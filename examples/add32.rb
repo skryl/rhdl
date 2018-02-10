@@ -6,18 +6,22 @@ class Add32 < Rhdl::LogicComponent
 
   output :s, bits: 32
 
-  output :over
+  output :over, :cout
 
   wire :c, bits: 32
 
   wire :null
 
   logic do
-    32.times do |n|
-      FullAdder(a: a[31-n], b: b[31-n], cin: cin,  s: s[31-n], cout: c[n])
+    FullAdder(a: a[31], b: b[31], cin: cin, s: s[31], cout: c[0])
+
+    (1..30).each do |n|
+      FullAdder(a: a[31-n], b: b[31-n], cin: c[n-1], s: s[31-n], cout: c[n])
     end
 
-    XorGate(a: c[30], b: c[31], out: over)
+    FullAdder(a: a[0], b: b[0], cin: c[30], s: s[0], cout: cout)
+
+    XorGate(a: c[30], b: cout, out: over)
   end
 
 end

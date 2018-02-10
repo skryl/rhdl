@@ -10,6 +10,10 @@ class Integer
     end
   end
 
+  def sext(bits=8)
+    to_s(2).sext(bits)
+  end
+
 
   def to_ba(bits=8)
     to_b(bits).to_a.map(&:to_i)

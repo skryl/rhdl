@@ -13,7 +13,7 @@ class Add8 < Rhdl::LogicComponent
   wire :null
 
   logic do
-    FullAdder(a: a[7], b: b[7], cin: cin, s: s[7], cout: c[0])
+    FullAdder(a: a[7], b: b[7], cin: cin,  s: s[7], cout: c[0])
     FullAdder(a: a[6], b: b[6], cin: c[0], s: s[6], cout: c[1])
     FullAdder(a: a[5], b: b[5], cin: c[1], s: s[5], cout: c[2])
     FullAdder(a: a[4], b: b[4], cin: c[2], s: s[4], cout: c[3])

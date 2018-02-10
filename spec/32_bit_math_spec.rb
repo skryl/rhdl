@@ -7,11 +7,14 @@ describe Add32 do
   let(:add32) { Add32.new }
 
   it 'performs 32 bit addition' do
-    (0..127).multisample(100, 2) do |(v1,v2)|
+    max = 2**32
+    max_int = (max/2-1)
+    (0...max).multisample(100, 2) do |(v1,v2)|
       r      = v1 + v2
       r_bits = r.to_ba(33)
       carry  = r_bits[0]
-      over   = r > 127 ? 1 : 0
+      over   = (v1 > max_int && v2 > max_int && r_bits[1] == 0) ||
+               (v1 <= max_int && v2 <= max_int && r_bits[1] == 1) ? 1 : 0
 
       expect(add32.set!(a: v1.to_b(32), b: v2.to_b(32)).outputs).to eq(s: r_bits[1..32], cout: carry, over: over)
     end
