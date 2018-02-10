@@ -11,7 +11,7 @@ Gem::Specification.new do |spec|
 
   spec.summary       = %q{Ruby Hardware Description Language}
   spec.description   = %q{Ruby Hardware Description Language}
-  spec.homepage      = "github.com/skryl/rhdl"
+  spec.homepage      = "http://github.com/skryl/rhdl"
   spec.license       = "MIT"
 
   # Prevent pushing this gem to RubyGems.org. To allow pushes either set the 'allowed_push_host'
@@ -33,5 +33,5 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency "bundler", "~> 1.16"
   spec.add_development_dependency "rake",    "~> 10.0"
   spec.add_development_dependency "rspec",   "~> 3.0"
-  spec.add_development_dependency "pry",     "~> 11.3"
+  spec.add_development_dependency "pry",     "~> 0.11.1"
 end
