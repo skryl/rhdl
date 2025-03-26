@@ -1,6 +1,12 @@
-source "https://rubygems.org"
+source 'https://rubygems.org'
 
-git_source(:github) {|repo_name| "https://github.com/#{repo_name}" }
+gem 'parslet', '~> 2.0'
+gem 'activesupport', '~> 7.0'
+
+group :development, :test do
+  gem 'rspec', '~> 3.12'
+  gem 'rake', '~> 13.0'
+end
 
 # Specify your gem's dependencies in rhdl.gemspec
 gemspec

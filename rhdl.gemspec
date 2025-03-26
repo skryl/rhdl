@@ -1,37 +1,29 @@
-
-lib = File.expand_path("../lib", __FILE__)
-$LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
-require "rhdl/version"
+require_relative 'lib/rhdl/version'
 
 Gem::Specification.new do |spec|
   spec.name          = "rhdl"
-  spec.version       = Rhdl::VERSION
-  spec.authors       = ["Alex Skryl"]
-  spec.email         = ["rut216@gmail.com"]
+  spec.version       = RHDL::VERSION
+  spec.authors       = ["Your Name"]
+  spec.email         = ["your.email@example.com"]
 
-  spec.summary       = %q{Ruby Hardware Description Language}
-  spec.description   = %q{Ruby Hardware Description Language}
-  spec.homepage      = "http://github.com/skryl/rhdl"
+  spec.summary       = "Ruby Hardware Description Language - A Ruby DSL for hardware design"
+  spec.description   = "RHDL allows you to design hardware using Ruby's flexible syntax and export to VHDL. " \
+                      "It provides a comfortable environment for Ruby developers to create hardware designs " \
+                      "with all the power of Ruby's metaprogramming capabilities."
+  spec.homepage      = "https://github.com/username/rhdl"
   spec.license       = "MIT"
+  spec.required_ruby_version = ">= 2.6.0"
 
-  # Prevent pushing this gem to RubyGems.org. To allow pushes either set the 'allowed_push_host'
-  # to allow pushing to a single host or delete this section to allow pushing to any host.
-  if spec.respond_to?(:metadata)
-    spec.metadata["allowed_push_host"] = "TODO: Set to 'http://mygemserver.com'"
-  else
-    raise "RubyGems 2.0 or newer is required to protect against " \
-      "public gem pushes."
-  end
+  spec.metadata["homepage_uri"] = spec.homepage
+  spec.metadata["source_code_uri"] = spec.homepage
+  spec.metadata["changelog_uri"] = "#{spec.homepage}/blob/main/CHANGELOG.md"
 
-  spec.files         = `git ls-files -z`.split("\x0").reject do |f|
-    f.match(%r{^(test|spec|features)/})
-  end
-  spec.bindir        = "exe"
-  spec.executables   = spec.files.grep(%r{^exe/}) { |f| File.basename(f) }
+  # Specify which files should be added to the gem when it is released.
+  spec.files = Dir.glob(%w[lib/**/*.rb [A-Z]*.md [A-Z]*.txt])
+  
   spec.require_paths = ["lib"]
 
-  spec.add_development_dependency "bundler", "~> 1.16"
-  spec.add_development_dependency "rake",    "~> 10.0"
-  spec.add_development_dependency "rspec",   "~> 3.0"
-  spec.add_development_dependency "pry",     "~> 0.11.1"
+  # Runtime dependencies
+  spec.add_dependency "parslet", "~> 2.0"
+  spec.add_dependency "activesupport", "~> 7.0"
 end

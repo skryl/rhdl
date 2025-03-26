@@ -1,56 +1,23 @@
-class FullAdder < Rhdl::LogicComponent
-  inputs :a, :b, :cin
+require 'rhdl'
 
-  outputs :s, :cout
+class FullAdder < RHDL::Component
+  # Port declarations
+  input :a
+  input :b
+  input :cin
+  output :sum
+  output :cout
 
-  wires :s1, :s2, :s3
+  # Internal signals
+  signal :ab_xor
 
-  logic do
-    XorGate(a: a, b: b, out: s1)
-    HalfAdder(a: s1, b: cin, s: s, c: s2)
-    AndGate(a: a, b: b, out: s3)
-    OrGate(a: s2, b: s3, out: cout)
+  architecture do
+    # Architecture implementation will go here
+    # This will be enhanced with actual logic implementation
   end
 end
 
-# class FullAdder
-#
-#   attr_reader :a, :b, :cin, :s, :cout
-#
-#   def initialize(a: nil, b: nil, cin: nil)
-#     @a   =   a || Wire.new
-#     @b   =   b || Wire.new
-#     @cin = cin || Wire.new
-#
-#     @s    = Wire.new
-#     @cout = Wire.new
-#
-#     init_logic
-#   end
-#
-#   def init_logic
-#     w1 = Wire.new
-#     w2 = Wire.new
-#     w3 = Wire.new
-#
-#     XorGate.new(in0: @a, in1: @b, out: w1)
-#     HalfAdder.new(a: w1, b: @cin, s: @s, c: w2)
-#     AndGate.new(in0: @a, in1: @b, out: w3)
-#     OrGate.new(in0: w2, in1: w3, out: @cout)
-#   end
-#
-#   def set!(a,b,cin)
-#     @a.set!(a)
-#     @b.set!(b)
-#     @cin.set!(cin)
-#     self
-#   end
-#
-#   def update!
-#     [@a, @b, @cin].map(&:update!)
-#   end
-#
-#   def inspect
-#     "FullAdder(#{@a.value}, #{@b.value}, #{@cin.value}) => (#{@s.value}, #{@cout.value})"
-#   end
-# end
+# Usage example:
+if __FILE__ == $0
+  puts FullAdder.to_vhdl
+end

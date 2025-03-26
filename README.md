@@ -1,43 +1,180 @@
-# Rhdl
+# RHDL (Ruby Hardware Description Language)
 
-Welcome to your new gem! In this directory, you'll find the files you need to be able to package up your Ruby library into a gem. Put your Ruby code in the file `lib/rhdl`. To experiment with that code, run `bin/console` for an interactive prompt.
+RHDL is a Domain Specific Language (DSL) that allows you to design hardware using Ruby's flexible syntax and export to VHDL. It provides a comfortable environment for Ruby developers to create hardware designs with all the power of Ruby's metaprogramming capabilities.
 
-TODO: Delete this and the text above, and describe your gem
+RHDL includes a simple 8-bit CPU architecture designed for educational purposes. The CPU features:
 
-## Installation
+- 8-bit data bus and 16-bit address space
+- Single accumulator (ACC) register
+- Simple ALU supporting basic operations (ADD, SUB, AND, OR, XOR, NOT, MUL, DIV)
+- Zero flag for conditional operations
+- 8-bit stack pointer (SP) with stack operations
+- Program counter (PC) for instruction sequencing
+- Control unit for instruction decoding and execution
 
-Add this line to your application's Gemfile:
+### Instruction Set
+
+The CPU implements the following instructions:
+
+| Instruction | Description | Encoding |
+|-------------|-------------|----------|
+| NOP | No operation | 0x00 |
+| LDA | Load accumulator from memory | 0x10 |
+| STA | Store accumulator to memory | 0x21 |
+| ADD | Add memory to accumulator | 0x30 |
+| SUB | Subtract memory from accumulator | 0x40 |
+| AND | Logical AND memory with accumulator | 0x50 |
+| OR | Logical OR memory with accumulator | 0x60 |
+| XOR | Logical XOR memory with accumulator | 0x70 |
+| JZ | Jump if zero flag is set | 0x80 |
+| JNZ | Jump if zero flag is clear | 0x90 |
+| LDI | Load immediate value into accumulator | 0xA0 |
+| JMP | Unconditional jump | 0xB0 |
+| CALL | Call subroutine | 0xC0 |
+| RET | Return from subroutine | 0xD0 |
+| DIV | Divide accumulator by memory | 0xE0 |
+| HLT | Halt the CPU | 0xF0 |
+| MUL | Multiply accumulator by memory | 0xF1 |
+| NOT | Logical NOT of accumulator | 0xF2 |
+
+### Memory Organization
+
+The CPU can address up to 256 memory locations (0x00-0xFF). The stack starts at 0xFF and grows downward.
+
+### Programming the CPU
+
+RHDL includes an assembler that allows you to write assembly code and assemble it into machine code:
 
 ```ruby
-gem 'rhdl'
+program = Assembler.build do |p|
+  p.label :start
+  p.instr :LDI, 0x10  # Load immediate value 0x10 into accumulator
+  p.instr :STA, 0x30  # Store accumulator to memory address 0x30
+  p.instr :JMP, :start  # Jump back to start
+end
 ```
 
-And then execute:
+### Running Custom Assembly Programs
 
-    $ bundle
+You can run your custom assembly programs on the CPU using the following approach:
 
-Or install it yourself as:
+```ruby
+require 'rhdl'
+require 'support/assembler'
 
-    $ gem install rhdl
+# Create the memory and CPU instances
+memory = MemorySimulator::Memory.new
+cpu = RHDL::Components::CPU::CPU.new(memory)
+cpu.reset
 
-## Usage
+# Define and assemble your program
+program = Assembler.build do |p|
+  p.label :main
+  p.instr :LDI, 0x42        # Load immediate value 0x42 into accumulator
+  p.instr :STA, 0x20        # Store it at memory location 0x20
+  
+  p.instr :LDI, 0x05        # Initialize counter
+  p.label :loop
+  p.instr :SUB, 0x01        # Decrement counter
+  p.instr :JZ, :done        # If counter is zero, jump to done
+  p.instr :LDA, 0x20        # Load value from memory
+  p.instr :ADD, 0x01        # Increment it
+  p.instr :STA, 0x20        # Store it back
+  p.instr :JMP, :loop       # Repeat
+  
+  p.label :done
+  p.instr :HLT              # Halt the CPU
+end
 
-TODO: Write usage instructions here
+# Load the program into memory at address 0
+memory.load_program(program)
 
-## Development
+# Run the program until halted
+while !cpu.halted
+  cpu.step
+end
 
-After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake spec` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
+# Check the result at memory location 0x20
+puts "Final value: #{memory.read(0x20).to_s(16)}"  # Should print "47"
+```
 
-To install this gem onto your local machine, run `bundle exec rake install`. To release a new version, update the version number in `version.rb`, and then run `bundle exec rake release`, which will create a git tag for the version, push git commits and tags, and push the `.gem` file to [rubygems.org](https://rubygems.org).
+You can also debug your program by examining the CPU state after each instruction:
 
-## Contributing
+```ruby
+# Step through your program one instruction at a time
+cpu.step
+puts "PC: 0x#{cpu.pc.to_s(16)}, ACC: 0x#{cpu.acc.to_s(16)}, Zero Flag: #{cpu.zero_flag}"
 
-Bug reports and pull requests are welcome on GitHub at https://github.com/skryl/rhdl. This project is intended to be a safe, welcoming space for collaboration, and contributors are expected to adhere to the [Contributor Covenant](http://contributor-covenant.org) code of conduct.
+# Or examine memory at specific locations
+puts "Memory at 0x20: 0x#{memory.read(0x20).to_s(16)}"
+```
 
-## License
+For more complex programs, you can define helper functions to make your assembly code more modular:
 
-The gem is available as open source under the terms of the [MIT License](https://opensource.org/licenses/MIT).
+```ruby
+program = Assembler.build do |p|
+  # Define a helper function to print a character to console
+  p.label :print_char
+  p.instr :STA, 0x80        # Store character at display address 0x80
+  p.instr :RET              # Return from function
+  
+  # Main program
+  p.label :main
+  p.instr :LDI, 'H'.ord     # Load ASCII value for 'H'
+  p.instr :CALL, :print_char
+  p.instr :LDI, 'i'.ord     # Load ASCII value for 'i'
+  p.instr :CALL, :print_char
+  p.instr :HLT              # Halt the CPU
+end
+```
 
-## Code of Conduct
+## Running Tests
 
-Everyone interacting in the Rhdl project’s codebases, issue trackers, chat rooms and mailing lists is expected to follow the [code of conduct](https://github.com/skryl/rhdl/blob/master/CODE_OF_CONDUCT.md).
+RHDL uses RSpec for testing. To run all tests:
+
+```bash
+bundle exec rspec
+```
+
+To run only the CPU-related tests:
+
+```bash
+bundle exec rspec spec/rhdl/cpu
+```
+
+Available test files include:
+
+- `instructions_spec.rb` - Tests individual CPU instructions
+- `fractal_spec.rb` - Tests the CPU with a fractal generation program
+- `assembler_spec.rb` - Tests the assembler functionality
+- `conway_spec.rb` - Tests the CPU with Conway's Game of Life implementation
+- `programs_spec.rb` - Tests various sample programs
+
+### Writing Tests
+
+CPU tests use the `CpuTestHelper` module to simplify test setup. For example:
+
+```ruby
+require 'spec_helper'
+
+RSpec.describe RHDL::Components::CPU::CPU do
+  include CpuTestHelper
+
+  before(:each) do
+    @memory = MemorySimulator::Memory.new
+    @cpu = described_class.new(@memory)
+    @cpu.reset
+  end
+
+  it 'executes a simple program' do
+    load_program([
+      [:LDI, 0x42],
+      [:STA, 0x10],
+      [:HLT]
+    ])
+    run_program
+    verify_memory(0x10, 0x42)
+    verify_cpu_state(acc: 0x42, pc: 3, halted: true, zero_flag: false, sp: 0xFF)
+  end
+end
+```
