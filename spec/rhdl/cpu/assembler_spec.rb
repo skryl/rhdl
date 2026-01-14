@@ -10,8 +10,8 @@ RSpec.describe Assembler do
       end
 
       expect(program).to eq([
-        :NOP, 0x00,
-        :HLT, 0x00
+        0x00,  # NOP
+        0xF0   # HLT
       ])
     end
 
@@ -25,11 +25,11 @@ RSpec.describe Assembler do
       end
 
       expect(program).to eq([
-        :LDI, 0x05,
-        :ADD, 0x03,
-        :SUB, 0x02,
-        :CMP, 0x04,
-        :STA, 0x10
+        0xA0, 0x05,  # LDI 0x05
+        0x33,        # ADD 0x03
+        0x42,        # SUB 0x02
+        0xF3, 0x04,  # CMP 0x04
+        0x21, 0x10   # STA 0x10 (2-byte direct)
       ])
     end
 
@@ -40,7 +40,7 @@ RSpec.describe Assembler do
       end
 
       expect(program).to eq([
-        :JMP_LONG, 0x00, 0x00  # high byte, low byte for address 0x0000
+        0xF9, 0x00, 0x00  # JMP_LONG: opcode, high byte, low byte for address 0x0000
       ])
     end
 
@@ -48,21 +48,21 @@ RSpec.describe Assembler do
       program = Assembler.build do |p|
         p.label :start
         p.instr :LDI, 0xFF
-        p.instr :STA, 0x20
+        p.instr :STA, 0x0E
         p.label :middle
-        p.instr :LDA, 0x20
+        p.instr :LDA, 0x0E
         p.instr :CMP, 0xFF
         p.instr :JNZ, :start
         p.instr :RET
       end
 
       expect(program).to eq([
-        :LDI, 0xFF,
-        :STA, 0x20,
-        :LDA, 0x20,
-        :CMP, 0xFF,
-        :JNZ, 0x00,    # Jump back to start (address 0x00)
-        :RET, 0x00
+        0xA0, 0xFF,  # LDI 0xFF
+        0x2E,        # STA 0x0E (nibble-encoded)
+        0x1E,        # LDA 0x0E (nibble-encoded)
+        0xF3, 0xFF,  # CMP 0xFF
+        0x90,        # JNZ 0x00 (jump back to start)
+        0xD0         # RET
       ])
     end
 
@@ -81,15 +81,15 @@ RSpec.describe Assembler do
       end
 
       expect(program).to eq([
-        :LDI, 0x05,
-        :ADD, 0x03,
-        :SUB, 0x02,
-        :CMP, 0x04,
-        :STA, 0x10,
-        :CALL, 0x07,   # Call to address 0x07 (test_label)
-        :NOP, 0x00,
-        :RET, 0x00,
-        :MUL, 0x0C
+        0xA0, 0x05,  # LDI 0x05
+        0x33,        # ADD 0x03
+        0x42,        # SUB 0x02
+        0xF3, 0x04,  # CMP 0x04
+        0x21, 0x10,  # STA 0x10 (2-byte)
+        0xC9,        # CALL 0x09 (call to test_label at offset 9)
+        0x00,        # NOP
+        0xD0,        # RET
+        0xF1, 0x0C   # MUL 0x0C
       ])
     end
 
@@ -105,11 +105,11 @@ RSpec.describe Assembler do
       end
 
       expect(program).to eq([
-        :LDI, 0x10,
-        :SUB, 0x01,
-        :CMP, 0x00,
-        :JNZ, 0x02,    # Jump to loop_start (address 0x02)
-        :RET, 0x00
+        0xA0, 0x10,  # LDI 0x10
+        0x41,        # SUB 0x01
+        0xF3, 0x00,  # CMP 0x00
+        0x92,        # JNZ 0x02 (jump to loop_start at offset 2)
+        0xD0         # RET
       ])
     end
 
@@ -124,10 +124,10 @@ RSpec.describe Assembler do
       end
 
       expect(program).to eq([
-        :CMP, 0x00,
-        :JZ_LONG, 0x00, 0x05,  # Jump to address 0x0005 if zero
-        :NOP, 0x00,
-        :RET, 0x00
+        0xF3, 0x00,     # CMP 0x00
+        0xF8, 0x00, 0x06,  # JZ_LONG to address 0x0006 (zero_label) if zero
+        0x00,           # NOP
+        0xD0            # RET (at zero_label)
       ])
     end
 
@@ -161,8 +161,8 @@ RSpec.describe Assembler do
       end
 
       expect(program).to eq([
-        :LDI, 0x10,
-        :JMP_LONG, 0x00, 0x00  # Jump to start at address 0x0000
+        0xA0, 0x10,        # LDI 0x10
+        0xF9, 0x00, 0x00   # JMP_LONG to start at address 0x0000
       ])
     end
 
