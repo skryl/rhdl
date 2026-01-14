@@ -129,24 +129,24 @@ RSpec.describe RHDL::Components::CPU::CPU do
         
         run_program
         verify_memory(0x800, 0x42)
-        verify_cpu_state(acc: 0x42, pc: 7, halted: true, zero_flag: false, sp: 0xFF)
+        verify_cpu_state(acc: 0x42, pc: 13, halted: true, zero_flag: false, sp: 0xFF)
       end
 
       it 'handles indirect STA with display memory' do
         # Test writing to display memory at 0x800
         load_program([
           [:LDI, 0x08],     # High byte of display memory
-          [:STA, 0x09],     # Store at 0x09
+          [:STA, 0x0E],     # Store at 0x0E (avoiding program code)
           [:LDI, 0x00],     # Low byte
-          [:STA, 0x08],     # Store at 0x08
+          [:STA, 0x0F],     # Store at 0x0F (avoiding program code)
           [:LDI, '#'.ord],  # Character to write
-          [:STA, 0x09, 0x08],  # Write to display memory
+          [:STA, 0x0E, 0x0F],  # Write to display memory using addresses 0x0E and 0x0F
           [:HLT]
         ])
-        
+
         run_program
         verify_memory(0x800, '#'.ord)
-        verify_cpu_state(acc: '#'.ord, pc: 7, halted: true, zero_flag: false, sp: 0xFF)
+        verify_cpu_state(acc: '#'.ord, pc: 11, halted: true, zero_flag: false, sp: 0xFF)
       end
     end
   end

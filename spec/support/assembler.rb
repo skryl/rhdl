@@ -38,13 +38,22 @@ module Assembler
         current_address = 0
         @instructions.each_with_index do |(opcode, operand), index|
           offsets << current_address
-          if needs_two_bytes?(opcode)
-            if needs_four_bytes?(opcode)
-              current_address += 3  # opcode + high byte + low byte
-            else
-              current_address += 2  # opcode + operand
-            end
+          # Calculate instruction size based on opcode and operand
+          if operand.is_a?(Array)
+            # 3-element instruction (indirect addressing)
+            current_address += 3
+          elsif needs_four_bytes?(opcode)
+            current_address += 3  # opcode + high byte + low byte
+          elsif is_single_byte?(opcode)
+            current_address += 1  # just opcode
+          elsif is_nibble_encoded?(opcode) && (!operand.is_a?(Symbol) && operand <= 0x0F)
+            # Nibble-encoded with operand that fits in nibble
+            current_address += 1
+          elsif needs_two_bytes?(opcode) || (is_nibble_encoded?(opcode) && (!operand.is_a?(Symbol) && operand > 0x0F))
+            # 2-byte instruction or nibble-encoded with operand > 0x0F
+            current_address += 2
           else
+            # Default: assume 1 byte for symbols that will be resolved
             current_address += 1
           end
         end
@@ -76,8 +85,8 @@ module Assembler
          case instr.size
          when 2
            opcode, operand = instr
-           # Check if this is a nibble-encoded instruction (1 byte)
-           if is_nibble_encoded?(opcode)
+           # Check if this is a nibble-encoded instruction (1 byte) AND operand fits in nibble
+           if is_nibble_encoded?(opcode) && operand <= 0x0F
              # Encode as single byte: high nibble = opcode, low nibble = operand
              flat_instructions << (encode_opcode(opcode) | (operand & 0x0F))
            elsif is_single_byte?(opcode)
@@ -92,8 +101,14 @@ module Assembler
              flat_instructions << low_byte
            else
              # Two-byte instruction: opcode + operand
-             flat_instructions << encode_opcode(opcode)
-             flat_instructions << operand
+             if opcode == :STA
+               # 2-byte direct STA uses 0x21 (not 0x20 which is indirect)
+               flat_instructions << 0x21
+               flat_instructions << operand
+             else
+               flat_instructions << encode_opcode(opcode)
+               flat_instructions << operand
+             end
            end
          when 3
            opcode, high, low = instr

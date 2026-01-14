@@ -78,25 +78,25 @@ RSpec.describe RHDL::Components::CPU::CPU do
     end
 
     it 'calculates factorial of a small number' do
+      # Minimal program that fits in < 10 bytes to avoid overwriting data at 0xD-0xF
       program = Assembler.build do |p|
         p.label :start
-        p.instr :LDA, 0xE
-        p.instr :JZ_LONG, :halt
-        p.instr :STA, 0xC
-        p.instr :LDA, 0xF
-        p.instr :MUL, 0xC
-        p.instr :STA, 0xF
-        p.instr :LDA, 0xE
-        p.instr :SUB, 0xD
-        p.instr :STA, 0xE
-        p.instr :JMP, 0x0    # jump back to offset 0
+        p.instr :LDA, 0xE       # 1 byte: load N
+        p.instr :JZ, :halt      # 1 byte: if zero, jump to halt
+        p.instr :MUL, 0xF       # 2 bytes: multiply by result
+        p.instr :STA, 0xF       # 1 byte: store result
+        p.instr :LDA, 0xE       # 1 byte: load N
+        p.instr :SUB, 0xD       # 1 byte: subtract 1 (from address 0xD)
+        p.instr :STA, 0xE       # 1 byte: store N
+        p.instr :JMP, :start    # 1 byte: jump to start (if < 16 bytes)
         p.label :halt
-        p.instr :HLT
+        p.instr :HLT            # 1 byte: halt
       end
+      # Total: 10 bytes, so halt is at offset 9, which fits in nibble for JZ
 
       load_program(program)
       @memory.write(0xE, 5)   # N=5
-      @memory.write(0xD, 1)   # decrement=1
+      @memory.write(0xD, 1)   # decrement value=1
       @memory.write(0xF, 1)   # result=1
       simulate_cycles(100)
 
