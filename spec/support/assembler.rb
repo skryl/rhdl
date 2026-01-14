@@ -76,13 +76,23 @@ module Assembler
          case instr.size
          when 2
            opcode, operand = instr
-           flat_instructions << opcode
-           if needs_four_bytes?(opcode)
+           # Check if this is a nibble-encoded instruction (1 byte)
+           if is_nibble_encoded?(opcode)
+             # Encode as single byte: high nibble = opcode, low nibble = operand
+             flat_instructions << (encode_opcode(opcode) | (operand & 0x0F))
+           elsif is_single_byte?(opcode)
+             # Single-byte instruction with no operand (e.g., HLT, NOT)
+             flat_instructions << encode_opcode(opcode)
+           elsif needs_four_bytes?(opcode)
+             # Three-byte instruction: opcode + high byte + low byte
              high_byte = (operand >> 8) & 0xFF
              low_byte = operand & 0xFF
+             flat_instructions << encode_opcode(opcode)
              flat_instructions << high_byte
              flat_instructions << low_byte
            else
+             # Two-byte instruction: opcode + operand
+             flat_instructions << encode_opcode(opcode)
              flat_instructions << operand
            end
          when 3
@@ -114,10 +124,21 @@ module Assembler
     end
   
       private
-  
-      # Return true if this opcode occupies two bytes in memory
+
+      # Return true if this is a nibble-encoded instruction (1 byte total)
+      def is_nibble_encoded?(opcode)
+        [:NOP, :LDA, :STA, :ADD, :SUB, :AND, :OR, :XOR, :JZ, :JNZ, :JMP, :CALL, :RET, :DIV].include?(opcode)
+      end
+
+      # Return true if this is a single-byte instruction with no operand
+      def is_single_byte?(opcode)
+        [:HLT, :NOT].include?(opcode)
+      end
+
+      # Return true if this opcode occupies two or more bytes in memory
       def needs_two_bytes?(opcode)
-        [:LDI, :MUL, :JZ_LONG, :JNZ_LONG, :JMP_LONG, :STA].include?(opcode)
+        # All non-nibble-encoded and non-single-byte instructions are multi-byte
+        !is_nibble_encoded?(opcode) && !is_single_byte?(opcode)
       end
   
       def valid_opcode?(opcode)

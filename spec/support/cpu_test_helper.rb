@@ -21,11 +21,18 @@ module CpuTestHelper
     if opcode == :STA && operand.is_a?(Array)
       return [0x20, operand[0], operand[1]]  # 3-byte indirect STA
     end
-    
+
+    # Warn if direct STA operand is out of nibble range
+    if opcode == :STA && operand > 0x0F
+      # For operands > 0x0F, we need multi-byte encoding
+      # Use 2-byte format: 0x21 + operand
+      return [0x21, operand & 0xFF]
+    end
+
     opcode_value = case opcode
     when :NOP  then 0x00
     when :LDA  then 0x10
-    when :STA  then 0x21  # Direct STA
+    when :STA  then 0x20  # Direct STA (nibble-encoded)
     when :ADD  then 0x30
     when :SUB  then 0x40
     when :AND  then 0x50
