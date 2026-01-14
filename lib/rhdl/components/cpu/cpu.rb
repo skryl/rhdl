@@ -40,13 +40,23 @@ module RHDL
             opcode = :LDI
             operand = @memory.read(@pc + 1) & 0xFF
             pc_increment = 2
-          when 0x20  # STA (indirect)
-            opcode = :STA
-            # This is a 3-byte STA instruction with indirect addressing
-            high_addr = @memory.read(@pc + 1)
-            low_addr = @memory.read(@pc + 2)
-            operand = [high_addr, low_addr]
-            pc_increment = 3
+          when 0x20  # STA
+            if instruction == 0x20  # Indirect STA (exactly 0x20)
+              opcode = :STA
+              # This is a 3-byte STA instruction with indirect addressing
+              high_addr = @memory.read(@pc + 1)
+              low_addr = @memory.read(@pc + 2)
+              operand = [high_addr, low_addr]
+              pc_increment = 3
+            elsif instruction == 0x21  # 2-byte direct STA
+              opcode = :STA
+              operand = @memory.read(@pc + 1)
+              pc_increment = 2
+            else  # Direct STA (0x22-0x2F, nibble-encoded)
+              opcode = :STA
+              operand = operand_nibble
+              pc_increment = 1
+            end
           when 0xF0
             # Could be HLT (0xF0), MUL (0xF1), NOT (0xF2), JZ_LONG (0xF8), JMP_LONG (0xF9), JNZ_LONG (0xFA)
             case instruction
@@ -54,9 +64,9 @@ module RHDL
             when 0xF1 then opcode = :MUL;  operand = @memory.read(@pc + 1) & 0xFF; pc_increment = 2
             when 0xF2 then opcode = :NOT;  operand = 0;   pc_increment = 1
             when 0xF3 then opcode = :CMP;  operand = @memory.read(@pc + 1) & 0xFF; pc_increment = 2
-            when 0xF8 then opcode = :JZ_LONG; operand = @memory.read(@pc + 1) & 0xFF; pc_increment = 2
-            when 0xF9 then opcode = :JMP_LONG; operand = @memory.read(@pc + 1) & 0xFF; pc_increment = 2
-            when 0xFA then opcode = :JNZ_LONG; operand = @memory.read(@pc + 1) & 0xFF; pc_increment = 2
+            when 0xF8 then opcode = :JZ_LONG; operand = (@memory.read(@pc + 1) << 8) | @memory.read(@pc + 2); pc_increment = 3
+            when 0xF9 then opcode = :JMP_LONG; operand = (@memory.read(@pc + 1) << 8) | @memory.read(@pc + 2); pc_increment = 3
+            when 0xFA then opcode = :JNZ_LONG; operand = (@memory.read(@pc + 1) << 8) | @memory.read(@pc + 2); pc_increment = 3
             else
               raise "Unknown F0-series opcode: #{instruction.to_s(16)}"
             end
@@ -65,7 +75,6 @@ module RHDL
             opcode = case opcode_byte
                      when 0x00 then :NOP
                      when 0x10 then :LDA
-                     when 0x21 then :STA  # Direct STA
                      when 0x30 then :ADD
                      when 0x40 then :SUB
                      when 0x50 then :AND
@@ -116,20 +125,19 @@ module RHDL
 
           when :STA
             if operand.is_a?(Array)
-              # Indirect addressing
-              high = operand[0] & 0xFF
-              low = operand[1] & 0xFF
+              # Indirect addressing - operand contains memory addresses of high/low bytes
+              high = @memory.read(operand[0]) & 0xFF
+              low = @memory.read(operand[1]) & 0xFF
               addr = (high << 8) | low
-              puts "[DEBUG:#{@step_count}] STA indirect: high=0x#{high.to_s(16)}, low=0x#{low.to_s(16)}, addr=0x#{addr.to_s(16)}"
+              puts "[DEBUG:] STA indirect: high_addr=0x#{operand[0].to_s(16)}, low_addr=0x#{operand[1].to_s(16)}, high=0x#{high.to_s(16)}, low=0x#{low.to_s(16)}, addr=0x#{addr.to_s(16)}"
               @memory.write(addr, @acc)
-              puts "[DEBUG:#{@step_count}] STA: Stored 0x#{@acc.to_s(16)} to memory[0x#{addr.to_s(16)}] (indirect)"
-              @pc += 3  # Increment PC by 3 for indirect STA
+              puts "[DEBUG:] STA: Stored 0x#{@acc.to_s(16)} to memory[0x#{addr.to_s(16)}] (indirect)"
             else
-              # Direct addressing
+              # Direct addressing (nibble-encoded)
               @memory.write(operand, @acc)
-              puts "[DEBUG:#{@step_count}] STA: Stored 0x#{@acc.to_s(16)} to memory[0x#{operand.to_s(16)}]"
-              @pc += 2  # Increment PC by 2 for direct STA
+              puts "[DEBUG:] STA: Stored 0x#{@acc.to_s(16)} to memory[0x#{operand.to_s(16)}]"
             end
+            @pc += pc_increment
 
           when :ADD, :SUB, :AND, :OR, :XOR, :DIV
             @alu.a = @acc
