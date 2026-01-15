@@ -29,7 +29,7 @@ module Assembler
       end
   
       # Once we have added all instructions (and labels), run finalize to convert label operands into addresses.
-      def finalize
+      def finalize(base_address = 0)
         # First pass: figure out how many bytes each instruction occupies to compute addresses.
         # nibble-based CPU typically uses 1 byte for single instructions plus 2 bytes for "long" instructions.
         # We'll build a "byte_offset" array that says where each instruction starts in memory.
@@ -67,13 +67,14 @@ module Assembler
             # The instruction wants to jump to a label. Let's see which instruction that label is on:
             label_index = @labels[operand]
             raise "Unknown label #{operand.inspect}" unless label_index
-            # Then the numeric address is offsets[label_index].
-            @instructions[index][1] = offsets[label_index] & 0xFF  # your CPU is 8-bit, so mask it
-           
+            # Then the numeric address is base_address + offsets[label_index].
+            absolute_address = base_address + offsets[label_index]
+            @instructions[index][1] = absolute_address & 0xFF  # For 8-bit jumps
+
             # Handle 16-bit operands for opcodes that require them
             if needs_four_bytes?(opcode)
-              high_byte = (offsets[label_index] >> 8) & 0xFF
-              low_byte = offsets[label_index] & 0xFF
+              high_byte = (absolute_address >> 8) & 0xFF
+              low_byte = absolute_address & 0xFF
               @instructions[index] = [opcode, high_byte, low_byte]
             end
          end
@@ -208,10 +209,10 @@ module Assembler
     #
     #   program.finalize
     #
-    def self.build
+    def self.build(base_address = 0)
       prog = Program.new
       yield prog
-      prog.finalize
+      prog.finalize(base_address)
       prog.instructions
     end
   end

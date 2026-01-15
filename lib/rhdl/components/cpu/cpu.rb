@@ -207,19 +207,19 @@ module RHDL
           when :JZ_LONG
             if @zero_flag
               puts "[DEBUG] JZ_LONG: zero_flag is true → PC=0x#{operand.to_s(16)}"
-              @pc = operand & 0xFF
+              @pc = operand & 0xFFFF  # 16-bit address
             else
               @pc += pc_increment
             end
 
           when :JMP_LONG
             puts "[DEBUG] JMP_LONG → PC=0x#{operand.to_s(16)}"
-            @pc = operand & 0xFF
+            @pc = operand & 0xFFFF  # 16-bit address
 
           when :JNZ_LONG
             if !@zero_flag
               puts "[DEBUG] JNZ_LONG: zero_flag is false → PC=0x#{operand.to_s(16)}"
-              @pc = operand & 0xFF
+              @pc = operand & 0xFFFF  # 16-bit address
             else
               @pc += pc_increment
             end
