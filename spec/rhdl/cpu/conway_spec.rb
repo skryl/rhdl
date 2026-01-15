@@ -16,7 +16,8 @@ RSpec.describe RHDL::Components::CPU::CPU, 'ConwayGameOfLife' do
   it 'runs an actual Conway program on a double-buffered 28×80 board' do
     # NOTE: This code is extremely large and may not fit in typical 8-bit memory.
 
-    program = Assembler.build do |p|
+    # Build program with base address 0x300 to avoid data overlap
+    program = Assembler.build(0x300) do |p|
       # We assume:
       # E0=row, E1=col, E2=1, E3=80, E4=28, E5=neighbor_count
       # E6/E7 used for neighbor row_temp/col_temp, or old cell read
@@ -605,11 +606,15 @@ RSpec.describe RHDL::Components::CPU::CPU, 'ConwayGameOfLife' do
     # ───────────────────��─────────────────────────────────────────────
     # 3) Load the program, seed buffer A, run for 5 generations
     # ─────────────────────────────────────────────────────────────────
-    load_program(program)
+    # Load program at 0x300 to avoid overlap with buffers at 0x100 and 0x200
+    load_program(program, 0x300)
 
-    # Verify Program Loading
+    # Reset PC to start of program (load_program resets CPU which sets PC to 0)
+    @cpu.instance_variable_set(:@pc, 0x300)
+
+    # Verify low memory is clear for variables
     expect(@memory.read(0x0)).to eq(0x00)
-    puts "Program loaded at memory address 0x0"
+    puts "Program loaded at memory address 0x300"
 
     # We'll store row=28 => memory[0xE4], col=80 => memory[0xE3], etc.
     # And row=27 => memory[0xE9], col=79 => memory[0xEA].
