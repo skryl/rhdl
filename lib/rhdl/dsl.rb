@@ -1095,3 +1095,6 @@ module RHDL
     end
   end
 end
+
+# Load behavior module after DSL is defined
+require_relative "dsl/behavior"
