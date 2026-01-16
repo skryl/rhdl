@@ -4,22 +4,42 @@ RSpec.describe 'HDL Combinational Components' do
   describe RHDL::HDL::Mux2 do
     let(:mux) { RHDL::HDL::Mux2.new(nil, width: 8) }
 
-    it 'selects input a when sel=0' do
-      mux.set_input(:a, 0x11)
-      mux.set_input(:b, 0x22)
-      mux.set_input(:sel, 0)
-      mux.propagate
+    describe 'simulation' do
+      it 'selects input a when sel=0' do
+        mux.set_input(:a, 0x11)
+        mux.set_input(:b, 0x22)
+        mux.set_input(:sel, 0)
+        mux.propagate
 
-      expect(mux.get_output(:y)).to eq(0x11)
+        expect(mux.get_output(:y)).to eq(0x11)
+      end
+
+      it 'selects input b when sel=1' do
+        mux.set_input(:a, 0x11)
+        mux.set_input(:b, 0x22)
+        mux.set_input(:sel, 1)
+        mux.propagate
+
+        expect(mux.get_output(:y)).to eq(0x22)
+      end
     end
 
-    it 'selects input b when sel=1' do
-      mux.set_input(:a, 0x11)
-      mux.set_input(:b, 0x22)
-      mux.set_input(:sel, 1)
-      mux.propagate
+    describe 'synthesis' do
+      it 'has a behavior block defined' do
+        expect(RHDL::HDL::Mux2.behavior_defined?).to be_truthy
+      end
 
-      expect(mux.get_output(:y)).to eq(0x22)
+      it 'generates valid IR' do
+        ir = RHDL::HDL::Mux2.to_ir
+        expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+        expect(ir.ports.length).to eq(4)  # a, b, sel, y
+      end
+
+      it 'generates valid Verilog' do
+        verilog = RHDL::HDL::Mux2.to_verilog
+        expect(verilog).to include('module mux2')
+        expect(verilog).to include('assign y')
+      end
     end
   end
 
@@ -302,10 +322,29 @@ RSpec.describe 'HDL Combinational Components' do
   describe RHDL::HDL::ZeroExtend do
     let(:ext) { RHDL::HDL::ZeroExtend.new(nil, in_width: 8, out_width: 16) }
 
-    it 'extends with zeros' do
-      ext.set_input(:a, 0xFF)
-      ext.propagate
-      expect(ext.get_output(:y)).to eq(0x00FF)
+    describe 'simulation' do
+      it 'extends with zeros' do
+        ext.set_input(:a, 0xFF)
+        ext.propagate
+        expect(ext.get_output(:y)).to eq(0x00FF)
+      end
+    end
+
+    describe 'synthesis' do
+      it 'has a behavior block defined' do
+        expect(RHDL::HDL::ZeroExtend.behavior_defined?).to be_truthy
+      end
+
+      it 'generates valid IR' do
+        ir = RHDL::HDL::ZeroExtend.to_ir
+        expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      end
+
+      it 'generates valid Verilog' do
+        verilog = RHDL::HDL::ZeroExtend.to_verilog
+        expect(verilog).to include('module zero_extend')
+        expect(verilog).to include('assign y')
+      end
     end
   end
 

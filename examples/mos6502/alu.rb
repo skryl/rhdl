@@ -1,5 +1,6 @@
 # MOS 6502 Arithmetic Logic Unit
 # Supports all 6502 arithmetic and logic operations including BCD mode
+# Combinational - can be synthesized as combinational logic
 
 module MOS6502
   class ALU < RHDL::HDL::SimComponent
@@ -20,24 +21,20 @@ module MOS6502
     OP_TST = 0x0D  # Pass through A (for TXA, TYA, TAX, TAY, LDA, etc.)
     OP_NOP = 0x0F  # No operation
 
-    def initialize(name = nil)
-      super(name)
-    end
+    port_input :a, width: 8         # Accumulator or first operand
+    port_input :b, width: 8         # Memory operand or second operand
+    port_input :c_in                # Carry input
+    port_input :d_flag              # Decimal mode flag
+    port_input :op, width: 4        # Operation select
 
-    def setup_ports
-      input :a, width: 8         # Accumulator or first operand
-      input :b, width: 8         # Memory operand or second operand
-      input :c_in                # Carry input
-      input :d_flag              # Decimal mode flag
-      input :op, width: 4        # Operation select
+    port_output :result, width: 8   # ALU result
+    port_output :n                  # Negative flag (bit 7 of result)
+    port_output :z                  # Zero flag
+    port_output :c                  # Carry flag
+    port_output :v                  # Overflow flag
 
-      output :result, width: 8   # ALU result
-      output :n                  # Negative flag (bit 7 of result)
-      output :z                  # Zero flag
-      output :c                  # Carry flag
-      output :v                  # Overflow flag
-    end
-
+    # Note: Complex BCD logic and case statements make behavior DSL impractical
+    # This is combinational but uses manual propagate for clarity
     def propagate
       a = in_val(:a) & 0xFF
       b = in_val(:b) & 0xFF

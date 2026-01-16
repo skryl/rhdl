@@ -1,5 +1,6 @@
 # MOS 6502 Instruction Decoder
 # Decodes opcodes into control signals
+# Combinational - can be synthesized as ROM or combinational logic
 
 module MOS6502
   class InstructionDecoder < RHDL::HDL::SimComponent
@@ -27,33 +28,33 @@ module MOS6502
     BRANCH_BNE = 6  # Branch on Not Equal (Z=0)
     BRANCH_BEQ = 7  # Branch on Equal (Z=1)
 
+    port_input :opcode, width: 8
+
+    # Decoded outputs
+    port_output :addr_mode, width: 4      # Addressing mode
+    port_output :alu_op, width: 4         # ALU operation
+    port_output :instr_type, width: 4     # Instruction type
+    port_output :src_reg, width: 2        # Source register (0=A, 1=X, 2=Y)
+    port_output :dst_reg, width: 2        # Destination register
+    port_output :branch_cond, width: 3    # Branch condition
+    port_output :cycles_base, width: 3    # Base cycle count
+    port_output :is_read                  # Reads from memory
+    port_output :is_write                 # Writes to memory
+    port_output :is_rmw                   # Read-Modify-Write operation
+    port_output :sets_nz                  # Sets N and Z flags
+    port_output :sets_c                   # Sets carry flag
+    port_output :sets_v                   # Sets overflow flag
+    port_output :writes_reg               # Writes to a register
+    port_output :is_status_op             # Stack operation on status register (PHP/PLP)
+    port_output :illegal                  # Illegal/undefined opcode
+
     def initialize(name = nil)
       super(name)
       build_decode_table
     end
 
-    def setup_ports
-      input :opcode, width: 8
-
-      # Decoded outputs
-      output :addr_mode, width: 4      # Addressing mode
-      output :alu_op, width: 4         # ALU operation
-      output :instr_type, width: 4     # Instruction type
-      output :src_reg, width: 2        # Source register (0=A, 1=X, 2=Y)
-      output :dst_reg, width: 2        # Destination register
-      output :branch_cond, width: 3    # Branch condition
-      output :cycles_base, width: 3    # Base cycle count
-      output :is_read                  # Reads from memory
-      output :is_write                 # Writes to memory
-      output :is_rmw                   # Read-Modify-Write operation
-      output :sets_nz                  # Sets N and Z flags
-      output :sets_c                   # Sets carry flag
-      output :sets_v                   # Sets overflow flag
-      output :writes_reg               # Writes to a register
-      output :is_status_op             # Stack operation on status register (PHP/PLP)
-      output :illegal                  # Illegal/undefined opcode
-    end
-
+    # Note: Lookup table makes behavior DSL impractical
+    # This is combinational but uses manual propagate for clarity
     def propagate
       opcode = in_val(:opcode) & 0xFF
       info = @decode_table[opcode] || illegal_opcode

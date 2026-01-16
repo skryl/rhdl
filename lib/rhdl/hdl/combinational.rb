@@ -5,23 +5,40 @@ module RHDL
   module HDL
     # 2-to-1 Multiplexer
     class Mux2 < SimComponent
+      port_input :a   # Selected when sel = 0
+      port_input :b   # Selected when sel = 1
+      port_input :sel
+      port_output :y
+
+      # mux(sel, if_true, if_false) - sel ? if_true : if_false
+      # Note: sel=0 selects a (first arg), sel=1 selects b (second arg)
+      behavior do
+        y <= mux(sel, b, a)
+      end
+
       def initialize(name = nil, width: 1)
         @width = width
         super(name)
       end
 
       def setup_ports
-        input :a, width: @width   # Selected when sel = 0
-        input :b, width: @width   # Selected when sel = 1
-        input :sel
-        output :y, width: @width
+        return if @width == 1
+        @inputs[:a] = Wire.new("#{@name}.a", width: @width)
+        @inputs[:b] = Wire.new("#{@name}.b", width: @width)
+        @outputs[:y] = Wire.new("#{@name}.y", width: @width)
+        @inputs[:a].on_change { |_| propagate }
+        @inputs[:b].on_change { |_| propagate }
       end
 
       def propagate
-        if in_val(:sel) == 0
-          out_set(:y, in_val(:a))
+        if @width == 1 && self.class.behavior_defined?
+          execute_behavior
         else
-          out_set(:y, in_val(:b))
+          if in_val(:sel) == 0
+            out_set(:y, in_val(:a))
+          else
+            out_set(:y, in_val(:b))
+          end
         end
       end
     end
@@ -307,6 +324,13 @@ module RHDL
 
     # Zero Extender
     class ZeroExtend < SimComponent
+      port_input :a, width: 8
+      port_output :y, width: 16
+
+      behavior do
+        y <= a
+      end
+
       def initialize(name = nil, in_width: 8, out_width: 16)
         @in_width = in_width
         @out_width = out_width
@@ -314,8 +338,10 @@ module RHDL
       end
 
       def setup_ports
-        input :a, width: @in_width
-        output :y, width: @out_width
+        return if @in_width == 8 && @out_width == 16
+        @inputs[:a] = Wire.new("#{@name}.a", width: @in_width)
+        @outputs[:y] = Wire.new("#{@name}.y", width: @out_width)
+        @inputs[:a].on_change { |_| propagate }
       end
 
       def propagate

@@ -1,10 +1,20 @@
 # HDL Memory Components
 # RAM, ROM, and memory interfaces
+#
+# Note: Memory components use manual propagate methods because they have
+# internal state arrays. Synthesis would require memory inference or block RAM.
 
 module RHDL
   module HDL
     # Synchronous RAM with single port
+    # Sequential - requires always @(posedge clk) and memory inference for synthesis
     class RAM < SimComponent
+      port_input :clk
+      port_input :we       # Write enable
+      port_input :addr, width: 8
+      port_input :din, width: 8
+      port_output :dout, width: 8
+
       def initialize(name = nil, data_width: 8, addr_width: 8)
         @data_width = data_width
         @addr_width = addr_width
@@ -15,11 +25,10 @@ module RHDL
       end
 
       def setup_ports
-        input :clk
-        input :we       # Write enable
-        input :addr, width: @addr_width
-        input :din, width: @data_width
-        output :dout, width: @data_width
+        return if @data_width == 8 && @addr_width == 8
+        @inputs[:addr] = Wire.new("#{@name}.addr", width: @addr_width)
+        @inputs[:din] = Wire.new("#{@name}.din", width: @data_width)
+        @outputs[:dout] = Wire.new("#{@name}.dout", width: @data_width)
       end
 
       def rising_edge?
@@ -57,7 +66,15 @@ module RHDL
     end
 
     # Synchronous RAM with dual port (read + write)
+    # Sequential - requires always @(posedge clk) and memory inference for synthesis
     class DualPortRAM < SimComponent
+      port_input :clk
+      port_input :we
+      port_input :waddr, width: 8
+      port_input :raddr, width: 8
+      port_input :din, width: 8
+      port_output :dout, width: 8
+
       def initialize(name = nil, data_width: 8, addr_width: 8)
         @data_width = data_width
         @addr_width = addr_width
@@ -68,12 +85,11 @@ module RHDL
       end
 
       def setup_ports
-        input :clk
-        input :we
-        input :waddr, width: @addr_width
-        input :raddr, width: @addr_width
-        input :din, width: @data_width
-        output :dout, width: @data_width
+        return if @data_width == 8 && @addr_width == 8
+        @inputs[:waddr] = Wire.new("#{@name}.waddr", width: @addr_width)
+        @inputs[:raddr] = Wire.new("#{@name}.raddr", width: @addr_width)
+        @inputs[:din] = Wire.new("#{@name}.din", width: @data_width)
+        @outputs[:dout] = Wire.new("#{@name}.dout", width: @data_width)
       end
 
       def rising_edge?
@@ -104,7 +120,12 @@ module RHDL
     end
 
     # ROM (Read-Only Memory)
+    # Combinational read with enable - can be synthesized as LUT or block ROM
     class ROM < SimComponent
+      port_input :addr, width: 8
+      port_input :en
+      port_output :dout, width: 8
+
       def initialize(name = nil, data_width: 8, addr_width: 8, contents: [])
         @data_width = data_width
         @addr_width = addr_width
@@ -115,9 +136,9 @@ module RHDL
       end
 
       def setup_ports
-        input :addr, width: @addr_width
-        input :en
-        output :dout, width: @data_width
+        return if @data_width == 8 && @addr_width == 8
+        @inputs[:addr] = Wire.new("#{@name}.addr", width: @addr_width)
+        @outputs[:dout] = Wire.new("#{@name}.dout", width: @data_width)
       end
 
       def propagate
@@ -135,7 +156,17 @@ module RHDL
     end
 
     # Register File (multiple registers with read/write ports)
+    # Sequential write, combinational read - typical FPGA register file
     class RegisterFile < SimComponent
+      port_input :clk
+      port_input :we
+      port_input :waddr, width: 3
+      port_input :raddr1, width: 3
+      port_input :raddr2, width: 3
+      port_input :wdata, width: 8
+      port_output :rdata1, width: 8
+      port_output :rdata2, width: 8
+
       def initialize(name = nil, data_width: 8, num_regs: 8)
         @data_width = data_width
         @num_regs = num_regs
@@ -146,14 +177,13 @@ module RHDL
       end
 
       def setup_ports
-        input :clk
-        input :we
-        input :waddr, width: @addr_width
-        input :raddr1, width: @addr_width
-        input :raddr2, width: @addr_width
-        input :wdata, width: @data_width
-        output :rdata1, width: @data_width
-        output :rdata2, width: @data_width
+        return if @data_width == 8 && @num_regs == 8
+        @inputs[:waddr] = Wire.new("#{@name}.waddr", width: @addr_width)
+        @inputs[:raddr1] = Wire.new("#{@name}.raddr1", width: @addr_width)
+        @inputs[:raddr2] = Wire.new("#{@name}.raddr2", width: @addr_width)
+        @inputs[:wdata] = Wire.new("#{@name}.wdata", width: @data_width)
+        @outputs[:rdata1] = Wire.new("#{@name}.rdata1", width: @data_width)
+        @outputs[:rdata2] = Wire.new("#{@name}.rdata2", width: @data_width)
       end
 
       def rising_edge?
@@ -186,7 +216,18 @@ module RHDL
     end
 
     # Stack (LIFO) with fixed depth
+    # Sequential - requires always @(posedge clk) for synthesis
     class Stack < SimComponent
+      port_input :clk
+      port_input :rst
+      port_input :push
+      port_input :pop
+      port_input :din, width: 8
+      port_output :dout, width: 8
+      port_output :empty
+      port_output :full
+      port_output :sp, width: 4
+
       def initialize(name = nil, data_width: 8, depth: 16)
         @data_width = data_width
         @depth = depth
@@ -198,15 +239,10 @@ module RHDL
       end
 
       def setup_ports
-        input :clk
-        input :rst
-        input :push
-        input :pop
-        input :din, width: @data_width
-        output :dout, width: @data_width
-        output :empty
-        output :full
-        output :sp, width: @addr_width
+        return if @data_width == 8 && @depth == 16
+        @inputs[:din] = Wire.new("#{@name}.din", width: @data_width)
+        @outputs[:dout] = Wire.new("#{@name}.dout", width: @data_width)
+        @outputs[:sp] = Wire.new("#{@name}.sp", width: @addr_width)
       end
 
       def rising_edge?
@@ -237,7 +273,18 @@ module RHDL
     end
 
     # FIFO Queue
+    # Sequential - requires always @(posedge clk) for synthesis
     class FIFO < SimComponent
+      port_input :clk
+      port_input :rst
+      port_input :wr_en
+      port_input :rd_en
+      port_input :din, width: 8
+      port_output :dout, width: 8
+      port_output :empty
+      port_output :full
+      port_output :count, width: 5
+
       def initialize(name = nil, data_width: 8, depth: 16)
         @data_width = data_width
         @depth = depth
@@ -251,15 +298,10 @@ module RHDL
       end
 
       def setup_ports
-        input :clk
-        input :rst
-        input :wr_en
-        input :rd_en
-        input :din, width: @data_width
-        output :dout, width: @data_width
-        output :empty
-        output :full
-        output :count, width: @addr_width + 1
+        return if @data_width == 8 && @depth == 16
+        @inputs[:din] = Wire.new("#{@name}.din", width: @data_width)
+        @outputs[:dout] = Wire.new("#{@name}.dout", width: @data_width)
+        @outputs[:count] = Wire.new("#{@name}.count", width: @addr_width + 1)
       end
 
       def rising_edge?
