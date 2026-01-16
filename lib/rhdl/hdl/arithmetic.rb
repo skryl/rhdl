@@ -5,62 +5,62 @@ module RHDL
   module HDL
     # Half Adder - adds 2 bits, produces sum and carry
     class HalfAdder < SimComponent
-      def setup_ports
-        input :a
-        input :b
-        output :sum
-        output :cout
-      end
+      port_input :a
+      port_input :b
+      port_output :sum
+      port_output :cout
 
-      def propagate
-        a = in_val(:a) & 1
-        b = in_val(:b) & 1
-        out_set(:sum, a ^ b)
-        out_set(:cout, a & b)
+      behavior do
+        sum <= a ^ b
+        cout <= a & b
       end
     end
 
     # Full Adder - adds 2 bits plus carry, produces sum and carry
     class FullAdder < SimComponent
-      def setup_ports
-        input :a
-        input :b
-        input :cin
-        output :sum
-        output :cout
-      end
+      port_input :a
+      port_input :b
+      port_input :cin
+      port_output :sum
+      port_output :cout
 
-      def propagate
-        a = in_val(:a) & 1
-        b = in_val(:b) & 1
-        cin = in_val(:cin) & 1
-
-        # sum = a XOR b XOR cin
-        sum = a ^ b ^ cin
-        # cout = (a AND b) OR (cin AND (a XOR b))
-        cout = (a & b) | (cin & (a ^ b))
-
-        out_set(:sum, sum)
-        out_set(:cout, cout)
+      behavior do
+        sum <= a ^ b ^ cin
+        cout <= (a & b) | (cin & (a ^ b))
       end
     end
 
     # Ripple Carry Adder - multi-bit adder
     class RippleCarryAdder < SimComponent
+      port_input :a, width: 8
+      port_input :b, width: 8
+      port_input :cin
+      port_output :sum, width: 8
+      port_output :cout
+      port_output :overflow
+
+      # Behavior block defines synthesizable logic for sum
+      # cout and overflow require wider temporary or more complex expressions
+      behavior do
+        sum <= a + b + cin
+      end
+
       def initialize(name = nil, width: 8)
         @width = width
         super(name)
       end
 
       def setup_ports
-        input :a, width: @width
-        input :b, width: @width
-        input :cin
-        output :sum, width: @width
-        output :cout
-        output :overflow
+        # Override default width if different from 8-bit
+        return if @width == 8
+        @inputs[:a] = Wire.new("#{@name}.a", width: @width)
+        @inputs[:b] = Wire.new("#{@name}.b", width: @width)
+        @outputs[:sum] = Wire.new("#{@name}.sum", width: @width)
+        @inputs[:a].on_change { |_| propagate }
+        @inputs[:b].on_change { |_| propagate }
       end
 
+      # Manual propagate computes cout and overflow which require wider arithmetic
       def propagate
         a = in_val(:a)
         b = in_val(:b)
@@ -220,22 +220,37 @@ module RHDL
 
     # Multiplier (combinational, 8x8 -> 16)
     class Multiplier < SimComponent
+      port_input :a, width: 8
+      port_input :b, width: 8
+      port_output :product, width: 16
+
+      behavior do
+        product <= a * b
+      end
+
       def initialize(name = nil, width: 8)
         @width = width
         super(name)
       end
 
       def setup_ports
-        input :a, width: @width
-        input :b, width: @width
-        output :product, width: @width * 2
+        return if @width == 8
+        @inputs[:a] = Wire.new("#{@name}.a", width: @width)
+        @inputs[:b] = Wire.new("#{@name}.b", width: @width)
+        @outputs[:product] = Wire.new("#{@name}.product", width: @width * 2)
+        @inputs[:a].on_change { |_| propagate }
+        @inputs[:b].on_change { |_| propagate }
       end
 
       def propagate
-        a = in_val(:a)
-        b = in_val(:b)
-        product = a * b
-        out_set(:product, product & ((1 << (@width * 2)) - 1))
+        if @width == 8 && self.class.behavior_defined?
+          execute_behavior
+        else
+          a = in_val(:a)
+          b = in_val(:b)
+          product = a * b
+          out_set(:product, product & ((1 << (@width * 2)) - 1))
+        end
       end
     end
 
