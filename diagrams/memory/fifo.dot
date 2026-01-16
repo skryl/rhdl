@@ -1,0 +1,13 @@
+digraph fifo {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<clk>clk[1]|<rst>rst[1]|<wr_en>wr_en[1]|<rd_en>rd_en[1]|<din>din[8]}|fifo\n(FIFO)|{<dout>dout[8]|<empty>empty[1]|<full>full[1]|<count>count[5]}}"];
+
+  subgraph cluster_main {
+    label="fifo";
+    style=rounded;
+    color=blue;
+  }
+}

@@ -1,0 +1,13 @@
+digraph rom {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<addr>addr[8]|<en>en[1]}|rom\n(ROM)|{<dout>dout[8]}}"];
+
+  subgraph cluster_main {
+    label="rom";
+    style=rounded;
+    color=blue;
+  }
+}

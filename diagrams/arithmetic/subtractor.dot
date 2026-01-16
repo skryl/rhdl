@@ -1,0 +1,13 @@
+digraph sub {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[8]|<b>b[8]|<bin>bin[1]}|sub\n(Subtractor)|{<diff>diff[8]|<bout>bout[1]|<overflow>overflow[1]}}"];
+
+  subgraph cluster_main {
+    label="sub";
+    style=rounded;
+    color=blue;
+  }
+}
