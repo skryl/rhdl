@@ -106,17 +106,18 @@ module MOS6502
       @control.set_input(:writes_reg, @decoder.get_output(:writes_reg))
       @control.set_input(:is_status_op, @decoder.get_output(:is_status_op))
 
+      if clk == 0
+        @status_reg.propagate  # Get current status first
+        @registers.propagate
+        @pc.propagate
+        @sp.propagate
+      end
+
       # Status flags to control unit (for branch decisions)
-      @status_reg.propagate  # Get current status first
       @control.set_input(:flag_n, @status_reg.get_output(:n))
       @control.set_input(:flag_v, @status_reg.get_output(:v))
       @control.set_input(:flag_z, @status_reg.get_output(:z))
       @control.set_input(:flag_c, @status_reg.get_output(:c))
-
-      # Propagate registers to get current values
-      @registers.propagate
-      @pc.propagate
-      @sp.propagate
 
       reg_a = @registers.get_output(:a)
       reg_x = @registers.get_output(:x)
@@ -148,6 +149,7 @@ module MOS6502
       @addr_calc.set_input(:x_reg, reg_x)
       @addr_calc.propagate
 
+      state_before = @control.get_output(:state_before)
       state = @control.get_output(:state)
 
       # Address bus multiplexer based on addr_sel
@@ -202,22 +204,28 @@ module MOS6502
       # For RMW operations, latch the ALU result during EXECUTE
       # so we can use it during WRITE (after flags are updated)
       is_rmw = @decoder.get_output(:is_rmw)
-      if state == ControlUnit::STATE_EXECUTE && is_rmw == 1
+      if state_before == ControlUnit::STATE_EXECUTE && is_rmw == 1
         @rmw_result_latch = alu_result
       end
 
       # Update registers based on control signals
-      update_registers(dst_reg, alu_result, data_in, instr_type, addr_mode)
+      update_registers(dst_reg, alu_result, data_in, instr_type, addr_mode, state_before)
 
       # Update status register
-      update_status_flags(instr_type, addr_mode)
+      update_status_flags(instr_type, addr_mode, state_before)
 
       # Program counter updates
       @pc.set_input(:inc, @control.get_output(:pc_inc))
       @pc.set_input(:load, @control.get_output(:pc_load))
 
       # PC load address: from address latch for jumps, or computed for branches
-      pc_load_addr = select_pc_load_addr(state, eff_addr, @addr_latch.get_output(:addr))
+      pc_load_addr = select_pc_load_addr(
+        state_before,
+        eff_addr,
+        @addr_latch.get_output(:addr),
+        @addr_latch.get_output(:addr_lo),
+        data_in
+      )
       @pc.set_input(:addr_in, pc_load_addr)
       @pc.propagate
 
@@ -229,7 +237,7 @@ module MOS6502
 
       # Handle TXS instruction specially
       if instr_type == InstructionDecoder::TYPE_TRANSFER &&
-         state == ControlUnit::STATE_EXECUTE &&
+         state_before == ControlUnit::STATE_EXECUTE &&
          opcode == 0x9A  # TXS
         @sp.set_input(:load, 1)
         @sp.set_input(:data_in, reg_x)
@@ -240,12 +248,12 @@ module MOS6502
       # Data output multiplexer
       # For RMW operations in WRITE state, use the latched result from EXECUTE
       data_sel = @control.get_output(:data_sel)
-      effective_alu_result = if state == ControlUnit::STATE_WRITE_MEM && is_rmw == 1
+      effective_alu_result = if state_before == ControlUnit::STATE_WRITE_MEM && is_rmw == 1
         @rmw_result_latch
       else
         alu_result
       end
-      pc_for_data = if state == ControlUnit::STATE_JSR_PUSH_HI || state == ControlUnit::STATE_JSR_PUSH_LO
+      pc_for_data = if state_before == ControlUnit::STATE_JSR_PUSH_HI || state_before == ControlUnit::STATE_JSR_PUSH_LO
         (pc_val - 1) & 0xFFFF
       else
         pc_val
@@ -257,7 +265,7 @@ module MOS6502
       out_set(:addr, addr_out)
       out_set(:data_out, data_out)
       out_set(:rw, @control.get_output(:mem_write) == 1 ? 0 : 1)
-      out_set(:sync, state == ControlUnit::STATE_FETCH ? 1 : 0)
+      out_set(:sync, state_before == ControlUnit::STATE_FETCH ? 1 : 0)
 
       # Debug outputs
       out_set(:reg_a, reg_a)
@@ -318,28 +326,29 @@ module MOS6502
       end
     end
 
-    def select_pc_load_addr(state, eff_addr, latch_addr)
+    def select_pc_load_addr(state, eff_addr, latch_addr, latch_lo, data_in)
       case state
       when ControlUnit::STATE_BRANCH_TAKE
         eff_addr
-      when ControlUnit::STATE_RTS_PULL_HI,
-           ControlUnit::STATE_RTI_PULL_HI,
+      when ControlUnit::STATE_RTS_PULL_HI
+        addr = ((data_in & 0xFF) << 8) | latch_lo
+        (addr + 1) & 0xFFFF
+      when ControlUnit::STATE_RTI_PULL_HI,
            ControlUnit::STATE_BRK_VEC_HI
-        latch_addr
+        ((data_in & 0xFF) << 8) | latch_lo
       else
         eff_addr
       end
     end
 
-    def update_registers(dst_reg, alu_result, data_in, instr_type, addr_mode)
+    def update_registers(dst_reg, alu_result, data_in, instr_type, addr_mode, state_before)
       reg_write = @control.get_output(:reg_write)
-      state = @control.get_output(:state)
 
       @registers.set_input(:load_a, 0)
       @registers.set_input(:load_x, 0)
       @registers.set_input(:load_y, 0)
 
-      if reg_write == 1 && state == ControlUnit::STATE_EXECUTE
+      if reg_write == 1 && state_before == ControlUnit::STATE_EXECUTE
         # Determine what data to write
         write_data = if instr_type == InstructionDecoder::TYPE_LOAD
           if addr_mode == AddressGenerator::MODE_IMMEDIATE
@@ -395,8 +404,7 @@ module MOS6502
       end
     end
 
-    def update_status_flags(instr_type, addr_mode)
-      state = @control.get_output(:state)
+    def update_status_flags(instr_type, addr_mode, state_before)
       update = @control.get_output(:update_flags)
 
       @status_reg.set_input(:load_all, 0)
@@ -409,7 +417,7 @@ module MOS6502
       @status_reg.set_input(:load_d, 0)
       @status_reg.set_input(:load_b, 0)
 
-      if update == 1 && state == ControlUnit::STATE_EXECUTE
+      if update == 1 && state_before == ControlUnit::STATE_EXECUTE
         if instr_type == InstructionDecoder::TYPE_FLAG
           # Handle flag instructions
           handle_flag_instruction
@@ -434,7 +442,7 @@ module MOS6502
       end
 
       # Handle PLP instruction after pull completes
-      if state == ControlUnit::STATE_EXECUTE && instr_type == InstructionDecoder::TYPE_STACK
+      if state_before == ControlUnit::STATE_EXECUTE && instr_type == InstructionDecoder::TYPE_STACK
         opcode = @ir.get_output(:opcode)
         if opcode == 0x28  # PLP
           @status_reg.set_input(:data_in, @data_latch.get_output(:data))
