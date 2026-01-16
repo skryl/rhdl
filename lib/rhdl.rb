@@ -39,10 +39,13 @@ require_relative "rhdl/components/multiplexers"
 require_relative "rhdl/components/storage"
 require_relative "rhdl/components/comparators"
 
-# CPU components
-require_relative "rhdl/components/cpu/cpu"
-require_relative "rhdl/components/cpu/control_unit"
-require_relative "rhdl/components/cpu/program_counter"
-require_relative "rhdl/components/cpu/cpu_alu"
-require_relative "rhdl/components/cpu/memory_unit"
-require_relative "rhdl/components/cpu/accumulator"
+# CPU components (top-level directory)
+require_relative "../cpu/cpu"
+require_relative "../cpu/control_unit"
+require_relative "../cpu/program_counter"
+require_relative "../cpu/cpu_alu"
+require_relative "../cpu/memory_unit"
+require_relative "../cpu/accumulator"
+
+# HDL simulation framework
+require_relative "rhdl/hdl"
