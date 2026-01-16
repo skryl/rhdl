@@ -54,7 +54,7 @@ module RHDL
 
     # A wire/signal in the circuit that can be connected and propagated
     class Wire
-      attr_reader :name, :width
+      attr_reader :name, :width, :sinks
       attr_accessor :value, :driver
 
       def initialize(name, width: 1)
@@ -62,6 +62,7 @@ module RHDL
         @width = width
         @value = SignalValue.new(0, width: width)
         @driver = nil
+        @sinks = []
         @listeners = []
       end
 
@@ -83,6 +84,10 @@ module RHDL
 
       def on_change(&block)
         @listeners << block
+      end
+
+      def add_sink(wire)
+        @sinks << wire
       end
 
       def notify_listeners
@@ -166,6 +171,8 @@ module RHDL
       def self.connect(source_wire, dest_wire)
         source_wire.on_change { |val| dest_wire.set(val) }
         dest_wire.set(source_wire.value)
+        dest_wire.driver = source_wire
+        source_wire.add_sink(dest_wire)
       end
 
       # Main simulation method - compute outputs from inputs
