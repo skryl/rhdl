@@ -21,3 +21,5 @@ require_relative "../cpu/accumulator"
 
 # HDL simulation framework
 require_relative "rhdl/hdl"
+require_relative "rhdl/gates"
+require_relative "rhdl/diagram"

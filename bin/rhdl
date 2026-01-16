@@ -1,52 +1,128 @@
 #!/usr/bin/env ruby
 
-require "optparse"
-require "fileutils"
-require "rhdl"
+require 'fileutils'
+require 'optparse'
+
+require_relative '../lib/rhdl'
 
 command = ARGV.shift
 
-unless command == "export"
-  warn "Usage: rhdl export --lang <verilog|vhdl> --out <dir> [--top NAME] <component_ref>"
-  exit 1
-end
+case command
+when 'diagram'
+  # Diagram generation command
+  options = {
+    level: 'component',
+    depth: 1,
+    format: 'svg',
+    out: 'diagrams',
+    bit_blasted: false
+  }
 
-options = {
-  lang: nil,
-  out: nil,
-  top: nil
-}
+  parser = OptionParser.new do |opts|
+    opts.banner = 'Usage: bin/rhdl diagram <ComponentRef> [options]'
+    opts.on('--level LEVEL', 'component|hierarchy|netlist|gate') { |v| options[:level] = v }
+    opts.on('--depth DEPTH', 'Depth for hierarchy (N or all)') do |v|
+      options[:depth] = v == 'all' ? :all : v.to_i
+    end
+    opts.on('--bit-blasted', 'Bit-blast gate-level nets') { options[:bit_blasted] = true }
+    opts.on('--format FORMAT', 'svg|png|dot') { |v| options[:format] = v }
+    opts.on('--out DIR', 'Output directory') { |v| options[:out] = v }
+  end
 
-OptionParser.new do |opts|
-  opts.banner = "Usage: rhdl export --lang <verilog|vhdl> --out <dir> [--top NAME] <component_ref>"
-  opts.on("--lang LANG", "verilog or vhdl") { |v| options[:lang] = v }
-  opts.on("--out DIR", "output directory") { |v| options[:out] = v }
-  opts.on("--top NAME", "override top module/entity name") { |v| options[:top] = v }
-end.parse!(ARGV)
+  parser.parse!(ARGV)
 
-component_ref = ARGV.shift
+  component_ref = ARGV.shift
+  unless component_ref
+    warn parser.to_s
+    exit 1
+  end
 
-if options[:lang].nil? || options[:out].nil? || component_ref.nil?
-  warn "Missing required arguments."
-  exit 1
-end
+  component_class = component_ref.split('::').inject(Object) { |mod, name| mod.const_get(name) }
+  component = component_class.new(component_ref.downcase)
 
-component_class = component_ref.split("::").inject(Object) { |mod, name| mod.const_get(name) }
+  diagram = case options[:level]
+            when 'component'
+              RHDL::Diagram.component(component)
+            when 'hierarchy'
+              RHDL::Diagram.hierarchy(component, depth: options[:depth])
+            when 'netlist'
+              RHDL::Diagram.netlist(component)
+            when 'gate'
+              components = RHDL::Diagram.collect_components(component)
+              gate_ir = RHDL::Gates::Lower.from_components(components, name: component.name)
+              RHDL::Diagram.gate_level(gate_ir, bit_blasted: options[:bit_blasted])
+            else
+              warn "Unknown level: #{options[:level]}"
+              exit 1
+            end
 
-FileUtils.mkdir_p(options[:out])
+  FileUtils.mkdir_p(options[:out])
+  base_name = "#{component.name}_#{options[:level]}"
 
-case options[:lang]
-when "verilog"
-  top_name = options[:top] || component_class.name.split("::").last.underscore
-  output_path = File.join(options[:out], "#{top_name}.v")
-  RHDL::Export.write_verilog(component_class, path: output_path, top_name: options[:top])
-when "vhdl"
-  top_name = options[:top] || component_class.name.split("::").last.underscore
-  output_path = File.join(options[:out], "#{top_name}.vhd")
-  RHDL::Export.write_vhdl(component_class, path: output_path, top_name: options[:top])
+  case options[:format]
+  when 'dot'
+    File.write(File.join(options[:out], "#{base_name}.dot"), diagram.to_dot)
+  when 'svg', 'png'
+    output = RHDL::Diagram::RenderSVG.render(diagram, format: options[:format])
+    if output
+      File.write(File.join(options[:out], "#{base_name}.#{options[:format]}"), output)
+    else
+      dot_path = File.join(options[:out], "#{base_name}.dot")
+      File.write(dot_path, diagram.to_dot)
+      warn "Graphviz not available; wrote #{dot_path} instead."
+    end
+  else
+    warn "Unknown format: #{options[:format]}"
+    exit 1
+  end
+
+when 'export'
+  # HDL export command
+  options = {
+    lang: nil,
+    out: nil,
+    top: nil
+  }
+
+  OptionParser.new do |opts|
+    opts.banner = "Usage: rhdl export --lang <verilog|vhdl> --out <dir> [--top NAME] <component_ref>"
+    opts.on("--lang LANG", "verilog or vhdl") { |v| options[:lang] = v }
+    opts.on("--out DIR", "output directory") { |v| options[:out] = v }
+    opts.on("--top NAME", "override top module/entity name") { |v| options[:top] = v }
+  end.parse!(ARGV)
+
+  component_ref = ARGV.shift
+
+  if options[:lang].nil? || options[:out].nil? || component_ref.nil?
+    warn "Missing required arguments."
+    exit 1
+  end
+
+  component_class = component_ref.split("::").inject(Object) { |mod, name| mod.const_get(name) }
+
+  FileUtils.mkdir_p(options[:out])
+
+  case options[:lang]
+  when "verilog"
+    top_name = options[:top] || component_class.name.split("::").last.underscore
+    output_path = File.join(options[:out], "#{top_name}.v")
+    RHDL::Export.write_verilog(component_class, path: output_path, top_name: options[:top])
+  when "vhdl"
+    top_name = options[:top] || component_class.name.split("::").last.underscore
+    output_path = File.join(options[:out], "#{top_name}.vhd")
+    RHDL::Export.write_vhdl(component_class, path: output_path, top_name: options[:top])
+  else
+    warn "Unknown language: #{options[:lang]}"
+    exit 1
+  end
+
+  puts "Wrote #{options[:lang]} to #{options[:out]}"
+
 else
-  warn "Unknown language: #{options[:lang]}"
+  warn "Usage: bin/rhdl <command> [options]"
+  warn ""
+  warn "Commands:"
+  warn "  diagram  Generate circuit diagrams"
+  warn "  export   Export component to Verilog or VHDL"
   exit 1
 end
-
-puts "Wrote #{options[:lang]} to #{options[:out]}"
