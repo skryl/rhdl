@@ -1,0 +1,12 @@
+digraph "and_gate" {
+  rankdir=LR;
+  node [fontname="Helvetica"];
+  edge [fontname="Helvetica"];
+  "gate:and:0" [label="AND" shape=ellipse];
+  "port:and_gate.a0:input:0" [label="and_gate.a0" shape=plaintext];
+  "port:and_gate.a1:input:0" [label="and_gate.a1" shape=plaintext];
+  "port:and_gate.y:output:0" [label="and_gate.y" shape=plaintext];
+  "gate:and:0" -> "port:and_gate.y:output:0";
+  "port:and_gate.a0:input:0" -> "gate:and:0";
+  "port:and_gate.a1:input:0" -> "gate:and:0";
+}

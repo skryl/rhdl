@@ -1,0 +1,13 @@
+digraph addsub {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[8]|<b>b[8]|<sub>sub[1]}|addsub\n(AddSub)|{<result>result[8]|<cout>cout[1]|<overflow>overflow[1]|<zero>zero[1]|<negative>negative[1]}}"];
+
+  subgraph cluster_main {
+    label="addsub";
+    style=rounded;
+    color=blue;
+  }
+}

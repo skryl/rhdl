@@ -1,0 +1,33 @@
+digraph "full_adder" {
+  rankdir=LR;
+  node [fontname="Helvetica"];
+  edge [fontname="Helvetica"];
+  "gate:and:2" [label="AND" shape=ellipse];
+  "gate:and:3" [label="AND" shape=ellipse];
+  "gate:or:4" [label="OR" shape=ellipse];
+  "gate:xor:0" [label="XOR" shape=ellipse];
+  "gate:xor:1" [label="XOR" shape=ellipse];
+  "port:full_adder.a:input:0" [label="full_adder.a" shape=plaintext];
+  "port:full_adder.b:input:0" [label="full_adder.b" shape=plaintext];
+  "port:full_adder.cin:input:0" [label="full_adder.cin" shape=plaintext];
+  "port:full_adder.cout:output:0" [label="full_adder.cout" shape=plaintext];
+  "port:full_adder.sum:output:0" [label="full_adder.sum" shape=plaintext];
+  "wire:5" [label="n5" shape=circle];
+  "wire:6" [label="n6" shape=circle];
+  "wire:7" [label="n7" shape=circle];
+  "gate:and:2" -> "wire:6";
+  "gate:and:3" -> "wire:7";
+  "gate:or:4" -> "port:full_adder.cout:output:0";
+  "gate:xor:0" -> "wire:5";
+  "gate:xor:1" -> "port:full_adder.sum:output:0";
+  "port:full_adder.a:input:0" -> "gate:and:2";
+  "port:full_adder.a:input:0" -> "gate:xor:0";
+  "port:full_adder.b:input:0" -> "gate:and:2";
+  "port:full_adder.b:input:0" -> "gate:xor:0";
+  "port:full_adder.cin:input:0" -> "gate:and:3";
+  "port:full_adder.cin:input:0" -> "gate:xor:1";
+  "wire:5" -> "gate:and:3";
+  "wire:5" -> "gate:xor:1";
+  "wire:6" -> "gate:or:4";
+  "wire:7" -> "gate:or:4";
+}

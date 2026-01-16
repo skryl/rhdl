@@ -1,0 +1,10 @@
+digraph "buffer" {
+  rankdir=LR;
+  node [fontname="Helvetica"];
+  edge [fontname="Helvetica"];
+  "gate:buf:0" [label="BUF" shape=ellipse];
+  "port:buffer.a:input:0" [label="buffer.a" shape=plaintext];
+  "port:buffer.y:output:0" [label="buffer.y" shape=plaintext];
+  "gate:buf:0" -> "port:buffer.y:output:0";
+  "port:buffer.a:input:0" -> "gate:buf:0";
+}

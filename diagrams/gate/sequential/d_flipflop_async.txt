@@ -1,0 +1,21 @@
+============================================================
+Gate-Level: dff_async
+Type: DFlipFlopAsync
+============================================================
+
+Gates: 1
+DFFs: 1
+Nets: 6
+
+Inputs:
+  dff_async.d[1]
+  dff_async.clk[1]
+  dff_async.rst[1]
+  dff_async.en[1]
+
+Outputs:
+  dff_async.q[1]
+  dff_async.qn[1]
+
+Gate Types:
+  not: 1

@@ -1,0 +1,17 @@
+============================================================
+Gate-Level: buffer
+Type: Buffer
+============================================================
+
+Gates: 1
+DFFs: 0
+Nets: 2
+
+Inputs:
+  buffer.a[1]
+
+Outputs:
+  buffer.y[1]
+
+Gate Types:
+  buf: 1

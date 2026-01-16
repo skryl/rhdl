@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="404" height="460" viewBox="0 0 404 460">
+
+<defs>
+  <linearGradient id="headerGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+    <stop offset="0%" style="stop-color:#5a9fd4"/>
+    <stop offset="100%" style="stop-color:#4a90d9"/>
+  </linearGradient>
+  <marker id="arrowhead" markerWidth="10" markerHeight="7"
+          refX="9" refY="3.5" orient="auto">
+    <polygon points="0 0, 10 3.5, 0 7" fill="#666666"/>
+  </marker>
+  <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+    <feDropShadow dx="2" dy="2" stdDeviation="2" flood-opacity="0.3"/>
+  </filter>
+</defs>
+
+<rect x="0" y="0" width="404" height="460" fill="#ffffff" stroke="none" stroke-width="1" rx="0"/>
+<g filter="url(#shadow)">
+<rect x="40" y="40" width="264" height="380" fill="#f8f9fa" stroke="#333333" stroke-width="2" rx="5"/>
+</g>
+<rect x="40" y="40" width="264" height="50" fill="url(#headerGradient)" stroke="#333333" stroke-width="2" rx="5"/>
+<text x="172" y="60" fill="#ffffff" font-size="14" font-weight="bold" text-anchor="middle" font-family="monospace">decoder</text>
+<text x="172" y="78" fill="#ffffff" font-size="11" font-weight="normal" text-anchor="middle" font-family="monospace">(InstructionDecoder)</text>
+<line x1="10" y1="113" x2="40" y2="113" stroke="#28a745" stroke-width="2" marker-end="url(#arrowhead)"/>
+<circle cx="40" cy="113" r="5" fill="#28a745" stroke="#333333" stroke-width="1"/>
+<text x="50" y="117" fill="#333333" font-size="11" font-weight="normal" text-anchor="start" font-family="monospace">instruction[8]</text>
+<line x1="10" y1="138" x2="40" y2="138" stroke="#28a745" stroke-width="2" marker-end="url(#arrowhead)"/>
+<circle cx="40" cy="138" r="5" fill="#28a745" stroke="#333333" stroke-width="1"/>
+<text x="50" y="142" fill="#333333" font-size="11" font-weight="normal" text-anchor="start" font-family="monospace">zero_flag</text>
+<circle cx="304" cy="113" r="5" fill="#dc3545" stroke="#333333" stroke-width="1"/>
+<line x1="304" y1="113" x2="334" y2="113" stroke="#dc3545" stroke-width="2" marker-end="url(#arrowhead)"/>
+<text x="294" y="117" fill="#333333" font-size="11" font-weight="normal" text-anchor="end" font-family="monospace">alu_op[4]</text>
+<circle cx="304" cy="138" r="5" fill="#dc3545" stroke="#333333" stroke-width="1"/>
+<line x1="304" y1="138" x2="334" y2="138" stroke="#dc3545" stroke-width="2" marker-end="url(#arrowhead)"/>
+<text x="294" y="142" fill="#333333" font-size="11" font-weight="normal" text-anchor="end" font-family="monospace">alu_src</text>
+<circle cx="304" cy="163" r="5" fill="#dc3545" stroke="#333333" stroke-width="1"/>
+<line x1="304" y1="163" x2="334" y2="163" stroke="#dc3545" stroke-width="2" marker-end="url(#arrowhead)"/>
+<text x="294" y="167" fill="#333333" font-size="11" font-weight="normal" text-anchor="end" font-family="monospace">reg_write</text>
+<circle cx="304" cy="188" r="5" fill="#dc3545" stroke="#333333" stroke-width="1"/>
+<line x1="304" y1="188" x2="334" y2="188" stroke="#dc3545" stroke-width="2" marker-end="url(#arrowhead)"/>
+<text x="294" y="192" fill="#333333" font-size="11" font-weight="normal" text-anchor="end" font-family="monospace">mem_read</text>
+<circle cx="304" cy="213" r="5" fill="#dc3545" stroke="#333333" stroke-width="1"/>
+<line x1="304" y1="213" x2="334" y2="213" stroke="#dc3545" stroke-width="2" marker-end="url(#arrowhead)"/>
+<text x="294" y="217" fill="#333333" font-size="11" font-weight="normal" text-anchor="end" font-family="monospace">mem_write</text>
+<circle cx="304" cy="238" r="5" fill="#dc3545" stroke="#333333" stroke-width="1"/>
+<line x1="304" y1="238" x2="334" y2="238" stroke="#dc3545" stroke-width="2" marker-end="url(#arrowhead)"/>
+<text x="294" y="242" fill="#333333" font-size="11" font-weight="normal" text-anchor="end" font-family="monospace">branch</text>
+<circle cx="304" cy="263" r="5" fill="#dc3545" stroke="#333333" stroke-width="1"/>
+<line x1="304" y1="263" x2="334" y2="263" stroke="#dc3545" stroke-width="2" marker-end="url(#arrowhead)"/>
+<text x="294" y="267" fill="#333333" font-size="11" font-weight="normal" text-anchor="end" font-family="monospace">jump</text>
+<circle cx="304" cy="288" r="5" fill="#dc3545" stroke="#333333" stroke-width="1"/>
+<line x1="304" y1="288" x2="334" y2="288" stroke="#dc3545" stroke-width="2" marker-end="url(#arrowhead)"/>
+<text x="294" y="292" fill="#333333" font-size="11" font-weight="normal" text-anchor="end" font-family="monospace">pc_src[2]</text>
+<circle cx="304" cy="313" r="5" fill="#dc3545" stroke="#333333" stroke-width="1"/>
+<line x1="304" y1="313" x2="334" y2="313" stroke="#dc3545" stroke-width="2" marker-end="url(#arrowhead)"/>
+<text x="294" y="317" fill="#333333" font-size="11" font-weight="normal" text-anchor="end" font-family="monospace">halt</text>
+<circle cx="304" cy="338" r="5" fill="#dc3545" stroke="#333333" stroke-width="1"/>
+<line x1="304" y1="338" x2="334" y2="338" stroke="#dc3545" stroke-width="2" marker-end="url(#arrowhead)"/>
+<text x="294" y="342" fill="#333333" font-size="11" font-weight="normal" text-anchor="end" font-family="monospace">call</text>
+<circle cx="304" cy="363" r="5" fill="#dc3545" stroke="#333333" stroke-width="1"/>
+<line x1="304" y1="363" x2="334" y2="363" stroke="#dc3545" stroke-width="2" marker-end="url(#arrowhead)"/>
+<text x="294" y="367" fill="#333333" font-size="11" font-weight="normal" text-anchor="end" font-family="monospace">ret</text>
+<circle cx="304" cy="388" r="5" fill="#dc3545" stroke="#333333" stroke-width="1"/>
+<line x1="304" y1="388" x2="334" y2="388" stroke="#dc3545" stroke-width="2" marker-end="url(#arrowhead)"/>
+<text x="294" y="392" fill="#333333" font-size="11" font-weight="normal" text-anchor="end" font-family="monospace">instr_length[2]</text>
+</svg>

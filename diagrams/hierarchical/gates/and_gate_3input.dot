@@ -1,0 +1,13 @@
+digraph and_gate_3in {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a0>a0[1]|<a1>a1[1]|<a2>a2[1]}|and_gate_3in\n(AndGate)|{<y>y[1]}}"];
+
+  subgraph cluster_main {
+    label="and_gate_3in";
+    style=rounded;
+    color=blue;
+  }
+}
