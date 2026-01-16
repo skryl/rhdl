@@ -1,4 +1,9 @@
-require "bundler/setup"
+begin
+  require "bundler/setup"
+rescue Bundler::GemNotFound, Bundler::BundlerError
+  # Bundler not fully set up, continue without it
+end
+
 require "rhdl"
 
 # Require all support files
