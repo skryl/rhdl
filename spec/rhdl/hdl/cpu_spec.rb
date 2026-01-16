@@ -5,12 +5,16 @@ RSpec.describe 'HDL CPU' do
     def create_cpu(program = [])
       cpu = RHDL::HDL::CPU::Datapath.new("test_cpu")
       cpu.load_program(program)
-      cpu.set_input(:rst, 1)
+      # Proper reset sequence (matching CPUAdapter)
       cpu.set_input(:clk, 0)
+      cpu.set_input(:rst, 1)
       cpu.propagate
       cpu.set_input(:clk, 1)
       cpu.propagate
+      cpu.set_input(:clk, 0)
+      cpu.propagate
       cpu.set_input(:rst, 0)
+      cpu.propagate
       cpu
     end
 
