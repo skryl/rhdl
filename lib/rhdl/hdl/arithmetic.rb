@@ -436,7 +436,7 @@ module RHDL
 
         when OP_DIV
           if b == 0
-            result = mask  # All 1s for divide by zero
+            result = 0     # Return 0 for divide by zero (matches behavioral CPU)
             cout = 1       # Error flag
           else
             result = a / b

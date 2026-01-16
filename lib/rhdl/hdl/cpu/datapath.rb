@@ -317,6 +317,11 @@ module RHDL
 
           # Handle RET
           if @decoder.get_output(:ret) == 1
+            # Check for stack underflow (SP at max means empty stack)
+            if @sp.get_output(:empty) == 1
+              @halted = true
+              return
+            end
             clock_sp(pop: true)
             sp_val = @sp.get_output(:q)
             new_pc = @memory.read_mem(sp_val)
