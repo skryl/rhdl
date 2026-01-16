@@ -576,9 +576,13 @@ module RHDL
       # Bit selection
       def [](index)
         if index.is_a?(Range)
-          slice_width = index.max - index.min + 1
+          # Handle both ascending (0..3) and descending (3..0) ranges
+          # In HDL, bit slices are typically written high..low (e.g., 7..4)
+          high = [index.begin, index.end].max
+          low = [index.begin, index.end].min
+          slice_width = high - low + 1
           mask = (1 << slice_width) - 1
-          SimValueProxy.new((value >> index.min) & mask, slice_width, @context)
+          SimValueProxy.new((value >> low) & mask, slice_width, @context)
         else
           SimValueProxy.new((value >> index) & 1, 1, @context)
         end

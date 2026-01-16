@@ -1,5 +1,6 @@
 # MOS 6502 Address Generation Unit
 # Computes effective addresses for all 6502 addressing modes
+# Combinational - can be synthesized as combinational logic
 
 module MOS6502
   class AddressGenerator < RHDL::HDL::SimComponent
@@ -21,28 +22,24 @@ module MOS6502
 
     STACK_BASE = 0x0100
 
-    def initialize(name = nil)
-      super(name)
-    end
+    # Inputs
+    port_input :mode, width: 4           # Addressing mode selector
+    port_input :operand_lo, width: 8     # Low byte of operand
+    port_input :operand_hi, width: 8     # High byte of operand (for absolute)
+    port_input :x_reg, width: 8          # X register value
+    port_input :y_reg, width: 8          # Y register value
+    port_input :pc, width: 16            # Program counter (for relative)
+    port_input :sp, width: 8             # Stack pointer
+    port_input :indirect_lo, width: 8    # Low byte read from indirect address
+    port_input :indirect_hi, width: 8    # High byte read from indirect address
 
-    def setup_ports
-      # Inputs
-      input :mode, width: 4           # Addressing mode selector
-      input :operand_lo, width: 8     # Low byte of operand
-      input :operand_hi, width: 8     # High byte of operand (for absolute)
-      input :x_reg, width: 8          # X register value
-      input :y_reg, width: 8          # Y register value
-      input :pc, width: 16            # Program counter (for relative)
-      input :sp, width: 8             # Stack pointer
-      input :indirect_lo, width: 8    # Low byte read from indirect address
-      input :indirect_hi, width: 8    # High byte read from indirect address
+    # Outputs
+    port_output :eff_addr, width: 16     # Effective address
+    port_output :page_cross             # Set if page boundary crossed
+    port_output :is_zero_page           # Address is in zero page
 
-      # Outputs
-      output :eff_addr, width: 16     # Effective address
-      output :page_cross             # Set if page boundary crossed
-      output :is_zero_page           # Address is in zero page
-    end
-
+    # Note: Complex case statements make behavior DSL impractical
+    # This is combinational but uses manual propagate for clarity
     def propagate
       mode = in_val(:mode) & 0x0F
       operand_lo = in_val(:operand_lo) & 0xFF
@@ -140,22 +137,17 @@ module MOS6502
   end
 
   # Helper component for computing indirect address fetch locations
+  # Combinational - can be synthesized as combinational logic
   class IndirectAddressCalc < RHDL::HDL::SimComponent
-    def initialize(name = nil)
-      super(name)
-    end
+    port_input :mode, width: 4
+    port_input :operand_lo, width: 8
+    port_input :operand_hi, width: 8
+    port_input :x_reg, width: 8
 
-    def setup_ports
-      input :mode, width: 4
-      input :operand_lo, width: 8
-      input :operand_hi, width: 8
-      input :x_reg, width: 8
-
-      # Address to fetch the low byte of indirect pointer
-      output :ptr_addr_lo, width: 16
-      # Address to fetch the high byte of indirect pointer
-      output :ptr_addr_hi, width: 16
-    end
+    # Address to fetch the low byte of indirect pointer
+    port_output :ptr_addr_lo, width: 16
+    # Address to fetch the high byte of indirect pointer
+    port_output :ptr_addr_hi, width: 16
 
     def propagate
       mode = in_val(:mode) & 0x0F
