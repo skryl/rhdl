@@ -131,9 +131,90 @@ module RHDL
           end
         when IR::Resize
           resize(expr_node)
+        when IR::Case
+          case_expr(expr_node)
+        when IR::MemoryRead
+          "#{sanitize(expr_node.memory)}[#{expr(expr_node.addr)}]"
         else
           raise ArgumentError, "Unsupported expression: #{expr_node.inspect}"
         end
+      end
+
+      # Case expression as nested ternary (for combinational use)
+      # For use in assign statements: assign y = case_expr
+      def case_expr(case_node)
+        selector = expr(case_node.selector)
+        default_expr = case_node.default ? expr(case_node.default) : literal(0, case_node.width)
+
+        # Build nested ternary from case branches
+        result = default_expr
+        case_node.cases.reverse_each do |values, branch|
+          conditions = values.map { |v| "(#{selector} == #{literal(v, case_node.selector.width)})" }
+          cond = conditions.join(" || ")
+          result = "(#{cond}) ? #{expr(branch)} : #{result}"
+        end
+        result
+      end
+
+      # Generate sequential block (always @(posedge clk))
+      def sequential_block(seq)
+        lines = []
+        if seq.reset
+          lines << "  always @(posedge #{sanitize(seq.clock)} or posedge #{sanitize(seq.reset)}) begin"
+          lines << "    if (#{sanitize(seq.reset)}) begin"
+          seq.reset_values.each do |name, value|
+            lines << "      #{sanitize(name)} <= #{literal(value, 8)};"
+          end
+          lines << "    end else begin"
+          seq.assignments.each do |assign|
+            lines << "      #{sanitize(assign.target)} <= #{expr(assign.expr)};"
+          end
+          lines << "    end"
+        else
+          lines << "  always @(posedge #{sanitize(seq.clock)}) begin"
+          seq.assignments.each do |assign|
+            lines << "    #{sanitize(assign.target)} <= #{expr(assign.expr)};"
+          end
+        end
+        lines << "  end"
+        lines.join("\n")
+      end
+
+      # Generate case statement for process blocks
+      def case_statement(case_node, target:, nonblocking:, indent:)
+        pad = " " * indent
+        op = nonblocking ? "<=" : "="
+        lines = []
+        lines << "#{pad}case (#{expr(case_node.selector)})"
+
+        case_node.cases.each do |values, branch|
+          value_str = values.map { |v| literal(v, case_node.selector.width) }.join(", ")
+          lines << "#{pad}  #{value_str}: #{sanitize(target)} #{op} #{expr(branch)};"
+        end
+
+        if case_node.default
+          lines << "#{pad}  default: #{sanitize(target)} #{op} #{expr(case_node.default)};"
+        end
+
+        lines << "#{pad}endcase"
+        lines
+      end
+
+      # Generate memory declaration
+      def memory_decl(mem)
+        addr_width = Math.log2(mem.depth).ceil
+        "  reg #{width_decl(mem.width)}#{sanitize(mem.name)} [0:#{mem.depth - 1}];"
+      end
+
+      # Generate memory write port (in always block)
+      def memory_write_block(write_port)
+        lines = []
+        lines << "  always @(posedge #{sanitize(write_port.clock)}) begin"
+        lines << "    if (#{sanitize(write_port.enable)}) begin"
+        lines << "      #{sanitize(write_port.memory)}[#{sanitize(write_port.addr)}] <= #{sanitize(write_port.data)};"
+        lines << "    end"
+        lines << "  end"
+        lines.join("\n")
       end
 
       def resize(resize_node)

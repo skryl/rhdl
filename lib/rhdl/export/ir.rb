@@ -170,6 +170,94 @@ module RHDL
           super(width: width)
         end
       end
+
+      # Case expression for multi-way selection
+      # Maps to Verilog case / VHDL case-when
+      class Case < Expr
+        attr_reader :selector, :cases, :default
+
+        # @param selector [Expr] The expression to match against
+        # @param cases [Hash{Array<Integer> => Expr}] Map of values to expressions
+        # @param default [Expr, nil] Default expression if no match
+        def initialize(selector:, cases:, default:, width:)
+          @selector = selector
+          @cases = cases
+          @default = default
+          super(width: width)
+        end
+      end
+
+      # Sequential block with clock and optional reset
+      # Maps to Verilog always @(posedge clk) / VHDL process
+      class Sequential
+        attr_reader :clock, :reset, :reset_values, :assignments
+
+        # @param clock [Symbol] Clock signal name
+        # @param reset [Symbol, nil] Reset signal name
+        # @param reset_values [Hash{Symbol => Integer}] Values on reset
+        # @param assignments [Array<Assign>] Register assignments
+        def initialize(clock:, reset: nil, reset_values: {}, assignments: [])
+          @clock = clock
+          @reset = reset
+          @reset_values = reset_values
+          @assignments = assignments
+        end
+      end
+
+      # Memory block for RAM/ROM inference
+      # Maps to Verilog reg array / VHDL signal array
+      class Memory
+        attr_reader :name, :depth, :width, :read_ports, :write_ports
+
+        # @param name [String] Memory array name
+        # @param depth [Integer] Number of entries
+        # @param width [Integer] Bits per entry
+        # @param read_ports [Array<ReadPort>] Read port definitions
+        # @param write_ports [Array<WritePort>] Write port definitions
+        def initialize(name:, depth:, width:, read_ports: [], write_ports: [])
+          @name = name
+          @depth = depth
+          @width = width
+          @read_ports = read_ports
+          @write_ports = write_ports
+        end
+      end
+
+      # Memory read port
+      class MemoryReadPort
+        attr_reader :memory, :addr, :data, :enable
+
+        def initialize(memory:, addr:, data:, enable: nil)
+          @memory = memory
+          @addr = addr
+          @data = data
+          @enable = enable
+        end
+      end
+
+      # Memory write port (synchronous)
+      class MemoryWritePort
+        attr_reader :memory, :clock, :addr, :data, :enable
+
+        def initialize(memory:, clock:, addr:, data:, enable:)
+          @memory = memory
+          @clock = clock
+          @addr = addr
+          @data = data
+          @enable = enable
+        end
+      end
+
+      # Memory read expression
+      class MemoryRead < Expr
+        attr_reader :memory, :addr
+
+        def initialize(memory:, addr:, width:)
+          @memory = memory
+          @addr = addr
+          super(width: width)
+        end
+      end
     end
   end
 end
