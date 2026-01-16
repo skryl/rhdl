@@ -104,6 +104,7 @@ module MOS6502
       @control.set_input(:is_write, @decoder.get_output(:is_write))
       @control.set_input(:is_rmw, @decoder.get_output(:is_rmw))
       @control.set_input(:writes_reg, @decoder.get_output(:writes_reg))
+      @control.set_input(:is_status_op, @decoder.get_output(:is_status_op))
 
       # Status flags to control unit (for branch decisions)
       @status_reg.propagate  # Get current status first
@@ -176,6 +177,9 @@ module MOS6502
         else
           @data_latch.get_output(:data)
         end
+      elsif instr_type == InstructionDecoder::TYPE_STACK && opcode == 0x68
+        # PLA: use pulled value for flag computation
+        alu_a = @data_latch.get_output(:data)
       elsif (instr_type == InstructionDecoder::TYPE_INC_DEC || instr_type == InstructionDecoder::TYPE_SHIFT) &&
             addr_mode != AddressGenerator::MODE_ACCUMULATOR &&
             addr_mode != AddressGenerator::MODE_IMPLIED
@@ -241,8 +245,13 @@ module MOS6502
       else
         alu_result
       end
+      pc_for_data = if state == ControlUnit::STATE_JSR_PUSH_HI || state == ControlUnit::STATE_JSR_PUSH_LO
+        (pc_val - 1) & 0xFFFF
+      else
+        pc_val
+      end
       data_out = select_data_out(data_sel, effective_alu_result, reg_a, reg_x, reg_y,
-                                 pc_val, @status_reg.get_output(:p))
+                                 pc_for_data, @status_reg.get_output(:p))
 
       # Output signals
       out_set(:addr, addr_out)
@@ -338,6 +347,8 @@ module MOS6502
           else
             @data_latch.get_output(:data)
           end
+        elsif instr_type == InstructionDecoder::TYPE_STACK && @ir.get_output(:opcode) == 0x68
+          @data_latch.get_output(:data)
         elsif instr_type == InstructionDecoder::TYPE_TRANSFER
           handle_transfer_data
         else
@@ -422,9 +433,8 @@ module MOS6502
         end
       end
 
-      # Handle PLP instruction
-      if state == ControlUnit::STATE_PULL && instr_type == InstructionDecoder::TYPE_STACK
-        # Check if this is PLP (pull processor status)
+      # Handle PLP instruction after pull completes
+      if state == ControlUnit::STATE_EXECUTE && instr_type == InstructionDecoder::TYPE_STACK
         opcode = @ir.get_output(:opcode)
         if opcode == 0x28  # PLP
           @status_reg.set_input(:data_in, @data_latch.get_output(:data))

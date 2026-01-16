@@ -50,6 +50,7 @@ module MOS6502
       output :sets_c                   # Sets carry flag
       output :sets_v                   # Sets overflow flag
       output :writes_reg               # Writes to a register
+      output :is_status_op             # Stack operation on status register (PHP/PLP)
       output :illegal                  # Illegal/undefined opcode
     end
 
@@ -71,6 +72,7 @@ module MOS6502
       out_set(:sets_c, info[:sets_c])
       out_set(:sets_v, info[:sets_v])
       out_set(:writes_reg, info[:writes_reg] || 0)
+      out_set(:is_status_op, info[:is_status] ? 1 : 0)
       out_set(:illegal, info[:illegal])
     end
 
@@ -587,6 +589,7 @@ module MOS6502
         sets_nz: (!is_push && !is_status) ? 1 : 0,  # PLA sets N,Z
         sets_c: (!is_push && is_status) ? 1 : 0,    # PLP restores all
         sets_v: (!is_push && is_status) ? 1 : 0,
+        writes_reg: (!is_push && !is_status) ? 1 : 0,  # PLA writes to A
         illegal: 0,
         mnemonic: name,
         is_push: is_push,
