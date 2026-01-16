@@ -11,14 +11,6 @@ module RHDL
   end
 end
 
-# CPU components (top-level directory)
-require_relative "../cpu/cpu"
-require_relative "../cpu/control_unit"
-require_relative "../cpu/program_counter"
-require_relative "../cpu/cpu_alu"
-require_relative "../cpu/memory_unit"
-require_relative "../cpu/accumulator"
-
 # HDL simulation framework
 require_relative "rhdl/hdl"
 require_relative "rhdl/gates"
