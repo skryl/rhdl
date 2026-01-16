@@ -5,11 +5,14 @@ RHDL is a Domain Specific Language (DSL) that allows you to design hardware usin
 ## Features
 
 - **HDL CPU**: A complete 8-bit CPU with gate-level datapath implementation
+- **MOS 6502 CPU**: Full 6502 processor implementation with 189+ instruction tests
 - **HDL Simulation Framework**: Gate-level simulation with support for combinational and sequential logic
 - **Signal Probing & Debugging**: Waveform capture, breakpoints, watchpoints, and VCD export
 - **Terminal GUI**: Interactive terminal-based simulator interface
 - **Component Library**: Gates, flip-flops, registers, ALU, memory, and more
-- **VHDL Export**: Generate synthesizable VHDL from Ruby definitions
+- **HDL Export**: Generate synthesizable VHDL and Verilog from Ruby definitions
+- **Diagram Generation**: Multi-level circuit diagrams with SVG, PNG, and DOT output
+- **Apple II Support**: Memory-mapped I/O for Apple II bus emulation
 
 ## Project Structure
 
@@ -17,22 +20,30 @@ RHDL is a Domain Specific Language (DSL) that allows you to design hardware usin
 rhdl/
 ├── lib/rhdl/           # Core library
 │   ├── dsl.rb          # VHDL DSL for component definitions
-│   ├── components/     # Structural component definitions
-│   └── hdl/            # HDL simulation framework
-│       ├── simulation.rb    # Core simulation engine
-│       ├── gates.rb         # Logic gate primitives
-│       ├── sequential.rb    # Flip-flops, registers, counters
-│       ├── arithmetic.rb    # Adders, ALU, comparators
-│       ├── combinational.rb # Multiplexers, decoders
-│       ├── memory.rb        # RAM, ROM, register files
-│       ├── debug.rb         # Signal probing & debugging
-│       ├── tui.rb           # Terminal GUI
-│       └── cpu/             # HDL CPU implementation (datapath, adapter)
+│   ├── export/         # HDL export backends
+│   │   ├── vhdl.rb     # VHDL export
+│   │   └── verilog.rb  # Verilog export
+│   ├── hdl/            # HDL simulation framework
+│   │   ├── simulation.rb    # Core simulation engine
+│   │   ├── gates.rb         # Logic gate primitives
+│   │   ├── sequential.rb    # Flip-flops, registers, counters
+│   │   ├── arithmetic.rb    # Adders, ALU, comparators
+│   │   ├── combinational.rb # Multiplexers, decoders
+│   │   ├── memory.rb        # RAM, ROM, register files
+│   │   ├── debug.rb         # Signal probing & debugging
+│   │   ├── tui.rb           # Terminal GUI
+│   │   └── cpu/             # HDL CPU implementation (datapath, adapter)
+│   ├── gates/          # Gate-level simulation
+│   └── diagram/        # Diagram rendering
 ├── examples/           # Demo scripts
+│   └── mos6502/        # MOS 6502 CPU implementation
 ├── spec/               # Test suite
 │   └── support/
 │       └── behavioral_cpu/  # Reference behavioral CPU (for testing)
-└── docs/               # Documentation
+├── docs/               # Documentation
+├── vhdl/               # Generated VHDL files
+├── verilog/            # Generated Verilog files
+└── diagrams/           # Generated circuit diagrams
 ```
 
 ## Documentation
@@ -44,6 +55,10 @@ Detailed documentation is available in the `docs/` directory:
 - **[Components Reference](docs/components.md)** - Complete reference for all HDL components
 - **[CPU Datapath](docs/cpu_datapath.md)** - CPU architecture and instruction set details
 - **[Debugging Guide](docs/debugging.md)** - Signal probing, breakpoints, and terminal GUI
+- **[Diagram Generation](docs/diagrams.md)** - Multi-level circuit diagram generation
+- **[HDL Export](docs/hdl_export.md)** - VHDL and Verilog export guide
+- **[Gate Level Backend](docs/gate_level_backend.md)** - Gate-level simulation details
+- **[Apple II I/O](docs/apple2_io.md)** - Apple II bus and memory-mapped I/O
 
 ## Quick Start
 
@@ -480,7 +495,33 @@ The test suite includes two complex integration tests that demonstrate the CPU's
 
 ## Recent Improvements
 
-### Signal Probing & Debugging
+### Latest (2025)
+
+#### Multi-Level Diagram Generation
+- Hierarchical component diagrams with collapsible buses
+- Gate-level netlist export with SVG, PNG, and DOT formats
+- Automatic layout and routing for complex circuits
+
+#### HDL Export Enhancements
+- Improved VHDL and Verilog export pipeline
+- Fixed Verilog resize operations for width mismatches
+- Tool-backed export tests for validation
+
+#### MOS 6502 CPU
+- Complete 6502 processor implementation
+- Fixed RMW (Read-Modify-Write) timing for shift instructions
+- Fixed control timing for datapath operations
+- 189+ comprehensive instruction tests
+- Support for algorithms: bubble sort, Fibonacci, Mandelbrot, Game of Life
+- FIG Forth interpreter test coverage
+
+#### Apple II Support
+- Memory-mapped I/O for Apple II bus emulation
+- Fixed 6502 stack returns and bus loading behavior
+
+### Core Framework
+
+#### Signal Probing & Debugging
 - **SignalProbe**: Records signal transitions over time for waveform viewing
 - **WaveformCapture**: Manages multiple probes with VCD export support
 - **Breakpoints**: Break on custom conditions or cycle counts
@@ -488,7 +529,7 @@ The test suite includes two complex integration tests that demonstrate the CPU's
 - **DebugSimulator**: Enhanced simulator with step mode, pause/resume, and state inspection
 - **VCD Export**: Export waveforms to Value Change Dump format for GTKWave
 
-### Terminal GUI (TUI)
+#### Terminal GUI (TUI)
 - Interactive terminal-based simulator interface
 - Signal panel with live value display
 - Waveform panel with ASCII waveform rendering
@@ -506,23 +547,13 @@ The test suite includes two complex integration tests that demonstrate the CPU's
 - HDL CPU datapath with instruction decoder, ALU, program counter, stack pointer
 - CPUAdapter providing a clean interface for running programs on the HDL CPU
 
-### Instruction Encoding Fixes
+#### Instruction Encoding & Assembler
 - Fixed assembler to output encoded bytes instead of symbols
 - Corrected STA instruction encoding (0x20 for indirect, 0x21 for 2-byte direct, 0x2n for nibble-encoded)
 - Fixed long jump instructions (JZ_LONG, JMP_LONG, JNZ_LONG) to use full 16-bit addresses
-- Implemented variable-length instruction encoding with proper offset calculation
-
-### Assembler Enhancements
-- Added `base_address` parameter to `Assembler.build()` for position-independent code
-- Implemented indirect addressing for STA instruction: `p.instr :STA, [high_addr, low_addr]`
-- Fixed label resolution to work correctly with base addresses
-- Added support for 16-bit long jump instructions
-
-### CPU Execution
-- Fixed instruction decoding for variable-length instructions
-- Corrected PC increment logic for multi-byte instructions
-- Improved indirect memory addressing
-- Enhanced debug output for troubleshooting
+- Variable-length instruction encoding with proper offset calculation
+- `base_address` parameter for position-independent code
+- Indirect addressing support: `p.instr :STA, [high_addr, low_addr]`
 
 ### Test Infrastructure
 - Updated display helper to support custom buffer addresses
