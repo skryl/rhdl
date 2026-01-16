@@ -1,0 +1,13 @@
+digraph enc4to2 {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[4]}|enc4to2\n(Encoder4to2)|{<y>y[2]|<valid>valid[1]}}"];
+
+  subgraph cluster_main {
+    label="enc4to2";
+    style=rounded;
+    color=blue;
+  }
+}
