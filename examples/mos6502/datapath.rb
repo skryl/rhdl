@@ -9,6 +9,7 @@ module MOS6502
     def initialize(name = nil)
       super(name)
       create_subcomponents
+      @rmw_result_latch = 0  # Holds ALU result during RMW operations
     end
 
     def setup_ports
@@ -194,6 +195,13 @@ module MOS6502
 
       alu_result = @alu.get_output(:result)
 
+      # For RMW operations, latch the ALU result during EXECUTE
+      # so we can use it during WRITE (after flags are updated)
+      is_rmw = @decoder.get_output(:is_rmw)
+      if state == ControlUnit::STATE_EXECUTE && is_rmw == 1
+        @rmw_result_latch = alu_result
+      end
+
       # Update registers based on control signals
       update_registers(dst_reg, alu_result, data_in, instr_type, addr_mode)
 
@@ -226,8 +234,14 @@ module MOS6502
       @sp.propagate
 
       # Data output multiplexer
+      # For RMW operations in WRITE state, use the latched result from EXECUTE
       data_sel = @control.get_output(:data_sel)
-      data_out = select_data_out(data_sel, alu_result, reg_a, reg_x, reg_y,
+      effective_alu_result = if state == ControlUnit::STATE_WRITE_MEM && is_rmw == 1
+        @rmw_result_latch
+      else
+        alu_result
+      end
+      data_out = select_data_out(data_sel, effective_alu_result, reg_a, reg_x, reg_y,
                                  pc_val, @status_reg.get_output(:p))
 
       # Output signals
