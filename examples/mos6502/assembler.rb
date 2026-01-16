@@ -106,6 +106,13 @@ module MOS6502
       pc = @origin
 
       lines.each do |line|
+        # Handle equates
+        if line =~ /^([A-Za-z_]\w*)\s*=\s*(.+)$/
+          label = $1.upcase
+          @labels[label] = resolve_value($2, pc)
+          next
+        end
+
         # Check for label
         if line =~ /^(\w+):(.*)$/
           label = $1.upcase
@@ -114,18 +121,18 @@ module MOS6502
         end
 
         # Check for directives
-        if line =~ /^\*\s*=\s*\$?([0-9A-Fa-f]+)/
-          pc = $1.to_i(16)
+        if line =~ /^\*\s*=\s*(.+)$/
+          pc = resolve_value($1, pc)
           next
         end
 
-        if line =~ /^\.ORG\s+\$?([0-9A-Fa-f]+)/i
-          pc = $1.to_i(16)
+        if line =~ /^\.ORG\s+(.+)/i
+          pc = resolve_value($1, pc)
           next
         end
 
         if line =~ /^\.BYTE\s+(.+)/i
-          bytes = parse_byte_list($1)
+          bytes = parse_byte_list($1, pc)
           pc += bytes.length
           next
         end
@@ -136,6 +143,10 @@ module MOS6502
           next
         end
 
+        if line =~ /^\.END/i
+          break
+        end
+
         # Skip empty lines after label extraction
         next if line.empty?
 
@@ -143,7 +154,7 @@ module MOS6502
         mnemonic, operand = parse_instruction(line)
         next unless mnemonic
 
-        mode, _ = determine_mode(mnemonic, operand)
+        mode, _ = determine_mode(mnemonic, operand, pc)
         info = INSTRUCTIONS[mnemonic]&.[](mode)
         if info
           pc += info[1]
@@ -158,24 +169,29 @@ module MOS6502
       pc = @origin
 
       lines.each do |line|
+        # Handle equates
+        if line =~ /^([A-Za-z_]\w*)\s*=\s*(.+)$/
+          next
+        end
+
         # Remove label
         if line =~ /^(\w+):(.*)$/
           line = $2.strip
         end
 
         # Handle directives
-        if line =~ /^\*\s*=\s*\$?([0-9A-Fa-f]+)/
-          pc = $1.to_i(16)
+        if line =~ /^\*\s*=\s*(.+)$/
+          pc = resolve_value($1, pc)
           next
         end
 
-        if line =~ /^\.ORG\s+\$?([0-9A-Fa-f]+)/i
-          pc = $1.to_i(16)
+        if line =~ /^\.ORG\s+(.+)/i
+          pc = resolve_value($1, pc)
           next
         end
 
         if line =~ /^\.BYTE\s+(.+)/i
-          data = parse_byte_list($1)
+          data = parse_byte_list($1, pc)
           bytes.concat(data)
           pc += data.length
           next
@@ -184,10 +200,15 @@ module MOS6502
         if line =~ /^\.WORD\s+(.+)/i
           words = parse_word_list($1)
           words.each do |w|
-            bytes << (w & 0xFF)
-            bytes << ((w >> 8) & 0xFF)
+            resolved = resolve_value(w, pc)
+            bytes << (resolved & 0xFF)
+            bytes << ((resolved >> 8) & 0xFF)
+            pc += 2
           end
-          pc += words.length * 2
+          next
+        end
+
+        if line =~ /^\.END/i
           next
         end
 
@@ -197,7 +218,7 @@ module MOS6502
         mnemonic, operand = parse_instruction(line)
         next unless mnemonic
 
-        mode, value = determine_mode(mnemonic, operand)
+        mode, value = determine_mode(mnemonic, operand, pc)
         info = INSTRUCTIONS[mnemonic]&.[](mode)
 
         unless info
@@ -208,7 +229,7 @@ module MOS6502
 
         # Handle relative addressing for branches
         if mode == :rel
-          target = resolve_value(value)
+          target = resolve_value(value, pc)
           offset = target - (pc + 2)
           if offset < -128 || offset > 127
             raise "Branch target out of range: #{line}"
@@ -218,11 +239,11 @@ module MOS6502
         elsif size == 1
           bytes << opcode
         elsif size == 2
-          resolved = resolve_value(value)
+          resolved = resolve_value(value, pc)
           bytes << opcode
           bytes << (resolved & 0xFF)
         elsif size == 3
-          resolved = resolve_value(value)
+          resolved = resolve_value(value, pc)
           bytes << opcode
           bytes << (resolved & 0xFF)
           bytes << ((resolved >> 8) & 0xFF)
@@ -244,7 +265,7 @@ module MOS6502
       [mnemonic, operand]
     end
 
-    def determine_mode(mnemonic, operand)
+    def determine_mode(mnemonic, operand, pc)
       return [:imp, nil] if operand.empty? || operand.nil?
 
       # Accumulator
@@ -275,7 +296,7 @@ module MOS6502
       # Absolute,X or Zero Page,X
       if operand =~ /^(.+),\s*X$/i
         value_str = $1
-        value = resolve_value(value_str)
+        value = resolve_value(value_str, pc)
         if value <= 0xFF && !INSTRUCTIONS[mnemonic][:absx]
           return [:zpx, value_str]
         elsif value <= 0xFF && INSTRUCTIONS[mnemonic][:zpx]
@@ -288,7 +309,7 @@ module MOS6502
       # Absolute,Y or Zero Page,Y
       if operand =~ /^(.+),\s*Y$/i
         value_str = $1
-        value = resolve_value(value_str)
+        value = resolve_value(value_str, pc)
         if value <= 0xFF && INSTRUCTIONS[mnemonic][:zpy]
           return [:zpy, value_str]
         else
@@ -302,7 +323,7 @@ module MOS6502
       end
 
       # Zero page or Absolute
-      value = resolve_value(operand)
+      value = resolve_value(operand, pc)
       if value <= 0xFF && INSTRUCTIONS[mnemonic][:zp]
         return [:zp, operand]
       else
@@ -310,16 +331,37 @@ module MOS6502
       end
     end
 
-    def resolve_value(str)
+    def resolve_value(str, pc = @origin)
       return 0 if str.nil? || str.empty?
 
       str = str.strip
+
+      # Expression with < (low byte) or > (high byte)
+      if str =~ /^<(.+)$/
+        value = resolve_value($1, pc)
+        return value & 0xFF
+      end
+
+      if str =~ /^>(.+)$/
+        value = resolve_value($1, pc)
+        return (value >> 8) & 0xFF
+      end
+
+      # Expression with +/-
+      if str =~ /[+\-]/
+        return evaluate_expression(str, pc)
+      end
 
       # Label reference
       if str =~ /^[A-Za-z_]\w*$/
         label = str.upcase
         return @labels[label] if @labels[label]
         return 0  # Will be resolved in pass 2
+      end
+
+      # Current location counter
+      if str == '*'
+        return pc
       end
 
       # Hex: $xx or $xxxx
@@ -337,33 +379,40 @@ module MOS6502
         return $1.to_i
       end
 
-      # Expression with < (low byte) or > (high byte)
-      if str =~ /^<(.+)$/
-        return resolve_value($1) & 0xFF
-      end
-
-      if str =~ /^>(.+)$/
-        return (resolve_value($1) >> 8) & 0xFF
-      end
-
       0
     end
 
-    def parse_byte_list(str)
+    def evaluate_expression(str, pc)
+      tokens = str.delete(' ').scan(/[+\-]?[^+\-]+/)
+      total = 0
+
+      tokens.each do |token|
+        sign = 1
+        if token.start_with?('+', '-')
+          sign = token[0] == '-' ? -1 : 1
+          token = token[1..]
+        end
+
+        value = resolve_value(token, pc)
+        total += sign * value
+      end
+
+      total
+    end
+
+    def parse_byte_list(str, pc)
       str.split(',').map do |item|
         item = item.strip
         if item =~ /^"(.+)"$/
           $1.bytes
         else
-          [resolve_value(item) & 0xFF]
+          [resolve_value(item, pc) & 0xFF]
         end
       end.flatten
     end
 
     def parse_word_list(str)
-      str.split(',').map do |item|
-        resolve_value(item.strip)
-      end
+      str.split(',').map(&:strip)
     end
   end
 end
