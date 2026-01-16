@@ -106,7 +106,7 @@ dot -Tpng diagrams/cpu/datapath.dot -o cpu.png
 
 To regenerate all diagrams, run:
 ```bash
-ruby scripts/generate_diagrams.rb
+rake diagrams:generate
 ```
 
 ---
