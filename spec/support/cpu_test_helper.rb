@@ -1,11 +1,25 @@
 module CpuTestHelper
+  # Set this to switch between behavioral and HDL CPU implementations
+  # Override in specific test files or use shared examples
+  def cpu_class
+    @cpu_class || RHDL::Components::CPU::CPU
+  end
+
+  def use_hdl_cpu!
+    @cpu_class = RHDL::HDL::CPU::CPUAdapter
+  end
+
+  def use_behavioral_cpu!
+    @cpu_class = RHDL::Components::CPU::CPU
+  end
+
   def create_test_program(instructions)
     instructions.flat_map do |instr|
       if instr.is_a?(Array)
         opcode = instr[0]
         operand1 = instr[1] || 0
         operand2 = instr[2] || 0
-        if opcode == :STA && instr[2] 
+        if opcode == :STA && instr[2]
           [0x20, operand1, operand2]  # 3-byte STA instruction
         else
           encode_instruction(opcode, operand1)
@@ -64,7 +78,7 @@ module CpuTestHelper
   end
 
   def load_program(program, start_addr = 0)
-    @cpu = RHDL::Components::CPU::CPU.new(@memory)
+    @cpu = cpu_class.new(@memory)
     # Clear any previous memory values
     (0..0xFFF).each { |addr| @memory.write(addr, 0x00) }
     setup_test_values
@@ -88,7 +102,7 @@ module CpuTestHelper
     @cpu.memory.write(0x0E, 0x00)
     @cpu.memory.write(0x0D, 0x00)
     @cpu.memory.write(0x0C, 0x00)
-    
+
     # Then set up test values only for instructions that need them
     @cpu.memory.write(0x0F, 0x42) # Test value for LDA
     @cpu.memory.write(0x0E, 0x24) # Test value for arithmetic operations
@@ -121,7 +135,7 @@ module CpuTestHelper
 
   def verify_memory(address, expected_value)
     actual = @cpu.memory.read(address)
-    expect(actual).to eq(expected_value), 
+    expect(actual).to eq(expected_value),
       "Memory at 0x#{address.to_s(16)} expected 0x#{expected_value.to_s(16)}, got 0x#{actual.to_s(16)}"
   end
 

@@ -238,30 +238,29 @@ module RHDL
           @zero_flag = 0
           @instruction = 0
           @operand = 0
+          @prev_clk = 0
 
-          # Reset PC
-          @pc.set_input(:rst, 1)
-          @pc.set_input(:clk, 0)
-          @pc.propagate
-          @pc.set_input(:clk, 1)
-          @pc.propagate
+          # Reset PC - set directly through internal state
+          @pc.instance_variable_set(:@state, 0)
           @pc.set_input(:rst, 0)
+          @pc.set_input(:en, 0)
+          @pc.set_input(:load, 0)
 
-          # Reset ACC
-          @acc.set_input(:rst, 1)
-          @acc.set_input(:clk, 0)
-          @acc.propagate
-          @acc.set_input(:clk, 1)
-          @acc.propagate
+          # Reset ACC - set directly
+          @acc.instance_variable_set(:@state, 0)
           @acc.set_input(:rst, 0)
+          @acc.set_input(:en, 0)
 
-          # Reset SP
-          @sp.set_input(:rst, 1)
-          @sp.set_input(:clk, 0)
-          @sp.propagate
-          @sp.set_input(:clk, 1)
-          @sp.propagate
+          # Reset SP - set directly to 0xFF
+          @sp.instance_variable_set(:@state, 0xFF)
           @sp.set_input(:rst, 0)
+          @sp.set_input(:push, 0)
+          @sp.set_input(:pop, 0)
+
+          # Propagate initial values
+          @pc.propagate
+          @acc.propagate
+          @sp.propagate
         end
 
         def execute_cycle
@@ -359,7 +358,7 @@ module RHDL
           end
 
           # Update PC
-          clock_register(@pc, new_pc, inc: false)
+          clock_register(@pc, new_pc, load: true)
         end
 
         def get_memory_operand
@@ -383,14 +382,25 @@ module RHDL
           end
         end
 
-        def clock_register(reg, value, inc: false)
+        def clock_register(reg, value, load: true)
           reg.set_input(:d, value)
-          reg.set_input(:en, 1)
+          # For registers with load vs en (like ProgramCounter), use load
+          if reg.inputs.key?(:load)
+            reg.set_input(:load, load ? 1 : 0)
+            reg.set_input(:en, 0)
+          else
+            reg.set_input(:en, 1)
+          end
           reg.set_input(:clk, 0)
           reg.propagate
           reg.set_input(:clk, 1)
           reg.propagate
-          reg.set_input(:en, 0)
+          # Clear the control signals
+          if reg.inputs.key?(:load)
+            reg.set_input(:load, 0)
+          else
+            reg.set_input(:en, 0)
+          end
         end
 
         def clock_sp(push: false, pop: false)
