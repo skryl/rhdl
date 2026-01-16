@@ -115,14 +115,12 @@ module MOS6502
 
       # Propagate registers to get current values
       @registers.propagate
-      @pc.propagate
-      @sp.propagate
 
       reg_a = @registers.get_output(:a)
       reg_x = @registers.get_output(:x)
       reg_y = @registers.get_output(:y)
-      sp_val = @sp.get_output(:sp)
-      pc_val = @pc.get_output(:pc)
+      sp_val = @sp.read_sp
+      pc_val = @pc.read_pc
 
       # Address Generation
       @addr_gen.set_input(:mode, addr_mode)
@@ -149,10 +147,11 @@ module MOS6502
       @addr_calc.propagate
 
       state = @control.get_output(:state)
+      state_pre = @control.get_output(:state_pre)
 
       # Address bus multiplexer based on addr_sel
       addr_sel = @control.get_output(:addr_sel)
-      addr_out = select_address(addr_sel, pc_val, eff_addr, @addr_calc, @sp)
+      addr_out = select_address(addr_sel, pc_val, eff_addr, @addr_calc, sp_val)
 
       # Data latch
       @data_latch.set_input(:load, @control.get_output(:load_data))
@@ -202,7 +201,7 @@ module MOS6502
       # For RMW operations, latch the ALU result during EXECUTE
       # so we can use it during WRITE (after flags are updated)
       is_rmw = @decoder.get_output(:is_rmw)
-      if state == ControlUnit::STATE_EXECUTE && is_rmw == 1
+      if state_pre == ControlUnit::STATE_EXECUTE && is_rmw == 1
         @rmw_result_latch = alu_result
       end
 
@@ -217,7 +216,7 @@ module MOS6502
       @pc.set_input(:load, @control.get_output(:pc_load))
 
       # PC load address: from address latch for jumps, or computed for branches
-      pc_load_addr = select_pc_load_addr(state, eff_addr, @addr_latch.get_output(:addr))
+      pc_load_addr = select_pc_load_addr(state_pre, eff_addr, @addr_latch.get_output(:addr))
       @pc.set_input(:addr_in, pc_load_addr)
       @pc.propagate
 
@@ -245,7 +244,7 @@ module MOS6502
       else
         alu_result
       end
-      pc_for_data = if state == ControlUnit::STATE_JSR_PUSH_HI || state == ControlUnit::STATE_JSR_PUSH_LO
+      pc_for_data = if state_pre == ControlUnit::STATE_JSR_PUSH_HI || state_pre == ControlUnit::STATE_JSR_PUSH_LO
         (pc_val - 1) & 0xFFFF
       else
         pc_val
@@ -263,8 +262,8 @@ module MOS6502
       out_set(:reg_a, reg_a)
       out_set(:reg_x, reg_x)
       out_set(:reg_y, reg_y)
-      out_set(:reg_sp, @sp.get_output(:sp))
-      out_set(:reg_pc, @pc.get_output(:pc))
+      out_set(:reg_sp, @sp.read_sp)
+      out_set(:reg_pc, @pc.read_pc)
       out_set(:reg_p, @status_reg.get_output(:p))
       out_set(:opcode, opcode)
       out_set(:state, state)
@@ -274,15 +273,15 @@ module MOS6502
 
     private
 
-    def select_address(sel, pc, eff_addr, addr_calc, sp)
+    def select_address(sel, pc, eff_addr, addr_calc, sp_val)
       case sel
       when 0 then pc                                    # Program counter
       when 1 then ControlUnit::RESET_VECTOR            # Reset vector
       when 2 then addr_calc.get_output(:ptr_addr_lo)   # Indirect pointer low
       when 3 then addr_calc.get_output(:ptr_addr_hi)   # Indirect pointer high
       when 4 then eff_addr                             # Effective address
-      when 5 then sp.get_output(:addr)                 # Stack address
-      when 6 then sp.get_output(:addr_plus1)           # Stack address + 1
+      when 5 then StackPointer6502::STACK_BASE | sp_val                # Stack address
+      when 6 then StackPointer6502::STACK_BASE | ((sp_val + 1) & 0xFF) # Stack address + 1
       when 7 then ControlUnit::IRQ_VECTOR              # IRQ vector
       else pc
       end
@@ -376,7 +375,7 @@ module MOS6502
       when 0x8A then @registers.get_output(:x)   # TXA: X -> A
       when 0xA8 then @registers.get_output(:a)   # TAY: A -> Y
       when 0x98 then @registers.get_output(:y)   # TYA: Y -> A
-      when 0xBA then @sp.get_output(:sp)         # TSX: S -> X
+      when 0xBA then @sp.read_sp                 # TSX: S -> X
       else 0
       end
     end
