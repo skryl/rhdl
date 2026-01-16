@@ -1,5 +1,6 @@
 # MOS 6502 Memory Interface
 # 64KB addressable memory with RAM and ROM regions
+# Sequential - requires always @(posedge clk) for synthesis
 
 module MOS6502
   # Simple 64KB memory for 6502
@@ -23,20 +24,18 @@ module MOS6502
     RESET_VECTOR = 0xFFFC
     IRQ_VECTOR   = 0xFFFE
 
+    port_input :clk
+    port_input :addr, width: 16
+    port_input :data_in, width: 8
+    port_input :rw           # 1 = read, 0 = write
+    port_input :cs           # Chip select (active high)
+
+    port_output :data_out, width: 8
+
     def initialize(name = nil)
       @memory = Array.new(0x10000, 0)  # 64KB
       @prev_clk = 0
       super(name)
-    end
-
-    def setup_ports
-      input :clk
-      input :addr, width: 16
-      input :data_in, width: 8
-      input :rw           # 1 = read, 0 = write
-      input :cs           # Chip select (active high)
-
-      output :data_out, width: 8
     end
 
     def rising_edge?
@@ -154,21 +153,20 @@ module MOS6502
   end
 
   # Memory-mapped I/O region handler
+  # Combinational - can be synthesized as combinational logic
   class MMIO < RHDL::HDL::SimComponent
+    port_input :addr, width: 16
+    port_input :data_in, width: 8
+    port_input :rw
+    port_input :cs
+
+    port_output :data_out, width: 8
+    port_output :handled       # 1 if address was handled by MMIO
+
     def initialize(name = nil, handlers: {})
       @handlers = handlers  # { addr_range => handler_proc }
       @output_buffer = 0
       super(name)
-    end
-
-    def setup_ports
-      input :addr, width: 16
-      input :data_in, width: 8
-      input :rw
-      input :cs
-
-      output :data_out, width: 8
-      output :handled       # 1 if address was handled by MMIO
     end
 
     def propagate

@@ -1,5 +1,9 @@
 # HDL Sequential Logic Components
 # Flip-flops, registers, and other clock-triggered elements
+#
+# Note: Sequential components use manual propagate methods because the current
+# behavior DSL only supports combinational logic (assign statements). Sequential
+# synthesis requires always @(posedge clk) blocks which are not yet implemented.
 
 module RHDL
   module HDL
@@ -45,15 +49,14 @@ module RHDL
     end
 
     # D Flip-Flop with synchronous reset and enable
+    # Sequential - requires always @(posedge clk) for synthesis
     class DFlipFlop < SequentialComponent
-      def setup_ports
-        input :d
-        input :clk
-        input :rst
-        input :en
-        output :q
-        output :qn
-      end
+      port_input :d
+      port_input :clk
+      port_input :rst
+      port_input :en
+      port_output :q
+      port_output :qn
 
       def propagate
         if rising_edge?
@@ -69,15 +72,14 @@ module RHDL
     end
 
     # D Flip-Flop with asynchronous reset
+    # Sequential - requires always @(posedge clk or posedge rst) for synthesis
     class DFlipFlopAsync < SequentialComponent
-      def setup_ports
-        input :d
-        input :clk
-        input :rst
-        input :en
-        output :q
-        output :qn
-      end
+      port_input :d
+      port_input :clk
+      port_input :rst
+      port_input :en
+      port_output :q
+      port_output :qn
 
       def propagate
         if in_val(:rst) == 1
@@ -91,15 +93,14 @@ module RHDL
     end
 
     # T Flip-Flop (Toggle)
+    # Sequential - requires always @(posedge clk) for synthesis
     class TFlipFlop < SequentialComponent
-      def setup_ports
-        input :t
-        input :clk
-        input :rst
-        input :en
-        output :q
-        output :qn
-      end
+      port_input :t
+      port_input :clk
+      port_input :rst
+      port_input :en
+      port_output :q
+      port_output :qn
 
       def propagate
         if rising_edge?
@@ -115,16 +116,15 @@ module RHDL
     end
 
     # JK Flip-Flop
+    # Sequential - requires always @(posedge clk) for synthesis
     class JKFlipFlop < SequentialComponent
-      def setup_ports
-        input :j
-        input :k
-        input :clk
-        input :rst
-        input :en
-        output :q
-        output :qn
-      end
+      port_input :j
+      port_input :k
+      port_input :clk
+      port_input :rst
+      port_input :en
+      port_output :q
+      port_output :qn
 
       def propagate
         if rising_edge?
@@ -147,16 +147,15 @@ module RHDL
     end
 
     # SR Flip-Flop (Set-Reset)
+    # Sequential - requires always @(posedge clk) for synthesis
     class SRFlipFlop < SequentialComponent
-      def setup_ports
-        input :s
-        input :r
-        input :clk
-        input :rst
-        input :en
-        output :q
-        output :qn
-      end
+      port_input :s
+      port_input :r
+      port_input :clk
+      port_input :rst
+      port_input :en
+      port_output :q
+      port_output :qn
 
       def propagate
         if rising_edge?
@@ -179,18 +178,17 @@ module RHDL
     end
 
     # SR Latch (level-sensitive, not edge-triggered)
+    # Combinational with feedback - requires special synthesis handling
     class SRLatch < SimComponent
+      port_input :s
+      port_input :r
+      port_input :en
+      port_output :q
+      port_output :qn
+
       def initialize(name = nil)
         @state = 0
         super(name)
-      end
-
-      def setup_ports
-        input :s
-        input :r
-        input :en
-        output :q
-        output :qn
       end
 
       def propagate
@@ -210,7 +208,14 @@ module RHDL
     end
 
     # Multi-bit Register with synchronous reset and enable
+    # Sequential - requires always @(posedge clk) for synthesis
     class Register < SequentialComponent
+      port_input :d, width: 8
+      port_input :clk
+      port_input :rst
+      port_input :en
+      port_output :q, width: 8
+
       def initialize(name = nil, width: 8)
         @width = width
         @state = 0
@@ -218,11 +223,9 @@ module RHDL
       end
 
       def setup_ports
-        input :d, width: @width
-        input :clk
-        input :rst
-        input :en
-        output :q, width: @width
+        return if @width == 8
+        @inputs[:d] = Wire.new("#{@name}.d", width: @width)
+        @outputs[:q] = Wire.new("#{@name}.q", width: @width)
       end
 
       def propagate
@@ -238,7 +241,14 @@ module RHDL
     end
 
     # Register with load capability
+    # Sequential - requires always @(posedge clk) for synthesis
     class RegisterLoad < SequentialComponent
+      port_input :d, width: 8
+      port_input :clk
+      port_input :rst
+      port_input :load
+      port_output :q, width: 8
+
       def initialize(name = nil, width: 8)
         @width = width
         @state = 0
@@ -246,11 +256,9 @@ module RHDL
       end
 
       def setup_ports
-        input :d, width: @width
-        input :clk
-        input :rst
-        input :load
-        output :q, width: @width
+        return if @width == 8
+        @inputs[:d] = Wire.new("#{@name}.d", width: @width)
+        @outputs[:q] = Wire.new("#{@name}.q", width: @width)
       end
 
       def propagate
@@ -266,7 +274,18 @@ module RHDL
     end
 
     # Shift Register
+    # Sequential - requires always @(posedge clk) for synthesis
     class ShiftRegister < SequentialComponent
+      port_input :d_in       # Serial input
+      port_input :clk
+      port_input :rst
+      port_input :en
+      port_input :dir        # 0 = right, 1 = left
+      port_input :load       # Parallel load enable
+      port_input :d, width: 8  # Parallel load data
+      port_output :q, width: 8
+      port_output :d_out     # Serial output
+
       def initialize(name = nil, width: 8)
         @width = width
         @state = 0
@@ -274,15 +293,9 @@ module RHDL
       end
 
       def setup_ports
-        input :d_in       # Serial input
-        input :clk
-        input :rst
-        input :en
-        input :dir        # 0 = right, 1 = left
-        input :load       # Parallel load enable
-        input :d, width: @width  # Parallel load data
-        output :q, width: @width
-        output :d_out     # Serial output
+        return if @width == 8
+        @inputs[:d] = Wire.new("#{@name}.d", width: @width)
+        @outputs[:q] = Wire.new("#{@name}.q", width: @width)
       end
 
       def propagate
@@ -307,7 +320,18 @@ module RHDL
     end
 
     # Binary Counter with up/down, load, and wrap
+    # Sequential - requires always @(posedge clk) for synthesis
     class Counter < SequentialComponent
+      port_input :clk
+      port_input :rst
+      port_input :en
+      port_input :up        # 1 = count up, 0 = count down
+      port_input :load
+      port_input :d, width: 8
+      port_output :q, width: 8
+      port_output :tc       # Terminal count (max when up, 0 when down)
+      port_output :zero     # Zero flag
+
       def initialize(name = nil, width: 8)
         @width = width
         @state = 0
@@ -316,15 +340,9 @@ module RHDL
       end
 
       def setup_ports
-        input :clk
-        input :rst
-        input :en
-        input :up        # 1 = count up, 0 = count down
-        input :load
-        input :d, width: @width
-        output :q, width: @width
-        output :tc       # Terminal count (max when up, 0 when down)
-        output :zero     # Zero flag
+        return if @width == 8
+        @inputs[:d] = Wire.new("#{@name}.d", width: @width)
+        @outputs[:q] = Wire.new("#{@name}.q", width: @width)
       end
 
       def propagate
@@ -349,7 +367,16 @@ module RHDL
     end
 
     # Program Counter (16-bit, for CPU)
+    # Sequential - requires always @(posedge clk) for synthesis
     class ProgramCounter < SequentialComponent
+      port_input :clk
+      port_input :rst
+      port_input :en          # Increment enable
+      port_input :load        # Load new address
+      port_input :d, width: 16
+      port_input :inc, width: 16  # Increment amount (usually 1, 2, or 3)
+      port_output :q, width: 16
+
       def initialize(name = nil, width: 16)
         @width = width
         @state = 0
@@ -358,13 +385,10 @@ module RHDL
       end
 
       def setup_ports
-        input :clk
-        input :rst
-        input :en          # Increment enable
-        input :load        # Load new address
-        input :d, width: @width
-        input :inc, width: @width  # Increment amount (usually 1, 2, or 3)
-        output :q, width: @width
+        return if @width == 16
+        @inputs[:d] = Wire.new("#{@name}.d", width: @width)
+        @inputs[:inc] = Wire.new("#{@name}.inc", width: @width)
+        @outputs[:q] = Wire.new("#{@name}.q", width: @width)
       end
 
       def propagate
@@ -384,7 +408,16 @@ module RHDL
     end
 
     # Stack Pointer Register
+    # Sequential - requires always @(posedge clk) for synthesis
     class StackPointer < SequentialComponent
+      port_input :clk
+      port_input :rst
+      port_input :push     # Decrement SP
+      port_input :pop      # Increment SP
+      port_output :q, width: 8
+      port_output :empty   # SP at max (empty stack)
+      port_output :full    # SP at 0 (full stack)
+
       def initialize(name = nil, width: 8, initial: 0xFF)
         @width = width
         @initial = initial
@@ -394,13 +427,8 @@ module RHDL
       end
 
       def setup_ports
-        input :clk
-        input :rst
-        input :push     # Decrement SP
-        input :pop      # Increment SP
-        output :q, width: @width
-        output :empty   # SP at max (empty stack)
-        output :full    # SP at 0 (full stack)
+        return if @width == 8
+        @outputs[:q] = Wire.new("#{@name}.q", width: @width)
       end
 
       def propagate
