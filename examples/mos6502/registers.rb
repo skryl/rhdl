@@ -138,7 +138,9 @@ module MOS6502
         if in_val(:rst) == 1
           @state = 0xFFFC  # Reset vector location
         elsif in_val(:load) == 1
-          @state = in_val(:addr_in) & 0xFFFF
+          next_state = in_val(:addr_in) & 0xFFFF
+          next_state = (next_state + 1) & 0xFFFF if in_val(:inc) == 1
+          @state = next_state
         elsif in_val(:inc) == 1
           @state = (@state + 1) & 0xFFFF
         end
