@@ -1,0 +1,20 @@
+============================================================
+Gate-Level: half_adder
+Type: HalfAdder
+============================================================
+
+Gates: 2
+DFFs: 0
+Nets: 4
+
+Inputs:
+  half_adder.a[1]
+  half_adder.b[1]
+
+Outputs:
+  half_adder.sum[1]
+  half_adder.cout[1]
+
+Gate Types:
+  xor: 1
+  and: 1

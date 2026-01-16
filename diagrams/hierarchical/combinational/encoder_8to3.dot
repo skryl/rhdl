@@ -1,0 +1,13 @@
+digraph enc8to3 {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[8]}|enc8to3\n(Encoder8to3)|{<y>y[3]|<valid>valid[1]}}"];
+
+  subgraph cluster_main {
+    label="enc8to3";
+    style=rounded;
+    color=blue;
+  }
+}

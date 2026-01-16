@@ -1,0 +1,13 @@
+digraph or_gate {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a0>a0[1]|<a1>a1[1]}|or_gate\n(OrGate)|{<y>y[1]}}"];
+
+  subgraph cluster_main {
+    label="or_gate";
+    style=rounded;
+    color=blue;
+  }
+}

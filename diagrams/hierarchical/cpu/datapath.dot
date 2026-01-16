@@ -1,0 +1,25 @@
+digraph cpu {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<clk>clk[1]|<rst>rst[1]}|cpu\n(Datapath)|{<pc_out>pc_out[16]|<acc_out>acc_out[8]|<zero_flag>zero_flag[1]|<halted>halted[1]}}"];
+  sub_0 [label="{{<clk>clk[1]|<rst>rst[1]|<en>en[1]|<load>load[1]|<d>d[16]|<inc>inc[16]}|pc\n(ProgramCounter)|{<q>q[16]}}"];
+  sub_1 [label="{{<d>d[8]|<clk>clk[1]|<rst>rst[1]|<en>en[1]}|acc\n(Register)|{<q>q[8]}}"];
+  sub_2 [label="{{<a>a[8]|<b>b[8]|<op>op[4]|<cin>cin[1]}|alu\n(ALU)|{<result>result[8]|<cout>cout[1]|<zero>zero[1]|<negative>negative[1]|<overflow>overflow[1]}}"];
+  sub_3 [label="{{<instruction>instruction[8]|<zero_flag>zero_flag[1]}|decoder\n(InstructionDecoder)|{<alu_op>alu_op[4]|<alu_src>alu_src[1]|<reg_write>reg_write[1]|<mem_read>mem_read[1]|<mem_write>mem_write[1]|<branch>branch[1]|<jump>jump[1]|<pc_src>pc_src[2]|<halt>halt[1]|<call>call[1]|<ret>ret[1]|<instr_length>instr_length[2]}}"];
+  sub_4 [label="{{<clk>clk[1]|<we>we[1]|<addr>addr[16]|<din>din[8]}|mem\n(RAM)|{<dout>dout[8]}}"];
+  sub_5 [label="{{<clk>clk[1]|<rst>rst[1]|<push>push[1]|<pop>pop[1]}|sp\n(StackPointer)|{<q>q[8]|<empty>empty[1]|<full>full[1]}}"];
+
+  subgraph cluster_main {
+    label="cpu";
+    style=rounded;
+    color=blue;
+    sub_0;
+    sub_1;
+    sub_2;
+    sub_3;
+    sub_4;
+    sub_5;
+  }
+}

@@ -1,0 +1,13 @@
+digraph xnor_gate {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a0>a0[1]|<a1>a1[1]}|xnor_gate\n(XnorGate)|{<y>y[1]}}"];
+
+  subgraph cluster_main {
+    label="xnor_gate";
+    style=rounded;
+    color=blue;
+  }
+}
