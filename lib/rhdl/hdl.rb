@@ -10,9 +10,12 @@ require_relative 'hdl/memory'
 require_relative 'hdl/debug'
 require_relative 'hdl/tui'
 require_relative 'hdl/cpu'
+require_relative 'hdl/diagram'
 
 module RHDL
   module HDL
+    # Include diagram methods in SimComponent
+    SimComponent.include(DiagramMethods)
     # Convenience method to create a simulator with components
     def self.simulator(&block)
       sim = Simulator.new
