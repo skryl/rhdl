@@ -423,6 +423,10 @@ module MOS6502
         out_set(:alu_enable, 1)
         out_set(:reg_write, needs_reg_write?)
         out_set(:update_flags, 1)
+        # JMP instructions need to load the PC with the effective address
+        if in_val(:instr_type) == InstructionDecoder::TYPE_JUMP
+          out_set(:pc_load, 1)
+        end
         out_set(:done, 1) unless in_val(:is_rmw) == 1
 
       when STATE_WRITE_MEM
