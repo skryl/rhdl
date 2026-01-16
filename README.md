@@ -6,6 +6,8 @@ RHDL is a Domain Specific Language (DSL) that allows you to design hardware usin
 
 - **Behavioral CPU**: A complete 8-bit CPU implementation for educational purposes
 - **HDL Simulation Framework**: Gate-level simulation with support for combinational and sequential logic
+- **Signal Probing & Debugging**: Waveform capture, breakpoints, watchpoints, and VCD export
+- **Terminal GUI**: Interactive terminal-based simulator interface
 - **Component Library**: Gates, flip-flops, registers, ALU, memory, and more
 - **VHDL Export**: Generate synthesizable VHDL from Ruby definitions
 
@@ -23,8 +25,11 @@ rhdl/
 │       ├── arithmetic.rb    # Adders, ALU, comparators
 │       ├── combinational.rb # Multiplexers, decoders
 │       ├── memory.rb        # RAM, ROM, register files
+│       ├── debug.rb         # Signal probing & debugging
+│       ├── tui.rb           # Terminal GUI
 │       └── cpu/             # HDL CPU implementation
 ├── cpu/                # Behavioral CPU implementation
+├── examples/           # Demo scripts
 ├── spec/               # Test suite
 └── docs/               # Documentation
 ```
@@ -37,6 +42,7 @@ Detailed documentation is available in the `docs/` directory:
 - **[Simulation Engine](docs/simulation_engine.md)** - Core simulation infrastructure and concepts
 - **[Components Reference](docs/components.md)** - Complete reference for all HDL components
 - **[CPU Datapath](docs/cpu_datapath.md)** - CPU architecture and instruction set details
+- **[Debugging Guide](docs/debugging.md)** - Signal probing, breakpoints, and terminal GUI
 
 ## Quick Start
 
@@ -74,6 +80,65 @@ end
 
 puts cpu.acc  # => 42
 ```
+
+### Using the Debug Simulator
+
+```ruby
+require 'rhdl'
+
+# Create a debug simulator with probing and breakpoints
+sim = RHDL::HDL::DebugSimulator.new
+clock = RHDL::HDL::Clock.new("clk")
+counter = RHDL::HDL::Counter.new("cnt", width: 8)
+
+sim.add_clock(clock)
+sim.add_component(counter)
+RHDL::HDL::SimComponent.connect(clock, counter.inputs[:clk])
+
+# Add a signal probe for waveform capture
+sim.probe(counter, :q)
+
+# Add a watchpoint to break when counter reaches 100
+sim.watch(counter.outputs[:q], type: :equals, value: 100) do |s|
+  puts "Counter reached 100!"
+end
+
+# Run simulation
+sim.run(200)
+
+# Export waveform to VCD file (viewable in GTKWave)
+File.write("waveform.vcd", sim.waveform.to_vcd)
+```
+
+### Using the Terminal GUI
+
+```ruby
+require 'rhdl'
+
+# Create simulator and components
+sim = RHDL::HDL::DebugSimulator.new
+# ... add components ...
+
+# Launch the interactive TUI
+tui = RHDL::HDL::SimulatorTUI.new(sim)
+tui.add_component(my_component)
+tui.run
+```
+
+Or run the demo:
+```bash
+ruby examples/simulator_tui_demo.rb
+```
+
+**TUI Key Bindings:**
+- `Space` - Step one cycle
+- `r` - Run simulation
+- `s` - Stop/pause
+- `w` - Add watchpoint
+- `b` - Add breakpoint
+- `:` - Enter command mode
+- `h` - Show help
+- `q` - Quit
 
 ## Behavioral CPU
 
@@ -390,6 +455,22 @@ The test suite includes two complex integration tests that demonstrate the CPU's
 - Simulates multiple generations of cellular automata
 
 ## Recent Improvements
+
+### Signal Probing & Debugging
+- **SignalProbe**: Records signal transitions over time for waveform viewing
+- **WaveformCapture**: Manages multiple probes with VCD export support
+- **Breakpoints**: Break on custom conditions or cycle counts
+- **Watchpoints**: Break on signal changes, value matches, or edge detection
+- **DebugSimulator**: Enhanced simulator with step mode, pause/resume, and state inspection
+- **VCD Export**: Export waveforms to Value Change Dump format for GTKWave
+
+### Terminal GUI (TUI)
+- Interactive terminal-based simulator interface
+- Signal panel with live value display
+- Waveform panel with ASCII waveform rendering
+- Console panel for status messages
+- Breakpoint panel for managing break/watch points
+- Command mode for advanced operations (set signals, export VCD, etc.)
 
 ### HDL Simulation Framework
 - Added complete gate-level simulation engine with signal propagation

@@ -139,9 +139,14 @@ RSpec.describe 'HDL Sequential Components' do
       clock_cycle(counter)
       counter.set_input(:load, 0)
 
+      # At max value (15), tc should be 1
+      expect(counter.get_output(:q)).to eq(15)
+      expect(counter.get_output(:tc)).to eq(1)
+
+      # After wrap to 0, tc should be 0 (since we're counting up)
       clock_cycle(counter)
       expect(counter.get_output(:q)).to eq(0)
-      expect(counter.get_output(:tc)).to eq(1)
+      expect(counter.get_output(:tc)).to eq(0)
     end
   end
 
