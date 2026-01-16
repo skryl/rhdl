@@ -115,6 +115,10 @@ module RHDL
         name.to_s
       end
 
+      def to_verilog
+        name.to_s
+      end
+
       def to_s
         name.to_s
       end
@@ -132,6 +136,10 @@ module RHDL
       def to_vhdl
         "#{signal.to_vhdl}(#{index})"
       end
+
+      def to_verilog
+        "#{signal.to_verilog}[#{index}]"
+      end
     end
 
     # Bit slice expression
@@ -145,6 +153,10 @@ module RHDL
 
       def to_vhdl
         "#{signal.to_vhdl}(#{range.max} downto #{range.min})"
+      end
+
+      def to_verilog
+        "#{signal.to_verilog}[#{range.max}:#{range.min}]"
       end
     end
 
@@ -160,6 +172,14 @@ module RHDL
         :< => '<', :> => '>', :<= => '<=', :>= => '>='
       }
 
+      VERILOG_OPS = {
+        :+ => '+', :- => '-', :* => '*', :/ => '/',
+        :& => '&', :| => '|', :^ => '^',
+        :<< => '<<', :>> => '>>',
+        :== => '==', :!= => '!=',
+        :< => '<', :> => '>', :<= => '<=', :>= => '>='
+      }
+
       def initialize(op, left, right)
         @op = op
         @left = left
@@ -170,6 +190,12 @@ module RHDL
         l = left.respond_to?(:to_vhdl) ? left.to_vhdl : left.to_s
         r = right.respond_to?(:to_vhdl) ? right.to_vhdl : right.to_s
         "(#{l} #{VHDL_OPS[op]} #{r})"
+      end
+
+      def to_verilog
+        l = left.respond_to?(:to_verilog) ? left.to_verilog : left.to_s
+        r = right.respond_to?(:to_verilog) ? right.to_verilog : right.to_s
+        "(#{l} #{VERILOG_OPS[op]} #{r})"
       end
 
       # Allow chaining
@@ -193,6 +219,13 @@ module RHDL
         else "#{op}#{operand.to_vhdl}"
         end
       end
+
+      def to_verilog
+        case op
+        when :~ then "~#{operand.to_verilog}"
+        else "#{op}#{operand.to_verilog}"
+        end
+      end
     end
 
     # Concatenation expression
@@ -206,6 +239,11 @@ module RHDL
       def to_vhdl
         parts = signals.map { |s| s.respond_to?(:to_vhdl) ? s.to_vhdl : s.to_s }
         "(#{parts.join(' & ')})"
+      end
+
+      def to_verilog
+        parts = signals.map { |s| s.respond_to?(:to_verilog) ? s.to_verilog : s.to_s }
+        "{#{parts.join(', ')}}"
       end
     end
 
@@ -221,6 +259,10 @@ module RHDL
       def to_vhdl
         parts = Array.new(times) { signal.to_vhdl }
         "(#{parts.join(' & ')})"
+      end
+
+      def to_verilog
+        "{#{times}{#{signal.to_verilog}}}"
       end
     end
 
@@ -238,6 +280,15 @@ module RHDL
       def to_vhdl
         type_str = width > 1 ? "std_logic_vector(#{width-1} downto 0)" : "std_logic"
         "#{name} : #{direction} #{type_str}"
+      end
+
+      def to_verilog
+        dir = case direction
+              when :in then "input"
+              when :out then "output"
+              when :inout then "inout"
+              end
+        width > 1 ? "#{dir} [#{width-1}:0] #{name}" : "#{dir} #{name}"
       end
 
       def to_signal_ref
@@ -261,6 +312,12 @@ module RHDL
         "signal #{name} : #{type_str}#{default_str};"
       end
 
+      def to_verilog
+        type_str = width > 1 ? "[#{width-1}:0]" : ""
+        default_str = default ? " = #{format_verilog_value(default)}" : ""
+        "reg #{type_str} #{name}#{default_str};".gsub(/\s+/, ' ').strip
+      end
+
       def to_signal_ref
         SignalRef.new(name, width: width)
       end
@@ -272,6 +329,14 @@ module RHDL
           val == 0 ? "'0'" : "'1'"
         else
           "\"#{val.to_s(2).rjust(width, '0')}\""
+        end
+      end
+
+      def format_verilog_value(val)
+        if width == 1
+          val == 0 ? "1'b0" : "1'b1"
+        else
+          "#{width}'b#{val.to_s(2).rjust(width, '0')}"
         end
       end
     end
@@ -291,6 +356,11 @@ module RHDL
         "constant #{name} : #{type_str} := #{format_value(value)};"
       end
 
+      def to_verilog
+        type_str = width > 1 ? "[#{width-1}:0]" : ""
+        "localparam #{type_str} #{name} = #{format_verilog_value(value)};".gsub(/\s+/, ' ').strip
+      end
+
       def to_signal_ref
         SignalRef.new(name, width: width)
       end
@@ -302,6 +372,14 @@ module RHDL
           val == 0 ? "'0'" : "'1'"
         else
           "\"#{val.to_s(2).rjust(width, '0')}\""
+        end
+      end
+
+      def format_verilog_value(val)
+        if width == 1
+          val == 0 ? "1'b0" : "1'b1"
+        else
+          "#{width}'b#{val.to_s(2).rjust(width, '0')}"
         end
       end
     end
@@ -328,6 +406,18 @@ module RHDL
         end
       end
 
+      def to_verilog
+        t = target.respond_to?(:to_verilog) ? target.to_verilog : target.to_s
+        v = value.respond_to?(:to_verilog) ? value.to_verilog : format_verilog_literal(value)
+
+        if condition
+          c = condition.respond_to?(:to_verilog) ? condition.to_verilog : condition.to_s
+          "assign #{t} = #{c} ? #{v} : #{t};"
+        else
+          "assign #{t} = #{v};"
+        end
+      end
+
       private
 
       def format_literal(val)
@@ -336,6 +426,18 @@ module RHDL
             "\"#{val.to_s(2).rjust(target.width, '0')}\""
           else
             val == 0 ? "'0'" : "'1'"
+          end
+        else
+          val.to_s
+        end
+      end
+
+      def format_verilog_literal(val)
+        if val.is_a?(Integer)
+          if target.respond_to?(:width) && target.width > 1
+            "#{target.width}'b#{val.to_s(2).rjust(target.width, '0')}"
+          else
+            val == 0 ? "1'b0" : "1'b1"
           end
         else
           val.to_s
@@ -363,6 +465,21 @@ module RHDL
         lines << "begin"
         statements.each { |s| lines << "  #{s.to_vhdl}" }
         lines << "end process #{name};"
+        lines.join("\n")
+      end
+
+      def to_verilog
+        sens = sensitivity_list.map { |s| s.respond_to?(:to_verilog) ? s.to_verilog : s.to_s }
+        lines = []
+        if is_clocked
+          # For clocked processes, use posedge/negedge
+          edge_list = sens.map { |s| "posedge #{s}" }
+          lines << "always @(#{edge_list.join(' or ')}) begin"
+        else
+          lines << "always @(#{sens.join(' or ')}) begin"
+        end
+        statements.each { |s| lines << "  #{s.to_verilog}" }
+        lines << "end"
         lines.join("\n")
       end
 
@@ -434,6 +551,12 @@ module RHDL
         v = value.respond_to?(:to_vhdl) ? value.to_vhdl : value.to_s
         "#{t} <= #{v};"
       end
+
+      def to_verilog
+        t = target.respond_to?(:to_verilog) ? target.to_verilog : target.to_s
+        v = value.respond_to?(:to_verilog) ? value.to_verilog : value.to_s
+        "#{t} <= #{v};"
+      end
     end
 
     # If statement
@@ -477,6 +600,29 @@ module RHDL
         end
 
         lines << "end if;"
+        lines.join("\n")
+      end
+
+      def to_verilog
+        lines = []
+        cond = condition.respond_to?(:to_verilog) ? condition.to_verilog : condition.to_s
+        lines << "if (#{cond}) begin"
+        then_block.each { |s| lines << "  #{s.to_verilog}" }
+        lines << "end"
+
+        elsif_blocks.each do |cond, stmts|
+          c = cond.respond_to?(:to_verilog) ? cond.to_verilog : cond.to_s
+          lines << "else if (#{c}) begin"
+          stmts.each { |s| lines << "  #{s.to_verilog}" }
+          lines << "end"
+        end
+
+        unless else_block.empty?
+          lines << "else begin"
+          else_block.each { |s| lines << "  #{s.to_verilog}" }
+          lines << "end"
+        end
+
         lines.join("\n")
       end
     end
@@ -559,10 +705,36 @@ module RHDL
         lines.join("\n")
       end
 
+      def to_verilog
+        lines = []
+        sel = selector.respond_to?(:to_verilog) ? selector.to_verilog : selector.to_s
+        lines << "case (#{sel})"
+
+        when_blocks.each do |val, stmts|
+          v = val.respond_to?(:to_verilog) ? val.to_verilog : format_verilog_case_value(val)
+          lines << "  #{v}: begin"
+          stmts.each { |s| lines << "    #{s.to_verilog}" }
+          lines << "  end"
+        end
+
+        unless default_block.empty?
+          lines << "  default: begin"
+          default_block.each { |s| lines << "    #{s.to_verilog}" }
+          lines << "  end"
+        end
+
+        lines << "endcase"
+        lines.join("\n")
+      end
+
       private
 
       def format_case_value(val)
         val.is_a?(Integer) ? "\"#{val.to_s(2)}\"" : val.to_s
+      end
+
+      def format_verilog_case_value(val)
+        val.is_a?(Integer) ? val.to_s : val.to_s
       end
     end
 
@@ -608,6 +780,14 @@ module RHDL
         lines << "end loop;"
         lines.join("\n")
       end
+
+      def to_verilog
+        lines = []
+        lines << "for (#{variable} = #{range.min}; #{variable} <= #{range.max}; #{variable} = #{variable} + 1) begin"
+        statements.each { |s| lines << "  #{s.to_verilog}" }
+        lines << "end"
+        lines.join("\n")
+      end
     end
 
     # Rising edge condition
@@ -621,6 +801,10 @@ module RHDL
       def to_vhdl
         "rising_edge(#{signal.respond_to?(:to_vhdl) ? signal.to_vhdl : signal})"
       end
+
+      def to_verilog
+        "posedge #{signal.respond_to?(:to_verilog) ? signal.to_verilog : signal}"
+      end
     end
 
     # Falling edge condition
@@ -633,6 +817,10 @@ module RHDL
 
       def to_vhdl
         "falling_edge(#{signal.respond_to?(:to_vhdl) ? signal.to_vhdl : signal})"
+      end
+
+      def to_verilog
+        "negedge #{signal.respond_to?(:to_verilog) ? signal.to_verilog : signal}"
       end
     end
 
@@ -661,6 +849,27 @@ module RHDL
           "#{k} => #{val}"
         end
         lines << "  port map(#{ports.join(', ')});"
+
+        lines.join("\n")
+      end
+
+      def to_verilog
+        lines = []
+
+        # In Verilog: module_name #(.param(value)) instance_name (.port(signal), ...);
+        if generic_map.empty?
+          lines << "#{component_type} #{name} ("
+        else
+          params = generic_map.map { |k, v| ".#{k}(#{v})" }
+          lines << "#{component_type} #(#{params.join(', ')}) #{name} ("
+        end
+
+        ports = port_map.map do |k, v|
+          val = v.respond_to?(:to_verilog) ? v.to_verilog : v.to_s
+          ".#{k}(#{val})"
+        end
+        lines << "  #{ports.join(', ')}"
+        lines << ");"
 
         lines.join("\n")
       end
@@ -799,6 +1008,60 @@ module RHDL
         _instances.each { |i| lines << "  #{i.to_vhdl}" }
 
         lines << "end rtl;"
+
+        lines.join("\n")
+      end
+
+      # Generate Verilog output
+      def to_verilog
+        lines = []
+
+        # Module declaration
+        module_name = name.split('::').last.underscore
+        lines << "module #{module_name}"
+
+        # Parameters (generics)
+        unless _generics.empty?
+          lines << "  #("
+          params_verilog = _generics.map do |g|
+            default_str = g[:default] ? " = #{g[:default]}" : ""
+            "    parameter #{g[:name]}#{default_str}"
+          end
+          lines << params_verilog.join(",\n")
+          lines << "  )"
+        end
+
+        # Port declarations
+        unless _ports.empty?
+          lines << "  ("
+          ports_verilog = _ports.map { |p| "    #{p.to_verilog}" }
+          lines << ports_verilog.join(",\n")
+          lines << "  );"
+        else
+          lines << "  ();"
+        end
+
+        lines << ""
+
+        # Local parameters (constants)
+        _constants.each { |c| lines << "  #{c.to_verilog}" }
+
+        # Internal signals (regs)
+        _signals.each { |s| lines << "  #{s.to_verilog}" }
+
+        lines << "" unless _constants.empty? && _signals.empty?
+
+        # Concurrent assignments
+        _assignments.each { |a| lines << "  #{a.to_verilog}" }
+
+        # Always blocks (processes)
+        _processes.each { |p| lines << "  #{p.to_verilog}" }
+
+        # Module instances
+        _instances.each { |i| lines << "  #{i.to_verilog}" }
+
+        lines << ""
+        lines << "endmodule"
 
         lines.join("\n")
       end
