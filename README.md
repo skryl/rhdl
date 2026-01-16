@@ -4,7 +4,7 @@ RHDL is a Domain Specific Language (DSL) that allows you to design hardware usin
 
 ## Features
 
-- **Behavioral CPU**: A complete 8-bit CPU implementation for educational purposes
+- **HDL CPU**: A complete 8-bit CPU with gate-level datapath implementation
 - **HDL Simulation Framework**: Gate-level simulation with support for combinational and sequential logic
 - **Signal Probing & Debugging**: Waveform capture, breakpoints, watchpoints, and VCD export
 - **Terminal GUI**: Interactive terminal-based simulator interface
@@ -27,10 +27,11 @@ rhdl/
 │       ├── memory.rb        # RAM, ROM, register files
 │       ├── debug.rb         # Signal probing & debugging
 │       ├── tui.rb           # Terminal GUI
-│       └── cpu/             # HDL CPU implementation
-├── cpu/                # Behavioral CPU implementation
+│       └── cpu/             # HDL CPU implementation (datapath, adapter)
 ├── examples/           # Demo scripts
 ├── spec/               # Test suite
+│   └── support/
+│       └── behavioral_cpu/  # Reference behavioral CPU (for testing)
 └── docs/               # Documentation
 ```
 
@@ -140,9 +141,9 @@ ruby examples/simulator_tui_demo.rb
 - `h` - Show help
 - `q` - Quit
 
-## Behavioral CPU
+## HDL CPU
 
-RHDL includes a simple 8-bit CPU architecture designed for educational purposes. The CPU features:
+RHDL includes a complete 8-bit CPU with a gate-level HDL implementation in `lib/rhdl/hdl/cpu/`. The CPU architecture features:
 
 - 8-bit data bus and 16-bit address space (64KB addressable memory)
 - Single accumulator (ACC) register
@@ -274,46 +275,39 @@ load_program(program, 0x100)
 
 ### Running Custom Assembly Programs
 
-You can run your custom assembly programs on the CPU using the following approach:
+You can run your custom assembly programs on the HDL CPU using the following approach:
 
 ```ruby
 require 'rhdl'
-require 'support/assembler'
 
-# Create the memory and CPU instances
-memory = MemorySimulator::Memory.new
-cpu = RHDL::Components::CPU::CPU.new(memory)
+# Create the HDL CPU instance
+cpu = RHDL::HDL::CPU::CPUAdapter.new
 cpu.reset
 
-# Define and assemble your program
-program = Assembler.build do |p|
-  p.label :main
-  p.instr :LDI, 0x42        # Load immediate value 0x42 into accumulator
-  p.instr :STA, 0x20        # Store it at memory location 0x20
-  
-  p.instr :LDI, 0x05        # Initialize counter
-  p.label :loop
-  p.instr :SUB, 0x01        # Decrement counter
-  p.instr :JZ, :done        # If counter is zero, jump to done
-  p.instr :LDA, 0x20        # Load value from memory
-  p.instr :ADD, 0x01        # Increment it
-  p.instr :STA, 0x20        # Store it back
-  p.instr :JMP, :loop       # Repeat
-  
-  p.label :done
-  p.instr :HLT              # Halt the CPU
-end
+# Define and assemble your program (using raw bytecode for simplicity)
+program = [
+  0xA0, 0x42,    # LDI 0x42 - Load immediate value 0x42 into accumulator
+  0x25,          # STA 0x05 - Store it at memory location 0x05
+  0xA0, 0x03,    # LDI 0x03 - Initialize counter
+  # loop:
+  0x45,          # SUB 0x05 - Subtract value at 0x05 (decrement counter)
+  0x8C,          # JZ 0x0C - If zero, jump to done (address 0x0C)
+  0xA0, 0x01,    # LDI 0x01 - Load 1
+  0xB6,          # JMP 0x06 - Jump back to loop
+  # done:
+  0xF0           # HLT - Halt the CPU
+]
 
 # Load the program into memory at address 0
-memory.load_program(program)
+cpu.memory.load(program, 0)
 
 # Run the program until halted
-while !cpu.halted
+until cpu.halted
   cpu.step
 end
 
-# Check the result at memory location 0x20
-puts "Final value: #{memory.read(0x20).to_s(16)}"  # Should print "47"
+# Check the result
+puts "Final ACC: #{cpu.acc.to_s(16)}"
 ```
 
 You can also debug your program by examining the CPU state after each instruction:
@@ -324,71 +318,69 @@ cpu.step
 puts "PC: 0x#{cpu.pc.to_s(16)}, ACC: 0x#{cpu.acc.to_s(16)}, Zero Flag: #{cpu.zero_flag}"
 
 # Or examine memory at specific locations
-puts "Memory at 0x20: 0x#{memory.read(0x20).to_s(16)}"
+puts "Memory at 0x20: 0x#{cpu.memory.read(0x20).to_s(16)}"
 ```
 
 For more complex programs with subroutines and indirect addressing:
 
 ```ruby
 # Example: Write characters to display using indirect addressing
-program = Assembler.build(0x100) do |p|
-  # Setup: Store display address (0x0800) in memory locations 0x09 (high), 0x08 (low)
-  p.instr :LDI, 0x08        # High byte of 0x0800
-  p.instr :STA, 0x09
-  p.instr :LDI, 0x00        # Low byte
-  p.instr :STA, 0x08
+cpu = RHDL::HDL::CPU::CPUAdapter.new
 
-  # Write 'H' to display
-  p.label :main
-  p.instr :LDI, 'H'.ord
-  p.instr :STA, [0x09, 0x08]  # Store via indirect addressing
+# Setup: Store display address (0x0800) in memory locations 0x09 (high), 0x08 (low)
+program = [
+  0xA0, 0x08,       # LDI 0x08 - High byte of 0x0800
+  0x29,             # STA 0x09 - Store to address pointer high byte
+  0xA0, 0x00,       # LDI 0x00 - Low byte
+  0x28,             # STA 0x08 - Store to address pointer low byte
+  0xA0, 0x48,       # LDI 0x48 - 'H' character
+  0x20, 0x09, 0x08, # STA [0x09, 0x08] - Store via indirect addressing
+  0xF0              # HLT
+]
 
-  # Increment address and write 'i'
-  p.instr :LDA, 0x08
-  p.instr :ADD, 0x01
-  p.instr :STA, 0x08
-  p.instr :LDI, 'i'.ord
-  p.instr :STA, [0x09, 0x08]
-
-  p.instr :HLT
+cpu.memory.load(program, 0)
+until cpu.halted
+  cpu.step
 end
 
-# Load at 0x100
-load_program(program, 0x100)
-@cpu.instance_variable_set(:@pc, 0x100)
+# Check display memory at 0x0800
+puts "Display[0x800]: #{cpu.memory.read(0x800).chr}"  # Should print 'H'
 ```
 
 ### Example: Factorial Calculator
 
 ```ruby
 # Calculate 5! using a loop
-program = Assembler.build do |p|
-  p.label :start
-  p.instr :LDA, 0xE       # Load N from memory
-  p.instr :JZ, :halt      # If zero, halt
-  p.instr :MUL, 0xF       # Multiply by result
-  p.instr :STA, 0xF       # Store result
-  p.instr :LDA, 0xE       # Load N again
-  p.instr :SUB, 0xD       # Subtract 1
-  p.instr :STA, 0xE       # Store N
-  p.instr :JMP, :start    # Loop
+cpu = RHDL::HDL::CPU::CPUAdapter.new
 
-  p.label :halt
-  p.instr :HLT
-end
+# Program to calculate factorial
+# Uses memory: 0x0D = decrement (1), 0x0E = N, 0x0F = result
+program = [
+  # start:
+  0x1E,             # LDA 0x0E - Load N from memory
+  0x8C,             # JZ 0x0C - If zero, jump to halt
+  0xF1, 0x0F,       # MUL 0x0F - Multiply ACC by result
+  0x2F,             # STA 0x0F - Store result
+  0x1E,             # LDA 0x0E - Load N again
+  0x4D,             # SUB 0x0D - Subtract 1
+  0x2E,             # STA 0x0E - Store N
+  0xB0,             # JMP 0x00 - Jump to start
+  # halt:
+  0xF0              # HLT
+]
 
 # Initialize values
-memory.write(0xE, 5)   # N = 5
-memory.write(0xD, 1)   # Decrement value = 1
-memory.write(0xF, 1)   # Result = 1
+cpu.memory.write(0x0D, 1)   # Decrement value = 1
+cpu.memory.write(0x0E, 5)   # N = 5
+cpu.memory.write(0x0F, 1)   # Result = 1
 
-# Run
-load_program(program)
-while !cpu.halted
+# Load and run
+cpu.memory.load(program, 0)
+until cpu.halted
   cpu.step
 end
 
-puts "5! = #{memory.read(0xF)}"  # Should print "120"
+puts "5! = #{cpu.memory.read(0x0F)}"  # Should print "120"
 ```
 
 ## Running Tests
@@ -452,24 +444,23 @@ Test files:
 
 ### Test Suite Status
 
-**Behavioral CPU: All 47 tests passing** ✓
-**HDL CPU: All 22 tests passing** ✓
+**All 586 tests passing** ✓
 
-Available test files include:
-
-**Behavioral CPU Tests:**
-- `assembler_spec.rb` - Tests the assembler functionality (11 tests)
-- `instructions_spec.rb` - Tests individual CPU instructions (22 tests)
-- `programs_spec.rb` - Tests various sample programs (5 tests)
-- `fractal_spec.rb` - Tests the CPU with a fractal generation program (1 test)
-- `conway_spec.rb` - Tests Conway's Game of Life implementation (1 test)
+The HDL CPU implementation is tested using both unit tests and shared examples that verify identical behavior between the HDL and behavioral implementations.
 
 **HDL Tests:**
-- `test_hdl_cpu.rb` - Standalone HDL CPU tests (22 tests)
 - `spec/rhdl/hdl/gates_spec.rb` - Logic gate tests
 - `spec/rhdl/hdl/arithmetic_spec.rb` - Arithmetic component tests
 - `spec/rhdl/hdl/sequential_spec.rb` - Sequential component tests
 - `spec/rhdl/hdl/cpu_spec.rb` - HDL CPU unit tests
+- `test_hdl_cpu.rb` - Standalone HDL CPU integration tests
+
+**CPU Tests (using shared examples for HDL/behavioral parity):**
+- `assembler_spec.rb` - Tests the assembler functionality
+- `instructions_spec.rb` - Tests individual CPU instructions
+- `programs_spec.rb` - Tests various sample programs
+- `fractal_spec.rb` - Tests the CPU with a fractal generation program
+- `conway_spec.rb` - Tests Conway's Game of Life implementation
 
 ### Complex Integration Tests
 
@@ -505,15 +496,15 @@ The test suite includes two complex integration tests that demonstrate the CPU's
 - Breakpoint panel for managing break/watch points
 - Command mode for advanced operations (set signals, export VCD, etc.)
 
-### HDL Simulation Framework
-- Added complete gate-level simulation engine with signal propagation
-- Implemented logic gates (AND, OR, XOR, NOT, NAND, NOR, etc.)
-- Added sequential components (D/T/JK/SR flip-flops, registers, counters)
-- Created arithmetic units (adders, ALU with 16 operations, comparators)
-- Built combinational logic (multiplexers, decoders, encoders, shifters)
-- Implemented memory components (RAM, ROM, register file, stack, FIFO)
-- Created HDL CPU datapath matching behavioral CPU instruction set
-- Added CPUAdapter for behavioral/HDL CPU interoperability
+### HDL Simulation Framework & CPU
+- Complete gate-level simulation engine with signal propagation
+- Logic gates (AND, OR, XOR, NOT, NAND, NOR, etc.)
+- Sequential components (D/T/JK/SR flip-flops, registers, counters)
+- Arithmetic units (adders, ALU with 16 operations, comparators)
+- Combinational logic (multiplexers, decoders, encoders, shifters)
+- Memory components (RAM, ROM, register file, stack, FIFO)
+- HDL CPU datapath with instruction decoder, ALU, program counter, stack pointer
+- CPUAdapter providing a clean interface for running programs on the HDL CPU
 
 ### Instruction Encoding Fixes
 - Fixed assembler to output encoded bytes instead of symbols
@@ -547,17 +538,18 @@ The test suite includes two complex integration tests that demonstrate the CPU's
 
 ### Writing Tests
 
-CPU tests use the `CpuTestHelper` module to simplify test setup. For example:
+CPU tests use the `CpuTestHelper` module to simplify test setup. The helper can test both the HDL CPU and the behavioral reference implementation. For example:
 
 ```ruby
 require 'spec_helper'
 
-RSpec.describe RHDL::Components::CPU::CPU do
+RSpec.describe RHDL::HDL::CPU::CPUAdapter do
   include CpuTestHelper
 
   before(:each) do
     @memory = MemorySimulator::Memory.new
-    @cpu = described_class.new(@memory)
+    use_hdl_cpu!  # Use HDL implementation (use_behavioral_cpu! for reference impl)
+    @cpu = cpu_class.new(@memory)
     @cpu.reset
   end
 
