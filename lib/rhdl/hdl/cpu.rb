@@ -2,6 +2,7 @@
 # Gate-level CPU implementation
 
 require_relative 'cpu/datapath'
+require_relative 'cpu/adapter'
 
 module RHDL
   module HDL
