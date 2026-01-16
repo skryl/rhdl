@@ -87,21 +87,24 @@ module MOS6502
     end
 
     def propagate
+      prev_state = @state
+      next_state = @state
       if rising_edge?
         if in_val(:rst) == 1
-          @state = 0xFD  # Reset value
+          next_state = 0xFD  # Reset value
         elsif in_val(:load) == 1
-          @state = in_val(:data_in) & 0xFF
+          next_state = in_val(:data_in) & 0xFF
         elsif in_val(:dec) == 1
-          @state = (@state - 1) & 0xFF
+          next_state = (prev_state - 1) & 0xFF
         elsif in_val(:inc) == 1
-          @state = (@state + 1) & 0xFF
+          next_state = (prev_state + 1) & 0xFF
         end
+        @state = next_state
       end
 
       out_set(:sp, @state)
-      out_set(:addr, STACK_BASE | @state)
-      out_set(:addr_plus1, STACK_BASE | ((@state + 1) & 0xFF))
+      out_set(:addr, STACK_BASE | prev_state)
+      out_set(:addr_plus1, STACK_BASE | ((prev_state + 1) & 0xFF))
     end
 
     # Direct access

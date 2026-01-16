@@ -409,10 +409,10 @@ module RHDL
       private
 
       def svg_header(width, height)
-        [
-          %(<?xml version="1.0" encoding="UTF-8"?>),
-          %(<svg xmlns="http://www.w3.org/2000/svg" width="#{width}" height="#{height}" viewBox="0 0 #{width} #{height}">)
-        ].join("\n")
+        <<~SVG
+          <?xml version="1.0" encoding="UTF-8"?>
+          <svg xmlns="http://www.w3.org/2000/svg" width="#{width}" height="#{height}" viewBox="0 0 #{width} #{height}">
+        SVG
       end
 
       def render_defs

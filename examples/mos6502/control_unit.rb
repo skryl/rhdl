@@ -73,7 +73,8 @@ module MOS6502
 
       # Control outputs
       output :state, width: 8         # Current state
-      output :state_pre, width: 8     # State before transition (for control timing)
+      output :state_before, width: 8  # State before transition (for control alignment)
+      output :state_pre, width: 8     # State before transition (alias for state_before)
       output :pc_inc                  # Increment program counter
       output :pc_load                 # Load program counter
       output :load_opcode             # Load instruction register
@@ -101,6 +102,9 @@ module MOS6502
       # Output control signals FIRST, based on current state
       # This ensures the signals reflect the state BEFORE any transitions
       output_control_signals
+
+      # Output state BEFORE transition so it stays aligned with control outputs
+      out_set(:state_before, @state)
 
       # Then advance state machine on rising edge
       if rising_edge?
