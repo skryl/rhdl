@@ -1,0 +1,18 @@
+============================================================
+Gate-Level: bitwise_xor
+Type: BitwiseXor
+============================================================
+
+Gates: 8
+DFFs: 0
+Nets: 24
+
+Inputs:
+  bitwise_xor.a[8]
+  bitwise_xor.b[8]
+
+Outputs:
+  bitwise_xor.y[8]
+
+Gate Types:
+  xor: 8

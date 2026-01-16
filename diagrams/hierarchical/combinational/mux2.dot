@@ -1,0 +1,13 @@
+digraph mux2 {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[8]|<b>b[8]|<sel>sel[1]}|mux2\n(Mux2)|{<y>y[8]}}"];
+
+  subgraph cluster_main {
+    label="mux2";
+    style=rounded;
+    color=blue;
+  }
+}

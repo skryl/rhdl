@@ -1,0 +1,17 @@
+digraph "half_adder" {
+  rankdir=LR;
+  node [fontname="Helvetica"];
+  edge [fontname="Helvetica"];
+  "gate:and:1" [label="AND" shape=ellipse];
+  "gate:xor:0" [label="XOR" shape=ellipse];
+  "port:half_adder.a:input:0" [label="half_adder.a" shape=plaintext];
+  "port:half_adder.b:input:0" [label="half_adder.b" shape=plaintext];
+  "port:half_adder.cout:output:0" [label="half_adder.cout" shape=plaintext];
+  "port:half_adder.sum:output:0" [label="half_adder.sum" shape=plaintext];
+  "gate:and:1" -> "port:half_adder.cout:output:0";
+  "gate:xor:0" -> "port:half_adder.sum:output:0";
+  "port:half_adder.a:input:0" -> "gate:and:1";
+  "port:half_adder.a:input:0" -> "gate:xor:0";
+  "port:half_adder.b:input:0" -> "gate:and:1";
+  "port:half_adder.b:input:0" -> "gate:xor:0";
+}

@@ -1,0 +1,13 @@
+digraph full_adder {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[1]|<b>b[1]|<cin>cin[1]}|full_adder\n(FullAdder)|{<sum>sum[1]|<cout>cout[1]}}"];
+
+  subgraph cluster_main {
+    label="full_adder";
+    style=rounded;
+    color=blue;
+  }
+}

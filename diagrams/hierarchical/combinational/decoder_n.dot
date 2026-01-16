@@ -1,0 +1,13 @@
+digraph decn {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[4]|<en>en[1]}|decn\n(DecoderN)|{<y0>y0[1]|<y1>y1[1]|<y2>y2[1]|<y3>y3[1]|<y4>y4[1]|<y5>y5[1]|<y6>y6[1]|<y7>y7[1]|<y8>y8[1]|<y9>y9[1]|<y10>y10[1]|<y11>y11[1]|<y12>y12[1]|<y13>y13[1]|<y14>y14[1]|<y15>y15[1]}}"];
+
+  subgraph cluster_main {
+    label="decn";
+    style=rounded;
+    color=blue;
+  }
+}

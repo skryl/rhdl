@@ -1,0 +1,13 @@
+digraph not_gate {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[1]}|not_gate\n(NotGate)|{<y>y[1]}}"];
+
+  subgraph cluster_main {
+    label="not_gate";
+    style=rounded;
+    color=blue;
+  }
+}

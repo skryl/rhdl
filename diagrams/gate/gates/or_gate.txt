@@ -1,0 +1,18 @@
+============================================================
+Gate-Level: or_gate
+Type: OrGate
+============================================================
+
+Gates: 1
+DFFs: 0
+Nets: 3
+
+Inputs:
+  or_gate.a0[1]
+  or_gate.a1[1]
+
+Outputs:
+  or_gate.y[1]
+
+Gate Types:
+  or: 1

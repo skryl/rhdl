@@ -1,0 +1,13 @@
+digraph alu8 {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[8]|<b>b[8]|<op>op[4]|<cin>cin[1]}|alu8\n(ALU)|{<result>result[8]|<cout>cout[1]|<zero>zero[1]|<negative>negative[1]|<overflow>overflow[1]}}"];
+
+  subgraph cluster_main {
+    label="alu8";
+    style=rounded;
+    color=blue;
+  }
+}

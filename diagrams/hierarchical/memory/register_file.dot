@@ -1,0 +1,13 @@
+digraph regfile {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<clk>clk[1]|<we>we[1]|<waddr>waddr[3]|<raddr1>raddr1[3]|<raddr2>raddr2[3]|<wdata>wdata[8]}|regfile\n(RegisterFile)|{<rdata1>rdata1[8]|<rdata2>rdata2[8]}}"];
+
+  subgraph cluster_main {
+    label="regfile";
+    style=rounded;
+    color=blue;
+  }
+}

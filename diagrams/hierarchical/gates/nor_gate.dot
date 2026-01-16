@@ -1,0 +1,13 @@
+digraph nor_gate {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a0>a0[1]|<a1>a1[1]}|nor_gate\n(NorGate)|{<y>y[1]}}"];
+
+  subgraph cluster_main {
+    label="nor_gate";
+    style=rounded;
+    color=blue;
+  }
+}

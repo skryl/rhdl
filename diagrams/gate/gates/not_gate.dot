@@ -1,0 +1,10 @@
+digraph "not_gate" {
+  rankdir=LR;
+  node [fontname="Helvetica"];
+  edge [fontname="Helvetica"];
+  "gate:not:0" [label="NOT" shape=ellipse];
+  "port:not_gate.a:input:0" [label="not_gate.a" shape=plaintext];
+  "port:not_gate.y:output:0" [label="not_gate.y" shape=plaintext];
+  "gate:not:0" -> "port:not_gate.y:output:0";
+  "port:not_gate.a:input:0" -> "gate:not:0";
+}

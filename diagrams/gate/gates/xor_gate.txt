@@ -1,0 +1,18 @@
+============================================================
+Gate-Level: xor_gate
+Type: XorGate
+============================================================
+
+Gates: 1
+DFFs: 0
+Nets: 3
+
+Inputs:
+  xor_gate.a0[1]
+  xor_gate.a1[1]
+
+Outputs:
+  xor_gate.y[1]
+
+Gate Types:
+  xor: 1
