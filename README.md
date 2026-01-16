@@ -2,6 +2,81 @@
 
 RHDL is a Domain Specific Language (DSL) that allows you to design hardware using Ruby's flexible syntax and export to VHDL. It provides a comfortable environment for Ruby developers to create hardware designs with all the power of Ruby's metaprogramming capabilities.
 
+## Features
+
+- **Behavioral CPU**: A complete 8-bit CPU implementation for educational purposes
+- **HDL Simulation Framework**: Gate-level simulation with support for combinational and sequential logic
+- **Component Library**: Gates, flip-flops, registers, ALU, memory, and more
+- **VHDL Export**: Generate synthesizable VHDL from Ruby definitions
+
+## Project Structure
+
+```
+rhdl/
+├── lib/rhdl/           # Core library
+│   ├── dsl.rb          # VHDL DSL for component definitions
+│   ├── components/     # Structural component definitions
+│   └── hdl/            # HDL simulation framework
+│       ├── simulation.rb    # Core simulation engine
+│       ├── gates.rb         # Logic gate primitives
+│       ├── sequential.rb    # Flip-flops, registers, counters
+│       ├── arithmetic.rb    # Adders, ALU, comparators
+│       ├── combinational.rb # Multiplexers, decoders
+│       ├── memory.rb        # RAM, ROM, register files
+│       └── cpu/             # HDL CPU implementation
+├── cpu/                # Behavioral CPU implementation
+├── spec/               # Test suite
+└── docs/               # Documentation
+```
+
+## Documentation
+
+Detailed documentation is available in the `docs/` directory:
+
+- **[HDL Overview](docs/hdl_overview.md)** - Introduction to the HDL framework architecture
+- **[Simulation Engine](docs/simulation_engine.md)** - Core simulation infrastructure and concepts
+- **[Components Reference](docs/components.md)** - Complete reference for all HDL components
+- **[CPU Datapath](docs/cpu_datapath.md)** - CPU architecture and instruction set details
+
+## Quick Start
+
+### Using the HDL Simulation Framework
+
+```ruby
+require 'rhdl'
+
+# Create an ALU
+alu = RHDL::HDL::ALU.new("my_alu", width: 8)
+alu.set_input(:a, 10)
+alu.set_input(:b, 5)
+alu.set_input(:op, RHDL::HDL::ALU::OP_ADD)
+alu.propagate
+
+puts alu.get_output(:result)  # => 15
+```
+
+### Using the HDL CPU
+
+```ruby
+require 'rhdl'
+
+# Create CPU with memory adapter
+memory = MemorySimulator::Memory.new
+cpu = RHDL::HDL::CPU::CPUAdapter.new(memory)
+
+# Load a program: LDI 42, HLT
+cpu.memory.load([0xA0, 0x2A, 0xF0], 0)
+
+# Run until halted
+until cpu.halted
+  cpu.step
+end
+
+puts cpu.acc  # => 42
+```
+
+## Behavioral CPU
+
 RHDL includes a simple 8-bit CPU architecture designed for educational purposes. The CPU features:
 
 - 8-bit data bus and 16-bit address space (64KB addressable memory)
@@ -271,17 +346,32 @@ To run only the CPU-related tests:
 bundle exec rspec spec/rhdl/cpu
 ```
 
+To run the HDL CPU standalone tests:
+
+```bash
+ruby test_hdl_cpu.rb
+```
+
 ### Test Suite Status
 
-**All 47 tests passing** ✓
+**Behavioral CPU: All 47 tests passing** ✓
+**HDL CPU: All 22 tests passing** ✓
 
 Available test files include:
 
+**Behavioral CPU Tests:**
 - `assembler_spec.rb` - Tests the assembler functionality (11 tests)
 - `instructions_spec.rb` - Tests individual CPU instructions (22 tests)
 - `programs_spec.rb` - Tests various sample programs (5 tests)
 - `fractal_spec.rb` - Tests the CPU with a fractal generation program (1 test)
 - `conway_spec.rb` - Tests Conway's Game of Life implementation (1 test)
+
+**HDL Tests:**
+- `test_hdl_cpu.rb` - Standalone HDL CPU tests (22 tests)
+- `spec/rhdl/hdl/gates_spec.rb` - Logic gate tests
+- `spec/rhdl/hdl/arithmetic_spec.rb` - Arithmetic component tests
+- `spec/rhdl/hdl/sequential_spec.rb` - Sequential component tests
+- `spec/rhdl/hdl/cpu_spec.rb` - HDL CPU unit tests
 
 ### Complex Integration Tests
 
@@ -300,6 +390,16 @@ The test suite includes two complex integration tests that demonstrate the CPU's
 - Simulates multiple generations of cellular automata
 
 ## Recent Improvements
+
+### HDL Simulation Framework
+- Added complete gate-level simulation engine with signal propagation
+- Implemented logic gates (AND, OR, XOR, NOT, NAND, NOR, etc.)
+- Added sequential components (D/T/JK/SR flip-flops, registers, counters)
+- Created arithmetic units (adders, ALU with 16 operations, comparators)
+- Built combinational logic (multiplexers, decoders, encoders, shifters)
+- Implemented memory components (RAM, ROM, register file, stack, FIFO)
+- Created HDL CPU datapath matching behavioral CPU instruction set
+- Added CPUAdapter for behavioral/HDL CPU interoperability
 
 ### Instruction Encoding Fixes
 - Fixed assembler to output encoded bytes instead of symbols
