@@ -1,0 +1,13 @@
+digraph sr_latch {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<s>s[1]|<r>r[1]|<en>en[1]}|sr_latch\n(SRLatch)|{<q>q[1]|<qn>qn[1]}}"];
+
+  subgraph cluster_main {
+    label="sr_latch";
+    style=rounded;
+    color=blue;
+  }
+}

@@ -1,0 +1,13 @@
+digraph muxn {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<in0>in0[8]|<in1>in1[8]|<in2>in2[8]|<in3>in3[8]|<sel>sel[2]}|muxn\n(MuxN)|{<y>y[8]}}"];
+
+  subgraph cluster_main {
+    label="muxn";
+    style=rounded;
+    color=blue;
+  }
+}

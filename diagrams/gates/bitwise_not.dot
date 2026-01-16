@@ -1,0 +1,13 @@
+digraph bitwise_not {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[8]}|bitwise_not\n(BitwiseNot)|{<y>y[8]}}"];
+
+  subgraph cluster_main {
+    label="bitwise_not";
+    style=rounded;
+    color=blue;
+  }
+}

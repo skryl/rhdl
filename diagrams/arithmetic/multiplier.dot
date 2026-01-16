@@ -1,0 +1,13 @@
+digraph mul {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[8]|<b>b[8]}|mul\n(Multiplier)|{<product>product[16]}}"];
+
+  subgraph cluster_main {
+    label="mul";
+    style=rounded;
+    color=blue;
+  }
+}

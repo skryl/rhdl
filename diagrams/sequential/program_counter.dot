@@ -1,0 +1,13 @@
+digraph pc {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<clk>clk[1]|<rst>rst[1]|<en>en[1]|<load>load[1]|<d>d[16]|<inc>inc[16]}|pc\n(ProgramCounter)|{<q>q[16]}}"];
+
+  subgraph cluster_main {
+    label="pc";
+    style=rounded;
+    color=blue;
+  }
+}

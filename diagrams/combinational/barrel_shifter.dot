@@ -1,0 +1,13 @@
+digraph barrel {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[8]|<shift>shift[3]|<dir>dir[1]|<arith>arith[1]|<rotate>rotate[1]}|barrel\n(BarrelShifter)|{<y>y[8]}}"];
+
+  subgraph cluster_main {
+    label="barrel";
+    style=rounded;
+    color=blue;
+  }
+}

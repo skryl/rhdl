@@ -1,0 +1,13 @@
+digraph counter {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<clk>clk[1]|<rst>rst[1]|<en>en[1]|<up>up[1]|<load>load[1]|<d>d[8]}|counter\n(Counter)|{<q>q[8]|<tc>tc[1]|<zero>zero[1]}}"];
+
+  subgraph cluster_main {
+    label="counter";
+    style=rounded;
+    color=blue;
+  }
+}

@@ -1,0 +1,13 @@
+digraph decoder {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<instruction>instruction[8]|<zero_flag>zero_flag[1]}|decoder\n(InstructionDecoder)|{<alu_op>alu_op[4]|<alu_src>alu_src[1]|<reg_write>reg_write[1]|<mem_read>mem_read[1]|<mem_write>mem_write[1]|<branch>branch[1]|<jump>jump[1]|<pc_src>pc_src[2]|<halt>halt[1]|<call>call[1]|<ret>ret[1]|<instr_length>instr_length[2]}}"];
+
+  subgraph cluster_main {
+    label="decoder";
+    style=rounded;
+    color=blue;
+  }
+}
