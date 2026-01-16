@@ -1,0 +1,79 @@
+#!/usr/bin/env ruby
+
+require 'fileutils'
+require 'optparse'
+
+require_relative '../lib/rhdl'
+
+command = ARGV.shift
+
+unless command == 'diagram'
+  warn 'Usage: bin/rhdl diagram <ComponentRef> [options]'
+  exit 1
+end
+
+options = {
+  level: 'component',
+  depth: 1,
+  format: 'svg',
+  out: 'diagrams',
+  bit_blasted: false
+}
+
+parser = OptionParser.new do |opts|
+  opts.banner = 'Usage: bin/rhdl diagram <ComponentRef> [options]'
+  opts.on('--level LEVEL', 'component|hierarchy|netlist|gate') { |v| options[:level] = v }
+  opts.on('--depth DEPTH', 'Depth for hierarchy (N or all)') do |v|
+    options[:depth] = v == 'all' ? :all : v.to_i
+  end
+  opts.on('--bit-blasted', 'Bit-blast gate-level nets') { options[:bit_blasted] = true }
+  opts.on('--format FORMAT', 'svg|png|dot') { |v| options[:format] = v }
+  opts.on('--out DIR', 'Output directory') { |v| options[:out] = v }
+end
+
+parser.parse!(ARGV)
+
+component_ref = ARGV.shift
+unless component_ref
+  warn parser.to_s
+  exit 1
+end
+
+component_class = component_ref.split('::').inject(Object) { |mod, name| mod.const_get(name) }
+component = component_class.new(component_ref.downcase)
+
+diagram = case options[:level]
+          when 'component'
+            RHDL::Diagram.component(component)
+          when 'hierarchy'
+            RHDL::Diagram.hierarchy(component, depth: options[:depth])
+          when 'netlist'
+            RHDL::Diagram.netlist(component)
+          when 'gate'
+            components = RHDL::Diagram.collect_components(component)
+            gate_ir = RHDL::Gates::Lower.from_components(components, name: component.name)
+            RHDL::Diagram.gate_level(gate_ir, bit_blasted: options[:bit_blasted])
+          else
+            warn "Unknown level: #{options[:level]}"
+            exit 1
+          end
+
+FileUtils.mkdir_p(options[:out])
+base_name = "#{component.name}_#{options[:level]}"
+
+case options[:format]
+when 'dot'
+  File.write(File.join(options[:out], "#{base_name}.dot"), diagram.to_dot)
+when 'svg', 'png'
+  output = RHDL::Diagram::RenderSVG.render(diagram, format: options[:format])
+  if output
+    File.write(File.join(options[:out], "#{base_name}.#{options[:format]}"), output)
+  else
+    dot_path = File.join(options[:out], "#{base_name}.dot")
+    File.write(dot_path, diagram.to_dot)
+    warn "Graphviz not available; wrote #{dot_path} instead."
+  end
+else
+  warn "Unknown format: #{options[:format]}"
+  exit 1
+end
