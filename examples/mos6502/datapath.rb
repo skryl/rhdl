@@ -119,9 +119,8 @@ module MOS6502
       @control.set_input(:flag_z, @status_reg.get_output(:z))
       @control.set_input(:flag_c, @status_reg.get_output(:c))
 
-      # Propagate registers to get current values
-      @registers.propagate
-
+      # Read current register values (don't propagate here - that would cause
+      # early rising edge update before ALU computes new values)
       reg_a = @registers.get_output(:a)
       reg_x = @registers.get_output(:x)
       reg_y = @registers.get_output(:y)
@@ -335,8 +334,8 @@ module MOS6502
       when ControlUnit::STATE_BRANCH_TAKE
         eff_addr
       when ControlUnit::STATE_RTS_PULL_HI
-        addr = ((data_in & 0xFF) << 8) | latch_lo
-        (addr + 1) & 0xFFFF
+        # Return address from stack - the +1 is handled by pc_inc signal
+        ((data_in & 0xFF) << 8) | latch_lo
       when ControlUnit::STATE_RTI_PULL_HI,
            ControlUnit::STATE_BRK_VEC_HI
         ((data_in & 0xFF) << 8) | latch_lo
