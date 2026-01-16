@@ -1,0 +1,13 @@
+digraph zext {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[8]}|zext\n(ZeroExtend)|{<y>y[16]}}"];
+
+  subgraph cluster_main {
+    label="zext";
+    style=rounded;
+    color=blue;
+  }
+}

@@ -1,0 +1,21 @@
+============================================================
+Gate-Level: dff
+Type: DFlipFlop
+============================================================
+
+Gates: 1
+DFFs: 1
+Nets: 6
+
+Inputs:
+  dff.d[1]
+  dff.clk[1]
+  dff.rst[1]
+  dff.en[1]
+
+Outputs:
+  dff.q[1]
+  dff.qn[1]
+
+Gate Types:
+  not: 1

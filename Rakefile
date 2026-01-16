@@ -43,6 +43,12 @@ end
 namespace :diagrams do
   DIAGRAMS_DIR = File.expand_path('diagrams', __dir__)
 
+  # Diagram modes
+  DIAGRAM_MODES = %w[component hierarchical gate].freeze
+
+  # Component categories
+  CATEGORIES = %w[gates sequential arithmetic combinational memory cpu].freeze
+
   # Component definitions with their instantiation parameters
   HDL_COMPONENTS = {
     # Gates
@@ -124,49 +130,139 @@ namespace :diagrams do
     'cpu/datapath' => -> { RHDL::HDL::CPU::Datapath.new('cpu') }
   }
 
-  def generate_diagram(name, component, diagrams_dir)
-    # Create subdirectory if needed
+  # Components that support gate-level lowering
+  GATE_LEVEL_COMPONENTS = %w[
+    gates/not_gate gates/buffer gates/and_gate gates/and_gate_3input
+    gates/or_gate gates/xor_gate
+    gates/bitwise_and gates/bitwise_or gates/bitwise_xor
+    sequential/d_flipflop sequential/d_flipflop_async
+    arithmetic/half_adder arithmetic/full_adder arithmetic/ripple_carry_adder
+    combinational/mux2
+  ].freeze
+
+  def create_mode_directories
+    DIAGRAM_MODES.each do |mode|
+      mode_dir = File.join(DIAGRAMS_DIR, mode)
+      CATEGORIES.each do |category|
+        FileUtils.mkdir_p(File.join(mode_dir, category))
+      end
+    end
+  end
+
+  def generate_component_diagram(name, component, base_dir)
     subdir = File.dirname(name)
-    full_subdir = File.join(diagrams_dir, subdir)
+    full_subdir = File.join(base_dir, subdir)
     FileUtils.mkdir_p(full_subdir)
+    base_path = File.join(base_dir, name)
 
-    base_path = File.join(diagrams_dir, name)
-
-    # Generate ASCII diagram (text file)
+    # Generate ASCII block diagram
     txt_content = []
     txt_content << "=" * 60
     txt_content << "Component: #{component.name}"
     txt_content << "Type: #{component.class.name.split('::').last}"
     txt_content << "=" * 60
     txt_content << ""
-    txt_content << "Block Diagram:"
-    txt_content << "-" * 40
     txt_content << component.to_diagram
-    txt_content << ""
-    txt_content << "Schematic:"
-    txt_content << "-" * 40
-    txt_content << component.to_schematic(show_subcomponents: true)
-
     File.write("#{base_path}.txt", txt_content.join("\n"))
 
-    # Generate SVG diagram
-    component.save_svg("#{base_path}.svg", show_subcomponents: true)
+    # Generate SVG (simple block view)
+    component.save_svg("#{base_path}.svg", show_subcomponents: false)
 
-    # Generate DOT diagram
+    # Generate DOT
     component.save_dot("#{base_path}.dot")
-
-    puts "  Generated: #{name}.txt, #{name}.svg, #{name}.dot"
   end
 
-  def generate_diagrams_index(diagrams_dir)
+  def generate_hierarchical_diagram(name, component, base_dir)
+    subdir = File.dirname(name)
+    full_subdir = File.join(base_dir, subdir)
+    FileUtils.mkdir_p(full_subdir)
+    base_path = File.join(base_dir, name)
+
+    # Generate ASCII schematic with subcomponents
+    txt_content = []
+    txt_content << "=" * 60
+    txt_content << "Component: #{component.name}"
+    txt_content << "Type: #{component.class.name.split('::').last}"
+    txt_content << "=" * 60
+    txt_content << ""
+    txt_content << component.to_schematic(show_subcomponents: true)
+    txt_content << ""
+    txt_content << "Hierarchy:"
+    txt_content << "-" * 40
+    txt_content << component.to_hierarchy(max_depth: 3)
+    File.write("#{base_path}.txt", txt_content.join("\n"))
+
+    # Generate SVG with subcomponents
+    component.save_svg("#{base_path}.svg", show_subcomponents: true)
+
+    # Generate DOT
+    component.save_dot("#{base_path}.dot")
+  end
+
+  def generate_gate_level_diagram(name, component, base_dir)
+    subdir = File.dirname(name)
+    full_subdir = File.join(base_dir, subdir)
+    FileUtils.mkdir_p(full_subdir)
+    base_path = File.join(base_dir, name)
+
+    # Lower to gate-level IR
+    ir = RHDL::Gates::Lower.from_components([component], name: component.name)
+
+    # Build gate-level diagram
+    diagram = RHDL::Diagram.gate_level(ir)
+
+    # Generate DOT format
+    dot_content = diagram.to_dot
+    File.write("#{base_path}.dot", dot_content)
+
+    # Generate text summary
+    txt_content = []
+    txt_content << "=" * 60
+    txt_content << "Gate-Level: #{component.name}"
+    txt_content << "Type: #{component.class.name.split('::').last}"
+    txt_content << "=" * 60
+    txt_content << ""
+    txt_content << "Gates: #{ir.gates.length}"
+    txt_content << "DFFs: #{ir.dffs.length}"
+    txt_content << "Nets: #{ir.net_count}"
+    txt_content << ""
+    txt_content << "Inputs:"
+    ir.inputs.each { |n, nets| txt_content << "  #{n}[#{nets.length}]" }
+    txt_content << ""
+    txt_content << "Outputs:"
+    ir.outputs.each { |n, nets| txt_content << "  #{n}[#{nets.length}]" }
+    txt_content << ""
+    txt_content << "Gate Types:"
+    gate_counts = ir.gates.group_by(&:type).transform_values(&:length)
+    gate_counts.each { |type, count| txt_content << "  #{type}: #{count}" }
+    File.write("#{base_path}.txt", txt_content.join("\n"))
+  end
+
+  def generate_readme(diagrams_dir)
     readme = []
     readme << "# RHDL Component Diagrams"
     readme << ""
-    readme << "This directory contains circuit diagrams for all HDL components in RHDL."
+    readme << "This directory contains circuit diagrams for all HDL components in RHDL,"
+    readme << "organized into three visualization modes."
+    readme << ""
+    readme << "## Diagram Modes"
+    readme << ""
+    readme << "### Component (`component/`)"
+    readme << "Simple block diagrams showing component interface (inputs/outputs)."
+    readme << "Best for understanding what a component does at a high level."
+    readme << ""
+    readme << "### Hierarchical (`hierarchical/`)"
+    readme << "Detailed schematics showing internal subcomponents and hierarchy."
+    readme << "Best for understanding how complex components are built from simpler ones."
+    readme << ""
+    readme << "### Gate (`gate/`)"
+    readme << "Gate-level netlist diagrams showing primitive logic gates and flip-flops."
+    readme << "Only available for components that support gate-level lowering."
+    readme << "Best for understanding the actual hardware implementation."
     readme << ""
     readme << "## File Formats"
     readme << ""
-    readme << "Each component has three diagram files:"
+    readme << "Each component has up to three diagram files:"
     readme << "- `.txt` - ASCII/Unicode text diagram for terminal viewing"
     readme << "- `.svg` - Scalable vector graphics for web/document viewing"
     readme << "- `.dot` - Graphviz DOT format for custom rendering"
@@ -175,13 +271,13 @@ namespace :diagrams do
     readme << ""
     readme << "To render DOT files as PNG images using Graphviz:"
     readme << "```bash"
-    readme << "dot -Tpng diagrams/cpu/datapath.dot -o cpu.png"
+    readme << "dot -Tpng diagrams/gate/arithmetic/full_adder.dot -o full_adder.png"
     readme << "```"
     readme << ""
     readme << "## Components by Category"
     readme << ""
 
-    categories = {
+    category_names = {
       'gates' => 'Logic Gates',
       'sequential' => 'Sequential Components',
       'arithmetic' => 'Arithmetic Components',
@@ -190,16 +286,19 @@ namespace :diagrams do
       'cpu' => 'CPU Components'
     }
 
-    categories.each do |dir, title|
-      readme << "### #{title}"
+    CATEGORIES.each do |category|
+      readme << "### #{category_names[category]}"
       readme << ""
 
-      path = File.join(diagrams_dir, dir)
+      # List components in this category from component mode
+      path = File.join(diagrams_dir, 'component', category)
       if Dir.exist?(path)
         files = Dir.glob(File.join(path, '*.txt')).sort
         files.each do |f|
           basename = File.basename(f, '.txt')
-          readme << "- [#{basename}](#{dir}/#{basename}.txt) ([SVG](#{dir}/#{basename}.svg), [DOT](#{dir}/#{basename}.dot))"
+          gate_level = GATE_LEVEL_COMPONENTS.include?("#{category}/#{basename}")
+          gate_link = gate_level ? ", [Gate](gate/#{category}/#{basename}.dot)" : ""
+          readme << "- **#{basename}**: [Component](component/#{category}/#{basename}.txt), [Hierarchical](hierarchical/#{category}/#{basename}.txt)#{gate_link}"
         end
       end
       readme << ""
@@ -207,9 +306,18 @@ namespace :diagrams do
 
     readme << "## Regenerating Diagrams"
     readme << ""
-    readme << "To regenerate all diagrams, run:"
     readme << "```bash"
+    readme << "# Generate all diagrams in all modes"
     readme << "rake diagrams:generate"
+    readme << ""
+    readme << "# Generate only component-level diagrams"
+    readme << "rake diagrams:component"
+    readme << ""
+    readme << "# Generate only hierarchical diagrams"
+    readme << "rake diagrams:hierarchical"
+    readme << ""
+    readme << "# Generate only gate-level diagrams"
+    readme << "rake diagrams:gate"
     readme << "```"
     readme << ""
     readme << "---"
@@ -218,57 +326,91 @@ namespace :diagrams do
     File.write(File.join(diagrams_dir, 'README.md'), readme.join("\n"))
   end
 
-  desc "Generate circuit diagrams for all HDL components"
-  task :generate do
+  desc "Generate component-level diagrams (simple block view)"
+  task :component do
     require_relative 'lib/rhdl/hdl'
 
-    puts "=" * 60
-    puts "RHDL Circuit Diagram Generator"
-    puts "=" * 60
-    puts ""
-    puts "Output directory: #{DIAGRAMS_DIR}"
-    puts ""
-
-    # Create category subdirectories
-    %w[gates sequential arithmetic combinational memory cpu].each do |category|
-      FileUtils.mkdir_p(File.join(DIAGRAMS_DIR, category))
-    end
-
-    success_count = 0
-    error_count = 0
+    puts "Generating component-level diagrams..."
+    base_dir = File.join(DIAGRAMS_DIR, 'component')
+    CATEGORIES.each { |c| FileUtils.mkdir_p(File.join(base_dir, c)) }
 
     HDL_COMPONENTS.each do |name, creator|
       begin
         component = creator.call
-        generate_diagram(name, component, DIAGRAMS_DIR)
-        success_count += 1
+        generate_component_diagram(name, component, base_dir)
+        puts "  [OK] #{name}"
       rescue => e
-        puts "  ERROR generating #{name}: #{e.message}"
-        error_count += 1
+        puts "  [ERROR] #{name}: #{e.message}"
+      end
+    end
+  end
+
+  desc "Generate hierarchical diagrams (with subcomponents)"
+  task :hierarchical do
+    require_relative 'lib/rhdl/hdl'
+
+    puts "Generating hierarchical diagrams..."
+    base_dir = File.join(DIAGRAMS_DIR, 'hierarchical')
+    CATEGORIES.each { |c| FileUtils.mkdir_p(File.join(base_dir, c)) }
+
+    HDL_COMPONENTS.each do |name, creator|
+      begin
+        component = creator.call
+        generate_hierarchical_diagram(name, component, base_dir)
+        puts "  [OK] #{name}"
+      rescue => e
+        puts "  [ERROR] #{name}: #{e.message}"
+      end
+    end
+  end
+
+  desc "Generate gate-level diagrams (primitive gates and flip-flops)"
+  task :gate do
+    require_relative 'lib/rhdl/hdl'
+    require_relative 'lib/rhdl/gates'
+    require_relative 'lib/rhdl/diagram'
+
+    puts "Generating gate-level diagrams..."
+    base_dir = File.join(DIAGRAMS_DIR, 'gate')
+    CATEGORIES.each { |c| FileUtils.mkdir_p(File.join(base_dir, c)) }
+
+    GATE_LEVEL_COMPONENTS.each do |name|
+      creator = HDL_COMPONENTS[name]
+      next unless creator
+
+      begin
+        component = creator.call
+        generate_gate_level_diagram(name, component, base_dir)
+        puts "  [OK] #{name}"
+      rescue => e
+        puts "  [ERROR] #{name}: #{e.message}"
       end
     end
 
     puts ""
-    puts "=" * 60
-    puts "Generation complete!"
-    puts "  Success: #{success_count}"
-    puts "  Errors: #{error_count}"
-    puts "=" * 60
+    puts "Note: Gate-level diagrams are only available for components that support lowering."
+    puts "Components with gate-level support: #{GATE_LEVEL_COMPONENTS.length}"
+  end
 
-    # Generate index file
-    generate_diagrams_index(DIAGRAMS_DIR)
+  desc "Generate all circuit diagrams (component, hierarchical, gate)"
+  task :generate => [:component, :hierarchical, :gate] do
+    require_relative 'lib/rhdl/hdl'
 
     puts ""
-    puts "Index file generated: #{File.join(DIAGRAMS_DIR, 'README.md')}"
+    puts "=" * 60
+    puts "Generating README..."
+    generate_readme(DIAGRAMS_DIR)
+    puts "Done! Diagrams generated in: #{DIAGRAMS_DIR}"
+    puts "=" * 60
   end
 
   desc "Clean all generated diagrams"
   task :clean do
-    %w[gates sequential arithmetic combinational memory cpu].each do |category|
-      dir = File.join(DIAGRAMS_DIR, category)
-      if Dir.exist?(dir)
-        FileUtils.rm_rf(Dir.glob(File.join(dir, '*')))
-        puts "Cleaned: #{dir}"
+    DIAGRAM_MODES.each do |mode|
+      mode_dir = File.join(DIAGRAMS_DIR, mode)
+      if Dir.exist?(mode_dir)
+        FileUtils.rm_rf(mode_dir)
+        puts "Cleaned: #{mode_dir}"
       end
     end
     readme = File.join(DIAGRAMS_DIR, 'README.md')

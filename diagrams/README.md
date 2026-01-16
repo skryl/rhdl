@@ -1,10 +1,26 @@
 # RHDL Component Diagrams
 
-This directory contains circuit diagrams for all HDL components in RHDL.
+This directory contains circuit diagrams for all HDL components in RHDL,
+organized into three visualization modes.
+
+## Diagram Modes
+
+### Component (`component/`)
+Simple block diagrams showing component interface (inputs/outputs).
+Best for understanding what a component does at a high level.
+
+### Hierarchical (`hierarchical/`)
+Detailed schematics showing internal subcomponents and hierarchy.
+Best for understanding how complex components are built from simpler ones.
+
+### Gate (`gate/`)
+Gate-level netlist diagrams showing primitive logic gates and flip-flops.
+Only available for components that support gate-level lowering.
+Best for understanding the actual hardware implementation.
 
 ## File Formats
 
-Each component has three diagram files:
+Each component has up to three diagram files:
 - `.txt` - ASCII/Unicode text diagram for terminal viewing
 - `.svg` - Scalable vector graphics for web/document viewing
 - `.dot` - Graphviz DOT format for custom rendering
@@ -13,100 +29,109 @@ Each component has three diagram files:
 
 To render DOT files as PNG images using Graphviz:
 ```bash
-dot -Tpng diagrams/cpu/datapath.dot -o cpu.png
+dot -Tpng diagrams/gate/arithmetic/full_adder.dot -o full_adder.png
 ```
 
 ## Components by Category
 
 ### Logic Gates
 
-- [and_gate](gates/and_gate.txt) ([SVG](gates/and_gate.svg), [DOT](gates/and_gate.dot))
-- [and_gate_3input](gates/and_gate_3input.txt) ([SVG](gates/and_gate_3input.svg), [DOT](gates/and_gate_3input.dot))
-- [bitwise_and](gates/bitwise_and.txt) ([SVG](gates/bitwise_and.svg), [DOT](gates/bitwise_and.dot))
-- [bitwise_not](gates/bitwise_not.txt) ([SVG](gates/bitwise_not.svg), [DOT](gates/bitwise_not.dot))
-- [bitwise_or](gates/bitwise_or.txt) ([SVG](gates/bitwise_or.svg), [DOT](gates/bitwise_or.dot))
-- [bitwise_xor](gates/bitwise_xor.txt) ([SVG](gates/bitwise_xor.svg), [DOT](gates/bitwise_xor.dot))
-- [buffer](gates/buffer.txt) ([SVG](gates/buffer.svg), [DOT](gates/buffer.dot))
-- [nand_gate](gates/nand_gate.txt) ([SVG](gates/nand_gate.svg), [DOT](gates/nand_gate.dot))
-- [nor_gate](gates/nor_gate.txt) ([SVG](gates/nor_gate.svg), [DOT](gates/nor_gate.dot))
-- [not_gate](gates/not_gate.txt) ([SVG](gates/not_gate.svg), [DOT](gates/not_gate.dot))
-- [or_gate](gates/or_gate.txt) ([SVG](gates/or_gate.svg), [DOT](gates/or_gate.dot))
-- [tristate_buffer](gates/tristate_buffer.txt) ([SVG](gates/tristate_buffer.svg), [DOT](gates/tristate_buffer.dot))
-- [xnor_gate](gates/xnor_gate.txt) ([SVG](gates/xnor_gate.svg), [DOT](gates/xnor_gate.dot))
-- [xor_gate](gates/xor_gate.txt) ([SVG](gates/xor_gate.svg), [DOT](gates/xor_gate.dot))
+- **and_gate**: [Component](component/gates/and_gate.txt), [Hierarchical](hierarchical/gates/and_gate.txt), [Gate](gate/gates/and_gate.dot)
+- **and_gate_3input**: [Component](component/gates/and_gate_3input.txt), [Hierarchical](hierarchical/gates/and_gate_3input.txt), [Gate](gate/gates/and_gate_3input.dot)
+- **bitwise_and**: [Component](component/gates/bitwise_and.txt), [Hierarchical](hierarchical/gates/bitwise_and.txt), [Gate](gate/gates/bitwise_and.dot)
+- **bitwise_not**: [Component](component/gates/bitwise_not.txt), [Hierarchical](hierarchical/gates/bitwise_not.txt)
+- **bitwise_or**: [Component](component/gates/bitwise_or.txt), [Hierarchical](hierarchical/gates/bitwise_or.txt), [Gate](gate/gates/bitwise_or.dot)
+- **bitwise_xor**: [Component](component/gates/bitwise_xor.txt), [Hierarchical](hierarchical/gates/bitwise_xor.txt), [Gate](gate/gates/bitwise_xor.dot)
+- **buffer**: [Component](component/gates/buffer.txt), [Hierarchical](hierarchical/gates/buffer.txt), [Gate](gate/gates/buffer.dot)
+- **nand_gate**: [Component](component/gates/nand_gate.txt), [Hierarchical](hierarchical/gates/nand_gate.txt)
+- **nor_gate**: [Component](component/gates/nor_gate.txt), [Hierarchical](hierarchical/gates/nor_gate.txt)
+- **not_gate**: [Component](component/gates/not_gate.txt), [Hierarchical](hierarchical/gates/not_gate.txt), [Gate](gate/gates/not_gate.dot)
+- **or_gate**: [Component](component/gates/or_gate.txt), [Hierarchical](hierarchical/gates/or_gate.txt), [Gate](gate/gates/or_gate.dot)
+- **tristate_buffer**: [Component](component/gates/tristate_buffer.txt), [Hierarchical](hierarchical/gates/tristate_buffer.txt)
+- **xnor_gate**: [Component](component/gates/xnor_gate.txt), [Hierarchical](hierarchical/gates/xnor_gate.txt)
+- **xor_gate**: [Component](component/gates/xor_gate.txt), [Hierarchical](hierarchical/gates/xor_gate.txt), [Gate](gate/gates/xor_gate.dot)
 
 ### Sequential Components
 
-- [counter](sequential/counter.txt) ([SVG](sequential/counter.svg), [DOT](sequential/counter.dot))
-- [d_flipflop](sequential/d_flipflop.txt) ([SVG](sequential/d_flipflop.svg), [DOT](sequential/d_flipflop.dot))
-- [d_flipflop_async](sequential/d_flipflop_async.txt) ([SVG](sequential/d_flipflop_async.svg), [DOT](sequential/d_flipflop_async.dot))
-- [jk_flipflop](sequential/jk_flipflop.txt) ([SVG](sequential/jk_flipflop.svg), [DOT](sequential/jk_flipflop.dot))
-- [program_counter](sequential/program_counter.txt) ([SVG](sequential/program_counter.svg), [DOT](sequential/program_counter.dot))
-- [register_16bit](sequential/register_16bit.txt) ([SVG](sequential/register_16bit.svg), [DOT](sequential/register_16bit.dot))
-- [register_8bit](sequential/register_8bit.txt) ([SVG](sequential/register_8bit.svg), [DOT](sequential/register_8bit.dot))
-- [register_load](sequential/register_load.txt) ([SVG](sequential/register_load.svg), [DOT](sequential/register_load.dot))
-- [shift_register](sequential/shift_register.txt) ([SVG](sequential/shift_register.svg), [DOT](sequential/shift_register.dot))
-- [sr_flipflop](sequential/sr_flipflop.txt) ([SVG](sequential/sr_flipflop.svg), [DOT](sequential/sr_flipflop.dot))
-- [sr_latch](sequential/sr_latch.txt) ([SVG](sequential/sr_latch.svg), [DOT](sequential/sr_latch.dot))
-- [stack_pointer](sequential/stack_pointer.txt) ([SVG](sequential/stack_pointer.svg), [DOT](sequential/stack_pointer.dot))
-- [t_flipflop](sequential/t_flipflop.txt) ([SVG](sequential/t_flipflop.svg), [DOT](sequential/t_flipflop.dot))
+- **counter**: [Component](component/sequential/counter.txt), [Hierarchical](hierarchical/sequential/counter.txt)
+- **d_flipflop**: [Component](component/sequential/d_flipflop.txt), [Hierarchical](hierarchical/sequential/d_flipflop.txt), [Gate](gate/sequential/d_flipflop.dot)
+- **d_flipflop_async**: [Component](component/sequential/d_flipflop_async.txt), [Hierarchical](hierarchical/sequential/d_flipflop_async.txt), [Gate](gate/sequential/d_flipflop_async.dot)
+- **jk_flipflop**: [Component](component/sequential/jk_flipflop.txt), [Hierarchical](hierarchical/sequential/jk_flipflop.txt)
+- **program_counter**: [Component](component/sequential/program_counter.txt), [Hierarchical](hierarchical/sequential/program_counter.txt)
+- **register_16bit**: [Component](component/sequential/register_16bit.txt), [Hierarchical](hierarchical/sequential/register_16bit.txt)
+- **register_8bit**: [Component](component/sequential/register_8bit.txt), [Hierarchical](hierarchical/sequential/register_8bit.txt)
+- **register_load**: [Component](component/sequential/register_load.txt), [Hierarchical](hierarchical/sequential/register_load.txt)
+- **shift_register**: [Component](component/sequential/shift_register.txt), [Hierarchical](hierarchical/sequential/shift_register.txt)
+- **sr_flipflop**: [Component](component/sequential/sr_flipflop.txt), [Hierarchical](hierarchical/sequential/sr_flipflop.txt)
+- **sr_latch**: [Component](component/sequential/sr_latch.txt), [Hierarchical](hierarchical/sequential/sr_latch.txt)
+- **stack_pointer**: [Component](component/sequential/stack_pointer.txt), [Hierarchical](hierarchical/sequential/stack_pointer.txt)
+- **t_flipflop**: [Component](component/sequential/t_flipflop.txt), [Hierarchical](hierarchical/sequential/t_flipflop.txt)
 
 ### Arithmetic Components
 
-- [addsub](arithmetic/addsub.txt) ([SVG](arithmetic/addsub.svg), [DOT](arithmetic/addsub.dot))
-- [alu_16bit](arithmetic/alu_16bit.txt) ([SVG](arithmetic/alu_16bit.svg), [DOT](arithmetic/alu_16bit.dot))
-- [alu_8bit](arithmetic/alu_8bit.txt) ([SVG](arithmetic/alu_8bit.svg), [DOT](arithmetic/alu_8bit.dot))
-- [comparator](arithmetic/comparator.txt) ([SVG](arithmetic/comparator.svg), [DOT](arithmetic/comparator.dot))
-- [divider](arithmetic/divider.txt) ([SVG](arithmetic/divider.svg), [DOT](arithmetic/divider.dot))
-- [full_adder](arithmetic/full_adder.txt) ([SVG](arithmetic/full_adder.svg), [DOT](arithmetic/full_adder.dot))
-- [half_adder](arithmetic/half_adder.txt) ([SVG](arithmetic/half_adder.svg), [DOT](arithmetic/half_adder.dot))
-- [incdec](arithmetic/incdec.txt) ([SVG](arithmetic/incdec.svg), [DOT](arithmetic/incdec.dot))
-- [multiplier](arithmetic/multiplier.txt) ([SVG](arithmetic/multiplier.svg), [DOT](arithmetic/multiplier.dot))
-- [ripple_carry_adder](arithmetic/ripple_carry_adder.txt) ([SVG](arithmetic/ripple_carry_adder.svg), [DOT](arithmetic/ripple_carry_adder.dot))
-- [subtractor](arithmetic/subtractor.txt) ([SVG](arithmetic/subtractor.svg), [DOT](arithmetic/subtractor.dot))
+- **addsub**: [Component](component/arithmetic/addsub.txt), [Hierarchical](hierarchical/arithmetic/addsub.txt)
+- **alu_16bit**: [Component](component/arithmetic/alu_16bit.txt), [Hierarchical](hierarchical/arithmetic/alu_16bit.txt)
+- **alu_8bit**: [Component](component/arithmetic/alu_8bit.txt), [Hierarchical](hierarchical/arithmetic/alu_8bit.txt)
+- **comparator**: [Component](component/arithmetic/comparator.txt), [Hierarchical](hierarchical/arithmetic/comparator.txt)
+- **divider**: [Component](component/arithmetic/divider.txt), [Hierarchical](hierarchical/arithmetic/divider.txt)
+- **full_adder**: [Component](component/arithmetic/full_adder.txt), [Hierarchical](hierarchical/arithmetic/full_adder.txt), [Gate](gate/arithmetic/full_adder.dot)
+- **half_adder**: [Component](component/arithmetic/half_adder.txt), [Hierarchical](hierarchical/arithmetic/half_adder.txt), [Gate](gate/arithmetic/half_adder.dot)
+- **incdec**: [Component](component/arithmetic/incdec.txt), [Hierarchical](hierarchical/arithmetic/incdec.txt)
+- **multiplier**: [Component](component/arithmetic/multiplier.txt), [Hierarchical](hierarchical/arithmetic/multiplier.txt)
+- **ripple_carry_adder**: [Component](component/arithmetic/ripple_carry_adder.txt), [Hierarchical](hierarchical/arithmetic/ripple_carry_adder.txt), [Gate](gate/arithmetic/ripple_carry_adder.dot)
+- **subtractor**: [Component](component/arithmetic/subtractor.txt), [Hierarchical](hierarchical/arithmetic/subtractor.txt)
 
 ### Combinational Components
 
-- [barrel_shifter](combinational/barrel_shifter.txt) ([SVG](combinational/barrel_shifter.svg), [DOT](combinational/barrel_shifter.dot))
-- [bit_reverse](combinational/bit_reverse.txt) ([SVG](combinational/bit_reverse.svg), [DOT](combinational/bit_reverse.dot))
-- [decoder_2to4](combinational/decoder_2to4.txt) ([SVG](combinational/decoder_2to4.svg), [DOT](combinational/decoder_2to4.dot))
-- [decoder_3to8](combinational/decoder_3to8.txt) ([SVG](combinational/decoder_3to8.svg), [DOT](combinational/decoder_3to8.dot))
-- [decoder_n](combinational/decoder_n.txt) ([SVG](combinational/decoder_n.svg), [DOT](combinational/decoder_n.dot))
-- [demux2](combinational/demux2.txt) ([SVG](combinational/demux2.svg), [DOT](combinational/demux2.dot))
-- [demux4](combinational/demux4.txt) ([SVG](combinational/demux4.svg), [DOT](combinational/demux4.dot))
-- [encoder_4to2](combinational/encoder_4to2.txt) ([SVG](combinational/encoder_4to2.svg), [DOT](combinational/encoder_4to2.dot))
-- [encoder_8to3](combinational/encoder_8to3.txt) ([SVG](combinational/encoder_8to3.svg), [DOT](combinational/encoder_8to3.dot))
-- [lzcount](combinational/lzcount.txt) ([SVG](combinational/lzcount.svg), [DOT](combinational/lzcount.dot))
-- [mux2](combinational/mux2.txt) ([SVG](combinational/mux2.svg), [DOT](combinational/mux2.dot))
-- [mux4](combinational/mux4.txt) ([SVG](combinational/mux4.svg), [DOT](combinational/mux4.dot))
-- [mux8](combinational/mux8.txt) ([SVG](combinational/mux8.svg), [DOT](combinational/mux8.dot))
-- [muxn](combinational/muxn.txt) ([SVG](combinational/muxn.svg), [DOT](combinational/muxn.dot))
-- [popcount](combinational/popcount.txt) ([SVG](combinational/popcount.svg), [DOT](combinational/popcount.dot))
-- [sign_extend](combinational/sign_extend.txt) ([SVG](combinational/sign_extend.svg), [DOT](combinational/sign_extend.dot))
-- [zero_detect](combinational/zero_detect.txt) ([SVG](combinational/zero_detect.svg), [DOT](combinational/zero_detect.dot))
-- [zero_extend](combinational/zero_extend.txt) ([SVG](combinational/zero_extend.svg), [DOT](combinational/zero_extend.dot))
+- **barrel_shifter**: [Component](component/combinational/barrel_shifter.txt), [Hierarchical](hierarchical/combinational/barrel_shifter.txt)
+- **bit_reverse**: [Component](component/combinational/bit_reverse.txt), [Hierarchical](hierarchical/combinational/bit_reverse.txt)
+- **decoder_2to4**: [Component](component/combinational/decoder_2to4.txt), [Hierarchical](hierarchical/combinational/decoder_2to4.txt)
+- **decoder_3to8**: [Component](component/combinational/decoder_3to8.txt), [Hierarchical](hierarchical/combinational/decoder_3to8.txt)
+- **decoder_n**: [Component](component/combinational/decoder_n.txt), [Hierarchical](hierarchical/combinational/decoder_n.txt)
+- **demux2**: [Component](component/combinational/demux2.txt), [Hierarchical](hierarchical/combinational/demux2.txt)
+- **demux4**: [Component](component/combinational/demux4.txt), [Hierarchical](hierarchical/combinational/demux4.txt)
+- **encoder_4to2**: [Component](component/combinational/encoder_4to2.txt), [Hierarchical](hierarchical/combinational/encoder_4to2.txt)
+- **encoder_8to3**: [Component](component/combinational/encoder_8to3.txt), [Hierarchical](hierarchical/combinational/encoder_8to3.txt)
+- **lzcount**: [Component](component/combinational/lzcount.txt), [Hierarchical](hierarchical/combinational/lzcount.txt)
+- **mux2**: [Component](component/combinational/mux2.txt), [Hierarchical](hierarchical/combinational/mux2.txt), [Gate](gate/combinational/mux2.dot)
+- **mux4**: [Component](component/combinational/mux4.txt), [Hierarchical](hierarchical/combinational/mux4.txt)
+- **mux8**: [Component](component/combinational/mux8.txt), [Hierarchical](hierarchical/combinational/mux8.txt)
+- **muxn**: [Component](component/combinational/muxn.txt), [Hierarchical](hierarchical/combinational/muxn.txt)
+- **popcount**: [Component](component/combinational/popcount.txt), [Hierarchical](hierarchical/combinational/popcount.txt)
+- **sign_extend**: [Component](component/combinational/sign_extend.txt), [Hierarchical](hierarchical/combinational/sign_extend.txt)
+- **zero_detect**: [Component](component/combinational/zero_detect.txt), [Hierarchical](hierarchical/combinational/zero_detect.txt)
+- **zero_extend**: [Component](component/combinational/zero_extend.txt), [Hierarchical](hierarchical/combinational/zero_extend.txt)
 
 ### Memory Components
 
-- [dual_port_ram](memory/dual_port_ram.txt) ([SVG](memory/dual_port_ram.svg), [DOT](memory/dual_port_ram.dot))
-- [fifo](memory/fifo.txt) ([SVG](memory/fifo.svg), [DOT](memory/fifo.dot))
-- [ram](memory/ram.txt) ([SVG](memory/ram.svg), [DOT](memory/ram.dot))
-- [ram_64k](memory/ram_64k.txt) ([SVG](memory/ram_64k.svg), [DOT](memory/ram_64k.dot))
-- [register_file](memory/register_file.txt) ([SVG](memory/register_file.svg), [DOT](memory/register_file.dot))
-- [rom](memory/rom.txt) ([SVG](memory/rom.svg), [DOT](memory/rom.dot))
-- [stack](memory/stack.txt) ([SVG](memory/stack.svg), [DOT](memory/stack.dot))
+- **dual_port_ram**: [Component](component/memory/dual_port_ram.txt), [Hierarchical](hierarchical/memory/dual_port_ram.txt)
+- **fifo**: [Component](component/memory/fifo.txt), [Hierarchical](hierarchical/memory/fifo.txt)
+- **ram**: [Component](component/memory/ram.txt), [Hierarchical](hierarchical/memory/ram.txt)
+- **ram_64k**: [Component](component/memory/ram_64k.txt), [Hierarchical](hierarchical/memory/ram_64k.txt)
+- **register_file**: [Component](component/memory/register_file.txt), [Hierarchical](hierarchical/memory/register_file.txt)
+- **rom**: [Component](component/memory/rom.txt), [Hierarchical](hierarchical/memory/rom.txt)
+- **stack**: [Component](component/memory/stack.txt), [Hierarchical](hierarchical/memory/stack.txt)
 
 ### CPU Components
 
-- [accumulator](cpu/accumulator.txt) ([SVG](cpu/accumulator.svg), [DOT](cpu/accumulator.dot))
-- [datapath](cpu/datapath.txt) ([SVG](cpu/datapath.svg), [DOT](cpu/datapath.dot))
-- [instruction_decoder](cpu/instruction_decoder.txt) ([SVG](cpu/instruction_decoder.svg), [DOT](cpu/instruction_decoder.dot))
+- **accumulator**: [Component](component/cpu/accumulator.txt), [Hierarchical](hierarchical/cpu/accumulator.txt)
+- **datapath**: [Component](component/cpu/datapath.txt), [Hierarchical](hierarchical/cpu/datapath.txt)
+- **instruction_decoder**: [Component](component/cpu/instruction_decoder.txt), [Hierarchical](hierarchical/cpu/instruction_decoder.txt)
 
 ## Regenerating Diagrams
 
-To regenerate all diagrams, run:
 ```bash
+# Generate all diagrams in all modes
 rake diagrams:generate
+
+# Generate only component-level diagrams
+rake diagrams:component
+
+# Generate only hierarchical diagrams
+rake diagrams:hierarchical
+
+# Generate only gate-level diagrams
+rake diagrams:gate
 ```
 
 ---

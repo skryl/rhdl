@@ -1,0 +1,12 @@
+digraph "or_gate" {
+  rankdir=LR;
+  node [fontname="Helvetica"];
+  edge [fontname="Helvetica"];
+  "gate:or:0" [label="OR" shape=ellipse];
+  "port:or_gate.a0:input:0" [label="or_gate.a0" shape=plaintext];
+  "port:or_gate.a1:input:0" [label="or_gate.a1" shape=plaintext];
+  "port:or_gate.y:output:0" [label="or_gate.y" shape=plaintext];
+  "gate:or:0" -> "port:or_gate.y:output:0";
+  "port:or_gate.a0:input:0" -> "gate:or:0";
+  "port:or_gate.a1:input:0" -> "gate:or:0";
+}

@@ -1,0 +1,18 @@
+digraph "and_gate_3in" {
+  rankdir=LR;
+  node [fontname="Helvetica"];
+  edge [fontname="Helvetica"];
+  "gate:and:0" [label="AND" shape=ellipse];
+  "gate:and:1" [label="AND" shape=ellipse];
+  "port:and_gate_3in.a0:input:0" [label="and_gate_3in.a0" shape=plaintext];
+  "port:and_gate_3in.a1:input:0" [label="and_gate_3in.a1" shape=plaintext];
+  "port:and_gate_3in.a2:input:0" [label="and_gate_3in.a2" shape=plaintext];
+  "port:and_gate_3in.y:output:0" [label="and_gate_3in.y" shape=plaintext];
+  "wire:4" [label="n4" shape=circle];
+  "gate:and:0" -> "wire:4";
+  "gate:and:1" -> "port:and_gate_3in.y:output:0";
+  "port:and_gate_3in.a0:input:0" -> "gate:and:0";
+  "port:and_gate_3in.a1:input:0" -> "gate:and:0";
+  "port:and_gate_3in.a2:input:0" -> "gate:and:1";
+  "wire:4" -> "gate:and:1";
+}
