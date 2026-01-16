@@ -418,11 +418,10 @@ RSpec.describe 'MOS 6502 Instructions' do
       expect(cpu.sp).to eq(0x80)
     end
 
-    # Known limitation: TXS flag behavior needs verification
-    xit 'TXS does not affect flags' do
+    it 'TXS does not affect flags' do
       cpu.assemble_and_load(<<~'ASM')
-        LDA #$01
         LDX #$00
+        LDA #$01
         TXS
       ASM
       cpu.reset
@@ -1313,8 +1312,7 @@ RSpec.describe 'MOS 6502 Instructions' do
       expect(cpu.a).to eq(0x42)
     end
 
-    # Known limitation: nested JSR/RTS stack handling
-    xit 'nested JSR and RTS' do
+    it 'nested JSR and RTS' do
       cpu.assemble_and_load(<<~'ASM')
         LDA #$00
         STA $10
@@ -1355,8 +1353,7 @@ RSpec.describe 'MOS 6502 Instructions' do
       expect(cpu.read_mem(0x0100 + sp_before)).to eq(0x42)
     end
 
-    # Known limitation: PLA stack pull not fully implemented
-    xit 'PLA pulls from stack to A' do
+    it 'PLA pulls from stack to A' do
       cpu.assemble_and_load(<<~'ASM')
         LDA #$42
         PHA
@@ -1368,8 +1365,7 @@ RSpec.describe 'MOS 6502 Instructions' do
       expect(cpu.a).to eq(0x42)
     end
 
-    # Known limitation: PLA stack pull not fully implemented
-    xit 'PLA sets Z flag when pulling zero' do
+    it 'PLA sets Z flag when pulling zero' do
       cpu.assemble_and_load(<<~'ASM')
         LDA #$00
         PHA
@@ -1382,8 +1378,7 @@ RSpec.describe 'MOS 6502 Instructions' do
       expect(cpu.flag_z).to eq(1)
     end
 
-    # Known limitation: PLA stack pull not fully implemented
-    xit 'PLA sets N flag when pulling negative' do
+    it 'PLA sets N flag when pulling negative' do
       cpu.assemble_and_load(<<~'ASM')
         LDA #$80
         PHA
@@ -1396,8 +1391,7 @@ RSpec.describe 'MOS 6502 Instructions' do
       expect(cpu.flag_n).to eq(1)
     end
 
-    # Known limitation: PHP stack push not fully implemented
-    xit 'PHP pushes status register' do
+    it 'PHP pushes status register' do
       cpu.assemble_and_load(<<~'ASM')
         SEC
         PHP
@@ -1409,8 +1403,7 @@ RSpec.describe 'MOS 6502 Instructions' do
       expect(status & 0x01).to eq(1)  # Carry should be set
     end
 
-    # Known limitation: PLP stack pull not fully implemented
-    xit 'PLP pulls status register' do
+    it 'PLP pulls status register' do
       cpu.assemble_and_load(<<~'ASM')
         SEC
         PHP
@@ -1522,8 +1515,7 @@ RSpec.describe 'MOS 6502 Instructions' do
   # BRK INSTRUCTION
   # ============================================
   describe 'BRK instruction' do
-    # Known limitation: BRK halt detection timing
-    xit 'BRK halts the CPU' do
+    it 'BRK halts the CPU' do
       cpu.assemble_and_load(<<~'ASM')
         LDA #$42
         BRK

@@ -57,6 +57,7 @@ module MOS6502
       input :is_write
       input :is_rmw
       input :writes_reg             # Instruction writes to register
+      input :is_status_op           # Stack operation on status register (PHP/PLP)
 
       # Status flags for branch decisions
       input :flag_n
@@ -160,6 +161,8 @@ module MOS6502
         mode = in_val(:addr_mode)
         if mode == AddressGenerator::MODE_INDIRECT
           @state = STATE_ADDR_LO
+        elsif in_val(:instr_type) == InstructionDecoder::TYPE_JUMP && in_val(:is_write) == 1
+          @state = STATE_JSR_PUSH_HI
         elsif needs_memory_read?
           @state = STATE_READ_MEM
         elsif in_val(:is_write) == 1
@@ -257,7 +260,7 @@ module MOS6502
         @state = STATE_BRK_VEC_HI
 
       when STATE_BRK_VEC_HI
-        @state = STATE_FETCH
+        @state = STATE_HALT
 
       when STATE_HALT
         # Stay halted
@@ -445,6 +448,7 @@ module MOS6502
       when STATE_PUSH
         out_set(:mem_write, 1)
         out_set(:addr_sel, 5)  # Stack address
+        out_set(:data_sel, in_val(:is_status_op) == 1 ? 4 : 0)
         out_set(:sp_dec, 1)
         out_set(:done, 1)
 
