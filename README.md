@@ -393,29 +393,62 @@ puts "5! = #{memory.read(0xF)}"  # Should print "120"
 
 ## Running Tests
 
-RHDL uses RSpec for testing. To run all tests:
+RHDL uses RSpec for testing. The recommended way to run tests:
+
+### Using the Test Runner Script (Recommended)
+
+```bash
+# Run all tests
+bin/test
+
+# Run specific test file
+bin/test spec/examples/mos6502/cpu_spec.rb
+
+# Run all 6502 CPU tests
+bin/test spec/examples/mos6502/
+
+# Run with documentation format
+bin/test --format documentation
+```
+
+### Using Rake
+
+```bash
+# Run all tests
+rake spec
+
+# Run 6502 CPU tests
+rake spec_6502
+
+# Run with documentation format
+rake spec_doc
+```
+
+### Using bundle exec (if bundler works)
 
 ```bash
 bundle exec rspec
+bundle exec rspec spec/examples/mos6502/
 ```
 
-Or using Ruby directly:
+### MOS 6502 CPU Tests
+
+The 6502 CPU implementation has comprehensive test coverage:
 
 ```bash
-ruby -I lib -r bundler/setup -r rspec -e "RSpec::Core::Runner.run(['spec', '--format', 'documentation'])"
+# Run all 6502 tests (189 examples)
+bin/test spec/examples/mos6502/
 ```
 
-To run only the CPU-related tests:
-
-```bash
-bundle exec rspec spec/rhdl/cpu
-```
-
-To run the HDL CPU standalone tests:
-
-```bash
-ruby test_hdl_cpu.rb
-```
+Test files:
+- `instructions_spec.rb` - All instructions and addressing modes (129 tests)
+- `cpu_spec.rb` - Core CPU operations and programs
+- `alu_spec.rb` - ALU operations
+- `assembler_spec.rb` - Assembly language support
+- `algorithms_spec.rb` - Complex algorithms (bubble sort, Fibonacci, etc.)
+- `math_spec.rb` - Mathematical operations
+- `mandelbrot_spec.rb` - Mandelbrot set computation with fixed-point math
+- `game_of_life_spec.rb` - Conway's Game of Life cellular automaton
 
 ### Test Suite Status
 
