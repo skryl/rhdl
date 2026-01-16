@@ -52,18 +52,18 @@ rhdl/
 │   ├── memory_unit.rb           # Memory interface
 │   └── program_counter.rb       # Program counter
 │
-├── examples/                    # Demo scripts
-│   ├── full_adder.rb            # Full adder example
-│   ├── simulator_tui_demo.rb    # TUI demo
-│   ├── circuit_diagrams.rb      # Diagram examples
+├── examples/                    # Example implementations
 │   └── mos6502/                 # MOS 6502 CPU implementation
 │       ├── cpu.rb               # 6502 CPU
 │       ├── alu.rb               # 6502 ALU
+│       ├── control_unit.rb      # State machine
+│       ├── datapath.rb          # CPU datapath
 │       ├── assembler.rb         # 6502 assembler
 │       └── ...                  # Other 6502 components
 │
 ├── spec/                        # Test suite
 │   ├── examples/mos6502/        # MOS 6502 tests (189+ tests)
+│   ├── behavioral_cpu/          # Behavioral CPU tests (47 tests)
 │   ├── rhdl/                    # Core framework tests
 │   │   └── hdl/                 # HDL component tests
 │   └── support/                 # Test helpers
@@ -73,6 +73,7 @@ rhdl/
 │   ├── simulation_engine.md     # Simulation infrastructure
 │   ├── components.md            # Component reference
 │   ├── cpu_datapath.md          # CPU architecture
+│   ├── mos6502.md               # MOS 6502 implementation
 │   ├── debugging.md             # Debug/TUI guide
 │   ├── diagrams.md              # Diagram generation
 │   ├── hdl_export.md            # VHDL/Verilog export
@@ -169,18 +170,7 @@ Key test files:
 ### Key Entry Points
 
 - `lib/rhdl.rb` - Main library entry point
-- `examples/simulator_tui_demo.rb` - Interactive TUI demo
-- `examples/circuit_diagrams.rb` - Diagram generation examples
-
-### Running Examples
-
-```bash
-# TUI simulator demo
-ruby examples/simulator_tui_demo.rb
-
-# Diagram generation example
-ruby examples/circuit_diagrams.rb
-```
+- `examples/mos6502/cpu.rb` - MOS 6502 CPU implementation
 
 ### Rake Tasks
 
@@ -270,4 +260,28 @@ Multi-level diagrams with hierarchy support are available. See `docs/diagrams.md
 Detailed documentation is available in `/docs/`:
 - Start with `hdl_overview.md` for architecture concepts
 - See `components.md` for the full component reference
+- See `mos6502.md` for MOS 6502 CPU implementation details
 - Use `debugging.md` for TUI and debugging guide
+
+## Development Guidelines
+
+### Debug and Test Scripts
+
+All debug and temporary test scripts should be written as rake tasks and reused when possible. Do not create standalone debug scripts at the top level of the repository.
+
+**Examples:**
+```bash
+# Run gate-level benchmark
+rake bench:gates
+
+# Run specific test suite
+rake spec_6502
+
+# Generate diagrams for debugging
+rake diagrams:generate
+```
+
+If you need to add a new debug or test script:
+1. Add it as a rake task in `Rakefile`
+2. Namespace it appropriately (e.g., `debug:`, `bench:`, `test:`)
+3. Include a description using `desc` so it appears in `rake -T`
