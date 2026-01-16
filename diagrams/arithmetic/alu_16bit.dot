@@ -1,0 +1,13 @@
+digraph alu16 {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[16]|<b>b[16]|<op>op[4]|<cin>cin[1]}|alu16\n(ALU)|{<result>result[16]|<cout>cout[1]|<zero>zero[1]|<negative>negative[1]|<overflow>overflow[1]}}"];
+
+  subgraph cluster_main {
+    label="alu16";
+    style=rounded;
+    color=blue;
+  }
+}

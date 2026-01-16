@@ -1,0 +1,13 @@
+digraph dpram {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<clk>clk[1]|<we>we[1]|<waddr>waddr[8]|<raddr>raddr[8]|<din>din[8]}|dpram\n(DualPortRAM)|{<dout>dout[8]}}"];
+
+  subgraph cluster_main {
+    label="dpram";
+    style=rounded;
+    color=blue;
+  }
+}

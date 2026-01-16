@@ -1,0 +1,13 @@
+digraph mux8 {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<in0>in0[8]|<in1>in1[8]|<in2>in2[8]|<in3>in3[8]|<in4>in4[8]|<in5>in5[8]|<in6>in6[8]|<in7>in7[8]|<sel>sel[3]}|mux8\n(Mux8)|{<y>y[8]}}"];
+
+  subgraph cluster_main {
+    label="mux8";
+    style=rounded;
+    color=blue;
+  }
+}

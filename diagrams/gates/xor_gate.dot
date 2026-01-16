@@ -1,0 +1,13 @@
+digraph xor_gate {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a0>a0[1]|<a1>a1[1]}|xor_gate\n(XorGate)|{<y>y[1]}}"];
+
+  subgraph cluster_main {
+    label="xor_gate";
+    style=rounded;
+    color=blue;
+  }
+}
