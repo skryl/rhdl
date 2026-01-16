@@ -8,30 +8,29 @@ module MOS6502
   REG_Y  = 2
 
   # 8-bit General Purpose Registers (A, X, Y)
+  # Sequential - requires always @(posedge clk) for synthesis
   class Registers < RHDL::HDL::SequentialComponent
+    port_input :clk
+    port_input :rst
+
+    # Data input
+    port_input :data_in, width: 8
+
+    # Load controls for each register
+    port_input :load_a
+    port_input :load_x
+    port_input :load_y
+
+    # Outputs
+    port_output :a, width: 8
+    port_output :x, width: 8
+    port_output :y, width: 8
+
     def initialize(name = nil)
       @a = 0  # Accumulator
       @x = 0  # Index X
       @y = 0  # Index Y
       super(name)
-    end
-
-    def setup_ports
-      input :clk
-      input :rst
-
-      # Data input
-      input :data_in, width: 8
-
-      # Load controls for each register
-      input :load_a
-      input :load_x
-      input :load_y
-
-      # Outputs
-      output :a, width: 8
-      output :x, width: 8
-      output :y, width: 8
     end
 
     def propagate
@@ -64,26 +63,25 @@ module MOS6502
   # 6502 Stack Pointer
   # Stack is located at page 1 ($0100-$01FF)
   # SP points to next free location, decrements on push, increments on pop
+  # Sequential - requires always @(posedge clk) for synthesis
   class StackPointer6502 < RHDL::HDL::SequentialComponent
     STACK_BASE = 0x0100  # Stack base address
+
+    port_input :clk
+    port_input :rst
+
+    port_input :inc        # Increment (pop)
+    port_input :dec        # Decrement (push)
+    port_input :load       # Load new value
+    port_input :data_in, width: 8
+
+    port_output :sp, width: 8           # Stack pointer value
+    port_output :addr, width: 16        # Full stack address ($01xx)
+    port_output :addr_plus1, width: 16  # SP+1 address (for reading after pop)
 
     def initialize(name = nil)
       @state = 0xFD  # Initial SP after reset
       super(name)
-    end
-
-    def setup_ports
-      input :clk
-      input :rst
-
-      input :inc        # Increment (pop)
-      input :dec        # Decrement (push)
-      input :load       # Load new value
-      input :data_in, width: 8
-
-      output :sp, width: 8           # Stack pointer value
-      output :addr, width: 16        # Full stack address ($01xx)
-      output :addr_plus1, width: 16  # SP+1 address (for reading after pop)
     end
 
     def propagate
@@ -114,23 +112,22 @@ module MOS6502
 
   # 6502 Program Counter
   # 16-bit counter that can be loaded or incremented
+  # Sequential - requires always @(posedge clk) for synthesis
   class ProgramCounter6502 < RHDL::HDL::SequentialComponent
+    port_input :clk
+    port_input :rst
+
+    port_input :inc           # Increment PC
+    port_input :load          # Load new address
+    port_input :addr_in, width: 16
+
+    port_output :pc, width: 16           # Current PC
+    port_output :pc_hi, width: 8         # High byte
+    port_output :pc_lo, width: 8         # Low byte
+
     def initialize(name = nil)
       @state = 0x0000
       super(name)
-    end
-
-    def setup_ports
-      input :clk
-      input :rst
-
-      input :inc           # Increment PC
-      input :load          # Load new address
-      input :addr_in, width: 16
-
-      output :pc, width: 16           # Current PC
-      output :pc_hi, width: 8         # High byte
-      output :pc_lo, width: 8         # Low byte
     end
 
     def propagate
@@ -157,27 +154,26 @@ module MOS6502
   end
 
   # Instruction Register and Operand Latches
+  # Sequential - requires always @(posedge clk) for synthesis
   class InstructionRegister < RHDL::HDL::SequentialComponent
+    port_input :clk
+    port_input :rst
+
+    port_input :load_opcode
+    port_input :load_operand_lo
+    port_input :load_operand_hi
+    port_input :data_in, width: 8
+
+    port_output :opcode, width: 8
+    port_output :operand_lo, width: 8
+    port_output :operand_hi, width: 8
+    port_output :operand, width: 16       # Combined operand (hi << 8 | lo)
+
     def initialize(name = nil)
       @opcode = 0
       @operand_lo = 0
       @operand_hi = 0
       super(name)
-    end
-
-    def setup_ports
-      input :clk
-      input :rst
-
-      input :load_opcode
-      input :load_operand_lo
-      input :load_operand_hi
-      input :data_in, width: 8
-
-      output :opcode, width: 8
-      output :operand_lo, width: 8
-      output :operand_hi, width: 8
-      output :operand, width: 16       # Combined operand (hi << 8 | lo)
     end
 
     def propagate
@@ -205,26 +201,25 @@ module MOS6502
   end
 
   # Address Latch for effective address calculation
+  # Sequential - requires always @(posedge clk) for synthesis
   class AddressLatch < RHDL::HDL::SequentialComponent
+    port_input :clk
+    port_input :rst
+
+    port_input :load_lo
+    port_input :load_hi
+    port_input :load_full       # Load complete 16-bit address
+    port_input :data_in, width: 8
+    port_input :addr_in, width: 16
+
+    port_output :addr, width: 16
+    port_output :addr_lo, width: 8
+    port_output :addr_hi, width: 8
+
     def initialize(name = nil)
       @addr_lo = 0
       @addr_hi = 0
       super(name)
-    end
-
-    def setup_ports
-      input :clk
-      input :rst
-
-      input :load_lo
-      input :load_hi
-      input :load_full       # Load complete 16-bit address
-      input :data_in, width: 8
-      input :addr_in, width: 16
-
-      output :addr, width: 16
-      output :addr_lo, width: 8
-      output :addr_hi, width: 8
     end
 
     def propagate
@@ -249,19 +244,18 @@ module MOS6502
   end
 
   # Data Latch for temporary storage
+  # Sequential - requires always @(posedge clk) for synthesis
   class DataLatch < RHDL::HDL::SequentialComponent
+    port_input :clk
+    port_input :rst
+    port_input :load
+    port_input :data_in, width: 8
+
+    port_output :data, width: 8
+
     def initialize(name = nil)
       @data = 0
       super(name)
-    end
-
-    def setup_ports
-      input :clk
-      input :rst
-      input :load
-      input :data_in, width: 8
-
-      output :data, width: 8
     end
 
     def propagate

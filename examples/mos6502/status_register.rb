@@ -21,48 +21,47 @@ module MOS6502
     FLAG_V = 6  # Overflow
     FLAG_N = 7  # Negative
 
+    # Control inputs
+    port_input :clk
+    port_input :rst
+
+    # Load controls
+    port_input :load_all        # Load entire register (from stack pull)
+    port_input :load_flags      # Load N, Z, C, V from ALU
+    port_input :load_n          # Load just N flag
+    port_input :load_z          # Load just Z flag
+    port_input :load_c          # Load just C flag
+    port_input :load_v          # Load just V flag
+    port_input :load_i          # Load just I flag
+    port_input :load_d          # Load just D flag
+    port_input :load_b          # Load just B flag
+
+    # Flag inputs
+    port_input :n_in            # Negative input
+    port_input :z_in            # Zero input
+    port_input :c_in            # Carry input
+    port_input :v_in            # Overflow input
+    port_input :i_in            # Interrupt disable input
+    port_input :d_in            # Decimal mode input
+    port_input :b_in            # Break flag input
+    port_input :data_in, width: 8  # Full byte input for PLP
+
+    # Outputs - full register and individual flags
+    port_output :p, width: 8    # Full status register
+    port_output :n              # Negative flag
+    port_output :v              # Overflow flag
+    port_output :b              # Break flag (only used when pushed)
+    port_output :d              # Decimal mode
+    port_output :i              # Interrupt disable
+    port_output :z              # Zero flag
+    port_output :c              # Carry flag
+
     def initialize(name = nil)
       @state = 0x24  # Initial: I=1, unused bit 5=1
       super(name)
     end
 
-    def setup_ports
-      # Control inputs
-      input :clk
-      input :rst
-
-      # Load controls
-      input :load_all        # Load entire register (from stack pull)
-      input :load_flags      # Load N, Z, C, V from ALU
-      input :load_n          # Load just N flag
-      input :load_z          # Load just Z flag
-      input :load_c          # Load just C flag
-      input :load_v          # Load just V flag
-      input :load_i          # Load just I flag
-      input :load_d          # Load just D flag
-      input :load_b          # Load just B flag
-
-      # Flag inputs
-      input :n_in            # Negative input
-      input :z_in            # Zero input
-      input :c_in            # Carry input
-      input :v_in            # Overflow input
-      input :i_in            # Interrupt disable input
-      input :d_in            # Decimal mode input
-      input :b_in            # Break flag input
-      input :data_in, width: 8  # Full byte input for PLP
-
-      # Outputs - full register and individual flags
-      output :p, width: 8    # Full status register
-      output :n              # Negative flag
-      output :v              # Overflow flag
-      output :b              # Break flag (only used when pushed)
-      output :d              # Decimal mode
-      output :i              # Interrupt disable
-      output :z              # Zero flag
-      output :c              # Carry flag
-    end
-
+    # Sequential component - requires always @(posedge clk) for synthesis
     def propagate
       if rising_edge?
         if in_val(:rst) == 1

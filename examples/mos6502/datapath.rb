@@ -1,43 +1,42 @@
 # MOS 6502 CPU Datapath
 # Integrates all CPU components into a complete datapath
+# Sequential - requires always @(posedge clk) for synthesis
 
 module MOS6502
   class Datapath < RHDL::HDL::SequentialComponent
     attr_reader :registers, :status_reg, :pc, :sp, :ir, :alu
     attr_reader :control, :decoder, :addr_gen, :addr_latch, :data_latch
 
+    # External interface
+    port_input :clk
+    port_input :rst
+    port_input :rdy              # Ready/halt input
+    port_input :irq              # Interrupt request
+    port_input :nmi              # Non-maskable interrupt
+
+    # Memory interface
+    port_input :data_in, width: 8     # Data from memory
+    port_output :data_out, width: 8   # Data to memory
+    port_output :addr, width: 16      # Address bus
+    port_output :rw                   # Read/Write (1=read, 0=write)
+    port_output :sync                 # Opcode fetch cycle
+
+    # Debug outputs
+    port_output :reg_a, width: 8
+    port_output :reg_x, width: 8
+    port_output :reg_y, width: 8
+    port_output :reg_sp, width: 8
+    port_output :reg_pc, width: 16
+    port_output :reg_p, width: 8
+    port_output :opcode, width: 8
+    port_output :state, width: 8
+    port_output :halted
+    port_output :cycle_count, width: 32
+
     def initialize(name = nil)
       super(name)
       create_subcomponents
       @rmw_result_latch = 0  # Holds ALU result during RMW operations
-    end
-
-    def setup_ports
-      # External interface
-      input :clk
-      input :rst
-      input :rdy              # Ready/halt input
-      input :irq              # Interrupt request
-      input :nmi              # Non-maskable interrupt
-
-      # Memory interface
-      input :data_in, width: 8     # Data from memory
-      output :data_out, width: 8   # Data to memory
-      output :addr, width: 16      # Address bus
-      output :rw                   # Read/Write (1=read, 0=write)
-      output :sync                 # Opcode fetch cycle
-
-      # Debug outputs
-      output :reg_a, width: 8
-      output :reg_x, width: 8
-      output :reg_y, width: 8
-      output :reg_sp, width: 8
-      output :reg_pc, width: 16
-      output :reg_p, width: 8
-      output :opcode, width: 8
-      output :state, width: 8
-      output :halted
-      output :cycle_count, width: 32
     end
 
     def create_subcomponents
