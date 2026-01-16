@@ -178,13 +178,49 @@ Key test files:
 # TUI simulator demo
 ruby examples/simulator_tui_demo.rb
 
-# Diagram generation
+# Diagram generation example
 ruby examples/circuit_diagrams.rb
+```
+
+### Rake Tasks
+
+The project includes rake tasks for common operations:
+
+```bash
+# Generate all component diagrams (SVG, DOT, TXT)
+rake diagrams:generate
+
+# Clean generated diagrams
+rake diagrams:clean
+
+# Export DSL components to VHDL and Verilog
+rake hdl:export
+
+# Export only VHDL
+rake hdl:vhdl
+
+# Export only Verilog
+rake hdl:verilog
+
+# Clean generated HDL files
+rake hdl:clean
+
+# Run gate-level simulation benchmark
+rake bench:gates
+
+# Generate all outputs (diagrams + HDL)
+rake generate_all
+
+# Clean all generated files
+rake clean_all
+
+# Regenerate everything (clean + generate)
+rake regenerate
 ```
 
 ### HDL Export
 
-Export Ruby components to VHDL/Verilog:
+Export Ruby DSL components to VHDL/Verilog:
 ```ruby
 require 'rhdl'
 
@@ -200,14 +236,21 @@ Generated files are placed in `/vhdl/` and `/verilog/` directories.
 
 ### Diagram Generation
 
-Generate circuit diagrams:
+Generate circuit diagrams programmatically:
 ```ruby
 require 'rhdl'
 
 # Generate component diagram
-diagram = RHDL::HDL::Diagram.new(component)
-diagram.render_svg("output.svg")
-diagram.render_dot("output.dot")
+component = RHDL::HDL::ALU.new('alu', width: 8)
+
+# ASCII diagram
+puts component.to_diagram
+
+# Save SVG
+component.save_svg("output.svg")
+
+# Save DOT (Graphviz)
+component.save_dot("output.dot")
 ```
 
 Multi-level diagrams with hierarchy support are available. See `docs/diagrams.md`.
@@ -215,6 +258,7 @@ Multi-level diagrams with hierarchy support are available. See `docs/diagrams.md
 ## Recent Changes
 
 ### Latest Updates (2025)
+- **Rake task migration** - Moved scripts to rake tasks (`rake diagrams:generate`, `rake hdl:export`, `rake bench:gates`)
 - **MOS 6502 CPU timing fixes** - Fixed RMW instruction timing for shifts
 - **Multi-level diagram generation** - Hierarchical component diagrams
 - **HDL export improvements** - Fixed Verilog resize and export tests
