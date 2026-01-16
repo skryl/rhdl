@@ -7,6 +7,8 @@ require_relative 'hdl/sequential'
 require_relative 'hdl/arithmetic'
 require_relative 'hdl/combinational'
 require_relative 'hdl/memory'
+require_relative 'hdl/debug'
+require_relative 'hdl/tui'
 require_relative 'hdl/cpu'
 
 module RHDL
@@ -16,6 +18,19 @@ module RHDL
       sim = Simulator.new
       block.call(sim) if block_given?
       sim
+    end
+
+    # Create a debug simulator with TUI support
+    def self.debug_simulator(&block)
+      sim = DebugSimulator.new
+      block.call(sim) if block_given?
+      sim
+    end
+
+    # Launch the TUI for a simulator
+    def self.tui(simulator = nil)
+      tui = SimulatorTUI.new(simulator)
+      tui
     end
 
     # Create an HDL CPU instance

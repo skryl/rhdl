@@ -7,7 +7,7 @@ module RHDL
     class SequentialComponent < SimComponent
       def initialize(name = nil)
         @prev_clk = 0
-        @state = 0
+        @state ||= 0  # Don't overwrite subclass initialization
         super(name)
       end
 
