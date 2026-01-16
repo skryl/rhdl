@@ -167,6 +167,7 @@ module MOS6502
 
       # ALU inputs
       # For LOAD instructions, alu_a should be the value being loaded (for N/Z flag computation)
+      # For RMW operations (INC/DEC/shift on memory), alu_a should be the memory data
       # For other instructions, use the source register
       if instr_type == InstructionDecoder::TYPE_LOAD
         alu_a = if addr_mode == AddressGenerator::MODE_IMMEDIATE
@@ -174,6 +175,11 @@ module MOS6502
         else
           @data_latch.get_output(:data)
         end
+      elsif (instr_type == InstructionDecoder::TYPE_INC_DEC || instr_type == InstructionDecoder::TYPE_SHIFT) &&
+            addr_mode != AddressGenerator::MODE_ACCUMULATOR &&
+            addr_mode != AddressGenerator::MODE_IMPLIED
+        # RMW on memory: use memory data as ALU input
+        alu_a = @data_latch.get_output(:data)
       else
         alu_a = select_alu_input_a(src_reg, reg_a, reg_x, reg_y, @data_latch.get_output(:data))
       end
