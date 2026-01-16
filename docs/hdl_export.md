@@ -1,0 +1,62 @@
+# HDL Export (Verilog/VHDL)
+
+This document describes the initial HDL export support implemented by `RHDL::Export`.
+
+## Supported subset
+
+The export pipeline currently supports a focused subset of the RHDL DSL:
+
+* Ports (input/output/inout) with explicit widths.
+* Internal registers declared via `signal`.
+* Continuous assignments (`assign`).
+* Combinational processes with `if`/`else` and sequential assignments.
+* Clocked processes with `if`/`else` and sequential assignments.
+* Expressions:
+  * Bitwise ops: `&`, `|`, `^`, `~`
+  * Arithmetic: `+` and `-`
+  * Shifts: `<<`, `>>`
+  * Comparisons: `==`, `!=`, `<`, `>`, `<=`, `>=`
+  * Concatenation and replication
+  * Conditional/mux (via `assign` with a condition or `if`/`else` in a process)
+
+Anything outside this subset will raise an error during lowering.
+
+## Signal naming rules
+
+* Identifiers are sanitized for HDL output:
+  * Invalid characters are replaced with `_`.
+  * Verilog/VHDL keywords are suffixed with `_rhdl`.
+  * Identifiers starting with a digit are prefixed with `_` (Verilog only).
+
+## Vector conventions
+
+* Verilog uses `[W-1:0]`.
+* VHDL uses `std_logic_vector(W-1 downto 0)`.
+* Width 1 is emitted as `std_logic` (VHDL) or a scalar port (Verilog).
+
+## Clock/reset semantics
+
+* Clocked processes use `posedge clk` in Verilog and `rising_edge(clk)` in VHDL.
+* Synchronous reset and enable can be expressed with `if`/`else` inside the
+  clocked process (reset/enable are treated as data signals evaluated on
+  the active clock edge).
+
+## Running export tests locally
+
+Verilog export tests require Icarus Verilog (`iverilog` and `vvp`).
+
+VHDL export tests require GHDL (`ghdl`).
+
+If a toolchain is missing, the corresponding specs are skipped automatically.
+
+Run all specs:
+
+```
+bundle exec rspec
+```
+
+Run only the HDL export specs:
+
+```
+bundle exec rspec spec/export_verilog_spec.rb spec/export_vhdl_spec.rb
+```

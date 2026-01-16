@@ -1,0 +1,52 @@
+#!/usr/bin/env ruby
+
+require "optparse"
+require "fileutils"
+require "rhdl"
+
+command = ARGV.shift
+
+unless command == "export"
+  warn "Usage: rhdl export --lang <verilog|vhdl> --out <dir> [--top NAME] <component_ref>"
+  exit 1
+end
+
+options = {
+  lang: nil,
+  out: nil,
+  top: nil
+}
+
+OptionParser.new do |opts|
+  opts.banner = "Usage: rhdl export --lang <verilog|vhdl> --out <dir> [--top NAME] <component_ref>"
+  opts.on("--lang LANG", "verilog or vhdl") { |v| options[:lang] = v }
+  opts.on("--out DIR", "output directory") { |v| options[:out] = v }
+  opts.on("--top NAME", "override top module/entity name") { |v| options[:top] = v }
+end.parse!(ARGV)
+
+component_ref = ARGV.shift
+
+if options[:lang].nil? || options[:out].nil? || component_ref.nil?
+  warn "Missing required arguments."
+  exit 1
+end
+
+component_class = component_ref.split("::").inject(Object) { |mod, name| mod.const_get(name) }
+
+FileUtils.mkdir_p(options[:out])
+
+case options[:lang]
+when "verilog"
+  top_name = options[:top] || component_class.name.split("::").last.underscore
+  output_path = File.join(options[:out], "#{top_name}.v")
+  RHDL::Export.write_verilog(component_class, path: output_path, top_name: options[:top])
+when "vhdl"
+  top_name = options[:top] || component_class.name.split("::").last.underscore
+  output_path = File.join(options[:out], "#{top_name}.vhd")
+  RHDL::Export.write_vhdl(component_class, path: output_path, top_name: options[:top])
+else
+  warn "Unknown language: #{options[:lang]}"
+  exit 1
+end
+
+puts "Wrote #{options[:lang]} to #{options[:out]}"
