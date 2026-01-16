@@ -32,13 +32,6 @@ module RHDL
   end
 end
 
-# Require all component files
-require_relative "rhdl/components/gates"
-require_relative "rhdl/components/arithmetic"
-require_relative "rhdl/components/multiplexers"
-require_relative "rhdl/components/storage"
-require_relative "rhdl/components/comparators"
-
 # CPU components (top-level directory)
 require_relative "../cpu/cpu"
 require_relative "../cpu/control_unit"
