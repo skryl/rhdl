@@ -115,7 +115,10 @@ module RHDL
         # Bit selection and slicing
         def [](index)
           if index.is_a?(Range)
-            slice_width = index.max - index.min + 1
+            # Handle both ascending (0..7) and descending (7..0) ranges
+            high = [index.begin, index.end].max
+            low = [index.begin, index.end].min
+            slice_width = high - low + 1
             BehaviorSlice.new(self, index, width: slice_width)
           else
             BehaviorBitSelect.new(self, index)
@@ -277,7 +280,10 @@ module RHDL
         def initialize(base, range, width: nil)
           @base = base
           @range = range
-          super(width: width || (range.max - range.min + 1))
+          # Handle both ascending (0..7) and descending (7..0) ranges
+          high = [range.begin, range.end].max
+          low = [range.begin, range.end].min
+          super(width: width || (high - low + 1))
         end
 
         def to_ir
@@ -499,7 +505,8 @@ module RHDL
           when BehaviorSlice
             base_val = compute_value(expr.base)
             mask = (1 << expr.width) - 1
-            (base_val >> expr.range.min) & mask
+            low = [expr.range.begin, expr.range.end].min
+            (base_val >> low) & mask
           when BehaviorConcat
             result = 0
             offset = 0
