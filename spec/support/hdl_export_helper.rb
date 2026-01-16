@@ -57,12 +57,12 @@ module HdlExportHelper
     lines = output.split("\n")
     results = []
     lines.each do |line|
-      match = line.match(/CYCLE\s+(\\d+)\\s+(.*)/)
+      match = line.match(/CYCLE\s+(\d+)\s+(.*)/)
       next unless match
       cycle = match[1].to_i
       values = {}
       output_names.each_with_index do |name, idx|
-        token = match[2].match(/OUT#{idx}=(\\d+)/)
+        token = match[2].match(/OUT#{idx}=(\d+)/)
         next unless token
         values[name] = token[1].to_i
       end
@@ -126,6 +126,7 @@ module HdlExportHelper
     lines << "library ieee;"
     lines << "use ieee.std_logic_1164.all;"
     lines << "use ieee.numeric_std.all;"
+    lines << "use std.env.all;"
     lines << ""
     lines << "entity #{tb_name} is"
     lines << "end #{tb_name};"
@@ -183,6 +184,7 @@ module HdlExportHelper
       end
       lines << "    report #{report_parts.join};"
     end
+    lines << "    std.env.stop;"
     lines << "    wait;"
     lines << "  end process;"
     lines << "end sim;"

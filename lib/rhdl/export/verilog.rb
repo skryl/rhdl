@@ -143,7 +143,8 @@ module RHDL
         return rendered if target_width == inner.width
 
         if target_width < inner.width
-          "#{rendered}[#{target_width - 1}:0]"
+          mask = literal((1 << target_width) - 1, inner.width)
+          "(#{rendered} & #{mask})"
         else
           pad = target_width - inner.width
           "{{#{pad}{1'b0}}, #{rendered}}"
