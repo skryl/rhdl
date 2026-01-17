@@ -1,0 +1,16 @@
+Component: nand_gate
+Type: RHDL::HDL::NandGate
+Gates: 2
+DFFs: 0
+Nets: 4
+
+Inputs:
+  nand_gate.a0: 1 bits
+  nand_gate.a1: 1 bits
+
+Outputs:
+  nand_gate.y: 1 bits
+
+Gate Types:
+  and: 1
+  not: 1

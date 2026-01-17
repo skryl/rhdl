@@ -1,0 +1,23 @@
+Component: dec3to8
+Type: RHDL::HDL::Decoder3to8
+Gates: 27
+DFFs: 0
+Nets: 31
+
+Inputs:
+  dec3to8.a: 3 bits
+  dec3to8.en: 1 bits
+
+Outputs:
+  dec3to8.y0: 1 bits
+  dec3to8.y1: 1 bits
+  dec3to8.y2: 1 bits
+  dec3to8.y3: 1 bits
+  dec3to8.y4: 1 bits
+  dec3to8.y5: 1 bits
+  dec3to8.y6: 1 bits
+  dec3to8.y7: 1 bits
+
+Gate Types:
+  not: 3
+  and: 24

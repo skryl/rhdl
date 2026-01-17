@@ -1,0 +1,16 @@
+Component: xnor_gate
+Type: RHDL::HDL::XnorGate
+Gates: 2
+DFFs: 0
+Nets: 4
+
+Inputs:
+  xnor_gate.a0: 1 bits
+  xnor_gate.a1: 1 bits
+
+Outputs:
+  xnor_gate.y: 1 bits
+
+Gate Types:
+  xor: 1
+  not: 1

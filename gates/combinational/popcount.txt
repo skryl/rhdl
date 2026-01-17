@@ -1,0 +1,18 @@
+Component: popcount
+Type: RHDL::HDL::PopCount
+Gates: 39
+DFFs: 0
+Nets: 47
+
+Inputs:
+  popcount.a: 8 bits
+
+Outputs:
+  popcount.count: 4 bits
+
+Gate Types:
+  xor: 15
+  and: 15
+  or: 4
+  buf: 4
+  const: 1

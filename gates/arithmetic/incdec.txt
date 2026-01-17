@@ -1,0 +1,20 @@
+Component: incdec
+Type: RHDL::HDL::IncDec
+Gates: 41
+DFFs: 0
+Nets: 50
+
+Inputs:
+  incdec.a: 8 bits
+  incdec.inc: 1 bits
+
+Outputs:
+  incdec.result: 8 bits
+  incdec.cout: 1 bits
+
+Gate Types:
+  not: 2
+  xor: 16
+  and: 15
+  or: 7
+  mux: 1

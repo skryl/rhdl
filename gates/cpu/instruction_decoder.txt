@@ -1,0 +1,30 @@
+Component: decoder
+Type: RHDL::HDL::CPU::InstructionDecoder
+Gates: 160
+DFFs: 0
+Nets: 169
+
+Inputs:
+  decoder.instruction: 8 bits
+  decoder.zero_flag: 1 bits
+
+Outputs:
+  decoder.alu_op: 4 bits
+  decoder.alu_src: 1 bits
+  decoder.reg_write: 1 bits
+  decoder.mem_read: 1 bits
+  decoder.mem_write: 1 bits
+  decoder.branch: 1 bits
+  decoder.jump: 1 bits
+  decoder.pc_src: 2 bits
+  decoder.halt: 1 bits
+  decoder.call: 1 bits
+  decoder.ret: 1 bits
+  decoder.instr_length: 2 bits
+
+Gate Types:
+  const: 8
+  buf: 17
+  not: 48
+  and: 73
+  or: 14

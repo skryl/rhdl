@@ -1,0 +1,19 @@
+Component: full_adder
+Type: RHDL::HDL::FullAdder
+Gates: 5
+DFFs: 0
+Nets: 8
+
+Inputs:
+  full_adder.a: 1 bits
+  full_adder.b: 1 bits
+  full_adder.cin: 1 bits
+
+Outputs:
+  full_adder.sum: 1 bits
+  full_adder.cout: 1 bits
+
+Gate Types:
+  xor: 2
+  and: 2
+  or: 1

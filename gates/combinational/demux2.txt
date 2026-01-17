@@ -1,0 +1,17 @@
+Component: demux2
+Type: RHDL::HDL::Demux2
+Gates: 9
+DFFs: 0
+Nets: 14
+
+Inputs:
+  demux2.a: 4 bits
+  demux2.sel: 1 bits
+
+Outputs:
+  demux2.y0: 4 bits
+  demux2.y1: 4 bits
+
+Gate Types:
+  not: 1
+  and: 8

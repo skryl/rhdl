@@ -1,0 +1,450 @@
+{
+  "name": "incdec",
+  "net_count": 50,
+  "gates": [
+    {
+      "type": "not",
+      "inputs": [
+        8
+      ],
+      "output": 18,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        0,
+        18
+      ],
+      "output": 19,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        19,
+        8
+      ],
+      "output": 9,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        19,
+        8
+      ],
+      "output": 20,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        1,
+        18
+      ],
+      "output": 21,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        21,
+        20
+      ],
+      "output": 10,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        21,
+        20
+      ],
+      "output": 22,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        2,
+        18
+      ],
+      "output": 23,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        23,
+        22
+      ],
+      "output": 11,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        23,
+        22
+      ],
+      "output": 24,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        3,
+        18
+      ],
+      "output": 25,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        25,
+        24
+      ],
+      "output": 12,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        25,
+        24
+      ],
+      "output": 26,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        4,
+        18
+      ],
+      "output": 27,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        27,
+        26
+      ],
+      "output": 13,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        27,
+        26
+      ],
+      "output": 28,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        5,
+        18
+      ],
+      "output": 29,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        29,
+        28
+      ],
+      "output": 14,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        29,
+        28
+      ],
+      "output": 30,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        6,
+        18
+      ],
+      "output": 31,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        31,
+        30
+      ],
+      "output": 15,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        31,
+        30
+      ],
+      "output": 32,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        7,
+        18
+      ],
+      "output": 33,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        33,
+        32
+      ],
+      "output": 16,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        33,
+        32
+      ],
+      "output": 34,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        0,
+        1
+      ],
+      "output": 35,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        35,
+        2
+      ],
+      "output": 36,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        36,
+        3
+      ],
+      "output": 37,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        37,
+        4
+      ],
+      "output": 38,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        38,
+        5
+      ],
+      "output": 39,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        39,
+        6
+      ],
+      "output": 40,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        40,
+        7
+      ],
+      "output": 41,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        0,
+        1
+      ],
+      "output": 42,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        42,
+        2
+      ],
+      "output": 43,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        43,
+        3
+      ],
+      "output": 44,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        44,
+        4
+      ],
+      "output": 45,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        45,
+        5
+      ],
+      "output": 46,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        46,
+        6
+      ],
+      "output": 47,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        47,
+        7
+      ],
+      "output": 48,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        48
+      ],
+      "output": 49,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        49,
+        41,
+        8
+      ],
+      "output": 17,
+      "value": null
+    }
+  ],
+  "dffs": [
+
+  ],
+  "inputs": {
+    "incdec.a": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "incdec.inc": [
+      8
+    ]
+  },
+  "outputs": {
+    "incdec.result": [
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ],
+    "incdec.cout": [
+      17
+    ]
+  },
+  "schedule": [
+    0,
+    25,
+    32,
+    1,
+    4,
+    7,
+    10,
+    13,
+    16,
+    19,
+    22,
+    26,
+    33,
+    2,
+    3,
+    27,
+    34,
+    5,
+    6,
+    28,
+    35,
+    8,
+    9,
+    29,
+    36,
+    11,
+    12,
+    30,
+    37,
+    14,
+    15,
+    31,
+    38,
+    17,
+    18,
+    39,
+    20,
+    21,
+    40,
+    23,
+    24
+  ]
+}

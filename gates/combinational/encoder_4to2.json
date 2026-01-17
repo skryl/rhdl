@@ -1,0 +1,135 @@
+{
+  "name": "enc4to2",
+  "net_count": 15,
+  "gates": [
+    {
+      "type": "not",
+      "inputs": [
+        3
+      ],
+      "output": 7,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        2
+      ],
+      "output": 8,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        1
+      ],
+      "output": 9,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        7,
+        2
+      ],
+      "output": 10,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        7,
+        8
+      ],
+      "output": 11,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        11,
+        1
+      ],
+      "output": 12,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        3,
+        10
+      ],
+      "output": 5,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        3,
+        12
+      ],
+      "output": 4,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        0,
+        1
+      ],
+      "output": 13,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        13,
+        2
+      ],
+      "output": 14,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        14,
+        3
+      ],
+      "output": 6,
+      "value": null
+    }
+  ],
+  "dffs": [
+
+  ],
+  "inputs": {
+    "enc4to2.a": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "outputs": {
+    "enc4to2.y": [
+      4,
+      5
+    ],
+    "enc4to2.valid": [
+      6
+    ]
+  },
+  "schedule": [
+    0,
+    1,
+    2,
+    8,
+    3,
+    4,
+    9,
+    6,
+    5,
+    10,
+    7
+  ]
+}

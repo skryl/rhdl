@@ -1,0 +1,15 @@
+Component: zext
+Type: RHDL::HDL::ZeroExtend
+Gates: 17
+DFFs: 0
+Nets: 25
+
+Inputs:
+  zext.a: 8 bits
+
+Outputs:
+  zext.y: 16 bits
+
+Gate Types:
+  buf: 16
+  const: 1

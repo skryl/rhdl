@@ -1,0 +1,23 @@
+Component: div
+Type: RHDL::HDL::Divider
+Gates: 183
+DFFs: 0
+Nets: 191
+
+Inputs:
+  div.dividend: 4 bits
+  div.divisor: 4 bits
+
+Outputs:
+  div.quotient: 4 bits
+  div.remainder: 4 bits
+  div.div_by_zero: 1 bits
+
+Gate Types:
+  or: 35
+  not: 22
+  buf: 12
+  const: 10
+  xor: 32
+  and: 56
+  mux: 16

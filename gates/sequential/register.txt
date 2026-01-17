@@ -1,0 +1,16 @@
+Component: reg
+Type: RHDL::HDL::Register
+Gates: 0
+DFFs: 8
+Nets: 19
+
+Inputs:
+  reg.d: 8 bits
+  reg.clk: 1 bits
+  reg.rst: 1 bits
+  reg.en: 1 bits
+
+Outputs:
+  reg.q: 8 bits
+
+Gate Types:

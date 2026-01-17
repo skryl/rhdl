@@ -1,0 +1,15 @@
+Component: or_gate
+Type: RHDL::HDL::OrGate
+Gates: 1
+DFFs: 0
+Nets: 3
+
+Inputs:
+  or_gate.a0: 1 bits
+  or_gate.a1: 1 bits
+
+Outputs:
+  or_gate.y: 1 bits
+
+Gate Types:
+  or: 1

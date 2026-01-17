@@ -1,0 +1,15 @@
+Component: zero_det
+Type: RHDL::HDL::ZeroDetect
+Gates: 8
+DFFs: 0
+Nets: 16
+
+Inputs:
+  zero_det.a: 8 bits
+
+Outputs:
+  zero_det.zero: 1 bits
+
+Gate Types:
+  or: 7
+  not: 1

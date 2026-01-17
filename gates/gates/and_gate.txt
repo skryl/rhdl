@@ -1,0 +1,15 @@
+Component: and_gate
+Type: RHDL::HDL::AndGate
+Gates: 1
+DFFs: 0
+Nets: 3
+
+Inputs:
+  and_gate.a0: 1 bits
+  and_gate.a1: 1 bits
+
+Outputs:
+  and_gate.y: 1 bits
+
+Gate Types:
+  and: 1

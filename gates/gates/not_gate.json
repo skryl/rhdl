@@ -1,0 +1,30 @@
+{
+  "name": "not_gate",
+  "net_count": 2,
+  "gates": [
+    {
+      "type": "not",
+      "inputs": [
+        0
+      ],
+      "output": 1,
+      "value": null
+    }
+  ],
+  "dffs": [
+
+  ],
+  "inputs": {
+    "not_gate.a": [
+      0
+    ]
+  },
+  "outputs": {
+    "not_gate.y": [
+      1
+    ]
+  },
+  "schedule": [
+    0
+  ]
+}

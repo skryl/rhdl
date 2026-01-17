@@ -1,0 +1,20 @@
+Component: tff
+Type: RHDL::HDL::TFlipFlop
+Gates: 3
+DFFs: 1
+Nets: 8
+
+Inputs:
+  tff.t: 1 bits
+  tff.clk: 1 bits
+  tff.rst: 1 bits
+  tff.en: 1 bits
+
+Outputs:
+  tff.q: 1 bits
+  tff.qn: 1 bits
+
+Gate Types:
+  xor: 1
+  buf: 1
+  not: 1

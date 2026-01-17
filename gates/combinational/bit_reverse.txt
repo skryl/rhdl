@@ -1,0 +1,14 @@
+Component: bitrev
+Type: RHDL::HDL::BitReverse
+Gates: 8
+DFFs: 0
+Nets: 16
+
+Inputs:
+  bitrev.a: 8 bits
+
+Outputs:
+  bitrev.y: 8 bits
+
+Gate Types:
+  buf: 8
