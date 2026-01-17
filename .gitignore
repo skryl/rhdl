@@ -12,3 +12,4 @@
 .DS_Store
 .rspec_status
 /spec/fixtures/apple2/
+/vendor/
