@@ -1,81 +1,48 @@
-// MOS 6502 Status Register - Synthesizable Verilog
-// Generated from RHDL Behavior DSL
-module mos6502s_status_register (
-  input        clk,
-  input        rst,
-  // Load controls
-  input        load_all,
-  input        load_flags,
-  input        load_n,
-  input        load_z,
-  input        load_c,
-  input        load_v,
-  input        load_i,
-  input        load_d,
-  input        load_b,
-  // Flag inputs
-  input        n_in,
-  input        z_in,
-  input        c_in,
-  input        v_in,
-  input        i_in,
-  input        d_in,
-  input        b_in,
-  input  [7:0] data_in,
-  // Outputs
+module mos6502s_status_register(
+  input clk,
+  input rst,
+  input load_all,
+  input load_flags,
+  input load_n,
+  input load_z,
+  input load_c,
+  input load_v,
+  input load_i,
+  input load_d,
+  input load_b,
+  input n_in,
+  input z_in,
+  input c_in,
+  input v_in,
+  input i_in,
+  input d_in,
+  input b_in,
+  input [7:0] data_in,
   output reg [7:0] p,
-  output       n,
-  output       v,
-  output       b,
-  output       d,
-  output       i,
-  output       z,
-  output       c
+  output n,
+  output v,
+  output b,
+  output d,
+  output i,
+  output z,
+  output c
 );
 
-  // Flag bit positions
-  localparam FLAG_C = 0;
-  localparam FLAG_Z = 1;
-  localparam FLAG_I = 2;
-  localparam FLAG_D = 3;
-  localparam FLAG_B = 4;
-  localparam FLAG_X = 5;
-  localparam FLAG_V = 6;
-  localparam FLAG_N = 7;
+  assign n = p[7];
+  assign v = p[6];
+  assign b = p[4];
+  assign d = p[3];
+  assign i = p[2];
+  assign z = p[1];
+  assign c = p[0];
 
-  always @(posedge clk or posedge rst) begin
-    if (rst) begin
-      p <= 8'h24;  // I=1, unused=1
-    end else if (load_all) begin
-      // Load from data bus, bit 5 always 1, B ignored
-      p <= (data_in | 8'h20) & 8'hEF;
-    end else if (load_flags) begin
-      // Load N, Z, C, V from ALU
-      p[FLAG_N] <= n_in;
-      p[FLAG_V] <= v_in;
-      p[FLAG_Z] <= z_in;
-      p[FLAG_C] <= c_in;
-      p[FLAG_X] <= 1'b1;  // Always 1
-    end else begin
-      // Individual flag updates
-      if (load_n) p[FLAG_N] <= n_in;
-      if (load_v) p[FLAG_V] <= v_in;
-      if (load_z) p[FLAG_Z] <= z_in;
-      if (load_c) p[FLAG_C] <= c_in;
-      if (load_i) p[FLAG_I] <= i_in;
-      if (load_d) p[FLAG_D] <= d_in;
-      if (load_b) p[FLAG_B] <= b_in;
-      p[FLAG_X] <= 1'b1;  // Always 1
-    end
+  always @(posedge clk) begin
+  if (rst) begin
+    p <= 8'd36;
   end
-
-  // Individual flag outputs
-  assign n = p[FLAG_N];
-  assign v = p[FLAG_V];
-  assign b = p[FLAG_B];
-  assign d = p[FLAG_D];
-  assign i = p[FLAG_I];
-  assign z = p[FLAG_Z];
-  assign c = p[FLAG_C];
+  else begin
+    p <= (load_all ? ((data_in | 8'd32) & 8'd239) : (load_flags ? {n_in, v_in, 1'b1, p[4], p[3], p[2], z_in, c_in} : {(load_n ? n_in : p[7]), (load_v ? v_in : p[6]), 1'b1, (load_b ? b_in : p[4]), (load_d ? d_in : p[3]), (load_i ? i_in : p[2]), (load_z ? z_in : p[1]), (load_c ? c_in : p[0])}));
+  end
+  end
 
 endmodule
