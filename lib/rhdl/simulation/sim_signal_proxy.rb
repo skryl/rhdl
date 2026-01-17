@@ -21,15 +21,15 @@ module RHDL
 
       # Bitwise operators - return SimValueProxy for chaining
       def &(other)
-        SimValueProxy.new(compute(:&, other), @width, @context)
+        SimValueProxy.new(compute_masked(:&, other, @width), @width, @context)
       end
 
       def |(other)
-        SimValueProxy.new(compute(:|, other), @width, @context)
+        SimValueProxy.new(compute_masked(:|, other, @width), @width, @context)
       end
 
       def ^(other)
-        SimValueProxy.new(compute(:^, other), @width, @context)
+        SimValueProxy.new(compute_masked(:^, other, @width), @width, @context)
       end
 
       def ~
@@ -150,8 +150,14 @@ module RHDL
 
       def compute(op, other)
         other_val = resolve(other)
+        value.send(op, other_val)
+        # Don't mask here - arithmetic needs full precision for carry
+      end
+
+      def compute_masked(op, other, width)
+        other_val = resolve(other)
         result = value.send(op, other_val)
-        mask = (1 << @width) - 1
+        mask = (1 << width) - 1
         result & mask
       end
 

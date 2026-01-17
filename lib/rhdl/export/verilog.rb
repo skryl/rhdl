@@ -124,10 +124,13 @@ module RHDL
           "{#{expr_node.parts.map { |part| expr(part) }.join(', ')}}"
         when IR::Slice
           base = expr(expr_node.base)
-          if expr_node.range.min == expr_node.range.max
-            "#{base}[#{expr_node.range.min}]"
+          # Handle both ascending (0..7) and descending (7..0) ranges
+          high = [expr_node.range.begin, expr_node.range.end].max
+          low = [expr_node.range.begin, expr_node.range.end].min
+          if high == low
+            "#{base}[#{low}]"
           else
-            "#{base}[#{expr_node.range.max}:#{expr_node.range.min}]"
+            "#{base}[#{high}:#{low}]"
           end
         when IR::Resize
           resize(expr_node)
