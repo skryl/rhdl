@@ -3,11 +3,14 @@
 
 require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
+require_relative '../../../lib/rhdl/dsl/sequential'
 
 module MOS6502S
-  # Address Latch - Synthesizable via DSL
+  # Address Latch - Synthesizable via Sequential DSL
+  # Uses internal registers and derives outputs combinationally
   class AddressLatch < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
+    include RHDL::DSL::Sequential
 
     port_input :clk
     port_input :rst
@@ -17,9 +20,10 @@ module MOS6502S
     port_input :data_in, width: 8
     port_input :addr_in, width: 16
 
-    port_output :addr, width: 16
+    # Internal registers (exposed as outputs for now)
     port_output :addr_lo, width: 8
     port_output :addr_hi, width: 8
+    port_output :addr, width: 16
 
     def initialize(name = nil)
       @addr_lo_reg = 0
@@ -27,6 +31,21 @@ module MOS6502S
       super(name)
     end
 
+    # Sequential block for internal registers
+    # Priority: load_full > load_lo/load_hi > hold
+    sequential clock: :clk, reset: :rst, reset_values: { addr_lo: 0, addr_hi: 0 } do
+      addr_lo <= mux(load_full, addr_in[7..0],
+                    mux(load_lo, data_in, addr_lo))
+      addr_hi <= mux(load_full, addr_in[15..8],
+                    mux(load_hi, data_in, addr_hi))
+    end
+
+    # Combinational output: 16-bit address from hi/lo
+    behavior do
+      addr <= cat(addr_hi, addr_lo)
+    end
+
+    # Override propagate to maintain internal state for testing
     def propagate
       if rising_edge?
         if in_val(:rst) == 1
@@ -49,44 +68,7 @@ module MOS6502S
     end
 
     def self.to_verilog
-      <<~VERILOG
-        // MOS 6502 Address Latch - Synthesizable Verilog
-        // Generated from RHDL Behavior DSL
-        module mos6502s_address_latch (
-          input         clk,
-          input         rst,
-          input         load_lo,
-          input         load_hi,
-          input         load_full,
-          input   [7:0] data_in,
-          input  [15:0] addr_in,
-          output [15:0] addr,
-          output  [7:0] addr_lo,
-          output  [7:0] addr_hi
-        );
-
-          reg [7:0] addr_lo_reg;
-          reg [7:0] addr_hi_reg;
-
-          always @(posedge clk or posedge rst) begin
-            if (rst) begin
-              addr_lo_reg <= 8'h00;
-              addr_hi_reg <= 8'h00;
-            end else if (load_full) begin
-              addr_lo_reg <= addr_in[7:0];
-              addr_hi_reg <= addr_in[15:8];
-            end else begin
-              if (load_lo) addr_lo_reg <= data_in;
-              if (load_hi) addr_hi_reg <= data_in;
-            end
-          end
-
-          assign addr = {addr_hi_reg, addr_lo_reg};
-          assign addr_lo = addr_lo_reg;
-          assign addr_hi = addr_hi_reg;
-
-        endmodule
-      VERILOG
+      RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502s_address_latch'))
     end
   end
 end

@@ -24,6 +24,7 @@ require_relative 'simulation/synth_slice'
 require_relative 'simulation/synth_concat'
 require_relative 'simulation/synth_replicate'
 require_relative 'simulation/synth_mux'
+require_relative 'simulation/synth_memory_read'
 require_relative 'simulation/synth_signal_proxy'
 require_relative 'simulation/synth_output_proxy'
 
