@@ -77,13 +77,22 @@ module RHDL
           # Also check for behavior blocks (for combinational parts)
           behavior_result = behavior_to_ir_assigns
 
+          # Generate instances from structure definitions
+          instances = structure_to_ir_instances
+
+          # Get signal defs for internal wires
+          regs = _signals.map do |s|
+            RHDL::Export::IR::Reg.new(name: s.name, width: s.width)
+          end
+
           RHDL::Export::IR::ModuleDef.new(
             name: name,
             ports: ports,
             nets: behavior_result[:wires],
-            regs: [],
+            regs: regs,
             assigns: behavior_result[:assigns],
             processes: processes,
+            instances: instances,
             reg_ports: reg_ports
           )
         end
