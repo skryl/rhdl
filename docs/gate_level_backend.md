@@ -43,8 +43,56 @@ RHDL_DUMP_NETLIST=1 bundle exec rspec
 
 The netlist will be written to `tmp/netlists/<name>.json`.
 
+### Supported Components (53 total)
+
+The lowering pass supports the following HDL components:
+
+**Gates (13):**
+`NotGate`, `Buffer`, `AndGate`, `OrGate`, `XorGate`, `NandGate`, `NorGate`, `XnorGate`, `TristateBuffer`, `BitwiseAnd`, `BitwiseOr`, `BitwiseXor`, `BitwiseNot`
+
+**Sequential (12):**
+`DFlipFlop`, `DFlipFlopAsync`, `TFlipFlop`, `JKFlipFlop`, `SRFlipFlop`, `SRLatch`, `Register`, `RegisterLoad`, `ShiftRegister`, `Counter`, `ProgramCounter`, `StackPointer`
+
+**Arithmetic (10):**
+`HalfAdder`, `FullAdder`, `RippleCarryAdder`, `Subtractor`, `AddSub`, `Comparator`, `IncDec`, `Multiplier`, `Divider`, `ALU`
+
+**Combinational (16):**
+`Mux2`, `Mux4`, `Mux8`, `MuxN`, `Demux2`, `Demux4`, `Decoder2to4`, `Decoder3to8`, `DecoderN`, `Encoder4to2`, `Encoder8to3`, `ZeroDetect`, `SignExtend`, `ZeroExtend`, `BitReverse`, `PopCount`, `LZCount`, `BarrelShifter`
+
+**CPU (2):**
+`InstructionDecoder`, `SynthDatapath` (hierarchical composition of decoder, ALU, PC, register)
+
+### Rake Tasks
+
+```bash
+# Export all 53 components to gate-level JSON netlists
+rake gates:export
+
+# Export SynthDatapath CPU components
+rake gates:simcpu
+
+# Show synthesis statistics (gate counts per component)
+rake gates:stats
+
+# Clean gate-level output directory
+rake gates:clean
+```
+
+Output files are written to `/export/gates/` with JSON netlists and TXT summaries.
+
+### Example Statistics
+
+```
+cpu/synth_datapath: 505 gates, 24 DFFs, 697 nets
+arithmetic/alu: 187 gates, 0 DFFs, 208 nets
+arithmetic/divider: 183 gates, 0 DFFs, 191 nets
+combinational/barrel_shifter: 167 gates, 0 DFFs, 181 nets
+cpu/instruction_decoder: 160 gates, 0 DFFs, 169 nets
+arithmetic/multiplier: 131 gates, 0 DFFs, 139 nets
+```
+
 ### Limitations
 
-* Lowering currently supports: `NotGate`, `Buffer`, `AndGate`, `OrGate`, `XorGate`, `BitwiseAnd`, `BitwiseOr`, `BitwiseXor`, `Mux2`, `HalfAdder`, `FullAdder`, `RippleCarryAdder`, `DFlipFlop`, and `DFlipFlopAsync`.
 * DFF reset/enable are modeled on tick boundaries for parity with the synchronous simulator flow.
 * GPU backend is a stub unless a compiled extension is provided.
+* Memory components (RAM, ROM, RegisterFile, FIFO, Stack) use placeholder implementations for gate-level.
