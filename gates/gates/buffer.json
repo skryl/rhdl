@@ -1,0 +1,30 @@
+{
+  "name": "buffer",
+  "net_count": 2,
+  "gates": [
+    {
+      "type": "buf",
+      "inputs": [
+        0
+      ],
+      "output": 1,
+      "value": null
+    }
+  ],
+  "dffs": [
+
+  ],
+  "inputs": {
+    "buffer.a": [
+      0
+    ]
+  },
+  "outputs": {
+    "buffer.y": [
+      1
+    ]
+  },
+  "schedule": [
+    0
+  ]
+}

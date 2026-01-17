@@ -1,0 +1,267 @@
+{
+  "name": "demux4",
+  "net_count": 28,
+  "gates": [
+    {
+      "type": "not",
+      "inputs": [
+        4
+      ],
+      "output": 22,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        5
+      ],
+      "output": 23,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        23,
+        22
+      ],
+      "output": 24,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        23,
+        4
+      ],
+      "output": 25,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        5,
+        22
+      ],
+      "output": 26,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        5,
+        4
+      ],
+      "output": 27,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        0,
+        24
+      ],
+      "output": 6,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        0,
+        25
+      ],
+      "output": 10,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        0,
+        26
+      ],
+      "output": 14,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        0,
+        27
+      ],
+      "output": 18,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        1,
+        24
+      ],
+      "output": 7,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        1,
+        25
+      ],
+      "output": 11,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        1,
+        26
+      ],
+      "output": 15,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        1,
+        27
+      ],
+      "output": 19,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        2,
+        24
+      ],
+      "output": 8,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        2,
+        25
+      ],
+      "output": 12,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        2,
+        26
+      ],
+      "output": 16,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        2,
+        27
+      ],
+      "output": 20,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        3,
+        24
+      ],
+      "output": 9,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        3,
+        25
+      ],
+      "output": 13,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        3,
+        26
+      ],
+      "output": 17,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        3,
+        27
+      ],
+      "output": 21,
+      "value": null
+    }
+  ],
+  "dffs": [
+
+  ],
+  "inputs": {
+    "demux4.a": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "demux4.sel": [
+      4,
+      5
+    ]
+  },
+  "outputs": {
+    "demux4.y0": [
+      6,
+      7,
+      8,
+      9
+    ],
+    "demux4.y1": [
+      10,
+      11,
+      12,
+      13
+    ],
+    "demux4.y2": [
+      14,
+      15,
+      16,
+      17
+    ],
+    "demux4.y3": [
+      18,
+      19,
+      20,
+      21
+    ]
+  },
+  "schedule": [
+    0,
+    1,
+    5,
+    4,
+    2,
+    3,
+    9,
+    13,
+    17,
+    21,
+    8,
+    12,
+    16,
+    20,
+    6,
+    10,
+    14,
+    18,
+    7,
+    11,
+    15,
+    19
+  ]
+}

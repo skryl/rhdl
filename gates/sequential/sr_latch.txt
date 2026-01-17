@@ -1,0 +1,18 @@
+Component: sr_latch
+Type: RHDL::HDL::SRLatch
+Gates: 3
+DFFs: 0
+Nets: 6
+
+Inputs:
+  sr_latch.s: 1 bits
+  sr_latch.r: 1 bits
+  sr_latch.en: 1 bits
+
+Outputs:
+  sr_latch.q: 1 bits
+  sr_latch.qn: 1 bits
+
+Gate Types:
+  not: 2
+  and: 1

@@ -1,0 +1,107 @@
+{
+  "name": "zero_det",
+  "net_count": 16,
+  "gates": [
+    {
+      "type": "or",
+      "inputs": [
+        0,
+        1
+      ],
+      "output": 9,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        9,
+        2
+      ],
+      "output": 10,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        10,
+        3
+      ],
+      "output": 11,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        11,
+        4
+      ],
+      "output": 12,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        12,
+        5
+      ],
+      "output": 13,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        13,
+        6
+      ],
+      "output": 14,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        14,
+        7
+      ],
+      "output": 15,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        15
+      ],
+      "output": 8,
+      "value": null
+    }
+  ],
+  "dffs": [
+
+  ],
+  "inputs": {
+    "zero_det.a": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ]
+  },
+  "outputs": {
+    "zero_det.zero": [
+      8
+    ]
+  },
+  "schedule": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ]
+}

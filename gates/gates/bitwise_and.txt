@@ -1,0 +1,15 @@
+Component: bitwise_and
+Type: RHDL::HDL::BitwiseAnd
+Gates: 8
+DFFs: 0
+Nets: 24
+
+Inputs:
+  bitwise_and.a: 8 bits
+  bitwise_and.b: 8 bits
+
+Outputs:
+  bitwise_and.y: 8 bits
+
+Gate Types:
+  and: 8

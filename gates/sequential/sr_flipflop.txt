@@ -1,0 +1,22 @@
+Component: srff
+Type: RHDL::HDL::SRFlipFlop
+Gates: 6
+DFFs: 1
+Nets: 12
+
+Inputs:
+  srff.s: 1 bits
+  srff.r: 1 bits
+  srff.clk: 1 bits
+  srff.rst: 1 bits
+  srff.en: 1 bits
+
+Outputs:
+  srff.q: 1 bits
+  srff.qn: 1 bits
+
+Gate Types:
+  not: 2
+  and: 2
+  or: 1
+  buf: 1

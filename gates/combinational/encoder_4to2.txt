@@ -1,0 +1,17 @@
+Component: enc4to2
+Type: RHDL::HDL::Encoder4to2
+Gates: 11
+DFFs: 0
+Nets: 15
+
+Inputs:
+  enc4to2.a: 4 bits
+
+Outputs:
+  enc4to2.y: 2 bits
+  enc4to2.valid: 1 bits
+
+Gate Types:
+  not: 3
+  and: 3
+  or: 5

@@ -1,0 +1,58 @@
+{
+  "name": "sr_latch",
+  "net_count": 6,
+  "gates": [
+    {
+      "type": "not",
+      "inputs": [
+        1
+      ],
+      "output": 5,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        0,
+        5
+      ],
+      "output": 3,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        3
+      ],
+      "output": 4,
+      "value": null
+    }
+  ],
+  "dffs": [
+
+  ],
+  "inputs": {
+    "sr_latch.s": [
+      0
+    ],
+    "sr_latch.r": [
+      1
+    ],
+    "sr_latch.en": [
+      2
+    ]
+  },
+  "outputs": {
+    "sr_latch.q": [
+      3
+    ],
+    "sr_latch.qn": [
+      4
+    ]
+  },
+  "schedule": [
+    0,
+    1,
+    2
+  ]
+}
