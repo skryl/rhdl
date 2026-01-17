@@ -8,7 +8,7 @@ RSpec.describe RHDL::HDL::ProgramCounter do
     component.propagate
   end
 
-  let(:pc) { RHDL::HDL::ProgramCounter.new(nil, width: 16) }
+  let(:pc) { RHDL::HDL::ProgramCounter.new }
 
   before do
     pc.set_input(:rst, 0)

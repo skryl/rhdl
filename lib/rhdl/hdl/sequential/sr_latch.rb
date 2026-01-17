@@ -26,11 +26,6 @@ module RHDL
           q)
         qn <= ~q
       end
-
-      def initialize(name = nil)
-        @state = 0
-        super(name)
-      end
     end
   end
 end

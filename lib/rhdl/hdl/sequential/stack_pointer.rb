@@ -33,18 +33,6 @@ module RHDL
         empty <= (q == lit(0xFF, width: 8))
         full <= (q == lit(0, width: 8))
       end
-
-      def initialize(name = nil, width: 8, initial: 0xFF)
-        @width = width
-        @initial = initial
-        @max = (1 << width) - 1
-        super(name)
-      end
-
-      def setup_ports
-        return if @width == 8
-        @outputs[:q] = Wire.new("#{@name}.q", width: @width)
-      end
     end
   end
 end

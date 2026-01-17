@@ -8,7 +8,7 @@ RSpec.describe RHDL::HDL::Counter do
     component.propagate
   end
 
-  let(:counter) { RHDL::HDL::Counter.new(nil, width: 4) }
+  let(:counter) { RHDL::HDL::Counter.new }
 
   before do
     counter.set_input(:rst, 0)
@@ -41,12 +41,12 @@ RSpec.describe RHDL::HDL::Counter do
 
     it 'wraps around' do
       counter.set_input(:load, 1)
-      counter.set_input(:d, 15)
+      counter.set_input(:d, 0xFF)
       clock_cycle(counter)
       counter.set_input(:load, 0)
 
-      # At max value (15), tc should be 1
-      expect(counter.get_output(:q)).to eq(15)
+      # At max value (0xFF), tc should be 1
+      expect(counter.get_output(:q)).to eq(0xFF)
       expect(counter.get_output(:tc)).to eq(1)
 
       # After wrap to 0, tc should be 0 (since we're counting up)

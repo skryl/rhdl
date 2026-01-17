@@ -8,7 +8,7 @@ RSpec.describe RHDL::HDL::StackPointer do
     component.propagate
   end
 
-  let(:sp) { RHDL::HDL::StackPointer.new(nil, width: 8, initial: 0xFF) }
+  let(:sp) { RHDL::HDL::StackPointer.new }
 
   before do
     sp.set_input(:rst, 0)
@@ -46,23 +46,30 @@ RSpec.describe RHDL::HDL::StackPointer do
     end
 
     it 'indicates full when SP is 0' do
-      # Start with SP at a low value
-      sp_low = RHDL::HDL::StackPointer.new(nil, width: 8, initial: 0x01)
-      sp_low.set_input(:rst, 0)
-      sp_low.set_input(:push, 1)
-      sp_low.set_input(:pop, 0)
-      clock_cycle(sp_low)
-      expect(sp_low.get_output(:q)).to eq(0x00)
-      expect(sp_low.get_output(:full)).to eq(1)
+      # Push until SP reaches 0 (255 pushes from 0xFF)
+      # For efficiency, we test after just enough pushes to verify the flag logic
+      # Push once to get to 0xFE first
+      sp.set_input(:push, 1)
+      clock_cycle(sp)
+      expect(sp.get_output(:q)).to eq(0xFE)
+      expect(sp.get_output(:full)).to eq(0)
+
+      # Push 254 more times to reach 0
+      254.times { clock_cycle(sp) }
+      expect(sp.get_output(:q)).to eq(0x00)
+      expect(sp.get_output(:full)).to eq(1)
     end
 
     it 'wraps around on underflow' do
-      sp_at_zero = RHDL::HDL::StackPointer.new(nil, width: 8, initial: 0x00)
-      sp_at_zero.set_input(:rst, 0)
-      sp_at_zero.set_input(:push, 1)
-      sp_at_zero.set_input(:pop, 0)
-      clock_cycle(sp_at_zero)
-      expect(sp_at_zero.get_output(:q)).to eq(0xFF)  # Wrapped around
+      # Push until SP reaches 0, then push once more to wrap
+      sp.set_input(:push, 1)
+      # Push 255 times to reach 0
+      255.times { clock_cycle(sp) }
+      expect(sp.get_output(:q)).to eq(0x00)
+
+      # One more push wraps around to 0xFF
+      clock_cycle(sp)
+      expect(sp.get_output(:q)).to eq(0xFF)
     end
 
     it 'resets to initial value' do

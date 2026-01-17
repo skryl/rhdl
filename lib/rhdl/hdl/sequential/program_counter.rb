@@ -29,19 +29,6 @@ module RHDL
         # Priority: load > increment
         q <= mux(load, d, mux(en, next_pc, q))
       end
-
-      def initialize(name = nil, width: 16)
-        @width = width
-        @max = (1 << width) - 1
-        super(name)
-      end
-
-      def setup_ports
-        return if @width == 16
-        @inputs[:d] = Wire.new("#{@name}.d", width: @width)
-        @inputs[:inc] = Wire.new("#{@name}.inc", width: @width)
-        @outputs[:q] = Wire.new("#{@name}.q", width: @width)
-      end
     end
   end
 end

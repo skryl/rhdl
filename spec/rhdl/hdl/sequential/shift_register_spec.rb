@@ -8,7 +8,7 @@ RSpec.describe RHDL::HDL::ShiftRegister do
     component.propagate
   end
 
-  let(:sr) { RHDL::HDL::ShiftRegister.new(nil, width: 8) }
+  let(:sr) { RHDL::HDL::ShiftRegister.new }
 
   before do
     sr.set_input(:rst, 0)
