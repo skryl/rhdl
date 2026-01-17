@@ -54,22 +54,21 @@ RSpec.describe RHDL::HDL::DFlipFlopAsync do
   end
 
   describe 'synthesis' do
-    it 'has a behavior block defined' do
-      expect(RHDL::HDL::DFlipFlopAsync.behavior_defined?).to be_truthy
+    it 'has synthesis support defined' do
+      expect(RHDL::HDL::DFlipFlopAsync.behavior_defined? || RHDL::HDL::DFlipFlopAsync.sequential_defined?).to be_truthy
     end
 
-    # Note: Sequential components use rising_edge? which is not yet supported in synthesis context
-    it 'generates valid IR', :pending do
+    it 'generates valid IR' do
       ir = RHDL::HDL::DFlipFlopAsync.to_ir
       expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
       expect(ir.ports.length).to eq(6)  # d, clk, rst, en, q, qn
     end
 
-    it 'generates valid Verilog', :pending do
+    it 'generates valid Verilog' do
       verilog = RHDL::HDL::DFlipFlopAsync.to_verilog
       expect(verilog).to include('module d_flip_flop_async')
       expect(verilog).to include('input d')
-      expect(verilog).to include('output q')
+      expect(verilog).to match(/output.*q/)
     end
   end
 end

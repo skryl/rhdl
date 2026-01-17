@@ -1,9 +1,16 @@
 # HDL JK Flip-Flop
 # JK Flip-Flop with all standard operations
+# Synthesizable via Sequential DSL
+
+require_relative '../../dsl/behavior'
+require_relative '../../dsl/sequential'
 
 module RHDL
   module HDL
     class JKFlipFlop < SequentialComponent
+      include RHDL::DSL::Behavior
+      include RHDL::DSL::Sequential
+
       port_input :j
       port_input :k
       port_input :clk
@@ -12,26 +19,21 @@ module RHDL
       port_output :q
       port_output :qn
 
+      # Sequential block for JK flip-flop
+      # JK truth table: J=0,K=0 -> hold; J=0,K=1 -> reset; J=1,K=0 -> set; J=1,K=1 -> toggle
+      sequential clock: :clk, reset: :rst, reset_values: { q: 0 } do
+        # JK logic with enable
+        # j=1: k=1 -> toggle, k=0 -> set(1)
+        # j=0: k=1 -> reset(0), k=0 -> hold
+        jk_result = mux(j,
+          mux(k, ~q, lit(1, width: 1)),     # j=1: k ? toggle : set
+          mux(k, lit(0, width: 1), q))      # j=0: k ? reset : hold
+        q <= mux(en, jk_result, q)
+      end
+
+      # Combinational block for inverted output
       behavior do
-        if rising_edge?
-          if rst.value == 1
-            set_state(0)
-          elsif en.value == 1
-            j_val = j.value & 1
-            k_val = k.value & 1
-            # JK truth table: J=0,K=0 -> hold; J=0,K=1 -> reset; J=1,K=0 -> set; J=1,K=1 -> toggle
-            if j_val == 0 && k_val == 1
-              set_state(0)
-            elsif j_val == 1 && k_val == 0
-              set_state(1)
-            elsif j_val == 1 && k_val == 1
-              set_state(state == 0 ? 1 : 0)
-            end
-            # j_val == 0 && k_val == 0: hold state
-          end
-        end
-        q <= state
-        qn <= mux(state, lit(0, width: 1), lit(1, width: 1))
+        qn <= ~q
       end
     end
   end

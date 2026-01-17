@@ -1,9 +1,16 @@
 # HDL Stack Pointer
 # Stack Pointer Register
+# Synthesizable via Sequential DSL
+
+require_relative '../../dsl/behavior'
+require_relative '../../dsl/sequential'
 
 module RHDL
   module HDL
     class StackPointer < SequentialComponent
+      include RHDL::DSL::Behavior
+      include RHDL::DSL::Sequential
+
       port_input :clk
       port_input :rst
       port_input :push     # Decrement SP
@@ -12,27 +19,24 @@ module RHDL
       port_output :empty   # SP at max (empty stack)
       port_output :full    # SP at 0 (full stack)
 
+      # Sequential block for stack pointer
+      # Push decrements, pop increments (6502-style stack)
+      sequential clock: :clk, reset: :rst, reset_values: { q: 0xFF } do
+        # Priority: push > pop
+        sp_dec = q - lit(1, width: 8)
+        sp_inc = q + lit(1, width: 8)
+        q <= mux(push, sp_dec, mux(pop, sp_inc, q))
+      end
+
+      # Combinational outputs for empty/full flags
       behavior do
-        max_val = param(:max)
-        initial_val = param(:initial)
-        if rising_edge?
-          if rst.value == 1
-            set_state(initial_val)
-          elsif push.value == 1
-            set_state((state - 1) & max_val)
-          elsif pop.value == 1
-            set_state((state + 1) & max_val)
-          end
-        end
-        q <= state
-        empty <= (state == max_val ? 1 : 0)
-        full <= (state == 0 ? 1 : 0)
+        empty <= (q == lit(0xFF, width: 8))
+        full <= (q == lit(0, width: 8))
       end
 
       def initialize(name = nil, width: 8, initial: 0xFF)
         @width = width
         @initial = initial
-        @state = initial
         @max = (1 << width) - 1
         super(name)
       end

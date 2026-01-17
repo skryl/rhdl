@@ -78,21 +78,20 @@ RSpec.describe RHDL::HDL::StackPointer do
   end
 
   describe 'synthesis' do
-    it 'has a behavior block defined' do
-      expect(RHDL::HDL::StackPointer.behavior_defined?).to be_truthy
+    it 'has synthesis support defined' do
+      expect(RHDL::HDL::StackPointer.behavior_defined? || RHDL::HDL::StackPointer.sequential_defined?).to be_truthy
     end
 
-    # Note: Sequential components use rising_edge? which is not yet supported in synthesis context
-    it 'generates valid IR', :pending do
+    it 'generates valid IR' do
       ir = RHDL::HDL::StackPointer.to_ir
       expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
       expect(ir.ports.length).to eq(7)  # clk, rst, push, pop, q, empty, full
     end
 
-    it 'generates valid Verilog', :pending do
+    it 'generates valid Verilog' do
       verilog = RHDL::HDL::StackPointer.to_verilog
       expect(verilog).to include('module stack_pointer')
-      expect(verilog).to include('output [7:0] q')
+      expect(verilog).to match(/output.*\[7:0\].*q/)
     end
   end
 end

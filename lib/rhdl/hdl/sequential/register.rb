@@ -1,29 +1,29 @@
 # HDL Register
 # Multi-bit Register with synchronous reset and enable
+# Synthesizable via Sequential DSL
+
+require_relative '../../dsl/behavior'
+require_relative '../../dsl/sequential'
 
 module RHDL
   module HDL
     class Register < SequentialComponent
+      include RHDL::DSL::Behavior
+      include RHDL::DSL::Sequential
+
       port_input :d, width: 8
       port_input :clk
       port_input :rst
       port_input :en
       port_output :q, width: 8
 
-      behavior do
-        if rising_edge?
-          if rst.value == 1
-            set_state(0)
-          elsif en.value == 1
-            set_state(d.value)
-          end
-        end
-        q <= state
+      # Sequential block for register
+      sequential clock: :clk, reset: :rst, reset_values: { q: 0 } do
+        q <= mux(en, d, q)
       end
 
       def initialize(name = nil, width: 8)
         @width = width
-        @state = 0
         super(name)
       end
 

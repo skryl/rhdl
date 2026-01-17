@@ -1,29 +1,30 @@
 # HDL SR Latch
 # Level-sensitive SR Latch (not edge-triggered)
+# Synthesizable via Behavior DSL
+
+require_relative '../../dsl/behavior'
 
 module RHDL
   module HDL
     class SRLatch < SimComponent
+      include RHDL::DSL::Behavior
+
       port_input :s
       port_input :r
       port_input :en
       port_output :q
       port_output :qn
 
+      # Combinational behavior block for SR latch
+      # SR latch truth table: S=1,R=0 -> Q=1; S=0,R=1 -> Q=0; S=R=0 -> hold; S=R=1 -> invalid (R wins)
+      # When en=0, hold state
       behavior do
-        if en.value == 1
-          s_val = s.value & 1
-          r_val = r.value & 1
-          # SR latch truth table: S=1,R=0 -> Q=1; S=0,R=1 -> Q=0; S=R=0 -> hold; S=R=1 -> invalid (force 0)
-          if s_val == 1 && r_val == 0
-            set_state(1)
-          elsif r_val == 1  # R=1 takes precedence (covers S=0,R=1 and S=1,R=1)
-            set_state(0)
-          end
-          # S=0, R=0: hold state (no change)
-        end
-        q <= state
-        qn <= mux(state, lit(0, width: 1), lit(1, width: 1))
+        # When enabled, R has priority: r=1 -> 0, else s ? 1 : hold
+        # When disabled, hold
+        q <= mux(en,
+          mux(r, lit(0, width: 1), mux(s, lit(1, width: 1), q)),
+          q)
+        qn <= ~q
       end
 
       def initialize(name = nil)
