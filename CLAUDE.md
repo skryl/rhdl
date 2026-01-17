@@ -22,15 +22,33 @@ rhdl/
 │   │   ├── verilog.rb           # Verilog export
 │   │   ├── ir.rb                # Intermediate representation
 │   │   └── lower.rb             # IR lowering utilities
-│   ├── hdl/                     # HDL simulation framework
-│   │   ├── simulation.rb        # Core simulation engine
+│   ├── simulation.rb            # Simulation engine loader
+│   ├── simulation/              # Core simulation engine
+│   │   ├── simulator.rb         # Main simulator
+│   │   ├── sim_component.rb     # Component base class
+│   │   ├── wire.rb              # Wire/signal implementation
+│   │   ├── clock.rb             # Clock signal
+│   │   └── ...                  # Synth expressions, proxies
+│   ├── debug.rb                 # Debug module loader
+│   ├── debug/                   # Signal probing & debugging
+│   │   ├── debug_simulator.rb   # Debug-enabled simulator
+│   │   ├── signal_probe.rb      # Signal probing
+│   │   ├── waveform_capture.rb  # Waveform capture
+│   │   ├── breakpoint.rb        # Breakpoints
+│   │   └── watchpoint.rb        # Watchpoints
+│   ├── tui.rb                   # Terminal GUI loader
+│   ├── tui/                     # Terminal GUI
+│   │   ├── simulator_tui.rb     # Main TUI interface
+│   │   ├── panel.rb             # Panel base class
+│   │   ├── signal_panel.rb      # Signal display panel
+│   │   ├── waveform_panel.rb    # Waveform display
+│   │   └── ...                  # Other TUI components
+│   ├── hdl/                     # HDL components
 │   │   ├── gates.rb             # Logic gate primitives
 │   │   ├── sequential.rb        # Flip-flops, registers, counters
 │   │   ├── arithmetic.rb        # Adders, ALU, comparators
 │   │   ├── combinational.rb     # Multiplexers, decoders
 │   │   ├── memory.rb            # RAM, ROM, register files
-│   │   ├── debug.rb             # Signal probing & debugging
-│   │   ├── tui.rb               # Terminal GUI
 │   │   ├── diagram.rb           # Diagram generation
 │   │   └── cpu/                 # HDL CPU implementation
 │   │       ├── datapath.rb      # CPU datapath
@@ -102,52 +120,37 @@ The project uses these gems:
 
 ### Installation
 
-1. Install the correct bundler version:
+1. Install bundler (use version 2.x, avoid 4.x which has known issues):
 ```bash
-gem install bundler -v 2.5.18
+gem install bundler -v '~> 2.5'
 ```
 
-2. Install dependencies:
+2. Install all dependencies:
 ```bash
 bundle install
 ```
 
+3. Verify installation:
+```bash
+bundle exec rake --version
+```
+
 ## Running Tests
 
-### Recommended: Using bundle exec
+Always use `bundle exec` to run tests to ensure correct gem versions:
 
 ```bash
 # Run all tests
-bundle exec rspec
+bundle exec rake spec
 
 # Run specific test file
 bundle exec rspec spec/some_spec.rb
 
-# Run with documentation format
-bundle exec rspec --format documentation
-```
-
-### Using rake
-
-```bash
-# Run all tests
-rake spec
-
 # Run 6502 CPU tests
-rake spec_6502
+bundle exec rake spec_6502
 
 # Run with documentation format
-rake spec_doc
-```
-
-### Using the test runner script
-
-```bash
-# Run all tests
-bin/test
-
-# Run specific tests
-bin/test spec/examples/mos6502/
+bundle exec rake spec_doc
 ```
 
 ### Test Coverage
@@ -285,3 +288,17 @@ If you need to add a new debug or test script:
 1. Add it as a rake task in `Rakefile`
 2. Namespace it appropriately (e.g., `debug:`, `bench:`, `test:`)
 3. Include a description using `desc` so it appears in `rake -T`
+
+### Code Organization
+
+Follow these conventions for file organization:
+
+**One class/module per file:**
+- Each Ruby file should contain exactly one class or module definition
+- File names should match the class/module name in snake_case (e.g., `signal_probe.rb` for `SignalProbe`)
+- Nested modules are acceptable within a single file when they are small and tightly coupled
+
+**One spec per file:**
+- Each spec file should test exactly one class or module
+- Spec files should mirror the lib directory structure (e.g., `spec/rhdl/simulation/simulator_spec.rb` for `lib/rhdl/simulation/simulator.rb`)
+- Name spec files with `_spec.rb` suffix matching the class being tested
