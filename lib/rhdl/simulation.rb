@@ -2,6 +2,7 @@
 # Provides the core simulation infrastructure for gate-level and behavioral simulation
 
 require 'active_support/concern'
+require 'active_support/core_ext/string/inflections'
 
 # Load simulation components in dependency order
 
