@@ -81,23 +81,22 @@ RSpec.describe RHDL::HDL::SRLatch do
   end
 
   describe 'synthesis' do
-    it 'has a behavior block defined' do
+    it 'has synthesis support defined' do
       expect(RHDL::HDL::SRLatch.behavior_defined?).to be_truthy
     end
 
-    # Note: Sequential components use stateful behavior which is not yet supported in synthesis context
-    it 'generates valid IR', :pending do
+    it 'generates valid IR' do
       ir = RHDL::HDL::SRLatch.to_ir
       expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
       expect(ir.ports.length).to eq(5)  # s, r, en, q, qn
     end
 
-    it 'generates valid Verilog', :pending do
+    it 'generates valid Verilog' do
       verilog = RHDL::HDL::SRLatch.to_verilog
       expect(verilog).to include('module sr_latch')
       expect(verilog).to include('input s')
       expect(verilog).to include('input r')
-      expect(verilog).to include('output q')
+      expect(verilog).to match(/output.*q/)
     end
   end
 end

@@ -1,9 +1,16 @@
 # HDL T Flip-Flop
 # Toggle Flip-Flop
+# Synthesizable via Sequential DSL
+
+require_relative '../../dsl/behavior'
+require_relative '../../dsl/sequential'
 
 module RHDL
   module HDL
     class TFlipFlop < SequentialComponent
+      include RHDL::DSL::Behavior
+      include RHDL::DSL::Sequential
+
       port_input :t
       port_input :clk
       port_input :rst
@@ -11,16 +18,16 @@ module RHDL
       port_output :q
       port_output :qn
 
+      # Sequential block for toggle flip-flop
+      # Toggle when t=1 and en=1, otherwise hold
+      sequential clock: :clk, reset: :rst, reset_values: { q: 0 } do
+        # Toggle when t & en, otherwise hold
+        q <= mux(t & en, ~q, q)
+      end
+
+      # Combinational block for inverted output
       behavior do
-        if rising_edge?
-          if rst.value == 1
-            set_state(0)
-          elsif en.value == 1 && t.value == 1
-            set_state(state == 0 ? 1 : 0)
-          end
-        end
-        q <= state
-        qn <= mux(state, lit(0, width: 1), lit(1, width: 1))
+        qn <= ~q
       end
     end
   end

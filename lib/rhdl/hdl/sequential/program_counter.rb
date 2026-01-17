@@ -1,9 +1,16 @@
 # HDL Program Counter
 # 16-bit Program Counter for CPU
+# Synthesizable via Sequential DSL
+
+require_relative '../../dsl/behavior'
+require_relative '../../dsl/sequential'
 
 module RHDL
   module HDL
     class ProgramCounter < SequentialComponent
+      include RHDL::DSL::Behavior
+      include RHDL::DSL::Sequential
+
       port_input :clk
       port_input :rst
       port_input :en          # Increment enable
@@ -12,25 +19,19 @@ module RHDL
       port_input :inc, width: 16  # Increment amount (usually 1, 2, or 3)
       port_output :q, width: 16
 
-      behavior do
-        max_val = param(:max)
-        if rising_edge?
-          if rst.value == 1
-            set_state(0)
-          elsif load.value == 1
-            set_state(d.value & max_val)
-          elsif en.value == 1
-            inc_val = inc.value
-            inc_val = 1 if inc_val == 0  # Default increment
-            set_state((state + inc_val) & max_val)
-          end
-        end
-        q <= state
+      # Sequential block for program counter
+      # Priority: load > en (increment)
+      sequential clock: :clk, reset: :rst, reset_values: { q: 0 } do
+        # Default increment of 1 when inc is 0
+        inc_is_zero = (inc == lit(0, width: 16))
+        inc_val = mux(inc_is_zero, lit(1, width: 16), inc)
+        next_pc = q + inc_val
+        # Priority: load > increment
+        q <= mux(load, d, mux(en, next_pc, q))
       end
 
       def initialize(name = nil, width: 16)
         @width = width
-        @state = 0
         @max = (1 << width) - 1
         super(name)
       end

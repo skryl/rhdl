@@ -50,14 +50,13 @@ RSpec.describe RHDL::HDL::DFlipFlop do
       expect(RHDL::HDL::DFlipFlop.behavior_defined?).to be_truthy
     end
 
-    # Note: Sequential components use rising_edge? which is not yet supported in synthesis context
-    it 'generates valid IR', :pending do
+    it 'generates valid IR' do
       ir = RHDL::HDL::DFlipFlop.to_ir
       expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
       expect(ir.ports.length).to eq(6)  # d, clk, rst, en, q, qn
     end
 
-    it 'generates valid Verilog', :pending do
+    it 'generates valid Verilog' do
       verilog = RHDL::HDL::DFlipFlop.to_verilog
       expect(verilog).to include('module d_flip_flop')
       expect(verilog).to include('input d')
