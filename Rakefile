@@ -512,20 +512,20 @@ namespace :hdl do
   # Example components with to_verilog methods
   # Format: { 'relative_path' => ['require_path', 'ClassName'] }
   EXAMPLE_COMPONENTS = {
-    # MOS6502S synthesizable components
-    'mos6502s/mos6502s_registers' => ['examples/mos6502s/registers/registers', 'MOS6502S::Registers'],
-    'mos6502s/mos6502s_stack_pointer' => ['examples/mos6502s/registers/stack_pointer', 'MOS6502S::StackPointer'],
-    'mos6502s/mos6502s_program_counter' => ['examples/mos6502s/registers/program_counter', 'MOS6502S::ProgramCounter'],
-    'mos6502s/mos6502s_instruction_register' => ['examples/mos6502s/registers/instruction_register', 'MOS6502S::InstructionRegister'],
-    'mos6502s/mos6502s_address_latch' => ['examples/mos6502s/registers/address_latch', 'MOS6502S::AddressLatch'],
-    'mos6502s/mos6502s_data_latch' => ['examples/mos6502s/registers/data_latch', 'MOS6502S::DataLatch'],
-    'mos6502s/mos6502s_status_register' => ['examples/mos6502s/status_register', 'MOS6502S::StatusRegister'],
-    'mos6502s/mos6502s_address_generator' => ['examples/mos6502s/address_gen/address_generator', 'MOS6502S::AddressGenerator'],
-    'mos6502s/mos6502s_indirect_addr_calc' => ['examples/mos6502s/address_gen/indirect_address_calc', 'MOS6502S::IndirectAddressCalc'],
-    'mos6502s/mos6502s_alu' => ['examples/mos6502s/alu', 'MOS6502S::ALU'],
-    'mos6502s/mos6502s_instruction_decoder' => ['examples/mos6502s/instruction_decoder', 'MOS6502S::InstructionDecoder'],
-    'mos6502s/mos6502s_control_unit' => ['examples/mos6502s/control_unit', 'MOS6502S::ControlUnit'],
-    'mos6502s/mos6502s_memory' => ['examples/mos6502s/memory', 'MOS6502S::Memory']
+    # MOS6502 synthesizable components
+    'mos6502/mos6502_registers' => ['examples/mos6502/registers/registers', 'MOS6502::Registers'],
+    'mos6502/mos6502_stack_pointer' => ['examples/mos6502/registers/stack_pointer', 'MOS6502::StackPointer'],
+    'mos6502/mos6502_program_counter' => ['examples/mos6502/registers/program_counter', 'MOS6502::ProgramCounter'],
+    'mos6502/mos6502_instruction_register' => ['examples/mos6502/registers/instruction_register', 'MOS6502::InstructionRegister'],
+    'mos6502/mos6502_address_latch' => ['examples/mos6502/registers/address_latch', 'MOS6502::AddressLatch'],
+    'mos6502/mos6502_data_latch' => ['examples/mos6502/registers/data_latch', 'MOS6502::DataLatch'],
+    'mos6502/mos6502_status_register' => ['examples/mos6502/status_register', 'MOS6502::StatusRegister'],
+    'mos6502/mos6502_address_generator' => ['examples/mos6502/address_gen/address_generator', 'MOS6502::AddressGenerator'],
+    'mos6502/mos6502_indirect_addr_calc' => ['examples/mos6502/address_gen/indirect_address_calc', 'MOS6502::IndirectAddressCalc'],
+    'mos6502/mos6502_alu' => ['examples/mos6502/alu', 'MOS6502::ALU'],
+    'mos6502/mos6502_instruction_decoder' => ['examples/mos6502/instruction_decoder', 'MOS6502::InstructionDecoder'],
+    'mos6502/mos6502_control_unit' => ['examples/mos6502/control_unit', 'MOS6502::ControlUnit'],
+    'mos6502/mos6502_memory' => ['examples/mos6502/memory', 'MOS6502::Memory']
   }.freeze
 
   desc "Export all DSL components to VHDL and Verilog (lib/ and examples/)"
@@ -779,20 +779,20 @@ namespace :gates do
     'cpu/instruction_decoder' => -> { RHDL::HDL::CPU::InstructionDecoder.new('decoder') },
     'cpu/synth_datapath' => -> { RHDL::HDL::CPU::SynthDatapath.new('synth_cpu') },
 
-    # MOS6502S (Synthesizable 6502)
-    'mos6502s/registers' => -> { require_relative 'examples/mos6502s/registers'; MOS6502S::Registers.new('regs') },
-    'mos6502s/stack_pointer' => -> { require_relative 'examples/mos6502s/registers'; MOS6502S::StackPointer.new('sp') },
-    'mos6502s/program_counter' => -> { require_relative 'examples/mos6502s/registers'; MOS6502S::ProgramCounter.new('pc') },
-    'mos6502s/instruction_register' => -> { require_relative 'examples/mos6502s/registers'; MOS6502S::InstructionRegister.new('ir') },
-    'mos6502s/address_latch' => -> { require_relative 'examples/mos6502s/registers'; MOS6502S::AddressLatch.new('alat') },
-    'mos6502s/data_latch' => -> { require_relative 'examples/mos6502s/registers'; MOS6502S::DataLatch.new('dlat') },
-    'mos6502s/status_register' => -> { require_relative 'examples/mos6502s/status_register'; MOS6502S::StatusRegister.new('sr') },
-    'mos6502s/address_generator' => -> { require_relative 'examples/mos6502s/address_gen'; MOS6502S::AddressGenerator.new('agen') },
-    'mos6502s/indirect_addr_calc' => -> { require_relative 'examples/mos6502s/address_gen'; MOS6502S::IndirectAddressCalc.new('acalc') },
-    'mos6502s/alu' => -> { require_relative 'examples/mos6502s/alu'; MOS6502S::ALU.new('alu') },
-    'mos6502s/instruction_decoder' => -> { require_relative 'examples/mos6502s/instruction_decoder'; MOS6502S::InstructionDecoder.new('dec') },
-    'mos6502s/control_unit' => -> { require_relative 'examples/mos6502s/control_unit'; MOS6502S::ControlUnit.new('ctrl') },
-    'mos6502s/datapath' => -> { require_relative 'examples/mos6502s/datapath'; MOS6502S::Datapath.new('datapath') }
+    # MOS6502 (Synthesizable 6502)
+    'mos6502/registers' => -> { require_relative 'examples/mos6502/registers'; MOS6502::Registers.new('regs') },
+    'mos6502/stack_pointer' => -> { require_relative 'examples/mos6502/registers'; MOS6502::StackPointer.new('sp') },
+    'mos6502/program_counter' => -> { require_relative 'examples/mos6502/registers'; MOS6502::ProgramCounter.new('pc') },
+    'mos6502/instruction_register' => -> { require_relative 'examples/mos6502/registers'; MOS6502::InstructionRegister.new('ir') },
+    'mos6502/address_latch' => -> { require_relative 'examples/mos6502/registers'; MOS6502::AddressLatch.new('alat') },
+    'mos6502/data_latch' => -> { require_relative 'examples/mos6502/registers'; MOS6502::DataLatch.new('dlat') },
+    'mos6502/status_register' => -> { require_relative 'examples/mos6502/status_register'; MOS6502::StatusRegister.new('sr') },
+    'mos6502/address_generator' => -> { require_relative 'examples/mos6502/address_gen'; MOS6502::AddressGenerator.new('agen') },
+    'mos6502/indirect_addr_calc' => -> { require_relative 'examples/mos6502/address_gen'; MOS6502::IndirectAddressCalc.new('acalc') },
+    'mos6502/alu' => -> { require_relative 'examples/mos6502/alu'; MOS6502::ALU.new('alu') },
+    'mos6502/instruction_decoder' => -> { require_relative 'examples/mos6502/instruction_decoder'; MOS6502::InstructionDecoder.new('dec') },
+    'mos6502/control_unit' => -> { require_relative 'examples/mos6502/control_unit'; MOS6502::ControlUnit.new('ctrl') },
+    'mos6502/datapath' => -> { require_relative 'examples/mos6502/datapath'; MOS6502::Datapath.new('datapath') }
   }.freeze
 
   desc "Export all components to gate-level IR (JSON netlists)"

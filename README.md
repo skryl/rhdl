@@ -41,7 +41,7 @@ rhdl/
 │   └── diagram/        # Diagram rendering
 ├── examples/           # Demo scripts
 │   ├── mos6502/        # MOS 6502 behavioral CPU
-│   └── mos6502s/       # MOS 6502 synthesizable CPU
+│   └── mos6502/       # MOS 6502 synthesizable CPU
 ├── spec/               # Test suite
 ├── docs/               # Documentation
 ├── export/             # Generated output files
