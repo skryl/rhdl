@@ -13,4 +13,5 @@
 .rspec_status
 .rspec_status*
 /spec/fixtures/apple2/
+/export/roms/
 /vendor/
