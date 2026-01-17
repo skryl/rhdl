@@ -99,4 +99,62 @@ RSpec.describe RHDL::HDL::SRLatch do
       expect(verilog).to match(/output.*q/)
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::SRLatch.new('sr_latch') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'sr_latch') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('sr_latch.s', 'sr_latch.r', 'sr_latch.en')
+      expect(ir.outputs.keys).to include('sr_latch.q', 'sr_latch.qn')
+      expect(ir.gates.length).to be >= 1
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module sr_latch')
+      expect(verilog).to include('input s')
+      expect(verilog).to include('input r')
+      expect(verilog).to include('input en')
+      expect(verilog).to include('output q')
+      expect(verilog).to include('output qn')
+    end
+
+    context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation' do
+        test_vectors = []
+        behavioral = RHDL::HDL::SRLatch.new
+        behavioral.set_input(:en, 1)
+
+        test_cases = [
+          { s: 1, r: 0, en: 1 },  # set
+          { s: 0, r: 0, en: 1 },  # hold
+          { s: 0, r: 1, en: 1 },  # reset
+          { s: 1, r: 0, en: 1 },  # set again
+          { s: 0, r: 1, en: 0 },  # hold (en=0)
+        ]
+
+        expected_outputs = []
+        test_cases.each do |tc|
+          behavioral.set_input(:s, tc[:s])
+          behavioral.set_input(:r, tc[:r])
+          behavioral.set_input(:en, tc[:en])
+          behavioral.propagate
+
+          test_vectors << { inputs: tc }
+          expected_outputs << { q: behavioral.get_output(:q) }
+        end
+
+        base_dir = File.join('tmp', 'iverilog', 'sr_latch')
+        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+
+        expect(result[:success]).to be(true), result[:error]
+
+        expected_outputs.each_with_index do |expected, idx|
+          expect(result[:results][idx][:q]).to eq(expected[:q]),
+            "Cycle #{idx}: expected q=#{expected[:q]}, got #{result[:results][idx][:q]}"
+        end
+      end
+    end
+  end
 end
