@@ -81,6 +81,17 @@ module RHDL
         mux(condition, then_expr, else_expr)
       end
 
+      # Case select - lookup table style case statement
+      # Usage: case_select(op, { 0 => a + b, 1 => a - b, 2 => a & b }, default: 0)
+      def case_select(selector, cases, default: 0)
+        sel_val = resolve_value(selector)
+        if cases.key?(sel_val)
+          resolve_value(cases[sel_val])
+        else
+          resolve_value(default)
+        end
+      end
+
       private
 
       def resolve_value(sig)
@@ -96,12 +107,17 @@ module RHDL
 
       def resolve_value_with_width(sig)
         case sig
-        when SimSignalProxy, SimOutputProxy, SimLocalProxy
+        when SimSignalProxy, SimOutputProxy, SimLocalProxy, SimValueProxy
           [sig.value, sig.width]
         when Integer
           [sig, sig == 0 ? 1 : sig.bit_length]
         else
-          [sig.to_i, 8]
+          # Fallback: check if it has value and width methods
+          if sig.respond_to?(:value) && sig.respond_to?(:width)
+            [sig.value, sig.width]
+          else
+            [sig.to_i, 8]
+          end
         end
       end
     end

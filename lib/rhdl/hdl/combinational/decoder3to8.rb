@@ -5,19 +5,28 @@ module RHDL
   module HDL
     # 3-to-8 Decoder
     class Decoder3to8 < SimComponent
-      def setup_ports
-        input :a, width: 3
-        input :en
-        8.times { |i| output :"y#{i}" }
-      end
+      # Class-level port definitions for synthesis
+      port_input :a, width: 3
+      port_input :en
+      port_output :y0
+      port_output :y1
+      port_output :y2
+      port_output :y3
+      port_output :y4
+      port_output :y5
+      port_output :y6
+      port_output :y7
 
-      def propagate
-        if in_val(:en) == 0
-          8.times { |i| out_set(:"y#{i}", 0) }
-        else
-          val = in_val(:a) & 7
-          8.times { |i| out_set(:"y#{i}", i == val ? 1 : 0) }
-        end
+      behavior do
+        # Each output is active when enabled and address matches
+        y0 <= en & (a == lit(0, width: 3))
+        y1 <= en & (a == lit(1, width: 3))
+        y2 <= en & (a == lit(2, width: 3))
+        y3 <= en & (a == lit(3, width: 3))
+        y4 <= en & (a == lit(4, width: 3))
+        y5 <= en & (a == lit(5, width: 3))
+        y6 <= en & (a == lit(6, width: 3))
+        y7 <= en & (a == lit(7, width: 3))
       end
     end
   end
