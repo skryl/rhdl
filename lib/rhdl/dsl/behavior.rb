@@ -4,7 +4,7 @@
 # - Simulation: Execute as Ruby code to compute outputs from inputs
 # - Synthesis: Build IR/AST for HDL export (VHDL/Verilog)
 #
-# Example:
+# Example - Basic combinational logic:
 #   class MyAnd
 #     include RHDL::DSL
 #     include RHDL::DSL::Behavior
@@ -18,9 +18,32 @@
 #     end
 #   end
 #
+# Example - ALU with case_of:
+#   behavior do
+#     # Local variables become wires
+#     sum = local(:sum, a + b + c_in, width: 9)
+#
+#     # Case with multiple outputs
+#     case_of op, width: 8 do |c|
+#       c.when(OP_ADD) do
+#         result <= sum[7..0]
+#         c_out <= sum[8]
+#       end
+#       c.when(OP_AND) do
+#         result <= a & b
+#         c_out <= lit(0, width: 1)
+#       end
+#       c.default do
+#         result <= a
+#         c_out <= c_in
+#       end
+#     end
+#   end
+#
 # The same behavior block is used for both simulation and synthesis.
 
 require 'active_support/concern'
+require 'set'
 
 module RHDL
   module DSL
@@ -360,6 +383,220 @@ module RHDL
         end
       end
 
+      # Local variable that becomes a wire in synthesis
+      class BehaviorLocal < BehaviorExpr
+        attr_reader :name, :expr
+
+        def initialize(name, expr, width:)
+          @name = name
+          @expr = expr.is_a?(BehaviorExpr) ? expr : BehaviorLiteral.new(expr, width: width)
+          super(width: width)
+        end
+
+        def to_ir
+          # In synthesis, reference the wire
+          RHDL::Export::IR::Signal.new(name: @name, width: @width)
+        end
+
+        # Return the assignment that creates this wire
+        def wire_assign_ir
+          RHDL::Export::IR::Assign.new(
+            target: @name,
+            expr: @expr.to_ir
+          )
+        end
+      end
+
+      # Case expression wrapper for synthesis
+      class BehaviorCaseExpr < BehaviorExpr
+        attr_reader :ir
+
+        def initialize(ir, width:)
+          @ir = ir
+          super(width: width)
+        end
+
+        def to_ir
+          @ir
+        end
+      end
+
+      # Case statement builder for behavior blocks
+      class BehaviorCaseBuilder
+        attr_reader :selector, :branches, :default_branch
+
+        def initialize(selector, context)
+          @selector = selector
+          @context = context
+          @branches = {}   # { value => { output_name => expr } }
+          @default_branch = {}
+        end
+
+        # Define a case branch
+        def when(value, &block)
+          @current_branch = {}
+          branch_context = BehaviorCaseBranchContext.new(@context, @current_branch)
+          branch_context.instance_eval(&block)
+          @branches[value] = @current_branch
+          self
+        end
+
+        # Define the default branch
+        def default(&block)
+          @default_branch = {}
+          branch_context = BehaviorCaseBranchContext.new(@context, @default_branch)
+          branch_context.instance_eval(&block)
+          self
+        end
+
+        # Build case expressions for each output
+        def build_assignments
+          # Collect all outputs that are assigned in any branch
+          all_outputs = Set.new
+          @branches.each_value { |b| all_outputs.merge(b.keys) }
+          all_outputs.merge(@default_branch.keys)
+
+          # For each output, build a case expression
+          all_outputs.map do |output_name|
+            cases = @branches.transform_values { |b| b[output_name] }
+                             .reject { |_, v| v.nil? }
+            default = @default_branch[output_name]
+
+            # Find output width
+            output_proxy = @context.proxies[output_name]
+            width = output_proxy&.width || 8
+
+            # Create case IR for this output
+            case_ir = build_case_ir(cases, default, width)
+            BehaviorAssignment.new(output_proxy, BehaviorCaseExpr.new(case_ir, width: width))
+          end
+        end
+
+        private
+
+        def build_case_ir(cases, default, width)
+          ir_cases = cases.transform_keys { |k| [k] }
+                         .transform_values { |v| to_ir_expr(v, width) }
+
+          RHDL::Export::IR::Case.new(
+            selector: to_ir_expr(@selector, @selector.width),
+            cases: ir_cases,
+            default: default ? to_ir_expr(default, width) : nil,
+            width: width
+          )
+        end
+
+        def to_ir_expr(expr, width)
+          return expr.to_ir if expr.respond_to?(:to_ir)
+          RHDL::Export::IR::Literal.new(value: expr.to_i, width: width)
+        end
+      end
+
+      # Context for inside a case branch
+      class BehaviorCaseBranchContext
+        def initialize(parent_context, assignments)
+          @parent_context = parent_context
+          @assignments = assignments
+          @proxies = parent_context.proxies
+        end
+
+        def method_missing(name, *args)
+          if @proxies.key?(name)
+            CaseBranchProxy.new(name, @assignments, @proxies[name])
+          else
+            super
+          end
+        end
+
+        def respond_to_missing?(name, include_private = false)
+          @proxies.key?(name) || super
+        end
+
+        def lit(value, width:)
+          BehaviorLiteral.new(value, width: width)
+        end
+
+        # Simple if-else for single expression
+        def if_else(condition, then_expr, else_expr)
+          cond = condition.is_a?(BehaviorExpr) ? condition : BehaviorLiteral.new(condition)
+          then_val = then_expr.is_a?(BehaviorExpr) ? then_expr : BehaviorLiteral.new(then_expr)
+          else_val = else_expr.is_a?(BehaviorExpr) ? else_expr : BehaviorLiteral.new(else_expr)
+          BehaviorConditional.new(cond, when_true: then_val, when_false: else_val)
+        end
+
+        # Mux helper
+        def mux(condition, when_true, when_false)
+          if_else(condition, when_true, when_false)
+        end
+      end
+
+      # Proxy for output in case branch that captures assignment
+      class CaseBranchProxy < BehaviorSignalRef
+        def initialize(name, assignments, original_proxy)
+          super(name, width: original_proxy.width)
+          @assignments = assignments
+          @original_proxy = original_proxy
+        end
+
+        def <=(expr)
+          wrapped = expr.is_a?(BehaviorExpr) ? expr : BehaviorLiteral.new(expr)
+          @assignments[@name] = wrapped
+        end
+      end
+
+      # If-elsif-else chain builder
+      class BehaviorIfChain
+        def initialize(context)
+          @context = context
+          @branches = []  # [ [condition, assignments], ... ]
+          @else_branch = nil
+        end
+
+        def when_cond(condition, &block)
+          assignments = {}
+          branch_context = BehaviorCaseBranchContext.new(@context, assignments)
+          branch_context.instance_eval(&block)
+          cond = condition.is_a?(BehaviorExpr) ? condition : BehaviorLiteral.new(condition)
+          @branches << [cond, assignments]
+          self
+        end
+
+        def else_do(&block)
+          @else_branch = {}
+          branch_context = BehaviorCaseBranchContext.new(@context, @else_branch)
+          branch_context.instance_eval(&block)
+          self
+        end
+
+        # Build nested mux assignments for each output
+        def build_assignments
+          all_outputs = Set.new
+          @branches.each { |_, assigns| all_outputs.merge(assigns.keys) }
+          all_outputs.merge(@else_branch&.keys || [])
+
+          all_outputs.map do |output_name|
+            output_proxy = @context.proxies[output_name]
+            width = output_proxy&.width || 8
+
+            # Build nested mux from bottom up
+            result = @else_branch&.dig(output_name) || BehaviorLiteral.new(0, width: width)
+
+            @branches.reverse.each do |cond, assigns|
+              if assigns[output_name]
+                result = BehaviorConditional.new(
+                  cond,
+                  when_true: assigns[output_name],
+                  when_false: result,
+                  width: width
+                )
+              end
+            end
+
+            BehaviorAssignment.new(output_proxy, result)
+          end
+        end
+      end
+
       # Assignment collector for behavior blocks
       class BehaviorAssignment
         attr_reader :target, :expr
@@ -390,7 +627,7 @@ module RHDL
 
       # Context for evaluating behavior blocks
       class BehaviorContext
-        attr_reader :mode, :input_values, :output_values, :assignments, :component_class
+        attr_reader :mode, :input_values, :output_values, :assignments, :component_class, :locals, :proxies
 
         def initialize(component_class)
           @component_class = component_class
@@ -398,18 +635,21 @@ module RHDL
           @input_values = {}
           @output_values = {}
           @assignments = []
-          @signal_proxies = {}
+          @locals = []
+          @proxies = {}
         end
 
         def simulation_mode!
           @mode = SIM_MODE
           @assignments.clear
+          @locals.clear
           self
         end
 
         def synthesis_mode!
           @mode = SYNTH_MODE
           @assignments.clear
+          @locals.clear
           self
         end
 
@@ -425,23 +665,27 @@ module RHDL
           @assignments << assignment
         end
 
+        def record_local(local_var)
+          @locals << local_var
+        end
+
         # Create signal proxies for the behavior block
         def create_proxies
-          @signal_proxies = {}
+          @proxies = {}
 
           @component_class._ports.each do |port|
             if port.direction == :out
-              @signal_proxies[port.name] = BehaviorOutputProxy.new(port.name, width: port.width, context: self)
+              @proxies[port.name] = BehaviorOutputProxy.new(port.name, width: port.width, context: self)
             else
-              @signal_proxies[port.name] = BehaviorSignalRef.new(port.name, width: port.width)
+              @proxies[port.name] = BehaviorSignalRef.new(port.name, width: port.width)
             end
           end
 
           @component_class._signals.each do |sig|
-            @signal_proxies[sig.name] = BehaviorOutputProxy.new(sig.name, width: sig.width, context: self)
+            @proxies[sig.name] = BehaviorOutputProxy.new(sig.name, width: sig.width, context: self)
           end
 
-          @signal_proxies
+          @proxies
         end
 
         # Evaluate for simulation - returns hash of output values
@@ -465,7 +709,7 @@ module RHDL
           @output_values
         end
 
-        # Evaluate for synthesis - returns list of IR assignments
+        # Evaluate for synthesis - returns hash with wires, wire_assigns, and output_assigns
         def evaluate_for_synthesis(&block)
           synthesis_mode!
           proxies = create_proxies
@@ -473,13 +717,23 @@ module RHDL
           # Execute the block to collect assignments
           BehaviorEvaluator.new(self, proxies).evaluate(&block)
 
-          # Convert assignments to IR
-          @assignments.map do |assignment|
-            RHDL::Export::IR::Assign.new(
-              target: assignment.target.name,
-              expr: resize_to_target(assignment.expr.to_ir, assignment.target.width)
-            )
-          end
+          # Convert to IR with locals as wires
+          {
+            wires: @locals.map { |l| RHDL::Export::IR::Net.new(name: l.name, width: l.width) },
+            wire_assigns: @locals.map(&:wire_assign_ir),
+            output_assigns: @assignments.map do |assignment|
+              RHDL::Export::IR::Assign.new(
+                target: assignment.target.name,
+                expr: resize_to_target(assignment.expr.to_ir, assignment.target.width)
+              )
+            end
+          }
+        end
+
+        # Simple version for backwards compatibility - returns flat list of assigns
+        def evaluate_for_synthesis_flat(&block)
+          result = evaluate_for_synthesis(&block)
+          result[:wire_assigns] + result[:output_assigns]
         end
 
         private
@@ -494,6 +748,9 @@ module RHDL
           case expr
           when BehaviorLiteral
             expr.value
+          when BehaviorLocal
+            # Evaluate the underlying expression
+            compute_value(expr.expr)
           when BehaviorSignalRef
             @input_values[expr.name] || @output_values[expr.name] || 0
           when BehaviorBinaryOp
@@ -531,10 +788,59 @@ module RHDL
             else
               expr.when_false_expr ? compute_value(expr.when_false_expr) : 0
             end
+          when BehaviorCaseExpr
+            compute_case_value(expr.ir)
           when Integer
             expr
           else
             raise "Unknown expression type: #{expr.class}"
+          end
+        end
+
+        # Compute case expression value during simulation
+        def compute_case_value(case_ir)
+          selector_val = compute_value_from_ir(case_ir.selector)
+
+          case_ir.cases.each do |values, branch_ir|
+            if values.include?(selector_val)
+              return compute_value_from_ir(branch_ir)
+            end
+          end
+
+          case_ir.default ? compute_value_from_ir(case_ir.default) : 0
+        end
+
+        # Compute IR expression value during simulation
+        def compute_value_from_ir(ir)
+          case ir
+          when RHDL::Export::IR::Literal
+            ir.value
+          when RHDL::Export::IR::Signal
+            @input_values[ir.name.to_sym] || @output_values[ir.name.to_sym] || 0
+          when RHDL::Export::IR::BinaryOp
+            left = compute_value_from_ir(ir.left)
+            right = compute_value_from_ir(ir.right)
+            compute_binary(ir.op, left, right, ir.width)
+          when RHDL::Export::IR::UnaryOp
+            operand = compute_value_from_ir(ir.operand)
+            compute_unary(ir.op, operand, ir.width)
+          when RHDL::Export::IR::Slice
+            base = compute_value_from_ir(ir.base)
+            low = [ir.range.begin, ir.range.end].min
+            (base >> low) & ((1 << ir.width) - 1)
+          when RHDL::Export::IR::Mux
+            cond = compute_value_from_ir(ir.condition)
+            if cond != 0
+              compute_value_from_ir(ir.when_true)
+            else
+              compute_value_from_ir(ir.when_false)
+            end
+          when RHDL::Export::IR::Case
+            compute_case_value(ir)
+          when RHDL::Export::IR::Resize
+            compute_value_from_ir(ir.expr)
+          else
+            0
           end
         end
 
@@ -578,11 +884,23 @@ module RHDL
         end
       end
 
+      # Wrapper to provide proxies access to case builders
+      class ContextWrapper
+        attr_reader :proxies
+
+        def initialize(context, proxies)
+          @context = context
+          @proxies = proxies
+        end
+      end
+
       # Evaluator that provides the DSL context for behavior blocks
       class BehaviorEvaluator
         def initialize(context, proxies)
           @context = context
           @proxies = proxies
+          @locals = {}
+          @context_wrapper = ContextWrapper.new(context, proxies)
 
           # Define methods for each signal
           @proxies.each do |name, proxy|
@@ -611,6 +929,52 @@ module RHDL
         def cat(*signals)
           parts = signals.map { |s| s.is_a?(BehaviorExpr) ? s : BehaviorLiteral.new(s) }
           BehaviorConcat.new(parts)
+        end
+
+        # Define a local variable (becomes a wire in synthesis)
+        def local(name, expr, width: nil)
+          wrapped = expr.is_a?(BehaviorExpr) ? expr : BehaviorLiteral.new(expr)
+          w = width || wrapped.width
+          local_var = BehaviorLocal.new(name, wrapped, width: w)
+          @locals[name] = local_var
+
+          # Make it available as a method
+          define_singleton_method(name) { local_var }
+
+          # Record the wire assignment
+          @context.record_local(local_var)
+
+          local_var
+        end
+
+        # Case statement with multiple outputs
+        def case_of(selector, &block)
+          builder = BehaviorCaseBuilder.new(selector, @context_wrapper)
+          builder.instance_eval(&block)
+
+          # Record all case assignments
+          builder.build_assignments.each do |assignment|
+            @context.record_assignment(assignment)
+          end
+        end
+
+        # If-elsif-else chain with multiple outputs
+        def if_chain(&block)
+          builder = BehaviorIfChain.new(@context_wrapper)
+          builder.instance_eval(&block)
+
+          # Record all if-chain assignments
+          builder.build_assignments.each do |assignment|
+            @context.record_assignment(assignment)
+          end
+        end
+
+        # Simple if-else for single expression
+        def if_else(condition, then_expr, else_expr)
+          cond = condition.is_a?(BehaviorExpr) ? condition : BehaviorLiteral.new(condition)
+          then_val = then_expr.is_a?(BehaviorExpr) ? then_expr : BehaviorLiteral.new(then_expr)
+          else_val = else_expr.is_a?(BehaviorExpr) ? else_expr : BehaviorLiteral.new(else_expr)
+          BehaviorConditional.new(cond, when_true: then_val, when_false: else_val)
         end
       end
 

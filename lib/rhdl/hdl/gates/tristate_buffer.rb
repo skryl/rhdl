@@ -1,5 +1,5 @@
 # HDL Tristate Buffer
-# Buffer with enable (high-Z output when disabled)
+# Buffer with enable (outputs 0 when disabled for synthesis compatibility)
 
 module RHDL
   module HDL
@@ -9,18 +9,12 @@ module RHDL
       port_output :y
 
       behavior do
-        # Simplified: always output a when enabled, 0 when disabled
-        # Full tristate support would require Z state in synthesis
-        y <= mux(en, a, 0)
+        # Note: Full tristate (Z state) would require special synthesis support
+        # This implementation outputs 0 when disabled for synthesis compatibility
+        y <= mux(en, a, lit(0, width: 1))
       end
 
-      def propagate
-        if in_val(:en) == 1
-          out_set(:y, in_val(:a))
-        else
-          @outputs[:y].set(SignalValue::Z)
-        end
-      end
+      # Behavior block handles both simulation and synthesis
     end
   end
 end

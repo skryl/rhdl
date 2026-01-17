@@ -1,5 +1,5 @@
 # HDL Ripple Carry Adder
-# Multi-bit adder
+# Multi-bit adder (synthesizable)
 
 module RHDL
   module HDL
@@ -11,10 +11,22 @@ module RHDL
       port_output :cout
       port_output :overflow
 
-      # Behavior block defines synthesizable logic for sum
-      # cout and overflow require wider temporary or more complex expressions
       behavior do
-        sum <= a + b + cin
+        # Use 9-bit result to capture carry
+        result = local(:result, a + b + cin, width: 9)
+
+        # Sum is lower 8 bits
+        sum <= result[7..0]
+
+        # Carry out is bit 8
+        cout <= result[8]
+
+        # Overflow for signed arithmetic: when signs of operands match
+        # but sign of result differs
+        a_sign = local(:a_sign, a[7], width: 1)
+        b_sign = local(:b_sign, b[7], width: 1)
+        sum_sign = local(:sum_sign, result[7], width: 1)
+        overflow <= (a_sign ^ sum_sign) & ~(a_sign ^ b_sign)
       end
 
       def initialize(name = nil, width: 8)
@@ -32,27 +44,7 @@ module RHDL
         @inputs[:b].on_change { |_| propagate }
       end
 
-      # Manual propagate computes cout and overflow which require wider arithmetic
-      def propagate
-        a = in_val(:a)
-        b = in_val(:b)
-        cin = in_val(:cin) & 1
-
-        result = a + b + cin
-        mask = (1 << @width) - 1
-        sum = result & mask
-        cout = (result >> @width) & 1
-
-        # Overflow for signed arithmetic
-        a_sign = (a >> (@width - 1)) & 1
-        b_sign = (b >> (@width - 1)) & 1
-        sum_sign = (sum >> (@width - 1)) & 1
-        overflow = ((a_sign == b_sign) && (sum_sign != a_sign)) ? 1 : 0
-
-        out_set(:sum, sum)
-        out_set(:cout, cout)
-        out_set(:overflow, overflow)
-      end
+      # Behavior block handles both simulation and synthesis
     end
   end
 end

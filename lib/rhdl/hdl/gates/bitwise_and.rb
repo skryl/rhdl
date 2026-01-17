@@ -27,9 +27,7 @@ module RHDL
         @inputs[:b].on_change { |_| propagate }
       end
 
-      def propagate
-        out_set(:y, in_val(:a) & in_val(:b))
-      end
+      # Behavior block handles both simulation and synthesis
     end
   end
 end

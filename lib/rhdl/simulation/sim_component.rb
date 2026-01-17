@@ -109,14 +109,17 @@ module RHDL
           @_behavior_block = BehaviorBlockDef.new(block, **options)
         end
 
-        # Generate IR assigns from the behavior block
+        # Generate IR assigns and wire declarations from the behavior block
         # Used by the export/lowering system for HDL generation
         def behavior_to_ir_assigns
-          return [] unless behavior_defined?
+          return { assigns: [], wires: [] } unless behavior_defined?
 
           ctx = BehaviorSynthContext.new(self)
           ctx.evaluate(&@_behavior_block.block)
-          ctx.to_ir_assigns
+          {
+            assigns: ctx.to_ir_assigns,
+            wires: ctx.wire_declarations
+          }
         end
 
         # Generate IR ModuleDef from the component
@@ -131,12 +134,14 @@ module RHDL
             RHDL::Export::IR::Reg.new(name: s.name, width: s.width)
           end
 
-          assigns = behavior_to_ir_assigns
+          behavior_result = behavior_to_ir_assigns
+          assigns = behavior_result[:assigns]
+          nets = behavior_result[:wires]
 
           RHDL::Export::IR::ModuleDef.new(
             name: name,
             ports: ports,
-            nets: [],
+            nets: nets,
             regs: regs,
             assigns: assigns,
             processes: []

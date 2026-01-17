@@ -1,5 +1,5 @@
 # HDL Multiplier
-# Combinational multiplier (8x8 -> 16)
+# Combinational multiplier (8x8 -> 16, synthesizable)
 
 module RHDL
   module HDL
@@ -26,16 +26,7 @@ module RHDL
         @inputs[:b].on_change { |_| propagate }
       end
 
-      def propagate
-        if @width == 8 && self.class.behavior_defined?
-          execute_behavior
-        else
-          a = in_val(:a)
-          b = in_val(:b)
-          product = a * b
-          out_set(:product, product & ((1 << (@width * 2)) - 1))
-        end
-      end
+      # Behavior block handles both simulation and synthesis
     end
   end
 end
