@@ -46,8 +46,37 @@ module RHDL
           lines << process_block(process)
         end
 
+        # Generate module instances
+        module_def.instances.each do |instance|
+          lines << ""
+          lines << instance_block(instance)
+        end
+
         lines << ""
         lines << "endmodule"
+        lines.join("\n")
+      end
+
+      # Generate module instantiation
+      def instance_block(instance)
+        lines = []
+
+        # Module name with optional parameters
+        if instance.parameters.empty?
+          lines << "  #{sanitize(instance.module_name)} #{sanitize(instance.name)} ("
+        else
+          param_list = instance.parameters.map { |k, v| ".#{sanitize(k)}(#{v})" }.join(", ")
+          lines << "  #{sanitize(instance.module_name)} #(#{param_list}) #{sanitize(instance.name)} ("
+        end
+
+        # Port connections
+        port_lines = instance.connections.map do |conn|
+          signal_str = conn.signal.is_a?(String) ? sanitize(conn.signal) : expr(conn.signal)
+          "    .#{sanitize(conn.port_name)}(#{signal_str})"
+        end
+        lines << port_lines.join(",\n")
+
+        lines << "  );"
         lines.join("\n")
       end
 
