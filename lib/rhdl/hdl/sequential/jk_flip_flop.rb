@@ -12,23 +12,26 @@ module RHDL
       port_output :q
       port_output :qn
 
-      def propagate
+      behavior do
         if rising_edge?
-          if in_val(:rst) == 1
-            @state = 0
-          elsif in_val(:en) == 1
-            j = in_val(:j) & 1
-            k = in_val(:k) & 1
-            case [j, k]
-            when [0, 0] then # Hold
-            when [0, 1] then @state = 0
-            when [1, 0] then @state = 1
-            when [1, 1] then @state = @state == 0 ? 1 : 0
+          if rst.value == 1
+            set_state(0)
+          elsif en.value == 1
+            j_val = j.value & 1
+            k_val = k.value & 1
+            # JK truth table: J=0,K=0 -> hold; J=0,K=1 -> reset; J=1,K=0 -> set; J=1,K=1 -> toggle
+            if j_val == 0 && k_val == 1
+              set_state(0)
+            elsif j_val == 1 && k_val == 0
+              set_state(1)
+            elsif j_val == 1 && k_val == 1
+              set_state(state == 0 ? 1 : 0)
             end
+            # j_val == 0 && k_val == 0: hold state
           end
         end
-        out_set(:q, @state)
-        out_set(:qn, @state == 0 ? 1 : 0)
+        q <= state
+        qn <= mux(state, lit(0, width: 1), lit(1, width: 1))
       end
     end
   end
