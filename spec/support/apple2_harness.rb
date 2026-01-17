@@ -1,7 +1,7 @@
 # Apple ][ test harness for MOS6502 CPU
 
 require_relative '../../examples/mos6502/cpu'
-require_relative '../../examples/mos6502/apple2_bus'
+require_relative '../../examples/mos6502/utility/apple2_bus'
 
 module Apple2Harness
   class Runner
