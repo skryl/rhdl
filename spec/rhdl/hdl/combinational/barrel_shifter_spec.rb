@@ -3,7 +3,7 @@
 require 'spec_helper'
 
 RSpec.describe RHDL::HDL::BarrelShifter do
-  let(:shifter) { RHDL::HDL::BarrelShifter.new(nil, width: 8) }
+  let(:shifter) { RHDL::HDL::BarrelShifter.new }
 
   describe 'simulation' do
     it 'shifts left' do
@@ -67,14 +67,13 @@ RSpec.describe RHDL::HDL::BarrelShifter do
       expect(RHDL::HDL::BarrelShifter.behavior_defined?).to be_truthy
     end
 
-    # Note: Component uses conditional shift logic which is not yet fully supported in synthesis context
-    it 'generates valid IR', :pending do
+    it 'generates valid IR' do
       ir = RHDL::HDL::BarrelShifter.to_ir
       expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
       expect(ir.ports.length).to eq(6)  # a, shift, dir, arith, rotate, y
     end
 
-    it 'generates valid Verilog', :pending do
+    it 'generates valid Verilog' do
       verilog = RHDL::HDL::BarrelShifter.to_verilog
       expect(verilog).to include('module barrel_shifter')
       expect(verilog).to include('input [7:0] a')
