@@ -58,4 +58,29 @@ RSpec.describe MOS6502::ControlUnit do
       expect(verilog).to include('state')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { described_class.new('mos6502_control_unit') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mos6502_control_unit') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('mos6502_control_unit.clk', 'mos6502_control_unit.rst')
+      expect(ir.inputs.keys).to include('mos6502_control_unit.addr_mode', 'mos6502_control_unit.instr_type')
+      expect(ir.outputs.keys).to include('mos6502_control_unit.state', 'mos6502_control_unit.done')
+    end
+
+    it 'generates gates for state machine logic' do
+      # Control unit has complex state machine logic
+      # Note: Behavioral state machines may not produce DFFs through gate lowering
+      expect(ir.gates.length).to be > 100
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module mos6502_control_unit')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input rst')
+      expect(verilog).to include('output [7:0] state')
+    end
+  end
 end

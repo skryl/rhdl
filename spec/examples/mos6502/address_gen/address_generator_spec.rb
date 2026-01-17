@@ -75,4 +75,28 @@ RSpec.describe MOS6502::AddressGenerator do
       expect(verilog).to include('eff_addr')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { described_class.new('mos6502_address_generator') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mos6502_address_generator') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('mos6502_address_generator.mode')
+      expect(ir.inputs.keys).to include('mos6502_address_generator.operand_lo', 'mos6502_address_generator.operand_hi')
+      expect(ir.outputs.keys).to include('mos6502_address_generator.eff_addr')
+    end
+
+    it 'generates gates for combinational address logic' do
+      # Address generator is purely combinational
+      expect(ir.gates.length).to be > 10
+      expect(ir.dffs.length).to eq(0)
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module mos6502_address_generator')
+      expect(verilog).to include('input [3:0] mode')
+      expect(verilog).to include('output [15:0] eff_addr')
+    end
+  end
 end

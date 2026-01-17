@@ -65,4 +65,29 @@ RSpec.describe MOS6502::StatusRegister do
       expect(verilog).to include('p')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { described_class.new('mos6502_status_register') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mos6502_status_register') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('mos6502_status_register.clk', 'mos6502_status_register.rst')
+      expect(ir.inputs.keys).to include('mos6502_status_register.n_in', 'mos6502_status_register.z_in')
+      expect(ir.outputs.keys).to include('mos6502_status_register.p')
+      expect(ir.outputs.keys).to include('mos6502_status_register.n', 'mos6502_status_register.z', 'mos6502_status_register.c')
+    end
+
+    it 'generates DFFs for flag storage' do
+      # Status register has 8-bit p register requiring DFFs
+      expect(ir.dffs.length).to be > 0
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module mos6502_status_register')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input rst')
+      expect(verilog).to include('output [7:0] p')
+    end
+  end
 end

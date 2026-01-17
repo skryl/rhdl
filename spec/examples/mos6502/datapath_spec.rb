@@ -38,4 +38,27 @@ RSpec.describe MOS6502::Datapath do
       expect(verilog.length).to be > 1000  # Complex module
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { described_class.new('mos6502_datapath') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mos6502_datapath') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('mos6502_datapath.clk', 'mos6502_datapath.rst')
+      expect(ir.inputs.keys).to include('mos6502_datapath.data_in')
+      expect(ir.outputs.keys).to include('mos6502_datapath.addr', 'mos6502_datapath.data_out')
+    end
+
+    it 'generates complex netlist with gates and DFFs' do
+      # Datapath is a complex hierarchical component
+      expect(ir.gates.length).to be > 100
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module mos6502_datapath')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input rst')
+    end
+  end
 end

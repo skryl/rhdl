@@ -41,4 +41,27 @@ RSpec.describe MOS6502::AddressLatch do
       expect(verilog).to include('addr')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { described_class.new('mos6502_address_latch') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mos6502_address_latch') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('mos6502_address_latch.clk', 'mos6502_address_latch.rst')
+      expect(ir.inputs.keys).to include('mos6502_address_latch.load_lo', 'mos6502_address_latch.load_hi')
+      expect(ir.outputs.keys).to include('mos6502_address_latch.addr')
+    end
+
+    it 'generates DFFs for 16-bit address register' do
+      # Address latch has 16-bit register requiring DFFs
+      expect(ir.dffs.length).to be > 0
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module mos6502_address_latch')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('output [15:0] addr')
+    end
+  end
 end

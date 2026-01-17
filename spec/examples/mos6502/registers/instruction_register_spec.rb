@@ -51,4 +51,27 @@ RSpec.describe MOS6502::InstructionRegister do
       expect(verilog).to include('opcode')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { described_class.new('mos6502_instruction_register') }
+    let(:netlist_ir) { RHDL::Gates::Lower.from_components([component], name: 'mos6502_instruction_register') }
+
+    it 'generates correct IR structure' do
+      expect(netlist_ir.inputs.keys).to include('mos6502_instruction_register.clk', 'mos6502_instruction_register.rst')
+      expect(netlist_ir.inputs.keys).to include('mos6502_instruction_register.load_opcode')
+      expect(netlist_ir.outputs.keys).to include('mos6502_instruction_register.opcode')
+    end
+
+    it 'generates DFFs for opcode and operand registers' do
+      # Instruction register has registers requiring DFFs
+      expect(netlist_ir.dffs.length).to be > 0
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(netlist_ir)
+      expect(verilog).to include('module mos6502_instruction_register')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('output [7:0] opcode')
+    end
+  end
 end
