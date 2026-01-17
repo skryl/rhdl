@@ -1,5 +1,5 @@
 # HDL AND Gate
-# 2 or more inputs
+# 2-input AND gate (synthesizable)
 
 module RHDL
   module HDL
@@ -12,28 +12,7 @@ module RHDL
         y <= a0 & a1
       end
 
-      def initialize(name = nil, inputs: 2)
-        @input_count = inputs
-        super(name)
-      end
-
-      def setup_ports
-        # Add additional inputs beyond the default 2 if needed
-        (@input_count - 2).times { |i| input :"a#{i + 2}" }
-      end
-
-      def propagate
-        if @input_count == 2 && self.class.behavior_defined?
-          execute_behavior
-        else
-          # Fall back to manual computation for N-input case
-          result = 1
-          @input_count.times do |i|
-            result &= (in_val(:"a#{i}") & 1)
-          end
-          out_set(:y, result)
-        end
-      end
+      # Behavior block handles both simulation and synthesis
     end
   end
 end

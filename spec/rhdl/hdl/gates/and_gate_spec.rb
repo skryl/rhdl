@@ -21,19 +21,8 @@ RSpec.describe RHDL::HDL::AndGate do
       expect(gate.get_output(:y)).to eq(1)
     end
 
-    it 'supports multiple inputs' do
-      gate = RHDL::HDL::AndGate.new(nil, inputs: 3)
-
-      gate.set_input(:a0, 1)
-      gate.set_input(:a1, 1)
-      gate.set_input(:a2, 1)
-      gate.propagate
-      expect(gate.get_output(:y)).to eq(1)
-
-      gate.set_input(:a2, 0)
-      gate.propagate
-      expect(gate.get_output(:y)).to eq(0)
-    end
+    # Note: N-input gates removed in favor of synthesizable 2-input gates
+    # For more inputs, chain multiple 2-input gates
   end
 
   describe 'synthesis' do
