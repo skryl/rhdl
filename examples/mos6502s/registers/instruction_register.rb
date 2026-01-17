@@ -23,13 +23,6 @@ module MOS6502S
     port_output :operand_hi, width: 8
     port_output :operand, width: 16
 
-    def initialize(name = nil)
-      @opcode_reg = 0
-      @operand_lo_reg = 0
-      @operand_hi_reg = 0
-      super(name)
-    end
-
     # Sequential block for opcode and operand registers
     sequential clock: :clk, reset: :rst, reset_values: { opcode: 0, operand_lo: 0, operand_hi: 0 } do
       opcode <= mux(load_opcode, data_in, opcode)
@@ -42,29 +35,9 @@ module MOS6502S
       operand <= cat(operand_hi, operand_lo)
     end
 
-    # Override propagate to maintain internal state for testing
-    def propagate
-      if rising_edge?
-        if in_val(:rst) == 1
-          @opcode_reg = 0
-          @operand_lo_reg = 0
-          @operand_hi_reg = 0
-        else
-          data = in_val(:data_in) & 0xFF
-          @opcode_reg = data if in_val(:load_opcode) == 1
-          @operand_lo_reg = data if in_val(:load_operand_lo) == 1
-          @operand_hi_reg = data if in_val(:load_operand_hi) == 1
-        end
-      end
-
-      out_set(:opcode, @opcode_reg)
-      out_set(:operand_lo, @operand_lo_reg)
-      out_set(:operand_hi, @operand_hi_reg)
-      out_set(:operand, (@operand_hi_reg << 8) | @operand_lo_reg)
-    end
-
-    def read_opcode; @opcode_reg; end
-    def read_operand; (@operand_hi_reg << 8) | @operand_lo_reg; end
+    # Test helper accessors (use DSL state management)
+    def read_opcode; read_reg(:opcode) || 0; end
+    def read_operand; ((read_reg(:operand_hi) || 0) << 8) | (read_reg(:operand_lo) || 0); end
 
     def self.to_verilog
       RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502s_instruction_register'))

@@ -22,13 +22,6 @@ module MOS6502S
     port_output :x, width: 8
     port_output :y, width: 8
 
-    def initialize(name = nil)
-      @reg_a = 0
-      @reg_x = 0
-      @reg_y = 0
-      super(name)
-    end
-
     # Sequential block for both simulation and synthesis
     # Defines the clocked behavior with reset
     sequential clock: :clk, reset: :rst, reset_values: { a: 0, x: 0, y: 0 } do
@@ -39,35 +32,13 @@ module MOS6502S
       y <= mux(load_y, data_in, y)
     end
 
-    # Direct access for testing (bypasses normal signal flow)
-    def read_a; @reg_a; end
-    def read_x; @reg_x; end
-    def read_y; @reg_y; end
-    def write_a(v); @reg_a = v & 0xFF; out_set(:a, @reg_a); end
-    def write_x(v); @reg_x = v & 0xFF; out_set(:x, @reg_x); end
-    def write_y(v); @reg_y = v & 0xFF; out_set(:y, @reg_y); end
-
-    # Override propagate to maintain internal state for testing
-    # The sequential block defines the synthesizable behavior,
-    # but we need custom propagate to maintain @reg_* for direct access
-    def propagate
-      if rising_edge?
-        if in_val(:rst) == 1
-          @reg_a = 0
-          @reg_x = 0
-          @reg_y = 0
-        else
-          data = in_val(:data_in) & 0xFF
-          @reg_a = data if in_val(:load_a) == 1
-          @reg_x = data if in_val(:load_x) == 1
-          @reg_y = data if in_val(:load_y) == 1
-        end
-      end
-
-      out_set(:a, @reg_a)
-      out_set(:x, @reg_x)
-      out_set(:y, @reg_y)
-    end
+    # Test helper accessors (use DSL state management)
+    def read_a; read_reg(:a) || 0; end
+    def read_x; read_reg(:x) || 0; end
+    def read_y; read_reg(:y) || 0; end
+    def write_a(v); write_reg(:a, v & 0xFF); end
+    def write_x(v); write_reg(:x, v & 0xFF); end
+    def write_y(v); write_reg(:y, v & 0xFF); end
 
     # Override to_verilog to use the proper module name
     def self.to_verilog

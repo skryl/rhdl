@@ -236,8 +236,22 @@ module RHDL
             &block
           )
 
-          # Define propagate method with rising edge detection
+          # Store reset values at class level for state initialization
+          @_reset_values = reset_values
+
+          # Define state initialization method
+          define_method(:_init_seq_state) do
+            return if @_seq_state
+            @_seq_state = {}
+            self.class._reset_values.each do |name, value|
+              @_seq_state[name] = value
+            end
+          end
+
+          # Define propagate method with rising edge detection and state management
           define_method(:propagate) do
+            _init_seq_state
+
             # Check for rising edge
             clk_val = in_val(clock)
             @_prev_clk ||= 0
@@ -247,16 +261,44 @@ module RHDL
             # Handle reset
             if reset && in_val(reset) == 1
               reset_values.each do |name, value|
+                @_seq_state[name] = value
                 out_set(name, value)
               end
+              # Also execute behavior block for combinational outputs
+              self.class.execute_behavior_for_simulation(self) if self.class.respond_to?(:behavior_defined?) && self.class.behavior_defined?
               return
             end
 
             # Execute on rising edge
             if rising
               self.class.execute_sequential_for_simulation(self)
+            else
+              # Output current state even when not rising edge
+              @_seq_state.each do |name, value|
+                out_set(name, value)
+              end
             end
+
+            # Also execute behavior block for combinational outputs (like pc_hi, pc_lo)
+            self.class.execute_behavior_for_simulation(self) if self.class.respond_to?(:behavior_defined?) && self.class.behavior_defined?
           end
+
+          # Define read_reg for accessing internal state
+          define_method(:read_reg) do |name|
+            _init_seq_state
+            @_seq_state[name]
+          end
+
+          # Define write_reg for modifying internal state (for test setup)
+          define_method(:write_reg) do |name, value|
+            _init_seq_state
+            @_seq_state[name] = value
+            out_set(name, value)
+          end
+        end
+
+        def _reset_values
+          @_reset_values || {}
         end
 
         def _sequential_block
@@ -276,9 +318,10 @@ module RHDL
           component.inputs.each do |name, wire|
             input_values[name] = wire.get
           end
-          # Also include current output values (for register feedback)
-          component.outputs.each do |name, wire|
-            input_values[name] ||= wire.get
+          # Also include current state values (for register feedback)
+          component._init_seq_state
+          component.instance_variable_get(:@_seq_state).each do |name, value|
+            input_values[name] = value
           end
 
           context = SequentialContext.new(
@@ -289,7 +332,9 @@ module RHDL
           )
           outputs = context.evaluate_for_simulation(input_values, &@_sequential_block.block)
 
+          # Store outputs in component's state and output wires
           outputs.each do |name, value|
+            component.instance_variable_get(:@_seq_state)[name] = value
             component.out_set(name, value)
           end
         end

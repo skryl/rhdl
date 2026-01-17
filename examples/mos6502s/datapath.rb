@@ -500,7 +500,7 @@ module MOS6502S
     def read_y; @registers.read_y; end
     def read_sp; @sp.read_sp; end
     def read_pc; @pc.read_pc; end
-    def read_p; @status_reg.instance_variable_get(:@p_reg); end
+    def read_p; @status_reg.read_p; end
 
     def write_a(v); @registers.write_a(v); end
     def write_x(v); @registers.write_x(v); end

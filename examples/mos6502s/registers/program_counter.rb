@@ -21,11 +21,6 @@ module MOS6502S
     port_output :pc_hi, width: 8
     port_output :pc_lo, width: 8
 
-    def initialize(name = nil)
-      @pc_reg = 0x0000
-      super(name)
-    end
-
     # Sequential block for the PC register
     # Priority: reset > load+inc > load > inc > hold
     sequential clock: :clk, reset: :rst, reset_values: { pc: 0xFFFC } do
@@ -45,27 +40,9 @@ module MOS6502S
       pc_lo <= pc[7..0]
     end
 
-    # Override propagate to maintain internal state for testing
-    def propagate
-      if rising_edge?
-        if in_val(:rst) == 1
-          @pc_reg = 0xFFFC
-        elsif in_val(:load) == 1
-          next_pc = in_val(:addr_in) & 0xFFFF
-          next_pc = (next_pc + 1) & 0xFFFF if in_val(:inc) == 1
-          @pc_reg = next_pc
-        elsif in_val(:inc) == 1
-          @pc_reg = (@pc_reg + 1) & 0xFFFF
-        end
-      end
-
-      out_set(:pc, @pc_reg)
-      out_set(:pc_hi, (@pc_reg >> 8) & 0xFF)
-      out_set(:pc_lo, @pc_reg & 0xFF)
-    end
-
-    def read_pc; @pc_reg; end
-    def write_pc(v); @pc_reg = v & 0xFFFF; end
+    # Test helper accessors (use DSL state management)
+    def read_pc; read_reg(:pc) || 0xFFFC; end
+    def write_pc(v); write_reg(:pc, v & 0xFFFF); end
 
     def self.to_verilog
       RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502s_program_counter'))
