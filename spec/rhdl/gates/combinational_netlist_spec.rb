@@ -187,7 +187,7 @@ RSpec.describe 'Combinational Gate-Level Netlist Generation' do
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('enc4to2.a')
-      expect(ir.outputs.keys).to include('enc4to2.y')
+      expect(ir.outputs.keys).to include('enc4to2.y', 'enc4to2.valid')
     end
 
     it 'generates valid structural Verilog' do
@@ -200,10 +200,10 @@ RSpec.describe 'Combinational Gate-Level Netlist Generation' do
     context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
       it 'simulates correctly' do
         vectors = [
-          { inputs: { a: 0b0001 }, expected: { y: 0 } },
-          { inputs: { a: 0b0010 }, expected: { y: 1 } },
-          { inputs: { a: 0b0100 }, expected: { y: 2 } },
-          { inputs: { a: 0b1000 }, expected: { y: 3 } }
+          { inputs: { a: 0b0001 }, expected: { y: 0, valid: 1 } },
+          { inputs: { a: 0b0010 }, expected: { y: 1, valid: 1 } },
+          { inputs: { a: 0b0100 }, expected: { y: 2, valid: 1 } },
+          { inputs: { a: 0b1000 }, expected: { y: 3, valid: 1 } }
         ]
 
         result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/enc4to2')
