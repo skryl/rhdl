@@ -89,8 +89,8 @@ module CpuTestHelper
                     program
                   end
 
-    puts "[DEBUG] Loading instructions at 0x#{start_addr.to_s(16)}:"
-    puts "        #{instructions.map { |b| '0x' + b.to_s(16).rjust(2, '0') }.join(' ')}"
+    Debug.log("Loading instructions at 0x#{start_addr.to_s(16)}:")
+    Debug.log("        #{instructions.map { |b| '0x' + b.to_s(16).rjust(2, '0') }.join(' ')}")
 
     @cpu.memory.load(instructions, start_addr)
   end

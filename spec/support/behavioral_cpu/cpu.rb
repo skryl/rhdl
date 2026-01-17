@@ -24,7 +24,7 @@ module RHDL
 
         def step
           # Add a line here to print CPU state before decoding:
-          puts "[DEBUG] PC=0x#{@pc.to_s(16)}, ACC=0x#{@acc.to_s(16)}, ZERO=#{@zero_flag}, SP=0x#{@sp.to_s(16)}"
+          Debug.log("PC=0x#{@pc.to_s(16)}, ACC=0x#{@acc.to_s(16)}, ZERO=#{@zero_flag}, SP=0x#{@sp.to_s(16)}")
 
           # Fetch
           instruction = @memory.read(@pc)
@@ -93,14 +93,14 @@ module RHDL
             pc_increment = 1
           end
 
-          puts "[DEBUG] Decoded opcode: #{opcode}, operand: #{operand}"
+          Debug.log("Decoded opcode: #{opcode}, operand: #{operand}")
 
           # Execute
           case opcode
           when :LDI
             @acc = operand & 0xFF
             @zero_flag = (@acc == 0)
-            puts "[DEBUG] Executed LDI: Loaded 0x#{@acc.to_s(16)} into Accumulator"
+            Debug.log("Executed LDI: Loaded 0x#{@acc.to_s(16)} into Accumulator")
             @pc += pc_increment
 
           when :MUL
@@ -111,7 +111,7 @@ module RHDL
             @alu.operate
             @acc = @alu.result
             @zero_flag = @alu.zero_flag
-            puts "[DEBUG] MUL: 0x#{@alu.a.to_s(16)} * 0x#{@alu.b.to_s(16)} = 0x#{@acc.to_s(16)}"
+            Debug.log("MUL: 0x#{@alu.a.to_s(16)} * 0x#{@alu.b.to_s(16)} = 0x#{@acc.to_s(16)}")
             @pc += pc_increment
 
           when :NOP
@@ -120,7 +120,7 @@ module RHDL
           when :LDA
             @acc = @memory.read(operand & 0xFF) & 0xFF
             @zero_flag = (@acc == 0)
-            puts "[DEBUG] LDA: Loaded 0x#{@acc.to_s(16)} from memory[0x#{(operand & 0xFF).to_s(16)}]"
+            Debug.log("LDA: Loaded 0x#{@acc.to_s(16)} from memory[0x#{(operand & 0xFF).to_s(16)}]")
             @pc += pc_increment
 
           when :STA
@@ -129,13 +129,13 @@ module RHDL
               high = @memory.read(operand[0]) & 0xFF
               low = @memory.read(operand[1]) & 0xFF
               addr = (high << 8) | low
-              puts "[DEBUG:] STA indirect: high_addr=0x#{operand[0].to_s(16)}, low_addr=0x#{operand[1].to_s(16)}, high=0x#{high.to_s(16)}, low=0x#{low.to_s(16)}, addr=0x#{addr.to_s(16)}"
+              Debug.log("STA indirect: high_addr=0x#{operand[0].to_s(16)}, low_addr=0x#{operand[1].to_s(16)}, high=0x#{high.to_s(16)}, low=0x#{low.to_s(16)}, addr=0x#{addr.to_s(16)}")
               @memory.write(addr, @acc)
-              puts "[DEBUG:] STA: Stored 0x#{@acc.to_s(16)} to memory[0x#{addr.to_s(16)}] (indirect)"
+              Debug.log("STA: Stored 0x#{@acc.to_s(16)} to memory[0x#{addr.to_s(16)}] (indirect)")
             else
               # Direct addressing (nibble-encoded)
               @memory.write(operand, @acc)
-              puts "[DEBUG:] STA: Stored 0x#{@acc.to_s(16)} to memory[0x#{operand.to_s(16)}]"
+              Debug.log("STA: Stored 0x#{@acc.to_s(16)} to memory[0x#{operand.to_s(16)}]")
             end
             @pc += pc_increment
 
@@ -143,11 +143,11 @@ module RHDL
             @alu.a = @acc
             @alu.b = @memory.read(operand & 0xFF) & 0xFF
             @alu.op = opcode
-            puts "[DEBUG] ALU operation: #{opcode}, a=0x#{@alu.a.to_s(16)}, b=0x#{@alu.b.to_s(16)}"
+            Debug.log("ALU operation: #{opcode}, a=0x#{@alu.a.to_s(16)}, b=0x#{@alu.b.to_s(16)}")
             @alu.operate
             @acc = @alu.result
             @zero_flag = @alu.zero_flag
-            puts "[DEBUG] ALU result=0x#{@acc.to_s(16)}"
+            Debug.log("ALU result=0x#{@acc.to_s(16)}")
             @pc += pc_increment
 
           when :NOT
@@ -156,12 +156,12 @@ module RHDL
             @alu.operate
             @acc = @alu.result
             @zero_flag = @alu.zero_flag
-            puts "[DEBUG] NOT: ~a=0x#{@acc.to_s(16)}"
+            Debug.log("NOT: ~a=0x#{@acc.to_s(16)}")
             @pc += pc_increment
 
           when :JZ
             if @zero_flag
-              puts "[DEBUG] JZ: zero_flag is true → PC=0x#{operand.to_s(16)}"
+              Debug.log("JZ: zero_flag is true → PC=0x#{operand.to_s(16)}")
               @pc = operand & 0xFF
             else
               @pc += pc_increment
@@ -169,56 +169,56 @@ module RHDL
 
           when :JNZ
             if !@zero_flag
-              puts "[DEBUG] JNZ: zero_flag is false → PC=0x#{operand.to_s(16)}"
+              Debug.log("JNZ: zero_flag is false → PC=0x#{operand.to_s(16)}")
               @pc = operand & 0xFF
             else
               @pc += pc_increment
             end
 
           when :JMP
-            puts "[DEBUG] JMP → PC=0x#{operand.to_s(16)}"
+            Debug.log("JMP → PC=0x#{operand.to_s(16)}")
             @pc = operand & 0xFF
 
           when :CALL
             if @sp == 0x00
               @halted = true
-              puts "[DEBUG] Stack Overflow (CALL). Halting CPU."
+              Debug.log("Stack Overflow (CALL). Halting CPU.")
             else
               @memory.write(@sp, (@pc + pc_increment) & 0xFF)
               @sp = (@sp - 1) & 0xFF
               @pc = operand & 0xFF
-              puts "[DEBUG] CALL: Return addr=0x#{(@pc + pc_increment).to_s(16)}, SP=0x#{@sp.to_s(16)}, PC=0x#{@pc.to_s(16)}"
+              Debug.log("CALL: Return addr=0x#{(@pc + pc_increment).to_s(16)}, SP=0x#{@sp.to_s(16)}, PC=0x#{@pc.to_s(16)}")
             end
 
           when :RET
             if @sp == 0xFF
               @halted = true
-              puts "[DEBUG] Stack Underflow (RET). Halting CPU."
+              Debug.log("Stack Underflow (RET). Halting CPU.")
             else
               @sp = (@sp + 1) & 0xFF
               @pc = @memory.read(@sp) & 0xFF
-              puts "[DEBUG] RET: PC=0x#{@pc.to_s(16)}, SP=0x#{@sp.to_s(16)}"
+              Debug.log("RET: PC=0x#{@pc.to_s(16)}, SP=0x#{@sp.to_s(16)}")
             end
 
           when :HLT
             @halted = true
-            puts "[DEBUG] HLT: Halting CPU."
+            Debug.log("HLT: Halting CPU.")
 
           when :JZ_LONG
             if @zero_flag
-              puts "[DEBUG] JZ_LONG: zero_flag is true → PC=0x#{operand.to_s(16)}"
+              Debug.log("JZ_LONG: zero_flag is true → PC=0x#{operand.to_s(16)}")
               @pc = operand & 0xFFFF  # 16-bit address
             else
               @pc += pc_increment
             end
 
           when :JMP_LONG
-            puts "[DEBUG] JMP_LONG → PC=0x#{operand.to_s(16)}"
+            Debug.log("JMP_LONG → PC=0x#{operand.to_s(16)}")
             @pc = operand & 0xFFFF  # 16-bit address
 
           when :JNZ_LONG
             if !@zero_flag
-              puts "[DEBUG] JNZ_LONG: zero_flag is false → PC=0x#{operand.to_s(16)}"
+              Debug.log("JNZ_LONG: zero_flag is false → PC=0x#{operand.to_s(16)}")
               @pc = operand & 0xFFFF  # 16-bit address
             else
               @pc += pc_increment
@@ -232,7 +232,7 @@ module RHDL
             mem_val = @memory.read(addr) & 0xFF
             result = (@acc - mem_val) & 0xFF
             @zero_flag = (result == 0)
-            puts "[DEBUG] CMP: ACC=0x#{@acc.to_s(16)}, mem[0x#{addr.to_s(16)}]=0x#{mem_val.to_s(16)}, zero_flag=#{@zero_flag}"
+            Debug.log("CMP: ACC=0x#{@acc.to_s(16)}, mem[0x#{addr.to_s(16)}]=0x#{mem_val.to_s(16)}, zero_flag=#{@zero_flag}")
             @pc += pc_increment
 
           else
