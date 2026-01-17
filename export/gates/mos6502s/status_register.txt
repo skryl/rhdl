@@ -1,0 +1,42 @@
+Component: sr
+Type: MOS6502S::StatusRegister
+Gates: 53
+DFFs: 7
+Nets: 93
+
+Inputs:
+  sr.clk: 1 bits
+  sr.rst: 1 bits
+  sr.load_all: 1 bits
+  sr.load_flags: 1 bits
+  sr.load_n: 1 bits
+  sr.load_z: 1 bits
+  sr.load_c: 1 bits
+  sr.load_v: 1 bits
+  sr.load_i: 1 bits
+  sr.load_d: 1 bits
+  sr.load_b: 1 bits
+  sr.n_in: 1 bits
+  sr.z_in: 1 bits
+  sr.c_in: 1 bits
+  sr.v_in: 1 bits
+  sr.i_in: 1 bits
+  sr.d_in: 1 bits
+  sr.b_in: 1 bits
+  sr.data_in: 8 bits
+
+Outputs:
+  sr.p: 8 bits
+  sr.n: 1 bits
+  sr.v: 1 bits
+  sr.b: 1 bits
+  sr.d: 1 bits
+  sr.i: 1 bits
+  sr.z: 1 bits
+  sr.c: 1 bits
+
+Gate Types:
+  mux: 18
+  or: 14
+  buf: 19
+  const: 2
