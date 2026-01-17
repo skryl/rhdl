@@ -41,6 +41,22 @@ RSpec.describe RHDL::HDL::IncDec do
     end
   end
 
-  # Note: IncDec uses manual propagate logic
-  # Synthesis tests are omitted since no behavior block is defined
+  describe 'synthesis' do
+    it 'has a behavior block defined' do
+      expect(RHDL::HDL::IncDec.behavior_defined?).to be_truthy
+    end
+
+    it 'generates valid IR' do
+      ir = RHDL::HDL::IncDec.to_ir
+      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      expect(ir.ports.length).to eq(4)  # a, inc, result, cout
+    end
+
+    it 'generates valid Verilog' do
+      verilog = RHDL::HDL::IncDec.to_verilog
+      expect(verilog).to include('module inc_dec')
+      expect(verilog).to include('input [7:0] a')
+      expect(verilog).to include('output [7:0] result')
+    end
+  end
 end

@@ -39,23 +39,78 @@ module RHDL
       OP_INC = 14
       OP_DEC = 15
 
+      # Class-level port definitions for synthesis (default 8-bit width)
+      port_input :a, width: 8
+      port_input :b, width: 8
+      port_input :op, width: 4
+      port_input :cin
+      port_output :result, width: 8
+      port_output :cout
+      port_output :zero
+      port_output :negative
+      port_output :overflow
+
+      # Note: Behavior block for synthesis only - uses case_select for operation dispatch
+      # The simulation uses the manual propagate method below due to complexity
+      behavior do
+        # Compute results for each operation
+        add_result = local(:add_result, a + b + cin, width: 8)
+        sub_result = local(:sub_result, a - b - cin, width: 8)
+        and_result = local(:and_result, a & b, width: 8)
+        or_result = local(:or_result, a | b, width: 8)
+        xor_result = local(:xor_result, a ^ b, width: 8)
+        not_result = local(:not_result, ~a, width: 8)
+        shl_result = local(:shl_result, a << (b & lit(7, width: 3)), width: 8)
+        shr_result = local(:shr_result, a >> (b & lit(7, width: 3)), width: 8)
+        mul_result = local(:mul_result, a * b, width: 8)
+        div_result = local(:div_result, mux(b == lit(0, width: 8), lit(0, width: 8), a / b), width: 8)
+        mod_result = local(:mod_result, mux(b == lit(0, width: 8), a, a % b), width: 8)
+        inc_result = local(:inc_result, a + lit(1, width: 8), width: 8)
+        dec_result = local(:dec_result, a - lit(1, width: 8), width: 8)
+
+        # Select result based on op
+        result <= case_select(op, {
+          0 => add_result,  # ADD
+          1 => sub_result,  # SUB
+          2 => and_result,  # AND
+          3 => or_result,   # OR
+          4 => xor_result,  # XOR
+          5 => not_result,  # NOT
+          6 => shl_result,  # SHL
+          7 => shr_result,  # SHR
+          8 => shr_result,  # SAR (simplified - proper SAR needs sign extension)
+          9 => shl_result,  # ROL (simplified)
+          10 => shr_result, # ROR (simplified)
+          11 => mul_result, # MUL
+          12 => div_result, # DIV
+          13 => mod_result, # MOD
+          14 => inc_result, # INC
+          15 => dec_result  # DEC
+        }, default: lit(0, width: 8))
+
+        # Simplified flags - actual flag calculation is complex and done in propagate
+        zero <= (result == lit(0, width: 8))
+        negative <= result[7]
+        cout <= lit(0, width: 1)      # Simplified
+        overflow <= lit(0, width: 1)  # Simplified
+      end
+
       def initialize(name = nil, width: 8)
         @width = width
         super(name)
       end
 
       def setup_ports
-        input :a, width: @width
-        input :b, width: @width
-        input :op, width: 4
-        input :cin
-        output :result, width: @width
-        output :cout
-        output :zero
-        output :negative
-        output :overflow
+        # Override default width if different from 8
+        return if @width == 8
+        @inputs[:a] = Wire.new("#{@name}.a", width: @width)
+        @inputs[:b] = Wire.new("#{@name}.b", width: @width)
+        @outputs[:result] = Wire.new("#{@name}.result", width: @width)
+        @inputs[:a].on_change { |_| propagate }
+        @inputs[:b].on_change { |_| propagate }
       end
 
+      # Override propagate for accurate simulation with all edge cases
       def propagate
         a = in_val(:a)
         b = in_val(:b)

@@ -109,6 +109,22 @@ module RHDL
         mux(condition, then_expr, else_expr)
       end
 
+      # Case select - generates nested mux chain for synthesis
+      # Usage: case_select(op, { 0 => a + b, 1 => a - b }, default: 0)
+      def case_select(selector, cases, default: 0)
+        sel = wrap_expr(selector)
+        default_expr = wrap_expr(default)
+
+        # Build nested mux chain: mux(sel == n, case_n, mux(sel == n-1, ...))
+        result = default_expr
+        cases.reverse_each do |value, expr|
+          wrapped = wrap_expr(expr)
+          cond = SynthBinaryOp.new(:==, sel, SynthLiteral.new(value, sel.width), 1)
+          result = SynthMux.new(cond, wrapped, result, [wrapped.width, result.width].max)
+        end
+        result
+      end
+
       private
 
       def wrap_expr(expr)

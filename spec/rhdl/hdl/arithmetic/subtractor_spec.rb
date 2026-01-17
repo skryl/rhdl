@@ -27,6 +27,22 @@ RSpec.describe RHDL::HDL::Subtractor do
     end
   end
 
-  # Note: Subtractor uses manual propagate logic
-  # Synthesis tests are omitted since no behavior block is defined
+  describe 'synthesis' do
+    it 'has a behavior block defined' do
+      expect(RHDL::HDL::Subtractor.behavior_defined?).to be_truthy
+    end
+
+    it 'generates valid IR' do
+      ir = RHDL::HDL::Subtractor.to_ir
+      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      expect(ir.ports.length).to eq(6)  # a, b, bin, diff, bout, overflow
+    end
+
+    it 'generates valid Verilog' do
+      verilog = RHDL::HDL::Subtractor.to_verilog
+      expect(verilog).to include('module subtractor')
+      expect(verilog).to include('input [7:0] a')
+      expect(verilog).to include('output [7:0] diff')
+    end
+  end
 end
