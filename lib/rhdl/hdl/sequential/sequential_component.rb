@@ -4,7 +4,7 @@
 module RHDL
   module HDL
     class SequentialComponent < SimComponent
-      def initialize(name = nil)
+      def initialize(name = nil, **kwargs)
         @prev_clk = 0
         @clk_sampled = false  # Track if we've sampled clock this cycle
         @state ||= 0  # Don't overwrite subclass initialization

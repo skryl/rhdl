@@ -278,9 +278,11 @@ module RHDL
 
           # Define propagate method with rising edge detection and state management
           # Order is critical for correct simulation (matches real hardware):
-          # 1. On rising edge, compute next state first (flip-flops latch on edge)
-          # 2. Output state values (new if rising edge, current otherwise)
-          # 3. Execute behavior block (combinational outputs based on current state)
+          # 1. On rising edge, process memory sync writes FIRST (using current register values)
+          # 2. On rising edge, compute next state (flip-flops latch on edge)
+          # 3. Output state values (new if rising edge, current otherwise)
+          # 4. Execute async memory reads (combinational)
+          # 5. Execute behavior block (combinational outputs based on current state)
           define_method(:propagate) do
             _init_seq_state
 
@@ -296,23 +298,35 @@ module RHDL
                 @_seq_state[name] = value
                 out_set(name, value)
               end
-              # Execute behavior block for combinational outputs
+              # Execute memory async reads and behavior block for combinational outputs
+              process_memory_async_reads if respond_to?(:process_memory_async_reads)
+              process_memory_lookup_tables if respond_to?(:process_memory_lookup_tables)
               self.class.execute_behavior_for_simulation(self) if self.class.respond_to?(:behavior_defined?) && self.class.behavior_defined?
               return
             end
 
-            # FIRST: On rising edge, compute and store next state values
-            # This happens BEFORE output so new values are immediately visible
+            # FIRST: On rising edge, process memory sync writes BEFORE state update
+            # This uses current register values (before sequential update)
+            if rising && respond_to?(:process_memory_sync_writes)
+              rising_clocks = { clock => true }
+              process_memory_sync_writes(rising_clocks)
+            end
+
+            # SECOND: On rising edge, compute and store next state values
             if rising
               self.class.execute_sequential_for_simulation(self)
             end
 
-            # SECOND: Output state values (will be new if rising edge just happened)
+            # THIRD: Output state values (will be new if rising edge just happened)
             @_seq_state.each do |name, value|
               out_set(name, value)
             end
 
-            # THIRD: Execute behavior block (combinational logic based on current state)
+            # FOURTH: Process memory async reads (combinational, uses current values)
+            process_memory_async_reads if respond_to?(:process_memory_async_reads)
+            process_memory_lookup_tables if respond_to?(:process_memory_lookup_tables)
+
+            # FIFTH: Execute behavior block (combinational logic based on current state)
             self.class.execute_behavior_for_simulation(self) if self.class.respond_to?(:behavior_defined?) && self.class.behavior_defined?
           end
 

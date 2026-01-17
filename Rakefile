@@ -1026,3 +1026,102 @@ task :clean_all => ['diagrams:clean', 'hdl:clean']
 
 desc "Regenerate all output files (clean + generate)"
 task :regenerate => ['clean_all', 'generate_all']
+
+# =============================================================================
+# Apple II ROM Tasks
+# =============================================================================
+
+namespace :apple2 do
+  ROMS_DIR = File.expand_path('examples/mos6502/roms', __dir__)
+  ROM_OUTPUT_DIR = File.expand_path('export/roms', __dir__)
+
+  desc "Assemble the mini monitor ROM"
+  task :build do
+    require_relative 'examples/mos6502/assembler'
+
+    puts "Apple II ROM Assembler"
+    puts "=" * 50
+    puts
+
+    FileUtils.mkdir_p(ROM_OUTPUT_DIR)
+
+    # Read assembly source
+    asm_file = File.join(ROMS_DIR, 'mini_monitor.asm')
+    unless File.exist?(asm_file)
+      puts "ERROR: Assembly file not found: #{asm_file}"
+      exit 1
+    end
+
+    source = File.read(asm_file)
+    puts "Source: #{asm_file}"
+    puts "Size: #{source.length} bytes"
+    puts
+
+    # Assemble
+    assembler = MOS6502::Assembler.new
+    begin
+      bytes = assembler.assemble(source, 0xF800)
+      puts "Assembled: #{bytes.length} bytes"
+
+      # The ROM should be 2KB ($F800-$FFFF)
+      # Pad to full 2KB if needed
+      rom_size = 0x10000 - 0xF800  # 2KB
+      if bytes.length < rom_size
+        # Pad with $FF (typical for unprogrammed EPROM)
+        bytes += [0xFF] * (rom_size - bytes.length)
+      end
+
+      # Write binary ROM
+      rom_file = File.join(ROM_OUTPUT_DIR, 'mini_monitor.bin')
+      File.binwrite(rom_file, bytes.pack('C*'))
+      puts "Output: #{rom_file}"
+      puts
+
+      # Verify reset vector
+      reset_lo = bytes[0xFFFC - 0xF800]
+      reset_hi = bytes[0xFFFD - 0xF800]
+      reset_vector = (reset_hi << 8) | reset_lo
+      puts "Reset vector: $#{reset_vector.to_s(16).upcase.rjust(4, '0')}"
+
+      puts
+      puts "ROM built successfully!"
+    rescue => e
+      puts "ERROR: Assembly failed: #{e.message}"
+      puts e.backtrace.first(5).join("\n")
+      exit 1
+    end
+  end
+
+  desc "Run the Apple II emulator with the mini monitor"
+  task :run => :build do
+    rom_file = File.join(ROM_OUTPUT_DIR, 'mini_monitor.bin')
+    exec "ruby", "bin/apple2", "-r", rom_file, "--rom-address", "F800", "-d"
+  end
+
+  desc "Run with AppleIIGo public domain ROM"
+  task :run_appleiigo do
+    rom_file = File.join(ROMS_DIR, 'appleiigo.rom')
+    unless File.exist?(rom_file)
+      puts "ERROR: AppleIIGo ROM not found: #{rom_file}"
+      puts "Download from: https://a2go.applearchives.com/roms/"
+      exit 1
+    end
+    exec "ruby", "bin/apple2", "-r", rom_file, "--rom-address", "D000", "-d"
+  end
+
+  desc "Run the Apple II emulator demo (no ROM needed)"
+  task :demo do
+    exec "ruby", "bin/apple2", "--demo", "-d"
+  end
+
+  desc "Clean ROM output files"
+  task :clean do
+    if Dir.exist?(ROM_OUTPUT_DIR)
+      FileUtils.rm_rf(ROM_OUTPUT_DIR)
+      puts "Cleaned: #{ROM_OUTPUT_DIR}"
+    end
+  end
+end
+
+desc "Build Apple II ROM (alias for apple2:build)"
+task apple2: 'apple2:build'

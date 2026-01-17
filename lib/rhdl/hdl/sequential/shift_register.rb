@@ -1,9 +1,16 @@
 # HDL Shift Register
 # Shift Register with serial/parallel I/O
+# Synthesizable via Sequential DSL
+
+require_relative '../../dsl/behavior'
+require_relative '../../dsl/sequential'
 
 module RHDL
   module HDL
     class ShiftRegister < SequentialComponent
+      include RHDL::DSL::Behavior
+      include RHDL::DSL::Sequential
+
       port_input :d_in       # Serial input
       port_input :clk
       port_input :rst
@@ -14,37 +21,23 @@ module RHDL
       port_output :q, width: 8
       port_output :d_out     # Serial output
 
+      # Sequential block for shift register
+      # Priority: load > en (shift)
+      sequential clock: :clk, reset: :rst, reset_values: { q: 0 } do
+        # Shift right: d_in becomes MSB, shift others down
+        shift_right = cat(d_in, q[7..1])
+        # Shift left: d_in becomes LSB, shift others up
+        shift_left = cat(q[6..0], d_in)
+        # Select direction
+        shift_result = mux(dir, shift_left, shift_right)
+        # Priority: load > shift
+        q <= mux(load, d, mux(en, shift_result, q))
+      end
+
+      # Combinational output for serial data
       behavior do
-        w = param(:width)
-        mask = (1 << w) - 1
-        if rising_edge?
-          if rst.value == 1
-            set_state(0)
-          elsif load.value == 1
-            set_state(d.value)
-          elsif en.value == 1
-            if dir.value == 0  # Shift right
-              set_state((state >> 1) | ((d_in.value & 1) << (w - 1)))
-            else  # Shift left
-              set_state(((state << 1) | (d_in.value & 1)) & mask)
-            end
-          end
-        end
-        q <= state
-        # Serial out is LSB when shifting right, MSB when shifting left
-        d_out <= dir.value == 0 ? state & 1 : (state >> (w - 1)) & 1
-      end
-
-      def initialize(name = nil, width: 8)
-        @width = width
-        @state = 0
-        super(name)
-      end
-
-      def setup_ports
-        return if @width == 8
-        @inputs[:d] = Wire.new("#{@name}.d", width: @width)
-        @outputs[:q] = Wire.new("#{@name}.q", width: @width)
+        # Serial out: LSB when right, MSB when left
+        d_out <= mux(dir, q[7], q[0])
       end
     end
   end
