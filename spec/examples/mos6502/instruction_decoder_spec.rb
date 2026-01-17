@@ -69,6 +69,49 @@ RSpec.describe MOS6502::InstructionDecoder do
       expect(verilog.length).to be > 1000  # Complex decoder
       expect(verilog).to include('endmodule')
     end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'behavioral Verilog matches RHDL simulation' do
+        verilog = described_class.to_verilog
+        behavioral = described_class.new('behavioral')
+        vectors = []
+
+        inputs = { opcode: 8 }
+        outputs = { addr_mode: 4, alu_op: 4, instr_type: 4, illegal: 1 }
+
+        # Test several opcodes
+        test_opcodes = [0x69, 0xA5, 0x8D, 0xF0, 0x4C]  # ADC imm, LDA zp, STA abs, BEQ, JMP
+
+        test_opcodes.each do |opcode|
+          behavioral.set_input(:opcode, opcode)
+          behavioral.propagate
+          vectors << {
+            inputs: { opcode: opcode },
+            expected: {
+              addr_mode: behavioral.get_output(:addr_mode),
+              alu_op: behavioral.get_output(:alu_op),
+              instr_type: behavioral.get_output(:instr_type),
+              illegal: behavioral.get_output(:illegal)
+            }
+          }
+        end
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 'mos6502_instruction_decoder',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/mos6502_instruction_decoder'
+        )
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx]).to eq(vec[:expected]),
+            "Opcode 0x#{test_opcodes[idx].to_s(16)}: expected #{vec[:expected]}, got #{result[:results][idx]}"
+        end
+      end
+    end
   end
 
   describe 'gate-level netlist' do

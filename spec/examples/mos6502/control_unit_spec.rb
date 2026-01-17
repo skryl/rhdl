@@ -57,6 +57,38 @@ RSpec.describe MOS6502::ControlUnit do
       expect(verilog).to include('always @(posedge clk')
       expect(verilog).to include('state')
     end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'behavioral Verilog compiles and runs' do
+        verilog = described_class.to_verilog
+
+        inputs = { clk: 1, rst: 1, rdy: 1, addr_mode: 4, instr_type: 4, branch_cond: 3,
+                   flag_n: 1, flag_v: 1, flag_z: 1, flag_c: 1, page_cross: 1, mem_ready: 1,
+                   is_read: 1, is_write: 1, is_rmw: 1, writes_reg: 1, is_status_op: 1 }
+        outputs = { state: 8, done: 1, pc_inc: 1, pc_load: 1, load_ir: 1, mem_read: 1, mem_write: 1 }
+
+        # Control unit is a complex state machine - just verify compilation
+        vectors = [
+          { inputs: { clk: 0, rst: 1, rdy: 1, addr_mode: 0, instr_type: 0, branch_cond: 0,
+                      flag_n: 0, flag_v: 0, flag_z: 0, flag_c: 0, page_cross: 0, mem_ready: 1,
+                      is_read: 0, is_write: 0, is_rmw: 0, writes_reg: 0, is_status_op: 0 } },
+          { inputs: { clk: 1, rst: 1, rdy: 1, addr_mode: 0, instr_type: 0, branch_cond: 0,
+                      flag_n: 0, flag_v: 0, flag_z: 0, flag_c: 0, page_cross: 0, mem_ready: 1,
+                      is_read: 0, is_write: 0, is_rmw: 0, writes_reg: 0, is_status_op: 0 } }
+        ]
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 'mos6502_control_unit',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/mos6502_control_unit',
+          has_clock: true
+        )
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do

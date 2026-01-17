@@ -51,6 +51,32 @@ RSpec.describe MOS6502::ProgramCounter do
       expect(verilog).to include('module mos6502_program_counter')
       expect(verilog).to include('output reg [15:0] pc')
     end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'behavioral Verilog compiles and runs' do
+        verilog = described_class.to_verilog
+
+        inputs = { clk: 1, rst: 1, inc: 1, load: 1, addr_in: 16 }
+        outputs = { pc: 16 }
+
+        vectors = [
+          { inputs: { clk: 0, rst: 1, inc: 0, load: 0, addr_in: 0 } },
+          { inputs: { clk: 1, rst: 1, inc: 0, load: 0, addr_in: 0 } },
+          { inputs: { clk: 0, rst: 0, inc: 1, load: 0, addr_in: 0 } }
+        ]
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 'mos6502_program_counter',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/mos6502_program_counter',
+          has_clock: true
+        )
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do

@@ -52,6 +52,32 @@ RSpec.describe MOS6502::Registers do
       expect(verilog).to include('output reg [7:0] a')
       expect(verilog).to include('always @(posedge clk')
     end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'behavioral Verilog compiles and runs' do
+        verilog = described_class.to_verilog
+
+        inputs = { clk: 1, rst: 1, data_in: 8, load_a: 1, load_x: 1, load_y: 1 }
+        outputs = { a: 8, x: 8, y: 8 }
+
+        vectors = [
+          { inputs: { clk: 0, rst: 0, data_in: 0x42, load_a: 0, load_x: 0, load_y: 0 } },
+          { inputs: { clk: 1, rst: 0, data_in: 0x42, load_a: 1, load_x: 0, load_y: 0 } },
+          { inputs: { clk: 0, rst: 0, data_in: 0x55, load_a: 0, load_x: 1, load_y: 0 } }
+        ]
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 'mos6502_registers',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/mos6502_registers',
+          has_clock: true
+        )
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do
