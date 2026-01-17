@@ -32,6 +32,8 @@ module RHDL
           # Copy port definitions to subclass
           subclass.instance_variable_set(:@_port_defs, (@_port_defs || []).dup)
           subclass.instance_variable_set(:@_signal_defs, (@_signal_defs || []).dup)
+          subclass.instance_variable_set(:@_instance_defs, (@_instance_defs || []).dup)
+          subclass.instance_variable_set(:@_connection_defs, (@_connection_defs || []).dup)
         end
 
         def _port_defs
@@ -40,6 +42,14 @@ module RHDL
 
         def _signal_defs
           @_signal_defs ||= []
+        end
+
+        def _instance_defs
+          @_instance_defs ||= []
+        end
+
+        def _connection_defs
+          @_connection_defs ||= []
         end
 
         # DSL-compatible _ports accessor for behavior module
@@ -109,6 +119,34 @@ module RHDL
           @_behavior_block = BehaviorBlockDef.new(block, **options)
         end
 
+        # Define a structure block for hierarchical component instantiation
+        #
+        # @example Structural component with instances
+        #   class MyDatapath < SimComponent
+        #     port_input :clk
+        #     port_input :a, width: 8
+        #     port_output :result, width: 8
+        #
+        #     structure do
+        #       instance :alu, ALU, width: 8
+        #       instance :reg, Register, width: 8
+        #
+        #       connect a: :alu_a
+        #       connect alu_result: :reg_d
+        #       connect reg_q: :result
+        #     end
+        #   end
+        #
+        def structure(&block)
+          ctx = StructureDefContext.new(self)
+          ctx.instance_eval(&block)
+        end
+
+        # Check if structure is defined
+        def structure_defined?
+          !_instance_defs.empty?
+        end
+
         # Generate IR assigns and wire declarations from the behavior block
         # Used by the export/lowering system for HDL generation
         def behavior_to_ir_assigns
@@ -138,14 +176,37 @@ module RHDL
           assigns = behavior_result[:assigns]
           nets = behavior_result[:wires]
 
+          # Generate instances from structure definitions
+          instances = structure_to_ir_instances
+
           RHDL::Export::IR::ModuleDef.new(
             name: name,
             ports: ports,
             nets: nets,
             regs: regs,
             assigns: assigns,
-            processes: []
+            processes: [],
+            instances: instances
           )
+        end
+
+        # Generate IR instances from structure definitions
+        def structure_to_ir_instances
+          _instance_defs.map do |inst_def|
+            connections = inst_def[:connections].map do |port_name, signal|
+              RHDL::Export::IR::PortConnection.new(
+                port_name: port_name,
+                signal: signal.to_s
+              )
+            end
+
+            RHDL::Export::IR::Instance.new(
+              name: inst_def[:name].to_s,
+              module_name: inst_def[:module_name],
+              connections: connections,
+              parameters: inst_def[:parameters]
+            )
+          end
         end
 
         # Generate Verilog from the component
@@ -162,6 +223,71 @@ module RHDL
       # Simple structs for port/signal definitions
       PortDef = Struct.new(:name, :direction, :width)
       SignalDef = Struct.new(:name, :width)
+
+      # Context for structure block DSL evaluation
+      class StructureDefContext
+        def initialize(component_class)
+          @component_class = component_class
+        end
+
+        # Define a component instance
+        # @param name [Symbol] Instance name
+        # @param component_class [Class] Component class to instantiate
+        # @param params [Hash] Parameters to pass to the component
+        def instance(name, component_class, **params)
+          module_name = component_class.name.split('::').last.underscore
+          @component_class._instance_defs << {
+            name: name,
+            component_class: component_class,
+            module_name: module_name,
+            parameters: params,
+            connections: {}
+          }
+        end
+
+        # Define connections between signals and instance ports
+        # @param mappings [Hash] Signal to port mappings
+        #   Can use formats like:
+        #   - connect clk: [:pc, :clk], [:acc, :clk]  # Connect clk to multiple instance ports
+        #   - connect a: [:alu, :a]                   # Connect signal 'a' to alu.a
+        #   - connect [:alu, :result] => :result      # Connect alu.result to output 'result'
+        def connect(mappings)
+          mappings.each do |source, dest|
+            # Store connection info for IR generation
+            @component_class._connection_defs << { source: source, dest: dest }
+
+            # Handle different connection formats
+            if dest.is_a?(Array) && dest.first.is_a?(Array)
+              # Multiple destinations: connect clk: [[:pc, :clk], [:acc, :clk]]
+              dest.each { |d| add_port_connection(source, d) }
+            elsif dest.is_a?(Array) && dest.length == 2
+              # Single destination: connect clk: [:pc, :clk]
+              add_port_connection(source, dest)
+            elsif source.is_a?(Array) && source.length == 2
+              # Instance output to signal: connect [:alu, :result] => :result
+              add_output_connection(source, dest)
+            end
+          end
+        end
+
+        private
+
+        def add_port_connection(signal, dest)
+          inst_name, port_name = dest
+          inst_def = @component_class._instance_defs.find { |i| i[:name] == inst_name }
+          return unless inst_def
+
+          inst_def[:connections][port_name] = signal
+        end
+
+        def add_output_connection(source, signal)
+          inst_name, port_name = source
+          inst_def = @component_class._instance_defs.find { |i| i[:name] == inst_name }
+          return unless inst_def
+
+          inst_def[:connections][port_name] = signal
+        end
+      end
 
       def initialize(name = nil)
         @name = name || self.class.name.split('::').last.downcase
