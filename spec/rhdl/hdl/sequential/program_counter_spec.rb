@@ -61,4 +61,71 @@ RSpec.describe RHDL::HDL::ProgramCounter do
       expect(verilog).to match(/output.*\[15:0\].*q/)
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::ProgramCounter.new('pc') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'pc') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('pc.clk', 'pc.rst', 'pc.en', 'pc.load', 'pc.d', 'pc.inc')
+      expect(ir.outputs.keys).to include('pc.q')
+      expect(ir.dffs.length).to eq(16)  # 16-bit program counter has 16 DFFs
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module pc')
+      expect(verilog).to include('input [15:0] d')
+      expect(verilog).to include('input [15:0] inc')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input rst')
+      expect(verilog).to include('input en')
+      expect(verilog).to include('input load')
+      expect(verilog).to include('output [15:0] q')
+    end
+
+    context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation' do
+        test_vectors = []
+        behavioral = RHDL::HDL::ProgramCounter.new
+        behavioral.set_input(:rst, 0)
+        behavioral.set_input(:en, 1)
+        behavioral.set_input(:load, 0)
+        behavioral.set_input(:inc, 1)
+
+        test_cases = [
+          { d: 0, rst: 0, en: 1, load: 0, inc: 1 },       # count: 0->1
+          { d: 0, rst: 0, en: 1, load: 0, inc: 1 },       # count: 1->2
+          { d: 0x100, rst: 0, en: 1, load: 1, inc: 1 },   # load 0x100
+          { d: 0, rst: 0, en: 1, load: 0, inc: 2 },       # inc by 2: 0x100->0x102
+        ]
+
+        expected_outputs = []
+        test_cases.each do |tc|
+          behavioral.set_input(:d, tc[:d])
+          behavioral.set_input(:rst, tc[:rst])
+          behavioral.set_input(:en, tc[:en])
+          behavioral.set_input(:load, tc[:load])
+          behavioral.set_input(:inc, tc[:inc])
+          behavioral.set_input(:clk, 0)
+          behavioral.propagate
+          behavioral.set_input(:clk, 1)
+          behavioral.propagate
+
+          test_vectors << { inputs: tc }
+          expected_outputs << { q: behavioral.get_output(:q) }
+        end
+
+        base_dir = File.join('tmp', 'iverilog', 'pc')
+        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+
+        expect(result[:success]).to be(true), result[:error]
+
+        expected_outputs.each_with_index do |expected, idx|
+          expect(result[:results][idx][:q]).to eq(expected[:q]),
+            "Cycle #{idx}: expected q=#{expected[:q]}, got #{result[:results][idx][:q]}"
+        end
+      end
+    end
+  end
 end

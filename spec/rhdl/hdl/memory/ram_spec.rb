@@ -95,4 +95,64 @@ RSpec.describe RHDL::HDL::RAM do
       expect(verilog).to include('reg [7:0] mem')  # Memory array
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::RAM.new('ram') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'ram') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('ram.clk', 'ram.we', 'ram.addr', 'ram.din')
+      expect(ir.outputs.keys).to include('ram.dout')
+      # RAM uses memory cells, expect significant gate count for address decoding
+      expect(ir.gates.length).to be >= 1
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module ram')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input we')
+      expect(verilog).to include('input [7:0] addr')
+      expect(verilog).to include('input [7:0] din')
+      expect(verilog).to include('output [7:0] dout')
+    end
+
+    context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation' do
+        test_vectors = []
+        behavioral = RHDL::HDL::RAM.new
+
+        test_cases = [
+          { addr: 0, din: 0xAB, we: 1 },  # write 0xAB to addr 0
+          { addr: 0, din: 0, we: 0 },      # read from addr 0
+          { addr: 1, din: 0x55, we: 1 },  # write 0x55 to addr 1
+          { addr: 1, din: 0, we: 0 },      # read from addr 1
+        ]
+
+        expected_outputs = []
+        test_cases.each do |tc|
+          behavioral.set_input(:addr, tc[:addr])
+          behavioral.set_input(:din, tc[:din])
+          behavioral.set_input(:we, tc[:we])
+          behavioral.set_input(:clk, 0)
+          behavioral.propagate
+          behavioral.set_input(:clk, 1)
+          behavioral.propagate
+
+          test_vectors << { inputs: tc }
+          expected_outputs << { dout: behavioral.get_output(:dout) }
+        end
+
+        base_dir = File.join('tmp', 'iverilog', 'ram')
+        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+
+        expect(result[:success]).to be(true), result[:error]
+
+        expected_outputs.each_with_index do |expected, idx|
+          expect(result[:results][idx][:dout]).to eq(expected[:dout]),
+            "Cycle #{idx}: expected dout=#{expected[:dout]}, got #{result[:results][idx][:dout]}"
+        end
+      end
+    end
+  end
 end

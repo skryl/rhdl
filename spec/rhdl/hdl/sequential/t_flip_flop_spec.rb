@@ -58,4 +58,67 @@ RSpec.describe RHDL::HDL::TFlipFlop do
       expect(verilog).to match(/output.*q/)
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::TFlipFlop.new('tff') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'tff') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('tff.t', 'tff.clk', 'tff.rst', 'tff.en')
+      expect(ir.outputs.keys).to include('tff.q', 'tff.qn')
+      expect(ir.dffs.length).to eq(1)
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module tff')
+      expect(verilog).to include('input t')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input rst')
+      expect(verilog).to include('input en')
+      expect(verilog).to include('output q')
+      expect(verilog).to include('output qn')
+    end
+
+    context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation' do
+        test_vectors = []
+        behavioral = RHDL::HDL::TFlipFlop.new
+        behavioral.set_input(:rst, 0)
+        behavioral.set_input(:en, 1)
+
+        test_cases = [
+          { t: 1, rst: 0, en: 1 },  # toggle to 1
+          { t: 1, rst: 0, en: 1 },  # toggle to 0
+          { t: 1, rst: 0, en: 1 },  # toggle to 1
+          { t: 0, rst: 0, en: 1 },  # hold
+          { t: 1, rst: 1, en: 1 },  # reset
+        ]
+
+        expected_outputs = []
+        test_cases.each do |tc|
+          behavioral.set_input(:t, tc[:t])
+          behavioral.set_input(:rst, tc[:rst])
+          behavioral.set_input(:en, tc[:en])
+          behavioral.set_input(:clk, 0)
+          behavioral.propagate
+          behavioral.set_input(:clk, 1)
+          behavioral.propagate
+
+          test_vectors << { inputs: tc }
+          expected_outputs << { q: behavioral.get_output(:q) }
+        end
+
+        base_dir = File.join('tmp', 'iverilog', 'tff')
+        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+
+        expect(result[:success]).to be(true), result[:error]
+
+        expected_outputs.each_with_index do |expected, idx|
+          expect(result[:results][idx][:q]).to eq(expected[:q]),
+            "Cycle #{idx}: expected q=#{expected[:q]}, got #{result[:results][idx][:q]}"
+        end
+      end
+    end
+  end
 end

@@ -124,6 +124,13 @@ The project uses these gems:
 - `rake ~> 13.0` - Build tool (dev/test)
 - `parallel_tests ~> 4.0` - Parallel test execution (dev/test)
 
+### Optional System Dependencies
+
+- `iverilog` - Icarus Verilog for gate-level simulation tests
+  - Install on Ubuntu/Debian: `apt-get install iverilog`
+  - Install on macOS: `brew install icarus-verilog`
+  - When installed, enables iverilog simulation tests that verify gate-level synthesis matches behavioral simulation
+
 ### Installation
 
 1. Install bundler (use version 2.x, avoid 4.x which has known issues):
@@ -199,6 +206,17 @@ Key test files:
 - `spec/examples/mos6502/algorithms_spec.rb` - Bubble sort, Fibonacci, etc.
 - `spec/rhdl/hdl/cpu_spec.rb` - HDL CPU unit tests
 - `spec/rhdl/hdl/gates_spec.rb` - Logic gate tests
+
+### Gate-Level Simulation Tests
+
+When iverilog is installed, additional tests run that verify gate-level synthesis matches behavioral simulation:
+
+1. Gate-level IR is converted to structural Verilog
+2. A testbench generates test vectors from behavioral simulation
+3. iverilog compiles and runs the structural simulation
+4. Results are compared against expected behavioral outputs
+
+These tests are conditional (`if: HdlToolchain.iverilog_available?`) and automatically skip when iverilog is not installed.
 
 ## Development Notes
 
