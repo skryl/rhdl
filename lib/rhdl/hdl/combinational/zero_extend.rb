@@ -3,11 +3,12 @@
 
 module RHDL
   module HDL
-    # Zero Extender
+    # Zero Extender - extends a narrower value with zeros
     class ZeroExtend < SimComponent
       port_input :a, width: 8
       port_output :y, width: 16
 
+      # Zero extension is just assignment - output width is larger than input
       behavior do
         y <= a
       end
@@ -23,10 +24,6 @@ module RHDL
         @inputs[:a] = Wire.new("#{@name}.a", width: @in_width)
         @outputs[:y] = Wire.new("#{@name}.y", width: @out_width)
         @inputs[:a].on_change { |_| propagate }
-      end
-
-      def propagate
-        out_set(:y, in_val(:a))
       end
     end
   end

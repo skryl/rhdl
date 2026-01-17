@@ -17,8 +17,9 @@ module RHDL
         # 4-to-1 mux using nested 2-to-1 muxes
         # sel[0] selects between pairs, sel[1] selects which pair
         # When sel=0: a, sel=1: b, sel=2: c, sel=3: d
-        low_mux = local(:low_mux, mux(sel[0], b, a), width: 1)   # sel[0]=0: a, sel[0]=1: b
-        high_mux = local(:high_mux, mux(sel[0], d, c), width: 1) # sel[0]=0: c, sel[0]=1: d
+        w = port_width(:y)
+        low_mux = local(:low_mux, mux(sel[0], b, a), width: w)   # sel[0]=0: a, sel[0]=1: b
+        high_mux = local(:high_mux, mux(sel[0], d, c), width: w) # sel[0]=0: c, sel[0]=1: d
         y <= mux(sel[1], high_mux, low_mux)  # sel[1]=0: low, sel[1]=1: high
       end
 
@@ -39,21 +40,6 @@ module RHDL
         @inputs[:b].on_change { |_| propagate }
         @inputs[:c].on_change { |_| propagate }
         @inputs[:d].on_change { |_| propagate }
-      end
-
-      # Override propagate to handle multi-bit properly
-      def propagate
-        if @width == 1 && self.class.behavior_defined?
-          execute_behavior
-        else
-          # Manual propagate for multi-bit
-          case in_val(:sel) & 3
-          when 0 then out_set(:y, in_val(:a))
-          when 1 then out_set(:y, in_val(:b))
-          when 2 then out_set(:y, in_val(:c))
-          when 3 then out_set(:y, in_val(:d))
-          end
-        end
       end
     end
   end
