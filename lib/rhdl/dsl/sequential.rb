@@ -148,6 +148,27 @@ module RHDL
           @registers = {}
         end
 
+        # Override to use SequentialEvaluator instead of BehaviorEvaluator
+        def evaluate_for_simulation(input_values, &block)
+          simulation_mode!
+          @input_values = input_values.transform_keys(&:to_sym)
+          @output_values = {}
+
+          proxies = create_proxies
+
+          # Use SequentialEvaluator which has local() and case_of support
+          SequentialEvaluator.new(self, proxies).evaluate(&block)
+
+          # Process assignments and compute output values
+          @assignments.each do |assignment|
+            target_name = assignment.target.name
+            value = compute_value(assignment.expr)
+            @output_values[target_name] = mask_value(value, assignment.target.width)
+          end
+
+          @output_values
+        end
+
         # For synthesis: generate always @(posedge clk) block IR
         def to_sequential_ir(&block)
           synthesis_mode!
@@ -201,8 +222,15 @@ module RHDL
 
         # Local variable for intermediate computation
         # In synthesis, these become wires
-        def local(name, expr)
-          wrapped = expr.is_a?(Behavior::BehaviorExpr) ? expr : Behavior::BehaviorLiteral.new(expr)
+        # @param name [Symbol] The local variable name
+        # @param expr [BehaviorExpr, Integer] The expression to assign
+        # @param width [Integer] Optional width override
+        def local(name, expr, width: nil)
+          wrapped = if expr.is_a?(Behavior::BehaviorExpr)
+            expr
+          else
+            Behavior::BehaviorLiteral.new(expr, width: width || 8)
+          end
           # Store as a signal proxy for later reference
           @local_vars ||= {}
           @local_vars[name] = wrapped
@@ -236,27 +264,74 @@ module RHDL
             &block
           )
 
-          # Define propagate method with rising edge detection
+          # Store reset values at class level for state initialization
+          @_reset_values = reset_values
+
+          # Define state initialization method
+          define_method(:_init_seq_state) do
+            return if @_seq_state
+            @_seq_state = {}
+            self.class._reset_values.each do |name, value|
+              @_seq_state[name] = value
+            end
+          end
+
+          # Define propagate method with rising edge detection and state management
+          # Order is critical for correct simulation (matches real hardware):
+          # 1. On rising edge, compute next state first (flip-flops latch on edge)
+          # 2. Output state values (new if rising edge, current otherwise)
+          # 3. Execute behavior block (combinational outputs based on current state)
           define_method(:propagate) do
+            _init_seq_state
+
             # Check for rising edge
             clk_val = in_val(clock)
             @_prev_clk ||= 0
             rising = (@_prev_clk == 0 && clk_val == 1)
             @_prev_clk = clk_val
 
-            # Handle reset
+            # Handle reset - immediately update state
             if reset && in_val(reset) == 1
               reset_values.each do |name, value|
+                @_seq_state[name] = value
                 out_set(name, value)
               end
+              # Execute behavior block for combinational outputs
+              self.class.execute_behavior_for_simulation(self) if self.class.respond_to?(:behavior_defined?) && self.class.behavior_defined?
               return
             end
 
-            # Execute on rising edge
+            # FIRST: On rising edge, compute and store next state values
+            # This happens BEFORE output so new values are immediately visible
             if rising
               self.class.execute_sequential_for_simulation(self)
             end
+
+            # SECOND: Output state values (will be new if rising edge just happened)
+            @_seq_state.each do |name, value|
+              out_set(name, value)
+            end
+
+            # THIRD: Execute behavior block (combinational logic based on current state)
+            self.class.execute_behavior_for_simulation(self) if self.class.respond_to?(:behavior_defined?) && self.class.behavior_defined?
           end
+
+          # Define read_reg for accessing internal state
+          define_method(:read_reg) do |name|
+            _init_seq_state
+            @_seq_state[name]
+          end
+
+          # Define write_reg for modifying internal state (for test setup)
+          define_method(:write_reg) do |name, value|
+            _init_seq_state
+            @_seq_state[name] = value
+            out_set(name, value)
+          end
+        end
+
+        def _reset_values
+          @_reset_values || {}
         end
 
         def _sequential_block
@@ -276,9 +351,10 @@ module RHDL
           component.inputs.each do |name, wire|
             input_values[name] = wire.get
           end
-          # Also include current output values (for register feedback)
-          component.outputs.each do |name, wire|
-            input_values[name] ||= wire.get
+          # Also include current state values (for register feedback)
+          component._init_seq_state
+          component.instance_variable_get(:@_seq_state).each do |name, value|
+            input_values[name] = value
           end
 
           context = SequentialContext.new(
@@ -289,8 +365,11 @@ module RHDL
           )
           outputs = context.evaluate_for_simulation(input_values, &@_sequential_block.block)
 
+          # Store outputs in component's internal state
+          # DO NOT call out_set here - outputs are set at start of NEXT propagate cycle
+          # This mimics how a real register updates on clock edge but outputs on next cycle
           outputs.each do |name, value|
-            component.out_set(name, value)
+            component.instance_variable_get(:@_seq_state)[name] = value
           end
         end
 

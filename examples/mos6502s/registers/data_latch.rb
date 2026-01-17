@@ -18,27 +18,9 @@ module MOS6502S
 
     port_output :data, width: 8
 
-    def initialize(name = nil)
-      @data_reg = 0
-      super(name)
-    end
-
     # Sequential block for data register
     sequential clock: :clk, reset: :rst, reset_values: { data: 0 } do
       data <= mux(load, data_in, data)
-    end
-
-    # Override propagate to maintain internal state for testing
-    def propagate
-      if rising_edge?
-        if in_val(:rst) == 1
-          @data_reg = 0
-        elsif in_val(:load) == 1
-          @data_reg = in_val(:data_in) & 0xFF
-        end
-      end
-
-      out_set(:data, @data_reg)
     end
 
     def self.to_verilog

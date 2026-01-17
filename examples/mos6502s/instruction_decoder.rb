@@ -390,56 +390,6 @@ module MOS6502S
       illegal <= case_select(opcode, DECODE_CASES[:addr_mode].transform_values { 0 }, default: 1)
     end
 
-    def initialize(name = nil)
-      super(name)
-      @decode_table = self.class.build_decode_data
-    end
-
-    def propagate
-      opcode = in_val(:opcode) & 0xFF
-      info = @decode_table[opcode] || illegal_opcode
-
-      out_set(:addr_mode, info[:addr_mode])
-      out_set(:alu_op, info[:alu_op])
-      out_set(:instr_type, info[:type])
-      out_set(:src_reg, info[:src_reg])
-      out_set(:dst_reg, info[:dst_reg])
-      out_set(:branch_cond, info[:branch_cond])
-      out_set(:cycles_base, info[:cycles])
-      out_set(:is_read, info[:is_read])
-      out_set(:is_write, info[:is_write])
-      out_set(:is_rmw, info[:is_rmw])
-      out_set(:sets_nz, info[:sets_nz])
-      out_set(:sets_c, info[:sets_c])
-      out_set(:sets_v, info[:sets_v])
-      out_set(:writes_reg, info[:writes_reg] || 0)
-      out_set(:is_status_op, info[:is_status] ? 1 : 0)
-      out_set(:illegal, info[:illegal] || 0)
-    end
-
-    private
-
-    def illegal_opcode
-      {
-        addr_mode: MODE_IMPLIED,
-        alu_op: OP_NOP,
-        type: TYPE_NOP,
-        src_reg: REG_A,
-        dst_reg: REG_A,
-        branch_cond: 0,
-        cycles: 2,
-        is_read: 0,
-        is_write: 0,
-        is_rmw: 0,
-        sets_nz: 0,
-        sets_c: 0,
-        sets_v: 0,
-        illegal: 1
-      }
-    end
-
-    public
-
     def self.to_verilog
       RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502s_instruction_decoder'))
     end

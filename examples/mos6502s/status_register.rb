@@ -63,11 +63,6 @@ module MOS6502S
     port_output :z
     port_output :c
 
-    def initialize(name = nil)
-      @p_reg = 0x24  # Initial: I=1, unused bit 5=1
-      super(name)
-    end
-
     # Sequential block for p register
     # Priority: reset > load_all > load_flags > individual loads
     sequential clock: :clk, reset: :rst, reset_values: { p: 0x24 } do
@@ -106,54 +101,8 @@ module MOS6502S
       c <= p[0]
     end
 
-    # Override propagate to maintain internal state for testing
-    def propagate
-      if rising_edge?
-        if in_val(:rst) == 1
-          @p_reg = 0x24
-        elsif in_val(:load_all) == 1
-          @p_reg = (in_val(:data_in) | 0x20) & 0xEF
-        elsif in_val(:load_flags) == 1
-          @p_reg = (@p_reg & 0x3C) |
-                   ((in_val(:n_in) & 1) << FLAG_N) |
-                   ((in_val(:v_in) & 1) << FLAG_V) |
-                   ((in_val(:z_in) & 1) << FLAG_Z) |
-                   ((in_val(:c_in) & 1) << FLAG_C) |
-                   0x20
-        else
-          @p_reg = set_flag_if(@p_reg, FLAG_N, in_val(:n_in), in_val(:load_n))
-          @p_reg = set_flag_if(@p_reg, FLAG_Z, in_val(:z_in), in_val(:load_z))
-          @p_reg = set_flag_if(@p_reg, FLAG_C, in_val(:c_in), in_val(:load_c))
-          @p_reg = set_flag_if(@p_reg, FLAG_V, in_val(:v_in), in_val(:load_v))
-          @p_reg = set_flag_if(@p_reg, FLAG_I, in_val(:i_in), in_val(:load_i))
-          @p_reg = set_flag_if(@p_reg, FLAG_D, in_val(:d_in), in_val(:load_d))
-          @p_reg = set_flag_if(@p_reg, FLAG_B, in_val(:b_in), in_val(:load_b))
-        end
-        @p_reg |= 0x20  # Bit 5 always 1
-      end
-
-      out_set(:p, @p_reg)
-      out_set(:n, (@p_reg >> FLAG_N) & 1)
-      out_set(:v, (@p_reg >> FLAG_V) & 1)
-      out_set(:b, (@p_reg >> FLAG_B) & 1)
-      out_set(:d, (@p_reg >> FLAG_D) & 1)
-      out_set(:i, (@p_reg >> FLAG_I) & 1)
-      out_set(:z, (@p_reg >> FLAG_Z) & 1)
-      out_set(:c, (@p_reg >> FLAG_C) & 1)
-    end
-
-    private
-
-    def set_flag_if(state, bit, value, load)
-      return state unless load == 1
-      if value == 1
-        state | (1 << bit)
-      else
-        state & ~(1 << bit)
-      end
-    end
-
-    public
+    # Test helper accessor (use DSL state management)
+    def read_p; read_reg(:p) || 0x24; end
 
     def self.to_verilog
       RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502s_status_register'))
