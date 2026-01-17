@@ -66,4 +66,40 @@ RSpec.describe RHDL::HDL::Comparator do
       expect(verilog).to include('input [7:0] a')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::Comparator.new('cmp', width: 4) }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'cmp') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('cmp.a', 'cmp.b', 'cmp.signed_cmp')
+      expect(ir.outputs.keys).to include('cmp.eq', 'cmp.lt', 'cmp.gt', 'cmp.gte', 'cmp.lte')
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module cmp')
+      expect(verilog).to include('output eq')
+      expect(verilog).to include('output lt')
+      expect(verilog).to include('output gt')
+    end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'simulates correctly' do
+        vectors = [
+          { inputs: { a: 5, b: 5, signed_cmp: 0 }, expected: { eq: 1, lt: 0, gt: 0, gte: 1, lte: 1 } },
+          { inputs: { a: 3, b: 7, signed_cmp: 0 }, expected: { eq: 0, lt: 1, gt: 0, gte: 0, lte: 1 } },
+          { inputs: { a: 10, b: 4, signed_cmp: 0 }, expected: { eq: 0, lt: 0, gt: 1, gte: 1, lte: 0 } },
+          { inputs: { a: 0, b: 0, signed_cmp: 0 }, expected: { eq: 1, lt: 0, gt: 0, gte: 1, lte: 1 } }
+        ]
+
+        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/cmp')
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx]).to eq(vec[:expected])
+        end
+      end
+    end
+  end
 end

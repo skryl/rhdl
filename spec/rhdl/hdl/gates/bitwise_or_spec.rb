@@ -21,4 +21,34 @@ RSpec.describe RHDL::HDL::BitwiseOr do
       expect(verilog).to include('assign y')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::BitwiseOr.new('bitwise_or', width: 4) }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'bitwise_or') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('bitwise_or.a', 'bitwise_or.b')
+      expect(ir.outputs.keys).to include('bitwise_or.y')
+      expect(ir.gates.length).to eq(4)
+      expect(ir.gates.all? { |g| g.type == :or }).to be(true)
+    end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'simulates correctly' do
+        vectors = [
+          { inputs: { a: 0b0000, b: 0b0000 }, expected: { y: 0b0000 } },
+          { inputs: { a: 0b1111, b: 0b0000 }, expected: { y: 0b1111 } },
+          { inputs: { a: 0b1010, b: 0b0101 }, expected: { y: 0b1111 } },
+          { inputs: { a: 0b0100, b: 0b0010 }, expected: { y: 0b0110 } }
+        ]
+
+        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/bitwise_or')
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx]).to eq(vec[:expected])
+        end
+      end
+    end
+  end
 end

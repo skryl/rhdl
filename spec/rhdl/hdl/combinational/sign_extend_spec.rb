@@ -37,4 +37,39 @@ RSpec.describe RHDL::HDL::SignExtend do
       expect(verilog).to include('output [15:0] y')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::SignExtend.new('sign_extend', in_width: 4, out_width: 8) }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'sign_extend') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('sign_extend.a')
+      expect(ir.outputs.keys).to include('sign_extend.y')
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module sign_extend')
+      expect(verilog).to include('input [3:0] a')
+      expect(verilog).to include('output [7:0] y')
+    end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'simulates correctly' do
+        vectors = [
+          { inputs: { a: 0b0101 }, expected: { y: 0b00000101 } },
+          { inputs: { a: 0b1000 }, expected: { y: 0b11111000 } },
+          { inputs: { a: 0b1111 }, expected: { y: 0b11111111 } },
+          { inputs: { a: 0b0000 }, expected: { y: 0b00000000 } }
+        ]
+
+        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/sign_extend')
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx]).to eq(vec[:expected])
+        end
+      end
+    end
+  end
 end
