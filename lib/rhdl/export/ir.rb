@@ -4,9 +4,11 @@ module RHDL
   module Export
     module IR
       class ModuleDef
-        attr_reader :name, :ports, :nets, :regs, :assigns, :processes, :reg_ports, :instances
+        attr_reader :name, :ports, :nets, :regs, :assigns, :processes, :reg_ports, :instances,
+                    :memories, :write_ports
 
-        def initialize(name:, ports:, nets:, regs:, assigns:, processes:, reg_ports: [], instances: [])
+        def initialize(name:, ports:, nets:, regs:, assigns:, processes:, reg_ports: [], instances: [],
+                       memories: [], write_ports: [])
           @name = name
           @ports = ports
           @nets = nets
@@ -15,6 +17,8 @@ module RHDL
           @processes = processes
           @reg_ports = reg_ports
           @instances = instances
+          @memories = memories
+          @write_ports = write_ports
         end
       end
 

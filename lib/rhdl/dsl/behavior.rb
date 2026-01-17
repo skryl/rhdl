@@ -421,6 +421,25 @@ module RHDL
         end
       end
 
+      # Memory read expression for synthesis
+      class BehaviorMemoryRead < BehaviorExpr
+        attr_reader :memory_name, :addr
+
+        def initialize(memory_name, addr, width:)
+          @memory_name = memory_name
+          @addr = addr.is_a?(BehaviorExpr) ? addr : BehaviorLiteral.new(addr)
+          super(width: width)
+        end
+
+        def to_ir
+          RHDL::Export::IR::MemoryRead.new(
+            memory: @memory_name,
+            addr: @addr.to_ir,
+            width: @width
+          )
+        end
+      end
+
       # Case statement builder for behavior blocks
       class BehaviorCaseBuilder
         attr_reader :selector, :branches, :default_branch
@@ -628,9 +647,11 @@ module RHDL
       # Context for evaluating behavior blocks
       class BehaviorContext
         attr_reader :mode, :input_values, :output_values, :assignments, :component_class, :locals, :proxies
+        attr_accessor :component  # Reference to component instance for memory access
 
         def initialize(component_class)
           @component_class = component_class
+          @component = nil
           @mode = SIM_MODE
           @input_values = {}
           @output_values = {}
@@ -790,6 +811,14 @@ module RHDL
             end
           when BehaviorCaseExpr
             compute_case_value(expr.ir)
+          when BehaviorMemoryRead
+            # For simulation, need component reference with memory arrays
+            if @component && @component.respond_to?(:mem_read)
+              addr_val = compute_value(expr.addr)
+              @component.mem_read(expr.memory_name, addr_val)
+            else
+              0  # No component reference or mem_read not available
+            end
           when Integer
             expr
           else
@@ -976,6 +1005,15 @@ module RHDL
           else_val = else_expr.is_a?(BehaviorExpr) ? else_expr : BehaviorLiteral.new(else_expr)
           BehaviorConditional.new(cond, when_true: then_val, when_false: else_val)
         end
+
+        # Memory read expression for use in behavior blocks
+        # Creates a BehaviorMemoryRead that generates IR::MemoryRead for synthesis
+        # @param memory_name [Symbol] The memory array name
+        # @param addr [BehaviorExpr, Integer] The address expression
+        # @param width [Integer] Optional width override (default: 8)
+        def mem_read_expr(memory_name, addr, width: 8)
+          BehaviorMemoryRead.new(memory_name, addr, width: width)
+        end
       end
 
       # Behavior block definition stored at class level
@@ -1034,6 +1072,7 @@ module RHDL
 
           # Create context and evaluate
           context = BehaviorContext.new(self)
+          context.component = component  # Pass component for memory access
           outputs = context.evaluate_for_simulation(input_values, &@_behavior_block.block)
 
           # Set output values
