@@ -233,33 +233,33 @@ module RHDL
             lower_datapath(component)
           when RHDL::HDL::CPU::SynthDatapath
             lower_synth_datapath(component)
-          # MOS6502S components
-          when MOS6502S::Registers
-            lower_mos6502s_registers(component)
-          when MOS6502S::StackPointer
-            lower_mos6502s_stack_pointer(component)
-          when MOS6502S::ProgramCounter
-            lower_mos6502s_program_counter(component)
-          when MOS6502S::InstructionRegister
-            lower_mos6502s_instruction_register(component)
-          when MOS6502S::AddressLatch
-            lower_mos6502s_address_latch(component)
-          when MOS6502S::DataLatch
-            lower_mos6502s_data_latch(component)
-          when MOS6502S::StatusRegister
-            lower_mos6502s_status_register(component)
-          when MOS6502S::AddressGenerator
-            lower_mos6502s_address_generator(component)
-          when MOS6502S::IndirectAddressCalc
-            lower_mos6502s_indirect_addr_calc(component)
-          when MOS6502S::ALU
-            lower_mos6502s_alu(component)
-          when MOS6502S::InstructionDecoder
-            lower_mos6502s_instruction_decoder(component)
-          when MOS6502S::ControlUnit
-            lower_mos6502s_control_unit(component)
-          when MOS6502S::Datapath
-            lower_mos6502s_datapath(component)
+          # MOS6502 components
+          when MOS6502::Registers
+            lower_mos6502_registers(component)
+          when MOS6502::StackPointer
+            lower_mos6502_stack_pointer(component)
+          when MOS6502::ProgramCounter
+            lower_mos6502_program_counter(component)
+          when MOS6502::InstructionRegister
+            lower_mos6502_instruction_register(component)
+          when MOS6502::AddressLatch
+            lower_mos6502_address_latch(component)
+          when MOS6502::DataLatch
+            lower_mos6502_data_latch(component)
+          when MOS6502::StatusRegister
+            lower_mos6502_status_register(component)
+          when MOS6502::AddressGenerator
+            lower_mos6502_address_generator(component)
+          when MOS6502::IndirectAddressCalc
+            lower_mos6502_indirect_addr_calc(component)
+          when MOS6502::ALU
+            lower_mos6502_alu(component)
+          when MOS6502::InstructionDecoder
+            lower_mos6502_instruction_decoder(component)
+          when MOS6502::ControlUnit
+            lower_mos6502_control_unit(component)
+          when MOS6502::Datapath
+            lower_mos6502_datapath(component)
           else
             raise ArgumentError, "Unsupported component for gate-level lowering: #{component.class}"
           end
@@ -2806,11 +2806,11 @@ module RHDL
       end
 
       # =======================================================================
-      # MOS6502S Component Lowering
+      # MOS6502 Component Lowering
       # =======================================================================
 
-      # MOS6502S Registers: 3 x 8-bit registers (A, X, Y) with individual load enables
-      def lower_mos6502s_registers(component)
+      # MOS6502 Registers: 3 x 8-bit registers (A, X, Y) with individual load enables
+      def lower_mos6502_registers(component)
         rst_net = map_bus(component.inputs[:rst]).first
         data_in_nets = map_bus(component.inputs[:data_in])
         load_a_net = map_bus(component.inputs[:load_a]).first
@@ -2828,8 +2828,8 @@ module RHDL
         end
       end
 
-      # MOS6502S StackPointer: 8-bit with inc/dec/load, outputs addr and addr_plus1
-      def lower_mos6502s_stack_pointer(component)
+      # MOS6502 StackPointer: 8-bit with inc/dec/load, outputs addr and addr_plus1
+      def lower_mos6502_stack_pointer(component)
         rst_net = map_bus(component.inputs[:rst]).first
         inc_net = map_bus(component.inputs[:inc]).first
         dec_net = map_bus(component.inputs[:dec]).first
@@ -2932,8 +2932,8 @@ module RHDL
         end
       end
 
-      # MOS6502S ProgramCounter: 16-bit with inc/load
-      def lower_mos6502s_program_counter(component)
+      # MOS6502 ProgramCounter: 16-bit with inc/load
+      def lower_mos6502_program_counter(component)
         rst_net = map_bus(component.inputs[:rst]).first
         inc_net = map_bus(component.inputs[:inc]).first
         load_net = map_bus(component.inputs[:load]).first
@@ -2993,8 +2993,8 @@ module RHDL
         end
       end
 
-      # MOS6502S InstructionRegister: opcode + operand_lo + operand_hi registers
-      def lower_mos6502s_instruction_register(component)
+      # MOS6502 InstructionRegister: opcode + operand_lo + operand_hi registers
+      def lower_mos6502_instruction_register(component)
         rst_net = map_bus(component.inputs[:rst]).first
         load_opcode_net = map_bus(component.inputs[:load_opcode]).first
         load_operand_lo_net = map_bus(component.inputs[:load_operand_lo]).first
@@ -3035,8 +3035,8 @@ module RHDL
         end
       end
 
-      # MOS6502S AddressLatch: 16-bit with byte-wise and full loading
-      def lower_mos6502s_address_latch(component)
+      # MOS6502 AddressLatch: 16-bit with byte-wise and full loading
+      def lower_mos6502_address_latch(component)
         rst_net = map_bus(component.inputs[:rst]).first
         load_lo_net = map_bus(component.inputs[:load_lo]).first
         load_hi_net = map_bus(component.inputs[:load_hi]).first
@@ -3081,8 +3081,8 @@ module RHDL
         end
       end
 
-      # MOS6502S DataLatch: simple 8-bit latch
-      def lower_mos6502s_data_latch(component)
+      # MOS6502 DataLatch: simple 8-bit latch
+      def lower_mos6502_data_latch(component)
         rst_net = map_bus(component.inputs[:rst]).first
         load_net = map_bus(component.inputs[:load]).first
         data_in_nets = map_bus(component.inputs[:data_in])
@@ -3093,8 +3093,8 @@ module RHDL
         end
       end
 
-      # MOS6502S StatusRegister: 8-bit status flags (N,V,-,B,D,I,Z,C)
-      def lower_mos6502s_status_register(component)
+      # MOS6502 StatusRegister: 8-bit status flags (N,V,-,B,D,I,Z,C)
+      def lower_mos6502_status_register(component)
         rst_net = map_bus(component.inputs[:rst]).first
         load_all_net = map_bus(component.inputs[:load_all]).first
         load_flags_net = map_bus(component.inputs[:load_flags]).first
@@ -3189,8 +3189,8 @@ module RHDL
         end
       end
 
-      # MOS6502S AddressGenerator: combinational address calculation
-      def lower_mos6502s_address_generator(component)
+      # MOS6502 AddressGenerator: combinational address calculation
+      def lower_mos6502_address_generator(component)
         mode_nets = map_bus(component.inputs[:mode])
         operand_lo_nets = map_bus(component.inputs[:operand_lo])
         operand_hi_nets = map_bus(component.inputs[:operand_hi])
@@ -3221,8 +3221,8 @@ module RHDL
         @ir.add_gate(type: Primitives::BUF, inputs: [const_zero], output: is_zero_page_net)
       end
 
-      # MOS6502S IndirectAddressCalc: combinational indirect address calculation
-      def lower_mos6502s_indirect_addr_calc(component)
+      # MOS6502 IndirectAddressCalc: combinational indirect address calculation
+      def lower_mos6502_indirect_addr_calc(component)
         mode_nets = map_bus(component.inputs[:mode])
         operand_lo_nets = map_bus(component.inputs[:operand_lo])
         operand_hi_nets = map_bus(component.inputs[:operand_hi])
@@ -3240,8 +3240,8 @@ module RHDL
         end
       end
 
-      # MOS6502S ALU: 8-bit ALU with BCD support
-      def lower_mos6502s_alu(component)
+      # MOS6502 ALU: 8-bit ALU with BCD support
+      def lower_mos6502_alu(component)
         a_nets = map_bus(component.inputs[:a])
         b_nets = map_bus(component.inputs[:b])
         c_in_net = map_bus(component.inputs[:c_in]).first
@@ -3350,8 +3350,8 @@ module RHDL
         @ir.add_gate(type: Primitives::BUF, inputs: [const_zero], output: v_net)
       end
 
-      # MOS6502S InstructionDecoder: ROM-style opcode decoder
-      def lower_mos6502s_instruction_decoder(component)
+      # MOS6502 InstructionDecoder: ROM-style opcode decoder
+      def lower_mos6502_instruction_decoder(component)
         opcode_nets = map_bus(component.inputs[:opcode])
 
         # Output nets
@@ -3394,8 +3394,8 @@ module RHDL
         end
       end
 
-      # MOS6502S ControlUnit: state machine
-      def lower_mos6502s_control_unit(component)
+      # MOS6502 ControlUnit: state machine
+      def lower_mos6502_control_unit(component)
         rst_net = map_bus(component.inputs[:rst]).first
         rdy_net = map_bus(component.inputs[:rdy]).first
 
@@ -3411,8 +3411,8 @@ module RHDL
         end
       end
 
-      # MOS6502S Datapath: structural composition using structure DSL
-      def lower_mos6502s_datapath(component)
+      # MOS6502 Datapath: structural composition using structure DSL
+      def lower_mos6502_datapath(component)
         # Use the same approach as SynthDatapath - process structure instances
         instance_defs = component.class._instance_defs
         connection_defs = component.class._connection_defs

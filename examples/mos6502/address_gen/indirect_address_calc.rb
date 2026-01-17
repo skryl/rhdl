@@ -2,11 +2,19 @@
 # Helper for computing indirect address fetch locations
 
 require_relative '../../../lib/rhdl'
+require_relative '../../../lib/rhdl/dsl/behavior'
 require_relative 'address_generator'
 
 module MOS6502
-  # Helper for computing indirect address fetch locations - DSL Version
+  # Helper for computing indirect address fetch locations - Synthesizable via Behavior DSL
   class IndirectAddressCalc < RHDL::HDL::SimComponent
+    include RHDL::DSL::Behavior
+
+    # Mode constants
+    MODE_INDIRECT    = 0x09
+    MODE_INDEXED_IND = 0x0A
+    MODE_INDIRECT_IDX = 0x0B
+
     port_input :mode, width: 4
     port_input :operand_lo, width: 8
     port_input :operand_hi, width: 8
@@ -15,88 +23,34 @@ module MOS6502
     port_output :ptr_addr_lo, width: 16
     port_output :ptr_addr_hi, width: 16
 
-    def propagate
-      mode = in_val(:mode) & 0x0F
-      operand_lo = in_val(:operand_lo) & 0xFF
-      operand_hi = in_val(:operand_hi) & 0xFF
-      x = in_val(:x_reg) & 0xFF
+    # Behavior block for combinational synthesis
+    behavior do
+      # Helper calculations
+      abs_addr = local(:abs_addr, cat(operand_hi, operand_lo), width: 16)
+      zp_addr_x = local(:zp_addr_x, (operand_lo + x_reg)[7..0], width: 8)
 
-      ptr_lo = 0
-      ptr_hi = 0
+      # ptr_addr_lo: depends on mode
+      ptr_addr_lo <= case_select(mode, {
+        MODE_INDIRECT => abs_addr,
+        MODE_INDEXED_IND => cat(lit(0, width: 8), zp_addr_x),
+        MODE_INDIRECT_IDX => cat(lit(0, width: 8), operand_lo)
+      }, default: 0)
 
-      case mode
-      when AddressGenerator::MODE_INDIRECT
-        base = (operand_hi << 8) | operand_lo
-        ptr_lo = base
-        # 6502 bug: if low byte is $FF, high byte comes from xx00
-        ptr_hi = ((base & 0xFF) == 0xFF) ? (base & 0xFF00) : ((base + 1) & 0xFFFF)
+      # ptr_addr_hi: depends on mode with 6502 page wrap bug handling
+      # For MODE_INDIRECT: if low byte is $FF, high byte comes from $xx00
+      ind_hi_normal = local(:ind_hi_normal, abs_addr + lit(1, width: 16), width: 16)
+      ind_hi_buggy = local(:ind_hi_buggy, cat(operand_hi, lit(0, width: 8)), width: 16)
+      is_page_wrap = operand_lo == lit(0xFF, width: 8)
 
-      when AddressGenerator::MODE_INDEXED_IND
-        zp_addr = (operand_lo + x) & 0xFF
-        ptr_lo = zp_addr
-        ptr_hi = (zp_addr + 1) & 0xFF
-
-      when AddressGenerator::MODE_INDIRECT_IDX
-        ptr_lo = operand_lo
-        ptr_hi = (operand_lo + 1) & 0xFF
-      end
-
-      out_set(:ptr_addr_lo, ptr_lo)
-      out_set(:ptr_addr_hi, ptr_hi)
+      ptr_addr_hi <= case_select(mode, {
+        MODE_INDIRECT => mux(is_page_wrap, ind_hi_buggy, ind_hi_normal),
+        MODE_INDEXED_IND => cat(lit(0, width: 8), (zp_addr_x + lit(1, width: 8))[7..0]),
+        MODE_INDIRECT_IDX => cat(lit(0, width: 8), (operand_lo + lit(1, width: 8))[7..0])
+      }, default: 0)
     end
 
     def self.to_verilog
-      <<~VERILOG
-        // MOS 6502 Indirect Address Calculator - Synthesizable Verilog
-        module mos6502_indirect_addr_calc (
-          input  [3:0]  mode,
-          input  [7:0]  operand_lo,
-          input  [7:0]  operand_hi,
-          input  [7:0]  x_reg,
-          output reg [15:0] ptr_addr_lo,
-          output reg [15:0] ptr_addr_hi
-        );
-
-          localparam MODE_INDIRECT    = 4'h9;
-          localparam MODE_INDEXED_IND = 4'hA;
-          localparam MODE_INDIRECT_IDX = 4'hB;
-
-          wire [15:0] abs_addr;
-          wire [7:0] zp_addr_x;
-
-          assign abs_addr = {operand_hi, operand_lo};
-          assign zp_addr_x = operand_lo + x_reg;
-
-          always @* begin
-            ptr_addr_lo = 16'h0000;
-            ptr_addr_hi = 16'h0000;
-
-            case (mode)
-              MODE_INDIRECT: begin
-                ptr_addr_lo = abs_addr;
-                // 6502 bug: page wrap on $xxFF
-                ptr_addr_hi = (operand_lo == 8'hFF) ? {operand_hi, 8'h00} : (abs_addr + 16'h0001);
-              end
-
-              MODE_INDEXED_IND: begin
-                ptr_addr_lo = {8'h00, zp_addr_x};
-                ptr_addr_hi = {8'h00, zp_addr_x + 8'h01};  // Wraps in ZP
-              end
-
-              MODE_INDIRECT_IDX: begin
-                ptr_addr_lo = {8'h00, operand_lo};
-                ptr_addr_hi = {8'h00, operand_lo + 8'h01};  // Wraps in ZP
-              end
-
-              default: begin
-                ptr_addr_lo = 16'h0000;
-                ptr_addr_hi = 16'h0000;
-              end
-            endcase
-          end
-
-        endmodule
-      VERILOG
+      RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502_indirect_addr_calc'))
     end
   end
 end

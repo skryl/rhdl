@@ -1,11 +1,16 @@
 # MOS 6502 CPU Registers (A, X, Y) - Synthesizable DSL Version
-# 8-bit General Purpose Registers using synthesizable patterns for Verilog/VHDL export
+# 8-bit General Purpose Registers using sequential DSL for automatic synthesis
 
 require_relative '../../../lib/rhdl'
+require_relative '../../../lib/rhdl/dsl/behavior'
+require_relative '../../../lib/rhdl/dsl/sequential'
 
 module MOS6502
-  # 8-bit General Purpose Registers (A, X, Y) - Synthesizable
+  # 8-bit General Purpose Registers (A, X, Y) - Synthesizable via Sequential DSL
   class Registers < RHDL::HDL::SequentialComponent
+    include RHDL::DSL::Behavior
+    include RHDL::DSL::Sequential
+
     port_input :clk
     port_input :rst
     port_input :data_in, width: 8
@@ -17,73 +22,27 @@ module MOS6502
     port_output :x, width: 8
     port_output :y, width: 8
 
-    def initialize(name = nil)
-      @a = 0
-      @x = 0
-      @y = 0
-      super(name)
+    # Sequential block for both simulation and synthesis
+    # Defines the clocked behavior with reset
+    sequential clock: :clk, reset: :rst, reset_values: { a: 0, x: 0, y: 0 } do
+      # On clock edge, conditionally load registers
+      # mux(condition, when_true, when_false) generates proper Verilog ternary
+      a <= mux(load_a, data_in, a)
+      x <= mux(load_x, data_in, x)
+      y <= mux(load_y, data_in, y)
     end
 
-    def propagate
-      clk = in_val(:clk)
-      rising = (@prev_clk == 0 && clk == 1)
-      @prev_clk = clk
+    # Test helper accessors (use DSL state management)
+    def read_a; read_reg(:a) || 0; end
+    def read_x; read_reg(:x) || 0; end
+    def read_y; read_reg(:y) || 0; end
+    def write_a(v); write_reg(:a, v & 0xFF); end
+    def write_x(v); write_reg(:x, v & 0xFF); end
+    def write_y(v); write_reg(:y, v & 0xFF); end
 
-      if rising
-        if in_val(:rst) == 1
-          @a = 0
-          @x = 0
-          @y = 0
-        else
-          data = in_val(:data_in) & 0xFF
-          @a = data if in_val(:load_a) == 1
-          @x = data if in_val(:load_x) == 1
-          @y = data if in_val(:load_y) == 1
-        end
-      end
-
-      out_set(:a, @a)
-      out_set(:x, @x)
-      out_set(:y, @y)
-    end
-
-    # Direct access for testing
-    def read_a; @a; end
-    def read_x; @x; end
-    def read_y; @y; end
-    def write_a(v); @a = v & 0xFF; end
-    def write_x(v); @x = v & 0xFF; end
-    def write_y(v); @y = v & 0xFF; end
-
+    # Override to_verilog to use the proper module name
     def self.to_verilog
-      <<~VERILOG
-        // MOS 6502 Registers (A, X, Y) - Synthesizable Verilog
-        module mos6502_registers (
-          input        clk,
-          input        rst,
-          input  [7:0] data_in,
-          input        load_a,
-          input        load_x,
-          input        load_y,
-          output reg [7:0] a,
-          output reg [7:0] x,
-          output reg [7:0] y
-        );
-
-          always @(posedge clk or posedge rst) begin
-            if (rst) begin
-              a <= 8'h00;
-              x <= 8'h00;
-              y <= 8'h00;
-            end else begin
-              if (load_a) a <= data_in;
-              if (load_x) x <= data_in;
-              if (load_y) y <= data_in;
-            end
-          end
-
-        endmodule
-      VERILOG
+      RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502_registers'))
     end
   end
 end

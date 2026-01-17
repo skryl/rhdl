@@ -74,7 +74,7 @@ rhdl/
 │   │   ├── datapath.rb          # CPU datapath
 │   │   ├── assembler.rb         # 6502 assembler
 │   │   └── ...                  # Other 6502 components
-│   └── mos6502s/                # MOS 6502 synthesizable CPU
+│   └── mos6502/                # MOS 6502 synthesizable CPU
 │       └── ...                  # Synthesizable 6502 components
 │
 ├── spec/                        # Test suite
