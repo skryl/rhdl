@@ -1,10 +1,18 @@
 # frozen_string_literal: true
 
+# HDL Register File Component
+# Multiple registers with read/write ports
+# Synthesizable via MemoryDSL
+
+require_relative '../../dsl/memory_dsl'
+
 module RHDL
   module HDL
     # Register File (multiple registers with read/write ports)
     # Sequential write, combinational read - typical FPGA register file
     class RegisterFile < SimComponent
+      include RHDL::DSL::MemoryDSL
+
       port_input :clk
       port_input :we
       port_input :waddr, width: 3
@@ -14,54 +22,90 @@ module RHDL
       port_output :rdata1, width: 8
       port_output :rdata2, width: 8
 
-      behavior do
-        num_regs = param(:num_regs)
-        data_width = param(:data_width)
+      # Define register array (8 x 8-bit registers)
+      memory :registers, depth: 8, width: 8
 
-        # Write on rising edge
-        if rising_edge? && we.value == 1
-          waddr_val = waddr.value & (num_regs - 1)
-          mem_write(waddr_val, wdata.value & ((1 << data_width) - 1), :registers)
-        end
+      # Synchronous write
+      sync_write :registers, clock: :clk, enable: :we, addr: :waddr, data: :wdata
 
-        # Async read
-        raddr1_val = raddr1.value & (num_regs - 1)
-        raddr2_val = raddr2.value & (num_regs - 1)
-        rdata1 <= mem_read(raddr1_val, :registers)
-        rdata2 <= mem_read(raddr2_val, :registers)
-      end
+      # Asynchronous reads from both ports
+      async_read :rdata1, from: :registers, addr: :raddr1
+      async_read :rdata2, from: :registers, addr: :raddr2
 
-      def initialize(name = nil, data_width: 8, num_regs: 8)
-        @data_width = data_width
-        @num_regs = num_regs
-        @addr_width = Math.log2(num_regs).ceil
-        @registers = Array.new(num_regs, 0)
-        @prev_clk = 0
-        super(name)
-      end
-
-      def setup_ports
-        return if @data_width == 8 && @num_regs == 8
-        @inputs[:waddr] = Wire.new("#{@name}.waddr", width: @addr_width)
-        @inputs[:raddr1] = Wire.new("#{@name}.raddr1", width: @addr_width)
-        @inputs[:raddr2] = Wire.new("#{@name}.raddr2", width: @addr_width)
-        @inputs[:wdata] = Wire.new("#{@name}.wdata", width: @data_width)
-        @outputs[:rdata1] = Wire.new("#{@name}.rdata1", width: @data_width)
-        @outputs[:rdata2] = Wire.new("#{@name}.rdata2", width: @data_width)
-      end
-
-      def rising_edge?
-        prev = @prev_clk
-        @prev_clk = in_val(:clk)
-        prev == 0 && @prev_clk == 1
-      end
-
+      # Direct register access for debugging
       def read_reg(addr)
-        @registers[addr & (@num_regs - 1)]
+        mem_read(:registers, addr & 0x7)
       end
 
       def write_reg(addr, data)
-        @registers[addr & (@num_regs - 1)] = data & ((1 << @data_width) - 1)
+        mem_write(:registers, addr & 0x7, data, 8)
+      end
+
+      # Override to_ir to generate proper memory IR
+      def self.to_ir(top_name: nil)
+        name = top_name || 'register_file'
+
+        # Ports
+        ports = _ports.map do |p|
+          RHDL::Export::IR::Port.new(name: p.name, direction: p.direction, width: p.width)
+        end
+
+        # Register array
+        mem_def = _memories[:registers]
+        memories = [
+          RHDL::Export::IR::Memory.new(
+            name: 'registers',
+            depth: mem_def.depth,
+            width: mem_def.width,
+            read_ports: [],
+            write_ports: []
+          )
+        ]
+
+        # Async read assigns
+        assigns = [
+          RHDL::Export::IR::Assign.new(
+            target: :rdata1,
+            expr: RHDL::Export::IR::MemoryRead.new(
+              memory: :registers,
+              addr: RHDL::Export::IR::Signal.new(name: :raddr1, width: 3),
+              width: 8
+            )
+          ),
+          RHDL::Export::IR::Assign.new(
+            target: :rdata2,
+            expr: RHDL::Export::IR::MemoryRead.new(
+              memory: :registers,
+              addr: RHDL::Export::IR::Signal.new(name: :raddr2, width: 3),
+              width: 8
+            )
+          )
+        ]
+
+        # Write port
+        write_port = RHDL::Export::IR::MemoryWritePort.new(
+          memory: :registers,
+          clock: :clk,
+          addr: RHDL::Export::IR::Signal.new(name: :waddr, width: 3),
+          data: RHDL::Export::IR::Signal.new(name: :wdata, width: 8),
+          enable: RHDL::Export::IR::Signal.new(name: :we, width: 1)
+        )
+
+        RHDL::Export::IR::ModuleDef.new(
+          name: name,
+          ports: ports,
+          nets: [],
+          regs: [],
+          assigns: assigns,
+          processes: [],
+          instances: [],
+          memories: memories,
+          write_ports: [write_port]
+        )
+      end
+
+      def self.to_verilog
+        RHDL::Export::Verilog.generate(to_ir)
       end
     end
   end

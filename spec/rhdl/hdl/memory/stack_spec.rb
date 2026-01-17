@@ -8,7 +8,7 @@ RSpec.describe RHDL::HDL::Stack do
     component.propagate
   end
 
-  let(:stack) { RHDL::HDL::Stack.new(nil, data_width: 8, depth: 4) }
+  let(:stack) { RHDL::HDL::Stack.new }
 
   before do
     stack.set_input(:rst, 0)
@@ -48,8 +48,8 @@ RSpec.describe RHDL::HDL::Stack do
       expect(stack.get_output(:empty)).to eq(1)
       expect(stack.get_output(:full)).to eq(0)
 
-      # Fill the stack
-      4.times do |i|
+      # Fill the stack (16 entries)
+      16.times do |i|
         stack.set_input(:din, i + 1)
         stack.set_input(:push, 1)
         clock_cycle(stack)
@@ -78,22 +78,22 @@ RSpec.describe RHDL::HDL::Stack do
   end
 
   describe 'synthesis' do
-    it 'has a behavior block defined' do
-      expect(RHDL::HDL::Stack.behavior_defined?).to be_truthy
+    it 'has memory DSL defined' do
+      expect(RHDL::HDL::Stack.memory_dsl_defined?).to be_truthy
     end
 
-    # Note: Memory components use internal state arrays which are not yet supported in synthesis context
-    it 'generates valid IR', :pending do
+    it 'generates valid IR' do
       ir = RHDL::HDL::Stack.to_ir
       expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
-      expect(ir.ports.length).to eq(7)  # clk, rst, push, pop, din, dout, empty, full
+      expect(ir.ports.length).to eq(9)  # clk, rst, push, pop, din, dout, empty, full, sp
+      expect(ir.memories.length).to eq(1)
     end
 
-    it 'generates valid Verilog', :pending do
+    it 'generates valid Verilog' do
       verilog = RHDL::HDL::Stack.to_verilog
       expect(verilog).to include('module stack')
       expect(verilog).to include('input [7:0] din')
-      expect(verilog).to include('output [7:0] dout')
+      expect(verilog).to match(/output.*\[7:0\].*dout/)
     end
   end
 end

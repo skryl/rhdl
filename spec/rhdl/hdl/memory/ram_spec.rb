@@ -8,7 +8,7 @@ RSpec.describe RHDL::HDL::RAM do
     component.propagate
   end
 
-  let(:ram) { RHDL::HDL::RAM.new(nil, data_width: 8, addr_width: 8) }
+  let(:ram) { RHDL::HDL::RAM.new }
 
   describe 'simulation' do
     it 'writes and reads data' do
@@ -47,11 +47,11 @@ RSpec.describe RHDL::HDL::RAM do
 
     it 'loads program data' do
       program = [0xA0, 0x42, 0xF0]
-      ram.load_program(program, 0x100)
+      ram.load_program(program, 0x80)
 
-      expect(ram.read_mem(0x100)).to eq(0xA0)
-      expect(ram.read_mem(0x101)).to eq(0x42)
-      expect(ram.read_mem(0x102)).to eq(0xF0)
+      expect(ram.read_mem(0x80)).to eq(0xA0)
+      expect(ram.read_mem(0x81)).to eq(0x42)
+      expect(ram.read_mem(0x82)).to eq(0xF0)
     end
 
     it 'reads different addresses' do
@@ -76,22 +76,23 @@ RSpec.describe RHDL::HDL::RAM do
   end
 
   describe 'synthesis' do
-    it 'has a behavior block defined' do
-      expect(RHDL::HDL::RAM.behavior_defined?).to be_truthy
+    it 'has memory DSL defined' do
+      expect(RHDL::HDL::RAM.memory_dsl_defined?).to be_truthy
     end
 
-    # Note: Memory components use internal state arrays which are not yet supported in synthesis context
-    it 'generates valid IR', :pending do
+    it 'generates valid IR' do
       ir = RHDL::HDL::RAM.to_ir
       expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
       expect(ir.ports.length).to eq(5)  # clk, we, addr, din, dout
+      expect(ir.memories.length).to eq(1)
     end
 
-    it 'generates valid Verilog', :pending do
+    it 'generates valid Verilog' do
       verilog = RHDL::HDL::RAM.to_verilog
       expect(verilog).to include('module ram')
       expect(verilog).to include('input [7:0] addr')
-      expect(verilog).to include('output [7:0] dout')
+      expect(verilog).to match(/output.*\[7:0\].*dout/)
+      expect(verilog).to include('reg [7:0] mem')  # Memory array
     end
   end
 end

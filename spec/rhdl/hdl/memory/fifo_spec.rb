@@ -8,7 +8,7 @@ RSpec.describe RHDL::HDL::FIFO do
     component.propagate
   end
 
-  let(:fifo) { RHDL::HDL::FIFO.new(nil, data_width: 8, depth: 4) }
+  let(:fifo) { RHDL::HDL::FIFO.new }
 
   before do
     fifo.set_input(:rst, 0)
@@ -41,8 +41,8 @@ RSpec.describe RHDL::HDL::FIFO do
       expect(fifo.get_output(:full)).to eq(0)
       expect(fifo.get_output(:count)).to eq(0)
 
-      # Fill FIFO
-      4.times do |i|
+      # Fill FIFO (16 entries)
+      16.times do |i|
         fifo.set_input(:din, i)
         fifo.set_input(:wr_en, 1)
         clock_cycle(fifo)
@@ -51,7 +51,7 @@ RSpec.describe RHDL::HDL::FIFO do
 
       expect(fifo.get_output(:empty)).to eq(0)
       expect(fifo.get_output(:full)).to eq(1)
-      expect(fifo.get_output(:count)).to eq(4)
+      expect(fifo.get_output(:count)).to eq(16)
     end
 
     it 'resets to empty state' do
@@ -73,22 +73,22 @@ RSpec.describe RHDL::HDL::FIFO do
   end
 
   describe 'synthesis' do
-    it 'has a behavior block defined' do
-      expect(RHDL::HDL::FIFO.behavior_defined?).to be_truthy
+    it 'has memory DSL defined' do
+      expect(RHDL::HDL::FIFO.memory_dsl_defined?).to be_truthy
     end
 
-    # Note: Memory components use internal state arrays which are not yet supported in synthesis context
-    it 'generates valid IR', :pending do
+    it 'generates valid IR' do
       ir = RHDL::HDL::FIFO.to_ir
       expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
-      expect(ir.ports.length).to eq(9)  # clk, rst, wr_en, rd_en, din, dout, empty, full, count
+      expect(ir.ports.length).to eq(11)  # clk, rst, wr_en, rd_en, din, dout, empty, full, count, wr_ptr, rd_ptr
+      expect(ir.memories.length).to eq(1)
     end
 
-    it 'generates valid Verilog', :pending do
+    it 'generates valid Verilog' do
       verilog = RHDL::HDL::FIFO.to_verilog
       expect(verilog).to include('module fifo')
       expect(verilog).to include('input [7:0] din')
-      expect(verilog).to include('output [7:0] dout')
+      expect(verilog).to match(/output.*\[7:0\].*dout/)
     end
   end
 end
