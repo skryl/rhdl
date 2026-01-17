@@ -1,10 +1,18 @@
 # frozen_string_literal: true
 
+# HDL Dual Port RAM Component
+# True Dual-Port RAM with two independent read/write ports
+# Synthesizable via MemoryDSL
+
+require_relative '../../dsl/memory_dsl'
+
 module RHDL
   module HDL
     # True Dual-Port RAM with two independent read/write ports
-    # Sequential - requires always @(posedge clk) and memory inference for synthesis
+    # Sequential write on rising clock edge, combinational read
     class DualPortRAM < SimComponent
+      include RHDL::DSL::MemoryDSL
+
       port_input :clk
       port_input :we_a
       port_input :we_b
@@ -15,55 +23,100 @@ module RHDL
       port_output :dout_a, width: 8
       port_output :dout_b, width: 8
 
-      behavior do
-        depth = param(:depth)
-        data_width = param(:data_width)
-        data_mask = (1 << data_width) - 1
-        addr_a_val = addr_a.value & (depth - 1)
-        addr_b_val = addr_b.value & (depth - 1)
+      # Define memory array (256 x 8-bit)
+      memory :mem, depth: 256, width: 8
 
-        # Write on rising edge
-        if rising_edge?
-          mem_write(addr_a_val, din_a.value & data_mask) if we_a.value == 1
-          mem_write(addr_b_val, din_b.value & data_mask) if we_b.value == 1
-        end
+      # Synchronous writes for both ports
+      sync_write :mem, clock: :clk, enable: :we_a, addr: :addr_a, data: :din_a
+      sync_write :mem, clock: :clk, enable: :we_b, addr: :addr_b, data: :din_b
 
-        # Async read from both ports
-        dout_a <= mem_read(addr_a_val)
-        dout_b <= mem_read(addr_b_val)
-      end
+      # Asynchronous reads for both ports
+      async_read :dout_a, from: :mem, addr: :addr_a
+      async_read :dout_b, from: :mem, addr: :addr_b
 
-      def initialize(name = nil, data_width: 8, addr_width: 8)
-        @data_width = data_width
-        @addr_width = addr_width
-        @depth = 1 << addr_width
-        @memory = Array.new(@depth, 0)
-        @prev_clk = 0
-        super(name)
-      end
-
-      def setup_ports
-        return if @data_width == 8 && @addr_width == 8
-        @inputs[:addr_a] = Wire.new("#{@name}.addr_a", width: @addr_width)
-        @inputs[:addr_b] = Wire.new("#{@name}.addr_b", width: @addr_width)
-        @inputs[:din_a] = Wire.new("#{@name}.din_a", width: @data_width)
-        @inputs[:din_b] = Wire.new("#{@name}.din_b", width: @data_width)
-        @outputs[:dout_a] = Wire.new("#{@name}.dout_a", width: @data_width)
-        @outputs[:dout_b] = Wire.new("#{@name}.dout_b", width: @data_width)
-      end
-
-      def rising_edge?
-        prev = @prev_clk
-        @prev_clk = in_val(:clk)
-        prev == 0 && @prev_clk == 1
-      end
-
+      # Direct memory access for initialization/debugging
       def read_mem(addr)
-        @memory[addr & (@depth - 1)]
+        mem_read(:mem, addr & 0xFF)
       end
 
       def write_mem(addr, data)
-        @memory[addr & (@depth - 1)] = data & ((1 << @data_width) - 1)
+        mem_write(:mem, addr & 0xFF, data, 8)
+      end
+
+      # Override to_ir to generate proper memory IR
+      def self.to_ir(top_name: nil)
+        name = top_name || 'dual_port_ram'
+
+        # Ports
+        ports = _ports.map do |p|
+          RHDL::Export::IR::Port.new(name: p.name, direction: p.direction, width: p.width)
+        end
+
+        # Memory array
+        mem_def = _memories[:mem]
+        memories = [
+          RHDL::Export::IR::Memory.new(
+            name: 'mem',
+            depth: mem_def.depth,
+            width: mem_def.width,
+            read_ports: [],
+            write_ports: []
+          )
+        ]
+
+        # Async read assigns
+        assigns = [
+          RHDL::Export::IR::Assign.new(
+            target: :dout_a,
+            expr: RHDL::Export::IR::MemoryRead.new(
+              memory: :mem,
+              addr: RHDL::Export::IR::Signal.new(name: :addr_a, width: 8),
+              width: 8
+            )
+          ),
+          RHDL::Export::IR::Assign.new(
+            target: :dout_b,
+            expr: RHDL::Export::IR::MemoryRead.new(
+              memory: :mem,
+              addr: RHDL::Export::IR::Signal.new(name: :addr_b, width: 8),
+              width: 8
+            )
+          )
+        ]
+
+        # Write ports
+        write_ports = [
+          RHDL::Export::IR::MemoryWritePort.new(
+            memory: :mem,
+            clock: :clk,
+            addr: RHDL::Export::IR::Signal.new(name: :addr_a, width: 8),
+            data: RHDL::Export::IR::Signal.new(name: :din_a, width: 8),
+            enable: RHDL::Export::IR::Signal.new(name: :we_a, width: 1)
+          ),
+          RHDL::Export::IR::MemoryWritePort.new(
+            memory: :mem,
+            clock: :clk,
+            addr: RHDL::Export::IR::Signal.new(name: :addr_b, width: 8),
+            data: RHDL::Export::IR::Signal.new(name: :din_b, width: 8),
+            enable: RHDL::Export::IR::Signal.new(name: :we_b, width: 1)
+          )
+        ]
+
+        RHDL::Export::IR::ModuleDef.new(
+          name: name,
+          ports: ports,
+          nets: [],
+          regs: [],
+          assigns: assigns,
+          processes: [],
+          instances: [],
+          memories: memories,
+          write_ports: write_ports
+        )
+      end
+
+      def self.to_verilog
+        RHDL::Export::Verilog.generate(to_ir)
       end
     end
   end

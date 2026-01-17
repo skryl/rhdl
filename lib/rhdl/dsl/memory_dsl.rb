@@ -270,52 +270,66 @@ module RHDL
           @_memory_arrays[memory][addr] = data & mask
         end
 
+        # Get signal value from inputs, outputs, or sequential state
+        # This allows MemoryDSL to work with register-based addresses
+        def signal_val(name)
+          # Try input first
+          if @inputs && @inputs[name]
+            return @inputs[name].get
+          end
+          # Try sequential state (for registers managed by Sequential DSL)
+          if @_seq_state && @_seq_state.key?(name)
+            return @_seq_state[name]
+          end
+          # Try output
+          if @outputs && @outputs[name]
+            return @outputs[name].get
+          end
+          0
+        end
+
         # Override initialize to set up memories
         alias_method :original_initialize, :initialize rescue nil
 
-        def initialize(name, *args, **kwargs, &block)
+        def initialize(name = nil, *args, **kwargs, &block)
           if respond_to?(:original_initialize)
             original_initialize(name, *args, **kwargs, &block)
           else
-            super
+            super(name)
           end
           initialize_memories
         end
 
-        # Default propagate for memory DSL components
-        def propagate
-          # Handle sync writes on rising edge
-          clk_val = nil
-          @_prev_clk ||= {}
-
+        # Process sync writes - called before sequential state updates
+        # This uses current register values before they are updated
+        def process_memory_sync_writes(rising_clocks)
           self.class._sync_writes.each do |write_def|
-            clk_val = in_val(write_def.clock)
-            prev = @_prev_clk[write_def.clock] || 0
-            rising = (prev == 0 && clk_val == 1)
-            @_prev_clk[write_def.clock] = clk_val
-
-            if rising && in_val(write_def.enable) == 1
-              addr = in_val(write_def.addr)
-              data = in_val(write_def.data)
+            if rising_clocks[write_def.clock] && signal_val(write_def.enable) == 1
+              addr = signal_val(write_def.addr)
+              data = signal_val(write_def.data)
               mem_def = self.class._memories[write_def.memory]
               mem_write(write_def.memory, addr, data, mem_def.width)
             end
           end
+        end
 
-          # Handle async reads
+        # Process async reads - uses current values
+        def process_memory_async_reads
           self.class._async_reads.each do |read_def|
-            if read_def.enable.nil? || in_val(read_def.enable) == 1
-              addr = in_val(read_def.addr)
+            if read_def.enable.nil? || signal_val(read_def.enable) == 1
+              addr = signal_val(read_def.addr)
               value = mem_read(read_def.memory, addr)
               out_set(read_def.output, value)
             else
               out_set(read_def.output, 0)
             end
           end
+        end
 
-          # Handle lookup tables
+        # Process lookup tables
+        def process_memory_lookup_tables
           self.class._lookup_tables.each do |_name, table|
-            input_val = in_val(table.input_signal)
+            input_val = signal_val(table.input_signal)
 
             table.outputs.each do |output_name, _width|
               value = if table.entries.key?(input_val)
@@ -326,6 +340,36 @@ module RHDL
               out_set(output_name, value)
             end
           end
+        end
+
+        # Default propagate for memory DSL components (only used if Sequential DSL is NOT included)
+        def propagate
+          # If Sequential DSL is included, it handles the propagate and calls our methods
+          return if self.class.respond_to?(:sequential_defined?) && self.class.sequential_defined?
+
+          # Handle sync writes on rising edge
+          # First, detect rising edges for all clocks ONCE
+          @_prev_clk ||= {}
+          rising_clocks = {}
+
+          self.class._sync_writes.each do |write_def|
+            clock = write_def.clock
+            next if rising_clocks.key?(clock)  # Already checked this clock
+
+            clk_val = in_val(clock)
+            prev = @_prev_clk[clock] || 0
+            rising_clocks[clock] = (prev == 0 && clk_val == 1)
+            @_prev_clk[clock] = clk_val
+          end
+
+          # Process sync writes
+          process_memory_sync_writes(rising_clocks)
+
+          # Handle async reads
+          process_memory_async_reads
+
+          # Handle lookup tables
+          process_memory_lookup_tables
         end
       end
     end

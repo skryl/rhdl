@@ -1,65 +1,103 @@
 # frozen_string_literal: true
 
+# HDL RAM Component
+# Synchronous RAM with single port
+# Synthesizable via MemoryDSL
+
+require_relative '../../dsl/memory_dsl'
+
 module RHDL
   module HDL
     # Synchronous RAM with single port
-    # Sequential - requires always @(posedge clk) and memory inference for synthesis
+    # Sequential write on rising clock edge, combinational read
     class RAM < SimComponent
+      include RHDL::DSL::MemoryDSL
+
       port_input :clk
       port_input :we       # Write enable
       port_input :addr, width: 8
       port_input :din, width: 8
       port_output :dout, width: 8
 
-      behavior do
-        depth = param(:depth)
-        data_width = param(:data_width)
-        addr_val = addr.value & (depth - 1)
+      # Define memory array (256 x 8-bit)
+      memory :mem, depth: 256, width: 8
 
-        # Write on rising edge
-        if rising_edge? && we.value == 1
-          mem_write(addr_val, din.value & ((1 << data_width) - 1))
-        end
+      # Synchronous write
+      sync_write :mem, clock: :clk, enable: :we, addr: :addr, data: :din
 
-        # Async read
-        dout <= mem_read(addr_val)
-      end
-
-      def initialize(name = nil, data_width: 8, addr_width: 8)
-        @data_width = data_width
-        @addr_width = addr_width
-        @depth = 1 << addr_width
-        @memory = Array.new(@depth, 0)
-        @prev_clk = 0
-        super(name)
-      end
-
-      def setup_ports
-        return if @data_width == 8 && @addr_width == 8
-        @inputs[:addr] = Wire.new("#{@name}.addr", width: @addr_width)
-        @inputs[:din] = Wire.new("#{@name}.din", width: @data_width)
-        @outputs[:dout] = Wire.new("#{@name}.dout", width: @data_width)
-      end
-
-      def rising_edge?
-        prev = @prev_clk
-        @prev_clk = in_val(:clk)
-        prev == 0 && @prev_clk == 1
-      end
+      # Asynchronous read
+      async_read :dout, from: :mem, addr: :addr
 
       # Direct memory access for initialization/debugging
       def read_mem(addr)
-        @memory[addr & (@depth - 1)]
+        mem_read(:mem, addr & 0xFF)
       end
 
       def write_mem(addr, data)
-        @memory[addr & (@depth - 1)] = data & ((1 << @data_width) - 1)
+        mem_write(:mem, addr & 0xFF, data, 8)
       end
 
       def load_program(program, start_addr = 0)
         program.each_with_index do |byte, i|
           write_mem(start_addr + i, byte)
         end
+      end
+
+      # Override to_ir to generate proper memory IR
+      def self.to_ir(top_name: nil)
+        name = top_name || 'ram'
+
+        # Ports
+        ports = _ports.map do |p|
+          RHDL::Export::IR::Port.new(name: p.name, direction: p.direction, width: p.width)
+        end
+
+        # Memory array
+        mem_def = _memories[:mem]
+        memories = [
+          RHDL::Export::IR::Memory.new(
+            name: 'mem',
+            depth: mem_def.depth,
+            width: mem_def.width,
+            read_ports: [],
+            write_ports: []
+          )
+        ]
+
+        # Async read assign: dout = mem[addr]
+        read_assign = RHDL::Export::IR::Assign.new(
+          target: :dout,
+          expr: RHDL::Export::IR::MemoryRead.new(
+            memory: :mem,
+            addr: RHDL::Export::IR::Signal.new(name: :addr, width: 8),
+            width: 8
+          )
+        )
+
+        # Write port
+        write_port = RHDL::Export::IR::MemoryWritePort.new(
+          memory: :mem,
+          clock: :clk,
+          addr: RHDL::Export::IR::Signal.new(name: :addr, width: 8),
+          data: RHDL::Export::IR::Signal.new(name: :din, width: 8),
+          enable: RHDL::Export::IR::Signal.new(name: :we, width: 1)
+        )
+
+        RHDL::Export::IR::ModuleDef.new(
+          name: name,
+          ports: ports,
+          nets: [],
+          regs: [],
+          assigns: [read_assign],
+          processes: [],
+          instances: [],
+          memories: memories,
+          write_ports: [write_port]
+        )
+      end
+
+      def self.to_verilog
+        RHDL::Export::Verilog.generate(to_ir)
       end
     end
   end
