@@ -13,14 +13,43 @@ module RHDL
       port_input :rotate   # 1 = rotate instead of shift
       port_output :y, width: 8
 
-      # Note: Behavior block uses simplified shift operations for synthesis
-      # Full simulation uses the manual propagate method below
       behavior do
-        # Simplified - just left/right logical shift for synthesis
-        # The full barrel shifter with rotate/arith is done in propagate
-        left_result = local(:left_result, a << (shift & lit(7, width: 3)), width: 8)
-        right_result = local(:right_result, a >> (shift & lit(7, width: 3)), width: 8)
-        y <= mux(dir, right_result, left_result)
+        w = param(:width)
+        mask = (1 << w) - 1
+        shift_amt = shift.value & (w - 1)
+
+        val = a.value
+        dir_val = dir.value & 1
+        arith_val = arith.value & 1
+        rotate_val = rotate.value & 1
+
+        if dir_val == 0  # Left
+          if rotate_val == 1
+            # Rotate left
+            y <= (((val << shift_amt) | (val >> (w - shift_amt))) & mask)
+          else
+            # Shift left (logical)
+            y <= ((val << shift_amt) & mask)
+          end
+        else  # Right
+          if rotate_val == 1
+            # Rotate right
+            y <= (((val >> shift_amt) | (val << (w - shift_amt))) & mask)
+          elsif arith_val == 1
+            # Arithmetic right shift (sign extend)
+            sign = (val >> (w - 1)) & 1
+            shifted = val >> shift_amt
+            if sign == 1
+              fill = ((1 << shift_amt) - 1) << (w - shift_amt)
+              y <= ((shifted | fill) & mask)
+            else
+              y <= shifted
+            end
+          else
+            # Shift right (logical)
+            y <= (val >> shift_amt)
+          end
+        end
       end
 
       def initialize(name = nil, width: 8)
@@ -34,43 +63,6 @@ module RHDL
         @inputs[:a] = Wire.new("#{@name}.a", width: @width)
         @inputs[:shift] = Wire.new("#{@name}.shift", width: @shift_width)
         @outputs[:y] = Wire.new("#{@name}.y", width: @width)
-        @inputs[:a].on_change { |_| propagate }
-        @inputs[:shift].on_change { |_| propagate }
-      end
-
-      # Override propagate for accurate simulation with all modes
-      def propagate
-        val = in_val(:a)
-        shift = in_val(:shift) & ((1 << @shift_width) - 1)
-        dir = in_val(:dir) & 1
-        arith = in_val(:arith) & 1
-        rotate = in_val(:rotate) & 1
-        mask = (1 << @width) - 1
-
-        result = if dir == 0  # Left
-          if rotate == 1
-            ((val << shift) | (val >> (@width - shift))) & mask
-          else
-            (val << shift) & mask
-          end
-        else  # Right
-          if rotate == 1
-            ((val >> shift) | (val << (@width - shift))) & mask
-          elsif arith == 1
-            sign = (val >> (@width - 1)) & 1
-            shifted = val >> shift
-            if sign == 1
-              fill = ((1 << shift) - 1) << (@width - shift)
-              (shifted | fill) & mask
-            else
-              shifted
-            end
-          else
-            val >> shift
-          end
-        end
-
-        out_set(:y, result)
       end
     end
   end

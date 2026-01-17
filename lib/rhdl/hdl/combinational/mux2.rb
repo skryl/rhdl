@@ -29,18 +29,6 @@ module RHDL
         @inputs[:a].on_change { |_| propagate }
         @inputs[:b].on_change { |_| propagate }
       end
-
-      def propagate
-        if @width == 1 && self.class.behavior_defined?
-          execute_behavior
-        else
-          if in_val(:sel) == 0
-            out_set(:y, in_val(:a))
-          else
-            out_set(:y, in_val(:b))
-          end
-        end
-      end
     end
   end
 end

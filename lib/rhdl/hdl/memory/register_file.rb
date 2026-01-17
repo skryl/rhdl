@@ -14,6 +14,23 @@ module RHDL
       port_output :rdata1, width: 8
       port_output :rdata2, width: 8
 
+      behavior do
+        num_regs = param(:num_regs)
+        data_width = param(:data_width)
+
+        # Write on rising edge
+        if rising_edge? && we.value == 1
+          waddr_val = waddr.value & (num_regs - 1)
+          mem_write(waddr_val, wdata.value & ((1 << data_width) - 1), :registers)
+        end
+
+        # Async read
+        raddr1_val = raddr1.value & (num_regs - 1)
+        raddr2_val = raddr2.value & (num_regs - 1)
+        rdata1 <= mem_read(raddr1_val, :registers)
+        rdata2 <= mem_read(raddr2_val, :registers)
+      end
+
       def initialize(name = nil, data_width: 8, num_regs: 8)
         @data_width = data_width
         @num_regs = num_regs
@@ -37,20 +54,6 @@ module RHDL
         prev = @prev_clk
         @prev_clk = in_val(:clk)
         prev == 0 && @prev_clk == 1
-      end
-
-      def propagate
-        # Write on rising edge
-        if rising_edge? && in_val(:we) == 1
-          waddr = in_val(:waddr) & (@num_regs - 1)
-          @registers[waddr] = in_val(:wdata) & ((1 << @data_width) - 1)
-        end
-
-        # Async read
-        raddr1 = in_val(:raddr1) & (@num_regs - 1)
-        raddr2 = in_val(:raddr2) & (@num_regs - 1)
-        out_set(:rdata1, @registers[raddr1])
-        out_set(:rdata2, @registers[raddr2])
       end
 
       def read_reg(addr)

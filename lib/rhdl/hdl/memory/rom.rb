@@ -9,6 +9,16 @@ module RHDL
       port_input :en
       port_output :dout, width: 8
 
+      behavior do
+        depth = param(:depth)
+        if en.value == 1
+          addr_val = addr.value & (depth - 1)
+          dout <= mem_read(addr_val)
+        else
+          dout <= 0
+        end
+      end
+
       def initialize(name = nil, data_width: 8, addr_width: 8, contents: [])
         @data_width = data_width
         @addr_width = addr_width
@@ -22,15 +32,6 @@ module RHDL
         return if @data_width == 8 && @addr_width == 8
         @inputs[:addr] = Wire.new("#{@name}.addr", width: @addr_width)
         @outputs[:dout] = Wire.new("#{@name}.dout", width: @data_width)
-      end
-
-      def propagate
-        if in_val(:en) == 1
-          addr = in_val(:addr) & (@depth - 1)
-          out_set(:dout, @memory[addr])
-        else
-          out_set(:dout, 0)
-        end
       end
 
       def read_mem(addr)

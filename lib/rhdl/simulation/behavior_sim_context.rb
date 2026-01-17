@@ -36,6 +36,115 @@ module RHDL
         @assignments << { wire: wire, value: value }
       end
 
+      # Access component instance variables (e.g., @width, @input_count)
+      def param(name)
+        @component.instance_variable_get(:"@#{name}")
+      end
+
+      # Get the actual runtime width of a port
+      def port_width(name)
+        wire = @component.inputs[name] || @component.outputs[name]
+        wire&.width || 1
+      end
+
+      # Sequential component support: access state variable
+      def state
+        @component.instance_variable_get(:@state) || 0
+      end
+
+      # Sequential component support: set state variable
+      def set_state(value)
+        @component.instance_variable_set(:@state, value)
+      end
+
+      # Sequential component support: check for rising clock edge
+      def rising_edge?(clock_name = :clk)
+        return false unless @component.respond_to?(:rising_edge?)
+        @component.rising_edge?
+      end
+
+      # Memory component support: read from memory array
+      def mem_read(index, array_name = :memory)
+        mem = @component.instance_variable_get(:"@#{array_name}")
+        return 0 unless mem
+        idx = resolve_value(index)
+        mem[idx] || 0
+      end
+
+      # Memory component support: write to memory array
+      def mem_write(index, value, array_name = :memory)
+        mem = @component.instance_variable_get(:"@#{array_name}")
+        return unless mem
+        idx = resolve_value(index)
+        val = resolve_value(value)
+        mem[idx] = val
+      end
+
+      # Set stack pointer (for Stack component)
+      def set_sp(value)
+        @component.instance_variable_set(:@sp, resolve_value(value))
+      end
+
+      # Generic state variable access (for components with multiple state vars like FIFO)
+      def get_var(name)
+        @component.instance_variable_get(:"@#{name}") || 0
+      end
+
+      def set_var(name, value)
+        @component.instance_variable_set(:"@#{name}", resolve_value(value))
+      end
+
+      # Dynamic input access (for MuxN with variable input count)
+      def input_val(name)
+        wire = @component.inputs[name.to_sym]
+        return 0 unless wire
+        wire.value
+      end
+
+      # Dynamic output assignment (for DecoderN with variable output count)
+      def output_set(name, value)
+        wire = @component.outputs[name.to_sym]
+        return unless wire
+        record_assignment(wire, resolve_value(value))
+      end
+
+      # Get memory array size
+      def mem_size(array_name = :memory)
+        mem = @component.instance_variable_get(:"@#{array_name}")
+        mem&.size || 0
+      end
+
+      # Create a range-based iteration for synthesis-friendly loops
+      # Usage: each_bit(a) { |bit, i| ... }
+      def each_bit(signal, &block)
+        val = resolve_value(signal)
+        w = signal.respond_to?(:width) ? signal.width : port_width(signal)
+        w.times { |i| yield((val >> i) & 1, i) }
+      end
+
+      # Reduction operations
+      def reduce_or(signal)
+        val = resolve_value(signal)
+        val != 0 ? 1 : 0
+      end
+
+      def reduce_and(signal)
+        w = signal.respond_to?(:width) ? signal.width : 8
+        mask = (1 << w) - 1
+        val = resolve_value(signal)
+        (val & mask) == mask ? 1 : 0
+      end
+
+      def reduce_xor(signal)
+        val = resolve_value(signal)
+        count = 0
+        while val > 0
+          count += val & 1
+          val >>= 1
+        end
+        count & 1
+      end
+
       # Define a local variable (becomes a wire in synthesis)
       def local(name, expr, width: nil)
         value = resolve_value(expr)
