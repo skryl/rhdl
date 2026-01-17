@@ -32,6 +32,7 @@ module MOS6502S
 
       # Pulse reset
       clock_cycle(rst: 1)
+      # Need 6 cycles for reset_step to reach 5 and state to transition to FETCH
       6.times { clock_cycle(rst: 0) }
 
       # Read reset vector

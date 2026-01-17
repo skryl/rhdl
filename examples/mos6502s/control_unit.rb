@@ -134,10 +134,145 @@ module MOS6502S
     port_output :done                    # Instruction complete
     port_output :halted                  # CPU halted
     port_output :cycle_count, width: 32  # Total cycles executed
+    port_output :reset_step, width: 8    # Reset sequence counter (internal)
+
+    # Sequential block for state machine
+    # State transitions happen on rising clock edge
+    sequential clock: :clk, reset: :rst, reset_values: { state: STATE_RESET, reset_step: 0, cycle_count: 0 } do
+      # Branch taken logic
+      branch_taken_val = local(:branch_taken_val,
+        case_select(branch_cond, {
+          BRANCH_BPL => (flag_n == lit(0, width: 1)),
+          BRANCH_BMI => (flag_n == lit(1, width: 1)),
+          BRANCH_BVC => (flag_v == lit(0, width: 1)),
+          BRANCH_BVS => (flag_v == lit(1, width: 1)),
+          BRANCH_BCC => (flag_c == lit(0, width: 1)),
+          BRANCH_BCS => (flag_c == lit(1, width: 1)),
+          BRANCH_BNE => (flag_z == lit(0, width: 1)),
+          BRANCH_BEQ => (flag_z == lit(1, width: 1))
+        }, default: 0), width: 1)
+
+      # Helper conditions
+      needs_read_val = local(:needs_read_val, is_read | is_rmw, width: 1)
+      is_implied_or_acc = local(:is_implied_or_acc,
+        (addr_mode == lit(MODE_IMPLIED, width: 4)) | (addr_mode == lit(MODE_ACCUMULATOR, width: 4)), width: 1)
+
+      # Next state after decode (complex logic)
+      decode_alu_like = local(:decode_alu_like,
+        (instr_type == lit(TYPE_ALU, width: 4)) |
+        (instr_type == lit(TYPE_LOAD, width: 4)) |
+        (instr_type == lit(TYPE_STORE, width: 4)) |
+        (instr_type == lit(TYPE_INC_DEC, width: 4)) |
+        (instr_type == lit(TYPE_SHIFT, width: 4)), width: 1)
+
+      decode_next = local(:decode_next,
+        mux(decode_alu_like,
+          mux(is_implied_or_acc, lit(STATE_EXECUTE, width: 8), lit(STATE_FETCH_OP1, width: 8)),
+          mux((instr_type == lit(TYPE_TRANSFER, width: 4)) |
+              (instr_type == lit(TYPE_FLAG, width: 4)) |
+              (instr_type == lit(TYPE_NOP, width: 4)),
+            lit(STATE_EXECUTE, width: 8),
+            mux(instr_type == lit(TYPE_BRANCH, width: 4),
+              lit(STATE_FETCH_OP1, width: 8),
+              mux(instr_type == lit(TYPE_JUMP, width: 4),
+                mux(addr_mode == lit(MODE_IMPLIED, width: 4),
+                  lit(STATE_RTS_PULL_LO, width: 8),
+                  lit(STATE_FETCH_OP1, width: 8)),
+                mux(instr_type == lit(TYPE_STACK, width: 4),
+                  mux(is_write, lit(STATE_PUSH, width: 8), lit(STATE_PULL, width: 8)),
+                  mux(instr_type == lit(TYPE_BRK, width: 4),
+                    lit(STATE_BRK_PUSH_HI, width: 8),
+                    lit(STATE_FETCH, width: 8))))))), width: 8)
+
+      # Next state after fetch_op1
+      is_zp_mode = local(:is_zp_mode,
+        (addr_mode == lit(MODE_ZERO_PAGE, width: 4)) |
+        (addr_mode == lit(MODE_ZERO_PAGE_X, width: 4)) |
+        (addr_mode == lit(MODE_ZERO_PAGE_Y, width: 4)), width: 1)
+
+      is_indirect_mode = local(:is_indirect_mode,
+        (addr_mode == lit(MODE_INDEXED_IND, width: 4)) |
+        (addr_mode == lit(MODE_INDIRECT_IDX, width: 4)), width: 1)
+
+      fetch_op1_next = local(:fetch_op1_next,
+        mux(addr_mode == lit(MODE_IMMEDIATE, width: 4),
+          lit(STATE_EXECUTE, width: 8),
+          mux(is_zp_mode,
+            mux(needs_read_val, lit(STATE_READ_MEM, width: 8),
+              mux(is_write, lit(STATE_WRITE_MEM, width: 8), lit(STATE_EXECUTE, width: 8))),
+            mux(addr_mode == lit(MODE_RELATIVE, width: 4),
+              lit(STATE_BRANCH, width: 8),
+              mux(is_indirect_mode,
+                lit(STATE_ADDR_LO, width: 8),
+                lit(STATE_FETCH_OP2, width: 8))))), width: 8)
+
+      # Next state after fetch_op2
+      fetch_op2_next = local(:fetch_op2_next,
+        mux(addr_mode == lit(MODE_INDIRECT, width: 4),
+          lit(STATE_ADDR_LO, width: 8),
+          mux((instr_type == lit(TYPE_JUMP, width: 4)) & is_write,
+            lit(STATE_JSR_PUSH_HI, width: 8),
+            mux(needs_read_val, lit(STATE_READ_MEM, width: 8),
+              mux(is_write, lit(STATE_WRITE_MEM, width: 8), lit(STATE_EXECUTE, width: 8))))), width: 8)
+
+      # Next state after addr_hi
+      addr_hi_next = local(:addr_hi_next,
+        mux(addr_mode == lit(MODE_INDIRECT, width: 4),
+          lit(STATE_EXECUTE, width: 8),
+          mux(needs_read_val, lit(STATE_READ_MEM, width: 8),
+            mux(is_write, lit(STATE_WRITE_MEM, width: 8), lit(STATE_EXECUTE, width: 8)))), width: 8)
+
+      # Only process when rdy is high
+      rdy_active = rdy == lit(1, width: 1)
+
+      # Increment cycle count when ready
+      cycle_count <= mux(rdy_active, cycle_count + lit(1, width: 32), cycle_count)
+
+      # Reset step counter (for reset sequence)
+      reset_step <= mux(state == lit(STATE_RESET, width: 8),
+        mux(rdy_active, (reset_step + lit(1, width: 8))[7..0], reset_step),
+        lit(0, width: 8))
+
+      # State machine transitions
+      state <= mux(rdy_active,
+        case_select(state, {
+          STATE_RESET => mux(reset_step >= lit(5, width: 8), lit(STATE_FETCH, width: 8), lit(STATE_RESET, width: 8)),
+          STATE_FETCH => lit(STATE_DECODE, width: 8),
+          STATE_DECODE => decode_next,
+          STATE_FETCH_OP1 => fetch_op1_next,
+          STATE_FETCH_OP2 => fetch_op2_next,
+          STATE_ADDR_LO => lit(STATE_ADDR_HI, width: 8),
+          STATE_ADDR_HI => addr_hi_next,
+          STATE_READ_MEM => lit(STATE_EXECUTE, width: 8),
+          STATE_EXECUTE => mux(is_rmw, lit(STATE_WRITE_MEM, width: 8), lit(STATE_FETCH, width: 8)),
+          STATE_WRITE_MEM => lit(STATE_FETCH, width: 8),
+          STATE_BRANCH => mux(branch_taken_val, lit(STATE_BRANCH_TAKE, width: 8), lit(STATE_FETCH, width: 8)),
+          STATE_BRANCH_TAKE => lit(STATE_FETCH, width: 8),
+          STATE_PUSH => lit(STATE_FETCH, width: 8),
+          STATE_PULL => lit(STATE_EXECUTE, width: 8),
+          STATE_JSR_PUSH_HI => lit(STATE_JSR_PUSH_LO, width: 8),
+          STATE_JSR_PUSH_LO => lit(STATE_EXECUTE, width: 8),
+          STATE_RTS_PULL_LO => lit(STATE_RTS_PULL_HI, width: 8),
+          STATE_RTS_PULL_HI => lit(STATE_FETCH, width: 8),
+          STATE_RTI_PULL_P => lit(STATE_RTI_PULL_LO, width: 8),
+          STATE_RTI_PULL_LO => lit(STATE_RTI_PULL_HI, width: 8),
+          STATE_RTI_PULL_HI => lit(STATE_FETCH, width: 8),
+          STATE_BRK_PUSH_HI => lit(STATE_BRK_PUSH_LO, width: 8),
+          STATE_BRK_PUSH_LO => lit(STATE_BRK_PUSH_P, width: 8),
+          STATE_BRK_PUSH_P => lit(STATE_BRK_VEC_LO, width: 8),
+          STATE_BRK_VEC_LO => lit(STATE_BRK_VEC_HI, width: 8),
+          STATE_BRK_VEC_HI => lit(STATE_HALT, width: 8),
+          STATE_HALT => lit(STATE_HALT, width: 8)
+        }, default: STATE_FETCH),
+        state)
+    end
 
     # Control signal behavior blocks - combinational outputs based on state
-    # Note: State machine transitions are handled in propagate for complexity
     behavior do
+      # state_before and state_pre are just the current state (for control signal alignment)
+      state_before <= state
+      state_pre <= state
+
       # halted: true when in HALT state
       halted <= (state == lit(STATE_HALT, width: 8))
 
@@ -272,431 +407,26 @@ module MOS6502S
         STATE_EXECUTE => lit(1, width: 1),
         STATE_RTI_PULL_P => lit(1, width: 1)
       }, default: 0)
+
+      # reg_write: write to register file during execute if instruction writes to register
+      reg_write <= mux(state == lit(STATE_EXECUTE, width: 8), writes_reg, lit(0, width: 1))
+
+      # done: instruction complete when transitioning back to fetch
+      done <= (state == lit(STATE_FETCH, width: 8))
+
+      # pc_load: load PC during jumps and branches
+      pc_load <= case_select(state, {
+        STATE_BRANCH_TAKE => lit(1, width: 1),
+        STATE_RTS_PULL_HI => lit(1, width: 1),
+        STATE_RTI_PULL_HI => lit(1, width: 1),
+        STATE_BRK_VEC_HI => lit(1, width: 1),
+        STATE_EXECUTE => mux(instr_type == lit(TYPE_JUMP, width: 4), lit(1, width: 1), lit(0, width: 1))
+      }, default: 0)
     end
 
-    def initialize(name = nil)
-      @state = STATE_RESET
-      @reset_step = 0
-      @cycle_count = 0
-      super(name)
-    end
-
-    # Synthesizable propagate - all logic maps to Verilog
-    def propagate
-      current_state = @state
-
-      # Output control signals FIRST, based on current state
-      output_control_signals
-
-      # Output state BEFORE transition so it stays aligned with control outputs
-      out_set(:state_before, @state)
-
-      # Then advance state machine on rising edge
-      if rising_edge?
-        if in_val(:rst) == 1
-          @state = STATE_RESET
-          @reset_step = 0
-          @cycle_count = 0
-        elsif in_val(:rdy) == 1
-          @cycle_count += 1
-          execute_state_machine
-        end
-      end
-
-      # Output state AFTER transition
-      out_set(:state, @state)
-      out_set(:state_pre, current_state)
-      out_set(:cycle_count, @cycle_count)
-    end
-
-    private
-
-    def execute_state_machine
-      mode = in_val(:addr_mode) & 0x0F
-      itype = in_val(:instr_type) & 0x0F
-      is_rd = in_val(:is_read)
-      is_wr = in_val(:is_write)
-      is_rmw_op = in_val(:is_rmw)
-
-      case @state
-      when STATE_RESET
-        @reset_step += 1
-        @state = STATE_FETCH if @reset_step >= 6
-
-      when STATE_FETCH
-        @state = STATE_DECODE
-
-      when STATE_DECODE
-        @state = next_state_after_decode(itype, mode, is_wr)
-
-      when STATE_FETCH_OP1
-        @state = next_state_after_fetch_op1(mode, is_rd, is_wr, is_rmw_op)
-
-      when STATE_FETCH_OP2
-        @state = next_state_after_fetch_op2(mode, itype, is_rd, is_wr, is_rmw_op)
-
-      when STATE_ADDR_LO
-        @state = STATE_ADDR_HI
-
-      when STATE_ADDR_HI
-        @state = next_state_after_addr_hi(mode, is_rd, is_wr, is_rmw_op)
-
-      when STATE_READ_MEM
-        @state = STATE_EXECUTE
-
-      when STATE_EXECUTE
-        @state = (is_rmw_op == 1) ? STATE_WRITE_MEM : STATE_FETCH
-
-      when STATE_WRITE_MEM
-        @state = STATE_FETCH
-
-      when STATE_BRANCH
-        @state = branch_taken? ? STATE_BRANCH_TAKE : STATE_FETCH
-
-      when STATE_BRANCH_TAKE
-        @state = STATE_FETCH
-
-      when STATE_PUSH
-        @state = STATE_FETCH
-
-      when STATE_PULL
-        @state = STATE_EXECUTE
-
-      when STATE_JSR_PUSH_HI
-        @state = STATE_JSR_PUSH_LO
-
-      when STATE_JSR_PUSH_LO
-        @state = STATE_EXECUTE
-
-      when STATE_RTS_PULL_LO
-        @state = STATE_RTS_PULL_HI
-
-      when STATE_RTS_PULL_HI
-        @state = STATE_FETCH
-
-      when STATE_RTI_PULL_P
-        @state = STATE_RTI_PULL_LO
-
-      when STATE_RTI_PULL_LO
-        @state = STATE_RTI_PULL_HI
-
-      when STATE_RTI_PULL_HI
-        @state = STATE_FETCH
-
-      when STATE_BRK_PUSH_HI
-        @state = STATE_BRK_PUSH_LO
-
-      when STATE_BRK_PUSH_LO
-        @state = STATE_BRK_PUSH_P
-
-      when STATE_BRK_PUSH_P
-        @state = STATE_BRK_VEC_LO
-
-      when STATE_BRK_VEC_LO
-        @state = STATE_BRK_VEC_HI
-
-      when STATE_BRK_VEC_HI
-        @state = STATE_HALT
-
-      when STATE_HALT
-        # Stay halted
-      end
-    end
-
-    def next_state_after_decode(itype, mode, is_wr)
-      case itype
-      when TYPE_ALU, TYPE_LOAD, TYPE_STORE, TYPE_INC_DEC, TYPE_SHIFT
-        if mode == MODE_IMPLIED || mode == MODE_ACCUMULATOR
-          STATE_EXECUTE
-        else
-          STATE_FETCH_OP1
-        end
-      when TYPE_TRANSFER, TYPE_FLAG, TYPE_NOP
-        STATE_EXECUTE
-      when TYPE_BRANCH
-        STATE_FETCH_OP1
-      when TYPE_JUMP
-        next_state_for_jump_decode(mode)
-      when TYPE_STACK
-        (is_wr == 1) ? STATE_PUSH : STATE_PULL
-      when TYPE_BRK
-        STATE_BRK_PUSH_HI
-      else
-        STATE_FETCH
-      end
-    end
-
-    def next_state_for_jump_decode(mode)
-      case mode
-      when MODE_IMPLIED
-        STATE_RTS_PULL_LO
-      when MODE_ABSOLUTE, MODE_INDIRECT
-        STATE_FETCH_OP1
-      else
-        STATE_FETCH
-      end
-    end
-
-    def next_state_after_fetch_op1(mode, is_rd, is_wr, is_rmw_op)
-      needs_read = (is_rd == 1) || (is_rmw_op == 1)
-
-      case mode
-      when MODE_IMMEDIATE
-        STATE_EXECUTE
-      when MODE_ZERO_PAGE, MODE_ZERO_PAGE_X, MODE_ZERO_PAGE_Y
-        if needs_read
-          STATE_READ_MEM
-        elsif is_wr == 1
-          STATE_WRITE_MEM
-        else
-          STATE_EXECUTE
-        end
-      when MODE_RELATIVE
-        STATE_BRANCH
-      when MODE_INDEXED_IND, MODE_INDIRECT_IDX
-        STATE_ADDR_LO
-      else
-        STATE_FETCH_OP2
-      end
-    end
-
-    def next_state_after_fetch_op2(mode, itype, is_rd, is_wr, is_rmw_op)
-      needs_read = (is_rd == 1) || (is_rmw_op == 1)
-
-      if mode == MODE_INDIRECT
-        STATE_ADDR_LO
-      elsif itype == TYPE_JUMP && is_wr == 1
-        STATE_JSR_PUSH_HI
-      elsif needs_read
-        STATE_READ_MEM
-      elsif is_wr == 1
-        STATE_WRITE_MEM
-      else
-        STATE_EXECUTE
-      end
-    end
-
-    def next_state_after_addr_hi(mode, is_rd, is_wr, is_rmw_op)
-      needs_read = (is_rd == 1) || (is_rmw_op == 1)
-
-      if mode == MODE_INDIRECT
-        STATE_EXECUTE
-      elsif needs_read
-        STATE_READ_MEM
-      elsif is_wr == 1
-        STATE_WRITE_MEM
-      else
-        STATE_EXECUTE
-      end
-    end
-
-    def branch_taken?
-      cond = in_val(:branch_cond) & 0x07
-      n = in_val(:flag_n)
-      v = in_val(:flag_v)
-      z = in_val(:flag_z)
-      c = in_val(:flag_c)
-
-      case cond
-      when BRANCH_BPL then n == 0
-      when BRANCH_BMI then n == 1
-      when BRANCH_BVC then v == 0
-      when BRANCH_BVS then v == 1
-      when BRANCH_BCC then c == 0
-      when BRANCH_BCS then c == 1
-      when BRANCH_BNE then z == 0
-      when BRANCH_BEQ then z == 1
-      else false
-      end
-    end
-
-    def output_control_signals
-      # Default all outputs to 0
-      out_set(:pc_inc, 0)
-      out_set(:pc_load, 0)
-      out_set(:load_opcode, 0)
-      out_set(:load_operand_lo, 0)
-      out_set(:load_operand_hi, 0)
-      out_set(:load_addr_lo, 0)
-      out_set(:load_addr_hi, 0)
-      out_set(:load_data, 0)
-      out_set(:mem_read, 0)
-      out_set(:mem_write, 0)
-      out_set(:addr_sel, 0)
-      out_set(:data_sel, 0)
-      out_set(:alu_enable, 0)
-      out_set(:reg_write, 0)
-      out_set(:sp_inc, 0)
-      out_set(:sp_dec, 0)
-      out_set(:update_flags, 0)
-      out_set(:done, 0)
-      out_set(:halted, (@state == STATE_HALT) ? 1 : 0)
-
-      itype = in_val(:instr_type) & 0x0F
-      is_rmw_op = in_val(:is_rmw)
-      is_status = in_val(:is_status_op)
-      writes_r = in_val(:writes_reg)
-
-      case @state
-      when STATE_RESET
-        out_set(:mem_read, 1)
-        out_set(:addr_sel, 1)
-
-      when STATE_FETCH
-        out_set(:mem_read, 1)
-        out_set(:load_opcode, 1)
-        out_set(:pc_inc, 1)
-
-      when STATE_DECODE
-        # Decode happens combinationally
-
-      when STATE_FETCH_OP1
-        out_set(:mem_read, 1)
-        out_set(:load_operand_lo, 1)
-        out_set(:pc_inc, 1)
-
-      when STATE_FETCH_OP2
-        out_set(:mem_read, 1)
-        out_set(:load_operand_hi, 1)
-        out_set(:pc_inc, 1)
-
-      when STATE_ADDR_LO
-        out_set(:mem_read, 1)
-        out_set(:load_addr_lo, 1)
-        out_set(:addr_sel, 2)
-
-      when STATE_ADDR_HI
-        out_set(:mem_read, 1)
-        out_set(:load_addr_hi, 1)
-        out_set(:addr_sel, 3)
-
-      when STATE_READ_MEM
-        out_set(:mem_read, 1)
-        out_set(:load_data, 1)
-        out_set(:addr_sel, 4)
-
-      when STATE_EXECUTE
-        out_set(:alu_enable, 1)
-        out_set(:reg_write, writes_r)
-        out_set(:update_flags, 1)
-        out_set(:pc_load, 1) if itype == TYPE_JUMP
-        out_set(:done, 1) unless is_rmw_op == 1
-
-      when STATE_WRITE_MEM
-        out_set(:mem_write, 1)
-        out_set(:addr_sel, 4)
-        out_set(:data_sel, 1)
-        out_set(:done, 1)
-
-      when STATE_BRANCH
-        # Check condition - next state decision made in state machine
-
-      when STATE_BRANCH_TAKE
-        out_set(:pc_load, 1)
-        out_set(:done, 1)
-
-      when STATE_PUSH
-        out_set(:mem_write, 1)
-        out_set(:addr_sel, 5)
-        out_set(:data_sel, (is_status == 1) ? 4 : 0)
-        out_set(:sp_dec, 1)
-        out_set(:done, 1)
-
-      when STATE_PULL
-        out_set(:sp_inc, 1)
-        out_set(:mem_read, 1)
-        out_set(:addr_sel, 6)
-        out_set(:load_data, 1)
-
-      when STATE_JSR_PUSH_HI
-        out_set(:mem_write, 1)
-        out_set(:addr_sel, 5)
-        out_set(:data_sel, 2)
-        out_set(:sp_dec, 1)
-
-      when STATE_JSR_PUSH_LO
-        out_set(:mem_write, 1)
-        out_set(:addr_sel, 5)
-        out_set(:data_sel, 3)
-        out_set(:sp_dec, 1)
-
-      when STATE_RTS_PULL_LO
-        out_set(:sp_inc, 1)
-        out_set(:mem_read, 1)
-        out_set(:addr_sel, 6)
-        out_set(:load_addr_lo, 1)
-
-      when STATE_RTS_PULL_HI
-        out_set(:sp_inc, 1)
-        out_set(:mem_read, 1)
-        out_set(:addr_sel, 6)
-        out_set(:load_addr_hi, 1)
-        out_set(:pc_load, 1)
-        out_set(:pc_inc, 1)
-        out_set(:done, 1)
-
-      when STATE_RTI_PULL_P
-        out_set(:sp_inc, 1)
-        out_set(:mem_read, 1)
-        out_set(:addr_sel, 6)
-        out_set(:update_flags, 1)
-
-      when STATE_RTI_PULL_LO
-        out_set(:sp_inc, 1)
-        out_set(:mem_read, 1)
-        out_set(:addr_sel, 6)
-        out_set(:load_addr_lo, 1)
-
-      when STATE_RTI_PULL_HI
-        out_set(:sp_inc, 1)
-        out_set(:mem_read, 1)
-        out_set(:addr_sel, 6)
-        out_set(:load_addr_hi, 1)
-        out_set(:pc_load, 1)
-        out_set(:done, 1)
-
-      when STATE_BRK_PUSH_HI
-        out_set(:mem_write, 1)
-        out_set(:addr_sel, 5)
-        out_set(:data_sel, 2)
-        out_set(:sp_dec, 1)
-
-      when STATE_BRK_PUSH_LO
-        out_set(:mem_write, 1)
-        out_set(:addr_sel, 5)
-        out_set(:data_sel, 3)
-        out_set(:sp_dec, 1)
-
-      when STATE_BRK_PUSH_P
-        out_set(:mem_write, 1)
-        out_set(:addr_sel, 5)
-        out_set(:data_sel, 4)
-        out_set(:sp_dec, 1)
-
-      when STATE_BRK_VEC_LO
-        out_set(:mem_read, 1)
-        out_set(:addr_sel, 7)
-        out_set(:load_addr_lo, 1)
-
-      when STATE_BRK_VEC_HI
-        out_set(:mem_read, 1)
-        out_set(:addr_sel, 7)
-        out_set(:load_addr_hi, 1)
-        out_set(:pc_load, 1)
-        out_set(:done, 1)
-      end
-    end
-
-    public
-
-    # Direct access for debugging
-    def current_state
-      @state
-    end
-
-    def set_state(s)
-      @state = s
-    end
+    # Test helper accessors (use DSL state management)
+    def current_state; read_reg(:state) || STATE_RESET; end
+    def set_state(s); write_reg(:state, s); end
 
     # Generate synthesizable Verilog
     def self.to_verilog
