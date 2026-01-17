@@ -1,0 +1,574 @@
+{
+  "name": "sub",
+  "net_count": 70,
+  "gates": [
+    {
+      "type": "not",
+      "inputs": [
+        8
+      ],
+      "output": 27,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        9
+      ],
+      "output": 28,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        10
+      ],
+      "output": 29,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        11
+      ],
+      "output": 30,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        12
+      ],
+      "output": 31,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        13
+      ],
+      "output": 32,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        14
+      ],
+      "output": 33,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        15
+      ],
+      "output": 34,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        16
+      ],
+      "output": 35,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        0,
+        27
+      ],
+      "output": 36,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        36,
+        35
+      ],
+      "output": 17,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        0,
+        27
+      ],
+      "output": 37,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        35,
+        36
+      ],
+      "output": 38,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        37,
+        38
+      ],
+      "output": 39,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        1,
+        28
+      ],
+      "output": 40,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        40,
+        39
+      ],
+      "output": 18,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        1,
+        28
+      ],
+      "output": 41,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        39,
+        40
+      ],
+      "output": 42,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        41,
+        42
+      ],
+      "output": 43,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        2,
+        29
+      ],
+      "output": 44,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        44,
+        43
+      ],
+      "output": 19,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        2,
+        29
+      ],
+      "output": 45,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        43,
+        44
+      ],
+      "output": 46,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        45,
+        46
+      ],
+      "output": 47,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        3,
+        30
+      ],
+      "output": 48,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        48,
+        47
+      ],
+      "output": 20,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        3,
+        30
+      ],
+      "output": 49,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        47,
+        48
+      ],
+      "output": 50,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        49,
+        50
+      ],
+      "output": 51,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        4,
+        31
+      ],
+      "output": 52,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        52,
+        51
+      ],
+      "output": 21,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        4,
+        31
+      ],
+      "output": 53,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        51,
+        52
+      ],
+      "output": 54,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        53,
+        54
+      ],
+      "output": 55,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        5,
+        32
+      ],
+      "output": 56,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        56,
+        55
+      ],
+      "output": 22,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        5,
+        32
+      ],
+      "output": 57,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        55,
+        56
+      ],
+      "output": 58,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        57,
+        58
+      ],
+      "output": 59,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        6,
+        33
+      ],
+      "output": 60,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        60,
+        59
+      ],
+      "output": 23,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        6,
+        33
+      ],
+      "output": 61,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        59,
+        60
+      ],
+      "output": 62,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        61,
+        62
+      ],
+      "output": 63,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        7,
+        34
+      ],
+      "output": 64,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        64,
+        63
+      ],
+      "output": 24,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        7,
+        34
+      ],
+      "output": 65,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        63,
+        64
+      ],
+      "output": 66,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        65,
+        66
+      ],
+      "output": 67,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        67
+      ],
+      "output": 25,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        7,
+        15
+      ],
+      "output": 68,
+      "value": null
+    },
+    {
+      "type": "xor",
+      "inputs": [
+        24,
+        7
+      ],
+      "output": 69,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        68,
+        69
+      ],
+      "output": 26,
+      "value": null
+    }
+  ],
+  "dffs": [
+
+  ],
+  "inputs": {
+    "sub.a": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "sub.b": [
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "sub.bin": [
+      16
+    ]
+  },
+  "outputs": {
+    "sub.diff": [
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24
+    ],
+    "sub.bout": [
+      25
+    ],
+    "sub.overflow": [
+      26
+    ]
+  },
+  "schedule": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    50,
+    9,
+    11,
+    14,
+    16,
+    19,
+    21,
+    24,
+    26,
+    29,
+    31,
+    34,
+    36,
+    39,
+    41,
+    44,
+    46,
+    10,
+    12,
+    13,
+    15,
+    17,
+    18,
+    20,
+    22,
+    23,
+    25,
+    27,
+    28,
+    30,
+    32,
+    33,
+    35,
+    37,
+    38,
+    40,
+    42,
+    43,
+    45,
+    47,
+    51,
+    48,
+    52,
+    49
+  ]
+}

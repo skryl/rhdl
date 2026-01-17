@@ -1,0 +1,18 @@
+Component: lzcount
+Type: RHDL::HDL::LZCount
+Gates: 57
+DFFs: 0
+Nets: 65
+
+Inputs:
+  lzcount.a: 8 bits
+
+Outputs:
+  lzcount.count: 4 bits
+  lzcount.all_zero: 1 bits
+
+Gate Types:
+  or: 16
+  not: 9
+  and: 28
+  buf: 4

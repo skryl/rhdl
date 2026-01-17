@@ -1,0 +1,571 @@
+{
+  "name": "enc8to3",
+  "net_count": 63,
+  "gates": [
+    {
+      "type": "not",
+      "inputs": [
+        0
+      ],
+      "output": 12,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        1
+      ],
+      "output": 13,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        2
+      ],
+      "output": 14,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        3
+      ],
+      "output": 15,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        4
+      ],
+      "output": 16,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        5
+      ],
+      "output": 17,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        6
+      ],
+      "output": 18,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        7
+      ],
+      "output": 19,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        13,
+        14
+      ],
+      "output": 20,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        20,
+        15
+      ],
+      "output": 21,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        21,
+        16
+      ],
+      "output": 22,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        22,
+        17
+      ],
+      "output": 23,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        23,
+        18
+      ],
+      "output": 24,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        24,
+        19
+      ],
+      "output": 25,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        25,
+        0
+      ],
+      "output": 26,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        14,
+        15
+      ],
+      "output": 27,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        27,
+        16
+      ],
+      "output": 28,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        28,
+        17
+      ],
+      "output": 29,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        29,
+        18
+      ],
+      "output": 30,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        30,
+        19
+      ],
+      "output": 31,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        31,
+        1
+      ],
+      "output": 32,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        15,
+        16
+      ],
+      "output": 33,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        33,
+        17
+      ],
+      "output": 34,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        34,
+        18
+      ],
+      "output": 35,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        35,
+        19
+      ],
+      "output": 36,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        36,
+        2
+      ],
+      "output": 37,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        16,
+        17
+      ],
+      "output": 38,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        38,
+        18
+      ],
+      "output": 39,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        39,
+        19
+      ],
+      "output": 40,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        40,
+        3
+      ],
+      "output": 41,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        17,
+        18
+      ],
+      "output": 42,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        42,
+        19
+      ],
+      "output": 43,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        43,
+        4
+      ],
+      "output": 44,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        18,
+        19
+      ],
+      "output": 45,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        45,
+        5
+      ],
+      "output": 46,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        19,
+        6
+      ],
+      "output": 47,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        44,
+        46
+      ],
+      "output": 48,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        47,
+        7
+      ],
+      "output": 49,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        48,
+        49
+      ],
+      "output": 50,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        50
+      ],
+      "output": 10,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        37,
+        41
+      ],
+      "output": 51,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        51,
+        49
+      ],
+      "output": 52,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        52
+      ],
+      "output": 9,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        32,
+        41
+      ],
+      "output": 53,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        46,
+        7
+      ],
+      "output": 54,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        53,
+        54
+      ],
+      "output": 55,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        55
+      ],
+      "output": 8,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        0,
+        1
+      ],
+      "output": 56,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        56,
+        2
+      ],
+      "output": 57,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        57,
+        3
+      ],
+      "output": 58,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        58,
+        4
+      ],
+      "output": 59,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        59,
+        5
+      ],
+      "output": 60,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        60,
+        6
+      ],
+      "output": 61,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        61,
+        7
+      ],
+      "output": 62,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        62
+      ],
+      "output": 11,
+      "value": null
+    }
+  ],
+  "dffs": [
+
+  ],
+  "inputs": {
+    "enc8to3.a": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ]
+  },
+  "outputs": {
+    "enc8to3.y": [
+      8,
+      9,
+      10
+    ],
+    "enc8to3.valid": [
+      11
+    ]
+  },
+  "schedule": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    47,
+    8,
+    15,
+    21,
+    26,
+    30,
+    33,
+    35,
+    48,
+    9,
+    16,
+    22,
+    27,
+    31,
+    34,
+    37,
+    49,
+    10,
+    17,
+    23,
+    28,
+    32,
+    44,
+    50,
+    11,
+    18,
+    24,
+    29,
+    36,
+    51,
+    12,
+    19,
+    25,
+    38,
+    52,
+    13,
+    20,
+    40,
+    39,
+    53,
+    14,
+    43,
+    41,
+    54,
+    45,
+    42,
+    46
+  ]
+}

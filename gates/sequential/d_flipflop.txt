@@ -1,0 +1,18 @@
+Component: dff
+Type: RHDL::HDL::DFlipFlop
+Gates: 1
+DFFs: 1
+Nets: 6
+
+Inputs:
+  dff.d: 1 bits
+  dff.clk: 1 bits
+  dff.rst: 1 bits
+  dff.en: 1 bits
+
+Outputs:
+  dff.q: 1 bits
+  dff.qn: 1 bits
+
+Gate Types:
+  not: 1

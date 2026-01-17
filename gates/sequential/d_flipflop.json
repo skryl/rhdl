@@ -1,0 +1,48 @@
+{
+  "name": "dff",
+  "net_count": 6,
+  "gates": [
+    {
+      "type": "not",
+      "inputs": [
+        4
+      ],
+      "output": 5,
+      "value": null
+    }
+  ],
+  "dffs": [
+    {
+      "d": 0,
+      "q": 4,
+      "rst": 2,
+      "en": 3,
+      "async_reset": false
+    }
+  ],
+  "inputs": {
+    "dff.d": [
+      0
+    ],
+    "dff.clk": [
+      1
+    ],
+    "dff.rst": [
+      2
+    ],
+    "dff.en": [
+      3
+    ]
+  },
+  "outputs": {
+    "dff.q": [
+      4
+    ],
+    "dff.qn": [
+      5
+    ]
+  },
+  "schedule": [
+    0
+  ]
+}

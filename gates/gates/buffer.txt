@@ -1,0 +1,14 @@
+Component: buffer
+Type: RHDL::HDL::Buffer
+Gates: 1
+DFFs: 0
+Nets: 2
+
+Inputs:
+  buffer.a: 1 bits
+
+Outputs:
+  buffer.y: 1 bits
+
+Gate Types:
+  buf: 1

@@ -1,0 +1,16 @@
+Component: reg_load
+Type: RHDL::HDL::RegisterLoad
+Gates: 0
+DFFs: 8
+Nets: 19
+
+Inputs:
+  reg_load.d: 8 bits
+  reg_load.clk: 1 bits
+  reg_load.rst: 1 bits
+  reg_load.load: 1 bits
+
+Outputs:
+  reg_load.q: 8 bits
+
+Gate Types:

@@ -1,0 +1,22 @@
+Component: jkff
+Type: RHDL::HDL::JKFlipFlop
+Gates: 7
+DFFs: 1
+Nets: 13
+
+Inputs:
+  jkff.j: 1 bits
+  jkff.k: 1 bits
+  jkff.clk: 1 bits
+  jkff.rst: 1 bits
+  jkff.en: 1 bits
+
+Outputs:
+  jkff.q: 1 bits
+  jkff.qn: 1 bits
+
+Gate Types:
+  not: 3
+  and: 2
+  or: 1
+  buf: 1

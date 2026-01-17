@@ -1,0 +1,370 @@
+{
+  "name": "shift_reg",
+  "net_count": 47,
+  "gates": [
+    {
+      "type": "mux",
+      "inputs": [
+        24,
+        0,
+        4
+      ],
+      "output": 31,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        31,
+        6,
+        5
+      ],
+      "output": 32,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        23
+      ],
+      "output": 14,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        25,
+        23,
+        4
+      ],
+      "output": 33,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        33,
+        7,
+        5
+      ],
+      "output": 34,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        24
+      ],
+      "output": 15,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        26,
+        24,
+        4
+      ],
+      "output": 35,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        35,
+        8,
+        5
+      ],
+      "output": 36,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        25
+      ],
+      "output": 16,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        27,
+        25,
+        4
+      ],
+      "output": 37,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        37,
+        9,
+        5
+      ],
+      "output": 38,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        26
+      ],
+      "output": 17,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        28,
+        26,
+        4
+      ],
+      "output": 39,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        39,
+        10,
+        5
+      ],
+      "output": 40,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        27
+      ],
+      "output": 18,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        29,
+        27,
+        4
+      ],
+      "output": 41,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        41,
+        11,
+        5
+      ],
+      "output": 42,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        28
+      ],
+      "output": 19,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        30,
+        28,
+        4
+      ],
+      "output": 43,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        43,
+        12,
+        5
+      ],
+      "output": 44,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        29
+      ],
+      "output": 20,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        0,
+        29,
+        4
+      ],
+      "output": 45,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        45,
+        13,
+        5
+      ],
+      "output": 46,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        30
+      ],
+      "output": 21,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        23,
+        30,
+        4
+      ],
+      "output": 22,
+      "value": null
+    }
+  ],
+  "dffs": [
+    {
+      "d": 32,
+      "q": 23,
+      "rst": 2,
+      "en": 3,
+      "async_reset": false
+    },
+    {
+      "d": 34,
+      "q": 24,
+      "rst": 2,
+      "en": 3,
+      "async_reset": false
+    },
+    {
+      "d": 36,
+      "q": 25,
+      "rst": 2,
+      "en": 3,
+      "async_reset": false
+    },
+    {
+      "d": 38,
+      "q": 26,
+      "rst": 2,
+      "en": 3,
+      "async_reset": false
+    },
+    {
+      "d": 40,
+      "q": 27,
+      "rst": 2,
+      "en": 3,
+      "async_reset": false
+    },
+    {
+      "d": 42,
+      "q": 28,
+      "rst": 2,
+      "en": 3,
+      "async_reset": false
+    },
+    {
+      "d": 44,
+      "q": 29,
+      "rst": 2,
+      "en": 3,
+      "async_reset": false
+    },
+    {
+      "d": 46,
+      "q": 30,
+      "rst": 2,
+      "en": 3,
+      "async_reset": false
+    }
+  ],
+  "inputs": {
+    "shift_reg.d_in": [
+      0
+    ],
+    "shift_reg.clk": [
+      1
+    ],
+    "shift_reg.rst": [
+      2
+    ],
+    "shift_reg.en": [
+      3
+    ],
+    "shift_reg.dir": [
+      4
+    ],
+    "shift_reg.load": [
+      5
+    ],
+    "shift_reg.d": [
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13
+    ]
+  },
+  "outputs": {
+    "shift_reg.q": [
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21
+    ],
+    "shift_reg.d_out": [
+      22
+    ]
+  },
+  "schedule": [
+    0,
+    2,
+    3,
+    5,
+    6,
+    8,
+    9,
+    11,
+    12,
+    14,
+    15,
+    17,
+    18,
+    20,
+    21,
+    23,
+    24,
+    1,
+    4,
+    7,
+    10,
+    13,
+    16,
+    19,
+    22
+  ]
+}

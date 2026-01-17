@@ -1,0 +1,16 @@
+Component: tristate
+Type: RHDL::HDL::TristateBuffer
+Gates: 2
+DFFs: 0
+Nets: 4
+
+Inputs:
+  tristate.a: 1 bits
+  tristate.en: 1 bits
+
+Outputs:
+  tristate.y: 1 bits
+
+Gate Types:
+  const: 1
+  mux: 1

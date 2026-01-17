@@ -1,0 +1,19 @@
+Component: mul
+Type: RHDL::HDL::Multiplier
+Gates: 131
+DFFs: 0
+Nets: 139
+
+Inputs:
+  mul.a: 4 bits
+  mul.b: 4 bits
+
+Outputs:
+  mul.product: 8 bits
+
+Gate Types:
+  and: 52
+  buf: 12
+  const: 13
+  xor: 36
+  or: 18

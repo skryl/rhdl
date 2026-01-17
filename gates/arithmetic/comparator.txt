@@ -1,0 +1,26 @@
+Component: cmp
+Type: RHDL::HDL::Comparator
+Gates: 83
+DFFs: 0
+Nets: 100
+
+Inputs:
+  cmp.a: 8 bits
+  cmp.b: 8 bits
+  cmp.signed_cmp: 1 bits
+
+Outputs:
+  cmp.eq: 1 bits
+  cmp.gt: 1 bits
+  cmp.lt: 1 bits
+  cmp.gte: 1 bits
+  cmp.lte: 1 bits
+
+Gate Types:
+  xor: 25
+  not: 18
+  and: 24
+  const: 1
+  or: 10
+  mux: 4
+  buf: 1

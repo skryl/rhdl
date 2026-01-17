@@ -1,0 +1,15 @@
+Component: xor_gate
+Type: RHDL::HDL::XorGate
+Gates: 1
+DFFs: 0
+Nets: 3
+
+Inputs:
+  xor_gate.a0: 1 bits
+  xor_gate.a1: 1 bits
+
+Outputs:
+  xor_gate.y: 1 bits
+
+Gate Types:
+  xor: 1

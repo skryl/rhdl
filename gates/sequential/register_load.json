@@ -1,0 +1,101 @@
+{
+  "name": "reg_load",
+  "net_count": 19,
+  "gates": [
+
+  ],
+  "dffs": [
+    {
+      "d": 0,
+      "q": 11,
+      "rst": 9,
+      "en": 10,
+      "async_reset": false
+    },
+    {
+      "d": 1,
+      "q": 12,
+      "rst": 9,
+      "en": 10,
+      "async_reset": false
+    },
+    {
+      "d": 2,
+      "q": 13,
+      "rst": 9,
+      "en": 10,
+      "async_reset": false
+    },
+    {
+      "d": 3,
+      "q": 14,
+      "rst": 9,
+      "en": 10,
+      "async_reset": false
+    },
+    {
+      "d": 4,
+      "q": 15,
+      "rst": 9,
+      "en": 10,
+      "async_reset": false
+    },
+    {
+      "d": 5,
+      "q": 16,
+      "rst": 9,
+      "en": 10,
+      "async_reset": false
+    },
+    {
+      "d": 6,
+      "q": 17,
+      "rst": 9,
+      "en": 10,
+      "async_reset": false
+    },
+    {
+      "d": 7,
+      "q": 18,
+      "rst": 9,
+      "en": 10,
+      "async_reset": false
+    }
+  ],
+  "inputs": {
+    "reg_load.d": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "reg_load.clk": [
+      8
+    ],
+    "reg_load.rst": [
+      9
+    ],
+    "reg_load.load": [
+      10
+    ]
+  },
+  "outputs": {
+    "reg_load.q": [
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18
+    ]
+  },
+  "schedule": [
+
+  ]
+}

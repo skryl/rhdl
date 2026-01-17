@@ -1,0 +1,14 @@
+Component: sext
+Type: RHDL::HDL::SignExtend
+Gates: 16
+DFFs: 0
+Nets: 24
+
+Inputs:
+  sext.a: 8 bits
+
+Outputs:
+  sext.y: 16 bits
+
+Gate Types:
+  buf: 16

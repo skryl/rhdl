@@ -1,0 +1,14 @@
+Component: bitwise_not
+Type: RHDL::HDL::BitwiseNot
+Gates: 8
+DFFs: 0
+Nets: 16
+
+Inputs:
+  bitwise_not.a: 8 bits
+
+Outputs:
+  bitwise_not.y: 8 bits
+
+Gate Types:
+  not: 8

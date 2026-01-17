@@ -1,0 +1,24 @@
+Component: pc
+Type: RHDL::HDL::ProgramCounter
+Gates: 129
+DFFs: 16
+Nets: 181
+
+Inputs:
+  pc.clk: 1 bits
+  pc.rst: 1 bits
+  pc.en: 1 bits
+  pc.load: 1 bits
+  pc.d: 16 bits
+  pc.inc: 16 bits
+
+Outputs:
+  pc.q: 16 bits
+
+Gate Types:
+  const: 1
+  xor: 32
+  and: 32
+  or: 16
+  mux: 32
+  buf: 16

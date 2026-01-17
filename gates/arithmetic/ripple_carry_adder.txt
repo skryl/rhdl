@@ -1,0 +1,21 @@
+Component: rca
+Type: RHDL::HDL::RippleCarryAdder
+Gates: 44
+DFFs: 0
+Nets: 61
+
+Inputs:
+  rca.a: 8 bits
+  rca.b: 8 bits
+  rca.cin: 1 bits
+
+Outputs:
+  rca.sum: 8 bits
+  rca.cout: 1 bits
+  rca.overflow: 1 bits
+
+Gate Types:
+  xor: 18
+  and: 17
+  or: 8
+  not: 1

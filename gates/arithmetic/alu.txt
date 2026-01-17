@@ -1,0 +1,27 @@
+Component: alu
+Type: RHDL::HDL::ALU
+Gates: 187
+DFFs: 0
+Nets: 208
+
+Inputs:
+  alu.a: 8 bits
+  alu.b: 8 bits
+  alu.op: 4 bits
+  alu.cin: 1 bits
+
+Outputs:
+  alu.result: 8 bits
+  alu.cout: 1 bits
+  alu.zero: 1 bits
+  alu.negative: 1 bits
+  alu.overflow: 1 bits
+
+Gate Types:
+  xor: 42
+  and: 41
+  or: 31
+  not: 20
+  mux: 51
+  const: 1
+  buf: 1

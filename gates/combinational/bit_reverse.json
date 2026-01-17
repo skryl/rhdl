@@ -1,0 +1,107 @@
+{
+  "name": "bitrev",
+  "net_count": 16,
+  "gates": [
+    {
+      "type": "buf",
+      "inputs": [
+        7
+      ],
+      "output": 8,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        6
+      ],
+      "output": 9,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        5
+      ],
+      "output": 10,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        4
+      ],
+      "output": 11,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        3
+      ],
+      "output": 12,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        2
+      ],
+      "output": 13,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        1
+      ],
+      "output": 14,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        0
+      ],
+      "output": 15,
+      "value": null
+    }
+  ],
+  "dffs": [
+
+  ],
+  "inputs": {
+    "bitrev.a": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ]
+  },
+  "outputs": {
+    "bitrev.y": [
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ]
+  },
+  "schedule": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ]
+}

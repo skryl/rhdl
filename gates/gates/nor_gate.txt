@@ -1,0 +1,16 @@
+Component: nor_gate
+Type: RHDL::HDL::NorGate
+Gates: 2
+DFFs: 0
+Nets: 4
+
+Inputs:
+  nor_gate.a0: 1 bits
+  nor_gate.a1: 1 bits
+
+Outputs:
+  nor_gate.y: 1 bits
+
+Gate Types:
+  or: 1
+  not: 1

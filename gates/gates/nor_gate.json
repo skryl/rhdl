@@ -1,0 +1,43 @@
+{
+  "name": "nor_gate",
+  "net_count": 4,
+  "gates": [
+    {
+      "type": "or",
+      "inputs": [
+        0,
+        1
+      ],
+      "output": 3,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        3
+      ],
+      "output": 2,
+      "value": null
+    }
+  ],
+  "dffs": [
+
+  ],
+  "inputs": {
+    "nor_gate.a0": [
+      0
+    ],
+    "nor_gate.a1": [
+      1
+    ]
+  },
+  "outputs": {
+    "nor_gate.y": [
+      2
+    ]
+  },
+  "schedule": [
+    0,
+    1
+  ]
+}
