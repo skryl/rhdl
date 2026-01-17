@@ -73,5 +73,40 @@ RSpec.describe MOS6502::IndirectAddressCalc do
       expect(verilog).to include('module mos6502_indirect_addr_calc')
       expect(verilog).to include('input [3:0] mode')
     end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation for indirect addressing' do
+        behavioral = described_class.new('behavioral')
+        vectors = []
+
+        # Test indexed indirect (zp,X)
+        behavioral.set_input(:mode, MOS6502::AddressGenerator::MODE_INDEXED_IND)
+        behavioral.set_input(:operand_lo, 0x40)
+        behavioral.set_input(:operand_hi, 0)
+        behavioral.set_input(:x_reg, 0x10)
+        behavioral.propagate
+        vectors << {
+          inputs: { mode: MOS6502::AddressGenerator::MODE_INDEXED_IND, operand_lo: 0x40, operand_hi: 0, x_reg: 0x10 },
+          expected: { ptr_addr_lo: behavioral.get_output(:ptr_addr_lo), ptr_addr_hi: behavioral.get_output(:ptr_addr_hi) }
+        }
+
+        # Test indirect indexed (zp),Y
+        behavioral.set_input(:mode, MOS6502::AddressGenerator::MODE_INDIRECT_IDX)
+        behavioral.set_input(:operand_lo, 0x80)
+        behavioral.propagate
+        vectors << {
+          inputs: { mode: MOS6502::AddressGenerator::MODE_INDIRECT_IDX, operand_lo: 0x80, operand_hi: 0, x_reg: 0 },
+          expected: { ptr_addr_lo: behavioral.get_output(:ptr_addr_lo), ptr_addr_hi: behavioral.get_output(:ptr_addr_hi) }
+        }
+
+        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mos6502_indirect_addr_calc')
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx]).to eq(vec[:expected]),
+            "Vector #{idx}: expected #{vec[:expected]}, got #{result[:results][idx]}"
+        end
+      end
+    end
   end
 end

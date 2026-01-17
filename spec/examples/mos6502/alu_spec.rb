@@ -144,5 +144,64 @@ RSpec.describe MOS6502::ALU do
       expect(verilog).to include('input [3:0] op')
       expect(verilog).to include('output [7:0] result')
     end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation for ADC operations' do
+        # Run behavioral simulation to get expected results
+        behavioral = MOS6502::ALU.new
+        vectors = []
+
+        # Test ADC: 0x10 + 0x20 = 0x30
+        behavioral.set_input(:a, 0x10)
+        behavioral.set_input(:b, 0x20)
+        behavioral.set_input(:op, MOS6502::ALU::OP_ADC)
+        behavioral.set_input(:c_in, 0)
+        behavioral.set_input(:d_flag, 0)
+        behavioral.propagate
+        vectors << {
+          inputs: { a: 0x10, b: 0x20, op: MOS6502::ALU::OP_ADC, c_in: 0, d_flag: 0 },
+          expected: { result: behavioral.get_output(:result), n: behavioral.get_output(:n), z: behavioral.get_output(:z), c: behavioral.get_output(:c), v: behavioral.get_output(:v) }
+        }
+
+        # Test ADC with carry: 0xFF + 0x01 = 0x00 with carry
+        behavioral.set_input(:a, 0xFF)
+        behavioral.set_input(:b, 0x01)
+        behavioral.set_input(:op, MOS6502::ALU::OP_ADC)
+        behavioral.set_input(:c_in, 0)
+        behavioral.propagate
+        vectors << {
+          inputs: { a: 0xFF, b: 0x01, op: MOS6502::ALU::OP_ADC, c_in: 0, d_flag: 0 },
+          expected: { result: behavioral.get_output(:result), n: behavioral.get_output(:n), z: behavioral.get_output(:z), c: behavioral.get_output(:c), v: behavioral.get_output(:v) }
+        }
+
+        # Test AND: 0xF0 & 0x0F = 0x00
+        behavioral.set_input(:a, 0xF0)
+        behavioral.set_input(:b, 0x0F)
+        behavioral.set_input(:op, MOS6502::ALU::OP_AND)
+        behavioral.propagate
+        vectors << {
+          inputs: { a: 0xF0, b: 0x0F, op: MOS6502::ALU::OP_AND, c_in: 0, d_flag: 0 },
+          expected: { result: behavioral.get_output(:result), n: behavioral.get_output(:n), z: behavioral.get_output(:z), c: behavioral.get_output(:c), v: behavioral.get_output(:v) }
+        }
+
+        # Test ORA: 0xF0 | 0x0F = 0xFF
+        behavioral.set_input(:a, 0xF0)
+        behavioral.set_input(:b, 0x0F)
+        behavioral.set_input(:op, MOS6502::ALU::OP_ORA)
+        behavioral.propagate
+        vectors << {
+          inputs: { a: 0xF0, b: 0x0F, op: MOS6502::ALU::OP_ORA, c_in: 0, d_flag: 0 },
+          expected: { result: behavioral.get_output(:result), n: behavioral.get_output(:n), z: behavioral.get_output(:z), c: behavioral.get_output(:c), v: behavioral.get_output(:v) }
+        }
+
+        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mos6502_alu')
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx]).to eq(vec[:expected]),
+            "Vector #{idx}: expected #{vec[:expected]}, got #{result[:results][idx]}"
+        end
+      end
+    end
   end
 end

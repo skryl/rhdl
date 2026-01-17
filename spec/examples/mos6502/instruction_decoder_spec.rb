@@ -94,5 +94,37 @@ RSpec.describe MOS6502::InstructionDecoder do
       expect(verilog).to include('input [7:0] opcode')
       expect(verilog).to include('output [3:0] addr_mode')
     end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation for opcode decoding' do
+        behavioral = described_class.new('behavioral')
+        vectors = []
+
+        # Test several opcodes and compare behavioral vs structural
+        test_opcodes = [0x69, 0xA5, 0x8D, 0xF0, 0x4C, 0x02]  # ADC imm, LDA zp, STA abs, BEQ, JMP, illegal
+
+        test_opcodes.each do |opcode|
+          behavioral.set_input(:opcode, opcode)
+          behavioral.propagate
+          vectors << {
+            inputs: { opcode: opcode },
+            expected: {
+              addr_mode: behavioral.get_output(:addr_mode),
+              alu_op: behavioral.get_output(:alu_op),
+              instr_type: behavioral.get_output(:instr_type),
+              illegal: behavioral.get_output(:illegal)
+            }
+          }
+        end
+
+        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mos6502_instruction_decoder')
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx]).to eq(vec[:expected]),
+            "Opcode 0x#{test_opcodes[idx].to_s(16)}: expected #{vec[:expected]}, got #{result[:results][idx]}"
+        end
+      end
+    end
   end
 end
