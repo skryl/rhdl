@@ -6,155 +6,166 @@ module RHDL
     module CPU
       # Instruction decoder - decodes opcode byte to control signals
       class InstructionDecoder < SimComponent
-        # Opcodes matching the behavioral CPU
-        OPCODES = {
-          NOP: 0x00, LDA: 0x10, STA: 0x20, ADD: 0x30,
-          SUB: 0x40, AND: 0x50, OR: 0x60, XOR: 0x70,
-          JZ: 0x80, JNZ: 0x90, LDI: 0xA0, JMP: 0xB0,
-          CALL: 0xC0, RET: 0xD0, DIV: 0xE0,
-          HLT: 0xF0, MUL: 0xF1, NOT: 0xF2, CMP: 0xF3,
-          JZ_LONG: 0xF8, JMP_LONG: 0xF9, JNZ_LONG: 0xFA
-        }
+        # ALU operation codes (must match ALU constants)
+        OP_ADD = 0
+        OP_SUB = 1
+        OP_AND = 2
+        OP_OR  = 3
+        OP_XOR = 4
+        OP_NOT = 5
+        OP_MUL = 11
+        OP_DIV = 12
 
-        def setup_ports
-          input :instruction, width: 8
-          input :zero_flag
+        port_input :instruction, width: 8
+        port_input :zero_flag
 
-          # Control signals
-          output :alu_op, width: 4       # ALU operation
-          output :alu_src              # 0 = register, 1 = immediate
-          output :reg_write            # Write to accumulator
-          output :mem_read             # Read from memory
-          output :mem_write            # Write to memory
-          output :branch               # Branch instruction
-          output :jump                 # Unconditional jump
-          output :pc_src, width: 2     # PC source: 0=+1, 1=operand, 2=long addr
-          output :halt                 # Halt CPU
-          output :call                 # Call instruction
-          output :ret                  # Return instruction
-          output :instr_length, width: 2  # 1, 2, or 3 bytes
-        end
+        # Control signals
+        port_output :alu_op, width: 4       # ALU operation
+        port_output :alu_src                # 0 = register, 1 = immediate
+        port_output :reg_write              # Write to accumulator
+        port_output :mem_read               # Read from memory
+        port_output :mem_write              # Write to memory
+        port_output :branch                 # Branch instruction
+        port_output :jump                   # Unconditional jump
+        port_output :pc_src, width: 2       # PC source: 0=+1, 1=operand, 2=long addr
+        port_output :halt                   # Halt CPU
+        port_output :call                   # Call instruction
+        port_output :ret                    # Return instruction
+        port_output :instr_length, width: 2 # 1, 2, or 3 bytes
 
-        def propagate
-          instr = in_val(:instruction)
+        behavior do
+          instr = instruction.value
           opcode = instr & 0xF0
-          zero = in_val(:zero_flag)
+          zero = zero_flag.value
 
           # Default all outputs to 0
-          out_set(:alu_op, 0)
-          out_set(:alu_src, 0)
-          out_set(:reg_write, 0)
-          out_set(:mem_read, 0)
-          out_set(:mem_write, 0)
-          out_set(:branch, 0)
-          out_set(:jump, 0)
-          out_set(:pc_src, 0)
-          out_set(:halt, 0)
-          out_set(:call, 0)
-          out_set(:ret, 0)
-          out_set(:instr_length, 1)
+          alu_op_val = 0
+          alu_src_val = 0
+          reg_write_val = 0
+          mem_read_val = 0
+          mem_write_val = 0
+          branch_val = 0
+          jump_val = 0
+          pc_src_val = 0
+          halt_val = 0
+          call_val = 0
+          ret_val = 0
+          instr_len_val = 1
 
           case opcode
           when 0x00  # NOP
             # Do nothing
 
           when 0x10  # LDA
-            out_set(:mem_read, 1)
-            out_set(:reg_write, 1)
+            mem_read_val = 1
+            reg_write_val = 1
 
           when 0x20  # STA
-            out_set(:mem_write, 1)
+            mem_write_val = 1
             if instr == 0x20  # Indirect (3 bytes)
-              out_set(:instr_length, 3)
+              instr_len_val = 3
             elsif instr == 0x21  # Direct 2-byte
-              out_set(:instr_length, 2)
+              instr_len_val = 2
             end
 
           when 0x30  # ADD
-            out_set(:alu_op, ALU::OP_ADD)
-            out_set(:mem_read, 1)
-            out_set(:reg_write, 1)
+            alu_op_val = 0  # OP_ADD
+            mem_read_val = 1
+            reg_write_val = 1
 
           when 0x40  # SUB
-            out_set(:alu_op, ALU::OP_SUB)
-            out_set(:mem_read, 1)
-            out_set(:reg_write, 1)
+            alu_op_val = 1  # OP_SUB
+            mem_read_val = 1
+            reg_write_val = 1
 
           when 0x50  # AND
-            out_set(:alu_op, ALU::OP_AND)
-            out_set(:mem_read, 1)
-            out_set(:reg_write, 1)
+            alu_op_val = 2  # OP_AND
+            mem_read_val = 1
+            reg_write_val = 1
 
           when 0x60  # OR
-            out_set(:alu_op, ALU::OP_OR)
-            out_set(:mem_read, 1)
-            out_set(:reg_write, 1)
+            alu_op_val = 3  # OP_OR
+            mem_read_val = 1
+            reg_write_val = 1
 
           when 0x70  # XOR
-            out_set(:alu_op, ALU::OP_XOR)
-            out_set(:mem_read, 1)
-            out_set(:reg_write, 1)
+            alu_op_val = 4  # OP_XOR
+            mem_read_val = 1
+            reg_write_val = 1
 
           when 0x80  # JZ
-            out_set(:branch, 1)
-            out_set(:pc_src, zero == 1 ? 1 : 0)
+            branch_val = 1
+            pc_src_val = zero == 1 ? 1 : 0
 
           when 0x90  # JNZ
-            out_set(:branch, 1)
-            out_set(:pc_src, zero == 0 ? 1 : 0)
+            branch_val = 1
+            pc_src_val = zero == 0 ? 1 : 0
 
           when 0xA0  # LDI
-            out_set(:alu_src, 1)  # Immediate
-            out_set(:reg_write, 1)
-            out_set(:instr_length, 2)
+            alu_src_val = 1  # Immediate
+            reg_write_val = 1
+            instr_len_val = 2
 
           when 0xB0  # JMP
-            out_set(:jump, 1)
-            out_set(:pc_src, 1)
+            jump_val = 1
+            pc_src_val = 1
 
           when 0xC0  # CALL
-            out_set(:call, 1)
-            out_set(:pc_src, 1)
+            call_val = 1
+            pc_src_val = 1
 
           when 0xD0  # RET
-            out_set(:ret, 1)
+            ret_val = 1
 
           when 0xE0  # DIV
-            out_set(:alu_op, ALU::OP_DIV)
-            out_set(:mem_read, 1)
-            out_set(:reg_write, 1)
+            alu_op_val = 12  # OP_DIV
+            mem_read_val = 1
+            reg_write_val = 1
 
           when 0xF0
             case instr
             when 0xF0  # HLT
-              out_set(:halt, 1)
+              halt_val = 1
             when 0xF1  # MUL
-              out_set(:alu_op, ALU::OP_MUL)
-              out_set(:mem_read, 1)
-              out_set(:reg_write, 1)
-              out_set(:instr_length, 2)
+              alu_op_val = 11  # OP_MUL
+              mem_read_val = 1
+              reg_write_val = 1
+              instr_len_val = 2
             when 0xF2  # NOT
-              out_set(:alu_op, ALU::OP_NOT)
-              out_set(:reg_write, 1)
+              alu_op_val = 5  # OP_NOT
+              reg_write_val = 1
             when 0xF3  # CMP
-              out_set(:alu_op, ALU::OP_SUB)
-              out_set(:mem_read, 1)
+              alu_op_val = 1  # OP_SUB
+              mem_read_val = 1
               # CMP sets flags but doesn't write result
-              out_set(:instr_length, 2)
+              instr_len_val = 2
             when 0xF8  # JZ_LONG
-              out_set(:branch, 1)
-              out_set(:pc_src, zero == 1 ? 2 : 0)
-              out_set(:instr_length, 3)
+              branch_val = 1
+              pc_src_val = zero == 1 ? 2 : 0
+              instr_len_val = 3
             when 0xF9  # JMP_LONG
-              out_set(:jump, 1)
-              out_set(:pc_src, 2)
-              out_set(:instr_length, 3)
+              jump_val = 1
+              pc_src_val = 2
+              instr_len_val = 3
             when 0xFA  # JNZ_LONG
-              out_set(:branch, 1)
-              out_set(:pc_src, zero == 0 ? 2 : 0)
-              out_set(:instr_length, 3)
+              branch_val = 1
+              pc_src_val = zero == 0 ? 2 : 0
+              instr_len_val = 3
             end
           end
+
+          alu_op <= alu_op_val
+          alu_src <= alu_src_val
+          reg_write <= reg_write_val
+          mem_read <= mem_read_val
+          mem_write <= mem_write_val
+          branch <= branch_val
+          jump <= jump_val
+          pc_src <= pc_src_val
+          halt <= halt_val
+          call <= call_val
+          ret <= ret_val
+          instr_length <= instr_len_val
         end
       end
 
@@ -162,6 +173,86 @@ module RHDL
       class Accumulator < Register
         def initialize(name = nil)
           super(name, width: 8)
+        end
+      end
+
+      # Synthesizable CPU Datapath - structural component with instances
+      # Generates Verilog/VHDL module instantiation and wiring
+      class SynthDatapath < SimComponent
+        # Clock and reset
+        port_input :clk
+        port_input :rst
+
+        # Memory interface
+        port_input :mem_data_in, width: 8
+        port_output :mem_data_out, width: 8
+        port_output :mem_addr, width: 16
+        port_output :mem_write_en
+        port_output :mem_read_en
+
+        # Status outputs
+        port_output :pc_out, width: 16
+        port_output :acc_out, width: 8
+        port_output :zero_flag
+        port_output :halt
+
+        # Internal signals
+        port_signal :instruction, width: 8
+        port_signal :operand, width: 8
+        port_signal :alu_result, width: 8
+        port_signal :alu_a, width: 8
+        port_signal :alu_b, width: 8
+        port_signal :alu_op, width: 4
+        port_signal :alu_zero
+        port_signal :reg_write
+        port_signal :alu_src
+        port_signal :decoder_mem_read
+        port_signal :decoder_mem_write
+        port_signal :branch
+        port_signal :jump
+        port_signal :pc_src, width: 2
+        port_signal :halt_signal
+        port_signal :call_signal
+        port_signal :ret_signal
+        port_signal :instr_length, width: 2
+
+        structure do
+          # Instruction Decoder
+          instance :decoder, InstructionDecoder
+          connect :instruction => [:decoder, :instruction]
+          connect :zero_flag => [:decoder, :zero_flag]
+          connect [:decoder, :alu_op] => :alu_op
+          connect [:decoder, :alu_src] => :alu_src
+          connect [:decoder, :reg_write] => :reg_write
+          connect [:decoder, :mem_read] => :decoder_mem_read
+          connect [:decoder, :mem_write] => :decoder_mem_write
+          connect [:decoder, :branch] => :branch
+          connect [:decoder, :jump] => :jump
+          connect [:decoder, :pc_src] => :pc_src
+          connect [:decoder, :halt] => :halt_signal
+          connect [:decoder, :call] => :call_signal
+          connect [:decoder, :ret] => :ret_signal
+          connect [:decoder, :instr_length] => :instr_length
+
+          # ALU
+          instance :alu, ALU, width: 8
+          connect :alu_a => [:alu, :a]
+          connect :alu_b => [:alu, :b]
+          connect :alu_op => [:alu, :op]
+          connect [:alu, :result] => :alu_result
+          connect [:alu, :zero] => :alu_zero
+
+          # Program Counter (16-bit)
+          instance :pc, ProgramCounter, width: 16
+          connect :clk => [:pc, :clk]
+          connect :rst => [:pc, :rst]
+          connect [:pc, :q] => :pc_out
+
+          # Accumulator Register (8-bit)
+          instance :acc, Register, width: 8
+          connect :clk => [:acc, :clk]
+          connect :rst => [:acc, :rst]
+          connect [:acc, :q] => :acc_out
         end
       end
 
