@@ -778,6 +778,9 @@ namespace :gates do
     # CPU
     'cpu/instruction_decoder' => -> { RHDL::HDL::CPU::InstructionDecoder.new('decoder') },
     'cpu/synth_datapath' => -> { RHDL::HDL::CPU::SynthDatapath.new('synth_cpu') }
+    # Note: MOS6502S components use behavior/sequential DSLs which require
+    # additional gate-level lowering handlers. For MOS6502S synthesis, use
+    # VHDL/Verilog export instead: rake hdl:export (exports to export/verilog/mos6502s/)
   }.freeze
 
   desc "Export all components to gate-level IR (JSON netlists)"
