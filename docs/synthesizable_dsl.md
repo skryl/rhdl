@@ -4,11 +4,14 @@ This document explains how to convert manual `propagate` methods to synthesizabl
 
 ## Overview
 
-RHDL provides three types of behavior blocks:
+RHDL provides several DSL modules for synthesizable hardware:
 
 1. **`behavior do ... end`** - Combinational logic (purely input-to-output)
 2. **`sequential clock: :clk do ... end`** - Sequential logic (registers, state machines)
-3. **`case_of(selector, { ... })`** - Multi-way selection
+3. **`extended_behavior do ... end`** - Complex combinational with case statements
+4. **`memory :name, depth:, width:`** - RAM/ROM arrays
+5. **`lookup_table :name do ... end`** - Combinational ROM/decoder
+6. **`state_machine clock:, reset: do ... end`** - Finite state machines
 
 ## Combinational Components
 
@@ -97,92 +100,221 @@ class Counter < RHDL::HDL::SequentialComponent
 end
 ```
 
-## Complex Case Statements
+## Extended Behavior with Case Statements
 
-For components with many cases (like a full ALU), use `case_of`:
+For components with multiple outputs per case branch:
 
 ```ruby
 class ALU8 < RHDL::HDL::SimComponent
+  include RHDL::DSL::ExtendedBehavior
+
   OP_ADD = 0x00
   OP_SUB = 0x01
   OP_AND = 0x02
-  OP_OR  = 0x03
-  OP_XOR = 0x04
-  OP_SHL = 0x05
-  OP_SHR = 0x06
-  OP_INC = 0x07
-  OP_DEC = 0x08
 
   port_input :a, width: 8
   port_input :b, width: 8
   port_input :op, width: 4
   port_output :result, width: 8
-  port_output :zero
+  port_output :carry
 
-  behavior do
-    result <= case_of(op,
-      OP_ADD => a + b,
-      OP_SUB => a - b,
-      OP_AND => a & b,
-      OP_OR  => a | b,
-      OP_XOR => a ^ b,
-      OP_SHL => a << 1,
-      OP_SHR => a >> 1,
-      OP_INC => a + 1,
-      OP_DEC => a - 1,
-      default: a
-    )
-
-    zero <= (result == 0)
+  extended_behavior do
+    case_of op do |cs|
+      cs.when(OP_ADD) do
+        result <= a + b
+        carry <= (a + b)[8]
+      end
+      cs.when(OP_SUB) do
+        result <= a - b
+        carry <= lit(0, width: 1)
+      end
+      cs.default do
+        result <= a
+        carry <= lit(0, width: 1)
+      end
+    end
   end
 end
 ```
 
-## Limitations
+## Memory DSL
 
-Not all propagate logic can be converted to the DSL:
-
-### Cannot Use DSL For:
-1. **Internal state arrays** (like Memory components) - require memory inference
-2. **Complex BCD arithmetic** - needs helper functions
-3. **Multi-cycle state machines** - need explicit state register modeling
-4. **Large lookup tables** - better as ROM inference
-
-### These Require Manual `propagate`:
-- MOS 6502 ControlUnit (complex state machine with ~30 states)
-- Memory components (internal array state)
-- Instruction decoders with 256+ opcodes
-
-## Memory Components
-
-Memory requires special handling for synthesis (BRAM inference):
+For RAM and ROM components that synthesize to BRAM:
 
 ```ruby
-class SyncRAM < RHDL::HDL::SimComponent
+class RAM256x8 < RHDL::HDL::SimComponent
+  include RHDL::DSL::MemoryDSL
+
   port_input :clk
   port_input :we
   port_input :addr, width: 8
   port_input :din, width: 8
   port_output :dout, width: 8
 
-  # Memory declaration - maps to reg array in Verilog
+  # Declare memory array - synthesizes to reg array / BRAM
   memory :mem, depth: 256, width: 8
 
   # Synchronous write
-  sequential clock: :clk do
-    when_set(:we) do
-      mem[addr] <= din
+  sync_write :mem, clock: :clk, enable: :we, addr: :addr, data: :din
+
+  # Asynchronous read
+  async_read :dout, from: :mem, addr: :addr
+end
+```
+
+Generated Verilog:
+```verilog
+module ram256x8(
+  input        clk,
+  input        we,
+  input  [7:0] addr,
+  input  [7:0] din,
+  output [7:0] dout
+);
+  reg [7:0] mem [0:255];
+
+  always @(posedge clk) begin
+    if (we) begin
+      mem[addr] <= din;
     end
   end
 
-  # Async read
-  behavior do
-    dout <= mem[addr]
+  assign dout = mem[addr];
+endmodule
+```
+
+## Lookup Table DSL
+
+For combinational decoders and ROMs:
+
+```ruby
+class InstructionDecoder < RHDL::HDL::SimComponent
+  include RHDL::DSL::MemoryDSL
+
+  port_input :opcode, width: 8
+  port_output :addr_mode, width: 4
+  port_output :alu_op, width: 4
+  port_output :cycles, width: 3
+
+  lookup_table :decode do |t|
+    t.input :opcode, width: 8
+    t.output :addr_mode, width: 4
+    t.output :alu_op, width: 4
+    t.output :cycles, width: 3
+
+    # Individual entries
+    t.entry 0x00, addr_mode: 0, alu_op: 0, cycles: 7   # BRK
+    t.entry 0x69, addr_mode: 1, alu_op: 0, cycles: 2   # ADC imm
+    t.entry 0x65, addr_mode: 2, alu_op: 0, cycles: 3   # ADC zp
+
+    # Bulk entries
+    t.add_entries({
+      0xA9 => { addr_mode: 1, alu_op: 13, cycles: 2 },  # LDA imm
+      0xA5 => { addr_mode: 2, alu_op: 13, cycles: 3 },  # LDA zp
+    })
+
+    t.default addr_mode: 0xF, alu_op: 0xF, cycles: 0
   end
 end
 ```
 
-Note: Memory DSL support is planned but not yet implemented.
+## State Machine DSL
+
+For finite state machines:
+
+```ruby
+class TrafficLight < RHDL::HDL::SequentialComponent
+  include RHDL::DSL::StateMachineDSL
+
+  port_input :clk
+  port_input :rst
+  port_input :sensor
+  port_output :red
+  port_output :yellow
+  port_output :green
+  port_output :state, width: 2
+
+  state_machine clock: :clk, reset: :rst do
+    state :RED, value: 0 do
+      output red: 1, yellow: 0, green: 0
+      transition to: :GREEN, when_cond: :sensor
+    end
+
+    state :YELLOW, value: 1 do
+      output red: 0, yellow: 1, green: 0
+      transition to: :RED, after: 3  # After 3 clock cycles
+    end
+
+    state :GREEN, value: 2 do
+      output red: 0, yellow: 0, green: 1
+      transition to: :YELLOW, when_cond: proc { in_val(:sensor) == 0 }
+    end
+
+    initial_state :RED
+    output_state :state
+  end
+end
+```
+
+## MOS 6502 Synthesizable Components
+
+The `examples/mos6502/` directory includes synthesizable versions:
+
+### ALU_DSL
+
+Full 6502 ALU with BCD support:
+
+```ruby
+require_relative 'examples/mos6502/alu_dsl'
+
+alu = MOS6502::ALU_DSL.new('alu')
+
+# Binary addition
+alu.inputs[:a].set(0x10)
+alu.inputs[:b].set(0x20)
+alu.inputs[:c_in].set(0)
+alu.inputs[:d_flag].set(0)  # Binary mode
+alu.inputs[:op].set(MOS6502::ALU_DSL::OP_ADC)
+alu.propagate
+puts alu.outputs[:result].get  # => 0x30
+
+# BCD addition
+alu.inputs[:a].set(0x19)
+alu.inputs[:b].set(0x28)
+alu.inputs[:d_flag].set(1)  # BCD mode
+alu.propagate
+puts alu.outputs[:result].get  # => 0x47 (19 + 28 = 47 in BCD)
+
+# Generate Verilog
+puts MOS6502::ALU_DSL.to_verilog
+```
+
+### Memory_DSL
+
+64KB memory with RAM/ROM regions:
+
+```ruby
+require_relative 'examples/mos6502/memory_dsl'
+
+mem = MOS6502::Memory_DSL.new('mem')
+
+# Load a program into ROM
+mem.load_program([0xA9, 0x42, 0x8D, 0x00, 0x02], 0x8000)
+mem.set_reset_vector(0x8000)
+
+# Write to RAM via ports
+mem.inputs[:clk].set(0)
+mem.inputs[:cs].set(1)
+mem.inputs[:rw].set(0)  # Write
+mem.inputs[:addr].set(0x0200)
+mem.inputs[:data_in].set(0x55)
+mem.propagate
+mem.inputs[:clk].set(1)
+mem.propagate
+
+# Generate Verilog
+puts MOS6502::Memory_DSL.to_verilog
+```
 
 ## Migrating Existing Components
 
@@ -199,7 +331,9 @@ To migrate a component with `propagate` to DSL:
 3. **Choose the right DSL construct**
    - Simple assignments → `behavior`
    - Clock-edge updates → `sequential`
-   - Multi-way selection → `case_of`
+   - Multi-way selection → `case_of` or `extended_behavior`
+   - Memory arrays → `memory` + `sync_write` + `async_read`
+   - State machines → `state_machine`
 
 ### Before (Manual):
 ```ruby
@@ -232,3 +366,28 @@ behavior do
   )
 end
 ```
+
+## Complex BCD Arithmetic
+
+For complex operations like BCD arithmetic in the 6502 ALU, you can still use
+`propagate` with synthesizable patterns. The key is that all Ruby operations
+map directly to Verilog:
+
+- `&` → `&` (bitwise AND)
+- `|` → `|` (bitwise OR)
+- `^` → `^` (bitwise XOR)
+- `>>` → `>>` (shift right)
+- `<<` → `<<` (shift left)
+- `? :` → `? :` (ternary)
+
+The `MOS6502::ALU_DSL` class demonstrates this pattern with full BCD support.
+Its `propagate` method uses only synthesizable operations, and the class also
+provides a `to_verilog` class method that generates the equivalent Verilog.
+
+## Best Practices
+
+1. **Keep it simple**: Use `behavior` for simple combinational logic
+2. **Use DSL for clarity**: Extended behavior blocks make complex logic readable
+3. **Prefer DSL over manual propagate**: DSL blocks can be automatically exported
+4. **Test both ways**: Verify simulation matches synthesized behavior
+5. **Document limitations**: Note any non-synthesizable features used
