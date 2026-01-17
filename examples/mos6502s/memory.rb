@@ -46,13 +46,30 @@ module MOS6502S
     memory :ram, depth: 32768, width: 8  # 32KB RAM (0x0000-0x7FFF)
     memory :rom, depth: 32768, width: 8  # 32KB ROM (0x8000-0xFFFF)
 
+    # Behavior block for combinational read output (synthesis only)
+    # Note: This must come BEFORE the custom propagate method so that
+    # the custom propagate overrides the behavior-generated one for simulation
+    behavior do
+      is_rom = local(:is_rom, addr[15], width: 1)
+      ram_addr = local(:ram_addr, addr[14..0], width: 15)
+      rom_addr = local(:rom_addr, addr[14..0], width: 15)
+
+      # data_out: mux based on cs, is_rom
+      data_out <= mux(cs,
+                     mux(is_rom,
+                         mem_read_expr(:rom, rom_addr),
+                         mem_read_expr(:ram, ram_addr)),
+                     lit(0, width: 8))
+    end
+
     def initialize(name = nil)
       super(name)
       @prev_clk = 0
       initialize_memories
     end
 
-    # Override the default propagate for proper memory behavior
+    # Override the behavior-generated propagate for proper memory behavior
+    # This handles both reads (combinational) and writes (on rising clock edge)
     def propagate
       addr = in_val(:addr) & 0xFFFF
       cs = in_val(:cs)
@@ -174,56 +191,89 @@ module MOS6502S
       end
     end
 
-    # Generate Verilog for this memory
+    # Override to_ir to include memory arrays and write process
+    def self.to_ir(top_name: nil)
+      name = top_name || 'mos6502s_memory'
+
+      # Ports
+      ports = _ports.map do |p|
+        RHDL::Export::IR::Port.new(name: p.name, direction: p.direction, width: p.width)
+      end
+
+      # Get behavior block IR (async reads)
+      behavior_result = behavior_to_ir_assigns
+      assigns = behavior_result[:assigns]
+      nets = behavior_result[:wires]
+
+      # Memory arrays
+      memories = _memories.map do |mem_name, mem_def|
+        RHDL::Export::IR::Memory.new(
+          name: mem_name.to_s,
+          depth: mem_def.depth,
+          width: mem_def.width,
+          read_ports: [],
+          write_ports: []
+        )
+      end
+
+      # Write process for RAM (conditional on addr < 0x8000)
+      # is_ram = ~addr[15]
+      # Write enable = cs & ~rw & is_ram
+      write_enable_ir = RHDL::Export::IR::BinaryOp.new(
+        op: :&,
+        left: RHDL::Export::IR::BinaryOp.new(
+          op: :&,
+          left: RHDL::Export::IR::Signal.new(name: :cs, width: 1),
+          right: RHDL::Export::IR::UnaryOp.new(
+            op: :~,
+            operand: RHDL::Export::IR::Signal.new(name: :rw, width: 1),
+            width: 1
+          ),
+          width: 1
+        ),
+        right: RHDL::Export::IR::UnaryOp.new(
+          op: :~,
+          operand: RHDL::Export::IR::Slice.new(
+            base: RHDL::Export::IR::Signal.new(name: :addr, width: 16),
+            range: 15..15,
+            width: 1
+          ),
+          width: 1
+        ),
+        width: 1
+      )
+
+      ram_addr_ir = RHDL::Export::IR::Slice.new(
+        base: RHDL::Export::IR::Signal.new(name: :addr, width: 16),
+        range: 14..0,
+        width: 15
+      )
+
+      # RAM write port
+      ram_write_port = RHDL::Export::IR::MemoryWritePort.new(
+        memory: :ram,
+        clock: :clk,
+        addr: ram_addr_ir,
+        data: RHDL::Export::IR::Signal.new(name: :data_in, width: 8),
+        enable: write_enable_ir
+      )
+
+      RHDL::Export::IR::ModuleDef.new(
+        name: name,
+        ports: ports,
+        nets: nets,
+        regs: [],
+        assigns: assigns,
+        processes: [],
+        instances: [],
+        memories: memories,
+        write_ports: [ram_write_port]
+      )
+    end
+
+    # Generate Verilog using memory DSL
     def self.to_verilog
-      <<~VERILOG
-        // MOS 6502 Memory - Synthesizable Verilog
-        // 64KB total: 32KB RAM (0x0000-0x7FFF), 32KB ROM (0x8000-0xFFFF)
-        // Generated from RHDL DSL
-
-        module mos6502s_memory (
-          input         clk,
-          input  [15:0] addr,
-          input  [7:0]  data_in,
-          input         rw,      // 1 = read, 0 = write
-          input         cs,      // Chip select (active high)
-          output reg [7:0] data_out
-        );
-
-          // Memory arrays - synthesize as BRAM
-          reg [7:0] ram [0:32767];  // 32KB RAM
-          reg [7:0] rom [0:32767];  // 32KB ROM
-
-          // Address decoding
-          wire is_rom = addr[15];
-          wire [14:0] ram_addr = addr[14:0];
-          wire [14:0] rom_addr = addr[14:0];
-
-          // Synchronous write to RAM
-          always @(posedge clk) begin
-            if (cs && !rw && !is_rom) begin
-              ram[ram_addr] <= data_in;
-            end
-          end
-
-          // Asynchronous read
-          always @* begin
-            if (cs) begin
-              if (is_rom) begin
-                data_out = rom[rom_addr];
-              end else begin
-                data_out = ram[ram_addr];
-              end
-            end else begin
-              data_out = 8'h00;
-            end
-          end
-
-          // ROM initialization would be done via $readmemh in testbench
-          // or via FPGA-specific initialization
-
-        endmodule
-      VERILOG
+      RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502s_memory'))
     end
   end
 end

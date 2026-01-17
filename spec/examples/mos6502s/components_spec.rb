@@ -11,7 +11,7 @@ RSpec.describe 'MOS6502S Synthesizable Components' do
     it 'generates valid Verilog' do
       verilog = described_class.to_verilog
       expect(verilog).to include('module mos6502s_registers')
-      expect(verilog).to include('input  [7:0] data_in')
+      expect(verilog).to include('input [7:0] data_in')
       expect(verilog).to include('output reg [7:0] a')
       expect(verilog).to include('always @(posedge clk')
     end

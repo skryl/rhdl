@@ -3,11 +3,13 @@
 
 require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
+require_relative '../../../lib/rhdl/dsl/sequential'
 
 module MOS6502S
-  # 6502 Program Counter - Synthesizable via DSL
+  # 6502 Program Counter - Synthesizable via Sequential DSL
   class ProgramCounter < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
+    include RHDL::DSL::Sequential
 
     port_input :clk
     port_input :rst
@@ -24,6 +26,26 @@ module MOS6502S
       super(name)
     end
 
+    # Sequential block for the PC register
+    # Priority: reset > load+inc > load > inc > hold
+    sequential clock: :clk, reset: :rst, reset_values: { pc: 0xFFFC } do
+      # Complex priority logic using nested mux:
+      # if load && inc: pc = addr_in + 1
+      # elif load: pc = addr_in
+      # elif inc: pc = pc + 1
+      # else: hold
+      pc <= mux(load,
+               mux(inc, addr_in + lit(1, width: 16), addr_in),
+               mux(inc, pc + lit(1, width: 16), pc))
+    end
+
+    # Combinational outputs derived from pc
+    behavior do
+      pc_hi <= pc[15..8]
+      pc_lo <= pc[7..0]
+    end
+
+    # Override propagate to maintain internal state for testing
     def propagate
       if rising_edge?
         if in_val(:rst) == 1
@@ -46,38 +68,7 @@ module MOS6502S
     def write_pc(v); @pc_reg = v & 0xFFFF; end
 
     def self.to_verilog
-      <<~VERILOG
-        // MOS 6502 Program Counter - Synthesizable Verilog
-        // Generated from RHDL Behavior DSL
-        module mos6502s_program_counter (
-          input         clk,
-          input         rst,
-          input         inc,
-          input         load,
-          input  [15:0] addr_in,
-          output reg [15:0] pc,
-          output  [7:0] pc_hi,
-          output  [7:0] pc_lo
-        );
-
-          always @(posedge clk or posedge rst) begin
-            if (rst) begin
-              pc <= 16'hFFFC;
-            end else if (load) begin
-              if (inc)
-                pc <= addr_in + 16'h0001;
-              else
-                pc <= addr_in;
-            end else if (inc) begin
-              pc <= pc + 16'h0001;
-            end
-          end
-
-          assign pc_hi = pc[15:8];
-          assign pc_lo = pc[7:0];
-
-        endmodule
-      VERILOG
+      RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502s_program_counter'))
     end
   end
 end
