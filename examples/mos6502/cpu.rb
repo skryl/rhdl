@@ -10,7 +10,7 @@ require_relative 'instruction_decoder'
 require_relative 'control_unit'
 require_relative 'datapath'
 require_relative 'memory'
-require_relative 'assembler'
+require_relative 'utility/assembler'
 
 module MOS6502
   class CPU

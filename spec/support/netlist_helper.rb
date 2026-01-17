@@ -343,4 +343,102 @@ module NetlistHelper
     end
     results
   end
+
+  # Generate a testbench for behavioral Verilog simulation
+  # Takes component class and test vectors with input/output port info
+  def generate_behavioral_testbench(module_name, inputs, outputs, test_vectors, has_clock: false)
+    lines = []
+    lines << "`timescale 1ns/1ps"
+    lines << "module tb;"
+    lines << ""
+
+    # Declare signals
+    inputs.each do |name, width|
+      if width > 1
+        lines << "  reg [#{width - 1}:0] #{name};"
+      else
+        lines << "  reg #{name};"
+      end
+    end
+
+    outputs.each do |name, width|
+      if width > 1
+        lines << "  wire [#{width - 1}:0] #{name};"
+      else
+        lines << "  wire #{name};"
+      end
+    end
+
+    # Clock generation if needed
+    if has_clock
+      lines << ""
+      lines << "  initial begin"
+      lines << "    clk = 0;"
+      lines << "  end"
+      lines << "  always #5 clk = ~clk;"
+    end
+
+    lines << ""
+
+    # Instantiate the module
+    port_map = []
+    inputs.each_key { |name| port_map << ".#{name}(#{name})" }
+    outputs.each_key { |name| port_map << ".#{name}(#{name})" }
+
+    lines << "  #{module_name} uut ("
+    lines << "    " + port_map.join(",\n    ")
+    lines << "  );"
+    lines << ""
+
+    # Test vectors
+    lines << "  initial begin"
+
+    test_vectors.each_with_index do |vec, idx|
+      vec[:inputs].each do |port, value|
+        lines << "    #{port} = #{value};"
+      end
+
+      if has_clock
+        lines << "    @(posedge clk);"
+        lines << "    #1;"
+      else
+        lines << "    #10;"
+      end
+
+      # Display outputs
+      output_names = outputs.keys
+      display_parts = output_names.map.with_index { |_name, i| "OUT#{i}=%0d" }
+      display_args = output_names.join(", ")
+      lines << "    $display(\"CYCLE #{idx} #{display_parts.join(' ')}\", #{display_args});"
+    end
+
+    lines << "    $finish;"
+    lines << "  end"
+    lines << "endmodule"
+
+    lines.join("\n")
+  end
+
+  # Run behavioral Verilog simulation using iverilog/vvp
+  # Takes the verilog source directly (from to_verilog) along with port info and test vectors
+  def run_behavioral_simulation(verilog_source, module_name:, inputs:, outputs:, test_vectors:, base_dir:, has_clock: false)
+    FileUtils.mkdir_p(base_dir)
+
+    module_path = File.join(base_dir, "#{module_name}.v")
+    tb_path = File.join(base_dir, "tb.v")
+
+    File.write(module_path, verilog_source)
+    File.write(tb_path, generate_behavioral_testbench(module_name, inputs, outputs, test_vectors, has_clock: has_clock))
+
+    compile = run_cmd(["iverilog", "-g2005", "-o", "sim.out", "tb.v", "#{module_name}.v"], cwd: base_dir)
+    return { success: false, error: "Compilation failed: #{compile[:stderr]}\n#{compile[:stdout]}" } unless compile[:status].success?
+
+    run = run_cmd(["vvp", "sim.out"], cwd: base_dir)
+    return { success: false, error: "Simulation failed: #{run[:stderr]}" } unless run[:status].success?
+
+    output_names = outputs.keys.map(&:to_s)
+    parsed = parse_cycles(run[:stdout], output_names)
+
+    { success: true, results: parsed, stdout: run[:stdout] }
+  end
 end
