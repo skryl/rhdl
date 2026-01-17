@@ -51,4 +51,44 @@ RSpec.describe RHDL::HDL::HalfAdder do
       expect(verilog).to include('assign cout')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::HalfAdder.new('half_adder') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'half_adder') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('half_adder.a', 'half_adder.b')
+      expect(ir.outputs.keys).to include('half_adder.sum', 'half_adder.cout')
+      expect(ir.gates.length).to eq(2)
+      gate_types = ir.gates.map(&:type).sort
+      expect(gate_types).to eq([:and, :xor])
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module half_adder')
+      expect(verilog).to include('input a')
+      expect(verilog).to include('input b')
+      expect(verilog).to include('output sum')
+      expect(verilog).to include('output cout')
+    end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'simulates correctly' do
+        vectors = [
+          { inputs: { a: 0, b: 0 }, expected: { sum: 0, cout: 0 } },
+          { inputs: { a: 0, b: 1 }, expected: { sum: 1, cout: 0 } },
+          { inputs: { a: 1, b: 0 }, expected: { sum: 1, cout: 0 } },
+          { inputs: { a: 1, b: 1 }, expected: { sum: 0, cout: 1 } }
+        ]
+
+        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/half_adder')
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx]).to eq(vec[:expected])
+        end
+      end
+    end
+  end
 end
