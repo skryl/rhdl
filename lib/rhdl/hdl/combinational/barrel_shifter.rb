@@ -3,8 +3,26 @@
 
 module RHDL
   module HDL
-    # Barrel Shifter
+    # Barrel Shifter - parameterized shifter with multiple modes
     class BarrelShifter < SimComponent
+      # Class-level port definitions for synthesis (default 8-bit)
+      port_input :a, width: 8
+      port_input :shift, width: 3
+      port_input :dir      # 0 = left, 1 = right
+      port_input :arith    # 1 = arithmetic right shift
+      port_input :rotate   # 1 = rotate instead of shift
+      port_output :y, width: 8
+
+      # Note: Behavior block uses simplified shift operations for synthesis
+      # Full simulation uses the manual propagate method below
+      behavior do
+        # Simplified - just left/right logical shift for synthesis
+        # The full barrel shifter with rotate/arith is done in propagate
+        left_result = local(:left_result, a << (shift & lit(7, width: 3)), width: 8)
+        right_result = local(:right_result, a >> (shift & lit(7, width: 3)), width: 8)
+        y <= mux(dir, right_result, left_result)
+      end
+
       def initialize(name = nil, width: 8)
         @width = width
         @shift_width = Math.log2(width).ceil
@@ -12,14 +30,15 @@ module RHDL
       end
 
       def setup_ports
-        input :a, width: @width
-        input :shift, width: @shift_width
-        input :dir      # 0 = left, 1 = right
-        input :arith    # 1 = arithmetic right shift
-        input :rotate   # 1 = rotate instead of shift
-        output :y, width: @width
+        return if @width == 8
+        @inputs[:a] = Wire.new("#{@name}.a", width: @width)
+        @inputs[:shift] = Wire.new("#{@name}.shift", width: @shift_width)
+        @outputs[:y] = Wire.new("#{@name}.y", width: @width)
+        @inputs[:a].on_change { |_| propagate }
+        @inputs[:shift].on_change { |_| propagate }
       end
 
+      # Override propagate for accurate simulation with all modes
       def propagate
         val = in_val(:a)
         shift = in_val(:shift) & ((1 << @shift_width) - 1)

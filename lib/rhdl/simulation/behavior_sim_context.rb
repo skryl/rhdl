@@ -81,6 +81,17 @@ module RHDL
         mux(condition, then_expr, else_expr)
       end
 
+      # Case select - lookup table style case statement
+      # Usage: case_select(op, { 0 => a + b, 1 => a - b, 2 => a & b }, default: 0)
+      def case_select(selector, cases, default: 0)
+        sel_val = resolve_value(selector)
+        if cases.key?(sel_val)
+          resolve_value(cases[sel_val])
+        else
+          resolve_value(default)
+        end
+      end
+
       private
 
       def resolve_value(sig)
