@@ -221,6 +221,9 @@ module NetlistHelper
     lines << "module tb;"
     lines << ""
 
+    # Check if clk is already an input
+    has_clk_input = ir.inputs.keys.any? { |k| sanitize_port_name(k) == 'clk' }
+
     # Declare signals
     ir.inputs.each do |name, nets|
       port_name = sanitize_port_name(name)
@@ -240,9 +243,8 @@ module NetlistHelper
       end
     end
 
-    # Clock for DFFs if present
-    if ir.dffs.any?
-      lines << "  reg clk;"
+    # Clock generation for DFFs if present (only add if clk is already an input)
+    if ir.dffs.any? && has_clk_input
       lines << ""
       lines << "  initial begin"
       lines << "    clk = 0;"
@@ -352,6 +354,9 @@ module NetlistHelper
     lines << "module tb;"
     lines << ""
 
+    # Check if clk is in inputs (for clock generation)
+    has_clk_input = inputs.key?(:clk)
+
     # Declare signals
     inputs.each do |name, width|
       if width > 1
@@ -369,8 +374,8 @@ module NetlistHelper
       end
     end
 
-    # Clock generation if needed
-    if has_clock
+    # Clock generation if needed (only if clk is already declared as input)
+    if has_clock && has_clk_input
       lines << ""
       lines << "  initial begin"
       lines << "    clk = 0;"
