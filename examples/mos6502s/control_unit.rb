@@ -4,10 +4,12 @@
 
 require_relative '../../lib/rhdl'
 require_relative '../../lib/rhdl/dsl/behavior'
+require_relative '../../lib/rhdl/dsl/sequential'
 
 module MOS6502S
   class ControlUnit < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
+    include RHDL::DSL::Sequential
     # CPU States (same as original)
     STATE_RESET       = 0x00  # Reset sequence
     STATE_FETCH       = 0x01  # Fetch opcode
@@ -132,6 +134,145 @@ module MOS6502S
     port_output :done                    # Instruction complete
     port_output :halted                  # CPU halted
     port_output :cycle_count, width: 32  # Total cycles executed
+
+    # Control signal behavior blocks - combinational outputs based on state
+    # Note: State machine transitions are handled in propagate for complexity
+    behavior do
+      # halted: true when in HALT state
+      halted <= (state == lit(STATE_HALT, width: 8))
+
+      # mem_read: enabled in fetch, read states
+      mem_read <= case_select(state, {
+        STATE_RESET => lit(1, width: 1),
+        STATE_FETCH => lit(1, width: 1),
+        STATE_FETCH_OP1 => lit(1, width: 1),
+        STATE_FETCH_OP2 => lit(1, width: 1),
+        STATE_ADDR_LO => lit(1, width: 1),
+        STATE_ADDR_HI => lit(1, width: 1),
+        STATE_READ_MEM => lit(1, width: 1),
+        STATE_PULL => lit(1, width: 1),
+        STATE_RTS_PULL_LO => lit(1, width: 1),
+        STATE_RTS_PULL_HI => lit(1, width: 1),
+        STATE_RTI_PULL_P => lit(1, width: 1),
+        STATE_RTI_PULL_LO => lit(1, width: 1),
+        STATE_RTI_PULL_HI => lit(1, width: 1),
+        STATE_BRK_VEC_LO => lit(1, width: 1),
+        STATE_BRK_VEC_HI => lit(1, width: 1)
+      }, default: 0)
+
+      # mem_write: enabled in write states
+      mem_write <= case_select(state, {
+        STATE_WRITE_MEM => lit(1, width: 1),
+        STATE_PUSH => lit(1, width: 1),
+        STATE_JSR_PUSH_HI => lit(1, width: 1),
+        STATE_JSR_PUSH_LO => lit(1, width: 1),
+        STATE_BRK_PUSH_HI => lit(1, width: 1),
+        STATE_BRK_PUSH_LO => lit(1, width: 1),
+        STATE_BRK_PUSH_P => lit(1, width: 1)
+      }, default: 0)
+
+      # pc_inc: increment PC during fetch stages
+      pc_inc <= case_select(state, {
+        STATE_FETCH => lit(1, width: 1),
+        STATE_FETCH_OP1 => lit(1, width: 1),
+        STATE_FETCH_OP2 => lit(1, width: 1),
+        STATE_RTS_PULL_HI => lit(1, width: 1)
+      }, default: 0)
+
+      # load_opcode: load IR during fetch
+      load_opcode <= (state == lit(STATE_FETCH, width: 8))
+
+      # load_operand_lo: load low operand byte
+      load_operand_lo <= (state == lit(STATE_FETCH_OP1, width: 8))
+
+      # load_operand_hi: load high operand byte
+      load_operand_hi <= (state == lit(STATE_FETCH_OP2, width: 8))
+
+      # load_addr_lo: load address latch low byte
+      load_addr_lo <= case_select(state, {
+        STATE_ADDR_LO => lit(1, width: 1),
+        STATE_RTS_PULL_LO => lit(1, width: 1),
+        STATE_RTI_PULL_LO => lit(1, width: 1),
+        STATE_BRK_VEC_LO => lit(1, width: 1)
+      }, default: 0)
+
+      # load_addr_hi: load address latch high byte
+      load_addr_hi <= case_select(state, {
+        STATE_ADDR_HI => lit(1, width: 1),
+        STATE_RTS_PULL_HI => lit(1, width: 1),
+        STATE_RTI_PULL_HI => lit(1, width: 1),
+        STATE_BRK_VEC_HI => lit(1, width: 1)
+      }, default: 0)
+
+      # load_data: load data latch
+      load_data <= case_select(state, {
+        STATE_READ_MEM => lit(1, width: 1),
+        STATE_PULL => lit(1, width: 1)
+      }, default: 0)
+
+      # alu_enable: enable ALU during execute
+      alu_enable <= (state == lit(STATE_EXECUTE, width: 8))
+
+      # sp_inc: increment stack pointer
+      sp_inc <= case_select(state, {
+        STATE_PULL => lit(1, width: 1),
+        STATE_RTS_PULL_LO => lit(1, width: 1),
+        STATE_RTS_PULL_HI => lit(1, width: 1),
+        STATE_RTI_PULL_P => lit(1, width: 1),
+        STATE_RTI_PULL_LO => lit(1, width: 1),
+        STATE_RTI_PULL_HI => lit(1, width: 1)
+      }, default: 0)
+
+      # sp_dec: decrement stack pointer
+      sp_dec <= case_select(state, {
+        STATE_PUSH => lit(1, width: 1),
+        STATE_JSR_PUSH_HI => lit(1, width: 1),
+        STATE_JSR_PUSH_LO => lit(1, width: 1),
+        STATE_BRK_PUSH_HI => lit(1, width: 1),
+        STATE_BRK_PUSH_LO => lit(1, width: 1),
+        STATE_BRK_PUSH_P => lit(1, width: 1)
+      }, default: 0)
+
+      # addr_sel: address source select
+      addr_sel <= case_select(state, {
+        STATE_RESET => lit(1, width: 3),
+        STATE_ADDR_LO => lit(2, width: 3),
+        STATE_ADDR_HI => lit(3, width: 3),
+        STATE_READ_MEM => lit(4, width: 3),
+        STATE_WRITE_MEM => lit(4, width: 3),
+        STATE_PUSH => lit(5, width: 3),
+        STATE_PULL => lit(6, width: 3),
+        STATE_JSR_PUSH_HI => lit(5, width: 3),
+        STATE_JSR_PUSH_LO => lit(5, width: 3),
+        STATE_RTS_PULL_LO => lit(6, width: 3),
+        STATE_RTS_PULL_HI => lit(6, width: 3),
+        STATE_RTI_PULL_P => lit(6, width: 3),
+        STATE_RTI_PULL_LO => lit(6, width: 3),
+        STATE_RTI_PULL_HI => lit(6, width: 3),
+        STATE_BRK_PUSH_HI => lit(5, width: 3),
+        STATE_BRK_PUSH_LO => lit(5, width: 3),
+        STATE_BRK_PUSH_P => lit(5, width: 3),
+        STATE_BRK_VEC_LO => lit(7, width: 3),
+        STATE_BRK_VEC_HI => lit(7, width: 3)
+      }, default: 0)
+
+      # data_sel: data source select - depends on state and is_status_op
+      data_sel <= case_select(state, {
+        STATE_WRITE_MEM => lit(1, width: 3),
+        STATE_PUSH => mux(is_status_op, lit(4, width: 3), lit(0, width: 3)),
+        STATE_JSR_PUSH_HI => lit(2, width: 3),
+        STATE_JSR_PUSH_LO => lit(3, width: 3),
+        STATE_BRK_PUSH_HI => lit(2, width: 3),
+        STATE_BRK_PUSH_LO => lit(3, width: 3),
+        STATE_BRK_PUSH_P => lit(4, width: 3)
+      }, default: 0)
+
+      # update_flags: update status flags
+      update_flags <= case_select(state, {
+        STATE_EXECUTE => lit(1, width: 1),
+        STATE_RTI_PULL_P => lit(1, width: 1)
+      }, default: 0)
+    end
 
     def initialize(name = nil)
       @state = STATE_RESET
@@ -1006,6 +1147,11 @@ module MOS6502S
 
         endmodule
       VERILOG
+    end
+
+    # Alternative IR-based generation (for DSL consistency)
+    def self.to_ir_verilog
+      RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502s_control_unit'))
     end
   end
 end

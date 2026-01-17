@@ -35,10 +35,25 @@ module RHDL
         module_def.nets.each do |net|
           lines << "  wire #{width_decl(net.width)}#{sanitize(net.name)};"
         end
-        lines << "" unless module_def.regs.empty? && module_def.nets.empty?
+
+        # Memory array declarations
+        module_def.memories.each do |mem|
+          lines << "  reg #{width_decl(mem.width)}#{sanitize(mem.name)} [0:#{mem.depth - 1}];"
+        end
+        lines << "" unless module_def.regs.empty? && module_def.nets.empty? && module_def.memories.empty?
 
         module_def.assigns.each do |assign|
           lines << "  assign #{sanitize(assign.target)} = #{expr(assign.expr)};"
+        end
+
+        # Memory write processes
+        module_def.write_ports.each do |wp|
+          lines << ""
+          lines << "  always @(posedge #{sanitize(wp.clock)}) begin"
+          lines << "    if (#{expr(wp.enable)}) begin"
+          lines << "      #{sanitize(wp.memory)}[#{expr(wp.addr)}] <= #{expr(wp.data)};"
+          lines << "    end"
+          lines << "  end"
         end
 
         module_def.processes.each do |process|

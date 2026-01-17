@@ -163,6 +163,16 @@ module RHDL
         result
       end
 
+      # Memory read expression for use in behavior blocks
+      # Creates a SynthMemoryRead that generates IR::MemoryRead for synthesis
+      # @param memory_name [Symbol] The memory array name
+      # @param addr [SynthExpr, Integer] The address expression
+      # @param width [Integer] Optional width override (default: 8)
+      def mem_read_expr(memory_name, addr, width: 8)
+        addr_expr = wrap_expr(addr)
+        SynthMemoryRead.new(memory_name, addr_expr, width)
+      end
+
       private
 
       def wrap_expr(expr)
