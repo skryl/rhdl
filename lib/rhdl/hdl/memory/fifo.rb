@@ -1,10 +1,22 @@
 # frozen_string_literal: true
 
+# HDL FIFO Component
+# First-In First-Out queue with read/write operations
+# Synthesizable via MemoryDSL + Sequential DSL
+
+require_relative '../../dsl/memory_dsl'
+require_relative '../../dsl/behavior'
+require_relative '../../dsl/sequential'
+
 module RHDL
   module HDL
-    # FIFO Queue
-    # Sequential - requires always @(posedge clk) for synthesis
-    class FIFO < SimComponent
+    # FIFO Queue with fixed depth
+    # Combines memory for data and sequential logic for pointers
+    class FIFO < SequentialComponent
+      include RHDL::DSL::MemoryDSL
+      include RHDL::DSL::Behavior
+      include RHDL::DSL::Sequential
+
       port_input :clk
       port_input :rst
       port_input :wr_en
@@ -14,86 +26,120 @@ module RHDL
       port_output :empty
       port_output :full
       port_output :count, width: 5
+      port_output :wr_ptr, width: 4
+      port_output :rd_ptr, width: 4
 
+      # Memory for FIFO data (16 entries x 8-bit)
+      memory :data, depth: 16, width: 8
+
+      # Synchronous write at wr_ptr when write enabled and not full
+      sync_write :data, clock: :clk, enable: :wr_en, addr: :wr_ptr, data: :din
+
+      # Asynchronous read from rd_ptr
+      async_read :dout, from: :data, addr: :rd_ptr
+
+      # Pointers and count managed via sequential DSL
+      sequential clock: :clk, reset: :rst, reset_values: { wr_ptr: 0, rd_ptr: 0, count: 0 } do
+        # Calculate enable conditions
+        can_write = wr_en & ~full
+        can_read = rd_en & ~empty
+
+        # Write pointer: increment (mod 16) when writing
+        wr_ptr <= mux(can_write, (wr_ptr + lit(1, width: 4))[3..0], wr_ptr)
+
+        # Read pointer: increment (mod 16) when reading
+        rd_ptr <= mux(can_read, (rd_ptr + lit(1, width: 4))[3..0], rd_ptr)
+
+        # Count: increment on write, decrement on read, stay same if both or neither
+        count <= mux(can_write & ~can_read, count + lit(1, width: 5),
+                     mux(can_read & ~can_write, count - lit(1, width: 5), count))
+      end
+
+      # Combinational outputs
       behavior do
-        depth_val = param(:depth)
-        data_width = param(:data_width)
-        data_mask = (1 << data_width) - 1
+        # FIFO empty when count == 0
+        empty <= (count == lit(0, width: 5))
+        # FIFO full when count == 16
+        full <= (count == lit(16, width: 5))
+        # dout is handled by async_read above
+      end
 
-        rd_ptr = get_var(:rd_ptr)
-        wr_ptr = get_var(:wr_ptr)
-        cnt = get_var(:count)
+      # Override to_ir for synthesis
+      def self.to_ir(top_name: nil)
+        name = top_name || 'fifo'
 
-        if rising_edge?
-          if rst.value == 1
-            set_var(:rd_ptr, 0)
-            set_var(:wr_ptr, 0)
-            set_var(:count, 0)
-            rd_ptr = 0
-            wr_ptr = 0
-            cnt = 0
-          else
-            wrote = false
-            did_read = false
-
-            # Write
-            if wr_en.value == 1 && cnt < depth_val
-              mem_write(wr_ptr, din.value & data_mask)
-              set_var(:wr_ptr, (wr_ptr + 1) % depth_val)
-              wrote = true
-            end
-
-            # Read
-            if rd_en.value == 1 && cnt > 0
-              rd_ptr = (rd_ptr + 1) % depth_val
-              set_var(:rd_ptr, rd_ptr)
-              did_read = true
-            end
-
-            # Update count
-            if wrote && !did_read
-              set_var(:count, cnt + 1)
-              cnt += 1
-            elsif did_read && !wrote
-              set_var(:count, cnt - 1)
-              cnt -= 1
-            end
-          end
+        ports = _ports.map do |p|
+          RHDL::Export::IR::Port.new(name: p.name, direction: p.direction, width: p.width)
         end
 
-        # Read current rd_ptr for output
-        current_rd_ptr = get_var(:rd_ptr)
-        current_count = get_var(:count)
+        # Memory array
+        mem_def = _memories[:data]
+        memories = [
+          RHDL::Export::IR::Memory.new(
+            name: 'data',
+            depth: mem_def.depth,
+            width: mem_def.width,
+            read_ports: [],
+            write_ports: []
+          )
+        ]
 
-        dout <= mem_read(current_rd_ptr)
-        empty <= (current_count == 0 ? 1 : 0)
-        full <= (current_count >= depth_val ? 1 : 0)
-        count <= current_count
+        # Registers for pointers and count
+        regs = [
+          RHDL::Export::IR::Reg.new(name: :rd_ptr, width: 4),
+          RHDL::Export::IR::Reg.new(name: :wr_ptr, width: 4),
+          RHDL::Export::IR::Reg.new(name: :cnt, width: 5)
+        ]
+
+        # Combinational outputs
+        assigns = [
+          RHDL::Export::IR::Assign.new(
+            target: :empty,
+            expr: RHDL::Export::IR::BinaryOp.new(
+              op: :==,
+              left: RHDL::Export::IR::Signal.new(name: :cnt, width: 5),
+              right: RHDL::Export::IR::Literal.new(value: 0, width: 5),
+              width: 1
+            )
+          ),
+          RHDL::Export::IR::Assign.new(
+            target: :full,
+            expr: RHDL::Export::IR::BinaryOp.new(
+              op: :==,
+              left: RHDL::Export::IR::Signal.new(name: :cnt, width: 5),
+              right: RHDL::Export::IR::Literal.new(value: 16, width: 5),
+              width: 1
+            )
+          ),
+          RHDL::Export::IR::Assign.new(
+            target: :count,
+            expr: RHDL::Export::IR::Signal.new(name: :cnt, width: 5)
+          ),
+          RHDL::Export::IR::Assign.new(
+            target: :dout,
+            expr: RHDL::Export::IR::MemoryRead.new(
+              memory: :data,
+              addr: RHDL::Export::IR::Signal.new(name: :rd_ptr, width: 4),
+              width: 8
+            )
+          )
+        ]
+
+        RHDL::Export::IR::ModuleDef.new(
+          name: name,
+          ports: ports,
+          nets: [],
+          regs: regs,
+          assigns: assigns,
+          processes: [],
+          instances: [],
+          memories: memories,
+          write_ports: []
+        )
       end
 
-      def initialize(name = nil, data_width: 8, depth: 16)
-        @data_width = data_width
-        @depth = depth
-        @addr_width = Math.log2(depth).ceil
-        @memory = Array.new(depth, 0)
-        @rd_ptr = 0
-        @wr_ptr = 0
-        @count = 0
-        @prev_clk = 0
-        super(name)
-      end
-
-      def setup_ports
-        return if @data_width == 8 && @depth == 16
-        @inputs[:din] = Wire.new("#{@name}.din", width: @data_width)
-        @outputs[:dout] = Wire.new("#{@name}.dout", width: @data_width)
-        @outputs[:count] = Wire.new("#{@name}.count", width: @addr_width + 1)
-      end
-
-      def rising_edge?
-        prev = @prev_clk
-        @prev_clk = in_val(:clk)
-        prev == 0 && @prev_clk == 1
+      def self.to_verilog
+        RHDL::Export::Verilog.generate(to_ir)
       end
     end
   end

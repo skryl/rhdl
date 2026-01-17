@@ -2,7 +2,7 @@ require 'spec_helper'
 
 RSpec.describe RHDL::HDL::ROM do
   let(:contents) { [0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77] }
-  let(:rom) { RHDL::HDL::ROM.new(nil, data_width: 8, addr_width: 8, contents: contents) }
+  let(:rom) { RHDL::HDL::ROM.new(nil, contents: contents) }
 
   describe 'simulation' do
     it 'reads stored data' do
@@ -36,22 +36,22 @@ RSpec.describe RHDL::HDL::ROM do
   end
 
   describe 'synthesis' do
-    it 'has a behavior block defined' do
-      expect(RHDL::HDL::ROM.behavior_defined?).to be_truthy
+    it 'has memory DSL defined' do
+      expect(RHDL::HDL::ROM.memory_dsl_defined?).to be_truthy
     end
 
-    # Note: Memory components use internal state arrays which are not yet supported in synthesis context
-    it 'generates valid IR', :pending do
+    it 'generates valid IR' do
       ir = RHDL::HDL::ROM.to_ir
       expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
       expect(ir.ports.length).to eq(3)  # en, addr, dout
+      expect(ir.memories.length).to eq(1)
     end
 
-    it 'generates valid Verilog', :pending do
+    it 'generates valid Verilog' do
       verilog = RHDL::HDL::ROM.to_verilog
       expect(verilog).to include('module rom')
       expect(verilog).to include('input [7:0] addr')
-      expect(verilog).to include('output [7:0] dout')
+      expect(verilog).to match(/output.*\[7:0\].*dout/)
     end
   end
 end

@@ -8,7 +8,7 @@ RSpec.describe RHDL::HDL::DualPortRAM do
     component.propagate
   end
 
-  let(:dpram) { RHDL::HDL::DualPortRAM.new(nil, data_width: 8, addr_width: 8) }
+  let(:dpram) { RHDL::HDL::DualPortRAM.new }
 
   describe 'simulation' do
     it 'writes and reads from port A' do
@@ -77,22 +77,22 @@ RSpec.describe RHDL::HDL::DualPortRAM do
   end
 
   describe 'synthesis' do
-    it 'has a behavior block defined' do
-      expect(RHDL::HDL::DualPortRAM.behavior_defined?).to be_truthy
+    it 'has memory DSL defined' do
+      expect(RHDL::HDL::DualPortRAM.memory_dsl_defined?).to be_truthy
     end
 
-    # Note: Memory components use internal state arrays which are not yet supported in synthesis context
-    it 'generates valid IR', :pending do
+    it 'generates valid IR' do
       ir = RHDL::HDL::DualPortRAM.to_ir
       expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
       expect(ir.ports.length).to eq(9)  # clk, we_a, we_b, addr_a, addr_b, din_a, din_b, dout_a, dout_b
+      expect(ir.memories.length).to eq(1)
     end
 
-    it 'generates valid Verilog', :pending do
+    it 'generates valid Verilog' do
       verilog = RHDL::HDL::DualPortRAM.to_verilog
       expect(verilog).to include('module dual_port_ram')
       expect(verilog).to include('input [7:0] addr_a')
-      expect(verilog).to include('output [7:0] dout_a')
+      expect(verilog).to match(/output.*\[7:0\].*dout_a/)
     end
   end
 end
