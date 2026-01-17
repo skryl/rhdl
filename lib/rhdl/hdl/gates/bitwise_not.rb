@@ -23,10 +23,7 @@ module RHDL
         @inputs[:a].on_change { |_| propagate }
       end
 
-      def propagate
-        mask = (1 << @width) - 1
-        out_set(:y, (~in_val(:a)) & mask)
-      end
+      # Behavior block handles both simulation and synthesis
     end
   end
 end

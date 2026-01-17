@@ -414,7 +414,8 @@ RSpec.describe 'Behavior DSL' do
 
   describe 'IR generation' do
     it 'generates IR assigns from behavior block' do
-      ir_assigns = BehaviorAndGate.behavior_to_ir_assigns
+      result = BehaviorAndGate.behavior_to_ir_assigns
+      ir_assigns = result[:assigns]
       expect(ir_assigns.length).to eq(1)
       expect(ir_assigns[0].target).to eq(:y)
       expect(ir_assigns[0].expr).to be_a(RHDL::Export::IR::BinaryOp)

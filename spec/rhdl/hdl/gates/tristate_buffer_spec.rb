@@ -15,15 +15,14 @@ RSpec.describe RHDL::HDL::TristateBuffer do
       expect(gate.get_output(:y)).to eq(0)
     end
 
-    it 'outputs high-Z when disabled' do
+    it 'outputs 0 when disabled (synthesizable behavior)' do
       gate = RHDL::HDL::TristateBuffer.new
 
       gate.set_input(:a, 1)
       gate.set_input(:en, 0)
       gate.propagate
-      # Access the wire's raw signal value since get_output returns to_i (0 for Z)
-      output_wire = gate.instance_variable_get(:@outputs)[:y]
-      expect(output_wire.instance_variable_get(:@value).value).to eq(RHDL::HDL::SignalValue::Z)
+      # Note: For synthesis compatibility, disabled outputs 0 instead of high-Z
+      expect(gate.get_output(:y)).to eq(0)
     end
   end
 

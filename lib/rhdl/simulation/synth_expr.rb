@@ -87,7 +87,10 @@ module RHDL
       # Bit selection
       def [](index)
         if index.is_a?(Range)
-          slice_width = index.max - index.min + 1
+          # Handle both ascending (0..7) and descending (7..0) ranges
+          high = [index.begin, index.end].max
+          low = [index.begin, index.end].min
+          slice_width = high - low + 1
           SynthSlice.new(self, index, slice_width)
         else
           SynthBitSelect.new(self, index)
