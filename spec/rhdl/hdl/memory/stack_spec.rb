@@ -1,0 +1,77 @@
+require 'spec_helper'
+
+RSpec.describe RHDL::HDL::Stack do
+  def clock_cycle(component)
+    component.set_input(:clk, 0)
+    component.propagate
+    component.set_input(:clk, 1)
+    component.propagate
+  end
+
+  let(:stack) { RHDL::HDL::Stack.new(nil, data_width: 8, depth: 4) }
+
+  before do
+    stack.set_input(:rst, 0)
+    stack.set_input(:push, 0)
+    stack.set_input(:pop, 0)
+    stack.propagate  # Initialize outputs
+  end
+
+  it 'pushes and pops values' do
+    # Push 0x11
+    stack.set_input(:din, 0x11)
+    stack.set_input(:push, 1)
+    clock_cycle(stack)
+
+    stack.set_input(:push, 0)
+    expect(stack.get_output(:dout)).to eq(0x11)
+    expect(stack.get_output(:empty)).to eq(0)
+
+    # Push 0x22
+    stack.set_input(:din, 0x22)
+    stack.set_input(:push, 1)
+    clock_cycle(stack)
+
+    stack.set_input(:push, 0)
+    expect(stack.get_output(:dout)).to eq(0x22)
+
+    # Pop - should get 0x22
+    stack.set_input(:pop, 1)
+    clock_cycle(stack)
+
+    stack.set_input(:pop, 0)
+    expect(stack.get_output(:dout)).to eq(0x11)
+  end
+
+  it 'indicates empty and full' do
+    expect(stack.get_output(:empty)).to eq(1)
+    expect(stack.get_output(:full)).to eq(0)
+
+    # Fill the stack
+    4.times do |i|
+      stack.set_input(:din, i + 1)
+      stack.set_input(:push, 1)
+      clock_cycle(stack)
+      stack.set_input(:push, 0)
+    end
+
+    expect(stack.get_output(:empty)).to eq(0)
+    expect(stack.get_output(:full)).to eq(1)
+  end
+
+  it 'resets correctly' do
+    # Push some values
+    stack.set_input(:din, 0xFF)
+    stack.set_input(:push, 1)
+    clock_cycle(stack)
+
+    stack.set_input(:push, 0)
+    expect(stack.get_output(:empty)).to eq(0)
+
+    # Reset
+    stack.set_input(:rst, 1)
+    clock_cycle(stack)
+
+    expect(stack.get_output(:empty)).to eq(1)
+  end
+end
