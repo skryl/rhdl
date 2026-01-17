@@ -777,7 +777,22 @@ namespace :gates do
 
     # CPU
     'cpu/instruction_decoder' => -> { RHDL::HDL::CPU::InstructionDecoder.new('decoder') },
-    'cpu/synth_datapath' => -> { RHDL::HDL::CPU::SynthDatapath.new('synth_cpu') }
+    'cpu/synth_datapath' => -> { RHDL::HDL::CPU::SynthDatapath.new('synth_cpu') },
+
+    # MOS6502S (Synthesizable 6502)
+    'mos6502s/registers' => -> { require_relative 'examples/mos6502s/registers'; MOS6502S::Registers.new('regs') },
+    'mos6502s/stack_pointer' => -> { require_relative 'examples/mos6502s/registers'; MOS6502S::StackPointer.new('sp') },
+    'mos6502s/program_counter' => -> { require_relative 'examples/mos6502s/registers'; MOS6502S::ProgramCounter.new('pc') },
+    'mos6502s/instruction_register' => -> { require_relative 'examples/mos6502s/registers'; MOS6502S::InstructionRegister.new('ir') },
+    'mos6502s/address_latch' => -> { require_relative 'examples/mos6502s/registers'; MOS6502S::AddressLatch.new('alat') },
+    'mos6502s/data_latch' => -> { require_relative 'examples/mos6502s/registers'; MOS6502S::DataLatch.new('dlat') },
+    'mos6502s/status_register' => -> { require_relative 'examples/mos6502s/status_register'; MOS6502S::StatusRegister.new('sr') },
+    'mos6502s/address_generator' => -> { require_relative 'examples/mos6502s/address_gen'; MOS6502S::AddressGenerator.new('agen') },
+    'mos6502s/indirect_addr_calc' => -> { require_relative 'examples/mos6502s/address_gen'; MOS6502S::IndirectAddressCalc.new('acalc') },
+    'mos6502s/alu' => -> { require_relative 'examples/mos6502s/alu'; MOS6502S::ALU.new('alu') },
+    'mos6502s/instruction_decoder' => -> { require_relative 'examples/mos6502s/instruction_decoder'; MOS6502S::InstructionDecoder.new('dec') },
+    'mos6502s/control_unit' => -> { require_relative 'examples/mos6502s/control_unit'; MOS6502S::ControlUnit.new('ctrl') },
+    'mos6502s/datapath' => -> { require_relative 'examples/mos6502s/datapath'; MOS6502S::Datapath.new('datapath') }
   }.freeze
 
   desc "Export all components to gate-level IR (JSON netlists)"

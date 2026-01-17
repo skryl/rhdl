@@ -1,0 +1,1775 @@
+{
+  "name": "ctrl",
+  "net_count": 199,
+  "gates": [
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 112,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        112
+      ],
+      "output": 25,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 113,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        113
+      ],
+      "output": 26,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 114,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        114
+      ],
+      "output": 27,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 115,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        115
+      ],
+      "output": 28,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 116,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        116
+      ],
+      "output": 29,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 117,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        117
+      ],
+      "output": 30,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 118,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        118
+      ],
+      "output": 31,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 119,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        119
+      ],
+      "output": 32,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 120,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        120
+      ],
+      "output": 33,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 121,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        121
+      ],
+      "output": 34,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 122,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        122
+      ],
+      "output": 35,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 123,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        123
+      ],
+      "output": 36,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 124,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        124
+      ],
+      "output": 37,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 125,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        125
+      ],
+      "output": 38,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 126,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        126
+      ],
+      "output": 39,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 127,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        127
+      ],
+      "output": 40,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 128,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        128
+      ],
+      "output": 41,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 129,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        129
+      ],
+      "output": 42,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 130,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        130
+      ],
+      "output": 43,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 131,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        131
+      ],
+      "output": 44,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 132,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        132
+      ],
+      "output": 45,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 133,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        133
+      ],
+      "output": 46,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 134,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        134
+      ],
+      "output": 47,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 135,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        135
+      ],
+      "output": 48,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 136,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        136
+      ],
+      "output": 49,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 137,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        137
+      ],
+      "output": 50,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 138,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        138
+      ],
+      "output": 51,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 139,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        139
+      ],
+      "output": 52,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 140,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        140
+      ],
+      "output": 53,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 141,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        141
+      ],
+      "output": 54,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 142,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        142
+      ],
+      "output": 55,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 143,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        143
+      ],
+      "output": 56,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 144,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        144
+      ],
+      "output": 57,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 145,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        145
+      ],
+      "output": 58,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 146,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        146
+      ],
+      "output": 59,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 147,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        147
+      ],
+      "output": 60,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 148,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        148
+      ],
+      "output": 61,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 149,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        149
+      ],
+      "output": 62,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 150,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        150
+      ],
+      "output": 63,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 151,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        151
+      ],
+      "output": 64,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 152,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        152
+      ],
+      "output": 65,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 153,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        153
+      ],
+      "output": 66,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 154,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        154
+      ],
+      "output": 67,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 155,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        155
+      ],
+      "output": 68,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 156,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        156
+      ],
+      "output": 69,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 157,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        157
+      ],
+      "output": 70,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 158,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        158
+      ],
+      "output": 71,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 159,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        159
+      ],
+      "output": 72,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 160,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        160
+      ],
+      "output": 73,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 161,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        161
+      ],
+      "output": 74,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 162,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        162
+      ],
+      "output": 75,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 163,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        163
+      ],
+      "output": 76,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 164,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        164
+      ],
+      "output": 77,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 165,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        165
+      ],
+      "output": 78,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 166,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        166
+      ],
+      "output": 79,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 167,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        167
+      ],
+      "output": 80,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 168,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        168
+      ],
+      "output": 81,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 169,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        169
+      ],
+      "output": 82,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 170,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        170
+      ],
+      "output": 83,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 171,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        171
+      ],
+      "output": 84,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 172,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        172
+      ],
+      "output": 85,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 173,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        173
+      ],
+      "output": 86,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 174,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        174
+      ],
+      "output": 87,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 175,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        175
+      ],
+      "output": 88,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 176,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        176
+      ],
+      "output": 89,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 177,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        177
+      ],
+      "output": 90,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 178,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        178
+      ],
+      "output": 91,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 179,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        179
+      ],
+      "output": 92,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 180,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        180
+      ],
+      "output": 93,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 181,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        181
+      ],
+      "output": 94,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 182,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        182
+      ],
+      "output": 95,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 183,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        183
+      ],
+      "output": 96,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 184,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        184
+      ],
+      "output": 97,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 185,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        185
+      ],
+      "output": 98,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 186,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        186
+      ],
+      "output": 99,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 187,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        187
+      ],
+      "output": 100,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 188,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        188
+      ],
+      "output": 101,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 189,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        189
+      ],
+      "output": 102,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 190,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        190
+      ],
+      "output": 103,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 191,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        191
+      ],
+      "output": 104,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 192,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        192
+      ],
+      "output": 105,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 193,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        193
+      ],
+      "output": 106,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 194,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        194
+      ],
+      "output": 107,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 195,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        195
+      ],
+      "output": 108,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 196,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        196
+      ],
+      "output": 109,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 197,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        197
+      ],
+      "output": 110,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 198,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        198
+      ],
+      "output": 111,
+      "value": null
+    }
+  ],
+  "dffs": [
+
+  ],
+  "inputs": {
+    "ctrl.clk": [
+      0
+    ],
+    "ctrl.rst": [
+      1
+    ],
+    "ctrl.rdy": [
+      2
+    ],
+    "ctrl.addr_mode": [
+      3,
+      4,
+      5,
+      6
+    ],
+    "ctrl.instr_type": [
+      7,
+      8,
+      9,
+      10
+    ],
+    "ctrl.branch_cond": [
+      11,
+      12,
+      13
+    ],
+    "ctrl.is_read": [
+      14
+    ],
+    "ctrl.is_write": [
+      15
+    ],
+    "ctrl.is_rmw": [
+      16
+    ],
+    "ctrl.writes_reg": [
+      17
+    ],
+    "ctrl.is_status_op": [
+      18
+    ],
+    "ctrl.flag_n": [
+      19
+    ],
+    "ctrl.flag_v": [
+      20
+    ],
+    "ctrl.flag_z": [
+      21
+    ],
+    "ctrl.flag_c": [
+      22
+    ],
+    "ctrl.page_cross": [
+      23
+    ],
+    "ctrl.mem_ready": [
+      24
+    ]
+  },
+  "outputs": {
+    "ctrl.state": [
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32
+    ],
+    "ctrl.state_before": [
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40
+    ],
+    "ctrl.state_pre": [
+      41,
+      42,
+      43,
+      44,
+      45,
+      46,
+      47,
+      48
+    ],
+    "ctrl.pc_inc": [
+      49
+    ],
+    "ctrl.pc_load": [
+      50
+    ],
+    "ctrl.load_opcode": [
+      51
+    ],
+    "ctrl.load_operand_lo": [
+      52
+    ],
+    "ctrl.load_operand_hi": [
+      53
+    ],
+    "ctrl.load_addr_lo": [
+      54
+    ],
+    "ctrl.load_addr_hi": [
+      55
+    ],
+    "ctrl.load_data": [
+      56
+    ],
+    "ctrl.mem_read": [
+      57
+    ],
+    "ctrl.mem_write": [
+      58
+    ],
+    "ctrl.addr_sel": [
+      59,
+      60,
+      61
+    ],
+    "ctrl.data_sel": [
+      62,
+      63,
+      64
+    ],
+    "ctrl.alu_enable": [
+      65
+    ],
+    "ctrl.reg_write": [
+      66
+    ],
+    "ctrl.sp_inc": [
+      67
+    ],
+    "ctrl.sp_dec": [
+      68
+    ],
+    "ctrl.update_flags": [
+      69
+    ],
+    "ctrl.done": [
+      70
+    ],
+    "ctrl.halted": [
+      71
+    ],
+    "ctrl.cycle_count": [
+      72,
+      73,
+      74,
+      75,
+      76,
+      77,
+      78,
+      79,
+      80,
+      81,
+      82,
+      83,
+      84,
+      85,
+      86,
+      87,
+      88,
+      89,
+      90,
+      91,
+      92,
+      93,
+      94,
+      95,
+      96,
+      97,
+      98,
+      99,
+      100,
+      101,
+      102,
+      103
+    ],
+    "ctrl.reset_step": [
+      104,
+      105,
+      106,
+      107,
+      108,
+      109,
+      110,
+      111
+    ]
+  },
+  "schedule": [
+    0,
+    2,
+    4,
+    6,
+    8,
+    10,
+    12,
+    14,
+    16,
+    18,
+    20,
+    22,
+    24,
+    26,
+    28,
+    30,
+    32,
+    34,
+    36,
+    38,
+    40,
+    42,
+    44,
+    46,
+    48,
+    50,
+    52,
+    54,
+    56,
+    58,
+    60,
+    62,
+    64,
+    66,
+    68,
+    70,
+    72,
+    74,
+    76,
+    78,
+    80,
+    82,
+    84,
+    86,
+    88,
+    90,
+    92,
+    94,
+    96,
+    98,
+    100,
+    102,
+    104,
+    106,
+    108,
+    110,
+    112,
+    114,
+    116,
+    118,
+    120,
+    122,
+    124,
+    126,
+    128,
+    130,
+    132,
+    134,
+    136,
+    138,
+    140,
+    142,
+    144,
+    146,
+    148,
+    150,
+    152,
+    154,
+    156,
+    158,
+    160,
+    162,
+    164,
+    166,
+    168,
+    170,
+    172,
+    1,
+    3,
+    5,
+    7,
+    9,
+    11,
+    13,
+    15,
+    17,
+    19,
+    21,
+    23,
+    25,
+    27,
+    29,
+    31,
+    33,
+    35,
+    37,
+    39,
+    41,
+    43,
+    45,
+    47,
+    49,
+    51,
+    53,
+    55,
+    57,
+    59,
+    61,
+    63,
+    65,
+    67,
+    69,
+    71,
+    73,
+    75,
+    77,
+    79,
+    81,
+    83,
+    85,
+    87,
+    89,
+    91,
+    93,
+    95,
+    97,
+    99,
+    101,
+    103,
+    105,
+    107,
+    109,
+    111,
+    113,
+    115,
+    117,
+    119,
+    121,
+    123,
+    125,
+    127,
+    129,
+    131,
+    133,
+    135,
+    137,
+    139,
+    141,
+    143,
+    145,
+    147,
+    149,
+    151,
+    153,
+    155,
+    157,
+    159,
+    161,
+    163,
+    165,
+    167,
+    169,
+    171,
+    173
+  ]
+}

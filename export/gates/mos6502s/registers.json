@@ -1,0 +1,239 @@
+{
+  "name": "regs",
+  "net_count": 37,
+  "gates": [
+
+  ],
+  "dffs": [
+    {
+      "d": 2,
+      "q": 13,
+      "rst": 1,
+      "en": 10,
+      "async_reset": false
+    },
+    {
+      "d": 2,
+      "q": 21,
+      "rst": 1,
+      "en": 11,
+      "async_reset": false
+    },
+    {
+      "d": 2,
+      "q": 29,
+      "rst": 1,
+      "en": 12,
+      "async_reset": false
+    },
+    {
+      "d": 3,
+      "q": 14,
+      "rst": 1,
+      "en": 10,
+      "async_reset": false
+    },
+    {
+      "d": 3,
+      "q": 22,
+      "rst": 1,
+      "en": 11,
+      "async_reset": false
+    },
+    {
+      "d": 3,
+      "q": 30,
+      "rst": 1,
+      "en": 12,
+      "async_reset": false
+    },
+    {
+      "d": 4,
+      "q": 15,
+      "rst": 1,
+      "en": 10,
+      "async_reset": false
+    },
+    {
+      "d": 4,
+      "q": 23,
+      "rst": 1,
+      "en": 11,
+      "async_reset": false
+    },
+    {
+      "d": 4,
+      "q": 31,
+      "rst": 1,
+      "en": 12,
+      "async_reset": false
+    },
+    {
+      "d": 5,
+      "q": 16,
+      "rst": 1,
+      "en": 10,
+      "async_reset": false
+    },
+    {
+      "d": 5,
+      "q": 24,
+      "rst": 1,
+      "en": 11,
+      "async_reset": false
+    },
+    {
+      "d": 5,
+      "q": 32,
+      "rst": 1,
+      "en": 12,
+      "async_reset": false
+    },
+    {
+      "d": 6,
+      "q": 17,
+      "rst": 1,
+      "en": 10,
+      "async_reset": false
+    },
+    {
+      "d": 6,
+      "q": 25,
+      "rst": 1,
+      "en": 11,
+      "async_reset": false
+    },
+    {
+      "d": 6,
+      "q": 33,
+      "rst": 1,
+      "en": 12,
+      "async_reset": false
+    },
+    {
+      "d": 7,
+      "q": 18,
+      "rst": 1,
+      "en": 10,
+      "async_reset": false
+    },
+    {
+      "d": 7,
+      "q": 26,
+      "rst": 1,
+      "en": 11,
+      "async_reset": false
+    },
+    {
+      "d": 7,
+      "q": 34,
+      "rst": 1,
+      "en": 12,
+      "async_reset": false
+    },
+    {
+      "d": 8,
+      "q": 19,
+      "rst": 1,
+      "en": 10,
+      "async_reset": false
+    },
+    {
+      "d": 8,
+      "q": 27,
+      "rst": 1,
+      "en": 11,
+      "async_reset": false
+    },
+    {
+      "d": 8,
+      "q": 35,
+      "rst": 1,
+      "en": 12,
+      "async_reset": false
+    },
+    {
+      "d": 9,
+      "q": 20,
+      "rst": 1,
+      "en": 10,
+      "async_reset": false
+    },
+    {
+      "d": 9,
+      "q": 28,
+      "rst": 1,
+      "en": 11,
+      "async_reset": false
+    },
+    {
+      "d": 9,
+      "q": 36,
+      "rst": 1,
+      "en": 12,
+      "async_reset": false
+    }
+  ],
+  "inputs": {
+    "regs.clk": [
+      0
+    ],
+    "regs.rst": [
+      1
+    ],
+    "regs.data_in": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "regs.load_a": [
+      10
+    ],
+    "regs.load_x": [
+      11
+    ],
+    "regs.load_y": [
+      12
+    ]
+  },
+  "outputs": {
+    "regs.a": [
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "regs.x": [
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28
+    ],
+    "regs.y": [
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36
+    ]
+  },
+  "schedule": [
+
+  ]
+}
