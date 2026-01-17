@@ -45,4 +45,38 @@ RSpec.describe RHDL::HDL::Subtractor do
       expect(verilog).to include('output [7:0] diff')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::Subtractor.new('sub', width: 4) }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'sub') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('sub.a', 'sub.b', 'sub.bin')
+      expect(ir.outputs.keys).to include('sub.diff', 'sub.bout', 'sub.overflow')
+      expect(ir.gates.length).to be > 0
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module sub')
+      expect(verilog).to include('output [3:0] diff')
+      expect(verilog).to include('output bout')
+    end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'simulates correctly' do
+        vectors = [
+          { inputs: { a: 5, b: 3, bin: 0 }, expected: { diff: 2, bout: 0, overflow: 0 } },
+          { inputs: { a: 0, b: 0, bin: 0 }, expected: { diff: 0, bout: 0, overflow: 0 } }
+        ]
+
+        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/sub')
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx]).to eq(vec[:expected])
+        end
+      end
+    end
+  end
 end
