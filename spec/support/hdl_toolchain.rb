@@ -16,8 +16,4 @@ module HdlToolchain
   def ghdl_available?
     which("ghdl")
   end
-
-  def yosys_available?
-    !!which("yosys")
-  end
 end
