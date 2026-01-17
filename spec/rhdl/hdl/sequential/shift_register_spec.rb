@@ -83,5 +83,49 @@ RSpec.describe RHDL::HDL::ShiftRegister do
       expect(verilog).to include('output [7:0] q')
       expect(verilog).to include('output d_out')
     end
+
+    context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation' do
+        test_vectors = []
+        behavioral = RHDL::HDL::ShiftRegister.new
+        behavioral.set_input(:rst, 0)
+        behavioral.set_input(:en, 1)
+        behavioral.set_input(:d_in, 0)
+
+        test_cases = [
+          { d: 0b00001111, d_in: 0, rst: 0, en: 1, load: 1, dir: 1 },  # load
+          { d: 0, d_in: 0, rst: 0, en: 1, load: 0, dir: 1 },           # shift left
+          { d: 0, d_in: 0, rst: 0, en: 1, load: 0, dir: 1 },           # shift left
+          { d: 0, d_in: 0, rst: 0, en: 1, load: 0, dir: 0 },           # shift right
+        ]
+
+        expected_outputs = []
+        test_cases.each do |tc|
+          behavioral.set_input(:d, tc[:d])
+          behavioral.set_input(:d_in, tc[:d_in])
+          behavioral.set_input(:rst, tc[:rst])
+          behavioral.set_input(:en, tc[:en])
+          behavioral.set_input(:load, tc[:load])
+          behavioral.set_input(:dir, tc[:dir])
+          behavioral.set_input(:clk, 0)
+          behavioral.propagate
+          behavioral.set_input(:clk, 1)
+          behavioral.propagate
+
+          test_vectors << { inputs: tc }
+          expected_outputs << { q: behavioral.get_output(:q) }
+        end
+
+        base_dir = File.join('tmp', 'iverilog', 'shift_reg')
+        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+
+        expect(result[:success]).to be(true), result[:error]
+
+        expected_outputs.each_with_index do |expected, idx|
+          expect(result[:results][idx][:q]).to eq(expected[:q]),
+            "Cycle #{idx}: expected q=#{expected[:q]}, got #{result[:results][idx][:q]}"
+        end
+      end
+    end
   end
 end

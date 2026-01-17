@@ -51,5 +51,41 @@ RSpec.describe RHDL::HDL::Multiplier do
       expect(verilog).to include('input [7:0] b')
       expect(verilog).to include('output [15:0] product')
     end
+
+    context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation' do
+        test_vectors = []
+        behavioral = RHDL::HDL::Multiplier.new(nil, width: 8)
+
+        test_cases = [
+          { a: 10, b: 20 },   # 200
+          { a: 15, b: 15 },   # 225
+          { a: 0, b: 100 },   # 0
+          { a: 255, b: 2 },   # 510
+          { a: 1, b: 1 },     # 1
+          { a: 16, b: 16 },   # 256
+        ]
+
+        expected_outputs = []
+        test_cases.each do |tc|
+          behavioral.set_input(:a, tc[:a])
+          behavioral.set_input(:b, tc[:b])
+          behavioral.propagate
+
+          test_vectors << { inputs: tc }
+          expected_outputs << { product: behavioral.get_output(:product) }
+        end
+
+        base_dir = File.join('tmp', 'iverilog', 'mult')
+        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+
+        expect(result[:success]).to be(true), result[:error]
+
+        expected_outputs.each_with_index do |expected, idx|
+          expect(result[:results][idx][:product]).to eq(expected[:product]),
+            "Cycle #{idx}: expected product=#{expected[:product]}, got #{result[:results][idx][:product]}"
+        end
+      end
+    end
   end
 end

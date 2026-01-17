@@ -116,5 +116,43 @@ RSpec.describe RHDL::HDL::RAM do
       expect(verilog).to include('input [7:0] din')
       expect(verilog).to include('output [7:0] dout')
     end
+
+    context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation' do
+        test_vectors = []
+        behavioral = RHDL::HDL::RAM.new
+
+        test_cases = [
+          { addr: 0, din: 0xAB, we: 1 },  # write 0xAB to addr 0
+          { addr: 0, din: 0, we: 0 },      # read from addr 0
+          { addr: 1, din: 0x55, we: 1 },  # write 0x55 to addr 1
+          { addr: 1, din: 0, we: 0 },      # read from addr 1
+        ]
+
+        expected_outputs = []
+        test_cases.each do |tc|
+          behavioral.set_input(:addr, tc[:addr])
+          behavioral.set_input(:din, tc[:din])
+          behavioral.set_input(:we, tc[:we])
+          behavioral.set_input(:clk, 0)
+          behavioral.propagate
+          behavioral.set_input(:clk, 1)
+          behavioral.propagate
+
+          test_vectors << { inputs: tc }
+          expected_outputs << { dout: behavioral.get_output(:dout) }
+        end
+
+        base_dir = File.join('tmp', 'iverilog', 'ram')
+        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+
+        expect(result[:success]).to be(true), result[:error]
+
+        expected_outputs.each_with_index do |expected, idx|
+          expect(result[:results][idx][:dout]).to eq(expected[:dout]),
+            "Cycle #{idx}: expected dout=#{expected[:dout]}, got #{result[:results][idx][:dout]}"
+        end
+      end
+    end
   end
 end

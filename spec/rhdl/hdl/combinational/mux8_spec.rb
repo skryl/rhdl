@@ -56,5 +56,39 @@ RSpec.describe RHDL::HDL::Mux8 do
       expect(verilog).to include('input [2:0] sel')
       expect(verilog).to include('output y')
     end
+
+    context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation' do
+        test_vectors = []
+        behavioral = RHDL::HDL::Mux8.new(nil, width: 1)
+
+        test_cases = []
+        8.times do |sel|
+          tc = { in0: 0, in1: 0, in2: 0, in3: 0, in4: 0, in5: 0, in6: 0, in7: 0, sel: sel }
+          tc["in#{sel}".to_sym] = 1
+          test_cases << tc
+        end
+
+        expected_outputs = []
+        test_cases.each do |tc|
+          8.times { |i| behavioral.set_input("in#{i}".to_sym, tc["in#{i}".to_sym]) }
+          behavioral.set_input(:sel, tc[:sel])
+          behavioral.propagate
+
+          test_vectors << { inputs: tc }
+          expected_outputs << { y: behavioral.get_output(:y) }
+        end
+
+        base_dir = File.join('tmp', 'iverilog', 'mux8')
+        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+
+        expect(result[:success]).to be(true), result[:error]
+
+        expected_outputs.each_with_index do |expected, idx|
+          expect(result[:results][idx][:y]).to eq(expected[:y]),
+            "Cycle #{idx}: expected y=#{expected[:y]}, got #{result[:results][idx][:y]}"
+        end
+      end
+    end
   end
 end

@@ -64,5 +64,51 @@ RSpec.describe RHDL::HDL::AddSub do
       expect(verilog).to include('output zero')
       expect(verilog).to include('output negative')
     end
+
+    context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation' do
+        # Generate test vectors from behavioral simulation
+        test_vectors = []
+        behavioral = RHDL::HDL::AddSub.new(nil, width: 8)
+
+        test_cases = [
+          { a: 100, b: 50, sub: 0 },  # 100 + 50 = 150
+          { a: 100, b: 50, sub: 1 },  # 100 - 50 = 50
+          { a: 200, b: 100, sub: 0 }, # 200 + 100 = 44 (overflow)
+          { a: 50, b: 100, sub: 1 },  # 50 - 100 = 206 (underflow)
+          { a: 0, b: 0, sub: 0 },     # zero result
+          { a: 128, b: 0, sub: 0 },   # negative result (MSB set)
+        ]
+
+        expected_outputs = []
+        test_cases.each do |tc|
+          behavioral.set_input(:a, tc[:a])
+          behavioral.set_input(:b, tc[:b])
+          behavioral.set_input(:sub, tc[:sub])
+          behavioral.propagate
+
+          test_vectors << { inputs: tc }
+          expected_outputs << {
+            result: behavioral.get_output(:result),
+            zero: behavioral.get_output(:zero),
+            negative: behavioral.get_output(:negative)
+          }
+        end
+
+        # Run structural simulation
+        base_dir = File.join('tmp', 'iverilog', 'addsub')
+        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+
+        expect(result[:success]).to be(true), result[:error]
+
+        # Compare outputs
+        expected_outputs.each_with_index do |expected, idx|
+          expect(result[:results][idx][:result]).to eq(expected[:result]),
+            "Cycle #{idx}: expected result=#{expected[:result]}, got #{result[:results][idx][:result]}"
+          expect(result[:results][idx][:zero]).to eq(expected[:zero]),
+            "Cycle #{idx}: expected zero=#{expected[:zero]}, got #{result[:results][idx][:zero]}"
+        end
+      end
+    end
   end
 end

@@ -72,5 +72,40 @@ RSpec.describe RHDL::HDL::ROM do
       expect(verilog).to include('input en')
       expect(verilog).to include('output [7:0] dout')
     end
+
+    context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation' do
+        test_vectors = []
+        behavioral = RHDL::HDL::ROM.new(nil, contents: [0x00, 0x11, 0x22, 0x33])
+
+        test_cases = [
+          { addr: 0, en: 1 },  # read addr 0
+          { addr: 1, en: 1 },  # read addr 1
+          { addr: 2, en: 1 },  # read addr 2
+          { addr: 3, en: 1 },  # read addr 3
+          { addr: 0, en: 0 },  # disabled
+        ]
+
+        expected_outputs = []
+        test_cases.each do |tc|
+          behavioral.set_input(:addr, tc[:addr])
+          behavioral.set_input(:en, tc[:en])
+          behavioral.propagate
+
+          test_vectors << { inputs: tc }
+          expected_outputs << { dout: behavioral.get_output(:dout) }
+        end
+
+        base_dir = File.join('tmp', 'iverilog', 'rom')
+        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+
+        expect(result[:success]).to be(true), result[:error]
+
+        expected_outputs.each_with_index do |expected, idx|
+          expect(result[:results][idx][:dout]).to eq(expected[:dout]),
+            "Cycle #{idx}: expected dout=#{expected[:dout]}, got #{result[:results][idx][:dout]}"
+        end
+      end
+    end
   end
 end

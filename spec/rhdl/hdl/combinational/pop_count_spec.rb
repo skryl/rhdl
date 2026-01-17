@@ -55,5 +55,39 @@ RSpec.describe RHDL::HDL::PopCount do
       expect(verilog).to include('input [7:0] a')
       expect(verilog).to include('output [3:0] count')
     end
+
+    context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation' do
+        test_vectors = []
+        behavioral = RHDL::HDL::PopCount.new(nil, width: 8)
+
+        test_cases = [
+          { a: 0b10101010 },  # 4 bits
+          { a: 0b11111111 },  # 8 bits
+          { a: 0b00000000 },  # 0 bits
+          { a: 0b00000001 },  # 1 bit
+          { a: 0b11110000 },  # 4 bits
+        ]
+
+        expected_outputs = []
+        test_cases.each do |tc|
+          behavioral.set_input(:a, tc[:a])
+          behavioral.propagate
+
+          test_vectors << { inputs: tc }
+          expected_outputs << { count: behavioral.get_output(:count) }
+        end
+
+        base_dir = File.join('tmp', 'iverilog', 'popcount')
+        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+
+        expect(result[:success]).to be(true), result[:error]
+
+        expected_outputs.each_with_index do |expected, idx|
+          expect(result[:results][idx][:count]).to eq(expected[:count]),
+            "Cycle #{idx}: expected count=#{expected[:count]}, got #{result[:results][idx][:count]}"
+        end
+      end
+    end
   end
 end

@@ -134,5 +134,48 @@ RSpec.describe RHDL::HDL::ALU do
       expect(verilog).to include('output negative')
       expect(verilog).to include('output overflow')
     end
+
+    context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation' do
+        test_vectors = []
+        behavioral = RHDL::HDL::ALU.new(nil, width: 8)
+
+        test_cases = [
+          { a: 10, b: 5, op: RHDL::HDL::ALU::OP_ADD, cin: 0 },   # ADD
+          { a: 10, b: 5, op: RHDL::HDL::ALU::OP_SUB, cin: 0 },   # SUB
+          { a: 0b11110000, b: 0b10101010, op: RHDL::HDL::ALU::OP_AND, cin: 0 },  # AND
+          { a: 0b11110000, b: 0b00001111, op: RHDL::HDL::ALU::OP_OR, cin: 0 },   # OR
+          { a: 0b11110000, b: 0b10101010, op: RHDL::HDL::ALU::OP_XOR, cin: 0 },  # XOR
+          { a: 5, b: 5, op: RHDL::HDL::ALU::OP_SUB, cin: 0 },    # zero flag test
+        ]
+
+        expected_outputs = []
+        test_cases.each do |tc|
+          behavioral.set_input(:a, tc[:a])
+          behavioral.set_input(:b, tc[:b])
+          behavioral.set_input(:op, tc[:op])
+          behavioral.set_input(:cin, tc[:cin])
+          behavioral.propagate
+
+          test_vectors << { inputs: tc }
+          expected_outputs << {
+            result: behavioral.get_output(:result),
+            zero: behavioral.get_output(:zero)
+          }
+        end
+
+        base_dir = File.join('tmp', 'iverilog', 'alu')
+        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+
+        expect(result[:success]).to be(true), result[:error]
+
+        expected_outputs.each_with_index do |expected, idx|
+          expect(result[:results][idx][:result]).to eq(expected[:result]),
+            "Cycle #{idx}: expected result=#{expected[:result]}, got #{result[:results][idx][:result]}"
+          expect(result[:results][idx][:zero]).to eq(expected[:zero]),
+            "Cycle #{idx}: expected zero=#{expected[:zero]}, got #{result[:results][idx][:zero]}"
+        end
+      end
+    end
   end
 end
