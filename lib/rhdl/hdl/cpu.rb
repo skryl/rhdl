@@ -1,6 +1,9 @@
 # CPU HDL Module
 # Gate-level CPU implementation
 
+require_relative 'cpu/instruction_decoder'
+require_relative 'cpu/accumulator'
+require_relative 'cpu/synth_datapath'
 require_relative 'cpu/datapath'
 require_relative 'cpu/adapter'
 
