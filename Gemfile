@@ -6,6 +6,7 @@ gem 'activesupport', '~> 7.0'
 group :development, :test do
   gem 'rspec', '~> 3.12'
   gem 'rake', '~> 13.0'
+  gem 'parallel_tests', '~> 4.0'
 end
 
 # Specify your gem's dependencies in rhdl.gemspec
