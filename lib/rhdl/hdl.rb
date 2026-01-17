@@ -1,14 +1,14 @@
 # RHDL HDL Module
 # Hardware Description Language with simulation support
 
-require_relative 'hdl/simulation'
+require_relative 'simulation'
 require_relative 'hdl/gates'
 require_relative 'hdl/sequential'
 require_relative 'hdl/arithmetic'
 require_relative 'hdl/combinational'
 require_relative 'hdl/memory'
-require_relative 'hdl/debug'
-require_relative 'hdl/tui'
+require_relative 'debug'
+require_relative 'tui'
 require_relative 'hdl/cpu'
 require_relative 'hdl/diagram'
 
