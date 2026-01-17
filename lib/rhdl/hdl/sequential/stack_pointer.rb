@@ -12,6 +12,23 @@ module RHDL
       port_output :empty   # SP at max (empty stack)
       port_output :full    # SP at 0 (full stack)
 
+      behavior do
+        max_val = param(:max)
+        initial_val = param(:initial)
+        if rising_edge?
+          if rst.value == 1
+            set_state(initial_val)
+          elsif push.value == 1
+            set_state((state - 1) & max_val)
+          elsif pop.value == 1
+            set_state((state + 1) & max_val)
+          end
+        end
+        q <= state
+        empty <= (state == max_val ? 1 : 0)
+        full <= (state == 0 ? 1 : 0)
+      end
+
       def initialize(name = nil, width: 8, initial: 0xFF)
         @width = width
         @initial = initial
@@ -23,21 +40,6 @@ module RHDL
       def setup_ports
         return if @width == 8
         @outputs[:q] = Wire.new("#{@name}.q", width: @width)
-      end
-
-      def propagate
-        if rising_edge?
-          if in_val(:rst) == 1
-            @state = @initial
-          elsif in_val(:push) == 1
-            @state = (@state - 1) & @max
-          elsif in_val(:pop) == 1
-            @state = (@state + 1) & @max
-          end
-        end
-        out_set(:q, @state)
-        out_set(:empty, @state == @max ? 1 : 0)
-        out_set(:full, @state == 0 ? 1 : 0)
       end
     end
   end

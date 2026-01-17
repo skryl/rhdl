@@ -21,26 +21,6 @@ module RHDL
         y <= cat(is_3 | is_2, is_3 | is_1)
         valid <= a[3] | a[2] | a[1] | a[0]
       end
-
-      def propagate
-        val = in_val(:a) & 0xF
-        if val == 0
-          out_set(:y, 0)
-          out_set(:valid, 0)
-        elsif (val & 8) != 0
-          out_set(:y, 3)
-          out_set(:valid, 1)
-        elsif (val & 4) != 0
-          out_set(:y, 2)
-          out_set(:valid, 1)
-        elsif (val & 2) != 0
-          out_set(:y, 1)
-          out_set(:valid, 1)
-        else
-          out_set(:y, 0)
-          out_set(:valid, 1)
-        end
-      end
     end
   end
 end

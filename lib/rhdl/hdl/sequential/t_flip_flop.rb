@@ -11,16 +11,16 @@ module RHDL
       port_output :q
       port_output :qn
 
-      def propagate
+      behavior do
         if rising_edge?
-          if in_val(:rst) == 1
-            @state = 0
-          elsif in_val(:en) == 1 && in_val(:t) == 1
-            @state = @state == 0 ? 1 : 0
+          if rst.value == 1
+            set_state(0)
+          elsif en.value == 1 && t.value == 1
+            set_state(state == 0 ? 1 : 0)
           end
         end
-        out_set(:q, @state)
-        out_set(:qn, @state == 0 ? 1 : 0)
+        q <= state
+        qn <= mux(state, lit(0, width: 1), lit(1, width: 1))
       end
     end
   end

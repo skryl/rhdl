@@ -15,6 +15,62 @@ module RHDL
       port_output :full
       port_output :count, width: 5
 
+      behavior do
+        depth_val = param(:depth)
+        data_width = param(:data_width)
+        data_mask = (1 << data_width) - 1
+
+        rd_ptr = get_var(:rd_ptr)
+        wr_ptr = get_var(:wr_ptr)
+        cnt = get_var(:count)
+
+        if rising_edge?
+          if rst.value == 1
+            set_var(:rd_ptr, 0)
+            set_var(:wr_ptr, 0)
+            set_var(:count, 0)
+            rd_ptr = 0
+            wr_ptr = 0
+            cnt = 0
+          else
+            wrote = false
+            did_read = false
+
+            # Write
+            if wr_en.value == 1 && cnt < depth_val
+              mem_write(wr_ptr, din.value & data_mask)
+              set_var(:wr_ptr, (wr_ptr + 1) % depth_val)
+              wrote = true
+            end
+
+            # Read
+            if rd_en.value == 1 && cnt > 0
+              rd_ptr = (rd_ptr + 1) % depth_val
+              set_var(:rd_ptr, rd_ptr)
+              did_read = true
+            end
+
+            # Update count
+            if wrote && !did_read
+              set_var(:count, cnt + 1)
+              cnt += 1
+            elsif did_read && !wrote
+              set_var(:count, cnt - 1)
+              cnt -= 1
+            end
+          end
+        end
+
+        # Read current rd_ptr for output
+        current_rd_ptr = get_var(:rd_ptr)
+        current_count = get_var(:count)
+
+        dout <= mem_read(current_rd_ptr)
+        empty <= (current_count == 0 ? 1 : 0)
+        full <= (current_count >= depth_val ? 1 : 0)
+        count <= current_count
+      end
+
       def initialize(name = nil, data_width: 8, depth: 16)
         @data_width = data_width
         @depth = depth
@@ -38,41 +94,6 @@ module RHDL
         prev = @prev_clk
         @prev_clk = in_val(:clk)
         prev == 0 && @prev_clk == 1
-      end
-
-      def propagate
-        if rising_edge?
-          if in_val(:rst) == 1
-            @rd_ptr = 0
-            @wr_ptr = 0
-            @count = 0
-          else
-            wrote = false
-            read = false
-
-            # Write
-            if in_val(:wr_en) == 1 && @count < @depth
-              @memory[@wr_ptr] = in_val(:din) & ((1 << @data_width) - 1)
-              @wr_ptr = (@wr_ptr + 1) % @depth
-              wrote = true
-            end
-
-            # Read
-            if in_val(:rd_en) == 1 && @count > 0
-              @rd_ptr = (@rd_ptr + 1) % @depth
-              read = true
-            end
-
-            # Update count
-            @count += 1 if wrote && !read
-            @count -= 1 if read && !wrote
-          end
-        end
-
-        out_set(:dout, @memory[@rd_ptr])
-        out_set(:empty, @count == 0 ? 1 : 0)
-        out_set(:full, @count >= @depth ? 1 : 0)
-        out_set(:count, @count)
       end
     end
   end

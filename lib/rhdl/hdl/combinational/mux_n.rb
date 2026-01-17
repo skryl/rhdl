@@ -12,8 +12,15 @@ module RHDL
       port_output :y
 
       behavior do
-        # Default 2-to-1 mux: sel=0 -> in0, sel=1 -> in1
-        y <= mux(sel, in1, in0)
+        input_cnt = param(:input_count)
+        sel_w = param(:sel_width)
+        sel_val = sel.value & ((1 << sel_w) - 1)
+
+        if sel_val < input_cnt
+          y <= input_val(:"in#{sel_val}")
+        else
+          y <= 0
+        end
       end
 
       def initialize(name = nil, inputs: 2, width: 1)
@@ -28,16 +35,6 @@ module RHDL
         @input_count.times { |i| @inputs[:"in#{i}"] = Wire.new("#{@name}.in#{i}", width: @width) }
         @inputs[:sel] = Wire.new("#{@name}.sel", width: @sel_width)
         @outputs[:y] = Wire.new("#{@name}.y", width: @width)
-        @input_count.times { |i| @inputs[:"in#{i}"].on_change { |_| propagate } }
-      end
-
-      def propagate
-        sel = in_val(:sel) & ((1 << @sel_width) - 1)
-        if sel < @input_count
-          out_set(:y, in_val(:"in#{sel}"))
-        else
-          out_set(:y, 0)
-        end
       end
     end
   end

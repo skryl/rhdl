@@ -109,6 +109,44 @@ module RHDL
         mux(condition, then_expr, else_expr)
       end
 
+      # Access component class-level parameters (for synthesis, uses defaults)
+      # In synthesis, this returns the default width from port definitions
+      def param(name)
+        case name
+        when :width
+          # Look for common width parameter from output ports
+          out_port = @component_class._port_defs.find { |p| p[:direction] == :out && p[:width] > 1 }
+          out_port ? out_port[:width] : 1
+        when :input_count
+          @component_class._port_defs.count { |p| p[:direction] == :in && p[:name].to_s.start_with?('in') }
+        else
+          nil
+        end
+      end
+
+      # Get the width of a port (uses class-level definitions)
+      def port_width(name)
+        @port_widths[name] || 1
+      end
+
+      # Reduction OR - any bit set
+      def reduce_or(signal)
+        wrapped = wrap_expr(signal)
+        SynthUnaryOp.new(:reduce_or, wrapped, 1)
+      end
+
+      # Reduction AND - all bits set
+      def reduce_and(signal)
+        wrapped = wrap_expr(signal)
+        SynthUnaryOp.new(:reduce_and, wrapped, 1)
+      end
+
+      # Reduction XOR - parity
+      def reduce_xor(signal)
+        wrapped = wrap_expr(signal)
+        SynthUnaryOp.new(:reduce_xor, wrapped, 1)
+      end
+
       # Case select - generates nested mux chain for synthesis
       # Usage: case_select(op, { 0 => a + b, 1 => a - b }, default: 0)
       def case_select(selector, cases, default: 0)

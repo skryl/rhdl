@@ -11,6 +11,20 @@ module RHDL
       port_input :din, width: 8
       port_output :dout, width: 8
 
+      behavior do
+        depth = param(:depth)
+        data_width = param(:data_width)
+        addr_val = addr.value & (depth - 1)
+
+        # Write on rising edge
+        if rising_edge? && we.value == 1
+          mem_write(addr_val, din.value & ((1 << data_width) - 1))
+        end
+
+        # Async read
+        dout <= mem_read(addr_val)
+      end
+
       def initialize(name = nil, data_width: 8, addr_width: 8)
         @data_width = data_width
         @addr_width = addr_width
@@ -31,18 +45,6 @@ module RHDL
         prev = @prev_clk
         @prev_clk = in_val(:clk)
         prev == 0 && @prev_clk == 1
-      end
-
-      def propagate
-        addr = in_val(:addr) & (@depth - 1)
-
-        # Write on rising edge
-        if rising_edge? && in_val(:we) == 1
-          @memory[addr] = in_val(:din) & ((1 << @data_width) - 1)
-        end
-
-        # Async read
-        out_set(:dout, @memory[addr])
       end
 
       # Direct memory access for initialization/debugging
