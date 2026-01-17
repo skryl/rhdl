@@ -120,39 +120,37 @@ The project uses these gems:
 
 ### Installation
 
-1. Install the correct bundler version:
+1. Install bundler (use version 2.x, avoid 4.x which has known issues):
 ```bash
-gem install bundler -v 2.5.18
+gem install bundler -v '~> 2.5'
 ```
 
-2. Install dependencies:
+2. Install all dependencies:
 ```bash
 bundle install
 ```
 
+3. Verify installation:
+```bash
+bundle exec rake --version
+```
+
 ## Running Tests
 
-All tests are run via rake tasks:
+Always use `bundle exec` to run tests to ensure correct gem versions:
 
 ```bash
 # Run all tests
-rake spec
+bundle exec rake spec
 
 # Run specific test file
-rake spec SPEC=spec/some_spec.rb
+bundle exec rspec spec/some_spec.rb
 
 # Run 6502 CPU tests
-rake spec_6502
+bundle exec rake spec_6502
 
 # Run with documentation format
-rake spec_doc
-```
-
-With bundler (if available):
-
-```bash
-bundle exec rake spec
-bundle exec rspec spec/some_spec.rb
+bundle exec rake spec_doc
 ```
 
 ### Test Coverage
