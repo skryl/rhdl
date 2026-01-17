@@ -1083,6 +1083,17 @@ namespace :apple2 do
     exec "ruby", "bin/apple2", "-r", rom_file, "--rom-address", "F800", "-d"
   end
 
+  desc "Run with AppleIIGo public domain ROM"
+  task :run_appleiigo do
+    rom_file = File.join(ROMS_DIR, 'appleiigo.rom')
+    unless File.exist?(rom_file)
+      puts "ERROR: AppleIIGo ROM not found: #{rom_file}"
+      puts "Download from: https://a2go.applearchives.com/roms/"
+      exit 1
+    end
+    exec "ruby", "bin/apple2", "-r", rom_file, "--rom-address", "D000", "-d"
+  end
+
   desc "Run the Apple II emulator demo (no ROM needed)"
   task :demo do
     exec "ruby", "bin/apple2", "--demo", "-d"
