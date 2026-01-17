@@ -405,9 +405,52 @@ puts "5! = #{cpu.memory.read(0x0F)}"  # Should print "120"
 
 ## Running Tests
 
-RHDL uses RSpec for testing. The recommended way to run tests:
+RHDL uses RSpec for testing with parallel execution support for faster test runs.
 
-### Using the Test Runner Script (Recommended)
+### Parallel Testing (Recommended)
+
+The test suite supports parallel execution using the `parallel_tests` gem. With 16 CPU cores, tests run approximately 40% faster.
+
+```bash
+# Run all tests in parallel (auto-detects CPU count)
+rake pspec
+
+# Or using the parallel namespace
+rake parallel:spec
+
+# Run with specific number of processes
+rake parallel:spec_n[8]
+
+# Run 6502 tests in parallel
+rake parallel:spec_6502
+
+# Run HDL tests in parallel
+rake parallel:spec_hdl
+```
+
+For optimal load balancing based on historical test runtimes:
+```bash
+# First, record test runtimes
+rake parallel:prepare
+
+# Then run with runtime-based balancing
+rake parallel:spec_balanced
+```
+
+### Serial Testing
+
+```bash
+# Run all tests (serial)
+rake spec
+
+# Run 6502 CPU tests
+rake spec_6502
+
+# Run with documentation format
+rake spec_doc
+```
+
+### Using the Test Runner Script
 
 ```bash
 # Run all tests
@@ -423,20 +466,7 @@ bin/test spec/examples/mos6502/
 bin/test --format documentation
 ```
 
-### Using Rake
-
-```bash
-# Run all tests
-rake spec
-
-# Run 6502 CPU tests
-rake spec_6502
-
-# Run with documentation format
-rake spec_doc
-```
-
-### Using bundle exec (if bundler works)
+### Using bundle exec
 
 ```bash
 bundle exec rspec

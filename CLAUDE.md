@@ -122,6 +122,7 @@ The project uses these gems:
 - `activesupport ~> 7.0` - Rails utility library
 - `rspec ~> 3.12` - Testing framework (dev/test)
 - `rake ~> 13.0` - Build tool (dev/test)
+- `parallel_tests ~> 4.0` - Parallel test execution (dev/test)
 
 ### Installation
 
@@ -142,7 +143,33 @@ bundle exec rake --version
 
 ## Running Tests
 
-Always use `bundle exec` to run tests to ensure correct gem versions:
+Always use `bundle exec` to run tests to ensure correct gem versions.
+
+### Parallel Testing (Recommended)
+
+The test suite supports parallel execution for faster test runs (~40% faster with 16 cores):
+
+```bash
+# Run all tests in parallel (auto-detects CPU count)
+bundle exec rake pspec
+
+# Run with specific number of processes
+bundle exec rake parallel:spec_n[8]
+
+# Run 6502 tests in parallel
+bundle exec rake parallel:spec_6502
+
+# Run HDL tests in parallel
+bundle exec rake parallel:spec_hdl
+
+# Record runtimes for optimal load balancing
+bundle exec rake parallel:prepare
+
+# Run with runtime-based balancing
+bundle exec rake parallel:spec_balanced
+```
+
+### Serial Testing
 
 ```bash
 # Run all tests
@@ -297,6 +324,10 @@ Multi-level diagrams with hierarchy support are available. See `docs/diagrams.md
 ## Recent Changes
 
 ### Latest Updates (January 2025)
+- **Parallel test execution** - Test suite runs ~40% faster with parallel_tests gem
+  - New rake tasks: `pspec`, `parallel:spec`, `parallel:spec_6502`, `parallel:spec_hdl`
+  - Runtime-based load balancing with `parallel:prepare` and `parallel:spec_balanced`
+  - Auto-detects CPU count for optimal parallelization
 - **Gate-level synthesis** - Complete gate-level lowering for 53 HDL components
   - Primitive gates: AND, OR, XOR, NOT, MUX, BUF, CONST, DFF
   - Complex components: Multiplier (array), Divider (restoring), ALU
