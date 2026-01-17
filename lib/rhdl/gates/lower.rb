@@ -203,10 +203,6 @@ module RHDL
             lower_sr_latch(component)
           when RHDL::HDL::TristateBuffer
             lower_tristate_buffer(component)
-          when RHDL::HDL::MuxN
-            lower_mux_n(component)
-          when RHDL::HDL::DecoderN
-            lower_decoder_n(component)
           when RHDL::HDL::Multiplier
             lower_multiplier(component)
           when RHDL::HDL::Divider
@@ -1702,102 +1698,6 @@ module RHDL
         const_zero = new_temp
         @ir.add_gate(type: Primitives::CONST, inputs: [], output: const_zero, value: 0)
         @ir.add_gate(type: Primitives::MUX, inputs: [const_zero, a_net, en_net], output: y_net)
-      end
-
-      # MuxN: N-way mux using mux tree
-      def lower_mux_n(component)
-        # Get all input signals
-        input_count = component.instance_variable_get(:@input_count) || 2
-        sel_nets = map_bus(component.inputs[:sel])
-        y_nets = map_bus(component.outputs[:y])
-        width = y_nets.length
-
-        # Gather input nets
-        inputs = []
-        input_count.times do |i|
-          in_sym = :"in#{i}"
-          if component.inputs[in_sym]
-            inputs << map_bus(component.inputs[in_sym])
-          end
-        end
-
-        # Build mux tree for each output bit
-        width.times do |bit_idx|
-          bit_inputs = inputs.map { |in_nets| in_nets[bit_idx] }
-          result = lower_mux_tree(bit_inputs, sel_nets, 0)
-          @ir.add_gate(type: Primitives::BUF, inputs: [result], output: y_nets[bit_idx])
-        end
-      end
-
-      # Helper: build mux tree recursively
-      def lower_mux_tree(inputs, sel_nets, sel_idx)
-        return inputs.first if inputs.length == 1
-
-        if inputs.length == 2
-          result = new_temp
-          @ir.add_gate(type: Primitives::MUX, inputs: [inputs[0], inputs[1], sel_nets[sel_idx]], output: result)
-          return result
-        end
-
-        # Split inputs in half and recurse
-        mid = inputs.length / 2
-        low_inputs = inputs[0...mid]
-        high_inputs = inputs[mid..]
-
-        # Pad high_inputs if needed
-        while high_inputs.length < low_inputs.length
-          zero = new_temp
-          @ir.add_gate(type: Primitives::CONST, inputs: [], output: zero, value: 0)
-          high_inputs << zero
-        end
-
-        low_result = lower_mux_tree(low_inputs, sel_nets, sel_idx)
-        high_result = lower_mux_tree(high_inputs, sel_nets, sel_idx)
-
-        result = new_temp
-        next_sel = sel_idx + Math.log2(low_inputs.length).ceil
-        next_sel = [next_sel, sel_nets.length - 1].min
-        @ir.add_gate(type: Primitives::MUX, inputs: [low_result, high_result, sel_nets[next_sel]], output: result)
-        result
-      end
-
-      # DecoderN: N-bit decoder to 2^N outputs
-      def lower_decoder_n(component)
-        a_nets = map_bus(component.inputs[:a])
-        en_net = map_bus(component.inputs[:en]).first
-        width = a_nets.length
-        output_count = 1 << width
-
-        # Invert all address bits
-        a_inv = a_nets.map do |a_net|
-          inv = new_temp
-          @ir.add_gate(type: Primitives::NOT, inputs: [a_net], output: inv)
-          inv
-        end
-
-        # Generate each output
-        output_count.times do |i|
-          out_sym = :"y#{i}"
-          next unless component.outputs[out_sym]
-
-          y_net = map_bus(component.outputs[out_sym]).first
-
-          # Build minterm
-          bits = []
-          width.times do |j|
-            bits << ((i >> j) & 1 == 1 ? a_nets[j] : a_inv[j])
-          end
-
-          # AND all bits together with enable
-          and_result = bits.first
-          bits[1..].each do |bit|
-            and_temp = new_temp
-            @ir.add_gate(type: Primitives::AND, inputs: [and_result, bit], output: and_temp)
-            and_result = and_temp
-          end
-
-          @ir.add_gate(type: Primitives::AND, inputs: [en_net, and_result], output: y_net)
-        end
       end
 
       # Multiplier: Array multiplier
