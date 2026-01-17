@@ -640,6 +640,255 @@ desc "Export all HDL (alias for hdl:export)"
 task hdl: 'hdl:export'
 
 # =============================================================================
+# Gate-Level Synthesis Tasks
+# =============================================================================
+
+namespace :gates do
+  GATES_DIR = File.expand_path('gates', __dir__)
+
+  # All components that support gate-level synthesis
+  GATE_SYNTH_COMPONENTS = {
+    # Gates
+    'gates/not_gate' => -> { RHDL::HDL::NotGate.new('not_gate') },
+    'gates/buffer' => -> { RHDL::HDL::Buffer.new('buffer') },
+    'gates/and_gate' => -> { RHDL::HDL::AndGate.new('and_gate') },
+    'gates/or_gate' => -> { RHDL::HDL::OrGate.new('or_gate') },
+    'gates/xor_gate' => -> { RHDL::HDL::XorGate.new('xor_gate') },
+    'gates/nand_gate' => -> { RHDL::HDL::NandGate.new('nand_gate') },
+    'gates/nor_gate' => -> { RHDL::HDL::NorGate.new('nor_gate') },
+    'gates/xnor_gate' => -> { RHDL::HDL::XnorGate.new('xnor_gate') },
+    'gates/tristate_buffer' => -> { RHDL::HDL::TristateBuffer.new('tristate') },
+    'gates/bitwise_and' => -> { RHDL::HDL::BitwiseAnd.new('bitwise_and', width: 8) },
+    'gates/bitwise_or' => -> { RHDL::HDL::BitwiseOr.new('bitwise_or', width: 8) },
+    'gates/bitwise_xor' => -> { RHDL::HDL::BitwiseXor.new('bitwise_xor', width: 8) },
+    'gates/bitwise_not' => -> { RHDL::HDL::BitwiseNot.new('bitwise_not', width: 8) },
+
+    # Sequential
+    'sequential/d_flipflop' => -> { RHDL::HDL::DFlipFlop.new('dff') },
+    'sequential/d_flipflop_async' => -> { RHDL::HDL::DFlipFlopAsync.new('dff_async') },
+    'sequential/t_flipflop' => -> { RHDL::HDL::TFlipFlop.new('tff') },
+    'sequential/jk_flipflop' => -> { RHDL::HDL::JKFlipFlop.new('jkff') },
+    'sequential/sr_flipflop' => -> { RHDL::HDL::SRFlipFlop.new('srff') },
+    'sequential/sr_latch' => -> { RHDL::HDL::SRLatch.new('sr_latch') },
+    'sequential/register' => -> { RHDL::HDL::Register.new('reg', width: 8) },
+    'sequential/register_load' => -> { RHDL::HDL::RegisterLoad.new('reg_load', width: 8) },
+    'sequential/shift_register' => -> { RHDL::HDL::ShiftRegister.new('shift_reg', width: 8) },
+    'sequential/counter' => -> { RHDL::HDL::Counter.new('counter', width: 8) },
+    'sequential/program_counter' => -> { RHDL::HDL::ProgramCounter.new('pc', width: 16) },
+    'sequential/stack_pointer' => -> { RHDL::HDL::StackPointer.new('sp', width: 8) },
+
+    # Arithmetic
+    'arithmetic/half_adder' => -> { RHDL::HDL::HalfAdder.new('half_adder') },
+    'arithmetic/full_adder' => -> { RHDL::HDL::FullAdder.new('full_adder') },
+    'arithmetic/ripple_carry_adder' => -> { RHDL::HDL::RippleCarryAdder.new('rca', width: 8) },
+    'arithmetic/subtractor' => -> { RHDL::HDL::Subtractor.new('sub', width: 8) },
+    'arithmetic/addsub' => -> { RHDL::HDL::AddSub.new('addsub', width: 8) },
+    'arithmetic/comparator' => -> { RHDL::HDL::Comparator.new('cmp', width: 8) },
+    'arithmetic/incdec' => -> { RHDL::HDL::IncDec.new('incdec', width: 8) },
+    'arithmetic/multiplier' => -> { RHDL::HDL::Multiplier.new('mul', width: 4) },
+    'arithmetic/divider' => -> { RHDL::HDL::Divider.new('div', width: 4) },
+    'arithmetic/alu' => -> { RHDL::HDL::ALU.new('alu', width: 8) },
+
+    # Combinational
+    'combinational/mux2' => -> { RHDL::HDL::Mux2.new('mux2', width: 8) },
+    'combinational/mux4' => -> { RHDL::HDL::Mux4.new('mux4', width: 4) },
+    'combinational/mux8' => -> { RHDL::HDL::Mux8.new('mux8', width: 4) },
+    'combinational/demux2' => -> { RHDL::HDL::Demux2.new('demux2', width: 4) },
+    'combinational/demux4' => -> { RHDL::HDL::Demux4.new('demux4', width: 4) },
+    'combinational/decoder_2to4' => -> { RHDL::HDL::Decoder2to4.new('dec2to4') },
+    'combinational/decoder_3to8' => -> { RHDL::HDL::Decoder3to8.new('dec3to8') },
+    'combinational/encoder_4to2' => -> { RHDL::HDL::Encoder4to2.new('enc4to2') },
+    'combinational/encoder_8to3' => -> { RHDL::HDL::Encoder8to3.new('enc8to3') },
+    'combinational/zero_detect' => -> { RHDL::HDL::ZeroDetect.new('zero_det', width: 8) },
+    'combinational/sign_extend' => -> { RHDL::HDL::SignExtend.new('sext', in_width: 8, out_width: 16) },
+    'combinational/zero_extend' => -> { RHDL::HDL::ZeroExtend.new('zext', in_width: 8, out_width: 16) },
+    'combinational/bit_reverse' => -> { RHDL::HDL::BitReverse.new('bitrev', width: 8) },
+    'combinational/popcount' => -> { RHDL::HDL::PopCount.new('popcount', width: 8) },
+    'combinational/lzcount' => -> { RHDL::HDL::LZCount.new('lzcount', width: 8) },
+    'combinational/barrel_shifter' => -> { RHDL::HDL::BarrelShifter.new('barrel', width: 8) },
+
+    # CPU
+    'cpu/instruction_decoder' => -> { RHDL::HDL::CPU::InstructionDecoder.new('decoder') }
+  }.freeze
+
+  desc "Export all components to gate-level IR (JSON netlists)"
+  task :export do
+    require_relative 'lib/rhdl/hdl'
+    require_relative 'lib/rhdl/gates'
+
+    puts "RHDL Gate-Level Synthesis Export"
+    puts "=" * 50
+    puts
+
+    FileUtils.mkdir_p(GATES_DIR)
+    exported_count = 0
+    error_count = 0
+
+    GATE_SYNTH_COMPONENTS.each do |name, creator|
+      begin
+        component = creator.call
+
+        # Create subdirectory
+        subdir = File.dirname(name)
+        FileUtils.mkdir_p(File.join(GATES_DIR, subdir))
+
+        # Lower to gate-level IR
+        ir = RHDL::Gates::Lower.from_components([component], name: component.name)
+
+        # Export to JSON
+        json_file = File.join(GATES_DIR, "#{name}.json")
+        File.write(json_file, ir.to_json)
+
+        # Also create a summary text file
+        txt_file = File.join(GATES_DIR, "#{name}.txt")
+        summary = []
+        summary << "Component: #{component.name}"
+        summary << "Type: #{component.class.name}"
+        summary << "Gates: #{ir.gates.length}"
+        summary << "DFFs: #{ir.dffs.length}"
+        summary << "Nets: #{ir.net_count}"
+        summary << ""
+        summary << "Inputs:"
+        ir.inputs.each { |n, nets| summary << "  #{n}: #{nets.length} bits" }
+        summary << ""
+        summary << "Outputs:"
+        ir.outputs.each { |n, nets| summary << "  #{n}: #{nets.length} bits" }
+        summary << ""
+        summary << "Gate Types:"
+        gate_counts = ir.gates.group_by(&:type).transform_values(&:length)
+        gate_counts.each { |type, count| summary << "  #{type}: #{count}" }
+        File.write(txt_file, summary.join("\n"))
+
+        puts "  [OK] #{name} (#{ir.gates.length} gates, #{ir.dffs.length} DFFs)"
+        exported_count += 1
+      rescue => e
+        puts "  [ERROR] #{name}: #{e.message}"
+        error_count += 1
+      end
+    end
+
+    puts
+    puts "=" * 50
+    puts "Exported: #{exported_count}/#{GATE_SYNTH_COMPONENTS.size} components"
+    puts "Errors: #{error_count}"
+    puts "Output: #{GATES_DIR}"
+  end
+
+  desc "Export simcpu datapath to gate-level"
+  task :simcpu do
+    require_relative 'lib/rhdl/hdl'
+    require_relative 'lib/rhdl/gates'
+
+    puts "RHDL SimCPU Gate-Level Export"
+    puts "=" * 50
+    puts
+
+    FileUtils.mkdir_p(File.join(GATES_DIR, 'cpu'))
+
+    begin
+      # Create CPU datapath components
+      pc = RHDL::HDL::ProgramCounter.new('pc', width: 16)
+      acc = RHDL::HDL::Register.new('acc', width: 8)
+      alu = RHDL::HDL::ALU.new('alu', width: 8)
+      decoder = RHDL::HDL::CPU::InstructionDecoder.new('decoder')
+
+      # Lower each component individually
+      components = [
+        ['cpu/pc', pc],
+        ['cpu/acc', acc],
+        ['cpu/alu', alu],
+        ['cpu/decoder', decoder]
+      ]
+
+      total_gates = 0
+      total_dffs = 0
+
+      components.each do |name, component|
+        ir = RHDL::Gates::Lower.from_components([component], name: component.name)
+
+        json_file = File.join(GATES_DIR, "#{name}.json")
+        File.write(json_file, ir.to_json)
+
+        puts "  [OK] #{name}: #{ir.gates.length} gates, #{ir.dffs.length} DFFs"
+        total_gates += ir.gates.length
+        total_dffs += ir.dffs.length
+      end
+
+      puts
+      puts "SimCPU Totals:"
+      puts "  Total Gates: #{total_gates}"
+      puts "  Total DFFs: #{total_dffs}"
+      puts "  Output: #{File.join(GATES_DIR, 'cpu')}"
+    rescue => e
+      puts "  [ERROR] #{e.message}"
+      puts e.backtrace.first(5).join("\n")
+    end
+  end
+
+  desc "Clean gate-level synthesis output"
+  task :clean do
+    if Dir.exist?(GATES_DIR)
+      FileUtils.rm_rf(GATES_DIR)
+      puts "Cleaned: #{GATES_DIR}"
+    end
+    puts "Gate-level files cleaned."
+  end
+
+  desc "Show gate-level synthesis statistics"
+  task :stats do
+    require_relative 'lib/rhdl/hdl'
+    require_relative 'lib/rhdl/gates'
+
+    puts "RHDL Gate-Level Synthesis Statistics"
+    puts "=" * 50
+    puts
+
+    total_gates = 0
+    total_dffs = 0
+    component_stats = []
+
+    GATE_SYNTH_COMPONENTS.each do |name, creator|
+      begin
+        component = creator.call
+        ir = RHDL::Gates::Lower.from_components([component], name: component.name)
+        component_stats << {
+          name: name,
+          gates: ir.gates.length,
+          dffs: ir.dffs.length,
+          nets: ir.net_count
+        }
+        total_gates += ir.gates.length
+        total_dffs += ir.dffs.length
+      rescue => e
+        component_stats << { name: name, error: e.message }
+      end
+    end
+
+    # Sort by gate count
+    component_stats.sort_by! { |s| -(s[:gates] || 0) }
+
+    puts "Components by Gate Count:"
+    puts "-" * 50
+    component_stats.each do |s|
+      if s[:error]
+        puts "  #{s[:name]}: ERROR - #{s[:error]}"
+      else
+        puts "  #{s[:name]}: #{s[:gates]} gates, #{s[:dffs]} DFFs, #{s[:nets]} nets"
+      end
+    end
+
+    puts
+    puts "=" * 50
+    puts "Total Components: #{GATE_SYNTH_COMPONENTS.size}"
+    puts "Total Gates: #{total_gates}"
+    puts "Total DFFs: #{total_dffs}"
+  end
+end
+
+desc "Export gate-level synthesis (alias for gates:export)"
+task gates: 'gates:export'
+
+# =============================================================================
 # Benchmarking Tasks
 # =============================================================================
 
