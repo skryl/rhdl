@@ -63,4 +63,26 @@ RSpec.describe RHDL::HDL::DFlipFlop do
       expect(verilog).to include('output q')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::DFlipFlop.new('dff') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'dff') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('dff.d', 'dff.clk', 'dff.rst', 'dff.en')
+      expect(ir.outputs.keys).to include('dff.q', 'dff.qn')
+      expect(ir.dffs.length).to eq(1)
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module dff')
+      expect(verilog).to include('input d')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input rst')
+      expect(verilog).to include('input en')
+      expect(verilog).to include('output q')
+      expect(verilog).to include('output qn')
+    end
+  end
 end

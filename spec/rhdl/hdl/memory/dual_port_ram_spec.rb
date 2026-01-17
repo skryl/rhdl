@@ -95,4 +95,27 @@ RSpec.describe RHDL::HDL::DualPortRAM do
       expect(verilog).to match(/output.*\[7:0\].*dout_a/)
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::DualPortRAM.new('dpram') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'dpram') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('dpram.clk', 'dpram.we_a', 'dpram.we_b', 'dpram.addr_a', 'dpram.addr_b', 'dpram.din_a', 'dpram.din_b')
+      expect(ir.outputs.keys).to include('dpram.dout_a', 'dpram.dout_b')
+      expect(ir.gates.length).to be >= 1
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module dpram')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input we_a')
+      expect(verilog).to include('input we_b')
+      expect(verilog).to include('input [7:0] addr_a')
+      expect(verilog).to include('input [7:0] addr_b')
+      expect(verilog).to include('output [7:0] dout_a')
+      expect(verilog).to include('output [7:0] dout_b')
+    end
+  end
 end

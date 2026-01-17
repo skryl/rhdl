@@ -93,4 +93,27 @@ RSpec.describe RHDL::HDL::JKFlipFlop do
       expect(verilog).to match(/output.*q/)
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::JKFlipFlop.new('jkff') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'jkff') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('jkff.j', 'jkff.k', 'jkff.clk', 'jkff.rst', 'jkff.en')
+      expect(ir.outputs.keys).to include('jkff.q', 'jkff.qn')
+      expect(ir.dffs.length).to eq(1)
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module jkff')
+      expect(verilog).to include('input j')
+      expect(verilog).to include('input k')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input rst')
+      expect(verilog).to include('input en')
+      expect(verilog).to include('output q')
+      expect(verilog).to include('output qn')
+    end
+  end
 end

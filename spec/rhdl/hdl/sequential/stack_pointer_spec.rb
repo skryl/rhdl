@@ -101,4 +101,27 @@ RSpec.describe RHDL::HDL::StackPointer do
       expect(verilog).to match(/output.*\[7:0\].*q/)
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::StackPointer.new('sp') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'sp') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('sp.clk', 'sp.rst', 'sp.push', 'sp.pop')
+      expect(ir.outputs.keys).to include('sp.q', 'sp.empty', 'sp.full')
+      expect(ir.dffs.length).to eq(8)  # 8-bit stack pointer has 8 DFFs
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module sp')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input rst')
+      expect(verilog).to include('input push')
+      expect(verilog).to include('input pop')
+      expect(verilog).to include('output [7:0] q')
+      expect(verilog).to include('output empty')
+      expect(verilog).to include('output full')
+    end
+  end
 end

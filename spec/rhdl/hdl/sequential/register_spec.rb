@@ -51,4 +51,25 @@ RSpec.describe RHDL::HDL::Register do
       expect(verilog).to match(/output.*\[7:0\].*q/)
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::Register.new('reg8') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'reg8') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('reg8.d', 'reg8.clk', 'reg8.rst', 'reg8.en')
+      expect(ir.outputs.keys).to include('reg8.q')
+      expect(ir.dffs.length).to eq(8)  # 8-bit register has 8 DFFs
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module reg8')
+      expect(verilog).to include('input [7:0] d')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input rst')
+      expect(verilog).to include('input en')
+      expect(verilog).to include('output [7:0] q')
+    end
+  end
 end

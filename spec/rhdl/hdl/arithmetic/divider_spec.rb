@@ -51,4 +51,26 @@ RSpec.describe RHDL::HDL::Divider do
       expect(verilog).to include('output [7:0] quotient')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::Divider.new('div', width: 8) }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'div') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('div.dividend', 'div.divisor')
+      expect(ir.outputs.keys).to include('div.quotient', 'div.remainder', 'div.div_by_zero')
+      # Divider has many gates for restoring division
+      expect(ir.gates.length).to be >= 1
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module div')
+      expect(verilog).to include('input [7:0] dividend')
+      expect(verilog).to include('input [7:0] divisor')
+      expect(verilog).to include('output [7:0] quotient')
+      expect(verilog).to include('output [7:0] remainder')
+      expect(verilog).to include('output div_by_zero')
+    end
+  end
 end

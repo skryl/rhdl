@@ -38,4 +38,22 @@ RSpec.describe RHDL::HDL::PopCount do
       expect(verilog).to include('input [7:0] a')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::PopCount.new('popcount', width: 8) }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'popcount') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('popcount.a')
+      expect(ir.outputs.keys).to include('popcount.count')
+      expect(ir.gates.length).to be >= 1
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module popcount')
+      expect(verilog).to include('input [7:0] a')
+      expect(verilog).to include('output [3:0] count')
+    end
+  end
 end

@@ -109,4 +109,30 @@ RSpec.describe RHDL::HDL::ALU do
       expect(verilog).to include('output [7:0] result')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::ALU.new('alu', width: 8) }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'alu') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('alu.a', 'alu.b', 'alu.op', 'alu.cin')
+      expect(ir.outputs.keys).to include('alu.result', 'alu.cout', 'alu.zero', 'alu.negative', 'alu.overflow')
+      # ALU has many gates for all operations
+      expect(ir.gates.length).to be >= 1
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module alu')
+      expect(verilog).to include('input [7:0] a')
+      expect(verilog).to include('input [7:0] b')
+      expect(verilog).to include('input [3:0] op')
+      expect(verilog).to include('input cin')
+      expect(verilog).to include('output [7:0] result')
+      expect(verilog).to include('output cout')
+      expect(verilog).to include('output zero')
+      expect(verilog).to include('output negative')
+      expect(verilog).to include('output overflow')
+    end
+  end
 end

@@ -37,4 +37,24 @@ RSpec.describe RHDL::HDL::Mux8 do
       expect(verilog).to include('output y')
     end
   end
+
+  describe 'gate-level netlist (1-bit)' do
+    let(:component) { RHDL::HDL::Mux8.new('mux8', width: 1) }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mux8') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('mux8.in0', 'mux8.in1', 'mux8.in2', 'mux8.in3')
+      expect(ir.inputs.keys).to include('mux8.in4', 'mux8.in5', 'mux8.in6', 'mux8.in7', 'mux8.sel')
+      expect(ir.outputs.keys).to include('mux8.y')
+      expect(ir.gates.length).to be >= 1
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module mux8')
+      expect(verilog).to include('input in0')
+      expect(verilog).to include('input [2:0] sel')
+      expect(verilog).to include('output y')
+    end
+  end
 end

@@ -52,4 +52,23 @@ RSpec.describe RHDL::HDL::BitReverse do
       expect(verilog).to include('input [7:0] a')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::BitReverse.new('bitrev', width: 8) }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'bitrev') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('bitrev.a')
+      expect(ir.outputs.keys).to include('bitrev.y')
+      # Bit reverse is just rewiring, may have buffer gates or none
+      expect(ir.gates.length).to be >= 0
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module bitrev')
+      expect(verilog).to include('input [7:0] a')
+      expect(verilog).to include('output [7:0] y')
+    end
+  end
 end

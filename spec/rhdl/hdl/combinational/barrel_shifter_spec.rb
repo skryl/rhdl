@@ -80,4 +80,26 @@ RSpec.describe RHDL::HDL::BarrelShifter do
       expect(verilog).to include('output [7:0] y')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::BarrelShifter.new('bshifter') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'bshifter') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('bshifter.a', 'bshifter.shift', 'bshifter.dir', 'bshifter.arith', 'bshifter.rotate')
+      expect(ir.outputs.keys).to include('bshifter.y')
+      expect(ir.gates.length).to be >= 1
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module bshifter')
+      expect(verilog).to include('input [7:0] a')
+      expect(verilog).to include('input [2:0] shift')
+      expect(verilog).to include('input dir')
+      expect(verilog).to include('input arith')
+      expect(verilog).to include('input rotate')
+      expect(verilog).to include('output [7:0] y')
+    end
+  end
 end

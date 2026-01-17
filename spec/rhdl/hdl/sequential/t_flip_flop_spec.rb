@@ -58,4 +58,26 @@ RSpec.describe RHDL::HDL::TFlipFlop do
       expect(verilog).to match(/output.*q/)
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::TFlipFlop.new('tff') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'tff') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('tff.t', 'tff.clk', 'tff.rst', 'tff.en')
+      expect(ir.outputs.keys).to include('tff.q', 'tff.qn')
+      expect(ir.dffs.length).to eq(1)
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module tff')
+      expect(verilog).to include('input t')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input rst')
+      expect(verilog).to include('input en')
+      expect(verilog).to include('output q')
+      expect(verilog).to include('output qn')
+    end
+  end
 end

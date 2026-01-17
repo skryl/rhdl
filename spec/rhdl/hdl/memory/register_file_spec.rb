@@ -70,4 +70,26 @@ RSpec.describe RHDL::HDL::RegisterFile do
       expect(verilog).to match(/output.*\[7:0\].*rdata1/)
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::RegisterFile.new('regfile') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'regfile') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('regfile.clk', 'regfile.we', 'regfile.waddr', 'regfile.wdata', 'regfile.raddr1', 'regfile.raddr2')
+      expect(ir.outputs.keys).to include('regfile.rdata1', 'regfile.rdata2')
+      expect(ir.gates.length).to be >= 1
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module regfile')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input we')
+      expect(verilog).to include('input [2:0] waddr')
+      expect(verilog).to include('input [7:0] wdata')
+      expect(verilog).to include('output [7:0] rdata1')
+      expect(verilog).to include('output [7:0] rdata2')
+    end
+  end
 end
