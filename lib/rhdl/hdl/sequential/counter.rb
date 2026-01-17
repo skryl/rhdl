@@ -14,6 +14,28 @@ module RHDL
       port_output :tc       # Terminal count (max when up, 0 when down)
       port_output :zero     # Zero flag
 
+      behavior do
+        max_val = param(:max)
+        if rising_edge?
+          if rst.value == 1
+            set_state(0)
+          elsif load.value == 1
+            set_state(d.value & max_val)
+          elsif en.value == 1
+            if up.value == 1
+              set_state((state + 1) & max_val)
+            else
+              set_state((state - 1) & max_val)
+            end
+          end
+        end
+        q <= state
+        # Terminal count: max when counting up, 0 when counting down
+        tc_val = up.value == 1 ? (state == max_val ? 1 : 0) : (state == 0 ? 1 : 0)
+        tc <= tc_val
+        zero <= (state == 0 ? 1 : 0)
+      end
+
       def initialize(name = nil, width: 8)
         @width = width
         @state = 0
@@ -25,26 +47,6 @@ module RHDL
         return if @width == 8
         @inputs[:d] = Wire.new("#{@name}.d", width: @width)
         @outputs[:q] = Wire.new("#{@name}.q", width: @width)
-      end
-
-      def propagate
-        if rising_edge?
-          if in_val(:rst) == 1
-            @state = 0
-          elsif in_val(:load) == 1
-            @state = in_val(:d) & @max
-          elsif in_val(:en) == 1
-            if in_val(:up) == 1
-              @state = (@state + 1) & @max
-            else
-              @state = (@state - 1) & @max
-            end
-          end
-        end
-        out_set(:q, @state)
-        tc = in_val(:up) == 1 ? (@state == @max ? 1 : 0) : (@state == 0 ? 1 : 0)
-        out_set(:tc, tc)
-        out_set(:zero, @state == 0 ? 1 : 0)
       end
     end
   end

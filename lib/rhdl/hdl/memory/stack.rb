@@ -15,6 +15,31 @@ module RHDL
       port_output :full
       port_output :sp, width: 4
 
+      behavior do
+        depth_val = param(:depth)
+        data_width = param(:data_width)
+        sp_val = param(:sp)
+
+        if rising_edge?
+          if rst.value == 1
+            set_sp(0)
+          elsif push.value == 1 && sp_val < depth_val
+            mem_write(sp_val, din.value & ((1 << data_width) - 1))
+            set_sp(sp_val + 1)
+          elsif pop.value == 1 && sp_val > 0
+            set_sp(sp_val - 1)
+          end
+        end
+
+        # Output top of stack (re-read sp after potential update)
+        current_sp = param(:sp)
+        dout_val = current_sp > 0 ? mem_read(current_sp - 1) : 0
+        dout <= dout_val
+        empty <= (current_sp == 0 ? 1 : 0)
+        full <= (current_sp >= depth_val ? 1 : 0)
+        sp <= current_sp
+      end
+
       def initialize(name = nil, data_width: 8, depth: 16)
         @data_width = data_width
         @depth = depth
@@ -36,26 +61,6 @@ module RHDL
         prev = @prev_clk
         @prev_clk = in_val(:clk)
         prev == 0 && @prev_clk == 1
-      end
-
-      def propagate
-        if rising_edge?
-          if in_val(:rst) == 1
-            @sp = 0
-          elsif in_val(:push) == 1 && @sp < @depth
-            @memory[@sp] = in_val(:din) & ((1 << @data_width) - 1)
-            @sp += 1
-          elsif in_val(:pop) == 1 && @sp > 0
-            @sp -= 1
-          end
-        end
-
-        # Output top of stack
-        dout = @sp > 0 ? @memory[@sp - 1] : 0
-        out_set(:dout, dout)
-        out_set(:empty, @sp == 0 ? 1 : 0)
-        out_set(:full, @sp >= @depth ? 1 : 0)
-        out_set(:sp, @sp)
       end
     end
   end

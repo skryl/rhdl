@@ -80,6 +80,34 @@ module RHDL
         mem[idx] = val
       end
 
+      # Set stack pointer (for Stack component)
+      def set_sp(value)
+        @component.instance_variable_set(:@sp, resolve_value(value))
+      end
+
+      # Generic state variable access (for components with multiple state vars like FIFO)
+      def get_var(name)
+        @component.instance_variable_get(:"@#{name}") || 0
+      end
+
+      def set_var(name, value)
+        @component.instance_variable_set(:"@#{name}", resolve_value(value))
+      end
+
+      # Dynamic input access (for MuxN with variable input count)
+      def input_val(name)
+        wire = @component.inputs[name.to_sym]
+        return 0 unless wire
+        wire.value
+      end
+
+      # Dynamic output assignment (for DecoderN with variable output count)
+      def output_set(name, value)
+        wire = @component.outputs[name.to_sym]
+        return unless wire
+        record_assignment(wire, resolve_value(value))
+      end
+
       # Get memory array size
       def mem_size(array_name = :memory)
         mem = @component.instance_variable_get(:"@#{array_name}")

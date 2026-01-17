@@ -15,6 +15,24 @@ module RHDL
       port_output :dout_a, width: 8
       port_output :dout_b, width: 8
 
+      behavior do
+        depth = param(:depth)
+        data_width = param(:data_width)
+        data_mask = (1 << data_width) - 1
+        addr_a_val = addr_a.value & (depth - 1)
+        addr_b_val = addr_b.value & (depth - 1)
+
+        # Write on rising edge
+        if rising_edge?
+          mem_write(addr_a_val, din_a.value & data_mask) if we_a.value == 1
+          mem_write(addr_b_val, din_b.value & data_mask) if we_b.value == 1
+        end
+
+        # Async read from both ports
+        dout_a <= mem_read(addr_a_val)
+        dout_b <= mem_read(addr_b_val)
+      end
+
       def initialize(name = nil, data_width: 8, addr_width: 8)
         @data_width = data_width
         @addr_width = addr_width
@@ -38,28 +56,6 @@ module RHDL
         prev = @prev_clk
         @prev_clk = in_val(:clk)
         prev == 0 && @prev_clk == 1
-      end
-
-      def propagate
-        if rising_edge?
-          # Write from port A
-          if in_val(:we_a) == 1
-            addr_a = in_val(:addr_a) & (@depth - 1)
-            @memory[addr_a] = in_val(:din_a) & ((1 << @data_width) - 1)
-          end
-
-          # Write from port B
-          if in_val(:we_b) == 1
-            addr_b = in_val(:addr_b) & (@depth - 1)
-            @memory[addr_b] = in_val(:din_b) & ((1 << @data_width) - 1)
-          end
-        end
-
-        # Async read from both ports
-        addr_a = in_val(:addr_a) & (@depth - 1)
-        addr_b = in_val(:addr_b) & (@depth - 1)
-        out_set(:dout_a, @memory[addr_a])
-        out_set(:dout_b, @memory[addr_b])
       end
 
       def read_mem(addr)

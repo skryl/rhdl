@@ -14,6 +14,27 @@ module RHDL
       port_output :q, width: 8
       port_output :d_out     # Serial output
 
+      behavior do
+        w = param(:width)
+        mask = (1 << w) - 1
+        if rising_edge?
+          if rst.value == 1
+            set_state(0)
+          elsif load.value == 1
+            set_state(d.value)
+          elsif en.value == 1
+            if dir.value == 0  # Shift right
+              set_state((state >> 1) | ((d_in.value & 1) << (w - 1)))
+            else  # Shift left
+              set_state(((state << 1) | (d_in.value & 1)) & mask)
+            end
+          end
+        end
+        q <= state
+        # Serial out is LSB when shifting right, MSB when shifting left
+        d_out <= dir.value == 0 ? state & 1 : (state >> (w - 1)) & 1
+      end
+
       def initialize(name = nil, width: 8)
         @width = width
         @state = 0
@@ -24,26 +45,6 @@ module RHDL
         return if @width == 8
         @inputs[:d] = Wire.new("#{@name}.d", width: @width)
         @outputs[:q] = Wire.new("#{@name}.q", width: @width)
-      end
-
-      def propagate
-        if rising_edge?
-          if in_val(:rst) == 1
-            @state = 0
-          elsif in_val(:load) == 1
-            @state = in_val(:d)
-          elsif in_val(:en) == 1
-            if in_val(:dir) == 0  # Shift right
-              @state = (@state >> 1) | ((in_val(:d_in) & 1) << (@width - 1))
-            else  # Shift left
-              @state = ((@state << 1) | (in_val(:d_in) & 1)) & ((1 << @width) - 1)
-            end
-          end
-        end
-        out_set(:q, @state)
-        # Serial out is LSB when shifting right, MSB when shifting left
-        serial_out = in_val(:dir) == 0 ? @state & 1 : (@state >> (@width - 1)) & 1
-        out_set(:d_out, serial_out)
       end
     end
   end
