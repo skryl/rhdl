@@ -437,8 +437,8 @@ task diagrams: 'diagrams:generate'
 # =============================================================================
 
 namespace :hdl do
-  VHDL_DIR = File.expand_path('vhdl', __dir__)
-  VERILOG_DIR = File.expand_path('verilog', __dir__)
+  VHDL_DIR = File.expand_path('export/vhdl', __dir__)
+  VERILOG_DIR = File.expand_path('export/verilog', __dir__)
   EXAMPLES_DIR = File.expand_path('examples', __dir__)
 
   # Example components with to_verilog methods
@@ -644,7 +644,7 @@ task hdl: 'hdl:export'
 # =============================================================================
 
 namespace :gates do
-  GATES_DIR = File.expand_path('gates', __dir__)
+  GATES_DIR = File.expand_path('export/gates', __dir__)
 
   # All components that support gate-level synthesis
   GATE_SYNTH_COMPONENTS = {
