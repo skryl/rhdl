@@ -36,6 +36,74 @@ rescue LoadError
   end
 end
 
+# =============================================================================
+# Parallel Test Tasks
+# =============================================================================
+
+begin
+  require 'parallel_tests'
+
+  # Helper to find the parallel_rspec command
+  def parallel_rspec_cmd
+    binstub = File.expand_path('bin/parallel_rspec', __dir__)
+    if File.executable?(binstub)
+      binstub
+    else
+      'bundle exec parallel_rspec'
+    end
+  end
+
+  namespace :parallel do
+    desc "Run all tests in parallel (auto-detect CPU count)"
+    task :spec do
+      sh "#{parallel_rspec_cmd} spec/"
+    end
+
+    desc "Run all tests in parallel with specific number of processes"
+    task :spec_n, [:count] do |_, args|
+      count = args[:count] || ENV['PARALLEL_TEST_PROCESSORS'] || Parallel.processor_count
+      sh "#{parallel_rspec_cmd} -n #{count} spec/"
+    end
+
+    desc "Run 6502 CPU tests in parallel"
+    task :spec_6502 do
+      sh "#{parallel_rspec_cmd} spec/examples/mos6502/"
+    end
+
+    desc "Run HDL tests in parallel"
+    task :spec_hdl do
+      sh "#{parallel_rspec_cmd} spec/rhdl/hdl/"
+    end
+
+    desc "Prepare parallel test database (record test file runtimes)"
+    task :prepare do
+      FileUtils.mkdir_p('tmp')
+      sh "#{parallel_rspec_cmd} --record-runtime spec/"
+    end
+
+    desc "Run tests in parallel using runtime-based grouping for better balance"
+    task :spec_balanced do
+      runtime_log = 'tmp/parallel_runtime_rspec.log'
+      if File.exist?(runtime_log)
+        sh "#{parallel_rspec_cmd} --group-by runtime --runtime-log #{runtime_log} spec/"
+      else
+        puts "No runtime log found. Run 'rake parallel:prepare' first for optimal balancing."
+        puts "Falling back to file-count based grouping..."
+        Rake::Task['parallel:spec'].invoke
+      end
+    end
+  end
+
+  desc "Run all tests in parallel (alias for parallel:spec)"
+  task pspec: 'parallel:spec'
+
+rescue LoadError
+  desc "Run tests in parallel (requires parallel_tests gem)"
+  task :pspec do
+    abort "parallel_tests gem not installed. Run: bundle install"
+  end
+end
+
 # RuboCop tasks (optional)
 begin
   require "rubocop/rake_task"
