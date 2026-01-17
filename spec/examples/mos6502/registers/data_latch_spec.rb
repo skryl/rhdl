@@ -49,4 +49,27 @@ RSpec.describe MOS6502::DataLatch do
       expect(verilog).to include('data')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { described_class.new('mos6502_data_latch') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mos6502_data_latch') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('mos6502_data_latch.clk', 'mos6502_data_latch.rst')
+      expect(ir.inputs.keys).to include('mos6502_data_latch.load')
+      expect(ir.outputs.keys).to include('mos6502_data_latch.data')
+    end
+
+    it 'generates DFFs for 8-bit data register' do
+      # Data latch has 8-bit register requiring DFFs
+      expect(ir.dffs.length).to be > 0
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module mos6502_data_latch')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('output [7:0] data')
+    end
+  end
 end

@@ -120,4 +120,29 @@ RSpec.describe MOS6502::ALU do
       expect(verilog).to include('result')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { MOS6502::ALU.new('mos6502_alu') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mos6502_alu') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('mos6502_alu.a', 'mos6502_alu.b', 'mos6502_alu.op')
+      expect(ir.inputs.keys).to include('mos6502_alu.c_in', 'mos6502_alu.d_flag')
+      expect(ir.outputs.keys).to include('mos6502_alu.result', 'mos6502_alu.n', 'mos6502_alu.z', 'mos6502_alu.c', 'mos6502_alu.v')
+    end
+
+    it 'generates gates for combinational logic' do
+      # ALU is a complex combinational component with many gates
+      expect(ir.gates.length).to be > 50
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module mos6502_alu')
+      expect(verilog).to include('input [7:0] a')
+      expect(verilog).to include('input [7:0] b')
+      expect(verilog).to include('input [3:0] op')
+      expect(verilog).to include('output [7:0] result')
+    end
+  end
 end

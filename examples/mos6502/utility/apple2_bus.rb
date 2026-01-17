@@ -1,6 +1,6 @@
 # Apple ][-style memory bus with I/O page and soft switches
 
-require_relative '../../lib/rhdl/hdl'
+require_relative '../../../lib/rhdl/hdl'
 
 module MOS6502
   class Apple2Bus < RHDL::HDL::SimComponent

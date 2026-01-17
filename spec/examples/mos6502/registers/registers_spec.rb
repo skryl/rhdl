@@ -53,4 +53,28 @@ RSpec.describe MOS6502::Registers do
       expect(verilog).to include('always @(posedge clk')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { described_class.new('mos6502_registers') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mos6502_registers') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('mos6502_registers.clk', 'mos6502_registers.rst')
+      expect(ir.inputs.keys).to include('mos6502_registers.data_in')
+      expect(ir.inputs.keys).to include('mos6502_registers.load_a', 'mos6502_registers.load_x', 'mos6502_registers.load_y')
+      expect(ir.outputs.keys).to include('mos6502_registers.a', 'mos6502_registers.x', 'mos6502_registers.y')
+    end
+
+    it 'generates DFFs for A, X, Y registers' do
+      # Registers has 3x 8-bit registers requiring DFFs
+      expect(ir.dffs.length).to be > 0
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module mos6502_registers')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('output [7:0] a')
+    end
+  end
 end
