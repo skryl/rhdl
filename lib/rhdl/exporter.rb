@@ -16,11 +16,20 @@ module RHDL
         components << component_class unless components.include?(component_class)
       end
 
-      # Find all classes that include RHDL::DSL
+      # Find all classes that are exportable (DSL or HDL with behavior blocks)
       def discover_components
-        ObjectSpace.each_object(Class).select do |klass|
+        dsl_components = ObjectSpace.each_object(Class).select do |klass|
           klass.included_modules.include?(RHDL::DSL) && klass != RHDL::Component
         end
+
+        # Also find HDL SimComponent subclasses with behavior blocks
+        hdl_components = ObjectSpace.each_object(Class).select do |klass|
+          klass < RHDL::HDL::SimComponent &&
+            klass.respond_to?(:behavior_defined?) &&
+            klass.behavior_defined?
+        end
+
+        (dsl_components + hdl_components).uniq
       end
 
       # Export a single component to VHDL
@@ -110,11 +119,25 @@ module RHDL
           {
             class: c,
             name: c.name.split('::').last.underscore,
+            relative_path: component_relative_path(c),
             ports: c._ports.size,
             signals: c._signals.size,
-            generics: c._generics.size
+            generics: c.respond_to?(:_generics) ? c._generics.size : 0
           }
         end
+      end
+
+      # Compute relative path from component class name
+      # e.g., RHDL::HDL::CPU::InstructionDecoder -> cpu/instruction_decoder
+      def component_relative_path(component_class)
+        parts = component_class.name.split('::')
+
+        # Remove RHDL and HDL prefixes
+        parts.shift if parts.first == 'RHDL'
+        parts.shift if parts.first == 'HDL'
+
+        # Convert all parts to snake_case and join with /
+        parts.map(&:underscore).join('/')
       end
     end
   end
