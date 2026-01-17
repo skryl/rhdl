@@ -24,7 +24,7 @@ module MOS6502
       0xC057 => [:hires, true]
     }.freeze
 
-    attr_reader :speaker_toggles, :video
+    attr_reader :speaker_toggles, :video, :key_ready
 
     def initialize(name = nil)
       @memory = Array.new(0x10000, 0)
@@ -40,6 +40,7 @@ module MOS6502
         hires: false
       }
       @soft_switch_access = Hash.new(0)
+      @text_page_dirty = false
       super(name)
     end
 
@@ -118,6 +119,58 @@ module MOS6502
       (TEXT_PAGE1_START..TEXT_PAGE1_END).any? { |addr| @memory[addr] != 0 }
     end
 
+    # Check if text page has been modified since last clear
+    def text_page_dirty?
+      @text_page_dirty
+    end
+
+    # Clear the dirty flag after rendering
+    def clear_text_page_dirty
+      @text_page_dirty = false
+    end
+
+    # Read the entire text page as a 24x40 array of characters
+    # Apple II text page has a peculiar memory layout
+    def read_text_page
+      lines = Array.new(24) { Array.new(40, 0x20) }
+
+      # Apple II text page memory layout:
+      # Line groups are interleaved with 128-byte spacing
+      # Group 0: lines 0, 8, 16 at offsets 0x000, 0x080, 0x100
+      # Group 1: lines 1, 9, 17 at offsets 0x028, 0x0A8, 0x128
+      # etc.
+      base_offsets = [0x000, 0x080, 0x100]
+      line_offsets = [0x00, 0x28, 0x50, 0x78, 0xA0, 0xC8, 0xF0, 0x118]
+
+      8.times do |group|
+        3.times do |section|
+          line_num = group + (section * 8)
+          next if line_num >= 24
+
+          addr = TEXT_PAGE1_START + line_offsets[group] + base_offsets[section]
+          40.times do |col|
+            byte = @memory[addr + col]
+            # Convert Apple II character to ASCII (handle inverse/flash)
+            char = byte & 0x7F
+            char = 0x20 if char < 0x20 # Control chars to space
+            lines[line_num][col] = char
+          end
+        end
+      end
+
+      lines
+    end
+
+    # Read text page as a string (24 lines of 40 chars)
+    def read_text_page_string
+      read_text_page.map { |line| line.pack('C*') }.join("\n")
+    end
+
+    # Clear the keyboard ready flag (for polling)
+    def clear_key
+      @key_ready = false
+    end
+
     private
 
     def handle_read(addr)
@@ -137,6 +190,11 @@ module MOS6502
       return if @rom_mask[addr]
 
       @memory[addr] = value & 0xFF
+
+      # Track text page writes for dirty flag
+      if addr >= TEXT_PAGE1_START && addr <= TEXT_PAGE1_END
+        @text_page_dirty = true
+      end
     end
 
     def io_page?(addr)

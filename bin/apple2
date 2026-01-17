@@ -1,0 +1,438 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Apple ][ Terminal Emulator
+# Runs a 6502 simulation with Apple II-style memory-mapped I/O
+
+require 'io/console'
+require 'optparse'
+
+$LOAD_PATH.unshift File.expand_path('../lib', __dir__)
+$LOAD_PATH.unshift File.expand_path('../examples', __dir__)
+$LOAD_PATH.unshift File.expand_path('../spec/support', __dir__)
+
+require 'rhdl'
+require 'apple2_harness'
+
+# Apple II Terminal class
+class Apple2Terminal
+  SCREEN_ROWS = 24
+  SCREEN_COLS = 40
+
+  # ANSI escape codes
+  ESC = "\e"
+  CLEAR_SCREEN = "#{ESC}[2J"
+  MOVE_HOME = "#{ESC}[H"
+  HIDE_CURSOR = "#{ESC}[?25l"
+  SHOW_CURSOR = "#{ESC}[?25h"
+  REVERSE_VIDEO = "#{ESC}[7m"
+  NORMAL_VIDEO = "#{ESC}[0m"
+  GREEN_FG = "#{ESC}[32m"
+  BLACK_BG = "#{ESC}[40m"
+  BOLD = "#{ESC}[1m"
+
+  attr_reader :runner, :running
+
+  def initialize(options = {})
+    @options = options
+    @runner = Apple2Harness::Runner.new
+    @running = false
+    @last_screen = nil
+    @cycles_per_frame = options[:speed] || 10_000
+    @debug = options[:debug] || false
+    @green_screen = options[:green] || false
+  end
+
+  def load_rom(path, base_addr: 0xF800)
+    puts "Loading ROM: #{path} at $#{base_addr.to_s(16).upcase}"
+    bytes = File.binread(path)
+    @runner.load_rom(bytes, base_addr: base_addr)
+  end
+
+  def load_program(path, base_addr: 0x0800)
+    puts "Loading program: #{path} at $#{base_addr.to_s(16).upcase}"
+    bytes = File.binread(path)
+    @runner.load_ram(bytes, base_addr: base_addr)
+  end
+
+  def load_program_bytes(bytes, base_addr: 0x0800)
+    @runner.load_ram(bytes, base_addr: base_addr)
+  end
+
+  def setup_reset_vector(addr)
+    # Set reset vector to point to our program
+    @runner.bus.write(0xFFFC, addr & 0xFF)
+    @runner.bus.write(0xFFFD, (addr >> 8) & 0xFF)
+  end
+
+  def run
+    @running = true
+
+    # Set up signal handler for clean exit
+    trap('INT') { stop }
+    trap('TERM') { stop }
+
+    puts "Starting Apple ][ emulator..."
+    puts "Press Ctrl+C to exit"
+    puts "Press any key to continue..."
+    sleep 0.5
+
+    # Reset the CPU
+    @runner.reset
+
+    # Enter raw terminal mode
+    begin
+      IO.console.raw do
+        print CLEAR_SCREEN
+        print MOVE_HOME
+        print HIDE_CURSOR
+
+        main_loop
+      end
+    ensure
+      cleanup
+    end
+  end
+
+  def stop
+    @running = false
+  end
+
+  private
+
+  def main_loop
+    frame_count = 0
+
+    while @running && !@runner.halted?
+      # Check for keyboard input (non-blocking)
+      handle_keyboard_input
+
+      # Run CPU cycles
+      @runner.run_steps(@cycles_per_frame)
+
+      # Update display if screen changed
+      if @runner.screen_dirty? || frame_count % 10 == 0
+        render_screen
+        @runner.clear_screen_dirty
+      end
+
+      frame_count += 1
+
+      # Small delay to prevent CPU spinning
+      sleep 0.016 # ~60fps
+    end
+
+    if @runner.halted?
+      print move_cursor(SCREEN_ROWS + 2, 1)
+      puts "CPU HALTED at PC=$#{@runner.cpu_state[:pc].to_s(16).upcase.rjust(4, '0')}"
+      puts "Press any key to exit..."
+      IO.console.getch
+    end
+  end
+
+  def handle_keyboard_input
+    # Non-blocking read
+    char = IO.console.read_nonblock(1)
+    return unless char
+
+    ascii = char.ord
+
+    # Handle special keys
+    case ascii
+    when 3 # Ctrl+C
+      stop
+      return
+    when 27 # ESC - check for arrow keys
+      handle_escape_sequence
+      return
+    when 127, 8 # Backspace/Delete
+      ascii = 0x08 # Apple II backspace
+    when 10, 13 # Enter/Return
+      ascii = 0x0D # Apple II carriage return
+    end
+
+    # Convert lowercase to uppercase for Apple II
+    ascii = ascii - 32 if ascii >= 97 && ascii <= 122
+
+    # Inject the key
+    @runner.inject_key(ascii)
+  rescue IO::WaitReadable, Errno::EAGAIN
+    # No input available, continue
+  end
+
+  def handle_escape_sequence
+    # Try to read arrow key sequence
+    begin
+      seq = IO.console.read_nonblock(2)
+      case seq
+      when '[A' # Up arrow
+        @runner.inject_key(0x0B) # Ctrl+K (up)
+      when '[B' # Down arrow
+        @runner.inject_key(0x0A) # Ctrl+J (down)
+      when '[C' # Right arrow
+        @runner.inject_key(0x15) # Ctrl+U (right)
+      when '[D' # Left arrow
+        @runner.inject_key(0x08) # Ctrl+H (left/backspace)
+      end
+    rescue IO::WaitReadable, Errno::EAGAIN
+      # Just ESC key pressed
+      @runner.inject_key(0x1B)
+    end
+  end
+
+  def render_screen
+    output = String.new
+    output << MOVE_HOME
+
+    if @green_screen
+      output << GREEN_FG
+      output << BLACK_BG
+    end
+
+    # Draw border top
+    output << "+" << ("-" * SCREEN_COLS) << "+\n"
+
+    # Read screen content
+    screen = @runner.read_screen_array
+
+    screen.each do |line|
+      output << "|"
+      line.each do |char_code|
+        # Handle inverse video (high bit set in original Apple II)
+        char = (char_code & 0x7F).chr
+        char = ' ' if char_code < 0x20
+        output << char
+      end
+      output << "|\n"
+    end
+
+    # Draw border bottom
+    output << "+" << ("-" * SCREEN_COLS) << "+"
+
+    output << NORMAL_VIDEO if @green_screen
+
+    # Status line
+    if @debug
+      state = @runner.cpu_state
+      output << "\n"
+      output << format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X Cycles:%d",
+                       state[:pc], state[:a], state[:x], state[:y],
+                       state[:sp], state[:p], state[:cycles])
+    end
+
+    print output
+  end
+
+  def move_cursor(row, col)
+    "#{ESC}[#{row};#{col}H"
+  end
+
+  def cleanup
+    print SHOW_CURSOR
+    print NORMAL_VIDEO
+    print move_cursor(SCREEN_ROWS + 4, 1)
+    puts "\nApple ][ emulator terminated."
+  end
+end
+
+# Demo program: Simple echo program that reads keyboard and displays on screen
+def create_demo_program
+  # Simple 6502 program that:
+  # 1. Clears screen
+  # 2. Prints "APPLE ][ READY" message
+  # 3. Echoes keyboard input to screen
+  asm = []
+
+  # ORG $0800
+  # Zero page variables
+  cursor_lo = 0x00
+  cursor_hi = 0x01
+
+  # INIT: Set up cursor at start of text page
+  asm << 0xA9 << 0x00        # LDA #$00
+  asm << 0x85 << cursor_lo   # STA $00 (cursor low)
+  asm << 0xA9 << 0x04        # LDA #$04
+  asm << 0x85 << cursor_hi   # STA $01 (cursor high)
+
+  # Clear text page
+  asm << 0xA0 << 0x00        # LDY #$00
+  asm << 0xA9 << 0xA0        # LDA #$A0 (space with high bit set)
+  # CLEAR_LOOP:
+  clear_loop = asm.length
+  asm << 0x91 << cursor_lo   # STA ($00),Y
+  asm << 0xC8                # INY
+  asm << 0xD0 << 0xFB        # BNE CLEAR_LOOP (-5)
+  asm << 0xE6 << cursor_hi   # INC $01
+  asm << 0xA5 << cursor_hi   # LDA $01
+  asm << 0xC9 << 0x08        # CMP #$08
+  asm << 0xD0 << 0xF3        # BNE CLEAR_LOOP (-13)
+
+  # Reset cursor to start
+  asm << 0xA9 << 0x00        # LDA #$00
+  asm << 0x85 << cursor_lo   # STA $00
+  asm << 0xA9 << 0x04        # LDA #$04
+  asm << 0x85 << cursor_hi   # STA $01
+
+  # Print "READY" message
+  message = "APPLE ][ READY\r"
+  message.each_byte do |b|
+    b = b | 0x80 # Set high bit for Apple II normal video
+    asm << 0xA9 << b         # LDA #char
+    asm << 0x20              # JSR PRINT_CHAR (we'll fill in address)
+    print_char_addr = asm.length + 40 # Approximate offset
+    asm << (print_char_addr & 0xFF) << ((print_char_addr >> 8) & 0xFF)
+  end
+
+  # Main loop: read keyboard and echo
+  # MAIN_LOOP:
+  main_loop = asm.length
+  asm << 0xAD << 0x00 << 0xC0  # LDA $C000 (read keyboard)
+  asm << 0x10 << 0xFB          # BPL MAIN_LOOP (wait for key)
+  asm << 0x8D << 0x10 << 0xC0  # STA $C010 (clear strobe)
+  asm << 0x29 << 0x7F          # AND #$7F (mask high bit)
+  asm << 0xC9 << 0x0D          # CMP #$0D (carriage return?)
+  asm << 0xF0 << 0x10          # BEQ NEW_LINE
+  asm << 0x09 << 0x80          # ORA #$80 (set high bit for display)
+  asm << 0x20                  # JSR PRINT_CHAR
+  print_char_offset = asm.length
+  asm << 0x00 << 0x00          # (placeholder)
+  jmp_main = asm.length
+  asm << 0x4C                  # JMP MAIN_LOOP
+  asm << (main_loop & 0xFF) << (((main_loop >> 8) + 0x08) & 0xFF)
+
+  # NEW_LINE: Handle carriage return
+  new_line = asm.length
+  # Move cursor to next line
+  asm << 0x18                  # CLC
+  asm << 0xA5 << cursor_lo     # LDA $00
+  asm << 0x69 << 0x28          # ADC #$28 (40 columns)
+  asm << 0x85 << cursor_lo     # STA $00
+  asm << 0xA5 << cursor_hi     # LDA $01
+  asm << 0x69 << 0x00          # ADC #$00
+  asm << 0x85 << cursor_hi     # STA $01
+  # Check for screen wrap
+  asm << 0xC9 << 0x08          # CMP #$08
+  asm << 0x90 << 0x04          # BCC NO_WRAP
+  asm << 0xA9 << 0x04          # LDA #$04
+  asm << 0x85 << cursor_hi     # STA $01
+  # NO_WRAP:
+  asm << 0x4C                  # JMP MAIN_LOOP
+  asm << (main_loop & 0xFF) << (((main_loop >> 8) + 0x08) & 0xFF)
+
+  # PRINT_CHAR: Print character in A to screen
+  print_char = asm.length
+  asm << 0xA0 << 0x00          # LDY #$00
+  asm << 0x91 << cursor_lo     # STA ($00),Y
+  asm << 0xE6 << cursor_lo     # INC $00
+  asm << 0xD0 << 0x02          # BNE NO_CARRY
+  asm << 0xE6 << cursor_hi     # INC $01
+  # NO_CARRY:
+  asm << 0x60                  # RTS
+
+  # Fix up JSR addresses
+  print_char_addr_full = 0x0800 + print_char
+  asm[print_char_offset] = print_char_addr_full & 0xFF
+  asm[print_char_offset + 1] = (print_char_addr_full >> 8) & 0xFF
+
+  # Fix up JSRs in message printing
+  idx = 0
+  while idx < main_loop
+    if asm[idx] == 0x20 # JSR
+      asm[idx + 1] = print_char_addr_full & 0xFF
+      asm[idx + 2] = (print_char_addr_full >> 8) & 0xFF
+      idx += 3
+    else
+      idx += 1
+    end
+  end
+
+  # Fix up NEW_LINE branch offset
+  new_line_offset = new_line - (jmp_main - 2)
+  # The BEQ after CMP #$0D needs to jump to NEW_LINE
+  beq_offset_idx = main_loop + 11 # Position of BEQ operand
+  asm[beq_offset_idx] = (new_line - (beq_offset_idx + 1)) & 0xFF
+
+  asm
+end
+
+# Parse command line options
+options = {
+  speed: 10_000,
+  debug: false,
+  green: false,
+  demo: false
+}
+
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: bin/apple2 [options] [program.bin]"
+  opts.separator ""
+  opts.separator "Apple ][ Terminal Emulator - 6502 CPU Simulation"
+  opts.separator ""
+  opts.separator "Options:"
+
+  opts.on("-r", "--rom FILE", "Load ROM file (default address: $F800)") do |v|
+    options[:rom] = v
+  end
+
+  opts.on("-a", "--address ADDR", "Load address for program (hex, default: 0800)") do |v|
+    options[:load_addr] = v.to_i(16)
+  end
+
+  opts.on("--rom-address ADDR", "Load address for ROM (hex, default: F800)") do |v|
+    options[:rom_addr] = v.to_i(16)
+  end
+
+  opts.on("-s", "--speed CYCLES", Integer, "Cycles per frame (default: 10000)") do |v|
+    options[:speed] = v
+  end
+
+  opts.on("-d", "--debug", "Show CPU state in status line") do
+    options[:debug] = true
+  end
+
+  opts.on("-g", "--green", "Green phosphor screen effect") do
+    options[:green] = true
+  end
+
+  opts.on("--demo", "Run built-in demo program") do
+    options[:demo] = true
+  end
+
+  opts.on("-h", "--help", "Show this help message") do
+    puts opts
+    exit
+  end
+end
+
+parser.parse!(ARGV)
+
+# Create terminal
+terminal = Apple2Terminal.new(options)
+
+# Load ROM if specified
+if options[:rom]
+  rom_addr = options[:rom_addr] || 0xF800
+  terminal.load_rom(options[:rom], base_addr: rom_addr)
+end
+
+# Load program file if specified
+program_file = ARGV.shift
+if program_file
+  load_addr = options[:load_addr] || 0x0800
+  terminal.load_program(program_file, base_addr: load_addr)
+  terminal.setup_reset_vector(load_addr)
+elsif options[:demo]
+  # Load demo program
+  puts "Loading built-in demo program..."
+  demo = create_demo_program
+  terminal.load_program_bytes(demo, base_addr: 0x0800)
+  terminal.setup_reset_vector(0x0800)
+else
+  puts parser
+  puts ""
+  puts "Error: No program specified. Use --demo for built-in demo or provide a binary file."
+  exit 1
+end
+
+# Run the emulator
+terminal.run
