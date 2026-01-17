@@ -25,12 +25,6 @@ module MOS6502S
     port_output :addr_hi, width: 8
     port_output :addr, width: 16
 
-    def initialize(name = nil)
-      @addr_lo_reg = 0
-      @addr_hi_reg = 0
-      super(name)
-    end
-
     # Sequential block for internal registers
     # Priority: load_full > load_lo/load_hi > hold
     sequential clock: :clk, reset: :rst, reset_values: { addr_lo: 0, addr_hi: 0 } do
@@ -43,28 +37,6 @@ module MOS6502S
     # Combinational output: 16-bit address from hi/lo
     behavior do
       addr <= cat(addr_hi, addr_lo)
-    end
-
-    # Override propagate to maintain internal state for testing
-    def propagate
-      if rising_edge?
-        if in_val(:rst) == 1
-          @addr_lo_reg = 0
-          @addr_hi_reg = 0
-        elsif in_val(:load_full) == 1
-          addr = in_val(:addr_in) & 0xFFFF
-          @addr_lo_reg = addr & 0xFF
-          @addr_hi_reg = (addr >> 8) & 0xFF
-        else
-          data = in_val(:data_in) & 0xFF
-          @addr_lo_reg = data if in_val(:load_lo) == 1
-          @addr_hi_reg = data if in_val(:load_hi) == 1
-        end
-      end
-
-      out_set(:addr, (@addr_hi_reg << 8) | @addr_lo_reg)
-      out_set(:addr_lo, @addr_lo_reg)
-      out_set(:addr_hi, @addr_hi_reg)
     end
 
     def self.to_verilog

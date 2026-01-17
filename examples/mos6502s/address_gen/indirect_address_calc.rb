@@ -49,36 +49,6 @@ module MOS6502S
       }, default: 0)
     end
 
-    # Propagate for simulation
-    def propagate
-      mode_val = in_val(:mode) & 0x0F
-      operand_lo_val = in_val(:operand_lo) & 0xFF
-      operand_hi_val = in_val(:operand_hi) & 0xFF
-      x = in_val(:x_reg) & 0xFF
-
-      ptr_lo = 0
-      ptr_hi = 0
-
-      case mode_val
-      when MODE_INDIRECT
-        base = (operand_hi_val << 8) | operand_lo_val
-        ptr_lo = base
-        ptr_hi = ((base & 0xFF) == 0xFF) ? (base & 0xFF00) : ((base + 1) & 0xFFFF)
-
-      when MODE_INDEXED_IND
-        zp_addr = (operand_lo_val + x) & 0xFF
-        ptr_lo = zp_addr
-        ptr_hi = (zp_addr + 1) & 0xFF
-
-      when MODE_INDIRECT_IDX
-        ptr_lo = operand_lo_val
-        ptr_hi = (operand_lo_val + 1) & 0xFF
-      end
-
-      out_set(:ptr_addr_lo, ptr_lo)
-      out_set(:ptr_addr_hi, ptr_hi)
-    end
-
     def self.to_verilog
       RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502s_indirect_addr_calc'))
     end

@@ -383,6 +383,36 @@ module RHDL
         end
       end
 
+      # Case select expression - maps selector to one of several values
+      # Used for lookup-table style case statements
+      class BehaviorCaseSelect < BehaviorExpr
+        attr_reader :selector, :cases, :default_val
+
+        def initialize(selector, cases, default_val: nil, width: 8)
+          @selector = selector.is_a?(BehaviorExpr) ? selector : BehaviorLiteral.new(selector)
+          @cases = cases.transform_values do |v|
+            v.is_a?(BehaviorExpr) ? v : BehaviorLiteral.new(v, width: width)
+          end
+          @default_val = if default_val
+            default_val.is_a?(BehaviorExpr) ? default_val : BehaviorLiteral.new(default_val, width: width)
+          else
+            BehaviorLiteral.new(0, width: width)
+          end
+          super(width: width)
+        end
+
+        def to_ir
+          # Convert to nested muxes or case IR
+          RHDL::Export::IR::Case.new(
+            selector: @selector.to_ir,
+            cases: @cases.transform_keys { |k| k.is_a?(Array) ? k : [k] }
+                        .transform_values(&:to_ir),
+            default: @default_val.to_ir,
+            width: @width
+          )
+        end
+      end
+
       # Local variable that becomes a wire in synthesis
       class BehaviorLocal < BehaviorExpr
         attr_reader :name, :expr
@@ -809,6 +839,13 @@ module RHDL
             else
               expr.when_false_expr ? compute_value(expr.when_false_expr) : 0
             end
+          when BehaviorCaseSelect
+            selector_val = compute_value(expr.selector)
+            if expr.cases.key?(selector_val)
+              compute_value(expr.cases[selector_val])
+            else
+              compute_value(expr.default_val)
+            end
           when BehaviorCaseExpr
             compute_case_value(expr.ir)
           when BehaviorMemoryRead
@@ -1006,6 +1043,17 @@ module RHDL
           BehaviorConditional.new(cond, when_true: then_val, when_false: else_val)
         end
 
+        # Case select - lookup table style case statement
+        # Returns a BehaviorCaseSelect expression for synthesis, or evaluates for simulation
+        # Usage: case_select(op, { 0 => a + b, 1 => a - b, 2 => a & b }, default: 0)
+        def case_select(selector, cases, default: 0)
+          # Determine width from first case value
+          first_val = cases.values.first
+          width = first_val.is_a?(BehaviorExpr) ? first_val.width : 8
+
+          BehaviorCaseSelect.new(selector, cases, default_val: default, width: width)
+        end
+
         # Memory read expression for use in behavior blocks
         # Creates a BehaviorMemoryRead that generates IR::MemoryRead for synthesis
         # @param memory_name [Symbol] The memory array name
@@ -1044,7 +1092,10 @@ module RHDL
           @_behavior_block = BehaviorBlock.new(block, **options)
 
           # Define propagate method if this is a SimComponent
-          if ancestors.include?(RHDL::HDL::SimComponent)
+          # BUT only if sequential is NOT defined (sequential handles its own propagate
+          # and will call execute_behavior_for_simulation itself)
+          sequential_block_defined = respond_to?(:_sequential_block) && !_sequential_block.nil?
+          if ancestors.include?(RHDL::HDL::SimComponent) && !sequential_block_defined
             define_method(:propagate) do
               self.class.execute_behavior_for_simulation(self)
             end
@@ -1068,6 +1119,10 @@ module RHDL
           input_values = {}
           component.inputs.each do |name, wire|
             input_values[name] = wire.get
+          end
+          # Also include current output values (for combinational outputs derived from sequential state)
+          component.outputs.each do |name, wire|
+            input_values[name] ||= wire.get
           end
 
           # Create context and evaluate
