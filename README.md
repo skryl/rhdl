@@ -7,6 +7,7 @@ RHDL is a Domain Specific Language (DSL) that allows you to design hardware usin
 - **HDL CPU**: A complete 8-bit CPU with gate-level datapath implementation
 - **MOS 6502 CPU**: Full 6502 processor implementation with 189+ instruction tests
 - **HDL Simulation Framework**: Gate-level simulation with support for combinational and sequential logic
+- **Gate-Level Synthesis**: Lower 53 HDL components to primitive gate netlists (AND, OR, XOR, NOT, MUX, DFF)
 - **Signal Probing & Debugging**: Waveform capture, breakpoints, watchpoints, and VCD export
 - **Terminal GUI**: Interactive terminal-based simulator interface
 - **Component Library**: Gates, flip-flops, registers, ALU, memory, and more
@@ -32,17 +33,21 @@ rhdl/
 │   │   ├── memory.rb        # RAM, ROM, register files
 │   │   ├── debug.rb         # Signal probing & debugging
 │   │   ├── tui.rb           # Terminal GUI
-│   │   └── cpu/             # HDL CPU implementation (datapath, adapter)
-│   ├── gates/          # Gate-level simulation
+│   │   └── cpu/             # HDL CPU (datapath, synth_datapath, decoder)
+│   ├── gates/          # Gate-level synthesis (53 components)
+│   │   ├── lower.rb    # HDL to gate-level lowering
+│   │   ├── ir.rb       # Gate-level intermediate representation
+│   │   └── primitives.rb # Gate primitives (AND, OR, XOR, NOT, MUX, DFF)
 │   └── diagram/        # Diagram rendering
 ├── examples/           # Demo scripts
-│   └── mos6502/        # MOS 6502 CPU implementation
+│   ├── mos6502/        # MOS 6502 behavioral CPU
+│   └── mos6502s/       # MOS 6502 synthesizable CPU
 ├── spec/               # Test suite
-│   └── support/
-│       └── behavioral_cpu/  # Reference behavioral CPU (for testing)
 ├── docs/               # Documentation
-├── vhdl/               # Generated VHDL files
-├── verilog/            # Generated Verilog files
+├── export/             # Generated output files
+│   ├── vhdl/           # Generated VHDL files
+│   ├── verilog/        # Generated Verilog files
+│   └── gates/          # Gate-level JSON netlists
 └── diagrams/           # Generated circuit diagrams
 ```
 
@@ -495,7 +500,21 @@ The test suite includes two complex integration tests that demonstrate the CPU's
 
 ## Recent Improvements
 
-### Latest (2025)
+### Latest (January 2025)
+
+#### Gate-Level Synthesis
+- Complete gate-level lowering for 53 HDL components
+- Primitive gates: AND, OR, XOR, NOT, MUX, BUF, CONST, DFF
+- Complex algorithms: Array multiplier, restoring divider
+- Hierarchical synthesis for SynthDatapath CPU (505 gates, 24 DFFs)
+- JSON netlist export with `rake gates:export`
+- Statistics with `rake gates:stats`
+
+#### Export Directory Consolidation
+- All generated output now in `/export/` directory
+- `/export/vhdl/` - Generated VHDL files
+- `/export/verilog/` - Generated Verilog files
+- `/export/gates/` - Gate-level JSON netlists
 
 #### Multi-Level Diagram Generation
 - Hierarchical component diagrams with collapsible buses
