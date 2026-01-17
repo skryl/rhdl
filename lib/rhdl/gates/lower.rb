@@ -107,6 +107,11 @@ module RHDL
 
       def lower_components
         @components.each do |component|
+          dispatch_lower(component)
+        end
+      end
+
+      def dispatch_lower(component)
           case component
           when RHDL::HDL::NotGate
             lower_not(component)
@@ -235,7 +240,6 @@ module RHDL
           else
             raise ArgumentError, "Unsupported component for gate-level lowering: #{component.class}"
           end
-        end
       end
 
       def lower_not(component)
@@ -2755,34 +2759,125 @@ module RHDL
         end
       end
 
-      # SynthDatapath: Structural composition
+      # SynthDatapath: Hierarchical structural composition
       def lower_synth_datapath(component)
-        # Similar to Datapath - structural instantiation would be handled at HDL level
-        # For gate-level, create passthrough buffers
+        # Get instance and connection definitions from the class
+        instance_defs = component.class._instance_defs
+        connection_defs = component.class._connection_defs
 
-        # Memory interface
-        mem_data_out_nets = map_bus(component.outputs[:mem_data_out]) if component.outputs[:mem_data_out]
-        mem_addr_nets = map_bus(component.outputs[:mem_addr]) if component.outputs[:mem_addr]
-        mem_write_en_net = map_bus(component.outputs[:mem_write_en]).first if component.outputs[:mem_write_en]
-        mem_read_en_net = map_bus(component.outputs[:mem_read_en]).first if component.outputs[:mem_read_en]
-        pc_out_nets = map_bus(component.outputs[:pc_out]) if component.outputs[:pc_out]
-        acc_out_nets = map_bus(component.outputs[:acc_out]) if component.outputs[:acc_out]
-        zero_flag_net = map_bus(component.outputs[:zero_flag]).first if component.outputs[:zero_flag]
-        halt_net = map_bus(component.outputs[:halt]).first if component.outputs[:halt]
+        # Create sub-component instances and map their ports to nets
+        sub_components = {}
+        sub_nets = {}  # Maps [instance_name, port_name] => net_id or [net_ids]
 
-        # Initialize all outputs to 0
-        [mem_data_out_nets, mem_addr_nets, pc_out_nets, acc_out_nets].compact.each do |nets|
-          nets.each do |out|
-            const_zero = new_temp
-            @ir.add_gate(type: Primitives::CONST, inputs: [], output: const_zero, value: 0)
-            @ir.add_gate(type: Primitives::BUF, inputs: [const_zero], output: out)
+        instance_defs.each do |inst_def|
+          inst_name = inst_def[:name]
+          component_class = inst_def[:component_class]
+          params = inst_def[:parameters] || {}
+
+          # Create sub-component instance
+          sub_comp = component_class.new("#{component.name}_#{inst_name}", **params)
+          sub_components[inst_name] = sub_comp
+
+          # Create nets for all ports of this sub-component
+          sub_comp.inputs.each do |port_name, wire|
+            width = wire.respond_to?(:width) ? wire.width : 1
+            if width == 1
+              sub_nets[[inst_name, port_name]] = new_temp
+            else
+              sub_nets[[inst_name, port_name]] = width.times.map { new_temp }
+            end
+          end
+
+          sub_comp.outputs.each do |port_name, wire|
+            width = wire.respond_to?(:width) ? wire.width : 1
+            if width == 1
+              sub_nets[[inst_name, port_name]] = new_temp
+            else
+              sub_nets[[inst_name, port_name]] = width.times.map { new_temp }
+            end
           end
         end
 
-        [mem_write_en_net, mem_read_en_net, zero_flag_net, halt_net].compact.each do |out|
-          const_zero = new_temp
-          @ir.add_gate(type: Primitives::CONST, inputs: [], output: const_zero, value: 0)
-          @ir.add_gate(type: Primitives::BUF, inputs: [const_zero], output: out)
+        # Map parent component I/O to nets (for external connections)
+        parent_nets = {}
+        component.inputs.each do |port_name, wire|
+          parent_nets[port_name] = map_bus(wire)
+        end
+        component.outputs.each do |port_name, wire|
+          parent_nets[port_name] = map_bus(wire)
+        end
+
+        # Map internal signals to nets
+        if component.respond_to?(:signals) && component.signals
+          component.signals.each do |sig_name, wire|
+            parent_nets[sig_name] = wire.respond_to?(:width) && wire.width > 1 ?
+              wire.width.times.map { new_temp } : [new_temp]
+          end
+        end
+
+        # Process connections - build a union-find of connected nets
+        net_aliases = {}  # Maps net -> canonical net
+
+        connection_defs.each do |conn|
+          source = conn[:source]
+          dest = conn[:dest]
+
+          # Get source nets
+          source_nets = if source.is_a?(Array) && source.length == 2
+            # Instance port reference [:inst, :port]
+            sub_nets[[source[0], source[1]]]
+          else
+            # Parent signal/port reference
+            parent_nets[source]
+          end
+
+          # Get dest nets
+          dest_nets = if dest.is_a?(Array) && dest.length == 2
+            # Instance port reference [:inst, :port]
+            sub_nets[[dest[0], dest[1]]]
+          else
+            # Parent signal/port reference
+            parent_nets[dest]
+          end
+
+          # Skip if either side is nil
+          next unless source_nets && dest_nets
+
+          # Normalize to arrays
+          source_nets = [source_nets] unless source_nets.is_a?(Array)
+          dest_nets = [dest_nets] unless dest_nets.is_a?(Array)
+
+          # Connect corresponding bits
+          [source_nets.length, dest_nets.length].min.times do |i|
+            src = source_nets[i]
+            dst = dest_nets[i]
+            # Use buffer to connect (direction: source drives dest)
+            @ir.add_gate(type: Primitives::BUF, inputs: [src], output: dst)
+          end
+        end
+
+        # Lower each sub-component with its mapped nets
+        sub_components.each do |inst_name, sub_comp|
+          # Set up wire-to-net mappings for this sub-component using @net_map
+          sub_comp.inputs.each do |port_name, wire|
+            nets = sub_nets[[inst_name, port_name]]
+            nets = [nets] unless nets.is_a?(Array)
+            # Map each bit of the wire to its net
+            wire.width.times do |i|
+              @net_map[[wire, i]] = nets[i] if nets[i]
+            end
+          end
+
+          sub_comp.outputs.each do |port_name, wire|
+            nets = sub_nets[[inst_name, port_name]]
+            nets = [nets] unless nets.is_a?(Array)
+            wire.width.times do |i|
+              @net_map[[wire, i]] = nets[i] if nets[i]
+            end
+          end
+
+          # Lower the sub-component using the dispatcher
+          dispatch_lower(sub_comp)
         end
       end
     end
