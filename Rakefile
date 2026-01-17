@@ -8,11 +8,31 @@ end
 # RSpec tasks
 begin
   require "rspec/core/rake_task"
+
   RSpec::Core::RakeTask.new(:spec)
+
+  RSpec::Core::RakeTask.new(:spec_6502) do |t|
+    t.pattern = "spec/examples/mos6502/**/*_spec.rb"
+    t.rspec_opts = "--format progress"
+  end
+
+  RSpec::Core::RakeTask.new(:spec_doc) do |t|
+    t.rspec_opts = "--format documentation"
+  end
 rescue LoadError
-  desc "Run RSpec tests (rspec not available via bundler, use bin/test)"
+  desc "Run RSpec tests"
   task :spec do
-    sh "bin/test"
+    sh "ruby -Ilib -S rspec"
+  end
+
+  desc "Run 6502 CPU tests"
+  task :spec_6502 do
+    sh "ruby -Ilib -S rspec spec/examples/mos6502/ --format progress"
+  end
+
+  desc "Run all tests with documentation format"
+  task :spec_doc do
+    sh "ruby -Ilib -S rspec --format documentation"
   end
 end
 
@@ -24,16 +44,6 @@ begin
 rescue LoadError
   # RuboCop not available
   task default: :spec
-end
-
-desc "Run 6502 CPU tests"
-task :spec_6502 do
-  sh "bin/test spec/examples/mos6502/ --format progress"
-end
-
-desc "Run all tests with documentation format"
-task :spec_doc do
-  sh "bin/test --format documentation"
 end
 
 # =============================================================================

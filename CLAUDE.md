@@ -132,24 +132,14 @@ bundle install
 
 ## Running Tests
 
-### Recommended: Using bundle exec
-
-```bash
-# Run all tests
-bundle exec rspec
-
-# Run specific test file
-bundle exec rspec spec/some_spec.rb
-
-# Run with documentation format
-bundle exec rspec --format documentation
-```
-
-### Using rake
+All tests are run via rake tasks:
 
 ```bash
 # Run all tests
 rake spec
+
+# Run specific test file
+rake spec SPEC=spec/some_spec.rb
 
 # Run 6502 CPU tests
 rake spec_6502
@@ -158,14 +148,11 @@ rake spec_6502
 rake spec_doc
 ```
 
-### Using the test runner script
+With bundler (if available):
 
 ```bash
-# Run all tests
-bin/test
-
-# Run specific tests
-bin/test spec/examples/mos6502/
+bundle exec rake spec
+bundle exec rspec spec/some_spec.rb
 ```
 
 ### Test Coverage
