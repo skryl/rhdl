@@ -167,6 +167,7 @@ module MOS6502
     def pass2(lines)
       bytes = []
       pc = @origin
+      base_origin = @origin  # Track the starting origin for gap calculation
 
       lines.each do |line|
         # Handle equates
@@ -181,12 +182,24 @@ module MOS6502
 
         # Handle directives
         if line =~ /^\*\s*=\s*(.+)$/
-          pc = resolve_value($1, pc)
+          new_pc = resolve_value($1, pc)
+          # Pad with $FF if there's a gap
+          if new_pc > pc
+            gap = new_pc - pc
+            bytes.concat([0xFF] * gap)
+          end
+          pc = new_pc
           next
         end
 
         if line =~ /^\.ORG\s+(.+)/i
-          pc = resolve_value($1, pc)
+          new_pc = resolve_value($1, pc)
+          # Pad with $FF if there's a gap
+          if new_pc > pc
+            gap = new_pc - pc
+            bytes.concat([0xFF] * gap)
+          end
+          pc = new_pc
           next
         end
 
