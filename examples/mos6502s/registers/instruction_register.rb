@@ -3,11 +3,13 @@
 
 require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
+require_relative '../../../lib/rhdl/dsl/sequential'
 
 module MOS6502S
-  # Instruction Register and Operand Latches - Synthesizable via DSL
+  # Instruction Register and Operand Latches - Synthesizable via Sequential DSL
   class InstructionRegister < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
+    include RHDL::DSL::Sequential
 
     port_input :clk
     port_input :rst
@@ -28,6 +30,19 @@ module MOS6502S
       super(name)
     end
 
+    # Sequential block for opcode and operand registers
+    sequential clock: :clk, reset: :rst, reset_values: { opcode: 0, operand_lo: 0, operand_hi: 0 } do
+      opcode <= mux(load_opcode, data_in, opcode)
+      operand_lo <= mux(load_operand_lo, data_in, operand_lo)
+      operand_hi <= mux(load_operand_hi, data_in, operand_hi)
+    end
+
+    # Combinational output: 16-bit operand from hi/lo bytes
+    behavior do
+      operand <= cat(operand_hi, operand_lo)
+    end
+
+    # Override propagate to maintain internal state for testing
     def propagate
       if rising_edge?
         if in_val(:rst) == 1
@@ -52,38 +67,7 @@ module MOS6502S
     def read_operand; (@operand_hi_reg << 8) | @operand_lo_reg; end
 
     def self.to_verilog
-      <<~VERILOG
-        // MOS 6502 Instruction Register - Synthesizable Verilog
-        // Generated from RHDL Behavior DSL
-        module mos6502s_instruction_register (
-          input        clk,
-          input        rst,
-          input        load_opcode,
-          input        load_operand_lo,
-          input        load_operand_hi,
-          input  [7:0] data_in,
-          output reg [7:0] opcode,
-          output reg [7:0] operand_lo,
-          output reg [7:0] operand_hi,
-          output [15:0] operand
-        );
-
-          always @(posedge clk or posedge rst) begin
-            if (rst) begin
-              opcode <= 8'h00;
-              operand_lo <= 8'h00;
-              operand_hi <= 8'h00;
-            end else begin
-              if (load_opcode) opcode <= data_in;
-              if (load_operand_lo) operand_lo <= data_in;
-              if (load_operand_hi) operand_hi <= data_in;
-            end
-          end
-
-          assign operand = {operand_hi, operand_lo};
-
-        endmodule
-      VERILOG
+      RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502s_instruction_register'))
     end
   end
 end

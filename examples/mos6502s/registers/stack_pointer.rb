@@ -3,11 +3,13 @@
 
 require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
+require_relative '../../../lib/rhdl/dsl/sequential'
 
 module MOS6502S
-  # 6502 Stack Pointer - Synthesizable via DSL
+  # 6502 Stack Pointer - Synthesizable via Sequential DSL
   class StackPointer < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
+    include RHDL::DSL::Sequential
 
     STACK_BASE = 0x0100
 
@@ -27,6 +29,24 @@ module MOS6502S
       super(name)
     end
 
+    # Sequential block for the SP register with priority encoding
+    # Priority: load > dec > inc (if none, hold value)
+    sequential clock: :clk, reset: :rst, reset_values: { sp: 0xFD } do
+      # Nested mux for priority: load > dec > inc > hold
+      sp <= mux(load, data_in,
+               mux(dec, sp - lit(1, width: 8),
+                  mux(inc, sp + lit(1, width: 8), sp)))
+    end
+
+    # Combinational block for address outputs
+    behavior do
+      # addr = STACK_BASE | sp = 0x0100 | sp
+      addr <= cat(lit(0x01, width: 8), sp)
+      # addr_plus1 = STACK_BASE | (sp + 1), masked to 8 bits
+      addr_plus1 <= cat(lit(0x01, width: 8), (sp + lit(1, width: 8))[7..0])
+    end
+
+    # Override propagate to maintain internal state for testing
     def propagate
       sp_before = @sp_reg
 
@@ -51,40 +71,7 @@ module MOS6502S
     def write_sp(v); @sp_reg = v & 0xFF; end
 
     def self.to_verilog
-      <<~VERILOG
-        // MOS 6502 Stack Pointer - Synthesizable Verilog
-        // Generated from RHDL Behavior DSL
-        module mos6502s_stack_pointer (
-          input        clk,
-          input        rst,
-          input        inc,
-          input        dec,
-          input        load,
-          input  [7:0] data_in,
-          output reg [7:0] sp,
-          output [15:0] addr,
-          output [15:0] addr_plus1
-        );
-
-          localparam STACK_BASE = 16'h0100;
-
-          always @(posedge clk or posedge rst) begin
-            if (rst) begin
-              sp <= 8'hFD;
-            end else if (load) begin
-              sp <= data_in;
-            end else if (dec) begin
-              sp <= sp - 8'h01;
-            end else if (inc) begin
-              sp <= sp + 8'h01;
-            end
-          end
-
-          assign addr = STACK_BASE | {8'h00, sp};
-          assign addr_plus1 = STACK_BASE | {8'h00, sp + 8'h01};
-
-        endmodule
-      VERILOG
+      RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502s_stack_pointer'))
     end
   end
 end
