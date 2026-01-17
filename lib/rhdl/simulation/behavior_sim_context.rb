@@ -94,14 +94,14 @@ module RHDL
         @component.instance_variable_set(:"@#{name}", resolve_value(value))
       end
 
-      # Dynamic input access (for MuxN with variable input count)
+      # Dynamic input access by name
       def input_val(name)
         wire = @component.inputs[name.to_sym]
         return 0 unless wire
         wire.value
       end
 
-      # Dynamic output assignment (for DecoderN with variable output count)
+      # Dynamic output assignment by name
       def output_set(name, value)
         wire = @component.outputs[name.to_sym]
         return unless wire

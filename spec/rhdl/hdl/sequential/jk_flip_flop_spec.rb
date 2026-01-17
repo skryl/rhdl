@@ -15,60 +15,82 @@ RSpec.describe RHDL::HDL::JKFlipFlop do
     jkff.set_input(:en, 1)
   end
 
-  it 'holds state when J=0 and K=0' do
-    jkff.set_input(:j, 1)
-    jkff.set_input(:k, 0)
-    clock_cycle(jkff)
-    expect(jkff.get_output(:q)).to eq(1)
+  describe 'simulation' do
+    it 'holds state when J=0 and K=0' do
+      jkff.set_input(:j, 1)
+      jkff.set_input(:k, 0)
+      clock_cycle(jkff)
+      expect(jkff.get_output(:q)).to eq(1)
 
-    jkff.set_input(:j, 0)
-    jkff.set_input(:k, 0)
-    clock_cycle(jkff)
-    expect(jkff.get_output(:q)).to eq(1)  # Hold
+      jkff.set_input(:j, 0)
+      jkff.set_input(:k, 0)
+      clock_cycle(jkff)
+      expect(jkff.get_output(:q)).to eq(1)  # Hold
+    end
+
+    it 'resets when J=0 and K=1' do
+      jkff.set_input(:j, 1)
+      jkff.set_input(:k, 0)
+      clock_cycle(jkff)
+      expect(jkff.get_output(:q)).to eq(1)
+
+      jkff.set_input(:j, 0)
+      jkff.set_input(:k, 1)
+      clock_cycle(jkff)
+      expect(jkff.get_output(:q)).to eq(0)
+    end
+
+    it 'sets when J=1 and K=0' do
+      jkff.set_input(:j, 1)
+      jkff.set_input(:k, 0)
+      clock_cycle(jkff)
+      expect(jkff.get_output(:q)).to eq(1)
+      expect(jkff.get_output(:qn)).to eq(0)
+    end
+
+    it 'toggles when J=1 and K=1' do
+      jkff.set_input(:j, 1)
+      jkff.set_input(:k, 1)
+
+      clock_cycle(jkff)
+      expect(jkff.get_output(:q)).to eq(1)
+
+      clock_cycle(jkff)
+      expect(jkff.get_output(:q)).to eq(0)
+
+      clock_cycle(jkff)
+      expect(jkff.get_output(:q)).to eq(1)
+    end
+
+    it 'resets on reset signal' do
+      jkff.set_input(:j, 1)
+      jkff.set_input(:k, 0)
+      clock_cycle(jkff)
+      expect(jkff.get_output(:q)).to eq(1)
+
+      jkff.set_input(:rst, 1)
+      clock_cycle(jkff)
+      expect(jkff.get_output(:q)).to eq(0)
+    end
   end
 
-  it 'resets when J=0 and K=1' do
-    jkff.set_input(:j, 1)
-    jkff.set_input(:k, 0)
-    clock_cycle(jkff)
-    expect(jkff.get_output(:q)).to eq(1)
+  describe 'synthesis' do
+    it 'has synthesis support defined' do
+      expect(RHDL::HDL::JKFlipFlop.behavior_defined? || RHDL::HDL::JKFlipFlop.sequential_defined?).to be_truthy
+    end
 
-    jkff.set_input(:j, 0)
-    jkff.set_input(:k, 1)
-    clock_cycle(jkff)
-    expect(jkff.get_output(:q)).to eq(0)
-  end
+    it 'generates valid IR' do
+      ir = RHDL::HDL::JKFlipFlop.to_ir
+      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      expect(ir.ports.length).to eq(7)  # j, k, clk, rst, en, q, qn
+    end
 
-  it 'sets when J=1 and K=0' do
-    jkff.set_input(:j, 1)
-    jkff.set_input(:k, 0)
-    clock_cycle(jkff)
-    expect(jkff.get_output(:q)).to eq(1)
-    expect(jkff.get_output(:qn)).to eq(0)
-  end
-
-  it 'toggles when J=1 and K=1' do
-    jkff.set_input(:j, 1)
-    jkff.set_input(:k, 1)
-
-    clock_cycle(jkff)
-    expect(jkff.get_output(:q)).to eq(1)
-
-    clock_cycle(jkff)
-    expect(jkff.get_output(:q)).to eq(0)
-
-    clock_cycle(jkff)
-    expect(jkff.get_output(:q)).to eq(1)
-  end
-
-  it 'resets on reset signal' do
-    jkff.set_input(:j, 1)
-    jkff.set_input(:k, 0)
-    clock_cycle(jkff)
-    expect(jkff.get_output(:q)).to eq(1)
-
-    jkff.set_input(:rst, 1)
-    clock_cycle(jkff)
-    expect(jkff.get_output(:q)).to eq(0)
+    it 'generates valid Verilog' do
+      verilog = RHDL::HDL::JKFlipFlop.to_verilog
+      expect(verilog).to include('module jk_flip_flop')
+      expect(verilog).to include('input j')
+      expect(verilog).to include('input k')
+      expect(verilog).to match(/output.*q/)
+    end
   end
 end

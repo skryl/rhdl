@@ -1,10 +1,22 @@
 # frozen_string_literal: true
 
+# HDL Stack Component
+# LIFO stack with push/pop operations
+# Synthesizable via MemoryDSL + Sequential DSL
+
+require_relative '../../dsl/memory_dsl'
+require_relative '../../dsl/behavior'
+require_relative '../../dsl/sequential'
+
 module RHDL
   module HDL
     # Stack (LIFO) with fixed depth
-    # Sequential - requires always @(posedge clk) for synthesis
-    class Stack < SimComponent
+    # Combines memory for data and sequential logic for pointer
+    class Stack < SequentialComponent
+      include RHDL::DSL::MemoryDSL
+      include RHDL::DSL::Behavior
+      include RHDL::DSL::Sequential
+
       port_input :clk
       port_input :rst
       port_input :push
@@ -13,54 +25,108 @@ module RHDL
       port_output :dout, width: 8
       port_output :empty
       port_output :full
-      port_output :sp, width: 4
+      port_output :sp, width: 5
 
+      # Memory for stack data (16 entries x 8-bit)
+      memory :data, depth: 16, width: 8
+
+      # Synchronous write - write to current sp when push is enabled
+      # Note: sync_write uses signal_val() which reads from @_seq_state for sp
+      sync_write :data, clock: :clk, enable: :push, addr: :sp, data: :din
+
+      # Asynchronous read from top of stack (sp - 1)
+      # Note: We need special handling for reading at sp-1, not sp
+      # This is handled in the behavior block
+
+      # Stack pointer managed via sequential DSL
+      # Push increments, pop decrements
+      sequential clock: :clk, reset: :rst, reset_values: { sp: 0 } do
+        # Push: write to sp, then increment
+        # Pop: decrement sp
+        push_enabled = push & ~full
+        pop_enabled = pop & ~empty
+        sp <= mux(push_enabled, sp + lit(1, width: 5),
+                  mux(pop_enabled, sp - lit(1, width: 5), sp))
+      end
+
+      # Combinational outputs
       behavior do
-        depth_val = param(:depth)
-        data_width = param(:data_width)
-        sp_val = param(:sp)
+        # Stack empty when sp == 0
+        empty <= (sp == lit(0, width: 5))
+        # Stack full when sp == 16
+        full <= (sp == lit(16, width: 5))
+        # Read top of stack (sp - 1), return 0 when empty
+        dout <= mux(sp > lit(0, width: 5),
+                    mem_read_expr(:data, sp - lit(1, width: 5), width: 8),
+                    lit(0, width: 8))
+      end
 
-        if rising_edge?
-          if rst.value == 1
-            set_sp(0)
-          elsif push.value == 1 && sp_val < depth_val
-            mem_write(sp_val, din.value & ((1 << data_width) - 1))
-            set_sp(sp_val + 1)
-          elsif pop.value == 1 && sp_val > 0
-            set_sp(sp_val - 1)
-          end
+      # Override to_ir for synthesis
+      def self.to_ir(top_name: nil)
+        name = top_name || 'stack'
+
+        ports = _ports.map do |p|
+          RHDL::Export::IR::Port.new(name: p.name, direction: p.direction, width: p.width)
         end
 
-        # Output top of stack (re-read sp after potential update)
-        current_sp = param(:sp)
-        dout_val = current_sp > 0 ? mem_read(current_sp - 1) : 0
-        dout <= dout_val
-        empty <= (current_sp == 0 ? 1 : 0)
-        full <= (current_sp >= depth_val ? 1 : 0)
-        sp <= current_sp
+        # Memory array
+        mem_def = _memories[:data]
+        memories = [
+          RHDL::Export::IR::Memory.new(
+            name: 'data',
+            depth: mem_def.depth,
+            width: mem_def.width,
+            read_ports: [],
+            write_ports: []
+          )
+        ]
+
+        # Stack pointer register
+        regs = [
+          RHDL::Export::IR::Reg.new(name: :sp_reg, width: 5)
+        ]
+
+        # Combinational outputs
+        assigns = [
+          RHDL::Export::IR::Assign.new(
+            target: :empty,
+            expr: RHDL::Export::IR::BinaryOp.new(
+              op: :==,
+              left: RHDL::Export::IR::Signal.new(name: :sp_reg, width: 5),
+              right: RHDL::Export::IR::Literal.new(value: 0, width: 5),
+              width: 1
+            )
+          ),
+          RHDL::Export::IR::Assign.new(
+            target: :full,
+            expr: RHDL::Export::IR::BinaryOp.new(
+              op: :==,
+              left: RHDL::Export::IR::Signal.new(name: :sp_reg, width: 5),
+              right: RHDL::Export::IR::Literal.new(value: 16, width: 5),
+              width: 1
+            )
+          ),
+          RHDL::Export::IR::Assign.new(
+            target: :sp,
+            expr: RHDL::Export::IR::Signal.new(name: :sp_reg, width: 5)
+          )
+        ]
+
+        RHDL::Export::IR::ModuleDef.new(
+          name: name,
+          ports: ports,
+          nets: [],
+          regs: regs,
+          assigns: assigns,
+          processes: [],
+          instances: [],
+          memories: memories,
+          write_ports: []
+        )
       end
 
-      def initialize(name = nil, data_width: 8, depth: 16)
-        @data_width = data_width
-        @depth = depth
-        @addr_width = Math.log2(depth).ceil
-        @memory = Array.new(depth, 0)
-        @sp = 0
-        @prev_clk = 0
-        super(name)
-      end
-
-      def setup_ports
-        return if @data_width == 8 && @depth == 16
-        @inputs[:din] = Wire.new("#{@name}.din", width: @data_width)
-        @outputs[:dout] = Wire.new("#{@name}.dout", width: @data_width)
-        @outputs[:sp] = Wire.new("#{@name}.sp", width: @addr_width)
-      end
-
-      def rising_edge?
-        prev = @prev_clk
-        @prev_clk = in_val(:clk)
-        prev == 0 && @prev_clk == 1
+      def self.to_verilog
+        RHDL::Export::Verilog.generate(to_ir)
       end
     end
   end

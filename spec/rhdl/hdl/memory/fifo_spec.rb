@@ -8,7 +8,7 @@ RSpec.describe RHDL::HDL::FIFO do
     component.propagate
   end
 
-  let(:fifo) { RHDL::HDL::FIFO.new(nil, data_width: 8, depth: 4) }
+  let(:fifo) { RHDL::HDL::FIFO.new }
 
   before do
     fifo.set_input(:rst, 0)
@@ -17,56 +17,78 @@ RSpec.describe RHDL::HDL::FIFO do
     fifo.propagate  # Initialize outputs
   end
 
-  it 'maintains FIFO order' do
-    # Write 1, 2, 3
-    [1, 2, 3].each do |val|
-      fifo.set_input(:din, val)
+  describe 'simulation' do
+    it 'maintains FIFO order' do
+      # Write 1, 2, 3
+      [1, 2, 3].each do |val|
+        fifo.set_input(:din, val)
+        fifo.set_input(:wr_en, 1)
+        clock_cycle(fifo)
+        fifo.set_input(:wr_en, 0)
+      end
+
+      # Read should get 1, 2, 3 in order
+      [1, 2, 3].each do |expected|
+        expect(fifo.get_output(:dout)).to eq(expected)
+        fifo.set_input(:rd_en, 1)
+        clock_cycle(fifo)
+        fifo.set_input(:rd_en, 0)
+      end
+    end
+
+    it 'indicates empty and full states' do
+      expect(fifo.get_output(:empty)).to eq(1)
+      expect(fifo.get_output(:full)).to eq(0)
+      expect(fifo.get_output(:count)).to eq(0)
+
+      # Fill FIFO (16 entries)
+      16.times do |i|
+        fifo.set_input(:din, i)
+        fifo.set_input(:wr_en, 1)
+        clock_cycle(fifo)
+        fifo.set_input(:wr_en, 0)
+      end
+
+      expect(fifo.get_output(:empty)).to eq(0)
+      expect(fifo.get_output(:full)).to eq(1)
+      expect(fifo.get_output(:count)).to eq(16)
+    end
+
+    it 'resets to empty state' do
+      # Write something
+      fifo.set_input(:din, 0xFF)
       fifo.set_input(:wr_en, 1)
       clock_cycle(fifo)
       fifo.set_input(:wr_en, 0)
-    end
 
-    # Read should get 1, 2, 3 in order
-    [1, 2, 3].each do |expected|
-      expect(fifo.get_output(:dout)).to eq(expected)
-      fifo.set_input(:rd_en, 1)
+      expect(fifo.get_output(:empty)).to eq(0)
+
+      # Reset
+      fifo.set_input(:rst, 1)
       clock_cycle(fifo)
-      fifo.set_input(:rd_en, 0)
+
+      expect(fifo.get_output(:empty)).to eq(1)
+      expect(fifo.get_output(:count)).to eq(0)
     end
   end
 
-  it 'indicates empty and full states' do
-    expect(fifo.get_output(:empty)).to eq(1)
-    expect(fifo.get_output(:full)).to eq(0)
-    expect(fifo.get_output(:count)).to eq(0)
-
-    # Fill FIFO
-    4.times do |i|
-      fifo.set_input(:din, i)
-      fifo.set_input(:wr_en, 1)
-      clock_cycle(fifo)
-      fifo.set_input(:wr_en, 0)
+  describe 'synthesis' do
+    it 'has memory DSL defined' do
+      expect(RHDL::HDL::FIFO.memory_dsl_defined?).to be_truthy
     end
 
-    expect(fifo.get_output(:empty)).to eq(0)
-    expect(fifo.get_output(:full)).to eq(1)
-    expect(fifo.get_output(:count)).to eq(4)
-  end
+    it 'generates valid IR' do
+      ir = RHDL::HDL::FIFO.to_ir
+      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      expect(ir.ports.length).to eq(11)  # clk, rst, wr_en, rd_en, din, dout, empty, full, count, wr_ptr, rd_ptr
+      expect(ir.memories.length).to eq(1)
+    end
 
-  it 'resets to empty state' do
-    # Write something
-    fifo.set_input(:din, 0xFF)
-    fifo.set_input(:wr_en, 1)
-    clock_cycle(fifo)
-    fifo.set_input(:wr_en, 0)
-
-    expect(fifo.get_output(:empty)).to eq(0)
-
-    # Reset
-    fifo.set_input(:rst, 1)
-    clock_cycle(fifo)
-
-    expect(fifo.get_output(:empty)).to eq(1)
-    expect(fifo.get_output(:count)).to eq(0)
+    it 'generates valid Verilog' do
+      verilog = RHDL::HDL::FIFO.to_verilog
+      expect(verilog).to include('module fifo')
+      expect(verilog).to include('input [7:0] din')
+      expect(verilog).to match(/output.*\[7:0\].*dout/)
+    end
   end
 end

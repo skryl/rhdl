@@ -8,7 +8,7 @@ RSpec.describe RHDL::HDL::StackPointer do
     component.propagate
   end
 
-  let(:sp) { RHDL::HDL::StackPointer.new(nil, width: 8, initial: 0xFF) }
+  let(:sp) { RHDL::HDL::StackPointer.new }
 
   before do
     sp.set_input(:rst, 0)
@@ -16,62 +16,89 @@ RSpec.describe RHDL::HDL::StackPointer do
     sp.set_input(:pop, 0)
   end
 
-  it 'initializes to the specified value' do
-    sp.propagate  # Initial propagate to set output wires
-    expect(sp.get_output(:q)).to eq(0xFF)
-    expect(sp.get_output(:empty)).to eq(1)  # SP at max means empty
-    expect(sp.get_output(:full)).to eq(0)
+  describe 'simulation' do
+    it 'initializes to the specified value' do
+      sp.propagate  # Initial propagate to set output wires
+      expect(sp.get_output(:q)).to eq(0xFF)
+      expect(sp.get_output(:empty)).to eq(1)  # SP at max means empty
+      expect(sp.get_output(:full)).to eq(0)
+    end
+
+    it 'decrements on push' do
+      sp.set_input(:push, 1)
+      clock_cycle(sp)
+      expect(sp.get_output(:q)).to eq(0xFE)
+      expect(sp.get_output(:empty)).to eq(0)
+    end
+
+    it 'increments on pop' do
+      # First push to decrement
+      sp.set_input(:push, 1)
+      clock_cycle(sp)
+      expect(sp.get_output(:q)).to eq(0xFE)
+
+      # Now pop to increment
+      sp.set_input(:push, 0)
+      sp.set_input(:pop, 1)
+      clock_cycle(sp)
+      expect(sp.get_output(:q)).to eq(0xFF)
+      expect(sp.get_output(:empty)).to eq(1)
+    end
+
+    it 'indicates full when SP is 0' do
+      # Push until SP reaches 0 (255 pushes from 0xFF)
+      # For efficiency, we test after just enough pushes to verify the flag logic
+      # Push once to get to 0xFE first
+      sp.set_input(:push, 1)
+      clock_cycle(sp)
+      expect(sp.get_output(:q)).to eq(0xFE)
+      expect(sp.get_output(:full)).to eq(0)
+
+      # Push 254 more times to reach 0
+      254.times { clock_cycle(sp) }
+      expect(sp.get_output(:q)).to eq(0x00)
+      expect(sp.get_output(:full)).to eq(1)
+    end
+
+    it 'wraps around on underflow' do
+      # Push until SP reaches 0, then push once more to wrap
+      sp.set_input(:push, 1)
+      # Push 255 times to reach 0
+      255.times { clock_cycle(sp) }
+      expect(sp.get_output(:q)).to eq(0x00)
+
+      # One more push wraps around to 0xFF
+      clock_cycle(sp)
+      expect(sp.get_output(:q)).to eq(0xFF)
+    end
+
+    it 'resets to initial value' do
+      sp.set_input(:push, 1)
+      clock_cycle(sp)
+      expect(sp.get_output(:q)).to eq(0xFE)
+
+      sp.set_input(:push, 0)
+      sp.set_input(:rst, 1)
+      clock_cycle(sp)
+      expect(sp.get_output(:q)).to eq(0xFF)
+    end
   end
 
-  it 'decrements on push' do
-    sp.set_input(:push, 1)
-    clock_cycle(sp)
-    expect(sp.get_output(:q)).to eq(0xFE)
-    expect(sp.get_output(:empty)).to eq(0)
-  end
+  describe 'synthesis' do
+    it 'has synthesis support defined' do
+      expect(RHDL::HDL::StackPointer.behavior_defined? || RHDL::HDL::StackPointer.sequential_defined?).to be_truthy
+    end
 
-  it 'increments on pop' do
-    # First push to decrement
-    sp.set_input(:push, 1)
-    clock_cycle(sp)
-    expect(sp.get_output(:q)).to eq(0xFE)
+    it 'generates valid IR' do
+      ir = RHDL::HDL::StackPointer.to_ir
+      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      expect(ir.ports.length).to eq(7)  # clk, rst, push, pop, q, empty, full
+    end
 
-    # Now pop to increment
-    sp.set_input(:push, 0)
-    sp.set_input(:pop, 1)
-    clock_cycle(sp)
-    expect(sp.get_output(:q)).to eq(0xFF)
-    expect(sp.get_output(:empty)).to eq(1)
-  end
-
-  it 'indicates full when SP is 0' do
-    # Start with SP at a low value
-    sp_low = RHDL::HDL::StackPointer.new(nil, width: 8, initial: 0x01)
-    sp_low.set_input(:rst, 0)
-    sp_low.set_input(:push, 1)
-    sp_low.set_input(:pop, 0)
-    clock_cycle(sp_low)
-    expect(sp_low.get_output(:q)).to eq(0x00)
-    expect(sp_low.get_output(:full)).to eq(1)
-  end
-
-  it 'wraps around on underflow' do
-    sp_at_zero = RHDL::HDL::StackPointer.new(nil, width: 8, initial: 0x00)
-    sp_at_zero.set_input(:rst, 0)
-    sp_at_zero.set_input(:push, 1)
-    sp_at_zero.set_input(:pop, 0)
-    clock_cycle(sp_at_zero)
-    expect(sp_at_zero.get_output(:q)).to eq(0xFF)  # Wrapped around
-  end
-
-  it 'resets to initial value' do
-    sp.set_input(:push, 1)
-    clock_cycle(sp)
-    expect(sp.get_output(:q)).to eq(0xFE)
-
-    sp.set_input(:push, 0)
-    sp.set_input(:rst, 1)
-    clock_cycle(sp)
-    expect(sp.get_output(:q)).to eq(0xFF)
+    it 'generates valid Verilog' do
+      verilog = RHDL::HDL::StackPointer.to_verilog
+      expect(verilog).to include('module stack_pointer')
+      expect(verilog).to match(/output.*\[7:0\].*q/)
+    end
   end
 end

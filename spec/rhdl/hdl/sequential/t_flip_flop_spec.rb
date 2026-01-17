@@ -15,26 +15,47 @@ RSpec.describe RHDL::HDL::TFlipFlop do
     tff.set_input(:en, 1)
   end
 
-  it 'toggles on T=1' do
-    tff.set_input(:t, 1)
+  describe 'simulation' do
+    it 'toggles on T=1' do
+      tff.set_input(:t, 1)
 
-    clock_cycle(tff)
-    expect(tff.get_output(:q)).to eq(1)
+      clock_cycle(tff)
+      expect(tff.get_output(:q)).to eq(1)
 
-    clock_cycle(tff)
-    expect(tff.get_output(:q)).to eq(0)
+      clock_cycle(tff)
+      expect(tff.get_output(:q)).to eq(0)
 
-    clock_cycle(tff)
-    expect(tff.get_output(:q)).to eq(1)
+      clock_cycle(tff)
+      expect(tff.get_output(:q)).to eq(1)
+    end
+
+    it 'holds on T=0' do
+      tff.set_input(:t, 1)
+      clock_cycle(tff)
+      expect(tff.get_output(:q)).to eq(1)
+
+      tff.set_input(:t, 0)
+      clock_cycle(tff)
+      expect(tff.get_output(:q)).to eq(1)
+    end
   end
 
-  it 'holds on T=0' do
-    tff.set_input(:t, 1)
-    clock_cycle(tff)
-    expect(tff.get_output(:q)).to eq(1)
+  describe 'synthesis' do
+    it 'has synthesis support defined' do
+      expect(RHDL::HDL::TFlipFlop.behavior_defined? || RHDL::HDL::TFlipFlop.sequential_defined?).to be_truthy
+    end
 
-    tff.set_input(:t, 0)
-    clock_cycle(tff)
-    expect(tff.get_output(:q)).to eq(1)
+    it 'generates valid IR' do
+      ir = RHDL::HDL::TFlipFlop.to_ir
+      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      expect(ir.ports.length).to eq(6)  # t, clk, rst, en, q, qn
+    end
+
+    it 'generates valid Verilog' do
+      verilog = RHDL::HDL::TFlipFlop.to_verilog
+      expect(verilog).to include('module t_flip_flop')
+      expect(verilog).to include('input t')
+      expect(verilog).to match(/output.*q/)
+    end
   end
 end
