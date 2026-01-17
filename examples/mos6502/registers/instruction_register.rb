@@ -2,10 +2,15 @@
 # Holds opcode and operand bytes during instruction execution
 
 require_relative '../../../lib/rhdl'
+require_relative '../../../lib/rhdl/dsl/behavior'
+require_relative '../../../lib/rhdl/dsl/sequential'
 
 module MOS6502
-  # Instruction Register and Operand Latches - DSL Version
+  # Instruction Register and Operand Latches - Synthesizable via Sequential DSL
   class InstructionRegister < RHDL::HDL::SequentialComponent
+    include RHDL::DSL::Behavior
+    include RHDL::DSL::Sequential
+
     port_input :clk
     port_input :rst
     port_input :load_opcode
@@ -18,73 +23,24 @@ module MOS6502
     port_output :operand_hi, width: 8
     port_output :operand, width: 16
 
-    def initialize(name = nil)
-      @opcode = 0
-      @operand_lo = 0
-      @operand_hi = 0
-      @prev_clk = 0
-      super(name)
+    # Sequential block for opcode and operand registers
+    sequential clock: :clk, reset: :rst, reset_values: { opcode: 0, operand_lo: 0, operand_hi: 0 } do
+      opcode <= mux(load_opcode, data_in, opcode)
+      operand_lo <= mux(load_operand_lo, data_in, operand_lo)
+      operand_hi <= mux(load_operand_hi, data_in, operand_hi)
     end
 
-    def propagate
-      clk = in_val(:clk)
-      rising = (@prev_clk == 0 && clk == 1)
-      @prev_clk = clk
-
-      if rising
-        if in_val(:rst) == 1
-          @opcode = 0
-          @operand_lo = 0
-          @operand_hi = 0
-        else
-          data = in_val(:data_in) & 0xFF
-          @opcode = data if in_val(:load_opcode) == 1
-          @operand_lo = data if in_val(:load_operand_lo) == 1
-          @operand_hi = data if in_val(:load_operand_hi) == 1
-        end
-      end
-
-      out_set(:opcode, @opcode)
-      out_set(:operand_lo, @operand_lo)
-      out_set(:operand_hi, @operand_hi)
-      out_set(:operand, (@operand_hi << 8) | @operand_lo)
+    # Combinational output: 16-bit operand from hi/lo bytes
+    behavior do
+      operand <= cat(operand_hi, operand_lo)
     end
 
-    def read_opcode; @opcode; end
-    def read_operand; (@operand_hi << 8) | @operand_lo; end
+    # Test helper accessors (use DSL state management)
+    def read_opcode; read_reg(:opcode) || 0; end
+    def read_operand; ((read_reg(:operand_hi) || 0) << 8) | (read_reg(:operand_lo) || 0); end
 
     def self.to_verilog
-      <<~VERILOG
-        // MOS 6502 Instruction Register - Synthesizable Verilog
-        module mos6502_instruction_register (
-          input        clk,
-          input        rst,
-          input        load_opcode,
-          input        load_operand_lo,
-          input        load_operand_hi,
-          input  [7:0] data_in,
-          output reg [7:0] opcode,
-          output reg [7:0] operand_lo,
-          output reg [7:0] operand_hi,
-          output [15:0] operand
-        );
-
-          always @(posedge clk or posedge rst) begin
-            if (rst) begin
-              opcode <= 8'h00;
-              operand_lo <= 8'h00;
-              operand_hi <= 8'h00;
-            end else begin
-              if (load_opcode) opcode <= data_in;
-              if (load_operand_lo) operand_lo <= data_in;
-              if (load_operand_hi) operand_hi <= data_in;
-            end
-          end
-
-          assign operand = {operand_hi, operand_lo};
-
-        endmodule
-      VERILOG
+      RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502_instruction_register'))
     end
   end
 end

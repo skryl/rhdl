@@ -2,10 +2,15 @@
 # 8-bit data latch for holding memory data
 
 require_relative '../../../lib/rhdl'
+require_relative '../../../lib/rhdl/dsl/behavior'
+require_relative '../../../lib/rhdl/dsl/sequential'
 
 module MOS6502
-  # Data Latch - DSL Version
+  # Data Latch - Synthesizable via Sequential DSL
   class DataLatch < RHDL::HDL::SequentialComponent
+    include RHDL::DSL::Behavior
+    include RHDL::DSL::Sequential
+
     port_input :clk
     port_input :rst
     port_input :load
@@ -13,49 +18,13 @@ module MOS6502
 
     port_output :data, width: 8
 
-    def initialize(name = nil)
-      @data = 0
-      @prev_clk = 0
-      super(name)
-    end
-
-    def propagate
-      clk = in_val(:clk)
-      rising = (@prev_clk == 0 && clk == 1)
-      @prev_clk = clk
-
-      if rising
-        if in_val(:rst) == 1
-          @data = 0
-        elsif in_val(:load) == 1
-          @data = in_val(:data_in) & 0xFF
-        end
-      end
-
-      out_set(:data, @data)
+    # Sequential block for data register
+    sequential clock: :clk, reset: :rst, reset_values: { data: 0 } do
+      data <= mux(load, data_in, data)
     end
 
     def self.to_verilog
-      <<~VERILOG
-        // MOS 6502 Data Latch - Synthesizable Verilog
-        module mos6502_data_latch (
-          input        clk,
-          input        rst,
-          input        load,
-          input  [7:0] data_in,
-          output reg [7:0] data
-        );
-
-          always @(posedge clk or posedge rst) begin
-            if (rst) begin
-              data <= 8'h00;
-            end else if (load) begin
-              data <= data_in;
-            end
-          end
-
-        endmodule
-      VERILOG
+      RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502_data_latch'))
     end
   end
 end

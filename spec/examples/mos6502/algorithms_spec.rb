@@ -1,7 +1,7 @@
 require_relative 'spec_helper'
 require_relative '../../../examples/mos6502/cpu'
 
-RSpec.describe 'Complex programs on 6502' do
+RSpec.describe 'MOS6502 Complex Programs' do
   let(:cpu) { MOS6502::CPU.new }
 
   describe 'Bubble sort' do
