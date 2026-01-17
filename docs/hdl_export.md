@@ -60,3 +60,26 @@ Run only the HDL export specs:
 ```
 bundle exec rspec spec/export_verilog_spec.rb spec/export_vhdl_spec.rb
 ```
+
+## Output Directory
+
+All generated HDL files are placed in the `/export/` directory:
+
+* `/export/vhdl/` - Generated VHDL files
+* `/export/verilog/` - Generated Verilog files
+
+## Rake Tasks
+
+```bash
+# Export all DSL components to VHDL and Verilog
+rake hdl:export
+
+# Export only VHDL
+rake hdl:vhdl
+
+# Export only Verilog
+rake hdl:verilog
+
+# Clean generated HDL files
+rake hdl:clean
+```

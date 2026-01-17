@@ -51,37 +51,34 @@ rhdl/
 │   │   ├── memory.rb            # RAM, ROM, register files
 │   │   ├── diagram.rb           # Diagram generation
 │   │   └── cpu/                 # HDL CPU implementation
-│   │       ├── datapath.rb      # CPU datapath
+│   │       ├── datapath.rb      # Behavioral CPU datapath
+│   │       ├── synth_datapath.rb # Synthesizable CPU datapath
+│   │       ├── instruction_decoder.rb # Instruction decoder
 │   │       └── adapter.rb       # Behavioral/HDL adapter
-│   ├── gates/                   # Gate-level primitives
-│   │   ├── primitives.rb        # Gate primitives
-│   │   ├── ir.rb                # Gate-level IR
-│   │   └── toposort.rb          # Topological sorting
+│   ├── gates/                   # Gate-level synthesis
+│   │   ├── primitives.rb        # Gate primitives (AND, OR, XOR, NOT, MUX, DFF)
+│   │   ├── ir.rb                # Gate-level intermediate representation
+│   │   ├── lower.rb             # HDL to gate-level lowering (53 components)
+│   │   └── toposort.rb          # Topological sorting for simulation
 │   └── diagram/                 # Diagram module
 │       ├── render_svg.rb        # SVG rendering
 │       ├── render_dot.rb        # Graphviz DOT format
 │       ├── gate_level.rb        # Gate-level diagrams
 │       └── netlist.rb           # Netlist generation
 │
-├── cpu/                         # Behavioral 8-bit CPU
-│   ├── cpu.rb                   # Main CPU implementation
-│   ├── control_unit.rb          # Instruction decoding
-│   ├── cpu_alu.rb               # ALU
-│   ├── memory_unit.rb           # Memory interface
-│   └── program_counter.rb       # Program counter
-│
 ├── examples/                    # Example implementations
-│   └── mos6502/                 # MOS 6502 CPU implementation
-│       ├── cpu.rb               # 6502 CPU
-│       ├── alu.rb               # 6502 ALU
-│       ├── control_unit.rb      # State machine
-│       ├── datapath.rb          # CPU datapath
-│       ├── assembler.rb         # 6502 assembler
-│       └── ...                  # Other 6502 components
+│   ├── mos6502/                 # MOS 6502 behavioral CPU
+│   │   ├── cpu.rb               # 6502 CPU
+│   │   ├── alu.rb               # 6502 ALU
+│   │   ├── control_unit.rb      # State machine
+│   │   ├── datapath.rb          # CPU datapath
+│   │   ├── assembler.rb         # 6502 assembler
+│   │   └── ...                  # Other 6502 components
+│   └── mos6502s/                # MOS 6502 synthesizable CPU
+│       └── ...                  # Synthesizable 6502 components
 │
 ├── spec/                        # Test suite
 │   ├── examples/mos6502/        # MOS 6502 tests (189+ tests)
-│   ├── behavioral_cpu/          # Behavioral CPU tests (47 tests)
 │   ├── rhdl/                    # Core framework tests
 │   │   └── hdl/                 # HDL component tests
 │   └── support/                 # Test helpers
@@ -95,12 +92,20 @@ rhdl/
 │   ├── debugging.md             # Debug/TUI guide
 │   ├── diagrams.md              # Diagram generation
 │   ├── hdl_export.md            # VHDL/Verilog export
-│   ├── gate_level_backend.md    # Gate-level details
+│   ├── gate_level_backend.md    # Gate-level synthesis details
 │   └── apple2_io.md             # Apple II I/O support
 │
-├── vhdl/                        # Generated VHDL files
-├── verilog/                     # Generated Verilog files
-└── diagrams/                    # Generated diagrams
+├── export/                      # Generated exports (all output files)
+│   ├── vhdl/                    # Generated VHDL files
+│   ├── verilog/                 # Generated Verilog files
+│   └── gates/                   # Gate-level synthesis JSON netlists
+│       ├── arithmetic/          # ALU, adders, multiplier, divider
+│       ├── combinational/       # Mux, demux, decoders, encoders
+│       ├── sequential/          # Registers, counters, flip-flops
+│       ├── gates/               # Logic gate primitives
+│       └── cpu/                 # CPU components (SynthDatapath)
+│
+└── diagrams/                    # Generated circuit diagrams
 ```
 
 ## Environment Setup
@@ -198,10 +203,22 @@ rake hdl:verilog
 # Clean generated HDL files
 rake hdl:clean
 
+# Gate-level synthesis - export all 53 components to JSON netlists
+rake gates:export
+
+# Export SynthDatapath CPU to gate-level
+rake gates:simcpu
+
+# Show gate-level synthesis statistics
+rake gates:stats
+
+# Clean gate-level output
+rake gates:clean
+
 # Run gate-level simulation benchmark
 rake bench:gates
 
-# Generate all outputs (diagrams + HDL)
+# Generate all outputs (diagrams + HDL + gates)
 rake generate_all
 
 # Clean all generated files
@@ -225,7 +242,36 @@ vhdl_code = RHDL::Export::VHDL.export(component)
 verilog_code = RHDL::Export::Verilog.export(component)
 ```
 
-Generated files are placed in `/vhdl/` and `/verilog/` directories.
+Generated files are placed in `/export/vhdl/` and `/export/verilog/` directories.
+
+### Gate-Level Synthesis
+
+Lower HDL components to primitive gate netlists (AND, OR, XOR, NOT, MUX, DFF):
+```ruby
+require 'rhdl/hdl'
+require 'rhdl/gates'
+
+# Create a component
+alu = RHDL::HDL::ALU.new('alu', width: 8)
+
+# Lower to gate-level IR
+ir = RHDL::Gates::Lower.from_components([alu], name: 'alu')
+
+# Export to JSON netlist
+File.write('alu.json', ir.to_json)
+
+# Get statistics
+puts "Gates: #{ir.gates.length}, DFFs: #{ir.dffs.length}"
+```
+
+The gate-level synthesis supports 53 HDL components including:
+- **Gates**: AND, OR, XOR, NOT, NAND, NOR, XNOR, Buffer, Tristate
+- **Arithmetic**: Adder, Subtractor, Multiplier, Divider, ALU, Comparator
+- **Sequential**: D/T/JK/SR flip-flops, Register, Counter, ProgramCounter
+- **Combinational**: Mux2/4/8, Demux, Decoder, Encoder, BarrelShifter
+- **CPU**: InstructionDecoder, SynthDatapath (hierarchical composition)
+
+Generated netlists are placed in `/export/gates/` directory.
 
 ### Diagram Generation
 
@@ -250,7 +296,19 @@ Multi-level diagrams with hierarchy support are available. See `docs/diagrams.md
 
 ## Recent Changes
 
-### Latest Updates (2025)
+### Latest Updates (January 2025)
+- **Gate-level synthesis** - Complete gate-level lowering for 53 HDL components
+  - Primitive gates: AND, OR, XOR, NOT, MUX, BUF, CONST, DFF
+  - Complex components: Multiplier (array), Divider (restoring), ALU
+  - Hierarchical synthesis for SynthDatapath CPU (505 gates, 24 DFFs)
+  - JSON netlist export with statistics
+- **Export directory consolidation** - All output now in `/export/` directory
+  - `/export/vhdl/` - Generated VHDL files
+  - `/export/verilog/` - Generated Verilog files
+  - `/export/gates/` - Gate-level JSON netlists
+- **New rake tasks** - `gates:export`, `gates:simcpu`, `gates:stats`, `gates:clean`
+
+### Previous Updates (2025)
 - **Rake task migration** - Moved scripts to rake tasks (`rake diagrams:generate`, `rake hdl:export`, `rake bench:gates`)
 - **MOS 6502 CPU timing fixes** - Fixed RMW instruction timing for shifts
 - **Multi-level diagram generation** - Hierarchical component diagrams
