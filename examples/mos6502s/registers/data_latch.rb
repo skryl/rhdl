@@ -3,11 +3,13 @@
 
 require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
+require_relative '../../../lib/rhdl/dsl/sequential'
 
 module MOS6502S
-  # Data Latch - Synthesizable via DSL
+  # Data Latch - Synthesizable via Sequential DSL
   class DataLatch < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
+    include RHDL::DSL::Sequential
 
     port_input :clk
     port_input :rst
@@ -21,6 +23,12 @@ module MOS6502S
       super(name)
     end
 
+    # Sequential block for data register
+    sequential clock: :clk, reset: :rst, reset_values: { data: 0 } do
+      data <= mux(load, data_in, data)
+    end
+
+    # Override propagate to maintain internal state for testing
     def propagate
       if rising_edge?
         if in_val(:rst) == 1
@@ -34,27 +42,7 @@ module MOS6502S
     end
 
     def self.to_verilog
-      <<~VERILOG
-        // MOS 6502 Data Latch - Synthesizable Verilog
-        // Generated from RHDL Behavior DSL
-        module mos6502s_data_latch (
-          input        clk,
-          input        rst,
-          input        load,
-          input  [7:0] data_in,
-          output reg [7:0] data
-        );
-
-          always @(posedge clk or posedge rst) begin
-            if (rst) begin
-              data <= 8'h00;
-            end else if (load) begin
-              data <= data_in;
-            end
-          end
-
-        endmodule
-      VERILOG
+      RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502s_data_latch'))
     end
   end
 end

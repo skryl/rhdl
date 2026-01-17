@@ -41,6 +41,101 @@ module RHDL
       def sample_clock
         @prev_clk = in_val(:clk)
       end
+
+      class << self
+        # Check if sequential block is defined
+        def sequential_defined?
+          respond_to?(:_sequential_block) && _sequential_block
+        end
+
+        # Override to_ir to include sequential processes
+        def to_ir(top_name: nil)
+          name = top_name || self.name.split('::').last.underscore
+
+          ports = _ports.map do |p|
+            RHDL::Export::IR::Port.new(name: p.name, direction: p.direction, width: p.width)
+          end
+
+          # Get sequential IR if defined
+          processes = []
+          sequential_targets = []
+          if sequential_defined?
+            seq_ir = execute_sequential_for_synthesis
+            if seq_ir
+              process = sequential_ir_to_process(seq_ir)
+              processes << process
+              # Collect targets assigned in sequential block
+              sequential_targets = seq_ir.assignments.map { |a| a.target.to_sym }
+              # Also include reset values as they're sequential targets too
+              sequential_targets += seq_ir.reset_values.keys
+            end
+          end
+
+          # Only mark outputs as registers if they are assigned in the sequential block
+          reg_ports = _ports.select { |p| p.direction == :out && sequential_targets.include?(p.name) }.map(&:name)
+
+          # Also check for behavior blocks (for combinational parts)
+          behavior_result = behavior_to_ir_assigns
+
+          RHDL::Export::IR::ModuleDef.new(
+            name: name,
+            ports: ports,
+            nets: behavior_result[:wires],
+            regs: [],
+            assigns: behavior_result[:assigns],
+            processes: processes,
+            reg_ports: reg_ports
+          )
+        end
+
+        # Convert IR::Sequential to IR::Process
+        def sequential_ir_to_process(seq_ir)
+          statements = []
+
+          # Build if-else structure: if (reset) ... else ...
+          if seq_ir.reset
+            # Reset branch: assign reset values
+            reset_stmts = seq_ir.reset_values.map do |name, value|
+              port = _ports.find { |p| p.name == name }
+              width = port ? port.width : 8
+              RHDL::Export::IR::SeqAssign.new(
+                target: name,
+                expr: RHDL::Export::IR::Literal.new(value: value, width: width)
+              )
+            end
+
+            # Normal operation branch
+            normal_stmts = seq_ir.assignments.map do |assign|
+              RHDL::Export::IR::SeqAssign.new(
+                target: assign.target,
+                expr: assign.expr
+              )
+            end
+
+            # Wrap in if-else
+            statements << RHDL::Export::IR::If.new(
+              condition: RHDL::Export::IR::Signal.new(name: seq_ir.reset, width: 1),
+              then_statements: reset_stmts,
+              else_statements: normal_stmts
+            )
+          else
+            # No reset - just the assignments
+            statements = seq_ir.assignments.map do |assign|
+              RHDL::Export::IR::SeqAssign.new(
+                target: assign.target,
+                expr: assign.expr
+              )
+            end
+          end
+
+          RHDL::Export::IR::Process.new(
+            name: :seq_logic,
+            statements: statements,
+            clocked: true,
+            clock: seq_ir.clock
+          )
+        end
+      end
     end
   end
 end
