@@ -11,5 +11,6 @@
 *.rbc
 .DS_Store
 .rspec_status
+.rspec_status*
 /spec/fixtures/apple2/
 /vendor/
