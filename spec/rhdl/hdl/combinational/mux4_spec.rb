@@ -49,4 +49,40 @@ RSpec.describe RHDL::HDL::Mux4 do
       expect(verilog).to include('input [1:0] sel')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::Mux4.new('mux4', width: 1) }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mux4') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('mux4.a', 'mux4.b', 'mux4.c', 'mux4.d', 'mux4.sel')
+      expect(ir.outputs.keys).to include('mux4.y')
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module mux4')
+      expect(verilog).to include('input [1:0] sel')
+    end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'simulates correctly' do
+        vectors = [
+          { inputs: { a: 1, b: 0, c: 0, d: 0, sel: 0 }, expected: { y: 1 } },
+          { inputs: { a: 0, b: 1, c: 0, d: 0, sel: 1 }, expected: { y: 1 } },
+          { inputs: { a: 0, b: 0, c: 1, d: 0, sel: 2 }, expected: { y: 1 } },
+          { inputs: { a: 0, b: 0, c: 0, d: 1, sel: 3 }, expected: { y: 1 } },
+          { inputs: { a: 1, b: 1, c: 1, d: 1, sel: 0 }, expected: { y: 1 } },
+          { inputs: { a: 0, b: 0, c: 0, d: 0, sel: 2 }, expected: { y: 0 } }
+        ]
+
+        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mux4')
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx]).to eq(vec[:expected])
+        end
+      end
+    end
+  end
 end

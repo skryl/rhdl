@@ -1356,21 +1356,18 @@ module RHDL
 
         width = a_nets.length
 
-        # For increment: add 1
-        # For decrement: subtract 1 = add all 1s + 1 = add 0 (two's complement of 1)
-        # Using XOR to conditionally invert and add inc as carry
+        # For increment (inc=1): A + 0...01 = A + 1, carry_in = 1, b = 0
+        # For decrement (inc=0): A + 1...11 = A + (-1) = A - 1, carry_in = 0, b = 1
+        #
+        # Using full adder with b = NOT(inc) for each bit:
+        #   sum = a XOR b XOR carry = a XOR NOT(inc) XOR carry
+        #   next_carry = (a AND b) OR (carry AND (a XOR b))
+        #             = (a AND NOT(inc)) OR (carry AND (a XOR NOT(inc)))
+        #
+        # For increment (b=0): next_carry = 0 OR (carry AND a) = carry AND a (half adder)
+        # For decrement (b=1): next_carry = a OR (carry AND NOT(a)) = a OR carry
 
-        # When inc=1: result = A + 1 (carry in = 1)
-        # When inc=0: result = A + (-1) = A + 0xFF...F + 1 = A - 1 (carry in = 1, all bits inverted = subtract)
-        # Actually: A - 1 = A + ~1 + 1 = A + 0xFE + 1 = A + 0xFF
-        # Simpler: use A XOR inc for each bit, then ripple add
-
-        # For inc/dec by 1:
-        # inc=1: result = A + 1
-        # inc=0: result = A - 1 = A + (-1) in two's complement
-
-        # Increment chain: propagate carry through
-        carry = inc_net  # Start with inc as carry-in for increment
+        carry = inc_net  # Start with inc as carry-in (1 for inc, 0 for dec)
         inc_inv = new_temp
         @ir.add_gate(type: Primitives::NOT, inputs: [inc_net], output: inc_inv)
 
@@ -1378,26 +1375,26 @@ module RHDL
           a_net = a_nets[idx]
           result_net = result_nets[idx]
 
-          # For increment: half-adder chain (A + 1)
-          # For decrement: A - 1 = A + ~0 + 1 but simpler as borrow chain
-
-          # Combined: XOR a with inc_inv to flip for decrement mode
+          # a_xor = a XOR NOT(inc) = a XOR b
           a_xor = new_temp
           @ir.add_gate(type: Primitives::XOR, inputs: [a_net, inc_inv], output: a_xor)
 
-          # Half adder: result = a_xor XOR carry, next_carry = a_xor AND carry
+          # sum = a_xor XOR carry
           @ir.add_gate(type: Primitives::XOR, inputs: [a_xor, carry], output: result_net)
 
-          if idx < width - 1
-            next_carry = new_temp
-            @ir.add_gate(type: Primitives::AND, inputs: [a_xor, carry], output: next_carry)
-            carry = next_carry
-          else
-            # Last bit: capture carry out
-            final_carry = new_temp
-            @ir.add_gate(type: Primitives::AND, inputs: [a_xor, carry], output: final_carry)
-            carry = final_carry
-          end
+          # Full adder carry: (a AND b) OR (carry AND a_xor)
+          # a_and_b = a AND NOT(inc)
+          a_and_b = new_temp
+          @ir.add_gate(type: Primitives::AND, inputs: [a_net, inc_inv], output: a_and_b)
+
+          # carry_and_axor = carry AND a_xor
+          carry_and_axor = new_temp
+          @ir.add_gate(type: Primitives::AND, inputs: [carry, a_xor], output: carry_and_axor)
+
+          # next_carry = a_and_b OR carry_and_axor
+          next_carry = new_temp
+          @ir.add_gate(type: Primitives::OR, inputs: [a_and_b, carry_and_axor], output: next_carry)
+          carry = next_carry
         end
 
         # Cout: overflow/underflow detection

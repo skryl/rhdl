@@ -32,4 +32,37 @@ RSpec.describe RHDL::HDL::XorGate do
       expect(verilog).to include('assign y')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::XorGate.new('xor_gate') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'xor_gate') }
+
+    it 'generates correct IR structure' do
+      expect(ir.gates.length).to eq(1)
+      expect(ir.gates.first.type).to eq(:xor)
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('xor g0')
+    end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'simulates correctly' do
+        vectors = [
+          { inputs: { a0: 0, a1: 0 }, expected: { y: 0 } },
+          { inputs: { a0: 0, a1: 1 }, expected: { y: 1 } },
+          { inputs: { a0: 1, a1: 0 }, expected: { y: 1 } },
+          { inputs: { a0: 1, a1: 1 }, expected: { y: 0 } }
+        ]
+
+        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/xor_gate')
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx]).to eq(vec[:expected])
+        end
+      end
+    end
+  end
 end
