@@ -1,0 +1,38 @@
+Component: datapath
+Type: MOS6502S::Datapath
+Gates: 915
+DFFs: 103
+Nets: 1742
+
+Inputs:
+  datapath.clk: 1 bits
+  datapath.rst: 1 bits
+  datapath.rdy: 1 bits
+  datapath.irq: 1 bits
+  datapath.nmi: 1 bits
+  datapath.data_in: 8 bits
+
+Outputs:
+  datapath.data_out: 8 bits
+  datapath.addr: 16 bits
+  datapath.rw: 1 bits
+  datapath.sync: 1 bits
+  datapath.reg_a: 8 bits
+  datapath.reg_x: 8 bits
+  datapath.reg_y: 8 bits
+  datapath.reg_sp: 8 bits
+  datapath.reg_pc: 16 bits
+  datapath.reg_p: 8 bits
+  datapath.opcode: 8 bits
+  datapath.state: 8 bits
+  datapath.halted: 1 bits
+  datapath.cycle_count: 32 bits
+
+Gate Types:
+  mux: 106
+  or: 101
+  buf: 334
+  const: 189
+  xor: 80
+  and: 80
+  not: 25

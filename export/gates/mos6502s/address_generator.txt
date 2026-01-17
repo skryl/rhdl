@@ -1,0 +1,25 @@
+Component: agen
+Type: MOS6502S::AddressGenerator
+Gates: 35
+DFFs: 0
+Nets: 111
+
+Inputs:
+  agen.mode: 4 bits
+  agen.operand_lo: 8 bits
+  agen.operand_hi: 8 bits
+  agen.x_reg: 8 bits
+  agen.y_reg: 8 bits
+  agen.pc: 16 bits
+  agen.sp: 8 bits
+  agen.indirect_lo: 8 bits
+  agen.indirect_hi: 8 bits
+
+Outputs:
+  agen.eff_addr: 16 bits
+  agen.page_cross: 1 bits
+  agen.is_zero_page: 1 bits
+
+Gate Types:
+  const: 17
+  buf: 18

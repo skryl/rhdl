@@ -1,0 +1,30 @@
+Component: dec
+Type: MOS6502S::InstructionDecoder
+Gates: 62
+DFFs: 0
+Nets: 70
+
+Inputs:
+  dec.opcode: 8 bits
+
+Outputs:
+  dec.addr_mode: 4 bits
+  dec.alu_op: 4 bits
+  dec.instr_type: 4 bits
+  dec.src_reg: 2 bits
+  dec.dst_reg: 2 bits
+  dec.branch_cond: 3 bits
+  dec.cycles_base: 3 bits
+  dec.is_read: 1 bits
+  dec.is_write: 1 bits
+  dec.is_rmw: 1 bits
+  dec.sets_nz: 1 bits
+  dec.sets_c: 1 bits
+  dec.sets_v: 1 bits
+  dec.writes_reg: 1 bits
+  dec.is_status_op: 1 bits
+  dec.illegal: 1 bits
+
+Gate Types:
+  const: 31
+  buf: 31

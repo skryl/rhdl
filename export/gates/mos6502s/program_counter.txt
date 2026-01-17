@@ -1,0 +1,25 @@
+Component: pc
+Type: MOS6502S::ProgramCounter
+Gates: 129
+DFFs: 16
+Nets: 181
+
+Inputs:
+  pc.clk: 1 bits
+  pc.rst: 1 bits
+  pc.inc: 1 bits
+  pc.load: 1 bits
+  pc.addr_in: 16 bits
+
+Outputs:
+  pc.pc: 16 bits
+  pc.pc_hi: 8 bits
+  pc.pc_lo: 8 bits
+
+Gate Types:
+  const: 1
+  xor: 16
+  and: 16
+  mux: 48
+  or: 16
+  buf: 32
