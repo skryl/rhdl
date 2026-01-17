@@ -40,18 +40,6 @@ module RHDL
         tc <= mux(up, is_max, is_zero)
         zero <= is_zero
       end
-
-      def initialize(name = nil, width: 8)
-        @width = width
-        @max = (1 << width) - 1
-        super(name)
-      end
-
-      def setup_ports
-        return if @width == 8
-        @inputs[:d] = Wire.new("#{@name}.d", width: @width)
-        @outputs[:q] = Wire.new("#{@name}.q", width: @width)
-      end
     end
   end
 end

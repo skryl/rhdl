@@ -39,17 +39,6 @@ module RHDL
         # Serial out: LSB when right, MSB when left
         d_out <= mux(dir, q[7], q[0])
       end
-
-      def initialize(name = nil, width: 8)
-        @width = width
-        super(name)
-      end
-
-      def setup_ports
-        return if @width == 8
-        @inputs[:d] = Wire.new("#{@name}.d", width: @width)
-        @outputs[:q] = Wire.new("#{@name}.q", width: @width)
-      end
     end
   end
 end

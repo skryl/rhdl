@@ -8,7 +8,7 @@ RSpec.describe RHDL::HDL::Register do
     component.propagate
   end
 
-  let(:reg) { RHDL::HDL::Register.new(nil, width: 8) }
+  let(:reg) { RHDL::HDL::Register.new }
 
   before do
     reg.set_input(:rst, 0)
