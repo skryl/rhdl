@@ -79,15 +79,32 @@ module MOS6502S
 
       @control.set_input(:rdy, rdy)
 
-      # IMPORTANT: Propagate control unit FIRST to get correct control signals
+      # CRITICAL: Sample control signals BEFORE propagating control unit
+      # In real hardware, all flip-flops sample their D inputs at the same clock edge.
+      # By sampling first, we ensure components see signals from the PREVIOUS state,
+      # not the state after the control unit transitions.
+      sampled_load_opcode = @control.get_output(:load_opcode)
+      sampled_load_operand_lo = @control.get_output(:load_operand_lo)
+      sampled_load_operand_hi = @control.get_output(:load_operand_hi)
+      sampled_state = @control.get_output(:state)
+      sampled_reg_write = @control.get_output(:reg_write)
+      sampled_update_flags = @control.get_output(:update_flags)
+      sampled_load_data = @control.get_output(:load_data)
+      sampled_load_addr_lo = @control.get_output(:load_addr_lo)
+      sampled_load_addr_hi = @control.get_output(:load_addr_hi)
+      sampled_sp_inc = @control.get_output(:sp_inc)
+      sampled_sp_dec = @control.get_output(:sp_dec)
+      sampled_pc_inc = @control.get_output(:pc_inc)
+      sampled_pc_load = @control.get_output(:pc_load)
+
+      # Now propagate control unit (which will update its state and outputs)
       @control.set_input(:mem_ready, 1)
       @control.propagate
 
-      # Instruction Register - load opcode and operands
-      # IMPORTANT: Set control signals FIRST before data_in to avoid premature propagation
-      @ir.set_input(:load_opcode, @control.get_output(:load_opcode))
-      @ir.set_input(:load_operand_lo, @control.get_output(:load_operand_lo))
-      @ir.set_input(:load_operand_hi, @control.get_output(:load_operand_hi))
+      # Instruction Register - use SAMPLED control signals (from previous state)
+      @ir.set_input(:load_opcode, sampled_load_opcode)
+      @ir.set_input(:load_operand_lo, sampled_load_operand_lo)
+      @ir.set_input(:load_operand_hi, sampled_load_operand_hi)
       @ir.set_input(:data_in, data_in)
       @ir.propagate
 
@@ -160,22 +177,23 @@ module MOS6502S
       @addr_calc.set_input(:x_reg, reg_x)
       @addr_calc.propagate
 
-      state_before = @control.get_output(:state_before)
+      # Use sampled state as state_before (the state BEFORE control unit transitions)
+      state_before = sampled_state
       state = @control.get_output(:state)
-      state_pre = @control.get_output(:state_pre)
+      state_pre = sampled_state
 
-      # Address bus multiplexer based on addr_sel
+      # Address bus multiplexer based on addr_sel (use current, not sampled - address is combinational)
       addr_sel = @control.get_output(:addr_sel)
       addr_out = select_address(addr_sel, pc_val, eff_addr, @addr_calc, sp_val)
 
-      # Data latch
-      @data_latch.set_input(:load, @control.get_output(:load_data))
+      # Data latch - use sampled load signal
+      @data_latch.set_input(:load, sampled_load_data)
       @data_latch.set_input(:data_in, data_in)
       @data_latch.propagate
 
-      # Address latch for indirect addressing
-      @addr_latch.set_input(:load_lo, @control.get_output(:load_addr_lo))
-      @addr_latch.set_input(:load_hi, @control.get_output(:load_addr_hi))
+      # Address latch for indirect addressing - use sampled load signals
+      @addr_latch.set_input(:load_lo, sampled_load_addr_lo)
+      @addr_latch.set_input(:load_hi, sampled_load_addr_hi)
       @addr_latch.set_input(:load_full, 0)
       @addr_latch.set_input(:data_in, data_in)
       @addr_latch.set_input(:addr_in, eff_addr)
@@ -220,15 +238,15 @@ module MOS6502S
         @rmw_result_latch = alu_result
       end
 
-      # Update registers based on control signals
-      update_registers(dst_reg, alu_result, data_in, instr_type, addr_mode, state_before)
+      # Update registers based on control signals - use sampled reg_write
+      update_registers(dst_reg, alu_result, data_in, instr_type, addr_mode, state_before, sampled_reg_write)
 
-      # Update status register
-      update_status_flags(instr_type, addr_mode, state_before)
+      # Update status register - use sampled update_flags
+      update_status_flags(instr_type, addr_mode, state_before, sampled_update_flags)
 
-      # Program counter updates
-      @pc.set_input(:inc, @control.get_output(:pc_inc))
-      @pc.set_input(:load, @control.get_output(:pc_load))
+      # Program counter updates - use sampled signals
+      @pc.set_input(:inc, sampled_pc_inc)
+      @pc.set_input(:load, sampled_pc_load)
 
       # PC load address: from address latch for jumps, or computed for branches
       pc_load_addr = select_pc_load_addr(
@@ -241,9 +259,9 @@ module MOS6502S
       @pc.set_input(:addr_in, pc_load_addr)
       @pc.propagate
 
-      # Stack pointer updates
-      @sp.set_input(:inc, @control.get_output(:sp_inc))
-      @sp.set_input(:dec, @control.get_output(:sp_dec))
+      # Stack pointer updates - use sampled signals
+      @sp.set_input(:inc, sampled_sp_inc)
+      @sp.set_input(:dec, sampled_sp_dec)
       @sp.set_input(:load, 0)
       @sp.set_input(:data_in, 0)
 
@@ -353,8 +371,8 @@ module MOS6502S
       end
     end
 
-    def update_registers(dst_reg, alu_result, data_in, instr_type, addr_mode, state_before)
-      reg_write = @control.get_output(:reg_write)
+    def update_registers(dst_reg, alu_result, data_in, instr_type, addr_mode, state_before, sampled_reg_write)
+      reg_write = sampled_reg_write
 
       @registers.set_input(:load_a, 0)
       @registers.set_input(:load_x, 0)
@@ -416,8 +434,8 @@ module MOS6502S
       end
     end
 
-    def update_status_flags(instr_type, addr_mode, state_before)
-      update = @control.get_output(:update_flags)
+    def update_status_flags(instr_type, addr_mode, state_before, sampled_update_flags)
+      update = sampled_update_flags
 
       @status_reg.set_input(:load_all, 0)
       @status_reg.set_input(:load_flags, 0)
