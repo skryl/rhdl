@@ -82,5 +82,25 @@ RSpec.describe MOS6502::ControlUnit do
       expect(verilog).to include('input rst')
       expect(verilog).to include('output [7:0] state')
     end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'compiles and simulates structural Verilog' do
+        # Control unit is a complex state machine - just verify it compiles and runs
+        vectors = [
+          { inputs: { clk: 0, rst: 1, rdy: 1, addr_mode: 0, instr_type: 0, branch_cond: 0,
+                      flag_n: 0, flag_v: 0, flag_z: 0, flag_c: 0, page_cross: 0, mem_ready: 1,
+                      is_read: 0, is_write: 0, is_rmw: 0, writes_reg: 0, is_status_op: 0 } },
+          { inputs: { clk: 1, rst: 1, rdy: 1, addr_mode: 0, instr_type: 0, branch_cond: 0,
+                      flag_n: 0, flag_v: 0, flag_z: 0, flag_c: 0, page_cross: 0, mem_ready: 1,
+                      is_read: 0, is_write: 0, is_rmw: 0, writes_reg: 0, is_status_op: 0 } },
+          { inputs: { clk: 0, rst: 0, rdy: 1, addr_mode: 0, instr_type: 0, branch_cond: 0,
+                      flag_n: 0, flag_v: 0, flag_z: 0, flag_c: 0, page_cross: 0, mem_ready: 1,
+                      is_read: 0, is_write: 0, is_rmw: 0, writes_reg: 0, is_status_op: 0 } }
+        ]
+
+        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mos6502_control_unit')
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 end

@@ -89,5 +89,24 @@ RSpec.describe MOS6502::StatusRegister do
       expect(verilog).to include('input rst')
       expect(verilog).to include('output [7:0] p')
     end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'compiles and simulates structural Verilog' do
+        # Status register is sequential - verify compilation and basic operation
+        base_inputs = { clk: 0, rst: 0, load_n: 0, load_v: 0, load_z: 0, load_c: 0,
+                        load_i: 0, load_d: 0, load_b: 0, load_all: 0, load_flags: 0,
+                        n_in: 0, v_in: 0, z_in: 0, c_in: 0, i_in: 0, d_in: 0, b_in: 0, data_in: 0 }
+
+        vectors = [
+          { inputs: base_inputs.dup },
+          { inputs: base_inputs.merge(clk: 1) },
+          { inputs: base_inputs.merge(n_in: 1, load_n: 1) },
+          { inputs: base_inputs.merge(n_in: 1, load_n: 1, clk: 1) }
+        ]
+
+        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mos6502_status_register')
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 end

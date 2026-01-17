@@ -60,5 +60,19 @@ RSpec.describe MOS6502::Datapath do
       expect(verilog).to include('input clk')
       expect(verilog).to include('input rst')
     end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'compiles and simulates structural Verilog' do
+        # Datapath is a complex hierarchical component - verify compilation
+        vectors = [
+          { inputs: { clk: 0, rst: 1, rdy: 1, data_in: 0 } },
+          { inputs: { clk: 1, rst: 1, rdy: 1, data_in: 0 } },
+          { inputs: { clk: 0, rst: 0, rdy: 1, data_in: 0 } }
+        ]
+
+        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mos6502_datapath')
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 end

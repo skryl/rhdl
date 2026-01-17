@@ -63,5 +63,19 @@ RSpec.describe MOS6502::AddressLatch do
       expect(verilog).to include('input clk')
       expect(verilog).to include('output [15:0] addr')
     end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'compiles and simulates structural Verilog' do
+        vectors = [
+          { inputs: { clk: 0, rst: 0, data_in: 0x34, load_lo: 0, load_hi: 0 } },
+          { inputs: { clk: 0, rst: 0, data_in: 0x34, load_lo: 1, load_hi: 0 } },
+          { inputs: { clk: 1, rst: 0, data_in: 0x34, load_lo: 1, load_hi: 0 } },
+          { inputs: { clk: 0, rst: 0, data_in: 0x12, load_lo: 0, load_hi: 1 } }
+        ]
+
+        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mos6502_address_latch')
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 end

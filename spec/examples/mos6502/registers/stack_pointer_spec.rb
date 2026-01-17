@@ -86,5 +86,19 @@ RSpec.describe MOS6502::StackPointer do
       expect(verilog).to include('input clk')
       expect(verilog).to include('output [7:0] sp')
     end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'compiles and simulates structural Verilog' do
+        vectors = [
+          { inputs: { clk: 0, rst: 1, inc: 0, dec: 0, load: 0, data_in: 0 } },
+          { inputs: { clk: 1, rst: 1, inc: 0, dec: 0, load: 0, data_in: 0 } },
+          { inputs: { clk: 0, rst: 0, inc: 0, dec: 0, load: 0, data_in: 0 } },
+          { inputs: { clk: 1, rst: 0, inc: 0, dec: 1, load: 0, data_in: 0 } }
+        ]
+
+        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mos6502_stack_pointer')
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 end

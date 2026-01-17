@@ -98,5 +98,41 @@ RSpec.describe MOS6502::AddressGenerator do
       expect(verilog).to include('input [3:0] mode')
       expect(verilog).to include('output [15:0] eff_addr')
     end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation for address modes' do
+        behavioral = described_class.new('behavioral')
+        vectors = []
+        base_inputs = { operand_lo: 0, operand_hi: 0, x_reg: 0, y_reg: 0, pc: 0, sp: 0xFF, indirect_lo: 0, indirect_hi: 0 }
+
+        # Test zero page mode
+        behavioral.set_input(:mode, MOS6502::AddressGenerator::MODE_ZERO_PAGE)
+        behavioral.set_input(:operand_lo, 0x80)
+        base_inputs.each { |k, v| behavioral.set_input(k, v) unless k == :mode || k == :operand_lo }
+        behavioral.propagate
+        vectors << {
+          inputs: base_inputs.merge(mode: MOS6502::AddressGenerator::MODE_ZERO_PAGE, operand_lo: 0x80),
+          expected: { eff_addr: behavioral.get_output(:eff_addr), is_zero_page: behavioral.get_output(:is_zero_page), page_cross: behavioral.get_output(:page_cross) }
+        }
+
+        # Test absolute mode
+        behavioral.set_input(:mode, MOS6502::AddressGenerator::MODE_ABSOLUTE)
+        behavioral.set_input(:operand_lo, 0x34)
+        behavioral.set_input(:operand_hi, 0x12)
+        behavioral.propagate
+        vectors << {
+          inputs: base_inputs.merge(mode: MOS6502::AddressGenerator::MODE_ABSOLUTE, operand_lo: 0x34, operand_hi: 0x12),
+          expected: { eff_addr: behavioral.get_output(:eff_addr), is_zero_page: behavioral.get_output(:is_zero_page), page_cross: behavioral.get_output(:page_cross) }
+        }
+
+        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mos6502_address_generator')
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx]).to eq(vec[:expected]),
+            "Vector #{idx}: expected #{vec[:expected]}, got #{result[:results][idx]}"
+        end
+      end
+    end
   end
 end

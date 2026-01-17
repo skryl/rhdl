@@ -73,5 +73,19 @@ RSpec.describe MOS6502::InstructionRegister do
       expect(verilog).to include('input clk')
       expect(verilog).to include('output [7:0] opcode')
     end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'compiles and simulates structural Verilog' do
+        vectors = [
+          { inputs: { clk: 0, rst: 0, data_in: 0xA9, load_opcode: 0, load_operand_lo: 0, load_operand_hi: 0 } },
+          { inputs: { clk: 0, rst: 0, data_in: 0xA9, load_opcode: 1, load_operand_lo: 0, load_operand_hi: 0 } },
+          { inputs: { clk: 1, rst: 0, data_in: 0xA9, load_opcode: 1, load_operand_lo: 0, load_operand_hi: 0 } },
+          { inputs: { clk: 0, rst: 0, data_in: 0x42, load_opcode: 0, load_operand_lo: 1, load_operand_hi: 0 } }
+        ]
+
+        result = NetlistHelper.run_structural_simulation(netlist_ir, vectors, base_dir: 'tmp/netlist_test/mos6502_instruction_register')
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 end
