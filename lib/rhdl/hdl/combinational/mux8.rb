@@ -19,6 +19,7 @@ module RHDL
 
       behavior do
         # 8-to-1 mux using case_select
+        w = port_width(:y)
         y <= case_select(sel, {
           0 => in0,
           1 => in1,
@@ -28,7 +29,7 @@ module RHDL
           5 => in5,
           6 => in6,
           7 => in7
-        }, default: lit(0, width: 1))
+        }, default: lit(0, width: w))
       end
 
       def initialize(name = nil, width: 1)
@@ -41,15 +42,6 @@ module RHDL
         8.times { |i| @inputs[:"in#{i}"] = Wire.new("#{@name}.in#{i}", width: @width) }
         @outputs[:y] = Wire.new("#{@name}.y", width: @width)
         8.times { |i| @inputs[:"in#{i}"].on_change { |_| propagate } }
-      end
-
-      def propagate
-        if @width == 1 && self.class.behavior_defined?
-          execute_behavior
-        else
-          sel = in_val(:sel) & 7
-          out_set(:y, in_val(:"in#{sel}"))
-        end
       end
     end
   end

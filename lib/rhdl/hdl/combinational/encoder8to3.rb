@@ -29,24 +29,6 @@ module RHDL
         valid <= a[7] | a[6] | a[5] | a[4] | a[3] | a[2] | a[1] | a[0]
       end
 
-      def propagate
-        val = in_val(:a) & 0xFF
-        if val == 0
-          out_set(:y, 0)
-          out_set(:valid, 0)
-        else
-          # Find highest set bit
-          result = 0
-          7.downto(0) do |i|
-            if (val & (1 << i)) != 0
-              result = i
-              break
-            end
-          end
-          out_set(:y, result)
-          out_set(:valid, 1)
-        end
-      end
     end
   end
 end
