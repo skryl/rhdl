@@ -110,4 +110,14 @@ RSpec.describe MOS6502S::ALU do
       expect(alu.get_output(:c)).to eq(1)
     end
   end
+
+  describe 'synthesis' do
+    it 'generates valid Verilog' do
+      verilog = MOS6502S::ALU.to_verilog
+      expect(verilog).to include('module mos6502s_alu')
+      expect(verilog).to include('input [3:0] op')
+      expect(verilog).to include('output')
+      expect(verilog).to include('result')
+    end
+  end
 end
