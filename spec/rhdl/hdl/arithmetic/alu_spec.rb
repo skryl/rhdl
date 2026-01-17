@@ -90,6 +90,23 @@ RSpec.describe RHDL::HDL::ALU do
     end
   end
 
-  # Note: ALU uses manual propagate for complex case logic
-  # Synthesis tests are omitted since the behavior DSL doesn't support case statements yet
+  describe 'synthesis' do
+    it 'has a behavior block defined' do
+      expect(RHDL::HDL::ALU.behavior_defined?).to be_truthy
+    end
+
+    it 'generates valid IR' do
+      ir = RHDL::HDL::ALU.to_ir
+      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      expect(ir.ports.length).to eq(9)  # a, b, op, cin, result, cout, zero, negative, overflow
+    end
+
+    it 'generates valid Verilog' do
+      verilog = RHDL::HDL::ALU.to_verilog
+      expect(verilog).to include('module alu')
+      expect(verilog).to include('input [7:0] a')
+      expect(verilog).to include('input [7:0] b')
+      expect(verilog).to include('output [7:0] result')
+    end
+  end
 end

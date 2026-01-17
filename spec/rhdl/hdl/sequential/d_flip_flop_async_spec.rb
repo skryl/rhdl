@@ -15,39 +15,61 @@ RSpec.describe RHDL::HDL::DFlipFlopAsync do
     dff.set_input(:en, 1)
   end
 
-  it 'captures input on rising edge' do
-    dff.set_input(:d, 1)
-    clock_cycle(dff)
-    expect(dff.get_output(:q)).to eq(1)
-    expect(dff.get_output(:qn)).to eq(0)
+  describe 'simulation' do
+    it 'captures input on rising edge' do
+      dff.set_input(:d, 1)
+      clock_cycle(dff)
+      expect(dff.get_output(:q)).to eq(1)
+      expect(dff.get_output(:qn)).to eq(0)
+    end
+
+    it 'holds value when enable is low' do
+      dff.set_input(:d, 1)
+      clock_cycle(dff)
+      expect(dff.get_output(:q)).to eq(1)
+
+      dff.set_input(:en, 0)
+      dff.set_input(:d, 0)
+      clock_cycle(dff)
+      expect(dff.get_output(:q)).to eq(1)  # Still 1
+    end
+
+    it 'resets asynchronously on reset signal' do
+      dff.set_input(:d, 1)
+      clock_cycle(dff)
+      expect(dff.get_output(:q)).to eq(1)
+
+      # Async reset should work without clock edge
+      dff.set_input(:rst, 1)
+      dff.propagate
+      expect(dff.get_output(:q)).to eq(0)
+    end
+
+    it 'reset takes priority over clock edge' do
+      dff.set_input(:d, 1)
+      dff.set_input(:rst, 1)
+      clock_cycle(dff)
+      expect(dff.get_output(:q)).to eq(0)
+    end
   end
 
-  it 'holds value when enable is low' do
-    dff.set_input(:d, 1)
-    clock_cycle(dff)
-    expect(dff.get_output(:q)).to eq(1)
+  describe 'synthesis' do
+    it 'has a behavior block defined' do
+      expect(RHDL::HDL::DFlipFlopAsync.behavior_defined?).to be_truthy
+    end
 
-    dff.set_input(:en, 0)
-    dff.set_input(:d, 0)
-    clock_cycle(dff)
-    expect(dff.get_output(:q)).to eq(1)  # Still 1
-  end
+    # Note: Sequential components use rising_edge? which is not yet supported in synthesis context
+    it 'generates valid IR', :pending do
+      ir = RHDL::HDL::DFlipFlopAsync.to_ir
+      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      expect(ir.ports.length).to eq(6)  # d, clk, rst, en, q, qn
+    end
 
-  it 'resets asynchronously on reset signal' do
-    dff.set_input(:d, 1)
-    clock_cycle(dff)
-    expect(dff.get_output(:q)).to eq(1)
-
-    # Async reset should work without clock edge
-    dff.set_input(:rst, 1)
-    dff.propagate
-    expect(dff.get_output(:q)).to eq(0)
-  end
-
-  it 'reset takes priority over clock edge' do
-    dff.set_input(:d, 1)
-    dff.set_input(:rst, 1)
-    clock_cycle(dff)
-    expect(dff.get_output(:q)).to eq(0)
+    it 'generates valid Verilog', :pending do
+      verilog = RHDL::HDL::DFlipFlopAsync.to_verilog
+      expect(verilog).to include('module d_flip_flop_async')
+      expect(verilog).to include('input d')
+      expect(verilog).to include('output q')
+    end
   end
 end

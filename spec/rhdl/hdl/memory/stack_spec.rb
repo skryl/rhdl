@@ -17,61 +17,83 @@ RSpec.describe RHDL::HDL::Stack do
     stack.propagate  # Initialize outputs
   end
 
-  it 'pushes and pops values' do
-    # Push 0x11
-    stack.set_input(:din, 0x11)
-    stack.set_input(:push, 1)
-    clock_cycle(stack)
-
-    stack.set_input(:push, 0)
-    expect(stack.get_output(:dout)).to eq(0x11)
-    expect(stack.get_output(:empty)).to eq(0)
-
-    # Push 0x22
-    stack.set_input(:din, 0x22)
-    stack.set_input(:push, 1)
-    clock_cycle(stack)
-
-    stack.set_input(:push, 0)
-    expect(stack.get_output(:dout)).to eq(0x22)
-
-    # Pop - should get 0x22
-    stack.set_input(:pop, 1)
-    clock_cycle(stack)
-
-    stack.set_input(:pop, 0)
-    expect(stack.get_output(:dout)).to eq(0x11)
-  end
-
-  it 'indicates empty and full' do
-    expect(stack.get_output(:empty)).to eq(1)
-    expect(stack.get_output(:full)).to eq(0)
-
-    # Fill the stack
-    4.times do |i|
-      stack.set_input(:din, i + 1)
+  describe 'simulation' do
+    it 'pushes and pops values' do
+      # Push 0x11
+      stack.set_input(:din, 0x11)
       stack.set_input(:push, 1)
       clock_cycle(stack)
+
       stack.set_input(:push, 0)
+      expect(stack.get_output(:dout)).to eq(0x11)
+      expect(stack.get_output(:empty)).to eq(0)
+
+      # Push 0x22
+      stack.set_input(:din, 0x22)
+      stack.set_input(:push, 1)
+      clock_cycle(stack)
+
+      stack.set_input(:push, 0)
+      expect(stack.get_output(:dout)).to eq(0x22)
+
+      # Pop - should get 0x22
+      stack.set_input(:pop, 1)
+      clock_cycle(stack)
+
+      stack.set_input(:pop, 0)
+      expect(stack.get_output(:dout)).to eq(0x11)
     end
 
-    expect(stack.get_output(:empty)).to eq(0)
-    expect(stack.get_output(:full)).to eq(1)
+    it 'indicates empty and full' do
+      expect(stack.get_output(:empty)).to eq(1)
+      expect(stack.get_output(:full)).to eq(0)
+
+      # Fill the stack
+      4.times do |i|
+        stack.set_input(:din, i + 1)
+        stack.set_input(:push, 1)
+        clock_cycle(stack)
+        stack.set_input(:push, 0)
+      end
+
+      expect(stack.get_output(:empty)).to eq(0)
+      expect(stack.get_output(:full)).to eq(1)
+    end
+
+    it 'resets correctly' do
+      # Push some values
+      stack.set_input(:din, 0xFF)
+      stack.set_input(:push, 1)
+      clock_cycle(stack)
+
+      stack.set_input(:push, 0)
+      expect(stack.get_output(:empty)).to eq(0)
+
+      # Reset
+      stack.set_input(:rst, 1)
+      clock_cycle(stack)
+
+      expect(stack.get_output(:empty)).to eq(1)
+    end
   end
 
-  it 'resets correctly' do
-    # Push some values
-    stack.set_input(:din, 0xFF)
-    stack.set_input(:push, 1)
-    clock_cycle(stack)
+  describe 'synthesis' do
+    it 'has a behavior block defined' do
+      expect(RHDL::HDL::Stack.behavior_defined?).to be_truthy
+    end
 
-    stack.set_input(:push, 0)
-    expect(stack.get_output(:empty)).to eq(0)
+    # Note: Memory components use internal state arrays which are not yet supported in synthesis context
+    it 'generates valid IR', :pending do
+      ir = RHDL::HDL::Stack.to_ir
+      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      expect(ir.ports.length).to eq(7)  # clk, rst, push, pop, din, dout, empty, full
+    end
 
-    # Reset
-    stack.set_input(:rst, 1)
-    clock_cycle(stack)
-
-    expect(stack.get_output(:empty)).to eq(1)
+    it 'generates valid Verilog', :pending do
+      verilog = RHDL::HDL::Stack.to_verilog
+      expect(verilog).to include('module stack')
+      expect(verilog).to include('input [7:0] din')
+      expect(verilog).to include('output [7:0] dout')
+    end
   end
 end
