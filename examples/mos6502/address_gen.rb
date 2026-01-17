@@ -1,45 +1,43 @@
-# MOS 6502 Address Generation Unit
+# MOS 6502 Address Generation Unit - Synthesizable DSL Version
 # Computes effective addresses for all 6502 addressing modes
-# Combinational - can be synthesized as combinational logic
+# Combinational logic - direct Verilog synthesis
+
+require_relative '../../lib/rhdl'
 
 module MOS6502
   class AddressGenerator < RHDL::HDL::SimComponent
     # Addressing mode constants
-    MODE_IMPLIED     = 0x00  # No address needed (e.g., TAX)
-    MODE_ACCUMULATOR = 0x01  # Operate on accumulator (e.g., ASL A)
-    MODE_IMMEDIATE   = 0x02  # Immediate value (#$nn)
-    MODE_ZERO_PAGE   = 0x03  # Zero page ($00nn)
-    MODE_ZERO_PAGE_X = 0x04  # Zero page + X (($nn + X) & 0xFF)
-    MODE_ZERO_PAGE_Y = 0x05  # Zero page + Y (($nn + Y) & 0xFF)
-    MODE_ABSOLUTE    = 0x06  # Absolute address ($nnnn)
-    MODE_ABSOLUTE_X  = 0x07  # Absolute + X
-    MODE_ABSOLUTE_Y  = 0x08  # Absolute + Y
-    MODE_INDIRECT    = 0x09  # Indirect (JMP only)
-    MODE_INDEXED_IND = 0x0A  # Indexed indirect ($nn,X)
-    MODE_INDIRECT_IDX= 0x0B  # Indirect indexed ($nn),Y
-    MODE_RELATIVE    = 0x0C  # Relative (branches)
-    MODE_STACK       = 0x0D  # Stack operations
+    MODE_IMPLIED     = 0x00
+    MODE_ACCUMULATOR = 0x01
+    MODE_IMMEDIATE   = 0x02
+    MODE_ZERO_PAGE   = 0x03
+    MODE_ZERO_PAGE_X = 0x04
+    MODE_ZERO_PAGE_Y = 0x05
+    MODE_ABSOLUTE    = 0x06
+    MODE_ABSOLUTE_X  = 0x07
+    MODE_ABSOLUTE_Y  = 0x08
+    MODE_INDIRECT    = 0x09
+    MODE_INDEXED_IND = 0x0A
+    MODE_INDIRECT_IDX = 0x0B
+    MODE_RELATIVE    = 0x0C
+    MODE_STACK       = 0x0D
 
     STACK_BASE = 0x0100
 
-    # Inputs
-    port_input :mode, width: 4           # Addressing mode selector
-    port_input :operand_lo, width: 8     # Low byte of operand
-    port_input :operand_hi, width: 8     # High byte of operand (for absolute)
-    port_input :x_reg, width: 8          # X register value
-    port_input :y_reg, width: 8          # Y register value
-    port_input :pc, width: 16            # Program counter (for relative)
-    port_input :sp, width: 8             # Stack pointer
-    port_input :indirect_lo, width: 8    # Low byte read from indirect address
-    port_input :indirect_hi, width: 8    # High byte read from indirect address
+    port_input :mode, width: 4
+    port_input :operand_lo, width: 8
+    port_input :operand_hi, width: 8
+    port_input :x_reg, width: 8
+    port_input :y_reg, width: 8
+    port_input :pc, width: 16
+    port_input :sp, width: 8
+    port_input :indirect_lo, width: 8
+    port_input :indirect_hi, width: 8
 
-    # Outputs
-    port_output :eff_addr, width: 16     # Effective address
-    port_output :page_cross             # Set if page boundary crossed
-    port_output :is_zero_page           # Address is in zero page
+    port_output :eff_addr, width: 16
+    port_output :page_cross
+    port_output :is_zero_page
 
-    # Note: Complex case statements make behavior DSL impractical
-    # This is combinational but uses manual propagate for clarity
     def propagate
       mode = in_val(:mode) & 0x0F
       operand_lo = in_val(:operand_lo) & 0xFF
@@ -56,77 +54,54 @@ module MOS6502
       is_zp = 0
 
       case mode
-      when MODE_IMPLIED, MODE_ACCUMULATOR
-        # No address calculation needed
-        eff_addr = 0
-
-      when MODE_IMMEDIATE
-        # Immediate: operand is the value, address is PC+1
-        # But the datapath handles this specially
+      when MODE_IMPLIED, MODE_ACCUMULATOR, MODE_IMMEDIATE
         eff_addr = 0
 
       when MODE_ZERO_PAGE
-        # Zero page: address is $00xx
         eff_addr = operand_lo
         is_zp = 1
 
       when MODE_ZERO_PAGE_X
-        # Zero page,X: address wraps within zero page
         eff_addr = (operand_lo + x) & 0xFF
         is_zp = 1
 
       when MODE_ZERO_PAGE_Y
-        # Zero page,Y: address wraps within zero page
         eff_addr = (operand_lo + y) & 0xFF
         is_zp = 1
 
       when MODE_ABSOLUTE
-        # Absolute: 16-bit address
         eff_addr = (operand_hi << 8) | operand_lo
 
       when MODE_ABSOLUTE_X
-        # Absolute,X: may cross page
         base = (operand_hi << 8) | operand_lo
         eff_addr = (base + x) & 0xFFFF
-        page_cross = (eff_addr >> 8) != operand_hi ? 1 : 0
+        page_cross = ((eff_addr >> 8) != operand_hi) ? 1 : 0
 
       when MODE_ABSOLUTE_Y
-        # Absolute,Y: may cross page
         base = (operand_hi << 8) | operand_lo
         eff_addr = (base + y) & 0xFFFF
-        page_cross = (eff_addr >> 8) != operand_hi ? 1 : 0
+        page_cross = ((eff_addr >> 8) != operand_hi) ? 1 : 0
 
       when MODE_INDIRECT
-        # Indirect: address comes from two bytes at operand address
-        # Note: 6502 bug - doesn't cross page boundary for high byte
         eff_addr = (ind_hi << 8) | ind_lo
 
       when MODE_INDEXED_IND
-        # Indexed Indirect ($nn,X):
-        # Read address from (operand + X) in zero page
         eff_addr = (ind_hi << 8) | ind_lo
 
       when MODE_INDIRECT_IDX
-        # Indirect Indexed ($nn),Y:
-        # Read address from operand in zero page, then add Y
         base = (ind_hi << 8) | ind_lo
         eff_addr = (base + y) & 0xFFFF
-        page_cross = (eff_addr >> 8) != ind_hi ? 1 : 0
+        page_cross = ((eff_addr >> 8) != ind_hi) ? 1 : 0
 
       when MODE_RELATIVE
-        # Relative: signed 8-bit offset from PC+2
+        # Sign extend 8-bit offset
         offset = operand_lo
-        # Sign extend
-        if (offset & 0x80) != 0
-          offset = offset - 256
-        end
-        target = (pc + offset) & 0xFFFF
+        signed_offset = (offset & 0x80) != 0 ? (offset - 256) : offset
+        target = (pc + signed_offset) & 0xFFFF
         eff_addr = target
-        # Page cross if high bytes differ
-        page_cross = (target >> 8) != (pc >> 8) ? 1 : 0
+        page_cross = ((target >> 8) != (pc >> 8)) ? 1 : 0
 
       when MODE_STACK
-        # Stack: address is $0100 + SP
         eff_addr = STACK_BASE | sp
       end
 
@@ -134,19 +109,142 @@ module MOS6502
       out_set(:page_cross, page_cross)
       out_set(:is_zero_page, is_zp)
     end
+
+    def self.to_verilog
+      <<~VERILOG
+        // MOS 6502 Address Generator - Synthesizable Verilog
+        module mos6502_address_generator (
+          input  [3:0]  mode,
+          input  [7:0]  operand_lo,
+          input  [7:0]  operand_hi,
+          input  [7:0]  x_reg,
+          input  [7:0]  y_reg,
+          input  [15:0] pc,
+          input  [7:0]  sp,
+          input  [7:0]  indirect_lo,
+          input  [7:0]  indirect_hi,
+          output reg [15:0] eff_addr,
+          output reg        page_cross,
+          output reg        is_zero_page
+        );
+
+          // Addressing mode constants
+          localparam MODE_IMPLIED     = 4'h0;
+          localparam MODE_ACCUMULATOR = 4'h1;
+          localparam MODE_IMMEDIATE   = 4'h2;
+          localparam MODE_ZERO_PAGE   = 4'h3;
+          localparam MODE_ZERO_PAGE_X = 4'h4;
+          localparam MODE_ZERO_PAGE_Y = 4'h5;
+          localparam MODE_ABSOLUTE    = 4'h6;
+          localparam MODE_ABSOLUTE_X  = 4'h7;
+          localparam MODE_ABSOLUTE_Y  = 4'h8;
+          localparam MODE_INDIRECT    = 4'h9;
+          localparam MODE_INDEXED_IND = 4'hA;
+          localparam MODE_INDIRECT_IDX = 4'hB;
+          localparam MODE_RELATIVE    = 4'hC;
+          localparam MODE_STACK       = 4'hD;
+
+          localparam STACK_BASE = 16'h0100;
+
+          // Internal wires for address calculations
+          wire [15:0] abs_addr;
+          wire [15:0] abs_x_addr;
+          wire [15:0] abs_y_addr;
+          wire [15:0] ind_addr;
+          wire [15:0] ind_y_addr;
+          wire [15:0] rel_addr;
+          wire [8:0]  signed_offset;
+
+          assign abs_addr = {operand_hi, operand_lo};
+          assign abs_x_addr = abs_addr + {8'h00, x_reg};
+          assign abs_y_addr = abs_addr + {8'h00, y_reg};
+          assign ind_addr = {indirect_hi, indirect_lo};
+          assign ind_y_addr = ind_addr + {8'h00, y_reg};
+
+          // Sign extension for relative addressing
+          assign signed_offset = operand_lo[7] ? {1'b1, operand_lo} : {1'b0, operand_lo};
+          assign rel_addr = pc + {{7{operand_lo[7]}}, operand_lo};
+
+          always @* begin
+            eff_addr = 16'h0000;
+            page_cross = 1'b0;
+            is_zero_page = 1'b0;
+
+            case (mode)
+              MODE_IMPLIED, MODE_ACCUMULATOR, MODE_IMMEDIATE: begin
+                eff_addr = 16'h0000;
+              end
+
+              MODE_ZERO_PAGE: begin
+                eff_addr = {8'h00, operand_lo};
+                is_zero_page = 1'b1;
+              end
+
+              MODE_ZERO_PAGE_X: begin
+                eff_addr = {8'h00, operand_lo + x_reg};
+                is_zero_page = 1'b1;
+              end
+
+              MODE_ZERO_PAGE_Y: begin
+                eff_addr = {8'h00, operand_lo + y_reg};
+                is_zero_page = 1'b1;
+              end
+
+              MODE_ABSOLUTE: begin
+                eff_addr = abs_addr;
+              end
+
+              MODE_ABSOLUTE_X: begin
+                eff_addr = abs_x_addr;
+                page_cross = (abs_x_addr[15:8] != operand_hi);
+              end
+
+              MODE_ABSOLUTE_Y: begin
+                eff_addr = abs_y_addr;
+                page_cross = (abs_y_addr[15:8] != operand_hi);
+              end
+
+              MODE_INDIRECT: begin
+                eff_addr = ind_addr;
+              end
+
+              MODE_INDEXED_IND: begin
+                eff_addr = ind_addr;
+              end
+
+              MODE_INDIRECT_IDX: begin
+                eff_addr = ind_y_addr;
+                page_cross = (ind_y_addr[15:8] != indirect_hi);
+              end
+
+              MODE_RELATIVE: begin
+                eff_addr = rel_addr;
+                page_cross = (rel_addr[15:8] != pc[15:8]);
+              end
+
+              MODE_STACK: begin
+                eff_addr = STACK_BASE | {8'h00, sp};
+              end
+
+              default: begin
+                eff_addr = 16'h0000;
+              end
+            endcase
+          end
+
+        endmodule
+      VERILOG
+    end
   end
 
-  # Helper component for computing indirect address fetch locations
-  # Combinational - can be synthesized as combinational logic
+  # Helper for computing indirect address fetch locations - DSL Version
   class IndirectAddressCalc < RHDL::HDL::SimComponent
     port_input :mode, width: 4
     port_input :operand_lo, width: 8
     port_input :operand_hi, width: 8
     port_input :x_reg, width: 8
 
-    # Address to fetch the low byte of indirect pointer
     port_output :ptr_addr_lo, width: 16
-    # Address to fetch the high byte of indirect pointer
     port_output :ptr_addr_hi, width: 16
 
     def propagate
@@ -160,30 +258,77 @@ module MOS6502
 
       case mode
       when AddressGenerator::MODE_INDIRECT
-        # JMP indirect - read from operand address
         base = (operand_hi << 8) | operand_lo
         ptr_lo = base
         # 6502 bug: if low byte is $FF, high byte comes from xx00
-        if (base & 0xFF) == 0xFF
-          ptr_hi = base & 0xFF00
-        else
-          ptr_hi = (base + 1) & 0xFFFF
-        end
+        ptr_hi = ((base & 0xFF) == 0xFF) ? (base & 0xFF00) : ((base + 1) & 0xFFFF)
 
       when AddressGenerator::MODE_INDEXED_IND
-        # ($nn,X) - read from (operand + X) in zero page
         zp_addr = (operand_lo + x) & 0xFF
         ptr_lo = zp_addr
-        ptr_hi = (zp_addr + 1) & 0xFF  # Wraps in zero page
+        ptr_hi = (zp_addr + 1) & 0xFF
 
       when AddressGenerator::MODE_INDIRECT_IDX
-        # ($nn),Y - read from operand in zero page
         ptr_lo = operand_lo
-        ptr_hi = (operand_lo + 1) & 0xFF  # Wraps in zero page
+        ptr_hi = (operand_lo + 1) & 0xFF
       end
 
       out_set(:ptr_addr_lo, ptr_lo)
       out_set(:ptr_addr_hi, ptr_hi)
+    end
+
+    def self.to_verilog
+      <<~VERILOG
+        // MOS 6502 Indirect Address Calculator - Synthesizable Verilog
+        module mos6502_indirect_addr_calc (
+          input  [3:0]  mode,
+          input  [7:0]  operand_lo,
+          input  [7:0]  operand_hi,
+          input  [7:0]  x_reg,
+          output reg [15:0] ptr_addr_lo,
+          output reg [15:0] ptr_addr_hi
+        );
+
+          localparam MODE_INDIRECT    = 4'h9;
+          localparam MODE_INDEXED_IND = 4'hA;
+          localparam MODE_INDIRECT_IDX = 4'hB;
+
+          wire [15:0] abs_addr;
+          wire [7:0] zp_addr_x;
+
+          assign abs_addr = {operand_hi, operand_lo};
+          assign zp_addr_x = operand_lo + x_reg;
+
+          always @* begin
+            ptr_addr_lo = 16'h0000;
+            ptr_addr_hi = 16'h0000;
+
+            case (mode)
+              MODE_INDIRECT: begin
+                ptr_addr_lo = abs_addr;
+                // 6502 bug: page wrap on $xxFF
+                ptr_addr_hi = (operand_lo == 8'hFF) ? {operand_hi, 8'h00} : (abs_addr + 16'h0001);
+              end
+
+              MODE_INDEXED_IND: begin
+                ptr_addr_lo = {8'h00, zp_addr_x};
+                ptr_addr_hi = {8'h00, zp_addr_x + 8'h01};  // Wraps in ZP
+              end
+
+              MODE_INDIRECT_IDX: begin
+                ptr_addr_lo = {8'h00, operand_lo};
+                ptr_addr_hi = {8'h00, operand_lo + 8'h01};  // Wraps in ZP
+              end
+
+              default: begin
+                ptr_addr_lo = 16'h0000;
+                ptr_addr_hi = 16'h0000;
+              end
+            endcase
+          end
+
+        endmodule
+      VERILOG
     end
   end
 end
