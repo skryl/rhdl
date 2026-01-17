@@ -33,6 +33,22 @@ RSpec.describe RHDL::HDL::Divider do
     end
   end
 
-  # Note: Divider uses manual propagate logic
-  # Synthesis tests are omitted since no behavior block is defined
+  describe 'synthesis' do
+    it 'has a behavior block defined' do
+      expect(RHDL::HDL::Divider.behavior_defined?).to be_truthy
+    end
+
+    it 'generates valid IR' do
+      ir = RHDL::HDL::Divider.to_ir
+      expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
+      expect(ir.ports.length).to eq(5)  # dividend, divisor, quotient, remainder, div_by_zero
+    end
+
+    it 'generates valid Verilog' do
+      verilog = RHDL::HDL::Divider.to_verilog
+      expect(verilog).to include('module divider')
+      expect(verilog).to include('input [7:0] dividend')
+      expect(verilog).to include('output [7:0] quotient')
+    end
+  end
 end
