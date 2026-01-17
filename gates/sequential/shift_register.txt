@@ -1,0 +1,22 @@
+Component: shift_reg
+Type: RHDL::HDL::ShiftRegister
+Gates: 25
+DFFs: 8
+Nets: 47
+
+Inputs:
+  shift_reg.d_in: 1 bits
+  shift_reg.clk: 1 bits
+  shift_reg.rst: 1 bits
+  shift_reg.en: 1 bits
+  shift_reg.dir: 1 bits
+  shift_reg.load: 1 bits
+  shift_reg.d: 8 bits
+
+Outputs:
+  shift_reg.q: 8 bits
+  shift_reg.d_out: 1 bits
+
+Gate Types:
+  mux: 17
+  buf: 8

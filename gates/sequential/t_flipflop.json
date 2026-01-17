@@ -1,0 +1,67 @@
+{
+  "name": "tff",
+  "net_count": 8,
+  "gates": [
+    {
+      "type": "xor",
+      "inputs": [
+        0,
+        6
+      ],
+      "output": 7,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        6
+      ],
+      "output": 4,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        6
+      ],
+      "output": 5,
+      "value": null
+    }
+  ],
+  "dffs": [
+    {
+      "d": 7,
+      "q": 6,
+      "rst": 2,
+      "en": 3,
+      "async_reset": false
+    }
+  ],
+  "inputs": {
+    "tff.t": [
+      0
+    ],
+    "tff.clk": [
+      1
+    ],
+    "tff.rst": [
+      2
+    ],
+    "tff.en": [
+      3
+    ]
+  },
+  "outputs": {
+    "tff.q": [
+      4
+    ],
+    "tff.qn": [
+      5
+    ]
+  },
+  "schedule": [
+    0,
+    1,
+    2
+  ]
+}

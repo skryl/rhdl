@@ -1,0 +1,16 @@
+Component: mux2
+Type: RHDL::HDL::Mux2
+Gates: 8
+DFFs: 0
+Nets: 25
+
+Inputs:
+  mux2.a: 8 bits
+  mux2.b: 8 bits
+  mux2.sel: 1 bits
+
+Outputs:
+  mux2.y: 8 bits
+
+Gate Types:
+  mux: 8

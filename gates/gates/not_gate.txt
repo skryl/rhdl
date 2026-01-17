@@ -1,0 +1,14 @@
+Component: not_gate
+Type: RHDL::HDL::NotGate
+Gates: 1
+DFFs: 0
+Nets: 2
+
+Inputs:
+  not_gate.a: 1 bits
+
+Outputs:
+  not_gate.y: 1 bits
+
+Gate Types:
+  not: 1

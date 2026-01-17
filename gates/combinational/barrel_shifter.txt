@@ -1,0 +1,20 @@
+Component: barrel
+Type: RHDL::HDL::BarrelShifter
+Gates: 167
+DFFs: 0
+Nets: 181
+
+Inputs:
+  barrel.a: 8 bits
+  barrel.shift: 3 bits
+  barrel.dir: 1 bits
+  barrel.arith: 1 bits
+  barrel.rotate: 1 bits
+
+Outputs:
+  barrel.y: 8 bits
+
+Gate Types:
+  const: 14
+  mux: 152
+  not: 1

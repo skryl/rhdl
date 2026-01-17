@@ -1,0 +1,48 @@
+{
+  "name": "dff_async",
+  "net_count": 6,
+  "gates": [
+    {
+      "type": "not",
+      "inputs": [
+        4
+      ],
+      "output": 5,
+      "value": null
+    }
+  ],
+  "dffs": [
+    {
+      "d": 0,
+      "q": 4,
+      "rst": 2,
+      "en": 3,
+      "async_reset": true
+    }
+  ],
+  "inputs": {
+    "dff_async.d": [
+      0
+    ],
+    "dff_async.clk": [
+      1
+    ],
+    "dff_async.rst": [
+      2
+    ],
+    "dff_async.en": [
+      3
+    ]
+  },
+  "outputs": {
+    "dff_async.q": [
+      4
+    ],
+    "dff_async.qn": [
+      5
+    ]
+  },
+  "schedule": [
+    0
+  ]
+}

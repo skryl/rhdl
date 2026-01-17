@@ -1,0 +1,18 @@
+Component: enc8to3
+Type: RHDL::HDL::Encoder8to3
+Gates: 55
+DFFs: 0
+Nets: 63
+
+Inputs:
+  enc8to3.a: 8 bits
+
+Outputs:
+  enc8to3.y: 3 bits
+  enc8to3.valid: 1 bits
+
+Gate Types:
+  not: 8
+  and: 28
+  or: 15
+  buf: 4

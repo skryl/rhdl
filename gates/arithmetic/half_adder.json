@@ -1,0 +1,47 @@
+{
+  "name": "half_adder",
+  "net_count": 4,
+  "gates": [
+    {
+      "type": "xor",
+      "inputs": [
+        0,
+        1
+      ],
+      "output": 2,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        0,
+        1
+      ],
+      "output": 3,
+      "value": null
+    }
+  ],
+  "dffs": [
+
+  ],
+  "inputs": {
+    "half_adder.a": [
+      0
+    ],
+    "half_adder.b": [
+      1
+    ]
+  },
+  "outputs": {
+    "half_adder.sum": [
+      2
+    ],
+    "half_adder.cout": [
+      3
+    ]
+  },
+  "schedule": [
+    0,
+    1
+  ]
+}

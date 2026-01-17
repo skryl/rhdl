@@ -1,0 +1,27 @@
+Component: counter
+Type: RHDL::HDL::Counter
+Gates: 76
+DFFs: 8
+Nets: 97
+
+Inputs:
+  counter.clk: 1 bits
+  counter.rst: 1 bits
+  counter.en: 1 bits
+  counter.up: 1 bits
+  counter.load: 1 bits
+  counter.d: 8 bits
+
+Outputs:
+  counter.q: 8 bits
+  counter.tc: 1 bits
+  counter.zero: 1 bits
+
+Gate Types:
+  const: 2
+  not: 2
+  xor: 16
+  and: 23
+  or: 15
+  mux: 9
+  buf: 9
