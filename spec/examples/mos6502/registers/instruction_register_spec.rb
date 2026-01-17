@@ -50,6 +50,32 @@ RSpec.describe MOS6502::InstructionRegister do
       expect(verilog).to include('module mos6502_instruction_register')
       expect(verilog).to include('opcode')
     end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'behavioral Verilog compiles and runs' do
+        verilog = described_class.to_verilog
+
+        inputs = { clk: 1, rst: 1, data_in: 8, load_opcode: 1, load_operand_lo: 1, load_operand_hi: 1 }
+        outputs = { opcode: 8, operand_lo: 8, operand_hi: 8 }
+
+        vectors = [
+          { inputs: { clk: 0, rst: 0, data_in: 0xA9, load_opcode: 0, load_operand_lo: 0, load_operand_hi: 0 } },
+          { inputs: { clk: 1, rst: 0, data_in: 0xA9, load_opcode: 1, load_operand_lo: 0, load_operand_hi: 0 } },
+          { inputs: { clk: 0, rst: 0, data_in: 0x42, load_opcode: 0, load_operand_lo: 1, load_operand_hi: 0 } }
+        ]
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 'mos6502_instruction_register',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/mos6502_instruction_register',
+          has_clock: true
+        )
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do

@@ -48,6 +48,32 @@ RSpec.describe MOS6502::DataLatch do
       expect(verilog).to include('module mos6502_data_latch')
       expect(verilog).to include('data')
     end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'behavioral Verilog compiles and runs' do
+        verilog = described_class.to_verilog
+
+        inputs = { clk: 1, rst: 1, data_in: 8, load: 1 }
+        outputs = { data: 8 }
+
+        vectors = [
+          { inputs: { clk: 0, rst: 0, data_in: 0x42, load: 0 } },
+          { inputs: { clk: 1, rst: 0, data_in: 0x42, load: 1 } },
+          { inputs: { clk: 0, rst: 0, data_in: 0xFF, load: 0 } }
+        ]
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 'mos6502_data_latch',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/mos6502_data_latch',
+          has_clock: true
+        )
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do

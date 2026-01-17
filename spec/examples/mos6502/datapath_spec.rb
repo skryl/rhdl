@@ -37,6 +37,33 @@ RSpec.describe MOS6502::Datapath do
       # Should reference subcomponents or have internal signals
       expect(verilog.length).to be > 1000  # Complex module
     end
+
+    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+      it 'behavioral Verilog compiles and runs' do
+        verilog = described_class.to_verilog
+
+        inputs = { clk: 1, rst: 1, rdy: 1, data_in: 8 }
+        outputs = { addr: 16, data_out: 8, rw: 1, reg_a: 8, reg_x: 8, reg_y: 8, reg_pc: 16 }
+
+        # Datapath is a complex hierarchical component - verify compilation
+        vectors = [
+          { inputs: { clk: 0, rst: 1, rdy: 1, data_in: 0 } },
+          { inputs: { clk: 1, rst: 1, rdy: 1, data_in: 0 } },
+          { inputs: { clk: 0, rst: 0, rdy: 1, data_in: 0 } }
+        ]
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 'datapath',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/mos6502_datapath',
+          has_clock: true
+        )
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do
