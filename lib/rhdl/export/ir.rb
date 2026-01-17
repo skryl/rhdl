@@ -4,9 +4,9 @@ module RHDL
   module Export
     module IR
       class ModuleDef
-        attr_reader :name, :ports, :nets, :regs, :assigns, :processes, :reg_ports
+        attr_reader :name, :ports, :nets, :regs, :assigns, :processes, :reg_ports, :instances
 
-        def initialize(name:, ports:, nets:, regs:, assigns:, processes:, reg_ports: [])
+        def initialize(name:, ports:, nets:, regs:, assigns:, processes:, reg_ports: [], instances: [])
           @name = name
           @ports = ports
           @nets = nets
@@ -14,6 +14,7 @@ module RHDL
           @assigns = assigns
           @processes = processes
           @reg_ports = reg_ports
+          @instances = instances
         end
       end
 
@@ -256,6 +257,36 @@ module RHDL
           @memory = memory
           @addr = addr
           super(width: width)
+        end
+      end
+
+      # Module instance for structural design
+      # Maps to Verilog module instantiation / VHDL component instantiation
+      class Instance
+        attr_reader :name, :module_name, :connections, :parameters
+
+        # @param name [String] Instance name
+        # @param module_name [String] Module/component type name
+        # @param connections [Array<PortConnection>] Port connections
+        # @param parameters [Hash{Symbol => Integer}] Parameter overrides
+        def initialize(name:, module_name:, connections:, parameters: {})
+          @name = name
+          @module_name = module_name
+          @connections = connections
+          @parameters = parameters
+        end
+      end
+
+      # Port connection for module instantiation
+      # Maps to Verilog .port(signal) / VHDL port map
+      class PortConnection
+        attr_reader :port_name, :signal
+
+        # @param port_name [Symbol] Port name on the instance
+        # @param signal [String, Expr] Signal to connect (name or expression)
+        def initialize(port_name:, signal:)
+          @port_name = port_name
+          @signal = signal
         end
       end
     end
