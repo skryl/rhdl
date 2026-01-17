@@ -23,4 +23,11 @@ RSpec.describe MOS6502S::Memory do
     expect(mem.read(0xFFFC)).to eq(0x00)
     expect(mem.read(0xFFFD)).to eq(0x80)
   end
+
+  describe 'synthesis' do
+    it 'generates valid Verilog' do
+      verilog = MOS6502S::Memory.to_verilog
+      expect(verilog).to include('module mos6502s_memory')
+    end
+  end
 end
