@@ -295,7 +295,7 @@ module RHDL
           if respond_to?(:original_initialize)
             original_initialize(name, *args, **kwargs, &block)
           else
-            super
+            super(name)
           end
           initialize_memories
         end
