@@ -1432,6 +1432,41 @@ module RHDL
         result
       end
 
+      # Helper: build a binary mux tree to select one of N data values based on address bits
+      # data_bits: array of data nets to select from (size must be power of 2 or will be padded)
+      # addr_nets: array of address/selector bits
+      # level: current recursion level (0 = start)
+      def lower_mux_tree(data_bits, addr_nets, level)
+        # Base case: single data bit, just return it
+        return data_bits.first if data_bits.length <= 1
+
+        # If odd number of data bits, pad with a constant 0
+        if data_bits.length.odd?
+          zero = new_temp
+          @ir.add_gate(type: Primitives::CONST, inputs: [], output: zero, value: 0)
+          data_bits = data_bits + [zero]
+        end
+
+        # Get the select bit for this level (LSB first)
+        sel_bit = addr_nets[level]
+
+        # If no more select bits available, just return first data bit
+        return data_bits.first unless sel_bit
+
+        # Pair up data bits and mux them
+        muxed = []
+        (0...data_bits.length).step(2) do |i|
+          d0 = data_bits[i]
+          d1 = data_bits[i + 1] || d0  # Use d0 if d1 doesn't exist
+          result = new_temp
+          @ir.add_gate(type: Primitives::MUX, inputs: [d0, d1, sel_bit], output: result)
+          muxed << result
+        end
+
+        # Recurse to next level
+        lower_mux_tree(muxed, addr_nets, level + 1)
+      end
+
       def lower_dff(component, async_reset: false)
         d_net = map_bus(component.inputs[:d]).first
         rst_net = map_bus(component.inputs[:rst]).first

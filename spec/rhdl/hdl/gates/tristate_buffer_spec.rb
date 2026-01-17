@@ -36,4 +36,24 @@ RSpec.describe RHDL::HDL::TristateBuffer do
       expect(verilog).to include('assign y')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::TristateBuffer.new('tribuf') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'tribuf') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('tribuf.a', 'tribuf.en')
+      expect(ir.outputs.keys).to include('tribuf.y')
+      # Tristate buffer implemented as mux
+      expect(ir.gates.length).to be >= 1
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module tribuf')
+      expect(verilog).to include('input a')
+      expect(verilog).to include('input en')
+      expect(verilog).to include('output y')
+    end
+  end
 end

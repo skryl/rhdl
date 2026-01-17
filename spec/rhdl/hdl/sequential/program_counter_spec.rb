@@ -61,4 +61,27 @@ RSpec.describe RHDL::HDL::ProgramCounter do
       expect(verilog).to match(/output.*\[15:0\].*q/)
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::ProgramCounter.new('pc') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'pc') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('pc.clk', 'pc.rst', 'pc.en', 'pc.load', 'pc.d', 'pc.inc')
+      expect(ir.outputs.keys).to include('pc.q')
+      expect(ir.dffs.length).to eq(16)  # 16-bit program counter has 16 DFFs
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module pc')
+      expect(verilog).to include('input [15:0] d')
+      expect(verilog).to include('input [15:0] inc')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input rst')
+      expect(verilog).to include('input en')
+      expect(verilog).to include('input load')
+      expect(verilog).to include('output [15:0] q')
+    end
+  end
 end

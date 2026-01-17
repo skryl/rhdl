@@ -62,4 +62,26 @@ RSpec.describe RHDL::HDL::ShiftRegister do
       expect(verilog).to match(/output.*\[7:0\].*q/)
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::ShiftRegister.new('shift_reg') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'shift_reg') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('shift_reg.d', 'shift_reg.d_in', 'shift_reg.clk', 'shift_reg.rst', 'shift_reg.en', 'shift_reg.load', 'shift_reg.dir')
+      expect(ir.outputs.keys).to include('shift_reg.q', 'shift_reg.d_out')
+      expect(ir.dffs.length).to eq(8)  # 8-bit shift register has 8 DFFs
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module shift_reg')
+      expect(verilog).to include('input [7:0] d')
+      expect(verilog).to include('input d_in')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input rst')
+      expect(verilog).to include('output [7:0] q')
+      expect(verilog).to include('output d_out')
+    end
+  end
 end

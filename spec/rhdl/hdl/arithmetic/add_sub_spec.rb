@@ -41,4 +41,28 @@ RSpec.describe RHDL::HDL::AddSub do
       expect(verilog).to include('output [7:0] result')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::AddSub.new('addsub', width: 8) }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'addsub') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('addsub.a', 'addsub.b', 'addsub.sub')
+      expect(ir.outputs.keys).to include('addsub.result', 'addsub.cout', 'addsub.overflow', 'addsub.zero', 'addsub.negative')
+      expect(ir.gates.length).to be >= 1
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module addsub')
+      expect(verilog).to include('input [7:0] a')
+      expect(verilog).to include('input [7:0] b')
+      expect(verilog).to include('input sub')
+      expect(verilog).to include('output [7:0] result')
+      expect(verilog).to include('output cout')
+      expect(verilog).to include('output overflow')
+      expect(verilog).to include('output zero')
+      expect(verilog).to include('output negative')
+    end
+  end
 end

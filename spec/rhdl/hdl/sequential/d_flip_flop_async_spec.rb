@@ -71,4 +71,26 @@ RSpec.describe RHDL::HDL::DFlipFlopAsync do
       expect(verilog).to match(/output.*q/)
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::DFlipFlopAsync.new('dff_async') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'dff_async') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('dff_async.d', 'dff_async.clk', 'dff_async.rst', 'dff_async.en')
+      expect(ir.outputs.keys).to include('dff_async.q', 'dff_async.qn')
+      expect(ir.dffs.length).to eq(1)
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module dff_async')
+      expect(verilog).to include('input d')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input rst')
+      expect(verilog).to include('input en')
+      expect(verilog).to include('output q')
+      expect(verilog).to include('output qn')
+    end
+  end
 end

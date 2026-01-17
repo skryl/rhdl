@@ -74,4 +74,29 @@ RSpec.describe RHDL::HDL::Counter do
       expect(verilog).to match(/output.*\[7:0\].*q/)
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::Counter.new('counter') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'counter') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('counter.clk', 'counter.rst', 'counter.en', 'counter.up', 'counter.load', 'counter.d')
+      expect(ir.outputs.keys).to include('counter.q', 'counter.tc', 'counter.zero')
+      expect(ir.dffs.length).to eq(8)  # 8-bit counter has 8 DFFs
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module counter')
+      expect(verilog).to include('input [7:0] d')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input rst')
+      expect(verilog).to include('input en')
+      expect(verilog).to include('input up')
+      expect(verilog).to include('input load')
+      expect(verilog).to include('output [7:0] q')
+      expect(verilog).to include('output tc')
+      expect(verilog).to include('output zero')
+    end
+  end
 end

@@ -39,4 +39,26 @@ RSpec.describe RHDL::HDL::Demux4 do
       expect(verilog).to include('output y0')
     end
   end
+
+  describe 'gate-level netlist (1-bit)' do
+    let(:component) { RHDL::HDL::Demux4.new('demux4', width: 1) }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'demux4') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('demux4.a', 'demux4.sel')
+      expect(ir.outputs.keys).to include('demux4.y0', 'demux4.y1', 'demux4.y2', 'demux4.y3')
+      expect(ir.gates.length).to be >= 1
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module demux4')
+      expect(verilog).to include('input a')
+      expect(verilog).to include('input [1:0] sel')
+      expect(verilog).to include('output y0')
+      expect(verilog).to include('output y1')
+      expect(verilog).to include('output y2')
+      expect(verilog).to include('output y3')
+    end
+  end
 end

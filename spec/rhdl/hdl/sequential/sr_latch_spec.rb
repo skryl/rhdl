@@ -99,4 +99,25 @@ RSpec.describe RHDL::HDL::SRLatch do
       expect(verilog).to match(/output.*q/)
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::SRLatch.new('sr_latch') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'sr_latch') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('sr_latch.s', 'sr_latch.r', 'sr_latch.en')
+      expect(ir.outputs.keys).to include('sr_latch.q', 'sr_latch.qn')
+      expect(ir.gates.length).to be >= 1
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module sr_latch')
+      expect(verilog).to include('input s')
+      expect(verilog).to include('input r')
+      expect(verilog).to include('input en')
+      expect(verilog).to include('output q')
+      expect(verilog).to include('output qn')
+    end
+  end
 end

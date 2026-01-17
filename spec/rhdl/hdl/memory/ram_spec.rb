@@ -95,4 +95,26 @@ RSpec.describe RHDL::HDL::RAM do
       expect(verilog).to include('reg [7:0] mem')  # Memory array
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::RAM.new('ram') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'ram') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('ram.clk', 'ram.we', 'ram.addr', 'ram.din')
+      expect(ir.outputs.keys).to include('ram.dout')
+      # RAM uses memory cells, expect significant gate count for address decoding
+      expect(ir.gates.length).to be >= 1
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module ram')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input we')
+      expect(verilog).to include('input [7:0] addr')
+      expect(verilog).to include('input [7:0] din')
+      expect(verilog).to include('output [7:0] dout')
+    end
+  end
 end

@@ -91,4 +91,29 @@ RSpec.describe RHDL::HDL::FIFO do
       expect(verilog).to match(/output.*\[7:0\].*dout/)
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::FIFO.new('fifo') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'fifo') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('fifo.clk', 'fifo.rst', 'fifo.wr_en', 'fifo.rd_en', 'fifo.din')
+      expect(ir.outputs.keys).to include('fifo.dout', 'fifo.empty', 'fifo.full', 'fifo.count')
+      # FIFO has DFFs for pointers and count
+      expect(ir.dffs.length).to be >= 1
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module fifo')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input rst')
+      expect(verilog).to include('input wr_en')
+      expect(verilog).to include('input rd_en')
+      expect(verilog).to include('input [7:0] din')
+      expect(verilog).to include('output [7:0] dout')
+      expect(verilog).to include('output empty')
+      expect(verilog).to include('output full')
+    end
+  end
 end

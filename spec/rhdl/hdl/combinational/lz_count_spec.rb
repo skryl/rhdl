@@ -43,4 +43,23 @@ RSpec.describe RHDL::HDL::LZCount do
       expect(verilog).to include('output [3:0] count')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::LZCount.new('lzcount', width: 8) }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'lzcount') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('lzcount.a')
+      expect(ir.outputs.keys).to include('lzcount.count', 'lzcount.all_zero')
+      expect(ir.gates.length).to be >= 1
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module lzcount')
+      expect(verilog).to include('input [7:0] a')
+      expect(verilog).to include('output [3:0] count')
+      expect(verilog).to include('output all_zero')
+    end
+  end
 end

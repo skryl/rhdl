@@ -32,4 +32,24 @@ RSpec.describe RHDL::HDL::Multiplier do
       expect(verilog).to include('assign product')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::Multiplier.new('mult', width: 8) }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mult') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('mult.a', 'mult.b')
+      expect(ir.outputs.keys).to include('mult.product')
+      # Multiplier has many gates for array multiplication
+      expect(ir.gates.length).to be >= 1
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module mult')
+      expect(verilog).to include('input [7:0] a')
+      expect(verilog).to include('input [7:0] b')
+      expect(verilog).to include('output [15:0] product')
+    end
+  end
 end
