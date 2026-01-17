@@ -439,12 +439,41 @@ task diagrams: 'diagrams:generate'
 namespace :hdl do
   VHDL_DIR = File.expand_path('vhdl', __dir__)
   VERILOG_DIR = File.expand_path('verilog', __dir__)
+  EXAMPLES_DIR = File.expand_path('examples', __dir__)
 
-  desc "Export all DSL components to VHDL and Verilog"
-  task :export do
+  # Example components with to_verilog methods
+  # Format: { 'relative_path' => ['require_path', 'ClassName'] }
+  EXAMPLE_COMPONENTS = {
+    # MOS6502S synthesizable components
+    'mos6502s/mos6502s_registers' => ['examples/mos6502s/registers/registers', 'MOS6502S::Registers'],
+    'mos6502s/mos6502s_stack_pointer' => ['examples/mos6502s/registers/stack_pointer', 'MOS6502S::StackPointer'],
+    'mos6502s/mos6502s_program_counter' => ['examples/mos6502s/registers/program_counter', 'MOS6502S::ProgramCounter'],
+    'mos6502s/mos6502s_instruction_register' => ['examples/mos6502s/registers/instruction_register', 'MOS6502S::InstructionRegister'],
+    'mos6502s/mos6502s_address_latch' => ['examples/mos6502s/registers/address_latch', 'MOS6502S::AddressLatch'],
+    'mos6502s/mos6502s_data_latch' => ['examples/mos6502s/registers/data_latch', 'MOS6502S::DataLatch'],
+    'mos6502s/mos6502s_status_register' => ['examples/mos6502s/status_register', 'MOS6502S::StatusRegister'],
+    'mos6502s/mos6502s_address_generator' => ['examples/mos6502s/address_gen/address_generator', 'MOS6502S::AddressGenerator'],
+    'mos6502s/mos6502s_indirect_addr_calc' => ['examples/mos6502s/address_gen/indirect_address_calc', 'MOS6502S::IndirectAddressCalc'],
+    'mos6502s/mos6502s_alu' => ['examples/mos6502s/alu', 'MOS6502S::ALU'],
+    'mos6502s/mos6502s_instruction_decoder' => ['examples/mos6502s/instruction_decoder', 'MOS6502S::InstructionDecoder'],
+    'mos6502s/mos6502s_control_unit' => ['examples/mos6502s/control_unit', 'MOS6502S::ControlUnit'],
+    'mos6502s/mos6502s_memory' => ['examples/mos6502s/memory', 'MOS6502S::Memory']
+  }.freeze
+
+  desc "Export all DSL components to VHDL and Verilog (lib/ and examples/)"
+  task :export => [:export_lib, :export_examples] do
+    puts
+    puts "=" * 50
+    puts "HDL export complete!"
+    puts "VHDL files:    #{VHDL_DIR}"
+    puts "Verilog files: #{VERILOG_DIR}"
+  end
+
+  desc "Export lib/ DSL components to VHDL and Verilog"
+  task :export_lib do
     require_relative 'lib/rhdl'
 
-    puts "RHDL Component Exporter"
+    puts "RHDL Component Exporter - lib/"
     puts "=" * 50
     puts
 
@@ -452,15 +481,15 @@ namespace :hdl do
     FileUtils.mkdir_p(VHDL_DIR)
     FileUtils.mkdir_p(VERILOG_DIR)
 
-    # Get all exportable components
+    # Get all exportable components from lib
     components = RHDL::Exporter.list_components
 
     if components.empty?
-      puts "No exportable components found."
-      exit 0
+      puts "No exportable components found in lib/."
+      return
     end
 
-    puts "Found #{components.size} exportable component(s):"
+    puts "Found #{components.size} exportable component(s) in lib/:"
     puts
 
     # Export each component
@@ -492,10 +521,47 @@ namespace :hdl do
     end
 
     puts
+    puts "Exported #{exported_count}/#{components.size} lib/ components"
+  end
+
+  desc "Export examples/ components to VHDL and Verilog"
+  task :export_examples do
+    require_relative 'lib/rhdl'
+
+    puts
+    puts "RHDL Component Exporter - examples/"
     puts "=" * 50
-    puts "Exported #{exported_count}/#{components.size} components"
-    puts "VHDL files:    #{VHDL_DIR}"
-    puts "Verilog files: #{VERILOG_DIR}"
+    puts
+
+    # Ensure output directories exist
+    FileUtils.mkdir_p(VHDL_DIR)
+    FileUtils.mkdir_p(VERILOG_DIR)
+
+    exported_count = 0
+    EXAMPLE_COMPONENTS.each do |relative_path, (require_path, class_name)|
+      begin
+        # Load the component
+        require_relative require_path
+
+        # Get the class
+        component = class_name.split('::').inject(Object) { |o, c| o.const_get(c) }
+
+        # Export to Verilog (only Verilog for examples as VHDL may not be implemented)
+        verilog_file = File.join(VERILOG_DIR, "#{relative_path}.v")
+        FileUtils.mkdir_p(File.dirname(verilog_file))
+        verilog_content = component.to_verilog
+        File.write(verilog_file, verilog_content)
+
+        puts "  [OK] #{class_name}"
+        puts "       -> #{verilog_file}"
+        exported_count += 1
+      rescue => e
+        puts "  [ERROR] #{class_name}: #{e.message}"
+      end
+    end
+
+    puts
+    puts "Exported #{exported_count}/#{EXAMPLE_COMPONENTS.size} examples/ components"
   end
 
   desc "Export only VHDL files"
