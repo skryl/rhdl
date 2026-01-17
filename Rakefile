@@ -467,16 +467,18 @@ namespace :hdl do
     exported_count = 0
     components.each do |info|
       component = info[:class]
-      name = info[:name]
+      relative_path = info[:relative_path]
 
       begin
-        # Export to VHDL
-        vhdl_file = File.join(VHDL_DIR, "#{name}.vhd")
+        # Create subdirectories and export to VHDL
+        vhdl_file = File.join(VHDL_DIR, "#{relative_path}.vhd")
+        FileUtils.mkdir_p(File.dirname(vhdl_file))
         vhdl_content = component.to_vhdl
         File.write(vhdl_file, vhdl_content)
 
-        # Export to Verilog
-        verilog_file = File.join(VERILOG_DIR, "#{name}.v")
+        # Create subdirectories and export to Verilog
+        verilog_file = File.join(VERILOG_DIR, "#{relative_path}.v")
+        FileUtils.mkdir_p(File.dirname(verilog_file))
         verilog_content = component.to_verilog
         File.write(verilog_file, verilog_content)
 
@@ -507,13 +509,14 @@ namespace :hdl do
 
     components.each do |info|
       component = info[:class]
-      name = info[:name]
+      relative_path = info[:relative_path]
       begin
-        vhdl_file = File.join(VHDL_DIR, "#{name}.vhd")
+        vhdl_file = File.join(VHDL_DIR, "#{relative_path}.vhd")
+        FileUtils.mkdir_p(File.dirname(vhdl_file))
         File.write(vhdl_file, component.to_vhdl)
-        puts "  [OK] #{name}.vhd"
+        puts "  [OK] #{relative_path}.vhd"
       rescue => e
-        puts "  [ERROR] #{name}: #{e.message}"
+        puts "  [ERROR] #{relative_path}: #{e.message}"
       end
     end
   end
@@ -529,28 +532,37 @@ namespace :hdl do
 
     components.each do |info|
       component = info[:class]
-      name = info[:name]
+      relative_path = info[:relative_path]
       begin
-        verilog_file = File.join(VERILOG_DIR, "#{name}.v")
+        verilog_file = File.join(VERILOG_DIR, "#{relative_path}.v")
+        FileUtils.mkdir_p(File.dirname(verilog_file))
         File.write(verilog_file, component.to_verilog)
-        puts "  [OK] #{name}.v"
+        puts "  [OK] #{relative_path}.v"
       rescue => e
-        puts "  [ERROR] #{name}: #{e.message}"
+        puts "  [ERROR] #{relative_path}: #{e.message}"
       end
     end
   end
 
   desc "Clean all generated HDL files"
   task :clean do
-    # Clean VHDL files (keep .gitkeep)
-    Dir.glob(File.join(VHDL_DIR, '*.vhd')).each do |f|
+    # Clean VHDL files recursively (keep .gitkeep)
+    Dir.glob(File.join(VHDL_DIR, '**', '*.vhd')).each do |f|
       FileUtils.rm_f(f)
+    end
+    # Remove empty subdirectories
+    Dir.glob(File.join(VHDL_DIR, '**', '*')).sort.reverse.each do |d|
+      FileUtils.rmdir(d) if File.directory?(d) && Dir.empty?(d)
     end
     puts "Cleaned: #{VHDL_DIR}"
 
-    # Clean Verilog files (keep .gitkeep)
-    Dir.glob(File.join(VERILOG_DIR, '*.v')).each do |f|
+    # Clean Verilog files recursively (keep .gitkeep)
+    Dir.glob(File.join(VERILOG_DIR, '**', '*.v')).each do |f|
       FileUtils.rm_f(f)
+    end
+    # Remove empty subdirectories
+    Dir.glob(File.join(VERILOG_DIR, '**', '*')).sort.reverse.each do |d|
+      FileUtils.rmdir(d) if File.directory?(d) && Dir.empty?(d)
     end
     puts "Cleaned: #{VERILOG_DIR}"
 
