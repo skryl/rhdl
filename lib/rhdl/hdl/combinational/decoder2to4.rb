@@ -5,22 +5,20 @@ module RHDL
   module HDL
     # 2-to-4 Decoder
     class Decoder2to4 < SimComponent
-      def setup_ports
-        input :a, width: 2
-        input :en
-        output :y0
-        output :y1
-        output :y2
-        output :y3
-      end
+      # Class-level port definitions for synthesis
+      port_input :a, width: 2
+      port_input :en
+      port_output :y0
+      port_output :y1
+      port_output :y2
+      port_output :y3
 
-      def propagate
-        if in_val(:en) == 0
-          4.times { |i| out_set(:"y#{i}", 0) }
-        else
-          val = in_val(:a) & 3
-          4.times { |i| out_set(:"y#{i}", i == val ? 1 : 0) }
-        end
+      behavior do
+        # Each output is active when enabled and address matches
+        y0 <= en & (a == lit(0, width: 2))
+        y1 <= en & (a == lit(1, width: 2))
+        y2 <= en & (a == lit(2, width: 2))
+        y3 <= en & (a == lit(3, width: 2))
       end
     end
   end
