@@ -92,5 +92,45 @@ RSpec.describe RHDL::HDL::DFlipFlopAsync do
       expect(verilog).to include('output q')
       expect(verilog).to include('output qn')
     end
+
+    context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation' do
+        test_vectors = []
+        behavioral = RHDL::HDL::DFlipFlopAsync.new
+        behavioral.set_input(:rst, 0)
+        behavioral.set_input(:en, 1)
+
+        test_cases = [
+          { d: 1, rst: 0, en: 1 },  # capture 1
+          { d: 0, rst: 0, en: 1 },  # capture 0
+          { d: 1, rst: 0, en: 0 },  # hold (en=0)
+          { d: 0, rst: 1, en: 1 },  # async reset
+        ]
+
+        expected_outputs = []
+        test_cases.each do |tc|
+          behavioral.set_input(:d, tc[:d])
+          behavioral.set_input(:rst, tc[:rst])
+          behavioral.set_input(:en, tc[:en])
+          behavioral.set_input(:clk, 0)
+          behavioral.propagate
+          behavioral.set_input(:clk, 1)
+          behavioral.propagate
+
+          test_vectors << { inputs: tc }
+          expected_outputs << { q: behavioral.get_output(:q) }
+        end
+
+        base_dir = File.join('tmp', 'iverilog', 'dff_async')
+        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+
+        expect(result[:success]).to be(true), result[:error]
+
+        expected_outputs.each_with_index do |expected, idx|
+          expect(result[:results][idx][:q]).to eq(expected[:q]),
+            "Cycle #{idx}: expected q=#{expected[:q]}, got #{result[:results][idx][:q]}"
+        end
+      end
+    end
   end
 end

@@ -55,5 +55,39 @@ RSpec.describe RHDL::HDL::TristateBuffer do
       expect(verilog).to include('input en')
       expect(verilog).to include('output y')
     end
+
+    context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation' do
+        test_vectors = []
+        behavioral = RHDL::HDL::TristateBuffer.new
+
+        test_cases = [
+          { a: 1, en: 1 },  # enabled, pass 1
+          { a: 0, en: 1 },  # enabled, pass 0
+          { a: 1, en: 0 },  # disabled, output 0
+          { a: 0, en: 0 },  # disabled, output 0
+        ]
+
+        expected_outputs = []
+        test_cases.each do |tc|
+          behavioral.set_input(:a, tc[:a])
+          behavioral.set_input(:en, tc[:en])
+          behavioral.propagate
+
+          test_vectors << { inputs: tc }
+          expected_outputs << { y: behavioral.get_output(:y) }
+        end
+
+        base_dir = File.join('tmp', 'iverilog', 'tribuf')
+        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+
+        expect(result[:success]).to be(true), result[:error]
+
+        expected_outputs.each_with_index do |expected, idx|
+          expect(result[:results][idx][:y]).to eq(expected[:y]),
+            "Cycle #{idx}: expected y=#{expected[:y]}, got #{result[:results][idx][:y]}"
+        end
+      end
+    end
   end
 end
