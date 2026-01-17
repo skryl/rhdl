@@ -1,0 +1,831 @@
+{
+  "name": "alat",
+  "net_count": 109,
+  "gates": [
+    {
+      "type": "mux",
+      "inputs": [
+        5,
+        13,
+        4
+      ],
+      "output": 61,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        2,
+        4
+      ],
+      "output": 62,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        63
+      ],
+      "output": 29,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        6,
+        14,
+        4
+      ],
+      "output": 64,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        2,
+        4
+      ],
+      "output": 65,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        66
+      ],
+      "output": 30,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        7,
+        15,
+        4
+      ],
+      "output": 67,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        2,
+        4
+      ],
+      "output": 68,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        69
+      ],
+      "output": 31,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        8,
+        16,
+        4
+      ],
+      "output": 70,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        2,
+        4
+      ],
+      "output": 71,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        72
+      ],
+      "output": 32,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        9,
+        17,
+        4
+      ],
+      "output": 73,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        2,
+        4
+      ],
+      "output": 74,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        75
+      ],
+      "output": 33,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        10,
+        18,
+        4
+      ],
+      "output": 76,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        2,
+        4
+      ],
+      "output": 77,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        78
+      ],
+      "output": 34,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        11,
+        19,
+        4
+      ],
+      "output": 79,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        2,
+        4
+      ],
+      "output": 80,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        81
+      ],
+      "output": 35,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        12,
+        20,
+        4
+      ],
+      "output": 82,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        2,
+        4
+      ],
+      "output": 83,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        84
+      ],
+      "output": 36,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        5,
+        21,
+        4
+      ],
+      "output": 85,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        3,
+        4
+      ],
+      "output": 86,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        87
+      ],
+      "output": 37,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        6,
+        22,
+        4
+      ],
+      "output": 88,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        3,
+        4
+      ],
+      "output": 89,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        90
+      ],
+      "output": 38,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        7,
+        23,
+        4
+      ],
+      "output": 91,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        3,
+        4
+      ],
+      "output": 92,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        93
+      ],
+      "output": 39,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        8,
+        24,
+        4
+      ],
+      "output": 94,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        3,
+        4
+      ],
+      "output": 95,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        96
+      ],
+      "output": 40,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        9,
+        25,
+        4
+      ],
+      "output": 97,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        3,
+        4
+      ],
+      "output": 98,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        99
+      ],
+      "output": 41,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        10,
+        26,
+        4
+      ],
+      "output": 100,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        3,
+        4
+      ],
+      "output": 101,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        102
+      ],
+      "output": 42,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        11,
+        27,
+        4
+      ],
+      "output": 103,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        3,
+        4
+      ],
+      "output": 104,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        105
+      ],
+      "output": 43,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        12,
+        28,
+        4
+      ],
+      "output": 106,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        3,
+        4
+      ],
+      "output": 107,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        108
+      ],
+      "output": 44,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        63
+      ],
+      "output": 45,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        87
+      ],
+      "output": 53,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        66
+      ],
+      "output": 46,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        90
+      ],
+      "output": 54,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        69
+      ],
+      "output": 47,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        93
+      ],
+      "output": 55,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        72
+      ],
+      "output": 48,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        96
+      ],
+      "output": 56,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        75
+      ],
+      "output": 49,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        99
+      ],
+      "output": 57,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        78
+      ],
+      "output": 50,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        102
+      ],
+      "output": 58,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        81
+      ],
+      "output": 51,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        105
+      ],
+      "output": 59,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        84
+      ],
+      "output": 52,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        108
+      ],
+      "output": 60,
+      "value": null
+    }
+  ],
+  "dffs": [
+    {
+      "d": 61,
+      "q": 63,
+      "rst": 1,
+      "en": 62,
+      "async_reset": false
+    },
+    {
+      "d": 64,
+      "q": 66,
+      "rst": 1,
+      "en": 65,
+      "async_reset": false
+    },
+    {
+      "d": 67,
+      "q": 69,
+      "rst": 1,
+      "en": 68,
+      "async_reset": false
+    },
+    {
+      "d": 70,
+      "q": 72,
+      "rst": 1,
+      "en": 71,
+      "async_reset": false
+    },
+    {
+      "d": 73,
+      "q": 75,
+      "rst": 1,
+      "en": 74,
+      "async_reset": false
+    },
+    {
+      "d": 76,
+      "q": 78,
+      "rst": 1,
+      "en": 77,
+      "async_reset": false
+    },
+    {
+      "d": 79,
+      "q": 81,
+      "rst": 1,
+      "en": 80,
+      "async_reset": false
+    },
+    {
+      "d": 82,
+      "q": 84,
+      "rst": 1,
+      "en": 83,
+      "async_reset": false
+    },
+    {
+      "d": 85,
+      "q": 87,
+      "rst": 1,
+      "en": 86,
+      "async_reset": false
+    },
+    {
+      "d": 88,
+      "q": 90,
+      "rst": 1,
+      "en": 89,
+      "async_reset": false
+    },
+    {
+      "d": 91,
+      "q": 93,
+      "rst": 1,
+      "en": 92,
+      "async_reset": false
+    },
+    {
+      "d": 94,
+      "q": 96,
+      "rst": 1,
+      "en": 95,
+      "async_reset": false
+    },
+    {
+      "d": 97,
+      "q": 99,
+      "rst": 1,
+      "en": 98,
+      "async_reset": false
+    },
+    {
+      "d": 100,
+      "q": 102,
+      "rst": 1,
+      "en": 101,
+      "async_reset": false
+    },
+    {
+      "d": 103,
+      "q": 105,
+      "rst": 1,
+      "en": 104,
+      "async_reset": false
+    },
+    {
+      "d": 106,
+      "q": 108,
+      "rst": 1,
+      "en": 107,
+      "async_reset": false
+    }
+  ],
+  "inputs": {
+    "alat.clk": [
+      0
+    ],
+    "alat.rst": [
+      1
+    ],
+    "alat.load_lo": [
+      2
+    ],
+    "alat.load_hi": [
+      3
+    ],
+    "alat.load_full": [
+      4
+    ],
+    "alat.data_in": [
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+    ],
+    "alat.addr_in": [
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28
+    ]
+  },
+  "outputs": {
+    "alat.addr_lo": [
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36
+    ],
+    "alat.addr_hi": [
+      37,
+      38,
+      39,
+      40,
+      41,
+      42,
+      43,
+      44
+    ],
+    "alat.addr": [
+      45,
+      46,
+      47,
+      48,
+      49,
+      50,
+      51,
+      52,
+      53,
+      54,
+      55,
+      56,
+      57,
+      58,
+      59,
+      60
+    ]
+  },
+  "schedule": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    49,
+    50,
+    51,
+    52,
+    53,
+    54,
+    55,
+    56,
+    57,
+    58,
+    59,
+    60,
+    61,
+    62,
+    63
+  ]
+}
