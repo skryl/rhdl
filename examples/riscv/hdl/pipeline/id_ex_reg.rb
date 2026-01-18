@@ -1,0 +1,106 @@
+# ID/EX Pipeline Register
+# Holds decoded instruction data and control signals
+
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
+
+module RISCV
+  module Pipeline
+    class ID_EX_Reg < RHDL::HDL::SequentialComponent
+      include RHDL::DSL::Behavior
+      include RHDL::DSL::Sequential
+
+      port_input :clk
+      port_input :rst
+      port_input :flush              # Flush on branch/jump
+
+      # Data from ID stage
+      port_input :pc_in, width: 32
+      port_input :pc_plus4_in, width: 32
+      port_input :rs1_data_in, width: 32
+      port_input :rs2_data_in, width: 32
+      port_input :imm_in, width: 32
+      port_input :rs1_addr_in, width: 5
+      port_input :rs2_addr_in, width: 5
+      port_input :rd_addr_in, width: 5
+      port_input :funct3_in, width: 3
+      port_input :funct7_in, width: 7
+
+      # Control signals from ID stage
+      port_input :alu_op_in, width: 4
+      port_input :alu_src_in           # 0=rs2, 1=imm
+      port_input :reg_write_in
+      port_input :mem_read_in
+      port_input :mem_write_in
+      port_input :mem_to_reg_in
+      port_input :branch_in
+      port_input :jump_in
+      port_input :jalr_in
+
+      # Outputs to EX stage
+      port_output :pc_out, width: 32
+      port_output :pc_plus4_out, width: 32
+      port_output :rs1_data_out, width: 32
+      port_output :rs2_data_out, width: 32
+      port_output :imm_out, width: 32
+      port_output :rs1_addr_out, width: 5
+      port_output :rs2_addr_out, width: 5
+      port_output :rd_addr_out, width: 5
+      port_output :funct3_out, width: 3
+      port_output :funct7_out, width: 7
+
+      # Control outputs
+      port_output :alu_op_out, width: 4
+      port_output :alu_src_out
+      port_output :reg_write_out
+      port_output :mem_read_out
+      port_output :mem_write_out
+      port_output :mem_to_reg_out
+      port_output :branch_out
+      port_output :jump_out
+      port_output :jalr_out
+
+      sequential clock: :clk, reset: :rst, reset_values: {
+        pc_out: 0, pc_plus4_out: 4,
+        rs1_data_out: 0, rs2_data_out: 0, imm_out: 0,
+        rs1_addr_out: 0, rs2_addr_out: 0, rd_addr_out: 0,
+        funct3_out: 0, funct7_out: 0,
+        alu_op_out: 0, alu_src_out: 0,
+        reg_write_out: 0, mem_read_out: 0, mem_write_out: 0,
+        mem_to_reg_out: 0, branch_out: 0, jump_out: 0, jalr_out: 0
+      } do
+        # On flush, clear control signals to insert bubble
+        pc_out <= mux(flush, lit(0, width: 32), pc_in)
+        pc_plus4_out <= mux(flush, lit(4, width: 32), pc_plus4_in)
+        rs1_data_out <= mux(flush, lit(0, width: 32), rs1_data_in)
+        rs2_data_out <= mux(flush, lit(0, width: 32), rs2_data_in)
+        imm_out <= mux(flush, lit(0, width: 32), imm_in)
+        rs1_addr_out <= mux(flush, lit(0, width: 5), rs1_addr_in)
+        rs2_addr_out <= mux(flush, lit(0, width: 5), rs2_addr_in)
+        rd_addr_out <= mux(flush, lit(0, width: 5), rd_addr_in)
+        funct3_out <= mux(flush, lit(0, width: 3), funct3_in)
+        funct7_out <= mux(flush, lit(0, width: 7), funct7_in)
+
+        # Control signals - all zero on flush (bubble)
+        alu_op_out <= mux(flush, lit(0, width: 4), alu_op_in)
+        alu_src_out <= mux(flush, lit(0, width: 1), alu_src_in)
+        reg_write_out <= mux(flush, lit(0, width: 1), reg_write_in)
+        mem_read_out <= mux(flush, lit(0, width: 1), mem_read_in)
+        mem_write_out <= mux(flush, lit(0, width: 1), mem_write_in)
+        mem_to_reg_out <= mux(flush, lit(0, width: 1), mem_to_reg_in)
+        branch_out <= mux(flush, lit(0, width: 1), branch_in)
+        jump_out <= mux(flush, lit(0, width: 1), jump_in)
+        jalr_out <= mux(flush, lit(0, width: 1), jalr_in)
+      end
+
+      def self.verilog_module_name
+        'riscv_id_ex_reg'
+      end
+
+      def self.to_verilog
+        RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
+      end
+    end
+  end
+end
