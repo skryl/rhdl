@@ -732,5 +732,15 @@ module MOS6502
     def write_y(v); @registers.write_y(v); end
     def write_sp(v); @sp.write_sp(v); end
     def write_pc(v); @pc.write_pc(v); end
+
+    # Verilog module name for synthesis
+    def self.verilog_module_name
+      'mos6502_datapath'
+    end
+
+    def self.to_verilog(top_name: nil)
+      name = top_name || verilog_module_name
+      RHDL::Export::Verilog.generate(to_ir(top_name: name))
+    end
   end
 end

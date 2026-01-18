@@ -26,7 +26,7 @@ RSpec.describe MOS6502::Datapath do
   describe 'synthesis' do
     it 'generates valid Verilog' do
       verilog = described_class.to_verilog
-      expect(verilog).to include('module datapath')
+      expect(verilog).to include('module mos6502_datapath')
       expect(verilog).to include('input clk')
       expect(verilog).to include('input rst')
       expect(verilog).to include('output [15:0] addr')
@@ -55,7 +55,7 @@ RSpec.describe MOS6502::Datapath do
 
         result = NetlistHelper.run_behavioral_simulation(
           verilog,
-          module_name: 'datapath',
+          module_name: 'mos6502_datapath',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,

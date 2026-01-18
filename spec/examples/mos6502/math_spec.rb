@@ -1,8 +1,8 @@
 require_relative 'spec_helper'
-require_relative '../../../examples/mos6502/cpu'
+require_relative '../../../examples/mos6502/cpu_harness'
 
 RSpec.describe 'Mathematical computations on 6502' do
-  let(:cpu) { MOS6502::CPU.new }
+  let(:cpu) { MOS6502::CPUHarness.new }
 
   describe 'Multiplication by repeated addition' do
     it 'multiplies two numbers' do
