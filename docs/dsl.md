@@ -256,66 +256,6 @@ class TrafficLight < RHDL::HDL::SequentialComponent
 end
 ```
 
-## MOS 6502 Synthesizable Components
-
-The `examples/mos6502/` directory includes synthesizable versions:
-
-### ALU_DSL
-
-Full 6502 ALU with BCD support:
-
-```ruby
-require_relative 'examples/mos6502/alu_dsl'
-
-alu = MOS6502::ALU_DSL.new('alu')
-
-# Binary addition
-alu.inputs[:a].set(0x10)
-alu.inputs[:b].set(0x20)
-alu.inputs[:c_in].set(0)
-alu.inputs[:d_flag].set(0)  # Binary mode
-alu.inputs[:op].set(MOS6502::ALU_DSL::OP_ADC)
-alu.propagate
-puts alu.outputs[:result].get  # => 0x30
-
-# BCD addition
-alu.inputs[:a].set(0x19)
-alu.inputs[:b].set(0x28)
-alu.inputs[:d_flag].set(1)  # BCD mode
-alu.propagate
-puts alu.outputs[:result].get  # => 0x47 (19 + 28 = 47 in BCD)
-
-# Generate Verilog
-puts MOS6502::ALU_DSL.to_verilog
-```
-
-### Memory_DSL
-
-64KB memory with RAM/ROM regions:
-
-```ruby
-require_relative 'examples/mos6502/memory_dsl'
-
-mem = MOS6502::Memory_DSL.new('mem')
-
-# Load a program into ROM
-mem.load_program([0xA9, 0x42, 0x8D, 0x00, 0x02], 0x8000)
-mem.set_reset_vector(0x8000)
-
-# Write to RAM via ports
-mem.inputs[:clk].set(0)
-mem.inputs[:cs].set(1)
-mem.inputs[:rw].set(0)  # Write
-mem.inputs[:addr].set(0x0200)
-mem.inputs[:data_in].set(0x55)
-mem.propagate
-mem.inputs[:clk].set(1)
-mem.propagate
-
-# Generate Verilog
-puts MOS6502::Memory_DSL.to_verilog
-```
-
 ## Migrating Existing Components
 
 To migrate a component with `propagate` to DSL:
@@ -367,22 +307,19 @@ behavior do
 end
 ```
 
-## Complex BCD Arithmetic
+## Synthesizable Operations
 
-For complex operations like BCD arithmetic in the 6502 ALU, you can still use
-`propagate` with synthesizable patterns. The key is that all Ruby operations
-map directly to Verilog:
+For complex operations, you can use `propagate` with synthesizable patterns.
+Ruby operations map directly to Verilog:
 
-- `&` → `&` (bitwise AND)
-- `|` → `|` (bitwise OR)
-- `^` → `^` (bitwise XOR)
-- `>>` → `>>` (shift right)
-- `<<` → `<<` (shift left)
-- `? :` → `? :` (ternary)
-
-The `MOS6502::ALU_DSL` class demonstrates this pattern with full BCD support.
-Its `propagate` method uses only synthesizable operations, and the class also
-provides a `to_verilog` class method that generates the equivalent Verilog.
+| Ruby | Verilog | Description |
+|------|---------|-------------|
+| `&` | `&` | Bitwise AND |
+| `\|` | `\|` | Bitwise OR |
+| `^` | `^` | Bitwise XOR |
+| `>>` | `>>` | Shift right |
+| `<<` | `<<` | Shift left |
+| `? :` | `? :` | Ternary/mux |
 
 ## Best Practices
 

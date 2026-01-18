@@ -28,9 +28,18 @@ Anything outside this subset will raise an error during lowering.
 ```ruby
 require 'rhdl'
 
-# Export a component to Verilog
+# Export a component instance to Verilog
 component = MyComponent.new
-verilog_code = RHDL::Export::Verilog.export(component)
+verilog_code = RHDL::Export.verilog(component)
+
+# Or use the class method
+verilog_code = MyComponent.to_verilog
+
+# Write directly to file
+RHDL::Export.write_verilog(component, path: 'output.v')
+
+# Batch export all discovered components
+RHDL::Export.export_all_to_files('export/verilog/')
 ```
 
 ### Signal Naming Rules
