@@ -11,8 +11,7 @@ module RHDL
       # The <= operator for assignments
       def <=(expr)
         val = resolve(expr)
-        mask = (1 << @width) - 1
-        @context.record_assignment(@wire, val & mask)
+        @context.record_assignment(@wire, val & MaskCache.mask(@width))
       end
 
       private

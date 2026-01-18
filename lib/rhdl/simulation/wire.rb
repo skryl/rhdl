@@ -5,7 +5,7 @@ module RHDL
     # A wire/signal in the circuit that can be connected and propagated
     class Wire
       attr_reader :name, :width, :sinks
-      attr_accessor :value, :driver
+      attr_accessor :value, :driver, :dependency_graph
 
       def initialize(name, width: 1)
         @name = name
@@ -14,6 +14,7 @@ module RHDL
         @driver = nil
         @sinks = []
         @listeners = []
+        @dependency_graph = nil
       end
 
       def set(val)
@@ -21,6 +22,8 @@ module RHDL
         if new_val.value != @value.value
           @value = new_val
           notify_listeners
+          # Notify dependency graph if attached
+          @dependency_graph&.mark_wire_dirty(self)
         end
       end
 
