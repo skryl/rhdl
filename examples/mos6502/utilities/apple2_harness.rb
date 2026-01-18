@@ -1,6 +1,6 @@
 # Apple ][ test harness for MOS6502 CPU
 
-require_relative '../hdl/cpu_harness'
+require_relative '../hdl/harness'
 require_relative 'apple2_bus'
 require_relative 'isa_simulator'
 
@@ -11,7 +11,7 @@ module Apple2Harness
 
     def initialize
       @bus = MOS6502::Apple2Bus.new("apple2_bus")
-      @cpu = MOS6502::CPUHarness.new(@bus)
+      @cpu = MOS6502::Harness.new(@bus)
     end
 
     def load_rom(bytes, base_addr:)
