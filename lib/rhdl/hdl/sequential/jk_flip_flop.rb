@@ -11,13 +11,13 @@ module RHDL
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
-      port_input :j
-      port_input :k
-      port_input :clk
-      port_input :rst
-      port_input :en
-      port_output :q
-      port_output :qn
+      input :j
+      input :k
+      input :clk
+      input :rst
+      input :en
+      output :q
+      output :qn
 
       # Sequential block for JK flip-flop
       # JK truth table: J=0,K=0 -> hold; J=0,K=1 -> reset; J=1,K=0 -> set; J=1,K=1 -> toggle

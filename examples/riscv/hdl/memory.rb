@@ -15,17 +15,17 @@ module RISCV
 
     DEFAULT_SIZE = 65536  # 64KB
 
-    port_input :clk
-    port_input :rst
+    input :clk
+    input :rst
 
     # Memory interface
-    port_input :addr, width: 32       # Address (word-aligned for simplicity)
-    port_input :write_data, width: 32 # Data to write
-    port_input :mem_read              # Read enable
-    port_input :mem_write             # Write enable
-    port_input :funct3, width: 3      # Size: BYTE, HALF, WORD + unsigned variants
+    input :addr, width: 32       # Address (word-aligned for simplicity)
+    input :write_data, width: 32 # Data to write
+    input :mem_read              # Read enable
+    input :mem_write             # Write enable
+    input :funct3, width: 3      # Size: BYTE, HALF, WORD + unsigned variants
 
-    port_output :read_data, width: 32 # Data read from memory
+    output :read_data, width: 32 # Data read from memory
 
     def initialize(name = nil, size: DEFAULT_SIZE)
       @size = size

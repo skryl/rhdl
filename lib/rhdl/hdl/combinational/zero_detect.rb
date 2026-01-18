@@ -6,8 +6,8 @@ module RHDL
     # Zero Detector
     class ZeroDetect < SimComponent
       # Class-level port definitions for synthesis (default 8-bit width)
-      port_input :a, width: 8
-      port_output :zero
+      input :a, width: 8
+      output :zero
 
       behavior do
         zero <= (a == lit(0, width: 8))

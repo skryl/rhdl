@@ -15,22 +15,22 @@ module RISCV
     include RHDL::DSL::Sequential
 
     # External interface
-    port_input :clk
-    port_input :rst
+    input :clk
+    input :rst
 
     # Debug outputs
-    port_output :pc, width: 32
-    port_output :inst, width: 32
-    port_output :x1, width: 32
-    port_output :x2, width: 32
-    port_output :x10, width: 32
-    port_output :x11, width: 32
+    output :pc, width: 32
+    output :inst, width: 32
+    output :x1, width: 32
+    output :x2, width: 32
+    output :x10, width: 32
+    output :x11, width: 32
 
     # Memory bus outputs (for external access)
-    port_output :mem_addr, width: 32
-    port_output :mem_wdata, width: 32
-    port_output :mem_we
-    port_output :mem_re
+    output :mem_addr, width: 32
+    output :mem_wdata, width: 32
+    output :mem_we
+    output :mem_re
 
     # Internal signals
     wire :inst_addr, width: 32

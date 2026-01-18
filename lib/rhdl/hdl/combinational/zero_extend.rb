@@ -5,8 +5,8 @@ module RHDL
   module HDL
     # Zero Extender - extends a narrower value with zeros
     class ZeroExtend < SimComponent
-      port_input :a, width: 8
-      port_output :y, width: 16
+      input :a, width: 8
+      output :y, width: 16
 
       # Zero extension is just assignment - output width is larger than input
       behavior do

@@ -11,20 +11,20 @@ module RISCV
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
-      port_input :clk
-      port_input :rst
-      port_input :stall              # Stall signal from hazard unit
-      port_input :flush              # Flush signal (branch taken)
+      input :clk
+      input :rst
+      input :stall              # Stall signal from hazard unit
+      input :flush              # Flush signal (branch taken)
 
       # Inputs from IF stage
-      port_input :pc_in, width: 32
-      port_input :inst_in, width: 32
-      port_input :pc_plus4_in, width: 32
+      input :pc_in, width: 32
+      input :inst_in, width: 32
+      input :pc_plus4_in, width: 32
 
       # Outputs to ID stage
-      port_output :pc_out, width: 32
-      port_output :inst_out, width: 32
-      port_output :pc_plus4_out, width: 32
+      output :pc_out, width: 32
+      output :inst_out, width: 32
+      output :pc_plus4_out, width: 32
 
       sequential clock: :clk, reset: :rst, reset_values: {
         pc_out: 0,

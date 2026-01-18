@@ -6,12 +6,12 @@ module RHDL
     # 1-to-4 Demultiplexer - routes input to one of 4 outputs
     class Demux4 < SimComponent
       # Class-level port definitions for synthesis (default 1-bit width)
-      port_input :a
-      port_input :sel, width: 2
-      port_output :y0
-      port_output :y1
-      port_output :y2
-      port_output :y3
+      input :a
+      input :sel, width: 2
+      output :y0
+      output :y1
+      output :y2
+      output :y3
 
       behavior do
         w = port_width(:a)

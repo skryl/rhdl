@@ -6,21 +6,21 @@ module RHDL
     module CPU
       class SynthDatapath < SimComponent
         # Clock and reset
-        port_input :clk
-        port_input :rst
+        input :clk
+        input :rst
 
         # Memory interface
-        port_input :mem_data_in, width: 8
-        port_output :mem_data_out, width: 8
-        port_output :mem_addr, width: 16
-        port_output :mem_write_en
-        port_output :mem_read_en
+        input :mem_data_in, width: 8
+        output :mem_data_out, width: 8
+        output :mem_addr, width: 16
+        output :mem_write_en
+        output :mem_read_en
 
         # Status outputs
-        port_output :pc_out, width: 16
-        port_output :acc_out, width: 8
-        port_output :zero_flag
-        port_output :halt
+        output :pc_out, width: 16
+        output :acc_out, width: 8
+        output :zero_flag
+        output :halt
 
         # Internal wires
         wire :instruction, width: 8

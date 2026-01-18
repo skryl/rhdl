@@ -5,10 +5,10 @@ module RHDL
   module HDL
     # 2-to-1 Multiplexer
     class Mux2 < SimComponent
-      port_input :a   # Selected when sel = 0
-      port_input :b   # Selected when sel = 1
-      port_input :sel
-      port_output :y
+      input :a   # Selected when sel = 0
+      input :b   # Selected when sel = 1
+      input :sel
+      output :y
 
       # mux(sel, if_true, if_false) - sel ? if_true : if_false
       # Note: sel=0 selects a (first arg), sel=1 selects b (second arg)

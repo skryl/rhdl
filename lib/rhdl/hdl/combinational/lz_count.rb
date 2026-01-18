@@ -6,9 +6,9 @@ module RHDL
     # Leading Zero Count - counts leading zeros in input
     class LZCount < SimComponent
       # Class-level port definitions for synthesis (default 8-bit)
-      port_input :a, width: 8
-      port_output :count, width: 4  # 4 bits for values 0-8
-      port_output :all_zero
+      input :a, width: 8
+      output :count, width: 4  # 4 bits for values 0-8
+      output :all_zero
 
       behavior do
         w = param(:width)

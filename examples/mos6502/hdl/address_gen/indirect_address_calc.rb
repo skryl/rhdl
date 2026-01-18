@@ -15,13 +15,13 @@ module MOS6502
     MODE_INDEXED_IND = 0x0A
     MODE_INDIRECT_IDX = 0x0B
 
-    port_input :mode, width: 4
-    port_input :operand_lo, width: 8
-    port_input :operand_hi, width: 8
-    port_input :x_reg, width: 8
+    input :mode, width: 4
+    input :operand_lo, width: 8
+    input :operand_hi, width: 8
+    input :x_reg, width: 8
 
-    port_output :ptr_addr_lo, width: 16
-    port_output :ptr_addr_hi, width: 16
+    output :ptr_addr_lo, width: 16
+    output :ptr_addr_hi, width: 16
 
     # Behavior block for combinational synthesis
     behavior do

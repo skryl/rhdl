@@ -4,8 +4,8 @@
 module RHDL
   module HDL
     class BitwiseNot < SimComponent
-      port_input :a, width: 8
-      port_output :y, width: 8
+      input :a, width: 8
+      output :y, width: 8
 
       behavior do
         y <= ~a

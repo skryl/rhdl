@@ -5,14 +5,14 @@ module RHDL
   module HDL
     class Comparator < SimComponent
       # Class-level port definitions for synthesis (default 8-bit width)
-      port_input :a, width: 8
-      port_input :b, width: 8
-      port_input :signed_cmp   # 1 = signed comparison (renamed to avoid keyword conflict)
-      port_output :eq      # a == b
-      port_output :gt      # a > b
-      port_output :lt      # a < b
-      port_output :gte     # a >= b
-      port_output :lte     # a <= b
+      input :a, width: 8
+      input :b, width: 8
+      input :signed_cmp   # 1 = signed comparison (renamed to avoid keyword conflict)
+      output :eq      # a == b
+      output :gt      # a > b
+      output :lt      # a < b
+      output :gte     # a >= b
+      output :lte     # a <= b
 
       behavior do
         # Unsigned comparisons

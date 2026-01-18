@@ -5,11 +5,11 @@ module RHDL
   module HDL
     class Divider < SimComponent
       # Class-level port definitions for synthesis (default 8-bit width)
-      port_input :dividend, width: 8
-      port_input :divisor, width: 8
-      port_output :quotient, width: 8
-      port_output :remainder, width: 8
-      port_output :div_by_zero
+      input :dividend, width: 8
+      input :divisor, width: 8
+      output :quotient, width: 8
+      output :remainder, width: 8
+      output :div_by_zero
 
       behavior do
         # Check for division by zero

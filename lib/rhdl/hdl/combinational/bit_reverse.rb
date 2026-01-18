@@ -6,8 +6,8 @@ module RHDL
     # Bit Reverser
     class BitReverse < SimComponent
       # Class-level port definitions for synthesis (default 8-bit)
-      port_input :a, width: 8
-      port_output :y, width: 8
+      input :a, width: 8
+      output :y, width: 8
 
       behavior do
         # Reverse bit order: y = {a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]}

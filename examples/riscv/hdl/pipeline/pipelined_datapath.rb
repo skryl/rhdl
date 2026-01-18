@@ -20,28 +20,28 @@ require_relative 'forwarding_unit'
 module RISCV
   module Pipeline
     class PipelinedDatapath < RHDL::HDL::SimComponent
-      port_input :clk
-      port_input :rst
+      input :clk
+      input :rst
 
       # Instruction memory interface
-      port_output :inst_addr, width: 32
-      port_input :inst_data, width: 32
+      output :inst_addr, width: 32
+      input :inst_data, width: 32
 
       # Data memory interface
-      port_output :data_addr, width: 32
-      port_output :data_wdata, width: 32
-      port_output :data_we
-      port_output :data_re
-      port_output :data_funct3, width: 3
-      port_input :data_rdata, width: 32
+      output :data_addr, width: 32
+      output :data_wdata, width: 32
+      output :data_we
+      output :data_re
+      output :data_funct3, width: 3
+      input :data_rdata, width: 32
 
       # Debug outputs
-      port_output :debug_pc, width: 32
-      port_output :debug_inst, width: 32
-      port_output :debug_x1, width: 32
-      port_output :debug_x2, width: 32
-      port_output :debug_x10, width: 32
-      port_output :debug_x11, width: 32
+      output :debug_pc, width: 32
+      output :debug_inst, width: 32
+      output :debug_x1, width: 32
+      output :debug_x2, width: 32
+      output :debug_x10, width: 32
+      output :debug_x11, width: 32
 
       def initialize(name = nil)
         super(name)

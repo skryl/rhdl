@@ -24,12 +24,12 @@ module RISCV
     OP_PASS_A = AluOp::PASS_A
     OP_PASS_B = AluOp::PASS_B
 
-    port_input :a, width: 32       # First operand
-    port_input :b, width: 32       # Second operand
-    port_input :op, width: 4       # ALU operation
+    input :a, width: 32       # First operand
+    input :b, width: 32       # Second operand
+    input :op, width: 4       # ALU operation
 
-    port_output :result, width: 32 # ALU result
-    port_output :zero              # Result is zero
+    output :result, width: 32 # ALU result
+    output :zero              # Result is zero
 
     behavior do
       # Compute all possible results

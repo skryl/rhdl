@@ -17,15 +17,15 @@ module RHDL
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
-      port_input :clk
-      port_input :rst
-      port_input :push
-      port_input :pop
-      port_input :din, width: 8
-      port_output :dout, width: 8
-      port_output :empty
-      port_output :full
-      port_output :sp, width: 5
+      input :clk
+      input :rst
+      input :push
+      input :pop
+      input :din, width: 8
+      output :dout, width: 8
+      output :empty
+      output :full
+      output :sp, width: 5
 
       # Memory for stack data (16 entries x 8-bit)
       memory :data, depth: 16, width: 8

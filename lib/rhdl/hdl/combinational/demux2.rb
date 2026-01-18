@@ -6,10 +6,10 @@ module RHDL
     # 1-to-2 Demultiplexer
     class Demux2 < SimComponent
       # Class-level port definitions for synthesis (default 1-bit width)
-      port_input :a
-      port_input :sel
-      port_output :y0
-      port_output :y1
+      input :a
+      input :sel
+      output :y0
+      output :y1
 
       behavior do
         # When sel=0: y0=a, y1=0

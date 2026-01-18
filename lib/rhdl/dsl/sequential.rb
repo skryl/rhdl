@@ -5,10 +5,10 @@
 #
 # Example - D Flip-Flop:
 #   class DFF < SequentialComponent
-#     port_input :clk
-#     port_input :rst
-#     port_input :d
-#     port_output :q
+#     input :clk
+#     input :rst
+#     input :d
+#     output :q
 #
 #     sequential clock: :clk, reset: :rst do
 #       q <= d
@@ -17,10 +17,10 @@
 #
 # Example - Counter with case:
 #   class Counter < SequentialComponent
-#     port_input :clk
-#     port_input :rst
-#     port_input :mode, width: 2
-#     port_output :count, width: 8
+#     input :clk
+#     input :rst
+#     input :mode, width: 2
+#     output :count, width: 8
 #
 #     sequential clock: :clk, reset: :rst, reset_value: { count: 0 } do
 #       case_of mode,
@@ -33,10 +33,10 @@
 #
 # Example - ALU with case:
 #   class ALU < SimComponent
-#     port_input :a, width: 8
-#     port_input :b, width: 8
-#     port_input :op, width: 4
-#     port_output :result, width: 8
+#     input :a, width: 8
+#     input :b, width: 8
+#     input :op, width: 4
+#     output :result, width: 8
 #
 #     behavior do
 #       result <= case_of(op,

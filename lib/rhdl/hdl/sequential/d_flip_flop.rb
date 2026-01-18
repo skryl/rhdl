@@ -11,12 +11,12 @@ module RHDL
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
-      port_input :d
-      port_input :clk
-      port_input :rst
-      port_input :en
-      port_output :q
-      port_output :qn
+      input :d
+      input :clk
+      input :rst
+      input :en
+      output :q
+      output :qn
 
       # Sequential block for the flip-flop register
       # Priority: rst > ~en (hold) > d

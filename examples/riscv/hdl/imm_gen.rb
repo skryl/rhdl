@@ -10,8 +10,8 @@ module RISCV
   class ImmGen < RHDL::HDL::SimComponent
     include RHDL::DSL::Behavior
 
-    port_input :inst, width: 32      # Full instruction
-    port_output :imm, width: 32      # Sign-extended immediate
+    input :inst, width: 32      # Full instruction
+    output :imm, width: 32      # Sign-extended immediate
 
     behavior do
       # Extract opcode

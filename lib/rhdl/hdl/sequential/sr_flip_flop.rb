@@ -11,13 +11,13 @@ module RHDL
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
-      port_input :s
-      port_input :r
-      port_input :clk
-      port_input :rst
-      port_input :en
-      port_output :q
-      port_output :qn
+      input :s
+      input :r
+      input :clk
+      input :rst
+      input :en
+      output :q
+      output :qn
 
       # Sequential block for SR flip-flop
       # SR truth table: S=1,R=0 -> set; S=0,R=1 -> reset; S=R=0 -> hold; S=R=1 -> invalid (R takes precedence)

@@ -11,25 +11,25 @@ module RISCV
       include RHDL::DSL::Behavior
 
       # From ID stage (current instruction being decoded)
-      port_input :id_rs1_addr, width: 5
-      port_input :id_rs2_addr, width: 5
+      input :id_rs1_addr, width: 5
+      input :id_rs2_addr, width: 5
 
       # From ID/EX register (instruction in EX stage)
-      port_input :ex_rd_addr, width: 5
-      port_input :ex_mem_read             # Load instruction in EX
+      input :ex_rd_addr, width: 5
+      input :ex_mem_read             # Load instruction in EX
 
       # From EX/MEM register (for branch/jump detection)
-      port_input :mem_rd_addr, width: 5
-      port_input :mem_mem_read            # Load instruction in MEM
+      input :mem_rd_addr, width: 5
+      input :mem_mem_read            # Load instruction in MEM
 
       # Branch/jump signals
-      port_input :branch_taken            # Branch is taken
-      port_input :jump                    # Jump instruction
+      input :branch_taken            # Branch is taken
+      input :jump                    # Jump instruction
 
       # Outputs
-      port_output :stall                  # Stall IF and ID stages
-      port_output :flush_if_id            # Flush IF/ID register
-      port_output :flush_id_ex            # Flush ID/EX register
+      output :stall                  # Stall IF and ID stages
+      output :flush_if_id            # Flush IF/ID register
+      output :flush_id_ex            # Flush ID/EX register
 
       behavior do
         # Load-use hazard detection:
