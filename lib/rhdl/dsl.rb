@@ -95,57 +95,6 @@ module RHDL
         _instances << inst
       end
 
-      # Generate VHDL output
-      def to_vhdl
-        lines = []
-
-        # Library declarations
-        lines << "library IEEE;"
-        lines << "use IEEE.STD_LOGIC_1164.ALL;"
-        lines << "use IEEE.NUMERIC_STD.ALL;"
-        lines << ""
-
-        # Entity declaration
-        entity_name = name.split('::').last.underscore
-        lines << "entity #{entity_name} is"
-
-        unless _generics.empty?
-          lines << "  generic("
-          generics_vhdl = _generics.map do |g|
-            default_str = g[:default] ? " := #{g[:default]}" : ""
-            "    #{g[:name]} : #{g[:type]}#{default_str}"
-          end
-          lines << generics_vhdl.join(";\n")
-          lines << "  );"
-        end
-
-        unless _ports.empty?
-          lines << "  port("
-          ports_vhdl = _ports.map { |p| "    #{p.to_vhdl}" }
-          lines << ports_vhdl.join(";\n")
-          lines << "  );"
-        end
-
-        lines << "end #{entity_name};"
-        lines << ""
-
-        # Architecture
-        lines << "architecture rtl of #{entity_name} is"
-
-        _constants.each { |c| lines << "  #{c.to_vhdl}" }
-        _signals.each { |s| lines << "  #{s.to_vhdl}" }
-
-        lines << "begin"
-
-        _assignments.each { |a| lines << "  #{a.to_vhdl}" }
-        _processes.each { |p| lines << "  #{p.to_vhdl}" }
-        _instances.each { |i| lines << "  #{i.to_vhdl}" }
-
-        lines << "end rtl;"
-
-        lines.join("\n")
-      end
-
       # Generate Verilog output
       def to_verilog
         lines = []

@@ -10,8 +10,8 @@ RSpec.describe RHDL::DSL do
         expect(signal.width).to eq(8)
       end
 
-      it 'converts to VHDL' do
-        expect(signal.to_vhdl).to eq('data')
+      it 'converts to Verilog' do
+        expect(signal.to_verilog).to eq('data')
       end
     end
 
@@ -20,14 +20,14 @@ RSpec.describe RHDL::DSL do
         bit = signal[3]
         expect(bit).to be_a(RHDL::DSL::BitSelect)
         expect(bit.index).to eq(3)
-        expect(bit.to_vhdl).to eq('data(3)')
+        expect(bit.to_verilog).to eq('data[3]')
       end
 
       it 'selects a bit range' do
         slice = signal[3..7]
         expect(slice).to be_a(RHDL::DSL::BitSlice)
         expect(slice.range).to eq(3..7)
-        expect(slice.to_vhdl).to eq('data(7 downto 3)')
+        expect(slice.to_verilog).to eq('data[7:3]')
       end
     end
 
@@ -38,25 +38,25 @@ RSpec.describe RHDL::DSL do
         expr = signal + other
         expect(expr).to be_a(RHDL::DSL::BinaryOp)
         expect(expr.op).to eq(:+)
-        expect(expr.to_vhdl).to eq('(data + other)')
+        expect(expr.to_verilog).to eq('(data + other)')
       end
 
       it 'creates subtraction expression' do
         expr = signal - other
         expect(expr.op).to eq(:-)
-        expect(expr.to_vhdl).to eq('(data - other)')
+        expect(expr.to_verilog).to eq('(data - other)')
       end
 
       it 'creates multiplication expression' do
         expr = signal * other
         expect(expr.op).to eq(:*)
-        expect(expr.to_vhdl).to eq('(data * other)')
+        expect(expr.to_verilog).to eq('(data * other)')
       end
 
       it 'creates division expression' do
         expr = signal / other
         expect(expr.op).to eq(:/)
-        expect(expr.to_vhdl).to eq('(data / other)')
+        expect(expr.to_verilog).to eq('(data / other)')
       end
 
       it 'creates modulo expression' do
@@ -71,26 +71,26 @@ RSpec.describe RHDL::DSL do
       it 'creates AND expression' do
         expr = signal & other
         expect(expr.op).to eq(:&)
-        expect(expr.to_vhdl).to eq('(data and mask)')
+        expect(expr.to_verilog).to eq('(data & mask)')
       end
 
       it 'creates OR expression' do
         expr = signal | other
         expect(expr.op).to eq(:|)
-        expect(expr.to_vhdl).to eq('(data or mask)')
+        expect(expr.to_verilog).to eq('(data | mask)')
       end
 
       it 'creates XOR expression' do
         expr = signal ^ other
         expect(expr.op).to eq(:^)
-        expect(expr.to_vhdl).to eq('(data xor mask)')
+        expect(expr.to_verilog).to eq('(data ^ mask)')
       end
 
       it 'creates NOT expression' do
         expr = ~signal
         expect(expr).to be_a(RHDL::DSL::UnaryOp)
         expect(expr.op).to eq(:~)
-        expect(expr.to_vhdl).to eq('not data')
+        expect(expr.to_verilog).to eq('~data')
       end
     end
 
@@ -98,13 +98,13 @@ RSpec.describe RHDL::DSL do
       it 'creates left shift expression' do
         expr = signal << 2
         expect(expr.op).to eq(:<<)
-        expect(expr.to_vhdl).to eq('(data sll 2)')
+        expect(expr.to_verilog).to eq('(data << 2)')
       end
 
       it 'creates right shift expression' do
         expr = signal >> 2
         expect(expr.op).to eq(:>>)
-        expect(expr.to_vhdl).to eq('(data srl 2)')
+        expect(expr.to_verilog).to eq('(data >> 2)')
       end
     end
 
@@ -113,32 +113,32 @@ RSpec.describe RHDL::DSL do
 
       it 'creates equality expression' do
         expr = signal == other
-        expect(expr.to_vhdl).to eq('(data = threshold)')
+        expect(expr.to_verilog).to eq('(data == threshold)')
       end
 
       it 'creates inequality expression' do
         expr = signal != other
-        expect(expr.to_vhdl).to eq('(data /= threshold)')
+        expect(expr.to_verilog).to eq('(data != threshold)')
       end
 
       it 'creates less than expression' do
         expr = signal < other
-        expect(expr.to_vhdl).to eq('(data < threshold)')
+        expect(expr.to_verilog).to eq('(data < threshold)')
       end
 
       it 'creates greater than expression' do
         expr = signal > other
-        expect(expr.to_vhdl).to eq('(data > threshold)')
+        expect(expr.to_verilog).to eq('(data > threshold)')
       end
 
       it 'creates less or equal expression' do
         expr = signal <= other
-        expect(expr.to_vhdl).to eq('(data <= threshold)')
+        expect(expr.to_verilog).to eq('(data <= threshold)')
       end
 
       it 'creates greater or equal expression' do
         expr = signal >= other
-        expect(expr.to_vhdl).to eq('(data >= threshold)')
+        expect(expr.to_verilog).to eq('(data >= threshold)')
       end
     end
 
@@ -149,14 +149,14 @@ RSpec.describe RHDL::DSL do
       it 'concatenates signals' do
         expr = high.concat(low)
         expect(expr).to be_a(RHDL::DSL::Concatenation)
-        expect(expr.to_vhdl).to eq('(high & low)')
+        expect(expr.to_verilog).to eq('{high, low}')
       end
 
       it 'replicates a signal' do
         bit = RHDL::DSL::SignalRef.new(:sign, width: 1)
         expr = bit.replicate(4)
         expect(expr).to be_a(RHDL::DSL::Replication)
-        expect(expr.to_vhdl).to eq('(sign & sign & sign & sign)')
+        expect(expr.to_verilog).to eq('{4{sign}}')
       end
     end
 
@@ -167,12 +167,12 @@ RSpec.describe RHDL::DSL do
 
       it 'chains bitwise operations' do
         expr = (a & b) | c
-        expect(expr.to_vhdl).to eq('((a and b) or c)')
+        expect(expr.to_verilog).to eq('((a & b) | c)')
       end
 
       it 'chains mixed operations' do
         expr = (a + b) & c
-        expect(expr.to_vhdl).to eq('((a + b) and c)')
+        expect(expr.to_verilog).to eq('((a + b) & c)')
       end
     end
   end
@@ -180,17 +180,17 @@ RSpec.describe RHDL::DSL do
   describe 'Port' do
     it 'creates single-bit input port' do
       port = RHDL::DSL::Port.new(:clk, :in, 1)
-      expect(port.to_vhdl).to eq('clk : in std_logic')
+      expect(port.to_verilog).to eq('input clk')
     end
 
     it 'creates multi-bit input port' do
       port = RHDL::DSL::Port.new(:data, :in, 8)
-      expect(port.to_vhdl).to eq('data : in std_logic_vector(7 downto 0)')
+      expect(port.to_verilog).to eq('input [7:0] data')
     end
 
     it 'creates output port' do
       port = RHDL::DSL::Port.new(:result, :out, 16)
-      expect(port.to_vhdl).to eq('result : out std_logic_vector(15 downto 0)')
+      expect(port.to_verilog).to eq('output [15:0] result')
     end
 
     it 'converts to signal ref' do
@@ -204,34 +204,34 @@ RSpec.describe RHDL::DSL do
   describe 'Signal' do
     it 'creates single-bit signal' do
       sig = RHDL::DSL::Signal.new(:flag, 1)
-      expect(sig.to_vhdl).to eq('signal flag : std_logic;')
+      expect(sig.to_verilog).to eq('reg flag;')
     end
 
     it 'creates multi-bit signal' do
       sig = RHDL::DSL::Signal.new(:counter, 8)
-      expect(sig.to_vhdl).to eq('signal counter : std_logic_vector(7 downto 0);')
+      expect(sig.to_verilog).to eq('reg [7:0] counter;')
     end
 
     it 'creates signal with default value' do
       sig = RHDL::DSL::Signal.new(:counter, 8, default: 0)
-      expect(sig.to_vhdl).to eq('signal counter : std_logic_vector(7 downto 0) := "00000000";')
+      expect(sig.to_verilog).to eq("reg [7:0] counter = 8'b00000000;")
     end
 
     it 'creates single-bit signal with default' do
       sig = RHDL::DSL::Signal.new(:flag, 1, default: 1)
-      expect(sig.to_vhdl).to eq("signal flag : std_logic := '1';")
+      expect(sig.to_verilog).to eq("reg flag = 1'b1;")
     end
   end
 
   describe 'Constant' do
     it 'creates constant declaration' do
       const = RHDL::DSL::Constant.new(:MAX_VALUE, 8, 255)
-      expect(const.to_vhdl).to eq('constant MAX_VALUE : std_logic_vector(7 downto 0) := "11111111";')
+      expect(const.to_verilog).to eq("localparam [7:0] MAX_VALUE = 8'b11111111;")
     end
 
     it 'creates single-bit constant' do
       const = RHDL::DSL::Constant.new(:HIGH, 1, 1)
-      expect(const.to_vhdl).to eq("constant HIGH : std_logic := '1';")
+      expect(const.to_verilog).to eq("localparam HIGH = 1'b1;")
     end
   end
 
@@ -241,13 +241,13 @@ RSpec.describe RHDL::DSL do
 
     it 'creates simple assignment' do
       assign = RHDL::DSL::Assignment.new(target, source)
-      expect(assign.to_vhdl).to eq('result <= input;')
+      expect(assign.to_verilog).to eq('assign result = input;')
     end
 
     it 'creates conditional assignment' do
       cond = RHDL::DSL::SignalRef.new(:enable, width: 1)
       assign = RHDL::DSL::Assignment.new(target, source, condition: cond)
-      expect(assign.to_vhdl).to eq('result <= input when enable else result;')
+      expect(assign.to_verilog).to eq('assign result = enable ? input : result;')
     end
   end
 
@@ -263,11 +263,10 @@ RSpec.describe RHDL::DSL do
         assign(result_ref, data_ref)
       end
 
-      vhdl = proc.to_vhdl
-      expect(vhdl).to include('main_proc: process(clk)')
-      expect(vhdl).to include('begin')
-      expect(vhdl).to include('result <= data;')
-      expect(vhdl).to include('end process main_proc;')
+      verilog = proc.to_verilog
+      expect(verilog).to include('always @(clk) begin')
+      expect(verilog).to include('result <= data;')
+      expect(verilog).to include('end')
     end
 
     it 'creates process with if statement' do
@@ -280,10 +279,10 @@ RSpec.describe RHDL::DSL do
         end
       end
 
-      vhdl = proc.to_vhdl
-      expect(vhdl).to include('if (enable = 1) then')
-      expect(vhdl).to include('result <= data;')
-      expect(vhdl).to include('end if;')
+      verilog = proc.to_verilog
+      expect(verilog).to include('if ((enable == 1)) begin')
+      expect(verilog).to include('result <= data;')
+      expect(verilog).to include('end')
     end
   end
 
@@ -294,10 +293,10 @@ RSpec.describe RHDL::DSL do
       stmt = RHDL::DSL::IfStatement.new(cond)
       stmt.add_then(RHDL::DSL::SequentialAssignment.new(:output, 1))
 
-      vhdl = stmt.to_vhdl
-      expect(vhdl).to include('if (enable = 1) then')
-      expect(vhdl).to include('output <= 1;')
-      expect(vhdl).to include('end if;')
+      verilog = stmt.to_verilog
+      expect(verilog).to include('if ((enable == 1)) begin')
+      expect(verilog).to include('output <= 1;')
+      expect(verilog).to include('end')
     end
 
     it 'creates if-else statement' do
@@ -305,9 +304,9 @@ RSpec.describe RHDL::DSL do
       stmt.add_then(RHDL::DSL::SequentialAssignment.new(:output, 1))
       stmt.add_else(RHDL::DSL::SequentialAssignment.new(:output, 0))
 
-      vhdl = stmt.to_vhdl
-      expect(vhdl).to include('else')
-      expect(vhdl).to include('output <= 0;')
+      verilog = stmt.to_verilog
+      expect(verilog).to include('else begin')
+      expect(verilog).to include('output <= 0;')
     end
 
     it 'creates if-elsif-else statement' do
@@ -317,9 +316,9 @@ RSpec.describe RHDL::DSL do
       stmt.add_elsif(cond2, [RHDL::DSL::SequentialAssignment.new(:output, 2)])
       stmt.add_else(RHDL::DSL::SequentialAssignment.new(:output, 0))
 
-      vhdl = stmt.to_vhdl
-      expect(vhdl).to include('elsif (mode = 1) then')
-      expect(vhdl).to include('output <= 2;')
+      verilog = stmt.to_verilog
+      expect(verilog).to include('else if ((mode == 1)) begin')
+      expect(verilog).to include('output <= 2;')
     end
   end
 
@@ -332,13 +331,13 @@ RSpec.describe RHDL::DSL do
       stmt.add_when(1, [RHDL::DSL::SequentialAssignment.new(:output, 20)])
       stmt.add_default([RHDL::DSL::SequentialAssignment.new(:output, 0)])
 
-      vhdl = stmt.to_vhdl
-      expect(vhdl).to include('case opcode is')
-      expect(vhdl).to include('when "0" =>')
-      expect(vhdl).to include('output <= 10;')
-      expect(vhdl).to include('when "1" =>')
-      expect(vhdl).to include('when others =>')
-      expect(vhdl).to include('end case;')
+      verilog = stmt.to_verilog
+      expect(verilog).to include('case (opcode)')
+      expect(verilog).to include('0: begin')
+      expect(verilog).to include('output <= 10;')
+      expect(verilog).to include('1: begin')
+      expect(verilog).to include('default: begin')
+      expect(verilog).to include('endcase')
     end
   end
 
@@ -347,10 +346,10 @@ RSpec.describe RHDL::DSL do
       loop_stmt = RHDL::DSL::ForLoop.new(:i, 0..7)
       loop_stmt.add_statement(RHDL::DSL::SequentialAssignment.new(:data, :i))
 
-      vhdl = loop_stmt.to_vhdl
-      expect(vhdl).to include('for i in 0 to 7 loop')
-      expect(vhdl).to include('data <= i;')
-      expect(vhdl).to include('end loop;')
+      verilog = loop_stmt.to_verilog
+      expect(verilog).to include('for (i = 0; i <= 7; i = i + 1) begin')
+      expect(verilog).to include('data <= i;')
+      expect(verilog).to include('end')
     end
   end
 
@@ -359,12 +358,12 @@ RSpec.describe RHDL::DSL do
 
     it 'creates rising edge condition' do
       edge = RHDL::DSL::RisingEdge.new(clk)
-      expect(edge.to_vhdl).to eq('rising_edge(clk)')
+      expect(edge.to_verilog).to eq('posedge clk')
     end
 
     it 'creates falling edge condition' do
       edge = RHDL::DSL::FallingEdge.new(clk)
-      expect(edge.to_vhdl).to eq('falling_edge(clk)')
+      expect(edge.to_verilog).to eq('negedge clk')
     end
   end
 
@@ -378,9 +377,11 @@ RSpec.describe RHDL::DSL do
         a: a, b: b, y: y
       })
 
-      vhdl = inst.to_vhdl
-      expect(vhdl).to include('adder1: adder8bit')
-      expect(vhdl).to include('port map(a => a_sig, b => b_sig, y => y_sig);')
+      verilog = inst.to_verilog
+      expect(verilog).to include('adder8bit adder1 (')
+      expect(verilog).to include('.a(a_sig)')
+      expect(verilog).to include('.b(b_sig)')
+      expect(verilog).to include('.y(y_sig)')
     end
 
     it 'creates instance with generics' do
@@ -389,9 +390,10 @@ RSpec.describe RHDL::DSL do
         generic_map: { width: 16 }
       )
 
-      vhdl = inst.to_vhdl
-      expect(vhdl).to include('generic map(width => 16)')
-      expect(vhdl).to include('port map(d => data_in, q => data_out);')
+      verilog = inst.to_verilog
+      expect(verilog).to include('register #(.width(16)) reg1 (')
+      expect(verilog).to include('.d(data_in)')
+      expect(verilog).to include('.q(data_out)')
     end
   end
 
@@ -435,18 +437,14 @@ RSpec.describe RHDL::DSL do
       expect(TestAdder._signals.first.name).to eq(:temp_sum)
     end
 
-    it 'generates VHDL entity' do
-      vhdl = TestAdder.to_vhdl
-      expect(vhdl).to include('library IEEE;')
-      expect(vhdl).to include('use IEEE.STD_LOGIC_1164.ALL;')
-      expect(vhdl).to include('entity test_adder is')
-      expect(vhdl).to include('generic(')
-      expect(vhdl).to include('width : integer := 8')
-      expect(vhdl).to include('port(')
-      expect(vhdl).to include('a : in std_logic_vector(7 downto 0)')
-      expect(vhdl).to include('end test_adder;')
-      expect(vhdl).to include('architecture rtl of test_adder is')
-      expect(vhdl).to include('signal temp_sum : std_logic_vector(8 downto 0);')
+    it 'generates Verilog module' do
+      verilog = TestAdder.to_verilog
+      expect(verilog).to include('module test_adder')
+      expect(verilog).to include('#(')
+      expect(verilog).to include('parameter width = 8')
+      expect(verilog).to include('input [7:0] a')
+      expect(verilog).to include('endmodule')
+      expect(verilog).to include('reg [8:0] temp_sum;')
     end
   end
 
@@ -462,9 +460,9 @@ RSpec.describe RHDL::DSL do
       signal :counter_reg, width: 8, default: 0
     end
 
-    it 'generates VHDL with signals having defaults' do
-      vhdl = TestCounter.to_vhdl
-      expect(vhdl).to include('signal counter_reg : std_logic_vector(7 downto 0) := "00000000";')
+    it 'generates Verilog with signals having defaults' do
+      verilog = TestCounter.to_verilog
+      expect(verilog).to include("reg [7:0] counter_reg = 8'b00000000;")
     end
   end
 

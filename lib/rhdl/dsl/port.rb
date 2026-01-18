@@ -13,11 +13,6 @@ module RHDL
         @default = default
       end
 
-      def to_vhdl
-        type_str = width > 1 ? "std_logic_vector(#{width-1} downto 0)" : "std_logic"
-        "#{name} : #{direction} #{type_str}"
-      end
-
       def to_verilog
         dir = case direction
               when :in then "input"

@@ -1,7 +1,7 @@
 # Sequential Behavior DSL for synthesis
 #
 # This module extends the behavior DSL to support sequential logic patterns
-# that can be synthesized to Verilog/VHDL with proper clock domain handling.
+# that can be synthesized to Verilog with proper clock domain handling.
 #
 # Example - D Flip-Flop:
 #   class DFF < SequentialComponent
@@ -59,7 +59,7 @@ module RHDL
     module Sequential
       extend ActiveSupport::Concern
 
-      # Case expression for synthesis - maps to Verilog case/VHDL case
+      # Case expression for synthesis - maps to Verilog case
       class BehaviorCase < Behavior::BehaviorExpr
         attr_reader :selector, :cases, :default_case
 

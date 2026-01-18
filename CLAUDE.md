@@ -6,7 +6,7 @@
 
 - Gate-level HDL simulation with signal propagation
 - MOS 6502 and custom 8-bit CPU implementations
-- HDL export to VHDL and Verilog
+- HDL export to Verilog
 - Interactive terminal GUI for debugging
 - Diagram generation (SVG, PNG, DOT formats)
 
@@ -18,7 +18,6 @@ rhdl/
 │   ├── dsl.rb                   # Ruby DSL for component definitions
 │   ├── export.rb                # HDL export infrastructure
 │   ├── export/                  # Export backends
-│   │   ├── vhdl.rb              # VHDL export
 │   │   ├── verilog.rb           # Verilog export
 │   │   ├── ir.rb                # Intermediate representation
 │   │   └── lower.rb             # IR lowering utilities
@@ -91,12 +90,11 @@ rhdl/
 │   ├── mos6502.md               # MOS 6502 implementation
 │   ├── debugging.md             # Debug/TUI guide
 │   ├── diagrams.md              # Diagram generation
-│   ├── hdl_export.md            # VHDL/Verilog export
+│   ├── hdl_export.md            # Verilog export
 │   ├── gate_level_backend.md    # Gate-level synthesis details
 │   └── apple2_io.md             # Apple II I/O support
 │
 ├── export/                      # Generated exports (all output files)
-│   ├── vhdl/                    # Generated VHDL files
 │   ├── verilog/                 # Generated Verilog files
 │   └── gates/                   # Gate-level synthesis JSON netlists
 │       ├── arithmetic/          # ALU, adders, multiplier, divider
@@ -236,13 +234,10 @@ rake diagrams:generate
 # Clean generated diagrams
 rake diagrams:clean
 
-# Export DSL components to VHDL and Verilog
+# Export DSL components to Verilog
 rake hdl:export
 
-# Export only VHDL
-rake hdl:vhdl
-
-# Export only Verilog
+# Export Verilog
 rake hdl:verilog
 
 # Clean generated HDL files
@@ -275,19 +270,16 @@ rake regenerate
 
 ### HDL Export
 
-Export Ruby DSL components to VHDL/Verilog:
+Export Ruby DSL components to Verilog:
 ```ruby
 require 'rhdl'
 
-# Export component to VHDL
-component = MyComponent.new
-vhdl_code = RHDL::Export::VHDL.export(component)
-
 # Export to Verilog
+component = MyComponent.new
 verilog_code = RHDL::Export::Verilog.export(component)
 ```
 
-Generated files are placed in `/export/vhdl/` and `/export/verilog/` directories.
+Generated files are placed in `/export/verilog/` directory.
 
 ### Gate-Level Synthesis
 
@@ -352,7 +344,6 @@ Multi-level diagrams with hierarchy support are available. See `docs/diagrams.md
   - Hierarchical synthesis for SynthDatapath CPU (505 gates, 24 DFFs)
   - JSON netlist export with statistics
 - **Export directory consolidation** - All output now in `/export/` directory
-  - `/export/vhdl/` - Generated VHDL files
   - `/export/verilog/` - Generated Verilog files
   - `/export/gates/` - Gate-level JSON netlists
 - **New rake tasks** - `gates:export`, `gates:simcpu`, `gates:stats`, `gates:clean`
