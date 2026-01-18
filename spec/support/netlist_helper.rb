@@ -139,7 +139,7 @@ module NetlistHelper
   def dff_to_verilog(dff, idx)
     lines = []
     lines << "  // DFF #{idx}: d=n#{dff.d} q=n#{dff.q} rst=#{dff.rst.nil? ? 'none' : "n#{dff.rst}"} en=#{dff.en.nil? ? 'none' : "n#{dff.en}"}"
-    lines << "  reg dff#{idx}_q;"
+    lines << "  reg dff#{idx}_q = 1'b0;"  # Initialize to 0 for simulation
     lines << "  assign n#{dff.q} = dff#{idx}_q;"
 
     # For simulation, we need a clock - assume there's a global 'clk' signal
@@ -243,8 +243,12 @@ module NetlistHelper
       end
     end
 
-    # Clock generation for DFFs if present (only add if clk is already an input)
-    if ir.dffs.any? && has_clk_input
+    # Clock for DFFs if present (only add if not already an input)
+    if ir.dffs.any? && !has_clk_input
+      lines << "  reg clk;"
+    end
+
+    if ir.dffs.any?
       lines << ""
       lines << "  initial begin"
       lines << "    clk = 0;"

@@ -70,4 +70,69 @@ RSpec.describe RHDL::HDL::RegisterFile do
       expect(verilog).to match(/output.*\[7:0\].*rdata1/)
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::RegisterFile.new('regfile') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'regfile') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('regfile.clk', 'regfile.we', 'regfile.waddr', 'regfile.wdata', 'regfile.raddr1', 'regfile.raddr2')
+      expect(ir.outputs.keys).to include('regfile.rdata1', 'regfile.rdata2')
+      expect(ir.gates.length).to be >= 1
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module regfile')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input we')
+      expect(verilog).to include('input [2:0] waddr')
+      expect(verilog).to include('input [7:0] wdata')
+      expect(verilog).to include('output [7:0] rdata1')
+      expect(verilog).to include('output [7:0] rdata2')
+    end
+
+    context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation' do
+        test_vectors = []
+        behavioral = RHDL::HDL::RegisterFile.new
+        behavioral.set_input(:we, 0)
+
+        test_cases = [
+          { waddr: 1, wdata: 0xAA, we: 1, raddr1: 1, raddr2: 0 },  # write reg1
+          { waddr: 2, wdata: 0xBB, we: 1, raddr1: 1, raddr2: 2 },  # write reg2
+          { waddr: 0, wdata: 0, we: 0, raddr1: 1, raddr2: 2 },     # read both
+        ]
+
+        expected_outputs = []
+        test_cases.each do |tc|
+          behavioral.set_input(:waddr, tc[:waddr])
+          behavioral.set_input(:wdata, tc[:wdata])
+          behavioral.set_input(:we, tc[:we])
+          behavioral.set_input(:raddr1, tc[:raddr1])
+          behavioral.set_input(:raddr2, tc[:raddr2])
+          behavioral.set_input(:clk, 0)
+          behavioral.propagate
+          behavioral.set_input(:clk, 1)
+          behavioral.propagate
+
+          test_vectors << { inputs: tc }
+          expected_outputs << {
+            rdata1: behavioral.get_output(:rdata1),
+            rdata2: behavioral.get_output(:rdata2)
+          }
+        end
+
+        base_dir = File.join('tmp', 'iverilog', 'regfile')
+        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+
+        expect(result[:success]).to be(true), result[:error]
+
+        expected_outputs.each_with_index do |expected, idx|
+          expect(result[:results][idx][:rdata1]).to eq(expected[:rdata1]),
+            "Cycle #{idx}: expected rdata1=#{expected[:rdata1]}, got #{result[:results][idx][:rdata1]}"
+        end
+      end
+    end
+  end
 end
