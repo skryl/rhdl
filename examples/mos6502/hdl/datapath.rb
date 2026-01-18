@@ -1,6 +1,6 @@
 # MOS 6502 CPU Datapath - Synthesizable DSL Version
 # Integrates all CPU components into a complete datapath
-# Uses class-level instance/connect declarations for component instantiation and wiring
+# Uses class-level instance/port declarations for component instantiation and wiring
 # Sequential - requires always @(posedge clk) for synthesis
 
 require_relative '../../../lib/rhdl'

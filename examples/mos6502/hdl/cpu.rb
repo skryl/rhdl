@@ -1,6 +1,6 @@
 # MOS 6502 CPU - Synthesizable System
 # Combines Datapath and Memory into a complete synthesizable 6502 system
-# Uses class-level instance/connect declarations for component instantiation and wiring
+# Uses class-level instance/port declarations for component instantiation and wiring
 
 require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
