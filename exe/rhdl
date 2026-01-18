@@ -97,7 +97,7 @@ HDL_COMPONENTS = {
   # CPU
   'cpu/instruction_decoder' => -> { RHDL::HDL::CPU::InstructionDecoder.new('decoder') },
   'cpu/accumulator' => -> { RHDL::HDL::CPU::Accumulator.new('acc') },
-  'cpu/datapath' => -> { RHDL::HDL::CPU::Datapath.new('cpu') }
+  'cpu/cpu' => -> { RHDL::HDL::CPU::CPU.new('cpu') }
 }.freeze
 
 # Components that support gate-level lowering
@@ -173,7 +173,7 @@ GATE_SYNTH_COMPONENTS = {
 
   # CPU
   'cpu/instruction_decoder' => -> { RHDL::HDL::CPU::InstructionDecoder.new('decoder') },
-  'cpu/datapath' => -> { RHDL::HDL::CPU::Datapath.new('datapath') }
+  'cpu/cpu' => -> { RHDL::HDL::CPU::CPU.new('cpu') }
 }.freeze
 
 # Example components with to_verilog methods
