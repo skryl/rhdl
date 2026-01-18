@@ -325,21 +325,46 @@ def show_help
     Usage: rhdl <command> [options]
 
     Commands:
-      tui         Launch interactive TUI debugger
-      diagram     Generate circuit diagrams
-      export      Export components to Verilog or VHDL
-      gates       Gate-level synthesis
-      apple2      Apple II emulator and ROM tools
+      tui           Launch interactive TUI debugger
+      diagram       Generate circuit diagrams
+      export        Export components to Verilog or VHDL
+      gates         Gate-level synthesis
+      apple2        Apple II emulator and ROM tools
+      generate      Generate all output files (diagrams + HDL exports)
+      clean         Clean all generated files
+      regenerate    Clean and regenerate all output files
 
     Run 'rhdl <command> --help' for more information on a command.
   HELP
+end
+
+TUI_INK_DIR = File.expand_path('../tui-ink', __dir__)
+
+def ensure_tui_deps
+  unless system('which node > /dev/null 2>&1')
+    warn "ERROR: Node.js is required but not installed."
+    warn "Please install Node.js (v18+) first:"
+    warn "  - macOS: brew install node"
+    warn "  - Ubuntu: sudo apt-get install nodejs npm"
+    warn "  - Or download from: https://nodejs.org/"
+    exit 1
+  end
+
+  node_modules = File.join(TUI_INK_DIR, 'node_modules')
+  unless Dir.exist?(node_modules)
+    puts "Installing TUI dependencies..."
+    Dir.chdir(TUI_INK_DIR) { system('npm install --silent') }
+  end
 end
 
 def handle_tui(args)
   options = {
     signals: :all,
     format: :auto,
-    list: false
+    list: false,
+    ink: false,
+    install: false,
+    clean: false
   }
 
   parser = OptionParser.new do |opts|
@@ -349,10 +374,15 @@ def handle_tui(args)
       Launch the interactive TUI debugger for HDL components.
 
       Examples:
-        rhdl tui RHDL::HDL::Counter
+        rhdl tui RHDL::HDL::Counter           # Ruby Curses TUI
+        rhdl tui --ink sequential/counter     # Ink (React) TUI
         rhdl tui RHDL::HDL::ALU --signals inputs
-        rhdl tui sequential/counter
         rhdl tui --list
+
+      Ink TUI options:
+        rhdl tui --ink [component]   Run with Ink (React-based) TUI
+        rhdl tui --install           Install Ink TUI dependencies
+        rhdl tui --clean             Clean Ink TUI build artifacts
 
       Keyboard Controls (in TUI):
         Space     Step one cycle
@@ -382,6 +412,9 @@ def handle_tui(args)
       Options:
     BANNER
 
+    opts.on('--ink', 'Use Ink (React-based) TUI renderer') { options[:ink] = true }
+    opts.on('--install', 'Install Ink TUI dependencies') { options[:install] = true }
+    opts.on('--clean', 'Clean Ink TUI build artifacts') { options[:clean] = true }
     opts.on('--signals TYPE', 'Signals to display: all, inputs, outputs, or comma-separated list') do |v|
       options[:signals] = case v
                           when 'all' then :all
@@ -402,6 +435,34 @@ def handle_tui(args)
 
   parser.parse!(args)
 
+  # Handle --install
+  if options[:install]
+    puts "Installing Ink TUI dependencies..."
+    puts "=" * 50
+
+    ensure_tui_deps
+    Dir.chdir(TUI_INK_DIR) { system('npm install') }
+
+    puts
+    puts "Ink TUI dependencies installed."
+    return
+  end
+
+  # Handle --clean
+  if options[:clean]
+    dist_dir = File.join(TUI_INK_DIR, 'dist')
+    node_modules = File.join(TUI_INK_DIR, 'node_modules')
+
+    FileUtils.rm_rf(dist_dir) if Dir.exist?(dist_dir)
+    puts "Cleaned: #{dist_dir}"
+
+    if ENV['CLEAN_NODE_MODULES']
+      FileUtils.rm_rf(node_modules) if Dir.exist?(node_modules)
+      puts "Cleaned: #{node_modules}"
+    end
+    return
+  end
+
   # Handle --list
   if options[:list]
     puts "Available Components:"
@@ -418,6 +479,45 @@ def handle_tui(args)
     return
   end
 
+  # Ink TUI mode
+  if options[:ink]
+    require 'rhdl/hdl'
+
+    puts "Starting RHDL Ink TUI..."
+    puts "=" * 50
+    puts
+
+    # Create a simple demo circuit
+    not_gate = RHDL::HDL::NotGate.new('inverter')
+    dff = RHDL::HDL::DFlipFlop.new('register')
+    counter = RHDL::HDL::Counter.new('counter', width: 8)
+
+    RHDL::HDL::SimComponent.connect(dff.outputs[:q], not_gate.inputs[:a])
+    RHDL::HDL::SimComponent.connect(not_gate.outputs[:y], dff.inputs[:d])
+
+    # Create debug simulator
+    sim = RHDL::HDL::DebugSimulator.new
+    sim.add_component(not_gate)
+    sim.add_component(dff)
+    sim.add_component(counter)
+
+    # Set initial values
+    dff.inputs[:rst].set(0)
+    dff.inputs[:en].set(1)
+    counter.inputs[:rst].set(0)
+    counter.inputs[:en].set(1)
+
+    # Create and run Ink adapter
+    require 'rhdl/tui/ink_adapter'
+    adapter = RHDL::TUI::InkAdapter.new(sim)
+    adapter.add_component(not_gate)
+    adapter.add_component(dff)
+    adapter.add_component(counter)
+    adapter.run
+    return
+  end
+
+  # Standard Ruby TUI
   component_ref = args.shift
   unless component_ref
     warn parser.to_s
@@ -945,6 +1045,84 @@ def handle_gates(args)
   end
 end
 
+APPLE2_DIR = File.expand_path('../examples/mos6502', __dir__)
+
+def create_apple2_demo_program
+  asm = []
+
+  cursor_lo = 0x00
+  cursor_hi = 0x01
+
+  # INIT: Set up cursor at start of text page
+  asm << 0xA9 << 0x00        # LDA #$00
+  asm << 0x85 << cursor_lo   # STA $00
+  asm << 0xA9 << 0x04        # LDA #$04
+  asm << 0x85 << cursor_hi   # STA $01
+
+  # Clear text page
+  asm << 0xA0 << 0x00        # LDY #$00
+  asm << 0xA9 << 0xA0        # LDA #$A0 (space)
+  asm << 0x91 << cursor_lo   # STA ($00),Y
+  asm << 0xC8                # INY
+  asm << 0xD0 << 0xFB        # BNE -5
+  asm << 0xE6 << cursor_hi   # INC $01
+  asm << 0xA5 << cursor_hi   # LDA $01
+  asm << 0xC9 << 0x08        # CMP #$08
+  asm << 0xD0 << 0xF3        # BNE -13
+
+  # Reset cursor
+  asm << 0xA9 << 0x00        # LDA #$00
+  asm << 0x85 << cursor_lo   # STA $00
+  asm << 0xA9 << 0x04        # LDA #$04
+  asm << 0x85 << cursor_hi   # STA $01
+
+  # Print "APPLE ][ READY" message
+  message = "APPLE ][ READY\r"
+  print_char = asm.length + message.length * 5 + 20
+
+  message.each_byte do |b|
+    b = b | 0x80
+    asm << 0xA9 << b         # LDA #char
+    asm << 0x20 << (print_char & 0xFF) << ((print_char >> 8) + 0x08)  # JSR
+  end
+
+  # Main loop
+  main_loop = asm.length
+  asm << 0xAD << 0x00 << 0xC0  # LDA $C000
+  asm << 0x10 << 0xFB          # BPL -5
+  asm << 0x8D << 0x10 << 0xC0  # STA $C010
+  asm << 0x29 << 0x7F          # AND #$7F
+  asm << 0xC9 << 0x0D          # CMP #$0D
+  asm << 0xF0 << 0x08          # BEQ +8 (newline)
+  asm << 0x09 << 0x80          # ORA #$80
+  asm << 0x20 << (print_char & 0xFF) << ((print_char >> 8) + 0x08)  # JSR
+  asm << 0x4C << (main_loop & 0xFF) << ((main_loop >> 8) + 0x08)  # JMP
+
+  # Newline handler
+  asm << 0x18                  # CLC
+  asm << 0xA5 << cursor_lo     # LDA $00
+  asm << 0x69 << 0x28          # ADC #40
+  asm << 0x85 << cursor_lo     # STA $00
+  asm << 0xA5 << cursor_hi     # LDA $01
+  asm << 0x69 << 0x00          # ADC #0
+  asm << 0x85 << cursor_hi     # STA $01
+  asm << 0xC9 << 0x08          # CMP #$08
+  asm << 0x90 << 0x04          # BCC +4
+  asm << 0xA9 << 0x04          # LDA #$04
+  asm << 0x85 << cursor_hi     # STA $01
+  asm << 0x4C << (main_loop & 0xFF) << ((main_loop >> 8) + 0x08)  # JMP
+
+  # Print char subroutine
+  asm << 0xA0 << 0x00          # LDY #$00
+  asm << 0x91 << cursor_lo     # STA ($00),Y
+  asm << 0xE6 << cursor_lo     # INC $00
+  asm << 0xD0 << 0x02          # BNE +2
+  asm << 0xE6 << cursor_hi     # INC $01
+  asm << 0x60                  # RTS
+
+  asm
+end
+
 def handle_apple2(args)
   options = {
     build: false,
@@ -954,12 +1132,14 @@ def handle_apple2(args)
     clean: false,
     debug: false,
     rom: nil,
-    rom_address: nil
+    rom_address: nil,
+    ink: false,
+    hdl: false
   }
 
   parser = OptionParser.new do |opts|
     opts.banner = <<~BANNER
-      Usage: rhdl apple2 [options]
+      Usage: rhdl apple2 [options] [FILE]
 
       Apple II emulator and ROM tools.
 
@@ -969,6 +1149,11 @@ def handle_apple2(args)
         rhdl apple2 --demo         Run emulator in demo mode (no ROM needed)
         rhdl apple2 --appleiigo    Run with AppleIIGo public domain ROM
         rhdl apple2 --clean        Clean ROM output files
+
+      Ink TUI (React-based terminal UI):
+        rhdl apple2 --ink          Run with Ink TUI (ISA mode, demo program)
+        rhdl apple2 --ink --hdl    Run with Ink TUI (HDL mode)
+        rhdl apple2 --ink FILE     Run program file with Ink TUI
 
       Options:
     BANNER
@@ -981,6 +1166,8 @@ def handle_apple2(args)
     opts.on('-d', '--debug', 'Enable debug mode') { options[:debug] = true }
     opts.on('-r', '--rom FILE', 'ROM file to load') { |v| options[:rom] = v }
     opts.on('--rom-address ADDR', 'ROM load address (hex)') { |v| options[:rom_address] = v }
+    opts.on('--ink', 'Use Ink (React-based) TUI renderer') { options[:ink] = true }
+    opts.on('--hdl', 'Use HDL mode (cycle-accurate simulation)') { options[:hdl] = true }
     opts.on('-h', '--help', 'Show this help') do
       puts opts
       exit 0
@@ -989,6 +1176,9 @@ def handle_apple2(args)
 
   parser.parse!(args)
 
+  # Remaining args after parsing - could be a file path
+  program_file = args.shift
+
   apple2_script = File.expand_path('../examples/mos6502/bin/apple2', __dir__)
 
   # Handle clean
@@ -996,6 +1186,67 @@ def handle_apple2(args)
     if Dir.exist?(ROM_OUTPUT_DIR)
       FileUtils.rm_rf(ROM_OUTPUT_DIR)
       puts "Cleaned: #{ROM_OUTPUT_DIR}"
+    end
+    return
+  end
+
+  # Handle Ink TUI modes
+  if options[:ink]
+    $LOAD_PATH.unshift File.join(APPLE2_DIR, 'utilities')
+
+    require_relative '../examples/mos6502/utilities/apple2_harness'
+    require_relative '../examples/mos6502/utilities/apple2_ink_adapter'
+
+    mode = options[:hdl] ? :hdl : :isa
+
+    if program_file
+      # Run with program file
+      unless File.exist?(program_file)
+        warn "Error: Program file not found: #{program_file}"
+        exit 1
+      end
+
+      puts "Starting Apple ][ Ink TUI with #{program_file}..."
+      puts "=" * 50
+
+      program = File.binread(program_file).bytes
+      runner_class = options[:hdl] ? Apple2Harness::Runner : Apple2Harness::ISARunner
+      runner = runner_class.new
+      runner.load_ram(program, base_addr: 0x0800)
+      runner.bus.write(0xFFFC, 0x00)
+      runner.bus.write(0xFFFD, 0x08)
+      runner.reset
+
+      adapter = Apple2Harness::InkAdapter.new(runner, mode: mode)
+      adapter.run
+    elsif options[:hdl]
+      # HDL mode with demo program
+      puts "Starting Apple ][ Ink TUI (HDL mode)..."
+      puts "=" * 50
+
+      demo = create_apple2_demo_program
+      runner = Apple2Harness::Runner.new
+      runner.load_ram(demo, base_addr: 0x0800)
+      runner.bus.write(0xFFFC, 0x00)
+      runner.bus.write(0xFFFD, 0x08)
+      runner.reset
+
+      adapter = Apple2Harness::InkAdapter.new(runner, mode: :hdl)
+      adapter.run
+    else
+      # ISA mode with demo program (default)
+      puts "Starting Apple ][ Ink TUI..."
+      puts "=" * 50
+
+      demo = create_apple2_demo_program
+      runner = Apple2Harness::ISARunner.new
+      runner.load_ram(demo, base_addr: 0x0800)
+      runner.bus.write(0xFFFC, 0x00)
+      runner.bus.write(0xFFFD, 0x08)
+      runner.reset
+
+      adapter = Apple2Harness::InkAdapter.new(runner, mode: :isa)
+      adapter.run
     end
     return
   end
@@ -1086,6 +1337,137 @@ def handle_apple2(args)
 end
 
 # =============================================================================
+# Combined Task Handlers
+# =============================================================================
+
+def handle_generate(args)
+  parser = OptionParser.new do |opts|
+    opts.banner = <<~BANNER
+      Usage: rhdl generate [options]
+
+      Generate all output files (diagrams + HDL exports).
+
+      This is equivalent to running:
+        rhdl diagram --all
+        rhdl export --all
+
+      Options:
+    BANNER
+
+    opts.on('-h', '--help', 'Show this help') do
+      puts opts
+      exit 0
+    end
+  end
+
+  parser.parse!(args)
+
+  puts "Generating all output files..."
+  puts "=" * 50
+  puts
+
+  # Generate diagrams
+  puts "Generating diagrams..."
+  handle_diagram(['--all'])
+
+  puts
+  puts "Exporting HDL..."
+  handle_export(['--all'])
+
+  puts
+  puts "=" * 50
+  puts "All output files generated."
+end
+
+def handle_clean(args)
+  parser = OptionParser.new do |opts|
+    opts.banner = <<~BANNER
+      Usage: rhdl clean [options]
+
+      Clean all generated files.
+
+      This is equivalent to running:
+        rhdl diagram --clean
+        rhdl export --clean
+        rhdl gates --clean
+
+      Options:
+    BANNER
+
+    opts.on('-h', '--help', 'Show this help') do
+      puts opts
+      exit 0
+    end
+  end
+
+  parser.parse!(args)
+
+  puts "Cleaning all generated files..."
+  puts "=" * 50
+  puts
+
+  # Clean diagrams
+  DIAGRAM_MODES.each do |mode|
+    mode_dir = File.join(DIAGRAMS_DIR, mode)
+    if Dir.exist?(mode_dir)
+      FileUtils.rm_rf(mode_dir)
+      puts "Cleaned: #{mode_dir}"
+    end
+  end
+  readme = File.join(DIAGRAMS_DIR, 'README.md')
+  FileUtils.rm_f(readme) if File.exist?(readme)
+
+  # Clean Verilog
+  Dir.glob(File.join(VERILOG_DIR, '**', '*.v')).each do |f|
+    FileUtils.rm_f(f)
+  end
+  Dir.glob(File.join(VERILOG_DIR, '**', '*')).sort.reverse.each do |d|
+    FileUtils.rmdir(d) if File.directory?(d) && Dir.empty?(d)
+  end
+  puts "Cleaned: #{VERILOG_DIR}"
+
+  # Clean gates
+  if Dir.exist?(GATES_DIR)
+    FileUtils.rm_rf(GATES_DIR)
+    puts "Cleaned: #{GATES_DIR}"
+  end
+
+  puts
+  puts "All generated files cleaned."
+end
+
+def handle_regenerate(args)
+  parser = OptionParser.new do |opts|
+    opts.banner = <<~BANNER
+      Usage: rhdl regenerate [options]
+
+      Clean and regenerate all output files.
+
+      This is equivalent to running:
+        rhdl clean
+        rhdl generate
+
+      Options:
+    BANNER
+
+    opts.on('-h', '--help', 'Show this help') do
+      puts opts
+      exit 0
+    end
+  end
+
+  parser.parse!(args)
+
+  puts "Regenerating all output files..."
+  puts "=" * 50
+  puts
+
+  handle_clean([])
+  puts
+  handle_generate([])
+end
+
+# =============================================================================
 # Main Entry Point
 # =============================================================================
 
@@ -1102,6 +1484,12 @@ when 'gates', 'gate'
   handle_gates(ARGV)
 when 'apple2'
   handle_apple2(ARGV)
+when 'generate', 'generate_all'
+  handle_generate(ARGV)
+when 'clean', 'clean_all'
+  handle_clean(ARGV)
+when 'regenerate'
+  handle_regenerate(ARGV)
 when '-h', '--help', 'help', nil
   show_help
 else

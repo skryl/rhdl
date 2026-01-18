@@ -6,143 +6,145 @@ rescue LoadError
 end
 
 # =============================================================================
-# Setup Tasks
+# Development Tasks (prefixed with dev:)
 # =============================================================================
 
-namespace :setup do
-  desc "Generate binstubs for all gem executables"
-  task :binstubs do
-    binstubs_needed = {
-      'rake' => 'rake',
-      'rspec-core' => 'rspec',
-      'parallel_tests' => 'parallel_rspec'
-    }
+namespace :dev do
+  namespace :setup do
+    desc "[Dev] Generate binstubs for all gem executables"
+    task :binstubs do
+      binstubs_needed = {
+        'rake' => 'rake',
+        'rspec-core' => 'rspec',
+        'parallel_tests' => 'parallel_rspec'
+      }
 
-    binstubs_needed.each do |gem_name, executable|
-      binstub_path = File.expand_path("bin/#{executable}", __dir__)
-      unless File.executable?(binstub_path)
-        puts "Generating binstub for #{executable}..."
-        system("bundle binstubs #{gem_name} --force")
+      binstubs_needed.each do |gem_name, executable|
+        binstub_path = File.expand_path("bin/#{executable}", __dir__)
+        unless File.executable?(binstub_path)
+          puts "Generating binstub for #{executable}..."
+          system("bundle binstubs #{gem_name} --force")
+        end
       end
     end
   end
-end
 
-desc "Setup development environment (install deps + binstubs)"
-task setup: ['setup:binstubs']
+  desc "[Dev] Setup development environment (install deps + binstubs)"
+  task setup: ['dev:setup:binstubs']
 
-# Ensure binstubs exist before running tests
-task spec: 'setup:binstubs'
-task pspec: 'setup:binstubs'
+  # RSpec tasks
+  begin
+    require "rspec/core/rake_task"
 
-# RSpec tasks
-begin
-  require "rspec/core/rake_task"
-
-  RSpec::Core::RakeTask.new(:spec)
-
-  RSpec::Core::RakeTask.new(:spec_6502) do |t|
-    t.pattern = "spec/examples/mos6502/**/*_spec.rb"
-    t.rspec_opts = "--format progress"
-  end
-
-  RSpec::Core::RakeTask.new(:spec_doc) do |t|
-    t.rspec_opts = "--format documentation"
-  end
-rescue LoadError
-  desc "Run RSpec tests"
-  task :spec do
-    sh "ruby -Ilib -S rspec"
-  end
-
-  desc "Run 6502 CPU tests"
-  task :spec_6502 do
-    sh "ruby -Ilib -S rspec spec/examples/mos6502/ --format progress"
-  end
-
-  desc "Run all tests with documentation format"
-  task :spec_doc do
-    sh "ruby -Ilib -S rspec --format documentation"
-  end
-end
-
-# =============================================================================
-# Parallel Test Tasks
-# =============================================================================
-
-begin
-  require 'parallel_tests'
-
-  # Helper to find the parallel_rspec command
-  def parallel_rspec_cmd
-    binstub = File.expand_path('bin/parallel_rspec', __dir__)
-    if File.executable?(binstub)
-      binstub
-    else
-      'bundle exec parallel_rspec'
+    RSpec::Core::RakeTask.new(:spec) do |t|
+      t.rspec_opts = "--format progress"
     end
-  end
 
-  namespace :parallel do
-    desc "Run all tests in parallel (auto-detect CPU count)"
+    RSpec::Core::RakeTask.new(:spec_6502) do |t|
+      t.pattern = "spec/examples/mos6502/**/*_spec.rb"
+      t.rspec_opts = "--format progress"
+    end
+
+    RSpec::Core::RakeTask.new(:spec_doc) do |t|
+      t.rspec_opts = "--format documentation"
+    end
+  rescue LoadError
+    desc "[Dev] Run RSpec tests"
     task :spec do
-      sh "#{parallel_rspec_cmd} spec/"
+      sh "ruby -Ilib -S rspec"
     end
 
-    desc "Run all tests in parallel with specific number of processes"
-    task :spec_n, [:count] do |_, args|
-      count = args[:count] || ENV['PARALLEL_TEST_PROCESSORS'] || Parallel.processor_count
-      sh "#{parallel_rspec_cmd} -n #{count} spec/"
-    end
-
-    desc "Run 6502 CPU tests in parallel"
+    desc "[Dev] Run 6502 CPU tests"
     task :spec_6502 do
-      sh "#{parallel_rspec_cmd} spec/examples/mos6502/"
+      sh "ruby -Ilib -S rspec spec/examples/mos6502/ --format progress"
     end
 
-    desc "Run HDL tests in parallel"
-    task :spec_hdl do
-      sh "#{parallel_rspec_cmd} spec/rhdl/hdl/"
+    desc "[Dev] Run all tests with documentation format"
+    task :spec_doc do
+      sh "ruby -Ilib -S rspec --format documentation"
     end
+  end
 
-    desc "Prepare parallel test database (record test file runtimes)"
-    task :prepare do
-      FileUtils.mkdir_p('tmp')
-      sh "#{parallel_rspec_cmd} --record-runtime spec/"
-    end
+  # Ensure binstubs exist before running tests
+  task spec: 'dev:setup:binstubs'
+  task pspec: 'dev:setup:binstubs'
 
-    desc "Run tests in parallel using runtime-based grouping for better balance"
-    task :spec_balanced do
-      runtime_log = 'tmp/parallel_runtime_rspec.log'
-      if File.exist?(runtime_log)
-        sh "#{parallel_rspec_cmd} --group-by runtime --runtime-log #{runtime_log} spec/"
+  # Parallel Test Tasks
+  begin
+    require 'parallel_tests'
+
+    # Helper to find the parallel_rspec command
+    def parallel_rspec_cmd
+      binstub = File.expand_path('bin/parallel_rspec', __dir__)
+      if File.executable?(binstub)
+        binstub
       else
-        puts "No runtime log found. Run 'rake parallel:prepare' first for optimal balancing."
-        puts "Falling back to file-count based grouping..."
-        Rake::Task['parallel:spec'].invoke
+        'bundle exec parallel_rspec'
       end
     end
+
+    namespace :parallel do
+      desc "[Dev] Run all tests in parallel (auto-detect CPU count)"
+      task :spec do
+        sh "#{parallel_rspec_cmd} spec/"
+      end
+
+      desc "[Dev] Run all tests in parallel with specific number of processes"
+      task :spec_n, [:count] do |_, args|
+        count = args[:count] || ENV['PARALLEL_TEST_PROCESSORS'] || Parallel.processor_count
+        sh "#{parallel_rspec_cmd} -n #{count} spec/"
+      end
+
+      desc "[Dev] Run 6502 CPU tests in parallel"
+      task :spec_6502 do
+        sh "#{parallel_rspec_cmd} spec/examples/mos6502/"
+      end
+
+      desc "[Dev] Run HDL tests in parallel"
+      task :spec_hdl do
+        sh "#{parallel_rspec_cmd} spec/rhdl/hdl/"
+      end
+
+      desc "[Dev] Prepare parallel test database (record test file runtimes)"
+      task :prepare do
+        FileUtils.mkdir_p('tmp')
+        sh "#{parallel_rspec_cmd} --record-runtime spec/"
+      end
+
+      desc "[Dev] Run tests in parallel using runtime-based grouping for better balance"
+      task :spec_balanced do
+        runtime_log = 'tmp/parallel_runtime_rspec.log'
+        if File.exist?(runtime_log)
+          sh "#{parallel_rspec_cmd} --group-by runtime --runtime-log #{runtime_log} spec/"
+        else
+          puts "No runtime log found. Run 'rake dev:parallel:prepare' first for optimal balancing."
+          puts "Falling back to file-count based grouping..."
+          Rake::Task['dev:parallel:spec'].invoke
+        end
+      end
+    end
+
+    desc "[Dev] Run all tests in parallel (alias for dev:parallel:spec)"
+    task pspec: 'dev:parallel:spec'
+
+  rescue LoadError
+    desc "[Dev] Run tests in parallel (requires parallel_tests gem)"
+    task :pspec do
+      abort "parallel_tests gem not installed. Run: bundle install"
+    end
   end
 
-  desc "Run all tests in parallel (alias for parallel:spec)"
-  task pspec: 'parallel:spec'
-
-rescue LoadError
-  desc "Run tests in parallel (requires parallel_tests gem)"
-  task :pspec do
-    abort "parallel_tests gem not installed. Run: bundle install"
+  # RuboCop tasks (optional)
+  begin
+    require "rubocop/rake_task"
+    RuboCop::RakeTask.new(:rubocop)
+  rescue LoadError
+    # RuboCop not available
   end
 end
 
-# RuboCop tasks (optional)
-begin
-  require "rubocop/rake_task"
-  RuboCop::RakeTask.new
-  task default: %i[spec rubocop]
-rescue LoadError
-  # RuboCop not available
-  task default: :spec
-end
+# Default task
+task default: 'dev:spec'
 
 # =============================================================================
 # Diagram Generation Tasks
@@ -959,46 +961,48 @@ desc "Export gate-level synthesis (alias for gates:export)"
 task gates: 'gates:export'
 
 # =============================================================================
-# Benchmarking Tasks
+# Benchmarking Tasks (Development)
 # =============================================================================
 
-namespace :bench do
-  desc "Benchmark gate-level simulation"
-  task :gates do
-    require_relative 'lib/rhdl'
+namespace :dev do
+  namespace :bench do
+    desc "[Dev] Benchmark gate-level simulation"
+    task :gates do
+      require_relative 'lib/rhdl'
 
-    lanes = (ENV['RHDL_BENCH_LANES'] || '64').to_i
-    cycles = (ENV['RHDL_BENCH_CYCLES'] || '100000').to_i
+      lanes = (ENV['RHDL_BENCH_LANES'] || '64').to_i
+      cycles = (ENV['RHDL_BENCH_CYCLES'] || '100000').to_i
 
-    puts "Gate-level Simulation Benchmark"
-    puts "=" * 50
-    puts "Lanes: #{lanes}"
-    puts "Cycles: #{cycles}"
-    puts
+      puts "Gate-level Simulation Benchmark"
+      puts "=" * 50
+      puts "Lanes: #{lanes}"
+      puts "Cycles: #{cycles}"
+      puts
 
-    not_gate = RHDL::HDL::NotGate.new('inv')
-    dff = RHDL::HDL::DFlipFlop.new('reg')
+      not_gate = RHDL::HDL::NotGate.new('inv')
+      dff = RHDL::HDL::DFlipFlop.new('reg')
 
-    RHDL::HDL::SimComponent.connect(dff.outputs[:q], not_gate.inputs[:a])
-    RHDL::HDL::SimComponent.connect(not_gate.outputs[:y], dff.inputs[:d])
+      RHDL::HDL::SimComponent.connect(dff.outputs[:q], not_gate.inputs[:a])
+      RHDL::HDL::SimComponent.connect(not_gate.outputs[:y], dff.inputs[:d])
 
-    sim = RHDL::Export.gate_level([not_gate, dff], backend: :cpu, lanes: lanes, name: 'bench_toggle')
+      sim = RHDL::Export.gate_level([not_gate, dff], backend: :cpu, lanes: lanes, name: 'bench_toggle')
 
-    sim.poke('reg.rst', 0)
-    sim.poke('reg.en', (1 << lanes) - 1)
+      sim.poke('reg.rst', 0)
+      sim.poke('reg.en', (1 << lanes) - 1)
 
-    start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    cycles.times { sim.tick }
-    finish = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      cycles.times { sim.tick }
+      finish = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
-    elapsed = finish - start
-    rate = cycles / elapsed
-    puts "Result: #{cycles} cycles in #{format('%.3f', elapsed)}s (#{format('%.2f', rate)} cycles/s)"
+      elapsed = finish - start
+      rate = cycles / elapsed
+      puts "Result: #{cycles} cycles in #{format('%.3f', elapsed)}s (#{format('%.2f', rate)} cycles/s)"
+    end
   end
-end
 
-desc "Run gate benchmark (alias for bench:gates)"
-task bench: 'bench:gates'
+  desc "[Dev] Run gate benchmark (alias for dev:bench:gates)"
+  task bench: 'dev:bench:gates'
+end
 
 # =============================================================================
 # Combined Tasks
@@ -1113,294 +1117,640 @@ desc "Build Apple II ROM (alias for apple2:build)"
 task apple2: 'apple2:build'
 
 # =============================================================================
-# Test Dependencies Tasks
+# Test Dependencies Tasks (Development)
 # =============================================================================
 
-namespace :deps do
-  desc "Check and install test dependencies (iverilog)"
-  task :install do
-    puts "RHDL Test Dependencies Installer"
-    puts "=" * 50
-    puts
-
-    # Detect platform
-    platform = case RUBY_PLATFORM
-               when /linux/i then :linux
-               when /darwin/i then :macos
-               when /mswin|mingw|cygwin/i then :windows
-               else :unknown
-               end
-
-    puts "Platform: #{platform}"
-    puts
-
-    # Check for iverilog
-    iverilog_available = system('which iverilog > /dev/null 2>&1')
-
-    if iverilog_available
-      version = `iverilog -V 2>&1`.lines.first&.strip
-      puts "[OK] iverilog is installed: #{version}"
-    else
-      puts "[MISSING] iverilog is not installed"
+namespace :dev do
+  namespace :deps do
+    desc "[Dev] Check and install test dependencies (iverilog)"
+    task :install do
+      puts "RHDL Test Dependencies Installer"
+      puts "=" * 50
       puts
 
-      case platform
-      when :linux
-        # Detect Linux distribution
-        if File.exist?('/etc/debian_version') || system('which apt-get > /dev/null 2>&1')
-          puts "Installing iverilog via apt-get..."
-          if ENV['USER'] == 'root'
-            system('apt-get update && apt-get install -y iverilog')
-          else
-            system('sudo apt-get update && sudo apt-get install -y iverilog')
-          end
-        elsif system('which dnf > /dev/null 2>&1')
-          puts "Installing iverilog via dnf..."
-          system('sudo dnf install -y iverilog')
-        elsif system('which yum > /dev/null 2>&1')
-          puts "Installing iverilog via yum..."
-          system('sudo yum install -y iverilog')
-        elsif system('which pacman > /dev/null 2>&1')
-          puts "Installing iverilog via pacman..."
-          system('sudo pacman -S --noconfirm iverilog')
-        else
-          puts "Could not detect package manager."
-          puts "Please install iverilog manually:"
-          puts "  Ubuntu/Debian: sudo apt-get install iverilog"
-          puts "  Fedora: sudo dnf install iverilog"
-          puts "  Arch: sudo pacman -S iverilog"
-        end
-      when :macos
-        if system('which brew > /dev/null 2>&1')
-          puts "Installing iverilog via Homebrew..."
-          system('brew install icarus-verilog')
-        else
-          puts "Homebrew not found. Please install Homebrew first:"
-          puts "  /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
-          puts "Then run: brew install icarus-verilog"
-        end
-      when :windows
-        puts "On Windows, please install iverilog manually:"
-        puts "  1. Download from: http://bleyer.org/icarus/"
-        puts "  2. Or use WSL and install via apt-get"
-      else
-        puts "Unknown platform. Please install iverilog manually."
-      end
+      # Detect platform
+      platform = case RUBY_PLATFORM
+                 when /linux/i then :linux
+                 when /darwin/i then :macos
+                 when /mswin|mingw|cygwin/i then :windows
+                 else :unknown
+                 end
 
-      # Verify installation
+      puts "Platform: #{platform}"
       puts
-      if system('which iverilog > /dev/null 2>&1')
+
+      # Check for iverilog
+      iverilog_available = system('which iverilog > /dev/null 2>&1')
+
+      if iverilog_available
         version = `iverilog -V 2>&1`.lines.first&.strip
-        puts "[OK] iverilog installed successfully: #{version}"
+        puts "[OK] iverilog is installed: #{version}"
       else
-        puts "[WARN] iverilog installation may have failed. Check above for errors."
+        puts "[MISSING] iverilog is not installed"
+        puts
+
+        case platform
+        when :linux
+          # Detect Linux distribution
+          if File.exist?('/etc/debian_version') || system('which apt-get > /dev/null 2>&1')
+            puts "Installing iverilog via apt-get..."
+            if ENV['USER'] == 'root'
+              system('apt-get update && apt-get install -y iverilog')
+            else
+              system('sudo apt-get update && sudo apt-get install -y iverilog')
+            end
+          elsif system('which dnf > /dev/null 2>&1')
+            puts "Installing iverilog via dnf..."
+            system('sudo dnf install -y iverilog')
+          elsif system('which yum > /dev/null 2>&1')
+            puts "Installing iverilog via yum..."
+            system('sudo yum install -y iverilog')
+          elsif system('which pacman > /dev/null 2>&1')
+            puts "Installing iverilog via pacman..."
+            system('sudo pacman -S --noconfirm iverilog')
+          else
+            puts "Could not detect package manager."
+            puts "Please install iverilog manually:"
+            puts "  Ubuntu/Debian: sudo apt-get install iverilog"
+            puts "  Fedora: sudo dnf install iverilog"
+            puts "  Arch: sudo pacman -S iverilog"
+          end
+        when :macos
+          if system('which brew > /dev/null 2>&1')
+            puts "Installing iverilog via Homebrew..."
+            system('brew install icarus-verilog')
+          else
+            puts "Homebrew not found. Please install Homebrew first:"
+            puts "  /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+            puts "Then run: brew install icarus-verilog"
+          end
+        when :windows
+          puts "On Windows, please install iverilog manually:"
+          puts "  1. Download from: http://bleyer.org/icarus/"
+          puts "  2. Or use WSL and install via apt-get"
+        else
+          puts "Unknown platform. Please install iverilog manually."
+        end
+
+        # Verify installation
+        puts
+        if system('which iverilog > /dev/null 2>&1')
+          version = `iverilog -V 2>&1`.lines.first&.strip
+          puts "[OK] iverilog installed successfully: #{version}"
+        else
+          puts "[WARN] iverilog installation may have failed. Check above for errors."
+        end
       end
+
+      puts
+      puts "=" * 50
+      puts "Dependency check complete."
     end
 
-    puts
-    puts "=" * 50
-    puts "Dependency check complete."
-  end
+    desc "[Dev] Check test dependencies status"
+    task :check do
+      puts "RHDL Test Dependencies Status"
+      puts "=" * 50
+      puts
 
-  desc "Check test dependencies status"
-  task :check do
-    puts "RHDL Test Dependencies Status"
-    puts "=" * 50
-    puts
+      deps = {
+        'iverilog' => { cmd: 'iverilog -V', optional: true, desc: 'Icarus Verilog (for gate-level simulation tests)' },
+        'dot' => { cmd: 'dot -V', optional: true, desc: 'Graphviz (for diagram rendering)' },
+        'ruby' => { cmd: 'ruby --version', optional: false, desc: 'Ruby interpreter' },
+        'bundler' => { cmd: 'bundle --version', optional: false, desc: 'Ruby Bundler' }
+      }
 
-    deps = {
-      'iverilog' => { cmd: 'iverilog -V', optional: true, desc: 'Icarus Verilog (for gate-level simulation tests)' },
-      'dot' => { cmd: 'dot -V', optional: true, desc: 'Graphviz (for diagram rendering)' },
-      'ruby' => { cmd: 'ruby --version', optional: false, desc: 'Ruby interpreter' },
-      'bundler' => { cmd: 'bundle --version', optional: false, desc: 'Ruby Bundler' }
-    }
+      deps.each do |name, info|
+        available = system("which #{name} > /dev/null 2>&1")
+        status = available ? "[OK]" : (info[:optional] ? "[OPTIONAL]" : "[MISSING]")
+        version = available ? `#{info[:cmd]} 2>&1`.lines.first&.strip : "not installed"
 
-    deps.each do |name, info|
-      available = system("which #{name} > /dev/null 2>&1")
-      status = available ? "[OK]" : (info[:optional] ? "[OPTIONAL]" : "[MISSING]")
-      version = available ? `#{info[:cmd]} 2>&1`.lines.first&.strip : "not installed"
+        puts "#{status.ljust(12)} #{name.ljust(12)} - #{info[:desc]}"
+        puts "             #{version}" if available
+      end
 
-      puts "#{status.ljust(12)} #{name.ljust(12)} - #{info[:desc]}"
-      puts "             #{version}" if available
+      puts
+      puts "Run 'rake dev:deps:install' to install missing dependencies."
     end
-
-    puts
-    puts "Run 'rake deps:install' to install missing dependencies."
   end
+
+  desc "[Dev] Install test dependencies (alias for dev:deps:install)"
+  task deps: 'dev:deps:install'
 end
 
-desc "Install test dependencies (alias for deps:install)"
-task deps: 'deps:install'
-
 # =============================================================================
-# Test Benchmarking Tasks
+# Test Benchmarking Tasks (Development)
 # =============================================================================
 
-namespace :benchmark do
-  # Helper to find rspec command
-  def rspec_cmd
-    binstub = File.expand_path('bin/rspec', __dir__)
-    File.executable?(binstub) ? binstub : 'rspec'
-  end
+namespace :dev do
+  namespace :benchmark do
+    # Helper to find rspec command
+    def rspec_cmd
+      binstub = File.expand_path('bin/rspec', __dir__)
+      File.executable?(binstub) ? binstub : 'rspec'
+    end
 
-  desc "Profile RSpec tests and show slowest 20 tests"
-  task :tests, [:count] => 'setup:binstubs' do |_, args|
-    count = args[:count] || 20
-    puts "Running RSpec with profiling (showing #{count} slowest tests)..."
-    puts "=" * 60
-    sh "#{rspec_cmd} --profile #{count} --format progress spec/"
-  end
+    desc "[Dev] Profile RSpec tests and show slowest 20 tests"
+    task :tests, [:count] => 'dev:setup:binstubs' do |_, args|
+      count = args[:count] || 20
+      puts "Running RSpec with profiling (showing #{count} slowest tests)..."
+      puts "=" * 60
+      sh "#{rspec_cmd} --profile #{count} --format progress spec/"
+    end
 
-  desc "Profile 6502 tests and show slowest tests"
-  task :tests_6502, [:count] => 'setup:binstubs' do |_, args|
-    count = args[:count] || 20
-    puts "Running 6502 specs with profiling (showing #{count} slowest tests)..."
-    puts "=" * 60
-    sh "#{rspec_cmd} --profile #{count} --format progress spec/examples/mos6502/"
-  end
+    desc "[Dev] Profile 6502 tests and show slowest tests"
+    task :tests_6502, [:count] => 'dev:setup:binstubs' do |_, args|
+      count = args[:count] || 20
+      puts "Running 6502 specs with profiling (showing #{count} slowest tests)..."
+      puts "=" * 60
+      sh "#{rspec_cmd} --profile #{count} --format progress spec/examples/mos6502/"
+    end
 
-  desc "Profile HDL tests and show slowest tests"
-  task :tests_hdl, [:count] => 'setup:binstubs' do |_, args|
-    count = args[:count] || 20
-    puts "Running HDL specs with profiling (showing #{count} slowest tests)..."
-    puts "=" * 60
-    sh "#{rspec_cmd} --profile #{count} --format progress spec/rhdl/hdl/"
-  end
+    desc "[Dev] Profile HDL tests and show slowest tests"
+    task :tests_hdl, [:count] => 'dev:setup:binstubs' do |_, args|
+      count = args[:count] || 20
+      puts "Running HDL specs with profiling (showing #{count} slowest tests)..."
+      puts "=" * 60
+      sh "#{rspec_cmd} --profile #{count} --format progress spec/rhdl/hdl/"
+    end
 
-  desc "Run full test timing analysis (detailed per-file timing)"
-  task timing: 'setup:binstubs' do
-    require 'benchmark'
+    desc "[Dev] Run full test timing analysis (detailed per-file timing)"
+    task timing: 'dev:setup:binstubs' do
+      require 'benchmark'
 
-    puts "RHDL Test Suite Timing Analysis"
-    puts "=" * 60
-    puts
+      puts "RHDL Test Suite Timing Analysis"
+      puts "=" * 60
+      puts
 
-    spec_files = Dir.glob('spec/**/*_spec.rb').sort
+      spec_files = Dir.glob('spec/**/*_spec.rb').sort
 
-    # Group by directory
-    groups = spec_files.group_by { |f| File.dirname(f).sub('spec/', '') }
+      # Group by directory
+      groups = spec_files.group_by { |f| File.dirname(f).sub('spec/', '') }
 
-    results = []
+      results = []
 
-    groups.each do |group, files|
-      group_time = 0.0
-      file_times = []
+      groups.each do |group, files|
+        group_time = 0.0
+        file_times = []
 
-      files.each do |file|
-        print "."
+        files.each do |file|
+          print "."
+          $stdout.flush
+
+          # Run each file individually and capture timing
+          start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          output = `#{rspec_cmd} #{file} --format progress 2>&1`
+          elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - start
+
+          # Check for failures
+          status = output.include?('0 failures') ? :pass : :fail
+
+          file_times << {
+            file: file,
+            time: elapsed,
+            status: status
+          }
+          group_time += elapsed
+        end
+
+        results << {
+          group: group,
+          total_time: group_time,
+          files: file_times.sort_by { |f| -f[:time] }
+        }
+      end
+
+      puts
+      puts
+
+      # Sort results by total time
+      results.sort_by! { |r| -r[:total_time] }
+
+      # Print summary by group
+      puts "Test Groups by Total Time"
+      puts "-" * 60
+      results.each do |r|
+        puts "#{r[:group].ljust(40)} #{format('%.2f', r[:total_time])}s (#{r[:files].length} files)"
+      end
+
+      puts
+      puts "Top 15 Slowest Test Files"
+      puts "-" * 60
+
+      all_files = results.flat_map { |r| r[:files] }.sort_by { |f| -f[:time] }
+      all_files.first(15).each_with_index do |f, i|
+        status_icon = f[:status] == :pass ? '' : ' [FAIL]'
+        puts "#{(i + 1).to_s.rjust(2)}. #{format('%.2f', f[:time])}s  #{f[:file]}#{status_icon}"
+      end
+
+      total_time = results.sum { |r| r[:total_time] }
+      puts
+      puts "=" * 60
+      puts "Total test time: #{format('%.2f', total_time)}s"
+      puts "Total test files: #{all_files.length}"
+    end
+
+    desc "[Dev] Quick benchmark of test categories"
+    task quick: 'dev:setup:binstubs' do
+      require 'benchmark'
+
+      puts "RHDL Test Suite Quick Benchmark"
+      puts "=" * 60
+      puts
+
+      categories = {
+        'HDL Components' => 'spec/rhdl/hdl/',
+        '6502 CPU' => 'spec/examples/mos6502/',
+        'Core Framework' => 'spec/rhdl/',
+        'All Tests' => 'spec/'
+      }
+
+      results = []
+
+      categories.each do |name, path|
+        next unless Dir.exist?(path)
+
+        files = Dir.glob("#{path}**/*_spec.rb")
+        next if files.empty?
+
+        print "Running #{name}..."
         $stdout.flush
 
-        # Run each file individually and capture timing
         start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        output = `#{rspec_cmd} #{file} --format progress 2>&1`
+        output = `#{rspec_cmd} #{path} --format progress 2>&1`
         elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - start
 
-        # Check for failures
-        status = output.include?('0 failures') ? :pass : :fail
+        # Parse test counts from output
+        match = output.match(/(\d+) examples?, (\d+) failures?/)
+        examples = match ? match[1].to_i : 0
+        failures = match ? match[2].to_i : 0
 
-        file_times << {
-          file: file,
+        results << {
+          name: name,
           time: elapsed,
-          status: status
+          examples: examples,
+          failures: failures,
+          files: files.length
         }
-        group_time += elapsed
+
+        puts " done (#{format('%.2f', elapsed)}s)"
       end
 
-      results << {
-        group: group,
-        total_time: group_time,
-        files: file_times.sort_by { |f| -f[:time] }
-      }
+      puts
+      puts "Results Summary"
+      puts "-" * 60
+      puts "#{'Category'.ljust(20)} #{'Time'.rjust(10)} #{'Tests'.rjust(8)} #{'Files'.rjust(8)} #{'Rate'.rjust(12)}"
+      puts "-" * 60
+
+      results.each do |r|
+        rate = r[:examples] > 0 ? format('%.1f', r[:examples] / r[:time]) : 'N/A'
+        puts "#{r[:name].ljust(20)} #{format('%8.2f', r[:time])}s #{r[:examples].to_s.rjust(8)} #{r[:files].to_s.rjust(8)} #{rate.rjust(8)} t/s"
+      end
     end
-
-    puts
-    puts
-
-    # Sort results by total time
-    results.sort_by! { |r| -r[:total_time] }
-
-    # Print summary by group
-    puts "Test Groups by Total Time"
-    puts "-" * 60
-    results.each do |r|
-      puts "#{r[:group].ljust(40)} #{format('%.2f', r[:total_time])}s (#{r[:files].length} files)"
-    end
-
-    puts
-    puts "Top 15 Slowest Test Files"
-    puts "-" * 60
-
-    all_files = results.flat_map { |r| r[:files] }.sort_by { |f| -f[:time] }
-    all_files.first(15).each_with_index do |f, i|
-      status_icon = f[:status] == :pass ? '' : ' [FAIL]'
-      puts "#{(i + 1).to_s.rjust(2)}. #{format('%.2f', f[:time])}s  #{f[:file]}#{status_icon}"
-    end
-
-    total_time = results.sum { |r| r[:total_time] }
-    puts
-    puts "=" * 60
-    puts "Total test time: #{format('%.2f', total_time)}s"
-    puts "Total test files: #{all_files.length}"
   end
 
-  desc "Quick benchmark of test categories"
-  task quick: 'setup:binstubs' do
-    require 'benchmark'
+  desc "[Dev] Benchmark tests showing 20 slowest (alias for dev:benchmark:tests)"
+  task benchmark: 'dev:benchmark:tests'
+end
 
-    puts "RHDL Test Suite Quick Benchmark"
-    puts "=" * 60
-    puts
+# =============================================================================
+# TUI Tasks
+# =============================================================================
 
-    categories = {
-      'HDL Components' => 'spec/rhdl/hdl/',
-      '6502 CPU' => 'spec/examples/mos6502/',
-      'Core Framework' => 'spec/rhdl/',
-      'All Tests' => 'spec/'
-    }
+# Helper to ensure TUI dependencies are installed (runs automatically)
+def ensure_tui_deps(tui_dir)
+  unless system('which node > /dev/null 2>&1')
+    puts "ERROR: Node.js is required but not installed."
+    puts "Please install Node.js (v18+) first:"
+    puts "  - macOS: brew install node"
+    puts "  - Ubuntu: sudo apt-get install nodejs npm"
+    puts "  - Or download from: https://nodejs.org/"
+    exit 1
+  end
 
-    results = []
+  node_modules = File.join(tui_dir, 'node_modules')
+  unless Dir.exist?(node_modules)
+    puts "Installing TUI dependencies..."
+    Dir.chdir(tui_dir) { system('npm install --silent') }
+  end
+end
 
-    categories.each do |name, path|
-      next unless Dir.exist?(path)
+# Helper to run TUI with npx tsx (no build step needed)
+def run_tui_tsx(tui_dir, entry_point)
+  ensure_tui_deps(tui_dir)
+  Dir.chdir(tui_dir) do
+    exec('npx', 'tsx', entry_point)
+  end
+end
 
-      files = Dir.glob("#{path}**/*_spec.rb")
-      next if files.empty?
+namespace :tui do
+  TUI_INK_DIR = File.expand_path('tui-ink', __dir__)
 
-      print "Running #{name}..."
-      $stdout.flush
+  desc "Install Ink TUI dependencies"
+  task :install do
+    puts "Installing Ink TUI dependencies..."
+    puts "=" * 50
 
-      start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      output = `#{rspec_cmd} #{path} --format progress 2>&1`
-      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - start
+    unless system('which node > /dev/null 2>&1')
+      puts "ERROR: Node.js is required but not installed."
+      puts "Please install Node.js (v18+) first:"
+      puts "  - macOS: brew install node"
+      puts "  - Ubuntu: sudo apt-get install nodejs npm"
+      puts "  - Or download from: https://nodejs.org/"
+      exit 1
+    end
 
-      # Parse test counts from output
-      match = output.match(/(\d+) examples?, (\d+) failures?/)
-      examples = match ? match[1].to_i : 0
-      failures = match ? match[2].to_i : 0
+    version = `node --version`.strip
+    puts "Node.js version: #{version}"
 
-      results << {
-        name: name,
-        time: elapsed,
-        examples: examples,
-        failures: failures,
-        files: files.length
-      }
-
-      puts " done (#{format('%.2f', elapsed)}s)"
+    Dir.chdir(TUI_INK_DIR) do
+      sh 'npm install'
     end
 
     puts
-    puts "Results Summary"
-    puts "-" * 60
-    puts "#{'Category'.ljust(20)} #{'Time'.rjust(10)} #{'Tests'.rjust(8)} #{'Files'.rjust(8)} #{'Rate'.rjust(12)}"
-    puts "-" * 60
+    puts "Ink TUI dependencies installed."
+  end
 
-    results.each do |r|
-      rate = r[:examples] > 0 ? format('%.1f', r[:examples] / r[:time]) : 'N/A'
-      puts "#{r[:name].ljust(20)} #{format('%8.2f', r[:time])}s #{r[:examples].to_s.rjust(8)} #{r[:files].to_s.rjust(8)} #{rate.rjust(8)} t/s"
+  desc "Build Ink TUI (compile TypeScript)"
+  task :build do
+    ensure_tui_deps(TUI_INK_DIR)
+    puts "Building Ink TUI..."
+    puts "=" * 50
+
+    Dir.chdir(TUI_INK_DIR) do
+      sh 'npm run build'
+    end
+
+    puts
+    puts "Ink TUI built successfully."
+  end
+
+  desc "Run the Ink TUI with a demo simulation"
+  task :run do
+    require_relative 'lib/rhdl'
+
+    puts "Starting RHDL Ink TUI..."
+    puts "=" * 50
+    puts
+
+    # Create a simple demo circuit
+    not_gate = RHDL::HDL::NotGate.new('inverter')
+    dff = RHDL::HDL::DFlipFlop.new('register')
+    counter = RHDL::HDL::Counter.new('counter', width: 8)
+
+    RHDL::HDL::SimComponent.connect(dff.outputs[:q], not_gate.inputs[:a])
+    RHDL::HDL::SimComponent.connect(not_gate.outputs[:y], dff.inputs[:d])
+
+    # Create debug simulator
+    sim = RHDL::HDL::DebugSimulator.new
+    sim.add_component(not_gate)
+    sim.add_component(dff)
+    sim.add_component(counter)
+
+    # Set initial values
+    dff.inputs[:rst].set(0)
+    dff.inputs[:en].set(1)
+    counter.inputs[:rst].set(0)
+    counter.inputs[:en].set(1)
+
+    # Create and run Ink adapter
+    adapter = RHDL::HDL::InkAdapter.new(sim)
+    adapter.add_component(not_gate)
+    adapter.add_component(dff)
+    adapter.add_component(counter)
+    adapter.run
+  end
+
+  desc "Run the Ink TUI with an ALU demo"
+  task :alu => :build do
+    require_relative 'lib/rhdl'
+
+    puts "Starting RHDL Ink TUI with ALU demo..."
+    puts "=" * 50
+    puts
+
+    # Create ALU and supporting components
+    alu = RHDL::HDL::ALU.new('alu', width: 8)
+    acc = RHDL::HDL::Register.new('acc', width: 8)
+
+    # Connect ALU output to accumulator input
+    RHDL::HDL::SimComponent.connect(alu.outputs[:result], acc.inputs[:d])
+
+    # Create debug simulator
+    sim = RHDL::HDL::DebugSimulator.new
+    sim.add_component(alu)
+    sim.add_component(acc)
+
+    # Set initial values
+    alu.inputs[:a].set(0x42)
+    alu.inputs[:b].set(0x10)
+    alu.inputs[:op].set(0)  # ADD
+    acc.inputs[:rst].set(0)
+    acc.inputs[:en].set(1)
+
+    # Create and run Ink adapter
+    adapter = RHDL::HDL::InkAdapter.new(sim)
+    adapter.add_component(alu, signals: :all)
+    adapter.add_component(acc, signals: :all)
+    adapter.run
+  end
+
+  desc "Clean Ink TUI build artifacts"
+  task :clean do
+    dist_dir = File.join(TUI_INK_DIR, 'dist')
+    node_modules = File.join(TUI_INK_DIR, 'node_modules')
+
+    FileUtils.rm_rf(dist_dir) if Dir.exist?(dist_dir)
+    puts "Cleaned: #{dist_dir}"
+
+    # Optionally clean node_modules (can be slow to reinstall)
+    if ENV['CLEAN_NODE_MODULES']
+      FileUtils.rm_rf(node_modules) if Dir.exist?(node_modules)
+      puts "Cleaned: #{node_modules}"
     end
   end
 end
 
-desc "Benchmark tests showing 20 slowest (alias for benchmark:tests)"
-task benchmark: 'benchmark:tests'
+desc "Run Ink TUI (alias for tui:run)"
+task tui: 'tui:run'
+
+# =============================================================================
+# Apple II TUI Tasks
+# =============================================================================
+
+namespace :apple2 do
+  TUI_INK_DIR = File.expand_path('tui-ink', __dir__)
+  APPLE2_DIR = File.expand_path('examples/mos6502', __dir__)
+
+  desc "Run Apple II emulator with Ink TUI"
+  task :ink do
+    $LOAD_PATH.unshift File.join(APPLE2_DIR, 'utilities')
+
+    require_relative 'examples/mos6502/utilities/apple2_harness'
+    require_relative 'examples/mos6502/utilities/apple2_ink_adapter'
+
+    puts "Starting Apple ][ Ink TUI..."
+    puts "=" * 50
+
+    # Create the demo program (same as bin/apple2 --demo)
+    demo = create_apple2_demo_program
+
+    # Use ISA runner for speed
+    runner = Apple2Harness::ISARunner.new
+    runner.load_ram(demo, base_addr: 0x0800)
+
+    # Set reset vector
+    runner.bus.write(0xFFFC, 0x00)
+    runner.bus.write(0xFFFD, 0x08)
+
+    runner.reset
+
+    # Create and run Ink adapter
+    adapter = Apple2Harness::InkAdapter.new(runner, mode: :isa)
+    adapter.run
+  end
+
+  desc "Run Apple II emulator with Ink TUI (HDL mode)"
+  task :ink_hdl do
+    $LOAD_PATH.unshift File.join(APPLE2_DIR, 'utilities')
+
+    require_relative 'examples/mos6502/utilities/apple2_harness'
+    require_relative 'examples/mos6502/utilities/apple2_ink_adapter'
+
+    puts "Starting Apple ][ Ink TUI (HDL mode)..."
+    puts "=" * 50
+
+    # Create the demo program
+    demo = create_apple2_demo_program
+
+    # Use HDL runner for cycle accuracy
+    runner = Apple2Harness::Runner.new
+    runner.load_ram(demo, base_addr: 0x0800)
+
+    # Set reset vector
+    runner.bus.write(0xFFFC, 0x00)
+    runner.bus.write(0xFFFD, 0x08)
+
+    runner.reset
+
+    # Create and run Ink adapter
+    adapter = Apple2Harness::InkAdapter.new(runner, mode: :hdl)
+    adapter.run
+  end
+
+  desc "Run Apple II with program file using Ink TUI"
+  task :ink_run, [:program] do |t, args|
+    unless args[:program]
+      puts "Usage: rake apple2:ink_run[path/to/program.bin]"
+      exit 1
+    end
+
+    $LOAD_PATH.unshift File.join(APPLE2_DIR, 'utilities')
+
+    require_relative 'examples/mos6502/utilities/apple2_harness'
+    require_relative 'examples/mos6502/utilities/apple2_ink_adapter'
+
+    program_path = args[:program]
+    unless File.exist?(program_path)
+      puts "Error: Program file not found: #{program_path}"
+      exit 1
+    end
+
+    puts "Starting Apple ][ Ink TUI with #{program_path}..."
+    puts "=" * 50
+
+    # Load program
+    program = File.binread(program_path).bytes
+
+    runner = Apple2Harness::ISARunner.new
+    runner.load_ram(program, base_addr: 0x0800)
+
+    # Set reset vector
+    runner.bus.write(0xFFFC, 0x00)
+    runner.bus.write(0xFFFD, 0x08)
+
+    runner.reset
+
+    # Create and run Ink adapter
+    adapter = Apple2Harness::InkAdapter.new(runner, mode: :isa)
+    adapter.run
+  end
+end
+
+# Helper to create the Apple II demo program
+def create_apple2_demo_program
+  asm = []
+
+  cursor_lo = 0x00
+  cursor_hi = 0x01
+
+  # INIT: Set up cursor at start of text page
+  asm << 0xA9 << 0x00        # LDA #$00
+  asm << 0x85 << cursor_lo   # STA $00
+  asm << 0xA9 << 0x04        # LDA #$04
+  asm << 0x85 << cursor_hi   # STA $01
+
+  # Clear text page
+  asm << 0xA0 << 0x00        # LDY #$00
+  asm << 0xA9 << 0xA0        # LDA #$A0 (space)
+  asm << 0x91 << cursor_lo   # STA ($00),Y
+  asm << 0xC8                # INY
+  asm << 0xD0 << 0xFB        # BNE -5
+  asm << 0xE6 << cursor_hi   # INC $01
+  asm << 0xA5 << cursor_hi   # LDA $01
+  asm << 0xC9 << 0x08        # CMP #$08
+  asm << 0xD0 << 0xF3        # BNE -13
+
+  # Reset cursor
+  asm << 0xA9 << 0x00        # LDA #$00
+  asm << 0x85 << cursor_lo   # STA $00
+  asm << 0xA9 << 0x04        # LDA #$04
+  asm << 0x85 << cursor_hi   # STA $01
+
+  # Print "APPLE ][ READY" message
+  message = "APPLE ][ READY\r"
+  print_char = asm.length + message.length * 5 + 20
+
+  message.each_byte do |b|
+    b = b | 0x80
+    asm << 0xA9 << b         # LDA #char
+    asm << 0x20 << (print_char & 0xFF) << ((print_char >> 8) + 0x08)  # JSR
+  end
+
+  # Main loop
+  main_loop = asm.length
+  asm << 0xAD << 0x00 << 0xC0  # LDA $C000
+  asm << 0x10 << 0xFB          # BPL -5
+  asm << 0x8D << 0x10 << 0xC0  # STA $C010
+  asm << 0x29 << 0x7F          # AND #$7F
+  asm << 0xC9 << 0x0D          # CMP #$0D
+  asm << 0xF0 << 0x08          # BEQ +8 (newline)
+  asm << 0x09 << 0x80          # ORA #$80
+  asm << 0x20 << (print_char & 0xFF) << ((print_char >> 8) + 0x08)  # JSR
+  asm << 0x4C << (main_loop & 0xFF) << ((main_loop >> 8) + 0x08)  # JMP
+
+  # Newline handler
+  asm << 0x18                  # CLC
+  asm << 0xA5 << cursor_lo     # LDA $00
+  asm << 0x69 << 0x28          # ADC #40
+  asm << 0x85 << cursor_lo     # STA $00
+  asm << 0xA5 << cursor_hi     # LDA $01
+  asm << 0x69 << 0x00          # ADC #0
+  asm << 0x85 << cursor_hi     # STA $01
+  asm << 0xC9 << 0x08          # CMP #$08
+  asm << 0x90 << 0x04          # BCC +4
+  asm << 0xA9 << 0x04          # LDA #$04
+  asm << 0x85 << cursor_hi     # STA $01
+  asm << 0x4C << (main_loop & 0xFF) << ((main_loop >> 8) + 0x08)  # JMP
+
+  # Print char subroutine
+  print_char_actual = asm.length
+  asm << 0xA0 << 0x00          # LDY #$00
+  asm << 0x91 << cursor_lo     # STA ($00),Y
+  asm << 0xE6 << cursor_lo     # INC $00
+  asm << 0xD0 << 0x02          # BNE +2
+  asm << 0xE6 << cursor_hi     # INC $01
+  asm << 0x60                  # RTS
+
+  asm
+end
