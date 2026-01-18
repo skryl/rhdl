@@ -780,7 +780,7 @@ namespace :gates do
     'mos6502/alu' => -> { require_relative 'examples/mos6502/hdl/alu'; MOS6502::ALU.new('alu') },
     'mos6502/instruction_decoder' => -> { require_relative 'examples/mos6502/hdl/instruction_decoder'; MOS6502::InstructionDecoder.new('dec') },
     'mos6502/control_unit' => -> { require_relative 'examples/mos6502/hdl/control_unit'; MOS6502::ControlUnit.new('ctrl') },
-    'mos6502/datapath' => -> { require_relative 'examples/mos6502/hdl/datapath'; MOS6502::Datapath.new('datapath') }
+    'mos6502/cpu' => -> { require_relative 'examples/mos6502/hdl/cpu'; MOS6502::CPU.new('cpu') }
   }.freeze
 
   desc "Export all components to gate-level IR (JSON netlists)"
