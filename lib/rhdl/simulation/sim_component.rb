@@ -378,8 +378,10 @@ module RHDL
         @internal_signals = {}
         @subcomponents = {}
         @propagation_delay = 0
+        @local_dependency_graph = nil
         setup_ports_from_class_defs
         setup_ports
+        setup_structure_instances
       end
 
       # Create ports from class-level definitions
@@ -399,6 +401,76 @@ module RHDL
 
       # Override in subclasses to define ports
       def setup_ports
+      end
+
+      # Automatically instantiate and wire sub-components from structure DSL
+      def setup_structure_instances
+        return if self.class._instance_defs.empty?
+
+        # Instantiate all sub-components
+        self.class._instance_defs.each do |inst_def|
+          component_class = inst_def[:component_class]
+          inst_name = inst_def[:name]
+          params = inst_def[:parameters] || {}
+
+          # Create the sub-component instance
+          component = component_class.new("#{@name}.#{inst_name}", **params)
+          @subcomponents[inst_name] = component
+
+          # Make it accessible as an instance variable for convenience
+          instance_variable_set(:"@#{inst_name}", component)
+        end
+
+        # Wire connections based on _connection_defs
+        self.class._connection_defs.each do |conn_def|
+          source = conn_def[:source]
+          dest = conn_def[:dest]
+          wire_connection(source, dest)
+        end
+
+        # Build local dependency graph for optimized propagation
+        setup_local_dependency_graph
+      end
+
+      # Wire a connection between source and destination
+      def wire_connection(source, dest)
+        source_wire = resolve_wire(source)
+        dest_wire = resolve_wire(dest)
+
+        return unless source_wire && dest_wire
+
+        # Connect source to destination
+        self.class.connect(source_wire, dest_wire)
+      end
+
+      # Resolve a wire reference to an actual Wire object
+      def resolve_wire(ref)
+        if ref.is_a?(Symbol)
+          # Reference to this component's port or signal
+          @inputs[ref] || @outputs[ref] || @internal_signals[ref]
+        elsif ref.is_a?(Array) && ref.length == 2
+          # Reference to sub-component port: [:inst_name, :port_name]
+          inst_name, port_name = ref
+          component = @subcomponents[inst_name]
+          return nil unless component
+
+          component.inputs[port_name] || component.outputs[port_name]
+        end
+      end
+
+      # Build dependency graph for sub-components
+      def setup_local_dependency_graph
+        return if @subcomponents.empty?
+
+        @local_dependency_graph = DependencyGraph.new
+
+        # Register all sub-components
+        @subcomponents.each_value do |component|
+          @local_dependency_graph.register(component)
+        end
+
+        # Build the graph
+        @local_dependency_graph.build
       end
 
       def input(name, width: 1)
@@ -436,8 +508,43 @@ module RHDL
       # Main simulation method - compute outputs from inputs
       # Override in subclasses, or use a behavior block
       def propagate
+        # If we have sub-components, propagate them using dependency graph
+        if @local_dependency_graph && !@subcomponents.empty?
+          propagate_subcomponents
+        end
+
+        # Execute behavior block if defined
         if self.class.behavior_defined?
           execute_behavior
+        end
+      end
+
+      # Propagate sub-components using event-driven dependency graph
+      def propagate_subcomponents
+        # Mark all sub-components as dirty initially
+        @local_dependency_graph.mark_all_dirty
+
+        max_iterations = 100
+        iterations = 0
+
+        while @local_dependency_graph.dirty? && iterations < max_iterations
+          dirty_components = @local_dependency_graph.consume_dirty
+
+          dirty_components.each do |component|
+            old_outputs = component.outputs.transform_values(&:get)
+            component.propagate
+
+            # Check if outputs changed and mark dependents
+            component.outputs.each do |port_name, wire|
+              if wire.get != old_outputs[port_name]
+                @local_dependency_graph.dependents_of(component).each do |dep|
+                  @local_dependency_graph.mark_dirty(dep)
+                end
+              end
+            end
+          end
+
+          iterations += 1
         end
       end
 
