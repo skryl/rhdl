@@ -1404,3 +1404,139 @@ end
 
 desc "Benchmark tests showing 20 slowest (alias for benchmark:tests)"
 task benchmark: 'benchmark:tests'
+
+# =============================================================================
+# TUI Tasks
+# =============================================================================
+
+namespace :tui do
+  TUI_INK_DIR = File.expand_path('tui-ink', __dir__)
+
+  desc "Install Ink TUI dependencies"
+  task :install do
+    puts "Installing Ink TUI dependencies..."
+    puts "=" * 50
+
+    unless system('which node > /dev/null 2>&1')
+      puts "ERROR: Node.js is required but not installed."
+      puts "Please install Node.js (v18+) first:"
+      puts "  - macOS: brew install node"
+      puts "  - Ubuntu: sudo apt-get install nodejs npm"
+      puts "  - Or download from: https://nodejs.org/"
+      exit 1
+    end
+
+    version = `node --version`.strip
+    puts "Node.js version: #{version}"
+
+    Dir.chdir(TUI_INK_DIR) do
+      sh 'npm install'
+    end
+
+    puts
+    puts "Ink TUI dependencies installed."
+    puts "Run 'rake tui:build' to compile TypeScript."
+  end
+
+  desc "Build Ink TUI (compile TypeScript)"
+  task :build => :install do
+    puts "Building Ink TUI..."
+    puts "=" * 50
+
+    Dir.chdir(TUI_INK_DIR) do
+      sh 'npm run build'
+    end
+
+    puts
+    puts "Ink TUI built successfully."
+    puts "Run 'rake tui:run' to start the TUI."
+  end
+
+  desc "Run the Ink TUI with a demo simulation"
+  task :run => :build do
+    require_relative 'lib/rhdl'
+
+    puts "Starting RHDL Ink TUI..."
+    puts "=" * 50
+    puts
+
+    # Create a simple demo circuit
+    not_gate = RHDL::HDL::NotGate.new('inverter')
+    dff = RHDL::HDL::DFlipFlop.new('register')
+    counter = RHDL::HDL::Counter.new('counter', width: 8)
+
+    RHDL::HDL::SimComponent.connect(dff.outputs[:q], not_gate.inputs[:a])
+    RHDL::HDL::SimComponent.connect(not_gate.outputs[:y], dff.inputs[:d])
+
+    # Create debug simulator
+    sim = RHDL::HDL::DebugSimulator.new
+    sim.add_component(not_gate)
+    sim.add_component(dff)
+    sim.add_component(counter)
+
+    # Set initial values
+    dff.inputs[:rst].set(0)
+    dff.inputs[:en].set(1)
+    counter.inputs[:rst].set(0)
+    counter.inputs[:en].set(1)
+
+    # Create and run Ink adapter
+    adapter = RHDL::HDL::InkAdapter.new(sim)
+    adapter.add_component(not_gate)
+    adapter.add_component(dff)
+    adapter.add_component(counter)
+    adapter.run
+  end
+
+  desc "Run the Ink TUI with an ALU demo"
+  task :alu => :build do
+    require_relative 'lib/rhdl'
+
+    puts "Starting RHDL Ink TUI with ALU demo..."
+    puts "=" * 50
+    puts
+
+    # Create ALU and supporting components
+    alu = RHDL::HDL::ALU.new('alu', width: 8)
+    acc = RHDL::HDL::Register.new('acc', width: 8)
+
+    # Connect ALU output to accumulator input
+    RHDL::HDL::SimComponent.connect(alu.outputs[:result], acc.inputs[:d])
+
+    # Create debug simulator
+    sim = RHDL::HDL::DebugSimulator.new
+    sim.add_component(alu)
+    sim.add_component(acc)
+
+    # Set initial values
+    alu.inputs[:a].set(0x42)
+    alu.inputs[:b].set(0x10)
+    alu.inputs[:op].set(0)  # ADD
+    acc.inputs[:rst].set(0)
+    acc.inputs[:en].set(1)
+
+    # Create and run Ink adapter
+    adapter = RHDL::HDL::InkAdapter.new(sim)
+    adapter.add_component(alu, signals: :all)
+    adapter.add_component(acc, signals: :all)
+    adapter.run
+  end
+
+  desc "Clean Ink TUI build artifacts"
+  task :clean do
+    dist_dir = File.join(TUI_INK_DIR, 'dist')
+    node_modules = File.join(TUI_INK_DIR, 'node_modules')
+
+    FileUtils.rm_rf(dist_dir) if Dir.exist?(dist_dir)
+    puts "Cleaned: #{dist_dir}"
+
+    # Optionally clean node_modules (can be slow to reinstall)
+    if ENV['CLEAN_NODE_MODULES']
+      FileUtils.rm_rf(node_modules) if Dir.exist?(node_modules)
+      puts "Cleaned: #{node_modules}"
+    end
+  end
+end
+
+desc "Run Ink TUI (alias for tui:run)"
+task tui: 'tui:run'
