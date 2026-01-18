@@ -765,7 +765,7 @@ namespace :gates do
 
     # CPU
     'cpu/instruction_decoder' => -> { RHDL::HDL::CPU::InstructionDecoder.new('decoder') },
-    'cpu/synth_datapath' => -> { RHDL::HDL::CPU::SynthDatapath.new('synth_cpu') },
+    'cpu/datapath' => -> { RHDL::HDL::CPU::Datapath.new('datapath') },
 
     # MOS6502 (Synthesizable 6502)
     'mos6502/registers' => -> { require_relative 'examples/mos6502/hdl/registers'; MOS6502::Registers.new('regs') },

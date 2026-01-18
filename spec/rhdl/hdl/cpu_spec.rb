@@ -1,9 +1,9 @@
 require 'spec_helper'
 
 RSpec.describe 'HDL CPU' do
-  describe RHDL::HDL::CPU::Datapath do
+  describe RHDL::HDL::CPU::CPU do
     def create_cpu(program = [])
-      cpu = RHDL::HDL::CPU::Datapath.new("test_cpu")
+      cpu = RHDL::HDL::CPU::CPU.new("test_cpu")
       cpu.load_program(program)
       # Proper reset sequence (matching CPUAdapter)
       cpu.set_input(:clk, 0)
