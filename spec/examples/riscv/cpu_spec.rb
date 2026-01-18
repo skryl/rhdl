@@ -1,47 +1,20 @@
 # RV32I CPU Tests
-# Tests the RISC-V single-cycle CPU implementation
+# Tests the RISC-V single-cycle CPU implementation using the Harness class
 
 require 'rspec'
 require_relative '../../../examples/riscv/hdl/constants'
-require_relative '../../../examples/riscv/hdl/cpu'
+require_relative '../../../examples/riscv/hdl/harness'
 require_relative '../../../examples/riscv/utilities/assembler'
 
-RSpec.describe RISCV::CPU do
-  let(:cpu) { RISCV::CPU.new('test_cpu', mem_size: 4096) }
-
-  before(:each) do
-    cpu.set_input(:clk, 0)
-    cpu.set_input(:rst, 0)
-  end
-
-  def reset_cpu
-    cpu.set_input(:rst, 1)
-    cpu.set_input(:clk, 0)
-    cpu.propagate
-    cpu.set_input(:clk, 1)
-    cpu.propagate
-    cpu.set_input(:rst, 0)
-  end
-
-  def clock_cycle
-    cpu.set_input(:clk, 0)
-    cpu.propagate
-    cpu.set_input(:clk, 1)
-    cpu.propagate
-  end
-
-  def run_cycles(n)
-    n.times { clock_cycle }
-  end
+RSpec.describe RISCV::Harness do
+  let(:cpu) { RISCV::Harness.new(mem_size: 4096) }
 
   describe 'Reset behavior' do
     it 'sets PC to reset vector after reset' do
-      reset_cpu
       expect(cpu.read_pc).to eq(0)
     end
 
     it 'clears registers on reset' do
-      reset_cpu
       (0..31).each do |i|
         expect(cpu.read_reg(i)).to eq(0)
       end
@@ -53,8 +26,8 @@ RSpec.describe RISCV::CPU do
       # addi x1, x0, 42
       program = [RISCV::Assembler.addi(1, 0, 42)]
       cpu.load_program(program)
-      reset_cpu
-      clock_cycle
+      cpu.reset!
+      cpu.clock_cycle
       expect(cpu.read_reg(1)).to eq(42)
     end
 
@@ -62,8 +35,8 @@ RSpec.describe RISCV::CPU do
       # addi x1, x0, -10
       program = [RISCV::Assembler.addi(1, 0, -10)]
       cpu.load_program(program)
-      reset_cpu
-      clock_cycle
+      cpu.reset!
+      cpu.clock_cycle
       expect(cpu.read_reg(1)).to eq(0xFFFFFFF6)
     end
 
@@ -75,8 +48,8 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.addi(2, 1, 5)
       ]
       cpu.load_program(program)
-      reset_cpu
-      run_cycles(2)
+      cpu.reset!
+      cpu.run_cycles(2)
       expect(cpu.read_reg(1)).to eq(10)
       expect(cpu.read_reg(2)).to eq(15)
     end
@@ -87,8 +60,8 @@ RSpec.describe RISCV::CPU do
       # lui x1, 0x12345
       program = [RISCV::Assembler.lui(1, 0x12345)]
       cpu.load_program(program)
-      reset_cpu
-      clock_cycle
+      cpu.reset!
+      cpu.clock_cycle
       expect(cpu.read_reg(1)).to eq(0x12345000)
     end
   end
@@ -98,8 +71,8 @@ RSpec.describe RISCV::CPU do
       # auipc x1, 1
       program = [RISCV::Assembler.auipc(1, 1)]
       cpu.load_program(program)
-      reset_cpu
-      clock_cycle
+      cpu.reset!
+      cpu.clock_cycle
       expect(cpu.read_reg(1)).to eq(0x1000)  # PC(0) + 0x1000
     end
   end
@@ -115,8 +88,8 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.add(3, 1, 2)
       ]
       cpu.load_program(program)
-      reset_cpu
-      run_cycles(3)
+      cpu.reset!
+      cpu.run_cycles(3)
       expect(cpu.read_reg(3)).to eq(30)
     end
   end
@@ -132,8 +105,8 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.sub(3, 1, 2)
       ]
       cpu.load_program(program)
-      reset_cpu
-      run_cycles(3)
+      cpu.reset!
+      cpu.run_cycles(3)
       expect(cpu.read_reg(3)).to eq(20)
     end
   end
@@ -149,8 +122,8 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.and(3, 1, 2)
       ]
       cpu.load_program(program)
-      reset_cpu
-      run_cycles(3)
+      cpu.reset!
+      cpu.run_cycles(3)
       expect(cpu.read_reg(3)).to eq(0x0F)
     end
 
@@ -164,8 +137,8 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.or(3, 1, 2)
       ]
       cpu.load_program(program)
-      reset_cpu
-      run_cycles(3)
+      cpu.reset!
+      cpu.run_cycles(3)
       expect(cpu.read_reg(3)).to eq(0xFF)
     end
 
@@ -179,8 +152,8 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.xor(3, 1, 2)
       ]
       cpu.load_program(program)
-      reset_cpu
-      run_cycles(3)
+      cpu.reset!
+      cpu.run_cycles(3)
       expect(cpu.read_reg(3)).to eq(0xF0)
     end
   end
@@ -194,8 +167,8 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.slli(2, 1, 4)
       ]
       cpu.load_program(program)
-      reset_cpu
-      run_cycles(2)
+      cpu.reset!
+      cpu.run_cycles(2)
       expect(cpu.read_reg(2)).to eq(16)
     end
 
@@ -207,8 +180,8 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.srli(2, 1, 3)
       ]
       cpu.load_program(program)
-      reset_cpu
-      run_cycles(2)
+      cpu.reset!
+      cpu.run_cycles(2)
       expect(cpu.read_reg(2)).to eq(16)
     end
 
@@ -220,8 +193,8 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.srai(2, 1, 4)
       ]
       cpu.load_program(program)
-      reset_cpu
-      run_cycles(2)
+      cpu.reset!
+      cpu.run_cycles(2)
       # 0xFFFFF000 >> 4 with sign extension = 0xFFFFFF00
       expect(cpu.read_reg(2)).to eq(0xFFFFFF00)
     end
@@ -238,8 +211,8 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.slt(3, 1, 2)
       ]
       cpu.load_program(program)
-      reset_cpu
-      run_cycles(3)
+      cpu.reset!
+      cpu.run_cycles(3)
       expect(cpu.read_reg(3)).to eq(1)
     end
 
@@ -253,8 +226,8 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.sltu(3, 1, 2)
       ]
       cpu.load_program(program)
-      reset_cpu
-      run_cycles(3)
+      cpu.reset!
+      cpu.run_cycles(3)
       expect(cpu.read_reg(3)).to eq(0)
     end
   end
@@ -270,11 +243,11 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.addi(3, 0, 2)
       ]
       cpu.load_program(program)
-      reset_cpu
-      clock_cycle
+      cpu.reset!
+      cpu.clock_cycle
       expect(cpu.read_pc).to eq(8)  # Jumped to offset 8
       expect(cpu.read_reg(1)).to eq(4)  # Return address is PC+4
-      clock_cycle
+      cpu.clock_cycle
       expect(cpu.read_reg(3)).to eq(2)  # Executed instruction at offset 8
       expect(cpu.read_reg(2)).to eq(0)  # Skipped instruction at offset 4
     end
@@ -291,9 +264,9 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.addi(4, 0, 2)   # Target
       ]
       cpu.load_program(program)
-      reset_cpu
-      clock_cycle  # addi
-      clock_cycle  # jalr
+      cpu.reset!
+      cpu.clock_cycle  # addi
+      cpu.clock_cycle  # jalr
       expect(cpu.read_pc).to eq(12)  # Jumped to x1+4 = 12
       expect(cpu.read_reg(2)).to eq(8)  # Return address is PC+4 of jalr
     end
@@ -314,10 +287,10 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.addi(4, 0, 2)
       ]
       cpu.load_program(program)
-      reset_cpu
-      run_cycles(3)  # addi, addi, beq
+      cpu.reset!
+      cpu.run_cycles(3)  # addi, addi, beq
       expect(cpu.read_pc).to eq(16)  # Branched to PC+8 (from PC=8)
-      clock_cycle
+      cpu.clock_cycle
       expect(cpu.read_reg(4)).to eq(2)
       expect(cpu.read_reg(3)).to eq(0)  # Skipped
     end
@@ -334,8 +307,8 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.addi(3, 0, 1)
       ]
       cpu.load_program(program)
-      reset_cpu
-      run_cycles(4)
+      cpu.reset!
+      cpu.run_cycles(4)
       expect(cpu.read_reg(3)).to eq(1)  # Executed
     end
 
@@ -353,8 +326,8 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.addi(4, 0, 2)
       ]
       cpu.load_program(program)
-      reset_cpu
-      run_cycles(4)
+      cpu.reset!
+      cpu.run_cycles(4)
       expect(cpu.read_reg(4)).to eq(2)
       expect(cpu.read_reg(3)).to eq(0)
     end
@@ -373,8 +346,8 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.addi(4, 0, 2)
       ]
       cpu.load_program(program)
-      reset_cpu
-      run_cycles(4)
+      cpu.reset!
+      cpu.run_cycles(4)
       expect(cpu.read_reg(4)).to eq(2)
       expect(cpu.read_reg(3)).to eq(0)
     end
@@ -393,8 +366,8 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.lw(3, 2, 0)
       ]
       cpu.load_program(program)
-      reset_cpu
-      run_cycles(4)
+      cpu.reset!
+      cpu.run_cycles(4)
       expect(cpu.read_reg(3)).to eq(0x42)
     end
 
@@ -410,8 +383,8 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.lw(3, 2, 8)
       ]
       cpu.load_program(program)
-      reset_cpu
-      run_cycles(4)
+      cpu.reset!
+      cpu.run_cycles(4)
       expect(cpu.read_reg(3)).to eq(0x55)
     end
 
@@ -429,8 +402,8 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.lbu(4, 2, 0)
       ]
       cpu.load_program(program)
-      reset_cpu
-      run_cycles(5)
+      cpu.reset!
+      cpu.run_cycles(5)
       expect(cpu.read_reg(3)).to eq(0xFFFFFFAB)  # Sign-extended
       expect(cpu.read_reg(4)).to eq(0xAB)        # Zero-extended
     end
@@ -445,8 +418,8 @@ RSpec.describe RISCV::CPU do
       # addi x0, x0, 42  ; Try to write to x0
       program = [RISCV::Assembler.addi(0, 0, 42)]
       cpu.load_program(program)
-      reset_cpu
-      clock_cycle
+      cpu.reset!
+      cpu.clock_cycle
       expect(cpu.read_reg(0)).to eq(0)
     end
   end
@@ -468,12 +441,12 @@ RSpec.describe RISCV::CPU do
         RISCV::Assembler.nop               # Done
       ]
       cpu.load_program(program)
-      reset_cpu
+      cpu.reset!
 
       # Run until we reach the NOP (max 30 cycles to be safe)
       30.times do
         break if cpu.read_pc == 24  # Address of NOP
-        clock_cycle
+        cpu.clock_cycle
       end
 
       expect(cpu.read_reg(2)).to eq(15)  # 1+2+3+4+5 = 15

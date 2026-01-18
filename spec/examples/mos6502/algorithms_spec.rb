@@ -1,8 +1,8 @@
 require_relative 'spec_helper'
-require_relative '../../../examples/mos6502/hdl/cpu_harness'
+require_relative '../../../examples/mos6502/hdl/harness'
 
 RSpec.describe 'MOS6502 Complex Programs' do
-  let(:cpu) { MOS6502::CPUHarness.new }
+  let(:cpu) { MOS6502::Harness.new }
 
   describe 'Bubble sort' do
     it 'sorts an array of numbers' do
