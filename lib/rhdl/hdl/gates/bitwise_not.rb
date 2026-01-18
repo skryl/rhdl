@@ -4,8 +4,10 @@
 module RHDL
   module HDL
     class BitwiseNot < SimComponent
-      input :a, width: 8
-      output :y, width: 8
+      parameter :width, default: 8
+
+      input :a, width: :width
+      output :y, width: :width
 
       behavior do
         y <= ~a
@@ -15,15 +17,6 @@ module RHDL
         @width = width
         super(name)
       end
-
-      def setup_ports
-        return if @width == 8
-        @inputs[:a] = Wire.new("#{@name}.a", width: @width)
-        @outputs[:y] = Wire.new("#{@name}.y", width: @width)
-        @inputs[:a].on_change { |_| propagate }
-      end
-
-      # Behavior block handles both simulation and synthesis
     end
   end
 end
