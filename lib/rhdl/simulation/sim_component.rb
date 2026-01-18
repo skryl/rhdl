@@ -123,9 +123,6 @@ module RHDL
           end
         end
 
-        # Alias for backwards compatibility
-        alias_method :port_signal, :wire
-
         # Define a sub-component instance (class-level)
         #
         # @param name [Symbol] Instance name
