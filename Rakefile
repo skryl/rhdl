@@ -1409,6 +1409,32 @@ task benchmark: 'benchmark:tests'
 # TUI Tasks
 # =============================================================================
 
+# Helper to ensure TUI dependencies are installed (runs automatically)
+def ensure_tui_deps(tui_dir)
+  unless system('which node > /dev/null 2>&1')
+    puts "ERROR: Node.js is required but not installed."
+    puts "Please install Node.js (v18+) first:"
+    puts "  - macOS: brew install node"
+    puts "  - Ubuntu: sudo apt-get install nodejs npm"
+    puts "  - Or download from: https://nodejs.org/"
+    exit 1
+  end
+
+  node_modules = File.join(tui_dir, 'node_modules')
+  unless Dir.exist?(node_modules)
+    puts "Installing TUI dependencies..."
+    Dir.chdir(tui_dir) { system('npm install --silent') }
+  end
+end
+
+# Helper to run TUI with npx tsx (no build step needed)
+def run_tui_tsx(tui_dir, entry_point)
+  ensure_tui_deps(tui_dir)
+  Dir.chdir(tui_dir) do
+    exec('npx', 'tsx', entry_point)
+  end
+end
+
 namespace :tui do
   TUI_INK_DIR = File.expand_path('tui-ink', __dir__)
 
@@ -1435,11 +1461,11 @@ namespace :tui do
 
     puts
     puts "Ink TUI dependencies installed."
-    puts "Run 'rake tui:build' to compile TypeScript."
   end
 
   desc "Build Ink TUI (compile TypeScript)"
-  task :build => :install do
+  task :build do
+    ensure_tui_deps(TUI_INK_DIR)
     puts "Building Ink TUI..."
     puts "=" * 50
 
@@ -1449,11 +1475,10 @@ namespace :tui do
 
     puts
     puts "Ink TUI built successfully."
-    puts "Run 'rake tui:run' to start the TUI."
   end
 
   desc "Run the Ink TUI with a demo simulation"
-  task :run => :build do
+  task :run do
     require_relative 'lib/rhdl'
 
     puts "Starting RHDL Ink TUI..."
@@ -1550,7 +1575,7 @@ namespace :apple2 do
   APPLE2_DIR = File.expand_path('examples/mos6502', __dir__)
 
   desc "Run Apple II emulator with Ink TUI"
-  task :ink => 'tui:build' do
+  task :ink do
     $LOAD_PATH.unshift File.join(APPLE2_DIR, 'utilities')
 
     require_relative 'examples/mos6502/utilities/apple2_harness'
@@ -1578,7 +1603,7 @@ namespace :apple2 do
   end
 
   desc "Run Apple II emulator with Ink TUI (HDL mode)"
-  task :ink_hdl => 'tui:build' do
+  task :ink_hdl do
     $LOAD_PATH.unshift File.join(APPLE2_DIR, 'utilities')
 
     require_relative 'examples/mos6502/utilities/apple2_harness'
@@ -1606,7 +1631,7 @@ namespace :apple2 do
   end
 
   desc "Run Apple II with program file using Ink TUI"
-  task :ink_run, [:program] => 'tui:build' do |t, args|
+  task :ink_run, [:program] do |t, args|
     unless args[:program]
       puts "Usage: rake apple2:ink_run[path/to/program.bin]"
       exit 1
