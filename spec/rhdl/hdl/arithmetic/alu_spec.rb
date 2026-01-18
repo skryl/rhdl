@@ -110,7 +110,7 @@ RSpec.describe RHDL::HDL::ALU do
     end
 
     context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches RHDL simulation', skip: 'ALU uses raw Ruby case statements - needs rewrite with DSL case_of' do
+      it 'matches RHDL simulation' do
         verilog = RHDL::HDL::ALU.to_verilog
         behavioral = RHDL::HDL::ALU.new(nil, width: 8)
 
