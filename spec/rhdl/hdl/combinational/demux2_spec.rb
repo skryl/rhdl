@@ -45,7 +45,7 @@ RSpec.describe RHDL::HDL::Demux2 do
 
   describe 'gate-level netlist (1-bit)' do
     let(:component) { RHDL::HDL::Demux2.new('demux2', width: 1) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'demux2') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'demux2') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('demux2.a', 'demux2.sel')

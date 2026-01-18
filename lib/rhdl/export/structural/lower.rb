@@ -7,7 +7,8 @@ require_relative 'primitives'
 require_relative 'toposort'
 
 module RHDL
-  module Gates
+  module Export
+    module Structural
     class Lower
       def self.from_components(components, name: 'design')
         new(components, name: name).lower
@@ -3538,4 +3539,5 @@ module RHDL
       end
     end
   end
+end
 end

@@ -73,7 +73,7 @@ RSpec.describe RHDL::HDL::OrGate do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::OrGate.new('or_gate') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'or_gate') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'or_gate') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('or_gate.a0', 'or_gate.a1')

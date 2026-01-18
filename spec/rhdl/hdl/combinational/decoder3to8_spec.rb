@@ -112,7 +112,7 @@ RSpec.describe RHDL::HDL::Decoder3to8 do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Decoder3to8.new('dec3to8') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'dec3to8') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'dec3to8') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('dec3to8.a', 'dec3to8.en')

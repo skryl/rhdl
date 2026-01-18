@@ -107,7 +107,7 @@ RSpec.describe RHDL::HDL::Encoder4to2 do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Encoder4to2.new('enc4to2') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'enc4to2') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'enc4to2') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('enc4to2.a')

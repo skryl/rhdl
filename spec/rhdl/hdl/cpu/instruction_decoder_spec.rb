@@ -145,7 +145,7 @@ RSpec.describe RHDL::HDL::CPU::InstructionDecoder do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::CPU::InstructionDecoder.new('decoder') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'decoder') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'decoder') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('decoder.instruction', 'decoder.zero_flag')

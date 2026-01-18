@@ -32,7 +32,7 @@ RSpec.describe RHDL::HDL::ZeroExtend do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::ZeroExtend.new('zero_extend', in_width: 4, out_width: 8) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'zero_extend') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'zero_extend') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('zero_extend.a')

@@ -82,7 +82,7 @@ RSpec.describe MOS6502::Registers do
 
   describe 'gate-level netlist' do
     let(:component) { described_class.new('mos6502_registers') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mos6502_registers') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'mos6502_registers') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mos6502_registers.clk', 'mos6502_registers.rst')

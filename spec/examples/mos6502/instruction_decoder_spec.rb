@@ -116,7 +116,7 @@ RSpec.describe MOS6502::InstructionDecoder do
 
   describe 'gate-level netlist' do
     let(:component) { described_class.new('mos6502_instruction_decoder') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mos6502_instruction_decoder') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'mos6502_instruction_decoder') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mos6502_instruction_decoder.opcode')

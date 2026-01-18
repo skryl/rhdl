@@ -100,7 +100,7 @@ RSpec.describe MOS6502::IndirectAddressCalc do
 
   describe 'gate-level netlist' do
     let(:component) { described_class.new('mos6502_indirect_addr_calc') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mos6502_indirect_addr_calc') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'mos6502_indirect_addr_calc') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mos6502_indirect_addr_calc.mode')

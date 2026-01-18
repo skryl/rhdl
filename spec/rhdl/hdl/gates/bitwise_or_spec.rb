@@ -24,7 +24,7 @@ RSpec.describe RHDL::HDL::BitwiseOr do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::BitwiseOr.new('bitwise_or', width: 4) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'bitwise_or') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'bitwise_or') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('bitwise_or.a', 'bitwise_or.b')

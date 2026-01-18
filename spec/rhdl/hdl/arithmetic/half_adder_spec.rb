@@ -103,7 +103,7 @@ RSpec.describe RHDL::HDL::HalfAdder do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::HalfAdder.new('half_adder') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'half_adder') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'half_adder') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('half_adder.a', 'half_adder.b')

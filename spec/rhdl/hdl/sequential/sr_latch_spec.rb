@@ -102,7 +102,7 @@ RSpec.describe RHDL::HDL::SRLatch do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::SRLatch.new('sr_latch') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'sr_latch') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'sr_latch') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('sr_latch.s', 'sr_latch.r', 'sr_latch.en')

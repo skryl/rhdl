@@ -91,7 +91,7 @@ RSpec.describe RHDL::HDL::Mux2 do
 
   describe 'gate-level netlist (1-bit)' do
     let(:component) { RHDL::HDL::Mux2.new('mux2', width: 1) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mux2') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'mux2') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mux2.a', 'mux2.b', 'mux2.sel')
@@ -128,7 +128,7 @@ RSpec.describe RHDL::HDL::Mux2 do
 
   describe 'gate-level netlist (4-bit)' do
     let(:component) { RHDL::HDL::Mux2.new('mux2_4bit', width: 4) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mux2_4bit') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'mux2_4bit') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mux2_4bit.a', 'mux2_4bit.b', 'mux2_4bit.sel')

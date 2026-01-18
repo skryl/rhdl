@@ -73,7 +73,7 @@ RSpec.describe RHDL::HDL::RegisterFile do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::RegisterFile.new('regfile') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'regfile') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'regfile') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('regfile.clk', 'regfile.we', 'regfile.waddr', 'regfile.wdata', 'regfile.raddr1', 'regfile.raddr2')

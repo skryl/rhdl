@@ -41,7 +41,7 @@ RSpec.describe RHDL::HDL::PopCount do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::PopCount.new('popcount', width: 8) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'popcount') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'popcount') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('popcount.a')

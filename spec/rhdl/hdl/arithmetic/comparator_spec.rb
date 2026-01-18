@@ -128,7 +128,7 @@ RSpec.describe RHDL::HDL::Comparator do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Comparator.new('cmp', width: 4) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'cmp') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'cmp') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('cmp.a', 'cmp.b', 'cmp.signed_cmp')

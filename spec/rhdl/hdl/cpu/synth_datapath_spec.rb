@@ -52,7 +52,7 @@ RSpec.describe RHDL::HDL::CPU::SynthDatapath do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::CPU::SynthDatapath.new('synth_dp') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'synth_dp') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'synth_dp') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('synth_dp.clk', 'synth_dp.rst', 'synth_dp.mem_data_in')
