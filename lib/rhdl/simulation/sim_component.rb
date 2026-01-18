@@ -50,11 +50,12 @@ module RHDL
       class << self
         def inherited(subclass)
           super
-          # Copy port definitions to subclass
+          # Copy definitions to subclass
           subclass.instance_variable_set(:@_port_defs, (@_port_defs || []).dup)
           subclass.instance_variable_set(:@_signal_defs, (@_signal_defs || []).dup)
           subclass.instance_variable_set(:@_instance_defs, (@_instance_defs || []).dup)
           subclass.instance_variable_set(:@_connection_defs, (@_connection_defs || []).dup)
+          subclass.instance_variable_set(:@_parameter_defs, (@_parameter_defs || {}).dup)
         end
 
         def _port_defs
@@ -73,17 +74,52 @@ module RHDL
           @_connection_defs ||= []
         end
 
+        def _parameter_defs
+          @_parameter_defs ||= {}
+        end
+
+        # Define a component parameter with default value
+        # Parameters can be referenced by symbol in width declarations
+        #
+        # @param name [Symbol] Parameter name (becomes @name instance variable)
+        # @param default [Integer] Default value
+        #
+        # @example
+        #   class Mux2 < SimComponent
+        #     parameter :width, default: 1
+        #
+        #     input :a, width: :width
+        #     input :b, width: :width
+        #     output :y, width: :width
+        #   end
+        #
+        def parameter(name, default:)
+          _parameter_defs[name] = default
+        end
+
+        # Resolve a width value at class level using default parameter values
+        def resolve_class_width(width)
+          case width
+          when Integer
+            width
+          when Symbol
+            _parameter_defs[width] || 1
+          else
+            1
+          end
+        end
+
         # DSL-compatible _ports accessor for behavior module
         def _ports
           _port_defs.map do |pd|
-            PortDef.new(pd[:name], pd[:direction], pd[:width])
+            PortDef.new(pd[:name], pd[:direction], resolve_class_width(pd[:width]))
           end
         end
 
         # DSL-compatible _signals accessor for behavior module
         def _signals
           _signal_defs.map do |sd|
-            SignalDef.new(sd[:name], sd[:width])
+            SignalDef.new(sd[:name], resolve_class_width(sd[:width]))
           end
         end
 
@@ -394,23 +430,46 @@ module RHDL
         @subcomponents = {}
         @propagation_delay = 0
         @local_dependency_graph = nil
+        setup_default_parameters
         setup_ports_from_class_defs
         setup_ports
         setup_structure_instances
       end
 
+      # Set default values for parameters not already set by subclass initialize
+      def setup_default_parameters
+        self.class._parameter_defs.each do |name, default|
+          ivar = :"@#{name}"
+          instance_variable_set(ivar, default) unless instance_variable_defined?(ivar)
+        end
+      end
+
+      # Resolve a width value - either an Integer or a Symbol referencing a parameter
+      def resolve_width(width)
+        case width
+        when Integer
+          width
+        when Symbol
+          instance_variable_get(:"@#{width}") || 1
+        else
+          1
+        end
+      end
+
       # Create ports from class-level definitions
       def setup_ports_from_class_defs
         self.class._port_defs.each do |pd|
+          w = resolve_width(pd[:width])
           case pd[:direction]
           when :in
-            input(pd[:name], width: pd[:width])
+            input(pd[:name], width: w)
           when :out
-            output(pd[:name], width: pd[:width])
+            output(pd[:name], width: w)
           end
         end
         self.class._signal_defs.each do |sd|
-          signal(sd[:name], width: sd[:width])
+          w = resolve_width(sd[:width])
+          signal(sd[:name], width: w)
         end
       end
 

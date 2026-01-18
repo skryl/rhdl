@@ -13,24 +13,24 @@ module RHDL
         @locals = []
         @port_widths = {}
 
-        # Build port width map
-        component_class._port_defs.each do |pd|
-          @port_widths[pd[:name]] = pd[:width]
+        # Build port width map (use _ports/_signals which resolve parameterized widths)
+        component_class._ports.each do |p|
+          @port_widths[p.name] = p.width
         end
-        component_class._signal_defs.each do |sd|
-          @port_widths[sd[:name]] = sd[:width]
+        component_class._signals.each do |s|
+          @port_widths[s.name] = s.width
         end
 
         # Create accessor methods for all ports and signals
-        component_class._port_defs.each do |pd|
-          if pd[:direction] == :out
-            define_singleton_method(pd[:name]) { SynthOutputProxy.new(pd[:name], pd[:width], self) }
+        component_class._ports.each do |p|
+          if p.direction == :out
+            define_singleton_method(p.name) { SynthOutputProxy.new(p.name, p.width, self) }
           else
-            define_singleton_method(pd[:name]) { SynthSignalProxy.new(pd[:name], pd[:width]) }
+            define_singleton_method(p.name) { SynthSignalProxy.new(p.name, p.width) }
           end
         end
-        component_class._signal_defs.each do |sd|
-          define_singleton_method(sd[:name]) { SynthOutputProxy.new(sd[:name], sd[:width], self) }
+        component_class._signals.each do |s|
+          define_singleton_method(s.name) { SynthOutputProxy.new(s.name, s.width, self) }
         end
       end
 
@@ -110,15 +110,21 @@ module RHDL
       end
 
       # Access component class-level parameters (for synthesis, uses defaults)
-      # In synthesis, this returns the default width from port definitions
+      # In synthesis, this returns the default value from parameter definitions
       def param(name)
+        # First check explicit parameter definitions
+        if @component_class._parameter_defs.key?(name)
+          return @component_class._parameter_defs[name]
+        end
+
+        # Fall back to legacy inference for backwards compatibility
         case name
         when :width
-          # Look for common width parameter from output ports
-          out_port = @component_class._port_defs.find { |p| p[:direction] == :out && p[:width] > 1 }
-          out_port ? out_port[:width] : 1
+          # Look for common width parameter from resolved ports
+          out_port = @component_class._ports.find { |p| p.direction == :out && p.width > 1 }
+          out_port ? out_port.width : 1
         when :input_count
-          @component_class._port_defs.count { |p| p[:direction] == :in && p[:name].to_s.start_with?('in') }
+          @component_class._ports.count { |p| p.direction == :in && p.name.to_s.start_with?('in') }
         else
           nil
         end

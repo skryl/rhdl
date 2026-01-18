@@ -5,24 +5,19 @@ module RHDL
   module HDL
     # Zero Detector
     class ZeroDetect < SimComponent
-      # Class-level port definitions for synthesis (default 8-bit width)
-      input :a, width: 8
+      parameter :width, default: 8
+
+      input :a, width: :width
       output :zero
 
       behavior do
-        zero <= (a == lit(0, width: 8))
+        w = port_width(:a)
+        zero <= (a == lit(0, width: w))
       end
 
       def initialize(name = nil, width: 8)
         @width = width
         super(name)
-      end
-
-      def setup_ports
-        # Override default width if different from 8
-        return if @width == 8
-        @inputs[:a] = Wire.new("#{@name}.a", width: @width)
-        @inputs[:a].on_change { |_| propagate }
       end
     end
   end

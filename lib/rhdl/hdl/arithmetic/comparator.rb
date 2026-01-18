@@ -4,9 +4,10 @@
 module RHDL
   module HDL
     class Comparator < SimComponent
-      # Class-level port definitions for synthesis (default 8-bit width)
-      input :a, width: 8
-      input :b, width: 8
+      parameter :width, default: 8
+
+      input :a, width: :width
+      input :b, width: :width
       input :signed_cmp   # 1 = signed comparison (renamed to avoid keyword conflict)
       output :eq      # a == b
       output :gt      # a > b
@@ -51,15 +52,6 @@ module RHDL
       def initialize(name = nil, width: 8)
         @width = width
         super(name)
-      end
-
-      def setup_ports
-        # Override default width if different from 8
-        return if @width == 8
-        @inputs[:a] = Wire.new("#{@name}.a", width: @width)
-        @inputs[:b] = Wire.new("#{@name}.b", width: @width)
-        @inputs[:a].on_change { |_| propagate }
-        @inputs[:b].on_change { |_| propagate }
       end
     end
   end

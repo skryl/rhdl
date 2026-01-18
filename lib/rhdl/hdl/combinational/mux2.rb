@@ -5,10 +5,12 @@ module RHDL
   module HDL
     # 2-to-1 Multiplexer
     class Mux2 < SimComponent
-      input :a   # Selected when sel = 0
-      input :b   # Selected when sel = 1
+      parameter :width, default: 1
+
+      input :a, width: :width   # Selected when sel = 0
+      input :b, width: :width   # Selected when sel = 1
       input :sel
-      output :y
+      output :y, width: :width
 
       # mux(sel, if_true, if_false) - sel ? if_true : if_false
       # Note: sel=0 selects a (first arg), sel=1 selects b (second arg)
@@ -19,15 +21,6 @@ module RHDL
       def initialize(name = nil, width: 1)
         @width = width
         super(name)
-      end
-
-      def setup_ports
-        return if @width == 1
-        @inputs[:a] = Wire.new("#{@name}.a", width: @width)
-        @inputs[:b] = Wire.new("#{@name}.b", width: @width)
-        @outputs[:y] = Wire.new("#{@name}.y", width: @width)
-        @inputs[:a].on_change { |_| propagate }
-        @inputs[:b].on_change { |_| propagate }
       end
     end
   end

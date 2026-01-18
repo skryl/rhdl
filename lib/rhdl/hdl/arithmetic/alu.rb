@@ -43,12 +43,13 @@ module RHDL
       OP_INC = 14
       OP_DEC = 15
 
-      # Class-level port definitions for synthesis (default 8-bit width)
-      input :a, width: 8
-      input :b, width: 8
+      parameter :width, default: 8
+
+      input :a, width: :width
+      input :b, width: :width
       input :op, width: 4
       input :cin
-      output :result, width: 8
+      output :result, width: :width
       output :cout
       output :zero
       output :negative
@@ -263,14 +264,6 @@ module RHDL
       def initialize(name = nil, width: 8)
         @width = width
         super(name)
-      end
-
-      def setup_ports
-        # Override default width if different from 8
-        return if @width == 8
-        @inputs[:a] = Wire.new("#{@name}.a", width: @width)
-        @inputs[:b] = Wire.new("#{@name}.b", width: @width)
-        @outputs[:result] = Wire.new("#{@name}.result", width: @width)
       end
     end
   end

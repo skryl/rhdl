@@ -5,17 +5,18 @@ module RHDL
   module HDL
     # 8-to-1 Multiplexer - selects one of 8 inputs
     class Mux8 < SimComponent
-      # Class-level port definitions for synthesis (default 1-bit width)
-      input :in0
-      input :in1
-      input :in2
-      input :in3
-      input :in4
-      input :in5
-      input :in6
-      input :in7
+      parameter :width, default: 1
+
+      input :in0, width: :width
+      input :in1, width: :width
+      input :in2, width: :width
+      input :in3, width: :width
+      input :in4, width: :width
+      input :in5, width: :width
+      input :in6, width: :width
+      input :in7, width: :width
       input :sel, width: 3
-      output :y
+      output :y, width: :width
 
       behavior do
         # 8-to-1 mux using case_select
@@ -35,13 +36,6 @@ module RHDL
       def initialize(name = nil, width: 1)
         @width = width
         super(name)
-      end
-
-      def setup_ports
-        return if @width == 1
-        8.times { |i| @inputs[:"in#{i}"] = Wire.new("#{@name}.in#{i}", width: @width) }
-        @outputs[:y] = Wire.new("#{@name}.y", width: @width)
-        8.times { |i| @inputs[:"in#{i}"].on_change { |_| propagate } }
       end
     end
   end
