@@ -43,10 +43,6 @@ RSpec.describe RHDL::HDL::AddSub do
 
     context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
-        # Skip: AddSub to_verilog generates invalid syntax: (a + b)[8]
-        # Cannot directly index expression result in Verilog
-        skip 'AddSub to_verilog generates invalid Verilog syntax for bit extraction'
-
         verilog = RHDL::HDL::AddSub.to_verilog
         behavioral = RHDL::HDL::AddSub.new(nil, width: 8)
 
