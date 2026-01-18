@@ -1,0 +1,1112 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "fileutils"
+require "optparse"
+require "rhdl"
+
+# =============================================================================
+# Shared Configuration
+# =============================================================================
+
+DIAGRAMS_DIR = File.expand_path('../diagrams', __dir__)
+VERILOG_DIR = File.expand_path('../export/verilog', __dir__)
+GATES_DIR = File.expand_path('../export/gates', __dir__)
+ROM_OUTPUT_DIR = File.expand_path('../export/roms', __dir__)
+ROMS_DIR = File.expand_path('../examples/mos6502/software/roms', __dir__)
+EXAMPLES_DIR = File.expand_path('../examples', __dir__)
+
+DIAGRAM_MODES = %w[component hierarchical gate].freeze
+CATEGORIES = %w[gates sequential arithmetic combinational memory cpu].freeze
+
+# Component definitions with their instantiation parameters
+HDL_COMPONENTS = {
+  # Gates
+  'gates/not_gate' => -> { RHDL::HDL::NotGate.new('not_gate') },
+  'gates/buffer' => -> { RHDL::HDL::Buffer.new('buffer') },
+  'gates/and_gate' => -> { RHDL::HDL::AndGate.new('and_gate') },
+  'gates/and_gate_3input' => -> { RHDL::HDL::AndGate.new('and_gate_3in', inputs: 3) },
+  'gates/or_gate' => -> { RHDL::HDL::OrGate.new('or_gate') },
+  'gates/nand_gate' => -> { RHDL::HDL::NandGate.new('nand_gate') },
+  'gates/nor_gate' => -> { RHDL::HDL::NorGate.new('nor_gate') },
+  'gates/xor_gate' => -> { RHDL::HDL::XorGate.new('xor_gate') },
+  'gates/xnor_gate' => -> { RHDL::HDL::XnorGate.new('xnor_gate') },
+  'gates/tristate_buffer' => -> { RHDL::HDL::TristateBuffer.new('tristate') },
+  'gates/bitwise_and' => -> { RHDL::HDL::BitwiseAnd.new('bitwise_and', width: 8) },
+  'gates/bitwise_or' => -> { RHDL::HDL::BitwiseOr.new('bitwise_or', width: 8) },
+  'gates/bitwise_xor' => -> { RHDL::HDL::BitwiseXor.new('bitwise_xor', width: 8) },
+  'gates/bitwise_not' => -> { RHDL::HDL::BitwiseNot.new('bitwise_not', width: 8) },
+
+  # Sequential
+  'sequential/d_flipflop' => -> { RHDL::HDL::DFlipFlop.new('dff') },
+  'sequential/d_flipflop_async' => -> { RHDL::HDL::DFlipFlopAsync.new('dff_async') },
+  'sequential/t_flipflop' => -> { RHDL::HDL::TFlipFlop.new('tff') },
+  'sequential/jk_flipflop' => -> { RHDL::HDL::JKFlipFlop.new('jkff') },
+  'sequential/sr_flipflop' => -> { RHDL::HDL::SRFlipFlop.new('srff') },
+  'sequential/sr_latch' => -> { RHDL::HDL::SRLatch.new('sr_latch') },
+  'sequential/register_8bit' => -> { RHDL::HDL::Register.new('reg8', width: 8) },
+  'sequential/register_16bit' => -> { RHDL::HDL::Register.new('reg16', width: 16) },
+  'sequential/register_load' => -> { RHDL::HDL::RegisterLoad.new('reg_load', width: 8) },
+  'sequential/shift_register' => -> { RHDL::HDL::ShiftRegister.new('shift_reg', width: 8) },
+  'sequential/counter' => -> { RHDL::HDL::Counter.new('counter', width: 8) },
+  'sequential/program_counter' => -> { RHDL::HDL::ProgramCounter.new('pc', width: 16) },
+  'sequential/stack_pointer' => -> { RHDL::HDL::StackPointer.new('sp', width: 8) },
+
+  # Arithmetic
+  'arithmetic/half_adder' => -> { RHDL::HDL::HalfAdder.new('half_adder') },
+  'arithmetic/full_adder' => -> { RHDL::HDL::FullAdder.new('full_adder') },
+  'arithmetic/ripple_carry_adder' => -> { RHDL::HDL::RippleCarryAdder.new('rca', width: 8) },
+  'arithmetic/subtractor' => -> { RHDL::HDL::Subtractor.new('sub', width: 8) },
+  'arithmetic/addsub' => -> { RHDL::HDL::AddSub.new('addsub', width: 8) },
+  'arithmetic/comparator' => -> { RHDL::HDL::Comparator.new('cmp', width: 8) },
+  'arithmetic/multiplier' => -> { RHDL::HDL::Multiplier.new('mul', width: 8) },
+  'arithmetic/divider' => -> { RHDL::HDL::Divider.new('div', width: 8) },
+  'arithmetic/incdec' => -> { RHDL::HDL::IncDec.new('incdec', width: 8) },
+  'arithmetic/alu_8bit' => -> { RHDL::HDL::ALU.new('alu8', width: 8) },
+  'arithmetic/alu_16bit' => -> { RHDL::HDL::ALU.new('alu16', width: 16) },
+
+  # Combinational
+  'combinational/mux2' => -> { RHDL::HDL::Mux2.new('mux2', width: 8) },
+  'combinational/mux4' => -> { RHDL::HDL::Mux4.new('mux4', width: 8) },
+  'combinational/mux8' => -> { RHDL::HDL::Mux8.new('mux8', width: 8) },
+  'combinational/muxn' => -> { RHDL::HDL::MuxN.new('muxn', width: 8, inputs: 4) },
+  'combinational/demux2' => -> { RHDL::HDL::Demux2.new('demux2', width: 8) },
+  'combinational/demux4' => -> { RHDL::HDL::Demux4.new('demux4', width: 8) },
+  'combinational/decoder_2to4' => -> { RHDL::HDL::Decoder2to4.new('dec2to4') },
+  'combinational/decoder_3to8' => -> { RHDL::HDL::Decoder3to8.new('dec3to8') },
+  'combinational/decoder_n' => -> { RHDL::HDL::DecoderN.new('decn', width: 4) },
+  'combinational/encoder_4to2' => -> { RHDL::HDL::Encoder4to2.new('enc4to2') },
+  'combinational/encoder_8to3' => -> { RHDL::HDL::Encoder8to3.new('enc8to3') },
+  'combinational/zero_detect' => -> { RHDL::HDL::ZeroDetect.new('zero_det', width: 8) },
+  'combinational/sign_extend' => -> { RHDL::HDL::SignExtend.new('sext', in_width: 8, out_width: 16) },
+  'combinational/zero_extend' => -> { RHDL::HDL::ZeroExtend.new('zext', in_width: 8, out_width: 16) },
+  'combinational/barrel_shifter' => -> { RHDL::HDL::BarrelShifter.new('barrel', width: 8) },
+  'combinational/bit_reverse' => -> { RHDL::HDL::BitReverse.new('bitrev', width: 8) },
+  'combinational/popcount' => -> { RHDL::HDL::PopCount.new('popcount', width: 8) },
+  'combinational/lzcount' => -> { RHDL::HDL::LZCount.new('lzcount', width: 8) },
+
+  # Memory
+  'memory/ram' => -> { RHDL::HDL::RAM.new('ram', data_width: 8, addr_width: 8) },
+  'memory/ram_64k' => -> { RHDL::HDL::RAM.new('ram64k', data_width: 8, addr_width: 16) },
+  'memory/dual_port_ram' => -> { RHDL::HDL::DualPortRAM.new('dpram', data_width: 8, addr_width: 8) },
+  'memory/rom' => -> { RHDL::HDL::ROM.new('rom', data_width: 8, addr_width: 8) },
+  'memory/register_file' => -> { RHDL::HDL::RegisterFile.new('regfile', num_regs: 8, data_width: 8) },
+  'memory/stack' => -> { RHDL::HDL::Stack.new('stack', data_width: 8, depth: 16) },
+  'memory/fifo' => -> { RHDL::HDL::FIFO.new('fifo', data_width: 8, depth: 16) },
+
+  # CPU
+  'cpu/instruction_decoder' => -> { RHDL::HDL::CPU::InstructionDecoder.new('decoder') },
+  'cpu/accumulator' => -> { RHDL::HDL::CPU::Accumulator.new('acc') },
+  'cpu/datapath' => -> { RHDL::HDL::CPU::Datapath.new('cpu') }
+}.freeze
+
+# Components that support gate-level lowering
+GATE_LEVEL_COMPONENTS = %w[
+  gates/not_gate gates/buffer gates/and_gate gates/and_gate_3input
+  gates/or_gate gates/xor_gate
+  gates/bitwise_and gates/bitwise_or gates/bitwise_xor
+  sequential/d_flipflop sequential/d_flipflop_async
+  arithmetic/half_adder arithmetic/full_adder arithmetic/ripple_carry_adder
+  combinational/mux2
+].freeze
+
+# All components that support gate-level synthesis
+GATE_SYNTH_COMPONENTS = {
+  # Gates
+  'gates/not_gate' => -> { RHDL::HDL::NotGate.new('not_gate') },
+  'gates/buffer' => -> { RHDL::HDL::Buffer.new('buffer') },
+  'gates/and_gate' => -> { RHDL::HDL::AndGate.new('and_gate') },
+  'gates/or_gate' => -> { RHDL::HDL::OrGate.new('or_gate') },
+  'gates/xor_gate' => -> { RHDL::HDL::XorGate.new('xor_gate') },
+  'gates/nand_gate' => -> { RHDL::HDL::NandGate.new('nand_gate') },
+  'gates/nor_gate' => -> { RHDL::HDL::NorGate.new('nor_gate') },
+  'gates/xnor_gate' => -> { RHDL::HDL::XnorGate.new('xnor_gate') },
+  'gates/tristate_buffer' => -> { RHDL::HDL::TristateBuffer.new('tristate') },
+  'gates/bitwise_and' => -> { RHDL::HDL::BitwiseAnd.new('bitwise_and', width: 8) },
+  'gates/bitwise_or' => -> { RHDL::HDL::BitwiseOr.new('bitwise_or', width: 8) },
+  'gates/bitwise_xor' => -> { RHDL::HDL::BitwiseXor.new('bitwise_xor', width: 8) },
+  'gates/bitwise_not' => -> { RHDL::HDL::BitwiseNot.new('bitwise_not', width: 8) },
+
+  # Sequential
+  'sequential/d_flipflop' => -> { RHDL::HDL::DFlipFlop.new('dff') },
+  'sequential/d_flipflop_async' => -> { RHDL::HDL::DFlipFlopAsync.new('dff_async') },
+  'sequential/t_flipflop' => -> { RHDL::HDL::TFlipFlop.new('tff') },
+  'sequential/jk_flipflop' => -> { RHDL::HDL::JKFlipFlop.new('jkff') },
+  'sequential/sr_flipflop' => -> { RHDL::HDL::SRFlipFlop.new('srff') },
+  'sequential/sr_latch' => -> { RHDL::HDL::SRLatch.new('sr_latch') },
+  'sequential/register' => -> { RHDL::HDL::Register.new('reg', width: 8) },
+  'sequential/register_load' => -> { RHDL::HDL::RegisterLoad.new('reg_load', width: 8) },
+  'sequential/shift_register' => -> { RHDL::HDL::ShiftRegister.new('shift_reg', width: 8) },
+  'sequential/counter' => -> { RHDL::HDL::Counter.new('counter', width: 8) },
+  'sequential/program_counter' => -> { RHDL::HDL::ProgramCounter.new('pc', width: 16) },
+  'sequential/stack_pointer' => -> { RHDL::HDL::StackPointer.new('sp', width: 8) },
+
+  # Arithmetic
+  'arithmetic/half_adder' => -> { RHDL::HDL::HalfAdder.new('half_adder') },
+  'arithmetic/full_adder' => -> { RHDL::HDL::FullAdder.new('full_adder') },
+  'arithmetic/ripple_carry_adder' => -> { RHDL::HDL::RippleCarryAdder.new('rca', width: 8) },
+  'arithmetic/subtractor' => -> { RHDL::HDL::Subtractor.new('sub', width: 8) },
+  'arithmetic/addsub' => -> { RHDL::HDL::AddSub.new('addsub', width: 8) },
+  'arithmetic/comparator' => -> { RHDL::HDL::Comparator.new('cmp', width: 8) },
+  'arithmetic/incdec' => -> { RHDL::HDL::IncDec.new('incdec', width: 8) },
+  'arithmetic/multiplier' => -> { RHDL::HDL::Multiplier.new('mul', width: 4) },
+  'arithmetic/divider' => -> { RHDL::HDL::Divider.new('div', width: 4) },
+  'arithmetic/alu' => -> { RHDL::HDL::ALU.new('alu', width: 8) },
+
+  # Combinational
+  'combinational/mux2' => -> { RHDL::HDL::Mux2.new('mux2', width: 8) },
+  'combinational/mux4' => -> { RHDL::HDL::Mux4.new('mux4', width: 4) },
+  'combinational/mux8' => -> { RHDL::HDL::Mux8.new('mux8', width: 4) },
+  'combinational/demux2' => -> { RHDL::HDL::Demux2.new('demux2', width: 4) },
+  'combinational/demux4' => -> { RHDL::HDL::Demux4.new('demux4', width: 4) },
+  'combinational/decoder_2to4' => -> { RHDL::HDL::Decoder2to4.new('dec2to4') },
+  'combinational/decoder_3to8' => -> { RHDL::HDL::Decoder3to8.new('dec3to8') },
+  'combinational/encoder_4to2' => -> { RHDL::HDL::Encoder4to2.new('enc4to2') },
+  'combinational/encoder_8to3' => -> { RHDL::HDL::Encoder8to3.new('enc8to3') },
+  'combinational/zero_detect' => -> { RHDL::HDL::ZeroDetect.new('zero_det', width: 8) },
+  'combinational/sign_extend' => -> { RHDL::HDL::SignExtend.new('sext', in_width: 8, out_width: 16) },
+  'combinational/zero_extend' => -> { RHDL::HDL::ZeroExtend.new('zext', in_width: 8, out_width: 16) },
+  'combinational/bit_reverse' => -> { RHDL::HDL::BitReverse.new('bitrev', width: 8) },
+  'combinational/popcount' => -> { RHDL::HDL::PopCount.new('popcount', width: 8) },
+  'combinational/lzcount' => -> { RHDL::HDL::LZCount.new('lzcount', width: 8) },
+  'combinational/barrel_shifter' => -> { RHDL::HDL::BarrelShifter.new('barrel', width: 8) },
+
+  # CPU
+  'cpu/instruction_decoder' => -> { RHDL::HDL::CPU::InstructionDecoder.new('decoder') },
+  'cpu/synth_datapath' => -> { RHDL::HDL::CPU::SynthDatapath.new('synth_cpu') }
+}.freeze
+
+# Example components with to_verilog methods
+EXAMPLE_COMPONENTS = {
+  'mos6502/mos6502_registers' => ['examples/mos6502/hdl/registers/registers', 'MOS6502::Registers'],
+  'mos6502/mos6502_stack_pointer' => ['examples/mos6502/hdl/registers/stack_pointer', 'MOS6502::StackPointer'],
+  'mos6502/mos6502_program_counter' => ['examples/mos6502/hdl/registers/program_counter', 'MOS6502::ProgramCounter'],
+  'mos6502/mos6502_instruction_register' => ['examples/mos6502/hdl/registers/instruction_register', 'MOS6502::InstructionRegister'],
+  'mos6502/mos6502_address_latch' => ['examples/mos6502/hdl/registers/address_latch', 'MOS6502::AddressLatch'],
+  'mos6502/mos6502_data_latch' => ['examples/mos6502/hdl/registers/data_latch', 'MOS6502::DataLatch'],
+  'mos6502/mos6502_status_register' => ['examples/mos6502/hdl/status_register', 'MOS6502::StatusRegister'],
+  'mos6502/mos6502_address_generator' => ['examples/mos6502/hdl/address_gen/address_generator', 'MOS6502::AddressGenerator'],
+  'mos6502/mos6502_indirect_addr_calc' => ['examples/mos6502/hdl/address_gen/indirect_address_calc', 'MOS6502::IndirectAddressCalc'],
+  'mos6502/mos6502_alu' => ['examples/mos6502/hdl/alu', 'MOS6502::ALU'],
+  'mos6502/mos6502_instruction_decoder' => ['examples/mos6502/hdl/instruction_decoder', 'MOS6502::InstructionDecoder'],
+  'mos6502/mos6502_control_unit' => ['examples/mos6502/hdl/control_unit', 'MOS6502::ControlUnit'],
+  'mos6502/mos6502_memory' => ['examples/mos6502/hdl/memory', 'MOS6502::Memory']
+}.freeze
+
+# =============================================================================
+# Diagram Helper Methods
+# =============================================================================
+
+def generate_component_diagram(name, component, base_dir)
+  subdir = File.dirname(name)
+  full_subdir = File.join(base_dir, subdir)
+  FileUtils.mkdir_p(full_subdir)
+  base_path = File.join(base_dir, name)
+
+  # Generate ASCII block diagram
+  txt_content = []
+  txt_content << "=" * 60
+  txt_content << "Component: #{component.name}"
+  txt_content << "Type: #{component.class.name.split('::').last}"
+  txt_content << "=" * 60
+  txt_content << ""
+  txt_content << component.to_diagram
+  File.write("#{base_path}.txt", txt_content.join("\n"))
+
+  # Generate SVG (simple block view)
+  component.save_svg("#{base_path}.svg", show_subcomponents: false)
+
+  # Generate DOT
+  component.save_dot("#{base_path}.dot")
+end
+
+def generate_hierarchical_diagram(name, component, base_dir)
+  subdir = File.dirname(name)
+  full_subdir = File.join(base_dir, subdir)
+  FileUtils.mkdir_p(full_subdir)
+  base_path = File.join(base_dir, name)
+
+  # Generate ASCII schematic with subcomponents
+  txt_content = []
+  txt_content << "=" * 60
+  txt_content << "Component: #{component.name}"
+  txt_content << "Type: #{component.class.name.split('::').last}"
+  txt_content << "=" * 60
+  txt_content << ""
+  txt_content << component.to_schematic(show_subcomponents: true)
+  txt_content << ""
+  txt_content << "Hierarchy:"
+  txt_content << "-" * 40
+  txt_content << component.to_hierarchy(max_depth: 3)
+  File.write("#{base_path}.txt", txt_content.join("\n"))
+
+  # Generate SVG with subcomponents
+  component.save_svg("#{base_path}.svg", show_subcomponents: true)
+
+  # Generate DOT
+  component.save_dot("#{base_path}.dot")
+end
+
+def generate_gate_level_diagram(name, component, base_dir)
+  subdir = File.dirname(name)
+  full_subdir = File.join(base_dir, subdir)
+  FileUtils.mkdir_p(full_subdir)
+  base_path = File.join(base_dir, name)
+
+  # Lower to gate-level IR
+  ir = RHDL::Export::Structural::Lower.from_components([component], name: component.name)
+
+  # Build gate-level diagram
+  diagram = RHDL::Diagram.gate_level(ir)
+
+  # Generate DOT format
+  dot_content = diagram.to_dot
+  File.write("#{base_path}.dot", dot_content)
+
+  # Generate text summary
+  txt_content = []
+  txt_content << "=" * 60
+  txt_content << "Gate-Level: #{component.name}"
+  txt_content << "Type: #{component.class.name.split('::').last}"
+  txt_content << "=" * 60
+  txt_content << ""
+  txt_content << "Gates: #{ir.gates.length}"
+  txt_content << "DFFs: #{ir.dffs.length}"
+  txt_content << "Nets: #{ir.net_count}"
+  txt_content << ""
+  txt_content << "Inputs:"
+  ir.inputs.each { |n, nets| txt_content << "  #{n}[#{nets.length}]" }
+  txt_content << ""
+  txt_content << "Outputs:"
+  ir.outputs.each { |n, nets| txt_content << "  #{n}[#{nets.length}]" }
+  txt_content << ""
+  txt_content << "Gate Types:"
+  gate_counts = ir.gates.group_by(&:type).transform_values(&:length)
+  gate_counts.each { |type, count| txt_content << "  #{type}: #{count}" }
+  File.write("#{base_path}.txt", txt_content.join("\n"))
+end
+
+def generate_diagrams_readme(diagrams_dir)
+  readme = []
+  readme << "# RHDL Component Diagrams"
+  readme << ""
+  readme << "This directory contains circuit diagrams for all HDL components in RHDL,"
+  readme << "organized into three visualization modes."
+  readme << ""
+  readme << "## Diagram Modes"
+  readme << ""
+  readme << "### Component (`component/`)"
+  readme << "Simple block diagrams showing component interface (inputs/outputs)."
+  readme << ""
+  readme << "### Hierarchical (`hierarchical/`)"
+  readme << "Detailed schematics showing internal subcomponents and hierarchy."
+  readme << ""
+  readme << "### Gate (`gate/`)"
+  readme << "Gate-level netlist diagrams showing primitive logic gates and flip-flops."
+  readme << ""
+  readme << "## File Formats"
+  readme << ""
+  readme << "- `.txt` - ASCII/Unicode text diagram"
+  readme << "- `.svg` - Scalable vector graphics"
+  readme << "- `.dot` - Graphviz DOT format"
+  readme << ""
+  readme << "---"
+  readme << "*Generated by RHDL*"
+
+  File.write(File.join(diagrams_dir, 'README.md'), readme.join("\n"))
+end
+
+# =============================================================================
+# Command Handlers
+# =============================================================================
+
+def show_help
+  puts <<~HELP
+    Usage: rhdl <command> [options]
+
+    Commands:
+      tui         Launch interactive TUI debugger
+      diagram     Generate circuit diagrams
+      export      Export components to Verilog or VHDL
+      gates       Gate-level synthesis
+      apple2      Apple II emulator and ROM tools
+
+    Run 'rhdl <command> --help' for more information on a command.
+  HELP
+end
+
+def handle_tui(args)
+  options = {
+    signals: :all,
+    format: :auto,
+    list: false
+  }
+
+  parser = OptionParser.new do |opts|
+    opts.banner = <<~BANNER
+      Usage: rhdl tui [options] <ComponentRef>
+
+      Launch the interactive TUI debugger for HDL components.
+
+      Examples:
+        rhdl tui RHDL::HDL::Counter
+        rhdl tui RHDL::HDL::ALU --signals inputs
+        rhdl tui sequential/counter
+        rhdl tui --list
+
+      Keyboard Controls (in TUI):
+        Space     Step one cycle
+        n         Step half cycle
+        r         Run simulation
+        s         Stop/pause
+        R         Reset simulation
+        c         Continue until breakpoint
+        w         Add watchpoint
+        b         Add breakpoint
+        j/k       Scroll signals
+        :         Enter command mode
+        h/?       Show help
+        q         Quit
+
+      Command Mode (: prefix):
+        run [n]           Run n cycles
+        step              Single step
+        watch <sig>       Add watchpoint
+        break [cycle]     Add breakpoint
+        set <sig> <val>   Set signal value
+        print <sig>       Print signal value
+        list              List all signals
+        export <file>     Export VCD waveform
+        quit              Exit
+
+      Options:
+    BANNER
+
+    opts.on('--signals TYPE', 'Signals to display: all, inputs, outputs, or comma-separated list') do |v|
+      options[:signals] = case v
+                          when 'all' then :all
+                          when 'inputs' then :inputs
+                          when 'outputs' then :outputs
+                          else v.split(',').map(&:strip).map(&:to_sym)
+                          end
+    end
+    opts.on('--format FORMAT', 'Signal format: auto, binary, hex, decimal, signed') do |v|
+      options[:format] = v.to_sym
+    end
+    opts.on('--list', 'List available components') { options[:list] = true }
+    opts.on('-h', '--help', 'Show this help') do
+      puts opts
+      exit 0
+    end
+  end
+
+  parser.parse!(args)
+
+  # Handle --list
+  if options[:list]
+    puts "Available Components:"
+    puts "=" * 50
+    puts
+
+    HDL_COMPONENTS.keys.sort.each do |name|
+      puts "  #{name}"
+    end
+
+    puts
+    puts "Use component path (e.g., sequential/counter) or"
+    puts "full class reference (e.g., RHDL::HDL::Counter)"
+    return
+  end
+
+  component_ref = args.shift
+  unless component_ref
+    warn parser.to_s
+    exit 1
+  end
+
+  require 'rhdl/hdl'
+  require 'rhdl/tui'
+  require 'rhdl/debug'
+
+  # Try to find component by short name first
+  component = if HDL_COMPONENTS.key?(component_ref)
+                HDL_COMPONENTS[component_ref].call
+              else
+                # Try as a class reference
+                begin
+                  component_class = component_ref.split('::').inject(Object) { |mod, name| mod.const_get(name) }
+                  component_class.new(component_ref.split('::').last.downcase)
+                rescue NameError => e
+                  warn "ERROR: Component not found: #{component_ref}"
+                  warn "Use 'rhdl tui --list' to see available components"
+                  exit 1
+                end
+              end
+
+  # Create debug simulator
+  simulator = RHDL::Debug::DebugSimulator.new
+
+  # Create TUI
+  tui = RHDL::TUI::SimulatorTUI.new(simulator)
+
+  # Add component with signal options
+  tui.add_component(component, signals: options[:signals], format: options[:format])
+
+  puts "Starting TUI for #{component.name}..."
+  puts "Press 'h' for help, 'q' to quit"
+  sleep 0.5
+
+  # Run the TUI
+  tui.run
+end
+
+def handle_diagram(args)
+  options = {
+    level: 'component',
+    depth: 1,
+    format: 'svg',
+    out: 'diagrams',
+    bit_blasted: false,
+    all: false,
+    mode: nil,
+    clean: false
+  }
+
+  parser = OptionParser.new do |opts|
+    opts.banner = <<~BANNER
+      Usage: rhdl diagram [options] [ComponentRef]
+
+      Generate circuit diagrams for HDL components.
+
+      Single component mode:
+        rhdl diagram RHDL::HDL::ALU --level component --format svg
+
+      Batch mode (generate all diagrams):
+        rhdl diagram --all
+        rhdl diagram --all --mode component
+        rhdl diagram --all --mode hierarchical
+        rhdl diagram --all --mode gate
+
+      Options:
+    BANNER
+
+    opts.on('--all', 'Generate diagrams for all components') { options[:all] = true }
+    opts.on('--mode MODE', 'Batch mode: component, hierarchical, gate, or all') { |v| options[:mode] = v }
+    opts.on('--clean', 'Clean all generated diagrams') { options[:clean] = true }
+    opts.on('--level LEVEL', 'Single component: component|hierarchy|netlist|gate') { |v| options[:level] = v }
+    opts.on('--depth DEPTH', 'Depth for hierarchy (N or all)') do |v|
+      options[:depth] = v == 'all' ? :all : v.to_i
+    end
+    opts.on('--bit-blasted', 'Bit-blast gate-level nets') { options[:bit_blasted] = true }
+    opts.on('--format FORMAT', 'Output format: svg|png|dot') { |v| options[:format] = v }
+    opts.on('--out DIR', 'Output directory') { |v| options[:out] = v }
+    opts.on('-h', '--help', 'Show this help') do
+      puts opts
+      exit 0
+    end
+  end
+
+  parser.parse!(args)
+
+  # Handle clean
+  if options[:clean]
+    DIAGRAM_MODES.each do |mode|
+      mode_dir = File.join(DIAGRAMS_DIR, mode)
+      if Dir.exist?(mode_dir)
+        FileUtils.rm_rf(mode_dir)
+        puts "Cleaned: #{mode_dir}"
+      end
+    end
+    readme = File.join(DIAGRAMS_DIR, 'README.md')
+    FileUtils.rm_f(readme) if File.exist?(readme)
+    puts "Diagrams cleaned."
+    return
+  end
+
+  # Handle batch mode
+  if options[:all]
+    require 'rhdl/hdl'
+    require 'rhdl/export'
+    require 'rhdl/diagram'
+
+    mode = options[:mode] || 'all'
+    modes_to_run = mode == 'all' ? DIAGRAM_MODES : [mode]
+
+    modes_to_run.each do |m|
+      puts "Generating #{m} diagrams..."
+      base_dir = File.join(DIAGRAMS_DIR, m)
+      CATEGORIES.each { |c| FileUtils.mkdir_p(File.join(base_dir, c)) }
+
+      components_to_use = m == 'gate' ? GATE_LEVEL_COMPONENTS : HDL_COMPONENTS.keys
+
+      components_to_use.each do |name|
+        creator = HDL_COMPONENTS[name]
+        next unless creator
+
+        begin
+          component = creator.call
+          case m
+          when 'component'
+            generate_component_diagram(name, component, base_dir)
+          when 'hierarchical'
+            generate_hierarchical_diagram(name, component, base_dir)
+          when 'gate'
+            generate_gate_level_diagram(name, component, base_dir)
+          end
+          puts "  [OK] #{name}"
+        rescue => e
+          puts "  [ERROR] #{name}: #{e.message}"
+        end
+      end
+    end
+
+    generate_diagrams_readme(DIAGRAMS_DIR)
+    puts "\nDiagrams generated in: #{DIAGRAMS_DIR}"
+    return
+  end
+
+  # Single component mode
+  component_ref = args.shift
+  unless component_ref
+    warn parser.to_s
+    exit 1
+  end
+
+  component_class = component_ref.split('::').inject(Object) { |mod, name| mod.const_get(name) }
+  component = component_class.new(component_ref.downcase)
+
+  diagram = case options[:level]
+            when 'component'
+              RHDL::Diagram.component(component)
+            when 'hierarchy'
+              RHDL::Diagram.hierarchy(component, depth: options[:depth])
+            when 'netlist'
+              RHDL::Diagram.netlist(component)
+            when 'gate'
+              components = RHDL::Diagram.collect_components(component)
+              gate_ir = RHDL::Gates::Lower.from_components(components, name: component.name)
+              RHDL::Diagram.gate_level(gate_ir, bit_blasted: options[:bit_blasted])
+            else
+              warn "Unknown level: #{options[:level]}"
+              exit 1
+            end
+
+  FileUtils.mkdir_p(options[:out])
+  base_name = "#{component.name}_#{options[:level]}"
+
+  case options[:format]
+  when 'dot'
+    File.write(File.join(options[:out], "#{base_name}.dot"), diagram.to_dot)
+  when 'svg', 'png'
+    output = RHDL::Diagram::RenderSVG.render(diagram, format: options[:format])
+    if output
+      File.write(File.join(options[:out], "#{base_name}.#{options[:format]}"), output)
+    else
+      dot_path = File.join(options[:out], "#{base_name}.dot")
+      File.write(dot_path, diagram.to_dot)
+      warn "Graphviz not available; wrote #{dot_path} instead."
+    end
+  else
+    warn "Unknown format: #{options[:format]}"
+    exit 1
+  end
+
+  puts "Diagram saved to: #{options[:out]}/#{base_name}.#{options[:format]}"
+end
+
+def handle_export(args)
+  options = {
+    lang: nil,
+    out: nil,
+    top: nil,
+    all: false,
+    scope: 'all',
+    clean: false
+  }
+
+  parser = OptionParser.new do |opts|
+    opts.banner = <<~BANNER
+      Usage: rhdl export [options] [ComponentRef]
+
+      Export HDL components to Verilog or VHDL.
+
+      Single component mode:
+        rhdl export --lang verilog --out ./output RHDL::HDL::Counter
+
+      Batch mode (export all components):
+        rhdl export --all
+        rhdl export --all --scope lib
+        rhdl export --all --scope examples
+
+      Options:
+    BANNER
+
+    opts.on('--all', 'Export all components') { options[:all] = true }
+    opts.on('--scope SCOPE', 'Batch scope: all, lib, or examples') { |v| options[:scope] = v }
+    opts.on('--clean', 'Clean all generated HDL files') { options[:clean] = true }
+    opts.on('--lang LANG', 'Target language: verilog or vhdl') { |v| options[:lang] = v }
+    opts.on('--out DIR', 'Output directory') { |v| options[:out] = v }
+    opts.on('--top NAME', 'Override top module/entity name') { |v| options[:top] = v }
+    opts.on('-h', '--help', 'Show this help') do
+      puts opts
+      exit 0
+    end
+  end
+
+  parser.parse!(args)
+
+  # Handle clean
+  if options[:clean]
+    Dir.glob(File.join(VERILOG_DIR, '**', '*.v')).each { |f| FileUtils.rm_f(f) }
+    Dir.glob(File.join(VERILOG_DIR, '**', '*')).sort.reverse.each do |d|
+      FileUtils.rmdir(d) if File.directory?(d) && Dir.empty?(d)
+    end
+    puts "Cleaned: #{VERILOG_DIR}"
+    return
+  end
+
+  # Handle batch mode
+  if options[:all]
+    FileUtils.mkdir_p(VERILOG_DIR)
+    exported_count = 0
+
+    # Export lib components
+    if %w[all lib].include?(options[:scope])
+      puts "Exporting lib/ components..."
+      components = RHDL::Export.list_components
+
+      components.each do |info|
+        component = info[:class]
+        relative_path = info[:relative_path]
+
+        begin
+          verilog_file = File.join(VERILOG_DIR, "#{relative_path}.v")
+          FileUtils.mkdir_p(File.dirname(verilog_file))
+          File.write(verilog_file, component.to_verilog)
+          puts "  [OK] #{component.name}"
+          exported_count += 1
+        rescue => e
+          puts "  [ERROR] #{component.name}: #{e.message}"
+        end
+      end
+    end
+
+    # Export example components
+    if %w[all examples].include?(options[:scope])
+      puts "\nExporting examples/ components..."
+
+      EXAMPLE_COMPONENTS.each do |relative_path, (require_path, class_name)|
+        begin
+          require_relative File.join('..', require_path)
+          component = class_name.split('::').inject(Object) { |o, c| o.const_get(c) }
+
+          verilog_file = File.join(VERILOG_DIR, "#{relative_path}.v")
+          FileUtils.mkdir_p(File.dirname(verilog_file))
+          File.write(verilog_file, component.to_verilog)
+          puts "  [OK] #{class_name}"
+          exported_count += 1
+        rescue => e
+          puts "  [ERROR] #{class_name}: #{e.message}"
+        end
+      end
+    end
+
+    puts "\nExported #{exported_count} components to: #{VERILOG_DIR}"
+    return
+  end
+
+  # Single component mode
+  component_ref = args.shift
+
+  if options[:lang].nil? || options[:out].nil? || component_ref.nil?
+    warn "Missing required arguments."
+    warn parser.to_s
+    exit 1
+  end
+
+  component_class = component_ref.split("::").inject(Object) { |mod, name| mod.const_get(name) }
+
+  FileUtils.mkdir_p(options[:out])
+
+  case options[:lang]
+  when "verilog"
+    top_name = options[:top] || component_class.name.split("::").last.underscore
+    output_path = File.join(options[:out], "#{top_name}.v")
+    RHDL::Export.write_verilog(component_class, path: output_path, top_name: options[:top])
+  when "vhdl"
+    top_name = options[:top] || component_class.name.split("::").last.underscore
+    output_path = File.join(options[:out], "#{top_name}.vhd")
+    RHDL::Export.write_vhdl(component_class, path: output_path, top_name: options[:top])
+  else
+    warn "Unknown language: #{options[:lang]}"
+    exit 1
+  end
+
+  puts "Wrote #{options[:lang]} to #{options[:out]}"
+end
+
+def handle_gates(args)
+  options = {
+    export: false,
+    simcpu: false,
+    stats: false,
+    clean: false
+  }
+
+  parser = OptionParser.new do |opts|
+    opts.banner = <<~BANNER
+      Usage: rhdl gates [options]
+
+      Gate-level synthesis - export components to primitive gate netlists.
+
+      Commands:
+        rhdl gates --export    Export all components to JSON netlists
+        rhdl gates --simcpu    Export SimCPU datapath components
+        rhdl gates --stats     Show gate-level synthesis statistics
+        rhdl gates --clean     Clean gate-level output
+
+      Options:
+    BANNER
+
+    opts.on('--export', 'Export all components to gate-level IR (JSON netlists)') { options[:export] = true }
+    opts.on('--simcpu', 'Export SimCPU datapath to gate-level') { options[:simcpu] = true }
+    opts.on('--stats', 'Show gate-level synthesis statistics') { options[:stats] = true }
+    opts.on('--clean', 'Clean gate-level synthesis output') { options[:clean] = true }
+    opts.on('-h', '--help', 'Show this help') do
+      puts opts
+      exit 0
+    end
+  end
+
+  parser.parse!(args)
+
+  # Default to --export if no option specified
+  options[:export] = true unless options.values.any?
+
+  require 'rhdl/hdl'
+  require 'rhdl/export'
+
+  # Handle clean
+  if options[:clean]
+    if Dir.exist?(GATES_DIR)
+      FileUtils.rm_rf(GATES_DIR)
+      puts "Cleaned: #{GATES_DIR}"
+    end
+    return
+  end
+
+  # Handle stats
+  if options[:stats]
+    puts "RHDL Gate-Level Synthesis Statistics"
+    puts "=" * 50
+    puts
+
+    total_gates = 0
+    total_dffs = 0
+    component_stats = []
+
+    GATE_SYNTH_COMPONENTS.each do |name, creator|
+      begin
+        component = creator.call
+        ir = RHDL::Export::Structural::Lower.from_components([component], name: component.name)
+        component_stats << {
+          name: name,
+          gates: ir.gates.length,
+          dffs: ir.dffs.length,
+          nets: ir.net_count
+        }
+        total_gates += ir.gates.length
+        total_dffs += ir.dffs.length
+      rescue => e
+        component_stats << { name: name, error: e.message }
+      end
+    end
+
+    component_stats.sort_by! { |s| -(s[:gates] || 0) }
+
+    puts "Components by Gate Count:"
+    puts "-" * 50
+    component_stats.each do |s|
+      if s[:error]
+        puts "  #{s[:name]}: ERROR - #{s[:error]}"
+      else
+        puts "  #{s[:name]}: #{s[:gates]} gates, #{s[:dffs]} DFFs, #{s[:nets]} nets"
+      end
+    end
+
+    puts
+    puts "=" * 50
+    puts "Total Components: #{GATE_SYNTH_COMPONENTS.size}"
+    puts "Total Gates: #{total_gates}"
+    puts "Total DFFs: #{total_dffs}"
+    return
+  end
+
+  # Handle simcpu
+  if options[:simcpu]
+    puts "RHDL SimCPU Gate-Level Export"
+    puts "=" * 50
+    puts
+
+    FileUtils.mkdir_p(File.join(GATES_DIR, 'cpu'))
+
+    begin
+      pc = RHDL::HDL::ProgramCounter.new('pc', width: 16)
+      acc = RHDL::HDL::Register.new('acc', width: 8)
+      alu = RHDL::HDL::ALU.new('alu', width: 8)
+      decoder = RHDL::HDL::CPU::InstructionDecoder.new('decoder')
+
+      components = [
+        ['cpu/pc', pc],
+        ['cpu/acc', acc],
+        ['cpu/alu', alu],
+        ['cpu/decoder', decoder]
+      ]
+
+      total_gates = 0
+      total_dffs = 0
+
+      components.each do |name, component|
+        ir = RHDL::Export::Structural::Lower.from_components([component], name: component.name)
+        json_file = File.join(GATES_DIR, "#{name}.json")
+        File.write(json_file, ir.to_json)
+        puts "  [OK] #{name}: #{ir.gates.length} gates, #{ir.dffs.length} DFFs"
+        total_gates += ir.gates.length
+        total_dffs += ir.dffs.length
+      end
+
+      puts
+      puts "SimCPU Totals:"
+      puts "  Total Gates: #{total_gates}"
+      puts "  Total DFFs: #{total_dffs}"
+      puts "  Output: #{File.join(GATES_DIR, 'cpu')}"
+    rescue => e
+      puts "  [ERROR] #{e.message}"
+    end
+    return
+  end
+
+  # Handle export
+  if options[:export]
+    puts "RHDL Gate-Level Synthesis Export"
+    puts "=" * 50
+    puts
+
+    FileUtils.mkdir_p(GATES_DIR)
+    exported_count = 0
+    error_count = 0
+
+    GATE_SYNTH_COMPONENTS.each do |name, creator|
+      begin
+        component = creator.call
+
+        subdir = File.dirname(name)
+        FileUtils.mkdir_p(File.join(GATES_DIR, subdir))
+
+        ir = RHDL::Export::Structural::Lower.from_components([component], name: component.name)
+
+        # Export to JSON
+        json_file = File.join(GATES_DIR, "#{name}.json")
+        File.write(json_file, ir.to_json)
+
+        # Create summary text file
+        txt_file = File.join(GATES_DIR, "#{name}.txt")
+        summary = []
+        summary << "Component: #{component.name}"
+        summary << "Type: #{component.class.name}"
+        summary << "Gates: #{ir.gates.length}"
+        summary << "DFFs: #{ir.dffs.length}"
+        summary << "Nets: #{ir.net_count}"
+        summary << ""
+        summary << "Inputs:"
+        ir.inputs.each { |n, nets| summary << "  #{n}: #{nets.length} bits" }
+        summary << ""
+        summary << "Outputs:"
+        ir.outputs.each { |n, nets| summary << "  #{n}: #{nets.length} bits" }
+        summary << ""
+        summary << "Gate Types:"
+        gate_counts = ir.gates.group_by(&:type).transform_values(&:length)
+        gate_counts.each { |type, count| summary << "  #{type}: #{count}" }
+        File.write(txt_file, summary.join("\n"))
+
+        puts "  [OK] #{name} (#{ir.gates.length} gates, #{ir.dffs.length} DFFs)"
+        exported_count += 1
+      rescue => e
+        puts "  [ERROR] #{name}: #{e.message}"
+        error_count += 1
+      end
+    end
+
+    puts
+    puts "=" * 50
+    puts "Exported: #{exported_count}/#{GATE_SYNTH_COMPONENTS.size} components"
+    puts "Errors: #{error_count}"
+    puts "Output: #{GATES_DIR}"
+  end
+end
+
+def handle_apple2(args)
+  options = {
+    build: false,
+    run: false,
+    demo: false,
+    appleiigo: false,
+    clean: false,
+    debug: false,
+    rom: nil,
+    rom_address: nil
+  }
+
+  parser = OptionParser.new do |opts|
+    opts.banner = <<~BANNER
+      Usage: rhdl apple2 [options]
+
+      Apple II emulator and ROM tools.
+
+      Commands:
+        rhdl apple2                Run the Apple II emulator (default)
+        rhdl apple2 --build        Assemble the mini monitor ROM
+        rhdl apple2 --demo         Run emulator in demo mode (no ROM needed)
+        rhdl apple2 --appleiigo    Run with AppleIIGo public domain ROM
+        rhdl apple2 --clean        Clean ROM output files
+
+      Options:
+    BANNER
+
+    opts.on('--build', 'Assemble the mini monitor ROM') { options[:build] = true }
+    opts.on('--run', 'Run the emulator (after build)') { options[:run] = true }
+    opts.on('--demo', 'Run emulator demo (no ROM needed)') { options[:demo] = true }
+    opts.on('--appleiigo', 'Run with AppleIIGo public domain ROM') { options[:appleiigo] = true }
+    opts.on('--clean', 'Clean ROM output files') { options[:clean] = true }
+    opts.on('-d', '--debug', 'Enable debug mode') { options[:debug] = true }
+    opts.on('-r', '--rom FILE', 'ROM file to load') { |v| options[:rom] = v }
+    opts.on('--rom-address ADDR', 'ROM load address (hex)') { |v| options[:rom_address] = v }
+    opts.on('-h', '--help', 'Show this help') do
+      puts opts
+      exit 0
+    end
+  end
+
+  parser.parse!(args)
+
+  apple2_script = File.expand_path('../examples/mos6502/bin/apple2', __dir__)
+
+  # Handle clean
+  if options[:clean]
+    if Dir.exist?(ROM_OUTPUT_DIR)
+      FileUtils.rm_rf(ROM_OUTPUT_DIR)
+      puts "Cleaned: #{ROM_OUTPUT_DIR}"
+    end
+    return
+  end
+
+  # Handle build
+  if options[:build]
+    require_relative '../examples/mos6502/utilities/assembler'
+
+    puts "Apple II ROM Assembler"
+    puts "=" * 50
+    puts
+
+    FileUtils.mkdir_p(ROM_OUTPUT_DIR)
+
+    asm_file = File.join(ROMS_DIR, 'mini_monitor.asm')
+    unless File.exist?(asm_file)
+      warn "ERROR: Assembly file not found: #{asm_file}"
+      exit 1
+    end
+
+    source = File.read(asm_file)
+    puts "Source: #{asm_file}"
+    puts "Size: #{source.length} bytes"
+    puts
+
+    assembler = MOS6502::Assembler.new
+    begin
+      bytes = assembler.assemble(source, 0xF800)
+      puts "Assembled: #{bytes.length} bytes"
+
+      rom_size = 0x10000 - 0xF800
+      bytes += [0xFF] * (rom_size - bytes.length) if bytes.length < rom_size
+
+      rom_file = File.join(ROM_OUTPUT_DIR, 'mini_monitor.bin')
+      File.binwrite(rom_file, bytes.pack('C*'))
+      puts "Output: #{rom_file}"
+      puts
+
+      reset_lo = bytes[0xFFFC - 0xF800]
+      reset_hi = bytes[0xFFFD - 0xF800]
+      reset_vector = (reset_hi << 8) | reset_lo
+      puts "Reset vector: $#{reset_vector.to_s(16).upcase.rjust(4, '0')}"
+      puts
+      puts "ROM built successfully!"
+
+      # If --run was also specified, run the emulator
+      if options[:run]
+        puts
+        puts "Starting emulator..."
+        exec_args = [apple2_script, "-r", rom_file, "--rom-address", "F800"]
+        exec_args << "-d" if options[:debug]
+        exec(*exec_args)
+      end
+    rescue => e
+      warn "ERROR: Assembly failed: #{e.message}"
+      exit 1
+    end
+    return
+  end
+
+  # Handle demo
+  if options[:demo]
+    exec_args = [apple2_script, "--demo"]
+    exec_args << "-d" if options[:debug]
+    exec(*exec_args)
+  end
+
+  # Handle appleiigo
+  if options[:appleiigo]
+    rom_file = File.join(ROMS_DIR, 'appleiigo.rom')
+    unless File.exist?(rom_file)
+      warn "ERROR: AppleIIGo ROM not found: #{rom_file}"
+      warn "Download from: https://a2go.applearchives.com/roms/"
+      exit 1
+    end
+    exec_args = [apple2_script, "-r", rom_file, "--rom-address", "D000"]
+    exec_args << "-d" if options[:debug]
+    exec(*exec_args)
+  end
+
+  # Default: run the emulator with any provided options
+  exec_args = [apple2_script]
+  exec_args += ["-r", options[:rom]] if options[:rom]
+  exec_args += ["--rom-address", options[:rom_address]] if options[:rom_address]
+  exec_args << "-d" if options[:debug]
+  exec_args += args # Pass any remaining args
+  exec(*exec_args)
+end
+
+# =============================================================================
+# Main Entry Point
+# =============================================================================
+
+command = ARGV.shift
+
+case command
+when 'tui'
+  handle_tui(ARGV)
+when 'diagram', 'diagrams'
+  handle_diagram(ARGV)
+when 'export', 'exports'
+  handle_export(ARGV)
+when 'gates', 'gate'
+  handle_gates(ARGV)
+when 'apple2'
+  handle_apple2(ARGV)
+when '-h', '--help', 'help', nil
+  show_help
+else
+  warn "Unknown command: #{command}"
+  warn ""
+  show_help
+  exit 1
+end
