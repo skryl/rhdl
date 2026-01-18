@@ -48,11 +48,6 @@ module RHDL
         gte <= eq_result | gt_result
         lte <= eq_result | lt_result
       end
-
-      def initialize(name = nil, width: 8)
-        @width = width
-        super(name)
-      end
     end
   end
 end

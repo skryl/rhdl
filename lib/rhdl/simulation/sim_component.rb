@@ -80,30 +80,44 @@ module RHDL
 
         # Define a component parameter with default value
         # Parameters can be referenced by symbol in width declarations
+        # Supports computed defaults via Proc/lambda
         #
         # @param name [Symbol] Parameter name (becomes @name instance variable)
-        # @param default [Integer] Default value
+        # @param default [Integer, Proc] Default value or lambda for computed value
         #
-        # @example
-        #   class Mux2 < SimComponent
-        #     parameter :width, default: 1
+        # @example Simple parameter
+        #   parameter :width, default: 8
         #
-        #     input :a, width: :width
-        #     input :b, width: :width
-        #     output :y, width: :width
-        #   end
+        # @example Computed parameter (evaluated after other params are set)
+        #   parameter :width, default: 8
+        #   parameter :product_width, default: -> { @width * 2 }
         #
         def parameter(name, default:)
           _parameter_defs[name] = default
         end
 
         # Resolve a width value at class level using default parameter values
+        # For computed (Proc) defaults, evaluates them using other defaults
         def resolve_class_width(width)
           case width
           when Integer
             width
           when Symbol
-            _parameter_defs[width] || 1
+            val = _parameter_defs[width]
+            case val
+            when Proc
+              # For class-level resolution, evaluate proc with defaults
+              eval_context = Object.new
+              _parameter_defs.each do |k, v|
+                next if v.is_a?(Proc)
+                eval_context.instance_variable_set(:"@#{k}", v)
+              end
+              eval_context.instance_exec(&val)
+            when Integer
+              val
+            else
+              1
+            end
           else
             1
           end
@@ -422,7 +436,7 @@ module RHDL
       PortDef = Struct.new(:name, :direction, :width)
       SignalDef = Struct.new(:name, :width)
 
-      def initialize(name = nil)
+      def initialize(name = nil, **kwargs)
         @name = name || self.class.name.split('::').last.downcase
         @inputs = {}
         @outputs = {}
@@ -430,17 +444,30 @@ module RHDL
         @subcomponents = {}
         @propagation_delay = 0
         @local_dependency_graph = nil
-        setup_default_parameters
+        setup_parameters(kwargs)
         setup_ports_from_class_defs
         setup_ports
         setup_structure_instances
       end
 
-      # Set default values for parameters not already set by subclass initialize
-      def setup_default_parameters
+      # Set parameter values from kwargs or use defaults from class definition
+      # Handles computed defaults (Procs) by evaluating them after simple params are set
+      def setup_parameters(kwargs)
+        # First pass: set non-computed parameters
         self.class._parameter_defs.each do |name, default|
+          next if default.is_a?(Proc)
           ivar = :"@#{name}"
-          instance_variable_set(ivar, default) unless instance_variable_defined?(ivar)
+          value = kwargs.fetch(name, default)
+          instance_variable_set(ivar, value)
+        end
+
+        # Second pass: evaluate computed parameters
+        self.class._parameter_defs.each do |name, default|
+          next unless default.is_a?(Proc)
+          ivar = :"@#{name}"
+          # Use kwarg value if provided, otherwise compute from proc
+          value = kwargs.key?(name) ? kwargs[name] : instance_exec(&default)
+          instance_variable_set(ivar, value)
         end
       end
 

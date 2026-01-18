@@ -21,12 +21,6 @@ module RHDL
         # Combine: upper byte is extension, lower byte is original
         y <= cat(extension, a)
       end
-
-      def initialize(name = nil, in_width: 8, out_width: 16)
-        @in_width = in_width
-        @out_width = out_width
-        super(name)
-      end
     end
   end
 end

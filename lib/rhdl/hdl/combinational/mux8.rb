@@ -32,11 +32,6 @@ module RHDL
           7 => in7
         }, default: lit(0, width: w))
       end
-
-      def initialize(name = nil, width: 1)
-        @width = width
-        super(name)
-      end
     end
   end
 end

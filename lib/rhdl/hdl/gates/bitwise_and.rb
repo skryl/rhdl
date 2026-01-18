@@ -13,11 +13,6 @@ module RHDL
       behavior do
         y <= a & b
       end
-
-      def initialize(name = nil, width: 8)
-        @width = width
-        super(name)
-      end
     end
   end
 end

@@ -14,11 +14,6 @@ module RHDL
         w = port_width(:a)
         zero <= (a == lit(0, width: w))
       end
-
-      def initialize(name = nil, width: 8)
-        @width = width
-        super(name)
-      end
     end
   end
 end

@@ -14,11 +14,6 @@ module RHDL
         # Reverse bit order: y = {a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]}
         y <= cat(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7])
       end
-
-      def initialize(name = nil, width: 8)
-        @width = width
-        super(name)
-      end
     end
   end
 end

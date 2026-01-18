@@ -48,11 +48,6 @@ module RHDL
         zero <= (result_val == lit(0, width: 8))
         negative <= r_sign
       end
-
-      def initialize(name = nil, width: 8)
-        @width = width
-        super(name)
-      end
     end
   end
 end

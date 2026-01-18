@@ -23,11 +23,6 @@ module RHDL
         high_mux = local(:high_mux, mux(sel[0], d, c), width: w) # sel[0]=0: c, sel[0]=1: d
         y <= mux(sel[1], high_mux, low_mux)  # sel[1]=0: low, sel[1]=1: high
       end
-
-      def initialize(name = nil, width: 1)
-        @width = width
-        super(name)
-      end
     end
   end
 end
