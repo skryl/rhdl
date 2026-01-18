@@ -5,17 +5,27 @@ The RHDL HDL (Hardware Description Language) framework provides a Ruby-based sim
 ## Architecture
 
 ```
-lib/rhdl/hdl/
-├── simulation.rb      # Core simulation engine
-├── gates.rb           # Logic gate primitives
-├── sequential.rb      # Flip-flops, registers, counters
-├── arithmetic.rb      # Adders, ALU, comparators
-├── combinational.rb   # Multiplexers, decoders, encoders
-├── memory.rb          # RAM, ROM, register files
-├── cpu.rb             # CPU module entry point
-└── cpu/
-    ├── datapath.rb    # CPU datapath implementation
-    └── adapter.rb     # Behavior CPU interface adapter
+lib/rhdl/
+├── simulation/             # Core simulation engine
+│   ├── sim_component.rb    # Base component class
+│   ├── simulator.rb        # Simulation runner
+│   ├── wire.rb             # Signal wires
+│   └── clock.rb            # Clock signal
+├── hdl/                    # HDL component library
+│   ├── gates/              # Logic gate primitives
+│   ├── sequential/         # Flip-flops, registers, counters
+│   ├── arithmetic/         # Adders, ALU, comparators
+│   ├── combinational/      # Multiplexers, decoders, encoders
+│   ├── memory/             # RAM, ROM, register files
+│   └── cpu/                # Sample CPU implementation
+│       ├── datapath.rb     # CPU datapath
+│       ├── cpu_adapter.rb  # CPU interface adapter
+│       └── synth_datapath.rb # Synthesizable datapath
+├── dsl/                    # Component definition DSL
+├── export/                 # Verilog/gate-level export
+├── debug/                  # Debugging tools
+├── tui/                    # Terminal UI
+└── diagram/                # Diagram generation
 ```
 
 ## Key Concepts
@@ -41,17 +51,27 @@ wire.bit(6)  # => 1
 
 ### Components
 
-All components inherit from `SimComponent` and implement:
-- `setup_ports` - Define inputs, outputs, and internal signals
-- `propagate` - Compute outputs from inputs
+Components inherit from `SimComponent` and define ports using class macros:
 
 ```ruby
 class MyGate < RHDL::HDL::SimComponent
-  def setup_ports
-    input :a
-    input :b
-    output :y
+  port_input :a
+  port_input :b
+  port_output :y
+
+  behavior do
+    y <= a & b
   end
+end
+```
+
+For manual control, override the `propagate` method:
+
+```ruby
+class MyGate < RHDL::HDL::SimComponent
+  port_input :a
+  port_input :b
+  port_output :y
 
   def propagate
     out_set(:y, in_val(:a) & in_val(:b))
@@ -59,24 +79,20 @@ class MyGate < RHDL::HDL::SimComponent
 end
 ```
 
-### Clocked Components
+### Sequential Components
 
-Sequential components use `SequentialComponent` base class:
+Sequential components use the `sequential` DSL block:
 
 ```ruby
 class MyRegister < RHDL::HDL::SequentialComponent
-  def setup_ports
-    input :d, width: 8
-    input :clk
-    input :en
-    output :q, width: 8
-  end
+  port_input :d, width: 8
+  port_input :clk
+  port_input :rst
+  port_input :en
+  port_output :q, width: 8
 
-  def propagate
-    if rising_edge? && in_val(:en) == 1
-      @state = in_val(:d)
-    end
-    out_set(:q, @state)
+  sequential clock: :clk, reset: :rst, reset_values: { q: 0 } do
+    q <= mux(en, d, q)
   end
 end
 ```
@@ -153,7 +169,7 @@ sim.run(100)
 |----------|------------|
 | **Gates** | AND, OR, XOR, NOT, NAND, NOR, XNOR, Buffer, Tristate |
 | **Bitwise** | BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot |
-| **Flip-flops** | DFlipFlop, TFlipFlop, JKFlipFlop, SRFlipFlop, SRLatch |
+| **Flip-flops** | DFlipFlop, DFlipFlopAsync, TFlipFlop, JKFlipFlop, SRFlipFlop, SRLatch |
 | **Registers** | Register, RegisterLoad, ShiftRegister, Counter, ProgramCounter, StackPointer |
 | **Arithmetic** | HalfAdder, FullAdder, RippleCarryAdder, Subtractor, AddSub, Comparator, Multiplier, Divider, IncDec, ALU |
 | **Combinational** | Mux2, Mux4, Mux8, MuxN, Demux2, Demux4, Decoder2to4, Decoder3to8, DecoderN, Encoder4to2, Encoder8to3, ZeroDetect, SignExtend, ZeroExtend, BarrelShifter, BitReverse, PopCount, LZCount |

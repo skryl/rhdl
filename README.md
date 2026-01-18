@@ -116,9 +116,12 @@ require 'rhdl'
 
 # Export a component to Verilog
 component = MyComponent.new
-verilog_code = RHDL::Export::Verilog.export(component)
+verilog_code = RHDL::Export.verilog(component)
 
-# Or use rake tasks
+# Or use the class method
+verilog_code = MyComponent.to_verilog
+
+# Batch export with rake
 # rake hdl:export       - Export all DSL components
 # rake hdl:verilog      - Export Verilog files
 ```
