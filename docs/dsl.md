@@ -8,9 +8,103 @@ RHDL provides several DSL modules for synthesizable hardware:
 
 1. **`behavior do ... end`** - Combinational logic (purely input-to-output), supports `case_of` for multi-way selection
 2. **`sequential clock: :clk do ... end`** - Sequential logic (registers, state machines)
-3. **`memory :name, depth:, width:`** - RAM/ROM arrays
-4. **`lookup_table :name do ... end`** - Combinational ROM/decoder
-5. **`state_machine clock:, reset: do ... end`** - Finite state machines
+3. **`instance` / `wire`** - Hierarchical components with sub-component instantiation and wiring
+4. **`memory :name, depth:, width:`** - RAM/ROM arrays
+5. **`lookup_table :name do ... end`** - Combinational ROM/decoder
+6. **`state_machine clock:, reset: do ... end`** - Finite state machines
+
+## Hierarchical Components
+
+Use `instance` and `wire` class-level methods to build complex components from sub-components:
+
+```ruby
+class MyDatapath < RHDL::HDL::SimComponent
+  # Define ports
+  port_input :clk
+  port_input :rst
+  port_input :a, width: 8
+  port_input :b, width: 8
+  port_output :result, width: 8
+
+  # Internal signals for inter-component wiring
+  port_signal :alu_out, width: 8
+
+  # Instantiate sub-components
+  instance :alu, ALU, width: 8
+  instance :reg, Register, width: 8
+
+  # Wire signals to sub-component ports
+  wire :a => [:alu, :a]              # Input to sub-component
+  wire :b => [:alu, :b]
+  wire [:alu, :result] => :alu_out   # Sub-component output to signal
+  wire :alu_out => [:reg, :d]        # Signal to sub-component input
+  wire :clk => [:reg, :clk]
+  wire :rst => [:reg, :rst]
+  wire [:reg, :q] => :result         # Sub-component output to port
+end
+```
+
+### Wire Syntax
+
+The `wire` method supports several connection patterns:
+
+```ruby
+# Input port to sub-component input
+wire :clk => [:component_name, :port_name]
+
+# Sub-component output to internal signal
+wire [:component_name, :port_name] => :signal_name
+
+# Internal signal to sub-component input
+wire :signal_name => [:component_name, :port_name]
+
+# Sub-component output to output port
+wire [:component_name, :port_name] => :output_port
+
+# Fan-out: one signal to multiple sub-component inputs
+wire :clk => [[:comp1, :clk], [:comp2, :clk], [:comp3, :clk]]
+```
+
+### Generated Verilog
+
+Hierarchical components generate Verilog with module instantiations:
+
+```verilog
+module my_datapath(
+  input        clk,
+  input        rst,
+  input  [7:0] a,
+  input  [7:0] b,
+  output [7:0] result
+);
+  wire [7:0] alu_out;
+
+  alu #(.WIDTH(8)) alu_inst (
+    .a(a),
+    .b(b),
+    .result(alu_out)
+  );
+
+  register #(.WIDTH(8)) reg_inst (
+    .clk(clk),
+    .rst(rst),
+    .d(alu_out),
+    .q(result)
+  );
+endmodule
+```
+
+### Hierarchy Export
+
+Export a component with all its sub-modules:
+
+```ruby
+# Export just the top module
+verilog = MyDatapath.to_verilog
+
+# Export complete hierarchy (all sub-modules included)
+verilog = MyDatapath.to_verilog_hierarchy
+```
 
 ## Combinational Components
 
