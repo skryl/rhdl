@@ -383,6 +383,6 @@ examples/mos6502/
 
 ## See Also
 
-- [MOS 6502](mos6502.md) - 6502 CPU implementation
-- [Sample CPU](sample_cpu.md) - RHDL sample CPU
+- [MOS 6502](mos6502_cpu.md) - 6502 CPU implementation
+- [8-bit CPU](8bit_cpu.md) - RHDL sample CPU
 - [Debugging Guide](debugging.md) - Signal probing and debugging

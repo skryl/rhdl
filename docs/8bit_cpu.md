@@ -429,4 +429,4 @@ This ensures proper edge detection in sequential components.
 
 - [Components Reference](components.md) - All HDL components
 - [Debugging Guide](debugging.md) - Signal probing and debugging
-- [MOS 6502](mos6502.md) - Full 6502 implementation example
+- [MOS 6502](mos6502_cpu.md) - Full 6502 implementation example

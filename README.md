@@ -234,16 +234,16 @@ Detailed documentation is available in the `docs/` directory:
 
 | Document | Description |
 |----------|-------------|
-| [HDL Overview](docs/hdl_overview.md) | Introduction to the HDL framework |
-| [Synthesizable DSL Guide](docs/synthesizable_dsl.md) | DSL reference for synthesizable components |
-| [Components Reference](docs/components.md) | Complete reference for all HDL components |
-| [Export Guide](docs/export.md) | Verilog and gate-level export |
-| [Sample CPU](docs/sample_cpu.md) | 8-bit sample CPU reference |
-| [MOS 6502](docs/mos6502.md) | MOS 6502 implementation |
-| [Debugging Guide](docs/debugging.md) | Signal probing, breakpoints, and TUI |
-| [Diagram Generation](docs/diagrams.md) | Multi-level circuit diagrams |
-| [Simulation Engine](docs/simulation_engine.md) | Core simulation infrastructure |
-| [Apple II I/O](docs/apple2_io.md) | Apple II bus emulation |
+| [Overview](docs/overview.md) | Introduction to the HDL framework |
+| [DSL Guide](docs/dsl.md) | DSL reference for synthesizable components |
+| [Components](docs/components.md) | Complete reference for all HDL components |
+| [Export](docs/export.md) | Verilog and gate-level export |
+| [8-bit CPU](docs/8bit_cpu.md) | Sample 8-bit CPU reference |
+| [MOS 6502](docs/mos6502_cpu.md) | MOS 6502 CPU implementation |
+| [Apple II](docs/apple2.md) | Apple II emulation |
+| [Simulation](docs/simulation.md) | Core simulation infrastructure |
+| [Debugging](docs/debugging.md) | Signal probing, breakpoints, and TUI |
+| [Diagrams](docs/diagrams.md) | Multi-level circuit diagrams |
 
 ## Rake Tasks
 
