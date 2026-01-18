@@ -1,10 +1,15 @@
 # Declarative CPU - combines all CPU components
 # Generates Verilog module with full CPU structure
+#
+# This component uses only the declarative DSL (input, output, wire, instance, port).
+# The SimComponent base class automatically instantiates sub-components and creates
+# instance variables (@decoder, @alu, @pc, @acc, @sp) from the instance declarations.
 
 module RHDL
   module HDL
     module CPU
       class CPU < SimComponent
+        # Expose sub-components (automatically instantiated from 'instance' declarations)
         attr_reader :decoder, :alu, :pc, :acc, :sp
 
         # Clock and reset
@@ -44,8 +49,14 @@ module RHDL
         wire :instr_length, width: 2
         wire :sp_empty
 
-        # Declarative structure for synthesis
+        # Sub-components - automatically instantiated by SimComponent
         instance :decoder, InstructionDecoder
+        instance :alu, ALU, width: 8
+        instance :pc, ProgramCounter, width: 16
+        instance :acc, Register, width: 8
+        instance :sp, StackPointer, width: 8, initial: 0xFF
+
+        # Decoder connections
         port :instruction => [:decoder, :instruction]
         port :zero_flag => [:decoder, :zero_flag]
         port [:decoder, :alu_op] => :alu_op
@@ -61,43 +72,34 @@ module RHDL
         port [:decoder, :ret] => :ret_signal
         port [:decoder, :instr_length] => :instr_length
 
-        instance :alu, ALU, width: 8
+        # ALU connections
         port :acc_out => [:alu, :a]
         port :mem_data_in => [:alu, :b]
         port :alu_op => [:alu, :op]
         port [:alu, :result] => :alu_result
         port [:alu, :zero] => :alu_zero
 
-        instance :pc, ProgramCounter, width: 16
+        # Program counter connections
         port :clk => [:pc, :clk]
         port :rst => [:pc, :rst]
         port [:pc, :q] => :pc_out
 
-        instance :acc, Register, width: 8
+        # Accumulator connections
         port :clk => [:acc, :clk]
         port :rst => [:acc, :rst]
         port :alu_result => [:acc, :d]
         port [:acc, :q] => :acc_out
 
-        instance :sp, StackPointer, width: 8, initial: 0xFF
+        # Stack pointer connections
         port :clk => [:sp, :clk]
         port :rst => [:sp, :rst]
         port [:sp, :q] => :sp_out
         port [:sp, :empty] => :sp_empty
 
+        # Output routing
         port :halt_signal => :halt
         port :mem_read => :mem_read_en
         port :mem_write => :mem_write_en
-
-        def initialize(name = nil)
-          super(name)
-          # Instantiate components for behavioral simulation
-          @decoder = InstructionDecoder.new("#{name}_decoder")
-          @alu = ALU.new("#{name}_alu", width: 8)
-          @pc = ProgramCounter.new("#{name}_pc", width: 16)
-          @acc = Register.new("#{name}_acc", width: 8)
-          @sp = StackPointer.new("#{name}_sp", width: 8, initial: 0xFF)
-        end
       end
     end
   end
