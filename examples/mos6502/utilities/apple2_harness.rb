@@ -2,8 +2,10 @@
 
 require_relative '../hdl/cpu_harness'
 require_relative 'apple2_bus'
+require_relative 'isa_simulator'
 
 module Apple2Harness
+  # HDL-based runner using cycle-accurate simulation
   class Runner
     attr_reader :cpu, :bus
 
@@ -98,6 +100,105 @@ module Apple2Harness
     # Get total CPU cycles
     def cycle_count
       @cpu.clock_count
+    end
+  end
+
+  # ISA-level runner using fast instruction-level simulation
+  # Provides the same interface as Runner but uses ISASimulator for performance
+  class ISARunner
+    attr_reader :cpu, :bus
+
+    def initialize
+      @bus = MOS6502::Apple2Bus.new("apple2_bus")
+      @cpu = MOS6502::ISASimulator.new(@bus)
+    end
+
+    def load_rom(bytes, base_addr:)
+      @bus.load_rom(bytes, base_addr: base_addr)
+    end
+
+    def load_ram(bytes, base_addr:)
+      @bus.load_ram(bytes, base_addr: base_addr)
+    end
+
+    def reset
+      # Read reset vector from bus
+      lo = @bus.read(MOS6502::ISASimulator::RESET_VECTOR)
+      hi = @bus.read(MOS6502::ISASimulator::RESET_VECTOR + 1)
+      @cpu.pc = (hi << 8) | lo
+      @cpu.instance_variable_set(:@sp, 0xFD)
+      @cpu.instance_variable_set(:@p, 0x24)
+      @cpu.instance_variable_set(:@a, 0)
+      @cpu.instance_variable_set(:@x, 0)
+      @cpu.instance_variable_set(:@y, 0)
+      @cpu.instance_variable_set(:@cycles, 0)
+      @cpu.instance_variable_set(:@halted, false)
+    end
+
+    def run_steps(steps)
+      # Run approximately this many cycles worth of instructions
+      @cpu.run_cycles(steps)
+    end
+
+    def run_until(max_cycles: 200_000)
+      cycles = 0
+      start_cycles = @cpu.cycles
+      while (@cpu.cycles - start_cycles) < max_cycles && !@cpu.halted?
+        @cpu.step
+        break if yield
+      end
+      @cpu.cycles - start_cycles
+    end
+
+    # Terminal I/O helpers
+
+    def inject_key(ascii)
+      @bus.inject_key(ascii)
+    end
+
+    def key_ready?
+      @bus.key_ready
+    end
+
+    def clear_key
+      @bus.clear_key
+    end
+
+    def read_screen
+      @bus.read_text_page_string
+    end
+
+    def read_screen_array
+      @bus.read_text_page
+    end
+
+    def screen_dirty?
+      @bus.text_page_dirty?
+    end
+
+    def clear_screen_dirty
+      @bus.clear_text_page_dirty
+    end
+
+    def cpu_state
+      {
+        pc: @cpu.pc,
+        a: @cpu.a,
+        x: @cpu.x,
+        y: @cpu.y,
+        sp: @cpu.sp,
+        p: @cpu.p,
+        cycles: @cpu.cycles,
+        halted: @cpu.halted?
+      }
+    end
+
+    def halted?
+      @cpu.halted?
+    end
+
+    def cycle_count
+      @cpu.cycles
     end
   end
 end

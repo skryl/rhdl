@@ -34,12 +34,18 @@ class Apple2Terminal
 
   def initialize(options = {})
     @options = options
-    @runner = Apple2Harness::Runner.new
+    # Use ISARunner for fast mode, HDL Runner for cycle-accurate mode
+    @runner = if options[:fast]
+                Apple2Harness::ISARunner.new
+              else
+                Apple2Harness::Runner.new
+              end
     @running = false
     @last_screen = nil
     @cycles_per_frame = options[:speed] || 10_000
     @debug = options[:debug] || false
     @green_screen = options[:green] || false
+    @fast_mode = options[:fast] || false
   end
 
   def load_rom(path, base_addr: 0xF800)
@@ -71,7 +77,8 @@ class Apple2Terminal
     trap('INT') { stop }
     trap('TERM') { stop }
 
-    puts "Starting Apple ][ emulator..."
+    mode = @fast_mode ? "ISA (fast)" : "HDL (cycle-accurate)"
+    puts "Starting Apple ][ emulator... [#{mode} mode]"
     puts "Press Ctrl+C to exit"
     puts "Press any key to continue..."
     sleep 0.5
@@ -359,7 +366,8 @@ options = {
   speed: 10_000,
   debug: false,
   green: false,
-  demo: false
+  demo: false,
+  fast: false
 }
 
 parser = OptionParser.new do |opts|
@@ -391,6 +399,10 @@ parser = OptionParser.new do |opts|
 
   opts.on("-g", "--green", "Green phosphor screen effect") do
     options[:green] = true
+  end
+
+  opts.on("-f", "--fast", "Use fast ISA-level simulator (not cycle-accurate)") do
+    options[:fast] = true
   end
 
   opts.on("--demo", "Run built-in demo program") do
