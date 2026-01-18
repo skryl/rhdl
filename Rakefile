@@ -1540,3 +1540,184 @@ end
 
 desc "Run Ink TUI (alias for tui:run)"
 task tui: 'tui:run'
+
+# =============================================================================
+# Apple II TUI Tasks
+# =============================================================================
+
+namespace :apple2 do
+  TUI_INK_DIR = File.expand_path('tui-ink', __dir__)
+  APPLE2_DIR = File.expand_path('examples/mos6502', __dir__)
+
+  desc "Run Apple II emulator with Ink TUI"
+  task :ink => 'tui:build' do
+    $LOAD_PATH.unshift File.join(APPLE2_DIR, 'utilities')
+
+    require_relative 'examples/mos6502/utilities/apple2_harness'
+    require_relative 'examples/mos6502/utilities/apple2_ink_adapter'
+
+    puts "Starting Apple ][ Ink TUI..."
+    puts "=" * 50
+
+    # Create the demo program (same as bin/apple2 --demo)
+    demo = create_apple2_demo_program
+
+    # Use ISA runner for speed
+    runner = Apple2Harness::ISARunner.new
+    runner.load_ram(demo, base_addr: 0x0800)
+
+    # Set reset vector
+    runner.bus.write(0xFFFC, 0x00)
+    runner.bus.write(0xFFFD, 0x08)
+
+    runner.reset
+
+    # Create and run Ink adapter
+    adapter = Apple2Harness::InkAdapter.new(runner, mode: :isa)
+    adapter.run
+  end
+
+  desc "Run Apple II emulator with Ink TUI (HDL mode)"
+  task :ink_hdl => 'tui:build' do
+    $LOAD_PATH.unshift File.join(APPLE2_DIR, 'utilities')
+
+    require_relative 'examples/mos6502/utilities/apple2_harness'
+    require_relative 'examples/mos6502/utilities/apple2_ink_adapter'
+
+    puts "Starting Apple ][ Ink TUI (HDL mode)..."
+    puts "=" * 50
+
+    # Create the demo program
+    demo = create_apple2_demo_program
+
+    # Use HDL runner for cycle accuracy
+    runner = Apple2Harness::Runner.new
+    runner.load_ram(demo, base_addr: 0x0800)
+
+    # Set reset vector
+    runner.bus.write(0xFFFC, 0x00)
+    runner.bus.write(0xFFFD, 0x08)
+
+    runner.reset
+
+    # Create and run Ink adapter
+    adapter = Apple2Harness::InkAdapter.new(runner, mode: :hdl)
+    adapter.run
+  end
+
+  desc "Run Apple II with program file using Ink TUI"
+  task :ink_run, [:program] => 'tui:build' do |t, args|
+    unless args[:program]
+      puts "Usage: rake apple2:ink_run[path/to/program.bin]"
+      exit 1
+    end
+
+    $LOAD_PATH.unshift File.join(APPLE2_DIR, 'utilities')
+
+    require_relative 'examples/mos6502/utilities/apple2_harness'
+    require_relative 'examples/mos6502/utilities/apple2_ink_adapter'
+
+    program_path = args[:program]
+    unless File.exist?(program_path)
+      puts "Error: Program file not found: #{program_path}"
+      exit 1
+    end
+
+    puts "Starting Apple ][ Ink TUI with #{program_path}..."
+    puts "=" * 50
+
+    # Load program
+    program = File.binread(program_path).bytes
+
+    runner = Apple2Harness::ISARunner.new
+    runner.load_ram(program, base_addr: 0x0800)
+
+    # Set reset vector
+    runner.bus.write(0xFFFC, 0x00)
+    runner.bus.write(0xFFFD, 0x08)
+
+    runner.reset
+
+    # Create and run Ink adapter
+    adapter = Apple2Harness::InkAdapter.new(runner, mode: :isa)
+    adapter.run
+  end
+end
+
+# Helper to create the Apple II demo program
+def create_apple2_demo_program
+  asm = []
+
+  cursor_lo = 0x00
+  cursor_hi = 0x01
+
+  # INIT: Set up cursor at start of text page
+  asm << 0xA9 << 0x00        # LDA #$00
+  asm << 0x85 << cursor_lo   # STA $00
+  asm << 0xA9 << 0x04        # LDA #$04
+  asm << 0x85 << cursor_hi   # STA $01
+
+  # Clear text page
+  asm << 0xA0 << 0x00        # LDY #$00
+  asm << 0xA9 << 0xA0        # LDA #$A0 (space)
+  asm << 0x91 << cursor_lo   # STA ($00),Y
+  asm << 0xC8                # INY
+  asm << 0xD0 << 0xFB        # BNE -5
+  asm << 0xE6 << cursor_hi   # INC $01
+  asm << 0xA5 << cursor_hi   # LDA $01
+  asm << 0xC9 << 0x08        # CMP #$08
+  asm << 0xD0 << 0xF3        # BNE -13
+
+  # Reset cursor
+  asm << 0xA9 << 0x00        # LDA #$00
+  asm << 0x85 << cursor_lo   # STA $00
+  asm << 0xA9 << 0x04        # LDA #$04
+  asm << 0x85 << cursor_hi   # STA $01
+
+  # Print "APPLE ][ READY" message
+  message = "APPLE ][ READY\r"
+  print_char = asm.length + message.length * 5 + 20
+
+  message.each_byte do |b|
+    b = b | 0x80
+    asm << 0xA9 << b         # LDA #char
+    asm << 0x20 << (print_char & 0xFF) << ((print_char >> 8) + 0x08)  # JSR
+  end
+
+  # Main loop
+  main_loop = asm.length
+  asm << 0xAD << 0x00 << 0xC0  # LDA $C000
+  asm << 0x10 << 0xFB          # BPL -5
+  asm << 0x8D << 0x10 << 0xC0  # STA $C010
+  asm << 0x29 << 0x7F          # AND #$7F
+  asm << 0xC9 << 0x0D          # CMP #$0D
+  asm << 0xF0 << 0x08          # BEQ +8 (newline)
+  asm << 0x09 << 0x80          # ORA #$80
+  asm << 0x20 << (print_char & 0xFF) << ((print_char >> 8) + 0x08)  # JSR
+  asm << 0x4C << (main_loop & 0xFF) << ((main_loop >> 8) + 0x08)  # JMP
+
+  # Newline handler
+  asm << 0x18                  # CLC
+  asm << 0xA5 << cursor_lo     # LDA $00
+  asm << 0x69 << 0x28          # ADC #40
+  asm << 0x85 << cursor_lo     # STA $00
+  asm << 0xA5 << cursor_hi     # LDA $01
+  asm << 0x69 << 0x00          # ADC #0
+  asm << 0x85 << cursor_hi     # STA $01
+  asm << 0xC9 << 0x08          # CMP #$08
+  asm << 0x90 << 0x04          # BCC +4
+  asm << 0xA9 << 0x04          # LDA #$04
+  asm << 0x85 << cursor_hi     # STA $01
+  asm << 0x4C << (main_loop & 0xFF) << ((main_loop >> 8) + 0x08)  # JMP
+
+  # Print char subroutine
+  print_char_actual = asm.length
+  asm << 0xA0 << 0x00          # LDY #$00
+  asm << 0x91 << cursor_lo     # STA ($00),Y
+  asm << 0xE6 << cursor_lo     # INC $00
+  asm << 0xD0 << 0x02          # BNE +2
+  asm << 0xE6 << cursor_hi     # INC $01
+  asm << 0x60                  # RTS
+
+  asm
+end
