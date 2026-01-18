@@ -39,21 +39,21 @@ module MOS6502
     port_output :sync
 
     # Internal signals for datapath <-> memory connection
-    port_signal :mem_data_out, width: 8    # Memory read data -> datapath
-    port_signal :dp_addr, width: 16        # Datapath address -> memory
-    port_signal :dp_data_out, width: 8     # Datapath write data -> memory
-    port_signal :dp_rw                     # Datapath read/write -> memory
-    port_signal :dp_sync                   # Datapath sync signal
-    port_signal :dp_reg_a, width: 8
-    port_signal :dp_reg_x, width: 8
-    port_signal :dp_reg_y, width: 8
-    port_signal :dp_reg_sp, width: 8
-    port_signal :dp_reg_pc, width: 16
-    port_signal :dp_reg_p, width: 8
-    port_signal :dp_opcode, width: 8
-    port_signal :dp_state, width: 8
-    port_signal :dp_halted
-    port_signal :dp_cycle_count, width: 32
+    wire :mem_data_out, width: 8    # Memory read data -> datapath
+    wire :dp_addr, width: 16        # Datapath address -> memory
+    wire :dp_data_out, width: 8     # Datapath write data -> memory
+    wire :dp_rw                     # Datapath read/write -> memory
+    wire :dp_sync                   # Datapath sync signal
+    wire :dp_reg_a, width: 8
+    wire :dp_reg_x, width: 8
+    wire :dp_reg_y, width: 8
+    wire :dp_reg_sp, width: 8
+    wire :dp_reg_pc, width: 16
+    wire :dp_reg_p, width: 8
+    wire :dp_opcode, width: 8
+    wire :dp_state, width: 8
+    wire :dp_halted
+    wire :dp_cycle_count, width: 32
 
     # Component instances
     instance :datapath, Datapath
