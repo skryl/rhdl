@@ -9,7 +9,7 @@ require_relative 'hdl/combinational'
 require_relative 'hdl/memory'
 require_relative 'debug'
 require_relative 'tui'
-require_relative 'hdl/cpu'
+require_relative 'hdl/cpu/harness'
 
 module RHDL
   module HDL
@@ -37,7 +37,7 @@ module RHDL
 
     # Create an HDL CPU instance
     def self.cpu(name = nil)
-      CPU::CPU.new(name)
+      CPU::Harness.new(name)
     end
   end
 end
