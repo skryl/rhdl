@@ -1,6 +1,6 @@
-require_relative "export/ir"
-require_relative "export/lower"
-require_relative "export/verilog"
+require_relative "export/behavioral/ir"
+require_relative "export/behavioral/lower"
+require_relative "export/behavioral/verilog"
 
 module RHDL
   module Export

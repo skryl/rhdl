@@ -14,10 +14,10 @@ The gate-level backend flattens simulation components into a gate IR (`RHDL::Gat
 
 ### Key files
 
-* `lib/rhdl/gates/ir.rb` – Gate-level IR and JSON serialization.
-* `lib/rhdl/gates/lower.rb` – Lowering pass from HDL components into IR, plus optional netlist dump via `RHDL_DUMP_NETLIST=1`.
-* `lib/rhdl/gates/sim_cpu.rb` – Packed-lane CPU simulator backend.
-* `lib/rhdl/gates/sim_gpu.rb` – GPU backend stub (optional build).
+* `lib/rhdl/export/structural/ir.rb` – Gate-level IR and JSON serialization.
+* `lib/rhdl/export/structural/lower.rb` – Lowering pass from HDL components into IR, plus optional netlist dump via `RHDL_DUMP_NETLIST=1`.
+* `lib/rhdl/export/structural/sim_cpu.rb` – Packed-lane CPU simulator backend.
+* `lib/rhdl/export/structural/sim_gpu.rb` – GPU backend stub (optional build).
 
 ### Running the backend
 

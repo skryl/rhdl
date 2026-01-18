@@ -1,9 +1,9 @@
-require_relative 'gates/ir'
-require_relative 'gates/primitives'
-require_relative 'gates/toposort'
-require_relative 'gates/lower'
-require_relative 'gates/sim_cpu'
-require_relative 'gates/sim_gpu'
+require_relative 'export/structural/ir'
+require_relative 'export/structural/primitives'
+require_relative 'export/structural/toposort'
+require_relative 'export/structural/lower'
+require_relative 'export/structural/sim_cpu'
+require_relative 'export/structural/sim_gpu'
 
 module RHDL
   module Gates
