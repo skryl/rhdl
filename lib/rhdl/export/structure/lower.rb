@@ -232,8 +232,6 @@ module RHDL
             lower_instruction_decoder(component)
           when RHDL::HDL::CPU::Datapath
             lower_datapath(component)
-          when RHDL::HDL::CPU::SynthDatapath
-            lower_synth_datapath(component)
           # MOS6502 components
           when MOS6502::Registers
             lower_mos6502_registers(component)
@@ -2681,46 +2679,8 @@ module RHDL
         reduce_and(eq_bits)
       end
 
-      # Datapath: Hierarchical composition - recursively lower subcomponents
+      # Datapath: Hierarchical structure composition
       def lower_datapath(component)
-        # The Datapath contains subcomponents that need to be lowered
-        # For gate-level synthesis, we would need to expose internal wiring
-        # This is a placeholder that creates buffer passthrough for I/O
-
-        rst_net = map_bus(component.inputs[:rst]).first if component.inputs[:rst]
-        pc_out_nets = map_bus(component.outputs[:pc_out]) if component.outputs[:pc_out]
-        acc_out_nets = map_bus(component.outputs[:acc_out]) if component.outputs[:acc_out]
-        zero_flag_net = map_bus(component.outputs[:zero_flag]).first if component.outputs[:zero_flag]
-        halted_net = map_bus(component.outputs[:halted]).first if component.outputs[:halted]
-
-        # Initialize outputs to 0
-        pc_out_nets&.each do |out|
-          const_zero = new_temp
-          @ir.add_gate(type: Primitives::CONST, inputs: [], output: const_zero, value: 0)
-          @ir.add_gate(type: Primitives::BUF, inputs: [const_zero], output: out)
-        end
-
-        acc_out_nets&.each do |out|
-          const_zero = new_temp
-          @ir.add_gate(type: Primitives::CONST, inputs: [], output: const_zero, value: 0)
-          @ir.add_gate(type: Primitives::BUF, inputs: [const_zero], output: out)
-        end
-
-        if zero_flag_net
-          const_zero = new_temp
-          @ir.add_gate(type: Primitives::CONST, inputs: [], output: const_zero, value: 0)
-          @ir.add_gate(type: Primitives::BUF, inputs: [const_zero], output: zero_flag_net)
-        end
-
-        if halted_net
-          const_zero = new_temp
-          @ir.add_gate(type: Primitives::CONST, inputs: [], output: const_zero, value: 0)
-          @ir.add_gate(type: Primitives::BUF, inputs: [const_zero], output: halted_net)
-        end
-      end
-
-      # SynthDatapath: Hierarchical structure composition
-      def lower_synth_datapath(component)
         # Get instance and connection definitions from the class
         instance_defs = component.class._instance_defs
         connection_defs = component.class._connection_defs
@@ -3449,7 +3409,7 @@ module RHDL
 
       # MOS6502 Datapath: structure composition using structure DSL
       def lower_mos6502_datapath(component)
-        # Use the same approach as SynthDatapath - process structure instances
+        # Use the same approach as Datapath - process structure instances
         instance_defs = component.class._instance_defs
         connection_defs = component.class._connection_defs
 

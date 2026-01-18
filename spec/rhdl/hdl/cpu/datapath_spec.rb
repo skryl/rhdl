@@ -2,14 +2,14 @@
 
 require 'spec_helper'
 
-RSpec.describe RHDL::HDL::CPU::SynthDatapath do
+RSpec.describe RHDL::HDL::CPU::Datapath do
   describe 'structure' do
     it 'has a structure block defined' do
-      expect(RHDL::HDL::CPU::SynthDatapath.structure_defined?).to be_truthy
+      expect(RHDL::HDL::CPU::Datapath.structure_defined?).to be_truthy
     end
 
     it 'defines expected ports' do
-      datapath = RHDL::HDL::CPU::SynthDatapath.new('dp')
+      datapath = RHDL::HDL::CPU::Datapath.new('dp')
 
       # Clock and reset
       expect(datapath.inputs.keys).to include(:clk, :rst)
@@ -25,7 +25,7 @@ RSpec.describe RHDL::HDL::CPU::SynthDatapath do
 
   describe 'synthesis' do
     it 'generates valid IR' do
-      ir = RHDL::HDL::CPU::SynthDatapath.to_ir
+      ir = RHDL::HDL::CPU::Datapath.to_ir
       expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
 
       # Check ports exist (port names are symbols)
@@ -34,8 +34,8 @@ RSpec.describe RHDL::HDL::CPU::SynthDatapath do
     end
 
     it 'generates valid Verilog' do
-      verilog = RHDL::HDL::CPU::SynthDatapath.to_verilog
-      expect(verilog).to include('module synth_datapath')
+      verilog = RHDL::HDL::CPU::Datapath.to_verilog
+      expect(verilog).to include('module datapath')
       expect(verilog).to include('input clk')
       expect(verilog).to include('input rst')
       expect(verilog).to include('input [7:0] mem_data_in')
@@ -44,29 +44,29 @@ RSpec.describe RHDL::HDL::CPU::SynthDatapath do
     end
 
     it 'includes submodule instantiations in Verilog' do
-      verilog = RHDL::HDL::CPU::SynthDatapath.to_verilog
+      verilog = RHDL::HDL::CPU::Datapath.to_verilog
       # Structure components should have instance declarations
       expect(verilog).to include('instruction_decoder') | include('alu') | include('program_counter')
     end
   end
 
   describe 'gate-level netlist' do
-    let(:component) { RHDL::HDL::CPU::SynthDatapath.new('synth_dp') }
-    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'synth_dp') }
+    let(:component) { RHDL::HDL::CPU::Datapath.new('datapath') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'datapath') }
 
     it 'generates correct IR structure' do
-      expect(ir.inputs.keys).to include('synth_dp.clk', 'synth_dp.rst', 'synth_dp.mem_data_in')
-      expect(ir.outputs.keys).to include('synth_dp.mem_addr', 'synth_dp.halt')
+      expect(ir.inputs.keys).to include('datapath.clk', 'datapath.rst', 'datapath.mem_data_in')
+      expect(ir.outputs.keys).to include('datapath.mem_addr', 'datapath.halt')
     end
 
     it 'generates gates from subcomponents' do
-      # SynthDatapath should have gates from ALU, decoder, etc.
+      # Datapath should have gates from ALU, decoder, etc.
       expect(ir.gates.length).to be > 100  # Complex component
     end
 
     it 'generates valid structure Verilog' do
       verilog = NetlistHelper.ir_to_structure_verilog(ir)
-      expect(verilog).to include('module synth_dp')
+      expect(verilog).to include('module datapath')
       expect(verilog).to include('input clk')
       expect(verilog).to include('output halt')
     end

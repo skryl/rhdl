@@ -49,10 +49,10 @@ rhdl/
 │   │   ├── combinational.rb     # Multiplexers, decoders
 │   │   ├── memory.rb            # RAM, ROM, register files
 │   │   └── cpu/                 # HDL CPU implementation
-│   │       ├── datapath.rb      # Behavioral CPU datapath
-│   │       ├── synth_datapath.rb # Synthesizable CPU datapath
-│   │       ├── instruction_decoder.rb # Instruction decoder
-│   │       └── adapter.rb       # Behavioral/HDL adapter
+│   │       ├── cpu.rb           # Declarative CPU (combines all components)
+│   │       ├── harness.rb       # Behavioral simulation wrapper
+│   │       ├── datapath.rb      # Synthesizable CPU datapath
+│   │       └── instruction_decoder.rb # Instruction decoder
 │   ├── export/                  # Export infrastructure
 │   │   ├── behavior/            # RTL/Verilog export
 │   │   │   ├── ir.rb            # Behavior intermediate representation
@@ -461,3 +461,48 @@ Follow these conventions for file organization:
 - The `lib/rhdl/hdl/` directory should only contain component definitions
 - Non-component utilities (diagram rendering, export tools, etc.) belong in their own top-level directories (e.g., `diagram/`, `export/`)
 - Component mixins and extension methods should be defined outside `hdl/` and included into components from hdl.rb
+
+### HDL Component Guidelines
+
+**All new components MUST use the declarative DSL only.** Do not override `initialize` to manually instantiate sub-components - the `SimComponent` base class handles this automatically.
+
+**Declarative DSL methods:**
+- `input :name, width: N` - Define input port
+- `output :name, width: N` - Define output port
+- `wire :name, width: N` - Define internal signal
+- `instance :name, ComponentClass, params` - Declare sub-component
+- `port :signal => [:instance, :port]` - Connect signal to instance port
+- `behavior do ... end` - Define combinational logic
+
+**Example component using only declarative DSL:**
+```ruby
+class MyDatapath < SimComponent
+  # Ports - the ONLY interface to the component
+  input :clk
+  input :a, width: 8
+  input :b, width: 8
+  output :result, width: 8
+
+  # Internal signals
+  wire :alu_out, width: 8
+
+  # Sub-components (automatically instantiated, private to component)
+  instance :alu, ALU, width: 8
+  instance :reg, Register, width: 8
+
+  # Connections
+  port :a => [:alu, :a]
+  port :b => [:alu, :b]
+  port [:alu, :result] => :alu_out
+  port :alu_out => [:reg, :d]
+  port :clk => [:reg, :clk]
+  port [:reg, :q] => :result
+end
+```
+
+**Key points:**
+- The `instance` DSL automatically creates instance variables (`@alu`, `@reg`) and populates `@subcomponents`
+- **Do NOT use `attr_reader` to expose sub-components** - all interaction must be through ports
+- Components should be fully encapsulated - external code uses `set_input`/`get_output` only
+- Never override `initialize` unless absolutely necessary for non-DSL functionality
+- The DSL supports both simulation and Verilog export automatically
