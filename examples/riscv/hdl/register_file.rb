@@ -72,10 +72,19 @@ module RISCV
     def update_outputs
       rs1_addr = in_val(:rs1_addr)
       rs2_addr = in_val(:rs2_addr)
+      rd_addr = in_val(:rd_addr)
+      rd_data = in_val(:rd_data)
+      rd_we = in_val(:rd_we)
 
-      # x0 always returns 0
-      rs1_val = rs1_addr == 0 ? 0 : @regs[rs1_addr]
-      rs2_val = rs2_addr == 0 ? 0 : @regs[rs2_addr]
+      # Internal forwarding: if reading the register being written, return write data
+      # This handles the write-read hazard when WB and ID happen in the same cycle
+      if rd_we == 1 && rd_addr != 0
+        rs1_val = (rs1_addr == rd_addr) ? rd_data : (rs1_addr == 0 ? 0 : @regs[rs1_addr])
+        rs2_val = (rs2_addr == rd_addr) ? rd_data : (rs2_addr == 0 ? 0 : @regs[rs2_addr])
+      else
+        rs1_val = rs1_addr == 0 ? 0 : @regs[rs1_addr]
+        rs2_val = rs2_addr == 0 ? 0 : @regs[rs2_addr]
+      end
 
       out_set(:rs1_data, rs1_val)
       out_set(:rs2_data, rs2_val)
