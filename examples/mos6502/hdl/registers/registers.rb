@@ -1,9 +1,9 @@
 # MOS 6502 CPU Registers (A, X, Y) - Synthesizable DSL Version
 # 8-bit General Purpose Registers using sequential DSL for automatic synthesis
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module MOS6502
   # 8-bit General Purpose Registers (A, X, Y) - Synthesizable via Sequential DSL

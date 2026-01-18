@@ -2,8 +2,8 @@
 # Computes effective addresses for all 6502 addressing modes
 # Combinational logic - synthesized from behavior DSL
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
 
 module MOS6502
   class AddressGenerator < RHDL::HDL::SimComponent

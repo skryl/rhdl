@@ -1,9 +1,9 @@
 # MOS 6502 Instruction Register - Synthesizable DSL Version
 # Holds opcode and operand bytes during instruction execution
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module MOS6502
   # Instruction Register and Operand Latches - Synthesizable via Sequential DSL

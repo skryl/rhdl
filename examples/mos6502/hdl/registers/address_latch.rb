@@ -1,9 +1,9 @@
 # MOS 6502 Address Latch - Synthesizable DSL Version
 # 16-bit address latch with byte-wise and full loading
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module MOS6502
   # Address Latch - Synthesizable via Sequential DSL

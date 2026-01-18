@@ -2,9 +2,9 @@
 # Uses MemoryDSL for Verilog/VHDL export
 # 64KB addressable memory with RAM and ROM regions
 
-require_relative '../../lib/rhdl'
-require_relative '../../lib/rhdl/dsl/memory_dsl'
-require_relative '../../lib/rhdl/dsl/extended_behavior'
+require_relative '../../../lib/rhdl'
+require_relative '../../../lib/rhdl/dsl/memory_dsl'
+require_relative '../../../lib/rhdl/dsl/extended_behavior'
 
 module MOS6502
   # Synthesizable 64KB memory for 6502
