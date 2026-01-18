@@ -1,31 +1,8 @@
-# HDL CPU Adapter
-# Provides the same interface as the behavior CPU for compatibility
+# CPU adapter providing the same interface as behavioral CPU
 
 module RHDL
   module HDL
     module CPU
-      # Memory adapter that wraps HDL RAM with behavior Memory interface
-      class MemoryAdapter
-        def initialize(ram)
-          @ram = ram
-        end
-
-        def read(addr)
-          @ram.read_mem(addr & 0xFFFF)
-        end
-
-        def write(addr, value)
-          @ram.write_mem(addr & 0xFFFF, value & 0xFF)
-        end
-
-        def load(program, start_addr = 0)
-          program.each_with_index do |byte, i|
-            write(start_addr + i, byte)
-          end
-        end
-      end
-
-      # CPU adapter providing the same interface as RHDL::Components::CPU::CPU
       class CPUAdapter
         attr_reader :memory
 

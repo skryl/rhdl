@@ -5,7 +5,8 @@ require_relative 'cpu/instruction_decoder'
 require_relative 'cpu/accumulator'
 require_relative 'cpu/synth_datapath'
 require_relative 'cpu/datapath'
-require_relative 'cpu/adapter'
+require_relative 'cpu/memory_adapter'
+require_relative 'cpu/cpu_adapter'
 
 module RHDL
   module HDL
