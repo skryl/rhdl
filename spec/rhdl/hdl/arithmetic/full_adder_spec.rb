@@ -39,10 +39,10 @@ RSpec.describe RHDL::HDL::FullAdder do
       expect(verilog).to include('assign cout')
     end
 
-    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+    context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::FullAdder.to_verilog
-        behavioral = RHDL::HDL::FullAdder.new
+        behavior = RHDL::HDL::FullAdder.new
 
         inputs = { a: 1, b: 1, cin: 1 }
         outputs = { sum: 1, cout: 1 }
@@ -60,26 +60,26 @@ RSpec.describe RHDL::HDL::FullAdder do
         ]
 
         test_cases.each do |tc|
-          behavioral.set_input(:a, tc[:a])
-          behavioral.set_input(:b, tc[:b])
-          behavioral.set_input(:cin, tc[:cin])
-          behavioral.propagate
+          behavior.set_input(:a, tc[:a])
+          behavior.set_input(:b, tc[:b])
+          behavior.set_input(:cin, tc[:cin])
+          behavior.propagate
           vectors << {
             inputs: tc,
             expected: {
-              sum: behavioral.get_output(:sum),
-              cout: behavioral.get_output(:cout)
+              sum: behavior.get_output(:sum),
+              cout: behavior.get_output(:cout)
             }
           }
         end
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'full_adder',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/full_adder'
+          base_dir: 'tmp/behavior_test/full_adder'
         )
 
         expect(result[:success]).to be(true), result[:error]
@@ -96,7 +96,7 @@ RSpec.describe RHDL::HDL::FullAdder do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::FullAdder.new('full_adder') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'full_adder') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'full_adder') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('full_adder.a', 'full_adder.b', 'full_adder.cin')
@@ -104,8 +104,8 @@ RSpec.describe RHDL::HDL::FullAdder do
       expect(ir.gates.length).to eq(5)
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module full_adder')
       expect(verilog).to include('input cin')
     end
@@ -123,7 +123,7 @@ RSpec.describe RHDL::HDL::FullAdder do
           { inputs: { a: 1, b: 1, cin: 1 }, expected: { sum: 1, cout: 1 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/full_adder')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/full_adder')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|

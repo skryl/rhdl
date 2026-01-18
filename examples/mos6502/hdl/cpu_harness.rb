@@ -1,5 +1,5 @@
 # MOS 6502 CPU Harness - Simulation Test Harness
-# Wraps the synthesizable CPU for behavioral simulation and testing
+# Wraps the synthesizable CPU for behavior simulation and testing
 # Provides high-level methods for stepping, running, and debugging
 
 require_relative '../../../lib/rhdl/hdl'

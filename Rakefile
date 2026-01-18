@@ -284,7 +284,7 @@ namespace :diagrams do
     base_path = File.join(base_dir, name)
 
     # Lower to gate-level IR
-    ir = RHDL::Gates::Lower.from_components([component], name: component.name)
+    ir = RHDL::Export::Structural::Lower.from_components([component], name: component.name)
 
     # Build gate-level diagram
     diagram = RHDL::Diagram.gate_level(ir)
@@ -445,7 +445,7 @@ namespace :diagrams do
   desc "Generate gate-level diagrams (primitive gates and flip-flops)"
   task :gate do
     require_relative 'lib/rhdl/hdl'
-    require_relative 'lib/rhdl/gates'
+    require_relative 'lib/rhdl/export'
     require_relative 'lib/rhdl/diagram'
 
     puts "Generating gate-level diagrams..."
@@ -547,7 +547,7 @@ namespace :hdl do
     FileUtils.mkdir_p(VERILOG_DIR)
 
     # Get all exportable components from lib
-    components = RHDL::Exporter.list_components
+    components = RHDL::Export.list_components
 
     if components.empty?
       puts "No exportable components found in lib/."
@@ -627,7 +627,7 @@ namespace :hdl do
 
     FileUtils.mkdir_p(VERILOG_DIR)
 
-    components = RHDL::Exporter.list_components
+    components = RHDL::Export.list_components
     puts "Exporting #{components.size} components to Verilog..."
 
     components.each do |info|
@@ -754,7 +754,7 @@ namespace :gates do
   desc "Export all components to gate-level IR (JSON netlists)"
   task :export do
     require_relative 'lib/rhdl/hdl'
-    require_relative 'lib/rhdl/gates'
+    require_relative 'lib/rhdl/export'
 
     puts "RHDL Gate-Level Synthesis Export"
     puts "=" * 50
@@ -773,7 +773,7 @@ namespace :gates do
         FileUtils.mkdir_p(File.join(GATES_DIR, subdir))
 
         # Lower to gate-level IR
-        ir = RHDL::Gates::Lower.from_components([component], name: component.name)
+        ir = RHDL::Export::Structural::Lower.from_components([component], name: component.name)
 
         # Export to JSON
         json_file = File.join(GATES_DIR, "#{name}.json")
@@ -817,7 +817,7 @@ namespace :gates do
   desc "Export simcpu datapath to gate-level"
   task :simcpu do
     require_relative 'lib/rhdl/hdl'
-    require_relative 'lib/rhdl/gates'
+    require_relative 'lib/rhdl/export'
 
     puts "RHDL SimCPU Gate-Level Export"
     puts "=" * 50
@@ -844,7 +844,7 @@ namespace :gates do
       total_dffs = 0
 
       components.each do |name, component|
-        ir = RHDL::Gates::Lower.from_components([component], name: component.name)
+        ir = RHDL::Export::Structural::Lower.from_components([component], name: component.name)
 
         json_file = File.join(GATES_DIR, "#{name}.json")
         File.write(json_file, ir.to_json)
@@ -877,7 +877,7 @@ namespace :gates do
   desc "Show gate-level synthesis statistics"
   task :stats do
     require_relative 'lib/rhdl/hdl'
-    require_relative 'lib/rhdl/gates'
+    require_relative 'lib/rhdl/export'
 
     puts "RHDL Gate-Level Synthesis Statistics"
     puts "=" * 50
@@ -890,7 +890,7 @@ namespace :gates do
     GATE_SYNTH_COMPONENTS.each do |name, creator|
       begin
         component = creator.call
-        ir = RHDL::Gates::Lower.from_components([component], name: component.name)
+        ir = RHDL::Export::Structural::Lower.from_components([component], name: component.name)
         component_stats << {
           name: name,
           gates: ir.gates.length,
@@ -952,7 +952,7 @@ namespace :bench do
     RHDL::HDL::SimComponent.connect(dff.outputs[:q], not_gate.inputs[:a])
     RHDL::HDL::SimComponent.connect(not_gate.outputs[:y], dff.inputs[:d])
 
-    sim = RHDL::Gates.gate_level([not_gate, dff], backend: :cpu, lanes: lanes, name: 'bench_toggle')
+    sim = RHDL::Export.gate_level([not_gate, dff], backend: :cpu, lanes: lanes, name: 'bench_toggle')
 
     sim.poke('reg.rst', 0)
     sim.poke('reg.en', (1 << lanes) - 1)

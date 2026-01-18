@@ -65,7 +65,7 @@ RSpec.describe MOS6502::StackPointer do
     end
 
     context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
-      it 'behavioral Verilog compiles and runs' do
+      it 'behavior Verilog compiles and runs' do
         verilog = described_class.to_verilog
 
         inputs = { clk: 1, rst: 1, inc: 1, dec: 1, load: 1, data_in: 8 }
@@ -77,13 +77,13 @@ RSpec.describe MOS6502::StackPointer do
           { inputs: { clk: 0, rst: 0, inc: 0, dec: 1, load: 0, data_in: 0 } }
         ]
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'mos6502_stack_pointer',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/mos6502_stack_pointer',
+          base_dir: 'tmp/behavior_test/mos6502_stack_pointer',
           has_clock: true
         )
         expect(result[:success]).to be(true), result[:error]
@@ -93,7 +93,7 @@ RSpec.describe MOS6502::StackPointer do
 
   describe 'gate-level netlist' do
     let(:component) { described_class.new('mos6502_stack_pointer') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mos6502_stack_pointer') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mos6502_stack_pointer') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mos6502_stack_pointer.clk', 'mos6502_stack_pointer.rst')
@@ -106,15 +106,15 @@ RSpec.describe MOS6502::StackPointer do
       expect(ir.dffs.length).to be > 0
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module mos6502_stack_pointer')
       expect(verilog).to include('input clk')
       expect(verilog).to include('output [7:0] sp')
     end
 
     context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
-      it 'compiles and simulates structural Verilog' do
+      it 'compiles and simulates structure Verilog' do
         vectors = [
           { inputs: { clk: 0, rst: 1, inc: 0, dec: 0, load: 0, data_in: 0 } },
           { inputs: { clk: 1, rst: 1, inc: 0, dec: 0, load: 0, data_in: 0 } },
@@ -122,7 +122,7 @@ RSpec.describe MOS6502::StackPointer do
           { inputs: { clk: 1, rst: 0, inc: 0, dec: 1, load: 0, data_in: 0 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mos6502_stack_pointer')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mos6502_stack_pointer')
         expect(result[:success]).to be(true), result[:error]
       end
     end

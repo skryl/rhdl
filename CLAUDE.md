@@ -42,31 +42,42 @@ rhdl/
 │   │   ├── signal_panel.rb      # Signal display panel
 │   │   ├── waveform_panel.rb    # Waveform display
 │   │   └── ...                  # Other TUI components
-│   ├── hdl/                     # HDL components
+│   ├── hdl/                     # HDL components (component definitions ONLY)
 │   │   ├── gates.rb             # Logic gate primitives
 │   │   ├── sequential.rb        # Flip-flops, registers, counters
 │   │   ├── arithmetic.rb        # Adders, ALU, comparators
 │   │   ├── combinational.rb     # Multiplexers, decoders
 │   │   ├── memory.rb            # RAM, ROM, register files
-│   │   ├── diagram.rb           # Diagram generation
 │   │   └── cpu/                 # HDL CPU implementation
 │   │       ├── datapath.rb      # Behavioral CPU datapath
 │   │       ├── synth_datapath.rb # Synthesizable CPU datapath
 │   │       ├── instruction_decoder.rb # Instruction decoder
 │   │       └── adapter.rb       # Behavioral/HDL adapter
-│   ├── gates/                   # Gate-level synthesis
-│   │   ├── primitives.rb        # Gate primitives (AND, OR, XOR, NOT, MUX, DFF)
-│   │   ├── ir.rb                # Gate-level intermediate representation
-│   │   ├── lower.rb             # HDL to gate-level lowering (53 components)
-│   │   └── toposort.rb          # Topological sorting for simulation
+│   ├── export/                  # Export infrastructure
+│   │   ├── behavior/            # RTL/Verilog export
+│   │   │   ├── ir.rb            # Behavior intermediate representation
+│   │   │   ├── lower.rb         # Behavior lowering
+│   │   │   └── verilog.rb       # Verilog code generation
+│   │   └── structure/           # Gate-level synthesis
+│   │       ├── primitives.rb    # Gate primitives (AND, OR, XOR, NOT, MUX, DFF)
+│   │       ├── ir.rb            # Gate-level intermediate representation
+│   │       ├── lower.rb         # HDL to gate-level lowering (53 components)
+│   │       ├── toposort.rb      # Topological sorting
+│   │       ├── sim_cpu.rb       # CPU gate-level simulation
+│   │       └── sim_gpu.rb       # GPU gate-level simulation
 │   └── diagram/                 # Diagram module
+│       ├── component.rb         # Component diagram generation
+│       ├── hierarchy.rb         # Hierarchical diagrams
+│       ├── netlist.rb           # Netlist diagrams
+│       ├── gate_level.rb        # Gate-level diagrams
 │       ├── render_svg.rb        # SVG rendering
 │       ├── render_dot.rb        # Graphviz DOT format
-│       ├── gate_level.rb        # Gate-level diagrams
-│       └── netlist.rb           # Netlist generation
+│       ├── renderer.rb          # ASCII/Unicode circuit renderer
+│       ├── svg_renderer.rb      # SVG diagram renderer
+│       └── methods.rb           # Extension methods for components
 │
 ├── examples/                    # Example implementations
-│   ├── mos6502/                 # MOS 6502 behavioral CPU
+│   ├── mos6502/                 # MOS 6502 behavior CPU
 │   │   ├── cpu.rb               # 6502 CPU
 │   │   ├── alu.rb               # 6502 ALU
 │   │   ├── control_unit.rb      # State machine
@@ -127,7 +138,7 @@ The project uses these gems:
 - `iverilog` - Icarus Verilog for gate-level simulation tests
   - Install on Ubuntu/Debian: `apt-get install iverilog`
   - Install on macOS: `brew install icarus-verilog`
-  - When installed, enables iverilog simulation tests that verify gate-level synthesis matches behavioral simulation
+  - When installed, enables iverilog simulation tests that verify gate-level synthesis matches behavior simulation
 
 ### Installation
 
@@ -195,7 +206,7 @@ bundle exec rake spec_doc
 | Test Suite | Status |
 |------------|--------|
 | MOS 6502 CPU | 189+ tests passing |
-| Behavioral CPU | 47 tests passing |
+| Behavior CPU | 47 tests passing |
 | HDL CPU | 22 tests passing |
 | HDL Components | All passing |
 
@@ -207,12 +218,12 @@ Key test files:
 
 ### Gate-Level Simulation Tests
 
-When iverilog is installed, additional tests run that verify gate-level synthesis matches behavioral simulation:
+When iverilog is installed, additional tests run that verify gate-level synthesis matches behavior simulation:
 
-1. Gate-level IR is converted to structural Verilog
-2. A testbench generates test vectors from behavioral simulation
-3. iverilog compiles and runs the structural simulation
-4. Results are compared against expected behavioral outputs
+1. Gate-level IR is converted to structure Verilog
+2. A testbench generates test vectors from behavior simulation
+3. iverilog compiles and runs the structure simulation
+4. Results are compared against expected behavior outputs
 
 These tests are conditional (`if: HdlToolchain.iverilog_available?`) and automatically skip when iverilog is not installed.
 
@@ -286,13 +297,13 @@ Generated files are placed in `/export/verilog/` directory.
 Lower HDL components to primitive gate netlists (AND, OR, XOR, NOT, MUX, DFF):
 ```ruby
 require 'rhdl/hdl'
-require 'rhdl/gates'
+require 'rhdl/export'
 
 # Create a component
 alu = RHDL::HDL::ALU.new('alu', width: 8)
 
 # Lower to gate-level IR
-ir = RHDL::Gates::Lower.from_components([alu], name: 'alu')
+ir = RHDL::Export::Structure::Lower.from_components([alu], name: 'alu')
 
 # Export to JSON netlist
 File.write('alu.json', ir.to_json)
@@ -400,3 +411,8 @@ Follow these conventions for file organization:
 - Each spec file should test exactly one class or module
 - Spec files should mirror the lib directory structure (e.g., `spec/rhdl/simulation/simulator_spec.rb` for `lib/rhdl/simulation/simulator.rb`)
 - Name spec files with `_spec.rb` suffix matching the class being tested
+
+**HDL directory organization:**
+- The `lib/rhdl/hdl/` directory should only contain component definitions
+- Non-component utilities (diagram rendering, export tools, etc.) belong in their own top-level directories (e.g., `diagram/`, `export/`)
+- Component mixins and extension methods should be defined outside `hdl/` and included into components from hdl.rb

@@ -1,5 +1,5 @@
 # Netlist testing helper for gate-level synthesis validation
-# Converts RHDL gate-level IR to structural Verilog and provides
+# Converts RHDL gate-level IR to structure Verilog and provides
 # comparison utilities for validating netlists
 
 require "fileutils"
@@ -8,10 +8,10 @@ require "open3"
 module NetlistHelper
   module_function
 
-  # Convert RHDL gate-level IR to structural Verilog
-  def ir_to_structural_verilog(ir)
+  # Convert RHDL gate-level IR to structure Verilog
+  def ir_to_structure_verilog(ir)
     lines = []
-    lines << "// Structural Verilog generated from RHDL gate-level IR"
+    lines << "// Structure Verilog generated from RHDL gate-level IR"
     lines << "// Design: #{ir.name}"
     lines << "// Gates: #{ir.gates.length}, DFFs: #{ir.dffs.length}, Nets: #{ir.net_count}"
     lines << ""
@@ -81,7 +81,7 @@ module NetlistHelper
 
     # DFF instantiations
     if ir.dffs.any?
-      lines << "  // DFF instances (behavioral for simulation)"
+      lines << "  // DFF instances (behavior for simulation)"
       ir.dffs.each_with_index do |dff, idx|
         lines << dff_to_verilog(dff, idx)
       end
@@ -135,7 +135,7 @@ module NetlistHelper
     end
   end
 
-  # Convert a DFF to Verilog behavioral model
+  # Convert a DFF to Verilog behavior model
   def dff_to_verilog(dff, idx)
     lines = []
     lines << "  // DFF #{idx}: d=n#{dff.d} q=n#{dff.q} rst=#{dff.rst.nil? ? 'none' : "n#{dff.rst}"} en=#{dff.en.nil? ? 'none' : "n#{dff.en}"}"
@@ -143,7 +143,7 @@ module NetlistHelper
     lines << "  assign n#{dff.q} = dff#{idx}_q;"
 
     # For simulation, we need a clock - assume there's a global 'clk' signal
-    # In structural netlists, DFFs would use explicit clock from the design
+    # In structure netlists, DFFs would use explicit clock from the design
     if dff.async_reset && dff.rst
       lines << "  always @(posedge clk or posedge n#{dff.rst}) begin"
       lines << "    if (n#{dff.rst})"
@@ -214,8 +214,8 @@ module NetlistHelper
     result
   end
 
-  # Generate a testbench for structural Verilog simulation
-  def generate_structural_testbench(ir, test_vectors)
+  # Generate a testbench for structure Verilog simulation
+  def generate_structure_testbench(ir, test_vectors)
     lines = []
     lines << "`timescale 1ns/1ps"
     lines << "module tb;"
@@ -303,15 +303,15 @@ module NetlistHelper
     lines.join("\n")
   end
 
-  # Run structural Verilog simulation using iverilog/vvp
-  def run_structural_simulation(ir, test_vectors, base_dir:)
+  # Run structure Verilog simulation using iverilog/vvp
+  def run_structure_simulation(ir, test_vectors, base_dir:)
     FileUtils.mkdir_p(base_dir)
 
     module_path = File.join(base_dir, "#{ir.name}.v")
     tb_path = File.join(base_dir, "tb.v")
 
-    File.write(module_path, ir_to_structural_verilog(ir))
-    File.write(tb_path, generate_structural_testbench(ir, test_vectors))
+    File.write(module_path, ir_to_structure_verilog(ir))
+    File.write(tb_path, generate_structure_testbench(ir, test_vectors))
 
     compile = run_cmd(["iverilog", "-g2001", "-o", "sim.out", "tb.v", "#{ir.name}.v"], cwd: base_dir)
     return { success: false, error: "Compilation failed: #{compile[:stderr]}" } unless compile[:status].success?
@@ -350,9 +350,9 @@ module NetlistHelper
     results
   end
 
-  # Generate a testbench for behavioral Verilog simulation
+  # Generate a testbench for behavior Verilog simulation
   # Takes component class and test vectors with input/output port info
-  def generate_behavioral_testbench(module_name, inputs, outputs, test_vectors, has_clock: false)
+  def generate_behavior_testbench(module_name, inputs, outputs, test_vectors, has_clock: false)
     lines = []
     lines << "`timescale 1ns/1ps"
     lines << "module tb;"
@@ -428,16 +428,16 @@ module NetlistHelper
     lines.join("\n")
   end
 
-  # Run behavioral Verilog simulation using iverilog/vvp
+  # Run behavior Verilog simulation using iverilog/vvp
   # Takes the verilog source directly (from to_verilog) along with port info and test vectors
-  def run_behavioral_simulation(verilog_source, module_name:, inputs:, outputs:, test_vectors:, base_dir:, has_clock: false)
+  def run_behavior_simulation(verilog_source, module_name:, inputs:, outputs:, test_vectors:, base_dir:, has_clock: false)
     FileUtils.mkdir_p(base_dir)
 
     module_path = File.join(base_dir, "#{module_name}.v")
     tb_path = File.join(base_dir, "tb.v")
 
     File.write(module_path, verilog_source)
-    File.write(tb_path, generate_behavioral_testbench(module_name, inputs, outputs, test_vectors, has_clock: has_clock))
+    File.write(tb_path, generate_behavior_testbench(module_name, inputs, outputs, test_vectors, has_clock: has_clock))
 
     compile = run_cmd(["iverilog", "-g2005", "-o", "sim.out", "tb.v", "#{module_name}.v"], cwd: base_dir)
     return { success: false, error: "Compilation failed: #{compile[:stderr]}\n#{compile[:stdout]}" } unless compile[:status].success?

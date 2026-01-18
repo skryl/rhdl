@@ -109,10 +109,10 @@ RSpec.describe RHDL::HDL::ALU do
       expect(verilog).to include('output [7:0] result')
     end
 
-    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+    context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::ALU.to_verilog
-        behavioral = RHDL::HDL::ALU.new(nil, width: 8)
+        behavior = RHDL::HDL::ALU.new(nil, width: 8)
 
         inputs = { a: 8, b: 8, op: 4, cin: 1 }
         outputs = { result: 8, cout: 1, zero: 1, negative: 1, overflow: 1 }
@@ -120,43 +120,43 @@ RSpec.describe RHDL::HDL::ALU do
         vectors = []
 
         # Test ADD
-        behavioral.set_input(:a, 10)
-        behavioral.set_input(:b, 5)
-        behavioral.set_input(:op, RHDL::HDL::ALU::OP_ADD)
-        behavioral.set_input(:cin, 0)
-        behavioral.propagate
+        behavior.set_input(:a, 10)
+        behavior.set_input(:b, 5)
+        behavior.set_input(:op, RHDL::HDL::ALU::OP_ADD)
+        behavior.set_input(:cin, 0)
+        behavior.propagate
         vectors << {
           inputs: { a: 10, b: 5, op: RHDL::HDL::ALU::OP_ADD, cin: 0 },
-          expected: { result: behavioral.get_output(:result), zero: behavioral.get_output(:zero) }
+          expected: { result: behavior.get_output(:result), zero: behavior.get_output(:zero) }
         }
 
         # Test SUB
-        behavioral.set_input(:a, 10)
-        behavioral.set_input(:b, 5)
-        behavioral.set_input(:op, RHDL::HDL::ALU::OP_SUB)
-        behavioral.propagate
+        behavior.set_input(:a, 10)
+        behavior.set_input(:b, 5)
+        behavior.set_input(:op, RHDL::HDL::ALU::OP_SUB)
+        behavior.propagate
         vectors << {
           inputs: { a: 10, b: 5, op: RHDL::HDL::ALU::OP_SUB, cin: 0 },
-          expected: { result: behavioral.get_output(:result), zero: behavioral.get_output(:zero) }
+          expected: { result: behavior.get_output(:result), zero: behavior.get_output(:zero) }
         }
 
         # Test AND
-        behavioral.set_input(:a, 0xF0)
-        behavioral.set_input(:b, 0x0F)
-        behavioral.set_input(:op, RHDL::HDL::ALU::OP_AND)
-        behavioral.propagate
+        behavior.set_input(:a, 0xF0)
+        behavior.set_input(:b, 0x0F)
+        behavior.set_input(:op, RHDL::HDL::ALU::OP_AND)
+        behavior.propagate
         vectors << {
           inputs: { a: 0xF0, b: 0x0F, op: RHDL::HDL::ALU::OP_AND, cin: 0 },
-          expected: { result: behavioral.get_output(:result), zero: behavioral.get_output(:zero) }
+          expected: { result: behavior.get_output(:result), zero: behavior.get_output(:zero) }
         }
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'alu',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/alu'
+          base_dir: 'tmp/behavior_test/alu'
         )
 
         expect(result[:success]).to be(true), result[:error]
@@ -171,7 +171,7 @@ RSpec.describe RHDL::HDL::ALU do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::ALU.new('alu', width: 8) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'alu') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'alu') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('alu.a', 'alu.b', 'alu.op', 'alu.cin')
@@ -180,8 +180,8 @@ RSpec.describe RHDL::HDL::ALU do
       expect(ir.gates.length).to be >= 1
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module alu')
       expect(verilog).to include('input [7:0] a')
       expect(verilog).to include('input [7:0] b')
@@ -195,9 +195,9 @@ RSpec.describe RHDL::HDL::ALU do
     end
 
     context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation' do
+      it 'matches behavior simulation' do
         test_vectors = []
-        behavioral = RHDL::HDL::ALU.new(nil, width: 8)
+        behavior = RHDL::HDL::ALU.new(nil, width: 8)
 
         test_cases = [
           { a: 10, b: 5, op: RHDL::HDL::ALU::OP_ADD, cin: 0 },   # ADD
@@ -210,21 +210,21 @@ RSpec.describe RHDL::HDL::ALU do
 
         expected_outputs = []
         test_cases.each do |tc|
-          behavioral.set_input(:a, tc[:a])
-          behavioral.set_input(:b, tc[:b])
-          behavioral.set_input(:op, tc[:op])
-          behavioral.set_input(:cin, tc[:cin])
-          behavioral.propagate
+          behavior.set_input(:a, tc[:a])
+          behavior.set_input(:b, tc[:b])
+          behavior.set_input(:op, tc[:op])
+          behavior.set_input(:cin, tc[:cin])
+          behavior.propagate
 
           test_vectors << { inputs: tc }
           expected_outputs << {
-            result: behavioral.get_output(:result),
-            zero: behavioral.get_output(:zero)
+            result: behavior.get_output(:result),
+            zero: behavior.get_output(:zero)
           }
         end
 
         base_dir = File.join('tmp', 'iverilog', 'alu')
-        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+        result = NetlistHelper.run_structure_simulation(ir, test_vectors, base_dir: base_dir)
 
         expect(result[:success]).to be(true), result[:error]
 

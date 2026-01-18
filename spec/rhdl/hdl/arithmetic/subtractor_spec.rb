@@ -48,7 +48,7 @@ RSpec.describe RHDL::HDL::Subtractor do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Subtractor.new('sub', width: 4) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'sub') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'sub') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('sub.a', 'sub.b', 'sub.bin')
@@ -56,8 +56,8 @@ RSpec.describe RHDL::HDL::Subtractor do
       expect(ir.gates.length).to be > 0
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module sub')
       expect(verilog).to include('output [3:0] diff')
       expect(verilog).to include('output bout')
@@ -70,7 +70,7 @@ RSpec.describe RHDL::HDL::Subtractor do
           { inputs: { a: 0, b: 0, bin: 0 }, expected: { diff: 0, bout: 0, overflow: 0 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/sub')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/sub')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|

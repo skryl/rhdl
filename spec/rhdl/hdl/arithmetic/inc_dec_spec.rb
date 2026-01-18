@@ -62,15 +62,15 @@ RSpec.describe RHDL::HDL::IncDec do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::IncDec.new('incdec', width: 4) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'incdec') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'incdec') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('incdec.a', 'incdec.inc')
       expect(ir.outputs.keys).to include('incdec.result', 'incdec.cout')
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module incdec')
       expect(verilog).to include('input inc')
     end
@@ -85,7 +85,7 @@ RSpec.describe RHDL::HDL::IncDec do
           { inputs: { a: 15, inc: 1 }, expected: { result: 0, cout: 1 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/incdec')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/incdec')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|

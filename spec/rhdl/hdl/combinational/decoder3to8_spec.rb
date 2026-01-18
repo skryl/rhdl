@@ -38,10 +38,10 @@ RSpec.describe RHDL::HDL::Decoder3to8 do
       expect(verilog).to include('input [2:0] a')
     end
 
-    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+    context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::Decoder3to8.to_verilog
-        behavioral = RHDL::HDL::Decoder3to8.new
+        behavior = RHDL::HDL::Decoder3to8.new
 
         inputs = { a: 3, en: 1 }
         outputs = { y0: 1, y1: 1, y2: 1, y3: 1, y4: 1, y5: 1, y6: 1, y7: 1 }
@@ -51,51 +51,51 @@ RSpec.describe RHDL::HDL::Decoder3to8 do
         8.times do |i|
           test_cases = [{ a: i, en: 1 }]
           test_cases.each do |tc|
-            behavioral.set_input(:a, tc[:a])
-            behavioral.set_input(:en, tc[:en])
-            behavioral.propagate
+            behavior.set_input(:a, tc[:a])
+            behavior.set_input(:en, tc[:en])
+            behavior.propagate
             vectors << {
               inputs: tc,
               expected: {
-                y0: behavioral.get_output(:y0),
-                y1: behavioral.get_output(:y1),
-                y2: behavioral.get_output(:y2),
-                y3: behavioral.get_output(:y3),
-                y4: behavioral.get_output(:y4),
-                y5: behavioral.get_output(:y5),
-                y6: behavioral.get_output(:y6),
-                y7: behavioral.get_output(:y7)
+                y0: behavior.get_output(:y0),
+                y1: behavior.get_output(:y1),
+                y2: behavior.get_output(:y2),
+                y3: behavior.get_output(:y3),
+                y4: behavior.get_output(:y4),
+                y5: behavior.get_output(:y5),
+                y6: behavior.get_output(:y6),
+                y7: behavior.get_output(:y7)
               }
             }
           end
         end
         # Test with enable=0
         [0, 4, 7].each do |i|
-          behavioral.set_input(:a, i)
-          behavioral.set_input(:en, 0)
-          behavioral.propagate
+          behavior.set_input(:a, i)
+          behavior.set_input(:en, 0)
+          behavior.propagate
           vectors << {
             inputs: { a: i, en: 0 },
             expected: {
-              y0: behavioral.get_output(:y0),
-              y1: behavioral.get_output(:y1),
-              y2: behavioral.get_output(:y2),
-              y3: behavioral.get_output(:y3),
-              y4: behavioral.get_output(:y4),
-              y5: behavioral.get_output(:y5),
-              y6: behavioral.get_output(:y6),
-              y7: behavioral.get_output(:y7)
+              y0: behavior.get_output(:y0),
+              y1: behavior.get_output(:y1),
+              y2: behavior.get_output(:y2),
+              y3: behavior.get_output(:y3),
+              y4: behavior.get_output(:y4),
+              y5: behavior.get_output(:y5),
+              y6: behavior.get_output(:y6),
+              y7: behavior.get_output(:y7)
             }
           }
         end
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'decoder3to8',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/decoder3to8'
+          base_dir: 'tmp/behavior_test/decoder3to8'
         )
 
         expect(result[:success]).to be(true), result[:error]
@@ -112,15 +112,15 @@ RSpec.describe RHDL::HDL::Decoder3to8 do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Decoder3to8.new('dec3to8') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'dec3to8') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'dec3to8') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('dec3to8.a', 'dec3to8.en')
       expect(ir.outputs.keys).to include('dec3to8.y0', 'dec3to8.y1')
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module dec3to8')
       expect(verilog).to include('input [2:0] a')
       expect(verilog).to include('output y0')
@@ -134,7 +134,7 @@ RSpec.describe RHDL::HDL::Decoder3to8 do
           { inputs: { a: 7, en: 1 }, expected: { y0: 0, y1: 0, y2: 0, y3: 0, y4: 0, y5: 0, y6: 0, y7: 1 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/dec3to8')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/dec3to8')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|

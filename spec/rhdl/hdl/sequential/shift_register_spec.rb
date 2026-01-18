@@ -62,13 +62,13 @@ RSpec.describe RHDL::HDL::ShiftRegister do
       expect(verilog).to match(/output.*\[7:0\].*q/)
     end
 
-    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+    context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::ShiftRegister.to_verilog
-        behavioral = RHDL::HDL::ShiftRegister.new
-        behavioral.set_input(:rst, 0)
-        behavioral.set_input(:en, 1)
-        behavioral.set_input(:d_in, 0)
+        behavior = RHDL::HDL::ShiftRegister.new
+        behavior.set_input(:rst, 0)
+        behavior.set_input(:en, 1)
+        behavior.set_input(:d_in, 0)
 
         inputs = { d_in: 1, clk: 1, rst: 1, en: 1, dir: 1, load: 1, d: 8 }
         outputs = { q: 8, d_out: 1 }
@@ -85,29 +85,29 @@ RSpec.describe RHDL::HDL::ShiftRegister do
         ]
 
         test_cases.each do |tc|
-          behavioral.set_input(:d, tc[:d])
-          behavioral.set_input(:d_in, tc[:d_in])
-          behavioral.set_input(:rst, tc[:rst])
-          behavioral.set_input(:en, tc[:en])
-          behavioral.set_input(:load, tc[:load])
-          behavioral.set_input(:dir, tc[:dir])
-          behavioral.set_input(:clk, 0)
-          behavioral.propagate
-          behavioral.set_input(:clk, 1)
-          behavioral.propagate
+          behavior.set_input(:d, tc[:d])
+          behavior.set_input(:d_in, tc[:d_in])
+          behavior.set_input(:rst, tc[:rst])
+          behavior.set_input(:en, tc[:en])
+          behavior.set_input(:load, tc[:load])
+          behavior.set_input(:dir, tc[:dir])
+          behavior.set_input(:clk, 0)
+          behavior.propagate
+          behavior.set_input(:clk, 1)
+          behavior.propagate
           vectors << {
             inputs: { d: tc[:d], d_in: tc[:d_in], rst: tc[:rst], en: tc[:en], load: tc[:load], dir: tc[:dir] },
-            expected: { q: behavioral.get_output(:q), d_out: behavioral.get_output(:d_out) }
+            expected: { q: behavior.get_output(:q), d_out: behavior.get_output(:d_out) }
           }
         end
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'shift_register',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/shift_register',
+          base_dir: 'tmp/behavior_test/shift_register',
           has_clock: true
         )
 
@@ -125,7 +125,7 @@ RSpec.describe RHDL::HDL::ShiftRegister do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::ShiftRegister.new('shift_reg') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'shift_reg') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'shift_reg') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('shift_reg.d', 'shift_reg.d_in', 'shift_reg.clk', 'shift_reg.rst', 'shift_reg.en', 'shift_reg.load', 'shift_reg.dir')
@@ -133,8 +133,8 @@ RSpec.describe RHDL::HDL::ShiftRegister do
       expect(ir.dffs.length).to eq(8)  # 8-bit shift register has 8 DFFs
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module shift_reg')
       expect(verilog).to include('input [7:0] d')
       expect(verilog).to include('input d_in')
@@ -145,12 +145,12 @@ RSpec.describe RHDL::HDL::ShiftRegister do
     end
 
     context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation' do
+      it 'matches behavior simulation' do
         test_vectors = []
-        behavioral = RHDL::HDL::ShiftRegister.new
-        behavioral.set_input(:rst, 0)
-        behavioral.set_input(:en, 1)
-        behavioral.set_input(:d_in, 0)
+        behavior = RHDL::HDL::ShiftRegister.new
+        behavior.set_input(:rst, 0)
+        behavior.set_input(:en, 1)
+        behavior.set_input(:d_in, 0)
 
         test_cases = [
           { d: 0b00001111, d_in: 0, rst: 0, en: 1, load: 1, dir: 1 },  # load
@@ -161,23 +161,23 @@ RSpec.describe RHDL::HDL::ShiftRegister do
 
         expected_outputs = []
         test_cases.each do |tc|
-          behavioral.set_input(:d, tc[:d])
-          behavioral.set_input(:d_in, tc[:d_in])
-          behavioral.set_input(:rst, tc[:rst])
-          behavioral.set_input(:en, tc[:en])
-          behavioral.set_input(:load, tc[:load])
-          behavioral.set_input(:dir, tc[:dir])
-          behavioral.set_input(:clk, 0)
-          behavioral.propagate
-          behavioral.set_input(:clk, 1)
-          behavioral.propagate
+          behavior.set_input(:d, tc[:d])
+          behavior.set_input(:d_in, tc[:d_in])
+          behavior.set_input(:rst, tc[:rst])
+          behavior.set_input(:en, tc[:en])
+          behavior.set_input(:load, tc[:load])
+          behavior.set_input(:dir, tc[:dir])
+          behavior.set_input(:clk, 0)
+          behavior.propagate
+          behavior.set_input(:clk, 1)
+          behavior.propagate
 
           test_vectors << { inputs: tc }
-          expected_outputs << { q: behavioral.get_output(:q) }
+          expected_outputs << { q: behavior.get_output(:q) }
         end
 
         base_dir = File.join('tmp', 'iverilog', 'shift_reg')
-        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+        result = NetlistHelper.run_structure_simulation(ir, test_vectors, base_dir: base_dir)
 
         expect(result[:success]).to be(true), result[:error]
 

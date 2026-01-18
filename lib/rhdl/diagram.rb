@@ -5,6 +5,9 @@ require_relative 'diagram/gate_level'
 require_relative 'diagram/hierarchy'
 require_relative 'diagram/netlist'
 require_relative 'diagram/render_svg'
+require_relative 'diagram/renderer'
+require_relative 'diagram/svg_renderer'
+require_relative 'diagram/methods'
 
 module RHDL
   module Diagram

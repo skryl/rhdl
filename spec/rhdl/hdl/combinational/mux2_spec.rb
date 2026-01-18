@@ -42,10 +42,10 @@ RSpec.describe RHDL::HDL::Mux2 do
       expect(verilog).to include('assign y')
     end
 
-    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+    context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::Mux2.to_verilog
-        behavioral = RHDL::HDL::Mux2.new(nil, width: 1)
+        behavior = RHDL::HDL::Mux2.new(nil, width: 1)
 
         inputs = { a: 1, b: 1, sel: 1 }
         outputs = { y: 1 }
@@ -60,23 +60,23 @@ RSpec.describe RHDL::HDL::Mux2 do
         ]
 
         test_cases.each do |tc|
-          behavioral.set_input(:a, tc[:a])
-          behavioral.set_input(:b, tc[:b])
-          behavioral.set_input(:sel, tc[:sel])
-          behavioral.propagate
+          behavior.set_input(:a, tc[:a])
+          behavior.set_input(:b, tc[:b])
+          behavior.set_input(:sel, tc[:sel])
+          behavior.propagate
           vectors << {
             inputs: tc,
-            expected: { y: behavioral.get_output(:y) }
+            expected: { y: behavior.get_output(:y) }
           }
         end
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'mux2',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/mux2'
+          base_dir: 'tmp/behavior_test/mux2'
         )
 
         expect(result[:success]).to be(true), result[:error]
@@ -91,7 +91,7 @@ RSpec.describe RHDL::HDL::Mux2 do
 
   describe 'gate-level netlist (1-bit)' do
     let(:component) { RHDL::HDL::Mux2.new('mux2', width: 1) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mux2') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mux2') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mux2.a', 'mux2.b', 'mux2.sel')
@@ -99,8 +99,8 @@ RSpec.describe RHDL::HDL::Mux2 do
       expect(ir.gates.length).to be >= 1
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module mux2')
       expect(verilog).to include('input sel')
     end
@@ -116,7 +116,7 @@ RSpec.describe RHDL::HDL::Mux2 do
           { inputs: { a: 1, b: 0, sel: 1 }, expected: { y: 0 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mux2')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mux2')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|
@@ -128,7 +128,7 @@ RSpec.describe RHDL::HDL::Mux2 do
 
   describe 'gate-level netlist (4-bit)' do
     let(:component) { RHDL::HDL::Mux2.new('mux2_4bit', width: 4) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mux2_4bit') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mux2_4bit') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mux2_4bit.a', 'mux2_4bit.b', 'mux2_4bit.sel')
@@ -136,8 +136,8 @@ RSpec.describe RHDL::HDL::Mux2 do
       expect(ir.gates.length).to eq(4)
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('input [3:0] a')
       expect(verilog).to include('input [3:0] b')
       expect(verilog).to include('output [3:0] y')
@@ -152,7 +152,7 @@ RSpec.describe RHDL::HDL::Mux2 do
           { inputs: { a: 0b1111, b: 0b0000, sel: 1 }, expected: { y: 0b0000 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mux2_4bit')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mux2_4bit')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|

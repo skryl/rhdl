@@ -145,15 +145,15 @@ RSpec.describe RHDL::HDL::CPU::InstructionDecoder do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::CPU::InstructionDecoder.new('decoder') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'decoder') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'decoder') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('decoder.instruction', 'decoder.zero_flag')
       expect(ir.outputs.keys).to include('decoder.alu_op', 'decoder.halt', 'decoder.reg_write')
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module decoder')
       expect(verilog).to include('input [7:0] instruction')
       expect(verilog).to include('output halt')
@@ -167,7 +167,7 @@ RSpec.describe RHDL::HDL::CPU::InstructionDecoder do
           { inputs: { instruction: 0xA0, zero_flag: 0 }, expected: { halt: 0 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors,
+        result = NetlistHelper.run_structure_simulation(ir, vectors,
           base_dir: 'tmp/netlist_test/decoder')
         expect(result[:success]).to be(true), result[:error]
 

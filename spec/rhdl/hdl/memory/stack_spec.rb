@@ -99,7 +99,7 @@ RSpec.describe RHDL::HDL::Stack do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Stack.new('stack') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'stack') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'stack') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('stack.clk', 'stack.rst', 'stack.push', 'stack.pop', 'stack.din')
@@ -108,8 +108,8 @@ RSpec.describe RHDL::HDL::Stack do
       expect(ir.dffs.length).to be >= 1
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module stack')
       expect(verilog).to include('input clk')
       expect(verilog).to include('input rst')
@@ -122,13 +122,13 @@ RSpec.describe RHDL::HDL::Stack do
     end
 
     context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation' do
+      it 'matches behavior simulation' do
         test_vectors = []
-        behavioral = RHDL::HDL::Stack.new
-        behavioral.set_input(:rst, 0)
-        behavioral.set_input(:push, 0)
-        behavioral.set_input(:pop, 0)
-        behavioral.propagate
+        behavior = RHDL::HDL::Stack.new
+        behavior.set_input(:rst, 0)
+        behavior.set_input(:push, 0)
+        behavior.set_input(:pop, 0)
+        behavior.propagate
 
         test_cases = [
           { din: 0x11, rst: 0, push: 1, pop: 0 },  # push
@@ -139,24 +139,24 @@ RSpec.describe RHDL::HDL::Stack do
 
         expected_outputs = []
         test_cases.each do |tc|
-          behavioral.set_input(:din, tc[:din])
-          behavioral.set_input(:rst, tc[:rst])
-          behavioral.set_input(:push, tc[:push])
-          behavioral.set_input(:pop, tc[:pop])
-          behavioral.set_input(:clk, 0)
-          behavioral.propagate
-          behavioral.set_input(:clk, 1)
-          behavioral.propagate
+          behavior.set_input(:din, tc[:din])
+          behavior.set_input(:rst, tc[:rst])
+          behavior.set_input(:push, tc[:push])
+          behavior.set_input(:pop, tc[:pop])
+          behavior.set_input(:clk, 0)
+          behavior.propagate
+          behavior.set_input(:clk, 1)
+          behavior.propagate
 
           test_vectors << { inputs: tc }
           expected_outputs << {
-            dout: behavioral.get_output(:dout),
-            empty: behavioral.get_output(:empty)
+            dout: behavior.get_output(:dout),
+            empty: behavior.get_output(:empty)
           }
         end
 
         base_dir = File.join('tmp', 'iverilog', 'stack')
-        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+        result = NetlistHelper.run_structure_simulation(ir, test_vectors, base_dir: base_dir)
 
         expect(result[:success]).to be(true), result[:error]
 

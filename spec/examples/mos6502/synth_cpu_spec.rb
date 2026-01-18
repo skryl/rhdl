@@ -54,7 +54,7 @@ RSpec.describe MOS6502::CPU do
     end
 
     context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
-      it 'behavioral Verilog compiles and runs' do
+      it 'behavior Verilog compiles and runs' do
         # Use to_verilog_hierarchy to include all sub-module definitions
         verilog = described_class.to_verilog_hierarchy
 
@@ -73,13 +73,13 @@ RSpec.describe MOS6502::CPU do
           { inputs: { clk: 1, rst: 0, rdy: 1, irq: 1, nmi: 1 } }
         ]
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'mos6502_cpu',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/mos6502_cpu',
+          base_dir: 'tmp/behavior_test/mos6502_cpu',
           has_clock: true
         )
         expect(result[:success]).to be(true), result[:error]

@@ -9,7 +9,7 @@ Diagram builders rely on the following internal conventions:
 - Components are `RHDL::HDL::SimComponent` (or subclasses) that expose `inputs`, `outputs`, and `internal_signals` as hashes of `Wire` instances.
 - Subcomponents are tracked in `@subcomponents` (via `add_subcomponent`) and can be traversed by inspecting that instance variable.
 - Connectivity is discovered by inspecting `Wire#driver` and `Wire#sinks`, which are populated via `SimComponent.connect`.
-- Gate-level diagrams operate directly on `RHDL::Gates::IR`, where nets are integer IDs and inputs/outputs are named buses with arrays of net IDs.
+- Gate-level diagrams operate directly on `RHDL::Export::Structure::IR`, where nets are integer IDs and inputs/outputs are named buses with arrays of net IDs.
 
 ## API
 

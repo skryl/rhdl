@@ -27,10 +27,10 @@ RSpec.describe RHDL::HDL::OrGate do
       expect(verilog).to include('assign y')
     end
 
-    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+    context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::OrGate.to_verilog
-        behavioral = RHDL::HDL::OrGate.new
+        behavior = RHDL::HDL::OrGate.new
 
         inputs = { a0: 1, a1: 1 }
         outputs = { y: 1 }
@@ -44,21 +44,21 @@ RSpec.describe RHDL::HDL::OrGate do
         ]
 
         test_cases.each do |tc|
-          tc.each { |k, v| behavioral.set_input(k, v) }
-          behavioral.propagate
+          tc.each { |k, v| behavior.set_input(k, v) }
+          behavior.propagate
           vectors << {
             inputs: tc,
-            expected: { y: behavioral.get_output(:y) }
+            expected: { y: behavior.get_output(:y) }
           }
         end
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'or_gate',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/or_gate'
+          base_dir: 'tmp/behavior_test/or_gate'
         )
 
         expect(result[:success]).to be(true), result[:error]
@@ -73,7 +73,7 @@ RSpec.describe RHDL::HDL::OrGate do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::OrGate.new('or_gate') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'or_gate') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'or_gate') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('or_gate.a0', 'or_gate.a1')
@@ -82,8 +82,8 @@ RSpec.describe RHDL::HDL::OrGate do
       expect(ir.gates.first.type).to eq(:or)
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('or g0')
     end
 
@@ -96,7 +96,7 @@ RSpec.describe RHDL::HDL::OrGate do
           { inputs: { a0: 1, a1: 1 }, expected: { y: 1 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/or_gate')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/or_gate')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|

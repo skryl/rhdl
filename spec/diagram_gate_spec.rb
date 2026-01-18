@@ -1,6 +1,6 @@
 require_relative 'spec_helper'
 require_relative '../lib/rhdl/diagram'
-require_relative '../lib/rhdl/gates/lower'
+require_relative '../lib/rhdl/export/structure/lower'
 require_relative '../lib/rhdl/hdl/gates'
 require_relative '../lib/rhdl/hdl/sequential'
 
@@ -9,7 +9,7 @@ RSpec.describe RHDL::Diagram do
     let(:gate_ir) do
       and_gate = RHDL::HDL::AndGate.new('and1')
       dff = RHDL::HDL::DFlipFlop.new('dff1')
-      RHDL::Gates::Lower.from_components([and_gate, dff], name: 'gate_test')
+      RHDL::Export::Structure::Lower.from_components([and_gate, dff], name: 'gate_test')
     end
 
     it 'creates nodes for gates and DFFs' do

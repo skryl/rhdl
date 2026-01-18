@@ -54,7 +54,7 @@ RSpec.describe RHDL::HDL::Divider do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Divider.new('div', width: 8) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'div') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'div') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('div.dividend', 'div.divisor')
@@ -63,8 +63,8 @@ RSpec.describe RHDL::HDL::Divider do
       expect(ir.gates.length).to be >= 1
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module div')
       expect(verilog).to include('input [7:0] dividend')
       expect(verilog).to include('input [7:0] divisor')
@@ -74,9 +74,9 @@ RSpec.describe RHDL::HDL::Divider do
     end
 
     context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation' do
+      it 'matches behavior simulation' do
         test_vectors = []
-        behavioral = RHDL::HDL::Divider.new(nil, width: 8)
+        behavior = RHDL::HDL::Divider.new(nil, width: 8)
 
         test_cases = [
           { dividend: 100, divisor: 10 },  # 10 r 0
@@ -89,20 +89,20 @@ RSpec.describe RHDL::HDL::Divider do
 
         expected_outputs = []
         test_cases.each do |tc|
-          behavioral.set_input(:dividend, tc[:dividend])
-          behavioral.set_input(:divisor, tc[:divisor])
-          behavioral.propagate
+          behavior.set_input(:dividend, tc[:dividend])
+          behavior.set_input(:divisor, tc[:divisor])
+          behavior.propagate
 
           test_vectors << { inputs: tc }
           expected_outputs << {
-            quotient: behavioral.get_output(:quotient),
-            remainder: behavioral.get_output(:remainder),
-            div_by_zero: behavioral.get_output(:div_by_zero)
+            quotient: behavior.get_output(:quotient),
+            remainder: behavior.get_output(:remainder),
+            div_by_zero: behavior.get_output(:div_by_zero)
           }
         end
 
         base_dir = File.join('tmp', 'iverilog', 'div')
-        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+        result = NetlistHelper.run_structure_simulation(ir, test_vectors, base_dir: base_dir)
 
         expect(result[:success]).to be(true), result[:error]
 

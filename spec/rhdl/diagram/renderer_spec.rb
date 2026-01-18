@@ -1,6 +1,6 @@
 require 'spec_helper'
 
-RSpec.describe RHDL::HDL::DiagramRenderer do
+RSpec.describe RHDL::Diagram::Renderer do
   describe 'Basic gate diagrams' do
     let(:and_gate) { RHDL::HDL::AndGate.new("my_and") }
 
@@ -241,9 +241,9 @@ RSpec.describe RHDL::HDL::DiagramRenderer do
   end
 end
 
-RSpec.describe RHDL::HDL::SVGRenderer do
+RSpec.describe RHDL::Diagram::SVGRenderer do
   let(:gate) { RHDL::HDL::AndGate.new("and1") }
-  let(:renderer) { RHDL::HDL::SVGRenderer.new(gate) }
+  let(:renderer) { RHDL::Diagram::SVGRenderer.new(gate) }
 
   it 'renders valid SVG structure' do
     svg = renderer.render

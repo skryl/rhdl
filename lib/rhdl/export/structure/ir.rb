@@ -3,7 +3,8 @@
 require 'json'
 
 module RHDL
-  module Gates
+  module Export
+    module Structure
     Gate = Struct.new(:type, :inputs, :output, :value, keyword_init: true)
     DFF = Struct.new(:d, :q, :rst, :en, :async_reset, keyword_init: true)
 
@@ -77,6 +78,7 @@ module RHDL
         ir.set_schedule(data[:schedule])
         ir
       end
+    end
     end
   end
 end

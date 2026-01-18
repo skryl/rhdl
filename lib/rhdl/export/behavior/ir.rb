@@ -264,7 +264,7 @@ module RHDL
         end
       end
 
-      # Module instance for structural design
+      # Module instance for structure design
       # Maps to Verilog module instantiation
       class Instance
         attr_reader :name, :module_name, :connections, :parameters
