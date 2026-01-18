@@ -94,7 +94,7 @@ RSpec.describe RHDL::HDL::FIFO do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::FIFO.new('fifo') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'fifo') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'fifo') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('fifo.clk', 'fifo.rst', 'fifo.wr_en', 'fifo.rd_en', 'fifo.din')
@@ -103,8 +103,8 @@ RSpec.describe RHDL::HDL::FIFO do
       expect(ir.dffs.length).to be >= 1
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module fifo')
       expect(verilog).to include('input clk')
       expect(verilog).to include('input rst')
@@ -117,13 +117,13 @@ RSpec.describe RHDL::HDL::FIFO do
     end
 
     context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation' do
+      it 'matches behavior simulation' do
         test_vectors = []
-        behavioral = RHDL::HDL::FIFO.new
-        behavioral.set_input(:rst, 0)
-        behavioral.set_input(:wr_en, 0)
-        behavioral.set_input(:rd_en, 0)
-        behavioral.propagate
+        behavior = RHDL::HDL::FIFO.new
+        behavior.set_input(:rst, 0)
+        behavior.set_input(:wr_en, 0)
+        behavior.set_input(:rd_en, 0)
+        behavior.propagate
 
         test_cases = [
           { din: 0x11, rst: 0, wr_en: 1, rd_en: 0 },  # write
@@ -134,24 +134,24 @@ RSpec.describe RHDL::HDL::FIFO do
 
         expected_outputs = []
         test_cases.each do |tc|
-          behavioral.set_input(:din, tc[:din])
-          behavioral.set_input(:rst, tc[:rst])
-          behavioral.set_input(:wr_en, tc[:wr_en])
-          behavioral.set_input(:rd_en, tc[:rd_en])
-          behavioral.set_input(:clk, 0)
-          behavioral.propagate
-          behavioral.set_input(:clk, 1)
-          behavioral.propagate
+          behavior.set_input(:din, tc[:din])
+          behavior.set_input(:rst, tc[:rst])
+          behavior.set_input(:wr_en, tc[:wr_en])
+          behavior.set_input(:rd_en, tc[:rd_en])
+          behavior.set_input(:clk, 0)
+          behavior.propagate
+          behavior.set_input(:clk, 1)
+          behavior.propagate
 
           test_vectors << { inputs: tc }
           expected_outputs << {
-            dout: behavioral.get_output(:dout),
-            empty: behavioral.get_output(:empty)
+            dout: behavior.get_output(:dout),
+            empty: behavior.get_output(:empty)
           }
         end
 
         base_dir = File.join('tmp', 'iverilog', 'fifo')
-        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+        result = NetlistHelper.run_structure_simulation(ir, test_vectors, base_dir: base_dir)
 
         expect(result[:success]).to be(true), result[:error]
 

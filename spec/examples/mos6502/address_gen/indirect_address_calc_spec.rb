@@ -52,41 +52,41 @@ RSpec.describe MOS6502::IndirectAddressCalc do
     end
 
     context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
-      it 'behavioral Verilog matches RHDL simulation' do
+      it 'behavior Verilog matches RHDL simulation' do
         verilog = described_class.to_verilog
-        behavioral = described_class.new('behavioral')
+        behavior = described_class.new('behavior')
         vectors = []
 
         inputs = { mode: 4, operand_lo: 8, operand_hi: 8, x_reg: 8 }
         outputs = { ptr_addr_lo: 8, ptr_addr_hi: 8 }
 
         # Test indexed indirect (zp,X)
-        behavioral.set_input(:mode, MOS6502::AddressGenerator::MODE_INDEXED_IND)
-        behavioral.set_input(:operand_lo, 0x40)
-        behavioral.set_input(:operand_hi, 0)
-        behavioral.set_input(:x_reg, 0x10)
-        behavioral.propagate
+        behavior.set_input(:mode, MOS6502::AddressGenerator::MODE_INDEXED_IND)
+        behavior.set_input(:operand_lo, 0x40)
+        behavior.set_input(:operand_hi, 0)
+        behavior.set_input(:x_reg, 0x10)
+        behavior.propagate
         vectors << {
           inputs: { mode: MOS6502::AddressGenerator::MODE_INDEXED_IND, operand_lo: 0x40, operand_hi: 0, x_reg: 0x10 },
-          expected: { ptr_addr_lo: behavioral.get_output(:ptr_addr_lo), ptr_addr_hi: behavioral.get_output(:ptr_addr_hi) }
+          expected: { ptr_addr_lo: behavior.get_output(:ptr_addr_lo), ptr_addr_hi: behavior.get_output(:ptr_addr_hi) }
         }
 
         # Test indirect indexed (zp),Y
-        behavioral.set_input(:mode, MOS6502::AddressGenerator::MODE_INDIRECT_IDX)
-        behavioral.set_input(:operand_lo, 0x80)
-        behavioral.propagate
+        behavior.set_input(:mode, MOS6502::AddressGenerator::MODE_INDIRECT_IDX)
+        behavior.set_input(:operand_lo, 0x80)
+        behavior.propagate
         vectors << {
           inputs: { mode: MOS6502::AddressGenerator::MODE_INDIRECT_IDX, operand_lo: 0x80, operand_hi: 0, x_reg: 0 },
-          expected: { ptr_addr_lo: behavioral.get_output(:ptr_addr_lo), ptr_addr_hi: behavioral.get_output(:ptr_addr_hi) }
+          expected: { ptr_addr_lo: behavior.get_output(:ptr_addr_lo), ptr_addr_hi: behavior.get_output(:ptr_addr_hi) }
         }
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'mos6502_indirect_addr_calc',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/mos6502_indirect_addr_calc'
+          base_dir: 'tmp/behavior_test/mos6502_indirect_addr_calc'
         )
         expect(result[:success]).to be(true), result[:error]
 
@@ -100,7 +100,7 @@ RSpec.describe MOS6502::IndirectAddressCalc do
 
   describe 'gate-level netlist' do
     let(:component) { described_class.new('mos6502_indirect_addr_calc') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mos6502_indirect_addr_calc') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mos6502_indirect_addr_calc') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mos6502_indirect_addr_calc.mode')
@@ -114,38 +114,38 @@ RSpec.describe MOS6502::IndirectAddressCalc do
       expect(ir.dffs.length).to eq(0)
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module mos6502_indirect_addr_calc')
       expect(verilog).to include('input [3:0] mode')
     end
 
     context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation for indirect addressing' do
-        behavioral = described_class.new('behavioral')
+      it 'matches behavior simulation for indirect addressing' do
+        behavior = described_class.new('behavior')
         vectors = []
 
         # Test indexed indirect (zp,X)
-        behavioral.set_input(:mode, MOS6502::AddressGenerator::MODE_INDEXED_IND)
-        behavioral.set_input(:operand_lo, 0x40)
-        behavioral.set_input(:operand_hi, 0)
-        behavioral.set_input(:x_reg, 0x10)
-        behavioral.propagate
+        behavior.set_input(:mode, MOS6502::AddressGenerator::MODE_INDEXED_IND)
+        behavior.set_input(:operand_lo, 0x40)
+        behavior.set_input(:operand_hi, 0)
+        behavior.set_input(:x_reg, 0x10)
+        behavior.propagate
         vectors << {
           inputs: { mode: MOS6502::AddressGenerator::MODE_INDEXED_IND, operand_lo: 0x40, operand_hi: 0, x_reg: 0x10 },
-          expected: { ptr_addr_lo: behavioral.get_output(:ptr_addr_lo), ptr_addr_hi: behavioral.get_output(:ptr_addr_hi) }
+          expected: { ptr_addr_lo: behavior.get_output(:ptr_addr_lo), ptr_addr_hi: behavior.get_output(:ptr_addr_hi) }
         }
 
         # Test indirect indexed (zp),Y
-        behavioral.set_input(:mode, MOS6502::AddressGenerator::MODE_INDIRECT_IDX)
-        behavioral.set_input(:operand_lo, 0x80)
-        behavioral.propagate
+        behavior.set_input(:mode, MOS6502::AddressGenerator::MODE_INDIRECT_IDX)
+        behavior.set_input(:operand_lo, 0x80)
+        behavior.propagate
         vectors << {
           inputs: { mode: MOS6502::AddressGenerator::MODE_INDIRECT_IDX, operand_lo: 0x80, operand_hi: 0, x_reg: 0 },
-          expected: { ptr_addr_lo: behavioral.get_output(:ptr_addr_lo), ptr_addr_hi: behavioral.get_output(:ptr_addr_hi) }
+          expected: { ptr_addr_lo: behavior.get_output(:ptr_addr_lo), ptr_addr_hi: behavior.get_output(:ptr_addr_hi) }
         }
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mos6502_indirect_addr_calc')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mos6502_indirect_addr_calc')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|

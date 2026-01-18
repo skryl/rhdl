@@ -49,10 +49,10 @@ RSpec.describe RHDL::HDL::Encoder4to2 do
       expect(verilog).to include('output [1:0] y')
     end
 
-    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+    context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::Encoder4to2.to_verilog
-        behavioral = RHDL::HDL::Encoder4to2.new
+        behavior = RHDL::HDL::Encoder4to2.new
 
         inputs = { a: 4 }
         outputs = { y: 2, valid: 1 }
@@ -73,24 +73,24 @@ RSpec.describe RHDL::HDL::Encoder4to2 do
         ]
 
         test_cases.each do |tc|
-          behavioral.set_input(:a, tc[:a])
-          behavioral.propagate
+          behavior.set_input(:a, tc[:a])
+          behavior.propagate
           vectors << {
             inputs: tc,
             expected: {
-              y: behavioral.get_output(:y),
-              valid: behavioral.get_output(:valid)
+              y: behavior.get_output(:y),
+              valid: behavior.get_output(:valid)
             }
           }
         end
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'encoder4to2',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/encoder4to2'
+          base_dir: 'tmp/behavior_test/encoder4to2'
         )
 
         expect(result[:success]).to be(true), result[:error]
@@ -107,15 +107,15 @@ RSpec.describe RHDL::HDL::Encoder4to2 do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Encoder4to2.new('enc4to2') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'enc4to2') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'enc4to2') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('enc4to2.a')
       expect(ir.outputs.keys).to include('enc4to2.y', 'enc4to2.valid')
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module enc4to2')
       expect(verilog).to include('input [3:0] a')
       expect(verilog).to include('output [1:0] y')
@@ -130,7 +130,7 @@ RSpec.describe RHDL::HDL::Encoder4to2 do
           { inputs: { a: 0b1000 }, expected: { y: 3, valid: 1 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/enc4to2')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/enc4to2')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|

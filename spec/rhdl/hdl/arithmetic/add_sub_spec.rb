@@ -41,10 +41,10 @@ RSpec.describe RHDL::HDL::AddSub do
       expect(verilog).to include('output [7:0] result')
     end
 
-    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+    context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::AddSub.to_verilog
-        behavioral = RHDL::HDL::AddSub.new(nil, width: 8)
+        behavior = RHDL::HDL::AddSub.new(nil, width: 8)
 
         inputs = { a: 8, b: 8, sub: 1 }
         outputs = { result: 8, cout: 1, overflow: 1, zero: 1, negative: 1 }
@@ -60,27 +60,27 @@ RSpec.describe RHDL::HDL::AddSub do
         ]
 
         test_cases.each do |tc|
-          behavioral.set_input(:a, tc[:a])
-          behavioral.set_input(:b, tc[:b])
-          behavioral.set_input(:sub, tc[:sub])
-          behavioral.propagate
+          behavior.set_input(:a, tc[:a])
+          behavior.set_input(:b, tc[:b])
+          behavior.set_input(:sub, tc[:sub])
+          behavior.propagate
           vectors << {
             inputs: tc,
             expected: {
-              result: behavioral.get_output(:result),
-              zero: behavioral.get_output(:zero),
-              negative: behavioral.get_output(:negative)
+              result: behavior.get_output(:result),
+              zero: behavior.get_output(:zero),
+              negative: behavior.get_output(:negative)
             }
           }
         end
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'add_sub',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/add_sub'
+          base_dir: 'tmp/behavior_test/add_sub'
         )
 
         expect(result[:success]).to be(true), result[:error]
@@ -97,7 +97,7 @@ RSpec.describe RHDL::HDL::AddSub do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::AddSub.new('addsub', width: 8) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'addsub') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'addsub') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('addsub.a', 'addsub.b', 'addsub.sub')
@@ -105,8 +105,8 @@ RSpec.describe RHDL::HDL::AddSub do
       expect(ir.gates.length).to be >= 1
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module addsub')
       expect(verilog).to include('input [7:0] a')
       expect(verilog).to include('input [7:0] b')
@@ -119,10 +119,10 @@ RSpec.describe RHDL::HDL::AddSub do
     end
 
     context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation' do
-        # Generate test vectors from behavioral simulation
+      it 'matches behavior simulation' do
+        # Generate test vectors from behavior simulation
         test_vectors = []
-        behavioral = RHDL::HDL::AddSub.new(nil, width: 8)
+        behavior = RHDL::HDL::AddSub.new(nil, width: 8)
 
         test_cases = [
           { a: 100, b: 50, sub: 0 },  # 100 + 50 = 150
@@ -135,22 +135,22 @@ RSpec.describe RHDL::HDL::AddSub do
 
         expected_outputs = []
         test_cases.each do |tc|
-          behavioral.set_input(:a, tc[:a])
-          behavioral.set_input(:b, tc[:b])
-          behavioral.set_input(:sub, tc[:sub])
-          behavioral.propagate
+          behavior.set_input(:a, tc[:a])
+          behavior.set_input(:b, tc[:b])
+          behavior.set_input(:sub, tc[:sub])
+          behavior.propagate
 
           test_vectors << { inputs: tc }
           expected_outputs << {
-            result: behavioral.get_output(:result),
-            zero: behavioral.get_output(:zero),
-            negative: behavioral.get_output(:negative)
+            result: behavior.get_output(:result),
+            zero: behavior.get_output(:zero),
+            negative: behavior.get_output(:negative)
           }
         end
 
-        # Run structural simulation
+        # Run structure simulation
         base_dir = File.join('tmp', 'iverilog', 'addsub')
-        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+        result = NetlistHelper.run_structure_simulation(ir, test_vectors, base_dir: base_dir)
 
         expect(result[:success]).to be(true), result[:error]
 

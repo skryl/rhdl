@@ -49,10 +49,10 @@ RSpec.describe RHDL::HDL::Mux4 do
       expect(verilog).to include('input [1:0] sel')
     end
 
-    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+    context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::Mux4.to_verilog
-        behavioral = RHDL::HDL::Mux4.new(nil, width: 1)
+        behavior = RHDL::HDL::Mux4.new(nil, width: 1)
 
         inputs = { a: 1, b: 1, c: 1, d: 1, sel: 2 }
         outputs = { y: 1 }
@@ -71,25 +71,25 @@ RSpec.describe RHDL::HDL::Mux4 do
         ]
 
         test_cases.each do |tc|
-          behavioral.set_input(:a, tc[:a])
-          behavioral.set_input(:b, tc[:b])
-          behavioral.set_input(:c, tc[:c])
-          behavioral.set_input(:d, tc[:d])
-          behavioral.set_input(:sel, tc[:sel])
-          behavioral.propagate
+          behavior.set_input(:a, tc[:a])
+          behavior.set_input(:b, tc[:b])
+          behavior.set_input(:c, tc[:c])
+          behavior.set_input(:d, tc[:d])
+          behavior.set_input(:sel, tc[:sel])
+          behavior.propagate
           vectors << {
             inputs: tc,
-            expected: { y: behavioral.get_output(:y) }
+            expected: { y: behavior.get_output(:y) }
           }
         end
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'mux4',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/mux4'
+          base_dir: 'tmp/behavior_test/mux4'
         )
 
         expect(result[:success]).to be(true), result[:error]
@@ -104,15 +104,15 @@ RSpec.describe RHDL::HDL::Mux4 do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Mux4.new('mux4', width: 1) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mux4') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mux4') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mux4.a', 'mux4.b', 'mux4.c', 'mux4.d', 'mux4.sel')
       expect(ir.outputs.keys).to include('mux4.y')
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module mux4')
       expect(verilog).to include('input [1:0] sel')
     end
@@ -128,7 +128,7 @@ RSpec.describe RHDL::HDL::Mux4 do
           { inputs: { a: 0, b: 0, c: 0, d: 0, sel: 2 }, expected: { y: 0 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mux4')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mux4')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|

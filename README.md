@@ -39,7 +39,7 @@ rhdl/
 │   │   └── primitives.rb # Gate primitives (AND, OR, XOR, NOT, MUX, DFF)
 │   └── diagram/        # Diagram rendering
 ├── examples/           # Demo scripts
-│   ├── mos6502/        # MOS 6502 behavioral CPU
+│   ├── mos6502/        # MOS 6502 behavior CPU
 │   └── mos6502/       # MOS 6502 synthesizable CPU
 ├── spec/               # Test suite
 ├── docs/               # Documentation
@@ -494,7 +494,7 @@ Test files:
 
 **All 586 tests passing** ✓
 
-The HDL CPU implementation is tested using both unit tests and shared examples that verify identical behavior between the HDL and behavioral implementations.
+The HDL CPU implementation is tested using both unit tests and shared examples that verify identical behavior between the HDL and behavior implementations.
 
 **HDL Tests:**
 - `spec/rhdl/hdl/gates_spec.rb` - Logic gate tests
@@ -503,7 +503,7 @@ The HDL CPU implementation is tested using both unit tests and shared examples t
 - `spec/rhdl/hdl/cpu_spec.rb` - HDL CPU unit tests
 - `test_hdl_cpu.rb` - Standalone HDL CPU integration tests
 
-**CPU Tests (using shared examples for HDL/behavioral parity):**
+**CPU Tests (using shared examples for HDL/behavior parity):**
 - `assembler_spec.rb` - Tests the assembler functionality
 - `instructions_spec.rb` - Tests individual CPU instructions
 - `programs_spec.rb` - Tests various sample programs
@@ -615,7 +615,7 @@ The test suite includes two complex integration tests that demonstrate the CPU's
 
 ### Writing Tests
 
-CPU tests use the `CpuTestHelper` module to simplify test setup. The helper can test both the HDL CPU and the behavioral reference implementation. For example:
+CPU tests use the `CpuTestHelper` module to simplify test setup. The helper can test both the HDL CPU and the behavior reference implementation. For example:
 
 ```ruby
 require 'spec_helper'
@@ -625,7 +625,7 @@ RSpec.describe RHDL::HDL::CPU::CPUAdapter do
 
   before(:each) do
     @memory = MemorySimulator::Memory.new
-    use_hdl_cpu!  # Use HDL implementation (use_behavioral_cpu! for reference impl)
+    use_hdl_cpu!  # Use HDL implementation (use_behavior_cpu! for reference impl)
     @cpu = cpu_class.new(@memory)
     @cpu.reset
   end

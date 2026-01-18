@@ -35,7 +35,7 @@ RSpec.describe RHDL::HDL::XnorGate do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::XnorGate.new('xnor_gate') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'xnor_gate') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'xnor_gate') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('xnor_gate.a0', 'xnor_gate.a1')
@@ -43,8 +43,8 @@ RSpec.describe RHDL::HDL::XnorGate do
       expect(ir.gates.length).to be >= 1
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module xnor_gate')
       expect(verilog).to match(/xnor g0|xor g0/)
     end
@@ -58,7 +58,7 @@ RSpec.describe RHDL::HDL::XnorGate do
           { inputs: { a0: 1, a1: 1 }, expected: { y: 1 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/xnor_gate')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/xnor_gate')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|

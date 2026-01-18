@@ -42,7 +42,7 @@ RSpec.describe RHDL::HDL::Demux4 do
 
   describe 'gate-level netlist (1-bit)' do
     let(:component) { RHDL::HDL::Demux4.new('demux4', width: 1) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'demux4') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'demux4') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('demux4.a', 'demux4.sel')
@@ -50,8 +50,8 @@ RSpec.describe RHDL::HDL::Demux4 do
       expect(ir.gates.length).to be >= 1
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module demux4')
       expect(verilog).to include('input a')
       expect(verilog).to include('input [1:0] sel')
@@ -62,30 +62,30 @@ RSpec.describe RHDL::HDL::Demux4 do
     end
 
     context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation' do
+      it 'matches behavior simulation' do
         test_vectors = []
-        behavioral = RHDL::HDL::Demux4.new(nil, width: 1)
+        behavior = RHDL::HDL::Demux4.new(nil, width: 1)
 
         test_cases = []
         4.times { |sel| test_cases << { a: 1, sel: sel } }
 
         expected_outputs = []
         test_cases.each do |tc|
-          behavioral.set_input(:a, tc[:a])
-          behavioral.set_input(:sel, tc[:sel])
-          behavioral.propagate
+          behavior.set_input(:a, tc[:a])
+          behavior.set_input(:sel, tc[:sel])
+          behavior.propagate
 
           test_vectors << { inputs: tc }
           expected_outputs << {
-            y0: behavioral.get_output(:y0),
-            y1: behavioral.get_output(:y1),
-            y2: behavioral.get_output(:y2),
-            y3: behavioral.get_output(:y3)
+            y0: behavior.get_output(:y0),
+            y1: behavior.get_output(:y1),
+            y2: behavior.get_output(:y2),
+            y3: behavior.get_output(:y3)
           }
         end
 
         base_dir = File.join('tmp', 'iverilog', 'demux4')
-        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+        result = NetlistHelper.run_structure_simulation(ir, test_vectors, base_dir: base_dir)
 
         expect(result[:success]).to be(true), result[:error]
 

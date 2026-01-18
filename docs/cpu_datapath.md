@@ -241,7 +241,7 @@ puts cpu.acc_value  # => 66
 
 ### Using the CPUAdapter
 
-For compatibility with the behavioral CPU interface:
+For compatibility with the behavior CPU interface:
 
 ```ruby
 memory = MemorySimulator::Memory.new
@@ -319,7 +319,7 @@ memory[15] = 10
 
 ## Testing
 
-The HDL CPU is tested against the behavioral CPU using shared examples:
+The HDL CPU is tested against the behavior CPU using shared examples:
 
 ```ruby
 # Run all HDL CPU tests

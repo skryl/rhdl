@@ -55,7 +55,7 @@ RSpec.describe RHDL::HDL::BitReverse do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::BitReverse.new('bitrev', width: 8) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'bitrev') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'bitrev') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('bitrev.a')
@@ -64,17 +64,17 @@ RSpec.describe RHDL::HDL::BitReverse do
       expect(ir.gates.length).to be >= 0
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module bitrev')
       expect(verilog).to include('input [7:0] a')
       expect(verilog).to include('output [7:0] y')
     end
 
     context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation' do
+      it 'matches behavior simulation' do
         test_vectors = []
-        behavioral = RHDL::HDL::BitReverse.new(nil, width: 8)
+        behavior = RHDL::HDL::BitReverse.new(nil, width: 8)
 
         test_cases = [
           { a: 0b10110001 },
@@ -86,15 +86,15 @@ RSpec.describe RHDL::HDL::BitReverse do
 
         expected_outputs = []
         test_cases.each do |tc|
-          behavioral.set_input(:a, tc[:a])
-          behavioral.propagate
+          behavior.set_input(:a, tc[:a])
+          behavior.propagate
 
           test_vectors << { inputs: tc }
-          expected_outputs << { y: behavioral.get_output(:y) }
+          expected_outputs << { y: behavior.get_output(:y) }
         end
 
         base_dir = File.join('tmp', 'iverilog', 'bitrev')
-        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+        result = NetlistHelper.run_structure_simulation(ir, test_vectors, base_dir: base_dir)
 
         expect(result[:success]).to be(true), result[:error]
 

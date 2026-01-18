@@ -45,7 +45,7 @@ RSpec.describe RHDL::HDL::RippleCarryAdder do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::RippleCarryAdder.new('rca', width: 4) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'rca') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'rca') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('rca.a', 'rca.b', 'rca.cin')
@@ -53,8 +53,8 @@ RSpec.describe RHDL::HDL::RippleCarryAdder do
       expect(ir.gates.length).to be > 0
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module rca')
       expect(verilog).to include('input [3:0] a')
       expect(verilog).to include('input [3:0] b')
@@ -69,7 +69,7 @@ RSpec.describe RHDL::HDL::RippleCarryAdder do
           { inputs: { a: 15, b: 1, cin: 0 }, expected: { sum: 0, cout: 1, overflow: 0 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/rca')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/rca')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|

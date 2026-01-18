@@ -59,7 +59,7 @@ RSpec.describe MOS6502::ControlUnit do
     end
 
     context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
-      it 'behavioral Verilog compiles and runs' do
+      it 'behavior Verilog compiles and runs' do
         verilog = described_class.to_verilog
 
         inputs = { clk: 1, rst: 1, rdy: 1, addr_mode: 4, instr_type: 4, branch_cond: 3,
@@ -77,13 +77,13 @@ RSpec.describe MOS6502::ControlUnit do
                       is_read: 0, is_write: 0, is_rmw: 0, writes_reg: 0, is_status_op: 0 } }
         ]
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'mos6502_control_unit',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/mos6502_control_unit',
+          base_dir: 'tmp/behavior_test/mos6502_control_unit',
           has_clock: true
         )
         expect(result[:success]).to be(true), result[:error]
@@ -93,7 +93,7 @@ RSpec.describe MOS6502::ControlUnit do
 
   describe 'gate-level netlist' do
     let(:component) { described_class.new('mos6502_control_unit') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mos6502_control_unit') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mos6502_control_unit') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mos6502_control_unit.clk', 'mos6502_control_unit.rst')
@@ -103,12 +103,12 @@ RSpec.describe MOS6502::ControlUnit do
 
     it 'generates gates for state machine logic' do
       # Control unit has complex state machine logic
-      # Note: Behavioral state machines may not produce DFFs through gate lowering
+      # Note: Behavior state machines may not produce DFFs through gate lowering
       expect(ir.gates.length).to be > 100
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module mos6502_control_unit')
       expect(verilog).to include('input clk')
       expect(verilog).to include('input rst')
@@ -116,7 +116,7 @@ RSpec.describe MOS6502::ControlUnit do
     end
 
     context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
-      it 'compiles and simulates structural Verilog' do
+      it 'compiles and simulates structure Verilog' do
         # Control unit is a complex state machine - just verify it compiles and runs
         vectors = [
           { inputs: { clk: 0, rst: 1, rdy: 1, addr_mode: 0, instr_type: 0, branch_cond: 0,
@@ -130,7 +130,7 @@ RSpec.describe MOS6502::ControlUnit do
                       is_read: 0, is_write: 0, is_rmw: 0, writes_reg: 0, is_status_op: 0 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mos6502_control_unit')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mos6502_control_unit')
         expect(result[:success]).to be(true), result[:error]
       end
     end

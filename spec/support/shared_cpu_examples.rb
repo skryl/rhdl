@@ -1,5 +1,5 @@
 # Shared examples for CPU behavior
-# These can be run against both behavioral and HDL CPU implementations
+# These can be run against both behavior and HDL CPU implementations
 
 RSpec.shared_examples 'a CPU implementation' do
   include CpuTestHelper

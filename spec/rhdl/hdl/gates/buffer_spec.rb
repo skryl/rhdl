@@ -28,15 +28,15 @@ RSpec.describe RHDL::HDL::Buffer do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Buffer.new('buffer') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'buffer') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'buffer') }
 
     it 'generates correct IR structure' do
       expect(ir.gates.length).to eq(1)
       expect(ir.gates.first.type).to eq(:buf)
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('buf g0')
     end
 
@@ -47,7 +47,7 @@ RSpec.describe RHDL::HDL::Buffer do
           { inputs: { a: 1 }, expected: { y: 1 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/buffer')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/buffer')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|

@@ -73,7 +73,7 @@ RSpec.describe RHDL::HDL::RegisterFile do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::RegisterFile.new('regfile') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'regfile') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'regfile') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('regfile.clk', 'regfile.we', 'regfile.waddr', 'regfile.wdata', 'regfile.raddr1', 'regfile.raddr2')
@@ -81,8 +81,8 @@ RSpec.describe RHDL::HDL::RegisterFile do
       expect(ir.gates.length).to be >= 1
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module regfile')
       expect(verilog).to include('input clk')
       expect(verilog).to include('input we')
@@ -93,10 +93,10 @@ RSpec.describe RHDL::HDL::RegisterFile do
     end
 
     context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation' do
+      it 'matches behavior simulation' do
         test_vectors = []
-        behavioral = RHDL::HDL::RegisterFile.new
-        behavioral.set_input(:we, 0)
+        behavior = RHDL::HDL::RegisterFile.new
+        behavior.set_input(:we, 0)
 
         test_cases = [
           { waddr: 1, wdata: 0xAA, we: 1, raddr1: 1, raddr2: 0 },  # write reg1
@@ -106,25 +106,25 @@ RSpec.describe RHDL::HDL::RegisterFile do
 
         expected_outputs = []
         test_cases.each do |tc|
-          behavioral.set_input(:waddr, tc[:waddr])
-          behavioral.set_input(:wdata, tc[:wdata])
-          behavioral.set_input(:we, tc[:we])
-          behavioral.set_input(:raddr1, tc[:raddr1])
-          behavioral.set_input(:raddr2, tc[:raddr2])
-          behavioral.set_input(:clk, 0)
-          behavioral.propagate
-          behavioral.set_input(:clk, 1)
-          behavioral.propagate
+          behavior.set_input(:waddr, tc[:waddr])
+          behavior.set_input(:wdata, tc[:wdata])
+          behavior.set_input(:we, tc[:we])
+          behavior.set_input(:raddr1, tc[:raddr1])
+          behavior.set_input(:raddr2, tc[:raddr2])
+          behavior.set_input(:clk, 0)
+          behavior.propagate
+          behavior.set_input(:clk, 1)
+          behavior.propagate
 
           test_vectors << { inputs: tc }
           expected_outputs << {
-            rdata1: behavioral.get_output(:rdata1),
-            rdata2: behavioral.get_output(:rdata2)
+            rdata1: behavior.get_output(:rdata1),
+            rdata2: behavior.get_output(:rdata2)
           }
         end
 
         base_dir = File.join('tmp', 'iverilog', 'regfile')
-        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+        result = NetlistHelper.run_structure_simulation(ir, test_vectors, base_dir: base_dir)
 
         expect(result[:success]).to be(true), result[:error]
 

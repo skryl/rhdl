@@ -51,10 +51,10 @@ RSpec.describe RHDL::HDL::HalfAdder do
       expect(verilog).to include('assign cout')
     end
 
-    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+    context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::HalfAdder.to_verilog
-        behavioral = RHDL::HDL::HalfAdder.new
+        behavior = RHDL::HDL::HalfAdder.new
 
         inputs = { a: 1, b: 1 }
         outputs = { sum: 1, cout: 1 }
@@ -68,25 +68,25 @@ RSpec.describe RHDL::HDL::HalfAdder do
         ]
 
         test_cases.each do |tc|
-          behavioral.set_input(:a, tc[:a])
-          behavioral.set_input(:b, tc[:b])
-          behavioral.propagate
+          behavior.set_input(:a, tc[:a])
+          behavior.set_input(:b, tc[:b])
+          behavior.propagate
           vectors << {
             inputs: tc,
             expected: {
-              sum: behavioral.get_output(:sum),
-              cout: behavioral.get_output(:cout)
+              sum: behavior.get_output(:sum),
+              cout: behavior.get_output(:cout)
             }
           }
         end
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'half_adder',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/half_adder'
+          base_dir: 'tmp/behavior_test/half_adder'
         )
 
         expect(result[:success]).to be(true), result[:error]
@@ -103,7 +103,7 @@ RSpec.describe RHDL::HDL::HalfAdder do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::HalfAdder.new('half_adder') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'half_adder') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'half_adder') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('half_adder.a', 'half_adder.b')
@@ -113,8 +113,8 @@ RSpec.describe RHDL::HDL::HalfAdder do
       expect(gate_types).to eq([:and, :xor])
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module half_adder')
       expect(verilog).to include('input a')
       expect(verilog).to include('input b')
@@ -131,7 +131,7 @@ RSpec.describe RHDL::HDL::HalfAdder do
           { inputs: { a: 1, b: 1 }, expected: { sum: 0, cout: 1 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/half_adder')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/half_adder')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|

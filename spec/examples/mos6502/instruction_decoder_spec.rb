@@ -71,9 +71,9 @@ RSpec.describe MOS6502::InstructionDecoder do
     end
 
     context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
-      it 'behavioral Verilog matches RHDL simulation' do
+      it 'behavior Verilog matches RHDL simulation' do
         verilog = described_class.to_verilog
-        behavioral = described_class.new('behavioral')
+        behavior = described_class.new('behavior')
         vectors = []
 
         inputs = { opcode: 8 }
@@ -83,26 +83,26 @@ RSpec.describe MOS6502::InstructionDecoder do
         test_opcodes = [0x69, 0xA5, 0x8D, 0xF0, 0x4C]  # ADC imm, LDA zp, STA abs, BEQ, JMP
 
         test_opcodes.each do |opcode|
-          behavioral.set_input(:opcode, opcode)
-          behavioral.propagate
+          behavior.set_input(:opcode, opcode)
+          behavior.propagate
           vectors << {
             inputs: { opcode: opcode },
             expected: {
-              addr_mode: behavioral.get_output(:addr_mode),
-              alu_op: behavioral.get_output(:alu_op),
-              instr_type: behavioral.get_output(:instr_type),
-              illegal: behavioral.get_output(:illegal)
+              addr_mode: behavior.get_output(:addr_mode),
+              alu_op: behavior.get_output(:alu_op),
+              instr_type: behavior.get_output(:instr_type),
+              illegal: behavior.get_output(:illegal)
             }
           }
         end
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'mos6502_instruction_decoder',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/mos6502_instruction_decoder'
+          base_dir: 'tmp/behavior_test/mos6502_instruction_decoder'
         )
         expect(result[:success]).to be(true), result[:error]
 
@@ -116,7 +116,7 @@ RSpec.describe MOS6502::InstructionDecoder do
 
   describe 'gate-level netlist' do
     let(:component) { described_class.new('mos6502_instruction_decoder') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'mos6502_instruction_decoder') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mos6502_instruction_decoder') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mos6502_instruction_decoder.opcode')
@@ -131,36 +131,36 @@ RSpec.describe MOS6502::InstructionDecoder do
       expect(ir.dffs.length).to eq(0)
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module mos6502_instruction_decoder')
       expect(verilog).to include('input [7:0] opcode')
       expect(verilog).to include('output [3:0] addr_mode')
     end
 
     context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation for opcode decoding' do
-        behavioral = described_class.new('behavioral')
+      it 'matches behavior simulation for opcode decoding' do
+        behavior = described_class.new('behavior')
         vectors = []
 
-        # Test several opcodes and compare behavioral vs structural
+        # Test several opcodes and compare behavior vs structure
         test_opcodes = [0x69, 0xA5, 0x8D, 0xF0, 0x4C, 0x02]  # ADC imm, LDA zp, STA abs, BEQ, JMP, illegal
 
         test_opcodes.each do |opcode|
-          behavioral.set_input(:opcode, opcode)
-          behavioral.propagate
+          behavior.set_input(:opcode, opcode)
+          behavior.propagate
           vectors << {
             inputs: { opcode: opcode },
             expected: {
-              addr_mode: behavioral.get_output(:addr_mode),
-              alu_op: behavioral.get_output(:alu_op),
-              instr_type: behavioral.get_output(:instr_type),
-              illegal: behavioral.get_output(:illegal)
+              addr_mode: behavior.get_output(:addr_mode),
+              alu_op: behavior.get_output(:alu_op),
+              instr_type: behavior.get_output(:instr_type),
+              illegal: behavior.get_output(:illegal)
             }
           }
         end
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mos6502_instruction_decoder')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mos6502_instruction_decoder')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|
