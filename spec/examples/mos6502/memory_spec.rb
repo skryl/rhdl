@@ -1,5 +1,5 @@
 require_relative 'spec_helper'
-require_relative '../../../examples/mos6502/memory'
+require_relative '../../../examples/mos6502/hdl/memory'
 
 RSpec.describe MOS6502::Memory do
   let(:mem) { MOS6502::Memory.new }

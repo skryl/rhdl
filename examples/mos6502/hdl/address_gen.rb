@@ -2,7 +2,7 @@
 # Computes effective addresses for all 6502 addressing modes
 # Combinational logic - direct Verilog synthesis
 
-require_relative '../../lib/rhdl'
+require_relative '../../../lib/rhdl'
 
 # Load individual address generation components
 require_relative 'address_gen/address_generator'

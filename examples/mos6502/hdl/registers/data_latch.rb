@@ -1,9 +1,9 @@
 # MOS 6502 Data Latch - Synthesizable DSL Version
 # 8-bit data latch for holding memory data
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module MOS6502
   # Data Latch - Synthesizable via Sequential DSL

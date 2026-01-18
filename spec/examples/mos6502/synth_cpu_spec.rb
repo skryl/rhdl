@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'spec_helper'
-require_relative '../../../examples/mos6502/cpu'
+require_relative '../../../examples/mos6502/hdl/cpu'
 
 RSpec.describe MOS6502::CPU do
   describe 'structure' do

@@ -2,9 +2,9 @@
 # State machine that sequences instruction execution
 # Sequential - requires always @(posedge clk) for synthesis
 
-require_relative '../../lib/rhdl'
-require_relative '../../lib/rhdl/dsl/behavior'
-require_relative '../../lib/rhdl/dsl/sequential'
+require_relative '../../../lib/rhdl'
+require_relative '../../../lib/rhdl/dsl/behavior'
+require_relative '../../../lib/rhdl/dsl/sequential'
 
 module MOS6502
   class ControlUnit < RHDL::HDL::SequentialComponent
