@@ -132,6 +132,7 @@ The project uses these gems:
 - `rspec ~> 3.12` - Testing framework (dev/test)
 - `rake ~> 13.0` - Build tool (dev/test)
 - `parallel_tests ~> 4.0` - Parallel test execution (dev/test)
+- `benchmark-ips ~> 2.12` - Benchmarking (dev/test)
 
 ### Optional System Dependencies
 
@@ -152,9 +153,21 @@ gem install bundler -v '~> 2.5'
 bundle install
 ```
 
-3. Verify installation:
+3. Setup binstubs and development environment:
 ```bash
-bundle exec rake --version
+bundle exec rake setup
+```
+
+This creates binstubs in `bin/` for rake, rspec, and parallel_rspec. The setup task is automatically run as a dependency when running tests or benchmarks.
+
+4. (Optional) Install system dependencies:
+```bash
+bundle exec rake deps:install
+```
+
+5. Verify installation:
+```bash
+./bin/rake --version
 ```
 
 ## Running Tests
@@ -239,6 +252,13 @@ These tests are conditional (`if: HdlToolchain.iverilog_available?`) and automat
 The project includes rake tasks for common operations:
 
 ```bash
+# Setup development environment (generates binstubs)
+rake setup
+
+# Check/install test dependencies (iverilog, etc.)
+rake deps:install
+rake deps:check
+
 # Generate all component diagrams (SVG, DOT, TXT)
 rake diagrams:generate
 
@@ -269,6 +289,21 @@ rake gates:clean
 # Run gate-level simulation benchmark
 rake bench:gates
 
+# Benchmark tests and show slowest N tests (default 20)
+rake benchmark:tests[30]
+
+# Benchmark 6502 tests only
+rake benchmark:tests_6502
+
+# Benchmark HDL tests only
+rake benchmark:tests_hdl
+
+# Detailed per-file timing analysis
+rake benchmark:timing
+
+# Quick benchmark by test category
+rake benchmark:quick
+
 # Generate all outputs (diagrams + HDL + gates)
 rake generate_all
 
@@ -278,6 +313,8 @@ rake clean_all
 # Regenerate everything (clean + generate)
 rake regenerate
 ```
+
+**Note:** The `setup:binstubs` task is automatically run as a dependency for `spec`, `pspec`, and all `benchmark:*` tasks. This ensures binstubs are available before running tests.
 
 ### HDL Export
 
