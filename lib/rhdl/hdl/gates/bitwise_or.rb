@@ -4,9 +4,9 @@
 module RHDL
   module HDL
     class BitwiseOr < SimComponent
-      port_input :a, width: 8
-      port_input :b, width: 8
-      port_output :y, width: 8
+      input :a, width: 8
+      input :b, width: 8
+      output :y, width: 8
 
       behavior do
         y <= a | b

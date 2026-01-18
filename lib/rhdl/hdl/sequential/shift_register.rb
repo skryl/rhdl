@@ -11,15 +11,15 @@ module RHDL
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
-      port_input :d_in       # Serial input
-      port_input :clk
-      port_input :rst
-      port_input :en
-      port_input :dir        # 0 = right, 1 = left
-      port_input :load       # Parallel load enable
-      port_input :d, width: 8  # Parallel load data
-      port_output :q, width: 8
-      port_output :d_out     # Serial output
+      input :d_in       # Serial input
+      input :clk
+      input :rst
+      input :en
+      input :dir        # 0 = right, 1 = left
+      input :load       # Parallel load enable
+      input :d, width: 8  # Parallel load data
+      output :q, width: 8
+      output :d_out     # Serial output
 
       # Sequential block for shift register
       # Priority: load > en (shift)

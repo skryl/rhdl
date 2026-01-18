@@ -11,11 +11,11 @@ module RHDL
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
-      port_input :d, width: 8
-      port_input :clk
-      port_input :rst
-      port_input :load
-      port_output :q, width: 8
+      input :d, width: 8
+      input :clk
+      input :rst
+      input :load
+      output :q, width: 8
 
       # Sequential block for register with load
       sequential clock: :clk, reset: :rst, reset_values: { q: 0 } do

@@ -6,16 +6,16 @@ module RHDL
     # 8-to-1 Multiplexer - selects one of 8 inputs
     class Mux8 < SimComponent
       # Class-level port definitions for synthesis (default 1-bit width)
-      port_input :in0
-      port_input :in1
-      port_input :in2
-      port_input :in3
-      port_input :in4
-      port_input :in5
-      port_input :in6
-      port_input :in7
-      port_input :sel, width: 3
-      port_output :y
+      input :in0
+      input :in1
+      input :in2
+      input :in3
+      input :in4
+      input :in5
+      input :in6
+      input :in7
+      input :sel, width: 3
+      output :y
 
       behavior do
         # 8-to-1 mux using case_select

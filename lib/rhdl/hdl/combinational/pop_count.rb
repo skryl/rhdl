@@ -6,8 +6,8 @@ module RHDL
     # Population Count (count 1 bits)
     class PopCount < SimComponent
       # Class-level port definitions for synthesis (default 8-bit input)
-      port_input :a, width: 8
-      port_output :count, width: 4  # log2(8+1) = 4 bits needed
+      input :a, width: 8
+      output :count, width: 4  # log2(8+1) = 4 bits needed
 
       behavior do
         # Count 1 bits by adding all individual bits

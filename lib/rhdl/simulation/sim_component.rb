@@ -7,7 +7,7 @@ module RHDL
     # Base class for all HDL components with simulation support
     #
     # Components are defined using class-level declarations:
-    # - port_input/port_output: Define I/O ports
+    # - input/output: Define I/O ports
     # - wire: Define internal wires (signals)
     # - instance: Instantiate sub-components
     # - port: Connect signals to sub-component ports
@@ -15,9 +15,9 @@ module RHDL
     #
     # @example Simple combinational component
     #   class MyAnd < SimComponent
-    #     port_input :a
-    #     port_input :b
-    #     port_output :y
+    #     input :a
+    #     input :b
+    #     output :y
     #
     #     behavior do
     #       y <= a & b
@@ -26,9 +26,9 @@ module RHDL
     #
     # @example Hierarchical component with sub-components
     #   class MyDatapath < SimComponent
-    #     port_input :a, width: 8
-    #     port_input :b, width: 8
-    #     port_output :result, width: 8
+    #     input :a, width: 8
+    #     input :b, width: 8
+    #     output :result, width: 8
     #
     #     wire :alu_out, width: 8
     #
@@ -87,12 +87,13 @@ module RHDL
           end
         end
 
-        # Class-level port definition (for behavior blocks)
-        def port_input(name, width: 1)
+        # Class-level input port definition
+        def input(name, width: 1)
           _port_defs << { name: name, direction: :in, width: width }
         end
 
-        def port_output(name, width: 1)
+        # Class-level output port definition
+        def output(name, width: 1)
           _port_defs << { name: name, direction: :out, width: width }
         end
 
@@ -131,8 +132,8 @@ module RHDL
         #
         # @example
         #   class MyDatapath < SimComponent
-        #     port_input :a, width: 8
-        #     port_output :result, width: 8
+        #     input :a, width: 8
+        #     output :result, width: 8
         #
         #     instance :alu, ALU, width: 8
         #     instance :reg, Register, width: 8
@@ -201,9 +202,9 @@ module RHDL
         #
         # @example Basic combinational logic
         #   class MyAnd < SimComponent
-        #     port_input :a
-        #     port_input :b
-        #     port_output :y
+        #     input :a
+        #     input :b
+        #     output :y
         #
         #     behavior do
         #       y <= a & b

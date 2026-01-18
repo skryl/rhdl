@@ -13,9 +13,9 @@ module RHDL
     class ROM < SimComponent
       include RHDL::DSL::MemoryDSL
 
-      port_input :addr, width: 8
-      port_input :en
-      port_output :dout, width: 8
+      input :addr, width: 8
+      input :en
+      output :dout, width: 8
 
       # Define memory array (256 x 8-bit)
       memory :mem, depth: 256, width: 8

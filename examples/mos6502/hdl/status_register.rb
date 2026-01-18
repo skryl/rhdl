@@ -29,39 +29,39 @@ module MOS6502
     FLAG_N = 7  # Negative
 
     # Control inputs
-    port_input :clk
-    port_input :rst
+    input :clk
+    input :rst
 
     # Load controls
-    port_input :load_all        # Load entire register (from stack pull)
-    port_input :load_flags      # Load N, Z, C, V from ALU
-    port_input :load_n
-    port_input :load_z
-    port_input :load_c
-    port_input :load_v
-    port_input :load_i
-    port_input :load_d
-    port_input :load_b
+    input :load_all        # Load entire register (from stack pull)
+    input :load_flags      # Load N, Z, C, V from ALU
+    input :load_n
+    input :load_z
+    input :load_c
+    input :load_v
+    input :load_i
+    input :load_d
+    input :load_b
 
     # Flag inputs
-    port_input :n_in
-    port_input :z_in
-    port_input :c_in
-    port_input :v_in
-    port_input :i_in
-    port_input :d_in
-    port_input :b_in
-    port_input :data_in, width: 8
+    input :n_in
+    input :z_in
+    input :c_in
+    input :v_in
+    input :i_in
+    input :d_in
+    input :b_in
+    input :data_in, width: 8
 
     # Outputs
-    port_output :p, width: 8
-    port_output :n
-    port_output :v
-    port_output :b
-    port_output :d
-    port_output :i
-    port_output :z
-    port_output :c
+    output :p, width: 8
+    output :n
+    output :v
+    output :b
+    output :d
+    output :i
+    output :z
+    output :c
 
     # Sequential block for p register
     # Priority: reset > load_all > load_flags > individual loads

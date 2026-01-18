@@ -4,12 +4,12 @@
 module RHDL
   module HDL
     class RippleCarryAdder < SimComponent
-      port_input :a, width: 8
-      port_input :b, width: 8
-      port_input :cin
-      port_output :sum, width: 8
-      port_output :cout
-      port_output :overflow
+      input :a, width: 8
+      input :b, width: 8
+      input :cin
+      output :sum, width: 8
+      output :cout
+      output :overflow
 
       behavior do
         # Use 9-bit result to capture carry

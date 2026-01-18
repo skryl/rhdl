@@ -11,15 +11,15 @@ module RHDL
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
-      port_input :clk
-      port_input :rst
-      port_input :en
-      port_input :up        # 1 = count up, 0 = count down
-      port_input :load
-      port_input :d, width: 8
-      port_output :q, width: 8
-      port_output :tc       # Terminal count (max when up, 0 when down)
-      port_output :zero     # Zero flag
+      input :clk
+      input :rst
+      input :en
+      input :up        # 1 = count up, 0 = count down
+      input :load
+      input :d, width: 8
+      output :q, width: 8
+      output :tc       # Terminal count (max when up, 0 when down)
+      output :zero     # Zero flag
 
       # Sequential block for counter
       # Priority: load > en (count)

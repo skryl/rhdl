@@ -6,12 +6,12 @@ module RHDL
     # 4-to-1 Multiplexer
     class Mux4 < SimComponent
       # Class-level port definitions for synthesis (default 1-bit width)
-      port_input :a
-      port_input :b
-      port_input :c
-      port_input :d
-      port_input :sel, width: 2
-      port_output :y
+      input :a
+      input :b
+      input :c
+      input :d
+      input :sel, width: 2
+      output :y
 
       behavior do
         # 4-to-1 mux using nested 2-to-1 muxes

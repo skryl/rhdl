@@ -10,12 +10,12 @@ module RHDL
     class BarrelShifter < SimComponent
       include RHDL::DSL::Behavior
 
-      port_input :a, width: 8
-      port_input :shift, width: 3
-      port_input :dir      # 0 = left, 1 = right
-      port_input :arith    # 1 = arithmetic right shift (only applies when dir=1, rotate=0)
-      port_input :rotate   # 1 = rotate instead of shift
-      port_output :y, width: 8
+      input :a, width: 8
+      input :shift, width: 3
+      input :dir      # 0 = left, 1 = right
+      input :arith    # 1 = arithmetic right shift (only applies when dir=1, rotate=0)
+      input :rotate   # 1 = rotate instead of shift
+      output :y, width: 8
 
       behavior do
         # Pre-compute shifted values for each shift amount

@@ -44,15 +44,15 @@ module RHDL
       OP_DEC = 15
 
       # Class-level port definitions for synthesis (default 8-bit width)
-      port_input :a, width: 8
-      port_input :b, width: 8
-      port_input :op, width: 4
-      port_input :cin
-      port_output :result, width: 8
-      port_output :cout
-      port_output :zero
-      port_output :negative
-      port_output :overflow
+      input :a, width: 8
+      input :b, width: 8
+      input :op, width: 4
+      input :cin
+      output :result, width: 8
+      output :cout
+      output :zero
+      output :negative
+      output :overflow
 
       behavior do
         # Addition: a + b + cin (9 bits to capture carry)

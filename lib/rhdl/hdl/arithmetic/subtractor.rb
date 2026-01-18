@@ -5,12 +5,12 @@ module RHDL
   module HDL
     class Subtractor < SimComponent
       # Class-level port definitions for synthesis (default 8-bit width)
-      port_input :a, width: 8
-      port_input :b, width: 8
-      port_input :bin       # Borrow in
-      port_output :diff, width: 8
-      port_output :bout     # Borrow out
-      port_output :overflow
+      input :a, width: 8
+      input :b, width: 8
+      input :bin       # Borrow in
+      output :diff, width: 8
+      output :bout     # Borrow out
+      output :overflow
 
       behavior do
         # Difference: lower 8 bits of a - b - bin

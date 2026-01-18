@@ -20,28 +20,28 @@ module RISCV
     include RHDL::DSL::Sequential
 
     # External interface
-    port_input :clk
-    port_input :rst
+    input :clk
+    input :rst
 
     # Instruction memory interface
-    port_output :inst_addr, width: 32    # Instruction address
-    port_input :inst_data, width: 32     # Instruction data
+    output :inst_addr, width: 32    # Instruction address
+    input :inst_data, width: 32     # Instruction data
 
     # Data memory interface
-    port_output :data_addr, width: 32    # Data address
-    port_output :data_wdata, width: 32   # Write data
-    port_input :data_rdata, width: 32    # Read data
-    port_output :data_we                 # Write enable
-    port_output :data_re                 # Read enable
-    port_output :data_funct3, width: 3   # Memory access size
+    output :data_addr, width: 32    # Data address
+    output :data_wdata, width: 32   # Write data
+    input :data_rdata, width: 32    # Read data
+    output :data_we                 # Write enable
+    output :data_re                 # Read enable
+    output :data_funct3, width: 3   # Memory access size
 
     # Debug outputs
-    port_output :debug_pc, width: 32
-    port_output :debug_inst, width: 32
-    port_output :debug_x1, width: 32
-    port_output :debug_x2, width: 32
-    port_output :debug_x10, width: 32
-    port_output :debug_x11, width: 32
+    output :debug_pc, width: 32
+    output :debug_inst, width: 32
+    output :debug_x1, width: 32
+    output :debug_x2, width: 32
+    output :debug_x10, width: 32
+    output :debug_x11, width: 32
 
     # Internal signals
     wire :pc, width: 32

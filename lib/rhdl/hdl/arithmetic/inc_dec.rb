@@ -5,10 +5,10 @@ module RHDL
   module HDL
     class IncDec < SimComponent
       # Class-level port definitions for synthesis (default 8-bit width)
-      port_input :a, width: 8
-      port_input :inc    # 1 = increment, 0 = decrement
-      port_output :result, width: 8
-      port_output :cout  # Carry/borrow
+      input :a, width: 8
+      input :inc    # 1 = increment, 0 = decrement
+      output :result, width: 8
+      output :cout  # Carry/borrow
 
       behavior do
         # Compute both increment and decrement results

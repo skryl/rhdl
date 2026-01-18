@@ -4,9 +4,9 @@
 module RHDL
   module HDL
     class Multiplier < SimComponent
-      port_input :a, width: 8
-      port_input :b, width: 8
-      port_output :product, width: 16
+      input :a, width: 8
+      input :b, width: 8
+      output :product, width: 16
 
       behavior do
         product <= a * b

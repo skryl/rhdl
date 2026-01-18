@@ -6,8 +6,8 @@ module RHDL
     # Sign Extender
     class SignExtend < SimComponent
       # Class-level port definitions for synthesis (default 8->16 extension)
-      port_input :a, width: 8
-      port_output :y, width: 16
+      input :a, width: 8
+      output :y, width: 16
 
       behavior do
         # Sign bit from input

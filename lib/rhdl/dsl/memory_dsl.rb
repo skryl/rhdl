@@ -7,11 +7,11 @@
 #   class RAM256x8 < RHDL::HDL::SimComponent
 #     include RHDL::DSL::MemoryDSL
 #
-#     port_input :clk
-#     port_input :we
-#     port_input :addr, width: 8
-#     port_input :din, width: 8
-#     port_output :dout, width: 8
+#     input :clk
+#     input :we
+#     input :addr, width: 8
+#     input :din, width: 8
+#     output :dout, width: 8
 #
 #     memory :mem, depth: 256, width: 8
 #
@@ -23,9 +23,9 @@
 #   class InstructionDecoder < RHDL::HDL::SimComponent
 #     include RHDL::DSL::MemoryDSL
 #
-#     port_input :opcode, width: 8
-#     port_output :addr_mode, width: 4
-#     port_output :alu_op, width: 4
+#     input :opcode, width: 8
+#     output :addr_mode, width: 4
+#     output :alu_op, width: 4
 #
 #     lookup_table :decode do |t|
 #       t.input :opcode, width: 8

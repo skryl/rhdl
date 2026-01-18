@@ -4,11 +4,11 @@
 module RHDL
   module HDL
     class FullAdder < SimComponent
-      port_input :a
-      port_input :b
-      port_input :cin
-      port_output :sum
-      port_output :cout
+      input :a
+      input :b
+      input :cin
+      output :sum
+      output :cout
 
       behavior do
         sum <= a ^ b ^ cin

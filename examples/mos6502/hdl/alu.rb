@@ -26,17 +26,17 @@ module MOS6502
     OP_TST = 0x0D  # Pass through A
     OP_NOP = 0x0F  # No operation
 
-    port_input :a, width: 8
-    port_input :b, width: 8
-    port_input :c_in
-    port_input :d_flag
-    port_input :op, width: 4
+    input :a, width: 8
+    input :b, width: 8
+    input :c_in
+    input :d_flag
+    input :op, width: 4
 
-    port_output :result, width: 8
-    port_output :n
-    port_output :z
-    port_output :c
-    port_output :v
+    output :result, width: 8
+    output :n
+    output :z
+    output :c
+    output :v
 
     # Behavior block for combinational synthesis
     behavior do
