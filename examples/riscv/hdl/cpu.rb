@@ -1,6 +1,9 @@
 # RV32I Single-Cycle CPU
 # Top-level component combining Datapath and Memory
 # Fully synthesizable - generates complete Verilog hierarchy
+#
+# For testing, use the Harness class which provides a cleaner interface
+# and interacts with the CPU only through ports.
 
 require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
@@ -160,7 +163,10 @@ module RISCV
       out_set(:mem_re, data_re)
     end
 
-    # Load program into instruction memory
+    # Direct access methods for simulation test setup
+    # These are simulation conveniences that directly manipulate internal state.
+    # For normal testing, use the Harness class instead.
+
     def load_program(program, start_addr = 0)
       @inst_mem.load_program(program, start_addr)
     end
