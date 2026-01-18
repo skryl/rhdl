@@ -4,7 +4,7 @@
 
 require_relative '../../lib/rhdl/hdl'
 require_relative 'cpu'
-require_relative 'utility/assembler'
+require_relative 'utilities/assembler'
 
 module MOS6502
   # Simulation harness for the synthesizable CPU
