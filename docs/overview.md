@@ -162,5 +162,5 @@ sim.run(100)
 ## Next Steps
 
 - See [Components Reference](components.md) for detailed component documentation
-- See [Sample CPU](sample_cpu.md) for CPU implementation details
-- See [Simulation Engine](simulation_engine.md) for advanced simulation topics
+- See [8-bit CPU](8bit_cpu.md) for CPU implementation details
+- See [Simulation](simulation.md) for advanced simulation topics

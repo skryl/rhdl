@@ -178,6 +178,6 @@ The gate-level IR uses these primitives:
 
 ## See Also
 
-- [Synthesizable DSL Guide](synthesizable_dsl.md) - DSL reference for components
+- [DSL Guide](dsl.md) - DSL reference for components
 - [Components Reference](components.md) - All HDL components
-- [Sample CPU](sample_cpu.md) - CPU implementation details
+- [8-bit CPU](8bit_cpu.md) - CPU implementation details
