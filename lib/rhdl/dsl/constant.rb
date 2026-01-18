@@ -12,11 +12,6 @@ module RHDL
         @value = value
       end
 
-      def to_vhdl
-        type_str = width > 1 ? "std_logic_vector(#{width-1} downto 0)" : "std_logic"
-        "constant #{name} : #{type_str} := #{format_value(value)};"
-      end
-
       def to_verilog
         type_str = width > 1 ? "[#{width-1}:0]" : ""
         "localparam #{type_str} #{name} = #{format_verilog_value(value)};".gsub(/\s+/, ' ').strip
@@ -27,14 +22,6 @@ module RHDL
       end
 
       private
-
-      def format_value(val)
-        if width == 1
-          val == 0 ? "'0'" : "'1'"
-        else
-          "\"#{val.to_s(2).rjust(width, '0')}\""
-        end
-      end
 
       def format_verilog_value(val)
         if width == 1

@@ -104,10 +104,6 @@ module RHDL
         Replication.new(self, times)
       end
 
-      def to_vhdl
-        name.to_s
-      end
-
       def to_verilog
         name.to_s
       end
