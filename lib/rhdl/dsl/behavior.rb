@@ -2,7 +2,7 @@
 #
 # This module provides a `behavior` block that can be used for both:
 # - Simulation: Execute as Ruby code to compute outputs from inputs
-# - Synthesis: Build IR/AST for HDL export (VHDL/Verilog)
+# - Synthesis: Build IR/AST for HDL export (Verilog)
 #
 # Example - Basic combinational logic:
 #   class MyAnd

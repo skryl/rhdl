@@ -11,13 +11,6 @@ module RHDL
         @operand = operand
       end
 
-      def to_vhdl
-        case op
-        when :~ then "not #{operand.to_vhdl}"
-        else "#{op}#{operand.to_vhdl}"
-        end
-      end
-
       def to_verilog
         case op
         when :~ then "~#{operand.to_verilog}"

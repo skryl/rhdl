@@ -13,24 +13,6 @@ module RHDL
         @generic_map = generic_map
       end
 
-      def to_vhdl
-        lines = []
-        lines << "#{name}: #{component_type}"
-
-        unless generic_map.empty?
-          generics = generic_map.map { |k, v| "#{k} => #{v}" }
-          lines << "  generic map(#{generics.join(', ')})"
-        end
-
-        ports = port_map.map do |k, v|
-          val = v.respond_to?(:to_vhdl) ? v.to_vhdl : v.to_s
-          "#{k} => #{val}"
-        end
-        lines << "  port map(#{ports.join(', ')});"
-
-        lines.join("\n")
-      end
-
       def to_verilog
         lines = []
 

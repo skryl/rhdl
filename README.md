@@ -1,6 +1,6 @@
 # RHDL (Ruby Hardware Description Language)
 
-RHDL is a Domain Specific Language (DSL) that allows you to design hardware using Ruby's flexible syntax and export to VHDL. It provides a comfortable environment for Ruby developers to create hardware designs with all the power of Ruby's metaprogramming capabilities.
+RHDL is a Domain Specific Language (DSL) that allows you to design hardware using Ruby's flexible syntax and export to Verilog. It provides a comfortable environment for Ruby developers to create hardware designs with all the power of Ruby's metaprogramming capabilities.
 
 ## Features
 
@@ -11,7 +11,7 @@ RHDL is a Domain Specific Language (DSL) that allows you to design hardware usin
 - **Signal Probing & Debugging**: Waveform capture, breakpoints, watchpoints, and VCD export
 - **Terminal GUI**: Interactive terminal-based simulator interface
 - **Component Library**: Gates, flip-flops, registers, ALU, memory, and more
-- **HDL Export**: Generate synthesizable VHDL and Verilog from Ruby definitions
+- **HDL Export**: Generate synthesizable Verilog from Ruby definitions
 - **Diagram Generation**: Multi-level circuit diagrams with SVG, PNG, and DOT output
 - **Apple II Support**: Memory-mapped I/O for Apple II bus emulation
 
@@ -20,9 +20,8 @@ RHDL is a Domain Specific Language (DSL) that allows you to design hardware usin
 ```
 rhdl/
 ├── lib/rhdl/           # Core library
-│   ├── dsl.rb          # VHDL DSL for component definitions
+│   ├── dsl.rb          # HDL DSL for component definitions
 │   ├── export/         # HDL export backends
-│   │   ├── vhdl.rb     # VHDL export
 │   │   └── verilog.rb  # Verilog export
 │   ├── hdl/            # HDL simulation framework
 │   │   ├── simulation.rb    # Core simulation engine
@@ -45,7 +44,6 @@ rhdl/
 ├── spec/               # Test suite
 ├── docs/               # Documentation
 ├── export/             # Generated output files
-│   ├── vhdl/           # Generated VHDL files
 │   ├── verilog/        # Generated Verilog files
 │   └── gates/          # Gate-level JSON netlists
 └── diagrams/           # Generated circuit diagrams
@@ -61,7 +59,7 @@ Detailed documentation is available in the `docs/` directory:
 - **[CPU Datapath](docs/cpu_datapath.md)** - CPU architecture and instruction set details
 - **[Debugging Guide](docs/debugging.md)** - Signal probing, breakpoints, and terminal GUI
 - **[Diagram Generation](docs/diagrams.md)** - Multi-level circuit diagram generation
-- **[HDL Export](docs/hdl_export.md)** - VHDL and Verilog export guide
+- **[HDL Export](docs/hdl_export.md)** - Verilog export guide
 - **[Gate Level Backend](docs/gate_level_backend.md)** - Gate-level simulation details
 - **[Apple II I/O](docs/apple2_io.md)** - Apple II bus and memory-mapped I/O
 
@@ -542,7 +540,6 @@ The test suite includes two complex integration tests that demonstrate the CPU's
 
 #### Export Directory Consolidation
 - All generated output now in `/export/` directory
-- `/export/vhdl/` - Generated VHDL files
 - `/export/verilog/` - Generated Verilog files
 - `/export/gates/` - Gate-level JSON netlists
 
@@ -552,7 +549,7 @@ The test suite includes two complex integration tests that demonstrate the CPU's
 - Automatic layout and routing for complex circuits
 
 #### HDL Export Enhancements
-- Improved VHDL and Verilog export pipeline
+- Improved Verilog export pipeline
 - Fixed Verilog resize operations for width mismatches
 - Tool-backed export tests for validation
 

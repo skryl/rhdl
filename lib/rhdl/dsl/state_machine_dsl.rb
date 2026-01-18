@@ -1,7 +1,7 @@
 # State Machine DSL for synthesizable sequential controllers
 #
 # This module provides DSL constructs for finite state machines that can be
-# synthesized to Verilog/VHDL.
+# synthesized to Verilog.
 #
 # Example - Simple FSM:
 #   class TrafficLight < RHDL::HDL::SequentialComponent
