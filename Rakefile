@@ -5,6 +5,36 @@ rescue LoadError
   # Bundler not available, skip gem tasks
 end
 
+# =============================================================================
+# Setup Tasks
+# =============================================================================
+
+namespace :setup do
+  desc "Generate binstubs for all gem executables"
+  task :binstubs do
+    binstubs_needed = {
+      'rake' => 'rake',
+      'rspec-core' => 'rspec',
+      'parallel_tests' => 'parallel_rspec'
+    }
+
+    binstubs_needed.each do |gem_name, executable|
+      binstub_path = File.expand_path("bin/#{executable}", __dir__)
+      unless File.executable?(binstub_path)
+        puts "Generating binstub for #{executable}..."
+        system("bundle binstubs #{gem_name} --force")
+      end
+    end
+  end
+end
+
+desc "Setup development environment (install deps + binstubs)"
+task setup: ['setup:binstubs']
+
+# Ensure binstubs exist before running tests
+task spec: 'setup:binstubs'
+task pspec: 'setup:binstubs'
+
 # RSpec tasks
 begin
   require "rspec/core/rake_task"
@@ -1214,7 +1244,7 @@ namespace :benchmark do
   end
 
   desc "Profile RSpec tests and show slowest 20 tests"
-  task :tests, [:count] do |_, args|
+  task :tests, [:count] => 'setup:binstubs' do |_, args|
     count = args[:count] || 20
     puts "Running RSpec with profiling (showing #{count} slowest tests)..."
     puts "=" * 60
@@ -1222,7 +1252,7 @@ namespace :benchmark do
   end
 
   desc "Profile 6502 tests and show slowest tests"
-  task :tests_6502, [:count] do |_, args|
+  task :tests_6502, [:count] => 'setup:binstubs' do |_, args|
     count = args[:count] || 20
     puts "Running 6502 specs with profiling (showing #{count} slowest tests)..."
     puts "=" * 60
@@ -1230,7 +1260,7 @@ namespace :benchmark do
   end
 
   desc "Profile HDL tests and show slowest tests"
-  task :tests_hdl, [:count] do |_, args|
+  task :tests_hdl, [:count] => 'setup:binstubs' do |_, args|
     count = args[:count] || 20
     puts "Running HDL specs with profiling (showing #{count} slowest tests)..."
     puts "=" * 60
@@ -1238,7 +1268,7 @@ namespace :benchmark do
   end
 
   desc "Run full test timing analysis (detailed per-file timing)"
-  task :timing do
+  task timing: 'setup:binstubs' do
     require 'benchmark'
 
     puts "RHDL Test Suite Timing Analysis"
@@ -1314,7 +1344,7 @@ namespace :benchmark do
   end
 
   desc "Quick benchmark of test categories"
-  task :quick do
+  task quick: 'setup:binstubs' do
     require 'benchmark'
 
     puts "RHDL Test Suite Quick Benchmark"
