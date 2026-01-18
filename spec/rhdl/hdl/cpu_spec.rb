@@ -1,20 +1,11 @@
 require 'spec_helper'
 
 RSpec.describe 'HDL CPU' do
-  describe RHDL::HDL::CPU::CPU do
+  describe RHDL::HDL::CPU::Harness do
     def create_cpu(program = [])
-      cpu = RHDL::HDL::CPU::CPU.new("test_cpu")
+      cpu = RHDL::HDL::CPU::Harness.new(name: "test_cpu")
       cpu.load_program(program)
-      # Proper reset sequence (matching CPUAdapter)
-      cpu.set_input(:clk, 0)
-      cpu.set_input(:rst, 1)
-      cpu.propagate
-      cpu.set_input(:clk, 1)
-      cpu.propagate
-      cpu.set_input(:clk, 0)
-      cpu.propagate
-      cpu.set_input(:rst, 0)
-      cpu.propagate
+      cpu.reset
       cpu
     end
 

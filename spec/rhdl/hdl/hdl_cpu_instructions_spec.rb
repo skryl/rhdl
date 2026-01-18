@@ -1,6 +1,6 @@
 require 'spec_helper'
 
-RSpec.describe RHDL::HDL::CPU::CPUAdapter do
+RSpec.describe RHDL::HDL::CPU::Harness do
   include CpuTestHelper
 
   # Use HDL CPU implementation
