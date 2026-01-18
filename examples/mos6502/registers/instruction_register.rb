@@ -39,8 +39,12 @@ module MOS6502
     def read_opcode; read_reg(:opcode) || 0; end
     def read_operand; ((read_reg(:operand_hi) || 0) << 8) | (read_reg(:operand_lo) || 0); end
 
+    def self.verilog_module_name
+      'mos6502_instruction_register'
+    end
+
     def self.to_verilog
-      RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502_instruction_register'))
+      RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
     end
   end
 end

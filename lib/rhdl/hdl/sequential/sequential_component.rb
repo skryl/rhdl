@@ -80,15 +80,32 @@ module RHDL
           # Generate instances from structure definitions
           instances = structure_to_ir_instances
 
-          # Get signal defs for internal wires
-          regs = _signals.map do |s|
-            RHDL::Export::IR::Reg.new(name: s.name, width: s.width)
+          # Identify signals driven by instance outputs (these must be wires, not regs)
+          # A signal is instance-driven if it's the destination of a connection from [inst, port]
+          instance_driven_signals = Set.new
+          _connection_defs.each do |conn|
+            source, dest = conn[:source], conn[:dest]
+            # If source is [inst_name, port_name], then dest is driven by an instance output
+            if source.is_a?(Array) && source.length == 2 && dest.is_a?(Symbol)
+              instance_driven_signals.add(dest)
+            end
+          end
+
+          # Split signals into regs (not instance-driven) and nets (instance-driven)
+          regs = []
+          instance_nets = []
+          _signals.each do |s|
+            if instance_driven_signals.include?(s.name)
+              instance_nets << RHDL::Export::IR::Net.new(name: s.name, width: s.width)
+            else
+              regs << RHDL::Export::IR::Reg.new(name: s.name, width: s.width)
+            end
           end
 
           RHDL::Export::IR::ModuleDef.new(
             name: name,
             ports: ports,
-            nets: behavior_result[:wires],
+            nets: behavior_result[:wires] + instance_nets,
             regs: regs,
             assigns: behavior_result[:assigns],
             processes: processes,

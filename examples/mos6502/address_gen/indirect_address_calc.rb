@@ -49,8 +49,12 @@ module MOS6502
       }, default: 0)
     end
 
+    def self.verilog_module_name
+      'mos6502_indirect_addr_calc'
+    end
+
     def self.to_verilog
-      RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502_indirect_addr_calc'))
+      RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
     end
   end
 end

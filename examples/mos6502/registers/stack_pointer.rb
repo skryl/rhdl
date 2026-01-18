@@ -45,8 +45,12 @@ module MOS6502
     def read_sp; read_reg(:sp) || 0xFD; end
     def write_sp(v); write_reg(:sp, v & 0xFF); end
 
+    def self.verilog_module_name
+      'mos6502_stack_pointer'
+    end
+
     def self.to_verilog
-      RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502_stack_pointer'))
+      RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
     end
   end
 end
