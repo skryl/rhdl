@@ -60,39 +60,39 @@ module MOS6502
     instance :memory, Memory
 
     # Clock and reset to datapath
-    wire :clk => [:datapath, :clk]
-    wire :rst => [:datapath, :rst]
-    wire :rdy => [:datapath, :rdy]
-    wire :irq => [:datapath, :irq]
-    wire :nmi => [:datapath, :nmi]
+    port :clk => [:datapath, :clk]
+    port :rst => [:datapath, :rst]
+    port :rdy => [:datapath, :rdy]
+    port :irq => [:datapath, :irq]
+    port :nmi => [:datapath, :nmi]
 
     # Clock to memory (memory uses clk for write timing)
-    wire :clk => [:memory, :clk]
+    port :clk => [:memory, :clk]
 
     # Datapath outputs -> internal signals
-    wire [:datapath, :addr] => :dp_addr
-    wire [:datapath, :data_out] => :dp_data_out
-    wire [:datapath, :rw] => :dp_rw
-    wire [:datapath, :sync] => :dp_sync
-    wire [:datapath, :reg_a] => :dp_reg_a
-    wire [:datapath, :reg_x] => :dp_reg_x
-    wire [:datapath, :reg_y] => :dp_reg_y
-    wire [:datapath, :reg_sp] => :dp_reg_sp
-    wire [:datapath, :reg_pc] => :dp_reg_pc
-    wire [:datapath, :reg_p] => :dp_reg_p
-    wire [:datapath, :opcode] => :dp_opcode
-    wire [:datapath, :state] => :dp_state
-    wire [:datapath, :halted] => :dp_halted
-    wire [:datapath, :cycle_count] => :dp_cycle_count
+    port [:datapath, :addr] => :dp_addr
+    port [:datapath, :data_out] => :dp_data_out
+    port [:datapath, :rw] => :dp_rw
+    port [:datapath, :sync] => :dp_sync
+    port [:datapath, :reg_a] => :dp_reg_a
+    port [:datapath, :reg_x] => :dp_reg_x
+    port [:datapath, :reg_y] => :dp_reg_y
+    port [:datapath, :reg_sp] => :dp_reg_sp
+    port [:datapath, :reg_pc] => :dp_reg_pc
+    port [:datapath, :reg_p] => :dp_reg_p
+    port [:datapath, :opcode] => :dp_opcode
+    port [:datapath, :state] => :dp_state
+    port [:datapath, :halted] => :dp_halted
+    port [:datapath, :cycle_count] => :dp_cycle_count
 
     # Memory inputs from datapath
-    wire :dp_addr => [:memory, :addr]
-    wire :dp_data_out => [:memory, :data_in]
-    wire :dp_rw => [:memory, :rw]
+    port :dp_addr => [:memory, :addr]
+    port :dp_data_out => [:memory, :data_in]
+    port :dp_rw => [:memory, :rw]
 
     # Memory output -> datapath input
-    wire [:memory, :data_out] => :mem_data_out
-    wire :mem_data_out => [:datapath, :data_in]
+    port [:memory, :data_out] => :mem_data_out
+    port :mem_data_out => [:datapath, :data_in]
 
     # Behavior block for combinational logic
     behavior do
