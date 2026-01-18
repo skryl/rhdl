@@ -477,10 +477,7 @@ Follow these conventions for file organization:
 **Example component using only declarative DSL:**
 ```ruby
 class MyDatapath < SimComponent
-  # Expose sub-components if external access is needed
-  attr_reader :alu, :reg
-
-  # Ports
+  # Ports - the ONLY interface to the component
   input :clk
   input :a, width: 8
   input :b, width: 8
@@ -489,7 +486,7 @@ class MyDatapath < SimComponent
   # Internal signals
   wire :alu_out, width: 8
 
-  # Sub-components (automatically instantiated)
+  # Sub-components (automatically instantiated, private to component)
   instance :alu, ALU, width: 8
   instance :reg, Register, width: 8
 
@@ -505,6 +502,7 @@ end
 
 **Key points:**
 - The `instance` DSL automatically creates instance variables (`@alu`, `@reg`) and populates `@subcomponents`
-- Use `attr_reader` only to expose sub-components that need external access
+- **Do NOT use `attr_reader` to expose sub-components** - all interaction must be through ports
+- Components should be fully encapsulated - external code uses `set_input`/`get_output` only
 - Never override `initialize` unless absolutely necessary for non-DSL functionality
 - The DSL supports both simulation and Verilog export automatically

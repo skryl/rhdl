@@ -1,5 +1,6 @@
 # CPU Harness - behavioral simulation wrapper
-# Connects CPU to memory and provides simulation interface
+# Connects CPU to memory and provides simulation interface.
+# Interacts with CPU ONLY through its ports - no direct access to internals.
 
 require_relative 'instruction_decoder'
 require_relative 'accumulator'
@@ -31,6 +32,7 @@ module RHDL
       end
 
       # CPU Harness - connects CPU to memory for behavioral simulation
+      # All interaction with CPU is through ports only
       class Harness
         attr_reader :memory, :halted, :cycle_count
         attr_reader :cpu, :ram
@@ -40,14 +42,10 @@ module RHDL
           @halted = false
           @zero_flag = 0
 
-          # Create CPU and RAM - the only two components
+          # Create CPU and RAM
           @cpu = CPU.new(name || "cpu")
           @ram = RAM.new("mem", data_width: 8, addr_width: 16)
           @memory = Memory.new(@ram)
-
-          # Internal execution state
-          @instruction = 0
-          @operand = 0
 
           # Load initial memory contents
           memory_contents.each_with_index do |byte, addr|
@@ -65,17 +63,17 @@ module RHDL
           reset
         end
 
-        # Accessors - delegate to CPU components
+        # Read CPU state through output ports only
         def acc
-          @cpu.acc.get_output(:q)
+          @cpu.get_output(:acc_out)
         end
 
         def pc
-          @cpu.pc.get_output(:q)
+          @cpu.get_output(:pc_out)
         end
 
         def sp
-          @cpu.sp.get_output(:q)
+          @cpu.get_output(:sp_out)
         end
 
         def zero_flag
@@ -104,27 +102,27 @@ module RHDL
           @halted = false
           @cycle_count = 0
           @zero_flag = 0
-          @instruction = 0
-          @operand = 0
 
-          # Reset CPU components
-          @cpu.pc.instance_variable_set(:@state, 0)
-          @cpu.pc.set_input(:rst, 0)
-          @cpu.pc.set_input(:en, 0)
-          @cpu.pc.set_input(:load, 0)
+          # Reset CPU through rst port
+          @cpu.set_input(:rst, 1)
+          @cpu.set_input(:zero_flag_in, 0)
+          clock_cpu
+          @cpu.set_input(:rst, 0)
 
-          @cpu.acc.instance_variable_set(:@state, 0)
-          @cpu.acc.set_input(:rst, 0)
-          @cpu.acc.set_input(:en, 0)
+          # Initialize PC to 0
+          @cpu.set_input(:pc_load_data, 0)
+          @cpu.set_input(:pc_load_en, 1)
+          clock_cpu
+          @cpu.set_input(:pc_load_en, 0)
 
-          @cpu.sp.instance_variable_set(:@state, 0xFF)
-          @cpu.sp.set_input(:rst, 0)
-          @cpu.sp.set_input(:push, 0)
-          @cpu.sp.set_input(:pop, 0)
+          # Initialize ACC to 0
+          @cpu.set_input(:acc_load_data, 0)
+          @cpu.set_input(:acc_load_en, 1)
+          clock_cpu
+          @cpu.set_input(:acc_load_en, 0)
 
-          @cpu.pc.propagate
-          @cpu.acc.propagate
-          @cpu.sp.propagate
+          # SP initializes to 0xFF via StackPointer component
+          @cpu.propagate
         end
 
         def step
@@ -166,18 +164,29 @@ module RHDL
           pc_val = pc
 
           # Fetch instruction from memory
-          @instruction = @ram.read_mem(pc_val)
-          operand_nibble = @instruction & 0x0F
+          instruction = @ram.read_mem(pc_val)
+          operand_nibble = instruction & 0x0F
 
-          # Decode instruction via CPU's decoder
-          @cpu.decoder.set_input(:instruction, @instruction)
-          @cpu.decoder.set_input(:zero_flag, @zero_flag)
-          @cpu.decoder.propagate
+          # Send instruction and zero flag to CPU for decoding
+          @cpu.set_input(:instruction, instruction)
+          @cpu.set_input(:zero_flag_in, @zero_flag)
+          @cpu.propagate
 
-          instr_length = @cpu.decoder.get_output(:instr_length)
+          # Read decoded control signals from CPU ports
+          instr_length = @cpu.get_output(:dec_instr_length)
+          halt = @cpu.get_output(:dec_halt)
+          jump = @cpu.get_output(:dec_jump)
+          branch = @cpu.get_output(:dec_branch)
+          call = @cpu.get_output(:dec_call)
+          ret = @cpu.get_output(:dec_ret)
+          pc_src = @cpu.get_output(:dec_pc_src)
+          reg_write = @cpu.get_output(:dec_reg_write)
+          alu_src = @cpu.get_output(:dec_alu_src)
+          mem_write = @cpu.get_output(:dec_mem_write)
+          alu_op = @cpu.get_output(:dec_alu_op)
 
           # Fetch operand bytes from memory
-          @operand = case instr_length
+          operand = case instr_length
           when 2
             @ram.read_mem(pc_val + 1)
           when 3
@@ -189,118 +198,105 @@ module RHDL
           acc_val = acc
 
           # Check for halt
-          if @cpu.decoder.get_output(:halt) == 1
+          if halt == 1
             @halted = true
             return
           end
 
           # Calculate new PC
           new_pc = pc_val + instr_length
-          pc_src = @cpu.decoder.get_output(:pc_src)
 
-          if @cpu.decoder.get_output(:jump) == 1 || @cpu.decoder.get_output(:branch) == 1
+          if jump == 1 || branch == 1
             case pc_src
-            when 1 then new_pc = @operand & 0xFF
-            when 2 then new_pc = @operand & 0xFFFF
+            when 1 then new_pc = operand & 0xFF
+            when 2 then new_pc = operand & 0xFFFF
             end
           end
 
           # Handle CALL - push return address to stack
-          if @cpu.decoder.get_output(:call) == 1
+          if call == 1
             sp_val = sp
             @ram.write_mem(sp_val, (pc_val + instr_length) & 0xFF)
-            clock_sp(push: true)
-            new_pc = @operand & 0xFF
+            @cpu.set_input(:sp_push, 1)
+            clock_cpu
+            @cpu.set_input(:sp_push, 0)
+            new_pc = operand & 0xFF
           end
 
           # Handle RET - pop return address from stack
-          if @cpu.decoder.get_output(:ret) == 1
-            if @cpu.sp.get_output(:empty) == 1
+          if ret == 1
+            if @cpu.get_output(:sp_empty) == 1
               @halted = true
               return
             end
-            clock_sp(pop: true)
+            @cpu.set_input(:sp_pop, 1)
+            clock_cpu
+            @cpu.set_input(:sp_pop, 0)
             sp_val = sp
             new_pc = @ram.read_mem(sp_val)
           end
 
           # ALU operations
-          if @cpu.decoder.get_output(:reg_write) == 1
-            if @cpu.decoder.get_output(:alu_src) == 1
+          if reg_write == 1
+            if alu_src == 1
               # Immediate load
-              result = @operand & 0xFF
+              result = operand & 0xFF
             else
-              # Memory operand through CPU's ALU
-              mem_operand = @ram.read_mem(@operand & 0xFF)
-              @cpu.alu.set_input(:a, acc_val)
-              @cpu.alu.set_input(:b, mem_operand)
-              @cpu.alu.set_input(:op, @cpu.decoder.get_output(:alu_op))
-              @cpu.alu.set_input(:cin, 0)
-              @cpu.alu.propagate
-              result = @cpu.alu.get_output(:result)
+              # Memory operand through ALU
+              mem_operand = @ram.read_mem(operand & 0xFF)
+              # Provide memory data to CPU for ALU computation
+              @cpu.set_input(:mem_data_in, mem_operand)
+              @cpu.propagate
+              result = @cpu.get_output(:alu_result_out)
             end
 
-            clock_register(@cpu.acc, result)
+            # Load result into accumulator
+            @cpu.set_input(:acc_load_data, result)
+            @cpu.set_input(:acc_load_en, 1)
+            clock_cpu
+            @cpu.set_input(:acc_load_en, 0)
+
+            # Update zero flag based on result
             @zero_flag = (result == 0) ? 1 : 0
           end
 
-          # CMP - compare without storing
-          if @instruction == 0xF3
-            mem_val = @ram.read_mem(@operand & 0xFF)
+          # CMP - compare without storing (just updates zero flag)
+          if instruction == 0xF3
+            mem_val = @ram.read_mem(operand & 0xFF)
             result = (acc_val - mem_val) & 0xFF
             @zero_flag = (result == 0) ? 1 : 0
           end
 
           # Memory write (STA)
-          if @cpu.decoder.get_output(:mem_write) == 1
-            addr = get_store_address
+          if mem_write == 1
+            addr = get_store_address(instruction, operand)
             @ram.write_mem(addr, acc_val)
           end
 
           # Update PC
-          clock_register(@cpu.pc, new_pc, load: true)
+          @cpu.set_input(:pc_load_data, new_pc)
+          @cpu.set_input(:pc_load_en, 1)
+          clock_cpu
+          @cpu.set_input(:pc_load_en, 0)
         end
 
-        def get_store_address
-          if @instruction == 0x20  # Indirect STA
-            high = @ram.read_mem((@operand >> 8) & 0xFF)
-            low = @ram.read_mem(@operand & 0xFF)
+        def get_store_address(instruction, operand)
+          if instruction == 0x20  # Indirect STA
+            high = @ram.read_mem((operand >> 8) & 0xFF)
+            low = @ram.read_mem(operand & 0xFF)
             (high << 8) | low
-          elsif @instruction == 0x21  # Direct 2-byte STA
-            @operand & 0xFF
+          elsif instruction == 0x21  # Direct 2-byte STA
+            operand & 0xFF
           else
-            @instruction & 0x0F
+            instruction & 0x0F
           end
         end
 
-        def clock_register(reg, value, load: true)
-          reg.set_input(:d, value)
-          if reg.inputs.key?(:load)
-            reg.set_input(:load, load ? 1 : 0)
-            reg.set_input(:en, 0)
-          else
-            reg.set_input(:en, 1)
-          end
-          reg.set_input(:clk, 0)
-          reg.propagate
-          reg.set_input(:clk, 1)
-          reg.propagate
-          if reg.inputs.key?(:load)
-            reg.set_input(:load, 0)
-          else
-            reg.set_input(:en, 0)
-          end
-        end
-
-        def clock_sp(push: false, pop: false)
-          @cpu.sp.set_input(:push, push ? 1 : 0)
-          @cpu.sp.set_input(:pop, pop ? 1 : 0)
-          @cpu.sp.set_input(:clk, 0)
-          @cpu.sp.propagate
-          @cpu.sp.set_input(:clk, 1)
-          @cpu.sp.propagate
-          @cpu.sp.set_input(:push, 0)
-          @cpu.sp.set_input(:pop, 0)
+        def clock_cpu
+          @cpu.set_input(:clk, 0)
+          @cpu.propagate
+          @cpu.set_input(:clk, 1)
+          @cpu.propagate
         end
       end
     end
