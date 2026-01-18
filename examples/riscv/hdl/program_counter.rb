@@ -14,13 +14,13 @@ module RISCV
     # Default reset vector
     RESET_VECTOR = 0x00000000
 
-    port_input :clk
-    port_input :rst
+    input :clk
+    input :rst
 
-    port_input :pc_next, width: 32   # Next PC value (computed by datapath)
-    port_input :pc_we                # PC write enable
+    input :pc_next, width: 32   # Next PC value (computed by datapath)
+    input :pc_we                # PC write enable
 
-    port_output :pc, width: 32       # Current PC value
+    output :pc, width: 32       # Current PC value
 
     sequential clock: :clk, reset: :rst, reset_values: { pc: RESET_VECTOR } do
       pc <= mux(pc_we, pc_next, pc)

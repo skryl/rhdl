@@ -8,16 +8,16 @@ require_relative 'pipelined_datapath'
 module RISCV
   module Pipeline
     class PipelinedCPU < RHDL::HDL::SimComponent
-      port_input :clk
-      port_input :rst
+      input :clk
+      input :rst
 
       # Debug outputs
-      port_output :debug_pc, width: 32
-      port_output :debug_inst, width: 32
-      port_output :debug_x1, width: 32
-      port_output :debug_x2, width: 32
-      port_output :debug_x10, width: 32
-      port_output :debug_x11, width: 32
+      output :debug_pc, width: 32
+      output :debug_inst, width: 32
+      output :debug_x1, width: 32
+      output :debug_x2, width: 32
+      output :debug_x10, width: 32
+      output :debug_x11, width: 32
 
       def initialize(name = nil)
         super(name)

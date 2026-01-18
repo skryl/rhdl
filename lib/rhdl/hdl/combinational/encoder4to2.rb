@@ -5,9 +5,9 @@ module RHDL
   module HDL
     # 4-to-2 Priority Encoder - encodes highest set bit position
     class Encoder4to2 < SimComponent
-      port_input :a, width: 4
-      port_output :y, width: 2
-      port_output :valid
+      input :a, width: 4
+      output :y, width: 2
+      output :valid
 
       behavior do
         # Priority encoder: find highest set bit

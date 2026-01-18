@@ -32,13 +32,13 @@ module MOS6502
     RESET_VECTOR = 0xFFFC
     IRQ_VECTOR   = 0xFFFE
 
-    port_input :clk
-    port_input :addr, width: 16
-    port_input :data_in, width: 8
-    port_input :rw           # 1 = read, 0 = write
-    port_input :cs           # Chip select (active high)
+    input :clk
+    input :addr, width: 16
+    input :data_in, width: 8
+    input :rw           # 1 = read, 0 = write
+    input :cs           # Chip select (active high)
 
-    port_output :data_out, width: 8
+    output :data_out, width: 8
 
     # Define memory arrays - these become Verilog reg arrays
     # In synthesis, these will be inferred as BRAM

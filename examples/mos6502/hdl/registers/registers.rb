@@ -11,16 +11,16 @@ module MOS6502
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
-    port_input :clk
-    port_input :rst
-    port_input :data_in, width: 8
-    port_input :load_a
-    port_input :load_x
-    port_input :load_y
+    input :clk
+    input :rst
+    input :data_in, width: 8
+    input :load_a
+    input :load_x
+    input :load_y
 
-    port_output :a, width: 8
-    port_output :x, width: 8
-    port_output :y, width: 8
+    output :a, width: 8
+    output :x, width: 8
+    output :y, width: 8
 
     # Sequential block for both simulation and synthesis
     # Defines the clocked behavior with reset

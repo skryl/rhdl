@@ -4,9 +4,9 @@
 module RHDL
   module HDL
     class XorGate < SimComponent
-      port_input :a0
-      port_input :a1
-      port_output :y
+      input :a0
+      input :a1
+      output :y
 
       behavior do
         y <= a0 ^ a1

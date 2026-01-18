@@ -10,29 +10,29 @@ module RISCV
   class Decoder < RHDL::HDL::SimComponent
     include RHDL::DSL::Behavior
 
-    port_input :inst, width: 32      # Full instruction
+    input :inst, width: 32      # Full instruction
 
     # Decoded fields
-    port_output :opcode, width: 7    # Opcode field
-    port_output :rd, width: 5        # Destination register
-    port_output :funct3, width: 3    # Function field 3
-    port_output :rs1, width: 5       # Source register 1
-    port_output :rs2, width: 5       # Source register 2
-    port_output :funct7, width: 7    # Function field 7
+    output :opcode, width: 7    # Opcode field
+    output :rd, width: 5        # Destination register
+    output :funct3, width: 3    # Function field 3
+    output :rs1, width: 5       # Source register 1
+    output :rs2, width: 5       # Source register 2
+    output :funct7, width: 7    # Function field 7
 
     # Control signals
-    port_output :reg_write           # Write to register file
-    port_output :mem_read            # Read from memory
-    port_output :mem_write           # Write to memory
-    port_output :mem_to_reg          # Memory data to register
-    port_output :alu_src             # 0=rs2, 1=immediate
-    port_output :branch              # Branch instruction
-    port_output :jump                # Jump instruction (JAL/JALR)
-    port_output :jalr                # JALR (PC = rs1 + imm)
-    port_output :alu_op, width: 4    # ALU operation code
+    output :reg_write           # Write to register file
+    output :mem_read            # Read from memory
+    output :mem_write           # Write to memory
+    output :mem_to_reg          # Memory data to register
+    output :alu_src             # 0=rs2, 1=immediate
+    output :branch              # Branch instruction
+    output :jump                # Jump instruction (JAL/JALR)
+    output :jalr                # JALR (PC = rs1 + imm)
+    output :alu_op, width: 4    # ALU operation code
 
     # Instruction type for debugging
-    port_output :inst_type, width: 3
+    output :inst_type, width: 3
 
     behavior do
       # Extract instruction fields (always present regardless of format)

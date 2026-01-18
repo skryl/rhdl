@@ -4,9 +4,7 @@ module RHDL
   module HDL
     module CPU
       class Accumulator < Register
-        def initialize(name = nil)
-          super(name, width: 8)
-        end
+        parameter :width, default: 8
       end
     end
   end

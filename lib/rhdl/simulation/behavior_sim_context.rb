@@ -4,10 +4,13 @@ module RHDL
   module HDL
     # Context for evaluating behavior blocks in simulation mode
     class BehaviorSimContext
+      attr_reader :proxy_pool
+
       def initialize(component)
         @component = component
         @assignments = []
         @locals = {}
+        @proxy_pool = ProxyPoolAccessor.pool
 
         # Create accessor methods for all inputs and outputs
         component.inputs.each do |name, wire|
@@ -30,6 +33,9 @@ module RHDL
         @assignments.each do |assignment|
           assignment[:wire].set(assignment[:value])
         end
+
+        # Release pooled proxies back to pool
+        @proxy_pool.release_all
       end
 
       def record_assignment(wire, value)
@@ -130,7 +136,7 @@ module RHDL
 
       def reduce_and(signal)
         w = signal.respond_to?(:width) ? signal.width : 8
-        mask = (1 << w) - 1
+        mask = MaskCache.mask(w)
         val = resolve_value(signal)
         (val & mask) == mask ? 1 : 0
       end
@@ -149,8 +155,7 @@ module RHDL
       def local(name, expr, width: nil)
         value = resolve_value(expr)
         w = width || (value == 0 ? 1 : [value.bit_length, 1].max)
-        mask = (1 << w) - 1
-        masked_value = value & mask
+        masked_value = value & MaskCache.mask(w)
 
         # Store the local and make it accessible
         local_var = SimLocalProxy.new(name, masked_value, w, self)
@@ -170,7 +175,7 @@ module RHDL
 
       # Helper for creating literal values with explicit width
       def lit(value, width:)
-        value & ((1 << width) - 1)
+        value & MaskCache.mask(width)
       end
 
       # Helper for concatenation
@@ -248,8 +253,7 @@ module RHDL
           high = [index.begin, index.end].max
           low = [index.begin, index.end].min
           slice_width = high - low + 1
-          mask = (1 << slice_width) - 1
-          SimLocalProxy.new("#{@name}[#{index}]", (@value >> low) & mask, slice_width, @context)
+          SimLocalProxy.new("#{@name}[#{index}]", (@value >> low) & MaskCache.mask(slice_width), slice_width, @context)
         else
           SimLocalProxy.new("#{@name}[#{index}]", (@value >> index) & 1, 1, @context)
         end
@@ -292,8 +296,7 @@ module RHDL
       end
 
       def ~
-        mask = (1 << @width) - 1
-        SimLocalProxy.new(nil, (~@value) & mask, @width, @context)
+        SimLocalProxy.new(nil, (~@value) & MaskCache.mask(@width), @width, @context)
       end
 
       # Shift operators

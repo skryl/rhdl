@@ -84,57 +84,57 @@ module MOS6502
     BRANCH_BNE = 6
     BRANCH_BEQ = 7
 
-    port_input :clk
-    port_input :rst
-    port_input :rdy            # Ready signal (for single-stepping)
+    input :clk
+    input :rst
+    input :rdy            # Ready signal (for single-stepping)
 
     # Decoded instruction info
-    port_input :addr_mode, width: 4
-    port_input :instr_type, width: 4
-    port_input :branch_cond, width: 3
-    port_input :is_read
-    port_input :is_write
-    port_input :is_rmw
-    port_input :writes_reg             # Instruction writes to register
-    port_input :is_status_op           # Stack operation on status register (PHP/PLP)
+    input :addr_mode, width: 4
+    input :instr_type, width: 4
+    input :branch_cond, width: 3
+    input :is_read
+    input :is_write
+    input :is_rmw
+    input :writes_reg             # Instruction writes to register
+    input :is_status_op           # Stack operation on status register (PHP/PLP)
 
     # Status flags for branch decisions
-    port_input :flag_n
-    port_input :flag_v
-    port_input :flag_z
-    port_input :flag_c
+    input :flag_n
+    input :flag_v
+    input :flag_z
+    input :flag_c
 
     # Page crossing
-    port_input :page_cross
+    input :page_cross
 
     # Memory ready
-    port_input :mem_ready
+    input :mem_ready
 
     # Control outputs
-    port_output :state, width: 8         # Current state
-    port_output :state_before, width: 8  # State before transition (for control alignment)
-    port_output :state_pre, width: 8     # State before transition (alias for state_before)
-    port_output :pc_inc                  # Increment program counter
-    port_output :pc_load                 # Load program counter
-    port_output :load_opcode             # Load instruction register
-    port_output :load_operand_lo         # Load operand low byte
-    port_output :load_operand_hi         # Load operand high byte
-    port_output :load_addr_lo            # Load address latch low
-    port_output :load_addr_hi            # Load address latch high
-    port_output :load_data               # Load data latch
-    port_output :mem_read                # Memory read enable
-    port_output :mem_write               # Memory write enable
-    port_output :addr_sel, width: 3      # Address source select
-    port_output :data_sel, width: 3      # Data source select
-    port_output :alu_enable              # Enable ALU operation
-    port_output :reg_write               # Write to register file
-    port_output :sp_inc                  # Increment stack pointer
-    port_output :sp_dec                  # Decrement stack pointer
-    port_output :update_flags            # Update status flags
-    port_output :done                    # Instruction complete
-    port_output :halted                  # CPU halted
-    port_output :cycle_count, width: 32  # Total cycles executed
-    port_output :reset_step, width: 8    # Reset sequence counter (internal)
+    output :state, width: 8         # Current state
+    output :state_before, width: 8  # State before transition (for control alignment)
+    output :state_pre, width: 8     # State before transition (alias for state_before)
+    output :pc_inc                  # Increment program counter
+    output :pc_load                 # Load program counter
+    output :load_opcode             # Load instruction register
+    output :load_operand_lo         # Load operand low byte
+    output :load_operand_hi         # Load operand high byte
+    output :load_addr_lo            # Load address latch low
+    output :load_addr_hi            # Load address latch high
+    output :load_data               # Load data latch
+    output :mem_read                # Memory read enable
+    output :mem_write               # Memory write enable
+    output :addr_sel, width: 3      # Address source select
+    output :data_sel, width: 3      # Data source select
+    output :alu_enable              # Enable ALU operation
+    output :reg_write               # Write to register file
+    output :sp_inc                  # Increment stack pointer
+    output :sp_dec                  # Decrement stack pointer
+    output :update_flags            # Update status flags
+    output :done                    # Instruction complete
+    output :halted                  # CPU halted
+    output :cycle_count, width: 32  # Total cycles executed
+    output :reset_step, width: 8    # Reset sequence counter (internal)
 
     # Sequential block for state machine
     # State transitions happen on rising clock edge

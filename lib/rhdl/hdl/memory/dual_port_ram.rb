@@ -13,15 +13,15 @@ module RHDL
     class DualPortRAM < SimComponent
       include RHDL::DSL::MemoryDSL
 
-      port_input :clk
-      port_input :we_a
-      port_input :we_b
-      port_input :addr_a, width: 8
-      port_input :addr_b, width: 8
-      port_input :din_a, width: 8
-      port_input :din_b, width: 8
-      port_output :dout_a, width: 8
-      port_output :dout_b, width: 8
+      input :clk
+      input :we_a
+      input :we_b
+      input :addr_a, width: 8
+      input :addr_b, width: 8
+      input :din_a, width: 8
+      input :din_b, width: 8
+      output :dout_a, width: 8
+      output :dout_b, width: 8
 
       # Define memory array (256 x 8-bit)
       memory :mem, depth: 256, width: 8

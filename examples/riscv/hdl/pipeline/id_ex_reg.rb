@@ -11,55 +11,55 @@ module RISCV
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
-      port_input :clk
-      port_input :rst
-      port_input :flush              # Flush on branch/jump
+      input :clk
+      input :rst
+      input :flush              # Flush on branch/jump
 
       # Data from ID stage
-      port_input :pc_in, width: 32
-      port_input :pc_plus4_in, width: 32
-      port_input :rs1_data_in, width: 32
-      port_input :rs2_data_in, width: 32
-      port_input :imm_in, width: 32
-      port_input :rs1_addr_in, width: 5
-      port_input :rs2_addr_in, width: 5
-      port_input :rd_addr_in, width: 5
-      port_input :funct3_in, width: 3
-      port_input :funct7_in, width: 7
+      input :pc_in, width: 32
+      input :pc_plus4_in, width: 32
+      input :rs1_data_in, width: 32
+      input :rs2_data_in, width: 32
+      input :imm_in, width: 32
+      input :rs1_addr_in, width: 5
+      input :rs2_addr_in, width: 5
+      input :rd_addr_in, width: 5
+      input :funct3_in, width: 3
+      input :funct7_in, width: 7
 
       # Control signals from ID stage
-      port_input :alu_op_in, width: 4
-      port_input :alu_src_in           # 0=rs2, 1=imm
-      port_input :reg_write_in
-      port_input :mem_read_in
-      port_input :mem_write_in
-      port_input :mem_to_reg_in
-      port_input :branch_in
-      port_input :jump_in
-      port_input :jalr_in
+      input :alu_op_in, width: 4
+      input :alu_src_in           # 0=rs2, 1=imm
+      input :reg_write_in
+      input :mem_read_in
+      input :mem_write_in
+      input :mem_to_reg_in
+      input :branch_in
+      input :jump_in
+      input :jalr_in
 
       # Outputs to EX stage
-      port_output :pc_out, width: 32
-      port_output :pc_plus4_out, width: 32
-      port_output :rs1_data_out, width: 32
-      port_output :rs2_data_out, width: 32
-      port_output :imm_out, width: 32
-      port_output :rs1_addr_out, width: 5
-      port_output :rs2_addr_out, width: 5
-      port_output :rd_addr_out, width: 5
-      port_output :funct3_out, width: 3
-      port_output :funct7_out, width: 7
+      output :pc_out, width: 32
+      output :pc_plus4_out, width: 32
+      output :rs1_data_out, width: 32
+      output :rs2_data_out, width: 32
+      output :imm_out, width: 32
+      output :rs1_addr_out, width: 5
+      output :rs2_addr_out, width: 5
+      output :rd_addr_out, width: 5
+      output :funct3_out, width: 3
+      output :funct7_out, width: 7
 
       # Control outputs
-      port_output :alu_op_out, width: 4
-      port_output :alu_src_out
-      port_output :reg_write_out
-      port_output :mem_read_out
-      port_output :mem_write_out
-      port_output :mem_to_reg_out
-      port_output :branch_out
-      port_output :jump_out
-      port_output :jalr_out
+      output :alu_op_out, width: 4
+      output :alu_src_out
+      output :reg_write_out
+      output :mem_read_out
+      output :mem_write_out
+      output :mem_to_reg_out
+      output :branch_out
+      output :jump_out
+      output :jalr_out
 
       sequential clock: :clk, reset: :rst, reset_values: {
         pc_out: 0, pc_plus4_out: 4,

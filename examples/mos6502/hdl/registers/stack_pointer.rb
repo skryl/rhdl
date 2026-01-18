@@ -13,16 +13,16 @@ module MOS6502
 
     STACK_BASE = 0x0100
 
-    port_input :clk
-    port_input :rst
-    port_input :inc
-    port_input :dec
-    port_input :load
-    port_input :data_in, width: 8
+    input :clk
+    input :rst
+    input :inc
+    input :dec
+    input :load
+    input :data_in, width: 8
 
-    port_output :sp, width: 8
-    port_output :addr, width: 16
-    port_output :addr_plus1, width: 16
+    output :sp, width: 8
+    output :addr, width: 16
+    output :addr_plus1, width: 16
 
     # Sequential block for the SP register with priority encoding
     # Priority: load > dec > inc (if none, hold value)

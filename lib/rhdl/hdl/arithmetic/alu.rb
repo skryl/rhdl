@@ -43,16 +43,17 @@ module RHDL
       OP_INC = 14
       OP_DEC = 15
 
-      # Class-level port definitions for synthesis (default 8-bit width)
-      port_input :a, width: 8
-      port_input :b, width: 8
-      port_input :op, width: 4
-      port_input :cin
-      port_output :result, width: 8
-      port_output :cout
-      port_output :zero
-      port_output :negative
-      port_output :overflow
+      parameter :width, default: 8
+
+      input :a, width: :width
+      input :b, width: :width
+      input :op, width: 4
+      input :cin
+      output :result, width: :width
+      output :cout
+      output :zero
+      output :negative
+      output :overflow
 
       behavior do
         # Addition: a + b + cin (9 bits to capture carry)
@@ -258,19 +259,6 @@ module RHDL
 
         zero <= mux(active_result == lit(0, width: 8), lit(1, width: 1), lit(0, width: 1))
         negative <= active_result[7]
-      end
-
-      def initialize(name = nil, width: 8)
-        @width = width
-        super(name)
-      end
-
-      def setup_ports
-        # Override default width if different from 8
-        return if @width == 8
-        @inputs[:a] = Wire.new("#{@name}.a", width: @width)
-        @inputs[:b] = Wire.new("#{@name}.b", width: @width)
-        @outputs[:result] = Wire.new("#{@name}.result", width: @width)
       end
     end
   end

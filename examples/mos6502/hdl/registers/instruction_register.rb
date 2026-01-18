@@ -11,17 +11,17 @@ module MOS6502
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
-    port_input :clk
-    port_input :rst
-    port_input :load_opcode
-    port_input :load_operand_lo
-    port_input :load_operand_hi
-    port_input :data_in, width: 8
+    input :clk
+    input :rst
+    input :load_opcode
+    input :load_operand_lo
+    input :load_operand_hi
+    input :data_in, width: 8
 
-    port_output :opcode, width: 8
-    port_output :operand_lo, width: 8
-    port_output :operand_hi, width: 8
-    port_output :operand, width: 16
+    output :opcode, width: 8
+    output :operand_lo, width: 8
+    output :operand_hi, width: 8
+    output :operand, width: 16
 
     # Sequential block for opcode and operand registers
     sequential clock: :clk, reset: :rst, reset_values: { opcode: 0, operand_lo: 0, operand_hi: 0 } do

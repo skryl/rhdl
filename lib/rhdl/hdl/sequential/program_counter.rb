@@ -11,13 +11,13 @@ module RHDL
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
-      port_input :clk
-      port_input :rst
-      port_input :en          # Increment enable
-      port_input :load        # Load new address
-      port_input :d, width: 16
-      port_input :inc, width: 16  # Increment amount (usually 1, 2, or 3)
-      port_output :q, width: 16
+      input :clk
+      input :rst
+      input :en          # Increment enable
+      input :load        # Load new address
+      input :d, width: 16
+      input :inc, width: 16  # Increment amount (usually 1, 2, or 3)
+      output :q, width: 16
 
       # Sequential block for program counter
       # Priority: load > en (increment)

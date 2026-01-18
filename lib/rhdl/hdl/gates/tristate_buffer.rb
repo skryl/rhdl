@@ -4,9 +4,9 @@
 module RHDL
   module HDL
     class TristateBuffer < SimComponent
-      port_input :a
-      port_input :en
-      port_output :y
+      input :a
+      input :en
+      output :y
 
       behavior do
         # Note: Full tristate (Z state) would require special synthesis support

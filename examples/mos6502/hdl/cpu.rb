@@ -1,6 +1,6 @@
 # MOS 6502 CPU - Synthesizable System
 # Combines Datapath and Memory into a complete synthesizable 6502 system
-# Uses structure DSL for component instantiation and wiring
+# Uses class-level instance/port declarations for component instantiation and wiring
 
 require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
@@ -14,91 +14,85 @@ module MOS6502
     include RHDL::DSL::Behavior
 
     # External interface
-    port_input :clk
-    port_input :rst
-    port_input :rdy              # Ready/halt input
-    port_input :irq              # Interrupt request
-    port_input :nmi              # Non-maskable interrupt
+    input :clk
+    input :rst
+    input :rdy              # Ready/halt input
+    input :irq              # Interrupt request
+    input :nmi              # Non-maskable interrupt
 
     # Debug outputs (directly from datapath)
-    port_output :reg_a, width: 8
-    port_output :reg_x, width: 8
-    port_output :reg_y, width: 8
-    port_output :reg_sp, width: 8
-    port_output :reg_pc, width: 16
-    port_output :reg_p, width: 8
-    port_output :opcode, width: 8
-    port_output :state, width: 8
-    port_output :halted
-    port_output :cycle_count, width: 32
+    output :reg_a, width: 8
+    output :reg_x, width: 8
+    output :reg_y, width: 8
+    output :reg_sp, width: 8
+    output :reg_pc, width: 16
+    output :reg_p, width: 8
+    output :opcode, width: 8
+    output :state, width: 8
+    output :halted
+    output :cycle_count, width: 32
 
     # Memory bus outputs (directly from datapath)
-    port_output :addr, width: 16
-    port_output :data_out, width: 8
-    port_output :rw
-    port_output :sync
+    output :addr, width: 16
+    output :data_out, width: 8
+    output :rw
+    output :sync
 
     # Internal signals for datapath <-> memory connection
-    port_signal :mem_data_out, width: 8    # Memory read data -> datapath
-    port_signal :dp_addr, width: 16        # Datapath address -> memory
-    port_signal :dp_data_out, width: 8     # Datapath write data -> memory
-    port_signal :dp_rw                     # Datapath read/write -> memory
-    port_signal :dp_sync                   # Datapath sync signal
-    port_signal :dp_reg_a, width: 8
-    port_signal :dp_reg_x, width: 8
-    port_signal :dp_reg_y, width: 8
-    port_signal :dp_reg_sp, width: 8
-    port_signal :dp_reg_pc, width: 16
-    port_signal :dp_reg_p, width: 8
-    port_signal :dp_opcode, width: 8
-    port_signal :dp_state, width: 8
-    port_signal :dp_halted
-    port_signal :dp_cycle_count, width: 32
+    wire :mem_data_out, width: 8    # Memory read data -> datapath
+    wire :dp_addr, width: 16        # Datapath address -> memory
+    wire :dp_data_out, width: 8     # Datapath write data -> memory
+    wire :dp_rw                     # Datapath read/write -> memory
+    wire :dp_sync                   # Datapath sync signal
+    wire :dp_reg_a, width: 8
+    wire :dp_reg_x, width: 8
+    wire :dp_reg_y, width: 8
+    wire :dp_reg_sp, width: 8
+    wire :dp_reg_pc, width: 16
+    wire :dp_reg_p, width: 8
+    wire :dp_opcode, width: 8
+    wire :dp_state, width: 8
+    wire :dp_halted
+    wire :dp_cycle_count, width: 32
 
-    # Structure DSL - Wire datapath and memory together
-    structure do
-      # Instantiate components
-      instance :datapath, Datapath
-      instance :memory, Memory
+    # Component instances
+    instance :datapath, Datapath
+    instance :memory, Memory
 
-      # Clock and reset to datapath
-      connect :clk => [:datapath, :clk]
-      connect :rst => [:datapath, :rst]
-      connect :rdy => [:datapath, :rdy]
-      connect :irq => [:datapath, :irq]
-      connect :nmi => [:datapath, :nmi]
+    # Clock and reset to datapath
+    port :clk => [:datapath, :clk]
+    port :rst => [:datapath, :rst]
+    port :rdy => [:datapath, :rdy]
+    port :irq => [:datapath, :irq]
+    port :nmi => [:datapath, :nmi]
 
-      # Clock to memory (memory uses clk for write timing)
-      connect :clk => [:memory, :clk]
+    # Clock to memory (memory uses clk for write timing)
+    port :clk => [:memory, :clk]
 
-      # Datapath outputs -> internal signals
-      connect [:datapath, :addr] => :dp_addr
-      connect [:datapath, :data_out] => :dp_data_out
-      connect [:datapath, :rw] => :dp_rw
-      connect [:datapath, :sync] => :dp_sync
-      connect [:datapath, :reg_a] => :dp_reg_a
-      connect [:datapath, :reg_x] => :dp_reg_x
-      connect [:datapath, :reg_y] => :dp_reg_y
-      connect [:datapath, :reg_sp] => :dp_reg_sp
-      connect [:datapath, :reg_pc] => :dp_reg_pc
-      connect [:datapath, :reg_p] => :dp_reg_p
-      connect [:datapath, :opcode] => :dp_opcode
-      connect [:datapath, :state] => :dp_state
-      connect [:datapath, :halted] => :dp_halted
-      connect [:datapath, :cycle_count] => :dp_cycle_count
+    # Datapath outputs -> internal signals
+    port [:datapath, :addr] => :dp_addr
+    port [:datapath, :data_out] => :dp_data_out
+    port [:datapath, :rw] => :dp_rw
+    port [:datapath, :sync] => :dp_sync
+    port [:datapath, :reg_a] => :dp_reg_a
+    port [:datapath, :reg_x] => :dp_reg_x
+    port [:datapath, :reg_y] => :dp_reg_y
+    port [:datapath, :reg_sp] => :dp_reg_sp
+    port [:datapath, :reg_pc] => :dp_reg_pc
+    port [:datapath, :reg_p] => :dp_reg_p
+    port [:datapath, :opcode] => :dp_opcode
+    port [:datapath, :state] => :dp_state
+    port [:datapath, :halted] => :dp_halted
+    port [:datapath, :cycle_count] => :dp_cycle_count
 
-      # Memory inputs from datapath
-      connect :dp_addr => [:memory, :addr]
-      connect :dp_data_out => [:memory, :data_in]
-      connect :dp_rw => [:memory, :rw]
+    # Memory inputs from datapath
+    port :dp_addr => [:memory, :addr]
+    port :dp_data_out => [:memory, :data_in]
+    port :dp_rw => [:memory, :rw]
 
-      # Memory chip select always enabled
-      # (handled in behavior block below)
-
-      # Memory output -> datapath input
-      connect [:memory, :data_out] => :mem_data_out
-      connect :mem_data_out => [:datapath, :data_in]
-    end
+    # Memory output -> datapath input
+    port [:memory, :data_out] => :mem_data_out
+    port :mem_data_out => [:datapath, :data_in]
 
     # Behavior block for combinational logic
     behavior do

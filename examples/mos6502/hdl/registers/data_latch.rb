@@ -11,12 +11,12 @@ module MOS6502
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
-    port_input :clk
-    port_input :rst
-    port_input :load
-    port_input :data_in, width: 8
+    input :clk
+    input :rst
+    input :load
+    input :data_in, width: 8
 
-    port_output :data, width: 8
+    output :data, width: 8
 
     # Sequential block for data register
     sequential clock: :clk, reset: :rst, reset_values: { data: 0 } do

@@ -13,22 +13,17 @@ module RHDL
     class ROM < SimComponent
       include RHDL::DSL::MemoryDSL
 
-      port_input :addr, width: 8
-      port_input :en
-      port_output :dout, width: 8
+      parameter :contents, default: []
+
+      input :addr, width: 8
+      input :en
+      output :dout, width: 8
 
       # Define memory array (256 x 8-bit)
       memory :mem, depth: 256, width: 8
 
       # Asynchronous read with enable
       async_read :dout, from: :mem, addr: :addr, enable: :en
-
-      def initialize(name = nil, contents: [])
-        super(name)
-        initialize_memories
-        # Load initial contents
-        contents.each_with_index { |v, i| mem_write(:mem, i, v, 8) if i < 256 }
-      end
 
       # Direct memory access for initialization
       def read_mem(addr)

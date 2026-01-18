@@ -8,7 +8,7 @@ module RHDL
         @prev_clk = 0
         @clk_sampled = false  # Track if we've sampled clock this cycle
         @state ||= 0  # Don't overwrite subclass initialization
-        super(name)
+        super
       end
 
       # Override input to not auto-propagate on any input changes

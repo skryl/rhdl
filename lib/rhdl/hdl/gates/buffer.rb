@@ -4,8 +4,8 @@
 module RHDL
   module HDL
     class Buffer < SimComponent
-      port_input :a
-      port_output :y
+      input :a
+      output :y
 
       behavior do
         y <= a

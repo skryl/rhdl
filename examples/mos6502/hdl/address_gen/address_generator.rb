@@ -27,19 +27,19 @@ module MOS6502
 
     STACK_BASE = 0x0100
 
-    port_input :mode, width: 4
-    port_input :operand_lo, width: 8
-    port_input :operand_hi, width: 8
-    port_input :x_reg, width: 8
-    port_input :y_reg, width: 8
-    port_input :pc, width: 16
-    port_input :sp, width: 8
-    port_input :indirect_lo, width: 8
-    port_input :indirect_hi, width: 8
+    input :mode, width: 4
+    input :operand_lo, width: 8
+    input :operand_hi, width: 8
+    input :x_reg, width: 8
+    input :y_reg, width: 8
+    input :pc, width: 16
+    input :sp, width: 8
+    input :indirect_lo, width: 8
+    input :indirect_hi, width: 8
 
-    port_output :eff_addr, width: 16
-    port_output :page_cross
-    port_output :is_zero_page
+    output :eff_addr, width: 16
+    output :page_cross
+    output :is_zero_page
 
     # Behavior block for combinational synthesis
     behavior do

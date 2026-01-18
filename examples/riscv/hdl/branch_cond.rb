@@ -10,11 +10,11 @@ module RISCV
   class BranchCond < RHDL::HDL::SimComponent
     include RHDL::DSL::Behavior
 
-    port_input :rs1_data, width: 32  # Source register 1 data
-    port_input :rs2_data, width: 32  # Source register 2 data
-    port_input :funct3, width: 3     # Branch condition type
+    input :rs1_data, width: 32  # Source register 1 data
+    input :rs2_data, width: 32  # Source register 2 data
+    input :funct3, width: 3     # Branch condition type
 
-    port_output :branch_taken        # Branch should be taken
+    output :branch_taken        # Branch should be taken
 
     behavior do
       # Compute comparison results

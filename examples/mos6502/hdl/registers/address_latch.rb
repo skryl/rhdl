@@ -12,18 +12,18 @@ module MOS6502
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
-    port_input :clk
-    port_input :rst
-    port_input :load_lo
-    port_input :load_hi
-    port_input :load_full
-    port_input :data_in, width: 8
-    port_input :addr_in, width: 16
+    input :clk
+    input :rst
+    input :load_lo
+    input :load_hi
+    input :load_full
+    input :data_in, width: 8
+    input :addr_in, width: 16
 
     # Internal registers (exposed as outputs for now)
-    port_output :addr_lo, width: 8
-    port_output :addr_hi, width: 8
-    port_output :addr, width: 16
+    output :addr_lo, width: 8
+    output :addr_hi, width: 8
+    output :addr, width: 16
 
     # Sequential block for internal registers
     # Priority: load_full > load_lo/load_hi > hold

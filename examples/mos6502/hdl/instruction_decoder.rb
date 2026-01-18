@@ -71,24 +71,24 @@ module MOS6502
     REG_X = 1
     REG_Y = 2
 
-    port_input :opcode, width: 8
+    input :opcode, width: 8
 
-    port_output :addr_mode, width: 4
-    port_output :alu_op, width: 4
-    port_output :instr_type, width: 4
-    port_output :src_reg, width: 2
-    port_output :dst_reg, width: 2
-    port_output :branch_cond, width: 3
-    port_output :cycles_base, width: 3
-    port_output :is_read
-    port_output :is_write
-    port_output :is_rmw
-    port_output :sets_nz
-    port_output :sets_c
-    port_output :sets_v
-    port_output :writes_reg
-    port_output :is_status_op
-    port_output :illegal
+    output :addr_mode, width: 4
+    output :alu_op, width: 4
+    output :instr_type, width: 4
+    output :src_reg, width: 2
+    output :dst_reg, width: 2
+    output :branch_cond, width: 3
+    output :cycles_base, width: 3
+    output :is_read
+    output :is_write
+    output :is_rmw
+    output :sets_nz
+    output :sets_c
+    output :sets_v
+    output :writes_reg
+    output :is_status_op
+    output :illegal
 
     # Build decode table as class-level data for DSL synthesis
     def self.build_decode_data
