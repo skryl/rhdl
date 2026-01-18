@@ -13,5 +13,5 @@ module RHDL
 end
 
 # HDL simulation framework
-require_relative "rhdl/hdl"
 require_relative "rhdl/diagram"
+require_relative "rhdl/hdl"
