@@ -168,13 +168,31 @@ module RHDL
             RHDL::Export::IR::Port.new(name: p.name, direction: p.direction, width: p.width)
           end
 
-          regs = _signals.map do |s|
-            RHDL::Export::IR::Reg.new(name: s.name, width: s.width)
+          # Identify signals driven by instance outputs (these must be wires, not regs)
+          # A signal is instance-driven if it's the destination of a connection from [inst, port]
+          instance_driven_signals = Set.new
+          _connection_defs.each do |conn|
+            source, dest = conn[:source], conn[:dest]
+            # If source is [inst_name, port_name], then dest is driven by an instance output
+            if source.is_a?(Array) && source.length == 2 && dest.is_a?(Symbol)
+              instance_driven_signals.add(dest)
+            end
+          end
+
+          # Split signals into regs (not instance-driven) and nets (instance-driven)
+          regs = []
+          instance_nets = []
+          _signals.each do |s|
+            if instance_driven_signals.include?(s.name)
+              instance_nets << RHDL::Export::IR::Net.new(name: s.name, width: s.width)
+            else
+              regs << RHDL::Export::IR::Reg.new(name: s.name, width: s.width)
+            end
           end
 
           behavior_result = behavior_to_ir_assigns
           assigns = behavior_result[:assigns]
-          nets = behavior_result[:wires]
+          nets = behavior_result[:wires] + instance_nets
 
           # Generate instances from structure definitions
           instances = structure_to_ir_instances
@@ -213,6 +231,69 @@ module RHDL
         def to_verilog(top_name: nil)
           RHDL::Export::Verilog.generate(to_ir(top_name: top_name))
         end
+
+        # Generate VHDL from the component
+        def to_vhdl(top_name: nil)
+          RHDL::Export::VHDL.generate(to_ir(top_name: top_name))
+        end
+
+        # Returns the Verilog module name for this component
+        # Override in subclasses that use custom module names
+        # @return [String] The module name used in generated Verilog
+        def verilog_module_name
+          self.name.split('::').last.underscore
+        end
+
+        # Collect all unique sub-module classes used by this component (recursively)
+        # @return [Array<Class>] Array of component classes
+        def collect_submodule_classes(collected = Set.new)
+          _instance_defs.each do |inst_def|
+            component_class = inst_def[:component_class]
+            next if collected.include?(component_class)
+
+            collected.add(component_class)
+            # Recursively collect from sub-modules if they have instances
+            if component_class.respond_to?(:_instance_defs)
+              component_class.collect_submodule_classes(collected)
+            end
+          end
+          collected.to_a
+        end
+
+        # Generate Verilog for this component and all its sub-modules
+        # Returns a single string with all module definitions
+        # @param top_name [String] Optional name override for top module
+        # @return [String] Complete Verilog with all module definitions
+        def to_verilog_hierarchy(top_name: nil)
+          parts = []
+
+          # Generate sub-modules first (in dependency order - leaves first)
+          submodules = collect_submodule_classes
+          submodules.each do |submod|
+            parts << submod.to_verilog
+          end
+
+          # Generate top-level module last
+          parts << to_verilog(top_name: top_name)
+
+          parts.join("\n\n")
+        end
+
+        # Generate VHDL for this component and all its sub-modules
+        # @param top_name [String] Optional name override for top module
+        # @return [String] Complete VHDL with all module definitions
+        def to_vhdl_hierarchy(top_name: nil)
+          parts = []
+
+          submodules = collect_submodule_classes
+          submodules.each do |submod|
+            parts << submod.to_vhdl
+          end
+
+          parts << to_vhdl(top_name: top_name)
+
+          parts.join("\n\n")
+        end
       end
 
       # Simple structs for port/signal definitions
@@ -230,7 +311,13 @@ module RHDL
         # @param component_class [Class] Component class to instantiate
         # @param params [Hash] Parameters to pass to the component
         def instance(name, component_class, **params)
-          module_name = component_class.name.split('::').last.underscore
+          # Get module name from component's verilog_module_name method
+          # This ensures consistency with how to_verilog generates the module name
+          module_name = if component_class.respond_to?(:verilog_module_name)
+                          component_class.verilog_module_name
+                        else
+                          component_class.name.split('::').last.underscore
+                        end
           @component_class._instance_defs << {
             name: name,
             component_class: component_class,

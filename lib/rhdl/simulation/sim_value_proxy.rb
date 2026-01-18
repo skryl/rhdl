@@ -102,12 +102,40 @@ module RHDL
       # Bit selection
       def [](index)
         if index.is_a?(Range)
-          slice_width = index.max - index.min + 1
+          # Handle both ascending (0..3) and descending (3..0) ranges
+          # In HDL, bit slices are typically written high..low (e.g., 7..4)
+          high = [index.begin, index.end].max
+          low = [index.begin, index.end].min
+          slice_width = high - low + 1
           mask = (1 << slice_width) - 1
-          SimValueProxy.new((@value >> index.min) & mask, slice_width, @context)
+          SimValueProxy.new((@value >> low) & mask, slice_width, @context)
         else
           SimValueProxy.new((@value >> index) & 1, 1, @context)
         end
+      end
+
+      # Concatenation
+      def concat(*others)
+        result = @value
+        offset = @width
+        total_width = @width
+        others.each do |other|
+          other_val = resolve(other)
+          other_width = other.respond_to?(:width) ? other.width : (other_val == 0 ? 1 : other_val.bit_length)
+          result = (other_val << offset) | result
+          offset += other_width
+          total_width += other_width
+        end
+        SimValueProxy.new(result, total_width, @context)
+      end
+
+      # Replication
+      def replicate(times)
+        result = 0
+        times.times do |i|
+          result |= (@value << (i * @width))
+        end
+        SimValueProxy.new(result, @width * times, @context)
       end
 
       def to_i

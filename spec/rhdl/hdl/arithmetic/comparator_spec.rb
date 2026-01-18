@@ -65,6 +65,65 @@ RSpec.describe RHDL::HDL::Comparator do
       expect(verilog).to include('module comparator')
       expect(verilog).to include('input [7:0] a')
     end
+
+    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches RHDL simulation' do
+        verilog = RHDL::HDL::Comparator.to_verilog
+        behavioral = RHDL::HDL::Comparator.new(nil, width: 8)
+
+        inputs = { a: 8, b: 8, signed_cmp: 1 }
+        outputs = { eq: 1, gt: 1, lt: 1, gte: 1, lte: 1 }
+
+        vectors = []
+        test_cases = [
+          { a: 42, b: 42, signed_cmp: 0 },   # equal
+          { a: 50, b: 30, signed_cmp: 0 },   # greater
+          { a: 20, b: 40, signed_cmp: 0 },   # less
+          { a: 0, b: 0, signed_cmp: 0 },     # zero equal
+          { a: 255, b: 1, signed_cmp: 0 },   # unsigned max > 1
+          { a: 255, b: 1, signed_cmp: 1 },   # signed -1 < 1
+          { a: 128, b: 127, signed_cmp: 0 }, # unsigned 128 > 127
+          { a: 128, b: 127, signed_cmp: 1 }, # signed -128 < 127
+        ]
+
+        test_cases.each do |tc|
+          behavioral.set_input(:a, tc[:a])
+          behavioral.set_input(:b, tc[:b])
+          behavioral.set_input(:signed_cmp, tc[:signed_cmp])
+          behavioral.propagate
+          vectors << {
+            inputs: tc,
+            expected: {
+              eq: behavioral.get_output(:eq),
+              gt: behavioral.get_output(:gt),
+              lt: behavioral.get_output(:lt),
+              gte: behavioral.get_output(:gte),
+              lte: behavioral.get_output(:lte)
+            }
+          }
+        end
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 'comparator',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/comparator'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx][:eq]).to eq(vec[:expected][:eq]),
+            "Vector #{idx}: expected eq=#{vec[:expected][:eq]}, got #{result[:results][idx][:eq]}"
+          expect(result[:results][idx][:gt]).to eq(vec[:expected][:gt]),
+            "Vector #{idx}: expected gt=#{vec[:expected][:gt]}, got #{result[:results][idx][:gt]}"
+          expect(result[:results][idx][:lt]).to eq(vec[:expected][:lt]),
+            "Vector #{idx}: expected lt=#{vec[:expected][:lt]}, got #{result[:results][idx][:lt]}"
+        end
+      end
+    end
   end
 
   describe 'gate-level netlist' do

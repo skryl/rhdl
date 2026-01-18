@@ -108,6 +108,65 @@ RSpec.describe RHDL::HDL::ALU do
       expect(verilog).to include('input [7:0] b')
       expect(verilog).to include('output [7:0] result')
     end
+
+    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches RHDL simulation' do
+        verilog = RHDL::HDL::ALU.to_verilog
+        behavioral = RHDL::HDL::ALU.new(nil, width: 8)
+
+        inputs = { a: 8, b: 8, op: 4, cin: 1 }
+        outputs = { result: 8, cout: 1, zero: 1, negative: 1, overflow: 1 }
+
+        vectors = []
+
+        # Test ADD
+        behavioral.set_input(:a, 10)
+        behavioral.set_input(:b, 5)
+        behavioral.set_input(:op, RHDL::HDL::ALU::OP_ADD)
+        behavioral.set_input(:cin, 0)
+        behavioral.propagate
+        vectors << {
+          inputs: { a: 10, b: 5, op: RHDL::HDL::ALU::OP_ADD, cin: 0 },
+          expected: { result: behavioral.get_output(:result), zero: behavioral.get_output(:zero) }
+        }
+
+        # Test SUB
+        behavioral.set_input(:a, 10)
+        behavioral.set_input(:b, 5)
+        behavioral.set_input(:op, RHDL::HDL::ALU::OP_SUB)
+        behavioral.propagate
+        vectors << {
+          inputs: { a: 10, b: 5, op: RHDL::HDL::ALU::OP_SUB, cin: 0 },
+          expected: { result: behavioral.get_output(:result), zero: behavioral.get_output(:zero) }
+        }
+
+        # Test AND
+        behavioral.set_input(:a, 0xF0)
+        behavioral.set_input(:b, 0x0F)
+        behavioral.set_input(:op, RHDL::HDL::ALU::OP_AND)
+        behavioral.propagate
+        vectors << {
+          inputs: { a: 0xF0, b: 0x0F, op: RHDL::HDL::ALU::OP_AND, cin: 0 },
+          expected: { result: behavioral.get_output(:result), zero: behavioral.get_output(:zero) }
+        }
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 'alu',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/alu'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx][:result]).to eq(vec[:expected][:result]),
+            "Vector #{idx}: expected result=#{vec[:expected][:result]}, got #{result[:results][idx][:result]}"
+        end
+      end
+    end
   end
 
   describe 'gate-level netlist' do

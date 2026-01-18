@@ -57,6 +57,62 @@ RSpec.describe RHDL::HDL::TFlipFlop do
       expect(verilog).to include('input t')
       expect(verilog).to match(/output.*q/)
     end
+
+    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches RHDL simulation' do
+        verilog = RHDL::HDL::TFlipFlop.to_verilog
+        behavioral = RHDL::HDL::TFlipFlop.new
+        behavioral.set_input(:rst, 0)
+        behavioral.set_input(:en, 1)
+
+        inputs = { t: 1, clk: 1, rst: 1, en: 1 }
+        outputs = { q: 1, qn: 1 }
+
+        vectors = []
+        # Start with reset cycle to initialize flip-flop (avoids X propagation)
+        test_cases = [
+          { t: 0, rst: 1, en: 1 },  # reset (initialize to 0)
+          { t: 1, rst: 0, en: 1 },  # toggle to 1
+          { t: 1, rst: 0, en: 1 },  # toggle to 0
+          { t: 1, rst: 0, en: 1 },  # toggle to 1
+          { t: 0, rst: 0, en: 1 },  # hold
+          { t: 1, rst: 0, en: 0 },  # hold (en=0)
+        ]
+
+        test_cases.each do |tc|
+          behavioral.set_input(:t, tc[:t])
+          behavioral.set_input(:rst, tc[:rst])
+          behavioral.set_input(:en, tc[:en])
+          behavioral.set_input(:clk, 0)
+          behavioral.propagate
+          behavioral.set_input(:clk, 1)
+          behavioral.propagate
+          vectors << {
+            inputs: { t: tc[:t], rst: tc[:rst], en: tc[:en] },
+            expected: { q: behavioral.get_output(:q), qn: behavioral.get_output(:qn) }
+          }
+        end
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 't_flip_flop',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/t_flip_flop',
+          has_clock: true
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx][:q]).to eq(vec[:expected][:q]),
+            "Vector #{idx}: expected q=#{vec[:expected][:q]}, got #{result[:results][idx][:q]}"
+          expect(result[:results][idx][:qn]).to eq(vec[:expected][:qn]),
+            "Vector #{idx}: expected qn=#{vec[:expected][:qn]}, got #{result[:results][idx][:qn]}"
+        end
+      end
+    end
   end
 
   describe 'gate-level netlist' do

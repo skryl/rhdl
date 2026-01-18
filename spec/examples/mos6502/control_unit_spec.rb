@@ -65,7 +65,7 @@ RSpec.describe MOS6502::ControlUnit do
         inputs = { clk: 1, rst: 1, rdy: 1, addr_mode: 4, instr_type: 4, branch_cond: 3,
                    flag_n: 1, flag_v: 1, flag_z: 1, flag_c: 1, page_cross: 1, mem_ready: 1,
                    is_read: 1, is_write: 1, is_rmw: 1, writes_reg: 1, is_status_op: 1 }
-        outputs = { state: 8, done: 1, pc_inc: 1, pc_load: 1, load_ir: 1, mem_read: 1, mem_write: 1 }
+        outputs = { state: 8, done: 1, pc_inc: 1, pc_load: 1, load_opcode: 1, mem_read: 1, mem_write: 1 }
 
         # Control unit is a complex state machine - just verify compilation
         vectors = [

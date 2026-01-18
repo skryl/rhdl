@@ -171,10 +171,34 @@ module RHDL
           # Handle both ascending (0..7) and descending (7..0) ranges
           high = [expr_node.range.begin, expr_node.range.end].max
           low = [expr_node.range.begin, expr_node.range.end].min
-          if high == low
-            "#{base}[#{low}]"
+
+          # Check if base is a simple signal (can use direct indexing) or complex expression
+          is_simple = expr_node.base.is_a?(IR::Signal)
+
+          if is_simple
+            # Simple signal - use direct indexing
+            if high == low
+              "#{base}[#{low}]"
+            else
+              "#{base}[#{high}:#{low}]"
+            end
           else
-            "#{base}[#{high}:#{low}]"
+            # Complex expression - use shift and mask to extract bits
+            # (expr >> low) & mask
+            slice_width = high - low + 1
+            if low == 0
+              if slice_width == 1
+                "(#{base} & 1'b1)"
+              else
+                "(#{base} & #{slice_width}'d#{(1 << slice_width) - 1})"
+              end
+            else
+              if slice_width == 1
+                "((#{base} >> #{low}) & 1'b1)"
+              else
+                "((#{base} >> #{low}) & #{slice_width}'d#{(1 << slice_width) - 1})"
+              end
+            end
           end
         when IR::Resize
           resize(expr_node)

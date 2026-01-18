@@ -48,6 +48,61 @@ RSpec.describe RHDL::HDL::Encoder4to2 do
       expect(verilog).to include('input [3:0] a')
       expect(verilog).to include('output [1:0] y')
     end
+
+    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches RHDL simulation' do
+        verilog = RHDL::HDL::Encoder4to2.to_verilog
+        behavioral = RHDL::HDL::Encoder4to2.new
+
+        inputs = { a: 4 }
+        outputs = { y: 2, valid: 1 }
+
+        vectors = []
+        test_cases = [
+          { a: 0b0000 },  # no input - invalid
+          { a: 0b0001 },  # bit 0 set - y=0
+          { a: 0b0010 },  # bit 1 set - y=1
+          { a: 0b0100 },  # bit 2 set - y=2
+          { a: 0b1000 },  # bit 3 set - y=3
+          { a: 0b0011 },  # bits 0,1 set - priority gives y=1
+          { a: 0b0101 },  # bits 0,2 set - priority gives y=2
+          { a: 0b1010 },  # bits 1,3 set - priority gives y=3
+          { a: 0b1111 },  # all bits set - priority gives y=3
+          { a: 0b0111 },  # bits 0,1,2 set - priority gives y=2
+          { a: 0b1011 }   # bits 0,1,3 set - priority gives y=3
+        ]
+
+        test_cases.each do |tc|
+          behavioral.set_input(:a, tc[:a])
+          behavioral.propagate
+          vectors << {
+            inputs: tc,
+            expected: {
+              y: behavioral.get_output(:y),
+              valid: behavioral.get_output(:valid)
+            }
+          }
+        end
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 'encoder4to2',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/encoder4to2'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx][:y]).to eq(vec[:expected][:y]),
+            "Vector #{idx}: expected y=#{vec[:expected][:y]}, got #{result[:results][idx][:y]}"
+          expect(result[:results][idx][:valid]).to eq(vec[:expected][:valid]),
+            "Vector #{idx}: expected valid=#{vec[:expected][:valid]}, got #{result[:results][idx][:valid]}"
+        end
+      end
+    end
   end
 
   describe 'gate-level netlist' do
