@@ -1,6 +1,6 @@
-# HDL CPU Reference
+# Sample 8-bit CPU
 
-This document provides comprehensive documentation for the 8-bit HDL CPU implementation in RHDL.
+This document provides comprehensive documentation for the 8-bit sample CPU implementation in RHDL, including architecture, instruction set, and datapath details.
 
 ## Overview
 
@@ -46,6 +46,64 @@ RHDL includes a complete 8-bit CPU with a gate-level HDL implementation in `lib/
                       | mulator |
                       |  (8b)   |
                       +---------+
+```
+
+## Datapath Components
+
+### Program Counter (PC)
+
+16-bit register for instruction address.
+
+```ruby
+@pc = ProgramCounter.new("pc", width: 16)
+```
+
+Operations:
+- **Reset**: Set to 0
+- **Load**: Load new address (for jumps)
+- **Increment**: Add instruction length (1, 2, or 3)
+
+### Accumulator (ACC)
+
+8-bit main working register.
+
+```ruby
+@acc = Register.new("acc", width: 8)
+```
+
+All arithmetic and logical operations use the accumulator as one operand and store results back.
+
+### ALU
+
+8-bit arithmetic logic unit.
+
+```ruby
+@alu = ALU.new("alu", width: 8)
+```
+
+Supports:
+- Arithmetic: ADD, SUB, MUL, DIV
+- Logical: AND, OR, XOR, NOT
+- Comparison (via SUB for flag setting)
+
+### Stack Pointer (SP)
+
+8-bit stack pointer initialized to 0xFF.
+
+```ruby
+@sp = StackPointer.new("sp", width: 8, initial: 0xFF)
+```
+
+Stack grows downward:
+- **PUSH**: Decrement SP, write to memory[SP]
+- **POP**: Read from memory[SP], increment SP
+
+### Instruction Decoder
+
+Decodes opcode byte to control signals.
+
+```ruby
+@decoder = InstructionDecoder.new("decoder")
 ```
 
 ## Instruction Set
@@ -95,6 +153,25 @@ For operands 0x00-0x0F, the value is encoded in the low nibble of the opcode byt
 |-------------|-------------|----------|---------|
 | STA [hi,lo] | Store via indirect addressing | 0x20 0xHH 0xLL | 3 bytes |
 
+## Control Signals
+
+The instruction decoder generates these control signals:
+
+| Signal | Width | Description |
+|--------|-------|-------------|
+| alu_op | 4 | ALU operation code |
+| alu_src | 1 | 0=memory, 1=immediate |
+| reg_write | 1 | Write to accumulator |
+| mem_read | 1 | Read from memory |
+| mem_write | 1 | Write to memory |
+| branch | 1 | Conditional branch |
+| jump | 1 | Unconditional jump |
+| pc_src | 2 | PC source (0=+len, 1=short, 2=long) |
+| halt | 1 | Halt CPU |
+| call | 1 | Call subroutine |
+| ret | 1 | Return from subroutine |
+| instr_length | 2 | Instruction length (1, 2, or 3) |
+
 ## Memory Organization
 
 The CPU supports a 16-bit address space (64KB addressable memory, 0x0000-0xFFFF):
@@ -106,13 +183,47 @@ The CPU supports a 16-bit address space (64KB addressable memory, 0x0000-0xFFFF)
 | 0x0800-0x0FFF | Display memory (28x80 character display at 0x0800) |
 | 0x1000+ | Extended memory for programs and data |
 
-The stack pointer (SP) is 8-bit and starts at 0xFF, growing downward. For large programs, use position-independent code by loading at higher addresses to avoid conflicts with data in low memory.
-
 **Best Practices:**
 - Load large programs at 0x0100 or higher to avoid overwriting low memory variables
 - Use the assembler's `base_address` parameter for position-independent code
 - Reserve 0x0800-0x0FFF for display memory if using graphics
 - Keep critical variables in low memory (0x00-0xFF) for faster access
+
+## Execution Cycle
+
+The CPU executes instructions in a single-cycle model:
+
+```ruby
+def execute_cycle
+  # 1. Fetch instruction at PC
+  instruction = memory.read(pc)
+
+  # 2. Decode instruction
+  decoder.set_input(:instruction, instruction)
+  decoder.propagate
+
+  # 3. Fetch additional bytes if needed
+  case decoder.get_output(:instr_length)
+  when 2 then operand = memory.read(pc + 1)
+  when 3 then operand = (memory.read(pc + 1) << 8) | memory.read(pc + 2)
+  end
+
+  # 4. Execute based on control signals
+  if decoder.get_output(:reg_write) == 1
+    result = compute_result()
+    clock_register(@acc, result)
+    @zero_flag = (result == 0) ? 1 : 0
+  end
+
+  if decoder.get_output(:mem_write) == 1
+    memory.write(address, acc)
+  end
+
+  # 5. Update PC
+  new_pc = compute_next_pc()
+  clock_register(@pc, new_pc, load: true)
+end
+```
 
 ## Using the CPU
 
@@ -213,21 +324,6 @@ p.instr :JMP_LONG, :distant_label  # Jump to any address in 64KB space
 p.instr :JZ_LONG, :target          # Conditional jump with 16-bit address
 ```
 
-**Position-Independent Code:**
-```ruby
-# Build program with base address for proper label resolution
-program = Assembler.build(0x100) do |p|
-  p.label :loop
-  p.instr :LDA, 0x00
-  p.instr :ADD, 0x01
-  p.instr :JMP_LONG, :loop  # Resolves to 0x100 + offset
-end
-
-# Load at the specified address
-load_program(program, 0x100)
-@cpu.instance_variable_set(:@pc, 0x100)
-```
-
 ## Example Programs
 
 ### Simple Addition
@@ -276,13 +372,10 @@ memory[15] = 10
 ### Factorial Calculator
 
 ```ruby
-# Calculate 5! using a loop
 cpu = RHDL::HDL::CPU::CPUAdapter.new
 
-# Program to calculate factorial
 # Uses memory: 0x0D = decrement (1), 0x0E = N, 0x0F = result
 program = [
-  # start:
   0x1E,             # LDA 0x0E - Load N from memory
   0x8C,             # JZ 0x0C - If zero, jump to halt
   0xF1, 0x0F,       # MUL 0x0F - Multiply ACC by result
@@ -291,74 +384,26 @@ program = [
   0x4D,             # SUB 0x0D - Subtract 1
   0x2E,             # STA 0x0E - Store N
   0xB0,             # JMP 0x00 - Jump to start
-  # halt:
   0xF0              # HLT
 ]
 
-# Initialize values
 cpu.memory.write(0x0D, 1)   # Decrement value = 1
 cpu.memory.write(0x0E, 5)   # N = 5
 cpu.memory.write(0x0F, 1)   # Result = 1
-
-# Load and run
 cpu.memory.load(program, 0)
+
 until cpu.halted
   cpu.step
 end
 
-puts "5! = #{cpu.memory.read(0x0F)}"  # Should print "120"
+puts "5! = #{cpu.memory.read(0x0F)}"  # => 120
 ```
-
-### Indirect Addressing with Display
-
-```ruby
-# Write characters to display using indirect addressing
-cpu = RHDL::HDL::CPU::CPUAdapter.new
-
-# Setup: Store display address (0x0800) in memory locations 0x09 (high), 0x08 (low)
-program = [
-  0xA0, 0x08,       # LDI 0x08 - High byte of 0x0800
-  0x29,             # STA 0x09 - Store to address pointer high byte
-  0xA0, 0x00,       # LDI 0x00 - Low byte
-  0x28,             # STA 0x08 - Store to address pointer low byte
-  0xA0, 0x48,       # LDI 0x48 - 'H' character
-  0x20, 0x09, 0x08, # STA [0x09, 0x08] - Store via indirect addressing
-  0xF0              # HLT
-]
-
-cpu.memory.load(program, 0)
-until cpu.halted
-  cpu.step
-end
-
-# Check display memory at 0x0800
-puts "Display[0x800]: #{cpu.memory.read(0x800).chr}"  # Should print 'H'
-```
-
-## Control Signals
-
-The instruction decoder generates these control signals:
-
-| Signal | Width | Description |
-|--------|-------|-------------|
-| alu_op | 4 | ALU operation code |
-| alu_src | 1 | 0=memory, 1=immediate |
-| reg_write | 1 | Write to accumulator |
-| mem_read | 1 | Read from memory |
-| mem_write | 1 | Write to memory |
-| branch | 1 | Conditional branch |
-| jump | 1 | Unconditional jump |
-| pc_src | 2 | PC source (0=+len, 1=short, 2=long) |
-| halt | 1 | Halt CPU |
-| call | 1 | Call subroutine |
-| ret | 1 | Return from subroutine |
-| instr_length | 2 | Instruction length (1, 2, or 3) |
 
 ## Implementation Notes
 
 ### Clock Management
 
-The datapath uses manual clock management to avoid issues with automatic propagation:
+The datapath uses manual clock management:
 
 1. Set clock low
 2. Propagate
@@ -369,34 +414,12 @@ This ensures proper edge detection in sequential components.
 
 ### Reset Sequence
 
-The reset sequence ensures clean initialization:
-
 1. Set clock low, reset high
 2. Clock cycle with reset high
 3. Set clock low before clearing reset
 4. Clear reset and propagate
 
-### Register Updates
-
-The `clock_register` helper handles differences between register types:
-
-```ruby
-def clock_register(reg, value, load: true)
-  reg.set_input(:d, value)
-  if reg.inputs.key?(:load)
-    reg.set_input(:load, load ? 1 : 0)
-  else
-    reg.set_input(:en, 1)
-  end
-  # Clock cycle
-  reg.set_input(:clk, 0); reg.propagate
-  reg.set_input(:clk, 1); reg.propagate
-  # Clear control signals
-  ...
-end
-```
-
-## Known Limitations
+### Known Limitations
 
 - 8-bit ALU limits arithmetic operations (e.g., y*80 overflows for y >= 4)
 - Stack operations limited to 0xFF address space
@@ -404,6 +427,6 @@ end
 
 ## See Also
 
-- [CPU Datapath Architecture](cpu_datapath.md) - Detailed component architecture
 - [Components Reference](components.md) - All HDL components
 - [Debugging Guide](debugging.md) - Signal probing and debugging
+- [MOS 6502](mos6502.md) - Full 6502 implementation example
