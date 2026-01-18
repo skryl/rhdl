@@ -83,16 +83,17 @@ module Apple2Harness
 
     def start_ink_process
       tui_dir = File.expand_path('../../../../tui-ink', __FILE__)
-      apple2_entry = File.join(tui_dir, 'dist', 'apple2', 'index.js')
 
-      # Check if TUI is built
-      unless File.exist?(apple2_entry)
-        raise "Apple II Ink TUI not built. Run 'cd #{tui_dir} && npm install && npm run build'"
+      # Ensure dependencies are installed (seamless like uv)
+      node_modules = File.join(tui_dir, 'node_modules')
+      unless Dir.exist?(node_modules)
+        STDERR.puts "Installing TUI dependencies..."
+        system('npm', 'install', '--silent', chdir: tui_dir)
       end
 
-      # Start the Node.js process
+      # Start the Node.js process using npx tsx (no build step needed)
       @stdin, @stdout, @stderr, @wait_thread = Open3.popen3(
-        'node', apple2_entry,
+        'npx', 'tsx', 'src/apple2/index.tsx',
         chdir: tui_dir
       )
 
