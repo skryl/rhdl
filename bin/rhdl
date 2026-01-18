@@ -118,11 +118,17 @@ when 'export'
 
   puts "Wrote #{options[:lang]} to #{options[:out]}"
 
+when 'apple2'
+  # Run the Apple II emulator
+  apple2_script = File.expand_path('../examples/mos6502/bin/apple2', __dir__)
+  exec(apple2_script, *ARGV)
+
 else
   warn "Usage: bin/rhdl <command> [options]"
   warn ""
   warn "Commands:"
   warn "  diagram  Generate circuit diagrams"
   warn "  export   Export component to Verilog or VHDL"
+  warn "  apple2   Run Apple II terminal emulator"
   exit 1
 end

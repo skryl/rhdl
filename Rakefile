@@ -512,19 +512,19 @@ namespace :hdl do
   # Format: { 'relative_path' => ['require_path', 'ClassName'] }
   EXAMPLE_COMPONENTS = {
     # MOS6502 synthesizable components
-    'mos6502/mos6502_registers' => ['examples/mos6502/registers/registers', 'MOS6502::Registers'],
-    'mos6502/mos6502_stack_pointer' => ['examples/mos6502/registers/stack_pointer', 'MOS6502::StackPointer'],
-    'mos6502/mos6502_program_counter' => ['examples/mos6502/registers/program_counter', 'MOS6502::ProgramCounter'],
-    'mos6502/mos6502_instruction_register' => ['examples/mos6502/registers/instruction_register', 'MOS6502::InstructionRegister'],
-    'mos6502/mos6502_address_latch' => ['examples/mos6502/registers/address_latch', 'MOS6502::AddressLatch'],
-    'mos6502/mos6502_data_latch' => ['examples/mos6502/registers/data_latch', 'MOS6502::DataLatch'],
-    'mos6502/mos6502_status_register' => ['examples/mos6502/status_register', 'MOS6502::StatusRegister'],
-    'mos6502/mos6502_address_generator' => ['examples/mos6502/address_gen/address_generator', 'MOS6502::AddressGenerator'],
-    'mos6502/mos6502_indirect_addr_calc' => ['examples/mos6502/address_gen/indirect_address_calc', 'MOS6502::IndirectAddressCalc'],
-    'mos6502/mos6502_alu' => ['examples/mos6502/alu', 'MOS6502::ALU'],
-    'mos6502/mos6502_instruction_decoder' => ['examples/mos6502/instruction_decoder', 'MOS6502::InstructionDecoder'],
-    'mos6502/mos6502_control_unit' => ['examples/mos6502/control_unit', 'MOS6502::ControlUnit'],
-    'mos6502/mos6502_memory' => ['examples/mos6502/memory', 'MOS6502::Memory']
+    'mos6502/mos6502_registers' => ['examples/mos6502/hdl/registers/registers', 'MOS6502::Registers'],
+    'mos6502/mos6502_stack_pointer' => ['examples/mos6502/hdl/registers/stack_pointer', 'MOS6502::StackPointer'],
+    'mos6502/mos6502_program_counter' => ['examples/mos6502/hdl/registers/program_counter', 'MOS6502::ProgramCounter'],
+    'mos6502/mos6502_instruction_register' => ['examples/mos6502/hdl/registers/instruction_register', 'MOS6502::InstructionRegister'],
+    'mos6502/mos6502_address_latch' => ['examples/mos6502/hdl/registers/address_latch', 'MOS6502::AddressLatch'],
+    'mos6502/mos6502_data_latch' => ['examples/mos6502/hdl/registers/data_latch', 'MOS6502::DataLatch'],
+    'mos6502/mos6502_status_register' => ['examples/mos6502/hdl/status_register', 'MOS6502::StatusRegister'],
+    'mos6502/mos6502_address_generator' => ['examples/mos6502/hdl/address_gen/address_generator', 'MOS6502::AddressGenerator'],
+    'mos6502/mos6502_indirect_addr_calc' => ['examples/mos6502/hdl/address_gen/indirect_address_calc', 'MOS6502::IndirectAddressCalc'],
+    'mos6502/mos6502_alu' => ['examples/mos6502/hdl/alu', 'MOS6502::ALU'],
+    'mos6502/mos6502_instruction_decoder' => ['examples/mos6502/hdl/instruction_decoder', 'MOS6502::InstructionDecoder'],
+    'mos6502/mos6502_control_unit' => ['examples/mos6502/hdl/control_unit', 'MOS6502::ControlUnit'],
+    'mos6502/mos6502_memory' => ['examples/mos6502/hdl/memory', 'MOS6502::Memory']
   }.freeze
 
   desc "Export all DSL components to Verilog (lib/ and examples/)"
@@ -736,19 +736,19 @@ namespace :gates do
     'cpu/synth_datapath' => -> { RHDL::HDL::CPU::SynthDatapath.new('synth_cpu') },
 
     # MOS6502 (Synthesizable 6502)
-    'mos6502/registers' => -> { require_relative 'examples/mos6502/registers'; MOS6502::Registers.new('regs') },
-    'mos6502/stack_pointer' => -> { require_relative 'examples/mos6502/registers'; MOS6502::StackPointer.new('sp') },
-    'mos6502/program_counter' => -> { require_relative 'examples/mos6502/registers'; MOS6502::ProgramCounter.new('pc') },
-    'mos6502/instruction_register' => -> { require_relative 'examples/mos6502/registers'; MOS6502::InstructionRegister.new('ir') },
-    'mos6502/address_latch' => -> { require_relative 'examples/mos6502/registers'; MOS6502::AddressLatch.new('alat') },
-    'mos6502/data_latch' => -> { require_relative 'examples/mos6502/registers'; MOS6502::DataLatch.new('dlat') },
-    'mos6502/status_register' => -> { require_relative 'examples/mos6502/status_register'; MOS6502::StatusRegister.new('sr') },
-    'mos6502/address_generator' => -> { require_relative 'examples/mos6502/address_gen'; MOS6502::AddressGenerator.new('agen') },
-    'mos6502/indirect_addr_calc' => -> { require_relative 'examples/mos6502/address_gen'; MOS6502::IndirectAddressCalc.new('acalc') },
-    'mos6502/alu' => -> { require_relative 'examples/mos6502/alu'; MOS6502::ALU.new('alu') },
-    'mos6502/instruction_decoder' => -> { require_relative 'examples/mos6502/instruction_decoder'; MOS6502::InstructionDecoder.new('dec') },
-    'mos6502/control_unit' => -> { require_relative 'examples/mos6502/control_unit'; MOS6502::ControlUnit.new('ctrl') },
-    'mos6502/datapath' => -> { require_relative 'examples/mos6502/datapath'; MOS6502::Datapath.new('datapath') }
+    'mos6502/registers' => -> { require_relative 'examples/mos6502/hdl/registers'; MOS6502::Registers.new('regs') },
+    'mos6502/stack_pointer' => -> { require_relative 'examples/mos6502/hdl/registers'; MOS6502::StackPointer.new('sp') },
+    'mos6502/program_counter' => -> { require_relative 'examples/mos6502/hdl/registers'; MOS6502::ProgramCounter.new('pc') },
+    'mos6502/instruction_register' => -> { require_relative 'examples/mos6502/hdl/registers'; MOS6502::InstructionRegister.new('ir') },
+    'mos6502/address_latch' => -> { require_relative 'examples/mos6502/hdl/registers'; MOS6502::AddressLatch.new('alat') },
+    'mos6502/data_latch' => -> { require_relative 'examples/mos6502/hdl/registers'; MOS6502::DataLatch.new('dlat') },
+    'mos6502/status_register' => -> { require_relative 'examples/mos6502/hdl/status_register'; MOS6502::StatusRegister.new('sr') },
+    'mos6502/address_generator' => -> { require_relative 'examples/mos6502/hdl/address_gen'; MOS6502::AddressGenerator.new('agen') },
+    'mos6502/indirect_addr_calc' => -> { require_relative 'examples/mos6502/hdl/address_gen'; MOS6502::IndirectAddressCalc.new('acalc') },
+    'mos6502/alu' => -> { require_relative 'examples/mos6502/hdl/alu'; MOS6502::ALU.new('alu') },
+    'mos6502/instruction_decoder' => -> { require_relative 'examples/mos6502/hdl/instruction_decoder'; MOS6502::InstructionDecoder.new('dec') },
+    'mos6502/control_unit' => -> { require_relative 'examples/mos6502/hdl/control_unit'; MOS6502::ControlUnit.new('ctrl') },
+    'mos6502/datapath' => -> { require_relative 'examples/mos6502/hdl/datapath'; MOS6502::Datapath.new('datapath') }
   }.freeze
 
   desc "Export all components to gate-level IR (JSON netlists)"
@@ -988,12 +988,12 @@ task :regenerate => ['clean_all', 'generate_all']
 # =============================================================================
 
 namespace :apple2 do
-  ROMS_DIR = File.expand_path('examples/mos6502/roms', __dir__)
+  ROMS_DIR = File.expand_path('examples/mos6502/software/roms', __dir__)
   ROM_OUTPUT_DIR = File.expand_path('export/roms', __dir__)
 
   desc "Assemble the mini monitor ROM"
   task :build do
-    require_relative 'examples/mos6502/assembler'
+    require_relative 'examples/mos6502/utilities/assembler'
 
     puts "Apple II ROM Assembler"
     puts "=" * 50
@@ -1051,7 +1051,7 @@ namespace :apple2 do
   desc "Run the Apple II emulator with the mini monitor"
   task :run => :build do
     rom_file = File.join(ROM_OUTPUT_DIR, 'mini_monitor.bin')
-    exec "ruby", "bin/apple2", "-r", rom_file, "--rom-address", "F800", "-d"
+    exec "ruby", "examples/mos6502/bin/apple2", "-r", rom_file, "--rom-address", "F800", "-d"
   end
 
   desc "Run with AppleIIGo public domain ROM"
@@ -1062,12 +1062,12 @@ namespace :apple2 do
       puts "Download from: https://a2go.applearchives.com/roms/"
       exit 1
     end
-    exec "ruby", "bin/apple2", "-r", rom_file, "--rom-address", "D000", "-d"
+    exec "ruby", "examples/mos6502/bin/apple2", "-r", rom_file, "--rom-address", "D000", "-d"
   end
 
   desc "Run the Apple II emulator demo (no ROM needed)"
   task :demo do
-    exec "ruby", "bin/apple2", "--demo", "-d"
+    exec "ruby", "examples/mos6502/bin/apple2", "--demo", "-d"
   end
 
   desc "Clean ROM output files"

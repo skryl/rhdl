@@ -2,8 +2,8 @@
 # Combines Datapath and Memory into a complete synthesizable 6502 system
 # Uses structure DSL for component instantiation and wiring
 
-require_relative '../../lib/rhdl'
-require_relative '../../lib/rhdl/dsl/behavior'
+require_relative '../../../lib/rhdl'
+require_relative '../../../lib/rhdl/dsl/behavior'
 require_relative 'datapath'
 require_relative 'memory'
 

@@ -3,8 +3,8 @@
 # Uses structure DSL for component instantiation and wiring
 # Sequential - requires always @(posedge clk) for synthesis
 
-require_relative '../../lib/rhdl'
-require_relative '../../lib/rhdl/dsl/behavior'
+require_relative '../../../lib/rhdl'
+require_relative '../../../lib/rhdl/dsl/behavior'
 require_relative 'registers'
 require_relative 'status_register'
 require_relative 'alu'

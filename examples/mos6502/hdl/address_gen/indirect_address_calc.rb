@@ -1,8 +1,8 @@
 # MOS 6502 Indirect Address Calculator - Synthesizable DSL Version
 # Helper for computing indirect address fetch locations
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative 'address_generator'
 
 module MOS6502

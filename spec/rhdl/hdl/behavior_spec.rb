@@ -388,12 +388,8 @@ RSpec.describe 'Behavior DSL' do
     # Test that class-level port_* and instance-level input/output work together
     class MixedPortComponent < RHDL::HDL::SimComponent
       port_input :a, width: 8
+      port_input :b, width: 8
       port_output :y, width: 8
-
-      def setup_ports
-        # Additional port defined in setup_ports
-        input :b, width: 8
-      end
 
       behavior do
         y <= a + b

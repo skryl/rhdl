@@ -1,9 +1,9 @@
 # MOS 6502 Program Counter - Synthesizable DSL Version
 # 16-bit program counter with increment and load capabilities
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module MOS6502
   # 6502 Program Counter - Synthesizable via Sequential DSL

@@ -2,7 +2,7 @@
 # Contains A, X, Y registers, Stack Pointer, Program Counter, and latches
 # All components use synthesizable patterns for Verilog/VHDL export
 
-require_relative '../../lib/rhdl'
+require_relative '../../../lib/rhdl'
 
 # Load individual register components
 require_relative 'registers/registers'

@@ -1,5 +1,5 @@
 require_relative 'spec_helper'
-require_relative '../../../examples/mos6502/cpu_harness'
+require_relative '../../../examples/mos6502/hdl/cpu_harness'
 
 RSpec.describe MOS6502::CPUHarness do
   let(:cpu) { MOS6502::CPUHarness.new }

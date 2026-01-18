@@ -1,9 +1,9 @@
 # MOS 6502 Stack Pointer - Synthesizable DSL Version
 # 8-bit stack pointer with 16-bit stack address generation
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module MOS6502
   # 6502 Stack Pointer - Synthesizable via Sequential DSL
