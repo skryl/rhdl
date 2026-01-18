@@ -2,9 +2,9 @@
 # Wraps the synthesizable CPU for behavioral simulation and testing
 # Provides high-level methods for stepping, running, and debugging
 
-require_relative '../../lib/rhdl/hdl'
+require_relative '../../../lib/rhdl/hdl'
 require_relative 'cpu'
-require_relative 'utilities/assembler'
+require_relative '../utilities/assembler'
 
 module MOS6502
   # Simulation harness for the synthesizable CPU
