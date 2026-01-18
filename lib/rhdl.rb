@@ -8,7 +8,7 @@ module RHDL
   class Component
     include DSL
     include DSL::Behavior
-    # to_vhdl and to_verilog are provided by the DSL module's class_methods
+    # to_verilog is provided by the DSL module's class_methods
     # behavior blocks are provided by the DSL::Behavior module
   end
 end

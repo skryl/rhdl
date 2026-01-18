@@ -12,12 +12,6 @@ module RHDL
         @default = default
       end
 
-      def to_vhdl
-        type_str = width > 1 ? "std_logic_vector(#{width-1} downto 0)" : "std_logic"
-        default_str = default ? " := #{format_value(default)}" : ""
-        "signal #{name} : #{type_str}#{default_str};"
-      end
-
       def to_verilog
         type_str = width > 1 ? "[#{width-1}:0]" : ""
         default_str = default ? " = #{format_verilog_value(default)}" : ""
@@ -29,14 +23,6 @@ module RHDL
       end
 
       private
-
-      def format_value(val)
-        if width == 1
-          val == 0 ? "'0'" : "'1'"
-        else
-          "\"#{val.to_s(2).rjust(width, '0')}\""
-        end
-      end
 
       def format_verilog_value(val)
         if width == 1

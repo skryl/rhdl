@@ -12,18 +12,6 @@ module RHDL
         @condition = condition
       end
 
-      def to_vhdl
-        t = target.respond_to?(:to_vhdl) ? target.to_vhdl : target.to_s
-        v = value.respond_to?(:to_vhdl) ? value.to_vhdl : format_literal(value)
-
-        if condition
-          c = condition.respond_to?(:to_vhdl) ? condition.to_vhdl : condition.to_s
-          "#{t} <= #{v} when #{c} else #{t};"
-        else
-          "#{t} <= #{v};"
-        end
-      end
-
       def to_verilog
         t = target.respond_to?(:to_verilog) ? target.to_verilog : target.to_s
         v = value.respond_to?(:to_verilog) ? value.to_verilog : format_verilog_literal(value)
@@ -37,18 +25,6 @@ module RHDL
       end
 
       private
-
-      def format_literal(val)
-        if val.is_a?(Integer)
-          if target.respond_to?(:width) && target.width > 1
-            "\"#{val.to_s(2).rjust(target.width, '0')}\""
-          else
-            val == 0 ? "'0'" : "'1'"
-          end
-        else
-          val.to_s
-        end
-      end
 
       def format_verilog_literal(val)
         if val.is_a?(Integer)

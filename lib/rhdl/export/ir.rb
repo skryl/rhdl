@@ -177,7 +177,7 @@ module RHDL
       end
 
       # Case expression for multi-way selection
-      # Maps to Verilog case / VHDL case-when
+      # Maps to Verilog case statement
       class Case < Expr
         attr_reader :selector, :cases, :default
 
@@ -193,7 +193,7 @@ module RHDL
       end
 
       # Sequential block with clock and optional reset
-      # Maps to Verilog always @(posedge clk) / VHDL process
+      # Maps to Verilog always @(posedge clk)
       class Sequential
         attr_reader :clock, :reset, :reset_values, :assignments
 
@@ -210,7 +210,7 @@ module RHDL
       end
 
       # Memory block for RAM/ROM inference
-      # Maps to Verilog reg array / VHDL signal array
+      # Maps to Verilog reg array
       class Memory
         attr_reader :name, :depth, :width, :read_ports, :write_ports
 
@@ -265,7 +265,7 @@ module RHDL
       end
 
       # Module instance for structural design
-      # Maps to Verilog module instantiation / VHDL component instantiation
+      # Maps to Verilog module instantiation
       class Instance
         attr_reader :name, :module_name, :connections, :parameters
 
@@ -282,7 +282,7 @@ module RHDL
       end
 
       # Port connection for module instantiation
-      # Maps to Verilog .port(signal) / VHDL port map
+      # Maps to Verilog .port(signal)
       class PortConnection
         attr_reader :port_name, :signal
 

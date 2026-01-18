@@ -1,5 +1,5 @@
 # Synthesizable CPU Datapath - structural component with instances
-# Generates Verilog/VHDL module instantiation and wiring
+# Generates Verilog module instantiation and wiring
 
 module RHDL
   module HDL
