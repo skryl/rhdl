@@ -83,7 +83,7 @@ RSpec.describe RHDL::HDL::BarrelShifter do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::BarrelShifter.new('bshifter') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'bshifter') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'bshifter') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('bshifter.a', 'bshifter.shift', 'bshifter.dir', 'bshifter.arith', 'bshifter.rotate')

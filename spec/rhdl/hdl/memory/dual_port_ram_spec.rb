@@ -98,7 +98,7 @@ RSpec.describe RHDL::HDL::DualPortRAM do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::DualPortRAM.new('dpram') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'dpram') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'dpram') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('dpram.clk', 'dpram.we_a', 'dpram.we_b', 'dpram.addr_a', 'dpram.addr_b', 'dpram.din_a', 'dpram.din_b')

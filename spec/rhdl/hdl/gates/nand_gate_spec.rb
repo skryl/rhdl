@@ -72,7 +72,7 @@ RSpec.describe RHDL::HDL::NandGate do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::NandGate.new('nand_gate') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'nand_gate') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'nand_gate') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('nand_gate.a0', 'nand_gate.a1')

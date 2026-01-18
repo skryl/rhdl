@@ -39,7 +39,7 @@ RSpec.describe RHDL::HDL::TristateBuffer do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::TristateBuffer.new('tribuf') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'tribuf') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'tribuf') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('tribuf.a', 'tribuf.en')

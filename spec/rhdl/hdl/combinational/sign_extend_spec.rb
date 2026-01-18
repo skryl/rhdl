@@ -40,7 +40,7 @@ RSpec.describe RHDL::HDL::SignExtend do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::SignExtend.new('sign_extend', in_width: 4, out_width: 8) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'sign_extend') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'sign_extend') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('sign_extend.a')

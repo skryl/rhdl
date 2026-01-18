@@ -139,7 +139,7 @@ RSpec.describe RHDL::HDL::Counter do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Counter.new('counter') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'counter') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'counter') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('counter.clk', 'counter.rst', 'counter.en', 'counter.up', 'counter.load', 'counter.d')

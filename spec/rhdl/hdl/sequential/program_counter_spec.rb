@@ -64,7 +64,7 @@ RSpec.describe RHDL::HDL::ProgramCounter do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::ProgramCounter.new('pc') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'pc') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'pc') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('pc.clk', 'pc.rst', 'pc.en', 'pc.load', 'pc.d', 'pc.inc')

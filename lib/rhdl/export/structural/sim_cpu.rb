@@ -3,8 +3,9 @@
 require_relative 'primitives'
 
 module RHDL
-  module Gates
-    class SimCPU
+  module Export
+    module Structural
+      class SimCPU
       attr_reader :ir, :lanes
 
       def initialize(ir, lanes: 64)
@@ -113,6 +114,7 @@ module RHDL
         else
           raise ArgumentError, "Unknown gate type: #{gate.type}"
         end
+      end
       end
     end
   end

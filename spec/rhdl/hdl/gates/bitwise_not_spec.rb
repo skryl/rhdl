@@ -23,7 +23,7 @@ RSpec.describe RHDL::HDL::BitwiseNot do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::BitwiseNot.new('bitwise_not', width: 4) }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'bitwise_not') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'bitwise_not') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('bitwise_not.a')

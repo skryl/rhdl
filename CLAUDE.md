@@ -286,13 +286,13 @@ Generated files are placed in `/export/verilog/` directory.
 Lower HDL components to primitive gate netlists (AND, OR, XOR, NOT, MUX, DFF):
 ```ruby
 require 'rhdl/hdl'
-require 'rhdl/gates'
+require 'rhdl/export'
 
 # Create a component
 alu = RHDL::HDL::ALU.new('alu', width: 8)
 
 # Lower to gate-level IR
-ir = RHDL::Gates::Lower.from_components([alu], name: 'alu')
+ir = RHDL::Export::Structural::Lower.from_components([alu], name: 'alu')
 
 # Export to JSON netlist
 File.write('alu.json', ir.to_json)

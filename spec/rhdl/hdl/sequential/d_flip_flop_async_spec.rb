@@ -74,7 +74,7 @@ RSpec.describe RHDL::HDL::DFlipFlopAsync do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::DFlipFlopAsync.new('dff_async') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'dff_async') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'dff_async') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('dff_async.d', 'dff_async.clk', 'dff_async.rst', 'dff_async.en')

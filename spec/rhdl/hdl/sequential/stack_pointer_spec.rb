@@ -104,7 +104,7 @@ RSpec.describe RHDL::HDL::StackPointer do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::StackPointer.new('sp') }
-    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'sp') }
+    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'sp') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('sp.clk', 'sp.rst', 'sp.push', 'sp.pop')

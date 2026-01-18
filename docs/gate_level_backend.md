@@ -10,7 +10,7 @@
 
 ## Gate-level backend overview
 
-The gate-level backend flattens simulation components into a gate IR (`RHDL::Gates::IR`) with dense 1-bit net indices and primitive gates. Multi-bit buses are bit-blasted into per-bit nets. The lowering pass flattens connections built via `SimComponent.connect` and emits primitive gates plus DFFs. The CPU backend evaluates gates in topological order with packed 64-lane bitmasks, while the GPU backend is currently a stub that raises a clear error when not built.
+The gate-level backend flattens simulation components into a gate IR (`RHDL::Export::Structural::IR`) with dense 1-bit net indices and primitive gates. Multi-bit buses are bit-blasted into per-bit nets. The lowering pass flattens connections built via `SimComponent.connect` and emits primitive gates plus DFFs. The CPU backend evaluates gates in topological order with packed 64-lane bitmasks, while the GPU backend is currently a stub that raises a clear error when not built.
 
 ### Key files
 
@@ -24,7 +24,7 @@ The gate-level backend flattens simulation components into a gate IR (`RHDL::Gat
 ```ruby
 components = [RHDL::HDL::FullAdder.new('fa')]
 # connect components via RHDL::HDL::SimComponent.connect as needed
-sim = RHDL::Gates.gate_level(components, backend: :cpu, lanes: 64, name: 'demo')
+sim = RHDL::Export.gate_level(components, backend: :cpu, lanes: 64, name: 'demo')
 
 sim.poke('fa.a', 0xffff_ffff_ffff_ffff)
 sim.poke('fa.b', 0x0)
