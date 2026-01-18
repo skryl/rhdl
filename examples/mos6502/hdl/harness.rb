@@ -34,12 +34,37 @@ module MOS6502
       # Pulse reset
       clock_cycle(rst: 1)
       # Need 6 cycles for reset_step to reach 5 and state to transition to FETCH
-      6.times { clock_cycle(rst: 0) }
+      5.times { clock_cycle(rst: 0) }
 
-      # Read reset vector and load PC through external load port
+      # Now CPU is in STATE_FETCH. Load PC with reset vector value.
+      # This clock cycle will:
+      # 1. Load PC with the new address (via external load)
+      # 2. Advance from FETCH to DECODE, but with opcode from new address
       lo = @memory.read(Memory::RESET_VECTOR)
       hi = @memory.read(Memory::RESET_VECTOR + 1)
-      load_pc((hi << 8) | lo)
+      target_addr = (hi << 8) | lo
+
+      @cpu.set_input(:ext_pc_load_data, target_addr)
+      @cpu.set_input(:ext_pc_load_en, 1)
+
+      # Do just the low phase to set up PC, then high phase will latch it
+      # along with fetching the first opcode from the new address
+      @cpu.set_input(:clk, 0)
+      @cpu.propagate
+
+      # Now set address bus to PC (target_addr) and provide correct data
+      @memory.set_input(:addr, target_addr)
+      @memory.set_input(:rw, 1)
+      @memory.set_input(:cs, 1)
+      @memory.propagate
+      @cpu.set_input(:data_in, @memory.get_output(:data_out))
+
+      @cpu.set_input(:clk, 1)
+      @cpu.propagate
+      @memory.propagate
+
+      @clock_count += 1
+      clear_ext_loads
     end
 
     def clock_cycle(rst: 0, rdy: 1, irq: 1, nmi: 1)
@@ -203,6 +228,8 @@ module MOS6502
     def load_program(bytes, addr = 0x8000)
       @memory.load_program(bytes, addr)
       @memory.set_reset_vector(addr)
+      # Do a full reset to properly initialize PC from reset vector
+      reset
     end
 
     def assemble_and_load(source, addr = 0x8000)
@@ -276,11 +303,10 @@ module MOS6502
     end
 
     def load_pc(addr)
-      # Direct PC write for reset - simulation convenience
-      # Uses the datapath's internal PC access since we need to set PC
-      # before the first instruction fetch, not during a clock cycle
-      @cpu.instance_variable_get(:@pc).write_pc(addr & 0xFFFF)
-      @cpu.propagate
+      # Use external PC load port to set PC
+      @cpu.set_input(:ext_pc_load_data, addr & 0xFFFF)
+      @cpu.set_input(:ext_pc_load_en, 1)
+      clock_cycle
     end
   end
 
