@@ -26,6 +26,7 @@ RHDL is a Domain Specific Language (DSL) for designing hardware using Ruby's fle
 | Document | Description |
 |----------|-------------|
 | [Overview](docs/overview.md) | Introduction to the HDL framework |
+| [CLI Reference](docs/cli.md) | Command line interface reference |
 | [DSL Guide](docs/dsl.md) | DSL reference for synthesizable components |
 | [Components](docs/components.md) | Complete reference for all HDL components |
 | [Export](docs/export.md) | Verilog and gate-level export |
@@ -256,9 +257,40 @@ rhdl/
 └── docs/               # Documentation
 ```
 
+## Command Line Interface
+
+RHDL provides a comprehensive CLI for common operations. See [CLI Reference](docs/cli.md) for complete documentation.
+
+```bash
+# Interactive TUI debugger
+rhdl tui sequential/counter              # Debug a counter component
+rhdl tui RHDL::HDL::ALU --signals inputs # Debug ALU, show only inputs
+rhdl tui --list                          # List available components
+
+# Diagram generation
+rhdl diagram --all                       # Generate all diagrams
+rhdl diagram RHDL::HDL::ALU --format svg # Single component diagram
+
+# Verilog/VHDL export
+rhdl export --all                        # Export all components
+rhdl export --lang verilog --out ./out RHDL::HDL::Counter
+
+# Gate-level synthesis
+rhdl gates --export                      # Export to JSON netlists
+rhdl gates --stats                       # Show synthesis statistics
+
+# Apple II emulator
+rhdl apple2 --demo                       # Run demo mode
+rhdl apple2 --build                      # Build mini monitor ROM
+```
+
 ## Rake Tasks
 
 ```bash
+# Testing
+rake spec                # Run all tests
+rake pspec               # Run tests in parallel
+
 # Verilog export
 rake hdl:export          # Export DSL components to Verilog
 rake hdl:verilog         # Export Verilog files
