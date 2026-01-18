@@ -5,7 +5,7 @@ module RHDL
   module HDL
     class Multiplier < SimComponent
       parameter :width, default: 8
-      parameter :product_width, default: 16
+      parameter :product_width, default: -> { @width * 2 }
 
       input :a, width: :width
       input :b, width: :width
@@ -13,12 +13,6 @@ module RHDL
 
       behavior do
         product <= a * b
-      end
-
-      def initialize(name = nil, width: 8)
-        @width = width
-        @product_width = width * 2
-        super(name)
       end
     end
   end

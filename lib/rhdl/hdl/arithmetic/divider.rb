@@ -28,11 +28,6 @@ module RHDL
         quotient <= mux(is_zero, lit(0, width: w), normal_quotient)
         remainder <= mux(is_zero, lit(0, width: w), normal_remainder)
       end
-
-      def initialize(name = nil, width: 8)
-        @width = width
-        super(name)
-      end
     end
   end
 end

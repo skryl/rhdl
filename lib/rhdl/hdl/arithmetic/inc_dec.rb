@@ -27,11 +27,6 @@ module RHDL
         dec_cout = local(:dec_cout, a == lit(0, width: 8), width: 1)
         cout <= mux(inc, inc_cout, dec_cout)
       end
-
-      def initialize(name = nil, width: 8)
-        @width = width
-        super(name)
-      end
     end
   end
 end

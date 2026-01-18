@@ -19,11 +19,6 @@ module RHDL
         y0 <= mux(sel, lit(0, width: w), a)  # sel=0: a, sel=1: 0
         y1 <= mux(sel, a, lit(0, width: w))  # sel=0: 0, sel=1: a
       end
-
-      def initialize(name = nil, width: 1)
-        @width = width
-        super(name)
-      end
     end
   end
 end

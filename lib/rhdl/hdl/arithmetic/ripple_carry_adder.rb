@@ -30,11 +30,6 @@ module RHDL
         sum_sign = local(:sum_sign, result[7], width: 1)
         overflow <= (a_sign ^ sum_sign) & ~(a_sign ^ b_sign)
       end
-
-      def initialize(name = nil, width: 8)
-        @width = width
-        super(name)
-      end
     end
   end
 end

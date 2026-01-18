@@ -6,7 +6,7 @@ module RHDL
     # Leading Zero Count - counts leading zeros in input
     class LZCount < SimComponent
       parameter :width, default: 8
-      parameter :out_width, default: 4  # 4 bits for values 0-8
+      parameter :out_width, default: -> { Math.log2(@width + 1).ceil }
 
       input :a, width: :width
       output :count, width: :out_width
@@ -28,12 +28,6 @@ module RHDL
 
         count <= lz_count
         all_zero <= (val == 0 ? 1 : 0)
-      end
-
-      def initialize(name = nil, width: 8)
-        @width = width
-        @out_width = Math.log2(width + 1).ceil
-        super(name)
       end
     end
   end

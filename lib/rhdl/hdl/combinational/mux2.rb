@@ -17,11 +17,6 @@ module RHDL
       behavior do
         y <= mux(sel, b, a)
       end
-
-      def initialize(name = nil, width: 1)
-        @width = width
-        super(name)
-      end
     end
   end
 end

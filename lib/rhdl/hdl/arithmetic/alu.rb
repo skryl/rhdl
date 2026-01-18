@@ -260,11 +260,6 @@ module RHDL
         zero <= mux(active_result == lit(0, width: 8), lit(1, width: 1), lit(0, width: 1))
         negative <= active_result[7]
       end
-
-      def initialize(name = nil, width: 8)
-        @width = width
-        super(name)
-      end
     end
   end
 end
