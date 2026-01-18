@@ -129,6 +129,9 @@ module RHDL
         when IR::SeqAssign
           op = nonblocking ? "<=" : "="
           ["#{pad}#{sanitize(stmt.target)} #{op} #{expr(stmt.expr)};"]
+        when IR::MemoryWrite
+          op = nonblocking ? "<=" : "="
+          ["#{pad}#{sanitize(stmt.memory)}[#{expr(stmt.addr)}] #{op} #{expr(stmt.data)};"]
         when IR::If
           cond = expr_bool(stmt.condition)
           lines = ["#{pad}if (#{cond}) begin"]

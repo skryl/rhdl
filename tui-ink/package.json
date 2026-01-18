@@ -1,0 +1,34 @@
+{
+  "name": "rhdl-tui",
+  "version": "1.0.0",
+  "description": "Ink-based TUI for RHDL simulator and Apple II emulator",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "rhdl-tui": "./dist/index.js",
+    "rhdl-apple2": "./dist/apple2/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "tsx src/index.tsx",
+    "start:apple2": "tsx src/apple2/index.tsx",
+    "start:built": "node dist/index.js",
+    "start:apple2:built": "node dist/apple2/index.js",
+    "dev": "tsc --watch",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "ink": "^5.0.1",
+    "ink-text-input": "^6.0.0",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
