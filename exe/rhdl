@@ -1134,13 +1134,12 @@ def handle_apple2(args)
     rom: nil,
     rom_address: nil,
     ink: false,
-    ink_hdl: false,
-    ink_run: nil
+    hdl: false
   }
 
   parser = OptionParser.new do |opts|
     opts.banner = <<~BANNER
-      Usage: rhdl apple2 [options]
+      Usage: rhdl apple2 [options] [FILE]
 
       Apple II emulator and ROM tools.
 
@@ -1152,9 +1151,9 @@ def handle_apple2(args)
         rhdl apple2 --clean        Clean ROM output files
 
       Ink TUI (React-based terminal UI):
-        rhdl apple2 --ink          Run with Ink TUI (ISA mode)
-        rhdl apple2 --ink-hdl      Run with Ink TUI (HDL mode)
-        rhdl apple2 --ink-run FILE Run program with Ink TUI
+        rhdl apple2 --ink          Run with Ink TUI (ISA mode, demo program)
+        rhdl apple2 --ink --hdl    Run with Ink TUI (HDL mode)
+        rhdl apple2 --ink FILE     Run program file with Ink TUI
 
       Options:
     BANNER
@@ -1167,9 +1166,8 @@ def handle_apple2(args)
     opts.on('-d', '--debug', 'Enable debug mode') { options[:debug] = true }
     opts.on('-r', '--rom FILE', 'ROM file to load') { |v| options[:rom] = v }
     opts.on('--rom-address ADDR', 'ROM load address (hex)') { |v| options[:rom_address] = v }
-    opts.on('--ink', 'Run with Ink TUI (ISA mode)') { options[:ink] = true }
-    opts.on('--ink-hdl', 'Run with Ink TUI (HDL mode)') { options[:ink_hdl] = true }
-    opts.on('--ink-run FILE', 'Run program file with Ink TUI') { |v| options[:ink_run] = v }
+    opts.on('--ink', 'Use Ink (React-based) TUI renderer') { options[:ink] = true }
+    opts.on('--hdl', 'Use HDL mode (cycle-accurate simulation)') { options[:hdl] = true }
     opts.on('-h', '--help', 'Show this help') do
       puts opts
       exit 0
@@ -1177,6 +1175,9 @@ def handle_apple2(args)
   end
 
   parser.parse!(args)
+
+  # Remaining args after parsing - could be a file path
+  program_file = args.shift
 
   apple2_script = File.expand_path('../examples/mos6502/bin/apple2', __dir__)
 
@@ -1190,33 +1191,36 @@ def handle_apple2(args)
   end
 
   # Handle Ink TUI modes
-  if options[:ink] || options[:ink_hdl] || options[:ink_run]
+  if options[:ink]
     $LOAD_PATH.unshift File.join(APPLE2_DIR, 'utilities')
 
     require_relative '../examples/mos6502/utilities/apple2_harness'
     require_relative '../examples/mos6502/utilities/apple2_ink_adapter'
 
-    if options[:ink_run]
+    mode = options[:hdl] ? :hdl : :isa
+
+    if program_file
       # Run with program file
-      unless File.exist?(options[:ink_run])
-        warn "Error: Program file not found: #{options[:ink_run]}"
+      unless File.exist?(program_file)
+        warn "Error: Program file not found: #{program_file}"
         exit 1
       end
 
-      puts "Starting Apple ][ Ink TUI with #{options[:ink_run]}..."
+      puts "Starting Apple ][ Ink TUI with #{program_file}..."
       puts "=" * 50
 
-      program = File.binread(options[:ink_run]).bytes
-      runner = Apple2Harness::ISARunner.new
+      program = File.binread(program_file).bytes
+      runner_class = options[:hdl] ? Apple2Harness::Runner : Apple2Harness::ISARunner
+      runner = runner_class.new
       runner.load_ram(program, base_addr: 0x0800)
       runner.bus.write(0xFFFC, 0x00)
       runner.bus.write(0xFFFD, 0x08)
       runner.reset
 
-      adapter = Apple2Harness::InkAdapter.new(runner, mode: :isa)
+      adapter = Apple2Harness::InkAdapter.new(runner, mode: mode)
       adapter.run
-    elsif options[:ink_hdl]
-      # HDL mode
+    elsif options[:hdl]
+      # HDL mode with demo program
       puts "Starting Apple ][ Ink TUI (HDL mode)..."
       puts "=" * 50
 
@@ -1230,7 +1234,7 @@ def handle_apple2(args)
       adapter = Apple2Harness::InkAdapter.new(runner, mode: :hdl)
       adapter.run
     else
-      # ISA mode (default ink)
+      # ISA mode with demo program (default)
       puts "Starting Apple ][ Ink TUI..."
       puts "=" * 50
 
