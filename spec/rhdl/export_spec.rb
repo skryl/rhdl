@@ -1,7 +1,7 @@
 require 'spec_helper'
 require 'tmpdir'
 
-RSpec.describe RHDL::Exporter do
+RSpec.describe RHDL::Export do
   # Define test components for export testing
   before(:all) do
     Object.send(:remove_const, :ExportTestAdder) if defined?(ExportTestAdder)
@@ -34,20 +34,20 @@ RSpec.describe RHDL::Exporter do
 
   describe '.discover_components' do
     it 'finds classes that include RHDL::DSL' do
-      components = RHDL::Exporter.discover_components
+      components = RHDL::Export.discover_components
       expect(components).to include(ExportTestAdder)
       expect(components).to include(ExportTestCounter)
     end
 
     it 'excludes RHDL::Component base class' do
-      components = RHDL::Exporter.discover_components
+      components = RHDL::Export.discover_components
       expect(components).not_to include(RHDL::Component)
     end
   end
 
   describe '.to_verilog' do
     it 'exports a single component to Verilog' do
-      verilog = RHDL::Exporter.to_verilog(ExportTestAdder)
+      verilog = RHDL::Export.to_verilog(ExportTestAdder)
       expect(verilog).to include('module export_test_adder')
       expect(verilog).to include('endmodule')
     end
@@ -55,7 +55,7 @@ RSpec.describe RHDL::Exporter do
 
   describe '.all_to_verilog' do
     it 'exports all discovered components to Verilog' do
-      results = RHDL::Exporter.all_to_verilog
+      results = RHDL::Export.all_to_verilog
       expect(results).to be_a(Hash)
       expect(results[ExportTestAdder]).to include('module export_test_adder')
       expect(results[ExportTestCounter]).to include('module export_test_counter')
@@ -64,7 +64,7 @@ RSpec.describe RHDL::Exporter do
 
   describe '.export_verilog' do
     it 'exports specific components to Verilog' do
-      results = RHDL::Exporter.export_verilog([ExportTestCounter])
+      results = RHDL::Export.export_verilog([ExportTestCounter])
       expect(results.keys).to eq([ExportTestCounter])
       expect(results[ExportTestCounter]).to include('module export_test_counter')
     end
@@ -73,7 +73,7 @@ RSpec.describe RHDL::Exporter do
   describe '.export_to_files' do
     it 'exports specific components to Verilog files' do
       Dir.mktmpdir do |dir|
-        results = RHDL::Exporter.export_to_files([ExportTestCounter], dir)
+        results = RHDL::Export.export_to_files([ExportTestCounter], dir)
 
         expect(results[:verilog][ExportTestCounter]).to end_with('export_test_counter.v')
         expect(File.exist?(File.join(dir, 'export_test_counter.v'))).to be true
@@ -87,7 +87,7 @@ RSpec.describe RHDL::Exporter do
   describe '.export_all_to_files' do
     it 'exports all discovered components to files' do
       Dir.mktmpdir do |dir|
-        results = RHDL::Exporter.export_all_to_files(dir)
+        results = RHDL::Export.export_all_to_files(dir)
 
         # Check that files were created for discovered components
         expect(results[:verilog]).not_to be_empty
@@ -102,7 +102,7 @@ RSpec.describe RHDL::Exporter do
         new_dir = File.join(base_dir, 'nested', 'output')
         expect(File.exist?(new_dir)).to be false
 
-        RHDL::Exporter.export_all_to_files(new_dir)
+        RHDL::Export.export_all_to_files(new_dir)
 
         expect(File.exist?(new_dir)).to be true
       end
@@ -111,7 +111,7 @@ RSpec.describe RHDL::Exporter do
 
   describe '.list_components' do
     it 'lists all exportable components with their info' do
-      list = RHDL::Exporter.list_components
+      list = RHDL::Export.list_components
 
       adder_info = list.find { |c| c[:class] == ExportTestAdder }
       expect(adder_info).not_to be_nil
@@ -130,7 +130,7 @@ RSpec.describe RHDL::Exporter do
 
   describe 'Verilog output' do
     it 'generates correct port names' do
-      verilog = RHDL::Exporter.to_verilog(ExportTestAdder)
+      verilog = RHDL::Export.to_verilog(ExportTestAdder)
 
       expect(verilog).to include('a')
       expect(verilog).to include('b')
@@ -138,7 +138,7 @@ RSpec.describe RHDL::Exporter do
     end
 
     it 'generates correct signal names' do
-      verilog = RHDL::Exporter.to_verilog(ExportTestAdder)
+      verilog = RHDL::Export.to_verilog(ExportTestAdder)
 
       expect(verilog).to include('internal_sum')
     end
