@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
+import { theme, box } from '../theme.js';
 
 interface CommandInputProps {
   initialValue?: string;
@@ -24,9 +25,9 @@ export function CommandInput({ initialValue = '', onSubmit, onCancel }: CommandI
 
   return (
     <Box>
-      <Text color="cyan">:</Text>
-      <Text>{value}</Text>
-      <Text color="cyan" inverse>_</Text>
+      <Text color={theme.primary}>{box.arrowRight} </Text>
+      <Text color={theme.amber}>{value}</Text>
+      <Text color={theme.primary}>█</Text>
     </Box>
   );
 }

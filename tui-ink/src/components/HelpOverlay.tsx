@@ -1,50 +1,136 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import { theme, box } from '../theme.js';
 
 interface HelpOverlayProps {
   onClose: () => void;
 }
 
 export function HelpOverlay({ onClose }: HelpOverlayProps) {
+  const width = 60;
+
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="double"
-      borderColor="cyan"
-      paddingX={2}
-      paddingY={1}
-    >
-      <Text bold color="cyan">═══ RHDL Simulator Help ═══</Text>
-      <Text> </Text>
-      <Text bold>Keys:</Text>
-      <Text>  <Text color="yellow">Space</Text>  - Step one cycle</Text>
-      <Text>  <Text color="yellow">n</Text>      - Step half cycle</Text>
-      <Text>  <Text color="yellow">r</Text>      - Run simulation</Text>
-      <Text>  <Text color="yellow">s</Text>      - Stop simulation</Text>
-      <Text>  <Text color="yellow">R</Text>      - Reset simulation</Text>
-      <Text>  <Text color="yellow">c</Text>      - Continue until breakpoint</Text>
-      <Text>  <Text color="yellow">w</Text>      - Add watchpoint</Text>
-      <Text>  <Text color="yellow">b</Text>      - Add breakpoint</Text>
-      <Text>  <Text color="yellow">j/k</Text>    - Navigate lists</Text>
-      <Text>  <Text color="yellow">Tab</Text>    - Switch panel focus</Text>
-      <Text>  <Text color="yellow">:</Text>      - Enter command mode</Text>
-      <Text>  <Text color="yellow">h/?</Text>    - Show this help</Text>
-      <Text>  <Text color="yellow">q</Text>      - Quit</Text>
-      <Text> </Text>
-      <Text bold>Commands:</Text>
-      <Text>  <Text color="green">run [n]</Text>           - Run n cycles</Text>
-      <Text>  <Text color="green">step</Text>              - Single step</Text>
-      <Text>  <Text color="green">watch sig [type]</Text>  - Add watchpoint</Text>
-      <Text>  <Text color="green">break [cycle]</Text>     - Add breakpoint</Text>
-      <Text>  <Text color="green">delete id</Text>         - Delete breakpoint</Text>
-      <Text>  <Text color="green">set sig val</Text>       - Set signal value</Text>
-      <Text>  <Text color="green">print sig</Text>         - Print signal value</Text>
-      <Text>  <Text color="green">export file</Text>       - Export VCD</Text>
-      <Text>  <Text color="green">clear [what]</Text>      - Clear breaks/waves/log</Text>
-      <Text> </Text>
-      <Text dimColor>Watch types: change, equals, rising_edge, falling_edge</Text>
-      <Text> </Text>
-      <Text dimColor>Press any key to close</Text>
+    <Box flexDirection="column">
+      {/* Header */}
+      <Box>
+        <Text color={theme.primary}>
+          {box.dTopLeft}{box.dHorizontal.repeat(width - 2)}{box.dTopRight}
+        </Text>
+      </Box>
+      <Box>
+        <Text color={theme.primary}>{box.dVertical}</Text>
+        <Box width={width - 4} justifyContent="center">
+          <Text color={theme.primaryBright} bold>
+            {'▄▄▄▄  ██  ██ ██████  ██      '}
+          </Text>
+        </Box>
+        <Text color={theme.primary}>{box.dVertical}</Text>
+      </Box>
+      <Box>
+        <Text color={theme.primary}>{box.dVertical}</Text>
+        <Box width={width - 4} justifyContent="center">
+          <Text color={theme.primaryBright} bold>
+            {'█   █ █▄▄▄█ █    █ █       '}
+          </Text>
+        </Box>
+        <Text color={theme.primary}>{box.dVertical}</Text>
+      </Box>
+      <Box>
+        <Text color={theme.primary}>{box.dVertical}</Text>
+        <Box width={width - 4} justifyContent="center">
+          <Text color={theme.primaryBright} bold>
+            {'█▄▄▄▀ █   █ █▄▄▄▄█ █▄▄▄▄▄  '}
+          </Text>
+        </Box>
+        <Text color={theme.primary}>{box.dVertical}</Text>
+      </Box>
+      <Box>
+        <Text color={theme.primary}>
+          {box.dVertical}{box.horizontal.repeat(width - 2)}{box.dVertical}
+        </Text>
+      </Box>
+
+      {/* Keyboard section */}
+      <Box>
+        <Text color={theme.primary}>{box.dVertical}</Text>
+        <Text color={theme.amber} bold> KEYBOARD </Text>
+        <Text color={theme.border}>{box.horizontal.repeat(width - 13)}</Text>
+        <Text color={theme.primary}>{box.dVertical}</Text>
+      </Box>
+
+      {[
+        ['SPC', 'Step one cycle'],
+        ['n', 'Step half cycle'],
+        ['r', 'Run simulation'],
+        ['s', 'Stop simulation'],
+        ['R', 'Reset simulation'],
+        ['c', 'Continue to breakpoint'],
+        ['b', 'Add breakpoint'],
+        ['w', 'Add watchpoint'],
+        ['j/k', 'Navigate up/down'],
+        ['TAB', 'Switch panel'],
+        [':', 'Command mode'],
+        ['h', 'This help'],
+        ['q', 'Quit'],
+      ].map(([key, desc]) => (
+        <Box key={key}>
+          <Text color={theme.primary}>{box.dVertical} </Text>
+          <Box width={8}>
+            <Text color={theme.amber}>{key.padEnd(6)}</Text>
+          </Box>
+          <Text color={theme.textDim}>{desc}</Text>
+          <Box flexGrow={1} />
+          <Text color={theme.primary}>{box.dVertical}</Text>
+        </Box>
+      ))}
+
+      {/* Commands section */}
+      <Box>
+        <Text color={theme.primary}>{box.dVertical}</Text>
+        <Text color={theme.amber} bold> COMMANDS </Text>
+        <Text color={theme.border}>{box.horizontal.repeat(width - 13)}</Text>
+        <Text color={theme.primary}>{box.dVertical}</Text>
+      </Box>
+
+      {[
+        ['run [n]', 'Execute n cycles'],
+        ['step', 'Single step'],
+        ['break [cyc]', 'Set breakpoint'],
+        ['watch sig', 'Watch signal'],
+        ['set sig val', 'Set signal value'],
+        ['print sig', 'Print signal'],
+        ['export file', 'Export VCD'],
+        ['clear', 'Clear logs/breaks'],
+      ].map(([cmd, desc]) => (
+        <Box key={cmd}>
+          <Text color={theme.primary}>{box.dVertical} </Text>
+          <Box width={14}>
+            <Text color={theme.primary}>{cmd}</Text>
+          </Box>
+          <Text color={theme.textDim}>{desc}</Text>
+          <Box flexGrow={1} />
+          <Text color={theme.primary}>{box.dVertical}</Text>
+        </Box>
+      ))}
+
+      {/* Footer */}
+      <Box>
+        <Text color={theme.primary}>
+          {box.dVertical}{box.horizontal.repeat(width - 2)}{box.dVertical}
+        </Text>
+      </Box>
+      <Box>
+        <Text color={theme.primary}>{box.dVertical}</Text>
+        <Box width={width - 4} justifyContent="center">
+          <Text color={theme.textMuted}>Press any key to close</Text>
+        </Box>
+        <Text color={theme.primary}>{box.dVertical}</Text>
+      </Box>
+      <Box>
+        <Text color={theme.primary}>
+          {box.dBottomLeft}{box.dHorizontal.repeat(width - 2)}{box.dBottomRight}
+        </Text>
+      </Box>
     </Box>
   );
 }
