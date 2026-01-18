@@ -41,7 +41,7 @@ RSpec.describe RHDL::HDL::PopCount do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::PopCount.new('popcount', width: 8) }
-    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'popcount') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'popcount') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('popcount.a')
@@ -49,17 +49,17 @@ RSpec.describe RHDL::HDL::PopCount do
       expect(ir.gates.length).to be >= 1
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module popcount')
       expect(verilog).to include('input [7:0] a')
       expect(verilog).to include('output [3:0] count')
     end
 
     context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation' do
+      it 'matches behavior simulation' do
         test_vectors = []
-        behavioral = RHDL::HDL::PopCount.new(nil, width: 8)
+        behavior = RHDL::HDL::PopCount.new(nil, width: 8)
 
         test_cases = [
           { a: 0b10101010 },  # 4 bits
@@ -71,15 +71,15 @@ RSpec.describe RHDL::HDL::PopCount do
 
         expected_outputs = []
         test_cases.each do |tc|
-          behavioral.set_input(:a, tc[:a])
-          behavioral.propagate
+          behavior.set_input(:a, tc[:a])
+          behavior.propagate
 
           test_vectors << { inputs: tc }
-          expected_outputs << { count: behavioral.get_output(:count) }
+          expected_outputs << { count: behavior.get_output(:count) }
         end
 
         base_dir = File.join('tmp', 'iverilog', 'popcount')
-        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+        result = NetlistHelper.run_structure_simulation(ir, test_vectors, base_dir: base_dir)
 
         expect(result[:success]).to be(true), result[:error]
 

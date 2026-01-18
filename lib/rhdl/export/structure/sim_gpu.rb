@@ -2,7 +2,7 @@
 
 module RHDL
   module Export
-    module Structural
+    module Structure
       class SimGPU
         def self.available?
           false

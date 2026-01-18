@@ -95,7 +95,7 @@ RSpec.describe RHDL::HDL::SRFlipFlop do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::SRFlipFlop.new('srff') }
-    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'srff') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'srff') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('srff.s', 'srff.r', 'srff.clk', 'srff.rst', 'srff.en')
@@ -103,8 +103,8 @@ RSpec.describe RHDL::HDL::SRFlipFlop do
       expect(ir.dffs.length).to eq(1)
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module srff')
       expect(verilog).to include('input s')
       expect(verilog).to include('input r')
@@ -116,11 +116,11 @@ RSpec.describe RHDL::HDL::SRFlipFlop do
     end
 
     context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation' do
+      it 'matches behavior simulation' do
         test_vectors = []
-        behavioral = RHDL::HDL::SRFlipFlop.new
-        behavioral.set_input(:rst, 0)
-        behavioral.set_input(:en, 1)
+        behavior = RHDL::HDL::SRFlipFlop.new
+        behavior.set_input(:rst, 0)
+        behavior.set_input(:en, 1)
 
         test_cases = [
           { s: 1, r: 0, rst: 0, en: 1 },  # set
@@ -132,21 +132,21 @@ RSpec.describe RHDL::HDL::SRFlipFlop do
 
         expected_outputs = []
         test_cases.each do |tc|
-          behavioral.set_input(:s, tc[:s])
-          behavioral.set_input(:r, tc[:r])
-          behavioral.set_input(:rst, tc[:rst])
-          behavioral.set_input(:en, tc[:en])
-          behavioral.set_input(:clk, 0)
-          behavioral.propagate
-          behavioral.set_input(:clk, 1)
-          behavioral.propagate
+          behavior.set_input(:s, tc[:s])
+          behavior.set_input(:r, tc[:r])
+          behavior.set_input(:rst, tc[:rst])
+          behavior.set_input(:en, tc[:en])
+          behavior.set_input(:clk, 0)
+          behavior.propagate
+          behavior.set_input(:clk, 1)
+          behavior.propagate
 
           test_vectors << { inputs: tc }
-          expected_outputs << { q: behavioral.get_output(:q) }
+          expected_outputs << { q: behavior.get_output(:q) }
         end
 
         base_dir = File.join('tmp', 'iverilog', 'srff')
-        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+        result = NetlistHelper.run_structure_simulation(ir, test_vectors, base_dir: base_dir)
 
         expect(result[:success]).to be(true), result[:error]
 

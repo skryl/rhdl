@@ -35,7 +35,7 @@ RSpec.describe RHDL::HDL::Multiplier do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Multiplier.new('mult', width: 8) }
-    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'mult') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mult') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mult.a', 'mult.b')
@@ -44,8 +44,8 @@ RSpec.describe RHDL::HDL::Multiplier do
       expect(ir.gates.length).to be >= 1
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module mult')
       expect(verilog).to include('input [7:0] a')
       expect(verilog).to include('input [7:0] b')
@@ -53,9 +53,9 @@ RSpec.describe RHDL::HDL::Multiplier do
     end
 
     context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation' do
+      it 'matches behavior simulation' do
         test_vectors = []
-        behavioral = RHDL::HDL::Multiplier.new(nil, width: 8)
+        behavior = RHDL::HDL::Multiplier.new(nil, width: 8)
 
         test_cases = [
           { a: 10, b: 20 },   # 200
@@ -68,16 +68,16 @@ RSpec.describe RHDL::HDL::Multiplier do
 
         expected_outputs = []
         test_cases.each do |tc|
-          behavioral.set_input(:a, tc[:a])
-          behavioral.set_input(:b, tc[:b])
-          behavioral.propagate
+          behavior.set_input(:a, tc[:a])
+          behavior.set_input(:b, tc[:b])
+          behavior.propagate
 
           test_vectors << { inputs: tc }
-          expected_outputs << { product: behavioral.get_output(:product) }
+          expected_outputs << { product: behavior.get_output(:product) }
         end
 
         base_dir = File.join('tmp', 'iverilog', 'mult')
-        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+        result = NetlistHelper.run_structure_simulation(ir, test_vectors, base_dir: base_dir)
 
         expect(result[:success]).to be(true), result[:error]
 

@@ -51,10 +51,10 @@ RSpec.describe RHDL::HDL::Decoder2to4 do
       expect(verilog).to include('input [1:0] a')
     end
 
-    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+    context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::Decoder2to4.to_verilog
-        behavioral = RHDL::HDL::Decoder2to4.new
+        behavior = RHDL::HDL::Decoder2to4.new
 
         inputs = { a: 2, en: 1 }
         outputs = { y0: 1, y1: 1, y2: 1, y3: 1 }
@@ -72,27 +72,27 @@ RSpec.describe RHDL::HDL::Decoder2to4 do
         ]
 
         test_cases.each do |tc|
-          behavioral.set_input(:a, tc[:a])
-          behavioral.set_input(:en, tc[:en])
-          behavioral.propagate
+          behavior.set_input(:a, tc[:a])
+          behavior.set_input(:en, tc[:en])
+          behavior.propagate
           vectors << {
             inputs: tc,
             expected: {
-              y0: behavioral.get_output(:y0),
-              y1: behavioral.get_output(:y1),
-              y2: behavioral.get_output(:y2),
-              y3: behavioral.get_output(:y3)
+              y0: behavior.get_output(:y0),
+              y1: behavior.get_output(:y1),
+              y2: behavior.get_output(:y2),
+              y3: behavior.get_output(:y3)
             }
           }
         end
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'decoder2to4',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/decoder2to4'
+          base_dir: 'tmp/behavior_test/decoder2to4'
         )
 
         expect(result[:success]).to be(true), result[:error]
@@ -109,15 +109,15 @@ RSpec.describe RHDL::HDL::Decoder2to4 do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Decoder2to4.new('dec2to4') }
-    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'dec2to4') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'dec2to4') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('dec2to4.a', 'dec2to4.en')
       expect(ir.outputs.keys).to include('dec2to4.y0', 'dec2to4.y1', 'dec2to4.y2', 'dec2to4.y3')
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module dec2to4')
       expect(verilog).to include('input [1:0] a')
       expect(verilog).to include('output y0')
@@ -132,7 +132,7 @@ RSpec.describe RHDL::HDL::Decoder2to4 do
           { inputs: { a: 3, en: 1 }, expected: { y0: 0, y1: 0, y2: 0, y3: 1 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/dec2to4')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/dec2to4')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|

@@ -66,10 +66,10 @@ RSpec.describe RHDL::HDL::Comparator do
       expect(verilog).to include('input [7:0] a')
     end
 
-    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+    context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::Comparator.to_verilog
-        behavioral = RHDL::HDL::Comparator.new(nil, width: 8)
+        behavior = RHDL::HDL::Comparator.new(nil, width: 8)
 
         inputs = { a: 8, b: 8, signed_cmp: 1 }
         outputs = { eq: 1, gt: 1, lt: 1, gte: 1, lte: 1 }
@@ -87,29 +87,29 @@ RSpec.describe RHDL::HDL::Comparator do
         ]
 
         test_cases.each do |tc|
-          behavioral.set_input(:a, tc[:a])
-          behavioral.set_input(:b, tc[:b])
-          behavioral.set_input(:signed_cmp, tc[:signed_cmp])
-          behavioral.propagate
+          behavior.set_input(:a, tc[:a])
+          behavior.set_input(:b, tc[:b])
+          behavior.set_input(:signed_cmp, tc[:signed_cmp])
+          behavior.propagate
           vectors << {
             inputs: tc,
             expected: {
-              eq: behavioral.get_output(:eq),
-              gt: behavioral.get_output(:gt),
-              lt: behavioral.get_output(:lt),
-              gte: behavioral.get_output(:gte),
-              lte: behavioral.get_output(:lte)
+              eq: behavior.get_output(:eq),
+              gt: behavior.get_output(:gt),
+              lt: behavior.get_output(:lt),
+              gte: behavior.get_output(:gte),
+              lte: behavior.get_output(:lte)
             }
           }
         end
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'comparator',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/comparator'
+          base_dir: 'tmp/behavior_test/comparator'
         )
 
         expect(result[:success]).to be(true), result[:error]
@@ -128,15 +128,15 @@ RSpec.describe RHDL::HDL::Comparator do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Comparator.new('cmp', width: 4) }
-    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'cmp') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'cmp') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('cmp.a', 'cmp.b', 'cmp.signed_cmp')
       expect(ir.outputs.keys).to include('cmp.eq', 'cmp.lt', 'cmp.gt', 'cmp.gte', 'cmp.lte')
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module cmp')
       expect(verilog).to include('output eq')
       expect(verilog).to include('output lt')
@@ -152,7 +152,7 @@ RSpec.describe RHDL::HDL::Comparator do
           { inputs: { a: 0, b: 0, signed_cmp: 0 }, expected: { eq: 1, lt: 0, gt: 0, gte: 1, lte: 1 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/cmp')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/cmp')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|

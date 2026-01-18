@@ -121,7 +121,7 @@ module RHDL
 
         # Define a structure block for hierarchical component instantiation
         #
-        # @example Structural component with instances
+        # @example Structure component with instances
         #   class MyDatapath < SimComponent
         #     port_input :clk
         #     port_input :a, width: 8

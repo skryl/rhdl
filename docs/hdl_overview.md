@@ -15,7 +15,7 @@ lib/rhdl/hdl/
 ├── cpu.rb             # CPU module entry point
 └── cpu/
     ├── datapath.rb    # CPU datapath implementation
-    └── adapter.rb     # Behavioral CPU interface adapter
+    └── adapter.rb     # Behavior CPU interface adapter
 ```
 
 ## Key Concepts

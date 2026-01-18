@@ -1,5 +1,5 @@
 module CpuTestHelper
-  # Set this to switch between behavioral and HDL CPU implementations
+  # Set this to switch between behavior and HDL CPU implementations
   # Override in specific test files or use shared examples
   def cpu_class
     @cpu_class || RHDL::Components::CPU::CPU
@@ -9,7 +9,7 @@ module CpuTestHelper
     @cpu_class = RHDL::HDL::CPU::CPUAdapter
   end
 
-  def use_behavioral_cpu!
+  def use_behavior_cpu!
     @cpu_class = RHDL::Components::CPU::CPU
   end
 

@@ -8,7 +8,7 @@ require_relative 'toposort'
 
 module RHDL
   module Export
-    module Structural
+    module Structure
     class Lower
       def self.from_components(components, name: 'design')
         new(components, name: name).lower
@@ -2719,7 +2719,7 @@ module RHDL
         end
       end
 
-      # SynthDatapath: Hierarchical structural composition
+      # SynthDatapath: Hierarchical structure composition
       def lower_synth_datapath(component)
         # Get instance and connection definitions from the class
         instance_defs = component.class._instance_defs
@@ -3447,7 +3447,7 @@ module RHDL
         end
       end
 
-      # MOS6502 Datapath: structural composition using structure DSL
+      # MOS6502 Datapath: structure composition using structure DSL
       def lower_mos6502_datapath(component)
         # Use the same approach as SynthDatapath - process structure instances
         instance_defs = component.class._instance_defs

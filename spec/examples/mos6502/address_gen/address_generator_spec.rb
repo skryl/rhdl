@@ -76,9 +76,9 @@ RSpec.describe MOS6502::AddressGenerator do
     end
 
     context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
-      it 'behavioral Verilog matches RHDL simulation' do
+      it 'behavior Verilog matches RHDL simulation' do
         verilog = described_class.to_verilog
-        behavioral = described_class.new('behavioral')
+        behavior = described_class.new('behavior')
         vectors = []
 
         inputs = { mode: 4, operand_lo: 8, operand_hi: 8, x_reg: 8, y_reg: 8, pc: 16, sp: 8, indirect_lo: 8, indirect_hi: 8 }
@@ -87,32 +87,32 @@ RSpec.describe MOS6502::AddressGenerator do
         base_inputs = { operand_lo: 0, operand_hi: 0, x_reg: 0, y_reg: 0, pc: 0, sp: 0xFF, indirect_lo: 0, indirect_hi: 0 }
 
         # Test zero page mode
-        behavioral.set_input(:mode, MOS6502::AddressGenerator::MODE_ZERO_PAGE)
-        behavioral.set_input(:operand_lo, 0x80)
-        base_inputs.each { |k, v| behavioral.set_input(k, v) unless k == :mode || k == :operand_lo }
-        behavioral.propagate
+        behavior.set_input(:mode, MOS6502::AddressGenerator::MODE_ZERO_PAGE)
+        behavior.set_input(:operand_lo, 0x80)
+        base_inputs.each { |k, v| behavior.set_input(k, v) unless k == :mode || k == :operand_lo }
+        behavior.propagate
         vectors << {
           inputs: base_inputs.merge(mode: MOS6502::AddressGenerator::MODE_ZERO_PAGE, operand_lo: 0x80),
-          expected: { eff_addr: behavioral.get_output(:eff_addr), is_zero_page: behavioral.get_output(:is_zero_page), page_cross: behavioral.get_output(:page_cross) }
+          expected: { eff_addr: behavior.get_output(:eff_addr), is_zero_page: behavior.get_output(:is_zero_page), page_cross: behavior.get_output(:page_cross) }
         }
 
         # Test absolute mode
-        behavioral.set_input(:mode, MOS6502::AddressGenerator::MODE_ABSOLUTE)
-        behavioral.set_input(:operand_lo, 0x34)
-        behavioral.set_input(:operand_hi, 0x12)
-        behavioral.propagate
+        behavior.set_input(:mode, MOS6502::AddressGenerator::MODE_ABSOLUTE)
+        behavior.set_input(:operand_lo, 0x34)
+        behavior.set_input(:operand_hi, 0x12)
+        behavior.propagate
         vectors << {
           inputs: base_inputs.merge(mode: MOS6502::AddressGenerator::MODE_ABSOLUTE, operand_lo: 0x34, operand_hi: 0x12),
-          expected: { eff_addr: behavioral.get_output(:eff_addr), is_zero_page: behavioral.get_output(:is_zero_page), page_cross: behavioral.get_output(:page_cross) }
+          expected: { eff_addr: behavior.get_output(:eff_addr), is_zero_page: behavior.get_output(:is_zero_page), page_cross: behavior.get_output(:page_cross) }
         }
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'mos6502_address_generator',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/mos6502_address_generator'
+          base_dir: 'tmp/behavior_test/mos6502_address_generator'
         )
         expect(result[:success]).to be(true), result[:error]
 
@@ -126,7 +126,7 @@ RSpec.describe MOS6502::AddressGenerator do
 
   describe 'gate-level netlist' do
     let(:component) { described_class.new('mos6502_address_generator') }
-    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'mos6502_address_generator') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mos6502_address_generator') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mos6502_address_generator.mode')
@@ -140,40 +140,40 @@ RSpec.describe MOS6502::AddressGenerator do
       expect(ir.dffs.length).to eq(0)
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module mos6502_address_generator')
       expect(verilog).to include('input [3:0] mode')
       expect(verilog).to include('output [15:0] eff_addr')
     end
 
     context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation for address modes' do
-        behavioral = described_class.new('behavioral')
+      it 'matches behavior simulation for address modes' do
+        behavior = described_class.new('behavior')
         vectors = []
         base_inputs = { operand_lo: 0, operand_hi: 0, x_reg: 0, y_reg: 0, pc: 0, sp: 0xFF, indirect_lo: 0, indirect_hi: 0 }
 
         # Test zero page mode
-        behavioral.set_input(:mode, MOS6502::AddressGenerator::MODE_ZERO_PAGE)
-        behavioral.set_input(:operand_lo, 0x80)
-        base_inputs.each { |k, v| behavioral.set_input(k, v) unless k == :mode || k == :operand_lo }
-        behavioral.propagate
+        behavior.set_input(:mode, MOS6502::AddressGenerator::MODE_ZERO_PAGE)
+        behavior.set_input(:operand_lo, 0x80)
+        base_inputs.each { |k, v| behavior.set_input(k, v) unless k == :mode || k == :operand_lo }
+        behavior.propagate
         vectors << {
           inputs: base_inputs.merge(mode: MOS6502::AddressGenerator::MODE_ZERO_PAGE, operand_lo: 0x80),
-          expected: { eff_addr: behavioral.get_output(:eff_addr), is_zero_page: behavioral.get_output(:is_zero_page), page_cross: behavioral.get_output(:page_cross) }
+          expected: { eff_addr: behavior.get_output(:eff_addr), is_zero_page: behavior.get_output(:is_zero_page), page_cross: behavior.get_output(:page_cross) }
         }
 
         # Test absolute mode
-        behavioral.set_input(:mode, MOS6502::AddressGenerator::MODE_ABSOLUTE)
-        behavioral.set_input(:operand_lo, 0x34)
-        behavioral.set_input(:operand_hi, 0x12)
-        behavioral.propagate
+        behavior.set_input(:mode, MOS6502::AddressGenerator::MODE_ABSOLUTE)
+        behavior.set_input(:operand_lo, 0x34)
+        behavior.set_input(:operand_hi, 0x12)
+        behavior.propagate
         vectors << {
           inputs: base_inputs.merge(mode: MOS6502::AddressGenerator::MODE_ABSOLUTE, operand_lo: 0x34, operand_hi: 0x12),
-          expected: { eff_addr: behavioral.get_output(:eff_addr), is_zero_page: behavioral.get_output(:is_zero_page), page_cross: behavioral.get_output(:page_cross) }
+          expected: { eff_addr: behavior.get_output(:eff_addr), is_zero_page: behavior.get_output(:is_zero_page), page_cross: behavior.get_output(:page_cross) }
         }
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mos6502_address_generator')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/mos6502_address_generator')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|

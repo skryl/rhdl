@@ -35,10 +35,10 @@ RSpec.describe RHDL::HDL::NotGate do
       expect(verilog).to include('assign y')
     end
 
-    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+    context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::NotGate.to_verilog
-        behavioral = RHDL::HDL::NotGate.new
+        behavior = RHDL::HDL::NotGate.new
 
         inputs = { a: 1 }
         outputs = { y: 1 }
@@ -50,21 +50,21 @@ RSpec.describe RHDL::HDL::NotGate do
         ]
 
         test_cases.each do |tc|
-          tc.each { |k, v| behavioral.set_input(k, v) }
-          behavioral.propagate
+          tc.each { |k, v| behavior.set_input(k, v) }
+          behavior.propagate
           vectors << {
             inputs: tc,
-            expected: { y: behavioral.get_output(:y) }
+            expected: { y: behavior.get_output(:y) }
           }
         end
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'not_gate',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/not_gate'
+          base_dir: 'tmp/behavior_test/not_gate'
         )
 
         expect(result[:success]).to be(true), result[:error]
@@ -79,7 +79,7 @@ RSpec.describe RHDL::HDL::NotGate do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::NotGate.new('not_gate') }
-    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'not_gate') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'not_gate') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('not_gate.a')
@@ -88,8 +88,8 @@ RSpec.describe RHDL::HDL::NotGate do
       expect(ir.gates.first.type).to eq(:not)
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module not_gate')
       expect(verilog).to include('input a')
       expect(verilog).to include('output y')
@@ -103,7 +103,7 @@ RSpec.describe RHDL::HDL::NotGate do
           { inputs: { a: 1 }, expected: { y: 0 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/not_gate')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/not_gate')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|

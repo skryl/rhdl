@@ -40,7 +40,7 @@ RSpec.describe RHDL::HDL::Mux8 do
 
   describe 'gate-level netlist (1-bit)' do
     let(:component) { RHDL::HDL::Mux8.new('mux8', width: 1) }
-    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'mux8') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mux8') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('mux8.in0', 'mux8.in1', 'mux8.in2', 'mux8.in3')
@@ -49,8 +49,8 @@ RSpec.describe RHDL::HDL::Mux8 do
       expect(ir.gates.length).to be >= 1
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module mux8')
       expect(verilog).to include('input in0')
       expect(verilog).to include('input [2:0] sel')
@@ -58,9 +58,9 @@ RSpec.describe RHDL::HDL::Mux8 do
     end
 
     context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation' do
+      it 'matches behavior simulation' do
         test_vectors = []
-        behavioral = RHDL::HDL::Mux8.new(nil, width: 1)
+        behavior = RHDL::HDL::Mux8.new(nil, width: 1)
 
         test_cases = []
         8.times do |sel|
@@ -71,16 +71,16 @@ RSpec.describe RHDL::HDL::Mux8 do
 
         expected_outputs = []
         test_cases.each do |tc|
-          8.times { |i| behavioral.set_input("in#{i}".to_sym, tc["in#{i}".to_sym]) }
-          behavioral.set_input(:sel, tc[:sel])
-          behavioral.propagate
+          8.times { |i| behavior.set_input("in#{i}".to_sym, tc["in#{i}".to_sym]) }
+          behavior.set_input(:sel, tc[:sel])
+          behavior.propagate
 
           test_vectors << { inputs: tc }
-          expected_outputs << { y: behavioral.get_output(:y) }
+          expected_outputs << { y: behavior.get_output(:y) }
         end
 
         base_dir = File.join('tmp', 'iverilog', 'mux8')
-        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+        result = NetlistHelper.run_structure_simulation(ir, test_vectors, base_dir: base_dir)
 
         expect(result[:success]).to be(true), result[:error]
 

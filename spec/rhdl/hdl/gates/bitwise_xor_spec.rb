@@ -24,7 +24,7 @@ RSpec.describe RHDL::HDL::BitwiseXor do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::BitwiseXor.new('bitwise_xor', width: 4) }
-    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'bitwise_xor') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'bitwise_xor') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('bitwise_xor.a', 'bitwise_xor.b')
@@ -42,7 +42,7 @@ RSpec.describe RHDL::HDL::BitwiseXor do
           { inputs: { a: 0b1010, b: 0b0110 }, expected: { y: 0b1100 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/bitwise_xor')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/bitwise_xor')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|

@@ -45,14 +45,14 @@ RSpec.describe RHDL::HDL::CPU::SynthDatapath do
 
     it 'includes submodule instantiations in Verilog' do
       verilog = RHDL::HDL::CPU::SynthDatapath.to_verilog
-      # Structural components should have instance declarations
+      # Structure components should have instance declarations
       expect(verilog).to include('instruction_decoder') | include('alu') | include('program_counter')
     end
   end
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::CPU::SynthDatapath.new('synth_dp') }
-    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'synth_dp') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'synth_dp') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('synth_dp.clk', 'synth_dp.rst', 'synth_dp.mem_data_in')
@@ -64,8 +64,8 @@ RSpec.describe RHDL::HDL::CPU::SynthDatapath do
       expect(ir.gates.length).to be > 100  # Complex component
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module synth_dp')
       expect(verilog).to include('input clk')
       expect(verilog).to include('output halt')

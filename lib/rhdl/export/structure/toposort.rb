@@ -2,7 +2,7 @@
 
 module RHDL
   module Export
-    module Structural
+    module Structure
       module Toposort
         def self.schedule(gates)
           output_to_gate = {}

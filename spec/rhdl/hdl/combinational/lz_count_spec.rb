@@ -46,7 +46,7 @@ RSpec.describe RHDL::HDL::LZCount do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::LZCount.new('lzcount', width: 8) }
-    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'lzcount') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'lzcount') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('lzcount.a')
@@ -54,8 +54,8 @@ RSpec.describe RHDL::HDL::LZCount do
       expect(ir.gates.length).to be >= 1
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module lzcount')
       expect(verilog).to include('input [7:0] a')
       expect(verilog).to include('output [3:0] count')
@@ -63,9 +63,9 @@ RSpec.describe RHDL::HDL::LZCount do
     end
 
     context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation' do
+      it 'matches behavior simulation' do
         test_vectors = []
-        behavioral = RHDL::HDL::LZCount.new(nil, width: 8)
+        behavior = RHDL::HDL::LZCount.new(nil, width: 8)
 
         test_cases = [
           { a: 0b10000000 },  # 0 leading zeros
@@ -77,18 +77,18 @@ RSpec.describe RHDL::HDL::LZCount do
 
         expected_outputs = []
         test_cases.each do |tc|
-          behavioral.set_input(:a, tc[:a])
-          behavioral.propagate
+          behavior.set_input(:a, tc[:a])
+          behavior.propagate
 
           test_vectors << { inputs: tc }
           expected_outputs << {
-            count: behavioral.get_output(:count),
-            all_zero: behavioral.get_output(:all_zero)
+            count: behavior.get_output(:count),
+            all_zero: behavior.get_output(:all_zero)
           }
         end
 
         base_dir = File.join('tmp', 'iverilog', 'lzcount')
-        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+        result = NetlistHelper.run_structure_simulation(ir, test_vectors, base_dir: base_dir)
 
         expect(result[:success]).to be(true), result[:error]
 

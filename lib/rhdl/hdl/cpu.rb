@@ -16,7 +16,7 @@ module RHDL
           super(name)
         end
 
-        # Convenience methods matching behavioral CPU interface
+        # Convenience methods matching behavior CPU interface
         def reset
           set_input(:rst, 1)
           step

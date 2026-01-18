@@ -102,7 +102,7 @@ RSpec.describe RHDL::HDL::SRLatch do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::SRLatch.new('sr_latch') }
-    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'sr_latch') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'sr_latch') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('sr_latch.s', 'sr_latch.r', 'sr_latch.en')
@@ -110,8 +110,8 @@ RSpec.describe RHDL::HDL::SRLatch do
       expect(ir.gates.length).to be >= 1
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module sr_latch')
       expect(verilog).to include('input s')
       expect(verilog).to include('input r')
@@ -121,10 +121,10 @@ RSpec.describe RHDL::HDL::SRLatch do
     end
 
     context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation' do
+      it 'matches behavior simulation' do
         test_vectors = []
-        behavioral = RHDL::HDL::SRLatch.new
-        behavioral.set_input(:en, 1)
+        behavior = RHDL::HDL::SRLatch.new
+        behavior.set_input(:en, 1)
 
         test_cases = [
           { s: 1, r: 0, en: 1 },  # set
@@ -136,17 +136,17 @@ RSpec.describe RHDL::HDL::SRLatch do
 
         expected_outputs = []
         test_cases.each do |tc|
-          behavioral.set_input(:s, tc[:s])
-          behavioral.set_input(:r, tc[:r])
-          behavioral.set_input(:en, tc[:en])
-          behavioral.propagate
+          behavior.set_input(:s, tc[:s])
+          behavior.set_input(:r, tc[:r])
+          behavior.set_input(:en, tc[:en])
+          behavior.propagate
 
           test_vectors << { inputs: tc }
-          expected_outputs << { q: behavioral.get_output(:q) }
+          expected_outputs << { q: behavior.get_output(:q) }
         end
 
         base_dir = File.join('tmp', 'iverilog', 'sr_latch')
-        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+        result = NetlistHelper.run_structure_simulation(ir, test_vectors, base_dir: base_dir)
 
         expect(result[:success]).to be(true), result[:error]
 

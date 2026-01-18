@@ -98,7 +98,7 @@ RSpec.describe RHDL::HDL::RAM do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::RAM.new('ram') }
-    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'ram') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'ram') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('ram.clk', 'ram.we', 'ram.addr', 'ram.din')
@@ -107,8 +107,8 @@ RSpec.describe RHDL::HDL::RAM do
       expect(ir.gates.length).to be >= 1
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module ram')
       expect(verilog).to include('input clk')
       expect(verilog).to include('input we')
@@ -118,9 +118,9 @@ RSpec.describe RHDL::HDL::RAM do
     end
 
     context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation' do
+      it 'matches behavior simulation' do
         test_vectors = []
-        behavioral = RHDL::HDL::RAM.new
+        behavior = RHDL::HDL::RAM.new
 
         test_cases = [
           { addr: 0, din: 0xAB, we: 1 },  # write 0xAB to addr 0
@@ -131,20 +131,20 @@ RSpec.describe RHDL::HDL::RAM do
 
         expected_outputs = []
         test_cases.each do |tc|
-          behavioral.set_input(:addr, tc[:addr])
-          behavioral.set_input(:din, tc[:din])
-          behavioral.set_input(:we, tc[:we])
-          behavioral.set_input(:clk, 0)
-          behavioral.propagate
-          behavioral.set_input(:clk, 1)
-          behavioral.propagate
+          behavior.set_input(:addr, tc[:addr])
+          behavior.set_input(:din, tc[:din])
+          behavior.set_input(:we, tc[:we])
+          behavior.set_input(:clk, 0)
+          behavior.propagate
+          behavior.set_input(:clk, 1)
+          behavior.propagate
 
           test_vectors << { inputs: tc }
-          expected_outputs << { dout: behavioral.get_output(:dout) }
+          expected_outputs << { dout: behavior.get_output(:dout) }
         end
 
         base_dir = File.join('tmp', 'iverilog', 'ram')
-        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+        result = NetlistHelper.run_structure_simulation(ir, test_vectors, base_dir: base_dir)
 
         expect(result[:success]).to be(true), result[:error]
 

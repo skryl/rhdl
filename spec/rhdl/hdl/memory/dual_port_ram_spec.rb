@@ -98,7 +98,7 @@ RSpec.describe RHDL::HDL::DualPortRAM do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::DualPortRAM.new('dpram') }
-    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'dpram') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'dpram') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('dpram.clk', 'dpram.we_a', 'dpram.we_b', 'dpram.addr_a', 'dpram.addr_b', 'dpram.din_a', 'dpram.din_b')
@@ -106,8 +106,8 @@ RSpec.describe RHDL::HDL::DualPortRAM do
       expect(ir.gates.length).to be >= 1
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module dpram')
       expect(verilog).to include('input clk')
       expect(verilog).to include('input we_a')
@@ -119,9 +119,9 @@ RSpec.describe RHDL::HDL::DualPortRAM do
     end
 
     context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation' do
+      it 'matches behavior simulation' do
         test_vectors = []
-        behavioral = RHDL::HDL::DualPortRAM.new
+        behavior = RHDL::HDL::DualPortRAM.new
 
         test_cases = [
           { addr_a: 0, din_a: 0xAB, we_a: 1, addr_b: 0, din_b: 0, we_b: 0 },  # write A
@@ -132,26 +132,26 @@ RSpec.describe RHDL::HDL::DualPortRAM do
 
         expected_outputs = []
         test_cases.each do |tc|
-          behavioral.set_input(:addr_a, tc[:addr_a])
-          behavioral.set_input(:din_a, tc[:din_a])
-          behavioral.set_input(:we_a, tc[:we_a])
-          behavioral.set_input(:addr_b, tc[:addr_b])
-          behavioral.set_input(:din_b, tc[:din_b])
-          behavioral.set_input(:we_b, tc[:we_b])
-          behavioral.set_input(:clk, 0)
-          behavioral.propagate
-          behavioral.set_input(:clk, 1)
-          behavioral.propagate
+          behavior.set_input(:addr_a, tc[:addr_a])
+          behavior.set_input(:din_a, tc[:din_a])
+          behavior.set_input(:we_a, tc[:we_a])
+          behavior.set_input(:addr_b, tc[:addr_b])
+          behavior.set_input(:din_b, tc[:din_b])
+          behavior.set_input(:we_b, tc[:we_b])
+          behavior.set_input(:clk, 0)
+          behavior.propagate
+          behavior.set_input(:clk, 1)
+          behavior.propagate
 
           test_vectors << { inputs: tc }
           expected_outputs << {
-            dout_a: behavioral.get_output(:dout_a),
-            dout_b: behavioral.get_output(:dout_b)
+            dout_a: behavior.get_output(:dout_a),
+            dout_b: behavior.get_output(:dout_b)
           }
         end
 
         base_dir = File.join('tmp', 'iverilog', 'dpram')
-        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+        result = NetlistHelper.run_structure_simulation(ir, test_vectors, base_dir: base_dir)
 
         expect(result[:success]).to be(true), result[:error]
 
