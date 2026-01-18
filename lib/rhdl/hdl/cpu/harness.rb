@@ -1,9 +1,10 @@
-# CPU HDL Module
-# Gate-level CPU implementation
+# CPU Harness - behavioral simulation wrapper
+# Connects CPU to memory and provides simulation interface
 
 require_relative 'instruction_decoder'
 require_relative 'accumulator'
 require_relative 'datapath'
+require_relative 'cpu'
 
 module RHDL
   module HDL
@@ -29,33 +30,22 @@ module RHDL
         end
       end
 
-      # CPU Harness with behavioral simulation logic
-      # Provides unified interface for running CPU simulations
-      class Harness < SimComponent
+      # CPU Harness - connects CPU to memory for behavioral simulation
+      class Harness
         attr_reader :memory, :halted, :cycle_count
+        attr_reader :cpu, :ram
 
         def initialize(external_memory = nil, name: nil, memory_contents: [])
           @cycle_count = 0
           @halted = false
-          @prev_clk = 0
+          @zero_flag = 0
 
-          # Handle name parameter (can be first positional arg for backward compat)
-          name = external_memory if external_memory.is_a?(String)
-          super(name)
-
-          # Create internal components
-          @pc_reg = ProgramCounter.new("pc", width: 16)
-          @acc_reg = Register.new("acc", width: 8)
-          @alu = ALU.new("alu", width: 8)
-          @decoder = InstructionDecoder.new("decoder")
+          # Create CPU and RAM - the only two components
+          @cpu = CPU.new(name || "cpu")
           @ram = RAM.new("mem", data_width: 8, addr_width: 16)
-          @sp_reg = StackPointer.new("sp", width: 8, initial: 0xFF)
-
-          # Memory interface
           @memory = Memory.new(@ram)
 
-          # Internal state
-          @zero_flag = 0
+          # Internal execution state
           @instruction = 0
           @operand = 0
 
@@ -75,33 +65,24 @@ module RHDL
           reset
         end
 
-        def setup_ports
-          input :clk
-          input :rst
-          output :pc_out, width: 16
-          output :acc_out, width: 8
-          output :zero_flag
-          output :halted
-        end
-
-        # Simple accessors matching expected interface
+        # Accessors - delegate to CPU components
         def acc
-          @acc_reg.get_output(:q)
+          @cpu.acc.get_output(:q)
         end
 
         def pc
-          @pc_reg.get_output(:q)
+          @cpu.pc.get_output(:q)
         end
 
         def sp
-          @sp_reg.get_output(:q)
+          @cpu.sp.get_output(:q)
         end
 
         def zero_flag
           @zero_flag == 1
         end
 
-        # Legacy accessors (for backward compatibility)
+        # Legacy accessors
         def acc_value
           acc
         end
@@ -118,79 +99,41 @@ module RHDL
           @zero_flag
         end
 
-        def rising_edge?
-          prev = @prev_clk
-          @prev_clk = in_val(:clk)
-          prev == 0 && @prev_clk == 1
-        end
-
-        def propagate
-          if in_val(:rst) == 1
-            reset_cpu
-            return
-          end
-
-          return if @halted
-
-          if rising_edge?
-            execute_cycle
-            @cycle_count += 1
-          end
-
-          out_set(:pc_out, pc)
-          out_set(:acc_out, acc)
-          out_set(:zero_flag, @zero_flag)
-          out_set(:halted, @halted ? 1 : 0)
-        end
-
+        # Simulation control
         def reset
-          set_input(:clk, 0)
-          set_input(:rst, 1)
-          propagate
-          set_input(:clk, 1)
-          propagate
-          set_input(:clk, 0)
-          propagate
-          set_input(:rst, 0)
-          propagate
-        end
-
-        def reset_cpu
           @halted = false
           @cycle_count = 0
           @zero_flag = 0
           @instruction = 0
           @operand = 0
-          @prev_clk = 0
 
-          @pc_reg.instance_variable_set(:@state, 0)
-          @pc_reg.set_input(:rst, 0)
-          @pc_reg.set_input(:en, 0)
-          @pc_reg.set_input(:load, 0)
+          # Reset CPU components
+          @cpu.pc.instance_variable_set(:@state, 0)
+          @cpu.pc.set_input(:rst, 0)
+          @cpu.pc.set_input(:en, 0)
+          @cpu.pc.set_input(:load, 0)
 
-          @acc_reg.instance_variable_set(:@state, 0)
-          @acc_reg.set_input(:rst, 0)
-          @acc_reg.set_input(:en, 0)
+          @cpu.acc.instance_variable_set(:@state, 0)
+          @cpu.acc.set_input(:rst, 0)
+          @cpu.acc.set_input(:en, 0)
 
-          @sp_reg.instance_variable_set(:@state, 0xFF)
-          @sp_reg.set_input(:rst, 0)
-          @sp_reg.set_input(:push, 0)
-          @sp_reg.set_input(:pop, 0)
+          @cpu.sp.instance_variable_set(:@state, 0xFF)
+          @cpu.sp.set_input(:rst, 0)
+          @cpu.sp.set_input(:push, 0)
+          @cpu.sp.set_input(:pop, 0)
 
-          @pc_reg.propagate
-          @acc_reg.propagate
-          @sp_reg.propagate
+          @cpu.pc.propagate
+          @cpu.acc.propagate
+          @cpu.sp.propagate
         end
 
         def step
-          set_input(:clk, 0)
-          propagate
-          set_input(:clk, 1)
-          propagate
+          return if @halted
+          execute_cycle
+          @cycle_count += 1
         end
 
         def run(max_cycles = 10000)
-          set_input(:rst, 0)
           cycles = 0
           until @halted || cycles >= max_cycles
             step
@@ -222,15 +165,18 @@ module RHDL
         def execute_cycle
           pc_val = pc
 
+          # Fetch instruction from memory
           @instruction = @ram.read_mem(pc_val)
           operand_nibble = @instruction & 0x0F
 
-          @decoder.set_input(:instruction, @instruction)
-          @decoder.set_input(:zero_flag, @zero_flag)
-          @decoder.propagate
+          # Decode instruction via CPU's decoder
+          @cpu.decoder.set_input(:instruction, @instruction)
+          @cpu.decoder.set_input(:zero_flag, @zero_flag)
+          @cpu.decoder.propagate
 
-          instr_length = @decoder.get_output(:instr_length)
+          instr_length = @cpu.decoder.get_output(:instr_length)
 
+          # Fetch operand bytes from memory
           @operand = case instr_length
           when 2
             @ram.read_mem(pc_val + 1)
@@ -242,30 +188,34 @@ module RHDL
 
           acc_val = acc
 
-          if @decoder.get_output(:halt) == 1
+          # Check for halt
+          if @cpu.decoder.get_output(:halt) == 1
             @halted = true
             return
           end
 
+          # Calculate new PC
           new_pc = pc_val + instr_length
-          pc_src = @decoder.get_output(:pc_src)
+          pc_src = @cpu.decoder.get_output(:pc_src)
 
-          if @decoder.get_output(:jump) == 1 || @decoder.get_output(:branch) == 1
+          if @cpu.decoder.get_output(:jump) == 1 || @cpu.decoder.get_output(:branch) == 1
             case pc_src
             when 1 then new_pc = @operand & 0xFF
             when 2 then new_pc = @operand & 0xFFFF
             end
           end
 
-          if @decoder.get_output(:call) == 1
+          # Handle CALL - push return address to stack
+          if @cpu.decoder.get_output(:call) == 1
             sp_val = sp
             @ram.write_mem(sp_val, (pc_val + instr_length) & 0xFF)
             clock_sp(push: true)
             new_pc = @operand & 0xFF
           end
 
-          if @decoder.get_output(:ret) == 1
-            if @sp_reg.get_output(:empty) == 1
+          # Handle RET - pop return address from stack
+          if @cpu.decoder.get_output(:ret) == 1
+            if @cpu.sp.get_output(:empty) == 1
               @halted = true
               return
             end
@@ -274,35 +224,41 @@ module RHDL
             new_pc = @ram.read_mem(sp_val)
           end
 
-          if @decoder.get_output(:reg_write) == 1
-            if @decoder.get_output(:alu_src) == 1
+          # ALU operations
+          if @cpu.decoder.get_output(:reg_write) == 1
+            if @cpu.decoder.get_output(:alu_src) == 1
+              # Immediate load
               result = @operand & 0xFF
             else
+              # Memory operand through CPU's ALU
               mem_operand = @ram.read_mem(@operand & 0xFF)
-              @alu.set_input(:a, acc_val)
-              @alu.set_input(:b, mem_operand)
-              @alu.set_input(:op, @decoder.get_output(:alu_op))
-              @alu.set_input(:cin, 0)
-              @alu.propagate
-              result = @alu.get_output(:result)
+              @cpu.alu.set_input(:a, acc_val)
+              @cpu.alu.set_input(:b, mem_operand)
+              @cpu.alu.set_input(:op, @cpu.decoder.get_output(:alu_op))
+              @cpu.alu.set_input(:cin, 0)
+              @cpu.alu.propagate
+              result = @cpu.alu.get_output(:result)
             end
 
-            clock_register(@acc_reg, result)
+            clock_register(@cpu.acc, result)
             @zero_flag = (result == 0) ? 1 : 0
           end
 
-          if @instruction == 0xF3  # CMP
+          # CMP - compare without storing
+          if @instruction == 0xF3
             mem_val = @ram.read_mem(@operand & 0xFF)
             result = (acc_val - mem_val) & 0xFF
             @zero_flag = (result == 0) ? 1 : 0
           end
 
-          if @decoder.get_output(:mem_write) == 1
+          # Memory write (STA)
+          if @cpu.decoder.get_output(:mem_write) == 1
             addr = get_store_address
             @ram.write_mem(addr, acc_val)
           end
 
-          clock_register(@pc_reg, new_pc, load: true)
+          # Update PC
+          clock_register(@cpu.pc, new_pc, load: true)
         end
 
         def get_store_address
@@ -337,14 +293,14 @@ module RHDL
         end
 
         def clock_sp(push: false, pop: false)
-          @sp_reg.set_input(:push, push ? 1 : 0)
-          @sp_reg.set_input(:pop, pop ? 1 : 0)
-          @sp_reg.set_input(:clk, 0)
-          @sp_reg.propagate
-          @sp_reg.set_input(:clk, 1)
-          @sp_reg.propagate
-          @sp_reg.set_input(:push, 0)
-          @sp_reg.set_input(:pop, 0)
+          @cpu.sp.set_input(:push, push ? 1 : 0)
+          @cpu.sp.set_input(:pop, pop ? 1 : 0)
+          @cpu.sp.set_input(:clk, 0)
+          @cpu.sp.propagate
+          @cpu.sp.set_input(:clk, 1)
+          @cpu.sp.propagate
+          @cpu.sp.set_input(:push, 0)
+          @cpu.sp.set_input(:pop, 0)
         end
       end
     end
