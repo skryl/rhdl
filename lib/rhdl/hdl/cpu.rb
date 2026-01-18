@@ -13,10 +13,6 @@ module RHDL
     module CPU
       # Full CPU wrapper with memory interface
       class CPU < Datapath
-        def initialize(name = nil)
-          super(name)
-        end
-
         # Convenience methods matching behavior CPU interface
         def reset
           set_input(:rst, 1)
