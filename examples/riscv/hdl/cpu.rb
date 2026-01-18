@@ -33,54 +33,52 @@ module RISCV
     port_output :mem_re
 
     # Internal signals
-    port_signal :inst_addr, width: 32
-    port_signal :inst_data, width: 32
-    port_signal :data_addr, width: 32
-    port_signal :data_wdata, width: 32
-    port_signal :data_rdata, width: 32
-    port_signal :data_we
-    port_signal :data_re
-    port_signal :data_funct3, width: 3
+    wire :inst_addr, width: 32
+    wire :inst_data, width: 32
+    wire :data_addr, width: 32
+    wire :data_wdata, width: 32
+    wire :data_rdata, width: 32
+    wire :data_we
+    wire :data_re
+    wire :data_funct3, width: 3
 
-    # Structure DSL
-    structure do
-      instance :datapath, Datapath
-      instance :inst_mem, Memory
-      instance :data_mem, Memory
+    # Component instances
+    instance :datapath, Datapath
+    instance :inst_mem, Memory
+    instance :data_mem, Memory
 
-      # Clock and reset
-      connect :clk => [[:datapath, :clk], [:inst_mem, :clk], [:data_mem, :clk]]
-      connect :rst => [[:datapath, :rst], [:inst_mem, :rst], [:data_mem, :rst]]
+    # Clock and reset
+    port :clk => [[:datapath, :clk], [:inst_mem, :clk], [:data_mem, :clk]]
+    port :rst => [[:datapath, :rst], [:inst_mem, :rst], [:data_mem, :rst]]
 
-      # Instruction memory connections
-      connect [:datapath, :inst_addr] => :inst_addr
-      connect :inst_addr => [:inst_mem, :addr]
-      connect [:inst_mem, :read_data] => :inst_data
-      connect :inst_data => [:datapath, :inst_data]
+    # Instruction memory connections
+    port [:datapath, :inst_addr] => :inst_addr
+    port :inst_addr => [:inst_mem, :addr]
+    port [:inst_mem, :read_data] => :inst_data
+    port :inst_data => [:datapath, :inst_data]
 
-      # Data memory connections
-      connect [:datapath, :data_addr] => :data_addr
-      connect [:datapath, :data_wdata] => :data_wdata
-      connect [:datapath, :data_we] => :data_we
-      connect [:datapath, :data_re] => :data_re
-      connect [:datapath, :data_funct3] => :data_funct3
+    # Data memory connections
+    port [:datapath, :data_addr] => :data_addr
+    port [:datapath, :data_wdata] => :data_wdata
+    port [:datapath, :data_we] => :data_we
+    port [:datapath, :data_re] => :data_re
+    port [:datapath, :data_funct3] => :data_funct3
 
-      connect :data_addr => [:data_mem, :addr]
-      connect :data_wdata => [:data_mem, :write_data]
-      connect :data_we => [:data_mem, :mem_write]
-      connect :data_re => [:data_mem, :mem_read]
-      connect :data_funct3 => [:data_mem, :funct3]
-      connect [:data_mem, :read_data] => :data_rdata
-      connect :data_rdata => [:datapath, :data_rdata]
+    port :data_addr => [:data_mem, :addr]
+    port :data_wdata => [:data_mem, :write_data]
+    port :data_we => [:data_mem, :mem_write]
+    port :data_re => [:data_mem, :mem_read]
+    port :data_funct3 => [:data_mem, :funct3]
+    port [:data_mem, :read_data] => :data_rdata
+    port :data_rdata => [:datapath, :data_rdata]
 
-      # Debug outputs from datapath
-      connect [:datapath, :debug_pc] => :pc
-      connect [:datapath, :debug_inst] => :inst
-      connect [:datapath, :debug_x1] => :x1
-      connect [:datapath, :debug_x2] => :x2
-      connect [:datapath, :debug_x10] => :x10
-      connect [:datapath, :debug_x11] => :x11
-    end
+    # Debug outputs from datapath
+    port [:datapath, :debug_pc] => :pc
+    port [:datapath, :debug_inst] => :inst
+    port [:datapath, :debug_x1] => :x1
+    port [:datapath, :debug_x2] => :x2
+    port [:datapath, :debug_x10] => :x10
+    port [:datapath, :debug_x11] => :x11
 
     def initialize(name = nil, mem_size: Memory::DEFAULT_SIZE)
       @mem_size = mem_size

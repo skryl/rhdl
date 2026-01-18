@@ -285,37 +285,6 @@ module RHDL
           parts.join("\n\n")
         end
 
-        private
-
-        def add_port_connection(signal, dest)
-          inst_name, port_name = dest
-          inst_def = _instance_defs.find { |i| i[:name] == inst_name }
-          return unless inst_def
-
-          inst_def[:connections][port_name] = signal
-        end
-
-        def add_output_connection(source, signal)
-          inst_name, port_name = source
-          inst_def = _instance_defs.find { |i| i[:name] == inst_name }
-          return unless inst_def
-
-          inst_def[:connections][port_name] = signal
-        end
-
-        # Generate IR assigns and wire declarations from the behavior block
-        # Used by the export/lowering system for HDL generation
-        def behavior_to_ir_assigns
-          return { assigns: [], wires: [] } unless behavior_defined?
-
-          ctx = BehaviorSynthContext.new(self)
-          ctx.evaluate(&@_behavior_block.block)
-          {
-            assigns: ctx.to_ir_assigns,
-            wires: ctx.wire_declarations
-          }
-        end
-
         # Generate IR ModuleDef from the component
         def to_ir(top_name: nil)
           name = top_name || self.name.split('::').last.underscore
@@ -381,6 +350,37 @@ module RHDL
               parameters: inst_def[:parameters]
             )
           end
+        end
+
+        private
+
+        def add_port_connection(signal, dest)
+          inst_name, port_name = dest
+          inst_def = _instance_defs.find { |i| i[:name] == inst_name }
+          return unless inst_def
+
+          inst_def[:connections][port_name] = signal
+        end
+
+        def add_output_connection(source, signal)
+          inst_name, port_name = source
+          inst_def = _instance_defs.find { |i| i[:name] == inst_name }
+          return unless inst_def
+
+          inst_def[:connections][port_name] = signal
+        end
+
+        # Generate IR assigns and wire declarations from the behavior block
+        # Used by the export/lowering system for HDL generation
+        def behavior_to_ir_assigns
+          return { assigns: [], wires: [] } unless behavior_defined?
+
+          ctx = BehaviorSynthContext.new(self)
+          ctx.evaluate(&@_behavior_block.block)
+          {
+            assigns: ctx.to_ir_assigns,
+            wires: ctx.wire_declarations
+          }
         end
       end
 
