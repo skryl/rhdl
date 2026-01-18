@@ -48,6 +48,58 @@ RSpec.describe RHDL::HDL::Mux4 do
       expect(verilog).to include('module mux4')
       expect(verilog).to include('input [1:0] sel')
     end
+
+    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches RHDL simulation' do
+        verilog = RHDL::HDL::Mux4.to_verilog
+        behavioral = RHDL::HDL::Mux4.new(nil, width: 1)
+
+        inputs = { a: 1, b: 1, c: 1, d: 1, sel: 2 }
+        outputs = { y: 1 }
+
+        vectors = []
+        test_cases = [
+          { a: 1, b: 0, c: 0, d: 0, sel: 0 },
+          { a: 0, b: 1, c: 0, d: 0, sel: 1 },
+          { a: 0, b: 0, c: 1, d: 0, sel: 2 },
+          { a: 0, b: 0, c: 0, d: 1, sel: 3 },
+          { a: 1, b: 1, c: 1, d: 1, sel: 0 },
+          { a: 1, b: 1, c: 1, d: 1, sel: 1 },
+          { a: 1, b: 1, c: 1, d: 1, sel: 2 },
+          { a: 1, b: 1, c: 1, d: 1, sel: 3 },
+          { a: 0, b: 0, c: 0, d: 0, sel: 2 }
+        ]
+
+        test_cases.each do |tc|
+          behavioral.set_input(:a, tc[:a])
+          behavioral.set_input(:b, tc[:b])
+          behavioral.set_input(:c, tc[:c])
+          behavioral.set_input(:d, tc[:d])
+          behavioral.set_input(:sel, tc[:sel])
+          behavioral.propagate
+          vectors << {
+            inputs: tc,
+            expected: { y: behavioral.get_output(:y) }
+          }
+        end
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 'mux4',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/mux4'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx][:y]).to eq(vec[:expected][:y]),
+            "Vector #{idx}: expected y=#{vec[:expected][:y]}, got #{result[:results][idx][:y]}"
+        end
+      end
+    end
   end
 
   describe 'gate-level netlist' do
