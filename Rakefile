@@ -988,12 +988,12 @@ task :regenerate => ['clean_all', 'generate_all']
 # =============================================================================
 
 namespace :apple2 do
-  ROMS_DIR = File.expand_path('examples/mos6502/roms', __dir__)
+  ROMS_DIR = File.expand_path('examples/mos6502/software/roms', __dir__)
   ROM_OUTPUT_DIR = File.expand_path('export/roms', __dir__)
 
   desc "Assemble the mini monitor ROM"
   task :build do
-    require_relative 'examples/mos6502/assembler'
+    require_relative 'examples/mos6502/utilities/assembler'
 
     puts "Apple II ROM Assembler"
     puts "=" * 50
@@ -1051,7 +1051,7 @@ namespace :apple2 do
   desc "Run the Apple II emulator with the mini monitor"
   task :run => :build do
     rom_file = File.join(ROM_OUTPUT_DIR, 'mini_monitor.bin')
-    exec "ruby", "bin/apple2", "-r", rom_file, "--rom-address", "F800", "-d"
+    exec "ruby", "examples/mos6502/bin/apple2", "-r", rom_file, "--rom-address", "F800", "-d"
   end
 
   desc "Run with AppleIIGo public domain ROM"
@@ -1062,12 +1062,12 @@ namespace :apple2 do
       puts "Download from: https://a2go.applearchives.com/roms/"
       exit 1
     end
-    exec "ruby", "bin/apple2", "-r", rom_file, "--rom-address", "D000", "-d"
+    exec "ruby", "examples/mos6502/bin/apple2", "-r", rom_file, "--rom-address", "D000", "-d"
   end
 
   desc "Run the Apple II emulator demo (no ROM needed)"
   task :demo do
-    exec "ruby", "bin/apple2", "--demo", "-d"
+    exec "ruby", "examples/mos6502/bin/apple2", "--demo", "-d"
   end
 
   desc "Clean ROM output files"
