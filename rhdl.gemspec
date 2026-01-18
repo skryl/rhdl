@@ -26,12 +26,12 @@ Gem::Specification.new do |spec|
 
   # Specify which files should be added to the gem when it is released.
   spec.files = Dir.chdir(__dir__) do
-    Dir["lib/**/*", "docs/**/*", "examples/**/*", "bin/rhdl", "LICENSE", "README.md", "CHANGELOG.md"].reject do |f|
+    Dir["lib/**/*", "docs/**/*", "examples/**/*", "exe/*", "LICENSE", "README.md", "CHANGELOG.md"].reject do |f|
       File.directory?(f) || f.start_with?(".")
     end
   end
 
-  spec.bindir = "bin"
+  spec.bindir = "exe"
   spec.executables = ["rhdl"]
   spec.require_paths = ["lib"]
 
