@@ -251,11 +251,30 @@ module RHDL
 
       # Instance methods for simulation
       included do
-        # Initialize memory arrays
+        # Initialize memory arrays and load contents if provided
         def initialize_memories
           @_memory_arrays = {}
           self.class._memories.each do |name, mem_def|
             @_memory_arrays[name] = mem_def.initial_values.dup
+          end
+
+          # Load contents if @contents parameter is set (from parameter DSL)
+          load_initial_contents if instance_variable_defined?(:@contents) && !@contents.empty?
+        end
+
+        # Load initial contents into the first memory (convention for ROM/RAM)
+        def load_initial_contents
+          return unless @_memory_arrays && !@_memory_arrays.empty?
+
+          # Find the first memory and its width
+          mem_name, _mem_array = @_memory_arrays.first
+          mem_def = self.class._memories[mem_name]
+          width = mem_def&.width || 8
+          depth = mem_def&.depth || 256
+
+          @contents.each_with_index do |v, i|
+            break if i >= depth
+            mem_write(mem_name, i, v, width)
           end
         end
 
@@ -289,14 +308,8 @@ module RHDL
         end
 
         # Override initialize to set up memories
-        alias_method :original_initialize, :initialize rescue nil
-
-        def initialize(name = nil, *args, **kwargs, &block)
-          if respond_to?(:original_initialize)
-            original_initialize(name, *args, **kwargs, &block)
-          else
-            super(name)
-          end
+        def initialize(name = nil, **kwargs)
+          super
           initialize_memories
         end
 
