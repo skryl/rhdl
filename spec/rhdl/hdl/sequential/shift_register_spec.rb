@@ -61,6 +61,66 @@ RSpec.describe RHDL::HDL::ShiftRegister do
       expect(verilog).to include('input [7:0] d')
       expect(verilog).to match(/output.*\[7:0\].*q/)
     end
+
+    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches RHDL simulation' do
+        verilog = RHDL::HDL::ShiftRegister.to_verilog
+        behavioral = RHDL::HDL::ShiftRegister.new
+        behavioral.set_input(:rst, 0)
+        behavioral.set_input(:en, 1)
+        behavioral.set_input(:d_in, 0)
+
+        inputs = { d_in: 1, clk: 1, rst: 1, en: 1, dir: 1, load: 1, d: 8 }
+        outputs = { q: 8, d_out: 1 }
+
+        vectors = []
+        # Start with reset cycle to initialize shift register (avoids X propagation)
+        test_cases = [
+          { d: 0, d_in: 0, rst: 1, en: 1, load: 0, dir: 1 },           # reset (initialize to 0)
+          { d: 0b00001111, d_in: 0, rst: 0, en: 1, load: 1, dir: 1 },  # load
+          { d: 0, d_in: 0, rst: 0, en: 1, load: 0, dir: 1 },           # shift left
+          { d: 0, d_in: 0, rst: 0, en: 1, load: 0, dir: 1 },           # shift left
+          { d: 0, d_in: 0, rst: 0, en: 1, load: 0, dir: 0 },           # shift right
+          { d: 0, d_in: 1, rst: 0, en: 1, load: 0, dir: 1 },           # shift left with d_in=1
+        ]
+
+        test_cases.each do |tc|
+          behavioral.set_input(:d, tc[:d])
+          behavioral.set_input(:d_in, tc[:d_in])
+          behavioral.set_input(:rst, tc[:rst])
+          behavioral.set_input(:en, tc[:en])
+          behavioral.set_input(:load, tc[:load])
+          behavioral.set_input(:dir, tc[:dir])
+          behavioral.set_input(:clk, 0)
+          behavioral.propagate
+          behavioral.set_input(:clk, 1)
+          behavioral.propagate
+          vectors << {
+            inputs: { d: tc[:d], d_in: tc[:d_in], rst: tc[:rst], en: tc[:en], load: tc[:load], dir: tc[:dir] },
+            expected: { q: behavioral.get_output(:q), d_out: behavioral.get_output(:d_out) }
+          }
+        end
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 'shift_register',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/shift_register',
+          has_clock: true
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx][:q]).to eq(vec[:expected][:q]),
+            "Vector #{idx}: expected q=#{vec[:expected][:q]}, got #{result[:results][idx][:q]}"
+          expect(result[:results][idx][:d_out]).to eq(vec[:expected][:d_out]),
+            "Vector #{idx}: expected d_out=#{vec[:expected][:d_out]}, got #{result[:results][idx][:d_out]}"
+        end
+      end
+    end
   end
 
   describe 'gate-level netlist' do

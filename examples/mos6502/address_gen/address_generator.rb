@@ -95,8 +95,12 @@ module MOS6502
       }, default: 0)
     end
 
+    def self.verilog_module_name
+      'mos6502_address_generator'
+    end
+
     def self.to_verilog
-      RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502_address_generator'))
+      RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
     end
   end
 end

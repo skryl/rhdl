@@ -26,7 +26,7 @@ RSpec.describe MOS6502::Datapath do
   describe 'synthesis' do
     it 'generates valid Verilog' do
       verilog = described_class.to_verilog
-      expect(verilog).to include('module datapath')
+      expect(verilog).to include('module mos6502_datapath')
       expect(verilog).to include('input clk')
       expect(verilog).to include('input rst')
       expect(verilog).to include('output [15:0] addr')
@@ -40,7 +40,8 @@ RSpec.describe MOS6502::Datapath do
 
     context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
       it 'behavioral Verilog compiles and runs' do
-        verilog = described_class.to_verilog
+        # Use to_verilog_hierarchy to include all sub-module definitions
+        verilog = described_class.to_verilog_hierarchy
 
         inputs = { clk: 1, rst: 1, rdy: 1, data_in: 8 }
         outputs = { addr: 16, data_out: 8, rw: 1, reg_a: 8, reg_x: 8, reg_y: 8, reg_pc: 16 }
@@ -54,7 +55,7 @@ RSpec.describe MOS6502::Datapath do
 
         result = NetlistHelper.run_behavioral_simulation(
           verilog,
-          module_name: 'datapath',
+          module_name: 'mos6502_datapath',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,

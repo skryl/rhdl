@@ -40,6 +40,59 @@ RSpec.describe RHDL::HDL::AddSub do
       expect(verilog).to include('input [7:0] a')
       expect(verilog).to include('output [7:0] result')
     end
+
+    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches RHDL simulation' do
+        verilog = RHDL::HDL::AddSub.to_verilog
+        behavioral = RHDL::HDL::AddSub.new(nil, width: 8)
+
+        inputs = { a: 8, b: 8, sub: 1 }
+        outputs = { result: 8, cout: 1, overflow: 1, zero: 1, negative: 1 }
+
+        vectors = []
+        test_cases = [
+          { a: 100, b: 50, sub: 0 },  # 100 + 50 = 150
+          { a: 100, b: 50, sub: 1 },  # 100 - 50 = 50
+          { a: 200, b: 100, sub: 0 }, # 200 + 100 = 44 (overflow)
+          { a: 50, b: 100, sub: 1 },  # 50 - 100 = 206 (underflow)
+          { a: 0, b: 0, sub: 0 },     # zero result
+          { a: 128, b: 0, sub: 0 },   # negative result (MSB set)
+        ]
+
+        test_cases.each do |tc|
+          behavioral.set_input(:a, tc[:a])
+          behavioral.set_input(:b, tc[:b])
+          behavioral.set_input(:sub, tc[:sub])
+          behavioral.propagate
+          vectors << {
+            inputs: tc,
+            expected: {
+              result: behavioral.get_output(:result),
+              zero: behavioral.get_output(:zero),
+              negative: behavioral.get_output(:negative)
+            }
+          }
+        end
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 'add_sub',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/add_sub'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx][:result]).to eq(vec[:expected][:result]),
+            "Vector #{idx}: expected result=#{vec[:expected][:result]}, got #{result[:results][idx][:result]}"
+          expect(result[:results][idx][:zero]).to eq(vec[:expected][:zero]),
+            "Vector #{idx}: expected zero=#{vec[:expected][:zero]}, got #{result[:results][idx][:zero]}"
+        end
+      end
+    end
   end
 
   describe 'gate-level netlist' do

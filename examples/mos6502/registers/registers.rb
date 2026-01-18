@@ -40,9 +40,12 @@ module MOS6502
     def write_x(v); write_reg(:x, v & 0xFF); end
     def write_y(v); write_reg(:y, v & 0xFF); end
 
-    # Override to_verilog to use the proper module name
+    def self.verilog_module_name
+      'mos6502_registers'
+    end
+
     def self.to_verilog
-      RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502_registers'))
+      RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
     end
   end
 end

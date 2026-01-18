@@ -44,8 +44,12 @@ module MOS6502
     def read_pc; read_reg(:pc) || 0xFFFC; end
     def write_pc(v); write_reg(:pc, v & 0xFFFF); end
 
+    def self.verilog_module_name
+      'mos6502_program_counter'
+    end
+
     def self.to_verilog
-      RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502_program_counter'))
+      RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
     end
   end
 end

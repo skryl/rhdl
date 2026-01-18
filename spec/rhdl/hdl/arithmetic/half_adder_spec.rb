@@ -50,6 +50,55 @@ RSpec.describe RHDL::HDL::HalfAdder do
       expect(verilog).to include('assign sum')
       expect(verilog).to include('assign cout')
     end
+
+    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches RHDL simulation' do
+        verilog = RHDL::HDL::HalfAdder.to_verilog
+        behavioral = RHDL::HDL::HalfAdder.new
+
+        inputs = { a: 1, b: 1 }
+        outputs = { sum: 1, cout: 1 }
+
+        vectors = []
+        test_cases = [
+          { a: 0, b: 0 },
+          { a: 0, b: 1 },
+          { a: 1, b: 0 },
+          { a: 1, b: 1 },
+        ]
+
+        test_cases.each do |tc|
+          behavioral.set_input(:a, tc[:a])
+          behavioral.set_input(:b, tc[:b])
+          behavioral.propagate
+          vectors << {
+            inputs: tc,
+            expected: {
+              sum: behavioral.get_output(:sum),
+              cout: behavioral.get_output(:cout)
+            }
+          }
+        end
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 'half_adder',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/half_adder'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx][:sum]).to eq(vec[:expected][:sum]),
+            "Vector #{idx}: expected sum=#{vec[:expected][:sum]}, got #{result[:results][idx][:sum]}"
+          expect(result[:results][idx][:cout]).to eq(vec[:expected][:cout]),
+            "Vector #{idx}: expected cout=#{vec[:expected][:cout]}, got #{result[:results][idx][:cout]}"
+        end
+      end
+    end
   end
 
   describe 'gate-level netlist' do
