@@ -1,4 +1,4 @@
-# Synthesizable CPU Datapath - structure component with instances
+# Synthesizable CPU Datapath - hierarchical component with instances
 # Generates Verilog module instantiation and wiring
 
 module RHDL
@@ -42,44 +42,42 @@ module RHDL
         port_signal :ret_signal
         port_signal :instr_length, width: 2
 
-        structure do
-          # Instruction Decoder
-          instance :decoder, InstructionDecoder
-          connect :instruction => [:decoder, :instruction]
-          connect :zero_flag => [:decoder, :zero_flag]
-          connect [:decoder, :alu_op] => :alu_op
-          connect [:decoder, :alu_src] => :alu_src
-          connect [:decoder, :reg_write] => :reg_write
-          connect [:decoder, :mem_read] => :decoder_mem_read
-          connect [:decoder, :mem_write] => :decoder_mem_write
-          connect [:decoder, :branch] => :branch
-          connect [:decoder, :jump] => :jump
-          connect [:decoder, :pc_src] => :pc_src
-          connect [:decoder, :halt] => :halt_signal
-          connect [:decoder, :call] => :call_signal
-          connect [:decoder, :ret] => :ret_signal
-          connect [:decoder, :instr_length] => :instr_length
+        # Instruction Decoder
+        instance :decoder, InstructionDecoder
+        wire :instruction => [:decoder, :instruction]
+        wire :zero_flag => [:decoder, :zero_flag]
+        wire [:decoder, :alu_op] => :alu_op
+        wire [:decoder, :alu_src] => :alu_src
+        wire [:decoder, :reg_write] => :reg_write
+        wire [:decoder, :mem_read] => :decoder_mem_read
+        wire [:decoder, :mem_write] => :decoder_mem_write
+        wire [:decoder, :branch] => :branch
+        wire [:decoder, :jump] => :jump
+        wire [:decoder, :pc_src] => :pc_src
+        wire [:decoder, :halt] => :halt_signal
+        wire [:decoder, :call] => :call_signal
+        wire [:decoder, :ret] => :ret_signal
+        wire [:decoder, :instr_length] => :instr_length
 
-          # ALU
-          instance :alu, ALU, width: 8
-          connect :alu_a => [:alu, :a]
-          connect :alu_b => [:alu, :b]
-          connect :alu_op => [:alu, :op]
-          connect [:alu, :result] => :alu_result
-          connect [:alu, :zero] => :alu_zero
+        # ALU
+        instance :alu, ALU, width: 8
+        wire :alu_a => [:alu, :a]
+        wire :alu_b => [:alu, :b]
+        wire :alu_op => [:alu, :op]
+        wire [:alu, :result] => :alu_result
+        wire [:alu, :zero] => :alu_zero
 
-          # Program Counter (16-bit)
-          instance :pc, ProgramCounter, width: 16
-          connect :clk => [:pc, :clk]
-          connect :rst => [:pc, :rst]
-          connect [:pc, :q] => :pc_out
+        # Program Counter (16-bit)
+        instance :pc, ProgramCounter, width: 16
+        wire :clk => [:pc, :clk]
+        wire :rst => [:pc, :rst]
+        wire [:pc, :q] => :pc_out
 
-          # Accumulator Register (8-bit)
-          instance :acc, Register, width: 8
-          connect :clk => [:acc, :clk]
-          connect :rst => [:acc, :rst]
-          connect [:acc, :q] => :acc_out
-        end
+        # Accumulator Register (8-bit)
+        instance :acc, Register, width: 8
+        wire :clk => [:acc, :clk]
+        wire :rst => [:acc, :rst]
+        wire [:acc, :q] => :acc_out
       end
     end
   end

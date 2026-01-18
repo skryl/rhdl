@@ -6,11 +6,14 @@ module RHDL
   module HDL
     # Base class for all HDL components with simulation support
     #
-    # Components can define their behavior in two ways:
-    # 1. Override the `propagate` method (traditional approach)
-    # 2. Use the `behavior` class method (unified simulation/synthesis)
+    # Components are defined using class-level declarations:
+    # - port_input/port_output: Define I/O ports
+    # - port_signal: Define internal signals
+    # - instance: Instantiate sub-components
+    # - wire: Connect signals to sub-component ports
+    # - behavior: Define combinational logic
     #
-    # Example with behavior block:
+    # @example Simple combinational component
     #   class MyAnd < SimComponent
     #     port_input :a
     #     port_input :b
@@ -19,6 +22,21 @@ module RHDL
     #     behavior do
     #       y <= a & b
     #     end
+    #   end
+    #
+    # @example Hierarchical component with sub-components
+    #   class MyDatapath < SimComponent
+    #     port_input :a, width: 8
+    #     port_input :b, width: 8
+    #     port_output :result, width: 8
+    #
+    #     instance :alu, ALU, width: 8
+    #     instance :reg, Register, width: 8
+    #
+    #     wire :a => [:alu, :a]
+    #     wire :b => [:alu, :b]
+    #     wire [:alu, :result] => [:reg, :d]
+    #     wire [:reg, :q] => :result
     #   end
     #
     class SimComponent
@@ -79,6 +97,66 @@ module RHDL
           _signal_defs << { name: name, width: width }
         end
 
+        # Define a sub-component instance (class-level)
+        #
+        # @param name [Symbol] Instance name
+        # @param component_class [Class] Component class to instantiate
+        # @param params [Hash] Parameters to pass to the component
+        #
+        # @example
+        #   class MyDatapath < SimComponent
+        #     port_input :a, width: 8
+        #     port_output :result, width: 8
+        #
+        #     instance :alu, ALU, width: 8
+        #     instance :reg, Register, width: 8
+        #
+        #     wire :a => [:alu, :a]
+        #     wire [:alu, :result] => [:reg, :d]
+        #     wire [:reg, :q] => :result
+        #   end
+        #
+        def instance(name, component_class, **params)
+          module_name = if component_class.respond_to?(:verilog_module_name)
+                          component_class.verilog_module_name
+                        else
+                          component_class.name.split('::').last.underscore
+                        end
+          _instance_defs << {
+            name: name,
+            component_class: component_class,
+            module_name: module_name,
+            parameters: params,
+            connections: {}
+          }
+        end
+
+        # Define connections between signals and instance ports (class-level)
+        #
+        # @param mappings [Hash] Signal to port mappings
+        #   Formats:
+        #   - wire :clk => [:pc, :clk]              # Signal to instance port
+        #   - wire :clk => [[:pc, :clk], [:acc, :clk]]  # Signal to multiple ports
+        #   - wire [:alu, :result] => :result      # Instance output to signal
+        #   - wire [:alu, :result] => [:reg, :d]   # Instance to instance
+        #
+        def wire(mappings)
+          mappings.each do |source, dest|
+            _connection_defs << { source: source, dest: dest }
+
+            if dest.is_a?(Array) && dest.first.is_a?(Array)
+              # Multiple destinations: connect :clk => [[:pc, :clk], [:acc, :clk]]
+              dest.each { |d| add_port_connection(source, d) }
+            elsif dest.is_a?(Array) && dest.length == 2
+              # Single destination: connect :clk => [:pc, :clk]
+              add_port_connection(source, dest)
+            elsif source.is_a?(Array) && source.length == 2
+              # Instance output to signal: connect [:alu, :result] => :result
+              add_output_connection(source, dest)
+            end
+          end
+        end
+
         # Check if behavior block is defined
         def behavior_defined?
           instance_variable_defined?(:@_behavior_block) && @_behavior_block
@@ -86,6 +164,11 @@ module RHDL
 
         def _behavior_block
           @_behavior_block
+        end
+
+        # Check if structure is defined (has instances)
+        def structure_defined?
+          !_instance_defs.empty?
         end
 
         # Define a behavior block for unified simulation and synthesis
@@ -101,50 +184,26 @@ module RHDL
         #     end
         #   end
         #
-        # @example Multiple outputs with arithmetic
-        #   class FullAdder < SimComponent
-        #     port_input :a
-        #     port_input :b
-        #     port_input :cin
-        #     port_output :sum
-        #     port_output :cout
-        #
-        #     behavior do
-        #       sum <= a ^ b ^ cin
-        #       cout <= (a & b) | (a & cin) | (b & cin)
-        #     end
-        #   end
-        #
         def behavior(**options, &block)
           @_behavior_block = BehaviorBlockDef.new(block, **options)
         end
 
-        # Define a structure block for hierarchical component instantiation
-        #
-        # @example Structure component with instances
-        #   class MyDatapath < SimComponent
-        #     port_input :clk
-        #     port_input :a, width: 8
-        #     port_output :result, width: 8
-        #
-        #     structure do
-        #       instance :alu, ALU, width: 8
-        #       instance :reg, Register, width: 8
-        #
-        #       connect a: :alu_a
-        #       connect alu_result: :reg_d
-        #       connect reg_q: :result
-        #     end
-        #   end
-        #
-        def structure(&block)
-          ctx = StructureDefContext.new(self)
-          ctx.instance_eval(&block)
+        private
+
+        def add_port_connection(signal, dest)
+          inst_name, port_name = dest
+          inst_def = _instance_defs.find { |i| i[:name] == inst_name }
+          return unless inst_def
+
+          inst_def[:connections][port_name] = signal
         end
 
-        # Check if structure is defined
-        def structure_defined?
-          !_instance_defs.empty?
+        def add_output_connection(source, signal)
+          inst_name, port_name = source
+          inst_def = _instance_defs.find { |i| i[:name] == inst_name }
+          return unless inst_def
+
+          inst_def[:connections][port_name] = signal
         end
 
         # Generate IR assigns and wire declarations from the behavior block
@@ -299,77 +358,6 @@ module RHDL
       # Simple structs for port/signal definitions
       PortDef = Struct.new(:name, :direction, :width)
       SignalDef = Struct.new(:name, :width)
-
-      # Context for structure block DSL evaluation
-      class StructureDefContext
-        def initialize(component_class)
-          @component_class = component_class
-        end
-
-        # Define a component instance
-        # @param name [Symbol] Instance name
-        # @param component_class [Class] Component class to instantiate
-        # @param params [Hash] Parameters to pass to the component
-        def instance(name, component_class, **params)
-          # Get module name from component's verilog_module_name method
-          # This ensures consistency with how to_verilog generates the module name
-          module_name = if component_class.respond_to?(:verilog_module_name)
-                          component_class.verilog_module_name
-                        else
-                          component_class.name.split('::').last.underscore
-                        end
-          @component_class._instance_defs << {
-            name: name,
-            component_class: component_class,
-            module_name: module_name,
-            parameters: params,
-            connections: {}
-          }
-        end
-
-        # Define connections between signals and instance ports
-        # @param mappings [Hash] Signal to port mappings
-        #   Can use formats like:
-        #   - connect clk: [:pc, :clk], [:acc, :clk]  # Connect clk to multiple instance ports
-        #   - connect a: [:alu, :a]                   # Connect signal 'a' to alu.a
-        #   - connect [:alu, :result] => :result      # Connect alu.result to output 'result'
-        def connect(mappings)
-          mappings.each do |source, dest|
-            # Store connection info for IR generation
-            @component_class._connection_defs << { source: source, dest: dest }
-
-            # Handle different connection formats
-            if dest.is_a?(Array) && dest.first.is_a?(Array)
-              # Multiple destinations: connect clk: [[:pc, :clk], [:acc, :clk]]
-              dest.each { |d| add_port_connection(source, d) }
-            elsif dest.is_a?(Array) && dest.length == 2
-              # Single destination: connect clk: [:pc, :clk]
-              add_port_connection(source, dest)
-            elsif source.is_a?(Array) && source.length == 2
-              # Instance output to signal: connect [:alu, :result] => :result
-              add_output_connection(source, dest)
-            end
-          end
-        end
-
-        private
-
-        def add_port_connection(signal, dest)
-          inst_name, port_name = dest
-          inst_def = @component_class._instance_defs.find { |i| i[:name] == inst_name }
-          return unless inst_def
-
-          inst_def[:connections][port_name] = signal
-        end
-
-        def add_output_connection(source, signal)
-          inst_name, port_name = source
-          inst_def = @component_class._instance_defs.find { |i| i[:name] == inst_name }
-          return unless inst_def
-
-          inst_def[:connections][port_name] = signal
-        end
-      end
 
       def initialize(name = nil)
         @name = name || self.class.name.split('::').last.downcase
