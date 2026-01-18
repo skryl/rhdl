@@ -42,28 +42,39 @@ rhdl/
 │   │   ├── signal_panel.rb      # Signal display panel
 │   │   ├── waveform_panel.rb    # Waveform display
 │   │   └── ...                  # Other TUI components
-│   ├── hdl/                     # HDL components
+│   ├── hdl/                     # HDL components (component definitions ONLY)
 │   │   ├── gates.rb             # Logic gate primitives
 │   │   ├── sequential.rb        # Flip-flops, registers, counters
 │   │   ├── arithmetic.rb        # Adders, ALU, comparators
 │   │   ├── combinational.rb     # Multiplexers, decoders
 │   │   ├── memory.rb            # RAM, ROM, register files
-│   │   ├── diagram.rb           # Diagram generation
 │   │   └── cpu/                 # HDL CPU implementation
-│   │       ├── datapath.rb      # Behavior CPU datapath
+│   │       ├── datapath.rb      # Behavioral CPU datapath
 │   │       ├── synth_datapath.rb # Synthesizable CPU datapath
 │   │       ├── instruction_decoder.rb # Instruction decoder
-│   │       └── adapter.rb       # Behavior/HDL adapter
-│   ├── gates/                   # Gate-level synthesis
-│   │   ├── primitives.rb        # Gate primitives (AND, OR, XOR, NOT, MUX, DFF)
-│   │   ├── ir.rb                # Gate-level intermediate representation
-│   │   ├── lower.rb             # HDL to gate-level lowering (53 components)
-│   │   └── toposort.rb          # Topological sorting for simulation
+│   │       └── adapter.rb       # Behavioral/HDL adapter
+│   ├── export/                  # Export infrastructure
+│   │   ├── behavior/            # RTL/Verilog export
+│   │   │   ├── ir.rb            # Behavior intermediate representation
+│   │   │   ├── lower.rb         # Behavior lowering
+│   │   │   └── verilog.rb       # Verilog code generation
+│   │   └── structure/           # Gate-level synthesis
+│   │       ├── primitives.rb    # Gate primitives (AND, OR, XOR, NOT, MUX, DFF)
+│   │       ├── ir.rb            # Gate-level intermediate representation
+│   │       ├── lower.rb         # HDL to gate-level lowering (53 components)
+│   │       ├── toposort.rb      # Topological sorting
+│   │       ├── sim_cpu.rb       # CPU gate-level simulation
+│   │       └── sim_gpu.rb       # GPU gate-level simulation
 │   └── diagram/                 # Diagram module
+│       ├── component.rb         # Component diagram generation
+│       ├── hierarchy.rb         # Hierarchical diagrams
+│       ├── netlist.rb           # Netlist diagrams
+│       ├── gate_level.rb        # Gate-level diagrams
 │       ├── render_svg.rb        # SVG rendering
 │       ├── render_dot.rb        # Graphviz DOT format
-│       ├── gate_level.rb        # Gate-level diagrams
-│       └── netlist.rb           # Netlist generation
+│       ├── renderer.rb          # ASCII/Unicode circuit renderer
+│       ├── svg_renderer.rb      # SVG diagram renderer
+│       └── methods.rb           # Extension methods for components
 │
 ├── examples/                    # Example implementations
 │   ├── mos6502/                 # MOS 6502 behavior CPU
@@ -400,3 +411,8 @@ Follow these conventions for file organization:
 - Each spec file should test exactly one class or module
 - Spec files should mirror the lib directory structure (e.g., `spec/rhdl/simulation/simulator_spec.rb` for `lib/rhdl/simulation/simulator.rb`)
 - Name spec files with `_spec.rb` suffix matching the class being tested
+
+**HDL directory organization:**
+- The `lib/rhdl/hdl/` directory should only contain component definitions
+- Non-component utilities (diagram rendering, export tools, etc.) belong in their own top-level directories (e.g., `diagram/`, `export/`)
+- Component mixins and extension methods should be defined outside `hdl/` and included into components from hdl.rb
