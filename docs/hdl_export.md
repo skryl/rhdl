@@ -1,6 +1,6 @@
-# HDL Export (Verilog/VHDL)
+# HDL Export (Verilog)
 
-This document describes the initial HDL export support implemented by `RHDL::Export`.
+This document describes the HDL export support implemented by `RHDL::Export`.
 
 ## Supported subset
 
@@ -25,18 +25,17 @@ Anything outside this subset will raise an error during lowering.
 
 * Identifiers are sanitized for HDL output:
   * Invalid characters are replaced with `_`.
-  * Verilog/VHDL keywords are suffixed with `_rhdl`.
-  * Identifiers starting with a digit are prefixed with `_` (Verilog only).
+  * Verilog keywords are suffixed with `_rhdl`.
+  * Identifiers starting with a digit are prefixed with `_`.
 
 ## Vector conventions
 
 * Verilog uses `[W-1:0]`.
-* VHDL uses `std_logic_vector(W-1 downto 0)`.
-* Width 1 is emitted as `std_logic` (VHDL) or a scalar port (Verilog).
+* Width 1 is emitted as a scalar port.
 
 ## Clock/reset semantics
 
-* Clocked processes use `posedge clk` in Verilog and `rising_edge(clk)` in VHDL.
+* Clocked processes use `posedge clk` in Verilog.
 * Synchronous reset and enable can be expressed with `if`/`else` inside the
   clocked process (reset/enable are treated as data signals evaluated on
   the active clock edge).
@@ -45,9 +44,7 @@ Anything outside this subset will raise an error during lowering.
 
 Verilog export tests require Icarus Verilog (`iverilog` and `vvp`).
 
-VHDL export tests require GHDL (`ghdl`).
-
-If a toolchain is missing, the corresponding specs are skipped automatically.
+If the toolchain is missing, the corresponding specs are skipped automatically.
 
 Run all specs:
 
@@ -58,26 +55,22 @@ bundle exec rspec
 Run only the HDL export specs:
 
 ```
-bundle exec rspec spec/export_verilog_spec.rb spec/export_vhdl_spec.rb
+bundle exec rspec spec/export_verilog_spec.rb
 ```
 
 ## Output Directory
 
 All generated HDL files are placed in the `/export/` directory:
 
-* `/export/vhdl/` - Generated VHDL files
 * `/export/verilog/` - Generated Verilog files
 
 ## Rake Tasks
 
 ```bash
-# Export all DSL components to VHDL and Verilog
+# Export all DSL components to Verilog
 rake hdl:export
 
-# Export only VHDL
-rake hdl:vhdl
-
-# Export only Verilog
+# Export Verilog
 rake hdl:verilog
 
 # Clean generated HDL files

@@ -11,10 +11,6 @@ module RHDL
         @range = range
       end
 
-      def to_vhdl
-        "#{signal.to_vhdl}(#{range.max} downto #{range.min})"
-      end
-
       def to_verilog
         "#{signal.to_verilog}[#{range.max}:#{range.min}]"
       end

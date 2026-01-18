@@ -16,14 +16,6 @@ module RHDL
         @statements << stmt
       end
 
-      def to_vhdl
-        lines = []
-        lines << "for #{variable} in #{range.min} to #{range.max} loop"
-        statements.each { |s| lines << "  #{s.to_vhdl}" }
-        lines << "end loop;"
-        lines.join("\n")
-      end
-
       def to_verilog
         lines = []
         lines << "for (#{variable} = #{range.min}; #{variable} <= #{range.max}; #{variable} = #{variable} + 1) begin"

@@ -11,11 +11,6 @@ module RHDL
         @times = times
       end
 
-      def to_vhdl
-        parts = Array.new(times) { signal.to_vhdl }
-        "(#{parts.join(' & ')})"
-      end
-
       def to_verilog
         "{#{times}{#{signal.to_verilog}}}"
       end

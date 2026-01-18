@@ -11,10 +11,6 @@ module RHDL
         @index = index
       end
 
-      def to_vhdl
-        "#{signal.to_vhdl}(#{index})"
-      end
-
       def to_verilog
         "#{signal.to_verilog}[#{index}]"
       end
