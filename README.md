@@ -1,4 +1,14 @@
-# RHDL (Ruby Hardware Description Language)
+```
+    ____  __  ______  __
+   / __ \/ / / / __ \/ /
+  / /_/ / /_/ / / / / /
+ / _, _/ __  / /_/ / /___
+/_/ |_/_/ /_/_____/_____/
+
+  Ruby Hardware Description Language
+```
+
+# RHDL
 
 RHDL is a Domain Specific Language (DSL) for designing hardware using Ruby's flexible syntax and exporting to synthesizable Verilog. It provides Ruby developers with a comfortable environment to create hardware designs leveraging Ruby's metaprogramming capabilities.
 
@@ -10,6 +20,8 @@ RHDL is a Domain Specific Language (DSL) for designing hardware using Ruby's fle
 - **Component Library**: Gates, flip-flops, registers, ALU, memory, and more
 - **Gate-Level Synthesis**: Lower components to primitive gate netlists (AND, OR, XOR, NOT, MUX, DFF)
 - **Diagram Generation**: Multi-level circuit diagrams with SVG, PNG, and DOT output
+
+See the [Documentation](#documentation) section for detailed guides.
 
 ## Quick Start
 
