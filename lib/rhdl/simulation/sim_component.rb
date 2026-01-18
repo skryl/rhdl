@@ -188,6 +188,74 @@ module RHDL
           @_behavior_block = BehaviorBlockDef.new(block, **options)
         end
 
+        # Generate Verilog from the component
+        def to_verilog(top_name: nil)
+          RHDL::Export::Verilog.generate(to_ir(top_name: top_name))
+        end
+
+        # Generate VHDL from the component
+        def to_vhdl(top_name: nil)
+          RHDL::Export::VHDL.generate(to_ir(top_name: top_name))
+        end
+
+        # Returns the Verilog module name for this component
+        # Override in subclasses that use custom module names
+        # @return [String] The module name used in generated Verilog
+        def verilog_module_name
+          self.name.split('::').last.underscore
+        end
+
+        # Collect all unique sub-module classes used by this component (recursively)
+        # @return [Array<Class>] Array of component classes
+        def collect_submodule_classes(collected = Set.new)
+          _instance_defs.each do |inst_def|
+            component_class = inst_def[:component_class]
+            next if collected.include?(component_class)
+
+            collected.add(component_class)
+            # Recursively collect from sub-modules if they have instances
+            if component_class.respond_to?(:_instance_defs)
+              component_class.collect_submodule_classes(collected)
+            end
+          end
+          collected.to_a
+        end
+
+        # Generate Verilog for this component and all its sub-modules
+        # Returns a single string with all module definitions
+        # @param top_name [String] Optional name override for top module
+        # @return [String] Complete Verilog with all module definitions
+        def to_verilog_hierarchy(top_name: nil)
+          parts = []
+
+          # Generate sub-modules first (in dependency order - leaves first)
+          submodules = collect_submodule_classes
+          submodules.each do |submod|
+            parts << submod.to_verilog
+          end
+
+          # Generate top-level module last
+          parts << to_verilog(top_name: top_name)
+
+          parts.join("\n\n")
+        end
+
+        # Generate VHDL for this component and all its sub-modules
+        # @param top_name [String] Optional name override for top module
+        # @return [String] Complete VHDL with all module definitions
+        def to_vhdl_hierarchy(top_name: nil)
+          parts = []
+
+          submodules = collect_submodule_classes
+          submodules.each do |submod|
+            parts << submod.to_vhdl
+          end
+
+          parts << to_vhdl(top_name: top_name)
+
+          parts.join("\n\n")
+        end
+
         private
 
         def add_port_connection(signal, dest)
@@ -284,74 +352,6 @@ module RHDL
               parameters: inst_def[:parameters]
             )
           end
-        end
-
-        # Generate Verilog from the component
-        def to_verilog(top_name: nil)
-          RHDL::Export::Verilog.generate(to_ir(top_name: top_name))
-        end
-
-        # Generate VHDL from the component
-        def to_vhdl(top_name: nil)
-          RHDL::Export::VHDL.generate(to_ir(top_name: top_name))
-        end
-
-        # Returns the Verilog module name for this component
-        # Override in subclasses that use custom module names
-        # @return [String] The module name used in generated Verilog
-        def verilog_module_name
-          self.name.split('::').last.underscore
-        end
-
-        # Collect all unique sub-module classes used by this component (recursively)
-        # @return [Array<Class>] Array of component classes
-        def collect_submodule_classes(collected = Set.new)
-          _instance_defs.each do |inst_def|
-            component_class = inst_def[:component_class]
-            next if collected.include?(component_class)
-
-            collected.add(component_class)
-            # Recursively collect from sub-modules if they have instances
-            if component_class.respond_to?(:_instance_defs)
-              component_class.collect_submodule_classes(collected)
-            end
-          end
-          collected.to_a
-        end
-
-        # Generate Verilog for this component and all its sub-modules
-        # Returns a single string with all module definitions
-        # @param top_name [String] Optional name override for top module
-        # @return [String] Complete Verilog with all module definitions
-        def to_verilog_hierarchy(top_name: nil)
-          parts = []
-
-          # Generate sub-modules first (in dependency order - leaves first)
-          submodules = collect_submodule_classes
-          submodules.each do |submod|
-            parts << submod.to_verilog
-          end
-
-          # Generate top-level module last
-          parts << to_verilog(top_name: top_name)
-
-          parts.join("\n\n")
-        end
-
-        # Generate VHDL for this component and all its sub-modules
-        # @param top_name [String] Optional name override for top module
-        # @return [String] Complete VHDL with all module definitions
-        def to_vhdl_hierarchy(top_name: nil)
-          parts = []
-
-          submodules = collect_submodule_classes
-          submodules.each do |submod|
-            parts << submod.to_vhdl
-          end
-
-          parts << to_vhdl(top_name: top_name)
-
-          parts.join("\n\n")
         end
       end
 
