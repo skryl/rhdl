@@ -5,6 +5,36 @@ rescue LoadError
   # Bundler not available, skip gem tasks
 end
 
+# =============================================================================
+# Setup Tasks
+# =============================================================================
+
+namespace :setup do
+  desc "Generate binstubs for all gem executables"
+  task :binstubs do
+    binstubs_needed = {
+      'rake' => 'rake',
+      'rspec-core' => 'rspec',
+      'parallel_tests' => 'parallel_rspec'
+    }
+
+    binstubs_needed.each do |gem_name, executable|
+      binstub_path = File.expand_path("bin/#{executable}", __dir__)
+      unless File.executable?(binstub_path)
+        puts "Generating binstub for #{executable}..."
+        system("bundle binstubs #{gem_name} --force")
+      end
+    end
+  end
+end
+
+desc "Setup development environment (install deps + binstubs)"
+task setup: ['setup:binstubs']
+
+# Ensure binstubs exist before running tests
+task spec: 'setup:binstubs'
+task pspec: 'setup:binstubs'
+
 # RSpec tasks
 begin
   require "rspec/core/rake_task"
@@ -1081,3 +1111,296 @@ end
 
 desc "Build Apple II ROM (alias for apple2:build)"
 task apple2: 'apple2:build'
+
+# =============================================================================
+# Test Dependencies Tasks
+# =============================================================================
+
+namespace :deps do
+  desc "Check and install test dependencies (iverilog)"
+  task :install do
+    puts "RHDL Test Dependencies Installer"
+    puts "=" * 50
+    puts
+
+    # Detect platform
+    platform = case RUBY_PLATFORM
+               when /linux/i then :linux
+               when /darwin/i then :macos
+               when /mswin|mingw|cygwin/i then :windows
+               else :unknown
+               end
+
+    puts "Platform: #{platform}"
+    puts
+
+    # Check for iverilog
+    iverilog_available = system('which iverilog > /dev/null 2>&1')
+
+    if iverilog_available
+      version = `iverilog -V 2>&1`.lines.first&.strip
+      puts "[OK] iverilog is installed: #{version}"
+    else
+      puts "[MISSING] iverilog is not installed"
+      puts
+
+      case platform
+      when :linux
+        # Detect Linux distribution
+        if File.exist?('/etc/debian_version') || system('which apt-get > /dev/null 2>&1')
+          puts "Installing iverilog via apt-get..."
+          if ENV['USER'] == 'root'
+            system('apt-get update && apt-get install -y iverilog')
+          else
+            system('sudo apt-get update && sudo apt-get install -y iverilog')
+          end
+        elsif system('which dnf > /dev/null 2>&1')
+          puts "Installing iverilog via dnf..."
+          system('sudo dnf install -y iverilog')
+        elsif system('which yum > /dev/null 2>&1')
+          puts "Installing iverilog via yum..."
+          system('sudo yum install -y iverilog')
+        elsif system('which pacman > /dev/null 2>&1')
+          puts "Installing iverilog via pacman..."
+          system('sudo pacman -S --noconfirm iverilog')
+        else
+          puts "Could not detect package manager."
+          puts "Please install iverilog manually:"
+          puts "  Ubuntu/Debian: sudo apt-get install iverilog"
+          puts "  Fedora: sudo dnf install iverilog"
+          puts "  Arch: sudo pacman -S iverilog"
+        end
+      when :macos
+        if system('which brew > /dev/null 2>&1')
+          puts "Installing iverilog via Homebrew..."
+          system('brew install icarus-verilog')
+        else
+          puts "Homebrew not found. Please install Homebrew first:"
+          puts "  /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+          puts "Then run: brew install icarus-verilog"
+        end
+      when :windows
+        puts "On Windows, please install iverilog manually:"
+        puts "  1. Download from: http://bleyer.org/icarus/"
+        puts "  2. Or use WSL and install via apt-get"
+      else
+        puts "Unknown platform. Please install iverilog manually."
+      end
+
+      # Verify installation
+      puts
+      if system('which iverilog > /dev/null 2>&1')
+        version = `iverilog -V 2>&1`.lines.first&.strip
+        puts "[OK] iverilog installed successfully: #{version}"
+      else
+        puts "[WARN] iverilog installation may have failed. Check above for errors."
+      end
+    end
+
+    puts
+    puts "=" * 50
+    puts "Dependency check complete."
+  end
+
+  desc "Check test dependencies status"
+  task :check do
+    puts "RHDL Test Dependencies Status"
+    puts "=" * 50
+    puts
+
+    deps = {
+      'iverilog' => { cmd: 'iverilog -V', optional: true, desc: 'Icarus Verilog (for gate-level simulation tests)' },
+      'dot' => { cmd: 'dot -V', optional: true, desc: 'Graphviz (for diagram rendering)' },
+      'ruby' => { cmd: 'ruby --version', optional: false, desc: 'Ruby interpreter' },
+      'bundler' => { cmd: 'bundle --version', optional: false, desc: 'Ruby Bundler' }
+    }
+
+    deps.each do |name, info|
+      available = system("which #{name} > /dev/null 2>&1")
+      status = available ? "[OK]" : (info[:optional] ? "[OPTIONAL]" : "[MISSING]")
+      version = available ? `#{info[:cmd]} 2>&1`.lines.first&.strip : "not installed"
+
+      puts "#{status.ljust(12)} #{name.ljust(12)} - #{info[:desc]}"
+      puts "             #{version}" if available
+    end
+
+    puts
+    puts "Run 'rake deps:install' to install missing dependencies."
+  end
+end
+
+desc "Install test dependencies (alias for deps:install)"
+task deps: 'deps:install'
+
+# =============================================================================
+# Test Benchmarking Tasks
+# =============================================================================
+
+namespace :benchmark do
+  # Helper to find rspec command
+  def rspec_cmd
+    binstub = File.expand_path('bin/rspec', __dir__)
+    File.executable?(binstub) ? binstub : 'rspec'
+  end
+
+  desc "Profile RSpec tests and show slowest 20 tests"
+  task :tests, [:count] => 'setup:binstubs' do |_, args|
+    count = args[:count] || 20
+    puts "Running RSpec with profiling (showing #{count} slowest tests)..."
+    puts "=" * 60
+    sh "#{rspec_cmd} --profile #{count} --format progress spec/"
+  end
+
+  desc "Profile 6502 tests and show slowest tests"
+  task :tests_6502, [:count] => 'setup:binstubs' do |_, args|
+    count = args[:count] || 20
+    puts "Running 6502 specs with profiling (showing #{count} slowest tests)..."
+    puts "=" * 60
+    sh "#{rspec_cmd} --profile #{count} --format progress spec/examples/mos6502/"
+  end
+
+  desc "Profile HDL tests and show slowest tests"
+  task :tests_hdl, [:count] => 'setup:binstubs' do |_, args|
+    count = args[:count] || 20
+    puts "Running HDL specs with profiling (showing #{count} slowest tests)..."
+    puts "=" * 60
+    sh "#{rspec_cmd} --profile #{count} --format progress spec/rhdl/hdl/"
+  end
+
+  desc "Run full test timing analysis (detailed per-file timing)"
+  task timing: 'setup:binstubs' do
+    require 'benchmark'
+
+    puts "RHDL Test Suite Timing Analysis"
+    puts "=" * 60
+    puts
+
+    spec_files = Dir.glob('spec/**/*_spec.rb').sort
+
+    # Group by directory
+    groups = spec_files.group_by { |f| File.dirname(f).sub('spec/', '') }
+
+    results = []
+
+    groups.each do |group, files|
+      group_time = 0.0
+      file_times = []
+
+      files.each do |file|
+        print "."
+        $stdout.flush
+
+        # Run each file individually and capture timing
+        start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        output = `#{rspec_cmd} #{file} --format progress 2>&1`
+        elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - start
+
+        # Check for failures
+        status = output.include?('0 failures') ? :pass : :fail
+
+        file_times << {
+          file: file,
+          time: elapsed,
+          status: status
+        }
+        group_time += elapsed
+      end
+
+      results << {
+        group: group,
+        total_time: group_time,
+        files: file_times.sort_by { |f| -f[:time] }
+      }
+    end
+
+    puts
+    puts
+
+    # Sort results by total time
+    results.sort_by! { |r| -r[:total_time] }
+
+    # Print summary by group
+    puts "Test Groups by Total Time"
+    puts "-" * 60
+    results.each do |r|
+      puts "#{r[:group].ljust(40)} #{format('%.2f', r[:total_time])}s (#{r[:files].length} files)"
+    end
+
+    puts
+    puts "Top 15 Slowest Test Files"
+    puts "-" * 60
+
+    all_files = results.flat_map { |r| r[:files] }.sort_by { |f| -f[:time] }
+    all_files.first(15).each_with_index do |f, i|
+      status_icon = f[:status] == :pass ? '' : ' [FAIL]'
+      puts "#{(i + 1).to_s.rjust(2)}. #{format('%.2f', f[:time])}s  #{f[:file]}#{status_icon}"
+    end
+
+    total_time = results.sum { |r| r[:total_time] }
+    puts
+    puts "=" * 60
+    puts "Total test time: #{format('%.2f', total_time)}s"
+    puts "Total test files: #{all_files.length}"
+  end
+
+  desc "Quick benchmark of test categories"
+  task quick: 'setup:binstubs' do
+    require 'benchmark'
+
+    puts "RHDL Test Suite Quick Benchmark"
+    puts "=" * 60
+    puts
+
+    categories = {
+      'HDL Components' => 'spec/rhdl/hdl/',
+      '6502 CPU' => 'spec/examples/mos6502/',
+      'Core Framework' => 'spec/rhdl/',
+      'All Tests' => 'spec/'
+    }
+
+    results = []
+
+    categories.each do |name, path|
+      next unless Dir.exist?(path)
+
+      files = Dir.glob("#{path}**/*_spec.rb")
+      next if files.empty?
+
+      print "Running #{name}..."
+      $stdout.flush
+
+      start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      output = `#{rspec_cmd} #{path} --format progress 2>&1`
+      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - start
+
+      # Parse test counts from output
+      match = output.match(/(\d+) examples?, (\d+) failures?/)
+      examples = match ? match[1].to_i : 0
+      failures = match ? match[2].to_i : 0
+
+      results << {
+        name: name,
+        time: elapsed,
+        examples: examples,
+        failures: failures,
+        files: files.length
+      }
+
+      puts " done (#{format('%.2f', elapsed)}s)"
+    end
+
+    puts
+    puts "Results Summary"
+    puts "-" * 60
+    puts "#{'Category'.ljust(20)} #{'Time'.rjust(10)} #{'Tests'.rjust(8)} #{'Files'.rjust(8)} #{'Rate'.rjust(12)}"
+    puts "-" * 60
+
+    results.each do |r|
+      rate = r[:examples] > 0 ? format('%.1f', r[:examples] / r[:time]) : 'N/A'
+      puts "#{r[:name].ljust(20)} #{format('%8.2f', r[:time])}s #{r[:examples].to_s.rjust(8)} #{r[:files].to_s.rjust(8)} #{rate.rjust(8)} t/s"
+    end
+  end
+end
+
+desc "Benchmark tests showing 20 slowest (alias for benchmark:tests)"
+task benchmark: 'benchmark:tests'
