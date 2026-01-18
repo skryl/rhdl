@@ -4,7 +4,7 @@ require 'fileutils'
 require 'open-uri'
 require_relative '../examples/mos6502/utilities/apple2_harness'
 
-RSpec.describe 'Apple ][ dead test ROM' do
+RSpec.describe 'Apple ][ dead test ROM', skip: 'Requires network access to download ROM' do
   DEADTEST_URL = 'https://github.com/misterblack1/appleII_deadtest/releases/download/v1.0.1/apple2dead.bin'
   FIXTURE_DIR = File.join(__dir__, 'fixtures', 'apple2')
   FIXTURE_PATH = File.join(FIXTURE_DIR, 'apple2dead.bin')
