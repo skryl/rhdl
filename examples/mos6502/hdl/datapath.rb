@@ -15,8 +15,8 @@ require_relative 'control_unit'
 module MOS6502
   class Datapath < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
-    attr_reader :registers, :status_reg, :pc, :sp, :ir, :alu
-    attr_reader :control, :decoder, :addr_gen, :addr_latch, :data_latch
+    # No attr_reader - internal components are private
+    # All interaction is through ports only
 
     # External interface
     input :clk
@@ -32,7 +32,19 @@ module MOS6502
     output :rw                   # Read/Write (1=read, 0=write)
     output :sync                 # Opcode fetch cycle
 
-    # Debug outputs
+    # External register load inputs (for test/debug - directly load registers)
+    input :ext_pc_load_data, width: 16
+    input :ext_pc_load_en
+    input :ext_a_load_data, width: 8
+    input :ext_a_load_en
+    input :ext_x_load_data, width: 8
+    input :ext_x_load_en
+    input :ext_y_load_data, width: 8
+    input :ext_y_load_en
+    input :ext_sp_load_data, width: 8
+    input :ext_sp_load_en
+
+    # Debug outputs (read register values through ports)
     output :reg_a, width: 8
     output :reg_x, width: 8
     output :reg_y, width: 8
@@ -449,32 +461,49 @@ module MOS6502
       update_status_flags(instr_type, addr_mode, state_before, sampled_update_flags)
 
       # Program counter updates - use sampled signals
-      @pc.set_input(:inc, sampled_pc_inc)
-      @pc.set_input(:load, sampled_pc_load)
+      # External load takes priority over internal control
+      ext_pc_load = in_val(:ext_pc_load_en)
+      if ext_pc_load == 1
+        @pc.set_input(:inc, 0)
+        @pc.set_input(:load, 1)
+        @pc.set_input(:addr_in, in_val(:ext_pc_load_data))
+      else
+        @pc.set_input(:inc, sampled_pc_inc)
+        @pc.set_input(:load, sampled_pc_load)
 
-      # PC load address: from address latch for jumps, or computed for branches
-      pc_load_addr = select_pc_load_addr(
-        state_before,
-        eff_addr,
-        @addr_latch.get_output(:addr),
-        @addr_latch.get_output(:addr_lo),
-        data_in
-      )
-      @pc.set_input(:addr_in, pc_load_addr)
+        # PC load address: from address latch for jumps, or computed for branches
+        pc_load_addr = select_pc_load_addr(
+          state_before,
+          eff_addr,
+          @addr_latch.get_output(:addr),
+          @addr_latch.get_output(:addr_lo),
+          data_in
+        )
+        @pc.set_input(:addr_in, pc_load_addr)
+      end
       @pc.propagate
 
       # Stack pointer updates - use sampled signals
-      @sp.set_input(:inc, sampled_sp_inc)
-      @sp.set_input(:dec, sampled_sp_dec)
-      @sp.set_input(:load, 0)
-      @sp.set_input(:data_in, 0)
-
-      # Handle TXS instruction specially
-      if instr_type == InstructionDecoder::TYPE_TRANSFER &&
-         state_before == ControlUnit::STATE_EXECUTE &&
-         opcode == 0x9A  # TXS
+      # External load takes priority over internal control
+      ext_sp_load = in_val(:ext_sp_load_en)
+      if ext_sp_load == 1
+        @sp.set_input(:inc, 0)
+        @sp.set_input(:dec, 0)
         @sp.set_input(:load, 1)
-        @sp.set_input(:data_in, reg_x)
+        @sp.set_input(:data_in, in_val(:ext_sp_load_data))
+      else
+        @sp.set_input(:inc, sampled_sp_inc)
+        @sp.set_input(:dec, sampled_sp_dec)
+        @sp.set_input(:load, 0)
+        @sp.set_input(:data_in, 0)
+
+        # Handle TXS instruction specially
+        if instr_type == InstructionDecoder::TYPE_TRANSFER &&
+           state_before == ControlUnit::STATE_EXECUTE &&
+           opcode == 0x9A  # TXS
+          @sp.set_input(:load, 1)
+          @sp.set_input(:data_in, reg_x)
+        end
       end
 
       @sp.propagate
@@ -582,7 +611,24 @@ module MOS6502
       @registers.set_input(:load_x, 0)
       @registers.set_input(:load_y, 0)
 
-      if reg_write == 1 && state_before == ControlUnit::STATE_EXECUTE
+      # External register loads take priority
+      ext_a_load = in_val(:ext_a_load_en)
+      ext_x_load = in_val(:ext_x_load_en)
+      ext_y_load = in_val(:ext_y_load_en)
+
+      if ext_a_load == 1 || ext_x_load == 1 || ext_y_load == 1
+        # External load - use external data
+        if ext_a_load == 1
+          @registers.set_input(:data_in, in_val(:ext_a_load_data))
+          @registers.set_input(:load_a, 1)
+        elsif ext_x_load == 1
+          @registers.set_input(:data_in, in_val(:ext_x_load_data))
+          @registers.set_input(:load_x, 1)
+        elsif ext_y_load == 1
+          @registers.set_input(:data_in, in_val(:ext_y_load_data))
+          @registers.set_input(:load_y, 1)
+        end
+      elsif reg_write == 1 && state_before == ControlUnit::STATE_EXECUTE
         # Determine what data to write
         write_data = if instr_type == InstructionDecoder::TYPE_LOAD
           if addr_mode == AddressGenerator::MODE_IMMEDIATE
@@ -714,9 +760,12 @@ module MOS6502
       end
     end
 
+    # Direct register access for test/debug (bypasses normal CPU operation)
+    # These are simulation conveniences that directly manipulate internal state.
     public
-
-    # Public accessors for testing
+    # Direct register access for simulation test setup.
+    # Use output ports (reg_a, reg_x, etc.) for normal reading.
+    # These methods provide direct state manipulation for test setup.
     def read_a; @registers.read_a; end
     def read_x; @registers.read_x; end
     def read_y; @registers.read_y; end

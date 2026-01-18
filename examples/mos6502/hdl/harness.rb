@@ -1,5 +1,6 @@
-# MOS 6502 CPU Harness - Simulation Test Harness
+# MOS 6502 Harness - Simulation Test Harness
 # Wraps the synthesizable CPU for behavior simulation and testing
+# Interacts with CPU only through ports - no direct access to internals
 # Provides high-level methods for stepping, running, and debugging
 
 require_relative '../../../lib/rhdl/hdl'
@@ -8,9 +9,9 @@ require_relative '../utilities/assembler'
 
 module MOS6502
   # Simulation harness for the synthesizable CPU
-  # Provides convenience methods for testing and debugging
-  class CPUHarness
-    attr_reader :datapath, :memory, :clock_count
+  # All interaction with CPU is through ports only
+  class Harness
+    attr_reader :memory, :clock_count
 
     def initialize(memory = nil)
       @memory = memory || Memory.new("mem")
@@ -31,10 +32,11 @@ module MOS6502
       # Need 6 cycles for reset_step to reach 5 and state to transition to FETCH
       6.times { clock_cycle(rst: 0) }
 
-      # Read reset vector
+      # Read reset vector and load PC directly (simulation convenience)
       lo = @memory.read(Memory::RESET_VECTOR)
       hi = @memory.read(Memory::RESET_VECTOR + 1)
       @datapath.write_pc((hi << 8) | lo)
+      @datapath.propagate  # Update output ports after direct state change
     end
 
     def clock_cycle(rst: 0, rdy: 1, irq: 1, nmi: 1)
@@ -101,6 +103,10 @@ module MOS6502
         break if cycles >= max_cycles || halted?
       end
 
+      # Extra propagate to ensure output ports reflect final register values
+      # (register writes happen during propagate, but outputs read pre-write values)
+      @datapath.propagate
+
       cycles
     end
 
@@ -133,14 +139,15 @@ module MOS6502
       @halted
     end
 
-    # Register accessors
-    def a; @datapath.read_a; end
-    def x; @datapath.read_x; end
-    def y; @datapath.read_y; end
-    def sp; @datapath.read_sp; end
-    def pc; @datapath.read_pc; end
-    def p; @datapath.read_p; end
+    # Register accessors - read through output ports
+    def a; @datapath.get_output(:reg_a); end
+    def x; @datapath.get_output(:reg_x); end
+    def y; @datapath.get_output(:reg_y); end
+    def sp; @datapath.get_output(:reg_sp); end
+    def pc; @datapath.get_output(:reg_pc); end
+    def p; @datapath.get_output(:reg_p); end
 
+    # Register setters - direct state manipulation for test setup
     def a=(v); @datapath.write_a(v); end
     def x=(v); @datapath.write_x(v); end
     def y=(v); @datapath.write_y(v); end

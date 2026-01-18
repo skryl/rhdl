@@ -378,7 +378,7 @@ examples/mos6502/
 ├── software/
 │   └── roms/               # ROM images
 └── hdl/
-    └── cpu_harness.rb      # CPU test harness
+    └── harness.rb      # CPU test harness
 ```
 
 ## See Also
