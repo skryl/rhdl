@@ -264,6 +264,28 @@ module RHDL
         end
       end
 
+      # Memory write statement (for sequential blocks)
+      class MemoryWrite
+        attr_reader :memory, :addr, :data
+
+        def initialize(memory:, addr:, data:)
+          @memory = memory
+          @addr = addr
+          @data = data
+        end
+      end
+
+      # Register array declaration (for reg [width-1:0] name [depth-1:0])
+      class RegArray
+        attr_reader :name, :width, :depth
+
+        def initialize(name:, width:, depth:)
+          @name = name
+          @width = width
+          @depth = depth
+        end
+      end
+
       # Module instance for structure design
       # Maps to Verilog module instantiation
       class Instance
