@@ -22,62 +22,62 @@ module RHDL
         port_output :zero_flag
         port_output :halt
 
-        # Internal signals
-        port_signal :instruction, width: 8
-        port_signal :operand, width: 8
-        port_signal :alu_result, width: 8
-        port_signal :alu_a, width: 8
-        port_signal :alu_b, width: 8
-        port_signal :alu_op, width: 4
-        port_signal :alu_zero
-        port_signal :reg_write
-        port_signal :alu_src
-        port_signal :decoder_mem_read
-        port_signal :decoder_mem_write
-        port_signal :branch
-        port_signal :jump
-        port_signal :pc_src, width: 2
-        port_signal :halt_signal
-        port_signal :call_signal
-        port_signal :ret_signal
-        port_signal :instr_length, width: 2
+        # Internal wires
+        wire :instruction, width: 8
+        wire :operand, width: 8
+        wire :alu_result, width: 8
+        wire :alu_a, width: 8
+        wire :alu_b, width: 8
+        wire :alu_op, width: 4
+        wire :alu_zero
+        wire :reg_write
+        wire :alu_src
+        wire :decoder_mem_read
+        wire :decoder_mem_write
+        wire :branch
+        wire :jump
+        wire :pc_src, width: 2
+        wire :halt_signal
+        wire :call_signal
+        wire :ret_signal
+        wire :instr_length, width: 2
 
         # Instruction Decoder
         instance :decoder, InstructionDecoder
-        wire :instruction => [:decoder, :instruction]
-        wire :zero_flag => [:decoder, :zero_flag]
-        wire [:decoder, :alu_op] => :alu_op
-        wire [:decoder, :alu_src] => :alu_src
-        wire [:decoder, :reg_write] => :reg_write
-        wire [:decoder, :mem_read] => :decoder_mem_read
-        wire [:decoder, :mem_write] => :decoder_mem_write
-        wire [:decoder, :branch] => :branch
-        wire [:decoder, :jump] => :jump
-        wire [:decoder, :pc_src] => :pc_src
-        wire [:decoder, :halt] => :halt_signal
-        wire [:decoder, :call] => :call_signal
-        wire [:decoder, :ret] => :ret_signal
-        wire [:decoder, :instr_length] => :instr_length
+        port :instruction => [:decoder, :instruction]
+        port :zero_flag => [:decoder, :zero_flag]
+        port [:decoder, :alu_op] => :alu_op
+        port [:decoder, :alu_src] => :alu_src
+        port [:decoder, :reg_write] => :reg_write
+        port [:decoder, :mem_read] => :decoder_mem_read
+        port [:decoder, :mem_write] => :decoder_mem_write
+        port [:decoder, :branch] => :branch
+        port [:decoder, :jump] => :jump
+        port [:decoder, :pc_src] => :pc_src
+        port [:decoder, :halt] => :halt_signal
+        port [:decoder, :call] => :call_signal
+        port [:decoder, :ret] => :ret_signal
+        port [:decoder, :instr_length] => :instr_length
 
         # ALU
         instance :alu, ALU, width: 8
-        wire :alu_a => [:alu, :a]
-        wire :alu_b => [:alu, :b]
-        wire :alu_op => [:alu, :op]
-        wire [:alu, :result] => :alu_result
-        wire [:alu, :zero] => :alu_zero
+        port :alu_a => [:alu, :a]
+        port :alu_b => [:alu, :b]
+        port :alu_op => [:alu, :op]
+        port [:alu, :result] => :alu_result
+        port [:alu, :zero] => :alu_zero
 
         # Program Counter (16-bit)
         instance :pc, ProgramCounter, width: 16
-        wire :clk => [:pc, :clk]
-        wire :rst => [:pc, :rst]
-        wire [:pc, :q] => :pc_out
+        port :clk => [:pc, :clk]
+        port :rst => [:pc, :rst]
+        port [:pc, :q] => :pc_out
 
         # Accumulator Register (8-bit)
         instance :acc, Register, width: 8
-        wire :clk => [:acc, :clk]
-        wire :rst => [:acc, :rst]
-        wire [:acc, :q] => :acc_out
+        port :clk => [:acc, :clk]
+        port :rst => [:acc, :rst]
+        port [:acc, :q] => :acc_out
       end
     end
   end

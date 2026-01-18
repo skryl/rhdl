@@ -8,9 +8,9 @@ module RHDL
     #
     # Components are defined using class-level declarations:
     # - port_input/port_output: Define I/O ports
-    # - port_signal: Define internal signals
+    # - wire: Define internal wires (signals)
     # - instance: Instantiate sub-components
-    # - wire: Connect signals to sub-component ports
+    # - port: Connect signals to sub-component ports
     # - behavior: Define combinational logic
     #
     # @example Simple combinational component
@@ -30,13 +30,16 @@ module RHDL
     #     port_input :b, width: 8
     #     port_output :result, width: 8
     #
+    #     wire :alu_out, width: 8
+    #
     #     instance :alu, ALU, width: 8
     #     instance :reg, Register, width: 8
     #
-    #     wire :a => [:alu, :a]
-    #     wire :b => [:alu, :b]
-    #     wire [:alu, :result] => [:reg, :d]
-    #     wire [:reg, :q] => :result
+    #     port :a => [:alu, :a]
+    #     port :b => [:alu, :b]
+    #     port [:alu, :result] => :alu_out
+    #     port :alu_out => [:reg, :d]
+    #     port [:reg, :q] => :result
     #   end
     #
     class SimComponent
@@ -93,9 +96,35 @@ module RHDL
           _port_defs << { name: name, direction: :out, width: width }
         end
 
-        def port_signal(name, width: 1)
-          _signal_defs << { name: name, width: width }
+        # Define an internal wire (signal)
+        # Also handles backwards-compatible connection syntax when called with a Hash
+        #
+        # @param name [Symbol] Wire name (for signal definition)
+        # @param width [Integer] Bit width (default: 1, only for signal definition)
+        # @param mappings [Hash] Connection mappings (backwards compatible)
+        #
+        # @example Define internal wire
+        #   wire :alu_out, width: 8
+        #
+        # @example Connection (backwards compatible, prefer 'port' instead)
+        #   wire :a => [:alu, :a]
+        #
+        def wire(name = nil, width: 1, **mappings)
+          if name.nil? && !mappings.empty?
+            # Backwards compatibility: wire :a => [:alu, :a]
+            # Ruby parses :a => [...] as keyword argument, so it ends up in mappings
+            port(mappings)
+          elsif name.is_a?(Hash)
+            # Explicit hash argument: wire({:a => [:alu, :a]})
+            port(name)
+          else
+            # New syntax: wire :signal_name, width: 8
+            _signal_defs << { name: name, width: width }
+          end
         end
+
+        # Alias for backwards compatibility
+        alias_method :port_signal, :wire
 
         # Define a sub-component instance (class-level)
         #
@@ -111,9 +140,9 @@ module RHDL
         #     instance :alu, ALU, width: 8
         #     instance :reg, Register, width: 8
         #
-        #     wire :a => [:alu, :a]
-        #     wire [:alu, :result] => [:reg, :d]
-        #     wire [:reg, :q] => :result
+        #     port :a => [:alu, :a]
+        #     port [:alu, :result] => [:reg, :d]
+        #     port [:reg, :q] => :result
         #   end
         #
         def instance(name, component_class, **params)
@@ -135,23 +164,23 @@ module RHDL
         #
         # @param mappings [Hash] Signal to port mappings
         #   Formats:
-        #   - wire :clk => [:pc, :clk]              # Signal to instance port
-        #   - wire :clk => [[:pc, :clk], [:acc, :clk]]  # Signal to multiple ports
-        #   - wire [:alu, :result] => :result      # Instance output to signal
-        #   - wire [:alu, :result] => [:reg, :d]   # Instance to instance
+        #   - port :clk => [:pc, :clk]              # Signal to instance port
+        #   - port :clk => [[:pc, :clk], [:acc, :clk]]  # Signal to multiple ports
+        #   - port [:alu, :result] => :result      # Instance output to signal
+        #   - port [:alu, :result] => [:reg, :d]   # Instance to instance
         #
-        def wire(mappings)
+        def port(mappings)
           mappings.each do |source, dest|
             _connection_defs << { source: source, dest: dest }
 
             if dest.is_a?(Array) && dest.first.is_a?(Array)
-              # Multiple destinations: connect :clk => [[:pc, :clk], [:acc, :clk]]
+              # Multiple destinations: port :clk => [[:pc, :clk], [:acc, :clk]]
               dest.each { |d| add_port_connection(source, d) }
             elsif dest.is_a?(Array) && dest.length == 2
-              # Single destination: connect :clk => [:pc, :clk]
+              # Single destination: port :clk => [:pc, :clk]
               add_port_connection(source, dest)
             elsif source.is_a?(Array) && source.length == 2
-              # Instance output to signal: connect [:alu, :result] => :result
+              # Instance output to signal: port [:alu, :result] => :result
               add_output_connection(source, dest)
             end
           end

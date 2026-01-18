@@ -382,12 +382,14 @@ Multi-level diagrams with hierarchy support are available. See `docs/diagrams.md
 ## Recent Changes
 
 ### Latest Updates (January 2025)
-- **Class-level hierarchical DSL** - Components now use class-level `instance` and `wire` methods
+- **Class-level hierarchical DSL** - Components use `instance`, `wire`, and `port` methods
   - Replaced block-based `structure do ... end` with class-level declarations
   - `instance :name, ComponentClass, params` - Instantiate sub-components
-  - `wire :signal => [:component, :port]` - Connect signals to sub-component ports
-  - Supports fan-out: `wire :clk => [[:comp1, :clk], [:comp2, :clk]]`
+  - `wire :signal_name, width: N` - Define internal wires (signals)
+  - `port :signal => [:component, :port]` - Connect signals to sub-component ports
+  - Supports fan-out: `port :clk => [[:comp1, :clk], [:comp2, :clk]]`
   - Generates Verilog module instantiations automatically
+  - Naming aligns with Verilog: `wire` for internal signals, `port` for connections
 - **Parallel test execution** - Test suite runs ~40% faster with parallel_tests gem
   - New rake tasks: `pspec`, `parallel:spec`, `parallel:spec_6502`, `parallel:spec_hdl`
   - Runtime-based load balancing with `parallel:prepare` and `parallel:spec_balanced`

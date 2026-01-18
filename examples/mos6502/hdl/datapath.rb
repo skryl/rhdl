@@ -46,65 +46,65 @@ module MOS6502
 
     # Internal signals for inter-component wiring
     # These signals connect component outputs to other component inputs
-    port_signal :ir_opcode, width: 8
-    port_signal :ir_operand_lo, width: 8
-    port_signal :ir_operand_hi, width: 8
-    port_signal :dec_addr_mode, width: 4
-    port_signal :dec_alu_op, width: 4
-    port_signal :dec_instr_type, width: 4
-    port_signal :dec_src_reg, width: 2
-    port_signal :dec_dst_reg, width: 2
-    port_signal :dec_branch_cond, width: 3
-    port_signal :dec_is_read
-    port_signal :dec_is_write
-    port_signal :dec_is_rmw
-    port_signal :dec_sets_nz
-    port_signal :dec_sets_c
-    port_signal :dec_sets_v
-    port_signal :dec_writes_reg
-    port_signal :dec_is_status_op
-    port_signal :ctrl_state, width: 8
-    port_signal :ctrl_pc_inc
-    port_signal :ctrl_pc_load
-    port_signal :ctrl_load_opcode
-    port_signal :ctrl_load_operand_lo
-    port_signal :ctrl_load_operand_hi
-    port_signal :ctrl_load_addr_lo
-    port_signal :ctrl_load_addr_hi
-    port_signal :ctrl_load_data
-    port_signal :ctrl_addr_sel, width: 3
-    port_signal :ctrl_data_sel, width: 3
-    port_signal :ctrl_reg_write
-    port_signal :ctrl_sp_inc
-    port_signal :ctrl_sp_dec
-    port_signal :ctrl_update_flags
-    port_signal :ctrl_mem_write
-    port_signal :ctrl_halted
-    port_signal :ctrl_cycle_count, width: 32
-    port_signal :alu_result, width: 8
-    port_signal :alu_n
-    port_signal :alu_z
-    port_signal :alu_c
-    port_signal :alu_v
-    port_signal :regs_a, width: 8
-    port_signal :regs_x, width: 8
-    port_signal :regs_y, width: 8
-    port_signal :sr_p, width: 8
-    port_signal :sr_n
-    port_signal :sr_v
-    port_signal :sr_z
-    port_signal :sr_c
-    port_signal :sr_d
-    port_signal :pc_val, width: 16
-    port_signal :sp_val, width: 8
-    port_signal :agen_eff_addr, width: 16
-    port_signal :agen_page_cross
-    port_signal :acalc_ptr_addr_lo, width: 16
-    port_signal :acalc_ptr_addr_hi, width: 16
-    port_signal :alatch_addr_lo, width: 8
-    port_signal :alatch_addr_hi, width: 8
-    port_signal :alatch_addr, width: 16
-    port_signal :dlatch_data, width: 8
+    wire :ir_opcode, width: 8
+    wire :ir_operand_lo, width: 8
+    wire :ir_operand_hi, width: 8
+    wire :dec_addr_mode, width: 4
+    wire :dec_alu_op, width: 4
+    wire :dec_instr_type, width: 4
+    wire :dec_src_reg, width: 2
+    wire :dec_dst_reg, width: 2
+    wire :dec_branch_cond, width: 3
+    wire :dec_is_read
+    wire :dec_is_write
+    wire :dec_is_rmw
+    wire :dec_sets_nz
+    wire :dec_sets_c
+    wire :dec_sets_v
+    wire :dec_writes_reg
+    wire :dec_is_status_op
+    wire :ctrl_state, width: 8
+    wire :ctrl_pc_inc
+    wire :ctrl_pc_load
+    wire :ctrl_load_opcode
+    wire :ctrl_load_operand_lo
+    wire :ctrl_load_operand_hi
+    wire :ctrl_load_addr_lo
+    wire :ctrl_load_addr_hi
+    wire :ctrl_load_data
+    wire :ctrl_addr_sel, width: 3
+    wire :ctrl_data_sel, width: 3
+    wire :ctrl_reg_write
+    wire :ctrl_sp_inc
+    wire :ctrl_sp_dec
+    wire :ctrl_update_flags
+    wire :ctrl_mem_write
+    wire :ctrl_halted
+    wire :ctrl_cycle_count, width: 32
+    wire :alu_result, width: 8
+    wire :alu_n
+    wire :alu_z
+    wire :alu_c
+    wire :alu_v
+    wire :regs_a, width: 8
+    wire :regs_x, width: 8
+    wire :regs_y, width: 8
+    wire :sr_p, width: 8
+    wire :sr_n
+    wire :sr_v
+    wire :sr_z
+    wire :sr_c
+    wire :sr_d
+    wire :pc_val, width: 16
+    wire :sp_val, width: 8
+    wire :agen_eff_addr, width: 16
+    wire :agen_page_cross
+    wire :acalc_ptr_addr_lo, width: 16
+    wire :acalc_ptr_addr_hi, width: 16
+    wire :alatch_addr_lo, width: 8
+    wire :alatch_addr_hi, width: 8
+    wire :alatch_addr, width: 16
+    wire :dlatch_data, width: 8
 
     # Component instances for Verilog synthesis
     # Sequential components - registers and state machines
