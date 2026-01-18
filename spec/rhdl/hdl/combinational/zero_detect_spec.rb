@@ -49,15 +49,15 @@ RSpec.describe RHDL::HDL::ZeroDetect do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::ZeroDetect.new('zero_detect', width: 4) }
-    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'zero_detect') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'zero_detect') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('zero_detect.a')
       expect(ir.outputs.keys).to include('zero_detect.zero')
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module zero_detect')
       expect(verilog).to include('input [3:0] a')
       expect(verilog).to include('output zero')
@@ -72,7 +72,7 @@ RSpec.describe RHDL::HDL::ZeroDetect do
           { inputs: { a: 15 }, expected: { zero: 0 } }
         ]
 
-        result = NetlistHelper.run_structural_simulation(ir, vectors, base_dir: 'tmp/netlist_test/zero_detect')
+        result = NetlistHelper.run_structure_simulation(ir, vectors, base_dir: 'tmp/netlist_test/zero_detect')
         expect(result[:success]).to be(true), result[:error]
 
         vectors.each_with_index do |vec, idx|

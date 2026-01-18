@@ -2,7 +2,7 @@
 
 module RHDL
   module Export
-    module Structural
+    module Structure
       module Primitives
         AND = :and
         OR = :or

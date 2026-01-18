@@ -209,7 +209,7 @@ RSpec.describe 'Gate-level backend equivalence' do
 
   it 'has a GPU backend parity stub when enabled' do
     skip 'GPU backend not requested' unless ENV.fetch('RHDL_TEST_GPU', '0') == '1'
-    skip 'GPU backend not available' unless RHDL::Export::Structural::SimGPU.available?
+    skip 'GPU backend not available' unless RHDL::Export::Structure::SimGPU.available?
 
     adder = RHDL::HDL::FullAdder.new('fa')
     gpu_sim = RHDL::Export.gate_level([adder], backend: :gpu, lanes: lanes, name: 'gpu_parity')

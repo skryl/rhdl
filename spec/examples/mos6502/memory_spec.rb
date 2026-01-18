@@ -32,12 +32,12 @@ RSpec.describe MOS6502::Memory do
   end
 
   describe 'gate-level netlist' do
-    # Memory uses behavioral RAM which cannot be lowered to primitive gates
+    # Memory uses behavior RAM which cannot be lowered to primitive gates
     # Gate-level synthesis is not supported for memory components
-    it 'is not supported for behavioral memory' do
+    it 'is not supported for behavior memory' do
       component = MOS6502::Memory.new('mos6502_memory')
       expect {
-        RHDL::Export::Structural::Lower.from_components([component], name: 'mos6502_memory')
+        RHDL::Export::Structure::Lower.from_components([component], name: 'mos6502_memory')
       }.to raise_error(ArgumentError, /Unsupported component/)
     end
   end

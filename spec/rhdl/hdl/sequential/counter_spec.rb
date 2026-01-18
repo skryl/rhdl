@@ -74,14 +74,14 @@ RSpec.describe RHDL::HDL::Counter do
       expect(verilog).to match(/output.*\[7:0\].*q/)
     end
 
-    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+    context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::Counter.to_verilog
-        behavioral = RHDL::HDL::Counter.new
-        behavioral.set_input(:rst, 0)
-        behavioral.set_input(:en, 1)
-        behavioral.set_input(:up, 1)
-        behavioral.set_input(:load, 0)
+        behavior = RHDL::HDL::Counter.new
+        behavior.set_input(:rst, 0)
+        behavior.set_input(:en, 1)
+        behavior.set_input(:up, 1)
+        behavior.set_input(:load, 0)
 
         inputs = { clk: 1, rst: 1, en: 1, up: 1, load: 1, d: 8 }
         outputs = { q: 8, tc: 1, zero: 1 }
@@ -98,28 +98,28 @@ RSpec.describe RHDL::HDL::Counter do
         ]
 
         test_cases.each do |tc|
-          behavioral.set_input(:d, tc[:d])
-          behavioral.set_input(:rst, tc[:rst])
-          behavioral.set_input(:en, tc[:en])
-          behavioral.set_input(:up, tc[:up])
-          behavioral.set_input(:load, tc[:load])
-          behavioral.set_input(:clk, 0)
-          behavioral.propagate
-          behavioral.set_input(:clk, 1)
-          behavioral.propagate
+          behavior.set_input(:d, tc[:d])
+          behavior.set_input(:rst, tc[:rst])
+          behavior.set_input(:en, tc[:en])
+          behavior.set_input(:up, tc[:up])
+          behavior.set_input(:load, tc[:load])
+          behavior.set_input(:clk, 0)
+          behavior.propagate
+          behavior.set_input(:clk, 1)
+          behavior.propagate
           vectors << {
             inputs: { d: tc[:d], rst: tc[:rst], en: tc[:en], up: tc[:up], load: tc[:load] },
-            expected: { q: behavioral.get_output(:q), tc: behavioral.get_output(:tc), zero: behavioral.get_output(:zero) }
+            expected: { q: behavior.get_output(:q), tc: behavior.get_output(:tc), zero: behavior.get_output(:zero) }
           }
         end
 
-        result = NetlistHelper.run_behavioral_simulation(
+        result = NetlistHelper.run_behavior_simulation(
           verilog,
           module_name: 'counter',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavioral_test/counter',
+          base_dir: 'tmp/behavior_test/counter',
           has_clock: true
         )
 
@@ -139,7 +139,7 @@ RSpec.describe RHDL::HDL::Counter do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::Counter.new('counter') }
-    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'counter') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'counter') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('counter.clk', 'counter.rst', 'counter.en', 'counter.up', 'counter.load', 'counter.d')
@@ -147,8 +147,8 @@ RSpec.describe RHDL::HDL::Counter do
       expect(ir.dffs.length).to eq(8)  # 8-bit counter has 8 DFFs
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module counter')
       expect(verilog).to include('input [7:0] d')
       expect(verilog).to include('input clk')
@@ -162,13 +162,13 @@ RSpec.describe RHDL::HDL::Counter do
     end
 
     context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation' do
+      it 'matches behavior simulation' do
         test_vectors = []
-        behavioral = RHDL::HDL::Counter.new
-        behavioral.set_input(:rst, 0)
-        behavioral.set_input(:en, 1)
-        behavioral.set_input(:up, 1)
-        behavioral.set_input(:load, 0)
+        behavior = RHDL::HDL::Counter.new
+        behavior.set_input(:rst, 0)
+        behavior.set_input(:en, 1)
+        behavior.set_input(:up, 1)
+        behavior.set_input(:load, 0)
 
         test_cases = [
           { d: 0, rst: 0, en: 1, up: 1, load: 0 },  # count up: 0->1
@@ -180,22 +180,22 @@ RSpec.describe RHDL::HDL::Counter do
 
         expected_outputs = []
         test_cases.each do |tc|
-          behavioral.set_input(:d, tc[:d])
-          behavioral.set_input(:rst, tc[:rst])
-          behavioral.set_input(:en, tc[:en])
-          behavioral.set_input(:up, tc[:up])
-          behavioral.set_input(:load, tc[:load])
-          behavioral.set_input(:clk, 0)
-          behavioral.propagate
-          behavioral.set_input(:clk, 1)
-          behavioral.propagate
+          behavior.set_input(:d, tc[:d])
+          behavior.set_input(:rst, tc[:rst])
+          behavior.set_input(:en, tc[:en])
+          behavior.set_input(:up, tc[:up])
+          behavior.set_input(:load, tc[:load])
+          behavior.set_input(:clk, 0)
+          behavior.propagate
+          behavior.set_input(:clk, 1)
+          behavior.propagate
 
           test_vectors << { inputs: tc }
-          expected_outputs << { q: behavioral.get_output(:q) }
+          expected_outputs << { q: behavior.get_output(:q) }
         end
 
         base_dir = File.join('tmp', 'iverilog', 'counter')
-        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+        result = NetlistHelper.run_structure_simulation(ir, test_vectors, base_dir: base_dir)
 
         expect(result[:success]).to be(true), result[:error]
 

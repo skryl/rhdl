@@ -83,7 +83,7 @@ RSpec.describe RHDL::HDL::BarrelShifter do
 
   describe 'gate-level netlist' do
     let(:component) { RHDL::HDL::BarrelShifter.new('bshifter') }
-    let(:ir) { RHDL::Export::Structural::Lower.from_components([component], name: 'bshifter') }
+    let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'bshifter') }
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('bshifter.a', 'bshifter.shift', 'bshifter.dir', 'bshifter.arith', 'bshifter.rotate')
@@ -91,8 +91,8 @@ RSpec.describe RHDL::HDL::BarrelShifter do
       expect(ir.gates.length).to be >= 1
     end
 
-    it 'generates valid structural Verilog' do
-      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+    it 'generates valid structure Verilog' do
+      verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module bshifter')
       expect(verilog).to include('input [7:0] a')
       expect(verilog).to include('input [2:0] shift')
@@ -103,9 +103,9 @@ RSpec.describe RHDL::HDL::BarrelShifter do
     end
 
     context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
-      it 'matches behavioral simulation' do
+      it 'matches behavior simulation' do
         test_vectors = []
-        behavioral = RHDL::HDL::BarrelShifter.new
+        behavior = RHDL::HDL::BarrelShifter.new
 
         test_cases = [
           { a: 0b00001111, shift: 2, dir: 0, arith: 0, rotate: 0 },  # shift left
@@ -117,19 +117,19 @@ RSpec.describe RHDL::HDL::BarrelShifter do
 
         expected_outputs = []
         test_cases.each do |tc|
-          behavioral.set_input(:a, tc[:a])
-          behavioral.set_input(:shift, tc[:shift])
-          behavioral.set_input(:dir, tc[:dir])
-          behavioral.set_input(:arith, tc[:arith])
-          behavioral.set_input(:rotate, tc[:rotate])
-          behavioral.propagate
+          behavior.set_input(:a, tc[:a])
+          behavior.set_input(:shift, tc[:shift])
+          behavior.set_input(:dir, tc[:dir])
+          behavior.set_input(:arith, tc[:arith])
+          behavior.set_input(:rotate, tc[:rotate])
+          behavior.propagate
 
           test_vectors << { inputs: tc }
-          expected_outputs << { y: behavioral.get_output(:y) }
+          expected_outputs << { y: behavior.get_output(:y) }
         end
 
         base_dir = File.join('tmp', 'iverilog', 'bshifter')
-        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+        result = NetlistHelper.run_structure_simulation(ir, test_vectors, base_dir: base_dir)
 
         expect(result[:success]).to be(true), result[:error]
 

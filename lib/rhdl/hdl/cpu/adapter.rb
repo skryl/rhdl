@@ -1,10 +1,10 @@
 # HDL CPU Adapter
-# Provides the same interface as the behavioral CPU for compatibility
+# Provides the same interface as the behavior CPU for compatibility
 
 module RHDL
   module HDL
     module CPU
-      # Memory adapter that wraps HDL RAM with behavioral Memory interface
+      # Memory adapter that wraps HDL RAM with behavior Memory interface
       class MemoryAdapter
         def initialize(ram)
           @ram = ram

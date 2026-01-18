@@ -50,10 +50,10 @@ rhdl/
 │   │   ├── memory.rb            # RAM, ROM, register files
 │   │   ├── diagram.rb           # Diagram generation
 │   │   └── cpu/                 # HDL CPU implementation
-│   │       ├── datapath.rb      # Behavioral CPU datapath
+│   │       ├── datapath.rb      # Behavior CPU datapath
 │   │       ├── synth_datapath.rb # Synthesizable CPU datapath
 │   │       ├── instruction_decoder.rb # Instruction decoder
-│   │       └── adapter.rb       # Behavioral/HDL adapter
+│   │       └── adapter.rb       # Behavior/HDL adapter
 │   ├── gates/                   # Gate-level synthesis
 │   │   ├── primitives.rb        # Gate primitives (AND, OR, XOR, NOT, MUX, DFF)
 │   │   ├── ir.rb                # Gate-level intermediate representation
@@ -66,7 +66,7 @@ rhdl/
 │       └── netlist.rb           # Netlist generation
 │
 ├── examples/                    # Example implementations
-│   ├── mos6502/                 # MOS 6502 behavioral CPU
+│   ├── mos6502/                 # MOS 6502 behavior CPU
 │   │   ├── cpu.rb               # 6502 CPU
 │   │   ├── alu.rb               # 6502 ALU
 │   │   ├── control_unit.rb      # State machine
@@ -127,7 +127,7 @@ The project uses these gems:
 - `iverilog` - Icarus Verilog for gate-level simulation tests
   - Install on Ubuntu/Debian: `apt-get install iverilog`
   - Install on macOS: `brew install icarus-verilog`
-  - When installed, enables iverilog simulation tests that verify gate-level synthesis matches behavioral simulation
+  - When installed, enables iverilog simulation tests that verify gate-level synthesis matches behavior simulation
 
 ### Installation
 
@@ -195,7 +195,7 @@ bundle exec rake spec_doc
 | Test Suite | Status |
 |------------|--------|
 | MOS 6502 CPU | 189+ tests passing |
-| Behavioral CPU | 47 tests passing |
+| Behavior CPU | 47 tests passing |
 | HDL CPU | 22 tests passing |
 | HDL Components | All passing |
 
@@ -207,12 +207,12 @@ Key test files:
 
 ### Gate-Level Simulation Tests
 
-When iverilog is installed, additional tests run that verify gate-level synthesis matches behavioral simulation:
+When iverilog is installed, additional tests run that verify gate-level synthesis matches behavior simulation:
 
-1. Gate-level IR is converted to structural Verilog
-2. A testbench generates test vectors from behavioral simulation
-3. iverilog compiles and runs the structural simulation
-4. Results are compared against expected behavioral outputs
+1. Gate-level IR is converted to structure Verilog
+2. A testbench generates test vectors from behavior simulation
+3. iverilog compiles and runs the structure simulation
+4. Results are compared against expected behavior outputs
 
 These tests are conditional (`if: HdlToolchain.iverilog_available?`) and automatically skip when iverilog is not installed.
 
@@ -292,7 +292,7 @@ require 'rhdl/export'
 alu = RHDL::HDL::ALU.new('alu', width: 8)
 
 # Lower to gate-level IR
-ir = RHDL::Export::Structural::Lower.from_components([alu], name: 'alu')
+ir = RHDL::Export::Structure::Lower.from_components([alu], name: 'alu')
 
 # Export to JSON netlist
 File.write('alu.json', ir.to_json)
