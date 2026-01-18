@@ -10,6 +10,7 @@ import {
   CommandInput
 } from './components/index.js';
 import { useSimulator } from './hooks/useSimulator.js';
+import { theme, box, headerCompact } from './theme.js';
 
 type Mode = 'normal' | 'command' | 'help';
 type FocusedPanel = 'signals' | 'waveform' | 'console' | 'breakpoints';
@@ -27,10 +28,11 @@ export function App() {
   const termWidth = stdout?.columns ?? 120;
   const termHeight = stdout?.rows ?? 40;
 
-  const leftWidth = Math.floor(termWidth * 0.4);
-  const rightWidth = termWidth - leftWidth - 2;
-  const topHeight = Math.floor(termHeight * 0.65);
-  const bottomHeight = termHeight - topHeight - 3;
+  // SHENZHEN I/O style layout - 3 columns
+  const leftWidth = Math.floor(termWidth * 0.35);
+  const middleWidth = Math.floor(termWidth * 0.40);
+  const rightWidth = termWidth - leftWidth - middleWidth - 2;
+  const mainHeight = termHeight - 6; // Header + Status bar
 
   const executeCommand = useCallback((cmd: string) => {
     const parts = cmd.trim().split(/\s+/);
@@ -88,7 +90,6 @@ export function App() {
         exit();
         break;
       default:
-        // Unknown command - logged by Ruby side
         break;
     }
   }, [simulator, exit]);
@@ -104,7 +105,6 @@ export function App() {
     setCommandBuffer('');
   }, []);
 
-  // Cycle through panels
   const cycleFocus = useCallback(() => {
     const panels: FocusedPanel[] = ['signals', 'waveform', 'console', 'breakpoints'];
     const currentIndex = panels.indexOf(focusedPanel);
@@ -112,18 +112,15 @@ export function App() {
   }, [focusedPanel]);
 
   useInput((input, key) => {
-    // Handle help mode - any key closes
     if (mode === 'help') {
       setMode('normal');
       return;
     }
 
-    // Handle command mode
     if (mode === 'command') {
-      return; // Handled by CommandInput
+      return;
     }
 
-    // Normal mode key handling
     if (key.escape) {
       setMode('normal');
     } else if (input === 'q' || (key.ctrl && input === 'c')) {
@@ -161,41 +158,67 @@ export function App() {
 
   return (
     <Box flexDirection="column" width={termWidth} height={termHeight}>
-      {/* Main content area */}
+      {/* Header bar - SHENZHEN I/O style */}
+      <Box>
+        <Text color={theme.border}>{box.dHorizontal.repeat(termWidth)}</Text>
+      </Box>
+      <Box justifyContent="space-between">
+        <Box>
+          <Text color={theme.border}>{box.dVertical}</Text>
+          <Text color={theme.primaryBright} bold> RHDL </Text>
+          <Text color={theme.primary}>HARDWARE SIMULATOR</Text>
+        </Box>
+        <Box>
+          <Text color={theme.textMuted}>v1.0</Text>
+          <Text color={theme.border}> {box.dVertical}</Text>
+        </Box>
+      </Box>
+      <Box>
+        <Text color={theme.border}>{box.dHorizontal.repeat(termWidth)}</Text>
+      </Box>
+
+      {/* Main content - 3 column layout */}
       <Box flexGrow={1}>
         {/* Left column - Signals */}
         <Box flexDirection="column" width={leftWidth}>
           <SignalPanel
             signals={state?.signals ?? []}
-            height={topHeight}
+            width={leftWidth}
+            height={mainHeight}
             focused={focusedPanel === 'signals'}
+          />
+        </Box>
+
+        {/* Middle column - Waveform */}
+        <Box flexDirection="column" width={middleWidth}>
+          <WaveformPanel
+            waveforms={state?.waveforms ?? []}
+            width={middleWidth}
+            height={Math.floor(mainHeight * 0.6)}
+            focused={focusedPanel === 'waveform'}
           />
           <ConsolePanel
             logs={simulator.logs}
-            height={bottomHeight}
+            width={middleWidth}
+            height={Math.floor(mainHeight * 0.4)}
             focused={focusedPanel === 'console'}
           />
         </Box>
 
-        {/* Right column - Waveform and Breakpoints */}
+        {/* Right column - Breakpoints */}
         <Box flexDirection="column" width={rightWidth}>
-          <WaveformPanel
-            waveforms={state?.waveforms ?? []}
-            width={rightWidth}
-            height={topHeight}
-            focused={focusedPanel === 'waveform'}
-          />
           <BreakpointPanel
             breakpoints={state?.breakpoints ?? []}
             watchpoints={state?.watchpoints ?? []}
-            height={bottomHeight}
+            width={rightWidth}
+            height={mainHeight}
             focused={focusedPanel === 'breakpoints'}
             onDelete={simulator.deleteBreakpoint}
           />
         </Box>
       </Box>
 
-      {/* Command input (when in command mode) */}
+      {/* Command input */}
       {mode === 'command' && (
         <CommandInput
           initialValue={commandBuffer}
@@ -213,10 +236,19 @@ export function App() {
         connected={simulator.connected}
         mode={mode}
         commandBuffer={commandBuffer}
+        width={termWidth}
       />
 
-      {/* Help overlay */}
-      {mode === 'help' && <HelpOverlay onClose={() => setMode('normal')} />}
+      {/* Help overlay - centered */}
+      {mode === 'help' && (
+        <Box
+          position="absolute"
+          marginTop={5}
+          marginLeft={Math.floor((termWidth - 60) / 2)}
+        >
+          <HelpOverlay onClose={() => setMode('normal')} />
+        </Box>
+      )}
     </Box>
   );
 }
