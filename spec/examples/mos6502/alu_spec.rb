@@ -1,5 +1,5 @@
 require_relative 'spec_helper'
-require_relative '../../../examples/mos6502/alu'
+require_relative '../../../examples/mos6502/hdl/alu'
 
 RSpec.describe MOS6502::ALU do
   let(:alu) { MOS6502::ALU.new }

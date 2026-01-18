@@ -2,8 +2,8 @@
 # Decodes opcodes into control signals
 # Uses behavior DSL for ROM-style lookup table synthesis
 
-require_relative '../../lib/rhdl'
-require_relative '../../lib/rhdl/dsl/behavior'
+require_relative '../../../lib/rhdl'
+require_relative '../../../lib/rhdl/dsl/behavior'
 require_relative 'alu'
 
 module MOS6502
