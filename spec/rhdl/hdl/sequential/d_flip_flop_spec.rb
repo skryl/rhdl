@@ -63,4 +63,66 @@ RSpec.describe RHDL::HDL::DFlipFlop do
       expect(verilog).to include('output q')
     end
   end
+
+  describe 'gate-level netlist' do
+    let(:component) { RHDL::HDL::DFlipFlop.new('dff') }
+    let(:ir) { RHDL::Gates::Lower.from_components([component], name: 'dff') }
+
+    it 'generates correct IR structure' do
+      expect(ir.inputs.keys).to include('dff.d', 'dff.clk', 'dff.rst', 'dff.en')
+      expect(ir.outputs.keys).to include('dff.q', 'dff.qn')
+      expect(ir.dffs.length).to eq(1)
+    end
+
+    it 'generates valid structural Verilog' do
+      verilog = NetlistHelper.ir_to_structural_verilog(ir)
+      expect(verilog).to include('module dff')
+      expect(verilog).to include('input d')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('input rst')
+      expect(verilog).to include('input en')
+      expect(verilog).to include('output q')
+      expect(verilog).to include('output qn')
+    end
+
+    context 'iverilog simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches behavioral simulation' do
+        test_vectors = []
+        behavioral = RHDL::HDL::DFlipFlop.new
+        behavioral.set_input(:rst, 0)
+        behavioral.set_input(:en, 1)
+
+        test_cases = [
+          { d: 1, rst: 0, en: 1 },  # capture 1
+          { d: 0, rst: 0, en: 1 },  # capture 0
+          { d: 1, rst: 0, en: 0 },  # hold (en=0)
+          { d: 0, rst: 1, en: 1 },  # reset
+        ]
+
+        expected_outputs = []
+        test_cases.each do |tc|
+          behavioral.set_input(:d, tc[:d])
+          behavioral.set_input(:rst, tc[:rst])
+          behavioral.set_input(:en, tc[:en])
+          behavioral.set_input(:clk, 0)
+          behavioral.propagate
+          behavioral.set_input(:clk, 1)
+          behavioral.propagate
+
+          test_vectors << { inputs: tc }
+          expected_outputs << { q: behavioral.get_output(:q) }
+        end
+
+        base_dir = File.join('tmp', 'iverilog', 'dff')
+        result = NetlistHelper.run_structural_simulation(ir, test_vectors, base_dir: base_dir)
+
+        expect(result[:success]).to be(true), result[:error]
+
+        expected_outputs.each_with_index do |expected, idx|
+          expect(result[:results][idx][:q]).to eq(expected[:q]),
+            "Cycle #{idx}: expected q=#{expected[:q]}, got #{result[:results][idx][:q]}"
+        end
+      end
+    end
+  end
 end
