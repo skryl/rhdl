@@ -118,7 +118,62 @@ module MOS6502
       (TEXT_PAGE1_START..TEXT_PAGE1_END).any? { |addr| @memory[addr] != 0 }
     end
 
+    # Read the text page as a 2D array of character codes (24 rows x 40 columns)
+    def read_text_page
+      result = []
+      24.times do |row|
+        line = []
+        base = text_line_address(row)
+        40.times do |col|
+          line << @memory[base + col]
+        end
+        result << line
+      end
+      result
+    end
+
+    # Read the text page as 24 lines of strings
+    def read_text_page_string
+      read_text_page.map do |line|
+        line.map { |c| ((c & 0x7F) >= 0x20 ? (c & 0x7F).chr : ' ') }.join
+      end
+    end
+
+    # Check if the screen has been modified
+    def text_page_dirty?
+      @text_page_dirty ||= false
+    end
+
+    # Clear the screen dirty flag
+    def clear_text_page_dirty
+      @text_page_dirty = false
+    end
+
+    # Mark the screen as dirty
+    def mark_text_page_dirty
+      @text_page_dirty = true
+    end
+
+    # Get the key ready state
+    def key_ready
+      @key_ready
+    end
+
+    # Clear the key ready flag
+    def clear_key
+      @key_ready = false
+    end
+
     private
+
+    # Apple II text page has a non-linear layout
+    def text_line_address(row)
+      base = TEXT_PAGE1_START
+      # Apple II screen memory layout: interleaved in groups of 8
+      group = row / 8
+      offset = row % 8
+      base + (offset * 0x80) + (group * 0x28)
+    end
 
     def handle_read(addr)
       if io_page?(addr)
@@ -137,6 +192,11 @@ module MOS6502
       return if @rom_mask[addr]
 
       @memory[addr] = value & 0xFF
+
+      # Mark text page dirty if writing to text area
+      if addr >= TEXT_PAGE1_START && addr <= TEXT_PAGE1_END
+        @text_page_dirty = true
+      end
     end
 
     def io_page?(addr)
