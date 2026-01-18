@@ -1,4 +1,14 @@
-# RHDL (Ruby Hardware Description Language)
+```
+    ____  __  ______  __
+   / __ \/ / / / __ \/ /
+  / /_/ / /_/ / / / / /
+ / _, _/ __  / /_/ / /___
+/_/ |_/_/ /_/_____/_____/
+
+  Ruby Hardware Description Language
+```
+
+# RHDL
 
 RHDL is a Domain Specific Language (DSL) for designing hardware using Ruby's flexible syntax and exporting to synthesizable Verilog. It provides Ruby developers with a comfortable environment to create hardware designs leveraging Ruby's metaprogramming capabilities.
 
@@ -10,6 +20,21 @@ RHDL is a Domain Specific Language (DSL) for designing hardware using Ruby's fle
 - **Component Library**: Gates, flip-flops, registers, ALU, memory, and more
 - **Gate-Level Synthesis**: Lower components to primitive gate netlists (AND, OR, XOR, NOT, MUX, DFF)
 - **Diagram Generation**: Multi-level circuit diagrams with SVG, PNG, and DOT output
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Overview](docs/overview.md) | Introduction to the HDL framework |
+| [DSL Guide](docs/dsl.md) | DSL reference for synthesizable components |
+| [Components](docs/components.md) | Complete reference for all HDL components |
+| [Export](docs/export.md) | Verilog and gate-level export |
+| [8-bit CPU](docs/8bit_cpu.md) | Sample 8-bit CPU reference |
+| [MOS 6502](docs/mos6502_cpu.md) | MOS 6502 CPU implementation |
+| [Apple II](docs/apple2.md) | Apple II emulation |
+| [Simulation](docs/simulation.md) | Core simulation infrastructure |
+| [Debugging](docs/debugging.md) | Signal probing, breakpoints, and TUI |
+| [Diagrams](docs/diagrams.md) | Multi-level circuit diagrams |
 
 ## Quick Start
 
@@ -207,7 +232,7 @@ bus.key_press('A')
 cpu.run
 ```
 
-See [Apple II I/O](docs/apple2_io.md) for details.
+See [Apple II](docs/apple2.md) for details.
 
 ## Project Structure
 
@@ -230,23 +255,6 @@ rhdl/
 │   └── gates/          # Gate-level JSON netlists
 └── docs/               # Documentation
 ```
-
-## Documentation
-
-Detailed documentation is available in the `docs/` directory:
-
-| Document | Description |
-|----------|-------------|
-| [Overview](docs/overview.md) | Introduction to the HDL framework |
-| [DSL Guide](docs/dsl.md) | DSL reference for synthesizable components |
-| [Components](docs/components.md) | Complete reference for all HDL components |
-| [Export](docs/export.md) | Verilog and gate-level export |
-| [8-bit CPU](docs/8bit_cpu.md) | Sample 8-bit CPU reference |
-| [MOS 6502](docs/mos6502_cpu.md) | MOS 6502 CPU implementation |
-| [Apple II](docs/apple2.md) | Apple II emulation |
-| [Simulation](docs/simulation.md) | Core simulation infrastructure |
-| [Debugging](docs/debugging.md) | Signal probing, breakpoints, and TUI |
-| [Diagrams](docs/diagrams.md) | Multi-level circuit diagrams |
 
 ## Rake Tasks
 
