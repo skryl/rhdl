@@ -17,17 +17,17 @@ module RHDL
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
-      port_input :clk
-      port_input :rst
-      port_input :wr_en
-      port_input :rd_en
-      port_input :din, width: 8
-      port_output :dout, width: 8
-      port_output :empty
-      port_output :full
-      port_output :count, width: 5
-      port_output :wr_ptr, width: 4
-      port_output :rd_ptr, width: 4
+      input :clk
+      input :rst
+      input :wr_en
+      input :rd_en
+      input :din, width: 8
+      output :dout, width: 8
+      output :empty
+      output :full
+      output :count, width: 5
+      output :wr_ptr, width: 4
+      output :rd_ptr, width: 4
 
       # Memory for FIFO data (16 entries x 8-bit)
       memory :data, depth: 16, width: 8

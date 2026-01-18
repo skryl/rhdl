@@ -13,14 +13,14 @@ module RHDL
     class RegisterFile < SimComponent
       include RHDL::DSL::MemoryDSL
 
-      port_input :clk
-      port_input :we
-      port_input :waddr, width: 3
-      port_input :raddr1, width: 3
-      port_input :raddr2, width: 3
-      port_input :wdata, width: 8
-      port_output :rdata1, width: 8
-      port_output :rdata2, width: 8
+      input :clk
+      input :we
+      input :waddr, width: 3
+      input :raddr1, width: 3
+      input :raddr2, width: 3
+      input :wdata, width: 8
+      output :rdata1, width: 8
+      output :rdata2, width: 8
 
       # Define register array (8 x 8-bit registers)
       memory :registers, depth: 8, width: 8

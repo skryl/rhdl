@@ -7,13 +7,13 @@
 #   class TrafficLight < RHDL::HDL::SequentialComponent
 #     include RHDL::DSL::StateMachineDSL
 #
-#     port_input :clk
-#     port_input :rst
-#     port_input :sensor
-#     port_output :red
-#     port_output :yellow
-#     port_output :green
-#     port_output :state, width: 2
+#     input :clk
+#     input :rst
+#     input :sensor
+#     output :red
+#     output :yellow
+#     output :green
+#     output :state, width: 2
 #
 #     state_machine clock: :clk, reset: :rst do
 #       state :RED, value: 0 do

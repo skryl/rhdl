@@ -11,30 +11,30 @@ module RISCV
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
-      port_input :clk
-      port_input :rst
+      input :clk
+      input :rst
 
       # Data from MEM stage
-      port_input :alu_result_in, width: 32
-      port_input :mem_data_in, width: 32
-      port_input :rd_addr_in, width: 5
-      port_input :pc_plus4_in, width: 32    # For JAL/JALR
+      input :alu_result_in, width: 32
+      input :mem_data_in, width: 32
+      input :rd_addr_in, width: 5
+      input :pc_plus4_in, width: 32    # For JAL/JALR
 
       # Control signals from MEM stage
-      port_input :reg_write_in
-      port_input :mem_to_reg_in
-      port_input :jump_in
+      input :reg_write_in
+      input :mem_to_reg_in
+      input :jump_in
 
       # Outputs to WB stage
-      port_output :alu_result_out, width: 32
-      port_output :mem_data_out, width: 32
-      port_output :rd_addr_out, width: 5
-      port_output :pc_plus4_out, width: 32
+      output :alu_result_out, width: 32
+      output :mem_data_out, width: 32
+      output :rd_addr_out, width: 5
+      output :pc_plus4_out, width: 32
 
       # Control outputs
-      port_output :reg_write_out
-      port_output :mem_to_reg_out
-      port_output :jump_out
+      output :reg_write_out
+      output :mem_to_reg_out
+      output :jump_out
 
       sequential clock: :clk, reset: :rst, reset_values: {
         alu_result_out: 0, mem_data_out: 0, rd_addr_out: 0, pc_plus4_out: 4,

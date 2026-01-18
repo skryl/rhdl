@@ -5,13 +5,14 @@ module RHDL
   module HDL
     # 4-to-1 Multiplexer
     class Mux4 < SimComponent
-      # Class-level port definitions for synthesis (default 1-bit width)
-      port_input :a
-      port_input :b
-      port_input :c
-      port_input :d
-      port_input :sel, width: 2
-      port_output :y
+      parameter :width, default: 1
+
+      input :a, width: :width
+      input :b, width: :width
+      input :c, width: :width
+      input :d, width: :width
+      input :sel, width: 2
+      output :y, width: :width
 
       behavior do
         # 4-to-1 mux using nested 2-to-1 muxes
@@ -21,25 +22,6 @@ module RHDL
         low_mux = local(:low_mux, mux(sel[0], b, a), width: w)   # sel[0]=0: a, sel[0]=1: b
         high_mux = local(:high_mux, mux(sel[0], d, c), width: w) # sel[0]=0: c, sel[0]=1: d
         y <= mux(sel[1], high_mux, low_mux)  # sel[1]=0: low, sel[1]=1: high
-      end
-
-      def initialize(name = nil, width: 1)
-        @width = width
-        super(name)
-      end
-
-      def setup_ports
-        # Override default width if different from 1
-        return if @width == 1
-        @inputs[:a] = Wire.new("#{@name}.a", width: @width)
-        @inputs[:b] = Wire.new("#{@name}.b", width: @width)
-        @inputs[:c] = Wire.new("#{@name}.c", width: @width)
-        @inputs[:d] = Wire.new("#{@name}.d", width: @width)
-        @outputs[:y] = Wire.new("#{@name}.y", width: @width)
-        @inputs[:a].on_change { |_| propagate }
-        @inputs[:b].on_change { |_| propagate }
-        @inputs[:c].on_change { |_| propagate }
-        @inputs[:d].on_change { |_| propagate }
       end
     end
   end

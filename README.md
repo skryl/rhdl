@@ -135,6 +135,36 @@ class TrafficLight < RHDL::HDL::SequentialComponent
 end
 ```
 
+#### Hierarchical Components
+
+Build complex components from sub-components using `instance`, `wire`, and `port`:
+
+```ruby
+class MyDatapath < RHDL::HDL::SimComponent
+  port_input :clk
+  port_input :rst
+  port_input :a, width: 8
+  port_input :b, width: 8
+  port_output :result, width: 8
+
+  # Internal wire
+  wire :alu_out, width: 8
+
+  # Sub-component instances
+  instance :alu, ALU, width: 8
+  instance :reg, Register, width: 8
+
+  # Port connections
+  port :a => [:alu, :a]
+  port :b => [:alu, :b]
+  port [:alu, :result] => :alu_out
+  port :alu_out => [:reg, :d]
+  port :clk => [:reg, :clk]
+  port :rst => [:reg, :rst]
+  port [:reg, :q] => :result
+end
+```
+
 ### Exporting to Verilog
 
 ```ruby

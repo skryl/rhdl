@@ -12,25 +12,25 @@ module RISCV
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
-    port_input :clk
-    port_input :rst
+    input :clk
+    input :rst
 
     # Read ports (asynchronous)
-    port_input :rs1_addr, width: 5    # Source register 1 address
-    port_input :rs2_addr, width: 5    # Source register 2 address
-    port_output :rs1_data, width: 32  # Source register 1 data
-    port_output :rs2_data, width: 32  # Source register 2 data
+    input :rs1_addr, width: 5    # Source register 1 address
+    input :rs2_addr, width: 5    # Source register 2 address
+    output :rs1_data, width: 32  # Source register 1 data
+    output :rs2_data, width: 32  # Source register 2 data
 
     # Write port (synchronous)
-    port_input :rd_addr, width: 5     # Destination register address
-    port_input :rd_data, width: 32    # Write data
-    port_input :rd_we                 # Write enable
+    input :rd_addr, width: 5     # Destination register address
+    input :rd_data, width: 32    # Write data
+    input :rd_we                 # Write enable
 
     # Debug outputs for testing
-    port_output :debug_x1, width: 32
-    port_output :debug_x2, width: 32
-    port_output :debug_x10, width: 32
-    port_output :debug_x11, width: 32
+    output :debug_x1, width: 32
+    output :debug_x2, width: 32
+    output :debug_x10, width: 32
+    output :debug_x11, width: 32
 
     def initialize(name = nil)
       super(name)

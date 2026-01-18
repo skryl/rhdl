@@ -9,11 +9,11 @@ module RHDL
     class SRLatch < SimComponent
       include RHDL::DSL::Behavior
 
-      port_input :s
-      port_input :r
-      port_input :en
-      port_output :q
-      port_output :qn
+      input :s
+      input :r
+      input :en
+      output :q
+      output :qn
 
       # Combinational behavior block for SR latch
       # SR latch truth table: S=1,R=0 -> Q=1; S=0,R=1 -> Q=0; S=R=0 -> hold; S=R=1 -> invalid (R wins)

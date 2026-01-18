@@ -20,133 +20,131 @@ module RISCV
     include RHDL::DSL::Sequential
 
     # External interface
-    port_input :clk
-    port_input :rst
+    input :clk
+    input :rst
 
     # Instruction memory interface
-    port_output :inst_addr, width: 32    # Instruction address
-    port_input :inst_data, width: 32     # Instruction data
+    output :inst_addr, width: 32    # Instruction address
+    input :inst_data, width: 32     # Instruction data
 
     # Data memory interface
-    port_output :data_addr, width: 32    # Data address
-    port_output :data_wdata, width: 32   # Write data
-    port_input :data_rdata, width: 32    # Read data
-    port_output :data_we                 # Write enable
-    port_output :data_re                 # Read enable
-    port_output :data_funct3, width: 3   # Memory access size
+    output :data_addr, width: 32    # Data address
+    output :data_wdata, width: 32   # Write data
+    input :data_rdata, width: 32    # Read data
+    output :data_we                 # Write enable
+    output :data_re                 # Read enable
+    output :data_funct3, width: 3   # Memory access size
 
     # Debug outputs
-    port_output :debug_pc, width: 32
-    port_output :debug_inst, width: 32
-    port_output :debug_x1, width: 32
-    port_output :debug_x2, width: 32
-    port_output :debug_x10, width: 32
-    port_output :debug_x11, width: 32
+    output :debug_pc, width: 32
+    output :debug_inst, width: 32
+    output :debug_x1, width: 32
+    output :debug_x2, width: 32
+    output :debug_x10, width: 32
+    output :debug_x11, width: 32
 
     # Internal signals
-    port_signal :pc, width: 32
-    port_signal :pc_plus4, width: 32
-    port_signal :pc_next, width: 32
-    port_signal :inst, width: 32
-    port_signal :imm, width: 32
-    port_signal :rs1_data, width: 32
-    port_signal :rs2_data, width: 32
-    port_signal :alu_a, width: 32
-    port_signal :alu_b, width: 32
-    port_signal :alu_result, width: 32
-    port_signal :alu_zero
-    port_signal :rd_data, width: 32
-    port_signal :branch_target, width: 32
-    port_signal :jal_target, width: 32
-    port_signal :jalr_target, width: 32
-    port_signal :branch_taken
+    wire :pc, width: 32
+    wire :pc_plus4, width: 32
+    wire :pc_next, width: 32
+    wire :inst, width: 32
+    wire :imm, width: 32
+    wire :rs1_data, width: 32
+    wire :rs2_data, width: 32
+    wire :alu_a, width: 32
+    wire :alu_b, width: 32
+    wire :alu_result, width: 32
+    wire :alu_zero
+    wire :rd_data, width: 32
+    wire :branch_target, width: 32
+    wire :jal_target, width: 32
+    wire :jalr_target, width: 32
+    wire :branch_taken
 
     # Decoded control signals
-    port_signal :opcode, width: 7
-    port_signal :rd, width: 5
-    port_signal :funct3, width: 3
-    port_signal :rs1, width: 5
-    port_signal :rs2, width: 5
-    port_signal :funct7, width: 7
-    port_signal :reg_write
-    port_signal :mem_read
-    port_signal :mem_write
-    port_signal :mem_to_reg
-    port_signal :alu_src
-    port_signal :branch
-    port_signal :jump
-    port_signal :jalr
-    port_signal :alu_op, width: 4
+    wire :opcode, width: 7
+    wire :rd, width: 5
+    wire :funct3, width: 3
+    wire :rs1, width: 5
+    wire :rs2, width: 5
+    wire :funct7, width: 7
+    wire :reg_write
+    wire :mem_read
+    wire :mem_write
+    wire :mem_to_reg
+    wire :alu_src
+    wire :branch
+    wire :jump
+    wire :jalr
+    wire :alu_op, width: 4
 
-    # Structure DSL - Declarative component instantiation
-    structure do
-      instance :pc_reg, ProgramCounter
-      instance :regfile, RegisterFile
-      instance :decoder, Decoder
-      instance :imm_gen, ImmGen
-      instance :alu, ALU
-      instance :branch_cond, BranchCond
+    # Component instances
+    instance :pc_reg, ProgramCounter
+    instance :regfile, RegisterFile
+    instance :decoder, Decoder
+    instance :imm_gen, ImmGen
+    instance :alu, ALU
+    instance :branch_cond, BranchCond
 
-      # Clock and reset to sequential components
-      connect :clk => [[:pc_reg, :clk], [:regfile, :clk]]
-      connect :rst => [[:pc_reg, :rst], [:regfile, :rst]]
+    # Clock and reset to sequential components
+    port :clk => [[:pc_reg, :clk], [:regfile, :clk]]
+    port :rst => [[:pc_reg, :rst], [:regfile, :rst]]
 
-      # PC connections
-      connect :pc_next => [:pc_reg, :pc_next]
-      connect [:pc_reg, :pc] => :pc
+    # PC connections
+    port :pc_next => [:pc_reg, :pc_next]
+    port [:pc_reg, :pc] => :pc
 
-      # Instruction to decoder and immediate generator
-      connect :inst => [:decoder, :inst]
-      connect :inst => [:imm_gen, :inst]
+    # Instruction to decoder and immediate generator
+    port :inst => [:decoder, :inst]
+    port :inst => [:imm_gen, :inst]
 
-      # Decoder outputs
-      connect [:decoder, :opcode] => :opcode
-      connect [:decoder, :rd] => :rd
-      connect [:decoder, :funct3] => :funct3
-      connect [:decoder, :rs1] => :rs1
-      connect [:decoder, :rs2] => :rs2
-      connect [:decoder, :funct7] => :funct7
-      connect [:decoder, :reg_write] => :reg_write
-      connect [:decoder, :mem_read] => :mem_read
-      connect [:decoder, :mem_write] => :mem_write
-      connect [:decoder, :mem_to_reg] => :mem_to_reg
-      connect [:decoder, :alu_src] => :alu_src
-      connect [:decoder, :branch] => :branch
-      connect [:decoder, :jump] => :jump
-      connect [:decoder, :jalr] => :jalr
-      connect [:decoder, :alu_op] => :alu_op
+    # Decoder outputs
+    port [:decoder, :opcode] => :opcode
+    port [:decoder, :rd] => :rd
+    port [:decoder, :funct3] => :funct3
+    port [:decoder, :rs1] => :rs1
+    port [:decoder, :rs2] => :rs2
+    port [:decoder, :funct7] => :funct7
+    port [:decoder, :reg_write] => :reg_write
+    port [:decoder, :mem_read] => :mem_read
+    port [:decoder, :mem_write] => :mem_write
+    port [:decoder, :mem_to_reg] => :mem_to_reg
+    port [:decoder, :alu_src] => :alu_src
+    port [:decoder, :branch] => :branch
+    port [:decoder, :jump] => :jump
+    port [:decoder, :jalr] => :jalr
+    port [:decoder, :alu_op] => :alu_op
 
-      # Immediate generator output
-      connect [:imm_gen, :imm] => :imm
+    # Immediate generator output
+    port [:imm_gen, :imm] => :imm
 
-      # Register file connections
-      connect :rs1 => [:regfile, :rs1_addr]
-      connect :rs2 => [:regfile, :rs2_addr]
-      connect :rd => [:regfile, :rd_addr]
-      connect :rd_data => [:regfile, :rd_data]
-      connect :reg_write => [:regfile, :rd_we]
-      connect [:regfile, :rs1_data] => :rs1_data
-      connect [:regfile, :rs2_data] => :rs2_data
+    # Register file connections
+    port :rs1 => [:regfile, :rs1_addr]
+    port :rs2 => [:regfile, :rs2_addr]
+    port :rd => [:regfile, :rd_addr]
+    port :rd_data => [:regfile, :rd_data]
+    port :reg_write => [:regfile, :rd_we]
+    port [:regfile, :rs1_data] => :rs1_data
+    port [:regfile, :rs2_data] => :rs2_data
 
-      # ALU connections
-      connect :alu_a => [:alu, :a]
-      connect :alu_b => [:alu, :b]
-      connect :alu_op => [:alu, :op]
-      connect [:alu, :result] => :alu_result
-      connect [:alu, :zero] => :alu_zero
+    # ALU connections
+    port :alu_a => [:alu, :a]
+    port :alu_b => [:alu, :b]
+    port :alu_op => [:alu, :op]
+    port [:alu, :result] => :alu_result
+    port [:alu, :zero] => :alu_zero
 
-      # Branch condition connections
-      connect :rs1_data => [:branch_cond, :rs1_data]
-      connect :rs2_data => [:branch_cond, :rs2_data]
-      connect :funct3 => [:branch_cond, :funct3]
-      connect [:branch_cond, :branch_taken] => :branch_taken
+    # Branch condition connections
+    port :rs1_data => [:branch_cond, :rs1_data]
+    port :rs2_data => [:branch_cond, :rs2_data]
+    port :funct3 => [:branch_cond, :funct3]
+    port [:branch_cond, :branch_taken] => :branch_taken
 
-      # Debug outputs from register file
-      connect [:regfile, :debug_x1] => :debug_x1
-      connect [:regfile, :debug_x2] => :debug_x2
-      connect [:regfile, :debug_x10] => :debug_x10
-      connect [:regfile, :debug_x11] => :debug_x11
-    end
+    # Debug outputs from register file
+    port [:regfile, :debug_x1] => :debug_x1
+    port [:regfile, :debug_x2] => :debug_x2
+    port [:regfile, :debug_x10] => :debug_x10
+    port [:regfile, :debug_x11] => :debug_x11
 
     def initialize(name = nil)
       super(name)

@@ -14,22 +14,22 @@ module RHDL
         OP_MUL = 11
         OP_DIV = 12
 
-        port_input :instruction, width: 8
-        port_input :zero_flag
+        input :instruction, width: 8
+        input :zero_flag
 
         # Control signals
-        port_output :alu_op, width: 4       # ALU operation
-        port_output :alu_src                # 0 = register, 1 = immediate
-        port_output :reg_write              # Write to accumulator
-        port_output :mem_read               # Read from memory
-        port_output :mem_write              # Write to memory
-        port_output :branch                 # Branch instruction
-        port_output :jump                   # Unconditional jump
-        port_output :pc_src, width: 2       # PC source: 0=+1, 1=operand, 2=long addr
-        port_output :halt                   # Halt CPU
-        port_output :call                   # Call instruction
-        port_output :ret                    # Return instruction
-        port_output :instr_length, width: 2 # 1, 2, or 3 bytes
+        output :alu_op, width: 4       # ALU operation
+        output :alu_src                # 0 = register, 1 = immediate
+        output :reg_write              # Write to accumulator
+        output :mem_read               # Read from memory
+        output :mem_write              # Write to memory
+        output :branch                 # Branch instruction
+        output :jump                   # Unconditional jump
+        output :pc_src, width: 2       # PC source: 0=+1, 1=operand, 2=long addr
+        output :halt                   # Halt CPU
+        output :call                   # Call instruction
+        output :ret                    # Return instruction
+        output :instr_length, width: 2 # 1, 2, or 3 bytes
 
         behavior do
           # Extract opcode nibble (high 4 bits: values 0-15)

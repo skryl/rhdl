@@ -11,15 +11,15 @@ module MOS6502
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
-    port_input :clk
-    port_input :rst
-    port_input :inc
-    port_input :load
-    port_input :addr_in, width: 16
+    input :clk
+    input :rst
+    input :inc
+    input :load
+    input :addr_in, width: 16
 
-    port_output :pc, width: 16
-    port_output :pc_hi, width: 8
-    port_output :pc_lo, width: 8
+    output :pc, width: 16
+    output :pc_hi, width: 8
+    output :pc_lo, width: 8
 
     # Sequential block for the PC register
     # Priority: reset > load+inc > load > inc > hold

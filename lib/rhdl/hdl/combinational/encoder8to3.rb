@@ -5,9 +5,9 @@ module RHDL
   module HDL
     # 8-to-3 Priority Encoder - encodes highest set bit position
     class Encoder8to3 < SimComponent
-      port_input :a, width: 8
-      port_output :y, width: 3
-      port_output :valid
+      input :a, width: 8
+      output :y, width: 3
+      output :valid
 
       behavior do
         # Priority encoder: find highest set bit (7 down to 0)

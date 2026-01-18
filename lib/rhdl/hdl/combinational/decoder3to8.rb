@@ -6,16 +6,16 @@ module RHDL
     # 3-to-8 Decoder
     class Decoder3to8 < SimComponent
       # Class-level port definitions for synthesis
-      port_input :a, width: 3
-      port_input :en
-      port_output :y0
-      port_output :y1
-      port_output :y2
-      port_output :y3
-      port_output :y4
-      port_output :y5
-      port_output :y6
-      port_output :y7
+      input :a, width: 3
+      input :en
+      output :y0
+      output :y1
+      output :y2
+      output :y3
+      output :y4
+      output :y5
+      output :y6
+      output :y7
 
       behavior do
         # Each output is active when enabled and address matches

@@ -11,13 +11,13 @@ module RHDL
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
-      port_input :clk
-      port_input :rst
-      port_input :push     # Decrement SP
-      port_input :pop      # Increment SP
-      port_output :q, width: 8
-      port_output :empty   # SP at max (empty stack)
-      port_output :full    # SP at 0 (full stack)
+      input :clk
+      input :rst
+      input :push     # Decrement SP
+      input :pop      # Increment SP
+      output :q, width: 8
+      output :empty   # SP at max (empty stack)
+      output :full    # SP at 0 (full stack)
 
       # Sequential block for stack pointer
       # Push decrements, pop increments (6502-style stack)

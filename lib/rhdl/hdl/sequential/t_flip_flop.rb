@@ -11,12 +11,12 @@ module RHDL
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
-      port_input :t
-      port_input :clk
-      port_input :rst
-      port_input :en
-      port_output :q
-      port_output :qn
+      input :t
+      input :clk
+      input :rst
+      input :en
+      output :q
+      output :qn
 
       # Sequential block for toggle flip-flop
       # Toggle when t=1 and en=1, otherwise hold

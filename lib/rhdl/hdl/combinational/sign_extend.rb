@@ -5,9 +5,11 @@ module RHDL
   module HDL
     # Sign Extender
     class SignExtend < SimComponent
-      # Class-level port definitions for synthesis (default 8->16 extension)
-      port_input :a, width: 8
-      port_output :y, width: 16
+      parameter :in_width, default: 8
+      parameter :out_width, default: 16
+
+      input :a, width: :in_width
+      output :y, width: :out_width
 
       behavior do
         # Sign bit from input
@@ -18,20 +20,6 @@ module RHDL
 
         # Combine: upper byte is extension, lower byte is original
         y <= cat(extension, a)
-      end
-
-      def initialize(name = nil, in_width: 8, out_width: 16)
-        @in_width = in_width
-        @out_width = out_width
-        super(name)
-      end
-
-      def setup_ports
-        # Override default widths if different
-        return if @in_width == 8 && @out_width == 16
-        @inputs[:a] = Wire.new("#{@name}.a", width: @in_width)
-        @outputs[:y] = Wire.new("#{@name}.y", width: @out_width)
-        @inputs[:a].on_change { |_| propagate }
       end
     end
   end

@@ -19,23 +19,23 @@ module RISCV
       include RHDL::DSL::Behavior
 
       # Source registers in EX stage (from ID/EX)
-      port_input :ex_rs1_addr, width: 5
-      port_input :ex_rs2_addr, width: 5
+      input :ex_rs1_addr, width: 5
+      input :ex_rs2_addr, width: 5
 
       # Destination from EX/MEM stage
-      port_input :mem_rd_addr, width: 5
-      port_input :mem_reg_write
+      input :mem_rd_addr, width: 5
+      input :mem_reg_write
 
       # Destination from MEM/WB stage
-      port_input :wb_rd_addr, width: 5
-      port_input :wb_reg_write
+      input :wb_rd_addr, width: 5
+      input :wb_reg_write
 
       # Forward selection outputs
       # 00 = no forward (use register file value)
       # 01 = forward from EX/MEM (ALU result)
       # 10 = forward from MEM/WB (ALU result or memory data)
-      port_output :forward_a, width: 2
-      port_output :forward_b, width: 2
+      output :forward_a, width: 2
+      output :forward_b, width: 2
 
       behavior do
         # Forward A (rs1)

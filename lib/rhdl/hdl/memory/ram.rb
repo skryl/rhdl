@@ -13,11 +13,11 @@ module RHDL
     class RAM < SimComponent
       include RHDL::DSL::MemoryDSL
 
-      port_input :clk
-      port_input :we       # Write enable
-      port_input :addr, width: 8
-      port_input :din, width: 8
-      port_output :dout, width: 8
+      input :clk
+      input :we       # Write enable
+      input :addr, width: 8
+      input :din, width: 8
+      output :dout, width: 8
 
       # Define memory array (256 x 8-bit)
       memory :mem, depth: 256, width: 8

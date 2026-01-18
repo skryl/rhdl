@@ -4,12 +4,14 @@
 module RHDL
   module HDL
     class RippleCarryAdder < SimComponent
-      port_input :a, width: 8
-      port_input :b, width: 8
-      port_input :cin
-      port_output :sum, width: 8
-      port_output :cout
-      port_output :overflow
+      parameter :width, default: 8
+
+      input :a, width: :width
+      input :b, width: :width
+      input :cin
+      output :sum, width: :width
+      output :cout
+      output :overflow
 
       behavior do
         # Use 9-bit result to capture carry
@@ -28,23 +30,6 @@ module RHDL
         sum_sign = local(:sum_sign, result[7], width: 1)
         overflow <= (a_sign ^ sum_sign) & ~(a_sign ^ b_sign)
       end
-
-      def initialize(name = nil, width: 8)
-        @width = width
-        super(name)
-      end
-
-      def setup_ports
-        # Override default width if different from 8-bit
-        return if @width == 8
-        @inputs[:a] = Wire.new("#{@name}.a", width: @width)
-        @inputs[:b] = Wire.new("#{@name}.b", width: @width)
-        @outputs[:sum] = Wire.new("#{@name}.sum", width: @width)
-        @inputs[:a].on_change { |_| propagate }
-        @inputs[:b].on_change { |_| propagate }
-      end
-
-      # Behavior block handles both simulation and synthesis
     end
   end
 end

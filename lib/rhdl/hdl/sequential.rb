@@ -5,7 +5,7 @@
 # behavior DSL only supports combinational logic (assign statements). Sequential
 # synthesis requires always @(posedge clk) blocks which are not yet implemented.
 
-require_relative 'sequential/sequential_component'
+require_relative '../simulation/sequential_component'
 require_relative 'sequential/d_flip_flop'
 require_relative 'sequential/d_flip_flop_async'
 require_relative 'sequential/t_flip_flop'
