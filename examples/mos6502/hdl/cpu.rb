@@ -1,6 +1,6 @@
 # MOS 6502 CPU - Synthesizable System
 # Combines Datapath and Memory into a complete synthesizable 6502 system
-# Uses structure DSL for component instantiation and wiring
+# Uses class-level instance/connect declarations for component instantiation and wiring
 
 require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
@@ -55,50 +55,44 @@ module MOS6502
     port_signal :dp_halted
     port_signal :dp_cycle_count, width: 32
 
-    # Structure DSL - Wire datapath and memory together
-    structure do
-      # Instantiate components
-      instance :datapath, Datapath
-      instance :memory, Memory
+    # Component instances
+    instance :datapath, Datapath
+    instance :memory, Memory
 
-      # Clock and reset to datapath
-      connect :clk => [:datapath, :clk]
-      connect :rst => [:datapath, :rst]
-      connect :rdy => [:datapath, :rdy]
-      connect :irq => [:datapath, :irq]
-      connect :nmi => [:datapath, :nmi]
+    # Clock and reset to datapath
+    wire :clk => [:datapath, :clk]
+    wire :rst => [:datapath, :rst]
+    wire :rdy => [:datapath, :rdy]
+    wire :irq => [:datapath, :irq]
+    wire :nmi => [:datapath, :nmi]
 
-      # Clock to memory (memory uses clk for write timing)
-      connect :clk => [:memory, :clk]
+    # Clock to memory (memory uses clk for write timing)
+    wire :clk => [:memory, :clk]
 
-      # Datapath outputs -> internal signals
-      connect [:datapath, :addr] => :dp_addr
-      connect [:datapath, :data_out] => :dp_data_out
-      connect [:datapath, :rw] => :dp_rw
-      connect [:datapath, :sync] => :dp_sync
-      connect [:datapath, :reg_a] => :dp_reg_a
-      connect [:datapath, :reg_x] => :dp_reg_x
-      connect [:datapath, :reg_y] => :dp_reg_y
-      connect [:datapath, :reg_sp] => :dp_reg_sp
-      connect [:datapath, :reg_pc] => :dp_reg_pc
-      connect [:datapath, :reg_p] => :dp_reg_p
-      connect [:datapath, :opcode] => :dp_opcode
-      connect [:datapath, :state] => :dp_state
-      connect [:datapath, :halted] => :dp_halted
-      connect [:datapath, :cycle_count] => :dp_cycle_count
+    # Datapath outputs -> internal signals
+    wire [:datapath, :addr] => :dp_addr
+    wire [:datapath, :data_out] => :dp_data_out
+    wire [:datapath, :rw] => :dp_rw
+    wire [:datapath, :sync] => :dp_sync
+    wire [:datapath, :reg_a] => :dp_reg_a
+    wire [:datapath, :reg_x] => :dp_reg_x
+    wire [:datapath, :reg_y] => :dp_reg_y
+    wire [:datapath, :reg_sp] => :dp_reg_sp
+    wire [:datapath, :reg_pc] => :dp_reg_pc
+    wire [:datapath, :reg_p] => :dp_reg_p
+    wire [:datapath, :opcode] => :dp_opcode
+    wire [:datapath, :state] => :dp_state
+    wire [:datapath, :halted] => :dp_halted
+    wire [:datapath, :cycle_count] => :dp_cycle_count
 
-      # Memory inputs from datapath
-      connect :dp_addr => [:memory, :addr]
-      connect :dp_data_out => [:memory, :data_in]
-      connect :dp_rw => [:memory, :rw]
+    # Memory inputs from datapath
+    wire :dp_addr => [:memory, :addr]
+    wire :dp_data_out => [:memory, :data_in]
+    wire :dp_rw => [:memory, :rw]
 
-      # Memory chip select always enabled
-      # (handled in behavior block below)
-
-      # Memory output -> datapath input
-      connect [:memory, :data_out] => :mem_data_out
-      connect :mem_data_out => [:datapath, :data_in]
-    end
+    # Memory output -> datapath input
+    wire [:memory, :data_out] => :mem_data_out
+    wire :mem_data_out => [:datapath, :data_in]
 
     # Behavior block for combinational logic
     behavior do

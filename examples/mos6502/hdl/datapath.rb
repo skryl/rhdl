@@ -1,6 +1,6 @@
 # MOS 6502 CPU Datapath - Synthesizable DSL Version
 # Integrates all CPU components into a complete datapath
-# Uses structure DSL for component instantiation and wiring
+# Uses class-level instance/connect declarations for component instantiation and wiring
 # Sequential - requires always @(posedge clk) for synthesis
 
 require_relative '../../../lib/rhdl'
@@ -106,149 +106,146 @@ module MOS6502
     port_signal :alatch_addr, width: 16
     port_signal :dlatch_data, width: 8
 
-    # Structure DSL - Declarative component instantiation and wiring
-    # This generates proper Verilog module instantiations for synthesis
-    structure do
-      # Sequential components - registers and state machines
-      instance :registers, Registers
-      instance :status_reg, StatusRegister
-      instance :pc, ProgramCounter
-      instance :sp, StackPointer
-      instance :ir, InstructionRegister
-      instance :addr_latch, AddressLatch
-      instance :data_latch, DataLatch
-      instance :control, ControlUnit
+    # Component instances for Verilog synthesis
+    # Sequential components - registers and state machines
+    instance :registers, Registers
+    instance :status_reg, StatusRegister
+    instance :pc, ProgramCounter
+    instance :sp, StackPointer
+    instance :ir, InstructionRegister
+    instance :addr_latch, AddressLatch
+    instance :data_latch, DataLatch
+    instance :control, ControlUnit
 
-      # Combinational components
-      instance :alu, ALU
-      instance :decoder, InstructionDecoder
-      instance :addr_gen, AddressGenerator
-      instance :addr_calc, IndirectAddressCalc
+    # Combinational components
+    instance :alu, ALU
+    instance :decoder, InstructionDecoder
+    instance :addr_gen, AddressGenerator
+    instance :addr_calc, IndirectAddressCalc
 
-      # Clock and reset connections to all sequential components
-      connect :clk => [[:registers, :clk], [:status_reg, :clk], [:pc, :clk],
-                       [:sp, :clk], [:ir, :clk], [:addr_latch, :clk],
-                       [:data_latch, :clk], [:control, :clk]]
-      connect :rst => [[:registers, :rst], [:status_reg, :rst], [:pc, :rst],
-                       [:sp, :rst], [:ir, :rst], [:addr_latch, :rst],
-                       [:data_latch, :rst], [:control, :rst]]
+    # Clock and reset connections to all sequential components
+    wire :clk => [[:registers, :clk], [:status_reg, :clk], [:pc, :clk],
+                     [:sp, :clk], [:ir, :clk], [:addr_latch, :clk],
+                     [:data_latch, :clk], [:control, :clk]]
+    wire :rst => [[:registers, :rst], [:status_reg, :rst], [:pc, :rst],
+                     [:sp, :rst], [:ir, :rst], [:addr_latch, :rst],
+                     [:data_latch, :rst], [:control, :rst]]
 
-      # Control unit input connections
-      connect :rdy => [:control, :rdy]
+    # Control unit input connections
+    wire :rdy => [:control, :rdy]
 
-      # Instruction register outputs
-      connect [:ir, :opcode] => :ir_opcode
-      connect [:ir, :operand_lo] => :ir_operand_lo
-      connect [:ir, :operand_hi] => :ir_operand_hi
+    # Instruction register outputs
+    wire [:ir, :opcode] => :ir_opcode
+    wire [:ir, :operand_lo] => :ir_operand_lo
+    wire [:ir, :operand_hi] => :ir_operand_hi
 
-      # Decoder connections
-      connect :ir_opcode => [:decoder, :opcode]
-      connect [:decoder, :addr_mode] => :dec_addr_mode
-      connect [:decoder, :alu_op] => :dec_alu_op
-      connect [:decoder, :instr_type] => :dec_instr_type
-      connect [:decoder, :src_reg] => :dec_src_reg
-      connect [:decoder, :dst_reg] => :dec_dst_reg
-      connect [:decoder, :branch_cond] => :dec_branch_cond
-      connect [:decoder, :is_read] => :dec_is_read
-      connect [:decoder, :is_write] => :dec_is_write
-      connect [:decoder, :is_rmw] => :dec_is_rmw
-      connect [:decoder, :sets_nz] => :dec_sets_nz
-      connect [:decoder, :sets_c] => :dec_sets_c
-      connect [:decoder, :sets_v] => :dec_sets_v
-      connect [:decoder, :writes_reg] => :dec_writes_reg
-      connect [:decoder, :is_status_op] => :dec_is_status_op
+    # Decoder connections
+    wire :ir_opcode => [:decoder, :opcode]
+    wire [:decoder, :addr_mode] => :dec_addr_mode
+    wire [:decoder, :alu_op] => :dec_alu_op
+    wire [:decoder, :instr_type] => :dec_instr_type
+    wire [:decoder, :src_reg] => :dec_src_reg
+    wire [:decoder, :dst_reg] => :dec_dst_reg
+    wire [:decoder, :branch_cond] => :dec_branch_cond
+    wire [:decoder, :is_read] => :dec_is_read
+    wire [:decoder, :is_write] => :dec_is_write
+    wire [:decoder, :is_rmw] => :dec_is_rmw
+    wire [:decoder, :sets_nz] => :dec_sets_nz
+    wire [:decoder, :sets_c] => :dec_sets_c
+    wire [:decoder, :sets_v] => :dec_sets_v
+    wire [:decoder, :writes_reg] => :dec_writes_reg
+    wire [:decoder, :is_status_op] => :dec_is_status_op
 
-      # Control unit inputs from decoder
-      connect :dec_addr_mode => [:control, :addr_mode]
-      connect :dec_instr_type => [:control, :instr_type]
-      connect :dec_branch_cond => [:control, :branch_cond]
-      connect :dec_is_read => [:control, :is_read]
-      connect :dec_is_write => [:control, :is_write]
-      connect :dec_is_rmw => [:control, :is_rmw]
-      connect :dec_writes_reg => [:control, :writes_reg]
-      connect :dec_is_status_op => [:control, :is_status_op]
+    # Control unit inputs from decoder
+    wire :dec_addr_mode => [:control, :addr_mode]
+    wire :dec_instr_type => [:control, :instr_type]
+    wire :dec_branch_cond => [:control, :branch_cond]
+    wire :dec_is_read => [:control, :is_read]
+    wire :dec_is_write => [:control, :is_write]
+    wire :dec_is_rmw => [:control, :is_rmw]
+    wire :dec_writes_reg => [:control, :writes_reg]
+    wire :dec_is_status_op => [:control, :is_status_op]
 
-      # Control unit outputs
-      connect [:control, :state] => :ctrl_state
-      connect [:control, :pc_inc] => :ctrl_pc_inc
-      connect [:control, :pc_load] => :ctrl_pc_load
-      connect [:control, :load_opcode] => :ctrl_load_opcode
-      connect [:control, :load_operand_lo] => :ctrl_load_operand_lo
-      connect [:control, :load_operand_hi] => :ctrl_load_operand_hi
-      connect [:control, :load_addr_lo] => :ctrl_load_addr_lo
-      connect [:control, :load_addr_hi] => :ctrl_load_addr_hi
-      connect [:control, :load_data] => :ctrl_load_data
-      connect [:control, :addr_sel] => :ctrl_addr_sel
-      connect [:control, :data_sel] => :ctrl_data_sel
-      connect [:control, :reg_write] => :ctrl_reg_write
-      connect [:control, :sp_inc] => :ctrl_sp_inc
-      connect [:control, :sp_dec] => :ctrl_sp_dec
-      connect [:control, :update_flags] => :ctrl_update_flags
-      connect [:control, :mem_write] => :ctrl_mem_write
-      connect [:control, :halted] => :ctrl_halted
-      connect [:control, :cycle_count] => :ctrl_cycle_count
+    # Control unit outputs
+    wire [:control, :state] => :ctrl_state
+    wire [:control, :pc_inc] => :ctrl_pc_inc
+    wire [:control, :pc_load] => :ctrl_pc_load
+    wire [:control, :load_opcode] => :ctrl_load_opcode
+    wire [:control, :load_operand_lo] => :ctrl_load_operand_lo
+    wire [:control, :load_operand_hi] => :ctrl_load_operand_hi
+    wire [:control, :load_addr_lo] => :ctrl_load_addr_lo
+    wire [:control, :load_addr_hi] => :ctrl_load_addr_hi
+    wire [:control, :load_data] => :ctrl_load_data
+    wire [:control, :addr_sel] => :ctrl_addr_sel
+    wire [:control, :data_sel] => :ctrl_data_sel
+    wire [:control, :reg_write] => :ctrl_reg_write
+    wire [:control, :sp_inc] => :ctrl_sp_inc
+    wire [:control, :sp_dec] => :ctrl_sp_dec
+    wire [:control, :update_flags] => :ctrl_update_flags
+    wire [:control, :mem_write] => :ctrl_mem_write
+    wire [:control, :halted] => :ctrl_halted
+    wire [:control, :cycle_count] => :ctrl_cycle_count
 
-      # Status register outputs to control unit
-      connect [:status_reg, :n] => :sr_n
-      connect [:status_reg, :v] => :sr_v
-      connect [:status_reg, :z] => :sr_z
-      connect [:status_reg, :c] => :sr_c
-      connect [:status_reg, :d] => :sr_d
-      connect [:status_reg, :p] => :sr_p
-      connect :sr_n => [:control, :flag_n]
-      connect :sr_v => [:control, :flag_v]
-      connect :sr_z => [:control, :flag_z]
-      connect :sr_c => [:control, :flag_c]
+    # Status register outputs to control unit
+    wire [:status_reg, :n] => :sr_n
+    wire [:status_reg, :v] => :sr_v
+    wire [:status_reg, :z] => :sr_z
+    wire [:status_reg, :c] => :sr_c
+    wire [:status_reg, :d] => :sr_d
+    wire [:status_reg, :p] => :sr_p
+    wire :sr_n => [:control, :flag_n]
+    wire :sr_v => [:control, :flag_v]
+    wire :sr_z => [:control, :flag_z]
+    wire :sr_c => [:control, :flag_c]
 
-      # ALU outputs
-      connect [:alu, :result] => :alu_result
-      connect [:alu, :n] => :alu_n
-      connect [:alu, :z] => :alu_z
-      connect [:alu, :c] => :alu_c
-      connect [:alu, :v] => :alu_v
-      connect :dec_alu_op => [:alu, :op]
-      connect :sr_c => [:alu, :c_in]
-      connect :sr_d => [:alu, :d_flag]
+    # ALU outputs
+    wire [:alu, :result] => :alu_result
+    wire [:alu, :n] => :alu_n
+    wire [:alu, :z] => :alu_z
+    wire [:alu, :c] => :alu_c
+    wire [:alu, :v] => :alu_v
+    wire :dec_alu_op => [:alu, :op]
+    wire :sr_c => [:alu, :c_in]
+    wire :sr_d => [:alu, :d_flag]
 
-      # Register outputs
-      connect [:registers, :a] => :regs_a
-      connect [:registers, :x] => :regs_x
-      connect [:registers, :y] => :regs_y
-      connect [:pc, :pc] => :pc_val
-      connect [:sp, :sp] => :sp_val
+    # Register outputs
+    wire [:registers, :a] => :regs_a
+    wire [:registers, :x] => :regs_x
+    wire [:registers, :y] => :regs_y
+    wire [:pc, :pc] => :pc_val
+    wire [:sp, :sp] => :sp_val
 
-      # Address generator connections
-      connect :dec_addr_mode => [:addr_gen, :mode]
-      connect :ir_operand_lo => [:addr_gen, :operand_lo]
-      connect :ir_operand_hi => [:addr_gen, :operand_hi]
-      connect :regs_x => [:addr_gen, :x_reg]
-      connect :regs_y => [:addr_gen, :y_reg]
-      connect :pc_val => [:addr_gen, :pc]
-      connect :sp_val => [:addr_gen, :sp]
-      connect [:addr_gen, :eff_addr] => :agen_eff_addr
-      connect [:addr_gen, :page_cross] => :agen_page_cross
-      connect :agen_page_cross => [:control, :page_cross]
+    # Address generator connections
+    wire :dec_addr_mode => [:addr_gen, :mode]
+    wire :ir_operand_lo => [:addr_gen, :operand_lo]
+    wire :ir_operand_hi => [:addr_gen, :operand_hi]
+    wire :regs_x => [:addr_gen, :x_reg]
+    wire :regs_y => [:addr_gen, :y_reg]
+    wire :pc_val => [:addr_gen, :pc]
+    wire :sp_val => [:addr_gen, :sp]
+    wire [:addr_gen, :eff_addr] => :agen_eff_addr
+    wire [:addr_gen, :page_cross] => :agen_page_cross
+    wire :agen_page_cross => [:control, :page_cross]
 
-      # Indirect address calculator connections
-      connect :dec_addr_mode => [:addr_calc, :mode]
-      connect :ir_operand_lo => [:addr_calc, :operand_lo]
-      connect :ir_operand_hi => [:addr_calc, :operand_hi]
-      connect :regs_x => [:addr_calc, :x_reg]
-      connect [:addr_calc, :ptr_addr_lo] => :acalc_ptr_addr_lo
-      connect [:addr_calc, :ptr_addr_hi] => :acalc_ptr_addr_hi
+    # Indirect address calculator connections
+    wire :dec_addr_mode => [:addr_calc, :mode]
+    wire :ir_operand_lo => [:addr_calc, :operand_lo]
+    wire :ir_operand_hi => [:addr_calc, :operand_hi]
+    wire :regs_x => [:addr_calc, :x_reg]
+    wire [:addr_calc, :ptr_addr_lo] => :acalc_ptr_addr_lo
+    wire [:addr_calc, :ptr_addr_hi] => :acalc_ptr_addr_hi
 
-      # Address latch outputs
-      connect [:addr_latch, :addr_lo] => :alatch_addr_lo
-      connect [:addr_latch, :addr_hi] => :alatch_addr_hi
-      connect [:addr_latch, :addr] => :alatch_addr
+    # Address latch outputs
+    wire [:addr_latch, :addr_lo] => :alatch_addr_lo
+    wire [:addr_latch, :addr_hi] => :alatch_addr_hi
+    wire [:addr_latch, :addr] => :alatch_addr
 
-      # Data latch output
-      connect [:data_latch, :data] => :dlatch_data
+    # Data latch output
+    wire [:data_latch, :data] => :dlatch_data
 
-      # Wire address latch indirect inputs to address generator
-      connect :alatch_addr_lo => [:addr_gen, :indirect_lo]
-      connect :alatch_addr_hi => [:addr_gen, :indirect_hi]
-    end
+    # Wire address latch indirect inputs to address generator
+    wire :alatch_addr_lo => [:addr_gen, :indirect_lo]
+    wire :alatch_addr_hi => [:addr_gen, :indirect_hi]
 
     def initialize(name = nil)
       super(name)
