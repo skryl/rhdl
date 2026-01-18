@@ -31,6 +31,49 @@ RSpec.describe RHDL::HDL::XorGate do
       verilog = RHDL::HDL::XorGate.to_verilog
       expect(verilog).to include('assign y')
     end
+
+    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches RHDL simulation' do
+        verilog = RHDL::HDL::XorGate.to_verilog
+        behavioral = RHDL::HDL::XorGate.new
+
+        inputs = { a0: 1, a1: 1 }
+        outputs = { y: 1 }
+
+        vectors = []
+        test_cases = [
+          { a0: 0, a1: 0 },
+          { a0: 0, a1: 1 },
+          { a0: 1, a1: 0 },
+          { a0: 1, a1: 1 }
+        ]
+
+        test_cases.each do |tc|
+          tc.each { |k, v| behavioral.set_input(k, v) }
+          behavioral.propagate
+          vectors << {
+            inputs: tc,
+            expected: { y: behavioral.get_output(:y) }
+          }
+        end
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 'xor_gate',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/xor_gate'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx][:y]).to eq(vec[:expected][:y]),
+            "Vector #{idx}: expected y=#{vec[:expected][:y]}, got #{result[:results][idx][:y]}"
+        end
+      end
+    end
   end
 
   describe 'gate-level netlist' do

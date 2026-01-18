@@ -50,6 +50,59 @@ RSpec.describe RHDL::HDL::Register do
       expect(verilog).to include('input [7:0] d')
       expect(verilog).to match(/output.*\[7:0\].*q/)
     end
+
+    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches RHDL simulation' do
+        verilog = RHDL::HDL::Register.to_verilog
+        behavioral = RHDL::HDL::Register.new
+        behavioral.set_input(:rst, 0)
+        behavioral.set_input(:en, 1)
+
+        inputs = { d: 8, clk: 1, rst: 1, en: 1 }
+        outputs = { q: 8 }
+
+        vectors = []
+        # Start with reset cycle to initialize register (avoids X propagation)
+        test_cases = [
+          { d: 0x00, rst: 1, en: 1 },  # reset (initialize to 0)
+          { d: 0xAB, rst: 0, en: 1 },  # store value
+          { d: 0x55, rst: 0, en: 1 },  # store another value
+          { d: 0xFF, rst: 0, en: 0 },  # hold (en=0)
+          { d: 0x00, rst: 1, en: 1 },  # reset
+        ]
+
+        test_cases.each do |tc|
+          behavioral.set_input(:d, tc[:d])
+          behavioral.set_input(:rst, tc[:rst])
+          behavioral.set_input(:en, tc[:en])
+          behavioral.set_input(:clk, 0)
+          behavioral.propagate
+          behavioral.set_input(:clk, 1)
+          behavioral.propagate
+          vectors << {
+            inputs: { d: tc[:d], rst: tc[:rst], en: tc[:en] },
+            expected: { q: behavioral.get_output(:q) }
+          }
+        end
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 'register',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/register',
+          has_clock: true
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx][:q]).to eq(vec[:expected][:q]),
+            "Vector #{idx}: expected q=#{vec[:expected][:q]}, got #{result[:results][idx][:q]}"
+        end
+      end
+    end
   end
 
   describe 'gate-level netlist' do

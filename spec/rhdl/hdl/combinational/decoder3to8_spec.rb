@@ -37,6 +37,77 @@ RSpec.describe RHDL::HDL::Decoder3to8 do
       expect(verilog).to include('module decoder3to8')
       expect(verilog).to include('input [2:0] a')
     end
+
+    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches RHDL simulation' do
+        verilog = RHDL::HDL::Decoder3to8.to_verilog
+        behavioral = RHDL::HDL::Decoder3to8.new
+
+        inputs = { a: 3, en: 1 }
+        outputs = { y0: 1, y1: 1, y2: 1, y3: 1, y4: 1, y5: 1, y6: 1, y7: 1 }
+
+        vectors = []
+        # Test all 8 address values with enable=1
+        8.times do |i|
+          test_cases = [{ a: i, en: 1 }]
+          test_cases.each do |tc|
+            behavioral.set_input(:a, tc[:a])
+            behavioral.set_input(:en, tc[:en])
+            behavioral.propagate
+            vectors << {
+              inputs: tc,
+              expected: {
+                y0: behavioral.get_output(:y0),
+                y1: behavioral.get_output(:y1),
+                y2: behavioral.get_output(:y2),
+                y3: behavioral.get_output(:y3),
+                y4: behavioral.get_output(:y4),
+                y5: behavioral.get_output(:y5),
+                y6: behavioral.get_output(:y6),
+                y7: behavioral.get_output(:y7)
+              }
+            }
+          end
+        end
+        # Test with enable=0
+        [0, 4, 7].each do |i|
+          behavioral.set_input(:a, i)
+          behavioral.set_input(:en, 0)
+          behavioral.propagate
+          vectors << {
+            inputs: { a: i, en: 0 },
+            expected: {
+              y0: behavioral.get_output(:y0),
+              y1: behavioral.get_output(:y1),
+              y2: behavioral.get_output(:y2),
+              y3: behavioral.get_output(:y3),
+              y4: behavioral.get_output(:y4),
+              y5: behavioral.get_output(:y5),
+              y6: behavioral.get_output(:y6),
+              y7: behavioral.get_output(:y7)
+            }
+          }
+        end
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 'decoder3to8',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/decoder3to8'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          %i[y0 y1 y2 y3 y4 y5 y6 y7].each do |out|
+            expect(result[:results][idx][out]).to eq(vec[:expected][out]),
+              "Vector #{idx}: expected #{out}=#{vec[:expected][out]}, got #{result[:results][idx][out]}"
+          end
+        end
+      end
+    end
   end
 
   describe 'gate-level netlist' do

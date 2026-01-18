@@ -41,6 +41,52 @@ RSpec.describe RHDL::HDL::Mux2 do
       expect(verilog).to include('module mux2')
       expect(verilog).to include('assign y')
     end
+
+    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches RHDL simulation' do
+        verilog = RHDL::HDL::Mux2.to_verilog
+        behavioral = RHDL::HDL::Mux2.new(nil, width: 1)
+
+        inputs = { a: 1, b: 1, sel: 1 }
+        outputs = { y: 1 }
+
+        vectors = []
+        test_cases = [
+          { a: 0, b: 0, sel: 0 },
+          { a: 0, b: 1, sel: 0 },
+          { a: 1, b: 0, sel: 0 },
+          { a: 0, b: 1, sel: 1 },
+          { a: 1, b: 0, sel: 1 },
+        ]
+
+        test_cases.each do |tc|
+          behavioral.set_input(:a, tc[:a])
+          behavioral.set_input(:b, tc[:b])
+          behavioral.set_input(:sel, tc[:sel])
+          behavioral.propagate
+          vectors << {
+            inputs: tc,
+            expected: { y: behavioral.get_output(:y) }
+          }
+        end
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 'mux2',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/mux2'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          expect(result[:results][idx][:y]).to eq(vec[:expected][:y]),
+            "Vector #{idx}: expected y=#{vec[:expected][:y]}, got #{result[:results][idx][:y]}"
+        end
+      end
+    end
   end
 
   describe 'gate-level netlist (1-bit)' do

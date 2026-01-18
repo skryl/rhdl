@@ -50,6 +50,61 @@ RSpec.describe RHDL::HDL::Decoder2to4 do
       expect(verilog).to include('module decoder2to4')
       expect(verilog).to include('input [1:0] a')
     end
+
+    context 'iverilog behavioral simulation', if: HdlToolchain.iverilog_available? do
+      it 'matches RHDL simulation' do
+        verilog = RHDL::HDL::Decoder2to4.to_verilog
+        behavioral = RHDL::HDL::Decoder2to4.new
+
+        inputs = { a: 2, en: 1 }
+        outputs = { y0: 1, y1: 1, y2: 1, y3: 1 }
+
+        vectors = []
+        test_cases = [
+          { a: 0, en: 1 },
+          { a: 1, en: 1 },
+          { a: 2, en: 1 },
+          { a: 3, en: 1 },
+          { a: 0, en: 0 },
+          { a: 1, en: 0 },
+          { a: 2, en: 0 },
+          { a: 3, en: 0 }
+        ]
+
+        test_cases.each do |tc|
+          behavioral.set_input(:a, tc[:a])
+          behavioral.set_input(:en, tc[:en])
+          behavioral.propagate
+          vectors << {
+            inputs: tc,
+            expected: {
+              y0: behavioral.get_output(:y0),
+              y1: behavioral.get_output(:y1),
+              y2: behavioral.get_output(:y2),
+              y3: behavioral.get_output(:y3)
+            }
+          }
+        end
+
+        result = NetlistHelper.run_behavioral_simulation(
+          verilog,
+          module_name: 'decoder2to4',
+          inputs: inputs,
+          outputs: outputs,
+          test_vectors: vectors,
+          base_dir: 'tmp/behavioral_test/decoder2to4'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+
+        vectors.each_with_index do |vec, idx|
+          %i[y0 y1 y2 y3].each do |out|
+            expect(result[:results][idx][out]).to eq(vec[:expected][out]),
+              "Vector #{idx}: expected #{out}=#{vec[:expected][out]}, got #{result[:results][idx][out]}"
+          end
+        end
+      end
+    end
   end
 
   describe 'gate-level netlist' do
