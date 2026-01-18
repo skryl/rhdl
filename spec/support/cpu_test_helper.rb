@@ -6,7 +6,7 @@ module CpuTestHelper
   end
 
   def use_hdl_cpu!
-    @cpu_class = RHDL::HDL::CPU::CPUAdapter
+    @cpu_class = RHDL::HDL::CPU::Harness
   end
 
   def use_behavior_cpu!
