@@ -1,6 +1,6 @@
 require_relative 'spec_helper'
 require_relative '../lib/rhdl/diagram'
-require_relative '../lib/rhdl/gates/lower'
+require_relative '../lib/rhdl/export/structural/lower'
 require_relative '../lib/rhdl/hdl/gates'
 require_relative '../lib/rhdl/hdl/sequential'
 
