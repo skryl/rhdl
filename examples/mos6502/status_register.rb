@@ -104,8 +104,12 @@ module MOS6502
     # Test helper accessor (use DSL state management)
     def read_p; read_reg(:p) || 0x24; end
 
+    def self.verilog_module_name
+      'mos6502_status_register'
+    end
+
     def self.to_verilog
-      RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502_status_register'))
+      RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
     end
   end
 end

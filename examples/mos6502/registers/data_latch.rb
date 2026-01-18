@@ -23,8 +23,12 @@ module MOS6502
       data <= mux(load, data_in, data)
     end
 
+    def self.verilog_module_name
+      'mos6502_data_latch'
+    end
+
     def self.to_verilog
-      RHDL::Export::Verilog.generate(to_ir(top_name: 'mos6502_data_latch'))
+      RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
     end
   end
 end
