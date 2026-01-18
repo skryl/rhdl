@@ -547,7 +547,7 @@ namespace :hdl do
     FileUtils.mkdir_p(VERILOG_DIR)
 
     # Get all exportable components from lib
-    components = RHDL::Exporter.list_components
+    components = RHDL::Export.list_components
 
     if components.empty?
       puts "No exportable components found in lib/."
@@ -627,7 +627,7 @@ namespace :hdl do
 
     FileUtils.mkdir_p(VERILOG_DIR)
 
-    components = RHDL::Exporter.list_components
+    components = RHDL::Export.list_components
     puts "Exporting #{components.size} components to Verilog..."
 
     components.each do |info|

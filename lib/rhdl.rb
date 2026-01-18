@@ -1,6 +1,5 @@
 require_relative "rhdl/version"
 require_relative "rhdl/dsl"
-require_relative "rhdl/exporter"
 require_relative "rhdl/export"
 require 'active_support/core_ext/string/inflections'
 
