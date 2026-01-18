@@ -237,13 +237,12 @@ Detailed documentation is available in the `docs/` directory:
 | [HDL Overview](docs/hdl_overview.md) | Introduction to the HDL framework |
 | [Synthesizable DSL Guide](docs/synthesizable_dsl.md) | DSL reference for synthesizable components |
 | [Components Reference](docs/components.md) | Complete reference for all HDL components |
-| [HDL Export](docs/hdl_export.md) | Verilog export guide |
-| [HDL CPU](docs/hdl_cpu.md) | 8-bit HDL CPU reference |
-| [CPU Datapath](docs/cpu_datapath.md) | CPU architecture details |
+| [Export Guide](docs/export.md) | Verilog and gate-level export |
+| [Sample CPU](docs/sample_cpu.md) | 8-bit sample CPU reference |
 | [MOS 6502](docs/mos6502.md) | MOS 6502 implementation |
 | [Debugging Guide](docs/debugging.md) | Signal probing, breakpoints, and TUI |
 | [Diagram Generation](docs/diagrams.md) | Multi-level circuit diagrams |
-| [Gate Level Backend](docs/gate_level_backend.md) | Gate-level synthesis details |
+| [Simulation Engine](docs/simulation_engine.md) | Core simulation infrastructure |
 | [Apple II I/O](docs/apple2_io.md) | Apple II bus emulation |
 
 ## Rake Tasks
