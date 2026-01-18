@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    rhdl (0.1.0)
+    rhdl (1.0.0)
       activesupport (~> 7.0)
       parslet (~> 2.0)
 
