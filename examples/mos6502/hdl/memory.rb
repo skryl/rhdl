@@ -4,7 +4,6 @@
 
 require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/memory_dsl'
-require_relative '../../../lib/rhdl/dsl/extended_behavior'
 
 module MOS6502
   # Synthesizable 64KB memory for 6502
@@ -12,7 +11,7 @@ module MOS6502
   # ROM: 0x8000 - 0xFFFF (32KB)
   class Memory < RHDL::HDL::SimComponent
     include RHDL::DSL::MemoryDSL
-    include RHDL::DSL::ExtendedBehavior
+    include RHDL::DSL::Behavior
 
     # Memory map constants
     RAM_START = 0x0000

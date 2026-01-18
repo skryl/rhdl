@@ -6,12 +6,11 @@ This document explains how to convert manual `propagate` methods to synthesizabl
 
 RHDL provides several DSL modules for synthesizable hardware:
 
-1. **`behavior do ... end`** - Combinational logic (purely input-to-output)
+1. **`behavior do ... end`** - Combinational logic (purely input-to-output), supports `case_of` for multi-way selection
 2. **`sequential clock: :clk do ... end`** - Sequential logic (registers, state machines)
-3. **`extended_behavior do ... end`** - Complex combinational with case statements
-4. **`memory :name, depth:, width:`** - RAM/ROM arrays
-5. **`lookup_table :name do ... end`** - Combinational ROM/decoder
-6. **`state_machine clock:, reset: do ... end`** - Finite state machines
+3. **`memory :name, depth:, width:`** - RAM/ROM arrays
+4. **`lookup_table :name do ... end`** - Combinational ROM/decoder
+5. **`state_machine clock:, reset: do ... end`** - Finite state machines
 
 ## Combinational Components
 
@@ -100,13 +99,13 @@ class Counter < RHDL::HDL::SequentialComponent
 end
 ```
 
-## Extended Behavior with Case Statements
+## Behavior with Case Statements
 
-For components with multiple outputs per case branch:
+For components with multiple outputs per case branch, use `case_of` inside a `behavior` block:
 
 ```ruby
 class ALU8 < RHDL::HDL::SimComponent
-  include RHDL::DSL::ExtendedBehavior
+  include RHDL::DSL::Behavior
 
   OP_ADD = 0x00
   OP_SUB = 0x01
@@ -118,7 +117,7 @@ class ALU8 < RHDL::HDL::SimComponent
   port_output :result, width: 8
   port_output :carry
 
-  extended_behavior do
+  behavior do
     case_of op do |cs|
       cs.when(OP_ADD) do
         result <= a + b
@@ -271,7 +270,7 @@ To migrate a component with `propagate` to DSL:
 3. **Choose the right DSL construct**
    - Simple assignments → `behavior`
    - Clock-edge updates → `sequential`
-   - Multi-way selection → `case_of` or `extended_behavior`
+   - Multi-way selection → `case_of` inside `behavior`
    - Memory arrays → `memory` + `sync_write` + `async_read`
    - State machines → `state_machine`
 

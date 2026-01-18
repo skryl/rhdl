@@ -221,6 +221,5 @@ require_relative "dsl/component_instance"
 # Load behavior module after DSL is defined
 require_relative "dsl/behavior"
 require_relative "dsl/sequential"
-require_relative "dsl/extended_behavior"
 require_relative "dsl/memory_dsl"
 require_relative "dsl/state_machine_dsl"
