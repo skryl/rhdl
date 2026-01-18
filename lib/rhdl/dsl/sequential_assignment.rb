@@ -11,12 +11,6 @@ module RHDL
         @value = value
       end
 
-      def to_vhdl
-        t = target.respond_to?(:to_vhdl) ? target.to_vhdl : target.to_s
-        v = value.respond_to?(:to_vhdl) ? value.to_vhdl : value.to_s
-        "#{t} <= #{v};"
-      end
-
       def to_verilog
         t = target.respond_to?(:to_verilog) ? target.to_verilog : target.to_s
         v = value.respond_to?(:to_verilog) ? value.to_verilog : value.to_s

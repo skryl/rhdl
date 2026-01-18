@@ -15,16 +15,6 @@ module RHDL
         @context.instance_eval(&block) if block_given?
       end
 
-      def to_vhdl
-        sens = sensitivity_list.map { |s| s.respond_to?(:to_vhdl) ? s.to_vhdl : s.to_s }
-        lines = []
-        lines << "#{name}: process(#{sens.join(', ')})"
-        lines << "begin"
-        statements.each { |s| lines << "  #{s.to_vhdl}" }
-        lines << "end process #{name};"
-        lines.join("\n")
-      end
-
       def to_verilog
         sens = sensitivity_list.map { |s| s.respond_to?(:to_verilog) ? s.to_verilog : s.to_s }
         lines = []

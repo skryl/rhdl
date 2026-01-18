@@ -6,14 +6,6 @@ module RHDL
     class BinaryOp
       attr_reader :op, :left, :right
 
-      VHDL_OPS = {
-        :+ => '+', :- => '-', :* => '*', :/ => '/',
-        :& => 'and', :| => 'or', :^ => 'xor',
-        :<< => 'sll', :>> => 'srl',
-        :== => '=', :!= => '/=',
-        :< => '<', :> => '>', :<= => '<=', :>= => '>='
-      }
-
       VERILOG_OPS = {
         :+ => '+', :- => '-', :* => '*', :/ => '/',
         :& => '&', :| => '|', :^ => '^',
@@ -26,12 +18,6 @@ module RHDL
         @op = op
         @left = left
         @right = right
-      end
-
-      def to_vhdl
-        l = left.respond_to?(:to_vhdl) ? left.to_vhdl : left.to_s
-        r = right.respond_to?(:to_vhdl) ? right.to_vhdl : right.to_s
-        "(#{l} #{VHDL_OPS[op]} #{r})"
       end
 
       def to_verilog

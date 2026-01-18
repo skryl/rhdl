@@ -213,11 +213,6 @@ module RHDL
         def to_verilog(top_name: nil)
           RHDL::Export::Verilog.generate(to_ir(top_name: top_name))
         end
-
-        # Generate VHDL from the component
-        def to_vhdl(top_name: nil)
-          RHDL::Export::VHDL.generate(to_ir(top_name: top_name))
-        end
       end
 
       # Simple structs for port/signal definitions

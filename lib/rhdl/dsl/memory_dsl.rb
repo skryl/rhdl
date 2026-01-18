@@ -1,7 +1,7 @@
 # Memory DSL for synthesizable RAM/ROM components
 #
 # This module provides DSL constructs for memory arrays that can be synthesized
-# to Verilog/VHDL with proper BRAM inference.
+# to Verilog with proper BRAM inference.
 #
 # Example - Simple RAM:
 #   class RAM256x8 < RHDL::HDL::SimComponent

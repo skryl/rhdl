@@ -45,29 +45,11 @@ RSpec.describe RHDL::Exporter do
     end
   end
 
-  describe '.to_vhdl' do
-    it 'exports a single component to VHDL' do
-      vhdl = RHDL::Exporter.to_vhdl(ExportTestAdder)
-      expect(vhdl).to include('library IEEE;')
-      expect(vhdl).to include('entity export_test_adder is')
-      expect(vhdl).to include('architecture rtl of export_test_adder is')
-    end
-  end
-
   describe '.to_verilog' do
     it 'exports a single component to Verilog' do
       verilog = RHDL::Exporter.to_verilog(ExportTestAdder)
       expect(verilog).to include('module export_test_adder')
       expect(verilog).to include('endmodule')
-    end
-  end
-
-  describe '.all_to_vhdl' do
-    it 'exports all discovered components to VHDL' do
-      results = RHDL::Exporter.all_to_vhdl
-      expect(results).to be_a(Hash)
-      expect(results[ExportTestAdder]).to include('entity export_test_adder is')
-      expect(results[ExportTestCounter]).to include('entity export_test_counter is')
     end
   end
 
@@ -80,19 +62,6 @@ RSpec.describe RHDL::Exporter do
     end
   end
 
-  describe '.export_vhdl' do
-    it 'exports specific components to VHDL' do
-      results = RHDL::Exporter.export_vhdl([ExportTestAdder])
-      expect(results.keys).to eq([ExportTestAdder])
-      expect(results[ExportTestAdder]).to include('entity export_test_adder is')
-    end
-
-    it 'accepts a single component' do
-      results = RHDL::Exporter.export_vhdl(ExportTestAdder)
-      expect(results[ExportTestAdder]).to include('entity export_test_adder is')
-    end
-  end
-
   describe '.export_verilog' do
     it 'exports specific components to Verilog' do
       results = RHDL::Exporter.export_verilog([ExportTestCounter])
@@ -102,38 +71,15 @@ RSpec.describe RHDL::Exporter do
   end
 
   describe '.export_to_files' do
-    it 'exports specific components to VHDL files' do
-      Dir.mktmpdir do |dir|
-        results = RHDL::Exporter.export_to_files([ExportTestAdder], dir, format: :vhdl)
-
-        expect(results[:vhdl][ExportTestAdder]).to end_with('export_test_adder.vhd')
-        expect(results[:verilog]).to be_empty
-        expect(File.exist?(File.join(dir, 'export_test_adder.vhd'))).to be true
-
-        content = File.read(File.join(dir, 'export_test_adder.vhd'))
-        expect(content).to include('entity export_test_adder is')
-      end
-    end
-
     it 'exports specific components to Verilog files' do
       Dir.mktmpdir do |dir|
-        results = RHDL::Exporter.export_to_files([ExportTestCounter], dir, format: :verilog)
+        results = RHDL::Exporter.export_to_files([ExportTestCounter], dir)
 
         expect(results[:verilog][ExportTestCounter]).to end_with('export_test_counter.v')
-        expect(results[:vhdl]).to be_empty
         expect(File.exist?(File.join(dir, 'export_test_counter.v'))).to be true
 
         content = File.read(File.join(dir, 'export_test_counter.v'))
         expect(content).to include('module export_test_counter')
-      end
-    end
-
-    it 'exports to both formats by default' do
-      Dir.mktmpdir do |dir|
-        results = RHDL::Exporter.export_to_files([ExportTestAdder], dir)
-
-        expect(File.exist?(File.join(dir, 'export_test_adder.vhd'))).to be true
-        expect(File.exist?(File.join(dir, 'export_test_adder.v'))).to be true
       end
     end
   end
@@ -144,11 +90,9 @@ RSpec.describe RHDL::Exporter do
         results = RHDL::Exporter.export_all_to_files(dir)
 
         # Check that files were created for discovered components
-        expect(results[:vhdl]).not_to be_empty
         expect(results[:verilog]).not_to be_empty
 
         # Check that export_test_adder files exist
-        expect(File.exist?(File.join(dir, 'export_test_adder.vhd'))).to be true
         expect(File.exist?(File.join(dir, 'export_test_adder.v'))).to be true
       end
     end
@@ -161,24 +105,6 @@ RSpec.describe RHDL::Exporter do
         RHDL::Exporter.export_all_to_files(new_dir)
 
         expect(File.exist?(new_dir)).to be true
-      end
-    end
-
-    it 'exports only VHDL when specified' do
-      Dir.mktmpdir do |dir|
-        results = RHDL::Exporter.export_all_to_files(dir, format: :vhdl)
-
-        expect(results[:vhdl]).not_to be_empty
-        expect(results[:verilog]).to be_empty
-      end
-    end
-
-    it 'exports only Verilog when specified' do
-      Dir.mktmpdir do |dir|
-        results = RHDL::Exporter.export_all_to_files(dir, format: :verilog)
-
-        expect(results[:verilog]).not_to be_empty
-        expect(results[:vhdl]).to be_empty
       end
     end
   end
@@ -202,26 +128,18 @@ RSpec.describe RHDL::Exporter do
     end
   end
 
-  describe 'VHDL and Verilog output consistency' do
-    it 'generates matching port names in both formats' do
-      vhdl = RHDL::Exporter.to_vhdl(ExportTestAdder)
+  describe 'Verilog output' do
+    it 'generates correct port names' do
       verilog = RHDL::Exporter.to_verilog(ExportTestAdder)
-
-      # Both should reference the same port names
-      expect(vhdl).to include('a :')
-      expect(vhdl).to include('b :')
-      expect(vhdl).to include('sum :')
 
       expect(verilog).to include('a')
       expect(verilog).to include('b')
       expect(verilog).to include('sum')
     end
 
-    it 'generates matching signal names in both formats' do
-      vhdl = RHDL::Exporter.to_vhdl(ExportTestAdder)
+    it 'generates correct signal names' do
       verilog = RHDL::Exporter.to_verilog(ExportTestAdder)
 
-      expect(vhdl).to include('internal_sum')
       expect(verilog).to include('internal_sum')
     end
   end

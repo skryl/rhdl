@@ -501,11 +501,10 @@ desc "Generate all diagrams (alias for diagrams:generate)"
 task diagrams: 'diagrams:generate'
 
 # =============================================================================
-# HDL Export Tasks (VHDL/Verilog)
+# HDL Export Tasks (Verilog)
 # =============================================================================
 
 namespace :hdl do
-  VHDL_DIR = File.expand_path('export/vhdl', __dir__)
   VERILOG_DIR = File.expand_path('export/verilog', __dir__)
   EXAMPLES_DIR = File.expand_path('examples', __dir__)
 
@@ -528,16 +527,15 @@ namespace :hdl do
     'mos6502/mos6502_memory' => ['examples/mos6502/memory', 'MOS6502::Memory']
   }.freeze
 
-  desc "Export all DSL components to VHDL and Verilog (lib/ and examples/)"
+  desc "Export all DSL components to Verilog (lib/ and examples/)"
   task :export => [:export_lib, :export_examples] do
     puts
     puts "=" * 50
     puts "HDL export complete!"
-    puts "VHDL files:    #{VHDL_DIR}"
     puts "Verilog files: #{VERILOG_DIR}"
   end
 
-  desc "Export lib/ DSL components to VHDL and Verilog"
+  desc "Export lib/ DSL components to Verilog"
   task :export_lib do
     require_relative 'lib/rhdl'
 
@@ -546,7 +544,6 @@ namespace :hdl do
     puts
 
     # Ensure output directories exist
-    FileUtils.mkdir_p(VHDL_DIR)
     FileUtils.mkdir_p(VERILOG_DIR)
 
     # Get all exportable components from lib
@@ -567,12 +564,6 @@ namespace :hdl do
       relative_path = info[:relative_path]
 
       begin
-        # Create subdirectories and export to VHDL
-        vhdl_file = File.join(VHDL_DIR, "#{relative_path}.vhd")
-        FileUtils.mkdir_p(File.dirname(vhdl_file))
-        vhdl_content = component.to_vhdl
-        File.write(vhdl_file, vhdl_content)
-
         # Create subdirectories and export to Verilog
         verilog_file = File.join(VERILOG_DIR, "#{relative_path}.v")
         FileUtils.mkdir_p(File.dirname(verilog_file))
@@ -580,7 +571,6 @@ namespace :hdl do
         File.write(verilog_file, verilog_content)
 
         puts "  [OK] #{component.name}"
-        puts "       -> #{vhdl_file}"
         puts "       -> #{verilog_file}"
         exported_count += 1
       rescue => e
@@ -592,7 +582,7 @@ namespace :hdl do
     puts "Exported #{exported_count}/#{components.size} lib/ components"
   end
 
-  desc "Export examples/ components to VHDL and Verilog"
+  desc "Export examples/ components to Verilog"
   task :export_examples do
     require_relative 'lib/rhdl'
 
@@ -602,7 +592,6 @@ namespace :hdl do
     puts
 
     # Ensure output directories exist
-    FileUtils.mkdir_p(VHDL_DIR)
     FileUtils.mkdir_p(VERILOG_DIR)
 
     exported_count = 0
@@ -632,30 +621,7 @@ namespace :hdl do
     puts "Exported #{exported_count}/#{EXAMPLE_COMPONENTS.size} examples/ components"
   end
 
-  desc "Export only VHDL files"
-  task :vhdl do
-    require_relative 'lib/rhdl'
-
-    FileUtils.mkdir_p(VHDL_DIR)
-
-    components = RHDL::Exporter.list_components
-    puts "Exporting #{components.size} components to VHDL..."
-
-    components.each do |info|
-      component = info[:class]
-      relative_path = info[:relative_path]
-      begin
-        vhdl_file = File.join(VHDL_DIR, "#{relative_path}.vhd")
-        FileUtils.mkdir_p(File.dirname(vhdl_file))
-        File.write(vhdl_file, component.to_vhdl)
-        puts "  [OK] #{relative_path}.vhd"
-      rescue => e
-        puts "  [ERROR] #{relative_path}: #{e.message}"
-      end
-    end
-  end
-
-  desc "Export only Verilog files"
+  desc "Export Verilog files"
   task :verilog do
     require_relative 'lib/rhdl'
 
@@ -680,16 +646,6 @@ namespace :hdl do
 
   desc "Clean all generated HDL files"
   task :clean do
-    # Clean VHDL files recursively (keep .gitkeep)
-    Dir.glob(File.join(VHDL_DIR, '**', '*.vhd')).each do |f|
-      FileUtils.rm_f(f)
-    end
-    # Remove empty subdirectories
-    Dir.glob(File.join(VHDL_DIR, '**', '*')).sort.reverse.each do |d|
-      FileUtils.rmdir(d) if File.directory?(d) && Dir.empty?(d)
-    end
-    puts "Cleaned: #{VHDL_DIR}"
-
     # Clean Verilog files recursively (keep .gitkeep)
     Dir.glob(File.join(VERILOG_DIR, '**', '*.v')).each do |f|
       FileUtils.rm_f(f)
