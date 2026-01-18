@@ -325,6 +325,7 @@ def show_help
     Usage: rhdl <command> [options]
 
     Commands:
+      tui         Launch interactive TUI debugger
       diagram     Generate circuit diagrams
       export      Export components to Verilog or VHDL
       gates       Gate-level synthesis
@@ -332,6 +333,131 @@ def show_help
 
     Run 'rhdl <command> --help' for more information on a command.
   HELP
+end
+
+def handle_tui(args)
+  options = {
+    signals: :all,
+    format: :auto,
+    list: false
+  }
+
+  parser = OptionParser.new do |opts|
+    opts.banner = <<~BANNER
+      Usage: rhdl tui [options] <ComponentRef>
+
+      Launch the interactive TUI debugger for HDL components.
+
+      Examples:
+        rhdl tui RHDL::HDL::Counter
+        rhdl tui RHDL::HDL::ALU --signals inputs
+        rhdl tui sequential/counter
+        rhdl tui --list
+
+      Keyboard Controls (in TUI):
+        Space     Step one cycle
+        n         Step half cycle
+        r         Run simulation
+        s         Stop/pause
+        R         Reset simulation
+        c         Continue until breakpoint
+        w         Add watchpoint
+        b         Add breakpoint
+        j/k       Scroll signals
+        :         Enter command mode
+        h/?       Show help
+        q         Quit
+
+      Command Mode (: prefix):
+        run [n]           Run n cycles
+        step              Single step
+        watch <sig>       Add watchpoint
+        break [cycle]     Add breakpoint
+        set <sig> <val>   Set signal value
+        print <sig>       Print signal value
+        list              List all signals
+        export <file>     Export VCD waveform
+        quit              Exit
+
+      Options:
+    BANNER
+
+    opts.on('--signals TYPE', 'Signals to display: all, inputs, outputs, or comma-separated list') do |v|
+      options[:signals] = case v
+                          when 'all' then :all
+                          when 'inputs' then :inputs
+                          when 'outputs' then :outputs
+                          else v.split(',').map(&:strip).map(&:to_sym)
+                          end
+    end
+    opts.on('--format FORMAT', 'Signal format: auto, binary, hex, decimal, signed') do |v|
+      options[:format] = v.to_sym
+    end
+    opts.on('--list', 'List available components') { options[:list] = true }
+    opts.on('-h', '--help', 'Show this help') do
+      puts opts
+      exit 0
+    end
+  end
+
+  parser.parse!(args)
+
+  # Handle --list
+  if options[:list]
+    puts "Available Components:"
+    puts "=" * 50
+    puts
+
+    HDL_COMPONENTS.keys.sort.each do |name|
+      puts "  #{name}"
+    end
+
+    puts
+    puts "Use component path (e.g., sequential/counter) or"
+    puts "full class reference (e.g., RHDL::HDL::Counter)"
+    return
+  end
+
+  component_ref = args.shift
+  unless component_ref
+    warn parser.to_s
+    exit 1
+  end
+
+  require 'rhdl/hdl'
+  require 'rhdl/tui'
+  require 'rhdl/debug'
+
+  # Try to find component by short name first
+  component = if HDL_COMPONENTS.key?(component_ref)
+                HDL_COMPONENTS[component_ref].call
+              else
+                # Try as a class reference
+                begin
+                  component_class = component_ref.split('::').inject(Object) { |mod, name| mod.const_get(name) }
+                  component_class.new(component_ref.split('::').last.downcase)
+                rescue NameError => e
+                  warn "ERROR: Component not found: #{component_ref}"
+                  warn "Use 'rhdl tui --list' to see available components"
+                  exit 1
+                end
+              end
+
+  # Create debug simulator
+  simulator = RHDL::Debug::DebugSimulator.new
+
+  # Create TUI
+  tui = RHDL::TUI::SimulatorTUI.new(simulator)
+
+  # Add component with signal options
+  tui.add_component(component, signals: options[:signals], format: options[:format])
+
+  puts "Starting TUI for #{component.name}..."
+  puts "Press 'h' for help, 'q' to quit"
+  sleep 0.5
+
+  # Run the TUI
+  tui.run
 end
 
 def handle_diagram(args)
@@ -966,6 +1092,8 @@ end
 command = ARGV.shift
 
 case command
+when 'tui'
+  handle_tui(ARGV)
 when 'diagram', 'diagrams'
   handle_diagram(ARGV)
 when 'export', 'exports'
