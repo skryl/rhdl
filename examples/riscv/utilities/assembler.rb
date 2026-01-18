@@ -228,6 +228,13 @@ module RISCV
       encode_r_type(rd, rs1, rs2, Funct3::AND, Funct7::NORMAL, Opcode::OP)
     end
 
+    # Aliases for Ruby reserved words
+    class << self
+      alias_method :and_inst, :and
+      alias_method :or_inst, :or
+      alias_method :xor_inst, :xor
+    end
+
     # Pseudo-instructions
     def self.nop
       addi(0, 0, 0)
