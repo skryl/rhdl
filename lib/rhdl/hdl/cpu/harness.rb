@@ -4,7 +4,6 @@
 
 require_relative 'instruction_decoder'
 require_relative 'accumulator'
-require_relative 'datapath'
 require_relative 'cpu'
 
 module RHDL
