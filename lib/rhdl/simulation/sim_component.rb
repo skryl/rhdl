@@ -427,6 +427,12 @@ module RHDL
           RHDL::Export::Verilog.generate(to_ir(top_name: top_name))
         end
 
+        # Generate CIRCT FIRRTL from the component
+        def to_circt(top_name: nil)
+          RHDL::Export::CIRCT::FIRRTL.generate(to_ir(top_name: top_name))
+        end
+        alias_method :to_firrtl, :to_circt
+
         # Generate VHDL from the component
         def to_vhdl(top_name: nil)
           RHDL::Export::VHDL.generate(to_ir(top_name: top_name))

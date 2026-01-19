@@ -63,6 +63,26 @@ RSpec.describe RHDL::HDL::DFlipFlop do
       expect(verilog).to include('output q')
     end
 
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::DFlipFlop.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit d_flip_flop')
+      expect(firrtl).to include('input d')
+      expect(firrtl).to include('input clk')
+      expect(firrtl).to include('output q')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::DFlipFlop,
+          base_dir: 'tmp/circt_test/d_flip_flop'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
+
     context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::DFlipFlop.to_verilog

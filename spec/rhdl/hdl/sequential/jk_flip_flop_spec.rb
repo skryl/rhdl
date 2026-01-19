@@ -92,6 +92,27 @@ RSpec.describe RHDL::HDL::JKFlipFlop do
       expect(verilog).to include('input k')
       expect(verilog).to match(/output.*q/)
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::JKFlipFlop.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit jk_flip_flop')
+      expect(firrtl).to include('input j')
+      expect(firrtl).to include('input k')
+      expect(firrtl).to include('input clk')
+      expect(firrtl).to include('output q')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::JKFlipFlop,
+          base_dir: 'tmp/circt_test/jk_flip_flop'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do

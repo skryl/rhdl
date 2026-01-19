@@ -70,6 +70,26 @@ RSpec.describe RHDL::HDL::DFlipFlopAsync do
       expect(verilog).to include('input d')
       expect(verilog).to match(/output.*q/)
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::DFlipFlopAsync.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit d_flip_flop_async')
+      expect(firrtl).to include('input d')
+      expect(firrtl).to include('input clk')
+      expect(firrtl).to include('output q')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::DFlipFlopAsync,
+          base_dir: 'tmp/circt_test/d_flip_flop_async'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do
