@@ -534,14 +534,24 @@ module RHDL
       end
 
       # Wire a connection between source and destination
+      # Handles fan-out where dest can be an array of destinations
       def wire_connection(source, dest)
         source_wire = resolve_wire(source)
-        dest_wire = resolve_wire(dest)
+        return unless source_wire
 
-        return unless source_wire && dest_wire
-
-        # Connect source to destination
-        self.class.connect(source_wire, dest_wire)
+        # Check if dest is a fan-out (array of arrays)
+        # e.g., [[:registers, :clk], [:pc, :clk], ...]
+        if dest.is_a?(Array) && dest.first.is_a?(Array)
+          # Fan-out: connect source to each destination
+          dest.each do |single_dest|
+            dest_wire = resolve_wire(single_dest)
+            self.class.connect(source_wire, dest_wire) if dest_wire
+          end
+        else
+          # Single destination
+          dest_wire = resolve_wire(dest)
+          self.class.connect(source_wire, dest_wire) if dest_wire
+        end
       end
 
       # Resolve a wire reference to an actual Wire object

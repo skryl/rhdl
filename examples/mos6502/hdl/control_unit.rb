@@ -403,13 +403,48 @@ module MOS6502
       }, default: 0)
 
       # update_flags: update status flags
+      # Set one cycle early so flags update on clock edge entering EXECUTE
+      # Also for RTI_PULL_P (restores flags from stack)
+      # States that transition to EXECUTE and may update flags:
+      # - READ_MEM → EXECUTE
+      # - PULL → EXECUTE
+      # - DECODE → EXECUTE (implied/accumulator modes)
+      # - FETCH_OP1 → EXECUTE (immediate mode)
+      # - RTI_PULL_P (special: restores flags from stack)
       update_flags <= case_select(state, {
-        STATE_EXECUTE => lit(1, width: 1),
+        STATE_READ_MEM => lit(1, width: 1),
+        STATE_PULL => lit(1, width: 1),
+        STATE_DECODE => mux((addr_mode == lit(MODE_IMPLIED, width: 4)) |
+                            (addr_mode == lit(MODE_ACCUMULATOR, width: 4)),
+                            lit(1, width: 1), lit(0, width: 1)),
+        STATE_FETCH_OP1 => mux(addr_mode == lit(MODE_IMMEDIATE, width: 4),
+                               lit(1, width: 1), lit(0, width: 1)),
         STATE_RTI_PULL_P => lit(1, width: 1)
       }, default: 0)
 
-      # reg_write: write to register file during execute if instruction writes to register
-      reg_write <= mux(state == lit(STATE_EXECUTE, width: 8), writes_reg, lit(0, width: 1))
+      # reg_write: write to register file
+      # Set one cycle early (during state that transitions to EXECUTE) so registers
+      # can capture on the clock edge that enters EXECUTE state
+      # States that transition to EXECUTE:
+      # - READ_MEM (memory read complete)
+      # - PULL (stack pull complete)
+      # - JSR_PUSH_LO (JSR about to jump)
+      # - DECODE with implied/accumulator mode for ALU-like ops
+      # - FETCH_OP1 with immediate mode (for LDA/LDX/LDY #imm, ADC/SBC #imm, etc.)
+      next_is_execute = (state == lit(STATE_READ_MEM, width: 8)) |
+                        (state == lit(STATE_PULL, width: 8)) |
+                        (state == lit(STATE_JSR_PUSH_LO, width: 8)) |
+                        ((state == lit(STATE_DECODE, width: 8)) &
+                         ((instr_type == lit(TYPE_ALU, width: 4)) |
+                          (instr_type == lit(TYPE_INC_DEC, width: 4)) |
+                          (instr_type == lit(TYPE_SHIFT, width: 4)) |
+                          (instr_type == lit(TYPE_TRANSFER, width: 4)) |
+                          (instr_type == lit(TYPE_FLAG, width: 4))) &
+                         ((addr_mode == lit(MODE_IMPLIED, width: 4)) |
+                          (addr_mode == lit(MODE_ACCUMULATOR, width: 4)))) |
+                        ((state == lit(STATE_FETCH_OP1, width: 8)) &
+                         (addr_mode == lit(MODE_IMMEDIATE, width: 4)))
+      reg_write <= mux(next_is_execute, writes_reg, lit(0, width: 1))
 
       # done: instruction complete when transitioning back to fetch
       done <= (state == lit(STATE_FETCH, width: 8))

@@ -237,7 +237,7 @@ namespace :diagrams do
     # CPU
     'cpu/instruction_decoder' => -> { RHDL::HDL::CPU::InstructionDecoder.new('decoder') },
     'cpu/accumulator' => -> { RHDL::HDL::CPU::Accumulator.new('acc') },
-    'cpu/datapath' => -> { RHDL::HDL::CPU::Datapath.new('cpu') }
+    'cpu/cpu' => -> { RHDL::HDL::CPU::CPU.new('cpu') }
   }
 
   # Components that support gate-level lowering
@@ -765,7 +765,7 @@ namespace :gates do
 
     # CPU
     'cpu/instruction_decoder' => -> { RHDL::HDL::CPU::InstructionDecoder.new('decoder') },
-    'cpu/datapath' => -> { RHDL::HDL::CPU::Datapath.new('datapath') },
+    'cpu/cpu' => -> { RHDL::HDL::CPU::CPU.new('cpu') },
 
     # MOS6502 (Synthesizable 6502)
     'mos6502/registers' => -> { require_relative 'examples/mos6502/hdl/registers'; MOS6502::Registers.new('regs') },
@@ -780,7 +780,7 @@ namespace :gates do
     'mos6502/alu' => -> { require_relative 'examples/mos6502/hdl/alu'; MOS6502::ALU.new('alu') },
     'mos6502/instruction_decoder' => -> { require_relative 'examples/mos6502/hdl/instruction_decoder'; MOS6502::InstructionDecoder.new('dec') },
     'mos6502/control_unit' => -> { require_relative 'examples/mos6502/hdl/control_unit'; MOS6502::ControlUnit.new('ctrl') },
-    'mos6502/datapath' => -> { require_relative 'examples/mos6502/hdl/datapath'; MOS6502::Datapath.new('datapath') }
+    'mos6502/cpu' => -> { require_relative 'examples/mos6502/hdl/cpu'; MOS6502::CPU.new('cpu') }
   }.freeze
 
   desc "Export all components to gate-level IR (JSON netlists)"

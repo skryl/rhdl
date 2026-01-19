@@ -126,7 +126,7 @@ module MOS6502
         OP_DEC => dec_result,
         OP_CMP => cmp_result,
         OP_BIT => a,
-        OP_TST => a,
+        OP_TST => b,  # Pass through B for load instructions
         OP_NOP => a
       }, default: a)
 
@@ -145,7 +145,7 @@ module MOS6502
         OP_DEC => dec_result[7],
         OP_CMP => cmp_result[7],
         OP_BIT => b[7],
-        OP_TST => a[7]
+        OP_TST => b[7]  # Test B for load instructions
       }, default: 0)
 
       # Z flag (zero)
@@ -163,7 +163,7 @@ module MOS6502
         OP_DEC => dec_result == lit(0, width: 8),
         OP_CMP => a == b,
         OP_BIT => (a & b) == lit(0, width: 8),
-        OP_TST => a == lit(0, width: 8)
+        OP_TST => b == lit(0, width: 8)  # Test B for load instructions
       }, default: 0)
 
       # C flag (carry)

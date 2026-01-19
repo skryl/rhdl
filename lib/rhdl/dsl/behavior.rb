@@ -1097,6 +1097,70 @@ module RHDL
           sequential_block_defined = respond_to?(:_sequential_block) && !_sequential_block.nil?
           if ancestors.include?(RHDL::HDL::SimComponent) && !sequential_block_defined
             define_method(:propagate) do
+              # Two-phase propagation to handle feedback between behavior and subcomponents:
+              #
+              # Phase 1: Stabilize combinational logic
+              # - Behavior computes control signals (alu_b_sel, etc.)
+              # - Combinational subcomponents (ALU) propagate with new inputs
+              # - Repeat until stable
+              #
+              # Phase 2: Sequential components capture
+              # - With stabilized combinational values, sequential components capture
+              #
+              # This ensures registers capture the correct final value, not intermediate.
+              max_iterations = 10
+              iterations = 0
+
+              # Separate sequential (clock-triggered) from combinational subcomponents
+              sequential_subs = []
+              combinational_subs = []
+              @subcomponents&.each do |name, sub|
+                # Check class-level _sequential_block (set by sequential DSL)
+                is_sequential = sub.class.respond_to?(:_sequential_block) && sub.class._sequential_block
+                if is_sequential
+                  sequential_subs << [name, sub]
+                else
+                  combinational_subs << [name, sub]
+                end
+              end
+
+              # Phase 1: Iterate to stabilize combinational logic
+              while iterations < max_iterations
+                old_values = {}
+                @internal_signals&.each do |name, wire|
+                  old_values[name] = wire.get
+                end
+
+                # Execute behavior (computes control signals like alu_b_sel)
+                self.class.execute_behavior_for_simulation(self)
+
+                # Propagate ONLY combinational subcomponents
+                combinational_subs.each do |name, sub|
+                  sub.propagate
+                end
+
+                # Execute behavior AGAIN to use fresh subcomponent outputs
+                self.class.execute_behavior_for_simulation(self)
+
+                # Check if stabilized
+                changed = false
+                @internal_signals&.each do |name, wire|
+                  if wire.get != old_values[name]
+                    changed = true
+                    break
+                  end
+                end
+
+                iterations += 1
+                break unless changed
+              end
+
+              # Phase 2: Now propagate sequential components with stabilized values
+              sequential_subs.each do |name, sub|
+                sub.propagate
+              end
+
+              # Final behavior pass to update any signals that depend on register outputs
               self.class.execute_behavior_for_simulation(self)
             end
           end
@@ -1124,15 +1188,25 @@ module RHDL
           component.outputs.each do |name, wire|
             input_values[name] ||= wire.get
           end
+          # Include internal signals (wires) that connect subcomponents
+          if component.respond_to?(:internal_signals) && component.internal_signals
+            component.internal_signals.each do |name, wire|
+              input_values[name] ||= wire.get
+            end
+          end
 
           # Create context and evaluate
           context = BehaviorContext.new(self)
           context.component = component  # Pass component for memory access
           outputs = context.evaluate_for_simulation(input_values, &@_behavior_block.block)
 
-          # Set output values
+          # Set output and internal signal values
           outputs.each do |name, value|
-            component.out_set(name, value)
+            if component.outputs[name]
+              component.out_set(name, value)
+            elsif component.internal_signals&.key?(name)
+              component.internal_signals[name].set(value)
+            end
           end
         end
 

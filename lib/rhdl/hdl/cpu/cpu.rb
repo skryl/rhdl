@@ -3,6 +3,9 @@
 # All logic is expressed through structure (instances + ports) and behavior blocks.
 # No simulation-only methods - Harness interacts only through ports.
 
+require_relative 'instruction_decoder'
+require_relative 'accumulator'
+
 module RHDL
   module HDL
     module CPU

@@ -261,12 +261,12 @@ puts cpu.acc  # => 42
 | `zero_flag` | Get zero flag state |
 | `memory` | Access memory adapter |
 
-### Direct Datapath Access
+### Direct CPU Access
 
-For lower-level control:
+For lower-level control, access the CPU component through port methods:
 
 ```ruby
-cpu = RHDL::HDL::CPU::Datapath.new("cpu")
+cpu = RHDL::HDL::CPU::CPU.new("cpu")
 
 # Reset
 cpu.set_input(:rst, 1)
@@ -275,18 +275,19 @@ cpu.set_input(:clk, 1); cpu.propagate
 cpu.set_input(:clk, 0); cpu.propagate
 cpu.set_input(:rst, 0); cpu.propagate
 
-# Load program
-cpu.write_memory(0, 0xA0)  # LDI
-cpu.write_memory(1, 0x42)  # 0x42
-cpu.write_memory(2, 0xF0)  # HLT
+# Set instruction and propagate
+cpu.set_input(:instruction, 0xA0)  # LDI opcode
+cpu.set_input(:zero_flag_in, 0)
+cpu.propagate
 
-# Run
-until cpu.halted
-  cpu.step
-end
-
-puts cpu.acc_value  # => 66
+# Read control signals from decoder outputs
+puts cpu.get_output(:dec_alu_op)    # ALU operation
+puts cpu.get_output(:dec_reg_write) # Register write enable
+puts cpu.get_output(:pc_out)        # Program counter value
+puts cpu.get_output(:acc_out)       # Accumulator value
 ```
+
+For complete program execution, use the Harness which manages memory and control flow.
 
 ## Programming with the Assembler
 

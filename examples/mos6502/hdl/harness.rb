@@ -5,6 +5,7 @@
 
 require_relative '../../../lib/rhdl/hdl'
 require_relative 'cpu'
+require_relative 'memory'
 require_relative '../utilities/assembler'
 
 module MOS6502
@@ -15,7 +16,7 @@ module MOS6502
 
     def initialize(memory = nil)
       @memory = memory || Memory.new("mem")
-      @datapath = Datapath.new("cpu")
+      @cpu = CPU.new("cpu")
       @clock_count = 0
       @halted = false
       @breakpoints = []
@@ -27,31 +28,58 @@ module MOS6502
       @clock_count = 0
       @halted = false
 
+      # Clear all external load enables
+      clear_ext_loads
+
       # Pulse reset
       clock_cycle(rst: 1)
       # Need 6 cycles for reset_step to reach 5 and state to transition to FETCH
-      6.times { clock_cycle(rst: 0) }
+      5.times { clock_cycle(rst: 0) }
 
-      # Read reset vector and load PC directly (simulation convenience)
+      # Now CPU is in STATE_FETCH. Load PC with reset vector value.
+      # This clock cycle will:
+      # 1. Load PC with the new address (via external load)
+      # 2. Advance from FETCH to DECODE, but with opcode from new address
       lo = @memory.read(Memory::RESET_VECTOR)
       hi = @memory.read(Memory::RESET_VECTOR + 1)
-      @datapath.write_pc((hi << 8) | lo)
-      @datapath.propagate  # Update output ports after direct state change
+      target_addr = (hi << 8) | lo
+
+      @cpu.set_input(:ext_pc_load_data, target_addr)
+      @cpu.set_input(:ext_pc_load_en, 1)
+
+      # Do just the low phase to set up PC, then high phase will latch it
+      # along with fetching the first opcode from the new address
+      @cpu.set_input(:clk, 0)
+      @cpu.propagate
+
+      # Now set address bus to PC (target_addr) and provide correct data
+      @memory.set_input(:addr, target_addr)
+      @memory.set_input(:rw, 1)
+      @memory.set_input(:cs, 1)
+      @memory.propagate
+      @cpu.set_input(:data_in, @memory.get_output(:data_out))
+
+      @cpu.set_input(:clk, 1)
+      @cpu.propagate
+      @memory.propagate
+
+      @clock_count += 1
+      clear_ext_loads
     end
 
     def clock_cycle(rst: 0, rdy: 1, irq: 1, nmi: 1)
-      # Get address from datapath (before clock)
-      @datapath.set_input(:rst, rst)
-      @datapath.set_input(:rdy, rdy)
-      @datapath.set_input(:irq, irq)
-      @datapath.set_input(:nmi, nmi)
+      # Get address from CPU (before clock)
+      @cpu.set_input(:rst, rst)
+      @cpu.set_input(:rdy, rdy)
+      @cpu.set_input(:irq, irq)
+      @cpu.set_input(:nmi, nmi)
 
       # Low clock phase
-      @datapath.set_input(:clk, 0)
-      @datapath.propagate
+      @cpu.set_input(:clk, 0)
+      @cpu.propagate
 
-      addr = @datapath.get_output(:addr)
-      rw = @datapath.get_output(:rw)
+      addr = @cpu.get_output(:addr)
+      rw = @cpu.get_output(:rw)
 
       # Memory operation
       @memory.set_input(:clk, 0)
@@ -60,38 +88,41 @@ module MOS6502
       @memory.set_input(:cs, 1)
 
       if rw == 0  # Write
-        data_out = @datapath.get_output(:data_out)
+        data_out = @cpu.get_output(:data_out)
         @memory.set_input(:data_in, data_out)
       end
 
       @memory.propagate
 
       # High clock phase
-      @datapath.set_input(:clk, 1)
+      @cpu.set_input(:clk, 1)
       @memory.set_input(:clk, 1)
 
-      # Read data from memory into datapath
+      # Read data from memory into CPU
       data_in = @memory.get_output(:data_out)
-      @datapath.set_input(:data_in, data_in)
+      @cpu.set_input(:data_in, data_in)
 
-      @datapath.propagate
+      @cpu.propagate
       @memory.propagate
 
       @clock_count += 1
-      @halted = @datapath.get_output(:halted) == 1
+      @halted = @cpu.get_output(:halted) == 1
+
+      # Clear external load enables after the cycle completes
+      clear_ext_loads
     end
 
     def step
       # Execute until instruction complete
       cycles = 0
       max_cycles = 20  # Safety limit
-      prev_state = @datapath.get_output(:state)
+      prev_state = @cpu.get_output(:state)
 
       loop do
         clock_cycle
         cycles += 1
 
-        state = @datapath.get_output(:state)
+        state = @cpu.get_output(:state)
 
         # Instruction is complete when we transition TO FETCH from another state
         # (not when we're already in FETCH from the start)
@@ -105,7 +136,7 @@ module MOS6502
 
       # Extra propagate to ensure output ports reflect final register values
       # (register writes happen during propagate, but outputs read pre-write values)
-      @datapath.propagate
+      @cpu.propagate
 
       cycles
     end
@@ -140,19 +171,41 @@ module MOS6502
     end
 
     # Register accessors - read through output ports
-    def a; @datapath.get_output(:reg_a); end
-    def x; @datapath.get_output(:reg_x); end
-    def y; @datapath.get_output(:reg_y); end
-    def sp; @datapath.get_output(:reg_sp); end
-    def pc; @datapath.get_output(:reg_pc); end
-    def p; @datapath.get_output(:reg_p); end
+    def a; @cpu.get_output(:reg_a); end
+    def x; @cpu.get_output(:reg_x); end
+    def y; @cpu.get_output(:reg_y); end
+    def sp; @cpu.get_output(:reg_sp); end
+    def pc; @cpu.get_output(:reg_pc); end
+    def p; @cpu.get_output(:reg_p); end
 
-    # Register setters - direct state manipulation for test setup
-    def a=(v); @datapath.write_a(v); end
-    def x=(v); @datapath.write_x(v); end
-    def y=(v); @datapath.write_y(v); end
-    def sp=(v); @datapath.write_sp(v); end
-    def pc=(v); @datapath.write_pc(v); end
+    # Register setters - use external load ports
+    def a=(v)
+      @cpu.set_input(:ext_a_load_data, v & 0xFF)
+      @cpu.set_input(:ext_a_load_en, 1)
+      clock_cycle
+    end
+
+    def x=(v)
+      @cpu.set_input(:ext_x_load_data, v & 0xFF)
+      @cpu.set_input(:ext_x_load_en, 1)
+      clock_cycle
+    end
+
+    def y=(v)
+      @cpu.set_input(:ext_y_load_data, v & 0xFF)
+      @cpu.set_input(:ext_y_load_en, 1)
+      clock_cycle
+    end
+
+    def sp=(v)
+      @cpu.set_input(:ext_sp_load_data, v & 0xFF)
+      @cpu.set_input(:ext_sp_load_en, 1)
+      clock_cycle
+    end
+
+    def pc=(v)
+      load_pc(v)
+    end
 
     # Status flag accessors
     def flag_n; (p >> 7) & 1; end
@@ -175,6 +228,8 @@ module MOS6502
     def load_program(bytes, addr = 0x8000)
       @memory.load_program(bytes, addr)
       @memory.set_reset_vector(addr)
+      # Do a full reset to properly initialize PC from reset vector
+      reset
     end
 
     def assemble_and_load(source, addr = 0x8000)
@@ -235,6 +290,23 @@ module MOS6502
 
     def disassemble(addr, count = 1)
       Disassembler.disassemble(@memory, addr, count)
+    end
+
+    private
+
+    def clear_ext_loads
+      @cpu.set_input(:ext_pc_load_en, 0)
+      @cpu.set_input(:ext_a_load_en, 0)
+      @cpu.set_input(:ext_x_load_en, 0)
+      @cpu.set_input(:ext_y_load_en, 0)
+      @cpu.set_input(:ext_sp_load_en, 0)
+    end
+
+    def load_pc(addr)
+      # Use external PC load port to set PC
+      @cpu.set_input(:ext_pc_load_data, addr & 0xFFFF)
+      @cpu.set_input(:ext_pc_load_en, 1)
+      clock_cycle
     end
   end
 
