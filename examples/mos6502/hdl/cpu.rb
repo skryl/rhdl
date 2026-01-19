@@ -428,7 +428,11 @@ module MOS6502
                            mux(dec_src_reg[0], regs_x, regs_a)))
 
       # ALU input B selection
-      alu_b_sel <= mux(load_from_imm, ir_operand_lo, dlatch_data)
+      # For immediate mode during FETCH_OP1, use data_in directly (operand not yet in IR)
+      # For memory mode during READ_MEM, use data_in directly (data not yet in latch)
+      alu_b_sel <= mux(load_from_imm,
+                       mux(is_fetch_op1_state, data_in, ir_operand_lo),
+                       mux(is_read_mem_state, data_in, dlatch_data))
 
       # Register data input selection
       # Priority: external load > TSX (sp to x) > PLA (stack pull) > load instruction > transfer > ALU result
