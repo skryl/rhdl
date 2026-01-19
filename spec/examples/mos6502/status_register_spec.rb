@@ -65,6 +65,25 @@ RSpec.describe MOS6502::StatusRegister do
       expect(verilog).to include('p')
     end
 
+    it 'generates valid FIRRTL' do
+      firrtl = described_class.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit mos6502_status_register')
+      expect(firrtl).to include('input clk')
+      expect(firrtl).to include('output p')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          described_class,
+          base_dir: 'tmp/circt_test/mos6502_status_register'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
+
     context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
       it 'behavior Verilog compiles and runs' do
         verilog = described_class.to_verilog
