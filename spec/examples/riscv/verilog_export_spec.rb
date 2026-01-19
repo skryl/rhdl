@@ -83,7 +83,7 @@ RSpec.describe 'RISC-V Verilog Export' do
   describe 'Pipeline Registers' do
     it 'exports IF_ID_Reg to Verilog' do
       verilog = RISCV::Pipeline::IF_ID_Reg.to_verilog
-      expect(verilog).to include('module riscv_if_id_reg')
+      expect(verilog).to include('module riscv_pipeline_if_id_reg')
       expect(verilog).to include('input clk')
       expect(verilog).to include('input rst')
       expect(verilog).to include('input stall')
@@ -98,7 +98,7 @@ RSpec.describe 'RISC-V Verilog Export' do
 
     it 'exports ID_EX_Reg to Verilog' do
       verilog = RISCV::Pipeline::ID_EX_Reg.to_verilog
-      expect(verilog).to include('module riscv_id_ex_reg')
+      expect(verilog).to include('module riscv_pipeline_id_ex_reg')
       expect(verilog).to include('input clk')
       expect(verilog).to include('input [31:0] rs1_data_in')
       expect(verilog).to include('output reg [31:0] rs1_data_out')  # reg for sequential output
@@ -107,7 +107,7 @@ RSpec.describe 'RISC-V Verilog Export' do
 
     it 'exports EX_MEM_Reg to Verilog' do
       verilog = RISCV::Pipeline::EX_MEM_Reg.to_verilog
-      expect(verilog).to include('module riscv_ex_mem_reg')
+      expect(verilog).to include('module riscv_pipeline_ex_mem_reg')
       expect(verilog).to include('input clk')
       expect(verilog).to include('input [31:0] alu_result_in')
       expect(verilog).to include('output reg [31:0] alu_result_out')  # reg for sequential output
@@ -116,7 +116,7 @@ RSpec.describe 'RISC-V Verilog Export' do
 
     it 'exports MEM_WB_Reg to Verilog' do
       verilog = RISCV::Pipeline::MEM_WB_Reg.to_verilog
-      expect(verilog).to include('module riscv_mem_wb_reg')
+      expect(verilog).to include('module riscv_pipeline_mem_wb_reg')
       expect(verilog).to include('input clk')
       expect(verilog).to include('output reg [31:0] alu_result_out')  # reg for sequential output
       expect(verilog).to include('output reg [31:0] mem_data_out')
@@ -127,7 +127,7 @@ RSpec.describe 'RISC-V Verilog Export' do
   describe 'Control Units' do
     it 'exports HazardUnit to Verilog' do
       verilog = RISCV::Pipeline::HazardUnit.to_verilog
-      expect(verilog).to include('module riscv_hazard_unit')
+      expect(verilog).to include('module riscv_pipeline_hazard_unit')
       expect(verilog).to include('input [4:0] id_rs1_addr')
       expect(verilog).to include('input [4:0] id_rs2_addr')
       expect(verilog).to include('output stall')
@@ -138,7 +138,7 @@ RSpec.describe 'RISC-V Verilog Export' do
 
     it 'exports ForwardingUnit to Verilog' do
       verilog = RISCV::Pipeline::ForwardingUnit.to_verilog
-      expect(verilog).to include('module riscv_forwarding_unit')
+      expect(verilog).to include('module riscv_pipeline_forwarding_unit')
       expect(verilog).to include('input [4:0] ex_rs1_addr')
       expect(verilog).to include('input [4:0] ex_rs2_addr')
       expect(verilog).to include('output [1:0] forward_a')
