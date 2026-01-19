@@ -1,8 +1,5 @@
 source 'https://rubygems.org'
 
-# Use local gem source
-gem 'rhdl', path: '.'
-
 gem 'parslet', '~> 2.0'
 gem 'activesupport', '~> 7.0'
 
@@ -13,4 +10,5 @@ group :development, :test do
   gem 'benchmark-ips', '~> 2.12'
 end
 
-# Dependencies are specified in rhdl.gemspec
+# Load gem and dependencies from gemspec
+gemspec
