@@ -12,6 +12,7 @@ module RHDL
         @assignments = []
         @locals = []
         @port_widths = {}
+        @vec_defs = {}
 
         # Build port width map (use _ports/_signals which resolve parameterized widths)
         component_class._ports.each do |p|
@@ -31,6 +32,16 @@ module RHDL
         end
         component_class._signals.each do |s|
           define_singleton_method(s.name) { SynthOutputProxy.new(s.name, s.width, self) }
+        end
+
+        # Create accessor methods for Vecs
+        component_class._vec_defs.each do |vd|
+          count = component_class.resolve_class_width(vd[:count])
+          width = component_class.resolve_class_width(vd[:width])
+          @vec_defs[vd[:name]] = { count: count, width: width, direction: vd[:direction] }
+
+          vec_name = vd[:name]
+          define_singleton_method(vec_name) { SynthVecProxy.new(vec_name, @vec_defs[vec_name], self) }
         end
       end
 
@@ -210,6 +221,100 @@ module RHDL
       def to_ir
         # Reference the wire by name
         RHDL::Export::IR::Signal.new(name: @name, width: @width)
+      end
+    end
+
+    # Proxy for Vec access in behavior blocks (synthesis mode)
+    # Generates mux trees for hardware-indexed access
+    class SynthVecProxy
+      attr_reader :name, :vec_def, :context
+
+      def initialize(name, vec_def, context)
+        @name = name
+        @vec_def = vec_def
+        @context = context
+      end
+
+      # Access element by index
+      # Constant index: returns reference to flattened port
+      # Hardware index: generates mux tree
+      def [](index)
+        if index.is_a?(Integer)
+          # Constant index - reference the flattened port directly
+          port_name = "#{@name}_#{index}"
+          SynthSignalProxy.new(port_name, @vec_def[:width])
+        else
+          # Hardware index - generate mux expression
+          SynthVecAccess.new(@name, @vec_def, index, @context)
+        end
+      end
+
+      def count
+        @vec_def[:count]
+      end
+
+      def element_width
+        @vec_def[:width]
+      end
+    end
+
+    # Represents a hardware-indexed Vec access for synthesis
+    # Generates a mux tree selecting from all elements
+    class SynthVecAccess < SynthExpr
+      attr_reader :vec_name, :vec_def, :index
+
+      def initialize(vec_name, vec_def, index, context)
+        super(vec_def[:width])
+        @vec_name = vec_name
+        @vec_def = vec_def
+        @index = index
+        @context = context
+      end
+
+      def to_ir
+        # Generate a mux tree for selecting from Vec elements
+        # case_select(index, { 0 => vec_0, 1 => vec_1, ... })
+        count = @vec_def[:count]
+        element_width = @vec_def[:width]
+
+        # Build cases for each element
+        # Start with last element as default, then build mux chain backwards
+        result = RHDL::Export::IR::Signal.new(
+          name: "#{@vec_name}_#{count - 1}",
+          width: element_width
+        )
+
+        # Build mux chain from second-to-last down to first
+        (count - 2).downto(0) do |i|
+          element_signal = RHDL::Export::IR::Signal.new(
+            name: "#{@vec_name}_#{i}",
+            width: element_width
+          )
+
+          # Condition: index == i
+          index_ir = @index.respond_to?(:to_ir) ? @index.to_ir : RHDL::Export::IR::Signal.new(name: @index.to_s, width: index_width)
+          condition = RHDL::Export::IR::BinaryOp.new(
+            op: :==,
+            left: index_ir,
+            right: RHDL::Export::IR::Literal.new(value: i, width: index_width),
+            width: 1
+          )
+
+          result = RHDL::Export::IR::Mux.new(
+            condition: condition,
+            when_true: element_signal,
+            when_false: result,
+            width: element_width
+          )
+        end
+
+        result
+      end
+
+      private
+
+      def index_width
+        (@vec_def[:count] - 1).bit_length.clamp(1, 32)
       end
     end
   end
