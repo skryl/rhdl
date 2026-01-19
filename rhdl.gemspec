@@ -43,6 +43,7 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency "benchmark-ips", "~> 2.12"
   spec.add_development_dependency "irb"
   spec.add_development_dependency "parallel_tests", "~> 4.0"
+  spec.add_development_dependency "pry"
   spec.add_development_dependency "rake", "~> 13.0"
   spec.add_development_dependency "rspec", "~> 3.12"
 end
