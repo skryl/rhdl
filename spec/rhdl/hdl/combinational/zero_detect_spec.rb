@@ -45,6 +45,25 @@ RSpec.describe RHDL::HDL::ZeroDetect do
       expect(verilog).to include('input [7:0] a')
       expect(verilog).to include('output zero')
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::ZeroDetect.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit zero_detect')
+      expect(firrtl).to include('input a')
+      expect(firrtl).to include('output zero')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::ZeroDetect,
+          base_dir: 'tmp/circt_test/zero_detect'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do

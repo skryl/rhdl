@@ -49,6 +49,25 @@ RSpec.describe RHDL::HDL::Encoder4to2 do
       expect(verilog).to include('output [1:0] y')
     end
 
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::Encoder4to2.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit encoder4to2')
+      expect(firrtl).to include('input a')
+      expect(firrtl).to include('output y')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::Encoder4to2,
+          base_dir: 'tmp/circt_test/encoder4to2'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
+
     context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::Encoder4to2.to_verilog

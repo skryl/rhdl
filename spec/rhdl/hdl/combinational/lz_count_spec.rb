@@ -42,6 +42,25 @@ RSpec.describe RHDL::HDL::LZCount do
       expect(verilog).to include('input [7:0] a')
       expect(verilog).to include('output [3:0] count')
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::LZCount.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit lz_count')
+      expect(firrtl).to include('input a')
+      expect(firrtl).to include('output count')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::LZCount,
+          base_dir: 'tmp/circt_test/lz_count'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do

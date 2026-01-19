@@ -69,6 +69,26 @@ RSpec.describe RHDL::HDL::RegisterFile do
       expect(verilog).to include('input [7:0] wdata')
       expect(verilog).to match(/output.*\[7:0\].*rdata1/)
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::RegisterFile.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit register_file')
+      expect(firrtl).to include('input clk')
+      expect(firrtl).to include('input wdata')
+      expect(firrtl).to include('output rdata1')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::RegisterFile,
+          base_dir: 'tmp/circt_test/register_file'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do
