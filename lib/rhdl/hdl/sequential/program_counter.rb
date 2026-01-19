@@ -11,13 +11,15 @@ module RHDL
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
+      parameter :width, default: 16
+
       input :clk
       input :rst
-      input :en          # Increment enable
-      input :load        # Load new address
-      input :d, width: 16
-      input :inc, width: 16  # Increment amount (usually 1, 2, or 3)
-      output :q, width: 16
+      input :en, default: 0        # Increment enable
+      input :load, default: 0      # Load new address
+      input :d, width: :width
+      input :inc, width: :width, default: 1  # Increment amount (usually 1, 2, or 3)
+      output :q, width: :width
 
       # Sequential block for program counter
       # Priority: load > en (increment)

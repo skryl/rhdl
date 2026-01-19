@@ -63,88 +63,18 @@ RSpec.describe 'HDL CPU Verilog Program Execution' do
 
   def write_verilog_modules(base_dir)
     # Write all required modules
-    # Add parameter wrappers to modules that need them for CPU instantiation
     modules = {
       'cpu_instruction_decoder.v' => RHDL::HDL::CPU::InstructionDecoder.to_verilog,
-      'alu.v' => add_alu_parameter(RHDL::HDL::ALU.to_verilog),
-      'program_counter.v' => add_pc_parameter(RHDL::HDL::ProgramCounter.to_verilog),
-      'register.v' => add_register_parameter(RHDL::HDL::Register.to_verilog),
-      'stack_pointer.v' => add_sp_parameter(RHDL::HDL::StackPointer.to_verilog),
-      'cpu.v' => fix_cpu_verilog(RHDL::HDL::CPU::CPU.to_verilog)
+      'alu.v' => RHDL::HDL::ALU.to_verilog,
+      'program_counter.v' => RHDL::HDL::ProgramCounter.to_verilog,
+      'register.v' => RHDL::HDL::Register.to_verilog,
+      'stack_pointer.v' => RHDL::HDL::StackPointer.to_verilog,
+      'cpu.v' => RHDL::HDL::CPU::CPU.to_verilog
     }
 
     modules.each do |filename, content|
       File.write(File.join(base_dir, filename), content)
     end
-  end
-
-  # Fix CPU Verilog by adding missing internal wire assignments
-  def fix_cpu_verilog(verilog)
-    # The Verilog export doesn't generate assignments for internal wire connections
-    # Add the missing assignments that should connect:
-    # - acc_out => alu_a
-    # - mem_data_in => alu_b
-    # - alu_result => alu_result_out
-    # - alu_zero => alu_zero_out
-    # - dec_halt => halt_out
-    # - dec_mem_read => mem_read_en
-    # - dec_mem_write => mem_write_en
-    # - acc_out => mem_data_out
-
-    # Change alu_a and alu_b from reg to wire since they're driven by assigns
-    verilog = verilog
-      .sub("reg [7:0] alu_a;", "wire [7:0] alu_a;")
-      .sub("reg [7:0] alu_b;", "wire [7:0] alu_b;")
-
-    # Add missing assignments before endmodule
-    missing_assigns = <<~VERILOG
-
-      // Internal wire assignments (added by test fixture)
-      assign alu_a = acc_out;
-      assign alu_b = mem_data_in;
-      assign alu_result_out = alu_result;
-      assign alu_zero_out = alu_zero;
-      assign halt_out = dec_halt;
-      assign mem_read_en = dec_mem_read;
-      assign mem_write_en = dec_mem_write;
-      assign mem_data_out = acc_out;
-    VERILOG
-
-    verilog.sub("endmodule", missing_assigns + "\nendmodule")
-  end
-
-  # Add parameter block to ALU module and fix unconnected inputs
-  def add_alu_parameter(verilog)
-    verilog
-      .sub("module alu(",
-           "module alu #(\n  parameter width = 8\n) (")
-      .sub("input cin,", "input cin = 1'b0,")
-  end
-
-  # Add parameter block to ProgramCounter module and fix unconnected inputs
-  def add_pc_parameter(verilog)
-    # Add parameter and default values for optional inputs
-    verilog
-      .sub("module program_counter(",
-           "module program_counter #(\n  parameter width = 16\n) (")
-      .sub("input en,", "input en = 1'b0,")
-      .sub("input [15:0] inc,", "input [15:0] inc = 16'd1,")
-  end
-
-  # Add parameter block to Register module
-  def add_register_parameter(verilog)
-    verilog.sub(
-      "module register(",
-      "module register #(\n  parameter width = 8\n) ("
-    )
-  end
-
-  # Add parameter block to StackPointer module
-  def add_sp_parameter(verilog)
-    verilog.sub(
-      "module stack_pointer(",
-      "module stack_pointer #(\n  parameter width = 8,\n  parameter initial_rhdl = 255\n) ("
-    )
   end
 
   def write_cpu_testbench(base_dir, program:, initial_memory:, check_addrs:, max_cycles:)

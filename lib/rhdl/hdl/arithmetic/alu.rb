@@ -48,7 +48,7 @@ module RHDL
       input :a, width: :width
       input :b, width: :width
       input :op, width: 4
-      input :cin
+      input :cin, default: 0
       output :result, width: :width
       output :cout
       output :zero

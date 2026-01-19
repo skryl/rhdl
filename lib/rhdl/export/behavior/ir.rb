@@ -5,10 +5,10 @@ module RHDL
     module IR
       class ModuleDef
         attr_reader :name, :ports, :nets, :regs, :assigns, :processes, :reg_ports, :instances,
-                    :memories, :write_ports
+                    :memories, :write_ports, :parameters
 
         def initialize(name:, ports:, nets:, regs:, assigns:, processes:, reg_ports: [], instances: [],
-                       memories: [], write_ports: [])
+                       memories: [], write_ports: [], parameters: {})
           @name = name
           @ports = ports
           @nets = nets
@@ -19,16 +19,18 @@ module RHDL
           @instances = instances
           @memories = memories
           @write_ports = write_ports
+          @parameters = parameters
         end
       end
 
       class Port
-        attr_reader :name, :direction, :width
+        attr_reader :name, :direction, :width, :default
 
-        def initialize(name:, direction:, width:)
+        def initialize(name:, direction:, width:, default: nil)
           @name = name
           @direction = direction
           @width = width
+          @default = default
         end
       end
 
