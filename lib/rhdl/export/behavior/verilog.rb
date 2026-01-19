@@ -21,7 +21,19 @@ module RHDL
 
       def generate(module_def)
         lines = []
-        lines << "module #{sanitize(module_def.name)}("
+
+        # Module declaration with optional parameters
+        if module_def.parameters.empty?
+          lines << "module #{sanitize(module_def.name)}("
+        else
+          lines << "module #{sanitize(module_def.name)} #("
+          param_lines = module_def.parameters.map do |name, value|
+            "  parameter #{sanitize(name)} = #{value}"
+          end
+          lines << param_lines.join(",\n")
+          lines << ") ("
+        end
+
         port_lines = module_def.ports.map do |port|
           "  #{port_decl(port, module_def.reg_ports.include?(port.name))}"
         end
@@ -102,7 +114,19 @@ module RHDL
               when :inout then "inout"
               else "input"
               end
-        "#{dir} #{width_decl(port.width)}#{sanitize(port.name)}".strip
+        decl = "#{dir} #{width_decl(port.width)}#{sanitize(port.name)}".strip
+
+        # Add default value for input ports if specified
+        if port.direction == :in && port.default
+          default_val = if port.width == 1
+                          port.default == 0 ? "1'b0" : "1'b1"
+                        else
+                          "#{port.width}'d#{port.default}"
+                        end
+          decl = "#{decl} = #{default_val}"
+        end
+
+        decl
       end
 
       def width_decl(width)

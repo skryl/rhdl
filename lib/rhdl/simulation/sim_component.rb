@@ -126,7 +126,7 @@ module RHDL
         # DSL-compatible _ports accessor for behavior module
         def _ports
           _port_defs.map do |pd|
-            PortDef.new(pd[:name], pd[:direction], resolve_class_width(pd[:width]))
+            PortDef.new(pd[:name], pd[:direction], resolve_class_width(pd[:width]), pd[:default])
           end
         end
 
@@ -138,8 +138,11 @@ module RHDL
         end
 
         # Class-level input port definition
-        def input(name, width: 1)
-          _port_defs << { name: name, direction: :in, width: width }
+        # @param name [Symbol] Port name
+        # @param width [Integer] Bit width (default: 1)
+        # @param default [Integer, nil] Default value for unconnected ports (Verilog only)
+        def input(name, width: 1, default: nil)
+          _port_defs << { name: name, direction: :in, width: width, default: default }
         end
 
         # Class-level output port definition
@@ -346,7 +349,30 @@ module RHDL
           name = top_name || verilog_module_name
 
           ports = _ports.map do |p|
-            RHDL::Export::IR::Port.new(name: p.name, direction: p.direction, width: p.width)
+            RHDL::Export::IR::Port.new(
+              name: p.name,
+              direction: p.direction,
+              width: p.width,
+              default: p.default
+            )
+          end
+
+          # Build parameters hash from class-level parameter definitions
+          # Convert Procs to their evaluated values using default values
+          parameters = {}
+          _parameter_defs.each do |param_name, default_val|
+            if default_val.is_a?(Proc)
+              # For class-level evaluation, use default parameter values
+              # Create context with parameter defaults and evaluate
+              eval_context = Object.new
+              _parameter_defs.each do |k, v|
+                next if v.is_a?(Proc)
+                eval_context.instance_variable_set(:"@#{k}", v)
+              end
+              parameters[param_name] = eval_context.instance_exec(&default_val)
+            else
+              parameters[param_name] = default_val
+            end
           end
 
           # Get behavior assigns first so we can identify which signals are assign-driven
@@ -356,13 +382,25 @@ module RHDL
           # Identify signals driven by instance outputs (these must be wires, not regs)
           # A signal is instance-driven if it's the destination of a connection from [inst, port]
           instance_driven_signals = Set.new
+          # Also generate assign statements for signal-to-signal connections
+          signal_assigns = []
           _connection_defs.each do |conn|
             source, dest = conn[:source], conn[:dest]
             # If source is [inst_name, port_name], then dest is driven by an instance output
             if source.is_a?(Array) && source.length == 2 && dest.is_a?(Symbol)
               instance_driven_signals.add(dest)
+            # If both are symbols, generate an assign statement (signal-to-signal connection)
+            # port :source_signal => :dest_signal means dest = source
+            elsif source.is_a?(Symbol) && dest.is_a?(Symbol)
+              # Get widths from ports and signals
+              source_width = find_signal_width(source)
+              signal_assigns << RHDL::Export::IR::Assign.new(
+                target: dest.to_s,
+                expr: RHDL::Export::IR::Signal.new(name: source.to_s, width: source_width)
+              )
             end
           end
+          assigns = assigns + signal_assigns
 
           # Identify signals driven by continuous assigns (these must be wires, not regs)
           # In Verilog, 'reg' cannot be driven by 'assign' statements
@@ -406,7 +444,8 @@ module RHDL
             processes: [],
             instances: instances,
             memories: memories,
-            write_ports: write_ports
+            write_ports: write_ports,
+            parameters: parameters
           )
         end
 
@@ -513,6 +552,20 @@ module RHDL
           inst_def[:connections][port_name] = signal
         end
 
+        # Find the width of a signal by checking ports and internal signals
+        def find_signal_width(signal_name)
+          # Check ports first
+          port = _ports.find { |p| p.name == signal_name }
+          return port.width if port
+
+          # Check internal signals
+          sig = _signals.find { |s| s.name == signal_name }
+          return sig.width if sig
+
+          # Default to 1 if not found
+          1
+        end
+
         # Generate IR assigns and wire declarations from the behavior block
         # Used by the export/lowering system for HDL generation
         def behavior_to_ir_assigns
@@ -528,7 +581,7 @@ module RHDL
       end
 
       # Simple structs for port/signal definitions
-      PortDef = Struct.new(:name, :direction, :width)
+      PortDef = Struct.new(:name, :direction, :width, :default)
       SignalDef = Struct.new(:name, :width)
 
       def initialize(name = nil, **kwargs)
