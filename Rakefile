@@ -1579,7 +1579,6 @@ task tui: 'tui:run'
 # =============================================================================
 
 namespace :apple2 do
-  TUI_INK_DIR = File.expand_path('tui-ink', __dir__)
   APPLE2_DIR = File.expand_path('examples/mos6502', __dir__)
 
   desc "Run Apple II emulator with Ink TUI"
