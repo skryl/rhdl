@@ -349,6 +349,10 @@ module RHDL
             RHDL::Export::IR::Port.new(name: p.name, direction: p.direction, width: p.width)
           end
 
+          # Get behavior assigns first so we can identify which signals are assign-driven
+          behavior_result = behavior_to_ir_assigns
+          assigns = behavior_result[:assigns]
+
           # Identify signals driven by instance outputs (these must be wires, not regs)
           # A signal is instance-driven if it's the destination of a connection from [inst, port]
           instance_driven_signals = Set.new
@@ -360,19 +364,24 @@ module RHDL
             end
           end
 
-          # Split signals into regs (not instance-driven) and nets (instance-driven)
+          # Identify signals driven by continuous assigns (these must be wires, not regs)
+          # In Verilog, 'reg' cannot be driven by 'assign' statements
+          assign_driven_signals = Set.new
+          assigns.each do |assign|
+            assign_driven_signals.add(assign.target.to_sym)
+          end
+
+          # Split signals into regs (procedural) and nets (continuous assignment or instance-driven)
           regs = []
           instance_nets = []
           _signals.each do |s|
-            if instance_driven_signals.include?(s.name)
+            if instance_driven_signals.include?(s.name) || assign_driven_signals.include?(s.name)
               instance_nets << RHDL::Export::IR::Net.new(name: s.name, width: s.width)
             else
               regs << RHDL::Export::IR::Reg.new(name: s.name, width: s.width)
             end
           end
 
-          behavior_result = behavior_to_ir_assigns
-          assigns = behavior_result[:assigns]
           nets = behavior_result[:wires] + instance_nets
 
           # Generate instances from structure definitions

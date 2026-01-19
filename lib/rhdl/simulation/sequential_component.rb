@@ -91,11 +91,18 @@ module RHDL
             end
           end
 
-          # Split signals into regs (not instance-driven) and nets (instance-driven)
+          # Identify signals driven by continuous assigns (these must be wires, not regs)
+          # In Verilog, 'reg' cannot be driven by 'assign' statements
+          assign_driven_signals = Set.new
+          behavior_result[:assigns].each do |assign|
+            assign_driven_signals.add(assign.target.to_sym)
+          end
+
+          # Split signals into regs (procedural) and nets (continuous assignment or instance-driven)
           regs = []
           instance_nets = []
           _signals.each do |s|
-            if instance_driven_signals.include?(s.name)
+            if instance_driven_signals.include?(s.name) || assign_driven_signals.include?(s.name)
               instance_nets << RHDL::Export::IR::Net.new(name: s.name, width: s.width)
             else
               regs << RHDL::Export::IR::Reg.new(name: s.name, width: s.width)
