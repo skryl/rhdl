@@ -48,6 +48,10 @@ require_relative 'simulation/behavior_synth_context'
 # Dependency tracking for event-driven simulation
 require_relative 'simulation/dependency_graph'
 
+# Aggregate types (Bundle and Vec)
+require_relative 'simulation/bundle'
+require_relative 'simulation/vec'
+
 # Main simulation classes
 require_relative 'simulation/sim_component'
 require_relative 'simulation/simulator'

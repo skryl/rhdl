@@ -56,6 +56,8 @@ module RHDL
           subclass.instance_variable_set(:@_instance_defs, (@_instance_defs || []).dup)
           subclass.instance_variable_set(:@_connection_defs, (@_connection_defs || []).dup)
           subclass.instance_variable_set(:@_parameter_defs, (@_parameter_defs || {}).dup)
+          subclass.instance_variable_set(:@_bundle_defs, (@_bundle_defs || []).dup)
+          subclass.instance_variable_set(:@_vec_defs, (@_vec_defs || []).dup)
         end
 
         def _port_defs
@@ -76,6 +78,14 @@ module RHDL
 
         def _parameter_defs
           @_parameter_defs ||= {}
+        end
+
+        def _bundle_defs
+          @_bundle_defs ||= []
+        end
+
+        def _vec_defs
+          @_vec_defs ||= []
         end
 
         # Define a component parameter with default value
@@ -175,6 +185,150 @@ module RHDL
             # New syntax: wire :signal_name, width: 8
             _signal_defs << { name: name, width: width }
           end
+        end
+
+        # Define a Bundle port (aggregate interface type)
+        #
+        # Bundles group multiple related signals into a single interface.
+        # Fields are flattened to individual ports in the generated Verilog.
+        #
+        # @param name [Symbol] Bundle instance name
+        # @param bundle_class [Class] Bundle class (must inherit from Bundle)
+        # @param direction [Symbol] :input or :output (default: :input)
+        # @param flipped [Boolean] Reverse all field directions (default: false)
+        #
+        # @example Define a bundle
+        #   class AxiLite < Bundle
+        #     field :awaddr, width: 32, direction: :output
+        #     field :awvalid, width: 1, direction: :output
+        #     field :awready, width: 1, direction: :input
+        #   end
+        #
+        # @example Use as input (producer interface)
+        #   input_bundle :axi, AxiLite
+        #
+        # @example Use as output (consumer interface - flipped)
+        #   output_bundle :axi, AxiLite  # equivalent to flipped: true
+        #
+        def input_bundle(name, bundle_class, flipped: false)
+          _bundle_defs << {
+            name: name,
+            bundle_class: bundle_class,
+            direction: :input,
+            flipped: flipped
+          }
+
+          # Add flattened ports
+          bundle_class.fields.each do |field|
+            effective_dir = flipped ? field.flipped_direction : field.direction
+            port_name = "#{name}_#{field.name}".to_sym
+
+            if effective_dir == :input
+              _port_defs << { name: port_name, direction: :in, width: field.width, default: nil }
+            else
+              _port_defs << { name: port_name, direction: :out, width: field.width }
+            end
+          end
+        end
+
+        # Define an output Bundle port (flipped by default for consumer interface)
+        #
+        # @param name [Symbol] Bundle instance name
+        # @param bundle_class [Class] Bundle class
+        # @param flipped [Boolean] Reverse field directions (default: true for output)
+        #
+        def output_bundle(name, bundle_class, flipped: true)
+          _bundle_defs << {
+            name: name,
+            bundle_class: bundle_class,
+            direction: :output,
+            flipped: flipped
+          }
+
+          # Add flattened ports
+          bundle_class.fields.each do |field|
+            effective_dir = flipped ? field.flipped_direction : field.direction
+            port_name = "#{name}_#{field.name}".to_sym
+
+            if effective_dir == :input
+              _port_defs << { name: port_name, direction: :in, width: field.width, default: nil }
+            else
+              _port_defs << { name: port_name, direction: :out, width: field.width }
+            end
+          end
+        end
+
+        # Define a Vec (hardware array) port or signal
+        #
+        # Vec creates an array of signals that can be indexed at runtime
+        # (generates mux/demux logic) or at elaboration time (constant index).
+        #
+        # @param name [Symbol] Vec instance name
+        # @param count [Integer, Symbol] Number of elements (can reference parameter)
+        # @param width [Integer, Symbol] Width of each element (default: 1)
+        # @param direction [Symbol] :input, :output, or nil for internal (default: nil)
+        #
+        # @example Internal Vec (array of wires)
+        #   vec :regs, count: 32, width: 64
+        #
+        # @example Input Vec (array of input ports)
+        #   input_vec :data_in, count: 4, width: 8
+        #
+        # @example Output Vec (array of output ports)
+        #   output_vec :data_out, count: 4, width: 8
+        #
+        # @example Parameterized Vec
+        #   parameter :depth, default: 32
+        #   vec :registers, count: :depth, width: 64
+        #
+        def vec(name, count:, width: 1, direction: nil)
+          _vec_defs << {
+            name: name,
+            count: count,
+            width: width,
+            direction: direction
+          }
+
+          # For ports, add flattened individual ports
+          resolved_count = resolve_class_width(count)
+          if direction == :input || direction == :output
+            resolved_count.times do |i|
+              port_name = "#{name}_#{i}".to_sym
+              if direction == :input
+                _port_defs << { name: port_name, direction: :in, width: width, default: nil }
+              else
+                _port_defs << { name: port_name, direction: :out, width: width }
+              end
+            end
+          end
+        end
+
+        # Define an input Vec (array of input ports)
+        #
+        # @param name [Symbol] Vec instance name
+        # @param count [Integer, Symbol] Number of elements
+        # @param width [Integer, Symbol] Width of each element
+        #
+        # @example
+        #   input_vec :data_in, count: 4, width: 8
+        #   # Creates: data_in_0, data_in_1, data_in_2, data_in_3 (all 8-bit inputs)
+        #
+        def input_vec(name, count:, width: 1)
+          vec(name, count: count, width: width, direction: :input)
+        end
+
+        # Define an output Vec (array of output ports)
+        #
+        # @param name [Symbol] Vec instance name
+        # @param count [Integer, Symbol] Number of elements
+        # @param width [Integer, Symbol] Width of each element
+        #
+        # @example
+        #   output_vec :data_out, count: 4, width: 8
+        #   # Creates: data_out_0, data_out_1, data_out_2, data_out_3 (all 8-bit outputs)
+        #
+        def output_vec(name, count:, width: 1)
+          vec(name, count: count, width: width, direction: :output)
         end
 
         # Define a sub-component instance (class-level)
@@ -645,6 +799,51 @@ module RHDL
         self.class._signal_defs.each do |sd|
           w = resolve_width(sd[:width])
           signal(sd[:name], width: w)
+        end
+
+        # Setup Vec instances
+        setup_vecs_from_class_defs
+
+        # Setup Bundle instances
+        setup_bundles_from_class_defs
+      end
+
+      # Setup Vec instances from class-level definitions
+      def setup_vecs_from_class_defs
+        @vecs = {}
+
+        self.class._vec_defs.each do |vd|
+          count = resolve_width(vd[:count])
+          width = resolve_width(vd[:width])
+          direction = vd[:direction]
+
+          vec_inst = VecInstance.new(
+            vd[:name],
+            count: count,
+            width: width,
+            component: self,
+            direction: direction
+          )
+
+          @vecs[vd[:name]] = vec_inst
+          instance_variable_set(:"@#{vd[:name]}", vec_inst)
+        end
+      end
+
+      # Setup Bundle instances from class-level definitions
+      def setup_bundles_from_class_defs
+        @bundles = {}
+
+        self.class._bundle_defs.each do |bd|
+          bundle_inst = BundleInstance.new(
+            bd[:name],
+            bd[:bundle_class],
+            self,
+            flipped: bd[:flipped]
+          )
+
+          @bundles[bd[:name]] = bundle_inst
+          instance_variable_set(:"@#{bd[:name]}", bundle_inst)
         end
       end
 
