@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Sim
     # Proxy for output signals that captures assignments
-    class SimOutputProxy < SimSignalProxy
+    class OutputProxy < SignalProxy
       def initialize(name, wire, context)
         super(name, wire, :output, context)
       end
@@ -18,7 +18,7 @@ module RHDL
 
       def resolve(other)
         case other
-        when SimSignalProxy, SimOutputProxy, SimValueProxy
+        when SignalProxy, OutputProxy, ValueProxy
           other.value
         when Integer
           other

@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
-    # Object pool for SimValueProxy instances to reduce GC pressure
+  module Sim
+    # Object pool for ValueProxy instances to reduce GC pressure
     # Proxies are recycled after each propagation cycle
     class ProxyPool
       # Maximum pool size per width to prevent memory bloat
@@ -13,11 +13,11 @@ module RHDL
         @in_use = []
       end
 
-      # Acquire a SimValueProxy from the pool or create a new one
+      # Acquire a ValueProxy from the pool or create a new one
       def acquire(value, width, context)
         pool = @pools[width]
         proxy = if pool.empty?
-                  SimValueProxy.allocate
+                  ValueProxy.allocate
                 else
                   pool.pop
                 end

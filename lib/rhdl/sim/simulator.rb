@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Sim
     # Simulation scheduler for event-driven simulation
     class Simulator
       attr_reader :time, :components, :dependency_graph

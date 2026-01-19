@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Sim
     # Pre-computed bit mask cache for common widths
     # Avoids repeated (1 << width) - 1 calculations in hot paths
     module MaskCache

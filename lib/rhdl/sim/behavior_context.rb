@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Sim
     # Context for evaluating behavior blocks in simulation mode
-    class BehaviorSimContext
+    class BehaviorContext
       attr_reader :proxy_pool
 
       def initialize(component)
@@ -14,26 +14,26 @@ module RHDL
 
         # Create accessor methods for all inputs and outputs
         component.inputs.each do |name, wire|
-          define_singleton_method(name) { SimSignalProxy.new(name, wire, :input, self) }
+          define_singleton_method(name) { SignalProxy.new(name, wire, :input, self) }
         end
         component.outputs.each do |name, wire|
-          define_singleton_method(name) { SimOutputProxy.new(name, wire, self) }
+          define_singleton_method(name) { OutputProxy.new(name, wire, self) }
         end
         component.internal_signals.each do |name, wire|
-          define_singleton_method(name) { SimOutputProxy.new(name, wire, self) }
+          define_singleton_method(name) { OutputProxy.new(name, wire, self) }
         end
 
         # Create accessor methods for Vecs
         if component.instance_variable_defined?(:@vecs) && component.instance_variable_get(:@vecs)
           component.instance_variable_get(:@vecs).each do |name, vec_inst|
-            define_singleton_method(name) { SimVecProxy.new(vec_inst, self) }
+            define_singleton_method(name) { VecProxy.new(vec_inst, self) }
           end
         end
 
         # Create accessor methods for Bundles
         if component.instance_variable_defined?(:@bundles) && component.instance_variable_get(:@bundles)
           component.instance_variable_get(:@bundles).each do |name, bundle_inst|
-            define_singleton_method(name) { SimBundleProxy.new(bundle_inst, self) }
+            define_singleton_method(name) { BundleProxy.new(bundle_inst, self) }
           end
         end
       end
@@ -172,7 +172,7 @@ module RHDL
         masked_value = value & MaskCache.mask(w)
 
         # Store the local and make it accessible
-        local_var = SimLocalProxy.new(name, masked_value, w, self)
+        local_var = LocalProxy.new(name, masked_value, w, self)
         @locals[name] = local_var
 
         # Define accessor method for this local
@@ -224,7 +224,7 @@ module RHDL
 
       def resolve_value(sig)
         case sig
-        when SimSignalProxy, SimOutputProxy, SimLocalProxy
+        when SignalProxy, OutputProxy, LocalProxy
           sig.value
         when Integer
           sig
@@ -235,7 +235,7 @@ module RHDL
 
       def resolve_value_with_width(sig)
         case sig
-        when SimSignalProxy, SimOutputProxy, SimLocalProxy, SimValueProxy
+        when SignalProxy, OutputProxy, LocalProxy, ValueProxy
           [sig.value, sig.width]
         when Integer
           [sig, sig == 0 ? 1 : sig.bit_length]
@@ -251,7 +251,7 @@ module RHDL
     end
 
     # Proxy for local variables in simulation
-    class SimLocalProxy
+    class LocalProxy
       attr_reader :name, :value, :width
 
       def initialize(name, value, width, context)
@@ -267,82 +267,82 @@ module RHDL
           high = [index.begin, index.end].max
           low = [index.begin, index.end].min
           slice_width = high - low + 1
-          SimLocalProxy.new("#{@name}[#{index}]", (@value >> low) & MaskCache.mask(slice_width), slice_width, @context)
+          LocalProxy.new("#{@name}[#{index}]", (@value >> low) & MaskCache.mask(slice_width), slice_width, @context)
         else
-          SimLocalProxy.new("#{@name}[#{index}]", (@value >> index) & 1, 1, @context)
+          LocalProxy.new("#{@name}[#{index}]", (@value >> index) & 1, 1, @context)
         end
       end
 
       # Arithmetic operators
       def +(other)
         other_val = @context.send(:resolve_value, other)
-        SimLocalProxy.new(nil, @value + other_val, @width + 1, @context)
+        LocalProxy.new(nil, @value + other_val, @width + 1, @context)
       end
 
       def -(other)
         other_val = @context.send(:resolve_value, other)
-        SimLocalProxy.new(nil, @value - other_val, @width, @context)
+        LocalProxy.new(nil, @value - other_val, @width, @context)
       end
 
       def *(other)
         other_val = @context.send(:resolve_value, other)
         other_width = other.respond_to?(:width) ? other.width : 8
-        SimLocalProxy.new(nil, @value * other_val, @width + other_width, @context)
+        LocalProxy.new(nil, @value * other_val, @width + other_width, @context)
       end
 
       # Bitwise operators
       def &(other)
         other_val = @context.send(:resolve_value, other)
         other_width = other.respond_to?(:width) ? other.width : @width
-        SimLocalProxy.new(nil, @value & other_val, [@width, other_width].max, @context)
+        LocalProxy.new(nil, @value & other_val, [@width, other_width].max, @context)
       end
 
       def |(other)
         other_val = @context.send(:resolve_value, other)
         other_width = other.respond_to?(:width) ? other.width : @width
-        SimLocalProxy.new(nil, @value | other_val, [@width, other_width].max, @context)
+        LocalProxy.new(nil, @value | other_val, [@width, other_width].max, @context)
       end
 
       def ^(other)
         other_val = @context.send(:resolve_value, other)
         other_width = other.respond_to?(:width) ? other.width : @width
-        SimLocalProxy.new(nil, @value ^ other_val, [@width, other_width].max, @context)
+        LocalProxy.new(nil, @value ^ other_val, [@width, other_width].max, @context)
       end
 
       def ~
-        SimLocalProxy.new(nil, (~@value) & MaskCache.mask(@width), @width, @context)
+        LocalProxy.new(nil, (~@value) & MaskCache.mask(@width), @width, @context)
       end
 
       # Shift operators
       def <<(amount)
         amt = @context.send(:resolve_value, amount)
-        SimLocalProxy.new(nil, @value << amt, @width, @context)
+        LocalProxy.new(nil, @value << amt, @width, @context)
       end
 
       def >>(amount)
         amt = @context.send(:resolve_value, amount)
-        SimLocalProxy.new(nil, @value >> amt, @width, @context)
+        LocalProxy.new(nil, @value >> amt, @width, @context)
       end
 
       # Comparison operators
       def ==(other)
         other_val = @context.send(:resolve_value, other)
-        SimLocalProxy.new(nil, @value == other_val ? 1 : 0, 1, @context)
+        LocalProxy.new(nil, @value == other_val ? 1 : 0, 1, @context)
       end
 
       def !=(other)
         other_val = @context.send(:resolve_value, other)
-        SimLocalProxy.new(nil, @value != other_val ? 1 : 0, 1, @context)
+        LocalProxy.new(nil, @value != other_val ? 1 : 0, 1, @context)
       end
 
       def <(other)
         other_val = @context.send(:resolve_value, other)
-        SimLocalProxy.new(nil, @value < other_val ? 1 : 0, 1, @context)
+        LocalProxy.new(nil, @value < other_val ? 1 : 0, 1, @context)
       end
 
       def >(other)
         other_val = @context.send(:resolve_value, other)
-        SimLocalProxy.new(nil, @value > other_val ? 1 : 0, 1, @context)
+        LocalProxy.new(nil, @value > other_val ? 1 : 0, 1, @context)
       end
 
       def to_i
@@ -351,7 +351,7 @@ module RHDL
     end
 
     # Proxy for Vec access in behavior blocks (simulation mode)
-    class SimVecProxy
+    class VecProxy
       attr_reader :vec_inst, :context
 
       def initialize(vec_inst, context)
@@ -364,7 +364,7 @@ module RHDL
         resolved_idx = resolve_value(index)
         clamped_idx = resolved_idx.clamp(0, @vec_inst.count - 1)
         wire = @vec_inst.elements[clamped_idx]
-        SimSignalProxy.new("#{@vec_inst.name}[#{clamped_idx}]", wire, :internal, @context)
+        SignalProxy.new("#{@vec_inst.name}[#{clamped_idx}]", wire, :internal, @context)
       end
 
       # Set element at constant index
@@ -379,14 +379,14 @@ module RHDL
       # Iterate over elements
       def each(&block)
         @vec_inst.elements.each_with_index do |wire, i|
-          proxy = SimSignalProxy.new("#{@vec_inst.name}[#{i}]", wire, :internal, @context)
+          proxy = SignalProxy.new("#{@vec_inst.name}[#{i}]", wire, :internal, @context)
           block.call(proxy)
         end
       end
 
       def each_with_index(&block)
         @vec_inst.elements.each_with_index do |wire, i|
-          proxy = SimSignalProxy.new("#{@vec_inst.name}[#{i}]", wire, :internal, @context)
+          proxy = SignalProxy.new("#{@vec_inst.name}[#{i}]", wire, :internal, @context)
           block.call(proxy, i)
         end
       end
@@ -411,7 +411,7 @@ module RHDL
         case val
         when Integer
           val
-        when SimSignalProxy, SimOutputProxy, SimLocalProxy
+        when SignalProxy, OutputProxy, LocalProxy
           val.value
         else
           val.respond_to?(:value) ? val.value : val.to_i
@@ -420,7 +420,7 @@ module RHDL
     end
 
     # Proxy for Bundle access in behavior blocks (simulation mode)
-    class SimBundleProxy
+    class BundleProxy
       attr_reader :bundle_inst, :context
 
       def initialize(bundle_inst, context)
@@ -434,9 +434,9 @@ module RHDL
           wire = @bundle_inst.fields[method_name]
           direction = @bundle_inst.field_direction(method_name)
           if direction == :output
-            SimOutputProxy.new("#{@bundle_inst.name}.#{method_name}", wire, @context)
+            OutputProxy.new("#{@bundle_inst.name}.#{method_name}", wire, @context)
           else
-            SimSignalProxy.new("#{@bundle_inst.name}.#{method_name}", wire, :input, @context)
+            SignalProxy.new("#{@bundle_inst.name}.#{method_name}", wire, :input, @context)
           end
         else
           super

@@ -1,14 +1,14 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Sim
     # Vec represents a hardware array of signals with hardware-indexable access
     #
     # Similar to Chisel's Vec, this allows creating arrays of signals that can
     # be indexed at both elaboration time (constant index) and runtime (hardware index).
     #
     # @example Create a Vec in a component
-    #   class RegisterFile < SimComponent
+    #   class RegisterFile < Component
     #     parameter :depth, default: 32
     #     parameter :width, default: 64
     #
@@ -145,7 +145,7 @@ module RHDL
           idx
         when Wire
           idx.get
-        when SimSignalProxy, SimOutputProxy, SimLocalProxy
+        when SignalProxy, OutputProxy, LocalProxy
           idx.value
         else
           idx.respond_to?(:value) ? idx.value : idx.to_i
@@ -286,23 +286,23 @@ module RHDL
 
       # Arithmetic operators
       def +(other)
-        SimValueProxy.new(nil, value + resolve_value(other), @width + 1, nil)
+        ValueProxy.new(nil, value + resolve_value(other), @width + 1, nil)
       end
 
       def -(other)
-        SimValueProxy.new(nil, value - resolve_value(other), @width, nil)
+        ValueProxy.new(nil, value - resolve_value(other), @width, nil)
       end
 
       def &(other)
-        SimValueProxy.new(nil, value & resolve_value(other), @width, nil)
+        ValueProxy.new(nil, value & resolve_value(other), @width, nil)
       end
 
       def |(other)
-        SimValueProxy.new(nil, value | resolve_value(other), @width, nil)
+        ValueProxy.new(nil, value | resolve_value(other), @width, nil)
       end
 
       def ^(other)
-        SimValueProxy.new(nil, value ^ resolve_value(other), @width, nil)
+        ValueProxy.new(nil, value ^ resolve_value(other), @width, nil)
       end
 
       def ==(other)
@@ -321,7 +321,7 @@ module RHDL
           val
         when Wire
           val.get
-        when SimSignalProxy, SimOutputProxy, SimLocalProxy, VecAccessProxy
+        when SignalProxy, OutputProxy, LocalProxy, VecAccessProxy
           val.value
         else
           val.respond_to?(:value) ? val.value : val.to_i

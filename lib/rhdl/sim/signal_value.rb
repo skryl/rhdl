@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Sim
     # Represents a signal value in the simulation
     # Supports multi-bit values and special states (X = unknown, Z = high-impedance)
     class SignalValue

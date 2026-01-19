@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Sim
     # A wire/signal in the circuit that can be connected and propagated
     class Wire
       attr_reader :name, :width, :sinks

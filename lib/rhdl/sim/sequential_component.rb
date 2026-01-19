@@ -7,8 +7,8 @@
 # This ensures all registers see the "old" values, not values updated by other registers
 
 module RHDL
-  module HDL
-    class SequentialComponent < SimComponent
+  module Sim
+    class SequentialComponent < Component
       def initialize(name = nil, **kwargs)
         @prev_clk = 0
         @clk_sampled = false  # Track if we've sampled clock this cycle

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Sim
     # Behavior block definition
     class BehaviorBlockDef
       attr_reader :block, :options

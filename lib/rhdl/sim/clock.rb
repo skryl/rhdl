@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Sim
     # Clock signal with configurable period
     class Clock < Wire
       attr_reader :period, :cycle_count
