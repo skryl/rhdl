@@ -1097,7 +1097,40 @@ module RHDL
           sequential_block_defined = respond_to?(:_sequential_block) && !_sequential_block.nil?
           if ancestors.include?(RHDL::HDL::SimComponent) && !sequential_block_defined
             define_method(:propagate) do
-              self.class.execute_behavior_for_simulation(self)
+              # Iterate until signals stabilize:
+              # 1. Execute behavior FIRST (computes combinational signals from inputs)
+              # 2. Propagate subcomponents (they use the fresh signal values)
+              # 3. Repeat if any internal signals changed
+              max_iterations = 10
+              iterations = 0
+
+              while iterations < max_iterations
+                # Save current internal signal values
+                old_values = {}
+                @internal_signals&.each do |name, wire|
+                  old_values[name] = wire.get
+                end
+
+                # Execute behavior block FIRST (computes combinational signals)
+                self.class.execute_behavior_for_simulation(self)
+
+                # Propagate subcomponents (use freshly computed signals)
+                if @local_dependency_graph && !@subcomponents.empty?
+                  propagate_subcomponents
+                end
+
+                # Check if any internal signals changed
+                changed = false
+                @internal_signals&.each do |name, wire|
+                  if wire.get != old_values[name]
+                    changed = true
+                    break
+                  end
+                end
+
+                iterations += 1
+                break unless changed
+              end
             end
           end
         end
@@ -1124,15 +1157,25 @@ module RHDL
           component.outputs.each do |name, wire|
             input_values[name] ||= wire.get
           end
+          # Include internal signals (wires) that connect subcomponents
+          if component.respond_to?(:internal_signals) && component.internal_signals
+            component.internal_signals.each do |name, wire|
+              input_values[name] ||= wire.get
+            end
+          end
 
           # Create context and evaluate
           context = BehaviorContext.new(self)
           context.component = component  # Pass component for memory access
           outputs = context.evaluate_for_simulation(input_values, &@_behavior_block.block)
 
-          # Set output values
+          # Set output and internal signal values
           outputs.each do |name, value|
-            component.out_set(name, value)
+            if component.outputs[name]
+              component.out_set(name, value)
+            elsif component.internal_signals&.key?(name)
+              component.internal_signals[name].set(value)
+            end
           end
         end
 
