@@ -544,13 +544,13 @@ def handle_tui(args)
               end
 
   # Create debug simulator
-  simulator = RHDL::Debug::DebugSimulator.new
+  simulator = RHDL::HDL::DebugSimulator.new
 
   # Create TUI
-  tui = RHDL::TUI::SimulatorTUI.new(simulator)
+  tui = RHDL::HDL::SimulatorTUI.new(simulator)
 
   # Add component with signal options
-  tui.add_component(component, signals: options[:signals], format: options[:format])
+  tui.add_component(component, signals: options[:signals])
 
   puts "Starting TUI for #{component.name}..."
   puts "Press 'h' for help, 'q' to quit"
