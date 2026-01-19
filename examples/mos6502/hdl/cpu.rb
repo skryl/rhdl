@@ -141,6 +141,9 @@ module MOS6502
     wire :flag_v_in
     wire :flag_i_in
     wire :flag_d_in
+    wire :sr_load_flags     # Status register: load N,V,Z,C from ALU (unused)
+    wire :sr_load_b         # Status register: load B flag (unused)
+    wire :sr_b_in           # Status register: B flag input (unused)
 
     # Additional computed signals
     wire :stack_addr, width: 16
@@ -291,6 +294,9 @@ module MOS6502
     port :flag_d_in => [:status_reg, :d_in]
     port :actual_load_all => [:status_reg, :load_all]
     port :sr_data_in => [:status_reg, :data_in]
+    port :sr_load_flags => [:status_reg, :load_flags]
+    port :sr_load_b => [:status_reg, :load_b]
+    port :sr_b_in => [:status_reg, :b_in]
 
     # ALU connections
     port [:alu, :result] => :alu_result
@@ -436,6 +442,13 @@ module MOS6502
       is_flag_i_instr <= is_flag_instr & (flag_type == lit(1, width: 2))
       is_flag_v_instr <= is_flag_instr & (flag_type == lit(2, width: 2))
       is_flag_d_instr <= is_flag_instr & (flag_type == lit(3, width: 2))
+
+      # Status register unused inputs (tie to 0)
+      # load_flags is not used - we use individual load_n/z/c/v instead
+      # load_b and b_in are not used - B flag is rarely modified
+      sr_load_flags <= lit(0, width: 1)
+      sr_load_b <= lit(0, width: 1)
+      sr_b_in <= lit(0, width: 1)
 
       # RMW instruction detection (INC/DEC memory, shifts on memory)
       is_rmw_instr <= dec_is_rmw
