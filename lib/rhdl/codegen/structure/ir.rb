@@ -3,7 +3,7 @@
 require 'json'
 
 module RHDL
-  module Export
+  module Codegen
     module Structure
     Gate = Struct.new(:type, :inputs, :output, :value, keyword_init: true)
     DFF = Struct.new(:d, :q, :rst, :en, :async_reset, keyword_init: true)

@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Synth
     # Synthesis slice
-    class SynthSlice < SynthExpr
+    class Slice < Expr
       attr_reader :base, :range
 
       def initialize(base, range, width)
@@ -13,7 +13,7 @@ module RHDL
       end
 
       def to_ir
-        RHDL::Export::IR::Slice.new(base: @base.to_ir, range: @range, width: @width)
+        RHDL::Codegen::IR::Slice.new(base: @base.to_ir, range: @range, width: @width)
       end
     end
   end

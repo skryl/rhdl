@@ -7,7 +7,7 @@ require_relative 'primitives'
 require_relative 'toposort'
 
 module RHDL
-  module Export
+  module Codegen
     module Structure
     class Lower
       def self.from_components(components, name: 'design')

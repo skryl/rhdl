@@ -1,7 +1,7 @@
 # GPU backend stub for gate-level simulation
 
 module RHDL
-  module Export
+  module Codegen
     module Structure
       class SimGPU
         def self.available?

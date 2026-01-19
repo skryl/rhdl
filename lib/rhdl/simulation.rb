@@ -17,19 +17,8 @@ require_relative 'simulation/mask_cache'
 require_relative 'simulation/wire'
 require_relative 'simulation/clock'
 
-# Synthesis expression hierarchy (all extend SynthExpr)
-require_relative 'simulation/synth_expr'
-require_relative 'simulation/synth_literal'
-require_relative 'simulation/synth_binary_op'
-require_relative 'simulation/synth_unary_op'
-require_relative 'simulation/synth_bit_select'
-require_relative 'simulation/synth_slice'
-require_relative 'simulation/synth_concat'
-require_relative 'simulation/synth_replicate'
-require_relative 'simulation/synth_mux'
-require_relative 'simulation/synth_memory_read'
-require_relative 'simulation/synth_signal_proxy'
-require_relative 'simulation/synth_output_proxy'
+# Synthesis expression hierarchy (loaded from synth module)
+require_relative 'synth'
 
 # Simulation proxy hierarchy (SimOutputProxy extends SimSignalProxy)
 # Note: SimValueProxy, SimSignalProxy, and SimOutputProxy have cross-references
@@ -43,7 +32,6 @@ require_relative 'simulation/proxy_pool'
 
 # Behavior contexts (depend on proxy classes and pool)
 require_relative 'simulation/behavior_sim_context'
-require_relative 'simulation/behavior_synth_context'
 
 # Dependency tracking for event-driven simulation
 require_relative 'simulation/dependency_graph'

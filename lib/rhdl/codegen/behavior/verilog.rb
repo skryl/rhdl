@@ -3,7 +3,7 @@
 require_relative "ir"
 
 module RHDL
-  module Export
+  module Codegen
     module Verilog
       VERILOG_KEYWORDS = %w[
         always and assign begin buf case casex casez cmos deassign default defparam

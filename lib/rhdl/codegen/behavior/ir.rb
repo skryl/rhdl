@@ -1,7 +1,7 @@
 # Export intermediate representation for HDL code generation
 
 module RHDL
-  module Export
+  module Codegen
     module IR
       class ModuleDef
         attr_reader :name, :ports, :nets, :regs, :assigns, :processes, :reg_ports, :instances,

@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Synth
     # Synthesis replication
-    class SynthReplicate < SynthExpr
+    class Replicate < Expr
       attr_reader :expr, :times
 
       def initialize(expr, times, width)
@@ -14,7 +14,7 @@ module RHDL
 
       def to_ir
         parts = Array.new(@times) { @expr.to_ir }
-        RHDL::Export::IR::Concat.new(parts: parts, width: @width)
+        RHDL::Codegen::IR::Concat.new(parts: parts, width: @width)
       end
     end
   end

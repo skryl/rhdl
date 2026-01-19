@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Synth
     # Synthesis output proxy that captures assignments
-    class SynthOutputProxy < SynthSignalProxy
+    class OutputProxy < SignalProxy
       def initialize(name, width, context)
         super(name, width)
         @context = context
@@ -11,7 +11,7 @@ module RHDL
 
       # The <= operator for assignments
       def <=(expr)
-        synth_expr = expr.is_a?(SynthExpr) ? expr : SynthLiteral.new(expr, bit_width(expr))
+        synth_expr = expr.is_a?(Expr) ? expr : Literal.new(expr, bit_width(expr))
         @context.record_assignment(@name, @width, synth_expr)
       end
 

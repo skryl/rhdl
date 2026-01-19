@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Synth
     # Synthesis unary operation
-    class SynthUnaryOp < SynthExpr
+    class UnaryOp < Expr
       attr_reader :op, :operand
 
       def initialize(op, operand, width)
@@ -13,7 +13,7 @@ module RHDL
       end
 
       def to_ir
-        RHDL::Export::IR::UnaryOp.new(op: @op, operand: @operand.to_ir, width: @width)
+        RHDL::Codegen::IR::UnaryOp.new(op: @op, operand: @operand.to_ir, width: @width)
       end
     end
   end
