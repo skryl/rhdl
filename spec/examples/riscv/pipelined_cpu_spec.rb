@@ -2,7 +2,7 @@
 # Tests cover pipeline behavior including forwarding and hazards
 
 require 'spec_helper'
-require_relative '../../../examples/riscv/hdl/pipeline/pipelined_cpu'
+require_relative '../../../examples/riscv/hdl/pipeline/cpu'
 require_relative '../../../examples/riscv/utilities/assembler'
 
 RSpec.describe RISCV::Pipeline::PipelinedCPU do
