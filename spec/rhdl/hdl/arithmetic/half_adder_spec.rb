@@ -51,6 +51,35 @@ RSpec.describe RHDL::HDL::HalfAdder do
       expect(verilog).to include('assign cout')
     end
 
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::HalfAdder.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit half_adder')
+      expect(firrtl).to include('input a')
+      expect(firrtl).to include('input b')
+      expect(firrtl).to include('output sum')
+      expect(firrtl).to include('output cout')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
+      it 'CIRCT-generated Verilog matches RHDL Verilog behavior' do
+        test_vectors = [
+          { inputs: { a: 0, b: 0 }, expected: { sum: 0, cout: 0 } },
+          { inputs: { a: 0, b: 1 }, expected: { sum: 1, cout: 0 } },
+          { inputs: { a: 1, b: 0 }, expected: { sum: 1, cout: 0 } },
+          { inputs: { a: 1, b: 1 }, expected: { sum: 0, cout: 1 } }
+        ]
+
+        result = CirctHelper.validate_circt_export(
+          RHDL::HDL::HalfAdder,
+          test_vectors: test_vectors,
+          base_dir: 'tmp/circt_test/half_adder'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
+
     context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::HalfAdder.to_verilog

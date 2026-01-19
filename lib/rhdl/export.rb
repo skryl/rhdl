@@ -3,6 +3,9 @@ require_relative "export/behavior/ir"
 require_relative "export/behavior/lower"
 require_relative "export/behavior/verilog"
 
+# CIRCT export (FIRRTL)
+require_relative "export/circt/firrtl"
+
 # Structure export (gate-level synthesis)
 require_relative "export/structure/ir"
 require_relative "export/structure/primitives"
@@ -26,6 +29,20 @@ module RHDL
       def write_verilog(component, path:, top_name: nil)
         File.write(path, verilog(component, top_name: top_name))
       end
+
+      # CIRCT FIRRTL export
+      def circt(component, top_name: nil)
+        module_def = Lower.new(component, top_name: top_name).build
+        CIRCT::FIRRTL.generate(module_def)
+      end
+      alias_method :to_circt, :circt
+      alias_method :firrtl, :circt
+      alias_method :to_firrtl, :circt
+
+      def write_circt(component, path:, top_name: nil)
+        File.write(path, circt(component, top_name: top_name))
+      end
+      alias_method :write_firrtl, :write_circt
 
       # Structure gate-level export
       def gate_level(components, backend: :cpu, lanes: 64, name: 'design')

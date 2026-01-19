@@ -50,6 +50,25 @@ RSpec.describe RHDL::HDL::Divider do
       expect(verilog).to include('input [7:0] dividend')
       expect(verilog).to include('output [7:0] quotient')
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::Divider.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit divider')
+      expect(firrtl).to include('input dividend')
+      expect(firrtl).to include('output quotient')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::Divider,
+          base_dir: 'tmp/circt_test/divider'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do

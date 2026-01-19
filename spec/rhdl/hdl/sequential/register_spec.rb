@@ -51,6 +51,26 @@ RSpec.describe RHDL::HDL::Register do
       expect(verilog).to match(/output.*\[7:0\].*q/)
     end
 
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::Register.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit register')
+      expect(firrtl).to include('input d')
+      expect(firrtl).to include('input clk')
+      expect(firrtl).to include('output q')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::Register,
+          base_dir: 'tmp/circt_test/register'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
+
     context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::Register.to_verilog

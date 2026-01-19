@@ -78,6 +78,35 @@ RSpec.describe RHDL::HDL::AndGate do
         end
       end
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::AndGate.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit and_gate')
+      expect(firrtl).to include('module and_gate')
+      expect(firrtl).to include('input a0')
+      expect(firrtl).to include('input a1')
+      expect(firrtl).to include('output y')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
+      it 'CIRCT-generated Verilog matches RHDL Verilog behavior' do
+        test_vectors = [
+          { inputs: { a0: 0, a1: 0 }, expected: { y: 0 } },
+          { inputs: { a0: 0, a1: 1 }, expected: { y: 0 } },
+          { inputs: { a0: 1, a1: 0 }, expected: { y: 0 } },
+          { inputs: { a0: 1, a1: 1 }, expected: { y: 1 } }
+        ]
+
+        result = CirctHelper.validate_circt_export(
+          RHDL::HDL::AndGate,
+          test_vectors: test_vectors,
+          base_dir: 'tmp/circt_test/and_gate'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do

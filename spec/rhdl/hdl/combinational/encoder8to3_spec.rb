@@ -33,6 +33,25 @@ RSpec.describe RHDL::HDL::Encoder8to3 do
       expect(verilog).to include('input [7:0] a')
       expect(verilog).to include('output [2:0] y')
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::Encoder8to3.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit encoder8to3')
+      expect(firrtl).to include('input a')
+      expect(firrtl).to include('output y')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::Encoder8to3,
+          base_dir: 'tmp/circt_test/encoder8to3'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do

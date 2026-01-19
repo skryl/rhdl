@@ -308,13 +308,15 @@ module RHDL
       # Port connection for module instantiation
       # Maps to Verilog .port(signal)
       class PortConnection
-        attr_reader :port_name, :signal
+        attr_reader :port_name, :signal, :direction
 
         # @param port_name [Symbol] Port name on the instance
         # @param signal [String, Expr] Signal to connect (name or expression)
-        def initialize(port_name:, signal:)
+        # @param direction [Symbol] Direction of the port (:in or :out)
+        def initialize(port_name:, signal:, direction: :in)
           @port_name = port_name
           @signal = signal
+          @direction = direction
         end
       end
     end

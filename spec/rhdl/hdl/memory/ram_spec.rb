@@ -94,6 +94,26 @@ RSpec.describe RHDL::HDL::RAM do
       expect(verilog).to match(/output.*\[7:0\].*dout/)
       expect(verilog).to include('reg [7:0] mem')  # Memory array
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::RAM.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit ram')
+      expect(firrtl).to include('input clk')
+      expect(firrtl).to include('input addr')
+      expect(firrtl).to include('output dout')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::RAM,
+          base_dir: 'tmp/circt_test/ram'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do
