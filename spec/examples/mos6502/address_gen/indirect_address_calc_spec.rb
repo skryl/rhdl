@@ -47,7 +47,7 @@ RSpec.describe MOS6502::IndirectAddressCalc do
   describe 'synthesis' do
     it 'generates valid Verilog' do
       verilog = described_class.to_verilog
-      expect(verilog).to include('module mos6502_indirect_addr_calc')
+      expect(verilog).to include('module mos6502_indirect_address_calc')
       expect(verilog).to include('ptr_addr_lo')
     end
 
@@ -82,11 +82,11 @@ RSpec.describe MOS6502::IndirectAddressCalc do
 
         result = NetlistHelper.run_behavior_simulation(
           verilog,
-          module_name: 'mos6502_indirect_addr_calc',
+          module_name: 'mos6502_indirect_address_calc',
           inputs: inputs,
           outputs: outputs,
           test_vectors: vectors,
-          base_dir: 'tmp/behavior_test/mos6502_indirect_addr_calc'
+          base_dir: 'tmp/behavior_test/mos6502_indirect_address_calc'
         )
         expect(result[:success]).to be(true), result[:error]
 

@@ -43,62 +43,6 @@ module RHDL
         end
       end
 
-      # Override to_ir to generate proper memory IR
-      def self.to_ir(top_name: nil)
-        name = top_name || 'ram'
-
-        # Ports
-        ports = _ports.map do |p|
-          RHDL::Export::IR::Port.new(name: p.name, direction: p.direction, width: p.width)
-        end
-
-        # Memory array
-        mem_def = _memories[:mem]
-        memories = [
-          RHDL::Export::IR::Memory.new(
-            name: 'mem',
-            depth: mem_def.depth,
-            width: mem_def.width,
-            read_ports: [],
-            write_ports: []
-          )
-        ]
-
-        # Async read assign: dout = mem[addr]
-        read_assign = RHDL::Export::IR::Assign.new(
-          target: :dout,
-          expr: RHDL::Export::IR::MemoryRead.new(
-            memory: :mem,
-            addr: RHDL::Export::IR::Signal.new(name: :addr, width: 8),
-            width: 8
-          )
-        )
-
-        # Write port
-        write_port = RHDL::Export::IR::MemoryWritePort.new(
-          memory: :mem,
-          clock: :clk,
-          addr: RHDL::Export::IR::Signal.new(name: :addr, width: 8),
-          data: RHDL::Export::IR::Signal.new(name: :din, width: 8),
-          enable: RHDL::Export::IR::Signal.new(name: :we, width: 1)
-        )
-
-        RHDL::Export::IR::ModuleDef.new(
-          name: name,
-          ports: ports,
-          nets: [],
-          regs: [],
-          assigns: [read_assign],
-          processes: [],
-          instances: [],
-          memories: memories,
-          write_ports: [write_port]
-        )
-      end
-
-      def self.to_verilog
-        RHDL::Export::Verilog.generate(to_ir)
-      end
     end
   end
 end

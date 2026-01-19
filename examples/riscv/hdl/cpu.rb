@@ -220,15 +220,6 @@ module RISCV
       @regfile.write_reg(index, value)
     end
 
-    def self.verilog_module_name
-      'riscv_cpu'
-    end
-
-    def self.to_verilog(top_name: nil)
-      name = top_name || verilog_module_name
-      RHDL::Export::Verilog.generate(to_ir(top_name: name))
-    end
-
     # Generate complete Verilog hierarchy
     def self.to_verilog_hierarchy(top_name: nil)
       parts = []

@@ -42,13 +42,6 @@ module RISCV
                          mux(stall, pc_plus4_out, pc_plus4_in))
       end
 
-      def self.verilog_module_name
-        'riscv_if_id_reg'
-      end
-
-      def self.to_verilog
-        RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
-      end
     end
   end
 end

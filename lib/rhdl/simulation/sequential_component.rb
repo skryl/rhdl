@@ -95,7 +95,7 @@ module RHDL
 
         # Override to_ir to include sequential processes
         def to_ir(top_name: nil)
-          name = top_name || self.name.split('::').last.underscore
+          name = top_name || verilog_module_name
 
           ports = _ports.map do |p|
             RHDL::Export::IR::Port.new(name: p.name, direction: p.direction, width: p.width)
@@ -136,15 +136,33 @@ module RHDL
             end
           end
 
-          # Split signals into regs (not instance-driven) and nets (instance-driven)
+          # Identify signals driven by continuous assigns (these must be wires, not regs)
+          # In Verilog, 'reg' cannot be driven by 'assign' statements
+          assign_driven_signals = Set.new
+          behavior_result[:assigns].each do |assign|
+            assign_driven_signals.add(assign.target.to_sym)
+          end
+
+          # Split signals into regs (procedural) and nets (continuous assignment or instance-driven)
           regs = []
           instance_nets = []
           _signals.each do |s|
-            if instance_driven_signals.include?(s.name)
+            if instance_driven_signals.include?(s.name) || assign_driven_signals.include?(s.name)
               instance_nets << RHDL::Export::IR::Net.new(name: s.name, width: s.width)
             else
               regs << RHDL::Export::IR::Reg.new(name: s.name, width: s.width)
             end
+          end
+
+          # Generate memory IR from MemoryDSL if included
+          memories = []
+          write_ports = []
+          assigns = behavior_result[:assigns]
+          if respond_to?(:_memories) && !_memories.empty?
+            memory_ir = memory_dsl_to_ir
+            memories = memory_ir[:memories]
+            write_ports = memory_ir[:write_ports]
+            assigns = assigns + memory_ir[:assigns]
           end
 
           RHDL::Export::IR::ModuleDef.new(
@@ -152,10 +170,12 @@ module RHDL
             ports: ports,
             nets: behavior_result[:wires] + instance_nets,
             regs: regs,
-            assigns: behavior_result[:assigns],
+            assigns: assigns,
             processes: processes,
             instances: instances,
-            reg_ports: reg_ports
+            reg_ports: reg_ports,
+            memories: memories,
+            write_ports: write_ports
           )
         end
 

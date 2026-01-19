@@ -914,13 +914,5 @@ module MOS6502
       VERILOG
     end
 
-    def self.verilog_module_name
-      'mos6502_control_unit'
-    end
-
-    # Alternative IR-based generation (for DSL consistency)
-    def self.to_ir_verilog
-      RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
-    end
   end
 end

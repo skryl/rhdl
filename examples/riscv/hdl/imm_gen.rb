@@ -81,12 +81,5 @@ module RISCV
       }, default: lit(0, width: 32))
     end
 
-    def self.verilog_module_name
-      'riscv_imm_gen'
-    end
-
-    def self.to_verilog
-      RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
-    end
   end
 end
