@@ -276,14 +276,91 @@ module RHDL
             end
           end
 
-          # Define propagate method with rising edge detection and state management
-          # Order is critical for correct simulation (matches real hardware):
-          # 1. Propagate subcomponents (if any)
-          # 2. On rising edge, process memory sync writes FIRST (using current register values)
-          # 3. On rising edge, compute next state (flip-flops latch on edge)
-          # 4. Output state values (new if rising edge, current otherwise)
-          # 5. Execute async memory reads (combinational)
-          # 6. Execute behavior block (combinational outputs based on current state)
+          # Two-phase non-blocking assignment semantics (Verilog-style):
+          # - sample_inputs: Called on ALL sequential components first, samples inputs
+          # - update_outputs: Called on ALL sequential components after, updates outputs
+          # This ensures all registers see the "old" values, not values updated by other registers
+
+          # Override sample_inputs for two-phase propagation
+          # Returns true if this is a rising edge (outputs will need updating)
+          # IMPORTANT: This ONLY samples inputs. Next state is computed in update phase.
+          define_method(:sample_inputs) do
+            _init_seq_state
+
+            # Check for rising edge
+            clk_val = in_val(clock)
+            @_prev_clk ||= 0
+            rising = (@_prev_clk == 0 && clk_val == 1)
+            @_prev_clk = clk_val
+
+            # Handle reset - sample but mark as needing reset
+            @_needs_reset = reset && in_val(reset) == 1
+
+            if @_needs_reset
+              return true
+            end
+
+            # On rising edge, ONLY sample input values
+            # Next state will be computed in update_outputs using these sampled values
+            if rising
+              # Sample ALL input wire values NOW, before any register updates
+              @_sampled_inputs = {}
+              @inputs.each do |name, wire|
+                @_sampled_inputs[name] = wire.get
+              end
+            end
+
+            rising
+          end
+
+          # Override update_outputs for two-phase propagation
+          # Called AFTER all sequential components have sampled inputs
+          define_method(:update_outputs) do
+            _init_seq_state
+
+            if @_needs_reset
+              # Apply reset values
+              reset_values.each do |name, value|
+                @_seq_state[name] = value
+                out_set(name, value)
+              end
+              @_needs_reset = false
+              # Execute combinational parts
+              process_memory_async_reads if respond_to?(:process_memory_async_reads)
+              process_memory_lookup_tables if respond_to?(:process_memory_lookup_tables)
+              self.class.execute_behavior_for_simulation(self) if self.class.respond_to?(:behavior_defined?) && self.class.behavior_defined?
+              return
+            end
+
+            # If we have sampled inputs (from rising edge), compute next state NOW
+            # using the sampled values (not current wire values)
+            if @_sampled_inputs && !@_sampled_inputs.empty?
+              # Process memory sync writes FIRST (using current register values)
+              if respond_to?(:process_memory_sync_writes)
+                rising_clocks = { clock => true }
+                process_memory_sync_writes(rising_clocks)
+              end
+
+              # Compute next state using SAMPLED input values
+              self.class.execute_sequential_with_sampled_inputs(self, @_sampled_inputs)
+              @_sampled_inputs = nil  # Clear sampled inputs
+            end
+
+            # Output state values
+            @_seq_state.each do |name, value|
+              out_set(name, value)
+            end
+
+            # Process memory async reads (combinational, uses current values)
+            process_memory_async_reads if respond_to?(:process_memory_async_reads)
+            process_memory_lookup_tables if respond_to?(:process_memory_lookup_tables)
+
+            # Execute behavior block (combinational logic based on current state)
+            self.class.execute_behavior_for_simulation(self) if self.class.respond_to?(:behavior_defined?) && self.class.behavior_defined?
+          end
+
+          # Define propagate method - used when not doing two-phase propagation
+          # (for backwards compatibility and when component is not a subcomponent)
           define_method(:propagate) do
             _init_seq_state
 
@@ -292,48 +369,9 @@ module RHDL
               propagate_subcomponents
             end
 
-            # Check for rising edge
-            clk_val = in_val(clock)
-            @_prev_clk ||= 0
-            rising = (@_prev_clk == 0 && clk_val == 1)
-            @_prev_clk = clk_val
-
-            # Handle reset - immediately update state
-            if reset && in_val(reset) == 1
-              reset_values.each do |name, value|
-                @_seq_state[name] = value
-                out_set(name, value)
-              end
-              # Execute memory async reads and behavior block for combinational outputs
-              process_memory_async_reads if respond_to?(:process_memory_async_reads)
-              process_memory_lookup_tables if respond_to?(:process_memory_lookup_tables)
-              self.class.execute_behavior_for_simulation(self) if self.class.respond_to?(:behavior_defined?) && self.class.behavior_defined?
-              return
-            end
-
-            # FIRST: On rising edge, process memory sync writes BEFORE state update
-            # This uses current register values (before sequential update)
-            if rising && respond_to?(:process_memory_sync_writes)
-              rising_clocks = { clock => true }
-              process_memory_sync_writes(rising_clocks)
-            end
-
-            # SECOND: On rising edge, compute and store next state values
-            if rising
-              self.class.execute_sequential_for_simulation(self)
-            end
-
-            # THIRD: Output state values (will be new if rising edge just happened)
-            @_seq_state.each do |name, value|
-              out_set(name, value)
-            end
-
-            # FOURTH: Process memory async reads (combinational, uses current values)
-            process_memory_async_reads if respond_to?(:process_memory_async_reads)
-            process_memory_lookup_tables if respond_to?(:process_memory_lookup_tables)
-
-            # FIFTH: Execute behavior block (combinational logic based on current state)
-            self.class.execute_behavior_for_simulation(self) if self.class.respond_to?(:behavior_defined?) && self.class.behavior_defined?
+            # Single-phase: sample and update together
+            sample_inputs
+            update_outputs
           end
 
           # Define read_reg for accessing internal state
@@ -366,11 +404,27 @@ module RHDL
         def execute_sequential_for_simulation(component)
           return unless @_sequential_block
 
-          # Gather input values
+          # Gather input values from current wire values
           input_values = {}
           component.inputs.each do |name, wire|
             input_values[name] = wire.get
           end
+
+          execute_sequential_with_inputs(component, input_values)
+        end
+
+        # Execute sequential block with pre-sampled input values
+        # This is used for two-phase propagation where inputs were sampled earlier
+        def execute_sequential_with_sampled_inputs(component, sampled_inputs)
+          return unless @_sequential_block
+
+          execute_sequential_with_inputs(component, sampled_inputs)
+        end
+
+        # Internal: execute sequential block with given input values
+        def execute_sequential_with_inputs(component, input_values)
+          return unless @_sequential_block
+
           # Also include current state values (for register feedback)
           component._init_seq_state
           component.instance_variable_get(:@_seq_state).each do |name, value|

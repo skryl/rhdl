@@ -1157,9 +1157,26 @@ module RHDL
                 break unless changed
               end
 
-              # Phase 2: Now propagate sequential components with stabilized values
+              # Phase 2: Sequential components using Verilog-style two-phase semantics
+              # Phase 2a: ALL sequential components SAMPLE inputs (don't update outputs yet)
+              rising_edge_subs = []
               sequential_subs.each do |name, sub|
-                sub.propagate
+                if sub.respond_to?(:sample_inputs)
+                  is_rising = sub.sample_inputs
+                  rising_edge_subs << [name, sub] if is_rising
+                end
+              end
+
+              # Phase 2b: ALL sequential components UPDATE outputs (for those with rising edge)
+              rising_edge_subs.each do |name, sub|
+                sub.update_outputs if sub.respond_to?(:update_outputs)
+              end
+
+              # For sequential components that didn't have a rising edge, execute behavior if present
+              (sequential_subs - rising_edge_subs).each do |name, sub|
+                if sub.class.respond_to?(:behavior_defined?) && sub.class.behavior_defined?
+                  sub.execute_behavior if sub.respond_to?(:execute_behavior)
+                end
               end
 
               # Final behavior pass to update any signals that depend on register outputs
@@ -1245,11 +1262,18 @@ module RHDL
       # Instance methods
       included do
         # Override propagate if behavior is defined
+        # IMPORTANT: Must call super first to handle subcomponent propagation
+        # The behavior block is executed as part of propagate_subcomponents (Phase 2)
+        # This ensures proper two-phase semantics for sequential components
         def propagate
-          if self.class.behavior_defined?
+          # Always call super to handle subcomponent propagation (two-phase for sequential)
+          # The behavior block execution is integrated into propagate_subcomponents
+          super if defined?(super)
+
+          # If no subcomponents and behavior is defined, execute behavior directly
+          # (This handles the case of standalone behavior-only components)
+          if @subcomponents.empty? && self.class.behavior_defined?
             self.class.execute_behavior_for_simulation(self)
-          else
-            super if defined?(super)
           end
         end
       end

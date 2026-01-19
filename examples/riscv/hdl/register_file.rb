@@ -32,11 +32,14 @@ module RISCV
     output :debug_x10, width: 32
     output :debug_x11, width: 32
 
-    def initialize(name = nil)
+    def initialize(name = nil, forwarding: false)
       super(name)
       # Internal register storage
       @regs = Array.new(32, 0)
       @regs[0] = 0  # x0 always 0
+      # Enable internal forwarding for pipelined designs
+      # Disable for single-cycle to avoid stale value issues with DSL propagation
+      @forwarding = forwarding
     end
 
     def propagate
@@ -72,16 +75,25 @@ module RISCV
     def update_outputs
       rs1_addr = in_val(:rs1_addr)
       rs2_addr = in_val(:rs2_addr)
-      rd_addr = in_val(:rd_addr)
-      rd_data = in_val(:rd_data)
-      rd_we = in_val(:rd_we)
 
-      # Internal forwarding: if reading the register being written, return write data
-      # This handles the write-read hazard when WB and ID happen in the same cycle
-      if rd_we == 1 && rd_addr != 0
-        rs1_val = (rs1_addr == rd_addr) ? rd_data : (rs1_addr == 0 ? 0 : @regs[rs1_addr])
-        rs2_val = (rs2_addr == rd_addr) ? rd_data : (rs2_addr == 0 ? 0 : @regs[rs2_addr])
+      if @forwarding
+        # Internal forwarding: if reading the register being written, return write data
+        # This handles the write-read hazard when WB and ID happen in the same cycle
+        # Used by pipelined designs
+        rd_addr = in_val(:rd_addr)
+        rd_data = in_val(:rd_data)
+        rd_we = in_val(:rd_we)
+
+        if rd_we == 1 && rd_addr != 0
+          rs1_val = (rs1_addr == rd_addr) ? rd_data : (rs1_addr == 0 ? 0 : @regs[rs1_addr])
+          rs2_val = (rs2_addr == rd_addr) ? rd_data : (rs2_addr == 0 ? 0 : @regs[rs2_addr])
+        else
+          rs1_val = rs1_addr == 0 ? 0 : @regs[rs1_addr]
+          rs2_val = rs2_addr == 0 ? 0 : @regs[rs2_addr]
+        end
       else
+        # Simple reads from register array
+        # In single-cycle design, writes happen at clock edge after all reads complete
         rs1_val = rs1_addr == 0 ? 0 : @regs[rs1_addr]
         rs2_val = rs2_addr == 0 ? 0 : @regs[rs2_addr]
       end
