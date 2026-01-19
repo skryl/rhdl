@@ -1134,6 +1134,9 @@ def handle_apple2(args)
     fast: false,
     rom: nil,
     rom_address: nil,
+    address: nil,
+    speed: nil,
+    green: false,
     ink: false,
     hdl: false
   }
@@ -1167,7 +1170,10 @@ def handle_apple2(args)
     opts.on('-d', '--debug', 'Enable debug mode') { options[:debug] = true }
     opts.on('-f', '--fast', 'Use fast ISA-level simulator (not cycle-accurate)') { options[:fast] = true }
     opts.on('-r', '--rom FILE', 'ROM file to load') { |v| options[:rom] = v }
+    opts.on('-a', '--address ADDR', 'Program load address (hex, default: 0800)') { |v| options[:address] = v }
     opts.on('--rom-address ADDR', 'ROM load address (hex)') { |v| options[:rom_address] = v }
+    opts.on('-s', '--speed CYCLES', Integer, 'Cycles per frame (default: 10000)') { |v| options[:speed] = v }
+    opts.on('-g', '--green', 'Green phosphor screen effect') { options[:green] = true }
     opts.on('--ink', 'Use Ink (React-based) TUI renderer') { options[:ink] = true }
     opts.on('--hdl', 'Use HDL mode (cycle-accurate simulation)') { options[:hdl] = true }
     opts.on('-h', '--help', 'Show this help') do
@@ -1301,6 +1307,8 @@ def handle_apple2(args)
         exec_args = [apple2_script, "-r", rom_file, "--rom-address", "F800"]
         exec_args << "-d" if options[:debug]
         exec_args << "-f" if options[:fast]
+        exec_args += ["-s", options[:speed].to_s] if options[:speed]
+        exec_args << "-g" if options[:green]
         exec(*exec_args)
       end
     rescue => e
@@ -1315,6 +1323,8 @@ def handle_apple2(args)
     exec_args = [apple2_script, "--demo"]
     exec_args << "-d" if options[:debug]
     exec_args << "-f" if options[:fast]
+    exec_args += ["-s", options[:speed].to_s] if options[:speed]
+    exec_args << "-g" if options[:green]
     exec(*exec_args)
   end
 
@@ -1329,15 +1339,20 @@ def handle_apple2(args)
     exec_args = [apple2_script, "-r", rom_file, "--rom-address", "D000"]
     exec_args << "-d" if options[:debug]
     exec_args << "-f" if options[:fast]
+    exec_args += ["-s", options[:speed].to_s] if options[:speed]
+    exec_args << "-g" if options[:green]
     exec(*exec_args)
   end
 
   # Default: run the emulator with any provided options
   exec_args = [apple2_script]
   exec_args += ["-r", options[:rom]] if options[:rom]
+  exec_args += ["-a", options[:address]] if options[:address]
   exec_args += ["--rom-address", options[:rom_address]] if options[:rom_address]
   exec_args << "-d" if options[:debug]
   exec_args << "-f" if options[:fast]
+  exec_args += ["-s", options[:speed].to_s] if options[:speed]
+  exec_args << "-g" if options[:green]
   exec_args += args # Pass any remaining args
   exec(*exec_args)
 end
