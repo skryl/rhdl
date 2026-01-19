@@ -98,7 +98,29 @@ module RHDL
           name = top_name || verilog_module_name
 
           ports = _ports.map do |p|
-            RHDL::Export::IR::Port.new(name: p.name, direction: p.direction, width: p.width)
+            RHDL::Export::IR::Port.new(
+              name: p.name,
+              direction: p.direction,
+              width: p.width,
+              default: p.default
+            )
+          end
+
+          # Build parameters hash from class-level parameter definitions
+          # Convert Procs to their evaluated values using default values
+          parameters = {}
+          _parameter_defs.each do |param_name, default_val|
+            if default_val.is_a?(Proc)
+              # For class-level evaluation, use default parameter values
+              eval_context = Object.new
+              _parameter_defs.each do |k, v|
+                next if v.is_a?(Proc)
+                eval_context.instance_variable_set(:"@#{k}", v)
+              end
+              parameters[param_name] = eval_context.instance_exec(&default_val)
+            else
+              parameters[param_name] = default_val
+            end
           end
 
           # Get sequential IR if defined
@@ -121,25 +143,35 @@ module RHDL
 
           # Also check for behavior blocks (for combinational parts)
           behavior_result = behavior_to_ir_assigns
+          assigns = behavior_result[:assigns]
 
           # Generate instances from structure definitions
           instances = structure_to_ir_instances
 
           # Identify signals driven by instance outputs (these must be wires, not regs)
-          # A signal is instance-driven if it's the destination of a connection from [inst, port]
+          # Also generate assign statements for signal-to-signal connections
           instance_driven_signals = Set.new
+          signal_assigns = []
           _connection_defs.each do |conn|
             source, dest = conn[:source], conn[:dest]
             # If source is [inst_name, port_name], then dest is driven by an instance output
             if source.is_a?(Array) && source.length == 2 && dest.is_a?(Symbol)
               instance_driven_signals.add(dest)
+            # If both are symbols, generate an assign statement (signal-to-signal connection)
+            elsif source.is_a?(Symbol) && dest.is_a?(Symbol)
+              source_width = find_signal_width(source)
+              signal_assigns << RHDL::Export::IR::Assign.new(
+                target: dest.to_s,
+                expr: RHDL::Export::IR::Signal.new(name: source.to_s, width: source_width)
+              )
             end
           end
+          assigns = assigns + signal_assigns
 
           # Identify signals driven by continuous assigns (these must be wires, not regs)
           # In Verilog, 'reg' cannot be driven by 'assign' statements
           assign_driven_signals = Set.new
-          behavior_result[:assigns].each do |assign|
+          assigns.each do |assign|
             assign_driven_signals.add(assign.target.to_sym)
           end
 
@@ -157,7 +189,6 @@ module RHDL
           # Generate memory IR from MemoryDSL if included
           memories = []
           write_ports = []
-          assigns = behavior_result[:assigns]
           if respond_to?(:_memories) && !_memories.empty?
             memory_ir = memory_dsl_to_ir
             memories = memory_ir[:memories]
@@ -175,7 +206,8 @@ module RHDL
             instances: instances,
             reg_ports: reg_ports,
             memories: memories,
-            write_ports: write_ports
+            write_ports: write_ports,
+            parameters: parameters
           )
         end
 

@@ -11,11 +11,14 @@ module RHDL
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
+      parameter :width, default: 8
+      parameter :initial_rhdl, default: 255  # initial is reserved in Verilog
+
       input :clk
-      input :rst
-      input :push     # Decrement SP
-      input :pop      # Increment SP
-      output :q, width: 8
+      input :rst, default: 0
+      input :push, default: 0     # Decrement SP
+      input :pop, default: 0      # Increment SP
+      output :q, width: :width
       output :empty   # SP at max (empty stack)
       output :full    # SP at 0 (full stack)
 

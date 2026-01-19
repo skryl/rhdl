@@ -11,11 +11,13 @@ module RHDL
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
-      input :d, width: 8
+      parameter :width, default: 8
+
+      input :d, width: :width
       input :clk
-      input :rst
-      input :en
-      output :q, width: 8
+      input :rst, default: 0
+      input :en, default: 0
+      output :q, width: :width
 
       # Sequential block for register
       sequential clock: :clk, reset: :rst, reset_values: { q: 0 } do
