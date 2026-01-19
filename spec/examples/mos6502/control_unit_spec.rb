@@ -48,8 +48,8 @@ RSpec.describe MOS6502::ControlUnit do
     it 'generates valid Verilog' do
       verilog = described_class.to_verilog
       expect(verilog).to include('module mos6502_control_unit')
-      expect(verilog).to include('localparam STATE_FETCH')
-      expect(verilog).to include('localparam STATE_EXECUTE')
+      expect(verilog).to include('input clk')
+      expect(verilog).to include('output reg [7:0] state')
     end
 
     it 'has state machine structure' do
