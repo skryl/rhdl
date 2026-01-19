@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Synth
     # Synthesis literal value
-    class SynthLiteral < SynthExpr
+    class Literal < Expr
       attr_reader :value
 
       def initialize(value, width)
@@ -12,7 +12,7 @@ module RHDL
       end
 
       def to_ir
-        RHDL::Export::IR::Literal.new(value: @value, width: @width)
+        RHDL::Codegen::IR::Literal.new(value: @value, width: @width)
       end
     end
   end

@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Synth
     # Base class for synthesis expressions
-    class SynthExpr
+    class Expr
       attr_reader :width
 
       def initialize(width)
@@ -12,76 +12,76 @@ module RHDL
 
       # Bitwise operators
       def &(other)
-        SynthBinaryOp.new(:&, self, wrap(other), result_width(other))
+        BinaryOp.new(:&, self, wrap(other), result_width(other))
       end
 
       def |(other)
-        SynthBinaryOp.new(:|, self, wrap(other), result_width(other))
+        BinaryOp.new(:|, self, wrap(other), result_width(other))
       end
 
       def ^(other)
-        SynthBinaryOp.new(:^, self, wrap(other), result_width(other))
+        BinaryOp.new(:^, self, wrap(other), result_width(other))
       end
 
       def ~
-        SynthUnaryOp.new(:~, self, @width)
+        UnaryOp.new(:~, self, @width)
       end
 
       # Arithmetic operators
       def +(other)
-        SynthBinaryOp.new(:+, self, wrap(other), result_width(other) + 1)
+        BinaryOp.new(:+, self, wrap(other), result_width(other) + 1)
       end
 
       def -(other)
-        SynthBinaryOp.new(:-, self, wrap(other), result_width(other))
+        BinaryOp.new(:-, self, wrap(other), result_width(other))
       end
 
       def *(other)
-        other_width = other.is_a?(SynthExpr) ? other.width : bit_width(other)
-        SynthBinaryOp.new(:*, self, wrap(other), @width + other_width)
+        other_width = other.is_a?(Expr) ? other.width : bit_width(other)
+        BinaryOp.new(:*, self, wrap(other), @width + other_width)
       end
 
       def /(other)
-        SynthBinaryOp.new(:/, self, wrap(other), @width)
+        BinaryOp.new(:/, self, wrap(other), @width)
       end
 
       def %(other)
-        SynthBinaryOp.new(:%, self, wrap(other), @width)
+        BinaryOp.new(:%, self, wrap(other), @width)
       end
 
       # Shift operators
       def <<(amount)
-        SynthBinaryOp.new(:<<, self, wrap(amount), @width)
+        BinaryOp.new(:<<, self, wrap(amount), @width)
       end
 
       def >>(amount)
-        SynthBinaryOp.new(:>>, self, wrap(amount), @width)
+        BinaryOp.new(:>>, self, wrap(amount), @width)
       end
 
       # Comparison operators (result is 1 bit)
       def ==(other)
-        SynthBinaryOp.new(:==, self, wrap(other), 1)
+        BinaryOp.new(:==, self, wrap(other), 1)
       end
 
       def !=(other)
-        SynthBinaryOp.new(:!=, self, wrap(other), 1)
+        BinaryOp.new(:!=, self, wrap(other), 1)
       end
 
       def <(other)
-        SynthBinaryOp.new(:<, self, wrap(other), 1)
+        BinaryOp.new(:<, self, wrap(other), 1)
       end
 
       def >(other)
-        SynthBinaryOp.new(:>, self, wrap(other), 1)
+        BinaryOp.new(:>, self, wrap(other), 1)
       end
 
       def <=(other)
         # Use different symbol to avoid conflict with assignment
-        SynthBinaryOp.new(:le, self, wrap(other), 1)
+        BinaryOp.new(:le, self, wrap(other), 1)
       end
 
       def >=(other)
-        SynthBinaryOp.new(:>=, self, wrap(other), 1)
+        BinaryOp.new(:>=, self, wrap(other), 1)
       end
 
       # Bit selection
@@ -91,9 +91,9 @@ module RHDL
           high = [index.begin, index.end].max
           low = [index.begin, index.end].min
           slice_width = high - low + 1
-          SynthSlice.new(self, index, slice_width)
+          Slice.new(self, index, slice_width)
         else
-          SynthBitSelect.new(self, index)
+          BitSelect.new(self, index)
         end
       end
 
@@ -101,23 +101,23 @@ module RHDL
       def concat(*others)
         parts = [self] + others.map { |o| wrap(o) }
         total_width = parts.sum(&:width)
-        SynthConcat.new(parts, total_width)
+        Concat.new(parts, total_width)
       end
 
       # Replication
       def replicate(times)
-        SynthReplicate.new(self, times, @width * times)
+        Replicate.new(self, times, @width * times)
       end
 
       protected
 
       def wrap(other)
-        return other if other.is_a?(SynthExpr)
-        SynthLiteral.new(other, bit_width(other))
+        return other if other.is_a?(Expr)
+        Literal.new(other, bit_width(other))
       end
 
       def result_width(other)
-        other_width = other.is_a?(SynthExpr) ? other.width : bit_width(other)
+        other_width = other.is_a?(Expr) ? other.width : bit_width(other)
         [@width, other_width].max
       end
 

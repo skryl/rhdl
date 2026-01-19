@@ -4,7 +4,7 @@ require "active_support/core_ext/string/inflections"
 require_relative "ir"
 
 module RHDL
-  module Export
+  module Codegen
     class Lower
       def initialize(component_class, top_name: nil)
         @component_class = component_class

@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Synth
     # Synthesis bit select
-    class SynthBitSelect < SynthExpr
+    class BitSelect < Expr
       attr_reader :base, :index
 
       def initialize(base, index)
@@ -13,7 +13,7 @@ module RHDL
       end
 
       def to_ir
-        RHDL::Export::IR::Slice.new(base: @base.to_ir, range: @index..@index, width: 1)
+        RHDL::Codegen::IR::Slice.new(base: @base.to_ir, range: @index..@index, width: 1)
       end
     end
   end

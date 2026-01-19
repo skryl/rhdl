@@ -1,7 +1,7 @@
 # Topological sort for gate scheduling
 
 module RHDL
-  module Export
+  module Codegen
     module Structure
       module Toposort
         def self.schedule(gates)

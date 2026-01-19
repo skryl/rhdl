@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Synth
     # Memory read expression for synthesis
     # Generates IR::MemoryRead for HDL export
-    class SynthMemoryRead < SynthExpr
+    class MemoryRead < Expr
       attr_reader :memory_name, :addr
 
       def initialize(memory_name, addr, width)
@@ -14,7 +14,7 @@ module RHDL
       end
 
       def to_ir
-        RHDL::Export::IR::MemoryRead.new(
+        RHDL::Codegen::IR::MemoryRead.new(
           memory: @memory_name,
           addr: @addr.to_ir,
           width: @width

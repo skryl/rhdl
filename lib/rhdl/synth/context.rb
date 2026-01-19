@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Synth
     # Context for evaluating behavior blocks in synthesis mode
     # Generates IR expressions instead of computing values
-    class BehaviorSynthContext
+    class Context
       attr_reader :assignments, :locals
 
       def initialize(component_class)
@@ -25,13 +25,13 @@ module RHDL
         # Create accessor methods for all ports and signals
         component_class._ports.each do |p|
           if p.direction == :out
-            define_singleton_method(p.name) { SynthOutputProxy.new(p.name, p.width, self) }
+            define_singleton_method(p.name) { OutputProxy.new(p.name, p.width, self) }
           else
-            define_singleton_method(p.name) { SynthSignalProxy.new(p.name, p.width) }
+            define_singleton_method(p.name) { SignalProxy.new(p.name, p.width) }
           end
         end
         component_class._signals.each do |s|
-          define_singleton_method(s.name) { SynthOutputProxy.new(s.name, s.width, self) }
+          define_singleton_method(s.name) { OutputProxy.new(s.name, s.width, self) }
         end
 
         # Create accessor methods for Vecs
@@ -41,7 +41,7 @@ module RHDL
           @vec_defs[vd[:name]] = { count: count, width: width, direction: vd[:direction] }
 
           vec_name = vd[:name]
-          define_singleton_method(vec_name) { SynthVecProxy.new(vec_name, @vec_defs[vec_name], self) }
+          define_singleton_method(vec_name) { VecProxy.new(vec_name, @vec_defs[vec_name], self) }
         end
       end
 
@@ -59,7 +59,7 @@ module RHDL
       def local(name, expr, width: nil)
         wrapped = wrap_expr(expr)
         w = width || wrapped.width
-        local_var = SynthLocal.new(name, wrapped, w)
+        local_var = Local.new(name, wrapped, w)
         @locals << local_var
 
         # Define accessor method for this local
@@ -74,14 +74,14 @@ module RHDL
         wire_assigns = @locals.map do |local_var|
           ir_expr = local_var.expr.to_ir
           ir_expr = resize_ir(ir_expr, local_var.width) if ir_expr.width != local_var.width
-          RHDL::Export::IR::Assign.new(target: local_var.name, expr: ir_expr)
+          RHDL::Codegen::IR::Assign.new(target: local_var.name, expr: ir_expr)
         end
 
         # Then, create output assignments
         output_assigns = @assignments.map do |assignment|
           ir_expr = assignment[:expr].to_ir
           ir_expr = resize_ir(ir_expr, assignment[:width]) if ir_expr.width != assignment[:width]
-          RHDL::Export::IR::Assign.new(target: assignment[:target], expr: ir_expr)
+          RHDL::Codegen::IR::Assign.new(target: assignment[:target], expr: ir_expr)
         end
 
         wire_assigns + output_assigns
@@ -90,7 +90,7 @@ module RHDL
       # Get wire declarations for locals
       def wire_declarations
         @locals.map do |local_var|
-          RHDL::Export::IR::Net.new(name: local_var.name, width: local_var.width)
+          RHDL::Codegen::IR::Net.new(name: local_var.name, width: local_var.width)
         end
       end
 
@@ -100,19 +100,19 @@ module RHDL
         true_expr = wrap_expr(when_true)
         false_expr = wrap_expr(when_false)
         width = [true_expr.width, false_expr.width].max
-        SynthMux.new(cond, true_expr, false_expr, width)
+        Mux.new(cond, true_expr, false_expr, width)
       end
 
       # Helper for creating literal values with explicit width
       def lit(value, width:)
-        SynthLiteral.new(value, width)
+        Literal.new(value, width)
       end
 
       # Helper for concatenation
       def cat(*signals)
         parts = signals.map { |s| wrap_expr(s) }
         total_width = parts.sum(&:width)
-        SynthConcat.new(parts, total_width)
+        Concat.new(parts, total_width)
       end
 
       # Simple if-else for single expression
@@ -149,19 +149,19 @@ module RHDL
       # Reduction OR - any bit set
       def reduce_or(signal)
         wrapped = wrap_expr(signal)
-        SynthUnaryOp.new(:reduce_or, wrapped, 1)
+        UnaryOp.new(:reduce_or, wrapped, 1)
       end
 
       # Reduction AND - all bits set
       def reduce_and(signal)
         wrapped = wrap_expr(signal)
-        SynthUnaryOp.new(:reduce_and, wrapped, 1)
+        UnaryOp.new(:reduce_and, wrapped, 1)
       end
 
       # Reduction XOR - parity
       def reduce_xor(signal)
         wrapped = wrap_expr(signal)
-        SynthUnaryOp.new(:reduce_xor, wrapped, 1)
+        UnaryOp.new(:reduce_xor, wrapped, 1)
       end
 
       # Case select - generates nested mux chain for synthesis
@@ -174,42 +174,42 @@ module RHDL
         result = default_expr
         cases.reverse_each do |value, expr|
           wrapped = wrap_expr(expr)
-          cond = SynthBinaryOp.new(:==, sel, SynthLiteral.new(value, sel.width), 1)
-          result = SynthMux.new(cond, wrapped, result, [wrapped.width, result.width].max)
+          cond = BinaryOp.new(:==, sel, Literal.new(value, sel.width), 1)
+          result = Mux.new(cond, wrapped, result, [wrapped.width, result.width].max)
         end
         result
       end
 
       # Memory read expression for use in behavior blocks
-      # Creates a SynthMemoryRead that generates IR::MemoryRead for synthesis
+      # Creates a MemoryRead that generates IR::MemoryRead for synthesis
       # @param memory_name [Symbol] The memory array name
-      # @param addr [SynthExpr, Integer] The address expression
+      # @param addr [Expr, Integer] The address expression
       # @param width [Integer] Optional width override (default: 8)
       def mem_read_expr(memory_name, addr, width: 8)
         addr_expr = wrap_expr(addr)
-        SynthMemoryRead.new(memory_name, addr_expr, width)
+        MemoryRead.new(memory_name, addr_expr, width)
       end
 
       private
 
       def wrap_expr(expr)
         case expr
-        when SynthExpr
+        when Expr
           expr
         when Integer
-          SynthLiteral.new(expr, expr == 0 ? 1 : expr.bit_length)
+          Literal.new(expr, expr == 0 ? 1 : expr.bit_length)
         else
           expr
         end
       end
 
       def resize_ir(ir_expr, target_width)
-        RHDL::Export::IR::Resize.new(expr: ir_expr, width: target_width)
+        RHDL::Codegen::IR::Resize.new(expr: ir_expr, width: target_width)
       end
     end
 
     # Local variable expression for synthesis
-    class SynthLocal < SynthExpr
+    class Local < Expr
       attr_reader :name, :expr
 
       def initialize(name, expr, width)
@@ -220,13 +220,13 @@ module RHDL
 
       def to_ir
         # Reference the wire by name
-        RHDL::Export::IR::Signal.new(name: @name, width: @width)
+        RHDL::Codegen::IR::Signal.new(name: @name, width: @width)
       end
     end
 
     # Proxy for Vec access in behavior blocks (synthesis mode)
     # Generates mux trees for hardware-indexed access
-    class SynthVecProxy
+    class VecProxy
       attr_reader :name, :vec_def, :context
 
       def initialize(name, vec_def, context)
@@ -242,10 +242,10 @@ module RHDL
         if index.is_a?(Integer)
           # Constant index - reference the flattened port directly
           port_name = "#{@name}_#{index}"
-          SynthSignalProxy.new(port_name, @vec_def[:width])
+          SignalProxy.new(port_name, @vec_def[:width])
         else
           # Hardware index - generate mux expression
-          SynthVecAccess.new(@name, @vec_def, index, @context)
+          VecAccess.new(@name, @vec_def, index, @context)
         end
       end
 
@@ -260,7 +260,7 @@ module RHDL
 
     # Represents a hardware-indexed Vec access for synthesis
     # Generates a mux tree selecting from all elements
-    class SynthVecAccess < SynthExpr
+    class VecAccess < Expr
       attr_reader :vec_name, :vec_def, :index
 
       def initialize(vec_name, vec_def, index, context)
@@ -279,28 +279,28 @@ module RHDL
 
         # Build cases for each element
         # Start with last element as default, then build mux chain backwards
-        result = RHDL::Export::IR::Signal.new(
+        result = RHDL::Codegen::IR::Signal.new(
           name: "#{@vec_name}_#{count - 1}",
           width: element_width
         )
 
         # Build mux chain from second-to-last down to first
         (count - 2).downto(0) do |i|
-          element_signal = RHDL::Export::IR::Signal.new(
+          element_signal = RHDL::Codegen::IR::Signal.new(
             name: "#{@vec_name}_#{i}",
             width: element_width
           )
 
           # Condition: index == i
-          index_ir = @index.respond_to?(:to_ir) ? @index.to_ir : RHDL::Export::IR::Signal.new(name: @index.to_s, width: index_width)
-          condition = RHDL::Export::IR::BinaryOp.new(
+          index_ir = @index.respond_to?(:to_ir) ? @index.to_ir : RHDL::Codegen::IR::Signal.new(name: @index.to_s, width: index_width)
+          condition = RHDL::Codegen::IR::BinaryOp.new(
             op: :==,
             left: index_ir,
-            right: RHDL::Export::IR::Literal.new(value: i, width: index_width),
+            right: RHDL::Codegen::IR::Literal.new(value: i, width: index_width),
             width: 1
           )
 
-          result = RHDL::Export::IR::Mux.new(
+          result = RHDL::Codegen::IR::Mux.new(
             condition: condition,
             when_true: element_signal,
             when_false: result,

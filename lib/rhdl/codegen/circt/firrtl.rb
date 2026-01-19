@@ -4,7 +4,7 @@
 require_relative "../behavior/ir"
 
 module RHDL
-  module Export
+  module Codegen
     module CIRCT
       module FIRRTL
         FIRRTL_KEYWORDS = %w[

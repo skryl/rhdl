@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Synth
     # Synthesis concatenation
-    class SynthConcat < SynthExpr
+    class Concat < Expr
       attr_reader :parts
 
       def initialize(parts, width)
@@ -12,7 +12,7 @@ module RHDL
       end
 
       def to_ir
-        RHDL::Export::IR::Concat.new(parts: @parts.map(&:to_ir), width: @width)
+        RHDL::Codegen::IR::Concat.new(parts: @parts.map(&:to_ir), width: @width)
       end
     end
   end

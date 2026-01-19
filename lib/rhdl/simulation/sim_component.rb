@@ -763,7 +763,7 @@ module RHDL
         def behavior_to_ir_assigns
           return { assigns: [], wires: [] } unless behavior_defined?
 
-          ctx = BehaviorSynthContext.new(self)
+          ctx = RHDL::Synth::Context.new(self)
           ctx.evaluate(&@_behavior_block.block)
           {
             assigns: ctx.to_ir_assigns,

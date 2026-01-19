@@ -3,7 +3,7 @@
 require_relative 'primitives'
 
 module RHDL
-  module Export
+  module Codegen
     module Structure
       class SimCPU
       attr_reader :ir, :lanes
