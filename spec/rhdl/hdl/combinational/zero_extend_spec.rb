@@ -28,6 +28,25 @@ RSpec.describe RHDL::HDL::ZeroExtend do
       expect(verilog).to include('module zero_extend')
       expect(verilog).to include('assign y')
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::ZeroExtend.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit zero_extend')
+      expect(firrtl).to include('input a')
+      expect(firrtl).to include('output y')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::ZeroExtend,
+          base_dir: 'tmp/circt_test/zero_extend'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do

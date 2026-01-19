@@ -36,6 +36,25 @@ RSpec.describe RHDL::HDL::Mux8 do
       expect(verilog).to include('input in0')
       expect(verilog).to include('output y')
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::Mux8.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit mux8')
+      expect(firrtl).to include('input in0')
+      expect(firrtl).to include('output y')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::Mux8,
+          base_dir: 'tmp/circt_test/mux8'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist (1-bit)' do

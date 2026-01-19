@@ -38,6 +38,25 @@ RSpec.describe RHDL::HDL::Decoder3to8 do
       expect(verilog).to include('input [2:0] a')
     end
 
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::Decoder3to8.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit decoder3to8')
+      expect(firrtl).to include('input a')
+      expect(firrtl).to include('output y0')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::Decoder3to8,
+          base_dir: 'tmp/circt_test/decoder3to8'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
+
     context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::Decoder3to8.to_verilog

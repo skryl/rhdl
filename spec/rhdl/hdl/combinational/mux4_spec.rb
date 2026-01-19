@@ -49,6 +49,25 @@ RSpec.describe RHDL::HDL::Mux4 do
       expect(verilog).to include('input [1:0] sel')
     end
 
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::Mux4.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit mux4')
+      expect(firrtl).to include('input a')
+      expect(firrtl).to include('output y')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::Mux4,
+          base_dir: 'tmp/circt_test/mux4'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
+
     context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::Mux4.to_verilog

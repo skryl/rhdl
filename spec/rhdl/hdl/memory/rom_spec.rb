@@ -53,6 +53,25 @@ RSpec.describe RHDL::HDL::ROM do
       expect(verilog).to include('input [7:0] addr')
       expect(verilog).to match(/output.*\[7:0\].*dout/)
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::ROM.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit rom')
+      expect(firrtl).to include('input addr')
+      expect(firrtl).to include('output dout')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::ROM,
+          base_dir: 'tmp/circt_test/rom'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do
