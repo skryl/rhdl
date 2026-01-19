@@ -176,6 +176,14 @@ module MOS6502
     wire :reg_data_z            # Z flag computed from actual_reg_data
     wire :is_decode_state       # We're in DECODE state
     wire :decode_to_execute     # Implied mode in DECODE transitioning to EXECUTE
+    wire :sr_data_in, width: 8  # Status register data input (data_in during PULL)
+    wire :pc_minus_one, width: 16  # PC-1 for JSR return address push
+    wire :pc_m1_hi, width: 8       # High byte of PC-1
+    wire :pc_m1_lo, width: 8       # Low byte of PC-1
+    wire :is_rts_pull_hi           # In RTS_PULL_HI state
+    wire :is_rti_pull_hi           # In RTI_PULL_HI state
+    wire :is_brk_vec_hi            # In BRK_VEC_HI state
+    wire :return_addr, width: 16   # Computed return address for RTS/RTI (cat(data_in, alatch_addr_lo))
 
     # Component instances
     instance :registers, Registers
@@ -282,7 +290,7 @@ module MOS6502
     port :flag_i_in => [:status_reg, :i_in]
     port :flag_d_in => [:status_reg, :d_in]
     port :actual_load_all => [:status_reg, :load_all]
-    port :dlatch_data => [:status_reg, :data_in]
+    port :sr_data_in => [:status_reg, :data_in]
 
     # ALU connections
     port [:alu, :result] => :alu_result
@@ -371,6 +379,11 @@ module MOS6502
       pc_hi_byte <= pc_val[15..8]
       pc_lo_byte <= pc_val[7..0]
 
+      # PC-1 for JSR (6502 pushes return address - 1)
+      pc_minus_one <= pc_val - lit(1, width: 16)
+      pc_m1_hi <= pc_minus_one[15..8]
+      pc_m1_lo <= pc_minus_one[7..0]
+
       # State detection
       is_execute_state <= (ctrl_state == lit(ControlUnit::STATE_EXECUTE, width: 8))
       is_write_mem_state <= (ctrl_state == lit(ControlUnit::STATE_WRITE_MEM, width: 8))
@@ -378,6 +391,19 @@ module MOS6502
       is_read_mem_state <= (ctrl_state == lit(ControlUnit::STATE_READ_MEM, width: 8))
       is_pull_state <= (ctrl_state == lit(ControlUnit::STATE_PULL, width: 8))
       is_decode_state <= (ctrl_state == lit(ControlUnit::STATE_DECODE, width: 8))
+
+      # RTS/RTI/BRK vector states - for loading PC from return address
+      is_rts_pull_hi <= (ctrl_state == lit(ControlUnit::STATE_RTS_PULL_HI, width: 8))
+      is_rti_pull_hi <= (ctrl_state == lit(ControlUnit::STATE_RTI_PULL_HI, width: 8))
+      is_brk_vec_hi <= (ctrl_state == lit(ControlUnit::STATE_BRK_VEC_HI, width: 8))
+
+      # Compute return address for RTS/RTI
+      # When in RTS_PULL_HI or RTI_PULL_HI state, data_in has the high byte
+      # and alatch_addr_lo has the low byte (captured in previous cycle)
+      # For RTS, we need to add 1 to get the actual return address
+      # But agen_eff_addr already handles the +1 for RTS
+      # So we build the address from data_in (hi) and alatch_addr_lo (lo)
+      return_addr <= cat(data_in, alatch_addr_lo)
 
       # Implied mode instructions transition directly from DECODE to EXECUTE
       # This is used for TXS timing since it doesn't set writes_reg
@@ -472,8 +498,13 @@ module MOS6502
                         (dec_dst_reg == lit(MOS6502::REG_Y, width: 2)))
 
       # PC control
+      # For RTS/RTI: PC loads from return_addr (cat(data_in, alatch_addr_lo))
+      # This avoids race condition where PC would see old alatch_addr value
+      # For BRK vector: same issue - need to use data_in directly
       actual_pc_load <= ext_pc_load_en | ctrl_pc_load
-      actual_pc_addr <= mux(ext_pc_load_en, ext_pc_load_data, agen_eff_addr)
+      actual_pc_addr <= mux(ext_pc_load_en, ext_pc_load_data,
+                            mux(is_rts_pull_hi | is_rti_pull_hi | is_brk_vec_hi,
+                                return_addr, agen_eff_addr))
 
       # SP control
       # TXS (0x9A) transfers X to SP
@@ -516,7 +547,13 @@ module MOS6502
 
       # PLP: load entire status register from stack
       # Use ctrl_update_flags for early timing (set during PULL state before EXECUTE)
-      actual_load_all <= is_stack_instr & dec_is_status_op & ctrl_update_flags
+      # Only for PLP (read from stack), not PHP (write to stack)
+      actual_load_all <= is_stack_instr & dec_is_status_op & dec_is_read & ctrl_update_flags
+
+      # Status register data input
+      # During PULL state for PLP, use data_in directly (dlatch_data not captured yet)
+      # Otherwise use dlatch_data
+      sr_data_in <= mux(is_pull_state, data_in, dlatch_data)
 
       # For load/transfer/PLA instructions, N/Z flags come from register data, not ALU
       # This is because these instructions bypass the ALU (data goes directly to register)
@@ -536,12 +573,13 @@ module MOS6502
                       mux(ctrl_addr_sel[0], lit(0xFFFC, width: 16), pc_val)))
 
       # Data output mux (7-way based on ctrl_data_sel)
+      # For JSR (data_sel 2,3), use PC-1 since 6502 pushes return address minus 1
       data_out <= mux(ctrl_data_sel[2],
                       mux(ctrl_data_sel[1],
                           mux(ctrl_data_sel[0], regs_a, regs_y),
                           mux(ctrl_data_sel[0], regs_x, (sr_p | lit(0x30, width: 8)))),
                       mux(ctrl_data_sel[1],
-                          mux(ctrl_data_sel[0], pc_lo_byte, pc_hi_byte),
+                          mux(ctrl_data_sel[0], pc_m1_lo, pc_m1_hi),
                           mux(ctrl_data_sel[0], alu_result, regs_a)))
 
       # RW signal
