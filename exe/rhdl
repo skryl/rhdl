@@ -1131,6 +1131,7 @@ def handle_apple2(args)
     appleiigo: false,
     clean: false,
     debug: false,
+    fast: false,
     rom: nil,
     rom_address: nil,
     ink: false,
@@ -1164,6 +1165,7 @@ def handle_apple2(args)
     opts.on('--appleiigo', 'Run with AppleIIGo public domain ROM') { options[:appleiigo] = true }
     opts.on('--clean', 'Clean ROM output files') { options[:clean] = true }
     opts.on('-d', '--debug', 'Enable debug mode') { options[:debug] = true }
+    opts.on('-f', '--fast', 'Use fast ISA-level simulator (not cycle-accurate)') { options[:fast] = true }
     opts.on('-r', '--rom FILE', 'ROM file to load') { |v| options[:rom] = v }
     opts.on('--rom-address ADDR', 'ROM load address (hex)') { |v| options[:rom_address] = v }
     opts.on('--ink', 'Use Ink (React-based) TUI renderer') { options[:ink] = true }
@@ -1298,6 +1300,7 @@ def handle_apple2(args)
         puts "Starting emulator..."
         exec_args = [apple2_script, "-r", rom_file, "--rom-address", "F800"]
         exec_args << "-d" if options[:debug]
+        exec_args << "-f" if options[:fast]
         exec(*exec_args)
       end
     rescue => e
@@ -1311,6 +1314,7 @@ def handle_apple2(args)
   if options[:demo]
     exec_args = [apple2_script, "--demo"]
     exec_args << "-d" if options[:debug]
+    exec_args << "-f" if options[:fast]
     exec(*exec_args)
   end
 
@@ -1324,6 +1328,7 @@ def handle_apple2(args)
     end
     exec_args = [apple2_script, "-r", rom_file, "--rom-address", "D000"]
     exec_args << "-d" if options[:debug]
+    exec_args << "-f" if options[:fast]
     exec(*exec_args)
   end
 
@@ -1332,6 +1337,7 @@ def handle_apple2(args)
   exec_args += ["-r", options[:rom]] if options[:rom]
   exec_args += ["--rom-address", options[:rom_address]] if options[:rom_address]
   exec_args << "-d" if options[:debug]
+  exec_args << "-f" if options[:fast]
   exec_args += args # Pass any remaining args
   exec(*exec_args)
 end
