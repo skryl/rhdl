@@ -803,7 +803,9 @@ module RHDL
             # Evaluate the underlying expression
             compute_value(expr.expr)
           when BehaviorSignalRef
-            @input_values[expr.name] || @output_values[expr.name] || 0
+            # Check output_values first so that values computed earlier in this
+            # behavior block execution are visible to later assignments
+            @output_values[expr.name] || @input_values[expr.name] || 0
           when BehaviorBinaryOp
             compute_binary(expr.op, compute_value(expr.left), compute_value(expr.right), expr.width)
           when BehaviorUnaryOp

@@ -56,13 +56,6 @@ module RISCV
                         mux(mem_to_reg_in, mem_data_in, alu_result_in))
       end
 
-      def self.verilog_module_name
-        'riscv_mem_wb_reg'
-      end
-
-      def self.to_verilog
-        RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
-      end
     end
   end
 end

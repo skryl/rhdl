@@ -54,13 +54,6 @@ module RISCV
         flush_id_ex <= branch_taken | jump | load_use_hazard
       end
 
-      def self.verilog_module_name
-        'riscv_hazard_unit'
-      end
-
-      def self.to_verilog
-        RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
-      end
     end
   end
 end
