@@ -71,11 +71,46 @@ RSpec.describe RHDL::HDL::ShiftRegister do
       expect(firrtl).to include('output q')
     end
 
-    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
-      it 'firtool can compile FIRRTL to Verilog' do
-        result = CirctHelper.validate_firrtl_syntax(
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
+      it 'CIRCT-generated Verilog matches RHDL Verilog behavior' do
+        behavior = RHDL::HDL::ShiftRegister.new
+        behavior.set_input(:rst, 0)
+        behavior.set_input(:en, 1)
+        behavior.set_input(:d_in, 0)
+
+        test_vectors = []
+        # Start with reset cycle to initialize shift register (avoids X propagation)
+        test_cases = [
+          { d: 0, d_in: 0, rst: 1, en: 1, load: 0, dir: 1 },           # reset (initialize to 0)
+          { d: 0b00001111, d_in: 0, rst: 0, en: 1, load: 1, dir: 1 },  # load
+          { d: 0, d_in: 0, rst: 0, en: 1, load: 0, dir: 1 },           # shift left
+          { d: 0, d_in: 0, rst: 0, en: 1, load: 0, dir: 1 },           # shift left
+          { d: 0, d_in: 0, rst: 0, en: 1, load: 0, dir: 0 },           # shift right
+          { d: 0, d_in: 1, rst: 0, en: 1, load: 0, dir: 1 },           # shift left with d_in=1
+        ]
+
+        test_cases.each do |tc|
+          behavior.set_input(:d, tc[:d])
+          behavior.set_input(:d_in, tc[:d_in])
+          behavior.set_input(:rst, tc[:rst])
+          behavior.set_input(:en, tc[:en])
+          behavior.set_input(:load, tc[:load])
+          behavior.set_input(:dir, tc[:dir])
+          behavior.set_input(:clk, 0)
+          behavior.propagate
+          behavior.set_input(:clk, 1)
+          behavior.propagate
+          test_vectors << {
+            inputs: { d: tc[:d], d_in: tc[:d_in], rst: tc[:rst], en: tc[:en], load: tc[:load], dir: tc[:dir] },
+            expected: { q: behavior.get_output(:q), d_out: behavior.get_output(:d_out) }
+          }
+        end
+
+        result = CirctHelper.validate_circt_export(
           RHDL::HDL::ShiftRegister,
-          base_dir: 'tmp/circt_test/shift_register'
+          test_vectors: test_vectors,
+          base_dir: 'tmp/circt_test/shift_register',
+          has_clock: true
         )
 
         expect(result[:success]).to be(true), result[:error]

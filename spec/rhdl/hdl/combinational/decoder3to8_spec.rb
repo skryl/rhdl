@@ -46,10 +46,53 @@ RSpec.describe RHDL::HDL::Decoder3to8 do
       expect(firrtl).to include('output y0')
     end
 
-    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
-      it 'firtool can compile FIRRTL to Verilog' do
-        result = CirctHelper.validate_firrtl_syntax(
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
+      it 'CIRCT-generated Verilog matches RHDL Verilog behavior' do
+        behavior = RHDL::HDL::Decoder3to8.new
+
+        test_vectors = []
+        # Test all 8 address values with enable=1
+        8.times do |i|
+          behavior.set_input(:a, i)
+          behavior.set_input(:en, 1)
+          behavior.propagate
+          test_vectors << {
+            inputs: { a: i, en: 1 },
+            expected: {
+              y0: behavior.get_output(:y0),
+              y1: behavior.get_output(:y1),
+              y2: behavior.get_output(:y2),
+              y3: behavior.get_output(:y3),
+              y4: behavior.get_output(:y4),
+              y5: behavior.get_output(:y5),
+              y6: behavior.get_output(:y6),
+              y7: behavior.get_output(:y7)
+            }
+          }
+        end
+        # Test with enable=0
+        [0, 4, 7].each do |i|
+          behavior.set_input(:a, i)
+          behavior.set_input(:en, 0)
+          behavior.propagate
+          test_vectors << {
+            inputs: { a: i, en: 0 },
+            expected: {
+              y0: behavior.get_output(:y0),
+              y1: behavior.get_output(:y1),
+              y2: behavior.get_output(:y2),
+              y3: behavior.get_output(:y3),
+              y4: behavior.get_output(:y4),
+              y5: behavior.get_output(:y5),
+              y6: behavior.get_output(:y6),
+              y7: behavior.get_output(:y7)
+            }
+          }
+        end
+
+        result = CirctHelper.validate_circt_export(
           RHDL::HDL::Decoder3to8,
+          test_vectors: test_vectors,
           base_dir: 'tmp/circt_test/decoder3to8'
         )
 

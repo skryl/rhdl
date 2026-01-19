@@ -51,10 +51,33 @@ RSpec.describe RHDL::HDL::Mux2 do
       expect(firrtl).to include('output y')
     end
 
-    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
-      it 'firtool can compile FIRRTL to Verilog' do
-        result = CirctHelper.validate_firrtl_syntax(
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
+      it 'CIRCT-generated Verilog matches RHDL Verilog behavior' do
+        behavior = RHDL::HDL::Mux2.new(nil, width: 1)
+
+        test_vectors = []
+        test_cases = [
+          { a: 0, b: 0, sel: 0 },
+          { a: 0, b: 1, sel: 0 },
+          { a: 1, b: 0, sel: 0 },
+          { a: 0, b: 1, sel: 1 },
+          { a: 1, b: 0, sel: 1 },
+        ]
+
+        test_cases.each do |tc|
+          behavior.set_input(:a, tc[:a])
+          behavior.set_input(:b, tc[:b])
+          behavior.set_input(:sel, tc[:sel])
+          behavior.propagate
+          test_vectors << {
+            inputs: tc,
+            expected: { y: behavior.get_output(:y) }
+          }
+        end
+
+        result = CirctHelper.validate_circt_export(
           RHDL::HDL::Mux2,
+          test_vectors: test_vectors,
           base_dir: 'tmp/circt_test/mux2'
         )
 
