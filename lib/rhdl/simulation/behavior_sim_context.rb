@@ -22,6 +22,20 @@ module RHDL
         component.internal_signals.each do |name, wire|
           define_singleton_method(name) { SimOutputProxy.new(name, wire, self) }
         end
+
+        # Create accessor methods for Vecs
+        if component.instance_variable_defined?(:@vecs) && component.instance_variable_get(:@vecs)
+          component.instance_variable_get(:@vecs).each do |name, vec_inst|
+            define_singleton_method(name) { SimVecProxy.new(vec_inst, self) }
+          end
+        end
+
+        # Create accessor methods for Bundles
+        if component.instance_variable_defined?(:@bundles) && component.instance_variable_get(:@bundles)
+          component.instance_variable_get(:@bundles).each do |name, bundle_inst|
+            define_singleton_method(name) { SimBundleProxy.new(bundle_inst, self) }
+          end
+        end
       end
 
       def evaluate(&block)
@@ -333,6 +347,119 @@ module RHDL
 
       def to_i
         @value
+      end
+    end
+
+    # Proxy for Vec access in behavior blocks (simulation mode)
+    class SimVecProxy
+      attr_reader :vec_inst, :context
+
+      def initialize(vec_inst, context)
+        @vec_inst = vec_inst
+        @context = context
+      end
+
+      # Access element by index (constant or hardware)
+      def [](index)
+        resolved_idx = resolve_value(index)
+        clamped_idx = resolved_idx.clamp(0, @vec_inst.count - 1)
+        wire = @vec_inst.elements[clamped_idx]
+        SimSignalProxy.new("#{@vec_inst.name}[#{clamped_idx}]", wire, :internal, @context)
+      end
+
+      # Set element at constant index
+      def []=(index, value)
+        resolved_idx = resolve_value(index)
+        clamped_idx = resolved_idx.clamp(0, @vec_inst.count - 1)
+        wire = @vec_inst.elements[clamped_idx]
+        val = resolve_value(value)
+        @context.record_assignment(wire, val)
+      end
+
+      # Iterate over elements
+      def each(&block)
+        @vec_inst.elements.each_with_index do |wire, i|
+          proxy = SimSignalProxy.new("#{@vec_inst.name}[#{i}]", wire, :internal, @context)
+          block.call(proxy)
+        end
+      end
+
+      def each_with_index(&block)
+        @vec_inst.elements.each_with_index do |wire, i|
+          proxy = SimSignalProxy.new("#{@vec_inst.name}[#{i}]", wire, :internal, @context)
+          block.call(proxy, i)
+        end
+      end
+
+      # Get count of elements
+      def count
+        @vec_inst.count
+      end
+
+      def length
+        @vec_inst.count
+      end
+
+      # Get width of each element
+      def element_width
+        @vec_inst.element_width
+      end
+
+      private
+
+      def resolve_value(val)
+        case val
+        when Integer
+          val
+        when SimSignalProxy, SimOutputProxy, SimLocalProxy
+          val.value
+        else
+          val.respond_to?(:value) ? val.value : val.to_i
+        end
+      end
+    end
+
+    # Proxy for Bundle access in behavior blocks (simulation mode)
+    class SimBundleProxy
+      attr_reader :bundle_inst, :context
+
+      def initialize(bundle_inst, context)
+        @bundle_inst = bundle_inst
+        @context = context
+      end
+
+      # Access field by name
+      def method_missing(method_name, *args, &block)
+        if @bundle_inst.fields.key?(method_name)
+          wire = @bundle_inst.fields[method_name]
+          direction = @bundle_inst.field_direction(method_name)
+          if direction == :output
+            SimOutputProxy.new("#{@bundle_inst.name}.#{method_name}", wire, @context)
+          else
+            SimSignalProxy.new("#{@bundle_inst.name}.#{method_name}", wire, :input, @context)
+          end
+        else
+          super
+        end
+      end
+
+      def respond_to_missing?(method_name, include_private = false)
+        @bundle_inst.fields.key?(method_name) || super
+      end
+
+      # Get all field values as hash
+      def to_h
+        @bundle_inst.fields.transform_values(&:get)
+      end
+
+      # Check if field exists
+      def field?(name)
+        @bundle_inst.fields.key?(name)
+      end
+
+      # Get field direction
+      def field_direction(name)
+        @bundle_inst.field_direction(name)
       end
     end
   end

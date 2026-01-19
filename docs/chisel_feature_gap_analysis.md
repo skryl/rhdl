@@ -16,7 +16,7 @@ Chisel is a hardware construction language embedded in Scala that provides advan
 
 ## 1. Type System Enhancements
 
-### 1.1 Aggregate Types: Bundle (P0)
+### 1.1 Aggregate Types: Bundle (P0) ✅ IMPLEMENTED
 
 **Chisel Feature:**
 ```scala
@@ -31,25 +31,32 @@ io.addr := 0x1000.U
 
 Bundles group named fields into structured types, similar to Verilog structs or C structs.
 
-**RHDL Status:** Missing. RHDL has no equivalent to Bundle. Ports are defined individually.
+**RHDL Status:** ✅ Implemented with `Bundle` class and `input_bundle`/`output_bundle` DSL methods.
 
-**Gap:** Cannot group related signals into reusable interface types.
-
-**Recommendation:** Add a `bundle` DSL:
+**RHDL Implementation:**
 ```ruby
-bundle :AxiLite do
-  field :awaddr, width: 32
-  field :awvalid, width: 1
-  field :awready, width: 1
-  field :wdata, width: 32
+# Define a bundle type
+class ValidBundle < RHDL::HDL::Bundle
+  field :data, width: 8, direction: :output
+  field :valid, width: 1, direction: :output
+  field :ready, width: 1, direction: :input
 end
 
-input :axi, type: :AxiLite
+# Use in a component
+class MyProducer < SimComponent
+  input_bundle :out_port, ValidBundle  # Producer interface
+end
+
+class MyConsumer < SimComponent
+  output_bundle :in_port, ValidBundle  # Consumer interface (flipped)
+end
 ```
+
+Bundles are flattened to individual ports (e.g., `out_port_data`, `out_port_valid`) for Verilog generation.
 
 ---
 
-### 1.2 Aggregate Types: Vec (P0)
+### 1.2 Aggregate Types: Vec (P0) ✅ IMPLEMENTED
 
 **Chisel Feature:**
 ```scala
@@ -60,15 +67,32 @@ myVec(idx) := value                    // Hardware indexing
 
 Vec creates arrays of hardware elements with hardware-indexed access.
 
-**RHDL Status:** Partial. RHDL supports `RegisterFile` component but lacks general-purpose Vec type for wires/ports.
+**RHDL Status:** ✅ Implemented with `vec`, `input_vec`, and `output_vec` DSL methods.
 
-**Gap:** Cannot create parameterized arrays of signals or bundle ports.
-
-**Recommendation:** Add `vec` type:
+**RHDL Implementation:**
 ```ruby
-input :data_in, width: 8, count: 4  # Vec(4, UInt(8.W))
-wire :pipeline_stages, width: 32, count: 5
+class MyMux < SimComponent
+  # Input Vec - creates data_in_0, data_in_1, data_in_2, data_in_3
+  input_vec :data_in, count: 4, width: 8
+  input :sel, width: 2
+  output :result, width: 8
+
+  behavior do
+    # Hardware-indexed read (generates mux tree)
+    result <= data_in[sel]
+  end
+end
+
+class RegFile < SimComponent
+  parameter :depth, default: 32
+  parameter :width, default: 64
+
+  # Internal Vec (array of wires)
+  vec :regs, count: :depth, width: :width
+end
 ```
+
+Hardware-indexed Vec access generates mux trees for synthesis. Parameterized counts are supported.
 
 ---
 
@@ -87,7 +111,7 @@ Arrays where elements can have different widths/types.
 
 ---
 
-### 1.4 Flipped (P1)
+### 1.4 Flipped (P1) ✅ IMPLEMENTED
 
 **Chisel Feature:**
 ```scala
@@ -104,11 +128,25 @@ class ConsumerIO extends Bundle {
 
 `Flipped()` recursively reverses all signal directions in a Bundle.
 
-**RHDL Status:** Missing.
+**RHDL Status:** ✅ Implemented via `output_bundle` (flipped by default) and `flipped: true` option.
 
-**Gap:** Must manually define mirrored interfaces for bidirectional protocols.
+**RHDL Implementation:**
+```ruby
+class ValidBundle < RHDL::HDL::Bundle
+  field :data, width: 8, direction: :output
+  field :valid, width: 1, direction: :output
+  field :ready, width: 1, direction: :input
+end
 
-**Recommendation:** Add `flipped` modifier for bundle definitions.
+# Producer interface (original directions)
+input_bundle :out_port, ValidBundle
+
+# Consumer interface (flipped - outputs become inputs)
+output_bundle :in_port, ValidBundle  # flipped: true is default
+
+# Explicit flipping
+input_bundle :flipped_port, ValidBundle, flipped: true
+```
 
 ---
 
@@ -858,12 +896,12 @@ Extensible compilation pipeline.
 ## Priority Summary
 
 ### P0 (Critical - Core Language)
-1. **Bundle** - Structured interface types
-2. **Vec** - Hardware arrays with indexing
+1. **Bundle** - Structured interface types ✅ **IMPLEMENTED**
+2. **Vec** - Hardware arrays with indexing ✅ **IMPLEMENTED**
 3. **when/elsewhen/otherwise** - Ergonomic conditionals (partial - has alternatives)
 
 ### P1 (High - Productivity)
-4. **Flipped** - Interface direction reversal
+4. **Flipped** - Interface direction reversal ✅ **IMPLEMENTED** (via `output_bundle`)
 5. **SInt** - First-class signed types
 6. **DecoupledIO** - Standard ready-valid interface
 7. **Arbiter** - N-to-1 arbitration
