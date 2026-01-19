@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Sim
     # Tracks dependencies between components for event-driven simulation
     # Components are only re-evaluated when their inputs change
     class DependencyGraph
