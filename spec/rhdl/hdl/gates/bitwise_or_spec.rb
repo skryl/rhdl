@@ -20,6 +20,33 @@ RSpec.describe RHDL::HDL::BitwiseOr do
       verilog = RHDL::HDL::BitwiseOr.to_verilog
       expect(verilog).to include('assign y')
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::BitwiseOr.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit bitwise_or')
+      expect(firrtl).to include('input a')
+      expect(firrtl).to include('input b')
+      expect(firrtl).to include('output y')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
+      it 'CIRCT-generated Verilog matches RHDL Verilog behavior' do
+        test_vectors = [
+          { inputs: { a: 0b11110000, b: 0b00001111 }, expected: { y: 0b11111111 } },
+          { inputs: { a: 0b00000000, b: 0b00000000 }, expected: { y: 0b00000000 } },
+          { inputs: { a: 0b10101010, b: 0b01010101 }, expected: { y: 0b11111111 } }
+        ]
+
+        result = CirctHelper.validate_circt_export(
+          RHDL::HDL::BitwiseOr,
+          test_vectors: test_vectors,
+          base_dir: 'tmp/circt_test/bitwise_or'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do

@@ -100,6 +100,25 @@ RSpec.describe RHDL::HDL::StackPointer do
       expect(verilog).to include('module stack_pointer')
       expect(verilog).to match(/output.*\[7:0\].*q/)
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::StackPointer.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit stack_pointer')
+      expect(firrtl).to include('input clk')
+      expect(firrtl).to include('output q')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::StackPointer,
+          base_dir: 'tmp/circt_test/stack_pointer'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do

@@ -38,6 +38,25 @@ RSpec.describe RHDL::HDL::Demux4 do
       expect(verilog).to include('input a')
       expect(verilog).to include('output y0')
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::Demux4.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit demux4')
+      expect(firrtl).to include('input a')
+      expect(firrtl).to include('output y0')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::Demux4,
+          base_dir: 'tmp/circt_test/demux4'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist (1-bit)' do

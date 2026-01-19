@@ -19,6 +19,32 @@ RSpec.describe RHDL::HDL::BitwiseNot do
       verilog = RHDL::HDL::BitwiseNot.to_verilog
       expect(verilog).to include('assign y')
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::BitwiseNot.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit bitwise_not')
+      expect(firrtl).to include('input a')
+      expect(firrtl).to include('output y')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
+      it 'CIRCT-generated Verilog matches RHDL Verilog behavior' do
+        test_vectors = [
+          { inputs: { a: 0b11110000 }, expected: { y: 0b00001111 } },
+          { inputs: { a: 0b00000000 }, expected: { y: 0b11111111 } },
+          { inputs: { a: 0b10101010 }, expected: { y: 0b01010101 } }
+        ]
+
+        result = CirctHelper.validate_circt_export(
+          RHDL::HDL::BitwiseNot,
+          test_vectors: test_vectors,
+          base_dir: 'tmp/circt_test/bitwise_not'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do

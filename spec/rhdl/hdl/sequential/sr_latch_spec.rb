@@ -98,6 +98,27 @@ RSpec.describe RHDL::HDL::SRLatch do
       expect(verilog).to include('input r')
       expect(verilog).to match(/output.*q/)
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::SRLatch.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit sr_latch')
+      expect(firrtl).to include('input s')
+      expect(firrtl).to include('input r')
+      expect(firrtl).to include('output q')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        pending 'FIRRTL memory port syntax not yet implemented'
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::SRLatch,
+          base_dir: 'tmp/circt_test/sr_latch'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do

@@ -24,6 +24,31 @@ RSpec.describe RHDL::HDL::Buffer do
       verilog = RHDL::HDL::Buffer.to_verilog
       expect(verilog).to include('assign y')
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::Buffer.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit buffer')
+      expect(firrtl).to include('input a')
+      expect(firrtl).to include('output y')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
+      it 'CIRCT-generated Verilog matches RHDL Verilog behavior' do
+        test_vectors = [
+          { inputs: { a: 0 }, expected: { y: 0 } },
+          { inputs: { a: 1 }, expected: { y: 1 } }
+        ]
+
+        result = CirctHelper.validate_circt_export(
+          RHDL::HDL::Buffer,
+          test_vectors: test_vectors,
+          base_dir: 'tmp/circt_test/buffer'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do

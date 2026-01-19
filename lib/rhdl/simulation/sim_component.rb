@@ -427,6 +427,33 @@ module RHDL
           RHDL::Export::Verilog.generate(to_ir(top_name: top_name))
         end
 
+        # Generate CIRCT FIRRTL from the component
+        def to_circt(top_name: nil)
+          RHDL::Export::CIRCT::FIRRTL.generate(to_ir(top_name: top_name))
+        end
+        alias_method :to_firrtl, :to_circt
+
+        # Generate CIRCT FIRRTL for this component and all its sub-modules
+        # Returns a single FIRRTL circuit with all module definitions
+        # @param top_name [String] Optional name override for top module
+        # @return [String] Complete FIRRTL with all module definitions
+        def to_circt_hierarchy(top_name: nil)
+          module_defs = []
+
+          # Generate sub-modules first (in dependency order - leaves first)
+          submodules = collect_submodule_classes
+          submodules.each do |submod|
+            module_defs << submod.to_ir
+          end
+
+          # Generate top-level module last
+          top_ir = to_ir(top_name: top_name)
+          module_defs << top_ir
+
+          RHDL::Export::CIRCT::FIRRTL.generate_hierarchy(module_defs, top_name: top_ir.name)
+        end
+        alias_method :to_firrtl_hierarchy, :to_circt_hierarchy
+
         # Generate VHDL from the component
         def to_vhdl(top_name: nil)
           RHDL::Export::VHDL.generate(to_ir(top_name: top_name))
@@ -672,10 +699,21 @@ module RHDL
         # Generate IR instances from structure definitions
         def structure_to_ir_instances
           _instance_defs.map do |inst_def|
+            component_class = inst_def[:component_class]
+            # Build a map of port names to directions from the component class
+            port_directions = {}
+            if component_class.respond_to?(:_port_defs)
+              component_class._port_defs.each do |port_def|
+                port_directions[port_def[:name]] = port_def[:direction]
+              end
+            end
+
             connections = inst_def[:connections].map do |port_name, signal|
+              direction = port_directions[port_name] || :in
               RHDL::Export::IR::PortConnection.new(
                 port_name: port_name,
-                signal: signal.to_s
+                signal: signal.to_s,
+                direction: direction
               )
             end
 

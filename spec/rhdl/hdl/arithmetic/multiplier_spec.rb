@@ -31,6 +31,26 @@ RSpec.describe RHDL::HDL::Multiplier do
       expect(verilog).to include('output [15:0] product')
       expect(verilog).to include('assign product')
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::Multiplier.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit multiplier')
+      expect(firrtl).to include('input a')
+      expect(firrtl).to include('input b')
+      expect(firrtl).to include('output product')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::Multiplier,
+          base_dir: 'tmp/circt_test/multiplier'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do
