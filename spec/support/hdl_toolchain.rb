@@ -16,4 +16,8 @@ module HdlToolchain
   def ghdl_available?
     which("ghdl")
   end
+
+  def firtool_available?
+    which("firtool")
+  end
 end
