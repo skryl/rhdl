@@ -35,12 +35,5 @@ module RISCV
       write_reg(:pc, value & 0xFFFFFFFF)
     end
 
-    def self.verilog_module_name
-      'riscv_program_counter'
-    end
-
-    def self.to_verilog
-      RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
-    end
   end
 end
