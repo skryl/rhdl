@@ -16,11 +16,47 @@ module RHDL
 
         module_function
 
+        # Generate a complete FIRRTL circuit with a single module
         def generate(module_def)
           lines = []
           lines << "FIRRTL version 5.1.0"
           lines << "circuit #{sanitize(module_def.name)}:"
-          lines << "  public module #{sanitize(module_def.name)}:"
+          lines << generate_module_body(module_def, is_public: true)
+          lines.join("\n")
+        end
+
+        # Generate a complete FIRRTL circuit with multiple modules (hierarchical)
+        # @param module_defs [Array<IR::ModuleDef>] Array of module definitions, top module last
+        # @param top_name [String] Name of the circuit (usually the top module name)
+        def generate_hierarchy(module_defs, top_name:)
+          lines = []
+          lines << "FIRRTL version 5.1.0"
+          lines << "circuit #{sanitize(top_name)}:"
+
+          # Build a map of module name -> module definition for looking up submodule ports
+          module_map = {}
+          module_defs.each do |mod_def|
+            module_map[sanitize(mod_def.name)] = mod_def
+          end
+
+          module_defs.each_with_index do |mod_def, idx|
+            is_top = (idx == module_defs.length - 1)
+            lines << generate_module_body(mod_def, is_public: is_top, module_map: module_map)
+            lines << "" unless is_top # Add blank line between modules
+          end
+
+          lines.join("\n")
+        end
+
+        # Generate just the module body (without circuit header)
+        # @param module_def [IR::ModuleDef] The module definition
+        # @param is_public [Boolean] Whether this is the public top-level module
+        # @param module_map [Hash{String => IR::ModuleDef}] Map of module names to definitions (for hierarchical)
+        # @return [String] The module body FIRRTL code
+        def generate_module_body(module_def, is_public: false, module_map: {})
+          lines = []
+          module_keyword = is_public ? "public module" : "module"
+          lines << "  #{module_keyword} #{sanitize(module_def.name)}:"
 
           # Build set of output port names
           output_ports = module_def.ports.select { |p| p.direction == :out }.map(&:name).to_set
@@ -186,14 +222,50 @@ module RHDL
           module_def.instances.each do |instance|
             lines << ""
             lines << "    inst #{sanitize(instance.name)} of #{sanitize(instance.module_name)}"
+
+            # Get connected port names
+            connected_ports = instance.connections.map { |c| c.port_name.to_sym }.to_set
+
+            # Generate explicit connections
             instance.connections.each do |conn|
               signal_str = conn.signal.is_a?(String) ? sanitize(conn.signal) : expr(conn.signal)
-              lines << "    connect #{sanitize(instance.name)}.#{sanitize(conn.port_name)}, #{signal_str}"
+              inst_port = "#{sanitize(instance.name)}.#{sanitize(conn.port_name)}"
+              # FIRRTL flow: input ports are sinks (connect TO them), output ports are sources (connect FROM them)
+              if conn.direction == :out
+                lines << "    connect #{signal_str}, #{inst_port}"
+              else
+                lines << "    connect #{inst_port}, #{signal_str}"
+              end
+            end
+
+            # Add default connections for unconnected input ports (if module_map is available)
+            submod_def = module_map[sanitize(instance.module_name)]
+            if submod_def
+              submod_def.ports.each do |port|
+                next unless port.direction == :in  # Only need to connect inputs (sinks)
+                next if connected_ports.include?(port.name.to_sym)
+
+                inst_port = "#{sanitize(instance.name)}.#{sanitize(port.name)}"
+                # Use appropriate default: Clock ports get a clock, others get 0
+                if clock_port?(port.name)
+                  # Find the clock port in the current module if available
+                  clock_port = module_def.ports.find { |p| clock_port?(p.name) && p.direction == :in }
+                  if clock_port
+                    lines << "    connect #{inst_port}, #{sanitize(clock_port.name)}"
+                  else
+                    lines << "    connect #{inst_port}, asClock(UInt<1>(0))"
+                  end
+                else
+                  lines << "    connect #{inst_port}, #{literal(0, port.width)}"
+                end
+              end
             end
           end
 
           lines.join("\n")
         end
+
+        private_class_method :generate_module_body
 
         def find_clock_from_write_ports(module_def)
           module_def.write_ports.first&.clock

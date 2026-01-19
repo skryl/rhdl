@@ -165,6 +165,20 @@ module CirctHelper
     }
   end
 
+  # Validate hierarchical FIRRTL export using to_circt_hierarchy
+  # This includes all submodule definitions in a single circuit
+  def validate_hierarchical_firrtl(component_class, base_dir:)
+    rhdl_firrtl = component_class.to_circt_hierarchy
+    result = firtool_to_verilog(rhdl_firrtl, base_dir: base_dir)
+
+    {
+      success: result[:success],
+      error: result[:error],
+      firrtl: rhdl_firrtl,
+      verilog: result[:verilog]
+    }
+  end
+
   def run_cmd(cmd, cwd:)
     stdout, stderr, status = Open3.capture3(*cmd, chdir: cwd)
     { stdout: stdout, stderr: stderr, status: status }
