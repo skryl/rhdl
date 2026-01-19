@@ -1,0 +1,17 @@
+============================================================
+Gate-Level: not_gate
+Type: NotGate
+============================================================
+
+Gates: 1
+DFFs: 0
+Nets: 2
+
+Inputs:
+  not_gate.a[1]
+
+Outputs:
+  not_gate.y[1]
+
+Gate Types:
+  not: 1

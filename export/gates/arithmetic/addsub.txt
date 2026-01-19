@@ -1,0 +1,24 @@
+Component: addsub
+Type: RHDL::HDL::AddSub
+Gates: 62
+DFFs: 0
+Nets: 79
+
+Inputs:
+  addsub.a: 8 bits
+  addsub.b: 8 bits
+  addsub.sub: 1 bits
+
+Outputs:
+  addsub.result: 8 bits
+  addsub.cout: 1 bits
+  addsub.overflow: 1 bits
+  addsub.zero: 1 bits
+  addsub.negative: 1 bits
+
+Gate Types:
+  xor: 27
+  and: 17
+  or: 15
+  not: 2
+  buf: 1

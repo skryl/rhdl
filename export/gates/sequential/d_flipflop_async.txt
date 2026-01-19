@@ -1,0 +1,18 @@
+Component: dff_async
+Type: RHDL::HDL::DFlipFlopAsync
+Gates: 1
+DFFs: 1
+Nets: 6
+
+Inputs:
+  dff_async.d: 1 bits
+  dff_async.clk: 1 bits
+  dff_async.rst: 1 bits
+  dff_async.en: 1 bits
+
+Outputs:
+  dff_async.q: 1 bits
+  dff_async.qn: 1 bits
+
+Gate Types:
+  not: 1

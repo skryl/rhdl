@@ -1,0 +1,13 @@
+digraph acc {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<d>d[8]|<clk>clk[1]|<rst>rst[1]|<en>en[1]}|acc\n(Accumulator)|{<q>q[8]}}"];
+
+  subgraph cluster_main {
+    label="acc";
+    style=rounded;
+    color=blue;
+  }
+}

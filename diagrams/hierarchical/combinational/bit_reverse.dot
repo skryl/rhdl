@@ -1,0 +1,13 @@
+digraph bitrev {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[8]}|bitrev\n(BitReverse)|{<y>y[8]}}"];
+
+  subgraph cluster_main {
+    label="bitrev";
+    style=rounded;
+    color=blue;
+  }
+}

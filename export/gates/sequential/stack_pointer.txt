@@ -1,0 +1,25 @@
+Component: sp
+Type: RHDL::HDL::StackPointer
+Gates: 91
+DFFs: 8
+Nets: 103
+
+Inputs:
+  sp.clk: 1 bits
+  sp.rst: 1 bits
+  sp.push: 1 bits
+  sp.pop: 1 bits
+
+Outputs:
+  sp.q: 8 bits
+  sp.empty: 1 bits
+  sp.full: 1 bits
+
+Gate Types:
+  const: 2
+  xor: 16
+  not: 17
+  and: 23
+  or: 8
+  mux: 16
+  buf: 9

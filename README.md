@@ -1,0 +1,356 @@
+```
+    ____  __  ______  __
+   / __ \/ / / / __ \/ /
+  / /_/ / /_/ / / / / /
+ / _, _/ __  / /_/ / /___
+/_/ |_/_/ /_/_____/_____/
+
+  Ruby Hardware Description Language
+```
+
+# RHDL
+
+RHDL is a Domain Specific Language (DSL) for designing hardware using Ruby's flexible syntax and exporting to synthesizable Verilog. It provides Ruby developers with a comfortable environment to create hardware designs leveraging Ruby's metaprogramming capabilities.
+
+## Features
+
+- **Component DSLs**: Ruby-based DSLs for combinational, sequential, memory, and state machine components
+- **Verilog Export**: Generate synthesizable Verilog from Ruby definitions
+- **HDL Simulation**: Gate-level simulation with signal propagation
+- **Component Library**: Gates, flip-flops, registers, ALU, memory, and more
+- **Gate-Level Synthesis**: Lower components to primitive gate netlists (AND, OR, XOR, NOT, MUX, DFF)
+- **Diagram Generation**: Multi-level circuit diagrams with SVG, PNG, and DOT output
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Overview](docs/overview.md) | Introduction to the HDL framework |
+| [CLI Reference](docs/cli.md) | Command line interface reference |
+| [DSL Guide](docs/dsl.md) | DSL reference for synthesizable components |
+| [Components](docs/components.md) | Complete reference for all HDL components |
+| [Export](docs/export.md) | Verilog and gate-level export |
+| [8-bit CPU](docs/8bit_cpu.md) | Sample 8-bit CPU reference |
+| [MOS 6502](docs/mos6502_cpu.md) | MOS 6502 CPU implementation |
+| [Apple II](docs/apple2.md) | Apple II emulation |
+| [Simulation](docs/simulation.md) | Core simulation infrastructure |
+| [Debugging](docs/debugging.md) | Signal probing, breakpoints, and TUI |
+| [Diagrams](docs/diagrams.md) | Multi-level circuit diagrams |
+
+## Quick Start
+
+### Installation
+
+```bash
+gem install bundler -v '~> 2.5'
+bundle install
+```
+
+### Defining Components with the DSL
+
+RHDL provides several DSL constructs for synthesizable hardware:
+
+#### Combinational Logic
+
+```ruby
+class SimpleALU < RHDL::HDL::SimComponent
+  port_input :a, width: 8
+  port_input :b, width: 8
+  port_input :op, width: 2
+  port_output :result, width: 8
+
+  behavior do
+    result <= case_of(op,
+      0 => a + b,
+      1 => a - b,
+      2 => a & b,
+      3 => a | b
+    )
+  end
+end
+```
+
+#### Sequential Logic
+
+```ruby
+class Counter < RHDL::HDL::SequentialComponent
+  port_input :clk
+  port_input :rst
+  port_input :en
+  port_output :count, width: 8
+
+  sequential clock: :clk, reset: :rst, reset_values: { count: 0 } do
+    count <= mux(en, count + 1, count)
+  end
+end
+```
+
+#### Memory Components
+
+```ruby
+class RAM256x8 < RHDL::HDL::SimComponent
+  include RHDL::DSL::MemoryDSL
+
+  port_input :clk
+  port_input :we
+  port_input :addr, width: 8
+  port_input :din, width: 8
+  port_output :dout, width: 8
+
+  memory :mem, depth: 256, width: 8
+  sync_write :mem, clock: :clk, enable: :we, addr: :addr, data: :din
+  async_read :dout, from: :mem, addr: :addr
+end
+```
+
+#### State Machines
+
+```ruby
+class TrafficLight < RHDL::HDL::SequentialComponent
+  include RHDL::DSL::StateMachineDSL
+
+  port_input :clk
+  port_input :rst
+  port_input :sensor
+  port_output :red, :yellow, :green
+
+  state_machine clock: :clk, reset: :rst do
+    state :RED, value: 0 do
+      output red: 1, yellow: 0, green: 0
+      transition to: :GREEN, when_cond: :sensor
+    end
+
+    state :YELLOW, value: 1 do
+      output red: 0, yellow: 1, green: 0
+      transition to: :RED, after: 3
+    end
+
+    state :GREEN, value: 2 do
+      output red: 0, yellow: 0, green: 1
+      transition to: :YELLOW, when_cond: proc { in_val(:sensor) == 0 }
+    end
+
+    initial_state :RED
+  end
+end
+```
+
+#### Hierarchical Components
+
+Build complex components from sub-components using `instance`, `wire`, and `port`:
+
+```ruby
+class MyDatapath < RHDL::HDL::SimComponent
+  port_input :clk
+  port_input :rst
+  port_input :a, width: 8
+  port_input :b, width: 8
+  port_output :result, width: 8
+
+  # Internal wire
+  wire :alu_out, width: 8
+
+  # Sub-component instances
+  instance :alu, ALU, width: 8
+  instance :reg, Register, width: 8
+
+  # Port connections
+  port :a => [:alu, :a]
+  port :b => [:alu, :b]
+  port [:alu, :result] => :alu_out
+  port :alu_out => [:reg, :d]
+  port :clk => [:reg, :clk]
+  port :rst => [:reg, :rst]
+  port [:reg, :q] => :result
+end
+```
+
+### Exporting to Verilog
+
+```ruby
+require 'rhdl'
+
+# Export a component to Verilog
+component = MyComponent.new
+verilog_code = RHDL::Export.verilog(component)
+
+# Or use the class method
+verilog_code = MyComponent.to_verilog
+
+# Batch export with rake
+# rake hdl:export       - Export all DSL components
+# rake hdl:verilog      - Export Verilog files
+```
+
+**Generated Verilog example:**
+
+```verilog
+module simple_alu(
+  input [7:0] a,
+  input [7:0] b,
+  input [1:0] op,
+  output [7:0] result
+);
+  assign result = (op == 2'd0) ? (a + b) :
+                  (op == 2'd1) ? (a - b) :
+                  (op == 2'd2) ? (a & b) :
+                  (a | b);
+endmodule
+```
+
+### Simulation
+
+```ruby
+require 'rhdl'
+
+# Create an ALU
+alu = RHDL::HDL::ALU.new("my_alu", width: 8)
+alu.set_input(:a, 10)
+alu.set_input(:b, 5)
+alu.set_input(:op, RHDL::HDL::ALU::OP_ADD)
+alu.propagate
+
+puts alu.get_output(:result)  # => 15
+```
+
+## MOS 6502 CPU Example
+
+The `examples/mos6502/` directory contains a complete behavior simulation of the MOS 6502 microprocessor, demonstrating RHDL's capabilities for complex hardware designs.
+
+### Features
+
+- **Full 6502 implementation**: All official instructions and addressing modes
+- **Clock-cycle accurate**: Proper timing for all operations
+- **Two-pass assembler**: Write programs in 6502 assembly
+- **BCD arithmetic**: Full decimal mode support
+
+### Quick Example
+
+```ruby
+require_relative 'examples/mos6502/cpu'
+
+cpu = MOS6502::CPU.new
+cpu.assemble_and_load(<<~ASM, 0x8000)
+  LDA #$42      ; Load 0x42 into accumulator
+  STA $00       ; Store to zero page
+  BRK           ; Break
+ASM
+cpu.reset
+cpu.run
+
+puts cpu.status_string  # A:42 X:00 Y:00 SP:FD PC:8006
+```
+
+### Apple II Bus Emulation
+
+The 6502 implementation includes Apple II-style I/O bus support for running unmodified Apple II binaries:
+
+- **Keyboard**: Memory-mapped at $C000 with strobe at $C010
+- **Speaker**: Click toggle at $C030
+- **Video switches**: Text/graphics modes, page selection, hi-res mode
+- **RAM/ROM regions**: Full 64KB address space
+
+```ruby
+require_relative 'examples/mos6502/apple2_bus'
+
+bus = MOS6502::Apple2Bus.new
+cpu = MOS6502::CPU.new(bus: bus)
+
+# Simulate keyboard input
+bus.key_press('A')
+
+# Run program
+cpu.run
+```
+
+See [Apple II](docs/apple2.md) for details.
+
+## Project Structure
+
+```
+rhdl/
+├── lib/rhdl/           # Core library
+│   ├── dsl.rb          # HDL DSL for component definitions
+│   ├── export/         # Verilog export backends
+│   ├── simulation/     # Simulation engine
+│   ├── hdl/            # HDL component library
+│   │   ├── gates.rb, sequential.rb, arithmetic.rb, ...
+│   │   └── cpu/        # HDL CPU implementation
+│   ├── debug/          # Signal probing & debugging
+│   ├── tui/            # Terminal GUI
+│   └── diagram/        # Diagram rendering
+├── examples/           # Example implementations
+│   └── mos6502/        # MOS 6502 CPU with Apple II support
+├── export/             # Generated output files
+│   ├── verilog/        # Generated Verilog
+│   └── gates/          # Gate-level JSON netlists
+└── docs/               # Documentation
+```
+
+## Command Line Interface
+
+RHDL provides a comprehensive CLI for common operations. See [CLI Reference](docs/cli.md) for complete documentation.
+
+```bash
+# Interactive TUI debugger
+rhdl tui sequential/counter              # Debug a counter component
+rhdl tui RHDL::HDL::ALU --signals inputs # Debug ALU, show only inputs
+rhdl tui --list                          # List available components
+
+# Diagram generation
+rhdl diagram --all                       # Generate all diagrams
+rhdl diagram RHDL::HDL::ALU --format svg # Single component diagram
+
+# Verilog/VHDL export
+rhdl export --all                        # Export all components
+rhdl export --lang verilog --out ./out RHDL::HDL::Counter
+
+# Gate-level synthesis
+rhdl gates --export                      # Export to JSON netlists
+rhdl gates --stats                       # Show synthesis statistics
+
+# Apple II emulator
+rhdl apple2 --demo                       # Run demo mode
+rhdl apple2 --build                      # Build mini monitor ROM
+```
+
+## Rake Tasks
+
+```bash
+# Testing
+rake spec                # Run all tests
+rake pspec               # Run tests in parallel
+
+# Verilog export
+rake hdl:export          # Export DSL components to Verilog
+rake hdl:verilog         # Export Verilog files
+rake hdl:clean           # Clean generated HDL files
+
+# Gate-level synthesis
+rake gates:export        # Export all 53 components to JSON netlists
+rake gates:stats         # Show gate-level synthesis statistics
+rake gates:clean         # Clean gate-level output
+
+# Diagrams
+rake diagrams:generate   # Generate component diagrams (SVG, DOT, TXT)
+rake diagrams:clean      # Clean generated diagrams
+
+# All outputs
+rake generate_all        # Generate all outputs
+rake clean_all           # Clean all generated files
+```
+
+## Component Library
+
+| Category | Components |
+|----------|------------|
+| **Gates** | AND, OR, XOR, NOT, NAND, NOR, XNOR, Buffer, Tristate |
+| **Flip-flops** | DFlipFlop, TFlipFlop, JKFlipFlop, SRFlipFlop, SRLatch |
+| **Registers** | Register, ShiftRegister, Counter, ProgramCounter, StackPointer |
+| **Arithmetic** | HalfAdder, FullAdder, RippleCarryAdder, Subtractor, Multiplier, Divider, ALU |
+| **Combinational** | Mux2/4/8/N, Demux, Decoder, Encoder, BarrelShifter, ZeroDetect |
+| **Memory** | RAM, DualPortRAM, ROM, RegisterFile, Stack, FIFO |
+
+## License
+
+MIT License

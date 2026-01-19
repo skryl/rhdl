@@ -1,0 +1,18 @@
+============================================================
+Gate-Level: bitwise_and
+Type: BitwiseAnd
+============================================================
+
+Gates: 8
+DFFs: 0
+Nets: 24
+
+Inputs:
+  bitwise_and.a[8]
+  bitwise_and.b[8]
+
+Outputs:
+  bitwise_and.y[8]
+
+Gate Types:
+  and: 8

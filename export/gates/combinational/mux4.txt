@@ -1,0 +1,18 @@
+Component: mux4
+Type: RHDL::HDL::Mux4
+Gates: 12
+DFFs: 0
+Nets: 30
+
+Inputs:
+  mux4.a: 4 bits
+  mux4.b: 4 bits
+  mux4.c: 4 bits
+  mux4.d: 4 bits
+  mux4.sel: 2 bits
+
+Outputs:
+  mux4.y: 4 bits
+
+Gate Types:
+  mux: 12

@@ -1,0 +1,17 @@
+Component: half_adder
+Type: RHDL::HDL::HalfAdder
+Gates: 2
+DFFs: 0
+Nets: 4
+
+Inputs:
+  half_adder.a: 1 bits
+  half_adder.b: 1 bits
+
+Outputs:
+  half_adder.sum: 1 bits
+  half_adder.cout: 1 bits
+
+Gate Types:
+  xor: 1
+  and: 1

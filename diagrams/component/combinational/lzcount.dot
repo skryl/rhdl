@@ -1,0 +1,13 @@
+digraph lzcount {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[8]}|lzcount\n(LZCount)|{<count>count[4]|<all_zero>all_zero[1]}}"];
+
+  subgraph cluster_main {
+    label="lzcount";
+    style=rounded;
+    color=blue;
+  }
+}
