@@ -74,6 +74,25 @@ RSpec.describe RHDL::HDL::Counter do
       expect(verilog).to match(/output.*\[7:0\].*q/)
     end
 
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::Counter.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit counter')
+      expect(firrtl).to include('input clk')
+      expect(firrtl).to include('output q')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::Counter,
+          base_dir: 'tmp/circt_test/counter'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
+
     context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::Counter.to_verilog
