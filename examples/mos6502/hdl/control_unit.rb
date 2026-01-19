@@ -662,6 +662,8 @@ module MOS6502
               current_state <= STATE_RESET;
               reset_step <= 3'd0;
               cycle_count <= 32'd0;
+              state_pre <= STATE_RESET;
+              state_before <= STATE_RESET;
             end else if (rdy) begin
               cycle_count <= cycle_count + 32'd1;
               state_pre <= current_state;
