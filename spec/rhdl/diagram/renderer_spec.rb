@@ -71,12 +71,12 @@ RSpec.describe RHDL::Diagram::Renderer do
   end
 
   describe 'Hierarchy rendering' do
-    let(:cpu) { RHDL::HDL::CPU::Datapath.new("test_cpu") }
+    let(:cpu) { RHDL::HDL::CPU::CPU.new("test_cpu") }
 
     it 'shows component hierarchy' do
       hierarchy = cpu.to_hierarchy(max_depth: 1)
       expect(hierarchy).to include("test_cpu")
-      expect(hierarchy).to include("Datapath")
+      expect(hierarchy).to include("CPU")
     end
 
     it 'shows subcomponents' do
@@ -130,12 +130,12 @@ RSpec.describe RHDL::Diagram::Renderer do
   end
 
   describe 'Complex component diagrams' do
-    let(:cpu) { RHDL::HDL::CPU::Datapath.new("cpu") }
+    let(:cpu) { RHDL::HDL::CPU::CPU.new("cpu") }
 
     it 'renders CPU block diagram' do
       diagram = cpu.to_diagram
       expect(diagram).to include("cpu")
-      expect(diagram).to include("Datapath")
+      expect(diagram).to include("CPU")
       expect(diagram).to include("clk")
       expect(diagram).to include("rst")
     end

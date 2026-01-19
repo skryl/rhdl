@@ -278,13 +278,19 @@ module RHDL
 
           # Define propagate method with rising edge detection and state management
           # Order is critical for correct simulation (matches real hardware):
-          # 1. On rising edge, process memory sync writes FIRST (using current register values)
-          # 2. On rising edge, compute next state (flip-flops latch on edge)
-          # 3. Output state values (new if rising edge, current otherwise)
-          # 4. Execute async memory reads (combinational)
-          # 5. Execute behavior block (combinational outputs based on current state)
+          # 1. Propagate subcomponents (if any)
+          # 2. On rising edge, process memory sync writes FIRST (using current register values)
+          # 3. On rising edge, compute next state (flip-flops latch on edge)
+          # 4. Output state values (new if rising edge, current otherwise)
+          # 5. Execute async memory reads (combinational)
+          # 6. Execute behavior block (combinational outputs based on current state)
           define_method(:propagate) do
             _init_seq_state
+
+            # Propagate subcomponents first (if any)
+            if @local_dependency_graph && !@subcomponents.empty?
+              propagate_subcomponents
+            end
 
             # Check for rising edge
             clk_val = in_val(clock)

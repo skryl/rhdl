@@ -2,9 +2,6 @@
 # Connects CPU to memory and provides simulation interface.
 # Interacts with CPU ONLY through its ports - no direct access to internals.
 
-require_relative 'instruction_decoder'
-require_relative 'accumulator'
-require_relative 'datapath'
 require_relative 'cpu'
 
 module RHDL

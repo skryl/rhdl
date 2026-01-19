@@ -230,8 +230,8 @@ module RHDL
             lower_stack_pointer(component)
           when RHDL::HDL::CPU::InstructionDecoder
             lower_instruction_decoder(component)
-          when RHDL::HDL::CPU::Datapath
-            lower_datapath(component)
+          when RHDL::HDL::CPU::CPU
+            lower_cpu(component)
           # MOS6502 components
           when MOS6502::Registers
             lower_mos6502_registers(component)
@@ -257,8 +257,8 @@ module RHDL
             lower_mos6502_instruction_decoder(component)
           when MOS6502::ControlUnit
             lower_mos6502_control_unit(component)
-          when MOS6502::Datapath
-            lower_mos6502_datapath(component)
+          when MOS6502::CPU
+            lower_mos6502_cpu(component)
           else
             raise ArgumentError, "Unsupported component for gate-level lowering: #{component.class}"
           end
@@ -2679,8 +2679,8 @@ module RHDL
         reduce_and(eq_bits)
       end
 
-      # Datapath: Hierarchical structure composition
-      def lower_datapath(component)
+      # CPU: Hierarchical structure composition
+      def lower_cpu(component)
         # Get instance and connection definitions from the class
         instance_defs = component.class._instance_defs
         connection_defs = component.class._connection_defs
@@ -3407,8 +3407,8 @@ module RHDL
         end
       end
 
-      # MOS6502 Datapath: structure composition using structure DSL
-      def lower_mos6502_datapath(component)
+      # MOS6502 CPU: structure composition using structure DSL
+      def lower_mos6502_cpu(component)
         # Use the same approach as Datapath - process structure instances
         instance_defs = component.class._instance_defs
         connection_defs = component.class._connection_defs
