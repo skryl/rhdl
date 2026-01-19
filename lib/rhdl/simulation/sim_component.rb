@@ -714,43 +714,170 @@ module RHDL
       # Main simulation method - compute outputs from inputs
       # Override in subclasses, or use a behavior block
       def propagate
-        # If we have sub-components, propagate them using dependency graph
+        # If we have sub-components, propagate them using two-phase semantics
         if @local_dependency_graph && !@subcomponents.empty?
           propagate_subcomponents
-        end
-
-        # Execute behavior block if defined
-        if self.class.behavior_defined?
+        elsif self.class.behavior_defined?
+          # No subcomponents, just execute behavior
           execute_behavior
         end
       end
 
-      # Propagate sub-components using event-driven dependency graph
+      # Propagate sub-components using Verilog-style two-phase semantics
+      # This ensures proper non-blocking assignment behavior for sequential components:
+      # 1. Propagate combinational components until stable
+      # 2. Execute parent's behavior block (sets combinational outputs like latch wires)
+      # 3. All sequential components sample their inputs simultaneously
+      # 4. All sequential components update their outputs
+      # 5. Repeat until stable (but behavior only runs when there's a rising edge)
       def propagate_subcomponents
-        # Mark all sub-components as dirty initially
-        @local_dependency_graph.mark_all_dirty
+        # Separate combinational and sequential components
+        combinational = []
+        sequential = []
+
+        @subcomponents.each_value do |comp|
+          if comp.is_a?(SequentialComponent)
+            sequential << comp
+          else
+            combinational << comp
+          end
+        end
+
+        # Check if any sequential component will see a rising edge
+        # This determines if behavior should run to set up latch wires
+        # We only want to run behavior ONCE when there's a rising edge
+        has_pending_edge = sequential.any? do |comp|
+          clk_wire = comp.inputs[:clk]
+          prev_clk = comp.instance_variable_get(:@prev_clk) || 0
+          clk_wire && prev_clk == 0 && clk_wire.get == 1
+        end
+
+        # Track whether we've already executed behavior while clk=1
+        # This prevents multiple propagate calls from overwriting latch wire values
+        # Once we've run behavior on a rising edge, don't run again until clk goes low
+        @_last_behavior_clk ||= nil
+        current_clk = @inputs[:clk]&.get
+
+        # If clk went 0->1 (rising edge), we need to run behavior
+        # If clk is still 1 and we already ran behavior, don't run again
+        # If clk went back to 0, reset tracking
+        if current_clk == 0
+          @_behavior_ran_this_high = false
+        end
+        behavior_already_ran = current_clk == 1 && @_behavior_ran_this_high
 
         max_iterations = 100
         iterations = 0
 
-        while @local_dependency_graph.dirty? && iterations < max_iterations
-          dirty_components = @local_dependency_graph.consume_dirty
+        loop do
+          changed = false
 
-          dirty_components.each do |component|
+          # Phase 1: Propagate all combinational components until stable
+          comb_iterations = 0
+          loop do
+            comb_changed = false
+
+            combinational.each do |component|
+              old_outputs = component.outputs.transform_values(&:get)
+              component.propagate
+
+              component.outputs.each do |_port_name, wire|
+                if wire.get != old_outputs[_port_name]
+                  comb_changed = true
+                  changed = true
+                end
+              end
+            end
+
+            comb_iterations += 1
+            break unless comb_changed && comb_iterations < max_iterations
+          end
+
+          # Phase 2: Execute parent's behavior block
+          # Only run on first iteration when there's a pending rising edge
+          # This ensures latch wires are set based on values BEFORE registers update
+          # On subsequent propagates (same clock value), behavior doesn't run
+          # to prevent overwriting latch wires with post-update values
+          should_run_behavior = self.class.behavior_defined? &&
+                                !behavior_already_ran &&
+                                (has_pending_edge ? iterations == 0 : true)
+          if should_run_behavior
+            execute_behavior
+            @_behavior_ran_this_high = true if current_clk == 1
+
+            # Phase 2b: Re-propagate combinational components after behavior
+            # This is critical for components like hazard_unit that depend on
+            # behavior outputs (e.g., take_branch). Without this, hazard_unit
+            # would see stale values and generate wrong flush signals.
+            comb_iterations = 0
+            loop do
+              comb_changed = false
+
+              combinational.each do |component|
+                old_outputs = component.outputs.transform_values(&:get)
+                component.propagate
+
+                component.outputs.each do |port_name, wire|
+                  if wire.get != old_outputs[port_name]
+                    comb_changed = true
+                    changed = true
+                  end
+                end
+              end
+
+              comb_iterations += 1
+              break unless comb_changed && comb_iterations < max_iterations
+            end
+          end
+
+          # Phase 3: All sequential components SAMPLE inputs (don't update outputs yet)
+          rising_edges = []
+          # DEBUG: Show phase start
+          puts "  [PHASE 3] iter=#{iterations} Sequential SAMPLE start" if ENV['DEBUG_PHASES']
+          sequential.each do |component|
+            if component.respond_to?(:sample_inputs)
+              puts "    [PHASE 3] Calling sample_inputs on #{component.name}" if ENV['DEBUG_PHASES']
+              is_rising = component.sample_inputs
+              rising_edges << component if is_rising
+            end
+          end
+          puts "  [PHASE 3] iter=#{iterations} done, rising_edges=#{rising_edges.map(&:name)}" if ENV['DEBUG_PHASES']
+
+          # Phase 4: All sequential components UPDATE outputs (for those with rising edge)
+          puts "  [PHASE 4] iter=#{iterations} Sequential UPDATE start" if ENV['DEBUG_PHASES']
+          rising_edges.each do |component|
+            puts "    [PHASE 4] Calling update_outputs on #{component.name}" if ENV['DEBUG_PHASES']
             old_outputs = component.outputs.transform_values(&:get)
-            component.propagate
+            component.update_outputs
 
-            # Check if outputs changed and mark dependents
-            component.outputs.each do |port_name, wire|
-              if wire.get != old_outputs[port_name]
-                @local_dependency_graph.dependents_of(component).each do |dep|
-                  @local_dependency_graph.mark_dirty(dep)
+            component.outputs.each do |_port_name, wire|
+              if wire.get != old_outputs[_port_name]
+                changed = true
+              end
+            end
+          end
+
+          # For sequential components that didn't have a rising edge, we still need
+          # to give them a chance to run combinational logic (behavior blocks).
+          # BUT we must NOT call their propagate() method because that would call
+          # sample_inputs and update_outputs together, violating two-phase semantics.
+          # Instead, just call execute_behavior if they have one.
+          (sequential - rising_edges).each do |component|
+            if component.class.respond_to?(:behavior_defined?) && component.class.behavior_defined?
+              puts "    [NO-EDGE] Executing behavior for #{component.name}" if ENV['DEBUG_PHASES']
+              old_outputs = component.outputs.transform_values(&:get)
+              component.execute_behavior if component.respond_to?(:execute_behavior)
+
+              component.outputs.each do |_port_name, wire|
+                if wire.get != old_outputs[_port_name]
+                  changed = true
                 end
               end
             end
           end
 
           iterations += 1
+          break unless changed && iterations < max_iterations
         end
       end
 

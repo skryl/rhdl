@@ -1,18 +1,18 @@
 # RV32I Harness - Simulation Test Harness
-# Wraps the synthesizable Datapath for behavior simulation and testing
-# Interacts with Datapath only through ports - no direct access to internals
+# Wraps the synthesizable CPU for behavior simulation and testing
+# Interacts with CPU only through ports - no direct access to internals
 # Provides high-level methods for stepping, running, and debugging
 
 require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
 require_relative '../../../lib/rhdl/dsl/sequential'
 require_relative 'constants'
-require_relative 'datapath'
+require_relative 'cpu'
 require_relative 'memory'
 
 module RISCV
-  # Simulation harness for the synthesizable Datapath
-  # All interaction with Datapath is through ports only
+  # Simulation harness for the synthesizable CPU
+  # All interaction with CPU is through ports only
   class Harness
     attr_reader :clock_count
 
@@ -21,8 +21,8 @@ module RISCV
       @clock_count = 0
       @prev_clk = 0
 
-      # Create datapath and memories
-      @datapath = Datapath.new('dp')
+      # Create CPU and memories
+      @cpu = CPU.new('cpu')
       @inst_mem = Memory.new('imem', size: mem_size)
       @data_mem = Memory.new('dmem', size: mem_size)
 
@@ -62,28 +62,28 @@ module RISCV
     def read_reg(index)
       case index
       when 0 then 0  # x0 always zero
-      when 1 then @datapath.get_output(:debug_x1)
-      when 2 then @datapath.get_output(:debug_x2)
-      when 10 then @datapath.get_output(:debug_x10)
-      when 11 then @datapath.get_output(:debug_x11)
+      when 1 then @cpu.get_output(:debug_x1)
+      when 2 then @cpu.get_output(:debug_x2)
+      when 10 then @cpu.get_output(:debug_x10)
+      when 11 then @cpu.get_output(:debug_x11)
       else
         # For other registers, use direct access (simulation convenience)
-        @datapath.read_reg(index)
+        @cpu.read_reg(index)
       end
     end
 
     # PC accessor - read through output port
     def read_pc
-      @datapath.get_output(:debug_pc)
+      @cpu.get_output(:debug_pc)
     end
 
     # Register setters - direct state manipulation for test setup
     def write_reg(index, value)
-      @datapath.write_reg(index, value)
+      @cpu.write_reg(index, value)
     end
 
     def write_pc(value)
-      @datapath.write_pc(value)
+      @cpu.write_pc(value)
     end
 
     # Memory accessors
@@ -115,7 +115,7 @@ module RISCV
         x2: read_reg(2),
         x10: read_reg(10),
         x11: read_reg(11),
-        inst: @datapath.get_output(:debug_inst),
+        inst: @cpu.get_output(:debug_inst),
         cycles: @clock_count
       }
     end
@@ -128,8 +128,8 @@ module RISCV
     private
 
     def set_clk_rst(clk, rst)
-      @datapath.set_input(:clk, clk)
-      @datapath.set_input(:rst, rst)
+      @cpu.set_input(:clk, clk)
+      @cpu.set_input(:rst, rst)
       @inst_mem.set_input(:clk, clk)
       @inst_mem.set_input(:rst, rst)
       @data_mem.set_input(:clk, clk)
@@ -137,10 +137,10 @@ module RISCV
     end
 
     def propagate_all
-      # Propagate datapath to get instruction address
-      @datapath.propagate
+      # Propagate CPU to get instruction address
+      @cpu.propagate
 
-      inst_addr = @datapath.get_output(:inst_addr)
+      inst_addr = @cpu.get_output(:inst_addr)
 
       # Instruction fetch (always read)
       @inst_mem.set_input(:addr, inst_addr)
@@ -152,18 +152,18 @@ module RISCV
 
       inst_data = @inst_mem.get_output(:read_data)
 
-      # Feed instruction to datapath
-      @datapath.set_input(:inst_data, inst_data)
+      # Feed instruction to CPU
+      @cpu.set_input(:inst_data, inst_data)
 
-      # Re-propagate datapath with instruction
-      @datapath.propagate
+      # Re-propagate CPU with instruction
+      @cpu.propagate
 
       # Data memory access
-      data_addr = @datapath.get_output(:data_addr)
-      data_wdata = @datapath.get_output(:data_wdata)
-      data_we = @datapath.get_output(:data_we)
-      data_re = @datapath.get_output(:data_re)
-      data_funct3 = @datapath.get_output(:data_funct3)
+      data_addr = @cpu.get_output(:data_addr)
+      data_wdata = @cpu.get_output(:data_wdata)
+      data_we = @cpu.get_output(:data_we)
+      data_re = @cpu.get_output(:data_re)
+      data_funct3 = @cpu.get_output(:data_funct3)
 
       @data_mem.set_input(:addr, data_addr)
       @data_mem.set_input(:write_data, data_wdata)
@@ -174,9 +174,9 @@ module RISCV
 
       data_rdata = @data_mem.get_output(:read_data)
 
-      # Feed memory data back to datapath for LOAD instructions
-      @datapath.set_input(:data_rdata, data_rdata)
-      @datapath.propagate
+      # Feed memory data back to CPU for LOAD instructions
+      @cpu.set_input(:data_rdata, data_rdata)
+      @cpu.propagate
     end
   end
 end
