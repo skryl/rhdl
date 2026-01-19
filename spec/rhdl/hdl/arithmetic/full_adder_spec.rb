@@ -39,6 +39,34 @@ RSpec.describe RHDL::HDL::FullAdder do
       expect(verilog).to include('assign cout')
     end
 
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::FullAdder.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit full_adder')
+      expect(firrtl).to include('input a')
+      expect(firrtl).to include('input b')
+      expect(firrtl).to include('output sum')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
+      it 'CIRCT-generated Verilog matches RHDL Verilog behavior' do
+        test_vectors = [
+          { inputs: { a: 0, b: 0, cin: 0 }, expected: { sum: 0, cout: 0 } },
+          { inputs: { a: 0, b: 1, cin: 0 }, expected: { sum: 1, cout: 0 } },
+          { inputs: { a: 1, b: 1, cin: 0 }, expected: { sum: 0, cout: 1 } },
+          { inputs: { a: 1, b: 1, cin: 1 }, expected: { sum: 1, cout: 1 } }
+        ]
+
+        result = CirctHelper.validate_circt_export(
+          RHDL::HDL::FullAdder,
+          test_vectors: test_vectors,
+          base_dir: 'tmp/circt_test/full_adder'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
+
     context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::FullAdder.to_verilog

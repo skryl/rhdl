@@ -109,6 +109,26 @@ RSpec.describe RHDL::HDL::ALU do
       expect(verilog).to include('output [7:0] result')
     end
 
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::ALU.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit alu')
+      expect(firrtl).to include('input a')
+      expect(firrtl).to include('input b')
+      expect(firrtl).to include('output result')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::ALU,
+          base_dir: 'tmp/circt_test/alu'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
+
     context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::ALU.to_verilog
