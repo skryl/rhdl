@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Sim
     # Proxy for input signals in simulation behavior blocks
-    # Returns SimValueProxy objects for chained operations
-    class SimSignalProxy
+    # Returns ValueProxy objects for chained operations
+    class SignalProxy
       attr_reader :name, :wire, :width
 
       def initialize(name, wire, direction, context)
@@ -19,81 +19,81 @@ module RHDL
         @wire.get
       end
 
-      # Bitwise operators - return SimValueProxy for chaining
+      # Bitwise operators - return ValueProxy for chaining
       def &(other)
-        SimValueProxy.create(compute_masked(:&, other, @width), @width, @context)
+        ValueProxy.create(compute_masked(:&, other, @width), @width, @context)
       end
 
       def |(other)
-        SimValueProxy.create(compute_masked(:|, other, @width), @width, @context)
+        ValueProxy.create(compute_masked(:|, other, @width), @width, @context)
       end
 
       def ^(other)
-        SimValueProxy.create(compute_masked(:^, other, @width), @width, @context)
+        ValueProxy.create(compute_masked(:^, other, @width), @width, @context)
       end
 
       def ~
-        SimValueProxy.create((~value) & MaskCache.mask(@width), @width, @context)
+        ValueProxy.create((~value) & MaskCache.mask(@width), @width, @context)
       end
 
       # Arithmetic operators
       def +(other)
-        SimValueProxy.create(compute(:+, other), @width + 1, @context)
+        ValueProxy.create(compute(:+, other), @width + 1, @context)
       end
 
       def -(other)
-        SimValueProxy.create(compute(:-, other), @width, @context)
+        ValueProxy.create(compute(:-, other), @width, @context)
       end
 
       def *(other)
         other_width = other.respond_to?(:width) ? other.width : 8
-        SimValueProxy.create(compute(:*, other), @width + other_width, @context)
+        ValueProxy.create(compute(:*, other), @width + other_width, @context)
       end
 
       def /(other)
         other_val = resolve(other)
         result = other_val != 0 ? value / other_val : 0
-        SimValueProxy.create(result, @width, @context)
+        ValueProxy.create(result, @width, @context)
       end
 
       def %(other)
         other_val = resolve(other)
         result = other_val != 0 ? value % other_val : 0
-        SimValueProxy.create(result, @width, @context)
+        ValueProxy.create(result, @width, @context)
       end
 
       # Shift operators
       def <<(amount)
-        SimValueProxy.create((value << resolve(amount)) & MaskCache.mask(@width), @width, @context)
+        ValueProxy.create((value << resolve(amount)) & MaskCache.mask(@width), @width, @context)
       end
 
       def >>(amount)
-        SimValueProxy.create(value >> resolve(amount), @width, @context)
+        ValueProxy.create(value >> resolve(amount), @width, @context)
       end
 
       # Comparison operators
       def ==(other)
-        SimValueProxy.create((value == resolve(other)) ? 1 : 0, 1, @context)
+        ValueProxy.create((value == resolve(other)) ? 1 : 0, 1, @context)
       end
 
       def !=(other)
-        SimValueProxy.create((value != resolve(other)) ? 1 : 0, 1, @context)
+        ValueProxy.create((value != resolve(other)) ? 1 : 0, 1, @context)
       end
 
       def <(other)
-        SimValueProxy.create((value < resolve(other)) ? 1 : 0, 1, @context)
+        ValueProxy.create((value < resolve(other)) ? 1 : 0, 1, @context)
       end
 
       def >(other)
-        SimValueProxy.create((value > resolve(other)) ? 1 : 0, 1, @context)
+        ValueProxy.create((value > resolve(other)) ? 1 : 0, 1, @context)
       end
 
       def <=(other)
-        SimValueProxy.create((value <= resolve(other)) ? 1 : 0, 1, @context)
+        ValueProxy.create((value <= resolve(other)) ? 1 : 0, 1, @context)
       end
 
       def >=(other)
-        SimValueProxy.create((value >= resolve(other)) ? 1 : 0, 1, @context)
+        ValueProxy.create((value >= resolve(other)) ? 1 : 0, 1, @context)
       end
 
       # Bit selection
@@ -104,9 +104,9 @@ module RHDL
           high = [index.begin, index.end].max
           low = [index.begin, index.end].min
           slice_width = high - low + 1
-          SimValueProxy.create((value >> low) & MaskCache.mask(slice_width), slice_width, @context)
+          ValueProxy.create((value >> low) & MaskCache.mask(slice_width), slice_width, @context)
         else
-          SimValueProxy.create((value >> index) & 1, 1, @context)
+          ValueProxy.create((value >> index) & 1, 1, @context)
         end
       end
 
@@ -122,7 +122,7 @@ module RHDL
           offset += other_width
           total_width += other_width
         end
-        SimValueProxy.create(result, total_width, @context)
+        ValueProxy.create(result, total_width, @context)
       end
 
       # Replication
@@ -131,7 +131,7 @@ module RHDL
         times.times do |i|
           result |= (value << (i * @width))
         end
-        SimValueProxy.create(result, @width * times, @context)
+        ValueProxy.create(result, @width * times, @context)
       end
 
       def to_i
@@ -140,7 +140,7 @@ module RHDL
 
       # Coercion support for Integer operations (e.g., 1 & proxy)
       def coerce(other)
-        [SimValueProxy.create(other, other == 0 ? 1 : other.bit_length, @context), self]
+        [ValueProxy.create(other, other == 0 ? 1 : other.bit_length, @context), self]
       end
 
       private
@@ -159,7 +159,7 @@ module RHDL
 
       def resolve(other)
         case other
-        when SimSignalProxy, SimOutputProxy, SimValueProxy
+        when SignalProxy, OutputProxy, ValueProxy
           other.value
         when Integer
           other

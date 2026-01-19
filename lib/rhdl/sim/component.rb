@@ -3,7 +3,7 @@
 require 'active_support/concern'
 
 module RHDL
-  module HDL
+  module Sim
     # Base class for all HDL components with simulation support
     #
     # Components are defined using class-level declarations:
@@ -14,7 +14,7 @@ module RHDL
     # - behavior: Define combinational logic
     #
     # @example Simple combinational component
-    #   class MyAnd < SimComponent
+    #   class MyAnd < Component
     #     input :a
     #     input :b
     #     output :y
@@ -25,7 +25,7 @@ module RHDL
     #   end
     #
     # @example Hierarchical component with sub-components
-    #   class MyDatapath < SimComponent
+    #   class MyDatapath < Component
     #     input :a, width: 8
     #     input :b, width: 8
     #     output :result, width: 8
@@ -42,7 +42,7 @@ module RHDL
     #     port [:reg, :q] => :result
     #   end
     #
-    class SimComponent
+    class Component
       extend ActiveSupport::Concern
       attr_reader :name, :inputs, :outputs, :internal_signals
 
@@ -338,7 +338,7 @@ module RHDL
         # @param params [Hash] Parameters to pass to the component
         #
         # @example
-        #   class MyDatapath < SimComponent
+        #   class MyDatapath < Component
         #     input :a, width: 8
         #     output :result, width: 8
         #
@@ -408,7 +408,7 @@ module RHDL
         # Define a behavior block for unified simulation and synthesis
         #
         # @example Basic combinational logic
-        #   class MyAnd < SimComponent
+        #   class MyAnd < Component
         #     input :a
         #     input :b
         #     output :y
@@ -1176,7 +1176,7 @@ module RHDL
         return unless self.class._behavior_block
 
         block = self.class._behavior_block
-        ctx = BehaviorSimContext.new(self)
+        ctx = BehaviorContext.new(self)
         ctx.evaluate(&block.block)
       end
 

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Sim
     # Base class for defining Bundle types (aggregate interface types)
     #
     # Bundles group named fields into reusable interface definitions,
@@ -18,13 +18,13 @@ module RHDL
     #   end
     #
     # @example Use bundle as port type
-    #   class MyModule < SimComponent
+    #   class MyModule < Component
     #     input_bundle :axi, AxiLite
     #     output_bundle :response, ResponseBundle
     #   end
     #
     # @example Flipped bundle (reverse all directions)
-    #   class Consumer < SimComponent
+    #   class Consumer < Component
     #     input_bundle :port, AxiLite, flipped: true
     #   end
     #
@@ -228,9 +228,9 @@ module RHDL
 
           # Connect based on direction
           if my_dir == :output && other_dir == :input
-            SimComponent.connect(wire, other_wire)
+            Component.connect(wire, other_wire)
           elsif my_dir == :input && other_dir == :output
-            SimComponent.connect(other_wire, wire)
+            Component.connect(other_wire, wire)
           end
         end
       end

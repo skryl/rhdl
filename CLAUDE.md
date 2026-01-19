@@ -43,13 +43,17 @@ rhdl/
 │   │       ├── toposort.rb      # Topological sorting
 │   │       ├── sim_cpu.rb       # CPU gate-level simulation
 │   │       └── sim_gpu.rb       # GPU gate-level simulation
-│   ├── simulation.rb            # Simulation engine loader
-│   ├── simulation/              # Core simulation engine
+│   ├── sim.rb                   # Simulation engine loader
+│   ├── sim/                     # Core simulation engine (RHDL::Sim module)
+│   │   ├── component.rb         # Component base class
 │   │   ├── simulator.rb         # Main simulator
-│   │   ├── sim_component.rb     # Component base class
 │   │   ├── wire.rb              # Wire/signal implementation
 │   │   ├── clock.rb             # Clock signal
-│   │   └── ...                  # Simulation proxies, contexts
+│   │   ├── value_proxy.rb       # Computed value proxy
+│   │   ├── signal_proxy.rb      # Input signal proxy
+│   │   ├── output_proxy.rb      # Output signal proxy
+│   │   ├── behavior_context.rb  # Simulation behavior context
+│   │   └── ...                  # Other simulation infrastructure
 │   ├── debug.rb                 # Debug module loader
 │   ├── debug/                   # Signal probing & debugging
 │   │   ├── debug_simulator.rb   # Debug-enabled simulator
