@@ -49,10 +49,38 @@ RSpec.describe RHDL::HDL::AddSub do
       expect(firrtl).to include('output result')
     end
 
-    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
-      it 'firtool can compile FIRRTL to Verilog' do
-        result = CirctHelper.validate_firrtl_syntax(
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
+      it 'CIRCT-generated Verilog matches RHDL Verilog behavior' do
+        behavior = RHDL::HDL::AddSub.new(nil, width: 8)
+
+        test_vectors = []
+        test_cases = [
+          { a: 100, b: 50, sub: 0 },  # 100 + 50 = 150
+          { a: 100, b: 50, sub: 1 },  # 100 - 50 = 50
+          { a: 200, b: 100, sub: 0 }, # 200 + 100 = 44 (overflow)
+          { a: 50, b: 100, sub: 1 },  # 50 - 100 = 206 (underflow)
+          { a: 0, b: 0, sub: 0 },     # zero result
+          { a: 128, b: 0, sub: 0 },   # negative result (MSB set)
+        ]
+
+        test_cases.each do |tc|
+          behavior.set_input(:a, tc[:a])
+          behavior.set_input(:b, tc[:b])
+          behavior.set_input(:sub, tc[:sub])
+          behavior.propagate
+          test_vectors << {
+            inputs: tc,
+            expected: {
+              result: behavior.get_output(:result),
+              zero: behavior.get_output(:zero),
+              negative: behavior.get_output(:negative)
+            }
+          }
+        end
+
+        result = CirctHelper.validate_circt_export(
           RHDL::HDL::AddSub,
+          test_vectors: test_vectors,
           base_dir: 'tmp/circt_test/add_sub'
         )
 

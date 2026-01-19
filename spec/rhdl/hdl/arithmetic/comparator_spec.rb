@@ -74,10 +74,42 @@ RSpec.describe RHDL::HDL::Comparator do
       expect(firrtl).to include('output eq')
     end
 
-    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
-      it 'firtool can compile FIRRTL to Verilog' do
-        result = CirctHelper.validate_firrtl_syntax(
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
+      it 'CIRCT-generated Verilog matches RHDL Verilog behavior' do
+        behavior = RHDL::HDL::Comparator.new(nil, width: 8)
+
+        test_vectors = []
+        test_cases = [
+          { a: 42, b: 42, signed_cmp: 0 },   # equal
+          { a: 50, b: 30, signed_cmp: 0 },   # greater
+          { a: 20, b: 40, signed_cmp: 0 },   # less
+          { a: 0, b: 0, signed_cmp: 0 },     # zero equal
+          { a: 255, b: 1, signed_cmp: 0 },   # unsigned max > 1
+          { a: 255, b: 1, signed_cmp: 1 },   # signed -1 < 1
+          { a: 128, b: 127, signed_cmp: 0 }, # unsigned 128 > 127
+          { a: 128, b: 127, signed_cmp: 1 }, # signed -128 < 127
+        ]
+
+        test_cases.each do |tc|
+          behavior.set_input(:a, tc[:a])
+          behavior.set_input(:b, tc[:b])
+          behavior.set_input(:signed_cmp, tc[:signed_cmp])
+          behavior.propagate
+          test_vectors << {
+            inputs: tc,
+            expected: {
+              eq: behavior.get_output(:eq),
+              gt: behavior.get_output(:gt),
+              lt: behavior.get_output(:lt),
+              gte: behavior.get_output(:gte),
+              lte: behavior.get_output(:lte)
+            }
+          }
+        end
+
+        result = CirctHelper.validate_circt_export(
           RHDL::HDL::Comparator,
+          test_vectors: test_vectors,
           base_dir: 'tmp/circt_test/comparator'
         )
 

@@ -59,10 +59,40 @@ RSpec.describe RHDL::HDL::Decoder2to4 do
       expect(firrtl).to include('output y0')
     end
 
-    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
-      it 'firtool can compile FIRRTL to Verilog' do
-        result = CirctHelper.validate_firrtl_syntax(
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
+      it 'CIRCT-generated Verilog matches RHDL Verilog behavior' do
+        behavior = RHDL::HDL::Decoder2to4.new
+
+        test_vectors = []
+        test_cases = [
+          { a: 0, en: 1 },
+          { a: 1, en: 1 },
+          { a: 2, en: 1 },
+          { a: 3, en: 1 },
+          { a: 0, en: 0 },
+          { a: 1, en: 0 },
+          { a: 2, en: 0 },
+          { a: 3, en: 0 }
+        ]
+
+        test_cases.each do |tc|
+          behavior.set_input(:a, tc[:a])
+          behavior.set_input(:en, tc[:en])
+          behavior.propagate
+          test_vectors << {
+            inputs: tc,
+            expected: {
+              y0: behavior.get_output(:y0),
+              y1: behavior.get_output(:y1),
+              y2: behavior.get_output(:y2),
+              y3: behavior.get_output(:y3)
+            }
+          }
+        end
+
+        result = CirctHelper.validate_circt_export(
           RHDL::HDL::Decoder2to4,
+          test_vectors: test_vectors,
           base_dir: 'tmp/circt_test/decoder2to4'
         )
 

@@ -67,11 +67,42 @@ RSpec.describe RHDL::HDL::TFlipFlop do
       expect(firrtl).to include('output q')
     end
 
-    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
-      it 'firtool can compile FIRRTL to Verilog' do
-        result = CirctHelper.validate_firrtl_syntax(
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
+      it 'CIRCT-generated Verilog matches RHDL Verilog behavior' do
+        behavior = RHDL::HDL::TFlipFlop.new
+        behavior.set_input(:rst, 0)
+        behavior.set_input(:en, 1)
+
+        test_vectors = []
+        # Start with reset cycle to initialize flip-flop (avoids X propagation)
+        test_cases = [
+          { t: 0, rst: 1, en: 1 },  # reset (initialize to 0)
+          { t: 1, rst: 0, en: 1 },  # toggle to 1
+          { t: 1, rst: 0, en: 1 },  # toggle to 0
+          { t: 1, rst: 0, en: 1 },  # toggle to 1
+          { t: 0, rst: 0, en: 1 },  # hold
+          { t: 1, rst: 0, en: 0 },  # hold (en=0)
+        ]
+
+        test_cases.each do |tc|
+          behavior.set_input(:t, tc[:t])
+          behavior.set_input(:rst, tc[:rst])
+          behavior.set_input(:en, tc[:en])
+          behavior.set_input(:clk, 0)
+          behavior.propagate
+          behavior.set_input(:clk, 1)
+          behavior.propagate
+          test_vectors << {
+            inputs: { t: tc[:t], rst: tc[:rst], en: tc[:en] },
+            expected: { q: behavior.get_output(:q), qn: behavior.get_output(:qn) }
+          }
+        end
+
+        result = CirctHelper.validate_circt_export(
           RHDL::HDL::TFlipFlop,
-          base_dir: 'tmp/circt_test/t_flip_flop'
+          test_vectors: test_vectors,
+          base_dir: 'tmp/circt_test/t_flip_flop',
+          has_clock: true
         )
 
         expect(result[:success]).to be(true), result[:error]
