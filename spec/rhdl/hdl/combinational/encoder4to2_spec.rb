@@ -57,10 +57,40 @@ RSpec.describe RHDL::HDL::Encoder4to2 do
       expect(firrtl).to include('output y')
     end
 
-    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
-      it 'firtool can compile FIRRTL to Verilog' do
-        result = CirctHelper.validate_firrtl_syntax(
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
+      it 'CIRCT-generated Verilog matches RHDL Verilog behavior' do
+        behavior = RHDL::HDL::Encoder4to2.new
+
+        test_vectors = []
+        test_cases = [
+          { a: 0b0000 },  # no input - invalid
+          { a: 0b0001 },  # bit 0 set - y=0
+          { a: 0b0010 },  # bit 1 set - y=1
+          { a: 0b0100 },  # bit 2 set - y=2
+          { a: 0b1000 },  # bit 3 set - y=3
+          { a: 0b0011 },  # bits 0,1 set - priority gives y=1
+          { a: 0b0101 },  # bits 0,2 set - priority gives y=2
+          { a: 0b1010 },  # bits 1,3 set - priority gives y=3
+          { a: 0b1111 },  # all bits set - priority gives y=3
+          { a: 0b0111 },  # bits 0,1,2 set - priority gives y=2
+          { a: 0b1011 }   # bits 0,1,3 set - priority gives y=3
+        ]
+
+        test_cases.each do |tc|
+          behavior.set_input(:a, tc[:a])
+          behavior.propagate
+          test_vectors << {
+            inputs: tc,
+            expected: {
+              y: behavior.get_output(:y),
+              valid: behavior.get_output(:valid)
+            }
+          }
+        end
+
+        result = CirctHelper.validate_circt_export(
           RHDL::HDL::Encoder4to2,
+          test_vectors: test_vectors,
           base_dir: 'tmp/circt_test/encoder4to2'
         )
 

@@ -60,11 +60,41 @@ RSpec.describe RHDL::HDL::Register do
       expect(firrtl).to include('output q')
     end
 
-    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
-      it 'firtool can compile FIRRTL to Verilog' do
-        result = CirctHelper.validate_firrtl_syntax(
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
+      it 'CIRCT-generated Verilog matches RHDL Verilog behavior' do
+        behavior = RHDL::HDL::Register.new
+        behavior.set_input(:rst, 0)
+        behavior.set_input(:en, 1)
+
+        test_vectors = []
+        # Start with reset cycle to initialize register (avoids X propagation)
+        test_cases = [
+          { d: 0x00, rst: 1, en: 1 },  # reset (initialize to 0)
+          { d: 0xAB, rst: 0, en: 1 },  # store value
+          { d: 0x55, rst: 0, en: 1 },  # store another value
+          { d: 0xFF, rst: 0, en: 0 },  # hold (en=0)
+          { d: 0x00, rst: 1, en: 1 },  # reset
+        ]
+
+        test_cases.each do |tc|
+          behavior.set_input(:d, tc[:d])
+          behavior.set_input(:rst, tc[:rst])
+          behavior.set_input(:en, tc[:en])
+          behavior.set_input(:clk, 0)
+          behavior.propagate
+          behavior.set_input(:clk, 1)
+          behavior.propagate
+          test_vectors << {
+            inputs: { d: tc[:d], rst: tc[:rst], en: tc[:en] },
+            expected: { q: behavior.get_output(:q) }
+          }
+        end
+
+        result = CirctHelper.validate_circt_export(
           RHDL::HDL::Register,
-          base_dir: 'tmp/circt_test/register'
+          test_vectors: test_vectors,
+          base_dir: 'tmp/circt_test/register',
+          has_clock: true
         )
 
         expect(result[:success]).to be(true), result[:error]
