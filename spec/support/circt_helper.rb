@@ -10,6 +10,7 @@ module CirctHelper
   # Convert FIRRTL to Verilog using firtool
   # Returns the generated Verilog string or nil on failure
   def firtool_to_verilog(firrtl_source, base_dir:)
+    base_dir = File.expand_path(base_dir)
     FileUtils.mkdir_p(base_dir)
 
     firrtl_path = File.join(base_dir, "design.fir")
