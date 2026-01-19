@@ -176,6 +176,7 @@ module MOS6502
     wire :reg_data_z            # Z flag computed from actual_reg_data
     wire :is_decode_state       # We're in DECODE state
     wire :decode_to_execute     # Implied mode in DECODE transitioning to EXECUTE
+    wire :sr_data_in, width: 8  # Status register data input (data_in during PULL)
 
     # Component instances
     instance :registers, Registers
@@ -282,7 +283,7 @@ module MOS6502
     port :flag_i_in => [:status_reg, :i_in]
     port :flag_d_in => [:status_reg, :d_in]
     port :actual_load_all => [:status_reg, :load_all]
-    port :dlatch_data => [:status_reg, :data_in]
+    port :sr_data_in => [:status_reg, :data_in]
 
     # ALU connections
     port [:alu, :result] => :alu_result
@@ -516,7 +517,13 @@ module MOS6502
 
       # PLP: load entire status register from stack
       # Use ctrl_update_flags for early timing (set during PULL state before EXECUTE)
-      actual_load_all <= is_stack_instr & dec_is_status_op & ctrl_update_flags
+      # Only for PLP (read from stack), not PHP (write to stack)
+      actual_load_all <= is_stack_instr & dec_is_status_op & dec_is_read & ctrl_update_flags
+
+      # Status register data input
+      # During PULL state for PLP, use data_in directly (dlatch_data not captured yet)
+      # Otherwise use dlatch_data
+      sr_data_in <= mux(is_pull_state, data_in, dlatch_data)
 
       # For load/transfer/PLA instructions, N/Z flags come from register data, not ALU
       # This is because these instructions bypass the ALU (data goes directly to register)
