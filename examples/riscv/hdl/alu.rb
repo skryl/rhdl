@@ -111,12 +111,5 @@ module RISCV
       zero <= alu_result == lit(0, width: 32)
     end
 
-    def self.verilog_module_name
-      'riscv_alu'
-    end
-
-    def self.to_verilog
-      RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
-    end
   end
 end

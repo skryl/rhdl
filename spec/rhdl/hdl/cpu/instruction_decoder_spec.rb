@@ -135,7 +135,7 @@ RSpec.describe RHDL::HDL::CPU::InstructionDecoder do
 
     it 'generates valid Verilog' do
       verilog = RHDL::HDL::CPU::InstructionDecoder.to_verilog
-      expect(verilog).to include('module instruction_decoder')
+      expect(verilog).to include('module cpu_instruction_decoder')
       expect(verilog).to include('input [7:0] instruction')
       expect(verilog).to include('input zero_flag')
       expect(verilog).to include('output [3:0] alu_op')

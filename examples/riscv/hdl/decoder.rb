@@ -158,12 +158,5 @@ module RISCV
       }, default: lit(InstType::R_TYPE, width: 3))
     end
 
-    def self.verilog_module_name
-      'riscv_decoder'
-    end
-
-    def self.to_verilog
-      RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
-    end
   end
 end

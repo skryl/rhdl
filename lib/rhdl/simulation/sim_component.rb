@@ -276,10 +276,18 @@ module RHDL
         end
 
         # Returns the Verilog module name for this component
-        # Override in subclasses that use custom module names
+        # Derived from the class's full module path, filtering out RHDL/HDL namespaces
+        # Examples:
+        #   RHDL::HDL::RAM => "ram"
+        #   MOS6502::ALU => "mos6502_alu"
+        #   RISCV::Decoder => "riscv_decoder"
         # @return [String] The module name used in generated Verilog
         def verilog_module_name
-          self.name.split('::').last.underscore
+          parts = self.name.split('::')
+          # Filter out RHDL and HDL namespace modules
+          filtered = parts.reject { |p| %w[RHDL HDL].include?(p) }
+          # Convert each part to snake_case and join with underscore
+          filtered.map { |p| p.underscore }.join('_')
         end
 
         # Collect all unique sub-module classes used by this component (recursively)
@@ -335,7 +343,7 @@ module RHDL
 
         # Generate IR ModuleDef from the component
         def to_ir(top_name: nil)
-          name = top_name || self.name.split('::').last.underscore
+          name = top_name || verilog_module_name
 
           ports = _ports.map do |p|
             RHDL::Export::IR::Port.new(name: p.name, direction: p.direction, width: p.width)
@@ -370,6 +378,16 @@ module RHDL
           # Generate instances from structure definitions
           instances = structure_to_ir_instances
 
+          # Generate memory IR from MemoryDSL if included
+          memories = []
+          write_ports = []
+          if respond_to?(:_memories) && !_memories.empty?
+            memory_ir = memory_dsl_to_ir
+            memories = memory_ir[:memories]
+            write_ports = memory_ir[:write_ports]
+            assigns = assigns + memory_ir[:assigns]
+          end
+
           RHDL::Export::IR::ModuleDef.new(
             name: name,
             ports: ports,
@@ -377,8 +395,76 @@ module RHDL
             regs: regs,
             assigns: assigns,
             processes: [],
-            instances: instances
+            instances: instances,
+            memories: memories,
+            write_ports: write_ports
           )
+        end
+
+        # Generate IR from MemoryDSL definitions
+        def memory_dsl_to_ir
+          memories = []
+          assigns = []
+          write_ports = []
+
+          mem_defs = _memories
+
+          # Generate Memory IR nodes
+          mem_defs.each do |mem_name, mem_def|
+            memories << RHDL::Export::IR::Memory.new(
+              name: mem_name.to_s,
+              depth: mem_def.depth,
+              width: mem_def.width,
+              read_ports: [],
+              write_ports: []
+            )
+          end
+
+          # Generate async read assigns
+          if respond_to?(:_async_reads)
+            _async_reads.each do |read_def|
+              mem_def = mem_defs[read_def.memory]
+              addr_width = mem_def&.addr_width || 8
+              data_width = mem_def&.width || 8
+
+              read_expr = RHDL::Export::IR::MemoryRead.new(
+                memory: read_def.memory,
+                addr: RHDL::Export::IR::Signal.new(name: read_def.addr, width: addr_width),
+                width: data_width
+              )
+
+              # Wrap in mux if enable is specified
+              if read_def.enable
+                read_expr = RHDL::Export::IR::Mux.new(
+                  condition: RHDL::Export::IR::Signal.new(name: read_def.enable, width: 1),
+                  when_true: read_expr,
+                  when_false: RHDL::Export::IR::Literal.new(value: 0, width: data_width),
+                  width: data_width
+                )
+              end
+
+              assigns << RHDL::Export::IR::Assign.new(target: read_def.output, expr: read_expr)
+            end
+          end
+
+          # Generate sync write ports
+          if respond_to?(:_sync_writes)
+            _sync_writes.each do |write_def|
+              mem_def = mem_defs[write_def.memory]
+              addr_width = mem_def&.addr_width || 8
+              data_width = mem_def&.width || 8
+
+              write_ports << RHDL::Export::IR::MemoryWritePort.new(
+                memory: write_def.memory,
+                clock: write_def.clock,
+                addr: RHDL::Export::IR::Signal.new(name: write_def.addr, width: addr_width),
+                data: RHDL::Export::IR::Signal.new(name: write_def.data, width: data_width),
+                enable: RHDL::Export::IR::Signal.new(name: write_def.enable, width: 1)
+              )
+            end
+          end
+
+          { memories: memories, assigns: assigns, write_ports: write_ports }
         end
 
         # Generate IR instances from structure definitions
