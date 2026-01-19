@@ -41,6 +41,26 @@ RSpec.describe RHDL::HDL::RippleCarryAdder do
       expect(verilog).to include('output [7:0] sum')
       expect(verilog).to include('assign sum')
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::RippleCarryAdder.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit ripple_carry_adder')
+      expect(firrtl).to include('input a')
+      expect(firrtl).to include('input b')
+      expect(firrtl).to include('output sum')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::RippleCarryAdder,
+          base_dir: 'tmp/circt_test/ripple_carry_adder'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do

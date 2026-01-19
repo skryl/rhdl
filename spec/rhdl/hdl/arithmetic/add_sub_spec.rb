@@ -41,6 +41,25 @@ RSpec.describe RHDL::HDL::AddSub do
       expect(verilog).to include('output [7:0] result')
     end
 
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::AddSub.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit add_sub')
+      expect(firrtl).to include('input a')
+      expect(firrtl).to include('output result')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::AddSub,
+          base_dir: 'tmp/circt_test/add_sub'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
+
     context 'iverilog behavior simulation', if: HdlToolchain.iverilog_available? do
       it 'matches RHDL simulation' do
         verilog = RHDL::HDL::AddSub.to_verilog

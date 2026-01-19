@@ -58,6 +58,25 @@ RSpec.describe RHDL::HDL::IncDec do
       expect(verilog).to include('input [7:0] a')
       expect(verilog).to include('output [7:0] result')
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = RHDL::HDL::IncDec.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit inc_dec')
+      expect(firrtl).to include('input a')
+      expect(firrtl).to include('output result')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          RHDL::HDL::IncDec,
+          base_dir: 'tmp/circt_test/inc_dec'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do
