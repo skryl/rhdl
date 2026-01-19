@@ -117,6 +117,8 @@ module MOS6502
     wire :alatch_addr_hi, width: 8
     wire :alatch_addr, width: 16
     wire :dlatch_data, width: 8
+    wire :alu_result_latched, width: 8
+    wire :latch_alu_result
 
     # Computed control signals for subcomponents
     wire :actual_load_a
@@ -131,10 +133,14 @@ module MOS6502
     wire :actual_load_z
     wire :actual_load_c
     wire :actual_load_v
+    wire :actual_load_i
+    wire :actual_load_d
     wire :flag_n_in
     wire :flag_z_in
     wire :flag_c_in
     wire :flag_v_in
+    wire :flag_i_in
+    wire :flag_d_in
 
     # Additional computed signals
     wire :stack_addr, width: 16
@@ -146,6 +152,30 @@ module MOS6502
     wire :is_execute_state
     wire :load_from_imm
     wire :load_from_mem
+    wire :is_load_instr
+    wire :is_flag_instr
+    wire :is_transfer_instr
+    wire :is_tsx_instr
+    wire :is_txs_instr
+    wire :flag_set_value
+    wire :flag_type, width: 2
+    wire :is_flag_c_instr
+    wire :is_flag_i_instr
+    wire :is_flag_v_instr
+    wire :is_flag_d_instr
+    wire :is_rmw_instr
+    wire :is_write_mem_state
+    wire :is_fetch_op1_state
+    wire :is_read_mem_state
+    wire :is_stack_instr
+    wire :is_stack_pull_reg
+    wire :is_pull_state
+    wire :actual_load_all
+    wire :uses_reg_for_nz       # Flag: N/Z flags come from register data, not ALU
+    wire :reg_data_n            # N flag computed from actual_reg_data
+    wire :reg_data_z            # Z flag computed from actual_reg_data
+    wire :is_decode_state       # We're in DECODE state
+    wire :decode_to_execute     # Implied mode in DECODE transitioning to EXECUTE
 
     # Component instances
     instance :registers, Registers
@@ -155,6 +185,7 @@ module MOS6502
     instance :ir, InstructionRegister
     instance :addr_latch, AddressLatch
     instance :data_latch, DataLatch
+    instance :alu_latch, DataLatch
     instance :control, ControlUnit
     instance :alu, ALU
     instance :decoder, InstructionDecoder
@@ -164,10 +195,10 @@ module MOS6502
     # Clock and reset to all sequential components
     port :clk => [[:registers, :clk], [:status_reg, :clk], [:pc, :clk],
                   [:sp, :clk], [:ir, :clk], [:addr_latch, :clk],
-                  [:data_latch, :clk], [:control, :clk]]
+                  [:data_latch, :clk], [:alu_latch, :clk], [:control, :clk]]
     port :rst => [[:registers, :rst], [:status_reg, :rst], [:pc, :rst],
                   [:sp, :rst], [:ir, :rst], [:addr_latch, :rst],
-                  [:data_latch, :rst], [:control, :rst]]
+                  [:data_latch, :rst], [:alu_latch, :rst], [:control, :rst]]
 
     # Control unit inputs
     port :rdy => [:control, :rdy]
@@ -242,10 +273,16 @@ module MOS6502
     port :actual_load_z => [:status_reg, :load_z]
     port :actual_load_c => [:status_reg, :load_c]
     port :actual_load_v => [:status_reg, :load_v]
+    port :actual_load_i => [:status_reg, :load_i]
+    port :actual_load_d => [:status_reg, :load_d]
     port :flag_n_in => [:status_reg, :n_in]
     port :flag_z_in => [:status_reg, :z_in]
     port :flag_c_in => [:status_reg, :c_in]
     port :flag_v_in => [:status_reg, :v_in]
+    port :flag_i_in => [:status_reg, :i_in]
+    port :flag_d_in => [:status_reg, :d_in]
+    port :actual_load_all => [:status_reg, :load_all]
+    port :dlatch_data => [:status_reg, :data_in]
 
     # ALU connections
     port [:alu, :result] => :alu_result
@@ -317,11 +354,18 @@ module MOS6502
     port :data_in => [:data_latch, :data_in]
     port :ctrl_load_data => [:data_latch, :load]
 
+    # ALU result latch connections (for RMW write-back)
+    port :alu_result => [:alu_latch, :data_in]
+    port :latch_alu_result => [:alu_latch, :load]
+    port [:alu_latch, :data] => :alu_result_latched
+
     # Combinational logic
     behavior do
       # Stack address computation (0x0100 + SP forms stack address in page 1)
       stack_addr <= cat(lit(0x01, width: 8), sp_val)
-      stack_addr_plus1 <= cat(lit(0x01, width: 8), sp_val + lit(1, width: 8))
+      # For PULL: compute address at SP+1 (where data to be pulled is located)
+      # Use full 16-bit addition to avoid width issues with 8-bit SP increment
+      stack_addr_plus1 <= stack_addr + lit(1, width: 16)
 
       # PC byte extraction
       pc_hi_byte <= pc_val[15..8]
@@ -329,38 +373,98 @@ module MOS6502
 
       # State detection
       is_execute_state <= (ctrl_state == lit(ControlUnit::STATE_EXECUTE, width: 8))
+      is_write_mem_state <= (ctrl_state == lit(ControlUnit::STATE_WRITE_MEM, width: 8))
+      is_fetch_op1_state <= (ctrl_state == lit(ControlUnit::STATE_FETCH_OP1, width: 8))
+      is_read_mem_state <= (ctrl_state == lit(ControlUnit::STATE_READ_MEM, width: 8))
+      is_pull_state <= (ctrl_state == lit(ControlUnit::STATE_PULL, width: 8))
+      is_decode_state <= (ctrl_state == lit(ControlUnit::STATE_DECODE, width: 8))
+
+      # Implied mode instructions transition directly from DECODE to EXECUTE
+      # This is used for TXS timing since it doesn't set writes_reg
+      decode_to_execute <= is_decode_state &
+                           (dec_addr_mode == lit(AddressGenerator::MODE_IMPLIED, width: 4))
 
       # Addressing mode detection
       load_from_imm <= (dec_addr_mode == lit(AddressGenerator::MODE_IMMEDIATE, width: 4))
       load_from_mem <= ~load_from_imm
 
-      # ALU input A selection (src_reg: 0=A, 1=X, 2=Y, 3=memory)
-      alu_a_sel <= mux(dec_src_reg[1],
-                       mux(dec_src_reg[0], dlatch_data, regs_y),
-                       mux(dec_src_reg[0], regs_x, regs_a))
+      # Instruction type detection (TYPE_LOAD = 1, TYPE_TRANSFER = 3, TYPE_STACK = 8, TYPE_FLAG = 9)
+      is_load_instr <= (dec_instr_type == lit(InstructionDecoder::TYPE_LOAD, width: 4))
+      is_transfer_instr <= (dec_instr_type == lit(InstructionDecoder::TYPE_TRANSFER, width: 4))
+      is_flag_instr <= (dec_instr_type == lit(InstructionDecoder::TYPE_FLAG, width: 4))
+      is_stack_instr <= (dec_instr_type == lit(InstructionDecoder::TYPE_STACK, width: 4))
+
+      # PLA: stack pull to register (TYPE_STACK with writes_reg and not is_status)
+      is_stack_pull_reg <= is_stack_instr & dec_writes_reg & ~dec_is_status_op
+
+      # Special instructions involving SP: TSX (0xBA) and TXS (0x9A)
+      is_tsx_instr <= (ir_opcode == lit(0xBA, width: 8))
+      is_txs_instr <= (ir_opcode == lit(0x9A, width: 8))
+
+      # For flag instructions (SEC/CLC/SED/CLD/SEI/CLI/CLV), bit 5 of opcode = set(1)/clear(0)
+      flag_set_value <= ir_opcode[5]
+
+      # Flag type from opcode bits 7:6: 00=C, 01=I, 10=V, 11=D
+      flag_type <= ir_opcode[7..6]
+      is_flag_c_instr <= is_flag_instr & (flag_type == lit(0, width: 2))
+      is_flag_i_instr <= is_flag_instr & (flag_type == lit(1, width: 2))
+      is_flag_v_instr <= is_flag_instr & (flag_type == lit(2, width: 2))
+      is_flag_d_instr <= is_flag_instr & (flag_type == lit(3, width: 2))
+
+      # RMW instruction detection (INC/DEC memory, shifts on memory)
+      is_rmw_instr <= dec_is_rmw
+
+      # Latch ALU result during EXECUTE state for RMW operations
+      # This captures the result before the carry flag gets updated
+      latch_alu_result <= is_execute_state & is_rmw_instr
+
+      # ALU input A selection
+      # For RMW (INC/DEC memory): use data latch (memory value)
+      # Otherwise: src_reg selects A(0), X(1), Y(2), or memory(3)
+      alu_a_sel <= mux(is_rmw_instr,
+                       dlatch_data,
+                       mux(dec_src_reg[1],
+                           mux(dec_src_reg[0], dlatch_data, regs_y),
+                           mux(dec_src_reg[0], regs_x, regs_a)))
 
       # ALU input B selection
       alu_b_sel <= mux(load_from_imm, ir_operand_lo, dlatch_data)
 
       # Register data input selection
-      # For loads: immediate uses operand, memory uses data latch
-      # For transfers/ALU ops: ALU result (which passes through the value)
+      # Priority: external load > TSX (sp to x) > PLA (stack pull) > load instruction > transfer > ALU result
+      # - TSX: use SP value
+      # - PLA: use data_in directly during PULL state (data not yet in latch)
+      # - Load instructions (LDA, LDX, LDY): use immediate operand or memory data
+      #   For immediate mode during FETCH_OP1, use data_in directly (operand not yet in IR)
+      #   For memory mode during READ_MEM, use data_in directly (data not yet in latch)
+      # - Transfer instructions (TAX, TAY, TXA, TYA): use source register (alu_a_sel)
+      # - ALU/other instructions: use ALU result
       actual_reg_data <= mux(ext_a_load_en | ext_x_load_en | ext_y_load_en,
                              mux(ext_a_load_en, ext_a_load_data,
                                  mux(ext_x_load_en, ext_x_load_data, ext_y_load_data)),
-                             mux(load_from_imm, ir_operand_lo,
-                                 mux(load_from_mem, dlatch_data, alu_result)))
+                             mux(is_tsx_instr, sp_val,
+                                 mux(is_stack_pull_reg,
+                                     mux(is_pull_state, data_in, dlatch_data),
+                                     mux(is_load_instr,
+                                         mux(load_from_imm,
+                                             mux(is_fetch_op1_state, data_in, ir_operand_lo),
+                                             mux(is_read_mem_state, data_in, dlatch_data)),
+                                         mux(is_transfer_instr, alu_a_sel, alu_result)))))
 
       # Register load enables
       # External loads have priority, then internal writes based on dst_reg
+      # Control unit sets reg_write=1 during state that transitions to EXECUTE
+      # So we use ctrl_reg_write directly (it's already "early" timed)
+      # The register will capture on the clock edge entering EXECUTE
       actual_load_a <= ext_a_load_en |
-                       (ctrl_reg_write & is_execute_state &
+                       (ctrl_reg_write &
                         (dec_dst_reg == lit(MOS6502::REG_A, width: 2)))
       actual_load_x <= ext_x_load_en |
-                       (ctrl_reg_write & is_execute_state &
-                        (dec_dst_reg == lit(MOS6502::REG_X, width: 2)))
+                       (ctrl_reg_write &
+                        (dec_dst_reg == lit(MOS6502::REG_X, width: 2))) |
+                       (is_tsx_instr & ctrl_reg_write)
       actual_load_y <= ext_y_load_en |
-                       (ctrl_reg_write & is_execute_state &
+                       (ctrl_reg_write &
                         (dec_dst_reg == lit(MOS6502::REG_Y, width: 2)))
 
       # PC control
@@ -368,20 +472,55 @@ module MOS6502
       actual_pc_addr <= mux(ext_pc_load_en, ext_pc_load_data, agen_eff_addr)
 
       # SP control
-      actual_sp_load <= ext_sp_load_en
-      actual_sp_data <= ext_sp_load_data
+      # TXS (0x9A) transfers X to SP
+      # Use decode_to_execute for early timing (TXS doesn't set writes_reg, so ctrl_reg_write=0)
+      actual_sp_load <= ext_sp_load_en | (is_txs_instr & decode_to_execute)
+      actual_sp_data <= mux(is_txs_instr, regs_x, ext_sp_load_data)
 
       # Flag update enables
-      actual_load_n <= ctrl_update_flags & is_execute_state & dec_sets_nz
-      actual_load_z <= ctrl_update_flags & is_execute_state & dec_sets_nz
-      actual_load_c <= ctrl_update_flags & is_execute_state & dec_sets_c
-      actual_load_v <= ctrl_update_flags & is_execute_state & dec_sets_v
+      # For RMW instructions, delay flag updates until WRITE_MEM state to avoid
+      # affecting the ALU result that gets written to memory
+      # ALU flags from arithmetic/logic ops (non-RMW, use ctrl_update_flags which is early-timed)
+      # For RMW during WRITE_MEM
+      actual_load_n <= (ctrl_update_flags & dec_sets_nz & ~is_rmw_instr) |
+                       (is_write_mem_state & is_rmw_instr & dec_sets_nz)
+      actual_load_z <= (ctrl_update_flags & dec_sets_nz & ~is_rmw_instr) |
+                       (is_write_mem_state & is_rmw_instr & dec_sets_nz)
+      # Carry: ALU ops that set C (delayed for RMW), or SEC/CLC flag instruction
+      actual_load_c <= (ctrl_update_flags & dec_sets_c & ~is_rmw_instr) |
+                       (is_write_mem_state & is_rmw_instr & dec_sets_c) |
+                       (is_flag_c_instr & ctrl_update_flags)
+      # Overflow: ALU ops that set V, or CLV flag instruction
+      actual_load_v <= (ctrl_update_flags & dec_sets_v) |
+                       (is_flag_v_instr & ctrl_update_flags)
+      # Interrupt: SEI/CLI flag instruction only
+      actual_load_i <= is_flag_i_instr & ctrl_update_flags
+      # Decimal: SED/CLD flag instruction only
+      actual_load_d <= is_flag_d_instr & ctrl_update_flags
 
-      # Flag input values from ALU
-      flag_n_in <= alu_n
-      flag_z_in <= alu_z
-      flag_c_in <= alu_c
-      flag_v_in <= alu_v
+      # Flag input values
+      # For load/transfer/PLA instructions, use register data for N/Z flags
+      # For flag instructions (SEC/CLC/SED/CLD/SEI/CLI/CLV), use opcode bit 5
+      # Otherwise use ALU outputs (ADC, SBC, AND, ORA, EOR, etc.)
+      flag_n_in <= mux(uses_reg_for_nz, reg_data_n, alu_n)
+      flag_z_in <= mux(uses_reg_for_nz, reg_data_z, alu_z)
+      flag_c_in <= mux(is_flag_c_instr, flag_set_value, alu_c)
+      # Note: CLV always clears V (there's no SEV instruction), so use 0, not flag_set_value
+      flag_v_in <= mux(is_flag_v_instr, lit(0, width: 1), alu_v)
+      flag_i_in <= flag_set_value
+      flag_d_in <= flag_set_value
+
+      # PLP: load entire status register from stack
+      # Use ctrl_update_flags for early timing (set during PULL state before EXECUTE)
+      actual_load_all <= is_stack_instr & dec_is_status_op & ctrl_update_flags
+
+      # For load/transfer/PLA instructions, N/Z flags come from register data, not ALU
+      # This is because these instructions bypass the ALU (data goes directly to register)
+      uses_reg_for_nz <= is_load_instr | is_transfer_instr | is_stack_pull_reg
+
+      # Compute N/Z from actual_reg_data for load/transfer/PLA
+      reg_data_n <= actual_reg_data[7]
+      reg_data_z <= (actual_reg_data == lit(0, width: 8))
 
       # Address bus mux (8-way based on ctrl_addr_sel)
       addr <= mux(ctrl_addr_sel[2],
@@ -418,25 +557,6 @@ module MOS6502
       state <= ctrl_state
       halted <= ctrl_halted
       cycle_count <= ctrl_cycle_count
-    end
-
-    # Override propagate to ensure correct simulation order:
-    # 1. First propagate subcomponents to get their outputs (control signals, etc.)
-    # 2. Run behavior block to compute derived signals from those outputs
-    # 3. Propagate subcomponents again since derived signals feed into inputs
-    # 4. Run behavior block again to update outputs with final values
-    def propagate
-      # First pass: propagate subcomponents to get control unit outputs, etc.
-      propagate_subcomponents if @local_dependency_graph && !@subcomponents.empty?
-
-      # Compute derived signals from subcomponent outputs
-      execute_behavior if self.class.behavior_defined?
-
-      # Second pass: propagate subcomponents with updated derived signals
-      propagate_subcomponents if @local_dependency_graph && !@subcomponents.empty?
-
-      # Final behavior pass to ensure outputs reflect final state
-      execute_behavior if self.class.behavior_defined?
     end
 
     def self.verilog_module_name
