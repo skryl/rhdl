@@ -386,9 +386,6 @@ module RISCV
 
       public
 
-      def self.verilog_module_name
-        'riscv_pipelined_datapath'
-      end
     end
   end
 end

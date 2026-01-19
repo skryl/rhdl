@@ -46,12 +46,5 @@ module RISCV
       }, default: lit(0, width: 1))
     end
 
-    def self.verilog_module_name
-      'riscv_branch_cond'
-    end
-
-    def self.to_verilog
-      RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
-    end
   end
 end

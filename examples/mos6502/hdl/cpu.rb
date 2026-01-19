@@ -601,13 +601,5 @@ module MOS6502
       cycle_count <= ctrl_cycle_count
     end
 
-    def self.verilog_module_name
-      'mos6502_cpu'
-    end
-
-    def self.to_verilog(top_name: nil)
-      name = top_name || verilog_module_name
-      RHDL::Export::Verilog.generate(to_ir(top_name: name))
-    end
   end
 end
