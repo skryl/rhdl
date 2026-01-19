@@ -50,13 +50,6 @@ module RISCV
         jump_out <= jump_in
       end
 
-      def self.verilog_module_name
-        'riscv_mem_wb_reg'
-      end
-
-      def self.to_verilog
-        RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
-      end
     end
   end
 end

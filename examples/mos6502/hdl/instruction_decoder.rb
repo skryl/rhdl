@@ -390,12 +390,5 @@ module MOS6502
       illegal <= case_select(opcode, DECODE_CASES[:addr_mode].transform_values { 0 }, default: 1)
     end
 
-    def self.verilog_module_name
-      'mos6502_instruction_decoder'
-    end
-
-    def self.to_verilog
-      RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
-    end
   end
 end

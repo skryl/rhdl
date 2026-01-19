@@ -146,9 +146,6 @@ module RISCV
         @datapath.get_output(:debug_inst)
       end
 
-      def self.verilog_module_name
-        'riscv_pipelined_cpu'
-      end
     end
   end
 end

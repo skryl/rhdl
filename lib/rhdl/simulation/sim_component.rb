@@ -276,10 +276,18 @@ module RHDL
         end
 
         # Returns the Verilog module name for this component
-        # Override in subclasses that use custom module names
+        # Derived from the class's full module path, filtering out RHDL/HDL namespaces
+        # Examples:
+        #   RHDL::HDL::RAM => "ram"
+        #   MOS6502::ALU => "mos6502_alu"
+        #   RISCV::Decoder => "riscv_decoder"
         # @return [String] The module name used in generated Verilog
         def verilog_module_name
-          self.name.split('::').last.underscore
+          parts = self.name.split('::')
+          # Filter out RHDL and HDL namespace modules
+          filtered = parts.reject { |p| %w[RHDL HDL].include?(p) }
+          # Convert each part to snake_case and join with underscore
+          filtered.map { |p| p.underscore }.join('_')
         end
 
         # Collect all unique sub-module classes used by this component (recursively)
@@ -335,7 +343,7 @@ module RHDL
 
         # Generate IR ModuleDef from the component
         def to_ir(top_name: nil)
-          name = top_name || self.name.split('::').last.underscore
+          name = top_name || verilog_module_name
 
           ports = _ports.map do |p|
             RHDL::Export::IR::Port.new(name: p.name, direction: p.direction, width: p.width)

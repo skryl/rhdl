@@ -94,13 +94,6 @@ module RISCV
         jalr_out <= mux(flush, lit(0, width: 1), jalr_in)
       end
 
-      def self.verilog_module_name
-        'riscv_id_ex_reg'
-      end
-
-      def self.to_verilog
-        RHDL::Export::Verilog.generate(to_ir(top_name: verilog_module_name))
-      end
     end
   end
 end

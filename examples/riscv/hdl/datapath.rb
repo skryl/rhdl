@@ -326,13 +326,5 @@ module RISCV
       @regfile.write_reg(index, value)
     end
 
-    def self.verilog_module_name
-      'riscv_datapath'
-    end
-
-    def self.to_verilog(top_name: nil)
-      name = top_name || verilog_module_name
-      RHDL::Export::Verilog.generate(to_ir(top_name: name))
-    end
   end
 end
