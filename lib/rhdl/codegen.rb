@@ -1,25 +1,25 @@
-# Behavior export (RTL/Verilog)
-require_relative "export/behavior/ir"
-require_relative "export/behavior/lower"
-require_relative "export/behavior/verilog"
+# Behavior codegen (RTL/Verilog)
+require_relative "codegen/behavior/ir"
+require_relative "codegen/behavior/lower"
+require_relative "codegen/behavior/verilog"
 
-# CIRCT export (FIRRTL)
-require_relative "export/circt/firrtl"
+# CIRCT codegen (FIRRTL)
+require_relative "codegen/circt/firrtl"
 
-# Structure export (gate-level synthesis)
-require_relative "export/structure/ir"
-require_relative "export/structure/primitives"
-require_relative "export/structure/toposort"
-require_relative "export/structure/lower"
-require_relative "export/structure/sim_cpu"
-require_relative "export/structure/sim_gpu"
+# Structure codegen (gate-level synthesis)
+require_relative "codegen/structure/ir"
+require_relative "codegen/structure/primitives"
+require_relative "codegen/structure/toposort"
+require_relative "codegen/structure/lower"
+require_relative "codegen/structure/sim_cpu"
+require_relative "codegen/structure/sim_gpu"
 
 require 'fileutils'
 
 module RHDL
-  module Export
+  module Codegen
     class << self
-      # Behavior Verilog export
+      # Behavior Verilog codegen
       def verilog(component, top_name: nil)
         module_def = Lower.new(component, top_name: top_name).build
         Verilog.generate(module_def)
@@ -30,7 +30,7 @@ module RHDL
         File.write(path, verilog(component, top_name: top_name))
       end
 
-      # CIRCT FIRRTL export
+      # CIRCT FIRRTL codegen
       def circt(component, top_name: nil)
         module_def = Lower.new(component, top_name: top_name).build
         CIRCT::FIRRTL.generate(module_def)
@@ -44,7 +44,7 @@ module RHDL
       end
       alias_method :write_firrtl, :write_circt
 
-      # Structure gate-level export
+      # Structure gate-level codegen
       def gate_level(components, backend: :cpu, lanes: 64, name: 'design')
         ir = Structure::Lower.from_components(components, name: name)
         case backend
@@ -57,7 +57,7 @@ module RHDL
         end
       end
 
-      # Component discovery and batch export
+      # Component discovery and batch codegen
 
       # Find all classes that are exportable (DSL or HDL with behavior blocks)
       def discover_components
@@ -141,4 +141,7 @@ module RHDL
       end
     end
   end
+
+  # Backwards compatibility alias
+  Export = Codegen
 end

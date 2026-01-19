@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 module RHDL
-  module HDL
+  module Synth
     # Synthesis signal reference
-    class SynthSignalProxy < SynthExpr
+    class SignalProxy < Expr
       attr_reader :name
 
       def initialize(name, width)
@@ -19,7 +19,7 @@ module RHDL
       end
 
       def to_ir
-        RHDL::Export::IR::Signal.new(name: @name, width: @width)
+        RHDL::Codegen::IR::Signal.new(name: @name, width: @width)
       end
     end
   end
