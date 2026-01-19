@@ -1,0 +1,34 @@
+{
+  "name": "xor_gate",
+  "net_count": 3,
+  "gates": [
+    {
+      "type": "xor",
+      "inputs": [
+        0,
+        1
+      ],
+      "output": 2,
+      "value": null
+    }
+  ],
+  "dffs": [
+
+  ],
+  "inputs": {
+    "xor_gate.a0": [
+      0
+    ],
+    "xor_gate.a1": [
+      1
+    ]
+  },
+  "outputs": {
+    "xor_gate.y": [
+      2
+    ]
+  },
+  "schedule": [
+    0
+  ]
+}

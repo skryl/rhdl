@@ -1,0 +1,13 @@
+digraph mux4 {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[8]|<b>b[8]|<c>c[8]|<d>d[8]|<sel>sel[2]}|mux4\n(Mux4)|{<y>y[8]}}"];
+
+  subgraph cluster_main {
+    label="mux4";
+    style=rounded;
+    color=blue;
+  }
+}

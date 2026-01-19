@@ -1,0 +1,6 @@
+require_relative 'memory/ram_spec'
+require_relative 'memory/dual_port_ram_spec'
+require_relative 'memory/rom_spec'
+require_relative 'memory/register_file_spec'
+require_relative 'memory/stack_spec'
+require_relative 'memory/fifo_spec'

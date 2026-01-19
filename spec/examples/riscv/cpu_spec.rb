@@ -1,0 +1,455 @@
+# RV32I CPU Tests
+# Tests the RISC-V single-cycle CPU implementation using the Harness class
+
+require 'rspec'
+require_relative '../../../examples/riscv/hdl/constants'
+require_relative '../../../examples/riscv/hdl/harness'
+require_relative '../../../examples/riscv/utilities/assembler'
+
+RSpec.describe RISCV::Harness do
+  let(:cpu) { RISCV::Harness.new(mem_size: 4096) }
+
+  describe 'Reset behavior' do
+    it 'sets PC to reset vector after reset' do
+      expect(cpu.read_pc).to eq(0)
+    end
+
+    it 'clears registers on reset' do
+      (0..31).each do |i|
+        expect(cpu.read_reg(i)).to eq(0)
+      end
+    end
+  end
+
+  describe 'ADDI instruction' do
+    it 'adds immediate to register' do
+      # addi x1, x0, 42
+      program = [RISCV::Assembler.addi(1, 0, 42)]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.clock_cycle
+      expect(cpu.read_reg(1)).to eq(42)
+    end
+
+    it 'handles negative immediates' do
+      # addi x1, x0, -10
+      program = [RISCV::Assembler.addi(1, 0, -10)]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.clock_cycle
+      expect(cpu.read_reg(1)).to eq(0xFFFFFFF6)
+    end
+
+    it 'adds to non-zero register' do
+      # addi x1, x0, 10
+      # addi x2, x1, 5
+      program = [
+        RISCV::Assembler.addi(1, 0, 10),
+        RISCV::Assembler.addi(2, 1, 5)
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.run_cycles(2)
+      expect(cpu.read_reg(1)).to eq(10)
+      expect(cpu.read_reg(2)).to eq(15)
+    end
+  end
+
+  describe 'LUI instruction' do
+    it 'loads upper immediate' do
+      # lui x1, 0x12345
+      program = [RISCV::Assembler.lui(1, 0x12345)]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.clock_cycle
+      expect(cpu.read_reg(1)).to eq(0x12345000)
+    end
+  end
+
+  describe 'AUIPC instruction' do
+    it 'adds upper immediate to PC' do
+      # auipc x1, 1
+      program = [RISCV::Assembler.auipc(1, 1)]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.clock_cycle
+      expect(cpu.read_reg(1)).to eq(0x1000)  # PC(0) + 0x1000
+    end
+  end
+
+  describe 'ADD instruction' do
+    it 'adds two registers' do
+      # addi x1, x0, 10
+      # addi x2, x0, 20
+      # add x3, x1, x2
+      program = [
+        RISCV::Assembler.addi(1, 0, 10),
+        RISCV::Assembler.addi(2, 0, 20),
+        RISCV::Assembler.add(3, 1, 2)
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.run_cycles(3)
+      expect(cpu.read_reg(3)).to eq(30)
+    end
+  end
+
+  describe 'SUB instruction' do
+    it 'subtracts two registers' do
+      # addi x1, x0, 30
+      # addi x2, x0, 10
+      # sub x3, x1, x2
+      program = [
+        RISCV::Assembler.addi(1, 0, 30),
+        RISCV::Assembler.addi(2, 0, 10),
+        RISCV::Assembler.sub(3, 1, 2)
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.run_cycles(3)
+      expect(cpu.read_reg(3)).to eq(20)
+    end
+  end
+
+  describe 'AND/OR/XOR instructions' do
+    it 'performs bitwise AND' do
+      # addi x1, x0, 0xFF
+      # addi x2, x0, 0x0F
+      # and x3, x1, x2
+      program = [
+        RISCV::Assembler.addi(1, 0, 0xFF),
+        RISCV::Assembler.addi(2, 0, 0x0F),
+        RISCV::Assembler.and(3, 1, 2)
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.run_cycles(3)
+      expect(cpu.read_reg(3)).to eq(0x0F)
+    end
+
+    it 'performs bitwise OR' do
+      # addi x1, x0, 0xF0
+      # addi x2, x0, 0x0F
+      # or x3, x1, x2
+      program = [
+        RISCV::Assembler.addi(1, 0, 0xF0),
+        RISCV::Assembler.addi(2, 0, 0x0F),
+        RISCV::Assembler.or(3, 1, 2)
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.run_cycles(3)
+      expect(cpu.read_reg(3)).to eq(0xFF)
+    end
+
+    it 'performs bitwise XOR' do
+      # addi x1, x0, 0xFF
+      # addi x2, x0, 0x0F
+      # xor x3, x1, x2
+      program = [
+        RISCV::Assembler.addi(1, 0, 0xFF),
+        RISCV::Assembler.addi(2, 0, 0x0F),
+        RISCV::Assembler.xor(3, 1, 2)
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.run_cycles(3)
+      expect(cpu.read_reg(3)).to eq(0xF0)
+    end
+  end
+
+  describe 'Shift instructions' do
+    it 'performs shift left logical' do
+      # addi x1, x0, 1
+      # slli x2, x1, 4
+      program = [
+        RISCV::Assembler.addi(1, 0, 1),
+        RISCV::Assembler.slli(2, 1, 4)
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.run_cycles(2)
+      expect(cpu.read_reg(2)).to eq(16)
+    end
+
+    it 'performs shift right logical' do
+      # addi x1, x0, 128
+      # srli x2, x1, 3
+      program = [
+        RISCV::Assembler.addi(1, 0, 128),
+        RISCV::Assembler.srli(2, 1, 3)
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.run_cycles(2)
+      expect(cpu.read_reg(2)).to eq(16)
+    end
+
+    it 'performs shift right arithmetic' do
+      # lui x1, 0xFFFFF  ; Load -4096 (0xFFFFF000)
+      # srai x2, x1, 4
+      program = [
+        RISCV::Assembler.lui(1, 0xFFFFF),
+        RISCV::Assembler.srai(2, 1, 4)
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.run_cycles(2)
+      # 0xFFFFF000 >> 4 with sign extension = 0xFFFFFF00
+      expect(cpu.read_reg(2)).to eq(0xFFFFFF00)
+    end
+  end
+
+  describe 'SLT/SLTU instructions' do
+    it 'sets less than (signed)' do
+      # addi x1, x0, -1    ; x1 = 0xFFFFFFFF (-1 signed)
+      # addi x2, x0, 1     ; x2 = 1
+      # slt x3, x1, x2     ; x3 = 1 (because -1 < 1)
+      program = [
+        RISCV::Assembler.addi(1, 0, -1),
+        RISCV::Assembler.addi(2, 0, 1),
+        RISCV::Assembler.slt(3, 1, 2)
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.run_cycles(3)
+      expect(cpu.read_reg(3)).to eq(1)
+    end
+
+    it 'sets less than unsigned' do
+      # addi x1, x0, -1    ; x1 = 0xFFFFFFFF (large unsigned)
+      # addi x2, x0, 1     ; x2 = 1
+      # sltu x3, x1, x2    ; x3 = 0 (because 0xFFFFFFFF > 1 unsigned)
+      program = [
+        RISCV::Assembler.addi(1, 0, -1),
+        RISCV::Assembler.addi(2, 0, 1),
+        RISCV::Assembler.sltu(3, 1, 2)
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.run_cycles(3)
+      expect(cpu.read_reg(3)).to eq(0)
+    end
+  end
+
+  describe 'JAL instruction' do
+    it 'jumps and links' do
+      # jal x1, 8          ; Jump to PC+8, save return address in x1
+      # addi x2, x0, 1     ; Skipped
+      # addi x3, x0, 2     ; Target of jump
+      program = [
+        RISCV::Assembler.jal(1, 8),
+        RISCV::Assembler.addi(2, 0, 1),
+        RISCV::Assembler.addi(3, 0, 2)
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.clock_cycle
+      expect(cpu.read_pc).to eq(8)  # Jumped to offset 8
+      expect(cpu.read_reg(1)).to eq(4)  # Return address is PC+4
+      cpu.clock_cycle
+      expect(cpu.read_reg(3)).to eq(2)  # Executed instruction at offset 8
+      expect(cpu.read_reg(2)).to eq(0)  # Skipped instruction at offset 4
+    end
+  end
+
+  describe 'JALR instruction' do
+    it 'jumps to register + offset' do
+      # addi x1, x0, 8     ; x1 = 8
+      # jalr x2, x1, 4     ; Jump to x1+4 = 12, save PC+4 in x2
+      program = [
+        RISCV::Assembler.addi(1, 0, 8),
+        RISCV::Assembler.jalr(2, 1, 4),
+        RISCV::Assembler.addi(3, 0, 1),  # Skipped
+        RISCV::Assembler.addi(4, 0, 2)   # Target
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.clock_cycle  # addi
+      cpu.clock_cycle  # jalr
+      expect(cpu.read_pc).to eq(12)  # Jumped to x1+4 = 12
+      expect(cpu.read_reg(2)).to eq(8)  # Return address is PC+4 of jalr
+    end
+  end
+
+  describe 'Branch instructions' do
+    it 'branches on equal' do
+      # addi x1, x0, 5
+      # addi x2, x0, 5
+      # beq x1, x2, 8      ; Branch to PC+8 if x1 == x2
+      # addi x3, x0, 1     ; Skipped
+      # addi x4, x0, 2     ; Target
+      program = [
+        RISCV::Assembler.addi(1, 0, 5),
+        RISCV::Assembler.addi(2, 0, 5),
+        RISCV::Assembler.beq(1, 2, 8),
+        RISCV::Assembler.addi(3, 0, 1),
+        RISCV::Assembler.addi(4, 0, 2)
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.run_cycles(3)  # addi, addi, beq
+      expect(cpu.read_pc).to eq(16)  # Branched to PC+8 (from PC=8)
+      cpu.clock_cycle
+      expect(cpu.read_reg(4)).to eq(2)
+      expect(cpu.read_reg(3)).to eq(0)  # Skipped
+    end
+
+    it 'does not branch when not equal' do
+      # addi x1, x0, 5
+      # addi x2, x0, 10
+      # beq x1, x2, 8      ; Don't branch
+      # addi x3, x0, 1     ; Executed
+      program = [
+        RISCV::Assembler.addi(1, 0, 5),
+        RISCV::Assembler.addi(2, 0, 10),
+        RISCV::Assembler.beq(1, 2, 8),
+        RISCV::Assembler.addi(3, 0, 1)
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.run_cycles(4)
+      expect(cpu.read_reg(3)).to eq(1)  # Executed
+    end
+
+    it 'branches on not equal' do
+      # addi x1, x0, 5
+      # addi x2, x0, 10
+      # bne x1, x2, 8
+      # addi x3, x0, 1
+      # addi x4, x0, 2
+      program = [
+        RISCV::Assembler.addi(1, 0, 5),
+        RISCV::Assembler.addi(2, 0, 10),
+        RISCV::Assembler.bne(1, 2, 8),
+        RISCV::Assembler.addi(3, 0, 1),
+        RISCV::Assembler.addi(4, 0, 2)
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.run_cycles(4)
+      expect(cpu.read_reg(4)).to eq(2)
+      expect(cpu.read_reg(3)).to eq(0)
+    end
+
+    it 'branches on less than (signed)' do
+      # addi x1, x0, -1    ; x1 = -1
+      # addi x2, x0, 1     ; x2 = 1
+      # blt x1, x2, 8      ; Branch because -1 < 1
+      # addi x3, x0, 1
+      # addi x4, x0, 2
+      program = [
+        RISCV::Assembler.addi(1, 0, -1),
+        RISCV::Assembler.addi(2, 0, 1),
+        RISCV::Assembler.blt(1, 2, 8),
+        RISCV::Assembler.addi(3, 0, 1),
+        RISCV::Assembler.addi(4, 0, 2)
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.run_cycles(4)
+      expect(cpu.read_reg(4)).to eq(2)
+      expect(cpu.read_reg(3)).to eq(0)
+    end
+  end
+
+  describe 'Load/Store instructions' do
+    it 'stores and loads a word' do
+      # addi x1, x0, 0x42  ; Value to store
+      # addi x2, x0, 0x100 ; Address
+      # sw x1, 0(x2)       ; Store x1 at address 0x100
+      # lw x3, 0(x2)       ; Load from address 0x100
+      program = [
+        RISCV::Assembler.addi(1, 0, 0x42),
+        RISCV::Assembler.addi(2, 0, 0x100),
+        RISCV::Assembler.sw(1, 2, 0),
+        RISCV::Assembler.lw(3, 2, 0)
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.run_cycles(4)
+      expect(cpu.read_reg(3)).to eq(0x42)
+    end
+
+    it 'stores and loads with offset' do
+      # addi x1, x0, 0x55
+      # addi x2, x0, 0x100
+      # sw x1, 8(x2)       ; Store at 0x108
+      # lw x3, 8(x2)       ; Load from 0x108
+      program = [
+        RISCV::Assembler.addi(1, 0, 0x55),
+        RISCV::Assembler.addi(2, 0, 0x100),
+        RISCV::Assembler.sw(1, 2, 8),
+        RISCV::Assembler.lw(3, 2, 8)
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.run_cycles(4)
+      expect(cpu.read_reg(3)).to eq(0x55)
+    end
+
+    it 'stores and loads bytes' do
+      # addi x1, x0, 0xAB
+      # addi x2, x0, 0x100
+      # sb x1, 0(x2)
+      # lb x3, 0(x2)       ; Should sign-extend
+      # lbu x4, 0(x2)      ; Should zero-extend
+      program = [
+        RISCV::Assembler.addi(1, 0, 0xAB),
+        RISCV::Assembler.addi(2, 0, 0x100),
+        RISCV::Assembler.sb(1, 2, 0),
+        RISCV::Assembler.lb(3, 2, 0),
+        RISCV::Assembler.lbu(4, 2, 0)
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.run_cycles(5)
+      expect(cpu.read_reg(3)).to eq(0xFFFFFFAB)  # Sign-extended
+      expect(cpu.read_reg(4)).to eq(0xAB)        # Zero-extended
+    end
+  end
+
+  describe 'x0 register' do
+    it 'always reads as zero' do
+      expect(cpu.read_reg(0)).to eq(0)
+    end
+
+    it 'cannot be written' do
+      # addi x0, x0, 42  ; Try to write to x0
+      program = [RISCV::Assembler.addi(0, 0, 42)]
+      cpu.load_program(program)
+      cpu.reset!
+      cpu.clock_cycle
+      expect(cpu.read_reg(0)).to eq(0)
+    end
+  end
+
+  describe 'Simple program: sum 1 to N' do
+    it 'computes sum of 1 to 5' do
+      # Sum 1+2+3+4+5 = 15
+      # x1 = counter (5 down to 0)
+      # x2 = sum
+      program = [
+        RISCV::Assembler.addi(1, 0, 5),    # x1 = 5
+        RISCV::Assembler.addi(2, 0, 0),    # x2 = 0 (sum)
+        # loop:
+        RISCV::Assembler.beq(1, 0, 12),    # if x1 == 0, exit
+        RISCV::Assembler.add(2, 2, 1),     # sum += counter
+        RISCV::Assembler.addi(1, 1, -1),   # counter--
+        RISCV::Assembler.jal(0, -12),      # jump back to loop (5 instructions * -4 = -20, but we want to go back 3 = -12)
+        # exit:
+        RISCV::Assembler.nop               # Done
+      ]
+      cpu.load_program(program)
+      cpu.reset!
+
+      # Run until we reach the NOP (max 30 cycles to be safe)
+      30.times do
+        break if cpu.read_pc == 24  # Address of NOP
+        cpu.clock_cycle
+      end
+
+      expect(cpu.read_reg(2)).to eq(15)  # 1+2+3+4+5 = 15
+    end
+  end
+end

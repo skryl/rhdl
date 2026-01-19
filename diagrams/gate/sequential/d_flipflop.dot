@@ -1,0 +1,19 @@
+digraph "dff" {
+  rankdir=LR;
+  node [fontname="Helvetica"];
+  edge [fontname="Helvetica"];
+  "dff:0" [label="DFF" shape=box style="rounded"];
+  "gate:not:0" [label="NOT" shape=ellipse];
+  "port:dff.clk:input:0" [label="dff.clk" shape=plaintext];
+  "port:dff.d:input:0" [label="dff.d" shape=plaintext];
+  "port:dff.en:input:0" [label="dff.en" shape=plaintext];
+  "port:dff.q:output:0" [label="dff.q" shape=plaintext];
+  "port:dff.qn:output:0" [label="dff.qn" shape=plaintext];
+  "port:dff.rst:input:0" [label="dff.rst" shape=plaintext];
+  "dff:0" -> "port:dff.q:output:0";
+  "gate:not:0" -> "port:dff.qn:output:0";
+  "port:dff.d:input:0" -> "dff:0";
+  "port:dff.en:input:0" -> "dff:0" [label="EN"];
+  "port:dff.q:output:0" -> "gate:not:0";
+  "port:dff.rst:input:0" -> "dff:0" [label="RST"];
+}

@@ -1,0 +1,382 @@
+{
+  "name": "mux8",
+  "net_count": 63,
+  "gates": [
+    {
+      "type": "mux",
+      "inputs": [
+        0,
+        4,
+        32
+      ],
+      "output": 39,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        8,
+        12,
+        32
+      ],
+      "output": 40,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        16,
+        20,
+        32
+      ],
+      "output": 41,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        24,
+        28,
+        32
+      ],
+      "output": 42,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        39,
+        40,
+        33
+      ],
+      "output": 43,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        41,
+        42,
+        33
+      ],
+      "output": 44,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        43,
+        44,
+        34
+      ],
+      "output": 35,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        1,
+        5,
+        32
+      ],
+      "output": 45,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        9,
+        13,
+        32
+      ],
+      "output": 46,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        17,
+        21,
+        32
+      ],
+      "output": 47,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        25,
+        29,
+        32
+      ],
+      "output": 48,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        45,
+        46,
+        33
+      ],
+      "output": 49,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        47,
+        48,
+        33
+      ],
+      "output": 50,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        49,
+        50,
+        34
+      ],
+      "output": 36,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        2,
+        6,
+        32
+      ],
+      "output": 51,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        10,
+        14,
+        32
+      ],
+      "output": 52,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        18,
+        22,
+        32
+      ],
+      "output": 53,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        26,
+        30,
+        32
+      ],
+      "output": 54,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        51,
+        52,
+        33
+      ],
+      "output": 55,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        53,
+        54,
+        33
+      ],
+      "output": 56,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        55,
+        56,
+        34
+      ],
+      "output": 37,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        3,
+        7,
+        32
+      ],
+      "output": 57,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        11,
+        15,
+        32
+      ],
+      "output": 58,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        19,
+        23,
+        32
+      ],
+      "output": 59,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        27,
+        31,
+        32
+      ],
+      "output": 60,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        57,
+        58,
+        33
+      ],
+      "output": 61,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        59,
+        60,
+        33
+      ],
+      "output": 62,
+      "value": null
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        61,
+        62,
+        34
+      ],
+      "output": 38,
+      "value": null
+    }
+  ],
+  "dffs": [
+
+  ],
+  "inputs": {
+    "mux8.in0": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "mux8.in1": [
+      4,
+      5,
+      6,
+      7
+    ],
+    "mux8.in2": [
+      8,
+      9,
+      10,
+      11
+    ],
+    "mux8.in3": [
+      12,
+      13,
+      14,
+      15
+    ],
+    "mux8.in4": [
+      16,
+      17,
+      18,
+      19
+    ],
+    "mux8.in5": [
+      20,
+      21,
+      22,
+      23
+    ],
+    "mux8.in6": [
+      24,
+      25,
+      26,
+      27
+    ],
+    "mux8.in7": [
+      28,
+      29,
+      30,
+      31
+    ],
+    "mux8.sel": [
+      32,
+      33,
+      34
+    ]
+  },
+  "outputs": {
+    "mux8.y": [
+      35,
+      36,
+      37,
+      38
+    ]
+  },
+  "schedule": [
+    0,
+    1,
+    2,
+    3,
+    7,
+    8,
+    9,
+    10,
+    14,
+    15,
+    16,
+    17,
+    21,
+    22,
+    23,
+    24,
+    4,
+    5,
+    11,
+    12,
+    18,
+    19,
+    25,
+    26,
+    6,
+    13,
+    20,
+    27
+  ]
+}

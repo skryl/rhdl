@@ -1,0 +1,13 @@
+digraph dff {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<d>d[1]|<clk>clk[1]|<rst>rst[1]|<en>en[1]}|dff\n(DFlipFlop)|{<q>q[1]|<qn>qn[1]}}"];
+
+  subgraph cluster_main {
+    label="dff";
+    style=rounded;
+    color=blue;
+  }
+}

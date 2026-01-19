@@ -1,0 +1,30 @@
+============================================================
+Component: decoder
+Type: InstructionDecoder
+============================================================
+
+═══ decoder (InstructionDecoder) ═══
+
+Interface:
+     ┌─────────────────────────────────────┐
+     │               decoder               │
+     │        (InstructionDecoder)         │
+     ├─────────────────────────────────────┤
+────▶├instruction[8]            alu_op[4]  ┤▶────
+────▶├zero_flag                   alu_src  ┤▶────
+     │                          reg_write  ┤▶────
+     │                           mem_read  ┤▶────
+     │                          mem_write  ┤▶────
+     │                             branch  ┤▶────
+     │                               jump  ┤▶────
+     │                          pc_src[2]  ┤▶────
+     │                               halt  ┤▶────
+     │                               call  ┤▶────
+     │                                ret  ┤▶────
+     │                    instr_length[2]  ┤▶────
+     └─────────────────────────────────────┘
+
+
+Hierarchy:
+----------------------------------------
+decoder [InstructionDecoder] (2 in, 12 out)

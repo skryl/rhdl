@@ -1,0 +1,15 @@
+require 'spec_helper'
+
+# Load all individual sequential component specs
+require_relative 'sequential/d_flip_flop_spec'
+require_relative 'sequential/d_flip_flop_async_spec'
+require_relative 'sequential/t_flip_flop_spec'
+require_relative 'sequential/jk_flip_flop_spec'
+require_relative 'sequential/sr_flip_flop_spec'
+require_relative 'sequential/sr_latch_spec'
+require_relative 'sequential/register_spec'
+require_relative 'sequential/register_load_spec'
+require_relative 'sequential/shift_register_spec'
+require_relative 'sequential/counter_spec'
+require_relative 'sequential/program_counter_spec'
+require_relative 'sequential/stack_pointer_spec'

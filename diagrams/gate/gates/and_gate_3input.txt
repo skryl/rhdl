@@ -1,0 +1,19 @@
+============================================================
+Gate-Level: and_gate_3in
+Type: AndGate
+============================================================
+
+Gates: 2
+DFFs: 0
+Nets: 5
+
+Inputs:
+  and_gate_3in.a0[1]
+  and_gate_3in.a1[1]
+  and_gate_3in.a2[1]
+
+Outputs:
+  and_gate_3in.y[1]
+
+Gate Types:
+  and: 2

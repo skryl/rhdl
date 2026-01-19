@@ -1,0 +1,19 @@
+digraph "dff_async" {
+  rankdir=LR;
+  node [fontname="Helvetica"];
+  edge [fontname="Helvetica"];
+  "dff:0" [label="DFF" shape=box style="rounded"];
+  "gate:not:0" [label="NOT" shape=ellipse];
+  "port:dff_async.clk:input:0" [label="dff_async.clk" shape=plaintext];
+  "port:dff_async.d:input:0" [label="dff_async.d" shape=plaintext];
+  "port:dff_async.en:input:0" [label="dff_async.en" shape=plaintext];
+  "port:dff_async.q:output:0" [label="dff_async.q" shape=plaintext];
+  "port:dff_async.qn:output:0" [label="dff_async.qn" shape=plaintext];
+  "port:dff_async.rst:input:0" [label="dff_async.rst" shape=plaintext];
+  "dff:0" -> "port:dff_async.q:output:0";
+  "gate:not:0" -> "port:dff_async.qn:output:0";
+  "port:dff_async.d:input:0" -> "dff:0";
+  "port:dff_async.en:input:0" -> "dff:0" [label="EN"];
+  "port:dff_async.q:output:0" -> "gate:not:0";
+  "port:dff_async.rst:input:0" -> "dff:0" [label="RST"];
+}

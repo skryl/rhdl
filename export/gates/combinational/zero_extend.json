@@ -1,0 +1,196 @@
+{
+  "name": "zext",
+  "net_count": 25,
+  "gates": [
+    {
+      "type": "buf",
+      "inputs": [
+        0
+      ],
+      "output": 8,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        1
+      ],
+      "output": 9,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        2
+      ],
+      "output": 10,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        3
+      ],
+      "output": 11,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        4
+      ],
+      "output": 12,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        5
+      ],
+      "output": 13,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        6
+      ],
+      "output": 14,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        7
+      ],
+      "output": 15,
+      "value": null
+    },
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 24,
+      "value": 0
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        24
+      ],
+      "output": 16,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        24
+      ],
+      "output": 17,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        24
+      ],
+      "output": 18,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        24
+      ],
+      "output": 19,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        24
+      ],
+      "output": 20,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        24
+      ],
+      "output": 21,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        24
+      ],
+      "output": 22,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        24
+      ],
+      "output": 23,
+      "value": null
+    }
+  ],
+  "dffs": [
+
+  ],
+  "inputs": {
+    "zext.a": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ]
+  },
+  "outputs": {
+    "zext.y": [
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23
+    ]
+  },
+  "schedule": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16
+  ]
+}

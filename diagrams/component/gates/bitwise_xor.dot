@@ -1,0 +1,13 @@
+digraph bitwise_xor {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[8]|<b>b[8]}|bitwise_xor\n(BitwiseXor)|{<y>y[8]}}"];
+
+  subgraph cluster_main {
+    label="bitwise_xor";
+    style=rounded;
+    color=blue;
+  }
+}

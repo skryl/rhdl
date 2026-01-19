@@ -1,0 +1,15 @@
+Component: bitwise_or
+Type: RHDL::HDL::BitwiseOr
+Gates: 8
+DFFs: 0
+Nets: 24
+
+Inputs:
+  bitwise_or.a: 8 bits
+  bitwise_or.b: 8 bits
+
+Outputs:
+  bitwise_or.y: 8 bits
+
+Gate Types:
+  or: 8

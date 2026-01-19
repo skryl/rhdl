@@ -1,0 +1,12 @@
+digraph "xor_gate" {
+  rankdir=LR;
+  node [fontname="Helvetica"];
+  edge [fontname="Helvetica"];
+  "gate:xor:0" [label="XOR" shape=ellipse];
+  "port:xor_gate.a0:input:0" [label="xor_gate.a0" shape=plaintext];
+  "port:xor_gate.a1:input:0" [label="xor_gate.a1" shape=plaintext];
+  "port:xor_gate.y:output:0" [label="xor_gate.y" shape=plaintext];
+  "gate:xor:0" -> "port:xor_gate.y:output:0";
+  "port:xor_gate.a0:input:0" -> "gate:xor:0";
+  "port:xor_gate.a1:input:0" -> "gate:xor:0";
+}

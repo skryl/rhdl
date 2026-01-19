@@ -1,0 +1,13 @@
+digraph ram {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<clk>clk[1]|<we>we[1]|<addr>addr[8]|<din>din[8]}|ram\n(RAM)|{<dout>dout[8]}}"];
+
+  subgraph cluster_main {
+    label="ram";
+    style=rounded;
+    color=blue;
+  }
+}

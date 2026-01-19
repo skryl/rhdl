@@ -1,0 +1,15 @@
+Component: bitwise_xor
+Type: RHDL::HDL::BitwiseXor
+Gates: 8
+DFFs: 0
+Nets: 24
+
+Inputs:
+  bitwise_xor.a: 8 bits
+  bitwise_xor.b: 8 bits
+
+Outputs:
+  bitwise_xor.y: 8 bits
+
+Gate Types:
+  xor: 8
