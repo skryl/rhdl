@@ -82,11 +82,46 @@ RSpec.describe RHDL::HDL::Counter do
       expect(firrtl).to include('output q')
     end
 
-    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
-      it 'firtool can compile FIRRTL to Verilog' do
-        result = CirctHelper.validate_firrtl_syntax(
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
+      it 'CIRCT-generated Verilog matches RHDL Verilog behavior' do
+        behavior = RHDL::HDL::Counter.new
+        behavior.set_input(:rst, 0)
+        behavior.set_input(:en, 1)
+        behavior.set_input(:up, 1)
+        behavior.set_input(:load, 0)
+
+        test_vectors = []
+        # Start with reset cycle to initialize counter (avoids X propagation)
+        test_cases = [
+          { d: 0, rst: 1, en: 1, up: 1, load: 0 },  # reset (initialize to 0)
+          { d: 0, rst: 0, en: 1, up: 1, load: 0 },  # count up: 0->1
+          { d: 0, rst: 0, en: 1, up: 1, load: 0 },  # count up: 1->2
+          { d: 0, rst: 0, en: 1, up: 1, load: 0 },  # count up: 2->3
+          { d: 5, rst: 0, en: 1, up: 1, load: 1 },  # load 5
+          { d: 0, rst: 0, en: 1, up: 0, load: 0 },  # count down: 5->4
+        ]
+
+        test_cases.each do |tc|
+          behavior.set_input(:d, tc[:d])
+          behavior.set_input(:rst, tc[:rst])
+          behavior.set_input(:en, tc[:en])
+          behavior.set_input(:up, tc[:up])
+          behavior.set_input(:load, tc[:load])
+          behavior.set_input(:clk, 0)
+          behavior.propagate
+          behavior.set_input(:clk, 1)
+          behavior.propagate
+          test_vectors << {
+            inputs: { d: tc[:d], rst: tc[:rst], en: tc[:en], up: tc[:up], load: tc[:load] },
+            expected: { q: behavior.get_output(:q), tc: behavior.get_output(:tc), zero: behavior.get_output(:zero) }
+          }
+        end
+
+        result = CirctHelper.validate_circt_export(
           RHDL::HDL::Counter,
-          base_dir: 'tmp/circt_test/counter'
+          test_vectors: test_vectors,
+          base_dir: 'tmp/circt_test/counter',
+          has_clock: true
         )
 
         expect(result[:success]).to be(true), result[:error]
