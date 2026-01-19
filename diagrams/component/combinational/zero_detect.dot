@@ -1,0 +1,13 @@
+digraph zero_det {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[8]}|zero_det\n(ZeroDetect)|{<zero>zero[1]}}"];
+
+  subgraph cluster_main {
+    label="zero_det";
+    style=rounded;
+    color=blue;
+  }
+}

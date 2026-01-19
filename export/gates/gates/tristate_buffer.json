@@ -1,0 +1,44 @@
+{
+  "name": "tristate",
+  "net_count": 4,
+  "gates": [
+    {
+      "type": "const",
+      "inputs": [
+
+      ],
+      "output": 3,
+      "value": 0
+    },
+    {
+      "type": "mux",
+      "inputs": [
+        3,
+        0,
+        1
+      ],
+      "output": 2,
+      "value": null
+    }
+  ],
+  "dffs": [
+
+  ],
+  "inputs": {
+    "tristate.a": [
+      0
+    ],
+    "tristate.en": [
+      1
+    ]
+  },
+  "outputs": {
+    "tristate.y": [
+      2
+    ]
+  },
+  "schedule": [
+    0,
+    1
+  ]
+}

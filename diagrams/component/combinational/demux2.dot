@@ -1,0 +1,13 @@
+digraph demux2 {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[8]|<sel>sel[1]}|demux2\n(Demux2)|{<y0>y0[8]|<y1>y1[8]}}"];
+
+  subgraph cluster_main {
+    label="demux2";
+    style=rounded;
+    color=blue;
+  }
+}

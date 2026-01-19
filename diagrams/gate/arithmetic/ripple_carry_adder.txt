@@ -1,0 +1,24 @@
+============================================================
+Gate-Level: rca
+Type: RippleCarryAdder
+============================================================
+
+Gates: 44
+DFFs: 0
+Nets: 61
+
+Inputs:
+  rca.a[8]
+  rca.b[8]
+  rca.cin[1]
+
+Outputs:
+  rca.sum[8]
+  rca.cout[1]
+  rca.overflow[1]
+
+Gate Types:
+  xor: 18
+  and: 17
+  or: 8
+  not: 1

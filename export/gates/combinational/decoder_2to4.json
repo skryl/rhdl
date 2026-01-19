@@ -1,0 +1,132 @@
+{
+  "name": "dec2to4",
+  "net_count": 13,
+  "gates": [
+    {
+      "type": "not",
+      "inputs": [
+        0
+      ],
+      "output": 7,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        1
+      ],
+      "output": 8,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        8,
+        7
+      ],
+      "output": 9,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        8,
+        0
+      ],
+      "output": 10,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        1,
+        7
+      ],
+      "output": 11,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        1,
+        0
+      ],
+      "output": 12,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        2,
+        9
+      ],
+      "output": 3,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        2,
+        10
+      ],
+      "output": 4,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        2,
+        11
+      ],
+      "output": 5,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        2,
+        12
+      ],
+      "output": 6,
+      "value": null
+    }
+  ],
+  "dffs": [
+
+  ],
+  "inputs": {
+    "dec2to4.a": [
+      0,
+      1
+    ],
+    "dec2to4.en": [
+      2
+    ]
+  },
+  "outputs": {
+    "dec2to4.y0": [
+      3
+    ],
+    "dec2to4.y1": [
+      4
+    ],
+    "dec2to4.y2": [
+      5
+    ],
+    "dec2to4.y3": [
+      6
+    ]
+  },
+  "schedule": [
+    0,
+    1,
+    5,
+    4,
+    2,
+    3,
+    9,
+    8,
+    6,
+    7
+  ]
+}

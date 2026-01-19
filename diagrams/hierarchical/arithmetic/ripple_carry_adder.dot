@@ -1,0 +1,13 @@
+digraph rca {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[8]|<b>b[8]|<cin>cin[1]}|rca\n(RippleCarryAdder)|{<sum>sum[8]|<cout>cout[1]|<overflow>overflow[1]}}"];
+
+  subgraph cluster_main {
+    label="rca";
+    style=rounded;
+    color=blue;
+  }
+}

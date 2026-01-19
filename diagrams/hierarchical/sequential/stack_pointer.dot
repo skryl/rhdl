@@ -1,0 +1,13 @@
+digraph sp {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<clk>clk[1]|<rst>rst[1]|<push>push[1]|<pop>pop[1]}|sp\n(StackPointer)|{<q>q[8]|<empty>empty[1]|<full>full[1]}}"];
+
+  subgraph cluster_main {
+    label="sp";
+    style=rounded;
+    color=blue;
+  }
+}

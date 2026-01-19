@@ -1,0 +1,44 @@
+# HDL Shift Register
+# Shift Register with serial/parallel I/O
+# Synthesizable via Sequential DSL
+
+require_relative '../../dsl/behavior'
+require_relative '../../dsl/sequential'
+
+module RHDL
+  module HDL
+    class ShiftRegister < SequentialComponent
+      include RHDL::DSL::Behavior
+      include RHDL::DSL::Sequential
+
+      input :d_in       # Serial input
+      input :clk
+      input :rst
+      input :en
+      input :dir        # 0 = right, 1 = left
+      input :load       # Parallel load enable
+      input :d, width: 8  # Parallel load data
+      output :q, width: 8
+      output :d_out     # Serial output
+
+      # Sequential block for shift register
+      # Priority: load > en (shift)
+      sequential clock: :clk, reset: :rst, reset_values: { q: 0 } do
+        # Shift right: d_in becomes MSB, shift others down
+        shift_right = cat(d_in, q[7..1])
+        # Shift left: d_in becomes LSB, shift others up
+        shift_left = cat(q[6..0], d_in)
+        # Select direction
+        shift_result = mux(dir, shift_left, shift_right)
+        # Priority: load > shift
+        q <= mux(load, d, mux(en, shift_result, q))
+      end
+
+      # Combinational output for serial data
+      behavior do
+        # Serial out: LSB when right, MSB when left
+        d_out <= mux(dir, q[7], q[0])
+      end
+    end
+  end
+end

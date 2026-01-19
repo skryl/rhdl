@@ -1,0 +1,22 @@
+============================================================
+Gate-Level: full_adder
+Type: FullAdder
+============================================================
+
+Gates: 5
+DFFs: 0
+Nets: 8
+
+Inputs:
+  full_adder.a[1]
+  full_adder.b[1]
+  full_adder.cin[1]
+
+Outputs:
+  full_adder.sum[1]
+  full_adder.cout[1]
+
+Gate Types:
+  xor: 2
+  and: 2
+  or: 1

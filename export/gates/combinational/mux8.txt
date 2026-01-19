@@ -1,0 +1,22 @@
+Component: mux8
+Type: RHDL::HDL::Mux8
+Gates: 28
+DFFs: 0
+Nets: 63
+
+Inputs:
+  mux8.in0: 4 bits
+  mux8.in1: 4 bits
+  mux8.in2: 4 bits
+  mux8.in3: 4 bits
+  mux8.in4: 4 bits
+  mux8.in5: 4 bits
+  mux8.in6: 4 bits
+  mux8.in7: 4 bits
+  mux8.sel: 3 bits
+
+Outputs:
+  mux8.y: 4 bits
+
+Gate Types:
+  mux: 28

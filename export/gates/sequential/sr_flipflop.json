@@ -1,0 +1,99 @@
+{
+  "name": "srff",
+  "net_count": 12,
+  "gates": [
+    {
+      "type": "not",
+      "inputs": [
+        1
+      ],
+      "output": 8,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        8,
+        7
+      ],
+      "output": 9,
+      "value": null
+    },
+    {
+      "type": "or",
+      "inputs": [
+        0,
+        9
+      ],
+      "output": 10,
+      "value": null
+    },
+    {
+      "type": "and",
+      "inputs": [
+        10,
+        8
+      ],
+      "output": 11,
+      "value": null
+    },
+    {
+      "type": "buf",
+      "inputs": [
+        7
+      ],
+      "output": 5,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        7
+      ],
+      "output": 6,
+      "value": null
+    }
+  ],
+  "dffs": [
+    {
+      "d": 11,
+      "q": 7,
+      "rst": 3,
+      "en": 4,
+      "async_reset": false
+    }
+  ],
+  "inputs": {
+    "srff.s": [
+      0
+    ],
+    "srff.r": [
+      1
+    ],
+    "srff.clk": [
+      2
+    ],
+    "srff.rst": [
+      3
+    ],
+    "srff.en": [
+      4
+    ]
+  },
+  "outputs": {
+    "srff.q": [
+      5
+    ],
+    "srff.qn": [
+      6
+    ]
+  },
+  "schedule": [
+    0,
+    4,
+    5,
+    1,
+    2,
+    3
+  ]
+}

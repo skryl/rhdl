@@ -1,0 +1,13 @@
+digraph cmp {
+  rankdir=LR;
+  node [shape=record, fontname="Courier"];
+  edge [fontname="Courier", fontsize=10];
+
+  main [label="{{<a>a[8]|<b>b[8]|<signed>signed[1]}|cmp\n(Comparator)|{<eq>eq[1]|<gt>gt[1]|<lt>lt[1]|<gte>gte[1]|<lte>lte[1]}}"];
+
+  subgraph cluster_main {
+    label="cmp";
+    style=rounded;
+    color=blue;
+  }
+}

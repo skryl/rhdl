@@ -1,0 +1,21 @@
+Component: sub
+Type: RHDL::HDL::Subtractor
+Gates: 53
+DFFs: 0
+Nets: 70
+
+Inputs:
+  sub.a: 8 bits
+  sub.b: 8 bits
+  sub.bin: 1 bits
+
+Outputs:
+  sub.diff: 8 bits
+  sub.bout: 1 bits
+  sub.overflow: 1 bits
+
+Gate Types:
+  not: 10
+  xor: 18
+  and: 17
+  or: 8

@@ -1,0 +1,19 @@
+Component: dec2to4
+Type: RHDL::HDL::Decoder2to4
+Gates: 10
+DFFs: 0
+Nets: 13
+
+Inputs:
+  dec2to4.a: 2 bits
+  dec2to4.en: 1 bits
+
+Outputs:
+  dec2to4.y0: 1 bits
+  dec2to4.y1: 1 bits
+  dec2to4.y2: 1 bits
+  dec2to4.y3: 1 bits
+
+Gate Types:
+  not: 2
+  and: 8

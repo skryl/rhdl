@@ -1,0 +1,20 @@
+/.bundle/*
+!/.bundle/config
+# Ignore binstubs except for the gem executable
+/bin/*
+!/bin/rhdl
+/.yardoc
+/_yardoc/
+/coverage/
+/doc/
+/pkg/
+/spec/reports/
+/tmp/
+*.gem
+*.rbc
+.DS_Store
+.rspec_status
+.rspec_status*
+/spec/fixtures/apple2/
+/export/roms/
+/vendor/

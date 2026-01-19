@@ -1,0 +1,107 @@
+{
+  "name": "bitwise_not",
+  "net_count": 16,
+  "gates": [
+    {
+      "type": "not",
+      "inputs": [
+        0
+      ],
+      "output": 8,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        1
+      ],
+      "output": 9,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        2
+      ],
+      "output": 10,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        3
+      ],
+      "output": 11,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        4
+      ],
+      "output": 12,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        5
+      ],
+      "output": 13,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        6
+      ],
+      "output": 14,
+      "value": null
+    },
+    {
+      "type": "not",
+      "inputs": [
+        7
+      ],
+      "output": 15,
+      "value": null
+    }
+  ],
+  "dffs": [
+
+  ],
+  "inputs": {
+    "bitwise_not.a": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ]
+  },
+  "outputs": {
+    "bitwise_not.y": [
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ]
+  },
+  "schedule": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ]
+}

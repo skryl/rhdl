@@ -1,0 +1,108 @@
+# MOS 6502 Status Register (P Register) - Synthesizable DSL Version
+# Contains the processor status flags:
+#   Bit 7: N - Negative
+#   Bit 6: V - Overflow
+#   Bit 5: - - (always 1)
+#   Bit 4: B - Break
+#   Bit 3: D - Decimal Mode
+#   Bit 2: I - Interrupt Disable
+#   Bit 1: Z - Zero
+#   Bit 0: C - Carry
+
+require_relative '../../../lib/rhdl'
+require_relative '../../../lib/rhdl/dsl/behavior'
+require_relative '../../../lib/rhdl/dsl/sequential'
+
+module MOS6502
+  class StatusRegister < RHDL::HDL::SequentialComponent
+    include RHDL::DSL::Behavior
+    include RHDL::DSL::Sequential
+
+    # Flag bit positions
+    FLAG_C = 0  # Carry
+    FLAG_Z = 1  # Zero
+    FLAG_I = 2  # Interrupt Disable
+    FLAG_D = 3  # Decimal Mode
+    FLAG_B = 4  # Break
+    FLAG_X = 5  # Unused (always 1)
+    FLAG_V = 6  # Overflow
+    FLAG_N = 7  # Negative
+
+    # Control inputs
+    input :clk
+    input :rst
+
+    # Load controls
+    input :load_all        # Load entire register (from stack pull)
+    input :load_flags      # Load N, Z, C, V from ALU
+    input :load_n
+    input :load_z
+    input :load_c
+    input :load_v
+    input :load_i
+    input :load_d
+    input :load_b
+
+    # Flag inputs
+    input :n_in
+    input :z_in
+    input :c_in
+    input :v_in
+    input :i_in
+    input :d_in
+    input :b_in
+    input :data_in, width: 8
+
+    # Outputs
+    output :p, width: 8
+    output :n
+    output :v
+    output :b
+    output :d
+    output :i
+    output :z
+    output :c
+
+    # Sequential block for p register
+    # Priority: reset > load_all > load_flags > individual loads
+    sequential clock: :clk, reset: :rst, reset_values: { p: 0x24 } do
+      # Build new_p for each priority level using mux
+      # For load_all: (data_in | 0x20) & 0xEF - set bit 5, clear bit 4
+      load_all_val = (data_in | lit(0x20, width: 8)) & lit(0xEF, width: 8)
+
+      # For load_flags: (p & 0x3C) | (n << 7) | (v << 6) | 0x20 | (z << 1) | c
+      # Keep bits 2,3,4,5 (I, D, B, X), update N, V, Z, C
+      flags_val = cat(n_in, v_in, lit(1, width: 1), p[4], p[3], p[2], z_in, c_in)
+
+      # For individual loads - build value with conditional updates
+      # Each bit: mux(load_x, x_in, p[bit])
+      ind_n = mux(load_n, n_in, p[7])
+      ind_v = mux(load_v, v_in, p[6])
+      ind_b = mux(load_b, b_in, p[4])
+      ind_d = mux(load_d, d_in, p[3])
+      ind_i = mux(load_i, i_in, p[2])
+      ind_z = mux(load_z, z_in, p[1])
+      ind_c = mux(load_c, c_in, p[0])
+      ind_val = cat(ind_n, ind_v, lit(1, width: 1), ind_b, ind_d, ind_i, ind_z, ind_c)
+
+      # Final priority mux
+      p <= mux(load_all, load_all_val,
+              mux(load_flags, flags_val, ind_val))
+    end
+
+    # Combinational outputs for individual flags
+    behavior do
+      n <= p[7]
+      v <= p[6]
+      b <= p[4]
+      d <= p[3]
+      i <= p[2]
+      z <= p[1]
+      c <= p[0]
+    end
+
+    # Test helper accessor (use DSL state management)
+    def read_p; read_reg(:p) || 0x24; end
+
+  end
+end

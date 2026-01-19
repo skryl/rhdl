@@ -1,0 +1,19 @@
+# HDL Combinational Logic Components
+# Multiplexers, decoders, encoders, and other combinational circuits
+
+require_relative 'combinational/mux2'
+require_relative 'combinational/mux4'
+require_relative 'combinational/mux8'
+require_relative 'combinational/demux2'
+require_relative 'combinational/demux4'
+require_relative 'combinational/decoder2to4'
+require_relative 'combinational/decoder3to8'
+require_relative 'combinational/encoder4to2'
+require_relative 'combinational/encoder8to3'
+require_relative 'combinational/zero_detect'
+require_relative 'combinational/sign_extend'
+require_relative 'combinational/zero_extend'
+require_relative 'combinational/barrel_shifter'
+require_relative 'combinational/bit_reverse'
+require_relative 'combinational/pop_count'
+require_relative 'combinational/lz_count'
