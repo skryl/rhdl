@@ -1,8 +1,7 @@
 /.bundle/*
 !/.bundle/config
-# Ignore binstubs except for the gem executable
-/bin/*
-!/bin/rhdl
+# Ignore binstubs directory (executable is in exe/)
+/bin/
 /.yardoc
 /_yardoc/
 /coverage/
