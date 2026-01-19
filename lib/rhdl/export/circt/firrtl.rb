@@ -26,12 +26,15 @@ module RHDL
           output_ports = module_def.ports.select { |p| p.direction == :out }.map(&:name).to_set
           output_widths = module_def.ports.select { |p| p.direction == :out }.map { |p| [p.name, p.width] }.to_h
 
-          # Find clock for sequential processes
-          clock = find_clock_for_reg(module_def, nil)
+          # Find clock for sequential processes or from write ports
+          clock = find_clock_for_reg(module_def, nil) || find_clock_from_write_ports(module_def)
 
           # Collect targets of sequential assignments that are outputs (need internal registers)
           seq_targets = collect_seq_targets(module_def)
           seq_output_targets = seq_targets.select { |t| output_ports.include?(t) }
+
+          # Collect memory reads to set up read ports
+          memory_reads = collect_memory_reads(module_def)
 
           # Ports
           module_def.ports.each do |port|
@@ -67,24 +70,75 @@ module RHDL
             end
           end
 
-          # Memory arrays
+          # Pre-compute read counts per memory for consistent port naming
+          # Normalize memory names to strings for consistent lookup
+          reads_per_mem = Hash.new(0)
+          memory_reads.each { |mr| reads_per_mem[mr.memory.to_s] += 1 }
+
+          # Memory arrays - determine read/write ports needed
           module_def.memories.each do |mem|
+            mem_key = mem.name.to_s
+            # Count how many read ports this memory needs
+            read_count = reads_per_mem[mem_key]
+            read_count = 1 if read_count == 0 # At least one reader if memory exists
+            # For dual-port RAM with 2 reads and 2 writes, we need multiple ports
+            write_count = module_def.write_ports.count { |wp| wp.memory.to_s == mem_key }
+
             lines << "    mem #{sanitize(mem.name)}:"
             lines << "      data-type => #{type_decl(mem.width)}"
             lines << "      depth => #{mem.depth}"
             lines << "      read-latency => 0"
             lines << "      write-latency => 1"
-            lines << "      reader => read"
-            lines << "      writer => write"
+
+            # Generate reader declarations - use numbered ports if multiple readers
+            if read_count == 1
+              lines << "      reader => read"
+            else
+              read_count.times { |i| lines << "      reader => read#{i}" }
+            end
+
+            # Generate writer declarations only if there are write ports
+            if write_count == 1
+              lines << "      writer => write"
+            elsif write_count > 1
+              write_count.times { |i| lines << "      writer => write#{i}" }
+            end
+            # No writer declaration for read-only memories (write_count == 0)
+          end
+
+          # For memories without a clock input, generate a fake clock
+          needs_fake_clock = !module_def.memories.empty? && !clock
+          if needs_fake_clock
+            lines << "    wire _fake_clk: Clock"
+            lines << "    connect _fake_clk, asClock(UInt<1>(0))"
           end
 
           has_decls = !module_def.nets.empty? || !module_def.regs.empty? ||
-                      !module_def.memories.empty? || !seq_output_targets.empty?
+                      !module_def.memories.empty? || !seq_output_targets.empty? || needs_fake_clock
           lines << "" if has_decls
 
-          # Continuous assignments
+          # Memory read port connections - must come before assigns that use them
+          # Track which memory read we're on for multi-port memories
+          mem_read_index = Hash.new(0)
+          memory_reads.each do |mr|
+            mem_key = mr.memory.to_s
+            mem_name = sanitize(mr.memory)
+            idx = mem_read_index[mem_key]
+            # Use numbered ports only if multiple readers
+            read_port = reads_per_mem[mem_key] > 1 ? "read#{idx}" : "read"
+
+            # Use real clock if available, otherwise fake clock
+            clk_signal = clock ? sanitize(clock) : "_fake_clk"
+            lines << "    connect #{mem_name}.#{read_port}.clk, #{clk_signal}"
+            lines << "    connect #{mem_name}.#{read_port}.en, UInt<1>(1)"
+            lines << "    connect #{mem_name}.#{read_port}.addr, #{expr(mr.addr)}"
+            mem_read_index[mem_key] += 1
+          end
+
+          # Continuous assignments - use memory read port data
+          mem_read_index = Hash.new(0)
           module_def.assigns.each do |assign|
-            lines << "    connect #{sanitize(assign.target)}, #{expr(assign.expr)}"
+            lines << "    connect #{sanitize(assign.target)}, #{expr_with_mem_reads(assign.expr, memory_reads, mem_read_index)}"
           end
 
           # Connect output ports to their internal registers
@@ -108,11 +162,24 @@ module RHDL
           end
 
           # Memory write ports
+          write_port_index = Hash.new(0)
           module_def.write_ports.each do |wp|
-            lines << "    connect #{sanitize(wp.memory)}.write.clk, #{sanitize(wp.clock)}"
-            lines << "    connect #{sanitize(wp.memory)}.write.en, #{expr(wp.enable)}"
-            lines << "    connect #{sanitize(wp.memory)}.write.addr, #{expr(wp.addr)}"
-            lines << "    connect #{sanitize(wp.memory)}.write.data, #{expr(wp.data)}"
+            mem_name = sanitize(wp.memory)
+            idx = write_port_index[wp.memory]
+            write_count = module_def.write_ports.count { |w| w.memory == wp.memory }
+            port_suffix = write_count > 1 ? idx.to_s : ""
+            write_port = "write#{port_suffix}"
+
+            # Find memory width for mask
+            mem = module_def.memories.find { |m| m.name == wp.memory }
+            mem_width = mem&.width || 8
+
+            lines << "    connect #{mem_name}.#{write_port}.clk, #{sanitize(wp.clock)}"
+            lines << "    connect #{mem_name}.#{write_port}.en, #{expr(wp.enable)}"
+            lines << "    connect #{mem_name}.#{write_port}.addr, #{expr(wp.addr)}"
+            lines << "    connect #{mem_name}.#{write_port}.mask, UInt<#{mem_width}>(#{(1 << mem_width) - 1})"
+            lines << "    connect #{mem_name}.#{write_port}.data, #{expr(wp.data)}"
+            write_port_index[wp.memory] += 1
           end
 
           # Module instances
@@ -126,6 +193,150 @@ module RHDL
           end
 
           lines.join("\n")
+        end
+
+        def find_clock_from_write_ports(module_def)
+          module_def.write_ports.first&.clock
+        end
+
+        def collect_memory_reads(module_def)
+          reads = []
+          module_def.assigns.each do |assign|
+            collect_memory_reads_from_expr(assign.expr, reads)
+          end
+          module_def.processes.each do |process|
+            process.statements.each do |stmt|
+              collect_memory_reads_from_stmt(stmt, reads)
+            end
+          end
+          reads
+        end
+
+        def collect_memory_reads_from_expr(expr_node, reads)
+          case expr_node
+          when IR::MemoryRead
+            reads << expr_node
+          when IR::UnaryOp
+            collect_memory_reads_from_expr(expr_node.operand, reads)
+          when IR::BinaryOp
+            collect_memory_reads_from_expr(expr_node.left, reads)
+            collect_memory_reads_from_expr(expr_node.right, reads)
+          when IR::Mux
+            collect_memory_reads_from_expr(expr_node.condition, reads)
+            collect_memory_reads_from_expr(expr_node.when_true, reads)
+            collect_memory_reads_from_expr(expr_node.when_false, reads)
+          when IR::Concat
+            expr_node.parts.each { |p| collect_memory_reads_from_expr(p, reads) }
+          when IR::Slice
+            collect_memory_reads_from_expr(expr_node.base, reads)
+          when IR::Resize
+            collect_memory_reads_from_expr(expr_node.expr, reads)
+          when IR::Case
+            collect_memory_reads_from_expr(expr_node.selector, reads)
+            expr_node.cases.each { |_v, branch| collect_memory_reads_from_expr(branch, reads) }
+            collect_memory_reads_from_expr(expr_node.default, reads) if expr_node.default
+          end
+        end
+
+        def collect_memory_reads_from_stmt(stmt, reads)
+          case stmt
+          when IR::SeqAssign
+            collect_memory_reads_from_expr(stmt.expr, reads)
+          when IR::If
+            collect_memory_reads_from_expr(stmt.condition, reads)
+            stmt.then_statements.each { |s| collect_memory_reads_from_stmt(s, reads) }
+            stmt.else_statements.each { |s| collect_memory_reads_from_stmt(s, reads) }
+          end
+        end
+
+        def expr_with_mem_reads(expr_node, memory_reads, mem_read_index, output_regs: Set.new)
+          case expr_node
+          when IR::MemoryRead
+            # Find which read port this corresponds to
+            mem_key = expr_node.memory.to_s
+            mem_name = sanitize(expr_node.memory)
+            read_count = memory_reads.count { |mr| mr.memory.to_s == mem_key }
+            idx = mem_read_index[mem_key]
+            # Use numbered ports only if multiple readers
+            read_port = read_count > 1 ? "read#{idx}" : "read"
+            mem_read_index[mem_key] += 1
+            "#{mem_name}.#{read_port}.data"
+          when IR::Signal
+            name = output_regs.include?(expr_node.name) ? "#{expr_node.name}_reg" : expr_node.name
+            sanitize(name)
+          when IR::Literal
+            literal(expr_node.value, expr_node.width)
+          when IR::UnaryOp
+            case expr_node.op
+            when :~, :!
+              "not(#{expr_with_mem_reads(expr_node.operand, memory_reads, mem_read_index, output_regs: output_regs)})"
+            else
+              raise ArgumentError, "Unsupported unary op: #{expr_node.op}"
+            end
+          when IR::BinaryOp
+            left = expr_with_mem_reads(expr_node.left, memory_reads, mem_read_index, output_regs: output_regs)
+            right = expr_with_mem_reads(expr_node.right, memory_reads, mem_read_index, output_regs: output_regs)
+            binary_op_str(expr_node.op, left, right)
+          when IR::Mux
+            cond = expr_with_mem_reads(expr_node.condition, memory_reads, mem_read_index, output_regs: output_regs)
+            when_true = expr_with_mem_reads(expr_node.when_true, memory_reads, mem_read_index, output_regs: output_regs)
+            when_false = expr_with_mem_reads(expr_node.when_false, memory_reads, mem_read_index, output_regs: output_regs)
+            "mux(#{cond}, #{when_true}, #{when_false})"
+          when IR::Concat
+            parts = expr_node.parts.map { |p| expr_with_mem_reads(p, memory_reads, mem_read_index, output_regs: output_regs) }
+            "cat(#{parts.join(', ')})"
+          when IR::Slice
+            base = expr_with_mem_reads(expr_node.base, memory_reads, mem_read_index, output_regs: output_regs)
+            high = [expr_node.range.begin, expr_node.range.end].max
+            low = [expr_node.range.begin, expr_node.range.end].min
+            "bits(#{base}, #{high}, #{low})"
+          when IR::Resize
+            inner = expr_with_mem_reads(expr_node.expr, memory_reads, mem_read_index, output_regs: output_regs)
+            target_width = expr_node.width
+            source_width = expr_node.expr.width
+            if target_width == source_width
+              inner
+            elsif target_width > source_width
+              "pad(#{inner}, #{target_width})"
+            else
+              "bits(#{inner}, #{target_width - 1}, 0)"
+            end
+          when IR::Case
+            selector = expr_with_mem_reads(expr_node.selector, memory_reads, mem_read_index, output_regs: output_regs)
+            default_expr = expr_node.default ? expr_with_mem_reads(expr_node.default, memory_reads, mem_read_index, output_regs: output_regs) : literal(0, expr_node.width)
+            result = default_expr
+            expr_node.cases.reverse_each do |values, branch|
+              values.each do |v|
+                cond = "eq(#{selector}, #{literal(v, expr_node.selector.width)})"
+                result = "mux(#{cond}, #{expr_with_mem_reads(branch, memory_reads, mem_read_index, output_regs: output_regs)}, #{result})"
+              end
+            end
+            result
+          else
+            raise ArgumentError, "Unsupported FIRRTL expression: #{expr_node.inspect}"
+          end
+        end
+
+        def binary_op_str(op, left, right)
+          case op
+          when :& then "and(#{left}, #{right})"
+          when :| then "or(#{left}, #{right})"
+          when :^ then "xor(#{left}, #{right})"
+          when :+ then "add(#{left}, #{right})"
+          when :- then "sub(#{left}, #{right})"
+          when :* then "mul(#{left}, #{right})"
+          when :/ then "div(#{left}, #{right})"
+          when :% then "rem(#{left}, #{right})"
+          when :<< then "shl(#{left}, #{right})"
+          when :>> then "shr(#{left}, #{right})"
+          when :== then "eq(#{left}, #{right})"
+          when :!= then "neq(#{left}, #{right})"
+          when :< then "lt(#{left}, #{right})"
+          when :> then "gt(#{left}, #{right})"
+          when :<= then "leq(#{left}, #{right})"
+          when :>= then "geq(#{left}, #{right})"
+          else raise ArgumentError, "Unsupported binary op: #{op}"
+          end
         end
 
         def collect_seq_targets(module_def)
