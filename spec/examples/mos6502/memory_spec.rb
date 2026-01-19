@@ -29,6 +29,25 @@ RSpec.describe MOS6502::Memory do
       verilog = MOS6502::Memory.to_verilog
       expect(verilog).to include('module mos6502_memory')
     end
+
+    it 'generates valid FIRRTL' do
+      firrtl = MOS6502::Memory.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit mos6502_memory')
+      expect(firrtl).to include('input clk')
+      expect(firrtl).to include('input addr')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          MOS6502::Memory,
+          base_dir: 'tmp/circt_test/mos6502_memory'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
   end
 
   describe 'gate-level netlist' do

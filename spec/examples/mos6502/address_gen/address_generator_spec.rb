@@ -75,6 +75,25 @@ RSpec.describe MOS6502::AddressGenerator do
       expect(verilog).to include('eff_addr')
     end
 
+    it 'generates valid FIRRTL' do
+      firrtl = described_class.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit mos6502_address_generator')
+      expect(firrtl).to include('input mode')
+      expect(firrtl).to include('output eff_addr')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        result = CirctHelper.validate_firrtl_syntax(
+          described_class,
+          base_dir: 'tmp/circt_test/mos6502_address_generator'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
+
     context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
       it 'behavior Verilog matches RHDL simulation' do
         verilog = described_class.to_verilog

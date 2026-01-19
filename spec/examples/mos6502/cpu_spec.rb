@@ -38,6 +38,26 @@ RSpec.describe MOS6502::CPU do
       expect(verilog.length).to be > 1000  # Complex module
     end
 
+    it 'generates valid FIRRTL' do
+      firrtl = described_class.to_circt
+      expect(firrtl).to include('FIRRTL version')
+      expect(firrtl).to include('circuit mos6502_cpu')
+      expect(firrtl).to include('input clk')
+      expect(firrtl).to include('output addr')
+    end
+
+    context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
+      it 'firtool can compile FIRRTL to Verilog' do
+        pending 'Hierarchical FIRRTL export not yet implemented'
+        result = CirctHelper.validate_firrtl_syntax(
+          described_class,
+          base_dir: 'tmp/circt_test/mos6502_cpu'
+        )
+
+        expect(result[:success]).to be(true), result[:error]
+      end
+    end
+
     context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
       it 'behavior Verilog compiles and runs' do
         # Use to_verilog_hierarchy to include all sub-module definitions
