@@ -439,7 +439,7 @@ module NetlistHelper
     File.write(module_path, verilog_source)
     File.write(tb_path, generate_behavior_testbench(module_name, inputs, outputs, test_vectors, has_clock: has_clock))
 
-    compile = run_cmd(["iverilog", "-g2005", "-o", "sim.out", "tb.v", "#{module_name}.v"], cwd: base_dir)
+    compile = run_cmd(["iverilog", "-g2012", "-o", "sim.out", "tb.v", "#{module_name}.v"], cwd: base_dir)
     return { success: false, error: "Compilation failed: #{compile[:stderr]}\n#{compile[:stdout]}" } unless compile[:status].success?
 
     run = run_cmd(["vvp", "sim.out"], cwd: base_dir)
