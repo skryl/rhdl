@@ -218,8 +218,17 @@ require_relative "dsl/assignment"
 # Load component instance
 require_relative "dsl/component_instance"
 
+# Load component DSL modules (used by sim/component.rb)
+require_relative "dsl/ports"
+require_relative "dsl/structure"
+require_relative "dsl/vec"
+require_relative "dsl/bundle"
+
 # Load behavior module after DSL is defined
 require_relative "dsl/behavior"
 require_relative "dsl/sequential"
-require_relative "dsl/memory_dsl"
-require_relative "dsl/state_machine_dsl"
+require_relative "dsl/memory"
+require_relative "dsl/state_machine"
+
+# Load codegen modules (depend on Export::IR, loaded later)
+# These are loaded after codegen.rb in the main rhdl.rb
