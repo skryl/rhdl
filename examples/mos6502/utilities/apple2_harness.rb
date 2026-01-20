@@ -97,7 +97,8 @@ module Apple2Harness
         sp: dp.read_sp,
         p: dp.read_p,
         cycles: @cpu.clock_count,
-        halted: @cpu.halted?
+        halted: @cpu.halted?,
+        simulator_type: simulator_type
       }
     end
 
@@ -109,6 +110,12 @@ module Apple2Harness
     # Get total CPU cycles
     def cycle_count
       @cpu.clock_count
+    end
+
+    # Get the simulator type
+    # @return [Symbol] :hdl for cycle-accurate HDL simulation
+    def simulator_type
+      :hdl
     end
   end
 
@@ -244,7 +251,8 @@ module Apple2Harness
         sp: @cpu.sp,
         p: @cpu.p,
         cycles: @cpu.cycles,
-        halted: @cpu.halted?
+        halted: @cpu.halted?,
+        simulator_type: simulator_type
       }
     end
 
@@ -254,6 +262,12 @@ module Apple2Harness
 
     def cycle_count
       @cpu.cycles
+    end
+
+    # Get the simulator type
+    # @return [Symbol] :native for Rust implementation, :ruby for pure Ruby
+    def simulator_type
+      native? ? :native : :ruby
     end
   end
 end
