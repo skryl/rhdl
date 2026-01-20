@@ -192,14 +192,23 @@ module MOS6502
       track_data = disk[@track]
       return 0x00 unless track_data
 
-      # Get next nibble byte
-      byte = track_data[@byte_position] || 0x00
+      # Get next byte from track data
+      entry = track_data[@byte_position]
       @byte_position = (@byte_position + 1) % track_data.length
 
       # Simulate disk spinning time
       @spin_counter += 1
 
-      byte
+      # Handle raw data bytes (marked with [:raw, byte])
+      if entry.is_a?(Array) && entry[0] == :raw
+        # Return raw sector byte directly without modification
+        # The byte will have bit 7 set by adding 0x100 marker,
+        # and boot ROM reads without BPL check for data bytes
+        entry[1]
+      else
+        # Return normal nibble byte
+        entry || 0x00
+      end
     end
 
     # Read write-protect status
@@ -242,6 +251,7 @@ module MOS6502
     end
 
     # Encode a single sector with address field, gaps, and data field
+    # Uses raw_data_mode where data field contains raw bytes (marked with special prefix)
     def encode_sector(track, sector, data)
       encoded = []
 
@@ -271,8 +281,12 @@ module MOS6502
       # Prologue: D5 AA AD
       encoded << 0xD5 << 0xAA << 0xAD
 
-      # Encode 256 bytes of data using 6-and-2 encoding
-      encoded.concat(encode_6and2(data || Array.new(256, 0)))
+      # Mark start of raw data with special sequence (256 means raw mode)
+      # Store raw sector data - these bytes will be returned with bit 7 ORed
+      (data || Array.new(256, 0)).each do |byte|
+        # Store the raw byte - the read_data method will add bit 7
+        encoded << [:raw, byte]
+      end
 
       # Epilogue: DE AA EB
       encoded << 0xDE << 0xAA << 0xEB
@@ -342,6 +356,168 @@ module MOS6502
       encoded << translate[checksum & 0x3F]
 
       encoded
+    end
+
+    public
+
+    # Generate a minimal Disk II boot ROM for slot 6 ($C600-$C6FF)
+    # This ROM reads sector 0 from track 0 into $800-$8FF and jumps to $801
+    def self.boot_rom
+      # This is a simplified boot ROM that:
+      # 1. Turns on the motor
+      # 2. Seeks to track 0 (already there after reset)
+      # 3. Reads bytes looking for address field (D5 AA 96)
+      # 4. Verifies it's sector 0
+      # 5. Reads data field (D5 AA AD) into $800
+      # 6. Jumps to $801
+      #
+      # Slot 6 addresses:
+      #   $C0E8 = motor off, $C0E9 = motor on
+      #   $C0EC = read data (Q6L), $C0EE = read mode (Q7L)
+
+      asm = []
+      labels = {}
+
+      # Helper to emit branch instruction with label
+      emit_branch = lambda do |opcode, target_label|
+        asm << opcode
+        # Store placeholder and remember position for patching
+        pos = asm.length
+        asm << 0x00  # Placeholder
+        [pos, target_label]
+      end
+
+      branches_to_patch = []
+
+      # Zero page locations we'll use
+      zp_ptr_lo = 0x26  # Pointer for storing data
+      zp_ptr_hi = 0x27
+      zp_sector = 0x3D  # Target sector number
+      zp_track = 0x41   # Target track (we want 0)
+      zp_temp = 0x2E
+
+      # ORG $C600
+
+      # === INIT ===
+      # Set up zero page variables
+      asm << 0xA9 << 0x00        # LDA #$00 - target sector 0
+      asm << 0x85 << zp_sector   # STA $3D
+      asm << 0xA9 << 0x00        # LDA #$00 - target track 0
+      asm << 0x85 << zp_track    # STA $41
+      asm << 0xA9 << 0x00        # LDA #$00
+      asm << 0x85 << zp_ptr_lo   # STA $26 - dest ptr lo = $00
+      asm << 0xA9 << 0x08        # LDA #$08
+      asm << 0x85 << zp_ptr_hi   # STA $27 - dest ptr hi = $08
+
+      # Turn on motor
+      asm << 0xAD << 0xE9 << 0xC0  # LDA $C0E9 (motor on)
+
+      # Set read mode
+      asm << 0xAD << 0xEE << 0xC0  # LDA $C0EE (Q7L - read mode)
+
+      # Select drive 1
+      asm << 0xAD << 0xEA << 0xC0  # LDA $C0EA (drive 1)
+
+      # === FIND ADDRESS FIELD ===
+      # Look for D5 AA 96 (address field prologue)
+      labels[:find_addr] = asm.length
+      asm << 0xAD << 0xEC << 0xC0  # LDA $C0EC (read data)
+      branches_to_patch << emit_branch.call(0x10, :find_addr)  # BPL find_addr
+      asm << 0xC9 << 0xD5          # CMP #$D5
+      branches_to_patch << emit_branch.call(0xD0, :find_addr)  # BNE find_addr
+
+      asm << 0xAD << 0xEC << 0xC0  # LDA $C0EC
+      branches_to_patch << emit_branch.call(0x10, :find_addr)  # BPL (wait for byte)
+      asm << 0xC9 << 0xAA          # CMP #$AA
+      branches_to_patch << emit_branch.call(0xD0, :find_addr)  # BNE find_addr
+
+      asm << 0xAD << 0xEC << 0xC0  # LDA $C0EC
+      branches_to_patch << emit_branch.call(0x10, :find_addr)  # BPL (wait for byte)
+      asm << 0xC9 << 0x96          # CMP #$96 (address field)
+      branches_to_patch << emit_branch.call(0xD0, :find_addr)  # BNE find_addr
+
+      # Found address field - read volume (skip), track, sector
+      # Read volume (2 bytes, 4-and-4 encoded) - discard
+      asm << 0xAD << 0xEC << 0xC0  # LDA $C0EC
+      branches_to_patch << emit_branch.call(0x10, :find_addr)  # BPL
+      asm << 0xAD << 0xEC << 0xC0  # LDA $C0EC (second byte of volume)
+      branches_to_patch << emit_branch.call(0x10, :find_addr)  # BPL
+
+      # Read track (2 bytes, 4-and-4 encoded)
+      asm << 0xAD << 0xEC << 0xC0  # LDA $C0EC
+      branches_to_patch << emit_branch.call(0x10, :find_addr)  # BPL
+      asm << 0x2A                  # ROL A
+      asm << 0x85 << zp_temp       # STA temp
+      asm << 0xAD << 0xEC << 0xC0  # LDA $C0EC
+      branches_to_patch << emit_branch.call(0x10, :find_addr)  # BPL
+      asm << 0x25 << zp_temp       # AND temp
+      asm << 0xC5 << zp_track      # CMP target track
+      branches_to_patch << emit_branch.call(0xD0, :find_addr)  # BNE find_addr (wrong track)
+
+      # Read sector (2 bytes, 4-and-4 encoded)
+      asm << 0xAD << 0xEC << 0xC0  # LDA $C0EC
+      branches_to_patch << emit_branch.call(0x10, :find_addr)  # BPL
+      asm << 0x2A                  # ROL A
+      asm << 0x85 << zp_temp       # STA temp
+      asm << 0xAD << 0xEC << 0xC0  # LDA $C0EC
+      branches_to_patch << emit_branch.call(0x10, :find_addr)  # BPL
+      asm << 0x25 << zp_temp       # AND temp
+      asm << 0xC5 << zp_sector     # CMP target sector
+      branches_to_patch << emit_branch.call(0xD0, :find_addr)  # BNE find_addr (wrong sector)
+
+      # Skip checksum - read 2 more bytes
+      asm << 0xAD << 0xEC << 0xC0  # LDA $C0EC
+      branches_to_patch << emit_branch.call(0x10, :find_addr)  # BPL
+      asm << 0xAD << 0xEC << 0xC0  # LDA $C0EC
+      branches_to_patch << emit_branch.call(0x10, :find_addr)  # BPL
+
+      # === FIND DATA FIELD ===
+      # Look for D5 AA AD
+      labels[:find_data] = asm.length
+      asm << 0xAD << 0xEC << 0xC0  # LDA $C0EC
+      branches_to_patch << emit_branch.call(0x10, :find_data)  # BPL
+      asm << 0xC9 << 0xD5          # CMP #$D5
+      branches_to_patch << emit_branch.call(0xD0, :find_data)  # BNE find_data
+
+      asm << 0xAD << 0xEC << 0xC0  # LDA $C0EC
+      branches_to_patch << emit_branch.call(0x10, :find_data)  # BPL
+      asm << 0xC9 << 0xAA          # CMP #$AA
+      branches_to_patch << emit_branch.call(0xD0, :find_data)  # BNE find_data
+
+      asm << 0xAD << 0xEC << 0xC0  # LDA $C0EC
+      branches_to_patch << emit_branch.call(0x10, :find_data)  # BPL
+      asm << 0xC9 << 0xAD          # CMP #$AD (data field marker)
+      branches_to_patch << emit_branch.call(0xD0, :find_data)  # BNE find_data
+
+      # === READ DATA ===
+      # The disk controller returns raw sector data directly
+      # No BPL check needed, no bit stripping - just read and store
+
+      asm << 0xA0 << 0x00          # LDY #$00
+      labels[:read_sector] = asm.length
+      asm << 0xAD << 0xEC << 0xC0  # LDA $C0EC (read data byte)
+      asm << 0x91 << zp_ptr_lo     # STA ($26),Y
+      asm << 0xC8                  # INY
+      branches_to_patch << emit_branch.call(0xD0, :read_sector)  # BNE read_sector (256 bytes)
+
+      # === JUMP TO LOADED CODE ===
+      asm << 0x4C << 0x01 << 0x08  # JMP $0801
+
+      # Patch all branch offsets
+      branches_to_patch.each do |pos, target_label|
+        target = labels[target_label]
+        # Branch offset is relative to the byte AFTER the offset byte
+        # PC will be at (pos + 1) when the branch is evaluated
+        offset = target - pos - 1
+        asm[pos] = offset & 0xFF
+      end
+
+      # Pad to 256 bytes
+      while asm.length < 256
+        asm << 0x00
+      end
+
+      asm[0...256]
     end
   end
 end

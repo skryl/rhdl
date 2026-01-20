@@ -113,8 +113,22 @@ module MOS6502
     end
 
     # Load a disk image into the specified drive
+    # Also installs the Disk II boot ROM at $C600 if not already present
     def load_disk(path_or_bytes, drive: 0)
       @disk_controller.load_disk(path_or_bytes, drive: drive)
+      install_disk_boot_rom
+    end
+
+    # Install the Disk II boot ROM at $C600-$C6FF (slot 6 expansion ROM)
+    def install_disk_boot_rom
+      return if @disk_boot_rom_installed
+
+      boot_rom = Disk2.boot_rom
+      boot_rom.each_with_index do |byte, i|
+        @memory[0xC600 + i] = byte & 0xFF
+        @rom_mask[0xC600 + i] = true  # Mark as ROM (read-only)
+      end
+      @disk_boot_rom_installed = true
     end
 
     # Check if a disk is loaded
