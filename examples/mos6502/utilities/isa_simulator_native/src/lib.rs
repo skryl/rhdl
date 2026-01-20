@@ -1,9 +1,13 @@
 //! MOS 6502 ISA-Level Simulator with Ruby bindings
 //! High-performance instruction-level simulator for the MOS 6502 CPU
-//! Supports both internal memory and external Ruby memory objects (like Apple2Bus)
+//!
+//! Memory Model:
+//! - Internal 64KB memory for fast CPU access
+//! - Optional I/O handler for memory-mapped I/O ($C000-$CFFF on Apple II)
+//! - External devices can read/write internal memory via peek/poke methods
 
 use magnus::{
-    function, method, prelude::*, value::Opaque, Error, RArray, RHash, Ruby, TryConvert, Value,
+    method, prelude::*, value::Opaque, Error, RArray, RHash, Ruby, TryConvert, Value,
 };
 use std::cell::RefCell;
 
@@ -20,6 +24,10 @@ const FLAG_N: u8 = 7; // Negative
 const NMI_VECTOR: u16 = 0xFFFA;
 const RESET_VECTOR: u16 = 0xFFFC;
 const IRQ_VECTOR: u16 = 0xFFFE;
+
+// Apple II I/O region
+const IO_START: u16 = 0xC000;
+const IO_END: u16 = 0xCFFF;
 
 /// MOS 6502 CPU state (core without memory)
 pub struct Cpu6502Core {
@@ -172,59 +180,67 @@ impl Cpu6502Core {
 }
 
 // ============================================================================
-// Ruby bindings wrapper with external memory support
+// Ruby bindings wrapper with hybrid memory model
 // ============================================================================
 
-/// Ruby-wrapped CPU simulator that can use either internal or external memory
+/// Ruby-wrapped CPU simulator with internal memory and optional I/O handler
+///
+/// Memory access:
+/// - RAM/ROM ($0000-$BFFF, $D000-$FFFF): Fast internal memory
+/// - I/O region ($C000-$CFFF): Calls Ruby I/O handler if provided
+///
+/// External devices can access internal memory via peek/poke methods.
 #[magnus::wrap(class = "MOS6502::ISASimulatorNative")]
 struct RubyCpu {
     cpu: RefCell<Cpu6502Core>,
-    internal_memory: RefCell<Vec<u8>>,
-    external_memory: RefCell<Option<Opaque<Value>>>,
+    memory: RefCell<Vec<u8>>,           // Internal 64KB memory
+    io_handler: RefCell<Option<Opaque<Value>>>,  // Optional I/O handler for $C000-$CFFF
 }
 
 impl Default for RubyCpu {
     fn default() -> Self {
         Self {
             cpu: RefCell::new(Cpu6502Core::new()),
-            internal_memory: RefCell::new(vec![0; 0x10000]),
-            external_memory: RefCell::new(None),
+            memory: RefCell::new(vec![0; 0x10000]),
+            io_handler: RefCell::new(None),
         }
     }
 }
 
 impl RubyCpu {
-    fn new() -> Self {
-        Self::default()
-    }
-
-    // Memory operations - use external if available, otherwise internal
+    // Memory operations - internal memory with I/O handler for $C000-$CFFF
+    #[inline]
     fn read(&self, addr: u16) -> u8 {
-        let ext_mem = self.external_memory.borrow();
-        if let Some(ref opaque) = *ext_mem {
-            // Call Ruby memory.read(addr)
-            let ruby = unsafe { Ruby::get_unchecked() };
-            let memory: Value = ruby.get_inner(*opaque);
-            match memory.funcall::<_, _, i64>("read", (addr as i64,)) {
-                Ok(v) => v as u8,
-                Err(_) => 0,
+        // Check if address is in I/O region and we have a handler
+        if addr >= IO_START && addr <= IO_END {
+            let handler = self.io_handler.borrow();
+            if let Some(ref opaque) = *handler {
+                let ruby = unsafe { Ruby::get_unchecked() };
+                let io: Value = ruby.get_inner(*opaque);
+                match io.funcall::<_, _, i64>("io_read", (addr as i64,)) {
+                    Ok(v) => return v as u8,
+                    Err(_) => {} // Fall through to internal memory
+                }
             }
-        } else {
-            self.internal_memory.borrow()[addr as usize]
         }
+        // Fast path: internal memory
+        self.memory.borrow()[addr as usize]
     }
 
+    #[inline]
     fn write(&self, addr: u16, value: u8) {
-        let ext_mem = self.external_memory.borrow();
-        if let Some(ref opaque) = *ext_mem {
-            // Call Ruby memory.write(addr, value)
-            let ruby = unsafe { Ruby::get_unchecked() };
-            let memory: Value = ruby.get_inner(*opaque);
-            let _ = memory.funcall::<_, _, Value>("write", (addr as i64, value as i64));
-        } else {
-            drop(ext_mem); // Release borrow before mutating
-            self.internal_memory.borrow_mut()[addr as usize] = value;
+        // Check if address is in I/O region and we have a handler
+        if addr >= IO_START && addr <= IO_END {
+            let handler = self.io_handler.borrow();
+            if let Some(ref opaque) = *handler {
+                let ruby = unsafe { Ruby::get_unchecked() };
+                let io: Value = ruby.get_inner(*opaque);
+                let _ = io.funcall::<_, _, Value>("io_write", (addr as i64, value as i64));
+                return;
+            }
         }
+        // Fast path: internal memory
+        self.memory.borrow_mut()[addr as usize] = value;
     }
 
     fn read_word(&self, addr: u16) -> u16 {
@@ -652,30 +668,30 @@ impl RubyCpu {
     /// Load program bytes into memory
     fn load_program_internal(&self, bytes: &[u8], addr: u16) {
         for (i, &byte) in bytes.iter().enumerate() {
-            self.write(addr.wrapping_add(i as u16), byte);
+            self.memory.borrow_mut()[addr.wrapping_add(i as u16) as usize] = byte;
         }
         // Set reset vector
-        self.write(RESET_VECTOR, (addr & 0xFF) as u8);
-        self.write(RESET_VECTOR + 1, ((addr >> 8) & 0xFF) as u8);
+        let mut mem = self.memory.borrow_mut();
+        mem[RESET_VECTOR as usize] = (addr & 0xFF) as u8;
+        mem[(RESET_VECTOR + 1) as usize] = ((addr >> 8) & 0xFF) as u8;
     }
 }
 
 // Ruby method implementations
 impl RubyCpu {
-    fn rb_initialize(&self, memory: Option<Value>) {
-        // If memory is provided and is not nil, store it as external memory
-        if let Some(mem) = memory {
-            if !mem.is_nil() {
-                let ruby = unsafe { Ruby::get_unchecked() };
-                let opaque = Opaque::from(mem);
-                *self.external_memory.borrow_mut() = Some(opaque);
+    fn rb_initialize(&self, io_handler: Option<Value>) {
+        // If an I/O handler is provided and is not nil, store it
+        if let Some(handler) = io_handler {
+            if !handler.is_nil() {
+                let opaque = Opaque::from(handler);
+                *self.io_handler.borrow_mut() = Some(opaque);
             }
         }
     }
 
     fn rb_reset(&self) {
         self.cpu.borrow_mut().reset();
-        // Read reset vector
+        // Read reset vector from internal memory
         let pc = self.read_word(RESET_VECTOR);
         self.cpu.borrow_mut().pc = pc;
     }
@@ -732,12 +748,32 @@ impl RubyCpu {
 
     fn rb_halted_q(&self) -> bool { self.cpu.borrow().halted }
 
+    // CPU memory access (uses I/O handler for $C000-$CFFF)
     fn rb_read(&self, addr: u16) -> u8 {
         self.read(addr)
     }
 
     fn rb_write(&self, addr: u16, value: u8) {
         self.write(addr, value);
+    }
+
+    // Direct memory access (bypasses I/O handler - for external devices)
+    fn rb_peek(&self, addr: u16) -> u8 {
+        self.memory.borrow()[addr as usize]
+    }
+
+    fn rb_poke(&self, addr: u16, value: u8) {
+        self.memory.borrow_mut()[addr as usize] = value;
+    }
+
+    // Bulk memory operations for loading ROM/RAM
+    fn rb_load_bytes(&self, bytes: RArray, addr: u16) -> Result<(), Error> {
+        let mut mem = self.memory.borrow_mut();
+        for (i, item) in bytes.into_iter().enumerate() {
+            let v: i64 = TryConvert::try_convert(item)?;
+            mem[addr.wrapping_add(i as u16) as usize] = v as u8;
+        }
+        Ok(())
     }
 
     fn rb_read_word(&self, addr: u16) -> u16 {
@@ -783,8 +819,8 @@ impl RubyCpu {
         true
     }
 
-    fn rb_has_external_memory(&self) -> bool {
-        self.external_memory.borrow().is_some()
+    fn rb_has_io_handler(&self) -> bool {
+        self.io_handler.borrow().is_some()
     }
 }
 
@@ -834,20 +870,25 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("flag_n", method!(RubyCpu::rb_flag_n, 0))?;
 
     // Memory operations
-    class.define_method("read", method!(RubyCpu::rb_read, 1))?;
-    class.define_method("write", method!(RubyCpu::rb_write, 2))?;
+    class.define_method("read", method!(RubyCpu::rb_read, 1))?;       // CPU access (I/O aware)
+    class.define_method("write", method!(RubyCpu::rb_write, 2))?;     // CPU access (I/O aware)
+    class.define_method("peek", method!(RubyCpu::rb_peek, 1))?;       // Direct memory access
+    class.define_method("poke", method!(RubyCpu::rb_poke, 2))?;       // Direct memory access
+    class.define_method("load_bytes", method!(RubyCpu::rb_load_bytes, 2))?;  // Bulk load
     class.define_method("read_word", method!(RubyCpu::rb_read_word, 1))?;
     class.define_method("load_program", method!(RubyCpu::rb_load_program, 2))?;
 
     // State
     class.define_method("state", method!(RubyCpu::rb_state, 0))?;
     class.define_method("native?", method!(RubyCpu::rb_native, 0))?;
-    class.define_method("has_external_memory?", method!(RubyCpu::rb_has_external_memory, 0))?;
+    class.define_method("has_io_handler?", method!(RubyCpu::rb_has_io_handler, 0))?;
 
     // Constants
     module.const_set("NMI_VECTOR", NMI_VECTOR as i64)?;
     module.const_set("RESET_VECTOR", RESET_VECTOR as i64)?;
     module.const_set("IRQ_VECTOR", IRQ_VECTOR as i64)?;
+    module.const_set("IO_START", IO_START as i64)?;
+    module.const_set("IO_END", IO_END as i64)?;
 
     Ok(())
 }
