@@ -10,7 +10,7 @@ license = "MIT"
 crate-type = ["cdylib"]
 
 [dependencies]
-magnus = "0.7"
+magnus = "0.8"
 
 [profile.release]
 opt-level = 3
