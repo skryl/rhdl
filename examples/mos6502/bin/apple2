@@ -62,7 +62,24 @@ class Apple2Terminal
     @term_cols = 80
     @pad_top = 0
     @pad_left = 0
+    @hires_pad_top = 0
+    @hires_pad_left = 0
     update_terminal_size
+
+    # Performance monitoring
+    @start_time = nil
+    @start_cycles = 0
+    @last_cycles = 0
+    @last_time = nil
+    @current_hz = 0.0
+    @frame_count = 0
+    @fps = 0.0
+    @last_fps_time = nil
+    @fps_frame_count = 0
+
+    # Input tracking for debug
+    @last_key = nil
+    @last_key_time = nil
   end
 
   def update_terminal_size
@@ -72,10 +89,19 @@ class Apple2Terminal
       @term_cols = [cols, DISPLAY_WIDTH].max
     end
 
-    # Calculate padding to center the display
-    display_height = @debug ? DISPLAY_HEIGHT + 1 : DISPLAY_HEIGHT
+    # Calculate padding to center the text display
+    # Debug mode adds 2 status lines, non-debug adds 1 for disk loading indicator
+    display_height = @debug ? DISPLAY_HEIGHT + 2 : DISPLAY_HEIGHT
     @pad_top = [(@term_rows - display_height) / 2, 0].max
     @pad_left = [(@term_cols - DISPLAY_WIDTH) / 2, 0].max
+
+    # Calculate padding for hires display
+    # Hires output height is proportional: (192/4) * (@hires_width / (280/2)) = 48 * @hires_width / 140
+    # Debug mode adds 2 status lines, non-debug adds 1 for disk loading indicator
+    hires_display_height = (HIRES_HEIGHT * @hires_width / HIRES_WIDTH) + (@debug ? 3 : 1)
+    hires_display_width = @hires_width
+    @hires_pad_top = [(@term_rows - hires_display_height) / 2, 0].max
+    @hires_pad_left = [(@term_cols - hires_display_width) / 2, 0].max
   end
 
   def load_rom(path, base_addr: 0xF800)
@@ -127,6 +153,14 @@ class Apple2Terminal
     # Reset the CPU
     @runner.reset
 
+    # Initialize performance monitoring
+    @start_time = Time.now
+    @start_cycles = @runner.cpu_state[:cycles]
+    @last_time = @start_time
+    @last_cycles = @start_cycles
+    @last_fps_time = @start_time
+    @fps_frame_count = 0
+
     # Enter raw terminal mode
     begin
       IO.console.raw do
@@ -147,7 +181,7 @@ class Apple2Terminal
   private
 
   def main_loop
-    frame_count = 0
+    @frame_count = 0
 
     while @running && !@runner.halted?
       # Handle terminal resize
@@ -163,13 +197,17 @@ class Apple2Terminal
       # Run CPU cycles
       @runner.run_steps(@cycles_per_frame)
 
+      # Update performance metrics
+      update_performance_metrics
+
       # Update display if screen changed
-      if @runner.screen_dirty? || frame_count % 10 == 0
+      if @runner.screen_dirty? || @frame_count % 10 == 0
         render_screen
         @runner.clear_screen_dirty
       end
 
-      frame_count += 1
+      @frame_count += 1
+      @fps_frame_count += 1
 
       # Small delay to prevent CPU spinning
       sleep 0.016 # ~60fps
@@ -210,6 +248,10 @@ class Apple2Terminal
     # Convert lowercase to uppercase for Apple II
     ascii = ascii - 32 if ascii >= 97 && ascii <= 122
 
+    # Track for debug display
+    @last_key = ascii
+    @last_key_time = Time.now
+
     # Inject the key
     @runner.inject_key(ascii)
   rescue IO::WaitReadable, Errno::EAGAIN
@@ -248,10 +290,6 @@ class Apple2Terminal
   def render_hires_screen
     output = String.new
 
-    # Clear screen and move to top
-    output << CLEAR_SCREEN
-    output << MOVE_HOME
-
     if @green_screen
       output << GREEN_FG
       output << BLACK_BG
@@ -259,23 +297,39 @@ class Apple2Terminal
 
     # Render hi-res using braille characters
     hires_output = @runner.bus.render_hires_braille(chars_wide: @hires_width, invert: true)
-    output << hires_output
+    hires_lines = hires_output.split("\n")
+
+    # Render each line of hires output with proper centering
+    hires_lines.each_with_index do |line, row|
+      output << move_cursor(@hires_pad_top + row + 1, @hires_pad_left + 1)
+      output << line
+    end
 
     output << NORMAL_VIDEO if @green_screen
 
-    # Status line below graphics
-    output << "\n"
+    # Status line below graphics (centered)
+    status_row = @hires_pad_top + hires_lines.length + 1
     if @debug
       state = @runner.cpu_state
       dc = @runner.bus.disk_controller
-      status = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X Cyc:%s [HIRES]",
+      # Line 1: CPU registers and performance
+      status = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X | %s %.1ffps [HIRES]",
                       state[:pc], state[:a], state[:x], state[:y],
-                      state[:sp], state[:p], format_cycles(state[:cycles]))
-      output << status << "\n"
-      disk_status = format("Disk:T%02d Motor:%s", dc.track, dc.motor_on ? "ON " : "OFF")
-      output << disk_status << "\n"
+                      state[:sp], state[:p], format_hz(@current_hz), @fps)
+      output << move_cursor(status_row, @hires_pad_left + 1)
+      output << status
+      status_row += 1
+      # Line 2: Cycles, uptime, key, disk info
+      status2 = format("Cyc:%s Up:%s Key:%-3s | Disk:T%02d %s",
+                       format_cycles(state[:cycles]),
+                       format_uptime(@start_time),
+                       format_key(@last_key),
+                       dc.track, dc.motor_on ? "ON " : "OFF")
+      output << move_cursor(status_row, @hires_pad_left + 1)
+      output << status2
     elsif disk_motor_on?
-      output << "DISK LOADING...\n"
+      output << move_cursor(status_row, @hires_pad_left + 1)
+      output << "DISK LOADING..."
     end
 
     print output
@@ -325,21 +379,25 @@ class Apple2Terminal
     status_row = @pad_top + DISPLAY_HEIGHT + 1
     if @debug
       state = @runner.cpu_state
-      status = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X Cyc:%s",
+      # Line 1: CPU registers and performance
+      status = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X | %s %.1ffps",
                       state[:pc], state[:a], state[:x], state[:y],
-                      state[:sp], state[:p], format_cycles(state[:cycles]))
+                      state[:sp], state[:p], format_hz(@current_hz), @fps)
       output << move_cursor(status_row, @pad_left + 1)
       output << status
       status_row += 1
 
-      # Second debug line: disk and video info
+      # Line 2: Cycles, uptime, key, disk and video info
       dc = @runner.bus.disk_controller
-      video = @runner.bus.video
       mode = @runner.bus.display_mode
-      disk_status = format("Disk:T%02d Motor:%s | Video:%s",
-                           dc.track, dc.motor_on ? "ON " : "OFF", mode.to_s.upcase)
+      status2 = format("Cyc:%s Up:%s Key:%-3s | Disk:T%02d %s | %s",
+                       format_cycles(state[:cycles]),
+                       format_uptime(@start_time),
+                       format_key(@last_key),
+                       dc.track, dc.motor_on ? "ON " : "OFF",
+                       mode.to_s.upcase)
       output << move_cursor(status_row, @pad_left + 1)
-      output << disk_status
+      output << status2
       status_row += 1
     end
 
@@ -364,6 +422,69 @@ class Apple2Terminal
       format("%.1fK", cycles / 1_000.0)
     else
       cycles.to_s
+    end
+  end
+
+  def update_performance_metrics
+    now = Time.now
+    current_cycles = @runner.cpu_state[:cycles]
+
+    # Update Hz calculation every 0.5 seconds for stability
+    elapsed = now - @last_time
+    if elapsed >= 0.5
+      cycles_delta = current_cycles - @last_cycles
+      @current_hz = cycles_delta / elapsed
+      @last_time = now
+      @last_cycles = current_cycles
+    end
+
+    # Update FPS calculation every second
+    fps_elapsed = now - @last_fps_time
+    if fps_elapsed >= 1.0
+      @fps = @fps_frame_count / fps_elapsed
+      @last_fps_time = now
+      @fps_frame_count = 0
+    end
+  end
+
+  def format_hz(hz)
+    if hz >= 1_000_000
+      format("%.2fMHz", hz / 1_000_000.0)
+    elsif hz >= 1_000
+      format("%.1fKHz", hz / 1_000.0)
+    else
+      format("%.0fHz", hz)
+    end
+  end
+
+  def format_uptime(start_time)
+    elapsed = Time.now - start_time
+    hours = (elapsed / 3600).to_i
+    minutes = ((elapsed % 3600) / 60).to_i
+    seconds = (elapsed % 60).to_i
+    if hours > 0
+      format("%d:%02d:%02d", hours, minutes, seconds)
+    else
+      format("%d:%02d", minutes, seconds)
+    end
+  end
+
+  def format_key(ascii)
+    return "---" unless ascii
+    # Clear key display after 2 seconds
+    return "---" if @last_key_time && (Time.now - @last_key_time) > 2.0
+
+    case ascii
+    when 0x00..0x1F
+      # Control characters
+      ctrl_char = (ascii + 0x40).chr
+      "^#{ctrl_char}"
+    when 0x20
+      "SPC"
+    when 0x7F
+      "DEL"
+    else
+      "'#{ascii.chr}'"
     end
   end
 
