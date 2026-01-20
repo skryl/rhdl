@@ -1,7 +1,7 @@
 # Waveform display panel
 
 module RHDL
-  module HDL
+  module TUI
     class WaveformPanel < Panel
       attr_accessor :probes
 

@@ -1,7 +1,7 @@
 # Box drawing characters
 
 module RHDL
-  module HDL
+  module TUI
     module BoxDraw
       HORIZONTAL = '─'
       VERTICAL = '│'

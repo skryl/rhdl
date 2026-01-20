@@ -2,7 +2,7 @@
 # Manages multiple signal probes for a simulation
 
 module RHDL
-  module HDL
+  module Debug
     # Manages multiple signal probes for a simulation
     class WaveformCapture
       attr_reader :probes, :time_step
