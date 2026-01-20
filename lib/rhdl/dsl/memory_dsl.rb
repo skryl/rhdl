@@ -4,7 +4,7 @@
 # to Verilog with proper BRAM inference.
 #
 # Example - Simple RAM:
-#   class RAM256x8 < RHDL::HDL::SimComponent
+#   class RAM256x8 < RHDL::Sim::Component
 #     include RHDL::DSL::MemoryDSL
 #
 #     input :clk
@@ -20,7 +20,7 @@
 #   end
 #
 # Example - Lookup Table (ROM):
-#   class InstructionDecoder < RHDL::HDL::SimComponent
+#   class InstructionDecoder < RHDL::Sim::Component
 #     include RHDL::DSL::MemoryDSL
 #
 #     input :opcode, width: 8

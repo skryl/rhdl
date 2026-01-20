@@ -422,6 +422,16 @@ module RHDL
           @_behavior_block = BehaviorBlockDef.new(block, **options)
         end
 
+        # Simple value object to hold behavior block definition
+        class BehaviorBlockDef
+          attr_reader :block, :options
+
+          def initialize(block, **options)
+            @block = block
+            @options = options
+          end
+        end
+
         # Generate Verilog from the component
         def to_verilog(top_name: nil)
           RHDL::Export::Verilog.generate(to_ir(top_name: top_name))

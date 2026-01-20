@@ -29,15 +29,3 @@ module RHDL
     end
   end
 end
-
-# Backwards compatibility aliases for old class names in RHDL::HDL
-module RHDL
-  module HDL
-    # Debug classes
-    SignalProbe = Debug::SignalProbe
-    WaveformCapture = Debug::WaveformCapture
-    Breakpoint = Debug::Breakpoint
-    Watchpoint = Debug::Watchpoint
-    DebugSimulator = Debug::DebugSimulator
-  end
-end
