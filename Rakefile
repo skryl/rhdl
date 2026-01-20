@@ -513,34 +513,8 @@ end
 # Top-level Aliases (for convenience)
 # =============================================================================
 
-# Commonly used aliases
 desc "Run tests (alias for dev:spec)"
 task spec: 'dev:spec'
 
 desc "Run tests in parallel (alias for dev:pspec)"
 task pspec: 'dev:pspec'
-
-# CLI task aliases for backwards compatibility
-desc "Generate diagrams (alias for cli:diagrams:generate)"
-task diagrams: 'cli:diagrams:generate'
-
-desc "Export HDL (alias for cli:hdl:export)"
-task hdl: 'cli:hdl:export'
-
-desc "Export gates (alias for cli:gates:export)"
-task gates: 'cli:gates:export'
-
-desc "Build Apple II ROM (alias for cli:apple2:build)"
-task apple2: 'cli:apple2:build'
-
-desc "Run TUI (alias for cli:tui:run)"
-task tui: 'cli:tui:run'
-
-desc "Generate all output files (alias for cli:generate_all)"
-task generate_all: 'cli:generate_all'
-
-desc "Clean all generated files (alias for cli:clean_all)"
-task clean_all: 'cli:clean_all'
-
-desc "Regenerate all output files (alias for cli:regenerate)"
-task regenerate: 'cli:regenerate'
