@@ -1,0 +1,18 @@
+[package]
+name = "isa_simulator_native"
+version = "0.1.0"
+edition = "2021"
+authors = ["RHDL Team"]
+description = "High-performance MOS 6502 ISA simulator with Ruby bindings"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+magnus = "0.7"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

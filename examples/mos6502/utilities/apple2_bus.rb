@@ -97,6 +97,36 @@ module MOS6502
       handle_write(addr & 0xFFFF, data)
     end
 
+    # I/O region access methods (called by native CPU for $C000-$CFFF)
+    # These only handle the I/O page - for ROM addresses like $C600, return internal memory value
+    def io_read(addr)
+      addr = addr & 0xFFFF
+      if io_page?(addr)
+        handle_io(:read, addr, 0)
+      else
+        # Return value from internal memory (for expansion ROM like Disk II at $C600)
+        @memory[addr]
+      end
+    end
+
+    def io_write(addr, value)
+      addr = addr & 0xFFFF
+      if io_page?(addr)
+        handle_io(:write, addr, value)
+      end
+      # Writes outside I/O page in $C000-$CFFF region are typically ROM and ignored
+    end
+
+    # Read a byte from memory - uses native CPU's memory if available
+    # This allows the bus to read screen memory when native CPU is active
+    def mem_read(addr)
+      if defined?(@native_cpu) && @native_cpu
+        @native_cpu.peek(addr)
+      else
+        @memory[addr]
+      end
+    end
+
     def load_rom(bytes, base_addr:)
       to_bytes(bytes).each_with_index do |byte, i|
         addr = (base_addr + i) & 0xFFFF
@@ -161,7 +191,7 @@ module MOS6502
     end
 
     def text_page_written?
-      (TEXT_PAGE1_START..TEXT_PAGE1_END).any? { |addr| @memory[addr] != 0 }
+      (TEXT_PAGE1_START..TEXT_PAGE1_END).any? { |addr| mem_read(addr) != 0 }
     end
 
     # Read the text page as a 2D array of character codes (24 rows x 40 columns)
@@ -171,7 +201,7 @@ module MOS6502
         line = []
         base = text_line_address(row)
         40.times do |col|
-          line << @memory[base + col]
+          line << mem_read(base + col)
         end
         result << line
       end
@@ -236,7 +266,7 @@ module MOS6502
         line_addr = hires_line_address(row, base)
 
         HIRES_BYTES_PER_LINE.times do |col|
-          byte = @memory[line_addr + col]
+          byte = mem_read(line_addr + col)
           # Each byte has 7 pixels (bit 7 is color/palette select)
           7.times do |bit|
             line << ((byte >> bit) & 1)
@@ -258,7 +288,7 @@ module MOS6502
         line = []
         line_addr = hires_line_address(row, base)
         HIRES_BYTES_PER_LINE.times do |col|
-          line << @memory[line_addr + col]
+          line << mem_read(line_addr + col)
         end
         result << line
       end
