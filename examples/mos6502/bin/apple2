@@ -129,8 +129,14 @@ class Apple2Terminal
 
   def setup_reset_vector(addr)
     # Set reset vector to point to our program
-    @runner.bus.write(0xFFFC, addr & 0xFF)
-    @runner.bus.write(0xFFFD, (addr >> 8) & 0xFF)
+    # For native mode, write to CPU memory; otherwise write to bus
+    if @fast_mode && @runner.respond_to?(:native?) && @runner.native?
+      @runner.cpu.poke(0xFFFC, addr & 0xFF)
+      @runner.cpu.poke(0xFFFD, (addr >> 8) & 0xFF)
+    else
+      @runner.bus.write(0xFFFC, addr & 0xFF)
+      @runner.bus.write(0xFFFD, (addr >> 8) & 0xFF)
+    end
   end
 
   def run
