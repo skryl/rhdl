@@ -3,7 +3,7 @@
 
 module RHDL
   module HDL
-    class BitwiseXor < SimComponent
+    class BitwiseXor < Component
       parameter :width, default: 8
 
       input :a, width: :width

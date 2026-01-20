@@ -4,7 +4,7 @@
 module RHDL
   module HDL
     # 1-to-2 Demultiplexer
-    class Demux2 < SimComponent
+    class Demux2 < Component
       parameter :width, default: 1
 
       input :a, width: :width

@@ -7,7 +7,7 @@ require_relative '../../../lib/rhdl/dsl/behavior'
 require_relative 'constants'
 
 module RISCV
-  class BranchCond < RHDL::HDL::SimComponent
+  class BranchCond < RHDL::HDL::Component
     include RHDL::DSL::Behavior
 
     input :rs1_data, width: 32  # Source register 1 data

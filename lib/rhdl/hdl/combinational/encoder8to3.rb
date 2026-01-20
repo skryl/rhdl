@@ -4,7 +4,7 @@
 module RHDL
   module HDL
     # 8-to-3 Priority Encoder - encodes highest set bit position
-    class Encoder8to3 < SimComponent
+    class Encoder8to3 < Component
       input :a, width: 8
       output :y, width: 3
       output :valid

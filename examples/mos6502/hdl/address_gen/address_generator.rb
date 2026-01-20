@@ -6,7 +6,7 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 
 module MOS6502
-  class AddressGenerator < RHDL::HDL::SimComponent
+  class AddressGenerator < RHDL::HDL::Component
     include RHDL::DSL::Behavior
 
     # Addressing mode constants

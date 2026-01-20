@@ -4,7 +4,7 @@
 module RHDL
   module HDL
     # 8-to-1 Multiplexer - selects one of 8 inputs
-    class Mux8 < SimComponent
+    class Mux8 < Component
       parameter :width, default: 1
 
       input :in0, width: :width

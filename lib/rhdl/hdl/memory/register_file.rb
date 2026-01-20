@@ -10,7 +10,7 @@ module RHDL
   module HDL
     # Register File (multiple registers with read/write ports)
     # Sequential write, combinational read - typical FPGA register file
-    class RegisterFile < SimComponent
+    class RegisterFile < Component
       include RHDL::DSL::MemoryDSL
 
       input :clk

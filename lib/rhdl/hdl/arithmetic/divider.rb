@@ -3,7 +3,7 @@
 
 module RHDL
   module HDL
-    class Divider < SimComponent
+    class Divider < Component
       parameter :width, default: 8
 
       input :dividend, width: :width

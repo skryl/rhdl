@@ -3,7 +3,7 @@
 
 module RHDL
   module HDL
-    class RippleCarryAdder < SimComponent
+    class RippleCarryAdder < Component
       parameter :width, default: 8
 
       input :a, width: :width

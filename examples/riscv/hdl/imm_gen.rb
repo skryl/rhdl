@@ -7,7 +7,7 @@ require_relative '../../../lib/rhdl/dsl/behavior'
 require_relative 'constants'
 
 module RISCV
-  class ImmGen < RHDL::HDL::SimComponent
+  class ImmGen < RHDL::HDL::Component
     include RHDL::DSL::Behavior
 
     input :inst, width: 32      # Full instruction

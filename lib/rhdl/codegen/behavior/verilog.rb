@@ -4,7 +4,8 @@ require_relative "ir"
 
 module RHDL
   module Codegen
-    module Verilog
+    module Behavior
+      module Verilog
       VERILOG_KEYWORDS = %w[
         always and assign begin buf case casex casez cmos deassign default defparam
         disable edge else end endcase endfunction endmodule endprimitive endspecify
@@ -375,5 +376,6 @@ module RHDL
         base
       end
     end
+  end
   end
 end
