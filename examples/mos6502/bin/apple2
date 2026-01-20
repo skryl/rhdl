@@ -76,6 +76,10 @@ class Apple2Terminal
     @fps = 0.0
     @last_fps_time = nil
     @fps_frame_count = 0
+
+    # Input tracking for debug
+    @last_key = nil
+    @last_key_time = nil
   end
 
   def update_terminal_size
@@ -244,6 +248,10 @@ class Apple2Terminal
     # Convert lowercase to uppercase for Apple II
     ascii = ascii - 32 if ascii >= 97 && ascii <= 122
 
+    # Track for debug display
+    @last_key = ascii
+    @last_key_time = Time.now
+
     # Inject the key
     @runner.inject_key(ascii)
   rescue IO::WaitReadable, Errno::EAGAIN
@@ -311,10 +319,11 @@ class Apple2Terminal
       output << move_cursor(status_row, @hires_pad_left + 1)
       output << status
       status_row += 1
-      # Line 2: Cycles, uptime, disk info
-      status2 = format("Cyc:%s Up:%s | Disk:T%02d %s",
+      # Line 2: Cycles, uptime, key, disk info
+      status2 = format("Cyc:%s Up:%s Key:%-3s | Disk:T%02d %s",
                        format_cycles(state[:cycles]),
                        format_uptime(@start_time),
+                       format_key(@last_key),
                        dc.track, dc.motor_on ? "ON " : "OFF")
       output << move_cursor(status_row, @hires_pad_left + 1)
       output << status2
@@ -378,12 +387,13 @@ class Apple2Terminal
       output << status
       status_row += 1
 
-      # Line 2: Cycles, uptime, disk and video info
+      # Line 2: Cycles, uptime, key, disk and video info
       dc = @runner.bus.disk_controller
       mode = @runner.bus.display_mode
-      status2 = format("Cyc:%s Up:%s | Disk:T%02d %s | %s",
+      status2 = format("Cyc:%s Up:%s Key:%-3s | Disk:T%02d %s | %s",
                        format_cycles(state[:cycles]),
                        format_uptime(@start_time),
+                       format_key(@last_key),
                        dc.track, dc.motor_on ? "ON " : "OFF",
                        mode.to_s.upcase)
       output << move_cursor(status_row, @pad_left + 1)
@@ -456,6 +466,25 @@ class Apple2Terminal
       format("%d:%02d:%02d", hours, minutes, seconds)
     else
       format("%d:%02d", minutes, seconds)
+    end
+  end
+
+  def format_key(ascii)
+    return "---" unless ascii
+    # Clear key display after 2 seconds
+    return "---" if @last_key_time && (Time.now - @last_key_time) > 2.0
+
+    case ascii
+    when 0x00..0x1F
+      # Control characters
+      ctrl_char = (ascii + 0x40).chr
+      "^#{ctrl_char}"
+    when 0x20
+      "SPC"
+    when 0x7F
+      "DEL"
+    else
+      "'#{ascii.chr}'"
     end
   end
 
