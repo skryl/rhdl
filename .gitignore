@@ -17,3 +17,6 @@
 /spec/fixtures/apple2/
 /export/roms/
 /vendor/
+# Test disk images (generated during testing)
+/examples/mos6502/software/disks/test_*.dsk
+/examples/mos6502/software/disks/dos33_*.dsk
