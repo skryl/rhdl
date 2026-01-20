@@ -746,6 +746,10 @@ parser = OptionParser.new do |opts|
     options[:disk2] = v
   end
 
+  opts.on("-b", "--bin FILE", "Load binary file into memory (use -a for address)") do |v|
+    options[:bin] = v
+  end
+
   opts.on("-h", "--help", "Show this help message") do
     puts opts
     exit
@@ -780,12 +784,17 @@ if options[:disk2]
   terminal.load_disk(options[:disk2], drive: 1)
 end
 
-# Load program file if specified
-program_file = ARGV.shift
+# Load program file if specified (via argument or --bin option)
+program_file = ARGV.shift || options[:bin]
 if program_file
+  unless File.exist?(program_file)
+    puts "Error: Program file not found: #{program_file}"
+    exit 1
+  end
   load_addr = options[:load_addr] || 0x0800
   terminal.load_program(program_file, base_addr: load_addr)
-  terminal.setup_reset_vector(load_addr)
+  # Only set reset vector if no ROM is loaded (ROM handles its own reset)
+  terminal.setup_reset_vector(load_addr) unless options[:rom]
 elsif options[:demo]
   # Load demo program
   puts "Loading built-in demo program..."

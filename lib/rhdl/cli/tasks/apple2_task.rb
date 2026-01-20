@@ -262,6 +262,7 @@ module RHDL
           exec_args.push("--hires-width", options[:hires_width].to_s) if options[:hires_width]
           exec_args.push("--disk", options[:disk]) if options[:disk]
           exec_args.push("--disk2", options[:disk2]) if options[:disk2]
+          exec_args.push("-b", options[:bin]) if options[:bin]
         end
       end
     end
