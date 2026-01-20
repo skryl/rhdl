@@ -2,6 +2,15 @@
 # Hardware Description Language with simulation support
 
 require_relative 'sim'
+
+# Base class aliases for HDL component definitions
+module RHDL
+  module HDL
+    SimComponent = Sim::Component
+    SequentialComponent = Sim::SequentialComponent
+  end
+end
+
 require_relative 'hdl/gates'
 require_relative 'hdl/sequential'
 require_relative 'hdl/arithmetic'
@@ -17,21 +26,21 @@ module RHDL
     SimComponent.include(RHDL::Diagram::Methods)
     # Convenience method to create a simulator with components
     def self.simulator(&block)
-      sim = Simulator.new
+      sim = RHDL::Sim::Simulator.new
       block.call(sim) if block_given?
       sim
     end
 
     # Create a debug simulator with TUI support
     def self.debug_simulator(&block)
-      sim = DebugSimulator.new
+      sim = RHDL::Debug::DebugSimulator.new
       block.call(sim) if block_given?
       sim
     end
 
     # Launch the TUI for a simulator
     def self.tui(simulator = nil)
-      tui = SimulatorTUI.new(simulator)
+      tui = RHDL::TUI::SimulatorTUI.new(simulator)
       tui
     end
 

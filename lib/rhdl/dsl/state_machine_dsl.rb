@@ -4,7 +4,7 @@
 # synthesized to Verilog.
 #
 # Example - Simple FSM:
-#   class TrafficLight < RHDL::HDL::SequentialComponent
+#   class TrafficLight < RHDL::Sim::SequentialComponent
 #     include RHDL::DSL::StateMachineDSL
 #
 #     input :clk

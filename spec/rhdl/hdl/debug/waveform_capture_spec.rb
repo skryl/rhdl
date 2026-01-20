@@ -2,10 +2,10 @@
 
 require 'spec_helper'
 
-RSpec.describe RHDL::HDL::WaveformCapture do
-  let(:wire1) { RHDL::HDL::Wire.new("signal_a", width: 1) }
-  let(:wire2) { RHDL::HDL::Wire.new("signal_b", width: 8) }
-  let(:capture) { RHDL::HDL::WaveformCapture.new }
+RSpec.describe RHDL::Debug::WaveformCapture do
+  let(:wire1) { RHDL::Sim::Wire.new("signal_a", width: 1) }
+  let(:wire2) { RHDL::Sim::Wire.new("signal_b", width: 8) }
+  let(:capture) { RHDL::Debug::WaveformCapture.new }
 
   before do
     capture.add_probe(wire1, name: "clk")
