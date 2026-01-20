@@ -67,7 +67,7 @@ module RHDL
 
         # Also find HDL SimComponent subclasses with behavior blocks
         hdl_components = ObjectSpace.each_object(Class).select do |klass|
-          klass < RHDL::HDL::SimComponent &&
+          klass < RHDL::Sim::Component &&
             klass.respond_to?(:behavior_defined?) &&
             klass.behavior_defined?
         end

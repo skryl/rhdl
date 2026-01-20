@@ -66,7 +66,7 @@ class TestVecParam < RHDL::HDL::SimComponent
   vec :memory, count: :depth, width: :width
 end
 
-RSpec.describe RHDL::HDL::Vec do
+RSpec.describe RHDL::Sim::Vec do
   describe 'Vec class' do
     it 'creates a Vec with correct attributes' do
       component = Object.new
@@ -76,7 +76,7 @@ RSpec.describe RHDL::HDL::Vec do
       component.define_singleton_method(:internal_signals) { {} }
       component.define_singleton_method(:propagate) { }
 
-      vec = RHDL::HDL::Vec.new(:test_vec, count: 4, width: 8, component: component)
+      vec = RHDL::Sim::Vec.new(:test_vec, count: 4, width: 8, component: component)
 
       expect(vec.count).to eq(4)
       expect(vec.element_width).to eq(8)

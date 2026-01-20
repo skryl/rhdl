@@ -90,10 +90,10 @@ RSpec.describe 'Gate-level backend equivalence' do
 
     ref_sims = lanes.times.map do
       dffs = 8.times.map { |i| RHDL::HDL::DFlipFlop.new("reg#{i}") }
-      clock = RHDL::HDL::Clock.new('clk')
-      sim_ref = RHDL::HDL::Simulator.new
+      clock = RHDL::Sim::Clock.new('clk')
+      sim_ref = RHDL::Sim::Simulator.new
       dffs.each do |dff|
-        RHDL::HDL::SimComponent.connect(clock, dff.inputs[:clk])
+        RHDL::Sim::Component.connect(clock, dff.inputs[:clk])
         sim_ref.add_component(dff)
       end
       sim_ref.add_clock(clock)
@@ -149,9 +149,9 @@ RSpec.describe 'Gate-level backend equivalence' do
     adder = RHDL::HDL::FullAdder.new('adder')
     dff = RHDL::HDL::DFlipFlop.new('acc')
 
-    RHDL::HDL::SimComponent.connect(dff.outputs[:q], adder.inputs[:a])
-    RHDL::HDL::SimComponent.connect(adder.outputs[:sum], mux.inputs[:b])
-    RHDL::HDL::SimComponent.connect(mux.outputs[:y], dff.inputs[:d])
+    RHDL::Sim::Component.connect(dff.outputs[:q], adder.inputs[:a])
+    RHDL::Sim::Component.connect(adder.outputs[:sum], mux.inputs[:b])
+    RHDL::Sim::Component.connect(mux.outputs[:y], dff.inputs[:d])
 
     sim = RHDL::Export.gate_level([mux, adder, dff], backend: :cpu, lanes: lanes, name: 'muxed_path')
 
@@ -159,13 +159,13 @@ RSpec.describe 'Gate-level backend equivalence' do
       mux_ref = RHDL::HDL::Mux2.new('mux', width: 1)
       adder_ref = RHDL::HDL::FullAdder.new('adder')
       dff_ref = RHDL::HDL::DFlipFlop.new('acc')
-      clock = RHDL::HDL::Clock.new('clk')
-      sim_ref = RHDL::HDL::Simulator.new
+      clock = RHDL::Sim::Clock.new('clk')
+      sim_ref = RHDL::Sim::Simulator.new
 
-      RHDL::HDL::SimComponent.connect(dff_ref.outputs[:q], adder_ref.inputs[:a])
-      RHDL::HDL::SimComponent.connect(adder_ref.outputs[:sum], mux_ref.inputs[:b])
-      RHDL::HDL::SimComponent.connect(mux_ref.outputs[:y], dff_ref.inputs[:d])
-      RHDL::HDL::SimComponent.connect(clock, dff_ref.inputs[:clk])
+      RHDL::Sim::Component.connect(dff_ref.outputs[:q], adder_ref.inputs[:a])
+      RHDL::Sim::Component.connect(adder_ref.outputs[:sum], mux_ref.inputs[:b])
+      RHDL::Sim::Component.connect(mux_ref.outputs[:y], dff_ref.inputs[:d])
+      RHDL::Sim::Component.connect(clock, dff_ref.inputs[:clk])
 
       sim_ref.add_component(mux_ref)
       sim_ref.add_component(adder_ref)
