@@ -36,16 +36,24 @@ module MOS6502
     # DOS 3.3 sector interleaving table
     # Physical to logical sector mapping
     DOS33_INTERLEAVE = [
-      0x00, 0x0D, 0x0B, 0x09, 0x07, 0x05, 0x03, 0x01,
-      0x0E, 0x0C, 0x0A, 0x08, 0x06, 0x04, 0x02, 0x0F
+      0x00, 0x07, 0x0E, 0x06, 0x0D, 0x05, 0x0C, 0x04,
+      0x0B, 0x03, 0x0A, 0x02, 0x09, 0x01, 0x08, 0x0F
     ].freeze
 
-    attr_reader :track, :motor_on, :write_mode, :current_drive
+    attr_reader :motor_on, :write_mode, :current_drive
+
+    # Disk spin timing constants
+    # Apple II Disk II spins at 300 RPM = 5 rotations/second
+    # At 1 MHz CPU, that's 200,000 cycles per rotation
+    # With ~6400 bytes per track, each byte takes ~31 cycles
+    CYCLES_PER_BYTE = 32
+    TRACK_BYTES = 6448
 
     def initialize
       @drives = [nil, nil]  # Two drives supported
       @current_drive = 0
-      @track = 0            # Current track (0-34)
+      @half_track = 0       # Current half-track position (0-68)
+      @current_phase = 0    # Last activated phase (0-3)
       @phase = [false, false, false, false]  # Phase magnet states
       @motor_on = false
       @write_mode = false   # false = read, true = write
@@ -55,6 +63,20 @@ module MOS6502
       @bit_position = 0     # Current bit position in nibble stream
       @byte_position = 0    # Current byte position in track
       @spin_counter = 0     # For timing simulation
+      @cycle_count = 0      # Current CPU cycle count for spin simulation
+    end
+
+    # Call this each CPU cycle to track elapsed time
+    # Position is managed by read_data() which advances on each read
+    # tick() just tracks cycle count for potential future timing needs
+    def tick(cycles = 1)
+      return unless @motor_on
+      @cycle_count += cycles
+    end
+
+    # Track position in full tracks (0-34) for data reading
+    def track
+      @half_track / 2
     end
 
     # Load a .dsk disk image into drive (0 or 1)
@@ -143,60 +165,54 @@ module MOS6502
 
     private
 
+    # Phase delta table: movement in half-tracks when transitioning from
+    # current phase (row) to new phase (column)
+    # Based on apple2js implementation - simplified stepper motor emulation
+    PHASE_DELTA = [
+      [0,  1,  2, -1],  # From phase 0
+      [-1, 0,  1,  2],  # From phase 1
+      [-2, -1, 0,  1],  # From phase 2
+      [1, -2, -1,  0]   # From phase 3
+    ].freeze
+
     # Set phase magnet state and move head if appropriate
+    # Simplified emulation: only phase ON events cause movement
     def set_phase(phase_num, on)
       @phase[phase_num] = on
-      update_track_position if @motor_on
-    end
 
-    # Update track position based on phase magnets
-    # The Disk II uses a 4-phase stepper motor
-    def update_track_position
-      # Find which phases are on
-      phases_on = @phase.each_with_index.select { |on, _| on }.map { |_, i| i }
-      return if phases_on.empty?
+      # Only move when a phase turns ON and motor is running
+      return unless on && @motor_on
 
-      # Calculate desired half-track from phase pattern
-      # Each phase corresponds to a half-track position
-      current_half_track = @track * 2
+      # Look up movement delta based on current phase and new phase
+      delta = PHASE_DELTA[@current_phase][phase_num]
+      @half_track += delta
 
-      # Simple stepper logic: move toward the active phase
-      phases_on.each do |phase|
-        target_half_track = phase
+      # Clamp to valid range (0 to 68 half-tracks for 35 tracks)
+      max_half_track = (TRACKS - 1) * 2
+      @half_track = 0 if @half_track < 0
+      @half_track = max_half_track if @half_track > max_half_track
 
-        # Find closest half-track position matching this phase
-        while target_half_track < current_half_track - 2
-          target_half_track += 4
-        end
-        while target_half_track > current_half_track + 2
-          target_half_track -= 4
-        end
-
-        if target_half_track > current_half_track && current_half_track < (TRACKS - 1) * 2
-          current_half_track += 1
-        elsif target_half_track < current_half_track && current_half_track > 0
-          current_half_track -= 1
-        end
-      end
-
-      @track = current_half_track / 2
-      @track = 0 if @track < 0
-      @track = TRACKS - 1 if @track >= TRACKS
+      # Update current phase
+      @current_phase = phase_num
     end
 
     # Read next data byte from current track
+    # All bytes returned have bit 7 set (valid disk nibbles)
+    # Each read advances to the next byte position, simulating that data
+    # streams by continuously and each read consumes the current byte
     def read_data
       disk = @drives[@current_drive]
       return 0x00 unless disk && @motor_on
 
-      track_data = disk[@track]
+      track_data = disk[track]
       return 0x00 unless track_data
 
-      # Get next nibble byte
-      byte = track_data[@byte_position] || 0x00
-      @byte_position = (@byte_position + 1) % track_data.length
+      # Get byte at current position
+      byte = track_data[@byte_position % track_data.length] || 0x00
 
-      # Simulate disk spinning time
+      # Advance position - each read moves to next byte
+      # This simulates the data stream where you can't read the same byte twice
+      @byte_position = (@byte_position + 1) % TRACK_BYTES
       @spin_counter += 1
 
       byte
@@ -242,14 +258,14 @@ module MOS6502
     end
 
     # Encode a single sector with address field, gaps, and data field
+    # Uses proper 6-and-2 encoding for all sectors (DOS 3.3 compatible)
     def encode_sector(track, sector, data)
       encoded = []
 
-      # Gap 1 - self-sync bytes (typically 40-95 $FF bytes)
+      # Gap 1 - self-sync bytes
       16.times { encoded << 0xFF }
 
-      # Address field
-      # Prologue: D5 AA 96
+      # Address field prologue: D5 AA 96
       encoded << 0xD5 << 0xAA << 0x96
 
       # Volume, track, sector, checksum (4-and-4 encoded)
@@ -261,20 +277,19 @@ module MOS6502
       encoded.concat(encode_4and4(sector))
       encoded.concat(encode_4and4(checksum))
 
-      # Epilogue: DE AA EB
+      # Address field epilogue: DE AA EB
       encoded << 0xDE << 0xAA << 0xEB
 
       # Gap 2
       8.times { encoded << 0xFF }
 
-      # Data field
-      # Prologue: D5 AA AD
+      # Data field prologue: D5 AA AD
       encoded << 0xD5 << 0xAA << 0xAD
 
-      # Encode 256 bytes of data using 6-and-2 encoding
+      # 6-and-2 encoding (343 bytes: 342 data + 1 checksum)
       encoded.concat(encode_6and2(data || Array.new(256, 0)))
 
-      # Epilogue: DE AA EB
+      # Data field epilogue: DE AA EB
       encoded << 0xDE << 0xAA << 0xEB
 
       # Gap 3
@@ -312,6 +327,9 @@ module MOS6502
       buffer = Array.new(342, 0)
 
       # Extract 2-bit values (bottom 2 bits of each byte, packed)
+      # P5 ROM reads aux nibbles and stores at $0355 down to $0300
+      # For reconstruction, aux[$0355] (first read) is used for byte 0
+      # So buffer[0] must contain aux bits for bytes 0, 86, 172
       86.times do |i|
         val = 0
         val |= ((data[i] || 0) & 0x01) << 1
@@ -320,7 +338,7 @@ module MOS6502
         val |= ((data[i + 86] || 0) & 0x02) << 1 if i + 86 < 256
         val |= ((data[i + 172] || 0) & 0x01) << 5 if i + 172 < 256
         val |= ((data[i + 172] || 0) & 0x02) << 3 if i + 172 < 256
-        buffer[85 - i] = val
+        buffer[i] = val
       end
 
       # Store 6-bit values (top 6 bits of each byte)
@@ -342,6 +360,18 @@ module MOS6502
       encoded << translate[checksum & 0x3F]
 
       encoded
+    end
+
+    public
+
+    # Get the Disk II boot ROM for slot 6 ($C600-$C6FF)
+    # Loads the real Apple II Disk II boot ROM (P5 - 341-0027)
+    def self.boot_rom
+      rom_path = File.join(File.dirname(__FILE__), '../software/roms/disk2_boot.bin')
+      if File.exist?(rom_path)
+        return File.binread(rom_path).bytes
+      end
+      raise "Disk II boot ROM not found at #{rom_path}. Please download the real ROM."
     end
   end
 end
