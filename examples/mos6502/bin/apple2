@@ -62,6 +62,8 @@ class Apple2Terminal
     @term_cols = 80
     @pad_top = 0
     @pad_left = 0
+    @hires_pad_top = 0
+    @hires_pad_left = 0
     update_terminal_size
   end
 
@@ -72,10 +74,17 @@ class Apple2Terminal
       @term_cols = [cols, DISPLAY_WIDTH].max
     end
 
-    # Calculate padding to center the display
+    # Calculate padding to center the text display
     display_height = @debug ? DISPLAY_HEIGHT + 1 : DISPLAY_HEIGHT
     @pad_top = [(@term_rows - display_height) / 2, 0].max
     @pad_left = [(@term_cols - DISPLAY_WIDTH) / 2, 0].max
+
+    # Calculate padding for hires display
+    # Hires output height is proportional: (192/4) * (@hires_width / (280/2)) = 48 * @hires_width / 140
+    hires_display_height = (HIRES_HEIGHT * @hires_width / HIRES_WIDTH) + (@debug ? 2 : 1)
+    hires_display_width = @hires_width
+    @hires_pad_top = [(@term_rows - hires_display_height) / 2, 0].max
+    @hires_pad_left = [(@term_cols - hires_display_width) / 2, 0].max
   end
 
   def load_rom(path, base_addr: 0xF800)
@@ -248,10 +257,6 @@ class Apple2Terminal
   def render_hires_screen
     output = String.new
 
-    # Clear screen and move to top
-    output << CLEAR_SCREEN
-    output << MOVE_HOME
-
     if @green_screen
       output << GREEN_FG
       output << BLACK_BG
@@ -259,23 +264,33 @@ class Apple2Terminal
 
     # Render hi-res using braille characters
     hires_output = @runner.bus.render_hires_braille(chars_wide: @hires_width, invert: true)
-    output << hires_output
+    hires_lines = hires_output.split("\n")
+
+    # Render each line of hires output with proper centering
+    hires_lines.each_with_index do |line, row|
+      output << move_cursor(@hires_pad_top + row + 1, @hires_pad_left + 1)
+      output << line
+    end
 
     output << NORMAL_VIDEO if @green_screen
 
-    # Status line below graphics
-    output << "\n"
+    # Status line below graphics (centered)
+    status_row = @hires_pad_top + hires_lines.length + 1
     if @debug
       state = @runner.cpu_state
       dc = @runner.bus.disk_controller
       status = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X Cyc:%s [HIRES]",
                       state[:pc], state[:a], state[:x], state[:y],
                       state[:sp], state[:p], format_cycles(state[:cycles]))
-      output << status << "\n"
+      output << move_cursor(status_row, @hires_pad_left + 1)
+      output << status
+      status_row += 1
       disk_status = format("Disk:T%02d Motor:%s", dc.track, dc.motor_on ? "ON " : "OFF")
-      output << disk_status << "\n"
+      output << move_cursor(status_row, @hires_pad_left + 1)
+      output << disk_status
     elsif disk_motor_on?
-      output << "DISK LOADING...\n"
+      output << move_cursor(status_row, @hires_pad_left + 1)
+      output << "DISK LOADING..."
     end
 
     print output
