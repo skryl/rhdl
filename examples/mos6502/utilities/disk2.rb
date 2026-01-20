@@ -312,6 +312,9 @@ module MOS6502
       buffer = Array.new(342, 0)
 
       # Extract 2-bit values (bottom 2 bits of each byte, packed)
+      # P5 ROM reads aux nibbles and stores at $0355 down to $0300
+      # For reconstruction, aux[$0355] (first read) is used for byte 0
+      # So buffer[0] must contain aux bits for bytes 0, 86, 172
       86.times do |i|
         val = 0
         val |= ((data[i] || 0) & 0x01) << 1
@@ -320,7 +323,7 @@ module MOS6502
         val |= ((data[i + 86] || 0) & 0x02) << 1 if i + 86 < 256
         val |= ((data[i + 172] || 0) & 0x01) << 5 if i + 172 < 256
         val |= ((data[i + 172] || 0) & 0x02) << 3 if i + 172 < 256
-        buffer[85 - i] = val
+        buffer[i] = val
       end
 
       # Store 6-bit values (top 6 bits of each byte)
