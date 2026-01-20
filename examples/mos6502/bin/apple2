@@ -267,14 +267,15 @@ class Apple2Terminal
     output << "\n"
     if @debug
       state = @runner.cpu_state
-      status = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X Cycles:%d [HIRES]",
+      dc = @runner.bus.disk_controller
+      status = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X Cyc:%s [HIRES]",
                       state[:pc], state[:a], state[:x], state[:y],
-                      state[:sp], state[:p], state[:cycles])
+                      state[:sp], state[:p], format_cycles(state[:cycles]))
       output << status << "\n"
-    end
-
-    if disk_motor_on?
-      output << "DISK LOADING..."
+      disk_status = format("Disk:T%02d Motor:%s", dc.track, dc.motor_on ? "ON " : "OFF")
+      output << disk_status << "\n"
+    elsif disk_motor_on?
+      output << "DISK LOADING...\n"
     end
 
     print output
@@ -324,26 +325,46 @@ class Apple2Terminal
     status_row = @pad_top + DISPLAY_HEIGHT + 1
     if @debug
       state = @runner.cpu_state
-      status = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X Cycles:%d",
+      status = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X Cyc:%s",
                       state[:pc], state[:a], state[:x], state[:y],
-                      state[:sp], state[:p], state[:cycles])
+                      state[:sp], state[:p], format_cycles(state[:cycles]))
       output << move_cursor(status_row, @pad_left + 1)
       output << status
       status_row += 1
+
+      # Second debug line: disk and video info
+      dc = @runner.bus.disk_controller
+      video = @runner.bus.video
+      mode = @runner.bus.display_mode
+      disk_status = format("Disk:T%02d Motor:%s | Video:%s",
+                           dc.track, dc.motor_on ? "ON " : "OFF", mode.to_s.upcase)
+      output << move_cursor(status_row, @pad_left + 1)
+      output << disk_status
+      status_row += 1
     end
 
-    # Show "DISK LOADING..." when disk motor is on
-    if disk_motor_on?
+    # Show "DISK LOADING..." when disk motor is on (non-debug mode)
+    if disk_motor_on? && !@debug
       output << move_cursor(status_row, @pad_left + 1)
       output << "DISK LOADING..."
       output << "     "  # Clear any leftover characters
-    else
+    elsif !@debug
       # Clear the disk loading message when motor is off
       output << move_cursor(status_row, @pad_left + 1)
       output << "                    "  # Clear the line
     end
 
     print output
+  end
+
+  def format_cycles(cycles)
+    if cycles >= 1_000_000
+      format("%.1fM", cycles / 1_000_000.0)
+    elsif cycles >= 1_000
+      format("%.1fK", cycles / 1_000.0)
+    else
+      cycles.to_s
+    end
   end
 
   def disk_motor_on?
