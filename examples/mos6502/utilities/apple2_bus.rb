@@ -120,7 +120,7 @@ module MOS6502
     end
 
     # Install the Disk II boot ROM at $C600-$C6FF (slot 6 expansion ROM)
-    # Also installs disk support ROM at $C700-$C7FF with 6-and-2 decode routine
+    # Uses the real Apple II Disk II ROM (P5 - 341-0027)
     def install_disk_boot_rom
       return if @disk_boot_rom_installed
 
@@ -129,13 +129,6 @@ module MOS6502
       boot_rom.each_with_index do |byte, i|
         @memory[0xC600 + i] = byte & 0xFF
         @rom_mask[0xC600 + i] = true
-      end
-
-      # Install disk support ROM at $C700 (6-and-2 decode routine)
-      support_rom = Disk2.disk_support_rom
-      support_rom.each_with_index do |byte, i|
-        @memory[0xC700 + i] = byte & 0xFF
-        @rom_mask[0xC700 + i] = true
       end
 
       @disk_boot_rom_installed = true
