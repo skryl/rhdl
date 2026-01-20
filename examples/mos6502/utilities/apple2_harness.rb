@@ -115,18 +115,23 @@ module Apple2Harness
   # ISA-level runner using fast instruction-level simulation
   # Provides the same interface as Runner but uses ISASimulator for performance
   #
-  # Uses the native Rust implementation when available, which calls back to Ruby
-  # for memory operations (supporting memory-mapped I/O via Apple2Bus).
+  # Memory Model (Native):
+  # - CPU has internal 64KB memory for fast execution
+  # - I/O region ($C000-$CFFF) calls back to Ruby bus for memory-mapped I/O
+  # - External devices read/write via cpu.peek/poke
+  #
   # Falls back to pure Ruby ISASimulator if native extension is not available.
   class ISARunner
     attr_reader :cpu, :bus
 
     def initialize
       @bus = MOS6502::Apple2Bus.new("apple2_bus")
-      # Use native Rust implementation with external memory (calls back to Ruby for read/write)
+      # Use native Rust implementation with I/O handler for $C000-$CFFF
       # Falls back to pure Ruby if native extension is not available
       if MOS6502::NATIVE_AVAILABLE
         @cpu = MOS6502::ISASimulatorNative.new(@bus)
+        # Give bus a reference to CPU for screen reading via peek
+        @bus.instance_variable_set(:@native_cpu, @cpu)
       else
         @cpu = MOS6502::ISASimulator.new(@bus)
       end
@@ -138,12 +143,38 @@ module Apple2Harness
     end
 
     def load_rom(bytes, base_addr:)
-      @bus.load_rom(bytes, base_addr: base_addr)
+      bytes_array = to_bytes(bytes)
+      if native?
+        if base_addr >= 0xC000 && base_addr < 0xD000
+          # Expansion ROM ($C000-$CFFF) goes to bus for io_read
+          @bus.load_rom(bytes_array, base_addr: base_addr)
+        else
+          # Main ROM goes directly to CPU memory for fast access
+          @cpu.load_bytes(bytes_array, base_addr)
+        end
+      else
+        @bus.load_rom(bytes_array, base_addr: base_addr)
+      end
     end
 
     def load_ram(bytes, base_addr:)
-      @bus.load_ram(bytes, base_addr: base_addr)
+      bytes_array = to_bytes(bytes)
+      if native?
+        # RAM goes directly to CPU memory for fast access
+        @cpu.load_bytes(bytes_array, base_addr)
+      else
+        @bus.load_ram(bytes_array, base_addr: base_addr)
+      end
     end
+
+    private
+
+    def to_bytes(source)
+      return source.bytes if source.is_a?(String)
+      source
+    end
+
+    public
 
     def load_disk(path_or_bytes, drive: 0)
       @bus.load_disk(path_or_bytes, drive: drive)
