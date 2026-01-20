@@ -468,6 +468,15 @@ elsif options[:demo]
   demo = create_demo_program
   terminal.load_program_bytes(demo, base_addr: 0x0800)
   terminal.setup_reset_vector(0x0800)
+elsif options[:rom]
+  # ROM loaded - it will handle startup (e.g., boot from disk)
+  # No additional program needed
+elsif options[:disk]
+  # Disk loaded but no ROM - need a ROM to boot from disk
+  puts parser
+  puts ""
+  puts "Error: Disk loading requires a ROM (use --rom or --appleiigo)."
+  exit 1
 else
   puts parser
   puts ""
