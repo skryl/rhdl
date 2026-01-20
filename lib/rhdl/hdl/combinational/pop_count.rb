@@ -4,7 +4,7 @@
 module RHDL
   module HDL
     # Population Count (count 1 bits)
-    class PopCount < SimComponent
+    class PopCount < Component
       parameter :width, default: 8
       parameter :out_width, default: -> { Math.log2(@width + 1).ceil }
 

@@ -4,7 +4,7 @@
 module RHDL
   module HDL
     # Zero Detector
-    class ZeroDetect < SimComponent
+    class ZeroDetect < Component
       parameter :width, default: 8
 
       input :a, width: :width

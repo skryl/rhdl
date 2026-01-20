@@ -3,7 +3,7 @@
 
 module RHDL
   module HDL
-    class AndGate < SimComponent
+    class AndGate < Component
       input :a0
       input :a1
       output :y

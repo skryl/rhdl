@@ -4,7 +4,7 @@
 module RHDL
   module HDL
     # 3-to-8 Decoder
-    class Decoder3to8 < SimComponent
+    class Decoder3to8 < Component
       # Class-level port definitions for synthesis
       input :a, width: 3
       input :en

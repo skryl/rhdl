@@ -6,7 +6,7 @@ require_relative 'sim'
 # Base class aliases for HDL component definitions
 module RHDL
   module HDL
-    SimComponent = Sim::Component
+    Component = Sim::Component
     SequentialComponent = Sim::SequentialComponent
   end
 end
@@ -22,8 +22,8 @@ require_relative 'hdl/cpu/harness'
 
 module RHDL
   module HDL
-    # Include diagram methods in SimComponent
-    SimComponent.include(RHDL::Diagram::Methods)
+    # Include diagram methods in Component
+    Component.include(RHDL::Diagram::Methods)
     # Convenience method to create a simulator with components
     def self.simulator(&block)
       sim = RHDL::Sim::Simulator.new

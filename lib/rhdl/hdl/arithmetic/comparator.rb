@@ -3,7 +3,7 @@
 
 module RHDL
   module HDL
-    class Comparator < SimComponent
+    class Comparator < Component
       parameter :width, default: 8
 
       input :a, width: :width

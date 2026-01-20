@@ -1,9 +1,9 @@
-# Diagram extension methods for HDL SimComponent
+# Diagram extension methods for HDL Component
 # Adds to_diagram, to_svg, and other diagram-related methods
 
 module RHDL
   module Diagram
-    # Extension methods for SimComponent
+    # Extension methods for Component
     module Methods
       # Generate a block diagram of this component
       def to_diagram(**options)

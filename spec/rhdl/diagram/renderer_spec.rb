@@ -198,7 +198,7 @@ RSpec.describe RHDL::Diagram::Renderer do
   describe 'Edge cases' do
     it 'handles components with no inputs' do
       # Create a simple component with only outputs
-      class OutputOnlyComponent < RHDL::HDL::SimComponent
+      class OutputOnlyComponent < RHDL::HDL::Component
         def setup_ports
           output :out1
           output :out2
@@ -213,7 +213,7 @@ RSpec.describe RHDL::Diagram::Renderer do
 
     it 'handles components with no outputs' do
       # Create a simple component with only inputs
-      class InputOnlyComponent < RHDL::HDL::SimComponent
+      class InputOnlyComponent < RHDL::HDL::Component
         def setup_ports
           input :in1
           input :in2
@@ -227,7 +227,7 @@ RSpec.describe RHDL::Diagram::Renderer do
     end
 
     it 'handles long port names' do
-      class LongNameComponent < RHDL::HDL::SimComponent
+      class LongNameComponent < RHDL::HDL::Component
         def setup_ports
           input :very_long_input_name_here
           output :extremely_long_output_name

@@ -7,7 +7,7 @@ require_relative '../../../../lib/rhdl/dsl/behavior'
 
 module RISCV
   module Pipeline
-    class HazardUnit < RHDL::HDL::SimComponent
+    class HazardUnit < RHDL::HDL::Component
       include RHDL::DSL::Behavior
 
       # From ID stage (current instruction being decoded)
