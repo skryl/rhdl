@@ -256,10 +256,12 @@ module RHDL
           exec_args << "-d" if options[:debug]
           # Fast mode is now the default; only pass --hdl if explicitly requested
           exec_args << "--hdl" if options[:hdl]
-          exec_args += ["-s", options[:speed].to_s] if options[:speed]
+          exec_args.push("-s", options[:speed].to_s) if options[:speed]
           exec_args << "-g" if options[:green]
-          exec_args += ["--disk", options[:disk]] if options[:disk]
-          exec_args += ["--disk2", options[:disk2]] if options[:disk2]
+          exec_args << "-H" if options[:hires]
+          exec_args.push("--hires-width", options[:hires_width].to_s) if options[:hires_width]
+          exec_args.push("--disk", options[:disk]) if options[:disk]
+          exec_args.push("--disk2", options[:disk2]) if options[:disk2]
         end
       end
     end

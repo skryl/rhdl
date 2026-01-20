@@ -75,6 +75,14 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
     it 'can be instantiated with run option' do
       expect { described_class.new(build: true, run: true) }.not_to raise_error
     end
+
+    it 'can be instantiated with hires option' do
+      expect { described_class.new(hires: true) }.not_to raise_error
+    end
+
+    it 'can be instantiated with hires_width option' do
+      expect { described_class.new(hires: true, hires_width: 140) }.not_to raise_error
+    end
   end
 
   describe '#run' do
@@ -157,6 +165,74 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       expect(task.options[:green]).to be true
       expect(task.options[:speed]).to eq(5000)
       expect(task.options[:rom]).to eq('/path/to/rom.bin')
+    end
+
+    it 'stores hires options' do
+      task = described_class.new(hires: true, hires_width: 140)
+
+      expect(task.options[:hires]).to be true
+      expect(task.options[:hires_width]).to eq(140)
+    end
+  end
+
+  describe '#add_common_args' do
+    it 'adds hires flag when hires option is set' do
+      task = described_class.new(hires: true)
+      exec_args = []
+
+      task.send(:add_common_args, exec_args)
+
+      expect(exec_args).to include('-H')
+    end
+
+    it 'adds hires-width when hires_width option is set' do
+      task = described_class.new(hires_width: 140)
+      exec_args = []
+
+      task.send(:add_common_args, exec_args)
+
+      expect(exec_args).to include('--hires-width')
+      expect(exec_args).to include('140')
+    end
+
+    it 'adds both hires flags together' do
+      task = described_class.new(hires: true, hires_width: 140)
+      exec_args = []
+
+      task.send(:add_common_args, exec_args)
+
+      expect(exec_args).to include('-H')
+      expect(exec_args).to include('--hires-width')
+      expect(exec_args).to include('140')
+    end
+
+    it 'adds all common args correctly' do
+      task = described_class.new(
+        debug: true,
+        hdl: true,
+        speed: 5000,
+        green: true,
+        hires: true,
+        hires_width: 100,
+        disk: '/path/to/disk.dsk',
+        disk2: '/path/to/disk2.dsk'
+      )
+      exec_args = []
+
+      task.send(:add_common_args, exec_args)
+
+      expect(exec_args).to include('-d')
+      expect(exec_args).to include('--hdl')
+      expect(exec_args).to include('-s')
+      expect(exec_args).to include('5000')
+      expect(exec_args).to include('-g')
+      expect(exec_args).to include('-H')
+      expect(exec_args).to include('--hires-width')
+      expect(exec_args).to include('100')
+      expect(exec_args).to include('--disk')
+      expect(exec_args).to include('/path/to/disk.dsk')
+      expect(exec_args).to include('--disk2')
+      expect(exec_args).to include('/path/to/disk2.dsk')
     end
   end
 end
