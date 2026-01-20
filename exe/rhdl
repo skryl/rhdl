@@ -16,7 +16,7 @@ def show_help
     Commands:
       tui           Launch interactive TUI debugger
       diagram       Generate circuit diagrams
-      export        Export components to Verilog or VHDL
+      export        Export components to Verilog
       gates         Gate-level synthesis
       apple2        Apple II emulator and ROM tools
       generate      Generate all output files (diagrams + HDL exports)
@@ -164,7 +164,7 @@ def handle_export(args)
     opts.banner = <<~BANNER
       Usage: rhdl export [options] [ComponentRef]
 
-      Export HDL components to Verilog or VHDL.
+      Export HDL components to Verilog.
 
       Single component mode:
         rhdl export --lang verilog --out ./output RHDL::HDL::Counter
@@ -180,7 +180,7 @@ def handle_export(args)
     opts.on('--all', 'Export all components') { options[:all] = true }
     opts.on('--scope SCOPE', 'Batch scope: all, lib, or examples') { |v| options[:scope] = v }
     opts.on('--clean', 'Clean all generated HDL files') { options[:clean] = true }
-    opts.on('--lang LANG', 'Target language: verilog or vhdl') { |v| options[:lang] = v }
+    opts.on('--lang LANG', 'Target language: verilog') { |v| options[:lang] = v }
     opts.on('--out DIR', 'Output directory') { |v| options[:out] = v }
     opts.on('--top NAME', 'Override top module/entity name') { |v| options[:top] = v }
     opts.on('-h', '--help', 'Show this help') do

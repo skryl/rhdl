@@ -23,7 +23,7 @@ bundle exec rhdl --help
 |---------|-------------|
 | `tui` | Launch interactive TUI debugger |
 | `diagram` | Generate circuit diagrams |
-| `export` | Export components to Verilog or VHDL |
+| `export` | Export components to Verilog |
 | `gates` | Gate-level synthesis |
 | `apple2` | Apple II emulator and ROM tools |
 
@@ -190,7 +190,7 @@ rhdl diagram --clean
 
 ## Export Command
 
-Export HDL components to Verilog or VHDL.
+Export HDL components to Verilog.
 
 ### Usage
 
@@ -205,7 +205,7 @@ rhdl export [options] [ComponentRef]
 | `--all` | Export all components |
 | `--scope SCOPE` | Batch scope: `all`, `lib`, or `examples` |
 | `--clean` | Clean all generated HDL files |
-| `--lang LANG` | Target language: `verilog` or `vhdl` |
+| `--lang LANG` | Target language: `verilog` |
 | `--out DIR` | Output directory |
 | `--top NAME` | Override top module/entity name |
 | `-h, --help` | Show help |
@@ -460,5 +460,5 @@ Use `rhdl tui --list` to see all available components:
 
 - [Debugging Guide](debugging.md) - Detailed TUI and debugging documentation
 - [Diagrams Guide](diagrams.md) - Diagram generation details
-- [Export Guide](export.md) - Verilog/VHDL export details
+- [Export Guide](export.md) - Verilog export details
 - [Components Reference](components.md) - Complete component documentation

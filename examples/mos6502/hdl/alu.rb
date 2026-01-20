@@ -1,6 +1,6 @@
 # MOS 6502 ALU - Fully Synthesizable DSL Version
 # Complete implementation with Binary Coded Decimal (BCD) mode
-# Uses behavior DSL for Verilog/VHDL export
+# Uses behavior DSL for Verilog export
 
 require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
