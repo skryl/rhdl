@@ -252,6 +252,8 @@ def handle_apple2(args)
     green: false,
     ink: false,
     hdl: false,
+    hires: false,
+    hires_width: nil,
     disk: nil,
     disk2: nil
   }
@@ -272,6 +274,10 @@ def handle_apple2(args)
       Disk loading:
         rhdl apple2 --appleiigo --disk path/to/disk.dsk
         rhdl apple2 --rom ROM --disk disk1.dsk --disk2 disk2.dsk
+
+      Hi-res graphics (for games like Karateka):
+        rhdl apple2 --appleiigo --disk karateka.dsk --hires
+        rhdl apple2 --appleiigo --disk karateka.dsk --hires --hires-width 140
 
       Ink TUI (React-based terminal UI):
         rhdl apple2 --ink          Run with Ink TUI (ISA mode, demo program)
@@ -295,6 +301,8 @@ def handle_apple2(args)
     opts.on('-g', '--green', 'Green phosphor screen effect') { options[:green] = true }
     opts.on('--ink', 'Use Ink (React-based) TUI renderer') { options[:ink] = true }
     opts.on('--hdl', 'Use HDL mode (cycle-accurate simulation)') { options[:hdl] = true }
+    opts.on('-H', '--hires', 'Enable hi-res graphics rendering (uses braille characters)') { options[:hires] = true }
+    opts.on('--hires-width WIDTH', Integer, 'Hi-res display width in chars (default: 80)') { |v| options[:hires_width] = v }
     opts.on('--disk FILE', 'Load disk image (.dsk) into drive 1') { |v| options[:disk] = v }
     opts.on('--disk2 FILE', 'Load disk image (.dsk) into drive 2') { |v| options[:disk2] = v }
     opts.on('-h', '--help', 'Show this help') do

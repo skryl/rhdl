@@ -58,4 +58,58 @@ RSpec.describe 'Apple2Bus disk integration' do
       expect(bus.disk_controller.motor_on).to be true
     end
   end
+
+  describe 'video soft switches' do
+    it 'starts in text mode' do
+      expect(bus.video[:text]).to be true
+      expect(bus.video[:hires]).to be false
+      expect(bus.hires_mode?).to be false
+      expect(bus.text_mode?).to be true
+    end
+
+    it 'switches to graphics mode when $C050 is accessed' do
+      bus.read(0xC050)  # Access GRAPHICS soft switch
+      expect(bus.video[:text]).to be false
+    end
+
+    it 'switches to hires mode when $C057 is accessed' do
+      bus.read(0xC057)  # Access HIRES soft switch
+      expect(bus.video[:hires]).to be true
+    end
+
+    it 'returns hires_mode? true when both switches are set' do
+      bus.read(0xC050)  # Graphics mode (text off)
+      bus.read(0xC057)  # Hires on
+      expect(bus.hires_mode?).to be true
+      expect(bus.display_mode).to eq(:hires)
+    end
+
+    it 'can switch via write as well as read' do
+      bus.write(0xC050, 0)  # Graphics mode (text off)
+      bus.write(0xC057, 0)  # Hires on
+      expect(bus.hires_mode?).to be true
+    end
+
+    it 'allows CPU to switch video modes' do
+      # Program that switches to hires mode
+      program = [
+        0xAD, 0x50, 0xC0,  # LDA $C050 (graphics mode)
+        0xAD, 0x57, 0xC0,  # LDA $C057 (hires on)
+        0x00               # BRK
+      ]
+      runner.load_ram(program, base_addr: 0x0800)
+      bus.write(0xFFFC, 0x00)  # Reset vector low
+      bus.write(0xFFFD, 0x08)  # Reset vector high
+      runner.reset
+
+      # Initially in text mode
+      expect(bus.hires_mode?).to be false
+
+      # Run the program
+      runner.run_until(max_cycles: 100) { runner.halted? }
+
+      # Now should be in hires mode
+      expect(bus.hires_mode?).to be true
+    end
+  end
 end
