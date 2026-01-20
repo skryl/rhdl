@@ -1,8 +1,9 @@
 //! MOS 6502 ISA-Level Simulator with Ruby bindings
 //! High-performance instruction-level simulator for the MOS 6502 CPU
+//! Supports both internal memory and external Ruby memory objects (like Apple2Bus)
 
 use magnus::{
-    method, prelude::*, Error, RArray, RHash, Ruby, TryConvert, Value,
+    function, method, prelude::*, value::Opaque, Error, RArray, RHash, Ruby, TryConvert, Value,
 };
 use std::cell::RefCell;
 
@@ -20,8 +21,8 @@ const NMI_VECTOR: u16 = 0xFFFA;
 const RESET_VECTOR: u16 = 0xFFFC;
 const IRQ_VECTOR: u16 = 0xFFFE;
 
-/// MOS 6502 CPU state
-pub struct Cpu6502 {
+/// MOS 6502 CPU state (core without memory)
+pub struct Cpu6502Core {
     // Registers
     pub a: u8,   // Accumulator
     pub x: u8,   // X index register
@@ -33,14 +34,11 @@ pub struct Cpu6502 {
     // State
     pub cycles: u64,
     pub halted: bool,
-
-    // Memory (owned array - 64KB)
-    pub memory: Vec<u8>,
 }
 
-impl Cpu6502 {
+impl Cpu6502Core {
     pub fn new() -> Self {
-        let mut cpu = Self {
+        Self {
             a: 0,
             x: 0,
             y: 0,
@@ -49,10 +47,7 @@ impl Cpu6502 {
             p: 0x24, // Unused flag set, Interrupt disable set
             cycles: 0,
             halted: false,
-            memory: vec![0; 0x10000],
-        };
-        cpu.pc = cpu.read_word(RESET_VECTOR);
-        cpu
+        }
     }
 
     pub fn reset(&mut self) {
@@ -61,27 +56,8 @@ impl Cpu6502 {
         self.y = 0;
         self.sp = 0xFD;
         self.p = 0x24;
-        self.pc = self.read_word(RESET_VECTOR);
         self.cycles = 0;
         self.halted = false;
-    }
-
-    // Memory operations
-    #[inline]
-    pub fn read(&self, addr: u16) -> u8 {
-        self.memory[addr as usize]
-    }
-
-    #[inline]
-    pub fn write(&mut self, addr: u16, value: u8) {
-        self.memory[addr as usize] = value;
-    }
-
-    #[inline]
-    pub fn read_word(&self, addr: u16) -> u16 {
-        let lo = self.read(addr) as u16;
-        let hi = self.read(addr.wrapping_add(1)) as u16;
-        (hi << 8) | lo
     }
 
     // Flag accessors
@@ -104,138 +80,6 @@ impl Cpu6502 {
         self.set_flag(FLAG_Z, value == 0);
         self.set_flag(FLAG_N, value & 0x80 != 0);
         value
-    }
-
-    // Fetch operations
-    #[inline]
-    fn fetch_byte(&mut self) -> u8 {
-        let byte = self.read(self.pc);
-        self.pc = self.pc.wrapping_add(1);
-        byte
-    }
-
-    #[inline]
-    fn fetch_word(&mut self) -> u16 {
-        let lo = self.fetch_byte() as u16;
-        let hi = self.fetch_byte() as u16;
-        (hi << 8) | lo
-    }
-
-    // Stack operations
-    #[inline]
-    fn push_byte(&mut self, value: u8) {
-        self.write(0x100 + self.sp as u16, value);
-        self.sp = self.sp.wrapping_sub(1);
-    }
-
-    #[inline]
-    fn pull_byte(&mut self) -> u8 {
-        self.sp = self.sp.wrapping_add(1);
-        self.read(0x100 + self.sp as u16)
-    }
-
-    #[inline]
-    fn push_word(&mut self, value: u16) {
-        self.push_byte((value >> 8) as u8);
-        self.push_byte(value as u8);
-    }
-
-    #[inline]
-    fn pull_word(&mut self) -> u16 {
-        let lo = self.pull_byte() as u16;
-        let hi = self.pull_byte() as u16;
-        (hi << 8) | lo
-    }
-
-    // Addressing modes - return address
-    #[inline]
-    fn addr_immediate(&mut self) -> u16 {
-        let addr = self.pc;
-        self.pc = self.pc.wrapping_add(1);
-        addr
-    }
-
-    #[inline]
-    fn addr_zero_page(&mut self) -> u16 {
-        self.fetch_byte() as u16
-    }
-
-    #[inline]
-    fn addr_zero_page_x(&mut self) -> u16 {
-        self.fetch_byte().wrapping_add(self.x) as u16
-    }
-
-    #[inline]
-    fn addr_zero_page_y(&mut self) -> u16 {
-        self.fetch_byte().wrapping_add(self.y) as u16
-    }
-
-    #[inline]
-    fn addr_absolute(&mut self) -> u16 {
-        self.fetch_word()
-    }
-
-    #[inline]
-    fn addr_absolute_x(&mut self, check_page_cross: bool) -> u16 {
-        let base = self.fetch_word();
-        let addr = base.wrapping_add(self.x as u16);
-        if check_page_cross && (base & 0xFF00) != (addr & 0xFF00) {
-            self.cycles += 1;
-        }
-        addr
-    }
-
-    #[inline]
-    fn addr_absolute_y(&mut self, check_page_cross: bool) -> u16 {
-        let base = self.fetch_word();
-        let addr = base.wrapping_add(self.y as u16);
-        if check_page_cross && (base & 0xFF00) != (addr & 0xFF00) {
-            self.cycles += 1;
-        }
-        addr
-    }
-
-    #[inline]
-    fn addr_indirect(&mut self) -> u16 {
-        let ptr = self.fetch_word();
-        // 6502 indirect JMP bug: if ptr is at xxFF, high byte comes from xx00
-        let lo = self.read(ptr);
-        let hi_addr = if ptr & 0xFF == 0xFF {
-            ptr & 0xFF00
-        } else {
-            ptr + 1
-        };
-        let hi = self.read(hi_addr);
-        ((hi as u16) << 8) | lo as u16
-    }
-
-    #[inline]
-    fn addr_indexed_indirect(&mut self) -> u16 {
-        // (zp,X)
-        let ptr = self.fetch_byte().wrapping_add(self.x);
-        let lo = self.read(ptr as u16);
-        let hi = self.read(ptr.wrapping_add(1) as u16);
-        ((hi as u16) << 8) | lo as u16
-    }
-
-    #[inline]
-    fn addr_indirect_indexed(&mut self, check_page_cross: bool) -> u16 {
-        // (zp),Y
-        let ptr = self.fetch_byte();
-        let lo = self.read(ptr as u16);
-        let hi = self.read(ptr.wrapping_add(1) as u16);
-        let base = ((hi as u16) << 8) | lo as u16;
-        let addr = base.wrapping_add(self.y as u16);
-        if check_page_cross && (base & 0xFF00) != (addr & 0xFF00) {
-            self.cycles += 1;
-        }
-        addr
-    }
-
-    #[inline]
-    fn addr_relative(&mut self) -> u16 {
-        let offset = self.fetch_byte() as i8 as i16;
-        self.pc.wrapping_add(offset as u16)
     }
 
     // ALU operations
@@ -325,313 +169,488 @@ impl Cpu6502 {
         self.set_flag(FLAG_C, value & 1 != 0);
         self.set_nz((value >> 1) | (carry << 7))
     }
+}
 
-    fn branch_if(&mut self, condition: bool) {
+// ============================================================================
+// Ruby bindings wrapper with external memory support
+// ============================================================================
+
+/// Ruby-wrapped CPU simulator that can use either internal or external memory
+#[magnus::wrap(class = "MOS6502::ISASimulatorNative")]
+struct RubyCpu {
+    cpu: RefCell<Cpu6502Core>,
+    internal_memory: RefCell<Vec<u8>>,
+    external_memory: RefCell<Option<Opaque<Value>>>,
+}
+
+impl Default for RubyCpu {
+    fn default() -> Self {
+        Self {
+            cpu: RefCell::new(Cpu6502Core::new()),
+            internal_memory: RefCell::new(vec![0; 0x10000]),
+            external_memory: RefCell::new(None),
+        }
+    }
+}
+
+impl RubyCpu {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    // Memory operations - use external if available, otherwise internal
+    fn read(&self, addr: u16) -> u8 {
+        let ext_mem = self.external_memory.borrow();
+        if let Some(ref opaque) = *ext_mem {
+            // Call Ruby memory.read(addr)
+            let ruby = unsafe { Ruby::get_unchecked() };
+            let memory: Value = ruby.get_inner(*opaque);
+            match memory.funcall::<_, _, i64>("read", (addr as i64,)) {
+                Ok(v) => v as u8,
+                Err(_) => 0,
+            }
+        } else {
+            self.internal_memory.borrow()[addr as usize]
+        }
+    }
+
+    fn write(&self, addr: u16, value: u8) {
+        let ext_mem = self.external_memory.borrow();
+        if let Some(ref opaque) = *ext_mem {
+            // Call Ruby memory.write(addr, value)
+            let ruby = unsafe { Ruby::get_unchecked() };
+            let memory: Value = ruby.get_inner(*opaque);
+            let _ = memory.funcall::<_, _, Value>("write", (addr as i64, value as i64));
+        } else {
+            drop(ext_mem); // Release borrow before mutating
+            self.internal_memory.borrow_mut()[addr as usize] = value;
+        }
+    }
+
+    fn read_word(&self, addr: u16) -> u16 {
+        let lo = self.read(addr) as u16;
+        let hi = self.read(addr.wrapping_add(1)) as u16;
+        (hi << 8) | lo
+    }
+
+    // Fetch operations
+    fn fetch_byte(&self) -> u8 {
+        let pc = self.cpu.borrow().pc;
+        let byte = self.read(pc);
+        self.cpu.borrow_mut().pc = pc.wrapping_add(1);
+        byte
+    }
+
+    fn fetch_word(&self) -> u16 {
+        let lo = self.fetch_byte() as u16;
+        let hi = self.fetch_byte() as u16;
+        (hi << 8) | lo
+    }
+
+    // Stack operations
+    fn push_byte(&self, value: u8) {
+        let sp = self.cpu.borrow().sp;
+        self.write(0x100 + sp as u16, value);
+        self.cpu.borrow_mut().sp = sp.wrapping_sub(1);
+    }
+
+    fn pull_byte(&self) -> u8 {
+        let sp = self.cpu.borrow().sp.wrapping_add(1);
+        self.cpu.borrow_mut().sp = sp;
+        self.read(0x100 + sp as u16)
+    }
+
+    fn push_word(&self, value: u16) {
+        self.push_byte((value >> 8) as u8);
+        self.push_byte(value as u8);
+    }
+
+    fn pull_word(&self) -> u16 {
+        let lo = self.pull_byte() as u16;
+        let hi = self.pull_byte() as u16;
+        (hi << 8) | lo
+    }
+
+    // Addressing modes - return address
+    fn addr_immediate(&self) -> u16 {
+        let pc = self.cpu.borrow().pc;
+        self.cpu.borrow_mut().pc = pc.wrapping_add(1);
+        pc
+    }
+
+    fn addr_zero_page(&self) -> u16 {
+        self.fetch_byte() as u16
+    }
+
+    fn addr_zero_page_x(&self) -> u16 {
+        let x = self.cpu.borrow().x;
+        self.fetch_byte().wrapping_add(x) as u16
+    }
+
+    fn addr_zero_page_y(&self) -> u16 {
+        let y = self.cpu.borrow().y;
+        self.fetch_byte().wrapping_add(y) as u16
+    }
+
+    fn addr_absolute(&self) -> u16 {
+        self.fetch_word()
+    }
+
+    fn addr_absolute_x(&self, check_page_cross: bool) -> u16 {
+        let base = self.fetch_word();
+        let x = self.cpu.borrow().x;
+        let addr = base.wrapping_add(x as u16);
+        if check_page_cross && (base & 0xFF00) != (addr & 0xFF00) {
+            self.cpu.borrow_mut().cycles += 1;
+        }
+        addr
+    }
+
+    fn addr_absolute_y(&self, check_page_cross: bool) -> u16 {
+        let base = self.fetch_word();
+        let y = self.cpu.borrow().y;
+        let addr = base.wrapping_add(y as u16);
+        if check_page_cross && (base & 0xFF00) != (addr & 0xFF00) {
+            self.cpu.borrow_mut().cycles += 1;
+        }
+        addr
+    }
+
+    fn addr_indirect(&self) -> u16 {
+        let ptr = self.fetch_word();
+        // 6502 indirect JMP bug: if ptr is at xxFF, high byte comes from xx00
+        let lo = self.read(ptr);
+        let hi_addr = if ptr & 0xFF == 0xFF {
+            ptr & 0xFF00
+        } else {
+            ptr + 1
+        };
+        let hi = self.read(hi_addr);
+        ((hi as u16) << 8) | lo as u16
+    }
+
+    fn addr_indexed_indirect(&self) -> u16 {
+        // (zp,X)
+        let x = self.cpu.borrow().x;
+        let ptr = self.fetch_byte().wrapping_add(x);
+        let lo = self.read(ptr as u16);
+        let hi = self.read(ptr.wrapping_add(1) as u16);
+        ((hi as u16) << 8) | lo as u16
+    }
+
+    fn addr_indirect_indexed(&self, check_page_cross: bool) -> u16 {
+        // (zp),Y
+        let ptr = self.fetch_byte();
+        let lo = self.read(ptr as u16);
+        let hi = self.read(ptr.wrapping_add(1) as u16);
+        let base = ((hi as u16) << 8) | lo as u16;
+        let y = self.cpu.borrow().y;
+        let addr = base.wrapping_add(y as u16);
+        if check_page_cross && (base & 0xFF00) != (addr & 0xFF00) {
+            self.cpu.borrow_mut().cycles += 1;
+        }
+        addr
+    }
+
+    fn addr_relative(&self) -> u16 {
+        let offset = self.fetch_byte() as i8 as i16;
+        let pc = self.cpu.borrow().pc;
+        pc.wrapping_add(offset as u16)
+    }
+
+    fn branch_if(&self, condition: bool) {
         let target = self.addr_relative();
         if condition {
-            self.cycles += 1;
-            if (self.pc & 0xFF00) != (target & 0xFF00) {
-                self.cycles += 1;
+            let pc = self.cpu.borrow().pc;
+            self.cpu.borrow_mut().cycles += 1;
+            if (pc & 0xFF00) != (target & 0xFF00) {
+                self.cpu.borrow_mut().cycles += 1;
             }
-            self.pc = target;
+            self.cpu.borrow_mut().pc = target;
         }
     }
 
     /// Execute one instruction and return cycles taken
-    pub fn step(&mut self) -> u64 {
-        if self.halted {
+    fn step_internal(&self) -> u64 {
+        if self.cpu.borrow().halted {
             return 0;
         }
 
         let opcode = self.fetch_byte();
         self.execute(opcode);
-        self.cycles
+        self.cpu.borrow().cycles
     }
 
-    /// Execute multiple instructions
-    pub fn run(&mut self, max_instructions: u32) -> u32 {
-        let mut count = 0;
-        while count < max_instructions && !self.halted {
-            self.step();
-            count += 1;
-        }
-        count
-    }
-
-    /// Execute for a number of cycles
-    pub fn run_cycles(&mut self, target_cycles: u64) -> u64 {
-        let start_cycles = self.cycles;
-        while (self.cycles - start_cycles) < target_cycles && !self.halted {
-            self.step();
-        }
-        self.cycles - start_cycles
-    }
-
-    fn execute(&mut self, opcode: u8) {
+    fn execute(&self, opcode: u8) {
         match opcode {
             // ADC - Add with Carry
-            0x69 => { self.cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); self.do_adc(v); }
-            0x65 => { self.cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); self.do_adc(v); }
-            0x75 => { self.cycles += 4; let addr = self.addr_zero_page_x(); let v = self.read(addr); self.do_adc(v); }
-            0x6D => { self.cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); self.do_adc(v); }
-            0x7D => { self.cycles += 4; let addr = self.addr_absolute_x(true); let v = self.read(addr); self.do_adc(v); }
-            0x79 => { self.cycles += 4; let addr = self.addr_absolute_y(true); let v = self.read(addr); self.do_adc(v); }
-            0x61 => { self.cycles += 6; let addr = self.addr_indexed_indirect(); let v = self.read(addr); self.do_adc(v); }
-            0x71 => { self.cycles += 5; let addr = self.addr_indirect_indexed(true); let v = self.read(addr); self.do_adc(v); }
+            0x69 => { self.cpu.borrow_mut().cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); self.cpu.borrow_mut().do_adc(v); }
+            0x65 => { self.cpu.borrow_mut().cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); self.cpu.borrow_mut().do_adc(v); }
+            0x75 => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_zero_page_x(); let v = self.read(addr); self.cpu.borrow_mut().do_adc(v); }
+            0x6D => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); self.cpu.borrow_mut().do_adc(v); }
+            0x7D => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute_x(true); let v = self.read(addr); self.cpu.borrow_mut().do_adc(v); }
+            0x79 => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute_y(true); let v = self.read(addr); self.cpu.borrow_mut().do_adc(v); }
+            0x61 => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_indexed_indirect(); let v = self.read(addr); self.cpu.borrow_mut().do_adc(v); }
+            0x71 => { self.cpu.borrow_mut().cycles += 5; let addr = self.addr_indirect_indexed(true); let v = self.read(addr); self.cpu.borrow_mut().do_adc(v); }
 
             // SBC - Subtract with Carry
-            0xE9 => { self.cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); self.do_sbc(v); }
-            0xE5 => { self.cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); self.do_sbc(v); }
-            0xF5 => { self.cycles += 4; let addr = self.addr_zero_page_x(); let v = self.read(addr); self.do_sbc(v); }
-            0xED => { self.cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); self.do_sbc(v); }
-            0xFD => { self.cycles += 4; let addr = self.addr_absolute_x(true); let v = self.read(addr); self.do_sbc(v); }
-            0xF9 => { self.cycles += 4; let addr = self.addr_absolute_y(true); let v = self.read(addr); self.do_sbc(v); }
-            0xE1 => { self.cycles += 6; let addr = self.addr_indexed_indirect(); let v = self.read(addr); self.do_sbc(v); }
-            0xF1 => { self.cycles += 5; let addr = self.addr_indirect_indexed(true); let v = self.read(addr); self.do_sbc(v); }
+            0xE9 => { self.cpu.borrow_mut().cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); self.cpu.borrow_mut().do_sbc(v); }
+            0xE5 => { self.cpu.borrow_mut().cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); self.cpu.borrow_mut().do_sbc(v); }
+            0xF5 => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_zero_page_x(); let v = self.read(addr); self.cpu.borrow_mut().do_sbc(v); }
+            0xED => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); self.cpu.borrow_mut().do_sbc(v); }
+            0xFD => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute_x(true); let v = self.read(addr); self.cpu.borrow_mut().do_sbc(v); }
+            0xF9 => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute_y(true); let v = self.read(addr); self.cpu.borrow_mut().do_sbc(v); }
+            0xE1 => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_indexed_indirect(); let v = self.read(addr); self.cpu.borrow_mut().do_sbc(v); }
+            0xF1 => { self.cpu.borrow_mut().cycles += 5; let addr = self.addr_indirect_indexed(true); let v = self.read(addr); self.cpu.borrow_mut().do_sbc(v); }
 
             // AND - Logical AND
-            0x29 => { self.cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); self.a = self.set_nz(self.a & v); }
-            0x25 => { self.cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); self.a = self.set_nz(self.a & v); }
-            0x35 => { self.cycles += 4; let addr = self.addr_zero_page_x(); let v = self.read(addr); self.a = self.set_nz(self.a & v); }
-            0x2D => { self.cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); self.a = self.set_nz(self.a & v); }
-            0x3D => { self.cycles += 4; let addr = self.addr_absolute_x(true); let v = self.read(addr); self.a = self.set_nz(self.a & v); }
-            0x39 => { self.cycles += 4; let addr = self.addr_absolute_y(true); let v = self.read(addr); self.a = self.set_nz(self.a & v); }
-            0x21 => { self.cycles += 6; let addr = self.addr_indexed_indirect(); let v = self.read(addr); self.a = self.set_nz(self.a & v); }
-            0x31 => { self.cycles += 5; let addr = self.addr_indirect_indexed(true); let v = self.read(addr); self.a = self.set_nz(self.a & v); }
+            0x29 => { self.cpu.borrow_mut().cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a & v); self.cpu.borrow_mut().a = r; }
+            0x25 => { self.cpu.borrow_mut().cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a & v); self.cpu.borrow_mut().a = r; }
+            0x35 => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_zero_page_x(); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a & v); self.cpu.borrow_mut().a = r; }
+            0x2D => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a & v); self.cpu.borrow_mut().a = r; }
+            0x3D => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute_x(true); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a & v); self.cpu.borrow_mut().a = r; }
+            0x39 => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute_y(true); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a & v); self.cpu.borrow_mut().a = r; }
+            0x21 => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_indexed_indirect(); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a & v); self.cpu.borrow_mut().a = r; }
+            0x31 => { self.cpu.borrow_mut().cycles += 5; let addr = self.addr_indirect_indexed(true); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a & v); self.cpu.borrow_mut().a = r; }
 
             // ORA - Logical OR
-            0x09 => { self.cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); self.a = self.set_nz(self.a | v); }
-            0x05 => { self.cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); self.a = self.set_nz(self.a | v); }
-            0x15 => { self.cycles += 4; let addr = self.addr_zero_page_x(); let v = self.read(addr); self.a = self.set_nz(self.a | v); }
-            0x0D => { self.cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); self.a = self.set_nz(self.a | v); }
-            0x1D => { self.cycles += 4; let addr = self.addr_absolute_x(true); let v = self.read(addr); self.a = self.set_nz(self.a | v); }
-            0x19 => { self.cycles += 4; let addr = self.addr_absolute_y(true); let v = self.read(addr); self.a = self.set_nz(self.a | v); }
-            0x01 => { self.cycles += 6; let addr = self.addr_indexed_indirect(); let v = self.read(addr); self.a = self.set_nz(self.a | v); }
-            0x11 => { self.cycles += 5; let addr = self.addr_indirect_indexed(true); let v = self.read(addr); self.a = self.set_nz(self.a | v); }
+            0x09 => { self.cpu.borrow_mut().cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a | v); self.cpu.borrow_mut().a = r; }
+            0x05 => { self.cpu.borrow_mut().cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a | v); self.cpu.borrow_mut().a = r; }
+            0x15 => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_zero_page_x(); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a | v); self.cpu.borrow_mut().a = r; }
+            0x0D => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a | v); self.cpu.borrow_mut().a = r; }
+            0x1D => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute_x(true); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a | v); self.cpu.borrow_mut().a = r; }
+            0x19 => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute_y(true); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a | v); self.cpu.borrow_mut().a = r; }
+            0x01 => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_indexed_indirect(); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a | v); self.cpu.borrow_mut().a = r; }
+            0x11 => { self.cpu.borrow_mut().cycles += 5; let addr = self.addr_indirect_indexed(true); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a | v); self.cpu.borrow_mut().a = r; }
 
             // EOR - Exclusive OR
-            0x49 => { self.cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); self.a = self.set_nz(self.a ^ v); }
-            0x45 => { self.cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); self.a = self.set_nz(self.a ^ v); }
-            0x55 => { self.cycles += 4; let addr = self.addr_zero_page_x(); let v = self.read(addr); self.a = self.set_nz(self.a ^ v); }
-            0x4D => { self.cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); self.a = self.set_nz(self.a ^ v); }
-            0x5D => { self.cycles += 4; let addr = self.addr_absolute_x(true); let v = self.read(addr); self.a = self.set_nz(self.a ^ v); }
-            0x59 => { self.cycles += 4; let addr = self.addr_absolute_y(true); let v = self.read(addr); self.a = self.set_nz(self.a ^ v); }
-            0x41 => { self.cycles += 6; let addr = self.addr_indexed_indirect(); let v = self.read(addr); self.a = self.set_nz(self.a ^ v); }
-            0x51 => { self.cycles += 5; let addr = self.addr_indirect_indexed(true); let v = self.read(addr); self.a = self.set_nz(self.a ^ v); }
+            0x49 => { self.cpu.borrow_mut().cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a ^ v); self.cpu.borrow_mut().a = r; }
+            0x45 => { self.cpu.borrow_mut().cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a ^ v); self.cpu.borrow_mut().a = r; }
+            0x55 => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_zero_page_x(); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a ^ v); self.cpu.borrow_mut().a = r; }
+            0x4D => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a ^ v); self.cpu.borrow_mut().a = r; }
+            0x5D => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute_x(true); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a ^ v); self.cpu.borrow_mut().a = r; }
+            0x59 => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute_y(true); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a ^ v); self.cpu.borrow_mut().a = r; }
+            0x41 => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_indexed_indirect(); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a ^ v); self.cpu.borrow_mut().a = r; }
+            0x51 => { self.cpu.borrow_mut().cycles += 5; let addr = self.addr_indirect_indexed(true); let v = self.read(addr); let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a ^ v); self.cpu.borrow_mut().a = r; }
 
             // CMP - Compare Accumulator
-            0xC9 => { self.cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); let a = self.a; self.do_cmp(a, v); }
-            0xC5 => { self.cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); let a = self.a; self.do_cmp(a, v); }
-            0xD5 => { self.cycles += 4; let addr = self.addr_zero_page_x(); let v = self.read(addr); let a = self.a; self.do_cmp(a, v); }
-            0xCD => { self.cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); let a = self.a; self.do_cmp(a, v); }
-            0xDD => { self.cycles += 4; let addr = self.addr_absolute_x(true); let v = self.read(addr); let a = self.a; self.do_cmp(a, v); }
-            0xD9 => { self.cycles += 4; let addr = self.addr_absolute_y(true); let v = self.read(addr); let a = self.a; self.do_cmp(a, v); }
-            0xC1 => { self.cycles += 6; let addr = self.addr_indexed_indirect(); let v = self.read(addr); let a = self.a; self.do_cmp(a, v); }
-            0xD1 => { self.cycles += 5; let addr = self.addr_indirect_indexed(true); let v = self.read(addr); let a = self.a; self.do_cmp(a, v); }
+            0xC9 => { self.cpu.borrow_mut().cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); let a = self.cpu.borrow().a; self.cpu.borrow_mut().do_cmp(a, v); }
+            0xC5 => { self.cpu.borrow_mut().cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); let a = self.cpu.borrow().a; self.cpu.borrow_mut().do_cmp(a, v); }
+            0xD5 => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_zero_page_x(); let v = self.read(addr); let a = self.cpu.borrow().a; self.cpu.borrow_mut().do_cmp(a, v); }
+            0xCD => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); let a = self.cpu.borrow().a; self.cpu.borrow_mut().do_cmp(a, v); }
+            0xDD => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute_x(true); let v = self.read(addr); let a = self.cpu.borrow().a; self.cpu.borrow_mut().do_cmp(a, v); }
+            0xD9 => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute_y(true); let v = self.read(addr); let a = self.cpu.borrow().a; self.cpu.borrow_mut().do_cmp(a, v); }
+            0xC1 => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_indexed_indirect(); let v = self.read(addr); let a = self.cpu.borrow().a; self.cpu.borrow_mut().do_cmp(a, v); }
+            0xD1 => { self.cpu.borrow_mut().cycles += 5; let addr = self.addr_indirect_indexed(true); let v = self.read(addr); let a = self.cpu.borrow().a; self.cpu.borrow_mut().do_cmp(a, v); }
 
             // CPX - Compare X Register
-            0xE0 => { self.cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); let x = self.x; self.do_cmp(x, v); }
-            0xE4 => { self.cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); let x = self.x; self.do_cmp(x, v); }
-            0xEC => { self.cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); let x = self.x; self.do_cmp(x, v); }
+            0xE0 => { self.cpu.borrow_mut().cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); let x = self.cpu.borrow().x; self.cpu.borrow_mut().do_cmp(x, v); }
+            0xE4 => { self.cpu.borrow_mut().cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); let x = self.cpu.borrow().x; self.cpu.borrow_mut().do_cmp(x, v); }
+            0xEC => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); let x = self.cpu.borrow().x; self.cpu.borrow_mut().do_cmp(x, v); }
 
             // CPY - Compare Y Register
-            0xC0 => { self.cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); let y = self.y; self.do_cmp(y, v); }
-            0xC4 => { self.cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); let y = self.y; self.do_cmp(y, v); }
-            0xCC => { self.cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); let y = self.y; self.do_cmp(y, v); }
+            0xC0 => { self.cpu.borrow_mut().cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); let y = self.cpu.borrow().y; self.cpu.borrow_mut().do_cmp(y, v); }
+            0xC4 => { self.cpu.borrow_mut().cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); let y = self.cpu.borrow().y; self.cpu.borrow_mut().do_cmp(y, v); }
+            0xCC => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); let y = self.cpu.borrow().y; self.cpu.borrow_mut().do_cmp(y, v); }
 
             // BIT - Bit Test
             0x24 => {
-                self.cycles += 3;
+                self.cpu.borrow_mut().cycles += 3;
                 let addr = self.addr_zero_page();
                 let value = self.read(addr);
-                let a = self.a;
-                self.set_flag(FLAG_Z, (a & value) == 0);
-                self.set_flag(FLAG_N, value & 0x80 != 0);
-                self.set_flag(FLAG_V, value & 0x40 != 0);
+                let a = self.cpu.borrow().a;
+                self.cpu.borrow_mut().set_flag(FLAG_Z, (a & value) == 0);
+                self.cpu.borrow_mut().set_flag(FLAG_N, value & 0x80 != 0);
+                self.cpu.borrow_mut().set_flag(FLAG_V, value & 0x40 != 0);
             }
             0x2C => {
-                self.cycles += 4;
+                self.cpu.borrow_mut().cycles += 4;
                 let addr = self.addr_absolute();
                 let value = self.read(addr);
-                let a = self.a;
-                self.set_flag(FLAG_Z, (a & value) == 0);
-                self.set_flag(FLAG_N, value & 0x80 != 0);
-                self.set_flag(FLAG_V, value & 0x40 != 0);
+                let a = self.cpu.borrow().a;
+                self.cpu.borrow_mut().set_flag(FLAG_Z, (a & value) == 0);
+                self.cpu.borrow_mut().set_flag(FLAG_N, value & 0x80 != 0);
+                self.cpu.borrow_mut().set_flag(FLAG_V, value & 0x40 != 0);
             }
 
             // LDA - Load Accumulator
-            0xA9 => { self.cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); self.a = self.set_nz(v); }
-            0xA5 => { self.cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); self.a = self.set_nz(v); }
-            0xB5 => { self.cycles += 4; let addr = self.addr_zero_page_x(); let v = self.read(addr); self.a = self.set_nz(v); }
-            0xAD => { self.cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); self.a = self.set_nz(v); }
-            0xBD => { self.cycles += 4; let addr = self.addr_absolute_x(true); let v = self.read(addr); self.a = self.set_nz(v); }
-            0xB9 => { self.cycles += 4; let addr = self.addr_absolute_y(true); let v = self.read(addr); self.a = self.set_nz(v); }
-            0xA1 => { self.cycles += 6; let addr = self.addr_indexed_indirect(); let v = self.read(addr); self.a = self.set_nz(v); }
-            0xB1 => { self.cycles += 5; let addr = self.addr_indirect_indexed(true); let v = self.read(addr); self.a = self.set_nz(v); }
+            0xA9 => { self.cpu.borrow_mut().cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().a = r; }
+            0xA5 => { self.cpu.borrow_mut().cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().a = r; }
+            0xB5 => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_zero_page_x(); let v = self.read(addr); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().a = r; }
+            0xAD => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().a = r; }
+            0xBD => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute_x(true); let v = self.read(addr); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().a = r; }
+            0xB9 => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute_y(true); let v = self.read(addr); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().a = r; }
+            0xA1 => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_indexed_indirect(); let v = self.read(addr); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().a = r; }
+            0xB1 => { self.cpu.borrow_mut().cycles += 5; let addr = self.addr_indirect_indexed(true); let v = self.read(addr); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().a = r; }
 
             // LDX - Load X Register
-            0xA2 => { self.cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); self.x = self.set_nz(v); }
-            0xA6 => { self.cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); self.x = self.set_nz(v); }
-            0xB6 => { self.cycles += 4; let addr = self.addr_zero_page_y(); let v = self.read(addr); self.x = self.set_nz(v); }
-            0xAE => { self.cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); self.x = self.set_nz(v); }
-            0xBE => { self.cycles += 4; let addr = self.addr_absolute_y(true); let v = self.read(addr); self.x = self.set_nz(v); }
+            0xA2 => { self.cpu.borrow_mut().cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().x = r; }
+            0xA6 => { self.cpu.borrow_mut().cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().x = r; }
+            0xB6 => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_zero_page_y(); let v = self.read(addr); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().x = r; }
+            0xAE => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().x = r; }
+            0xBE => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute_y(true); let v = self.read(addr); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().x = r; }
 
             // LDY - Load Y Register
-            0xA0 => { self.cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); self.y = self.set_nz(v); }
-            0xA4 => { self.cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); self.y = self.set_nz(v); }
-            0xB4 => { self.cycles += 4; let addr = self.addr_zero_page_x(); let v = self.read(addr); self.y = self.set_nz(v); }
-            0xAC => { self.cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); self.y = self.set_nz(v); }
-            0xBC => { self.cycles += 4; let addr = self.addr_absolute_x(true); let v = self.read(addr); self.y = self.set_nz(v); }
+            0xA0 => { self.cpu.borrow_mut().cycles += 2; let addr = self.addr_immediate(); let v = self.read(addr); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().y = r; }
+            0xA4 => { self.cpu.borrow_mut().cycles += 3; let addr = self.addr_zero_page(); let v = self.read(addr); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().y = r; }
+            0xB4 => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_zero_page_x(); let v = self.read(addr); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().y = r; }
+            0xAC => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute(); let v = self.read(addr); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().y = r; }
+            0xBC => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute_x(true); let v = self.read(addr); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().y = r; }
 
             // STA - Store Accumulator
-            0x85 => { self.cycles += 3; let addr = self.addr_zero_page(); let a = self.a; self.write(addr, a); }
-            0x95 => { self.cycles += 4; let addr = self.addr_zero_page_x(); let a = self.a; self.write(addr, a); }
-            0x8D => { self.cycles += 4; let addr = self.addr_absolute(); let a = self.a; self.write(addr, a); }
-            0x9D => { self.cycles += 5; let addr = self.addr_absolute_x(false); let a = self.a; self.write(addr, a); }
-            0x99 => { self.cycles += 5; let addr = self.addr_absolute_y(false); let a = self.a; self.write(addr, a); }
-            0x81 => { self.cycles += 6; let addr = self.addr_indexed_indirect(); let a = self.a; self.write(addr, a); }
-            0x91 => { self.cycles += 6; let addr = self.addr_indirect_indexed(false); let a = self.a; self.write(addr, a); }
+            0x85 => { self.cpu.borrow_mut().cycles += 3; let addr = self.addr_zero_page(); let a = self.cpu.borrow().a; self.write(addr, a); }
+            0x95 => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_zero_page_x(); let a = self.cpu.borrow().a; self.write(addr, a); }
+            0x8D => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute(); let a = self.cpu.borrow().a; self.write(addr, a); }
+            0x9D => { self.cpu.borrow_mut().cycles += 5; let addr = self.addr_absolute_x(false); let a = self.cpu.borrow().a; self.write(addr, a); }
+            0x99 => { self.cpu.borrow_mut().cycles += 5; let addr = self.addr_absolute_y(false); let a = self.cpu.borrow().a; self.write(addr, a); }
+            0x81 => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_indexed_indirect(); let a = self.cpu.borrow().a; self.write(addr, a); }
+            0x91 => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_indirect_indexed(false); let a = self.cpu.borrow().a; self.write(addr, a); }
 
             // STX - Store X Register
-            0x86 => { self.cycles += 3; let addr = self.addr_zero_page(); let x = self.x; self.write(addr, x); }
-            0x96 => { self.cycles += 4; let addr = self.addr_zero_page_y(); let x = self.x; self.write(addr, x); }
-            0x8E => { self.cycles += 4; let addr = self.addr_absolute(); let x = self.x; self.write(addr, x); }
+            0x86 => { self.cpu.borrow_mut().cycles += 3; let addr = self.addr_zero_page(); let x = self.cpu.borrow().x; self.write(addr, x); }
+            0x96 => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_zero_page_y(); let x = self.cpu.borrow().x; self.write(addr, x); }
+            0x8E => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute(); let x = self.cpu.borrow().x; self.write(addr, x); }
 
             // STY - Store Y Register
-            0x84 => { self.cycles += 3; let addr = self.addr_zero_page(); let y = self.y; self.write(addr, y); }
-            0x94 => { self.cycles += 4; let addr = self.addr_zero_page_x(); let y = self.y; self.write(addr, y); }
-            0x8C => { self.cycles += 4; let addr = self.addr_absolute(); let y = self.y; self.write(addr, y); }
+            0x84 => { self.cpu.borrow_mut().cycles += 3; let addr = self.addr_zero_page(); let y = self.cpu.borrow().y; self.write(addr, y); }
+            0x94 => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_zero_page_x(); let y = self.cpu.borrow().y; self.write(addr, y); }
+            0x8C => { self.cpu.borrow_mut().cycles += 4; let addr = self.addr_absolute(); let y = self.cpu.borrow().y; self.write(addr, y); }
 
             // Register Transfers
-            0xAA => { self.cycles += 2; let a = self.a; self.x = self.set_nz(a); }       // TAX
-            0x8A => { self.cycles += 2; let x = self.x; self.a = self.set_nz(x); }       // TXA
-            0xA8 => { self.cycles += 2; let a = self.a; self.y = self.set_nz(a); }       // TAY
-            0x98 => { self.cycles += 2; let y = self.y; self.a = self.set_nz(y); }       // TYA
-            0xBA => { self.cycles += 2; let sp = self.sp; self.x = self.set_nz(sp); }    // TSX
-            0x9A => { self.cycles += 2; self.sp = self.x; }                               // TXS (no flags)
+            0xAA => { self.cpu.borrow_mut().cycles += 2; let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a); self.cpu.borrow_mut().x = r; }       // TAX
+            0x8A => { self.cpu.borrow_mut().cycles += 2; let x = self.cpu.borrow().x; let r = self.cpu.borrow_mut().set_nz(x); self.cpu.borrow_mut().a = r; }       // TXA
+            0xA8 => { self.cpu.borrow_mut().cycles += 2; let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().set_nz(a); self.cpu.borrow_mut().y = r; }       // TAY
+            0x98 => { self.cpu.borrow_mut().cycles += 2; let y = self.cpu.borrow().y; let r = self.cpu.borrow_mut().set_nz(y); self.cpu.borrow_mut().a = r; }       // TYA
+            0xBA => { self.cpu.borrow_mut().cycles += 2; let sp = self.cpu.borrow().sp; let r = self.cpu.borrow_mut().set_nz(sp); self.cpu.borrow_mut().x = r; }    // TSX
+            0x9A => { self.cpu.borrow_mut().cycles += 2; let x = self.cpu.borrow().x; self.cpu.borrow_mut().sp = x; }                               // TXS (no flags)
 
             // Increment/Decrement Register
-            0xE8 => { self.cycles += 2; let v = self.x.wrapping_add(1); self.x = self.set_nz(v); }  // INX
-            0xCA => { self.cycles += 2; let v = self.x.wrapping_sub(1); self.x = self.set_nz(v); }  // DEX
-            0xC8 => { self.cycles += 2; let v = self.y.wrapping_add(1); self.y = self.set_nz(v); }  // INY
-            0x88 => { self.cycles += 2; let v = self.y.wrapping_sub(1); self.y = self.set_nz(v); }  // DEY
+            0xE8 => { self.cpu.borrow_mut().cycles += 2; let x = self.cpu.borrow().x; let v = x.wrapping_add(1); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().x = r; }  // INX
+            0xCA => { self.cpu.borrow_mut().cycles += 2; let x = self.cpu.borrow().x; let v = x.wrapping_sub(1); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().x = r; }  // DEX
+            0xC8 => { self.cpu.borrow_mut().cycles += 2; let y = self.cpu.borrow().y; let v = y.wrapping_add(1); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().y = r; }  // INY
+            0x88 => { self.cpu.borrow_mut().cycles += 2; let y = self.cpu.borrow().y; let v = y.wrapping_sub(1); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().y = r; }  // DEY
 
             // Increment Memory
-            0xE6 => { self.cycles += 5; let addr = self.addr_zero_page(); let v = self.read(addr).wrapping_add(1); self.set_nz(v); self.write(addr, v); }
-            0xF6 => { self.cycles += 6; let addr = self.addr_zero_page_x(); let v = self.read(addr).wrapping_add(1); self.set_nz(v); self.write(addr, v); }
-            0xEE => { self.cycles += 6; let addr = self.addr_absolute(); let v = self.read(addr).wrapping_add(1); self.set_nz(v); self.write(addr, v); }
-            0xFE => { self.cycles += 7; let addr = self.addr_absolute_x(false); let v = self.read(addr).wrapping_add(1); self.set_nz(v); self.write(addr, v); }
+            0xE6 => { self.cpu.borrow_mut().cycles += 5; let addr = self.addr_zero_page(); let v = self.read(addr).wrapping_add(1); self.cpu.borrow_mut().set_nz(v); self.write(addr, v); }
+            0xF6 => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_zero_page_x(); let v = self.read(addr).wrapping_add(1); self.cpu.borrow_mut().set_nz(v); self.write(addr, v); }
+            0xEE => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_absolute(); let v = self.read(addr).wrapping_add(1); self.cpu.borrow_mut().set_nz(v); self.write(addr, v); }
+            0xFE => { self.cpu.borrow_mut().cycles += 7; let addr = self.addr_absolute_x(false); let v = self.read(addr).wrapping_add(1); self.cpu.borrow_mut().set_nz(v); self.write(addr, v); }
 
             // Decrement Memory
-            0xC6 => { self.cycles += 5; let addr = self.addr_zero_page(); let v = self.read(addr).wrapping_sub(1); self.set_nz(v); self.write(addr, v); }
-            0xD6 => { self.cycles += 6; let addr = self.addr_zero_page_x(); let v = self.read(addr).wrapping_sub(1); self.set_nz(v); self.write(addr, v); }
-            0xCE => { self.cycles += 6; let addr = self.addr_absolute(); let v = self.read(addr).wrapping_sub(1); self.set_nz(v); self.write(addr, v); }
-            0xDE => { self.cycles += 7; let addr = self.addr_absolute_x(false); let v = self.read(addr).wrapping_sub(1); self.set_nz(v); self.write(addr, v); }
+            0xC6 => { self.cpu.borrow_mut().cycles += 5; let addr = self.addr_zero_page(); let v = self.read(addr).wrapping_sub(1); self.cpu.borrow_mut().set_nz(v); self.write(addr, v); }
+            0xD6 => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_zero_page_x(); let v = self.read(addr).wrapping_sub(1); self.cpu.borrow_mut().set_nz(v); self.write(addr, v); }
+            0xCE => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_absolute(); let v = self.read(addr).wrapping_sub(1); self.cpu.borrow_mut().set_nz(v); self.write(addr, v); }
+            0xDE => { self.cpu.borrow_mut().cycles += 7; let addr = self.addr_absolute_x(false); let v = self.read(addr).wrapping_sub(1); self.cpu.borrow_mut().set_nz(v); self.write(addr, v); }
 
             // ASL - Arithmetic Shift Left
-            0x0A => { self.cycles += 2; let v = self.a; self.a = self.do_asl(v); }
-            0x06 => { self.cycles += 5; let addr = self.addr_zero_page(); let v = self.read(addr); let r = self.do_asl(v); self.write(addr, r); }
-            0x16 => { self.cycles += 6; let addr = self.addr_zero_page_x(); let v = self.read(addr); let r = self.do_asl(v); self.write(addr, r); }
-            0x0E => { self.cycles += 6; let addr = self.addr_absolute(); let v = self.read(addr); let r = self.do_asl(v); self.write(addr, r); }
-            0x1E => { self.cycles += 7; let addr = self.addr_absolute_x(false); let v = self.read(addr); let r = self.do_asl(v); self.write(addr, r); }
+            0x0A => { self.cpu.borrow_mut().cycles += 2; let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().do_asl(a); self.cpu.borrow_mut().a = r; }
+            0x06 => { self.cpu.borrow_mut().cycles += 5; let addr = self.addr_zero_page(); let v = self.read(addr); let r = self.cpu.borrow_mut().do_asl(v); self.write(addr, r); }
+            0x16 => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_zero_page_x(); let v = self.read(addr); let r = self.cpu.borrow_mut().do_asl(v); self.write(addr, r); }
+            0x0E => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_absolute(); let v = self.read(addr); let r = self.cpu.borrow_mut().do_asl(v); self.write(addr, r); }
+            0x1E => { self.cpu.borrow_mut().cycles += 7; let addr = self.addr_absolute_x(false); let v = self.read(addr); let r = self.cpu.borrow_mut().do_asl(v); self.write(addr, r); }
 
             // LSR - Logical Shift Right
-            0x4A => { self.cycles += 2; let v = self.a; self.a = self.do_lsr(v); }
-            0x46 => { self.cycles += 5; let addr = self.addr_zero_page(); let v = self.read(addr); let r = self.do_lsr(v); self.write(addr, r); }
-            0x56 => { self.cycles += 6; let addr = self.addr_zero_page_x(); let v = self.read(addr); let r = self.do_lsr(v); self.write(addr, r); }
-            0x4E => { self.cycles += 6; let addr = self.addr_absolute(); let v = self.read(addr); let r = self.do_lsr(v); self.write(addr, r); }
-            0x5E => { self.cycles += 7; let addr = self.addr_absolute_x(false); let v = self.read(addr); let r = self.do_lsr(v); self.write(addr, r); }
+            0x4A => { self.cpu.borrow_mut().cycles += 2; let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().do_lsr(a); self.cpu.borrow_mut().a = r; }
+            0x46 => { self.cpu.borrow_mut().cycles += 5; let addr = self.addr_zero_page(); let v = self.read(addr); let r = self.cpu.borrow_mut().do_lsr(v); self.write(addr, r); }
+            0x56 => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_zero_page_x(); let v = self.read(addr); let r = self.cpu.borrow_mut().do_lsr(v); self.write(addr, r); }
+            0x4E => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_absolute(); let v = self.read(addr); let r = self.cpu.borrow_mut().do_lsr(v); self.write(addr, r); }
+            0x5E => { self.cpu.borrow_mut().cycles += 7; let addr = self.addr_absolute_x(false); let v = self.read(addr); let r = self.cpu.borrow_mut().do_lsr(v); self.write(addr, r); }
 
             // ROL - Rotate Left
-            0x2A => { self.cycles += 2; let v = self.a; self.a = self.do_rol(v); }
-            0x26 => { self.cycles += 5; let addr = self.addr_zero_page(); let v = self.read(addr); let r = self.do_rol(v); self.write(addr, r); }
-            0x36 => { self.cycles += 6; let addr = self.addr_zero_page_x(); let v = self.read(addr); let r = self.do_rol(v); self.write(addr, r); }
-            0x2E => { self.cycles += 6; let addr = self.addr_absolute(); let v = self.read(addr); let r = self.do_rol(v); self.write(addr, r); }
-            0x3E => { self.cycles += 7; let addr = self.addr_absolute_x(false); let v = self.read(addr); let r = self.do_rol(v); self.write(addr, r); }
+            0x2A => { self.cpu.borrow_mut().cycles += 2; let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().do_rol(a); self.cpu.borrow_mut().a = r; }
+            0x26 => { self.cpu.borrow_mut().cycles += 5; let addr = self.addr_zero_page(); let v = self.read(addr); let r = self.cpu.borrow_mut().do_rol(v); self.write(addr, r); }
+            0x36 => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_zero_page_x(); let v = self.read(addr); let r = self.cpu.borrow_mut().do_rol(v); self.write(addr, r); }
+            0x2E => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_absolute(); let v = self.read(addr); let r = self.cpu.borrow_mut().do_rol(v); self.write(addr, r); }
+            0x3E => { self.cpu.borrow_mut().cycles += 7; let addr = self.addr_absolute_x(false); let v = self.read(addr); let r = self.cpu.borrow_mut().do_rol(v); self.write(addr, r); }
 
             // ROR - Rotate Right
-            0x6A => { self.cycles += 2; let v = self.a; self.a = self.do_ror(v); }
-            0x66 => { self.cycles += 5; let addr = self.addr_zero_page(); let v = self.read(addr); let r = self.do_ror(v); self.write(addr, r); }
-            0x76 => { self.cycles += 6; let addr = self.addr_zero_page_x(); let v = self.read(addr); let r = self.do_ror(v); self.write(addr, r); }
-            0x6E => { self.cycles += 6; let addr = self.addr_absolute(); let v = self.read(addr); let r = self.do_ror(v); self.write(addr, r); }
-            0x7E => { self.cycles += 7; let addr = self.addr_absolute_x(false); let v = self.read(addr); let r = self.do_ror(v); self.write(addr, r); }
+            0x6A => { self.cpu.borrow_mut().cycles += 2; let a = self.cpu.borrow().a; let r = self.cpu.borrow_mut().do_ror(a); self.cpu.borrow_mut().a = r; }
+            0x66 => { self.cpu.borrow_mut().cycles += 5; let addr = self.addr_zero_page(); let v = self.read(addr); let r = self.cpu.borrow_mut().do_ror(v); self.write(addr, r); }
+            0x76 => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_zero_page_x(); let v = self.read(addr); let r = self.cpu.borrow_mut().do_ror(v); self.write(addr, r); }
+            0x6E => { self.cpu.borrow_mut().cycles += 6; let addr = self.addr_absolute(); let v = self.read(addr); let r = self.cpu.borrow_mut().do_ror(v); self.write(addr, r); }
+            0x7E => { self.cpu.borrow_mut().cycles += 7; let addr = self.addr_absolute_x(false); let v = self.read(addr); let r = self.cpu.borrow_mut().do_ror(v); self.write(addr, r); }
 
             // Branches
-            0x10 => { self.cycles += 2; let cond = self.flag(FLAG_N) == 0; self.branch_if(cond); }  // BPL
-            0x30 => { self.cycles += 2; let cond = self.flag(FLAG_N) == 1; self.branch_if(cond); }  // BMI
-            0x50 => { self.cycles += 2; let cond = self.flag(FLAG_V) == 0; self.branch_if(cond); }  // BVC
-            0x70 => { self.cycles += 2; let cond = self.flag(FLAG_V) == 1; self.branch_if(cond); }  // BVS
-            0x90 => { self.cycles += 2; let cond = self.flag(FLAG_C) == 0; self.branch_if(cond); }  // BCC
-            0xB0 => { self.cycles += 2; let cond = self.flag(FLAG_C) == 1; self.branch_if(cond); }  // BCS
-            0xD0 => { self.cycles += 2; let cond = self.flag(FLAG_Z) == 0; self.branch_if(cond); }  // BNE
-            0xF0 => { self.cycles += 2; let cond = self.flag(FLAG_Z) == 1; self.branch_if(cond); }  // BEQ
+            0x10 => { self.cpu.borrow_mut().cycles += 2; let cond = self.cpu.borrow().flag(FLAG_N) == 0; self.branch_if(cond); }  // BPL
+            0x30 => { self.cpu.borrow_mut().cycles += 2; let cond = self.cpu.borrow().flag(FLAG_N) == 1; self.branch_if(cond); }  // BMI
+            0x50 => { self.cpu.borrow_mut().cycles += 2; let cond = self.cpu.borrow().flag(FLAG_V) == 0; self.branch_if(cond); }  // BVC
+            0x70 => { self.cpu.borrow_mut().cycles += 2; let cond = self.cpu.borrow().flag(FLAG_V) == 1; self.branch_if(cond); }  // BVS
+            0x90 => { self.cpu.borrow_mut().cycles += 2; let cond = self.cpu.borrow().flag(FLAG_C) == 0; self.branch_if(cond); }  // BCC
+            0xB0 => { self.cpu.borrow_mut().cycles += 2; let cond = self.cpu.borrow().flag(FLAG_C) == 1; self.branch_if(cond); }  // BCS
+            0xD0 => { self.cpu.borrow_mut().cycles += 2; let cond = self.cpu.borrow().flag(FLAG_Z) == 0; self.branch_if(cond); }  // BNE
+            0xF0 => { self.cpu.borrow_mut().cycles += 2; let cond = self.cpu.borrow().flag(FLAG_Z) == 1; self.branch_if(cond); }  // BEQ
 
             // JMP - Jump
-            0x4C => { self.cycles += 3; self.pc = self.addr_absolute(); }
-            0x6C => { self.cycles += 5; self.pc = self.addr_indirect(); }
+            0x4C => { self.cpu.borrow_mut().cycles += 3; let addr = self.addr_absolute(); self.cpu.borrow_mut().pc = addr; }
+            0x6C => { self.cpu.borrow_mut().cycles += 5; let addr = self.addr_indirect(); self.cpu.borrow_mut().pc = addr; }
 
             // JSR - Jump to Subroutine
             0x20 => {
-                self.cycles += 6;
+                self.cpu.borrow_mut().cycles += 6;
                 let target = self.addr_absolute();
-                let pc = self.pc.wrapping_sub(1);
+                let pc = self.cpu.borrow().pc.wrapping_sub(1);
                 self.push_word(pc);
-                self.pc = target;
+                self.cpu.borrow_mut().pc = target;
             }
 
             // RTS - Return from Subroutine
             0x60 => {
-                self.cycles += 6;
-                self.pc = self.pull_word().wrapping_add(1);
+                self.cpu.borrow_mut().cycles += 6;
+                let addr = self.pull_word().wrapping_add(1);
+                self.cpu.borrow_mut().pc = addr;
             }
 
             // RTI - Return from Interrupt
             0x40 => {
-                self.cycles += 6;
-                self.p = self.pull_byte() | 0x20; // Unused flag always 1
-                self.pc = self.pull_word();
+                self.cpu.borrow_mut().cycles += 6;
+                let p = self.pull_byte() | 0x20; // Unused flag always 1
+                self.cpu.borrow_mut().p = p;
+                let pc = self.pull_word();
+                self.cpu.borrow_mut().pc = pc;
             }
 
             // Stack Operations
-            0x48 => { self.cycles += 3; let a = self.a; self.push_byte(a); }              // PHA
-            0x08 => { self.cycles += 3; let p = self.p | 0x10; self.push_byte(p); }       // PHP (B flag set when pushed)
-            0x68 => { self.cycles += 4; let v = self.pull_byte(); self.a = self.set_nz(v); }  // PLA
-            0x28 => { self.cycles += 4; self.p = self.pull_byte() | 0x20; }               // PLP
+            0x48 => { self.cpu.borrow_mut().cycles += 3; let a = self.cpu.borrow().a; self.push_byte(a); }              // PHA
+            0x08 => { self.cpu.borrow_mut().cycles += 3; let p = self.cpu.borrow().p | 0x10; self.push_byte(p); }       // PHP (B flag set when pushed)
+            0x68 => { self.cpu.borrow_mut().cycles += 4; let v = self.pull_byte(); let r = self.cpu.borrow_mut().set_nz(v); self.cpu.borrow_mut().a = r; }  // PLA
+            0x28 => { self.cpu.borrow_mut().cycles += 4; let p = self.pull_byte() | 0x20; self.cpu.borrow_mut().p = p; }               // PLP
 
             // Flag Operations
-            0x18 => { self.cycles += 2; self.set_flag(FLAG_C, false); }  // CLC
-            0x38 => { self.cycles += 2; self.set_flag(FLAG_C, true); }   // SEC
-            0x58 => { self.cycles += 2; self.set_flag(FLAG_I, false); }  // CLI
-            0x78 => { self.cycles += 2; self.set_flag(FLAG_I, true); }   // SEI
-            0xB8 => { self.cycles += 2; self.set_flag(FLAG_V, false); }  // CLV
-            0xD8 => { self.cycles += 2; self.set_flag(FLAG_D, false); }  // CLD
-            0xF8 => { self.cycles += 2; self.set_flag(FLAG_D, true); }   // SED
+            0x18 => { self.cpu.borrow_mut().cycles += 2; self.cpu.borrow_mut().set_flag(FLAG_C, false); }  // CLC
+            0x38 => { self.cpu.borrow_mut().cycles += 2; self.cpu.borrow_mut().set_flag(FLAG_C, true); }   // SEC
+            0x58 => { self.cpu.borrow_mut().cycles += 2; self.cpu.borrow_mut().set_flag(FLAG_I, false); }  // CLI
+            0x78 => { self.cpu.borrow_mut().cycles += 2; self.cpu.borrow_mut().set_flag(FLAG_I, true); }   // SEI
+            0xB8 => { self.cpu.borrow_mut().cycles += 2; self.cpu.borrow_mut().set_flag(FLAG_V, false); }  // CLV
+            0xD8 => { self.cpu.borrow_mut().cycles += 2; self.cpu.borrow_mut().set_flag(FLAG_D, false); }  // CLD
+            0xF8 => { self.cpu.borrow_mut().cycles += 2; self.cpu.borrow_mut().set_flag(FLAG_D, true); }   // SED
 
             // NOP
-            0xEA => { self.cycles += 2; }
+            0xEA => { self.cpu.borrow_mut().cycles += 2; }
 
             // BRK - Break
             0x00 => {
-                self.cycles += 7;
-                self.pc = self.pc.wrapping_add(1); // BRK skips a byte
-                let pc = self.pc;
+                self.cpu.borrow_mut().cycles += 7;
+                let pc = self.cpu.borrow().pc.wrapping_add(1); // BRK skips a byte
+                self.cpu.borrow_mut().pc = pc;
+                let pc = self.cpu.borrow().pc;
                 self.push_word(pc);
-                let p = self.p | 0x10; // B flag set when pushed
+                let p = self.cpu.borrow().p | 0x10; // B flag set when pushed
                 self.push_byte(p);
-                self.set_flag(FLAG_I, true);
-                self.pc = self.read_word(IRQ_VECTOR);
+                self.cpu.borrow_mut().set_flag(FLAG_I, true);
+                let new_pc = self.read_word(IRQ_VECTOR);
+                self.cpu.borrow_mut().pc = new_pc;
             }
 
             // Illegal opcode - halt
             _ => {
-                self.halted = true;
-                self.cycles += 2;
+                self.cpu.borrow_mut().halted = true;
+                self.cpu.borrow_mut().cycles += 2;
             }
         }
     }
 
     /// Load program bytes into memory
-    pub fn load_program(&mut self, bytes: &[u8], addr: u16) {
+    fn load_program_internal(&self, bytes: &[u8], addr: u16) {
         for (i, &byte) in bytes.iter().enumerate() {
             self.write(addr.wrapping_add(i as u16), byte);
         }
@@ -641,53 +660,45 @@ impl Cpu6502 {
     }
 }
 
-// ============================================================================
-// Ruby bindings wrapper - simplified version without external memory
-// For external memory support, use the pure Ruby implementation
-// ============================================================================
-
-/// Ruby-wrapped CPU simulator using internal memory only
-/// For high-performance applications that don't need memory-mapped I/O
-#[magnus::wrap(class = "MOS6502::ISASimulatorNative")]
-struct RubyCpu {
-    cpu: RefCell<Cpu6502>,
-}
-
-impl Default for RubyCpu {
-    fn default() -> Self {
-        Self {
-            cpu: RefCell::new(Cpu6502::new()),
-        }
-    }
-}
-
-impl RubyCpu {
-    fn new() -> Self {
-        Self::default()
-    }
-}
-
 // Ruby method implementations
 impl RubyCpu {
-    fn rb_initialize(&self, _memory: Option<Value>) {
-        // Memory argument is ignored - we use internal memory only
-        // This signature is for compatibility with ISASimulator.new(memory)
+    fn rb_initialize(&self, memory: Option<Value>) {
+        // If memory is provided and is not nil, store it as external memory
+        if let Some(mem) = memory {
+            if !mem.is_nil() {
+                let ruby = unsafe { Ruby::get_unchecked() };
+                let opaque = Opaque::from(mem);
+                *self.external_memory.borrow_mut() = Some(opaque);
+            }
+        }
     }
 
     fn rb_reset(&self) {
         self.cpu.borrow_mut().reset();
+        // Read reset vector
+        let pc = self.read_word(RESET_VECTOR);
+        self.cpu.borrow_mut().pc = pc;
     }
 
     fn rb_step(&self) -> u64 {
-        self.cpu.borrow_mut().step()
+        self.step_internal()
     }
 
     fn rb_run(&self, max_instructions: u32) -> u32 {
-        self.cpu.borrow_mut().run(max_instructions)
+        let mut count = 0;
+        while count < max_instructions && !self.cpu.borrow().halted {
+            self.step_internal();
+            count += 1;
+        }
+        count
     }
 
     fn rb_run_cycles(&self, target_cycles: u64) -> u64 {
-        self.cpu.borrow_mut().run_cycles(target_cycles)
+        let start_cycles = self.cpu.borrow().cycles;
+        while (self.cpu.borrow().cycles - start_cycles) < target_cycles && !self.cpu.borrow().halted {
+            self.step_internal();
+        }
+        self.cpu.borrow().cycles - start_cycles
     }
 
     // Register getters
@@ -707,6 +718,8 @@ impl RubyCpu {
     fn rb_set_sp(&self, v: u8) { self.cpu.borrow_mut().sp = v; }
     fn rb_set_pc(&self, v: u16) { self.cpu.borrow_mut().pc = v; }
     fn rb_set_p(&self, v: u8) { self.cpu.borrow_mut().p = (v & 0xFF) | 0x20; }
+    fn rb_set_cycles(&self, v: u64) { self.cpu.borrow_mut().cycles = v; }
+    fn rb_set_halted(&self, v: bool) { self.cpu.borrow_mut().halted = v; }
 
     // Flag accessors
     fn rb_flag_c(&self) -> u8 { self.cpu.borrow().flag(FLAG_C) }
@@ -720,15 +733,15 @@ impl RubyCpu {
     fn rb_halted_q(&self) -> bool { self.cpu.borrow().halted }
 
     fn rb_read(&self, addr: u16) -> u8 {
-        self.cpu.borrow().read(addr)
+        self.read(addr)
     }
 
     fn rb_write(&self, addr: u16, value: u8) {
-        self.cpu.borrow_mut().write(addr, value);
+        self.write(addr, value);
     }
 
     fn rb_read_word(&self, addr: u16) -> u16 {
-        self.cpu.borrow().read_word(addr)
+        self.read_word(addr)
     }
 
     fn rb_load_program(&self, bytes: RArray, addr: u16) -> Result<(), Error> {
@@ -738,7 +751,7 @@ impl RubyCpu {
             bytes_vec.push(v as u8);
         }
 
-        self.cpu.borrow_mut().load_program(&bytes_vec, addr);
+        self.load_program_internal(&bytes_vec, addr);
         Ok(())
     }
 
@@ -768,6 +781,10 @@ impl RubyCpu {
 
     fn rb_native(&self) -> bool {
         true
+    }
+
+    fn rb_has_external_memory(&self) -> bool {
+        self.external_memory.borrow().is_some()
     }
 }
 
@@ -804,6 +821,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("sp=", method!(RubyCpu::rb_set_sp, 1))?;
     class.define_method("pc=", method!(RubyCpu::rb_set_pc, 1))?;
     class.define_method("p=", method!(RubyCpu::rb_set_p, 1))?;
+    class.define_method("cycles=", method!(RubyCpu::rb_set_cycles, 1))?;
+    class.define_method("halted=", method!(RubyCpu::rb_set_halted, 1))?;
 
     // Flag accessors
     class.define_method("flag_c", method!(RubyCpu::rb_flag_c, 0))?;
@@ -823,6 +842,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // State
     class.define_method("state", method!(RubyCpu::rb_state, 0))?;
     class.define_method("native?", method!(RubyCpu::rb_native, 0))?;
+    class.define_method("has_external_memory?", method!(RubyCpu::rb_has_external_memory, 0))?;
 
     // Constants
     module.const_set("NMI_VECTOR", NMI_VECTOR as i64)?;
