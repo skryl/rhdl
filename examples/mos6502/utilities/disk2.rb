@@ -67,33 +67,11 @@ module MOS6502
     end
 
     # Call this each CPU cycle to track elapsed time
-    # Used for timing during delays between disk operations
-    # Note: byte_position is primarily advanced by read_data(), not tick()
-    # tick() provides additional rotation during long delays
+    # Position is managed by read_data() which advances on each read
+    # tick() just tracks cycle count for potential future timing needs
     def tick(cycles = 1)
       return unless @motor_on
-
       @cycle_count += cycles
-
-      # During long delays (no reads), advance position based on elapsed time
-      # This prevents the disk from "sticking" if no reads occur
-      # At 32 cycles per byte, check if we should advance
-      expected_pos = (@cycle_count / CYCLES_PER_BYTE) % TRACK_BYTES
-
-      # If we're significantly behind where we should be, catch up
-      # This happens during delays (e.g., motor spinup, seek delays)
-      # but reads will then continue sequentially from the new position
-      pos_diff = (expected_pos - @byte_position) % TRACK_BYTES
-      if pos_diff > TRACK_BYTES / 2
-        # Wrapped around - expected_pos is actually behind
-        pos_diff = pos_diff - TRACK_BYTES
-      end
-
-      # Only jump ahead if we've fallen significantly behind (> 10 bytes)
-      # This allows reads to advance sequentially in tight loops
-      if pos_diff > 10
-        @byte_position = expected_pos
-      end
     end
 
     # Track position in full tracks (0-34) for data reading
