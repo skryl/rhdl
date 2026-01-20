@@ -4,7 +4,7 @@
 module RHDL
   module HDL
     # Leading Zero Count - counts leading zeros in input
-    class LZCount < SimComponent
+    class LZCount < Component
       parameter :width, default: 8
       parameter :out_width, default: -> { Math.log2(@width + 1).ceil }
 

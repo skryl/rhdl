@@ -3,7 +3,7 @@
 
 module RHDL
   module HDL
-    class NandGate < SimComponent
+    class NandGate < Component
       input :a0
       input :a1
       output :y

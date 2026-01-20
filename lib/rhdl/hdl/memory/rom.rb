@@ -10,7 +10,7 @@ module RHDL
   module HDL
     # ROM (Read-Only Memory)
     # Combinational read with enable - can be synthesized as LUT or block ROM
-    class ROM < SimComponent
+    class ROM < Component
       include RHDL::DSL::MemoryDSL
 
       parameter :contents, default: []

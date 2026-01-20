@@ -4,7 +4,7 @@
 module RHDL
   module HDL
     # 1-to-4 Demultiplexer - routes input to one of 4 outputs
-    class Demux4 < SimComponent
+    class Demux4 < Component
       parameter :width, default: 1
 
       input :a, width: :width

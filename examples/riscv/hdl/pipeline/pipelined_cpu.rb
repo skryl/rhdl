@@ -7,7 +7,7 @@ require_relative 'pipelined_datapath'
 
 module RISCV
   module Pipeline
-    class PipelinedCPU < RHDL::HDL::SimComponent
+    class PipelinedCPU < RHDL::HDL::Component
       input :clk
       input :rst
 

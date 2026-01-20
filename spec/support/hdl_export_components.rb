@@ -77,7 +77,7 @@ module RHDL
       end
     end
 
-    class Mux2Ref < RHDL::HDL::SimComponent
+    class Mux2Ref < RHDL::HDL::Component
       def setup_ports
         input :a, width: 4
         input :b, width: 4
@@ -90,7 +90,7 @@ module RHDL
       end
     end
 
-    class Adder8Ref < RHDL::HDL::SimComponent
+    class Adder8Ref < RHDL::HDL::Component
       def setup_ports
         input :a, width: 8
         input :b, width: 8
@@ -102,7 +102,7 @@ module RHDL
       end
     end
 
-    class Reg8Ref < RHDL::HDL::SimComponent
+    class Reg8Ref < RHDL::HDL::Component
       def initialize(name = nil)
         @state = 0
         @last_clk = 0

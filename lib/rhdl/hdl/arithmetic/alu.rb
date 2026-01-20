@@ -22,7 +22,7 @@ require_relative '../../dsl/behavior'
 
 module RHDL
   module HDL
-    class ALU < SimComponent
+    class ALU < Component
       include RHDL::DSL::Behavior
 
       # Operation constants

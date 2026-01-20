@@ -4,7 +4,7 @@
 module RHDL
   module HDL
     # 2-to-4 Decoder
-    class Decoder2to4 < SimComponent
+    class Decoder2to4 < Component
       # Class-level port definitions for synthesis
       input :a, width: 2
       input :en

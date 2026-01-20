@@ -4,7 +4,7 @@
 module RHDL
   module HDL
     # Bit Reverser
-    class BitReverse < SimComponent
+    class BitReverse < Component
       parameter :width, default: 8
 
       input :a, width: :width
