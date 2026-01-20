@@ -282,7 +282,8 @@ class Apple2Terminal
 
   def render_screen
     # Check if we should render hi-res graphics
-    if @hires_mode && @runner.bus.hires_mode?
+    # Automatically switch based on soft switch state, or force with -H flag
+    if @runner.bus.hires_mode? || (@hires_mode && !@runner.bus.text_mode?)
       render_hires_screen
     else
       render_text_screen
