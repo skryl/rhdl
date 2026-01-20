@@ -1,6 +1,7 @@
 # Apple ][-style memory bus with I/O page and soft switches
 
 require_relative '../../../lib/rhdl/hdl'
+require_relative 'disk2'
 
 module MOS6502
   class Apple2Bus < RHDL::HDL::Component
@@ -24,7 +25,7 @@ module MOS6502
       0xC057 => [:hires, true]
     }.freeze
 
-    attr_reader :speaker_toggles, :video
+    attr_reader :speaker_toggles, :video, :disk_controller
 
     def initialize(name = nil)
       @memory = Array.new(0x10000, 0)
@@ -40,6 +41,7 @@ module MOS6502
         hires: false
       }
       @soft_switch_access = Hash.new(0)
+      @disk_controller = Disk2.new
       super(name)
     end
 
@@ -108,6 +110,21 @@ module MOS6502
     def inject_key(ascii)
       @key_value = ascii & 0x7F
       @key_ready = true
+    end
+
+    # Load a disk image into the specified drive
+    def load_disk(path_or_bytes, drive: 0)
+      @disk_controller.load_disk(path_or_bytes, drive: drive)
+    end
+
+    # Check if a disk is loaded
+    def disk_loaded?(drive: 0)
+      @disk_controller.disk_loaded?(drive: drive)
+    end
+
+    # Eject disk from drive
+    def eject_disk(drive: 0)
+      @disk_controller.eject_disk(drive: drive)
     end
 
     def soft_switch_accessed?(addr)
@@ -204,6 +221,11 @@ module MOS6502
     end
 
     def handle_io(direction, addr, value)
+      # Check Disk II controller first (slot 6: $C0E0-$C0EF)
+      if @disk_controller.handles_address?(addr)
+        return @disk_controller.access(addr, value, write: direction == :write)
+      end
+
       case addr
       when 0xC000
         @key_ready ? (@key_value | 0x80) : 0x00

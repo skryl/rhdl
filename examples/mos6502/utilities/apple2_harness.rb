@@ -22,6 +22,14 @@ module Apple2Harness
       @bus.load_ram(bytes, base_addr: base_addr)
     end
 
+    def load_disk(path_or_bytes, drive: 0)
+      @bus.load_disk(path_or_bytes, drive: drive)
+    end
+
+    def disk_loaded?(drive: 0)
+      @bus.disk_loaded?(drive: drive)
+    end
+
     def reset
       @cpu.reset
     end
@@ -119,6 +127,14 @@ module Apple2Harness
 
     def load_ram(bytes, base_addr:)
       @bus.load_ram(bytes, base_addr: base_addr)
+    end
+
+    def load_disk(path_or_bytes, drive: 0)
+      @bus.load_disk(path_or_bytes, drive: drive)
+    end
+
+    def disk_loaded?(drive: 0)
+      @bus.disk_loaded?(drive: drive)
     end
 
     def reset

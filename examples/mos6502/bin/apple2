@@ -64,6 +64,11 @@ class Apple2Terminal
     @runner.load_ram(bytes, base_addr: base_addr)
   end
 
+  def load_disk(path, drive: 0)
+    puts "Loading disk: #{path} into drive #{drive + 1}"
+    @runner.load_disk(path, drive: drive)
+  end
+
   def setup_reset_vector(addr)
     # Set reset vector to point to our program
     @runner.bus.write(0xFFFC, addr & 0xFF)
@@ -409,6 +414,14 @@ parser = OptionParser.new do |opts|
     options[:demo] = true
   end
 
+  opts.on("--disk FILE", "Load disk image (.dsk) into drive 1") do |v|
+    options[:disk] = v
+  end
+
+  opts.on("--disk2 FILE", "Load disk image (.dsk) into drive 2") do |v|
+    options[:disk2] = v
+  end
+
   opts.on("-h", "--help", "Show this help message") do
     puts opts
     exit
@@ -424,6 +437,23 @@ terminal = Apple2Terminal.new(options)
 if options[:rom]
   rom_addr = options[:rom_addr] || 0xF800
   terminal.load_rom(options[:rom], base_addr: rom_addr)
+end
+
+# Load disk images if specified
+if options[:disk]
+  unless File.exist?(options[:disk])
+    puts "Error: Disk image not found: #{options[:disk]}"
+    exit 1
+  end
+  terminal.load_disk(options[:disk], drive: 0)
+end
+
+if options[:disk2]
+  unless File.exist?(options[:disk2])
+    puts "Error: Disk image not found: #{options[:disk2]}"
+    exit 1
+  end
+  terminal.load_disk(options[:disk2], drive: 1)
 end
 
 # Load program file if specified
