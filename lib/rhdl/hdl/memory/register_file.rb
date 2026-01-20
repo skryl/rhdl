@@ -2,16 +2,16 @@
 
 # HDL Register File Component
 # Multiple registers with read/write ports
-# Synthesizable via MemoryDSL
+# Synthesizable via Memory
 
-require_relative '../../dsl/memory_dsl'
+require_relative '../../dsl/memory'
 
 module RHDL
   module HDL
     # Register File (multiple registers with read/write ports)
     # Sequential write, combinational read - typical FPGA register file
     class RegisterFile < Component
-      include RHDL::DSL::MemoryDSL
+      include RHDL::DSL::Memory
 
       input :clk
       input :we
