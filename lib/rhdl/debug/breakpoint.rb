@@ -2,7 +2,7 @@
 # Breakpoint for simulation debugging
 
 module RHDL
-  module HDL
+  module Debug
     # Breakpoint for simulation debugging
     class Breakpoint
       attr_reader :id, :condition, :hit_count, :enabled

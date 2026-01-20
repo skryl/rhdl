@@ -1,12 +1,12 @@
 # Main Terminal UI class
 
 module RHDL
-  module HDL
+  module TUI
     class SimulatorTUI
       attr_reader :simulator, :running
 
       def initialize(simulator = nil)
-        @simulator = simulator || DebugSimulator.new
+        @simulator = simulator || Debug::DebugSimulator.new
         @running = false
         @screen_width = 120
         @screen_height = 40
@@ -60,7 +60,7 @@ module RHDL
       def setup_callbacks
         @simulator.on_break = -> (sim, bp) do
           @auto_run = false
-          msg = bp.is_a?(Watchpoint) ? bp.description : "Breakpoint ##{bp.id}"
+          msg = bp.is_a?(Debug::Watchpoint) ? bp.description : "Breakpoint ##{bp.id}"
           log("Break: #{msg}", level: :warning)
           refresh
         end

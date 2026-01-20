@@ -1,7 +1,7 @@
 # Breakpoint list panel
 
 module RHDL
-  module HDL
+  module TUI
     class BreakpointPanel < Panel
       attr_accessor :breakpoints
 
@@ -25,7 +25,7 @@ module RHDL
           selected = i == @selected_index
 
           status = bp.enabled ? "#{ANSI::GREEN}●#{ANSI::RESET}" : "#{ANSI::RED}○#{ANSI::RESET}"
-          desc = bp.is_a?(Watchpoint) ? bp.description : "custom"
+          desc = bp.is_a?(Debug::Watchpoint) ? bp.description : "custom"
           hits = "hits:#{bp.hit_count}"
 
           line = "#{status} ##{bp.id} #{desc} (#{hits})"

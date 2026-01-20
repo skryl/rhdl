@@ -2,7 +2,7 @@
 # Records signal transitions over time for waveform viewing
 
 module RHDL
-  module HDL
+  module Debug
     # Records signal transitions over time for waveform viewing
     class SignalProbe
       attr_reader :name, :wire, :history, :width

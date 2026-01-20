@@ -3,7 +3,7 @@
 require 'json'
 
 module RHDL
-  module HDL
+  module TUI
     module JsonProtocol
       # Convert a Wire to a signal hash
       def self.signal_to_hash(name, wire)
@@ -65,7 +65,7 @@ module RHDL
         watchpoints = []
         if sim.respond_to?(:breakpoints)
           sim.breakpoints.each do |bp|
-            if bp.is_a?(Watchpoint)
+            if bp.is_a?(Debug::Watchpoint)
               watchpoints << watchpoint_to_hash(bp)
             else
               breakpoints << breakpoint_to_hash(bp)
