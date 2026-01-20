@@ -369,15 +369,7 @@ namespace :cli do
     desc "[CLI] Build Ink TUI (compile TypeScript)"
     task :build do
       load_cli_tasks
-      # Ensure deps are installed first
-      RHDL::CLI::Tasks::TuiTask.new.send(:ensure_tui_deps)
-      puts "Building Ink TUI..."
-      puts "=" * 50
-      Dir.chdir(RHDL::CLI::Config.tui_ink_dir) do
-        sh 'npm run build'
-      end
-      puts
-      puts "Ink TUI built successfully."
+      RHDL::CLI::Tasks::TuiTask.new(build: true).run
     end
 
     desc "[CLI] Run the Ink TUI with a demo simulation"
@@ -387,37 +379,9 @@ namespace :cli do
     end
 
     desc "[CLI] Run the Ink TUI with an ALU demo"
-    task alu: :build do
-      require_relative 'lib/rhdl'
-
-      puts "Starting RHDL Ink TUI with ALU demo..."
-      puts "=" * 50
-      puts
-
-      # Create ALU and supporting components
-      alu = RHDL::HDL::ALU.new('alu', width: 8)
-      acc = RHDL::HDL::Register.new('acc', width: 8)
-
-      # Connect ALU output to accumulator input
-      RHDL::HDL::SimComponent.connect(alu.outputs[:result], acc.inputs[:d])
-
-      # Create debug simulator
-      sim = RHDL::HDL::DebugSimulator.new
-      sim.add_component(alu)
-      sim.add_component(acc)
-
-      # Set initial values
-      alu.inputs[:a].set(0x42)
-      alu.inputs[:b].set(0x10)
-      alu.inputs[:op].set(0)  # ADD
-      acc.inputs[:rst].set(0)
-      acc.inputs[:en].set(1)
-
-      # Create and run Ink adapter
-      adapter = RHDL::HDL::InkAdapter.new(sim)
-      adapter.add_component(alu, signals: :all)
-      adapter.add_component(acc, signals: :all)
-      adapter.run
+    task :alu do
+      load_cli_tasks
+      RHDL::CLI::Tasks::TuiTask.new(alu: true).run
     end
 
     desc "[CLI] List available components for TUI"
@@ -529,3 +493,30 @@ task spec: 'dev:spec'
 
 desc "Run tests in parallel (alias for dev:pspec)"
 task pspec: 'dev:pspec'
+
+# =============================================================================
+# Native Extension Tasks
+# =============================================================================
+
+namespace :native do
+  desc "Build the native ISA simulator Rust extension"
+  task :build do
+    load_cli_tasks
+    RHDL::CLI::Tasks::NativeTask.new(build: true).run
+  end
+
+  desc "Clean native extension build artifacts"
+  task :clean do
+    load_cli_tasks
+    RHDL::CLI::Tasks::NativeTask.new(clean: true).run
+  end
+
+  desc "Check if native extension is available"
+  task :check do
+    load_cli_tasks
+    RHDL::CLI::Tasks::NativeTask.new(check: true).run
+  end
+end
+
+desc "Build native ISA simulator (alias for native:build)"
+task native: 'native:build'

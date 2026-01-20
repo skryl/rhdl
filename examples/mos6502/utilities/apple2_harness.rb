@@ -2,6 +2,7 @@
 
 require_relative '../hdl/harness'
 require_relative 'apple2_bus'
+require_relative 'isa_simulator_native'
 require_relative 'isa_simulator'
 
 module Apple2Harness
@@ -113,21 +114,67 @@ module Apple2Harness
 
   # ISA-level runner using fast instruction-level simulation
   # Provides the same interface as Runner but uses ISASimulator for performance
+  #
+  # Memory Model (Native):
+  # - CPU has internal 64KB memory for fast execution
+  # - I/O region ($C000-$CFFF) calls back to Ruby bus for memory-mapped I/O
+  # - External devices read/write via cpu.peek/poke
+  #
+  # Falls back to pure Ruby ISASimulator if native extension is not available.
   class ISARunner
     attr_reader :cpu, :bus
 
     def initialize
       @bus = MOS6502::Apple2Bus.new("apple2_bus")
-      @cpu = MOS6502::ISASimulator.new(@bus)
+      # Use native Rust implementation with I/O handler for $C000-$CFFF
+      # Falls back to pure Ruby if native extension is not available
+      if MOS6502::NATIVE_AVAILABLE
+        @cpu = MOS6502::ISASimulatorNative.new(@bus)
+        # Give bus a reference to CPU for screen reading via peek
+        @bus.instance_variable_set(:@native_cpu, @cpu)
+      else
+        @cpu = MOS6502::ISASimulator.new(@bus)
+      end
+    end
+
+    # Check if using native implementation
+    def native?
+      @cpu.respond_to?(:native?) && @cpu.native?
     end
 
     def load_rom(bytes, base_addr:)
-      @bus.load_rom(bytes, base_addr: base_addr)
+      bytes_array = to_bytes(bytes)
+      if native?
+        if base_addr >= 0xC000 && base_addr < 0xD000
+          # Expansion ROM ($C000-$CFFF) goes to bus for io_read
+          @bus.load_rom(bytes_array, base_addr: base_addr)
+        else
+          # Main ROM goes directly to CPU memory for fast access
+          @cpu.load_bytes(bytes_array, base_addr)
+        end
+      else
+        @bus.load_rom(bytes_array, base_addr: base_addr)
+      end
     end
 
     def load_ram(bytes, base_addr:)
-      @bus.load_ram(bytes, base_addr: base_addr)
+      bytes_array = to_bytes(bytes)
+      if native?
+        # RAM goes directly to CPU memory for fast access
+        @cpu.load_bytes(bytes_array, base_addr)
+      else
+        @bus.load_ram(bytes_array, base_addr: base_addr)
+      end
     end
+
+    private
+
+    def to_bytes(source)
+      return source.bytes if source.is_a?(String)
+      source
+    end
+
+    public
 
     def load_disk(path_or_bytes, drive: 0)
       @bus.load_disk(path_or_bytes, drive: drive)
@@ -138,17 +185,9 @@ module Apple2Harness
     end
 
     def reset
-      # Read reset vector from bus
-      lo = @bus.read(MOS6502::ISASimulator::RESET_VECTOR)
-      hi = @bus.read(MOS6502::ISASimulator::RESET_VECTOR + 1)
-      @cpu.pc = (hi << 8) | lo
-      @cpu.instance_variable_set(:@sp, 0xFD)
-      @cpu.instance_variable_set(:@p, 0x24)
-      @cpu.instance_variable_set(:@a, 0)
-      @cpu.instance_variable_set(:@x, 0)
-      @cpu.instance_variable_set(:@y, 0)
-      @cpu.instance_variable_set(:@cycles, 0)
-      @cpu.instance_variable_set(:@halted, false)
+      # Both native and Ruby implementations have a reset method
+      # that reads the reset vector from memory and initializes registers
+      @cpu.reset
     end
 
     def run_steps(steps)
