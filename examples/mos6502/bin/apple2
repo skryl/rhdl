@@ -90,15 +90,15 @@ class Apple2Terminal
     end
 
     # Calculate padding to center the text display
-    # Debug mode adds 2 status lines, non-debug adds 1 for disk loading indicator
-    display_height = @debug ? DISPLAY_HEIGHT + 2 : DISPLAY_HEIGHT
+    # Debug mode adds 3 status lines, non-debug adds 1 for disk loading indicator
+    display_height = @debug ? DISPLAY_HEIGHT + 3 : DISPLAY_HEIGHT
     @pad_top = [(@term_rows - display_height) / 2, 0].max
     @pad_left = [(@term_cols - DISPLAY_WIDTH) / 2, 0].max
 
     # Calculate padding for hires display
     # Hires output height is proportional: (192/4) * (@hires_width / (280/2)) = 48 * @hires_width / 140
-    # Debug mode adds 2 status lines, non-debug adds 1 for disk loading indicator
-    hires_display_height = (HIRES_HEIGHT * @hires_width / HIRES_WIDTH) + (@debug ? 3 : 1)
+    # Debug mode adds 3 status lines, non-debug adds 1 for disk loading indicator
+    hires_display_height = (HIRES_HEIGHT * @hires_width / HIRES_WIDTH) + (@debug ? 4 : 1)
     hires_display_width = @hires_width
     @hires_pad_top = [(@term_rows - hires_display_height) / 2, 0].max
     @hires_pad_left = [(@term_cols - hires_display_width) / 2, 0].max
@@ -215,7 +215,7 @@ class Apple2Terminal
 
     if @runner.halted?
       # Position halted message below the display (after debug and disk loading lines)
-      halt_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 3 : 2)
+      halt_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 4 : 2)
       print move_cursor(halt_row, @pad_left + 1)
       puts "CPU HALTED at PC=$#{@runner.cpu_state[:pc].to_s(16).upcase.rjust(4, '0')}"
       print move_cursor(halt_row + 1, @pad_left + 1)
@@ -312,21 +312,31 @@ class Apple2Terminal
     if @debug
       state = @runner.cpu_state
       dc = @runner.bus.disk_controller
-      # Line 1: CPU registers and performance
-      status = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X | %s %.1ffps [HIRES]",
-                      state[:pc], state[:a], state[:x], state[:y],
-                      state[:sp], state[:p], format_hz(@current_hz), @fps)
+      sim_type = (state[:simulator_type] || 'unknown').to_s.upcase
+
+      # Line 1: Registers
+      line1 = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X [HIRES]",
+                     state[:pc], state[:a], state[:x], state[:y],
+                     state[:sp], state[:p])
       output << move_cursor(status_row, @hires_pad_left + 1)
-      output << status
+      output << line1
       status_row += 1
-      # Line 2: Cycles, uptime, key, disk info
-      status2 = format("Cyc:%s Up:%s Key:%-3s | Disk:T%02d %s",
-                       format_cycles(state[:cycles]),
-                       format_uptime(@start_time),
-                       format_key(@last_key),
-                       dc.track, dc.motor_on ? "ON " : "OFF")
+
+      # Line 2: Sim type / cycles / speed / uptime
+      line2 = format("Sim:%-6s Cyc:%s %s %.1ffps Up:%s",
+                     sim_type, format_cycles(state[:cycles]),
+                     format_hz(@current_hz), @fps,
+                     format_uptime(@start_time))
       output << move_cursor(status_row, @hires_pad_left + 1)
-      output << status2
+      output << line2
+      status_row += 1
+
+      # Line 3: Disk IO / keyboard IO
+      line3 = format("Disk:T%02d %s | Key:%-3s",
+                     dc.track, dc.motor_on ? "ON " : "OFF",
+                     format_key(@last_key))
+      output << move_cursor(status_row, @hires_pad_left + 1)
+      output << line3
     elsif disk_motor_on?
       output << move_cursor(status_row, @hires_pad_left + 1)
       output << "DISK LOADING..."
@@ -379,25 +389,34 @@ class Apple2Terminal
     status_row = @pad_top + DISPLAY_HEIGHT + 1
     if @debug
       state = @runner.cpu_state
-      # Line 1: CPU registers and performance
-      status = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X | %s %.1ffps",
-                      state[:pc], state[:a], state[:x], state[:y],
-                      state[:sp], state[:p], format_hz(@current_hz), @fps)
-      output << move_cursor(status_row, @pad_left + 1)
-      output << status
-      status_row += 1
-
-      # Line 2: Cycles, uptime, key, disk and video info
       dc = @runner.bus.disk_controller
       mode = @runner.bus.display_mode
-      status2 = format("Cyc:%s Up:%s Key:%-3s | Disk:T%02d %s | %s",
-                       format_cycles(state[:cycles]),
-                       format_uptime(@start_time),
-                       format_key(@last_key),
-                       dc.track, dc.motor_on ? "ON " : "OFF",
-                       mode.to_s.upcase)
+      sim_type = (state[:simulator_type] || 'unknown').to_s.upcase
+
+      # Line 1: Registers
+      line1 = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X",
+                     state[:pc], state[:a], state[:x], state[:y],
+                     state[:sp], state[:p])
       output << move_cursor(status_row, @pad_left + 1)
-      output << status2
+      output << line1
+      status_row += 1
+
+      # Line 2: Sim type / cycles / speed / uptime
+      line2 = format("Sim:%-6s Cyc:%s %s %.1ffps Up:%s",
+                     sim_type, format_cycles(state[:cycles]),
+                     format_hz(@current_hz), @fps,
+                     format_uptime(@start_time))
+      output << move_cursor(status_row, @pad_left + 1)
+      output << line2
+      status_row += 1
+
+      # Line 3: Disk IO / keyboard IO / video mode
+      line3 = format("Disk:T%02d %s | Key:%-3s | %s",
+                     dc.track, dc.motor_on ? "ON " : "OFF",
+                     format_key(@last_key),
+                     mode.to_s.upcase)
+      output << move_cursor(status_row, @pad_left + 1)
+      output << line3
       status_row += 1
     end
 
@@ -502,8 +521,8 @@ class Apple2Terminal
     print SHOW_CURSOR
     print NORMAL_VIDEO
     # Position exit message below the display area
-    # Account for debug line and disk loading line
-    exit_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 4 : 3)
+    # Account for debug lines (3) and disk loading line
+    exit_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 5 : 3)
     print move_cursor(exit_row, 1)
     puts "Apple ][ emulator terminated."
   end
