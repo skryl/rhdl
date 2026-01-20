@@ -198,6 +198,12 @@ module MOS6502
       @key_ready = false
     end
 
+    # Advance disk spin simulation by one or more CPU cycles
+    # Call this after each CPU step to simulate continuous disk rotation
+    def tick(cycles = 1)
+      @disk_controller.tick(cycles)
+    end
+
     private
 
     # Apple II text page has a non-linear layout
