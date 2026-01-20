@@ -18,6 +18,10 @@ class Apple2Terminal
   SCREEN_ROWS = 24
   SCREEN_COLS = 40
 
+  # Display dimensions including border
+  DISPLAY_WIDTH = SCREEN_COLS + 2   # 42 (40 + 2 border chars)
+  DISPLAY_HEIGHT = SCREEN_ROWS + 2  # 26 (24 + 2 border lines)
+
   # ANSI escape codes
   ESC = "\e"
   CLEAR_SCREEN = "#{ESC}[2J"
@@ -46,6 +50,26 @@ class Apple2Terminal
     @debug = options[:debug] || false
     @green_screen = options[:green] || false
     @fast_mode = options[:fast] || false
+
+    # Terminal size and padding for centering
+    @term_rows = 24
+    @term_cols = 80
+    @pad_top = 0
+    @pad_left = 0
+    update_terminal_size
+  end
+
+  def update_terminal_size
+    if $stdout.respond_to?(:winsize)
+      rows, cols = $stdout.winsize
+      @term_rows = [rows, DISPLAY_HEIGHT].max
+      @term_cols = [cols, DISPLAY_WIDTH].max
+    end
+
+    # Calculate padding to center the display
+    display_height = @debug ? DISPLAY_HEIGHT + 1 : DISPLAY_HEIGHT
+    @pad_top = [(@term_rows - display_height) / 2, 0].max
+    @pad_left = [(@term_cols - DISPLAY_WIDTH) / 2, 0].max
   end
 
   def load_rom(path, base_addr: 0xF800)
@@ -77,10 +101,16 @@ class Apple2Terminal
 
   def run
     @running = true
+    @resize_pending = false
 
     # Set up signal handler for clean exit
     trap('INT') { stop }
     trap('TERM') { stop }
+
+    # Handle terminal resize
+    trap('WINCH') do
+      @resize_pending = true
+    end
 
     mode = @fast_mode ? "ISA (fast)" : "HDL (cycle-accurate)"
     puts "Starting Apple ][ emulator... [#{mode} mode]"
@@ -95,7 +125,6 @@ class Apple2Terminal
     begin
       IO.console.raw do
         print CLEAR_SCREEN
-        print MOVE_HOME
         print HIDE_CURSOR
 
         main_loop
@@ -115,6 +144,13 @@ class Apple2Terminal
     frame_count = 0
 
     while @running && !@runner.halted?
+      # Handle terminal resize
+      if @resize_pending
+        @resize_pending = false
+        update_terminal_size
+        print CLEAR_SCREEN
+      end
+
       # Check for keyboard input (non-blocking)
       handle_keyboard_input
 
@@ -134,8 +170,11 @@ class Apple2Terminal
     end
 
     if @runner.halted?
-      print move_cursor(SCREEN_ROWS + 2, 1)
+      # Position halted message below the display
+      halt_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 2 : 1)
+      print move_cursor(halt_row, @pad_left + 1)
       puts "CPU HALTED at PC=$#{@runner.cpu_state[:pc].to_s(16).upcase.rjust(4, '0')}"
+      print move_cursor(halt_row + 1, @pad_left + 1)
       puts "Press any key to exit..."
       IO.console.getch
     end
@@ -193,20 +232,27 @@ class Apple2Terminal
 
   def render_screen
     output = String.new
-    output << MOVE_HOME
+
+    # Move cursor to the top-left corner of the centered display
+    # ANSI cursor positions are 1-based
+    output << move_cursor(@pad_top + 1, @pad_left + 1)
 
     if @green_screen
       output << GREEN_FG
       output << BLACK_BG
     end
 
+    # Horizontal padding string (reused for each line)
+    h_pad = " " * @pad_left
+
     # Draw border top
-    output << "+" << ("-" * SCREEN_COLS) << "+\n"
+    output << "+" << ("-" * SCREEN_COLS) << "+"
+    output << move_cursor(@pad_top + 2, @pad_left + 1)
 
     # Read screen content
     screen = @runner.read_screen_array
 
-    screen.each do |line|
+    screen.each_with_index do |line, row|
       output << "|"
       line.each do |char_code|
         # Handle inverse video (high bit set in original Apple II)
@@ -214,7 +260,9 @@ class Apple2Terminal
         char = ' ' if char_code < 0x20
         output << char
       end
-      output << "|\n"
+      output << "|"
+      # Move to the next line at the correct horizontal position
+      output << move_cursor(@pad_top + 3 + row, @pad_left + 1)
     end
 
     # Draw border bottom
@@ -222,13 +270,14 @@ class Apple2Terminal
 
     output << NORMAL_VIDEO if @green_screen
 
-    # Status line
+    # Status line (centered below the display)
     if @debug
       state = @runner.cpu_state
-      output << "\n"
-      output << format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X Cycles:%d",
-                       state[:pc], state[:a], state[:x], state[:y],
-                       state[:sp], state[:p], state[:cycles])
+      status = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X Cycles:%d",
+                      state[:pc], state[:a], state[:x], state[:y],
+                      state[:sp], state[:p], state[:cycles])
+      output << move_cursor(@pad_top + DISPLAY_HEIGHT + 1, @pad_left + 1)
+      output << status
     end
 
     print output
@@ -241,8 +290,10 @@ class Apple2Terminal
   def cleanup
     print SHOW_CURSOR
     print NORMAL_VIDEO
-    print move_cursor(SCREEN_ROWS + 4, 1)
-    puts "\nApple ][ emulator terminated."
+    # Position exit message below the display area
+    exit_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 3 : 2)
+    print move_cursor(exit_row, 1)
+    puts "Apple ][ emulator terminated."
   end
 end
 
@@ -372,7 +423,7 @@ options = {
   debug: false,
   green: false,
   demo: false,
-  fast: false
+  fast: true  # Default to fast (ISA emulation) mode
 }
 
 parser = OptionParser.new do |opts|
@@ -406,8 +457,12 @@ parser = OptionParser.new do |opts|
     options[:green] = true
   end
 
-  opts.on("-f", "--fast", "Use fast ISA-level simulator (not cycle-accurate)") do
+  opts.on("-f", "--fast", "Use fast ISA-level simulator (default)") do
     options[:fast] = true
+  end
+
+  opts.on("--hdl", "Use HDL cycle-accurate simulator (slower)") do
+    options[:fast] = false
   end
 
   opts.on("--demo", "Run built-in demo program") do
