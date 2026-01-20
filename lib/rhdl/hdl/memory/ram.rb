@@ -2,16 +2,16 @@
 
 # HDL RAM Component
 # Synchronous RAM with single port
-# Synthesizable via MemoryDSL
+# Synthesizable via Memory DSL
 
-require_relative '../../dsl/memory_dsl'
+require_relative '../../dsl/memory'
 
 module RHDL
   module HDL
     # Synchronous RAM with single port
     # Sequential write on rising clock edge, combinational read
     class RAM < Component
-      include RHDL::DSL::MemoryDSL
+      include RHDL::DSL::Memory
 
       input :clk
       input :we       # Write enable
