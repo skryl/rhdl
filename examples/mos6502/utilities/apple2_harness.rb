@@ -2,6 +2,7 @@
 
 require_relative '../hdl/harness'
 require_relative 'apple2_bus'
+require_relative 'isa_simulator_native'
 require_relative 'isa_simulator'
 
 module Apple2Harness
@@ -113,12 +114,24 @@ module Apple2Harness
 
   # ISA-level runner using fast instruction-level simulation
   # Provides the same interface as Runner but uses ISASimulator for performance
+  #
+  # Note: The native Rust implementation cannot use external Ruby memory objects,
+  # so we always use the pure Ruby ISASimulator for Apple II (which needs Apple2Bus).
+  # For benchmarks and simple programs without memory-mapped I/O, use
+  # MOS6502::ISASimulatorNative directly with load_program().
   class ISARunner
     attr_reader :cpu, :bus
 
     def initialize
       @bus = MOS6502::Apple2Bus.new("apple2_bus")
+      # Apple II requires external memory (Apple2Bus) for memory-mapped I/O
+      # The pure Ruby ISASimulator supports this, native Rust does not
       @cpu = MOS6502::ISASimulator.new(@bus)
+    end
+
+    # Check if using native implementation (always false for Apple II)
+    def native?
+      false
     end
 
     def load_rom(bytes, base_addr:)
