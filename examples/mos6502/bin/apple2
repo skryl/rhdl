@@ -170,8 +170,8 @@ class Apple2Terminal
     end
 
     if @runner.halted?
-      # Position halted message below the display
-      halt_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 2 : 1)
+      # Position halted message below the display (after debug and disk loading lines)
+      halt_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 3 : 2)
       print move_cursor(halt_row, @pad_left + 1)
       puts "CPU HALTED at PC=$#{@runner.cpu_state[:pc].to_s(16).upcase.rjust(4, '0')}"
       print move_cursor(halt_row + 1, @pad_left + 1)
@@ -271,16 +271,35 @@ class Apple2Terminal
     output << NORMAL_VIDEO if @green_screen
 
     # Status line (centered below the display)
+    status_row = @pad_top + DISPLAY_HEIGHT + 1
     if @debug
       state = @runner.cpu_state
       status = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X Cycles:%d",
                       state[:pc], state[:a], state[:x], state[:y],
                       state[:sp], state[:p], state[:cycles])
-      output << move_cursor(@pad_top + DISPLAY_HEIGHT + 1, @pad_left + 1)
+      output << move_cursor(status_row, @pad_left + 1)
       output << status
+      status_row += 1
+    end
+
+    # Show "DISK LOADING..." when disk motor is on
+    if disk_motor_on?
+      output << move_cursor(status_row, @pad_left + 1)
+      output << "DISK LOADING..."
+      output << "     "  # Clear any leftover characters
+    else
+      # Clear the disk loading message when motor is off
+      output << move_cursor(status_row, @pad_left + 1)
+      output << "                    "  # Clear the line
     end
 
     print output
+  end
+
+  def disk_motor_on?
+    @runner.bus.disk_controller.motor_on
+  rescue
+    false
   end
 
   def move_cursor(row, col)
@@ -291,7 +310,8 @@ class Apple2Terminal
     print SHOW_CURSOR
     print NORMAL_VIDEO
     # Position exit message below the display area
-    exit_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 3 : 2)
+    # Account for debug line and disk loading line
+    exit_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 4 : 3)
     print move_cursor(exit_row, 1)
     puts "Apple ][ emulator terminated."
   end
