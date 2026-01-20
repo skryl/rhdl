@@ -17,12 +17,12 @@ def load_cli_tasks
 end
 
 # =============================================================================
-# Development Tasks (prefixed with dev:)
+# Development Tasks (not prefixed - internal use)
 # =============================================================================
 
 namespace :dev do
   namespace :setup do
-    desc "[Dev] Generate binstubs for all gem executables"
+    desc "Generate binstubs for all gem executables"
     task :binstubs do
       binstubs_needed = {
         'rake' => 'rake',
@@ -40,7 +40,7 @@ namespace :dev do
     end
   end
 
-  desc "[Dev] Setup development environment (install deps + binstubs)"
+  desc "Setup development environment (install deps + binstubs)"
   task setup: ['dev:setup:binstubs']
 
   # RSpec tasks
@@ -60,17 +60,17 @@ namespace :dev do
       t.rspec_opts = "--format documentation"
     end
   rescue LoadError
-    desc "[Dev] Run RSpec tests"
+    desc "Run RSpec tests"
     task :spec do
       sh "ruby -Ilib -S rspec"
     end
 
-    desc "[Dev] Run 6502 CPU tests"
+    desc "Run 6502 CPU tests"
     task :spec_6502 do
       sh "ruby -Ilib -S rspec spec/examples/mos6502/ --format progress"
     end
 
-    desc "[Dev] Run all tests with documentation format"
+    desc "Run all tests with documentation format"
     task :spec_doc do
       sh "ruby -Ilib -S rspec --format documentation"
     end
@@ -95,34 +95,34 @@ namespace :dev do
     end
 
     namespace :parallel do
-      desc "[Dev] Run all tests in parallel (auto-detect CPU count)"
+      desc "Run all tests in parallel (auto-detect CPU count)"
       task :spec do
         sh "#{parallel_rspec_cmd} spec/"
       end
 
-      desc "[Dev] Run all tests in parallel with specific number of processes"
+      desc "Run all tests in parallel with specific number of processes"
       task :spec_n, [:count] do |_, args|
         count = args[:count] || ENV['PARALLEL_TEST_PROCESSORS'] || Parallel.processor_count
         sh "#{parallel_rspec_cmd} -n #{count} spec/"
       end
 
-      desc "[Dev] Run 6502 CPU tests in parallel"
+      desc "Run 6502 CPU tests in parallel"
       task :spec_6502 do
         sh "#{parallel_rspec_cmd} spec/examples/mos6502/"
       end
 
-      desc "[Dev] Run HDL tests in parallel"
+      desc "Run HDL tests in parallel"
       task :spec_hdl do
         sh "#{parallel_rspec_cmd} spec/rhdl/hdl/"
       end
 
-      desc "[Dev] Prepare parallel test database (record test file runtimes)"
+      desc "Prepare parallel test database (record test file runtimes)"
       task :prepare do
         FileUtils.mkdir_p('tmp')
         sh "#{parallel_rspec_cmd} --record-runtime spec/"
       end
 
-      desc "[Dev] Run tests in parallel using runtime-based grouping for better balance"
+      desc "Run tests in parallel using runtime-based grouping for better balance"
       task :spec_balanced do
         runtime_log = 'tmp/parallel_runtime_rspec.log'
         if File.exist?(runtime_log)
@@ -135,11 +135,11 @@ namespace :dev do
       end
     end
 
-    desc "[Dev] Run all tests in parallel (alias for dev:parallel:spec)"
+    desc "Run all tests in parallel (alias for dev:parallel:spec)"
     task pspec: 'dev:parallel:spec'
 
   rescue LoadError
-    desc "[Dev] Run tests in parallel (requires parallel_tests gem)"
+    desc "Run tests in parallel (requires parallel_tests gem)"
     task :pspec do
       abort "parallel_tests gem not installed. Run: bundle install"
     end
@@ -152,230 +152,39 @@ namespace :dev do
   rescue LoadError
     # RuboCop not available
   end
-end
 
-# Default task
-task default: 'dev:spec'
-
-# =============================================================================
-# Diagram Generation Tasks (using CLI Tasks)
-# =============================================================================
-
-namespace :diagrams do
-  desc "Generate component-level diagrams (simple block view)"
-  task :component do
-    load_cli_tasks
-    RHDL::CLI::Tasks::DiagramTask.new(all: true, mode: 'component').run
-  end
-
-  desc "Generate hierarchical diagrams (with subcomponents)"
-  task :hierarchical do
-    load_cli_tasks
-    RHDL::CLI::Tasks::DiagramTask.new(all: true, mode: 'hierarchical').run
-  end
-
-  desc "Generate gate-level diagrams (primitive gates and flip-flops)"
-  task :gate do
-    load_cli_tasks
-    RHDL::CLI::Tasks::DiagramTask.new(all: true, mode: 'gate').run
-  end
-
-  desc "Generate all circuit diagrams (component, hierarchical, gate)"
-  task generate: [:component, :hierarchical, :gate] do
-    load_cli_tasks
-    # Generate README after all modes are done
-    task = RHDL::CLI::Tasks::DiagramTask.new(all: true)
-    task.send(:generate_readme)
-    puts
-    puts "=" * 60
-    puts "Done! Diagrams generated in: #{RHDL::CLI::Config.diagrams_dir}"
-    puts "=" * 60
-  end
-
-  desc "Clean all generated diagrams"
-  task :clean do
-    load_cli_tasks
-    RHDL::CLI::Tasks::DiagramTask.new(clean: true).run
-  end
-end
-
-desc "Generate all diagrams (alias for diagrams:generate)"
-task diagrams: 'diagrams:generate'
-
-# =============================================================================
-# HDL Export Tasks (using CLI Tasks)
-# =============================================================================
-
-namespace :hdl do
-  desc "Export all DSL components to Verilog (lib/ and examples/)"
-  task export: [:export_lib, :export_examples] do
-    puts
-    puts "=" * 50
-    puts "HDL export complete!"
-    load_cli_tasks
-    puts "Verilog files: #{RHDL::CLI::Config.verilog_dir}"
-  end
-
-  desc "Export lib/ DSL components to Verilog"
-  task :export_lib do
-    load_cli_tasks
-    RHDL::CLI::Tasks::ExportTask.new(all: true, scope: 'lib').run
-  end
-
-  desc "Export examples/ components to Verilog"
-  task :export_examples do
-    load_cli_tasks
-    RHDL::CLI::Tasks::ExportTask.new(all: true, scope: 'examples').run
-  end
-
-  desc "Export Verilog files"
-  task :verilog do
-    load_cli_tasks
-    RHDL::CLI::Tasks::ExportTask.new(all: true, scope: 'lib').run
-  end
-
-  desc "Clean all generated HDL files"
-  task :clean do
-    load_cli_tasks
-    RHDL::CLI::Tasks::ExportTask.new(clean: true).run
-  end
-end
-
-desc "Export all HDL (alias for hdl:export)"
-task hdl: 'hdl:export'
-
-# =============================================================================
-# Gate-Level Synthesis Tasks (using CLI Tasks)
-# =============================================================================
-
-namespace :gates do
-  desc "Export all components to gate-level IR (JSON netlists)"
-  task :export do
-    load_cli_tasks
-    RHDL::CLI::Tasks::GatesTask.new(export: true).run
-  end
-
-  desc "Export simcpu datapath to gate-level"
-  task :simcpu do
-    load_cli_tasks
-    RHDL::CLI::Tasks::GatesTask.new(simcpu: true).run
-  end
-
-  desc "Clean gate-level synthesis output"
-  task :clean do
-    load_cli_tasks
-    RHDL::CLI::Tasks::GatesTask.new(clean: true).run
-  end
-
-  desc "Show gate-level synthesis statistics"
-  task :stats do
-    load_cli_tasks
-    RHDL::CLI::Tasks::GatesTask.new(stats: true).run
-  end
-end
-
-desc "Export gate-level synthesis (alias for gates:export)"
-task gates: 'gates:export'
-
-# =============================================================================
-# Benchmarking Tasks (Development, using CLI Tasks)
-# =============================================================================
-
-namespace :dev do
-  namespace :bench do
-    desc "[Dev] Benchmark gate-level simulation"
-    task :gates do
-      load_cli_tasks
-      RHDL::CLI::Tasks::BenchmarkTask.new(type: :gates).run
-    end
-  end
-
-  desc "[Dev] Run gate benchmark (alias for dev:bench:gates)"
-  task bench: 'dev:bench:gates'
-end
-
-# =============================================================================
-# Combined Tasks (using CLI Tasks)
-# =============================================================================
-
-desc "Generate all output files (diagrams + HDL exports)"
-task generate_all: ['diagrams:generate', 'hdl:export']
-
-desc "Clean all generated files"
-task clean_all: ['diagrams:clean', 'hdl:clean', 'gates:clean']
-
-desc "Regenerate all output files (clean + generate)"
-task regenerate: ['clean_all', 'generate_all']
-
-# =============================================================================
-# Apple II ROM Tasks (using CLI Tasks)
-# =============================================================================
-
-namespace :apple2 do
-  desc "Assemble the mini monitor ROM"
-  task :build do
-    load_cli_tasks
-    RHDL::CLI::Tasks::Apple2Task.new(build: true).run
-  end
-
-  desc "Run the Apple II emulator with the mini monitor"
-  task run: :build do
-    load_cli_tasks
-    RHDL::CLI::Tasks::Apple2Task.new(build: true, run: true).run
-  end
-
-  desc "Run with AppleIIGo public domain ROM"
-  task :run_appleiigo do
-    load_cli_tasks
-    RHDL::CLI::Tasks::Apple2Task.new(appleiigo: true).run
-  end
-
-  desc "Run the Apple II emulator demo (no ROM needed)"
-  task :demo do
-    load_cli_tasks
-    RHDL::CLI::Tasks::Apple2Task.new(demo: true).run
-  end
-
-  desc "Clean ROM output files"
-  task :clean do
-    load_cli_tasks
-    RHDL::CLI::Tasks::Apple2Task.new(clean: true).run
-  end
-end
-
-desc "Build Apple II ROM (alias for apple2:build)"
-task apple2: 'apple2:build'
-
-# =============================================================================
-# Test Dependencies Tasks (Development, using CLI Tasks)
-# =============================================================================
-
-namespace :dev do
+  # Dependency Management
   namespace :deps do
-    desc "[Dev] Check and install test dependencies (iverilog)"
+    desc "Check and install test dependencies (iverilog)"
     task :install do
       load_cli_tasks
       RHDL::CLI::Tasks::DepsTask.new.run
     end
 
-    desc "[Dev] Check test dependencies status"
+    desc "Check test dependencies status"
     task :check do
       load_cli_tasks
       RHDL::CLI::Tasks::DepsTask.new(check: true).run
     end
   end
 
-  desc "[Dev] Install test dependencies (alias for dev:deps:install)"
+  desc "Install test dependencies (alias for dev:deps:install)"
   task deps: 'dev:deps:install'
-end
 
-# =============================================================================
-# Test Benchmarking Tasks (Development, using CLI Tasks)
-# =============================================================================
+  # Benchmarking
+  namespace :bench do
+    desc "Benchmark gate-level simulation"
+    task :gates do
+      load_cli_tasks
+      RHDL::CLI::Tasks::BenchmarkTask.new(type: :gates).run
+    end
+  end
 
-namespace :dev do
+  desc "Run gate benchmark (alias for dev:bench:gates)"
+  task bench: 'dev:bench:gates'
+
   namespace :benchmark do
-    desc "[Dev] Profile RSpec tests and show slowest 20 tests"
+    desc "Profile RSpec tests and show slowest 20 tests"
     task :tests, [:count] => 'dev:setup:binstubs' do |_, args|
       load_cli_tasks
       RHDL::CLI::Tasks::BenchmarkTask.new(
@@ -385,7 +194,7 @@ namespace :dev do
       ).run
     end
 
-    desc "[Dev] Profile 6502 tests and show slowest tests"
+    desc "Profile 6502 tests and show slowest tests"
     task :tests_6502, [:count] => 'dev:setup:binstubs' do |_, args|
       load_cli_tasks
       RHDL::CLI::Tasks::BenchmarkTask.new(
@@ -395,7 +204,7 @@ namespace :dev do
       ).run
     end
 
-    desc "[Dev] Profile HDL tests and show slowest tests"
+    desc "Profile HDL tests and show slowest tests"
     task :tests_hdl, [:count] => 'dev:setup:binstubs' do |_, args|
       load_cli_tasks
       RHDL::CLI::Tasks::BenchmarkTask.new(
@@ -405,122 +214,307 @@ namespace :dev do
       ).run
     end
 
-    desc "[Dev] Run full test timing analysis (detailed per-file timing)"
+    desc "Run full test timing analysis (detailed per-file timing)"
     task timing: 'dev:setup:binstubs' do
       load_cli_tasks
       RHDL::CLI::Tasks::BenchmarkTask.new(type: :timing).run
     end
 
-    desc "[Dev] Quick benchmark of test categories"
+    desc "Quick benchmark of test categories"
     task quick: 'dev:setup:binstubs' do
       load_cli_tasks
       RHDL::CLI::Tasks::BenchmarkTask.new(type: :quick).run
     end
   end
 
-  desc "[Dev] Benchmark tests showing 20 slowest (alias for dev:benchmark:tests)"
+  desc "Benchmark tests showing 20 slowest (alias for dev:benchmark:tests)"
   task benchmark: 'dev:benchmark:tests'
 end
 
+# Default task
+task default: 'dev:spec'
+
 # =============================================================================
-# TUI Tasks (using CLI Tasks)
+# CLI Tasks (prefixed with cli: - shared with CLI binary)
 # =============================================================================
 
-namespace :tui do
-  desc "Install Ink TUI dependencies"
-  task :install do
-    load_cli_tasks
-    RHDL::CLI::Tasks::TuiTask.new(install: true).run
-  end
-
-  desc "Build Ink TUI (compile TypeScript)"
-  task :build do
-    load_cli_tasks
-    # Ensure deps are installed first
-    RHDL::CLI::Tasks::TuiTask.new.send(:ensure_tui_deps)
-    puts "Building Ink TUI..."
-    puts "=" * 50
-    Dir.chdir(RHDL::CLI::Config.tui_ink_dir) do
-      sh 'npm run build'
+namespace :cli do
+  # ---------------------------------------------------------------------------
+  # Diagram Generation
+  # ---------------------------------------------------------------------------
+  namespace :diagrams do
+    desc "[CLI] Generate component-level diagrams (simple block view)"
+    task :component do
+      load_cli_tasks
+      RHDL::CLI::Tasks::DiagramTask.new(all: true, mode: 'component').run
     end
-    puts
-    puts "Ink TUI built successfully."
+
+    desc "[CLI] Generate hierarchical diagrams (with subcomponents)"
+    task :hierarchical do
+      load_cli_tasks
+      RHDL::CLI::Tasks::DiagramTask.new(all: true, mode: 'hierarchical').run
+    end
+
+    desc "[CLI] Generate gate-level diagrams (primitive gates and flip-flops)"
+    task :gate do
+      load_cli_tasks
+      RHDL::CLI::Tasks::DiagramTask.new(all: true, mode: 'gate').run
+    end
+
+    desc "[CLI] Generate all circuit diagrams (component, hierarchical, gate)"
+    task generate: [:component, :hierarchical, :gate] do
+      load_cli_tasks
+      # Generate README after all modes are done
+      task = RHDL::CLI::Tasks::DiagramTask.new(all: true)
+      task.send(:generate_readme)
+      puts
+      puts "=" * 60
+      puts "Done! Diagrams generated in: #{RHDL::CLI::Config.diagrams_dir}"
+      puts "=" * 60
+    end
+
+    desc "[CLI] Clean all generated diagrams"
+    task :clean do
+      load_cli_tasks
+      RHDL::CLI::Tasks::DiagramTask.new(clean: true).run
+    end
   end
 
-  desc "Run the Ink TUI with a demo simulation"
-  task :run do
-    load_cli_tasks
-    RHDL::CLI::Tasks::TuiTask.new(ink: true).run
+  desc "[CLI] Generate all diagrams (alias for cli:diagrams:generate)"
+  task diagrams: 'cli:diagrams:generate'
+
+  # ---------------------------------------------------------------------------
+  # HDL Export
+  # ---------------------------------------------------------------------------
+  namespace :hdl do
+    desc "[CLI] Export all DSL components to Verilog (lib/ and examples/)"
+    task export: [:export_lib, :export_examples] do
+      puts
+      puts "=" * 50
+      puts "HDL export complete!"
+      load_cli_tasks
+      puts "Verilog files: #{RHDL::CLI::Config.verilog_dir}"
+    end
+
+    desc "[CLI] Export lib/ DSL components to Verilog"
+    task :export_lib do
+      load_cli_tasks
+      RHDL::CLI::Tasks::ExportTask.new(all: true, scope: 'lib').run
+    end
+
+    desc "[CLI] Export examples/ components to Verilog"
+    task :export_examples do
+      load_cli_tasks
+      RHDL::CLI::Tasks::ExportTask.new(all: true, scope: 'examples').run
+    end
+
+    desc "[CLI] Export Verilog files"
+    task :verilog do
+      load_cli_tasks
+      RHDL::CLI::Tasks::ExportTask.new(all: true, scope: 'lib').run
+    end
+
+    desc "[CLI] Clean all generated HDL files"
+    task :clean do
+      load_cli_tasks
+      RHDL::CLI::Tasks::ExportTask.new(clean: true).run
+    end
   end
 
-  desc "Run the Ink TUI with an ALU demo"
-  task alu: :build do
-    require_relative 'lib/rhdl'
+  desc "[CLI] Export all HDL (alias for cli:hdl:export)"
+  task hdl: 'cli:hdl:export'
 
-    puts "Starting RHDL Ink TUI with ALU demo..."
-    puts "=" * 50
-    puts
+  # ---------------------------------------------------------------------------
+  # Gate-Level Synthesis
+  # ---------------------------------------------------------------------------
+  namespace :gates do
+    desc "[CLI] Export all components to gate-level IR (JSON netlists)"
+    task :export do
+      load_cli_tasks
+      RHDL::CLI::Tasks::GatesTask.new(export: true).run
+    end
 
-    # Create ALU and supporting components
-    alu = RHDL::HDL::ALU.new('alu', width: 8)
-    acc = RHDL::HDL::Register.new('acc', width: 8)
+    desc "[CLI] Export simcpu datapath to gate-level"
+    task :simcpu do
+      load_cli_tasks
+      RHDL::CLI::Tasks::GatesTask.new(simcpu: true).run
+    end
 
-    # Connect ALU output to accumulator input
-    RHDL::HDL::SimComponent.connect(alu.outputs[:result], acc.inputs[:d])
+    desc "[CLI] Clean gate-level synthesis output"
+    task :clean do
+      load_cli_tasks
+      RHDL::CLI::Tasks::GatesTask.new(clean: true).run
+    end
 
-    # Create debug simulator
-    sim = RHDL::HDL::DebugSimulator.new
-    sim.add_component(alu)
-    sim.add_component(acc)
-
-    # Set initial values
-    alu.inputs[:a].set(0x42)
-    alu.inputs[:b].set(0x10)
-    alu.inputs[:op].set(0)  # ADD
-    acc.inputs[:rst].set(0)
-    acc.inputs[:en].set(1)
-
-    # Create and run Ink adapter
-    adapter = RHDL::HDL::InkAdapter.new(sim)
-    adapter.add_component(alu, signals: :all)
-    adapter.add_component(acc, signals: :all)
-    adapter.run
+    desc "[CLI] Show gate-level synthesis statistics"
+    task :stats do
+      load_cli_tasks
+      RHDL::CLI::Tasks::GatesTask.new(stats: true).run
+    end
   end
 
-  desc "Clean Ink TUI build artifacts"
-  task :clean do
-    load_cli_tasks
-    RHDL::CLI::Tasks::TuiTask.new(clean: true).run
+  desc "[CLI] Export gate-level synthesis (alias for cli:gates:export)"
+  task gates: 'cli:gates:export'
+
+  # ---------------------------------------------------------------------------
+  # TUI Debugger
+  # ---------------------------------------------------------------------------
+  namespace :tui do
+    desc "[CLI] Install Ink TUI dependencies"
+    task :install do
+      load_cli_tasks
+      RHDL::CLI::Tasks::TuiTask.new(install: true).run
+    end
+
+    desc "[CLI] Build Ink TUI (compile TypeScript)"
+    task :build do
+      load_cli_tasks
+      # Ensure deps are installed first
+      RHDL::CLI::Tasks::TuiTask.new.send(:ensure_tui_deps)
+      puts "Building Ink TUI..."
+      puts "=" * 50
+      Dir.chdir(RHDL::CLI::Config.tui_ink_dir) do
+        sh 'npm run build'
+      end
+      puts
+      puts "Ink TUI built successfully."
+    end
+
+    desc "[CLI] Run the Ink TUI with a demo simulation"
+    task :run do
+      load_cli_tasks
+      RHDL::CLI::Tasks::TuiTask.new(ink: true).run
+    end
+
+    desc "[CLI] Run the Ink TUI with an ALU demo"
+    task alu: :build do
+      require_relative 'lib/rhdl'
+
+      puts "Starting RHDL Ink TUI with ALU demo..."
+      puts "=" * 50
+      puts
+
+      # Create ALU and supporting components
+      alu = RHDL::HDL::ALU.new('alu', width: 8)
+      acc = RHDL::HDL::Register.new('acc', width: 8)
+
+      # Connect ALU output to accumulator input
+      RHDL::HDL::SimComponent.connect(alu.outputs[:result], acc.inputs[:d])
+
+      # Create debug simulator
+      sim = RHDL::HDL::DebugSimulator.new
+      sim.add_component(alu)
+      sim.add_component(acc)
+
+      # Set initial values
+      alu.inputs[:a].set(0x42)
+      alu.inputs[:b].set(0x10)
+      alu.inputs[:op].set(0)  # ADD
+      acc.inputs[:rst].set(0)
+      acc.inputs[:en].set(1)
+
+      # Create and run Ink adapter
+      adapter = RHDL::HDL::InkAdapter.new(sim)
+      adapter.add_component(alu, signals: :all)
+      adapter.add_component(acc, signals: :all)
+      adapter.run
+    end
+
+    desc "[CLI] List available components for TUI"
+    task :list do
+      load_cli_tasks
+      RHDL::CLI::Tasks::TuiTask.new(list: true).run
+    end
+
+    desc "[CLI] Clean Ink TUI build artifacts"
+    task :clean do
+      load_cli_tasks
+      RHDL::CLI::Tasks::TuiTask.new(clean: true).run
+    end
   end
+
+  desc "[CLI] Run Ink TUI (alias for cli:tui:run)"
+  task tui: 'cli:tui:run'
+
+  # ---------------------------------------------------------------------------
+  # Apple II Emulator
+  # ---------------------------------------------------------------------------
+  namespace :apple2 do
+    desc "[CLI] Assemble the mini monitor ROM"
+    task :build do
+      load_cli_tasks
+      RHDL::CLI::Tasks::Apple2Task.new(build: true).run
+    end
+
+    desc "[CLI] Run the Apple II emulator with the mini monitor"
+    task run: :build do
+      load_cli_tasks
+      RHDL::CLI::Tasks::Apple2Task.new(build: true, run: true).run
+    end
+
+    desc "[CLI] Run with AppleIIGo public domain ROM"
+    task :run_appleiigo do
+      load_cli_tasks
+      RHDL::CLI::Tasks::Apple2Task.new(appleiigo: true).run
+    end
+
+    desc "[CLI] Run the Apple II emulator demo (no ROM needed)"
+    task :demo do
+      load_cli_tasks
+      RHDL::CLI::Tasks::Apple2Task.new(demo: true).run
+    end
+
+    desc "[CLI] Run Apple II emulator with Ink TUI"
+    task :ink do
+      load_cli_tasks
+      RHDL::CLI::Tasks::Apple2Task.new(ink: true).run
+    end
+
+    desc "[CLI] Run Apple II emulator with Ink TUI (HDL mode)"
+    task :ink_hdl do
+      load_cli_tasks
+      RHDL::CLI::Tasks::Apple2Task.new(ink: true, hdl: true).run
+    end
+
+    desc "[CLI] Run Apple II with program file using Ink TUI"
+    task :ink_run, [:program] do |_, args|
+      unless args[:program]
+        puts "Usage: rake cli:apple2:ink_run[path/to/program.bin]"
+        exit 1
+      end
+      load_cli_tasks
+      RHDL::CLI::Tasks::Apple2Task.new(ink: true, program: args[:program]).run
+    end
+
+    desc "[CLI] Clean ROM output files"
+    task :clean do
+      load_cli_tasks
+      RHDL::CLI::Tasks::Apple2Task.new(clean: true).run
+    end
+  end
+
+  desc "[CLI] Build Apple II ROM (alias for cli:apple2:build)"
+  task apple2: 'cli:apple2:build'
+
+  # ---------------------------------------------------------------------------
+  # Combined Tasks
+  # ---------------------------------------------------------------------------
+  desc "[CLI] Generate all output files (diagrams + HDL exports)"
+  task generate_all: ['cli:diagrams:generate', 'cli:hdl:export']
+
+  desc "[CLI] Clean all generated files"
+  task clean_all: ['cli:diagrams:clean', 'cli:hdl:clean', 'cli:gates:clean']
+
+  desc "[CLI] Regenerate all output files (clean + generate)"
+  task regenerate: ['cli:clean_all', 'cli:generate_all']
 end
 
-desc "Run Ink TUI (alias for tui:run)"
-task tui: 'tui:run'
-
 # =============================================================================
-# Apple II TUI Tasks (using CLI Tasks)
+# Top-level Aliases (for convenience)
 # =============================================================================
 
-namespace :apple2 do
-  desc "Run Apple II emulator with Ink TUI"
-  task :ink do
-    load_cli_tasks
-    RHDL::CLI::Tasks::Apple2Task.new(ink: true).run
-  end
+desc "Run tests (alias for dev:spec)"
+task spec: 'dev:spec'
 
-  desc "Run Apple II emulator with Ink TUI (HDL mode)"
-  task :ink_hdl do
-    load_cli_tasks
-    RHDL::CLI::Tasks::Apple2Task.new(ink: true, hdl: true).run
-  end
-
-  desc "Run Apple II with program file using Ink TUI"
-  task :ink_run, [:program] do |_, args|
-    unless args[:program]
-      puts "Usage: rake apple2:ink_run[path/to/program.bin]"
-      exit 1
-    end
-    load_cli_tasks
-    RHDL::CLI::Tasks::Apple2Task.new(ink: true, program: args[:program]).run
-  end
-end
+desc "Run tests in parallel (alias for dev:pspec)"
+task pspec: 'dev:pspec'
