@@ -257,6 +257,8 @@ module RHDL
           exec_args << "-f" if options[:fast]
           exec_args += ["-s", options[:speed].to_s] if options[:speed]
           exec_args << "-g" if options[:green]
+          exec_args += ["--disk", options[:disk]] if options[:disk]
+          exec_args += ["--disk2", options[:disk2]] if options[:disk2]
         end
       end
     end

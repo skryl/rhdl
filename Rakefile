@@ -458,6 +458,17 @@ namespace :cli do
       RHDL::CLI::Tasks::Apple2Task.new(appleiigo: true).run
     end
 
+    desc "[CLI] Run with AppleIIGo ROM and disk image"
+    task :boot_disk, [:disk] do |_, args|
+      unless args[:disk]
+        puts "Usage: rake cli:apple2:boot_disk[path/to/disk.dsk]"
+        puts "Example: rake cli:apple2:boot_disk[examples/mos6502/software/disks/karateka.dsk]"
+        exit 1
+      end
+      load_cli_tasks
+      RHDL::CLI::Tasks::Apple2Task.new(appleiigo: true, disk: args[:disk]).run
+    end
+
     desc "[CLI] Run the Apple II emulator demo (no ROM needed)"
     task :demo do
       load_cli_tasks
