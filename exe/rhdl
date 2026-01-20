@@ -251,7 +251,9 @@ def handle_apple2(args)
     speed: nil,
     green: false,
     ink: false,
-    hdl: false
+    hdl: false,
+    disk: nil,
+    disk2: nil
   }
 
   parser = OptionParser.new do |opts|
@@ -266,6 +268,10 @@ def handle_apple2(args)
         rhdl apple2 --demo         Run emulator in demo mode (no ROM needed)
         rhdl apple2 --appleiigo    Run with AppleIIGo public domain ROM
         rhdl apple2 --clean        Clean ROM output files
+
+      Disk loading:
+        rhdl apple2 --appleiigo --disk path/to/disk.dsk
+        rhdl apple2 --rom ROM --disk disk1.dsk --disk2 disk2.dsk
 
       Ink TUI (React-based terminal UI):
         rhdl apple2 --ink          Run with Ink TUI (ISA mode, demo program)
@@ -289,6 +295,8 @@ def handle_apple2(args)
     opts.on('-g', '--green', 'Green phosphor screen effect') { options[:green] = true }
     opts.on('--ink', 'Use Ink (React-based) TUI renderer') { options[:ink] = true }
     opts.on('--hdl', 'Use HDL mode (cycle-accurate simulation)') { options[:hdl] = true }
+    opts.on('--disk FILE', 'Load disk image (.dsk) into drive 1') { |v| options[:disk] = v }
+    opts.on('--disk2 FILE', 'Load disk image (.dsk) into drive 2') { |v| options[:disk2] = v }
     opts.on('-h', '--help', 'Show this help') do
       puts opts
       exit 0
