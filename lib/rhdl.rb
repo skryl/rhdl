@@ -1,6 +1,11 @@
 require_relative "rhdl/version"
 require_relative "rhdl/dsl"
 require_relative "rhdl/codegen"
+
+# Load codegen DSL modules after codegen.rb (they depend on Export::IR)
+require_relative "rhdl/dsl/codegen"
+require_relative "rhdl/dsl/sequential_codegen"
+
 require 'active_support/core_ext/string/inflections'
 
 module RHDL

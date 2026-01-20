@@ -2,16 +2,16 @@
 
 # HDL Dual Port RAM Component
 # True Dual-Port RAM with two independent read/write ports
-# Synthesizable via MemoryDSL
+# Synthesizable via Memory
 
-require_relative '../../dsl/memory_dsl'
+require_relative '../../dsl/memory'
 
 module RHDL
   module HDL
     # True Dual-Port RAM with two independent read/write ports
     # Sequential write on rising clock edge, combinational read
     class DualPortRAM < Component
-      include RHDL::DSL::MemoryDSL
+      include RHDL::DSL::Memory
 
       input :clk
       input :we_a

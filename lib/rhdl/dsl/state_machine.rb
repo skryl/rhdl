@@ -5,7 +5,7 @@
 #
 # Example - Simple FSM:
 #   class TrafficLight < RHDL::Sim::SequentialComponent
-#     include RHDL::DSL::StateMachineDSL
+#     include RHDL::DSL::StateMachine
 #
 #     input :clk
 #     input :rst
@@ -40,7 +40,7 @@ require 'active_support/concern'
 
 module RHDL
   module DSL
-    module StateMachineDSL
+    module StateMachine
       extend ActiveSupport::Concern
 
       # State definition

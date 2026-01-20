@@ -2,16 +2,16 @@
 
 # HDL ROM Component
 # Read-Only Memory with enable
-# Synthesizable via MemoryDSL
+# Synthesizable via Memory
 
-require_relative '../../dsl/memory_dsl'
+require_relative '../../dsl/memory'
 
 module RHDL
   module HDL
     # ROM (Read-Only Memory)
     # Combinational read with enable - can be synthesized as LUT or block ROM
     class ROM < Component
-      include RHDL::DSL::MemoryDSL
+      include RHDL::DSL::Memory
 
       parameter :contents, default: []
 

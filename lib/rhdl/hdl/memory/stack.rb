@@ -2,9 +2,9 @@
 
 # HDL Stack Component
 # LIFO stack with push/pop operations
-# Synthesizable via MemoryDSL + Sequential DSL
+# Synthesizable via Memory + Sequential DSL
 
-require_relative '../../dsl/memory_dsl'
+require_relative '../../dsl/memory'
 require_relative '../../dsl/behavior'
 require_relative '../../dsl/sequential'
 
@@ -13,7 +13,7 @@ module RHDL
     # Stack (LIFO) with fixed depth
     # Combines memory for data and sequential logic for pointer
     class Stack < SequentialComponent
-      include RHDL::DSL::MemoryDSL
+      include RHDL::DSL::Memory
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 

@@ -5,7 +5,7 @@
 #
 # Example - Simple RAM:
 #   class RAM256x8 < RHDL::Sim::Component
-#     include RHDL::DSL::MemoryDSL
+#     include RHDL::DSL::Memory
 #
 #     input :clk
 #     input :we
@@ -21,7 +21,7 @@
 #
 # Example - Lookup Table (ROM):
 #   class InstructionDecoder < RHDL::Sim::Component
-#     include RHDL::DSL::MemoryDSL
+#     include RHDL::DSL::Memory
 #
 #     input :opcode, width: 8
 #     output :addr_mode, width: 4
@@ -47,7 +47,7 @@ require 'active_support/concern'
 
 module RHDL
   module DSL
-    module MemoryDSL
+    module Memory
       extend ActiveSupport::Concern
 
       # Memory definition for RAM/ROM
@@ -290,7 +290,7 @@ module RHDL
         end
 
         # Get signal value from inputs, outputs, or sequential state
-        # This allows MemoryDSL to work with register-based addresses
+        # This allows Memory to work with register-based addresses
         def signal_val(name)
           # Try input first
           if @inputs && @inputs[name]
