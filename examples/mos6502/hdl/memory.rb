@@ -1,5 +1,5 @@
 # MOS 6502 Memory Interface - Synthesizable DSL Version
-# Uses MemoryDSL for Verilog/VHDL export
+# Uses MemoryDSL for Verilog export
 # 64KB addressable memory with RAM and ROM regions
 
 require_relative '../../../lib/rhdl'

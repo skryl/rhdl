@@ -301,7 +301,7 @@ rhdl tui --list                          # List available components
 rhdl diagram --all                       # Generate all diagrams
 rhdl diagram RHDL::HDL::ALU --format svg # Single component diagram
 
-# Verilog/VHDL export
+# Verilog export
 rhdl export --all                        # Export all components
 rhdl export --lang verilog --out ./out RHDL::HDL::Counter
 
