@@ -1,7 +1,7 @@
 # Command/status panel
 
 module RHDL
-  module HDL
+  module TUI
     class StatusPanel < Panel
       attr_accessor :status_lines, :command_history
 

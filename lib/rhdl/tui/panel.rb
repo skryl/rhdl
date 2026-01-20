@@ -1,7 +1,7 @@
 # Terminal UI Panel base class
 
 module RHDL
-  module HDL
+  module TUI
     class Panel
       attr_accessor :x, :y, :width, :height, :title, :visible
 

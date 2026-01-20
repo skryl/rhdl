@@ -2,9 +2,9 @@
 # Enhanced simulator with debugging support
 
 module RHDL
-  module HDL
+  module Debug
     # Enhanced simulator with debugging support
-    class DebugSimulator < Simulator
+    class DebugSimulator < Sim::Simulator
       attr_reader :breakpoints, :waveform, :step_mode, :current_cycle
       attr_accessor :on_break, :on_step
 
@@ -22,7 +22,7 @@ module RHDL
 
       # Add a probe to track a signal
       def probe(wire_or_component, signal_name = nil)
-        wire = if wire_or_component.is_a?(Wire)
+        wire = if wire_or_component.is_a?(Sim::Wire)
           wire_or_component
         elsif signal_name
           wire_or_component.outputs[signal_name] ||
