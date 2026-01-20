@@ -21,8 +21,8 @@ module RHDL
     class << self
       # Behavior Verilog codegen
       def verilog(component, top_name: nil)
-        module_def = Lower.new(component, top_name: top_name).build
-        Verilog.generate(module_def)
+        module_def = Behavior::Lower.new(component, top_name: top_name).build
+        Behavior::Verilog.generate(module_def)
       end
       alias_method :to_verilog, :verilog
 
@@ -32,7 +32,7 @@ module RHDL
 
       # CIRCT FIRRTL codegen
       def circt(component, top_name: nil)
-        module_def = Lower.new(component, top_name: top_name).build
+        module_def = Behavior::Lower.new(component, top_name: top_name).build
         CIRCT::FIRRTL.generate(module_def)
       end
       alias_method :to_circt, :circt
@@ -65,9 +65,9 @@ module RHDL
           klass.included_modules.include?(RHDL::DSL) && klass != RHDL::Component
         end
 
-        # Also find HDL SimComponent subclasses with behavior blocks
+        # Also find HDL Component subclasses with behavior blocks
         hdl_components = ObjectSpace.each_object(Class).select do |klass|
-          klass < RHDL::HDL::SimComponent &&
+          klass < RHDL::Sim::Component &&
             klass.respond_to?(:behavior_defined?) &&
             klass.behavior_defined?
         end
@@ -140,6 +140,11 @@ module RHDL
         parts.map(&:underscore).join('/')
       end
     end
+
+    # Backwards compatibility aliases for old namespace
+    IR = Behavior::IR
+    Verilog = Behavior::Verilog
+    Lower = Behavior::Lower
   end
 
   # Backwards compatibility alias

@@ -3,7 +3,7 @@
 
 module RHDL
   module HDL
-    class HalfAdder < SimComponent
+    class HalfAdder < Component
       input :a
       input :b
       output :sum

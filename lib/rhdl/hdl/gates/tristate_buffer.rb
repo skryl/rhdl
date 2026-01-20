@@ -3,7 +3,7 @@
 
 module RHDL
   module HDL
-    class TristateBuffer < SimComponent
+    class TristateBuffer < Component
       input :a
       input :en
       output :y

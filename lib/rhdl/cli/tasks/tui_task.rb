@@ -76,11 +76,11 @@ module RHDL
           dff = RHDL::HDL::DFlipFlop.new('register')
           counter = RHDL::HDL::Counter.new('counter', width: 8)
 
-          RHDL::HDL::SimComponent.connect(dff.outputs[:q], not_gate.inputs[:a])
-          RHDL::HDL::SimComponent.connect(not_gate.outputs[:y], dff.inputs[:d])
+          RHDL::Sim::Component.connect(dff.outputs[:q], not_gate.inputs[:a])
+          RHDL::Sim::Component.connect(not_gate.outputs[:y], dff.inputs[:d])
 
           # Create debug simulator
-          sim = RHDL::HDL::DebugSimulator.new
+          sim = RHDL::Debug::DebugSimulator.new
           sim.add_component(not_gate)
           sim.add_component(dff)
           sim.add_component(counter)
@@ -123,10 +123,10 @@ module RHDL
                       end
 
           # Create debug simulator
-          simulator = RHDL::HDL::DebugSimulator.new
+          simulator = RHDL::Debug::DebugSimulator.new
 
           # Create TUI
-          tui = RHDL::HDL::SimulatorTUI.new(simulator)
+          tui = RHDL::TUI::SimulatorTUI.new(simulator)
 
           # Add component with signal options
           tui.add_component(component, signals: options[:signals])

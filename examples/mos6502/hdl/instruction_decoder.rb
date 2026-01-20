@@ -7,7 +7,7 @@ require_relative '../../../lib/rhdl/dsl/behavior'
 require_relative 'alu'
 
 module MOS6502
-  class InstructionDecoder < RHDL::HDL::SimComponent
+  class InstructionDecoder < RHDL::HDL::Component
     include RHDL::DSL::Behavior
     # Instruction types
     TYPE_ALU       = 0x00

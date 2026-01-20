@@ -3,7 +3,7 @@
 
 module RHDL
   module HDL
-    class Buffer < SimComponent
+    class Buffer < Component
       input :a
       output :y
 

@@ -7,7 +7,7 @@ require 'rhdl'
 RSpec.describe 'Behavior DSL' do
   describe 'Basic combinational logic' do
     # Simple AND gate using behavior block
-    class BehaviorAndGate < RHDL::HDL::SimComponent
+    class BehaviorAndGate < RHDL::HDL::Component
       input :a
       input :b
       output :y
@@ -36,7 +36,7 @@ RSpec.describe 'Behavior DSL' do
   end
 
   describe 'OR gate' do
-    class BehaviorOrGate < RHDL::HDL::SimComponent
+    class BehaviorOrGate < RHDL::HDL::Component
       input :a
       input :b
       output :y
@@ -59,7 +59,7 @@ RSpec.describe 'Behavior DSL' do
   end
 
   describe 'XOR gate' do
-    class BehaviorXorGate < RHDL::HDL::SimComponent
+    class BehaviorXorGate < RHDL::HDL::Component
       input :a
       input :b
       output :y
@@ -82,7 +82,7 @@ RSpec.describe 'Behavior DSL' do
   end
 
   describe 'NOT gate' do
-    class BehaviorNotGate < RHDL::HDL::SimComponent
+    class BehaviorNotGate < RHDL::HDL::Component
       input :a
       output :y
 
@@ -105,7 +105,7 @@ RSpec.describe 'Behavior DSL' do
   end
 
   describe 'Full adder' do
-    class BehaviorFullAdder < RHDL::HDL::SimComponent
+    class BehaviorFullAdder < RHDL::HDL::Component
       input :a
       input :b
       input :cin
@@ -151,7 +151,7 @@ RSpec.describe 'Behavior DSL' do
   end
 
   describe 'Multi-bit operations' do
-    class Behavior8BitAdder < RHDL::HDL::SimComponent
+    class Behavior8BitAdder < RHDL::HDL::Component
       input :a, width: 8
       input :b, width: 8
       output :sum, width: 8
@@ -191,7 +191,7 @@ RSpec.describe 'Behavior DSL' do
   end
 
   describe 'Bitwise operations on multi-bit values' do
-    class Behavior8BitAnd < RHDL::HDL::SimComponent
+    class Behavior8BitAnd < RHDL::HDL::Component
       input :a, width: 8
       input :b, width: 8
       output :y, width: 8
@@ -217,7 +217,7 @@ RSpec.describe 'Behavior DSL' do
   end
 
   describe 'Comparison operations' do
-    class BehaviorZeroDetect < RHDL::HDL::SimComponent
+    class BehaviorZeroDetect < RHDL::HDL::Component
       input :a, width: 8
       output :is_zero
 
@@ -244,7 +244,7 @@ RSpec.describe 'Behavior DSL' do
   end
 
   describe 'Shift operations' do
-    class BehaviorShifter < RHDL::HDL::SimComponent
+    class BehaviorShifter < RHDL::HDL::Component
       input :a, width: 8
       input :amount, width: 3
       output :left, width: 8
@@ -274,7 +274,7 @@ RSpec.describe 'Behavior DSL' do
   end
 
   describe 'Mux helper' do
-    class BehaviorMux < RHDL::HDL::SimComponent
+    class BehaviorMux < RHDL::HDL::Component
       input :sel
       input :a, width: 8
       input :b, width: 8
@@ -307,7 +307,7 @@ RSpec.describe 'Behavior DSL' do
   end
 
   describe 'Bit selection' do
-    class BehaviorBitSelect < RHDL::HDL::SimComponent
+    class BehaviorBitSelect < RHDL::HDL::Component
       input :a, width: 8
       output :bit0
       output :bit7
@@ -334,7 +334,7 @@ RSpec.describe 'Behavior DSL' do
   end
 
   describe 'Bit slice' do
-    class BehaviorBitSlice < RHDL::HDL::SimComponent
+    class BehaviorBitSlice < RHDL::HDL::Component
       input :a, width: 8
       output :low, width: 4
       output :high, width: 4
@@ -357,7 +357,7 @@ RSpec.describe 'Behavior DSL' do
 
   describe 'Backwards compatibility' do
     # Test that existing components with propagate() still work
-    class TraditionalGate < RHDL::HDL::SimComponent
+    class TraditionalGate < RHDL::HDL::Component
       def setup_ports
         input :a
         input :b
@@ -386,7 +386,7 @@ RSpec.describe 'Behavior DSL' do
 
   describe 'Mixed port definitions' do
     # Test that class-level port_* and instance-level input/output work together
-    class MixedPortComponent < RHDL::HDL::SimComponent
+    class MixedPortComponent < RHDL::HDL::Component
       input :a, width: 8
       input :b, width: 8
       output :y, width: 8

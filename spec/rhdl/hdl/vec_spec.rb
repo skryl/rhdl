@@ -1,7 +1,7 @@
 require 'spec_helper'
 
 # Component using internal Vec
-class TestVecInternal < RHDL::HDL::SimComponent
+class TestVecInternal < RHDL::HDL::Component
   parameter :depth, default: 4
   parameter :width, default: 8
 
@@ -15,7 +15,7 @@ class TestVecInternal < RHDL::HDL::SimComponent
 end
 
 # Component using input Vec
-class TestVecInput < RHDL::HDL::SimComponent
+class TestVecInput < RHDL::HDL::Component
   input_vec :data_in, count: 4, width: 8
   input :sel, width: 2
   output :data_out, width: 8
@@ -26,7 +26,7 @@ class TestVecInput < RHDL::HDL::SimComponent
 end
 
 # Component using output Vec
-class TestVecOutput < RHDL::HDL::SimComponent
+class TestVecOutput < RHDL::HDL::Component
   input :data_in, width: 8
   input :sel, width: 2
   input :enable
@@ -43,7 +43,7 @@ end
 
 # Component demonstrating hardware-indexed Vec read
 # Note: Vec name cannot be 'inputs' as it conflicts with @inputs hash
-class TestVecMux < RHDL::HDL::SimComponent
+class TestVecMux < RHDL::HDL::Component
   parameter :depth, default: 8
 
   input_vec :data_inputs, count: 8, width: 8
@@ -56,7 +56,7 @@ class TestVecMux < RHDL::HDL::SimComponent
 end
 
 # Component with parameterized Vec
-class TestVecParam < RHDL::HDL::SimComponent
+class TestVecParam < RHDL::HDL::Component
   parameter :depth, default: 16
   parameter :width, default: 32
 
@@ -66,7 +66,7 @@ class TestVecParam < RHDL::HDL::SimComponent
   vec :memory, count: :depth, width: :width
 end
 
-RSpec.describe RHDL::HDL::Vec do
+RSpec.describe RHDL::Sim::Vec do
   describe 'Vec class' do
     it 'creates a Vec with correct attributes' do
       component = Object.new
@@ -76,7 +76,7 @@ RSpec.describe RHDL::HDL::Vec do
       component.define_singleton_method(:internal_signals) { {} }
       component.define_singleton_method(:propagate) { }
 
-      vec = RHDL::HDL::Vec.new(:test_vec, count: 4, width: 8, component: component)
+      vec = RHDL::Sim::Vec.new(:test_vec, count: 4, width: 8, component: component)
 
       expect(vec.count).to eq(4)
       expect(vec.element_width).to eq(8)
