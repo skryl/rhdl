@@ -5,7 +5,8 @@ require_relative "ir"
 
 module RHDL
   module Codegen
-    class Lower
+    module Behavior
+      class Lower
       def initialize(component_class, top_name: nil)
         @component_class = component_class
         @top_name = top_name
@@ -267,5 +268,6 @@ module RHDL
         end
       end
     end
+  end
   end
 end
