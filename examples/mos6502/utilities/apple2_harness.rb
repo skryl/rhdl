@@ -115,23 +115,26 @@ module Apple2Harness
   # ISA-level runner using fast instruction-level simulation
   # Provides the same interface as Runner but uses ISASimulator for performance
   #
-  # Note: The native Rust implementation cannot use external Ruby memory objects,
-  # so we always use the pure Ruby ISASimulator for Apple II (which needs Apple2Bus).
-  # For benchmarks and simple programs without memory-mapped I/O, use
-  # MOS6502::ISASimulatorNative directly with load_program().
+  # Uses the native Rust implementation when available, which calls back to Ruby
+  # for memory operations (supporting memory-mapped I/O via Apple2Bus).
+  # Falls back to pure Ruby ISASimulator if native extension is not available.
   class ISARunner
     attr_reader :cpu, :bus
 
     def initialize
       @bus = MOS6502::Apple2Bus.new("apple2_bus")
-      # Apple II requires external memory (Apple2Bus) for memory-mapped I/O
-      # The pure Ruby ISASimulator supports this, native Rust does not
-      @cpu = MOS6502::ISASimulator.new(@bus)
+      # Use native Rust implementation with external memory (calls back to Ruby for read/write)
+      # Falls back to pure Ruby if native extension is not available
+      if MOS6502::NATIVE_AVAILABLE
+        @cpu = MOS6502::ISASimulatorNative.new(@bus)
+      else
+        @cpu = MOS6502::ISASimulator.new(@bus)
+      end
     end
 
-    # Check if using native implementation (always false for Apple II)
+    # Check if using native implementation
     def native?
-      false
+      @cpu.respond_to?(:native?) && @cpu.native?
     end
 
     def load_rom(bytes, base_addr:)
@@ -151,17 +154,9 @@ module Apple2Harness
     end
 
     def reset
-      # Read reset vector from bus
-      lo = @bus.read(MOS6502::ISASimulator::RESET_VECTOR)
-      hi = @bus.read(MOS6502::ISASimulator::RESET_VECTOR + 1)
-      @cpu.pc = (hi << 8) | lo
-      @cpu.instance_variable_set(:@sp, 0xFD)
-      @cpu.instance_variable_set(:@p, 0x24)
-      @cpu.instance_variable_set(:@a, 0)
-      @cpu.instance_variable_set(:@x, 0)
-      @cpu.instance_variable_set(:@y, 0)
-      @cpu.instance_variable_set(:@cycles, 0)
-      @cpu.instance_variable_set(:@halted, false)
+      # Both native and Ruby implementations have a reset method
+      # that reads the reset vector from memory and initializes registers
+      @cpu.reset
     end
 
     def run_steps(steps)
