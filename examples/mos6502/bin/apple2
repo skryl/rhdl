@@ -90,15 +90,17 @@ class Apple2Terminal
     end
 
     # Calculate padding to center the text display
-    # Debug mode adds 3 status lines, non-debug adds 1 for disk loading indicator
-    display_height = @debug ? DISPLAY_HEIGHT + 3 : DISPLAY_HEIGHT
+    # Debug mode adds bordered debug window: 1 padding + 5 lines (border + 3 content + border)
+    # Non-debug adds 1 for disk loading indicator
+    display_height = @debug ? DISPLAY_HEIGHT + 6 : DISPLAY_HEIGHT
     @pad_top = [(@term_rows - display_height) / 2, 0].max
     @pad_left = [(@term_cols - DISPLAY_WIDTH) / 2, 0].max
 
     # Calculate padding for hires display
     # Hires output height is proportional: (192/4) * (@hires_width / (280/2)) = 48 * @hires_width / 140
-    # Debug mode adds 3 status lines, non-debug adds 1 for disk loading indicator
-    hires_display_height = (HIRES_HEIGHT * @hires_width / HIRES_WIDTH) + (@debug ? 4 : 1)
+    # Debug mode adds bordered debug window: 1 padding + 5 lines (border + 3 content + border)
+    # Non-debug adds 1 for disk loading indicator
+    hires_display_height = (HIRES_HEIGHT * @hires_width / HIRES_WIDTH) + (@debug ? 7 : 1)
     hires_display_width = @hires_width
     @hires_pad_top = [(@term_rows - hires_display_height) / 2, 0].max
     @hires_pad_left = [(@term_cols - hires_display_width) / 2, 0].max
@@ -215,7 +217,7 @@ class Apple2Terminal
 
     if @runner.halted?
       # Position halted message below the display (after debug and disk loading lines)
-      halt_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 4 : 2)
+      halt_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 7 : 2)
       print move_cursor(halt_row, @pad_left + 1)
       puts "CPU HALTED at PC=$#{@runner.cpu_state[:pc].to_s(16).upcase.rjust(4, '0')}"
       print move_cursor(halt_row + 1, @pad_left + 1)
@@ -307,9 +309,14 @@ class Apple2Terminal
 
     output << NORMAL_VIDEO if @green_screen
 
-    # Status line below graphics (centered)
-    status_row = @hires_pad_top + hires_lines.length + 1
+    # Debug window (bordered, with padding above)
     if @debug
+      # Debug window width matches hires display width
+      debug_width = @hires_width - 2  # Account for border chars
+
+      # Add 1 line padding between hires display and debug window
+      debug_row = @hires_pad_top + hires_lines.length + 2
+
       state = @runner.cpu_state
       dc = @runner.bus.disk_controller
       sim_type = (state[:simulator_type] || 'unknown').to_s.upcase
@@ -318,26 +325,36 @@ class Apple2Terminal
       line1 = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X [HIRES]",
                      state[:pc], state[:a], state[:x], state[:y],
                      state[:sp], state[:p])
-      output << move_cursor(status_row, @hires_pad_left + 1)
-      output << line1
-      status_row += 1
 
       # Line 2: Sim type / cycles / speed / uptime
       line2 = format("Sim:%-6s Cyc:%s %s %.1ffps Up:%s",
                      sim_type, format_cycles(state[:cycles]),
                      format_hz(@current_hz), @fps,
                      format_uptime(@start_time))
-      output << move_cursor(status_row, @hires_pad_left + 1)
-      output << line2
-      status_row += 1
 
       # Line 3: Disk IO / keyboard IO
       line3 = format("Disk:T%02d %s | Key:%-3s",
                      dc.track, dc.motor_on ? "ON " : "OFF",
                      format_key(@last_key))
-      output << move_cursor(status_row, @hires_pad_left + 1)
-      output << line3
+
+      # Pad/truncate lines to fit within border
+      line1 = line1.ljust(debug_width)[0, debug_width]
+      line2 = line2.ljust(debug_width)[0, debug_width]
+      line3 = line3.ljust(debug_width)[0, debug_width]
+
+      # Draw debug window with border
+      output << move_cursor(debug_row, @hires_pad_left + 1)
+      output << "+" << ("-" * debug_width) << "+"
+      output << move_cursor(debug_row + 1, @hires_pad_left + 1)
+      output << "|" << line1 << "|"
+      output << move_cursor(debug_row + 2, @hires_pad_left + 1)
+      output << "|" << line2 << "|"
+      output << move_cursor(debug_row + 3, @hires_pad_left + 1)
+      output << "|" << line3 << "|"
+      output << move_cursor(debug_row + 4, @hires_pad_left + 1)
+      output << "+" << ("-" * debug_width) << "+"
     elsif disk_motor_on?
+      status_row = @hires_pad_top + hires_lines.length + 1
       output << move_cursor(status_row, @hires_pad_left + 1)
       output << "DISK LOADING..."
     end
@@ -385,9 +402,11 @@ class Apple2Terminal
 
     output << NORMAL_VIDEO if @green_screen
 
-    # Status line (centered below the display)
-    status_row = @pad_top + DISPLAY_HEIGHT + 1
+    # Debug window (bordered, with padding above)
     if @debug
+      # Add 1 line padding between screen and debug window
+      debug_row = @pad_top + DISPLAY_HEIGHT + 2
+
       state = @runner.cpu_state
       dc = @runner.bus.disk_controller
       mode = @runner.bus.display_mode
@@ -397,30 +416,39 @@ class Apple2Terminal
       line1 = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X",
                      state[:pc], state[:a], state[:x], state[:y],
                      state[:sp], state[:p])
-      output << move_cursor(status_row, @pad_left + 1)
-      output << line1
-      status_row += 1
 
       # Line 2: Sim type / cycles / speed / uptime
       line2 = format("Sim:%-6s Cyc:%s %s %.1ffps Up:%s",
                      sim_type, format_cycles(state[:cycles]),
                      format_hz(@current_hz), @fps,
                      format_uptime(@start_time))
-      output << move_cursor(status_row, @pad_left + 1)
-      output << line2
-      status_row += 1
 
       # Line 3: Disk IO / keyboard IO / video mode
       line3 = format("Disk:T%02d %s | Key:%-3s | %s",
                      dc.track, dc.motor_on ? "ON " : "OFF",
                      format_key(@last_key),
                      mode.to_s.upcase)
-      output << move_cursor(status_row, @pad_left + 1)
-      output << line3
-      status_row += 1
+
+      # Pad/truncate lines to fit within border
+      line1 = line1.ljust(SCREEN_COLS)[0, SCREEN_COLS]
+      line2 = line2.ljust(SCREEN_COLS)[0, SCREEN_COLS]
+      line3 = line3.ljust(SCREEN_COLS)[0, SCREEN_COLS]
+
+      # Draw debug window with border
+      output << move_cursor(debug_row, @pad_left + 1)
+      output << "+" << ("-" * SCREEN_COLS) << "+"
+      output << move_cursor(debug_row + 1, @pad_left + 1)
+      output << "|" << line1 << "|"
+      output << move_cursor(debug_row + 2, @pad_left + 1)
+      output << "|" << line2 << "|"
+      output << move_cursor(debug_row + 3, @pad_left + 1)
+      output << "|" << line3 << "|"
+      output << move_cursor(debug_row + 4, @pad_left + 1)
+      output << "+" << ("-" * SCREEN_COLS) << "+"
     end
 
     # Show "DISK LOADING..." when disk motor is on (non-debug mode)
+    status_row = @pad_top + DISPLAY_HEIGHT + 1
     if disk_motor_on? && !@debug
       output << move_cursor(status_row, @pad_left + 1)
       output << "DISK LOADING..."
@@ -521,8 +549,8 @@ class Apple2Terminal
     print SHOW_CURSOR
     print NORMAL_VIDEO
     # Position exit message below the display area
-    # Account for debug lines (3) and disk loading line
-    exit_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 5 : 3)
+    # Account for bordered debug window (5 lines) + padding (1 line) + disk loading line
+    exit_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 8 : 3)
     print move_cursor(exit_row, 1)
     puts "Apple ][ emulator terminated."
   end
