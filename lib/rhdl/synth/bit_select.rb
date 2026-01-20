@@ -13,7 +13,7 @@ module RHDL
       end
 
       def to_ir
-        RHDL::Codegen::IR::Slice.new(base: @base.to_ir, range: @index..@index, width: 1)
+        RHDL::Codegen::Behavior::IR::Slice.new(base: @base.to_ir, range: @index..@index, width: 1)
       end
     end
   end
