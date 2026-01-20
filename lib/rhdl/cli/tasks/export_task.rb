@@ -6,7 +6,7 @@ require_relative '../config'
 module RHDL
   module CLI
     module Tasks
-      # Task for exporting HDL components to Verilog/VHDL
+      # Task for exporting HDL components to Verilog
       class ExportTask < Task
         def run
           if options[:clean]
@@ -84,18 +84,13 @@ module RHDL
           component_class = component_ref.split("::").inject(Object) { |mod, name| mod.const_get(name) }
           ensure_dir(out_dir)
 
-          case lang
-          when "verilog"
-            top_name = options[:top] || component_class.name.split("::").last.underscore
-            output_path = File.join(out_dir, "#{top_name}.v")
-            RHDL::Export.write_verilog(component_class, path: output_path, top_name: options[:top])
-          when "vhdl"
-            top_name = options[:top] || component_class.name.split("::").last.underscore
-            output_path = File.join(out_dir, "#{top_name}.vhd")
-            RHDL::Export.write_vhdl(component_class, path: output_path, top_name: options[:top])
-          else
-            raise ArgumentError, "Unknown language: #{lang}"
+          unless lang == "verilog"
+            raise ArgumentError, "Unknown language: #{lang}. Only 'verilog' is supported."
           end
+
+          top_name = options[:top] || component_class.name.split("::").last.underscore
+          output_path = File.join(out_dir, "#{top_name}.v")
+          RHDL::Export.write_verilog(component_class, path: output_path, top_name: options[:top])
 
           puts "Wrote #{lang} to #{out_dir}"
         end
