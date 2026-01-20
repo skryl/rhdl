@@ -2,15 +2,15 @@
 
 require 'spec_helper'
 
-RSpec.describe RHDL::HDL::DebugSimulator do
-  let(:sim) { RHDL::HDL::DebugSimulator.new }
+RSpec.describe RHDL::Debug::DebugSimulator do
+  let(:sim) { RHDL::Debug::DebugSimulator.new }
   let(:counter) { RHDL::HDL::Counter.new("counter", width: 4) }
-  let(:clock) { RHDL::HDL::Clock.new("clk") }
+  let(:clock) { RHDL::Sim::Clock.new("clk") }
 
   before do
     sim.add_component(counter)
     sim.add_clock(clock)
-    RHDL::HDL::SimComponent.connect(clock, counter.inputs[:clk])
+    RHDL::Sim::Component.connect(clock, counter.inputs[:clk])
     counter.set_input(:rst, 0)
     counter.set_input(:en, 1)
     counter.set_input(:up, 1)
@@ -19,7 +19,7 @@ RSpec.describe RHDL::HDL::DebugSimulator do
 
   it 'adds probes to signals' do
     probe = sim.probe(counter, :q)
-    expect(probe).to be_a(RHDL::HDL::SignalProbe)
+    expect(probe).to be_a(RHDL::Debug::SignalProbe)
     expect(sim.waveform.probes).not_to be_empty
   end
 
@@ -33,7 +33,7 @@ RSpec.describe RHDL::HDL::DebugSimulator do
 
   it 'adds watchpoints' do
     wp = sim.watch(counter.outputs[:q], type: :change)
-    expect(wp).to be_a(RHDL::HDL::Watchpoint)
+    expect(wp).to be_a(RHDL::Debug::Watchpoint)
     expect(sim.breakpoints).to include(wp)
   end
 
@@ -121,13 +121,13 @@ RSpec.describe RHDL::HDL::DebugSimulator do
 
   describe 'Integration test' do
     it 'captures complete simulation with probes and breakpoints' do
-      sim = RHDL::HDL::DebugSimulator.new
-      clock = RHDL::HDL::Clock.new("clk")
+      sim = RHDL::Debug::DebugSimulator.new
+      clock = RHDL::Sim::Clock.new("clk")
       counter = RHDL::HDL::Counter.new("cnt", width: 4)
 
       sim.add_clock(clock)
       sim.add_component(counter)
-      RHDL::HDL::SimComponent.connect(clock, counter.inputs[:clk])
+      RHDL::Sim::Component.connect(clock, counter.inputs[:clk])
 
       counter.set_input(:rst, 0)
       counter.set_input(:en, 1)

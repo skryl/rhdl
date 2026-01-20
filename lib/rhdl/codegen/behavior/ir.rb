@@ -2,7 +2,8 @@
 
 module RHDL
   module Codegen
-    module IR
+    module Behavior
+      module IR
       class ModuleDef
         attr_reader :name, :ports, :nets, :regs, :assigns, :processes, :reg_ports, :instances,
                     :memories, :write_ports, :parameters
@@ -321,4 +322,5 @@ module RHDL
       end
     end
   end
+end
 end

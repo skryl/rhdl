@@ -1,13 +1,13 @@
 require 'spec_helper'
 
 # Test Bundle definitions
-class TestValidBundle < RHDL::HDL::Bundle
+class TestValidBundle < RHDL::Sim::Bundle
   field :data, width: 8, direction: :output
   field :valid, width: 1, direction: :output
   field :ready, width: 1, direction: :input
 end
 
-class TestAxiLiteWrite < RHDL::HDL::Bundle
+class TestAxiLiteWrite < RHDL::Sim::Bundle
   field :awaddr, width: 32, direction: :output
   field :awvalid, width: 1, direction: :output
   field :awready, width: 1, direction: :input
@@ -17,7 +17,7 @@ class TestAxiLiteWrite < RHDL::HDL::Bundle
 end
 
 # Component using input bundle (producer)
-class TestBundleProducer < RHDL::HDL::SimComponent
+class TestBundleProducer < RHDL::HDL::Component
   input :clk
   input :enable
   input :data_in, width: 8
@@ -30,7 +30,7 @@ class TestBundleProducer < RHDL::HDL::SimComponent
 end
 
 # Component using output bundle (consumer, flipped)
-class TestBundleConsumer < RHDL::HDL::SimComponent
+class TestBundleConsumer < RHDL::HDL::Component
   input :clk
   output :data_out, width: 8
   output :data_valid
@@ -44,7 +44,7 @@ class TestBundleConsumer < RHDL::HDL::SimComponent
 end
 
 # Component using bundle with explicit flipped: false
-class TestBundleProducerExplicit < RHDL::HDL::SimComponent
+class TestBundleProducerExplicit < RHDL::HDL::Component
   input :data_in, width: 8
   input :valid_in
   output_bundle :out_port, TestValidBundle, flipped: false
@@ -55,7 +55,7 @@ class TestBundleProducerExplicit < RHDL::HDL::SimComponent
   end
 end
 
-RSpec.describe RHDL::HDL::Bundle do
+RSpec.describe RHDL::Sim::Bundle do
   describe 'Bundle class definition' do
     it 'defines fields with correct attributes' do
       expect(TestValidBundle.fields.length).to eq(3)
@@ -79,7 +79,7 @@ RSpec.describe RHDL::HDL::Bundle do
 
     it 'supports flipped accessor' do
       flipped = TestValidBundle.flipped
-      expect(flipped).to be_a(RHDL::HDL::FlippedBundle)
+      expect(flipped).to be_a(RHDL::Sim::FlippedBundle)
       expect(flipped.bundle_class).to eq(TestValidBundle)
     end
   end
@@ -94,13 +94,13 @@ RSpec.describe RHDL::HDL::Bundle do
 
     it 'creates flipped Bundle instances' do
       instance = flipped.new(:test_port)
-      expect(instance).to be_a(RHDL::HDL::Bundle)
+      expect(instance).to be_a(RHDL::Sim::Bundle)
       expect(instance.flipped).to be(true)
     end
   end
 
   describe 'Bundle instance' do
-    let(:bundle) { RHDL::HDL::Bundle.new(:test, TestValidBundle) }
+    let(:bundle) { RHDL::Sim::Bundle.new(:test, TestValidBundle) }
 
     it 'has correct field directions (not flipped)' do
       expect(bundle.field_direction(:data)).to eq(:output)
@@ -119,7 +119,7 @@ RSpec.describe RHDL::HDL::Bundle do
   end
 
   describe 'Flipped Bundle instance' do
-    let(:bundle) { RHDL::HDL::Bundle.new(:test, TestValidBundle, flipped: true) }
+    let(:bundle) { RHDL::Sim::Bundle.new(:test, TestValidBundle, flipped: true) }
 
     it 'reverses field directions' do
       expect(bundle.field_direction(:data)).to eq(:input)
@@ -138,7 +138,7 @@ RSpec.describe RHDL::HDL::Bundle do
   end
 end
 
-RSpec.describe 'Bundle in SimComponent' do
+RSpec.describe 'Bundle in Component' do
   describe 'input_bundle' do
     let(:producer) { TestBundleProducer.new('producer') }
 

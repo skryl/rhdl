@@ -4,7 +4,7 @@
 module RHDL
   module HDL
     # Zero Extender - extends a narrower value with zeros
-    class ZeroExtend < SimComponent
+    class ZeroExtend < Component
       parameter :in_width, default: 8
       parameter :out_width, default: 16
 

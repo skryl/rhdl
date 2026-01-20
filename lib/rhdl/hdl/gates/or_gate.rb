@@ -3,7 +3,7 @@
 
 module RHDL
   module HDL
-    class OrGate < SimComponent
+    class OrGate < Component
       input :a0
       input :a1
       output :y

@@ -7,7 +7,7 @@ require_relative '../../../lib/rhdl/dsl/behavior'
 require_relative 'constants'
 
 module RISCV
-  class Decoder < RHDL::HDL::SimComponent
+  class Decoder < RHDL::HDL::Component
     include RHDL::DSL::Behavior
 
     input :inst, width: 32      # Full instruction

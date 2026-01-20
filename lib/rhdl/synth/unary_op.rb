@@ -13,7 +13,7 @@ module RHDL
       end
 
       def to_ir
-        RHDL::Codegen::IR::UnaryOp.new(op: @op, operand: @operand.to_ir, width: @width)
+        RHDL::Codegen::Behavior::IR::UnaryOp.new(op: @op, operand: @operand.to_ir, width: @width)
       end
     end
   end

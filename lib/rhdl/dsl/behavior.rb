@@ -1093,11 +1093,11 @@ module RHDL
         def behavior(**options, &block)
           @_behavior_block = BehaviorBlock.new(block, **options)
 
-          # Define propagate method if this is a SimComponent
+          # Define propagate method if this is a Component
           # BUT only if sequential is NOT defined (sequential handles its own propagate
           # and will call execute_behavior_for_simulation itself)
           sequential_block_defined = respond_to?(:_sequential_block) && !_sequential_block.nil?
-          if ancestors.include?(RHDL::HDL::SimComponent) && !sequential_block_defined
+          if ancestors.include?(RHDL::Sim::Component) && !sequential_block_defined
             define_method(:propagate) do
               # Two-phase propagation to handle feedback between behavior and subcomponents:
               #

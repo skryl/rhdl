@@ -3,7 +3,7 @@
 require_relative '../../../lib/rhdl/hdl'
 
 module MOS6502
-  class Apple2Bus < RHDL::HDL::SimComponent
+  class Apple2Bus < RHDL::HDL::Component
     IO_PAGE_START = 0xC000
     IO_PAGE_END = 0xC0FF
 

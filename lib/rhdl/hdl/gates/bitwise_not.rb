@@ -3,7 +3,7 @@
 
 module RHDL
   module HDL
-    class BitwiseNot < SimComponent
+    class BitwiseNot < Component
       parameter :width, default: 8
 
       input :a, width: :width

@@ -3,7 +3,7 @@
 
 module RHDL
   module HDL
-    class FullAdder < SimComponent
+    class FullAdder < Component
       input :a
       input :b
       input :cin

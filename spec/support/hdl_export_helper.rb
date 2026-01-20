@@ -5,14 +5,14 @@ module HdlExportHelper
   module_function
 
   def build_vectors(ref_class, cycles:, clocked:, input_builder:)
-    sim = RHDL::HDL::Simulator.new
+    sim = RHDL::Sim::Simulator.new
     component = ref_class.new(:uut)
     sim.add_component(component)
 
     if clocked
-      clock = RHDL::HDL::Clock.new(:clk)
+      clock = RHDL::Sim::Clock.new(:clk)
       sim.add_clock(clock)
-      RHDL::HDL::SimComponent.connect(clock, component.inputs[:clk])
+      RHDL::Sim::Component.connect(clock, component.inputs[:clk])
     end
 
     input_vectors = []

@@ -32,7 +32,7 @@
 #   end
 #
 # Example - ALU with case:
-#   class ALU < SimComponent
+#   class ALU < Component
 #     input :a, width: 8
 #     input :b, width: 8
 #     input :op, width: 4

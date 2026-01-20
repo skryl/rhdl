@@ -4,7 +4,7 @@
 module RHDL
   module HDL
     # 4-to-1 Multiplexer
-    class Mux4 < SimComponent
+    class Mux4 < Component
       parameter :width, default: 1
 
       input :a, width: :width

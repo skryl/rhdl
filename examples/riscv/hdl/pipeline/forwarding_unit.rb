@@ -15,7 +15,7 @@ module RISCV
       MEM_WB  = 2  # Forward from MEM/WB (memory or ALU result)
     end
 
-    class ForwardingUnit < RHDL::HDL::SimComponent
+    class ForwardingUnit < RHDL::HDL::Component
       include RHDL::DSL::Behavior
 
       # Source registers in EX stage (from ID/EX)

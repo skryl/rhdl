@@ -8,7 +8,6 @@ require 'active_support/core_ext/string/inflections'
 
 # Base types (no dependencies)
 require_relative 'sim/signal_value'
-require_relative 'sim/behavior_block_def'
 
 # Performance optimizations (no dependencies)
 require_relative 'sim/mask_cache'
@@ -31,7 +30,7 @@ require_relative 'sim/output_proxy'
 require_relative 'sim/proxy_pool'
 
 # Behavior contexts (depend on proxy classes and pool)
-require_relative 'sim/behavior_context'
+require_relative 'sim/context'
 
 # Dependency tracking for event-driven simulation
 require_relative 'sim/dependency_graph'
@@ -44,41 +43,3 @@ require_relative 'sim/vec'
 require_relative 'sim/component'
 require_relative 'sim/simulator'
 require_relative 'sim/sequential_component'
-
-# Backwards compatibility aliases for old class names in RHDL::HDL
-module RHDL
-  module HDL
-    # Alias old RHDL::HDL::Sim* names to new RHDL::Sim::* names
-    SignalValue = Sim::SignalValue
-    BehaviorBlockDef = Sim::BehaviorBlockDef
-    MaskCache = Sim::MaskCache
-    Wire = Sim::Wire
-    Clock = Sim::Clock
-    SimValueProxy = Sim::ValueProxy
-    SimSignalProxy = Sim::SignalProxy
-    SimOutputProxy = Sim::OutputProxy
-    ValueProxy = Sim::ValueProxy
-    SignalProxy = Sim::SignalProxy
-    OutputProxy = Sim::OutputProxy
-    ProxyPool = Sim::ProxyPool
-    ProxyPoolAccessor = Sim::ProxyPoolAccessor
-    BehaviorSimContext = Sim::BehaviorContext
-    BehaviorContext = Sim::BehaviorContext
-    SimLocalProxy = Sim::LocalProxy
-    LocalProxy = Sim::LocalProxy
-    SimVecProxy = Sim::VecProxy
-    VecProxy = Sim::VecProxy
-    SimBundleProxy = Sim::BundleProxy
-    BundleProxy = Sim::BundleProxy
-    DependencyGraph = Sim::DependencyGraph
-    Bundle = Sim::Bundle
-    FlippedBundle = Sim::FlippedBundle
-    BundleInstance = Sim::BundleInstance
-    Vec = Sim::Vec
-    VecInstance = Sim::VecInstance
-    SimComponent = Sim::Component
-    Component = Sim::Component
-    Simulator = Sim::Simulator
-    SequentialComponent = Sim::SequentialComponent
-  end
-end

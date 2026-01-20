@@ -7,7 +7,7 @@ require_relative 'address_generator'
 
 module MOS6502
   # Helper for computing indirect address fetch locations - Synthesizable via Behavior DSL
-  class IndirectAddressCalc < RHDL::HDL::SimComponent
+  class IndirectAddressCalc < RHDL::HDL::Component
     include RHDL::DSL::Behavior
 
     # Mode constants

@@ -9,7 +9,7 @@ module MOS6502
   # Synthesizable 64KB memory for 6502
   # RAM: 0x0000 - 0x7FFF (32KB)
   # ROM: 0x8000 - 0xFFFF (32KB)
-  class Memory < RHDL::HDL::SimComponent
+  class Memory < RHDL::HDL::Component
     include RHDL::DSL::MemoryDSL
     include RHDL::DSL::Behavior
 

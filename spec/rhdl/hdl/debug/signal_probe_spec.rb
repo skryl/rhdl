@@ -2,9 +2,9 @@
 
 require 'spec_helper'
 
-RSpec.describe RHDL::HDL::SignalProbe do
-  let(:wire) { RHDL::HDL::Wire.new("test_signal", width: 8) }
-  let!(:probe) { RHDL::HDL::SignalProbe.new(wire, name: "test_probe") }  # Use let! for eager evaluation
+RSpec.describe RHDL::Debug::SignalProbe do
+  let(:wire) { RHDL::Sim::Wire.new("test_signal", width: 8) }
+  let!(:probe) { RHDL::Debug::SignalProbe.new(wire, name: "test_probe") }  # Use let! for eager evaluation
 
   it 'records signal transitions' do
     wire.set(10)

@@ -39,8 +39,8 @@ module RHDL
           not_gate = RHDL::HDL::NotGate.new('inv')
           dff = RHDL::HDL::DFlipFlop.new('reg')
 
-          RHDL::HDL::SimComponent.connect(dff.outputs[:q], not_gate.inputs[:a])
-          RHDL::HDL::SimComponent.connect(not_gate.outputs[:y], dff.inputs[:d])
+          RHDL::Sim::Component.connect(dff.outputs[:q], not_gate.inputs[:a])
+          RHDL::Sim::Component.connect(not_gate.outputs[:y], dff.inputs[:d])
 
           sim = RHDL::Export.gate_level([not_gate, dff], backend: :cpu, lanes: lanes, name: 'bench_toggle')
 

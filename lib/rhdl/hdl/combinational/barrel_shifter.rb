@@ -7,7 +7,7 @@ module RHDL
   module HDL
     # Barrel Shifter - 8-bit shifter with multiple modes
     # Modes: shift left, shift right (logical/arithmetic), rotate left/right
-    class BarrelShifter < SimComponent
+    class BarrelShifter < Component
       include RHDL::DSL::Behavior
 
       input :a, width: 8

@@ -3,7 +3,7 @@
 
 module RHDL
   module HDL
-    class XorGate < SimComponent
+    class XorGate < Component
       input :a0
       input :a1
       output :y

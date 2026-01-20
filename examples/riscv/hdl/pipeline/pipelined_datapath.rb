@@ -19,7 +19,7 @@ require_relative 'forwarding_unit'
 
 module RISCV
   module Pipeline
-    class PipelinedDatapath < RHDL::HDL::SimComponent
+    class PipelinedDatapath < RHDL::HDL::Component
       input :clk
       input :rst
 
