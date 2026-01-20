@@ -22,29 +22,25 @@ module MOS6502
 
   # ISASimulatorNative - High-performance 6502 simulator
   #
-  # The native Rust implementation provides ~10-50x speedup for CPU-bound
-  # simulations, but uses INTERNAL memory only. It cannot use external Ruby
-  # memory objects like Apple2Bus.
+  # The native Rust implementation provides ~7x speedup over the pure Ruby
+  # implementation. It uses a hybrid memory model:
   #
-  # Use ISASimulatorNative (with load_program) for:
-  # - Benchmarks
-  # - Simple test programs
-  # - Situations where memory-mapped I/O is not needed
+  # - Internal 64KB memory for fast CPU access
+  # - Optional I/O handler for memory-mapped I/O ($C000-$CFFF)
+  # - External devices can access memory via peek/poke methods
   #
-  # Use ISASimulator (pure Ruby, with external memory) for:
-  # - Apple II emulation (requires Apple2Bus for memory-mapped I/O)
-  # - Any situation requiring custom memory handlers
-  #
-  # @example Basic usage with internal memory (native)
+  # @example Basic usage with internal memory only
   #   cpu = MOS6502::ISASimulatorNative.new(nil)
-  #   cpu.load_program([0xA9, 0x42, 0x85, 0x00], 0x8000)
+  #   cpu.load_bytes([0xA9, 0x42, 0x85, 0x00], 0x8000)
+  #   cpu.poke(0xFFFC, 0x00); cpu.poke(0xFFFD, 0x80)
   #   cpu.reset
   #   cpu.step
   #   puts cpu.a  # => 0x42
   #
-  # @example Usage with external memory (pure Ruby)
+  # @example Usage with I/O handler (for Apple II emulation)
   #   bus = MOS6502::Apple2Bus.new
-  #   cpu = MOS6502::ISASimulator.new(bus)
+  #   cpu = MOS6502::ISASimulatorNative.new(bus)  # bus provides io_read/io_write
+  #   cpu.load_bytes(rom_bytes, 0xF800)           # load ROM to CPU memory
   #   cpu.reset
   #   cpu.step
   #
@@ -91,11 +87,10 @@ module MOS6502
   end
 
   # Factory method to create the best available simulator for simple programs
-  # For programs requiring external memory (like Apple II), use ISASimulator directly
-  # @param memory [nil] Should be nil - external memory not supported in native mode
-  # @return [ISASimulatorNative] The native simulator instance
-  def self.create_fast_simulator
-    ISASimulatorNative.new(nil)
+  # @param io_handler [Object, nil] Optional I/O handler with io_read/io_write methods
+  # @return [ISASimulatorNative] The native simulator instance (or Ruby fallback)
+  def self.create_fast_simulator(io_handler = nil)
+    ISASimulatorNative.new(io_handler)
   end
 
   # Check if native simulator is available
