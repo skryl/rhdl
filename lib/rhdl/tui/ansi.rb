@@ -1,7 +1,7 @@
 # ANSI escape code helpers
 
 module RHDL
-  module HDL
+  module TUI
     module ANSI
       # Colors
       RESET = "\e[0m"

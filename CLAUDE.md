@@ -16,18 +16,44 @@
 rhdl/
 ├── lib/rhdl/                    # Core library
 │   ├── dsl.rb                   # Ruby DSL for component definitions
-│   ├── export.rb                # HDL export infrastructure
-│   ├── export/                  # Export backends
-│   │   ├── verilog.rb           # Verilog export
-│   │   ├── ir.rb                # Intermediate representation
-│   │   └── lower.rb             # IR lowering utilities
-│   ├── simulation.rb            # Simulation engine loader
-│   ├── simulation/              # Core simulation engine
+│   ├── synth.rb                 # Synthesis expression tree loader
+│   ├── synth/                   # Synthesis expression tree building
+│   │   ├── expr.rb              # Base expression class with operators
+│   │   ├── literal.rb           # Literal values
+│   │   ├── binary_op.rb         # Binary operations (+, -, &, |, etc.)
+│   │   ├── unary_op.rb          # Unary operations (~, reduction ops)
+│   │   ├── mux.rb               # Conditional mux expressions
+│   │   ├── concat.rb            # Concatenation
+│   │   ├── slice.rb             # Bit slicing
+│   │   ├── signal_proxy.rb      # Signal references
+│   │   ├── output_proxy.rb      # Output assignment proxies
+│   │   └── context.rb           # Synthesis evaluation context
+│   ├── codegen.rb               # Code generation infrastructure
+│   ├── codegen/                 # Code generation backends
+│   │   ├── behavior/            # RTL/Verilog codegen
+│   │   │   ├── ir.rb            # Behavior intermediate representation
+│   │   │   ├── lower.rb         # Behavior lowering
+│   │   │   └── verilog.rb       # Verilog code generation
+│   │   ├── circt/               # CIRCT toolchain
+│   │   │   └── firrtl.rb        # FIRRTL code generation
+│   │   └── structure/           # Gate-level synthesis
+│   │       ├── primitives.rb    # Gate primitives (AND, OR, XOR, NOT, MUX, DFF)
+│   │       ├── ir.rb            # Gate-level intermediate representation
+│   │       ├── lower.rb         # HDL to gate-level lowering (53 components)
+│   │       ├── toposort.rb      # Topological sorting
+│   │       ├── sim_cpu.rb       # CPU gate-level simulation
+│   │       └── sim_gpu.rb       # GPU gate-level simulation
+│   ├── sim.rb                   # Simulation engine loader
+│   ├── sim/                     # Core simulation engine (RHDL::Sim module)
+│   │   ├── component.rb         # Component base class
 │   │   ├── simulator.rb         # Main simulator
-│   │   ├── sim_component.rb     # Component base class
 │   │   ├── wire.rb              # Wire/signal implementation
 │   │   ├── clock.rb             # Clock signal
-│   │   └── ...                  # Synth expressions, proxies
+│   │   ├── value_proxy.rb       # Computed value proxy
+│   │   ├── signal_proxy.rb      # Input signal proxy
+│   │   ├── output_proxy.rb      # Output signal proxy
+│   │   ├── behavior_context.rb  # Simulation behavior context
+│   │   └── ...                  # Other simulation infrastructure
 │   ├── debug.rb                 # Debug module loader
 │   ├── debug/                   # Signal probing & debugging
 │   │   ├── debug_simulator.rb   # Debug-enabled simulator
@@ -53,18 +79,6 @@ rhdl/
 │   │       ├── harness.rb       # Behavioral simulation wrapper
 │   │       ├── datapath.rb      # Synthesizable CPU datapath
 │   │       └── instruction_decoder.rb # Instruction decoder
-│   ├── export/                  # Export infrastructure
-│   │   ├── behavior/            # RTL/Verilog export
-│   │   │   ├── ir.rb            # Behavior intermediate representation
-│   │   │   ├── lower.rb         # Behavior lowering
-│   │   │   └── verilog.rb       # Verilog code generation
-│   │   └── structure/           # Gate-level synthesis
-│   │       ├── primitives.rb    # Gate primitives (AND, OR, XOR, NOT, MUX, DFF)
-│   │       ├── ir.rb            # Gate-level intermediate representation
-│   │       ├── lower.rb         # HDL to gate-level lowering (53 components)
-│   │       ├── toposort.rb      # Topological sorting
-│   │       ├── sim_cpu.rb       # CPU gate-level simulation
-│   │       └── sim_gpu.rb       # GPU gate-level simulation
 │   └── diagram/                 # Diagram module
 │       ├── component.rb         # Component diagram generation
 │       ├── hierarchy.rb         # Hierarchical diagrams

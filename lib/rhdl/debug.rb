@@ -6,3 +6,38 @@ require_relative 'debug/waveform_capture'
 require_relative 'debug/breakpoint'
 require_relative 'debug/watchpoint'
 require_relative 'debug/debug_simulator'
+
+module RHDL
+  module Debug
+    # Debug logging helper compatible with spec/support/debug.rb
+    class << self
+      def enabled?
+        ENV['RHDL_DEBUG'] == '1'
+      end
+
+      def log(message)
+        puts "[DEBUG] #{message}" if enabled?
+      end
+
+      def enable!
+        ENV['RHDL_DEBUG'] = '1'
+      end
+
+      def disable!
+        ENV['RHDL_DEBUG'] = nil
+      end
+    end
+  end
+end
+
+# Backwards compatibility aliases for old class names in RHDL::HDL
+module RHDL
+  module HDL
+    # Debug classes
+    SignalProbe = Debug::SignalProbe
+    WaveformCapture = Debug::WaveformCapture
+    Breakpoint = Debug::Breakpoint
+    Watchpoint = Debug::Watchpoint
+    DebugSimulator = Debug::DebugSimulator
+  end
+end
