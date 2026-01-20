@@ -4,7 +4,7 @@
 module RHDL
   module HDL
     # Sign Extender
-    class SignExtend < SimComponent
+    class SignExtend < Component
       parameter :in_width, default: 8
       parameter :out_width, default: 16
 

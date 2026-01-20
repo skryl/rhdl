@@ -3,7 +3,7 @@
 
 module RHDL
   module HDL
-    class BitwiseAnd < SimComponent
+    class BitwiseAnd < Component
       parameter :width, default: 8
 
       input :a, width: :width

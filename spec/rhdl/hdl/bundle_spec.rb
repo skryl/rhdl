@@ -17,7 +17,7 @@ class TestAxiLiteWrite < RHDL::Sim::Bundle
 end
 
 # Component using input bundle (producer)
-class TestBundleProducer < RHDL::HDL::SimComponent
+class TestBundleProducer < RHDL::HDL::Component
   input :clk
   input :enable
   input :data_in, width: 8
@@ -30,7 +30,7 @@ class TestBundleProducer < RHDL::HDL::SimComponent
 end
 
 # Component using output bundle (consumer, flipped)
-class TestBundleConsumer < RHDL::HDL::SimComponent
+class TestBundleConsumer < RHDL::HDL::Component
   input :clk
   output :data_out, width: 8
   output :data_valid
@@ -44,7 +44,7 @@ class TestBundleConsumer < RHDL::HDL::SimComponent
 end
 
 # Component using bundle with explicit flipped: false
-class TestBundleProducerExplicit < RHDL::HDL::SimComponent
+class TestBundleProducerExplicit < RHDL::HDL::Component
   input :data_in, width: 8
   input :valid_in
   output_bundle :out_port, TestValidBundle, flipped: false
@@ -138,7 +138,7 @@ RSpec.describe RHDL::Sim::Bundle do
   end
 end
 
-RSpec.describe 'Bundle in SimComponent' do
+RSpec.describe 'Bundle in Component' do
   describe 'input_bundle' do
     let(:producer) { TestBundleProducer.new('producer') }
 

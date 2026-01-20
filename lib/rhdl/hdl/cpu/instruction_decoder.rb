@@ -3,7 +3,7 @@
 module RHDL
   module HDL
     module CPU
-      class InstructionDecoder < SimComponent
+      class InstructionDecoder < Component
         # ALU operation codes (must match ALU constants)
         OP_ADD = 0
         OP_SUB = 1

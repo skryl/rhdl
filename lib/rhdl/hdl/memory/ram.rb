@@ -10,7 +10,7 @@ module RHDL
   module HDL
     # Synchronous RAM with single port
     # Sequential write on rising clock edge, combinational read
-    class RAM < SimComponent
+    class RAM < Component
       include RHDL::DSL::MemoryDSL
 
       input :clk

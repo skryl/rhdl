@@ -6,7 +6,7 @@ require_relative '../../dsl/behavior'
 
 module RHDL
   module HDL
-    class SRLatch < SimComponent
+    class SRLatch < Component
       include RHDL::DSL::Behavior
 
       input :s

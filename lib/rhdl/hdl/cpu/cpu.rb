@@ -9,7 +9,7 @@ require_relative 'accumulator'
 module RHDL
   module HDL
     module CPU
-      class CPU < SimComponent
+      class CPU < Component
         # Clock and reset
         input :clk
         input :rst

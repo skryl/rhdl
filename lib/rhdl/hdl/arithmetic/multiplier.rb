@@ -3,7 +3,7 @@
 
 module RHDL
   module HDL
-    class Multiplier < SimComponent
+    class Multiplier < Component
       parameter :width, default: 8
       parameter :product_width, default: -> { @width * 2 }
 

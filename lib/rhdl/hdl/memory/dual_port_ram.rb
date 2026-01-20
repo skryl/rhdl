@@ -10,7 +10,7 @@ module RHDL
   module HDL
     # True Dual-Port RAM with two independent read/write ports
     # Sequential write on rising clock edge, combinational read
-    class DualPortRAM < SimComponent
+    class DualPortRAM < Component
       include RHDL::DSL::MemoryDSL
 
       input :clk

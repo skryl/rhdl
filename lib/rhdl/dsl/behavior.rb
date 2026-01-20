@@ -1093,7 +1093,7 @@ module RHDL
         def behavior(**options, &block)
           @_behavior_block = BehaviorBlock.new(block, **options)
 
-          # Define propagate method if this is a SimComponent
+          # Define propagate method if this is a Component
           # BUT only if sequential is NOT defined (sequential handles its own propagate
           # and will call execute_behavior_for_simulation itself)
           sequential_block_defined = respond_to?(:_sequential_block) && !_sequential_block.nil?

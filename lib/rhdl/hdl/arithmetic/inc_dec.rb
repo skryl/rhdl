@@ -3,7 +3,7 @@
 
 module RHDL
   module HDL
-    class IncDec < SimComponent
+    class IncDec < Component
       parameter :width, default: 8
 
       input :a, width: :width

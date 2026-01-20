@@ -3,7 +3,7 @@
 
 module RHDL
   module HDL
-    class NorGate < SimComponent
+    class NorGate < Component
       input :a0
       input :a1
       output :y

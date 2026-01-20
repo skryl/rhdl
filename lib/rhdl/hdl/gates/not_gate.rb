@@ -3,7 +3,7 @@
 
 module RHDL
   module HDL
-    class NotGate < SimComponent
+    class NotGate < Component
       input :a
       output :y
 
