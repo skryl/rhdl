@@ -20,3 +20,9 @@
 # Test disk images (generated during testing)
 /examples/mos6502/software/disks/test_*.dsk
 /examples/mos6502/software/disks/dos33_*.dsk
+# Native extension build artifacts
+*.so
+*.bundle
+*.dylib
+/examples/mos6502/utilities/isa_simulator_native/target/
+/examples/mos6502/utilities/isa_simulator_native/lib/
