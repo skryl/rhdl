@@ -454,11 +454,6 @@ module RHDL
         end
         alias_method :to_firrtl_hierarchy, :to_circt_hierarchy
 
-        # Generate VHDL from the component
-        def to_vhdl(top_name: nil)
-          RHDL::Export::VHDL.generate(to_ir(top_name: top_name))
-        end
-
         # Returns the Verilog module name for this component
         # Derived from the class's full module path, filtering out RHDL/HDL namespaces
         # Examples:
@@ -505,22 +500,6 @@ module RHDL
 
           # Generate top-level module last
           parts << to_verilog(top_name: top_name)
-
-          parts.join("\n\n")
-        end
-
-        # Generate VHDL for this component and all its sub-modules
-        # @param top_name [String] Optional name override for top module
-        # @return [String] Complete VHDL with all module definitions
-        def to_vhdl_hierarchy(top_name: nil)
-          parts = []
-
-          submodules = collect_submodule_classes
-          submodules.each do |submod|
-            parts << submod.to_vhdl
-          end
-
-          parts << to_vhdl(top_name: top_name)
 
           parts.join("\n\n")
         end

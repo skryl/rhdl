@@ -1,6 +1,6 @@
 # MOS 6502 CPU Registers - Synthesizable DSL Version
 # Contains A, X, Y registers, Stack Pointer, Program Counter, and latches
-# All components use synthesizable patterns for Verilog/VHDL export
+# All components use synthesizable patterns for Verilog export
 
 require_relative '../../../lib/rhdl'
 
