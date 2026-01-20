@@ -254,7 +254,8 @@ module RHDL
 
         def add_common_args(exec_args)
           exec_args << "-d" if options[:debug]
-          exec_args << "-f" if options[:fast]
+          # Fast mode is now the default; only pass --hdl if explicitly requested
+          exec_args << "--hdl" if options[:hdl]
           exec_args += ["-s", options[:speed].to_s] if options[:speed]
           exec_args << "-g" if options[:green]
           exec_args += ["--disk", options[:disk]] if options[:disk]
