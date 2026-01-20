@@ -461,10 +461,89 @@ namespace :cli do
       RHDL::CLI::Tasks::Apple2Task.new(ink: true, program: args[:program]).run
     end
 
+    desc "[CLI] Run with binary file loaded at specified address"
+    task :run_bin, [:bin, :addr] do |_, args|
+      unless args[:bin]
+        puts "Usage: rake cli:apple2:run_bin[path/to/file.bin,0800]"
+        puts "Example: rake cli:apple2:run_bin[karateka.bin,2000]"
+        exit 1
+      end
+      load_cli_tasks
+      opts = { bin: args[:bin] }
+      opts[:address] = args[:addr] if args[:addr]
+      RHDL::CLI::Tasks::Apple2Task.new(opts).run
+    end
+
+    desc "[CLI] Run with AppleIIGo ROM and binary file"
+    task :run_bin_rom, [:bin, :addr] do |_, args|
+      unless args[:bin]
+        puts "Usage: rake cli:apple2:run_bin_rom[path/to/file.bin,2000]"
+        puts "Example: rake cli:apple2:run_bin_rom[karateka.bin,2000]"
+        exit 1
+      end
+      load_cli_tasks
+      opts = { appleiigo: true, bin: args[:bin], hires: true }
+      opts[:address] = args[:addr] if args[:addr]
+      RHDL::CLI::Tasks::Apple2Task.new(opts).run
+    end
+
     desc "[CLI] Clean ROM output files"
     task :clean do
       load_cli_tasks
       RHDL::CLI::Tasks::Apple2Task.new(clean: true).run
+    end
+
+    # Disk conversion tasks
+    namespace :disk do
+      desc "[CLI] Show disk image information"
+      task :info, [:disk] do |_, args|
+        unless args[:disk]
+          puts "Usage: rake cli:apple2:disk:info[path/to/disk.dsk]"
+          exit 1
+        end
+        load_cli_tasks
+        RHDL::CLI::Tasks::DiskConvertTask.new(info: true, disk: args[:disk]).run
+      end
+
+      desc "[CLI] Convert disk image to binary file for direct memory loading"
+      task :convert, [:disk, :output] do |_, args|
+        unless args[:disk]
+          puts "Usage: rake cli:apple2:disk:convert[input.dsk,output.bin]"
+          puts "Example: rake cli:apple2:disk:convert[karateka.dsk,karateka.bin]"
+          exit 1
+        end
+        load_cli_tasks
+        opts = { disk: args[:disk] }
+        opts[:output] = args[:output] if args[:output]
+        RHDL::CLI::Tasks::DiskConvertTask.new(opts).run
+      end
+
+      desc "[CLI] Extract boot sector from disk image"
+      task :boot, [:disk] do |_, args|
+        unless args[:disk]
+          puts "Usage: rake cli:apple2:disk:boot[path/to/disk.dsk]"
+          exit 1
+        end
+        load_cli_tasks
+        RHDL::CLI::Tasks::DiskConvertTask.new(extract_boot: true, disk: args[:disk]).run
+      end
+
+      desc "[CLI] Extract specific tracks from disk image"
+      task :tracks, [:disk, :start_track, :end_track] do |_, args|
+        unless args[:disk]
+          puts "Usage: rake cli:apple2:disk:tracks[disk.dsk,start,end]"
+          puts "Example: rake cli:apple2:disk:tracks[karateka.dsk,0,3]"
+          exit 1
+        end
+        load_cli_tasks
+        opts = {
+          extract_tracks: true,
+          disk: args[:disk],
+          start_track: (args[:start_track] || 0).to_i,
+          end_track: (args[:end_track] || 2).to_i
+        }
+        RHDL::CLI::Tasks::DiskConvertTask.new(opts).run
+      end
     end
   end
 
