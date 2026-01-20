@@ -73,6 +73,12 @@ module MOS6502
           self.p = self.p & ~(1 << flag)
         end
       end
+
+      # Check if this is the native implementation
+      # @return [Boolean] true for native Rust implementation
+      def native?
+        true
+      end
     end
   else
     # Fallback: alias the pure Ruby implementation
