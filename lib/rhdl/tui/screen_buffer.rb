@@ -1,7 +1,7 @@
 # Screen buffer for efficient rendering
 
 module RHDL
-  module HDL
+  module TUI
     class ScreenBuffer
       def initialize(width, height)
         @width = width

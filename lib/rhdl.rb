@@ -1,6 +1,6 @@
 require_relative "rhdl/version"
 require_relative "rhdl/dsl"
-require_relative "rhdl/export"
+require_relative "rhdl/codegen"
 require 'active_support/core_ext/string/inflections'
 
 module RHDL

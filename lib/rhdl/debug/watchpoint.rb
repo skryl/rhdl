@@ -2,7 +2,7 @@
 # Watchpoint - break when a signal changes or matches a value
 
 module RHDL
-  module HDL
+  module Debug
     # Watchpoint - break when a signal changes or matches a value
     class Watchpoint < Breakpoint
       attr_reader :wire, :watch_type, :watch_value

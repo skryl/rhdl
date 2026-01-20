@@ -6,12 +6,12 @@ require 'json'
 require_relative 'json_protocol'
 
 module RHDL
-  module HDL
+  module TUI
     class InkAdapter
       attr_reader :simulator, :tracked_signals
 
       def initialize(simulator = nil)
-        @simulator = simulator || DebugSimulator.new
+        @simulator = simulator || Debug::DebugSimulator.new
         @tracked_signals = {}
         @running = false
         @auto_run = false
@@ -94,7 +94,7 @@ module RHDL
 
         @simulator.on_break = ->(sim, bp) do
           @auto_run = false
-          msg = bp.is_a?(Watchpoint) ? bp.description : "Breakpoint ##{bp.id}"
+          msg = bp.is_a?(Debug::Watchpoint) ? bp.description : "Breakpoint ##{bp.id}"
           send_event(type: 'break', breakpoint: JsonProtocol.breakpoint_to_hash(bp), message: "Break: #{msg}")
           send_state
         end

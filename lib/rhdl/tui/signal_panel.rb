@@ -1,7 +1,7 @@
 # Signal viewer panel
 
 module RHDL
-  module HDL
+  module TUI
     class SignalPanel < Panel
       attr_accessor :signals
 
