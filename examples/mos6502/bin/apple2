@@ -18,6 +18,10 @@ class Apple2Terminal
   SCREEN_ROWS = 24
   SCREEN_COLS = 40
 
+  # Hi-res display dimensions
+  HIRES_WIDTH = 140   # braille chars (280 pixels / 2)
+  HIRES_HEIGHT = 48   # braille chars (192 pixels / 4)
+
   # Display dimensions including border
   DISPLAY_WIDTH = SCREEN_COLS + 2   # 42 (40 + 2 border chars)
   DISPLAY_HEIGHT = SCREEN_ROWS + 2  # 26 (24 + 2 border lines)
@@ -50,6 +54,8 @@ class Apple2Terminal
     @debug = options[:debug] || false
     @green_screen = options[:green] || false
     @fast_mode = options[:fast] || false
+    @hires_mode = options[:hires] || false
+    @hires_width = options[:hires_width] || 80
 
     # Terminal size and padding for centering
     @term_rows = 24
@@ -231,6 +237,50 @@ class Apple2Terminal
   end
 
   def render_screen
+    # Check if we should render hi-res graphics
+    if @hires_mode && @runner.bus.hires_mode?
+      render_hires_screen
+    else
+      render_text_screen
+    end
+  end
+
+  def render_hires_screen
+    output = String.new
+
+    # Clear screen and move to top
+    output << CLEAR_SCREEN
+    output << MOVE_HOME
+
+    if @green_screen
+      output << GREEN_FG
+      output << BLACK_BG
+    end
+
+    # Render hi-res using braille characters
+    hires_output = @runner.bus.render_hires_braille(chars_wide: @hires_width, invert: true)
+    output << hires_output
+
+    output << NORMAL_VIDEO if @green_screen
+
+    # Status line below graphics
+    output << "\n"
+    if @debug
+      state = @runner.cpu_state
+      status = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X Cycles:%d [HIRES]",
+                      state[:pc], state[:a], state[:x], state[:y],
+                      state[:sp], state[:p], state[:cycles])
+      output << status << "\n"
+    end
+
+    if disk_motor_on?
+      output << "DISK LOADING..."
+    end
+
+    print output
+  end
+
+  def render_text_screen
     output = String.new
 
     # Move cursor to the top-left corner of the centered display
@@ -443,7 +493,9 @@ options = {
   debug: false,
   green: false,
   demo: false,
-  fast: true  # Default to fast (ISA emulation) mode
+  fast: true,  # Default to fast (ISA emulation) mode
+  hires: false,
+  hires_width: 80
 }
 
 parser = OptionParser.new do |opts|
@@ -487,6 +539,14 @@ parser = OptionParser.new do |opts|
 
   opts.on("--demo", "Run built-in demo program") do
     options[:demo] = true
+  end
+
+  opts.on("-H", "--hires", "Enable hi-res graphics rendering (uses braille characters)") do
+    options[:hires] = true
+  end
+
+  opts.on("--hires-width WIDTH", Integer, "Hi-res display width in chars (default: 80)") do |v|
+    options[:hires_width] = v
   end
 
   opts.on("--disk FILE", "Load disk image (.dsk) into drive 1") do |v|
