@@ -6,12 +6,12 @@
 # PS/2 keyboard controller with scancode to ASCII translation
 # Supports US English keyboard layout
 
-require 'rhdl'
+require 'rhdl/hdl'
 
 module RHDL
   module Apple2
     # PS/2 Controller - handles low-level PS/2 protocol
-    class PS2Controller < SequentialComponent
+    class PS2Controller < RHDL::HDL::SequentialComponent
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
@@ -79,7 +79,7 @@ module RHDL
     end
 
     # Main Keyboard Controller
-    class Keyboard < SequentialComponent
+    class Keyboard < RHDL::HDL::SequentialComponent
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
       include RHDL::DSL::Memory
@@ -109,6 +109,67 @@ module RHDL
       STATE_GOT_KEY_UP3    = 5
       STATE_KEY_UP         = 6
       STATE_NORMAL_KEY     = 7
+
+      # Build scancode to ASCII ROM data (must be defined before used)
+      def self.build_scancode_rom(shifted)
+        rom = Array.new(256, 0)
+
+        # Scancode mappings: scancode => [unshifted, shifted]
+        mappings = {
+          0x1C => [0x41, 0x41],  # A
+          0x32 => [0x42, 0x42],  # B
+          0x21 => [0x43, 0x43],  # C
+          0x23 => [0x44, 0x44],  # D
+          0x24 => [0x45, 0x45],  # E
+          0x2B => [0x46, 0x46],  # F
+          0x34 => [0x47, 0x47],  # G
+          0x33 => [0x48, 0x48],  # H
+          0x43 => [0x49, 0x49],  # I
+          0x3B => [0x4A, 0x4A],  # J
+          0x42 => [0x4B, 0x4B],  # K
+          0x4B => [0x4C, 0x4C],  # L
+          0x3A => [0x4D, 0x4D],  # M
+          0x31 => [0x4E, 0x4E],  # N
+          0x44 => [0x4F, 0x4F],  # O
+          0x4D => [0x50, 0x50],  # P
+          0x15 => [0x51, 0x51],  # Q
+          0x2D => [0x52, 0x52],  # R
+          0x1B => [0x53, 0x53],  # S
+          0x2C => [0x54, 0x54],  # T
+          0x3C => [0x55, 0x55],  # U
+          0x2A => [0x56, 0x56],  # V
+          0x1D => [0x57, 0x57],  # W
+          0x22 => [0x58, 0x58],  # X
+          0x35 => [0x59, 0x59],  # Y
+          0x1A => [0x5A, 0x5A],  # Z
+          0x45 => [0x30, 0x29],  # 0 )
+          0x16 => [0x31, 0x21],  # 1 !
+          0x1E => [0x32, 0x40],  # 2 @
+          0x26 => [0x33, 0x23],  # 3 #
+          0x25 => [0x34, 0x24],  # 4 $
+          0x2E => [0x35, 0x25],  # 5 %
+          0x36 => [0x36, 0x5E],  # 6 ^
+          0x3D => [0x37, 0x26],  # 7 &
+          0x3E => [0x38, 0x2A],  # 8 *
+          0x46 => [0x39, 0x28],  # 9 (
+          0x29 => [0x20, 0x20],  # Space
+          0x5A => [0x0D, 0x0D],  # Enter
+          0x66 => [0x08, 0x08],  # Backspace
+          0x0D => [0x09, 0x09],  # Tab
+          0x76 => [0x1B, 0x1B],  # Escape
+          0x71 => [0x7F, 0x7F],  # Delete
+          0x74 => [0x15, 0x15],  # Right arrow (Ctrl-U)
+          0x6B => [0x08, 0x08],  # Left arrow (BS)
+          0x75 => [0x0B, 0x0B],  # Up arrow
+          0x72 => [0x0A, 0x0A],  # Down arrow (LF)
+        }
+
+        mappings.each do |scancode, values|
+          rom[scancode] = shifted ? values[1] : values[0]
+        end
+
+        rom
+      end
 
       # Sub-component: PS/2 controller
       instance :ps2_ctrl, PS2Controller
@@ -241,67 +302,6 @@ module RHDL
           cat(key_pressed, lit(0, width: 2), ascii_value[4..0]),
           cat(key_pressed, ascii_value[6..0])
         )
-      end
-
-      # Build scancode to ASCII ROM data
-      def self.build_scancode_rom(shifted)
-        rom = Array.new(256, 0)
-
-        # Scancode mappings: scancode => [unshifted, shifted]
-        mappings = {
-          0x1C => [0x41, 0x41],  # A
-          0x32 => [0x42, 0x42],  # B
-          0x21 => [0x43, 0x43],  # C
-          0x23 => [0x44, 0x44],  # D
-          0x24 => [0x45, 0x45],  # E
-          0x2B => [0x46, 0x46],  # F
-          0x34 => [0x47, 0x47],  # G
-          0x33 => [0x48, 0x48],  # H
-          0x43 => [0x49, 0x49],  # I
-          0x3B => [0x4A, 0x4A],  # J
-          0x42 => [0x4B, 0x4B],  # K
-          0x4B => [0x4C, 0x4C],  # L
-          0x3A => [0x4D, 0x4D],  # M
-          0x31 => [0x4E, 0x4E],  # N
-          0x44 => [0x4F, 0x4F],  # O
-          0x4D => [0x50, 0x50],  # P
-          0x15 => [0x51, 0x51],  # Q
-          0x2D => [0x52, 0x52],  # R
-          0x1B => [0x53, 0x53],  # S
-          0x2C => [0x54, 0x54],  # T
-          0x3C => [0x55, 0x55],  # U
-          0x2A => [0x56, 0x56],  # V
-          0x1D => [0x57, 0x57],  # W
-          0x22 => [0x58, 0x58],  # X
-          0x35 => [0x59, 0x59],  # Y
-          0x1A => [0x5A, 0x5A],  # Z
-          0x45 => [0x30, 0x29],  # 0 )
-          0x16 => [0x31, 0x21],  # 1 !
-          0x1E => [0x32, 0x40],  # 2 @
-          0x26 => [0x33, 0x23],  # 3 #
-          0x25 => [0x34, 0x24],  # 4 $
-          0x2E => [0x35, 0x25],  # 5 %
-          0x36 => [0x36, 0x5E],  # 6 ^
-          0x3D => [0x37, 0x26],  # 7 &
-          0x3E => [0x38, 0x2A],  # 8 *
-          0x46 => [0x39, 0x28],  # 9 (
-          0x29 => [0x20, 0x20],  # Space
-          0x5A => [0x0D, 0x0D],  # Enter
-          0x66 => [0x08, 0x08],  # Backspace
-          0x0D => [0x09, 0x09],  # Tab
-          0x76 => [0x1B, 0x1B],  # Escape
-          0x71 => [0x7F, 0x7F],  # Delete
-          0x74 => [0x15, 0x15],  # Right arrow (Ctrl-U)
-          0x6B => [0x08, 0x08],  # Left arrow (BS)
-          0x75 => [0x0B, 0x0B],  # Up arrow
-          0x72 => [0x0A, 0x0A],  # Down arrow (LF)
-        }
-
-        mappings.each do |scancode, values|
-          rom[scancode] = shifted ? values[1] : values[0]
-        end
-
-        rom
       end
     end
   end

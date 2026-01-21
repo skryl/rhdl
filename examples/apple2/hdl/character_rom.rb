@@ -8,11 +8,11 @@
 # Address format: char(5:0) & row(2:0) = 9 bits
 # Output: 5 pixel bits per row
 
-require 'rhdl'
+require 'rhdl/hdl'
 
 module RHDL
   module Apple2
-    class CharacterROM < Component
+    class CharacterROM < RHDL::HDL::Component
       include RHDL::DSL::Memory
 
       input :clk
