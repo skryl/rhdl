@@ -10,6 +10,21 @@ RSpec.describe MOS6502::Apple2Speaker do
     it 'starts disabled' do
       expect(speaker.enabled).to be false
     end
+
+    it 'starts with zero toggle count' do
+      expect(speaker.toggle_count).to eq 0
+    end
+  end
+
+  describe '#status' do
+    it 'returns off when not started' do
+      expect(speaker.status).to eq 'off'
+    end
+
+    it 'returns backend name or none after start' do
+      speaker.start
+      expect(['sox', 'ffplay', 'paplay', 'aplay', 'none', 'no backend', 'off']).to include(speaker.status)
+    end
   end
 
   describe '#toggle' do
@@ -71,6 +86,10 @@ RSpec.describe MOS6502::Apple2SpeakerBeep do
     it 'starts enabled' do
       expect(speaker.enabled).to be true
     end
+
+    it 'starts with zero toggle count' do
+      expect(speaker.toggle_count).to eq 0
+    end
   end
 
   describe '#toggle' do
@@ -80,7 +99,18 @@ RSpec.describe MOS6502::Apple2SpeakerBeep do
 
     it 'increments toggle count' do
       100.times { speaker.toggle(0) }
-      # Should not raise error
+      expect(speaker.toggle_count).to eq 100
+    end
+  end
+
+  describe '#status' do
+    it 'returns beep when enabled' do
+      expect(speaker.status).to eq 'beep'
+    end
+
+    it 'returns off when disabled' do
+      speaker.enable(false)
+      expect(speaker.status).to eq 'off'
     end
   end
 

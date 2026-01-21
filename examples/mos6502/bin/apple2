@@ -479,10 +479,12 @@ class Apple2Terminal
                      format_hz(@current_hz), @fps,
                      format_uptime(@start_time))
 
-      # Line 3: Disk IO / keyboard IO
-      line3 = format("Disk:T%02d %s | Key:%-3s",
+      # Line 3: Disk IO / keyboard IO / Audio
+      speaker = @runner.bus.speaker
+      audio_status = speaker.status
+      line3 = format("Disk:T%02d %s | Key:%-3s | Audio:%s",
                      dc.track, dc.motor_on ? "ON " : "OFF",
-                     format_key(@last_key))
+                     format_key(@last_key), audio_status)
 
       # Pad/truncate lines to fit within border
       line1 = line1.ljust(debug_width)[0, debug_width]
@@ -570,11 +572,13 @@ class Apple2Terminal
                      format_hz(@current_hz), @fps,
                      format_uptime(@start_time))
 
-      # Line 3: Disk IO / keyboard IO / video mode
-      line3 = format("Disk:T%02d %s | Key:%-3s | %s",
+      # Line 3: Disk IO / keyboard IO / video mode / Audio
+      speaker = @runner.bus.speaker
+      audio_status = speaker.status
+      line3 = format("Disk:T%02d %s|Key:%-3s|%s|Audio:%s",
                      dc.track, dc.motor_on ? "ON " : "OFF",
                      format_key(@last_key),
-                     mode.to_s.upcase)
+                     mode.to_s.upcase, audio_status)
 
       # Pad/truncate lines to fit within border
       line1 = line1.ljust(SCREEN_COLS)[0, SCREEN_COLS]
