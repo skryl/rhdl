@@ -213,7 +213,7 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       task.send(:add_common_args, exec_args)
 
       expect(exec_args).to include('-d')
-      expect(exec_args).to include('--sim')
+      expect(exec_args).to include('-m')
       expect(exec_args).to include('hdl')
       expect(exec_args).to include('-s')
       expect(exec_args).to include('5000')
@@ -227,22 +227,22 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       expect(exec_args).to include('/path/to/disk2.dsk')
     end
 
-    it 'does not pass --sim for native mode (default)' do
+    it 'does not pass -m for native mode (default)' do
       task = described_class.new(mode: :native)
       exec_args = []
 
       task.send(:add_common_args, exec_args)
 
-      expect(exec_args).not_to include('--sim')
+      expect(exec_args).not_to include('-m')
     end
 
-    it 'passes --sim for ruby mode' do
+    it 'passes -m for ruby mode' do
       task = described_class.new(mode: :ruby)
       exec_args = []
 
       task.send(:add_common_args, exec_args)
 
-      expect(exec_args).to include('--sim')
+      expect(exec_args).to include('-m')
       expect(exec_args).to include('ruby')
     end
 
