@@ -86,6 +86,19 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
     it 'can be instantiated with karateka option' do
       expect { described_class.new(karateka: true) }.not_to raise_error
     end
+
+    it 'can be instantiated with bin option' do
+      expect { described_class.new(bin: '/path/to/file.bin') }.not_to raise_error
+    end
+
+    it 'can be instantiated with disk options' do
+      expect { described_class.new(disk: '/path/to/disk.dsk') }.not_to raise_error
+      expect { described_class.new(disk2: '/path/to/disk2.dsk') }.not_to raise_error
+    end
+
+    it 'can be instantiated with remaining_args option' do
+      expect { described_class.new(remaining_args: ['--extra', 'args']) }.not_to raise_error
+    end
   end
 
   describe '#run' do
@@ -256,6 +269,16 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
 
       expect(exec_args).to include('--sim')
       expect(exec_args).to include('ruby')
+    end
+
+    it 'adds bin flag when bin option is set' do
+      task = described_class.new(bin: '/path/to/file.bin')
+      exec_args = []
+
+      task.send(:add_common_args, exec_args)
+
+      expect(exec_args).to include('-b')
+      expect(exec_args).to include('/path/to/file.bin')
     end
   end
 end
