@@ -17,8 +17,14 @@ require 'harness'
 class Apple2HDLTerminal
   SCREEN_ROWS = 24
   SCREEN_COLS = 40
-  DISPLAY_WIDTH = SCREEN_COLS + 2
-  DISPLAY_HEIGHT = SCREEN_ROWS + 2
+
+  # Hi-res display dimensions
+  HIRES_WIDTH = 140   # braille chars (280 pixels / 2)
+  HIRES_HEIGHT = 48   # braille chars (192 pixels / 4)
+
+  # Display dimensions including border
+  DISPLAY_WIDTH = SCREEN_COLS + 2   # 42 (40 + 2 border chars)
+  DISPLAY_HEIGHT = SCREEN_ROWS + 2  # 26 (24 + 2 border lines)
 
   # ANSI escape codes
   ESC = "\e"
@@ -30,6 +36,7 @@ class Apple2HDLTerminal
   NORMAL_VIDEO = "#{ESC}[0m"
   GREEN_FG = "#{ESC}[32m"
   BLACK_BG = "#{ESC}[40m"
+  BOLD = "#{ESC}[1m"
 
   attr_reader :runner, :running
 
@@ -41,12 +48,16 @@ class Apple2HDLTerminal
     @cycles_per_frame = options[:speed] || 100  # HDL is slow, default to small value
     @debug = options[:debug] || false
     @green_screen = options[:green] || false
+    @hires_mode = options[:hires] || false
+    @hires_width = options[:hires_width] || 80
 
-    # Terminal size
+    # Terminal size and padding for centering
     @term_rows = 24
     @term_cols = 80
     @pad_top = 0
     @pad_left = 0
+    @hires_pad_top = 0
+    @hires_pad_left = 0
     update_terminal_size
 
     # Performance monitoring
@@ -63,6 +74,9 @@ class Apple2HDLTerminal
     # Input tracking
     @last_key = nil
     @last_key_time = nil
+
+    # Keyboard mode: :normal passes keys to emulator, :command handles runtime controls
+    @keyboard_mode = :normal
   end
 
   def update_terminal_size
@@ -71,9 +85,25 @@ class Apple2HDLTerminal
       @term_rows = [rows, DISPLAY_HEIGHT].max
       @term_cols = [cols, DISPLAY_WIDTH].max
     end
+
+    # Calculate padding to center the text display
+    # Debug mode adds bordered debug window: 1 padding + 6 lines (border + 4 content + border)
     display_height = @debug ? DISPLAY_HEIGHT + 7 : DISPLAY_HEIGHT
     @pad_top = [(@term_rows - display_height) / 2, 0].max
     @pad_left = [(@term_cols - DISPLAY_WIDTH) / 2, 0].max
+
+    # Calculate padding for hires display
+    hires_content_height = HIRES_HEIGHT  # Always 48 braille chars tall
+    debug_panel_height = @debug ? 8 : 1  # 6 lines debug box + 2 gap, or 1 line for disk status
+    total_content_height = hires_content_height + debug_panel_height
+    hires_display_width = @hires_width
+
+    if total_content_height <= @term_rows
+      @hires_pad_top = [(@term_rows - total_content_height) / 2, 0].max
+    else
+      @hires_pad_top = @term_rows - total_content_height
+    end
+    @hires_pad_left = [(@term_cols - hires_display_width) / 2, 0].max
   end
 
   def load_rom(path, base_addr: 0xD000)
@@ -234,25 +264,181 @@ class Apple2HDLTerminal
     return unless char
 
     ascii = char.ord
-    return stop if ascii == 3  # Ctrl+C
 
-    # Handle special keys
+    # Handle special keys that work in all modes
     case ascii
-    when 127, 8 then ascii = 0x08  # Backspace
-    when 10, 13 then ascii = 0x0D  # Enter
+    when 3 # Ctrl+C
+      stop
+      return
+    when 27 # ESC - toggle command mode or check for arrow keys
+      handle_escape_sequence
+      return
     end
 
-    # Convert lowercase to uppercase
+    # In command mode, handle runtime controls instead of passing to emulator
+    if @keyboard_mode == :command
+      handle_command_key(ascii)
+      return
+    end
+
+    # Normal mode: pass key to emulator
+    case ascii
+    when 127, 8  # Backspace/Delete
+      ascii = 0x08  # Apple II backspace
+    when 10, 13  # Enter/Return
+      ascii = 0x0D  # Apple II carriage return
+    end
+
+    # Convert lowercase to uppercase for Apple II
     ascii = ascii - 32 if ascii >= 97 && ascii <= 122
 
+    # Track for debug display
     @last_key = ascii
     @last_key_time = Time.now
+
+    # Inject the key
     @runner.inject_key(ascii)
   rescue IO::WaitReadable, Errno::EAGAIN
-    # No input
+    # No input available
+  end
+
+  def handle_escape_sequence
+    # Try to read arrow key sequence
+    if IO.select([IO.console], nil, nil, 0.05)
+      begin
+        seq = IO.console.read_nonblock(2)
+        if @keyboard_mode == :command
+          # In command mode, arrow keys control speed
+          speed_delta = 10
+          case seq
+          when '[C' # Right arrow - increase speed
+            @cycles_per_frame += speed_delta
+          when '[D' # Left arrow - decrease speed
+            @cycles_per_frame = [@cycles_per_frame - speed_delta, speed_delta].max
+          end
+        else
+          # In normal mode, arrow keys go to emulator
+          case seq
+          when '[A' # Up arrow
+            @runner.inject_key(0x0B) # Ctrl+K (up)
+          when '[B' # Down arrow
+            @runner.inject_key(0x0A) # Ctrl+J (down)
+          when '[C' # Right arrow
+            @runner.inject_key(0x15) # Ctrl+U (right)
+          when '[D' # Left arrow
+            @runner.inject_key(0x08) # Ctrl+H (left/backspace)
+          end
+        end
+      rescue IO::WaitReadable, Errno::EAGAIN
+        handle_esc_key
+      end
+    else
+      handle_esc_key
+    end
+  end
+
+  def handle_esc_key
+    # Toggle command mode (only in debug mode)
+    if @debug
+      @keyboard_mode = @keyboard_mode == :normal ? :command : :normal
+    else
+      @runner.inject_key(0x1B)
+    end
+  end
+
+  def handle_command_key(ascii)
+    case ascii
+    when 72, 104 # H or h - toggle hires mode
+      @hires_mode = !@hires_mode
+      print CLEAR_SCREEN
+    end
   end
 
   def render_screen
+    if @hires_mode
+      render_hires_screen
+    else
+      render_text_screen
+    end
+  end
+
+  def render_hires_screen
+    output = String.new
+
+    if @green_screen
+      output << GREEN_FG
+      output << BLACK_BG
+    end
+
+    # Render hi-res using braille characters
+    hires_output = @runner.render_hires_braille(chars_wide: @hires_width, invert: true)
+    hires_lines = hires_output.split("\n")
+
+    # Render each line of hires output with proper centering
+    hires_lines.each_with_index do |line, row|
+      output << move_cursor(@hires_pad_top + row + 1, @hires_pad_left + 1)
+      output << line
+    end
+
+    output << NORMAL_VIDEO if @green_screen
+
+    # Debug window (bordered, with padding above)
+    if @debug
+      debug_width = @hires_width - 2  # Account for border chars
+      debug_row = @hires_pad_top + hires_lines.length + 2
+
+      state = @runner.cpu_state
+      dc = @runner.disk_controller
+      kb_mode = @keyboard_mode == :command ? "CMD" : "NRM"
+
+      # Line 1: Registers
+      line1 = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X [HIRES]",
+                     state[:pc], state[:a], state[:x], state[:y],
+                     state[:sp], state[:p] || 0)
+
+      # Line 2: Sim type / cycles / speed
+      line2 = format("Sim:HDL Cyc:%s %s %.1ffps Spd:%s",
+                     format_cycles(state[:cycles]),
+                     format_hz(@current_hz), @fps,
+                     format_number(@cycles_per_frame))
+
+      # Line 3: Disk / Key / keyboard mode
+      line3 = format("Disk:T%02d %s | Key:%-3s | KB:%s",
+                     dc.track, dc.motor_on ? "ON " : "OFF",
+                     format_key(@last_key),
+                     kb_mode)
+
+      # Line 4: Help
+      line4 = "ESC:toggle cmd mode | H:toggle hires | Arrows:speed"
+
+      # Pad/truncate lines to fit within border
+      line1 = line1.ljust(debug_width)[0, debug_width]
+      line2 = line2.ljust(debug_width)[0, debug_width]
+      line3 = line3.ljust(debug_width)[0, debug_width]
+      line4 = line4.ljust(debug_width)[0, debug_width]
+
+      output << move_cursor(debug_row, @hires_pad_left + 1)
+      output << "+" << ("-" * debug_width) << "+"
+      output << move_cursor(debug_row + 1, @hires_pad_left + 1)
+      output << "|" << line1 << "|"
+      output << move_cursor(debug_row + 2, @hires_pad_left + 1)
+      output << "|" << line2 << "|"
+      output << move_cursor(debug_row + 3, @hires_pad_left + 1)
+      output << "|" << line3 << "|"
+      output << move_cursor(debug_row + 4, @hires_pad_left + 1)
+      output << "|" << line4 << "|"
+      output << move_cursor(debug_row + 5, @hires_pad_left + 1)
+      output << "+" << ("-" * debug_width) << "+"
+    elsif disk_motor_on?
+      status_row = @hires_pad_top + hires_lines.length + 1
+      output << move_cursor(status_row, @hires_pad_left + 1)
+      output << "DISK LOADING..."
+    end
+
+    print output
+  end
+
+  def render_text_screen
     output = String.new
     output << move_cursor(@pad_top + 1, @pad_left + 1)
     output << GREEN_FG << BLACK_BG if @green_screen
@@ -278,24 +464,63 @@ class Apple2HDLTerminal
     output << "+" << ("-" * SCREEN_COLS) << "+"
     output << NORMAL_VIDEO if @green_screen
 
-    # Debug info
+    # Debug window (bordered, with padding above)
     if @debug
       debug_row = @pad_top + DISPLAY_HEIGHT + 2
-      state = @runner.cpu_state
 
-      line1 = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X",
-                     state[:pc], state[:a], state[:x], state[:y], state[:sp])
-      line2 = format("Cycles:%s %s %.1ffps",
-                     format_cycles(state[:cycles]), format_hz(@current_hz), @fps)
+      state = @runner.cpu_state
+      dc = @runner.disk_controller
+      kb_mode = @keyboard_mode == :command ? "CMD" : "NRM"
+
+      # Line 1: Registers
+      line1 = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X",
+                     state[:pc], state[:a], state[:x], state[:y],
+                     state[:sp], state[:p] || 0)
+
+      # Line 2: Sim type / cycles / speed
+      line2 = format("Sim:HDL Cyc:%s %s %.1ffps Spd:%s",
+                     format_cycles(state[:cycles]),
+                     format_hz(@current_hz), @fps,
+                     format_number(@cycles_per_frame))
+
+      # Line 3: Disk / Key / keyboard mode
+      line3 = format("Disk:T%02d %s|Key:%-3s|KB:%s",
+                     dc.track, dc.motor_on ? "ON " : "OFF",
+                     format_key(@last_key),
+                     kb_mode)
+
+      # Line 4: Help
+      line4 = "ESC:cmd mode|H:hires|Arrows:speed"
+
+      # Pad/truncate lines to fit within border
+      line1 = line1.ljust(SCREEN_COLS)[0, SCREEN_COLS]
+      line2 = line2.ljust(SCREEN_COLS)[0, SCREEN_COLS]
+      line3 = line3.ljust(SCREEN_COLS)[0, SCREEN_COLS]
+      line4 = line4.ljust(SCREEN_COLS)[0, SCREEN_COLS]
 
       output << move_cursor(debug_row, @pad_left + 1)
       output << "+" << ("-" * SCREEN_COLS) << "+"
       output << move_cursor(debug_row + 1, @pad_left + 1)
-      output << "|" << line1.ljust(SCREEN_COLS) << "|"
+      output << "|" << line1 << "|"
       output << move_cursor(debug_row + 2, @pad_left + 1)
-      output << "|" << line2.ljust(SCREEN_COLS) << "|"
+      output << "|" << line2 << "|"
       output << move_cursor(debug_row + 3, @pad_left + 1)
+      output << "|" << line3 << "|"
+      output << move_cursor(debug_row + 4, @pad_left + 1)
+      output << "|" << line4 << "|"
+      output << move_cursor(debug_row + 5, @pad_left + 1)
       output << "+" << ("-" * SCREEN_COLS) << "+"
+    end
+
+    # Show "DISK LOADING..." when disk motor is on (non-debug mode)
+    status_row = @pad_top + DISPLAY_HEIGHT + 1
+    if disk_motor_on? && !@debug
+      output << move_cursor(status_row, @pad_left + 1)
+      output << "DISK LOADING..."
+      output << "     "  # Clear any leftover characters
+    elsif !@debug
+      output << move_cursor(status_row, @pad_left + 1)
+      output << "                    "  # Clear the line
     end
 
     print output
@@ -311,6 +536,16 @@ class Apple2HDLTerminal
     end
   end
 
+  def format_number(n)
+    if n >= 1_000_000
+      format("%.1fM", n / 1_000_000.0)
+    elsif n >= 1_000
+      format("%.1fK", n / 1_000.0)
+    else
+      n.to_s
+    end
+  end
+
   def format_hz(hz)
     if hz >= 1_000_000
       format("%.2fMHz", hz / 1_000_000.0)
@@ -319,6 +554,31 @@ class Apple2HDLTerminal
     else
       format("%.0fHz", hz)
     end
+  end
+
+  def format_key(ascii)
+    return "---" unless ascii
+    # Clear key display after 2 seconds
+    return "---" if @last_key_time && (Time.now - @last_key_time) > 2.0
+
+    case ascii
+    when 0x00..0x1F
+      # Control characters
+      ctrl_char = (ascii + 0x40).chr
+      "^#{ctrl_char}"
+    when 0x20
+      "SPC"
+    when 0x7F
+      "DEL"
+    else
+      "'#{ascii.chr}'"
+    end
+  end
+
+  def disk_motor_on?
+    @runner.disk_controller.motor_on
+  rescue
+    false
   end
 
   def update_performance_metrics
@@ -348,7 +608,8 @@ class Apple2HDLTerminal
   def cleanup
     print SHOW_CURSOR
     print NORMAL_VIDEO
-    exit_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 6 : 3)
+    # Position exit message below the display area
+    exit_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 9 : 3)
     print move_cursor(exit_row, 1)
     puts "Apple II HDL emulator terminated."
   end
@@ -413,7 +674,9 @@ options = {
   speed: 100,
   debug: false,
   green: false,
-  demo: false
+  demo: false,
+  hires: false,
+  hires_width: 80
 }
 
 parser = OptionParser.new do |opts|
@@ -442,6 +705,14 @@ parser = OptionParser.new do |opts|
     options[:green] = true
   end
 
+  opts.on("-H", "--hires", "Enable hi-res graphics rendering (braille)") do
+    options[:hires] = true
+  end
+
+  opts.on("--hires-width WIDTH", Integer, "Hi-res display width in chars (default: 80)") do |v|
+    options[:hires_width] = v
+  end
+
   opts.on("--demo", "Run built-in demo") do
     options[:demo] = true
   end
@@ -460,6 +731,7 @@ parser = OptionParser.new do |opts|
 
   opts.on("--karateka", "Load Karateka memory dump") do
     options[:karateka] = true
+    options[:hires] = true  # Karateka uses hi-res graphics
   end
 
   opts.on("--disk FILE", "Load disk image (.dsk)") do |v|
@@ -504,8 +776,7 @@ end
 if options[:karateka]
   memdump_file = File.expand_path('../software/disks/karateka_mem.bin', __dir__)
   if File.exist?(memdump_file)
-    puts "Loading Karateka..."
-    puts "NOTE: Karateka requires hires graphics (not fully supported in text terminal)"
+    puts "Loading Karateka... (hi-res mode enabled)"
     terminal.load_memdump(memdump_file, pc: 0xB82A, use_appleiigo: true)
   else
     puts "Error: Karateka memory dump not found: #{memdump_file}"
