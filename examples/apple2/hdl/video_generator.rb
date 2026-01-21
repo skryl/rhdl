@@ -153,12 +153,14 @@ module RHDL
         # Text pixel with inversion
         text_pixel = text_shiftreg[0] ^ invert_character
 
-        # Lores pixel selection (4 pixels per byte) using nested mux
+        # Lores pixel selection (4 pixels per byte)
         # pixel_select[1:0] selects one of 4 pixels
-        lores_pixel = mux(pixel_select[1],
-          mux(pixel_select[0], graph_shiftreg[6], graph_shiftreg[4]),  # 1x
-          mux(pixel_select[0], graph_shiftreg[2], graph_shiftreg[0])   # 0x
-        )
+        lores_pixel = case_select(pixel_select, {
+          0 => graph_shiftreg[0],
+          1 => graph_shiftreg[2],
+          2 => graph_shiftreg[4],
+          3 => graph_shiftreg[6]
+        }, default: graph_shiftreg[0])
 
         # Hires pixel with delay for color shift
         hires_pixel = mux(pixel_select[0],
