@@ -242,6 +242,7 @@ def handle_apple2(args)
     run: false,
     demo: false,
     appleiigo: false,
+    karateka: false,
     clean: false,
     debug: false,
     fast: false,
@@ -279,6 +280,9 @@ def handle_apple2(args)
         rhdl apple2 --appleiigo --disk karateka.dsk --hires
         rhdl apple2 --appleiigo --disk karateka.dsk --hires --hires-width 140
 
+      Quick start (pre-loaded memory dump):
+        rhdl apple2 --karateka     Run Karateka directly (no disk/ROM needed)
+
       Ink TUI (React-based terminal UI):
         rhdl apple2 --ink          Run with Ink TUI (ISA mode, demo program)
         rhdl apple2 --ink --hdl    Run with Ink TUI (HDL mode)
@@ -291,6 +295,7 @@ def handle_apple2(args)
     opts.on('--run', 'Run the emulator (after build)') { options[:run] = true }
     opts.on('--demo', 'Run emulator demo (no ROM needed)') { options[:demo] = true }
     opts.on('--appleiigo', 'Run with AppleIIGo public domain ROM') { options[:appleiigo] = true }
+    opts.on('-k', '--karateka', 'Load Karateka memory dump (ready to play)') { options[:karateka] = true }
     opts.on('--clean', 'Clean ROM output files') { options[:clean] = true }
     opts.on('-d', '--debug', 'Enable debug mode') { options[:debug] = true }
     opts.on('-f', '--fast', 'Use fast ISA-level simulator (not cycle-accurate)') { options[:fast] = true }

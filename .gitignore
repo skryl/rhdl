@@ -21,9 +21,7 @@
 /examples/mos6502/software/disks/test_*.dsk
 /examples/mos6502/software/disks/dos33_*.dsk
 # Memory dumps from disk boot
-/examples/mos6502/software/disks/*_mem.bin
 /examples/mos6502/software/disks/*_memdump.bin
-/examples/mos6502/software/disks/*_meta.txt
 # Native extension build artifacts
 *.so
 *.bundle
