@@ -315,24 +315,51 @@ impl SimulatorState {
     fn compile(&mut self) -> Result<bool, String> {
         let code = generate_full_code(&self.ir, &self.signal_indices);
 
-        // Write generated code to temp file
-        let temp_dir = std::env::temp_dir();
-        let src_path = temp_dir.join("rhdl_circuit.rs");
-        let lib_path = temp_dir.join(if cfg!(target_os = "macos") {
-            "librhdl_circuit.dylib"
-        } else if cfg!(target_os = "windows") {
-            "rhdl_circuit.dll"
-        } else {
-            "librhdl_circuit.so"
-        });
+        // Compute a simple hash of the code for caching
+        let code_hash = {
+            let mut hash: u64 = 0xcbf29ce484222325; // FNV-1a offset basis
+            for byte in code.bytes() {
+                hash ^= byte as u64;
+                hash = hash.wrapping_mul(0x100000001b3); // FNV-1a prime
+            }
+            hash
+        };
 
+        // Cache directory and file paths
+        let cache_dir = std::env::temp_dir().join("rhdl_cache");
+        let _ = fs::create_dir_all(&cache_dir);
+
+        let lib_ext = if cfg!(target_os = "macos") {
+            "dylib"
+        } else if cfg!(target_os = "windows") {
+            "dll"
+        } else {
+            "so"
+        };
+        let lib_name = format!("rhdl_circuit_{:016x}.{}", code_hash, lib_ext);
+        let lib_path = cache_dir.join(&lib_name);
+        let src_path = cache_dir.join(format!("rhdl_circuit_{:016x}.rs", code_hash));
+
+        // Check if cached library exists
+        if lib_path.exists() {
+            // Load cached library
+            unsafe {
+                let lib = libloading::Library::new(&lib_path).map_err(|e| e.to_string())?;
+                self.compiled_lib = Some(lib);
+            }
+            self.compiled = true;
+            return Ok(true);
+        }
+
+        // Write generated code and compile
         fs::write(&src_path, &code).map_err(|e| e.to_string())?;
 
-        // Compile with rustc
+        // Compile with rustc using aggressive optimizations
         let output = Command::new("rustc")
             .args(&[
                 "--crate-type=cdylib",
-                "-O",
+                "-C", "opt-level=3",
+                "-C", "target-cpu=native",
                 "-o",
                 lib_path.to_str().unwrap(),
                 src_path.to_str().unwrap(),
@@ -501,12 +528,14 @@ fn expr_to_rust_with_name(expr: &Expr, signal_indices: &HashMap<String, usize>, 
             let m = generate_mask_str(*width);
             match op.as_str() {
                 "~" | "not" => format!("((!{}) & {})", operand_code, m),
+                // Branchless reduce_and: compare masked value to mask
                 "&" | "reduce_and" => {
                     let op_width = get_expr_width(operand);
                     let op_mask = generate_mask_str(op_width);
-                    format!("(if ({} & {}) == {} {{ 1_u64 }} else {{ 0_u64 }})", operand_code, op_mask, op_mask)
+                    format!("((({} & {}) == {}) as u64)", operand_code, op_mask, op_mask)
                 }
-                "|" | "reduce_or" => format!("(if {} != 0 {{ 1_u64 }} else {{ 0_u64 }})", operand_code),
+                // Branchless reduce_or: != 0 as bool
+                "|" | "reduce_or" => format!("(({} != 0) as u64)", operand_code),
                 "^" | "reduce_xor" => format!("({}.count_ones() as u64 & 1)", operand_code),
                 _ => operand_code,
             }
@@ -526,12 +555,13 @@ fn expr_to_rust_with_name(expr: &Expr, signal_indices: &HashMap<String, usize>, 
                 "%" => format!("(if {} != 0 {{ {} % {} }} else {{ 0 }})", right_code, left_code, right_code),
                 "<<" => format!("(({} << ({}.min(63))) & {})", left_code, right_code, m),
                 ">>" => format!("({} >> ({}.min(63)))", left_code, right_code),
-                "==" => format!("(if {} == {} {{ 1_u64 }} else {{ 0_u64 }})", left_code, right_code),
-                "!=" => format!("(if {} != {} {{ 1_u64 }} else {{ 0_u64 }})", left_code, right_code),
-                "<" => format!("(if {} < {} {{ 1_u64 }} else {{ 0_u64 }})", left_code, right_code),
-                ">" => format!("(if {} > {} {{ 1_u64 }} else {{ 0_u64 }})", left_code, right_code),
-                "<=" | "le" => format!("(if {} <= {} {{ 1_u64 }} else {{ 0_u64 }})", left_code, right_code),
-                ">=" => format!("(if {} >= {} {{ 1_u64 }} else {{ 0_u64 }})", left_code, right_code),
+                // Branchless comparisons using `as u64`
+                "==" => format!("(({} == {}) as u64)", left_code, right_code),
+                "!=" => format!("(({} != {}) as u64)", left_code, right_code),
+                "<" => format!("(({} < {}) as u64)", left_code, right_code),
+                ">" => format!("(({} > {}) as u64)", left_code, right_code),
+                "<=" | "le" => format!("(({} <= {}) as u64)", left_code, right_code),
+                ">=" => format!("(({} >= {}) as u64)", left_code, right_code),
                 _ => "0_u64".to_string(),
             }
         }
@@ -540,7 +570,11 @@ fn expr_to_rust_with_name(expr: &Expr, signal_indices: &HashMap<String, usize>, 
             let true_code = expr_to_rust_with_name(when_true, signal_indices, signals_name);
             let false_code = expr_to_rust_with_name(when_false, signal_indices, signals_name);
             let m = generate_mask_str(*width);
-            format!("(if {} != 0 {{ {} }} else {{ {} }} & {})", cond_code, true_code, false_code, m)
+            // Branchless mux using bitwise select:
+            // mask = -(cond != 0) as u64  // all 1s if true, all 0s if false
+            // result = (true & mask) | (false & !mask)
+            format!("({{ let _c = (({} != 0) as u64).wrapping_neg(); (({} & _c) | ({} & !_c)) & {} }})",
+                    cond_code, true_code, false_code, m)
         }
         Expr::Slice { base, low, width, .. } => {
             let base_code = expr_to_rust_with_name(base, signal_indices, signals_name);
@@ -647,6 +681,7 @@ fn generate_full_code(ir: &CircuitIR, signal_indices: &HashMap<String, usize>) -
     let read_key_idx = signal_indices.get("read_key").cloned().unwrap_or(0);
     let reg_count = count_regs(ir);
 
+    // Generate run_cpu_cycles with loop unrolling and optimized evaluate sequence
     code.push_str(&format!(r#"/// Run N CPU cycles with zero function-call overhead
 /// Returns: (text_dirty: bool, key_cleared: bool)
 #[no_mangle]
@@ -663,57 +698,66 @@ pub extern "C" fn run_cpu_cycles(
     let mut key_cleared = false;
     let mut key_is_ready = key_ready;
 
-    for _ in 0..n {{
-        for _ in 0..14 {{
-            // Set keyboard state
-            signals[{}] = if key_is_ready {{ (key_data as u64) | 0x80 }} else {{ 0 }};
+    // Pre-compute keyboard value (branchless)
+    let key_val_base = (key_data as u64) | 0x80;
 
-            // Falling edge
-            signals[{}] = 0;
+    // Macro for one 14MHz cycle
+    macro_rules! cycle_14m {{
+        () => {{
+            // Set keyboard state (branchless)
+            *signals.get_unchecked_mut({k_idx}) = key_val_base * (key_is_ready as u64);
+
+            // Falling edge - set clock low and read memory
+            *signals.get_unchecked_mut({clk_idx}) = 0;
             do_evaluate!(signals);
 
-            // Provide RAM/ROM data
-            let addr = signals[{}] as usize;
-            signals[{}] = if addr >= 0xD000 && addr <= 0xFFFF {{
-                let rom_offset = addr - 0xD000;
-                if rom_offset < rom.len() {{ rom[rom_offset] as u64 }} else {{ 0 }}
-            }} else if addr < ram.len() {{
-                ram[addr] as u64
+            // Provide RAM/ROM data (unchecked access)
+            let addr = *signals.get_unchecked({ram_addr_idx}) as usize;
+            *signals.get_unchecked_mut({ram_do_idx}) = if addr >= 0xD000 {{
+                let rom_offset = addr.wrapping_sub(0xD000);
+                if rom_offset < 0x3000 {{ *rom.get_unchecked(rom_offset) as u64 }} else {{ 0 }}
             }} else {{
-                0
+                *ram.get_unchecked(addr & 0xFFFF) as u64
             }};
-            do_evaluate!(signals);
 
-            // Rising edge - clock triggers register update
-            signals[{}] = 1;
+            // Rising edge - trigger register update
+            *signals.get_unchecked_mut({clk_idx}) = 1;
             do_evaluate!(signals);
             do_tick!(signals, next_regs);
             do_update_regs!(signals, next_regs);
-            do_evaluate!(signals);
 
             // Handle RAM writes
-            if signals[{}] == 1 {{
-                let write_addr = signals[{}] as usize;
-                if write_addr < ram.len() {{
-                    ram[write_addr] = (signals[{}] & 0xFF) as u8;
-                    if write_addr >= 0x0400 && write_addr <= 0x07FF {{
-                        text_dirty = true;
-                    }}
+            let ram_we = *signals.get_unchecked({ram_we_idx});
+            if ram_we == 1 {{
+                let write_addr = *signals.get_unchecked({ram_addr_idx}) as usize;
+                if write_addr < 0xC000 {{
+                    *ram.get_unchecked_mut(write_addr) = (*signals.get_unchecked({d_idx}) & 0xFF) as u8;
+                    text_dirty |= (write_addr >= 0x0400) & (write_addr <= 0x07FF);
                 }}
             }}
 
-            // Check keyboard strobe clear
-            if signals[{}] == 1 {{
-                key_is_ready = false;
-                key_cleared = true;
+            // Check keyboard strobe clear (branchless)
+            let strobe_clear = *signals.get_unchecked({read_key_idx}) == 1;
+            key_is_ready &= !strobe_clear;
+            key_cleared |= strobe_clear;
+        }};
+    }}
+
+    for _ in 0..n {{
+        unsafe {{
+            // Partial unroll: 7 iterations of 2 cycles each
+            for _ in 0..7 {{
+                cycle_14m!(); cycle_14m!();
             }}
         }}
     }}
 
     (text_dirty, key_cleared)
 }}
-"#, reg_count, k_idx, clk_idx, ram_addr_idx, ram_do_idx, clk_idx,
-    ram_we_idx, ram_addr_idx, d_idx, read_key_idx));
+"#, reg_count,
+    k_idx = k_idx, clk_idx = clk_idx, ram_addr_idx = ram_addr_idx,
+    ram_do_idx = ram_do_idx, ram_we_idx = ram_we_idx, d_idx = d_idx,
+    read_key_idx = read_key_idx));
 
     code
 }
