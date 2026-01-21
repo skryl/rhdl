@@ -431,6 +431,9 @@ class Apple2Terminal
     # Sync video state from native CPU to bus (for soft switches handled in Rust)
     @runner.sync_video_state if @runner.respond_to?(:sync_video_state)
 
+    # Sync speaker toggles from native CPU to Ruby speaker (for audio generation)
+    @runner.sync_speaker_state if @runner.respond_to?(:sync_speaker_state)
+
     # Check if we should render hi-res graphics
     # Automatically switch based on soft switch state, or force with -H flag
     if @runner.bus.hires_mode? || (@hires_mode && !@runner.bus.text_mode?)
