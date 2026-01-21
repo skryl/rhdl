@@ -18,7 +18,7 @@ module MOS6502
     # Maximum time between toggles before we consider it silence
     MAX_TOGGLE_INTERVAL = 0.1  # 100ms
 
-    attr_reader :enabled
+    attr_reader :enabled, :toggle_count, :audio_backend
 
     def initialize
       @enabled = false  # Start disabled, enable explicitly
@@ -31,10 +31,14 @@ module MOS6502
       @running = false
       @audio_pipe = nil
       @audio_cmd = nil
+      @audio_backend = nil
+      @toggle_count = 0
+      @samples_generated = 0
     end
 
     # Toggle the speaker (called when $C030 is accessed)
     def toggle(_cycle = 0)
+      @toggle_count += 1
       return unless @enabled && @running
 
       now = Time.now
@@ -67,6 +71,7 @@ module MOS6502
         num_samples.times do
           @sample_buffer << sample_value
         end
+        @samples_generated += num_samples
 
         # Write to audio pipe if we have enough samples
         flush_to_pipe if @sample_buffer.size >= BUFFER_SIZE
@@ -77,15 +82,17 @@ module MOS6502
     def start
       return if @running
 
-      @audio_cmd = find_audio_command
+      @audio_cmd, @audio_backend = find_audio_command
       unless @audio_cmd
-        warn "No audio player found (tried paplay, aplay, play)"
+        @audio_backend = 'none'
         return
       end
 
       @running = true
       @enabled = true
       @last_toggle_time = nil
+      @toggle_count = 0
+      @samples_generated = 0
       start_audio_pipe
     end
 
@@ -103,32 +110,78 @@ module MOS6502
       @enabled = state
     end
 
+    # Get status info for debug display
+    def status
+      if @running && @audio_backend && @audio_backend != 'none'
+        "#{@audio_backend}"
+      elsif @audio_backend == 'none'
+        "no backend"
+      else
+        "off"
+      end
+    end
+
     # Check if audio system is available
     def self.available?
-      system('which paplay > /dev/null 2>&1') ||
-        system('which aplay > /dev/null 2>&1') ||
-        system('which play > /dev/null 2>&1')
+      find_available_backend != nil
+    end
+
+    # Find available audio backend (class method for checking availability)
+    def self.find_available_backend
+      # Check for sox play (works on macOS and Linux)
+      if system('which play > /dev/null 2>&1')
+        return 'sox'
+      end
+
+      # Check for ffplay (ffmpeg - works on macOS and Linux)
+      if system('which ffplay > /dev/null 2>&1')
+        return 'ffplay'
+      end
+
+      # Check for paplay (PulseAudio - Linux)
+      if system('which paplay > /dev/null 2>&1')
+        return 'paplay'
+      end
+
+      # Check for aplay (ALSA - Linux)
+      if system('which aplay > /dev/null 2>&1')
+        return 'aplay'
+      end
+
+      nil
     end
 
     private
 
     def find_audio_command
-      # Prefer paplay (PulseAudio) - works well on most Linux systems
-      if system('which paplay > /dev/null 2>&1')
-        return ['paplay', '--raw', "--rate=#{SAMPLE_RATE}", '--channels=1', '--format=s16le']
-      end
-
-      # Try aplay (ALSA) - direct hardware access
-      if system('which aplay > /dev/null 2>&1')
-        return ['aplay', '-q', '-f', 'S16_LE', '-r', SAMPLE_RATE.to_s, '-c', '1']
-      end
-
-      # Try sox play
+      # Try sox play first (cross-platform, install with: brew install sox)
       if system('which play > /dev/null 2>&1')
-        return ['play', '-q', '-t', 'raw', '-r', SAMPLE_RATE.to_s, '-e', 'signed', '-b', '16', '-c', '1', '-']
+        cmd = ['play', '-q', '-t', 'raw', '-r', SAMPLE_RATE.to_s,
+               '-e', 'signed-integer', '-b', '16', '-c', '1',
+               '--endian', 'little', '-']
+        return [cmd, 'sox']
       end
 
-      nil
+      # Try ffplay (ffmpeg - cross-platform, install with: brew install ffmpeg)
+      if system('which ffplay > /dev/null 2>&1')
+        cmd = ['ffplay', '-f', 's16le', '-ar', SAMPLE_RATE.to_s,
+               '-ac', '1', '-nodisp', '-autoexit', '-loglevel', 'quiet', '-']
+        return [cmd, 'ffplay']
+      end
+
+      # Try paplay (PulseAudio - Linux)
+      if system('which paplay > /dev/null 2>&1')
+        cmd = ['paplay', '--raw', "--rate=#{SAMPLE_RATE}", '--channels=1', '--format=s16le']
+        return [cmd, 'paplay']
+      end
+
+      # Try aplay (ALSA - Linux)
+      if system('which aplay > /dev/null 2>&1')
+        cmd = ['aplay', '-q', '-f', 'S16_LE', '-r', SAMPLE_RATE.to_s, '-c', '1']
+        return [cmd, 'aplay']
+      end
+
+      [nil, nil]
     end
 
     def start_audio_pipe
@@ -138,8 +191,9 @@ module MOS6502
         @audio_pipe = IO.popen(@audio_cmd, 'wb')
         @audio_thread = Thread.new { audio_writer_thread }
       rescue => e
-        warn "Failed to start audio: #{e.message}"
+        warn "Failed to start audio: #{e.message}" if ENV['DEBUG']
         @audio_pipe = nil
+        @audio_backend = 'error'
       end
     end
 
@@ -213,12 +267,13 @@ module MOS6502
 
   # Simple beep-based audio fallback for systems without audio utilities
   class Apple2SpeakerBeep
-    attr_reader :enabled
+    attr_reader :enabled, :toggle_count, :audio_backend
 
     def initialize
       @enabled = true
       @toggle_count = 0
       @last_beep_time = Time.now
+      @audio_backend = 'beep'
     end
 
     def toggle(_cycle = 0)
@@ -245,6 +300,10 @@ module MOS6502
 
     def enable(state)
       @enabled = state
+    end
+
+    def status
+      @enabled ? 'beep' : 'off'
     end
 
     def self.available?
