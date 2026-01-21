@@ -1057,6 +1057,8 @@ if options[:init_hires]
   bus.read(0xC052)  # MIXCLR - full screen
   bus.read(0xC054)  # PAGE1 - page 1
   bus.read(0xC057)  # HIRES - hi-res mode
+  # Push video state to native CPU so it matches Ruby bus
+  terminal.runner.sync_video_to_native if terminal.runner.respond_to?(:sync_video_to_native)
 end
 
 # Run the emulator
