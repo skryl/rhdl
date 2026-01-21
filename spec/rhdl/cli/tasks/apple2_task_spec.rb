@@ -32,10 +32,6 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       expect { described_class.new(appleiigo: true) }.not_to raise_error
     end
 
-    it 'can be instantiated with ink option' do
-      expect { described_class.new(ink: true) }.not_to raise_error
-    end
-
     it 'can be instantiated with mode option' do
       expect { described_class.new(mode: :native) }.not_to raise_error
       expect { described_class.new(mode: :ruby) }.not_to raise_error
@@ -43,7 +39,7 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
     end
 
     it 'can be instantiated with program option' do
-      expect { described_class.new(ink: true, program: '/path/to/program.bin') }.not_to raise_error
+      expect { described_class.new(program: '/path/to/program.bin') }.not_to raise_error
     end
 
     it 'can be instantiated with rom option' do
@@ -129,27 +125,6 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       expect { task.clean }.to output(/Cleaned/).to_stdout
 
       expect(Dir.exist?(temp_dir)).to be false
-    end
-  end
-
-  describe '#create_demo_program' do
-    let(:task) { described_class.new }
-
-    it 'returns an array of bytes' do
-      program = task.create_demo_program
-      expect(program).to be_an(Array)
-      expect(program.all? { |b| b.is_a?(Integer) && b >= 0 && b <= 255 }).to be true
-    end
-
-    it 'starts with initialization code (LDA #$00)' do
-      program = task.create_demo_program
-      expect(program[0]).to eq(0xA9) # LDA immediate
-      expect(program[1]).to eq(0x00) # #$00
-    end
-
-    it 'includes print character subroutine (ends with RTS)' do
-      program = task.create_demo_program
-      expect(program.last).to eq(0x60) # RTS
     end
   end
 
