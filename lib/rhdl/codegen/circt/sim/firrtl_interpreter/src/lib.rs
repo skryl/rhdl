@@ -1,12 +1,12 @@
 //! High-performance RTL simulator for FIRRTL/Behavior IR with Ruby bindings
 //!
 //! Optimizations:
-//! - Closure-based execution (no runtime dispatch - operations baked in at load time)
-//! - Vec<u64> indexing instead of HashMap<String, u64> for O(1) signal access
+//! - Flat operation model with pre-resolved indices (no string lookups at runtime)
+//! - Vec<u64> indexing for O(1) signal access
 //! - Batched cycle execution to minimize Ruby-Rust FFI overhead
 //! - Internalized RAM/ROM for zero-copy memory access
 //! - Unsafe unchecked array access in hot loops
-//! - Circuit topology is fully static - only values propagate at runtime
+//! - Contiguous operation storage for cache efficiency
 
 use magnus::{method, prelude::*, Error, RArray, RHash, Ruby, TryConvert, Value};
 use serde::Deserialize;
@@ -236,14 +236,10 @@ struct RtlSimulator {
     input_names: Vec<String>,
     /// Output names (for Ruby API)
     output_names: Vec<String>,
-    /// Compiled combinational assignments (kept for compatibility)
-    assigns: Vec<CompiledAssign>,
-    /// Compiled sequential assignments (kept for compatibility)
+    /// Compiled sequential assignments (needed for register sampling)
     seq_assigns: Vec<CompiledAssign>,
-    /// ALL combinational ops flattened into one contiguous array (cache-optimal)
+    /// All combinational ops flattened into one contiguous array
     all_comb_ops: Vec<FlatOp>,
-    /// ALL sequential ops flattened into one contiguous array
-    all_seq_ops: Vec<FlatOp>,
     /// Total signal count
     signal_count: usize,
     /// Register count
@@ -320,16 +316,18 @@ impl RtlSimulator {
 
         let signal_count = signals.len();
 
-        // Compile combinational assignments to flat ops (compact, cache-friendly)
+        // Compile combinational assignments to flat ops
         let mut max_temps = 0usize;
-        let assigns: Vec<CompiledAssign> = ir.assigns.iter().map(|a| {
-            let target_idx = *name_to_idx.get(&a.target).unwrap_or(&0);
-            let (ops, temps_used) = Self::compile_to_flat_ops(&a.expr, target_idx, &name_to_idx, &widths);
-            max_temps = max_temps.max(temps_used);
-            CompiledAssign { ops, final_target: target_idx }
-        }).collect();
+        let mut all_comb_ops: Vec<FlatOp> = Vec::new();
 
-        // Compile sequential assignments to flat ops
+        for assign in &ir.assigns {
+            let target_idx = *name_to_idx.get(&assign.target).unwrap_or(&0);
+            let (ops, temps_used) = Self::compile_to_flat_ops(&assign.expr, target_idx, &name_to_idx, &widths);
+            max_temps = max_temps.max(temps_used);
+            all_comb_ops.extend(ops);
+        }
+
+        // Compile sequential assignments (kept separate for register sampling)
         let mut seq_assigns = Vec::new();
         let mut seq_targets = Vec::new();
         for process in &ir.processes {
@@ -349,16 +347,6 @@ impl RtlSimulator {
         let temps = vec![0u64; max_temps + 1];
         let next_regs = vec![0u64; seq_targets.len()];
 
-        // Flatten all combinational ops into one contiguous array for cache efficiency
-        let all_comb_ops: Vec<FlatOp> = assigns.iter()
-            .flat_map(|a| a.ops.iter().copied())
-            .collect();
-
-        // Flatten all sequential ops
-        let all_seq_ops: Vec<FlatOp> = seq_assigns.iter()
-            .flat_map(|a| a.ops.iter().copied())
-            .collect();
-
         // Get Apple II specific signal indices
         let ram_addr_idx = *name_to_idx.get("ram_addr").unwrap_or(&0);
         let ram_do_idx = *name_to_idx.get("ram_do").unwrap_or(&0);
@@ -375,10 +363,8 @@ impl RtlSimulator {
             name_to_idx,
             input_names,
             output_names,
-            assigns,
             seq_assigns,
             all_comb_ops,
-            all_seq_ops,
             signal_count,
             reg_count,
             next_regs,
@@ -513,19 +499,14 @@ impl RtlSimulator {
                 });
                 Operand::Temp(dst)
             }
-            ExprDef::Mux { condition, when_true, when_false, width } => {
+            ExprDef::Mux { condition, when_true, when_false, .. } => {
                 let cond = Self::compile_expr_to_flat(condition, name_to_idx, widths, ops, temp_counter);
                 let t = Self::compile_expr_to_flat(when_true, name_to_idx, widths, ops, temp_counter);
                 let f = Self::compile_expr_to_flat(when_false, name_to_idx, widths, ops, temp_counter);
-                let mask = Self::compute_mask(*width);
                 let dst = *temp_counter;
                 *temp_counter += 1;
 
-                // For mux we need 3 operands, so we pack cond in arg0, true in arg1, encode false+mask differently
-                // Actually, let's use a 4-field approach: pack mask in dst high bits or use separate storage
-                // Simpler: use arg2 for false, and store mask in a separate temp location
-                // Even simpler: just store mask and false_op differently
-
+                // Mux uses all 3 arg slots: cond, true_val, false_val
                 ops.push(FlatOp {
                     op_type: OP_MUX,
                     dst,
@@ -533,8 +514,6 @@ impl RtlSimulator {
                     arg1: FlatOp::encode_operand(t),
                     arg2: FlatOp::encode_operand(f),
                 });
-                // Store mask in a separate copy op if needed, or just use direct computation
-                // For now, just apply mask at read time
                 Operand::Temp(dst)
             }
             ExprDef::Slice { base, low, width, .. } => {
@@ -1083,7 +1062,7 @@ impl RubyRtlSim {
         hash.aset(ruby.sym_new("reg_count"), sim.reg_count() as i64)?;
         hash.aset(ruby.sym_new("input_count"), sim.input_names.len() as i64)?;
         hash.aset(ruby.sym_new("output_count"), sim.output_names.len() as i64)?;
-        hash.aset(ruby.sym_new("assign_count"), sim.assigns.len() as i64)?;
+        hash.aset(ruby.sym_new("comb_op_count"), sim.all_comb_ops.len() as i64)?;
         hash.aset(ruby.sym_new("seq_assign_count"), sim.seq_assigns.len() as i64)?;
 
         Ok(hash)
