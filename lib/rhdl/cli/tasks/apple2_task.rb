@@ -17,6 +17,8 @@ module RHDL
             run_demo
           elsif options[:appleiigo]
             run_appleiigo
+          elsif options[:karateka]
+            run_karateka
           elsif options[:ink]
             run_ink
           else
@@ -90,6 +92,13 @@ module RHDL
                   "Download from: https://a2go.applearchives.com/roms/"
           end
           run_with_rom(rom_file, 'D000')
+        end
+
+        # Run Karateka from pre-loaded memory dump
+        def run_karateka
+          exec_args = [apple2_script, "--karateka"]
+          add_common_args(exec_args)
+          exec(*exec_args)
         end
 
         # Run with Ink TUI

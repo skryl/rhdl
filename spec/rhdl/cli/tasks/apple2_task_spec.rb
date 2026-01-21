@@ -83,6 +83,10 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
     it 'can be instantiated with hires_width option' do
       expect { described_class.new(hires: true, hires_width: 140) }.not_to raise_error
     end
+
+    it 'can be instantiated with karateka option' do
+      expect { described_class.new(karateka: true) }.not_to raise_error
+    end
   end
 
   describe '#run' do
