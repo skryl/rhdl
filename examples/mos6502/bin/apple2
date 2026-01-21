@@ -757,6 +757,14 @@ parser = OptionParser.new do |opts|
     options[:bin] = v
   end
 
+  opts.on("-e", "--entry ADDR", "Entry point address (hex, default: load address)") do |v|
+    options[:entry] = v.to_i(16)
+  end
+
+  opts.on("--init-hires", "Initialize HIRES mode soft switches before start") do
+    options[:init_hires] = true
+  end
+
   opts.on("-h", "--help", "Show this help message") do
     puts opts
     exit
@@ -799,9 +807,10 @@ if program_file
     exit 1
   end
   load_addr = options[:load_addr] || 0x0800
+  entry_point = options[:entry] || load_addr
   terminal.load_program(program_file, base_addr: load_addr)
   # Only set reset vector if no ROM is loaded (ROM handles its own reset)
-  terminal.setup_reset_vector(load_addr) unless options[:rom]
+  terminal.setup_reset_vector(entry_point) unless options[:rom]
 elsif options[:demo]
   # Load demo program
   puts "Loading built-in demo program..."
@@ -822,6 +831,16 @@ else
   puts ""
   puts "Error: No program specified. Use --demo for built-in demo or provide a binary file."
   exit 1
+end
+
+# Initialize HIRES mode soft switches if requested
+# This is useful for loading memory dumps that were captured in HIRES mode
+if options[:init_hires]
+  bus = terminal.runner.bus
+  bus.read(0xC050)  # TXTCLR - graphics mode
+  bus.read(0xC052)  # MIXCLR - full screen
+  bus.read(0xC054)  # PAGE1 - page 1
+  bus.read(0xC057)  # HIRES - hi-res mode
 end
 
 # Run the emulator
