@@ -106,7 +106,9 @@ module RHDL
           slice_width = high - low + 1
           ValueProxy.create((value >> low) & MaskCache.mask(slice_width), slice_width, @context)
         else
-          ValueProxy.create((value >> index) & 1, 1, @context)
+          # Resolve index if it's a proxy (dynamic array access)
+          idx = resolve(index)
+          ValueProxy.create((value >> idx) & 1, 1, @context)
         end
       end
 
