@@ -34,9 +34,11 @@ module RHDL
       input :addr, width: 8
       output :dout, width: 8
 
-      memory :rom, depth: 256, width: 8, readonly: true
+      memory :rom, depth: 256, width: 8
 
-      sync_read :dout, from: :rom, clock: :clk, addr: :addr
+      # Asynchronous read (combinational)
+      # Note: For proper BRAM, sync_read would be needed (to be added to RHDL)
+      async_read :dout, from: :rom, addr: :addr
 
       # The Disk II boot ROM would be loaded here
       # This is a placeholder - actual ROM data would be loaded from file
@@ -96,6 +98,16 @@ module RHDL
       wire :rom_dout, width: 8
       port :rom_addr => [:rom, :addr]
       port [:rom, :dout] => :rom_dout
+
+      # Internal registers (declared as wires for sequential block)
+      wire :motor_phase, width: 4
+      wire :drive_on
+      wire :drive2_select
+      wire :q6
+      wire :q7
+      wire :phase, width: 8
+      wire :track_byte_addr, width: 15
+      wire :byte_delay, width: 6
 
       sequential clock: :clk_2m, reset: :reset, reset_values: {
         motor_phase: 0,

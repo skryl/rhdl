@@ -23,6 +23,14 @@ module RHDL
       output :scan_code, width: 8        # Received scancode
       output :scan_dav                   # Data available strobe
 
+      # Internal registers
+      wire :ps2_clk_sync, width: 2
+      wire :ps2_data_sync
+      wire :bit_count, width: 4
+      wire :shift_reg, width: 11
+      wire :scan_code_reg, width: 8
+      wire :scan_dav_reg
+
       # PS/2 protocol: 11 bits - 1 start + 8 data + 1 parity + 1 stop
       # Data is valid on falling edge of PS/2 clock
 
@@ -74,6 +82,7 @@ module RHDL
     class Keyboard < SequentialComponent
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
+      include RHDL::DSL::Memory
 
       input :clk_14m                     # 14.31818 MHz clock
       input :reset
@@ -116,6 +125,15 @@ module RHDL
 
       port [:ps2_ctrl, :scan_code] => :code
       port [:ps2_ctrl, :scan_dav] => :code_available
+
+      # Internal state registers
+      wire :state, width: 4
+      wire :latched_code, width: 8
+      wire :key_pressed
+      wire :shift
+      wire :ctrl
+      wire :alt
+      wire :ascii, width: 8
 
       sequential clock: :clk_14m, reset: :reset, reset_values: {
         state: STATE_IDLE,
@@ -222,13 +240,26 @@ module RHDL
         )
       end
 
+      # Scancode to ASCII lookup table using memory DSL
+      # Two ROMs: one for unshifted, one for shifted codes
+      # Address is 8-bit scancode, data is 8-bit ASCII
+      UNSHIFTED_MAP = build_scancode_rom(false)
+      SHIFTED_MAP = build_scancode_rom(true)
+
+      memory :unshifted_rom, depth: 256, width: 8, initial: UNSHIFTED_MAP
+      memory :shifted_rom, depth: 256, width: 8, initial: SHIFTED_MAP
+
+      # Async read from both ROMs
+      wire :unshifted_ascii, width: 8
+      wire :shifted_ascii, width: 8
+
+      async_read :unshifted_ascii, from: :unshifted_rom, addr: :latched_code
+      async_read :shifted_ascii, from: :shifted_rom, addr: :latched_code
+
       # Combinational ASCII lookup
       behavior do
-        # Create shifted code index: {alt, shift, latched_code}
-        shifted_code = cat(alt, shift, latched_code)
-
-        # ASCII translation (simplified - full table in actual implementation)
-        ascii_value = scancode_to_ascii(shifted_code)
+        # Select shifted or unshifted based on shift key
+        ascii_value = mux(shift, shifted_ascii, unshifted_ascii)
 
         # Apply ctrl modifier (mask to 5 bits)
         k <= mux(ctrl,
@@ -237,69 +268,66 @@ module RHDL
         )
       end
 
-      private
+      # Build scancode to ASCII ROM data
+      def self.build_scancode_rom(shifted)
+        rom = Array.new(256, 0)
 
-      # PS/2 scancode to ASCII translation table (US layout)
-      # Returns 8-bit ASCII value
-      def scancode_to_ascii(shifted_code)
-        # This is a simplified version - in actual hardware this would be
-        # a large lookup table or ROM
-        # shifted_code format: {alt[1], shift[1], scancode[8]}
+        # Scancode mappings: scancode => [unshifted, shifted]
+        mappings = {
+          0x1C => [0x41, 0x41],  # A
+          0x32 => [0x42, 0x42],  # B
+          0x21 => [0x43, 0x43],  # C
+          0x23 => [0x44, 0x44],  # D
+          0x24 => [0x45, 0x45],  # E
+          0x2B => [0x46, 0x46],  # F
+          0x34 => [0x47, 0x47],  # G
+          0x33 => [0x48, 0x48],  # H
+          0x43 => [0x49, 0x49],  # I
+          0x3B => [0x4A, 0x4A],  # J
+          0x42 => [0x4B, 0x4B],  # K
+          0x4B => [0x4C, 0x4C],  # L
+          0x3A => [0x4D, 0x4D],  # M
+          0x31 => [0x4E, 0x4E],  # N
+          0x44 => [0x4F, 0x4F],  # O
+          0x4D => [0x50, 0x50],  # P
+          0x15 => [0x51, 0x51],  # Q
+          0x2D => [0x52, 0x52],  # R
+          0x1B => [0x53, 0x53],  # S
+          0x2C => [0x54, 0x54],  # T
+          0x3C => [0x55, 0x55],  # U
+          0x2A => [0x56, 0x56],  # V
+          0x1D => [0x57, 0x57],  # W
+          0x22 => [0x58, 0x58],  # X
+          0x35 => [0x59, 0x59],  # Y
+          0x1A => [0x5A, 0x5A],  # Z
+          0x45 => [0x30, 0x29],  # 0 )
+          0x16 => [0x31, 0x21],  # 1 !
+          0x1E => [0x32, 0x40],  # 2 @
+          0x26 => [0x33, 0x23],  # 3 #
+          0x25 => [0x34, 0x24],  # 4 $
+          0x2E => [0x35, 0x25],  # 5 %
+          0x36 => [0x36, 0x5E],  # 6 ^
+          0x3D => [0x37, 0x26],  # 7 &
+          0x3E => [0x38, 0x2A],  # 8 *
+          0x46 => [0x39, 0x28],  # 9 (
+          0x29 => [0x20, 0x20],  # Space
+          0x5A => [0x0D, 0x0D],  # Enter
+          0x66 => [0x08, 0x08],  # Backspace
+          0x0D => [0x09, 0x09],  # Tab
+          0x76 => [0x1B, 0x1B],  # Escape
+          0x71 => [0x7F, 0x7F],  # Delete
+          0x74 => [0x15, 0x15],  # Right arrow (Ctrl-U)
+          0x6B => [0x08, 0x08],  # Left arrow (BS)
+          0x75 => [0x0B, 0x0B],  # Up arrow
+          0x72 => [0x0A, 0x0A],  # Down arrow (LF)
+        }
 
-        # Default to 0 for unmapped codes
-        lit(0, width: 8)
+        mappings.each do |scancode, values|
+          rom[scancode] = shifted ? values[1] : values[0]
+        end
+
+        rom
       end
-
-      # Full scancode table (for reference/initialization)
-      SCANCODE_TABLE = {
-        # Format: [unshifted, shifted] for each scancode
-        0x1C => [0x41, 0x41],  # A
-        0x32 => [0x42, 0x42],  # B
-        0x21 => [0x43, 0x43],  # C
-        0x23 => [0x44, 0x44],  # D
-        0x24 => [0x45, 0x45],  # E
-        0x2B => [0x46, 0x46],  # F
-        0x34 => [0x47, 0x47],  # G
-        0x33 => [0x48, 0x48],  # H
-        0x43 => [0x49, 0x49],  # I
-        0x3B => [0x4A, 0x4A],  # J
-        0x42 => [0x4B, 0x4B],  # K
-        0x4B => [0x4C, 0x4C],  # L
-        0x3A => [0x4D, 0x4D],  # M
-        0x31 => [0x4E, 0x4E],  # N
-        0x44 => [0x4F, 0x4F],  # O
-        0x4D => [0x50, 0x50],  # P
-        0x15 => [0x51, 0x51],  # Q
-        0x2D => [0x52, 0x52],  # R
-        0x1B => [0x53, 0x53],  # S
-        0x2C => [0x54, 0x54],  # T
-        0x3C => [0x55, 0x55],  # U
-        0x2A => [0x56, 0x56],  # V
-        0x1D => [0x57, 0x57],  # W
-        0x22 => [0x58, 0x58],  # X
-        0x35 => [0x59, 0x59],  # Y
-        0x1A => [0x5A, 0x5A],  # Z
-        0x45 => [0x30, 0x29],  # 0 )
-        0x16 => [0x31, 0x21],  # 1 !
-        0x1E => [0x32, 0x40],  # 2 @
-        0x26 => [0x33, 0x23],  # 3 #
-        0x25 => [0x34, 0x24],  # 4 $
-        0x2E => [0x35, 0x25],  # 5 %
-        0x36 => [0x36, 0x5E],  # 6 ^
-        0x3D => [0x37, 0x26],  # 7 &
-        0x3E => [0x38, 0x2A],  # 8 *
-        0x46 => [0x39, 0x28],  # 9 (
-        0x29 => [0x20, 0x20],  # Space
-        0x5A => [0x0D, 0x0D],  # Enter
-        0x66 => [0x08, 0x08],  # Backspace
-        0x0D => [0x09, 0x09],  # Tab
-        0x76 => [0x1B, 0x1B],  # Escape
-        0x71 => [0x7F, 0x7F],  # Delete
-        0x74 => [0x15, 0x15],  # Right arrow (Ctrl-U)
-        0x6B => [0x08, 0x08],  # Left arrow (BS)
-        0x75 => [0x0B, 0x0B],  # Up arrow
-        0x72 => [0x0A, 0x0A],  # Down arrow (LF)
-      }.freeze
     end
   end
 end

@@ -25,6 +25,10 @@ module RHDL
       output :aud_pwm                    # PWM output
       output :aud_sd                     # Audio shutdown (active low)
 
+      # Internal registers
+      wire :counter, width: 8
+      wire :audio_latched, width: 8
+
       sequential clock: :clk, reset_values: {
         counter: 0,
         audio_latched: 0
@@ -63,6 +67,9 @@ module RHDL
       input :toggle                      # Toggle strobe (from $C030 access)
 
       output :speaker                    # Speaker output
+
+      # Internal register
+      wire :speaker_state
 
       sequential clock: :clk, reset_values: { speaker_state: 0 } do
         # Toggle speaker state when toggle signal is high
