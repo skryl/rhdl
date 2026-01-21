@@ -7,7 +7,7 @@ require_relative '../../../examples/mos6502/hdl/harness'
 require_relative '../../../examples/mos6502/utilities/assembler'
 require 'fileutils'
 
-RSpec.describe 'MOS6502 Verilog Program Execution', if: HdlToolchain.iverilog_available? do
+RSpec.describe 'MOS6502 Verilog Program Execution', :slow, if: HdlToolchain.iverilog_available? do
   # Run a program in both Ruby and Verilog, compare results
   def run_program_comparison(program:, initial_memory: {}, check_addrs: [], max_cycles: 500,
                              expected_a: nil, expected_x: nil, expected_y: nil)

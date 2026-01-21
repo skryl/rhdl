@@ -184,5 +184,24 @@ RSpec.describe RHDL::HDL::Mux4 do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 1, b: 0, c: 0, d: 0, sel: 0 },
+          { a: 0, b: 1, c: 0, d: 0, sel: 1 },
+          { a: 0, b: 0, c: 1, d: 0, sel: 2 },
+          { a: 0, b: 0, c: 0, d: 1, sel: 3 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::Mux4,
+          'mux4',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/mux4',
+          has_clock: false
+        )
+      end
+    end
   end
 end

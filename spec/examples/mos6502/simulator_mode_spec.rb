@@ -7,7 +7,7 @@ $LOAD_PATH.unshift File.expand_path('../../../../examples/mos6502/utilities', __
 require 'apple2_harness'
 require 'isa_simulator'
 
-RSpec.describe 'Simulator mode selection' do
+RSpec.describe 'Simulator mode selection', :slow do
   describe 'Apple2Harness::ISARunner' do
     it 'creates a runner that responds to native?' do
       runner = Apple2Harness::ISARunner.new

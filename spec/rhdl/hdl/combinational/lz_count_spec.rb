@@ -119,5 +119,24 @@ RSpec.describe RHDL::HDL::LZCount do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 0b10000000 },
+          { a: 0b00001000 },
+          { a: 0b00000001 },
+          { a: 0b00000000 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::LZCount,
+          'lz_count',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/lz_count',
+          has_clock: false
+        )
+      end
+    end
   end
 end

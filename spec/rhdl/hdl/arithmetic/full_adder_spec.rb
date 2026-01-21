@@ -159,5 +159,28 @@ RSpec.describe RHDL::HDL::FullAdder do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 0, b: 0, cin: 0 },
+          { a: 0, b: 0, cin: 1 },
+          { a: 0, b: 1, cin: 0 },
+          { a: 0, b: 1, cin: 1 },
+          { a: 1, b: 0, cin: 0 },
+          { a: 1, b: 0, cin: 1 },
+          { a: 1, b: 1, cin: 0 },
+          { a: 1, b: 1, cin: 1 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::FullAdder,
+          'full_adder',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/full_adder',
+          has_clock: false
+        )
+      end
+    end
   end
 end

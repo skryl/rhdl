@@ -9,6 +9,18 @@ require "rhdl"
 # Require all support files
 Dir[File.expand_path("support/**/*.rb", __dir__)].each { |f| require f }
 
+require 'timeout'
+
+# Test timeouts (can be overridden with env vars)
+# - RSPEC_TIMEOUT: Default timeout for regular tests (default: 10 seconds)
+# - RSPEC_SLOW_TIMEOUT: Timeout for tests tagged :slow (default: 60 seconds)
+# - Set to 0 to disable timeout
+#
+# To exclude slow tests: rspec --tag ~slow
+# To run only slow tests: rspec --tag slow
+RSPEC_TEST_TIMEOUT = ENV.fetch('RSPEC_TIMEOUT', 10).to_i
+RSPEC_SLOW_TIMEOUT = ENV.fetch('RSPEC_SLOW_TIMEOUT', 60).to_i
+
 RSpec.configure do |config|
   # Enable flags like --only-failures and --next-failure
   # Use process-specific status file for parallel test runs
@@ -30,4 +42,22 @@ RSpec.configure do |config|
 
   # Seed for reproducibility (use TEST_ENV_NUMBER for parallel runs)
   config.seed = ENV.fetch('RSPEC_SEED', srand % 0xFFFF).to_i
+
+  # Fail tests that take longer than timeout (default: 10s, slow tests: 60s)
+  # Skip timeout if timeout value is 0
+  config.around(:each) do |example|
+    timeout = if example.metadata[:slow]
+      RSPEC_SLOW_TIMEOUT
+    else
+      RSPEC_TEST_TIMEOUT
+    end
+
+    if timeout > 0
+      Timeout.timeout(timeout, Timeout::Error, "Test exceeded #{timeout} second timeout") do
+        example.run
+      end
+    else
+      example.run
+    end
+  end
 end

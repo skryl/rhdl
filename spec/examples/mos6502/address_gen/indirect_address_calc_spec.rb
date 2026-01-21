@@ -70,7 +70,7 @@ RSpec.describe MOS6502::IndirectAddressCalc do
       end
     end
 
-    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+    context 'when iverilog is available', :slow, if: HdlToolchain.iverilog_available? do
       it 'behavior Verilog matches RHDL simulation' do
         verilog = described_class.to_verilog
         behavior = described_class.new('behavior')
@@ -139,7 +139,7 @@ RSpec.describe MOS6502::IndirectAddressCalc do
       expect(verilog).to include('input [3:0] mode')
     end
 
-    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+    context 'when iverilog is available', :slow, if: HdlToolchain.iverilog_available? do
       it 'matches behavior simulation for indirect addressing' do
         behavior = described_class.new('behavior')
         vectors = []

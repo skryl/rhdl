@@ -204,5 +204,25 @@ RSpec.describe RHDL::HDL::Decoder3to8 do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 0, en: 1 },
+          { a: 1, en: 1 },
+          { a: 4, en: 1 },
+          { a: 7, en: 1 },
+          { a: 0, en: 0 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::Decoder3to8,
+          'decoder3to8',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/decoder3to8',
+          has_clock: false
+        )
+      end
+    end
   end
 end

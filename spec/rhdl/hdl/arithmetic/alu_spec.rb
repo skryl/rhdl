@@ -285,5 +285,24 @@ RSpec.describe RHDL::HDL::ALU do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 10, b: 5, op: RHDL::HDL::ALU::OP_ADD, cin: 0 },
+          { a: 10, b: 5, op: RHDL::HDL::ALU::OP_SUB, cin: 0 },
+          { a: 0xF0, b: 0x0F, op: RHDL::HDL::ALU::OP_AND, cin: 0 },
+          { a: 0xF0, b: 0x0F, op: RHDL::HDL::ALU::OP_OR, cin: 0 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::ALU,
+          'alu',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/alu',
+          has_clock: false
+        )
+      end
+    end
   end
 end

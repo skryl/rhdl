@@ -210,5 +210,24 @@ RSpec.describe RHDL::HDL::AddSub do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 100, b: 50, sub: 0 },
+          { a: 100, b: 50, sub: 1 },
+          { a: 200, b: 100, sub: 0 },
+          { a: 0, b: 0, sub: 0 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::AddSub,
+          'add_sub',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/add_sub',
+          has_clock: false
+        )
+      end
+    end
   end
 end

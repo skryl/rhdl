@@ -168,5 +168,24 @@ RSpec.describe RHDL::HDL::HalfAdder do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 0, b: 0 },
+          { a: 0, b: 1 },
+          { a: 1, b: 0 },
+          { a: 1, b: 1 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::HalfAdder,
+          'half_adder',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/half_adder',
+          has_clock: false
+        )
+      end
+    end
   end
 end

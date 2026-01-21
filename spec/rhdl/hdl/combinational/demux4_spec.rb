@@ -116,5 +116,24 @@ RSpec.describe RHDL::HDL::Demux4 do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 0xFF, sel: 0 },
+          { a: 0xFF, sel: 1 },
+          { a: 0xFF, sel: 2 },
+          { a: 0xFF, sel: 3 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::Demux4,
+          'demux4',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/demux4',
+          has_clock: false
+        )
+      end
+    end
   end
 end

@@ -89,7 +89,7 @@ RSpec.describe MOS6502::InstructionDecoder do
       end
     end
 
-    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+    context 'when iverilog is available', :slow, if: HdlToolchain.iverilog_available? do
       it 'behavior Verilog matches RHDL simulation' do
         verilog = described_class.to_verilog
         behavior = described_class.new('behavior')
@@ -157,7 +157,7 @@ RSpec.describe MOS6502::InstructionDecoder do
       expect(verilog).to include('output [3:0] addr_mode')
     end
 
-    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+    context 'when iverilog is available', :slow, if: HdlToolchain.iverilog_available? do
       it 'matches behavior simulation for opcode decoding' do
         behavior = described_class.new('behavior')
         vectors = []

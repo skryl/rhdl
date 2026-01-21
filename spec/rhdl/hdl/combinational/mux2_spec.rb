@@ -169,6 +169,25 @@ RSpec.describe RHDL::HDL::Mux2 do
     end
   end
 
+  describe 'simulator comparison' do
+    it 'all simulators produce matching results' do
+      test_cases = [
+        { a: 1, b: 0, sel: 0 },
+        { a: 0, b: 1, sel: 1 },
+        { a: 1, b: 0, sel: 1 },
+        { a: 0, b: 1, sel: 0 }
+      ]
+
+      NetlistHelper.compare_and_validate!(
+        RHDL::HDL::Mux2,
+        'mux2',
+        test_cases,
+        base_dir: 'tmp/netlist_comparison/mux2',
+        has_clock: false
+      )
+    end
+  end
+
   describe 'gate-level netlist (4-bit)' do
     let(:component) { RHDL::HDL::Mux2.new('mux2_4bit', width: 4) }
     let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mux2_4bit') }

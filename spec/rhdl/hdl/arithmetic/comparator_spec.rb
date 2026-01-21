@@ -211,5 +211,24 @@ RSpec.describe RHDL::HDL::Comparator do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 42, b: 42, signed_cmp: 0 },
+          { a: 50, b: 30, signed_cmp: 0 },
+          { a: 20, b: 40, signed_cmp: 0 },
+          { a: 0, b: 0, signed_cmp: 0 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::Comparator,
+          'comparator',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/comparator',
+          has_clock: false
+        )
+      end
+    end
   end
 end

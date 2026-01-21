@@ -181,5 +181,24 @@ RSpec.describe RHDL::HDL::FIFO do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { din: 0x11, rst: 0, wr_en: 1, rd_en: 0 },
+          { din: 0x22, rst: 0, wr_en: 1, rd_en: 0 },
+          { din: 0, rst: 0, wr_en: 0, rd_en: 1 },
+          { din: 0, rst: 1, wr_en: 0, rd_en: 0 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::FIFO,
+          'fifo',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/fifo',
+          has_clock: true
+        )
+      end
+    end
   end
 end
