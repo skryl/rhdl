@@ -9,7 +9,7 @@
 //! is represented as a u64 bitmask, allowing parallel simulation of
 //! up to 64 test vectors simultaneously.
 
-use magnus::{method, prelude::*, Error, IntoValue, RArray, RHash, Ruby, TryConvert, Value};
+use magnus::{method, prelude::*, Error, RArray, RHash, Ruby, TryConvert, Value};
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -94,6 +94,7 @@ struct NetlistSimulator {
     lane_mask: u64,
 }
 
+#[allow(dead_code)]
 impl NetlistSimulator {
     fn new(json: &str, lanes: usize) -> Result<Self, String> {
         let ir: NetlistIR = serde_json::from_str(json)
@@ -364,15 +365,17 @@ struct RubyNetlistSim {
 
 impl RubyNetlistSim {
     fn new(json: String, lanes: Option<usize>) -> Result<Self, Error> {
+        let ruby = unsafe { Ruby::get_unchecked() };
         let lanes = lanes.unwrap_or(64);
         let sim = NetlistSimulator::new(&json, lanes)
-            .map_err(|e| Error::new(magnus::exception::runtime_error(), e))?;
+            .map_err(|e| Error::new(ruby.exception_runtime_error(), e))?;
         Ok(Self {
             sim: RefCell::new(sim),
         })
     }
 
     fn poke(&self, name: String, value: Value) -> Result<(), Error> {
+        let ruby = unsafe { Ruby::get_unchecked() };
         let mut sim = self.sim.borrow_mut();
 
         // Check if value is an array (bus values) or single value
@@ -382,11 +385,11 @@ impl RubyNetlistSim {
                 .map(|v| ruby_to_u64(v))
                 .collect::<Result<Vec<_>, Error>>()?;
             sim.poke_bus(&name, &values)
-                .map_err(|e| Error::new(magnus::exception::runtime_error(), e))
+                .map_err(|e| Error::new(ruby.exception_runtime_error(), e))
         } else {
             let v = ruby_to_u64(value)?;
             sim.poke(&name, v)
-                .map_err(|e| Error::new(magnus::exception::runtime_error(), e))
+                .map_err(|e| Error::new(ruby.exception_runtime_error(), e))
         }
     }
 
@@ -396,7 +399,7 @@ impl RubyNetlistSim {
         let nets = sim
             .outputs
             .get(&name)
-            .ok_or_else(|| Error::new(magnus::exception::runtime_error(), format!("Unknown output: {}", name)))?;
+            .ok_or_else(|| Error::new(ruby.exception_runtime_error(), format!("Unknown output: {}", name)))?;
 
         if nets.len() == 1 {
             Ok(u64_to_ruby(&ruby, sim.nets[nets[0]]))
@@ -405,7 +408,7 @@ impl RubyNetlistSim {
             for &net in nets {
                 let _ = arr.push(u64_to_ruby(&ruby, sim.nets[net]));
             }
-            Ok(arr.into_value())
+            Ok(arr.as_value())
         }
     }
 
