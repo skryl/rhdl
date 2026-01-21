@@ -918,6 +918,17 @@ if options[:karateka]
     puts "Run: rake cli:apple2:disk:memdump to generate it"
     exit 1
   end
+
+  # Karateka needs the Apple II ROM for ROM routines
+  rom_file = File.expand_path('../../../software/roms/appleiigo.rom', __FILE__)
+  unless File.exist?(rom_file)
+    puts "Error: AppleIIGo ROM not found: #{rom_file}"
+    puts "Download from: https://a2go.applearchives.com/roms/"
+    exit 1
+  end
+
+  # Load ROM first (at $D000), then memory dump (at $0000)
+  terminal.load_rom(rom_file, base_addr: 0xD000)
   terminal.load_program(karateka_bin, base_addr: 0x0000)
   terminal.setup_reset_vector(0xB82A)  # Entry point from memory dump
   options[:init_hires] = true  # Karateka runs in HIRES mode
