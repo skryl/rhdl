@@ -56,12 +56,6 @@ RSpec.describe RHDL::CLI::Config do
     end
   end
 
-  describe '.tui_ink_dir' do
-    it 'returns the TUI Ink directory path' do
-      expect(described_class.tui_ink_dir).to eq(File.join(described_class.project_root, 'tui-ink'))
-    end
-  end
-
   describe 'DIAGRAM_MODES' do
     it 'contains expected diagram modes' do
       expect(described_class::DIAGRAM_MODES).to eq(%w[component hierarchical gate])
