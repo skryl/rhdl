@@ -811,7 +811,9 @@ module RHDL
           when BehaviorUnaryOp
             compute_unary(expr.op, compute_value(expr.operand), expr.width)
           when BehaviorBitSelect
-            (compute_value(expr.base) >> expr.index) & 1
+            # Handle dynamic index (expr.index can be an expression or integer)
+            idx = expr.index.is_a?(Integer) ? expr.index : compute_value(expr.index)
+            (compute_value(expr.base) >> idx) & 1
           when BehaviorSlice
             base_val = compute_value(expr.base)
             mask = (1 << expr.width) - 1
@@ -1113,20 +1115,32 @@ module RHDL
               max_iterations = 10
               iterations = 0
 
-              # Separate sequential (clock-triggered) from combinational subcomponents
+              # Separate subcomponents into three categories:
+              # 1. combinational - no clock, pure combinational logic
+              # 2. sequential_subs - sequential with no subcomponents (simple registers)
+              # 3. hierarchical_sequential - sequential with their own subcomponents (need full propagate)
               sequential_subs = []
+              hierarchical_sequential_subs = []
               combinational_subs = []
               @subcomponents&.each do |name, sub|
                 # Check class-level _sequential_block (set by sequential DSL)
                 is_sequential = sub.class.respond_to?(:_sequential_block) && sub.class._sequential_block
                 if is_sequential
-                  sequential_subs << [name, sub]
+                  # Check if this sequential component has its own subcomponents
+                  has_subcomponents = sub.instance_variable_defined?(:@subcomponents) &&
+                                     sub.instance_variable_get(:@subcomponents)&.any?
+                  if has_subcomponents
+                    hierarchical_sequential_subs << [name, sub]
+                  else
+                    sequential_subs << [name, sub]
+                  end
                 else
                   combinational_subs << [name, sub]
                 end
               end
 
               # Phase 1: Iterate to stabilize combinational logic
+              # Also propagate hierarchical sequential components as they need full propagate()
               while iterations < max_iterations
                 old_values = {}
                 @internal_signals&.each do |name, wire|
@@ -1136,8 +1150,13 @@ module RHDL
                 # Execute behavior (computes control signals like alu_b_sel)
                 self.class.execute_behavior_for_simulation(self)
 
-                # Propagate ONLY combinational subcomponents
+                # Propagate combinational subcomponents
                 combinational_subs.each do |name, sub|
+                  sub.propagate
+                end
+
+                # Propagate hierarchical sequential subcomponents (they handle their own internals)
+                hierarchical_sequential_subs.each do |name, sub|
                   sub.propagate
                 end
 
@@ -1157,8 +1176,9 @@ module RHDL
                 break unless changed
               end
 
-              # Phase 2: Sequential components using Verilog-style two-phase semantics
-              # Phase 2a: ALL sequential components SAMPLE inputs (don't update outputs yet)
+              # Phase 2: Simple sequential components using Verilog-style two-phase semantics
+              # (Hierarchical sequential components already handled their internals in Phase 1)
+              # Phase 2a: ALL simple sequential components SAMPLE inputs (don't update outputs yet)
               rising_edge_subs = []
               sequential_subs.each do |name, sub|
                 if sub.respond_to?(:sample_inputs)
@@ -1167,12 +1187,12 @@ module RHDL
                 end
               end
 
-              # Phase 2b: ALL sequential components UPDATE outputs (for those with rising edge)
+              # Phase 2b: ALL simple sequential components UPDATE outputs (for those with rising edge)
               rising_edge_subs.each do |name, sub|
                 sub.update_outputs if sub.respond_to?(:update_outputs)
               end
 
-              # For sequential components that didn't have a rising edge, execute behavior if present
+              # For simple sequential components that didn't have a rising edge, execute behavior if present
               (sequential_subs - rising_edge_subs).each do |name, sub|
                 if sub.class.respond_to?(:behavior_defined?) && sub.class.behavior_defined?
                   sub.execute_behavior if sub.respond_to?(:execute_behavior)

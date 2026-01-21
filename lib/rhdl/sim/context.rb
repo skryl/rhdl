@@ -182,26 +182,32 @@ module RHDL
       end
 
       # Helper for conditional expressions (mux)
+      # Returns a LocalProxy to ensure subsequent operations work correctly
       def mux(condition, when_true, when_false)
         cond_val = resolve_value(condition)
-        cond_val != 0 ? resolve_value(when_true) : resolve_value(when_false)
+        selected = cond_val != 0 ? when_true : when_false
+        val, width = resolve_value_with_width(selected)
+        LocalProxy.new(nil, val, width, self)
       end
 
       # Helper for creating literal values with explicit width
+      # Returns a LocalProxy so operators work with other proxies
       def lit(value, width:)
-        value & MaskCache.mask(width)
+        masked_value = value & MaskCache.mask(width)
+        LocalProxy.new(nil, masked_value, width, self)
       end
 
       # Helper for concatenation
+      # Returns a LocalProxy to ensure subsequent operations work correctly
       def cat(*signals)
         result = 0
-        offset = 0
+        total_width = 0
         signals.reverse.each do |sig|
           val, width = resolve_value_with_width(sig)
-          result |= (val << offset)
-          offset += width
+          result |= (val << total_width)
+          total_width += width
         end
-        result
+        LocalProxy.new(nil, result, total_width, self)
       end
 
       # Simple if-else for single expression
@@ -217,6 +223,26 @@ module RHDL
           resolve_value(cases[sel_val])
         else
           resolve_value(default)
+        end
+      end
+
+      # Memory read expression - reads from memory array using address expression
+      # For simulation, this directly reads from the component's memory array
+      # @param memory_name [Symbol] The memory array name
+      # @param addr [Object] The address expression
+      # @param width [Integer] The data width (unused in simulation but needed for consistency)
+      def mem_read_expr(memory_name, addr, width: 8)
+        addr_val = resolve_value(addr)
+        if @component.respond_to?(:mem_read)
+          @component.mem_read(memory_name, addr_val)
+        else
+          # Fallback: try to read from _memory_arrays
+          arrays = @component.instance_variable_get(:@_memory_arrays)
+          if arrays && arrays[memory_name]
+            arrays[memory_name][addr_val] || 0
+          else
+            0
+          end
         end
       end
 
@@ -343,6 +369,19 @@ module RHDL
       def >(other)
         other_val = @context.send(:resolve_value, other)
         LocalProxy.new(nil, @value > other_val ? 1 : 0, 1, @context)
+      end
+
+      # Ruby coercion for mixed-type arithmetic (e.g., Integer + LocalProxy)
+      # When Ruby sees `integer + local_proxy`, it calls local_proxy.coerce(integer)
+      # and expects [converted_integer, self] back, then does converted_integer + self
+      def coerce(other)
+        if other.is_a?(Integer)
+          # Convert integer to LocalProxy with appropriate width
+          width = other == 0 ? 1 : [other.bit_length, @width].max
+          [LocalProxy.new(nil, other, width, @context), self]
+        else
+          raise TypeError, "#{self.class} can't be coerced with #{other.class}"
+        end
       end
 
       def to_i
