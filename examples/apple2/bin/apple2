@@ -1,0 +1,435 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Apple II HDL Terminal Emulator
+# Runs the Apple2System HDL component with cycle-accurate simulation
+
+require 'io/console'
+require 'optparse'
+
+$LOAD_PATH.unshift File.expand_path('../../../lib', __dir__)
+$LOAD_PATH.unshift File.expand_path('../utilities', __dir__)
+
+require 'rhdl'
+require 'harness'
+
+# Apple II Terminal class for HDL simulation
+class Apple2HDLTerminal
+  SCREEN_ROWS = 24
+  SCREEN_COLS = 40
+  DISPLAY_WIDTH = SCREEN_COLS + 2
+  DISPLAY_HEIGHT = SCREEN_ROWS + 2
+
+  # ANSI escape codes
+  ESC = "\e"
+  CLEAR_SCREEN = "#{ESC}[2J"
+  MOVE_HOME = "#{ESC}[H"
+  HIDE_CURSOR = "#{ESC}[?25l"
+  SHOW_CURSOR = "#{ESC}[?25h"
+  REVERSE_VIDEO = "#{ESC}[7m"
+  NORMAL_VIDEO = "#{ESC}[0m"
+  GREEN_FG = "#{ESC}[32m"
+  BLACK_BG = "#{ESC}[40m"
+
+  attr_reader :runner, :running
+
+  def initialize(options = {})
+    @options = options
+    @runner = RHDL::Apple2::Runner.new
+    @running = false
+    @last_screen = nil
+    @cycles_per_frame = options[:speed] || 100  # HDL is slow, default to small value
+    @debug = options[:debug] || false
+    @green_screen = options[:green] || false
+
+    # Terminal size
+    @term_rows = 24
+    @term_cols = 80
+    @pad_top = 0
+    @pad_left = 0
+    update_terminal_size
+
+    # Performance monitoring
+    @start_time = nil
+    @start_cycles = 0
+    @last_cycles = 0
+    @last_time = nil
+    @current_hz = 0.0
+    @frame_count = 0
+    @fps = 0.0
+    @last_fps_time = nil
+    @fps_frame_count = 0
+
+    # Input tracking
+    @last_key = nil
+    @last_key_time = nil
+  end
+
+  def update_terminal_size
+    if $stdout.respond_to?(:winsize)
+      rows, cols = $stdout.winsize
+      @term_rows = [rows, DISPLAY_HEIGHT].max
+      @term_cols = [cols, DISPLAY_WIDTH].max
+    end
+    display_height = @debug ? DISPLAY_HEIGHT + 7 : DISPLAY_HEIGHT
+    @pad_top = [(@term_rows - display_height) / 2, 0].max
+    @pad_left = [(@term_cols - DISPLAY_WIDTH) / 2, 0].max
+  end
+
+  def load_rom(path, base_addr: 0xD000)
+    puts "Loading ROM: #{path}"
+    bytes = File.binread(path)
+    @runner.load_rom(bytes, base_addr: base_addr)
+  end
+
+  def load_program(path, base_addr: 0x0800)
+    puts "Loading program: #{path} at $#{base_addr.to_s(16).upcase}"
+    bytes = File.binread(path)
+    @runner.load_ram(bytes, base_addr: base_addr)
+  end
+
+  def load_program_bytes(bytes, base_addr: 0x0800)
+    @runner.load_ram(bytes, base_addr: base_addr)
+  end
+
+  def setup_reset_vector(addr)
+    @runner.write(0xFFFC, addr & 0xFF)
+    @runner.write(0xFFFD, (addr >> 8) & 0xFF)
+  end
+
+  def run
+    @running = true
+
+    trap('INT') { @running = false }
+    trap('TERM') { @running = false }
+    trap('WINCH') { update_terminal_size; print CLEAR_SCREEN }
+
+    puts "Starting Apple II HDL emulator..."
+    puts "WARNING: HDL mode is VERY slow (cycle-accurate simulation)"
+    puts "Press Ctrl+C to exit"
+    sleep 1
+
+    @runner.reset
+
+    @start_time = Time.now
+    @start_cycles = @runner.cycle_count
+    @last_time = @start_time
+    @last_cycles = @start_cycles
+    @last_fps_time = @start_time
+    @fps_frame_count = 0
+
+    begin
+      IO.console.raw do
+        print CLEAR_SCREEN
+        print HIDE_CURSOR
+        main_loop
+      end
+    ensure
+      cleanup
+    end
+  end
+
+  def stop
+    @running = false
+  end
+
+  private
+
+  def main_loop
+    @frame_count = 0
+
+    while @running && !@runner.halted?
+      frame_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+      handle_keyboard_input
+      @runner.run_steps(@cycles_per_frame)
+      update_performance_metrics
+
+      if @runner.screen_dirty? || @frame_count % 10 == 0
+        render_screen
+        @runner.clear_screen_dirty
+      end
+
+      @frame_count += 1
+      @fps_frame_count += 1
+
+      # Sleep to maintain ~30fps display update
+      frame_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - frame_start
+      sleep_time = 0.033 - frame_elapsed
+      sleep(sleep_time) if sleep_time > 0
+    end
+
+    if @runner.halted?
+      halt_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 7 : 2)
+      print move_cursor(halt_row, @pad_left + 1)
+      puts "CPU HALTED at PC=$#{@runner.cpu_state[:pc].to_s(16).upcase.rjust(4, '0')}"
+      print move_cursor(halt_row + 1, @pad_left + 1)
+      puts "Press any key to exit..."
+      IO.console.getch
+    end
+  end
+
+  def handle_keyboard_input
+    char = IO.console.read_nonblock(1)
+    return unless char
+
+    ascii = char.ord
+    return stop if ascii == 3  # Ctrl+C
+
+    # Handle special keys
+    case ascii
+    when 127, 8 then ascii = 0x08  # Backspace
+    when 10, 13 then ascii = 0x0D  # Enter
+    end
+
+    # Convert lowercase to uppercase
+    ascii = ascii - 32 if ascii >= 97 && ascii <= 122
+
+    @last_key = ascii
+    @last_key_time = Time.now
+    @runner.inject_key(ascii)
+  rescue IO::WaitReadable, Errno::EAGAIN
+    # No input
+  end
+
+  def render_screen
+    output = String.new
+    output << move_cursor(@pad_top + 1, @pad_left + 1)
+    output << GREEN_FG << BLACK_BG if @green_screen
+
+    # Border top
+    output << "+" << ("-" * SCREEN_COLS) << "+"
+    output << move_cursor(@pad_top + 2, @pad_left + 1)
+
+    # Screen content
+    screen = @runner.read_screen_array
+    screen.each_with_index do |line, row|
+      output << "|"
+      line.each do |char_code|
+        char = (char_code & 0x7F).chr
+        char = ' ' if char_code < 0x20
+        output << char
+      end
+      output << "|"
+      output << move_cursor(@pad_top + 3 + row, @pad_left + 1)
+    end
+
+    # Border bottom
+    output << "+" << ("-" * SCREEN_COLS) << "+"
+    output << NORMAL_VIDEO if @green_screen
+
+    # Debug info
+    if @debug
+      debug_row = @pad_top + DISPLAY_HEIGHT + 2
+      state = @runner.cpu_state
+
+      line1 = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X",
+                     state[:pc], state[:a], state[:x], state[:y], state[:sp])
+      line2 = format("Cycles:%s %s %.1ffps",
+                     format_cycles(state[:cycles]), format_hz(@current_hz), @fps)
+
+      output << move_cursor(debug_row, @pad_left + 1)
+      output << "+" << ("-" * SCREEN_COLS) << "+"
+      output << move_cursor(debug_row + 1, @pad_left + 1)
+      output << "|" << line1.ljust(SCREEN_COLS) << "|"
+      output << move_cursor(debug_row + 2, @pad_left + 1)
+      output << "|" << line2.ljust(SCREEN_COLS) << "|"
+      output << move_cursor(debug_row + 3, @pad_left + 1)
+      output << "+" << ("-" * SCREEN_COLS) << "+"
+    end
+
+    print output
+  end
+
+  def format_cycles(cycles)
+    if cycles >= 1_000_000
+      format("%.1fM", cycles / 1_000_000.0)
+    elsif cycles >= 1_000
+      format("%.1fK", cycles / 1_000.0)
+    else
+      cycles.to_s
+    end
+  end
+
+  def format_hz(hz)
+    if hz >= 1_000_000
+      format("%.2fMHz", hz / 1_000_000.0)
+    elsif hz >= 1_000
+      format("%.1fKHz", hz / 1_000.0)
+    else
+      format("%.0fHz", hz)
+    end
+  end
+
+  def update_performance_metrics
+    now = Time.now
+    current_cycles = @runner.cpu_state[:cycles]
+
+    elapsed = now - @last_time
+    if elapsed >= 0.5
+      cycles_delta = current_cycles - @last_cycles
+      @current_hz = cycles_delta / elapsed
+      @last_time = now
+      @last_cycles = current_cycles
+    end
+
+    fps_elapsed = now - @last_fps_time
+    if fps_elapsed >= 1.0
+      @fps = @fps_frame_count / fps_elapsed
+      @last_fps_time = now
+      @fps_frame_count = 0
+    end
+  end
+
+  def move_cursor(row, col)
+    "#{ESC}[#{row};#{col}H"
+  end
+
+  def cleanup
+    print SHOW_CURSOR
+    print NORMAL_VIDEO
+    exit_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 6 : 3)
+    print move_cursor(exit_row, 1)
+    puts "Apple II HDL emulator terminated."
+  end
+end
+
+# Demo program
+def create_demo_program
+  asm = []
+  cursor_lo = 0x00
+  cursor_hi = 0x01
+
+  # Initialize cursor
+  asm << 0xA9 << 0x00        # LDA #$00
+  asm << 0x85 << cursor_lo   # STA $00
+  asm << 0xA9 << 0x04        # LDA #$04
+  asm << 0x85 << cursor_hi   # STA $01
+
+  # Clear screen
+  asm << 0xA0 << 0x00        # LDY #$00
+  asm << 0xA9 << 0xA0        # LDA #$A0 (space)
+  # CLEAR_LOOP:
+  asm << 0x91 << cursor_lo   # STA ($00),Y
+  asm << 0xC8                # INY
+  asm << 0xD0 << 0xFB        # BNE CLEAR_LOOP
+  asm << 0xE6 << cursor_hi   # INC $01
+  asm << 0xA5 << cursor_hi   # LDA $01
+  asm << 0xC9 << 0x08        # CMP #$08
+  asm << 0xD0 << 0xF3        # BNE CLEAR_LOOP
+
+  # Reset cursor
+  asm << 0xA9 << 0x00        # LDA #$00
+  asm << 0x85 << cursor_lo   # STA $00
+  asm << 0xA9 << 0x04        # LDA #$04
+  asm << 0x85 << cursor_hi   # STA $01
+
+  # Print "HDL READY"
+  "HDL READY\r".each_byte do |b|
+    b = b | 0x80
+    asm << 0xA9 << b         # LDA #char
+    asm << 0xA0 << 0x00      # LDY #$00
+    asm << 0x91 << cursor_lo # STA ($00),Y
+    asm << 0xE6 << cursor_lo # INC $00
+  end
+
+  # Main loop: read keyboard
+  main_loop = asm.length
+  asm << 0xAD << 0x00 << 0xC0  # LDA $C000
+  asm << 0x10 << 0xFB          # BPL (wait for key)
+  asm << 0x8D << 0x10 << 0xC0  # STA $C010 (clear strobe)
+  asm << 0x09 << 0x80          # ORA #$80
+  asm << 0xA0 << 0x00          # LDY #$00
+  asm << 0x91 << cursor_lo     # STA ($00),Y
+  asm << 0xE6 << cursor_lo     # INC $00
+  asm << 0x4C                  # JMP main_loop
+  asm << (main_loop & 0xFF) << (((main_loop >> 8) + 0x08) & 0xFF)
+
+  asm
+end
+
+# Parse options
+options = {
+  speed: 100,
+  debug: false,
+  green: false,
+  demo: false
+}
+
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: bin/apple2 [options] [program.bin]"
+  opts.separator ""
+  opts.separator "Apple II HDL Terminal Emulator - Cycle-accurate simulation"
+  opts.separator ""
+
+  opts.on("-r", "--rom FILE", "Load ROM file") do |v|
+    options[:rom] = v
+  end
+
+  opts.on("-a", "--address ADDR", "Load address (hex, default: 0800)") do |v|
+    options[:load_addr] = v.to_i(16)
+  end
+
+  opts.on("-s", "--speed CYCLES", Integer, "Cycles per frame (default: 100)") do |v|
+    options[:speed] = v
+  end
+
+  opts.on("-d", "--debug", "Show CPU state") do
+    options[:debug] = true
+  end
+
+  opts.on("-g", "--green", "Green phosphor effect") do
+    options[:green] = true
+  end
+
+  opts.on("--demo", "Run built-in demo") do
+    options[:demo] = true
+  end
+
+  opts.on("--appleiigo", "Load AppleIIGo ROM") do
+    options[:appleiigo] = true
+  end
+
+  opts.on("-h", "--help", "Show help") do
+    puts opts
+    exit
+  end
+end
+
+parser.parse!(ARGV)
+
+terminal = Apple2HDLTerminal.new(options)
+
+# Load AppleIIGo ROM if requested
+if options[:appleiigo]
+  rom_file = File.expand_path('../software/roms/appleiigo.rom', __dir__)
+  if File.exist?(rom_file)
+    terminal.load_rom(rom_file, base_addr: 0xD000)
+  else
+    puts "Error: AppleIIGo ROM not found: #{rom_file}"
+    puts "Download from: https://a2go.applearchives.com/roms/"
+    exit 1
+  end
+elsif options[:rom]
+  terminal.load_rom(options[:rom])
+end
+
+# Load program
+program_file = ARGV.shift
+if program_file
+  load_addr = options[:load_addr] || 0x0800
+  terminal.load_program(program_file, base_addr: load_addr)
+  terminal.setup_reset_vector(load_addr) unless options[:rom] || options[:appleiigo]
+elsif options[:demo]
+  puts "Loading demo program..."
+  demo = create_demo_program
+  terminal.load_program_bytes(demo, base_addr: 0x0800)
+  terminal.setup_reset_vector(0x0800)
+elsif !options[:rom] && !options[:appleiigo]
+  puts parser
+  puts ""
+  puts "Error: No program specified. Use --demo or provide a binary file."
+  exit 1
+end
+
+terminal.run
