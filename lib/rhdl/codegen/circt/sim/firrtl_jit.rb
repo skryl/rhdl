@@ -114,6 +114,30 @@ module RHDL
           @sim.write_ram(start, data) if @sim.respond_to?(:write_ram)
         end
 
+        # Batched tick execution - eliminates FFI overhead for bulk simulation
+        def run_ticks(n)
+          if @sim.respond_to?(:run_ticks)
+            @sim.run_ticks(n)
+          else
+            n.times { @sim.tick }
+          end
+        end
+
+        # Get signal index by name (for caching)
+        def get_signal_idx(name)
+          @sim.get_signal_idx(name) if @sim.respond_to?(:get_signal_idx)
+        end
+
+        # Poke by index - faster than by name when index is cached
+        def poke_by_idx(idx, value)
+          @sim.poke_by_idx(idx, value) if @sim.respond_to?(:poke_by_idx)
+        end
+
+        # Peek by index - faster than by name when index is cached
+        def peek_by_idx(idx)
+          @sim.peek_by_idx(idx) if @sim.respond_to?(:peek_by_idx)
+        end
+
         def respond_to_missing?(method_name, include_private = false)
           @sim.respond_to?(method_name) || super
         end
