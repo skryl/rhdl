@@ -152,13 +152,11 @@ module Apple2Harness
     def load_rom(bytes, base_addr:)
       bytes_array = to_bytes(bytes)
       if native?
-        if base_addr >= 0xC000 && base_addr < 0xD000
-          # Expansion ROM ($C000-$CFFF) goes to bus for io_read
-          @bus.load_rom(bytes_array, base_addr: base_addr)
-        else
-          # Main ROM goes directly to CPU memory for fast access
-          @cpu.load_bytes(bytes_array, base_addr)
-        end
+        # Always load ROM into CPU memory for fast access
+        # This includes expansion ROM ($C100-$CFFF) which doesn't need I/O callbacks
+        @cpu.load_bytes(bytes_array, base_addr)
+        # Also load into bus for non-native fallback paths
+        @bus.load_rom(bytes_array, base_addr: base_addr)
       else
         @bus.load_rom(bytes_array, base_addr: base_addr)
       end
@@ -215,11 +213,20 @@ module Apple2Harness
     # Terminal I/O helpers
 
     def inject_key(ascii)
-      @bus.inject_key(ascii)
+      if native?
+        # Inject key directly into native CPU's I/O state (fast, no FFI callback needed)
+        @cpu.inject_key(ascii)
+      else
+        @bus.inject_key(ascii)
+      end
     end
 
     def key_ready?
-      @bus.key_ready
+      if native?
+        @cpu.key_ready?
+      else
+        @bus.key_ready
+      end
     end
 
     def clear_key
@@ -240,6 +247,21 @@ module Apple2Harness
 
     def clear_screen_dirty
       @bus.clear_text_page_dirty
+    end
+
+    # Sync video state from native CPU to Ruby bus (for rendering)
+    def sync_video_state
+      return unless native?
+      video = @cpu.video_state
+      @bus.video[:text] = video[:text]
+      @bus.video[:mixed] = video[:mixed]
+      @bus.video[:page2] = video[:page2]
+      @bus.video[:hires] = video[:hires]
+    end
+
+    # Get speaker toggle count from native CPU
+    def speaker_toggles
+      native? ? @cpu.speaker_toggles : @bus.speaker_toggles
     end
 
     def cpu_state
