@@ -607,7 +607,7 @@ module RHDL
           @_memory_arrays[memory][addr] = data & mask
         end
 
-        # Get signal value from inputs, outputs, or sequential state
+        # Get signal value from inputs, outputs, internal signals, or sequential state
         # This allows Memory to work with register-based addresses
         def signal_val(name)
           # Try input first
@@ -617,6 +617,10 @@ module RHDL
           # Try sequential state (for registers managed by Sequential DSL)
           if @_seq_state && @_seq_state.key?(name)
             return @_seq_state[name]
+          end
+          # Try internal signals
+          if @internal_signals && @internal_signals[name]
+            return @internal_signals[name].get
           end
           # Try output
           if @outputs && @outputs[name]

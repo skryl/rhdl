@@ -28,16 +28,35 @@ module RHDL
       # Internal registers
       wire :counter, width: 8
       wire :audio_latched, width: 8
+      wire :aud_pwm_reg
+
+      # Reference Verilog (audio_pwm.v):
+      # always @(posedge clk) begin
+      #     if (counter == 0)
+      #         audio_latched <= audio;
+      #     if (counter < 1 || (counter < audio_latched && counter < 255) )
+      #         aud_pwm <= 1;
+      #     else
+      #         aud_pwm <= 0;
+      #     counter <= counter + 1;
+      # end
 
       sequential clock: :clk, reset_values: {
         counter: 0,
-        audio_latched: 0
+        audio_latched: 0,
+        aud_pwm_reg: 0
       } do
         # Latch audio sample at start of each PWM period (counter == 0)
         audio_latched <= mux(counter == lit(0, width: 8),
           audio,
           audio_latched
         )
+
+        # PWM output (registered): high when counter < 1 OR (counter < audio_latched AND counter < 255)
+        # counter < 1 is equivalent to counter == 0 for 8-bit counter
+        is_first = (counter < lit(1, width: 8))
+        is_below = (counter < audio_latched) & (counter < lit(255, width: 8))
+        aud_pwm_reg <= is_first | is_below
 
         # Increment counter (wraps at 255)
         counter <= counter + lit(1, width: 8)
@@ -46,14 +65,7 @@ module RHDL
       behavior do
         # Audio shutdown is always off (audio enabled)
         aud_sd <= lit(1, width: 1)
-
-        # PWM output: high when counter < audio_latched
-        # Special case: always high for first cycle (counter < 1)
-        # This ensures at least some pulse width for all non-zero values
-        is_first = (counter == lit(0, width: 8))
-        is_below = (counter < audio_latched) & (counter < lit(255, width: 8))
-
-        aud_pwm <= is_first | is_below
+        aud_pwm <= aud_pwm_reg
       end
     end
 

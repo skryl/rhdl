@@ -188,8 +188,10 @@ module RHDL
       end
 
       # Helper for creating literal values with explicit width
+      # Returns a LocalProxy so operators work with other proxies
       def lit(value, width:)
-        value & MaskCache.mask(width)
+        masked_value = value & MaskCache.mask(width)
+        LocalProxy.new(nil, masked_value, width, self)
       end
 
       # Helper for concatenation
@@ -217,6 +219,26 @@ module RHDL
           resolve_value(cases[sel_val])
         else
           resolve_value(default)
+        end
+      end
+
+      # Memory read expression - reads from memory array using address expression
+      # For simulation, this directly reads from the component's memory array
+      # @param memory_name [Symbol] The memory array name
+      # @param addr [Object] The address expression
+      # @param width [Integer] The data width (unused in simulation but needed for consistency)
+      def mem_read_expr(memory_name, addr, width: 8)
+        addr_val = resolve_value(addr)
+        if @component.respond_to?(:mem_read)
+          @component.mem_read(memory_name, addr_val)
+        else
+          # Fallback: try to read from _memory_arrays
+          arrays = @component.instance_variable_get(:@_memory_arrays)
+          if arrays && arrays[memory_name]
+            arrays[memory_name][addr_val] || 0
+          else
+            0
+          end
         end
       end
 
