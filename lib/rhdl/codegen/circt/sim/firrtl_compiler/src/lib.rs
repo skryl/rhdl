@@ -356,6 +356,27 @@ impl SimulatorState {
     }
 
     fn run_cpu_cycles(&mut self, n: usize, key_data: u8, key_ready: bool) -> CycleResult {
+        // Use compiled run_cpu_cycles if available - this is the big optimization!
+        // The compiled version runs the entire loop without any function call overhead.
+        if let Some(ref lib) = self.compiled_lib {
+            unsafe {
+                type RunCpuCyclesFn = unsafe extern "C" fn(
+                    &mut [u64], &mut [u8], &[u8], usize, u8, bool
+                ) -> (bool, bool);
+                let func: libloading::Symbol<RunCpuCyclesFn> = lib.get(b"run_cpu_cycles").unwrap();
+                let (text_dirty, key_cleared) = func(
+                    &mut self.signals,
+                    &mut self.ram,
+                    &self.rom,
+                    n,
+                    key_data,
+                    key_ready
+                );
+                return CycleResult { cycles_run: n, text_dirty, key_cleared };
+            }
+        }
+
+        // Fallback to interpreted mode
         let mut text_dirty = false;
         let mut key_cleared = false;
         let mut key_is_ready = key_ready;
@@ -463,16 +484,20 @@ fn generate_mask_str(width: u32) -> String {
 }
 
 fn expr_to_rust(expr: &Expr, signal_indices: &HashMap<String, usize>) -> String {
+    expr_to_rust_with_name(expr, signal_indices, "signals")
+}
+
+fn expr_to_rust_with_name(expr: &Expr, signal_indices: &HashMap<String, usize>, signals_name: &str) -> String {
     match expr {
         Expr::Signal { name, width } => {
             let idx = signal_indices.get(name).unwrap_or(&0);
-            format!("(signals[{}] & {})", idx, generate_mask_str(*width))
+            format!("({}[{}] & {})", signals_name, idx, generate_mask_str(*width))
         }
         Expr::Literal { value, width } => {
             format!("({}_u64 & {})", value, generate_mask_str(*width))
         }
         Expr::UnaryOp { op, operand, width } => {
-            let operand_code = expr_to_rust(operand, signal_indices);
+            let operand_code = expr_to_rust_with_name(operand, signal_indices, signals_name);
             let m = generate_mask_str(*width);
             match op.as_str() {
                 "~" | "not" => format!("((!{}) & {})", operand_code, m),
@@ -487,8 +512,8 @@ fn expr_to_rust(expr: &Expr, signal_indices: &HashMap<String, usize>) -> String 
             }
         }
         Expr::BinaryOp { op, left, right, width } => {
-            let left_code = expr_to_rust(left, signal_indices);
-            let right_code = expr_to_rust(right, signal_indices);
+            let left_code = expr_to_rust_with_name(left, signal_indices, signals_name);
+            let right_code = expr_to_rust_with_name(right, signal_indices, signals_name);
             let m = generate_mask_str(*width);
             match op.as_str() {
                 "&" => format!("({} & {})", left_code, right_code),
@@ -511,14 +536,14 @@ fn expr_to_rust(expr: &Expr, signal_indices: &HashMap<String, usize>) -> String 
             }
         }
         Expr::Mux { condition, when_true, when_false, width } => {
-            let cond_code = expr_to_rust(condition, signal_indices);
-            let true_code = expr_to_rust(when_true, signal_indices);
-            let false_code = expr_to_rust(when_false, signal_indices);
+            let cond_code = expr_to_rust_with_name(condition, signal_indices, signals_name);
+            let true_code = expr_to_rust_with_name(when_true, signal_indices, signals_name);
+            let false_code = expr_to_rust_with_name(when_false, signal_indices, signals_name);
             let m = generate_mask_str(*width);
             format!("(if {} != 0 {{ {} }} else {{ {} }} & {})", cond_code, true_code, false_code, m)
         }
         Expr::Slice { base, low, width, .. } => {
-            let base_code = expr_to_rust(base, signal_indices);
+            let base_code = expr_to_rust_with_name(base, signal_indices, signals_name);
             let m = generate_mask_str(*width);
             format!("(({} >> {}) & {})", base_code, low, m)
         }
@@ -527,7 +552,7 @@ fn expr_to_rust(expr: &Expr, signal_indices: &HashMap<String, usize>) -> String 
             let mut result = String::from("(");
             let mut shift = 0u32;
             for (i, part) in parts.iter().enumerate() {
-                let part_code = expr_to_rust(part, signal_indices);
+                let part_code = expr_to_rust_with_name(part, signal_indices, signals_name);
                 let part_width = get_expr_width(part);
                 let part_mask = generate_mask_str(part_width);
                 if i > 0 { result.push_str(" | "); }
@@ -542,7 +567,7 @@ fn expr_to_rust(expr: &Expr, signal_indices: &HashMap<String, usize>) -> String 
             result
         }
         Expr::Resize { expr, width } => {
-            let expr_code = expr_to_rust(expr, signal_indices);
+            let expr_code = expr_to_rust_with_name(expr, signal_indices, signals_name);
             let m = generate_mask_str(*width);
             format!("({} & {})", expr_code, m)
         }
@@ -554,44 +579,141 @@ fn generate_full_code(ir: &CircuitIR, signal_indices: &HashMap<String, usize>) -
     code.push_str("// Auto-generated circuit simulation code\n");
     code.push_str("// DO NOT EDIT - generated by FIRRTL compiler\n\n");
 
-    // Generate evaluate function
-    code.push_str("#[no_mangle]\npub extern \"C\" fn evaluate(signals: &mut [u64]) {\n");
+    // Generate inline evaluate logic as a macro for zero-overhead
+    code.push_str("macro_rules! do_evaluate {\n");
+    code.push_str("    ($signals:expr) => {{\n");
     for assign in &ir.assigns {
         if let Some(&idx) = signal_indices.get(&assign.target) {
-            let expr_code = expr_to_rust(&assign.expr, signal_indices);
-            code.push_str(&format!("    signals[{}] = {};\n", idx, expr_code));
+            let expr_code = expr_to_rust_with_name(&assign.expr, signal_indices, "$signals");
+            code.push_str(&format!("        $signals[{}] = {};\n", idx, expr_code));
         }
     }
-    code.push_str("}\n\n");
+    code.push_str("    }};\n}\n\n");
 
-    // Generate tick function
-    code.push_str("#[no_mangle]\npub extern \"C\" fn tick(signals: &mut [u64], next_regs: &mut [u64]) {\n");
+    // Generate inline tick logic as a macro
+    code.push_str("macro_rules! do_tick {\n");
+    code.push_str("    ($signals:expr, $next_regs:expr) => {{\n");
     let mut reg_idx = 0;
     for process in &ir.processes {
         if process.clocked {
             for stmt in &process.statements {
-                let expr_code = expr_to_rust(&stmt.expr, signal_indices);
-                code.push_str(&format!("    next_regs[{}] = {};\n", reg_idx, expr_code));
+                let expr_code = expr_to_rust_with_name(&stmt.expr, signal_indices, "$signals");
+                code.push_str(&format!("        $next_regs[{}] = {};\n", reg_idx, expr_code));
                 reg_idx += 1;
             }
         }
     }
-    code.push_str("}\n\n");
+    code.push_str("    }};\n}\n\n");
 
-    // Generate update_regs function
-    code.push_str("#[no_mangle]\npub extern \"C\" fn update_regs(signals: &mut [u64], next_regs: &[u64]) {\n");
+    // Generate inline update_regs logic as a macro
+    code.push_str("macro_rules! do_update_regs {\n");
+    code.push_str("    ($signals:expr, $next_regs:expr) => {{\n");
     let mut reg_idx = 0;
     for process in &ir.processes {
         if process.clocked {
             for stmt in &process.statements {
                 if let Some(&sig_idx) = signal_indices.get(&stmt.target) {
-                    code.push_str(&format!("    signals[{}] = next_regs[{}];\n", sig_idx, reg_idx));
+                    code.push_str(&format!("        $signals[{}] = $next_regs[{}];\n", sig_idx, reg_idx));
                     reg_idx += 1;
                 }
             }
         }
     }
+    code.push_str("    }};\n}\n\n");
+
+    // Generate evaluate function (for compatibility)
+    code.push_str("#[no_mangle]\npub extern \"C\" fn evaluate(signals: &mut [u64]) {\n");
+    code.push_str("    do_evaluate!(signals);\n");
     code.push_str("}\n\n");
+
+    // Generate tick function (for compatibility)
+    code.push_str("#[no_mangle]\npub extern \"C\" fn tick(signals: &mut [u64], next_regs: &mut [u64]) {\n");
+    code.push_str("    do_tick!(signals, next_regs);\n");
+    code.push_str("}\n\n");
+
+    // Generate update_regs function (for compatibility)
+    code.push_str("#[no_mangle]\npub extern \"C\" fn update_regs(signals: &mut [u64], next_regs: &[u64]) {\n");
+    code.push_str("    do_update_regs!(signals, next_regs);\n");
+    code.push_str("}\n\n");
+
+    // Generate run_cpu_cycles - the main optimized entry point
+    // This runs the entire CPU cycle loop without any function call overhead
+    let clk_idx = signal_indices.get("clk_14m").cloned().unwrap_or(0);
+    let k_idx = signal_indices.get("k").cloned().unwrap_or(0);
+    let ram_addr_idx = signal_indices.get("ram_addr").cloned().unwrap_or(0);
+    let ram_do_idx = signal_indices.get("ram_do").cloned().unwrap_or(0);
+    let ram_we_idx = signal_indices.get("ram_we").cloned().unwrap_or(0);
+    let d_idx = signal_indices.get("d").cloned().unwrap_or(0);
+    let read_key_idx = signal_indices.get("read_key").cloned().unwrap_or(0);
+    let reg_count = count_regs(ir);
+
+    code.push_str(&format!(r#"/// Run N CPU cycles with zero function-call overhead
+/// Returns: (text_dirty: bool, key_cleared: bool)
+#[no_mangle]
+pub extern "C" fn run_cpu_cycles(
+    signals: &mut [u64],
+    ram: &mut [u8],
+    rom: &[u8],
+    n: usize,
+    key_data: u8,
+    key_ready: bool,
+) -> (bool, bool) {{
+    let mut next_regs = [0u64; {}];
+    let mut text_dirty = false;
+    let mut key_cleared = false;
+    let mut key_is_ready = key_ready;
+
+    for _ in 0..n {{
+        for _ in 0..14 {{
+            // Set keyboard state
+            signals[{}] = if key_is_ready {{ (key_data as u64) | 0x80 }} else {{ 0 }};
+
+            // Falling edge
+            signals[{}] = 0;
+            do_evaluate!(signals);
+
+            // Provide RAM/ROM data
+            let addr = signals[{}] as usize;
+            signals[{}] = if addr >= 0xD000 && addr <= 0xFFFF {{
+                let rom_offset = addr - 0xD000;
+                if rom_offset < rom.len() {{ rom[rom_offset] as u64 }} else {{ 0 }}
+            }} else if addr < ram.len() {{
+                ram[addr] as u64
+            }} else {{
+                0
+            }};
+            do_evaluate!(signals);
+
+            // Rising edge - clock triggers register update
+            signals[{}] = 1;
+            do_evaluate!(signals);
+            do_tick!(signals, next_regs);
+            do_update_regs!(signals, next_regs);
+            do_evaluate!(signals);
+
+            // Handle RAM writes
+            if signals[{}] == 1 {{
+                let write_addr = signals[{}] as usize;
+                if write_addr < ram.len() {{
+                    ram[write_addr] = (signals[{}] & 0xFF) as u8;
+                    if write_addr >= 0x0400 && write_addr <= 0x07FF {{
+                        text_dirty = true;
+                    }}
+                }}
+            }}
+
+            // Check keyboard strobe clear
+            if signals[{}] == 1 {{
+                key_is_ready = false;
+                key_cleared = true;
+            }}
+        }}
+    }}
+
+    (text_dirty, key_cleared)
+}}
+"#, reg_count, k_idx, clk_idx, ram_addr_idx, ram_do_idx, clk_idx,
+    ram_we_idx, ram_addr_idx, d_idx, read_key_idx));
 
     code
 }
