@@ -15,6 +15,16 @@ module RHDL
       TEXT_PAGE1_START = 0x0400
       TEXT_PAGE1_END = 0x07FF
 
+      # Hi-res graphics pages (280x192, 8KB each)
+      HIRES_PAGE1_START = 0x2000
+      HIRES_PAGE1_END = 0x3FFF
+      HIRES_PAGE2_START = 0x4000
+      HIRES_PAGE2_END = 0x5FFF
+
+      HIRES_WIDTH = 280   # pixels
+      HIRES_HEIGHT = 192  # lines
+      HIRES_BYTES_PER_LINE = 40  # 280 pixels / 7 bits per byte
+
       # Disk geometry constants
       TRACKS = 35
       SECTORS_PER_TRACK = 16
@@ -224,6 +234,99 @@ module RHDL
 
       def clear_screen_dirty
         @text_page_dirty = false
+      end
+
+      # Read hi-res graphics as raw bitmap (192 rows x 280 pixels)
+      # Returns 2D array of 0/1 values
+      def read_hires_bitmap
+        base = HIRES_PAGE1_START  # Always use page 1 for now
+        bitmap = []
+
+        HIRES_HEIGHT.times do |row|
+          line = []
+          line_addr = hires_line_address(row, base)
+
+          HIRES_BYTES_PER_LINE.times do |col|
+            byte = @ram[line_addr + col] || 0
+            # Each byte has 7 pixels (bit 7 is color/palette select)
+            7.times do |bit|
+              line << ((byte >> bit) & 1)
+            end
+          end
+
+          bitmap << line
+        end
+
+        bitmap
+      end
+
+      # Render hi-res screen using Unicode braille characters (2x4 dots per char)
+      # This gives much higher resolution than ASCII art
+      # chars_wide: target width in characters (default 80)
+      def render_hires_braille(chars_wide: 80, invert: false)
+        bitmap = read_hires_bitmap
+
+        # Braille characters are 2 dots wide x 4 dots tall
+        chars_tall = (HIRES_HEIGHT / 4.0).ceil
+
+        # Scale factors
+        x_scale = HIRES_WIDTH.to_f / (chars_wide * 2)
+        y_scale = HIRES_HEIGHT.to_f / (chars_tall * 4)
+
+        # Braille dot positions (Unicode mapping):
+        # Dot 1 (0x01) Dot 4 (0x08)
+        # Dot 2 (0x02) Dot 5 (0x10)
+        # Dot 3 (0x04) Dot 6 (0x20)
+        # Dot 7 (0x40) Dot 8 (0x80)
+        dot_map = [
+          [0x01, 0x08],  # row 0
+          [0x02, 0x10],  # row 1
+          [0x04, 0x20],  # row 2
+          [0x40, 0x80]   # row 3
+        ]
+
+        lines = []
+        chars_tall.times do |char_y|
+          line = String.new
+          chars_wide.times do |char_x|
+            pattern = 0
+
+            # Sample 2x4 grid for this braille character
+            4.times do |dy|
+              2.times do |dx|
+                px = ((char_x * 2 + dx) * x_scale).to_i
+                py = ((char_y * 4 + dy) * y_scale).to_i
+                px = [px, HIRES_WIDTH - 1].min
+                py = [py, HIRES_HEIGHT - 1].min
+
+                pixel = bitmap[py][px]
+                pixel = 1 - pixel if invert
+                pattern |= dot_map[dy][dx] if pixel == 1
+              end
+            end
+
+            # Unicode braille starts at U+2800
+            line << (0x2800 + pattern).chr(Encoding::UTF_8)
+          end
+          lines << line
+        end
+
+        lines.join("\n")
+      end
+
+      # Hi-res screen line address calculation (Apple II interleaved layout)
+      def hires_line_address(row, base = HIRES_PAGE1_START)
+        # row 0-191
+        # Each group of 8 consecutive rows is separated by 0x400 bytes
+        # Groups of 8 lines within a section are 0x80 apart
+        # Sections (0-63, 64-127, 128-191) are 0x28 apart
+
+        section = row / 64           # 0, 1, or 2
+        row_in_section = row % 64
+        group = row_in_section / 8   # 0-7
+        line_in_group = row_in_section % 8  # 0-7
+
+        base + (line_in_group * 0x400) + (group * 0x80) + (section * 0x28)
       end
 
       # Get CPU state for debugging
