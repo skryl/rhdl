@@ -123,5 +123,24 @@ RSpec.describe RHDL::HDL::BitReverse do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 0b10110001 },
+          { a: 0b10000001 },
+          { a: 0b00000000 },
+          { a: 0b11111111 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::BitReverse,
+          'bit_reverse',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/bit_reverse',
+          has_clock: false
+        )
+      end
+    end
   end
 end

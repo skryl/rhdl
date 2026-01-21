@@ -112,5 +112,24 @@ RSpec.describe RHDL::HDL::IncDec do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 100, inc: 1 },
+          { a: 100, inc: 0 },
+          { a: 255, inc: 1 },
+          { a: 0, inc: 0 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::IncDec,
+          'inc_dec',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/inc_dec',
+          has_clock: false
+        )
+      end
+    end
   end
 end

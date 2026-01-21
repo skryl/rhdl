@@ -98,5 +98,24 @@ RSpec.describe RHDL::HDL::Subtractor do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 0x64, b: 0x32, bin: 0 },  # 100 - 50 = 50
+          { a: 0x32, b: 0x64, bin: 0 },  # 50 - 100 (with borrow)
+          { a: 0x00, b: 0x00, bin: 0 },
+          { a: 0xFF, b: 0x01, bin: 0 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::Subtractor,
+          'subtractor',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/subtractor',
+          has_clock: false
+        )
+      end
+    end
   end
 end

@@ -223,5 +223,24 @@ RSpec.describe RHDL::HDL::DFlipFlop do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { d: 1, rst: 0, en: 1 },
+          { d: 0, rst: 0, en: 1 },
+          { d: 1, rst: 0, en: 0 },
+          { d: 0, rst: 1, en: 1 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::DFlipFlop,
+          'd_flip_flop',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/d_flip_flop',
+          has_clock: true
+        )
+      end
+    end
   end
 end

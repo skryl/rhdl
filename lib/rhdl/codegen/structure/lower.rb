@@ -1567,9 +1567,9 @@ module RHDL
         @ir.add_gate(type: Primitives::NOT, inputs: [up_net], output: up_inv)
 
         # Build adder chain
-        # When up=1: add 1 (carry_in = 1, addend = 0)
-        # When up=0: subtract 1 = add all 1s + 1, but simpler: add -1 = add all 1s with carry 1
-        carry = const_one
+        # When up=1: add 1 (carry_in = 1, addend = 0) → q + 0 + 1 = q + 1
+        # When up=0: subtract 1 (carry_in = 0, addend = all 1s) → q + 0xFF + 0 = q - 1
+        carry = up_net  # carry_in = 1 for up, 0 for down
         count_result = []
         width.times do |idx|
           q_bit = q_internal[idx]
@@ -1696,27 +1696,22 @@ module RHDL
         @ir.add_gate(type: Primitives::NOT, inputs: [q_internal], output: qn_net)
       end
 
-      # SRLatch: Combinational SR latch (level-sensitive)
+      # SRLatch: Level-sensitive SR latch with enable
       def lower_sr_latch(component)
         s_net = map_bus(component.inputs[:s]).first
         r_net = map_bus(component.inputs[:r]).first
+        en_net = map_bus(component.inputs[:en]).first
         q_net = map_bus(component.outputs[:q]).first
         qn_net = map_bus(component.outputs[:qn]).first
 
-        # Cross-coupled NOR gates
-        # Q = NOR(R, Qn)
-        # Qn = NOR(S, Q)
-        # This creates feedback - for gate-level we approximate with the stable state:
-        # If S=1, R=0: Q=1
-        # If S=0, R=1: Q=0
-        # If S=0, R=0: hold (we can't easily model memory in combinational gates)
-        # If S=1, R=1: invalid (Q=0 in our implementation)
-
-        # For synthesis purposes, model as: Q = S AND NOT R
-        r_inv = new_temp
-        @ir.add_gate(type: Primitives::NOT, inputs: [r_net], output: r_inv)
-        @ir.add_gate(type: Primitives::AND, inputs: [s_net, r_inv], output: q_net)
-        @ir.add_gate(type: Primitives::NOT, inputs: [q_net], output: qn_net)
+        # SR latch is a memory element that needs special handling in simulation
+        # Truth table (when en=1):
+        #   S=1, R=0: Q=1 (set)
+        #   S=0, R=1: Q=0 (reset)
+        #   S=0, R=0: Q=hold (memory)
+        #   S=1, R=1: invalid (we let R win, Q=0)
+        # When en=0: Q=hold (memory)
+        @ir.add_sr_latch(s: s_net, r: r_net, en: en_net, q: q_net, qn: qn_net)
       end
 
       # TristateBuffer: Buffer with enable (outputs 0 when disabled)
@@ -1840,6 +1835,20 @@ module RHDL
           # For simplicity, we compare and subtract at each step
           # This is a simplified approach suitable for small widths
 
+          # First, check for overflow: if any bit of divisor at positions >= (width - i) is set,
+          # then (divisor << i) would overflow and we should NOT set quotient bit
+          overflow = nil
+          if i > 0
+            # Check bits from (width - i) to (width - 1) for any set bit
+            overflow_bits = divisor_nets[(width - i)..]
+            overflow = overflow_bits.first
+            overflow_bits[1..].each do |bit|
+              or_temp = new_temp
+              @ir.add_gate(type: Primitives::OR, inputs: [overflow, bit], output: or_temp)
+              overflow = or_temp
+            end
+          end
+
           # Build shifted divisor (divisor << i)
           shifted_divisor = Array.new(width) do |j|
             if j >= i && (j - i) < width
@@ -1884,8 +1893,19 @@ module RHDL
           end
 
           # If no borrow (remainder >= shifted_divisor), set quotient bit and update remainder
-          q_bit = new_temp
-          @ir.add_gate(type: Primitives::NOT, inputs: [borrow], output: q_bit)
+          # But if overflow occurred, q_bit must be 0
+          q_bit_raw = new_temp
+          @ir.add_gate(type: Primitives::NOT, inputs: [borrow], output: q_bit_raw)
+
+          if overflow
+            # q_bit = q_bit_raw AND (NOT overflow)
+            not_overflow = new_temp
+            @ir.add_gate(type: Primitives::NOT, inputs: [overflow], output: not_overflow)
+            q_bit = new_temp
+            @ir.add_gate(type: Primitives::AND, inputs: [q_bit_raw, not_overflow], output: q_bit)
+          else
+            q_bit = q_bit_raw
+          end
           quotient[i] = q_bit
 
           # Select new remainder: if q_bit then diff else remainder
@@ -2145,8 +2165,9 @@ module RHDL
         data_width = dout_nets.length
         depth = 1 << addr_width
 
-        # Get ROM contents from component
-        memory = component.instance_variable_get(:@memory) || Array.new(depth, 0)
+        # Get ROM contents from component (stored in @_memory_arrays[:mem] by memory DSL)
+        memory_arrays = component.instance_variable_get(:@_memory_arrays)
+        memory = memory_arrays&.dig(:mem) || component.instance_variable_get(:@memory) || Array.new(depth, 0)
 
         # Build constant generators for each memory location
         mem_data = Array.new(depth) { Array.new(data_width) }
@@ -2303,16 +2324,43 @@ module RHDL
         empty_net = map_bus(component.outputs[:empty]).first
         full_net = map_bus(component.outputs[:full]).first
         count_nets = map_bus(component.outputs[:count])
+        wr_ptr_nets = map_bus(component.outputs[:wr_ptr])
+        rd_ptr_nets = map_bus(component.outputs[:rd_ptr])
 
         data_width = din_nets.length
         depth = component.instance_variable_get(:@depth) || 16
-        addr_width = Math.log2(depth).ceil
+        addr_width = wr_ptr_nets.length  # Use actual output width
         count_width = count_nets.length
 
-        # Pointers
+        # Internal pointers and count registers
         rd_ptr = Array.new(addr_width) { new_temp }
         wr_ptr = Array.new(addr_width) { new_temp }
         cnt = Array.new(count_width) { new_temp }
+
+        # First, compute empty and full based on count for use in enable logic
+        # Empty: count == 0
+        any_cnt = cnt.first
+        cnt[1..].each { |c| t = new_temp; @ir.add_gate(type: Primitives::OR, inputs: [any_cnt, c], output: t); any_cnt = t }
+        empty_internal = new_temp
+        @ir.add_gate(type: Primitives::NOT, inputs: [any_cnt], output: empty_internal)
+        @ir.add_gate(type: Primitives::BUF, inputs: [empty_internal], output: empty_net)
+
+        # Full: count == depth (16 for 5-bit count)
+        full_internal = lower_compare_const(cnt, depth)
+        @ir.add_gate(type: Primitives::BUF, inputs: [full_internal], output: full_net)
+
+        # Calculate enable conditions
+        # can_write = wr_en & ~full
+        not_full = new_temp
+        @ir.add_gate(type: Primitives::NOT, inputs: [full_internal], output: not_full)
+        can_write = new_temp
+        @ir.add_gate(type: Primitives::AND, inputs: [wr_en_net, not_full], output: can_write)
+
+        # can_read = rd_en & ~empty
+        not_empty = new_temp
+        @ir.add_gate(type: Primitives::NOT, inputs: [empty_internal], output: not_empty)
+        can_read = new_temp
+        @ir.add_gate(type: Primitives::AND, inputs: [rd_en_net, not_empty], output: can_read)
 
         # Memory array using DFFs
         mem_q = Array.new(depth) { Array.new(data_width) }
@@ -2323,46 +2371,116 @@ module RHDL
           select = select_bits.first
           select_bits[1..].each { |b| t = new_temp; @ir.add_gate(type: Primitives::AND, inputs: [select, b], output: t); select = t }
 
-          # Write when selected and wr_en and not full
-          not_full = new_temp
-          @ir.add_gate(type: Primitives::NOT, inputs: [full_net], output: not_full)
+          # Write when selected and can_write
           loc_we = new_temp
-          t1 = new_temp
-          @ir.add_gate(type: Primitives::AND, inputs: [select, wr_en_net], output: t1)
-          @ir.add_gate(type: Primitives::AND, inputs: [t1, not_full], output: loc_we)
+          @ir.add_gate(type: Primitives::AND, inputs: [select, can_write], output: loc_we)
 
           data_width.times do |bit|
             q = new_temp
             mem_q[loc][bit] = q
-            @ir.add_dff(d: din_nets[bit], q: q, rst: rst_net, en: loc_we)
+            # Memory content is NOT reset on rst - only pointers are reset
+            @ir.add_dff(d: din_nets[bit], q: q, rst: nil, en: loc_we)
           end
         end
 
-        # Read mux
+        # Read mux from rd_ptr
         data_width.times do |bit|
           data_bits = depth.times.map { |loc| mem_q[loc][bit] }
-          result = lower_mux_tree(data_bits, rd_ptr, 0)
+          result = lower_mux_tree(data_bits, rd_ptr[0...Math.log2(depth).ceil], 0)
           @ir.add_gate(type: Primitives::BUF, inputs: [result], output: dout_nets[bit])
         end
 
-        # Pointer and count logic using DFFs
-        # Simplified: just create registers for pointers
-        addr_width.times do |i|
-          @ir.add_dff(d: rd_ptr[i], q: rd_ptr[i], rst: rst_net, en: rd_en_net)
-          @ir.add_dff(d: wr_ptr[i], q: wr_ptr[i], rst: rst_net, en: wr_en_net)
+        # Write pointer: increment (mod depth) when can_write
+        wr_ptr_inc = []
+        carry = new_temp
+        @ir.add_gate(type: Primitives::CONST, inputs: [], output: carry, value: 1)
+        addr_width.times do |idx|
+          sum = new_temp
+          new_carry = new_temp
+          @ir.add_gate(type: Primitives::XOR, inputs: [wr_ptr[idx], carry], output: sum)
+          @ir.add_gate(type: Primitives::AND, inputs: [wr_ptr[idx], carry], output: new_carry)
+          wr_ptr_inc << sum
+          carry = new_carry
         end
 
-        # Empty: count == 0
-        any_cnt = cnt.first
-        cnt[1..].each { |c| t = new_temp; @ir.add_gate(type: Primitives::OR, inputs: [any_cnt, c], output: t); any_cnt = t }
-        @ir.add_gate(type: Primitives::NOT, inputs: [any_cnt], output: empty_net)
+        addr_width.times do |i|
+          next_wr = new_temp
+          @ir.add_gate(type: Primitives::MUX, inputs: [wr_ptr[i], wr_ptr_inc[i], can_write], output: next_wr)
+          @ir.add_dff(d: next_wr, q: wr_ptr[i], rst: rst_net, en: nil)
+          @ir.add_gate(type: Primitives::BUF, inputs: [wr_ptr[i]], output: wr_ptr_nets[i])
+        end
 
-        # Full: count >= depth
-        # Simplified: check MSB of count
-        @ir.add_gate(type: Primitives::BUF, inputs: [cnt[-1]], output: full_net)
+        # Read pointer: increment (mod depth) when can_read
+        rd_ptr_inc = []
+        carry = new_temp
+        @ir.add_gate(type: Primitives::CONST, inputs: [], output: carry, value: 1)
+        addr_width.times do |idx|
+          sum = new_temp
+          new_carry = new_temp
+          @ir.add_gate(type: Primitives::XOR, inputs: [rd_ptr[idx], carry], output: sum)
+          @ir.add_gate(type: Primitives::AND, inputs: [rd_ptr[idx], carry], output: new_carry)
+          rd_ptr_inc << sum
+          carry = new_carry
+        end
 
-        # Count output
-        count_width.times { |i| @ir.add_gate(type: Primitives::BUF, inputs: [cnt[i]], output: count_nets[i]) }
+        addr_width.times do |i|
+          next_rd = new_temp
+          @ir.add_gate(type: Primitives::MUX, inputs: [rd_ptr[i], rd_ptr_inc[i], can_read], output: next_rd)
+          @ir.add_dff(d: next_rd, q: rd_ptr[i], rst: rst_net, en: nil)
+          @ir.add_gate(type: Primitives::BUF, inputs: [rd_ptr[i]], output: rd_ptr_nets[i])
+        end
+
+        # Count: increment on write only, decrement on read only, hold if both or neither
+        # can_write_only = can_write & ~can_read
+        # can_read_only = can_read & ~can_write
+        not_can_read = new_temp
+        @ir.add_gate(type: Primitives::NOT, inputs: [can_read], output: not_can_read)
+        can_write_only = new_temp
+        @ir.add_gate(type: Primitives::AND, inputs: [can_write, not_can_read], output: can_write_only)
+
+        not_can_write = new_temp
+        @ir.add_gate(type: Primitives::NOT, inputs: [can_write], output: not_can_write)
+        can_read_only = new_temp
+        @ir.add_gate(type: Primitives::AND, inputs: [can_read, not_can_write], output: can_read_only)
+
+        # Count + 1
+        cnt_inc = []
+        carry = new_temp
+        @ir.add_gate(type: Primitives::CONST, inputs: [], output: carry, value: 1)
+        count_width.times do |idx|
+          sum = new_temp
+          new_carry = new_temp
+          @ir.add_gate(type: Primitives::XOR, inputs: [cnt[idx], carry], output: sum)
+          @ir.add_gate(type: Primitives::AND, inputs: [cnt[idx], carry], output: new_carry)
+          cnt_inc << sum
+          carry = new_carry
+        end
+
+        # Count - 1
+        cnt_dec = []
+        borrow = new_temp
+        @ir.add_gate(type: Primitives::CONST, inputs: [], output: borrow, value: 1)
+        count_width.times do |idx|
+          diff = new_temp
+          new_borrow = new_temp
+          @ir.add_gate(type: Primitives::XOR, inputs: [cnt[idx], borrow], output: diff)
+          cnt_inv = new_temp
+          @ir.add_gate(type: Primitives::NOT, inputs: [cnt[idx]], output: cnt_inv)
+          @ir.add_gate(type: Primitives::AND, inputs: [cnt_inv, borrow], output: new_borrow)
+          cnt_dec << diff
+          borrow = new_borrow
+        end
+
+        # Select next count: write_only -> inc, read_only -> dec, else hold
+        count_width.times do |i|
+          mux_rd = new_temp
+          @ir.add_gate(type: Primitives::MUX, inputs: [cnt[i], cnt_dec[i], can_read_only], output: mux_rd)
+          next_cnt = new_temp
+          @ir.add_gate(type: Primitives::MUX, inputs: [mux_rd, cnt_inc[i], can_write_only], output: next_cnt)
+
+          @ir.add_dff(d: next_cnt, q: cnt[i], rst: rst_net, en: nil)
+          @ir.add_gate(type: Primitives::BUF, inputs: [cnt[i]], output: count_nets[i])
+        end
       end
 
       # Stack: LIFO with push/pop
@@ -2402,22 +2520,82 @@ module RHDL
           data_width.times do |bit|
             q = new_temp
             mem_q[loc][bit] = q
-            @ir.add_dff(d: din_nets[bit], q: q, rst: rst_net, en: loc_we)
+            # Memory content is NOT reset on rst - only SP is reset
+            @ir.add_dff(d: din_nets[bit], q: q, rst: nil, en: loc_we)
           end
         end
 
         # Read top of stack (SP - 1)
-        # For simplicity, read current SP location
+        # First compute SP - 1 for read address
+        sp_minus_1 = []
+        borrow_read = new_temp
+        @ir.add_gate(type: Primitives::CONST, inputs: [], output: borrow_read, value: 1)
+        sp_width.times do |idx|
+          diff = new_temp
+          new_borrow = new_temp
+          @ir.add_gate(type: Primitives::XOR, inputs: [sp_internal[idx], borrow_read], output: diff)
+          sp_inv = new_temp
+          @ir.add_gate(type: Primitives::NOT, inputs: [sp_internal[idx]], output: sp_inv)
+          @ir.add_gate(type: Primitives::AND, inputs: [sp_inv, borrow_read], output: new_borrow)
+          sp_minus_1 << diff
+          borrow_read = new_borrow
+        end
+
+        # Read from sp-1 using mux tree
         data_width.times do |bit|
           data_bits = depth.times.map { |loc| mem_q[loc][bit] }
-          result = lower_mux_tree(data_bits, sp_internal[0...Math.log2(depth).ceil], 0)
+          result = lower_mux_tree(data_bits, sp_minus_1[0...Math.log2(depth).ceil], 0)
           @ir.add_gate(type: Primitives::BUF, inputs: [result], output: dout_nets[bit])
         end
 
         # SP register with increment/decrement
-        # Simplified implementation
+        # push_enabled = push & ~full, pop_enabled = pop & ~empty
+        not_full = new_temp
+        @ir.add_gate(type: Primitives::NOT, inputs: [full_net], output: not_full)
+        push_enabled = new_temp
+        @ir.add_gate(type: Primitives::AND, inputs: [push_net, not_full], output: push_enabled)
+
+        not_empty = new_temp
+        @ir.add_gate(type: Primitives::NOT, inputs: [empty_net], output: not_empty)
+        pop_enabled = new_temp
+        @ir.add_gate(type: Primitives::AND, inputs: [pop_net, not_empty], output: pop_enabled)
+
+        # Compute SP + 1 (increment)
+        inc_result = []
+        carry = new_temp
+        @ir.add_gate(type: Primitives::CONST, inputs: [], output: carry, value: 1)
+        sp_width.times do |idx|
+          sum = new_temp
+          new_carry = new_temp
+          @ir.add_gate(type: Primitives::XOR, inputs: [sp_internal[idx], carry], output: sum)
+          @ir.add_gate(type: Primitives::AND, inputs: [sp_internal[idx], carry], output: new_carry)
+          inc_result << sum
+          carry = new_carry
+        end
+
+        # Compute SP - 1 (decrement)
+        dec_result = []
+        borrow = new_temp
+        @ir.add_gate(type: Primitives::CONST, inputs: [], output: borrow, value: 1)
+        sp_width.times do |idx|
+          diff = new_temp
+          new_borrow = new_temp
+          @ir.add_gate(type: Primitives::XOR, inputs: [sp_internal[idx], borrow], output: diff)
+          sp_inv = new_temp
+          @ir.add_gate(type: Primitives::NOT, inputs: [sp_internal[idx]], output: sp_inv)
+          @ir.add_gate(type: Primitives::AND, inputs: [sp_inv, borrow], output: new_borrow)
+          dec_result << diff
+          borrow = new_borrow
+        end
+
+        # Select next SP value: push_enabled -> inc, pop_enabled -> dec, else hold
         sp_width.times do |i|
-          @ir.add_dff(d: sp_internal[i], q: sp_internal[i], rst: rst_net, en: push_net)
+          mux_pop = new_temp
+          @ir.add_gate(type: Primitives::MUX, inputs: [sp_internal[i], dec_result[i], pop_enabled], output: mux_pop)
+          next_sp = new_temp
+          @ir.add_gate(type: Primitives::MUX, inputs: [mux_pop, inc_result[i], push_enabled], output: next_sp)
+
+          @ir.add_dff(d: next_sp, q: sp_internal[i], rst: rst_net, en: nil)
           @ir.add_gate(type: Primitives::BUF, inputs: [sp_internal[i]], output: sp_nets[i])
         end
 
@@ -2512,16 +2690,17 @@ module RHDL
         q_internal = Array.new(width) { new_temp }
 
         # Compute SP - 1 (push) and SP + 1 (pop)
-        # Decrement
+        # Decrement: q - 1 using subtraction with borrow
+        # diff[i] = q[i] XOR borrow_in
+        # borrow_out = (~q[i]) AND borrow_in
         dec_result = []
         borrow = new_temp
         @ir.add_gate(type: Primitives::CONST, inputs: [], output: borrow, value: 1)
         width.times do |idx|
           diff = new_temp
           new_borrow = new_temp
-          q_xor_b = new_temp
-          @ir.add_gate(type: Primitives::XOR, inputs: [q_internal[idx], borrow], output: q_xor_b)
-          @ir.add_gate(type: Primitives::NOT, inputs: [q_xor_b], output: diff)
+          # diff = q XOR borrow (not inverted)
+          @ir.add_gate(type: Primitives::XOR, inputs: [q_internal[idx], borrow], output: diff)
 
           q_inv = new_temp
           @ir.add_gate(type: Primitives::NOT, inputs: [q_internal[idx]], output: q_inv)
@@ -2553,7 +2732,8 @@ module RHDL
           next_val = new_temp
           @ir.add_gate(type: Primitives::MUX, inputs: [q_internal[idx], mux_op, en_any], output: next_val)
 
-          @ir.add_dff(d: next_val, q: q_internal[idx], rst: rst_net, en: nil)
+          # Stack pointer resets to 0xFF, so each bit resets to 1
+          @ir.add_dff(d: next_val, q: q_internal[idx], rst: rst_net, en: nil, reset_value: 1)
           @ir.add_gate(type: Primitives::BUF, inputs: [q_internal[idx]], output: q_nets[idx])
         end
 
@@ -2592,12 +2772,37 @@ module RHDL
         # This is a simplified implementation - full decode would be more complex
 
         # For synthesis, use mux trees based on opcode value
-        # ALU op: default 0 (ADD)
-        alu_op_nets.each_with_index do |out, idx|
-          const_zero = new_temp
-          @ir.add_gate(type: Primitives::CONST, inputs: [], output: const_zero, value: 0)
-          @ir.add_gate(type: Primitives::BUF, inputs: [const_zero], output: out)
-        end
+        # ALU op: ADD=0, SUB=1, AND=2, OR=3, XOR=4, NOT=5, MUL=11, DIV=12
+        # opcode 3=ADD(0), 4=SUB(1), 5=AND(2), 6=OR(3), 7=XOR(4), 14=DIV(12)
+        opcode_is_3 = lower_compare_const(opcode_nets, 3)
+        opcode_is_4 = lower_compare_const(opcode_nets, 4)
+        opcode_is_5 = lower_compare_const(opcode_nets, 5)
+        opcode_is_6 = lower_compare_const(opcode_nets, 6)
+        opcode_is_7 = lower_compare_const(opcode_nets, 7)
+        opcode_is_14 = lower_compare_const(opcode_nets, 14)
+
+        # alu_op is 4 bits: build each bit based on operation encoding
+        # 0=ADD(0000), 1=SUB(0001), 2=AND(0010), 3=OR(0011), 4=XOR(0100), 12=DIV(1100)
+        # Bit 0: SUB(1), OR(3), XOR(4) -> opcode 4, 6, 7
+        alu_op_bit0 = new_temp
+        temp0 = new_temp
+        @ir.add_gate(type: Primitives::OR, inputs: [opcode_is_4, opcode_is_6], output: temp0)
+        # Note: XOR opcode 7 maps to alu_op 4 (binary 0100), so bit 0 is 0, not 1
+        @ir.add_gate(type: Primitives::BUF, inputs: [temp0], output: alu_op_bit0)
+        @ir.add_gate(type: Primitives::BUF, inputs: [alu_op_bit0], output: alu_op_nets[0])
+
+        # Bit 1: AND(2), OR(3) -> opcode 5, 6
+        alu_op_bit1 = new_temp
+        @ir.add_gate(type: Primitives::OR, inputs: [opcode_is_5, opcode_is_6], output: alu_op_bit1)
+        @ir.add_gate(type: Primitives::BUF, inputs: [alu_op_bit1], output: alu_op_nets[1])
+
+        # Bit 2: XOR(4), DIV(12) -> opcode 7, 14
+        alu_op_bit2 = new_temp
+        @ir.add_gate(type: Primitives::OR, inputs: [opcode_is_7, opcode_is_14], output: alu_op_bit2)
+        @ir.add_gate(type: Primitives::BUF, inputs: [alu_op_bit2], output: alu_op_nets[2])
+
+        # Bit 3: DIV(12) -> opcode 14
+        @ir.add_gate(type: Primitives::BUF, inputs: [opcode_is_14], output: alu_op_nets[3])
 
         # alu_src: LDI (opcode 10 = 0xA) uses immediate
         opcode_is_10 = lower_compare_const(opcode_nets, 10)
@@ -2632,12 +2837,41 @@ module RHDL
         opcode_is_11 = lower_compare_const(opcode_nets, 11)
         @ir.add_gate(type: Primitives::BUF, inputs: [opcode_is_11], output: jump_net)
 
-        # pc_src: default 0
-        pc_src_nets.each do |out|
-          const_zero = new_temp
-          @ir.add_gate(type: Primitives::CONST, inputs: [], output: const_zero, value: 0)
-          @ir.add_gate(type: Primitives::BUF, inputs: [const_zero], output: out)
-        end
+        # pc_src: PC source selection (0=+1, 1=short operand, 2=long addr)
+        # JZ(8): if zero_flag then 1 else 0
+        # JNZ(9): if not zero_flag then 1 else 0
+        # JMP(11): always 1
+        # CALL(12): always 1
+        opcode_is_jz = lower_compare_const(opcode_nets, 8)
+        opcode_is_jnz = lower_compare_const(opcode_nets, 9)
+        opcode_is_jmp = lower_compare_const(opcode_nets, 11)
+        opcode_is_call = lower_compare_const(opcode_nets, 12)
+
+        # JZ takes branch if zero_flag=1: jz_taken = opcode_is_8 AND zero_flag
+        jz_taken = new_temp
+        @ir.add_gate(type: Primitives::AND, inputs: [opcode_is_jz, zero_flag_net], output: jz_taken)
+
+        # JNZ takes branch if zero_flag=0: jnz_taken = opcode_is_9 AND NOT(zero_flag)
+        not_zero_flag = new_temp
+        @ir.add_gate(type: Primitives::NOT, inputs: [zero_flag_net], output: not_zero_flag)
+        jnz_taken = new_temp
+        @ir.add_gate(type: Primitives::AND, inputs: [opcode_is_jnz, not_zero_flag], output: jnz_taken)
+
+        # pc_src = 1 when: JZ taken, JNZ taken, JMP, or CALL
+        pc_src_is_1 = new_temp
+        pc_src_t1 = new_temp
+        @ir.add_gate(type: Primitives::OR, inputs: [jz_taken, jnz_taken], output: pc_src_t1)
+        pc_src_t2 = new_temp
+        @ir.add_gate(type: Primitives::OR, inputs: [pc_src_t1, opcode_is_jmp], output: pc_src_t2)
+        @ir.add_gate(type: Primitives::OR, inputs: [pc_src_t2, opcode_is_call], output: pc_src_is_1)
+
+        # pc_src is 2 bits: bit 0 = 1 means short operand
+        @ir.add_gate(type: Primitives::BUF, inputs: [pc_src_is_1], output: pc_src_nets[0])
+
+        # Bit 1 = 0 for now (long address modes not supported in simple decode)
+        const_zero_pcsrc = new_temp
+        @ir.add_gate(type: Primitives::CONST, inputs: [], output: const_zero_pcsrc, value: 0)
+        @ir.add_gate(type: Primitives::BUF, inputs: [const_zero_pcsrc], output: pc_src_nets[1])
 
         # halt: 0xF0
         instr_is_f0 = lower_compare_const(instr_nets, 0xF0)
@@ -2727,11 +2961,12 @@ module RHDL
           parent_nets[port_name] = map_bus(wire)
         end
 
-        # Map internal signals to nets
-        if component.respond_to?(:signals) && component.signals
-          component.signals.each do |sig_name, wire|
-            parent_nets[sig_name] = wire.respond_to?(:width) && wire.width > 1 ?
-              wire.width.times.map { new_temp } : [new_temp]
+        # Map internal signals (wires) to nets using class-level _signal_defs
+        if component.class.respond_to?(:_signal_defs)
+          component.class._signal_defs.each do |sig_def|
+            sig_name = sig_def[:name]
+            width = sig_def[:width] || 1
+            parent_nets[sig_name] = width > 1 ? width.times.map { new_temp } : [new_temp]
           end
         end
 
@@ -2771,6 +3006,8 @@ module RHDL
           [source_nets.length, dest_nets.length].min.times do |i|
             src = source_nets[i]
             dst = dest_nets[i]
+            # Skip if already connected (same net due to wire union-find)
+            next if src == dst
             # Use buffer to connect (direction: source drives dest)
             @ir.add_gate(type: Primitives::BUF, inputs: [src], output: dst)
           end
