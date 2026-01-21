@@ -76,6 +76,48 @@ module RHDL
         def stats
           @sim.stats
         end
+
+        # Batched execution methods (only available with native backend)
+        def load_rom(data)
+          @sim.load_rom(data) if @sim.respond_to?(:load_rom)
+        end
+
+        def load_ram(data, offset)
+          @sim.load_ram(data, offset) if @sim.respond_to?(:load_ram)
+        end
+
+        def run_cpu_cycles(n, key_data, key_ready)
+          if @sim.respond_to?(:run_cpu_cycles)
+            @sim.run_cpu_cycles(n, key_data, key_ready)
+          else
+            # Fallback: not supported in Ruby simulator
+            { cycles_run: 0, text_dirty: false, key_cleared: false }
+          end
+        end
+
+        def read_ram(start, length)
+          if @sim.respond_to?(:read_ram)
+            @sim.read_ram(start, length)
+          else
+            []
+          end
+        end
+
+        def write_ram(start, data)
+          @sim.write_ram(start, data) if @sim.respond_to?(:write_ram)
+        end
+
+        def respond_to_missing?(method_name, include_private = false)
+          @sim.respond_to?(method_name) || super
+        end
+
+        def method_missing(method_name, *args, &block)
+          if @sim.respond_to?(method_name)
+            @sim.send(method_name, *args, &block)
+          else
+            super
+          end
+        end
       end
 
       # Ruby fallback simulator for when native extension is not available
