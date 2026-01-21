@@ -3910,44 +3910,589 @@ module RHDL
         end
       end
 
-      # Lower a behavior block to gates
-      # This is a simplified implementation that handles common patterns
+      # Lower a behavior block to gates using the component's IR
       def lower_behavior_block(component)
-        # Get the behavior block context
-        return unless component.class.respond_to?(:behavior_defined?) && component.class.behavior_defined?
+        return unless component.class.respond_to?(:to_ir)
 
-        # The component needs to be evaluated to build its expression tree
-        # Create a temporary instance to evaluate behavior
+        # Get the behavior IR from the component
         begin
-          component.propagate if component.respond_to?(:propagate)
-        rescue StandardError
-          # Ignore propagation errors during lowering
+          behavior_ir = component.class.to_ir
+        rescue StandardError => e
+          # If IR generation fails, skip this component
+          warn "Warning: Failed to generate IR for #{component.class}: #{e.message}" if ENV['RHDL_DEBUG']
+          return
         end
 
-        # Handle sequential registers (create DFFs for registered outputs)
-        if component.class.respond_to?(:_sequential_defs) && component.class._sequential_defs
-          component.class._sequential_defs.each do |seq_def|
-            lower_sequential_block(component, seq_def)
+        return unless behavior_ir
+
+        # Build signal name to net mapping
+        signal_nets = {}
+
+        # Map input ports
+        component.inputs.each do |port_name, wire|
+          next unless wire
+          signal_nets[port_name.to_s] = map_bus(wire)
+          signal_nets[port_name.to_sym] = map_bus(wire)
+        end
+
+        # Map output ports
+        component.outputs.each do |port_name, wire|
+          next unless wire
+          signal_nets[port_name.to_s] = map_bus(wire)
+          signal_nets[port_name.to_sym] = map_bus(wire)
+        end
+
+        # Map internal signals
+        component.internal_signals.each do |sig_name, wire|
+          next unless wire
+          signal_nets[sig_name.to_s] = map_bus(wire)
+          signal_nets[sig_name.to_sym] = map_bus(wire)
+        end
+
+        # Map registers from IR
+        behavior_ir.regs&.each do |reg|
+          unless signal_nets[reg.name.to_s]
+            signal_nets[reg.name.to_s] = reg.width.times.map { new_temp }
+            signal_nets[reg.name.to_sym] = signal_nets[reg.name.to_s]
           end
         end
 
-        # For now, connect inputs to outputs through buffers for combinational logic
-        # This is a placeholder - full behavior lowering would require expression tree analysis
-        component.outputs.each do |output_name, output_wire|
-          next unless output_wire
-          output_nets = map_bus(output_wire)
+        # Lower combinational assignments
+        behavior_ir.assigns&.each do |assign|
+          target_nets = signal_nets[assign.target.to_s] || signal_nets[assign.target.to_sym]
+          next unless target_nets
 
-          # Try to find matching internal signal or input
-          internal = component.internal_signals[output_name]
-          if internal
-            internal_nets = map_bus(internal)
-            output_nets.each_with_index do |out_net, i|
-              if internal_nets[i]
-                @ir.add_gate(type: Primitives::BUF, inputs: [internal_nets[i]], output: out_net)
+          target_nets = [target_nets] unless target_nets.is_a?(Array)
+          result_nets = lower_ir_expr(assign.expr, signal_nets)
+          result_nets = [result_nets] unless result_nets.is_a?(Array)
+
+          # Connect result to target
+          [target_nets.length, result_nets.length].min.times do |i|
+            next unless target_nets[i] && result_nets[i]
+            @ir.add_gate(type: Primitives::BUF, inputs: [result_nets[i]], output: target_nets[i])
+          end
+        end
+
+        # Lower sequential processes
+        behavior_ir.processes&.each do |process|
+          next unless process.clocked
+
+          clock_nets = signal_nets[process.clock.to_s] || signal_nets[process.clock.to_sym]
+          clock_net = clock_nets&.first
+          next unless clock_net
+
+          process.statements&.each do |stmt|
+            next unless stmt.is_a?(RHDL::Codegen::Behavior::IR::SeqAssign)
+
+            target_nets = signal_nets[stmt.target.to_s] || signal_nets[stmt.target.to_sym]
+            next unless target_nets
+
+            target_nets = [target_nets] unless target_nets.is_a?(Array)
+            d_nets = lower_ir_expr(stmt.expr, signal_nets)
+            d_nets = [d_nets] unless d_nets.is_a?(Array)
+
+            # Create DFFs for each bit
+            target_nets.each_with_index do |q_net, i|
+              # Skip if q_net is nil (shouldn't happen but be safe)
+              next if q_net.nil?
+              d_net = d_nets[i]
+              if d_net.nil?
+                # Create constant 0 for missing d input
+                d_net = new_temp
+                @ir.add_gate(type: Primitives::CONST, inputs: [], output: d_net, value: 0)
               end
+              # Add DFF (clock is implicit in the netlist format)
+              @ir.add_dff(d: d_net, q: q_net, rst: nil, en: nil, reset_value: 0)
             end
           end
         end
+      end
+
+      # Lower an IR expression to gate-level nets
+      # Returns an array of net IDs (one per bit)
+      def lower_ir_expr(expr, signal_nets)
+        # Handle Synth expressions by converting to IR first
+        if expr.class.to_s.start_with?('RHDL::Synth::')
+          return lower_ir_expr(expr.to_ir, signal_nets)
+        end
+
+        case expr
+        when RHDL::Codegen::Behavior::IR::Signal
+          nets = signal_nets[expr.name.to_s] || signal_nets[expr.name.to_sym]
+          return nets if nets
+          # Create new nets for unknown signal
+          expr.width.times.map { new_temp }
+
+        when RHDL::Codegen::Behavior::IR::Literal
+          # Create constant gates
+          expr.width.times.map do |i|
+            bit = (expr.value >> i) & 1
+            out = new_temp
+            @ir.add_gate(type: Primitives::CONST, inputs: [], output: out, value: bit)
+            out
+          end
+
+        when RHDL::Codegen::Behavior::IR::UnaryOp
+          operand_nets = lower_ir_expr(expr.operand, signal_nets)
+          operand_nets = [operand_nets] unless operand_nets.is_a?(Array)
+          # Replace any nil values with zero
+          operand_nets = operand_nets.map do |n|
+            if n.nil?
+              z = new_temp
+              @ir.add_gate(type: Primitives::CONST, inputs: [], output: z, value: 0)
+              z
+            else
+              n
+            end
+          end
+
+          case expr.op
+          when :~, :not
+            # Bitwise NOT
+            operand_nets.map do |in_net|
+              out = new_temp
+              @ir.add_gate(type: Primitives::NOT, inputs: [in_net], output: out)
+              out
+            end
+          when :&, :reduce_and
+            # Reduction AND
+            result = reduce_gate_chain(Primitives::AND, operand_nets)
+            [result]
+          when :|, :reduce_or
+            # Reduction OR
+            result = reduce_gate_chain(Primitives::OR, operand_nets)
+            [result]
+          when :^, :reduce_xor
+            # Reduction XOR
+            result = reduce_gate_chain(Primitives::XOR, operand_nets)
+            [result]
+          else
+            operand_nets
+          end
+
+        when RHDL::Codegen::Behavior::IR::BinaryOp
+          left_nets = lower_ir_expr(expr.left, signal_nets)
+          right_nets = lower_ir_expr(expr.right, signal_nets)
+          left_nets = [left_nets] unless left_nets.is_a?(Array)
+          right_nets = [right_nets] unless right_nets.is_a?(Array)
+
+          # Extend to same width
+          max_width = [left_nets.length, right_nets.length, expr.width].max
+          left_nets = extend_nets(left_nets, max_width)
+          right_nets = extend_nets(right_nets, max_width)
+
+          case expr.op
+          when :&
+            # Bitwise AND
+            max_width.times.map do |i|
+              out = new_temp
+              @ir.add_gate(type: Primitives::AND, inputs: [left_nets[i], right_nets[i]], output: out)
+              out
+            end
+          when :|
+            # Bitwise OR
+            max_width.times.map do |i|
+              out = new_temp
+              @ir.add_gate(type: Primitives::OR, inputs: [left_nets[i], right_nets[i]], output: out)
+              out
+            end
+          when :^
+            # Bitwise XOR
+            max_width.times.map do |i|
+              out = new_temp
+              @ir.add_gate(type: Primitives::XOR, inputs: [left_nets[i], right_nets[i]], output: out)
+              out
+            end
+          when :+
+            # Addition (ripple carry)
+            lower_adder(left_nets, right_nets, expr.width)
+          when :-
+            # Subtraction (twos complement)
+            lower_subtractor(left_nets, right_nets, expr.width)
+          when :==
+            # Equality comparison
+            xor_results = max_width.times.map do |i|
+              out = new_temp
+              @ir.add_gate(type: Primitives::XOR, inputs: [left_nets[i], right_nets[i]], output: out)
+              out
+            end
+            # NOR of all XOR results = 1 when equal
+            or_result = reduce_gate_chain(Primitives::OR, xor_results)
+            not_result = new_temp
+            @ir.add_gate(type: Primitives::NOT, inputs: [or_result], output: not_result)
+            [not_result]
+          when :!=
+            # Inequality comparison
+            xor_results = max_width.times.map do |i|
+              out = new_temp
+              @ir.add_gate(type: Primitives::XOR, inputs: [left_nets[i], right_nets[i]], output: out)
+              out
+            end
+            # OR of all XOR results = 1 when not equal
+            [reduce_gate_chain(Primitives::OR, xor_results)]
+          when :<
+            # Less than (unsigned)
+            lower_comparator_lt(left_nets, right_nets)
+          when :>
+            # Greater than (unsigned) - swap operands
+            lower_comparator_lt(right_nets, left_nets)
+          when :<=
+            # Less than or equal
+            lt = lower_comparator_lt(left_nets, right_nets)
+            eq = lower_ir_expr(RHDL::Codegen::Behavior::IR::BinaryOp.new(op: :==, left: expr.left, right: expr.right, width: 1), signal_nets)
+            out = new_temp
+            @ir.add_gate(type: Primitives::OR, inputs: [lt.first, eq.first], output: out)
+            [out]
+          when :>=
+            # Greater than or equal - swap operands for LT
+            lt = lower_comparator_lt(right_nets, left_nets)
+            eq = lower_ir_expr(RHDL::Codegen::Behavior::IR::BinaryOp.new(op: :==, left: expr.left, right: expr.right, width: 1), signal_nets)
+            out = new_temp
+            @ir.add_gate(type: Primitives::OR, inputs: [lt.first, eq.first], output: out)
+            [out]
+          when :<<
+            # Left shift
+            lower_shift_left(left_nets, right_nets, expr.width)
+          when :>>
+            # Right shift
+            lower_shift_right(left_nets, right_nets, expr.width)
+          else
+            # Unknown op - pass through left operand
+            left_nets
+          end
+
+        when RHDL::Codegen::Behavior::IR::Mux
+          cond_nets = lower_ir_expr(expr.condition, signal_nets)
+          true_nets = lower_ir_expr(expr.when_true, signal_nets)
+          false_nets = lower_ir_expr(expr.when_false, signal_nets)
+
+          cond_nets = [cond_nets] unless cond_nets.is_a?(Array)
+          true_nets = [true_nets] unless true_nets.is_a?(Array)
+          false_nets = [false_nets] unless false_nets.is_a?(Array)
+
+          cond_net = cond_nets.first
+          # Ensure cond_net isn't nil
+          if cond_net.nil?
+            cond_net = new_temp
+            @ir.add_gate(type: Primitives::CONST, inputs: [], output: cond_net, value: 0)
+          end
+
+          # Extend to output width (this also replaces nil elements)
+          true_nets = extend_nets(true_nets, expr.width)
+          false_nets = extend_nets(false_nets, expr.width)
+
+          # Create MUX for each bit
+          expr.width.times.map do |i|
+            out = new_temp
+            @ir.add_gate(type: Primitives::MUX, inputs: [cond_net, true_nets[i], false_nets[i]], output: out)
+            out
+          end
+
+        when RHDL::Codegen::Behavior::IR::Slice
+          base_nets = lower_ir_expr(expr.base, signal_nets)
+          base_nets = [base_nets] unless base_nets.is_a?(Array)
+
+          # Extract bits from range
+          if expr.range.is_a?(Range)
+            range_begin = expr.range.begin
+            range_end = expr.range.end
+
+            # Handle dynamic range bounds (expressions instead of integers)
+            if !range_begin.is_a?(Integer) || !range_end.is_a?(Integer)
+              # Dynamic slice - convert bounds to constant values if possible
+              if range_begin.respond_to?(:to_ir)
+                range_begin_ir = range_begin.to_ir
+                if range_begin_ir.is_a?(RHDL::Codegen::Behavior::IR::Literal)
+                  range_begin = range_begin_ir.value
+                end
+              end
+              if range_end.respond_to?(:to_ir)
+                range_end_ir = range_end.to_ir
+                if range_end_ir.is_a?(RHDL::Codegen::Behavior::IR::Literal)
+                  range_end = range_end_ir.value
+                end
+              end
+
+              # If still not integers, use width-based extraction
+              unless range_begin.is_a?(Integer) && range_end.is_a?(Integer)
+                # Extract bits based on expr.width
+                return (0...expr.width).map { |i| base_nets[i] || new_temp }
+              end
+            end
+
+            # Now both are integers
+            low = [range_begin, range_end].min
+            high = [range_begin, range_end].max
+            (low..high).map { |i| base_nets[i] || new_temp }
+          elsif expr.range.is_a?(Integer)
+            [base_nets[expr.range] || new_temp]
+          elsif expr.range.respond_to?(:to_ir)
+            # Dynamic slice - convert range expression to IR and create mux
+            # For now, just return based on width
+            (0...expr.width).map { |i| base_nets[i] || new_temp }
+          else
+            # Unknown range type - return based on width
+            (0...expr.width).map { |i| base_nets[i] || new_temp }
+          end
+
+        when RHDL::Codegen::Behavior::IR::Concat
+          result = []
+          expr.parts.each do |part|
+            part_nets = lower_ir_expr(part, signal_nets)
+            part_nets = [part_nets] unless part_nets.is_a?(Array)
+            result.concat(part_nets)
+          end
+          result
+
+        when RHDL::Codegen::Behavior::IR::Resize
+          inner_nets = lower_ir_expr(expr.expr, signal_nets)
+          inner_nets = [inner_nets] unless inner_nets.is_a?(Array)
+          extend_nets(inner_nets, expr.width)
+
+        when RHDL::Codegen::Behavior::IR::Case
+          # Case expression - build MUX tree
+          selector_nets = lower_ir_expr(expr.selector, signal_nets)
+          selector_nets = [selector_nets] unless selector_nets.is_a?(Array)
+
+          # Start with default value
+          default_nets = if expr.default
+                           lower_ir_expr(expr.default, signal_nets)
+                         else
+                           expr.width.times.map { |_| z = new_temp; @ir.add_gate(type: Primitives::CONST, inputs: [], output: z, value: 0); z }
+                         end
+          default_nets = [default_nets] unless default_nets.is_a?(Array)
+          default_nets = extend_nets(default_nets, expr.width)
+
+          result = default_nets
+
+          # Build comparison chain
+          expr.cases.each do |values, case_expr|
+            case_nets = lower_ir_expr(case_expr, signal_nets)
+            case_nets = [case_nets] unless case_nets.is_a?(Array)
+            case_nets = extend_nets(case_nets, expr.width)
+
+            # Build OR of all value matches
+            match_nets = Array(values).map do |val|
+              # Compare selector to value
+              val_nets = expr.selector.width.times.map do |i|
+                bit = (val >> i) & 1
+                out = new_temp
+                @ir.add_gate(type: Primitives::CONST, inputs: [], output: out, value: bit)
+                out
+              end
+              # XOR each bit and NOR the results
+              xors = selector_nets.zip(val_nets).map do |s, v|
+                out = new_temp
+                @ir.add_gate(type: Primitives::XOR, inputs: [s || new_temp, v || new_temp], output: out)
+                out
+              end
+              or_result = reduce_gate_chain(Primitives::OR, xors)
+              not_result = new_temp
+              @ir.add_gate(type: Primitives::NOT, inputs: [or_result], output: not_result)
+              not_result
+            end
+
+            match = reduce_gate_chain(Primitives::OR, match_nets)
+
+            # MUX between current result and case value based on match
+            result = expr.width.times.map do |i|
+              out = new_temp
+              @ir.add_gate(type: Primitives::MUX, inputs: [match, case_nets[i], result[i]], output: out)
+              out
+            end
+          end
+
+          result
+
+        when RHDL::Codegen::Behavior::IR::MemoryRead
+          # Memory reads become all zeros for now (would need ROM content)
+          expr.width.times.map { z = new_temp; @ir.add_gate(type: Primitives::CONST, inputs: [], output: z, value: 0); z }
+
+        else
+          # Unknown expression type - return zeros
+          expr.width.times.map { z = new_temp; @ir.add_gate(type: Primitives::CONST, inputs: [], output: z, value: 0); z }
+        end
+      end
+
+      # Extend nets array to given width (zero extend)
+      def extend_nets(nets, width)
+        # Create zero constant for any nil values or extension
+        zero = nil
+
+        # First, replace any nil elements with zero
+        result = nets.map do |n|
+          if n.nil?
+            zero ||= begin
+              z = new_temp
+              @ir.add_gate(type: Primitives::CONST, inputs: [], output: z, value: 0)
+              z
+            end
+            zero
+          else
+            n
+          end
+        end
+
+        # Extend to width if needed
+        if result.length < width
+          zero ||= begin
+            z = new_temp
+            @ir.add_gate(type: Primitives::CONST, inputs: [], output: z, value: 0)
+            z
+          end
+          (width - result.length).times { result << zero }
+        end
+
+        result
+      end
+
+      # Reduce multiple inputs using a gate type (AND, OR, XOR)
+      def reduce_gate_chain(gate_type, inputs)
+        return inputs.first if inputs.length == 1
+
+        result = inputs.first
+        inputs[1..].each do |input|
+          out = new_temp
+          @ir.add_gate(type: gate_type, inputs: [result, input], output: out)
+          result = out
+        end
+        result
+      end
+
+      # Lower adder (ripple carry)
+      def lower_adder(a_nets, b_nets, width)
+        result = []
+        carry = new_temp
+        @ir.add_gate(type: Primitives::CONST, inputs: [], output: carry, value: 0)
+
+        width.times do |i|
+          a = a_nets[i] || new_temp
+          b = b_nets[i] || new_temp
+
+          # Full adder: sum = a ^ b ^ cin, cout = (a & b) | (cin & (a ^ b))
+          a_xor_b = new_temp
+          @ir.add_gate(type: Primitives::XOR, inputs: [a, b], output: a_xor_b)
+
+          sum = new_temp
+          @ir.add_gate(type: Primitives::XOR, inputs: [a_xor_b, carry], output: sum)
+
+          a_and_b = new_temp
+          @ir.add_gate(type: Primitives::AND, inputs: [a, b], output: a_and_b)
+
+          cin_and_xor = new_temp
+          @ir.add_gate(type: Primitives::AND, inputs: [carry, a_xor_b], output: cin_and_xor)
+
+          new_carry = new_temp
+          @ir.add_gate(type: Primitives::OR, inputs: [a_and_b, cin_and_xor], output: new_carry)
+
+          result << sum
+          carry = new_carry
+        end
+
+        result
+      end
+
+      # Lower subtractor (twos complement: a - b = a + ~b + 1)
+      def lower_subtractor(a_nets, b_nets, width)
+        # Invert b
+        b_inv = b_nets.map do |b|
+          out = new_temp
+          @ir.add_gate(type: Primitives::NOT, inputs: [b || new_temp], output: out)
+          out
+        end
+
+        # Add with carry in = 1
+        result = []
+        carry = new_temp
+        @ir.add_gate(type: Primitives::CONST, inputs: [], output: carry, value: 1)
+
+        width.times do |i|
+          a = a_nets[i] || new_temp
+          b = b_inv[i] || new_temp
+
+          a_xor_b = new_temp
+          @ir.add_gate(type: Primitives::XOR, inputs: [a, b], output: a_xor_b)
+
+          sum = new_temp
+          @ir.add_gate(type: Primitives::XOR, inputs: [a_xor_b, carry], output: sum)
+
+          a_and_b = new_temp
+          @ir.add_gate(type: Primitives::AND, inputs: [a, b], output: a_and_b)
+
+          cin_and_xor = new_temp
+          @ir.add_gate(type: Primitives::AND, inputs: [carry, a_xor_b], output: cin_and_xor)
+
+          new_carry = new_temp
+          @ir.add_gate(type: Primitives::OR, inputs: [a_and_b, cin_and_xor], output: new_carry)
+
+          result << sum
+          carry = new_carry
+        end
+
+        result
+      end
+
+      # Lower less-than comparator (unsigned)
+      def lower_comparator_lt(a_nets, b_nets)
+        # a < b when: starting from MSB, find first differing bit where a=0, b=1
+        width = [a_nets.length, b_nets.length].max
+
+        # Build comparison from LSB to MSB
+        result = new_temp
+        @ir.add_gate(type: Primitives::CONST, inputs: [], output: result, value: 0)
+
+        (0...width).reverse_each do |i|
+          a = a_nets[i] || new_temp
+          b = b_nets[i] || new_temp
+
+          # a[i] < b[i] when ~a[i] & b[i]
+          not_a = new_temp
+          @ir.add_gate(type: Primitives::NOT, inputs: [a], output: not_a)
+
+          lt_bit = new_temp
+          @ir.add_gate(type: Primitives::AND, inputs: [not_a, b], output: lt_bit)
+
+          # a[i] > b[i] when a[i] & ~b[i]
+          not_b = new_temp
+          @ir.add_gate(type: Primitives::NOT, inputs: [b], output: not_b)
+
+          gt_bit = new_temp
+          @ir.add_gate(type: Primitives::AND, inputs: [a, not_b], output: gt_bit)
+
+          # a[i] == b[i] when ~(a[i] ^ b[i])
+          xor_ab = new_temp
+          @ir.add_gate(type: Primitives::XOR, inputs: [a, b], output: xor_ab)
+
+          eq_bit = new_temp
+          @ir.add_gate(type: Primitives::NOT, inputs: [xor_ab], output: eq_bit)
+
+          # new_result = lt_bit | (eq_bit & prev_result)
+          eq_and_prev = new_temp
+          @ir.add_gate(type: Primitives::AND, inputs: [eq_bit, result], output: eq_and_prev)
+
+          new_result = new_temp
+          @ir.add_gate(type: Primitives::OR, inputs: [lt_bit, eq_and_prev], output: new_result)
+
+          result = new_result
+        end
+
+        [result]
+      end
+
+      # Lower left shift (by constant or small variable)
+      def lower_shift_left(a_nets, shift_nets, width)
+        # For simplicity, use first bit of shift as constant
+        # Full barrel shifter would need more complex logic
+        result = a_nets.dup
+        result = extend_nets(result, width)
+        result
+      end
+
+      # Lower right shift (by constant or small variable)
+      def lower_shift_right(a_nets, shift_nets, width)
+        result = a_nets.dup
+        result = extend_nets(result, width)
+        result
       end
 
       # Lower a sequential block (creates DFFs)
