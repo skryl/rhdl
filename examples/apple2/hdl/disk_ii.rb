@@ -27,6 +27,7 @@ require 'rhdl'
 module RHDL
   module Apple2
     # Disk II ROM (256 bytes boot ROM at $C600-$C6FF)
+    # Pure DSL component - ROM data loaded via simulation helper or initial: parameter
     class DiskIIROM < Component
       include RHDL::DSL::Memory
 
@@ -34,20 +35,15 @@ module RHDL
       input :addr, width: 8
       output :dout, width: 8
 
+      # ROM initialized to zeros by default via DSL
+      # For actual ROM data, use: memory :rom, depth: 256, width: 8, initial: ROM_DATA
       memory :rom, depth: 256, width: 8
 
       # Asynchronous read (combinational) - suitable for small ROM
       # For BRAM inference, use: sync_read :dout, from: :rom, clock: :clk, addr: :addr
       async_read :dout, from: :rom, addr: :addr
 
-      # The Disk II boot ROM would be loaded here
-      # This is a placeholder - actual ROM data would be loaded from file
-      def initialize(name = nil, **params)
-        super
-        # Initialize with zeros - actual ROM would be loaded
-        256.times { |i| mem_write(:rom, i, 0, 8) }
-      end
-
+      # Simulation helper: load ROM data at runtime (non-synthesizable)
       def load_rom(data)
         data.each_with_index do |byte, i|
           break if i >= 256
