@@ -2,6 +2,7 @@
 
 require_relative '../../../lib/rhdl/hdl'
 require_relative 'disk2'
+require_relative 'apple2_speaker'
 
 module MOS6502
   class Apple2Bus < RHDL::HDL::Component
@@ -37,7 +38,7 @@ module MOS6502
       0xC057 => [:hires, true]
     }.freeze
 
-    attr_reader :speaker_toggles, :video, :disk_controller
+    attr_reader :speaker_toggles, :video, :disk_controller, :speaker
 
     def initialize(name = nil)
       @memory = Array.new(0x10000, 0)
@@ -54,6 +55,8 @@ module MOS6502
       }
       @soft_switch_access = Hash.new(0)
       @disk_controller = Disk2.new
+      @speaker = Apple2Speaker.new
+      @current_cycle = 0
       super(name)
     end
 
@@ -524,7 +527,29 @@ module MOS6502
     # Advance disk spin simulation by one or more CPU cycles
     # Call this after each CPU step to simulate continuous disk rotation
     def tick(cycles = 1)
+      @current_cycle += cycles
       @disk_controller.tick(cycles)
+      @speaker.update_cycle(@current_cycle)
+    end
+
+    # Get current cycle count for speaker timing
+    def current_cycle
+      @current_cycle
+    end
+
+    # Start audio playback
+    def start_audio
+      @speaker.start
+    end
+
+    # Stop audio playback
+    def stop_audio
+      @speaker.stop
+    end
+
+    # Enable/disable audio
+    def enable_audio(state)
+      @speaker.enable(state)
     end
 
     private
@@ -603,6 +628,7 @@ module MOS6502
         0x00
       when 0xC030
         @speaker_toggles += 1
+        @speaker.toggle(@current_cycle)
         0x00
       else
         if SOFT_SWITCHES.key?(addr)

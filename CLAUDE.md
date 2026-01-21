@@ -565,6 +565,7 @@ Follow these conventions for file organization:
 - Each spec file should test exactly one class or module
 - Spec files should mirror the lib directory structure (e.g., `spec/rhdl/simulation/simulator_spec.rb` for `lib/rhdl/simulation/simulator.rb`)
 - Name spec files with `_spec.rb` suffix matching the class being tested
+- **IMPORTANT: Always add a test file when creating a new source file.** Every new class or module should have a corresponding spec file.
 
 **HDL directory organization:**
 - The `lib/rhdl/hdl/` directory should only contain component definitions
