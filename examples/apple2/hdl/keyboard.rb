@@ -67,9 +67,13 @@ module RHDL
         bit_count <= bit_count_next
 
         # Output scancode when all 11 bits received
+        # Use shift_reg_next (which includes the stop bit just shifted in)
+        # because with non-blocking semantics, shift_reg still has the old value
         complete = falling_edge & (bit_count == lit(10, width: 4))
-        scan_code_reg <= mux(complete, shift_reg[8..1], scan_code_reg)
-        scan_dav_reg <= complete
+        scan_code_reg <= mux(complete, shift_reg_next[8..1], scan_code_reg)
+        # scan_dav stays high until next falling edge starts a new reception
+        scan_dav_reg <= mux(complete, lit(1, width: 1),
+                           mux(falling_edge, lit(0, width: 1), scan_dav_reg))
       end
 
       behavior do
@@ -195,6 +199,7 @@ module RHDL
       wire :ctrl
       wire :alt
       wire :ascii, width: 8
+      wire :prev_code_available  # For edge detection
 
       sequential clock: :clk_14m, reset: :reset, reset_values: {
         state: STATE_IDLE,
@@ -203,10 +208,12 @@ module RHDL
         shift: 0,
         ctrl: 0,
         alt: 0,
-        ascii: 0
+        ascii: 0,
+        prev_code_available: 0
       } do
-        # Clear key_pressed on read
-        key_pressed <= mux(read, lit(0, width: 1), key_pressed)
+        # Track code_available for rising edge detection
+        prev_code_available <= code_available
+        code_available_rising = code_available & ~prev_code_available
 
         # Modifier key handling
         is_left_shift = (code == lit(LEFT_SHIFT, width: 8))
@@ -229,12 +236,14 @@ module RHDL
         )
 
         state_next = case_select(state, {
-          STATE_IDLE       => mux(code_available, lit(STATE_HAVE_CODE, width: 4), lit(STATE_IDLE, width: 4)),
+          # Use rising edge of code_available to prevent re-latching same code
+          STATE_IDLE       => mux(code_available_rising, lit(STATE_HAVE_CODE, width: 4), lit(STATE_IDLE, width: 4)),
           STATE_HAVE_CODE  => lit(STATE_DECODE, width: 4),
           STATE_DECODE     => decode_next,
           STATE_GOT_KEY_UP => lit(STATE_GOT_KEY_UP2, width: 4),
           STATE_GOT_KEY_UP2 => lit(STATE_GOT_KEY_UP3, width: 4),
-          STATE_GOT_KEY_UP3 => mux(code_available, lit(STATE_KEY_UP, width: 4), lit(STATE_GOT_KEY_UP3, width: 4)),
+          # Use rising edge here too for the second scancode after F0
+          STATE_GOT_KEY_UP3 => mux(code_available_rising, lit(STATE_KEY_UP, width: 4), lit(STATE_GOT_KEY_UP3, width: 4)),
           STATE_KEY_UP     => lit(STATE_IDLE, width: 4),
           STATE_NORMAL_KEY => lit(STATE_IDLE, width: 4)
         }, default: lit(STATE_IDLE, width: 4))
@@ -271,8 +280,10 @@ module RHDL
           code, latched_code
         )
 
+        # key_pressed: set on NORMAL_KEY, clear on read, otherwise hold
         key_pressed <= mux(state == lit(STATE_NORMAL_KEY, width: 4),
-          lit(1, width: 1), key_pressed
+          lit(1, width: 1),
+          mux(read, lit(0, width: 1), key_pressed)
         )
       end
 

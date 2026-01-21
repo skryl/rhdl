@@ -811,7 +811,9 @@ module RHDL
           when BehaviorUnaryOp
             compute_unary(expr.op, compute_value(expr.operand), expr.width)
           when BehaviorBitSelect
-            (compute_value(expr.base) >> expr.index) & 1
+            # Handle dynamic index (expr.index can be an expression or integer)
+            idx = expr.index.is_a?(Integer) ? expr.index : compute_value(expr.index)
+            (compute_value(expr.base) >> idx) & 1
           when BehaviorSlice
             base_val = compute_value(expr.base)
             mask = (1 << expr.width) - 1

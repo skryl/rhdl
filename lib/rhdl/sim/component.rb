@@ -345,9 +345,13 @@ module RHDL
         @inputs[name]&.get || 0
       end
 
-      # Set output value by name
+      # Set output or internal signal value by name
       def out_set(name, val)
-        @outputs[name]&.set(val)
+        if @outputs[name]
+          @outputs[name].set(val)
+        elsif @internal_signals && @internal_signals[name]
+          @internal_signals[name].set(val)
+        end
       end
 
       # Convenience method to set an input
