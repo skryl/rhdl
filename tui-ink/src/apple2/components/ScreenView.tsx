@@ -11,11 +11,53 @@ interface ScreenViewProps {
   cursorPos?: { row: number; col: number };
 }
 
-// Apple II 40-column text display
+// Hi-res display width (in braille characters)
+const HIRES_COLS = 80;
+
+// Apple II 40-column text display or hi-res graphics
 export function ScreenView({ screen, focused = false, showBorder = true, cursorPos }: ScreenViewProps) {
   const borderColor = focused ? apple2Theme.phosphor : apple2Theme.border;
+  const isHiresMode = screen?.mode === 'hires' || screen?.mode === 'hires_mixed';
 
-  // Generate empty screen if no data
+  // Render hi-res mode
+  if (isHiresMode && screen?.hires_lines) {
+    return (
+      <Box flexDirection="column">
+        {/* Top border */}
+        {showBorder && (
+          <Box>
+            <Text color={borderColor}>
+              {apple2Chars.boxTL}
+              {apple2Chars.boxH.repeat(HIRES_COLS)}
+              {apple2Chars.boxTR}
+            </Text>
+          </Box>
+        )}
+
+        {/* Hi-res screen content (braille characters) */}
+        {screen.hires_lines.map((line, rowIdx) => (
+          <Box key={rowIdx}>
+            {showBorder && <Text color={borderColor}>{apple2Chars.boxV}</Text>}
+            <Text color={apple2Theme.phosphor}>{line.padEnd(HIRES_COLS)}</Text>
+            {showBorder && <Text color={borderColor}>{apple2Chars.boxV}</Text>}
+          </Box>
+        ))}
+
+        {/* Bottom border */}
+        {showBorder && (
+          <Box>
+            <Text color={borderColor}>
+              {apple2Chars.boxBL}
+              {apple2Chars.boxH.repeat(HIRES_COLS)}
+              {apple2Chars.boxBR}
+            </Text>
+          </Box>
+        )}
+      </Box>
+    );
+  }
+
+  // Generate empty text screen if no data
   const rows = screen?.rows ?? Array(APPLE2_ROWS).fill(null).map(() =>
     Array(APPLE2_COLS).fill(0xA0) // Space with high bit
   );
@@ -33,7 +75,7 @@ export function ScreenView({ screen, focused = false, showBorder = true, cursorP
         </Box>
       )}
 
-      {/* Screen content */}
+      {/* Text screen content */}
       {rows.map((row, rowIdx) => (
         <Box key={rowIdx}>
           {showBorder && <Text color={borderColor}>{apple2Chars.boxV}</Text>}
@@ -89,15 +131,18 @@ interface ScreenPanelProps extends ScreenViewProps {
 
 export function ScreenPanel({ title = 'DISPLAY', ...props }: ScreenPanelProps) {
   const borderColor = props.focused ? apple2Theme.phosphor : apple2Theme.border;
+  const isHiresMode = props.screen?.mode === 'hires' || props.screen?.mode === 'hires_mixed';
+  const cols = isHiresMode ? HIRES_COLS : APPLE2_COLS;
+  const displayTitle = isHiresMode ? `${title} [HIRES]` : title;
 
   return (
     <Box flexDirection="column">
       {/* Header */}
       <Box>
         <Text color={borderColor}>{apple2Chars.boxTL}{apple2Chars.boxH}</Text>
-        <Text color={apple2Theme.phosphor} bold>[ {title} ]</Text>
+        <Text color={apple2Theme.phosphor} bold>[ {displayTitle} ]</Text>
         <Text color={borderColor}>
-          {apple2Chars.boxH.repeat(APPLE2_COLS - title.length - 4)}
+          {apple2Chars.boxH.repeat(Math.max(0, cols - displayTitle.length - 4))}
           {apple2Chars.boxTR}
         </Text>
       </Box>
@@ -109,7 +154,7 @@ export function ScreenPanel({ title = 'DISPLAY', ...props }: ScreenPanelProps) {
       <Box>
         <Text color={borderColor}>
           {apple2Chars.boxBL}
-          {apple2Chars.boxH.repeat(APPLE2_COLS)}
+          {apple2Chars.boxH.repeat(cols)}
           {apple2Chars.boxBR}
         </Text>
       </Box>

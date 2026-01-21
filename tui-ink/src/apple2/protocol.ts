@@ -12,9 +12,14 @@ export interface CPUState {
   halted: boolean;
 }
 
-// Screen content (40x24 character codes)
+// Display mode types
+export type DisplayMode = 'text' | 'hires' | 'hires_mixed' | 'lores' | 'lores_mixed';
+
+// Screen content (40x24 character codes for text, or braille strings for hires)
 export interface ScreenData {
-  rows: number[][];  // 24 rows of 40 character codes
+  mode: DisplayMode;      // Current display mode
+  rows?: number[][];      // 24 rows of 40 character codes (text mode)
+  hires_lines?: string[]; // Braille-rendered hi-res lines (hires mode)
   dirty: boolean;
 }
 
@@ -46,8 +51,9 @@ export interface EmulatorState {
   cpu: CPUState;
   screen: ScreenData;
   running: boolean;
-  speed: number;       // Cycles per frame
-  mode: 'hdl' | 'isa'; // Simulation mode
+  speed: number;          // Cycles per frame
+  mode: 'hdl' | 'isa';    // Simulation mode
+  display_mode?: DisplayMode; // Current video display mode
   romInfo?: ROMInfo;
 }
 
