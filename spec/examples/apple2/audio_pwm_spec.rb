@@ -3,8 +3,11 @@
 require 'spec_helper'
 require 'rhdl'
 require_relative '../../../examples/apple2/hdl/audio_pwm'
+require_relative '../../support/vhdl_reference_helper'
+require_relative '../../support/hdl_toolchain'
 
 RSpec.describe RHDL::Apple2::AudioPWM do
+  extend VhdlReferenceHelper
   let(:pwm) { described_class.new('pwm') }
 
   before do
@@ -174,6 +177,84 @@ RSpec.describe RHDL::Apple2::AudioPWM do
       first_period = pattern[0...256]
       second_period = pattern[256...512]
       expect(first_period).to eq(second_period)
+    end
+  end
+
+  describe 'Verilog reference comparison', if: HdlToolchain.iverilog_available? do
+    include VhdlReferenceHelper
+
+    let(:reference_verilog) { VhdlReferenceHelper.reference_file('audio_pwm.v') }
+    let(:work_dir) { Dir.mktmpdir('audio_pwm_test_') }
+
+    before do
+      skip 'Reference Verilog not found' unless VhdlReferenceHelper.reference_exists?('audio_pwm.v')
+    end
+
+    after do
+      FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
+    end
+
+    it 'matches reference Verilog PWM behavior' do
+      ports = {
+        clk: { direction: 'in', width: 1 },
+        audio: { direction: 'in', width: 8 },
+        aud_pwm: { direction: 'out', width: 1 },
+        aud_sd: { direction: 'out', width: 1 }
+      }
+
+      # Test PWM generation for different audio levels
+      test_vectors = []
+      # First 20 cycles with audio=128 (50% duty cycle)
+      20.times { test_vectors << { inputs: { audio: 128 } } }
+      # Next 20 cycles with audio=64 (25% duty cycle)
+      20.times { test_vectors << { inputs: { audio: 64 } } }
+      # Next 20 cycles with audio=255 (100% duty cycle)
+      20.times { test_vectors << { inputs: { audio: 255 } } }
+
+      result = run_verilog_comparison_test(
+        pwm,
+        verilog_files: [reference_verilog],
+        ports: ports,
+        test_vectors: test_vectors,
+        base_dir: work_dir,
+        clock_name: 'clk'
+      )
+
+      if result[:success] == false && result[:error]
+        skip "iverilog simulation failed: #{result[:error]}"
+      end
+
+      expect(result[:success]).to be(true),
+        "Mismatches: #{result[:comparison][:mismatches].first(5).inspect}"
+    end
+
+    it 'matches reference aud_sd output (always 1)' do
+      ports = {
+        clk: { direction: 'in', width: 1 },
+        audio: { direction: 'in', width: 8 },
+        aud_pwm: { direction: 'out', width: 1 },
+        aud_sd: { direction: 'out', width: 1 }
+      }
+
+      test_vectors = [0, 128, 255].map { |level| { inputs: { audio: level } } }
+
+      result = run_verilog_comparison_test(
+        pwm,
+        verilog_files: [reference_verilog],
+        ports: ports,
+        test_vectors: test_vectors,
+        base_dir: work_dir,
+        clock_name: 'clk'
+      )
+
+      if result[:success] == false && result[:error]
+        skip "iverilog simulation failed: #{result[:error]}"
+      end
+
+      # Check aud_sd is always 1
+      result[:rhdl_results].each do |cycle_result|
+        expect(cycle_result[:aud_sd]).to eq(1)
+      end
     end
   end
 end

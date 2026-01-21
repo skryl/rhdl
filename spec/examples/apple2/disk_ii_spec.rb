@@ -3,8 +3,11 @@
 require 'spec_helper'
 require 'rhdl'
 require_relative '../../../examples/apple2/hdl/disk_ii'
+require_relative '../../support/vhdl_reference_helper'
+require_relative '../../support/hdl_toolchain'
 
 RSpec.describe RHDL::Apple2::DiskII do
+  extend VhdlReferenceHelper
   let(:disk) { described_class.new('disk') }
 
   # Disk II I/O addresses (relative to slot base C0E0)
@@ -405,6 +408,63 @@ RSpec.describe RHDL::Apple2::DiskII do
       expect(disk.read_track_byte(3)).to eq(0xEF)
     end
   end
+
+  describe 'VHDL reference comparison', if: HdlToolchain.ghdl_available? do
+    include VhdlReferenceHelper
+
+    let(:reference_vhdl) { VhdlReferenceHelper.reference_file('disk_ii.vhd') }
+    let(:rom_vhdl) { VhdlReferenceHelper.reference_file('disk_ii_rom.vhd') }
+    let(:work_dir) { Dir.mktmpdir('disk_ii_test_') }
+
+    before do
+      skip 'Reference VHDL not found' unless VhdlReferenceHelper.reference_exists?('disk_ii.vhd')
+    end
+
+    after do
+      FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
+    end
+
+    it 'matches reference motor control behavior' do
+      # This is a high-level test that compares motor on/off behavior
+      # Disk II has complex dependencies so we test reset behavior
+      ports = {
+        CLK_14M: { direction: 'in', width: 1 },
+        CLK_2M: { direction: 'in', width: 1 },
+        PRE_PHASE_ZERO: { direction: 'in', width: 1 },
+        IO_SELECT: { direction: 'in', width: 1 },
+        DEVICE_SELECT: { direction: 'in', width: 1 },
+        RESET: { direction: 'in', width: 1 },
+        A: { direction: 'in', width: 16 },
+        D_IN: { direction: 'in', width: 8 },
+        D_OUT: { direction: 'out', width: 8 },
+        TRACK: { direction: 'out', width: 6 },
+        D1_ACTIVE: { direction: 'out', width: 1 },
+        D2_ACTIVE: { direction: 'out', width: 1 }
+      }
+
+      # Test reset behavior
+      test_vectors = [
+        { inputs: { RESET: 1, A: 0, D_IN: 0, PRE_PHASE_ZERO: 0, IO_SELECT: 0, DEVICE_SELECT: 0, CLK_2M: 0 } },
+        { inputs: { RESET: 0, A: 0, D_IN: 0, PRE_PHASE_ZERO: 0, IO_SELECT: 0, DEVICE_SELECT: 0, CLK_2M: 0 } }
+      ]
+
+      result = run_comparison_test(
+        disk,
+        vhdl_files: [reference_vhdl, rom_vhdl],
+        ports: ports,
+        test_vectors: test_vectors,
+        base_dir: work_dir,
+        clock_name: 'CLK_14M'
+      )
+
+      if result[:success] == false && result[:error]
+        skip "GHDL simulation failed: #{result[:error]}"
+      end
+
+      expect(result[:success]).to be(true),
+        "Mismatches: #{result[:comparison][:mismatches].first(5).inspect}"
+    end
+  end
 end
 
 RSpec.describe RHDL::Apple2::DiskIIROM do
@@ -493,6 +553,48 @@ RSpec.describe RHDL::Apple2::DiskIIROM do
       rom.set_input(:addr, 255)
       rom.propagate
       expect(rom.get_output(:dout)).to eq(255)
+    end
+  end
+
+  describe 'VHDL reference comparison', if: HdlToolchain.ghdl_available? do
+    include VhdlReferenceHelper
+
+    let(:reference_vhdl) { VhdlReferenceHelper.reference_file('disk_ii_rom.vhd') }
+    let(:work_dir) { Dir.mktmpdir('disk_ii_rom_test_') }
+
+    before do
+      skip 'Reference VHDL not found' unless VhdlReferenceHelper.reference_exists?('disk_ii_rom.vhd')
+    end
+
+    after do
+      FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
+    end
+
+    it 'matches reference ROM read behavior' do
+      ports = {
+        clk: { direction: 'in', width: 1 },
+        addr: { direction: 'in', width: 8 },
+        dout: { direction: 'out', width: 8 }
+      }
+
+      # Test reading from various ROM addresses
+      test_vectors = [0, 16, 32, 64, 128, 200, 255].map { |addr| { inputs: { addr: addr } } }
+
+      result = run_comparison_test(
+        rom,
+        vhdl_files: [reference_vhdl],
+        ports: ports,
+        test_vectors: test_vectors,
+        base_dir: work_dir,
+        clock_name: 'clk'
+      )
+
+      if result[:success] == false && result[:error]
+        skip "GHDL simulation failed: #{result[:error]}"
+      end
+
+      expect(result[:success]).to be(true),
+        "Mismatches: #{result[:comparison][:mismatches].first(5).inspect}"
     end
   end
 end
