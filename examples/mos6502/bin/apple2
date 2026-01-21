@@ -426,37 +426,48 @@ class Apple2Terminal
 
   def handle_escape_sequence
     # Try to read arrow key sequence
-    begin
-      seq = IO.console.read_nonblock(2)
-      if @keyboard_mode == :command
-        # In command mode, arrow keys control speed
-        case seq
-        when '[C' # Right arrow - increase speed
-          @cycles_per_frame += 1000
-        when '[D' # Left arrow - decrease speed
-          @cycles_per_frame = [@cycles_per_frame - 1000, 1000].max
+    # Wait briefly for more bytes (escape sequences come in quick succession)
+    if IO.select([IO.console], nil, nil, 0.05)
+      begin
+        seq = IO.console.read_nonblock(2)
+        if @keyboard_mode == :command
+          # In command mode, arrow keys control speed
+          case seq
+          when '[C' # Right arrow - increase speed
+            @cycles_per_frame += 1000
+          when '[D' # Left arrow - decrease speed
+            @cycles_per_frame = [@cycles_per_frame - 1000, 1000].max
+          end
+        else
+          # In normal mode, arrow keys go to emulator
+          case seq
+          when '[A' # Up arrow
+            @runner.inject_key(0x0B) # Ctrl+K (up)
+          when '[B' # Down arrow
+            @runner.inject_key(0x0A) # Ctrl+J (down)
+          when '[C' # Right arrow
+            @runner.inject_key(0x15) # Ctrl+U (right)
+          when '[D' # Left arrow
+            @runner.inject_key(0x08) # Ctrl+H (left/backspace)
+          end
         end
-      else
-        # In normal mode, arrow keys go to emulator
-        case seq
-        when '[A' # Up arrow
-          @runner.inject_key(0x0B) # Ctrl+K (up)
-        when '[B' # Down arrow
-          @runner.inject_key(0x0A) # Ctrl+J (down)
-        when '[C' # Right arrow
-          @runner.inject_key(0x15) # Ctrl+U (right)
-        when '[D' # Left arrow
-          @runner.inject_key(0x08) # Ctrl+H (left/backspace)
-        end
+      rescue IO::WaitReadable, Errno::EAGAIN
+        # Incomplete sequence, treat as just ESC
+        handle_esc_key
       end
-    rescue IO::WaitReadable, Errno::EAGAIN
-      # Just ESC key pressed - toggle command mode (only in debug mode)
-      if @debug
-        @keyboard_mode = @keyboard_mode == :normal ? :command : :normal
-      else
-        # In non-debug mode, pass ESC to emulator
-        @runner.inject_key(0x1B)
-      end
+    else
+      # No more bytes within timeout - just ESC key pressed
+      handle_esc_key
+    end
+  end
+
+  def handle_esc_key
+    # Toggle command mode (only in debug mode)
+    if @debug
+      @keyboard_mode = @keyboard_mode == :normal ? :command : :normal
+    else
+      # In non-debug mode, pass ESC to emulator
+      @runner.inject_key(0x1B)
     end
   end
 
@@ -483,8 +494,9 @@ class Apple2Terminal
     @runner.sync_speaker_state if @runner.respond_to?(:sync_speaker_state)
 
     # Check if we should render hi-res graphics
-    # Automatically switch based on soft switch state, or force with -H flag
-    if @runner.bus.hires_mode? || (@hires_mode && !@runner.bus.text_mode?)
+    # @hires_mode is the user-controlled toggle (H key in command mode)
+    # It overrides the soft switch state for display purposes
+    if @hires_mode
       render_hires_screen
     else
       render_text_screen
