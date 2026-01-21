@@ -36,8 +36,10 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       expect { described_class.new(ink: true) }.not_to raise_error
     end
 
-    it 'can be instantiated with hdl option' do
-      expect { described_class.new(ink: true, hdl: true) }.not_to raise_error
+    it 'can be instantiated with mode option' do
+      expect { described_class.new(mode: :native) }.not_to raise_error
+      expect { described_class.new(mode: :ruby) }.not_to raise_error
+      expect { described_class.new(mode: :hdl) }.not_to raise_error
     end
 
     it 'can be instantiated with program option' do
@@ -60,9 +62,6 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       expect { described_class.new(debug: true) }.not_to raise_error
     end
 
-    it 'can be instantiated with fast option' do
-      expect { described_class.new(fast: true) }.not_to raise_error
-    end
 
     it 'can be instantiated with speed option' do
       expect { described_class.new(speed: 5000) }.not_to raise_error
@@ -156,7 +155,7 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       options = {
         build: true,
         debug: true,
-        fast: true,
+        mode: :ruby,
         green: true,
         speed: 5000,
         rom: '/path/to/rom.bin'
@@ -165,7 +164,7 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
 
       expect(task.options[:build]).to be true
       expect(task.options[:debug]).to be true
-      expect(task.options[:fast]).to be true
+      expect(task.options[:mode]).to eq(:ruby)
       expect(task.options[:green]).to be true
       expect(task.options[:speed]).to eq(5000)
       expect(task.options[:rom]).to eq('/path/to/rom.bin')
@@ -213,7 +212,7 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
     it 'adds all common args correctly' do
       task = described_class.new(
         debug: true,
-        hdl: true,
+        mode: :hdl,
         speed: 5000,
         green: true,
         hires: true,
@@ -226,7 +225,8 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       task.send(:add_common_args, exec_args)
 
       expect(exec_args).to include('-d')
-      expect(exec_args).to include('--hdl')
+      expect(exec_args).to include('--sim')
+      expect(exec_args).to include('hdl')
       expect(exec_args).to include('-s')
       expect(exec_args).to include('5000')
       expect(exec_args).to include('-g')
@@ -237,6 +237,25 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       expect(exec_args).to include('/path/to/disk.dsk')
       expect(exec_args).to include('--disk2')
       expect(exec_args).to include('/path/to/disk2.dsk')
+    end
+
+    it 'does not pass --sim for native mode (default)' do
+      task = described_class.new(mode: :native)
+      exec_args = []
+
+      task.send(:add_common_args, exec_args)
+
+      expect(exec_args).not_to include('--sim')
+    end
+
+    it 'passes --sim for ruby mode' do
+      task = described_class.new(mode: :ruby)
+      exec_args = []
+
+      task.send(:add_common_args, exec_args)
+
+      expect(exec_args).to include('--sim')
+      expect(exec_args).to include('ruby')
     end
   end
 end
