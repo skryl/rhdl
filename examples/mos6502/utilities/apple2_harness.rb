@@ -142,6 +142,9 @@ module Apple2Harness
       else
         @cpu = MOS6502::ISASimulator.new(@bus)
       end
+      # Track speaker toggles synced from native CPU to Ruby speaker
+      @synced_speaker_toggles = 0
+      @last_speaker_sync = nil
     end
 
     # Check if using native implementation
@@ -257,6 +260,26 @@ module Apple2Harness
       @bus.video[:mixed] = video[:mixed]
       @bus.video[:page2] = video[:page2]
       @bus.video[:hires] = video[:hires]
+    end
+
+    # Sync speaker toggles from native CPU to Ruby speaker (for audio generation)
+    # Called each frame to forward any new speaker toggles to the audio system
+    def sync_speaker_state
+      return unless native?
+
+      current_toggles = @cpu.speaker_toggles
+      new_toggles = current_toggles - @synced_speaker_toggles
+
+      if new_toggles > 0
+        # Calculate elapsed time since last sync for timing estimation
+        now = Time.now
+        elapsed = @last_speaker_sync ? (now - @last_speaker_sync) : 0.016  # Default to ~60fps
+        @last_speaker_sync = now
+
+        # Forward toggles to speaker with timing info for proper audio generation
+        @bus.speaker.sync_toggles(new_toggles, elapsed)
+        @synced_speaker_toggles = current_toggles
+      end
     end
 
     # Get speaker toggle count from native CPU
