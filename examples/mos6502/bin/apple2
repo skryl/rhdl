@@ -12,6 +12,99 @@ $LOAD_PATH.unshift File.expand_path('../utilities', __dir__)
 
 require 'rhdl'
 require 'apple2_harness'
+require 'isa_simulator'
+
+# Wrapper for pure Ruby ISA simulator to match ISARunner interface
+class RubyISARunner
+  attr_reader :cpu, :bus
+
+  def initialize(bus, cpu)
+    @bus = bus
+    @cpu = cpu
+  end
+
+  def native?
+    false
+  end
+
+  def simulator_type
+    :ruby
+  end
+
+  def load_rom(bytes, base_addr:)
+    @bus.load_rom(bytes.is_a?(String) ? bytes.bytes : bytes, base_addr: base_addr)
+  end
+
+  def load_ram(bytes, base_addr:)
+    @bus.load_ram(bytes.is_a?(String) ? bytes.bytes : bytes, base_addr: base_addr)
+  end
+
+  def load_disk(path_or_bytes, drive: 0)
+    @bus.load_disk(path_or_bytes, drive: drive)
+  end
+
+  def disk_loaded?(drive: 0)
+    @bus.disk_loaded?(drive: drive)
+  end
+
+  def reset
+    @cpu.reset
+  end
+
+  def run_steps(steps)
+    @cpu.run_cycles(steps)
+  end
+
+  def inject_key(ascii)
+    @bus.inject_key(ascii)
+  end
+
+  def key_ready?
+    @bus.key_ready
+  end
+
+  def clear_key
+    @bus.clear_key
+  end
+
+  def read_screen
+    @bus.read_text_page_string
+  end
+
+  def read_screen_array
+    @bus.read_text_page
+  end
+
+  def screen_dirty?
+    @bus.text_page_dirty?
+  end
+
+  def clear_screen_dirty
+    @bus.clear_text_page_dirty
+  end
+
+  def cpu_state
+    {
+      pc: @cpu.pc,
+      a: @cpu.a,
+      x: @cpu.x,
+      y: @cpu.y,
+      sp: @cpu.sp,
+      p: @cpu.p,
+      cycles: @cpu.cycles,
+      halted: @cpu.halted?,
+      simulator_type: :ruby
+    }
+  end
+
+  def halted?
+    @cpu.halted?
+  end
+
+  def cycle_count
+    @cpu.cycles
+  end
+end
 
 # Apple II Terminal class
 class Apple2Terminal
@@ -42,18 +135,35 @@ class Apple2Terminal
 
   def initialize(options = {})
     @options = options
-    # Use ISARunner for fast mode, HDL Runner for cycle-accurate mode
-    @runner = if options[:fast]
-                Apple2Harness::ISARunner.new
-              else
+    @sim_type = options[:mode] || :native
+
+    # Create runner based on simulator type
+    @runner = case @sim_type
+              when :native
+                runner = Apple2Harness::ISARunner.new
+                # Verify we got native, warn if fell back to ruby
+                unless runner.native?
+                  warn "Warning: Native simulator not available, using Ruby ISA simulator"
+                  @sim_type = :ruby
+                end
+                runner
+              when :ruby
+                # Force Ruby ISA simulator
+                bus = MOS6502::Apple2Bus.new("apple2_bus")
+                cpu = MOS6502::ISASimulator.new(bus)
+                # Wrap in a simple runner-like object
+                RubyISARunner.new(bus, cpu)
+              when :hdl
                 Apple2Harness::Runner.new
+              else
+                raise "Unknown simulator type: #{@sim_type}"
               end
+
     @running = false
     @last_screen = nil
     @cycles_per_frame = options[:speed] || 10_000
     @debug = options[:debug] || false
     @green_screen = options[:green] || false
-    @fast_mode = options[:fast] || false
     @hires_mode = options[:hires] || false
     @hires_width = options[:hires_width] || 80
 
@@ -129,8 +239,14 @@ class Apple2Terminal
 
   def setup_reset_vector(addr)
     # Set reset vector to point to our program
-    @runner.bus.write(0xFFFC, addr & 0xFF)
-    @runner.bus.write(0xFFFD, (addr >> 8) & 0xFF)
+    # For native mode, write to CPU memory; otherwise write to bus
+    if @sim_type == :native && @runner.respond_to?(:native?) && @runner.native?
+      @runner.cpu.poke(0xFFFC, addr & 0xFF)
+      @runner.cpu.poke(0xFFFD, (addr >> 8) & 0xFF)
+    else
+      @runner.bus.write(0xFFFC, addr & 0xFF)
+      @runner.bus.write(0xFFFD, (addr >> 8) & 0xFF)
+    end
   end
 
   def run
@@ -146,7 +262,8 @@ class Apple2Terminal
       @resize_pending = true
     end
 
-    mode = @fast_mode ? "ISA (fast)" : "HDL (cycle-accurate)"
+    mode_names = { native: "Native ISA", ruby: "Ruby ISA", hdl: "HDL (cycle-accurate)" }
+    mode = mode_names[@sim_type] || @sim_type.to_s
     puts "Starting Apple ][ emulator... [#{mode} mode]"
     puts "Press Ctrl+C to exit"
     puts "Press any key to continue..."
@@ -282,7 +399,8 @@ class Apple2Terminal
 
   def render_screen
     # Check if we should render hi-res graphics
-    if @hires_mode && @runner.bus.hires_mode?
+    # Automatically switch based on soft switch state, or force with -H flag
+    if @runner.bus.hires_mode? || (@hires_mode && !@runner.bus.text_mode?)
       render_hires_screen
     else
       render_text_screen
@@ -682,7 +800,7 @@ options = {
   debug: false,
   green: false,
   demo: false,
-  fast: true,  # Default to fast (ISA emulation) mode
+  mode: :native,  # Simulator mode: native, ruby, or hdl
   hires: false,
   hires_width: 80
 }
@@ -718,12 +836,8 @@ parser = OptionParser.new do |opts|
     options[:green] = true
   end
 
-  opts.on("-f", "--fast", "Use fast ISA-level simulator (default)") do
-    options[:fast] = true
-  end
-
-  opts.on("--hdl", "Use HDL cycle-accurate simulator (slower)") do
-    options[:fast] = false
+  opts.on("-m", "--mode TYPE", [:native, :ruby, :hdl], "Simulator mode: native (default), ruby, hdl") do |v|
+    options[:mode] = v
   end
 
   opts.on("--demo", "Run built-in demo program") do
@@ -744,6 +858,22 @@ parser = OptionParser.new do |opts|
 
   opts.on("--disk2 FILE", "Load disk image (.dsk) into drive 2") do |v|
     options[:disk2] = v
+  end
+
+  opts.on("-b", "--bin FILE", "Load binary file into memory (use -a for address)") do |v|
+    options[:bin] = v
+  end
+
+  opts.on("-e", "--entry ADDR", "Entry point address (hex, default: load address)") do |v|
+    options[:entry] = v.to_i(16)
+  end
+
+  opts.on("--init-hires", "Initialize HIRES mode soft switches before start") do
+    options[:init_hires] = true
+  end
+
+  opts.on("-k", "--karateka", "Load Karateka memory dump (ready to play)") do
+    options[:karateka] = true
   end
 
   opts.on("-h", "--help", "Show this help message") do
@@ -780,12 +910,33 @@ if options[:disk2]
   terminal.load_disk(options[:disk2], drive: 1)
 end
 
-# Load program file if specified
-program_file = ARGV.shift
+# Load Karateka memory dump if --karateka specified
+if options[:karateka]
+  karateka_bin = File.expand_path('../../../software/disks/karateka_mem.bin', __FILE__)
+  unless File.exist?(karateka_bin)
+    puts "Error: Karateka memory dump not found: #{karateka_bin}"
+    puts "Run: rake cli:apple2:disk:memdump to generate it"
+    exit 1
+  end
+  terminal.load_program(karateka_bin, base_addr: 0x0000)
+  terminal.setup_reset_vector(0xB82A)  # Entry point from memory dump
+  options[:init_hires] = true  # Karateka runs in HIRES mode
+end
+
+# Load program file if specified (via argument or --bin option)
+program_file = ARGV.shift || options[:bin]
 if program_file
+  unless File.exist?(program_file)
+    puts "Error: Program file not found: #{program_file}"
+    exit 1
+  end
   load_addr = options[:load_addr] || 0x0800
+  entry_point = options[:entry] || load_addr
   terminal.load_program(program_file, base_addr: load_addr)
-  terminal.setup_reset_vector(load_addr)
+  # Only set reset vector if no ROM is loaded (ROM handles its own reset)
+  terminal.setup_reset_vector(entry_point) unless options[:rom]
+elsif options[:karateka]
+  # Already handled above
 elsif options[:demo]
   # Load demo program
   puts "Loading built-in demo program..."
@@ -806,6 +957,16 @@ else
   puts ""
   puts "Error: No program specified. Use --demo for built-in demo or provide a binary file."
   exit 1
+end
+
+# Initialize HIRES mode soft switches if requested
+# This is useful for loading memory dumps that were captured in HIRES mode
+if options[:init_hires]
+  bus = terminal.runner.bus
+  bus.read(0xC050)  # TXTCLR - graphics mode
+  bus.read(0xC052)  # MIXCLR - full screen
+  bus.read(0xC054)  # PAGE1 - page 1
+  bus.read(0xC057)  # HIRES - hi-res mode
 end
 
 # Run the emulator

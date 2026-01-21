@@ -52,9 +52,11 @@ module Apple2Harness
 
           # Send screen updates periodically
           @screen_update_counter += 1
-          if @screen_update_counter >= 5 || @runner.screen_dirty?
+          screen_dirty = @runner.screen_dirty? || @runner.bus.hires_page_dirty?
+          if @screen_update_counter >= 5 || screen_dirty
             send_screen_update
             @runner.clear_screen_dirty
+            @runner.bus.clear_hires_page_dirty
             @screen_update_counter = 0
           end
 
@@ -207,7 +209,8 @@ module Apple2Harness
         screen: screen,
         running: @auto_run,
         speed: @cycles_per_frame,
-        mode: @mode.to_s
+        mode: @mode.to_s,
+        display_mode: @runner.bus.display_mode.to_s
       }
 
       send_event(type: 'state', state: state)
@@ -219,11 +222,25 @@ module Apple2Harness
     end
 
     def build_screen_data
-      rows = @runner.read_screen_array
-      {
-        rows: rows,
-        dirty: @runner.screen_dirty?
-      }
+      display_mode = @runner.bus.display_mode
+
+      if display_mode == :hires || display_mode == :hires_mixed
+        # Send HIRES screen data as braille-rendered string
+        hires_lines = @runner.bus.render_hires_braille(chars_wide: 80, invert: true).split("\n")
+        {
+          mode: display_mode.to_s,
+          hires_lines: hires_lines,
+          dirty: @runner.bus.hires_page_dirty?
+        }
+      else
+        # Send text screen data
+        rows = @runner.read_screen_array
+        {
+          mode: display_mode.to_s,
+          rows: rows,
+          dirty: @runner.screen_dirty?
+        }
+      end
     end
 
     def send_memory(address, length)

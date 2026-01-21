@@ -63,7 +63,7 @@ export function Apple2App() {
       emulator.quit();
       exit();
     } else if (input === 'h' || input === '?') {
-      setMode(mode === 'help' ? 'normal' : 'help');
+      setMode('help');
     } else if (key.tab) {
       cycleFocus();
     }
