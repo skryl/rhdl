@@ -262,6 +262,18 @@ module Apple2Harness
       @bus.video[:hires] = video[:hires]
     end
 
+    # Sync video state from Ruby bus to native CPU (for initialization)
+    # Call this after setting soft switches on the bus to push state to native CPU
+    def sync_video_to_native
+      return unless native?
+      @cpu.set_video_state(
+        @bus.video[:text],
+        @bus.video[:mixed],
+        @bus.video[:page2],
+        @bus.video[:hires]
+      )
+    end
+
     # Sync speaker toggles from native CPU to Ruby speaker (for audio generation)
     # Called each frame to forward any new speaker toggles to the audio system
     def sync_speaker_state
