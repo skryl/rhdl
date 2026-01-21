@@ -3,7 +3,12 @@
 require 'spec_helper'
 require 'rhdl/codegen'
 
-RSpec.describe RHDL::Codegen::Structure::SimCPUNative, if: RHDL::Codegen::Structure::NATIVE_SIM_AVAILABLE do
+# Only run these tests if the native simulator is available
+# SimCPUNative may not be defined if the native library failed to load
+native_available = RHDL::Codegen::Structure::NATIVE_SIM_AVAILABLE
+native_class = native_available ? RHDL::Codegen::Structure::SimCPUNative : Object
+
+RSpec.describe native_class, if: native_available do
   # Helper to create a simple IR JSON
   def make_ir_json(name: 'test', net_count: 0, gates: [], dffs: [], inputs: {}, outputs: {}, schedule: [])
     {
