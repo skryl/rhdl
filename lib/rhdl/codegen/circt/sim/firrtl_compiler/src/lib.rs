@@ -7,7 +7,7 @@
 use magnus::{method, prelude::*, Error, RArray, RHash, Ruby};
 use serde::Deserialize;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::process::Command;
 
@@ -501,6 +501,157 @@ fn get_expr_width(expr: &Expr) -> u32 {
     }
 }
 
+/// Extract all signal names read by an expression
+fn get_signal_reads(expr: &Expr) -> HashSet<String> {
+    let mut reads = HashSet::new();
+    collect_signal_reads(expr, &mut reads);
+    reads
+}
+
+fn collect_signal_reads(expr: &Expr, reads: &mut HashSet<String>) {
+    match expr {
+        Expr::Signal { name, .. } => { reads.insert(name.clone()); }
+        Expr::Literal { .. } => {}
+        Expr::UnaryOp { operand, .. } => collect_signal_reads(operand, reads),
+        Expr::BinaryOp { left, right, .. } => {
+            collect_signal_reads(left, reads);
+            collect_signal_reads(right, reads);
+        }
+        Expr::Mux { condition, when_true, when_false, .. } => {
+            collect_signal_reads(condition, reads);
+            collect_signal_reads(when_true, reads);
+            collect_signal_reads(when_false, reads);
+        }
+        Expr::Slice { base, .. } => collect_signal_reads(base, reads),
+        Expr::Concat { parts, .. } => {
+            for part in parts {
+                collect_signal_reads(part, reads);
+            }
+        }
+        Expr::Resize { expr, .. } => collect_signal_reads(expr, reads),
+    }
+}
+
+/// Levelize assignments by dependency for SIMD parallel evaluation
+/// Returns a vector of levels, where each level contains assignment indices
+/// that can be evaluated in parallel (they depend only on earlier levels)
+fn levelize_assigns(assigns: &[Assign], inputs: &HashSet<String>) -> Vec<Vec<usize>> {
+    let n = assigns.len();
+    if n == 0 {
+        return vec![];
+    }
+
+    // Build dependency info: for each assign, which signals does it read?
+    let mut reads: Vec<HashSet<String>> = assigns.iter()
+        .map(|a| get_signal_reads(&a.expr))
+        .collect();
+
+    // Which targets are assigned? (map target -> assign index)
+    let mut target_to_idx: HashMap<String, usize> = HashMap::new();
+    for (i, assign) in assigns.iter().enumerate() {
+        target_to_idx.insert(assign.target.clone(), i);
+    }
+
+    // Compute level for each assignment
+    // Level 0 = depends only on inputs/ports (not on other assignments)
+    // Level N = depends on at least one assignment at level N-1
+    let mut levels = vec![usize::MAX; n];
+    let mut changed = true;
+    let max_iterations = n + 1;
+    let mut iteration = 0;
+
+    // Initialize: assignments that depend only on inputs get level 0
+    for i in 0..n {
+        let deps_on_assigns: Vec<usize> = reads[i].iter()
+            .filter_map(|sig| target_to_idx.get(sig).cloned())
+            .filter(|&j| j != i)  // Exclude self-reference
+            .collect();
+
+        if deps_on_assigns.is_empty() {
+            levels[i] = 0;
+        }
+    }
+
+    // Iterate until stable
+    while changed && iteration < max_iterations {
+        changed = false;
+        iteration += 1;
+
+        for i in 0..n {
+            if levels[i] != usize::MAX {
+                continue;
+            }
+
+            // Find max level of dependencies
+            let mut max_dep_level = 0usize;
+            let mut all_deps_resolved = true;
+
+            for sig in &reads[i] {
+                if let Some(&j) = target_to_idx.get(sig) {
+                    if j == i { continue; }  // Skip self
+                    if levels[j] == usize::MAX {
+                        all_deps_resolved = false;
+                        break;
+                    }
+                    max_dep_level = max_dep_level.max(levels[j] + 1);
+                }
+            }
+
+            if all_deps_resolved {
+                levels[i] = max_dep_level;
+                changed = true;
+            }
+        }
+    }
+
+    // Handle cycles - put remaining at highest level
+    let max_level = levels.iter().filter(|&&l| l != usize::MAX).max().cloned().unwrap_or(0);
+    for l in &mut levels {
+        if *l == usize::MAX {
+            *l = max_level + 1;
+        }
+    }
+
+    // Group by level
+    let num_levels = levels.iter().max().cloned().unwrap_or(0) + 1;
+    let mut result: Vec<Vec<usize>> = vec![vec![]; num_levels];
+    for (i, &level) in levels.iter().enumerate() {
+        result[level].push(i);
+    }
+
+    result
+}
+
+/// Check if an expression is "simple" enough to benefit from AVX2 batching
+/// Simple = signal, literal, or basic binary ops on simple operands (depth <= 2)
+fn is_simple_assign(expr: &Expr) -> bool {
+    is_simple_expr(expr, 0)
+}
+
+fn is_simple_expr(expr: &Expr, depth: usize) -> bool {
+    if depth > 2 {
+        return false;
+    }
+    match expr {
+        Expr::Signal { .. } | Expr::Literal { .. } => true,
+        Expr::UnaryOp { operand, op, .. } => {
+            // Allow NOT and simple reduction ops
+            matches!(op.as_str(), "~" | "not" | "|" | "&" | "^" | "reduce_and" | "reduce_or" | "reduce_xor")
+                && is_simple_expr(operand, depth + 1)
+        }
+        Expr::BinaryOp { left, right, op, .. } => {
+            // Allow basic bitwise and arithmetic ops
+            matches!(op.as_str(), "&" | "|" | "^" | "+" | "-" | "==" | "!=" | "<" | ">" | "<=" | ">=")
+                && is_simple_expr(left, depth + 1)
+                && is_simple_expr(right, depth + 1)
+        }
+        Expr::Slice { base, .. } => is_simple_expr(base, depth + 1),
+        Expr::Resize { expr, .. } => is_simple_expr(expr, depth + 1),
+        // Mux and Concat are typically not worth batching
+        Expr::Mux { .. } | Expr::Concat { .. } => false,
+    }
+}
+
 // Code generation functions
 fn generate_mask_str(width: u32) -> String {
     if width >= 64 {
@@ -613,13 +764,104 @@ fn generate_full_code(ir: &CircuitIR, signal_indices: &HashMap<String, usize>) -
     code.push_str("// Auto-generated circuit simulation code\n");
     code.push_str("// DO NOT EDIT - generated by FIRRTL compiler\n\n");
 
-    // Generate inline evaluate logic as a macro for zero-overhead
+    // Check if we should use AVX2
+    code.push_str("#[cfg(target_arch = \"x86_64\")]\n");
+    code.push_str("use std::arch::x86_64::*;\n\n");
+
+    // Build input set for levelization
+    let inputs: HashSet<String> = ir.ports.iter()
+        .filter(|p| p.direction == "in")
+        .map(|p| p.name.clone())
+        .collect();
+
+    // Levelize assignments for optimal parallel evaluation
+    let levels = levelize_assigns(&ir.assigns, &inputs);
+
+    // Generate inline evaluate logic as a macro with levelized AVX2 SIMD
     code.push_str("macro_rules! do_evaluate {\n");
     code.push_str("    ($signals:expr) => {{\n");
-    for assign in &ir.assigns {
-        if let Some(&idx) = signal_indices.get(&assign.target) {
-            let expr_code = expr_to_rust_with_name(&assign.expr, signal_indices, "$signals");
-            code.push_str(&format!("        $signals[{}] = {};\n", idx, expr_code));
+
+    // Process each level
+    for level in &levels {
+        if level.is_empty() {
+            continue;
+        }
+
+        // Group assignments at this level by 4s for AVX2
+        let chunks: Vec<_> = level.chunks(4).collect();
+
+        for chunk in chunks {
+            if chunk.len() == 4 {
+                // Generate AVX2 SIMD code for 4 parallel assignments
+                // Note: AVX2 is great for simple ops, but for complex expressions
+                // the scalar branchless code is often faster due to register pressure.
+                // We use AVX2 only for simple signal copies and basic ops.
+                let all_simple = chunk.iter().all(|&idx| {
+                    is_simple_assign(&ir.assigns[idx].expr)
+                });
+
+                if all_simple {
+                    // Use AVX2 for simple assignments
+                    code.push_str("        #[cfg(target_arch = \"x86_64\")]\n");
+                    code.push_str("        unsafe {\n");
+
+                    // Load 4 values
+                    code.push_str("            let _v = _mm256_set_epi64x(\n");
+                    for (i, &idx) in chunk.iter().rev().enumerate() {
+                        let assign = &ir.assigns[idx];
+                        let expr_code = expr_to_rust_with_name(&assign.expr, signal_indices, "$signals");
+                        if i < 3 {
+                            code.push_str(&format!("                {} as i64,\n", expr_code));
+                        } else {
+                            code.push_str(&format!("                {} as i64\n", expr_code));
+                        }
+                    }
+                    code.push_str("            );\n");
+
+                    // Extract and store 4 values
+                    // For x86_64, we extract each 64-bit lane
+                    for (i, &idx) in chunk.iter().enumerate() {
+                        let assign = &ir.assigns[idx];
+                        if let Some(&sig_idx) = signal_indices.get(&assign.target) {
+                            code.push_str(&format!(
+                                "            $signals[{}] = _mm256_extract_epi64(_v, {}) as u64;\n",
+                                sig_idx, i
+                            ));
+                        }
+                    }
+                    code.push_str("        }\n");
+
+                    // Fallback for non-x86_64
+                    code.push_str("        #[cfg(not(target_arch = \"x86_64\"))]\n");
+                    code.push_str("        {\n");
+                    for &idx in chunk {
+                        let assign = &ir.assigns[idx];
+                        if let Some(&sig_idx) = signal_indices.get(&assign.target) {
+                            let expr_code = expr_to_rust_with_name(&assign.expr, signal_indices, "$signals");
+                            code.push_str(&format!("            $signals[{}] = {};\n", sig_idx, expr_code));
+                        }
+                    }
+                    code.push_str("        }\n");
+                } else {
+                    // Complex expressions - use scalar code
+                    for &idx in chunk {
+                        let assign = &ir.assigns[idx];
+                        if let Some(&sig_idx) = signal_indices.get(&assign.target) {
+                            let expr_code = expr_to_rust_with_name(&assign.expr, signal_indices, "$signals");
+                            code.push_str(&format!("        $signals[{}] = {};\n", sig_idx, expr_code));
+                        }
+                    }
+                }
+            } else {
+                // Remainder - use scalar code
+                for &idx in chunk {
+                    let assign = &ir.assigns[idx];
+                    if let Some(&sig_idx) = signal_indices.get(&assign.target) {
+                        let expr_code = expr_to_rust_with_name(&assign.expr, signal_indices, "$signals");
+                        code.push_str(&format!("        $signals[{}] = {};\n", sig_idx, expr_code));
+                    }
+                }
+            }
         }
     }
     code.push_str("    }};\n}\n\n");
