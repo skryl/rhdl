@@ -1,6 +1,6 @@
 # CPU backend for gate-level simulation
 
-require_relative 'primitives'
+require_relative '../primitives'
 
 module RHDL
   module Codegen
