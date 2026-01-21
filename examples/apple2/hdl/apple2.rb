@@ -92,6 +92,14 @@ module RHDL
       # Pause control
       input :pause                       # Pause CPU execution
 
+      # CPU interface (directly exposed as ports)
+      input :cpu_addr, width: 16         # CPU address bus
+      input :cpu_we                      # CPU write enable
+      input :cpu_dout, width: 8          # CPU data output
+      input :cpu_pc, width: 16           # CPU program counter (debug)
+      input :cpu_opcode, width: 8        # CPU current opcode (debug)
+      output :cpu_din, width: 8          # CPU data input
+
       # ROM memory (12KB: $D000-$FFFF)
       memory :main_rom, depth: 12 * 1024, width: 8, readonly: true
 
@@ -124,6 +132,17 @@ module RHDL
       wire :ld194_i
       wire :hires
 
+      # Sequential state registers
+      wire :soft_switches, width: 8
+      wire :speaker_select_latch
+      wire :dl, width: 8
+
+      # Decoded soft switch signals
+      wire :text_mode
+      wire :mixed_mode
+      wire :page2
+      wire :hires_mode
+
       # Connect timing generator
       port :clk_14m => [:timing, :clk_14m]
       port [:timing, :clk_7m] => :clk_7m
@@ -146,6 +165,9 @@ module RHDL
       port [:timing, :blank] => :blank
       port [:timing, :ldps_n] => :ldps_n
       port [:timing, :ld194] => :ld194_i
+      port :text_mode => [:timing, :text_mode]
+      port :page2 => [:timing, :page2]
+      port :hires => [:timing, :hires]
 
       # Connect video generator
       port :clk_14m => [:video_gen, :clk_14m]
@@ -162,6 +184,11 @@ module RHDL
       port :ldps_n => [:video_gen, :ldps_n]
       port :ld194_i => [:video_gen, :ld194]
       port :flash_clk => [:video_gen, :flash_clk]
+      port :text_mode => [:video_gen, :text_mode]
+      port :page2 => [:video_gen, :page2]
+      port :hires_mode => [:video_gen, :hires_mode]
+      port :mixed_mode => [:video_gen, :mixed_mode]
+      port :dl => [:video_gen, :dl]
       port [:video_gen, :hires] => :hires
       port [:video_gen, :video] => :video
       port [:video_gen, :color_line] => :color_line
@@ -171,6 +198,7 @@ module RHDL
 
       # Connect speaker toggle
       port :q3 => [:speaker_toggle, :clk]
+      port :speaker_select_latch => [:speaker_toggle, :toggle]
       port [:speaker_toggle, :speaker] => :speaker
 
       # Soft switches state
@@ -183,20 +211,20 @@ module RHDL
         dl <= mux(ax & ~cas_n & ~ras_n, ram_do, dl)
 
         # Soft switch updates
-        softswitch_select = (a[15..12] == lit(0xC, width: 4)) &
-                            (a[11..8] == lit(0x0, width: 4)) &
-                            (a[7..4] == lit(0x5, width: 4))
+        softswitch_select = (cpu_addr[15..12] == lit(0xC, width: 4)) &
+                            (cpu_addr[11..8] == lit(0x0, width: 4)) &
+                            (cpu_addr[7..4] == lit(0x5, width: 4))
 
         soft_switches <= mux(pre_phi0 & softswitch_select,
-          (soft_switches & ~(lit(1, width: 8) << a[3..1])) |
-          (mux(a[0], lit(1, width: 8), lit(0, width: 8)) << a[3..1]),
+          (soft_switches & ~(lit(1, width: 8) << cpu_addr[3..1])) |
+          (mux(cpu_addr[0], lit(1, width: 8), lit(0, width: 8)) << cpu_addr[3..1]),
           soft_switches
         )
 
         # Speaker toggle
-        speaker_select = (a[15..12] == lit(0xC, width: 4)) &
-                        (a[11..8] == lit(0x0, width: 4)) &
-                        (a[7..4] == lit(0x3, width: 4))
+        speaker_select = (cpu_addr[15..12] == lit(0xC, width: 4)) &
+                        (cpu_addr[11..8] == lit(0x0, width: 4)) &
+                        (cpu_addr[7..4] == lit(0x3, width: 4))
 
         speaker_select_latch <= pre_phi0 & speaker_select
       end
@@ -209,36 +237,22 @@ module RHDL
         ld194 <= ld194_i
 
         # RAM address mux (CPU or video)
-        ram_addr <= mux(phi0, a, video_address)
+        ram_addr <= mux(phi0, cpu_addr, video_address)
 
         # RAM write enable
-        ram_we <= we & ~ras_n & phi0
+        ram_we <= cpu_we & ~ras_n & phi0
 
         # Soft switch decoding
-        text_mode = soft_switches[0]
-        mixed_mode = soft_switches[1]
-        page2 = soft_switches[2]
-        hires_mode = soft_switches[3]
+        text_mode <= soft_switches[0]
+        mixed_mode <= soft_switches[1]
+        page2 <= soft_switches[2]
+        hires_mode <= soft_switches[3]
         an <= soft_switches[7..4]
 
-        # Connect soft switches to timing generator
-        port :text_mode => [:timing, :text_mode]
-        port :page2 => [:timing, :page2]
-        port :hires => [:timing, :hires]
-
-        # Connect soft switches to video generator
-        port :text_mode => [:video_gen, :text_mode]
-        port :page2 => [:video_gen, :page2]
-        port :hires_mode => [:video_gen, :hires_mode]
-        port :mixed_mode => [:video_gen, :mixed_mode]
-
-        # Connect speaker toggle
-        port :speaker_select_latch => [:speaker_toggle, :toggle]
-
         # Address decoding
-        a_hi = a[15..12]
-        a_mid = a[11..8]
-        a_lo = a[7..4]
+        a_hi = cpu_addr[15..12]
+        a_mid = cpu_addr[11..8]
+        a_lo = cpu_addr[7..4]
 
         # ROM select: $D000-$FFFF
         rom_select = (a_hi == lit(0xD, width: 4)) |
@@ -246,7 +260,7 @@ module RHDL
                      (a_hi == lit(0xF, width: 4))
 
         # RAM select: $0000-$BFFF
-        ram_select = ~a[15] | (~a[14] & ~a[15])
+        ram_select = ~cpu_addr[15] | (~cpu_addr[14] & ~cpu_addr[15])
 
         # Keyboard select: $C000-$C00F
         keyboard_select = (a_hi == lit(0xC, width: 4)) &
@@ -257,8 +271,6 @@ module RHDL
         read_key <= (a_hi == lit(0xC, width: 4)) &
                    (a_mid == lit(0x0, width: 4)) &
                    (a_lo == lit(0x1, width: 4))
-
-        # Speaker select: $C030-$C03F (already decoded above)
 
         # Gameport select: $C060-$C06F
         gameport_select = (a_hi == lit(0xC, width: 4)) &
@@ -278,10 +290,10 @@ module RHDL
         # Slot I/O select: $C080-$C0FF
         device_select_addr = (a_hi == lit(0xC, width: 4)) &
                             (a_mid == lit(0x0, width: 4)) &
-                            (a[7] == lit(1, width: 1))
+                            (cpu_addr[7] == lit(1, width: 1))
 
         device_select <= mux(device_select_addr,
-          lit(1, width: 8) << a[6..4],
+          lit(1, width: 8) << cpu_addr[6..4],
           lit(0, width: 8)
         )
 
@@ -291,7 +303,7 @@ module RHDL
                         (a_mid != lit(0x0, width: 4))
 
         io_select <= mux(io_select_addr,
-          lit(1, width: 8) << a[10..8],
+          lit(1, width: 8) << cpu_addr[10..8],
           lit(0, width: 8)
         )
 
@@ -299,13 +311,13 @@ module RHDL
         # $D000-$DFFF -> $0000-$0FFF
         # $E000-$EFFF -> $1000-$1FFF
         # $F000-$FFFF -> $2000-$2FFF
-        rom_addr = cat((a[13] & a[12]), ~a[12], a[11..0])
+        rom_addr_mapped = cat((cpu_addr[13] & cpu_addr[12]), ~cpu_addr[12], cpu_addr[11..0])
 
         # Data input mux to CPU
-        rom_out = lit(0, width: 8)  # Would be main_rom[rom_addr]
-        gameport_data = cat(gameport[a[2..0]], lit(0, width: 7))
+        rom_out = lit(0, width: 8)  # Would be main_rom[rom_addr_mapped]
+        gameport_data = cat(gameport[cpu_addr[2..0]], lit(0, width: 7))
 
-        d_in = mux(ram_select, dl,
+        cpu_din <= mux(ram_select, dl,
           mux(keyboard_select, k,
             mux(gameport_select, gameport_data,
               mux(rom_select, rom_out,
@@ -316,14 +328,14 @@ module RHDL
         )
 
         # CPU data output
-        d <= d_out_cpu
+        d <= cpu_dout
 
         # Address output
-        addr <= a
+        addr <= cpu_addr
 
         # Debug outputs
-        pc_debug_out <= pc_cpu
-        opcode_debug_out <= opcode_cpu
+        pc_debug_out <= cpu_pc
+        opcode_debug_out <= cpu_opcode
       end
 
       # Load ROM data
@@ -336,33 +348,6 @@ module RHDL
 
       def read_rom(addr)
         mem_read(:main_rom, addr & 0x2FFF)
-      end
-
-      private
-
-      # CPU interface signals (would be connected to actual 6502 component)
-      def a
-        @cpu_addr ||= 0
-      end
-
-      def we
-        @cpu_we ||= 0
-      end
-
-      def d_out_cpu
-        @cpu_dout ||= 0
-      end
-
-      def pc_cpu
-        @cpu_pc ||= 0
-      end
-
-      def opcode_cpu
-        @cpu_opcode ||= 0
-      end
-
-      def d_in
-        @cpu_din ||= 0
       end
     end
 
@@ -385,6 +370,11 @@ module RHDL
       output :vga_b, width: 4
       output :vga_hsync
       output :vga_vsync
+
+      # Internal registers
+      wire :pixel_count, width: 10
+      wire :line_count, width: 10
+      wire :pixel_data
 
       sequential clock: :clk_14m, reset_values: {
         pixel_count: 0,
