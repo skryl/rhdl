@@ -188,7 +188,7 @@ RSpec.describe RHDL::HDL::Stack do
     end
 
     describe 'simulator comparison' do
-      it 'all simulators produce matching results', pending: 'Memory components have complex synthesis requirements' do
+      it 'all simulators produce matching results' do
         test_cases = [
           { din: 0x11, rst: 0, push: 1, pop: 0 },
           { din: 0x22, rst: 0, push: 1, pop: 0 },

@@ -46,6 +46,18 @@ struct DffDef {
     en: Option<usize>,
     #[allow(dead_code)]
     async_reset: Option<bool>,
+    #[serde(default)]
+    reset_value: i64,
+}
+
+/// SR Latch definition from JSON netlist
+#[derive(Debug, Clone, Deserialize)]
+struct SrLatchDef {
+    s: usize,
+    r: usize,
+    en: usize,
+    q: usize,
+    qn: usize,
 }
 
 /// Complete netlist IR from JSON
@@ -56,6 +68,8 @@ struct NetlistIR {
     net_count: usize,
     gates: Vec<GateDef>,
     dffs: Vec<DffDef>,
+    #[serde(default)]
+    sr_latches: Vec<SrLatchDef>,
     inputs: HashMap<String, Vec<usize>>,
     outputs: HashMap<String, Vec<usize>>,
     schedule: Vec<usize>,
@@ -80,6 +94,17 @@ struct Dff {
     q: usize,
     rst: Option<usize>,
     en: Option<usize>,
+    reset_value: i64,
+}
+
+/// Internal SR Latch representation
+#[derive(Debug, Clone)]
+struct SrLatch {
+    s: usize,
+    r: usize,
+    en: usize,
+    q: usize,
+    qn: usize,
 }
 
 /// The native netlist simulator
@@ -87,6 +112,7 @@ struct NetlistSimulator {
     nets: Vec<u64>,
     gates: Vec<Gate>,
     dffs: Vec<Dff>,
+    sr_latches: Vec<SrLatch>,
     schedule: Vec<usize>,
     inputs: HashMap<String, Vec<usize>>,
     outputs: HashMap<String, Vec<usize>>,
@@ -156,6 +182,20 @@ impl NetlistSimulator {
                 q: d.q,
                 rst: d.rst,
                 en: d.en,
+                reset_value: d.reset_value,
+            })
+            .collect();
+
+        // Convert SR latches
+        let sr_latches: Vec<SrLatch> = ir
+            .sr_latches
+            .iter()
+            .map(|l| SrLatch {
+                s: l.s,
+                r: l.r,
+                en: l.en,
+                q: l.q,
+                qn: l.qn,
             })
             .collect();
 
@@ -163,6 +203,7 @@ impl NetlistSimulator {
             nets: vec![0; ir.net_count],
             gates,
             dffs,
+            sr_latches,
             schedule: ir.schedule,
             inputs: ir.inputs,
             outputs: ir.outputs,
@@ -268,6 +309,35 @@ impl NetlistSimulator {
                 }
             }
         }
+
+        // Update SR latches (level-sensitive, may need iteration for stability)
+        for _ in 0..10 {
+            let mut changed = false;
+            for latch in &self.sr_latches {
+                let s = self.nets[latch.s];
+                let r = self.nets[latch.r];
+                let en = self.nets[latch.en];
+                let q_old = self.nets[latch.q];
+
+                // SR latch truth table (when en=1):
+                //   S=1, R=0: Q=1 (set)
+                //   S=0, R=1: Q=0 (reset)
+                //   S=0, R=0: Q=hold
+                //   S=1, R=1: invalid (R wins, Q=0)
+                // When en=0: Q=hold
+                // q_next = (~en & q) | (en & ~r & (s | q))
+                let q_next = ((!en) & q_old) | (en & (!r) & (s | q_old)) & self.lane_mask;
+
+                if q_next != q_old {
+                    self.nets[latch.q] = q_next;
+                    self.nets[latch.qn] = (!q_next) & self.lane_mask;
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
     }
 
     fn tick(&mut self) {
@@ -289,10 +359,12 @@ impl NetlistSimulator {
                     q_next = (q & !en_val) | (d & en_val);
                 }
 
-                // Reset: q_next &= ~rst
+                // Reset: apply reset_value when rst is asserted
                 if let Some(rst) = dff.rst {
                     let rst_val = self.nets[rst];
-                    q_next &= !rst_val;
+                    // When rst is asserted, use reset_value instead of 0
+                    let reset_target = if dff.reset_value == 0 { 0 } else { self.lane_mask };
+                    q_next = (q_next & !rst_val) | (rst_val & reset_target);
                 }
 
                 q_next
@@ -311,6 +383,12 @@ impl NetlistSimulator {
 
     fn reset(&mut self) {
         self.nets.fill(0);
+        // Apply DFF reset values (for non-zero reset)
+        for dff in &self.dffs {
+            if dff.reset_value != 0 {
+                self.nets[dff.q] = self.lane_mask;
+            }
+        }
     }
 
     fn net_count(&self) -> usize {

@@ -79,7 +79,7 @@ RSpec.describe RHDL::HDL::CPU::CPU do
     end
 
     describe 'simulator comparison' do
-      it 'all simulators produce matching results', pending: 'CPU is a complex hierarchical component with memory' do
+      it 'all simulators produce matching results' do
         test_cases = [
           { rst: 1, mem_data_in: 0, acc_load_en: 0, acc_load_data: 0, pc_load_en: 0, pc_load_data: 0, sp_push: 0, sp_pop: 0 },
           { rst: 0, mem_data_in: 0, acc_load_en: 0, acc_load_data: 0, pc_load_en: 0, pc_load_data: 0, sp_push: 0, sp_pop: 0 },

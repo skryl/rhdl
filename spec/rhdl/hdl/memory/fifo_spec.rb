@@ -183,7 +183,7 @@ RSpec.describe RHDL::HDL::FIFO do
     end
 
     describe 'simulator comparison' do
-      it 'all simulators produce matching results', pending: 'FIFO has complex memory synthesis requirements' do
+      it 'all simulators produce matching results' do
         test_cases = [
           { din: 0x11, rst: 0, wr_en: 1, rd_en: 0 },
           { din: 0x22, rst: 0, wr_en: 1, rd_en: 0 },

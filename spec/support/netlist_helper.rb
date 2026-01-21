@@ -88,6 +88,15 @@ module NetlistHelper
       lines << ""
     end
 
+    # SR Latch instantiations
+    if ir.sr_latches.any?
+      lines << "  // SR Latch instances (behavior for simulation)"
+      ir.sr_latches.each_with_index do |latch, idx|
+        lines << sr_latch_to_verilog(latch, idx)
+      end
+      lines << ""
+    end
+
     # Connect nets to output ports
     lines << "  // Output connections"
     ir.outputs.each do |name, nets|
@@ -138,8 +147,10 @@ module NetlistHelper
   # Convert a DFF to Verilog behavior model
   def dff_to_verilog(dff, idx)
     lines = []
-    lines << "  // DFF #{idx}: d=n#{dff.d} q=n#{dff.q} rst=#{dff.rst.nil? ? 'none' : "n#{dff.rst}"} en=#{dff.en.nil? ? 'none' : "n#{dff.en}"}"
-    lines << "  reg dff#{idx}_q = 1'b0;"  # Initialize to 0 for simulation
+    reset_val = (dff.reset_value || 0).zero? ? "1'b0" : "1'b1"
+    init_val = reset_val  # Initialize to reset value for simulation
+    lines << "  // DFF #{idx}: d=n#{dff.d} q=n#{dff.q} rst=#{dff.rst.nil? ? 'none' : "n#{dff.rst}"} en=#{dff.en.nil? ? 'none' : "n#{dff.en}"} reset_value=#{dff.reset_value || 0}"
+    lines << "  reg dff#{idx}_q = #{init_val};"  # Initialize to reset_value for simulation
     lines << "  assign n#{dff.q} = dff#{idx}_q;"
 
     # For simulation, we need a clock - assume there's a global 'clk' signal
@@ -147,13 +158,13 @@ module NetlistHelper
     if dff.async_reset && dff.rst
       lines << "  always @(posedge clk or posedge n#{dff.rst}) begin"
       lines << "    if (n#{dff.rst})"
-      lines << "      dff#{idx}_q <= 1'b0;"
+      lines << "      dff#{idx}_q <= #{reset_val};"
       elsif_or_else = "    else"
     else
       lines << "  always @(posedge clk) begin"
       if dff.rst
         lines << "    if (n#{dff.rst})"
-        lines << "      dff#{idx}_q <= 1'b0;"
+        lines << "      dff#{idx}_q <= #{reset_val};"
         elsif_or_else = "    else"
       else
         elsif_or_else = nil
@@ -176,6 +187,25 @@ module NetlistHelper
       end
     end
 
+    lines << "  end"
+    lines.join("\n")
+  end
+
+  # Convert an SR Latch to Verilog behavior model
+  def sr_latch_to_verilog(latch, idx)
+    lines = []
+    lines << "  // SR Latch #{idx}: s=n#{latch.s} r=n#{latch.r} en=n#{latch.en} q=n#{latch.q} qn=n#{latch.qn}"
+    lines << "  reg srl#{idx}_q = 1'b0;"  # Initialize to 0 for simulation
+    lines << "  assign n#{latch.q} = srl#{idx}_q;"
+    lines << "  assign n#{latch.qn} = ~srl#{idx}_q;"
+    lines << "  always @(*) begin"
+    lines << "    if (n#{latch.en}) begin"
+    lines << "      if (n#{latch.r})"
+    lines << "        srl#{idx}_q <= 1'b0;"  # Reset wins
+    lines << "      else if (n#{latch.s})"
+    lines << "        srl#{idx}_q <= 1'b1;"  # Set"
+    lines << "      // else hold"
+    lines << "    end"
     lines << "  end"
     lines.join("\n")
   end
@@ -475,6 +505,9 @@ module NetlistHelper
 
   # Common implementation for Ruby and Native netlist simulators
   def run_netlist_sim(sim, ir, test_vectors, has_clock:, name:)
+    # Reset to initialize DFFs with their reset values
+    sim.reset
+
     results = []
     output_names = ir.outputs.keys.map { |k| sanitize_port_name(k) }
 

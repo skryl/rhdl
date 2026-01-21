@@ -135,7 +135,7 @@ RSpec.describe RHDL::HDL::Divider do
     end
 
     describe 'simulator comparison' do
-      it 'all simulators produce matching results', pending: 'Divider gate-level synthesis does not match behavior' do
+      it 'all simulators produce matching results' do
         test_cases = [
           { dividend: 100, divisor: 10 },
           { dividend: 100, divisor: 30 },
