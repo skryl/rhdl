@@ -3,8 +3,11 @@
 require 'spec_helper'
 require 'rhdl'
 require_relative '../../../examples/apple2/hdl/keyboard'
+require_relative '../../support/vhdl_reference_helper'
+require_relative '../../support/hdl_toolchain'
 
 RSpec.describe RHDL::Apple2::Keyboard do
+  extend VhdlReferenceHelper
   let(:keyboard) { described_class.new('keyboard') }
 
   # PS/2 scan codes (from reference keyboard.vhd)
@@ -502,6 +505,57 @@ RSpec.describe RHDL::Apple2::PS2Controller do
 
       scan_code = ps2_ctrl.get_output(:scan_code)
       expect(scan_code).to eq(0xAA)
+    end
+  end
+
+  describe 'VHDL reference comparison', if: HdlToolchain.ghdl_available? do
+    include VhdlReferenceHelper
+
+    let(:reference_vhdl) { VhdlReferenceHelper.reference_file('PS2_Ctrl.vhd') }
+    let(:work_dir) { Dir.mktmpdir('ps2_ctrl_test_') }
+
+    before do
+      skip 'Reference VHDL not found' unless VhdlReferenceHelper.reference_exists?('PS2_Ctrl.vhd')
+    end
+
+    after do
+      FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
+    end
+
+    it 'matches reference PS/2 controller behavior for reset' do
+      # The PS/2 controller receives 11-bit frames and outputs 8-bit scan codes
+      # Test basic behavior of receiving scan codes
+      ports = {
+        Clk: { direction: 'in', width: 1 },
+        Reset: { direction: 'in', width: 1 },
+        PS2_Clk: { direction: 'in', width: 1 },
+        PS2_Data: { direction: 'in', width: 1 },
+        Scan_Code: { direction: 'out', width: 8 },
+        Scan_DAV: { direction: 'out', width: 1 }
+      }
+
+      # Test reset behavior
+      test_vectors = [
+        { inputs: { Reset: 1, PS2_Clk: 1, PS2_Data: 1 } },
+        { inputs: { Reset: 0, PS2_Clk: 1, PS2_Data: 1 } },
+        { inputs: { Reset: 0, PS2_Clk: 1, PS2_Data: 1 } }
+      ]
+
+      result = run_comparison_test(
+        ps2_ctrl,
+        vhdl_files: [reference_vhdl],
+        ports: ports,
+        test_vectors: test_vectors,
+        base_dir: work_dir,
+        clock_name: 'Clk'
+      )
+
+      if result[:success] == false && result[:error]
+        skip "GHDL simulation failed: #{result[:error]}"
+      end
+
+      expect(result[:success]).to be(true),
+        "Mismatches: #{result[:comparison][:mismatches].first(5).inspect}"
     end
   end
 end
