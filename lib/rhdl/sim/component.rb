@@ -181,13 +181,22 @@ module RHDL
       # 4. All sequential components update their outputs
       # 5. Repeat until stable (but behavior only runs when there's a rising edge)
       def propagate_subcomponents
-        # Separate combinational and sequential components
+        # Separate combinational, simple sequential, and hierarchical sequential components
+        # Hierarchical sequential components (those with subcomponents) need full propagate()
+        # called to handle their internal hierarchy
         combinational = []
         sequential = []
+        hierarchical_sequential = []
 
         @subcomponents.each_value do |comp|
           if comp.is_a?(SequentialComponent)
-            sequential << comp
+            # Check if this sequential component has its own subcomponents
+            if comp.instance_variable_defined?(:@subcomponents) &&
+               comp.instance_variable_get(:@subcomponents)&.any?
+              hierarchical_sequential << comp
+            else
+              sequential << comp
+            end
           else
             combinational << comp
           end
@@ -222,12 +231,28 @@ module RHDL
         loop do
           changed = false
 
-          # Phase 1: Propagate all combinational components until stable
+          # Phase 1: Propagate all combinational and hierarchical sequential components until stable
+          # Hierarchical sequential components need their full propagate() called to handle
+          # their internal subcomponents (e.g., Apple2 contains TimingGenerator)
           comb_iterations = 0
           loop do
             comb_changed = false
 
+            # Propagate combinational components
             combinational.each do |component|
+              old_outputs = component.outputs.transform_values(&:get)
+              component.propagate
+
+              component.outputs.each do |_port_name, wire|
+                if wire.get != old_outputs[_port_name]
+                  comb_changed = true
+                  changed = true
+                end
+              end
+            end
+
+            # Also propagate hierarchical sequential components
+            hierarchical_sequential.each do |component|
               old_outputs = component.outputs.transform_values(&:get)
               component.propagate
 
@@ -255,7 +280,7 @@ module RHDL
             execute_behavior
             @_behavior_ran_this_high = true if current_clk == 1
 
-            # Phase 2b: Re-propagate combinational components after behavior
+            # Phase 2b: Re-propagate combinational and hierarchical sequential components after behavior
             # This is critical for components like hazard_unit that depend on
             # behavior outputs (e.g., take_branch). Without this, hazard_unit
             # would see stale values and generate wrong flush signals.
@@ -264,6 +289,18 @@ module RHDL
               comb_changed = false
 
               combinational.each do |component|
+                old_outputs = component.outputs.transform_values(&:get)
+                component.propagate
+
+                component.outputs.each do |port_name, wire|
+                  if wire.get != old_outputs[port_name]
+                    comb_changed = true
+                    changed = true
+                  end
+                end
+              end
+
+              hierarchical_sequential.each do |component|
                 old_outputs = component.outputs.transform_values(&:get)
                 component.propagate
 

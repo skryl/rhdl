@@ -182,9 +182,12 @@ module RHDL
       end
 
       # Helper for conditional expressions (mux)
+      # Returns a LocalProxy to ensure subsequent operations work correctly
       def mux(condition, when_true, when_false)
         cond_val = resolve_value(condition)
-        cond_val != 0 ? resolve_value(when_true) : resolve_value(when_false)
+        selected = cond_val != 0 ? when_true : when_false
+        val, width = resolve_value_with_width(selected)
+        LocalProxy.new(nil, val, width, self)
       end
 
       # Helper for creating literal values with explicit width
@@ -195,15 +198,16 @@ module RHDL
       end
 
       # Helper for concatenation
+      # Returns a LocalProxy to ensure subsequent operations work correctly
       def cat(*signals)
         result = 0
-        offset = 0
+        total_width = 0
         signals.reverse.each do |sig|
           val, width = resolve_value_with_width(sig)
-          result |= (val << offset)
-          offset += width
+          result |= (val << total_width)
+          total_width += width
         end
-        result
+        LocalProxy.new(nil, result, total_width, self)
       end
 
       # Simple if-else for single expression
@@ -365,6 +369,19 @@ module RHDL
       def >(other)
         other_val = @context.send(:resolve_value, other)
         LocalProxy.new(nil, @value > other_val ? 1 : 0, 1, @context)
+      end
+
+      # Ruby coercion for mixed-type arithmetic (e.g., Integer + LocalProxy)
+      # When Ruby sees `integer + local_proxy`, it calls local_proxy.coerce(integer)
+      # and expects [converted_integer, self] back, then does converted_integer + self
+      def coerce(other)
+        if other.is_a?(Integer)
+          # Convert integer to LocalProxy with appropriate width
+          width = other == 0 ? 1 : [other.bit_length, @width].max
+          [LocalProxy.new(nil, other, width, @context), self]
+        else
+          raise TypeError, "#{self.class} can't be coerced with #{other.class}"
+        end
       end
 
       def to_i
