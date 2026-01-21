@@ -109,5 +109,24 @@ RSpec.describe RHDL::HDL::Mux8 do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { in0: 1, in1: 0, in2: 0, in3: 0, in4: 0, in5: 0, in6: 0, in7: 0, sel: 0 },
+          { in0: 0, in1: 1, in2: 0, in3: 0, in4: 0, in5: 0, in6: 0, in7: 0, sel: 1 },
+          { in0: 0, in1: 0, in2: 1, in3: 0, in4: 0, in5: 0, in6: 0, in7: 0, sel: 2 },
+          { in0: 0, in1: 0, in2: 0, in3: 0, in4: 0, in5: 0, in6: 0, in7: 1, sel: 7 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::Mux8,
+          'mux8',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/mux8',
+          has_clock: false
+        )
+      end
+    end
   end
 end

@@ -154,5 +154,23 @@ RSpec.describe RHDL::HDL::RegisterFile do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results', pending: 'Memory components have complex synthesis requirements' do
+        test_cases = [
+          { waddr: 1, wdata: 0xAA, we: 1, raddr1: 1, raddr2: 0 },
+          { waddr: 2, wdata: 0xBB, we: 1, raddr1: 1, raddr2: 2 },
+          { waddr: 0, wdata: 0, we: 0, raddr1: 1, raddr2: 2 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::RegisterFile,
+          'register_file',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/register_file',
+          has_clock: true
+        )
+      end
+    end
   end
 end

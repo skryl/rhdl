@@ -107,5 +107,24 @@ RSpec.describe RHDL::HDL::Multiplier do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 10, b: 20 },
+          { a: 15, b: 15 },
+          { a: 0, b: 100 },
+          { a: 3, b: 7 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::Multiplier,
+          'multiplier',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/multiplier',
+          has_clock: false
+        )
+      end
+    end
   end
 end

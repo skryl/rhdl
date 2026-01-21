@@ -176,5 +176,28 @@ RSpec.describe RHDL::HDL::CPU::InstructionDecoder do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results', pending: 'InstructionDecoder has gate-level synthesis mismatches' do
+        test_cases = [
+          { instruction: 0x00, zero_flag: 0 },  # NOP
+          { instruction: 0x15, zero_flag: 0 },  # LDA
+          { instruction: 0x25, zero_flag: 0 },  # STA
+          { instruction: 0x35, zero_flag: 0 },  # ADD
+          { instruction: 0x45, zero_flag: 0 },  # SUB
+          { instruction: 0x85, zero_flag: 1 },  # JZ (taken)
+          { instruction: 0x85, zero_flag: 0 },  # JZ (not taken)
+          { instruction: 0xF0, zero_flag: 0 }   # HLT
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::CPU::InstructionDecoder,
+          'instruction_decoder',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/instruction_decoder',
+          has_clock: false
+        )
+      end
+    end
   end
 end
