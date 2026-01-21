@@ -544,6 +544,25 @@ namespace :cli do
         }
         RHDL::CLI::Tasks::DiskConvertTask.new(opts).run
       end
+
+      desc "[CLI] Boot disk and dump memory once loaded (requires ROM)"
+      task :memdump, [:disk, :rom, :output] do |_, args|
+        unless args[:disk] && args[:rom]
+          puts "Usage: rake cli:apple2:disk:memdump[disk.dsk,rom.bin,output.bin]"
+          puts "Example: rake cli:apple2:disk:memdump[karateka.dsk,appleiigo.rom,karateka_mem.bin]"
+          puts ""
+          puts "This boots the disk using the ROM and dumps memory once HIRES mode is detected."
+          exit 1
+        end
+        load_cli_tasks
+        opts = {
+          dump_after_boot: true,
+          disk: args[:disk],
+          rom: args[:rom]
+        }
+        opts[:output] = args[:output] if args[:output]
+        RHDL::CLI::Tasks::DiskConvertTask.new(opts).run
+      end
     end
   end
 

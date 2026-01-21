@@ -34,6 +34,8 @@ module RHDL
             extract_boot_sector
           elsif options[:extract_tracks]
             extract_tracks
+          elsif options[:dump_after_boot]
+            dump_after_boot
           elsif options[:convert]
             convert_disk_to_binary
           else
@@ -163,6 +165,153 @@ module RHDL
 
           File.binwrite(output_file, output.pack('C*'))
           puts "Wrote #{output.length} bytes (#{end_track - start_track + 1} tracks) to #{output_file}"
+        end
+
+        # Boot a disk using the disk controller and dump memory once loaded
+        # This captures the game in its loaded state, ready to run
+        def dump_after_boot
+          disk_file = options[:input] || options[:disk]
+          raise "No input disk file specified" unless disk_file
+          raise "Disk file not found: #{disk_file}" unless File.exist?(disk_file)
+
+          rom_file = options[:rom]
+          raise "ROM file required for booting (use --rom)" unless rom_file
+          raise "ROM file not found: #{rom_file}" unless File.exist?(rom_file)
+
+          output_file = options[:output] || disk_file.sub(/\.dsk$/i, '_memdump.bin')
+          max_cycles = options[:max_cycles] || 200_000_000
+          wait_for_hires = options[:wait_for_hires] != false
+          base_addr = options[:base_addr] || 0x0000
+          end_addr = options[:end_addr] || 0xBFFF
+
+          puts_header "Booting disk and dumping memory"
+          puts "Disk: #{disk_file}"
+          puts "ROM:  #{rom_file}"
+          puts "Output: #{output_file}"
+          puts "Max cycles: #{max_cycles.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
+          puts "Wait for HIRES: #{wait_for_hires}"
+          puts "Memory range: $#{base_addr.to_s(16).upcase}-$#{end_addr.to_s(16).upcase}"
+          puts
+
+          # Load dependencies
+          require 'rhdl'
+          $LOAD_PATH.unshift File.expand_path('examples/mos6502/utilities')
+          require 'apple2_harness'
+
+          # Create runner with disk
+          runner = Apple2Harness::ISARunner.new
+          puts "Simulator: #{runner.simulator_type}"
+
+          # Load ROM
+          rom_bytes = File.binread(rom_file).bytes
+          rom_base = 0x10000 - rom_bytes.length
+          runner.load_rom(rom_bytes, base_addr: rom_base)
+          puts "Loaded ROM: #{rom_bytes.length} bytes at $#{rom_base.to_s(16).upcase}"
+
+          # Load disk
+          runner.load_disk(disk_file, drive: 0)
+          puts "Loaded disk: #{File.basename(disk_file)}"
+          puts
+
+          # Reset and boot
+          runner.reset
+          puts "Starting boot sequence..."
+
+          # Run until condition is met
+          cycles = 0
+          last_report = 0
+          hires_detected = false
+          stable_pc_count = 0
+          last_pc = nil
+
+          while cycles < max_cycles
+            # Run in batches for efficiency
+            batch_size = 100_000
+            runner.run_steps(batch_size)
+            cycles += batch_size
+
+            # Check for HIRES mode
+            if wait_for_hires && !hires_detected && runner.bus.hires_mode?
+              hires_detected = true
+              puts "  HIRES mode detected at cycle #{cycles.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
+
+              # Run a bit more to let the game initialize
+              runner.run_steps(1_000_000)
+              cycles += 1_000_000
+              break
+            end
+
+            # Progress report every 5M cycles
+            if cycles - last_report >= 5_000_000
+              state = runner.cpu_state
+              mode = runner.bus.display_mode
+              puts "  Cycle #{(cycles / 1_000_000)}M: PC=$#{state[:pc].to_s(16).upcase.rjust(4, '0')} mode=#{mode}"
+              last_report = cycles
+            end
+          end
+
+          puts
+          state = runner.cpu_state
+          puts "Boot completed:"
+          puts "  Cycles: #{cycles.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
+          puts "  PC: $#{state[:pc].to_s(16).upcase.rjust(4, '0')}"
+          puts "  Display mode: #{runner.bus.display_mode}"
+          puts "  HIRES: #{runner.bus.hires_mode?}"
+          puts
+
+          # Dump memory
+          puts "Dumping memory $#{base_addr.to_s(16).upcase}-$#{end_addr.to_s(16).upcase}..."
+          mem_size = end_addr - base_addr + 1
+          memory = Array.new(mem_size, 0)
+
+          if runner.native?
+            # Read from native CPU memory
+            mem_size.times do |i|
+              memory[i] = runner.cpu.peek(base_addr + i)
+            end
+          else
+            # Read from bus
+            mem_size.times do |i|
+              memory[i] = runner.bus.read(base_addr + i)
+            end
+          end
+
+          # Write binary file
+          File.binwrite(output_file, memory.pack('C*'))
+          puts "Wrote #{memory.length} bytes to #{output_file}"
+
+          # Also save metadata
+          meta_file = output_file.sub(/\.bin$/, '_meta.txt')
+          File.open(meta_file, 'w') do |f|
+            f.puts "Source disk: #{disk_file}"
+            f.puts "ROM: #{rom_file}"
+            f.puts "Boot cycles: #{cycles}"
+            f.puts "Memory range: $#{base_addr.to_s(16).upcase}-$#{end_addr.to_s(16).upcase}"
+            f.puts "PC at dump: $#{state[:pc].to_s(16).upcase.rjust(4, '0')}"
+            f.puts "Display mode: #{runner.bus.display_mode}"
+            f.puts "HIRES: #{runner.bus.hires_mode?}"
+            f.puts "A: $#{state[:a].to_s(16).upcase.rjust(2, '0')}"
+            f.puts "X: $#{state[:x].to_s(16).upcase.rjust(2, '0')}"
+            f.puts "Y: $#{state[:y].to_s(16).upcase.rjust(2, '0')}"
+            f.puts "SP: $#{state[:sp].to_s(16).upcase.rjust(2, '0')}"
+            f.puts "P: $#{state[:p].to_s(16).upcase.rjust(2, '0')}"
+          end
+          puts "Wrote metadata to #{meta_file}"
+
+          # Show how to use
+          puts
+          puts "To load this memory dump:"
+          puts "  bin/apple2 -b #{output_file} -a 0 --entry #{state[:pc].to_s(16)}"
+
+          # If in HIRES mode, show a preview
+          if runner.bus.hires_mode?
+            puts
+            puts "HIRES preview:"
+            frame = runner.bus.render_hires_braille(chars_wide: 40, invert: true)
+            lines = frame.split("\n")
+            lines[0..9].each { |l| puts "  #{l}" }
+            puts "  ..." if lines.length > 10
+          end
         end
 
         # Show information about a disk image
