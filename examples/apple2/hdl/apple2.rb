@@ -34,6 +34,7 @@ require_relative 'keyboard'
 require_relative 'ram'
 require_relative 'audio_pwm'
 require_relative 'disk_ii'
+require_relative 'cpu6502'
 
 module RHDL
   module Apple2
@@ -47,31 +48,27 @@ module RHDL
       input :flash_clk                   # ~2 Hz flashing character clock
       input :reset
 
-      # Clock outputs
-      output :clk_2m                     # 2 MHz clock
-      output :pre_phase_zero             # One 14M cycle before PHI0
-
-      # CPU address/data bus
-      output :addr, width: 16            # CPU address
+      # RAM interface (external RAM)
       output :ram_addr, width: 16        # RAM address (muxed with video)
+      output :ram_we                     # RAM write enable
       output :d, width: 8                # Data to RAM
       input :ram_do, width: 8            # Data from RAM
+
+      # Peripheral data input
       input :pd, width: 8                # Data from peripherals
-      output :ram_we                     # RAM write enable
 
       # Video outputs
       output :video                      # Serial video output
       output :color_line                 # Color burst enable
       output :hbl                        # Horizontal blanking
       output :vbl                        # Vertical blanking
-      output :ld194                      # Load signal
 
       # Keyboard interface
       input :k, width: 8                 # Keyboard data
       output :read_key                   # Keyboard read strobe
 
-      # Annunciator outputs
-      output :an, width: 4               # Annunciator outputs
+      # Audio output
+      output :speaker                    # 1-bit speaker output
 
       # Gameport interface
       input :gameport, width: 8          # Gameport input
@@ -82,23 +79,22 @@ module RHDL
       output :io_select, width: 8        # Slot ROM select ($Cnxx)
       output :device_select, width: 8    # Slot I/O select ($C0nx)
 
-      # Debug outputs
-      output :pc_debug_out, width: 16    # CPU program counter
-      output :opcode_debug_out, width: 8 # Current opcode
+      # Annunciator outputs
+      output :an, width: 4               # Annunciator outputs
 
-      # Audio output
-      output :speaker                    # 1-bit speaker output
+      # Timing outputs (exposed for testing)
+      output :clk_2m                     # 2 MHz clock (q3)
+      output :pre_phase_zero             # Pre-PHI0 signal
+
+      # Debug outputs (directly from CPU)
+      output :pc_debug, width: 16        # CPU program counter
+      output :opcode_debug, width: 8     # Current opcode
+      output :a_debug, width: 8          # A register
+      output :x_debug, width: 8          # X register
+      output :y_debug, width: 8          # Y register
 
       # Pause control
       input :pause                       # Pause CPU execution
-
-      # CPU interface (directly exposed as ports)
-      input :cpu_addr, width: 16         # CPU address bus
-      input :cpu_we                      # CPU write enable
-      input :cpu_dout, width: 8          # CPU data output
-      input :cpu_pc, width: 16           # CPU program counter (debug)
-      input :cpu_opcode, width: 8        # CPU current opcode (debug)
-      output :cpu_din, width: 8          # CPU data input
 
       # ROM memory (12KB: $D000-$FFFF)
       memory :main_rom, depth: 12 * 1024, width: 8, readonly: true
@@ -108,6 +104,7 @@ module RHDL
       instance :video_gen, VideoGenerator
       instance :char_rom, CharacterROM
       instance :speaker_toggle, SpeakerToggle
+      instance :cpu, CPU6502
 
       # Internal wires for clocks
       wire :clk_7m
@@ -142,6 +139,18 @@ module RHDL
       wire :mixed_mode
       wire :page2
       wire :hires_mode
+
+      # CPU interface wires (internal)
+      wire :cpu_addr, width: 16
+      wire :cpu_we
+      wire :cpu_dout, width: 8
+      wire :cpu_din, width: 8
+      wire :cpu_enable
+
+      # Interrupt signals (active low)
+      wire :nmi_n
+      wire :irq_n
+      wire :so_n
 
       # Connect timing generator
       port :clk_14m => [:timing, :clk_14m]
@@ -201,6 +210,27 @@ module RHDL
       port :speaker_select_latch => [:speaker_toggle, :toggle]
       port [:speaker_toggle, :speaker] => :speaker
 
+      # Connect CPU
+      port :q3 => [:cpu, :clk]
+      port :cpu_enable => [:cpu, :enable]
+      port :reset => [:cpu, :reset]
+      port :cpu_din => [:cpu, :di]
+      port :nmi_n => [:cpu, :nmi_n]
+      port :irq_n => [:cpu, :irq_n]
+      port :so_n => [:cpu, :so_n]
+
+      # CPU outputs
+      port [:cpu, :addr] => :cpu_addr
+      port [:cpu, :we] => :cpu_we
+      port [:cpu, :do_out] => :cpu_dout
+
+      # CPU debug outputs
+      port [:cpu, :debug_pc] => :pc_debug
+      port [:cpu, :debug_opcode] => :opcode_debug
+      port [:cpu, :debug_a] => :a_debug
+      port [:cpu, :debug_x] => :x_debug
+      port [:cpu, :debug_y] => :y_debug
+
       # Soft switches state
       sequential clock: :q3, reset: :reset, reset_values: {
         soft_switches: 0,
@@ -231,10 +261,13 @@ module RHDL
 
       # Combinational logic
       behavior do
-        # Clock outputs
-        clk_2m <= q3
-        pre_phase_zero <= pre_phi0
-        ld194 <= ld194_i
+        # CPU enable: not pause and not pre_phase_zero (matches reference)
+        cpu_enable <= ~pause & ~pre_phi0
+
+        # Tie off interrupt inputs (active low, so 1 = inactive)
+        nmi_n <= lit(1, width: 1)
+        irq_n <= lit(1, width: 1)
+        so_n <= lit(1, width: 1)
 
         # RAM address mux (CPU or video)
         ram_addr <= mux(phi0, cpu_addr, video_address)
@@ -248,6 +281,10 @@ module RHDL
         page2 <= soft_switches[2]
         hires_mode <= soft_switches[3]
         an <= soft_switches[7..4]
+
+        # Timing outputs
+        clk_2m <= q3
+        pre_phase_zero <= pre_phi0
 
         # Address decoding
         a_hi = cpu_addr[15..12]
@@ -330,13 +367,6 @@ module RHDL
 
         # CPU data output
         d <= cpu_dout
-
-        # Address output
-        addr <= cpu_addr
-
-        # Debug outputs
-        pc_debug_out <= cpu_pc
-        opcode_debug_out <= cpu_opcode
       end
 
       # Simulation helpers for ROM access
