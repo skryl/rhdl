@@ -14,6 +14,7 @@ require 'rhdl'
 require 'harness'
 
 # Apple II Terminal class for HDL simulation
+# Supports both HDL and netlist simulation modes
 class Apple2HDLTerminal
   SCREEN_ROWS = 24
   SCREEN_COLS = 40
@@ -42,7 +43,22 @@ class Apple2HDLTerminal
 
   def initialize(options = {})
     @options = options
-    @runner = RHDL::Apple2::Runner.new
+    @sim_type = options[:mode] || :hdl
+
+    # Create runner based on simulator type
+    @runner = case @sim_type
+              when :netlist
+                require 'apple2_netlist'
+                puts "Initializing netlist simulation mode..."
+                runner = RHDL::Apple2::NetlistRunner.new
+                unless runner.native?
+                  warn "Warning: Native Rust backend not available, using Ruby fallback"
+                end
+                runner
+              else  # :hdl (default)
+                RHDL::Apple2::Runner.new
+              end
+
     @running = false
     @last_screen = nil
     @cycles_per_frame = options[:speed] || 100  # HDL is slow, default to small value
@@ -194,8 +210,12 @@ class Apple2HDLTerminal
     trap('TERM') { @running = false }
     trap('WINCH') { update_terminal_size; print CLEAR_SCREEN }
 
-    puts "Starting Apple II HDL emulator..."
-    puts "WARNING: HDL mode is VERY slow (cycle-accurate simulation)"
+    mode_name = @sim_type == :netlist ? "Netlist (gate-level)" : "HDL (cycle-accurate)"
+    puts "Starting Apple II emulator in #{mode_name} mode..."
+    if @sim_type == :netlist
+      puts "Using native Rust backend: #{@runner.native?}"
+    end
+    puts "WARNING: Both modes are slow (for verification/testing)"
     puts "Press Ctrl+C to exit"
     sleep 1
 
@@ -397,7 +417,8 @@ class Apple2HDLTerminal
                      state[:sp], state[:p] || 0)
 
       # Line 2: Sim type / cycles / speed
-      line2 = format("Sim:HDL Cyc:%s %s %.1ffps Spd:%s",
+      line2 = format("Sim:%-7s Cyc:%s %s %.1ffps Spd:%s",
+                     @sim_type.to_s.upcase,
                      format_cycles(state[:cycles]),
                      format_hz(@current_hz), @fps,
                      format_number(@cycles_per_frame))
@@ -478,7 +499,8 @@ class Apple2HDLTerminal
                      state[:sp], state[:p] || 0)
 
       # Line 2: Sim type / cycles / speed
-      line2 = format("Sim:HDL Cyc:%s %s %.1ffps Spd:%s",
+      line2 = format("Sim:%-7s Cyc:%s %s %.1ffps Spd:%s",
+                     @sim_type.to_s.upcase,
                      format_cycles(state[:cycles]),
                      format_hz(@current_hz), @fps,
                      format_number(@cycles_per_frame))
@@ -676,7 +698,8 @@ options = {
   green: false,
   demo: false,
   hires: false,
-  hires_width: 80
+  hires_width: 80,
+  mode: :hdl  # Simulator mode: :hdl or :netlist
 }
 
 parser = OptionParser.new do |opts|
@@ -703,6 +726,10 @@ parser = OptionParser.new do |opts|
 
   opts.on("-g", "--green", "Green phosphor effect") do
     options[:green] = true
+  end
+
+  opts.on("-m", "--mode TYPE", [:hdl, :netlist], "Simulator mode: hdl (default), netlist") do |v|
+    options[:mode] = v
   end
 
   opts.on("-H", "--hires", "Enable hi-res graphics rendering (braille)") do
