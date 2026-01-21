@@ -920,7 +920,7 @@ end
 
 # Load Karateka memory dump if --karateka specified
 if options[:karateka]
-  karateka_bin = File.expand_path('../../../software/disks/karateka_mem.bin', __FILE__)
+  karateka_bin = File.expand_path('../../software/disks/karateka_mem.bin', __FILE__)
   unless File.exist?(karateka_bin)
     puts "Error: Karateka memory dump not found: #{karateka_bin}"
     puts "Run: rake cli:apple2:disk:memdump to generate it"
@@ -928,7 +928,7 @@ if options[:karateka]
   end
 
   # Karateka needs the Apple II ROM for ROM routines
-  rom_file = File.expand_path('../../../software/roms/appleiigo.rom', __FILE__)
+  rom_file = File.expand_path('../../software/roms/appleiigo.rom', __FILE__)
   unless File.exist?(rom_file)
     puts "Error: AppleIIGo ROM not found: #{rom_file}"
     puts "Download from: https://a2go.applearchives.com/roms/"
