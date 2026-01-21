@@ -77,6 +77,30 @@ RSpec.describe MOS6502::Apple2Speaker do
       expect(result).to be(true).or be(false)
     end
   end
+
+  describe '#active?' do
+    it 'returns false when no toggles' do
+      expect(speaker.active?).to be false
+    end
+
+    it 'returns true after toggles' do
+      speaker.start
+      10.times { speaker.toggle(0) }
+      # Force activity check
+      speaker.instance_variable_set(:@last_activity_check, Time.now - 1)
+      speaker.active?
+      expect(speaker.active?).to be true
+      speaker.stop
+    end
+  end
+
+  describe '#debug_info' do
+    it 'returns a hash with debug information' do
+      info = speaker.debug_info
+      expect(info).to be_a(Hash)
+      expect(info).to include(:backend, :enabled, :running, :toggle_count)
+    end
+  end
 end
 
 RSpec.describe MOS6502::Apple2SpeakerBeep do

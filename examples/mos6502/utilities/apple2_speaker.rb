@@ -18,7 +18,7 @@ module MOS6502
     # Maximum time between toggles before we consider it silence
     MAX_TOGGLE_INTERVAL = 0.1  # 100ms
 
-    attr_reader :enabled, :toggle_count, :audio_backend
+    attr_reader :enabled, :toggle_count, :audio_backend, :samples_written, :last_error
 
     def initialize
       @enabled = false  # Start disabled, enable explicitly
@@ -34,6 +34,10 @@ module MOS6502
       @audio_backend = nil
       @toggle_count = 0
       @samples_generated = 0
+      @samples_written = 0
+      @last_error = nil
+      @last_toggle_count = 0
+      @last_activity_check = Time.now
     end
 
     # Toggle the speaker (called when $C030 is accessed)
@@ -121,6 +125,32 @@ module MOS6502
       end
     end
 
+    # Check if speaker is actively being toggled (for debug display)
+    def active?
+      now = Time.now
+      if now - @last_activity_check > 0.1
+        @activity = @toggle_count > @last_toggle_count
+        @last_toggle_count = @toggle_count
+        @last_activity_check = now
+      end
+      @activity || false
+    end
+
+    # Get detailed status for debugging
+    def debug_info
+      {
+        backend: @audio_backend,
+        enabled: @enabled,
+        running: @running,
+        toggle_count: @toggle_count,
+        samples_generated: @samples_generated,
+        samples_written: @samples_written,
+        buffer_size: @sample_buffer.size,
+        last_error: @last_error,
+        pipe_open: !@audio_pipe.nil?
+      }
+    end
+
     # Check if audio system is available
     def self.available?
       find_available_backend != nil
@@ -154,18 +184,35 @@ module MOS6502
     private
 
     def find_audio_command
+      # Detect OS for platform-specific options
+      is_macos = RUBY_PLATFORM =~ /darwin/
+
       # Try sox play first (cross-platform, install with: brew install sox)
       if system('which play > /dev/null 2>&1')
-        cmd = ['play', '-q', '-t', 'raw', '-r', SAMPLE_RATE.to_s,
-               '-e', 'signed-integer', '-b', '16', '-c', '1',
-               '--endian', 'little', '-']
+        # sox play reads raw audio from stdin
+        # -t raw: input type is raw PCM
+        # -r: sample rate
+        # -b 16: 16-bit samples
+        # -c 1: mono
+        # -e signed: signed integer encoding
+        # -L: little-endian (or --endian little)
+        # -: read from stdin
+        # -d: output to default audio device
+        if is_macos
+          # macOS sox might need explicit output device
+          cmd = ['play', '-q', '-t', 'raw', '-r', SAMPLE_RATE.to_s,
+                 '-b', '16', '-c', '1', '-e', 'signed', '-L', '-']
+        else
+          cmd = ['play', '-q', '-t', 'raw', '-r', SAMPLE_RATE.to_s,
+                 '-b', '16', '-c', '1', '-e', 'signed', '-L', '-']
+        end
         return [cmd, 'sox']
       end
 
       # Try ffplay (ffmpeg - cross-platform, install with: brew install ffmpeg)
       if system('which ffplay > /dev/null 2>&1')
         cmd = ['ffplay', '-f', 's16le', '-ar', SAMPLE_RATE.to_s,
-               '-ac', '1', '-nodisp', '-autoexit', '-loglevel', 'quiet', '-']
+               '-ac', '1', '-nodisp', '-autoexit', '-loglevel', 'quiet', '-i', '-']
         return [cmd, 'ffplay']
       end
 
@@ -245,11 +292,15 @@ module MOS6502
         raw_data = samples.pack('s<*')
         @audio_pipe.write(raw_data)
         @audio_pipe.flush
+        @samples_written += samples.size
       rescue Errno::EPIPE, IOError => e
+        @last_error = "Pipe: #{e.message}"
         warn "Audio pipe error: #{e.message}" if ENV['DEBUG']
         # Restart the pipe
         stop_audio_pipe
         start_audio_pipe
+      rescue => e
+        @last_error = "Write: #{e.class}"
       end
     end
 
@@ -259,8 +310,11 @@ module MOS6502
       begin
         raw_data = samples.pack('s<*')
         @audio_pipe.write(raw_data)
-      rescue Errno::EPIPE, IOError
-        # Will be handled by audio thread
+        @samples_written += samples.size
+      rescue Errno::EPIPE, IOError => e
+        @last_error = "Pipe: #{e.message}"
+      rescue => e
+        @last_error = "Write: #{e.class}"
       end
     end
   end
