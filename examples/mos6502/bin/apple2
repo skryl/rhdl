@@ -191,6 +191,9 @@ class Apple2Terminal
     # Input tracking for debug
     @last_key = nil
     @last_key_time = nil
+
+    # Keyboard mode: :normal passes keys to emulator, :command handles runtime controls
+    @keyboard_mode = :normal
   end
 
   def update_terminal_size
@@ -384,14 +387,24 @@ class Apple2Terminal
 
     ascii = char.ord
 
-    # Handle special keys
+    # Handle special keys that work in all modes
     case ascii
     when 3 # Ctrl+C
       stop
       return
-    when 27 # ESC - check for arrow keys
+    when 27 # ESC - toggle command mode or check for arrow keys
       handle_escape_sequence
       return
+    end
+
+    # In command mode, handle runtime controls instead of passing to emulator
+    if @keyboard_mode == :command
+      handle_command_key(ascii)
+      return
+    end
+
+    # Normal mode: pass key to emulator
+    case ascii
     when 127, 8 # Backspace/Delete
       ascii = 0x08 # Apple II backspace
     when 10, 13 # Enter/Return
@@ -415,19 +428,50 @@ class Apple2Terminal
     # Try to read arrow key sequence
     begin
       seq = IO.console.read_nonblock(2)
-      case seq
-      when '[A' # Up arrow
-        @runner.inject_key(0x0B) # Ctrl+K (up)
-      when '[B' # Down arrow
-        @runner.inject_key(0x0A) # Ctrl+J (down)
-      when '[C' # Right arrow
-        @runner.inject_key(0x15) # Ctrl+U (right)
-      when '[D' # Left arrow
-        @runner.inject_key(0x08) # Ctrl+H (left/backspace)
+      if @keyboard_mode == :command
+        # In command mode, arrow keys control speed
+        case seq
+        when '[C' # Right arrow - increase speed
+          @cycles_per_frame += 1000
+        when '[D' # Left arrow - decrease speed
+          @cycles_per_frame = [@cycles_per_frame - 1000, 1000].max
+        end
+      else
+        # In normal mode, arrow keys go to emulator
+        case seq
+        when '[A' # Up arrow
+          @runner.inject_key(0x0B) # Ctrl+K (up)
+        when '[B' # Down arrow
+          @runner.inject_key(0x0A) # Ctrl+J (down)
+        when '[C' # Right arrow
+          @runner.inject_key(0x15) # Ctrl+U (right)
+        when '[D' # Left arrow
+          @runner.inject_key(0x08) # Ctrl+H (left/backspace)
+        end
       end
     rescue IO::WaitReadable, Errno::EAGAIN
-      # Just ESC key pressed
-      @runner.inject_key(0x1B)
+      # Just ESC key pressed - toggle command mode (only in debug mode)
+      if @debug
+        @keyboard_mode = @keyboard_mode == :normal ? :command : :normal
+      else
+        # In non-debug mode, pass ESC to emulator
+        @runner.inject_key(0x1B)
+      end
+    end
+  end
+
+  def handle_command_key(ascii)
+    case ascii
+    when 72, 104 # H or h - toggle hires mode
+      @hires_mode = !@hires_mode
+    when 65, 97 # A or a - toggle audio
+      if @audio_enabled
+        @runner.bus.stop_audio
+        @audio_enabled = false
+      else
+        @runner.bus.start_audio
+        @audio_enabled = true
+      end
     end
   end
 
@@ -490,15 +534,17 @@ class Apple2Terminal
                      state[:sp], state[:p])
 
       # Line 2: Sim type / cycles / speed / uptime
-      line2 = format("Sim:%-6s Cyc:%s %s %.1ffps Up:%s",
+      line2 = format("Sim:%-6s Cyc:%s %s %.1ffps Spd:%s",
                      sim_type, format_cycles(state[:cycles]),
                      format_hz(@current_hz), @fps,
-                     format_uptime(@start_time))
+                     format_number(@cycles_per_frame))
 
-      # Line 3: Disk IO / keyboard IO
-      line3 = format("Disk:T%02d %s | Key:%-3s",
+      # Line 3: Disk IO / keyboard IO / keyboard mode
+      kb_mode = @keyboard_mode == :command ? "CMD" : "NRM"
+      line3 = format("Disk:T%02d %s | Key:%-3s | KB:%s",
                      dc.track, dc.motor_on ? "ON " : "OFF",
-                     format_key(@last_key))
+                     format_key(@last_key),
+                     kb_mode)
 
       # Line 4: Audio status with toggle count and activity
       speaker = @runner.bus.speaker
@@ -593,16 +639,18 @@ class Apple2Terminal
                      state[:sp], state[:p])
 
       # Line 2: Sim type / cycles / speed / uptime
-      line2 = format("Sim:%-6s Cyc:%s %s %.1ffps Up:%s",
+      line2 = format("Sim:%-6s Cyc:%s %s %.1ffps Spd:%s",
                      sim_type, format_cycles(state[:cycles]),
                      format_hz(@current_hz), @fps,
-                     format_uptime(@start_time))
+                     format_number(@cycles_per_frame))
 
-      # Line 3: Disk / Key / video mode
-      line3 = format("Disk:T%02d %s|Key:%-3s|%s",
+      # Line 3: Disk / Key / video mode / keyboard mode
+      kb_mode = @keyboard_mode == :command ? "CMD" : "NRM"
+      line3 = format("Disk:T%02d %s|Key:%-3s|%s|KB:%s",
                      dc.track, dc.motor_on ? "ON " : "OFF",
                      format_key(@last_key),
-                     mode.to_s.upcase)
+                     mode.to_s.upcase,
+                     kb_mode)
 
       # Line 4: Audio status with toggle count and activity
       speaker = @runner.bus.speaker
