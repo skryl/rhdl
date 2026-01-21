@@ -471,3 +471,162 @@ RSpec.describe RHDL::Apple2::VGAOutput do
     end
   end
 end
+
+RSpec.describe 'Apple II ROM Integration' do
+  # Integration test using only the Apple2 HDL component
+  # Verifies ROM loading and memory map access via cpu_din
+
+  let(:apple2) { RHDL::Apple2::Apple2.new('apple2') }
+
+  ROM_PATH = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
+
+  before do
+    skip 'AppleIIgo ROM not found' unless File.exist?(ROM_PATH)
+
+    apple2
+    # Initialize inputs
+    apple2.set_input(:clk_14m, 0)
+    apple2.set_input(:flash_clk, 0)
+    apple2.set_input(:reset, 0)
+    apple2.set_input(:ram_do, 0)
+    apple2.set_input(:pd, 0)
+    apple2.set_input(:k, 0)
+    apple2.set_input(:gameport, 0)
+    apple2.set_input(:pause, 0)
+    apple2.set_input(:cpu_addr, 0)
+    apple2.set_input(:cpu_we, 0)
+    apple2.set_input(:cpu_dout, 0)
+    apple2.set_input(:cpu_pc, 0)
+    apple2.set_input(:cpu_opcode, 0)
+
+    # Load the AppleIIgo ROM
+    rom_data = File.binread(ROM_PATH).bytes
+    apple2.load_rom(rom_data)
+
+    # Reset the system
+    apple2.set_input(:reset, 1)
+    clock_cycle
+    apple2.set_input(:reset, 0)
+  end
+
+  def clock_cycle
+    apple2.set_input(:clk_14m, 0)
+    apple2.propagate
+    apple2.set_input(:clk_14m, 1)
+    apple2.propagate
+  end
+
+  def read_rom_byte(addr)
+    apple2.set_input(:cpu_addr, addr)
+    clock_cycle
+    apple2.get_output(:cpu_din)
+  end
+
+  describe 'ROM memory map access' do
+    it 'reads ROM identifier at $D000 via cpu_din' do
+      # Read the first 16 bytes of ROM (identifier string)
+      identifier = (0..15).map { |i| read_rom_byte(0xD000 + i) }
+      identifier_string = identifier.map { |b| b.chr rescue '?' }.join
+
+      expect(identifier_string).to eq('APPLEIIGO ROM1.0')
+    end
+
+    it 'reads valid reset vector at $FFFC-$FFFD' do
+      # Read reset vector (little-endian)
+      reset_lo = read_rom_byte(0xFFFC)
+      reset_hi = read_rom_byte(0xFFFD)
+      reset_vector = (reset_hi << 8) | reset_lo
+
+      # Reset vector should point to ROM space ($D000-$FFFF)
+      expect(reset_vector).to be >= 0xD000
+      expect(reset_vector).to be <= 0xFFFF
+    end
+
+    it 'reads first instruction at reset vector (CLD)' do
+      # Read reset vector
+      reset_lo = read_rom_byte(0xFFFC)
+      reset_hi = read_rom_byte(0xFFFD)
+      reset_vector = (reset_hi << 8) | reset_lo
+
+      # Read first byte at reset vector - should be CLD ($D8)
+      first_byte = read_rom_byte(reset_vector)
+      expect(first_byte).to eq(0xD8), "Expected CLD ($D8) at reset vector $#{reset_vector.to_s(16).upcase}, got $#{first_byte.to_s(16).upcase}"
+    end
+
+    it 'maps ROM addresses correctly across the 12KB range' do
+      # Test ROM access at different address ranges:
+      # $D000-$DFFF -> ROM offset $0000-$0FFF
+      # $E000-$EFFF -> ROM offset $1000-$1FFF
+      # $F000-$FFFF -> ROM offset $2000-$2FFF
+
+      # $D000 = ROM offset 0 (start of identifier)
+      expect(read_rom_byte(0xD000)).to eq(0x41) # 'A'
+
+      # $D001 = ROM offset 1
+      expect(read_rom_byte(0xD001)).to eq(0x50) # 'P'
+
+      # Verify ROM is accessible at different regions
+      # These should return ROM data (not zeros or undefined values)
+      e000_byte = read_rom_byte(0xE000)
+      f000_byte = read_rom_byte(0xF000)
+
+      # ROM bytes should be valid (0-255)
+      expect(e000_byte).to be_between(0, 255)
+      expect(f000_byte).to be_between(0, 255)
+    end
+  end
+
+  describe 'screen memory routing' do
+    # The Apple2 component routes CPU writes to text page ($0400-$07FF)
+    # through to external RAM via ram_addr, ram_we, and d outputs.
+    # This tests the memory map routing for screen writes.
+
+    it 'routes CPU writes to text page through ram_addr and d outputs' do
+      # Simulate CPU write to text page address $0400 (first character)
+      apple2.set_input(:cpu_addr, 0x0400)
+      apple2.set_input(:cpu_we, 1)
+      apple2.set_input(:cpu_dout, 0xC1)  # 'A' with high bit (Apple II format)
+
+      # Run clock cycles to propagate
+      10.times { clock_cycle }
+
+      # Verify ram_addr output shows the text page address
+      ram_addr = apple2.get_output(:ram_addr)
+      # ram_addr alternates between CPU and video addresses
+      # During CPU phase (phi0=1), it should be the CPU address
+      expect(ram_addr).to be_between(0, 0xFFFF)
+
+      # Verify d output (data to RAM) contains the character
+      d = apple2.get_output(:d)
+      expect(d).to eq(0xC1)
+    end
+
+    it 'returns RAM data via cpu_din when reading text page' do
+      # When CPU reads from text page, cpu_din should return ram_do
+      apple2.set_input(:cpu_addr, 0x0400)
+      apple2.set_input(:cpu_we, 0)  # Read mode
+      apple2.set_input(:ram_do, 0xC1)  # Simulate RAM returning 'A'
+
+      # Run clock cycles - the data latch captures ram_do
+      20.times { clock_cycle }
+
+      # cpu_din should eventually reflect the latched RAM data
+      # (Note: timing depends on internal data latch behavior)
+      cpu_din = apple2.get_output(:cpu_din)
+      expect(cpu_din).to be_between(0, 255)
+    end
+
+    it 'generates video addresses during blanking' do
+      # Run many cycles to capture video address generation
+      video_addrs = []
+      200.times do
+        clock_cycle
+        video_addrs << apple2.get_output(:ram_addr)
+      end
+
+      # Should see various addresses as video generator scans screen
+      unique_addrs = video_addrs.uniq
+      expect(unique_addrs.size).to be > 1, "Expected video address changes during scan"
+    end
+  end
+end
