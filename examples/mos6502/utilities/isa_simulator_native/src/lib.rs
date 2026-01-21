@@ -5,6 +5,12 @@
 //! - Internal 64KB memory for fast CPU access
 //! - Optional I/O handler for memory-mapped I/O ($C000-$CFFF on Apple II)
 //! - External devices can read/write internal memory via peek/poke methods
+//!
+//! Performance optimizations:
+//! - Keyboard and speaker state cached in Rust to avoid FFI calls
+//! - CPU state copied to local variables in tight loop
+//! - I/O region $C100-$CFFF served from internal memory (ROM)
+//! - Only disk controller ($C0E0-$C0EF) requires FFI callbacks
 
 use magnus::{
     method, prelude::*, value::Opaque, Error, RArray, RHash, Ruby, TryConvert, Value,
@@ -28,6 +34,14 @@ const IRQ_VECTOR: u16 = 0xFFFE;
 // Apple II I/O region
 const IO_START: u16 = 0xC000;
 const IO_END: u16 = 0xCFFF;
+
+// Apple II I/O page (actual soft switches)
+const IO_PAGE_START: u16 = 0xC000;
+const IO_PAGE_END: u16 = 0xC0FF;
+
+// Disk II controller range (slot 6)
+const DISK_IO_START: u16 = 0xC0E0;
+const DISK_IO_END: u16 = 0xC0EF;
 
 /// MOS 6502 CPU state (core without memory)
 pub struct Cpu6502Core {
@@ -183,18 +197,51 @@ impl Cpu6502Core {
 // Ruby bindings wrapper with hybrid memory model
 // ============================================================================
 
+/// Apple II I/O state (cached in Rust for performance)
+struct AppleIIState {
+    // Keyboard state
+    key_value: u8,      // Last key pressed (ASCII, without high bit)
+    key_ready: bool,    // Key available to read
+
+    // Speaker state
+    speaker_toggles: u64,  // Count of speaker toggles
+
+    // Video soft switches
+    video_text: bool,   // TEXT/GRAPHICS mode
+    video_mixed: bool,  // MIXED mode
+    video_page2: bool,  // PAGE2 select
+    video_hires: bool,  // HIRES mode
+}
+
+impl Default for AppleIIState {
+    fn default() -> Self {
+        Self {
+            key_value: 0,
+            key_ready: false,
+            speaker_toggles: 0,
+            video_text: true,
+            video_mixed: false,
+            video_page2: false,
+            video_hires: false,
+        }
+    }
+}
+
 /// Ruby-wrapped CPU simulator with internal memory and optional I/O handler
 ///
 /// Memory access:
 /// - RAM/ROM ($0000-$BFFF, $D000-$FFFF): Fast internal memory
-/// - I/O region ($C000-$CFFF): Calls Ruby I/O handler if provided
+/// - I/O page ($C000-$C0FF): Handled in Rust except disk controller
+/// - Expansion ROM ($C100-$CFFF): Fast internal memory
+/// - Disk controller ($C0E0-$C0EF): Calls Ruby I/O handler
 ///
 /// External devices can access internal memory via peek/poke methods.
 #[magnus::wrap(class = "MOS6502::ISASimulatorNative")]
 struct RubyCpu {
     cpu: RefCell<Cpu6502Core>,
     memory: RefCell<Vec<u8>>,           // Internal 64KB memory
-    io_handler: RefCell<Option<Opaque<Value>>>,  // Optional I/O handler for $C000-$CFFF
+    io_handler: RefCell<Option<Opaque<Value>>>,  // Optional I/O handler for disk controller
+    io_state: RefCell<AppleIIState>,    // Cached Apple II I/O state
 }
 
 impl Default for RubyCpu {
@@ -203,44 +250,144 @@ impl Default for RubyCpu {
             cpu: RefCell::new(Cpu6502Core::new()),
             memory: RefCell::new(vec![0; 0x10000]),
             io_handler: RefCell::new(None),
+            io_state: RefCell::new(AppleIIState::default()),
         }
     }
 }
 
 impl RubyCpu {
-    // Memory operations - internal memory with I/O handler for $C000-$CFFF
+    // Memory operations - optimized I/O handling
+    // Most I/O is handled directly in Rust, only disk controller calls Ruby
     #[inline]
     fn read(&self, addr: u16) -> u8 {
-        // Check if address is in I/O region and we have a handler
-        if addr >= IO_START && addr <= IO_END {
-            let handler = self.io_handler.borrow();
-            if let Some(ref opaque) = *handler {
-                let ruby = unsafe { Ruby::get_unchecked() };
-                let io: Value = ruby.get_inner(*opaque);
-                match io.funcall::<_, _, i64>("io_read", (addr as i64,)) {
-                    Ok(v) => return v as u8,
-                    Err(_) => {} // Fall through to internal memory
-                }
-            }
+        // Fast path: addresses outside I/O page use internal memory
+        if addr < IO_PAGE_START || addr > IO_PAGE_END {
+            return self.memory.borrow()[addr as usize];
         }
-        // Fast path: internal memory
-        self.memory.borrow()[addr as usize]
+
+        // I/O page ($C000-$C0FF) - handle in Rust except disk controller
+        self.handle_io_read(addr)
     }
 
     #[inline]
     fn write(&self, addr: u16, value: u8) {
-        // Check if address is in I/O region and we have a handler
-        if addr >= IO_START && addr <= IO_END {
-            let handler = self.io_handler.borrow();
-            if let Some(ref opaque) = *handler {
-                let ruby = unsafe { Ruby::get_unchecked() };
-                let io: Value = ruby.get_inner(*opaque);
-                let _ = io.funcall::<_, _, Value>("io_write", (addr as i64, value as i64));
-                return;
+        // Fast path: addresses outside I/O page use internal memory
+        if addr < IO_PAGE_START || addr > IO_PAGE_END {
+            self.memory.borrow_mut()[addr as usize] = value;
+            return;
+        }
+
+        // I/O page ($C000-$C0FF) - handle in Rust except disk controller
+        self.handle_io_write(addr, value);
+    }
+
+    // Handle I/O page reads ($C000-$C0FF)
+    #[inline]
+    fn handle_io_read(&self, addr: u16) -> u8 {
+        // Disk controller - must call Ruby
+        if addr >= DISK_IO_START && addr <= DISK_IO_END {
+            return self.call_ruby_io_read(addr);
+        }
+
+        let io = self.io_state.borrow();
+        match addr {
+            // Keyboard data ($C000)
+            0xC000 => {
+                if io.key_ready {
+                    io.key_value | 0x80
+                } else {
+                    0x00
+                }
+            }
+            // Keyboard strobe clear ($C010)
+            0xC010 => {
+                drop(io);
+                self.io_state.borrow_mut().key_ready = false;
+                0x00
+            }
+            // Speaker toggle ($C030)
+            0xC030 => {
+                drop(io);
+                self.io_state.borrow_mut().speaker_toggles += 1;
+                0x00
+            }
+            // Video soft switches (reading also sets them)
+            0xC050 => { drop(io); self.io_state.borrow_mut().video_text = false; 0x00 }
+            0xC051 => { drop(io); self.io_state.borrow_mut().video_text = true; 0x00 }
+            0xC052 => { drop(io); self.io_state.borrow_mut().video_mixed = false; 0x00 }
+            0xC053 => { drop(io); self.io_state.borrow_mut().video_mixed = true; 0x00 }
+            0xC054 => { drop(io); self.io_state.borrow_mut().video_page2 = false; 0x00 }
+            0xC055 => { drop(io); self.io_state.borrow_mut().video_page2 = true; 0x00 }
+            0xC056 => { drop(io); self.io_state.borrow_mut().video_hires = false; 0x00 }
+            0xC057 => { drop(io); self.io_state.borrow_mut().video_hires = true; 0x00 }
+            // Other I/O addresses return 0 or call Ruby handler
+            _ => {
+                drop(io);
+                // Check if we have a handler for unknown I/O
+                self.call_ruby_io_read(addr)
             }
         }
-        // Fast path: internal memory
-        self.memory.borrow_mut()[addr as usize] = value;
+    }
+
+    // Handle I/O page writes ($C000-$C0FF)
+    #[inline]
+    fn handle_io_write(&self, addr: u16, value: u8) {
+        // Disk controller - must call Ruby
+        if addr >= DISK_IO_START && addr <= DISK_IO_END {
+            self.call_ruby_io_write(addr, value);
+            return;
+        }
+
+        match addr {
+            // Keyboard strobe ($C010)
+            0xC010 => {
+                self.io_state.borrow_mut().key_ready = false;
+            }
+            // Speaker toggle ($C030)
+            0xC030 => {
+                self.io_state.borrow_mut().speaker_toggles += 1;
+            }
+            // Video soft switches
+            0xC050 => { self.io_state.borrow_mut().video_text = false; }
+            0xC051 => { self.io_state.borrow_mut().video_text = true; }
+            0xC052 => { self.io_state.borrow_mut().video_mixed = false; }
+            0xC053 => { self.io_state.borrow_mut().video_mixed = true; }
+            0xC054 => { self.io_state.borrow_mut().video_page2 = false; }
+            0xC055 => { self.io_state.borrow_mut().video_page2 = true; }
+            0xC056 => { self.io_state.borrow_mut().video_hires = false; }
+            0xC057 => { self.io_state.borrow_mut().video_hires = true; }
+            // Other writes may need Ruby handler
+            _ => {
+                self.call_ruby_io_write(addr, value);
+            }
+        }
+    }
+
+    // Call Ruby I/O handler for disk access
+    #[inline]
+    fn call_ruby_io_read(&self, addr: u16) -> u8 {
+        let handler = self.io_handler.borrow();
+        if let Some(ref opaque) = *handler {
+            let ruby = unsafe { Ruby::get_unchecked() };
+            let io: Value = ruby.get_inner(*opaque);
+            match io.funcall::<_, _, i64>("io_read", (addr as i64,)) {
+                Ok(v) => return v as u8,
+                Err(_) => {}
+            }
+        }
+        // Fall through to internal memory for expansion ROM
+        self.memory.borrow()[addr as usize]
+    }
+
+    // Call Ruby I/O handler for disk access
+    #[inline]
+    fn call_ruby_io_write(&self, addr: u16, value: u8) {
+        let handler = self.io_handler.borrow();
+        if let Some(ref opaque) = *handler {
+            let ruby = unsafe { Ruby::get_unchecked() };
+            let io: Value = ruby.get_inner(*opaque);
+            let _ = io.funcall::<_, _, Value>("io_write", (addr as i64, value as i64));
+        }
     }
 
     fn read_word(&self, addr: u16) -> u16 {
@@ -822,6 +969,53 @@ impl RubyCpu {
     fn rb_has_io_handler(&self) -> bool {
         self.io_handler.borrow().is_some()
     }
+
+    // Apple II I/O state accessors (for integration with Ruby bus)
+
+    // Inject a key press (called from Ruby when key is pressed)
+    fn rb_inject_key(&self, ascii: u8) {
+        let mut io = self.io_state.borrow_mut();
+        io.key_value = ascii & 0x7F;
+        io.key_ready = true;
+    }
+
+    // Check if key is ready
+    fn rb_key_ready(&self) -> bool {
+        self.io_state.borrow().key_ready
+    }
+
+    // Get speaker toggle count and reset
+    fn rb_speaker_toggles(&self) -> u64 {
+        self.io_state.borrow().speaker_toggles
+    }
+
+    // Reset speaker toggle count
+    fn rb_reset_speaker_toggles(&self) {
+        self.io_state.borrow_mut().speaker_toggles = 0;
+    }
+
+    // Get video state as hash
+    fn rb_video_state(&self) -> Result<RHash, Error> {
+        let ruby = unsafe { Ruby::get_unchecked() };
+        let hash = ruby.hash_new();
+        let io = self.io_state.borrow();
+
+        hash.aset(ruby.sym_new("text"), io.video_text)?;
+        hash.aset(ruby.sym_new("mixed"), io.video_mixed)?;
+        hash.aset(ruby.sym_new("page2"), io.video_page2)?;
+        hash.aset(ruby.sym_new("hires"), io.video_hires)?;
+
+        Ok(hash)
+    }
+
+    // Set video state (for synchronization from Ruby)
+    fn rb_set_video_state(&self, text: bool, mixed: bool, page2: bool, hires: bool) {
+        let mut io = self.io_state.borrow_mut();
+        io.video_text = text;
+        io.video_mixed = mixed;
+        io.video_page2 = page2;
+        io.video_hires = hires;
+    }
 }
 
 #[magnus::init]
@@ -882,6 +1076,14 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("state", method!(RubyCpu::rb_state, 0))?;
     class.define_method("native?", method!(RubyCpu::rb_native, 0))?;
     class.define_method("has_io_handler?", method!(RubyCpu::rb_has_io_handler, 0))?;
+
+    // Apple II I/O state (for fast keyboard/video/speaker handling)
+    class.define_method("inject_key", method!(RubyCpu::rb_inject_key, 1))?;
+    class.define_method("key_ready?", method!(RubyCpu::rb_key_ready, 0))?;
+    class.define_method("speaker_toggles", method!(RubyCpu::rb_speaker_toggles, 0))?;
+    class.define_method("reset_speaker_toggles", method!(RubyCpu::rb_reset_speaker_toggles, 0))?;
+    class.define_method("video_state", method!(RubyCpu::rb_video_state, 0))?;
+    class.define_method("set_video_state", method!(RubyCpu::rb_set_video_state, 4))?;
 
     // Constants
     module.const_set("NMI_VECTOR", NMI_VECTOR as i64)?;
