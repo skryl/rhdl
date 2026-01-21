@@ -38,10 +38,6 @@ module RHDL
         @apple2_dir ||= File.join(project_root, 'examples/mos6502')
       end
 
-      def self.tui_ink_dir
-        @tui_ink_dir ||= File.join(project_root, 'tui-ink')
-      end
-
       # Diagram configuration
       DIAGRAM_MODES = %w[component hierarchical gate].freeze
       CATEGORIES = %w[gates sequential arithmetic combinational memory cpu].freeze
