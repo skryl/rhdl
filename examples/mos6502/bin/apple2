@@ -208,10 +208,11 @@ class Apple2Terminal
     @pad_left = [(@term_cols - DISPLAY_WIDTH) / 2, 0].max
 
     # Calculate padding for hires display
-    # Hires output height is proportional: (192/4) * (@hires_width / (280/2)) = 48 * @hires_width / 140
-    # Debug mode adds bordered debug window: 1 padding + 6 lines (border + 4 content + border)
+    # Hires output is always 48 lines tall (192 pixels / 4 dots per braille char)
+    # Width can vary, but height is fixed
+    # Debug mode adds bordered debug window: 2 gap + 6 lines (border + 4 content + border)
     # Non-debug adds 1 for disk loading indicator
-    hires_content_height = (HIRES_HEIGHT * @hires_width / HIRES_WIDTH)
+    hires_content_height = HIRES_HEIGHT  # Always 48 braille chars tall
     debug_panel_height = @debug ? 8 : 1  # 6 lines debug box + 2 gap, or 1 line for disk status
     total_content_height = hires_content_height + debug_panel_height
     hires_display_width = @hires_width
