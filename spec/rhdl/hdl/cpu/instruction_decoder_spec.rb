@@ -178,7 +178,7 @@ RSpec.describe RHDL::HDL::CPU::InstructionDecoder do
     end
 
     describe 'simulator comparison' do
-      it 'all simulators produce matching results', pending: 'InstructionDecoder has gate-level synthesis mismatches' do
+      it 'all simulators produce matching results' do
         test_cases = [
           { instruction: 0x00, zero_flag: 0 },  # NOP
           { instruction: 0x15, zero_flag: 0 },  # LDA
