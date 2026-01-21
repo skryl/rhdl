@@ -441,11 +441,13 @@ class Apple2Terminal
         seq = IO.console.read_nonblock(2)
         if @keyboard_mode == :command
           # In command mode, arrow keys control speed
+          # HDL mode uses smaller increments since it's much slower
+          speed_delta = @sim_type == :hdl ? 10 : 1000
           case seq
           when '[C' # Right arrow - increase speed
-            @cycles_per_frame += 1000
+            @cycles_per_frame += speed_delta
           when '[D' # Left arrow - decrease speed
-            @cycles_per_frame = [@cycles_per_frame - 1000, 1000].max
+            @cycles_per_frame = [@cycles_per_frame - speed_delta, speed_delta].max
           end
         else
           # In normal mode, arrow keys go to emulator
