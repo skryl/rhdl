@@ -13,7 +13,6 @@ module RHDL
   module Apple2
     class RAM < Component
       include RHDL::DSL::Memory
-      include RHDL::DSL::Behavior
 
       # Parameters
       parameter :addr_width, default: 16
@@ -28,24 +27,16 @@ module RHDL
       input :din, width: :data_width
       output :dout, width: :data_width
 
-      # Internal wire for combined enable
-      wire :write_enable
-
       # Define memory array
       memory :mem, depth: :depth, width: :data_width
 
       # Synchronous write on rising edge when cs and we are high
-      # Note: Using intermediate signal for combined enable since DSL doesn't support lambdas
-      sync_write :mem, clock: :clk, enable: :write_enable, addr: :addr, data: :din
+      # Using expression-based enable: no intermediate wire needed
+      sync_write :mem, clock: :clk, enable: [:cs, :&, :we], addr: :addr, data: :din
 
       # Asynchronous read (combinational) - suitable for distributed RAM
       # For BRAM inference, use: sync_read :dout, from: :mem, clock: :clk, addr: :addr, enable: :cs
       async_read :dout, from: :mem, addr: :addr, enable: :cs
-
-      # Combinational logic to compute write_enable
-      behavior do
-        write_enable <= cs & we
-      end
 
       # Direct memory access for initialization/debugging
       def read_mem(addr)
@@ -70,9 +61,9 @@ module RHDL
     end
 
     # Dual-port RAM variant for video memory access
+    # Uses multi-port memory DSL with expression-based enables
     class DualPortRAM < Component
       include RHDL::DSL::Memory
-      include RHDL::DSL::Behavior
 
       parameter :addr_width, default: 16
       parameter :data_width, default: 8
@@ -92,24 +83,16 @@ module RHDL
       input :addr_b, width: :addr_width
       output :dout_b, width: :data_width
 
-      # Internal wire for combined enable
-      wire :write_enable_a
+      # Define memory array with multiple ports using block syntax
+      memory :mem, depth: :depth, width: :data_width do |m|
+        # Port A: write with expression-based enable (cs_a & we_a)
+        m.write_port clock: :clk_a, enable: [:cs_a, :&, :we_a], addr: :addr_a, data: :din_a
 
-      # Define memory array
-      memory :mem, depth: :depth, width: :data_width
+        # Port A: async read
+        m.async_read_port addr: :addr_a, output: :dout_a, enable: :cs_a
 
-      # Port A: synchronous write
-      sync_write :mem, clock: :clk_a, enable: :write_enable_a, addr: :addr_a, data: :din_a
-
-      # Port A: asynchronous read
-      async_read :dout_a, from: :mem, addr: :addr_a, enable: :cs_a
-
-      # Port B: asynchronous read only
-      async_read :dout_b, from: :mem, addr: :addr_b, enable: :cs_b
-
-      # Combinational logic to compute write_enable
-      behavior do
-        write_enable_a <= cs_a & we_a
+        # Port B: async read only
+        m.async_read_port addr: :addr_b, output: :dout_b, enable: :cs_b
       end
 
       # Direct memory access
