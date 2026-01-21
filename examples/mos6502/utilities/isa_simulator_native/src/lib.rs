@@ -1016,6 +1016,111 @@ impl RubyCpu {
         io.video_page2 = page2;
         io.video_hires = hires;
     }
+
+    // Fast hires rendering to braille characters
+    // chars_wide: target width in braille chars (default 140 for 80-column terminal)
+    // invert: if true, invert pixels (white on black)
+    fn rb_render_hires_braille(&self, chars_wide: u32, invert: bool) -> String {
+        const HIRES_WIDTH: u32 = 280;
+        const HIRES_HEIGHT: u32 = 192;
+        const HIRES_BYTES_PER_LINE: u32 = 40;
+
+        let mem = self.memory.borrow();
+        let io = self.io_state.borrow();
+
+        // Determine hires page base address
+        let base: u16 = if io.video_page2 { 0x4000 } else { 0x2000 };
+
+        // Braille characters are 2 dots wide × 4 dots tall
+        let chars_tall = (HIRES_HEIGHT + 3) / 4; // ceil division
+
+        // Scale factors (fixed point for speed: multiply by 65536)
+        let x_scale_fp = ((HIRES_WIDTH as u64) << 16) / ((chars_wide * 2) as u64);
+        let y_scale_fp = ((HIRES_HEIGHT as u64) << 16) / ((chars_tall * 4) as u64);
+
+        // Braille dot bit positions (Unicode mapping)
+        // Dot 1 (0x01) Dot 4 (0x08)
+        // Dot 2 (0x02) Dot 5 (0x10)
+        // Dot 3 (0x04) Dot 6 (0x20)
+        // Dot 7 (0x40) Dot 8 (0x80)
+        const DOT_MAP: [[u8; 2]; 4] = [
+            [0x01, 0x08], // row 0
+            [0x02, 0x10], // row 1
+            [0x04, 0x20], // row 2
+            [0x40, 0x80], // row 3
+        ];
+
+        // Pre-compute line addresses for all 192 rows
+        let mut line_addrs: [u16; 192] = [0; 192];
+        for row in 0..192 {
+            let section = row / 64;
+            let row_in_section = row % 64;
+            let group = row_in_section / 8;
+            let line_in_group = row_in_section % 8;
+            line_addrs[row] = base + (line_in_group as u16 * 0x400)
+                + (group as u16 * 0x80)
+                + (section as u16 * 0x28);
+        }
+
+        // Pre-compute which bit to extract for each x coordinate (0-279)
+        // Each byte contains 7 pixels (bit 7 is palette select, bits 0-6 are pixels)
+        let mut x_to_byte_bit: [(u16, u8); 280] = [(0, 0); 280];
+        for x in 0..280 {
+            let byte_offset = x / 7;
+            let bit = x % 7;
+            x_to_byte_bit[x] = (byte_offset as u16, bit as u8);
+        }
+
+        // Estimate output size: chars_tall lines, each with chars_wide chars + newline
+        // Each braille char is 3 bytes UTF-8
+        let estimated_size = (chars_tall as usize) * ((chars_wide as usize) * 3 + 1);
+        let mut result = String::with_capacity(estimated_size);
+
+        for char_y in 0..chars_tall {
+            for char_x in 0..chars_wide {
+                let mut pattern: u8 = 0;
+
+                // Sample 2x4 grid for this braille character
+                for dy in 0..4u32 {
+                    for dx in 0..2u32 {
+                        // Fixed-point pixel coordinates
+                        let px_fp = ((char_x * 2 + dx) as u64) * x_scale_fp;
+                        let py_fp = ((char_y * 4 + dy) as u64) * y_scale_fp;
+
+                        let px = (px_fp >> 16) as usize;
+                        let py = (py_fp >> 16) as usize;
+
+                        // Clamp to valid range
+                        let px = px.min(HIRES_WIDTH as usize - 1);
+                        let py = py.min(HIRES_HEIGHT as usize - 1);
+
+                        // Get line address and byte/bit position
+                        let line_addr = line_addrs[py];
+                        let (byte_offset, bit) = x_to_byte_bit[px];
+
+                        // Read byte from memory and extract pixel
+                        let byte = mem[(line_addr + byte_offset) as usize];
+                        let pixel = (byte >> bit) & 1;
+
+                        // Apply inversion and set dot
+                        let pixel = if invert { 1 - pixel } else { pixel };
+                        if pixel == 1 {
+                            pattern |= DOT_MAP[dy as usize][dx as usize];
+                        }
+                    }
+                }
+
+                // Unicode braille starts at U+2800
+                let braille_char = char::from_u32(0x2800 + pattern as u32).unwrap_or(' ');
+                result.push(braille_char);
+            }
+            if char_y < chars_tall - 1 {
+                result.push('\n');
+            }
+        }
+
+        result
+    }
 }
 
 #[magnus::init]
@@ -1084,6 +1189,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("reset_speaker_toggles", method!(RubyCpu::rb_reset_speaker_toggles, 0))?;
     class.define_method("video_state", method!(RubyCpu::rb_video_state, 0))?;
     class.define_method("set_video_state", method!(RubyCpu::rb_set_video_state, 4))?;
+    class.define_method("render_hires_braille", method!(RubyCpu::rb_render_hires_braille, 2))?;
 
     // Constants
     module.const_set("NMI_VECTOR", NMI_VECTOR as i64)?;

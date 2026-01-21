@@ -161,7 +161,7 @@ class Apple2Terminal
 
     @running = false
     @last_screen = nil
-    @cycles_per_frame = options[:speed] || 10_000
+    @cycles_per_frame = options[:speed] || 17_030  # ~1.022 MHz at 60fps
     @debug = options[:debug] || false
     @green_screen = options[:green] || false
     @hires_mode = options[:hires] || false
@@ -332,6 +332,8 @@ class Apple2Terminal
         print CLEAR_SCREEN
       end
 
+      frame_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
       # Check for keyboard input (non-blocking)
       handle_keyboard_input
 
@@ -358,8 +360,10 @@ class Apple2Terminal
       @frame_count += 1
       @fps_frame_count += 1
 
-      # Small delay to prevent CPU spinning
-      sleep 0.016 # ~60fps
+      # Dynamic frame timing - sleep only if frame was faster than 16.67ms (60fps)
+      frame_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - frame_start
+      sleep_time = 0.01667 - frame_elapsed
+      sleep(sleep_time) if sleep_time > 0
     end
 
     if @runner.halted?
@@ -452,7 +456,12 @@ class Apple2Terminal
     end
 
     # Render hi-res using braille characters
-    hires_output = @runner.bus.render_hires_braille(chars_wide: @hires_width, invert: true)
+    # Use fast Rust rendering when available (native mode)
+    hires_output = if @runner.native? && @runner.cpu.respond_to?(:render_hires_braille)
+                     @runner.cpu.render_hires_braille(@hires_width, true)
+                   else
+                     @runner.bus.render_hires_braille(chars_wide: @hires_width, invert: true)
+                   end
     hires_lines = hires_output.split("\n")
 
     # Render each line of hires output with proper centering
@@ -869,7 +878,7 @@ end
 
 # Parse command line options
 options = {
-  speed: 10_000,
+  speed: 17_030,  # ~1.022 MHz at 60fps (Apple II target: 1.023 MHz)
   debug: false,
   green: false,
   demo: false,
@@ -898,7 +907,7 @@ parser = OptionParser.new do |opts|
     options[:rom_addr] = v.to_i(16)
   end
 
-  opts.on("-s", "--speed CYCLES", Integer, "Cycles per frame (default: 10000)") do |v|
+  opts.on("-s", "--speed CYCLES", Integer, "Cycles per frame (default: 17030)") do |v|
     options[:speed] = v
   end
 
