@@ -458,6 +458,8 @@ module RHDL
             reset: @_sequential_block.reset,
             reset_values: @_sequential_block.reset_values
           )
+          # Set component reference for memory access in mem_read_expr
+          context.component = component
           outputs = context.evaluate_for_simulation(input_values, &@_sequential_block.block)
 
           # Store outputs in component's internal state
