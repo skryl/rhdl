@@ -7,6 +7,7 @@
 # this approach eliminates all interpretation overhead.
 
 require 'json'
+require_relative 'firrtl_interpreter'  # For IRToJson module
 
 module RHDL
   module Codegen
