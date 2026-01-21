@@ -201,18 +201,18 @@ class Apple2Terminal
     end
 
     # Calculate padding to center the text display
-    # Debug mode adds bordered debug window: 1 padding + 5 lines (border + 3 content + border)
+    # Debug mode adds bordered debug window: 1 padding + 6 lines (border + 4 content + border)
     # Non-debug adds 1 for disk loading indicator
-    display_height = @debug ? DISPLAY_HEIGHT + 6 : DISPLAY_HEIGHT
+    display_height = @debug ? DISPLAY_HEIGHT + 7 : DISPLAY_HEIGHT
     @pad_top = [(@term_rows - display_height) / 2, 0].max
     @pad_left = [(@term_cols - DISPLAY_WIDTH) / 2, 0].max
 
     # Calculate padding for hires display
     # Hires output height is proportional: (192/4) * (@hires_width / (280/2)) = 48 * @hires_width / 140
-    # Debug mode adds bordered debug window: 1 padding + 5 lines (border + 3 content + border)
+    # Debug mode adds bordered debug window: 1 padding + 6 lines (border + 4 content + border)
     # Non-debug adds 1 for disk loading indicator
     hires_content_height = (HIRES_HEIGHT * @hires_width / HIRES_WIDTH)
-    debug_panel_height = @debug ? 7 : 1  # 5 lines debug box + 2 gap, or 1 line for disk status
+    debug_panel_height = @debug ? 8 : 1  # 6 lines debug box + 2 gap, or 1 line for disk status
     total_content_height = hires_content_height + debug_panel_height
     hires_display_width = @hires_width
 
@@ -479,19 +479,27 @@ class Apple2Terminal
                      format_hz(@current_hz), @fps,
                      format_uptime(@start_time))
 
-      # Line 3: Disk IO / keyboard IO / Audio
+      # Line 3: Disk IO / keyboard IO
+      line3 = format("Disk:T%02d %s | Key:%-3s",
+                     dc.track, dc.motor_on ? "ON " : "OFF",
+                     format_key(@last_key))
+
+      # Line 4: Audio status with toggle count and activity
       speaker = @runner.bus.speaker
       audio_status = speaker.status
-      line3 = format("Disk:T%02d %s | Key:%-3s | Audio:%s",
-                     dc.track, dc.motor_on ? "ON " : "OFF",
-                     format_key(@last_key), audio_status)
+      activity = speaker.active? ? "*" : " "
+      toggle_count = format_number(speaker.toggle_count)
+      line4 = format("Audio:%s%s Tgl:%s Smp:%s",
+                     audio_status, activity, toggle_count,
+                     format_number(speaker.samples_written))
 
       # Pad/truncate lines to fit within border
       line1 = line1.ljust(debug_width)[0, debug_width]
       line2 = line2.ljust(debug_width)[0, debug_width]
       line3 = line3.ljust(debug_width)[0, debug_width]
+      line4 = line4.ljust(debug_width)[0, debug_width]
 
-      # Draw debug window with border
+      # Draw debug window with border (now 4 lines of content)
       output << move_cursor(debug_row, @hires_pad_left + 1)
       output << "+" << ("-" * debug_width) << "+"
       output << move_cursor(debug_row + 1, @hires_pad_left + 1)
@@ -501,6 +509,8 @@ class Apple2Terminal
       output << move_cursor(debug_row + 3, @hires_pad_left + 1)
       output << "|" << line3 << "|"
       output << move_cursor(debug_row + 4, @hires_pad_left + 1)
+      output << "|" << line4 << "|"
+      output << move_cursor(debug_row + 5, @hires_pad_left + 1)
       output << "+" << ("-" * debug_width) << "+"
     elsif disk_motor_on?
       status_row = @hires_pad_top + hires_lines.length + 1
@@ -572,20 +582,28 @@ class Apple2Terminal
                      format_hz(@current_hz), @fps,
                      format_uptime(@start_time))
 
-      # Line 3: Disk IO / keyboard IO / video mode / Audio
-      speaker = @runner.bus.speaker
-      audio_status = speaker.status
-      line3 = format("Disk:T%02d %s|Key:%-3s|%s|Audio:%s",
+      # Line 3: Disk / Key / video mode
+      line3 = format("Disk:T%02d %s|Key:%-3s|%s",
                      dc.track, dc.motor_on ? "ON " : "OFF",
                      format_key(@last_key),
-                     mode.to_s.upcase, audio_status)
+                     mode.to_s.upcase)
+
+      # Line 4: Audio status with toggle count and activity
+      speaker = @runner.bus.speaker
+      audio_status = speaker.status
+      activity = speaker.active? ? "*" : " "
+      toggle_count = format_number(speaker.toggle_count)
+      line4 = format("Audio:%s%s Tgl:%s Smp:%s",
+                     audio_status, activity, toggle_count,
+                     format_number(speaker.samples_written))
 
       # Pad/truncate lines to fit within border
       line1 = line1.ljust(SCREEN_COLS)[0, SCREEN_COLS]
       line2 = line2.ljust(SCREEN_COLS)[0, SCREEN_COLS]
       line3 = line3.ljust(SCREEN_COLS)[0, SCREEN_COLS]
+      line4 = line4.ljust(SCREEN_COLS)[0, SCREEN_COLS]
 
-      # Draw debug window with border
+      # Draw debug window with border (now 4 lines of content)
       output << move_cursor(debug_row, @pad_left + 1)
       output << "+" << ("-" * SCREEN_COLS) << "+"
       output << move_cursor(debug_row + 1, @pad_left + 1)
@@ -595,6 +613,8 @@ class Apple2Terminal
       output << move_cursor(debug_row + 3, @pad_left + 1)
       output << "|" << line3 << "|"
       output << move_cursor(debug_row + 4, @pad_left + 1)
+      output << "|" << line4 << "|"
+      output << move_cursor(debug_row + 5, @pad_left + 1)
       output << "+" << ("-" * SCREEN_COLS) << "+"
     end
 
@@ -620,6 +640,16 @@ class Apple2Terminal
       format("%.1fK", cycles / 1_000.0)
     else
       cycles.to_s
+    end
+  end
+
+  def format_number(n)
+    if n >= 1_000_000
+      format("%.1fM", n / 1_000_000.0)
+    elsif n >= 1_000
+      format("%.1fK", n / 1_000.0)
+    else
+      n.to_s
     end
   end
 
@@ -703,8 +733,8 @@ class Apple2Terminal
     print SHOW_CURSOR
     print NORMAL_VIDEO
     # Position exit message below the display area
-    # Account for bordered debug window (5 lines) + padding (1 line) + disk loading line
-    exit_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 8 : 3)
+    # Account for bordered debug window (6 lines) + padding (2 lines) + disk loading line
+    exit_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 9 : 3)
     print move_cursor(exit_row, 1)
     puts "Apple ][ emulator terminated."
   end
