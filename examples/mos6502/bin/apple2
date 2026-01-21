@@ -166,6 +166,7 @@ class Apple2Terminal
     @green_screen = options[:green] || false
     @hires_mode = options[:hires] || false
     @hires_width = options[:hires_width] || 80
+    @audio_enabled = options[:audio] != false
 
     # Terminal size and padding for centering
     @term_rows = 24
@@ -278,10 +279,16 @@ class Apple2Terminal
 
     mode_names = { native: "Native ISA", ruby: "Ruby ISA", hdl: "HDL (cycle-accurate)" }
     mode = mode_names[@sim_type] || @sim_type.to_s
-    puts "Starting Apple ][ emulator... [#{mode} mode]"
+    audio_status = @audio_enabled ? "Audio ON" : "Audio OFF"
+    puts "Starting Apple ][ emulator... [#{mode} mode, #{audio_status}]"
     puts "Press Ctrl+C to exit"
     puts "Press any key to continue..."
     sleep 0.5
+
+    # Start audio if enabled
+    if @audio_enabled
+      @runner.bus.start_audio
+    end
 
     # Reset the CPU
     @runner.reset
@@ -327,8 +334,16 @@ class Apple2Terminal
       # Check for keyboard input (non-blocking)
       handle_keyboard_input
 
+      # Get cycle count before running
+      cycles_before = @runner.cycle_count
+
       # Run CPU cycles
       @runner.run_steps(@cycles_per_frame)
+
+      # Get cycles actually executed and update bus timing
+      cycles_after = @runner.cycle_count
+      cycles_executed = cycles_after - cycles_before
+      @runner.bus.tick(cycles_executed) if cycles_executed > 0
 
       # Update performance metrics
       update_performance_metrics
@@ -678,6 +693,9 @@ class Apple2Terminal
   end
 
   def cleanup
+    # Stop audio
+    @runner.bus.stop_audio if @audio_enabled
+
     print SHOW_CURSOR
     print NORMAL_VIDEO
     # Position exit message below the display area
@@ -816,7 +834,8 @@ options = {
   demo: false,
   mode: :native,  # Simulator mode: native, ruby, or hdl
   hires: false,
-  hires_width: 80
+  hires_width: 80,
+  audio: true  # Audio enabled by default
 }
 
 parser = OptionParser.new do |opts|
@@ -888,6 +907,10 @@ parser = OptionParser.new do |opts|
 
   opts.on("-k", "--karateka", "Load Karateka memory dump (ready to play)") do
     options[:karateka] = true
+  end
+
+  opts.on("--no-audio", "Disable audio output") do
+    options[:audio] = false
   end
 
   opts.on("-h", "--help", "Show this help message") do
