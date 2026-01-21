@@ -105,6 +105,7 @@ module RHDL
       instance :char_rom, CharacterROM
       instance :speaker_toggle, SpeakerToggle
       instance :cpu, CPU6502
+      instance :disk, DiskII
 
       # Internal wires for clocks
       wire :clk_7m
@@ -151,6 +152,11 @@ module RHDL
       wire :nmi_n
       wire :irq_n
       wire :so_n
+
+      # Disk II interface wires
+      wire :disk_io_select             # Slot 6 ROM select ($C600-$C6FF)
+      wire :disk_device_select         # Slot 6 I/O select ($C0E0-$C0EF)
+      wire :disk_dout, width: 8        # Data from disk controller
 
       # Connect timing generator
       port :clk_14m => [:timing, :clk_14m]
@@ -230,6 +236,17 @@ module RHDL
       port [:cpu, :debug_a] => :a_debug
       port [:cpu, :debug_x] => :x_debug
       port [:cpu, :debug_y] => :y_debug
+
+      # Connect Disk II controller (slot 6)
+      port :clk_14m => [:disk, :clk_14m]
+      port :clk_2m => [:disk, :clk_2m]
+      port :pre_phi0 => [:disk, :pre_phase_zero]
+      port :disk_io_select => [:disk, :io_select]
+      port :disk_device_select => [:disk, :device_select]
+      port :reset => [:disk, :reset]
+      port :cpu_addr => [:disk, :a]
+      port :cpu_dout => [:disk, :d_in]
+      port [:disk, :d_out] => :disk_dout
 
       # Soft switches state
       sequential clock: :q3, reset: :reset, reset_values: {
@@ -344,6 +361,12 @@ module RHDL
           lit(0, width: 8)
         )
 
+        # Disk II (slot 6) select signals
+        # Slot 6 I/O: $C0E0-$C0EF (device_select bit 6)
+        # Slot 6 ROM: $C600-$C6FF (io_select bit 6)
+        disk_device_select <= device_select_addr & (cpu_addr[6..4] == lit(6, width: 3))
+        disk_io_select <= io_select_addr & (cpu_addr[10..8] == lit(6, width: 3))
+
         # ROM address mapping
         # $D000-$DFFF -> $0000-$0FFF
         # $E000-$EFFF -> $1000-$1FFF
@@ -355,11 +378,16 @@ module RHDL
         rom_out = mem_read_expr(:main_rom, rom_addr_mapped, width: 8)
         gameport_data = cat(gameport[cpu_addr[2..0]], lit(0, width: 7))
 
-        cpu_din <= mux(ram_select, dl,
-          mux(keyboard_select, k,
-            mux(gameport_select, gameport_data,
-              mux(rom_select, rom_out,
-                pd
+        # Disk II provides data for both ROM and I/O access
+        disk_select = disk_device_select | disk_io_select
+
+        cpu_din <= mux(disk_select, disk_dout,
+          mux(ram_select, dl,
+            mux(keyboard_select, k,
+              mux(gameport_select, gameport_data,
+                mux(rom_select, rom_out,
+                  pd
+                )
               )
             )
           )
@@ -379,6 +407,19 @@ module RHDL
 
       def read_rom(addr)
         mem_read(:main_rom, addr & 0x2FFF)
+      end
+
+      # Simulation helpers for disk access
+      def load_disk_boot_rom(data)
+        @disk.instance_variable_get(:@rom).load_rom(data)
+      end
+
+      def load_disk_track(track_num, data)
+        @disk.load_track(track_num, data)
+      end
+
+      def disk_controller
+        @disk
       end
     end
 
