@@ -14,11 +14,11 @@
 # - PHI0: 1.0 MHz processor clock
 # - COLOR_REF: 3.579545 MHz colorburst
 
-require 'rhdl'
+require 'rhdl/hdl'
 
 module RHDL
   module Apple2
-    class TimingGenerator < SequentialComponent
+    class TimingGenerator < RHDL::HDL::SequentialComponent
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 

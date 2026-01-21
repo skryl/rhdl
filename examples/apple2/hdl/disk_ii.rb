@@ -22,13 +22,13 @@
 # Track format: 0x1A00 bytes per track (6656 bytes)
 # 35 tracks total = 227.5 KB per disk image
 
-require 'rhdl'
+require 'rhdl/hdl'
 
 module RHDL
   module Apple2
     # Disk II ROM (256 bytes boot ROM at $C600-$C6FF)
     # Pure DSL component - ROM data loaded via simulation helper or initial: parameter
-    class DiskIIROM < Component
+    class DiskIIROM < RHDL::HDL::Component
       include RHDL::DSL::Memory
 
       input :clk
@@ -43,7 +43,7 @@ module RHDL
       # For BRAM inference, use: sync_read :dout, from: :rom, clock: :clk, addr: :addr
       async_read :dout, from: :rom, addr: :addr
 
-      # Simulation helper: load ROM data at runtime (non-synthesizable)
+      # Simulation helper: load ROM data at runtime
       def load_rom(data)
         data.each_with_index do |byte, i|
           break if i >= 256
@@ -53,7 +53,7 @@ module RHDL
     end
 
     # Main Disk II Controller
-    class DiskII < SequentialComponent
+    class DiskII < RHDL::HDL::SequentialComponent
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
       include RHDL::DSL::Memory
@@ -221,7 +221,7 @@ module RHDL
         )
       end
 
-      # Helper methods for disk image loading
+      # Simulation helpers for disk image loading
       def load_track(track_num, data)
         return if track_num >= 35 || data.nil?
 

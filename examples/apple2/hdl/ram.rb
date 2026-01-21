@@ -7,11 +7,11 @@
 # Synchronous RAM with single port
 # Address range: $0000 - $BFFF (48K)
 
-require 'rhdl'
+require 'rhdl/hdl'
 
 module RHDL
   module Apple2
-    class RAM < Component
+    class RAM < RHDL::HDL::Component
       include RHDL::DSL::Memory
 
       # Parameters
@@ -27,8 +27,8 @@ module RHDL
       input :din, width: :data_width
       output :dout, width: :data_width
 
-      # Define memory array
-      memory :mem, depth: :depth, width: :data_width
+      # Define memory array (48KB = 49152 bytes)
+      memory :mem, depth: 48 * 1024, width: 8
 
       # Synchronous write on rising edge when cs and we are high
       # Using expression-based enable: no intermediate wire needed
@@ -38,15 +38,15 @@ module RHDL
       # For BRAM inference, use: sync_read :dout, from: :mem, clock: :clk, addr: :addr, enable: :cs
       async_read :dout, from: :mem, addr: :addr, enable: :cs
 
-      # Direct memory access for initialization/debugging
+      # Simulation helpers for memory access
       def read_mem(addr)
-        effective_addr = addr & ((1 << fetch_parameter(:addr_width)) - 1)
+        effective_addr = addr & 0xFFFF  # 16-bit address
         mem_read(:mem, effective_addr)
       end
 
       def write_mem(addr, data)
-        effective_addr = addr & ((1 << fetch_parameter(:addr_width)) - 1)
-        mem_write(:mem, effective_addr, data, fetch_parameter(:data_width))
+        effective_addr = addr & 0xFFFF  # 16-bit address
+        mem_write(:mem, effective_addr, data, 8)
       end
 
       def load_binary(data, start_addr = 0)
@@ -62,7 +62,7 @@ module RHDL
 
     # Dual-port RAM variant for video memory access
     # Uses multi-port memory DSL with expression-based enables
-    class DualPortRAM < Component
+    class DualPortRAM < RHDL::HDL::Component
       include RHDL::DSL::Memory
 
       parameter :addr_width, default: 16
@@ -83,8 +83,8 @@ module RHDL
       input :addr_b, width: :addr_width
       output :dout_b, width: :data_width
 
-      # Define memory array with multiple ports using block syntax
-      memory :mem, depth: :depth, width: :data_width do |m|
+      # Define memory array with multiple ports using block syntax (48KB = 49152 bytes)
+      memory :mem, depth: 48 * 1024, width: 8 do |m|
         # Port A: write with expression-based enable (cs_a & we_a)
         m.write_port clock: :clk_a, enable: [:cs_a, :&, :we_a], addr: :addr_a, data: :din_a
 
@@ -95,15 +95,15 @@ module RHDL
         m.async_read_port addr: :addr_b, output: :dout_b, enable: :cs_b
       end
 
-      # Direct memory access
+      # Simulation helpers for memory access
       def read_mem(addr)
-        effective_addr = addr & ((1 << fetch_parameter(:addr_width)) - 1)
+        effective_addr = addr & 0xFFFF  # 16-bit address
         mem_read(:mem, effective_addr)
       end
 
       def write_mem(addr, data)
-        effective_addr = addr & ((1 << fetch_parameter(:addr_width)) - 1)
-        mem_write(:mem, effective_addr, data, fetch_parameter(:data_width))
+        effective_addr = addr & 0xFFFF  # 16-bit address
+        mem_write(:mem, effective_addr, data, 8)
       end
     end
   end

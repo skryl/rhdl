@@ -7,11 +7,11 @@
 # Converts 8-bit audio samples to 1-bit PWM output
 # Sampling frequency: 14 MHz / 256 = ~54.7 kHz
 
-require 'rhdl'
+require 'rhdl/hdl'
 
 module RHDL
   module Apple2
-    class AudioPWM < SequentialComponent
+    class AudioPWM < RHDL::HDL::SequentialComponent
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
@@ -59,7 +59,7 @@ module RHDL
 
     # Simple speaker toggle (original Apple II 1-bit audio)
     # The original Apple II just toggled a speaker driver
-    class SpeakerToggle < SequentialComponent
+    class SpeakerToggle < RHDL::HDL::SequentialComponent
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
@@ -85,7 +85,7 @@ module RHDL
     end
 
     # Audio mixer for combining multiple audio sources
-    class AudioMixer < Component
+    class AudioMixer < RHDL::HDL::Component
       include RHDL::DSL::Behavior
 
       # Audio inputs
