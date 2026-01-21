@@ -44,7 +44,10 @@ module RHDL
       end
 
       def tick
+        # First pass: evaluate combinational logic with current DFF state
         evaluate
+
+        # Sample all DFF inputs and compute next state
         next_q = @ir.dffs.map do |dff|
           q = @nets[dff.q]
           d = @nets[dff.d]
@@ -63,9 +66,14 @@ module RHDL
           q_next
         end
 
+        # Update all DFF Q outputs
         @ir.dffs.each_with_index do |dff, idx|
           @nets[dff.q] = next_q[idx]
         end
+
+        # Second pass: re-evaluate combinational logic with new DFF state
+        # This ensures outputs depending on DFF state are updated in the same cycle
+        evaluate
       end
 
       def reset

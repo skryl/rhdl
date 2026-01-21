@@ -1567,9 +1567,9 @@ module RHDL
         @ir.add_gate(type: Primitives::NOT, inputs: [up_net], output: up_inv)
 
         # Build adder chain
-        # When up=1: add 1 (carry_in = 1, addend = 0)
-        # When up=0: subtract 1 = add all 1s + 1, but simpler: add -1 = add all 1s with carry 1
-        carry = const_one
+        # When up=1: add 1 (carry_in = 1, addend = 0) → q + 0 + 1 = q + 1
+        # When up=0: subtract 1 (carry_in = 0, addend = all 1s) → q + 0xFF + 0 = q - 1
+        carry = up_net  # carry_in = 1 for up, 0 for down
         count_result = []
         width.times do |idx|
           q_bit = q_internal[idx]

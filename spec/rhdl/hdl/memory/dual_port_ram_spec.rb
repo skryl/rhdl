@@ -183,7 +183,7 @@ RSpec.describe RHDL::HDL::DualPortRAM do
     end
 
     describe 'simulator comparison' do
-      it 'all simulators produce matching results', pending: 'Dual-port RAM has complex memory synthesis requirements' do
+      it 'all simulators produce matching results' do
         test_cases = [
           { addr_a: 0, din_a: 0xAB, we_a: 1, addr_b: 0, din_b: 0, we_b: 0 },
           { addr_a: 0, din_a: 0, we_a: 0, addr_b: 0, din_b: 0, we_b: 0 },

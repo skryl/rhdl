@@ -179,7 +179,7 @@ RSpec.describe RHDL::HDL::SRFlipFlop do
     end
 
     describe 'simulator comparison' do
-      it 'all simulators produce matching results', pending: 'Flip-flop qn timing issues with Ruby/Native SimCPU' do
+      it 'all simulators produce matching results' do
         test_cases = [
           { s: 1, r: 0, rst: 0, en: 1 },
           { s: 0, r: 0, rst: 0, en: 1 },
