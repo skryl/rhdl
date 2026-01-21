@@ -1,23 +1,22 @@
 # frozen_string_literal: true
 
 # Apple II HDL Harness
-# Wraps the Apple2System HDL component for use in emulation
+# Wraps the Apple2 HDL component for use in emulation
 
-require_relative '../hdl/apple2_system'
-require_relative '../hdl/cpu6502'
+require_relative '../hdl/apple2'
 
 module RHDL
   module Apple2
-    # HDL-based runner using cycle-accurate Apple2System simulation
+    # HDL-based runner using cycle-accurate Apple2 simulation
     class Runner
-      attr_reader :system, :ram
+      attr_reader :apple2, :ram
 
       # Text page constants
       TEXT_PAGE1_START = 0x0400
       TEXT_PAGE1_END = 0x07FF
 
       def initialize
-        @system = Apple2System.new('apple2_system')
+        @apple2 = Apple2.new('apple2')
         @ram = Array.new(48 * 1024, 0)  # 48KB RAM
         @cycles = 0
         @halted = false
@@ -26,14 +25,14 @@ module RHDL
         @key_ready = false
 
         # Initialize system inputs
-        @system.set_input(:clk_14m, 0)
-        @system.set_input(:flash_clk, 0)
-        @system.set_input(:reset, 0)
-        @system.set_input(:ram_do, 0)
-        @system.set_input(:pd, 0)
-        @system.set_input(:k, 0)
-        @system.set_input(:gameport, 0)
-        @system.set_input(:pause, 0)
+        @apple2.set_input(:clk_14m, 0)
+        @apple2.set_input(:flash_clk, 0)
+        @apple2.set_input(:reset, 0)
+        @apple2.set_input(:ram_do, 0)
+        @apple2.set_input(:pd, 0)
+        @apple2.set_input(:k, 0)
+        @apple2.set_input(:gameport, 0)
+        @apple2.set_input(:pause, 0)
 
         # Track Q3 for cycle counting
         @prev_q3 = 0
@@ -42,7 +41,7 @@ module RHDL
       # Load ROM data into the Apple2System
       def load_rom(bytes, base_addr:)
         bytes = bytes.bytes if bytes.is_a?(String)
-        @system.load_rom(bytes)
+        @apple2.load_rom(bytes)
       end
 
       # Load data into RAM
@@ -66,9 +65,9 @@ module RHDL
 
       # Reset the system
       def reset
-        @system.set_input(:reset, 1)
+        @apple2.set_input(:reset, 1)
         run_14m_cycles(14)  # Hold reset for a few cycles
-        @system.set_input(:reset, 0)
+        @apple2.set_input(:reset, 0)
         run_14m_cycles(14 * 10)  # Let system settle
         @cycles = 0
         @halted = false
@@ -94,29 +93,29 @@ module RHDL
       # Run a single 14MHz clock cycle
       def run_14m_cycle
         # Update keyboard input
-        @system.set_input(:k, @key_ready ? (@key_data | 0x80) : 0)
+        @apple2.set_input(:k, @key_ready ? (@key_data | 0x80) : 0)
 
         # Falling edge
-        @system.set_input(:clk_14m, 0)
-        @system.propagate
+        @apple2.set_input(:clk_14m, 0)
+        @apple2.propagate
 
         # Provide RAM data
-        ram_addr = @system.get_output(:ram_addr)
+        ram_addr = @apple2.get_output(:ram_addr)
         if ram_addr < @ram.size
-          @system.set_input(:ram_do, @ram[ram_addr])
+          @apple2.set_input(:ram_do, @ram[ram_addr])
         end
-        @system.propagate
+        @apple2.propagate
 
         # Rising edge
-        @system.set_input(:clk_14m, 1)
-        @system.propagate
+        @apple2.set_input(:clk_14m, 1)
+        @apple2.propagate
 
         # Handle RAM writes
-        ram_we = @system.get_output(:ram_we)
+        ram_we = @apple2.get_output(:ram_we)
         if ram_we == 1
-          write_addr = @system.get_output(:ram_addr)
+          write_addr = @apple2.get_output(:ram_addr)
           if write_addr < @ram.size
-            @ram[write_addr] = @system.get_output(:d)
+            @ram[write_addr] = @apple2.get_output(:d)
             # Mark text page dirty
             if write_addr >= TEXT_PAGE1_START && write_addr <= TEXT_PAGE1_END
               @text_page_dirty = true
@@ -125,7 +124,7 @@ module RHDL
         end
 
         # Check for keyboard strobe clear
-        if @system.get_output(:read_key) == 1
+        if @apple2.get_output(:read_key) == 1
           @key_ready = false
         end
       end
@@ -182,10 +181,10 @@ module RHDL
       # Get CPU state for debugging
       def cpu_state
         {
-          pc: @system.get_output(:pc_debug),
-          a: @system.get_output(:a_debug),
-          x: @system.get_output(:x_debug),
-          y: @system.get_output(:y_debug),
+          pc: @apple2.get_output(:pc_debug),
+          a: @apple2.get_output(:a_debug),
+          x: @apple2.get_output(:x_debug),
+          y: @apple2.get_output(:y_debug),
           sp: 0xFF,  # TODO: Add S register debug output
           p: 0,      # TODO: Add P register debug output
           cycles: @cycles,

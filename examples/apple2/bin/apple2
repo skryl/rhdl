@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 
 # Apple II HDL Terminal Emulator
-# Runs the Apple2System HDL component with cycle-accurate simulation
+# Runs the Apple2 HDL component with cycle-accurate simulation
 
 require 'io/console'
 require 'optparse'
