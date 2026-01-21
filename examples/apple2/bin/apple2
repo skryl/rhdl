@@ -97,6 +97,11 @@ class Apple2HDLTerminal
     @runner.write(0xFFFD, (addr >> 8) & 0xFF)
   end
 
+  def load_disk(path, drive: 0)
+    puts "Loading disk image: #{path}"
+    @runner.load_disk(path, drive: drive)
+  end
+
   def load_memdump(path, pc: nil, use_appleiigo: false)
     puts "Loading memory dump: #{path}"
     bytes = File.binread(path)
@@ -457,6 +462,10 @@ parser = OptionParser.new do |opts|
     options[:karateka] = true
   end
 
+  opts.on("--disk FILE", "Load disk image (.dsk)") do |v|
+    options[:disk] = v
+  end
+
   opts.on("-h", "--help", "Show help") do
     puts opts
     exit
@@ -468,7 +477,7 @@ parser.parse!(ARGV)
 terminal = Apple2HDLTerminal.new(options)
 
 # Load AppleIIGo ROM if requested
-if options[:appleiigo]
+if options[:appleiigo] || options[:disk]
   rom_file = File.expand_path('../software/roms/appleiigo.rom', __dir__)
   if File.exist?(rom_file)
     terminal.load_rom(rom_file, base_addr: 0xD000)
@@ -479,6 +488,16 @@ if options[:appleiigo]
   end
 elsif options[:rom]
   terminal.load_rom(options[:rom])
+end
+
+# Load disk image if specified
+if options[:disk]
+  disk_file = options[:disk]
+  unless File.exist?(disk_file)
+    puts "Error: Disk image not found: #{disk_file}"
+    exit 1
+  end
+  terminal.load_disk(disk_file)
 end
 
 # Load Karateka memory dump if requested
