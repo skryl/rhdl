@@ -36,8 +36,8 @@ module RHDL
 
       memory :rom, depth: 256, width: 8
 
-      # Asynchronous read (combinational)
-      # Note: For proper BRAM, sync_read would be needed (to be added to RHDL)
+      # Asynchronous read (combinational) - suitable for small ROM
+      # For BRAM inference, use: sync_read :dout, from: :rom, clock: :clk, addr: :addr
       async_read :dout, from: :rom, addr: :addr
 
       # The Disk II boot ROM would be loaded here
@@ -213,7 +213,8 @@ module RHDL
         # - Track data when reading disk (valid when addr bit 0 is 0)
         # - Otherwise 0
 
-        ram_data = lit(0, width: 8)  # Would be track_memory[track_byte_addr[14:1]]
+        # Read from track memory with computed address (track_byte_addr >> 1)
+        ram_data = mem_read_expr(:track_memory, track_byte_addr[14..1], width: 8)
 
         d_out <= mux(io_select,
           rom_dout,
