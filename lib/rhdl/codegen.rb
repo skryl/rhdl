@@ -11,8 +11,9 @@ require_relative "codegen/structure/ir"
 require_relative "codegen/structure/primitives"
 require_relative "codegen/structure/toposort"
 require_relative "codegen/structure/lower"
-require_relative "codegen/structure/sim_cpu"
-require_relative "codegen/structure/sim_gpu"
+require_relative "codegen/structure/sim/cpu"
+require_relative "codegen/structure/sim/gpu"
+require_relative "codegen/structure/sim/cpu_native"
 
 require 'fileutils'
 
@@ -50,6 +51,8 @@ module RHDL
         case backend
         when :cpu
           Structure::SimCPU.new(ir, lanes: lanes)
+        when :cpu_native
+          Structure::SimCPUNativeWrapper.new(ir, lanes: lanes)
         when :gpu
           Structure::SimGPU.new(ir, lanes: lanes)
         else
