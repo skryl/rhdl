@@ -693,4 +693,101 @@ module NetlistHelper
 
     comparison
   end
+
+  # Validate that all required simulators match
+  # Without iverilog: expected, Ruby, Native must match (3 simulators)
+  # With iverilog: All 4 must match (expected, Verilog, Ruby, Native)
+  # Raises an error with details if validation fails
+  def validate_comparison!(comparison)
+    iverilog_available = HdlToolchain.iverilog_available?
+    native_available = RHDL::Codegen::Structure::NATIVE_SIM_AVAILABLE
+
+    errors = []
+
+    # Check that required simulators succeeded
+    unless comparison[:ruby][:success]
+      errors << "Ruby SimCPU failed: #{comparison[:ruby][:error]}"
+    end
+
+    if native_available && !comparison[:native][:success]
+      errors << "Native SimCPUNative failed: #{comparison[:native][:error]}"
+    end
+
+    if iverilog_available && !comparison[:verilog][:success]
+      errors << "Verilog simulation failed: #{comparison[:verilog][:error]}"
+    end
+
+    # Check for mismatches
+    if comparison[:mismatches].any?
+      # Filter mismatches based on what simulators are available
+      relevant_mismatches = comparison[:mismatches].select do |m|
+        values = m[:values]
+        # Get values from available simulators
+        available = { expected: values[:expected], ruby: values[:ruby] }
+        available[:native] = values[:native] if native_available
+        available[:verilog] = values[:verilog] if iverilog_available && comparison[:verilog][:success]
+
+        # Check if there's a mismatch among available simulators
+        available.values.compact.uniq.length > 1
+      end
+
+      if relevant_mismatches.any?
+        errors << "Simulator mismatches found:"
+        relevant_mismatches.first(5).each do |m|
+          available_sims = []
+          available_sims << "expected=#{m[:values][:expected]}"
+          available_sims << "ruby=#{m[:values][:ruby]}"
+          available_sims << "native=#{m[:values][:native]}" if native_available
+          available_sims << "verilog=#{m[:values][:verilog]}" if iverilog_available && comparison[:verilog][:success]
+          errors << "  Cycle #{m[:cycle]}, output #{m[:output]}: #{available_sims.join(', ')}"
+        end
+        if relevant_mismatches.length > 5
+          errors << "  ... and #{relevant_mismatches.length - 5} more mismatches"
+        end
+      end
+    end
+
+    return true if errors.empty?
+
+    # Build informative error message
+    available_sims = ["expected (behavior)", "Ruby SimCPU"]
+    available_sims << "Native SimCPUNative" if native_available
+    available_sims << "Verilog (iverilog)" if iverilog_available
+
+    error_msg = [
+      "Netlist comparison validation failed!",
+      "Available simulators: #{available_sims.join(', ')}",
+      "",
+      errors.join("\n")
+    ].join("\n")
+
+    raise error_msg
+  end
+
+  # Convenience method: run comparison and validate in one step
+  # Returns the comparison results if validation passes, raises otherwise
+  def compare_and_validate!(component_class, component_name, test_cases, base_dir:, has_clock: false)
+    comparison = compare_behavior_to_netlist(
+      component_class,
+      component_name,
+      test_cases,
+      base_dir: base_dir,
+      has_clock: has_clock
+    )
+    validate_comparison!(comparison)
+    comparison
+  end
+
+  # Summary of comparison results for display
+  def comparison_summary(comparison)
+    lines = []
+    lines << "Comparison Results:"
+    lines << "  Behavior: success=#{comparison[:behavior][:success]}"
+    lines << "  Ruby SimCPU: success=#{comparison[:ruby][:success]}"
+    lines << "  Native SimCPU: success=#{comparison[:native][:success]}#{comparison[:native][:skipped] ? ' (skipped)' : ''}"
+    lines << "  Verilog: success=#{comparison[:verilog][:success]}#{comparison[:verilog][:skipped] ? ' (skipped)' : ''}"
+    lines << "  All match: #{comparison[:all_match]}"
+    lines << "  Mismatches: #{comparison[:mismatches].length}"
+    lines.join("\n")
+  end
 end
