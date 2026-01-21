@@ -314,7 +314,8 @@ module RHDL
         rom_addr_mapped = cat((cpu_addr[13] & cpu_addr[12]), ~cpu_addr[12], cpu_addr[11..0])
 
         # Data input mux to CPU
-        rom_out = lit(0, width: 8)  # Would be main_rom[rom_addr_mapped]
+        # Read from ROM with computed address
+        rom_out = mem_read_expr(:main_rom, rom_addr_mapped, width: 8)
         gameport_data = cat(gameport[cpu_addr[2..0]], lit(0, width: 7))
 
         cpu_din <= mux(ram_select, dl,
