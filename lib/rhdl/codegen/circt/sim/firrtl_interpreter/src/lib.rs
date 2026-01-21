@@ -1,11 +1,12 @@
 //! High-performance RTL simulator for FIRRTL/Behavior IR with Ruby bindings
 //!
 //! Optimizations:
-//! - Bytecode compilation for expressions (no recursion, minimal branching)
+//! - Direct operation sequence (no stack, no VM dispatch)
 //! - Vec<u64> indexing instead of HashMap<String, u64> for O(1) signal access
 //! - Batched cycle execution to minimize Ruby-Rust FFI overhead
 //! - Internalized RAM/ROM for zero-copy memory access
 //! - Unsafe unchecked array access in hot loops
+//! - Operations flattened at load time - circuit is "baked in"
 
 use magnus::{method, prelude::*, Error, RArray, RHash, Ruby, TryConvert, Value};
 use serde::Deserialize;
@@ -107,67 +108,67 @@ struct ModuleIR {
 }
 
 // ============================================================================
-// Bytecode-based expression evaluator for maximum performance
+// Direct Operation Model - No Stack, No VM
 // ============================================================================
 
-/// Bytecode instructions for expression evaluation
+/// Operand source - either a signal index or an immediate value
 #[derive(Debug, Clone, Copy)]
-enum Opcode {
-    // Load operations
-    LoadSignal(usize, u64),      // (signal_idx, mask)
-    LoadLiteral(u64),            // value
+enum Operand {
+    Signal(usize),      // Index into signals array
+    Immediate(u64),     // Literal value
+    Temp(usize),        // Index into temp array
+}
+
+/// Direct operation - reads from operands, writes to target
+#[derive(Debug, Clone, Copy)]
+enum DirectOp {
+    // Simple copy/load
+    Copy { dst: usize, src: Operand, mask: u64 },
 
     // Unary operations
-    Not(u64),                    // mask
-    ReduceAnd(u64),              // operand_mask
-    ReduceOr,
-    ReduceXor,
+    Not { dst: usize, src: Operand, mask: u64 },
+    ReduceAnd { dst: usize, src: Operand, src_mask: u64 },
+    ReduceOr { dst: usize, src: Operand },
+    ReduceXor { dst: usize, src: Operand },
 
     // Binary operations
-    And,
-    Or,
-    Xor,
-    Add(u64),                    // mask
-    Sub(u64),                    // mask
-    Mul(u64),                    // mask
-    Div,
-    Mod,
-    Shl(u64),                    // mask
-    Shr,
-    Eq,
-    Ne,
-    Lt,
-    Gt,
-    Le,
-    Ge,
+    And { dst: usize, left: Operand, right: Operand },
+    Or { dst: usize, left: Operand, right: Operand },
+    Xor { dst: usize, left: Operand, right: Operand },
+    Add { dst: usize, left: Operand, right: Operand, mask: u64 },
+    Sub { dst: usize, left: Operand, right: Operand, mask: u64 },
+    Mul { dst: usize, left: Operand, right: Operand, mask: u64 },
+    Div { dst: usize, left: Operand, right: Operand },
+    Mod { dst: usize, left: Operand, right: Operand },
+    Shl { dst: usize, left: Operand, right: Operand, mask: u64 },
+    Shr { dst: usize, left: Operand, right: Operand },
+    Eq { dst: usize, left: Operand, right: Operand },
+    Ne { dst: usize, left: Operand, right: Operand },
+    Lt { dst: usize, left: Operand, right: Operand },
+    Gt { dst: usize, left: Operand, right: Operand },
+    Le { dst: usize, left: Operand, right: Operand },
+    Ge { dst: usize, left: Operand, right: Operand },
 
-    // Mux - pops condition, true_val, false_val
-    Mux(u64),                    // mask
+    // Mux - branchless select
+    Mux { dst: usize, cond: Operand, when_true: Operand, when_false: Operand, mask: u64 },
 
-    // Slice - pops value, shifts and masks
-    Slice(u32, u64),             // (shift, mask)
+    // Slice
+    Slice { dst: usize, src: Operand, shift: u32, mask: u64 },
 
-    // Concat - pops N values and combines them
-    ConcatStart,
-    ConcatPart(usize),           // width
-    ConcatEnd(u64),              // final mask
+    // Concat operations
+    ConcatInit { dst: usize },
+    ConcatAccum { dst: usize, src: Operand, shift: usize, part_mask: u64 },
+    ConcatFinish { dst: usize, mask: u64 },
 
     // Resize
-    Resize(u64),                 // mask
+    Resize { dst: usize, src: Operand, mask: u64 },
 }
 
-/// Compiled bytecode program for an expression
-#[derive(Debug, Clone)]
-struct BytecodeProgram {
-    ops: Vec<Opcode>,
-}
-
-/// Compiled assignment using bytecode
+/// Compiled assignment - sequence of direct ops ending with final target
 #[derive(Debug, Clone)]
 struct CompiledAssign {
-    target_idx: usize,
-    program: BytecodeProgram,
-    mask: u64,
+    ops: Vec<DirectOp>,
+    final_target: usize,
 }
 
 // ============================================================================
@@ -177,6 +178,8 @@ struct CompiledAssign {
 struct RtlSimulator {
     /// Signal values (Vec for O(1) access)
     signals: Vec<u64>,
+    /// Temp values for intermediate computations
+    temps: Vec<u64>,
     /// Signal widths
     widths: Vec<usize>,
     /// Signal name to index mapping (for external access)
@@ -193,8 +196,6 @@ struct RtlSimulator {
     signal_count: usize,
     /// Register count
     reg_count: usize,
-    /// Evaluation stack (pre-allocated)
-    eval_stack: Vec<u64>,
     /// Next register values buffer
     next_regs: Vec<u64>,
     /// Sequential assignment target indices
@@ -267,16 +268,17 @@ impl RtlSimulator {
 
         let signal_count = signals.len();
 
-        // Compile combinational assignments to bytecode
+        // Compile combinational assignments to direct ops
+        let mut max_temps = 0usize;
         let assigns: Vec<CompiledAssign> = ir.assigns.iter().map(|a| {
             let target_idx = *name_to_idx.get(&a.target).unwrap_or(&0);
             let width = widths.get(target_idx).copied().unwrap_or(64);
-            let mask = Self::compute_mask(width);
-            let program = Self::compile_to_bytecode(&a.expr, &name_to_idx, &widths);
-            CompiledAssign { target_idx, program, mask }
+            let (ops, temps_used) = Self::compile_to_direct_ops(&a.expr, target_idx, &name_to_idx, &widths);
+            max_temps = max_temps.max(temps_used);
+            CompiledAssign { ops, final_target: target_idx }
         }).collect();
 
-        // Compile sequential assignments to bytecode
+        // Compile sequential assignments to direct ops
         let mut seq_assigns = Vec::new();
         let mut seq_targets = Vec::new();
         for process in &ir.processes {
@@ -285,16 +287,15 @@ impl RtlSimulator {
             }
             for stmt in &process.statements {
                 let target_idx = *name_to_idx.get(&stmt.target).unwrap_or(&0);
-                let width = widths.get(target_idx).copied().unwrap_or(64);
-                let mask = Self::compute_mask(width);
-                let program = Self::compile_to_bytecode(&stmt.expr, &name_to_idx, &widths);
-                seq_assigns.push(CompiledAssign { target_idx, program, mask });
+                let (ops, temps_used) = Self::compile_to_direct_ops(&stmt.expr, target_idx, &name_to_idx, &widths);
+                max_temps = max_temps.max(temps_used);
+                seq_assigns.push(CompiledAssign { ops, final_target: target_idx });
                 seq_targets.push(target_idx);
             }
         }
 
-        // Pre-allocate buffers
-        let eval_stack = Vec::with_capacity(64);
+        // Pre-allocate temp buffer
+        let temps = vec![0u64; max_temps + 1];
         let next_regs = vec![0u64; seq_targets.len()];
 
         // Get Apple II specific signal indices
@@ -308,6 +309,7 @@ impl RtlSimulator {
 
         Ok(Self {
             signals,
+            temps,
             widths,
             name_to_idx,
             input_names,
@@ -316,7 +318,6 @@ impl RtlSimulator {
             seq_assigns,
             signal_count,
             reg_count,
-            eval_stack,
             next_regs,
             seq_targets,
             ram: vec![0u8; 48 * 1024],
@@ -336,89 +337,142 @@ impl RtlSimulator {
         if width >= 64 { u64::MAX } else { (1u64 << width) - 1 }
     }
 
-    /// Compile expression to bytecode
-    fn compile_to_bytecode(expr: &ExprDef, name_to_idx: &HashMap<String, usize>, widths: &[usize]) -> BytecodeProgram {
+    /// Compile expression to direct operations
+    /// Returns (ops, max_temp_used)
+    fn compile_to_direct_ops(
+        expr: &ExprDef,
+        final_target: usize,
+        name_to_idx: &HashMap<String, usize>,
+        widths: &[usize]
+    ) -> (Vec<DirectOp>, usize) {
         let mut ops = Vec::new();
-        Self::compile_expr_to_ops(expr, name_to_idx, widths, &mut ops);
-        BytecodeProgram { ops }
+        let mut temp_counter = 0usize;
+
+        let result = Self::compile_expr_recursive(expr, name_to_idx, widths, &mut ops, &mut temp_counter);
+
+        // Final copy to target if needed
+        let width = widths.get(final_target).copied().unwrap_or(64);
+        let mask = Self::compute_mask(width);
+        match result {
+            Operand::Signal(idx) if idx == final_target => {
+                // Already in place
+            }
+            _ => {
+                ops.push(DirectOp::Copy { dst: final_target, src: result, mask });
+            }
+        }
+
+        (ops, temp_counter)
     }
 
-    fn compile_expr_to_ops(expr: &ExprDef, name_to_idx: &HashMap<String, usize>, widths: &[usize], ops: &mut Vec<Opcode>) {
+    /// Recursively compile expression, returning operand for the result
+    fn compile_expr_recursive(
+        expr: &ExprDef,
+        name_to_idx: &HashMap<String, usize>,
+        widths: &[usize],
+        ops: &mut Vec<DirectOp>,
+        temp_counter: &mut usize,
+    ) -> Operand {
         match expr {
             ExprDef::Signal { name, width } => {
                 let idx = *name_to_idx.get(name).unwrap_or(&0);
-                let mask = Self::compute_mask(*width);
-                ops.push(Opcode::LoadSignal(idx, mask));
+                Operand::Signal(idx)
             }
             ExprDef::Literal { value, width } => {
                 let mask = Self::compute_mask(*width);
-                ops.push(Opcode::LoadLiteral((*value as u64) & mask));
+                Operand::Immediate((*value as u64) & mask)
             }
             ExprDef::UnaryOp { op, operand, width } => {
-                Self::compile_expr_to_ops(operand, name_to_idx, widths, ops);
+                let src = Self::compile_expr_recursive(operand, name_to_idx, widths, ops, temp_counter);
                 let mask = Self::compute_mask(*width);
+                let dst = *temp_counter;
+                *temp_counter += 1;
+
                 let op_width = Self::expr_width(operand, widths, name_to_idx);
                 let op_mask = Self::compute_mask(op_width);
+
                 match op.as_str() {
-                    "~" | "not" => ops.push(Opcode::Not(mask)),
-                    "&" | "reduce_and" => ops.push(Opcode::ReduceAnd(op_mask)),
-                    "|" | "reduce_or" => ops.push(Opcode::ReduceOr),
-                    "^" | "reduce_xor" => ops.push(Opcode::ReduceXor),
-                    _ => ops.push(Opcode::Not(mask)),
+                    "~" | "not" => ops.push(DirectOp::Not { dst, src, mask }),
+                    "&" | "reduce_and" => ops.push(DirectOp::ReduceAnd { dst, src, src_mask: op_mask }),
+                    "|" | "reduce_or" => ops.push(DirectOp::ReduceOr { dst, src }),
+                    "^" | "reduce_xor" => ops.push(DirectOp::ReduceXor { dst, src }),
+                    _ => ops.push(DirectOp::Copy { dst, src, mask }),
                 }
+                Operand::Temp(dst)
             }
             ExprDef::BinaryOp { op, left, right, width } => {
-                // Evaluate left, then right, then apply op
-                Self::compile_expr_to_ops(left, name_to_idx, widths, ops);
-                Self::compile_expr_to_ops(right, name_to_idx, widths, ops);
+                let l = Self::compile_expr_recursive(left, name_to_idx, widths, ops, temp_counter);
+                let r = Self::compile_expr_recursive(right, name_to_idx, widths, ops, temp_counter);
                 let mask = Self::compute_mask(*width);
+                let dst = *temp_counter;
+                *temp_counter += 1;
+
                 match op.as_str() {
-                    "&" => ops.push(Opcode::And),
-                    "|" => ops.push(Opcode::Or),
-                    "^" => ops.push(Opcode::Xor),
-                    "+" => ops.push(Opcode::Add(mask)),
-                    "-" => ops.push(Opcode::Sub(mask)),
-                    "*" => ops.push(Opcode::Mul(mask)),
-                    "/" => ops.push(Opcode::Div),
-                    "%" => ops.push(Opcode::Mod),
-                    "<<" => ops.push(Opcode::Shl(mask)),
-                    ">>" => ops.push(Opcode::Shr),
-                    "==" => ops.push(Opcode::Eq),
-                    "!=" => ops.push(Opcode::Ne),
-                    "<" => ops.push(Opcode::Lt),
-                    ">" => ops.push(Opcode::Gt),
-                    "<=" | "le" => ops.push(Opcode::Le),
-                    ">=" => ops.push(Opcode::Ge),
-                    _ => ops.push(Opcode::And),
+                    "&" => ops.push(DirectOp::And { dst, left: l, right: r }),
+                    "|" => ops.push(DirectOp::Or { dst, left: l, right: r }),
+                    "^" => ops.push(DirectOp::Xor { dst, left: l, right: r }),
+                    "+" => ops.push(DirectOp::Add { dst, left: l, right: r, mask }),
+                    "-" => ops.push(DirectOp::Sub { dst, left: l, right: r, mask }),
+                    "*" => ops.push(DirectOp::Mul { dst, left: l, right: r, mask }),
+                    "/" => ops.push(DirectOp::Div { dst, left: l, right: r }),
+                    "%" => ops.push(DirectOp::Mod { dst, left: l, right: r }),
+                    "<<" => ops.push(DirectOp::Shl { dst, left: l, right: r, mask }),
+                    ">>" => ops.push(DirectOp::Shr { dst, left: l, right: r }),
+                    "==" => ops.push(DirectOp::Eq { dst, left: l, right: r }),
+                    "!=" => ops.push(DirectOp::Ne { dst, left: l, right: r }),
+                    "<" => ops.push(DirectOp::Lt { dst, left: l, right: r }),
+                    ">" => ops.push(DirectOp::Gt { dst, left: l, right: r }),
+                    "<=" | "le" => ops.push(DirectOp::Le { dst, left: l, right: r }),
+                    ">=" => ops.push(DirectOp::Ge { dst, left: l, right: r }),
+                    _ => ops.push(DirectOp::And { dst, left: l, right: r }),
                 }
+                Operand::Temp(dst)
             }
             ExprDef::Mux { condition, when_true, when_false, width } => {
-                // Evaluate: condition, when_false, when_true (reverse order for stack)
-                Self::compile_expr_to_ops(condition, name_to_idx, widths, ops);
-                Self::compile_expr_to_ops(when_false, name_to_idx, widths, ops);
-                Self::compile_expr_to_ops(when_true, name_to_idx, widths, ops);
+                let cond = Self::compile_expr_recursive(condition, name_to_idx, widths, ops, temp_counter);
+                let t = Self::compile_expr_recursive(when_true, name_to_idx, widths, ops, temp_counter);
+                let f = Self::compile_expr_recursive(when_false, name_to_idx, widths, ops, temp_counter);
                 let mask = Self::compute_mask(*width);
-                ops.push(Opcode::Mux(mask));
+                let dst = *temp_counter;
+                *temp_counter += 1;
+
+                ops.push(DirectOp::Mux { dst, cond, when_true: t, when_false: f, mask });
+                Operand::Temp(dst)
             }
             ExprDef::Slice { base, low, width, .. } => {
-                Self::compile_expr_to_ops(base, name_to_idx, widths, ops);
+                let src = Self::compile_expr_recursive(base, name_to_idx, widths, ops, temp_counter);
                 let mask = Self::compute_mask(*width);
-                ops.push(Opcode::Slice(*low as u32, mask));
+                let dst = *temp_counter;
+                *temp_counter += 1;
+
+                ops.push(DirectOp::Slice { dst, src, shift: *low as u32, mask });
+                Operand::Temp(dst)
             }
             ExprDef::Concat { parts, width } => {
-                ops.push(Opcode::ConcatStart);
+                let dst = *temp_counter;
+                *temp_counter += 1;
+
+                ops.push(DirectOp::ConcatInit { dst });
+                let mut shift = 0usize;
                 for part in parts {
-                    Self::compile_expr_to_ops(part, name_to_idx, widths, ops);
+                    let src = Self::compile_expr_recursive(part, name_to_idx, widths, ops, temp_counter);
                     let part_width = Self::expr_width(part, widths, name_to_idx);
-                    ops.push(Opcode::ConcatPart(part_width));
+                    let part_mask = Self::compute_mask(part_width);
+                    ops.push(DirectOp::ConcatAccum { dst, src, shift, part_mask });
+                    shift += part_width;
                 }
                 let mask = Self::compute_mask(*width);
-                ops.push(Opcode::ConcatEnd(mask));
+                ops.push(DirectOp::ConcatFinish { dst, mask });
+                Operand::Temp(dst)
             }
             ExprDef::Resize { expr, width } => {
-                Self::compile_expr_to_ops(expr, name_to_idx, widths, ops);
+                let src = Self::compile_expr_recursive(expr, name_to_idx, widths, ops, temp_counter);
                 let mask = Self::compute_mask(*width);
-                ops.push(Opcode::Resize(mask));
+                let dst = *temp_counter;
+                *temp_counter += 1;
+
+                ops.push(DirectOp::Resize { dst, src, mask });
+                Operand::Temp(dst)
             }
         }
     }
@@ -438,149 +492,143 @@ impl RtlSimulator {
         }
     }
 
-    /// Execute bytecode program and return result (static version for borrow checker)
+    /// Get operand value (static function to avoid borrow issues)
     #[inline(always)]
-    fn execute_bytecode_static(signals: &[u64], program: &BytecodeProgram, stack: &mut Vec<u64>) -> u64 {
-        stack.clear();
-        let mut concat_result = 0u64;
-        let mut concat_shift = 0usize;
+    fn get_operand_static(signals: &[u64], temps: &[u64], op: Operand) -> u64 {
+        match op {
+            Operand::Signal(idx) => unsafe { *signals.get_unchecked(idx) },
+            Operand::Immediate(val) => val,
+            Operand::Temp(idx) => unsafe { *temps.get_unchecked(idx) },
+        }
+    }
 
-        for op in &program.ops {
-            match *op {
-                Opcode::LoadSignal(idx, mask) => {
-                    let val = unsafe { *signals.get_unchecked(idx) } & mask;
-                    stack.push(val);
-                }
-                Opcode::LoadLiteral(val) => {
-                    stack.push(val);
-                }
-                Opcode::Not(mask) => {
-                    let val = stack.pop().unwrap_or(0);
-                    stack.push((!val) & mask);
-                }
-                Opcode::ReduceAnd(op_mask) => {
-                    let val = stack.pop().unwrap_or(0);
-                    stack.push(if (val & op_mask) == op_mask { 1 } else { 0 });
-                }
-                Opcode::ReduceOr => {
-                    let val = stack.pop().unwrap_or(0);
-                    stack.push(if val != 0 { 1 } else { 0 });
-                }
-                Opcode::ReduceXor => {
-                    let val = stack.pop().unwrap_or(0);
-                    stack.push((val.count_ones() & 1) as u64);
-                }
-                Opcode::And => {
-                    let r = stack.pop().unwrap_or(0);
-                    let l = stack.pop().unwrap_or(0);
-                    stack.push(l & r);
-                }
-                Opcode::Or => {
-                    let r = stack.pop().unwrap_or(0);
-                    let l = stack.pop().unwrap_or(0);
-                    stack.push(l | r);
-                }
-                Opcode::Xor => {
-                    let r = stack.pop().unwrap_or(0);
-                    let l = stack.pop().unwrap_or(0);
-                    stack.push(l ^ r);
-                }
-                Opcode::Add(mask) => {
-                    let r = stack.pop().unwrap_or(0);
-                    let l = stack.pop().unwrap_or(0);
-                    stack.push(l.wrapping_add(r) & mask);
-                }
-                Opcode::Sub(mask) => {
-                    let r = stack.pop().unwrap_or(0);
-                    let l = stack.pop().unwrap_or(0);
-                    stack.push(l.wrapping_sub(r) & mask);
-                }
-                Opcode::Mul(mask) => {
-                    let r = stack.pop().unwrap_or(0);
-                    let l = stack.pop().unwrap_or(0);
-                    stack.push(l.wrapping_mul(r) & mask);
-                }
-                Opcode::Div => {
-                    let r = stack.pop().unwrap_or(0);
-                    let l = stack.pop().unwrap_or(0);
-                    stack.push(if r != 0 { l / r } else { 0 });
-                }
-                Opcode::Mod => {
-                    let r = stack.pop().unwrap_or(0);
-                    let l = stack.pop().unwrap_or(0);
-                    stack.push(if r != 0 { l % r } else { 0 });
-                }
-                Opcode::Shl(mask) => {
-                    let r = stack.pop().unwrap_or(0);
-                    let l = stack.pop().unwrap_or(0);
-                    stack.push((l << (r as u32).min(63)) & mask);
-                }
-                Opcode::Shr => {
-                    let r = stack.pop().unwrap_or(0);
-                    let l = stack.pop().unwrap_or(0);
-                    stack.push(l >> (r as u32).min(63));
-                }
-                Opcode::Eq => {
-                    let r = stack.pop().unwrap_or(0);
-                    let l = stack.pop().unwrap_or(0);
-                    stack.push(if l == r { 1 } else { 0 });
-                }
-                Opcode::Ne => {
-                    let r = stack.pop().unwrap_or(0);
-                    let l = stack.pop().unwrap_or(0);
-                    stack.push(if l != r { 1 } else { 0 });
-                }
-                Opcode::Lt => {
-                    let r = stack.pop().unwrap_or(0);
-                    let l = stack.pop().unwrap_or(0);
-                    stack.push(if l < r { 1 } else { 0 });
-                }
-                Opcode::Gt => {
-                    let r = stack.pop().unwrap_or(0);
-                    let l = stack.pop().unwrap_or(0);
-                    stack.push(if l > r { 1 } else { 0 });
-                }
-                Opcode::Le => {
-                    let r = stack.pop().unwrap_or(0);
-                    let l = stack.pop().unwrap_or(0);
-                    stack.push(if l <= r { 1 } else { 0 });
-                }
-                Opcode::Ge => {
-                    let r = stack.pop().unwrap_or(0);
-                    let l = stack.pop().unwrap_or(0);
-                    stack.push(if l >= r { 1 } else { 0 });
-                }
-                Opcode::Mux(mask) => {
-                    let when_true = stack.pop().unwrap_or(0);
-                    let when_false = stack.pop().unwrap_or(0);
-                    let cond = stack.pop().unwrap_or(0);
-                    let result = if cond != 0 { when_true } else { when_false };
-                    stack.push(result & mask);
-                }
-                Opcode::Slice(shift, mask) => {
-                    let val = stack.pop().unwrap_or(0);
-                    stack.push((val >> shift) & mask);
-                }
-                Opcode::ConcatStart => {
-                    concat_result = 0;
-                    concat_shift = 0;
-                }
-                Opcode::ConcatPart(width) => {
-                    let val = stack.pop().unwrap_or(0);
-                    concat_result |= (val & Self::compute_mask(width)) << concat_shift;
-                    concat_shift += width;
-                }
-                Opcode::ConcatEnd(mask) => {
-                    stack.push(concat_result & mask);
-                }
-                Opcode::Resize(mask) => {
-                    let val = stack.pop().unwrap_or(0);
-                    stack.push(val & mask);
+    /// Execute a single direct operation (static to avoid borrow issues)
+    #[inline(always)]
+    fn execute_op_static(signals: &mut [u64], temps: &mut [u64], op: &DirectOp) {
+        match *op {
+            DirectOp::Copy { dst, src, mask } => {
+                let val = Self::get_operand_static(signals, temps, src) & mask;
+                unsafe { *signals.get_unchecked_mut(dst) = val; }
+            }
+            DirectOp::Not { dst, src, mask } => {
+                let val = (!Self::get_operand_static(signals, temps, src)) & mask;
+                unsafe { *temps.get_unchecked_mut(dst) = val; }
+            }
+            DirectOp::ReduceAnd { dst, src, src_mask } => {
+                let val = Self::get_operand_static(signals, temps, src);
+                let result = ((val & src_mask) == src_mask) as u64;
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::ReduceOr { dst, src } => {
+                let result = (Self::get_operand_static(signals, temps, src) != 0) as u64;
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::ReduceXor { dst, src } => {
+                let result = (Self::get_operand_static(signals, temps, src).count_ones() & 1) as u64;
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::And { dst, left, right } => {
+                let result = Self::get_operand_static(signals, temps, left) & Self::get_operand_static(signals, temps, right);
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::Or { dst, left, right } => {
+                let result = Self::get_operand_static(signals, temps, left) | Self::get_operand_static(signals, temps, right);
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::Xor { dst, left, right } => {
+                let result = Self::get_operand_static(signals, temps, left) ^ Self::get_operand_static(signals, temps, right);
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::Add { dst, left, right, mask } => {
+                let result = Self::get_operand_static(signals, temps, left).wrapping_add(Self::get_operand_static(signals, temps, right)) & mask;
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::Sub { dst, left, right, mask } => {
+                let result = Self::get_operand_static(signals, temps, left).wrapping_sub(Self::get_operand_static(signals, temps, right)) & mask;
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::Mul { dst, left, right, mask } => {
+                let result = Self::get_operand_static(signals, temps, left).wrapping_mul(Self::get_operand_static(signals, temps, right)) & mask;
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::Div { dst, left, right } => {
+                let r = Self::get_operand_static(signals, temps, right);
+                let result = if r != 0 { Self::get_operand_static(signals, temps, left) / r } else { 0 };
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::Mod { dst, left, right } => {
+                let r = Self::get_operand_static(signals, temps, right);
+                let result = if r != 0 { Self::get_operand_static(signals, temps, left) % r } else { 0 };
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::Shl { dst, left, right, mask } => {
+                let shift = Self::get_operand_static(signals, temps, right).min(63) as u32;
+                let result = (Self::get_operand_static(signals, temps, left) << shift) & mask;
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::Shr { dst, left, right } => {
+                let shift = Self::get_operand_static(signals, temps, right).min(63) as u32;
+                let result = Self::get_operand_static(signals, temps, left) >> shift;
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::Eq { dst, left, right } => {
+                let result = (Self::get_operand_static(signals, temps, left) == Self::get_operand_static(signals, temps, right)) as u64;
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::Ne { dst, left, right } => {
+                let result = (Self::get_operand_static(signals, temps, left) != Self::get_operand_static(signals, temps, right)) as u64;
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::Lt { dst, left, right } => {
+                let result = (Self::get_operand_static(signals, temps, left) < Self::get_operand_static(signals, temps, right)) as u64;
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::Gt { dst, left, right } => {
+                let result = (Self::get_operand_static(signals, temps, left) > Self::get_operand_static(signals, temps, right)) as u64;
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::Le { dst, left, right } => {
+                let result = (Self::get_operand_static(signals, temps, left) <= Self::get_operand_static(signals, temps, right)) as u64;
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::Ge { dst, left, right } => {
+                let result = (Self::get_operand_static(signals, temps, left) >= Self::get_operand_static(signals, temps, right)) as u64;
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::Mux { dst, cond, when_true, when_false, mask } => {
+                // Branchless mux
+                let c = Self::get_operand_static(signals, temps, cond);
+                let t = Self::get_operand_static(signals, temps, when_true);
+                let f = Self::get_operand_static(signals, temps, when_false);
+                let select = (c != 0) as u64;
+                let result = (select.wrapping_neg() & t) | ((!select.wrapping_neg()) & f);
+                unsafe { *temps.get_unchecked_mut(dst) = result & mask; }
+            }
+            DirectOp::Slice { dst, src, shift, mask } => {
+                let result = (Self::get_operand_static(signals, temps, src) >> shift) & mask;
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
+            DirectOp::ConcatInit { dst } => {
+                unsafe { *temps.get_unchecked_mut(dst) = 0; }
+            }
+            DirectOp::ConcatAccum { dst, src, shift, part_mask } => {
+                let part = Self::get_operand_static(signals, temps, src) & part_mask;
+                unsafe {
+                    let current = *temps.get_unchecked(dst);
+                    *temps.get_unchecked_mut(dst) = current | (part << shift);
                 }
             }
+            DirectOp::ConcatFinish { dst, mask } => {
+                unsafe {
+                    let val = *temps.get_unchecked(dst);
+                    *temps.get_unchecked_mut(dst) = val & mask;
+                }
+            }
+            DirectOp::Resize { dst, src, mask } => {
+                let result = Self::get_operand_static(signals, temps, src) & mask;
+                unsafe { *temps.get_unchecked_mut(dst) = result; }
+            }
         }
-
-        stack.pop().unwrap_or(0)
     }
 
     fn poke_by_name(&mut self, name: &str, value: u64) -> Result<(), String> {
@@ -599,16 +647,13 @@ impl RtlSimulator {
 
     #[inline(always)]
     fn evaluate(&mut self) {
-        // Single pass - assignments should be topologically sorted
-        let mut stack = std::mem::take(&mut self.eval_stack);
+        // Execute all assignments in order
         for i in 0..self.assigns.len() {
-            let assign = &self.assigns[i];
-            let target_idx = assign.target_idx;
-            let mask = assign.mask;
-            let new_val = Self::execute_bytecode_static(&self.signals, &assign.program, &mut stack) & mask;
-            unsafe { *self.signals.get_unchecked_mut(target_idx) = new_val; }
+            for j in 0..self.assigns[i].ops.len() {
+                let op = self.assigns[i].ops[j];
+                Self::execute_op_static(&mut self.signals, &mut self.temps, &op);
+            }
         }
-        self.eval_stack = stack;
     }
 
     #[inline(always)]
@@ -616,14 +661,15 @@ impl RtlSimulator {
         // Evaluate combinational logic
         self.evaluate();
 
-        // Sample all register inputs into pre-allocated buffer
-        let mut stack = std::mem::take(&mut self.eval_stack);
+        // Sample all register inputs
         for i in 0..self.seq_assigns.len() {
-            let assign = &self.seq_assigns[i];
-            let new_val = Self::execute_bytecode_static(&self.signals, &assign.program, &mut stack) & assign.mask;
-            self.next_regs[i] = new_val;
+            for j in 0..self.seq_assigns[i].ops.len() {
+                let op = self.seq_assigns[i].ops[j];
+                Self::execute_op_static(&mut self.signals, &mut self.temps, &op);
+            }
+            let target = self.seq_assigns[i].final_target;
+            self.next_regs[i] = unsafe { *self.signals.get_unchecked(target) };
         }
-        self.eval_stack = stack;
 
         // Update all registers
         for i in 0..self.seq_targets.len() {
@@ -653,27 +699,29 @@ impl RtlSimulator {
     /// Run a single 14MHz cycle with integrated memory handling (optimized)
     #[inline(always)]
     fn run_14m_cycle_internal(&mut self, key_data: u8, key_ready: bool) -> (bool, bool) {
-        // Set keyboard input
-        let k_val = if key_ready { (key_data as u64) | 0x80 } else { 0 };
+        // Set keyboard input (branchless)
+        let k_val = ((key_data as u64) | 0x80) * (key_ready as u64);
         unsafe { *self.signals.get_unchecked_mut(self.k_idx) = k_val; }
 
-        // Falling edge - set clock and provide memory data in one go
+        // Falling edge
         unsafe { *self.signals.get_unchecked_mut(self.clk_idx) = 0; }
-
-        // Evaluate once to get current ram_addr
         self.evaluate();
 
-        // Provide RAM/ROM data based on address
+        // Provide RAM/ROM data
         let ram_addr = unsafe { *self.signals.get_unchecked(self.ram_addr_idx) } as usize;
-        let ram_data = if ram_addr >= 0xD000 && ram_addr <= 0xFFFF {
-            let rom_offset = ram_addr - 0xD000;
-            unsafe { *self.rom.get_unchecked(rom_offset.min(self.rom.len() - 1)) }
+        let ram_data = if ram_addr >= 0xD000 {
+            let rom_offset = ram_addr.wrapping_sub(0xD000);
+            if rom_offset < self.rom.len() {
+                unsafe { *self.rom.get_unchecked(rom_offset) }
+            } else {
+                0
+            }
         } else {
-            unsafe { *self.ram.get_unchecked(ram_addr.min(self.ram.len() - 1)) }
+            unsafe { *self.ram.get_unchecked(ram_addr & 0xFFFF) }
         };
         unsafe { *self.signals.get_unchecked_mut(self.ram_do_idx) = ram_data as u64; }
 
-        // Rising edge - clock transition triggers register update
+        // Rising edge
         unsafe { *self.signals.get_unchecked_mut(self.clk_idx) = 1; }
         self.tick_fast();
 
@@ -682,12 +730,10 @@ impl RtlSimulator {
         let ram_we = unsafe { *self.signals.get_unchecked(self.ram_we_idx) };
         if ram_we == 1 {
             let write_addr = unsafe { *self.signals.get_unchecked(self.ram_addr_idx) } as usize;
-            if write_addr < self.ram.len() {
+            if write_addr < 0xC000 {
                 let data = unsafe { (*self.signals.get_unchecked(self.d_idx) & 0xFF) as u8 };
                 unsafe { *self.ram.get_unchecked_mut(write_addr) = data; }
-                if write_addr >= 0x0400 && write_addr <= 0x07FF {
-                    text_dirty = true;
-                }
+                text_dirty = (write_addr >= 0x0400) & (write_addr <= 0x07FF);
             }
         }
 
@@ -700,29 +746,28 @@ impl RtlSimulator {
     /// Optimized tick - only evaluate once after register update
     #[inline(always)]
     fn tick_fast(&mut self) {
-        // Evaluate to sample register inputs
         self.evaluate();
 
-        // Sample all register inputs into pre-allocated buffer
-        let mut stack = std::mem::take(&mut self.eval_stack);
+        // Sample register inputs
         for i in 0..self.seq_assigns.len() {
-            let assign = &self.seq_assigns[i];
-            let new_val = Self::execute_bytecode_static(&self.signals, &assign.program, &mut stack) & assign.mask;
-            self.next_regs[i] = new_val;
+            for j in 0..self.seq_assigns[i].ops.len() {
+                let op = self.seq_assigns[i].ops[j];
+                Self::execute_op_static(&mut self.signals, &mut self.temps, &op);
+            }
+            let target = self.seq_assigns[i].final_target;
+            self.next_regs[i] = unsafe { *self.signals.get_unchecked(target) };
         }
-        self.eval_stack = stack;
 
-        // Update all registers
+        // Update registers
         for i in 0..self.seq_targets.len() {
             let target_idx = self.seq_targets[i];
             unsafe { *self.signals.get_unchecked_mut(target_idx) = self.next_regs[i]; }
         }
 
-        // Final evaluate with new register values
         self.evaluate();
     }
 
-    /// Run N CPU cycles (each = 14 x 14MHz cycles) - main batched execution entry point
+    /// Run N CPU cycles
     fn run_cpu_cycles(&mut self, n: usize, key_data: u8, key_ready: bool) -> BatchResult {
         let mut result = BatchResult {
             text_dirty: false,
@@ -735,9 +780,7 @@ impl RtlSimulator {
         for _ in 0..n {
             for _ in 0..14 {
                 let (text_dirty, key_cleared) = self.run_14m_cycle_internal(key_data, current_key_ready);
-                if text_dirty {
-                    result.text_dirty = true;
-                }
+                result.text_dirty |= text_dirty;
                 if key_cleared {
                     current_key_ready = false;
                     result.key_cleared = true;
@@ -752,7 +795,9 @@ impl RtlSimulator {
         for val in self.signals.iter_mut() {
             *val = 0;
         }
-        // Don't clear RAM/ROM on reset
+        for val in self.temps.iter_mut() {
+            *val = 0;
+        }
     }
 
     fn signal_count(&self) -> usize {
@@ -851,7 +896,6 @@ impl RubyRtlSim {
         self.sim.borrow().output_names.clone()
     }
 
-    /// Load ROM data (bytes as array of integers)
     fn load_rom(&self, data: RArray) -> Result<(), Error> {
         let ruby = unsafe { Ruby::get_unchecked() };
         let bytes: Vec<u8> = data.to_vec::<i64>()
@@ -863,7 +907,6 @@ impl RubyRtlSim {
         Ok(())
     }
 
-    /// Load RAM data at offset
     fn load_ram(&self, data: RArray, offset: usize) -> Result<(), Error> {
         let ruby = unsafe { Ruby::get_unchecked() };
         let bytes: Vec<u8> = data.to_vec::<i64>()
@@ -875,7 +918,6 @@ impl RubyRtlSim {
         Ok(())
     }
 
-    /// Run N CPU cycles with batched execution (key optimization!)
     fn run_cpu_cycles(&self, n: usize, key_data: i64, key_ready: bool) -> Result<RHash, Error> {
         let ruby = unsafe { Ruby::get_unchecked() };
         let result = self.sim.borrow_mut().run_cpu_cycles(n, key_data as u8, key_ready);
@@ -887,7 +929,6 @@ impl RubyRtlSim {
         Ok(hash)
     }
 
-    /// Read RAM range (for screen reading)
     fn read_ram(&self, start: usize, length: usize) -> Result<RArray, Error> {
         let ruby = unsafe { Ruby::get_unchecked() };
         let sim = self.sim.borrow();
@@ -896,7 +937,6 @@ impl RubyRtlSim {
         Ok(ruby.ary_from_vec(data))
     }
 
-    /// Write RAM (for initial loading)
     fn write_ram(&self, start: usize, data: RArray) -> Result<(), Error> {
         let ruby = unsafe { Ruby::get_unchecked() };
         let bytes: Vec<u8> = data.to_vec::<i64>()
