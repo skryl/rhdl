@@ -3,7 +3,7 @@
 # This module provides DSL constructs for memory arrays that can be synthesized
 # to Verilog with proper BRAM inference.
 #
-# Example - Simple RAM:
+# Example - Simple RAM with async read (distributed RAM):
 #   class RAM256x8 < RHDL::Sim::Component
 #     include RHDL::DSL::Memory
 #
@@ -17,6 +17,35 @@
 #
 #     sync_write :mem, clock: :clk, enable: :we, addr: :addr, data: :din
 #     async_read :dout, from: :mem, addr: :addr
+#   end
+#
+# Example - BRAM with sync read (for FPGA BRAM inference):
+#   class BRAM256x8 < RHDL::Sim::Component
+#     include RHDL::DSL::Memory
+#
+#     input :clk
+#     input :we
+#     input :addr, width: 8
+#     input :din, width: 8
+#     output :dout, width: 8
+#
+#     memory :mem, depth: 256, width: 8
+#
+#     sync_write :mem, clock: :clk, enable: :we, addr: :addr, data: :din
+#     sync_read :dout, from: :mem, clock: :clk, addr: :addr
+#   end
+#
+# Example - Computed address in behavior blocks:
+#   class Stack < RHDL::Sim::Component
+#     include RHDL::DSL::Memory
+#     include RHDL::DSL::Behavior
+#
+#     # ... ports and memory definition ...
+#
+#     behavior do
+#       # Read with computed address (sp - 1)
+#       dout <= mem_read_expr(:data, sp - lit(1, width: 5), width: 8)
+#     end
 #   end
 #
 # Example - Lookup Table (ROM):
@@ -86,6 +115,19 @@ module RHDL
         def initialize(output, from:, addr:, enable: nil)
           @output = output
           @memory = from
+          @addr = addr
+          @enable = enable
+        end
+      end
+
+      # Synchronous read definition (registered output for BRAM inference)
+      class SyncReadDef
+        attr_reader :output, :memory, :clock, :addr, :enable
+
+        def initialize(output, from:, clock:, addr:, enable: nil)
+          @output = output
+          @memory = from
+          @clock = clock
           @addr = addr
           @enable = enable
         end
@@ -216,6 +258,31 @@ module RHDL
           @_async_reads || []
         end
 
+        # Define a synchronous read (registered output for BRAM inference)
+        #
+        # @param output [Symbol] Output signal name
+        # @param from [Symbol] Memory to read from
+        # @param clock [Symbol] Clock signal
+        # @param addr [Symbol] Address signal
+        # @param enable [Symbol, nil] Optional enable signal
+        #
+        # @example
+        #   sync_read :dout, from: :mem, clock: :clk, addr: :addr
+        #
+        # This generates proper BRAM read inferencing in synthesis:
+        #   always @(posedge clk) begin
+        #     dout <= mem[addr];
+        #   end
+        #
+        def sync_read(output, from:, clock:, addr:, enable: nil)
+          @_sync_reads ||= []
+          @_sync_reads << SyncReadDef.new(output, from: from, clock: clock, addr: addr, enable: enable)
+        end
+
+        def _sync_reads
+          @_sync_reads || []
+        end
+
         # Define a lookup table (combinational ROM)
         #
         # @param name [Symbol] Lookup table name
@@ -326,7 +393,7 @@ module RHDL
           end
         end
 
-        # Process async reads - uses current values
+        # Process async reads - uses current values (combinational)
         def process_memory_async_reads
           self.class._async_reads.each do |read_def|
             if read_def.enable.nil? || signal_val(read_def.enable) == 1
@@ -336,6 +403,20 @@ module RHDL
             else
               out_set(read_def.output, 0)
             end
+          end
+        end
+
+        # Process sync reads - registered output on clock edge (for BRAM inference)
+        def process_memory_sync_reads(rising_clocks)
+          self.class._sync_reads.each do |read_def|
+            next unless rising_clocks[read_def.clock]
+
+            if read_def.enable.nil? || signal_val(read_def.enable) == 1
+              addr = signal_val(read_def.addr)
+              value = mem_read(read_def.memory, addr)
+              out_set(read_def.output, value)
+            end
+            # Note: When enable is low, output retains previous value (registered)
           end
         end
 
@@ -360,13 +441,15 @@ module RHDL
           # If Sequential DSL is included, it handles the propagate and calls our methods
           return if self.class.respond_to?(:sequential_defined?) && self.class.sequential_defined?
 
-          # Handle sync writes on rising edge
+          # Handle sync writes and reads on rising edge
           # First, detect rising edges for all clocks ONCE
           @_prev_clk ||= {}
           rising_clocks = {}
 
-          self.class._sync_writes.each do |write_def|
-            clock = write_def.clock
+          # Collect all clocks from sync writes and reads
+          all_sync_ops = self.class._sync_writes + self.class._sync_reads
+          all_sync_ops.each do |op_def|
+            clock = op_def.clock
             next if rising_clocks.key?(clock)  # Already checked this clock
 
             clk_val = in_val(clock)
@@ -377,6 +460,9 @@ module RHDL
 
           # Process sync writes
           process_memory_sync_writes(rising_clocks)
+
+          # Process sync reads (registered output)
+          process_memory_sync_reads(rising_clocks)
 
           # Handle async reads
           process_memory_async_reads

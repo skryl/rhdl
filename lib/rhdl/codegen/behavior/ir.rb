@@ -6,10 +6,10 @@ module RHDL
       module IR
       class ModuleDef
         attr_reader :name, :ports, :nets, :regs, :assigns, :processes, :reg_ports, :instances,
-                    :memories, :write_ports, :parameters
+                    :memories, :write_ports, :sync_read_ports, :parameters
 
         def initialize(name:, ports:, nets:, regs:, assigns:, processes:, reg_ports: [], instances: [],
-                       memories: [], write_ports: [], parameters: {})
+                       memories: [], write_ports: [], sync_read_ports: [], parameters: {})
           @name = name
           @ports = ports
           @nets = nets
@@ -20,6 +20,7 @@ module RHDL
           @instances = instances
           @memories = memories
           @write_ports = write_ports
+          @sync_read_ports = sync_read_ports
           @parameters = parameters
         end
       end
@@ -248,6 +249,20 @@ module RHDL
         attr_reader :memory, :clock, :addr, :data, :enable
 
         def initialize(memory:, clock:, addr:, data:, enable:)
+          @memory = memory
+          @clock = clock
+          @addr = addr
+          @data = data
+          @enable = enable
+        end
+      end
+
+      # Memory synchronous read port (registered output for BRAM inference)
+      # Generates: always @(posedge clk) dout <= mem[addr];
+      class MemorySyncReadPort
+        attr_reader :memory, :clock, :addr, :data, :enable
+
+        def initialize(memory:, clock:, addr:, data:, enable: nil)
           @memory = memory
           @clock = clock
           @addr = addr

@@ -38,8 +38,8 @@ module RHDL
       # Note: Using intermediate signal for combined enable since DSL doesn't support lambdas
       sync_write :mem, clock: :clk, enable: :write_enable, addr: :addr, data: :din
 
-      # Asynchronous read (combinational)
-      # Note: For proper BRAM inference, sync_read would be needed (to be added to RHDL)
+      # Asynchronous read (combinational) - suitable for distributed RAM
+      # For BRAM inference, use: sync_read :dout, from: :mem, clock: :clk, addr: :addr, enable: :cs
       async_read :dout, from: :mem, addr: :addr, enable: :cs
 
       # Combinational logic to compute write_enable
