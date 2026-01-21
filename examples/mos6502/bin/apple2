@@ -210,7 +210,9 @@ class Apple2Terminal
     # Hires output height is proportional: (192/4) * (@hires_width / (280/2)) = 48 * @hires_width / 140
     # Debug mode adds bordered debug window: 1 padding + 5 lines (border + 3 content + border)
     # Non-debug adds 1 for disk loading indicator
-    hires_display_height = (HIRES_HEIGHT * @hires_width / HIRES_WIDTH) + (@debug ? 7 : 1)
+    # Add extra bottom padding (3 lines) to ensure debug panel is visible at terminal bottom
+    bottom_padding = 3
+    hires_display_height = (HIRES_HEIGHT * @hires_width / HIRES_WIDTH) + (@debug ? 7 : 1) + bottom_padding
     hires_display_width = @hires_width
     @hires_pad_top = [(@term_rows - hires_display_height) / 2, 0].max
     @hires_pad_left = [(@term_cols - hires_display_width) / 2, 0].max
@@ -476,6 +478,12 @@ class Apple2Terminal
       output << move_cursor(status_row, @hires_pad_left + 1)
       output << "DISK LOADING..."
     end
+
+    # Add bottom padding to ensure terminal scrolls enough to show all content
+    # This moves cursor below all rendered content and outputs blank lines
+    final_row = @hires_pad_top + hires_lines.length + (@debug ? 7 : 2) + 3
+    output << move_cursor(final_row, 1)
+    output << " " # Force terminal to recognize this line exists
 
     print output
   end
