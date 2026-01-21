@@ -27,6 +27,59 @@ RSpec.describe RHDL::CLI::Tasks::DiagramTask do
     it 'can be instantiated with single component option' do
       expect { described_class.new(component: 'gates/not_gate') }.not_to raise_error
     end
+
+    it 'can be instantiated with level option' do
+      expect { described_class.new(component: 'gates/not_gate', level: 'component') }.not_to raise_error
+      expect { described_class.new(component: 'gates/not_gate', level: 'hierarchy') }.not_to raise_error
+      expect { described_class.new(component: 'gates/not_gate', level: 'netlist') }.not_to raise_error
+      expect { described_class.new(component: 'gates/not_gate', level: 'gate') }.not_to raise_error
+    end
+
+    it 'can be instantiated with depth option' do
+      expect { described_class.new(component: 'gates/not_gate', depth: 1) }.not_to raise_error
+      expect { described_class.new(component: 'gates/not_gate', depth: :all) }.not_to raise_error
+    end
+
+    it 'can be instantiated with bit_blasted option' do
+      expect { described_class.new(component: 'gates/not_gate', bit_blasted: true) }.not_to raise_error
+    end
+
+    it 'can be instantiated with out option' do
+      expect { described_class.new(component: 'gates/not_gate', out: '/path/to/output') }.not_to raise_error
+    end
+
+    it 'can be instantiated with format option' do
+      expect { described_class.new(component: 'gates/not_gate', format: 'svg') }.not_to raise_error
+      expect { described_class.new(component: 'gates/not_gate', format: 'png') }.not_to raise_error
+      expect { described_class.new(component: 'gates/not_gate', format: 'dot') }.not_to raise_error
+    end
+
+    it 'can be instantiated with mode option for batch generation' do
+      expect { described_class.new(all: true, mode: 'component') }.not_to raise_error
+      expect { described_class.new(all: true, mode: 'hierarchical') }.not_to raise_error
+      expect { described_class.new(all: true, mode: 'gate') }.not_to raise_error
+    end
+  end
+
+  describe 'options handling' do
+    it 'stores all provided options' do
+      options = {
+        component: 'gates/not_gate',
+        level: 'hierarchy',
+        depth: 2,
+        bit_blasted: true,
+        out: '/custom/output',
+        format: 'svg'
+      }
+      task = described_class.new(options)
+
+      expect(task.options[:component]).to eq('gates/not_gate')
+      expect(task.options[:level]).to eq('hierarchy')
+      expect(task.options[:depth]).to eq(2)
+      expect(task.options[:bit_blasted]).to be true
+      expect(task.options[:out]).to eq('/custom/output')
+      expect(task.options[:format]).to eq('svg')
+    end
   end
 
   describe '#run with clean option' do

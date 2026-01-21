@@ -146,7 +146,7 @@ export function CurrentInstruction({ instruction, currentPC }: { instruction?: I
 
   return (
     <Box>
-      <Text color={apple2Theme.textDim}>></Text>
+      <Text color={apple2Theme.textDim}>{'>'}</Text>
       <Text color={apple2Theme.phosphor}>${formatHex16(instruction.address)}</Text>
       <Text color={apple2Theme.textDim}> {bytesHex.padEnd(8)} </Text>
       <Text color={apple2Theme.phosphor} bold>{instruction.mnemonic} </Text>

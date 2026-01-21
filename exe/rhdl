@@ -19,6 +19,7 @@ def show_help
       export        Export components to Verilog
       gates         Gate-level synthesis
       apple2        Apple II emulator and ROM tools
+      disk          Disk image utilities for Apple II
       generate      Generate all output files (diagrams + HDL exports)
       clean         Clean all generated files
       regenerate    Clean and regenerate all output files
@@ -236,22 +237,104 @@ def handle_gates(args)
   RHDL::CLI::Tasks::GatesTask.new(options).run
 end
 
+def handle_disk(args)
+  options = {
+    info: false,
+    convert: false,
+    extract_boot: false,
+    extract_tracks: false,
+    dump_after_boot: false,
+    disk: nil,
+    output: nil,
+    rom: nil,
+    start_track: nil,
+    end_track: nil,
+    prodos: false,
+    max_cycles: nil,
+    base_addr: nil,
+    end_addr: nil
+  }
+
+  parser = OptionParser.new do |opts|
+    opts.banner = <<~BANNER
+      Usage: rhdl disk <command> [options] FILE
+
+      Disk image utilities for Apple II.
+
+      Commands:
+        rhdl disk info FILE            Show disk image information
+        rhdl disk convert FILE         Convert disk to binary file
+        rhdl disk boot FILE            Extract boot sector
+        rhdl disk tracks FILE          Extract specific tracks
+        rhdl disk memdump FILE         Boot disk and dump memory (requires ROM)
+
+      Options:
+    BANNER
+
+    opts.on('-o', '--output FILE', 'Output file path') { |v| options[:output] = v }
+    opts.on('-r', '--rom FILE', 'ROM file for booting (memdump only)') { |v| options[:rom] = v }
+    opts.on('--start-track N', Integer, 'Start track for extraction') { |v| options[:start_track] = v }
+    opts.on('--end-track N', Integer, 'End track for extraction') { |v| options[:end_track] = v }
+    opts.on('--prodos', 'Use ProDOS sector interleaving') { options[:prodos] = true }
+    opts.on('--max-cycles N', Integer, 'Max boot cycles for memdump') { |v| options[:max_cycles] = v }
+    opts.on('--base-addr ADDR', 'Memory dump base address (hex)') { |v| options[:base_addr] = v.to_i(16) }
+    opts.on('--end-addr ADDR', 'Memory dump end address (hex)') { |v| options[:end_addr] = v.to_i(16) }
+    opts.on('-h', '--help', 'Show this help') do
+      puts opts
+      exit 0
+    end
+  end
+
+  parser.parse!(args)
+
+  command = args.shift
+  options[:disk] = args.shift
+
+  case command
+  when 'info'
+    options[:info] = true
+  when 'convert'
+    options[:convert] = true
+  when 'boot'
+    options[:extract_boot] = true
+  when 'tracks'
+    options[:extract_tracks] = true
+  when 'memdump'
+    options[:dump_after_boot] = true
+  when nil, '-h', '--help', 'help'
+    puts parser
+    exit 0
+  else
+    warn "Unknown disk command: #{command}"
+    puts parser
+    exit 1
+  end
+
+  unless options[:disk]
+    warn "Error: No disk file specified"
+    puts parser
+    exit 1
+  end
+
+  RHDL::CLI::Tasks::DiskConvertTask.new(options).run
+end
+
 def handle_apple2(args)
   options = {
     build: false,
     run: false,
     demo: false,
     appleiigo: false,
+    karateka: false,
     clean: false,
     debug: false,
-    fast: false,
+    mode: :native,  # Simulator mode: native, ruby, or hdl
     rom: nil,
     rom_address: nil,
     address: nil,
     speed: nil,
     green: false,
     ink: false,
-    hdl: false,
     hires: false,
     hires_width: nil,
     disk: nil,
@@ -279,6 +362,9 @@ def handle_apple2(args)
         rhdl apple2 --appleiigo --disk karateka.dsk --hires
         rhdl apple2 --appleiigo --disk karateka.dsk --hires --hires-width 140
 
+      Quick start (pre-loaded memory dump):
+        rhdl apple2 --karateka     Run Karateka directly (no disk/ROM needed)
+
       Ink TUI (React-based terminal UI):
         rhdl apple2 --ink          Run with Ink TUI (ISA mode, demo program)
         rhdl apple2 --ink --hdl    Run with Ink TUI (HDL mode)
@@ -291,16 +377,16 @@ def handle_apple2(args)
     opts.on('--run', 'Run the emulator (after build)') { options[:run] = true }
     opts.on('--demo', 'Run emulator demo (no ROM needed)') { options[:demo] = true }
     opts.on('--appleiigo', 'Run with AppleIIGo public domain ROM') { options[:appleiigo] = true }
+    opts.on('-k', '--karateka', 'Load Karateka memory dump (ready to play)') { options[:karateka] = true }
     opts.on('--clean', 'Clean ROM output files') { options[:clean] = true }
     opts.on('-d', '--debug', 'Enable debug mode') { options[:debug] = true }
-    opts.on('-f', '--fast', 'Use fast ISA-level simulator (not cycle-accurate)') { options[:fast] = true }
+    opts.on('-m', '--mode TYPE', [:native, :ruby, :hdl], 'Simulator mode: native (default), ruby, hdl') { |v| options[:mode] = v }
     opts.on('-r', '--rom FILE', 'ROM file to load') { |v| options[:rom] = v }
     opts.on('-a', '--address ADDR', 'Program load address (hex, default: 0800)') { |v| options[:address] = v }
     opts.on('--rom-address ADDR', 'ROM load address (hex)') { |v| options[:rom_address] = v }
     opts.on('-s', '--speed CYCLES', Integer, 'Cycles per frame (default: 10000)') { |v| options[:speed] = v }
     opts.on('-g', '--green', 'Green phosphor screen effect') { options[:green] = true }
     opts.on('--ink', 'Use Ink (React-based) TUI renderer') { options[:ink] = true }
-    opts.on('--hdl', 'Use HDL mode (cycle-accurate simulation)') { options[:hdl] = true }
     opts.on('-H', '--hires', 'Enable hi-res graphics rendering (uses braille characters)') { options[:hires] = true }
     opts.on('--hires-width WIDTH', Integer, 'Hi-res display width in chars (default: 80)') { |v| options[:hires_width] = v }
     opts.on('--disk FILE', 'Load disk image (.dsk) into drive 1') { |v| options[:disk] = v }
@@ -408,6 +494,8 @@ when 'gates', 'gate'
   handle_gates(ARGV)
 when 'apple2'
   handle_apple2(ARGV)
+when 'disk'
+  handle_disk(ARGV)
 when 'generate', 'generate_all'
   handle_generate(ARGV)
 when 'clean', 'clean_all'
