@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # Apple II FIRRTL/RTL Simulator Runner
-# Provides RTL-level simulation for the Apple2 HDL component
+# High-performance RTL-level simulation using batched Rust execution
 #
 # Usage:
 #   runner = RHDL::Apple2::FirrtlRunner.new
@@ -44,7 +44,7 @@ module RHDL
       end
     end
 
-    # RTL-level runner using FIRRTL simulator
+    # High-performance RTL-level runner using batched Rust execution
     class FirrtlRunner
       attr_reader :sim, :ir_json
 
@@ -72,7 +72,7 @@ module RHDL
       ].freeze
 
       def initialize
-        puts "Initializing Apple2 FIRRTL/RTL simulation..."
+        puts "Initializing Apple2 FIRRTL/RTL simulation (optimized)..."
         start_time = Time.now
 
         # Generate RTL IR JSON
@@ -83,19 +83,22 @@ module RHDL
 
         elapsed = Time.now - start_time
         puts "  IR loaded in #{elapsed.round(2)}s"
-        puts "  Native backend: #{@sim.native? ? 'Rust' : 'Ruby (fallback)'}"
+        puts "  Native backend: #{@sim.native? ? 'Rust (optimized)' : 'Ruby (fallback)'}"
         puts "  Signals: #{@sim.signal_count}, Registers: #{@sim.reg_count}"
 
-        @ram = Array.new(48 * 1024, 0)
-        @rom = Array.new(12 * 1024, 0)
         @cycles = 0
         @halted = false
         @text_page_dirty = false
         @key_data = 0
         @key_ready = false
+        @use_batched = @sim.native? && @sim.respond_to?(:run_cpu_cycles)
+
+        if @use_batched
+          puts "  Batched execution: enabled (minimal FFI overhead)"
+        end
 
         @sim.reset
-        initialize_inputs
+        initialize_inputs unless @use_batched
       end
 
       def native?
@@ -107,6 +110,7 @@ module RHDL
       end
 
       def initialize_inputs
+        return if @use_batched
         poke_input('clk_14m', 0)
         poke_input('flash_clk', 0)
         poke_input('reset', 0)
@@ -128,16 +132,32 @@ module RHDL
 
       def load_rom(bytes, base_addr:)
         bytes = bytes.bytes if bytes.is_a?(String)
-        bytes.each_with_index do |byte, i|
-          @rom[i] = byte if i < @rom.size
+
+        if @use_batched
+          # Load directly into Rust memory
+          @sim.load_rom(bytes)
+        else
+          # Fallback: store locally
+          @rom ||= Array.new(12 * 1024, 0)
+          bytes.each_with_index do |byte, i|
+            @rom[i] = byte if i < @rom.size
+          end
         end
       end
 
       def load_ram(bytes, base_addr:)
         bytes = bytes.bytes if bytes.is_a?(String)
-        bytes.each_with_index do |byte, i|
-          addr = base_addr + i
-          @ram[addr] = byte if addr < @ram.size
+
+        if @use_batched
+          # Load directly into Rust memory
+          @sim.load_ram(bytes, base_addr)
+        else
+          # Fallback: store locally
+          @ram ||= Array.new(48 * 1024, 0)
+          bytes.each_with_index do |byte, i|
+            addr = base_addr + i
+            @ram[addr] = byte if addr < @ram.size
+          end
         end
       end
 
@@ -161,24 +181,54 @@ module RHDL
       end
 
       def reset
-        poke_input('reset', 1)
-        run_14m_cycles(14)
-        poke_input('reset', 0)
-        run_14m_cycles(14 * 10)
+        if @use_batched
+          # Use batched reset sequence
+          poke_input('reset', 1)
+          @sim.run_cpu_cycles(1, 0, false)
+          poke_input('reset', 0)
+          @sim.run_cpu_cycles(10, 0, false)
+        else
+          poke_input('reset', 1)
+          run_14m_cycles(14)
+          poke_input('reset', 0)
+          run_14m_cycles(14 * 10)
+        end
         @cycles = 0
         @halted = false
       end
 
+      # Main entry point for running cycles - uses batched execution when available
       def run_steps(steps)
-        steps.times { run_cpu_cycle }
+        if @use_batched
+          run_steps_batched(steps)
+        else
+          steps.times { run_cpu_cycle }
+        end
+      end
+
+      # Batched execution - runs many cycles with single FFI call
+      def run_steps_batched(steps)
+        result = @sim.run_cpu_cycles(steps, @key_data, @key_ready)
+
+        @cycles += result[:cycles_run]
+        @text_page_dirty = true if result[:text_dirty]
+        @key_ready = false if result[:key_cleared]
       end
 
       def run_cpu_cycle
-        14.times { run_14m_cycle }
-        @cycles += 1
+        if @use_batched
+          run_steps_batched(1)
+        else
+          14.times { run_14m_cycle }
+          @cycles += 1
+        end
       end
 
+      # Fallback: individual 14MHz cycle (only used without batching)
       def run_14m_cycle
+        @ram ||= Array.new(48 * 1024, 0)
+        @rom ||= Array.new(12 * 1024, 0)
+
         poke_input('k', @key_ready ? (@key_data | 0x80) : 0)
 
         # Falling edge
@@ -238,6 +288,25 @@ module RHDL
       end
 
       def read_screen_array
+        if @use_batched
+          read_screen_array_batched
+        else
+          read_screen_array_fallback
+        end
+      end
+
+      def read_screen_array_batched
+        result = []
+        24.times do |row|
+          base = text_line_address(row)
+          line_data = @sim.read_ram(base, 40)
+          result << line_data.to_a
+        end
+        result
+      end
+
+      def read_screen_array_fallback
+        @ram ||= Array.new(48 * 1024, 0)
         result = []
         24.times do |row|
           line = []
@@ -265,6 +334,33 @@ module RHDL
       end
 
       def read_hires_bitmap
+        if @use_batched
+          read_hires_bitmap_batched
+        else
+          read_hires_bitmap_fallback
+        end
+      end
+
+      def read_hires_bitmap_batched
+        bitmap = []
+        HIRES_HEIGHT.times do |row|
+          line = []
+          line_addr = hires_line_address(row, HIRES_PAGE1_START)
+          line_bytes = @sim.read_ram(line_addr, HIRES_BYTES_PER_LINE).to_a
+
+          line_bytes.each do |byte|
+            7.times do |bit|
+              line << ((byte >> bit) & 1)
+            end
+          end
+
+          bitmap << line
+        end
+        bitmap
+      end
+
+      def read_hires_bitmap_fallback
+        @ram ||= Array.new(48 * 1024, 0)
         base = HIRES_PAGE1_START
         bitmap = []
 
@@ -386,18 +482,30 @@ module RHDL
       end
 
       def read(addr)
-        if addr < @ram.size
-          @ram[addr]
-        elsif addr >= 0xD000 && addr <= 0xFFFF
-          @rom[addr - 0xD000] || 0
+        if @use_batched
+          data = @sim.read_ram(addr, 1)
+          data[0] || 0
         else
-          0
+          @ram ||= Array.new(48 * 1024, 0)
+          @rom ||= Array.new(12 * 1024, 0)
+          if addr < @ram.size
+            @ram[addr]
+          elsif addr >= 0xD000 && addr <= 0xFFFF
+            @rom[addr - 0xD000] || 0
+          else
+            0
+          end
         end
       end
 
       def write(addr, value)
-        if addr < @ram.size
-          @ram[addr] = value & 0xFF
+        if @use_batched
+          @sim.write_ram(addr, [value & 0xFF])
+        else
+          @ram ||= Array.new(48 * 1024, 0)
+          if addr < @ram.size
+            @ram[addr] = value & 0xFF
+          end
         end
       end
 
