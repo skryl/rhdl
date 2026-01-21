@@ -10,7 +10,7 @@
 
 require_relative '../hdl/apple2'
 require 'rhdl/codegen'
-require 'rhdl/codegen/circt/sim/firrtl_native'
+require 'rhdl/codegen/circt/sim/firrtl_interpreter'
 
 module RHDL
   module Apple2
@@ -79,7 +79,7 @@ module RHDL
         @ir_json = Apple2Firrtl.ir_json
 
         # Create the simulator
-        @sim = RHDL::Codegen::CIRCT::FirrtlSimWrapper.new(@ir_json)
+        @sim = RHDL::Codegen::CIRCT::FirrtlInterpreterWrapper.new(@ir_json)
 
         elapsed = Time.now - start_time
         puts "  IR loaded in #{elapsed.round(2)}s"

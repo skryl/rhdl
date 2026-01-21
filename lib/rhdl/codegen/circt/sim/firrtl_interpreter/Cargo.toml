@@ -1,9 +1,9 @@
 [package]
-name = "firrtl_native"
+name = "firrtl_interpreter"
 version = "0.1.0"
 edition = "2021"
 authors = ["RHDL Team"]
-description = "High-performance RTL simulator for FIRRTL/Behavior IR with Ruby bindings"
+description = "Bytecode-based RTL interpreter for FIRRTL/Behavior IR with Ruby bindings"
 license = "MIT"
 
 [lib]
