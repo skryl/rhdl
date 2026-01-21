@@ -94,7 +94,7 @@ RSpec.describe MOS6502::AddressGenerator do
       end
     end
 
-    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+    context 'when iverilog is available', :slow, if: HdlToolchain.iverilog_available? do
       it 'behavior Verilog matches RHDL simulation' do
         verilog = described_class.to_verilog
         behavior = described_class.new('behavior')
@@ -166,7 +166,7 @@ RSpec.describe MOS6502::AddressGenerator do
       expect(verilog).to include('output [15:0] eff_addr')
     end
 
-    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+    context 'when iverilog is available', :slow, if: HdlToolchain.iverilog_available? do
       it 'matches behavior simulation for address modes' do
         behavior = described_class.new('behavior')
         vectors = []
