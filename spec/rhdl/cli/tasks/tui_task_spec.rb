@@ -39,6 +39,19 @@ RSpec.describe RHDL::CLI::Tasks::TuiTask do
     it 'can be instantiated with signals option' do
       expect { described_class.new(component: 'sequential/counter', signals: :all) }.not_to raise_error
     end
+
+    it 'can be instantiated with build option' do
+      expect { described_class.new(build: true) }.not_to raise_error
+    end
+
+    it 'can be instantiated with alu option' do
+      expect { described_class.new(alu: true) }.not_to raise_error
+    end
+
+    it 'can be instantiated with format option' do
+      expect { described_class.new(component: 'sequential/counter', format: :hex) }.not_to raise_error
+      expect { described_class.new(component: 'sequential/counter', format: :binary) }.not_to raise_error
+    end
   end
 
   describe '#run' do
