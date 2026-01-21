@@ -5,16 +5,9 @@ require 'rhdl/cli'
 
 RSpec.describe RHDL::CLI::Tasks::NativeTask do
   describe 'constants' do
-    it 'defines EXT_DIR' do
-      expect(described_class::EXT_DIR).to include('isa_simulator_native')
-    end
-
-    it 'defines LIB_DIR' do
-      expect(described_class::LIB_DIR).to include('lib')
-    end
-
-    it 'defines TARGET_DIR' do
-      expect(described_class::TARGET_DIR).to include('target')
+    it 'defines EXTENSIONS' do
+      expect(described_class::EXTENSIONS).to be_a(Hash)
+      expect(described_class::EXTENSIONS.keys).to include(:isa_simulator, :sim_cpu)
     end
   end
 
@@ -41,7 +34,7 @@ RSpec.describe RHDL::CLI::Tasks::NativeTask do
       it 'displays native simulator status' do
         task = described_class.new(check: true)
 
-        expect { task.run }.to output(/Native ISA simulator/).to_stdout
+        expect { task.run }.to output(/ISA Simulator/).to_stdout
       end
     end
 
@@ -59,7 +52,7 @@ RSpec.describe RHDL::CLI::Tasks::NativeTask do
     let(:task) { described_class.new(check: true) }
 
     it 'displays native simulator status' do
-      expect { task.check }.to output(/Native ISA simulator/).to_stdout
+      expect { task.check }.to output(/ISA Simulator/).to_stdout
     end
 
     it 'returns true or false' do
@@ -88,6 +81,7 @@ RSpec.describe RHDL::CLI::Tasks::NativeTask do
 
   describe 'private methods' do
     let(:task) { described_class.new }
+    let(:ext) { described_class::EXTENSIONS[:isa_simulator] }
 
     describe '#host_os' do
       it 'returns a string' do
@@ -98,21 +92,21 @@ RSpec.describe RHDL::CLI::Tasks::NativeTask do
 
     describe '#src_lib_name' do
       it 'returns library name based on platform' do
-        result = task.send(:src_lib_name)
+        result = task.send(:src_lib_name, ext)
         expect(result).to match(/libisa_simulator_native\.(so|dylib)|isa_simulator_native\.dll/)
       end
     end
 
     describe '#dst_lib_name' do
       it 'returns target library name based on platform' do
-        result = task.send(:dst_lib_name)
+        result = task.send(:dst_lib_name, ext)
         expect(result).to match(/isa_simulator_native\.(so|bundle|dll)/)
       end
     end
 
     describe '#src_lib_path' do
       it 'returns path under target/release' do
-        result = task.send(:src_lib_path)
+        result = task.send(:src_lib_path, ext)
         expect(result).to include('target')
         expect(result).to include('release')
       end
@@ -120,7 +114,7 @@ RSpec.describe RHDL::CLI::Tasks::NativeTask do
 
     describe '#dst_lib_path' do
       it 'returns path under lib directory' do
-        result = task.send(:dst_lib_path)
+        result = task.send(:dst_lib_path, ext)
         expect(result).to include('lib')
       end
     end
