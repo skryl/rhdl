@@ -131,7 +131,7 @@ module RHDL
           exec_args << "-d" if options[:debug]
           # Pass simulator type (default is native, only pass if different)
           if options[:mode] && options[:mode] != :native
-            exec_args.push("--sim", options[:mode].to_s)
+            exec_args.push("-m", options[:mode].to_s)
           end
           exec_args.push("-s", options[:speed].to_s) if options[:speed]
           exec_args << "-g" if options[:green]
