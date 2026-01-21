@@ -827,19 +827,27 @@ module RHDL
         )
 
         # cycle3 address
+        # For indexed addressing, use index_out (t_reg + index register)
+        # For non-indexed, use t_reg directly (index_out has stale values)
+        indexed = index_x | index_y
         addr_c3 = mux(indirect_bit & index_x,
           cat(di, t_reg),
-          cat(di, index_out[7..0])
+          mux(indexed,
+            cat(di, (t_reg + idx_val)[7..0]),  # Use fresh index calculation
+            cat(di, t_reg)                      # Non-indexed: use t_reg directly
+          )
         )
 
-        # branch address
-        addr_branch = cat(addr_reg[15..8], index_out[7..0])
+        # branch address - compute fresh using current t_reg and addr_reg
+        # (index_out has stale values from previous cycle)
+        branch_low = (t_reg + addr_reg[7..0])[7..0]
+        addr_branch = cat(addr_reg[15..8], branch_low)
         addr_branch_page = mux(t_reg[7],
-          cat(addr_reg[15..8] - lit(1, width: 8), addr_reg[7..0]),
-          cat(addr_reg[15..8] + lit(1, width: 8), addr_reg[7..0])
+          cat(addr_reg[15..8] - lit(1, width: 8), branch_low),
+          cat(addr_reg[15..8] + lit(1, width: 8), branch_low)
         )
 
-        # stack address
+        # stack address - use current S register
         addr_stack = cat(lit(0x01, width: 8), s_reg)
 
         # irq/nmi vector
@@ -848,6 +856,13 @@ module RHDL
         # jump address
         addr_jump = cat(di, t_reg)
 
+        # For indexed zero page addressing (pre_read state), compute indexed address fresh
+        # (index_out has stale values from previous cycle)
+        index_x_bit = opc_info[OPC_INDEX_X]
+        index_y_bit = opc_info[OPC_INDEX_Y]
+        zp_index_val = mux(index_x_bit, x_reg, mux(index_y_bit, y_reg, lit(0, width: 8)))
+        zp_indexed_addr = cat(lit(0x00, width: 8), (t_reg + zp_index_val)[7..0])
+
         addr_reg <= mux(enable,
           mux(cycle2, addr_c2,
             mux(cycle3, addr_c3,
@@ -855,7 +870,7 @@ module RHDL
                 mux(indirect, addr_incr_l,
                   mux(branch_taken, addr_branch,
                     mux(branch_page, addr_branch_page,
-                      mux(pre_read, cat(lit(0x00, width: 8), index_out[7..0]),
+                      mux(pre_read, zp_indexed_addr,
                         mux(read_cycle,
                           mux(jump_bit, addr_incr_l,
                             mux(index_out[8], cat(addr_reg[15..8] + lit(1, width: 8), addr_reg[7..0]),
@@ -863,14 +878,23 @@ module RHDL
                             )
                           ),
                           mux(read2, mux(rmw_bit, addr_reg, pc_reg),
-                            mux(rmw_cycle | pre_write,
-                              mux(zeropage, cat(lit(0x00, width: 8), index_out[7..0]),
-                                mux(index_out[8], cat(addr_reg[15..8] + lit(1, width: 8), addr_reg[7..0]), addr_reg)
-                              ),
-                              mux(write_cycle, pc_reg,
-                                mux(stack1 | stack2 | stack3, addr_stack,
-                                  mux(stack4, addr_irq,
-                                    mux(jump_cycle, addr_jump, addr_incr)
+                            mux(rmw_cycle,
+                              # For RMW cycle, hold address constant (don't use t_reg which now contains data)
+                              addr_reg,
+                              mux(pre_write,
+                                mux(zeropage, zp_indexed_addr,
+                                  mux(index_out[8], cat(addr_reg[15..8] + lit(1, width: 8), addr_reg[7..0]), addr_reg)
+                                ),
+                                mux(write_cycle, pc_reg,
+                                  mux(stack1 | stack2, addr_stack,
+                                    mux(stack3,
+                                      # For JSR (jump_bit), use pc_reg to read high byte
+                                      # For other stack ops, use addr_stack
+                                      mux(jump_bit, pc_reg, addr_stack),
+                                      mux(stack4, addr_irq,
+                                        mux(jump_cycle, addr_jump, addr_incr)
+                                      )
+                                    )
                                   )
                                 )
                               )
@@ -923,6 +947,21 @@ module RHDL
         in_cpx = opc_info[OPC_IN_CPX]
         in_cpy = opc_info[OPC_IN_CPY]
 
+        # Compute t_latch condition for bypass (same as in sequential block)
+        # When t_latch is true, di is about to be latched into t_reg.
+        # Use di directly (bypass) to match reference VHDL combinational behavior.
+        b_cycle2 = (cpu_state == lit(STATE_CYCLE2, width: 5))
+        b_stack1 = (cpu_state == lit(STATE_STACK1, width: 5))
+        b_stack2 = (cpu_state == lit(STATE_STACK2, width: 5))
+        b_indirect = (cpu_state == lit(STATE_INDIRECT, width: 5))
+        b_read_cycle = (cpu_state == lit(STATE_READ, width: 5))
+        b_read2 = (cpu_state == lit(STATE_READ2, width: 5))
+        b_stack_up = opc_info[OPC_STACK_UP]
+        b_t_latch = b_cycle2 | ((b_stack1 | b_stack2) & b_stack_up) | b_indirect | b_read_cycle | b_read2
+
+        # Use di directly when t_latch is true (bypassing old t_reg)
+        t_val = mux(enable & b_t_latch, di, t_reg)
+
         # ALU input (ANDed together like reference)
         alu_tmp = lit(0xFF, width: 8)
         alu_tmp = mux(in_a, alu_tmp & a_reg, alu_tmp)
@@ -930,7 +969,7 @@ module RHDL
         alu_tmp = mux(in_x, alu_tmp & x_reg, alu_tmp)
         alu_tmp = mux(in_y, alu_tmp & y_reg, alu_tmp)
         alu_tmp = mux(in_s, alu_tmp & s_reg, alu_tmp)
-        alu_tmp = mux(in_t, alu_tmp & t_reg, alu_tmp)
+        alu_tmp = mux(in_t, alu_tmp & t_val, alu_tmp)
         alu_tmp = mux(in_clr, lit(0x00, width: 8), alu_tmp)
         alu_input <= alu_tmp
 
@@ -976,12 +1015,16 @@ module RHDL
           )
         )
 
-        rmw_c_out = mux(alu_mode1 == lit(ALU1_LSR, width: 4), rmw_in[0],
-          mux(alu_mode1 == lit(ALU1_ROR, width: 4), rmw_in[0],
-            mux(alu_mode1 == lit(ALU1_ASL, width: 4), rmw_in[7],
-              mux(alu_mode1 == lit(ALU1_ROL, width: 4), rmw_in[7],
-                mux(alu_mode1 == lit(ALU1_ANC, width: 4), rmw_in[7] & a_reg[7],
-                  flag_c
+        # Carry output from shift/RMW unit
+        # For ALU1_FLG (SEC/CLC), use bit 0 of input: SEC has 0xFF (bit0=1), CLC has 0x00 (bit0=0)
+        rmw_c_out = mux(alu_mode1 == lit(ALU1_FLG, width: 4), rmw_in[0],
+          mux(alu_mode1 == lit(ALU1_LSR, width: 4), rmw_in[0],
+            mux(alu_mode1 == lit(ALU1_ROR, width: 4), rmw_in[0],
+              mux(alu_mode1 == lit(ALU1_ASL, width: 4), rmw_in[7],
+                mux(alu_mode1 == lit(ALU1_ROL, width: 4), rmw_in[7],
+                  mux(alu_mode1 == lit(ALU1_ANC, width: 4), rmw_in[7] & a_reg[7],
+                    flag_c
+                  )
                 )
               )
             )
