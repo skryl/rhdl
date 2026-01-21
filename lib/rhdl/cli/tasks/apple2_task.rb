@@ -263,8 +263,10 @@ module RHDL
 
         def add_common_args(exec_args)
           exec_args << "-d" if options[:debug]
-          # Fast mode is now the default; only pass --hdl if explicitly requested
-          exec_args << "--hdl" if options[:hdl]
+          # Pass simulator type (default is native, only pass if different)
+          if options[:mode] && options[:mode] != :native
+            exec_args.push("--sim", options[:mode].to_s)
+          end
           exec_args.push("-s", options[:speed].to_s) if options[:speed]
           exec_args << "-g" if options[:green]
           exec_args << "-H" if options[:hires]
