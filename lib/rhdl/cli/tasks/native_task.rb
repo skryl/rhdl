@@ -24,6 +24,13 @@ module RHDL
             crate_name: 'sim_cpu_native',
             load_path: 'lib/rhdl/codegen/structure/sim/cpu_native/lib',
             check_const: 'RHDL::Codegen::Structure::NATIVE_SIM_AVAILABLE'
+          },
+          firrtl: {
+            name: 'FIRRTL (RTL-Level)',
+            ext_dir: File.expand_path('lib/rhdl/codegen/circt/sim/firrtl_native', Config.project_root),
+            crate_name: 'firrtl_native',
+            load_path: 'lib/rhdl/codegen/circt/sim/firrtl_native/lib',
+            check_const: 'RHDL::Codegen::CIRCT::FIRRTL_NATIVE_AVAILABLE'
           }
         }.freeze
 
