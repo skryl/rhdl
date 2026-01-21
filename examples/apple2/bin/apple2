@@ -97,6 +97,61 @@ class Apple2HDLTerminal
     @runner.write(0xFFFD, (addr >> 8) & 0xFF)
   end
 
+  def load_memdump(path, pc: nil, use_appleiigo: false)
+    puts "Loading memory dump: #{path}"
+    bytes = File.binread(path)
+    @runner.load_ram(bytes, base_addr: 0x0000)
+    if pc
+      puts "Setting PC to $#{pc.to_s(16).upcase}"
+      if use_appleiigo
+        # Load AppleIIgo ROM and patch reset vector
+        create_patched_appleiigo_rom(pc)
+      else
+        # Create a minimal boot ROM that jumps to the desired PC
+        create_boot_rom(pc)
+      end
+    end
+  end
+
+  def create_patched_appleiigo_rom(target_pc)
+    rom_file = File.expand_path('../software/roms/appleiigo.rom', __dir__)
+    unless File.exist?(rom_file)
+      puts "Warning: AppleIIgo ROM not found, using minimal boot ROM"
+      return create_boot_rom(target_pc)
+    end
+
+    puts "Using AppleIIgo ROM with patched reset vector"
+    rom = File.binread(rom_file).bytes
+
+    # Patch reset vector (at ROM offset 0x2FFC-0x2FFD for $FFFC-$FFFD)
+    # Point to a trampoline at $FFF0 (ROM offset 0x2FF0)
+    rom[0x2FFC] = 0xF0  # Low byte of $FFF0
+    rom[0x2FFD] = 0xFF  # High byte of $FFF0
+
+    # Put JMP target_pc at $FFF0 (ROM offset 0x2FF0)
+    rom[0x2FF0] = 0x4C  # JMP
+    rom[0x2FF1] = target_pc & 0xFF
+    rom[0x2FF2] = (target_pc >> 8) & 0xFF
+
+    @runner.load_rom(rom, base_addr: 0xD000)
+  end
+
+  def create_boot_rom(target_pc)
+    # Create a 12KB ROM ($D000-$FFFF) with a JMP to target_pc
+    rom = Array.new(12 * 1024, 0xEA)  # Fill with NOPs
+
+    # Put JMP target_pc at $F000 (ROM offset 0x2000)
+    rom[0x2000] = 0x4C  # JMP
+    rom[0x2001] = target_pc & 0xFF
+    rom[0x2002] = (target_pc >> 8) & 0xFF
+
+    # Set reset vector to $F000 (ROM offset 0x2FFC-0x2FFD)
+    rom[0x2FFC] = 0x00  # Low byte of $F000
+    rom[0x2FFD] = 0xF0  # High byte of $F000
+
+    @runner.load_rom(rom, base_addr: 0xD000)
+  end
+
   def run
     @running = true
 
@@ -390,6 +445,18 @@ parser = OptionParser.new do |opts|
     options[:appleiigo] = true
   end
 
+  opts.on("--memdump FILE", "Load memory dump at $0000") do |v|
+    options[:memdump] = v
+  end
+
+  opts.on("--pc ADDR", "Set initial PC (hex)") do |v|
+    options[:pc] = v.to_i(16)
+  end
+
+  opts.on("--karateka", "Load Karateka memory dump") do
+    options[:karateka] = true
+  end
+
   opts.on("-h", "--help", "Show help") do
     puts opts
     exit
@@ -414,22 +481,40 @@ elsif options[:rom]
   terminal.load_rom(options[:rom])
 end
 
+# Load Karateka memory dump if requested
+if options[:karateka]
+  memdump_file = File.expand_path('../software/disks/karateka_mem.bin', __dir__)
+  if File.exist?(memdump_file)
+    puts "Loading Karateka..."
+    puts "NOTE: Karateka requires hires graphics (not fully supported in text terminal)"
+    terminal.load_memdump(memdump_file, pc: 0xB82A, use_appleiigo: true)
+  else
+    puts "Error: Karateka memory dump not found: #{memdump_file}"
+    exit 1
+  end
+# Load memory dump if specified
+elsif options[:memdump]
+  pc = options[:pc] || 0x0800
+  use_appleiigo = options[:appleiigo] || false
+  terminal.load_memdump(options[:memdump], pc: pc, use_appleiigo: use_appleiigo)
 # Load program
-program_file = ARGV.shift
-if program_file
-  load_addr = options[:load_addr] || 0x0800
-  terminal.load_program(program_file, base_addr: load_addr)
-  terminal.setup_reset_vector(load_addr) unless options[:rom] || options[:appleiigo]
-elsif options[:demo]
-  puts "Loading demo program..."
-  demo = create_demo_program
-  terminal.load_program_bytes(demo, base_addr: 0x0800)
-  terminal.setup_reset_vector(0x0800)
-elsif !options[:rom] && !options[:appleiigo]
-  puts parser
-  puts ""
-  puts "Error: No program specified. Use --demo or provide a binary file."
-  exit 1
+else
+  program_file = ARGV.shift
+  if program_file
+    load_addr = options[:load_addr] || 0x0800
+    terminal.load_program(program_file, base_addr: load_addr)
+    terminal.setup_reset_vector(load_addr) unless options[:rom] || options[:appleiigo]
+  elsif options[:demo]
+    puts "Loading demo program..."
+    demo = create_demo_program
+    terminal.load_program_bytes(demo, base_addr: 0x0800)
+    terminal.setup_reset_vector(0x0800)
+  elsif !options[:rom] && !options[:appleiigo]
+    puts parser
+    puts ""
+    puts "Error: No program specified. Use --demo or provide a binary file."
+    exit 1
+  end
 end
 
 terminal.run
