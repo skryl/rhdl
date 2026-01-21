@@ -149,6 +149,8 @@ module RHDL
         end
 
         # Override to use SequentialEvaluator instead of BehaviorEvaluator
+        # IMPORTANT: Uses non-blocking assignment semantics where all RHS values
+        # are computed using OLD state values before any updates occur.
         def evaluate_for_simulation(input_values, &block)
           simulation_mode!
           @input_values = input_values.transform_keys(&:to_sym)
@@ -159,13 +161,19 @@ module RHDL
           # Use SequentialEvaluator which has local() and case_of support
           SequentialEvaluator.new(self, proxies).evaluate(&block)
 
-          # Process assignments and compute output values
+          # Non-blocking assignment semantics: compute ALL values first using
+          # only input_values (old state), then store all results at once.
+          # This prevents earlier assignments from affecting later ones.
+          computed_values = {}
           @assignments.each do |assignment|
             target_name = assignment.target.name
+            # compute_value will only see @input_values since @output_values is empty
             value = compute_value(assignment.expr)
-            @output_values[target_name] = mask_value(value, assignment.target.width)
+            computed_values[target_name] = mask_value(value, assignment.target.width)
           end
 
+          # Now store all computed values
+          @output_values = computed_values
           @output_values
         end
 
@@ -308,9 +316,22 @@ module RHDL
               @inputs.each do |name, wire|
                 @_sampled_inputs[name] = wire.get
               end
+              # Also sample internal signals (wires from subcomponents, etc.)
+              @internal_signals.each do |name, wire|
+                @_sampled_inputs[name] = wire.get
+              end
             end
 
             rising
+          end
+
+          # Helper to set state value on outputs OR internal signals
+          define_method(:_set_state_value) do |name, value|
+            if @outputs[name]
+              @outputs[name].set(value)
+            elsif @internal_signals[name]
+              @internal_signals[name].set(value)
+            end
           end
 
           # Override update_outputs for two-phase propagation
@@ -322,7 +343,7 @@ module RHDL
               # Apply reset values
               reset_values.each do |name, value|
                 @_seq_state[name] = value
-                out_set(name, value)
+                _set_state_value(name, value)
               end
               @_needs_reset = false
               # Execute combinational parts
@@ -346,9 +367,9 @@ module RHDL
               @_sampled_inputs = nil  # Clear sampled inputs
             end
 
-            # Output state values
+            # Output state values (to both outputs and internal signals)
             @_seq_state.each do |name, value|
-              out_set(name, value)
+              _set_state_value(name, value)
             end
 
             # Process memory async reads (combinational, uses current values)
@@ -437,6 +458,8 @@ module RHDL
             reset: @_sequential_block.reset,
             reset_values: @_sequential_block.reset_values
           )
+          # Set component reference for memory access in mem_read_expr
+          context.component = component
           outputs = context.evaluate_for_simulation(input_values, &@_sequential_block.block)
 
           # Store outputs in component's internal state

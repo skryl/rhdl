@@ -69,6 +69,20 @@ module RHDL
           lines << "  end"
         end
 
+        # Memory synchronous read processes (for BRAM inference)
+        module_def.sync_read_ports.each do |rp|
+          lines << ""
+          lines << "  always @(posedge #{sanitize(rp.clock)}) begin"
+          if rp.enable
+            lines << "    if (#{expr(rp.enable)}) begin"
+            lines << "      #{sanitize(rp.data)} <= #{sanitize(rp.memory)}[#{expr(rp.addr)}];"
+            lines << "    end"
+          else
+            lines << "    #{sanitize(rp.data)} <= #{sanitize(rp.memory)}[#{expr(rp.addr)}];"
+          end
+          lines << "  end"
+        end
+
         module_def.processes.each do |process|
           lines << "" unless module_def.assigns.empty?
           lines << process_block(process)
@@ -312,6 +326,21 @@ module RHDL
         lines << "    if (#{sanitize(write_port.enable)}) begin"
         lines << "      #{sanitize(write_port.memory)}[#{sanitize(write_port.addr)}] <= #{sanitize(write_port.data)};"
         lines << "    end"
+        lines << "  end"
+        lines.join("\n")
+      end
+
+      # Generate memory synchronous read port (in always block, for BRAM inference)
+      def memory_sync_read_block(read_port)
+        lines = []
+        lines << "  always @(posedge #{sanitize(read_port.clock)}) begin"
+        if read_port.enable
+          lines << "    if (#{sanitize(read_port.enable)}) begin"
+          lines << "      #{sanitize(read_port.data)} <= #{sanitize(read_port.memory)}[#{sanitize(read_port.addr)}];"
+          lines << "    end"
+        else
+          lines << "    #{sanitize(read_port.data)} <= #{sanitize(read_port.memory)}[#{sanitize(read_port.addr)}];"
+        end
         lines << "  end"
         lines.join("\n")
       end
