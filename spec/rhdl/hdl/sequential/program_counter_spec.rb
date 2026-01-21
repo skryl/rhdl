@@ -148,7 +148,7 @@ RSpec.describe RHDL::HDL::ProgramCounter do
     end
 
     describe 'simulator comparison' do
-      it 'all simulators produce matching results', pending: 'Sequential timing mismatch between Ruby/Native SimCPU and Verilog' do
+      it 'all simulators produce matching results' do
         test_cases = [
           { d: 0, rst: 0, en: 1, load: 0, inc: 1 },
           { d: 0, rst: 0, en: 1, load: 0, inc: 1 },

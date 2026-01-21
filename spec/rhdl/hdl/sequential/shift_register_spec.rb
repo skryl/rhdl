@@ -244,7 +244,7 @@ RSpec.describe RHDL::HDL::ShiftRegister do
     end
 
     describe 'simulator comparison' do
-      it 'all simulators produce matching results', pending: 'Sequential timing mismatch between Ruby/Native SimCPU and Verilog' do
+      it 'all simulators produce matching results' do
         test_cases = [
           { d: 0b00001111, d_in: 0, rst: 0, en: 1, load: 1, dir: 1 },
           { d: 0, d_in: 0, rst: 0, en: 1, load: 0, dir: 1 },
