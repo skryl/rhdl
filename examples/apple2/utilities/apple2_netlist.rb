@@ -101,8 +101,8 @@ module RHDL
         # Generate gate-level IR
         @ir = Apple2Netlist.gate_ir
 
-        # Create the native simulator wrapper (uses Rust if available, falls back to Ruby)
-        @sim = RHDL::Codegen::Structure::SimCPUNativeWrapper.new(@ir, lanes: 1)
+        # Create the simulator wrapper (uses JIT for balance of compile time and performance)
+        @sim = RHDL::Codegen::Structure::NetlistJitWrapper.new(@ir, lanes: 1)
 
         elapsed = Time.now - start_time
         puts "  Netlist loaded in #{elapsed.round(2)}s"
