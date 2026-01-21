@@ -450,4 +450,247 @@ module NetlistHelper
 
     { success: true, results: parsed, stdout: run[:stdout] }
   end
+
+  # Run simulation using Ruby SimCPU netlist simulator
+  # Takes IR and test vectors, returns results in the same format as other simulators
+  def run_ruby_netlist_simulation(ir, test_vectors, has_clock: false)
+    require 'rhdl/codegen'
+
+    sim = RHDL::Codegen::Structure::SimCPU.new(ir, lanes: 64)
+    run_netlist_sim(sim, ir, test_vectors, has_clock: has_clock, name: 'Ruby SimCPU')
+  end
+
+  # Run simulation using Native SimCPUNative netlist simulator
+  # Takes IR and test vectors, returns results in the same format as other simulators
+  def run_native_netlist_simulation(ir, test_vectors, has_clock: false)
+    require 'rhdl/codegen'
+
+    unless RHDL::Codegen::Structure::NATIVE_SIM_AVAILABLE
+      return { success: false, error: 'Native SimCPU extension not available', skipped: true }
+    end
+
+    sim = RHDL::Codegen::Structure::SimCPUNative.new(ir.to_json, 64)
+    run_netlist_sim(sim, ir, test_vectors, has_clock: has_clock, name: 'Native SimCPU')
+  end
+
+  # Common implementation for Ruby and Native netlist simulators
+  def run_netlist_sim(sim, ir, test_vectors, has_clock:, name:)
+    results = []
+    output_names = ir.outputs.keys.map { |k| sanitize_port_name(k) }
+
+    # Build input port name mapping (sanitized name -> full IR name)
+    input_map = {}
+    ir.inputs.each do |full_name, _nets|
+      short_name = sanitize_port_name(full_name)
+      input_map[short_name] = full_name
+    end
+
+    # Build output port name mapping (sanitized name -> full IR name)
+    output_map = {}
+    ir.outputs.each do |full_name, nets|
+      short_name = sanitize_port_name(full_name)
+      output_map[short_name] = { full_name: full_name, width: nets.length }
+    end
+
+    test_vectors.each_with_index do |vec, _idx|
+      # Apply inputs - convert values to lane masks per bit
+      vec[:inputs].each do |port, value|
+        port_str = port.to_s
+        full_name = input_map[port_str] || port_str
+        nets = ir.inputs[full_name]
+
+        if nets && nets.length > 1
+          # Multi-bit input: set each bit's lane mask based on value
+          # All lanes get the same value, so use the value bits as the mask pattern
+          sim.poke(full_name, lanes_from_value(value, nets.length))
+        else
+          # Single-bit input: value 1 means all lanes high
+          lane_value = value != 0 ? 0xFFFFFFFFFFFFFFFF : 0
+          sim.poke(full_name, lane_value)
+        end
+      end
+
+      # Execute simulation
+      if has_clock
+        sim.tick
+      else
+        sim.evaluate
+      end
+
+      # Collect outputs - convert lane masks back to single values
+      cycle_results = {}
+      output_names.each do |out_name|
+        info = output_map[out_name]
+        next unless info
+
+        full_name = info[:full_name]
+        width = info[:width]
+        lane_data = sim.peek(full_name)
+
+        # Extract value from lane 0
+        cycle_results[out_name.to_sym] = value_from_lanes(lane_data, width)
+      end
+      results << cycle_results
+    end
+
+    { success: true, results: results, simulator: name }
+  rescue StandardError => e
+    { success: false, error: "#{name} simulation failed: #{e.message}\n#{e.backtrace.first(5).join("\n")}" }
+  end
+
+  # Convert a numeric value to the format expected by SimCPU.poke
+  # For multi-bit signals, poke expects an array of lane values [lane0_val, lane1_val, ...]
+  # We simulate with lane 0 only, so we pass [value] as the array
+  def lanes_from_value(value, width)
+    if width == 1
+      value != 0 ? 0xFFFFFFFFFFFFFFFF : 0
+    else
+      # For multi-bit values, pass the value as lane 0's value
+      # SimCPU.poke will convert this to per-bit lane masks internally via lane_values_to_masks
+      [value]
+    end
+  end
+
+  # Convert lane masks back to a numeric value (extract from lane 0)
+  def value_from_lanes(lane_data, width)
+    if width == 1
+      # Single bit - check lane 0
+      if lane_data.is_a?(Array)
+        (lane_data[0] & 1) != 0 ? 1 : 0
+      else
+        (lane_data & 1) != 0 ? 1 : 0
+      end
+    elsif lane_data.is_a?(Array)
+      # Multi-bit bus - reconstruct value from bit lane masks
+      value = 0
+      lane_data.each_with_index do |bit_mask, bit_idx|
+        if (bit_mask & 1) != 0
+          value |= (1 << bit_idx)
+        end
+      end
+      value
+    else
+      # Single value returned for multi-bit (shouldn't happen, but handle it)
+      (lane_data & 1) != 0 ? 1 : 0
+    end
+  end
+
+  # Run all available simulators and compare results
+  # Returns comparison results showing any mismatches between:
+  # - Verilog structure simulation (iverilog)
+  # - Ruby SimCPU netlist simulation
+  # - Native Rust SimCPUNative netlist simulation
+  def run_netlist_comparison(ir, test_vectors, base_dir:, has_clock: false)
+    results = {
+      verilog: nil,
+      ruby: nil,
+      native: nil,
+      all_match: false,
+      mismatches: []
+    }
+
+    # Run Verilog simulation if iverilog is available
+    if HdlToolchain.iverilog_available?
+      results[:verilog] = run_structure_simulation(ir, test_vectors, base_dir: base_dir)
+    else
+      results[:verilog] = { success: false, error: 'iverilog not available', skipped: true }
+    end
+
+    # Run Ruby netlist simulation
+    results[:ruby] = run_ruby_netlist_simulation(ir, test_vectors, has_clock: has_clock)
+
+    # Run Native netlist simulation
+    results[:native] = run_native_netlist_simulation(ir, test_vectors, has_clock: has_clock)
+
+    # Compare results across all successful simulators
+    compare_simulator_results(results, ir, test_vectors)
+
+    results
+  end
+
+  # Compare results between all successful simulators
+  def compare_simulator_results(results, ir, test_vectors)
+    output_names = ir.outputs.keys.map { |k| sanitize_port_name(k).to_sym }
+
+    test_vectors.each_with_index do |vec, idx|
+      expected = vec[:expected]
+
+      # Get results from each simulator
+      verilog_result = results[:verilog][:success] ? results[:verilog][:results][idx] : nil
+      ruby_result = results[:ruby][:success] ? results[:ruby][:results][idx] : nil
+      native_result = results[:native][:success] ? results[:native][:results][idx] : nil
+
+      # Compare each output
+      output_names.each do |out_name|
+        values = {
+          expected: expected ? expected[out_name] : nil,
+          verilog: verilog_result ? verilog_result[out_name] : nil,
+          ruby: ruby_result ? ruby_result[out_name] : nil,
+          native: native_result ? native_result[out_name] : nil
+        }
+
+        # Check for mismatches between available simulators
+        available_values = values.values.compact.uniq
+        if available_values.length > 1
+          results[:mismatches] << {
+            cycle: idx,
+            output: out_name,
+            inputs: vec[:inputs],
+            values: values
+          }
+        end
+      end
+    end
+
+    results[:all_match] = results[:mismatches].empty?
+  end
+
+  # Helper to run behavior simulation (RTL Ruby) and compare with all netlist simulators
+  # This is the main entry point for comprehensive testing
+  def compare_behavior_to_netlist(component_class, component_name, test_cases, base_dir:, has_clock: false)
+    require 'rhdl/codegen'
+
+    # Create behavior component and generate test vectors with expected outputs
+    behavior = component_class.new
+    test_vectors = []
+
+    test_cases.each do |tc|
+      tc.each do |port, value|
+        behavior.set_input(port, value)
+      end
+
+      if has_clock
+        behavior.set_input(:clk, 0)
+        behavior.propagate
+        behavior.set_input(:clk, 1)
+        behavior.propagate
+      else
+        behavior.propagate
+      end
+
+      # Get expected outputs from behavior simulation
+      expected = {}
+      behavior.outputs.each_key do |out_name|
+        expected[out_name] = behavior.get_output(out_name)
+      end
+
+      test_vectors << {
+        inputs: tc.dup,
+        expected: expected
+      }
+    end
+
+    # Create gate-level IR
+    component = component_class.new(component_name)
+    ir = RHDL::Codegen::Structure::Lower.from_components([component], name: component_name)
+
+    # Run comparison across all simulators
+    comparison = run_netlist_comparison(ir, test_vectors, base_dir: base_dir, has_clock: has_clock)
+
+    # Add behavior reference to results
+    comparison[:behavior] = { success: true, results: test_vectors.map { |v| v[:expected] } }
+    comparison[:test_vectors] = test_vectors
+
+    comparison
+  end
 end
