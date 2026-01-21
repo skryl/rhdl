@@ -1,44 +1,28 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require_relative '../../../examples/apple2/hdl/apple2'
-require_relative '../../../examples/apple2/hdl/cpu6502'
+require_relative '../../../examples/apple2/hdl/apple2_system'
 
-# Integration test: CPU6502 + Apple2 - manually connected
-# Based on reference design: CPU uses Q3 clock, enable = not pre_phi0
-RSpec.describe 'CPU6502 + Apple2 Integration' do
-  let(:cpu) { RHDL::Apple2::CPU6502.new('cpu') }
-  let(:apple2) { RHDL::Apple2::Apple2.new('apple2') }
+# Integration test: Apple2System - CPU6502 integrated with Apple2
+# Uses Apple2System which has CPU6502 and Apple2 as subcomponents
+RSpec.describe 'Apple2System Integration' do
+  let(:system) { RHDL::Apple2::Apple2System.new('apple2_system') }
   let(:ram) { Array.new(48 * 1024, 0) }  # 48KB RAM
 
   before do
-    # Initialize CPU inputs
-    cpu.set_input(:clk, 0)
-    cpu.set_input(:enable, 1)
-    cpu.set_input(:reset, 0)
-    cpu.set_input(:nmi_n, 1)
-    cpu.set_input(:irq_n, 1)
-    cpu.set_input(:so_n, 1)
-    cpu.set_input(:di, 0)
-
-    # Initialize Apple2 inputs
-    apple2.set_input(:clk_14m, 0)
-    apple2.set_input(:flash_clk, 0)
-    apple2.set_input(:reset, 0)
-    apple2.set_input(:ram_do, 0)
-    apple2.set_input(:pd, 0)
-    apple2.set_input(:k, 0)
-    apple2.set_input(:gameport, 0)
-    apple2.set_input(:pause, 0)
-    apple2.set_input(:cpu_addr, 0)
-    apple2.set_input(:cpu_we, 0)
-    apple2.set_input(:cpu_dout, 0)
-    apple2.set_input(:cpu_pc, 0)
-    apple2.set_input(:cpu_opcode, 0)
+    # Initialize system inputs
+    system.set_input(:clk_14m, 0)
+    system.set_input(:flash_clk, 0)
+    system.set_input(:reset, 0)
+    system.set_input(:ram_do, 0)
+    system.set_input(:pd, 0)
+    system.set_input(:k, 0)
+    system.set_input(:gameport, 0)
+    system.set_input(:pause, 0)
   end
 
   def load_rom(data)
-    apple2.load_rom(data)
+    system.load_rom(data)
   end
 
   def load_ram(data, start_addr)
@@ -47,72 +31,37 @@ RSpec.describe 'CPU6502 + Apple2 Integration' do
     end
   end
 
-  # Track previous Q3 for edge detection
-  attr_accessor :prev_q3
-
   # Run one 14MHz clock cycle
   def clock_14m_cycle(trace: false)
-    @prev_q3 ||= 0
     @cpu_clock_count ||= 0
 
-    # Update Apple2 with CPU outputs
-    apple2.set_input(:cpu_addr, cpu.get_output(:addr))
-    apple2.set_input(:cpu_we, cpu.get_output(:we))
-    apple2.set_input(:cpu_dout, cpu.get_output(:do_out))
-    apple2.set_input(:cpu_pc, cpu.get_output(:debug_pc))
-    apple2.set_input(:cpu_opcode, cpu.get_output(:debug_opcode))
-
     # 14MHz falling edge
-    apple2.set_input(:clk_14m, 0)
-    apple2.propagate
+    system.set_input(:clk_14m, 0)
+    system.propagate
 
     # Get RAM address and provide data
-    ram_addr = apple2.get_output(:ram_addr)
+    ram_addr = system.get_output(:ram_addr)
     if ram_addr < ram.size
-      apple2.set_input(:ram_do, ram[ram_addr])
+      system.set_input(:ram_do, ram[ram_addr])
     end
-    apple2.propagate
+    system.propagate
 
     # 14MHz rising edge
-    apple2.set_input(:clk_14m, 1)
-    apple2.propagate
+    system.set_input(:clk_14m, 1)
+    system.propagate
 
-    # Get timing signals
-    q3 = apple2.get_output(:clk_2m)
-    pre_phi0 = apple2.get_output(:pre_phase_zero)
-
-    # CPU enable: not pre_phi0 (matches reference)
-    cpu.set_input(:enable, pre_phi0 == 0 ? 1 : 0)
-
-    # Get CPU data from Apple2
-    cpu_din = apple2.get_output(:cpu_din)
-    cpu.set_input(:di, cpu_din)
-
-    # Clock CPU on rising edge of Q3
-    if @prev_q3 == 0 && q3 == 1
-      enable = pre_phi0 == 0 ? 1 : 0
-      if trace
-        pc = cpu.get_output(:debug_pc)
-        addr = cpu.get_output(:addr)
-        a_reg = cpu.get_output(:debug_a)
-        puts "  CPU_CLK #{@cpu_clock_count}: PC=0x#{pc.to_s(16).rjust(4,'0')} addr=0x#{addr.to_s(16).rjust(4,'0')} " \
-             "A=0x#{a_reg.to_s(16).rjust(2,'0')} di=0x#{cpu_din.to_s(16).rjust(2,'0')} en=#{enable} pre_phi0=#{pre_phi0}"
-      end
-
-      cpu.set_input(:clk, 0)
-      cpu.propagate
-      cpu.set_input(:clk, 1)
-      cpu.propagate
-      @cpu_clock_count += 1
+    if trace
+      pc = system.get_output(:pc_debug)
+      a_reg = system.get_output(:a_debug)
+      puts "  14M cycle: PC=0x#{pc.to_s(16).rjust(4,'0')} A=0x#{a_reg.to_s(16).rjust(2,'0')}"
     end
-    @prev_q3 = q3
 
     # Handle RAM writes
-    ram_we = apple2.get_output(:ram_we)
+    ram_we = system.get_output(:ram_we)
     if ram_we == 1
-      write_addr = apple2.get_output(:ram_addr)
+      write_addr = system.get_output(:ram_addr)
       if write_addr < ram.size
-        ram[write_addr] = apple2.get_output(:d)
+        ram[write_addr] = system.get_output(:d)
       end
     end
   end
@@ -127,20 +76,16 @@ RSpec.describe 'CPU6502 + Apple2 Integration' do
   end
 
   def reset_system
-    @prev_q3 = 0
-    cpu.set_input(:reset, 1)
-    apple2.set_input(:reset, 1)
+    system.set_input(:reset, 1)
     clock_cycle
-    cpu.set_input(:reset, 0)
-    apple2.set_input(:reset, 0)
+    system.set_input(:reset, 0)
   end
 
   describe 'basic integration' do
-    it 'connects CPU to Apple2' do
+    it 'system initializes without error' do
       reset_system
       run_cycles(10)
-      expect(cpu.get_output(:addr)).to be_a(Integer)
-      expect(apple2.get_output(:cpu_din)).to be_a(Integer)
+      expect(system.get_output(:pc_debug)).to be_a(Integer)
     end
   end
 
@@ -185,7 +130,7 @@ RSpec.describe 'CPU6502 + Apple2 Integration' do
       run_cycles(10)
 
       # After reset, PC should be at boot code address
-      pc = cpu.get_output(:debug_pc)
+      pc = system.get_output(:pc_debug)
       expect(pc).to be >= 0xF000
     end
 
@@ -198,7 +143,7 @@ RSpec.describe 'CPU6502 + Apple2 Integration' do
       end
       35.times { clock_cycle }
 
-      puts "Final A=0x#{cpu.get_output(:debug_a).to_s(16)}"
+      puts "Final A=0x#{system.get_output(:a_debug).to_s(16)}"
       puts "ram[0x0400] = 0x#{ram[0x0400].to_s(16)}"
       # Check that 'A' was written to $0400
       expect(ram[0x0400]).to eq(0x41)
@@ -274,7 +219,7 @@ RSpec.describe 'CPU6502 + Apple2 Integration' do
 
     it 'reads keyboard data from $C000' do
       # Set keyboard data
-      apple2.set_input(:k, 0xC1)  # 'A' with high bit set
+      system.set_input(:k, 0xC1)  # 'A' with high bit set
 
       run_cycles(100)
 
