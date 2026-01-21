@@ -15,6 +15,20 @@ module RHDL
       TEXT_PAGE1_START = 0x0400
       TEXT_PAGE1_END = 0x07FF
 
+      # Disk geometry constants
+      TRACKS = 35
+      SECTORS_PER_TRACK = 16
+      BYTES_PER_SECTOR = 256
+      TRACK_SIZE = SECTORS_PER_TRACK * BYTES_PER_SECTOR  # 4096 bytes
+      DISK_SIZE = TRACKS * TRACK_SIZE                     # 143360 bytes
+      TRACK_BYTES = 6448  # Nibblized track size
+
+      # DOS 3.3 sector interleaving table
+      DOS33_INTERLEAVE = [
+        0x00, 0x07, 0x0E, 0x06, 0x0D, 0x05, 0x0C, 0x04,
+        0x0B, 0x03, 0x0A, 0x02, 0x09, 0x01, 0x08, 0x0F
+      ].freeze
+
       def initialize
         @apple2 = Apple2.new('apple2')
         @ram = Array.new(48 * 1024, 0)  # 48KB RAM
@@ -53,14 +67,48 @@ module RHDL
         end
       end
 
-      # Disk loading (stub - not yet implemented for HDL)
+      # Disk loading
       def load_disk(path_or_bytes, drive: 0)
-        # TODO: Implement disk controller integration
-        warn "Disk loading not yet implemented for HDL Apple2"
+        bytes = if path_or_bytes.is_a?(String)
+                  File.binread(path_or_bytes).bytes
+                else
+                  path_or_bytes.is_a?(Array) ? path_or_bytes : path_or_bytes.bytes
+                end
+
+        if bytes.length != DISK_SIZE
+          raise ArgumentError, "Invalid disk image size: #{bytes.length} (expected #{DISK_SIZE})"
+        end
+
+        # Load disk boot ROM
+        load_disk_boot_rom
+
+        # Convert DSK to nibblized tracks and load each track
+        @disk_tracks = encode_disk(bytes)
+        @disk_loaded = true
+        @current_track = 0
+
+        # Load initial track (track 0)
+        load_track_to_controller(0)
       end
 
       def disk_loaded?(drive: 0)
-        false
+        @disk_loaded || false
+      end
+
+      def load_disk_boot_rom
+        boot_rom_path = File.expand_path('../software/roms/disk2_boot.bin', __dir__)
+        if File.exist?(boot_rom_path)
+          rom_data = File.binread(boot_rom_path).bytes
+          @apple2.load_disk_boot_rom(rom_data)
+        else
+          warn "Disk II boot ROM not found at #{boot_rom_path}"
+        end
+      end
+
+      def load_track_to_controller(track_num)
+        return unless @disk_tracks && track_num < @disk_tracks.length
+        track_data = @disk_tracks[track_num]
+        @apple2.load_disk_track(track_num, track_data)
       end
 
       # Reset the system
@@ -263,6 +311,122 @@ module RHDL
         group = row / 8
         line_in_group = row % 8
         TEXT_PAGE1_START + (line_in_group * 0x80) + (group * 0x28)
+      end
+
+      # Encode a .dsk image to nibblized format for each track
+      def encode_disk(bytes)
+        tracks = []
+
+        TRACKS.times do |track_num|
+          track_data = []
+
+          SECTORS_PER_TRACK.times do |phys_sector|
+            log_sector = DOS33_INTERLEAVE[phys_sector]
+            offset = (track_num * TRACK_SIZE) + (log_sector * BYTES_PER_SECTOR)
+            sector_data = bytes[offset, BYTES_PER_SECTOR]
+            track_data.concat(encode_sector(track_num, phys_sector, sector_data))
+          end
+
+          tracks << track_data
+        end
+
+        tracks
+      end
+
+      # Encode a single sector with address field, gaps, and data field
+      def encode_sector(track, sector, data)
+        encoded = []
+
+        # Gap 1 - self-sync bytes
+        16.times { encoded << 0xFF }
+
+        # Address field prologue: D5 AA 96
+        encoded << 0xD5 << 0xAA << 0x96
+
+        # Volume, track, sector, checksum (4-and-4 encoded)
+        volume = 254
+        checksum = volume ^ track ^ sector
+
+        encoded.concat(encode_4and4(volume))
+        encoded.concat(encode_4and4(track))
+        encoded.concat(encode_4and4(sector))
+        encoded.concat(encode_4and4(checksum))
+
+        # Address field epilogue: DE AA EB
+        encoded << 0xDE << 0xAA << 0xEB
+
+        # Gap 2
+        8.times { encoded << 0xFF }
+
+        # Data field prologue: D5 AA AD
+        encoded << 0xD5 << 0xAA << 0xAD
+
+        # 6-and-2 encoding
+        encoded.concat(encode_6and2(data || Array.new(256, 0)))
+
+        # Data field epilogue: DE AA EB
+        encoded << 0xDE << 0xAA << 0xEB
+
+        # Gap 3
+        16.times { encoded << 0xFF }
+
+        encoded
+      end
+
+      # 4-and-4 encoding for address field
+      def encode_4and4(byte)
+        [
+          ((byte >> 1) & 0x55) | 0xAA,
+          (byte & 0x55) | 0xAA
+        ]
+      end
+
+      # 6-and-2 encoding for data field
+      def encode_6and2(data)
+        translate = [
+          0x96, 0x97, 0x9A, 0x9B, 0x9D, 0x9E, 0x9F, 0xA6,
+          0xA7, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF, 0xB2, 0xB3,
+          0xB4, 0xB5, 0xB6, 0xB7, 0xB9, 0xBA, 0xBB, 0xBC,
+          0xBD, 0xBE, 0xBF, 0xCB, 0xCD, 0xCE, 0xCF, 0xD3,
+          0xD6, 0xD7, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE,
+          0xDF, 0xE5, 0xE6, 0xE7, 0xE9, 0xEA, 0xEB, 0xEC,
+          0xED, 0xEE, 0xEF, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6,
+          0xF7, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF
+        ]
+
+        buffer = Array.new(342, 0)
+
+        # Extract 2-bit values
+        86.times do |i|
+          val = 0
+          val |= ((data[i] || 0) & 0x01) << 1
+          val |= ((data[i] || 0) & 0x02) >> 1
+          val |= ((data[i + 86] || 0) & 0x01) << 3 if i + 86 < 256
+          val |= ((data[i + 86] || 0) & 0x02) << 1 if i + 86 < 256
+          val |= ((data[i + 172] || 0) & 0x01) << 5 if i + 172 < 256
+          val |= ((data[i + 172] || 0) & 0x02) << 3 if i + 172 < 256
+          buffer[i] = val
+        end
+
+        # Store 6-bit values
+        256.times do |i|
+          buffer[86 + i] = (data[i] || 0) >> 2
+        end
+
+        # XOR encode and translate
+        encoded = []
+        checksum = 0
+
+        342.times do |i|
+          val = buffer[i] ^ checksum
+          checksum = buffer[i]
+          encoded << translate[val & 0x3F]
+        end
+
+        # Append checksum
+        encoded << translate[checksum & 0x3F]
+
+        encoded
       end
     end
 
