@@ -271,7 +271,7 @@ impl NetlistSimulator {
     }
 
     fn tick(&mut self) {
-        // Evaluate combinational logic
+        // First pass: evaluate combinational logic with current DFF state
         self.evaluate();
 
         // Sample all DFF inputs (before any updates)
@@ -303,6 +303,10 @@ impl NetlistSimulator {
         for (i, dff) in self.dffs.iter().enumerate() {
             self.nets[dff.q] = next_q[i];
         }
+
+        // Second pass: re-evaluate combinational logic with new DFF state
+        // This ensures outputs depending on DFF state are updated in the same cycle
+        self.evaluate();
     }
 
     fn reset(&mut self) {

@@ -179,7 +179,7 @@ RSpec.describe RHDL::HDL::SRLatch do
     end
 
     describe 'simulator comparison' do
-      it 'all simulators produce matching results', pending: 'Latch qn timing issues with Ruby/Native SimCPU' do
+      it 'all simulators produce matching results', pending: 'SR Latch synthesized as combinational logic without memory hold state' do
         test_cases = [
           { s: 1, r: 0, en: 1 },
           { s: 0, r: 0, en: 1 },
