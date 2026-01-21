@@ -38,7 +38,7 @@ module RHDL
         @prev_q3 = 0
       end
 
-      # Load ROM data into the Apple2System
+      # Load ROM data into the Apple2 component
       def load_rom(bytes, base_addr:)
         bytes = bytes.bytes if bytes.is_a?(String)
         @apple2.load_rom(bytes)
