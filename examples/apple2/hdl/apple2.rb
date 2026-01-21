@@ -26,7 +26,7 @@
 # $C100-$CFFF: Peripheral ROM space
 # $D000-$FFFF: ROM (12KB)
 
-require 'rhdl'
+require 'rhdl/hdl'
 require_relative 'timing_generator'
 require_relative 'video_generator'
 require_relative 'character_rom'
@@ -37,7 +37,7 @@ require_relative 'disk_ii'
 
 module RHDL
   module Apple2
-    class Apple2 < SequentialComponent
+    class Apple2 < RHDL::HDL::SequentialComponent
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
       include RHDL::DSL::Memory
@@ -339,7 +339,7 @@ module RHDL
         opcode_debug_out <= cpu_opcode
       end
 
-      # Load ROM data
+      # Simulation helpers for ROM access
       def load_rom(data, start_addr = 0)
         data.each_with_index do |byte, i|
           break if start_addr + i >= 12 * 1024
@@ -354,7 +354,7 @@ module RHDL
 
     # VGA output adapter
     # Converts Apple II video signal to VGA timing
-    class VGAOutput < SequentialComponent
+    class VGAOutput < RHDL::HDL::SequentialComponent
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 

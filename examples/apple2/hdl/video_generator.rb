@@ -11,11 +11,11 @@
 # - LORES: 40x48 low-resolution graphics (16 colors)
 # - HIRES: 280x192 high-resolution graphics (6 colors)
 
-require 'rhdl'
+require 'rhdl/hdl'
 
 module RHDL
   module Apple2
-    class VideoGenerator < SequentialComponent
+    class VideoGenerator < RHDL::HDL::SequentialComponent
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
