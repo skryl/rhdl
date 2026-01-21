@@ -77,5 +77,23 @@ RSpec.describe RHDL::HDL::CPU::CPU do
       expect(verilog).to include('input clk')
       expect(verilog).to include('output halt_out')
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results', pending: 'CPU is a complex hierarchical component with memory' do
+        test_cases = [
+          { rst: 1, mem_data_in: 0, acc_load_en: 0, acc_load_data: 0, pc_load_en: 0, pc_load_data: 0, sp_push: 0, sp_pop: 0 },
+          { rst: 0, mem_data_in: 0, acc_load_en: 0, acc_load_data: 0, pc_load_en: 0, pc_load_data: 0, sp_push: 0, sp_pop: 0 },
+          { rst: 0, mem_data_in: 0xF0, acc_load_en: 0, acc_load_data: 0, pc_load_en: 0, pc_load_data: 0, sp_push: 0, sp_pop: 0 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::CPU::CPU,
+          'cpu',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/cpu',
+          has_clock: true
+        )
+      end
+    end
   end
 end

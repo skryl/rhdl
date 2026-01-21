@@ -136,5 +136,22 @@ RSpec.describe RHDL::HDL::NotGate do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 0 },
+          { a: 1 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::NotGate,
+          'not_gate',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/not_gate',
+          has_clock: false
+        )
+      end
+    end
   end
 end

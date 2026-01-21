@@ -174,5 +174,24 @@ RSpec.describe RHDL::HDL::RAM do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results', pending: 'Memory components have complex synthesis requirements' do
+        test_cases = [
+          { addr: 0, din: 0xAB, we: 1 },
+          { addr: 0, din: 0, we: 0 },
+          { addr: 1, din: 0x55, we: 1 },
+          { addr: 1, din: 0, we: 0 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::RAM,
+          'ram',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/ram',
+          has_clock: true
+        )
+      end
+    end
   end
 end

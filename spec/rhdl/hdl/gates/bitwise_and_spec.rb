@@ -78,5 +78,24 @@ RSpec.describe RHDL::HDL::BitwiseAnd do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 0x00, b: 0x00 },
+          { a: 0xFF, b: 0xFF },
+          { a: 0xAA, b: 0x55 },
+          { a: 0x0F, b: 0xF0 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::BitwiseAnd,
+          'bitwise_and',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/bitwise_and',
+          has_clock: false
+        )
+      end
+    end
   end
 end

@@ -187,5 +187,24 @@ RSpec.describe RHDL::HDL::Encoder4to2 do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 0b0001 },
+          { a: 0b0010 },
+          { a: 0b0100 },
+          { a: 0b1000 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::Encoder4to2,
+          'encoder4to2',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/encoder4to2',
+          has_clock: false
+        )
+      end
+    end
   end
 end

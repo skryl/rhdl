@@ -82,5 +82,24 @@ RSpec.describe RHDL::HDL::BitwiseNot do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 0x00 },
+          { a: 0xFF },
+          { a: 0xAA },
+          { a: 0x55 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::BitwiseNot,
+          'bitwise_not',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/bitwise_not',
+          has_clock: false
+        )
+      end
+    end
   end
 end

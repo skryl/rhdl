@@ -108,5 +108,24 @@ RSpec.describe RHDL::HDL::PopCount do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 0b10101010 },
+          { a: 0b11111111 },
+          { a: 0b00000000 },
+          { a: 0b00000001 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::PopCount,
+          'pop_count',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/pop_count',
+          has_clock: false
+        )
+      end
+    end
   end
 end

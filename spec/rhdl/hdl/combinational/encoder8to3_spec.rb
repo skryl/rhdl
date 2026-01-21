@@ -105,5 +105,24 @@ RSpec.describe RHDL::HDL::Encoder8to3 do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 0b00000001 },
+          { a: 0b00000010 },
+          { a: 0b00010000 },
+          { a: 0b10000000 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::Encoder8to3,
+          'encoder8to3',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/encoder8to3',
+          has_clock: false
+        )
+      end
+    end
   end
 end

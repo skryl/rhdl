@@ -181,5 +181,24 @@ RSpec.describe RHDL::HDL::DualPortRAM do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results', pending: 'Dual-port RAM has complex memory synthesis requirements' do
+        test_cases = [
+          { addr_a: 0, din_a: 0xAB, we_a: 1, addr_b: 0, din_b: 0, we_b: 0 },
+          { addr_a: 0, din_a: 0, we_a: 0, addr_b: 0, din_b: 0, we_b: 0 },
+          { addr_a: 1, din_a: 0, we_a: 0, addr_b: 1, din_b: 0x55, we_b: 1 },
+          { addr_a: 1, din_a: 0, we_a: 0, addr_b: 1, din_b: 0, we_b: 0 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::DualPortRAM,
+          'dual_port_ram',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/dual_port_ram',
+          has_clock: true
+        )
+      end
+    end
   end
 end

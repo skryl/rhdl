@@ -126,5 +126,24 @@ RSpec.describe RHDL::HDL::ROM do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { addr: 0, en: 1 },
+          { addr: 1, en: 1 },
+          { addr: 2, en: 1 },
+          { addr: 0, en: 0 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::ROM,
+          'rom',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/rom',
+          has_clock: false
+        )
+      end
+    end
   end
 end

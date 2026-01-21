@@ -259,5 +259,24 @@ RSpec.describe RHDL::HDL::Counter do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results', pending: 'Sequential timing mismatch between Ruby/Native SimCPU and Verilog' do
+        test_cases = [
+          { d: 0, rst: 0, en: 1, up: 1, load: 0 },
+          { d: 0, rst: 0, en: 1, up: 1, load: 0 },
+          { d: 5, rst: 0, en: 1, up: 1, load: 1 },
+          { d: 0, rst: 0, en: 1, up: 0, load: 0 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::Counter,
+          'counter',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/counter',
+          has_clock: true
+        )
+      end
+    end
   end
 end

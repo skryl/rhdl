@@ -242,5 +242,24 @@ RSpec.describe RHDL::HDL::ShiftRegister do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results', pending: 'Sequential timing mismatch between Ruby/Native SimCPU and Verilog' do
+        test_cases = [
+          { d: 0b00001111, d_in: 0, rst: 0, en: 1, load: 1, dir: 1 },
+          { d: 0, d_in: 0, rst: 0, en: 1, load: 0, dir: 1 },
+          { d: 0, d_in: 0, rst: 0, en: 1, load: 0, dir: 1 },
+          { d: 0, d_in: 0, rst: 0, en: 1, load: 0, dir: 0 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::ShiftRegister,
+          'shift_register',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/shift_register',
+          has_clock: true
+        )
+      end
+    end
   end
 end

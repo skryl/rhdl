@@ -99,5 +99,24 @@ RSpec.describe RHDL::HDL::ZeroDetect do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 0x00 },
+          { a: 0x01 },
+          { a: 0x55 },
+          { a: 0xFF }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::ZeroDetect,
+          'zero_detect',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/zero_detect',
+          has_clock: false
+        )
+      end
+    end
   end
 end
