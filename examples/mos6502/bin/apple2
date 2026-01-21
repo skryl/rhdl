@@ -161,7 +161,9 @@ class Apple2Terminal
 
     @running = false
     @last_screen = nil
-    @cycles_per_frame = options[:speed] || 17_030  # ~1.022 MHz at 60fps
+    # HDL mode is ~44000x slower than real-time, so use tiny cycles_per_frame
+    default_speed = @sim_type == :hdl ? 10 : 17_030
+    @cycles_per_frame = options[:speed] || default_speed
     @debug = options[:debug] || false
     @green_screen = options[:green] || false
     @hires_mode = options[:hires] || false
@@ -272,9 +274,13 @@ class Apple2Terminal
     @running = true
     @resize_pending = false
 
-    # Set up signal handler for clean exit
-    trap('INT') { stop }
-    trap('TERM') { stop }
+    # Set up signal handler for clean exit - use exit! for immediate termination
+    trap('INT') do
+      @running = false
+      # Force exit if we're stuck in a long operation
+      Thread.new { sleep 0.5; exit!(0) if @running == false }
+    end
+    trap('TERM') { @running = false; exit!(0) }
 
     # Handle terminal resize
     trap('WINCH') do
@@ -285,6 +291,9 @@ class Apple2Terminal
     mode = mode_names[@sim_type] || @sim_type.to_s
     audio_status = @audio_enabled ? "Audio ON" : "Audio OFF"
     puts "Starting Apple ][ emulator... [#{mode} mode, #{audio_status}]"
+    if @sim_type == :hdl
+      puts "WARNING: HDL mode is ~44000x slower than real-time (for verification only)"
+    end
     puts "Press Ctrl+C to exit"
     puts "Press any key to continue..."
     sleep 0.5
