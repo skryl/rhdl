@@ -154,54 +154,29 @@ module RHDL
         is_ctrl_key = (code == lit(LEFT_CTRL, width: 8))
         is_alt_key = (code == lit(ALT_GR, width: 8))
 
-        # FSM state machine
-        state_next = state
-
-        # State transitions
-        state_next = mux(state == lit(STATE_IDLE, width: 4),
-          mux(code_available, lit(STATE_HAVE_CODE, width: 4), state),
-          state_next
-        )
-
-        state_next = mux(state == lit(STATE_HAVE_CODE, width: 4),
-          lit(STATE_DECODE, width: 4),
-          state_next
-        )
-
-        state_next = mux(state == lit(STATE_DECODE, width: 4),
-          mux(code == lit(KEY_UP_CODE, width: 8),
-            lit(STATE_GOT_KEY_UP, width: 4),
-            mux(code == lit(EXTENDED_CODE, width: 8),
+        # FSM state machine using case_select
+        # Decode state determines next state based on code received
+        decode_next = mux(code == lit(KEY_UP_CODE, width: 8),
+          lit(STATE_GOT_KEY_UP, width: 4),
+          mux(code == lit(EXTENDED_CODE, width: 8),
+            lit(STATE_IDLE, width: 4),
+            mux(is_shift_key | is_ctrl_key,
               lit(STATE_IDLE, width: 4),
-              mux(is_shift_key | is_ctrl_key,
-                lit(STATE_IDLE, width: 4),
-                lit(STATE_NORMAL_KEY, width: 4)
-              )
+              lit(STATE_NORMAL_KEY, width: 4)
             )
-          ),
-          state_next
+          )
         )
 
-        state_next = mux(state == lit(STATE_GOT_KEY_UP, width: 4),
-          lit(STATE_GOT_KEY_UP2, width: 4),
-          state_next
-        )
-
-        state_next = mux(state == lit(STATE_GOT_KEY_UP2, width: 4),
-          lit(STATE_GOT_KEY_UP3, width: 4),
-          state_next
-        )
-
-        state_next = mux(state == lit(STATE_GOT_KEY_UP3, width: 4),
-          mux(code_available, lit(STATE_KEY_UP, width: 4), state),
-          state_next
-        )
-
-        state_next = mux((state == lit(STATE_KEY_UP, width: 4)) |
-                         (state == lit(STATE_NORMAL_KEY, width: 4)),
-          lit(STATE_IDLE, width: 4),
-          state_next
-        )
+        state_next = case_select(state, {
+          STATE_IDLE       => mux(code_available, lit(STATE_HAVE_CODE, width: 4), lit(STATE_IDLE, width: 4)),
+          STATE_HAVE_CODE  => lit(STATE_DECODE, width: 4),
+          STATE_DECODE     => decode_next,
+          STATE_GOT_KEY_UP => lit(STATE_GOT_KEY_UP2, width: 4),
+          STATE_GOT_KEY_UP2 => lit(STATE_GOT_KEY_UP3, width: 4),
+          STATE_GOT_KEY_UP3 => mux(code_available, lit(STATE_KEY_UP, width: 4), lit(STATE_GOT_KEY_UP3, width: 4)),
+          STATE_KEY_UP     => lit(STATE_IDLE, width: 4),
+          STATE_NORMAL_KEY => lit(STATE_IDLE, width: 4)
+        }, default: lit(STATE_IDLE, width: 4))
 
         state <= state_next
 
