@@ -53,6 +53,18 @@ module RHDL
       output :video                        # Serial video output
       output :color_line                   # Color burst enable
 
+      # Internal registers (declared as wires for sequential access)
+      wire :text_shiftreg, width: 6
+      wire :invert_character
+      wire :graph_shiftreg, width: 8
+      wire :graphics_time_1
+      wire :graphics_time_2
+      wire :graphics_time_3
+      wire :pixel_select, width: 2
+      wire :hires_delayed
+      wire :blank_delayed
+      wire :video_sig
+
       # Character ROM interface
       # addr = DL(5:0) & VC & VB & VA (9 bits)
       # ROM outputs 5 bits per character row
@@ -141,12 +153,11 @@ module RHDL
         # Text pixel with inversion
         text_pixel = text_shiftreg[0] ^ invert_character
 
-        # Lores pixel selection (4 pixels per byte)
-        lores_pixel = mux(pixel_select,
-          graph_shiftreg[6],               # 11
-          graph_shiftreg[4],               # 10
-          graph_shiftreg[2],               # 01
-          graph_shiftreg[0]                # 00
+        # Lores pixel selection (4 pixels per byte) using nested mux
+        # pixel_select[1:0] selects one of 4 pixels
+        lores_pixel = mux(pixel_select[1],
+          mux(pixel_select[0], graph_shiftreg[6], graph_shiftreg[4]),  # 1x
+          mux(pixel_select[0], graph_shiftreg[2], graph_shiftreg[0])   # 0x
         )
 
         # Hires pixel with delay for color shift
@@ -175,49 +186,6 @@ module RHDL
         video <= video_sig
         color_line <= graphics_time_1
         hires <= hires_mode & graphics_time_3
-      end
-
-      private
-
-      # Internal register accessors
-      def text_shiftreg
-        @internal_text_shiftreg ||= 0
-      end
-
-      def invert_character
-        @internal_invert_character ||= 0
-      end
-
-      def graph_shiftreg
-        @internal_graph_shiftreg ||= 0
-      end
-
-      def graphics_time_1
-        @internal_graphics_time_1 ||= 0
-      end
-
-      def graphics_time_2
-        @internal_graphics_time_2 ||= 0
-      end
-
-      def graphics_time_3
-        @internal_graphics_time_3 ||= 0
-      end
-
-      def pixel_select
-        @internal_pixel_select ||= 0
-      end
-
-      def hires_delayed
-        @internal_hires_delayed ||= 0
-      end
-
-      def blank_delayed
-        @internal_blank_delayed ||= 0
-      end
-
-      def video_sig
-        @internal_video_sig ||= 0
       end
     end
   end

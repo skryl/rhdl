@@ -58,9 +58,11 @@ module RHDL
       output :ldps_n                       # Load parallel shift
       output :ld194                        # Load 194
 
-      # Internal state
+      # Internal registers (declared as wires for sequential access)
       # H counter: 7 bits (0, 40-127 = 65 states)
       # V counter: 9 bits ($FA-$1FF = 262 states)
+      wire :h, width: 7
+      wire :v, width: 9
 
       # DRAM signal generator (74S195 shift register)
       # State format: {q3, cas_n, ax, ras_n}
@@ -167,17 +169,6 @@ module RHDL
            cat(lit(0, width: 3), v[6]))[3..0],
           h[2..0]                                              # Bits 2:0
         )
-      end
-
-      private
-
-      # Internal registers (declared via sequential block)
-      def h
-        @internal_h ||= 0
-      end
-
-      def v
-        @internal_v ||= 0b011111010
       end
     end
   end

@@ -19,12 +19,6 @@ module RHDL
       input :addr, width: 9              # 512 locations
       output :dout, width: 5             # 5 bits per row
 
-      # Define ROM array
-      memory :rom, depth: 512, width: 5, readonly: true
-
-      # Synchronous read
-      sync_read :dout, from: :rom, clock: :clk, addr: :addr
-
       # Character ROM data (from reference implementation)
       # Each entry is 5 bits representing one row of a character
       CHARACTER_DATA = [
@@ -158,18 +152,12 @@ module RHDL
         0b01110, 0b10001, 0b01000, 0b00100, 0b00100, 0b00000, 0b00100, 0b00000
       ].freeze
 
-      def initialize(name = nil, **params)
-        super
-        initialize_rom
-      end
+      # Define ROM array with initial data
+      # Note: Using async_read for now; sync_read to be added to RHDL DSL
+      memory :rom, depth: 512, width: 5, initial: CHARACTER_DATA
 
-      private
-
-      def initialize_rom
-        CHARACTER_DATA.each_with_index do |value, addr|
-          mem_write(:rom, addr, value, 5)
-        end
-      end
+      # Asynchronous read (combinational)
+      async_read :dout, from: :rom, addr: :addr
     end
   end
 end
