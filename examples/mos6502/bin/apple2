@@ -1049,7 +1049,12 @@ end
 # Initialize HIRES mode soft switches if requested
 # This is useful for loading memory dumps that were captured in HIRES mode
 if options[:init_hires]
-  bus = terminal.runner.bus
+  runner = terminal.runner
+  # For native mode, also set video state on the CPU (soft switches are handled in Rust)
+  if runner.native?
+    runner.cpu.set_video_state(false, false, false, true)  # text=false, mixed=false, page2=false, hires=true
+  end
+  bus = runner.bus
   bus.read(0xC050)  # TXTCLR - graphics mode
   bus.read(0xC052)  # MIXCLR - full screen
   bus.read(0xC054)  # PAGE1 - page 1
