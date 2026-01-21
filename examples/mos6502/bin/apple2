@@ -911,6 +911,7 @@ parser = OptionParser.new do |opts|
 
   opts.on("-k", "--karateka", "Load Karateka memory dump (ready to play)") do
     options[:karateka] = true
+    options[:hires] = true  # Karateka uses hi-res graphics mode
   end
 
   opts.on("--no-audio", "Disable audio output") do
