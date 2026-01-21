@@ -6,16 +6,18 @@ module RHDL
   module Codegen
     module Structure
     Gate = Struct.new(:type, :inputs, :output, :value, keyword_init: true)
-    DFF = Struct.new(:d, :q, :rst, :en, :async_reset, keyword_init: true)
+    DFF = Struct.new(:d, :q, :rst, :en, :async_reset, :reset_value, keyword_init: true)
+    SRLatch = Struct.new(:s, :r, :en, :q, :qn, keyword_init: true)
 
     class IR
-      attr_reader :name, :net_count, :gates, :dffs, :inputs, :outputs, :schedule
+      attr_reader :name, :net_count, :gates, :dffs, :sr_latches, :inputs, :outputs, :schedule
 
       def initialize(name: 'design')
         @name = name
         @net_count = 0
         @gates = []
         @dffs = []
+        @sr_latches = []
         @inputs = {}
         @outputs = {}
         @schedule = []
@@ -31,8 +33,12 @@ module RHDL
         @gates << Gate.new(type: type, inputs: inputs, output: output, value: value)
       end
 
-      def add_dff(d:, q:, rst: nil, en: nil, async_reset: false)
-        @dffs << DFF.new(d: d, q: q, rst: rst, en: en, async_reset: async_reset)
+      def add_dff(d:, q:, rst: nil, en: nil, async_reset: false, reset_value: 0)
+        @dffs << DFF.new(d: d, q: q, rst: rst, en: en, async_reset: async_reset, reset_value: reset_value)
+      end
+
+      def add_sr_latch(s:, r:, en:, q:, qn:)
+        @sr_latches << SRLatch.new(s: s, r: r, en: en, q: q, qn: qn)
       end
 
       def add_input(name, nets)
@@ -52,7 +58,8 @@ module RHDL
           name: @name,
           net_count: @net_count,
           gates: @gates.map { |g| { type: g.type, inputs: g.inputs, output: g.output, value: g.value } },
-          dffs: @dffs.map { |d| { d: d.d, q: d.q, rst: d.rst, en: d.en, async_reset: d.async_reset } },
+          dffs: @dffs.map { |d| { d: d.d, q: d.q, rst: d.rst, en: d.en, async_reset: d.async_reset, reset_value: d.reset_value } },
+          sr_latches: @sr_latches.map { |l| { s: l.s, r: l.r, en: l.en, q: l.q, qn: l.qn } },
           inputs: @inputs,
           outputs: @outputs,
           schedule: @schedule
@@ -71,7 +78,10 @@ module RHDL
           ir.add_gate(type: g[:type].to_sym, inputs: g[:inputs], output: g[:output], value: g[:value])
         end
         data[:dffs].each do |d|
-          ir.add_dff(d: d[:d], q: d[:q], rst: d[:rst], en: d[:en], async_reset: d[:async_reset])
+          ir.add_dff(d: d[:d], q: d[:q], rst: d[:rst], en: d[:en], async_reset: d[:async_reset], reset_value: d[:reset_value] || 0)
+        end
+        (data[:sr_latches] || []).each do |l|
+          ir.add_sr_latch(s: l[:s], r: l[:r], en: l[:en], q: l[:q], qn: l[:qn])
         end
         data[:inputs].each { |name, nets| ir.add_input(name, nets) }
         data[:outputs].each { |name, nets| ir.add_output(name, nets) }

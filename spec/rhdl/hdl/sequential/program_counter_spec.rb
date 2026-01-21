@@ -146,5 +146,24 @@ RSpec.describe RHDL::HDL::ProgramCounter do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { d: 0, rst: 0, en: 1, load: 0, inc: 1 },
+          { d: 0, rst: 0, en: 1, load: 0, inc: 1 },
+          { d: 0x100, rst: 0, en: 1, load: 1, inc: 1 },
+          { d: 0, rst: 0, en: 1, load: 0, inc: 2 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::ProgramCounter,
+          'program_counter',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/program_counter',
+          has_clock: true
+        )
+      end
+    end
   end
 end

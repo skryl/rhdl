@@ -186,5 +186,24 @@ RSpec.describe RHDL::HDL::Stack do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { din: 0x11, rst: 0, push: 1, pop: 0 },
+          { din: 0x22, rst: 0, push: 1, pop: 0 },
+          { din: 0, rst: 0, push: 0, pop: 1 },
+          { din: 0, rst: 1, push: 0, pop: 0 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::Stack,
+          'stack',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/stack',
+          has_clock: true
+        )
+      end
+    end
   end
 end

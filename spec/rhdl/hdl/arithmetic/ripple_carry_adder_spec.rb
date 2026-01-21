@@ -97,5 +97,25 @@ RSpec.describe RHDL::HDL::RippleCarryAdder do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 0x00, b: 0x00, cin: 0 },
+          { a: 0x01, b: 0x01, cin: 0 },
+          { a: 0xFF, b: 0x01, cin: 0 },
+          { a: 0x0F, b: 0x0F, cin: 1 },
+          { a: 0x55, b: 0xAA, cin: 0 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::RippleCarryAdder,
+          'rca8',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/rca8',
+          has_clock: false
+        )
+      end
+    end
   end
 end

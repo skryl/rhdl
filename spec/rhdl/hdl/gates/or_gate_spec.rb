@@ -131,5 +131,24 @@ RSpec.describe RHDL::HDL::OrGate do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a0: 0, a1: 0 },
+          { a0: 0, a1: 1 },
+          { a0: 1, a1: 0 },
+          { a0: 1, a1: 1 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::OrGate,
+          'or_gate',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/or_gate',
+          has_clock: false
+        )
+      end
+    end
   end
 end

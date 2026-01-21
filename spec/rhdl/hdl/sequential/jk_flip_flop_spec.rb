@@ -179,5 +179,24 @@ RSpec.describe RHDL::HDL::JKFlipFlop do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { j: 1, k: 0, rst: 0, en: 1 },
+          { j: 0, k: 0, rst: 0, en: 1 },
+          { j: 0, k: 1, rst: 0, en: 1 },
+          { j: 1, k: 1, rst: 0, en: 1 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::JKFlipFlop,
+          'jk_flip_flop',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/jk_flip_flop',
+          has_clock: true
+        )
+      end
+    end
   end
 end

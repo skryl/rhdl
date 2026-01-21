@@ -23,3 +23,7 @@
 *.dylib
 /examples/mos6502/utilities/isa_simulator_native/target/
 /examples/mos6502/utilities/isa_simulator_native/lib/
+
+# Native extension build artifacts
+lib/rhdl/codegen/structure/sim/cpu_native/target/
+lib/rhdl/codegen/structure/sim/cpu_native/lib/

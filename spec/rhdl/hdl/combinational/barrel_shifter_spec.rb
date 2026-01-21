@@ -158,5 +158,24 @@ RSpec.describe RHDL::HDL::BarrelShifter do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 0b00001111, shift: 2, dir: 0, arith: 0, rotate: 0 },
+          { a: 0b11110000, shift: 2, dir: 1, arith: 0, rotate: 0 },
+          { a: 0b10000000, shift: 2, dir: 1, arith: 1, rotate: 0 },
+          { a: 0b10000001, shift: 1, dir: 0, arith: 0, rotate: 1 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::BarrelShifter,
+          'barrel_shifter',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/barrel_shifter',
+          has_clock: false
+        )
+      end
+    end
   end
 end
