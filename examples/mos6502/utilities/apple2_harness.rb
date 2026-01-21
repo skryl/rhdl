@@ -88,14 +88,13 @@ module Apple2Harness
 
     # Get CPU state for debugging
     def cpu_state
-      dp = @cpu.datapath
       {
-        pc: dp.read_pc,
-        a: dp.read_a,
-        x: dp.read_x,
-        y: dp.read_y,
-        sp: dp.read_sp,
-        p: dp.read_p,
+        pc: @cpu.pc,
+        a: @cpu.a,
+        x: @cpu.x,
+        y: @cpu.y,
+        sp: @cpu.sp,
+        p: @cpu.p,
         cycles: @cpu.clock_count,
         halted: @cpu.halted?,
         simulator_type: simulator_type
@@ -116,6 +115,11 @@ module Apple2Harness
     # @return [Symbol] :hdl for cycle-accurate HDL simulation
     def simulator_type
       :hdl
+    end
+
+    # Check if using native implementation (HDL is not native)
+    def native?
+      false
     end
   end
 
