@@ -794,7 +794,7 @@ fn u64_to_ruby(ruby: &Ruby, value: u64) -> Value {
     }
 }
 
-#[magnus::wrap(class = "RHDL::Codegen::CIRCT::FirrtlNative")]
+#[magnus::wrap(class = "RHDL::Codegen::CIRCT::FirrtlInterpreter")]
 struct RubyRtlSim {
     sim: RefCell<RtlSimulator>,
 }
@@ -937,7 +937,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     let codegen = rhdl.define_module("Codegen")?;
     let circt = codegen.define_module("CIRCT")?;
 
-    let class = circt.define_class("FirrtlNative", ruby.class_object())?;
+    let class = circt.define_class("FirrtlInterpreter", ruby.class_object())?;
 
     class.define_singleton_method("new", magnus::function!(RubyRtlSim::new, 1))?;
     class.define_method("poke", method!(RubyRtlSim::poke, 2))?;
@@ -957,7 +957,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("stats", method!(RubyRtlSim::stats, 0))?;
     class.define_method("native?", method!(RubyRtlSim::native, 0))?;
 
-    circt.const_set("FIRRTL_NATIVE_AVAILABLE", true)?;
+    circt.const_set("FIRRTL_INTERPRETER_AVAILABLE", true)?;
 
     Ok(())
 }

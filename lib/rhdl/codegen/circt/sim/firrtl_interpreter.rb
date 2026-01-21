@@ -1,40 +1,40 @@
 # frozen_string_literal: true
 
-# FIRRTL/RTL-level simulator with native Rust backend
+# FIRRTL/RTL-level bytecode interpreter with Rust backend
 #
-# This simulator operates at the RTL level, interpreting Behavior IR directly.
-# It's faster than gate-level netlist simulation because it operates on whole
-# words instead of individual bits.
+# This simulator operates at the RTL level, interpreting Behavior IR using
+# a stack-based bytecode interpreter. It's faster than gate-level netlist
+# simulation because it operates on whole words instead of individual bits.
 
 require 'json'
 
 module RHDL
   module Codegen
     module CIRCT
-      # Try to load native extension
-      FIRRTL_NATIVE_AVAILABLE = begin
-        require_relative 'firrtl_native/lib/firrtl_native'
+      # Try to load interpreter extension
+      FIRRTL_INTERPRETER_AVAILABLE = begin
+        require_relative 'firrtl_interpreter/lib/firrtl_interpreter'
         true
       rescue LoadError
         false
       end
 
-      # Wrapper class that uses native Rust simulator if available
-      class FirrtlSimWrapper
+      # Wrapper class that uses Rust interpreter if available
+      class FirrtlInterpreterWrapper
         attr_reader :ir_json
 
         def initialize(ir_json)
           @ir_json = ir_json
 
-          if FIRRTL_NATIVE_AVAILABLE
-            @sim = FirrtlNative.new(ir_json)
+          if FIRRTL_INTERPRETER_AVAILABLE
+            @sim = FirrtlInterpreter.new(ir_json)
           else
             @sim = RubyFirrtlSim.new(ir_json)
           end
         end
 
         def native?
-          FIRRTL_NATIVE_AVAILABLE
+          FIRRTL_INTERPRETER_AVAILABLE
         end
 
         def poke(name, value)
