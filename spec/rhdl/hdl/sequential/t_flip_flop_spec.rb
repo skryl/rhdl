@@ -227,5 +227,24 @@ RSpec.describe RHDL::HDL::TFlipFlop do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results', pending: 'Flip-flop qn timing issues with Ruby/Native SimCPU' do
+        test_cases = [
+          { t: 1, rst: 0, en: 1 },
+          { t: 1, rst: 0, en: 1 },
+          { t: 0, rst: 0, en: 1 },
+          { t: 1, rst: 1, en: 1 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::TFlipFlop,
+          't_flip_flop',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/t_flip_flop',
+          has_clock: true
+        )
+      end
+    end
   end
 end

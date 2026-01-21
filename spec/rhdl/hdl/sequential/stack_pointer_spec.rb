@@ -184,5 +184,24 @@ RSpec.describe RHDL::HDL::StackPointer do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results', pending: 'Sequential timing mismatch between Ruby/Native SimCPU and Verilog' do
+        test_cases = [
+          { rst: 0, push: 1, pop: 0 },
+          { rst: 0, push: 1, pop: 0 },
+          { rst: 0, push: 0, pop: 1 },
+          { rst: 1, push: 0, pop: 0 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::StackPointer,
+          'stack_pointer',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/stack_pointer',
+          has_clock: true
+        )
+      end
+    end
   end
 end

@@ -145,5 +145,24 @@ RSpec.describe RHDL::HDL::RegisterLoad do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { d: 0xAB, rst: 0, load: 1 },
+          { d: 0x55, rst: 0, load: 1 },
+          { d: 0xFF, rst: 0, load: 0 },
+          { d: 0x00, rst: 1, load: 1 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::RegisterLoad,
+          'register_load',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/register_load',
+          has_clock: true
+        )
+      end
+    end
   end
 end

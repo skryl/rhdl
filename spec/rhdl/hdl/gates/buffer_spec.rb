@@ -80,5 +80,22 @@ RSpec.describe RHDL::HDL::Buffer do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results' do
+        test_cases = [
+          { a: 0 },
+          { a: 1 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::Buffer,
+          'buffer',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/buffer',
+          has_clock: false
+        )
+      end
+    end
   end
 end

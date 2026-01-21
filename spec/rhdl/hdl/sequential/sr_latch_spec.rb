@@ -177,5 +177,24 @@ RSpec.describe RHDL::HDL::SRLatch do
         end
       end
     end
+
+    describe 'simulator comparison' do
+      it 'all simulators produce matching results', pending: 'Latch qn timing issues with Ruby/Native SimCPU' do
+        test_cases = [
+          { s: 1, r: 0, en: 1 },
+          { s: 0, r: 0, en: 1 },
+          { s: 0, r: 1, en: 1 },
+          { s: 1, r: 0, en: 0 }
+        ]
+
+        NetlistHelper.compare_and_validate!(
+          RHDL::HDL::SRLatch,
+          'sr_latch',
+          test_cases,
+          base_dir: 'tmp/netlist_comparison/sr_latch',
+          has_clock: false
+        )
+      end
+    end
   end
 end
