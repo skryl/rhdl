@@ -697,6 +697,38 @@ impl JitRtlSimulator {
         result
     }
 
+    /// Run N ticks with a single FFI call (general-purpose batched execution)
+    #[inline(never)]
+    fn run_ticks(&mut self, n: usize) {
+        for _ in 0..n {
+            self.tick();
+        }
+    }
+
+    /// Poke by index - faster than by name for hot paths
+    #[inline(always)]
+    fn poke_by_idx(&mut self, idx: usize, value: u64) {
+        if idx < self.signals.len() {
+            let mask = Self::compute_mask(self.widths[idx]);
+            self.signals[idx] = value & mask;
+        }
+    }
+
+    /// Peek by index - faster than by name for hot paths
+    #[inline(always)]
+    fn peek_by_idx(&self, idx: usize) -> u64 {
+        if idx < self.signals.len() {
+            self.signals[idx]
+        } else {
+            0
+        }
+    }
+
+    /// Get signal index by name (for caching)
+    fn get_signal_idx(&self, name: &str) -> Option<usize> {
+        self.name_to_idx.get(name).copied()
+    }
+
     fn reset(&mut self) {
         for val in self.signals.iter_mut() {
             *val = 0;
@@ -871,6 +903,30 @@ impl RubyJitSim {
     fn native(&self) -> bool {
         true
     }
+
+    /// Run N ticks with a single FFI call
+    fn run_ticks(&self, n: usize) {
+        self.sim.borrow_mut().run_ticks(n);
+    }
+
+    /// Get signal index by name (for caching indices)
+    fn get_signal_idx(&self, name: String) -> Option<usize> {
+        self.sim.borrow().get_signal_idx(&name)
+    }
+
+    /// Poke by index - faster than by name
+    fn poke_by_idx(&self, idx: usize, value: Value) -> Result<(), Error> {
+        let v = ruby_to_u64(value)?;
+        self.sim.borrow_mut().poke_by_idx(idx, v);
+        Ok(())
+    }
+
+    /// Peek by index - faster than by name
+    fn peek_by_idx(&self, idx: usize) -> Result<Value, Error> {
+        let ruby = unsafe { Ruby::get_unchecked() };
+        let val = self.sim.borrow().peek_by_idx(idx);
+        Ok(u64_to_ruby(&ruby, val))
+    }
 }
 
 #[magnus::init]
@@ -898,6 +954,10 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("write_ram", method!(RubyJitSim::write_ram, 2))?;
     class.define_method("stats", method!(RubyJitSim::stats, 0))?;
     class.define_method("native?", method!(RubyJitSim::native, 0))?;
+    class.define_method("run_ticks", method!(RubyJitSim::run_ticks, 1))?;
+    class.define_method("get_signal_idx", method!(RubyJitSim::get_signal_idx, 1))?;
+    class.define_method("poke_by_idx", method!(RubyJitSim::poke_by_idx, 2))?;
+    class.define_method("peek_by_idx", method!(RubyJitSim::peek_by_idx, 1))?;
 
     circt.const_set("FIRRTL_JIT_AVAILABLE", true)?;
 
