@@ -427,6 +427,9 @@ class Apple2Terminal
   end
 
   def render_screen
+    # Sync video state from native CPU to bus (for soft switches handled in Rust)
+    @runner.sync_video_state if @runner.respond_to?(:sync_video_state)
+
     # Check if we should render hi-res graphics
     # Automatically switch based on soft switch state, or force with -H flag
     if @runner.bus.hires_mode? || (@hires_mode && !@runner.bus.text_mode?)
