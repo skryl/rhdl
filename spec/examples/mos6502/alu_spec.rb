@@ -140,7 +140,7 @@ RSpec.describe MOS6502::ALU do
       end
     end
 
-    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+    context 'when iverilog is available', :slow, if: HdlToolchain.iverilog_available? do
       it 'behavior Verilog matches RHDL simulation' do
         verilog = MOS6502::ALU.to_verilog
         behavior = MOS6502::ALU.new
@@ -223,7 +223,7 @@ RSpec.describe MOS6502::ALU do
       expect(verilog).to include('output [7:0] result')
     end
 
-    context 'when iverilog is available', if: HdlToolchain.iverilog_available? do
+    context 'when iverilog is available', :slow, if: HdlToolchain.iverilog_available? do
       it 'matches behavior simulation for ADC operations' do
         # Run behavior simulation to get expected results
         behavior = MOS6502::ALU.new
