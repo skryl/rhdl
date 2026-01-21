@@ -49,8 +49,16 @@ class Apple2HDLTerminal
     @runner = case @sim_type
               when :netlist
                 require 'apple2_netlist'
-                puts "Initializing netlist simulation mode..."
+                puts "Initializing netlist (gate-level) simulation mode..."
                 runner = RHDL::Apple2::NetlistRunner.new
+                unless runner.native?
+                  warn "Warning: Native Rust backend not available, using Ruby fallback"
+                end
+                runner
+              when :firrtl
+                require 'apple2_firrtl'
+                puts "Initializing FIRRTL (RTL-level) simulation mode..."
+                runner = RHDL::Apple2::FirrtlRunner.new
                 unless runner.native?
                   warn "Warning: Native Rust backend not available, using Ruby fallback"
                 end
@@ -728,7 +736,7 @@ parser = OptionParser.new do |opts|
     options[:green] = true
   end
 
-  opts.on("-m", "--mode TYPE", [:hdl, :netlist], "Simulator mode: hdl (default), netlist") do |v|
+  opts.on("-m", "--mode TYPE", [:hdl, :netlist, :firrtl], "Simulator mode: hdl (default), netlist, firrtl") do |v|
     options[:mode] = v
   end
 
