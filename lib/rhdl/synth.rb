@@ -2,7 +2,7 @@
 # Provides expression AST classes for converting behavior blocks to IR
 
 # Load codegen IR first (synth expressions depend on IR types)
-require_relative 'codegen/verilog/ir'
+require_relative 'codegen/ir/ir'
 
 # Load expression hierarchy in dependency order
 require_relative 'synth/expr'

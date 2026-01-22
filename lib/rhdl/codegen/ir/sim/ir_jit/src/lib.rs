@@ -645,13 +645,21 @@ impl JitRtlSimulator {
         self.signals[self.clk_idx] = 0;
         self.evaluate();
 
-        // Provide RAM/ROM data
+        // Provide RAM/ROM data based on Apple II memory map:
+        // $0000-$BFFF: RAM (48KB)
+        // $C000-$CFFF: I/O space (soft switches, slot ROMs)
+        // $D000-$FFFF: ROM (12KB)
         let ram_addr = self.signals[self.ram_addr_idx] as usize;
         let ram_data = if ram_addr >= 0xD000 {
+            // ROM space
             let rom_offset = ram_addr.wrapping_sub(0xD000);
             if rom_offset < self.rom.len() { self.rom[rom_offset] } else { 0 }
+        } else if ram_addr >= 0xC000 {
+            // I/O space - return 0 (soft switches handled by HDL logic)
+            0
         } else {
-            self.ram[ram_addr & 0xFFFF]
+            // RAM space
+            self.ram[ram_addr]
         };
         self.signals[self.ram_do_idx] = ram_data as u64;
 
