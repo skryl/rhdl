@@ -1,7 +1,7 @@
 # FIRRTL code generator for CIRCT toolchain
 # Generates FIRRTL 5.1.0 format that can be compiled by firtool to Verilog
 
-require_relative "../behavior/ir"
+require_relative "../verilog/ir"
 
 module RHDL
   module Codegen
