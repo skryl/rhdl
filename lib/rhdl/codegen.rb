@@ -25,7 +25,7 @@ module RHDL
       # Behavior Verilog codegen
       def verilog(component, top_name: nil)
         module_def = IR::Lower.new(component, top_name: top_name).build
-        Verilog::Verilog.generate(module_def)
+        Verilog.generate(module_def)
       end
       alias_method :to_verilog, :verilog
 
