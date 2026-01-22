@@ -13,11 +13,26 @@ require 'json'
 module RHDL
   module Codegen
     module CIRCT
+      # Determine library path based on platform
+      RTL_JIT_EXT_DIR = File.expand_path('rtl_jit/lib', __dir__)
+      RTL_JIT_LIB_NAME = case RbConfig::CONFIG['host_os']
+      when /darwin/ then 'rtl_jit.bundle'
+      when /mswin|mingw/ then 'rtl_jit.dll'
+      else 'rtl_jit.so'
+      end
+      RTL_JIT_LIB_PATH = File.join(RTL_JIT_EXT_DIR, RTL_JIT_LIB_NAME)
+
       # Try to load JIT extension
       RTL_JIT_AVAILABLE = begin
-        require_relative 'rtl_jit/lib/rtl_jit'
-        true
-      rescue LoadError
+        if File.exist?(RTL_JIT_LIB_PATH)
+          $LOAD_PATH.unshift(RTL_JIT_EXT_DIR) unless $LOAD_PATH.include?(RTL_JIT_EXT_DIR)
+          require 'rtl_jit'
+          true
+        else
+          false
+        end
+      rescue LoadError => e
+        warn "RtlJit extension not available: #{e.message}" if ENV['RHDL_DEBUG']
         false
       end
 
@@ -25,24 +40,31 @@ module RHDL
       class RtlJitWrapper
         attr_reader :ir_json
 
-        def initialize(ir_json)
+        def initialize(ir_json, allow_fallback: true)
           @ir_json = ir_json
 
           if RTL_JIT_AVAILABLE
             @sim = RtlJit.new(ir_json)
-          else
-            # Fallback to interpreter
+            @backend = :jit
+          elsif allow_fallback
             require_relative 'rtl_interpreter'
-            @sim = RtlInterpreterWrapper.new(ir_json)
+            @sim = RtlInterpreterWrapper.new(ir_json, allow_fallback: true)
+            @backend = @sim.native? ? :interpret : :ruby
+          else
+            raise LoadError, "RTL JIT extension not found at: #{RTL_JIT_LIB_PATH}\nRun 'rake native:build' to build it."
           end
         end
 
+        def simulator_type
+          :"hdl_#{@backend}"
+        end
+
         def native?
-          RTL_JIT_AVAILABLE
+          RTL_JIT_AVAILABLE && @backend == :jit
         end
 
         def backend
-          RTL_JIT_AVAILABLE ? :cranelift_jit : :interpreter
+          @backend
         end
 
         def poke(name, value)

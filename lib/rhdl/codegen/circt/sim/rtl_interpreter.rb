@@ -11,11 +11,26 @@ require 'json'
 module RHDL
   module Codegen
     module CIRCT
+      # Determine library path based on platform
+      RTL_INTERPRETER_EXT_DIR = File.expand_path('rtl_interpreter/lib', __dir__)
+      RTL_INTERPRETER_LIB_NAME = case RbConfig::CONFIG['host_os']
+      when /darwin/ then 'rtl_interpreter.bundle'
+      when /mswin|mingw/ then 'rtl_interpreter.dll'
+      else 'rtl_interpreter.so'
+      end
+      RTL_INTERPRETER_LIB_PATH = File.join(RTL_INTERPRETER_EXT_DIR, RTL_INTERPRETER_LIB_NAME)
+
       # Try to load interpreter extension
       RTL_INTERPRETER_AVAILABLE = begin
-        require_relative 'rtl_interpreter/lib/rtl_interpreter'
-        true
-      rescue LoadError
+        if File.exist?(RTL_INTERPRETER_LIB_PATH)
+          $LOAD_PATH.unshift(RTL_INTERPRETER_EXT_DIR) unless $LOAD_PATH.include?(RTL_INTERPRETER_EXT_DIR)
+          require 'rtl_interpreter'
+          true
+        else
+          false
+        end
+      rescue LoadError => e
+        warn "RtlInterpreter extension not available: #{e.message}" if ENV['RHDL_DEBUG']
         false
       end
 
@@ -23,18 +38,26 @@ module RHDL
       class RtlInterpreterWrapper
         attr_reader :ir_json
 
-        def initialize(ir_json)
+        def initialize(ir_json, allow_fallback: true)
           @ir_json = ir_json
 
           if RTL_INTERPRETER_AVAILABLE
             @sim = RtlInterpreter.new(ir_json)
-          else
+            @backend = :interpret
+          elsif allow_fallback
             @sim = RubyRtlSim.new(ir_json)
+            @backend = :ruby
+          else
+            raise LoadError, "RTL interpreter extension not found at: #{RTL_INTERPRETER_LIB_PATH}\nRun 'rake native:build' to build it."
           end
         end
 
+        def simulator_type
+          :"hdl_#{@backend}"
+        end
+
         def native?
-          RTL_INTERPRETER_AVAILABLE
+          RTL_INTERPRETER_AVAILABLE && @backend == :interpret
         end
 
         def poke(name, value)

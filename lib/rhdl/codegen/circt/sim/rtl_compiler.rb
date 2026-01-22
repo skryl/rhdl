@@ -12,11 +12,26 @@ require_relative 'rtl_interpreter'  # For IRToJson module
 module RHDL
   module Codegen
     module CIRCT
+      # Determine library path based on platform
+      RTL_COMPILER_EXT_DIR = File.expand_path('rtl_compiler/lib', __dir__)
+      RTL_COMPILER_LIB_NAME = case RbConfig::CONFIG['host_os']
+      when /darwin/ then 'rtl_compiler.bundle'
+      when /mswin|mingw/ then 'rtl_compiler.dll'
+      else 'rtl_compiler.so'
+      end
+      RTL_COMPILER_LIB_PATH = File.join(RTL_COMPILER_EXT_DIR, RTL_COMPILER_LIB_NAME)
+
       # Try to load compiler extension
       RTL_COMPILER_AVAILABLE = begin
-        require_relative 'rtl_compiler/lib/rtl_compiler'
-        true
-      rescue LoadError
+        if File.exist?(RTL_COMPILER_LIB_PATH)
+          $LOAD_PATH.unshift(RTL_COMPILER_EXT_DIR) unless $LOAD_PATH.include?(RTL_COMPILER_EXT_DIR)
+          require 'rtl_compiler'
+          true
+        else
+          false
+        end
+      rescue LoadError => e
+        warn "RtlCompiler extension not available: #{e.message}" if ENV['RHDL_DEBUG']
         false
       end
 
@@ -28,10 +43,14 @@ module RHDL
           @ir_json = ir_json
 
           unless RTL_COMPILER_AVAILABLE
-            raise LoadError, "RTL Compiler native extension not available. Run 'rake native:build' to build it."
+            raise LoadError, "RTL Compiler extension not found at: #{RTL_COMPILER_LIB_PATH}\nRun 'rake native:build' to build it."
           end
 
           @sim = ::RtlCompiler.new(ir_json)
+        end
+
+        def simulator_type
+          :hdl_compile
         end
 
         def native?
