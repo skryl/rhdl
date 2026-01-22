@@ -781,7 +781,7 @@ fn u64_to_ruby(ruby: &Ruby, value: u64) -> Value {
     }
 }
 
-#[magnus::wrap(class = "RHDL::Codegen::CIRCT::RtlJit")]
+#[magnus::wrap(class = "RHDL::Codegen::IR::IrJit")]
 struct RubyJitSim {
     sim: RefCell<JitRtlSimulator>,
 }
@@ -941,9 +941,9 @@ impl RubyJitSim {
 fn init(ruby: &Ruby) -> Result<(), Error> {
     let rhdl = ruby.define_module("RHDL")?;
     let codegen = rhdl.define_module("Codegen")?;
-    let circt = codegen.define_module("CIRCT")?;
+    let ir = codegen.define_module("IR")?;
 
-    let class = circt.define_class("RtlJit", ruby.class_object())?;
+    let class = ir.define_class("IrJit", ruby.class_object())?;
 
     class.define_singleton_method("new", magnus::function!(RubyJitSim::new, 1))?;
     class.define_method("poke", method!(RubyJitSim::poke, 2))?;
@@ -966,8 +966,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("get_signal_idx", method!(RubyJitSim::get_signal_idx, 1))?;
     class.define_method("poke_by_idx", method!(RubyJitSim::poke_by_idx, 2))?;
     class.define_method("peek_by_idx", method!(RubyJitSim::peek_by_idx, 1))?;
-
-    circt.const_set("RTL_JIT_AVAILABLE", true)?;
 
     Ok(())
 }
