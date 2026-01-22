@@ -949,7 +949,7 @@ fn u64_to_ruby(ruby: &Ruby, value: u64) -> Value {
     }
 }
 
-#[magnus::wrap(class = "RHDL::Codegen::CIRCT::RtlInterpreter")]
+#[magnus::wrap(class = "RHDL::Codegen::IR::IrInterpreter")]
 struct RubyRtlSim {
     sim: RefCell<RtlSimulator>,
 }
@@ -1085,9 +1085,9 @@ impl RubyRtlSim {
 fn init(ruby: &Ruby) -> Result<(), Error> {
     let rhdl = ruby.define_module("RHDL")?;
     let codegen = rhdl.define_module("Codegen")?;
-    let circt = codegen.define_module("CIRCT")?;
+    let ir = codegen.define_module("IR")?;
 
-    let class = circt.define_class("RtlInterpreter", ruby.class_object())?;
+    let class = ir.define_class("IrInterpreter", ruby.class_object())?;
 
     class.define_singleton_method("new", magnus::function!(RubyRtlSim::new, 1))?;
     class.define_method("poke", method!(RubyRtlSim::poke, 2))?;
@@ -1106,8 +1106,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("write_ram", method!(RubyRtlSim::write_ram, 2))?;
     class.define_method("stats", method!(RubyRtlSim::stats, 0))?;
     class.define_method("native?", method!(RubyRtlSim::native, 0))?;
-
-    circt.const_set("RTL_INTERPRETER_AVAILABLE", true)?;
 
     Ok(())
 }
