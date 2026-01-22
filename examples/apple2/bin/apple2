@@ -43,22 +43,16 @@ class Apple2HDLTerminal
 
   def initialize(options = {})
     @options = options
-    @sim_type = options[:mode] || :hdl
+    @sim_mode = options[:mode] || :hdl
+    @sim_backend = options[:sim] || :jit
 
-    # Create runner based on simulator type
-    @runner = case @sim_type
+    # Create runner based on simulation mode and backend
+    @runner = case @sim_mode
               when :netlist
                 require 'apple2_netlist'
-                puts "Initializing netlist (gate-level) simulation mode..."
-                runner = RHDL::Apple2::NetlistRunner.new
-                unless runner.native?
-                  warn "Warning: Native Rust backend not available, using Ruby fallback"
-                end
-                runner
-              when :firrtl
-                require 'apple2_firrtl'
-                puts "Initializing FIRRTL (RTL-level) simulation mode..."
-                runner = RHDL::Apple2::FirrtlRunner.new
+                backend_names = { interpret: "Interpreter", jit: "JIT", compile: "Compiler" }
+                puts "Initializing netlist (gate-level) simulation [#{backend_names[@sim_backend]}]..."
+                runner = RHDL::Apple2::NetlistRunner.new(backend: @sim_backend)
                 unless runner.native?
                   warn "Warning: Native Rust backend not available, using Ruby fallback"
                 end
@@ -66,6 +60,9 @@ class Apple2HDLTerminal
               else  # :hdl (default)
                 RHDL::Apple2::Runner.new
               end
+
+    # For compatibility
+    @sim_type = @runner.simulator_type
 
     @running = false
     @last_screen = nil
@@ -707,7 +704,8 @@ options = {
   demo: false,
   hires: false,
   hires_width: 80,
-  mode: :hdl  # Simulator mode: :hdl or :netlist
+  mode: :hdl,  # Simulation mode: :hdl (default), :netlist
+  sim: :jit   # Simulator backend: :interpret, :jit (default), :compile
 }
 
 parser = OptionParser.new do |opts|
@@ -736,8 +734,12 @@ parser = OptionParser.new do |opts|
     options[:green] = true
   end
 
-  opts.on("-m", "--mode TYPE", [:hdl, :netlist, :firrtl], "Simulator mode: hdl (default), netlist, firrtl") do |v|
+  opts.on("-m", "--mode TYPE", [:hdl, :netlist], "Simulation mode: hdl (default), netlist (gate-level)") do |v|
     options[:mode] = v
+  end
+
+  opts.on("--sim TYPE", [:interpret, :jit, :compile], "Simulator backend: interpret, jit (default), compile") do |v|
+    options[:sim] = v
   end
 
   opts.on("-H", "--hires", "Enable hi-res graphics rendering (braille)") do

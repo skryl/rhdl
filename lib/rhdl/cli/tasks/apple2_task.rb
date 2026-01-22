@@ -107,7 +107,7 @@ module RHDL
         private
 
         def apple2_script
-          File.join(Config.project_root, 'examples/mos6502/bin/apple2')
+          File.join(Config.project_root, 'examples/apple2/bin/apple2')
         end
 
         def run_with_rom(rom_file, rom_address)
@@ -129,9 +129,13 @@ module RHDL
 
         def add_common_args(exec_args)
           exec_args << "-d" if options[:debug]
-          # Pass simulator type (default is native, only pass if different)
-          if options[:mode] && options[:mode] != :native
+          # Pass simulation mode (default is hdl)
+          if options[:mode] && options[:mode] != :hdl
             exec_args.push("-m", options[:mode].to_s)
+          end
+          # Pass simulator backend (default is jit)
+          if options[:sim] && options[:sim] != :jit
+            exec_args.push("--sim", options[:sim].to_s)
           end
           exec_args.push("-s", options[:speed].to_s) if options[:speed]
           exec_args << "-g" if options[:green]

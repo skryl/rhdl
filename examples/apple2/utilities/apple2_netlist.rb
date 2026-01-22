@@ -94,20 +94,40 @@ module RHDL
         0x0B, 0x03, 0x0A, 0x02, 0x09, 0x01, 0x08, 0x0F
       ].freeze
 
-      def initialize
-        puts "Initializing Apple2 netlist simulation..."
+      # Backend options:
+      #   :interpret - Pure Rust interpreter (slowest, fastest startup)
+      #   :jit       - Cranelift JIT (default, balanced)
+      #   :compile   - Rustc compiled (fastest, slow startup)
+      def initialize(backend: :jit, simd: :auto)
+        @backend = backend
+        @simd = simd
+
+        backend_names = { interpret: "Interpreter", jit: "Cranelift JIT", compile: "Rustc Compiler" }
+        puts "Initializing Apple2 netlist simulation (#{backend_names[backend] || backend})..."
         start_time = Time.now
 
         # Generate gate-level IR
         @ir = Apple2Netlist.gate_ir
 
-        # Create the simulator wrapper (uses JIT for balance of compile time and performance)
-        @sim = RHDL::Codegen::Structure::NetlistJitWrapper.new(@ir, lanes: 1)
+        # Create the simulator wrapper based on backend selection
+        @sim = case backend
+               when :interpret
+                 RHDL::Codegen::Structure::NetlistInterpreterWrapper.new(@ir, lanes: 1)
+               when :jit
+                 RHDL::Codegen::Structure::NetlistJitWrapper.new(@ir, lanes: 1)
+               when :compile
+                 RHDL::Codegen::Structure::NetlistCompilerWrapper.new(@ir, simd: simd, lanes: 1)
+               else
+                 raise ArgumentError, "Unknown backend: #{backend}. Valid: :interpret, :jit, :compile"
+               end
 
         elapsed = Time.now - start_time
         puts "  Netlist loaded in #{elapsed.round(2)}s"
         puts "  Native backend: #{@sim.native? ? 'Rust' : 'Ruby (fallback)'}"
         puts "  Gates: #{@ir.gates.length}, DFFs: #{@ir.dffs.length}"
+        if backend == :compile && @sim.respond_to?(:simd_mode)
+          puts "  SIMD mode: #{@sim.simd_mode}"
+        end
 
         @ram = Array.new(48 * 1024, 0)  # 48KB RAM
         @rom = Array.new(12 * 1024, 0)  # 12KB ROM (loaded separately)
@@ -127,7 +147,7 @@ module RHDL
       end
 
       def simulator_type
-        :netlist
+        :"netlist_#{@backend}"
       end
 
       # Initialize all input signals to safe defaults
