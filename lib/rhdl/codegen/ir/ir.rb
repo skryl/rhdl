@@ -216,19 +216,21 @@ module RHDL
       # Memory block for RAM/ROM inference
       # Maps to Verilog reg array
       class Memory
-        attr_reader :name, :depth, :width, :read_ports, :write_ports
+        attr_reader :name, :depth, :width, :read_ports, :write_ports, :initial_data
 
         # @param name [String] Memory array name
         # @param depth [Integer] Number of entries
         # @param width [Integer] Bits per entry
         # @param read_ports [Array<ReadPort>] Read port definitions
         # @param write_ports [Array<WritePort>] Write port definitions
-        def initialize(name:, depth:, width:, read_ports: [], write_ports: [])
+        # @param initial_data [Array<Integer>] Initial memory contents (optional)
+        def initialize(name:, depth:, width:, read_ports: [], write_ports: [], initial_data: nil)
           @name = name
           @depth = depth
           @width = width
           @read_ports = read_ports
           @write_ports = write_ports
+          @initial_data = initial_data
         end
       end
 
