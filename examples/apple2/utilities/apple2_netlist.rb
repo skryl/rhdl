@@ -32,7 +32,7 @@ module RHDL
         # Export Apple2 component to gate-level IR
         def gate_ir
           apple2 = Apple2.new('apple2')
-          RHDL::Codegen::Structure::Lower.from_components([apple2], name: 'apple2')
+          RHDL::Codegen::Netlist::Lower.from_components([apple2], name: 'apple2')
         end
 
         # Export to JSON file
@@ -112,11 +112,11 @@ module RHDL
         # Create the simulator wrapper based on backend selection
         @sim = case backend
                when :interpret
-                 RHDL::Codegen::Structure::NetlistInterpreterWrapper.new(@ir, lanes: 1)
+                 RHDL::Codegen::Netlist::NetlistInterpreterWrapper.new(@ir, lanes: 1)
                when :jit
-                 RHDL::Codegen::Structure::NetlistJitWrapper.new(@ir, lanes: 1)
+                 RHDL::Codegen::Netlist::NetlistJitWrapper.new(@ir, lanes: 1)
                when :compile
-                 RHDL::Codegen::Structure::NetlistCompilerWrapper.new(@ir, simd: simd, lanes: 1)
+                 RHDL::Codegen::Netlist::NetlistCompilerWrapper.new(@ir, simd: simd, lanes: 1)
                else
                  raise ArgumentError, "Unknown backend: #{backend}. Valid: :interpret, :jit, :compile"
                end
