@@ -47,7 +47,7 @@ module RHDL
           @ir_json = ir_json
 
           if IR_JIT_AVAILABLE
-            @sim = IrJit.new(ir_json)
+            @sim = ::RHDL::Codegen::CIRCT::RtlJit.new(ir_json)
             @backend = :jit
           elsif allow_fallback
             require_relative 'ir_interpreter'
