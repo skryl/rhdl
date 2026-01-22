@@ -105,6 +105,12 @@ struct SimulatorState {
     compiled: bool,
     /// Reset values for registers (signal index -> reset value)
     reset_values: Vec<(usize, u64)>,
+    /// Multi-clock domain support: clock signal index for each sequential assignment
+    seq_clocks: Vec<usize>,
+    /// Unique clock signal indices used by any clocked process
+    clock_indices: Vec<usize>,
+    /// Old clock values for rising edge detection
+    old_clocks: Vec<u64>,
 }
 
 impl SimulatorState {
@@ -145,6 +151,25 @@ impl SimulatorState {
             signals[idx] = reset_val;
         }
 
+        // Build multi-clock domain tracking
+        // seq_clocks[i] = clock signal index for sequential assignment i
+        let mut seq_clocks = Vec::new();
+        let mut clock_set = HashSet::new();
+        for process in &ir.processes {
+            if process.clocked {
+                let clock_idx = process.clock.as_ref()
+                    .and_then(|name| signal_indices.get(name))
+                    .cloned()
+                    .unwrap_or(0);
+                clock_set.insert(clock_idx);
+                for _ in &process.statements {
+                    seq_clocks.push(clock_idx);
+                }
+            }
+        }
+        let clock_indices: Vec<usize> = clock_set.into_iter().collect();
+        let old_clocks = clock_indices.iter().map(|&idx| signals[idx]).collect();
+
         Ok(SimulatorState {
             ir,
             signal_indices,
@@ -155,6 +180,9 @@ impl SimulatorState {
             compiled_lib: None,
             compiled: false,
             reset_values,
+            seq_clocks,
+            clock_indices,
+            old_clocks,
         })
     }
 
@@ -261,9 +289,12 @@ impl SimulatorState {
                 (val >> low) & mask(*width)
             }
             Expr::Concat { parts, width } => {
+                // Concat in HDL: cat(high, low) puts first arg in high bits
+                // Parts are ordered [high, ..., low], so we process in REVERSE
+                // to build up from low bits (shift = 0) to high bits
                 let mut result = 0u64;
                 let mut shift = 0u32;
-                for part in parts {
+                for part in parts.iter().rev() {
                     let part_val = self.eval_expr(part);
                     let part_width = get_expr_width(part);
                     result |= (part_val & mask(part_width)) << shift;
@@ -278,6 +309,11 @@ impl SimulatorState {
     }
 
     fn tick(&mut self) {
+        // Capture initial clock values BEFORE any updates
+        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+            self.old_clocks[i] = self.signals[clk_idx];
+        }
+
         self.evaluate();
 
         if let Some(ref lib) = self.compiled_lib {
@@ -290,36 +326,124 @@ impl SimulatorState {
                     lib.get(b"update_regs").unwrap();
                 update_func(&mut self.signals, &self.next_regs);
             }
+            self.evaluate();
         } else {
-            self.tick_interpreted();
+            // Iterate until no more rising edges are detected (delta-cycle simulation)
+            // This handles cascading clocks (e.g., clk_14m -> timing__clk_14m -> q3 -> cpu__clk)
+            // IMPORTANT: Keep old_clocks fixed at the start-of-tick values
+            // This allows detecting cascading rising edges (e.g., q3 going 0->1 after timing__q3 update)
+            let mut processed_clocks: HashSet<usize> = HashSet::new();
+            let max_iterations = 10;
+            for iteration in 0..max_iterations {
+                let had_edges = self.tick_interpreted_check_edges_track(&mut processed_clocks);
+                if !had_edges {
+                    break;
+                }
+                // After updating registers, re-evaluate combinational logic
+                // This may cause new clock signals to change (e.g., q3 = timing__q3)
+                self.evaluate();
+                if std::env::var("RHDL_DEBUG_TICK").is_ok() {
+                    eprintln!("tick iteration {}: checking for more edges", iteration);
+                }
+            }
         }
-
-        self.evaluate();
     }
 
-    fn tick_interpreted(&mut self) {
-        let mut reg_idx = 0;
-        for process in &self.ir.processes.clone() {
-            if process.clocked {
-                for stmt in &process.statements {
-                    self.next_regs[reg_idx] = self.eval_expr(&stmt.expr);
-                    reg_idx += 1;
+    /// Check for edges and update registers, tracking which clocks have been processed.
+    /// Returns true if any NEW rising edges were detected (clocks not already processed).
+    fn tick_interpreted_check_edges_track(&mut self, processed_clocks: &mut HashSet<usize>) -> bool {
+        // Multi-clock domain: detect rising edges on each clock
+        // Only consider clocks that haven't been processed yet in this tick
+        let mut rising_clocks = HashSet::new();
+        if std::env::var("RHDL_DEBUG_TICK").is_ok() {
+            eprintln!("tick_interpreted_check_edges_track: checking {} clocks", self.clock_indices.len());
+        }
+        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+            // Skip already processed clocks
+            if processed_clocks.contains(&clk_idx) {
+                continue;
+            }
+            let old_val = self.old_clocks[i];
+            let new_val = self.signals[clk_idx];
+            if std::env::var("RHDL_DEBUG_TICK").is_ok() {
+                eprintln!("  clock[{}] at signal[{}]: old={}, new={}", i, clk_idx, old_val, new_val);
+            }
+            if old_val == 0 && new_val != 0 {
+                rising_clocks.insert(clk_idx);
+                processed_clocks.insert(clk_idx);
+                if std::env::var("RHDL_DEBUG_TICK").is_ok() {
+                    eprintln!("    -> RISING EDGE!");
                 }
             }
         }
 
-        reg_idx = 0;
+        // If no new rising edges detected, nothing to do
+        if rising_clocks.is_empty() {
+            if std::env::var("RHDL_DEBUG_TICK").is_ok() {
+                eprintln!("  No new rising edges detected");
+            }
+            return false;
+        }
+        if std::env::var("RHDL_DEBUG_TICK").is_ok() {
+            eprintln!("  Rising edges detected on {} clocks", rising_clocks.len());
+        }
+
+        // Sample registers whose clocks have rising edges
+        let mut reg_idx = 0;
         for process in &self.ir.processes.clone() {
             if process.clocked {
+                let clock_name = process.clock.as_ref().map(|s| s.as_str()).unwrap_or("none");
+                let clock_idx = process.clock.as_ref()
+                    .and_then(|name| self.signal_indices.get(name))
+                    .cloned()
+                    .unwrap_or(0);
+                let should_sample = rising_clocks.contains(&clock_idx);
+                if std::env::var("RHDL_DEBUG_SAMPLE").is_ok() && should_sample {
+                    eprintln!("  SAMPLE process {} (clock={}, idx={})",
+                        process.name, clock_name, clock_idx);
+                }
                 for stmt in &process.statements {
-                    if let Some(&sig_idx) = self.signal_indices.get(&stmt.target) {
-                        self.signals[sig_idx] = self.next_regs[reg_idx];
+                    if should_sample {
+                        let value = self.eval_expr(&stmt.expr);
+                        if std::env::var("RHDL_DEBUG_SAMPLE").is_ok() && stmt.target.starts_with("cpu__") {
+                            eprintln!("    {} <= {}", stmt.target, value);
+                        }
+                        self.next_regs[reg_idx] = value;
                     }
                     reg_idx += 1;
                 }
             }
         }
+
+        // Update registers whose clocks had rising edges
+        reg_idx = 0;
+        for process in &self.ir.processes.clone() {
+            if process.clocked {
+                let clock_idx = process.clock.as_ref()
+                    .and_then(|name| self.signal_indices.get(name))
+                    .cloned()
+                    .unwrap_or(0);
+                let should_update = rising_clocks.contains(&clock_idx);
+                for stmt in &process.statements {
+                    if should_update {
+                        if let Some(&sig_idx) = self.signal_indices.get(&stmt.target) {
+                            let value = self.next_regs[reg_idx];
+                            if std::env::var("RHDL_DEBUG_UPDATE").is_ok() && stmt.target.starts_with("cpu__") {
+                                eprintln!("    UPDATE signals[{}] ({}) = {}", sig_idx, stmt.target, value);
+                            }
+                            self.signals[sig_idx] = value;
+                        } else if std::env::var("RHDL_DEBUG_UPDATE").is_ok() && stmt.target.starts_with("cpu__") {
+                            eprintln!("    UPDATE FAILED: {} not found in signal_indices!", stmt.target);
+                        }
+                    }
+                    reg_idx += 1;
+                }
+            }
+        }
+
+        true
     }
+
 
     fn reset(&mut self) {
         for sig in &mut self.signals {
@@ -755,14 +879,19 @@ fn expr_to_rust_with_name(expr: &Expr, signal_indices: &HashMap<String, usize>, 
             format!("(({} >> {}) & {})", base_code, low, m)
         }
         Expr::Concat { parts, width } => {
+            // Concat in HDL: cat(high, low) puts first arg in high bits
+            // Parts are ordered [high, ..., low], so we process in REVERSE
+            // to build up from low bits (shift = 0) to high bits
             let m = generate_mask_str(*width);
             let mut result = String::from("(");
             let mut shift = 0u32;
-            for (i, part) in parts.iter().enumerate() {
+            let mut first = true;
+            for part in parts.iter().rev() {
                 let part_code = expr_to_rust_with_name(part, signal_indices, signals_name);
                 let part_width = get_expr_width(part);
                 let part_mask = generate_mask_str(part_width);
-                if i > 0 { result.push_str(" | "); }
+                if !first { result.push_str(" | "); }
+                first = false;
                 if shift > 0 {
                     result.push_str(&format!("(({} & {}) << {})", part_code, part_mask, shift));
                 } else {
@@ -888,34 +1017,112 @@ fn generate_full_code(ir: &CircuitIR, signal_indices: &HashMap<String, usize>) -
     }
     code.push_str("    }};\n}\n\n");
 
-    // Generate inline tick logic as a macro
-    code.push_str("macro_rules! do_tick {\n");
-    code.push_str("    ($signals:expr, $next_regs:expr) => {{\n");
-    let mut reg_idx = 0;
-    for process in &ir.processes {
+    // Build clock domain info for multi-clock support
+    // Group processes by their clock signal
+    let mut clock_domains: HashMap<usize, Vec<(usize, &Process)>> = HashMap::new();
+    let mut clock_indices_set: HashSet<usize> = HashSet::new();
+    for (proc_idx, process) in ir.processes.iter().enumerate() {
         if process.clocked {
-            for stmt in &process.statements {
-                let expr_code = expr_to_rust_with_name(&stmt.expr, signal_indices, "$signals");
-                code.push_str(&format!("        $next_regs[{}] = {};\n", reg_idx, expr_code));
-                reg_idx += 1;
-            }
+            let clk_idx = process.clock.as_ref()
+                .and_then(|name| signal_indices.get(name))
+                .cloned()
+                .unwrap_or(0);
+            clock_indices_set.insert(clk_idx);
+            clock_domains.entry(clk_idx).or_default().push((proc_idx, process));
         }
     }
-    code.push_str("    }};\n}\n\n");
+    let clock_indices_vec: Vec<usize> = clock_indices_set.iter().cloned().collect();
+    let num_clocks = clock_indices_vec.len();
 
-    // Generate inline update_regs logic as a macro
-    code.push_str("macro_rules! do_update_regs {\n");
-    code.push_str("    ($signals:expr, $next_regs:expr) => {{\n");
-    let mut reg_idx = 0;
-    for process in &ir.processes {
-        if process.clocked {
-            for stmt in &process.statements {
-                if let Some(&sig_idx) = signal_indices.get(&stmt.target) {
-                    code.push_str(&format!("        $signals[{}] = $next_regs[{}];\n", sig_idx, reg_idx));
-                    reg_idx += 1;
+    // Generate inline tick-and-update logic as a macro with multi-clock support
+    // This samples registers on rising edge and immediately updates them
+    code.push_str("macro_rules! do_tick_update {\n");
+    code.push_str("    ($signals:expr, $old_clocks:expr) => {{\n");
+
+    // Check each clock domain for rising edge, sample and update immediately
+    for (clock_array_idx, &clk_idx) in clock_indices_vec.iter().enumerate() {
+        code.push_str(&format!("        // Clock domain: signal index {}\n", clk_idx));
+        code.push_str(&format!("        let _old_clk_{} = $old_clocks[{}];\n", clock_array_idx, clock_array_idx));
+        code.push_str(&format!("        let _new_clk_{} = $signals[{}];\n", clock_array_idx, clk_idx));
+        code.push_str(&format!("        $old_clocks[{}] = _new_clk_{};\n", clock_array_idx, clock_array_idx));
+        code.push_str(&format!("        if _old_clk_{} == 0 && _new_clk_{} != 0 {{\n", clock_array_idx, clock_array_idx));
+
+        // Sample all registers in this clock domain, then immediately update
+        if let Some(procs) = clock_domains.get(&clk_idx) {
+            // Calculate register indices for processes in this domain
+            let mut base_reg_idx = 0;
+            for (proc_idx, proc) in ir.processes.iter().enumerate() {
+                if proc.clocked {
+                    // Check if this process is in current clock domain
+                    if procs.iter().any(|(pi, _)| *pi == proc_idx) {
+                        // First sample all registers to temps to avoid read-after-write issues
+                        for (stmt_idx, stmt) in proc.statements.iter().enumerate() {
+                            let expr_code = expr_to_rust_with_name(&stmt.expr, signal_indices, "$signals");
+                            code.push_str(&format!("            let _next_{} = {};\n", base_reg_idx + stmt_idx, expr_code));
+                        }
+                        // Then update all registers
+                        for (stmt_idx, stmt) in proc.statements.iter().enumerate() {
+                            if let Some(&sig_idx) = signal_indices.get(&stmt.target) {
+                                code.push_str(&format!("            $signals[{}] = _next_{};\n", sig_idx, base_reg_idx + stmt_idx));
+                            }
+                        }
+                    }
+                    base_reg_idx += proc.statements.len();
                 }
             }
         }
+        code.push_str("        }\n");
+    }
+    code.push_str("    }};\n}\n\n");
+
+    // Legacy macros for compatibility (sample all, update all)
+    code.push_str("macro_rules! do_tick {\n");
+    code.push_str("    ($signals:expr, $next_regs:expr, $old_clocks:expr) => {{\n");
+    for (clock_array_idx, &clk_idx) in clock_indices_vec.iter().enumerate() {
+        code.push_str(&format!("        let _old_clk_{} = $old_clocks[{}];\n", clock_array_idx, clock_array_idx));
+        code.push_str(&format!("        let _new_clk_{} = $signals[{}];\n", clock_array_idx, clk_idx));
+        code.push_str(&format!("        $old_clocks[{}] = _new_clk_{};\n", clock_array_idx, clock_array_idx));
+        code.push_str(&format!("        if _old_clk_{} == 0 && _new_clk_{} != 0 {{\n", clock_array_idx, clock_array_idx));
+        if let Some(procs) = clock_domains.get(&clk_idx) {
+            let mut base_reg_idx = 0;
+            for (proc_idx, proc) in ir.processes.iter().enumerate() {
+                if proc.clocked {
+                    if procs.iter().any(|(pi, _)| *pi == proc_idx) {
+                        for (stmt_idx, stmt) in proc.statements.iter().enumerate() {
+                            let reg_idx = base_reg_idx + stmt_idx;
+                            let expr_code = expr_to_rust_with_name(&stmt.expr, signal_indices, "$signals");
+                            code.push_str(&format!("            $next_regs[{}] = {};\n", reg_idx, expr_code));
+                        }
+                    }
+                    base_reg_idx += proc.statements.len();
+                }
+            }
+        }
+        code.push_str("        }\n");
+    }
+    code.push_str("    }};\n}\n\n");
+
+    code.push_str("macro_rules! do_update_regs {\n");
+    code.push_str("    ($signals:expr, $next_regs:expr, $old_clocks:expr, $prev_clocks:expr) => {{\n");
+    for (clock_array_idx, &clk_idx) in clock_indices_vec.iter().enumerate() {
+        code.push_str(&format!("        if $prev_clocks[{}] == 0 && $old_clocks[{}] != 0 {{\n", clock_array_idx, clock_array_idx));
+        if let Some(procs) = clock_domains.get(&clk_idx) {
+            let mut base_reg_idx = 0;
+            for (proc_idx, proc) in ir.processes.iter().enumerate() {
+                if proc.clocked {
+                    if procs.iter().any(|(pi, _)| *pi == proc_idx) {
+                        for (stmt_idx, stmt) in proc.statements.iter().enumerate() {
+                            let reg_idx = base_reg_idx + stmt_idx;
+                            if let Some(&sig_idx) = signal_indices.get(&stmt.target) {
+                                code.push_str(&format!("            $signals[{}] = $next_regs[{}];\n", sig_idx, reg_idx));
+                            }
+                        }
+                    }
+                    base_reg_idx += proc.statements.len();
+                }
+            }
+        }
+        code.push_str("        }\n");
     }
     code.push_str("    }};\n}\n\n");
 
@@ -924,14 +1131,70 @@ fn generate_full_code(ir: &CircuitIR, signal_indices: &HashMap<String, usize>) -
     code.push_str("    do_evaluate!(signals);\n");
     code.push_str("}\n\n");
 
-    // Generate tick function (for compatibility)
+    // Generate tick function with proper multi-clock domain support using static state
+    code.push_str("use std::sync::Mutex;\n");
+    code.push_str(&format!("static TICK_OLD_CLOCKS: Mutex<[u64; {}]> = Mutex::new([0u64; {}]);\n\n",
+        num_clocks.max(1), num_clocks.max(1)));
+
     code.push_str("#[no_mangle]\npub extern \"C\" fn tick(signals: &mut [u64], next_regs: &mut [u64]) {\n");
-    code.push_str("    do_tick!(signals, next_regs);\n");
+    code.push_str("    let mut old_clocks = TICK_OLD_CLOCKS.lock().unwrap();\n");
+
+    // Generate multi-clock domain tick logic with proper edge detection
+    code.push_str("    // Detect rising edges and sample/update registers\n");
+    for (clock_array_idx, &clk_idx) in clock_indices_vec.iter().enumerate() {
+        code.push_str(&format!("    let _old_clk_{} = old_clocks[{}];\n", clock_array_idx, clock_array_idx));
+        code.push_str(&format!("    let _new_clk_{} = signals[{}];\n", clock_array_idx, clk_idx));
+        code.push_str(&format!("    old_clocks[{}] = _new_clk_{};\n", clock_array_idx, clock_array_idx));
+        code.push_str(&format!("    if _old_clk_{} == 0 && _new_clk_{} != 0 {{\n", clock_array_idx, clock_array_idx));
+
+        // Sample and update registers in this clock domain
+        if let Some(procs) = clock_domains.get(&clk_idx) {
+            let mut base_reg_idx = 0;
+            for (proc_idx, proc) in ir.processes.iter().enumerate() {
+                if proc.clocked {
+                    if procs.iter().any(|(pi, _)| *pi == proc_idx) {
+                        // Sample all registers first
+                        for (stmt_idx, stmt) in proc.statements.iter().enumerate() {
+                            let expr_code = expr_to_rust_with_name(&stmt.expr, signal_indices, "signals");
+                            code.push_str(&format!("        next_regs[{}] = {};\n", base_reg_idx + stmt_idx, expr_code));
+                        }
+                    }
+                    base_reg_idx += proc.statements.len();
+                }
+            }
+
+            // Update all registers
+            base_reg_idx = 0;
+            for (proc_idx, proc) in ir.processes.iter().enumerate() {
+                if proc.clocked {
+                    if procs.iter().any(|(pi, _)| *pi == proc_idx) {
+                        for (stmt_idx, stmt) in proc.statements.iter().enumerate() {
+                            if let Some(&sig_idx) = signal_indices.get(&stmt.target) {
+                                code.push_str(&format!("        signals[{}] = next_regs[{}];\n", sig_idx, base_reg_idx + stmt_idx));
+                            }
+                        }
+                    }
+                    base_reg_idx += proc.statements.len();
+                }
+            }
+        }
+        code.push_str("    }\n");
+    }
     code.push_str("}\n\n");
 
-    // Generate update_regs function (for compatibility)
+    // Generate update_regs function (for compatibility - unconditional update)
     code.push_str("#[no_mangle]\npub extern \"C\" fn update_regs(signals: &mut [u64], next_regs: &[u64]) {\n");
-    code.push_str("    do_update_regs!(signals, next_regs);\n");
+    let mut reg_idx = 0;
+    for process in &ir.processes {
+        if process.clocked {
+            for stmt in &process.statements {
+                if let Some(&sig_idx) = signal_indices.get(&stmt.target) {
+                    code.push_str(&format!("    signals[{}] = next_regs[{}];\n", sig_idx, reg_idx));
+                }
+                reg_idx += 1;
+            }
+        }
+    }
     code.push_str("}\n\n");
 
     // Generate run_cpu_cycles - the main optimized entry point
@@ -944,6 +1207,16 @@ fn generate_full_code(ir: &CircuitIR, signal_indices: &HashMap<String, usize>) -
     let d_idx = signal_indices.get("d").cloned().unwrap_or(0);
     let read_key_idx = signal_indices.get("read_key").cloned().unwrap_or(0);
     let reg_count = count_regs(ir);
+    let num_clocks_for_run = num_clocks.max(1);
+
+    // Generate initialization for old_clocks based on current signal values
+    let mut old_clocks_init = String::new();
+    for (i, &clk_idx_val) in clock_indices_vec.iter().enumerate() {
+        old_clocks_init.push_str(&format!("    old_clocks[{}] = signals[{}]; // clock signal {}\n", i, clk_idx_val, clk_idx_val));
+    }
+    if clock_indices_vec.is_empty() {
+        old_clocks_init.push_str("    // No clocked processes\n");
+    }
 
     // Generate run_cpu_cycles with loop unrolling and optimized evaluate sequence
     code.push_str(&format!(r#"/// Run N CPU cycles with zero function-call overhead
@@ -957,23 +1230,28 @@ pub extern "C" fn run_cpu_cycles(
     key_data: u8,
     key_ready: bool,
 ) -> (bool, bool) {{
-    let mut next_regs = [0u64; {}];
+    let mut old_clocks = [0u64; {num_clocks}];
     let mut text_dirty = false;
     let mut key_cleared = false;
     let mut key_is_ready = key_ready;
 
+    // Initialize old_clocks from current signal values
+{old_clocks_init}
     // Pre-compute keyboard value (branchless)
     let key_val_base = (key_data as u64) | 0x80;
 
-    // Macro for one 14MHz cycle
+    // Macro for one 14MHz cycle with multi-clock domain support
     macro_rules! cycle_14m {{
         () => {{
             // Set keyboard state (branchless)
             *signals.get_unchecked_mut({k_idx}) = key_val_base * (key_is_ready as u64);
 
-            // Falling edge - set clock low and read memory
+            // Falling edge - set clock low
             *signals.get_unchecked_mut({clk_idx}) = 0;
             do_evaluate!(signals);
+
+            // Check for rising edges on derived clocks after falling edge eval
+            do_tick_update!(signals, old_clocks);
 
             // Provide RAM/ROM data (unchecked access)
             let addr = *signals.get_unchecked({ram_addr_idx}) as usize;
@@ -983,12 +1261,17 @@ pub extern "C" fn run_cpu_cycles(
             }} else {{
                 *ram.get_unchecked(addr & 0xFFFF) as u64
             }};
+            do_evaluate!(signals);
 
-            // Rising edge - trigger register update
+            // Check for rising edges after memory data available
+            do_tick_update!(signals, old_clocks);
+
+            // Rising edge - set clock high
             *signals.get_unchecked_mut({clk_idx}) = 1;
             do_evaluate!(signals);
-            do_tick!(signals, next_regs);
-            do_update_regs!(signals, next_regs);
+
+            // Check for rising edges on clk_14m and derived clocks
+            do_tick_update!(signals, old_clocks);
 
             // Handle RAM writes
             let ram_we = *signals.get_unchecked({ram_we_idx});
@@ -1018,7 +1301,7 @@ pub extern "C" fn run_cpu_cycles(
 
     (text_dirty, key_cleared)
 }}
-"#, reg_count,
+"#, num_clocks = num_clocks_for_run, old_clocks_init = old_clocks_init,
     k_idx = k_idx, clk_idx = clk_idx, ram_addr_idx = ram_addr_idx,
     ram_do_idx = ram_do_idx, ram_we_idx = ram_we_idx, d_idx = d_idx,
     read_key_idx = read_key_idx));
