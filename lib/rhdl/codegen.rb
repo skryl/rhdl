@@ -1,6 +1,9 @@
 # Behavior IR (intermediate representation for RTL codegen)
 require_relative "codegen/ir/ir"
 require_relative "codegen/ir/lower"
+require_relative "codegen/ir/sim/ir_interpreter"
+require_relative "codegen/ir/sim/ir_jit"
+require_relative "codegen/ir/sim/ir_compiler"
 
 # Verilog codegen
 require_relative "codegen/verilog/verilog"
