@@ -1,52 +1,55 @@
 # frozen_string_literal: true
 
-# RTL Compiler with Rust backend
+# IR Compiler with Rust backend
 #
 # This simulator generates specialized Rust code for the circuit and compiles
 # it at runtime for maximum simulation performance. Unlike the interpreter,
 # this approach eliminates all interpretation overhead.
 
 require 'json'
-require_relative 'rtl_interpreter'  # For IRToJson module
+require_relative 'ir_interpreter'  # For IRToJson module
 
 module RHDL
   module Codegen
-    module CIRCT
+    module IR
       # Determine library path based on platform
-      RTL_COMPILER_EXT_DIR = File.expand_path('rtl_compiler/lib', __dir__)
-      RTL_COMPILER_LIB_NAME = case RbConfig::CONFIG['host_os']
-      when /darwin/ then 'rtl_compiler.bundle'
-      when /mswin|mingw/ then 'rtl_compiler.dll'
-      else 'rtl_compiler.so'
+      IR_COMPILER_EXT_DIR = File.expand_path('ir_compiler/lib', __dir__)
+      IR_COMPILER_LIB_NAME = case RbConfig::CONFIG['host_os']
+      when /darwin/ then 'ir_compiler.bundle'
+      when /mswin|mingw/ then 'ir_compiler.dll'
+      else 'ir_compiler.so'
       end
-      RTL_COMPILER_LIB_PATH = File.join(RTL_COMPILER_EXT_DIR, RTL_COMPILER_LIB_NAME)
+      IR_COMPILER_LIB_PATH = File.join(IR_COMPILER_EXT_DIR, IR_COMPILER_LIB_NAME)
 
       # Try to load compiler extension
-      RTL_COMPILER_AVAILABLE = begin
-        if File.exist?(RTL_COMPILER_LIB_PATH)
-          $LOAD_PATH.unshift(RTL_COMPILER_EXT_DIR) unless $LOAD_PATH.include?(RTL_COMPILER_EXT_DIR)
-          require 'rtl_compiler'
+      IR_COMPILER_AVAILABLE = begin
+        if File.exist?(IR_COMPILER_LIB_PATH)
+          $LOAD_PATH.unshift(IR_COMPILER_EXT_DIR) unless $LOAD_PATH.include?(IR_COMPILER_EXT_DIR)
+          require 'ir_compiler'
           true
         else
           false
         end
       rescue LoadError => e
-        warn "RtlCompiler extension not available: #{e.message}" if ENV['RHDL_DEBUG']
+        warn "IrCompiler extension not available: #{e.message}" if ENV['RHDL_DEBUG']
         false
       end
 
+      # Backwards compatibility alias
+      RTL_COMPILER_AVAILABLE = IR_COMPILER_AVAILABLE
+
       # Wrapper class that uses Rust AOT compiler if available
-      class RtlCompilerWrapper
+      class IrCompilerWrapper
         attr_reader :ir_json
 
         def initialize(ir_json)
           @ir_json = ir_json
 
-          unless RTL_COMPILER_AVAILABLE
-            raise LoadError, "RTL Compiler extension not found at: #{RTL_COMPILER_LIB_PATH}\nRun 'rake native:build' to build it."
+          unless IR_COMPILER_AVAILABLE
+            raise LoadError, "IR Compiler extension not found at: #{IR_COMPILER_LIB_PATH}\nRun 'rake native:build' to build it."
           end
 
-          @sim = ::RtlCompiler.new(ir_json)
+          @sim = ::IrCompiler.new(ir_json)
         end
 
         def simulator_type
@@ -142,6 +145,9 @@ module RHDL
           end
         end
       end
+
+      # Backwards compatibility alias
+      RtlCompilerWrapper = IrCompilerWrapper
     end
   end
 end
