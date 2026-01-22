@@ -11,6 +11,7 @@ module RHDL
       class NativeTask < Task
         # Native extension definitions
         EXTENSIONS = {
+          # MOS 6502 ISA simulator (behavioral)
           isa_simulator: {
             name: 'ISA Simulator',
             ext_dir: File.expand_path('examples/mos6502/utilities/isa_simulator_native', Config.project_root),
@@ -18,26 +19,51 @@ module RHDL
             load_path: 'examples/mos6502/utilities',
             check_const: 'MOS6502::NATIVE_AVAILABLE'
           },
-          sim_cpu: {
-            name: 'SimCPU (Gate-Level)',
-            ext_dir: File.expand_path('lib/rhdl/codegen/structure/sim/cpu_native', Config.project_root),
-            crate_name: 'sim_cpu_native',
-            load_path: 'lib/rhdl/codegen/structure/sim/cpu_native/lib',
-            check_const: 'RHDL::Codegen::Structure::NATIVE_SIM_AVAILABLE'
+
+          # Gate-level netlist simulators (netlist backend)
+          netlist_interpreter: {
+            name: 'Netlist Interpreter (Gate-Level)',
+            ext_dir: File.expand_path('lib/rhdl/codegen/netlist/sim/netlist_interpreter', Config.project_root),
+            crate_name: 'netlist_interpreter',
+            load_path: 'lib/rhdl/codegen/netlist/sim/netlist_interpreter/lib',
+            check_const: 'RHDL::Codegen::Netlist::NETLIST_INTERPRETER_AVAILABLE'
           },
-          firrtl_interpreter: {
-            name: 'FIRRTL Interpreter (RTL-Level)',
-            ext_dir: File.expand_path('lib/rhdl/codegen/circt/sim/firrtl_interpreter', Config.project_root),
-            crate_name: 'firrtl_interpreter',
-            load_path: 'lib/rhdl/codegen/circt/sim/firrtl_interpreter/lib',
-            check_const: 'RHDL::Codegen::CIRCT::FIRRTL_INTERPRETER_AVAILABLE'
+          netlist_jit: {
+            name: 'Netlist JIT (Gate-Level Cranelift)',
+            ext_dir: File.expand_path('lib/rhdl/codegen/netlist/sim/netlist_jit', Config.project_root),
+            crate_name: 'netlist_jit',
+            load_path: 'lib/rhdl/codegen/netlist/sim/netlist_jit/lib',
+            check_const: 'RHDL::Codegen::Netlist::NETLIST_JIT_AVAILABLE'
           },
-          firrtl_compiler: {
-            name: 'FIRRTL Compiler (RTL-Level JIT)',
-            ext_dir: File.expand_path('lib/rhdl/codegen/circt/sim/firrtl_compiler', Config.project_root),
-            crate_name: 'firrtl_compiler',
-            load_path: 'lib/rhdl/codegen/circt/sim/firrtl_compiler/lib',
-            check_const: 'RHDL::Codegen::CIRCT::FIRRTL_COMPILER_AVAILABLE'
+          netlist_compiler: {
+            name: 'Netlist Compiler (Gate-Level SIMD)',
+            ext_dir: File.expand_path('lib/rhdl/codegen/netlist/sim/netlist_compiler', Config.project_root),
+            crate_name: 'netlist_compiler',
+            load_path: 'lib/rhdl/codegen/netlist/sim/netlist_compiler/lib',
+            check_const: 'RHDL::Codegen::Netlist::NETLIST_COMPILER_AVAILABLE'
+          },
+
+          # RTL-level simulators (CIRCT backend)
+          rtl_interpreter: {
+            name: 'RTL Interpreter',
+            ext_dir: File.expand_path('lib/rhdl/codegen/circt/sim/rtl_interpreter', Config.project_root),
+            crate_name: 'rtl_interpreter',
+            load_path: 'lib/rhdl/codegen/circt/sim/rtl_interpreter/lib',
+            check_const: 'RHDL::Codegen::CIRCT::RTL_INTERPRETER_AVAILABLE'
+          },
+          rtl_jit: {
+            name: 'RTL JIT (Cranelift)',
+            ext_dir: File.expand_path('lib/rhdl/codegen/circt/sim/rtl_jit', Config.project_root),
+            crate_name: 'rtl_jit',
+            load_path: 'lib/rhdl/codegen/circt/sim/rtl_jit/lib',
+            check_const: 'RHDL::Codegen::CIRCT::RTL_JIT_AVAILABLE'
+          },
+          rtl_compiler: {
+            name: 'RTL Compiler (AOT)',
+            ext_dir: File.expand_path('lib/rhdl/codegen/circt/sim/rtl_compiler', Config.project_root),
+            crate_name: 'rtl_compiler',
+            load_path: 'lib/rhdl/codegen/circt/sim/rtl_compiler/lib',
+            check_const: 'RHDL::Codegen::CIRCT::RTL_COMPILER_AVAILABLE'
           }
         }.freeze
 
