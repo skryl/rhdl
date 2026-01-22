@@ -4,6 +4,7 @@
 # Wraps the Apple2 HDL component for use in emulation
 
 require_relative '../hdl/apple2'
+require_relative 'speaker'
 
 module RHDL
   module Apple2
@@ -60,6 +61,10 @@ module RHDL
 
         # Track Q3 for cycle counting
         @prev_q3 = 0
+
+        # Speaker audio simulation
+        @speaker = Speaker.new
+        @prev_speaker_state = 0
       end
 
       # Load ROM data into the Apple2 component
@@ -184,6 +189,13 @@ module RHDL
         # Check for keyboard strobe clear
         if @apple2.get_output(:read_key) == 1
           @key_ready = false
+        end
+
+        # Monitor speaker output for state changes
+        speaker_state = @apple2.get_output(:speaker)
+        if speaker_state != @prev_speaker_state
+          @speaker.toggle
+          @prev_speaker_state = speaker_state
         end
       end
 
@@ -375,7 +387,7 @@ module RHDL
       end
 
       def speaker
-        @speaker ||= SpeakerStub.new
+        @speaker
       end
 
       def display_mode
@@ -383,11 +395,11 @@ module RHDL
       end
 
       def start_audio
-        # No-op for now
+        @speaker.start
       end
 
       def stop_audio
-        # No-op for now
+        @speaker.stop
       end
 
       def read(addr)
