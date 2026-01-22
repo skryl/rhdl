@@ -11,6 +11,7 @@ module RHDL
       class NativeTask < Task
         # Native extension definitions
         EXTENSIONS = {
+          # MOS 6502 ISA simulator (behavioral)
           isa_simulator: {
             name: 'ISA Simulator',
             ext_dir: File.expand_path('examples/mos6502/utilities/isa_simulator_native', Config.project_root),
@@ -18,13 +19,31 @@ module RHDL
             load_path: 'examples/mos6502/utilities',
             check_const: 'MOS6502::NATIVE_AVAILABLE'
           },
-          sim_cpu: {
-            name: 'SimCPU (Gate-Level)',
-            ext_dir: File.expand_path('lib/rhdl/codegen/structure/sim/cpu_native', Config.project_root),
-            crate_name: 'sim_cpu_native',
-            load_path: 'lib/rhdl/codegen/structure/sim/cpu_native/lib',
-            check_const: 'RHDL::Codegen::Structure::NATIVE_SIM_AVAILABLE'
+
+          # Gate-level netlist simulators (structure backend)
+          netlist_interpreter: {
+            name: 'Netlist Interpreter (Gate-Level)',
+            ext_dir: File.expand_path('lib/rhdl/codegen/structure/sim/netlist_interpreter', Config.project_root),
+            crate_name: 'netlist_interpreter',
+            load_path: 'lib/rhdl/codegen/structure/sim/netlist_interpreter/lib',
+            check_const: 'RHDL::Codegen::Structure::NETLIST_INTERPRETER_AVAILABLE'
           },
+          netlist_jit: {
+            name: 'Netlist JIT (Gate-Level Cranelift)',
+            ext_dir: File.expand_path('lib/rhdl/codegen/structure/sim/netlist_jit', Config.project_root),
+            crate_name: 'netlist_jit',
+            load_path: 'lib/rhdl/codegen/structure/sim/netlist_jit/lib',
+            check_const: 'RHDL::Codegen::Structure::NETLIST_JIT_AVAILABLE'
+          },
+          netlist_compiler: {
+            name: 'Netlist Compiler (Gate-Level SIMD)',
+            ext_dir: File.expand_path('lib/rhdl/codegen/structure/sim/netlist_compiler', Config.project_root),
+            crate_name: 'netlist_compiler',
+            load_path: 'lib/rhdl/codegen/structure/sim/netlist_compiler/lib',
+            check_const: 'RHDL::Codegen::Structure::NETLIST_COMPILER_AVAILABLE'
+          },
+
+          # FIRRTL/RTL-level simulators (CIRCT backend)
           firrtl_interpreter: {
             name: 'FIRRTL Interpreter (RTL-Level)',
             ext_dir: File.expand_path('lib/rhdl/codegen/circt/sim/firrtl_interpreter', Config.project_root),
@@ -32,8 +51,15 @@ module RHDL
             load_path: 'lib/rhdl/codegen/circt/sim/firrtl_interpreter/lib',
             check_const: 'RHDL::Codegen::CIRCT::FIRRTL_INTERPRETER_AVAILABLE'
           },
+          firrtl_jit: {
+            name: 'FIRRTL JIT (RTL-Level Cranelift)',
+            ext_dir: File.expand_path('lib/rhdl/codegen/circt/sim/firrtl_jit', Config.project_root),
+            crate_name: 'firrtl_jit',
+            load_path: 'lib/rhdl/codegen/circt/sim/firrtl_jit/lib',
+            check_const: 'RHDL::Codegen::CIRCT::FIRRTL_JIT_AVAILABLE'
+          },
           firrtl_compiler: {
-            name: 'FIRRTL Compiler (RTL-Level JIT)',
+            name: 'FIRRTL Compiler (RTL-Level AOT)',
             ext_dir: File.expand_path('lib/rhdl/codegen/circt/sim/firrtl_compiler', Config.project_root),
             crate_name: 'firrtl_compiler',
             load_path: 'lib/rhdl/codegen/circt/sim/firrtl_compiler/lib',
