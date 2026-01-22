@@ -161,8 +161,16 @@ module RHDL
           if seq_ir.reset
             # Reset branch: assign reset values
             reset_stmts = seq_ir.reset_values.map do |name, value|
+              # Look up width from ports first, then signals
               port = _ports.find { |p| p.name == name }
-              width = port ? port.width : 8
+              signal = _signals.find { |s| s.name == name }
+              width = if port
+                        port.width
+                      elsif signal
+                        signal.width
+                      else
+                        8  # Default fallback
+                      end
               RHDL::Export::IR::SeqAssign.new(
                 target: name,
                 expr: RHDL::Export::IR::Literal.new(value: value, width: width)
