@@ -107,7 +107,15 @@ module RHDL
         private
 
         def apple2_script
-          File.join(Config.project_root, 'examples/apple2/bin/apple2')
+          case options[:subcommand]
+          when :mos6502
+            File.join(Config.project_root, 'examples/mos6502/bin/mos6502')
+          when :apple2
+            File.join(Config.project_root, 'examples/apple2/bin/apple2')
+          else
+            # Default to apple2 for backwards compatibility
+            File.join(Config.project_root, 'examples/apple2/bin/apple2')
+          end
         end
 
         def run_with_rom(rom_file, rom_address)
