@@ -71,6 +71,7 @@ class Apple2HDLTerminal
     @green_screen = options[:green] || false
     @hires_mode = options[:hires] || false
     @hires_width = options[:hires_width] || 80
+    @audio_enabled = options[:audio] || false
 
     # Terminal size and padding for centering
     @term_rows = 24
@@ -220,9 +221,15 @@ class Apple2HDLTerminal
     if @sim_type == :netlist
       puts "Using native Rust backend: #{@runner.native?}"
     end
+    if @audio_enabled
+      puts "Audio output: #{RHDL::Apple2::Speaker.available? ? 'enabled' : 'not available (install sox or ffmpeg)'}"
+    end
     puts "WARNING: Both modes are slow (for verification/testing)"
     puts "Press Ctrl+C to exit"
     sleep 1
+
+    # Start audio if enabled
+    @runner.start_audio if @audio_enabled
 
     @runner.reset
 
@@ -428,11 +435,13 @@ class Apple2HDLTerminal
                      format_hz(@current_hz), @fps,
                      format_number(@cycles_per_frame))
 
-      # Line 3: Disk / Key / keyboard mode
-      line3 = format("Disk:T%02d %s | Key:%-3s | KB:%s",
+      # Line 3: Disk / Key / keyboard mode / Audio
+      spk = @runner.speaker
+      audio_status = @audio_enabled ? (spk.active? ? "PLAY" : spk.status) : "off"
+      line3 = format("Disk:T%02d %s|Key:%-3s|KB:%s|Aud:%s",
                      dc.track, dc.motor_on ? "ON " : "OFF",
                      format_key(@last_key),
-                     kb_mode)
+                     kb_mode, audio_status)
 
       # Line 4: Help
       line4 = "ESC:toggle cmd mode | H:toggle hires | Arrows:speed"
@@ -510,14 +519,16 @@ class Apple2HDLTerminal
                      format_hz(@current_hz), @fps,
                      format_number(@cycles_per_frame))
 
-      # Line 3: Disk / Key / keyboard mode
-      line3 = format("Disk:T%02d %s|Key:%-3s|KB:%s",
+      # Line 3: Disk / Key / keyboard mode / Audio
+      spk = @runner.speaker
+      audio_status = @audio_enabled ? (spk.active? ? "PLAY" : spk.status) : "off"
+      line3 = format("Disk:T%02d %s|Key:%-3s|KB:%s|Aud:%s",
                      dc.track, dc.motor_on ? "ON " : "OFF",
                      format_key(@last_key),
-                     kb_mode)
+                     kb_mode, audio_status)
 
       # Line 4: Help
-      line4 = "ESC:cmd mode|H:hires|Arrows:speed"
+      line4 = "ESC:cmd|H:hires|Arrows:spd"
 
       # Pad/truncate lines to fit within border
       line1 = line1.ljust(SCREEN_COLS)[0, SCREEN_COLS]
@@ -633,6 +644,9 @@ class Apple2HDLTerminal
   end
 
   def cleanup
+    # Stop audio
+    @runner.stop_audio if @audio_enabled
+
     print SHOW_CURSOR
     print NORMAL_VIDEO
     # Position exit message below the display area
@@ -704,6 +718,7 @@ options = {
   demo: false,
   hires: false,
   hires_width: 80,
+  audio: false,  # Audio output disabled by default
   mode: :hdl,  # Simulation mode: :hdl (default), :netlist
   sim: :jit   # Simulator backend: :interpret, :jit (default), :compile
 }
@@ -732,6 +747,10 @@ parser = OptionParser.new do |opts|
 
   opts.on("-g", "--green", "Green phosphor effect") do
     options[:green] = true
+  end
+
+  opts.on("-A", "--audio", "Enable speaker audio output") do
+    options[:audio] = true
   end
 
   opts.on("-m", "--mode TYPE", [:hdl, :netlist], "Simulation mode: hdl (default), netlist (gate-level)") do |v|
