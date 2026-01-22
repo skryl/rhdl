@@ -62,6 +62,7 @@ enum ExprDef {
     Slice { base: Box<ExprDef>, low: usize, high: usize, width: usize },
     Concat { parts: Vec<ExprDef>, width: usize },
     Resize { expr: Box<ExprDef>, width: usize },
+    MemRead { memory: String, addr: Box<ExprDef>, width: usize },
 }
 
 /// Assignment (combinational)
@@ -90,12 +91,13 @@ struct ProcessDef {
 }
 
 /// Memory definition
-#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct MemoryDef {
     name: String,
     depth: usize,
     width: usize,
+    #[serde(default)]
+    initial_data: Vec<u64>,
 }
 
 /// Complete module IR
@@ -117,11 +119,11 @@ struct ModuleIR {
 // JIT-compiled function types
 // ============================================================================
 
-/// Function signature for evaluate: fn(signals: *mut u64) -> ()
-type EvaluateFn = unsafe extern "C" fn(*mut u64);
+/// Function signature for evaluate: fn(signals: *mut u64, mem_ptrs: *const *const u64) -> ()
+type EvaluateFn = unsafe extern "C" fn(*mut u64, *const *const u64);
 
-/// Function signature for tick: fn(signals: *mut u64, next_regs: *mut u64) -> ()
-type TickFn = unsafe extern "C" fn(*mut u64, *mut u64);
+/// Function signature for tick: fn(signals: *mut u64, next_regs: *mut u64, mem_ptrs: *const *const u64) -> ()
+type TickFn = unsafe extern "C" fn(*mut u64, *mut u64, *const *const u64);
 
 // ============================================================================
 // Cranelift JIT Compiler
@@ -134,6 +136,10 @@ struct JitCompiler {
     name_to_idx: HashMap<String, usize>,
     /// Signal widths
     widths: Vec<usize>,
+    /// Memory name to index mapping
+    mem_name_to_idx: HashMap<String, usize>,
+    /// Memory depths (for bounds checking)
+    mem_depths: Vec<usize>,
 }
 
 impl JitCompiler {
@@ -155,6 +161,8 @@ impl JitCompiler {
             module,
             name_to_idx: HashMap::new(),
             widths: Vec::new(),
+            mem_name_to_idx: HashMap::new(),
+            mem_depths: Vec::new(),
         })
     }
 
@@ -168,6 +176,7 @@ impl JitCompiler {
         builder: &mut FunctionBuilder,
         expr: &ExprDef,
         signals_ptr: cranelift::prelude::Value,
+        mem_ptrs: &[cranelift::prelude::Value],
     ) -> cranelift::prelude::Value {
         match expr {
             ExprDef::Signal { name, .. } => {
@@ -182,7 +191,7 @@ impl JitCompiler {
                 builder.ins().iconst(types::I64, masked as i64)
             }
             ExprDef::UnaryOp { op, operand, width } => {
-                let src = self.compile_expr(builder, operand, signals_ptr);
+                let src = self.compile_expr(builder, operand, signals_ptr, mem_ptrs);
                 let mask = Self::compile_mask(*width);
                 let mask_val = builder.ins().iconst(types::I64, mask as i64);
 
@@ -213,8 +222,8 @@ impl JitCompiler {
                 }
             }
             ExprDef::BinaryOp { op, left, right, width } => {
-                let l = self.compile_expr(builder, left, signals_ptr);
-                let r = self.compile_expr(builder, right, signals_ptr);
+                let l = self.compile_expr(builder, left, signals_ptr, mem_ptrs);
+                let r = self.compile_expr(builder, right, signals_ptr, mem_ptrs);
                 let mask = Self::compile_mask(*width);
                 let mask_val = builder.ins().iconst(types::I64, mask as i64);
 
@@ -281,9 +290,9 @@ impl JitCompiler {
                 builder.ins().band(result, mask_val)
             }
             ExprDef::Mux { condition, when_true, when_false, width } => {
-                let cond = self.compile_expr(builder, condition, signals_ptr);
-                let t = self.compile_expr(builder, when_true, signals_ptr);
-                let f = self.compile_expr(builder, when_false, signals_ptr);
+                let cond = self.compile_expr(builder, condition, signals_ptr, mem_ptrs);
+                let t = self.compile_expr(builder, when_true, signals_ptr, mem_ptrs);
+                let f = self.compile_expr(builder, when_false, signals_ptr, mem_ptrs);
 
                 let zero = builder.ins().iconst(types::I64, 0);
                 let cond_bool = builder.ins().icmp(IntCC::NotEqual, cond, zero);
@@ -295,7 +304,7 @@ impl JitCompiler {
                 builder.ins().band(result, mask_val)
             }
             ExprDef::Slice { base, low, width, .. } => {
-                let src = self.compile_expr(builder, base, signals_ptr);
+                let src = self.compile_expr(builder, base, signals_ptr, mem_ptrs);
                 let mask = Self::compile_mask(*width);
                 let mask_val = builder.ins().iconst(types::I64, mask as i64);
                 let shift = builder.ins().iconst(types::I32, *low as i64);
@@ -310,7 +319,7 @@ impl JitCompiler {
                 let mut shift_acc = 0u64;
 
                 for part in parts.iter().rev() {
-                    let part_val = self.compile_expr(builder, part, signals_ptr);
+                    let part_val = self.compile_expr(builder, part, signals_ptr, mem_ptrs);
                     let part_width = Self::expr_width(part, &self.widths, &self.name_to_idx);
                     let part_mask = Self::compile_mask(part_width);
                     let mask_val = builder.ins().iconst(types::I64, part_mask as i64);
@@ -332,10 +341,45 @@ impl JitCompiler {
                 builder.ins().band(result, final_mask_val)
             }
             ExprDef::Resize { expr, width } => {
-                let src = self.compile_expr(builder, expr, signals_ptr);
+                let src = self.compile_expr(builder, expr, signals_ptr, mem_ptrs);
                 let mask = Self::compile_mask(*width);
                 let mask_val = builder.ins().iconst(types::I64, mask as i64);
                 builder.ins().band(src, mask_val)
+            }
+            ExprDef::MemRead { memory, addr, width } => {
+                // Get memory index
+                let mem_idx = *self.mem_name_to_idx.get(memory).unwrap_or(&0);
+                let depth = self.mem_depths.get(mem_idx).copied().unwrap_or(256);
+
+                // Compile address expression
+                let addr_val = self.compile_expr(builder, addr, signals_ptr, mem_ptrs);
+
+                // Get pointer to this memory array
+                if mem_idx < mem_ptrs.len() {
+                    let mem_ptr = mem_ptrs[mem_idx];
+
+                    // Bounds check: addr % depth
+                    let depth_val = builder.ins().iconst(types::I64, depth as i64);
+                    let bounded_addr = builder.ins().urem(addr_val, depth_val);
+
+                    // Calculate byte offset (each entry is 8 bytes / u64)
+                    let eight = builder.ins().iconst(types::I64, 8);
+                    let byte_offset = builder.ins().imul(bounded_addr, eight);
+
+                    // Add offset to base pointer for dynamic indexing
+                    let elem_ptr = builder.ins().iadd(mem_ptr, byte_offset);
+
+                    // Load from memory: mem_ptr[bounded_addr] using zero offset
+                    let loaded = builder.ins().load(types::I64, MemFlags::trusted(), elem_ptr, 0);
+
+                    // Mask to width
+                    let mask = Self::compile_mask(*width);
+                    let mask_val = builder.ins().iconst(types::I64, mask as i64);
+                    builder.ins().band(loaded, mask_val)
+                } else {
+                    // Memory not found, return 0
+                    builder.ins().iconst(types::I64, 0)
+                }
             }
         }
     }
@@ -352,17 +396,19 @@ impl JitCompiler {
             ExprDef::Slice { width, .. } => *width,
             ExprDef::Concat { width, .. } => *width,
             ExprDef::Resize { width, .. } => *width,
+            ExprDef::MemRead { width, .. } => *width,
         }
     }
 
     /// Compile the evaluate function that runs all combinational logic
-    fn compile_evaluate(&mut self, assigns: &[AssignDef]) -> Result<EvaluateFn, String> {
+    fn compile_evaluate(&mut self, assigns: &[AssignDef], num_memories: usize) -> Result<EvaluateFn, String> {
         let mut ctx = self.module.make_context();
         let pointer_type = self.module.target_config().pointer_type();
 
-        // Function signature: fn(signals: *mut u64) -> ()
+        // Function signature: fn(signals: *mut u64, mem_ptrs: *const *const u64) -> ()
         let mut sig = self.module.make_signature();
-        sig.params.push(AbiParam::new(pointer_type));
+        sig.params.push(AbiParam::new(pointer_type)); // signals
+        sig.params.push(AbiParam::new(pointer_type)); // mem_ptrs
 
         ctx.func.signature = sig;
 
@@ -379,6 +425,15 @@ impl JitCompiler {
         builder.seal_block(entry_block);
 
         let signals_ptr = builder.block_params(entry_block)[0];
+        let mem_ptrs_base = builder.block_params(entry_block)[1];
+
+        // Load memory pointers from mem_ptrs array
+        let mut mem_ptrs: Vec<cranelift::prelude::Value> = Vec::new();
+        for i in 0..num_memories {
+            let offset = (i * 8) as i32;  // Each pointer is 8 bytes
+            let mem_ptr = builder.ins().load(pointer_type, MemFlags::trusted(), mem_ptrs_base, offset);
+            mem_ptrs.push(mem_ptr);
+        }
 
         // Compile each assignment (skip unknown targets to avoid overwriting unrelated signals)
         for assign in assigns {
@@ -386,7 +441,7 @@ impl JitCompiler {
                 Some(&idx) => idx,
                 None => continue,  // Skip unknown targets
             };
-            let value = self.compile_expr(&mut builder, &assign.expr, signals_ptr);
+            let value = self.compile_expr(&mut builder, &assign.expr, signals_ptr, &mem_ptrs);
 
             // Store to signals[target_idx]
             let offset = (target_idx * 8) as i32;
@@ -407,14 +462,15 @@ impl JitCompiler {
     }
 
     /// Compile sequential assignment sampling function
-    fn compile_seq_sample(&mut self, seq_assigns: &[(String, ExprDef)]) -> Result<TickFn, String> {
+    fn compile_seq_sample(&mut self, seq_assigns: &[(String, ExprDef)], num_memories: usize) -> Result<TickFn, String> {
         let mut ctx = self.module.make_context();
         let pointer_type = self.module.target_config().pointer_type();
 
-        // Function signature: fn(signals: *mut u64, next_regs: *mut u64) -> ()
+        // Function signature: fn(signals: *mut u64, next_regs: *mut u64, mem_ptrs: *const *const u64) -> ()
         let mut sig = self.module.make_signature();
-        sig.params.push(AbiParam::new(pointer_type));
-        sig.params.push(AbiParam::new(pointer_type));
+        sig.params.push(AbiParam::new(pointer_type)); // signals
+        sig.params.push(AbiParam::new(pointer_type)); // next_regs
+        sig.params.push(AbiParam::new(pointer_type)); // mem_ptrs
 
         ctx.func.signature = sig;
 
@@ -432,10 +488,19 @@ impl JitCompiler {
 
         let signals_ptr = builder.block_params(entry_block)[0];
         let next_regs_ptr = builder.block_params(entry_block)[1];
+        let mem_ptrs_base = builder.block_params(entry_block)[2];
+
+        // Load memory pointers from mem_ptrs array
+        let mut mem_ptrs: Vec<cranelift::prelude::Value> = Vec::new();
+        for i in 0..num_memories {
+            let offset = (i * 8) as i32;
+            let mem_ptr = builder.ins().load(pointer_type, MemFlags::trusted(), mem_ptrs_base, offset);
+            mem_ptrs.push(mem_ptr);
+        }
 
         // Sample each sequential assignment
         for (i, (_target, expr)) in seq_assigns.iter().enumerate() {
-            let value = self.compile_expr(&mut builder, expr, signals_ptr);
+            let value = self.compile_expr(&mut builder, expr, signals_ptr, &mem_ptrs);
             let offset = (i * 8) as i32;
             builder.ins().store(MemFlags::trusted(), value, next_regs_ptr, offset);
         }
@@ -488,6 +553,9 @@ struct JitRtlSimulator {
     evaluate_fn: EvaluateFn,
     /// JIT-compiled sequential sample function
     seq_sample_fn: TickFn,
+
+    /// Memory arrays (for mem_read operations)
+    memory_arrays: Vec<Vec<u64>>,
 
     // Apple II specific: internalized memory
     ram: Vec<u8>,
@@ -582,13 +650,35 @@ impl JitRtlSimulator {
 
         let next_regs = vec![0u64; seq_targets.len()];
 
+        // Build memory arrays from IR definitions
+        let mut memory_arrays: Vec<Vec<u64>> = Vec::new();
+        let mut mem_name_to_idx: HashMap<String, usize> = HashMap::new();
+        let mut mem_depths: Vec<usize> = Vec::new();
+
+        for (idx, mem) in ir.memories.iter().enumerate() {
+            let mut data = vec![0u64; mem.depth];
+            // Copy initial data if present
+            for (i, &val) in mem.initial_data.iter().enumerate() {
+                if i < data.len() {
+                    data[i] = val;
+                }
+            }
+            memory_arrays.push(data);
+            mem_name_to_idx.insert(mem.name.clone(), idx);
+            mem_depths.push(mem.depth);
+        }
+
+        let num_memories = memory_arrays.len();
+
         // Create JIT compiler and compile functions
         let mut compiler = JitCompiler::new()?;
         compiler.name_to_idx = name_to_idx.clone();
         compiler.widths = widths.clone();
+        compiler.mem_name_to_idx = mem_name_to_idx;
+        compiler.mem_depths = mem_depths;
 
-        let evaluate_fn = compiler.compile_evaluate(&ir.assigns)?;
-        let seq_sample_fn = compiler.compile_seq_sample(&seq_assigns)?;
+        let evaluate_fn = compiler.compile_evaluate(&ir.assigns, num_memories)?;
+        let seq_sample_fn = compiler.compile_seq_sample(&seq_assigns, num_memories)?;
 
         // Get Apple II specific signal indices
         let ram_addr_idx = *name_to_idx.get("ram_addr").unwrap_or(&0);
@@ -616,6 +706,7 @@ impl JitRtlSimulator {
             prev_clock_values,
             evaluate_fn,
             seq_sample_fn,
+            memory_arrays,
             ram: vec![0u8; 48 * 1024],
             rom: vec![0u8; 12 * 1024],
             ram_addr_idx,
@@ -650,7 +741,16 @@ impl JitRtlSimulator {
 
     #[inline(always)]
     fn evaluate(&mut self) {
-        unsafe { (self.evaluate_fn)(self.signals.as_mut_ptr()); }
+        // Build memory pointers array on demand
+        let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
+            .map(|arr| arr.as_ptr())
+            .collect();
+        unsafe {
+            (self.evaluate_fn)(
+                self.signals.as_mut_ptr(),
+                mem_ptrs.as_ptr()
+            );
+        }
     }
 
     #[inline(always)]
@@ -686,7 +786,16 @@ impl JitRtlSimulator {
 
         // Sample ALL register input expressions ONCE with post-evaluate signal values
         // This ensures all registers see the same "snapshot" of combinational logic
-        unsafe { (self.seq_sample_fn)(self.signals.as_mut_ptr(), self.next_regs.as_mut_ptr()); }
+        let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
+            .map(|arr| arr.as_ptr())
+            .collect();
+        unsafe {
+            (self.seq_sample_fn)(
+                self.signals.as_mut_ptr(),
+                self.next_regs.as_mut_ptr(),
+                mem_ptrs.as_ptr()
+            );
+        }
 
         // Track which registers have been updated this tick to avoid double-updates
         let mut updated: Vec<bool> = vec![false; self.seq_targets.len()];
