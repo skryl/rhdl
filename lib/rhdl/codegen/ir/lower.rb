@@ -17,11 +17,13 @@ module RHDL
         @assigns = []
         @processes = []
         @reg_ports = []
+        @memories = []
       end
 
       def build
         collect_ports
         collect_signals
+        collect_memories
         collect_assignments
         collect_processes
 
@@ -32,7 +34,8 @@ module RHDL
           regs: @regs,
           assigns: @assigns,
           processes: @processes,
-          reg_ports: @reg_ports
+          reg_ports: @reg_ports,
+          memories: @memories
         )
       end
 
@@ -66,6 +69,19 @@ module RHDL
         end
         @component_class._constants.each do |const|
           @widths[const.name.to_sym] = const.width
+        end
+      end
+
+      def collect_memories
+        return unless @component_class.respond_to?(:_memories)
+
+        @component_class._memories.each do |name, mem_def|
+          @memories << IR::Memory.new(
+            name: name,
+            depth: mem_def.depth,
+            width: mem_def.width,
+            initial_data: mem_def.initial_values
+          )
         end
       end
 
@@ -217,6 +233,9 @@ module RHDL
         when Symbol
           width = @widths.fetch(expr, 1)
           IR::Signal.new(name: expr, width: width)
+        when RHDL::DSL::BehaviorMemoryRead
+          addr = lower_expr(expr.addr)
+          IR::MemoryRead.new(memory: expr.memory_name, addr: addr, width: expr.width)
         else
           raise ArgumentError, "Unsupported expression: #{expr.inspect}"
         end
