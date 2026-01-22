@@ -12,9 +12,9 @@ RSpec.describe RHDL::CLI::Tasks::NativeTask do
         :netlist_interpreter,
         :netlist_jit,
         :netlist_compiler,
-        :rtl_interpreter,
-        :rtl_jit,
-        :rtl_compiler
+        :ir_interpreter,
+        :ir_jit,
+        :ir_compiler
       )
     end
   end

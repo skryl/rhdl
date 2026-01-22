@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'rhdl/cli'
+require 'tmpdir'
 
 RSpec.describe RHDL::CLI::Task do
   let(:task) { described_class.new }
