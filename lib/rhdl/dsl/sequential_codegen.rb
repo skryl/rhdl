@@ -110,13 +110,21 @@ module RHDL
           end
 
           # Split signals into regs (procedural) and nets (continuous assignment or instance-driven)
+          # Get reset values from sequential block if available
+          reset_vals = {}
+          if sequential_defined?
+            seq_ir_for_reset = execute_sequential_for_synthesis
+            reset_vals = seq_ir_for_reset&.reset_values || {}
+          end
+
           regs = []
           instance_nets = []
           _signals.each do |s|
             if instance_driven_signals.include?(s.name) || assign_driven_signals.include?(s.name)
               instance_nets << RHDL::Export::IR::Net.new(name: s.name, width: s.width)
             else
-              regs << RHDL::Export::IR::Reg.new(name: s.name, width: s.width)
+              reset_val = reset_vals[s.name]
+              regs << RHDL::Export::IR::Reg.new(name: s.name, width: s.width, reset_value: reset_val)
             end
           end
 
