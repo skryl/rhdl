@@ -1,20 +1,19 @@
-# Behavior codegen (RTL/Verilog)
-require_relative "codegen/behavior/ir"
-require_relative "codegen/behavior/lower"
-require_relative "codegen/behavior/verilog"
+# Verilog codegen (RTL/Behavior IR)
+require_relative "codegen/verilog/ir"
+require_relative "codegen/verilog/lower"
+require_relative "codegen/verilog/verilog"
 
 # CIRCT codegen (FIRRTL)
 require_relative "codegen/circt/firrtl"
 
-# Structure codegen (gate-level synthesis)
-require_relative "codegen/structure/ir"
-require_relative "codegen/structure/primitives"
-require_relative "codegen/structure/toposort"
-require_relative "codegen/structure/lower"
-require_relative "codegen/structure/sim/gpu"
-require_relative "codegen/structure/sim/netlist_interpreter"
-require_relative "codegen/structure/sim/netlist_jit"
-require_relative "codegen/structure/sim/netlist_compiler"
+# Netlist codegen (gate-level synthesis)
+require_relative "codegen/netlist/ir"
+require_relative "codegen/netlist/primitives"
+require_relative "codegen/netlist/toposort"
+require_relative "codegen/netlist/lower"
+require_relative "codegen/netlist/sim/netlist_interpreter"
+require_relative "codegen/netlist/sim/netlist_jit"
+require_relative "codegen/netlist/sim/netlist_compiler"
 
 require 'fileutils'
 
@@ -23,8 +22,8 @@ module RHDL
     class << self
       # Behavior Verilog codegen
       def verilog(component, top_name: nil)
-        module_def = Behavior::Lower.new(component, top_name: top_name).build
-        Behavior::Verilog.generate(module_def)
+        module_def = Verilog::Lower.new(component, top_name: top_name).build
+        Verilog::Verilog.generate(module_def)
       end
       alias_method :to_verilog, :verilog
 
@@ -34,7 +33,7 @@ module RHDL
 
       # CIRCT FIRRTL codegen
       def circt(component, top_name: nil)
-        module_def = Behavior::Lower.new(component, top_name: top_name).build
+        module_def = Verilog::Lower.new(component, top_name: top_name).build
         CIRCT::FIRRTL.generate(module_def)
       end
       alias_method :to_circt, :circt
@@ -48,18 +47,16 @@ module RHDL
 
       # Structure gate-level codegen
       def gate_level(components, backend: :interpreter, lanes: 64, name: 'design')
-        ir = Structure::Lower.from_components(components, name: name)
+        ir = Netlist::Lower.from_components(components, name: name)
         case backend
         when :interpreter
-          Structure::NetlistInterpreterWrapper.new(ir, lanes: lanes)
+          Netlist::NetlistInterpreterWrapper.new(ir, lanes: lanes)
         when :jit
-          Structure::NetlistJitWrapper.new(ir, lanes: lanes)
+          Netlist::NetlistJitWrapper.new(ir, lanes: lanes)
         when :compiler
-          Structure::NetlistCompilerWrapper.new(ir, lanes: lanes)
-        when :gpu
-          Structure::SimGPU.new(ir, lanes: lanes)
+          Netlist::NetlistCompilerWrapper.new(ir, lanes: lanes)
         else
-          raise ArgumentError, "Unknown backend: #{backend}. Valid: :interpreter, :jit, :compiler, :gpu"
+          raise ArgumentError, "Unknown backend: #{backend}. Valid: :interpreter, :jit, :compiler"
         end
       end
 
@@ -148,9 +145,12 @@ module RHDL
     end
 
     # Backwards compatibility aliases for old namespace
-    IR = Behavior::IR
-    Verilog = Behavior::Verilog
-    Lower = Behavior::Lower
+    IR = Verilog::IR
+    Lower = Verilog::Lower
+
+    # Backwards compatibility: Behavior -> Verilog, Structure -> Netlist
+    Behavior = Verilog
+    Structure = Netlist
   end
 
   # Backwards compatibility alias
