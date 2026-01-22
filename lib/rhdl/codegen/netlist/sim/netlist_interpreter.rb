@@ -20,23 +20,18 @@ module RHDL
     module Netlist
       # Try to load the native extension
       unless const_defined?(:NETLIST_INTERPRETER_AVAILABLE)
+        # Determine library path based on platform
+        NETLIST_INTERPRETER_EXT_DIR = File.expand_path('netlist_interpreter/lib', __dir__)
+        NETLIST_INTERPRETER_LIB_NAME = case RbConfig::CONFIG['host_os']
+        when /darwin/ then 'netlist_interpreter.bundle'
+        when /mswin|mingw/ then 'netlist_interpreter.dll'
+        else 'netlist_interpreter.so'
+        end
+        NETLIST_INTERPRETER_LIB_PATH = File.join(NETLIST_INTERPRETER_EXT_DIR, NETLIST_INTERPRETER_LIB_NAME)
+
         _native_loaded = begin
-          ext_dir = File.expand_path('netlist_interpreter/lib', __dir__)
-
-          # Determine library name based on platform
-          lib_name = case RbConfig::CONFIG['host_os']
-          when /darwin/
-            'netlist_interpreter.bundle'
-          when /mswin|mingw/
-            'netlist_interpreter.dll'
-          else
-            'netlist_interpreter.so'
-          end
-
-          lib_path = File.join(ext_dir, lib_name)
-
-          if File.exist?(lib_path)
-            $LOAD_PATH.unshift(ext_dir) unless $LOAD_PATH.include?(ext_dir)
+          if File.exist?(NETLIST_INTERPRETER_LIB_PATH)
+            $LOAD_PATH.unshift(NETLIST_INTERPRETER_EXT_DIR) unless $LOAD_PATH.include?(NETLIST_INTERPRETER_EXT_DIR)
             require 'netlist_interpreter'
             true
           else
@@ -207,16 +202,24 @@ module RHDL
       class NetlistInterpreterWrapper
         attr_reader :ir, :lanes
 
-        def initialize(ir, lanes: 64)
+        def initialize(ir, lanes: 64, allow_fallback: true)
           @ir = ir
           @lanes = lanes
 
           if NETLIST_INTERPRETER_AVAILABLE
             json = ir.is_a?(String) ? ir : ir.to_json
             @sim = NetlistInterpreter.new(json, lanes)
-          else
+            @backend = :interpret
+          elsif allow_fallback
             @sim = RubyNetlistSimulator.new(ir, lanes: lanes)
+            @backend = :ruby
+          else
+            raise LoadError, "Netlist interpreter extension not found at: #{NETLIST_INTERPRETER_LIB_PATH}\nRun 'rake native:build' to build it."
           end
+        end
+
+        def simulator_type
+          :"netlist_#{@backend}"
         end
 
         def poke(name, value)
