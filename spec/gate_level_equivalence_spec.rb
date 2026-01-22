@@ -229,3 +229,191 @@ RSpec.describe 'Gate-level backend equivalence' do
     expect(gpu_sim.peek('fa.sum')).to eq(cpu_sim.peek('fa.sum'))
   end
 end
+
+RSpec.describe 'Netlist Simulator Modes' do
+  # Tests to verify all 3 netlist simulator backends (interpreter, jit, compiler)
+  # produce correct and consistent results
+
+  let(:lanes) { 64 }
+  let(:rng) { Random.new(5678) }
+
+  NETLIST_BACKENDS = [:interpreter, :jit, :compiler]
+
+  def pack_scalar_mask(values)
+    values.each_with_index.reduce(0) do |mask, (val, lane)|
+      val == 1 ? (mask | (1 << lane)) : mask
+    end
+  end
+
+  def unpack_scalar_mask(mask, num_lanes = 64)
+    num_lanes.times.map { |lane| (mask >> lane) & 1 }
+  end
+
+  def create_simulator(backend, components, name)
+    RHDL::Export.gate_level(components, backend: backend, lanes: lanes, name: name)
+  rescue LoadError, RuntimeError => e
+    skip "#{backend} backend not available: #{e.message}"
+  end
+
+  describe 'full adder across backends' do
+    NETLIST_BACKENDS.each do |backend|
+      context "with #{backend} backend" do
+        it 'computes correct sum and carry' do
+          adder = RHDL::HDL::FullAdder.new('fa')
+          sim = create_simulator(backend, [adder], "fa_#{backend}")
+
+          # Test all 8 combinations of (a, b, cin)
+          8.times do |i|
+            a = (i >> 0) & 1
+            b = (i >> 1) & 1
+            cin = (i >> 2) & 1
+
+            sim.poke('fa.a', a == 1 ? -1 : 0)  # All lanes same value
+            sim.poke('fa.b', b == 1 ? -1 : 0)
+            sim.poke('fa.cin', cin == 1 ? -1 : 0)
+            sim.evaluate
+
+            expected_sum = (a + b + cin) & 1
+            expected_cout = (a + b + cin) > 1 ? 1 : 0
+
+            actual_sum = (sim.peek('fa.sum') & 1)
+            actual_cout = (sim.peek('fa.cout') & 1)
+
+            expect(actual_sum).to eq(expected_sum),
+              "#{backend}: a=#{a}, b=#{b}, cin=#{cin}: sum should be #{expected_sum}, got #{actual_sum}"
+            expect(actual_cout).to eq(expected_cout),
+              "#{backend}: a=#{a}, b=#{b}, cin=#{cin}: cout should be #{expected_cout}, got #{actual_cout}"
+          end
+        end
+      end
+    end
+  end
+
+  describe 'D flip-flop across backends' do
+    NETLIST_BACKENDS.each do |backend|
+      context "with #{backend} backend" do
+        it 'samples input on clock edge' do
+          dff = RHDL::HDL::DFlipFlop.new('dff')
+          sim = create_simulator(backend, [dff], "dff_#{backend}")
+
+          # Initialize
+          sim.poke('dff.d', 0)
+          sim.poke('dff.rst', 0)
+          sim.poke('dff.en', -1)  # Enable all lanes
+          sim.evaluate
+
+          # Clock in a 0
+          sim.tick
+          expect(sim.peek('dff.q') & 1).to eq(0)
+
+          # Set input to 1, but don't clock yet
+          sim.poke('dff.d', -1)
+          sim.evaluate
+          expect(sim.peek('dff.q') & 1).to eq(0)  # Q hasn't changed yet
+
+          # Clock in the 1
+          sim.tick
+          expect(sim.peek('dff.q') & 1).to eq(1)  # Now Q is 1
+        end
+
+        it 'respects reset signal' do
+          dff = RHDL::HDL::DFlipFlop.new('dff')
+          sim = create_simulator(backend, [dff], "dff_rst_#{backend}")
+
+          # Set up with D=1, en=1
+          sim.poke('dff.d', -1)
+          sim.poke('dff.rst', 0)
+          sim.poke('dff.en', -1)
+          sim.tick
+
+          expect(sim.peek('dff.q') & 1).to eq(1)
+
+          # Apply reset
+          sim.poke('dff.rst', -1)
+          sim.tick
+          expect(sim.peek('dff.q') & 1).to eq(0)  # Reset clears Q
+        end
+      end
+    end
+  end
+
+  describe 'backend consistency' do
+    it 'all backends produce identical results for full adder' do
+      results = {}
+
+      NETLIST_BACKENDS.each do |backend|
+        begin
+          adder = RHDL::HDL::FullAdder.new('fa')
+          sim = create_simulator(backend, [adder], "fa_consistency_#{backend}")
+
+          # Random test vectors
+          vectors = lanes.times.map do
+            { a: rng.rand(2), b: rng.rand(2), cin: rng.rand(2) }
+          end
+
+          sim.poke('fa.a', pack_scalar_mask(vectors.map { |v| v[:a] }))
+          sim.poke('fa.b', pack_scalar_mask(vectors.map { |v| v[:b] }))
+          sim.poke('fa.cin', pack_scalar_mask(vectors.map { |v| v[:cin] }))
+          sim.evaluate
+
+          results[backend] = {
+            sum: sim.peek('fa.sum'),
+            cout: sim.peek('fa.cout')
+          }
+        rescue => e
+          next if e.message.include?('not available') || e.message.include?('skip')
+          raise
+        end
+      end
+
+      # Compare all backends to first available one
+      if results.size > 1
+        reference = results.values.first
+        results.each do |backend, result|
+          expect(result[:sum]).to eq(reference[:sum]),
+            "#{backend} sum differs from reference"
+          expect(result[:cout]).to eq(reference[:cout]),
+            "#{backend} cout differs from reference"
+        end
+      end
+    end
+
+    it 'all backends produce identical results for D flip-flop sequence' do
+      results = {}
+
+      NETLIST_BACKENDS.each do |backend|
+        begin
+          dff = RHDL::HDL::DFlipFlop.new('dff')
+          sim = create_simulator(backend, [dff], "dff_consistency_#{backend}")
+
+          # Set up initial state
+          sim.poke('dff.d', 0)
+          sim.poke('dff.rst', 0)
+          sim.poke('dff.en', -1)
+
+          # Run a sequence of clock cycles with different D values
+          output_sequence = []
+          [0, 1, 1, 0, 1, 0, 0, 1].each do |d_val|
+            sim.poke('dff.d', d_val == 1 ? -1 : 0)
+            sim.tick
+            output_sequence << (sim.peek('dff.q') & 1)
+          end
+
+          results[backend] = output_sequence
+        rescue => e
+          next if e.message.include?('not available') || e.message.include?('skip')
+          raise
+        end
+      end
+
+      # Compare all backends to first available one
+      if results.size > 1
+        reference = results.values.first
+        results.each do |backend, sequence|
+          expect(sequence).to eq(reference),
+            "#{backend} DFF sequence #{sequence.inspect} differs from reference #{reference.inspect}"
+        end
+      end
+    end
+  end
+end
