@@ -50,6 +50,8 @@ module RHDL
           end
 
           @sim = IrCompiler.new(ir_json)
+          # Auto-compile for performance - without this, falls back to slow interpreted mode
+          @sim.compile
         end
 
         def simulator_type
