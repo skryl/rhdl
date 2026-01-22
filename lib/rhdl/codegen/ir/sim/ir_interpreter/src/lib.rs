@@ -58,6 +58,7 @@ enum ExprDef {
     Slice { base: Box<ExprDef>, low: usize, high: usize, width: usize },
     Concat { parts: Vec<ExprDef>, width: usize },
     Resize { expr: Box<ExprDef>, width: usize },
+    MemRead { memory: String, addr: Box<ExprDef>, width: usize },
 }
 
 /// Assignment (combinational)
@@ -86,12 +87,13 @@ struct ProcessDef {
 }
 
 /// Memory definition
-#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct MemoryDef {
     name: String,
     depth: usize,
     width: usize,
+    #[serde(default)]
+    initial_data: Vec<u64>,
 }
 
 /// Complete module IR
@@ -181,6 +183,7 @@ const OP_CONCAT_ACCUM: u8 = 26;
 const OP_CONCAT_FINISH: u8 = 27;
 const OP_RESIZE: u8 = 28;
 const OP_COPY_TO_SIG: u8 = 29; // signals[dst] = get_operand(arg0) & arg2
+const OP_MEM_READ: u8 = 30;    // temps[dst] = memories[arg0][get_operand(arg1)] & arg2
 
 // Operand type tags (stored in high bits of arg values)
 const TAG_SIGNAL: u64 = 0;
@@ -280,6 +283,10 @@ struct RtlSimulator {
     read_key_idx: usize,
     /// Reset values for registers (signal index -> reset value)
     reset_values: Vec<(usize, u64)>,
+    /// Memory arrays (indexed by memory index)
+    memory_arrays: Vec<Vec<u64>>,
+    /// Memory name to index mapping
+    memory_name_to_idx: HashMap<String, usize>,
 }
 
 impl RtlSimulator {
@@ -333,13 +340,16 @@ impl RtlSimulator {
 
         let signal_count = signals.len();
 
+        // Build memory arrays (needed early for expression compilation)
+        let (memory_arrays, mem_name_to_idx) = Self::build_memory_arrays(&ir.memories);
+
         // Compile combinational assignments to flat ops
         let mut max_temps = 0usize;
         let mut all_comb_ops: Vec<FlatOp> = Vec::new();
 
         for assign in &ir.assigns {
             let target_idx = *name_to_idx.get(&assign.target).unwrap_or(&0);
-            let (ops, temps_used) = Self::compile_to_flat_ops(&assign.expr, target_idx, &name_to_idx, &widths);
+            let (ops, temps_used) = Self::compile_to_flat_ops(&assign.expr, target_idx, &name_to_idx, &mem_name_to_idx, &widths);
             max_temps = max_temps.max(temps_used);
             all_comb_ops.extend(ops);
         }
@@ -363,7 +373,7 @@ impl RtlSimulator {
 
             for stmt in &process.statements {
                 let target_idx = *name_to_idx.get(&stmt.target).unwrap_or(&0);
-                let (ops, temps_used) = Self::compile_to_flat_ops(&stmt.expr, target_idx, &name_to_idx, &widths);
+                let (ops, temps_used) = Self::compile_to_flat_ops(&stmt.expr, target_idx, &name_to_idx, &mem_name_to_idx, &widths);
                 max_temps = max_temps.max(temps_used);
                 seq_assigns.push(CompiledAssign { ops, final_target: target_idx });
                 seq_targets.push(target_idx);
@@ -414,6 +424,8 @@ impl RtlSimulator {
             k_idx,
             read_key_idx,
             reset_values,
+            memory_arrays,
+            memory_name_to_idx: mem_name_to_idx,
         })
     }
 
@@ -422,18 +434,37 @@ impl RtlSimulator {
         if width >= 64 { u64::MAX } else { (1u64 << width) - 1 }
     }
 
+    /// Build memory arrays from IR definitions
+    fn build_memory_arrays(memories: &[MemoryDef]) -> (Vec<Vec<u64>>, HashMap<String, usize>) {
+        let mut arrays = Vec::new();
+        let mut name_to_idx = HashMap::new();
+        for (idx, mem) in memories.iter().enumerate() {
+            let mut data = vec![0u64; mem.depth];
+            // Copy initial data if present
+            for (i, &val) in mem.initial_data.iter().enumerate() {
+                if i < data.len() {
+                    data[i] = val;
+                }
+            }
+            arrays.push(data);
+            name_to_idx.insert(mem.name.clone(), idx);
+        }
+        (arrays, name_to_idx)
+    }
+
     /// Compile expression to flat ops
     /// Returns (ops, max_temp_used)
     fn compile_to_flat_ops(
         expr: &ExprDef,
         final_target: usize,
         name_to_idx: &HashMap<String, usize>,
+        mem_name_to_idx: &HashMap<String, usize>,
         widths: &[usize]
     ) -> (Vec<FlatOp>, usize) {
         let mut ops: Vec<FlatOp> = Vec::new();
         let mut temp_counter = 0usize;
 
-        let result = Self::compile_expr_to_flat(expr, name_to_idx, widths, &mut ops, &mut temp_counter);
+        let result = Self::compile_expr_to_flat(expr, name_to_idx, mem_name_to_idx, widths, &mut ops, &mut temp_counter);
 
         // Final copy to target signal if needed
         let width = widths.get(final_target).copied().unwrap_or(64);
@@ -460,6 +491,7 @@ impl RtlSimulator {
     fn compile_expr_to_flat(
         expr: &ExprDef,
         name_to_idx: &HashMap<String, usize>,
+        mem_name_to_idx: &HashMap<String, usize>,
         widths: &[usize],
         ops: &mut Vec<FlatOp>,
         temp_counter: &mut usize,
@@ -474,7 +506,7 @@ impl RtlSimulator {
                 Operand::Immediate((*value as u64) & mask)
             }
             ExprDef::UnaryOp { op, operand, width } => {
-                let src = Self::compile_expr_to_flat(operand, name_to_idx, widths, ops, temp_counter);
+                let src = Self::compile_expr_to_flat(operand, name_to_idx, mem_name_to_idx, widths, ops, temp_counter);
                 let mask = Self::compute_mask(*width);
                 let dst = *temp_counter;
                 *temp_counter += 1;
@@ -500,8 +532,8 @@ impl RtlSimulator {
                 Operand::Temp(dst)
             }
             ExprDef::BinaryOp { op, left, right, width } => {
-                let l = Self::compile_expr_to_flat(left, name_to_idx, widths, ops, temp_counter);
-                let r = Self::compile_expr_to_flat(right, name_to_idx, widths, ops, temp_counter);
+                let l = Self::compile_expr_to_flat(left, name_to_idx, mem_name_to_idx, widths, ops, temp_counter);
+                let r = Self::compile_expr_to_flat(right, name_to_idx, mem_name_to_idx, widths, ops, temp_counter);
                 let mask = Self::compute_mask(*width);
                 let dst = *temp_counter;
                 *temp_counter += 1;
@@ -536,9 +568,9 @@ impl RtlSimulator {
                 Operand::Temp(dst)
             }
             ExprDef::Mux { condition, when_true, when_false, width } => {
-                let cond = Self::compile_expr_to_flat(condition, name_to_idx, widths, ops, temp_counter);
-                let t = Self::compile_expr_to_flat(when_true, name_to_idx, widths, ops, temp_counter);
-                let f = Self::compile_expr_to_flat(when_false, name_to_idx, widths, ops, temp_counter);
+                let cond = Self::compile_expr_to_flat(condition, name_to_idx, mem_name_to_idx, widths, ops, temp_counter);
+                let t = Self::compile_expr_to_flat(when_true, name_to_idx, mem_name_to_idx, widths, ops, temp_counter);
+                let f = Self::compile_expr_to_flat(when_false, name_to_idx, mem_name_to_idx, widths, ops, temp_counter);
                 let dst = *temp_counter;
                 *temp_counter += 1;
 
@@ -565,7 +597,7 @@ impl RtlSimulator {
                 Operand::Temp(masked_dst)
             }
             ExprDef::Slice { base, low, width, .. } => {
-                let src = Self::compile_expr_to_flat(base, name_to_idx, widths, ops, temp_counter);
+                let src = Self::compile_expr_to_flat(base, name_to_idx, mem_name_to_idx, widths, ops, temp_counter);
                 let mask = Self::compute_mask(*width);
                 let dst = *temp_counter;
                 *temp_counter += 1;
@@ -597,7 +629,7 @@ impl RtlSimulator {
                 // to build up from low bits (shift_acc = 0) to high bits
                 let mut shift_acc = 0u64;
                 for part in parts.iter().rev() {
-                    let src = Self::compile_expr_to_flat(part, name_to_idx, widths, ops, temp_counter);
+                    let src = Self::compile_expr_to_flat(part, name_to_idx, mem_name_to_idx, widths, ops, temp_counter);
                     let part_width = Self::expr_width(part, widths, name_to_idx);
                     let part_mask = Self::compute_mask(part_width);
 
@@ -622,7 +654,7 @@ impl RtlSimulator {
                 Operand::Temp(dst)
             }
             ExprDef::Resize { expr, width } => {
-                let src = Self::compile_expr_to_flat(expr, name_to_idx, widths, ops, temp_counter);
+                let src = Self::compile_expr_to_flat(expr, name_to_idx, mem_name_to_idx, widths, ops, temp_counter);
                 let mask = Self::compute_mask(*width);
                 let dst = *temp_counter;
                 *temp_counter += 1;
@@ -632,6 +664,22 @@ impl RtlSimulator {
                     dst,
                     arg0: FlatOp::encode_operand(src),
                     arg1: 0,
+                    arg2: mask,
+                });
+                Operand::Temp(dst)
+            }
+            ExprDef::MemRead { memory, addr, width } => {
+                let addr_op = Self::compile_expr_to_flat(addr, name_to_idx, mem_name_to_idx, widths, ops, temp_counter);
+                let mem_idx = *mem_name_to_idx.get(memory).unwrap_or(&0);
+                let mask = Self::compute_mask(*width);
+                let dst = *temp_counter;
+                *temp_counter += 1;
+
+                ops.push(FlatOp {
+                    op_type: OP_MEM_READ,
+                    dst,
+                    arg0: mem_idx as u64,
+                    arg1: FlatOp::encode_operand(addr_op),
                     arg2: mask,
                 });
                 Operand::Temp(dst)
@@ -651,6 +699,7 @@ impl RtlSimulator {
             ExprDef::Slice { width, .. } => *width,
             ExprDef::Concat { width, .. } => *width,
             ExprDef::Resize { width, .. } => *width,
+            ExprDef::MemRead { width, .. } => *width,
         }
     }
 
@@ -670,7 +719,7 @@ impl RtlSimulator {
 
     /// Execute a single flat operation
     #[inline(always)]
-    fn execute_flat_op(signals: &mut [u64], temps: &mut [u64], op: &FlatOp) {
+    fn execute_flat_op(signals: &mut [u64], temps: &mut [u64], memories: &[Vec<u64>], op: &FlatOp) {
         match op.op_type {
             OP_COPY_TO_SIG => {
                 let val = FlatOp::get_operand(signals, temps, op.arg0) & op.arg2;
@@ -801,6 +850,18 @@ impl RtlSimulator {
                 let result = FlatOp::get_operand(signals, temps, op.arg0) & op.arg2;
                 unsafe { *temps.get_unchecked_mut(op.dst) = result; }
             }
+            OP_MEM_READ => {
+                // arg0 = memory index, arg1 = encoded address operand, arg2 = mask
+                let mem_idx = op.arg0 as usize;
+                let addr = FlatOp::get_operand(signals, temps, op.arg1) as usize;
+                let result = if mem_idx < memories.len() {
+                    let mem = &memories[mem_idx];
+                    if addr < mem.len() { mem[addr] } else { 0 }
+                } else {
+                    0
+                };
+                unsafe { *temps.get_unchecked_mut(op.dst) = result & op.arg2; }
+            }
             _ => {}
         }
     }
@@ -809,7 +870,7 @@ impl RtlSimulator {
     fn evaluate(&mut self) {
         // Execute all ops from single contiguous array (optimal cache access)
         for op in &self.all_comb_ops {
-            Self::execute_flat_op(&mut self.signals, &mut self.temps, op);
+            Self::execute_flat_op(&mut self.signals, &mut self.temps, &self.memory_arrays, op);
         }
     }
 
@@ -843,7 +904,7 @@ impl RtlSimulator {
 
             // Execute all ops except the last (which writes to signals)
             for op in &seq_assign.ops[..ops_len.saturating_sub(1)] {
-                Self::execute_flat_op(&mut self.signals, &mut self.temps, op);
+                Self::execute_flat_op(&mut self.signals, &mut self.temps, &self.memory_arrays, op);
             }
 
             // For the last op, get the result without writing to signals
@@ -854,7 +915,7 @@ impl RtlSimulator {
                 self.next_regs[i] = val;
             } else {
                 // Fallback: execute and read from target
-                Self::execute_flat_op(&mut self.signals, &mut self.temps, last_op);
+                Self::execute_flat_op(&mut self.signals, &mut self.temps, &self.memory_arrays, last_op);
                 self.next_regs[i] = unsafe { *self.signals.get_unchecked(seq_assign.final_target) };
             }
         }
@@ -988,7 +1049,7 @@ impl RtlSimulator {
 
             // Execute all ops except the last (which writes to signals)
             for op in &seq_assign.ops[..ops_len.saturating_sub(1)] {
-                Self::execute_flat_op(&mut self.signals, &mut self.temps, op);
+                Self::execute_flat_op(&mut self.signals, &mut self.temps, &self.memory_arrays, op);
             }
 
             // For the last op, get the result without writing to signals
@@ -997,7 +1058,7 @@ impl RtlSimulator {
                 let val = FlatOp::get_operand(&self.signals, &self.temps, last_op.arg0) & last_op.arg2;
                 self.next_regs[i] = val;
             } else {
-                Self::execute_flat_op(&mut self.signals, &mut self.temps, last_op);
+                Self::execute_flat_op(&mut self.signals, &mut self.temps, &self.memory_arrays, last_op);
                 self.next_regs[i] = unsafe { *self.signals.get_unchecked(seq_assign.final_target) };
             }
         }
