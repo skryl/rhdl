@@ -102,6 +102,208 @@ module RHDL
           parts.join("\n\n")
         end
 
+        # Generate flattened IR for simulation (inlines all subcomponent logic)
+        # This produces a single flat IR with no instances - suitable for RTL simulation
+        def to_flat_ir(top_name: nil, prefix: '')
+          name = top_name || verilog_module_name
+
+          all_ports = []
+          all_nets = []
+          all_regs = []
+          all_assigns = []
+          all_processes = []
+
+          # Get this component's IR
+          ir = to_ir(top_name: name)
+
+          # Add top-level ports (only for the root component, not prefixed subcomponents)
+          if prefix.empty?
+            all_ports = ir.ports
+          end
+
+          # Add this component's nets and regs with prefix
+          ir.nets.each do |net|
+            prefixed_name = prefix.empty? ? net.name : :"#{prefix}__#{net.name}"
+            all_nets << RHDL::Export::IR::Net.new(name: prefixed_name, width: net.width)
+          end
+
+          ir.regs.each do |reg|
+            prefixed_name = prefix.empty? ? reg.name : :"#{prefix}__#{reg.name}"
+            all_regs << RHDL::Export::IR::Reg.new(name: prefixed_name, width: reg.width)
+          end
+
+          # Add this component's assigns with prefixed signal names
+          ir.assigns.each do |assign|
+            prefixed_assign = prefix_assign(assign, prefix)
+            all_assigns << prefixed_assign
+          end
+
+          # Add this component's processes with prefixed signal names
+          ir.processes.each do |process|
+            prefixed_process = prefix_process(process, prefix)
+            all_processes << prefixed_process
+          end
+
+          # Recursively flatten each instance
+          _instance_defs.each do |inst_def|
+            inst_name = inst_def[:name]
+            component_class = inst_def[:component_class]
+            inst_prefix = prefix.empty? ? inst_name.to_s : "#{prefix}__#{inst_name}"
+
+            # Get flattened IR from subcomponent
+            if component_class.respond_to?(:to_flat_ir)
+              sub_ir = component_class.to_flat_ir(prefix: inst_prefix)
+
+              # Merge subcomponent's flattened IR
+              all_nets.concat(sub_ir.nets)
+              all_regs.concat(sub_ir.regs)
+              all_assigns.concat(sub_ir.assigns)
+              all_processes.concat(sub_ir.processes)
+
+              # Create assignments for port connections
+              inst_def[:connections].each do |port_name, parent_signal|
+                # Find port direction
+                port_def = component_class._port_defs.find { |p| p[:name] == port_name }
+                direction = port_def ? port_def[:direction] : :in
+                port_width = port_def ? port_def[:width] : 1
+
+                child_signal = "#{inst_prefix}__#{port_name}"
+                parent_sig = prefix.empty? ? parent_signal.to_s : "#{prefix}__#{parent_signal}"
+
+                if direction == :in
+                  # Input: parent drives child
+                  all_assigns << RHDL::Export::IR::Assign.new(
+                    target: child_signal,
+                    expr: RHDL::Export::IR::Signal.new(name: parent_sig, width: port_width)
+                  )
+                else
+                  # Output: child drives parent
+                  all_assigns << RHDL::Export::IR::Assign.new(
+                    target: parent_sig,
+                    expr: RHDL::Export::IR::Signal.new(name: child_signal, width: port_width)
+                  )
+                end
+
+                # Add net for child port signal if not already present
+                unless all_nets.any? { |n| n.name.to_s == child_signal }
+                  all_nets << RHDL::Export::IR::Net.new(name: child_signal.to_sym, width: port_width)
+                end
+              end
+            end
+          end
+
+          RHDL::Export::IR::ModuleDef.new(
+            name: name,
+            ports: all_ports,
+            nets: all_nets,
+            regs: all_regs,
+            assigns: all_assigns,
+            processes: all_processes,
+            instances: [],  # Flattened - no instances
+            memories: ir.memories,
+            write_ports: ir.write_ports,
+            parameters: ir.parameters
+          )
+        end
+
+        # Prefix all signal references in an assign
+        def prefix_assign(assign, prefix)
+          return assign if prefix.empty?
+
+          RHDL::Export::IR::Assign.new(
+            target: "#{prefix}__#{assign.target}",
+            expr: prefix_expr(assign.expr, prefix)
+          )
+        end
+
+        # Prefix all signal references in an expression
+        def prefix_expr(expr, prefix)
+          return expr if prefix.empty?
+
+          case expr
+          when RHDL::Export::IR::Signal
+            RHDL::Export::IR::Signal.new(name: "#{prefix}__#{expr.name}", width: expr.width)
+          when RHDL::Export::IR::Literal
+            expr
+          when RHDL::Export::IR::BinaryOp
+            RHDL::Export::IR::BinaryOp.new(
+              op: expr.op,
+              left: prefix_expr(expr.left, prefix),
+              right: prefix_expr(expr.right, prefix),
+              width: expr.width
+            )
+          when RHDL::Export::IR::UnaryOp
+            RHDL::Export::IR::UnaryOp.new(
+              op: expr.op,
+              operand: prefix_expr(expr.operand, prefix),
+              width: expr.width
+            )
+          when RHDL::Export::IR::Mux
+            RHDL::Export::IR::Mux.new(
+              condition: prefix_expr(expr.condition, prefix),
+              when_true: prefix_expr(expr.when_true, prefix),
+              when_false: prefix_expr(expr.when_false, prefix),
+              width: expr.width
+            )
+          when RHDL::Export::IR::Slice
+            RHDL::Export::IR::Slice.new(
+              base: prefix_expr(expr.base, prefix),
+              range: expr.range,
+              width: expr.width
+            )
+          when RHDL::Export::IR::Concat
+            RHDL::Export::IR::Concat.new(
+              parts: expr.parts.map { |p| prefix_expr(p, prefix) },
+              width: expr.width
+            )
+          when RHDL::Export::IR::Resize
+            RHDL::Export::IR::Resize.new(
+              expr: prefix_expr(expr.expr, prefix),
+              width: expr.width
+            )
+          when RHDL::Export::IR::Case
+            RHDL::Export::IR::Case.new(
+              selector: prefix_expr(expr.selector, prefix),
+              cases: expr.cases.transform_values { |v| prefix_expr(v, prefix) },
+              default: expr.default ? prefix_expr(expr.default, prefix) : nil,
+              width: expr.width
+            )
+          else
+            expr
+          end
+        end
+
+        # Prefix all signal references in a process
+        def prefix_process(process, prefix)
+          return process if prefix.empty?
+
+          RHDL::Export::IR::Process.new(
+            name: :"#{prefix}__#{process.name}",
+            statements: process.statements.map { |s| prefix_statement(s, prefix) },
+            clocked: process.clocked,
+            clock: process.clock ? "#{prefix}__#{process.clock}" : nil
+          )
+        end
+
+        # Prefix all signal references in a statement
+        def prefix_statement(stmt, prefix)
+          case stmt
+          when RHDL::Export::IR::SeqAssign
+            RHDL::Export::IR::SeqAssign.new(
+              target: "#{prefix}__#{stmt.target}",
+              expr: prefix_expr(stmt.expr, prefix)
+            )
+          when RHDL::Export::IR::If
+            RHDL::Export::IR::If.new(
+              condition: prefix_expr(stmt.condition, prefix),
+              then_statements: stmt.then_statements&.map { |s| prefix_statement(s, prefix) },
+              else_statements: stmt.else_statements&.map { |s| prefix_statement(s, prefix) }
+            )
+          else
+            stmt
+          end
+        end
+
         # Generate IR ModuleDef from the component
         def to_ir(top_name: nil)
           name = top_name || verilog_module_name
