@@ -112,6 +112,7 @@ module RHDL
           all_regs = []
           all_assigns = []
           all_processes = []
+          all_memories = []
 
           # Get this component's IR
           ir = to_ir(top_name: name)
@@ -144,6 +145,19 @@ module RHDL
             all_processes << prefixed_process
           end
 
+          # Add this component's memories with prefix
+          ir.memories.each do |mem|
+            prefixed_name = prefix.empty? ? mem.name : "#{prefix}__#{mem.name}"
+            all_memories << RHDL::Export::IR::Memory.new(
+              name: prefixed_name,
+              depth: mem.depth,
+              width: mem.width,
+              read_ports: mem.read_ports,
+              write_ports: mem.write_ports,
+              initial_data: mem.initial_data
+            )
+          end
+
           # Recursively flatten each instance
           _instance_defs.each do |inst_def|
             inst_name = inst_def[:name]
@@ -159,6 +173,7 @@ module RHDL
               all_regs.concat(sub_ir.regs)
               all_assigns.concat(sub_ir.assigns)
               all_processes.concat(sub_ir.processes)
+              all_memories.concat(sub_ir.memories) if sub_ir.memories
 
               # Create assignments for port connections
               inst_def[:connections].each do |port_name, parent_signal|
@@ -200,7 +215,7 @@ module RHDL
             assigns: all_assigns,
             processes: all_processes,
             instances: [],  # Flattened - no instances
-            memories: ir.memories,
+            memories: all_memories,
             write_ports: ir.write_ports,
             parameters: ir.parameters
           )
@@ -266,6 +281,12 @@ module RHDL
               selector: prefix_expr(expr.selector, prefix),
               cases: expr.cases.transform_values { |v| prefix_expr(v, prefix) },
               default: expr.default ? prefix_expr(expr.default, prefix) : nil,
+              width: expr.width
+            )
+          when RHDL::Export::IR::MemoryRead
+            RHDL::Export::IR::MemoryRead.new(
+              memory: "#{prefix}__#{expr.memory}",
+              addr: prefix_expr(expr.addr, prefix),
               width: expr.width
             )
           else
@@ -424,7 +445,8 @@ module RHDL
               depth: mem_def.depth,
               width: mem_def.width,
               read_ports: [],
-              write_ports: []
+              write_ports: [],
+              initial_data: mem_def.initial_values
             )
           end
 
