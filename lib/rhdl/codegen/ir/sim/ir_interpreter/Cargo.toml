@@ -1,9 +1,9 @@
 [package]
-name = "rtl_compiler"
+name = "ir_interpreter"
 version = "0.1.0"
 edition = "2021"
 authors = ["RHDL Team"]
-description = "JIT-compiled RTL simulator - generates specialized Rust code for maximum performance"
+description = "Bytecode-based IR interpreter for Behavior IR with Ruby bindings"
 license = "MIT"
 
 [lib]
@@ -13,7 +13,6 @@ crate-type = ["cdylib"]
 magnus = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-libloading = "0.8"
 
 [profile.release]
 opt-level = 3

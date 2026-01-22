@@ -12,7 +12,7 @@
 
 require_relative '../hdl/apple2'
 require 'rhdl/codegen'
-require 'rhdl/codegen/circt/sim/rtl_interpreter'
+require 'rhdl/codegen/ir/sim/ir_interpreter'
 
 module RHDL
   module Apple2
@@ -33,7 +33,7 @@ module RHDL
         # Uses flattened IR so all subcomponent logic is included
         def ir_json
           ir = flat_ir
-          RHDL::Codegen::CIRCT::IRToJson.convert(ir)
+          RHDL::Codegen::IR::IRToJson.convert(ir)
         end
 
         # Get stats about the IR
@@ -91,13 +91,13 @@ module RHDL
         # Create the simulator based on backend choice
         @sim = case backend
                when :interpret
-                 RHDL::Codegen::CIRCT::RtlInterpreterWrapper.new(@ir_json, allow_fallback: false)
+                 RHDL::Codegen::IR::IrInterpreterWrapper.new(@ir_json, allow_fallback: false)
                when :jit
-                 require 'rhdl/codegen/circt/sim/rtl_jit'
-                 RHDL::Codegen::CIRCT::RtlJitWrapper.new(@ir_json, allow_fallback: false)
+                 require 'rhdl/codegen/ir/sim/ir_jit'
+                 RHDL::Codegen::IR::IrJitWrapper.new(@ir_json, allow_fallback: false)
                when :compile
-                 require 'rhdl/codegen/circt/sim/rtl_compiler'
-                 RHDL::Codegen::CIRCT::RtlCompilerWrapper.new(@ir_json)
+                 require 'rhdl/codegen/ir/sim/ir_compiler'
+                 RHDL::Codegen::IR::IrCompilerWrapper.new(@ir_json)
                else
                  raise ArgumentError, "Unknown backend: #{backend}. Use :interpret, :jit, or :compile"
                end

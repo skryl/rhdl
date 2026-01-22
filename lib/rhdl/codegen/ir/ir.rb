@@ -2,8 +2,7 @@
 
 module RHDL
   module Codegen
-    module Verilog
-      module IR
+    module IR
       class ModuleDef
         attr_reader :name, :ports, :nets, :regs, :assigns, :processes, :reg_ports, :instances,
                     :memories, :write_ports, :sync_read_ports, :parameters
@@ -337,5 +336,4 @@ module RHDL
       end
     end
   end
-end
 end
