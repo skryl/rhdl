@@ -19,14 +19,20 @@ module RHDL
     # Utility module for exporting Apple2 component to RTL IR
     module Apple2Rtl
       class << self
-        # Get the Behavior IR for the Apple2 component
+        # Get the Behavior IR for the Apple2 component (shallow, for Verilog export)
         def behavior_ir
           Apple2.to_ir
         end
 
+        # Get the flattened Behavior IR (includes all subcomponent logic)
+        def flat_ir
+          Apple2.to_flat_ir
+        end
+
         # Convert to JSON format for the simulator
+        # Uses flattened IR so all subcomponent logic is included
         def ir_json
-          ir = behavior_ir
+          ir = flat_ir
           RHDL::Codegen::CIRCT::IRToJson.convert(ir)
         end
 
@@ -100,9 +106,6 @@ module RHDL
         puts "  IR loaded in #{elapsed.round(2)}s"
         puts "  Native backend: #{@sim.native? ? 'Rust (optimized)' : 'Ruby (fallback)'}"
         puts "  Signals: #{@sim.signal_count}, Registers: #{@sim.reg_count}"
-        if @sim.native?
-          puts "  Note: CPU debug registers not available in native RTL mode"
-        end
 
         @cycles = 0
         @halted = false
@@ -450,9 +453,7 @@ module RHDL
       end
 
       def cpu_state
-        # Note: Debug signals require hierarchical flattening which the RTL behavior IR
-        # doesn't currently support. The debug values may show as 0 in native RTL modes.
-        # For full CPU state visibility, use the Ruby HDL mode (--sim ruby).
+        # With flattened IR, debug signals from subcomponents should be available
         {
           pc: safe_peek('pc_debug'),
           a: safe_peek('a_debug'),
