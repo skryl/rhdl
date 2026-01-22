@@ -50,8 +50,18 @@ module RHDL
       end
 
       def collect_signals
+        # Get reset values from sequential block if present
+        reset_values = if @component_class.respond_to?(:_reset_values)
+          @component_class._reset_values
+        elsif @component_class.respond_to?(:_sequential_block) && @component_class._sequential_block
+          @component_class._sequential_block.reset_values
+        else
+          {}
+        end
+
         @component_class._signals.each do |signal|
-          @regs << IR::Reg.new(name: signal.name, width: signal.width)
+          reset_val = reset_values[signal.name.to_sym]
+          @regs << IR::Reg.new(name: signal.name, width: signal.width, reset_value: reset_val)
           @widths[signal.name.to_sym] = signal.width
         end
         @component_class._constants.each do |const|

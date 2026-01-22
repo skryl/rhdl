@@ -41,6 +41,8 @@ struct Net {
 struct Reg {
     name: String,
     width: u32,
+    #[serde(default)]
+    reset_value: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -101,6 +103,8 @@ struct SimulatorState {
     rom: Vec<u8>,
     compiled_lib: Option<libloading::Library>,
     compiled: bool,
+    /// Reset values for registers (signal index -> reset value)
+    reset_values: Vec<(usize, u64)>,
 }
 
 impl SimulatorState {
@@ -120,23 +124,37 @@ impl SimulatorState {
             signal_indices.insert(net.name.clone(), idx);
             idx += 1;
         }
+        // Track reset values
+        let mut reset_values: Vec<(usize, u64)> = Vec::new();
         for reg in &ir.regs {
             signal_indices.insert(reg.name.clone(), idx);
+            if let Some(reset_val) = reg.reset_value {
+                if reset_val != 0 {
+                    reset_values.push((idx, reset_val));
+                }
+            }
             idx += 1;
         }
 
         let signal_count = signal_indices.len();
         let reg_count = count_regs(&ir);
 
+        // Initialize signals (including reset values for registers)
+        let mut signals = vec![0u64; signal_count];
+        for &(idx, reset_val) in &reset_values {
+            signals[idx] = reset_val;
+        }
+
         Ok(SimulatorState {
             ir,
             signal_indices,
-            signals: vec![0; signal_count],
+            signals,
             next_regs: vec![0; reg_count],
             ram: vec![0; 48 * 1024],
             rom: vec![0; 12 * 1024],
             compiled_lib: None,
             compiled: false,
+            reset_values,
         })
     }
 
@@ -309,6 +327,10 @@ impl SimulatorState {
         }
         for reg in &mut self.next_regs {
             *reg = 0;
+        }
+        // Apply register reset values
+        for &(idx, reset_val) in &self.reset_values {
+            self.signals[idx] = reset_val;
         }
     }
 

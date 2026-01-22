@@ -129,7 +129,7 @@ module RHDL
 
           ir.regs.each do |reg|
             prefixed_name = prefix.empty? ? reg.name : :"#{prefix}__#{reg.name}"
-            all_regs << RHDL::Export::IR::Reg.new(name: prefixed_name, width: reg.width)
+            all_regs << RHDL::Export::IR::Reg.new(name: prefixed_name, width: reg.width, reset_value: reg.reset_value)
           end
 
           # Add this component's assigns with prefixed signal names
