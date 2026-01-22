@@ -303,6 +303,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ir_jit"
+version = "0.1.0"
+dependencies = [
+ "cranelift",
+ "cranelift-codegen",
+ "cranelift-frontend",
+ "cranelift-jit",
+ "cranelift-module",
+ "cranelift-native",
+ "magnus",
+ "serde",
+ "serde_json",
+ "target-lexicon 0.12.16",
+]
+
+[[package]]
 name = "itertools"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -506,22 +522,6 @@ dependencies = [
  "libc",
  "mach2",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "rtl_jit"
-version = "0.1.0"
-dependencies = [
- "cranelift",
- "cranelift-codegen",
- "cranelift-frontend",
- "cranelift-jit",
- "cranelift-module",
- "cranelift-native",
- "magnus",
- "serde",
- "serde_json",
- "target-lexicon 0.12.16",
 ]
 
 [[package]]
