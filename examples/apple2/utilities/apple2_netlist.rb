@@ -110,13 +110,14 @@ module RHDL
         @ir = Apple2Netlist.gate_ir
 
         # Create the simulator wrapper based on backend selection
+        # allow_fallback: false ensures we get an error if the native extension is missing
         @sim = case backend
                when :interpret
-                 RHDL::Codegen::Netlist::NetlistInterpreterWrapper.new(@ir, lanes: 1)
+                 RHDL::Codegen::Netlist::NetlistInterpreterWrapper.new(@ir, lanes: 1, allow_fallback: false)
                when :jit
-                 RHDL::Codegen::Netlist::NetlistJitWrapper.new(@ir, lanes: 1)
+                 RHDL::Codegen::Netlist::NetlistJitWrapper.new(@ir, lanes: 1, allow_fallback: false)
                when :compile
-                 RHDL::Codegen::Netlist::NetlistCompilerWrapper.new(@ir, simd: simd, lanes: 1)
+                 RHDL::Codegen::Netlist::NetlistCompilerWrapper.new(@ir, simd: simd, lanes: 1, allow_fallback: false)
                else
                  raise ArgumentError, "Unknown backend: #{backend}. Valid: :interpret, :jit, :compile"
                end
