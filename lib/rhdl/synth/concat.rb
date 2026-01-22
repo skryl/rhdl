@@ -12,7 +12,7 @@ module RHDL
       end
 
       def to_ir
-        RHDL::Codegen::Verilog::IR::Concat.new(parts: @parts.map(&:to_ir), width: @width)
+        RHDL::Codegen::IR::Concat.new(parts: @parts.map(&:to_ir), width: @width)
       end
     end
   end
