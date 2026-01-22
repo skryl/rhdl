@@ -440,7 +440,7 @@ fn u64_to_ruby(ruby: &Ruby, value: u64) -> Value {
     }
 }
 
-#[magnus::wrap(class = "RHDL::Codegen::Structure::SimCPUNative")]
+#[magnus::wrap(class = "RHDL::Codegen::Structure::NetlistInterpreter")]
 struct RubyNetlistSim {
     sim: RefCell<NetlistSimulator>,
 }
@@ -548,6 +548,14 @@ impl RubyNetlistSim {
     fn native(&self) -> bool {
         true
     }
+
+    /// Run N ticks with a single FFI call
+    fn run_ticks(&self, n: usize) {
+        let mut sim = self.sim.borrow_mut();
+        for _ in 0..n {
+            sim.tick();
+        }
+    }
 }
 
 #[magnus::init]
@@ -557,8 +565,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     let codegen = rhdl.define_module("Codegen")?;
     let structure = codegen.define_module("Structure")?;
 
-    // Define class RHDL::Codegen::Structure::SimCPUNative
-    let class = structure.define_class("SimCPUNative", ruby.class_object())?;
+    // Define class RHDL::Codegen::Structure::NetlistInterpreter
+    let class = structure.define_class("NetlistInterpreter", ruby.class_object())?;
 
     class.define_singleton_method("new", magnus::function!(RubyNetlistSim::new, 2))?;
     class.define_method("poke", method!(RubyNetlistSim::poke, 2))?;
@@ -566,6 +574,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("evaluate", method!(RubyNetlistSim::evaluate, 0))?;
     class.define_method("tick", method!(RubyNetlistSim::tick, 0))?;
     class.define_method("reset", method!(RubyNetlistSim::reset, 0))?;
+    class.define_method("run_ticks", method!(RubyNetlistSim::run_ticks, 1))?;
     class.define_method("net_count", method!(RubyNetlistSim::net_count, 0))?;
     class.define_method("gate_count", method!(RubyNetlistSim::gate_count, 0))?;
     class.define_method("dff_count", method!(RubyNetlistSim::dff_count, 0))?;
@@ -576,7 +585,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("native?", method!(RubyNetlistSim::native, 0))?;
 
     // Set constant to indicate native extension is available
-    structure.const_set("NATIVE_SIM_AVAILABLE", true)?;
+    structure.const_set("NETLIST_INTERPRETER_AVAILABLE", true)?;
 
     Ok(())
 }

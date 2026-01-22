@@ -24,6 +24,20 @@ module RHDL
             crate_name: 'sim_cpu_native',
             load_path: 'lib/rhdl/codegen/structure/sim/cpu_native/lib',
             check_const: 'RHDL::Codegen::Structure::NATIVE_SIM_AVAILABLE'
+          },
+          firrtl_interpreter: {
+            name: 'FIRRTL Interpreter (RTL-Level)',
+            ext_dir: File.expand_path('lib/rhdl/codegen/circt/sim/firrtl_interpreter', Config.project_root),
+            crate_name: 'firrtl_interpreter',
+            load_path: 'lib/rhdl/codegen/circt/sim/firrtl_interpreter/lib',
+            check_const: 'RHDL::Codegen::CIRCT::FIRRTL_INTERPRETER_AVAILABLE'
+          },
+          firrtl_compiler: {
+            name: 'FIRRTL Compiler (RTL-Level JIT)',
+            ext_dir: File.expand_path('lib/rhdl/codegen/circt/sim/firrtl_compiler', Config.project_root),
+            crate_name: 'firrtl_compiler',
+            load_path: 'lib/rhdl/codegen/circt/sim/firrtl_compiler/lib',
+            check_const: 'RHDL::Codegen::CIRCT::FIRRTL_COMPILER_AVAILABLE'
           }
         }.freeze
 
