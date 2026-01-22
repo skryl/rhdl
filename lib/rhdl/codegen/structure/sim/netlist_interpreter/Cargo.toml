@@ -1,0 +1,20 @@
+[package]
+name = "netlist_interpreter"
+version = "0.1.0"
+edition = "2021"
+authors = ["RHDL Team"]
+description = "High-performance gate-level netlist interpreter with Ruby bindings"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+magnus = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

@@ -11,9 +11,10 @@ require_relative "codegen/structure/ir"
 require_relative "codegen/structure/primitives"
 require_relative "codegen/structure/toposort"
 require_relative "codegen/structure/lower"
-require_relative "codegen/structure/sim/cpu"
 require_relative "codegen/structure/sim/gpu"
-require_relative "codegen/structure/sim/cpu_native"
+require_relative "codegen/structure/sim/netlist_interpreter"
+require_relative "codegen/structure/sim/netlist_jit"
+require_relative "codegen/structure/sim/netlist_compiler"
 
 require 'fileutils'
 
@@ -46,17 +47,19 @@ module RHDL
       alias_method :write_firrtl, :write_circt
 
       # Structure gate-level codegen
-      def gate_level(components, backend: :cpu, lanes: 64, name: 'design')
+      def gate_level(components, backend: :interpreter, lanes: 64, name: 'design')
         ir = Structure::Lower.from_components(components, name: name)
         case backend
-        when :cpu
-          Structure::SimCPU.new(ir, lanes: lanes)
-        when :cpu_native
-          Structure::SimCPUNativeWrapper.new(ir, lanes: lanes)
+        when :interpreter
+          Structure::NetlistInterpreterWrapper.new(ir, lanes: lanes)
+        when :jit
+          Structure::NetlistJitWrapper.new(ir, lanes: lanes)
+        when :compiler
+          Structure::NetlistCompilerWrapper.new(ir, lanes: lanes)
         when :gpu
           Structure::SimGPU.new(ir, lanes: lanes)
         else
-          raise ArgumentError, "Unknown backend: #{backend}"
+          raise ArgumentError, "Unknown backend: #{backend}. Valid: :interpreter, :jit, :compiler, :gpu"
         end
       end
 

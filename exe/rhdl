@@ -18,7 +18,7 @@ def show_help
       diagram       Generate circuit diagrams
       export        Export components to Verilog
       gates         Gate-level synthesis
-      apple2        Apple II emulator and ROM tools
+      examples      Run example emulators (mos6502, apple2)
       disk          Disk image utilities for Apple II
       generate      Generate all output files (diagrams + HDL exports)
       clean         Clean all generated files
@@ -308,7 +308,27 @@ def handle_disk(args)
   RHDL::CLI::Tasks::DiskConvertTask.new(options).run
 end
 
-def handle_apple2(args)
+def show_examples_help
+  puts <<~HELP
+    Usage: rhdl examples <subcommand> [options]
+
+    Run example emulators.
+
+    Subcommands:
+      mos6502       MOS 6502 ISA emulator (fast, behavioral simulation)
+      apple2        Apple II HDL emulator (cycle-accurate, supports netlist mode)
+
+    Examples:
+      rhdl examples mos6502 --demo
+      rhdl examples mos6502 --appleiigo --disk game.dsk
+      rhdl examples apple2 --demo
+      rhdl examples apple2 --mode netlist --sim jit --demo
+
+    Run 'rhdl examples <subcommand> --help' for more information.
+  HELP
+end
+
+def handle_examples_mos6502(args)
   options = {
     build: false,
     run: false,
@@ -331,27 +351,25 @@ def handle_apple2(args)
 
   parser = OptionParser.new do |opts|
     opts.banner = <<~BANNER
-      Usage: rhdl apple2 [options] [FILE]
+      Usage: rhdl examples mos6502 [options] [FILE]
 
-      Apple II emulator and ROM tools.
+      MOS 6502 ISA emulator - fast behavioral simulation.
 
       Commands:
-        rhdl apple2                Run the Apple II emulator (default)
-        rhdl apple2 --build        Assemble the mini monitor ROM
-        rhdl apple2 --demo         Run emulator in demo mode (no ROM needed)
-        rhdl apple2 --appleiigo    Run with AppleIIGo public domain ROM
-        rhdl apple2 --clean        Clean ROM output files
+        rhdl examples mos6502                Run the emulator (default)
+        rhdl examples mos6502 --build        Assemble the mini monitor ROM
+        rhdl examples mos6502 --demo         Run emulator in demo mode
+        rhdl examples mos6502 --appleiigo    Run with AppleIIGo ROM
+        rhdl examples mos6502 --clean        Clean ROM output files
 
       Disk loading:
-        rhdl apple2 --appleiigo --disk path/to/disk.dsk
-        rhdl apple2 --rom ROM --disk disk1.dsk --disk2 disk2.dsk
+        rhdl examples mos6502 --appleiigo --disk path/to/disk.dsk
 
-      Hi-res graphics (for games like Karateka):
-        rhdl apple2 --appleiigo --disk karateka.dsk --hires
-        rhdl apple2 --appleiigo --disk karateka.dsk --hires --hires-width 140
+      Hi-res graphics:
+        rhdl examples mos6502 --appleiigo --disk karateka.dsk --hires
 
-      Quick start (pre-loaded memory dump):
-        rhdl apple2 --karateka     Run Karateka directly (no disk/ROM needed)
+      Quick start:
+        rhdl examples mos6502 --karateka     Run Karateka directly
 
       Options:
     BANNER
@@ -369,7 +387,7 @@ def handle_apple2(args)
     opts.on('--rom-address ADDR', 'ROM load address (hex)') { |v| options[:rom_address] = v }
     opts.on('-s', '--speed CYCLES', Integer, 'Cycles per frame (default: 10000)') { |v| options[:speed] = v }
     opts.on('-g', '--green', 'Green phosphor screen effect') { options[:green] = true }
-    opts.on('-H', '--hires', 'Enable hi-res graphics rendering (uses braille characters)') { options[:hires] = true }
+    opts.on('-H', '--hires', 'Enable hi-res graphics rendering') { options[:hires] = true }
     opts.on('--hires-width WIDTH', Integer, 'Hi-res display width in chars (default: 80)') { |v| options[:hires_width] = v }
     opts.on('--disk FILE', 'Load disk image (.dsk) into drive 1') { |v| options[:disk] = v }
     opts.on('--disk2 FILE', 'Load disk image (.dsk) into drive 2') { |v| options[:disk2] = v }
@@ -382,8 +400,100 @@ def handle_apple2(args)
   parser.parse!(args)
   options[:program] = args.shift
   options[:remaining_args] = args
+  options[:subcommand] = :mos6502
 
   RHDL::CLI::Tasks::Apple2Task.new(options).run
+end
+
+def handle_examples_apple2(args)
+  options = {
+    demo: false,
+    appleiigo: false,
+    karateka: false,
+    debug: false,
+    mode: :hdl,       # Simulation mode: hdl (default), netlist
+    sim: :jit,        # Simulator backend: interpret, jit (default), compile
+    rom: nil,
+    address: nil,
+    speed: nil,
+    green: false,
+    hires: false,
+    hires_width: nil,
+    disk: nil
+  }
+
+  parser = OptionParser.new do |opts|
+    opts.banner = <<~BANNER
+      Usage: rhdl examples apple2 [options] [FILE]
+
+      Apple II HDL emulator - cycle-accurate simulation with netlist support.
+
+      Commands:
+        rhdl examples apple2                Run the emulator (default)
+        rhdl examples apple2 --demo         Run emulator in demo mode
+        rhdl examples apple2 --appleiigo    Run with AppleIIGo ROM
+        rhdl examples apple2 --karateka     Run Karateka directly
+
+      Simulation modes:
+        --mode hdl                HDL behavioral simulation (default)
+        --mode netlist            Gate-level netlist simulation
+
+      Simulator backends (for netlist mode):
+        --sim interpret           Pure Rust interpreter (slowest, fast startup)
+        --sim jit                 Cranelift JIT (default, balanced)
+        --sim compile             Rustc compiled (fastest, slow startup)
+
+      Examples:
+        rhdl examples apple2 --mode netlist --sim jit --demo
+        rhdl examples apple2 --mode netlist --sim compile --demo
+
+      Options:
+    BANNER
+
+    opts.on('--demo', 'Run emulator demo (no ROM needed)') { options[:demo] = true }
+    opts.on('--appleiigo', 'Run with AppleIIGo public domain ROM') { options[:appleiigo] = true }
+    opts.on('-k', '--karateka', 'Load Karateka memory dump (ready to play)') { options[:karateka] = true }
+    opts.on('-d', '--debug', 'Enable debug mode') { options[:debug] = true }
+    opts.on('-m', '--mode TYPE', [:hdl, :netlist], 'Simulation mode: hdl (default), netlist') { |v| options[:mode] = v }
+    opts.on('--sim TYPE', [:interpret, :jit, :compile], 'Simulator backend: interpret, jit (default), compile') { |v| options[:sim] = v }
+    opts.on('-r', '--rom FILE', 'ROM file to load') { |v| options[:rom] = v }
+    opts.on('-a', '--address ADDR', 'Program load address (hex, default: 0800)') { |v| options[:address] = v }
+    opts.on('-s', '--speed CYCLES', Integer, 'Cycles per frame (default: 100)') { |v| options[:speed] = v }
+    opts.on('-g', '--green', 'Green phosphor screen effect') { options[:green] = true }
+    opts.on('-H', '--hires', 'Enable hi-res graphics rendering') { options[:hires] = true }
+    opts.on('--hires-width WIDTH', Integer, 'Hi-res display width in chars (default: 80)') { |v| options[:hires_width] = v }
+    opts.on('--disk FILE', 'Load disk image (.dsk)') { |v| options[:disk] = v }
+    opts.on('-h', '--help', 'Show this help') do
+      puts opts
+      exit 0
+    end
+  end
+
+  parser.parse!(args)
+  options[:program] = args.shift
+  options[:remaining_args] = args
+  options[:subcommand] = :apple2
+
+  RHDL::CLI::Tasks::Apple2Task.new(options).run
+end
+
+def handle_examples(args)
+  subcommand = args.shift
+
+  case subcommand
+  when 'mos6502'
+    handle_examples_mos6502(args)
+  when 'apple2'
+    handle_examples_apple2(args)
+  when '-h', '--help', 'help', nil
+    show_examples_help
+    exit 0
+  else
+    warn "Unknown examples subcommand: #{subcommand}"
+    warn ""
+    show_examples_help
+    exit 1
+  end
 end
 
 def handle_generate(args)
@@ -474,8 +584,8 @@ when 'export', 'exports'
   handle_export(ARGV)
 when 'gates', 'gate'
   handle_gates(ARGV)
-when 'apple2'
-  handle_apple2(ARGV)
+when 'examples'
+  handle_examples(ARGV)
 when 'disk'
   handle_disk(ARGV)
 when 'generate', 'generate_all'

@@ -40,6 +40,9 @@ RSpec.configure do |config|
   # Random ordering helps detect order-dependent tests
   config.order = :random
 
+  # Exclude slow tests by default (run with: rspec --tag slow to include them)
+  config.filter_run_excluding slow: true unless ENV['INCLUDE_SLOW_TESTS']
+
   # Seed for reproducibility (use TEST_ENV_NUMBER for parallel runs)
   config.seed = ENV.fetch('RSPEC_SEED', srand % 0xFFFF).to_i
 
