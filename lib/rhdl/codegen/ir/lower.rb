@@ -5,7 +5,7 @@ require_relative "ir"
 
 module RHDL
   module Codegen
-    module Verilog
+    module IR
       class Lower
       def initialize(component_class, top_name: nil)
         @component_class = component_class

@@ -74,14 +74,14 @@ module RHDL
         wire_assigns = @locals.map do |local_var|
           ir_expr = local_var.expr.to_ir
           ir_expr = resize_ir(ir_expr, local_var.width) if ir_expr.width != local_var.width
-          RHDL::Codegen::Verilog::IR::Assign.new(target: local_var.name, expr: ir_expr)
+          RHDL::Codegen::IR::Assign.new(target: local_var.name, expr: ir_expr)
         end
 
         # Then, create output assignments
         output_assigns = @assignments.map do |assignment|
           ir_expr = assignment[:expr].to_ir
           ir_expr = resize_ir(ir_expr, assignment[:width]) if ir_expr.width != assignment[:width]
-          RHDL::Codegen::Verilog::IR::Assign.new(target: assignment[:target], expr: ir_expr)
+          RHDL::Codegen::IR::Assign.new(target: assignment[:target], expr: ir_expr)
         end
 
         wire_assigns + output_assigns
@@ -90,7 +90,7 @@ module RHDL
       # Get wire declarations for locals
       def wire_declarations
         @locals.map do |local_var|
-          RHDL::Codegen::Verilog::IR::Net.new(name: local_var.name, width: local_var.width)
+          RHDL::Codegen::IR::Net.new(name: local_var.name, width: local_var.width)
         end
       end
 
@@ -204,7 +204,7 @@ module RHDL
       end
 
       def resize_ir(ir_expr, target_width)
-        RHDL::Codegen::Verilog::IR::Resize.new(expr: ir_expr, width: target_width)
+        RHDL::Codegen::IR::Resize.new(expr: ir_expr, width: target_width)
       end
     end
 
@@ -220,7 +220,7 @@ module RHDL
 
       def to_ir
         # Reference the wire by name
-        RHDL::Codegen::Verilog::IR::Signal.new(name: @name, width: @width)
+        RHDL::Codegen::IR::Signal.new(name: @name, width: @width)
       end
     end
 
@@ -279,28 +279,28 @@ module RHDL
 
         # Build cases for each element
         # Start with last element as default, then build mux chain backwards
-        result = RHDL::Codegen::Verilog::IR::Signal.new(
+        result = RHDL::Codegen::IR::Signal.new(
           name: "#{@vec_name}_#{count - 1}",
           width: element_width
         )
 
         # Build mux chain from second-to-last down to first
         (count - 2).downto(0) do |i|
-          element_signal = RHDL::Codegen::Verilog::IR::Signal.new(
+          element_signal = RHDL::Codegen::IR::Signal.new(
             name: "#{@vec_name}_#{i}",
             width: element_width
           )
 
           # Condition: index == i
-          index_ir = @index.respond_to?(:to_ir) ? @index.to_ir : RHDL::Codegen::Verilog::IR::Signal.new(name: @index.to_s, width: index_width)
-          condition = RHDL::Codegen::Verilog::IR::BinaryOp.new(
+          index_ir = @index.respond_to?(:to_ir) ? @index.to_ir : RHDL::Codegen::IR::Signal.new(name: @index.to_s, width: index_width)
+          condition = RHDL::Codegen::IR::BinaryOp.new(
             op: :==,
             left: index_ir,
-            right: RHDL::Codegen::Verilog::IR::Literal.new(value: i, width: index_width),
+            right: RHDL::Codegen::IR::Literal.new(value: i, width: index_width),
             width: 1
           )
 
-          result = RHDL::Codegen::Verilog::IR::Mux.new(
+          result = RHDL::Codegen::IR::Mux.new(
             condition: condition,
             when_true: element_signal,
             when_false: result,

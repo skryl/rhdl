@@ -43,27 +43,27 @@ module RHDL
             check_const: 'RHDL::Codegen::Netlist::NETLIST_COMPILER_AVAILABLE'
           },
 
-          # RTL-level simulators (CIRCT backend)
-          rtl_interpreter: {
-            name: 'RTL Interpreter',
-            ext_dir: File.expand_path('lib/rhdl/codegen/circt/sim/rtl_interpreter', Config.project_root),
-            crate_name: 'rtl_interpreter',
-            load_path: 'lib/rhdl/codegen/circt/sim/rtl_interpreter/lib',
-            check_const: 'RHDL::Codegen::CIRCT::RTL_INTERPRETER_AVAILABLE'
+          # IR-level simulators (Behavior IR backend)
+          ir_interpreter: {
+            name: 'IR Interpreter',
+            ext_dir: File.expand_path('lib/rhdl/codegen/ir/sim/ir_interpreter', Config.project_root),
+            crate_name: 'ir_interpreter',
+            load_path: 'lib/rhdl/codegen/ir/sim/ir_interpreter/lib',
+            check_const: 'RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE'
           },
-          rtl_jit: {
-            name: 'RTL JIT (Cranelift)',
-            ext_dir: File.expand_path('lib/rhdl/codegen/circt/sim/rtl_jit', Config.project_root),
-            crate_name: 'rtl_jit',
-            load_path: 'lib/rhdl/codegen/circt/sim/rtl_jit/lib',
-            check_const: 'RHDL::Codegen::CIRCT::RTL_JIT_AVAILABLE'
+          ir_jit: {
+            name: 'IR JIT (Cranelift)',
+            ext_dir: File.expand_path('lib/rhdl/codegen/ir/sim/ir_jit', Config.project_root),
+            crate_name: 'ir_jit',
+            load_path: 'lib/rhdl/codegen/ir/sim/ir_jit/lib',
+            check_const: 'RHDL::Codegen::IR::IR_JIT_AVAILABLE'
           },
-          rtl_compiler: {
-            name: 'RTL Compiler (AOT)',
-            ext_dir: File.expand_path('lib/rhdl/codegen/circt/sim/rtl_compiler', Config.project_root),
-            crate_name: 'rtl_compiler',
-            load_path: 'lib/rhdl/codegen/circt/sim/rtl_compiler/lib',
-            check_const: 'RHDL::Codegen::CIRCT::RTL_COMPILER_AVAILABLE'
+          ir_compiler: {
+            name: 'IR Compiler (AOT)',
+            ext_dir: File.expand_path('lib/rhdl/codegen/ir/sim/ir_compiler', Config.project_root),
+            crate_name: 'ir_compiler',
+            load_path: 'lib/rhdl/codegen/ir/sim/ir_compiler/lib',
+            check_const: 'RHDL::Codegen::IR::IR_COMPILER_AVAILABLE'
           }
         }.freeze
 

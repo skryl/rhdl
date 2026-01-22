@@ -13,7 +13,7 @@ module RHDL
       end
 
       def to_ir
-        RHDL::Codegen::Verilog::IR::Slice.new(base: @base.to_ir, range: @range, width: @width)
+        RHDL::Codegen::IR::Slice.new(base: @base.to_ir, range: @range, width: @width)
       end
     end
   end

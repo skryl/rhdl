@@ -12,22 +12,28 @@
 
 require_relative '../hdl/apple2'
 require 'rhdl/codegen'
-require 'rhdl/codegen/circt/sim/rtl_interpreter'
+require 'rhdl/codegen/ir/sim/ir_interpreter'
 
 module RHDL
   module Apple2
     # Utility module for exporting Apple2 component to RTL IR
     module Apple2Rtl
       class << self
-        # Get the Behavior IR for the Apple2 component
+        # Get the Behavior IR for the Apple2 component (shallow, for Verilog export)
         def behavior_ir
           Apple2.to_ir
         end
 
+        # Get the flattened Behavior IR (includes all subcomponent logic)
+        def flat_ir
+          Apple2.to_flat_ir
+        end
+
         # Convert to JSON format for the simulator
+        # Uses flattened IR so all subcomponent logic is included
         def ir_json
-          ir = behavior_ir
-          RHDL::Codegen::CIRCT::IRToJson.convert(ir)
+          ir = flat_ir
+          RHDL::Codegen::IR::IRToJson.convert(ir)
         end
 
         # Get stats about the IR
@@ -85,13 +91,13 @@ module RHDL
         # Create the simulator based on backend choice
         @sim = case backend
                when :interpret
-                 RHDL::Codegen::CIRCT::RtlInterpreterWrapper.new(@ir_json, allow_fallback: false)
+                 RHDL::Codegen::IR::IrInterpreterWrapper.new(@ir_json, allow_fallback: false)
                when :jit
-                 require 'rhdl/codegen/circt/sim/rtl_jit'
-                 RHDL::Codegen::CIRCT::RtlJitWrapper.new(@ir_json, allow_fallback: false)
+                 require 'rhdl/codegen/ir/sim/ir_jit'
+                 RHDL::Codegen::IR::IrJitWrapper.new(@ir_json, allow_fallback: false)
                when :compile
-                 require 'rhdl/codegen/circt/sim/rtl_compiler'
-                 RHDL::Codegen::CIRCT::RtlCompilerWrapper.new(@ir_json)
+                 require 'rhdl/codegen/ir/sim/ir_compiler'
+                 RHDL::Codegen::IR::IrCompilerWrapper.new(@ir_json)
                else
                  raise ArgumentError, "Unknown backend: #{backend}. Use :interpret, :jit, or :compile"
                end
@@ -100,9 +106,6 @@ module RHDL
         puts "  IR loaded in #{elapsed.round(2)}s"
         puts "  Native backend: #{@sim.native? ? 'Rust (optimized)' : 'Ruby (fallback)'}"
         puts "  Signals: #{@sim.signal_count}, Registers: #{@sim.reg_count}"
-        if @sim.native?
-          puts "  Note: CPU debug registers not available in native RTL mode"
-        end
 
         @cycles = 0
         @halted = false
@@ -450,9 +453,7 @@ module RHDL
       end
 
       def cpu_state
-        # Note: Debug signals require hierarchical flattening which the RTL behavior IR
-        # doesn't currently support. The debug values may show as 0 in native RTL modes.
-        # For full CPU state visibility, use the Ruby HDL mode (--sim ruby).
+        # With flattened IR, debug signals from subcomponents should be available
         {
           pc: safe_peek('pc_debug'),
           a: safe_peek('a_debug'),

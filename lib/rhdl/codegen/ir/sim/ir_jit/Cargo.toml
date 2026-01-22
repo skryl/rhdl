@@ -1,9 +1,9 @@
 [package]
-name = "rtl_jit"
+name = "ir_jit"
 version = "0.1.0"
 edition = "2021"
 authors = ["RHDL Team"]
-description = "Cranelift-based JIT compiler for RTL simulation - runtime code generation for zero-dispatch evaluation"
+description = "Cranelift-based JIT compiler for IR simulation - runtime code generation for zero-dispatch evaluation"
 license = "MIT"
 
 [lib]
