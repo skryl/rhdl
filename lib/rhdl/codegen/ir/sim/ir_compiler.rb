@@ -49,7 +49,7 @@ module RHDL
             raise LoadError, "IR Compiler extension not found at: #{IR_COMPILER_LIB_PATH}\nRun 'rake native:build' to build it."
           end
 
-          @sim = ::IrCompiler.new(ir_json)
+          @sim = ::RtlCompiler.new(ir_json)
         end
 
         def simulator_type
