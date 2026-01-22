@@ -1,21 +1,23 @@
 # frozen_string_literal: true
 
-# Apple II FIRRTL/RTL Simulator Runner
+# Apple II RTL Simulator Runner
 # High-performance RTL-level simulation using batched Rust execution
 #
 # Usage:
-#   runner = RHDL::Apple2::FirrtlRunner.new
+#   runner = RHDL::Apple2::RtlRunner.new(backend: :interpret)
+#   runner = RHDL::Apple2::RtlRunner.new(backend: :jit)
+#   runner = RHDL::Apple2::RtlRunner.new(backend: :compile)
 #   runner.reset
 #   runner.run_steps(100)
 
 require_relative '../hdl/apple2'
 require 'rhdl/codegen'
-require 'rhdl/codegen/circt/sim/firrtl_interpreter'
+require 'rhdl/codegen/circt/sim/rtl_interpreter'
 
 module RHDL
   module Apple2
     # Utility module for exporting Apple2 component to RTL IR
-    module Apple2Firrtl
+    module Apple2Rtl
       class << self
         # Get the Behavior IR for the Apple2 component
         def behavior_ir
@@ -45,7 +47,7 @@ module RHDL
     end
 
     # High-performance RTL-level runner using batched Rust execution
-    class FirrtlRunner
+    class RtlRunner
       attr_reader :sim, :ir_json
 
       # Text page constants
@@ -71,15 +73,28 @@ module RHDL
         0x0B, 0x03, 0x0A, 0x02, 0x09, 0x01, 0x08, 0x0F
       ].freeze
 
-      def initialize
-        puts "Initializing Apple2 FIRRTL/RTL simulation (optimized)..."
+      def initialize(backend: :interpret)
+        backend_names = { interpret: "Interpreter", jit: "JIT", compile: "Compiler" }
+        puts "Initializing Apple2 RTL simulation [#{backend_names[backend]}]..."
         start_time = Time.now
 
         # Generate RTL IR JSON
-        @ir_json = Apple2Firrtl.ir_json
+        @ir_json = Apple2Rtl.ir_json
+        @backend = backend
 
-        # Create the simulator
-        @sim = RHDL::Codegen::CIRCT::FirrtlInterpreterWrapper.new(@ir_json)
+        # Create the simulator based on backend choice
+        @sim = case backend
+               when :interpret
+                 RHDL::Codegen::CIRCT::RtlInterpreterWrapper.new(@ir_json, allow_fallback: false)
+               when :jit
+                 require 'rhdl/codegen/circt/sim/rtl_jit'
+                 RHDL::Codegen::CIRCT::RtlJitWrapper.new(@ir_json, allow_fallback: false)
+               when :compile
+                 require 'rhdl/codegen/circt/sim/rtl_compiler'
+                 RHDL::Codegen::CIRCT::RtlCompilerWrapper.new(@ir_json)
+               else
+                 raise ArgumentError, "Unknown backend: #{backend}. Use :interpret, :jit, or :compile"
+               end
 
         elapsed = Time.now - start_time
         puts "  IR loaded in #{elapsed.round(2)}s"
@@ -106,7 +121,7 @@ module RHDL
       end
 
       def simulator_type
-        :firrtl
+        @sim.simulator_type
       end
 
       def initialize_inputs
@@ -173,7 +188,7 @@ module RHDL
         end
 
         @disk_loaded = true
-        puts "Warning: Disk support in FIRRTL mode is limited"
+        puts "Warning: Disk support in RTL mode is limited"
       end
 
       def disk_loaded?(drive: 0)
@@ -441,7 +456,7 @@ module RHDL
           p: 0,
           cycles: @cycles,
           halted: @halted,
-          simulator_type: :firrtl
+          simulator_type: simulator_type
         }
       end
 
