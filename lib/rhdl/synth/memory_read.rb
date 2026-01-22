@@ -14,7 +14,7 @@ module RHDL
       end
 
       def to_ir
-        RHDL::Codegen::Behavior::IR::MemoryRead.new(
+        RHDL::Codegen::Verilog::IR::MemoryRead.new(
           memory: @memory_name,
           addr: @addr.to_ir,
           width: @width

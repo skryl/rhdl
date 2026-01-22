@@ -19,7 +19,7 @@ module RHDL
       end
 
       def to_ir
-        RHDL::Codegen::Behavior::IR::Signal.new(name: @name, width: @width)
+        RHDL::Codegen::Verilog::IR::Signal.new(name: @name, width: @width)
       end
     end
   end
