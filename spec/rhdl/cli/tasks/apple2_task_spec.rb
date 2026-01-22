@@ -33,9 +33,26 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
     end
 
     it 'can be instantiated with mode option' do
-      expect { described_class.new(mode: :native) }.not_to raise_error
-      expect { described_class.new(mode: :ruby) }.not_to raise_error
       expect { described_class.new(mode: :hdl) }.not_to raise_error
+      expect { described_class.new(mode: :netlist) }.not_to raise_error
+    end
+
+    it 'can be instantiated with sim option' do
+      expect { described_class.new(sim: :interpret) }.not_to raise_error
+      expect { described_class.new(sim: :jit) }.not_to raise_error
+      expect { described_class.new(sim: :compile) }.not_to raise_error
+    end
+
+    it 'can be instantiated with all 6 mode/sim combinations' do
+      # hdl mode with all sim options
+      expect { described_class.new(mode: :hdl, sim: :interpret) }.not_to raise_error
+      expect { described_class.new(mode: :hdl, sim: :jit) }.not_to raise_error
+      expect { described_class.new(mode: :hdl, sim: :compile) }.not_to raise_error
+
+      # netlist mode with all sim options
+      expect { described_class.new(mode: :netlist, sim: :interpret) }.not_to raise_error
+      expect { described_class.new(mode: :netlist, sim: :jit) }.not_to raise_error
+      expect { described_class.new(mode: :netlist, sim: :compile) }.not_to raise_error
     end
 
     it 'can be instantiated with program option' do
@@ -129,11 +146,27 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
   end
 
   describe 'path configuration' do
-    it 'uses correct apple2 script path' do
+    it 'uses apple2 script path by default' do
       task = described_class.new
       script_path = task.send(:apple2_script)
 
-      expect(script_path).to include('examples/mos6502/bin/apple2')
+      expect(script_path).to include('examples/apple2/bin/apple2')
+      expect(File.exist?(script_path)).to be true
+    end
+
+    it 'uses mos6502 script path for mos6502 subcommand' do
+      task = described_class.new(subcommand: :mos6502)
+      script_path = task.send(:apple2_script)
+
+      expect(script_path).to include('examples/mos6502/bin/mos6502')
+      expect(File.exist?(script_path)).to be true
+    end
+
+    it 'uses apple2 script path for apple2 subcommand' do
+      task = described_class.new(subcommand: :apple2)
+      script_path = task.send(:apple2_script)
+
+      expect(script_path).to include('examples/apple2/bin/apple2')
       expect(File.exist?(script_path)).to be true
     end
   end
@@ -200,7 +233,8 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
     it 'adds all common args correctly' do
       task = described_class.new(
         debug: true,
-        mode: :hdl,
+        mode: :netlist,
+        sim: :compile,
         speed: 5000,
         green: true,
         hires: true,
@@ -214,7 +248,9 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
 
       expect(exec_args).to include('-d')
       expect(exec_args).to include('-m')
-      expect(exec_args).to include('hdl')
+      expect(exec_args).to include('netlist')
+      expect(exec_args).to include('--sim')
+      expect(exec_args).to include('compile')
       expect(exec_args).to include('-s')
       expect(exec_args).to include('5000')
       expect(exec_args).to include('-g')
@@ -227,8 +263,8 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       expect(exec_args).to include('/path/to/disk2.dsk')
     end
 
-    it 'does not pass -m for native mode (default)' do
-      task = described_class.new(mode: :native)
+    it 'does not pass -m for hdl mode (default)' do
+      task = described_class.new(mode: :hdl)
       exec_args = []
 
       task.send(:add_common_args, exec_args)
@@ -236,14 +272,67 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       expect(exec_args).not_to include('-m')
     end
 
-    it 'passes -m for ruby mode' do
-      task = described_class.new(mode: :ruby)
+    it 'passes -m for netlist mode' do
+      task = described_class.new(mode: :netlist)
       exec_args = []
 
       task.send(:add_common_args, exec_args)
 
       expect(exec_args).to include('-m')
-      expect(exec_args).to include('ruby')
+      expect(exec_args).to include('netlist')
+    end
+
+    it 'does not pass --sim for jit backend (default)' do
+      task = described_class.new(sim: :jit)
+      exec_args = []
+
+      task.send(:add_common_args, exec_args)
+
+      expect(exec_args).not_to include('--sim')
+    end
+
+    it 'passes --sim for interpret backend' do
+      task = described_class.new(sim: :interpret)
+      exec_args = []
+
+      task.send(:add_common_args, exec_args)
+
+      expect(exec_args).to include('--sim')
+      expect(exec_args).to include('interpret')
+    end
+
+    it 'passes --sim for compile backend' do
+      task = described_class.new(sim: :compile)
+      exec_args = []
+
+      task.send(:add_common_args, exec_args)
+
+      expect(exec_args).to include('--sim')
+      expect(exec_args).to include('compile')
+    end
+
+    it 'passes both -m and --sim for netlist with interpret' do
+      task = described_class.new(mode: :netlist, sim: :interpret)
+      exec_args = []
+
+      task.send(:add_common_args, exec_args)
+
+      expect(exec_args).to include('-m')
+      expect(exec_args).to include('netlist')
+      expect(exec_args).to include('--sim')
+      expect(exec_args).to include('interpret')
+    end
+
+    it 'passes both -m and --sim for netlist with compile' do
+      task = described_class.new(mode: :netlist, sim: :compile)
+      exec_args = []
+
+      task.send(:add_common_args, exec_args)
+
+      expect(exec_args).to include('-m')
+      expect(exec_args).to include('netlist')
+      expect(exec_args).to include('--sim')
+      expect(exec_args).to include('compile')
     end
 
     it 'adds bin flag when bin option is set' do
