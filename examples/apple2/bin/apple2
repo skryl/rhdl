@@ -44,7 +44,7 @@ class Apple2HDLTerminal
   def initialize(options = {})
     @options = options
     @sim_mode = options[:mode] || :hdl
-    @sim_backend = options[:sim] || :jit
+    @sim_backend = options[:sim] || :ruby  # Default to :ruby for HDL mode
 
     # Create runner based on simulation mode and backend
     @runner = case @sim_mode
@@ -52,13 +52,16 @@ class Apple2HDLTerminal
                 require 'apple2_netlist'
                 backend_names = { interpret: "Interpreter", jit: "JIT", compile: "Compiler" }
                 puts "Initializing netlist (gate-level) simulation [#{backend_names[@sim_backend]}]..."
-                runner = RHDL::Apple2::NetlistRunner.new(backend: @sim_backend)
-                unless runner.native?
-                  warn "Warning: Native Rust backend not available, using Ruby fallback"
-                end
-                runner
+                RHDL::Apple2::NetlistRunner.new(backend: @sim_backend)
               else  # :hdl (default)
-                RHDL::Apple2::Runner.new
+                if @sim_backend == :ruby
+                  # Pure Ruby HDL simulation
+                  RHDL::Apple2::Runner.new
+                else
+                  # RTL simulation with native backends (interpret, jit, compile)
+                  require 'apple2_rtl'
+                  RHDL::Apple2::RtlRunner.new(backend: @sim_backend)
+                end
               end
 
     # For compatibility
@@ -705,7 +708,7 @@ options = {
   hires: false,
   hires_width: 80,
   mode: :hdl,  # Simulation mode: :hdl (default), :netlist
-  sim: :jit   # Simulator backend: :interpret, :jit (default), :compile
+  sim: :ruby   # Simulator backend: :ruby (default), :interpret, :jit, :compile
 }
 
 parser = OptionParser.new do |opts|
@@ -738,7 +741,7 @@ parser = OptionParser.new do |opts|
     options[:mode] = v
   end
 
-  opts.on("--sim TYPE", [:interpret, :jit, :compile], "Simulator backend: interpret, jit (default), compile") do |v|
+  opts.on("--sim TYPE", [:ruby, :interpret, :jit, :compile], "Simulator backend: ruby (default), interpret, jit, compile") do |v|
     options[:sim] = v
   end
 
