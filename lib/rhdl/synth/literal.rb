@@ -12,7 +12,7 @@ module RHDL
       end
 
       def to_ir
-        RHDL::Codegen::Verilog::IR::Literal.new(value: @value, width: @width)
+        RHDL::Codegen::IR::Literal.new(value: @value, width: @width)
       end
     end
   end
