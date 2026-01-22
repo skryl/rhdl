@@ -489,11 +489,13 @@ module RHDL
         end
 
         def memory_to_hash(mem)
-          {
+          hash = {
             name: mem.name.to_s,
             depth: mem.depth,
             width: mem.width
           }
+          hash[:initial_data] = mem.initial_data if mem.initial_data
+          hash
         end
 
         def expr_to_hash(expr)
@@ -546,6 +548,8 @@ module RHDL
               end
               result
             end
+          when IR::MemoryRead
+            { type: 'mem_read', memory: expr.memory.to_s, addr: expr_to_hash(expr.addr), width: expr.width }
           else
             { type: 'literal', value: 0, width: 1 }
           end
