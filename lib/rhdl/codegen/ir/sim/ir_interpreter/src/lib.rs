@@ -251,6 +251,14 @@ struct RtlSimulator {
     /// Sequential assignment target indices
     seq_targets: Vec<usize>,
 
+    // Multi-clock domain support
+    /// Clock signal index for each sequential assignment
+    seq_clocks: Vec<usize>,
+    /// All unique clock signal indices used by processes
+    clock_indices: Vec<usize>,
+    /// Old clock values for edge detection
+    old_clocks: Vec<u64>,
+
     // Apple II specific: internalized memory for batched execution
     /// RAM (48KB)
     ram: Vec<u8>,
@@ -337,20 +345,35 @@ impl RtlSimulator {
         }
 
         // Compile sequential assignments (kept separate for register sampling)
+        // Track clock domain for each sequential assignment
         let mut seq_assigns = Vec::new();
         let mut seq_targets = Vec::new();
+        let mut seq_clocks = Vec::new();
+        let mut clock_set = std::collections::HashSet::new();
+
         for process in &ir.processes {
             if !process.clocked {
                 continue;
             }
+            // Get clock index for this process (default to clk_14m if not specified)
+            let clock_idx = process.clock.as_ref()
+                .and_then(|c| name_to_idx.get(c).copied())
+                .unwrap_or_else(|| *name_to_idx.get("clk_14m").unwrap_or(&0));
+            clock_set.insert(clock_idx);
+
             for stmt in &process.statements {
                 let target_idx = *name_to_idx.get(&stmt.target).unwrap_or(&0);
                 let (ops, temps_used) = Self::compile_to_flat_ops(&stmt.expr, target_idx, &name_to_idx, &widths);
                 max_temps = max_temps.max(temps_used);
                 seq_assigns.push(CompiledAssign { ops, final_target: target_idx });
                 seq_targets.push(target_idx);
+                seq_clocks.push(clock_idx);
             }
         }
+
+        // Collect all unique clock indices
+        let clock_indices: Vec<usize> = clock_set.into_iter().collect();
+        let old_clocks = vec![0u64; clock_indices.len()];
 
         // Pre-allocate temp buffer
         let temps = vec![0u64; max_temps + 1];
@@ -378,6 +401,9 @@ impl RtlSimulator {
             reg_count,
             next_regs,
             seq_targets,
+            seq_clocks,
+            clock_indices,
+            old_clocks,
             ram: vec![0u8; 48 * 1024],
             rom: vec![0u8; 12 * 1024],
             ram_addr_idx,
@@ -509,7 +535,7 @@ impl RtlSimulator {
                 });
                 Operand::Temp(dst)
             }
-            ExprDef::Mux { condition, when_true, when_false, .. } => {
+            ExprDef::Mux { condition, when_true, when_false, width } => {
                 let cond = Self::compile_expr_to_flat(condition, name_to_idx, widths, ops, temp_counter);
                 let t = Self::compile_expr_to_flat(when_true, name_to_idx, widths, ops, temp_counter);
                 let f = Self::compile_expr_to_flat(when_false, name_to_idx, widths, ops, temp_counter);
@@ -524,7 +550,19 @@ impl RtlSimulator {
                     arg1: FlatOp::encode_operand(t),
                     arg2: FlatOp::encode_operand(f),
                 });
-                Operand::Temp(dst)
+
+                // Mask result to specified width (prevents overflow issues)
+                let mask = Self::compute_mask(*width);
+                let masked_dst = *temp_counter;
+                *temp_counter += 1;
+                ops.push(FlatOp {
+                    op_type: OP_RESIZE,
+                    dst: masked_dst,
+                    arg0: FlatOp::encode_operand(Operand::Temp(dst)),
+                    arg1: 0,
+                    arg2: mask,
+                });
+                Operand::Temp(masked_dst)
             }
             ExprDef::Slice { base, low, width, .. } => {
                 let src = Self::compile_expr_to_flat(base, name_to_idx, widths, ops, temp_counter);
@@ -554,8 +592,11 @@ impl RtlSimulator {
                     arg2: 0,
                 });
 
+                // Concat in HDL: cat(high, low) puts first arg in high bits
+                // Parts are ordered [high, ..., low], so we process in REVERSE
+                // to build up from low bits (shift_acc = 0) to high bits
                 let mut shift_acc = 0u64;
-                for part in parts {
+                for part in parts.iter().rev() {
                     let src = Self::compile_expr_to_flat(part, name_to_idx, widths, ops, temp_counter);
                     let part_width = Self::expr_width(part, widths, name_to_idx);
                     let part_mask = Self::compute_mask(part_width);
@@ -774,24 +815,86 @@ impl RtlSimulator {
 
     #[inline(always)]
     fn tick(&mut self) {
-        // Evaluate combinational logic
+        // Multi-clock domain timing:
+        // 1. Sample ALL register expressions ONCE at tick start (before any updates)
+        // 2. Evaluate combinational logic and detect clock edges
+        // 3. Update registers for clocks with rising edges
+        // 4. Iterate for derived clock domains
+
+        // Save old clock values FIRST (before evaluate changes them)
+        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+            self.old_clocks[i] = self.signals[clk_idx];
+        }
+
+        // Evaluate combinational logic (may change derived clocks)
         self.evaluate();
 
-        // Sample all register inputs
+        // Sample ALL register inputs at this point (before any register updates)
+        // This ensures all expressions see the same state
+        // IMPORTANT: Don't write to signals during sampling - only store results in next_regs
         for (i, seq_assign) in self.seq_assigns.iter().enumerate() {
-            for op in &seq_assign.ops {
+            // Execute all ops, but we need to capture the result without corrupting signals
+            // The last op is OP_COPY_TO_SIG which would write to signals[target]
+            // We run all ops but capture the result from the temp that was written
+            let ops_len = seq_assign.ops.len();
+            if ops_len == 0 {
+                continue;
+            }
+
+            // Execute all ops except the last (which writes to signals)
+            for op in &seq_assign.ops[..ops_len.saturating_sub(1)] {
                 Self::execute_flat_op(&mut self.signals, &mut self.temps, op);
             }
-            let target = seq_assign.final_target;
-            self.next_regs[i] = unsafe { *self.signals.get_unchecked(target) };
+
+            // For the last op, get the result without writing to signals
+            let last_op = &seq_assign.ops[ops_len - 1];
+            if last_op.op_type == OP_COPY_TO_SIG {
+                // Get the operand value and store directly in next_regs
+                let val = FlatOp::get_operand(&self.signals, &self.temps, last_op.arg0) & last_op.arg2;
+                self.next_regs[i] = val;
+            } else {
+                // Fallback: execute and read from target
+                Self::execute_flat_op(&mut self.signals, &mut self.temps, last_op);
+                self.next_regs[i] = unsafe { *self.signals.get_unchecked(seq_assign.final_target) };
+            }
         }
 
-        // Update all registers
-        for (i, &target_idx) in self.seq_targets.iter().enumerate() {
-            unsafe { *self.signals.get_unchecked_mut(target_idx) = self.next_regs[i]; }
+        // Iterate for derived clock domains
+        // Each iteration may cause new clock edges as registers update
+        const MAX_ITERATIONS: usize = 10;
+        for _ in 0..MAX_ITERATIONS {
+            // Detect rising edges on all clock signals
+            let mut any_edge = false;
+            for (clock_list_idx, &clk_idx) in self.clock_indices.iter().enumerate() {
+                let old_val = self.old_clocks[clock_list_idx];
+                let new_val = self.signals[clk_idx];
+
+                // Check for rising edge (0 -> 1)
+                if old_val == 0 && new_val == 1 {
+                    any_edge = true;
+
+                    // Update only registers clocked by this signal
+                    for (i, &reg_clk) in self.seq_clocks.iter().enumerate() {
+                        if reg_clk == clk_idx {
+                            let target_idx = self.seq_targets[i];
+                            unsafe { *self.signals.get_unchecked_mut(target_idx) = self.next_regs[i]; }
+                        }
+                    }
+
+                    // Mark this clock as processed (set old to 1 to prevent re-triggering)
+                    self.old_clocks[clock_list_idx] = 1;
+                }
+            }
+
+            if !any_edge {
+                break;
+            }
+
+            // Re-evaluate combinational logic (may trigger derived clocks)
+            self.evaluate();
         }
 
-        // Re-evaluate combinational logic
+        // Final evaluate to propagate any remaining changes
         self.evaluate();
     }
 
@@ -865,23 +968,65 @@ impl RtlSimulator {
         (text_dirty, key_cleared)
     }
 
-    /// Optimized tick - only evaluate once after register update
+    /// Optimized tick with multi-clock domain support
     #[inline(always)]
     fn tick_fast(&mut self) {
-        self.evaluate();
-
-        // Sample register inputs
-        for (i, seq_assign) in self.seq_assigns.iter().enumerate() {
-            for op in &seq_assign.ops {
-                Self::execute_flat_op(&mut self.signals, &mut self.temps, op);
-            }
-            let target = seq_assign.final_target;
-            self.next_regs[i] = unsafe { *self.signals.get_unchecked(target) };
+        // Save old clock values FIRST
+        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+            self.old_clocks[i] = self.signals[clk_idx];
         }
 
-        // Update registers
-        for (i, &target_idx) in self.seq_targets.iter().enumerate() {
-            unsafe { *self.signals.get_unchecked_mut(target_idx) = self.next_regs[i]; }
+        self.evaluate();
+
+        // Sample ALL register inputs at this point (before any register updates)
+        // IMPORTANT: Don't write to signals during sampling - only store results in next_regs
+        for (i, seq_assign) in self.seq_assigns.iter().enumerate() {
+            let ops_len = seq_assign.ops.len();
+            if ops_len == 0 {
+                continue;
+            }
+
+            // Execute all ops except the last (which writes to signals)
+            for op in &seq_assign.ops[..ops_len.saturating_sub(1)] {
+                Self::execute_flat_op(&mut self.signals, &mut self.temps, op);
+            }
+
+            // For the last op, get the result without writing to signals
+            let last_op = &seq_assign.ops[ops_len - 1];
+            if last_op.op_type == OP_COPY_TO_SIG {
+                let val = FlatOp::get_operand(&self.signals, &self.temps, last_op.arg0) & last_op.arg2;
+                self.next_regs[i] = val;
+            } else {
+                Self::execute_flat_op(&mut self.signals, &mut self.temps, last_op);
+                self.next_regs[i] = unsafe { *self.signals.get_unchecked(seq_assign.final_target) };
+            }
+        }
+
+        // Iterate for derived clock domains
+        const MAX_ITERATIONS: usize = 10;
+        for _ in 0..MAX_ITERATIONS {
+            let mut any_edge = false;
+            for (clock_list_idx, &clk_idx) in self.clock_indices.iter().enumerate() {
+                let old_val = self.old_clocks[clock_list_idx];
+                let new_val = self.signals[clk_idx];
+
+                if old_val == 0 && new_val == 1 {
+                    any_edge = true;
+                    for (i, &reg_clk) in self.seq_clocks.iter().enumerate() {
+                        if reg_clk == clk_idx {
+                            let target_idx = self.seq_targets[i];
+                            unsafe { *self.signals.get_unchecked_mut(target_idx) = self.next_regs[i]; }
+                        }
+                    }
+                    self.old_clocks[clock_list_idx] = 1;
+                }
+            }
+
+            if !any_edge {
+                break;
+            }
+
+            self.evaluate();
         }
 
         self.evaluate();
