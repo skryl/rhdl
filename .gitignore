@@ -24,10 +24,18 @@
 /examples/mos6502/utilities/isa_simulator_native/target/
 /examples/mos6502/utilities/isa_simulator_native/lib/
 
-# Native extension build artifacts (structure/sim)
-lib/rhdl/codegen/structure/sim/netlist_interpreter/target/
-lib/rhdl/codegen/structure/sim/netlist_interpreter/lib/
-lib/rhdl/codegen/structure/sim/netlist_jit/target/
-lib/rhdl/codegen/structure/sim/netlist_jit/lib/
-lib/rhdl/codegen/structure/sim/netlist_compiler/target/
-lib/rhdl/codegen/structure/sim/netlist_compiler/lib/
+# Native extension build artifacts (netlist/sim)
+lib/rhdl/codegen/netlist/sim/netlist_interpreter/target/
+lib/rhdl/codegen/netlist/sim/netlist_interpreter/lib/
+lib/rhdl/codegen/netlist/sim/netlist_jit/target/
+lib/rhdl/codegen/netlist/sim/netlist_jit/lib/
+lib/rhdl/codegen/netlist/sim/netlist_compiler/target/
+lib/rhdl/codegen/netlist/sim/netlist_compiler/lib/
+
+# Native extension build artifacts (ir/sim)
+lib/rhdl/codegen/ir/sim/ir_interpreter/target/
+lib/rhdl/codegen/ir/sim/ir_interpreter/lib/
+lib/rhdl/codegen/ir/sim/ir_jit/target/
+lib/rhdl/codegen/ir/sim/ir_jit/lib/
+lib/rhdl/codegen/ir/sim/ir_compiler/target/
+lib/rhdl/codegen/ir/sim/ir_compiler/lib/
