@@ -340,7 +340,7 @@ module RHDL
           p: 0,      # TODO: Add P register debug output
           cycles: @cycles,
           halted: @halted,
-          simulator_type: :hdl_apple2
+          simulator_type: :hdl_ruby
         }
       end
 
@@ -353,7 +353,7 @@ module RHDL
       end
 
       def simulator_type
-        :hdl_apple2
+        :hdl_ruby
       end
 
       def native?

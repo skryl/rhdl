@@ -20,19 +20,18 @@ module RHDL
     module Netlist
       # Try to load the compiler extension
       unless const_defined?(:NETLIST_COMPILER_AVAILABLE)
+        # Determine library path based on platform
+        NETLIST_COMPILER_EXT_DIR = File.expand_path('netlist_compiler/lib', __dir__)
+        NETLIST_COMPILER_LIB_NAME = case RbConfig::CONFIG['host_os']
+        when /darwin/ then 'netlist_compiler.bundle'
+        when /mswin|mingw/ then 'netlist_compiler.dll'
+        else 'netlist_compiler.so'
+        end
+        NETLIST_COMPILER_LIB_PATH = File.join(NETLIST_COMPILER_EXT_DIR, NETLIST_COMPILER_LIB_NAME)
+
         _compiler_loaded = begin
-          ext_dir = File.expand_path('netlist_compiler/lib', __dir__)
-
-          lib_name = case RbConfig::CONFIG['host_os']
-          when /darwin/ then 'netlist_compiler.bundle'
-          when /mswin|mingw/ then 'netlist_compiler.dll'
-          else 'netlist_compiler.so'
-          end
-
-          lib_path = File.join(ext_dir, lib_name)
-
-          if File.exist?(lib_path)
-            $LOAD_PATH.unshift(ext_dir) unless $LOAD_PATH.include?(ext_dir)
+          if File.exist?(NETLIST_COMPILER_LIB_PATH)
+            $LOAD_PATH.unshift(NETLIST_COMPILER_EXT_DIR) unless $LOAD_PATH.include?(NETLIST_COMPILER_EXT_DIR)
             require 'netlist_compiler'
             true
           else
@@ -54,7 +53,8 @@ module RHDL
         # @param ir [Hash, String] Netlist IR (hash or JSON string)
         # @param simd [Symbol, String] SIMD mode: :auto, :scalar, :avx2, :avx512
         # @param lanes [Integer] Deprecated, use simd: parameter instead
-        def initialize(ir, simd: :auto, lanes: nil)
+        # @param allow_fallback [Boolean] If false, raise error when native not available
+        def initialize(ir, simd: :auto, lanes: nil, allow_fallback: false)
           @ir = ir
 
           # Convert simd parameter to string for Rust
@@ -64,10 +64,17 @@ module RHDL
             json = ir.is_a?(String) ? ir : ir.to_json
             @sim = NetlistCompiler.new(json, simd_mode)
             @sim.compile  # Compile immediately for maximum performance
+            @backend = :compile
+          elsif allow_fallback
+            @sim = NetlistInterpreterWrapper.new(ir, lanes: lanes || 64, allow_fallback: true)
+            @backend = @sim.simulator_type.to_s.split('_').last.to_sym
           else
-            # Fall back to interpreter
-            @sim = NetlistInterpreterWrapper.new(ir, lanes: lanes || 64)
+            raise LoadError, "Netlist compiler extension not found at: #{NETLIST_COMPILER_LIB_PATH}\nRun 'rake native:build' to build it."
           end
+        end
+
+        def simulator_type
+          :"netlist_#{@backend}"
         end
 
         def poke(name, value)
