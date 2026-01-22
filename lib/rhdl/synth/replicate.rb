@@ -14,7 +14,7 @@ module RHDL
 
       def to_ir
         parts = Array.new(@times) { @expr.to_ir }
-        RHDL::Codegen::Verilog::IR::Concat.new(parts: parts, width: @width)
+        RHDL::Codegen::IR::Concat.new(parts: parts, width: @width)
       end
     end
   end

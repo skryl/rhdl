@@ -3982,7 +3982,7 @@ module RHDL
           next unless clock_net
 
           process.statements&.each do |stmt|
-            next unless stmt.is_a?(RHDL::Codegen::Verilog::IR::SeqAssign)
+            next unless stmt.is_a?(RHDL::Codegen::IR::SeqAssign)
 
             target_nets = signal_nets[stmt.target.to_s] || signal_nets[stmt.target.to_sym]
             next unless target_nets
@@ -4017,13 +4017,13 @@ module RHDL
         end
 
         case expr
-        when RHDL::Codegen::Verilog::IR::Signal
+        when RHDL::Codegen::IR::Signal
           nets = signal_nets[expr.name.to_s] || signal_nets[expr.name.to_sym]
           return nets if nets
           # Create new nets for unknown signal
           expr.width.times.map { new_temp }
 
-        when RHDL::Codegen::Verilog::IR::Literal
+        when RHDL::Codegen::IR::Literal
           # Create constant gates
           expr.width.times.map do |i|
             bit = (expr.value >> i) & 1
@@ -4032,7 +4032,7 @@ module RHDL
             out
           end
 
-        when RHDL::Codegen::Verilog::IR::UnaryOp
+        when RHDL::Codegen::IR::UnaryOp
           operand_nets = lower_ir_expr(expr.operand, signal_nets)
           operand_nets = [operand_nets] unless operand_nets.is_a?(Array)
           # Replace any nil values with zero
@@ -4070,7 +4070,7 @@ module RHDL
             operand_nets
           end
 
-        when RHDL::Codegen::Verilog::IR::BinaryOp
+        when RHDL::Codegen::IR::BinaryOp
           left_nets = lower_ir_expr(expr.left, signal_nets)
           right_nets = lower_ir_expr(expr.right, signal_nets)
           left_nets = [left_nets] unless left_nets.is_a?(Array)
@@ -4139,14 +4139,14 @@ module RHDL
           when :<=
             # Less than or equal
             lt = lower_comparator_lt(left_nets, right_nets)
-            eq = lower_ir_expr(RHDL::Codegen::Verilog::IR::BinaryOp.new(op: :==, left: expr.left, right: expr.right, width: 1), signal_nets)
+            eq = lower_ir_expr(RHDL::Codegen::IR::BinaryOp.new(op: :==, left: expr.left, right: expr.right, width: 1), signal_nets)
             out = new_temp
             @ir.add_gate(type: Primitives::OR, inputs: [lt.first, eq.first], output: out)
             [out]
           when :>=
             # Greater than or equal - swap operands for LT
             lt = lower_comparator_lt(right_nets, left_nets)
-            eq = lower_ir_expr(RHDL::Codegen::Verilog::IR::BinaryOp.new(op: :==, left: expr.left, right: expr.right, width: 1), signal_nets)
+            eq = lower_ir_expr(RHDL::Codegen::IR::BinaryOp.new(op: :==, left: expr.left, right: expr.right, width: 1), signal_nets)
             out = new_temp
             @ir.add_gate(type: Primitives::OR, inputs: [lt.first, eq.first], output: out)
             [out]
@@ -4161,7 +4161,7 @@ module RHDL
             left_nets
           end
 
-        when RHDL::Codegen::Verilog::IR::Mux
+        when RHDL::Codegen::IR::Mux
           cond_nets = lower_ir_expr(expr.condition, signal_nets)
           true_nets = lower_ir_expr(expr.when_true, signal_nets)
           false_nets = lower_ir_expr(expr.when_false, signal_nets)
@@ -4188,7 +4188,7 @@ module RHDL
             out
           end
 
-        when RHDL::Codegen::Verilog::IR::Slice
+        when RHDL::Codegen::IR::Slice
           base_nets = lower_ir_expr(expr.base, signal_nets)
           base_nets = [base_nets] unless base_nets.is_a?(Array)
 
@@ -4202,13 +4202,13 @@ module RHDL
               # Dynamic slice - convert bounds to constant values if possible
               if range_begin.respond_to?(:to_ir)
                 range_begin_ir = range_begin.to_ir
-                if range_begin_ir.is_a?(RHDL::Codegen::Verilog::IR::Literal)
+                if range_begin_ir.is_a?(RHDL::Codegen::IR::Literal)
                   range_begin = range_begin_ir.value
                 end
               end
               if range_end.respond_to?(:to_ir)
                 range_end_ir = range_end.to_ir
-                if range_end_ir.is_a?(RHDL::Codegen::Verilog::IR::Literal)
+                if range_end_ir.is_a?(RHDL::Codegen::IR::Literal)
                   range_end = range_end_ir.value
                 end
               end
@@ -4235,7 +4235,7 @@ module RHDL
             (0...expr.width).map { |i| base_nets[i] || new_temp }
           end
 
-        when RHDL::Codegen::Verilog::IR::Concat
+        when RHDL::Codegen::IR::Concat
           result = []
           expr.parts.each do |part|
             part_nets = lower_ir_expr(part, signal_nets)
@@ -4244,12 +4244,12 @@ module RHDL
           end
           result
 
-        when RHDL::Codegen::Verilog::IR::Resize
+        when RHDL::Codegen::IR::Resize
           inner_nets = lower_ir_expr(expr.expr, signal_nets)
           inner_nets = [inner_nets] unless inner_nets.is_a?(Array)
           extend_nets(inner_nets, expr.width)
 
-        when RHDL::Codegen::Verilog::IR::Case
+        when RHDL::Codegen::IR::Case
           # Case expression - build MUX tree
           selector_nets = lower_ir_expr(expr.selector, signal_nets)
           selector_nets = [selector_nets] unless selector_nets.is_a?(Array)
@@ -4304,7 +4304,7 @@ module RHDL
 
           result
 
-        when RHDL::Codegen::Verilog::IR::MemoryRead
+        when RHDL::Codegen::IR::MemoryRead
           # Memory reads become all zeros for now (would need ROM content)
           expr.width.times.map { z = new_temp; @ir.add_gate(type: Primitives::CONST, inputs: [], output: z, value: 0); z }
 

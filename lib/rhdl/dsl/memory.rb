@@ -244,20 +244,20 @@ module RHDL
           case e
           when Symbol
             width = widths.fetch(e, 1)
-            RHDL::Codegen::Verilog::IR::Signal.new(name: e, width: width)
+            RHDL::Codegen::IR::Signal.new(name: e, width: width)
           when Integer
-            RHDL::Codegen::Verilog::IR::Literal.new(value: e, width: 1)
+            RHDL::Codegen::IR::Literal.new(value: e, width: 1)
           when Array
             if e.length == 3
               left = expr_to_ir(e[0], widths)
               op = e[1]
               right = expr_to_ir(e[2], widths)
-              RHDL::Codegen::Verilog::IR::BinaryOp.new(op: op, left: left, right: right, width: 1)
+              RHDL::Codegen::IR::BinaryOp.new(op: op, left: left, right: right, width: 1)
             else
-              RHDL::Codegen::Verilog::IR::Literal.new(value: 0, width: 1)
+              RHDL::Codegen::IR::Literal.new(value: 0, width: 1)
             end
           else
-            RHDL::Codegen::Verilog::IR::Literal.new(value: 1, width: 1)
+            RHDL::Codegen::IR::Literal.new(value: 1, width: 1)
           end
         end
       end
