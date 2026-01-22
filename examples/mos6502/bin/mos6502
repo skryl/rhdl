@@ -1031,6 +1031,10 @@ parser = OptionParser.new do |opts|
     options[:hires] = true  # Karateka uses hi-res graphics mode
   end
 
+  opts.on("--appleiigo", "Load AppleIIGo ROM and boot from it") do
+    options[:appleiigo] = true
+  end
+
   opts.on("--no-audio", "Disable audio output") do
     options[:audio] = false
   end
@@ -1093,6 +1097,20 @@ if options[:karateka]
   options[:init_hires] = true  # Karateka runs in HIRES mode
 end
 
+# Load AppleIIGo ROM if --appleiigo specified
+if options[:appleiigo]
+  rom_file = File.expand_path('../../software/roms/appleiigo.rom', __FILE__)
+  unless File.exist?(rom_file)
+    puts "Error: AppleIIGo ROM not found: #{rom_file}"
+    puts "Download from: https://a2go.applearchives.com/roms/"
+    exit 1
+  end
+
+  # Load 12KB ROM at $D000 (covers $D000-$FFFF including reset vector)
+  terminal.load_rom(rom_file, base_addr: 0xD000)
+  # ROM's reset vector at $FFFC/$FFFD will be used automatically
+end
+
 # Load program file if specified (via argument or --bin option)
 program_file = ARGV.shift || options[:bin]
 if program_file
@@ -1107,6 +1125,8 @@ if program_file
   terminal.setup_reset_vector(entry_point) unless options[:rom]
 elsif options[:karateka]
   # Already handled above
+elsif options[:appleiigo]
+  # ROM loaded above - it will handle startup
 elsif options[:demo]
   # Load demo program
   puts "Loading built-in demo program..."
