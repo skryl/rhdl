@@ -1005,7 +1005,7 @@ pub extern "C" fn run_cpu_cycles(
 }
 
 /// Ruby wrapper using RefCell for interior mutability
-#[magnus::wrap(class = "RtlCompiler")]
+#[magnus::wrap(class = "RHDL::Codegen::IR::IrCompiler")]
 struct RubyRtlCompiler {
     sim: RefCell<SimulatorState>,
 }
@@ -1162,7 +1162,11 @@ impl RubyRtlCompiler {
 
 #[magnus::init]
 fn init(ruby: &Ruby) -> Result<(), Error> {
-    let class = ruby.define_class("RtlCompiler", ruby.class_object())?;
+    let rhdl = ruby.define_module("RHDL")?;
+    let codegen = rhdl.define_module("Codegen")?;
+    let ir = codegen.define_module("IR")?;
+
+    let class = ir.define_class("IrCompiler", ruby.class_object())?;
 
     class.define_singleton_method("new", magnus::function!(RubyRtlCompiler::new, 1))?;
     class.define_method("compile", method!(RubyRtlCompiler::compile, 0))?;
@@ -1184,8 +1188,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("output_names", method!(RubyRtlCompiler::output_names, 0))?;
     class.define_method("stats", method!(RubyRtlCompiler::stats, 0))?;
     class.define_method("native?", method!(RubyRtlCompiler::native, 0))?;
-
-    ruby.define_global_const("RTL_COMPILER_AVAILABLE", true)?;
 
     Ok(())
 }

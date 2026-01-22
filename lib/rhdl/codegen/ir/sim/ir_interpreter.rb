@@ -45,7 +45,7 @@ module RHDL
           @ir_json = ir_json
 
           if IR_INTERPRETER_AVAILABLE
-            @sim = ::RHDL::Codegen::CIRCT::RtlInterpreter.new(ir_json)
+            @sim = IrInterpreter.new(ir_json)
             @backend = :interpret
           elsif allow_fallback
             @sim = RubyIrSim.new(ir_json)
