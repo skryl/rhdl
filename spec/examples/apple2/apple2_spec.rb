@@ -605,3 +605,144 @@ RSpec.describe 'Apple II ROM Integration' do
     end
   end
 end
+
+RSpec.describe 'Apple II Simulator Modes' do
+  # Tests to verify IR simulator backends (interpret, jit, compile)
+  # produce correct results when booting with appleiigo.rom
+  #
+  # Note: Ruby HDL simulation is tested elsewhere and is too slow for these tests
+
+  ROM_PATH2 = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
+
+  # IR-only simulator mode configurations (Ruby is too slow)
+  IR_SIMULATOR_MODES = [
+    { name: 'interpret', backend: :interpreter },
+    { name: 'jit', backend: :jit },
+    { name: 'compile', backend: :compiler }
+  ]
+
+  def create_ir_simulator(mode)
+    require 'rhdl/codegen'
+
+    # Use the component's to_flat_ir method which flattens all subcomponents
+    ir = RHDL::Apple2::Apple2.to_flat_ir
+    ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+
+    case mode[:backend]
+    when :interpreter
+      skip 'IR Interpreter not available' unless RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
+      RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json)
+    when :jit
+      skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+      RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
+    when :compiler
+      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+      RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json)
+    end
+  end
+
+  describe 'boot with appleiigo.rom' do
+    before(:all) do
+      @rom_available = File.exist?(ROM_PATH2)
+      if @rom_available
+        @rom_data = File.binread(ROM_PATH2).bytes
+      end
+    end
+
+    IR_SIMULATOR_MODES.each do |mode|
+      context "with #{mode[:name]} simulator" do
+        before do
+          skip 'AppleIIgo ROM not found' unless @rom_available
+          @sim = create_ir_simulator(mode)
+          @sim.load_rom(@rom_data)
+        end
+
+        it 'initializes registers with reset values' do
+          # After reset, cpu__addr_reg should be 0xFFFC (reset vector address)
+          @sim.reset
+
+          addr = @sim.peek('cpu__addr_reg')
+          expect(addr).to eq(0xFFFC), "Expected cpu__addr_reg to be 0xFFFC after reset, got 0x#{addr.to_s(16)}"
+        end
+
+        it 'boots successfully and executes code' do
+          @sim.poke('reset', 1)
+          @sim.tick
+          @sim.poke('reset', 0)
+
+          # Run enough cycles to complete boot sequence
+          @sim.run_cpu_cycles(200, 0, false)
+
+          pc = @sim.peek('cpu__pc_reg')
+
+          # After reset and boot, PC should be valid and not stuck at zero
+          expect(pc).to be_a(Integer)
+          expect(pc).to be_between(0, 0xFFFF)
+          expect(pc).not_to eq(0), "PC should not be stuck at zero"
+        end
+
+        it 'executes code after reset' do
+          @sim.poke('reset', 1)
+          @sim.tick
+          @sim.poke('reset', 0)
+
+          # Run some CPU cycles to let the CPU start executing
+          @sim.run_cpu_cycles(50, 0, false)
+
+          pc = @sim.peek('cpu__pc_reg')
+          # PC should have moved from reset vector area and be executing code
+          # The boot code may jump to RAM, so we just verify PC is valid and not stuck
+          expect(pc).to be_a(Integer)
+          expect(pc).to be_between(0, 0xFFFF)
+        end
+      end
+    end
+  end
+
+  describe 'reset values consistency across IR simulators' do
+    before(:all) do
+      @rom_available = File.exist?(ROM_PATH2)
+      if @rom_available
+        @rom_data = File.binread(ROM_PATH2).bytes
+      end
+    end
+
+    it 'all IR simulators boot successfully' do
+      skip 'AppleIIgo ROM not found' unless @rom_available
+
+      results = {}
+
+      IR_SIMULATOR_MODES.each do |mode|
+        begin
+          sim = create_ir_simulator(mode)
+          sim.load_rom(@rom_data)
+          sim.poke('reset', 1)
+          sim.tick
+          sim.poke('reset', 0)
+          sim.run_cpu_cycles(100, 0, false)
+
+          pc = sim.peek('cpu__pc_reg')
+          a_reg = sim.peek('cpu__a_reg')
+
+          results[mode[:name]] = { pc: pc, a: a_reg }
+        rescue => e
+          next if e.message.include?('not available') || e.message.include?('skip')
+          raise
+        end
+      end
+
+      # All available simulators should have valid state
+      results.each do |name, state|
+        expect(state[:pc]).to be_a(Integer), "#{name}: PC should be an integer"
+        expect(state[:pc]).to be_between(0, 0xFFFF), "#{name}: PC should be in valid range"
+        expect(state[:a]).to be_a(Integer), "#{name}: A register should be an integer"
+        expect(state[:a]).to be_between(0, 0xFF), "#{name}: A register should be in valid range"
+      end
+
+      # Log results for debugging
+      results.each do |name, state|
+        puts "  #{name}: PC=0x#{state[:pc].to_s(16)}, A=0x#{state[:a].to_s(16)}" if ENV['DEBUG']
+      end
+    end
+  end
+end

@@ -175,10 +175,13 @@ module RHDL
             @widths[net[:name]] = net[:width]
           end
 
-          # Initialize registers
+          # Initialize registers (with reset values if present)
+          @reset_values = {}
           @ir[:regs]&.each do |reg|
-            @signals[reg[:name]] = 0
+            reset_val = reg[:reset_value] || 0
+            @signals[reg[:name]] = reset_val
             @widths[reg[:name]] = reg[:width]
+            @reset_values[reg[:name]] = reset_val
           end
 
           @assigns = @ir[:assigns] || []
@@ -316,6 +319,10 @@ module RHDL
 
         def reset
           @signals.transform_values! { 0 }
+          # Apply register reset values
+          @reset_values.each do |name, val|
+            @signals[name] = val
+          end
         end
 
         def signal_count
@@ -378,10 +385,12 @@ module RHDL
         end
 
         def reg_to_hash(reg)
-          {
+          hash = {
             name: reg.name.to_s,
             width: reg.width
           }
+          hash[:reset_value] = reg.reset_value if reg.reset_value
+          hash
         end
 
         def assign_to_hash(assign)

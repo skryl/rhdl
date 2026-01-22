@@ -41,6 +41,8 @@ struct NetDef {
 struct RegDef {
     name: String,
     width: usize,
+    #[serde(default)]
+    reset_value: Option<u64>,
 }
 
 /// Expression types (JSON deserialization)
@@ -268,6 +270,8 @@ struct RtlSimulator {
     k_idx: usize,
     /// Read key strobe index
     read_key_idx: usize,
+    /// Reset values for registers (signal index -> reset value)
+    reset_values: Vec<(usize, u64)>,
 }
 
 impl RtlSimulator {
@@ -305,13 +309,18 @@ impl RtlSimulator {
             name_to_idx.insert(net.name.clone(), idx);
         }
 
-        // Registers
+        // Registers (with reset values)
         let reg_count = ir.regs.len();
+        let mut reset_values: Vec<(usize, u64)> = Vec::new();
         for reg in &ir.regs {
             let idx = signals.len();
-            signals.push(0u64);
+            let reset_val = reg.reset_value.unwrap_or(0);
+            signals.push(reset_val);  // Initialize with reset value
             widths.push(reg.width);
             name_to_idx.insert(reg.name.clone(), idx);
+            if reset_val != 0 {
+                reset_values.push((idx, reset_val));
+            }
         }
 
         let signal_count = signals.len();
@@ -378,6 +387,7 @@ impl RtlSimulator {
             clk_idx,
             k_idx,
             read_key_idx,
+            reset_values,
         })
     }
 
@@ -907,6 +917,10 @@ impl RtlSimulator {
         }
         for val in self.temps.iter_mut() {
             *val = 0;
+        }
+        // Apply register reset values
+        for &(idx, reset_val) in &self.reset_values {
+            self.signals[idx] = reset_val;
         }
     }
 

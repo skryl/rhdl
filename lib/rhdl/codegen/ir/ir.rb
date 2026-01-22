@@ -45,11 +45,12 @@ module RHDL
       end
 
       class Reg
-        attr_reader :name, :width
+        attr_reader :name, :width, :reset_value
 
-        def initialize(name:, width:)
+        def initialize(name:, width:, reset_value: nil)
           @name = name
           @width = width
+          @reset_value = reset_value
         end
       end
 
