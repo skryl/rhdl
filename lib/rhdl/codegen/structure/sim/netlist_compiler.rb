@@ -1,9 +1,17 @@
 # frozen_string_literal: true
 
-# Rustc-based compiler for gate-level netlist simulation
+# Rustc-based compiler for gate-level netlist simulation with SIMD support
 #
 # This module generates specialized Rust code for the netlist and compiles
-# it with rustc for maximum simulation performance (~3x faster than JIT).
+# it with rustc for maximum simulation performance. Supports SIMD:
+#   - scalar: 64 lanes (1 × u64)
+#   - avx2:   256 lanes (4 × u64)
+#   - avx512: 512 lanes (8 × u64)
+#
+# Usage:
+#   sim = NetlistCompilerWrapper.new(ir, simd: :auto)  # auto-detect
+#   sim = NetlistCompilerWrapper.new(ir, simd: :avx2)  # force AVX2
+#   sim = NetlistCompilerWrapper.new(ir, simd: :scalar) # scalar only
 
 require_relative 'netlist_interpreter'
 
@@ -38,21 +46,27 @@ module RHDL
         NETLIST_COMPILER_AVAILABLE = _compiler_loaded unless const_defined?(:NETLIST_COMPILER_AVAILABLE)
       end
 
-      # Wrapper class for the Rustc-based compiler
+      # Wrapper class for the Rustc-based SIMD compiler
       class NetlistCompilerWrapper
-        attr_reader :ir, :lanes
+        attr_reader :ir
 
-        def initialize(ir, lanes: 64)
+        # Initialize with netlist IR and SIMD mode
+        # @param ir [Hash, String] Netlist IR (hash or JSON string)
+        # @param simd [Symbol, String] SIMD mode: :auto, :scalar, :avx2, :avx512
+        # @param lanes [Integer] Deprecated, use simd: parameter instead
+        def initialize(ir, simd: :auto, lanes: nil)
           @ir = ir
-          @lanes = lanes
+
+          # Convert simd parameter to string for Rust
+          simd_mode = simd.to_s
 
           if NETLIST_COMPILER_AVAILABLE
             json = ir.is_a?(String) ? ir : ir.to_json
-            @sim = NetlistCompiler.new(json, lanes)
+            @sim = NetlistCompiler.new(json, simd_mode)
             @sim.compile  # Compile immediately for maximum performance
           else
             # Fall back to interpreter
-            @sim = NetlistInterpreterWrapper.new(ir, lanes: lanes)
+            @sim = NetlistInterpreterWrapper.new(ir, lanes: lanes || 64)
           end
         end
 
@@ -90,6 +104,14 @@ module RHDL
 
         def generated_code
           @sim.generated_code if @sim.respond_to?(:generated_code)
+        end
+
+        def simd_mode
+          @sim.simd_mode if @sim.respond_to?(:simd_mode)
+        end
+
+        def lanes
+          @sim.lanes if @sim.respond_to?(:lanes)
         end
 
         def stats
