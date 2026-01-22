@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# RTL-level JIT compiler with Cranelift backend
+# IR-level JIT compiler with Cranelift backend
 #
 # This simulator generates native machine code at load time using Cranelift,
 # eliminating all interpretation dispatch overhead. The generated code
@@ -12,46 +12,49 @@ require 'json'
 
 module RHDL
   module Codegen
-    module CIRCT
+    module IR
       # Determine library path based on platform
-      RTL_JIT_EXT_DIR = File.expand_path('rtl_jit/lib', __dir__)
-      RTL_JIT_LIB_NAME = case RbConfig::CONFIG['host_os']
-      when /darwin/ then 'rtl_jit.bundle'
-      when /mswin|mingw/ then 'rtl_jit.dll'
-      else 'rtl_jit.so'
+      IR_JIT_EXT_DIR = File.expand_path('ir_jit/lib', __dir__)
+      IR_JIT_LIB_NAME = case RbConfig::CONFIG['host_os']
+      when /darwin/ then 'ir_jit.bundle'
+      when /mswin|mingw/ then 'ir_jit.dll'
+      else 'ir_jit.so'
       end
-      RTL_JIT_LIB_PATH = File.join(RTL_JIT_EXT_DIR, RTL_JIT_LIB_NAME)
+      IR_JIT_LIB_PATH = File.join(IR_JIT_EXT_DIR, IR_JIT_LIB_NAME)
 
       # Try to load JIT extension
-      RTL_JIT_AVAILABLE = begin
-        if File.exist?(RTL_JIT_LIB_PATH)
-          $LOAD_PATH.unshift(RTL_JIT_EXT_DIR) unless $LOAD_PATH.include?(RTL_JIT_EXT_DIR)
-          require 'rtl_jit'
+      IR_JIT_AVAILABLE = begin
+        if File.exist?(IR_JIT_LIB_PATH)
+          $LOAD_PATH.unshift(IR_JIT_EXT_DIR) unless $LOAD_PATH.include?(IR_JIT_EXT_DIR)
+          require 'ir_jit'
           true
         else
           false
         end
       rescue LoadError => e
-        warn "RtlJit extension not available: #{e.message}" if ENV['RHDL_DEBUG']
+        warn "IrJit extension not available: #{e.message}" if ENV['RHDL_DEBUG']
         false
       end
 
+      # Backwards compatibility alias
+      RTL_JIT_AVAILABLE = IR_JIT_AVAILABLE
+
       # Wrapper class that uses Cranelift JIT if available
-      class RtlJitWrapper
+      class IrJitWrapper
         attr_reader :ir_json
 
         def initialize(ir_json, allow_fallback: true)
           @ir_json = ir_json
 
-          if RTL_JIT_AVAILABLE
-            @sim = RtlJit.new(ir_json)
+          if IR_JIT_AVAILABLE
+            @sim = IrJit.new(ir_json)
             @backend = :jit
           elsif allow_fallback
-            require_relative 'rtl_interpreter'
-            @sim = RtlInterpreterWrapper.new(ir_json, allow_fallback: true)
+            require_relative 'ir_interpreter'
+            @sim = IrInterpreterWrapper.new(ir_json, allow_fallback: true)
             @backend = @sim.native? ? :interpret : :ruby
           else
-            raise LoadError, "RTL JIT extension not found at: #{RTL_JIT_LIB_PATH}\nRun 'rake native:build' to build it."
+            raise LoadError, "IR JIT extension not found at: #{IR_JIT_LIB_PATH}\nRun 'rake native:build' to build it."
           end
         end
 
@@ -60,7 +63,7 @@ module RHDL
         end
 
         def native?
-          RTL_JIT_AVAILABLE && @backend == :jit
+          IR_JIT_AVAILABLE && @backend == :jit
         end
 
         def backend
@@ -172,6 +175,9 @@ module RHDL
           end
         end
       end
+
+      # Backwards compatibility alias
+      RtlJitWrapper = IrJitWrapper
     end
   end
 end

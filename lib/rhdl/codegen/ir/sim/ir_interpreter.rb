@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-# RTL-level bytecode interpreter with Rust backend
+# IR-level bytecode interpreter with Rust backend
 #
-# This simulator operates at the RTL level, interpreting Behavior IR using
+# This simulator operates at the IR level, interpreting Behavior IR using
 # a stack-based bytecode interpreter. It's faster than gate-level netlist
 # simulation because it operates on whole words instead of individual bits.
 
@@ -10,45 +10,48 @@ require 'json'
 
 module RHDL
   module Codegen
-    module CIRCT
+    module IR
       # Determine library path based on platform
-      RTL_INTERPRETER_EXT_DIR = File.expand_path('rtl_interpreter/lib', __dir__)
-      RTL_INTERPRETER_LIB_NAME = case RbConfig::CONFIG['host_os']
-      when /darwin/ then 'rtl_interpreter.bundle'
-      when /mswin|mingw/ then 'rtl_interpreter.dll'
-      else 'rtl_interpreter.so'
+      IR_INTERPRETER_EXT_DIR = File.expand_path('ir_interpreter/lib', __dir__)
+      IR_INTERPRETER_LIB_NAME = case RbConfig::CONFIG['host_os']
+      when /darwin/ then 'ir_interpreter.bundle'
+      when /mswin|mingw/ then 'ir_interpreter.dll'
+      else 'ir_interpreter.so'
       end
-      RTL_INTERPRETER_LIB_PATH = File.join(RTL_INTERPRETER_EXT_DIR, RTL_INTERPRETER_LIB_NAME)
+      IR_INTERPRETER_LIB_PATH = File.join(IR_INTERPRETER_EXT_DIR, IR_INTERPRETER_LIB_NAME)
 
       # Try to load interpreter extension
-      RTL_INTERPRETER_AVAILABLE = begin
-        if File.exist?(RTL_INTERPRETER_LIB_PATH)
-          $LOAD_PATH.unshift(RTL_INTERPRETER_EXT_DIR) unless $LOAD_PATH.include?(RTL_INTERPRETER_EXT_DIR)
-          require 'rtl_interpreter'
+      IR_INTERPRETER_AVAILABLE = begin
+        if File.exist?(IR_INTERPRETER_LIB_PATH)
+          $LOAD_PATH.unshift(IR_INTERPRETER_EXT_DIR) unless $LOAD_PATH.include?(IR_INTERPRETER_EXT_DIR)
+          require 'ir_interpreter'
           true
         else
           false
         end
       rescue LoadError => e
-        warn "RtlInterpreter extension not available: #{e.message}" if ENV['RHDL_DEBUG']
+        warn "IrInterpreter extension not available: #{e.message}" if ENV['RHDL_DEBUG']
         false
       end
 
+      # Backwards compatibility alias
+      RTL_INTERPRETER_AVAILABLE = IR_INTERPRETER_AVAILABLE
+
       # Wrapper class that uses Rust interpreter if available
-      class RtlInterpreterWrapper
+      class IrInterpreterWrapper
         attr_reader :ir_json
 
         def initialize(ir_json, allow_fallback: true)
           @ir_json = ir_json
 
-          if RTL_INTERPRETER_AVAILABLE
-            @sim = RtlInterpreter.new(ir_json)
+          if IR_INTERPRETER_AVAILABLE
+            @sim = IrInterpreter.new(ir_json)
             @backend = :interpret
           elsif allow_fallback
-            @sim = RubyRtlSim.new(ir_json)
+            @sim = RubyIrSim.new(ir_json)
             @backend = :ruby
           else
-            raise LoadError, "RTL interpreter extension not found at: #{RTL_INTERPRETER_LIB_PATH}\nRun 'rake native:build' to build it."
+            raise LoadError, "IR interpreter extension not found at: #{IR_INTERPRETER_LIB_PATH}\nRun 'rake native:build' to build it."
           end
         end
 
@@ -57,7 +60,7 @@ module RHDL
         end
 
         def native?
-          RTL_INTERPRETER_AVAILABLE && @backend == :interpret
+          IR_INTERPRETER_AVAILABLE && @backend == :interpret
         end
 
         def poke(name, value)
@@ -143,8 +146,11 @@ module RHDL
         end
       end
 
+      # Backwards compatibility alias
+      RtlInterpreterWrapper = IrInterpreterWrapper
+
       # Ruby fallback simulator for when native extension is not available
-      class RubyRtlSim
+      class RubyIrSim
         def initialize(json)
           @ir = JSON.parse(json, symbolize_names: true)
           @signals = {}
@@ -400,9 +406,9 @@ module RHDL
           result = []
           stmts.each do |stmt|
             case stmt
-            when Behavior::IR::SeqAssign
+            when IR::SeqAssign
               result << seq_assign_to_hash(stmt)
-            when Behavior::IR::If
+            when IR::If
               # Convert If to conditional assignments using mux
               flatten_if(stmt, result)
             end
@@ -417,9 +423,9 @@ module RHDL
           then_assigns = {}
           if_stmt.then_statements&.each do |s|
             case s
-            when Behavior::IR::SeqAssign
+            when IR::SeqAssign
               then_assigns[s.target.to_s] = expr_to_hash(s.expr)
-            when Behavior::IR::If
+            when IR::If
               # Nested if - flatten recursively
               flatten_if(s, result)
             end
@@ -429,9 +435,9 @@ module RHDL
           else_assigns = {}
           if_stmt.else_statements&.each do |s|
             case s
-            when Behavior::IR::SeqAssign
+            when IR::SeqAssign
               else_assigns[s.target.to_s] = expr_to_hash(s.expr)
-            when Behavior::IR::If
+            when IR::If
               flatten_if(s, result)
             end
           end
@@ -483,17 +489,17 @@ module RHDL
 
         def expr_to_hash(expr)
           case expr
-          when Behavior::IR::Signal
+          when IR::Signal
             { type: 'signal', name: expr.name.to_s, width: expr.width }
-          when Behavior::IR::Literal
+          when IR::Literal
             { type: 'literal', value: expr.value, width: expr.width }
-          when Behavior::IR::UnaryOp
+          when IR::UnaryOp
             { type: 'unary_op', op: expr.op.to_s, operand: expr_to_hash(expr.operand), width: expr.width }
-          when Behavior::IR::BinaryOp
+          when IR::BinaryOp
             { type: 'binary_op', op: expr.op.to_s, left: expr_to_hash(expr.left), right: expr_to_hash(expr.right), width: expr.width }
-          when Behavior::IR::Mux
+          when IR::Mux
             { type: 'mux', condition: expr_to_hash(expr.condition), when_true: expr_to_hash(expr.when_true), when_false: expr_to_hash(expr.when_false), width: expr.width }
-          when Behavior::IR::Slice
+          when IR::Slice
             # Handle various range types
             low = 0
             high = expr.width - 1
@@ -512,11 +518,11 @@ module RHDL
             end
             # Dynamic slices just use width-based extraction
             { type: 'slice', base: expr_to_hash(expr.base), low: low, high: high, width: expr.width }
-          when Behavior::IR::Concat
+          when IR::Concat
             { type: 'concat', parts: expr.parts.map { |p| expr_to_hash(p) }, width: expr.width }
-          when Behavior::IR::Resize
+          when IR::Resize
             { type: 'resize', expr: expr_to_hash(expr.expr), width: expr.width }
-          when Behavior::IR::Case
+          when IR::Case
             # Convert case to nested muxes
             if expr.cases.empty?
               expr_to_hash(expr.default)
