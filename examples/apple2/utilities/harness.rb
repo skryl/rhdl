@@ -43,6 +43,7 @@ module RHDL
       def initialize
         @apple2 = Apple2.new('apple2')
         @ram = Array.new(48 * 1024, 0)  # 48KB RAM
+        @rom = Array.new(12 * 1024, 0)  # 12KB ROM ($D000-$FFFF)
         @cycles = 0
         @halted = false
         @text_page_dirty = false
@@ -70,6 +71,10 @@ module RHDL
       # Load ROM data into the Apple2 component
       def load_rom(bytes, base_addr:)
         bytes = bytes.bytes if bytes.is_a?(String)
+        # Store ROM locally for read() access and ram_do provision
+        bytes.each_with_index do |byte, i|
+          @rom[i] = byte if i < @rom.size
+        end
         @apple2.load_rom(bytes)
       end
 
@@ -162,10 +167,16 @@ module RHDL
         @apple2.set_input(:clk_14m, 0)
         @apple2.propagate
 
-        # Provide RAM data
+        # Provide RAM/ROM data based on address
         ram_addr = @apple2.get_output(:ram_addr)
-        if ram_addr < @ram.size
-          @apple2.set_input(:ram_do, @ram[ram_addr])
+        if ram_addr >= 0xD000 && ram_addr <= 0xFFFF
+          # ROM range ($D000-$FFFF)
+          rom_offset = ram_addr - 0xD000
+          @apple2.set_input(:ram_do, @rom[rom_offset] || 0)
+        elsif ram_addr < @ram.size
+          @apple2.set_input(:ram_do, @ram[ram_addr] || 0)
+        else
+          @apple2.set_input(:ram_do, 0)
         end
         @apple2.propagate
 
@@ -403,7 +414,10 @@ module RHDL
       end
 
       def read(addr)
-        if addr < @ram.size
+        if addr >= 0xD000 && addr <= 0xFFFF
+          # ROM range
+          @rom[addr - 0xD000] || 0
+        elsif addr < @ram.size
           @ram[addr]
         else
           0
