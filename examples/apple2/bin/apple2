@@ -46,17 +46,18 @@ class Apple2HDLTerminal
     @sim_mode = options[:mode] || :hdl
     @sim_backend = options[:sim] || :jit
 
+    # Warn if --sim is used without --mode netlist
+    if options[:sim] && @sim_mode != :netlist
+      warn "Warning: --sim option only applies to netlist mode. Add --mode netlist to use it."
+    end
+
     # Create runner based on simulation mode and backend
     @runner = case @sim_mode
               when :netlist
                 require 'apple2_netlist'
                 backend_names = { interpret: "Interpreter", jit: "JIT", compile: "Compiler" }
                 puts "Initializing netlist (gate-level) simulation [#{backend_names[@sim_backend]}]..."
-                runner = RHDL::Apple2::NetlistRunner.new(backend: @sim_backend)
-                unless runner.native?
-                  warn "Warning: Native Rust backend not available, using Ruby fallback"
-                end
-                runner
+                RHDL::Apple2::NetlistRunner.new(backend: @sim_backend)
               else  # :hdl (default)
                 RHDL::Apple2::Runner.new
               end
