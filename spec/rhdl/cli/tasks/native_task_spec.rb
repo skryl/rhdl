@@ -7,7 +7,15 @@ RSpec.describe RHDL::CLI::Tasks::NativeTask do
   describe 'constants' do
     it 'defines EXTENSIONS' do
       expect(described_class::EXTENSIONS).to be_a(Hash)
-      expect(described_class::EXTENSIONS.keys).to include(:isa_simulator, :sim_cpu)
+      expect(described_class::EXTENSIONS.keys).to include(
+        :isa_simulator,
+        :netlist_interpreter,
+        :netlist_jit,
+        :netlist_compiler,
+        :firrtl_interpreter,
+        :firrtl_jit,
+        :firrtl_compiler
+      )
     end
   end
 
