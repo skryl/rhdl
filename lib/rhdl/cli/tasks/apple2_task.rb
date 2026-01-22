@@ -147,6 +147,7 @@ module RHDL
           end
           exec_args.push("-s", options[:speed].to_s) if options[:speed]
           exec_args << "-g" if options[:green]
+          exec_args << "-A" if options[:audio]
           exec_args << "-H" if options[:hires]
           exec_args.push("--hires-width", options[:hires_width].to_s) if options[:hires_width]
           exec_args.push("--disk", options[:disk]) if options[:disk]
