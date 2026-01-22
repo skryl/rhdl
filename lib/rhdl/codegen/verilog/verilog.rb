@@ -1,6 +1,6 @@
 # Verilog-2001 code generator
 
-require_relative "ir"
+require_relative "../ir/ir"
 
 module RHDL
   module Codegen
