@@ -100,6 +100,9 @@ module RHDL
         puts "  IR loaded in #{elapsed.round(2)}s"
         puts "  Native backend: #{@sim.native? ? 'Rust (optimized)' : 'Ruby (fallback)'}"
         puts "  Signals: #{@sim.signal_count}, Registers: #{@sim.reg_count}"
+        if @sim.native?
+          puts "  Note: CPU debug registers not available in native RTL mode"
+        end
 
         @cycles = 0
         @halted = false
@@ -447,17 +450,27 @@ module RHDL
       end
 
       def cpu_state
+        # Note: Debug signals require hierarchical flattening which the RTL behavior IR
+        # doesn't currently support. The debug values may show as 0 in native RTL modes.
+        # For full CPU state visibility, use the Ruby HDL mode (--sim ruby).
         {
-          pc: peek_output('pc_debug'),
-          a: peek_output('a_debug'),
-          x: peek_output('x_debug'),
-          y: peek_output('y_debug'),
+          pc: safe_peek('pc_debug'),
+          a: safe_peek('a_debug'),
+          x: safe_peek('x_debug'),
+          y: safe_peek('y_debug'),
           sp: 0xFF,
           p: 0,
           cycles: @cycles,
           halted: @halted,
           simulator_type: simulator_type
         }
+      end
+
+      # Safely peek a signal, returning 0 if not available
+      def safe_peek(name)
+        peek_output(name)
+      rescue StandardError
+        0
       end
 
       def halted?

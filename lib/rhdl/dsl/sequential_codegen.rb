@@ -73,11 +73,24 @@ module RHDL
           # Also generate assign statements for signal-to-signal connections
           instance_driven_signals = Set.new
           signal_assigns = []
+          instance_output_nets = []
           _connection_defs.each do |conn|
             source, dest = conn[:source], conn[:dest]
             # If source is [inst_name, port_name], then dest is driven by an instance output
             if source.is_a?(Array) && source.length == 2 && dest.is_a?(Symbol)
               instance_driven_signals.add(dest)
+              # Generate a flattened signal name and assign statement for RTL simulation
+              # This allows behavior-level simulators to trace these connections
+              inst_name, port_name = source
+              flat_signal_name = "#{inst_name}__#{port_name}"
+              dest_width = find_signal_width(dest)
+              # Add net for the flattened instance output signal
+              instance_output_nets << RHDL::Export::IR::Net.new(name: flat_signal_name.to_sym, width: dest_width)
+              # Add assign from flattened signal to destination
+              signal_assigns << RHDL::Export::IR::Assign.new(
+                target: dest.to_s,
+                expr: RHDL::Export::IR::Signal.new(name: flat_signal_name, width: dest_width)
+              )
             # If both are symbols, generate an assign statement (signal-to-signal connection)
             elsif source.is_a?(Symbol) && dest.is_a?(Symbol)
               source_width = find_signal_width(source)
@@ -120,7 +133,7 @@ module RHDL
           RHDL::Export::IR::ModuleDef.new(
             name: name,
             ports: ports,
-            nets: behavior_result[:wires] + instance_nets,
+            nets: behavior_result[:wires] + instance_nets + instance_output_nets,
             regs: regs,
             assigns: assigns,
             processes: processes,
