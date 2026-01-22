@@ -24,7 +24,7 @@ RSpec.describe 'Gate-level backend equivalence' do
 
   it 'matches full adder outputs' do
     adder = RHDL::HDL::FullAdder.new('fa')
-    sim = RHDL::Export.gate_level([adder], backend: :cpu, lanes: lanes, name: 'full_adder')
+    sim = RHDL::Export.gate_level([adder], backend: :interpreter, lanes: lanes, name: 'full_adder')
 
     vectors = lanes.times.map do
       { a: rng.rand(2), b: rng.rand(2), cin: rng.rand(2) }
@@ -52,7 +52,7 @@ RSpec.describe 'Gate-level backend equivalence' do
 
   it 'matches ripple adder outputs' do
     adder = RHDL::HDL::RippleCarryAdder.new('ra', width: 8)
-    sim = RHDL::Export.gate_level([adder], backend: :cpu, lanes: lanes, name: 'ripple_adder')
+    sim = RHDL::Export.gate_level([adder], backend: :interpreter, lanes: lanes, name: 'ripple_adder')
 
     vectors = lanes.times.map do
       { a: rng.rand(256), b: rng.rand(256), cin: rng.rand(2) }
@@ -86,7 +86,7 @@ RSpec.describe 'Gate-level backend equivalence' do
 
   it 'matches register outputs over cycles' do
     gate_dffs = 8.times.map { |i| RHDL::HDL::DFlipFlop.new("reg#{i}") }
-    sim = RHDL::Export.gate_level(gate_dffs, backend: :cpu, lanes: lanes, name: 'register')
+    sim = RHDL::Export.gate_level(gate_dffs, backend: :interpreter, lanes: lanes, name: 'register')
 
     ref_sims = lanes.times.map do
       dffs = 8.times.map { |i| RHDL::HDL::DFlipFlop.new("reg#{i}") }
@@ -153,7 +153,7 @@ RSpec.describe 'Gate-level backend equivalence' do
     RHDL::Sim::Component.connect(adder.outputs[:sum], mux.inputs[:b])
     RHDL::Sim::Component.connect(mux.outputs[:y], dff.inputs[:d])
 
-    sim = RHDL::Export.gate_level([mux, adder, dff], backend: :cpu, lanes: lanes, name: 'muxed_path')
+    sim = RHDL::Export.gate_level([mux, adder, dff], backend: :interpreter, lanes: lanes, name: 'muxed_path')
 
     ref_sims = lanes.times.map do
       mux_ref = RHDL::HDL::Mux2.new('mux', width: 1)
