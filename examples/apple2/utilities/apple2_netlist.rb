@@ -418,18 +418,26 @@ module RHDL
       end
 
       # Get CPU state for debugging
+      # Netlist mode uses fully flattened gate-level IR, so debug signals should work
       def cpu_state
         {
-          pc: peek_output(:pc_debug),
-          a: peek_output(:a_debug),
-          x: peek_output(:x_debug),
-          y: peek_output(:y_debug),
+          pc: safe_peek(:pc_debug),
+          a: safe_peek(:a_debug),
+          x: safe_peek(:x_debug),
+          y: safe_peek(:y_debug),
           sp: 0xFF,  # TODO: Add S register debug output
           p: 0,      # TODO: Add P register debug output
           cycles: @cycles,
           halted: @halted,
-          simulator_type: :netlist
+          simulator_type: simulator_type
         }
+      end
+
+      # Safely peek an output, returning 0 on error
+      def safe_peek(name)
+        peek_output(name)
+      rescue StandardError
+        0
       end
 
       def halted?
