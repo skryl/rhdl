@@ -280,14 +280,19 @@ impl JitCompiler {
                 // Mask the result
                 builder.ins().band(result, mask_val)
             }
-            ExprDef::Mux { condition, when_true, when_false, .. } => {
+            ExprDef::Mux { condition, when_true, when_false, width } => {
                 let cond = self.compile_expr(builder, condition, signals_ptr);
                 let t = self.compile_expr(builder, when_true, signals_ptr);
                 let f = self.compile_expr(builder, when_false, signals_ptr);
 
                 let zero = builder.ins().iconst(types::I64, 0);
                 let cond_bool = builder.ins().icmp(IntCC::NotEqual, cond, zero);
-                builder.ins().select(cond_bool, t, f)
+                let result = builder.ins().select(cond_bool, t, f);
+
+                // Mask result to specified width
+                let mask = Self::compile_mask(*width);
+                let mask_val = builder.ins().iconst(types::I64, mask as i64);
+                builder.ins().band(result, mask_val)
             }
             ExprDef::Slice { base, low, width, .. } => {
                 let src = self.compile_expr(builder, base, signals_ptr);
@@ -298,10 +303,13 @@ impl JitCompiler {
                 builder.ins().band(shifted, mask_val)
             }
             ExprDef::Concat { parts, width } => {
+                // Concat in HDL: cat(high, low) puts first arg in high bits
+                // Parts are ordered [high, ..., low], so we process in REVERSE
+                // to build from low bits upward
                 let mut result = builder.ins().iconst(types::I64, 0);
                 let mut shift_acc = 0u64;
 
-                for part in parts {
+                for part in parts.iter().rev() {
                     let part_val = self.compile_expr(builder, part, signals_ptr);
                     let part_width = Self::expr_width(part, &self.widths, &self.name_to_idx);
                     let part_mask = Self::compile_mask(part_width);
@@ -372,9 +380,12 @@ impl JitCompiler {
 
         let signals_ptr = builder.block_params(entry_block)[0];
 
-        // Compile each assignment
+        // Compile each assignment (skip unknown targets to avoid overwriting unrelated signals)
         for assign in assigns {
-            let target_idx = *self.name_to_idx.get(&assign.target).unwrap_or(&0);
+            let target_idx = match self.name_to_idx.get(&assign.target) {
+                Some(&idx) => idx,
+                None => continue,  // Skip unknown targets
+            };
             let value = self.compile_expr(&mut builder, &assign.expr, signals_ptr);
 
             // Store to signals[target_idx]
@@ -466,6 +477,12 @@ struct JitRtlSimulator {
     next_regs: Vec<u64>,
     /// Sequential assignment target indices
     seq_targets: Vec<usize>,
+    /// Clock signal index for each sequential assignment (for multi-clock domain support)
+    seq_clocks: Vec<usize>,
+    /// Unique clock signal indices
+    clock_indices: Vec<usize>,
+    /// Previous clock values (for edge detection)
+    prev_clock_values: Vec<u64>,
 
     /// JIT-compiled evaluate function
     evaluate_fn: EvaluateFn,
@@ -482,6 +499,8 @@ struct JitRtlSimulator {
     clk_idx: usize,
     k_idx: usize,
     read_key_idx: usize,
+    /// CPU address register - used to provide correct data during any phase
+    cpu_addr_idx: usize,
     /// Reset values for registers (signal index -> reset value)
     reset_values: Vec<(usize, u64)>,
 }
@@ -533,19 +552,33 @@ impl JitRtlSimulator {
 
         let signal_count = signals.len();
 
-        // Collect sequential assignments
+        // Collect sequential assignments with clock domain information
         let mut seq_assigns: Vec<(String, ExprDef)> = Vec::new();
         let mut seq_targets = Vec::new();
+        let mut seq_clocks = Vec::new();
+        let mut clock_set: std::collections::HashSet<usize> = std::collections::HashSet::new();
+
         for process in &ir.processes {
             if !process.clocked {
                 continue;
             }
+            // Get the clock signal index for this process
+            let clock_idx = process.clock.as_ref()
+                .and_then(|clk_name| name_to_idx.get(clk_name).copied())
+                .unwrap_or(0);
+            clock_set.insert(clock_idx);
+
             for stmt in &process.statements {
                 let target_idx = *name_to_idx.get(&stmt.target).unwrap_or(&0);
                 seq_assigns.push((stmt.target.clone(), stmt.expr.clone()));
                 seq_targets.push(target_idx);
+                seq_clocks.push(clock_idx);
             }
         }
+
+        // Build unique clock indices list and initialize previous values
+        let clock_indices: Vec<usize> = clock_set.into_iter().collect();
+        let prev_clock_values = vec![0u64; clock_indices.len()];
 
         let next_regs = vec![0u64; seq_targets.len()];
 
@@ -565,6 +598,8 @@ impl JitRtlSimulator {
         let clk_idx = *name_to_idx.get("clk_14m").unwrap_or(&0);
         let k_idx = *name_to_idx.get("k").unwrap_or(&0);
         let read_key_idx = *name_to_idx.get("read_key").unwrap_or(&0);
+        // CPU address register for providing correct data during any bus phase
+        let cpu_addr_idx = *name_to_idx.get("cpu__addr_reg").unwrap_or(&0);
 
         Ok(Self {
             signals,
@@ -576,6 +611,9 @@ impl JitRtlSimulator {
             reg_count,
             next_regs,
             seq_targets,
+            seq_clocks,
+            clock_indices,
+            prev_clock_values,
             evaluate_fn,
             seq_sample_fn,
             ram: vec![0u8; 48 * 1024],
@@ -587,6 +625,7 @@ impl JitRtlSimulator {
             clk_idx,
             k_idx,
             read_key_idx,
+            cpu_addr_idx,
             reset_values,
         })
     }
@@ -616,18 +655,101 @@ impl JitRtlSimulator {
 
     #[inline(always)]
     fn tick(&mut self) {
-        // Evaluate combinational logic
-        self.evaluate();
+        self.tick_internal(false);
+    }
 
-        // Sample register inputs using JIT function
-        unsafe { (self.seq_sample_fn)(self.signals.as_mut_ptr(), self.next_regs.as_mut_ptr()); }
+    fn tick_debug(&mut self) {
+        self.tick_internal(true);
+    }
 
-        // Update all registers
-        for (i, &target_idx) in self.seq_targets.iter().enumerate() {
-            self.signals[target_idx] = self.next_regs[i];
+    fn tick_internal(&mut self, _debug: bool) {
+        // Multi-clock domain simulation using delta-cycle iteration:
+        //
+        // Key insight: All registers should sample their inputs using the signal
+        // values that existed BEFORE the tick started. This models real hardware
+        // where all flip-flops sample simultaneously at the clock edge.
+        //
+        // Algorithm:
+        // 1. Sample clock values BEFORE evaluate (pre-tick state)
+        // 2. Evaluate to propagate external input changes
+        // 3. Sample ALL register input expressions using post-evaluate values
+        // 4. Iterate to detect derived clock edges and apply updates
+
+        // Sample clock values BEFORE any evaluation (pre-tick state)
+        let mut initial_clock_values: Vec<u64> = Vec::with_capacity(self.clock_indices.len());
+        for &clk_idx in &self.clock_indices {
+            initial_clock_values.push(self.signals[clk_idx]);
         }
 
-        // Re-evaluate combinational logic
+        // Evaluate to propagate any external input changes (like clk_14m)
+        self.evaluate();
+
+        // Sample ALL register input expressions ONCE with post-evaluate signal values
+        // This ensures all registers see the same "snapshot" of combinational logic
+        unsafe { (self.seq_sample_fn)(self.signals.as_mut_ptr(), self.next_regs.as_mut_ptr()); }
+
+        // Track which registers have been updated this tick to avoid double-updates
+        let mut updated: Vec<bool> = vec![false; self.seq_targets.len()];
+        let max_iterations = 10;  // Safety limit to prevent infinite loops
+
+        // First, detect rising edges from the INITIAL state to post-evaluate state
+        let mut rising_clocks: Vec<bool> = vec![false; self.signals.len()];
+        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+            let before = initial_clock_values[i];
+            let after = self.signals[clk_idx];
+            if before == 0 && after == 1 {
+                rising_clocks[clk_idx] = true;
+            }
+        }
+
+        // Apply updates for clocks that rose from initial state
+        for (i, &target_idx) in self.seq_targets.iter().enumerate() {
+            let clk_idx = self.seq_clocks[i];
+            if rising_clocks[clk_idx] && !updated[i] {
+                self.signals[target_idx] = self.next_regs[i];
+                updated[i] = true;
+            }
+        }
+
+        // Now iterate to handle derived clocks
+        for _iteration in 0..max_iterations {
+            // Sample clock values before evaluate
+            let mut clock_before: Vec<u64> = Vec::with_capacity(self.clock_indices.len());
+            for &clk_idx in &self.clock_indices {
+                clock_before.push(self.signals[clk_idx]);
+            }
+
+            // Evaluate combinational logic (propagates register changes)
+            self.evaluate();
+
+            // Detect rising edges
+            let mut rising_clocks: Vec<bool> = vec![false; self.signals.len()];
+            let mut any_rising = false;
+            for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+                let before = clock_before[i];
+                let after = self.signals[clk_idx];
+                if before == 0 && after == 1 {
+                    rising_clocks[clk_idx] = true;
+                    any_rising = true;
+                }
+            }
+
+            // If no rising edges, we've reached a fixed point
+            if !any_rising {
+                break;
+            }
+
+            // Apply the pre-sampled values to registers whose clocks just rose
+            for (i, &target_idx) in self.seq_targets.iter().enumerate() {
+                let clk_idx = self.seq_clocks[i];
+                if rising_clocks[clk_idx] && !updated[i] {
+                    self.signals[target_idx] = self.next_regs[i];
+                    updated[i] = true;
+                }
+            }
+        }
+
+        // Final evaluate to propagate any remaining combinational changes
         self.evaluate();
     }
 
@@ -659,17 +781,23 @@ impl JitRtlSimulator {
         // $0000-$BFFF: RAM (48KB)
         // $C000-$CFFF: I/O space (soft switches, slot ROMs)
         // $D000-$FFFF: ROM (12KB)
-        let ram_addr = self.signals[self.ram_addr_idx] as usize;
-        let ram_data = if ram_addr >= 0xD000 {
+        //
+        // Use CPU's actual address register instead of ram_addr (which may show
+        // video address during phi0=0). This ensures the CPU gets correct data
+        // regardless of timing phase.
+        let cpu_addr = self.signals[self.cpu_addr_idx] as usize;
+        let ram_data = if cpu_addr >= 0xD000 && cpu_addr <= 0xFFFF {
             // ROM space
-            let rom_offset = ram_addr.wrapping_sub(0xD000);
+            let rom_offset = cpu_addr.wrapping_sub(0xD000);
             if rom_offset < self.rom.len() { self.rom[rom_offset] } else { 0 }
-        } else if ram_addr >= 0xC000 {
+        } else if cpu_addr >= 0xC000 {
             // I/O space - return 0 (soft switches handled by HDL logic)
             0
-        } else {
+        } else if cpu_addr < self.ram.len() {
             // RAM space
-            self.ram[ram_addr]
+            self.ram[cpu_addr]
+        } else {
+            0
         };
         self.signals[self.ram_do_idx] = ram_data as u64;
 
@@ -755,6 +883,15 @@ impl JitRtlSimulator {
         for &(idx, reset_val) in &self.reset_values {
             self.signals[idx] = reset_val;
         }
+        // Reset previous clock values for edge detection
+        for val in self.prev_clock_values.iter_mut() {
+            *val = 0;
+        }
+    }
+
+    /// Debug method to get clock domain info
+    fn get_clock_info(&self) -> (Vec<usize>, Vec<u64>, Vec<usize>) {
+        (self.clock_indices.clone(), self.prev_clock_values.clone(), self.seq_clocks.clone())
     }
 
     fn signal_count(&self) -> usize {
@@ -830,6 +967,10 @@ impl RubyJitSim {
 
     fn tick(&self) {
         self.sim.borrow_mut().tick();
+    }
+
+    fn tick_debug(&self) {
+        self.sim.borrow_mut().tick_debug();
     }
 
     fn reset(&self) {
@@ -949,6 +1090,23 @@ impl RubyJitSim {
         let val = self.sim.borrow().peek_by_idx(idx);
         Ok(u64_to_ruby(&ruby, val))
     }
+
+    /// Get clock domain debug info
+    fn get_clock_info(&self) -> Result<RHash, Error> {
+        let ruby = unsafe { Ruby::get_unchecked() };
+        let (clock_indices, prev_clock_values, seq_clocks) = self.sim.borrow().get_clock_info();
+
+        let hash = ruby.hash_new();
+        let clock_indices_arr = ruby.ary_from_vec(clock_indices.into_iter().map(|v| v as i64).collect::<Vec<_>>());
+        let prev_values_arr = ruby.ary_from_vec(prev_clock_values.into_iter().map(|v| v as i64).collect::<Vec<_>>());
+        let seq_clocks_arr = ruby.ary_from_vec(seq_clocks.into_iter().map(|v| v as i64).collect::<Vec<_>>());
+
+        hash.aset(ruby.sym_new("clock_indices"), clock_indices_arr)?;
+        hash.aset(ruby.sym_new("prev_clock_values"), prev_values_arr)?;
+        hash.aset(ruby.sym_new("seq_clocks"), seq_clocks_arr)?;
+
+        Ok(hash)
+    }
 }
 
 #[magnus::init]
@@ -964,6 +1122,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("peek", method!(RubyJitSim::peek, 1))?;
     class.define_method("evaluate", method!(RubyJitSim::evaluate, 0))?;
     class.define_method("tick", method!(RubyJitSim::tick, 0))?;
+    class.define_method("tick_debug", method!(RubyJitSim::tick_debug, 0))?;
     class.define_method("reset", method!(RubyJitSim::reset, 0))?;
     class.define_method("signal_count", method!(RubyJitSim::signal_count, 0))?;
     class.define_method("reg_count", method!(RubyJitSim::reg_count, 0))?;
@@ -980,6 +1139,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("get_signal_idx", method!(RubyJitSim::get_signal_idx, 1))?;
     class.define_method("poke_by_idx", method!(RubyJitSim::poke_by_idx, 2))?;
     class.define_method("peek_by_idx", method!(RubyJitSim::peek_by_idx, 1))?;
+    class.define_method("get_clock_info", method!(RubyJitSim::get_clock_info, 0))?;
 
     Ok(())
 }

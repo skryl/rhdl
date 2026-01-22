@@ -374,20 +374,23 @@ module RHDL
         rom_addr_mapped = cat((cpu_addr[13] & cpu_addr[12]), ~cpu_addr[12], cpu_addr[11..0])
 
         # Data input mux to CPU
-        # Read from ROM with computed address
+        # Note: Internal ROM (mem_read_expr) doesn't work in IR simulation,
+        # so ROM reads use the external data latch (dl) which gets data from ram_do.
+        # The external memory interface provides both RAM and ROM data.
         rom_out = mem_read_expr(:main_rom, rom_addr_mapped, width: 8)
         gameport_data = cat(gameport[cpu_addr[2..0]], lit(0, width: 7))
 
         # Disk II provides data for both ROM and I/O access
         disk_select = disk_device_select | disk_io_select
 
+        # For IR simulation compatibility, use ram_do directly
+        # This bypasses the dl register which has timing issues in cycle-accurate simulation.
+        # In real hardware, dl is a level-triggered latch, but JIT uses edge-triggered model.
         cpu_din <= mux(disk_select, disk_dout,
-          mux(ram_select, dl,
+          mux(ram_select | rom_select, ram_do,
             mux(keyboard_select, k,
               mux(gameport_select, gameport_data,
-                mux(rom_select, rom_out,
-                  pd
-                )
+                pd
               )
             )
           )
