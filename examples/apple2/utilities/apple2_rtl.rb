@@ -154,15 +154,15 @@ module RHDL
       def load_rom(bytes, base_addr:)
         bytes = bytes.bytes if bytes.is_a?(String)
 
+        # Always store ROM locally for read() access
+        @rom ||= Array.new(12 * 1024, 0)
+        bytes.each_with_index do |byte, i|
+          @rom[i] = byte if i < @rom.size
+        end
+
         if @use_batched
-          # Load directly into Rust memory
+          # Also load into Rust memory for simulation
           @sim.load_rom(bytes)
-        else
-          # Fallback: store locally
-          @rom ||= Array.new(12 * 1024, 0)
-          bytes.each_with_index do |byte, i|
-            @rom[i] = byte if i < @rom.size
-          end
         end
       end
 
@@ -511,19 +511,19 @@ module RHDL
       end
 
       def read(addr)
+        # ROM addresses ($D000-$FFFF) are always read from local @rom storage
+        if addr >= 0xD000 && addr <= 0xFFFF
+          @rom ||= Array.new(12 * 1024, 0)
+          return @rom[addr - 0xD000] || 0
+        end
+
+        # RAM addresses use batched Rust backend when available
         if @use_batched
           data = @sim.read_ram(addr, 1)
           data[0] || 0
         else
           @ram ||= Array.new(48 * 1024, 0)
-          @rom ||= Array.new(12 * 1024, 0)
-          if addr < @ram.size
-            @ram[addr]
-          elsif addr >= 0xD000 && addr <= 0xFFFF
-            @rom[addr - 0xD000] || 0
-          else
-            0
-          end
+          addr < @ram.size ? @ram[addr] : 0
         end
       end
 
