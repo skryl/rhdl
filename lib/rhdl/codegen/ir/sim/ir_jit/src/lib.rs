@@ -645,7 +645,9 @@ impl JitRtlSimulator {
         }
 
         // Build unique clock indices list and initialize previous values
-        let clock_indices: Vec<usize> = clock_set.into_iter().collect();
+        // Sort for deterministic order (HashSet iteration is non-deterministic)
+        let mut clock_indices: Vec<usize> = clock_set.into_iter().collect();
+        clock_indices.sort();
         let prev_clock_values = vec![0u64; clock_indices.len()];
 
         let next_regs = vec![0u64; seq_targets.len()];

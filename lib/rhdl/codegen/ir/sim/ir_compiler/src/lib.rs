@@ -154,6 +154,7 @@ struct IrSimulator {
     clk_idx: usize,
     k_idx: usize,
     read_key_idx: usize,
+    cpu_addr_idx: usize,
 }
 
 impl IrSimulator {
@@ -235,7 +236,9 @@ impl IrSimulator {
             }
         }
 
-        let clock_indices: Vec<usize> = clock_set.into_iter().collect();
+        // Sort clock indices for deterministic order (HashSet iteration is non-deterministic)
+        let mut clock_indices: Vec<usize> = clock_set.into_iter().collect();
+        clock_indices.sort();
         let old_clocks = vec![0u64; clock_indices.len()];
         let next_regs = vec![0u64; seq_targets.len()];
 
@@ -256,6 +259,8 @@ impl IrSimulator {
         let clk_idx = *name_to_idx.get("clk_14m").unwrap_or(&0);
         let k_idx = *name_to_idx.get("k").unwrap_or(&0);
         let read_key_idx = *name_to_idx.get("read_key").unwrap_or(&0);
+        // Use CPU's address register for memory reads (not ram_addr which may show video address)
+        let cpu_addr_idx = *name_to_idx.get("cpu__addr_reg").unwrap_or(&0);
 
         Ok(Self {
             ir,
@@ -284,6 +289,7 @@ impl IrSimulator {
             clk_idx,
             k_idx,
             read_key_idx,
+            cpu_addr_idx,
         })
     }
 
@@ -695,7 +701,8 @@ impl IrSimulator {
             }
         }
 
-        let clock_indices: Vec<usize> = clock_domains.keys().copied().collect();
+        // IMPORTANT: Use self.clock_indices for consistent ordering (HashMaps have non-deterministic order)
+        let clock_indices: Vec<usize> = self.clock_indices.clone();
         let num_clocks = clock_indices.len().max(1);
         let num_regs = self.seq_targets.len();
 
@@ -765,6 +772,7 @@ impl IrSimulator {
         let clk_idx = self.clk_idx;
         let k_idx = self.k_idx;
         let ram_addr_idx = self.ram_addr_idx;
+        let cpu_addr_idx = self.cpu_addr_idx;  // Use CPU's addr reg for reads
         let ram_do_idx = self.ram_do_idx;
         let ram_we_idx = self.ram_we_idx;
         let d_idx = self.d_idx;
@@ -813,9 +821,9 @@ impl IrSimulator {
         code.push_str(&format!("            signals[{}] = 0;\n", clk_idx));
         code.push_str("            evaluate(signals.as_mut_ptr(), signals.len());\n\n");
 
-        // Provide RAM/ROM data
+        // Provide RAM/ROM data (use CPU's address register, not ram_addr which may show video address)
         code.push_str(&format!("            // Provide RAM/ROM data\n"));
-        code.push_str(&format!("            let addr = signals[{}] as usize;\n", ram_addr_idx));
+        code.push_str(&format!("            let addr = signals[{}] as usize;\n", cpu_addr_idx));
         code.push_str(&format!("            signals[{}] = if addr >= 0xD000 {{\n", ram_do_idx));
         code.push_str("                let rom_offset = addr.wrapping_sub(0xD000);\n");
         code.push_str("                if rom_offset < rom.len() { rom[rom_offset] as u64 } else { 0 }\n");
