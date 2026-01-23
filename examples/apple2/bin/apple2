@@ -180,18 +180,15 @@ class Apple2HDLTerminal
       return create_boot_rom(target_pc)
     end
 
-    puts "Using AppleIIgo ROM with patched reset vector"
+    puts "Using AppleIIgo ROM with patched reset vector -> $#{target_pc.to_s(16).upcase}"
     rom = File.binread(rom_file).bytes
 
-    # Patch reset vector (at ROM offset 0x2FFC-0x2FFD for $FFFC-$FFFD)
-    # Point to a trampoline at $FFF0 (ROM offset 0x2FF0)
-    rom[0x2FFC] = 0xF0  # Low byte of $FFF0
-    rom[0x2FFD] = 0xFF  # High byte of $FFF0
-
-    # Put JMP target_pc at $FFF0 (ROM offset 0x2FF0)
-    rom[0x2FF0] = 0x4C  # JMP
-    rom[0x2FF1] = target_pc & 0xFF
-    rom[0x2FF2] = (target_pc >> 8) & 0xFF
+    # Patch reset vector directly to point to target_pc
+    # ROM is 12K loaded at $D000, so:
+    # - $FFFC (reset vector low) = offset 0x2FFC
+    # - $FFFD (reset vector high) = offset 0x2FFD
+    rom[0x2FFC] = target_pc & 0xFF         # low byte
+    rom[0x2FFD] = (target_pc >> 8) & 0xFF  # high byte
 
     @runner.load_rom(rom, base_addr: 0xD000)
   end
