@@ -70,6 +70,8 @@ struct Memory {
     name: String,
     depth: u32,
     width: u32,
+    #[serde(default)]
+    initial_data: Vec<u64>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -91,6 +93,8 @@ enum Expr {
     Concat { parts: Vec<Expr>, width: u32 },
     #[serde(rename = "resize")]
     Resize { expr: Box<Expr>, width: u32 },
+    #[serde(rename = "mem_read")]
+    MemRead { memory: String, addr: Box<Expr>, width: u32 },
 }
 
 /// Inner simulator state
@@ -111,6 +115,10 @@ struct SimulatorState {
     clock_indices: Vec<usize>,
     /// Old clock values for rising edge detection
     old_clocks: Vec<u64>,
+    /// Memory arrays for mem_read operations
+    memory_arrays: Vec<Vec<u64>>,
+    /// Memory name to index mapping
+    mem_name_to_idx: HashMap<String, usize>,
 }
 
 impl SimulatorState {
@@ -170,6 +178,21 @@ impl SimulatorState {
         let clock_indices: Vec<usize> = clock_set.into_iter().collect();
         let old_clocks = clock_indices.iter().map(|&idx| signals[idx]).collect();
 
+        // Build memory arrays and name-to-index mapping
+        let mut memory_arrays = Vec::new();
+        let mut mem_name_to_idx = HashMap::new();
+        for (i, mem) in ir.memories.iter().enumerate() {
+            mem_name_to_idx.insert(mem.name.clone(), i);
+            let mut arr = vec![0u64; mem.depth as usize];
+            // Initialize with initial_data if provided
+            for (j, &val) in mem.initial_data.iter().enumerate() {
+                if j < arr.len() {
+                    arr[j] = val;
+                }
+            }
+            memory_arrays.push(arr);
+        }
+
         Ok(SimulatorState {
             ir,
             signal_indices,
@@ -183,6 +206,8 @@ impl SimulatorState {
             seq_clocks,
             clock_indices,
             old_clocks,
+            memory_arrays,
+            mem_name_to_idx,
         })
     }
 
@@ -305,6 +330,19 @@ impl SimulatorState {
             Expr::Resize { expr, width } => {
                 self.eval_expr(expr) & mask(*width)
             }
+            Expr::MemRead { memory, addr, width } => {
+                if let Some(&mem_idx) = self.mem_name_to_idx.get(memory) {
+                    if let Some(arr) = self.memory_arrays.get(mem_idx) {
+                        let addr_val = self.eval_expr(addr) as usize;
+                        let bounded_addr = addr_val % arr.len().max(1);
+                        arr.get(bounded_addr).cloned().unwrap_or(0) & mask(*width)
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                }
+            }
         }
     }
 
@@ -316,18 +354,9 @@ impl SimulatorState {
 
         self.evaluate();
 
-        if let Some(ref lib) = self.compiled_lib {
-            unsafe {
-                let tick_func: libloading::Symbol<unsafe extern "C" fn(&mut [u64], &mut [u64])> =
-                    lib.get(b"tick").unwrap();
-                tick_func(&mut self.signals, &mut self.next_regs);
-
-                let update_func: libloading::Symbol<unsafe extern "C" fn(&mut [u64], &[u64])> =
-                    lib.get(b"update_regs").unwrap();
-                update_func(&mut self.signals, &self.next_regs);
-            }
-            self.evaluate();
-        } else {
+        // Always use the interpreted tick loop for proper derived clock handling
+        // The compiled tick function uses static state that doesn't work well with iteration
+        {
             // Iterate until no more rising edges are detected (delta-cycle simulation)
             // This handles cascading clocks (e.g., clk_14m -> timing__clk_14m -> q3 -> cpu__clk)
             // IMPORTANT: Keep old_clocks fixed at the start-of-tick values
@@ -644,6 +673,7 @@ fn get_expr_width(expr: &Expr) -> u32 {
         Expr::Slice { width, .. } => *width,
         Expr::Concat { width, .. } => *width,
         Expr::Resize { width, .. } => *width,
+        Expr::MemRead { width, .. } => *width,
     }
 }
 
@@ -675,6 +705,7 @@ fn collect_signal_reads(expr: &Expr, reads: &mut HashSet<String>) {
             }
         }
         Expr::Resize { expr, .. } => collect_signal_reads(expr, reads),
+        Expr::MemRead { addr, .. } => collect_signal_reads(addr, reads),
     }
 }
 
@@ -793,8 +824,8 @@ fn is_simple_expr(expr: &Expr, depth: usize) -> bool {
         }
         Expr::Slice { base, .. } => is_simple_expr(base, depth + 1),
         Expr::Resize { expr, .. } => is_simple_expr(expr, depth + 1),
-        // Mux and Concat are typically not worth batching
-        Expr::Mux { .. } | Expr::Concat { .. } => false,
+        // Mux, Concat, and MemRead are typically not worth batching
+        Expr::Mux { .. } | Expr::Concat { .. } | Expr::MemRead { .. } => false,
     }
 }
 
@@ -907,6 +938,15 @@ fn expr_to_rust_with_name(expr: &Expr, signal_indices: &HashMap<String, usize>, 
             let m = generate_mask_str(*width);
             format!("({} & {})", expr_code, m)
         }
+        Expr::MemRead { memory, addr, width } => {
+            // Generate code to access static memory array MEM_<n>
+            let addr_code = expr_to_rust_with_name(addr, signal_indices, signals_name);
+            let m = generate_mask_str(*width);
+            // Memory name is "mem_<name>", we need to convert to MEM_<NAME> format
+            // For now, use a placeholder that will be resolved in generate_full_code
+            format!("(MEM_{}.get(({}) as usize % MEM_{}.len()).copied().unwrap_or(0) & {})",
+                    memory.to_uppercase().replace("__", "_"), addr_code, memory.to_uppercase().replace("__", "_"), m)
+        }
     }
 }
 
@@ -918,6 +958,28 @@ fn generate_full_code(ir: &CircuitIR, signal_indices: &HashMap<String, usize>) -
     // Check if we should use AVX2
     code.push_str("#[cfg(target_arch = \"x86_64\")]\n");
     code.push_str("use std::arch::x86_64::*;\n\n");
+
+    // Generate static memory arrays for mem_read operations
+    for mem in &ir.memories {
+        let mem_name = mem.name.to_uppercase().replace("__", "_");
+        code.push_str(&format!("static MEM_{}: &[u64] = &[\n", mem_name));
+        for (i, &val) in mem.initial_data.iter().enumerate() {
+            if i > 0 && i % 16 == 0 {
+                code.push_str("\n");
+            }
+            code.push_str(&format!("    {}_u64,", val));
+        }
+        // If no initial data, generate zeros up to depth
+        if mem.initial_data.is_empty() {
+            for i in 0..mem.depth.min(256) as usize {
+                if i > 0 && i % 16 == 0 {
+                    code.push_str("\n");
+                }
+                code.push_str("    0_u64,");
+            }
+        }
+        code.push_str("\n];\n\n");
+    }
 
     // Build input set for levelization
     let inputs: HashSet<String> = ir.ports.iter()
