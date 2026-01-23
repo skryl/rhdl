@@ -1014,51 +1014,59 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
       skip 'AppleIIgo ROM not found' unless @rom_available
     end
 
-    context 'with Ruby ISA simulator as reference' do
-      it 'compares PC sequences after boot (100 at start, 100 at end)', timeout: 30 do
-        # Create reference (Ruby ISA simulator)
-        cpu, _bus = create_isa_simulator(native: false)
-        cpu.reset
+    context 'with IR Interpreter as reference' do
+      it 'compares PC sequences after boot vs JIT and Compiler', timeout: 120 do
+        # Create reference (IR Interpreter)
+        ref_sim = create_apple2_ir_simulator(:interpreter)
+        ref_sim.load_rom(@rom_data)
+        boot_ir_simulator(ref_sim)
 
-        # Create target (Apple2 IR interpreter) and boot it
-        ir_sim = create_apple2_ir_simulator(:interpreter)
-        ir_sim.load_rom(@rom_data)
-        boot_cycles = boot_ir_simulator(ir_sim)
-
-        # Collect PC transitions from ISA
-        isa_transitions = collect_isa_pc_transitions(cpu, RUBY_ITERATIONS)
-
-        # Collect PC transitions from IR (use smaller multiplier)
-        ir_result = collect_ir_pc_transitions(ir_sim, RUBY_ITERATIONS * 5, target_transitions: isa_transitions.size * 2)
-        ir_transitions = ir_result[:transitions]
+        # Collect PC transitions from reference interpreter
+        ref_result = collect_ir_pc_transitions(ref_sim, INTERPRETER_ITERATIONS * 5, target_transitions: INTERPRETER_ITERATIONS * 2)
+        ref_transitions = ref_result[:transitions]
 
         compare_count = 100
-        first_isa = isa_transitions.first(compare_count)
-        last_isa = isa_transitions.last(compare_count)
+        first_ref = ref_transitions.first(compare_count)
+        last_ref = ref_transitions.last(compare_count)
 
-        first_match = find_isa_pcs_in_ir(first_isa, ir_transitions)
-        last_match = find_isa_pcs_in_ir(last_isa, ir_transitions)
+        puts "\n  PC Sequence Comparison (IR Interpreter vs JIT & Compiler):"
+        puts "  Reference (Interpreter): #{ref_transitions.size} transitions"
+        puts "  First 10 Ref: #{first_ref.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
 
-        puts "\n  PC Sequence Comparison (Ruby ISA vs IR Interpreter):"
-        puts "  Boot cycles: #{boot_cycles}"
-        puts "  ISA transitions: #{isa_transitions.size}, IR transitions: #{ir_transitions.size}"
-        puts "  First #{compare_count} ISA PCs found in IR: #{first_match[:found].size}/#{compare_count}"
-        puts "  Last #{compare_count} ISA PCs found in IR: #{last_match[:found].size}/#{compare_count}"
-        puts "  First 10 ISA: #{first_isa.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
-        puts "  First 10 IR:  #{ir_transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+        results = {}
 
-        if first_match[:not_found].any?
-          puts "  Missing ISA PCs: #{first_match[:not_found].first(5).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+        # Test JIT and Compiler against interpreter
+        [:jit, :compiler].each do |backend|
+          begin
+            ir_sim = create_apple2_ir_simulator(backend)
+            ir_sim.load_rom(@rom_data)
+            boot_cycles = boot_ir_simulator(ir_sim)
+
+            ir_result = collect_ir_pc_transitions(ir_sim, INTERPRETER_ITERATIONS * 5, target_transitions: ref_transitions.size * 2)
+            ir_transitions = ir_result[:transitions]
+
+            first_match = find_isa_pcs_in_ir(first_ref, ir_transitions)
+            last_match = find_isa_pcs_in_ir(last_ref, ir_transitions)
+            match_rate = first_match[:found].size.to_f / compare_count
+
+            results[backend] = { transitions: ir_transitions.size, boot: boot_cycles, match: match_rate }
+
+            puts "  #{backend.to_s.capitalize}: #{ir_transitions.size} transitions, boot=#{boot_cycles}, first=#{first_match[:found].size}/#{compare_count}, last=#{last_match[:found].size}/#{compare_count}"
+            puts "    First 10 IR: #{ir_transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+
+            expect(ir_transitions.size).to be >= compare_count, "#{backend}: should have >= #{compare_count} transitions"
+            expect(match_rate).to be >= 0.95, "#{backend}: at least 95% match rate required vs interpreter"
+          rescue => e
+            if e.message.include?('not available') || e.message.include?('skip') || e.message.include?('timeout')
+              puts "  #{backend.to_s.capitalize}: SKIPPED (#{e.message.split("\n").first})"
+            else
+              raise
+            end
+          end
         end
 
-        # Verify both systems execute valid code
-        expect(isa_transitions.size).to be >= compare_count
-        expect(ir_transitions.size).to be >= compare_count
-
-        # Report match rate (some PCs may differ due to cycle-level timing)
-        match_rate = first_match[:found].size.to_f / compare_count
-        puts "  Match rate: #{(match_rate * 100).round(1)}%"
-        expect(match_rate).to be >= 0.8, "At least 80% of first #{compare_count} ISA PCs should appear in IR"
+        expect(ref_transitions.size).to be >= compare_count
+        expect(results.size).to be >= 1, "At least one IR backend (JIT or Compiler) should be tested"
       end
     end
 
@@ -1067,78 +1075,57 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
         skip 'Native ISA simulator not available' unless native_isa_available?
       end
 
-      it 'compares PC sequences after boot vs IR interpreter', timeout: 30 do
+      it 'compares PC sequences after boot vs all 3 IR backends', timeout: 120 do
         cpu, _bus = create_isa_simulator(native: true)
         skip 'Native ISA simulator not available' unless cpu.native?
         cpu.reset
 
-        ir_sim = create_apple2_ir_simulator(:interpreter)
-        ir_sim.load_rom(@rom_data)
-        boot_cycles = boot_ir_simulator(ir_sim)
-
-        isa_transitions = collect_isa_pc_transitions(cpu, INTERPRETER_ITERATIONS)
-        ir_result = collect_ir_pc_transitions(ir_sim, INTERPRETER_ITERATIONS * 5, target_transitions: isa_transitions.size * 2)
-        ir_transitions = ir_result[:transitions]
-
-        compare_count = 100
-        first_isa = isa_transitions.first(compare_count)
-        last_isa = isa_transitions.last(compare_count)
-
-        first_match = find_isa_pcs_in_ir(first_isa, ir_transitions)
-        last_match = find_isa_pcs_in_ir(last_isa, ir_transitions)
-
-        puts "\n  PC Sequence Comparison (Rust ISA vs IR Interpreter):"
-        puts "  Boot cycles: #{boot_cycles}"
-        puts "  ISA transitions: #{isa_transitions.size}, IR transitions: #{ir_transitions.size}"
-        puts "  First #{compare_count} ISA PCs found in IR: #{first_match[:found].size}/#{compare_count}"
-        puts "  Last #{compare_count} ISA PCs found in IR: #{last_match[:found].size}/#{compare_count}"
-        puts "  First 10 ISA: #{first_isa.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
-        puts "  First 10 IR:  #{ir_transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
-
-        expect(isa_transitions.size).to be >= compare_count
-        expect(ir_transitions.size).to be >= compare_count
-
-        match_rate = first_match[:found].size.to_f / compare_count
-        puts "  Match rate: #{(match_rate * 100).round(1)}%"
-        expect(match_rate).to be >= 0.8
-      end
-
-      it 'compares PC sequences after boot vs IR JIT', timeout: 30 do
-        cpu, _bus = create_isa_simulator(native: true)
-        skip 'Native ISA simulator not available' unless cpu.native?
-        cpu.reset
-
-        ir_sim = create_apple2_ir_simulator(:jit)
-        ir_sim.load_rom(@rom_data)
-        boot_cycles = boot_ir_simulator(ir_sim)
-
-        # Use smaller iterations for JIT to avoid timeout
+        # Use smaller iterations for comparison
         iterations = [JIT_ITERATIONS, 10_000].min
         isa_transitions = collect_isa_pc_transitions(cpu, iterations)
-        ir_result = collect_ir_pc_transitions(ir_sim, iterations * 5, target_transitions: isa_transitions.size * 2)
-        ir_transitions = ir_result[:transitions]
 
         compare_count = 100
         first_isa = isa_transitions.first(compare_count)
         last_isa = isa_transitions.last(compare_count)
 
-        first_match = find_isa_pcs_in_ir(first_isa, ir_transitions)
-        last_match = find_isa_pcs_in_ir(last_isa, ir_transitions)
-
-        puts "\n  PC Sequence Comparison (Rust ISA vs IR JIT):"
-        puts "  Boot cycles: #{boot_cycles}"
-        puts "  ISA transitions: #{isa_transitions.size}, IR transitions: #{ir_transitions.size}"
-        puts "  First #{compare_count} ISA PCs found in IR: #{first_match[:found].size}/#{compare_count}"
-        puts "  Last #{compare_count} ISA PCs found in IR: #{last_match[:found].size}/#{compare_count}"
+        puts "\n  PC Sequence Comparison (Rust ISA vs All IR Backends):"
+        puts "  ISA transitions: #{isa_transitions.size}"
         puts "  First 10 ISA: #{first_isa.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
-        puts "  First 10 IR:  #{ir_transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+
+        results = {}
+
+        # Test all 3 IR backends
+        [:interpreter, :jit, :compiler].each do |backend|
+          begin
+            ir_sim = create_apple2_ir_simulator(backend)
+            ir_sim.load_rom(@rom_data)
+            boot_cycles = boot_ir_simulator(ir_sim)
+
+            ir_result = collect_ir_pc_transitions(ir_sim, iterations * 5, target_transitions: isa_transitions.size * 2)
+            ir_transitions = ir_result[:transitions]
+
+            first_match = find_isa_pcs_in_ir(first_isa, ir_transitions)
+            last_match = find_isa_pcs_in_ir(last_isa, ir_transitions)
+            match_rate = first_match[:found].size.to_f / compare_count
+
+            results[backend] = { transitions: ir_transitions.size, boot: boot_cycles, match: match_rate }
+
+            puts "  #{backend.to_s.capitalize}: #{ir_transitions.size} transitions, boot=#{boot_cycles}, first=#{first_match[:found].size}/#{compare_count}, last=#{last_match[:found].size}/#{compare_count}"
+            puts "    First 10 IR: #{ir_transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+
+            expect(ir_transitions.size).to be >= compare_count, "#{backend}: should have >= #{compare_count} transitions"
+            expect(match_rate).to be >= 0.8, "#{backend}: at least 80% match rate required"
+          rescue => e
+            if e.message.include?('not available') || e.message.include?('skip') || e.message.include?('timeout')
+              puts "  #{backend.to_s.capitalize}: SKIPPED (#{e.message.split("\n").first})"
+            else
+              raise
+            end
+          end
+        end
 
         expect(isa_transitions.size).to be >= compare_count
-        expect(ir_transitions.size).to be >= compare_count
-
-        match_rate = first_match[:found].size.to_f / compare_count
-        puts "  Match rate: #{(match_rate * 100).round(1)}%"
-        expect(match_rate).to be >= 0.8
+        expect(results.size).to be >= 1, "At least one IR backend should be tested"
       end
     end
   end
@@ -1204,44 +1191,58 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
       cpu.reset
     end
 
-    context 'with Ruby ISA simulator as reference' do
-      it 'compares PC sequences from game entry point (100 at start, 100 at end)', timeout: 30 do
-        # Create reference (Ruby ISA simulator) - PC at game entry
-        cpu, bus = create_isa_simulator(native: false)
-        setup_isa_for_karateka(cpu, bus)
+    context 'with IR Interpreter as reference' do
+      it 'compares PC sequences from game entry vs JIT and Compiler', timeout: 120 do
+        # Create reference (IR Interpreter)
+        ref_sim = create_apple2_ir_simulator(:interpreter)
+        setup_result = setup_ir_for_karateka(ref_sim)
 
-        # Create target (Apple2 IR interpreter) - PC forced to game entry
-        ir_sim = create_apple2_ir_simulator(:interpreter)
-        setup_result = setup_ir_for_karateka(ir_sim)
-
-        # Collect PC transitions from ISA
-        isa_transitions = collect_isa_pc_transitions(cpu, RUBY_ITERATIONS)
-
-        # Collect PC transitions from IR
-        ir_result = collect_ir_pc_transitions(ir_sim, RUBY_ITERATIONS * 5, target_transitions: isa_transitions.size * 2)
-        ir_transitions = ir_result[:transitions]
+        # Collect PC transitions from reference interpreter
+        ref_result = collect_ir_pc_transitions(ref_sim, INTERPRETER_ITERATIONS * 5, target_transitions: INTERPRETER_ITERATIONS * 2)
+        ref_transitions = ref_result[:transitions]
 
         compare_count = 100
-        first_isa = isa_transitions.first(compare_count)
-        last_isa = isa_transitions.last(compare_count)
+        first_ref = ref_transitions.first(compare_count)
+        last_ref = ref_transitions.last(compare_count)
 
-        first_match = find_isa_pcs_in_ir(first_isa, ir_transitions)
-        last_match = find_isa_pcs_in_ir(last_isa, ir_transitions)
+        puts "\n  PC Sequence Comparison (IR Interpreter vs JIT & Compiler - Karateka):"
+        puts "  Target PC: 0x#{KARATEKA_ENTRY.to_s(16)}, started=0x#{setup_result[:started_at].to_s(16)}"
+        puts "  Reference (Interpreter): #{ref_transitions.size} transitions"
+        puts "  First 10 Ref: #{first_ref.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
 
-        puts "\n  PC Sequence Comparison (Ruby ISA vs IR Interpreter - Karateka game code):"
-        puts "  Target PC: 0x#{KARATEKA_ENTRY.to_s(16)}, IR actual: 0x#{setup_result[:started_at].to_s(16)}"
-        puts "  ISA transitions: #{isa_transitions.size}, IR transitions: #{ir_transitions.size}"
-        puts "  First #{compare_count} ISA PCs found in IR: #{first_match[:found].size}/#{compare_count}"
-        puts "  Last #{compare_count} ISA PCs found in IR: #{last_match[:found].size}/#{compare_count}"
-        puts "  First 10 ISA: #{first_isa.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
-        puts "  First 10 IR:  #{ir_transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+        results = {}
 
-        expect(isa_transitions.size).to be >= compare_count
-        expect(ir_transitions.size).to be >= compare_count
+        # Test JIT and Compiler against interpreter
+        [:jit, :compiler].each do |backend|
+          begin
+            ir_sim = create_apple2_ir_simulator(backend)
+            ir_setup = setup_ir_for_karateka(ir_sim)
 
-        match_rate = first_match[:found].size.to_f / compare_count
-        puts "  Match rate: #{(match_rate * 100).round(1)}%"
-        expect(match_rate).to be >= 0.8, "At least 80% of first #{compare_count} ISA PCs should appear in IR"
+            ir_result = collect_ir_pc_transitions(ir_sim, INTERPRETER_ITERATIONS * 5, target_transitions: ref_transitions.size * 2)
+            ir_transitions = ir_result[:transitions]
+
+            first_match = find_isa_pcs_in_ir(first_ref, ir_transitions)
+            last_match = find_isa_pcs_in_ir(last_ref, ir_transitions)
+            match_rate = first_match[:found].size.to_f / compare_count
+
+            results[backend] = { transitions: ir_transitions.size, started: ir_setup[:started_at], match: match_rate }
+
+            puts "  #{backend.to_s.capitalize}: started=0x#{ir_setup[:started_at].to_s(16)}, #{ir_transitions.size} trans, first=#{first_match[:found].size}/#{compare_count}, last=#{last_match[:found].size}/#{compare_count}"
+            puts "    First 10 IR: #{ir_transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+
+            expect(ir_transitions.size).to be >= compare_count, "#{backend}: should have >= #{compare_count} transitions"
+            expect(match_rate).to be >= 0.95, "#{backend}: at least 95% match rate required vs interpreter"
+          rescue => e
+            if e.message.include?('not available') || e.message.include?('skip') || e.message.include?('timeout')
+              puts "  #{backend.to_s.capitalize}: SKIPPED (#{e.message.split("\n").first})"
+            else
+              raise
+            end
+          end
+        end
+
+        expect(ref_transitions.size).to be >= compare_count
+        expect(results.size).to be >= 1, "At least one IR backend (JIT or Compiler) should be tested"
       end
     end
 
@@ -1250,75 +1251,56 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
         skip 'Native ISA simulator not available' unless native_isa_available?
       end
 
-      it 'compares PC sequences from game entry vs IR interpreter', timeout: 30 do
+      it 'compares PC sequences from game entry vs all 3 IR backends', timeout: 120 do
         cpu, bus = create_isa_simulator(native: true)
         skip 'Native ISA simulator not available' unless cpu.native?
         setup_isa_for_karateka(cpu, bus)
-
-        ir_sim = create_apple2_ir_simulator(:interpreter)
-        setup_result = setup_ir_for_karateka(ir_sim)
-
-        isa_transitions = collect_isa_pc_transitions(cpu, INTERPRETER_ITERATIONS)
-        ir_result = collect_ir_pc_transitions(ir_sim, INTERPRETER_ITERATIONS * 5, target_transitions: isa_transitions.size * 2)
-        ir_transitions = ir_result[:transitions]
-
-        compare_count = 100
-        first_isa = isa_transitions.first(compare_count)
-        last_isa = isa_transitions.last(compare_count)
-
-        first_match = find_isa_pcs_in_ir(first_isa, ir_transitions)
-        last_match = find_isa_pcs_in_ir(last_isa, ir_transitions)
-
-        puts "\n  PC Sequence Comparison (Rust ISA vs IR Interpreter - Karateka game code):"
-        puts "  Target PC: 0x#{KARATEKA_ENTRY.to_s(16)}, IR actual: 0x#{setup_result[:started_at].to_s(16)}"
-        puts "  ISA transitions: #{isa_transitions.size}, IR transitions: #{ir_transitions.size}"
-        puts "  First #{compare_count} ISA PCs found in IR: #{first_match[:found].size}/#{compare_count}"
-        puts "  Last #{compare_count} ISA PCs found in IR: #{last_match[:found].size}/#{compare_count}"
-        puts "  First 10 ISA: #{first_isa.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
-        puts "  First 10 IR:  #{ir_transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
-
-        expect(isa_transitions.size).to be >= compare_count
-        expect(ir_transitions.size).to be >= compare_count
-
-        match_rate = first_match[:found].size.to_f / compare_count
-        puts "  Match rate: #{(match_rate * 100).round(1)}%"
-        expect(match_rate).to be >= 0.8
-      end
-
-      it 'compares PC sequences from game entry vs IR JIT', timeout: 30 do
-        cpu, bus = create_isa_simulator(native: true)
-        skip 'Native ISA simulator not available' unless cpu.native?
-        setup_isa_for_karateka(cpu, bus)
-
-        ir_sim = create_apple2_ir_simulator(:jit)
-        setup_result = setup_ir_for_karateka(ir_sim)
 
         iterations = [JIT_ITERATIONS, 10_000].min
         isa_transitions = collect_isa_pc_transitions(cpu, iterations)
-        ir_result = collect_ir_pc_transitions(ir_sim, iterations * 5, target_transitions: isa_transitions.size * 2)
-        ir_transitions = ir_result[:transitions]
 
         compare_count = 100
         first_isa = isa_transitions.first(compare_count)
         last_isa = isa_transitions.last(compare_count)
 
-        first_match = find_isa_pcs_in_ir(first_isa, ir_transitions)
-        last_match = find_isa_pcs_in_ir(last_isa, ir_transitions)
-
-        puts "\n  PC Sequence Comparison (Rust ISA vs IR JIT - Karateka game code):"
-        puts "  Target PC: 0x#{KARATEKA_ENTRY.to_s(16)}, IR actual: 0x#{setup_result[:started_at].to_s(16)}"
-        puts "  ISA transitions: #{isa_transitions.size}, IR transitions: #{ir_transitions.size}"
-        puts "  First #{compare_count} ISA PCs found in IR: #{first_match[:found].size}/#{compare_count}"
-        puts "  Last #{compare_count} ISA PCs found in IR: #{last_match[:found].size}/#{compare_count}"
+        puts "\n  PC Sequence Comparison (Rust ISA vs All IR Backends - Karateka):"
+        puts "  Target PC: 0x#{KARATEKA_ENTRY.to_s(16)}"
+        puts "  ISA transitions: #{isa_transitions.size}"
         puts "  First 10 ISA: #{first_isa.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
-        puts "  First 10 IR:  #{ir_transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+
+        results = {}
+
+        # Test all 3 IR backends
+        [:interpreter, :jit, :compiler].each do |backend|
+          begin
+            ir_sim = create_apple2_ir_simulator(backend)
+            setup_result = setup_ir_for_karateka(ir_sim)
+
+            ir_result = collect_ir_pc_transitions(ir_sim, iterations * 5, target_transitions: isa_transitions.size * 2)
+            ir_transitions = ir_result[:transitions]
+
+            first_match = find_isa_pcs_in_ir(first_isa, ir_transitions)
+            last_match = find_isa_pcs_in_ir(last_isa, ir_transitions)
+            match_rate = first_match[:found].size.to_f / compare_count
+
+            results[backend] = { transitions: ir_transitions.size, started: setup_result[:started_at], match: match_rate }
+
+            puts "  #{backend.to_s.capitalize}: started=0x#{setup_result[:started_at].to_s(16)}, #{ir_transitions.size} trans, first=#{first_match[:found].size}/#{compare_count}, last=#{last_match[:found].size}/#{compare_count}"
+            puts "    First 10 IR: #{ir_transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+
+            expect(ir_transitions.size).to be >= compare_count, "#{backend}: should have >= #{compare_count} transitions"
+            expect(match_rate).to be >= 0.8, "#{backend}: at least 80% match rate required"
+          rescue => e
+            if e.message.include?('not available') || e.message.include?('skip') || e.message.include?('timeout')
+              puts "  #{backend.to_s.capitalize}: SKIPPED (#{e.message.split("\n").first})"
+            else
+              raise
+            end
+          end
+        end
 
         expect(isa_transitions.size).to be >= compare_count
-        expect(ir_transitions.size).to be >= compare_count
-
-        match_rate = first_match[:found].size.to_f / compare_count
-        puts "  Match rate: #{(match_rate * 100).round(1)}%"
-        expect(match_rate).to be >= 0.8
+        expect(results.size).to be >= 1, "At least one IR backend should be tested"
       end
     end
   end

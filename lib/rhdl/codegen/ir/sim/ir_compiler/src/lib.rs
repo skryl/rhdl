@@ -560,9 +560,9 @@ impl SimulatorState {
     }
 
     fn run_cpu_cycles(&mut self, n: usize, key_data: u8, key_ready: bool) -> CycleResult {
-        // Use compiled run_cpu_cycles only when explicitly enabled.
-        // The compiled version is faster but can diverge from the interpreter in complex timing cases.
-        if std::env::var("RHDL_USE_COMPILED_CYCLES").is_ok() {
+        // Use compiled run_cpu_cycles when available (default behavior).
+        // Set RHDL_INTERPRETED_CYCLES=1 to force interpreted mode for debugging.
+        if self.compiled && std::env::var("RHDL_INTERPRETED_CYCLES").is_err() {
             if let Some(ref lib) = self.compiled_lib {
             unsafe {
                 type RunCpuCyclesFn = unsafe extern "C" fn(
