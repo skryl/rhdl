@@ -185,6 +185,20 @@ const OP_RESIZE: u8 = 28;
 const OP_COPY_TO_SIG: u8 = 29; // signals[dst] = get_operand(arg0) & arg2
 const OP_MEM_READ: u8 = 30;    // temps[dst] = memories[arg0][get_operand(arg1)] & arg2
 
+// Specialized ops with pre-decoded signal operands (no tag checking at runtime)
+// These store raw signal indices in arg0/arg1 instead of tagged operands
+const OP_AND_SS: u8 = 32;      // temps[dst] = signals[arg0] & signals[arg1]
+const OP_OR_SS: u8 = 33;       // temps[dst] = signals[arg0] | signals[arg1]
+const OP_XOR_SS: u8 = 34;      // temps[dst] = signals[arg0] ^ signals[arg1]
+const OP_EQ_SS: u8 = 35;       // temps[dst] = (signals[arg0] == signals[arg1]) as u64
+const OP_MUX_SSS: u8 = 36;     // temps[dst] = mux(signals[arg0], signals[arg1], signals[arg2])
+const OP_COPY_SIG_TO_SIG: u8 = 37;  // signals[dst] = signals[arg0] & arg2
+const OP_AND_SI: u8 = 38;      // temps[dst] = signals[arg0] & arg1 (immediate in arg1)
+const OP_OR_SI: u8 = 39;       // temps[dst] = signals[arg0] | arg1
+const OP_SLICE_S: u8 = 40;     // temps[dst] = (signals[arg0] >> arg1) & arg2
+const OP_NOT_S: u8 = 41;       // temps[dst] = (!signals[arg0]) & arg2
+const OP_STORE_NEXT_REG: u8 = 42;  // next_regs[dst] = get_operand(arg0) & arg2
+
 // Operand type tags (stored in high bits of arg values)
 const TAG_SIGNAL: u64 = 0;
 const TAG_IMMEDIATE: u64 = 1 << 62;
@@ -222,6 +236,9 @@ struct CompiledAssign {
     ops: Vec<FlatOp>,
     /// Final target signal index (for sequential assignment sampling)
     final_target: usize,
+    /// Fast path: if the assignment is just reading a signal (optionally masked),
+    /// store the source signal index and mask directly to skip op execution
+    fast_source: Option<(usize, u64)>,  // (signal_idx, mask)
 }
 
 // ============================================================================
@@ -245,6 +262,12 @@ struct RtlSimulator {
     seq_assigns: Vec<CompiledAssign>,
     /// All combinational ops flattened into one contiguous array
     all_comb_ops: Vec<FlatOp>,
+    /// All sequential ops flattened for cache-friendly sampling
+    /// Each op sequence ends with a special marker op that stores result in next_regs
+    all_seq_ops: Vec<FlatOp>,
+    /// For each sequential assign: (start_idx, fast_source option)
+    /// If fast_source is Some, skip ops and just read signal directly
+    seq_fast_paths: Vec<Option<(usize, u64)>>,  // (signal_idx, mask)
     /// Total signal count
     signal_count: usize,
     /// Register count
@@ -261,6 +284,9 @@ struct RtlSimulator {
     clock_indices: Vec<usize>,
     /// Old clock values for edge detection
     old_clocks: Vec<u64>,
+    /// Pre-grouped: for each clock domain, list of (seq_assign_idx, target_idx)
+    /// This avoids O(n) scan of seq_clocks for each clock edge
+    clock_domain_assigns: Vec<Vec<(usize, usize)>>,
 
     // Apple II specific: internalized memory for batched execution
     /// RAM (48KB)
@@ -375,7 +401,11 @@ impl RtlSimulator {
                 let target_idx = *name_to_idx.get(&stmt.target).unwrap_or(&0);
                 let (ops, temps_used) = Self::compile_to_flat_ops(&stmt.expr, target_idx, &name_to_idx, &mem_name_to_idx, &widths);
                 max_temps = max_temps.max(temps_used);
-                seq_assigns.push(CompiledAssign { ops, final_target: target_idx });
+
+                // Detect fast path: if expr is a simple signal read (optionally with mux/resize)
+                let fast_source = Self::detect_fast_source(&stmt.expr, &name_to_idx, &widths);
+
+                seq_assigns.push(CompiledAssign { ops, final_target: target_idx, fast_source });
                 seq_targets.push(target_idx);
                 seq_clocks.push(clock_idx);
             }
@@ -384,6 +414,64 @@ impl RtlSimulator {
         // Collect all unique clock indices
         let clock_indices: Vec<usize> = clock_set.into_iter().collect();
         let old_clocks = vec![0u64; clock_indices.len()];
+
+        // Pre-group sequential assignments by clock domain
+        // Maps clock_list_idx -> Vec<(seq_assign_idx, target_idx)>
+        let mut clock_domain_assigns: Vec<Vec<(usize, usize)>> = vec![Vec::new(); clock_indices.len()];
+        for (seq_idx, &clk_idx) in seq_clocks.iter().enumerate() {
+            if let Some(clock_list_idx) = clock_indices.iter().position(|&c| c == clk_idx) {
+                clock_domain_assigns[clock_list_idx].push((seq_idx, seq_targets[seq_idx]));
+            }
+        }
+
+        // Flatten sequential ops for cache-friendly sampling
+        // Each sequence ends with a marker that stores result to next_regs[i]
+        let mut all_seq_ops = Vec::new();
+        let mut seq_fast_paths = Vec::new();
+
+        for (i, seq_assign) in seq_assigns.iter().enumerate() {
+            if let Some((src_idx, mask)) = seq_assign.fast_source {
+                // Fast path: just record the source, no ops needed
+                seq_fast_paths.push(Some((src_idx, mask)));
+            } else if seq_assign.ops.is_empty() {
+                // No ops - skip
+                seq_fast_paths.push(None);
+            } else {
+                // Add all ops except the last (which writes to signal)
+                seq_fast_paths.push(None);
+                let ops_len = seq_assign.ops.len();
+                for op in &seq_assign.ops[..ops_len.saturating_sub(1)] {
+                    all_seq_ops.push(*op);
+                }
+
+                // For the last op, if it's COPY_TO_SIG, convert to store in next_regs
+                // We use a special marker: OP_COPY_TO_SIG with dst = i (next_regs index)
+                // But we need to differentiate from regular COPY_TO_SIG...
+                // Actually, just store the final op info and handle in sampling
+                let last_op = &seq_assign.ops[ops_len - 1];
+                if last_op.op_type == OP_COPY_TO_SIG {
+                    // Store a modified op that writes to next_regs instead
+                    // We'll use a new op type for this
+                    all_seq_ops.push(FlatOp {
+                        op_type: OP_STORE_NEXT_REG,  // New op type
+                        dst: i,  // next_regs index
+                        arg0: last_op.arg0,
+                        arg1: 0,
+                        arg2: last_op.arg2,
+                    });
+                } else {
+                    // Fallback: execute the op and store from final_target
+                    all_seq_ops.push(*last_op);
+                    all_seq_ops.push(FlatOp {
+                        op_type: OP_STORE_NEXT_REG,
+                        dst: i,
+                        arg0: FlatOp::encode_operand(Operand::Signal(seq_assign.final_target)),
+                        arg1: 0,
+                        arg2: u64::MAX,
+                    });
+                }
+            }
+        }
 
         // Pre-allocate temp buffer
         let temps = vec![0u64; max_temps + 1];
@@ -407,6 +495,8 @@ impl RtlSimulator {
             output_names,
             seq_assigns,
             all_comb_ops,
+            all_seq_ops,
+            seq_fast_paths,
             signal_count,
             reg_count,
             next_regs,
@@ -414,6 +504,7 @@ impl RtlSimulator {
             seq_clocks,
             clock_indices,
             old_clocks,
+            clock_domain_assigns,
             ram: vec![0u8; 48 * 1024],
             rom: vec![0u8; 12 * 1024],
             ram_addr_idx,
@@ -473,6 +564,16 @@ impl RtlSimulator {
             Operand::Signal(idx) if idx == final_target => {
                 // Already in place
             }
+            Operand::Signal(src_idx) => {
+                // Specialized signal-to-signal copy (re-enabled)
+                ops.push(FlatOp {
+                    op_type: OP_COPY_SIG_TO_SIG,
+                    dst: final_target,
+                    arg0: src_idx as u64,
+                    arg1: 0,
+                    arg2: mask,
+                });
+            }
             _ => {
                 ops.push(FlatOp {
                     op_type: OP_COPY_TO_SIG,
@@ -514,21 +615,26 @@ impl RtlSimulator {
                 let op_width = Self::expr_width(operand, widths, name_to_idx);
                 let op_mask = Self::compute_mask(op_width);
 
-                let op_type = match op.as_str() {
-                    "~" | "not" => OP_NOT,
-                    "&" | "reduce_and" => OP_REDUCE_AND,
-                    "|" | "reduce_or" => OP_REDUCE_OR,
-                    "^" | "reduce_xor" => OP_REDUCE_XOR,
-                    _ => OP_COPY_TMP,
-                };
+                // NOT_S disabled for testing
+                let emitted_specialized = false;
 
-                ops.push(FlatOp {
-                    op_type,
-                    dst,
-                    arg0: FlatOp::encode_operand(src),
-                    arg1: op_mask,  // For reduce_and
-                    arg2: mask,
-                });
+                if !emitted_specialized {
+                    let op_type = match op.as_str() {
+                        "~" | "not" => OP_NOT,
+                        "&" | "reduce_and" => OP_REDUCE_AND,
+                        "|" | "reduce_or" => OP_REDUCE_OR,
+                        "^" | "reduce_xor" => OP_REDUCE_XOR,
+                        _ => OP_COPY_TMP,
+                    };
+
+                    ops.push(FlatOp {
+                        op_type,
+                        dst,
+                        arg0: FlatOp::encode_operand(src),
+                        arg1: op_mask,  // For reduce_and
+                        arg2: mask,
+                    });
+                }
                 Operand::Temp(dst)
             }
             ExprDef::BinaryOp { op, left, right, width } => {
@@ -538,33 +644,52 @@ impl RtlSimulator {
                 let dst = *temp_counter;
                 *temp_counter += 1;
 
-                let op_type = match op.as_str() {
-                    "&" => OP_AND,
-                    "|" => OP_OR,
-                    "^" => OP_XOR,
-                    "+" => OP_ADD,
-                    "-" => OP_SUB,
-                    "*" => OP_MUL,
-                    "/" => OP_DIV,
-                    "%" => OP_MOD,
-                    "<<" => OP_SHL,
-                    ">>" => OP_SHR,
-                    "==" => OP_EQ,
-                    "!=" => OP_NE,
-                    "<" => OP_LT,
-                    ">" => OP_GT,
-                    "<=" | "le" => OP_LE,
-                    ">=" => OP_GE,
-                    _ => OP_AND,
+                // AND_SS, OR_SS, EQ_SS - testing
+                let emitted_specialized = match (&l, &r, op.as_str()) {
+                    (Operand::Signal(l_idx), Operand::Signal(r_idx), "&") => {
+                        ops.push(FlatOp { op_type: OP_AND_SS, dst, arg0: *l_idx as u64, arg1: *r_idx as u64, arg2: mask });
+                        true
+                    }
+                    (Operand::Signal(l_idx), Operand::Signal(r_idx), "|") => {
+                        ops.push(FlatOp { op_type: OP_OR_SS, dst, arg0: *l_idx as u64, arg1: *r_idx as u64, arg2: mask });
+                        true
+                    }
+                    (Operand::Signal(l_idx), Operand::Signal(r_idx), "==") => {
+                        ops.push(FlatOp { op_type: OP_EQ_SS, dst, arg0: *l_idx as u64, arg1: *r_idx as u64, arg2: mask });
+                        true
+                    }
+                    _ => false,
                 };
 
-                ops.push(FlatOp {
-                    op_type,
-                    dst,
-                    arg0: FlatOp::encode_operand(l),
-                    arg1: FlatOp::encode_operand(r),
-                    arg2: mask,
-                });
+                if !emitted_specialized {
+                    let op_type = match op.as_str() {
+                        "&" => OP_AND,
+                        "|" => OP_OR,
+                        "^" => OP_XOR,
+                        "+" => OP_ADD,
+                        "-" => OP_SUB,
+                        "*" => OP_MUL,
+                        "/" => OP_DIV,
+                        "%" => OP_MOD,
+                        "<<" => OP_SHL,
+                        ">>" => OP_SHR,
+                        "==" => OP_EQ,
+                        "!=" => OP_NE,
+                        "<" => OP_LT,
+                        ">" => OP_GT,
+                        "<=" | "le" => OP_LE,
+                        ">=" => OP_GE,
+                        _ => OP_AND,
+                    };
+
+                    ops.push(FlatOp {
+                        op_type,
+                        dst,
+                        arg0: FlatOp::encode_operand(l),
+                        arg1: FlatOp::encode_operand(r),
+                        arg2: mask,
+                    });
+                }
                 Operand::Temp(dst)
             }
             ExprDef::Mux { condition, when_true, when_false, width } => {
@@ -574,14 +699,17 @@ impl RtlSimulator {
                 let dst = *temp_counter;
                 *temp_counter += 1;
 
-                // Mux uses all 3 arg slots: cond, true_val, false_val
-                ops.push(FlatOp {
-                    op_type: OP_MUX,
-                    dst,
-                    arg0: FlatOp::encode_operand(cond),
-                    arg1: FlatOp::encode_operand(t),
-                    arg2: FlatOp::encode_operand(f),
-                });
+                // MUX_SSS disabled - correctness issue
+                {
+                    // Mux uses all 3 arg slots: cond, true_val, false_val
+                    ops.push(FlatOp {
+                        op_type: OP_MUX,
+                        dst,
+                        arg0: FlatOp::encode_operand(cond),
+                        arg1: FlatOp::encode_operand(t),
+                        arg2: FlatOp::encode_operand(f),
+                    });
+                }
 
                 // Mask result to specified width (prevents overflow issues)
                 let mask = Self::compute_mask(*width);
@@ -602,11 +730,12 @@ impl RtlSimulator {
                 let dst = *temp_counter;
                 *temp_counter += 1;
 
+                // SLICE_S disabled for testing - use generic
                 ops.push(FlatOp {
                     op_type: OP_SLICE,
                     dst,
                     arg0: FlatOp::encode_operand(src),
-                    arg1: *low as u64,  // shift amount
+                    arg1: *low as u64,
                     arg2: mask,
                 });
                 Operand::Temp(dst)
@@ -700,6 +829,37 @@ impl RtlSimulator {
             ExprDef::Concat { width, .. } => *width,
             ExprDef::Resize { width, .. } => *width,
             ExprDef::MemRead { width, .. } => *width,
+        }
+    }
+
+    /// Detect if an expression is a "fast path" - just reading a signal with optional masking.
+    /// Returns Some((signal_idx, mask)) if fast path is possible, None otherwise.
+    fn detect_fast_source(
+        expr: &ExprDef,
+        name_to_idx: &HashMap<String, usize>,
+        widths: &[usize]
+    ) -> Option<(usize, u64)> {
+        match expr {
+            // Direct signal read
+            ExprDef::Signal { name, width } => {
+                let idx = *name_to_idx.get(name)?;
+                let actual_width = widths.get(idx).copied().unwrap_or(*width);
+                let mask = Self::compute_mask(actual_width);
+                Some((idx, mask))
+            }
+            // Resize of a signal
+            ExprDef::Resize { expr: inner, width } => {
+                if let ExprDef::Signal { name, .. } = inner.as_ref() {
+                    let idx = *name_to_idx.get(name)?;
+                    let mask = Self::compute_mask(*width);
+                    Some((idx, mask))
+                } else {
+                    None
+                }
+            }
+            // Slice of a signal - can be optimized but requires shift
+            // For now, skip this case
+            _ => None,
         }
     }
 
@@ -869,8 +1029,112 @@ impl RtlSimulator {
     #[inline(always)]
     fn evaluate(&mut self) {
         // Execute all ops from single contiguous array (optimal cache access)
+        // Inline hot ops for better performance
+        let signals = &mut self.signals;
+        let temps = &mut self.temps;
+        let memories = &self.memory_arrays;
+
         for op in &self.all_comb_ops {
-            Self::execute_flat_op(&mut self.signals, &mut self.temps, &self.memory_arrays, op);
+            // Inline the most common ops to avoid match dispatch overhead
+            match op.op_type {
+                OP_COPY_TO_SIG => {
+                    let val = FlatOp::get_operand(signals, temps, op.arg0) & op.arg2;
+                    unsafe { *signals.get_unchecked_mut(op.dst) = val; }
+                }
+                OP_AND => {
+                    let result = FlatOp::get_operand(signals, temps, op.arg0) & FlatOp::get_operand(signals, temps, op.arg1);
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_OR => {
+                    let result = FlatOp::get_operand(signals, temps, op.arg0) | FlatOp::get_operand(signals, temps, op.arg1);
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_MUX => {
+                    let c = FlatOp::get_operand(signals, temps, op.arg0);
+                    let t = FlatOp::get_operand(signals, temps, op.arg1);
+                    let f = FlatOp::get_operand(signals, temps, op.arg2);
+                    let select = (c != 0) as u64;
+                    let result = (select.wrapping_neg() & t) | ((!select.wrapping_neg()) & f);
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_RESIZE => {
+                    let result = FlatOp::get_operand(signals, temps, op.arg0) & op.arg2;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_EQ => {
+                    let result = (FlatOp::get_operand(signals, temps, op.arg0) == FlatOp::get_operand(signals, temps, op.arg1)) as u64;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_NOT => {
+                    let val = (!FlatOp::get_operand(signals, temps, op.arg0)) & op.arg2;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = val; }
+                }
+                OP_XOR => {
+                    let result = FlatOp::get_operand(signals, temps, op.arg0) ^ FlatOp::get_operand(signals, temps, op.arg1);
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_SLICE => {
+                    let shift = op.arg1 as u32;
+                    let result = (FlatOp::get_operand(signals, temps, op.arg0) >> shift) & op.arg2;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_SHL => {
+                    let shift = FlatOp::get_operand(signals, temps, op.arg1).min(63) as u32;
+                    let result = (FlatOp::get_operand(signals, temps, op.arg0) << shift) & op.arg2;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_ADD => {
+                    let result = FlatOp::get_operand(signals, temps, op.arg0).wrapping_add(FlatOp::get_operand(signals, temps, op.arg1)) & op.arg2;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                // Specialized signal-signal ops (no tag decoding overhead)
+                OP_AND_SS => {
+                    let result = unsafe { *signals.get_unchecked(op.arg0 as usize) & *signals.get_unchecked(op.arg1 as usize) };
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_OR_SS => {
+                    let result = unsafe { *signals.get_unchecked(op.arg0 as usize) | *signals.get_unchecked(op.arg1 as usize) };
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_XOR_SS => {
+                    let result = unsafe { *signals.get_unchecked(op.arg0 as usize) ^ *signals.get_unchecked(op.arg1 as usize) };
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_EQ_SS => {
+                    let result = unsafe { (*signals.get_unchecked(op.arg0 as usize) == *signals.get_unchecked(op.arg1 as usize)) as u64 };
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_MUX_SSS => {
+                    let c = unsafe { *signals.get_unchecked(op.arg0 as usize) };
+                    let t = unsafe { *signals.get_unchecked(op.arg1 as usize) };
+                    let f = unsafe { *signals.get_unchecked(op.arg2 as usize) };
+                    let select = (c != 0) as u64;
+                    let result = (select.wrapping_neg() & t) | ((!select.wrapping_neg()) & f);
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_COPY_SIG_TO_SIG => {
+                    let val = unsafe { *signals.get_unchecked(op.arg0 as usize) } & op.arg2;
+                    unsafe { *signals.get_unchecked_mut(op.dst) = val; }
+                }
+                OP_AND_SI => {
+                    let result = unsafe { *signals.get_unchecked(op.arg0 as usize) } & op.arg1;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_OR_SI => {
+                    let result = unsafe { *signals.get_unchecked(op.arg0 as usize) } | op.arg1;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_SLICE_S => {
+                    let result = (unsafe { *signals.get_unchecked(op.arg0 as usize) } >> op.arg1 as u32) & op.arg2;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_NOT_S => {
+                    let result = (!unsafe { *signals.get_unchecked(op.arg0 as usize) }) & op.arg2;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                // Fall through to generic handler for less common ops
+                _ => Self::execute_flat_op(signals, temps, memories, op),
+            }
         }
     }
 
@@ -890,56 +1154,49 @@ impl RtlSimulator {
         // Evaluate combinational logic (may change derived clocks)
         self.evaluate();
 
-        // Sample ALL register inputs at this point (before any register updates)
-        // This ensures all expressions see the same state
-        // IMPORTANT: Don't write to signals during sampling - only store results in next_regs
-        for (i, seq_assign) in self.seq_assigns.iter().enumerate() {
-            // Execute all ops, but we need to capture the result without corrupting signals
-            // The last op is OP_COPY_TO_SIG which would write to signals[target]
-            // We run all ops but capture the result from the temp that was written
-            let ops_len = seq_assign.ops.len();
-            if ops_len == 0 {
-                continue;
+        // Sample ALL register inputs using flattened ops for cache efficiency
+        // First handle fast paths (direct signal reads)
+        for (i, fast_path) in self.seq_fast_paths.iter().enumerate() {
+            if let Some((src_idx, mask)) = fast_path {
+                let val = unsafe { *self.signals.get_unchecked(*src_idx) } & mask;
+                unsafe { *self.next_regs.get_unchecked_mut(i) = val; }
             }
+        }
 
-            // Execute all ops except the last (which writes to signals)
-            for op in &seq_assign.ops[..ops_len.saturating_sub(1)] {
-                Self::execute_flat_op(&mut self.signals, &mut self.temps, &self.memory_arrays, op);
-            }
-
-            // For the last op, get the result without writing to signals
-            let last_op = &seq_assign.ops[ops_len - 1];
-            if last_op.op_type == OP_COPY_TO_SIG {
-                // Get the operand value and store directly in next_regs
-                let val = FlatOp::get_operand(&self.signals, &self.temps, last_op.arg0) & last_op.arg2;
-                self.next_regs[i] = val;
-            } else {
-                // Fallback: execute and read from target
-                Self::execute_flat_op(&mut self.signals, &mut self.temps, &self.memory_arrays, last_op);
-                self.next_regs[i] = unsafe { *self.signals.get_unchecked(seq_assign.final_target) };
+        // Execute all sequential ops in one contiguous loop (cache-friendly)
+        // The flattened array includes OP_STORE_NEXT_REG ops that write to next_regs
+        for op in &self.all_seq_ops {
+            match op.op_type {
+                OP_STORE_NEXT_REG => {
+                    // Store result in next_regs[dst]
+                    let val = FlatOp::get_operand(&self.signals, &self.temps, op.arg0) & op.arg2;
+                    unsafe { *self.next_regs.get_unchecked_mut(op.dst) = val; }
+                }
+                _ => {
+                    // Execute the op normally (stores in temps or signals)
+                    Self::execute_flat_op(&mut self.signals, &mut self.temps, &self.memory_arrays, op);
+                }
             }
         }
 
         // Iterate for derived clock domains
         // Each iteration may cause new clock edges as registers update
+        // Use pre-grouped assignments to avoid O(n) scan per clock
         const MAX_ITERATIONS: usize = 10;
         for _ in 0..MAX_ITERATIONS {
             // Detect rising edges on all clock signals
             let mut any_edge = false;
             for (clock_list_idx, &clk_idx) in self.clock_indices.iter().enumerate() {
                 let old_val = self.old_clocks[clock_list_idx];
-                let new_val = self.signals[clk_idx];
+                let new_val = unsafe { *self.signals.get_unchecked(clk_idx) };
 
                 // Check for rising edge (0 -> 1)
                 if old_val == 0 && new_val == 1 {
                     any_edge = true;
 
-                    // Update only registers clocked by this signal
-                    for (i, &reg_clk) in self.seq_clocks.iter().enumerate() {
-                        if reg_clk == clk_idx {
-                            let target_idx = self.seq_targets[i];
-                            unsafe { *self.signals.get_unchecked_mut(target_idx) = self.next_regs[i]; }
-                        }
+                    // Update only registers clocked by this signal (pre-grouped)
+                    for &(seq_idx, target_idx) in &self.clock_domain_assigns[clock_list_idx] {
+                        unsafe { *self.signals.get_unchecked_mut(target_idx) = self.next_regs[seq_idx]; }
                     }
 
                     // Mark this clock as processed (set old to 1 to prevent re-triggering)
@@ -954,9 +1211,7 @@ impl RtlSimulator {
             // Re-evaluate combinational logic (may trigger derived clocks)
             self.evaluate();
         }
-
-        // Final evaluate to propagate any remaining changes
-        self.evaluate();
+        // Note: Removed redundant final evaluate() - not needed after loop exits with no edges
     }
 
     /// Load ROM data
@@ -1042,6 +1297,14 @@ impl RtlSimulator {
         // Sample ALL register inputs at this point (before any register updates)
         // IMPORTANT: Don't write to signals during sampling - only store results in next_regs
         for (i, seq_assign) in self.seq_assigns.iter().enumerate() {
+            // Fast path: if this is a simple signal read, just read directly
+            if let Some((src_idx, mask)) = seq_assign.fast_source {
+                let val = unsafe { *self.signals.get_unchecked(src_idx) } & mask;
+                self.next_regs[i] = val;
+                continue;
+            }
+
+            // Slow path: execute ops
             let ops_len = seq_assign.ops.len();
             if ops_len == 0 {
                 continue;
@@ -1064,20 +1327,19 @@ impl RtlSimulator {
         }
 
         // Iterate for derived clock domains
+        // Use pre-grouped assignments to avoid O(n) scan per clock
         const MAX_ITERATIONS: usize = 10;
         for _ in 0..MAX_ITERATIONS {
             let mut any_edge = false;
             for (clock_list_idx, &clk_idx) in self.clock_indices.iter().enumerate() {
                 let old_val = self.old_clocks[clock_list_idx];
-                let new_val = self.signals[clk_idx];
+                let new_val = unsafe { *self.signals.get_unchecked(clk_idx) };
 
                 if old_val == 0 && new_val == 1 {
                     any_edge = true;
-                    for (i, &reg_clk) in self.seq_clocks.iter().enumerate() {
-                        if reg_clk == clk_idx {
-                            let target_idx = self.seq_targets[i];
-                            unsafe { *self.signals.get_unchecked_mut(target_idx) = self.next_regs[i]; }
-                        }
+                    // Use pre-grouped assignments for this clock domain
+                    for &(seq_idx, target_idx) in &self.clock_domain_assigns[clock_list_idx] {
+                        unsafe { *self.signals.get_unchecked_mut(target_idx) = self.next_regs[seq_idx]; }
                     }
                     self.old_clocks[clock_list_idx] = 1;
                 }
@@ -1089,8 +1351,7 @@ impl RtlSimulator {
 
             self.evaluate();
         }
-
-        self.evaluate();
+        // Note: Removed redundant final evaluate() - not needed after loop exits with no edges
     }
 
     /// Run N CPU cycles
@@ -1292,6 +1553,8 @@ impl RubyRtlSim {
         hash.aset(ruby.sym_new("output_count"), sim.output_names.len() as i64)?;
         hash.aset(ruby.sym_new("comb_op_count"), sim.all_comb_ops.len() as i64)?;
         hash.aset(ruby.sym_new("seq_assign_count"), sim.seq_assigns.len() as i64)?;
+        let fast_count = sim.seq_assigns.iter().filter(|a| a.fast_source.is_some()).count();
+        hash.aset(ruby.sym_new("seq_fast_count"), fast_count as i64)?;
 
         Ok(hash)
     }
