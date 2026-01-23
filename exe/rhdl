@@ -337,7 +337,8 @@ def handle_examples_mos6502(args)
     karateka: false,
     clean: false,
     debug: false,
-    mode: :native,  # Simulator mode: native, ruby, or hdl
+    mode: :isa,       # Simulator mode: isa, hdl, or netlist
+    sim: :jit,        # Sim backend: interpret, jit, or compile (ignored for ISA mode)
     rom: nil,
     rom_address: nil,
     address: nil,
@@ -353,7 +354,7 @@ def handle_examples_mos6502(args)
     opts.banner = <<~BANNER
       Usage: rhdl examples mos6502 [options] [FILE]
 
-      MOS 6502 ISA emulator - fast behavioral simulation.
+      MOS 6502 emulator with multiple simulation backends.
 
       Commands:
         rhdl examples mos6502                Run the emulator (default)
@@ -362,14 +363,20 @@ def handle_examples_mos6502(args)
         rhdl examples mos6502 --appleiigo    Run with AppleIIGo ROM
         rhdl examples mos6502 --clean        Clean ROM output files
 
-      Disk loading:
-        rhdl examples mos6502 --appleiigo --disk path/to/disk.dsk
+      Simulation modes:
+        --mode isa              ISA-level simulation (default, fastest)
+        --mode hdl              HDL behavioral simulation (cycle-accurate)
+        --mode netlist          Gate-level netlist simulation (slowest)
 
-      Hi-res graphics:
-        rhdl examples mos6502 --appleiigo --disk karateka.dsk --hires
+      Simulator backends (for HDL/netlist modes):
+        --sim interpret         Pure interpreter (slow, fast startup)
+        --sim jit               Cranelift JIT (default, balanced)
+        --sim compile           AOT compiled (fastest, slow startup)
 
-      Quick start:
-        rhdl examples mos6502 --karateka     Run Karateka directly
+      Examples:
+        rhdl examples mos6502 --karateka
+        rhdl examples mos6502 --mode hdl --sim compile --karateka
+        rhdl examples mos6502 --appleiigo --disk game.dsk --hires
 
       Options:
     BANNER
@@ -381,11 +388,12 @@ def handle_examples_mos6502(args)
     opts.on('-k', '--karateka', 'Load Karateka memory dump (ready to play)') { options[:karateka] = true }
     opts.on('--clean', 'Clean ROM output files') { options[:clean] = true }
     opts.on('-d', '--debug', 'Enable debug mode') { options[:debug] = true }
-    opts.on('-m', '--mode TYPE', [:native, :ruby, :hdl], 'Simulator mode: native (default), ruby, hdl') { |v| options[:mode] = v }
+    opts.on('-m', '--mode TYPE', [:isa, :hdl, :netlist], 'Simulator mode: isa (default), hdl, netlist') { |v| options[:mode] = v }
+    opts.on('--sim TYPE', [:interpret, :jit, :compile], 'Sim backend: interpret, jit (default), compile') { |v| options[:sim] = v }
     opts.on('-r', '--rom FILE', 'ROM file to load') { |v| options[:rom] = v }
     opts.on('-a', '--address ADDR', 'Program load address (hex, default: 0800)') { |v| options[:address] = v }
     opts.on('--rom-address ADDR', 'ROM load address (hex)') { |v| options[:rom_address] = v }
-    opts.on('-s', '--speed CYCLES', Integer, 'Cycles per frame (default: 10000)') { |v| options[:speed] = v }
+    opts.on('-s', '--speed CYCLES', Integer, 'Cycles per frame') { |v| options[:speed] = v }
     opts.on('-g', '--green', 'Green phosphor screen effect') { options[:green] = true }
     opts.on('-H', '--hires', 'Enable hi-res graphics rendering') { options[:hires] = true }
     opts.on('--hires-width WIDTH', Integer, 'Hi-res display width in chars (default: 80)') { |v| options[:hires_width] = v }
@@ -400,9 +408,8 @@ def handle_examples_mos6502(args)
   parser.parse!(args)
   options[:program] = args.shift
   options[:remaining_args] = args
-  options[:subcommand] = :mos6502
 
-  RHDL::CLI::Tasks::Apple2Task.new(options).run
+  RHDL::CLI::Tasks::MOS6502Task.new(options).run
 end
 
 def handle_examples_apple2(args)
@@ -412,7 +419,7 @@ def handle_examples_apple2(args)
     karateka: false,
     debug: false,
     mode: :hdl,       # Simulation mode: hdl (default), netlist
-    sim: :jit,        # Simulator backend: interpret, jit (default), compile
+    sim: :ruby,       # Simulator backend: ruby (default), interpret, jit, compile
     rom: nil,
     address: nil,
     speed: nil,
@@ -438,14 +445,16 @@ def handle_examples_apple2(args)
         --mode hdl                HDL behavioral simulation (default)
         --mode netlist            Gate-level netlist simulation
 
-      Simulator backends (for netlist mode):
-        --sim interpret           Pure Rust interpreter (slowest, fast startup)
-        --sim jit                 Cranelift JIT (default, balanced)
-        --sim compile             Rustc compiled (fastest, slow startup)
+      Simulator backends:
+        --sim ruby                Pure Ruby interpreter (default)
+        --sim interpret           Rust interpreter (fast startup)
+        --sim jit                 Cranelift JIT (balanced)
+        --sim compile             AOT compiled (fastest, slow startup)
 
       Examples:
+        rhdl examples apple2 --demo
         rhdl examples apple2 --mode netlist --sim jit --demo
-        rhdl examples apple2 --mode netlist --sim compile --demo
+        rhdl examples apple2 --mode netlist --sim compile --karateka
 
       Options:
     BANNER
@@ -455,7 +464,7 @@ def handle_examples_apple2(args)
     opts.on('-k', '--karateka', 'Load Karateka memory dump (ready to play)') { options[:karateka] = true }
     opts.on('-d', '--debug', 'Enable debug mode') { options[:debug] = true }
     opts.on('-m', '--mode TYPE', [:hdl, :netlist], 'Simulation mode: hdl (default), netlist') { |v| options[:mode] = v }
-    opts.on('--sim TYPE', [:interpret, :jit, :compile], 'Simulator backend: interpret, jit (default), compile') { |v| options[:sim] = v }
+    opts.on('--sim TYPE', [:ruby, :interpret, :jit, :compile], 'Simulator backend: ruby (default), interpret, jit, compile') { |v| options[:sim] = v }
     opts.on('-r', '--rom FILE', 'ROM file to load') { |v| options[:rom] = v }
     opts.on('-a', '--address ADDR', 'Program load address (hex, default: 0800)') { |v| options[:address] = v }
     opts.on('-s', '--speed CYCLES', Integer, 'Cycles per frame (default: 100)') { |v| options[:speed] = v }
@@ -472,7 +481,6 @@ def handle_examples_apple2(args)
   parser.parse!(args)
   options[:program] = args.shift
   options[:remaining_args] = args
-  options[:subcommand] = :apple2
 
   RHDL::CLI::Tasks::Apple2Task.new(options).run
 end
