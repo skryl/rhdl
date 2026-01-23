@@ -548,6 +548,11 @@ struct JitRtlSimulator {
     clock_indices: Vec<usize>,
     /// Previous clock values (for edge detection)
     prev_clock_values: Vec<u64>,
+    /// Pre-grouped: for each clock domain, list of (seq_assign_idx, target_idx)
+    /// This avoids O(n) scan of seq_clocks for each clock edge
+    clock_domain_assigns: Vec<Vec<(usize, usize)>>,
+    /// Pre-allocated buffer for old clock values in tick (avoids allocation per tick)
+    old_clocks: Vec<u64>,
 
     /// JIT-compiled evaluate function
     evaluate_fn: EvaluateFn,
@@ -647,6 +652,16 @@ impl JitRtlSimulator {
         // Build unique clock indices list and initialize previous values
         let clock_indices: Vec<usize> = clock_set.into_iter().collect();
         let prev_clock_values = vec![0u64; clock_indices.len()];
+        let old_clocks = vec![0u64; clock_indices.len()];
+
+        // Pre-group sequential assignments by clock domain
+        // Maps clock_list_idx -> Vec<(seq_assign_idx, target_idx)>
+        let mut clock_domain_assigns: Vec<Vec<(usize, usize)>> = vec![Vec::new(); clock_indices.len()];
+        for (seq_idx, &clk_idx) in seq_clocks.iter().enumerate() {
+            if let Some(clock_list_idx) = clock_indices.iter().position(|&c| c == clk_idx) {
+                clock_domain_assigns[clock_list_idx].push((seq_idx, seq_targets[seq_idx]));
+            }
+        }
 
         let next_regs = vec![0u64; seq_targets.len()];
 
@@ -704,6 +719,8 @@ impl JitRtlSimulator {
             seq_clocks,
             clock_indices,
             prev_clock_values,
+            clock_domain_assigns,
+            old_clocks,
             evaluate_fn,
             seq_sample_fn,
             memory_arrays,
@@ -741,7 +758,7 @@ impl JitRtlSimulator {
 
     #[inline(always)]
     fn evaluate(&mut self) {
-        // Build memory pointers array on demand
+        // Build memory pointers on stack (small array, no heap allocation)
         let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
             .map(|arr| arr.as_ptr())
             .collect();
@@ -763,32 +780,33 @@ impl JitRtlSimulator {
     }
 
     fn tick_internal(&mut self, _debug: bool) {
+        // Use the full tick path for debug mode (preserves all iteration logic)
+        // For non-debug, use tick_fast which is more optimized
+        self.tick_full();
+    }
+
+    /// Full tick with all debug-friendly iteration (used by tick_debug)
+    fn tick_full(&mut self) {
         // Multi-clock domain simulation using delta-cycle iteration:
         //
         // Key insight: All registers should sample their inputs using the signal
         // values that existed BEFORE the tick started. This models real hardware
         // where all flip-flops sample simultaneously at the clock edge.
-        //
-        // Algorithm:
-        // 1. Sample clock values BEFORE evaluate (pre-tick state)
-        // 2. Evaluate to propagate external input changes
-        // 3. Sample ALL register input expressions using post-evaluate values
-        // 4. Iterate to detect derived clock edges and apply updates
 
         // Sample clock values BEFORE any evaluation (pre-tick state)
-        let mut initial_clock_values: Vec<u64> = Vec::with_capacity(self.clock_indices.len());
-        for &clk_idx in &self.clock_indices {
-            initial_clock_values.push(self.signals[clk_idx]);
+        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+            self.old_clocks[i] = unsafe { *self.signals.get_unchecked(clk_idx) };
         }
 
         // Evaluate to propagate any external input changes (like clk_14m)
         self.evaluate();
 
-        // Sample ALL register input expressions ONCE with post-evaluate signal values
-        // This ensures all registers see the same "snapshot" of combinational logic
+        // Build memory pointers on stack for JIT call
         let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
             .map(|arr| arr.as_ptr())
             .collect();
+
+        // Sample ALL register input expressions ONCE with post-evaluate signal values
         unsafe {
             (self.seq_sample_fn)(
                 self.signals.as_mut_ptr(),
@@ -797,69 +815,86 @@ impl JitRtlSimulator {
             );
         }
 
-        // Track which registers have been updated this tick to avoid double-updates
-        let mut updated: Vec<bool> = vec![false; self.seq_targets.len()];
-        let max_iterations = 10;  // Safety limit to prevent infinite loops
+        // Iterate for derived clock domains using pre-grouped assignments
+        const MAX_ITERATIONS: usize = 10;
+        for _ in 0..MAX_ITERATIONS {
+            // Detect rising edges on all clock signals
+            let mut any_edge = false;
+            for (clock_list_idx, &clk_idx) in self.clock_indices.iter().enumerate() {
+                let old_val = self.old_clocks[clock_list_idx];
+                let new_val = unsafe { *self.signals.get_unchecked(clk_idx) };
 
-        // First, detect rising edges from the INITIAL state to post-evaluate state
-        let mut rising_clocks: Vec<bool> = vec![false; self.signals.len()];
-        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
-            let before = initial_clock_values[i];
-            let after = self.signals[clk_idx];
-            if before == 0 && after == 1 {
-                rising_clocks[clk_idx] = true;
-            }
-        }
+                // Check for rising edge (0 -> 1)
+                if old_val == 0 && new_val == 1 {
+                    any_edge = true;
 
-        // Apply updates for clocks that rose from initial state
-        for (i, &target_idx) in self.seq_targets.iter().enumerate() {
-            let clk_idx = self.seq_clocks[i];
-            if rising_clocks[clk_idx] && !updated[i] {
-                self.signals[target_idx] = self.next_regs[i];
-                updated[i] = true;
-            }
-        }
+                    // Update only registers clocked by this signal (pre-grouped)
+                    for &(seq_idx, target_idx) in &self.clock_domain_assigns[clock_list_idx] {
+                        unsafe { *self.signals.get_unchecked_mut(target_idx) = self.next_regs[seq_idx]; }
+                    }
 
-        // Now iterate to handle derived clocks
-        for _iteration in 0..max_iterations {
-            // Sample clock values before evaluate
-            let mut clock_before: Vec<u64> = Vec::with_capacity(self.clock_indices.len());
-            for &clk_idx in &self.clock_indices {
-                clock_before.push(self.signals[clk_idx]);
-            }
-
-            // Evaluate combinational logic (propagates register changes)
-            self.evaluate();
-
-            // Detect rising edges
-            let mut rising_clocks: Vec<bool> = vec![false; self.signals.len()];
-            let mut any_rising = false;
-            for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
-                let before = clock_before[i];
-                let after = self.signals[clk_idx];
-                if before == 0 && after == 1 {
-                    rising_clocks[clk_idx] = true;
-                    any_rising = true;
+                    // Mark this clock as processed (set old to 1 to prevent re-triggering)
+                    self.old_clocks[clock_list_idx] = 1;
                 }
             }
 
-            // If no rising edges, we've reached a fixed point
-            if !any_rising {
+            if !any_edge {
                 break;
             }
 
-            // Apply the pre-sampled values to registers whose clocks just rose
-            for (i, &target_idx) in self.seq_targets.iter().enumerate() {
-                let clk_idx = self.seq_clocks[i];
-                if rising_clocks[clk_idx] && !updated[i] {
-                    self.signals[target_idx] = self.next_regs[i];
-                    updated[i] = true;
-                }
-            }
+            // Re-evaluate combinational logic (may trigger derived clocks)
+            self.evaluate();
+        }
+    }
+
+    /// Optimized tick with multi-clock domain support (minimal allocations)
+    #[inline(always)]
+    fn tick_fast(&mut self) {
+        // Save old clock values FIRST (using pre-allocated buffer)
+        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+            unsafe { *self.old_clocks.get_unchecked_mut(i) = *self.signals.get_unchecked(clk_idx); }
         }
 
-        // Final evaluate to propagate any remaining combinational changes
         self.evaluate();
+
+        // Build memory pointers on stack for JIT call
+        let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
+            .map(|arr| arr.as_ptr())
+            .collect();
+
+        // Sample ALL register inputs using JIT-compiled function
+        unsafe {
+            (self.seq_sample_fn)(
+                self.signals.as_mut_ptr(),
+                self.next_regs.as_mut_ptr(),
+                mem_ptrs.as_ptr()
+            );
+        }
+
+        // Iterate for derived clock domains using pre-grouped assignments
+        const MAX_ITERATIONS: usize = 10;
+        for _ in 0..MAX_ITERATIONS {
+            let mut any_edge = false;
+            for (clock_list_idx, &clk_idx) in self.clock_indices.iter().enumerate() {
+                let old_val = unsafe { *self.old_clocks.get_unchecked(clock_list_idx) };
+                let new_val = unsafe { *self.signals.get_unchecked(clk_idx) };
+
+                if old_val == 0 && new_val == 1 {
+                    any_edge = true;
+                    // Use pre-grouped assignments for this clock domain
+                    for &(seq_idx, target_idx) in unsafe { self.clock_domain_assigns.get_unchecked(clock_list_idx) } {
+                        unsafe { *self.signals.get_unchecked_mut(target_idx) = *self.next_regs.get_unchecked(seq_idx); }
+                    }
+                    unsafe { *self.old_clocks.get_unchecked_mut(clock_list_idx) = 1; }
+                }
+            }
+
+            if !any_edge {
+                break;
+            }
+
+            self.evaluate();
+        }
     }
 
     fn load_rom(&mut self, data: &[u8]) {
@@ -875,15 +910,15 @@ impl JitRtlSimulator {
         }
     }
 
-    /// Run a single 14MHz cycle with integrated memory handling
+    /// Run a single 14MHz cycle with integrated memory handling (optimized)
     #[inline(always)]
     fn run_14m_cycle_internal(&mut self, key_data: u8, key_ready: bool) -> (bool, bool) {
-        // Set keyboard input
-        let k_val = if key_ready { (key_data as u64) | 0x80 } else { 0 };
-        self.signals[self.k_idx] = k_val;
+        // Set keyboard input (branchless)
+        let k_val = ((key_data as u64) | 0x80) * (key_ready as u64);
+        unsafe { *self.signals.get_unchecked_mut(self.k_idx) = k_val; }
 
         // Falling edge
-        self.signals[self.clk_idx] = 0;
+        unsafe { *self.signals.get_unchecked_mut(self.clk_idx) = 0; }
         self.evaluate();
 
         // Provide RAM/ROM data based on Apple II memory map:
@@ -894,38 +929,43 @@ impl JitRtlSimulator {
         // Use CPU's actual address register instead of ram_addr (which may show
         // video address during phi0=0). This ensures the CPU gets correct data
         // regardless of timing phase.
-        let cpu_addr = self.signals[self.cpu_addr_idx] as usize;
-        let ram_data = if cpu_addr >= 0xD000 && cpu_addr <= 0xFFFF {
+        let cpu_addr = unsafe { *self.signals.get_unchecked(self.cpu_addr_idx) } as usize;
+        let ram_data = if cpu_addr >= 0xD000 {
             // ROM space
             let rom_offset = cpu_addr.wrapping_sub(0xD000);
-            if rom_offset < self.rom.len() { self.rom[rom_offset] } else { 0 }
+            if rom_offset < self.rom.len() {
+                unsafe { *self.rom.get_unchecked(rom_offset) }
+            } else {
+                0
+            }
         } else if cpu_addr >= 0xC000 {
             // I/O space - return 0 (soft switches handled by HDL logic)
             0
-        } else if cpu_addr < self.ram.len() {
-            // RAM space
-            self.ram[cpu_addr]
         } else {
-            0
+            // RAM space
+            unsafe { *self.ram.get_unchecked(cpu_addr) }
         };
-        self.signals[self.ram_do_idx] = ram_data as u64;
+        unsafe { *self.signals.get_unchecked_mut(self.ram_do_idx) = ram_data as u64; }
 
         // Rising edge
-        self.signals[self.clk_idx] = 1;
-        self.tick();
+        unsafe { *self.signals.get_unchecked_mut(self.clk_idx) = 1; }
+        self.tick_fast();
 
         // Handle RAM writes
         let mut text_dirty = false;
-        if self.signals[self.ram_we_idx] == 1 {
-            let write_addr = self.signals[self.ram_addr_idx] as usize;
+        let ram_we = unsafe { *self.signals.get_unchecked(self.ram_we_idx) };
+        if ram_we == 1 {
+            let write_addr = unsafe { *self.signals.get_unchecked(self.ram_addr_idx) } as usize;
             if write_addr < 0xC000 {
-                let data = (self.signals[self.d_idx] & 0xFF) as u8;
-                self.ram[write_addr] = data;
-                text_dirty = (0x0400..=0x07FF).contains(&write_addr);
+                let data = unsafe { (*self.signals.get_unchecked(self.d_idx) & 0xFF) as u8 };
+                unsafe { *self.ram.get_unchecked_mut(write_addr) = data; }
+                text_dirty = (write_addr >= 0x0400) & (write_addr <= 0x07FF);
             }
         }
 
-        let key_cleared = self.signals[self.read_key_idx] == 1;
+        // Check keyboard strobe
+        let key_cleared = unsafe { *self.signals.get_unchecked(self.read_key_idx) } == 1;
+
         (text_dirty, key_cleared)
     }
 
@@ -994,6 +1034,10 @@ impl JitRtlSimulator {
         }
         // Reset previous clock values for edge detection
         for val in self.prev_clock_values.iter_mut() {
+            *val = 0;
+        }
+        // Reset old_clocks buffer
+        for val in self.old_clocks.iter_mut() {
             *val = 0;
         }
     }
