@@ -185,6 +185,19 @@ const OP_RESIZE: u8 = 28;
 const OP_COPY_TO_SIG: u8 = 29; // signals[dst] = get_operand(arg0) & arg2
 const OP_MEM_READ: u8 = 30;    // temps[dst] = memories[arg0][get_operand(arg1)] & arg2
 
+// Specialized ops with pre-decoded signal operands (no tag checking at runtime)
+// These store raw signal indices in arg0/arg1 instead of tagged operands
+const OP_AND_SS: u8 = 32;      // temps[dst] = signals[arg0] & signals[arg1]
+const OP_OR_SS: u8 = 33;       // temps[dst] = signals[arg0] | signals[arg1]
+const OP_XOR_SS: u8 = 34;      // temps[dst] = signals[arg0] ^ signals[arg1]
+const OP_EQ_SS: u8 = 35;       // temps[dst] = (signals[arg0] == signals[arg1]) as u64
+const OP_MUX_SSS: u8 = 36;     // temps[dst] = mux(signals[arg0], signals[arg1], signals[arg2])
+const OP_COPY_SIG_TO_SIG: u8 = 37;  // signals[dst] = signals[arg0] & arg2
+const OP_AND_SI: u8 = 38;      // temps[dst] = signals[arg0] & arg1 (immediate in arg1)
+const OP_OR_SI: u8 = 39;       // temps[dst] = signals[arg0] | arg1
+const OP_SLICE_S: u8 = 40;     // temps[dst] = (signals[arg0] >> arg1) & arg2
+const OP_NOT_S: u8 = 41;       // temps[dst] = (!signals[arg0]) & arg2
+
 // Operand type tags (stored in high bits of arg values)
 const TAG_SIGNAL: u64 = 0;
 const TAG_IMMEDIATE: u64 = 1 << 62;
@@ -493,6 +506,16 @@ impl RtlSimulator {
             Operand::Signal(idx) if idx == final_target => {
                 // Already in place
             }
+            Operand::Signal(src_idx) => {
+                // Specialized signal-to-signal copy (re-enabled)
+                ops.push(FlatOp {
+                    op_type: OP_COPY_SIG_TO_SIG,
+                    dst: final_target,
+                    arg0: src_idx as u64,
+                    arg1: 0,
+                    arg2: mask,
+                });
+            }
             _ => {
                 ops.push(FlatOp {
                     op_type: OP_COPY_TO_SIG,
@@ -534,21 +557,26 @@ impl RtlSimulator {
                 let op_width = Self::expr_width(operand, widths, name_to_idx);
                 let op_mask = Self::compute_mask(op_width);
 
-                let op_type = match op.as_str() {
-                    "~" | "not" => OP_NOT,
-                    "&" | "reduce_and" => OP_REDUCE_AND,
-                    "|" | "reduce_or" => OP_REDUCE_OR,
-                    "^" | "reduce_xor" => OP_REDUCE_XOR,
-                    _ => OP_COPY_TMP,
-                };
+                // NOT_S disabled for testing
+                let emitted_specialized = false;
 
-                ops.push(FlatOp {
-                    op_type,
-                    dst,
-                    arg0: FlatOp::encode_operand(src),
-                    arg1: op_mask,  // For reduce_and
-                    arg2: mask,
-                });
+                if !emitted_specialized {
+                    let op_type = match op.as_str() {
+                        "~" | "not" => OP_NOT,
+                        "&" | "reduce_and" => OP_REDUCE_AND,
+                        "|" | "reduce_or" => OP_REDUCE_OR,
+                        "^" | "reduce_xor" => OP_REDUCE_XOR,
+                        _ => OP_COPY_TMP,
+                    };
+
+                    ops.push(FlatOp {
+                        op_type,
+                        dst,
+                        arg0: FlatOp::encode_operand(src),
+                        arg1: op_mask,  // For reduce_and
+                        arg2: mask,
+                    });
+                }
                 Operand::Temp(dst)
             }
             ExprDef::BinaryOp { op, left, right, width } => {
@@ -558,33 +586,52 @@ impl RtlSimulator {
                 let dst = *temp_counter;
                 *temp_counter += 1;
 
-                let op_type = match op.as_str() {
-                    "&" => OP_AND,
-                    "|" => OP_OR,
-                    "^" => OP_XOR,
-                    "+" => OP_ADD,
-                    "-" => OP_SUB,
-                    "*" => OP_MUL,
-                    "/" => OP_DIV,
-                    "%" => OP_MOD,
-                    "<<" => OP_SHL,
-                    ">>" => OP_SHR,
-                    "==" => OP_EQ,
-                    "!=" => OP_NE,
-                    "<" => OP_LT,
-                    ">" => OP_GT,
-                    "<=" | "le" => OP_LE,
-                    ">=" => OP_GE,
-                    _ => OP_AND,
+                // AND_SS, OR_SS, EQ_SS - testing
+                let emitted_specialized = match (&l, &r, op.as_str()) {
+                    (Operand::Signal(l_idx), Operand::Signal(r_idx), "&") => {
+                        ops.push(FlatOp { op_type: OP_AND_SS, dst, arg0: *l_idx as u64, arg1: *r_idx as u64, arg2: mask });
+                        true
+                    }
+                    (Operand::Signal(l_idx), Operand::Signal(r_idx), "|") => {
+                        ops.push(FlatOp { op_type: OP_OR_SS, dst, arg0: *l_idx as u64, arg1: *r_idx as u64, arg2: mask });
+                        true
+                    }
+                    (Operand::Signal(l_idx), Operand::Signal(r_idx), "==") => {
+                        ops.push(FlatOp { op_type: OP_EQ_SS, dst, arg0: *l_idx as u64, arg1: *r_idx as u64, arg2: mask });
+                        true
+                    }
+                    _ => false,
                 };
 
-                ops.push(FlatOp {
-                    op_type,
-                    dst,
-                    arg0: FlatOp::encode_operand(l),
-                    arg1: FlatOp::encode_operand(r),
-                    arg2: mask,
-                });
+                if !emitted_specialized {
+                    let op_type = match op.as_str() {
+                        "&" => OP_AND,
+                        "|" => OP_OR,
+                        "^" => OP_XOR,
+                        "+" => OP_ADD,
+                        "-" => OP_SUB,
+                        "*" => OP_MUL,
+                        "/" => OP_DIV,
+                        "%" => OP_MOD,
+                        "<<" => OP_SHL,
+                        ">>" => OP_SHR,
+                        "==" => OP_EQ,
+                        "!=" => OP_NE,
+                        "<" => OP_LT,
+                        ">" => OP_GT,
+                        "<=" | "le" => OP_LE,
+                        ">=" => OP_GE,
+                        _ => OP_AND,
+                    };
+
+                    ops.push(FlatOp {
+                        op_type,
+                        dst,
+                        arg0: FlatOp::encode_operand(l),
+                        arg1: FlatOp::encode_operand(r),
+                        arg2: mask,
+                    });
+                }
                 Operand::Temp(dst)
             }
             ExprDef::Mux { condition, when_true, when_false, width } => {
@@ -594,14 +641,17 @@ impl RtlSimulator {
                 let dst = *temp_counter;
                 *temp_counter += 1;
 
-                // Mux uses all 3 arg slots: cond, true_val, false_val
-                ops.push(FlatOp {
-                    op_type: OP_MUX,
-                    dst,
-                    arg0: FlatOp::encode_operand(cond),
-                    arg1: FlatOp::encode_operand(t),
-                    arg2: FlatOp::encode_operand(f),
-                });
+                // MUX_SSS disabled - correctness issue
+                {
+                    // Mux uses all 3 arg slots: cond, true_val, false_val
+                    ops.push(FlatOp {
+                        op_type: OP_MUX,
+                        dst,
+                        arg0: FlatOp::encode_operand(cond),
+                        arg1: FlatOp::encode_operand(t),
+                        arg2: FlatOp::encode_operand(f),
+                    });
+                }
 
                 // Mask result to specified width (prevents overflow issues)
                 let mask = Self::compute_mask(*width);
@@ -622,11 +672,12 @@ impl RtlSimulator {
                 let dst = *temp_counter;
                 *temp_counter += 1;
 
+                // SLICE_S disabled for testing - use generic
                 ops.push(FlatOp {
                     op_type: OP_SLICE,
                     dst,
                     arg0: FlatOp::encode_operand(src),
-                    arg1: *low as u64,  // shift amount
+                    arg1: *low as u64,
                     arg2: mask,
                 });
                 Operand::Temp(dst)
@@ -976,6 +1027,51 @@ impl RtlSimulator {
                 }
                 OP_ADD => {
                     let result = FlatOp::get_operand(signals, temps, op.arg0).wrapping_add(FlatOp::get_operand(signals, temps, op.arg1)) & op.arg2;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                // Specialized signal-signal ops (no tag decoding overhead)
+                OP_AND_SS => {
+                    let result = unsafe { *signals.get_unchecked(op.arg0 as usize) & *signals.get_unchecked(op.arg1 as usize) };
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_OR_SS => {
+                    let result = unsafe { *signals.get_unchecked(op.arg0 as usize) | *signals.get_unchecked(op.arg1 as usize) };
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_XOR_SS => {
+                    let result = unsafe { *signals.get_unchecked(op.arg0 as usize) ^ *signals.get_unchecked(op.arg1 as usize) };
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_EQ_SS => {
+                    let result = unsafe { (*signals.get_unchecked(op.arg0 as usize) == *signals.get_unchecked(op.arg1 as usize)) as u64 };
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_MUX_SSS => {
+                    let c = unsafe { *signals.get_unchecked(op.arg0 as usize) };
+                    let t = unsafe { *signals.get_unchecked(op.arg1 as usize) };
+                    let f = unsafe { *signals.get_unchecked(op.arg2 as usize) };
+                    let select = (c != 0) as u64;
+                    let result = (select.wrapping_neg() & t) | ((!select.wrapping_neg()) & f);
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_COPY_SIG_TO_SIG => {
+                    let val = unsafe { *signals.get_unchecked(op.arg0 as usize) } & op.arg2;
+                    unsafe { *signals.get_unchecked_mut(op.dst) = val; }
+                }
+                OP_AND_SI => {
+                    let result = unsafe { *signals.get_unchecked(op.arg0 as usize) } & op.arg1;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_OR_SI => {
+                    let result = unsafe { *signals.get_unchecked(op.arg0 as usize) } | op.arg1;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_SLICE_S => {
+                    let result = (unsafe { *signals.get_unchecked(op.arg0 as usize) } >> op.arg1 as u32) & op.arg2;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_NOT_S => {
+                    let result = (!unsafe { *signals.get_unchecked(op.arg0 as usize) }) & op.arg2;
                     unsafe { *temps.get_unchecked_mut(op.dst) = result; }
                 }
                 // Fall through to generic handler for less common ops
