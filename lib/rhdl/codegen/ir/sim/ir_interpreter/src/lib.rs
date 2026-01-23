@@ -222,6 +222,9 @@ struct CompiledAssign {
     ops: Vec<FlatOp>,
     /// Final target signal index (for sequential assignment sampling)
     final_target: usize,
+    /// Fast path: if the assignment is just reading a signal (optionally masked),
+    /// store the source signal index and mask directly to skip op execution
+    fast_source: Option<(usize, u64)>,  // (signal_idx, mask)
 }
 
 // ============================================================================
@@ -261,6 +264,9 @@ struct RtlSimulator {
     clock_indices: Vec<usize>,
     /// Old clock values for edge detection
     old_clocks: Vec<u64>,
+    /// Pre-grouped: for each clock domain, list of (seq_assign_idx, target_idx)
+    /// This avoids O(n) scan of seq_clocks for each clock edge
+    clock_domain_assigns: Vec<Vec<(usize, usize)>>,
 
     // Apple II specific: internalized memory for batched execution
     /// RAM (48KB)
@@ -375,7 +381,11 @@ impl RtlSimulator {
                 let target_idx = *name_to_idx.get(&stmt.target).unwrap_or(&0);
                 let (ops, temps_used) = Self::compile_to_flat_ops(&stmt.expr, target_idx, &name_to_idx, &mem_name_to_idx, &widths);
                 max_temps = max_temps.max(temps_used);
-                seq_assigns.push(CompiledAssign { ops, final_target: target_idx });
+
+                // Detect fast path: if expr is a simple signal read (optionally with mux/resize)
+                let fast_source = Self::detect_fast_source(&stmt.expr, &name_to_idx, &widths);
+
+                seq_assigns.push(CompiledAssign { ops, final_target: target_idx, fast_source });
                 seq_targets.push(target_idx);
                 seq_clocks.push(clock_idx);
             }
@@ -384,6 +394,15 @@ impl RtlSimulator {
         // Collect all unique clock indices
         let clock_indices: Vec<usize> = clock_set.into_iter().collect();
         let old_clocks = vec![0u64; clock_indices.len()];
+
+        // Pre-group sequential assignments by clock domain
+        // Maps clock_list_idx -> Vec<(seq_assign_idx, target_idx)>
+        let mut clock_domain_assigns: Vec<Vec<(usize, usize)>> = vec![Vec::new(); clock_indices.len()];
+        for (seq_idx, &clk_idx) in seq_clocks.iter().enumerate() {
+            if let Some(clock_list_idx) = clock_indices.iter().position(|&c| c == clk_idx) {
+                clock_domain_assigns[clock_list_idx].push((seq_idx, seq_targets[seq_idx]));
+            }
+        }
 
         // Pre-allocate temp buffer
         let temps = vec![0u64; max_temps + 1];
@@ -414,6 +433,7 @@ impl RtlSimulator {
             seq_clocks,
             clock_indices,
             old_clocks,
+            clock_domain_assigns,
             ram: vec![0u8; 48 * 1024],
             rom: vec![0u8; 12 * 1024],
             ram_addr_idx,
@@ -703,6 +723,37 @@ impl RtlSimulator {
         }
     }
 
+    /// Detect if an expression is a "fast path" - just reading a signal with optional masking.
+    /// Returns Some((signal_idx, mask)) if fast path is possible, None otherwise.
+    fn detect_fast_source(
+        expr: &ExprDef,
+        name_to_idx: &HashMap<String, usize>,
+        widths: &[usize]
+    ) -> Option<(usize, u64)> {
+        match expr {
+            // Direct signal read
+            ExprDef::Signal { name, width } => {
+                let idx = *name_to_idx.get(name)?;
+                let actual_width = widths.get(idx).copied().unwrap_or(*width);
+                let mask = Self::compute_mask(actual_width);
+                Some((idx, mask))
+            }
+            // Resize of a signal
+            ExprDef::Resize { expr: inner, width } => {
+                if let ExprDef::Signal { name, .. } = inner.as_ref() {
+                    let idx = *name_to_idx.get(name)?;
+                    let mask = Self::compute_mask(*width);
+                    Some((idx, mask))
+                } else {
+                    None
+                }
+            }
+            // Slice of a signal - can be optimized but requires shift
+            // For now, skip this case
+            _ => None,
+        }
+    }
+
     fn poke_by_name(&mut self, name: &str, value: u64) -> Result<(), String> {
         let idx = *self.name_to_idx.get(name)
             .ok_or_else(|| format!("Unknown signal: {}", name))?;
@@ -869,8 +920,67 @@ impl RtlSimulator {
     #[inline(always)]
     fn evaluate(&mut self) {
         // Execute all ops from single contiguous array (optimal cache access)
+        // Inline hot ops for better performance
+        let signals = &mut self.signals;
+        let temps = &mut self.temps;
+        let memories = &self.memory_arrays;
+
         for op in &self.all_comb_ops {
-            Self::execute_flat_op(&mut self.signals, &mut self.temps, &self.memory_arrays, op);
+            // Inline the most common ops to avoid match dispatch overhead
+            match op.op_type {
+                OP_COPY_TO_SIG => {
+                    let val = FlatOp::get_operand(signals, temps, op.arg0) & op.arg2;
+                    unsafe { *signals.get_unchecked_mut(op.dst) = val; }
+                }
+                OP_AND => {
+                    let result = FlatOp::get_operand(signals, temps, op.arg0) & FlatOp::get_operand(signals, temps, op.arg1);
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_OR => {
+                    let result = FlatOp::get_operand(signals, temps, op.arg0) | FlatOp::get_operand(signals, temps, op.arg1);
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_MUX => {
+                    let c = FlatOp::get_operand(signals, temps, op.arg0);
+                    let t = FlatOp::get_operand(signals, temps, op.arg1);
+                    let f = FlatOp::get_operand(signals, temps, op.arg2);
+                    let select = (c != 0) as u64;
+                    let result = (select.wrapping_neg() & t) | ((!select.wrapping_neg()) & f);
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_RESIZE => {
+                    let result = FlatOp::get_operand(signals, temps, op.arg0) & op.arg2;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_EQ => {
+                    let result = (FlatOp::get_operand(signals, temps, op.arg0) == FlatOp::get_operand(signals, temps, op.arg1)) as u64;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_NOT => {
+                    let val = (!FlatOp::get_operand(signals, temps, op.arg0)) & op.arg2;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = val; }
+                }
+                OP_XOR => {
+                    let result = FlatOp::get_operand(signals, temps, op.arg0) ^ FlatOp::get_operand(signals, temps, op.arg1);
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_SLICE => {
+                    let shift = op.arg1 as u32;
+                    let result = (FlatOp::get_operand(signals, temps, op.arg0) >> shift) & op.arg2;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_SHL => {
+                    let shift = FlatOp::get_operand(signals, temps, op.arg1).min(63) as u32;
+                    let result = (FlatOp::get_operand(signals, temps, op.arg0) << shift) & op.arg2;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                OP_ADD => {
+                    let result = FlatOp::get_operand(signals, temps, op.arg0).wrapping_add(FlatOp::get_operand(signals, temps, op.arg1)) & op.arg2;
+                    unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+                }
+                // Fall through to generic handler for less common ops
+                _ => Self::execute_flat_op(signals, temps, memories, op),
+            }
         }
     }
 
@@ -894,9 +1004,14 @@ impl RtlSimulator {
         // This ensures all expressions see the same state
         // IMPORTANT: Don't write to signals during sampling - only store results in next_regs
         for (i, seq_assign) in self.seq_assigns.iter().enumerate() {
-            // Execute all ops, but we need to capture the result without corrupting signals
-            // The last op is OP_COPY_TO_SIG which would write to signals[target]
-            // We run all ops but capture the result from the temp that was written
+            // Fast path: if this is a simple signal read, just read directly
+            if let Some((src_idx, mask)) = seq_assign.fast_source {
+                let val = unsafe { *self.signals.get_unchecked(src_idx) } & mask;
+                self.next_regs[i] = val;
+                continue;
+            }
+
+            // Slow path: execute ops
             let ops_len = seq_assign.ops.len();
             if ops_len == 0 {
                 continue;
@@ -922,24 +1037,22 @@ impl RtlSimulator {
 
         // Iterate for derived clock domains
         // Each iteration may cause new clock edges as registers update
+        // Use pre-grouped assignments to avoid O(n) scan per clock
         const MAX_ITERATIONS: usize = 10;
         for _ in 0..MAX_ITERATIONS {
             // Detect rising edges on all clock signals
             let mut any_edge = false;
             for (clock_list_idx, &clk_idx) in self.clock_indices.iter().enumerate() {
                 let old_val = self.old_clocks[clock_list_idx];
-                let new_val = self.signals[clk_idx];
+                let new_val = unsafe { *self.signals.get_unchecked(clk_idx) };
 
                 // Check for rising edge (0 -> 1)
                 if old_val == 0 && new_val == 1 {
                     any_edge = true;
 
-                    // Update only registers clocked by this signal
-                    for (i, &reg_clk) in self.seq_clocks.iter().enumerate() {
-                        if reg_clk == clk_idx {
-                            let target_idx = self.seq_targets[i];
-                            unsafe { *self.signals.get_unchecked_mut(target_idx) = self.next_regs[i]; }
-                        }
+                    // Update only registers clocked by this signal (pre-grouped)
+                    for &(seq_idx, target_idx) in &self.clock_domain_assigns[clock_list_idx] {
+                        unsafe { *self.signals.get_unchecked_mut(target_idx) = self.next_regs[seq_idx]; }
                     }
 
                     // Mark this clock as processed (set old to 1 to prevent re-triggering)
@@ -954,9 +1067,7 @@ impl RtlSimulator {
             // Re-evaluate combinational logic (may trigger derived clocks)
             self.evaluate();
         }
-
-        // Final evaluate to propagate any remaining changes
-        self.evaluate();
+        // Note: Removed redundant final evaluate() - not needed after loop exits with no edges
     }
 
     /// Load ROM data
@@ -1042,6 +1153,14 @@ impl RtlSimulator {
         // Sample ALL register inputs at this point (before any register updates)
         // IMPORTANT: Don't write to signals during sampling - only store results in next_regs
         for (i, seq_assign) in self.seq_assigns.iter().enumerate() {
+            // Fast path: if this is a simple signal read, just read directly
+            if let Some((src_idx, mask)) = seq_assign.fast_source {
+                let val = unsafe { *self.signals.get_unchecked(src_idx) } & mask;
+                self.next_regs[i] = val;
+                continue;
+            }
+
+            // Slow path: execute ops
             let ops_len = seq_assign.ops.len();
             if ops_len == 0 {
                 continue;
@@ -1064,20 +1183,19 @@ impl RtlSimulator {
         }
 
         // Iterate for derived clock domains
+        // Use pre-grouped assignments to avoid O(n) scan per clock
         const MAX_ITERATIONS: usize = 10;
         for _ in 0..MAX_ITERATIONS {
             let mut any_edge = false;
             for (clock_list_idx, &clk_idx) in self.clock_indices.iter().enumerate() {
                 let old_val = self.old_clocks[clock_list_idx];
-                let new_val = self.signals[clk_idx];
+                let new_val = unsafe { *self.signals.get_unchecked(clk_idx) };
 
                 if old_val == 0 && new_val == 1 {
                     any_edge = true;
-                    for (i, &reg_clk) in self.seq_clocks.iter().enumerate() {
-                        if reg_clk == clk_idx {
-                            let target_idx = self.seq_targets[i];
-                            unsafe { *self.signals.get_unchecked_mut(target_idx) = self.next_regs[i]; }
-                        }
+                    // Use pre-grouped assignments for this clock domain
+                    for &(seq_idx, target_idx) in &self.clock_domain_assigns[clock_list_idx] {
+                        unsafe { *self.signals.get_unchecked_mut(target_idx) = self.next_regs[seq_idx]; }
                     }
                     self.old_clocks[clock_list_idx] = 1;
                 }
@@ -1089,8 +1207,7 @@ impl RtlSimulator {
 
             self.evaluate();
         }
-
-        self.evaluate();
+        // Note: Removed redundant final evaluate() - not needed after loop exits with no edges
     }
 
     /// Run N CPU cycles
@@ -1292,6 +1409,8 @@ impl RubyRtlSim {
         hash.aset(ruby.sym_new("output_count"), sim.output_names.len() as i64)?;
         hash.aset(ruby.sym_new("comb_op_count"), sim.all_comb_ops.len() as i64)?;
         hash.aset(ruby.sym_new("seq_assign_count"), sim.seq_assigns.len() as i64)?;
+        let fast_count = sim.seq_assigns.iter().filter(|a| a.fast_source.is_some()).count();
+        hash.aset(ruby.sym_new("seq_fast_count"), fast_count as i64)?;
 
         Ok(hash)
     }
