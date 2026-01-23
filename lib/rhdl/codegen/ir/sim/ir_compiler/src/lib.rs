@@ -1268,6 +1268,8 @@ fn generate_full_code(ir: &CircuitIR, signal_indices: &HashMap<String, usize>) -
     let ram_we_idx = signal_indices.get("ram_we").cloned().unwrap_or(0);
     let d_idx = signal_indices.get("d").cloned().unwrap_or(0);
     let read_key_idx = signal_indices.get("read_key").cloned().unwrap_or(0);
+    // Use CPU's address register for reads (ram_addr may show video address during phi0=0)
+    let cpu_addr_idx = signal_indices.get("cpu__addr_reg").cloned().unwrap_or(0);
     let reg_count = count_regs(ir);
     let num_clocks_for_run = num_clocks.max(1);
 
@@ -1315,13 +1317,16 @@ pub extern "C" fn run_cpu_cycles(
             // Check for rising edges on derived clocks after falling edge eval
             do_tick_update!(signals, old_clocks);
 
-            // Provide RAM/ROM data (unchecked access)
-            let addr = *signals.get_unchecked({ram_addr_idx}) as usize;
+            // Provide RAM/ROM data using CPU's address register
+            // (ram_addr may show video address during phi0=0)
+            let addr = *signals.get_unchecked({cpu_addr_idx}) as usize;
             *signals.get_unchecked_mut({ram_do_idx}) = if addr >= 0xD000 {{
                 let rom_offset = addr.wrapping_sub(0xD000);
                 if rom_offset < 0x3000 {{ *rom.get_unchecked(rom_offset) as u64 }} else {{ 0 }}
+            }} else if addr < 0xC000 {{
+                *ram.get_unchecked(addr) as u64
             }} else {{
-                *ram.get_unchecked(addr & 0xFFFF) as u64
+                0  // I/O range $C000-$CFFF returns 0
             }};
             do_evaluate!(signals);
 
@@ -1361,12 +1366,16 @@ pub extern "C" fn run_cpu_cycles(
         }}
     }}
 
+    // Final evaluate to propagate register values to nets (like q3 = timing__q3)
+    // This matches the JIT's tick() which evaluates at the start
+    unsafe {{ do_evaluate!(signals); }}
+
     (text_dirty, key_cleared)
 }}
 "#, num_clocks = num_clocks_for_run, old_clocks_init = old_clocks_init,
     k_idx = k_idx, clk_idx = clk_idx, ram_addr_idx = ram_addr_idx,
     ram_do_idx = ram_do_idx, ram_we_idx = ram_we_idx, d_idx = d_idx,
-    read_key_idx = read_key_idx));
+    read_key_idx = read_key_idx, cpu_addr_idx = cpu_addr_idx));
 
     code
 }
