@@ -1320,6 +1320,104 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
         puts "  Match rate: #{(match_rate * 100).round(1)}%"
         expect(match_rate).to be >= 0.8
       end
+
+      it 'compares PC sequences from game entry vs IR Compiler', timeout: 120 do
+        cpu, bus = create_isa_simulator(native: true)
+        skip 'Native ISA simulator not available' unless cpu.native?
+        setup_isa_for_karateka(cpu, bus)
+
+        ir_sim = create_apple2_ir_simulator(:compiler)
+        setup_result = setup_ir_for_karateka(ir_sim)
+
+        # Use fewer iterations for compiler (slower than JIT due to compilation overhead)
+        iterations = [INTERPRETER_ITERATIONS, 1_000].min
+        isa_transitions = collect_isa_pc_transitions(cpu, iterations)
+        ir_result = collect_ir_pc_transitions(ir_sim, iterations * 5, target_transitions: isa_transitions.size * 2)
+        ir_transitions = ir_result[:transitions]
+
+        compare_count = 100
+        first_isa = isa_transitions.first(compare_count)
+        last_isa = isa_transitions.last(compare_count)
+
+        first_match = find_isa_pcs_in_ir(first_isa, ir_transitions)
+        last_match = find_isa_pcs_in_ir(last_isa, ir_transitions)
+
+        puts "\n  PC Sequence Comparison (Rust ISA vs IR Compiler - Karateka game code):"
+        puts "  Target PC: 0x#{KARATEKA_ENTRY.to_s(16)}, IR actual: 0x#{setup_result[:started_at].to_s(16)}"
+        puts "  ISA transitions: #{isa_transitions.size}, IR transitions: #{ir_transitions.size}"
+        puts "  First #{compare_count} ISA PCs found in IR: #{first_match[:found].size}/#{compare_count}"
+        puts "  Last #{compare_count} ISA PCs found in IR: #{last_match[:found].size}/#{compare_count}"
+        puts "  First 10 ISA: #{first_isa.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+        puts "  First 10 IR:  #{ir_transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+
+        expect(isa_transitions.size).to be >= compare_count
+        expect(ir_transitions.size).to be >= compare_count
+
+        match_rate = first_match[:found].size.to_f / compare_count
+        puts "  Match rate: #{(match_rate * 100).round(1)}%"
+        expect(match_rate).to be >= 0.8
+      end
+    end
+
+    context 'with Ruby HDL simulator', :slow do
+      # Helper to set up Ruby HDL simulator with Karateka memory and modified ROM
+      def setup_hdl_for_karateka(hdl_sim)
+        karateka_rom = create_karateka_rom
+        hdl_sim.load_rom(karateka_rom)
+        # Only load first 48K of memory (Apple II RAM is 48K, $0000-$BFFF)
+        ram_size = 48 * 1024
+        hdl_sim.load_ram(@karateka_mem.first(ram_size), 0)
+
+        # Boot through reset - CPU should start directly at game entry
+        hdl_sim.poke('reset', 1)
+        hdl_sim.tick
+        hdl_sim.poke('reset', 0)
+
+        # Run a few cycles to complete reset sequence
+        3.times { hdl_sim.run_cpu_cycles(1, 0, false) }
+
+        pc = hdl_sim.peek('cpu__pc_reg')
+        { started_at: pc, boot_cycles: 3 }
+      end
+
+      it 'compares PC sequences from game entry vs Ruby ISA reference', timeout: 300 do
+        # Create reference (Ruby ISA simulator) - PC at game entry
+        cpu, bus = create_isa_simulator(native: false)
+        setup_isa_for_karateka(cpu, bus)
+
+        # Create target (Ruby HDL simulator) - PC forced to game entry
+        hdl_sim = create_ruby_hdl_simulator
+        setup_result = setup_hdl_for_karateka(hdl_sim)
+
+        # Collect PC transitions from ISA (use smaller count for HDL comparison)
+        isa_transitions = collect_isa_pc_transitions(cpu, RUBY_HDL_ITERATIONS)
+
+        # Collect PC transitions from HDL
+        hdl_result = collect_ir_pc_transitions(hdl_sim, RUBY_HDL_ITERATIONS * 5, target_transitions: isa_transitions.size * 2)
+        hdl_transitions = hdl_result[:transitions]
+
+        compare_count = [50, isa_transitions.size].min
+        first_isa = isa_transitions.first(compare_count)
+        last_isa = isa_transitions.last(compare_count)
+
+        first_match = find_isa_pcs_in_ir(first_isa, hdl_transitions)
+        last_match = find_isa_pcs_in_ir(last_isa, hdl_transitions)
+
+        puts "\n  PC Sequence Comparison (Ruby ISA vs Ruby HDL - Karateka game code):"
+        puts "  Target PC: 0x#{KARATEKA_ENTRY.to_s(16)}, HDL actual: 0x#{setup_result[:started_at].to_s(16)}"
+        puts "  ISA transitions: #{isa_transitions.size}, HDL transitions: #{hdl_transitions.size}"
+        puts "  First #{compare_count} ISA PCs found in HDL: #{first_match[:found].size}/#{compare_count}"
+        puts "  Last #{compare_count} ISA PCs found in HDL: #{last_match[:found].size}/#{compare_count}"
+        puts "  First 10 ISA: #{first_isa.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+        puts "  First 10 HDL: #{hdl_transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+
+        expect(isa_transitions.size).to be >= compare_count
+        expect(hdl_transitions.size).to be >= compare_count
+
+        match_rate = first_match[:found].size.to_f / compare_count
+        puts "  Match rate: #{(match_rate * 100).round(1)}%"
+        expect(match_rate).to be >= 0.8, "At least 80% of first #{compare_count} ISA PCs should appear in HDL"
+      end
     end
   end
 end
