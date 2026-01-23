@@ -18,6 +18,8 @@ module RHDL
             benchmark_timing
           when :quick
             benchmark_quick
+          when :ir
+            benchmark_ir_runners
           else
             benchmark_gates
           end
@@ -187,6 +189,166 @@ module RHDL
           results.each do |r|
             rate = r[:examples] > 0 ? format('%.1f', r[:examples] / r[:time]) : 'N/A'
             puts "#{r[:name].ljust(20)} #{format('%8.2f', r[:time])}s #{r[:examples].to_s.rjust(8)} #{r[:files].to_s.rjust(8)} #{rate.rjust(8)} t/s"
+          end
+        end
+
+        # Benchmark IR runners with Karateka game code
+        def benchmark_ir_runners
+          require 'rhdl/codegen'
+
+          # Paths to ROM and memory dump
+          rom_path = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __dir__)
+          karateka_path = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __dir__)
+
+          unless File.exist?(rom_path)
+            puts "Error: AppleIIgo ROM not found at #{rom_path}"
+            puts "Please ensure the ROM file exists."
+            return
+          end
+
+          unless File.exist?(karateka_path)
+            puts "Error: Karateka memory dump not found at #{karateka_path}"
+            puts "Please ensure the memory dump file exists."
+            return
+          end
+
+          # Load ROM and memory data
+          rom_data = File.binread(rom_path).bytes
+          karateka_mem = File.binread(karateka_path).bytes
+
+          # Modify ROM reset vector to point to game entry ($B82A)
+          karateka_rom = rom_data.dup
+          karateka_rom[0x2FFC] = 0x2A  # low byte of $B82A
+          karateka_rom[0x2FFD] = 0xB8  # high byte of $B82A
+
+          cycles = options[:cycles] || 100_000
+
+          puts_header("IR Runner Benchmark - Karateka Game Code")
+          puts "Cycles per run: #{cycles}"
+          puts "ROM: #{rom_path}"
+          puts "Memory dump: #{karateka_path}"
+          puts
+
+          # Generate IR once for all runners
+          print "Generating Apple2 IR... "
+          $stdout.flush
+
+          require_relative '../../../../examples/apple2/hdl'
+          ir_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          ir = RHDL::Apple2::Apple2.to_flat_ir
+          ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+          ir_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - ir_start
+          puts "done (#{format('%.3f', ir_elapsed)}s)"
+
+          # Define runners to benchmark
+          runners = [
+            { name: 'Interpreter', backend: :interpreter, available_const: :IR_INTERPRETER_AVAILABLE },
+            { name: 'JIT', backend: :jit, available_const: :IR_JIT_AVAILABLE },
+            { name: 'Compiler', backend: :compiler, available_const: :IR_COMPILER_AVAILABLE }
+          ]
+
+          results = []
+
+          runners.each do |runner|
+            available = RHDL::Codegen::IR.const_get(runner[:available_const]) rescue false
+            unless available
+              puts "\n#{runner[:name]}: SKIPPED (not available)"
+              results << { name: runner[:name], status: :skipped }
+              next
+            end
+
+            print "\n#{runner[:name]}: "
+            $stdout.flush
+
+            begin
+              # Create simulator
+              print "initializing... "
+              $stdout.flush
+              init_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+              sim = case runner[:backend]
+              when :interpreter
+                RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json)
+              when :jit
+                RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
+              when :compiler
+                RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json)
+              end
+
+              init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
+
+              # Load ROM and RAM
+              print "loading... "
+              $stdout.flush
+              sim.load_rom(karateka_rom)
+              sim.load_ram(karateka_mem.first(48 * 1024), 0)
+
+              # Reset
+              sim.poke('reset', 1)
+              sim.tick
+              sim.poke('reset', 0)
+
+              # Warmup - run a few cycles to get past reset
+              3.times { sim.run_cpu_cycles(1, 0, false) }
+
+              # Benchmark
+              print "running #{cycles} cycles... "
+              $stdout.flush
+              run_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+              sim.run_cpu_cycles(cycles, 0, false)
+              run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
+
+              cycles_per_sec = cycles / run_elapsed
+              pc = sim.peek('cpu__pc_reg')
+
+              puts "done"
+              puts "  Init time: #{format('%.3f', init_elapsed)}s"
+              puts "  Run time:  #{format('%.3f', run_elapsed)}s"
+              puts "  Rate:      #{format('%.0f', cycles_per_sec)} cycles/s (#{format('%.2f', cycles_per_sec / 1_000_000)}M/s)"
+              puts "  Final PC:  0x#{pc.to_s(16).upcase}"
+
+              results << {
+                name: runner[:name],
+                status: :success,
+                init_time: init_elapsed,
+                run_time: run_elapsed,
+                cycles_per_sec: cycles_per_sec,
+                final_pc: pc
+              }
+            rescue => e
+              puts "FAILED"
+              puts "  Error: #{e.message}"
+              results << { name: runner[:name], status: :failed, error: e.message }
+            end
+          end
+
+          # Summary table
+          puts
+          puts_header("Summary")
+          puts "#{'Runner'.ljust(15)} #{'Status'.ljust(10)} #{'Init'.rjust(10)} #{'Run'.rjust(10)} #{'Rate'.rjust(15)}"
+          puts_separator
+
+          results.each do |r|
+            if r[:status] == :success
+              rate_str = "#{format('%.2f', r[:cycles_per_sec] / 1_000_000)}M/s"
+              puts "#{r[:name].ljust(15)} #{'OK'.ljust(10)} #{format('%8.3f', r[:init_time])}s #{format('%8.3f', r[:run_time])}s #{rate_str.rjust(15)}"
+            elsif r[:status] == :skipped
+              puts "#{r[:name].ljust(15)} #{'SKIP'.ljust(10)} #{'-'.rjust(10)} #{'-'.rjust(10)} #{'-'.rjust(15)}"
+            else
+              puts "#{r[:name].ljust(15)} #{'FAIL'.ljust(10)} #{'-'.rjust(10)} #{'-'.rjust(10)} #{'-'.rjust(15)}"
+            end
+          end
+
+          # Performance comparison
+          successful = results.select { |r| r[:status] == :success }
+          if successful.length >= 2
+            puts
+            puts "Performance Ratios:"
+            base = successful.first
+            successful[1..].each do |r|
+              ratio = r[:cycles_per_sec] / base[:cycles_per_sec]
+              puts "  #{r[:name]} vs #{base[:name]}: #{format('%.1f', ratio)}x"
+            end
           end
         end
 

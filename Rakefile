@@ -177,6 +177,13 @@ namespace :bench do
     load_cli_tasks
     RHDL::CLI::Tasks::BenchmarkTask.new(type: :gates).run
   end
+
+  desc "Benchmark IR runners with Karateka game code"
+  task :ir, [:cycles] do |_, args|
+    load_cli_tasks
+    cycles = args[:cycles]&.to_i || 100_000
+    RHDL::CLI::Tasks::BenchmarkTask.new(type: :ir, cycles: cycles).run
+  end
 end
 
 desc "Run gate benchmark (alias for bench:gates)"
