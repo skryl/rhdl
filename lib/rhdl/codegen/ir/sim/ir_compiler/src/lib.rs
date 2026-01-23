@@ -650,7 +650,9 @@ impl IrSimulator {
                 format!("(({} >> {}) & mask({}))", base_code, low, width)
             }
             ExprDef::Concat { parts, width } => {
-                let mut result = String::from("(");
+                // Wrap the entire concat expression in parens to ensure proper precedence
+                // when used as operand in binary ops like + (wrapping_add)
+                let mut result = String::from("((");
                 let mut shift = 0usize;
                 let mut first = true;
                 for part in parts.iter().rev() {
@@ -667,7 +669,7 @@ impl IrSimulator {
                     }
                     shift += part_width;
                 }
-                result.push_str(&format!(") & mask({})", width));
+                result.push_str(&format!(") & mask({}))", width));
                 result
             }
             ExprDef::Resize { expr, width } => {
@@ -714,13 +716,14 @@ impl IrSimulator {
         code.push_str(&format!("    let next_regs = std::slice::from_raw_parts_mut(next_regs, {});\n", num_regs));
         code.push_str("\n");
 
-        // Save old clock values
+        // Save old clock values FIRST (before evaluate changes derived clocks)
+        // At this point clk_14m=1 but derived clocks haven't propagated yet
         for (i, &clk_idx) in clock_indices.iter().enumerate() {
             code.push_str(&format!("    old_clocks[{}] = signals[{}];\n", i, clk_idx));
         }
         code.push_str("\n");
 
-        // Call evaluate
+        // Call evaluate (propagates clk_14m=1 to derived clocks)
         code.push_str("    evaluate(signals.as_mut_ptr(), signals.len());\n\n");
 
         // Sample all register inputs
@@ -971,8 +974,8 @@ impl IrSimulator {
                 self.signals[self.clk_idx] = 0;
                 self.evaluate();
 
-                // Provide RAM/ROM data
-                let addr = self.signals[self.ram_addr_idx] as usize;
+                // Provide RAM/ROM data (use CPU's address register, not ram_addr which may show video address)
+                let addr = self.signals[self.cpu_addr_idx] as usize;
                 self.signals[self.ram_do_idx] = if addr >= 0xD000 {
                     let rom_offset = addr.wrapping_sub(0xD000);
                     if rom_offset < self.rom.len() { self.rom[rom_offset] as u64 } else { 0 }
