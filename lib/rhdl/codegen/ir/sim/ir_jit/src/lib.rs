@@ -191,6 +191,21 @@ impl JitCompiler {
                 builder.ins().iconst(types::I64, masked as i64)
             }
             ExprDef::UnaryOp { op, operand, width } => {
+                // Constant folding: if operand is a literal, compute at compile time
+                if let ExprDef::Literal { value, width: lit_width } = operand.as_ref() {
+                    let v = *value as u64;
+                    let mask = Self::compile_mask(*width);
+                    let op_mask = Self::compile_mask(*lit_width);
+                    let result = match op.as_str() {
+                        "~" | "not" => (!v) & mask,
+                        "&" | "reduce_and" => ((v & op_mask) == op_mask) as u64,
+                        "|" | "reduce_or" => (v != 0) as u64,
+                        "^" | "reduce_xor" => (v.count_ones() & 1) as u64,
+                        _ => v & mask,
+                    };
+                    return builder.ins().iconst(types::I64, result as i64);
+                }
+
                 let src = self.compile_expr(builder, operand, signals_ptr, mem_ptrs);
                 let mask = Self::compile_mask(*width);
                 let mask_val = builder.ins().iconst(types::I64, mask as i64);
@@ -222,10 +237,39 @@ impl JitCompiler {
                 }
             }
             ExprDef::BinaryOp { op, left, right, width } => {
+                // Constant folding: if both operands are literals, compute at compile time
+                if let (ExprDef::Literal { value: lv, .. }, ExprDef::Literal { value: rv, .. }) = (left.as_ref(), right.as_ref()) {
+                    let lv = *lv as u64;
+                    let rv = *rv as u64;
+                    let mask = Self::compile_mask(*width);
+                    let result = match op.as_str() {
+                        "&" => lv & rv,
+                        "|" => lv | rv,
+                        "^" => lv ^ rv,
+                        "+" => lv.wrapping_add(rv),
+                        "-" => lv.wrapping_sub(rv),
+                        "*" => lv.wrapping_mul(rv),
+                        "/" => if rv != 0 { lv / rv } else { 0 },
+                        "%" => if rv != 0 { lv % rv } else { 0 },
+                        "<<" => lv << (rv.min(63) as u32),
+                        ">>" => lv >> (rv.min(63) as u32),
+                        "==" => (lv == rv) as u64,
+                        "!=" => (lv != rv) as u64,
+                        "<" => (lv < rv) as u64,
+                        ">" => (lv > rv) as u64,
+                        "<=" | "le" => (lv <= rv) as u64,
+                        ">=" => (lv >= rv) as u64,
+                        _ => lv,
+                    } & mask;
+                    return builder.ins().iconst(types::I64, result as i64);
+                }
+
                 let l = self.compile_expr(builder, left, signals_ptr, mem_ptrs);
                 let r = self.compile_expr(builder, right, signals_ptr, mem_ptrs);
-                let mask = Self::compile_mask(*width);
-                let mask_val = builder.ins().iconst(types::I64, mask as i64);
+
+                // Check if masking is needed (comparison ops return 0/1, no mask needed)
+                let is_comparison = matches!(op.as_str(), "==" | "!=" | "<" | ">" | "<=" | "le" | ">=");
+                let needs_mask = !is_comparison && *width < 64;
 
                 let result = match op.as_str() {
                     "&" => builder.ins().band(l, r),
@@ -286,8 +330,14 @@ impl JitCompiler {
                     _ => l,
                 };
 
-                // Mask the result
-                builder.ins().band(result, mask_val)
+                // Only mask if needed (skip for comparisons and 64-bit values)
+                if needs_mask {
+                    let mask = Self::compile_mask(*width);
+                    let mask_val = builder.ins().iconst(types::I64, mask as i64);
+                    builder.ins().band(result, mask_val)
+                } else {
+                    result
+                }
             }
             ExprDef::Mux { condition, when_true, when_false, width } => {
                 let cond = self.compile_expr(builder, condition, signals_ptr, mem_ptrs);
@@ -298,10 +348,14 @@ impl JitCompiler {
                 let cond_bool = builder.ins().icmp(IntCC::NotEqual, cond, zero);
                 let result = builder.ins().select(cond_bool, t, f);
 
-                // Mask result to specified width
-                let mask = Self::compile_mask(*width);
-                let mask_val = builder.ins().iconst(types::I64, mask as i64);
-                builder.ins().band(result, mask_val)
+                // Skip mask if width >= 64 (mask is all 1s, no-op)
+                if *width >= 64 {
+                    result
+                } else {
+                    let mask = Self::compile_mask(*width);
+                    let mask_val = builder.ins().iconst(types::I64, mask as i64);
+                    builder.ins().band(result, mask_val)
+                }
             }
             ExprDef::Slice { base, low, width, .. } => {
                 let src = self.compile_expr(builder, base, signals_ptr, mem_ptrs);
@@ -342,9 +396,14 @@ impl JitCompiler {
             }
             ExprDef::Resize { expr, width } => {
                 let src = self.compile_expr(builder, expr, signals_ptr, mem_ptrs);
-                let mask = Self::compile_mask(*width);
-                let mask_val = builder.ins().iconst(types::I64, mask as i64);
-                builder.ins().band(src, mask_val)
+                // Skip mask if width >= 64 (mask is all 1s, no-op)
+                if *width >= 64 {
+                    src
+                } else {
+                    let mask = Self::compile_mask(*width);
+                    let mask_val = builder.ins().iconst(types::I64, mask as i64);
+                    builder.ins().band(src, mask_val)
+                }
             }
             ExprDef::MemRead { memory, addr, width } => {
                 // Get memory index
@@ -553,6 +612,8 @@ struct JitRtlSimulator {
     clock_domain_assigns: Vec<Vec<(usize, usize)>>,
     /// Pre-allocated buffer for old clock values in tick (avoids allocation per tick)
     old_clocks: Vec<u64>,
+    /// Single-clock optimization: if only one clock domain, store its index for fast path
+    single_clock_idx: Option<usize>,
 
     /// JIT-compiled evaluate function
     evaluate_fn: EvaluateFn,
@@ -654,6 +715,13 @@ impl JitRtlSimulator {
         let prev_clock_values = vec![0u64; clock_indices.len()];
         let old_clocks = vec![0u64; clock_indices.len()];
 
+        // Single-clock optimization: if only one clock, store its index for fast path
+        let single_clock_idx = if clock_indices.len() == 1 {
+            Some(clock_indices[0])
+        } else {
+            None
+        };
+
         // Pre-group sequential assignments by clock domain
         // Maps clock_list_idx -> Vec<(seq_assign_idx, target_idx)>
         let mut clock_domain_assigns: Vec<Vec<(usize, usize)>> = vec![Vec::new(); clock_indices.len()];
@@ -721,6 +789,7 @@ impl JitRtlSimulator {
             prev_clock_values,
             clock_domain_assigns,
             old_clocks,
+            single_clock_idx,
             evaluate_fn,
             seq_sample_fn,
             memory_arrays,
@@ -850,7 +919,13 @@ impl JitRtlSimulator {
     /// Optimized tick with multi-clock domain support (minimal allocations)
     #[inline(always)]
     fn tick_fast(&mut self) {
-        // Save old clock values FIRST (using pre-allocated buffer)
+        // Use single-clock fast path when possible (most common case)
+        if let Some(clk_idx) = self.single_clock_idx {
+            self.tick_single_clock(clk_idx);
+            return;
+        }
+
+        // Multi-clock path: Save old clock values FIRST (using pre-allocated buffer)
         for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
             unsafe { *self.old_clocks.get_unchecked_mut(i) = *self.signals.get_unchecked(clk_idx); }
         }
@@ -893,6 +968,43 @@ impl JitRtlSimulator {
                 break;
             }
 
+            self.evaluate();
+        }
+    }
+
+    /// Ultra-fast tick for single-clock designs (no iteration needed)
+    #[inline(always)]
+    fn tick_single_clock(&mut self, clk_idx: usize) {
+        // Save old clock value
+        let old_clk = unsafe { *self.signals.get_unchecked(clk_idx) };
+
+        self.evaluate();
+
+        // Build memory pointers on stack for JIT call
+        let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
+            .map(|arr| arr.as_ptr())
+            .collect();
+
+        // Sample ALL register inputs
+        unsafe {
+            (self.seq_sample_fn)(
+                self.signals.as_mut_ptr(),
+                self.next_regs.as_mut_ptr(),
+                mem_ptrs.as_ptr()
+            );
+        }
+
+        // Check for rising edge (0 -> 1)
+        let new_clk = unsafe { *self.signals.get_unchecked(clk_idx) };
+        if old_clk == 0 && new_clk == 1 {
+            // Update all registers (single clock domain means all registers use this clock)
+            // Use clock_domain_assigns[0] since there's only one clock
+            if !self.clock_domain_assigns.is_empty() {
+                for &(seq_idx, target_idx) in unsafe { self.clock_domain_assigns.get_unchecked(0) } {
+                    unsafe { *self.signals.get_unchecked_mut(target_idx) = *self.next_regs.get_unchecked(seq_idx); }
+                }
+            }
+            // Re-evaluate after register update (for combinational outputs)
             self.evaluate();
         }
     }
