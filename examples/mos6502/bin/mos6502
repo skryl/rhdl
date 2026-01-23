@@ -106,6 +106,168 @@ class RubyISARunner
   end
 end
 
+# Wrapper for IR-based simulators (HDL mode with interpret/jit/compile backends)
+class IRSimulatorRunner
+  attr_reader :bus
+
+  def initialize(sim_backend = :interpret)
+    require 'rhdl/codegen'
+    require_relative '../../../examples/apple2/hdl/apple2'
+
+    @bus = MOS6502::Apple2Bus.new("apple2_bus")
+    @sim_backend = sim_backend
+    @sim = nil
+    @cycles = 0
+    @halted = false
+    @key_data = 0
+    @key_ready = false
+
+    # Generate IR JSON from Apple2 component
+    ir = RHDL::Apple2::Apple2.to_flat_ir
+    @ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+  end
+
+  def create_simulator
+    case @sim_backend
+    when :interpret
+      raise "IR Interpreter not available" unless RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
+      RHDL::Codegen::IR::IrInterpreterWrapper.new(@ir_json)
+    when :jit
+      raise "IR JIT not available" unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+      RHDL::Codegen::IR::IrJitWrapper.new(@ir_json)
+    when :compile
+      raise "IR Compiler not available" unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+      RHDL::Codegen::IR::IrCompilerWrapper.new(@ir_json)
+    else
+      raise "Unknown IR backend: #{@sim_backend}"
+    end
+  end
+
+  def native?
+    @sim_backend != :interpret
+  end
+
+  def simulator_type
+    case @sim_backend
+    when :interpret then :ir_interpret
+    when :jit then :ir_jit
+    when :compile then :ir_compile
+    end
+  end
+
+  def load_rom(bytes, base_addr:)
+    @sim ||= create_simulator
+    bytes_array = bytes.is_a?(String) ? bytes.bytes : bytes
+    @sim.load_rom(bytes_array)
+    # Also load into bus for screen reading
+    @bus.load_rom(bytes_array, base_addr: base_addr)
+  end
+
+  def load_ram(bytes, base_addr:)
+    @sim ||= create_simulator
+    bytes_array = bytes.is_a?(String) ? bytes.bytes : bytes
+    @sim.load_ram(bytes_array, base_addr)
+    # Also load into bus for screen reading
+    @bus.load_ram(bytes_array, base_addr: base_addr)
+  end
+
+  def load_disk(path_or_bytes, drive: 0)
+    @bus.load_disk(path_or_bytes, drive: drive)
+  end
+
+  def disk_loaded?(drive: 0)
+    @bus.disk_loaded?(drive: drive)
+  end
+
+  def reset
+    @sim ||= create_simulator
+    @sim.poke('reset', 1)
+    @sim.tick
+    @sim.poke('reset', 0)
+    @cycles = 0
+    @halted = false
+  end
+
+  def run_steps(steps)
+    @sim ||= create_simulator
+    result = @sim.run_cpu_cycles(steps, @key_data, @key_ready)
+
+    # Sync screen from IR simulator RAM to bus
+    if result[:text_dirty]
+      sync_screen_from_sim
+    end
+
+    if result[:key_cleared]
+      @key_ready = false
+      @bus.clear_key
+    end
+
+    @cycles += result[:cycles_run]
+  end
+
+  def sync_screen_from_sim
+    # Read text page from IR simulator and write to bus
+    text_page = @sim.read_ram(0x0400, 0x0400)  # $0400-$07FF
+    text_page.each_with_index do |byte, i|
+      @bus.ram[0x0400 + i] = byte
+    end
+  end
+
+  def inject_key(ascii)
+    @key_data = ascii
+    @key_ready = true
+    @bus.inject_key(ascii)
+  end
+
+  def key_ready?
+    @key_ready
+  end
+
+  def clear_key
+    @key_ready = false
+    @bus.clear_key
+  end
+
+  def read_screen
+    @bus.read_text_page_string
+  end
+
+  def read_screen_array
+    @bus.read_text_page
+  end
+
+  def screen_dirty?
+    @bus.text_page_dirty?
+  end
+
+  def clear_screen_dirty
+    @bus.clear_text_page_dirty
+  end
+
+  def cpu_state
+    @sim ||= create_simulator
+    {
+      pc: @sim.peek('cpu__pc_reg'),
+      a: @sim.peek('cpu__a_reg'),
+      x: @sim.peek('cpu__x_reg'),
+      y: @sim.peek('cpu__y_reg'),
+      sp: @sim.peek('cpu__sp_reg'),
+      p: @sim.peek('cpu__p_reg'),
+      cycles: @cycles,
+      halted: @halted,
+      simulator_type: simulator_type
+    }
+  end
+
+  def halted?
+    @halted
+  end
+
+  def cycle_count
+    @cycles
+  end
+end
+
 # Apple II Terminal class
 class Apple2Terminal
   SCREEN_ROWS = 24
@@ -135,34 +297,48 @@ class Apple2Terminal
 
   def initialize(options = {})
     @options = options
-    @sim_type = options[:mode] || :native
+    @mode = options[:mode] || :isa
+    @sim_backend = options[:sim] || :jit
 
-    # Create runner based on simulator type
-    @runner = case @sim_type
-              when :native
+    # Create runner based on mode and sim backend
+    @runner = case @mode
+              when :isa
+                # ISA mode ignores --sim option
                 runner = Apple2Harness::ISARunner.new
                 # Verify we got native, warn if fell back to ruby
                 unless runner.native?
                   warn "Warning: Native simulator not available, using Ruby ISA simulator"
-                  @sim_type = :ruby
                 end
+                @sim_type = runner.native? ? :native : :ruby
                 runner
-              when :ruby
-                # Force Ruby ISA simulator
-                bus = MOS6502::Apple2Bus.new("apple2_bus")
-                cpu = MOS6502::ISASimulator.new(bus)
-                # Wrap in a simple runner-like object
-                RubyISARunner.new(bus, cpu)
               when :hdl
-                Apple2Harness::Runner.new
+                # HDL mode uses IR-based simulators
+                @sim_type = :"hdl_#{@sim_backend}"
+                IRSimulatorRunner.new(@sim_backend)
+              when :netlist
+                # Netlist mode uses gate-level simulators (not yet implemented)
+                raise "Netlist mode not yet implemented"
               else
-                raise "Unknown simulator type: #{@sim_type}"
+                raise "Unknown mode: #{@mode}. Valid modes: isa, hdl, netlist"
               end
 
     @running = false
     @last_screen = nil
-    # HDL mode is ~44000x slower than real-time, so use tiny cycles_per_frame
-    default_speed = @sim_type == :hdl ? 10 : 17_030
+    # HDL/Netlist mode may be slower than ISA, adjust default speed accordingly
+    # ISA mode: ~1.022 MHz at 60fps
+    # HDL interpret: much slower, use smaller cycles
+    # HDL jit/compile: faster, but still slower than ISA
+    default_speed = case @mode
+                    when :isa then 17_030
+                    when :hdl
+                      case @sim_backend
+                      when :interpret then 100
+                      when :jit then 5_000
+                      when :compile then 10_000
+                      end
+                    when :netlist then 10
+                    else 17_030
+                    end
     @cycles_per_frame = options[:speed] || default_speed
     @debug = options[:debug] || false
     @green_screen = options[:green] || false
@@ -287,12 +463,23 @@ class Apple2Terminal
       @resize_pending = true
     end
 
-    mode_names = { native: "Native ISA", ruby: "Ruby ISA", hdl: "HDL (cycle-accurate)" }
+    mode_names = {
+      native: "Native ISA",
+      ruby: "Ruby ISA",
+      hdl_interpret: "HDL (IR Interpret)",
+      hdl_jit: "HDL (IR JIT)",
+      hdl_compile: "HDL (IR Compile)",
+      netlist_interpret: "Netlist (Interpret)",
+      netlist_jit: "Netlist (JIT)",
+      netlist_compile: "Netlist (Compile)"
+    }
     mode = mode_names[@sim_type] || @sim_type.to_s
     audio_status = @audio_enabled ? "Audio ON" : "Audio OFF"
     puts "Starting Apple ][ emulator... [#{mode} mode, #{audio_status}]"
-    if @sim_type == :hdl
-      puts "WARNING: HDL mode is ~44000x slower than real-time (for verification only)"
+    if @mode == :hdl && @sim_backend == :interpret
+      puts "WARNING: HDL interpret mode is slow (for verification only)"
+    elsif @mode == :netlist
+      puts "WARNING: Netlist mode is very slow (for verification only)"
     end
     puts "Press Ctrl+C to exit"
     puts "Press any key to continue..."
@@ -441,8 +628,8 @@ class Apple2Terminal
         seq = IO.console.read_nonblock(2)
         if @keyboard_mode == :command
           # In command mode, arrow keys control speed
-          # HDL mode uses smaller increments since it's much slower
-          speed_delta = @sim_type == :hdl ? 10 : 1000
+          # HDL/Netlist mode uses smaller increments since it's much slower
+          speed_delta = @mode == :isa ? 1000 : 100
           case seq
           when '[C' # Right arrow - increase speed
             @cycles_per_frame += speed_delta
@@ -953,7 +1140,8 @@ options = {
   debug: false,
   green: false,
   demo: false,
-  mode: :native,  # Simulator mode: native, ruby, or hdl
+  mode: :isa,      # Simulator mode: isa, hdl, or netlist
+  sim: :jit,       # Sim backend: interpret, jit, or compile (ignored for ISA mode)
   hires: false,
   hires_width: 80,
   audio: true  # Audio enabled by default
@@ -990,8 +1178,12 @@ parser = OptionParser.new do |opts|
     options[:green] = true
   end
 
-  opts.on("-m", "--mode TYPE", [:native, :ruby, :hdl], "Simulator mode: native (default), ruby, hdl") do |v|
+  opts.on("-m", "--mode TYPE", [:isa, :hdl, :netlist], "Simulator mode: isa (default), hdl, netlist") do |v|
     options[:mode] = v
+  end
+
+  opts.on("--sim TYPE", [:interpret, :jit, :compile], "Sim backend: interpret, jit (default), compile (ignored for ISA mode)") do |v|
+    options[:sim] = v
   end
 
   opts.on("--demo", "Run built-in demo program") do
