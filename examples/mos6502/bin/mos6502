@@ -966,7 +966,7 @@ parser = OptionParser.new do |opts|
   opts.separator ""
   opts.separator "Options:"
 
-  opts.on("-r", "--rom FILE", "Load ROM file (default address: $F800)") do |v|
+  opts.on("-r", "--rom FILE", "Load ROM file (address auto-detected from size)") do |v|
     options[:rom] = v
   end
 
@@ -1052,7 +1052,20 @@ terminal = Apple2Terminal.new(options)
 
 # Load ROM if specified
 if options[:rom]
-  rom_addr = options[:rom_addr] || 0xF800
+  unless File.exist?(options[:rom])
+    puts "Error: ROM file not found: #{options[:rom]}"
+    exit 1
+  end
+
+  # Auto-detect ROM base address from file size if not specified
+  rom_size = File.size(options[:rom])
+  rom_addr = options[:rom_addr] || case rom_size
+                                   when 0x4000 then 0xC000  # 16KB ROM at $C000
+                                   when 0x3000 then 0xD000  # 12KB ROM at $D000
+                                   when 0x2000 then 0xE000  # 8KB ROM at $E000
+                                   when 0x0800 then 0xF800  # 2KB ROM at $F800
+                                   else 0x10000 - rom_size  # Auto-align to end at $FFFF
+                                   end
   terminal.load_rom(options[:rom], base_addr: rom_addr)
 end
 
@@ -1062,6 +1075,22 @@ if options[:disk]
     puts "Error: Disk image not found: #{options[:disk]}"
     exit 1
   end
+
+  # Auto-load AppleIIGo ROM if disk specified without ROM
+  unless options[:rom] || options[:appleiigo] || options[:karateka]
+    rom_file = File.expand_path('../../software/roms/appleiigo.rom', __FILE__)
+    if File.exist?(rom_file)
+      puts "Auto-loading AppleIIGo ROM for disk boot..."
+      terminal.load_rom(rom_file, base_addr: 0xD000)
+      options[:appleiigo] = true  # Mark as loaded for later logic
+    else
+      puts "Error: AppleIIGo ROM not found: #{rom_file}"
+      puts "Download from: https://a2go.applearchives.com/roms/"
+      puts "Or specify a ROM with --rom option"
+      exit 1
+    end
+  end
+
   terminal.load_disk(options[:disk], drive: 0)
 end
 
@@ -1136,12 +1165,6 @@ elsif options[:demo]
 elsif options[:rom]
   # ROM loaded - it will handle startup (e.g., boot from disk)
   # No additional program needed
-elsif options[:disk]
-  # Disk loaded but no ROM - need a ROM to boot from disk
-  puts parser
-  puts ""
-  puts "Error: Disk loading requires a ROM (use --rom or --appleiigo)."
-  exit 1
 else
   puts parser
   puts ""
