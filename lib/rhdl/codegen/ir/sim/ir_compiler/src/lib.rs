@@ -1096,9 +1096,9 @@ fn generate_full_code(ir: &CircuitIR, signal_indices: &HashMap<String, usize>) -
     let clock_indices_vec: Vec<usize> = clock_indices_set.iter().cloned().collect();
     let num_clocks = clock_indices_vec.len();
 
-    // Generate inline tick-and-update logic as a macro with multi-clock support
-    // This samples registers on rising edge and immediately updates them
-    code.push_str("macro_rules! do_tick_update {\n");
+    // Generate tick_check macro - checks for rising edges using old_clocks vs signals
+    // Does NOT update old_clocks (that's done separately with do_sample_clocks)
+    code.push_str("macro_rules! do_tick_check {\n");
     code.push_str("    ($signals:expr, $old_clocks:expr) => {{\n");
 
     // Check each clock domain for rising edge, sample and update immediately
@@ -1106,23 +1106,19 @@ fn generate_full_code(ir: &CircuitIR, signal_indices: &HashMap<String, usize>) -
         code.push_str(&format!("        // Clock domain: signal index {}\n", clk_idx));
         code.push_str(&format!("        let _old_clk_{} = $old_clocks[{}];\n", clock_array_idx, clock_array_idx));
         code.push_str(&format!("        let _new_clk_{} = $signals[{}];\n", clock_array_idx, clk_idx));
-        code.push_str(&format!("        $old_clocks[{}] = _new_clk_{};\n", clock_array_idx, clock_array_idx));
+        // Note: Do NOT update old_clocks here - that's done by do_sample_clocks
         code.push_str(&format!("        if _old_clk_{} == 0 && _new_clk_{} != 0 {{\n", clock_array_idx, clock_array_idx));
 
         // Sample all registers in this clock domain, then immediately update
         if let Some(procs) = clock_domains.get(&clk_idx) {
-            // Calculate register indices for processes in this domain
             let mut base_reg_idx = 0;
             for (proc_idx, proc) in ir.processes.iter().enumerate() {
                 if proc.clocked {
-                    // Check if this process is in current clock domain
                     if procs.iter().any(|(pi, _)| *pi == proc_idx) {
-                        // First sample all registers to temps to avoid read-after-write issues
                         for (stmt_idx, stmt) in proc.statements.iter().enumerate() {
                             let expr_code = expr_to_rust_with_name(&stmt.expr, signal_indices, "$signals");
                             code.push_str(&format!("            let _next_{} = {};\n", base_reg_idx + stmt_idx, expr_code));
                         }
-                        // Then update all registers
                         for (stmt_idx, stmt) in proc.statements.iter().enumerate() {
                             if let Some(&sig_idx) = signal_indices.get(&stmt.target) {
                                 code.push_str(&format!("            $signals[{}] = _next_{};\n", sig_idx, base_reg_idx + stmt_idx));
@@ -1134,6 +1130,22 @@ fn generate_full_code(ir: &CircuitIR, signal_indices: &HashMap<String, usize>) -
             }
         }
         code.push_str("        }\n");
+    }
+    code.push_str("    }};\n}\n\n");
+
+    // Legacy tick_update macro (for compatibility) - checks edges AND updates old_clocks
+    code.push_str("macro_rules! do_tick_update {\n");
+    code.push_str("    ($signals:expr, $old_clocks:expr) => {{\n");
+    code.push_str("        do_tick_check!($signals, $old_clocks);\n");
+    code.push_str("        do_sample_clocks!($signals, $old_clocks);\n");
+    code.push_str("    }};\n}\n\n");
+
+    // Macro to only sample clock values into old_clocks without checking edges
+    // Used to capture the "low" state of derived clocks at the falling edge
+    code.push_str("macro_rules! do_sample_clocks {\n");
+    code.push_str("    ($signals:expr, $old_clocks:expr) => {{\n");
+    for (clock_array_idx, &clk_idx) in clock_indices_vec.iter().enumerate() {
+        code.push_str(&format!("        $old_clocks[{}] = $signals[{}];\n", clock_array_idx, clk_idx));
     }
     code.push_str("    }};\n}\n\n");
 
@@ -1305,6 +1317,12 @@ pub extern "C" fn run_cpu_cycles(
     let key_val_base = (key_data as u64) | 0x80;
 
     // Macro for one 14MHz cycle with multi-clock domain support
+    // Match JIT's tick_internal exactly:
+    // 1. Set clk_14m high
+    // 2. Sample initial clock values (derived clocks still at post-falling-edge state)
+    // 3. Evaluate (derived clocks update)
+    // 4. Detect edges (initial vs post-evaluate)
+    // 5. Sample and update registers
     macro_rules! cycle_14m {{
         () => {{
             // Set keyboard state (branchless)
@@ -1313,9 +1331,8 @@ pub extern "C" fn run_cpu_cycles(
             // Falling edge - set clock low
             *signals.get_unchecked_mut({clk_idx}) = 0;
             do_evaluate!(signals);
-
-            // Check for rising edges on derived clocks after falling edge eval
-            do_tick_update!(signals, old_clocks);
+            // Sample clocks to capture "low" state for rising edge detection
+            do_sample_clocks!(signals, old_clocks);
 
             // Provide RAM/ROM data using CPU's address register
             // (ram_addr may show video address during phi0=0)
@@ -1328,17 +1345,17 @@ pub extern "C" fn run_cpu_cycles(
             }} else {{
                 0  // I/O range $C000-$CFFF returns 0
             }};
-            do_evaluate!(signals);
-
-            // Check for rising edges after memory data available
-            do_tick_update!(signals, old_clocks);
 
             // Rising edge - set clock high
             *signals.get_unchecked_mut({clk_idx}) = 1;
+            // Evaluate to propagate clk_14m=1 to derived clocks
             do_evaluate!(signals);
-
-            // Check for rising edges on clk_14m and derived clocks
-            do_tick_update!(signals, old_clocks);
+            // Detect rising edges using old_clocks (captured at falling edge) vs current
+            do_tick_check!(signals, old_clocks);
+            // Final evaluate to propagate register updates (matches JIT's tick_internal)
+            do_evaluate!(signals);
+            // Update old_clocks to current state for next cycle's comparison
+            do_sample_clocks!(signals, old_clocks);
 
             // Handle RAM writes
             let ram_we = *signals.get_unchecked({ram_we_idx});
