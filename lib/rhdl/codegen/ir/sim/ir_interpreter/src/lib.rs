@@ -615,7 +615,7 @@ impl RtlSimulator {
                 let op_width = Self::expr_width(operand, widths, name_to_idx);
                 let op_mask = Self::compute_mask(op_width);
 
-                // NOT_S disabled for testing
+                // NOT_S disabled - bug investigation
                 let emitted_specialized = false;
 
                 if !emitted_specialized {
@@ -644,7 +644,7 @@ impl RtlSimulator {
                 let dst = *temp_counter;
                 *temp_counter += 1;
 
-                // AND_SS, OR_SS, EQ_SS - testing
+                // Specialized signal-signal and signal-immediate ops
                 let emitted_specialized = match (&l, &r, op.as_str()) {
                     (Operand::Signal(l_idx), Operand::Signal(r_idx), "&") => {
                         ops.push(FlatOp { op_type: OP_AND_SS, dst, arg0: *l_idx as u64, arg1: *r_idx as u64, arg2: mask });
@@ -656,6 +656,14 @@ impl RtlSimulator {
                     }
                     (Operand::Signal(l_idx), Operand::Signal(r_idx), "==") => {
                         ops.push(FlatOp { op_type: OP_EQ_SS, dst, arg0: *l_idx as u64, arg1: *r_idx as u64, arg2: mask });
+                        true
+                    }
+                    (Operand::Signal(l_idx), Operand::Immediate(imm), "&") => {
+                        ops.push(FlatOp { op_type: OP_AND_SI, dst, arg0: *l_idx as u64, arg1: *imm, arg2: mask });
+                        true
+                    }
+                    (Operand::Signal(l_idx), Operand::Immediate(imm), "|") => {
+                        ops.push(FlatOp { op_type: OP_OR_SI, dst, arg0: *l_idx as u64, arg1: *imm, arg2: mask });
                         true
                     }
                     _ => false,
@@ -730,7 +738,7 @@ impl RtlSimulator {
                 let dst = *temp_counter;
                 *temp_counter += 1;
 
-                // SLICE_S disabled for testing - use generic
+                // SLICE_S disabled - bug investigation
                 ops.push(FlatOp {
                     op_type: OP_SLICE,
                     dst,
