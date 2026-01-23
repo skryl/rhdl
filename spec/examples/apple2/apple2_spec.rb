@@ -763,6 +763,9 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
   ROM_PATH_ISA = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
   KARATEKA_MEM_PATH = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
 
+  # Karateka game entry point (where execution starts in the memory dump)
+  KARATEKA_ENTRY = 0xB82A
+
   # Number of iterations for each test type
   # Ruby ISA is slow, so use fewer iterations
   RUBY_ITERATIONS = 1_000
@@ -1141,48 +1144,73 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
   end
 
   describe 'Karateka memory dump' do
-    # Test that ISA and IR execute the same ROM code with game memory loaded.
-    # Note: Keyboard input to navigate to game code (0xB82A) is not yet working
-    # because the ROM has a long delay loop at boot before reaching the keyboard
-    # read routine. For now, we test that both systems execute the same ROM boot
-    # code path with the game memory state loaded.
+    # Test that ISA and IR execute the same code with Karateka game memory loaded.
+    #
+    # Strategy: We modify the reset vector in ROM to point directly to the game
+    # entry point $B82A. This bypasses the ROM's long boot sequence and allows
+    # testing actual game code execution.
 
     before do
       skip 'AppleIIgo ROM not found' unless @rom_available
       skip 'Karateka memory dump not found' unless @karateka_available
     end
 
-    # Helper to set up IR simulator with Karateka memory (boots from ROM)
-    def setup_ir_for_karateka(ir_sim)
-      ir_sim.load_rom(@rom_data)
-      ir_sim.load_ram(@karateka_mem, 0)
-      boot_cycles = boot_ir_simulator(ir_sim)
-
-      pc = ir_sim.peek('cpu__pc_reg')
-      { started_at: pc, boot_cycles: boot_cycles }
+    # Create a modified ROM that has reset vector pointing to game entry.
+    # We simply modify the reset vector at $FFFC-$FFFD to point to $B82A.
+    def create_karateka_rom
+      rom = @rom_data.dup
+      # ROM is 12K loaded at $D000, so:
+      # - $FFFC (reset vector low) = offset 0x2FFC
+      # - $FFFD (reset vector high) = offset 0x2FFD
+      rom[0x2FFC] = 0x2A     # low byte of $B82A
+      rom[0x2FFD] = 0xB8     # high byte of $B82A
+      rom
     end
 
-    # Helper to set up ISA simulator with Karateka memory (boots from ROM reset)
+    # Helper to set up IR simulator with Karateka memory and modified ROM
+    def setup_ir_for_karateka(ir_sim)
+      karateka_rom = create_karateka_rom
+      ir_sim.load_rom(karateka_rom)
+      # Only load first 48K of memory (Apple II RAM is 48K, $0000-$BFFF)
+      ram_size = 48 * 1024
+      ir_sim.load_ram(@karateka_mem.first(ram_size), 0)
+
+      # Boot through reset - CPU should start directly at game entry
+      ir_sim.poke('reset', 1)
+      ir_sim.tick
+      ir_sim.poke('reset', 0)
+
+      # Run a few cycles to complete reset sequence
+      3.times { ir_sim.run_cpu_cycles(1, 0, false) }
+
+      pc = ir_sim.peek('cpu__pc_reg')
+      { started_at: pc, boot_cycles: 3 }
+    end
+
+    # Helper to set up ISA simulator with Karateka memory and modified ROM
     def setup_isa_for_karateka(cpu, bus)
+      karateka_rom = create_karateka_rom
+      bus.load_rom(karateka_rom, base_addr: 0xD000)
       bus.load_ram(@karateka_mem, base_addr: 0x0000)
+
       if cpu.respond_to?(:load_bytes)
         cpu.load_bytes(@karateka_mem, 0x0000)
+        cpu.load_bytes(karateka_rom, 0xD000)
       else
-        @karateka_mem.each_with_index do |byte, i|
-          cpu.write(i, byte)
-        end
+        @karateka_mem.each_with_index { |byte, i| cpu.write(i, byte) }
+        karateka_rom.each_with_index { |byte, i| cpu.write(0xD000 + i, byte) }
       end
-      # Reset to boot from ROM (don't set PC to game code)
+
       cpu.reset
     end
 
     context 'with Ruby ISA simulator as reference' do
-      it 'compares PC sequences with game memory loaded (100 at start, 100 at end)', timeout: 30 do
-        # Create reference (Ruby ISA simulator) - boots from ROM with game memory
+      it 'compares PC sequences from game entry point (100 at start, 100 at end)', timeout: 30 do
+        # Create reference (Ruby ISA simulator) - PC at game entry
         cpu, bus = create_isa_simulator(native: false)
         setup_isa_for_karateka(cpu, bus)
 
-        # Create target (Apple2 IR interpreter) - boots from ROM with game memory
+        # Create target (Apple2 IR interpreter) - PC forced to game entry
         ir_sim = create_apple2_ir_simulator(:interpreter)
         setup_result = setup_ir_for_karateka(ir_sim)
 
@@ -1200,8 +1228,8 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
         first_match = find_isa_pcs_in_ir(first_isa, ir_transitions)
         last_match = find_isa_pcs_in_ir(last_isa, ir_transitions)
 
-        puts "\n  PC Sequence Comparison (Ruby ISA vs IR Interpreter - with Karateka memory):"
-        puts "  IR started at: PC=0x#{setup_result[:started_at].to_s(16)}, boot_cycles=#{setup_result[:boot_cycles]}"
+        puts "\n  PC Sequence Comparison (Ruby ISA vs IR Interpreter - Karateka game code):"
+        puts "  Target PC: 0x#{KARATEKA_ENTRY.to_s(16)}, IR actual: 0x#{setup_result[:started_at].to_s(16)}"
         puts "  ISA transitions: #{isa_transitions.size}, IR transitions: #{ir_transitions.size}"
         puts "  First #{compare_count} ISA PCs found in IR: #{first_match[:found].size}/#{compare_count}"
         puts "  Last #{compare_count} ISA PCs found in IR: #{last_match[:found].size}/#{compare_count}"
@@ -1222,7 +1250,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
         skip 'Native ISA simulator not available' unless native_isa_available?
       end
 
-      it 'compares PC sequences with game memory vs IR interpreter', timeout: 30 do
+      it 'compares PC sequences from game entry vs IR interpreter', timeout: 30 do
         cpu, bus = create_isa_simulator(native: true)
         skip 'Native ISA simulator not available' unless cpu.native?
         setup_isa_for_karateka(cpu, bus)
@@ -1241,8 +1269,8 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
         first_match = find_isa_pcs_in_ir(first_isa, ir_transitions)
         last_match = find_isa_pcs_in_ir(last_isa, ir_transitions)
 
-        puts "\n  PC Sequence Comparison (Rust ISA vs IR Interpreter - with Karateka memory):"
-        puts "  IR started at: PC=0x#{setup_result[:started_at].to_s(16)}, boot_cycles=#{setup_result[:boot_cycles]}"
+        puts "\n  PC Sequence Comparison (Rust ISA vs IR Interpreter - Karateka game code):"
+        puts "  Target PC: 0x#{KARATEKA_ENTRY.to_s(16)}, IR actual: 0x#{setup_result[:started_at].to_s(16)}"
         puts "  ISA transitions: #{isa_transitions.size}, IR transitions: #{ir_transitions.size}"
         puts "  First #{compare_count} ISA PCs found in IR: #{first_match[:found].size}/#{compare_count}"
         puts "  Last #{compare_count} ISA PCs found in IR: #{last_match[:found].size}/#{compare_count}"
@@ -1257,7 +1285,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
         expect(match_rate).to be >= 0.8
       end
 
-      it 'compares PC sequences with game memory vs IR JIT', timeout: 30 do
+      it 'compares PC sequences from game entry vs IR JIT', timeout: 30 do
         cpu, bus = create_isa_simulator(native: true)
         skip 'Native ISA simulator not available' unless cpu.native?
         setup_isa_for_karateka(cpu, bus)
@@ -1277,8 +1305,8 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
         first_match = find_isa_pcs_in_ir(first_isa, ir_transitions)
         last_match = find_isa_pcs_in_ir(last_isa, ir_transitions)
 
-        puts "\n  PC Sequence Comparison (Rust ISA vs IR JIT - with Karateka memory):"
-        puts "  IR started at: PC=0x#{setup_result[:started_at].to_s(16)}, boot_cycles=#{setup_result[:boot_cycles]}"
+        puts "\n  PC Sequence Comparison (Rust ISA vs IR JIT - Karateka game code):"
+        puts "  Target PC: 0x#{KARATEKA_ENTRY.to_s(16)}, IR actual: 0x#{setup_result[:started_at].to_s(16)}"
         puts "  ISA transitions: #{isa_transitions.size}, IR transitions: #{ir_transitions.size}"
         puts "  First #{compare_count} ISA PCs found in IR: #{first_match[:found].size}/#{compare_count}"
         puts "  Last #{compare_count} ISA PCs found in IR: #{last_match[:found].size}/#{compare_count}"
