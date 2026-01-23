@@ -313,8 +313,9 @@ module RHDL
                      (a_hi == lit(0xE, width: 4)) |
                      (a_hi == lit(0xF, width: 4))
 
-        # RAM select: $0000-$BFFF
-        ram_select = ~cpu_addr[15] | (~cpu_addr[14] & ~cpu_addr[15])
+        # RAM select: $0000-$BFFF (not $C000-$FFFF)
+        # True when address bits 15 and 14 are not both 1
+        ram_select = ~cpu_addr[15] | ~cpu_addr[14]
 
         # Keyboard select: $C000-$C00F
         keyboard_select = (a_hi == lit(0xC, width: 4)) &
