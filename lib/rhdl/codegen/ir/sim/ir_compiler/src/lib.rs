@@ -824,9 +824,9 @@ impl IrSimulator {
         code.push_str(&format!("            signals[{}] = 0;\n", clk_idx));
         code.push_str("            evaluate(signals.as_mut_ptr(), signals.len());\n\n");
 
-        // Provide RAM/ROM data (use CPU's address register, not ram_addr which may show video address)
+        // Provide RAM/ROM data (use ram_addr to match Ruby behavior simulator)
         code.push_str(&format!("            // Provide RAM/ROM data\n"));
-        code.push_str(&format!("            let addr = signals[{}] as usize;\n", cpu_addr_idx));
+        code.push_str(&format!("            let addr = signals[{}] as usize;\n", ram_addr_idx));
         code.push_str(&format!("            signals[{}] = if addr >= 0xD000 {{\n", ram_do_idx));
         code.push_str("                let rom_offset = addr.wrapping_sub(0xD000);\n");
         code.push_str("                if rom_offset < rom.len() { rom[rom_offset] as u64 } else { 0 }\n");
@@ -974,8 +974,8 @@ impl IrSimulator {
                 self.signals[self.clk_idx] = 0;
                 self.evaluate();
 
-                // Provide RAM/ROM data (use CPU's address register, not ram_addr which may show video address)
-                let addr = self.signals[self.cpu_addr_idx] as usize;
+                // Provide RAM/ROM data (use ram_addr to match Ruby behavior simulator)
+                let addr = self.signals[self.ram_addr_idx] as usize;
                 self.signals[self.ram_do_idx] = if addr >= 0xD000 {
                     let rom_offset = addr.wrapping_sub(0xD000);
                     if rom_offset < self.rom.len() { self.rom[rom_offset] as u64 } else { 0 }

@@ -893,20 +893,18 @@ impl JitRtlSimulator {
         // $C000-$CFFF: I/O space (soft switches, slot ROMs)
         // $D000-$FFFF: ROM (12KB)
         //
-        // Use CPU's actual address register instead of ram_addr (which may show
-        // video address during phi0=0). This ensures the CPU gets correct data
-        // regardless of timing phase.
-        let cpu_addr = self.signals[self.cpu_addr_idx] as usize;
-        let ram_data = if cpu_addr >= 0xD000 && cpu_addr <= 0xFFFF {
+        // Use ram_addr to match Ruby behavior simulator (harness.rb line 171)
+        let ram_addr = self.signals[self.ram_addr_idx] as usize;
+        let ram_data = if ram_addr >= 0xD000 && ram_addr <= 0xFFFF {
             // ROM space
-            let rom_offset = cpu_addr.wrapping_sub(0xD000);
+            let rom_offset = ram_addr.wrapping_sub(0xD000);
             if rom_offset < self.rom.len() { self.rom[rom_offset] } else { 0 }
-        } else if cpu_addr >= 0xC000 {
+        } else if ram_addr >= 0xC000 {
             // I/O space - return 0 (soft switches handled by HDL logic)
             0
-        } else if cpu_addr < self.ram.len() {
+        } else if ram_addr < self.ram.len() {
             // RAM space
-            self.ram[cpu_addr]
+            self.ram[ram_addr]
         } else {
             0
         };
