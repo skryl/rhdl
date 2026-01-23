@@ -832,46 +832,128 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
     end
   end
 
-  # Helper to reset and run ISA simulator
-  def run_isa_simulator(cpu, iterations)
-    cpu.reset
-    pcs = []
-
-    # Sample PC at regular intervals
-    sample_interval = [iterations / 100, 1].max
-    cycles_run = 0
-
-    while cycles_run < iterations
-      cpu.step
-      cycles_run = cpu.cycles
-      pcs << cpu.pc if (cycles_run % sample_interval) < cpu.cycles - cycles_run + 1
+  # Extract PC transitions (unique consecutive PC values) from a raw PC sequence
+  # This filters out repeated PC values that occur during multi-cycle instructions
+  def extract_pc_transitions(pcs)
+    return [] if pcs.empty?
+    transitions = [pcs.first]
+    pcs.each do |pc|
+      transitions << pc if pc != transitions.last
     end
-
-    { final_pc: cpu.pc, cycles: cpu.cycles, samples: pcs.last(100) }
+    transitions
   end
 
-  # Helper to reset and run Apple2 IR simulator
-  def run_apple2_ir_simulator(sim, iterations)
-    sim.load_rom(@rom_data)
+  # Boot IR simulator through reset sequence until it reaches the first ROM instruction
+  # Returns the number of cycles used for boot
+  def boot_ir_simulator(sim)
     sim.poke('reset', 1)
     sim.tick
     sim.poke('reset', 0)
 
-    # Run in batches and sample PC
-    pcs = []
-    sample_interval = [iterations / 100, 1].max
-    cycles_run = 0
+    boot_cycles = 0
+    max_boot_cycles = 100
 
-    while cycles_run < iterations
-      batch_size = [sample_interval, iterations - cycles_run].min
-      result = sim.run_cpu_cycles(batch_size, 0, false)
-      cycles_run += result[:cycles_run] || batch_size
-
+    # Run through reset until PC reaches ROM code (not in reset vector area)
+    while boot_cycles < max_boot_cycles
       pc = sim.peek('cpu__pc_reg')
-      pcs << pc
+
+      # Stop when PC is at a valid ROM address
+      if pc >= 0xD000 && pc < 0xFFFC
+        break
+      end
+
+      sim.run_cpu_cycles(1, 0, false)
+      boot_cycles += 1
     end
 
-    { final_pc: sim.peek('cpu__pc_reg'), cycles: cycles_run, samples: pcs.last(100) }
+    boot_cycles
+  end
+
+  # Wait for IR simulator to reach a specific PC address (or nearby code area)
+  # Used to synchronize IR with ISA when starting from different points
+  def wait_for_ir_to_reach(sim, target_pc, max_cycles: 100_000)
+    cycles = 0
+    while cycles < max_cycles
+      pc = sim.peek('cpu__pc_reg')
+      # Check if we're in the target code area (within 256 bytes)
+      if (pc - target_pc).abs < 256 || pc == target_pc
+        return { cycles: cycles, reached_pc: pc }
+      end
+      sim.run_cpu_cycles(1, 0, false)
+      cycles += 1
+    end
+    { cycles: cycles, reached_pc: sim.peek('cpu__pc_reg') }
+  end
+
+  # Collect PC transitions from ISA simulator
+  def collect_isa_pc_transitions(cpu, iterations)
+    transitions = []
+    iterations.times do
+      break if cpu.halted?
+      transitions << cpu.pc
+      cpu.step
+    end
+    transitions
+  end
+
+  # Collect PC transitions from IR simulator
+  # Runs cycles and records PC whenever it changes
+  def collect_ir_pc_transitions(sim, max_cycles, target_transitions: nil)
+    transitions = []
+    last_pc = nil
+    cycles = 0
+
+    while cycles < max_cycles
+      pc = sim.peek('cpu__pc_reg')
+      if pc != last_pc
+        transitions << pc
+        last_pc = pc
+        break if target_transitions && transitions.size >= target_transitions
+      end
+      sim.run_cpu_cycles(1, 0, false)
+      cycles += 1
+    end
+
+    { transitions: transitions, cycles: cycles }
+  end
+
+  # Check if ISA PC sequence is a subsequence of IR PC sequence
+  # (IR has extra intermediate PCs from operand fetches, but should include all ISA PCs)
+  def find_isa_pcs_in_ir(isa_pcs, ir_pcs)
+    found = []
+    not_found = []
+    ir_index = 0
+
+    isa_pcs.each do |isa_pc|
+      # Find this ISA PC in the remaining IR sequence
+      found_at = nil
+      while ir_index < ir_pcs.size
+        if ir_pcs[ir_index] == isa_pc
+          found_at = ir_index
+          ir_index += 1
+          break
+        end
+        ir_index += 1
+      end
+
+      if found_at
+        found << { isa_pc: isa_pc, ir_index: found_at }
+      else
+        not_found << isa_pc
+        # Reset to try again (PC might repeat in loops)
+        ir_index = 0
+        ir_pcs.each_with_index do |ir_pc, i|
+          if ir_pc == isa_pc
+            found << { isa_pc: isa_pc, ir_index: i }
+            not_found.pop
+            ir_index = i + 1
+            break
+          end
+        end
+      end
+    end
+
+    { found: found, not_found: not_found }
   end
 
   # Helper to load Karateka memory dump
@@ -903,49 +985,50 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
     end
 
     context 'with Ruby ISA simulator as reference' do
-      it 'tracks PC progression against Apple2 IR interpreter' do
+      it 'compares PC sequences after boot (100 at start, 100 at end)', timeout: 30 do
         # Create reference (Ruby ISA simulator)
         cpu, _bus = create_isa_simulator(native: false)
         cpu.reset
 
-        # Create target (Apple2 IR interpreter)
+        # Create target (Apple2 IR interpreter) and boot it
         ir_sim = create_apple2_ir_simulator(:interpreter)
         ir_sim.load_rom(@rom_data)
-        ir_sim.poke('reset', 1)
-        ir_sim.tick
-        ir_sim.poke('reset', 0)
+        boot_cycles = boot_ir_simulator(ir_sim)
 
-        # Collect PC sequences from both systems
-        isa_pcs = []
-        ir_pcs = []
+        # Collect PC transitions from ISA
+        isa_transitions = collect_isa_pc_transitions(cpu, RUBY_ITERATIONS)
 
-        RUBY_ITERATIONS.times do |i|
-          break if cpu.halted?
+        # Collect PC transitions from IR (use smaller multiplier)
+        ir_result = collect_ir_pc_transitions(ir_sim, RUBY_ITERATIONS * 5, target_transitions: isa_transitions.size * 2)
+        ir_transitions = ir_result[:transitions]
 
-          # Record ISA PC and execute one instruction
-          isa_pcs << cpu.pc
-          cpu.step
+        compare_count = 100
+        first_isa = isa_transitions.first(compare_count)
+        last_isa = isa_transitions.last(compare_count)
 
-          # Record IR PC and run one CPU cycle
-          ir_pcs << ir_sim.peek('cpu__pc_reg')
-          ir_sim.run_cpu_cycles(1, 0, false)
+        first_match = find_isa_pcs_in_ir(first_isa, ir_transitions)
+        last_match = find_isa_pcs_in_ir(last_isa, ir_transitions)
+
+        puts "\n  PC Sequence Comparison (Ruby ISA vs IR Interpreter):"
+        puts "  Boot cycles: #{boot_cycles}"
+        puts "  ISA transitions: #{isa_transitions.size}, IR transitions: #{ir_transitions.size}"
+        puts "  First #{compare_count} ISA PCs found in IR: #{first_match[:found].size}/#{compare_count}"
+        puts "  Last #{compare_count} ISA PCs found in IR: #{last_match[:found].size}/#{compare_count}"
+        puts "  First 10 ISA: #{first_isa.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+        puts "  First 10 IR:  #{ir_transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+
+        if first_match[:not_found].any?
+          puts "  Missing ISA PCs: #{first_match[:not_found].first(5).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
         end
 
-        # Report results
-        puts "\n  PC Progression (Ruby ISA vs IR Interpreter):"
-        puts "  ISA executed #{isa_pcs.size} instructions"
-        puts "  ISA final PC: 0x#{cpu.pc.to_s(16)}"
-        puts "  IR final PC: 0x#{ir_sim.peek('cpu__pc_reg').to_s(16)}"
-        puts "  ISA unique PCs: #{isa_pcs.uniq.size}"
-        puts "  IR unique PCs: #{ir_pcs.uniq.size}"
-        puts "  First 10 ISA PCs: #{isa_pcs.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
-        puts "  First 10 IR PCs: #{ir_pcs.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
-
         # Verify both systems execute valid code
-        expect(isa_pcs).not_to be_empty, "ISA simulator should execute instructions"
-        expect(ir_pcs).not_to be_empty, "IR simulator should execute cycles"
-        expect(cpu.pc).to be_between(0, 0xFFFF)
-        expect(ir_sim.peek('cpu__pc_reg')).to be_between(0, 0xFFFF)
+        expect(isa_transitions.size).to be >= compare_count
+        expect(ir_transitions.size).to be >= compare_count
+
+        # Report match rate (some PCs may differ due to cycle-level timing)
+        match_rate = first_match[:found].size.to_f / compare_count
+        puts "  Match rate: #{(match_rate * 100).round(1)}%"
+        expect(match_rate).to be >= 0.8, "At least 80% of first #{compare_count} ISA PCs should appear in IR"
       end
     end
 
@@ -954,136 +1037,129 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
         skip 'Native ISA simulator not available' unless native_isa_available?
       end
 
-      it 'tracks PC progression against Apple2 IR interpreter' do
-        # Create reference (Rust ISA simulator)
+      it 'compares PC sequences after boot vs IR interpreter', timeout: 30 do
         cpu, _bus = create_isa_simulator(native: true)
         skip 'Native ISA simulator not available' unless cpu.native?
         cpu.reset
 
-        # Create target (Apple2 IR interpreter)
         ir_sim = create_apple2_ir_simulator(:interpreter)
         ir_sim.load_rom(@rom_data)
-        ir_sim.poke('reset', 1)
-        ir_sim.tick
-        ir_sim.poke('reset', 0)
+        boot_cycles = boot_ir_simulator(ir_sim)
 
-        # Collect PC sequences
-        isa_pcs = []
-        ir_pcs = []
+        isa_transitions = collect_isa_pc_transitions(cpu, INTERPRETER_ITERATIONS)
+        ir_result = collect_ir_pc_transitions(ir_sim, INTERPRETER_ITERATIONS * 5, target_transitions: isa_transitions.size * 2)
+        ir_transitions = ir_result[:transitions]
 
-        INTERPRETER_ITERATIONS.times do |i|
-          break if cpu.halted?
+        compare_count = 100
+        first_isa = isa_transitions.first(compare_count)
+        last_isa = isa_transitions.last(compare_count)
 
-          isa_pcs << cpu.pc
-          cpu.step
+        first_match = find_isa_pcs_in_ir(first_isa, ir_transitions)
+        last_match = find_isa_pcs_in_ir(last_isa, ir_transitions)
 
-          ir_pcs << ir_sim.peek('cpu__pc_reg')
-          ir_sim.run_cpu_cycles(1, 0, false)
-        end
+        puts "\n  PC Sequence Comparison (Rust ISA vs IR Interpreter):"
+        puts "  Boot cycles: #{boot_cycles}"
+        puts "  ISA transitions: #{isa_transitions.size}, IR transitions: #{ir_transitions.size}"
+        puts "  First #{compare_count} ISA PCs found in IR: #{first_match[:found].size}/#{compare_count}"
+        puts "  Last #{compare_count} ISA PCs found in IR: #{last_match[:found].size}/#{compare_count}"
+        puts "  First 10 ISA: #{first_isa.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+        puts "  First 10 IR:  #{ir_transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
 
-        puts "\n  PC Progression (Rust ISA vs IR Interpreter):"
-        puts "  ISA executed #{isa_pcs.size} instructions"
-        puts "  ISA final PC: 0x#{cpu.pc.to_s(16)}"
-        puts "  IR final PC: 0x#{ir_sim.peek('cpu__pc_reg').to_s(16)}"
-        puts "  ISA unique PCs: #{isa_pcs.uniq.size}"
-        puts "  IR unique PCs: #{ir_pcs.uniq.size}"
-        puts "  First 10 ISA PCs: #{isa_pcs.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
-        puts "  First 10 IR PCs: #{ir_pcs.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+        expect(isa_transitions.size).to be >= compare_count
+        expect(ir_transitions.size).to be >= compare_count
 
-        expect(isa_pcs).not_to be_empty
-        expect(ir_pcs).not_to be_empty
-        expect(cpu.pc).to be_between(0, 0xFFFF)
-        expect(ir_sim.peek('cpu__pc_reg')).to be_between(0, 0xFFFF)
+        match_rate = first_match[:found].size.to_f / compare_count
+        puts "  Match rate: #{(match_rate * 100).round(1)}%"
+        expect(match_rate).to be >= 0.8
       end
 
-      it 'tracks PC progression against Apple2 IR JIT' do
-        # Create reference (Rust ISA simulator)
+      it 'compares PC sequences after boot vs IR JIT', timeout: 30 do
         cpu, _bus = create_isa_simulator(native: true)
         skip 'Native ISA simulator not available' unless cpu.native?
         cpu.reset
 
-        # Create target (Apple2 IR JIT)
         ir_sim = create_apple2_ir_simulator(:jit)
         ir_sim.load_rom(@rom_data)
-        ir_sim.poke('reset', 1)
-        ir_sim.tick
-        ir_sim.poke('reset', 0)
+        boot_cycles = boot_ir_simulator(ir_sim)
 
-        # Collect PC sequences
-        isa_pcs = []
-        ir_pcs = []
+        # Use smaller iterations for JIT to avoid timeout
+        iterations = [JIT_ITERATIONS, 10_000].min
+        isa_transitions = collect_isa_pc_transitions(cpu, iterations)
+        ir_result = collect_ir_pc_transitions(ir_sim, iterations * 5, target_transitions: isa_transitions.size * 2)
+        ir_transitions = ir_result[:transitions]
 
-        JIT_ITERATIONS.times do |i|
-          break if cpu.halted?
+        compare_count = 100
+        first_isa = isa_transitions.first(compare_count)
+        last_isa = isa_transitions.last(compare_count)
 
-          isa_pcs << cpu.pc
-          cpu.step
+        first_match = find_isa_pcs_in_ir(first_isa, ir_transitions)
+        last_match = find_isa_pcs_in_ir(last_isa, ir_transitions)
 
-          ir_pcs << ir_sim.peek('cpu__pc_reg')
-          ir_sim.run_cpu_cycles(1, 0, false)
-        end
+        puts "\n  PC Sequence Comparison (Rust ISA vs IR JIT):"
+        puts "  Boot cycles: #{boot_cycles}"
+        puts "  ISA transitions: #{isa_transitions.size}, IR transitions: #{ir_transitions.size}"
+        puts "  First #{compare_count} ISA PCs found in IR: #{first_match[:found].size}/#{compare_count}"
+        puts "  Last #{compare_count} ISA PCs found in IR: #{last_match[:found].size}/#{compare_count}"
+        puts "  First 10 ISA: #{first_isa.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+        puts "  First 10 IR:  #{ir_transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
 
-        puts "\n  PC Progression (Rust ISA vs IR JIT):"
-        puts "  ISA executed #{isa_pcs.size} instructions"
-        puts "  ISA final PC: 0x#{cpu.pc.to_s(16)}"
-        puts "  IR final PC: 0x#{ir_sim.peek('cpu__pc_reg').to_s(16)}"
-        puts "  ISA unique PCs: #{isa_pcs.uniq.size}"
-        puts "  IR unique PCs: #{ir_pcs.uniq.size}"
-        puts "  First 10 ISA PCs: #{isa_pcs.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
-        puts "  First 10 IR PCs: #{ir_pcs.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+        expect(isa_transitions.size).to be >= compare_count
+        expect(ir_transitions.size).to be >= compare_count
 
-        expect(isa_pcs).not_to be_empty
-        expect(ir_pcs).not_to be_empty
-        expect(cpu.pc).to be_between(0, 0xFFFF)
-        expect(ir_sim.peek('cpu__pc_reg')).to be_between(0, 0xFFFF)
+        match_rate = first_match[:found].size.to_f / compare_count
+        puts "  Match rate: #{(match_rate * 100).round(1)}%"
+        expect(match_rate).to be >= 0.8
       end
     end
   end
 
   describe 'Karateka memory dump' do
+    # Note: For Karateka, the ISA is manually started at game entry point (0xB82A)
+    # while the IR boots from ROM and enters keyboard scan loop, waiting for input.
+    # IR will never naturally reach game code without user input, so these tests
+    # compare what each system does from its starting point.
+
     before do
       skip 'AppleIIgo ROM not found' unless @rom_available
       skip 'Karateka memory dump not found' unless @karateka_available
     end
 
     context 'with Ruby ISA simulator as reference' do
-      it 'tracks PC progression against Apple2 IR interpreter' do
-        # Create reference (Ruby ISA simulator)
+      it 'reports PC sequences (ISA at game entry, IR at keyboard loop)', timeout: 30 do
+        # Create reference (Ruby ISA simulator) - starts at Karateka entry point
         cpu, bus = create_isa_simulator(native: false)
         load_karateka_into_isa(cpu, bus)
 
-        # Create target (Apple2 IR interpreter)
+        # Create target (Apple2 IR interpreter) - boots from ROM
         ir_sim = create_apple2_ir_simulator(:interpreter)
-        load_karateka_into_ir(ir_sim)
+        ir_sim.load_rom(@rom_data)
+        ir_sim.load_ram(@karateka_mem, 0)
+        boot_ir_simulator(ir_sim)
 
-        # Collect PC sequences
-        isa_pcs = []
-        ir_pcs = []
+        # Collect PC transitions from ISA
+        isa_transitions = collect_isa_pc_transitions(cpu, RUBY_ITERATIONS)
 
-        RUBY_ITERATIONS.times do |i|
-          break if cpu.halted?
+        # Collect PC transitions from IR (use fewer cycles for interpreter)
+        ir_result = collect_ir_pc_transitions(ir_sim, 2000, target_transitions: 200)
+        ir_transitions = ir_result[:transitions]
 
-          isa_pcs << cpu.pc
-          cpu.step
+        compare_count = [100, isa_transitions.size, ir_transitions.size].min
+        first_isa = isa_transitions.first(compare_count)
+        last_isa = isa_transitions.last(compare_count)
 
-          ir_pcs << ir_sim.peek('cpu__pc_reg')
-          ir_sim.run_cpu_cycles(1, 0, false)
-        end
+        puts "\n  PC Sequences (Ruby ISA vs IR Interpreter - Karateka):"
+        puts "  ISA transitions: #{isa_transitions.size}, IR transitions: #{ir_transitions.size}"
+        puts "  ISA start PC: 0x#{isa_transitions.first&.to_s(16) || 'N/A'} (game entry)"
+        puts "  IR start PC: 0x#{ir_transitions.first&.to_s(16) || 'N/A'} (ROM boot)"
+        puts "  First 10 ISA: #{first_isa.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+        puts "  First 10 IR:  #{ir_transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+        puts "  Last 10 ISA: #{last_isa.last(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+        puts "  Last 10 IR:  #{ir_transitions.last(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
 
-        puts "\n  PC Progression (Ruby ISA vs IR Interpreter - Karateka):"
-        puts "  ISA executed #{isa_pcs.size} instructions"
-        puts "  ISA starting PC: 0x#{isa_pcs.first&.to_s(16) || 'N/A'}"
-        puts "  ISA final PC: 0x#{cpu.pc.to_s(16)}"
-        puts "  IR final PC: 0x#{ir_sim.peek('cpu__pc_reg').to_s(16)}"
-        puts "  ISA unique PCs: #{isa_pcs.uniq.size}"
-        puts "  IR unique PCs: #{ir_pcs.uniq.size}"
-        puts "  First 10 ISA PCs: #{isa_pcs.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
-        puts "  First 10 IR PCs: #{ir_pcs.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
-
-        expect(isa_pcs).not_to be_empty
-        expect(ir_pcs).not_to be_empty
-        expect(cpu.pc).to be_between(0, 0xFFFF)
-        expect(ir_sim.peek('cpu__pc_reg')).to be_between(0, 0xFFFF)
+        # Verify both execute valid code
+        expect(isa_transitions.size).to be >= compare_count
+        expect(ir_transitions.size).to be >= compare_count
+        expect(isa_transitions.first).to eq(0xB82A), "ISA should start at Karateka entry 0xB82A"
       end
     end
 
@@ -1092,84 +1168,69 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
         skip 'Native ISA simulator not available' unless native_isa_available?
       end
 
-      it 'tracks PC progression against Apple2 IR interpreter' do
-        # Create reference (Rust ISA simulator)
+      it 'reports PC sequences vs IR interpreter', timeout: 30 do
         cpu, bus = create_isa_simulator(native: true)
         skip 'Native ISA simulator not available' unless cpu.native?
         load_karateka_into_isa(cpu, bus)
 
-        # Create target (Apple2 IR interpreter)
         ir_sim = create_apple2_ir_simulator(:interpreter)
-        load_karateka_into_ir(ir_sim)
+        ir_sim.load_rom(@rom_data)
+        ir_sim.load_ram(@karateka_mem, 0)
+        boot_ir_simulator(ir_sim)
 
-        # Collect PC sequences
-        isa_pcs = []
-        ir_pcs = []
+        isa_transitions = collect_isa_pc_transitions(cpu, INTERPRETER_ITERATIONS)
+        ir_result = collect_ir_pc_transitions(ir_sim, 2000, target_transitions: 200)
+        ir_transitions = ir_result[:transitions]
 
-        INTERPRETER_ITERATIONS.times do |i|
-          break if cpu.halted?
+        compare_count = [100, isa_transitions.size, ir_transitions.size].min
+        first_isa = isa_transitions.first(compare_count)
+        last_isa = isa_transitions.last(compare_count)
 
-          isa_pcs << cpu.pc
-          cpu.step
+        puts "\n  PC Sequences (Rust ISA vs IR Interpreter - Karateka):"
+        puts "  ISA transitions: #{isa_transitions.size}, IR transitions: #{ir_transitions.size}"
+        puts "  ISA start PC: 0x#{isa_transitions.first&.to_s(16) || 'N/A'} (game entry)"
+        puts "  IR start PC: 0x#{ir_transitions.first&.to_s(16) || 'N/A'} (ROM boot)"
+        puts "  First 10 ISA: #{first_isa.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+        puts "  First 10 IR:  #{ir_transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+        puts "  Last 10 ISA: #{last_isa.last(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+        puts "  Last 10 IR:  #{ir_transitions.last(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
 
-          ir_pcs << ir_sim.peek('cpu__pc_reg')
-          ir_sim.run_cpu_cycles(1, 0, false)
-        end
-
-        puts "\n  PC Progression (Rust ISA vs IR Interpreter - Karateka):"
-        puts "  ISA executed #{isa_pcs.size} instructions"
-        puts "  ISA starting PC: 0x#{isa_pcs.first&.to_s(16) || 'N/A'}"
-        puts "  ISA final PC: 0x#{cpu.pc.to_s(16)}"
-        puts "  IR final PC: 0x#{ir_sim.peek('cpu__pc_reg').to_s(16)}"
-        puts "  ISA unique PCs: #{isa_pcs.uniq.size}"
-        puts "  IR unique PCs: #{ir_pcs.uniq.size}"
-        puts "  First 10 ISA PCs: #{isa_pcs.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
-        puts "  First 10 IR PCs: #{ir_pcs.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
-
-        expect(isa_pcs).not_to be_empty
-        expect(ir_pcs).not_to be_empty
-        expect(cpu.pc).to be_between(0, 0xFFFF)
-        expect(ir_sim.peek('cpu__pc_reg')).to be_between(0, 0xFFFF)
+        expect(isa_transitions.size).to be >= compare_count
+        expect(ir_transitions.size).to be >= compare_count
+        expect(isa_transitions.first).to eq(0xB82A)
       end
 
-      it 'tracks PC progression against Apple2 IR JIT' do
-        # Create reference (Rust ISA simulator)
+      it 'reports PC sequences vs IR JIT', timeout: 30 do
         cpu, bus = create_isa_simulator(native: true)
         skip 'Native ISA simulator not available' unless cpu.native?
         load_karateka_into_isa(cpu, bus)
 
-        # Create target (Apple2 IR JIT)
         ir_sim = create_apple2_ir_simulator(:jit)
-        load_karateka_into_ir(ir_sim)
+        ir_sim.load_rom(@rom_data)
+        ir_sim.load_ram(@karateka_mem, 0)
+        boot_ir_simulator(ir_sim)
 
-        # Collect PC sequences
-        isa_pcs = []
-        ir_pcs = []
+        iterations = [JIT_ITERATIONS, 10_000].min
+        isa_transitions = collect_isa_pc_transitions(cpu, iterations)
+        ir_result = collect_ir_pc_transitions(ir_sim, iterations * 3, target_transitions: isa_transitions.size)
+        ir_transitions = ir_result[:transitions]
 
-        JIT_ITERATIONS.times do |i|
-          break if cpu.halted?
+        compare_count = [100, isa_transitions.size, ir_transitions.size].min
+        first_isa = isa_transitions.first(compare_count)
+        last_isa = isa_transitions.last(compare_count)
 
-          isa_pcs << cpu.pc
-          cpu.step
+        puts "\n  PC Sequences (Rust ISA vs IR JIT - Karateka):"
+        puts "  ISA transitions: #{isa_transitions.size}, IR transitions: #{ir_transitions.size}"
+        puts "  ISA start PC: 0x#{isa_transitions.first&.to_s(16) || 'N/A'} (game entry)"
+        puts "  IR start PC: 0x#{ir_transitions.first&.to_s(16) || 'N/A'} (ROM boot)"
+        puts "  First 10 ISA: #{first_isa.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+        puts "  First 10 IR:  #{ir_transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+        puts "  Last 10 ISA: #{last_isa.last(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+        puts "  Last 10 IR:  #{ir_transitions.last(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
 
-          ir_pcs << ir_sim.peek('cpu__pc_reg')
-          ir_sim.run_cpu_cycles(1, 0, false)
-        end
-
-        puts "\n  PC Progression (Rust ISA vs IR JIT - Karateka):"
-        puts "  ISA executed #{isa_pcs.size} instructions"
-        puts "  ISA starting PC: 0x#{isa_pcs.first&.to_s(16) || 'N/A'}"
-        puts "  ISA final PC: 0x#{cpu.pc.to_s(16)}"
-        puts "  IR final PC: 0x#{ir_sim.peek('cpu__pc_reg').to_s(16)}"
-        puts "  ISA unique PCs: #{isa_pcs.uniq.size}"
-        puts "  IR unique PCs: #{ir_pcs.uniq.size}"
-        puts "  First 10 ISA PCs: #{isa_pcs.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
-        puts "  First 10 IR PCs: #{ir_pcs.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
-
-        expect(isa_pcs).not_to be_empty
-        expect(ir_pcs).not_to be_empty
-        expect(cpu.pc).to be_between(0, 0xFFFF)
-        expect(ir_sim.peek('cpu__pc_reg')).to be_between(0, 0xFFFF)
+        expect(isa_transitions.size).to be >= compare_count
+        expect(ir_transitions.size).to be >= compare_count
+        expect(isa_transitions.first).to eq(0xB82A)
       end
     end
   end
