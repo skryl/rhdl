@@ -125,6 +125,7 @@ type EvaluateFn = unsafe extern "C" fn(*mut u64, *const *const u64);
 /// Function signature for tick: fn(signals: *mut u64, next_regs: *mut u64, mem_ptrs: *const *const u64) -> ()
 type TickFn = unsafe extern "C" fn(*mut u64, *mut u64, *const *const u64);
 
+
 // ============================================================================
 // Cranelift JIT Compiler
 // ============================================================================
@@ -145,6 +146,7 @@ struct JitCompiler {
 impl JitCompiler {
     fn new() -> Result<Self, String> {
         let mut flag_builder = settings::builder();
+        // Aggressive optimization settings
         flag_builder.set("opt_level", "speed").map_err(|e| e.to_string())?;
         flag_builder.set("is_pic", "false").map_err(|e| e.to_string())?;
 
@@ -827,7 +829,7 @@ impl JitRtlSimulator {
 
     #[inline(always)]
     fn evaluate(&mut self) {
-        // Build memory pointers on stack (small array, no heap allocation)
+        // Build memory pointers on stack (empty Vec is zero-alloc)
         let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
             .map(|arr| arr.as_ptr())
             .collect();
@@ -919,9 +921,45 @@ impl JitRtlSimulator {
     /// Optimized tick with multi-clock domain support (minimal allocations)
     #[inline(always)]
     fn tick_fast(&mut self) {
-        // Use single-clock fast path when possible (most common case)
+        // Build memory pointers on stack once (shared by all JIT calls)
+        let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
+            .map(|arr| arr.as_ptr())
+            .collect();
+
+        // Single-clock fast path (most common case) - fully inlined
         if let Some(clk_idx) = self.single_clock_idx {
-            self.tick_single_clock(clk_idx);
+            // Save old clock value
+            let old_clk = unsafe { *self.signals.get_unchecked(clk_idx) };
+
+            // Evaluate combinational logic
+            unsafe {
+                (self.evaluate_fn)(
+                    self.signals.as_mut_ptr(),
+                    mem_ptrs.as_ptr()
+                );
+            }
+
+            // Sample all register inputs
+            unsafe {
+                (self.seq_sample_fn)(
+                    self.signals.as_mut_ptr(),
+                    self.next_regs.as_mut_ptr(),
+                    mem_ptrs.as_ptr()
+                );
+            }
+
+            // Check for rising edge (0 -> 1)
+            let new_clk = unsafe { *self.signals.get_unchecked(clk_idx) };
+            if old_clk == 0 && new_clk == 1 {
+                // Update all registers (single clock domain)
+                if !self.clock_domain_assigns.is_empty() {
+                    for &(seq_idx, target_idx) in unsafe { self.clock_domain_assigns.get_unchecked(0) } {
+                        unsafe { *self.signals.get_unchecked_mut(target_idx) = *self.next_regs.get_unchecked(seq_idx); }
+                    }
+                }
+                // Re-evaluate after register update
+                self.evaluate();
+            }
             return;
         }
 
@@ -930,14 +968,15 @@ impl JitRtlSimulator {
             unsafe { *self.old_clocks.get_unchecked_mut(i) = *self.signals.get_unchecked(clk_idx); }
         }
 
-        self.evaluate();
+        // Evaluate combinational logic
+        unsafe {
+            (self.evaluate_fn)(
+                self.signals.as_mut_ptr(),
+                mem_ptrs.as_ptr()
+            );
+        }
 
-        // Build memory pointers on stack for JIT call
-        let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
-            .map(|arr| arr.as_ptr())
-            .collect();
-
-        // Sample ALL register inputs using JIT-compiled function
+        // Sample all register inputs
         unsafe {
             (self.seq_sample_fn)(
                 self.signals.as_mut_ptr(),
@@ -968,43 +1007,6 @@ impl JitRtlSimulator {
                 break;
             }
 
-            self.evaluate();
-        }
-    }
-
-    /// Ultra-fast tick for single-clock designs (no iteration needed)
-    #[inline(always)]
-    fn tick_single_clock(&mut self, clk_idx: usize) {
-        // Save old clock value
-        let old_clk = unsafe { *self.signals.get_unchecked(clk_idx) };
-
-        self.evaluate();
-
-        // Build memory pointers on stack for JIT call
-        let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
-            .map(|arr| arr.as_ptr())
-            .collect();
-
-        // Sample ALL register inputs
-        unsafe {
-            (self.seq_sample_fn)(
-                self.signals.as_mut_ptr(),
-                self.next_regs.as_mut_ptr(),
-                mem_ptrs.as_ptr()
-            );
-        }
-
-        // Check for rising edge (0 -> 1)
-        let new_clk = unsafe { *self.signals.get_unchecked(clk_idx) };
-        if old_clk == 0 && new_clk == 1 {
-            // Update all registers (single clock domain means all registers use this clock)
-            // Use clock_domain_assigns[0] since there's only one clock
-            if !self.clock_domain_assigns.is_empty() {
-                for &(seq_idx, target_idx) in unsafe { self.clock_domain_assigns.get_unchecked(0) } {
-                    unsafe { *self.signals.get_unchecked_mut(target_idx) = *self.next_regs.get_unchecked(seq_idx); }
-                }
-            }
-            // Re-evaluate after register update (for combinational outputs)
             self.evaluate();
         }
     }
