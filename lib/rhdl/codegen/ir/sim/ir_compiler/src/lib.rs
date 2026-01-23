@@ -232,15 +232,17 @@ impl SimulatorState {
     }
 
     fn evaluate(&mut self) {
-        if let Some(ref lib) = self.compiled_lib {
-            unsafe {
-                let func: libloading::Symbol<unsafe extern "C" fn(&mut [u64])> =
-                    lib.get(b"evaluate").unwrap();
-                func(&mut self.signals);
+        if std::env::var("RHDL_USE_COMPILED_EVAL").is_ok() {
+            if let Some(ref lib) = self.compiled_lib {
+                unsafe {
+                    let func: libloading::Symbol<unsafe extern "C" fn(&mut [u64])> =
+                        lib.get(b"evaluate").unwrap();
+                    func(&mut self.signals);
+                    return;
+                }
             }
-        } else {
-            self.evaluate_interpreted();
         }
+        self.evaluate_interpreted();
     }
 
     fn evaluate_interpreted(&mut self) {
@@ -558,9 +560,10 @@ impl SimulatorState {
     }
 
     fn run_cpu_cycles(&mut self, n: usize, key_data: u8, key_ready: bool) -> CycleResult {
-        // Use compiled run_cpu_cycles if available - this is the big optimization!
-        // The compiled version runs the entire loop without any function call overhead.
-        if let Some(ref lib) = self.compiled_lib {
+        // Use compiled run_cpu_cycles only when explicitly enabled.
+        // The compiled version is faster but can diverge from the interpreter in complex timing cases.
+        if std::env::var("RHDL_USE_COMPILED_CYCLES").is_ok() {
+            if let Some(ref lib) = self.compiled_lib {
             unsafe {
                 type RunCpuCyclesFn = unsafe extern "C" fn(
                     &mut [u64], &mut [u8], &[u8], usize, u8, bool
@@ -576,6 +579,7 @@ impl SimulatorState {
                 );
                 return CycleResult { cycles_run: n, text_dirty, key_cleared };
             }
+            }
         }
 
         // Fallback to interpreted mode
@@ -590,6 +594,7 @@ impl SimulatorState {
         let ram_we_idx = self.signal_indices.get("ram_we").cloned();
         let d_idx = self.signal_indices.get("d").cloned();
         let read_key_idx = self.signal_indices.get("read_key").cloned();
+        let cpu_addr_idx = self.signal_indices.get("cpu__addr_reg").cloned();
 
         for _ in 0..n {
             for _ in 0..14 {
@@ -602,11 +607,13 @@ impl SimulatorState {
                 }
                 self.evaluate();
 
-                if let (Some(addr_idx), Some(do_idx)) = (ram_addr_idx, ram_do_idx) {
+                if let (Some(addr_idx), Some(do_idx)) = (cpu_addr_idx, ram_do_idx) {
                     let addr = self.signals[addr_idx] as usize;
                     let data = if addr >= 0xD000 && addr <= 0xFFFF {
                         let rom_offset = addr - 0xD000;
                         if rom_offset < self.rom.len() { self.rom[rom_offset] as u64 } else { 0 }
+                    } else if addr >= 0xC000 {
+                        0
                     } else if addr < self.ram.len() {
                         self.ram[addr] as u64
                     } else {
@@ -963,20 +970,12 @@ fn generate_full_code(ir: &CircuitIR, signal_indices: &HashMap<String, usize>) -
     for mem in &ir.memories {
         let mem_name = mem.name.to_uppercase().replace("__", "_");
         code.push_str(&format!("static MEM_{}: &[u64] = &[\n", mem_name));
-        for (i, &val) in mem.initial_data.iter().enumerate() {
+        for i in 0..mem.depth as usize {
             if i > 0 && i % 16 == 0 {
                 code.push_str("\n");
             }
+            let val = mem.initial_data.get(i).copied().unwrap_or(0);
             code.push_str(&format!("    {}_u64,", val));
-        }
-        // If no initial data, generate zeros up to depth
-        if mem.initial_data.is_empty() {
-            for i in 0..mem.depth.min(256) as usize {
-                if i > 0 && i % 16 == 0 {
-                    code.push_str("\n");
-                }
-                code.push_str("    0_u64,");
-            }
         }
         code.push_str("\n];\n\n");
     }
@@ -1096,9 +1095,9 @@ fn generate_full_code(ir: &CircuitIR, signal_indices: &HashMap<String, usize>) -
     let clock_indices_vec: Vec<usize> = clock_indices_set.iter().cloned().collect();
     let num_clocks = clock_indices_vec.len();
 
-    // Generate tick_check macro - checks for rising edges using old_clocks vs signals
-    // Does NOT update old_clocks (that's done separately with do_sample_clocks)
-    code.push_str("macro_rules! do_tick_check {\n");
+    // Generate inline tick-and-update logic as a macro with multi-clock support
+    // This samples registers on rising edge and immediately updates them
+    code.push_str("macro_rules! do_tick_update {\n");
     code.push_str("    ($signals:expr, $old_clocks:expr) => {{\n");
 
     // Check each clock domain for rising edge, sample and update immediately
@@ -1106,19 +1105,23 @@ fn generate_full_code(ir: &CircuitIR, signal_indices: &HashMap<String, usize>) -
         code.push_str(&format!("        // Clock domain: signal index {}\n", clk_idx));
         code.push_str(&format!("        let _old_clk_{} = $old_clocks[{}];\n", clock_array_idx, clock_array_idx));
         code.push_str(&format!("        let _new_clk_{} = $signals[{}];\n", clock_array_idx, clk_idx));
-        // Note: Do NOT update old_clocks here - that's done by do_sample_clocks
+        code.push_str(&format!("        $old_clocks[{}] = _new_clk_{};\n", clock_array_idx, clock_array_idx));
         code.push_str(&format!("        if _old_clk_{} == 0 && _new_clk_{} != 0 {{\n", clock_array_idx, clock_array_idx));
 
         // Sample all registers in this clock domain, then immediately update
         if let Some(procs) = clock_domains.get(&clk_idx) {
+            // Calculate register indices for processes in this domain
             let mut base_reg_idx = 0;
             for (proc_idx, proc) in ir.processes.iter().enumerate() {
                 if proc.clocked {
+                    // Check if this process is in current clock domain
                     if procs.iter().any(|(pi, _)| *pi == proc_idx) {
+                        // First sample all registers to temps to avoid read-after-write issues
                         for (stmt_idx, stmt) in proc.statements.iter().enumerate() {
                             let expr_code = expr_to_rust_with_name(&stmt.expr, signal_indices, "$signals");
                             code.push_str(&format!("            let _next_{} = {};\n", base_reg_idx + stmt_idx, expr_code));
                         }
+                        // Then update all registers
                         for (stmt_idx, stmt) in proc.statements.iter().enumerate() {
                             if let Some(&sig_idx) = signal_indices.get(&stmt.target) {
                                 code.push_str(&format!("            $signals[{}] = _next_{};\n", sig_idx, base_reg_idx + stmt_idx));
@@ -1130,22 +1133,6 @@ fn generate_full_code(ir: &CircuitIR, signal_indices: &HashMap<String, usize>) -
             }
         }
         code.push_str("        }\n");
-    }
-    code.push_str("    }};\n}\n\n");
-
-    // Legacy tick_update macro (for compatibility) - checks edges AND updates old_clocks
-    code.push_str("macro_rules! do_tick_update {\n");
-    code.push_str("    ($signals:expr, $old_clocks:expr) => {{\n");
-    code.push_str("        do_tick_check!($signals, $old_clocks);\n");
-    code.push_str("        do_sample_clocks!($signals, $old_clocks);\n");
-    code.push_str("    }};\n}\n\n");
-
-    // Macro to only sample clock values into old_clocks without checking edges
-    // Used to capture the "low" state of derived clocks at the falling edge
-    code.push_str("macro_rules! do_sample_clocks {\n");
-    code.push_str("    ($signals:expr, $old_clocks:expr) => {{\n");
-    for (clock_array_idx, &clk_idx) in clock_indices_vec.iter().enumerate() {
-        code.push_str(&format!("        $old_clocks[{}] = $signals[{}];\n", clock_array_idx, clk_idx));
     }
     code.push_str("    }};\n}\n\n");
 
@@ -1280,11 +1267,11 @@ fn generate_full_code(ir: &CircuitIR, signal_indices: &HashMap<String, usize>) -
     let ram_we_idx = signal_indices.get("ram_we").cloned().unwrap_or(0);
     let d_idx = signal_indices.get("d").cloned().unwrap_or(0);
     let read_key_idx = signal_indices.get("read_key").cloned().unwrap_or(0);
-    // Use CPU's address register for reads (ram_addr may show video address during phi0=0)
-    let cpu_addr_idx = signal_indices.get("cpu__addr_reg").cloned().unwrap_or(0);
+    let cpu_addr_idx = signal_indices
+        .get("cpu__addr_reg")
+        .cloned()
+        .unwrap_or(0);
     let reg_count = count_regs(ir);
-    let num_clocks_for_run = num_clocks.max(1);
-
     // Generate initialization for old_clocks based on current signal values
     let mut old_clocks_init = String::new();
     for (i, &clk_idx_val) in clock_indices_vec.iter().enumerate() {
@@ -1293,6 +1280,7 @@ fn generate_full_code(ir: &CircuitIR, signal_indices: &HashMap<String, usize>) -
     if clock_indices_vec.is_empty() {
         old_clocks_init.push_str("    // No clocked processes\n");
     }
+    let old_clocks_sync = old_clocks_init.clone();
 
     // Generate run_cpu_cycles with loop unrolling and optimized evaluate sequence
     code.push_str(&format!(r#"/// Run N CPU cycles with zero function-call overhead
@@ -1306,23 +1294,20 @@ pub extern "C" fn run_cpu_cycles(
     key_data: u8,
     key_ready: bool,
 ) -> (bool, bool) {{
-    let mut old_clocks = [0u64; {num_clocks}];
+    let mut next_regs = [0u64; {reg_count}];
     let mut text_dirty = false;
     let mut key_cleared = false;
     let mut key_is_ready = key_ready;
 
-    // Initialize old_clocks from current signal values
+    // Initialize tick's static old_clocks from current signal values
+    {{
+        let mut old_clocks = TICK_OLD_CLOCKS.lock().unwrap();
 {old_clocks_init}
+    }}
     // Pre-compute keyboard value (branchless)
     let key_val_base = (key_data as u64) | 0x80;
 
     // Macro for one 14MHz cycle with multi-clock domain support
-    // Match JIT's tick_internal exactly:
-    // 1. Set clk_14m high
-    // 2. Sample initial clock values (derived clocks still at post-falling-edge state)
-    // 3. Evaluate (derived clocks update)
-    // 4. Detect edges (initial vs post-evaluate)
-    // 5. Sample and update registers
     macro_rules! cycle_14m {{
         () => {{
             // Set keyboard state (branchless)
@@ -1331,31 +1316,34 @@ pub extern "C" fn run_cpu_cycles(
             // Falling edge - set clock low
             *signals.get_unchecked_mut({clk_idx}) = 0;
             do_evaluate!(signals);
-            // Sample clocks to capture "low" state for rising edge detection
-            do_sample_clocks!(signals, old_clocks);
 
-            // Provide RAM/ROM data using CPU's address register
-            // (ram_addr may show video address during phi0=0)
+            // Provide RAM/ROM data (unchecked access)
+            // Use the CPU address register to avoid video-phase address contamination.
             let addr = *signals.get_unchecked({cpu_addr_idx}) as usize;
+            let ram_len = ram.len();
+            let rom_len = rom.len();
             *signals.get_unchecked_mut({ram_do_idx}) = if addr >= 0xD000 {{
                 let rom_offset = addr.wrapping_sub(0xD000);
-                if rom_offset < 0x3000 {{ *rom.get_unchecked(rom_offset) as u64 }} else {{ 0 }}
-            }} else if addr < 0xC000 {{
+                if rom_offset < rom_len {{ *rom.get_unchecked(rom_offset) as u64 }} else {{ 0 }}
+            }} else if addr >= 0xC000 {{
+                0
+            }} else if addr < ram_len {{
                 *ram.get_unchecked(addr) as u64
             }} else {{
-                0  // I/O range $C000-$CFFF returns 0
+                0
             }};
+            do_evaluate!(signals);
+
+            // Sync old clock values to the current (low) state before rising edge
+            {{
+                let mut old_clocks = TICK_OLD_CLOCKS.lock().unwrap();
+{old_clocks_sync}
+            }}
 
             // Rising edge - set clock high
             *signals.get_unchecked_mut({clk_idx}) = 1;
-            // Evaluate to propagate clk_14m=1 to derived clocks
             do_evaluate!(signals);
-            // Detect rising edges using old_clocks (captured at falling edge) vs current
-            do_tick_check!(signals, old_clocks);
-            // Final evaluate to propagate register updates (matches JIT's tick_internal)
-            do_evaluate!(signals);
-            // Update old_clocks to current state for next cycle's comparison
-            do_sample_clocks!(signals, old_clocks);
+            tick(signals, &mut next_regs);
 
             // Handle RAM writes
             let ram_we = *signals.get_unchecked({ram_we_idx});
@@ -1383,16 +1371,12 @@ pub extern "C" fn run_cpu_cycles(
         }}
     }}
 
-    // Final evaluate to propagate register values to nets (like q3 = timing__q3)
-    // This matches the JIT's tick() which evaluates at the start
-    unsafe {{ do_evaluate!(signals); }}
-
     (text_dirty, key_cleared)
 }}
-"#, num_clocks = num_clocks_for_run, old_clocks_init = old_clocks_init,
-    k_idx = k_idx, clk_idx = clk_idx, ram_addr_idx = ram_addr_idx,
+"#, k_idx = k_idx, clk_idx = clk_idx, ram_addr_idx = ram_addr_idx,
     ram_do_idx = ram_do_idx, ram_we_idx = ram_we_idx, d_idx = d_idx,
-    read_key_idx = read_key_idx, cpu_addr_idx = cpu_addr_idx));
+    read_key_idx = read_key_idx, cpu_addr_idx = cpu_addr_idx, reg_count = reg_count,
+    old_clocks_init = old_clocks_init, old_clocks_sync = old_clocks_sync));
 
     code
 }

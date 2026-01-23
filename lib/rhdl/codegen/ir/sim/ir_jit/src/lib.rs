@@ -125,7 +125,6 @@ type EvaluateFn = unsafe extern "C" fn(*mut u64, *const *const u64);
 /// Function signature for tick: fn(signals: *mut u64, next_regs: *mut u64, mem_ptrs: *const *const u64) -> ()
 type TickFn = unsafe extern "C" fn(*mut u64, *mut u64, *const *const u64);
 
-
 // ============================================================================
 // Cranelift JIT Compiler
 // ============================================================================
@@ -146,7 +145,6 @@ struct JitCompiler {
 impl JitCompiler {
     fn new() -> Result<Self, String> {
         let mut flag_builder = settings::builder();
-        // Aggressive optimization settings
         flag_builder.set("opt_level", "speed").map_err(|e| e.to_string())?;
         flag_builder.set("is_pic", "false").map_err(|e| e.to_string())?;
 
@@ -193,21 +191,6 @@ impl JitCompiler {
                 builder.ins().iconst(types::I64, masked as i64)
             }
             ExprDef::UnaryOp { op, operand, width } => {
-                // Constant folding: if operand is a literal, compute at compile time
-                if let ExprDef::Literal { value, width: lit_width } = operand.as_ref() {
-                    let v = *value as u64;
-                    let mask = Self::compile_mask(*width);
-                    let op_mask = Self::compile_mask(*lit_width);
-                    let result = match op.as_str() {
-                        "~" | "not" => (!v) & mask,
-                        "&" | "reduce_and" => ((v & op_mask) == op_mask) as u64,
-                        "|" | "reduce_or" => (v != 0) as u64,
-                        "^" | "reduce_xor" => (v.count_ones() & 1) as u64,
-                        _ => v & mask,
-                    };
-                    return builder.ins().iconst(types::I64, result as i64);
-                }
-
                 let src = self.compile_expr(builder, operand, signals_ptr, mem_ptrs);
                 let mask = Self::compile_mask(*width);
                 let mask_val = builder.ins().iconst(types::I64, mask as i64);
@@ -239,39 +222,10 @@ impl JitCompiler {
                 }
             }
             ExprDef::BinaryOp { op, left, right, width } => {
-                // Constant folding: if both operands are literals, compute at compile time
-                if let (ExprDef::Literal { value: lv, .. }, ExprDef::Literal { value: rv, .. }) = (left.as_ref(), right.as_ref()) {
-                    let lv = *lv as u64;
-                    let rv = *rv as u64;
-                    let mask = Self::compile_mask(*width);
-                    let result = match op.as_str() {
-                        "&" => lv & rv,
-                        "|" => lv | rv,
-                        "^" => lv ^ rv,
-                        "+" => lv.wrapping_add(rv),
-                        "-" => lv.wrapping_sub(rv),
-                        "*" => lv.wrapping_mul(rv),
-                        "/" => if rv != 0 { lv / rv } else { 0 },
-                        "%" => if rv != 0 { lv % rv } else { 0 },
-                        "<<" => lv << (rv.min(63) as u32),
-                        ">>" => lv >> (rv.min(63) as u32),
-                        "==" => (lv == rv) as u64,
-                        "!=" => (lv != rv) as u64,
-                        "<" => (lv < rv) as u64,
-                        ">" => (lv > rv) as u64,
-                        "<=" | "le" => (lv <= rv) as u64,
-                        ">=" => (lv >= rv) as u64,
-                        _ => lv,
-                    } & mask;
-                    return builder.ins().iconst(types::I64, result as i64);
-                }
-
                 let l = self.compile_expr(builder, left, signals_ptr, mem_ptrs);
                 let r = self.compile_expr(builder, right, signals_ptr, mem_ptrs);
-
-                // Check if masking is needed (comparison ops return 0/1, no mask needed)
-                let is_comparison = matches!(op.as_str(), "==" | "!=" | "<" | ">" | "<=" | "le" | ">=");
-                let needs_mask = !is_comparison && *width < 64;
+                let mask = Self::compile_mask(*width);
+                let mask_val = builder.ins().iconst(types::I64, mask as i64);
 
                 let result = match op.as_str() {
                     "&" => builder.ins().band(l, r),
@@ -332,14 +286,8 @@ impl JitCompiler {
                     _ => l,
                 };
 
-                // Only mask if needed (skip for comparisons and 64-bit values)
-                if needs_mask {
-                    let mask = Self::compile_mask(*width);
-                    let mask_val = builder.ins().iconst(types::I64, mask as i64);
-                    builder.ins().band(result, mask_val)
-                } else {
-                    result
-                }
+                // Mask the result
+                builder.ins().band(result, mask_val)
             }
             ExprDef::Mux { condition, when_true, when_false, width } => {
                 let cond = self.compile_expr(builder, condition, signals_ptr, mem_ptrs);
@@ -350,14 +298,10 @@ impl JitCompiler {
                 let cond_bool = builder.ins().icmp(IntCC::NotEqual, cond, zero);
                 let result = builder.ins().select(cond_bool, t, f);
 
-                // Skip mask if width >= 64 (mask is all 1s, no-op)
-                if *width >= 64 {
-                    result
-                } else {
-                    let mask = Self::compile_mask(*width);
-                    let mask_val = builder.ins().iconst(types::I64, mask as i64);
-                    builder.ins().band(result, mask_val)
-                }
+                // Mask result to specified width
+                let mask = Self::compile_mask(*width);
+                let mask_val = builder.ins().iconst(types::I64, mask as i64);
+                builder.ins().band(result, mask_val)
             }
             ExprDef::Slice { base, low, width, .. } => {
                 let src = self.compile_expr(builder, base, signals_ptr, mem_ptrs);
@@ -398,14 +342,9 @@ impl JitCompiler {
             }
             ExprDef::Resize { expr, width } => {
                 let src = self.compile_expr(builder, expr, signals_ptr, mem_ptrs);
-                // Skip mask if width >= 64 (mask is all 1s, no-op)
-                if *width >= 64 {
-                    src
-                } else {
-                    let mask = Self::compile_mask(*width);
-                    let mask_val = builder.ins().iconst(types::I64, mask as i64);
-                    builder.ins().band(src, mask_val)
-                }
+                let mask = Self::compile_mask(*width);
+                let mask_val = builder.ins().iconst(types::I64, mask as i64);
+                builder.ins().band(src, mask_val)
             }
             ExprDef::MemRead { memory, addr, width } => {
                 // Get memory index
@@ -609,13 +548,6 @@ struct JitRtlSimulator {
     clock_indices: Vec<usize>,
     /// Previous clock values (for edge detection)
     prev_clock_values: Vec<u64>,
-    /// Pre-grouped: for each clock domain, list of (seq_assign_idx, target_idx)
-    /// This avoids O(n) scan of seq_clocks for each clock edge
-    clock_domain_assigns: Vec<Vec<(usize, usize)>>,
-    /// Pre-allocated buffer for old clock values in tick (avoids allocation per tick)
-    old_clocks: Vec<u64>,
-    /// Single-clock optimization: if only one clock domain, store its index for fast path
-    single_clock_idx: Option<usize>,
 
     /// JIT-compiled evaluate function
     evaluate_fn: EvaluateFn,
@@ -715,23 +647,6 @@ impl JitRtlSimulator {
         // Build unique clock indices list and initialize previous values
         let clock_indices: Vec<usize> = clock_set.into_iter().collect();
         let prev_clock_values = vec![0u64; clock_indices.len()];
-        let old_clocks = vec![0u64; clock_indices.len()];
-
-        // Single-clock optimization: if only one clock, store its index for fast path
-        let single_clock_idx = if clock_indices.len() == 1 {
-            Some(clock_indices[0])
-        } else {
-            None
-        };
-
-        // Pre-group sequential assignments by clock domain
-        // Maps clock_list_idx -> Vec<(seq_assign_idx, target_idx)>
-        let mut clock_domain_assigns: Vec<Vec<(usize, usize)>> = vec![Vec::new(); clock_indices.len()];
-        for (seq_idx, &clk_idx) in seq_clocks.iter().enumerate() {
-            if let Some(clock_list_idx) = clock_indices.iter().position(|&c| c == clk_idx) {
-                clock_domain_assigns[clock_list_idx].push((seq_idx, seq_targets[seq_idx]));
-            }
-        }
 
         let next_regs = vec![0u64; seq_targets.len()];
 
@@ -789,9 +704,6 @@ impl JitRtlSimulator {
             seq_clocks,
             clock_indices,
             prev_clock_values,
-            clock_domain_assigns,
-            old_clocks,
-            single_clock_idx,
             evaluate_fn,
             seq_sample_fn,
             memory_arrays,
@@ -829,7 +741,7 @@ impl JitRtlSimulator {
 
     #[inline(always)]
     fn evaluate(&mut self) {
-        // Build memory pointers on stack (empty Vec is zero-alloc)
+        // Build memory pointers array on demand
         let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
             .map(|arr| arr.as_ptr())
             .collect();
@@ -851,132 +763,32 @@ impl JitRtlSimulator {
     }
 
     fn tick_internal(&mut self, _debug: bool) {
-        // Use the full tick path for debug mode (preserves all iteration logic)
-        // For non-debug, use tick_fast which is more optimized
-        self.tick_full();
-    }
-
-    /// Full tick with all debug-friendly iteration (used by tick_debug)
-    fn tick_full(&mut self) {
         // Multi-clock domain simulation using delta-cycle iteration:
         //
         // Key insight: All registers should sample their inputs using the signal
         // values that existed BEFORE the tick started. This models real hardware
         // where all flip-flops sample simultaneously at the clock edge.
+        //
+        // Algorithm:
+        // 1. Sample clock values BEFORE evaluate (pre-tick state)
+        // 2. Evaluate to propagate external input changes
+        // 3. Sample ALL register input expressions using post-evaluate values
+        // 4. Iterate to detect derived clock edges and apply updates
 
         // Sample clock values BEFORE any evaluation (pre-tick state)
-        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
-            self.old_clocks[i] = unsafe { *self.signals.get_unchecked(clk_idx) };
+        let mut initial_clock_values: Vec<u64> = Vec::with_capacity(self.clock_indices.len());
+        for &clk_idx in &self.clock_indices {
+            initial_clock_values.push(self.signals[clk_idx]);
         }
 
         // Evaluate to propagate any external input changes (like clk_14m)
         self.evaluate();
 
-        // Build memory pointers on stack for JIT call
-        let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
-            .map(|arr| arr.as_ptr())
-            .collect();
-
         // Sample ALL register input expressions ONCE with post-evaluate signal values
-        unsafe {
-            (self.seq_sample_fn)(
-                self.signals.as_mut_ptr(),
-                self.next_regs.as_mut_ptr(),
-                mem_ptrs.as_ptr()
-            );
-        }
-
-        // Iterate for derived clock domains using pre-grouped assignments
-        const MAX_ITERATIONS: usize = 10;
-        for _ in 0..MAX_ITERATIONS {
-            // Detect rising edges on all clock signals
-            let mut any_edge = false;
-            for (clock_list_idx, &clk_idx) in self.clock_indices.iter().enumerate() {
-                let old_val = self.old_clocks[clock_list_idx];
-                let new_val = unsafe { *self.signals.get_unchecked(clk_idx) };
-
-                // Check for rising edge (0 -> 1)
-                if old_val == 0 && new_val == 1 {
-                    any_edge = true;
-
-                    // Update only registers clocked by this signal (pre-grouped)
-                    for &(seq_idx, target_idx) in &self.clock_domain_assigns[clock_list_idx] {
-                        unsafe { *self.signals.get_unchecked_mut(target_idx) = self.next_regs[seq_idx]; }
-                    }
-
-                    // Mark this clock as processed (set old to 1 to prevent re-triggering)
-                    self.old_clocks[clock_list_idx] = 1;
-                }
-            }
-
-            if !any_edge {
-                break;
-            }
-
-            // Re-evaluate combinational logic (may trigger derived clocks)
-            self.evaluate();
-        }
-    }
-
-    /// Optimized tick with multi-clock domain support (minimal allocations)
-    #[inline(always)]
-    fn tick_fast(&mut self) {
-        // Build memory pointers on stack once (shared by all JIT calls)
+        // This ensures all registers see the same "snapshot" of combinational logic
         let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
             .map(|arr| arr.as_ptr())
             .collect();
-
-        // Single-clock fast path (most common case) - fully inlined
-        if let Some(clk_idx) = self.single_clock_idx {
-            // Save old clock value
-            let old_clk = unsafe { *self.signals.get_unchecked(clk_idx) };
-
-            // Evaluate combinational logic
-            unsafe {
-                (self.evaluate_fn)(
-                    self.signals.as_mut_ptr(),
-                    mem_ptrs.as_ptr()
-                );
-            }
-
-            // Sample all register inputs
-            unsafe {
-                (self.seq_sample_fn)(
-                    self.signals.as_mut_ptr(),
-                    self.next_regs.as_mut_ptr(),
-                    mem_ptrs.as_ptr()
-                );
-            }
-
-            // Check for rising edge (0 -> 1)
-            let new_clk = unsafe { *self.signals.get_unchecked(clk_idx) };
-            if old_clk == 0 && new_clk == 1 {
-                // Update all registers (single clock domain)
-                if !self.clock_domain_assigns.is_empty() {
-                    for &(seq_idx, target_idx) in unsafe { self.clock_domain_assigns.get_unchecked(0) } {
-                        unsafe { *self.signals.get_unchecked_mut(target_idx) = *self.next_regs.get_unchecked(seq_idx); }
-                    }
-                }
-                // Re-evaluate after register update
-                self.evaluate();
-            }
-            return;
-        }
-
-        // Multi-clock path: Save old clock values FIRST (using pre-allocated buffer)
-        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
-            unsafe { *self.old_clocks.get_unchecked_mut(i) = *self.signals.get_unchecked(clk_idx); }
-        }
-
-        // Evaluate combinational logic
-        unsafe {
-            (self.evaluate_fn)(
-                self.signals.as_mut_ptr(),
-                mem_ptrs.as_ptr()
-            );
-        }
-
-        // Sample all register inputs
         unsafe {
             (self.seq_sample_fn)(
                 self.signals.as_mut_ptr(),
@@ -985,30 +797,69 @@ impl JitRtlSimulator {
             );
         }
 
-        // Iterate for derived clock domains using pre-grouped assignments
-        const MAX_ITERATIONS: usize = 10;
-        for _ in 0..MAX_ITERATIONS {
-            let mut any_edge = false;
-            for (clock_list_idx, &clk_idx) in self.clock_indices.iter().enumerate() {
-                let old_val = unsafe { *self.old_clocks.get_unchecked(clock_list_idx) };
-                let new_val = unsafe { *self.signals.get_unchecked(clk_idx) };
+        // Track which registers have been updated this tick to avoid double-updates
+        let mut updated: Vec<bool> = vec![false; self.seq_targets.len()];
+        let max_iterations = 10;  // Safety limit to prevent infinite loops
 
-                if old_val == 0 && new_val == 1 {
-                    any_edge = true;
-                    // Use pre-grouped assignments for this clock domain
-                    for &(seq_idx, target_idx) in unsafe { self.clock_domain_assigns.get_unchecked(clock_list_idx) } {
-                        unsafe { *self.signals.get_unchecked_mut(target_idx) = *self.next_regs.get_unchecked(seq_idx); }
-                    }
-                    unsafe { *self.old_clocks.get_unchecked_mut(clock_list_idx) = 1; }
+        // First, detect rising edges from the INITIAL state to post-evaluate state
+        let mut rising_clocks: Vec<bool> = vec![false; self.signals.len()];
+        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+            let before = initial_clock_values[i];
+            let after = self.signals[clk_idx];
+            if before == 0 && after == 1 {
+                rising_clocks[clk_idx] = true;
+            }
+        }
+
+        // Apply updates for clocks that rose from initial state
+        for (i, &target_idx) in self.seq_targets.iter().enumerate() {
+            let clk_idx = self.seq_clocks[i];
+            if rising_clocks[clk_idx] && !updated[i] {
+                self.signals[target_idx] = self.next_regs[i];
+                updated[i] = true;
+            }
+        }
+
+        // Now iterate to handle derived clocks
+        for _iteration in 0..max_iterations {
+            // Sample clock values before evaluate
+            let mut clock_before: Vec<u64> = Vec::with_capacity(self.clock_indices.len());
+            for &clk_idx in &self.clock_indices {
+                clock_before.push(self.signals[clk_idx]);
+            }
+
+            // Evaluate combinational logic (propagates register changes)
+            self.evaluate();
+
+            // Detect rising edges
+            let mut rising_clocks: Vec<bool> = vec![false; self.signals.len()];
+            let mut any_rising = false;
+            for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+                let before = clock_before[i];
+                let after = self.signals[clk_idx];
+                if before == 0 && after == 1 {
+                    rising_clocks[clk_idx] = true;
+                    any_rising = true;
                 }
             }
 
-            if !any_edge {
+            // If no rising edges, we've reached a fixed point
+            if !any_rising {
                 break;
             }
 
-            self.evaluate();
+            // Apply the pre-sampled values to registers whose clocks just rose
+            for (i, &target_idx) in self.seq_targets.iter().enumerate() {
+                let clk_idx = self.seq_clocks[i];
+                if rising_clocks[clk_idx] && !updated[i] {
+                    self.signals[target_idx] = self.next_regs[i];
+                    updated[i] = true;
+                }
+            }
         }
+
+        // Final evaluate to propagate any remaining combinational changes
+        self.evaluate();
     }
 
     fn load_rom(&mut self, data: &[u8]) {
@@ -1024,15 +875,15 @@ impl JitRtlSimulator {
         }
     }
 
-    /// Run a single 14MHz cycle with integrated memory handling (optimized)
+    /// Run a single 14MHz cycle with integrated memory handling
     #[inline(always)]
     fn run_14m_cycle_internal(&mut self, key_data: u8, key_ready: bool) -> (bool, bool) {
-        // Set keyboard input (branchless)
-        let k_val = ((key_data as u64) | 0x80) * (key_ready as u64);
-        unsafe { *self.signals.get_unchecked_mut(self.k_idx) = k_val; }
+        // Set keyboard input
+        let k_val = if key_ready { (key_data as u64) | 0x80 } else { 0 };
+        self.signals[self.k_idx] = k_val;
 
         // Falling edge
-        unsafe { *self.signals.get_unchecked_mut(self.clk_idx) = 0; }
+        self.signals[self.clk_idx] = 0;
         self.evaluate();
 
         // Provide RAM/ROM data based on Apple II memory map:
@@ -1043,43 +894,38 @@ impl JitRtlSimulator {
         // Use CPU's actual address register instead of ram_addr (which may show
         // video address during phi0=0). This ensures the CPU gets correct data
         // regardless of timing phase.
-        let cpu_addr = unsafe { *self.signals.get_unchecked(self.cpu_addr_idx) } as usize;
-        let ram_data = if cpu_addr >= 0xD000 {
+        let cpu_addr = self.signals[self.cpu_addr_idx] as usize;
+        let ram_data = if cpu_addr >= 0xD000 && cpu_addr <= 0xFFFF {
             // ROM space
             let rom_offset = cpu_addr.wrapping_sub(0xD000);
-            if rom_offset < self.rom.len() {
-                unsafe { *self.rom.get_unchecked(rom_offset) }
-            } else {
-                0
-            }
+            if rom_offset < self.rom.len() { self.rom[rom_offset] } else { 0 }
         } else if cpu_addr >= 0xC000 {
             // I/O space - return 0 (soft switches handled by HDL logic)
             0
-        } else {
+        } else if cpu_addr < self.ram.len() {
             // RAM space
-            unsafe { *self.ram.get_unchecked(cpu_addr) }
+            self.ram[cpu_addr]
+        } else {
+            0
         };
-        unsafe { *self.signals.get_unchecked_mut(self.ram_do_idx) = ram_data as u64; }
+        self.signals[self.ram_do_idx] = ram_data as u64;
 
         // Rising edge
-        unsafe { *self.signals.get_unchecked_mut(self.clk_idx) = 1; }
-        self.tick_fast();
+        self.signals[self.clk_idx] = 1;
+        self.tick();
 
         // Handle RAM writes
         let mut text_dirty = false;
-        let ram_we = unsafe { *self.signals.get_unchecked(self.ram_we_idx) };
-        if ram_we == 1 {
-            let write_addr = unsafe { *self.signals.get_unchecked(self.ram_addr_idx) } as usize;
+        if self.signals[self.ram_we_idx] == 1 {
+            let write_addr = self.signals[self.ram_addr_idx] as usize;
             if write_addr < 0xC000 {
-                let data = unsafe { (*self.signals.get_unchecked(self.d_idx) & 0xFF) as u8 };
-                unsafe { *self.ram.get_unchecked_mut(write_addr) = data; }
-                text_dirty = (write_addr >= 0x0400) & (write_addr <= 0x07FF);
+                let data = (self.signals[self.d_idx] & 0xFF) as u8;
+                self.ram[write_addr] = data;
+                text_dirty = (0x0400..=0x07FF).contains(&write_addr);
             }
         }
 
-        // Check keyboard strobe
-        let key_cleared = unsafe { *self.signals.get_unchecked(self.read_key_idx) } == 1;
-
+        let key_cleared = self.signals[self.read_key_idx] == 1;
         (text_dirty, key_cleared)
     }
 
@@ -1148,10 +994,6 @@ impl JitRtlSimulator {
         }
         // Reset previous clock values for edge detection
         for val in self.prev_clock_values.iter_mut() {
-            *val = 0;
-        }
-        // Reset old_clocks buffer
-        for val in self.old_clocks.iter_mut() {
             *val = 0;
         }
     }
