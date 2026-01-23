@@ -197,6 +197,7 @@ const OP_AND_SI: u8 = 38;      // temps[dst] = signals[arg0] & arg1 (immediate i
 const OP_OR_SI: u8 = 39;       // temps[dst] = signals[arg0] | arg1
 const OP_SLICE_S: u8 = 40;     // temps[dst] = (signals[arg0] >> arg1) & arg2
 const OP_NOT_S: u8 = 41;       // temps[dst] = (!signals[arg0]) & arg2
+const OP_STORE_NEXT_REG: u8 = 42;  // next_regs[dst] = get_operand(arg0) & arg2
 
 // Operand type tags (stored in high bits of arg values)
 const TAG_SIGNAL: u64 = 0;
@@ -261,6 +262,12 @@ struct RtlSimulator {
     seq_assigns: Vec<CompiledAssign>,
     /// All combinational ops flattened into one contiguous array
     all_comb_ops: Vec<FlatOp>,
+    /// All sequential ops flattened for cache-friendly sampling
+    /// Each op sequence ends with a special marker op that stores result in next_regs
+    all_seq_ops: Vec<FlatOp>,
+    /// For each sequential assign: (start_idx, fast_source option)
+    /// If fast_source is Some, skip ops and just read signal directly
+    seq_fast_paths: Vec<Option<(usize, u64)>>,  // (signal_idx, mask)
     /// Total signal count
     signal_count: usize,
     /// Register count
@@ -417,6 +424,55 @@ impl RtlSimulator {
             }
         }
 
+        // Flatten sequential ops for cache-friendly sampling
+        // Each sequence ends with a marker that stores result to next_regs[i]
+        let mut all_seq_ops = Vec::new();
+        let mut seq_fast_paths = Vec::new();
+
+        for (i, seq_assign) in seq_assigns.iter().enumerate() {
+            if let Some((src_idx, mask)) = seq_assign.fast_source {
+                // Fast path: just record the source, no ops needed
+                seq_fast_paths.push(Some((src_idx, mask)));
+            } else if seq_assign.ops.is_empty() {
+                // No ops - skip
+                seq_fast_paths.push(None);
+            } else {
+                // Add all ops except the last (which writes to signal)
+                seq_fast_paths.push(None);
+                let ops_len = seq_assign.ops.len();
+                for op in &seq_assign.ops[..ops_len.saturating_sub(1)] {
+                    all_seq_ops.push(*op);
+                }
+
+                // For the last op, if it's COPY_TO_SIG, convert to store in next_regs
+                // We use a special marker: OP_COPY_TO_SIG with dst = i (next_regs index)
+                // But we need to differentiate from regular COPY_TO_SIG...
+                // Actually, just store the final op info and handle in sampling
+                let last_op = &seq_assign.ops[ops_len - 1];
+                if last_op.op_type == OP_COPY_TO_SIG {
+                    // Store a modified op that writes to next_regs instead
+                    // We'll use a new op type for this
+                    all_seq_ops.push(FlatOp {
+                        op_type: OP_STORE_NEXT_REG,  // New op type
+                        dst: i,  // next_regs index
+                        arg0: last_op.arg0,
+                        arg1: 0,
+                        arg2: last_op.arg2,
+                    });
+                } else {
+                    // Fallback: execute the op and store from final_target
+                    all_seq_ops.push(*last_op);
+                    all_seq_ops.push(FlatOp {
+                        op_type: OP_STORE_NEXT_REG,
+                        dst: i,
+                        arg0: FlatOp::encode_operand(Operand::Signal(seq_assign.final_target)),
+                        arg1: 0,
+                        arg2: u64::MAX,
+                    });
+                }
+            }
+        }
+
         // Pre-allocate temp buffer
         let temps = vec![0u64; max_temps + 1];
         let next_regs = vec![0u64; seq_targets.len()];
@@ -439,6 +495,8 @@ impl RtlSimulator {
             output_names,
             seq_assigns,
             all_comb_ops,
+            all_seq_ops,
+            seq_fast_paths,
             signal_count,
             reg_count,
             next_regs,
@@ -1096,38 +1154,28 @@ impl RtlSimulator {
         // Evaluate combinational logic (may change derived clocks)
         self.evaluate();
 
-        // Sample ALL register inputs at this point (before any register updates)
-        // This ensures all expressions see the same state
-        // IMPORTANT: Don't write to signals during sampling - only store results in next_regs
-        for (i, seq_assign) in self.seq_assigns.iter().enumerate() {
-            // Fast path: if this is a simple signal read, just read directly
-            if let Some((src_idx, mask)) = seq_assign.fast_source {
-                let val = unsafe { *self.signals.get_unchecked(src_idx) } & mask;
-                self.next_regs[i] = val;
-                continue;
+        // Sample ALL register inputs using flattened ops for cache efficiency
+        // First handle fast paths (direct signal reads)
+        for (i, fast_path) in self.seq_fast_paths.iter().enumerate() {
+            if let Some((src_idx, mask)) = fast_path {
+                let val = unsafe { *self.signals.get_unchecked(*src_idx) } & mask;
+                unsafe { *self.next_regs.get_unchecked_mut(i) = val; }
             }
+        }
 
-            // Slow path: execute ops
-            let ops_len = seq_assign.ops.len();
-            if ops_len == 0 {
-                continue;
-            }
-
-            // Execute all ops except the last (which writes to signals)
-            for op in &seq_assign.ops[..ops_len.saturating_sub(1)] {
-                Self::execute_flat_op(&mut self.signals, &mut self.temps, &self.memory_arrays, op);
-            }
-
-            // For the last op, get the result without writing to signals
-            let last_op = &seq_assign.ops[ops_len - 1];
-            if last_op.op_type == OP_COPY_TO_SIG {
-                // Get the operand value and store directly in next_regs
-                let val = FlatOp::get_operand(&self.signals, &self.temps, last_op.arg0) & last_op.arg2;
-                self.next_regs[i] = val;
-            } else {
-                // Fallback: execute and read from target
-                Self::execute_flat_op(&mut self.signals, &mut self.temps, &self.memory_arrays, last_op);
-                self.next_regs[i] = unsafe { *self.signals.get_unchecked(seq_assign.final_target) };
+        // Execute all sequential ops in one contiguous loop (cache-friendly)
+        // The flattened array includes OP_STORE_NEXT_REG ops that write to next_regs
+        for op in &self.all_seq_ops {
+            match op.op_type {
+                OP_STORE_NEXT_REG => {
+                    // Store result in next_regs[dst]
+                    let val = FlatOp::get_operand(&self.signals, &self.temps, op.arg0) & op.arg2;
+                    unsafe { *self.next_regs.get_unchecked_mut(op.dst) = val; }
+                }
+                _ => {
+                    // Execute the op normally (stores in temps or signals)
+                    Self::execute_flat_op(&mut self.signals, &mut self.temps, &self.memory_arrays, op);
+                }
             }
         }
 
