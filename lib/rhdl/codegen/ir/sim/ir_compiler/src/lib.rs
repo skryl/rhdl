@@ -97,24 +97,17 @@ enum Expr {
     MemRead { memory: String, addr: Box<Expr>, width: u32 },
 }
 
-/// Inner simulator state
+/// Inner simulator state (compiled mode only - no interpreted fallback)
 struct SimulatorState {
     ir: CircuitIR,
     signal_indices: HashMap<String, usize>,
     signals: Vec<u64>,
-    next_regs: Vec<u64>,
     ram: Vec<u8>,
     rom: Vec<u8>,
     compiled_lib: Option<libloading::Library>,
     compiled: bool,
     /// Reset values for registers (signal index -> reset value)
     reset_values: Vec<(usize, u64)>,
-    /// Multi-clock domain support: clock signal index for each sequential assignment
-    seq_clocks: Vec<usize>,
-    /// Unique clock signal indices used by any clocked process
-    clock_indices: Vec<usize>,
-    /// Old clock values for rising edge detection
-    old_clocks: Vec<u64>,
     /// Memory arrays for mem_read operations
     memory_arrays: Vec<Vec<u64>>,
     /// Memory name to index mapping
@@ -151,32 +144,12 @@ impl SimulatorState {
         }
 
         let signal_count = signal_indices.len();
-        let reg_count = count_regs(&ir);
 
         // Initialize signals (including reset values for registers)
         let mut signals = vec![0u64; signal_count];
         for &(idx, reset_val) in &reset_values {
             signals[idx] = reset_val;
         }
-
-        // Build multi-clock domain tracking
-        // seq_clocks[i] = clock signal index for sequential assignment i
-        let mut seq_clocks = Vec::new();
-        let mut clock_set = HashSet::new();
-        for process in &ir.processes {
-            if process.clocked {
-                let clock_idx = process.clock.as_ref()
-                    .and_then(|name| signal_indices.get(name))
-                    .cloned()
-                    .unwrap_or(0);
-                clock_set.insert(clock_idx);
-                for _ in &process.statements {
-                    seq_clocks.push(clock_idx);
-                }
-            }
-        }
-        let clock_indices: Vec<usize> = clock_set.into_iter().collect();
-        let old_clocks = clock_indices.iter().map(|&idx| signals[idx]).collect();
 
         // Build memory arrays and name-to-index mapping
         let mut memory_arrays = Vec::new();
@@ -197,15 +170,11 @@ impl SimulatorState {
             ir,
             signal_indices,
             signals,
-            next_regs: vec![0; reg_count],
             ram: vec![0; 48 * 1024],
             rom: vec![0; 12 * 1024],
             compiled_lib: None,
             compiled: false,
             reset_values,
-            seq_clocks,
-            clock_indices,
-            old_clocks,
             memory_arrays,
             mem_name_to_idx,
         })
@@ -232,256 +201,42 @@ impl SimulatorState {
     }
 
     fn evaluate(&mut self) {
-        if std::env::var("RHDL_USE_COMPILED_EVAL").is_ok() {
-            if let Some(ref lib) = self.compiled_lib {
-                unsafe {
-                    let func: libloading::Symbol<unsafe extern "C" fn(&mut [u64])> =
-                        lib.get(b"evaluate").unwrap();
-                    func(&mut self.signals);
-                    return;
-                }
-            }
+        // IR Compiler always uses compiled evaluate - no interpreted fallback
+        if !self.compiled {
+            panic!("IR Compiler: evaluate() called but circuit not compiled. Call compile() first.");
         }
-        self.evaluate_interpreted();
-    }
-
-    fn evaluate_interpreted(&mut self) {
-        for assign in &self.ir.assigns.clone() {
-            if let Some(&idx) = self.signal_indices.get(&assign.target) {
-                let value = self.eval_expr(&assign.expr);
-                self.signals[idx] = value;
-            }
-        }
-    }
-
-    fn eval_expr(&self, expr: &Expr) -> u64 {
-        match expr {
-            Expr::Signal { name, width } => {
-                let idx = self.signal_indices.get(name).cloned().unwrap_or(0);
-                self.signals[idx] & mask(*width)
-            }
-            Expr::Literal { value, width } => {
-                value & mask(*width)
-            }
-            Expr::UnaryOp { op, operand, width } => {
-                let val = self.eval_expr(operand);
-                let m = mask(*width);
-                match op.as_str() {
-                    "~" | "not" => (!val) & m,
-                    "&" | "reduce_and" => {
-                        let op_width = get_expr_width(operand);
-                        let op_mask = mask(op_width);
-                        if (val & op_mask) == op_mask { 1 } else { 0 }
-                    }
-                    "|" | "reduce_or" => if val != 0 { 1 } else { 0 },
-                    "^" | "reduce_xor" => val.count_ones() as u64 & 1,
-                    _ => val,
-                }
-            }
-            Expr::BinaryOp { op, left, right, width } => {
-                let l = self.eval_expr(left);
-                let r = self.eval_expr(right);
-                let m = mask(*width);
-                match op.as_str() {
-                    "&" => l & r,
-                    "|" => l | r,
-                    "^" => l ^ r,
-                    "+" => l.wrapping_add(r) & m,
-                    "-" => l.wrapping_sub(r) & m,
-                    "*" => l.wrapping_mul(r) & m,
-                    "/" => if r != 0 { l / r } else { 0 },
-                    "%" => if r != 0 { l % r } else { 0 },
-                    "<<" => (l << r.min(63)) & m,
-                    ">>" => l >> r.min(63),
-                    "==" => if l == r { 1 } else { 0 },
-                    "!=" => if l != r { 1 } else { 0 },
-                    "<" => if l < r { 1 } else { 0 },
-                    ">" => if l > r { 1 } else { 0 },
-                    "<=" | "le" => if l <= r { 1 } else { 0 },
-                    ">=" => if l >= r { 1 } else { 0 },
-                    _ => 0,
-                }
-            }
-            Expr::Mux { condition, when_true, when_false, width } => {
-                let cond = self.eval_expr(condition);
-                let m = mask(*width);
-                if cond != 0 {
-                    self.eval_expr(when_true) & m
-                } else {
-                    self.eval_expr(when_false) & m
-                }
-            }
-            Expr::Slice { base, low, width, .. } => {
-                let val = self.eval_expr(base);
-                (val >> low) & mask(*width)
-            }
-            Expr::Concat { parts, width } => {
-                // Concat in HDL: cat(high, low) puts first arg in high bits
-                // Parts are ordered [high, ..., low], so we process in REVERSE
-                // to build up from low bits (shift = 0) to high bits
-                let mut result = 0u64;
-                let mut shift = 0u32;
-                for part in parts.iter().rev() {
-                    let part_val = self.eval_expr(part);
-                    let part_width = get_expr_width(part);
-                    result |= (part_val & mask(part_width)) << shift;
-                    shift += part_width;
-                }
-                result & mask(*width)
-            }
-            Expr::Resize { expr, width } => {
-                self.eval_expr(expr) & mask(*width)
-            }
-            Expr::MemRead { memory, addr, width } => {
-                if let Some(&mem_idx) = self.mem_name_to_idx.get(memory) {
-                    if let Some(arr) = self.memory_arrays.get(mem_idx) {
-                        let addr_val = self.eval_expr(addr) as usize;
-                        let bounded_addr = addr_val % arr.len().max(1);
-                        arr.get(bounded_addr).cloned().unwrap_or(0) & mask(*width)
-                    } else {
-                        0
-                    }
-                } else {
-                    0
-                }
-            }
+        let lib = self.compiled_lib.as_ref()
+            .expect("IR Compiler: compiled flag set but no library loaded");
+        unsafe {
+            let func: libloading::Symbol<unsafe extern "C" fn(&mut [u64])> =
+                lib.get(b"evaluate").unwrap();
+            func(&mut self.signals);
         }
     }
 
     fn tick(&mut self) {
-        // Capture initial clock values BEFORE any updates
-        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
-            self.old_clocks[i] = self.signals[clk_idx];
+        // IR Compiler always uses compiled tick - no interpreted fallback
+        if !self.compiled {
+            panic!("IR Compiler: tick() called but circuit not compiled. Call compile() first.");
         }
 
+        // Evaluate combinational logic first (just like the old interpreted version)
         self.evaluate();
 
-        // Always use the interpreted tick loop for proper derived clock handling
-        // The compiled tick function uses static state that doesn't work well with iteration
-        {
-            // Iterate until no more rising edges are detected (delta-cycle simulation)
-            // This handles cascading clocks (e.g., clk_14m -> timing__clk_14m -> q3 -> cpu__clk)
-            // IMPORTANT: Keep old_clocks fixed at the start-of-tick values
-            // This allows detecting cascading rising edges (e.g., q3 going 0->1 after timing__q3 update)
-            let mut processed_clocks: HashSet<usize> = HashSet::new();
-            let max_iterations = 10;
-            for iteration in 0..max_iterations {
-                let had_edges = self.tick_interpreted_check_edges_track(&mut processed_clocks);
-                if !had_edges {
-                    break;
-                }
-                // After updating registers, re-evaluate combinational logic
-                // This may cause new clock signals to change (e.g., q3 = timing__q3)
-                self.evaluate();
-                if std::env::var("RHDL_DEBUG_TICK").is_ok() {
-                    eprintln!("tick iteration {}: checking for more edges", iteration);
-                }
-            }
+        let lib = self.compiled_lib.as_ref()
+            .expect("IR Compiler: compiled flag set but no library loaded");
+        let reg_count = count_regs(&self.ir);
+        let mut next_regs = vec![0u64; reg_count];
+        unsafe {
+            let func: libloading::Symbol<unsafe extern "C" fn(&mut [u64], &mut [u64])> =
+                lib.get(b"tick").unwrap();
+            func(&mut self.signals, &mut next_regs);
         }
     }
-
-    /// Check for edges and update registers, tracking which clocks have been processed.
-    /// Returns true if any NEW rising edges were detected (clocks not already processed).
-    fn tick_interpreted_check_edges_track(&mut self, processed_clocks: &mut HashSet<usize>) -> bool {
-        // Multi-clock domain: detect rising edges on each clock
-        // Only consider clocks that haven't been processed yet in this tick
-        let mut rising_clocks = HashSet::new();
-        if std::env::var("RHDL_DEBUG_TICK").is_ok() {
-            eprintln!("tick_interpreted_check_edges_track: checking {} clocks", self.clock_indices.len());
-        }
-        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
-            // Skip already processed clocks
-            if processed_clocks.contains(&clk_idx) {
-                continue;
-            }
-            let old_val = self.old_clocks[i];
-            let new_val = self.signals[clk_idx];
-            if std::env::var("RHDL_DEBUG_TICK").is_ok() {
-                eprintln!("  clock[{}] at signal[{}]: old={}, new={}", i, clk_idx, old_val, new_val);
-            }
-            if old_val == 0 && new_val != 0 {
-                rising_clocks.insert(clk_idx);
-                processed_clocks.insert(clk_idx);
-                if std::env::var("RHDL_DEBUG_TICK").is_ok() {
-                    eprintln!("    -> RISING EDGE!");
-                }
-            }
-        }
-
-        // If no new rising edges detected, nothing to do
-        if rising_clocks.is_empty() {
-            if std::env::var("RHDL_DEBUG_TICK").is_ok() {
-                eprintln!("  No new rising edges detected");
-            }
-            return false;
-        }
-        if std::env::var("RHDL_DEBUG_TICK").is_ok() {
-            eprintln!("  Rising edges detected on {} clocks", rising_clocks.len());
-        }
-
-        // Sample registers whose clocks have rising edges
-        let mut reg_idx = 0;
-        for process in &self.ir.processes.clone() {
-            if process.clocked {
-                let clock_name = process.clock.as_ref().map(|s| s.as_str()).unwrap_or("none");
-                let clock_idx = process.clock.as_ref()
-                    .and_then(|name| self.signal_indices.get(name))
-                    .cloned()
-                    .unwrap_or(0);
-                let should_sample = rising_clocks.contains(&clock_idx);
-                if std::env::var("RHDL_DEBUG_SAMPLE").is_ok() && should_sample {
-                    eprintln!("  SAMPLE process {} (clock={}, idx={})",
-                        process.name, clock_name, clock_idx);
-                }
-                for stmt in &process.statements {
-                    if should_sample {
-                        let value = self.eval_expr(&stmt.expr);
-                        if std::env::var("RHDL_DEBUG_SAMPLE").is_ok() && stmt.target.starts_with("cpu__") {
-                            eprintln!("    {} <= {}", stmt.target, value);
-                        }
-                        self.next_regs[reg_idx] = value;
-                    }
-                    reg_idx += 1;
-                }
-            }
-        }
-
-        // Update registers whose clocks had rising edges
-        reg_idx = 0;
-        for process in &self.ir.processes.clone() {
-            if process.clocked {
-                let clock_idx = process.clock.as_ref()
-                    .and_then(|name| self.signal_indices.get(name))
-                    .cloned()
-                    .unwrap_or(0);
-                let should_update = rising_clocks.contains(&clock_idx);
-                for stmt in &process.statements {
-                    if should_update {
-                        if let Some(&sig_idx) = self.signal_indices.get(&stmt.target) {
-                            let value = self.next_regs[reg_idx];
-                            if std::env::var("RHDL_DEBUG_UPDATE").is_ok() && stmt.target.starts_with("cpu__") {
-                                eprintln!("    UPDATE signals[{}] ({}) = {}", sig_idx, stmt.target, value);
-                            }
-                            self.signals[sig_idx] = value;
-                        } else if std::env::var("RHDL_DEBUG_UPDATE").is_ok() && stmt.target.starts_with("cpu__") {
-                            eprintln!("    UPDATE FAILED: {} not found in signal_indices!", stmt.target);
-                        }
-                    }
-                    reg_idx += 1;
-                }
-            }
-        }
-
-        true
-    }
-
 
     fn reset(&mut self) {
         for sig in &mut self.signals {
             *sig = 0;
-        }
-        for reg in &mut self.next_regs {
-            *reg = 0;
         }
         // Apply register reset values
         for &(idx, reset_val) in &self.reset_values {
@@ -597,10 +352,6 @@ fn count_regs(ir: &CircuitIR) -> usize {
         .filter(|p| p.clocked)
         .map(|p| p.statements.len())
         .sum()
-}
-
-fn mask(width: u32) -> u64 {
-    if width >= 64 { u64::MAX } else { (1u64 << width) - 1 }
 }
 
 fn get_expr_width(expr: &Expr) -> u32 {
