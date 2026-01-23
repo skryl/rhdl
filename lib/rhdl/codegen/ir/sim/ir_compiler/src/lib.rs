@@ -560,96 +560,29 @@ impl SimulatorState {
     }
 
     fn run_cpu_cycles(&mut self, n: usize, key_data: u8, key_ready: bool) -> CycleResult {
-        // Use compiled run_cpu_cycles when available (default behavior).
-        // Set RHDL_INTERPRETED_CYCLES=1 to force interpreted mode for debugging.
-        if self.compiled && std::env::var("RHDL_INTERPRETED_CYCLES").is_err() {
-            if let Some(ref lib) = self.compiled_lib {
-            unsafe {
-                type RunCpuCyclesFn = unsafe extern "C" fn(
-                    &mut [u64], &mut [u8], &[u8], usize, u8, bool
-                ) -> (bool, bool);
-                let func: libloading::Symbol<RunCpuCyclesFn> = lib.get(b"run_cpu_cycles").unwrap();
-                let (text_dirty, key_cleared) = func(
-                    &mut self.signals,
-                    &mut self.ram,
-                    &self.rom,
-                    n,
-                    key_data,
-                    key_ready
-                );
-                return CycleResult { cycles_run: n, text_dirty, key_cleared };
-            }
-            }
+        // IR Compiler always uses compiled run_cpu_cycles - no interpreted fallback
+        if !self.compiled {
+            panic!("IR Compiler: run_cpu_cycles called but circuit not compiled. Call compile() first.");
         }
 
-        // Fallback to interpreted mode
-        let mut text_dirty = false;
-        let mut key_cleared = false;
-        let mut key_is_ready = key_ready;
+        let lib = self.compiled_lib.as_ref()
+            .expect("IR Compiler: compiled flag set but no library loaded");
 
-        let clk_idx = self.signal_indices.get("clk_14m").cloned();
-        let k_idx = self.signal_indices.get("k").cloned();
-        let ram_addr_idx = self.signal_indices.get("ram_addr").cloned();
-        let ram_do_idx = self.signal_indices.get("ram_do").cloned();
-        let ram_we_idx = self.signal_indices.get("ram_we").cloned();
-        let d_idx = self.signal_indices.get("d").cloned();
-        let read_key_idx = self.signal_indices.get("read_key").cloned();
-        let cpu_addr_idx = self.signal_indices.get("cpu__addr_reg").cloned();
-
-        for _ in 0..n {
-            for _ in 0..14 {
-                if let Some(k) = k_idx {
-                    self.signals[k] = if key_is_ready { (key_data as u64) | 0x80 } else { 0 };
-                }
-
-                if let Some(clk) = clk_idx {
-                    self.signals[clk] = 0;
-                }
-                self.evaluate();
-
-                if let (Some(addr_idx), Some(do_idx)) = (cpu_addr_idx, ram_do_idx) {
-                    let addr = self.signals[addr_idx] as usize;
-                    let data = if addr >= 0xD000 && addr <= 0xFFFF {
-                        let rom_offset = addr - 0xD000;
-                        if rom_offset < self.rom.len() { self.rom[rom_offset] as u64 } else { 0 }
-                    } else if addr >= 0xC000 {
-                        0
-                    } else if addr < self.ram.len() {
-                        self.ram[addr] as u64
-                    } else {
-                        0
-                    };
-                    self.signals[do_idx] = data;
-                }
-                self.evaluate();
-
-                if let Some(clk) = clk_idx {
-                    self.signals[clk] = 1;
-                }
-                self.tick();
-
-                if let (Some(we_idx), Some(addr_idx), Some(d)) = (ram_we_idx, ram_addr_idx, d_idx) {
-                    if self.signals[we_idx] == 1 {
-                        let write_addr = self.signals[addr_idx] as usize;
-                        if write_addr < self.ram.len() {
-                            self.ram[write_addr] = (self.signals[d] & 0xFF) as u8;
-                            if write_addr >= 0x0400 && write_addr <= 0x07FF {
-                                text_dirty = true;
-                            }
-                        }
-                    }
-                }
-
-                if let Some(rk) = read_key_idx {
-                    if self.signals[rk] == 1 {
-                        key_is_ready = false;
-                        key_cleared = true;
-                    }
-                }
-            }
+        unsafe {
+            type RunCpuCyclesFn = unsafe extern "C" fn(
+                &mut [u64], &mut [u8], &[u8], usize, u8, bool
+            ) -> (bool, bool);
+            let func: libloading::Symbol<RunCpuCyclesFn> = lib.get(b"run_cpu_cycles").unwrap();
+            let (text_dirty, key_cleared) = func(
+                &mut self.signals,
+                &mut self.ram,
+                &self.rom,
+                n,
+                key_data,
+                key_ready
+            );
+            CycleResult { cycles_run: n, text_dirty, key_cleared }
         }
-
-        CycleResult { cycles_run: n, text_dirty, key_cleared }
     }
 }
 
