@@ -1,287 +1,344 @@
-//! FIRRTL JIT Compiler
+//! IR Compiler - generates specialized Rust code from Behavior IR
 //!
-//! This module generates specialized Rust code for a circuit and compiles it
-//! at runtime for maximum simulation performance. Instead of interpreting
-//! bytecode, we generate native code that directly computes signal values.
+//! This compiler generates Rust source code that directly implements the circuit
+//! evaluation logic, then compiles it with rustc at runtime for maximum performance.
+//!
+//! The generated code uses the exact same evaluation semantics as the ir_interpreter,
+//! making it easy to verify correctness via PC progression comparison.
 
-use magnus::{method, prelude::*, Error, RArray, RHash, Ruby};
+use magnus::{method, prelude::*, Error, RArray, RHash, Ruby, TryConvert, Value};
 use serde::Deserialize;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::process::Command;
 
-// IR structures matching the JSON format
-#[derive(Debug, Deserialize, Clone)]
-struct CircuitIR {
-    name: String,
-    ports: Vec<Port>,
-    nets: Vec<Net>,
-    regs: Vec<Reg>,
-    assigns: Vec<Assign>,
-    processes: Vec<Process>,
-    #[serde(default)]
-    memories: Vec<Memory>,
+// ============================================================================
+// IR Data Structures (matching JSON format from Ruby's IRToJson)
+// ============================================================================
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Direction {
+    In,
+    Out,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-struct Port {
+#[derive(Debug, Clone, Deserialize)]
+struct PortDef {
     name: String,
-    direction: String,
-    width: u32,
+    direction: Direction,
+    width: usize,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-struct Net {
+#[derive(Debug, Clone, Deserialize)]
+struct NetDef {
     name: String,
-    width: u32,
+    width: usize,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-struct Reg {
+#[derive(Debug, Clone, Deserialize)]
+struct RegDef {
     name: String,
-    width: u32,
+    width: usize,
     #[serde(default)]
     reset_value: Option<u64>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-struct Assign {
-    target: String,
-    expr: Expr,
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ExprDef {
+    Signal { name: String, width: usize },
+    Literal { value: i64, width: usize },
+    UnaryOp { op: String, operand: Box<ExprDef>, width: usize },
+    BinaryOp { op: String, left: Box<ExprDef>, right: Box<ExprDef>, width: usize },
+    Mux { condition: Box<ExprDef>, when_true: Box<ExprDef>, when_false: Box<ExprDef>, width: usize },
+    Slice { base: Box<ExprDef>, low: usize, #[allow(dead_code)] high: usize, width: usize },
+    Concat { parts: Vec<ExprDef>, width: usize },
+    Resize { expr: Box<ExprDef>, width: usize },
+    MemRead { memory: String, addr: Box<ExprDef>, width: usize },
 }
 
-#[derive(Debug, Deserialize, Clone)]
-struct Process {
+#[derive(Debug, Clone, Deserialize)]
+struct AssignDef {
+    target: String,
+    expr: ExprDef,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SeqAssignDef {
+    target: String,
+    expr: ExprDef,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ProcessDef {
+    #[allow(dead_code)]
     name: String,
     clock: Option<String>,
     clocked: bool,
-    statements: Vec<Statement>,
+    statements: Vec<SeqAssignDef>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-struct Statement {
-    target: String,
-    expr: Expr,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-struct Memory {
+#[derive(Debug, Clone, Deserialize)]
+struct MemoryDef {
     name: String,
-    depth: u32,
-    width: u32,
+    depth: usize,
+    #[allow(dead_code)]
+    width: usize,
     #[serde(default)]
     initial_data: Vec<u64>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-#[serde(tag = "type")]
-enum Expr {
-    #[serde(rename = "signal")]
-    Signal { name: String, width: u32 },
-    #[serde(rename = "literal")]
-    Literal { value: u64, width: u32 },
-    #[serde(rename = "unary_op")]
-    UnaryOp { op: String, operand: Box<Expr>, width: u32 },
-    #[serde(rename = "binary_op")]
-    BinaryOp { op: String, left: Box<Expr>, right: Box<Expr>, width: u32 },
-    #[serde(rename = "mux")]
-    Mux { condition: Box<Expr>, when_true: Box<Expr>, when_false: Box<Expr>, width: u32 },
-    #[serde(rename = "slice")]
-    Slice { base: Box<Expr>, low: u32, high: u32, width: u32 },
-    #[serde(rename = "concat")]
-    Concat { parts: Vec<Expr>, width: u32 },
-    #[serde(rename = "resize")]
-    Resize { expr: Box<Expr>, width: u32 },
-    #[serde(rename = "mem_read")]
-    MemRead { memory: String, addr: Box<Expr>, width: u32 },
+#[derive(Debug, Clone, Deserialize)]
+struct ModuleIR {
+    #[allow(dead_code)]
+    name: String,
+    ports: Vec<PortDef>,
+    nets: Vec<NetDef>,
+    regs: Vec<RegDef>,
+    assigns: Vec<AssignDef>,
+    processes: Vec<ProcessDef>,
+    #[serde(default)]
+    memories: Vec<MemoryDef>,
 }
 
-/// Inner simulator state
-struct SimulatorState {
-    ir: CircuitIR,
-    signal_indices: HashMap<String, usize>,
+// ============================================================================
+// Simulator State
+// ============================================================================
+
+struct IrSimulator {
+    /// IR definition
+    ir: ModuleIR,
+    /// Signal values (Vec for O(1) access)
     signals: Vec<u64>,
-    next_regs: Vec<u64>,
-    ram: Vec<u8>,
-    rom: Vec<u8>,
-    compiled_lib: Option<libloading::Library>,
-    compiled: bool,
+    /// Signal widths
+    widths: Vec<usize>,
+    /// Signal name to index mapping
+    name_to_idx: HashMap<String, usize>,
+    /// Input names
+    input_names: Vec<String>,
+    /// Output names
+    output_names: Vec<String>,
     /// Reset values for registers (signal index -> reset value)
     reset_values: Vec<(usize, u64)>,
-    /// Multi-clock domain support: clock signal index for each sequential assignment
+    /// Next register values buffer
+    next_regs: Vec<u64>,
+    /// Sequential assignment target indices
+    seq_targets: Vec<usize>,
+    /// Clock signal index for each sequential assignment
     seq_clocks: Vec<usize>,
-    /// Unique clock signal indices used by any clocked process
+    /// All unique clock signal indices
     clock_indices: Vec<usize>,
-    /// Old clock values for rising edge detection
+    /// Old clock values for edge detection
     old_clocks: Vec<u64>,
-    /// Memory arrays for mem_read operations
+    /// Pre-grouped: for each clock domain, list of (seq_assign_idx, target_idx)
+    clock_domain_assigns: Vec<Vec<(usize, usize)>>,
+    /// Memory arrays
     memory_arrays: Vec<Vec<u64>>,
-    /// Memory name to index mapping
-    mem_name_to_idx: HashMap<String, usize>,
+    /// Memory name to index
+    memory_name_to_idx: HashMap<String, usize>,
+    /// Compiled library (if compilation succeeded)
+    compiled_lib: Option<libloading::Library>,
+    /// Whether compilation succeeded
+    compiled: bool,
+    /// Apple II specific: RAM
+    ram: Vec<u8>,
+    /// Apple II specific: ROM
+    rom: Vec<u8>,
+    /// Apple II specific signal indices
+    ram_addr_idx: usize,
+    ram_do_idx: usize,
+    ram_we_idx: usize,
+    d_idx: usize,
+    clk_idx: usize,
+    k_idx: usize,
+    read_key_idx: usize,
 }
 
-impl SimulatorState {
+impl IrSimulator {
     fn new(json: &str) -> Result<Self, String> {
-        let ir: CircuitIR = serde_json::from_str(json)
-            .map_err(|e| e.to_string())?;
+        let ir: ModuleIR = serde_json::from_str(json)
+            .map_err(|e| format!("Failed to parse IR JSON: {}", e))?;
 
-        let mut signal_indices = HashMap::new();
-        let mut idx = 0;
+        let mut signals = Vec::new();
+        let mut widths = Vec::new();
+        let mut name_to_idx = HashMap::new();
+        let mut input_names = Vec::new();
+        let mut output_names = Vec::new();
 
-        // Assign indices to all signals
+        // Build signal table - ports first
         for port in &ir.ports {
-            signal_indices.insert(port.name.clone(), idx);
-            idx += 1;
+            let idx = signals.len();
+            signals.push(0u64);
+            widths.push(port.width);
+            name_to_idx.insert(port.name.clone(), idx);
+            match port.direction {
+                Direction::In => input_names.push(port.name.clone()),
+                Direction::Out => output_names.push(port.name.clone()),
+            }
         }
+
+        // Wires
         for net in &ir.nets {
-            signal_indices.insert(net.name.clone(), idx);
-            idx += 1;
+            let idx = signals.len();
+            signals.push(0u64);
+            widths.push(net.width);
+            name_to_idx.insert(net.name.clone(), idx);
         }
-        // Track reset values
+
+        // Registers with reset values
         let mut reset_values: Vec<(usize, u64)> = Vec::new();
         for reg in &ir.regs {
-            signal_indices.insert(reg.name.clone(), idx);
-            if let Some(reset_val) = reg.reset_value {
-                if reset_val != 0 {
-                    reset_values.push((idx, reset_val));
-                }
-            }
-            idx += 1;
-        }
-
-        let signal_count = signal_indices.len();
-        let reg_count = count_regs(&ir);
-
-        // Initialize signals (including reset values for registers)
-        let mut signals = vec![0u64; signal_count];
-        for &(idx, reset_val) in &reset_values {
-            signals[idx] = reset_val;
-        }
-
-        // Build multi-clock domain tracking
-        // seq_clocks[i] = clock signal index for sequential assignment i
-        let mut seq_clocks = Vec::new();
-        let mut clock_set = HashSet::new();
-        for process in &ir.processes {
-            if process.clocked {
-                let clock_idx = process.clock.as_ref()
-                    .and_then(|name| signal_indices.get(name))
-                    .cloned()
-                    .unwrap_or(0);
-                clock_set.insert(clock_idx);
-                for _ in &process.statements {
-                    seq_clocks.push(clock_idx);
-                }
+            let idx = signals.len();
+            let reset_val = reg.reset_value.unwrap_or(0);
+            signals.push(reset_val);
+            widths.push(reg.width);
+            name_to_idx.insert(reg.name.clone(), idx);
+            if reset_val != 0 {
+                reset_values.push((idx, reset_val));
             }
         }
-        let clock_indices: Vec<usize> = clock_set.into_iter().collect();
-        let old_clocks = clock_indices.iter().map(|&idx| signals[idx]).collect();
 
-        // Build memory arrays and name-to-index mapping
+        // Build memory arrays
         let mut memory_arrays = Vec::new();
-        let mut mem_name_to_idx = HashMap::new();
-        for (i, mem) in ir.memories.iter().enumerate() {
-            mem_name_to_idx.insert(mem.name.clone(), i);
-            let mut arr = vec![0u64; mem.depth as usize];
-            // Initialize with initial_data if provided
-            for (j, &val) in mem.initial_data.iter().enumerate() {
-                if j < arr.len() {
-                    arr[j] = val;
+        let mut memory_name_to_idx = HashMap::new();
+        for (idx, mem) in ir.memories.iter().enumerate() {
+            let mut data = vec![0u64; mem.depth];
+            for (i, &val) in mem.initial_data.iter().enumerate() {
+                if i < data.len() {
+                    data[i] = val;
                 }
             }
-            memory_arrays.push(arr);
+            memory_arrays.push(data);
+            memory_name_to_idx.insert(mem.name.clone(), idx);
         }
 
-        Ok(SimulatorState {
+        // Build sequential assignment tracking
+        let mut seq_targets = Vec::new();
+        let mut seq_clocks = Vec::new();
+        let mut clock_set = std::collections::HashSet::new();
+
+        for process in &ir.processes {
+            if !process.clocked {
+                continue;
+            }
+            let clock_idx = process.clock.as_ref()
+                .and_then(|c| name_to_idx.get(c).copied())
+                .unwrap_or_else(|| *name_to_idx.get("clk_14m").unwrap_or(&0));
+            clock_set.insert(clock_idx);
+
+            for stmt in &process.statements {
+                let target_idx = *name_to_idx.get(&stmt.target).unwrap_or(&0);
+                seq_targets.push(target_idx);
+                seq_clocks.push(clock_idx);
+            }
+        }
+
+        let clock_indices: Vec<usize> = clock_set.into_iter().collect();
+        let old_clocks = vec![0u64; clock_indices.len()];
+        let next_regs = vec![0u64; seq_targets.len()];
+
+        // Build clock_domain_assigns: for each clock domain, list of (seq_assign_idx, target_idx)
+        let mut clock_domain_assigns: Vec<Vec<(usize, usize)>> = vec![Vec::new(); clock_indices.len()];
+        for (seq_idx, &clk_idx) in seq_clocks.iter().enumerate() {
+            if let Some(clock_list_idx) = clock_indices.iter().position(|&ci| ci == clk_idx) {
+                let target_idx = seq_targets[seq_idx];
+                clock_domain_assigns[clock_list_idx].push((seq_idx, target_idx));
+            }
+        }
+
+        // Apple II signal indices
+        let ram_addr_idx = *name_to_idx.get("ram_addr").unwrap_or(&0);
+        let ram_do_idx = *name_to_idx.get("ram_do").unwrap_or(&0);
+        let ram_we_idx = *name_to_idx.get("ram_we").unwrap_or(&0);
+        let d_idx = *name_to_idx.get("d").unwrap_or(&0);
+        let clk_idx = *name_to_idx.get("clk_14m").unwrap_or(&0);
+        let k_idx = *name_to_idx.get("k").unwrap_or(&0);
+        let read_key_idx = *name_to_idx.get("read_key").unwrap_or(&0);
+
+        Ok(Self {
             ir,
-            signal_indices,
             signals,
-            next_regs: vec![0; reg_count],
-            ram: vec![0; 48 * 1024],
-            rom: vec![0; 12 * 1024],
-            compiled_lib: None,
-            compiled: false,
+            widths,
+            name_to_idx,
+            input_names,
+            output_names,
             reset_values,
+            next_regs,
+            seq_targets,
             seq_clocks,
             clock_indices,
             old_clocks,
+            clock_domain_assigns,
             memory_arrays,
-            mem_name_to_idx,
+            memory_name_to_idx,
+            compiled_lib: None,
+            compiled: false,
+            ram: vec![0u8; 48 * 1024],
+            rom: vec![0u8; 12 * 1024],
+            ram_addr_idx,
+            ram_do_idx,
+            ram_we_idx,
+            d_idx,
+            clk_idx,
+            k_idx,
+            read_key_idx,
         })
     }
 
-    fn signal_count(&self) -> usize {
-        self.signal_indices.len()
+    #[inline(always)]
+    fn mask(width: usize) -> u64 {
+        if width >= 64 { u64::MAX } else { (1u64 << width) - 1 }
     }
 
-    fn reg_count(&self) -> usize {
-        count_regs(&self.ir)
-    }
-
-    fn poke(&mut self, name: &str, value: u64) {
-        if let Some(&idx) = self.signal_indices.get(name) {
-            self.signals[idx] = value;
-        }
-    }
-
-    fn peek(&self, name: &str) -> u64 {
-        self.signal_indices.get(name)
-            .map(|&idx| self.signals[idx])
-            .unwrap_or(0)
-    }
-
-    fn evaluate(&mut self) {
-        if std::env::var("RHDL_USE_COMPILED_EVAL").is_ok() {
-            if let Some(ref lib) = self.compiled_lib {
-                unsafe {
-                    let func: libloading::Symbol<unsafe extern "C" fn(&mut [u64])> =
-                        lib.get(b"evaluate").unwrap();
-                    func(&mut self.signals);
-                    return;
-                }
-            }
-        }
-        self.evaluate_interpreted();
-    }
-
-    fn evaluate_interpreted(&mut self) {
-        for assign in &self.ir.assigns.clone() {
-            if let Some(&idx) = self.signal_indices.get(&assign.target) {
-                let value = self.eval_expr(&assign.expr);
-                self.signals[idx] = value;
-            }
-        }
-    }
-
-    fn eval_expr(&self, expr: &Expr) -> u64 {
+    fn expr_width(&self, expr: &ExprDef) -> usize {
         match expr {
-            Expr::Signal { name, width } => {
-                let idx = self.signal_indices.get(name).cloned().unwrap_or(0);
-                self.signals[idx] & mask(*width)
+            ExprDef::Signal { name, width } => {
+                self.name_to_idx.get(name)
+                    .and_then(|&idx| self.widths.get(idx).copied())
+                    .unwrap_or(*width)
             }
-            Expr::Literal { value, width } => {
-                value & mask(*width)
+            ExprDef::Literal { width, .. } => *width,
+            ExprDef::UnaryOp { width, .. } => *width,
+            ExprDef::BinaryOp { width, .. } => *width,
+            ExprDef::Mux { width, .. } => *width,
+            ExprDef::Slice { width, .. } => *width,
+            ExprDef::Concat { width, .. } => *width,
+            ExprDef::Resize { width, .. } => *width,
+            ExprDef::MemRead { width, .. } => *width,
+        }
+    }
+
+    /// Evaluate an expression (interpreter mode)
+    fn eval_expr(&self, expr: &ExprDef) -> u64 {
+        match expr {
+            ExprDef::Signal { name, width } => {
+                let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
+                self.signals.get(idx).copied().unwrap_or(0) & Self::mask(*width)
             }
-            Expr::UnaryOp { op, operand, width } => {
+            ExprDef::Literal { value, width } => {
+                (*value as u64) & Self::mask(*width)
+            }
+            ExprDef::UnaryOp { op, operand, width } => {
                 let val = self.eval_expr(operand);
-                let m = mask(*width);
+                let m = Self::mask(*width);
                 match op.as_str() {
                     "~" | "not" => (!val) & m,
                     "&" | "reduce_and" => {
-                        let op_width = get_expr_width(operand);
-                        let op_mask = mask(op_width);
+                        let op_width = self.expr_width(operand);
+                        let op_mask = Self::mask(op_width);
                         if (val & op_mask) == op_mask { 1 } else { 0 }
                     }
                     "|" | "reduce_or" => if val != 0 { 1 } else { 0 },
-                    "^" | "reduce_xor" => val.count_ones() as u64 & 1,
+                    "^" | "reduce_xor" => (val.count_ones() & 1) as u64,
                     _ => val,
                 }
             }
-            Expr::BinaryOp { op, left, right, width } => {
+            ExprDef::BinaryOp { op, left, right, width } => {
                 let l = self.eval_expr(left);
                 let r = self.eval_expr(right);
-                let m = mask(*width);
+                let m = Self::mask(*width);
                 match op.as_str() {
                     "&" => l & r,
                     "|" => l | r,
@@ -302,42 +359,43 @@ impl SimulatorState {
                     _ => 0,
                 }
             }
-            Expr::Mux { condition, when_true, when_false, width } => {
+            ExprDef::Mux { condition, when_true, when_false, width } => {
                 let cond = self.eval_expr(condition);
-                let m = mask(*width);
+                let m = Self::mask(*width);
                 if cond != 0 {
                     self.eval_expr(when_true) & m
                 } else {
                     self.eval_expr(when_false) & m
                 }
             }
-            Expr::Slice { base, low, width, .. } => {
+            ExprDef::Slice { base, low, width, .. } => {
                 let val = self.eval_expr(base);
-                (val >> low) & mask(*width)
+                (val >> low) & Self::mask(*width)
             }
-            Expr::Concat { parts, width } => {
-                // Concat in HDL: cat(high, low) puts first arg in high bits
-                // Parts are ordered [high, ..., low], so we process in REVERSE
-                // to build up from low bits (shift = 0) to high bits
+            ExprDef::Concat { parts, width } => {
+                // Parts are ordered [high, ..., low], process in reverse
                 let mut result = 0u64;
-                let mut shift = 0u32;
+                let mut shift = 0usize;
                 for part in parts.iter().rev() {
                     let part_val = self.eval_expr(part);
-                    let part_width = get_expr_width(part);
-                    result |= (part_val & mask(part_width)) << shift;
+                    let part_width = self.expr_width(part);
+                    result |= (part_val & Self::mask(part_width)) << shift;
                     shift += part_width;
                 }
-                result & mask(*width)
+                result & Self::mask(*width)
             }
-            Expr::Resize { expr, width } => {
-                self.eval_expr(expr) & mask(*width)
+            ExprDef::Resize { expr, width } => {
+                self.eval_expr(expr) & Self::mask(*width)
             }
-            Expr::MemRead { memory, addr, width } => {
-                if let Some(&mem_idx) = self.mem_name_to_idx.get(memory) {
+            ExprDef::MemRead { memory, addr, width } => {
+                if let Some(&mem_idx) = self.memory_name_to_idx.get(memory) {
                     if let Some(arr) = self.memory_arrays.get(mem_idx) {
                         let addr_val = self.eval_expr(addr) as usize;
-                        let bounded_addr = addr_val % arr.len().max(1);
-                        arr.get(bounded_addr).cloned().unwrap_or(0) & mask(*width)
+                        if addr_val < arr.len() {
+                            arr[addr_val] & Self::mask(*width)
+                        } else {
+                            0
+                        }
                     } else {
                         0
                     }
@@ -348,161 +406,471 @@ impl SimulatorState {
         }
     }
 
+    /// Evaluate all combinational assignments
+    fn evaluate(&mut self) {
+        if let Some(ref lib) = self.compiled_lib {
+            // Use compiled evaluate function
+            unsafe {
+                let func: libloading::Symbol<unsafe extern "C" fn(*mut u64, usize)> =
+                    lib.get(b"evaluate").expect("evaluate function not found");
+                func(self.signals.as_mut_ptr(), self.signals.len());
+            }
+        } else {
+            // Interpreted mode
+            self.evaluate_interpreted();
+        }
+    }
+
+    fn evaluate_interpreted(&mut self) {
+        for assign in self.ir.assigns.clone() {
+            if let Some(&idx) = self.name_to_idx.get(&assign.target) {
+                let value = self.eval_expr(&assign.expr);
+                let width = self.widths.get(idx).copied().unwrap_or(64);
+                self.signals[idx] = value & Self::mask(width);
+            }
+        }
+    }
+
+    fn poke(&mut self, name: &str, value: u64) -> Result<(), String> {
+        let idx = *self.name_to_idx.get(name)
+            .ok_or_else(|| format!("Unknown signal: {}", name))?;
+        let mask = Self::mask(self.widths[idx]);
+        self.signals[idx] = value & mask;
+        Ok(())
+    }
+
+    fn peek(&self, name: &str) -> Result<u64, String> {
+        let idx = *self.name_to_idx.get(name)
+            .ok_or_else(|| format!("Unknown signal: {}", name))?;
+        Ok(self.signals[idx])
+    }
+
+    /// Clock tick - sample registers on rising edges
     fn tick(&mut self) {
-        // Capture initial clock values BEFORE any updates
+        // Multi-clock domain timing:
+        // 1. Sample ALL register expressions ONCE at tick start (before any updates)
+        // 2. Evaluate combinational logic and detect clock edges
+        // 3. Update registers for clocks with rising edges
+        // 4. Iterate for derived clock domains
+
+        // Save old clock values FIRST (before evaluate changes them)
         for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
             self.old_clocks[i] = self.signals[clk_idx];
         }
 
+        // Evaluate combinational logic (may change derived clocks)
         self.evaluate();
 
-        // Always use the interpreted tick loop for proper derived clock handling
-        // The compiled tick function uses static state that doesn't work well with iteration
-        {
-            // Iterate until no more rising edges are detected (delta-cycle simulation)
-            // This handles cascading clocks (e.g., clk_14m -> timing__clk_14m -> q3 -> cpu__clk)
-            // IMPORTANT: Keep old_clocks fixed at the start-of-tick values
-            // This allows detecting cascading rising edges (e.g., q3 going 0->1 after timing__q3 update)
-            let mut processed_clocks: HashSet<usize> = HashSet::new();
-            let max_iterations = 10;
-            for iteration in 0..max_iterations {
-                let had_edges = self.tick_interpreted_check_edges_track(&mut processed_clocks);
-                if !had_edges {
-                    break;
-                }
-                // After updating registers, re-evaluate combinational logic
-                // This may cause new clock signals to change (e.g., q3 = timing__q3)
-                self.evaluate();
-                if std::env::var("RHDL_DEBUG_TICK").is_ok() {
-                    eprintln!("tick iteration {}: checking for more edges", iteration);
-                }
-            }
-        }
-    }
-
-    /// Check for edges and update registers, tracking which clocks have been processed.
-    /// Returns true if any NEW rising edges were detected (clocks not already processed).
-    fn tick_interpreted_check_edges_track(&mut self, processed_clocks: &mut HashSet<usize>) -> bool {
-        // Multi-clock domain: detect rising edges on each clock
-        // Only consider clocks that haven't been processed yet in this tick
-        let mut rising_clocks = HashSet::new();
-        if std::env::var("RHDL_DEBUG_TICK").is_ok() {
-            eprintln!("tick_interpreted_check_edges_track: checking {} clocks", self.clock_indices.len());
-        }
-        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
-            // Skip already processed clocks
-            if processed_clocks.contains(&clk_idx) {
+        // Sample ALL register inputs
+        let mut reg_idx = 0;
+        for process in self.ir.processes.clone() {
+            if !process.clocked {
                 continue;
             }
-            let old_val = self.old_clocks[i];
-            let new_val = self.signals[clk_idx];
-            if std::env::var("RHDL_DEBUG_TICK").is_ok() {
-                eprintln!("  clock[{}] at signal[{}]: old={}, new={}", i, clk_idx, old_val, new_val);
-            }
-            if old_val == 0 && new_val != 0 {
-                rising_clocks.insert(clk_idx);
-                processed_clocks.insert(clk_idx);
-                if std::env::var("RHDL_DEBUG_TICK").is_ok() {
-                    eprintln!("    -> RISING EDGE!");
-                }
+            for stmt in &process.statements {
+                let value = self.eval_expr(&stmt.expr);
+                let target_idx = self.seq_targets[reg_idx];
+                let width = self.widths.get(target_idx).copied().unwrap_or(64);
+                self.next_regs[reg_idx] = value & Self::mask(width);
+                reg_idx += 1;
             }
         }
 
-        // If no new rising edges detected, nothing to do
-        if rising_clocks.is_empty() {
-            if std::env::var("RHDL_DEBUG_TICK").is_ok() {
-                eprintln!("  No new rising edges detected");
-            }
-            return false;
-        }
-        if std::env::var("RHDL_DEBUG_TICK").is_ok() {
-            eprintln!("  Rising edges detected on {} clocks", rising_clocks.len());
-        }
+        // Iterate for derived clock domains
+        // Each iteration may cause new clock edges as registers update
+        const MAX_ITERATIONS: usize = 10;
+        for _ in 0..MAX_ITERATIONS {
+            let mut any_edge = false;
 
-        // Sample registers whose clocks have rising edges
-        let mut reg_idx = 0;
-        for process in &self.ir.processes.clone() {
-            if process.clocked {
-                let clock_name = process.clock.as_ref().map(|s| s.as_str()).unwrap_or("none");
-                let clock_idx = process.clock.as_ref()
-                    .and_then(|name| self.signal_indices.get(name))
-                    .cloned()
-                    .unwrap_or(0);
-                let should_sample = rising_clocks.contains(&clock_idx);
-                if std::env::var("RHDL_DEBUG_SAMPLE").is_ok() && should_sample {
-                    eprintln!("  SAMPLE process {} (clock={}, idx={})",
-                        process.name, clock_name, clock_idx);
-                }
-                for stmt in &process.statements {
-                    if should_sample {
-                        let value = self.eval_expr(&stmt.expr);
-                        if std::env::var("RHDL_DEBUG_SAMPLE").is_ok() && stmt.target.starts_with("cpu__") {
-                            eprintln!("    {} <= {}", stmt.target, value);
-                        }
-                        self.next_regs[reg_idx] = value;
+            for (clock_list_idx, &clk_idx) in self.clock_indices.iter().enumerate() {
+                let old_val = self.old_clocks[clock_list_idx];
+                let new_val = self.signals[clk_idx];
+
+                // Check for rising edge (0 -> 1)
+                if old_val == 0 && new_val == 1 {
+                    any_edge = true;
+
+                    // Update only registers clocked by this signal (pre-grouped for efficiency)
+                    for &(seq_idx, target_idx) in &self.clock_domain_assigns[clock_list_idx] {
+                        self.signals[target_idx] = self.next_regs[seq_idx];
                     }
-                    reg_idx += 1;
+
+                    // Mark this clock as processed (set old to 1 to prevent re-triggering)
+                    self.old_clocks[clock_list_idx] = 1;
                 }
             }
-        }
 
-        // Update registers whose clocks had rising edges
-        reg_idx = 0;
-        for process in &self.ir.processes.clone() {
-            if process.clocked {
-                let clock_idx = process.clock.as_ref()
-                    .and_then(|name| self.signal_indices.get(name))
-                    .cloned()
-                    .unwrap_or(0);
-                let should_update = rising_clocks.contains(&clock_idx);
-                for stmt in &process.statements {
-                    if should_update {
-                        if let Some(&sig_idx) = self.signal_indices.get(&stmt.target) {
-                            let value = self.next_regs[reg_idx];
-                            if std::env::var("RHDL_DEBUG_UPDATE").is_ok() && stmt.target.starts_with("cpu__") {
-                                eprintln!("    UPDATE signals[{}] ({}) = {}", sig_idx, stmt.target, value);
-                            }
-                            self.signals[sig_idx] = value;
-                        } else if std::env::var("RHDL_DEBUG_UPDATE").is_ok() && stmt.target.starts_with("cpu__") {
-                            eprintln!("    UPDATE FAILED: {} not found in signal_indices!", stmt.target);
-                        }
-                    }
-                    reg_idx += 1;
-                }
+            if !any_edge {
+                break;
             }
-        }
 
-        true
+            // Re-evaluate combinational logic (may trigger derived clocks)
+            self.evaluate();
+        }
     }
 
-
     fn reset(&mut self) {
-        for sig in &mut self.signals {
-            *sig = 0;
+        for val in self.signals.iter_mut() {
+            *val = 0;
         }
-        for reg in &mut self.next_regs {
-            *reg = 0;
-        }
-        // Apply register reset values
         for &(idx, reset_val) in &self.reset_values {
             self.signals[idx] = reset_val;
         }
     }
 
-    fn compile(&mut self) -> Result<bool, String> {
-        let code = generate_full_code(&self.ir, &self.signal_indices);
+    fn signal_count(&self) -> usize {
+        self.signals.len()
+    }
 
-        // Compute a simple hash of the code for caching
+    fn reg_count(&self) -> usize {
+        self.seq_targets.len()
+    }
+
+    // ========================================================================
+    // Code Generation
+    // ========================================================================
+
+    fn generate_code(&self) -> String {
+        let mut code = String::new();
+
+        code.push_str("//! Auto-generated circuit simulation code\n");
+        code.push_str("//! Generated by RHDL IR Compiler\n\n");
+
+        // Generate mask helper
+        code.push_str("#[inline(always)]\n");
+        code.push_str("fn mask(width: usize) -> u64 {\n");
+        code.push_str("    if width >= 64 { u64::MAX } else { (1u64 << width) - 1 }\n");
+        code.push_str("}\n\n");
+
+        // Generate memory arrays if any
+        for (idx, mem) in self.ir.memories.iter().enumerate() {
+            code.push_str(&format!("static MEM_{}: &[u64] = &[\n", idx));
+            for (i, &val) in mem.initial_data.iter().enumerate() {
+                if i > 0 && i % 8 == 0 {
+                    code.push_str("\n");
+                }
+                code.push_str(&format!("    {},", val));
+            }
+            if mem.initial_data.is_empty() {
+                for i in 0..mem.depth.min(256) {
+                    if i > 0 && i % 8 == 0 {
+                        code.push_str("\n");
+                    }
+                    code.push_str("    0,");
+                }
+            }
+            code.push_str("\n];\n\n");
+        }
+
+        // Generate evaluate function
+        code.push_str("/// Evaluate all combinational assignments\n");
+        code.push_str("#[no_mangle]\n");
+        code.push_str("pub unsafe extern \"C\" fn evaluate(signals: *mut u64, len: usize) {\n");
+        code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, len);\n");
+
+        for assign in &self.ir.assigns {
+            if let Some(&idx) = self.name_to_idx.get(&assign.target) {
+                let width = self.widths.get(idx).copied().unwrap_or(64);
+                let expr_code = self.expr_to_rust(&assign.expr);
+                code.push_str(&format!("    signals[{}] = ({}) & mask({});\n", idx, expr_code, width));
+            }
+        }
+
+        code.push_str("}\n\n");
+
+        // Generate tick function
+        self.generate_tick_function(&mut code);
+
+        // Generate run_cpu_cycles function
+        self.generate_run_cpu_cycles(&mut code);
+
+        code
+    }
+
+    fn expr_to_rust(&self, expr: &ExprDef) -> String {
+        match expr {
+            ExprDef::Signal { name, width } => {
+                let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
+                format!("(signals[{}] & mask({}))", idx, width)
+            }
+            ExprDef::Literal { value, width } => {
+                format!("({}u64 & mask({}))", *value as u64, width)
+            }
+            ExprDef::UnaryOp { op, operand, width } => {
+                let operand_code = self.expr_to_rust(operand);
+                match op.as_str() {
+                    "~" | "not" => format!("((!{}) & mask({}))", operand_code, width),
+                    "&" | "reduce_and" => {
+                        let op_width = self.expr_width(operand);
+                        format!("(if ({} & mask({})) == mask({}) {{ 1 }} else {{ 0 }})",
+                                operand_code, op_width, op_width)
+                    }
+                    "|" | "reduce_or" => format!("(if {} != 0 {{ 1 }} else {{ 0 }})", operand_code),
+                    "^" | "reduce_xor" => format!("(({}).count_ones() as u64 & 1)", operand_code),
+                    _ => operand_code,
+                }
+            }
+            ExprDef::BinaryOp { op, left, right, width } => {
+                let l = self.expr_to_rust(left);
+                let r = self.expr_to_rust(right);
+                match op.as_str() {
+                    "&" => format!("({} & {})", l, r),
+                    "|" => format!("({} | {})", l, r),
+                    "^" => format!("({} ^ {})", l, r),
+                    "+" => format!("({}.wrapping_add({}) & mask({}))", l, r, width),
+                    "-" => format!("({}.wrapping_sub({}) & mask({}))", l, r, width),
+                    "*" => format!("({}.wrapping_mul({}) & mask({}))", l, r, width),
+                    "/" => format!("(if {} != 0 {{ {} / {} }} else {{ 0 }})", r, l, r),
+                    "%" => format!("(if {} != 0 {{ {} % {} }} else {{ 0 }})", r, l, r),
+                    "<<" => format!("(({} << {}.min(63)) & mask({}))", l, r, width),
+                    ">>" => format!("({} >> {}.min(63))", l, r),
+                    "==" => format!("(if {} == {} {{ 1 }} else {{ 0 }})", l, r),
+                    "!=" => format!("(if {} != {} {{ 1 }} else {{ 0 }})", l, r),
+                    "<" => format!("(if {} < {} {{ 1 }} else {{ 0 }})", l, r),
+                    ">" => format!("(if {} > {} {{ 1 }} else {{ 0 }})", l, r),
+                    "<=" | "le" => format!("(if {} <= {} {{ 1 }} else {{ 0 }})", l, r),
+                    ">=" => format!("(if {} >= {} {{ 1 }} else {{ 0 }})", l, r),
+                    _ => "0".to_string(),
+                }
+            }
+            ExprDef::Mux { condition, when_true, when_false, width } => {
+                let cond = self.expr_to_rust(condition);
+                let t = self.expr_to_rust(when_true);
+                let f = self.expr_to_rust(when_false);
+                format!("(if {} != 0 {{ {} }} else {{ {} }} & mask({}))", cond, t, f, width)
+            }
+            ExprDef::Slice { base, low, width, .. } => {
+                let base_code = self.expr_to_rust(base);
+                format!("(({} >> {}) & mask({}))", base_code, low, width)
+            }
+            ExprDef::Concat { parts, width } => {
+                let mut result = String::from("(");
+                let mut shift = 0usize;
+                let mut first = true;
+                for part in parts.iter().rev() {
+                    let part_code = self.expr_to_rust(part);
+                    let part_width = self.expr_width(part);
+                    if !first {
+                        result.push_str(" | ");
+                    }
+                    first = false;
+                    if shift > 0 {
+                        result.push_str(&format!("(({} & mask({})) << {})", part_code, part_width, shift));
+                    } else {
+                        result.push_str(&format!("({} & mask({}))", part_code, part_width));
+                    }
+                    shift += part_width;
+                }
+                result.push_str(&format!(") & mask({})", width));
+                result
+            }
+            ExprDef::Resize { expr, width } => {
+                let expr_code = self.expr_to_rust(expr);
+                format!("({} & mask({}))", expr_code, width)
+            }
+            ExprDef::MemRead { memory, addr, width } => {
+                let mem_idx = self.memory_name_to_idx.get(memory).copied().unwrap_or(0);
+                let addr_code = self.expr_to_rust(addr);
+                format!("(MEM_{}.get({} as usize).copied().unwrap_or(0) & mask({}))",
+                        mem_idx, addr_code, width)
+            }
+        }
+    }
+
+    fn generate_tick_function(&self, code: &mut String) {
+        // Build clock domain info
+        let mut clock_domains: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+        let mut seq_idx = 0;
+        for process in &self.ir.processes {
+            if !process.clocked {
+                continue;
+            }
+            let clock_idx = process.clock.as_ref()
+                .and_then(|c| self.name_to_idx.get(c).copied())
+                .unwrap_or_else(|| *self.name_to_idx.get("clk_14m").unwrap_or(&0));
+
+            for _ in &process.statements {
+                clock_domains.entry(clock_idx).or_default().push(seq_idx);
+                seq_idx += 1;
+            }
+        }
+
+        let clock_indices: Vec<usize> = clock_domains.keys().copied().collect();
+        let num_clocks = clock_indices.len().max(1);
+        let num_regs = self.seq_targets.len();
+
+        code.push_str("/// Clock tick - sample registers on rising edges\n");
+        code.push_str("#[no_mangle]\n");
+        code.push_str(&format!("pub unsafe extern \"C\" fn tick(signals: *mut u64, len: usize, old_clocks: *mut u64, next_regs: *mut u64) {{\n"));
+        code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, len);\n");
+        code.push_str(&format!("    let old_clocks = std::slice::from_raw_parts_mut(old_clocks, {});\n", num_clocks));
+        code.push_str(&format!("    let next_regs = std::slice::from_raw_parts_mut(next_regs, {});\n", num_regs));
+        code.push_str("\n");
+
+        // Save old clock values
+        for (i, &clk_idx) in clock_indices.iter().enumerate() {
+            code.push_str(&format!("    old_clocks[{}] = signals[{}];\n", i, clk_idx));
+        }
+        code.push_str("\n");
+
+        // Call evaluate
+        code.push_str("    evaluate(signals.as_mut_ptr(), signals.len());\n\n");
+
+        // Sample all register inputs
+        code.push_str("    // Sample register inputs\n");
+        let mut reg_idx = 0;
+        for process in &self.ir.processes {
+            if !process.clocked {
+                continue;
+            }
+            for stmt in &process.statements {
+                let expr_code = self.expr_to_rust(&stmt.expr);
+                let target_idx = self.seq_targets[reg_idx];
+                let width = self.widths.get(target_idx).copied().unwrap_or(64);
+                code.push_str(&format!("    next_regs[{}] = ({}) & mask({});\n", reg_idx, expr_code, width));
+                reg_idx += 1;
+            }
+        }
+        code.push_str("\n");
+
+        // Iterate for derived clock domains
+        code.push_str("    // Iterate for derived clock domains\n");
+        code.push_str("    for _ in 0..10 {\n");
+        code.push_str("        let mut any_edge = false;\n\n");
+
+        // Check for rising edges and update registers
+        for (clock_list_idx, &clk_idx) in clock_indices.iter().enumerate() {
+            code.push_str(&format!("        if old_clocks[{}] == 0 && signals[{}] == 1 {{\n", clock_list_idx, clk_idx));
+            code.push_str("            any_edge = true;\n");
+
+            if let Some(reg_indices) = clock_domains.get(&clk_idx) {
+                for &ri in reg_indices {
+                    let target_idx = self.seq_targets[ri];
+                    code.push_str(&format!("            signals[{}] = next_regs[{}];\n", target_idx, ri));
+                }
+            }
+
+            code.push_str(&format!("            old_clocks[{}] = 1;\n", clock_list_idx));
+            code.push_str("        }\n");
+        }
+
+        code.push_str("\n        if !any_edge { break; }\n");
+        code.push_str("        evaluate(signals.as_mut_ptr(), signals.len());\n");
+        code.push_str("    }\n");
+
+        code.push_str("}\n\n");
+    }
+
+    fn generate_run_cpu_cycles(&self, code: &mut String) {
+        let clk_idx = self.clk_idx;
+        let k_idx = self.k_idx;
+        let ram_addr_idx = self.ram_addr_idx;
+        let ram_do_idx = self.ram_do_idx;
+        let ram_we_idx = self.ram_we_idx;
+        let d_idx = self.d_idx;
+        let read_key_idx = self.read_key_idx;
+
+        let clock_indices: Vec<usize> = self.clock_indices.clone();
+        let num_clocks = clock_indices.len().max(1);
+        let num_regs = self.seq_targets.len();
+
+        code.push_str("/// Run N CPU cycles\n");
+        code.push_str("#[no_mangle]\n");
+        code.push_str("pub unsafe extern \"C\" fn run_cpu_cycles(\n");
+        code.push_str("    signals: *mut u64,\n");
+        code.push_str("    signals_len: usize,\n");
+        code.push_str("    ram: *mut u8,\n");
+        code.push_str("    ram_len: usize,\n");
+        code.push_str("    rom: *const u8,\n");
+        code.push_str("    rom_len: usize,\n");
+        code.push_str("    n: usize,\n");
+        code.push_str("    key_data: u8,\n");
+        code.push_str("    key_ready: bool,\n");
+        code.push_str(") -> (bool, bool) {\n");
+        code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, signals_len);\n");
+        code.push_str("    let ram = std::slice::from_raw_parts_mut(ram, ram_len);\n");
+        code.push_str("    let rom = std::slice::from_raw_parts(rom, rom_len);\n");
+        code.push_str(&format!("    let mut old_clocks = [0u64; {}];\n", num_clocks));
+        code.push_str(&format!("    let mut next_regs = [0u64; {}];\n", num_regs.max(1)));
+        code.push_str("    let mut text_dirty = false;\n");
+        code.push_str("    let mut key_cleared = false;\n");
+        code.push_str("    let mut key_is_ready = key_ready;\n\n");
+
+        // Initialize old_clocks
+        for (i, &clk) in clock_indices.iter().enumerate() {
+            code.push_str(&format!("    old_clocks[{}] = signals[{}];\n", i, clk));
+        }
+        code.push_str("\n");
+
+        code.push_str("    for _ in 0..n {\n");
+        code.push_str("        for _ in 0..14 {\n");
+
+        // Set keyboard input
+        code.push_str(&format!("            signals[{}] = if key_is_ready {{ (key_data as u64) | 0x80 }} else {{ 0 }};\n\n", k_idx));
+
+        // Falling edge
+        code.push_str(&format!("            // Falling edge\n"));
+        code.push_str(&format!("            signals[{}] = 0;\n", clk_idx));
+        code.push_str("            evaluate(signals.as_mut_ptr(), signals.len());\n\n");
+
+        // Provide RAM/ROM data
+        code.push_str(&format!("            // Provide RAM/ROM data\n"));
+        code.push_str(&format!("            let addr = signals[{}] as usize;\n", ram_addr_idx));
+        code.push_str(&format!("            signals[{}] = if addr >= 0xD000 {{\n", ram_do_idx));
+        code.push_str("                let rom_offset = addr.wrapping_sub(0xD000);\n");
+        code.push_str("                if rom_offset < rom.len() { rom[rom_offset] as u64 } else { 0 }\n");
+        code.push_str("            } else if addr >= 0xC000 {\n");
+        code.push_str("                0  // I/O space\n");
+        code.push_str("            } else if addr < ram.len() {\n");
+        code.push_str("                ram[addr] as u64\n");
+        code.push_str("            } else {\n");
+        code.push_str("                0\n");
+        code.push_str("            };\n\n");
+
+        // Rising edge
+        code.push_str(&format!("            // Rising edge\n"));
+        code.push_str(&format!("            signals[{}] = 1;\n", clk_idx));
+        code.push_str("            tick(signals.as_mut_ptr(), signals.len(), old_clocks.as_mut_ptr(), next_regs.as_mut_ptr());\n\n");
+
+        // Handle RAM writes
+        code.push_str(&format!("            // Handle RAM writes\n"));
+        code.push_str(&format!("            if signals[{}] == 1 {{\n", ram_we_idx));
+        code.push_str(&format!("                let write_addr = signals[{}] as usize;\n", ram_addr_idx));
+        code.push_str("                if write_addr < 0xC000 && write_addr < ram.len() {\n");
+        code.push_str(&format!("                    ram[write_addr] = (signals[{}] & 0xFF) as u8;\n", d_idx));
+        code.push_str("                    if write_addr >= 0x0400 && write_addr <= 0x07FF {\n");
+        code.push_str("                        text_dirty = true;\n");
+        code.push_str("                    }\n");
+        code.push_str("                }\n");
+        code.push_str("            }\n\n");
+
+        // Check keyboard strobe
+        code.push_str(&format!("            // Check keyboard strobe\n"));
+        code.push_str(&format!("            if signals[{}] == 1 {{\n", read_key_idx));
+        code.push_str("                key_is_ready = false;\n");
+        code.push_str("                key_cleared = true;\n");
+        code.push_str("            }\n");
+
+        code.push_str("        }\n");
+        code.push_str("    }\n\n");
+        code.push_str("    (text_dirty, key_cleared)\n");
+        code.push_str("}\n");
+    }
+
+    fn compile(&mut self) -> Result<bool, String> {
+        let code = self.generate_code();
+
+        // Compute hash for caching
         let code_hash = {
-            let mut hash: u64 = 0xcbf29ce484222325; // FNV-1a offset basis
+            let mut hash: u64 = 0xcbf29ce484222325;
             for byte in code.bytes() {
                 hash ^= byte as u64;
-                hash = hash.wrapping_mul(0x100000001b3); // FNV-1a prime
+                hash = hash.wrapping_mul(0x100000001b3);
             }
             hash
         };
 
-        // Cache directory and file paths
+        // Cache paths
         let cache_dir = std::env::temp_dir().join("rhdl_cache");
         let _ = fs::create_dir_all(&cache_dir);
 
@@ -513,13 +881,12 @@ impl SimulatorState {
         } else {
             "so"
         };
-        let lib_name = format!("rhdl_circuit_{:016x}.{}", code_hash, lib_ext);
+        let lib_name = format!("rhdl_ir_{:016x}.{}", code_hash, lib_ext);
         let lib_path = cache_dir.join(&lib_name);
-        let src_path = cache_dir.join(format!("rhdl_circuit_{:016x}.rs", code_hash));
+        let src_path = cache_dir.join(format!("rhdl_ir_{:016x}.rs", code_hash));
 
-        // Check if cached library exists
+        // Check cache
         if lib_path.exists() {
-            // Load cached library
             unsafe {
                 let lib = libloading::Library::new(&lib_path).map_err(|e| e.to_string())?;
                 self.compiled_lib = Some(lib);
@@ -528,10 +895,9 @@ impl SimulatorState {
             return Ok(true);
         }
 
-        // Write generated code and compile
+        // Write source and compile
         fs::write(&src_path, &code).map_err(|e| e.to_string())?;
 
-        // Compile with rustc using aggressive optimizations
         let output = Command::new("rustc")
             .args(&[
                 "--crate-type=cdylib",
@@ -549,7 +915,7 @@ impl SimulatorState {
             return Err(format!("Compilation failed: {}", stderr));
         }
 
-        // Load the compiled library
+        // Load compiled library
         unsafe {
             let lib = libloading::Library::new(&lib_path).map_err(|e| e.to_string())?;
             self.compiled_lib = Some(lib);
@@ -559,26 +925,27 @@ impl SimulatorState {
         Ok(true)
     }
 
-    fn run_cpu_cycles(&mut self, n: usize, key_data: u8, key_ready: bool) -> CycleResult {
-        // Use compiled run_cpu_cycles only when explicitly enabled.
-        // The compiled version is faster but can diverge from the interpreter in complex timing cases.
-        if std::env::var("RHDL_USE_COMPILED_CYCLES").is_ok() {
-            if let Some(ref lib) = self.compiled_lib {
+    fn run_cpu_cycles(&mut self, n: usize, key_data: u8, key_ready: bool) -> BatchResult {
+        if let Some(ref lib) = self.compiled_lib {
             unsafe {
+                #[allow(improper_ctypes_definitions)]
                 type RunCpuCyclesFn = unsafe extern "C" fn(
-                    &mut [u64], &mut [u8], &[u8], usize, u8, bool
+                    *mut u64, usize, *mut u8, usize, *const u8, usize, usize, u8, bool
                 ) -> (bool, bool);
-                let func: libloading::Symbol<RunCpuCyclesFn> = lib.get(b"run_cpu_cycles").unwrap();
+                let func: libloading::Symbol<RunCpuCyclesFn> =
+                    lib.get(b"run_cpu_cycles").expect("run_cpu_cycles not found");
                 let (text_dirty, key_cleared) = func(
-                    &mut self.signals,
-                    &mut self.ram,
-                    &self.rom,
+                    self.signals.as_mut_ptr(),
+                    self.signals.len(),
+                    self.ram.as_mut_ptr(),
+                    self.ram.len(),
+                    self.rom.as_ptr(),
+                    self.rom.len(),
                     n,
                     key_data,
-                    key_ready
+                    key_ready,
                 );
-                return CycleResult { cycles_run: n, text_dirty, key_cleared };
-            }
+                return BatchResult { cycles_run: n, text_dirty, key_cleared };
             }
         }
 
@@ -587,810 +954,106 @@ impl SimulatorState {
         let mut key_cleared = false;
         let mut key_is_ready = key_ready;
 
-        let clk_idx = self.signal_indices.get("clk_14m").cloned();
-        let k_idx = self.signal_indices.get("k").cloned();
-        let ram_addr_idx = self.signal_indices.get("ram_addr").cloned();
-        let ram_do_idx = self.signal_indices.get("ram_do").cloned();
-        let ram_we_idx = self.signal_indices.get("ram_we").cloned();
-        let d_idx = self.signal_indices.get("d").cloned();
-        let read_key_idx = self.signal_indices.get("read_key").cloned();
-        let cpu_addr_idx = self.signal_indices.get("cpu__addr_reg").cloned();
-
         for _ in 0..n {
             for _ in 0..14 {
-                if let Some(k) = k_idx {
-                    self.signals[k] = if key_is_ready { (key_data as u64) | 0x80 } else { 0 };
-                }
+                // Set keyboard input
+                self.signals[self.k_idx] = if key_is_ready { (key_data as u64) | 0x80 } else { 0 };
 
-                if let Some(clk) = clk_idx {
-                    self.signals[clk] = 0;
-                }
+                // Falling edge
+                self.signals[self.clk_idx] = 0;
                 self.evaluate();
 
-                if let (Some(addr_idx), Some(do_idx)) = (cpu_addr_idx, ram_do_idx) {
-                    let addr = self.signals[addr_idx] as usize;
-                    let data = if addr >= 0xD000 && addr <= 0xFFFF {
-                        let rom_offset = addr - 0xD000;
-                        if rom_offset < self.rom.len() { self.rom[rom_offset] as u64 } else { 0 }
-                    } else if addr >= 0xC000 {
-                        0
-                    } else if addr < self.ram.len() {
-                        self.ram[addr] as u64
-                    } else {
-                        0
-                    };
-                    self.signals[do_idx] = data;
-                }
-                self.evaluate();
+                // Provide RAM/ROM data
+                let addr = self.signals[self.ram_addr_idx] as usize;
+                self.signals[self.ram_do_idx] = if addr >= 0xD000 {
+                    let rom_offset = addr.wrapping_sub(0xD000);
+                    if rom_offset < self.rom.len() { self.rom[rom_offset] as u64 } else { 0 }
+                } else if addr >= 0xC000 {
+                    0
+                } else if addr < self.ram.len() {
+                    self.ram[addr] as u64
+                } else {
+                    0
+                };
 
-                if let Some(clk) = clk_idx {
-                    self.signals[clk] = 1;
-                }
+                // Rising edge
+                self.signals[self.clk_idx] = 1;
                 self.tick();
 
-                if let (Some(we_idx), Some(addr_idx), Some(d)) = (ram_we_idx, ram_addr_idx, d_idx) {
-                    if self.signals[we_idx] == 1 {
-                        let write_addr = self.signals[addr_idx] as usize;
-                        if write_addr < self.ram.len() {
-                            self.ram[write_addr] = (self.signals[d] & 0xFF) as u8;
-                            if write_addr >= 0x0400 && write_addr <= 0x07FF {
-                                text_dirty = true;
-                            }
+                // Handle RAM writes
+                if self.signals[self.ram_we_idx] == 1 {
+                    let write_addr = self.signals[self.ram_addr_idx] as usize;
+                    if write_addr < 0xC000 && write_addr < self.ram.len() {
+                        self.ram[write_addr] = (self.signals[self.d_idx] & 0xFF) as u8;
+                        if write_addr >= 0x0400 && write_addr <= 0x07FF {
+                            text_dirty = true;
                         }
                     }
                 }
 
-                if let Some(rk) = read_key_idx {
-                    if self.signals[rk] == 1 {
-                        key_is_ready = false;
-                        key_cleared = true;
-                    }
+                // Check keyboard strobe
+                if self.signals[self.read_key_idx] == 1 {
+                    key_is_ready = false;
+                    key_cleared = true;
                 }
             }
         }
 
-        CycleResult { cycles_run: n, text_dirty, key_cleared }
+        BatchResult { cycles_run: n, text_dirty, key_cleared }
+    }
+
+    fn load_rom(&mut self, data: &[u8]) {
+        let len = data.len().min(self.rom.len());
+        self.rom[..len].copy_from_slice(&data[..len]);
+    }
+
+    fn load_ram(&mut self, data: &[u8], offset: usize) {
+        let end = (offset + data.len()).min(self.ram.len());
+        let len = end.saturating_sub(offset);
+        if len > 0 {
+            self.ram[offset..end].copy_from_slice(&data[..len]);
+        }
     }
 }
 
-struct CycleResult {
-    cycles_run: usize,
+struct BatchResult {
     text_dirty: bool,
     key_cleared: bool,
+    cycles_run: usize,
 }
 
-fn count_regs(ir: &CircuitIR) -> usize {
-    ir.processes.iter()
-        .filter(|p| p.clocked)
-        .map(|p| p.statements.len())
-        .sum()
+// ============================================================================
+// Ruby Bindings
+// ============================================================================
+
+fn ruby_to_u64(value: Value) -> Result<u64, Error> {
+    if let Ok(i) = <i64 as TryConvert>::try_convert(value) {
+        return Ok(i as u64);
+    }
+    let ruby = unsafe { Ruby::get_unchecked() };
+    let str_val: String = value.funcall("to_s", (16i32,))?;
+    u64::from_str_radix(&str_val, 16)
+        .map_err(|e| Error::new(ruby.exception_runtime_error(), format!("Invalid integer: {}", e)))
 }
 
-fn mask(width: u32) -> u64 {
-    if width >= 64 { u64::MAX } else { (1u64 << width) - 1 }
-}
-
-fn get_expr_width(expr: &Expr) -> u32 {
-    match expr {
-        Expr::Signal { width, .. } => *width,
-        Expr::Literal { width, .. } => *width,
-        Expr::UnaryOp { width, .. } => *width,
-        Expr::BinaryOp { width, .. } => *width,
-        Expr::Mux { width, .. } => *width,
-        Expr::Slice { width, .. } => *width,
-        Expr::Concat { width, .. } => *width,
-        Expr::Resize { width, .. } => *width,
-        Expr::MemRead { width, .. } => *width,
-    }
-}
-
-/// Extract all signal names read by an expression
-fn get_signal_reads(expr: &Expr) -> HashSet<String> {
-    let mut reads = HashSet::new();
-    collect_signal_reads(expr, &mut reads);
-    reads
-}
-
-fn collect_signal_reads(expr: &Expr, reads: &mut HashSet<String>) {
-    match expr {
-        Expr::Signal { name, .. } => { reads.insert(name.clone()); }
-        Expr::Literal { .. } => {}
-        Expr::UnaryOp { operand, .. } => collect_signal_reads(operand, reads),
-        Expr::BinaryOp { left, right, .. } => {
-            collect_signal_reads(left, reads);
-            collect_signal_reads(right, reads);
-        }
-        Expr::Mux { condition, when_true, when_false, .. } => {
-            collect_signal_reads(condition, reads);
-            collect_signal_reads(when_true, reads);
-            collect_signal_reads(when_false, reads);
-        }
-        Expr::Slice { base, .. } => collect_signal_reads(base, reads),
-        Expr::Concat { parts, .. } => {
-            for part in parts {
-                collect_signal_reads(part, reads);
-            }
-        }
-        Expr::Resize { expr, .. } => collect_signal_reads(expr, reads),
-        Expr::MemRead { addr, .. } => collect_signal_reads(addr, reads),
-    }
-}
-
-/// Levelize assignments by dependency for SIMD parallel evaluation
-/// Returns a vector of levels, where each level contains assignment indices
-/// that can be evaluated in parallel (they depend only on earlier levels)
-fn levelize_assigns(assigns: &[Assign], inputs: &HashSet<String>) -> Vec<Vec<usize>> {
-    let n = assigns.len();
-    if n == 0 {
-        return vec![];
-    }
-
-    // Build dependency info: for each assign, which signals does it read?
-    let mut reads: Vec<HashSet<String>> = assigns.iter()
-        .map(|a| get_signal_reads(&a.expr))
-        .collect();
-
-    // Which targets are assigned? (map target -> assign index)
-    let mut target_to_idx: HashMap<String, usize> = HashMap::new();
-    for (i, assign) in assigns.iter().enumerate() {
-        target_to_idx.insert(assign.target.clone(), i);
-    }
-
-    // Compute level for each assignment
-    // Level 0 = depends only on inputs/ports (not on other assignments)
-    // Level N = depends on at least one assignment at level N-1
-    let mut levels = vec![usize::MAX; n];
-    let mut changed = true;
-    let max_iterations = n + 1;
-    let mut iteration = 0;
-
-    // Initialize: assignments that depend only on inputs get level 0
-    for i in 0..n {
-        let deps_on_assigns: Vec<usize> = reads[i].iter()
-            .filter_map(|sig| target_to_idx.get(sig).cloned())
-            .filter(|&j| j != i)  // Exclude self-reference
-            .collect();
-
-        if deps_on_assigns.is_empty() {
-            levels[i] = 0;
-        }
-    }
-
-    // Iterate until stable
-    while changed && iteration < max_iterations {
-        changed = false;
-        iteration += 1;
-
-        for i in 0..n {
-            if levels[i] != usize::MAX {
-                continue;
-            }
-
-            // Find max level of dependencies
-            let mut max_dep_level = 0usize;
-            let mut all_deps_resolved = true;
-
-            for sig in &reads[i] {
-                if let Some(&j) = target_to_idx.get(sig) {
-                    if j == i { continue; }  // Skip self
-                    if levels[j] == usize::MAX {
-                        all_deps_resolved = false;
-                        break;
-                    }
-                    max_dep_level = max_dep_level.max(levels[j] + 1);
-                }
-            }
-
-            if all_deps_resolved {
-                levels[i] = max_dep_level;
-                changed = true;
-            }
-        }
-    }
-
-    // Handle cycles - put remaining at highest level
-    let max_level = levels.iter().filter(|&&l| l != usize::MAX).max().cloned().unwrap_or(0);
-    for l in &mut levels {
-        if *l == usize::MAX {
-            *l = max_level + 1;
-        }
-    }
-
-    // Group by level
-    let num_levels = levels.iter().max().cloned().unwrap_or(0) + 1;
-    let mut result: Vec<Vec<usize>> = vec![vec![]; num_levels];
-    for (i, &level) in levels.iter().enumerate() {
-        result[level].push(i);
-    }
-
-    result
-}
-
-/// Check if an expression is "simple" enough to benefit from AVX2 batching
-/// Simple = signal, literal, or basic binary ops on simple operands (depth <= 2)
-fn is_simple_assign(expr: &Expr) -> bool {
-    is_simple_expr(expr, 0)
-}
-
-fn is_simple_expr(expr: &Expr, depth: usize) -> bool {
-    if depth > 2 {
-        return false;
-    }
-    match expr {
-        Expr::Signal { .. } | Expr::Literal { .. } => true,
-        Expr::UnaryOp { operand, op, .. } => {
-            // Allow NOT and simple reduction ops
-            matches!(op.as_str(), "~" | "not" | "|" | "&" | "^" | "reduce_and" | "reduce_or" | "reduce_xor")
-                && is_simple_expr(operand, depth + 1)
-        }
-        Expr::BinaryOp { left, right, op, .. } => {
-            // Allow basic bitwise and arithmetic ops
-            matches!(op.as_str(), "&" | "|" | "^" | "+" | "-" | "==" | "!=" | "<" | ">" | "<=" | ">=")
-                && is_simple_expr(left, depth + 1)
-                && is_simple_expr(right, depth + 1)
-        }
-        Expr::Slice { base, .. } => is_simple_expr(base, depth + 1),
-        Expr::Resize { expr, .. } => is_simple_expr(expr, depth + 1),
-        // Mux, Concat, and MemRead are typically not worth batching
-        Expr::Mux { .. } | Expr::Concat { .. } | Expr::MemRead { .. } => false,
-    }
-}
-
-// Code generation functions
-fn generate_mask_str(width: u32) -> String {
-    if width >= 64 {
-        "0xFFFFFFFFFFFFFFFF_u64".to_string()
+fn u64_to_ruby(ruby: &Ruby, value: u64) -> Value {
+    if value <= i64::MAX as u64 {
+        ruby.into_value(value as i64)
     } else {
-        format!("0x{:X}_u64", (1u64 << width) - 1)
+        let hex_str = format!("{:x}", value);
+        ruby.eval(&format!("0x{}", hex_str)).unwrap_or_else(|_| ruby.into_value(0i64))
     }
 }
 
-fn expr_to_rust(expr: &Expr, signal_indices: &HashMap<String, usize>) -> String {
-    expr_to_rust_with_name(expr, signal_indices, "signals")
-}
-
-fn expr_to_rust_with_name(expr: &Expr, signal_indices: &HashMap<String, usize>, signals_name: &str) -> String {
-    match expr {
-        Expr::Signal { name, width } => {
-            let idx = signal_indices.get(name).unwrap_or(&0);
-            format!("({}[{}] & {})", signals_name, idx, generate_mask_str(*width))
-        }
-        Expr::Literal { value, width } => {
-            format!("({}_u64 & {})", value, generate_mask_str(*width))
-        }
-        Expr::UnaryOp { op, operand, width } => {
-            let operand_code = expr_to_rust_with_name(operand, signal_indices, signals_name);
-            let m = generate_mask_str(*width);
-            match op.as_str() {
-                "~" | "not" => format!("((!{}) & {})", operand_code, m),
-                // Branchless reduce_and: compare masked value to mask
-                "&" | "reduce_and" => {
-                    let op_width = get_expr_width(operand);
-                    let op_mask = generate_mask_str(op_width);
-                    format!("((({} & {}) == {}) as u64)", operand_code, op_mask, op_mask)
-                }
-                // Branchless reduce_or: != 0 as bool
-                "|" | "reduce_or" => format!("(({} != 0) as u64)", operand_code),
-                "^" | "reduce_xor" => format!("({}.count_ones() as u64 & 1)", operand_code),
-                _ => operand_code,
-            }
-        }
-        Expr::BinaryOp { op, left, right, width } => {
-            let left_code = expr_to_rust_with_name(left, signal_indices, signals_name);
-            let right_code = expr_to_rust_with_name(right, signal_indices, signals_name);
-            let m = generate_mask_str(*width);
-            match op.as_str() {
-                "&" => format!("({} & {})", left_code, right_code),
-                "|" => format!("({} | {})", left_code, right_code),
-                "^" => format!("({} ^ {})", left_code, right_code),
-                "+" => format!("({}.wrapping_add({}) & {})", left_code, right_code, m),
-                "-" => format!("({}.wrapping_sub({}) & {})", left_code, right_code, m),
-                "*" => format!("({}.wrapping_mul({}) & {})", left_code, right_code, m),
-                "/" => format!("(if {} != 0 {{ {} / {} }} else {{ 0 }})", right_code, left_code, right_code),
-                "%" => format!("(if {} != 0 {{ {} % {} }} else {{ 0 }})", right_code, left_code, right_code),
-                "<<" => format!("(({} << ({}.min(63))) & {})", left_code, right_code, m),
-                ">>" => format!("({} >> ({}.min(63)))", left_code, right_code),
-                // Branchless comparisons using `as u64`
-                "==" => format!("(({} == {}) as u64)", left_code, right_code),
-                "!=" => format!("(({} != {}) as u64)", left_code, right_code),
-                "<" => format!("(({} < {}) as u64)", left_code, right_code),
-                ">" => format!("(({} > {}) as u64)", left_code, right_code),
-                "<=" | "le" => format!("(({} <= {}) as u64)", left_code, right_code),
-                ">=" => format!("(({} >= {}) as u64)", left_code, right_code),
-                _ => "0_u64".to_string(),
-            }
-        }
-        Expr::Mux { condition, when_true, when_false, width } => {
-            let cond_code = expr_to_rust_with_name(condition, signal_indices, signals_name);
-            let true_code = expr_to_rust_with_name(when_true, signal_indices, signals_name);
-            let false_code = expr_to_rust_with_name(when_false, signal_indices, signals_name);
-            let m = generate_mask_str(*width);
-            // Branchless mux using bitwise select:
-            // mask = -(cond != 0) as u64  // all 1s if true, all 0s if false
-            // result = (true & mask) | (false & !mask)
-            format!("({{ let _c = (({} != 0) as u64).wrapping_neg(); (({} & _c) | ({} & !_c)) & {} }})",
-                    cond_code, true_code, false_code, m)
-        }
-        Expr::Slice { base, low, width, .. } => {
-            let base_code = expr_to_rust_with_name(base, signal_indices, signals_name);
-            let m = generate_mask_str(*width);
-            format!("(({} >> {}) & {})", base_code, low, m)
-        }
-        Expr::Concat { parts, width } => {
-            // Concat in HDL: cat(high, low) puts first arg in high bits
-            // Parts are ordered [high, ..., low], so we process in REVERSE
-            // to build up from low bits (shift = 0) to high bits
-            let m = generate_mask_str(*width);
-            let mut result = String::from("(");
-            let mut shift = 0u32;
-            let mut first = true;
-            for part in parts.iter().rev() {
-                let part_code = expr_to_rust_with_name(part, signal_indices, signals_name);
-                let part_width = get_expr_width(part);
-                let part_mask = generate_mask_str(part_width);
-                if !first { result.push_str(" | "); }
-                first = false;
-                if shift > 0 {
-                    result.push_str(&format!("(({} & {}) << {})", part_code, part_mask, shift));
-                } else {
-                    result.push_str(&format!("({} & {})", part_code, part_mask));
-                }
-                shift += part_width;
-            }
-            result.push_str(&format!(") & {}", m));
-            result
-        }
-        Expr::Resize { expr, width } => {
-            let expr_code = expr_to_rust_with_name(expr, signal_indices, signals_name);
-            let m = generate_mask_str(*width);
-            format!("({} & {})", expr_code, m)
-        }
-        Expr::MemRead { memory, addr, width } => {
-            // Generate code to access static memory array MEM_<n>
-            let addr_code = expr_to_rust_with_name(addr, signal_indices, signals_name);
-            let m = generate_mask_str(*width);
-            // Memory name is "mem_<name>", we need to convert to MEM_<NAME> format
-            // For now, use a placeholder that will be resolved in generate_full_code
-            format!("(MEM_{}.get(({}) as usize % MEM_{}.len()).copied().unwrap_or(0) & {})",
-                    memory.to_uppercase().replace("__", "_"), addr_code, memory.to_uppercase().replace("__", "_"), m)
-        }
-    }
-}
-
-fn generate_full_code(ir: &CircuitIR, signal_indices: &HashMap<String, usize>) -> String {
-    let mut code = String::new();
-    code.push_str("// Auto-generated circuit simulation code\n");
-    code.push_str("// DO NOT EDIT - generated by FIRRTL compiler\n\n");
-
-    // Check if we should use AVX2
-    code.push_str("#[cfg(target_arch = \"x86_64\")]\n");
-    code.push_str("use std::arch::x86_64::*;\n\n");
-
-    // Generate static memory arrays for mem_read operations
-    for mem in &ir.memories {
-        let mem_name = mem.name.to_uppercase().replace("__", "_");
-        code.push_str(&format!("static MEM_{}: &[u64] = &[\n", mem_name));
-        for i in 0..mem.depth as usize {
-            if i > 0 && i % 16 == 0 {
-                code.push_str("\n");
-            }
-            let val = mem.initial_data.get(i).copied().unwrap_or(0);
-            code.push_str(&format!("    {}_u64,", val));
-        }
-        code.push_str("\n];\n\n");
-    }
-
-    // Build input set for levelization
-    let inputs: HashSet<String> = ir.ports.iter()
-        .filter(|p| p.direction == "in")
-        .map(|p| p.name.clone())
-        .collect();
-
-    // Levelize assignments for optimal parallel evaluation
-    let levels = levelize_assigns(&ir.assigns, &inputs);
-
-    // Generate inline evaluate logic as a macro with levelized AVX2 SIMD
-    code.push_str("macro_rules! do_evaluate {\n");
-    code.push_str("    ($signals:expr) => {{\n");
-
-    // Process each level
-    for level in &levels {
-        if level.is_empty() {
-            continue;
-        }
-
-        // Group assignments at this level by 4s for AVX2
-        let chunks: Vec<_> = level.chunks(4).collect();
-
-        for chunk in chunks {
-            if chunk.len() == 4 {
-                // Generate AVX2 SIMD code for 4 parallel assignments
-                // Note: AVX2 is great for simple ops, but for complex expressions
-                // the scalar branchless code is often faster due to register pressure.
-                // We use AVX2 only for simple signal copies and basic ops.
-                let all_simple = chunk.iter().all(|&idx| {
-                    is_simple_assign(&ir.assigns[idx].expr)
-                });
-
-                if all_simple {
-                    // Use AVX2 for simple assignments
-                    code.push_str("        #[cfg(target_arch = \"x86_64\")]\n");
-                    code.push_str("        unsafe {\n");
-
-                    // Load 4 values
-                    code.push_str("            let _v = _mm256_set_epi64x(\n");
-                    for (i, &idx) in chunk.iter().rev().enumerate() {
-                        let assign = &ir.assigns[idx];
-                        let expr_code = expr_to_rust_with_name(&assign.expr, signal_indices, "$signals");
-                        if i < 3 {
-                            code.push_str(&format!("                {} as i64,\n", expr_code));
-                        } else {
-                            code.push_str(&format!("                {} as i64\n", expr_code));
-                        }
-                    }
-                    code.push_str("            );\n");
-
-                    // Extract and store 4 values
-                    // For x86_64, we extract each 64-bit lane
-                    for (i, &idx) in chunk.iter().enumerate() {
-                        let assign = &ir.assigns[idx];
-                        if let Some(&sig_idx) = signal_indices.get(&assign.target) {
-                            code.push_str(&format!(
-                                "            $signals[{}] = _mm256_extract_epi64(_v, {}) as u64;\n",
-                                sig_idx, i
-                            ));
-                        }
-                    }
-                    code.push_str("        }\n");
-
-                    // Fallback for non-x86_64
-                    code.push_str("        #[cfg(not(target_arch = \"x86_64\"))]\n");
-                    code.push_str("        {\n");
-                    for &idx in chunk {
-                        let assign = &ir.assigns[idx];
-                        if let Some(&sig_idx) = signal_indices.get(&assign.target) {
-                            let expr_code = expr_to_rust_with_name(&assign.expr, signal_indices, "$signals");
-                            code.push_str(&format!("            $signals[{}] = {};\n", sig_idx, expr_code));
-                        }
-                    }
-                    code.push_str("        }\n");
-                } else {
-                    // Complex expressions - use scalar code
-                    for &idx in chunk {
-                        let assign = &ir.assigns[idx];
-                        if let Some(&sig_idx) = signal_indices.get(&assign.target) {
-                            let expr_code = expr_to_rust_with_name(&assign.expr, signal_indices, "$signals");
-                            code.push_str(&format!("        $signals[{}] = {};\n", sig_idx, expr_code));
-                        }
-                    }
-                }
-            } else {
-                // Remainder - use scalar code
-                for &idx in chunk {
-                    let assign = &ir.assigns[idx];
-                    if let Some(&sig_idx) = signal_indices.get(&assign.target) {
-                        let expr_code = expr_to_rust_with_name(&assign.expr, signal_indices, "$signals");
-                        code.push_str(&format!("        $signals[{}] = {};\n", sig_idx, expr_code));
-                    }
-                }
-            }
-        }
-    }
-    code.push_str("    }};\n}\n\n");
-
-    // Build clock domain info for multi-clock support
-    // Group processes by their clock signal
-    let mut clock_domains: HashMap<usize, Vec<(usize, &Process)>> = HashMap::new();
-    let mut clock_indices_set: HashSet<usize> = HashSet::new();
-    for (proc_idx, process) in ir.processes.iter().enumerate() {
-        if process.clocked {
-            let clk_idx = process.clock.as_ref()
-                .and_then(|name| signal_indices.get(name))
-                .cloned()
-                .unwrap_or(0);
-            clock_indices_set.insert(clk_idx);
-            clock_domains.entry(clk_idx).or_default().push((proc_idx, process));
-        }
-    }
-    let clock_indices_vec: Vec<usize> = clock_indices_set.iter().cloned().collect();
-    let num_clocks = clock_indices_vec.len();
-
-    // Generate inline tick-and-update logic as a macro with multi-clock support
-    // This samples registers on rising edge and immediately updates them
-    code.push_str("macro_rules! do_tick_update {\n");
-    code.push_str("    ($signals:expr, $old_clocks:expr) => {{\n");
-
-    // Check each clock domain for rising edge, sample and update immediately
-    for (clock_array_idx, &clk_idx) in clock_indices_vec.iter().enumerate() {
-        code.push_str(&format!("        // Clock domain: signal index {}\n", clk_idx));
-        code.push_str(&format!("        let _old_clk_{} = $old_clocks[{}];\n", clock_array_idx, clock_array_idx));
-        code.push_str(&format!("        let _new_clk_{} = $signals[{}];\n", clock_array_idx, clk_idx));
-        code.push_str(&format!("        $old_clocks[{}] = _new_clk_{};\n", clock_array_idx, clock_array_idx));
-        code.push_str(&format!("        if _old_clk_{} == 0 && _new_clk_{} != 0 {{\n", clock_array_idx, clock_array_idx));
-
-        // Sample all registers in this clock domain, then immediately update
-        if let Some(procs) = clock_domains.get(&clk_idx) {
-            // Calculate register indices for processes in this domain
-            let mut base_reg_idx = 0;
-            for (proc_idx, proc) in ir.processes.iter().enumerate() {
-                if proc.clocked {
-                    // Check if this process is in current clock domain
-                    if procs.iter().any(|(pi, _)| *pi == proc_idx) {
-                        // First sample all registers to temps to avoid read-after-write issues
-                        for (stmt_idx, stmt) in proc.statements.iter().enumerate() {
-                            let expr_code = expr_to_rust_with_name(&stmt.expr, signal_indices, "$signals");
-                            code.push_str(&format!("            let _next_{} = {};\n", base_reg_idx + stmt_idx, expr_code));
-                        }
-                        // Then update all registers
-                        for (stmt_idx, stmt) in proc.statements.iter().enumerate() {
-                            if let Some(&sig_idx) = signal_indices.get(&stmt.target) {
-                                code.push_str(&format!("            $signals[{}] = _next_{};\n", sig_idx, base_reg_idx + stmt_idx));
-                            }
-                        }
-                    }
-                    base_reg_idx += proc.statements.len();
-                }
-            }
-        }
-        code.push_str("        }\n");
-    }
-    code.push_str("    }};\n}\n\n");
-
-    // Legacy macros for compatibility (sample all, update all)
-    code.push_str("macro_rules! do_tick {\n");
-    code.push_str("    ($signals:expr, $next_regs:expr, $old_clocks:expr) => {{\n");
-    for (clock_array_idx, &clk_idx) in clock_indices_vec.iter().enumerate() {
-        code.push_str(&format!("        let _old_clk_{} = $old_clocks[{}];\n", clock_array_idx, clock_array_idx));
-        code.push_str(&format!("        let _new_clk_{} = $signals[{}];\n", clock_array_idx, clk_idx));
-        code.push_str(&format!("        $old_clocks[{}] = _new_clk_{};\n", clock_array_idx, clock_array_idx));
-        code.push_str(&format!("        if _old_clk_{} == 0 && _new_clk_{} != 0 {{\n", clock_array_idx, clock_array_idx));
-        if let Some(procs) = clock_domains.get(&clk_idx) {
-            let mut base_reg_idx = 0;
-            for (proc_idx, proc) in ir.processes.iter().enumerate() {
-                if proc.clocked {
-                    if procs.iter().any(|(pi, _)| *pi == proc_idx) {
-                        for (stmt_idx, stmt) in proc.statements.iter().enumerate() {
-                            let reg_idx = base_reg_idx + stmt_idx;
-                            let expr_code = expr_to_rust_with_name(&stmt.expr, signal_indices, "$signals");
-                            code.push_str(&format!("            $next_regs[{}] = {};\n", reg_idx, expr_code));
-                        }
-                    }
-                    base_reg_idx += proc.statements.len();
-                }
-            }
-        }
-        code.push_str("        }\n");
-    }
-    code.push_str("    }};\n}\n\n");
-
-    code.push_str("macro_rules! do_update_regs {\n");
-    code.push_str("    ($signals:expr, $next_regs:expr, $old_clocks:expr, $prev_clocks:expr) => {{\n");
-    for (clock_array_idx, &clk_idx) in clock_indices_vec.iter().enumerate() {
-        code.push_str(&format!("        if $prev_clocks[{}] == 0 && $old_clocks[{}] != 0 {{\n", clock_array_idx, clock_array_idx));
-        if let Some(procs) = clock_domains.get(&clk_idx) {
-            let mut base_reg_idx = 0;
-            for (proc_idx, proc) in ir.processes.iter().enumerate() {
-                if proc.clocked {
-                    if procs.iter().any(|(pi, _)| *pi == proc_idx) {
-                        for (stmt_idx, stmt) in proc.statements.iter().enumerate() {
-                            let reg_idx = base_reg_idx + stmt_idx;
-                            if let Some(&sig_idx) = signal_indices.get(&stmt.target) {
-                                code.push_str(&format!("            $signals[{}] = $next_regs[{}];\n", sig_idx, reg_idx));
-                            }
-                        }
-                    }
-                    base_reg_idx += proc.statements.len();
-                }
-            }
-        }
-        code.push_str("        }\n");
-    }
-    code.push_str("    }};\n}\n\n");
-
-    // Generate evaluate function (for compatibility)
-    code.push_str("#[no_mangle]\npub extern \"C\" fn evaluate(signals: &mut [u64]) {\n");
-    code.push_str("    do_evaluate!(signals);\n");
-    code.push_str("}\n\n");
-
-    // Generate tick function with proper multi-clock domain support using static state
-    code.push_str("use std::sync::Mutex;\n");
-    code.push_str(&format!("static TICK_OLD_CLOCKS: Mutex<[u64; {}]> = Mutex::new([0u64; {}]);\n\n",
-        num_clocks.max(1), num_clocks.max(1)));
-
-    code.push_str("#[no_mangle]\npub extern \"C\" fn tick(signals: &mut [u64], next_regs: &mut [u64]) {\n");
-    code.push_str("    let mut old_clocks = TICK_OLD_CLOCKS.lock().unwrap();\n");
-
-    // Generate multi-clock domain tick logic with proper edge detection
-    code.push_str("    // Detect rising edges and sample/update registers\n");
-    for (clock_array_idx, &clk_idx) in clock_indices_vec.iter().enumerate() {
-        code.push_str(&format!("    let _old_clk_{} = old_clocks[{}];\n", clock_array_idx, clock_array_idx));
-        code.push_str(&format!("    let _new_clk_{} = signals[{}];\n", clock_array_idx, clk_idx));
-        code.push_str(&format!("    old_clocks[{}] = _new_clk_{};\n", clock_array_idx, clock_array_idx));
-        code.push_str(&format!("    if _old_clk_{} == 0 && _new_clk_{} != 0 {{\n", clock_array_idx, clock_array_idx));
-
-        // Sample and update registers in this clock domain
-        if let Some(procs) = clock_domains.get(&clk_idx) {
-            let mut base_reg_idx = 0;
-            for (proc_idx, proc) in ir.processes.iter().enumerate() {
-                if proc.clocked {
-                    if procs.iter().any(|(pi, _)| *pi == proc_idx) {
-                        // Sample all registers first
-                        for (stmt_idx, stmt) in proc.statements.iter().enumerate() {
-                            let expr_code = expr_to_rust_with_name(&stmt.expr, signal_indices, "signals");
-                            code.push_str(&format!("        next_regs[{}] = {};\n", base_reg_idx + stmt_idx, expr_code));
-                        }
-                    }
-                    base_reg_idx += proc.statements.len();
-                }
-            }
-
-            // Update all registers
-            base_reg_idx = 0;
-            for (proc_idx, proc) in ir.processes.iter().enumerate() {
-                if proc.clocked {
-                    if procs.iter().any(|(pi, _)| *pi == proc_idx) {
-                        for (stmt_idx, stmt) in proc.statements.iter().enumerate() {
-                            if let Some(&sig_idx) = signal_indices.get(&stmt.target) {
-                                code.push_str(&format!("        signals[{}] = next_regs[{}];\n", sig_idx, base_reg_idx + stmt_idx));
-                            }
-                        }
-                    }
-                    base_reg_idx += proc.statements.len();
-                }
-            }
-        }
-        code.push_str("    }\n");
-    }
-    code.push_str("}\n\n");
-
-    // Generate update_regs function (for compatibility - unconditional update)
-    code.push_str("#[no_mangle]\npub extern \"C\" fn update_regs(signals: &mut [u64], next_regs: &[u64]) {\n");
-    let mut reg_idx = 0;
-    for process in &ir.processes {
-        if process.clocked {
-            for stmt in &process.statements {
-                if let Some(&sig_idx) = signal_indices.get(&stmt.target) {
-                    code.push_str(&format!("    signals[{}] = next_regs[{}];\n", sig_idx, reg_idx));
-                }
-                reg_idx += 1;
-            }
-        }
-    }
-    code.push_str("}\n\n");
-
-    // Generate run_cpu_cycles - the main optimized entry point
-    // This runs the entire CPU cycle loop without any function call overhead
-    let clk_idx = signal_indices.get("clk_14m").cloned().unwrap_or(0);
-    let k_idx = signal_indices.get("k").cloned().unwrap_or(0);
-    let ram_addr_idx = signal_indices.get("ram_addr").cloned().unwrap_or(0);
-    let ram_do_idx = signal_indices.get("ram_do").cloned().unwrap_or(0);
-    let ram_we_idx = signal_indices.get("ram_we").cloned().unwrap_or(0);
-    let d_idx = signal_indices.get("d").cloned().unwrap_or(0);
-    let read_key_idx = signal_indices.get("read_key").cloned().unwrap_or(0);
-    let cpu_addr_idx = signal_indices
-        .get("cpu__addr_reg")
-        .cloned()
-        .unwrap_or(0);
-    let reg_count = count_regs(ir);
-    // Generate initialization for old_clocks based on current signal values
-    let mut old_clocks_init = String::new();
-    for (i, &clk_idx_val) in clock_indices_vec.iter().enumerate() {
-        old_clocks_init.push_str(&format!("    old_clocks[{}] = signals[{}]; // clock signal {}\n", i, clk_idx_val, clk_idx_val));
-    }
-    if clock_indices_vec.is_empty() {
-        old_clocks_init.push_str("    // No clocked processes\n");
-    }
-    let old_clocks_sync = old_clocks_init.clone();
-
-    // Generate run_cpu_cycles with loop unrolling and optimized evaluate sequence
-    code.push_str(&format!(r#"/// Run N CPU cycles with zero function-call overhead
-/// Returns: (text_dirty: bool, key_cleared: bool)
-#[no_mangle]
-pub extern "C" fn run_cpu_cycles(
-    signals: &mut [u64],
-    ram: &mut [u8],
-    rom: &[u8],
-    n: usize,
-    key_data: u8,
-    key_ready: bool,
-) -> (bool, bool) {{
-    let mut next_regs = [0u64; {reg_count}];
-    let mut text_dirty = false;
-    let mut key_cleared = false;
-    let mut key_is_ready = key_ready;
-
-    // Initialize tick's static old_clocks from current signal values
-    {{
-        let mut old_clocks = TICK_OLD_CLOCKS.lock().unwrap();
-{old_clocks_init}
-    }}
-    // Pre-compute keyboard value (branchless)
-    let key_val_base = (key_data as u64) | 0x80;
-
-    // Macro for one 14MHz cycle with multi-clock domain support
-    macro_rules! cycle_14m {{
-        () => {{
-            // Set keyboard state (branchless)
-            *signals.get_unchecked_mut({k_idx}) = key_val_base * (key_is_ready as u64);
-
-            // Falling edge - set clock low
-            *signals.get_unchecked_mut({clk_idx}) = 0;
-            do_evaluate!(signals);
-
-            // Provide RAM/ROM data (unchecked access)
-            // Use the CPU address register to avoid video-phase address contamination.
-            let addr = *signals.get_unchecked({cpu_addr_idx}) as usize;
-            let ram_len = ram.len();
-            let rom_len = rom.len();
-            *signals.get_unchecked_mut({ram_do_idx}) = if addr >= 0xD000 {{
-                let rom_offset = addr.wrapping_sub(0xD000);
-                if rom_offset < rom_len {{ *rom.get_unchecked(rom_offset) as u64 }} else {{ 0 }}
-            }} else if addr >= 0xC000 {{
-                0
-            }} else if addr < ram_len {{
-                *ram.get_unchecked(addr) as u64
-            }} else {{
-                0
-            }};
-            do_evaluate!(signals);
-
-            // Sync old clock values to the current (low) state before rising edge
-            {{
-                let mut old_clocks = TICK_OLD_CLOCKS.lock().unwrap();
-{old_clocks_sync}
-            }}
-
-            // Rising edge - set clock high
-            *signals.get_unchecked_mut({clk_idx}) = 1;
-            do_evaluate!(signals);
-            tick(signals, &mut next_regs);
-
-            // Handle RAM writes
-            let ram_we = *signals.get_unchecked({ram_we_idx});
-            if ram_we == 1 {{
-                let write_addr = *signals.get_unchecked({ram_addr_idx}) as usize;
-                if write_addr < 0xC000 {{
-                    *ram.get_unchecked_mut(write_addr) = (*signals.get_unchecked({d_idx}) & 0xFF) as u8;
-                    text_dirty |= (write_addr >= 0x0400) & (write_addr <= 0x07FF);
-                }}
-            }}
-
-            // Check keyboard strobe clear (branchless)
-            let strobe_clear = *signals.get_unchecked({read_key_idx}) == 1;
-            key_is_ready &= !strobe_clear;
-            key_cleared |= strobe_clear;
-        }};
-    }}
-
-    for _ in 0..n {{
-        unsafe {{
-            // Partial unroll: 7 iterations of 2 cycles each
-            for _ in 0..7 {{
-                cycle_14m!(); cycle_14m!();
-            }}
-        }}
-    }}
-
-    (text_dirty, key_cleared)
-}}
-"#, k_idx = k_idx, clk_idx = clk_idx, ram_addr_idx = ram_addr_idx,
-    ram_do_idx = ram_do_idx, ram_we_idx = ram_we_idx, d_idx = d_idx,
-    read_key_idx = read_key_idx, cpu_addr_idx = cpu_addr_idx, reg_count = reg_count,
-    old_clocks_init = old_clocks_init, old_clocks_sync = old_clocks_sync));
-
-    code
-}
-
-/// Ruby wrapper using RefCell for interior mutability
 #[magnus::wrap(class = "RHDL::Codegen::IR::IrCompiler")]
-struct RubyRtlCompiler {
-    sim: RefCell<SimulatorState>,
+struct RubyIrCompiler {
+    sim: RefCell<IrSimulator>,
 }
 
-impl RubyRtlCompiler {
+impl RubyIrCompiler {
     fn new(json: String) -> Result<Self, Error> {
         let ruby = unsafe { Ruby::get_unchecked() };
-        let sim = SimulatorState::new(&json)
+        let sim = IrSimulator::new(&json)
             .map_err(|e| Error::new(ruby.exception_runtime_error(), e))?;
         Ok(Self { sim: RefCell::new(sim) })
     }
@@ -1406,24 +1069,21 @@ impl RubyRtlCompiler {
     }
 
     fn generated_code(&self) -> String {
-        let sim = self.sim.borrow();
-        generate_full_code(&sim.ir, &sim.signal_indices)
+        self.sim.borrow().generate_code()
     }
 
-    fn signal_count(&self) -> usize {
-        self.sim.borrow().signal_count()
+    fn poke(&self, name: String, value: Value) -> Result<(), Error> {
+        let ruby = unsafe { Ruby::get_unchecked() };
+        let v = ruby_to_u64(value)?;
+        self.sim.borrow_mut().poke(&name, v)
+            .map_err(|e| Error::new(ruby.exception_runtime_error(), e))
     }
 
-    fn reg_count(&self) -> usize {
-        self.sim.borrow().reg_count()
-    }
-
-    fn poke(&self, name: String, value: i64) {
-        self.sim.borrow_mut().poke(&name, value as u64);
-    }
-
-    fn peek(&self, name: String) -> i64 {
-        self.sim.borrow().peek(&name) as i64
+    fn peek(&self, name: String) -> Result<Value, Error> {
+        let ruby = unsafe { Ruby::get_unchecked() };
+        let val = self.sim.borrow().peek(&name)
+            .map_err(|e| Error::new(ruby.exception_runtime_error(), e))?;
+        Ok(u64_to_ruby(&ruby, val))
     }
 
     fn evaluate(&self) {
@@ -1438,6 +1098,22 @@ impl RubyRtlCompiler {
         self.sim.borrow_mut().reset();
     }
 
+    fn signal_count(&self) -> usize {
+        self.sim.borrow().signal_count()
+    }
+
+    fn reg_count(&self) -> usize {
+        self.sim.borrow().reg_count()
+    }
+
+    fn input_names(&self) -> Vec<String> {
+        self.sim.borrow().input_names.clone()
+    }
+
+    fn output_names(&self) -> Vec<String> {
+        self.sim.borrow().output_names.clone()
+    }
+
     fn load_rom(&self, data: RArray) -> Result<(), Error> {
         let ruby = unsafe { Ruby::get_unchecked() };
         let bytes: Vec<u8> = data.to_vec::<i64>()
@@ -1445,11 +1121,7 @@ impl RubyRtlCompiler {
             .into_iter()
             .map(|v| v as u8)
             .collect();
-        let mut sim = self.sim.borrow_mut();
-        for (i, &b) in bytes.iter().enumerate() {
-            if i >= sim.rom.len() { break; }
-            sim.rom[i] = b;
-        }
+        self.sim.borrow_mut().load_rom(&bytes);
         Ok(())
     }
 
@@ -1460,13 +1132,19 @@ impl RubyRtlCompiler {
             .into_iter()
             .map(|v| v as u8)
             .collect();
-        let mut sim = self.sim.borrow_mut();
-        for (i, &b) in bytes.iter().enumerate() {
-            let addr = offset + i;
-            if addr >= sim.ram.len() { break; }
-            sim.ram[addr] = b;
-        }
+        self.sim.borrow_mut().load_ram(&bytes, offset);
         Ok(())
+    }
+
+    fn run_cpu_cycles(&self, n: usize, key_data: i64, key_ready: bool) -> Result<RHash, Error> {
+        let ruby = unsafe { Ruby::get_unchecked() };
+        let result = self.sim.borrow_mut().run_cpu_cycles(n, key_data as u8, key_ready);
+
+        let hash = ruby.hash_new();
+        hash.aset(ruby.sym_new("text_dirty"), result.text_dirty)?;
+        hash.aset(ruby.sym_new("key_cleared"), result.key_cleared)?;
+        hash.aset(ruby.sym_new("cycles_run"), result.cycles_run as i64)?;
+        Ok(hash)
     }
 
     fn read_ram(&self, start: usize, length: usize) -> Result<RArray, Error> {
@@ -1491,31 +1169,6 @@ impl RubyRtlCompiler {
         Ok(())
     }
 
-    fn run_cpu_cycles(&self, n: usize, key_data: i64, key_ready: bool) -> Result<RHash, Error> {
-        let ruby = unsafe { Ruby::get_unchecked() };
-        let result = self.sim.borrow_mut().run_cpu_cycles(n, key_data as u8, key_ready);
-
-        let hash = ruby.hash_new();
-        hash.aset(ruby.sym_new("text_dirty"), result.text_dirty)?;
-        hash.aset(ruby.sym_new("key_cleared"), result.key_cleared)?;
-        hash.aset(ruby.sym_new("cycles_run"), result.cycles_run as i64)?;
-        Ok(hash)
-    }
-
-    fn input_names(&self) -> Vec<String> {
-        self.sim.borrow().ir.ports.iter()
-            .filter(|p| p.direction == "in")
-            .map(|p| p.name.clone())
-            .collect()
-    }
-
-    fn output_names(&self) -> Vec<String> {
-        self.sim.borrow().ir.ports.iter()
-            .filter(|p| p.direction == "out")
-            .map(|p| p.name.clone())
-            .collect()
-    }
-
     fn stats(&self) -> Result<RHash, Error> {
         let ruby = unsafe { Ruby::get_unchecked() };
         let hash = ruby.hash_new();
@@ -1523,8 +1176,8 @@ impl RubyRtlCompiler {
 
         hash.aset(ruby.sym_new("signal_count"), sim.signal_count() as i64)?;
         hash.aset(ruby.sym_new("reg_count"), sim.reg_count() as i64)?;
-        hash.aset(ruby.sym_new("input_count"), sim.ir.ports.iter().filter(|p| p.direction == "in").count() as i64)?;
-        hash.aset(ruby.sym_new("output_count"), sim.ir.ports.iter().filter(|p| p.direction == "out").count() as i64)?;
+        hash.aset(ruby.sym_new("input_count"), sim.input_names.len() as i64)?;
+        hash.aset(ruby.sym_new("output_count"), sim.output_names.len() as i64)?;
         hash.aset(ruby.sym_new("assign_count"), sim.ir.assigns.len() as i64)?;
         hash.aset(ruby.sym_new("process_count"), sim.ir.processes.len() as i64)?;
         hash.aset(ruby.sym_new("compiled"), sim.compiled)?;
@@ -1545,26 +1198,26 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
 
     let class = ir.define_class("IrCompiler", ruby.class_object())?;
 
-    class.define_singleton_method("new", magnus::function!(RubyRtlCompiler::new, 1))?;
-    class.define_method("compile", method!(RubyRtlCompiler::compile, 0))?;
-    class.define_method("compiled?", method!(RubyRtlCompiler::is_compiled, 0))?;
-    class.define_method("generated_code", method!(RubyRtlCompiler::generated_code, 0))?;
-    class.define_method("signal_count", method!(RubyRtlCompiler::signal_count, 0))?;
-    class.define_method("reg_count", method!(RubyRtlCompiler::reg_count, 0))?;
-    class.define_method("poke", method!(RubyRtlCompiler::poke, 2))?;
-    class.define_method("peek", method!(RubyRtlCompiler::peek, 1))?;
-    class.define_method("evaluate", method!(RubyRtlCompiler::evaluate, 0))?;
-    class.define_method("tick", method!(RubyRtlCompiler::tick, 0))?;
-    class.define_method("reset", method!(RubyRtlCompiler::reset, 0))?;
-    class.define_method("load_rom", method!(RubyRtlCompiler::load_rom, 1))?;
-    class.define_method("load_ram", method!(RubyRtlCompiler::load_ram, 2))?;
-    class.define_method("read_ram", method!(RubyRtlCompiler::read_ram, 2))?;
-    class.define_method("write_ram", method!(RubyRtlCompiler::write_ram, 2))?;
-    class.define_method("run_cpu_cycles", method!(RubyRtlCompiler::run_cpu_cycles, 3))?;
-    class.define_method("input_names", method!(RubyRtlCompiler::input_names, 0))?;
-    class.define_method("output_names", method!(RubyRtlCompiler::output_names, 0))?;
-    class.define_method("stats", method!(RubyRtlCompiler::stats, 0))?;
-    class.define_method("native?", method!(RubyRtlCompiler::native, 0))?;
+    class.define_singleton_method("new", magnus::function!(RubyIrCompiler::new, 1))?;
+    class.define_method("compile", method!(RubyIrCompiler::compile, 0))?;
+    class.define_method("compiled?", method!(RubyIrCompiler::is_compiled, 0))?;
+    class.define_method("generated_code", method!(RubyIrCompiler::generated_code, 0))?;
+    class.define_method("poke", method!(RubyIrCompiler::poke, 2))?;
+    class.define_method("peek", method!(RubyIrCompiler::peek, 1))?;
+    class.define_method("evaluate", method!(RubyIrCompiler::evaluate, 0))?;
+    class.define_method("tick", method!(RubyIrCompiler::tick, 0))?;
+    class.define_method("reset", method!(RubyIrCompiler::reset, 0))?;
+    class.define_method("signal_count", method!(RubyIrCompiler::signal_count, 0))?;
+    class.define_method("reg_count", method!(RubyIrCompiler::reg_count, 0))?;
+    class.define_method("input_names", method!(RubyIrCompiler::input_names, 0))?;
+    class.define_method("output_names", method!(RubyIrCompiler::output_names, 0))?;
+    class.define_method("load_rom", method!(RubyIrCompiler::load_rom, 1))?;
+    class.define_method("load_ram", method!(RubyIrCompiler::load_ram, 2))?;
+    class.define_method("run_cpu_cycles", method!(RubyIrCompiler::run_cpu_cycles, 3))?;
+    class.define_method("read_ram", method!(RubyIrCompiler::read_ram, 2))?;
+    class.define_method("write_ram", method!(RubyIrCompiler::write_ram, 2))?;
+    class.define_method("stats", method!(RubyIrCompiler::stats, 0))?;
+    class.define_method("native?", method!(RubyIrCompiler::native, 0))?;
 
     Ok(())
 }
