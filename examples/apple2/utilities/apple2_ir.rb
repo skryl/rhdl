@@ -80,7 +80,13 @@ module RHDL
         0x0B, 0x03, 0x0A, 0x02, 0x09, 0x01, 0x08, 0x0F
       ].freeze
 
-      def initialize(backend: :interpret)
+      # Initialize the Apple II IR runner
+      # @param backend [Symbol] :interpret, :jit, or :compile
+      # @param sub_cycles [Integer] Sub-cycles per CPU cycle (1-14, default: 14)
+      #   - 14: Full timing accuracy (~0.4M cycles/sec)
+      #   - 7: Good accuracy, ~2x faster (~0.7M cycles/sec)
+      #   - 2: Minimal accuracy, ~7x faster (~3M cycles/sec)
+      def initialize(backend: :interpret, sub_cycles: 14)
         backend_names = { interpret: "Interpreter", jit: "JIT", compile: "Compiler" }
         puts "Initializing Apple2 IR simulation [#{backend_names[backend]}]..."
         start_time = Time.now
@@ -88,6 +94,7 @@ module RHDL
         # Generate IR JSON
         @ir_json = Apple2Ir.ir_json
         @backend = backend
+        @sub_cycles = sub_cycles.clamp(1, 14)
 
         # Create the simulator based on backend choice
         @sim = case backend
@@ -98,7 +105,7 @@ module RHDL
                  RHDL::Codegen::IR::IrJitWrapper.new(@ir_json, allow_fallback: false)
                when :compile
                  require 'rhdl/codegen/ir/sim/ir_compiler'
-                 RHDL::Codegen::IR::IrCompilerWrapper.new(@ir_json)
+                 RHDL::Codegen::IR::IrCompilerWrapper.new(@ir_json, sub_cycles: @sub_cycles)
                else
                  raise ArgumentError, "Unknown backend: #{backend}. Use :interpret, :jit, or :compile"
                end
@@ -107,6 +114,7 @@ module RHDL
         puts "  IR loaded in #{elapsed.round(2)}s"
         puts "  Native backend: #{@sim.native? ? 'Rust (optimized)' : 'Ruby (fallback)'}"
         puts "  Signals: #{@sim.signal_count}, Registers: #{@sim.reg_count}"
+        puts "  Sub-cycles: #{@sub_cycles} (#{@sub_cycles == 14 ? 'full accuracy' : 'fast mode'})" if backend == :compile
 
         @cycles = 0
         @halted = false
