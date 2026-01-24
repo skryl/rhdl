@@ -11,6 +11,7 @@
 #   runner.run_steps(100)
 
 require_relative '../hdl/apple2'
+require_relative 'speaker'
 require 'rhdl/codegen'
 require 'rhdl/codegen/ir/sim/ir_interpreter'
 
@@ -113,6 +114,10 @@ module RHDL
         @key_data = 0
         @key_ready = false
         @use_batched = @sim.native? && @sim.respond_to?(:run_cpu_cycles)
+
+        # Speaker audio simulation
+        @speaker = Speaker.new
+        @prev_speaker_state = 0
 
         if @use_batched
           puts "  Batched execution: enabled (minimal FFI overhead)"
@@ -234,6 +239,11 @@ module RHDL
         @cycles += result[:cycles_run]
         @text_page_dirty = true if result[:text_dirty]
         @key_ready = false if result[:key_cleared]
+
+        # Process speaker toggles for audio generation
+        if result[:speaker_toggles] && result[:speaker_toggles] > 0
+          result[:speaker_toggles].times { @speaker.toggle }
+        end
       end
 
       def run_cpu_cycle
@@ -288,6 +298,13 @@ module RHDL
         # Check for keyboard strobe clear
         if peek_output('read_key') == 1
           @key_ready = false
+        end
+
+        # Monitor speaker output for state changes
+        speaker_state = safe_peek('speaker')
+        if speaker_state != @prev_speaker_state
+          @speaker.toggle
+          @prev_speaker_state = speaker_state
         end
       end
 
@@ -495,7 +512,7 @@ module RHDL
       end
 
       def speaker
-        @speaker ||= SpeakerStub.new
+        @speaker
       end
 
       def display_mode
@@ -503,11 +520,11 @@ module RHDL
       end
 
       def start_audio
-        # No-op
+        @speaker.start
       end
 
       def stop_audio
-        # No-op
+        @speaker.stop
       end
 
       def read(addr)
@@ -557,23 +574,6 @@ module RHDL
         end
       end
 
-      class SpeakerStub
-        def status
-          "OFF"
-        end
-
-        def active?
-          false
-        end
-
-        def toggle_count
-          0
-        end
-
-        def samples_written
-          0
-        end
-      end
     end
   end
 end

@@ -154,6 +154,8 @@ struct IrSimulator {
     clk_idx: usize,
     k_idx: usize,
     read_key_idx: usize,
+    speaker_idx: usize,
+    prev_speaker: u64,
     cpu_addr_idx: usize,
 }
 
@@ -259,6 +261,7 @@ impl IrSimulator {
         let clk_idx = *name_to_idx.get("clk_14m").unwrap_or(&0);
         let k_idx = *name_to_idx.get("k").unwrap_or(&0);
         let read_key_idx = *name_to_idx.get("read_key").unwrap_or(&0);
+        let speaker_idx = *name_to_idx.get("speaker").unwrap_or(&0);
         // Use CPU's address register for memory reads (not ram_addr which may show video address)
         let cpu_addr_idx = *name_to_idx.get("cpu__addr_reg").unwrap_or(&0);
 
@@ -289,6 +292,8 @@ impl IrSimulator {
             clk_idx,
             k_idx,
             read_key_idx,
+            speaker_idx,
+            prev_speaker: 0,
             cpu_addr_idx,
         })
     }
@@ -775,11 +780,11 @@ impl IrSimulator {
         let clk_idx = self.clk_idx;
         let k_idx = self.k_idx;
         let ram_addr_idx = self.ram_addr_idx;
-        let cpu_addr_idx = self.cpu_addr_idx;  // Use CPU's addr reg for reads
         let ram_do_idx = self.ram_do_idx;
         let ram_we_idx = self.ram_we_idx;
         let d_idx = self.d_idx;
         let read_key_idx = self.read_key_idx;
+        let speaker_idx = self.speaker_idx;
 
         let clock_indices: Vec<usize> = self.clock_indices.clone();
         let num_clocks = clock_indices.len().max(1);
@@ -797,7 +802,8 @@ impl IrSimulator {
         code.push_str("    n: usize,\n");
         code.push_str("    key_data: u8,\n");
         code.push_str("    key_ready: bool,\n");
-        code.push_str(") -> (bool, bool) {\n");
+        code.push_str("    prev_speaker_ptr: *mut u64,\n");
+        code.push_str(") -> (bool, bool, u32) {\n");
         code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, signals_len);\n");
         code.push_str("    let ram = std::slice::from_raw_parts_mut(ram, ram_len);\n");
         code.push_str("    let rom = std::slice::from_raw_parts(rom, rom_len);\n");
@@ -805,7 +811,9 @@ impl IrSimulator {
         code.push_str(&format!("    let mut next_regs = [0u64; {}];\n", num_regs.max(1)));
         code.push_str("    let mut text_dirty = false;\n");
         code.push_str("    let mut key_cleared = false;\n");
-        code.push_str("    let mut key_is_ready = key_ready;\n\n");
+        code.push_str("    let mut key_is_ready = key_ready;\n");
+        code.push_str("    let mut speaker_toggles: u32 = 0;\n");
+        code.push_str("    let mut prev_speaker = *prev_speaker_ptr;\n\n");
 
         // Initialize old_clocks
         for (i, &clk) in clock_indices.iter().enumerate() {
@@ -860,11 +868,20 @@ impl IrSimulator {
         code.push_str(&format!("            if signals[{}] == 1 {{\n", read_key_idx));
         code.push_str("                key_is_ready = false;\n");
         code.push_str("                key_cleared = true;\n");
+        code.push_str("            }\n\n");
+
+        // Check speaker toggle (edge detection)
+        code.push_str(&format!("            // Check speaker toggle\n"));
+        code.push_str(&format!("            let speaker = signals[{}];\n", speaker_idx));
+        code.push_str("            if speaker != prev_speaker {\n");
+        code.push_str("                speaker_toggles += 1;\n");
+        code.push_str("                prev_speaker = speaker;\n");
         code.push_str("            }\n");
 
         code.push_str("        }\n");
         code.push_str("    }\n\n");
-        code.push_str("    (text_dirty, key_cleared)\n");
+        code.push_str("    *prev_speaker_ptr = prev_speaker;\n");
+        code.push_str("    (text_dirty, key_cleared, speaker_toggles)\n");
         code.push_str("}\n");
     }
 
@@ -941,11 +958,11 @@ impl IrSimulator {
             unsafe {
                 #[allow(improper_ctypes_definitions)]
                 type RunCpuCyclesFn = unsafe extern "C" fn(
-                    *mut u64, usize, *mut u8, usize, *const u8, usize, usize, u8, bool
-                ) -> (bool, bool);
+                    *mut u64, usize, *mut u8, usize, *const u8, usize, usize, u8, bool, *mut u64
+                ) -> (bool, bool, u32);
                 let func: libloading::Symbol<RunCpuCyclesFn> =
                     lib.get(b"run_cpu_cycles").expect("run_cpu_cycles not found");
-                let (text_dirty, key_cleared) = func(
+                let (text_dirty, key_cleared, speaker_toggles) = func(
                     self.signals.as_mut_ptr(),
                     self.signals.len(),
                     self.ram.as_mut_ptr(),
@@ -955,8 +972,9 @@ impl IrSimulator {
                     n,
                     key_data,
                     key_ready,
+                    &mut self.prev_speaker,
                 );
-                return BatchResult { cycles_run: n, text_dirty, key_cleared };
+                return BatchResult { cycles_run: n, text_dirty, key_cleared, speaker_toggles };
             }
         }
 
@@ -964,6 +982,7 @@ impl IrSimulator {
         let mut text_dirty = false;
         let mut key_cleared = false;
         let mut key_is_ready = key_ready;
+        let mut speaker_toggles: u32 = 0;
 
         for _ in 0..n {
             for _ in 0..14 {
@@ -1007,10 +1026,17 @@ impl IrSimulator {
                     key_is_ready = false;
                     key_cleared = true;
                 }
+
+                // Check speaker toggle (edge detection)
+                let speaker = self.signals[self.speaker_idx];
+                if speaker != self.prev_speaker {
+                    speaker_toggles += 1;
+                    self.prev_speaker = speaker;
+                }
             }
         }
 
-        BatchResult { cycles_run: n, text_dirty, key_cleared }
+        BatchResult { cycles_run: n, text_dirty, key_cleared, speaker_toggles }
     }
 
     fn load_rom(&mut self, data: &[u8]) {
@@ -1031,6 +1057,7 @@ struct BatchResult {
     text_dirty: bool,
     key_cleared: bool,
     cycles_run: usize,
+    speaker_toggles: u32,
 }
 
 // ============================================================================
@@ -1155,6 +1182,7 @@ impl RubyIrCompiler {
         hash.aset(ruby.sym_new("text_dirty"), result.text_dirty)?;
         hash.aset(ruby.sym_new("key_cleared"), result.key_cleared)?;
         hash.aset(ruby.sym_new("cycles_run"), result.cycles_run as i64)?;
+        hash.aset(ruby.sym_new("speaker_toggles"), result.speaker_toggles as i64)?;
         Ok(hash)
     }
 
