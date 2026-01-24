@@ -567,6 +567,10 @@ struct JitRtlSimulator {
     clk_idx: usize,
     k_idx: usize,
     read_key_idx: usize,
+    /// Speaker output signal index
+    speaker_idx: usize,
+    /// Previous speaker state for edge detection
+    prev_speaker: u64,
     /// CPU address register - used to provide correct data during any phase
     cpu_addr_idx: usize,
     /// Reset values for registers (signal index -> reset value)
@@ -690,6 +694,7 @@ impl JitRtlSimulator {
         let clk_idx = *name_to_idx.get("clk_14m").unwrap_or(&0);
         let k_idx = *name_to_idx.get("k").unwrap_or(&0);
         let read_key_idx = *name_to_idx.get("read_key").unwrap_or(&0);
+        let speaker_idx = *name_to_idx.get("speaker").unwrap_or(&0);
         // CPU address register for providing correct data during any bus phase
         let cpu_addr_idx = *name_to_idx.get("cpu__addr_reg").unwrap_or(&0);
 
@@ -718,6 +723,8 @@ impl JitRtlSimulator {
             clk_idx,
             k_idx,
             read_key_idx,
+            speaker_idx,
+            prev_speaker: 0,
             cpu_addr_idx,
             reset_values,
         })
@@ -879,7 +886,7 @@ impl JitRtlSimulator {
 
     /// Run a single 14MHz cycle with integrated memory handling
     #[inline(always)]
-    fn run_14m_cycle_internal(&mut self, key_data: u8, key_ready: bool) -> (bool, bool) {
+    fn run_14m_cycle_internal(&mut self, key_data: u8, key_ready: bool) -> (bool, bool, bool) {
         // Set keyboard input
         let k_val = if key_ready { (key_data as u64) | 0x80 } else { 0 };
         self.signals[self.k_idx] = k_val;
@@ -926,7 +933,13 @@ impl JitRtlSimulator {
         }
 
         let key_cleared = self.signals[self.read_key_idx] == 1;
-        (text_dirty, key_cleared)
+
+        // Check speaker toggle (edge detection)
+        let speaker = self.signals[self.speaker_idx];
+        let speaker_toggled = speaker != self.prev_speaker;
+        self.prev_speaker = speaker;
+
+        (text_dirty, key_cleared, speaker_toggled)
     }
 
     fn run_cpu_cycles(&mut self, n: usize, key_data: u8, key_ready: bool) -> BatchResult {
@@ -934,17 +947,21 @@ impl JitRtlSimulator {
             text_dirty: false,
             key_cleared: false,
             cycles_run: n,
+            speaker_toggles: 0,
         };
 
         let mut current_key_ready = key_ready;
 
         for _ in 0..n {
             for _ in 0..14 {
-                let (text_dirty, key_cleared) = self.run_14m_cycle_internal(key_data, current_key_ready);
+                let (text_dirty, key_cleared, speaker_toggled) = self.run_14m_cycle_internal(key_data, current_key_ready);
                 result.text_dirty |= text_dirty;
                 if key_cleared {
                     current_key_ready = false;
                     result.key_cleared = true;
+                }
+                if speaker_toggled {
+                    result.speaker_toggles += 1;
                 }
             }
         }
@@ -1016,6 +1033,7 @@ struct BatchResult {
     text_dirty: bool,
     key_cleared: bool,
     cycles_run: usize,
+    speaker_toggles: u32,
 }
 
 // ============================================================================
@@ -1132,6 +1150,7 @@ impl RubyJitSim {
         hash.aset(ruby.sym_new("text_dirty"), result.text_dirty)?;
         hash.aset(ruby.sym_new("key_cleared"), result.key_cleared)?;
         hash.aset(ruby.sym_new("cycles_run"), result.cycles_run as i64)?;
+        hash.aset(ruby.sym_new("speaker_toggles"), result.speaker_toggles as i64)?;
         Ok(hash)
     }
 
