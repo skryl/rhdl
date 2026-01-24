@@ -411,8 +411,10 @@ impl RtlSimulator {
             }
         }
 
-        // Collect all unique clock indices
-        let clock_indices: Vec<usize> = clock_set.into_iter().collect();
+        // Collect all unique clock indices and sort for deterministic order
+        // (HashSet iteration is non-deterministic)
+        let mut clock_indices: Vec<usize> = clock_set.into_iter().collect();
+        clock_indices.sort();
         let old_clocks = vec![0u64; clock_indices.len()];
 
         // Pre-group sequential assignments by clock domain
