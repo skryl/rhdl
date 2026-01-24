@@ -157,10 +157,12 @@ struct IrSimulator {
     speaker_idx: usize,
     prev_speaker: u64,
     cpu_addr_idx: usize,
+    /// Number of sub-cycles per CPU cycle (default: 14 for full accuracy)
+    sub_cycles: usize,
 }
 
 impl IrSimulator {
-    fn new(json: &str) -> Result<Self, String> {
+    fn new(json: &str, sub_cycles: usize) -> Result<Self, String> {
         let ir: ModuleIR = serde_json::from_str(json)
             .map_err(|e| format!("Failed to parse IR JSON: {}", e))?;
 
@@ -295,6 +297,7 @@ impl IrSimulator {
             speaker_idx,
             prev_speaker: 0,
             cpu_addr_idx,
+            sub_cycles: sub_cycles.max(1).min(14),  // Clamp to 1-14
         })
     }
 
@@ -1068,10 +1071,10 @@ impl IrSimulator {
         }
         code.push_str("\n");
 
-        // Run 14 sub-cycles per CPU cycle (full timing accuracy)
-        // For faster simulation, reduce this to 7 (~2x) or 2 (~7x) sub-cycles
+        // Run sub-cycles per CPU cycle (configurable for speed vs accuracy trade-off)
+        // 14 = full accuracy, 7 = ~2x speed, 2 = ~7x speed
         code.push_str("    for _ in 0..n {\n");
-        code.push_str("        for _ in 0..14 {\n");
+        code.push_str(&format!("        for _ in 0..{} {{\n", self.sub_cycles));
 
         // Set keyboard input
         code.push_str(&format!("            signals[{}] = if key_is_ready {{ (key_data as u64) | 0x80 }} else {{ 0 }};\n\n", k_idx));
@@ -1324,9 +1327,11 @@ struct RubyIrCompiler {
 }
 
 impl RubyIrCompiler {
-    fn new(json: String) -> Result<Self, Error> {
+    fn new(json: String, sub_cycles: Option<i64>) -> Result<Self, Error> {
         let ruby = unsafe { Ruby::get_unchecked() };
-        let sim = IrSimulator::new(&json)
+        // Default to 14 sub-cycles for full accuracy
+        let cycles = sub_cycles.unwrap_or(14) as usize;
+        let sim = IrSimulator::new(&json, cycles)
             .map_err(|e| Error::new(ruby.exception_runtime_error(), e))?;
         Ok(Self { sim: RefCell::new(sim) })
     }
@@ -1472,7 +1477,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
 
     let class = ir.define_class("IrCompiler", ruby.class_object())?;
 
-    class.define_singleton_method("new", magnus::function!(RubyIrCompiler::new, 1))?;
+    class.define_singleton_method("new", magnus::function!(RubyIrCompiler::new, 2))?;
     class.define_method("compile", method!(RubyIrCompiler::compile, 0))?;
     class.define_method("compiled?", method!(RubyIrCompiler::is_compiled, 0))?;
     class.define_method("generated_code", method!(RubyIrCompiler::generated_code, 0))?;
