@@ -317,10 +317,14 @@ struct RtlSimulator {
     memory_arrays: Vec<Vec<u64>>,
     /// Memory name to index mapping
     memory_name_to_idx: HashMap<String, usize>,
+    /// Sub-cycles per CPU cycle (1-14, default 14 for full timing accuracy)
+    sub_cycles: usize,
 }
 
 impl RtlSimulator {
-    fn new(json: &str) -> Result<Self, String> {
+    fn new(json: &str, sub_cycles: usize) -> Result<Self, String> {
+        // Clamp sub_cycles to valid range (1-14)
+        let sub_cycles = sub_cycles.max(1).min(14);
         let ir: ModuleIR = serde_json::from_str(json)
             .map_err(|e| format!("Failed to parse IR JSON: {}", e))?;
 
@@ -526,6 +530,7 @@ impl RtlSimulator {
             reset_values,
             memory_arrays,
             memory_name_to_idx: mem_name_to_idx,
+            sub_cycles,
         })
     }
 
@@ -1380,7 +1385,7 @@ impl RtlSimulator {
         let mut current_key_ready = key_ready;
 
         for _ in 0..n {
-            for _ in 0..14 {
+            for _ in 0..self.sub_cycles {
                 let (text_dirty, key_cleared, speaker_toggled) = self.run_14m_cycle_internal(key_data, current_key_ready);
                 result.text_dirty |= text_dirty;
                 if key_cleared {
@@ -1455,9 +1460,10 @@ struct RubyRtlSim {
 }
 
 impl RubyRtlSim {
-    fn new(json: String) -> Result<Self, Error> {
+    fn new(json: String, sub_cycles: Option<i64>) -> Result<Self, Error> {
         let ruby = unsafe { Ruby::get_unchecked() };
-        let sim = RtlSimulator::new(&json)
+        let cycles = sub_cycles.unwrap_or(14) as usize;
+        let sim = RtlSimulator::new(&json, cycles)
             .map_err(|e| Error::new(ruby.exception_runtime_error(), e))?;
         Ok(Self {
             sim: RefCell::new(sim),
@@ -1592,7 +1598,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
 
     let class = ir.define_class("IrInterpreter", ruby.class_object())?;
 
-    class.define_singleton_method("new", magnus::function!(RubyRtlSim::new, 1))?;
+    class.define_singleton_method("new", magnus::function!(RubyRtlSim::new, 2))?;
     class.define_method("poke", method!(RubyRtlSim::poke, 2))?;
     class.define_method("peek", method!(RubyRtlSim::peek, 1))?;
     class.define_method("evaluate", method!(RubyRtlSim::evaluate, 0))?;

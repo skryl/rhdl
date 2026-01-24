@@ -575,10 +575,14 @@ struct JitRtlSimulator {
     cpu_addr_idx: usize,
     /// Reset values for registers (signal index -> reset value)
     reset_values: Vec<(usize, u64)>,
+    /// Sub-cycles per CPU cycle (1-14, default 14 for full timing accuracy)
+    sub_cycles: usize,
 }
 
 impl JitRtlSimulator {
-    fn new(json: &str) -> Result<Self, String> {
+    fn new(json: &str, sub_cycles: usize) -> Result<Self, String> {
+        // Clamp sub_cycles to valid range (1-14)
+        let sub_cycles = sub_cycles.max(1).min(14);
         let ir: ModuleIR = serde_json::from_str(json)
             .map_err(|e| format!("Failed to parse IR JSON: {}", e))?;
 
@@ -727,6 +731,7 @@ impl JitRtlSimulator {
             prev_speaker: 0,
             cpu_addr_idx,
             reset_values,
+            sub_cycles,
         })
     }
 
@@ -953,7 +958,7 @@ impl JitRtlSimulator {
         let mut current_key_ready = key_ready;
 
         for _ in 0..n {
-            for _ in 0..14 {
+            for _ in 0..self.sub_cycles {
                 let (text_dirty, key_cleared, speaker_toggled) = self.run_14m_cycle_internal(key_data, current_key_ready);
                 result.text_dirty |= text_dirty;
                 if key_cleared {
@@ -1065,9 +1070,10 @@ struct RubyJitSim {
 }
 
 impl RubyJitSim {
-    fn new(json: String) -> Result<Self, Error> {
+    fn new(json: String, sub_cycles: Option<i64>) -> Result<Self, Error> {
         let ruby = unsafe { Ruby::get_unchecked() };
-        let sim = JitRtlSimulator::new(&json)
+        let cycles = sub_cycles.unwrap_or(14) as usize;
+        let sim = JitRtlSimulator::new(&json, cycles)
             .map_err(|e| Error::new(ruby.exception_runtime_error(), e))?;
         Ok(Self {
             sim: RefCell::new(sim),
@@ -1245,7 +1251,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
 
     let class = ir.define_class("IrJit", ruby.class_object())?;
 
-    class.define_singleton_method("new", magnus::function!(RubyJitSim::new, 1))?;
+    class.define_singleton_method("new", magnus::function!(RubyJitSim::new, 2))?;
     class.define_method("poke", method!(RubyJitSim::poke, 2))?;
     class.define_method("peek", method!(RubyJitSim::peek, 1))?;
     class.define_method("evaluate", method!(RubyJitSim::evaluate, 0))?;

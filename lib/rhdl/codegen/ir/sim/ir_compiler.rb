@@ -49,7 +49,7 @@ module RHDL
         #   - 2: ~7x faster, minimal accuracy
         def initialize(ir_json, sub_cycles: 14)
           @ir_json = ir_json
-          @sub_cycles = sub_cycles
+          @sub_cycles = sub_cycles.clamp(1, 14)
 
           unless IR_COMPILER_AVAILABLE
             raise LoadError, "IR Compiler extension not found at: #{IR_COMPILER_LIB_PATH}\nRun 'rake native:build' to build it."

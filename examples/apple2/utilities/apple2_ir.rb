@@ -99,10 +99,10 @@ module RHDL
         # Create the simulator based on backend choice
         @sim = case backend
                when :interpret
-                 RHDL::Codegen::IR::IrInterpreterWrapper.new(@ir_json, allow_fallback: false)
+                 RHDL::Codegen::IR::IrInterpreterWrapper.new(@ir_json, allow_fallback: false, sub_cycles: @sub_cycles)
                when :jit
                  require 'rhdl/codegen/ir/sim/ir_jit'
-                 RHDL::Codegen::IR::IrJitWrapper.new(@ir_json, allow_fallback: false)
+                 RHDL::Codegen::IR::IrJitWrapper.new(@ir_json, allow_fallback: false, sub_cycles: @sub_cycles)
                when :compile
                  require 'rhdl/codegen/ir/sim/ir_compiler'
                  RHDL::Codegen::IR::IrCompilerWrapper.new(@ir_json, sub_cycles: @sub_cycles)
@@ -114,7 +114,7 @@ module RHDL
         puts "  IR loaded in #{elapsed.round(2)}s"
         puts "  Native backend: #{@sim.native? ? 'Rust (optimized)' : 'Ruby (fallback)'}"
         puts "  Signals: #{@sim.signal_count}, Registers: #{@sim.reg_count}"
-        puts "  Sub-cycles: #{@sub_cycles} (#{@sub_cycles == 14 ? 'full accuracy' : 'fast mode'})" if backend == :compile
+        puts "  Sub-cycles: #{@sub_cycles} (#{@sub_cycles == 14 ? 'full accuracy' : 'fast mode'})"
 
         @cycles = 0
         @halted = false
