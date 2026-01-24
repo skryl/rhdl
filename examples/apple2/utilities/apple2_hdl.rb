@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Apple II HDL Harness
+# Apple II HDL Runner
 # Wraps the Apple2 HDL component for use in emulation
 
 require_relative '../hdl/apple2'
@@ -9,7 +9,7 @@ require_relative 'speaker'
 module RHDL
   module Apple2
     # HDL-based runner using cycle-accurate Apple2 simulation
-    class Runner
+    class HdlRunner
       attr_reader :apple2, :ram
 
       # Text page constants

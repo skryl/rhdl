@@ -11,7 +11,7 @@ $LOAD_PATH.unshift File.expand_path('../../../lib', __dir__)
 $LOAD_PATH.unshift File.expand_path('../utilities', __dir__)
 
 require 'rhdl'
-require 'harness'
+require 'apple2_hdl'
 
 # Apple II Terminal class for HDL simulation
 # Supports both HDL and netlist simulation modes
@@ -56,11 +56,11 @@ class Apple2HDLTerminal
               else  # :hdl (default)
                 if @sim_backend == :ruby
                   # Pure Ruby HDL simulation
-                  RHDL::Apple2::Runner.new
+                  RHDL::Apple2::HdlRunner.new
                 else
-                  # RTL simulation with native backends (interpret, jit, compile)
-                  require 'apple2_rtl'
-                  RHDL::Apple2::RtlRunner.new(backend: @sim_backend)
+                  # IR simulation with native backends (interpret, jit, compile)
+                  require 'apple2_ir'
+                  RHDL::Apple2::IrRunner.new(backend: @sim_backend)
                 end
               end
 

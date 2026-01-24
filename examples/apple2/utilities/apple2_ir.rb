@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
-# Apple II RTL Simulator Runner
-# High-performance RTL-level simulation using batched Rust execution
+# Apple II IR Simulator Runner
+# High-performance IR-level simulation using batched Rust execution
 #
 # Usage:
-#   runner = RHDL::Apple2::RtlRunner.new(backend: :interpret)
-#   runner = RHDL::Apple2::RtlRunner.new(backend: :jit)
-#   runner = RHDL::Apple2::RtlRunner.new(backend: :compile)
+#   runner = RHDL::Apple2::IrRunner.new(backend: :interpret)
+#   runner = RHDL::Apple2::IrRunner.new(backend: :jit)
+#   runner = RHDL::Apple2::IrRunner.new(backend: :compile)
 #   runner.reset
 #   runner.run_steps(100)
 
@@ -16,8 +16,8 @@ require 'rhdl/codegen/ir/sim/ir_interpreter'
 
 module RHDL
   module Apple2
-    # Utility module for exporting Apple2 component to RTL IR
-    module Apple2Rtl
+    # Utility module for exporting Apple2 component to IR
+    module Apple2Ir
       class << self
         # Get the Behavior IR for the Apple2 component (shallow, for Verilog export)
         def behavior_ir
@@ -52,8 +52,8 @@ module RHDL
       end
     end
 
-    # High-performance RTL-level runner using batched Rust execution
-    class RtlRunner
+    # High-performance IR-level runner using batched Rust execution
+    class IrRunner
       attr_reader :sim, :ir_json
 
       # Text page constants
@@ -81,11 +81,11 @@ module RHDL
 
       def initialize(backend: :interpret)
         backend_names = { interpret: "Interpreter", jit: "JIT", compile: "Compiler" }
-        puts "Initializing Apple2 RTL simulation [#{backend_names[backend]}]..."
+        puts "Initializing Apple2 IR simulation [#{backend_names[backend]}]..."
         start_time = Time.now
 
-        # Generate RTL IR JSON
-        @ir_json = Apple2Rtl.ir_json
+        # Generate IR JSON
+        @ir_json = Apple2Ir.ir_json
         @backend = backend
 
         # Create the simulator based on backend choice
@@ -194,7 +194,7 @@ module RHDL
         end
 
         @disk_loaded = true
-        puts "Warning: Disk support in RTL mode is limited"
+        puts "Warning: Disk support in IR mode is limited"
       end
 
       def disk_loaded?(drive: 0)
