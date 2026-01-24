@@ -845,8 +845,8 @@ RSpec.describe 'Sub-cycles PC Progression' do
         sim = create_ir_simulator(backend, sub_cycles: 7)
         start_pc = setup_simulator(sim)
 
-        # Run 500 cycles and collect PC transitions
-        transitions = collect_pc_transitions(sim, 500)
+        # Run 2000 cycles and collect PC transitions
+        transitions = collect_pc_transitions(sim, 2000)
 
         puts "\n  #{backend} (sub_cycles=7):"
         puts "    Started at PC: 0x#{start_pc.to_s(16)}"
@@ -872,7 +872,7 @@ RSpec.describe 'Sub-cycles PC Progression' do
         begin
           sim = create_ir_simulator(backend, sub_cycles: 7)
           start_pc = setup_simulator(sim)
-          transitions = collect_pc_transitions(sim, 500)
+          transitions = collect_pc_transitions(sim, 2000)
           results[backend] = { start_pc: start_pc, transitions: transitions }
         rescue => e
           next if e.message.include?('not available') || e.message.include?('skip')
@@ -888,20 +888,21 @@ RSpec.describe 'Sub-cycles PC Progression' do
       end
 
       # All available backends should produce similar results
-      # Compare only the first 20 PCs (timing differences cause divergence over time)
+      # Compare first 1000 PCs
       if results.size >= 2
         backends = results.keys
-        ref = results[backends.first][:transitions].first(20)
+        compare_count = [1000, results.values.map { |d| d[:transitions].size }.min].min
+        ref = results[backends.first][:transitions].first(compare_count)
 
         backends[1..].each do |backend|
-          other = results[backend][:transitions].first(20)
+          other = results[backend][:transitions].first(compare_count)
 
-          # First N transitions should be nearly identical
+          # First N transitions should be mostly identical
           matches = ref.zip(other).count { |a, b| a == b }
-          match_rate = matches.to_f / ref.size
+          match_rate = matches.to_f / compare_count
 
-          puts "    #{backends.first} vs #{backend}: #{matches}/#{ref.size} matching (#{(match_rate * 100).round(1)}%)"
-          expect(match_rate).to be >= 0.7, "Backends should match at least 70% of first 20 PC values"
+          puts "    #{backends.first} vs #{backend}: #{matches}/#{compare_count} matching (#{(match_rate * 100).round(1)}%)"
+          expect(match_rate).to be >= 0.7, "Backends should match at least 70% of first #{compare_count} PC values"
         end
       end
     end
@@ -918,8 +919,8 @@ RSpec.describe 'Sub-cycles PC Progression' do
         sim = create_ir_simulator(backend, sub_cycles: 2)
         start_pc = setup_simulator(sim)
 
-        # Run 500 cycles and collect PC transitions
-        transitions = collect_pc_transitions(sim, 500)
+        # Run 2000 cycles and collect PC transitions
+        transitions = collect_pc_transitions(sim, 2000)
 
         puts "\n  #{backend} (sub_cycles=2):"
         puts "    Started at PC: 0x#{start_pc.to_s(16)}"
@@ -945,7 +946,7 @@ RSpec.describe 'Sub-cycles PC Progression' do
         begin
           sim = create_ir_simulator(backend, sub_cycles: 2)
           start_pc = setup_simulator(sim)
-          transitions = collect_pc_transitions(sim, 500)
+          transitions = collect_pc_transitions(sim, 2000)
           results[backend] = { start_pc: start_pc, transitions: transitions }
         rescue => e
           next if e.message.include?('not available') || e.message.include?('skip')
@@ -961,19 +962,21 @@ RSpec.describe 'Sub-cycles PC Progression' do
       end
 
       # All available backends should produce similar results
+      # Compare first 1000 PCs
       if results.size >= 2
         backends = results.keys
-        ref = results[backends.first][:transitions].first(100)
+        compare_count = [1000, results.values.map { |d| d[:transitions].size }.min].min
+        ref = results[backends.first][:transitions].first(compare_count)
 
         backends[1..].each do |backend|
-          other = results[backend][:transitions].first(100)
+          other = results[backend][:transitions].first(compare_count)
 
-          # Find overlap between sequences
-          overlap = ref & other
-          overlap_rate = overlap.size.to_f / [ref.size, other.size].min
+          # First N transitions should be mostly identical
+          matches = ref.zip(other).count { |a, b| a == b }
+          match_rate = matches.to_f / compare_count
 
-          puts "    #{backends.first} vs #{backend}: #{overlap.size} common PCs (#{(overlap_rate * 100).round(1)}%)"
-          expect(overlap_rate).to be >= 0.5, "Backends should share at least 50% of PC values"
+          puts "    #{backends.first} vs #{backend}: #{matches}/#{compare_count} matching (#{(match_rate * 100).round(1)}%)"
+          expect(match_rate).to be >= 0.7, "Backends should match at least 70% of first #{compare_count} PC values"
         end
       end
     end
