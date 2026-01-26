@@ -11,6 +11,7 @@
 #   runner.run_steps(100)
 
 require_relative '../hdl/apple2'
+require_relative 'speaker'
 require 'rhdl/codegen'
 require 'rhdl/codegen/ir/sim/ir_interpreter'
 
@@ -79,7 +80,13 @@ module RHDL
         0x0B, 0x03, 0x0A, 0x02, 0x09, 0x01, 0x08, 0x0F
       ].freeze
 
-      def initialize(backend: :interpret)
+      # Initialize the Apple II IR runner
+      # @param backend [Symbol] :interpret, :jit, or :compile
+      # @param sub_cycles [Integer] Sub-cycles per CPU cycle (1-14, default: 14)
+      #   - 14: Full timing accuracy (~0.4M cycles/sec)
+      #   - 7: Good accuracy, ~2x faster (~0.7M cycles/sec)
+      #   - 2: Minimal accuracy, ~7x faster (~3M cycles/sec)
+      def initialize(backend: :interpret, sub_cycles: 14)
         backend_names = { interpret: "Interpreter", jit: "JIT", compile: "Compiler" }
         puts "Initializing Apple2 IR simulation [#{backend_names[backend]}]..."
         start_time = Time.now
@@ -87,17 +94,18 @@ module RHDL
         # Generate IR JSON
         @ir_json = Apple2Ir.ir_json
         @backend = backend
+        @sub_cycles = sub_cycles.clamp(1, 14)
 
         # Create the simulator based on backend choice
         @sim = case backend
                when :interpret
-                 RHDL::Codegen::IR::IrInterpreterWrapper.new(@ir_json, allow_fallback: false)
+                 RHDL::Codegen::IR::IrInterpreterWrapper.new(@ir_json, allow_fallback: false, sub_cycles: @sub_cycles)
                when :jit
                  require 'rhdl/codegen/ir/sim/ir_jit'
-                 RHDL::Codegen::IR::IrJitWrapper.new(@ir_json, allow_fallback: false)
+                 RHDL::Codegen::IR::IrJitWrapper.new(@ir_json, allow_fallback: false, sub_cycles: @sub_cycles)
                when :compile
                  require 'rhdl/codegen/ir/sim/ir_compiler'
-                 RHDL::Codegen::IR::IrCompilerWrapper.new(@ir_json)
+                 RHDL::Codegen::IR::IrCompilerWrapper.new(@ir_json, sub_cycles: @sub_cycles)
                else
                  raise ArgumentError, "Unknown backend: #{backend}. Use :interpret, :jit, or :compile"
                end
@@ -106,6 +114,7 @@ module RHDL
         puts "  IR loaded in #{elapsed.round(2)}s"
         puts "  Native backend: #{@sim.native? ? 'Rust (optimized)' : 'Ruby (fallback)'}"
         puts "  Signals: #{@sim.signal_count}, Registers: #{@sim.reg_count}"
+        puts "  Sub-cycles: #{@sub_cycles} (#{@sub_cycles == 14 ? 'full accuracy' : 'fast mode'})"
 
         @cycles = 0
         @halted = false
@@ -113,6 +122,10 @@ module RHDL
         @key_data = 0
         @key_ready = false
         @use_batched = @sim.native? && @sim.respond_to?(:run_cpu_cycles)
+
+        # Speaker audio simulation
+        @speaker = Speaker.new
+        @prev_speaker_state = 0
 
         if @use_batched
           puts "  Batched execution: enabled (minimal FFI overhead)"
@@ -234,6 +247,11 @@ module RHDL
         @cycles += result[:cycles_run]
         @text_page_dirty = true if result[:text_dirty]
         @key_ready = false if result[:key_cleared]
+
+        # Process speaker toggles for audio generation
+        if result[:speaker_toggles] && result[:speaker_toggles] > 0
+          result[:speaker_toggles].times { @speaker.toggle }
+        end
       end
 
       def run_cpu_cycle
@@ -288,6 +306,13 @@ module RHDL
         # Check for keyboard strobe clear
         if peek_output('read_key') == 1
           @key_ready = false
+        end
+
+        # Monitor speaker output for state changes
+        speaker_state = safe_peek('speaker')
+        if speaker_state != @prev_speaker_state
+          @speaker.toggle
+          @prev_speaker_state = speaker_state
         end
       end
 
@@ -495,7 +520,7 @@ module RHDL
       end
 
       def speaker
-        @speaker ||= SpeakerStub.new
+        @speaker
       end
 
       def display_mode
@@ -503,11 +528,11 @@ module RHDL
       end
 
       def start_audio
-        # No-op
+        @speaker.start
       end
 
       def stop_audio
-        # No-op
+        @speaker.stop
       end
 
       def read(addr)
@@ -557,23 +582,6 @@ module RHDL
         end
       end
 
-      class SpeakerStub
-        def status
-          "OFF"
-        end
-
-        def active?
-          false
-        end
-
-        def toggle_count
-          0
-        end
-
-        def samples_written
-          0
-        end
-      end
     end
   end
 end

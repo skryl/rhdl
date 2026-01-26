@@ -86,6 +86,8 @@ module RHDL
           exec_args << "-H" if options[:hires]
           exec_args.push("--hires-width", options[:hires_width].to_s) if options[:hires_width]
           exec_args.push("--disk", options[:disk]) if options[:disk]
+          # Sub-cycles: 14=full accuracy, 7=~2x speed, 2=~7x speed (compile backend only)
+          exec_args.push("--sub-cycles", options[:sub_cycles].to_s) if options[:sub_cycles]
         end
       end
     end

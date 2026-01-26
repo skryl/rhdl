@@ -40,16 +40,22 @@ module RHDL
 
       # Wrapper class that uses Rust AOT compiler if available
       class IrCompilerWrapper
-        attr_reader :ir_json
+        attr_reader :ir_json, :sub_cycles
 
-        def initialize(ir_json)
+        # @param ir_json [String] JSON representation of the IR
+        # @param sub_cycles [Integer] Number of sub-cycles per CPU cycle (default: 14)
+        #   - 14: Full timing accuracy
+        #   - 7: ~2x faster, good accuracy
+        #   - 2: ~7x faster, minimal accuracy
+        def initialize(ir_json, sub_cycles: 14)
           @ir_json = ir_json
+          @sub_cycles = sub_cycles.clamp(1, 14)
 
           unless IR_COMPILER_AVAILABLE
             raise LoadError, "IR Compiler extension not found at: #{IR_COMPILER_LIB_PATH}\nRun 'rake native:build' to build it."
           end
 
-          @sim = IrCompiler.new(ir_json)
+          @sim = IrCompiler.new(ir_json, sub_cycles)
           # Auto-compile for performance - without this, falls back to slow interpreted mode
           @sim.compile
         end
