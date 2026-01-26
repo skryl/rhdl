@@ -5,6 +5,9 @@
 
 require_relative '../hdl/apple2'
 require_relative 'speaker'
+require_relative 'text_renderer'
+require_relative 'braille_renderer'
+require_relative 'color_renderer'
 
 module RHDL
   module Apple2
@@ -288,53 +291,15 @@ module RHDL
       # chars_wide: target width in characters (default 80)
       def render_hires_braille(chars_wide: 80, invert: false)
         bitmap = read_hires_bitmap
+        renderer = BrailleRenderer.new(chars_wide: chars_wide, invert: invert)
+        renderer.render(bitmap)
+      end
 
-        # Braille characters are 2 dots wide x 4 dots tall
-        chars_tall = (HIRES_HEIGHT / 4.0).ceil
-
-        # Scale factors
-        x_scale = HIRES_WIDTH.to_f / (chars_wide * 2)
-        y_scale = HIRES_HEIGHT.to_f / (chars_tall * 4)
-
-        # Braille dot positions (Unicode mapping):
-        # Dot 1 (0x01) Dot 4 (0x08)
-        # Dot 2 (0x02) Dot 5 (0x10)
-        # Dot 3 (0x04) Dot 6 (0x20)
-        # Dot 7 (0x40) Dot 8 (0x80)
-        dot_map = [
-          [0x01, 0x08],  # row 0
-          [0x02, 0x10],  # row 1
-          [0x04, 0x20],  # row 2
-          [0x40, 0x80]   # row 3
-        ]
-
-        lines = []
-        chars_tall.times do |char_y|
-          line = String.new
-          chars_wide.times do |char_x|
-            pattern = 0
-
-            # Sample 2x4 grid for this braille character
-            4.times do |dy|
-              2.times do |dx|
-                px = ((char_x * 2 + dx) * x_scale).to_i
-                py = ((char_y * 4 + dy) * y_scale).to_i
-                px = [px, HIRES_WIDTH - 1].min
-                py = [py, HIRES_HEIGHT - 1].min
-
-                pixel = bitmap[py][px]
-                pixel = 1 - pixel if invert
-                pattern |= dot_map[dy][dx] if pixel == 1
-              end
-            end
-
-            # Unicode braille starts at U+2800
-            line << (0x2800 + pattern).chr(Encoding::UTF_8)
-          end
-          lines << line
-        end
-
-        lines.join("\n")
+      # Render hi-res screen with NTSC artifact colors
+      # chars_wide: target width in characters (default 140)
+      def render_hires_color(chars_wide: 140)
+        renderer = ColorRenderer.new(chars_wide: chars_wide)
+        renderer.render(@ram, base_addr: HIRES_PAGE1_START)
       end
 
       # Hi-res screen line address calculation (Apple II interleaved layout)

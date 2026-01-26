@@ -74,7 +74,9 @@ class Apple2HDLTerminal
     @debug = options[:debug] || false
     @green_screen = options[:green] || false
     @hires_mode = options[:hires] || false
-    @hires_width = options[:hires_width] || 80
+    @color_mode = options[:color] || false
+    # Default width is 140 for color mode (half-blocks), 80 for braille
+    @hires_width = options[:hires_width] || (@color_mode ? 140 : 80)
     @audio_enabled = options[:audio] || false
 
     # Terminal size and padding for centering
@@ -384,6 +386,12 @@ class Apple2HDLTerminal
     when 72, 104 # H or h - toggle hires mode
       @hires_mode = !@hires_mode
       print CLEAR_SCREEN
+    when 67, 99 # C or c - toggle color mode
+      @color_mode = !@color_mode
+      @hires_mode = true if @color_mode  # Color implies hires
+      # Adjust width for the mode
+      @hires_width = @color_mode ? 140 : 80
+      print CLEAR_SCREEN
     end
   end
 
@@ -398,13 +406,17 @@ class Apple2HDLTerminal
   def render_hires_screen
     output = String.new
 
-    if @green_screen
+    if @green_screen && !@color_mode
       output << GREEN_FG
       output << BLACK_BG
     end
 
-    # Render hi-res using braille characters
-    hires_output = @runner.render_hires_braille(chars_wide: @hires_width, invert: true)
+    # Render hi-res using color or braille characters
+    if @color_mode
+      hires_output = @runner.render_hires_color(chars_wide: @hires_width)
+    else
+      hires_output = @runner.render_hires_braille(chars_wide: @hires_width, invert: true)
+    end
     hires_lines = hires_output.split("\n")
 
     # Render each line of hires output with proper centering
@@ -425,9 +437,10 @@ class Apple2HDLTerminal
       kb_mode = @keyboard_mode == :command ? "CMD" : "NRM"
 
       # Line 1: Registers
-      line1 = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X [HIRES]",
+      mode_label = @color_mode ? "[COLOR]" : "[HIRES]"
+      line1 = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X %s",
                      state[:pc], state[:a], state[:x], state[:y],
-                     state[:sp], state[:p] || 0)
+                     state[:sp], state[:p] || 0, mode_label)
 
       # Line 2: Sim type / cycles / speed
       line2 = format("Sim:%-7s Cyc:%s %s %.1ffps Spd:%s",
@@ -445,7 +458,7 @@ class Apple2HDLTerminal
                      kb_mode, audio_status)
 
       # Line 4: Help
-      line4 = "ESC:toggle cmd mode | H:toggle hires | Arrows:speed"
+      line4 = "ESC:cmd | H:hires | C:color | Arrows:speed"
 
       # Pad/truncate lines to fit within border
       line1 = line1.ljust(debug_width)[0, debug_width]
@@ -719,6 +732,7 @@ options = {
   demo: false,
   hires: false,
   hires_width: 80,
+  color: false,  # NTSC artifact color rendering
   audio: false,  # Audio output disabled by default
   mode: :hdl,  # Simulation mode: :hdl (default), :netlist
   sim: :ruby   # Simulator backend: :ruby (default), :interpret, :jit, :compile
@@ -770,7 +784,12 @@ parser = OptionParser.new do |opts|
     options[:hires] = true
   end
 
-  opts.on("--hires-width WIDTH", Integer, "Hi-res display width in chars (default: 80)") do |v|
+  opts.on("-C", "--color", "Enable NTSC artifact color rendering (implies --hires)") do
+    options[:color] = true
+    options[:hires] = true
+  end
+
+  opts.on("--hires-width WIDTH", Integer, "Hi-res display width in chars (default: 80, 140 for color)") do |v|
     options[:hires_width] = v
   end
 
@@ -790,9 +809,10 @@ parser = OptionParser.new do |opts|
     options[:pc] = v.to_i(16)
   end
 
-  opts.on("--karateka", "Load Karateka memory dump") do
+  opts.on("--karateka", "Load Karateka memory dump (enables color mode)") do
     options[:karateka] = true
-    options[:hires] = true  # Karateka uses hi-res graphics
+    options[:hires] = true   # Karateka uses hi-res graphics
+    options[:color] = true   # Enable NTSC artifact colors
   end
 
   opts.on("--disk FILE", "Load disk image (.dsk)") do |v|
