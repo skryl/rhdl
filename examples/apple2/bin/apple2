@@ -60,7 +60,8 @@ class Apple2HDLTerminal
                 else
                   # IR simulation with native backends (interpret, jit, compile)
                   require 'apple2_ir'
-                  RHDL::Apple2::IrRunner.new(backend: @sim_backend)
+                  sub_cycles = options[:sub_cycles] || 14
+                  RHDL::Apple2::IrRunner.new(backend: @sim_backend, sub_cycles: sub_cycles)
                 end
               end
 
@@ -759,6 +760,10 @@ parser = OptionParser.new do |opts|
 
   opts.on("--sim TYPE", [:ruby, :interpret, :jit, :compile], "Simulator backend: ruby (default), interpret, jit, compile") do |v|
     options[:sim] = v
+  end
+
+  opts.on("--sub-cycles N", Integer, "Sub-cycles per CPU cycle: 14=full, 7=~2x, 2=~7x (compile only)") do |v|
+    options[:sub_cycles] = v
   end
 
   opts.on("-H", "--hires", "Enable hi-res graphics rendering (braille)") do

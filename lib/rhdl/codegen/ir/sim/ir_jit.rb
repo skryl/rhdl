@@ -41,17 +41,24 @@ module RHDL
 
       # Wrapper class that uses Cranelift JIT if available
       class IrJitWrapper
-        attr_reader :ir_json
+        attr_reader :ir_json, :sub_cycles
 
-        def initialize(ir_json, allow_fallback: true)
+        # @param ir_json [String] JSON representation of the IR
+        # @param allow_fallback [Boolean] Allow fallback to interpreter
+        # @param sub_cycles [Integer] Number of sub-cycles per CPU cycle (default: 14)
+        #   - 14: Full timing accuracy
+        #   - 7: ~2x faster, good accuracy
+        #   - 2: ~7x faster, minimal accuracy
+        def initialize(ir_json, allow_fallback: true, sub_cycles: 14)
           @ir_json = ir_json
+          @sub_cycles = sub_cycles.clamp(1, 14)
 
           if IR_JIT_AVAILABLE
-            @sim = IrJit.new(ir_json)
+            @sim = IrJit.new(ir_json, @sub_cycles)
             @backend = :jit
           elsif allow_fallback
             require_relative 'ir_interpreter'
-            @sim = IrInterpreterWrapper.new(ir_json, allow_fallback: true)
+            @sim = IrInterpreterWrapper.new(ir_json, allow_fallback: true, sub_cycles: @sub_cycles)
             @backend = @sim.native? ? :interpret : :ruby
           else
             raise LoadError, "IR JIT extension not found at: #{IR_JIT_LIB_PATH}\nRun 'rake native:build' to build it."
