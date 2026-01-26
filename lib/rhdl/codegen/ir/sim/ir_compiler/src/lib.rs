@@ -9,7 +9,7 @@
 use magnus::{method, prelude::*, Error, RArray, RHash, Ruby, TryConvert, Value};
 use serde::Deserialize;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::process::Command;
 
@@ -154,11 +154,15 @@ struct IrSimulator {
     clk_idx: usize,
     k_idx: usize,
     read_key_idx: usize,
+    speaker_idx: usize,
+    prev_speaker: u64,
     cpu_addr_idx: usize,
+    /// Number of sub-cycles per CPU cycle (default: 14 for full accuracy)
+    sub_cycles: usize,
 }
 
 impl IrSimulator {
-    fn new(json: &str) -> Result<Self, String> {
+    fn new(json: &str, sub_cycles: usize) -> Result<Self, String> {
         let ir: ModuleIR = serde_json::from_str(json)
             .map_err(|e| format!("Failed to parse IR JSON: {}", e))?;
 
@@ -259,6 +263,7 @@ impl IrSimulator {
         let clk_idx = *name_to_idx.get("clk_14m").unwrap_or(&0);
         let k_idx = *name_to_idx.get("k").unwrap_or(&0);
         let read_key_idx = *name_to_idx.get("read_key").unwrap_or(&0);
+        let speaker_idx = *name_to_idx.get("speaker").unwrap_or(&0);
         // Use CPU's address register for memory reads (not ram_addr which may show video address)
         let cpu_addr_idx = *name_to_idx.get("cpu__addr_reg").unwrap_or(&0);
 
@@ -289,7 +294,10 @@ impl IrSimulator {
             clk_idx,
             k_idx,
             read_key_idx,
+            speaker_idx,
+            prev_speaker: 0,
             cpu_addr_idx,
+            sub_cycles: sub_cycles.max(1).min(14),  // Clamp to 1-14
         })
     }
 
@@ -536,17 +544,150 @@ impl IrSimulator {
     // Code Generation
     // ========================================================================
 
+    /// Generate inline mask constant (e.g., 0xFF for width 8)
+    fn mask_const(width: usize) -> String {
+        if width >= 64 {
+            "0xFFFFFFFFFFFFFFFFu64".to_string()
+        } else {
+            format!("0x{:X}u64", (1u64 << width) - 1)
+        }
+    }
+
+    /// Extract signal indices that an expression depends on
+    fn expr_dependencies(&self, expr: &ExprDef) -> HashSet<usize> {
+        let mut deps = HashSet::new();
+        self.collect_expr_deps(expr, &mut deps);
+        deps
+    }
+
+    fn collect_expr_deps(&self, expr: &ExprDef, deps: &mut HashSet<usize>) {
+        match expr {
+            ExprDef::Signal { name, .. } => {
+                if let Some(&idx) = self.name_to_idx.get(name) {
+                    deps.insert(idx);
+                }
+            }
+            ExprDef::Literal { .. } => {}
+            ExprDef::UnaryOp { operand, .. } => {
+                self.collect_expr_deps(operand, deps);
+            }
+            ExprDef::BinaryOp { left, right, .. } => {
+                self.collect_expr_deps(left, deps);
+                self.collect_expr_deps(right, deps);
+            }
+            ExprDef::Mux { condition, when_true, when_false, .. } => {
+                self.collect_expr_deps(condition, deps);
+                self.collect_expr_deps(when_true, deps);
+                self.collect_expr_deps(when_false, deps);
+            }
+            ExprDef::Slice { base, .. } => {
+                self.collect_expr_deps(base, deps);
+            }
+            ExprDef::Concat { parts, .. } => {
+                for part in parts {
+                    self.collect_expr_deps(part, deps);
+                }
+            }
+            ExprDef::Resize { expr, .. } => {
+                self.collect_expr_deps(expr, deps);
+            }
+            ExprDef::MemRead { addr, .. } => {
+                self.collect_expr_deps(addr, deps);
+            }
+        }
+    }
+
+    /// Group assignments into levels based on dependencies
+    /// Each level contains assignments that can be computed in parallel
+    fn compute_assignment_levels(&self) -> Vec<Vec<usize>> {
+        let assigns = &self.ir.assigns;
+        let n = assigns.len();
+
+        // Map: target signal idx -> assignment idx
+        let mut target_to_assign: HashMap<usize, usize> = HashMap::new();
+        for (i, assign) in assigns.iter().enumerate() {
+            if let Some(&idx) = self.name_to_idx.get(&assign.target) {
+                target_to_assign.insert(idx, i);
+            }
+        }
+
+        // Compute dependencies for each assignment (in terms of other assignment indices)
+        let mut assign_deps: Vec<HashSet<usize>> = Vec::with_capacity(n);
+        for assign in assigns {
+            let signal_deps = self.expr_dependencies(&assign.expr);
+            let mut deps = HashSet::new();
+            for sig_idx in signal_deps {
+                if let Some(&assign_idx) = target_to_assign.get(&sig_idx) {
+                    deps.insert(assign_idx);
+                }
+            }
+            assign_deps.push(deps);
+        }
+
+        // Assign levels (topological sort into levels)
+        let mut levels: Vec<Vec<usize>> = Vec::new();
+        let mut assigned_level: Vec<Option<usize>> = vec![None; n];
+
+        loop {
+            let mut made_progress = false;
+            for i in 0..n {
+                if assigned_level[i].is_some() {
+                    continue;
+                }
+                // Check if all dependencies have been assigned
+                let mut max_dep_level = None;
+                let mut all_deps_ready = true;
+                for &dep_idx in &assign_deps[i] {
+                    if dep_idx == i {
+                        // Self-dependency, ignore
+                        continue;
+                    }
+                    match assigned_level[dep_idx] {
+                        Some(lvl) => {
+                            max_dep_level = Some(max_dep_level.map_or(lvl, |m: usize| m.max(lvl)));
+                        }
+                        None => {
+                            all_deps_ready = false;
+                            break;
+                        }
+                    }
+                }
+                if all_deps_ready {
+                    let my_level = max_dep_level.map_or(0, |l| l + 1);
+                    assigned_level[i] = Some(my_level);
+                    while levels.len() <= my_level {
+                        levels.push(Vec::new());
+                    }
+                    levels[my_level].push(i);
+                    made_progress = true;
+                }
+            }
+            if !made_progress {
+                // Handle remaining (cycles or orphans) - put them at the end
+                let last_level = levels.len();
+                for i in 0..n {
+                    if assigned_level[i].is_none() {
+                        if levels.len() <= last_level {
+                            levels.push(Vec::new());
+                        }
+                        levels[last_level].push(i);
+                    }
+                }
+                break;
+            }
+            if assigned_level.iter().all(|l| l.is_some()) {
+                break;
+            }
+        }
+
+        levels
+    }
+
     fn generate_code(&self) -> String {
         let mut code = String::new();
 
         code.push_str("//! Auto-generated circuit simulation code\n");
-        code.push_str("//! Generated by RHDL IR Compiler\n\n");
-
-        // Generate mask helper
-        code.push_str("#[inline(always)]\n");
-        code.push_str("fn mask(width: usize) -> u64 {\n");
-        code.push_str("    if width >= 64 { u64::MAX } else { (1u64 << width) - 1 }\n");
-        code.push_str("}\n\n");
+        code.push_str("//! Generated by RHDL IR Compiler (LTO optimized)\n\n");
 
         // Generate memory arrays if any
         for (idx, mem) in self.ir.memories.iter().enumerate() {
@@ -568,20 +709,26 @@ impl IrSimulator {
             code.push_str("\n];\n\n");
         }
 
-        // Generate evaluate function
+        // Generate evaluate function (inline for performance)
         code.push_str("/// Evaluate all combinational assignments\n");
-        code.push_str("#[no_mangle]\n");
-        code.push_str("pub unsafe extern \"C\" fn evaluate(signals: *mut u64, len: usize) {\n");
-        code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, len);\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("unsafe fn evaluate_inline(signals: &mut [u64]) {\n");
 
         for assign in &self.ir.assigns {
             if let Some(&idx) = self.name_to_idx.get(&assign.target) {
                 let width = self.widths.get(idx).copied().unwrap_or(64);
                 let expr_code = self.expr_to_rust(&assign.expr);
-                code.push_str(&format!("    signals[{}] = ({}) & mask({});\n", idx, expr_code, width));
+                code.push_str(&format!("    signals[{}] = ({}) & {};\n", idx, expr_code, Self::mask_const(width)));
             }
         }
 
+        code.push_str("}\n\n");
+
+        // Generate extern "C" wrapper for evaluate (for external callers)
+        code.push_str("#[no_mangle]\n");
+        code.push_str("pub unsafe extern \"C\" fn evaluate(signals: *mut u64, len: usize) {\n");
+        code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, len);\n");
+        code.push_str("    evaluate_inline(signals);\n");
         code.push_str("}\n\n");
 
         // Generate tick function
@@ -597,21 +744,24 @@ impl IrSimulator {
         match expr {
             ExprDef::Signal { name, width } => {
                 let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
-                format!("(signals[{}] & mask({}))", idx, width)
+                format!("(signals[{}] & {})", idx, Self::mask_const(*width))
             }
             ExprDef::Literal { value, width } => {
-                format!("({}u64 & mask({}))", *value as u64, width)
+                // For literals, just compute the masked value directly
+                let masked = (*value as u64) & Self::mask(*width);
+                format!("{}u64", masked)
             }
             ExprDef::UnaryOp { op, operand, width } => {
                 let operand_code = self.expr_to_rust(operand);
                 match op.as_str() {
-                    "~" | "not" => format!("((!{}) & mask({}))", operand_code, width),
+                    "~" | "not" => format!("((!{}) & {})", operand_code, Self::mask_const(*width)),
                     "&" | "reduce_and" => {
                         let op_width = self.expr_width(operand);
-                        format!("(if ({} & mask({})) == mask({}) {{ 1 }} else {{ 0 }})",
-                                operand_code, op_width, op_width)
+                        let m = Self::mask_const(op_width);
+                        format!("(if ({} & {}) == {} {{ 1u64 }} else {{ 0u64 }})",
+                                operand_code, m, m)
                     }
-                    "|" | "reduce_or" => format!("(if {} != 0 {{ 1 }} else {{ 0 }})", operand_code),
+                    "|" | "reduce_or" => format!("(if {} != 0 {{ 1u64 }} else {{ 0u64 }})", operand_code),
                     "^" | "reduce_xor" => format!("(({}).count_ones() as u64 & 1)", operand_code),
                     _ => operand_code,
                 }
@@ -619,39 +769,38 @@ impl IrSimulator {
             ExprDef::BinaryOp { op, left, right, width } => {
                 let l = self.expr_to_rust(left);
                 let r = self.expr_to_rust(right);
+                let m = Self::mask_const(*width);
                 match op.as_str() {
                     "&" => format!("({} & {})", l, r),
                     "|" => format!("({} | {})", l, r),
                     "^" => format!("({} ^ {})", l, r),
-                    "+" => format!("({}.wrapping_add({}) & mask({}))", l, r, width),
-                    "-" => format!("({}.wrapping_sub({}) & mask({}))", l, r, width),
-                    "*" => format!("({}.wrapping_mul({}) & mask({}))", l, r, width),
-                    "/" => format!("(if {} != 0 {{ {} / {} }} else {{ 0 }})", r, l, r),
-                    "%" => format!("(if {} != 0 {{ {} % {} }} else {{ 0 }})", r, l, r),
-                    "<<" => format!("(({} << {}.min(63)) & mask({}))", l, r, width),
+                    "+" => format!("({}.wrapping_add({}) & {})", l, r, m),
+                    "-" => format!("({}.wrapping_sub({}) & {})", l, r, m),
+                    "*" => format!("({}.wrapping_mul({}) & {})", l, r, m),
+                    "/" => format!("(if {} != 0 {{ {} / {} }} else {{ 0u64 }})", r, l, r),
+                    "%" => format!("(if {} != 0 {{ {} % {} }} else {{ 0u64 }})", r, l, r),
+                    "<<" => format!("(({} << {}.min(63)) & {})", l, r, m),
                     ">>" => format!("({} >> {}.min(63))", l, r),
-                    "==" => format!("(if {} == {} {{ 1 }} else {{ 0 }})", l, r),
-                    "!=" => format!("(if {} != {} {{ 1 }} else {{ 0 }})", l, r),
-                    "<" => format!("(if {} < {} {{ 1 }} else {{ 0 }})", l, r),
-                    ">" => format!("(if {} > {} {{ 1 }} else {{ 0 }})", l, r),
-                    "<=" | "le" => format!("(if {} <= {} {{ 1 }} else {{ 0 }})", l, r),
-                    ">=" => format!("(if {} >= {} {{ 1 }} else {{ 0 }})", l, r),
-                    _ => "0".to_string(),
+                    "==" => format!("(if {} == {} {{ 1u64 }} else {{ 0u64 }})", l, r),
+                    "!=" => format!("(if {} != {} {{ 1u64 }} else {{ 0u64 }})", l, r),
+                    "<" => format!("(if {} < {} {{ 1u64 }} else {{ 0u64 }})", l, r),
+                    ">" => format!("(if {} > {} {{ 1u64 }} else {{ 0u64 }})", l, r),
+                    "<=" | "le" => format!("(if {} <= {} {{ 1u64 }} else {{ 0u64 }})", l, r),
+                    ">=" => format!("(if {} >= {} {{ 1u64 }} else {{ 0u64 }})", l, r),
+                    _ => "0u64".to_string(),
                 }
             }
             ExprDef::Mux { condition, when_true, when_false, width } => {
                 let cond = self.expr_to_rust(condition);
                 let t = self.expr_to_rust(when_true);
                 let f = self.expr_to_rust(when_false);
-                format!("(if {} != 0 {{ {} }} else {{ {} }} & mask({}))", cond, t, f, width)
+                format!("(if {} != 0 {{ {} }} else {{ {} }} & {})", cond, t, f, Self::mask_const(*width))
             }
             ExprDef::Slice { base, low, width, .. } => {
                 let base_code = self.expr_to_rust(base);
-                format!("(({} >> {}) & mask({}))", base_code, low, width)
+                format!("(({} >> {}) & {})", base_code, low, Self::mask_const(*width))
             }
             ExprDef::Concat { parts, width } => {
-                // Wrap the entire concat expression in parens to ensure proper precedence
-                // when used as operand in binary ops like + (wrapping_add)
                 let mut result = String::from("((");
                 let mut shift = 0usize;
                 let mut first = true;
@@ -663,24 +812,125 @@ impl IrSimulator {
                     }
                     first = false;
                     if shift > 0 {
-                        result.push_str(&format!("(({} & mask({})) << {})", part_code, part_width, shift));
+                        result.push_str(&format!("(({} & {}) << {})", part_code, Self::mask_const(part_width), shift));
                     } else {
-                        result.push_str(&format!("({} & mask({}))", part_code, part_width));
+                        result.push_str(&format!("({} & {})", part_code, Self::mask_const(part_width)));
                     }
                     shift += part_width;
                 }
-                result.push_str(&format!(") & mask({}))", width));
+                result.push_str(&format!(") & {})", Self::mask_const(*width)));
                 result
             }
             ExprDef::Resize { expr, width } => {
                 let expr_code = self.expr_to_rust(expr);
-                format!("({} & mask({}))", expr_code, width)
+                format!("({} & {})", expr_code, Self::mask_const(*width))
             }
             ExprDef::MemRead { memory, addr, width } => {
                 let mem_idx = self.memory_name_to_idx.get(memory).copied().unwrap_or(0);
                 let addr_code = self.expr_to_rust(addr);
-                format!("(MEM_{}.get({} as usize).copied().unwrap_or(0) & mask({}))",
-                        mem_idx, addr_code, width)
+                format!("(MEM_{}.get({} as usize).copied().unwrap_or(0) & {})",
+                        mem_idx, addr_code, Self::mask_const(*width))
+            }
+        }
+    }
+
+    /// Generate branchless Rust code for an expression (uses mux64 for conditionals)
+    fn expr_to_rust_branchless(&self, expr: &ExprDef) -> String {
+        match expr {
+            ExprDef::Signal { name, width } => {
+                let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
+                format!("(signals[{}] & {})", idx, Self::mask_const(*width))
+            }
+            ExprDef::Literal { value, width } => {
+                let masked = (*value as u64) & Self::mask(*width);
+                format!("{}u64", masked)
+            }
+            ExprDef::UnaryOp { op, operand, width } => {
+                let operand_code = self.expr_to_rust_branchless(operand);
+                match op.as_str() {
+                    "~" | "not" => format!("((!{}) & {})", operand_code, Self::mask_const(*width)),
+                    "&" | "reduce_and" => {
+                        let op_width = self.expr_width(operand);
+                        let m = Self::mask_const(op_width);
+                        // Branchless reduce_and
+                        format!("(((({} & {}) == {}) as u64))", operand_code, m, m)
+                    }
+                    "|" | "reduce_or" => format!("((({} != 0) as u64))", operand_code),
+                    "^" | "reduce_xor" => format!("(({}).count_ones() as u64 & 1)", operand_code),
+                    _ => operand_code,
+                }
+            }
+            ExprDef::BinaryOp { op, left, right, width } => {
+                let l = self.expr_to_rust_branchless(left);
+                let r = self.expr_to_rust_branchless(right);
+                let m = Self::mask_const(*width);
+                match op.as_str() {
+                    "&" => format!("({} & {})", l, r),
+                    "|" => format!("({} | {})", l, r),
+                    "^" => format!("({} ^ {})", l, r),
+                    "+" => format!("({}.wrapping_add({}) & {})", l, r, m),
+                    "-" => format!("({}.wrapping_sub({}) & {})", l, r, m),
+                    "*" => format!("({}.wrapping_mul({}) & {})", l, r, m),
+                    "/" => {
+                        // Branchless division (avoid divide by zero)
+                        format!("({{ let d = {}; if d != 0 {{ {} / d }} else {{ 0u64 }} }})", r, l)
+                    }
+                    "%" => {
+                        format!("({{ let d = {}; if d != 0 {{ {} % d }} else {{ 0u64 }} }})", r, l)
+                    }
+                    "<<" => format!("(({} << {}.min(63)) & {})", l, r, m),
+                    ">>" => format!("({} >> {}.min(63))", l, r),
+                    // Branchless comparisons
+                    "==" => format!("((({} == {}) as u64))", l, r),
+                    "!=" => format!("((({} != {}) as u64))", l, r),
+                    "<" => format!("((({} < {}) as u64))", l, r),
+                    ">" => format!("((({} > {}) as u64))", l, r),
+                    "<=" | "le" => format!("((({} <= {}) as u64))", l, r),
+                    ">=" => format!("((({} >= {}) as u64))", l, r),
+                    _ => "0u64".to_string(),
+                }
+            }
+            ExprDef::Mux { condition, when_true, when_false, width } => {
+                // Use branchless mux function
+                let cond = self.expr_to_rust_branchless(condition);
+                let t = self.expr_to_rust_branchless(when_true);
+                let f = self.expr_to_rust_branchless(when_false);
+                format!("(mux64({}, {}, {}) & {})", cond, t, f, Self::mask_const(*width))
+            }
+            ExprDef::Slice { base, low, width, .. } => {
+                let base_code = self.expr_to_rust_branchless(base);
+                format!("(({} >> {}) & {})", base_code, low, Self::mask_const(*width))
+            }
+            ExprDef::Concat { parts, width } => {
+                let mut result = String::from("((");
+                let mut shift = 0usize;
+                let mut first = true;
+                for part in parts.iter().rev() {
+                    let part_code = self.expr_to_rust_branchless(part);
+                    let part_width = self.expr_width(part);
+                    if !first {
+                        result.push_str(" | ");
+                    }
+                    first = false;
+                    if shift > 0 {
+                        result.push_str(&format!("(({} & {}) << {})", part_code, Self::mask_const(part_width), shift));
+                    } else {
+                        result.push_str(&format!("({} & {})", part_code, Self::mask_const(part_width)));
+                    }
+                    shift += part_width;
+                }
+                result.push_str(&format!(") & {})", Self::mask_const(*width)));
+                result
+            }
+            ExprDef::Resize { expr, width } => {
+                let expr_code = self.expr_to_rust_branchless(expr);
+                format!("({} & {})", expr_code, Self::mask_const(*width))
+            }
+            ExprDef::MemRead { memory, addr, width } => {
+                let mem_idx = self.memory_name_to_idx.get(memory).copied().unwrap_or(0);
+                let addr_code = self.expr_to_rust_branchless(addr);
+                format!("(MEM_{}.get({} as usize).copied().unwrap_or(0) & {})",
+                        mem_idx, addr_code, Self::mask_const(*width))
             }
         }
     }
@@ -708,12 +958,9 @@ impl IrSimulator {
         let num_clocks = clock_indices.len().max(1);
         let num_regs = self.seq_targets.len();
 
-        code.push_str("/// Clock tick - sample registers on rising edges\n");
-        code.push_str("#[no_mangle]\n");
-        code.push_str(&format!("pub unsafe extern \"C\" fn tick(signals: *mut u64, len: usize, old_clocks: *mut u64, next_regs: *mut u64) {{\n"));
-        code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, len);\n");
-        code.push_str(&format!("    let old_clocks = std::slice::from_raw_parts_mut(old_clocks, {});\n", num_clocks));
-        code.push_str(&format!("    let next_regs = std::slice::from_raw_parts_mut(next_regs, {});\n", num_regs));
+        code.push_str("/// Clock tick - sample registers on rising edges (inline for performance)\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str(&format!("unsafe fn tick_inline(signals: &mut [u64], old_clocks: &mut [u64; {}], next_regs: &mut [u64; {}]) {{\n", num_clocks, num_regs.max(1)));
         code.push_str("\n");
 
         // Save old clock values FIRST (before evaluate changes derived clocks)
@@ -724,7 +971,7 @@ impl IrSimulator {
         code.push_str("\n");
 
         // Call evaluate (propagates clk_14m=1 to derived clocks)
-        code.push_str("    evaluate(signals.as_mut_ptr(), signals.len());\n\n");
+        code.push_str("    evaluate_inline(signals);\n\n");
 
         // Sample all register inputs
         code.push_str("    // Sample register inputs\n");
@@ -737,15 +984,15 @@ impl IrSimulator {
                 let expr_code = self.expr_to_rust(&stmt.expr);
                 let target_idx = self.seq_targets[reg_idx];
                 let width = self.widths.get(target_idx).copied().unwrap_or(64);
-                code.push_str(&format!("    next_regs[{}] = ({}) & mask({});\n", reg_idx, expr_code, width));
+                code.push_str(&format!("    next_regs[{}] = ({}) & {};\n", reg_idx, expr_code, Self::mask_const(width)));
                 reg_idx += 1;
             }
         }
         code.push_str("\n");
 
-        // Iterate for derived clock domains
+        // Iterate for derived clock domains (2 iterations sufficient for Apple II)
         code.push_str("    // Iterate for derived clock domains\n");
-        code.push_str("    for _ in 0..10 {\n");
+        code.push_str("    for _ in 0..2 {\n");
         code.push_str("        let mut any_edge = false;\n\n");
 
         // Check for rising edges and update registers
@@ -765,9 +1012,17 @@ impl IrSimulator {
         }
 
         code.push_str("\n        if !any_edge { break; }\n");
-        code.push_str("        evaluate(signals.as_mut_ptr(), signals.len());\n");
+        code.push_str("        evaluate_inline(signals);\n");
         code.push_str("    }\n");
+        code.push_str("}\n\n");
 
+        // Generate extern "C" wrapper for tick (for external callers)
+        code.push_str("#[no_mangle]\n");
+        code.push_str(&format!("pub unsafe extern \"C\" fn tick(signals: *mut u64, len: usize, old_clocks: *mut u64, next_regs: *mut u64) {{\n"));
+        code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, len);\n");
+        code.push_str(&format!("    let old_clocks: &mut [u64; {}] = &mut *(old_clocks as *mut [u64; {}]);\n", num_clocks, num_clocks));
+        code.push_str(&format!("    let next_regs: &mut [u64; {}] = &mut *(next_regs as *mut [u64; {}]);\n", num_regs.max(1), num_regs.max(1)));
+        code.push_str("    tick_inline(signals, old_clocks, next_regs);\n");
         code.push_str("}\n\n");
     }
 
@@ -775,11 +1030,11 @@ impl IrSimulator {
         let clk_idx = self.clk_idx;
         let k_idx = self.k_idx;
         let ram_addr_idx = self.ram_addr_idx;
-        let cpu_addr_idx = self.cpu_addr_idx;  // Use CPU's addr reg for reads
         let ram_do_idx = self.ram_do_idx;
         let ram_we_idx = self.ram_we_idx;
         let d_idx = self.d_idx;
         let read_key_idx = self.read_key_idx;
+        let speaker_idx = self.speaker_idx;
 
         let clock_indices: Vec<usize> = self.clock_indices.clone();
         let num_clocks = clock_indices.len().max(1);
@@ -797,7 +1052,8 @@ impl IrSimulator {
         code.push_str("    n: usize,\n");
         code.push_str("    key_data: u8,\n");
         code.push_str("    key_ready: bool,\n");
-        code.push_str(") -> (bool, bool) {\n");
+        code.push_str("    prev_speaker_ptr: *mut u64,\n");
+        code.push_str(") -> (bool, bool, u32) {\n");
         code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, signals_len);\n");
         code.push_str("    let ram = std::slice::from_raw_parts_mut(ram, ram_len);\n");
         code.push_str("    let rom = std::slice::from_raw_parts(rom, rom_len);\n");
@@ -805,7 +1061,9 @@ impl IrSimulator {
         code.push_str(&format!("    let mut next_regs = [0u64; {}];\n", num_regs.max(1)));
         code.push_str("    let mut text_dirty = false;\n");
         code.push_str("    let mut key_cleared = false;\n");
-        code.push_str("    let mut key_is_ready = key_ready;\n\n");
+        code.push_str("    let mut key_is_ready = key_ready;\n");
+        code.push_str("    let mut speaker_toggles: u32 = 0;\n");
+        code.push_str("    let mut prev_speaker = *prev_speaker_ptr;\n\n");
 
         // Initialize old_clocks
         for (i, &clk) in clock_indices.iter().enumerate() {
@@ -813,58 +1071,51 @@ impl IrSimulator {
         }
         code.push_str("\n");
 
+        // Run sub-cycles per CPU cycle (configurable for speed vs accuracy trade-off)
+        // 14 = full accuracy, 7 = ~2x speed, 2 = ~7x speed
         code.push_str("    for _ in 0..n {\n");
-        code.push_str("        for _ in 0..14 {\n");
+        code.push_str(&format!("        for _ in 0..{} {{\n", self.sub_cycles));
 
         // Set keyboard input
         code.push_str(&format!("            signals[{}] = if key_is_ready {{ (key_data as u64) | 0x80 }} else {{ 0 }};\n\n", k_idx));
 
         // Falling edge
-        code.push_str(&format!("            // Falling edge\n"));
         code.push_str(&format!("            signals[{}] = 0;\n", clk_idx));
-        code.push_str("            evaluate(signals.as_mut_ptr(), signals.len());\n\n");
+        code.push_str("            evaluate_inline(signals);\n\n");
 
-        // Provide RAM/ROM data (use ram_addr to match Ruby behavior simulator)
-        code.push_str(&format!("            // Provide RAM/ROM data\n"));
+        // Provide RAM/ROM data
         code.push_str(&format!("            let addr = signals[{}] as usize;\n", ram_addr_idx));
         code.push_str(&format!("            signals[{}] = if addr >= 0xD000 {{\n", ram_do_idx));
         code.push_str("                let rom_offset = addr.wrapping_sub(0xD000);\n");
         code.push_str("                if rom_offset < rom.len() { rom[rom_offset] as u64 } else { 0 }\n");
-        code.push_str("            } else if addr >= 0xC000 {\n");
-        code.push_str("                0  // I/O space\n");
-        code.push_str("            } else if addr < ram.len() {\n");
-        code.push_str("                ram[addr] as u64\n");
-        code.push_str("            } else {\n");
-        code.push_str("                0\n");
-        code.push_str("            };\n\n");
+        code.push_str("            } else if addr >= 0xC000 { 0 }\n");
+        code.push_str("            else if addr < ram.len() { ram[addr] as u64 }\n");
+        code.push_str("            else { 0 };\n\n");
 
         // Rising edge
-        code.push_str(&format!("            // Rising edge\n"));
         code.push_str(&format!("            signals[{}] = 1;\n", clk_idx));
-        code.push_str("            tick(signals.as_mut_ptr(), signals.len(), old_clocks.as_mut_ptr(), next_regs.as_mut_ptr());\n\n");
+        code.push_str("            tick_inline(signals, &mut old_clocks, &mut next_regs);\n\n");
 
         // Handle RAM writes
-        code.push_str(&format!("            // Handle RAM writes\n"));
         code.push_str(&format!("            if signals[{}] == 1 {{\n", ram_we_idx));
-        code.push_str(&format!("                let write_addr = signals[{}] as usize;\n", ram_addr_idx));
-        code.push_str("                if write_addr < 0xC000 && write_addr < ram.len() {\n");
-        code.push_str(&format!("                    ram[write_addr] = (signals[{}] & 0xFF) as u8;\n", d_idx));
-        code.push_str("                    if write_addr >= 0x0400 && write_addr <= 0x07FF {\n");
-        code.push_str("                        text_dirty = true;\n");
-        code.push_str("                    }\n");
+        code.push_str(&format!("                let wa = signals[{}] as usize;\n", ram_addr_idx));
+        code.push_str("                if wa < 0xC000 && wa < ram.len() {\n");
+        code.push_str(&format!("                    ram[wa] = (signals[{}] & 0xFF) as u8;\n", d_idx));
+        code.push_str("                    if wa >= 0x0400 && wa <= 0x07FF { text_dirty = true; }\n");
         code.push_str("                }\n");
         code.push_str("            }\n\n");
 
         // Check keyboard strobe
-        code.push_str(&format!("            // Check keyboard strobe\n"));
-        code.push_str(&format!("            if signals[{}] == 1 {{\n", read_key_idx));
-        code.push_str("                key_is_ready = false;\n");
-        code.push_str("                key_cleared = true;\n");
-        code.push_str("            }\n");
+        code.push_str(&format!("            if signals[{}] == 1 {{ key_is_ready = false; key_cleared = true; }}\n\n", read_key_idx));
+
+        // Check speaker toggle
+        code.push_str(&format!("            let spk = signals[{}];\n", speaker_idx));
+        code.push_str("            if spk != prev_speaker { speaker_toggles += 1; prev_speaker = spk; }\n");
 
         code.push_str("        }\n");
         code.push_str("    }\n\n");
-        code.push_str("    (text_dirty, key_cleared)\n");
+        code.push_str("    *prev_speaker_ptr = prev_speaker;\n");
+        code.push_str("    (text_dirty, key_cleared, speaker_toggles)\n");
         code.push_str("}\n");
     }
 
@@ -914,6 +1165,10 @@ impl IrSimulator {
                 "--crate-type=cdylib",
                 "-C", "opt-level=3",
                 "-C", "target-cpu=native",
+                "-C", "panic=abort",
+                "-C", "lto=thin",
+                "-C", "codegen-units=1",
+                "-A", "warnings",
                 "-o",
                 lib_path.to_str().unwrap(),
                 src_path.to_str().unwrap(),
@@ -941,11 +1196,11 @@ impl IrSimulator {
             unsafe {
                 #[allow(improper_ctypes_definitions)]
                 type RunCpuCyclesFn = unsafe extern "C" fn(
-                    *mut u64, usize, *mut u8, usize, *const u8, usize, usize, u8, bool
-                ) -> (bool, bool);
+                    *mut u64, usize, *mut u8, usize, *const u8, usize, usize, u8, bool, *mut u64
+                ) -> (bool, bool, u32);
                 let func: libloading::Symbol<RunCpuCyclesFn> =
                     lib.get(b"run_cpu_cycles").expect("run_cpu_cycles not found");
-                let (text_dirty, key_cleared) = func(
+                let (text_dirty, key_cleared, speaker_toggles) = func(
                     self.signals.as_mut_ptr(),
                     self.signals.len(),
                     self.ram.as_mut_ptr(),
@@ -955,8 +1210,9 @@ impl IrSimulator {
                     n,
                     key_data,
                     key_ready,
+                    &mut self.prev_speaker,
                 );
-                return BatchResult { cycles_run: n, text_dirty, key_cleared };
+                return BatchResult { cycles_run: n, text_dirty, key_cleared, speaker_toggles };
             }
         }
 
@@ -964,6 +1220,7 @@ impl IrSimulator {
         let mut text_dirty = false;
         let mut key_cleared = false;
         let mut key_is_ready = key_ready;
+        let mut speaker_toggles: u32 = 0;
 
         for _ in 0..n {
             for _ in 0..14 {
@@ -1007,10 +1264,17 @@ impl IrSimulator {
                     key_is_ready = false;
                     key_cleared = true;
                 }
+
+                // Check speaker toggle (edge detection)
+                let speaker = self.signals[self.speaker_idx];
+                if speaker != self.prev_speaker {
+                    speaker_toggles += 1;
+                    self.prev_speaker = speaker;
+                }
             }
         }
 
-        BatchResult { cycles_run: n, text_dirty, key_cleared }
+        BatchResult { cycles_run: n, text_dirty, key_cleared, speaker_toggles }
     }
 
     fn load_rom(&mut self, data: &[u8]) {
@@ -1031,6 +1295,7 @@ struct BatchResult {
     text_dirty: bool,
     key_cleared: bool,
     cycles_run: usize,
+    speaker_toggles: u32,
 }
 
 // ============================================================================
@@ -1062,9 +1327,11 @@ struct RubyIrCompiler {
 }
 
 impl RubyIrCompiler {
-    fn new(json: String) -> Result<Self, Error> {
+    fn new(json: String, sub_cycles: Option<i64>) -> Result<Self, Error> {
         let ruby = unsafe { Ruby::get_unchecked() };
-        let sim = IrSimulator::new(&json)
+        // Default to 14 sub-cycles for full accuracy
+        let cycles = sub_cycles.unwrap_or(14) as usize;
+        let sim = IrSimulator::new(&json, cycles)
             .map_err(|e| Error::new(ruby.exception_runtime_error(), e))?;
         Ok(Self { sim: RefCell::new(sim) })
     }
@@ -1155,6 +1422,7 @@ impl RubyIrCompiler {
         hash.aset(ruby.sym_new("text_dirty"), result.text_dirty)?;
         hash.aset(ruby.sym_new("key_cleared"), result.key_cleared)?;
         hash.aset(ruby.sym_new("cycles_run"), result.cycles_run as i64)?;
+        hash.aset(ruby.sym_new("speaker_toggles"), result.speaker_toggles as i64)?;
         Ok(hash)
     }
 
@@ -1209,7 +1477,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
 
     let class = ir.define_class("IrCompiler", ruby.class_object())?;
 
-    class.define_singleton_method("new", magnus::function!(RubyIrCompiler::new, 1))?;
+    class.define_singleton_method("new", magnus::function!(RubyIrCompiler::new, 2))?;
     class.define_method("compile", method!(RubyIrCompiler::compile, 0))?;
     class.define_method("compiled?", method!(RubyIrCompiler::is_compiled, 0))?;
     class.define_method("generated_code", method!(RubyIrCompiler::generated_code, 0))?;

@@ -747,6 +747,282 @@ RSpec.describe 'Apple II Simulator Modes' do
   end
 end
 
+RSpec.describe 'Sub-cycles PC Progression' do
+  # Tests that all three backends (interpreter, jit, compiler) produce
+  # consistent PC progression with different sub-cycle settings (7 and 2).
+  #
+  # Sub-cycles control timing accuracy:
+  # - 14: Full timing accuracy (14 14MHz cycles per CPU cycle)
+  # - 7:  ~2x faster, good accuracy
+  # - 2:  ~7x faster, minimal accuracy
+
+  ROM_PATH_SUB = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
+  KARATEKA_MEM_PATH_SUB = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
+  KARATEKA_ENTRY_SUB = 0xB82A
+
+  before(:all) do
+    @rom_available = File.exist?(ROM_PATH_SUB)
+    @karateka_available = File.exist?(KARATEKA_MEM_PATH_SUB)
+    if @rom_available
+      @rom_data = File.binread(ROM_PATH_SUB).bytes
+    end
+    if @karateka_available
+      @karateka_mem = File.binread(KARATEKA_MEM_PATH_SUB).bytes
+    end
+  end
+
+  # Create a modified ROM that has reset vector pointing to game entry.
+  def create_karateka_rom
+    rom = @rom_data.dup
+    rom[0x2FFC] = 0x2A     # low byte of $B82A
+    rom[0x2FFD] = 0xB8     # high byte of $B82A
+    rom
+  end
+
+  def create_ir_simulator(backend, sub_cycles:)
+    require 'rhdl/codegen'
+
+    ir = RHDL::Apple2::Apple2.to_flat_ir
+    ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+
+    case backend
+    when :interpreter
+      skip 'IR Interpreter not available' unless RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
+      RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json, sub_cycles: sub_cycles)
+    when :jit
+      skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+      RHDL::Codegen::IR::IrJitWrapper.new(ir_json, sub_cycles: sub_cycles)
+    when :compiler
+      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+      RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json, sub_cycles: sub_cycles)
+    end
+  end
+
+  def setup_simulator(sim)
+    karateka_rom = create_karateka_rom
+    sim.load_rom(karateka_rom)
+    ram_size = 48 * 1024
+    sim.load_ram(@karateka_mem.first(ram_size), 0)
+
+    sim.poke('reset', 1)
+    sim.tick
+    sim.poke('reset', 0)
+
+    # Run a few cycles to complete reset sequence
+    3.times { sim.run_cpu_cycles(1, 0, false) }
+
+    sim.peek('cpu__pc_reg')
+  end
+
+  def collect_pc_transitions(sim, cycles)
+    transitions = []
+    last_pc = nil
+    cycles.times do
+      pc = sim.peek('cpu__pc_reg')
+      if pc != last_pc
+        transitions << pc
+        last_pc = pc
+      end
+      sim.run_cpu_cycles(1, 0, false)
+    end
+    transitions
+  end
+
+  # Backends to test
+  BACKENDS = [:interpreter, :jit, :compiler]
+
+  # Sub-cycle values to test (7 and 2 as per user request)
+  SUB_CYCLE_VALUES = [7, 2]
+
+  describe 'PC progression with sub_cycles=7' do
+    before do
+      skip 'AppleIIgo ROM not found' unless @rom_available
+      skip 'Karateka memory dump not found' unless @karateka_available
+    end
+
+    BACKENDS.each do |backend|
+      it "#{backend} backend produces valid PC progression with sub_cycles=7", timeout: 60 do
+        sim = create_ir_simulator(backend, sub_cycles: 7)
+        start_pc = setup_simulator(sim)
+
+        # Run 2000 cycles and collect PC transitions
+        transitions = collect_pc_transitions(sim, 2000)
+
+        puts "\n  #{backend} (sub_cycles=7):"
+        puts "    Started at PC: 0x#{start_pc.to_s(16)}"
+        puts "    PC transitions: #{transitions.size}"
+        puts "    First 10: #{transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+
+        # Verify valid execution
+        expect(start_pc).to be_between(0, 0xFFFF), "Start PC should be valid"
+        expect(transitions.size).to be >= 10, "Should have at least 10 PC transitions"
+        expect(transitions.first).to be_between(0, 0xFFFF), "First PC should be valid"
+
+        # All PCs should be valid addresses
+        transitions.each do |pc|
+          expect(pc).to be_between(0, 0xFFFF), "PC 0x#{pc.to_s(16)} should be valid"
+        end
+      end
+    end
+
+    it 'all backends produce similar PC sequences with sub_cycles=7', timeout: 120 do
+      results = {}
+
+      BACKENDS.each do |backend|
+        begin
+          sim = create_ir_simulator(backend, sub_cycles: 7)
+          start_pc = setup_simulator(sim)
+          transitions = collect_pc_transitions(sim, 2000)
+          results[backend] = { start_pc: start_pc, transitions: transitions }
+        rescue => e
+          next if e.message.include?('not available') || e.message.include?('skip')
+          raise
+        end
+      end
+
+      skip 'No backends available' if results.empty?
+
+      puts "\n  Cross-backend comparison (sub_cycles=7):"
+      results.each do |backend, data|
+        puts "    #{backend}: #{data[:transitions].size} transitions, start=0x#{data[:start_pc].to_s(16)}"
+      end
+
+      # All available backends should produce similar results
+      # Compare first 1000 PCs
+      if results.size >= 2
+        backends = results.keys
+        compare_count = [1000, results.values.map { |d| d[:transitions].size }.min].min
+        ref = results[backends.first][:transitions].first(compare_count)
+
+        backends[1..].each do |backend|
+          other = results[backend][:transitions].first(compare_count)
+
+          # First N transitions should be mostly identical
+          matches = ref.zip(other).count { |a, b| a == b }
+          match_rate = matches.to_f / compare_count
+
+          puts "    #{backends.first} vs #{backend}: #{matches}/#{compare_count} matching (#{(match_rate * 100).round(1)}%)"
+          expect(match_rate).to be >= 0.7, "Backends should match at least 70% of first #{compare_count} PC values"
+        end
+      end
+    end
+  end
+
+  describe 'PC progression with sub_cycles=2' do
+    before do
+      skip 'AppleIIgo ROM not found' unless @rom_available
+      skip 'Karateka memory dump not found' unless @karateka_available
+    end
+
+    BACKENDS.each do |backend|
+      it "#{backend} backend produces valid PC progression with sub_cycles=2", timeout: 60 do
+        sim = create_ir_simulator(backend, sub_cycles: 2)
+        start_pc = setup_simulator(sim)
+
+        # Run 2000 cycles and collect PC transitions
+        transitions = collect_pc_transitions(sim, 2000)
+
+        puts "\n  #{backend} (sub_cycles=2):"
+        puts "    Started at PC: 0x#{start_pc.to_s(16)}"
+        puts "    PC transitions: #{transitions.size}"
+        puts "    First 10: #{transitions.first(10).map { |pc| '0x' + pc.to_s(16) }.join(', ')}"
+
+        # Verify valid execution
+        expect(start_pc).to be_between(0, 0xFFFF), "Start PC should be valid"
+        expect(transitions.size).to be >= 10, "Should have at least 10 PC transitions"
+        expect(transitions.first).to be_between(0, 0xFFFF), "First PC should be valid"
+
+        # All PCs should be valid addresses
+        transitions.each do |pc|
+          expect(pc).to be_between(0, 0xFFFF), "PC 0x#{pc.to_s(16)} should be valid"
+        end
+      end
+    end
+
+    it 'all backends produce similar PC sequences with sub_cycles=2', timeout: 120 do
+      results = {}
+
+      BACKENDS.each do |backend|
+        begin
+          sim = create_ir_simulator(backend, sub_cycles: 2)
+          start_pc = setup_simulator(sim)
+          transitions = collect_pc_transitions(sim, 2000)
+          results[backend] = { start_pc: start_pc, transitions: transitions }
+        rescue => e
+          next if e.message.include?('not available') || e.message.include?('skip')
+          raise
+        end
+      end
+
+      skip 'No backends available' if results.empty?
+
+      puts "\n  Cross-backend comparison (sub_cycles=2):"
+      results.each do |backend, data|
+        puts "    #{backend}: #{data[:transitions].size} transitions, start=0x#{data[:start_pc].to_s(16)}"
+      end
+
+      # All available backends should produce similar results
+      # Compare first 1000 PCs
+      if results.size >= 2
+        backends = results.keys
+        compare_count = [1000, results.values.map { |d| d[:transitions].size }.min].min
+        ref = results[backends.first][:transitions].first(compare_count)
+
+        backends[1..].each do |backend|
+          other = results[backend][:transitions].first(compare_count)
+
+          # First N transitions should be mostly identical
+          matches = ref.zip(other).count { |a, b| a == b }
+          match_rate = matches.to_f / compare_count
+
+          puts "    #{backends.first} vs #{backend}: #{matches}/#{compare_count} matching (#{(match_rate * 100).round(1)}%)"
+          expect(match_rate).to be >= 0.7, "Backends should match at least 70% of first #{compare_count} PC values"
+        end
+      end
+    end
+  end
+
+  describe 'sub_cycles parameter validation' do
+    before do
+      skip 'AppleIIgo ROM not found' unless @rom_available
+    end
+
+    it 'clamps sub_cycles to valid range (1-14)' do
+      require 'rhdl/codegen'
+
+      ir = RHDL::Apple2::Apple2.to_flat_ir
+      ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+
+      # Test interpreter wrapper clamps values
+      if RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
+        wrapper_low = RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json, sub_cycles: 0)
+        expect(wrapper_low.sub_cycles).to eq(1)
+
+        wrapper_high = RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json, sub_cycles: 100)
+        expect(wrapper_high.sub_cycles).to eq(14)
+      end
+
+      # Test JIT wrapper clamps values
+      if RHDL::Codegen::IR::IR_JIT_AVAILABLE
+        wrapper_low = RHDL::Codegen::IR::IrJitWrapper.new(ir_json, sub_cycles: 0)
+        expect(wrapper_low.sub_cycles).to eq(1)
+
+        wrapper_high = RHDL::Codegen::IR::IrJitWrapper.new(ir_json, sub_cycles: 100)
+        expect(wrapper_high.sub_cycles).to eq(14)
+      end
+
+      # Test compiler wrapper clamps values
+      if RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+        wrapper_low = RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json, sub_cycles: 0)
+        expect(wrapper_low.sub_cycles).to eq(1)
+
+        wrapper_high = RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json, sub_cycles: 100)
+        expect(wrapper_high.sub_cycles).to eq(14)
+      end
+    end
+  end
+end
+
 RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
   # Tests to verify the Apple2 system produces the same results as the
   # MOS6502 ISA runner reference implementation.

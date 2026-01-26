@@ -39,13 +39,20 @@ module RHDL
 
       # Wrapper class that uses Rust interpreter if available
       class IrInterpreterWrapper
-        attr_reader :ir_json
+        attr_reader :ir_json, :sub_cycles
 
-        def initialize(ir_json, allow_fallback: true)
+        # @param ir_json [String] JSON representation of the IR
+        # @param allow_fallback [Boolean] Allow fallback to Ruby implementation
+        # @param sub_cycles [Integer] Number of sub-cycles per CPU cycle (default: 14)
+        #   - 14: Full timing accuracy
+        #   - 7: ~2x faster, good accuracy
+        #   - 2: ~7x faster, minimal accuracy
+        def initialize(ir_json, allow_fallback: true, sub_cycles: 14)
           @ir_json = ir_json
+          @sub_cycles = sub_cycles.clamp(1, 14)
 
           if IR_INTERPRETER_AVAILABLE
-            @sim = IrInterpreter.new(ir_json)
+            @sim = IrInterpreter.new(ir_json, @sub_cycles)
             @backend = :interpret
           elsif allow_fallback
             @sim = RubyIrSim.new(ir_json)

@@ -307,16 +307,24 @@ struct RtlSimulator {
     k_idx: usize,
     /// Read key strobe index
     read_key_idx: usize,
+    /// Speaker output index
+    speaker_idx: usize,
+    /// Previous speaker state for edge detection
+    prev_speaker: u64,
     /// Reset values for registers (signal index -> reset value)
     reset_values: Vec<(usize, u64)>,
     /// Memory arrays (indexed by memory index)
     memory_arrays: Vec<Vec<u64>>,
     /// Memory name to index mapping
     memory_name_to_idx: HashMap<String, usize>,
+    /// Sub-cycles per CPU cycle (1-14, default 14 for full timing accuracy)
+    sub_cycles: usize,
 }
 
 impl RtlSimulator {
-    fn new(json: &str) -> Result<Self, String> {
+    fn new(json: &str, sub_cycles: usize) -> Result<Self, String> {
+        // Clamp sub_cycles to valid range (1-14)
+        let sub_cycles = sub_cycles.max(1).min(14);
         let ir: ModuleIR = serde_json::from_str(json)
             .map_err(|e| format!("Failed to parse IR JSON: {}", e))?;
 
@@ -487,6 +495,7 @@ impl RtlSimulator {
         let clk_idx = *name_to_idx.get("clk_14m").unwrap_or(&0);
         let k_idx = *name_to_idx.get("k").unwrap_or(&0);
         let read_key_idx = *name_to_idx.get("read_key").unwrap_or(&0);
+        let speaker_idx = *name_to_idx.get("speaker").unwrap_or(&0);
 
         Ok(Self {
             signals,
@@ -516,9 +525,12 @@ impl RtlSimulator {
             clk_idx,
             k_idx,
             read_key_idx,
+            speaker_idx,
+            prev_speaker: 0,
             reset_values,
             memory_arrays,
             memory_name_to_idx: mem_name_to_idx,
+            sub_cycles,
         })
     }
 
@@ -1233,7 +1245,7 @@ impl RtlSimulator {
 
     /// Run a single 14MHz cycle with integrated memory handling (optimized)
     #[inline(always)]
-    fn run_14m_cycle_internal(&mut self, key_data: u8, key_ready: bool) -> (bool, bool) {
+    fn run_14m_cycle_internal(&mut self, key_data: u8, key_ready: bool) -> (bool, bool, bool) {
         // Set keyboard input (branchless)
         let k_val = ((key_data as u64) | 0x80) * (key_ready as u64);
         unsafe { *self.signals.get_unchecked_mut(self.k_idx) = k_val; }
@@ -1283,7 +1295,12 @@ impl RtlSimulator {
         // Check keyboard strobe
         let key_cleared = unsafe { *self.signals.get_unchecked(self.read_key_idx) } == 1;
 
-        (text_dirty, key_cleared)
+        // Check speaker toggle (edge detection)
+        let speaker = unsafe { *self.signals.get_unchecked(self.speaker_idx) };
+        let speaker_toggled = speaker != self.prev_speaker;
+        self.prev_speaker = speaker;
+
+        (text_dirty, key_cleared, speaker_toggled)
     }
 
     /// Optimized tick with multi-clock domain support
@@ -1362,17 +1379,21 @@ impl RtlSimulator {
             text_dirty: false,
             key_cleared: false,
             cycles_run: n,
+            speaker_toggles: 0,
         };
 
         let mut current_key_ready = key_ready;
 
         for _ in 0..n {
-            for _ in 0..14 {
-                let (text_dirty, key_cleared) = self.run_14m_cycle_internal(key_data, current_key_ready);
+            for _ in 0..self.sub_cycles {
+                let (text_dirty, key_cleared, speaker_toggled) = self.run_14m_cycle_internal(key_data, current_key_ready);
                 result.text_dirty |= text_dirty;
                 if key_cleared {
                     current_key_ready = false;
                     result.key_cleared = true;
+                }
+                if speaker_toggled {
+                    result.speaker_toggles += 1;
                 }
             }
         }
@@ -1407,6 +1428,7 @@ struct BatchResult {
     text_dirty: bool,
     key_cleared: bool,
     cycles_run: usize,
+    speaker_toggles: u32,
 }
 
 // ============================================================================
@@ -1438,9 +1460,10 @@ struct RubyRtlSim {
 }
 
 impl RubyRtlSim {
-    fn new(json: String) -> Result<Self, Error> {
+    fn new(json: String, sub_cycles: Option<i64>) -> Result<Self, Error> {
         let ruby = unsafe { Ruby::get_unchecked() };
-        let sim = RtlSimulator::new(&json)
+        let cycles = sub_cycles.unwrap_or(14) as usize;
+        let sim = RtlSimulator::new(&json, cycles)
             .map_err(|e| Error::new(ruby.exception_runtime_error(), e))?;
         Ok(Self {
             sim: RefCell::new(sim),
@@ -1519,6 +1542,7 @@ impl RubyRtlSim {
         hash.aset(ruby.sym_new("text_dirty"), result.text_dirty)?;
         hash.aset(ruby.sym_new("key_cleared"), result.key_cleared)?;
         hash.aset(ruby.sym_new("cycles_run"), result.cycles_run as i64)?;
+        hash.aset(ruby.sym_new("speaker_toggles"), result.speaker_toggles as i64)?;
         Ok(hash)
     }
 
@@ -1574,7 +1598,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
 
     let class = ir.define_class("IrInterpreter", ruby.class_object())?;
 
-    class.define_singleton_method("new", magnus::function!(RubyRtlSim::new, 1))?;
+    class.define_singleton_method("new", magnus::function!(RubyRtlSim::new, 2))?;
     class.define_method("poke", method!(RubyRtlSim::poke, 2))?;
     class.define_method("peek", method!(RubyRtlSim::peek, 1))?;
     class.define_method("evaluate", method!(RubyRtlSim::evaluate, 0))?;
