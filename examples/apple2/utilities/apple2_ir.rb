@@ -12,6 +12,7 @@
 
 require_relative '../hdl/apple2'
 require_relative 'speaker'
+require_relative 'color_renderer'
 require 'rhdl/codegen'
 require 'rhdl/codegen/ir/sim/ir_interpreter'
 
@@ -466,6 +467,14 @@ module RHDL
         end
 
         lines.join("\n")
+      end
+
+      # Render hi-res screen with NTSC artifact colors
+      # chars_wide: target width in characters (default 140)
+      def render_hires_color(chars_wide: 140)
+        @ram ||= Array.new(48 * 1024, 0)
+        renderer = ColorRenderer.new(chars_wide: chars_wide)
+        renderer.render(@ram, base_addr: HIRES_PAGE1_START)
       end
 
       def hires_line_address(row, base = HIRES_PAGE1_START)
