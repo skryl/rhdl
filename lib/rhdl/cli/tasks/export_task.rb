@@ -9,6 +9,10 @@ module RHDL
       # Task for exporting HDL components to Verilog
       class ExportTask < Task
         def run
+          if dry_run?
+            return dry_run_describe
+          end
+
           if options[:clean]
             clean
           elsif options[:all]
@@ -16,6 +20,19 @@ module RHDL
           else
             export_single
           end
+        end
+
+        def dry_run_describe
+          if options[:clean]
+            would :clean_verilog, dir: Config.verilog_dir
+          elsif options[:all]
+            scope = options[:scope] || 'all'
+            would :export_all, description: "Export all HDL components to Verilog",
+                  output_dir: Config.verilog_dir, scope: scope
+          else
+            would :export_single, component: options[:component], lang: options[:lang], out: options[:out]
+          end
+          dry_run_output
         end
 
         # Export all components
