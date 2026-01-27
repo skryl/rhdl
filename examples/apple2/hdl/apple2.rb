@@ -92,6 +92,8 @@ module RHDL
       output :a_debug, width: 8          # A register
       output :x_debug, width: 8          # X register
       output :y_debug, width: 8          # Y register
+      output :s_debug, width: 8          # Stack pointer
+      output :p_debug, width: 8          # Processor status
 
       # Pause control
       input :pause                       # Pause CPU execution
@@ -236,6 +238,8 @@ module RHDL
       port [:cpu, :debug_a] => :a_debug
       port [:cpu, :debug_x] => :x_debug
       port [:cpu, :debug_y] => :y_debug
+      port [:cpu, :debug_s] => :s_debug
+      port [:cpu, :debug_p] => :p_debug
 
       # Connect Disk II controller (slot 6)
       port :clk_14m => [:disk, :clk_14m]
