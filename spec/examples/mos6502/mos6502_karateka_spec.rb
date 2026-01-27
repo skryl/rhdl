@@ -144,11 +144,11 @@ RSpec.describe 'MOS6502 Karateka Mode' do
       state = runner.cpu_state
       expect(state[:pc]).to be_a(Integer)
 
-      # Run some cycles (HDL mode is slower)
-      runner.run_steps(100)
+      # Run 100k cycles to verify sustained execution
+      runner.run_steps(100_000)
 
       new_state = runner.cpu_state
-      expect(new_state[:cycles]).to be > 0
+      expect(new_state[:cycles]).to be >= 100_000
     end
 
     it 'loads and runs with IR interpret backend' do
