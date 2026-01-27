@@ -600,7 +600,7 @@ module RHDL
         a_reg: 0,
         x_reg: 0,
         y_reg: 0,
-        s_reg: 0xFF,
+        s_reg: 0xFD,  # 6502 reset decrements SP 3 times (dummy pushes)
         flag_c: 0,
         flag_z: 0,
         flag_i: 1,
