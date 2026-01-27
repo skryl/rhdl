@@ -18,8 +18,10 @@ module RHDL
             benchmark_timing
           when :quick
             benchmark_quick
-          when :ir
-            benchmark_ir_runners
+          when :ir, :apple2
+            benchmark_apple2
+          when :mos6502
+            benchmark_mos6502
           else
             benchmark_gates
           end
@@ -192,8 +194,170 @@ module RHDL
           end
         end
 
-        # Benchmark IR runners with Karateka game code
-        def benchmark_ir_runners
+        # Benchmark MOS6502 CPU IR with memory bridging (like karateka tests)
+        def benchmark_mos6502
+          require 'rhdl/codegen'
+
+          # Paths to ROM and memory dump
+          rom_path = File.expand_path('../../../../examples/mos6502/software/roms/appleiigo.rom', __dir__)
+          karateka_path = File.expand_path('../../../../examples/mos6502/software/disks/karateka_mem.bin', __dir__)
+
+          unless File.exist?(rom_path)
+            puts "Error: AppleIIgo ROM not found at #{rom_path}"
+            return
+          end
+
+          unless File.exist?(karateka_path)
+            puts "Error: Karateka memory dump not found at #{karateka_path}"
+            return
+          end
+
+          cycles = options[:cycles] || 100_000
+
+          puts_header("MOS6502 CPU IR Benchmark - Karateka Game Code")
+          puts "Cycles per run: #{cycles}"
+          puts "ROM: #{rom_path}"
+          puts "Memory dump: #{karateka_path}"
+          puts
+
+          # Generate IR once for all runners
+          print "Generating MOS6502::CPU IR... "
+          $stdout.flush
+
+          require_relative '../../../../examples/mos6502/hdl/cpu'
+          require_relative '../../../../examples/mos6502/utilities/apple2_bus'
+
+          ir_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          ir = MOS6502::CPU.to_flat_ir
+          ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+          ir_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - ir_start
+          puts "done (#{format('%.3f', ir_elapsed)}s)"
+
+          # Load ROM and memory data
+          rom_data = File.binread(rom_path).bytes
+          karateka_mem = File.binread(karateka_path).bytes
+
+          # Define runners to benchmark
+          runners = [
+            { name: 'Interpreter', backend: :interpreter, available_const: :IR_INTERPRETER_AVAILABLE },
+            { name: 'JIT', backend: :jit, available_const: :IR_JIT_AVAILABLE },
+            { name: 'Compiler', backend: :compiler, available_const: :IR_COMPILER_AVAILABLE }
+          ]
+
+          results = []
+
+          runners.each do |runner|
+            available = RHDL::Codegen::IR.const_get(runner[:available_const]) rescue false
+            unless available
+              puts "\n#{runner[:name]}: SKIPPED (not available)"
+              results << { name: runner[:name], status: :skipped }
+              next
+            end
+
+            print "\n#{runner[:name]}: "
+            $stdout.flush
+
+            begin
+              # Create simulator and bus
+              print "initializing... "
+              $stdout.flush
+              init_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+              bus = MOS6502::Apple2Bus.new("bench_bus")
+
+              sim = case runner[:backend]
+              when :interpreter
+                RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json)
+              when :jit
+                RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
+              when :compiler
+                RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json)
+              end
+
+              init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
+
+              # Load ROM and RAM into bus
+              print "loading... "
+              $stdout.flush
+              bus.load_rom(rom_data, base_addr: 0xD000)
+              bus.load_ram(karateka_mem, base_addr: 0x0000)
+
+              # Set reset vector directly in memory (bypass ROM protection)
+              memory = bus.instance_variable_get(:@memory)
+              memory[0xFFFC] = 0x2A  # low byte of $B82A
+              memory[0xFFFD] = 0xB8  # high byte of $B82A
+
+              # Reset CPU
+              sim.poke('rst', 1)
+              sim.poke('rdy', 1)
+              sim.poke('irq', 1)
+              sim.poke('nmi', 1)
+              sim.poke('data_in', 0)
+              sim.poke('ext_pc_load_en', 0)
+              sim.poke('ext_a_load_en', 0)
+              sim.poke('ext_x_load_en', 0)
+              sim.poke('ext_y_load_en', 0)
+              sim.poke('ext_sp_load_en', 0)
+
+              # Clock tick with memory bridging
+              clock_tick = lambda do
+                addr = sim.peek('addr')
+                rw = sim.peek('rw')
+                if rw == 1
+                  data = bus.read(addr)
+                  sim.poke('data_in', data)
+                else
+                  data = sim.peek('data_out')
+                  bus.write(addr, data)
+                end
+                sim.poke('clk', 0)
+                sim.tick
+                sim.poke('clk', 1)
+                sim.tick
+              end
+
+              # Run reset sequence
+              clock_tick.call
+              sim.poke('rst', 0)
+              6.times { clock_tick.call }
+
+              # Benchmark
+              print "running #{cycles} cycles... "
+              $stdout.flush
+              run_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+              cycles.times { clock_tick.call }
+              run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
+
+              cycles_per_sec = cycles / run_elapsed
+              pc = sim.peek('reg_pc')
+
+              puts "done"
+              puts "  Init time: #{format('%.3f', init_elapsed)}s"
+              puts "  Run time:  #{format('%.3f', run_elapsed)}s"
+              puts "  Rate:      #{format('%.0f', cycles_per_sec)} cycles/s (#{format('%.2f', cycles_per_sec / 1_000_000)}M/s)"
+              puts "  Final PC:  0x#{pc.to_s(16).upcase}"
+
+              results << {
+                name: runner[:name],
+                status: :success,
+                init_time: init_elapsed,
+                run_time: run_elapsed,
+                cycles_per_sec: cycles_per_sec,
+                final_pc: pc
+              }
+            rescue => e
+              puts "FAILED"
+              puts "  Error: #{e.message}"
+              puts "  #{e.backtrace.first(3).join("\n  ")}" if options[:verbose]
+              results << { name: runner[:name], status: :failed, error: e.message }
+            end
+          end
+
+          print_benchmark_summary(results, cycles)
+        end
+
+        # Benchmark Apple2 full system IR (legacy bench:ir)
+        def benchmark_apple2
           require 'rhdl/codegen'
 
           # Paths to ROM and memory dump
@@ -223,7 +387,7 @@ module RHDL
 
           cycles = options[:cycles] || 100_000
 
-          puts_header("IR Runner Benchmark - Karateka Game Code")
+          puts_header("Apple2 Full System IR Benchmark - Karateka Game Code")
           puts "Cycles per run: #{cycles}"
           puts "ROM: #{rom_path}"
           puts "Memory dump: #{karateka_path}"
@@ -322,7 +486,12 @@ module RHDL
             end
           end
 
-          # Summary table
+          print_benchmark_summary(results, cycles)
+        end
+
+        private
+
+        def print_benchmark_summary(results, cycles)
           puts
           puts_header("Summary")
           puts "#{'Runner'.ljust(15)} #{'Status'.ljust(10)} #{'Init'.rjust(10)} #{'Run'.rjust(10)} #{'Rate'.rjust(15)}"
@@ -351,8 +520,6 @@ module RHDL
             end
           end
         end
-
-        private
 
         def rspec_cmd
           binstub = File.join(Config.project_root, 'bin/rspec')
