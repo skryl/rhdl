@@ -9,6 +9,10 @@ module RHDL
       # Task for benchmarking
       class BenchmarkTask < Task
         def run
+          if dry_run?
+            return dry_run_describe
+          end
+
           case options[:type]
           when :gates
             benchmark_gates
@@ -23,6 +27,26 @@ module RHDL
           else
             benchmark_gates
           end
+        end
+
+        def dry_run_describe
+          type = options[:type] || :gates
+          case type
+          when :gates
+            would :benchmark_gates, description: "Run gate-level simulation benchmark"
+          when :tests
+            count = options[:count] || 20
+            pattern = options[:pattern] || 'spec/'
+            would :benchmark_tests, description: "Profile RSpec tests showing #{count} slowest", pattern: pattern
+          when :timing
+            would :benchmark_timing, description: "Run detailed per-file timing analysis"
+          when :quick
+            would :benchmark_quick, description: "Quick benchmark of test categories"
+          when :ir
+            cycles = options[:cycles] || 100_000
+            would :benchmark_ir, description: "Benchmark IR runners with #{cycles} cycles"
+          end
+          dry_run_output
         end
 
         # Benchmark gate-level simulation

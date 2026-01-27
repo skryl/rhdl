@@ -9,6 +9,10 @@ module RHDL
       # Task for generating circuit diagrams
       class DiagramTask < Task
         def run
+          if dry_run?
+            return dry_run_describe
+          end
+
           if options[:clean]
             clean
           elsif options[:all]
@@ -16,6 +20,20 @@ module RHDL
           else
             generate_single
           end
+        end
+
+        def dry_run_describe
+          if options[:clean]
+            would :clean_diagrams, dir: Config.diagrams_dir
+          elsif options[:all]
+            mode = options[:mode] || 'all'
+            would :generate_all, description: "Generate #{mode} diagrams for all components",
+                  output_dir: Config.diagrams_dir, mode: mode
+          else
+            would :generate_single, component: options[:component], level: options[:level],
+                  format: options[:format], out: options[:out]
+          end
+          dry_run_output
         end
 
         # Generate diagrams for all components
