@@ -163,7 +163,10 @@ struct IrSimulator {
 
 impl IrSimulator {
     fn new(json: &str, sub_cycles: usize) -> Result<Self, String> {
-        let ir: ModuleIR = serde_json::from_str(json)
+        // Use deserializer with disabled recursion limit for deeply nested IR
+        let mut deserializer = serde_json::Deserializer::from_str(json);
+        deserializer.disable_recursion_limit();
+        let ir: ModuleIR = serde::Deserialize::deserialize(&mut deserializer)
             .map_err(|e| format!("Failed to parse IR JSON: {}", e))?;
 
         let mut signals = Vec::new();
