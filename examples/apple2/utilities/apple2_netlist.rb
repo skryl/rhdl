@@ -448,6 +448,19 @@ module RHDL
         @cycles
       end
 
+      # Return dry-run information for testing without starting emulation
+      # @return [Hash] Information about engine configuration and memory state
+      def dry_run_info
+        {
+          mode: :netlist,
+          simulator_type: simulator_type,
+          native: native?,
+          backend: @backend,
+          cpu_state: cpu_state,
+          memory_sample: memory_sample
+        }
+      end
+
       # Bus-like interface for compatibility
       def bus
         self
@@ -494,6 +507,17 @@ module RHDL
       end
 
       private
+
+      # Return a sample of memory for verification
+      def memory_sample
+        {
+          zero_page: (0...256).map { |i| @ram[i] || 0 },
+          stack: (0...256).map { |i| @ram[0x0100 + i] || 0 },
+          text_page: (0...1024).map { |i| @ram[0x0400 + i] || 0 },
+          program_area: (0...256).map { |i| @ram[0x0800 + i] || 0 },
+          reset_vector: [read(0xFFFC), read(0xFFFD)]
+        }
+      end
 
       # Apple II text screen line address calculation
       def text_line_address(row)

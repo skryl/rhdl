@@ -516,6 +516,19 @@ module RHDL
         @cycles
       end
 
+      # Return dry-run information for testing without starting emulation
+      # @return [Hash] Information about engine configuration and memory state
+      def dry_run_info
+        {
+          mode: :hdl,
+          simulator_type: simulator_type,
+          native: native?,
+          backend: @backend,
+          cpu_state: cpu_state,
+          memory_sample: memory_sample
+        }
+      end
+
       def bus
         self
       end
@@ -578,6 +591,17 @@ module RHDL
         group = row / 8
         line_in_group = row % 8
         TEXT_PAGE1_START + (line_in_group * 0x80) + (group * 0x28)
+      end
+
+      # Return a sample of memory for verification
+      def memory_sample
+        {
+          zero_page: (0...256).map { |i| read(i) },
+          stack: (0...256).map { |i| read(0x0100 + i) },
+          text_page: (0...1024).map { |i| read(0x0400 + i) },
+          program_area: (0...256).map { |i| read(0x0800 + i) },
+          reset_vector: [read(0xFFFC), read(0xFFFD)]
+        }
       end
 
       # Reuse stubs from netlist runner
