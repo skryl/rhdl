@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'rhdl'
 require_relative '../../../examples/apple2/hdl/apple2'
+require_relative '../../../examples/apple2/utilities/braille_renderer'
 
 RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   # Debug test to identify where ISA runner and IR compiler diverge
@@ -14,6 +15,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   # Test parameters
   TOTAL_CYCLES = 20_000_000
   CHECKPOINT_INTERVAL = 500_000  # Check every 500K cycles
+  SCREEN_INTERVAL = 2_000_000    # Print screen every 2M cycles
 
   before(:all) do
     @rom_available = File.exist?(ROM_PATH)
@@ -105,6 +107,57 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     data = sim.read_ram(0x0400, 0x400).to_a
     data.each { |b| checksum = (checksum + b) & 0xFFFFFFFF }
     checksum
+  end
+
+  # Hi-res screen line address calculation (Apple II interleaved layout)
+  def hires_line_address(row, base)
+    section = row / 64
+    row_in_section = row % 64
+    group = row_in_section / 8
+    line_in_group = row_in_section % 8
+    base + (line_in_group * 0x400) + (group * 0x80) + (section * 0x28)
+  end
+
+  # Decode HiRes memory to monochrome bitmap for ISA
+  def decode_hires_isa(bus, base_addr = 0x2000)
+    bitmap = []
+    192.times do |row|
+      line = []
+      line_addr = hires_line_address(row, base_addr)
+      40.times do |col|
+        byte = bus.read(line_addr + col) || 0
+        7.times do |bit|
+          line << ((byte >> bit) & 1)
+        end
+      end
+      bitmap << line
+    end
+    bitmap
+  end
+
+  # Decode HiRes memory to monochrome bitmap for IR
+  def decode_hires_ir(sim, base_addr = 0x2000)
+    ram = sim.read_ram(base_addr, 0x2000).to_a
+    bitmap = []
+    192.times do |row|
+      line = []
+      line_addr = hires_line_address(row, base_addr) - base_addr
+      40.times do |col|
+        byte = ram[line_addr + col] || 0
+        7.times do |bit|
+          line << ((byte >> bit) & 1)
+        end
+      end
+      bitmap << line
+    end
+    bitmap
+  end
+
+  # Print HiRes screen using braille renderer
+  def print_hires_screen(label, bitmap, cycles)
+    renderer = RHDL::Apple2::BrailleRenderer.new(chars_wide: 70)
+    puts "\n#{label} @ #{cycles / 1_000_000.0}M cycles:"
+    puts renderer.render(bitmap, invert: false)
   end
 
   it 'compares ISA vs IR compiler over 20M cycles', timeout: 1200 do
@@ -209,6 +262,15 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
                   checkpoint[:hires_match] ? "match" : "DIFF",
                   checkpoint[:text_match] ? "match" : "DIFF",
                   rate)
+
+      # Print HiRes screen at intervals
+      if (cycles_run % SCREEN_INTERVAL).zero?
+        isa_bitmap = decode_hires_isa(isa_bus)
+        print_hires_screen("ISA HiRes", isa_bitmap, cycles_run)
+
+        ir_bitmap = decode_hires_ir(ir_sim)
+        print_hires_screen("IR HiRes", ir_bitmap, cycles_run)
+      end
     end
 
     elapsed = Time.now - start_time
