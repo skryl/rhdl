@@ -1023,6 +1023,257 @@ RSpec.describe 'Sub-cycles PC Progression' do
   end
 end
 
+RSpec.describe 'Hi-res Rendering Modes' do
+  # Tests that braille and color rendering modes produce non-empty output
+  # when running with the Karateka memory dump, which contains actual game graphics
+
+  ROM_PATH_RENDER = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
+  KARATEKA_MEM_PATH_RENDER = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
+
+  before(:all) do
+    @rom_available = File.exist?(ROM_PATH_RENDER)
+    @karateka_available = File.exist?(KARATEKA_MEM_PATH_RENDER)
+    if @rom_available
+      @rom_data = File.binread(ROM_PATH_RENDER).bytes
+    end
+    if @karateka_available
+      @karateka_mem = File.binread(KARATEKA_MEM_PATH_RENDER).bytes
+    end
+  end
+
+  # Create IrRunner with Karateka memory loaded
+  # Tries JIT first, falls back to interpreter if not available
+  # Returns nil if no native backends are available
+  def create_ir_runner_with_karateka(backend: :jit)
+    require_relative '../../../examples/apple2/utilities/apple2_ir'
+
+    # Try the requested backend, fall back to interpreter
+    runner = nil
+    begin
+      runner = RHDL::Apple2::IrRunner.new(backend: backend)
+    rescue LoadError => e
+      if backend == :jit
+        # Fall back to interpreter
+        begin
+          runner = RHDL::Apple2::IrRunner.new(backend: :interpret)
+        rescue LoadError
+          return nil  # No native backends available
+        end
+      else
+        return nil  # Requested backend not available
+      end
+    end
+
+    # Modify reset vector to point to game entry
+    rom = @rom_data.dup
+    rom[0x2FFC] = 0x2A  # low byte of $B82A
+    rom[0x2FFD] = 0xB8  # high byte of $B82A
+
+    runner.load_rom(rom, base_addr: 0xD000)
+    runner.load_ram(@karateka_mem.first(48 * 1024), base_addr: 0)
+    runner.reset
+    runner
+  end
+
+  # Create HdlRunner with Karateka memory loaded
+  def create_hdl_runner_with_karateka
+    require_relative '../../../examples/apple2/utilities/apple2_hdl'
+
+    runner = RHDL::Apple2::HdlRunner.new
+
+    # Modify reset vector to point to game entry
+    rom = @rom_data.dup
+    rom[0x2FFC] = 0x2A  # low byte of $B82A
+    rom[0x2FFD] = 0xB8  # high byte of $B82A
+
+    runner.load_rom(rom, base_addr: 0xD000)
+    runner.load_ram(@karateka_mem.first(48 * 1024), base_addr: 0)
+    runner.reset
+    runner
+  end
+
+  describe 'IrRunner braille rendering' do
+    before do
+      skip 'AppleIIgo ROM not found' unless @rom_available
+      skip 'Karateka memory dump not found' unless @karateka_available
+    end
+
+    it 'produces non-empty braille output with Karateka graphics' do
+      runner = create_ir_runner_with_karateka(backend: :jit)
+      skip 'No native IR backends available' if runner.nil?
+
+      # Run a few cycles to stabilize
+      runner.run_steps(100)
+
+      # Render braille
+      output = runner.render_hires_braille(chars_wide: 80, invert: false)
+
+      expect(output).to be_a(String)
+      expect(output.length).to be > 0, "Braille output should not be empty"
+
+      # Split into lines and verify structure
+      lines = output.split("\n")
+      expect(lines.length).to eq(48), "Should have 48 braille rows (192/4)"
+
+      # Check that at least some lines have non-blank braille characters
+      # Blank braille is U+2800, any other braille character indicates content
+      non_blank_lines = lines.count { |line| line.chars.any? { |c| c.ord > 0x2800 && c.ord <= 0x28FF } }
+      expect(non_blank_lines).to be > 0, "Should have at least some lines with non-blank braille content"
+
+      puts "\n  IrRunner braille rendering:"
+      puts "    Output length: #{output.length} chars"
+      puts "    Lines: #{lines.length}"
+      puts "    Non-blank lines: #{non_blank_lines}/#{lines.length}"
+    end
+
+    it 'produces different output with invert option' do
+      runner = create_ir_runner_with_karateka(backend: :jit)
+      skip 'No native IR backends available' if runner.nil?
+
+      runner.run_steps(100)
+
+      normal = runner.render_hires_braille(chars_wide: 80, invert: false)
+      inverted = runner.render_hires_braille(chars_wide: 80, invert: true)
+
+      expect(normal).not_to eq(inverted), "Normal and inverted output should differ"
+    end
+  end
+
+  describe 'IrRunner color rendering' do
+    before do
+      skip 'AppleIIgo ROM not found' unless @rom_available
+      skip 'Karateka memory dump not found' unless @karateka_available
+    end
+
+    it 'produces non-empty color output with Karateka graphics' do
+      runner = create_ir_runner_with_karateka(backend: :jit)
+      skip 'No native IR backends available' if runner.nil?
+
+      # Run a few cycles to stabilize
+      runner.run_steps(100)
+
+      # Render color
+      output = runner.render_hires_color(chars_wide: 140)
+
+      expect(output).to be_a(String)
+      expect(output.length).to be > 0, "Color output should not be empty"
+
+      # Split into lines and verify structure
+      lines = output.split("\n")
+      expect(lines.length).to eq(96), "Should have 96 half-block rows (192/2)"
+
+      # Check for ANSI color codes (truecolor: \e[38;2;R;G;Bm)
+      has_color_codes = output.include?("\e[38;2;")
+      expect(has_color_codes).to be(true), "Color output should contain ANSI truecolor codes"
+
+      # Check that at least some lines have colored content (not all spaces)
+      non_blank_lines = lines.count { |line| line.gsub(/\e\[[^m]*m/, '').strip.length > 0 }
+      expect(non_blank_lines).to be > 0, "Should have at least some lines with colored content"
+
+      puts "\n  IrRunner color rendering:"
+      puts "    Output length: #{output.length} chars"
+      puts "    Lines: #{lines.length}"
+      puts "    Non-blank lines: #{non_blank_lines}/#{lines.length}"
+      puts "    Has color codes: #{has_color_codes}"
+    end
+  end
+
+  describe 'HdlRunner braille rendering' do
+    before do
+      skip 'AppleIIgo ROM not found' unless @rom_available
+      skip 'Karateka memory dump not found' unless @karateka_available
+    end
+
+    it 'produces non-empty braille output with Karateka graphics' do
+      runner = create_hdl_runner_with_karateka
+
+      # Run a few cycles to stabilize (HDL is slower)
+      runner.run_steps(50)
+
+      # Render braille
+      output = runner.render_hires_braille(chars_wide: 80, invert: false)
+
+      expect(output).to be_a(String)
+      expect(output.length).to be > 0, "Braille output should not be empty"
+
+      lines = output.split("\n")
+      expect(lines.length).to eq(48), "Should have 48 braille rows (192/4)"
+
+      non_blank_lines = lines.count { |line| line.chars.any? { |c| c.ord > 0x2800 && c.ord <= 0x28FF } }
+      expect(non_blank_lines).to be > 0, "Should have at least some lines with non-blank braille content"
+
+      puts "\n  HdlRunner braille rendering:"
+      puts "    Output length: #{output.length} chars"
+      puts "    Lines: #{lines.length}"
+      puts "    Non-blank lines: #{non_blank_lines}/#{lines.length}"
+    end
+  end
+
+  describe 'HdlRunner color rendering' do
+    before do
+      skip 'AppleIIgo ROM not found' unless @rom_available
+      skip 'Karateka memory dump not found' unless @karateka_available
+    end
+
+    it 'produces non-empty color output with Karateka graphics' do
+      runner = create_hdl_runner_with_karateka
+
+      # Run a few cycles to stabilize (HDL is slower)
+      runner.run_steps(50)
+
+      # Render color
+      output = runner.render_hires_color(chars_wide: 140)
+
+      expect(output).to be_a(String)
+      expect(output.length).to be > 0, "Color output should not be empty"
+
+      lines = output.split("\n")
+      expect(lines.length).to eq(96), "Should have 96 half-block rows (192/2)"
+
+      has_color_codes = output.include?("\e[38;2;")
+      expect(has_color_codes).to be(true), "Color output should contain ANSI truecolor codes"
+
+      non_blank_lines = lines.count { |line| line.gsub(/\e\[[^m]*m/, '').strip.length > 0 }
+      expect(non_blank_lines).to be > 0, "Should have at least some lines with colored content"
+
+      puts "\n  HdlRunner color rendering:"
+      puts "    Output length: #{output.length} chars"
+      puts "    Lines: #{lines.length}"
+      puts "    Non-blank lines: #{non_blank_lines}/#{lines.length}"
+      puts "    Has color codes: #{has_color_codes}"
+    end
+  end
+
+  describe 'rendering with batched vs fallback execution' do
+    before do
+      skip 'AppleIIgo ROM not found' unless @rom_available
+      skip 'Karateka memory dump not found' unless @karateka_available
+    end
+
+    it 'IrRunner reads hi-res memory correctly from batched backend' do
+      runner = create_ir_runner_with_karateka(backend: :jit)
+      skip 'No native IR backends available' if runner.nil?
+
+      runner.run_steps(100)
+
+      # Test that read_hires_bitmap returns non-empty data
+      bitmap = runner.read_hires_bitmap
+
+      expect(bitmap).to be_an(Array)
+      expect(bitmap.length).to eq(192), "Bitmap should have 192 rows"
+      expect(bitmap[0].length).to eq(280), "Each row should have 280 pixels"
+
+      # Check that the bitmap has some non-zero pixels (actual graphics data)
+      total_pixels = bitmap.flatten.sum
+      expect(total_pixels).to be > 0, "Bitmap should have some lit pixels"
+
+      puts "\n  Batched hi-res memory read:"
+      puts "    Bitmap size: #{bitmap.length}x#{bitmap[0].length}"
+      puts "    Total lit pixels: #{total_pixels}"
+    end
+  end
+end
+
 RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
   # Tests to verify the Apple2 system produces the same results as the
   # MOS6502 ISA runner reference implementation.
