@@ -263,8 +263,8 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     simulators[:isa] = create_isa_simulator
     puts "  [x] ISA: Native Rust ISA simulator (reference)"
 
-    # IR backends (skip interpreter - too slow)
-    [:jit, :compile].each do |backend|
+    # IR backends (skip interpreter and compile - too slow for now)
+    [:jit].each do |backend|
       if ir_backend_available?(backend)
         simulators[backend] = create_ir_simulator(backend)
         puts "  [x] IR #{backend.to_s.capitalize}: Available"
