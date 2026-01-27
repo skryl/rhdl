@@ -39,6 +39,7 @@ module RHDL
       output :debug_x, width: 8
       output :debug_y, width: 8
       output :debug_s, width: 8
+      output :debug_p, width: 8
       output :debug_second_byte
       output :debug_cycle2
       output :debug_addr_c2, width: 16
@@ -992,6 +993,7 @@ module RHDL
 
         # Status register pack for PHP
         status_reg = cat(flag_n, flag_v, lit(1, width: 1), ~irq_active, flag_d, flag_i, flag_z, flag_c)
+        debug_p <= status_reg
 
         rmw_out = mux(alu_mode1 == lit(ALU1_INP, width: 4), rmw_in,
           mux(alu_mode1 == lit(ALU1_P, width: 4), status_reg,
