@@ -48,8 +48,11 @@ RSpec.configure do |config|
 
   # Fail tests that take longer than timeout (default: 10s, slow tests: 60s)
   # Skip timeout if timeout value is 0
+  # Custom timeout can be specified via example.metadata[:timeout]
   config.around(:each) do |example|
-    timeout = if example.metadata[:slow]
+    timeout = if example.metadata[:timeout]
+      example.metadata[:timeout]
+    elsif example.metadata[:slow]
       RSPEC_SLOW_TIMEOUT
     else
       RSPEC_TEST_TIMEOUT
