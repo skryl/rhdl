@@ -119,13 +119,26 @@ module RHDL
 
           regs = []
           instance_nets = []
+          signal_names = Set.new
+
           _signals.each do |s|
+            signal_names.add(s.name)
             if instance_driven_signals.include?(s.name) || assign_driven_signals.include?(s.name)
               instance_nets << RHDL::Export::IR::Net.new(name: s.name, width: s.width)
             else
               reset_val = reset_vals[s.name]
               regs << RHDL::Export::IR::Reg.new(name: s.name, width: s.width, reset_value: reset_val)
             end
+          end
+
+          # Also create registers for sequential targets defined in reset_values
+          # that aren't already defined as explicit signals
+          reset_vals.each do |reg_name, reset_val|
+            next if signal_names.include?(reg_name)
+            # Look up width from ports if it's an output port, otherwise default to 8 bits
+            port = _ports.find { |p| p.name == reg_name }
+            width = port ? port.width : 8
+            regs << RHDL::Export::IR::Reg.new(name: reg_name, width: width, reset_value: reset_val)
           end
 
           # Generate memory IR from Memory DSL if included

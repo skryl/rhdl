@@ -67,9 +67,29 @@ module RHDL
           @regs << IR::Reg.new(name: signal.name, width: signal.width, reset_value: reset_val)
           @widths[signal.name.to_sym] = signal.width
         end
+
+        # Also create registers for sequential block targets defined in reset_values
+        # that aren't already defined as explicit signals
+        reset_values.each do |name, value|
+          next if @widths.key?(name.to_sym)
+
+          # Infer width from reset value, or use a reasonable default
+          width = infer_width_from_value(value)
+          @regs << IR::Reg.new(name: name, width: width, reset_value: value)
+          @widths[name.to_sym] = width
+        end
+
         @component_class._constants.each do |const|
           @widths[const.name.to_sym] = const.width
         end
+      end
+
+      def infer_width_from_value(value)
+        # For sequential block registers, the reset value doesn't tell us the max value.
+        # Use a reasonable default that covers most state machines and counters.
+        # 8 bits covers states 0-255, good for most state machines.
+        # Can be overridden by defining the signal explicitly with `wire :name, width: N`
+        8
       end
 
       def collect_memories
