@@ -122,6 +122,23 @@ class IRSimulatorRunner
     @sim.poke('rst', 0)
     # Run reset sequence (6 cycles)
     6.times { clock_tick }
+
+    # Load PC from reset vector (like harness.rb does)
+    # The HDL control unit doesn't automatically load PC from reset vector,
+    # so we use external PC load to do it
+    if @use_rust_memory
+      lo = @sim.read_mos6502_memory(0xFFFC)
+      hi = @sim.read_mos6502_memory(0xFFFD)
+    else
+      lo = @bus.read(0xFFFC)
+      hi = @bus.read(0xFFFD)
+    end
+    target_addr = (hi << 8) | lo
+    @sim.poke('ext_pc_load_data', target_addr)
+    @sim.poke('ext_pc_load_en', 1)
+    clock_tick
+    @sim.poke('ext_pc_load_en', 0)
+
     @cycles = 0
     @halted = false
   end
