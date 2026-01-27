@@ -472,6 +472,28 @@ module RHDL
       # Render hi-res screen with NTSC artifact colors
       # chars_wide: target width in characters (default 140)
       def render_hires_color(chars_wide: 140)
+        if @use_batched
+          render_hires_color_batched(chars_wide)
+        else
+          render_hires_color_fallback(chars_wide)
+        end
+      end
+
+      def render_hires_color_batched(chars_wide)
+        # Build a RAM array with hi-res page data from Rust backend
+        # ColorRenderer needs the full address space since it uses hires_line_address()
+        hires_ram = Array.new(HIRES_PAGE1_END + 1, 0)
+
+        # Read hi-res page data from Rust backend
+        # The hi-res page is 8KB at $2000-$3FFF
+        hires_data = @sim.read_ram(HIRES_PAGE1_START, HIRES_PAGE1_END - HIRES_PAGE1_START + 1).to_a
+        hires_data.each_with_index { |b, i| hires_ram[HIRES_PAGE1_START + i] = b }
+
+        renderer = ColorRenderer.new(chars_wide: chars_wide)
+        renderer.render(hires_ram, base_addr: HIRES_PAGE1_START)
+      end
+
+      def render_hires_color_fallback(chars_wide)
         @ram ||= Array.new(48 * 1024, 0)
         renderer = ColorRenderer.new(chars_wide: chars_wide)
         renderer.render(@ram, base_addr: HIRES_PAGE1_START)
