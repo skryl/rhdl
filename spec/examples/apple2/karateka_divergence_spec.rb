@@ -107,6 +107,41 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     checksum
   end
 
+  # Categorize PC into memory regions for convergence checking
+  def pc_region(pc)
+    case pc
+    when 0x0000..0x01FF then :zero_page_stack
+    when 0x0200..0x03FF then :input_buffer
+    when 0x0400..0x07FF then :text_page
+    when 0x0800..0x1FFF then :user_code
+    when 0x2000..0x3FFF then :hires_page1
+    when 0x4000..0x5FFF then :hires_page2
+    when 0x6000..0xBFFF then :high_ram
+    when 0xC000..0xCFFF then :io_space
+    when 0xD000..0xFFFF then :rom
+    else :unknown
+    end
+  end
+
+  # Check if two PCs are in converging regions (same general area)
+  def pcs_converging?(isa_pc, ir_pc)
+    isa_region = pc_region(isa_pc)
+    ir_region = pc_region(ir_pc)
+
+    # Exact region match
+    return true if isa_region == ir_region
+
+    # Allow ROM/high_ram as equivalent (game loop area)
+    rom_like = [:rom, :high_ram]
+    return true if rom_like.include?(isa_region) && rom_like.include?(ir_region)
+
+    # Allow user code areas as equivalent
+    user_like = [:user_code, :zero_page_stack, :input_buffer]
+    return true if user_like.include?(isa_region) && user_like.include?(ir_region)
+
+    false
+  end
+
   it 'compares ISA vs IR compiler over 10M cycles', timeout: 600 do
     skip 'AppleIIgo ROM not found' unless @rom_available
     skip 'Karateka memory dump not found' unless @karateka_available
@@ -179,6 +214,9 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
         isa_pc: isa_pc,
         ir_pc: ir_pc,
         pc_match: isa_pc == ir_pc,
+        pc_converging: pcs_converging?(isa_pc, ir_pc),
+        isa_region: pc_region(isa_pc),
+        ir_region: pc_region(ir_pc),
         isa_regs: { a: isa_a, x: isa_x, y: isa_y },
         ir_regs: { a: ir_a, x: ir_x, y: ir_y },
         regs_match: isa_a == ir_a && isa_x == ir_x && isa_y == ir_y,
@@ -234,37 +272,83 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
     # Summary table
     puts "\nCheckpoint Summary:"
-    puts "  Cycles     | PC Match | Regs Match | HiRes Match | Text Match"
-    puts "  " + "-" * 60
+    puts "  Cycles     | PC Match | Converging | HiRes Match | Text Match | ISA Region   | IR Region"
+    puts "  " + "-" * 90
     checkpoints.each do |cp|
-      puts format("  %9s | %-8s | %-10s | %-11s | %-10s",
+      puts format("  %9s | %-8s | %-10s | %-11s | %-10s | %-12s | %-12s",
                   "#{cp[:cycles] / 1_000_000.0}M",
                   cp[:pc_match] ? "yes" : "NO",
-                  cp[:regs_match] ? "yes" : "NO",
+                  cp[:pc_converging] ? "yes" : "NO",
                   cp[:hires_match] ? "yes" : "NO",
-                  cp[:text_match] ? "yes" : "NO")
+                  cp[:text_match] ? "yes" : "NO",
+                  cp[:isa_region],
+                  cp[:ir_region])
     end
 
     # Calculate match percentages
     total = checkpoints.size.to_f
     pc_match_pct = (checkpoints.count { |cp| cp[:pc_match] } / total * 100).round(1)
+    pc_converge_pct = (checkpoints.count { |cp| cp[:pc_converging] } / total * 100).round(1)
     regs_match_pct = (checkpoints.count { |cp| cp[:regs_match] } / total * 100).round(1)
     hires_match_pct = (checkpoints.count { |cp| cp[:hires_match] } / total * 100).round(1)
     text_match_pct = (checkpoints.count { |cp| cp[:text_match] } / total * 100).round(1)
 
     puts "\nMatch Percentages:"
-    puts format("  PC:     %5.1f%% (%d/%d checkpoints)", pc_match_pct, checkpoints.count { |cp| cp[:pc_match] }, checkpoints.size)
-    puts format("  Regs:   %5.1f%% (%d/%d checkpoints)", regs_match_pct, checkpoints.count { |cp| cp[:regs_match] }, checkpoints.size)
-    puts format("  HiRes:  %5.1f%% (%d/%d checkpoints)", hires_match_pct, checkpoints.count { |cp| cp[:hires_match] }, checkpoints.size)
-    puts format("  Text:   %5.1f%% (%d/%d checkpoints)", text_match_pct, checkpoints.count { |cp| cp[:text_match] }, checkpoints.size)
+    puts format("  PC Exact:     %5.1f%% (%d/%d checkpoints)", pc_match_pct, checkpoints.count { |cp| cp[:pc_match] }, checkpoints.size)
+    puts format("  PC Converge:  %5.1f%% (%d/%d checkpoints)", pc_converge_pct, checkpoints.count { |cp| cp[:pc_converging] }, checkpoints.size)
+    puts format("  Regs:         %5.1f%% (%d/%d checkpoints)", regs_match_pct, checkpoints.count { |cp| cp[:regs_match] }, checkpoints.size)
+    puts format("  HiRes:        %5.1f%% (%d/%d checkpoints)", hires_match_pct, checkpoints.count { |cp| cp[:hires_match] }, checkpoints.size)
+    puts format("  Text:         %5.1f%% (%d/%d checkpoints)", text_match_pct, checkpoints.count { |cp| cp[:text_match] }, checkpoints.size)
 
     # Note about PC timing differences
-    if pc_match_pct < 100 && hires_match_pct > 50
+    if pc_match_pct < 100 && pc_converge_pct > 80
       puts "\n  Note: PC mismatches are expected due to timing differences between"
       puts "        ISA (instruction-level) and IR (cycle-accurate HDL) simulators."
-      puts "        Graphics matching indicates correct functional behavior."
+      puts "        High convergence rate indicates correct functional behavior."
     end
 
+    # Assertions - pass if PC is converging (both visit same general code regions)
     expect(checkpoints.size).to be >= 10, "Should have at least 10 checkpoints"
+
+    # Check that both simulators visit the same set of regions
+    # (timing offset is OK, but they should be executing the same code areas)
+    isa_regions = checkpoints.map { |cp| cp[:isa_region] }.uniq.sort
+    ir_regions = checkpoints.map { |cp| cp[:ir_region] }.uniq.sort
+
+    # Normalize regions - ROM/high_ram are equivalent, user-like regions are equivalent
+    def normalize_regions(regions)
+      regions.map do |r|
+        case r
+        when :rom, :high_ram then :game_loop
+        when :user_code, :zero_page_stack, :input_buffer, :text_page then :user_area
+        else r
+        end
+      end.uniq.sort
+    end
+
+    isa_normalized = normalize_regions(isa_regions)
+    ir_normalized = normalize_regions(ir_regions)
+
+    puts "\n  Regions visited:"
+    puts "    ISA: #{isa_regions.join(', ')}"
+    puts "    IR:  #{ir_regions.join(', ')}"
+    puts "    Normalized ISA: #{isa_normalized.join(', ')}"
+    puts "    Normalized IR:  #{ir_normalized.join(', ')}"
+
+    # Both should visit game_loop and user_area regions
+    expect(isa_normalized).to include(:game_loop),
+      "ISA should visit game loop (ROM/HighRAM) region"
+    expect(ir_normalized).to include(:game_loop),
+      "IR should visit game loop (ROM/HighRAM) region"
+
+    # Check that IR doesn't get stuck in unusual regions (HiRes pages as code)
+    stuck_in_hires = checkpoints.count { |cp| [:hires_page1, :hires_page2].include?(cp[:ir_region]) }
+    expect(stuck_in_hires).to be < (checkpoints.size * 0.3),
+      "IR should not execute from HiRes memory for more than 30% of checkpoints (got #{stuck_in_hires})"
+
+    # Text should match for majority of checkpoints (indicates functional correctness)
+    text_match_count = checkpoints.count { |cp| cp[:text_match] }
+    expect(text_match_count).to be >= (checkpoints.size * 0.8),
+      "Text memory should match for at least 80% of checkpoints, got #{(text_match_count * 100.0 / checkpoints.size).round(1)}%"
   end
 end
