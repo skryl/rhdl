@@ -159,4 +159,32 @@ class IRSimulatorRunner
   def cycle_count
     @cycles
   end
+
+  # Return dry-run information for testing without starting emulation
+  # @return [Hash] Information about engine configuration and memory state
+  def dry_run_info
+    @sim ||= create_simulator
+    {
+      mode: :hdl,
+      simulator_type: simulator_type,
+      native: native?,
+      backend: @sim_backend,
+      cpu_state: cpu_state,
+      memory_sample: memory_sample
+    }
+  end
+
+  private
+
+  # Return a sample of memory for verification
+  def memory_sample
+    @sim ||= create_simulator
+    {
+      zero_page: @sim.read_ram(0x0000, 256),
+      stack: @sim.read_ram(0x0100, 256),
+      text_page: @sim.read_ram(0x0400, 1024),
+      program_area: @sim.read_ram(0x0800, 256),
+      reset_vector: @sim.read_ram(0xFFFC, 2)
+    }
+  end
 end
