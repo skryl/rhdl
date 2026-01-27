@@ -79,17 +79,30 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     sim
   end
 
-  def hires_checksum_isa(bus)
+  # Get the active HiRes page base address for ISA simulator
+  def hires_page_base_isa(bus)
+    bus.hires_page_base
+  end
+
+  # Get the active HiRes page base address for IR simulator
+  def hires_page_base_ir(sim)
+    page2 = sim.peek('page2')
+    page2 == 1 ? 0x4000 : 0x2000
+  end
+
+  def hires_checksum_isa(bus, base_addr = nil)
+    base_addr ||= hires_page_base_isa(bus)
     checksum = 0
-    (0x2000..0x3FFF).each do |addr|
+    (base_addr..(base_addr + 0x1FFF)).each do |addr|
       checksum = (checksum + bus.read(addr)) & 0xFFFFFFFF
     end
     checksum
   end
 
-  def hires_checksum_ir(sim)
+  def hires_checksum_ir(sim, base_addr = nil)
+    base_addr ||= hires_page_base_ir(sim)
     checksum = 0
-    data = sim.read_ram(0x2000, 0x2000).to_a
+    data = sim.read_ram(base_addr, 0x2000).to_a
     data.each { |b| checksum = (checksum + b) & 0xFFFFFFFF }
     checksum
   end
@@ -214,8 +227,12 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       isa_pc = isa_cpu.pc
       ir_pc = ir_sim.peek('cpu__pc_reg')
 
-      isa_hires = hires_checksum_isa(isa_bus)
-      ir_hires = hires_checksum_ir(ir_sim)
+      # Get active HiRes pages
+      isa_page = hires_page_base_isa(isa_bus)
+      ir_page = hires_page_base_ir(ir_sim)
+
+      isa_hires = hires_checksum_isa(isa_bus, isa_page)
+      ir_hires = hires_checksum_ir(ir_sim, ir_page)
       isa_text = text_checksum_isa(isa_bus)
       ir_text = text_checksum_ir(ir_sim)
 
@@ -235,6 +252,9 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
         isa_regs: { a: isa_a, x: isa_x, y: isa_y },
         ir_regs: { a: ir_a, x: ir_x, y: ir_y },
         regs_match: isa_a == ir_a && isa_x == ir_x && isa_y == ir_y,
+        isa_page: isa_page,
+        ir_page: ir_page,
+        page_match: isa_page == ir_page,
         isa_hires: isa_hires,
         ir_hires: ir_hires,
         hires_match: isa_hires == ir_hires,
@@ -254,22 +274,28 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       rate = cycles_run / elapsed / 1_000_000
       pct = (cycles_run.to_f / TOTAL_CYCLES * 100).round(1)
 
-      puts format("  %5.1f%% | %7.1fM cycles | PC: ISA=%04X IR=%04X %s | HiRes: %s | Text: %s | %.2fM/s",
+      isa_pg = isa_page == 0x2000 ? 1 : 2
+      ir_pg = ir_page == 0x2000 ? 1 : 2
+      puts format("  %5.1f%% | %7.1fM cycles | PC: ISA=%04X IR=%04X %s | Page: ISA=%d IR=%d | HiRes: %s | Text: %s | %.2fM/s",
                   pct,
                   cycles_run / 1_000_000.0,
                   isa_pc, ir_pc,
                   isa_pc == ir_pc ? "=" : "≠",
+                  isa_pg, ir_pg,
                   checkpoint[:hires_match] ? "match" : "DIFF",
                   checkpoint[:text_match] ? "match" : "DIFF",
                   rate)
 
-      # Print HiRes screen at intervals
+      # Print HiRes screen at intervals (using active page)
       if (cycles_run % SCREEN_INTERVAL).zero?
-        isa_bitmap = decode_hires_isa(isa_bus)
-        print_hires_screen("ISA HiRes", isa_bitmap, cycles_run)
+        isa_page = hires_page_base_isa(isa_bus)
+        ir_page = hires_page_base_ir(ir_sim)
 
-        ir_bitmap = decode_hires_ir(ir_sim)
-        print_hires_screen("IR HiRes", ir_bitmap, cycles_run)
+        isa_bitmap = decode_hires_isa(isa_bus, isa_page)
+        print_hires_screen("ISA HiRes (page #{isa_page == 0x2000 ? 1 : 2})", isa_bitmap, cycles_run)
+
+        ir_bitmap = decode_hires_ir(ir_sim, ir_page)
+        print_hires_screen("IR HiRes (page #{ir_page == 0x2000 ? 1 : 2})", ir_bitmap, cycles_run)
       end
     end
 
@@ -296,13 +322,16 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
     # Summary table
     puts "\nCheckpoint Summary:"
-    puts "  Cycles     | PC Match | Regs Match | HiRes Match | Text Match"
-    puts "  " + "-" * 60
+    puts "  Cycles     | PC Match | Regs Match | Page (ISA/IR) | HiRes Match | Text Match"
+    puts "  " + "-" * 75
     checkpoints.each do |cp|
-      puts format("  %9s | %-8s | %-10s | %-11s | %-10s",
+      isa_pg = cp[:isa_page] == 0x2000 ? 1 : 2
+      ir_pg = cp[:ir_page] == 0x2000 ? 1 : 2
+      puts format("  %9s | %-8s | %-10s | %-13s | %-11s | %-10s",
                   "#{cp[:cycles] / 1_000_000.0}M",
                   cp[:pc_match] ? "yes" : "NO",
                   cp[:regs_match] ? "yes" : "NO",
+                  "#{isa_pg}/#{ir_pg}",
                   cp[:hires_match] ? "yes" : "NO",
                   cp[:text_match] ? "yes" : "NO")
     end
