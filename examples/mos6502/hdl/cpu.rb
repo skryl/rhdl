@@ -126,6 +126,7 @@ module MOS6502
     wire :actual_load_y
     wire :actual_reg_data, width: 8
     wire :actual_pc_load
+    wire :actual_pc_inc
     wire :actual_pc_addr, width: 16
     wire :actual_sp_load
     wire :actual_sp_data, width: 8
@@ -323,7 +324,7 @@ module MOS6502
     port [:pc, :pc] => :pc_val
     port :actual_pc_load => [:pc, :load]
     port :actual_pc_addr => [:pc, :addr_in]
-    port :ctrl_pc_inc => [:pc, :inc]
+    port :actual_pc_inc => [:pc, :inc]
 
     # SP connections (use computed signals)
     port [:sp, :sp] => :sp_val
@@ -515,6 +516,12 @@ module MOS6502
       # This avoids race condition where PC would see old alatch_addr value
       # For BRK vector: same issue - need to use data_in directly
       actual_pc_load <= ext_pc_load_en | ctrl_pc_load
+      # PC increment: follows control unit
+      # During ext_pc_load in FETCH state:
+      #   actual_pc_load = 1, actual_pc_inc = 1 (from ctrl_pc_inc)
+      #   ProgramCounter: PC = addr_in + 1 = target_addr + 1
+      # This is correct - after FETCH, PC should point past the opcode to the operand
+      actual_pc_inc <= ctrl_pc_inc
       actual_pc_addr <= mux(ext_pc_load_en, ext_pc_load_data,
                             mux(is_rts_pull_hi | is_rti_pull_hi | is_brk_vec_hi,
                                 return_addr, agen_eff_addr))
