@@ -997,8 +997,8 @@ module RHDL
 
         rmw_out = mux(alu_mode1 == lit(ALU1_INP, width: 4), rmw_in,
           mux(alu_mode1 == lit(ALU1_P, width: 4), status_reg,
-            mux(alu_mode1 == lit(ALU1_INC, width: 4), rmw_in + lit(1, width: 8),
-              mux(alu_mode1 == lit(ALU1_DEC, width: 4), rmw_in - lit(1, width: 8),
+            mux(alu_mode1 == lit(ALU1_INC, width: 4), (rmw_in + lit(1, width: 8))[7..0],
+              mux(alu_mode1 == lit(ALU1_DEC, width: 4), (rmw_in - lit(1, width: 8))[7..0],
                 mux(alu_mode1 == lit(ALU1_FLG, width: 4), rmw_in,
                   mux(alu_mode1 == lit(ALU1_BIT, width: 4), rmw_in,
                     mux(alu_mode1 == lit(ALU1_LSR, width: 4), cat(lit(0, width: 1), rmw_in[7..1]),
