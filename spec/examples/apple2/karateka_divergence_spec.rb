@@ -90,6 +90,11 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     sim.poke('reset', 0)
     3.times { sim.run_cpu_cycles(1, 0, false) }
 
+    # Initialize HIRES soft switches (like ISA simulator does)
+    # soft_switches bits: 0=text, 1=mixed, 2=page2, 3=hires
+    # For HIRES mode: text=0, mixed=0, page2=0, hires=1 => 0b00001000 = 8
+    sim.poke('soft_switches', 8)
+
     sim
   end
 
