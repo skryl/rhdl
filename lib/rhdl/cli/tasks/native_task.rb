@@ -68,10 +68,6 @@ module RHDL
         }.freeze
 
         def run
-          if dry_run?
-            return dry_run_describe
-          end
-
           if options[:build]
             build
           elsif options[:clean]
@@ -81,29 +77,6 @@ module RHDL
           else
             build
           end
-        end
-
-        def dry_run_describe
-          target = options[:target]
-          extensions = target ? { target.to_sym => EXTENSIONS[target.to_sym] } : EXTENSIONS
-
-          if options[:build] || (!options[:clean] && !options[:check])
-            extensions.each do |key, ext|
-              next unless ext
-              would :cargo_build, extension: key, name: ext[:name], dir: ext[:ext_dir]
-            end
-          elsif options[:clean]
-            extensions.each do |key, ext|
-              next unless ext
-              would :clean_extension, extension: key, name: ext[:name]
-            end
-          elsif options[:check]
-            extensions.each do |key, ext|
-              next unless ext
-              would :check_extension, extension: key, name: ext[:name]
-            end
-          end
-          dry_run_output
         end
 
         # Build all native Rust extensions

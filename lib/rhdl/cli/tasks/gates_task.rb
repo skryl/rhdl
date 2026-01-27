@@ -9,10 +9,6 @@ module RHDL
       # Task for gate-level synthesis
       class GatesTask < Task
         def run
-          if dry_run?
-            return dry_run_describe
-          end
-
           if options[:clean]
             clean
           elsif options[:stats]
@@ -22,22 +18,6 @@ module RHDL
           else
             export_all
           end
-        end
-
-        def dry_run_describe
-          if options[:clean]
-            would :clean_gates, dir: Config.gates_dir
-          elsif options[:stats]
-            would :show_stats, description: "Show gate-level synthesis statistics for all components"
-          elsif options[:simcpu]
-            would :export_simcpu, description: "Export SimCPU datapath components to gate-level IR",
-                  output_dir: File.join(Config.gates_dir, 'cpu')
-          else
-            would :export_all, description: "Export all components to gate-level IR",
-                  output_dir: Config.gates_dir,
-                  component_count: Config.gate_synth_components.size
-          end
-          dry_run_output
         end
 
         # Export all components to gate-level IR

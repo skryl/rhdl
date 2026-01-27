@@ -9,10 +9,6 @@ module RHDL
       # Task for combined generate/clean/regenerate operations
       class GenerateTask < Task
         def run
-          if dry_run?
-            return dry_run_describe
-          end
-
           case options[:action]
           when :clean
             clean_all
@@ -23,18 +19,6 @@ module RHDL
           else
             generate_all
           end
-        end
-
-        def dry_run_describe
-          case options[:action]
-          when :clean
-            would :clean_all, description: "Clean all generated files (diagrams, verilog, gates)"
-          when :regenerate
-            would :regenerate_all, description: "Clean and regenerate all output files"
-          else
-            would :generate_all, description: "Generate all output files (diagrams, verilog)"
-          end
-          dry_run_output
         end
 
         # Generate all output files

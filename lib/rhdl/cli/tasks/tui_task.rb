@@ -9,24 +9,11 @@ module RHDL
       # Task for launching TUI debugger
       class TuiTask < Task
         def run
-          if dry_run?
-            return dry_run_describe
-          end
-
           if options[:list]
             list_components
           else
             run_ruby_tui
           end
-        end
-
-        def dry_run_describe
-          if options[:list]
-            would :list_components, description: "List available TUI components"
-          else
-            would :run_tui, component: options[:component], signals: options[:signals]
-          end
-          dry_run_output
         end
 
         # List available components
