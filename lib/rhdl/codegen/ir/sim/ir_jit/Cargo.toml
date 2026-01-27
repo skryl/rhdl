@@ -12,7 +12,7 @@ crate-type = ["cdylib"]
 [dependencies]
 magnus = "0.8"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde_json = { version = "1.0.100", features = ["unbounded_depth"] }
 cranelift = "0.116"
 cranelift-jit = "0.116"
 cranelift-module = "0.116"
