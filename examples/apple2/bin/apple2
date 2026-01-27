@@ -131,7 +131,8 @@ class Apple2HDLTerminal
     @hires_width = [preferred, @term_cols].min
 
     # Calculate padding for hires display
-    hires_content_height = HIRES_HEIGHT  # Always 48 braille chars tall
+    # Color mode uses half-blocks (2 pixels/char = 96 lines), braille uses 4 pixels/char (48 lines)
+    hires_content_height = @color_mode ? 96 : HIRES_HEIGHT
     debug_panel_height = @debug ? 8 : 1  # 6 lines debug box + 2 gap, or 1 line for disk status
     total_content_height = hires_content_height + debug_panel_height
 
