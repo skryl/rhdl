@@ -7,8 +7,8 @@ require 'spec_helper'
 require 'rhdl'
 
 RSpec.describe 'JIT Divergence Trace', :hdl, :slow do
-  ROM_PATH = File.expand_path('../../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
-  KARATEKA_MEM_PATH = File.expand_path('../../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
+  ROM_PATH = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
+  KARATEKA_MEM_PATH = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
 
   before(:all) do
     @rom_available = File.exist?(ROM_PATH)
@@ -29,8 +29,8 @@ RSpec.describe 'JIT Divergence Trace', :hdl, :slow do
   end
 
   def create_isa_simulator
-    require_relative '../../../../examples/mos6502/utilities/apple2_bus'
-    require_relative '../../../../examples/mos6502/utilities/isa_simulator_native'
+    require_relative '../../../examples/mos6502/utilities/apple2_bus'
+    require_relative '../../../examples/mos6502/utilities/isa_simulator_native'
 
     karateka_rom = create_karateka_rom
     bus = MOS6502::Apple2Bus.new
@@ -53,8 +53,8 @@ RSpec.describe 'JIT Divergence Trace', :hdl, :slow do
   end
 
   def create_jit_simulator
-    require_relative '../../../../examples/mos6502/utilities/ir_simulator_runner'
-    require_relative '../../../../examples/mos6502/utilities/apple2_bus'
+    require_relative '../../../examples/mos6502/utilities/ir_simulator_runner'
+    require_relative '../../../examples/mos6502/utilities/apple2_bus'
 
     runner = IRSimulatorRunner.new(:jit)
     karateka_rom = create_karateka_rom
