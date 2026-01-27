@@ -577,6 +577,24 @@ struct JitRtlSimulator {
     reset_values: Vec<(usize, u64)>,
     /// Sub-cycles per CPU cycle (1-14, default 14 for full timing accuracy)
     sub_cycles: usize,
+
+    // MOS6502 CPU-only mode: memory bridging internalized
+    /// True if this is a MOS6502 CPU IR (has addr, data_in, data_out, rw signals)
+    mos6502_mode: bool,
+    /// MOS6502 memory (64KB unified)
+    mos6502_memory: Vec<u8>,
+    /// MOS6502 ROM mask (true = ROM protected)
+    mos6502_rom_mask: Vec<bool>,
+    /// MOS6502 address output signal index
+    mos6502_addr_idx: usize,
+    /// MOS6502 data input signal index
+    mos6502_data_in_idx: usize,
+    /// MOS6502 data output signal index
+    mos6502_data_out_idx: usize,
+    /// MOS6502 read/write signal index (1=read, 0=write)
+    mos6502_rw_idx: usize,
+    /// MOS6502 clock signal index
+    mos6502_clk_idx: usize,
 }
 
 impl JitRtlSimulator {
@@ -705,6 +723,18 @@ impl JitRtlSimulator {
         // CPU address register for providing correct data during any bus phase
         let cpu_addr_idx = *name_to_idx.get("cpu__addr_reg").unwrap_or(&0);
 
+        // Detect MOS6502 CPU-only mode (has addr, data_in, data_out, rw, clk signals)
+        let mos6502_addr_idx = *name_to_idx.get("addr").unwrap_or(&0);
+        let mos6502_data_in_idx = *name_to_idx.get("data_in").unwrap_or(&0);
+        let mos6502_data_out_idx = *name_to_idx.get("data_out").unwrap_or(&0);
+        let mos6502_rw_idx = *name_to_idx.get("rw").unwrap_or(&0);
+        let mos6502_clk_idx = *name_to_idx.get("clk").unwrap_or(&0);
+        let mos6502_mode = name_to_idx.contains_key("addr")
+            && name_to_idx.contains_key("data_in")
+            && name_to_idx.contains_key("data_out")
+            && name_to_idx.contains_key("rw")
+            && name_to_idx.contains_key("clk");
+
         Ok(Self {
             signals,
             widths,
@@ -735,6 +765,14 @@ impl JitRtlSimulator {
             cpu_addr_idx,
             reset_values,
             sub_cycles,
+            mos6502_mode,
+            mos6502_memory: vec![0u8; 64 * 1024],
+            mos6502_rom_mask: vec![false; 64 * 1024],
+            mos6502_addr_idx,
+            mos6502_data_in_idx,
+            mos6502_data_out_idx,
+            mos6502_rw_idx,
+            mos6502_clk_idx,
         })
     }
 
@@ -1035,6 +1073,92 @@ impl JitRtlSimulator {
     fn reg_count(&self) -> usize {
         self.reg_count
     }
+
+    // ========================================================================
+    // MOS6502 CPU-only mode methods
+    // ========================================================================
+
+    /// Check if this simulator is in MOS6502 CPU-only mode
+    fn is_mos6502_mode(&self) -> bool {
+        self.mos6502_mode
+    }
+
+    /// Load memory for MOS6502 mode
+    /// If rom is true, memory is marked as ROM (writes blocked)
+    fn load_mos6502_memory(&mut self, data: &[u8], offset: usize, rom: bool) {
+        let end = (offset + data.len()).min(self.mos6502_memory.len());
+        let len = end.saturating_sub(offset);
+        if len > 0 {
+            self.mos6502_memory[offset..end].copy_from_slice(&data[..len]);
+            if rom {
+                for i in offset..end {
+                    self.mos6502_rom_mask[i] = true;
+                }
+            }
+        }
+    }
+
+    /// Set reset vector directly (bypasses ROM protection)
+    fn set_mos6502_reset_vector(&mut self, addr: u16) {
+        self.mos6502_memory[0xFFFC] = (addr & 0xFF) as u8;
+        self.mos6502_memory[0xFFFD] = ((addr >> 8) & 0xFF) as u8;
+    }
+
+    /// Run N CPU cycles with internalized memory bridging for MOS6502
+    /// Returns the number of cycles actually run
+    fn run_mos6502_cycles(&mut self, n: usize) -> usize {
+        if !self.mos6502_mode {
+            return 0;
+        }
+
+        // Find clock index in our clock_indices array for proper edge detection
+        let clk_list_idx = self.clock_indices.iter().position(|&ci| ci == self.mos6502_clk_idx);
+
+        for _ in 0..n {
+            // Get address and R/W from CPU
+            let addr = unsafe { *self.signals.get_unchecked(self.mos6502_addr_idx) } as usize & 0xFFFF;
+            let rw = unsafe { *self.signals.get_unchecked(self.mos6502_rw_idx) };
+
+            if rw == 1 {
+                // Read: provide data from memory to CPU
+                let data = unsafe { *self.mos6502_memory.get_unchecked(addr) } as u64;
+                unsafe { *self.signals.get_unchecked_mut(self.mos6502_data_in_idx) = data; }
+            } else {
+                // Write: store CPU data to memory (unless ROM protected)
+                if !unsafe { *self.mos6502_rom_mask.get_unchecked(addr) } {
+                    let data = unsafe { *self.signals.get_unchecked(self.mos6502_data_out_idx) } as u8;
+                    unsafe { *self.mos6502_memory.get_unchecked_mut(addr) = data; }
+                }
+            }
+
+            // Clock falling edge
+            // First save current clock state, then set to 0, then evaluate
+            if let Some(idx) = clk_list_idx {
+                self.prev_clock_values[idx] = 1; // Previous state was high
+            }
+            unsafe { *self.signals.get_unchecked_mut(self.mos6502_clk_idx) = 0; }
+            self.evaluate();
+
+            // Clock rising edge - this is where registers update
+            // Save current clock state (0), then set to 1, then full tick for register sampling
+            if let Some(idx) = clk_list_idx {
+                self.prev_clock_values[idx] = 0; // Previous state was low
+            }
+            unsafe { *self.signals.get_unchecked_mut(self.mos6502_clk_idx) = 1; }
+            self.tick();
+        }
+
+        n
+    }
+
+    /// Read from MOS6502 memory
+    fn read_mos6502_memory(&self, addr: usize) -> u8 {
+        if addr < self.mos6502_memory.len() {
+            self.mos6502_memory[addr]
+        } else {
+            0
+        }
+    }
 }
 
 struct BatchResult {
@@ -1244,6 +1368,36 @@ impl RubyJitSim {
 
         Ok(hash)
     }
+
+    // MOS6502 CPU-only mode methods
+
+    fn is_mos6502_mode(&self) -> bool {
+        self.sim.borrow().is_mos6502_mode()
+    }
+
+    fn load_mos6502_memory(&self, data: RArray, offset: usize, rom: bool) -> Result<(), Error> {
+        let ruby = unsafe { Ruby::get_unchecked() };
+        let bytes: Vec<u8> = data.to_vec::<i64>()
+            .map_err(|e| Error::new(ruby.exception_runtime_error(), format!("Invalid memory data: {}", e)))?
+            .into_iter()
+            .map(|v| v as u8)
+            .collect();
+        self.sim.borrow_mut().load_mos6502_memory(&bytes, offset, rom);
+        Ok(())
+    }
+
+    fn set_mos6502_reset_vector(&self, addr: i64) -> Result<(), Error> {
+        self.sim.borrow_mut().set_mos6502_reset_vector(addr as u16);
+        Ok(())
+    }
+
+    fn run_mos6502_cycles(&self, n: usize) -> usize {
+        self.sim.borrow_mut().run_mos6502_cycles(n)
+    }
+
+    fn read_mos6502_memory(&self, addr: usize) -> u8 {
+        self.sim.borrow().read_mos6502_memory(addr)
+    }
 }
 
 #[magnus::init]
@@ -1277,6 +1431,13 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("poke_by_idx", method!(RubyJitSim::poke_by_idx, 2))?;
     class.define_method("peek_by_idx", method!(RubyJitSim::peek_by_idx, 1))?;
     class.define_method("get_clock_info", method!(RubyJitSim::get_clock_info, 0))?;
+
+    // MOS6502 CPU-only mode methods
+    class.define_method("mos6502_mode?", method!(RubyJitSim::is_mos6502_mode, 0))?;
+    class.define_method("load_mos6502_memory", method!(RubyJitSim::load_mos6502_memory, 3))?;
+    class.define_method("set_mos6502_reset_vector", method!(RubyJitSim::set_mos6502_reset_vector, 1))?;
+    class.define_method("run_mos6502_cycles", method!(RubyJitSim::run_mos6502_cycles, 1))?;
+    class.define_method("read_mos6502_memory", method!(RubyJitSim::read_mos6502_memory, 1))?;
 
     Ok(())
 }
