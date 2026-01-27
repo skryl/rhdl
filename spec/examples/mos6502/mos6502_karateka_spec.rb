@@ -1,0 +1,197 @@
+# frozen_string_literal: true
+
+require 'spec_helper'
+
+# Load the runner utilities
+require_relative '../../../examples/mos6502/utilities/apple2_bus'
+require_relative '../../../examples/mos6502/utilities/isa_simulator'
+require_relative '../../../examples/mos6502/utilities/ruby_isa_runner'
+
+RSpec.describe 'MOS6502 Karateka Mode' do
+  let(:karateka_mem) { File.expand_path('../../../examples/mos6502/software/disks/karateka_mem.bin', __dir__) }
+  let(:appleiigo_rom) { File.expand_path('../../../examples/mos6502/software/roms/appleiigo.rom', __dir__) }
+
+  before(:each) do
+    skip "Karateka memory dump not found" unless File.exist?(karateka_mem)
+    skip "AppleIIGo ROM not found" unless File.exist?(appleiigo_rom)
+  end
+
+  # Helper to set reset vector bypassing ROM protection
+  # ROM protection blocks writes to $FFFC/$FFFD after load_rom is called
+  def set_reset_vector(bus, addr)
+    memory = bus.instance_variable_get(:@memory)
+    memory[0xFFFC] = addr & 0xFF
+    memory[0xFFFD] = (addr >> 8) & 0xFF
+  end
+
+  describe 'ISA mode with karateka' do
+    let(:runner) do
+      bus = MOS6502::Apple2Bus.new("test_bus")
+      cpu = MOS6502::ISASimulator.new(bus)
+      RubyISARunner.new(bus, cpu)
+    end
+
+    it 'loads ROM and memory dump successfully' do
+      rom_bytes = File.binread(appleiigo_rom).bytes
+      mem_bytes = File.binread(karateka_mem).bytes
+
+      # Load ROM at $D000 and memory dump at $0000
+      runner.load_rom(rom_bytes, base_addr: 0xD000)
+      runner.load_ram(mem_bytes, base_addr: 0x0000)
+
+      # Set up reset vector to karateka entry point (bypass ROM protection)
+      set_reset_vector(runner.bus, 0xB82A)
+
+      # Verify reset vector is set correctly
+      reset_lo = runner.bus.read(0xFFFC)
+      reset_hi = runner.bus.read(0xFFFD)
+      reset_addr = reset_lo | (reset_hi << 8)
+      expect(reset_addr).to eq(0xB82A)
+    end
+
+    it 'resets CPU to entry point and runs cycles' do
+      rom_bytes = File.binread(appleiigo_rom).bytes
+      mem_bytes = File.binread(karateka_mem).bytes
+
+      runner.load_rom(rom_bytes, base_addr: 0xD000)
+      runner.load_ram(mem_bytes, base_addr: 0x0000)
+
+      # Set up reset vector (bypass ROM protection)
+      set_reset_vector(runner.bus, 0xB82A)
+
+      # Reset CPU - this should set PC to $B82A
+      runner.reset
+
+      state = runner.cpu_state
+      expect(state[:pc]).to eq(0xB82A)
+
+      # Run some cycles
+      runner.run_steps(100)
+
+      # PC should have advanced
+      new_state = runner.cpu_state
+      expect(new_state[:cycles]).to be > 0
+    end
+
+    it 'executes karateka code for 1000 cycles without crashing' do
+      rom_bytes = File.binread(appleiigo_rom).bytes
+      mem_bytes = File.binread(karateka_mem).bytes
+
+      runner.load_rom(rom_bytes, base_addr: 0xD000)
+      runner.load_ram(mem_bytes, base_addr: 0x0000)
+
+      # Set up reset vector (bypass ROM protection)
+      set_reset_vector(runner.bus, 0xB82A)
+
+      runner.reset
+
+      # Run 1000 cycles
+      runner.run_steps(1000)
+
+      state = runner.cpu_state
+      # Should have executed cycles without halting (no BRK)
+      expect(state[:halted]).to be(false)
+      expect(state[:cycles]).to be >= 1000
+    end
+
+    it 'can read and write to text page memory' do
+      rom_bytes = File.binread(appleiigo_rom).bytes
+      mem_bytes = File.binread(karateka_mem).bytes
+
+      runner.load_rom(rom_bytes, base_addr: 0xD000)
+      runner.load_ram(mem_bytes, base_addr: 0x0000)
+
+      # Text page is at $0400-$07FF
+      # Write a test value
+      runner.bus.write(0x0400, 0x41)  # 'A'
+      expect(runner.bus.read(0x0400)).to eq(0x41)
+
+      # Read screen array (returns 24 rows of 40 columns each)
+      screen = runner.read_screen_array
+      expect(screen).to be_a(Array)
+      expect(screen.length).to eq(24)  # 24 lines
+      expect(screen.first.length).to eq(40)  # 40 columns per line
+    end
+  end
+
+  describe 'HDL mode with karateka', :slow do
+    # Note: HDL mode tests are marked slow and may be skipped in normal runs
+    # They require the IR simulator which may not have native extensions built
+
+    it 'loads and runs with IR simulator if available' do
+      begin
+        require_relative '../../../examples/mos6502/utilities/ir_simulator_runner'
+      rescue LoadError => e
+        skip "IR simulator runner not available: #{e.message}"
+      end
+
+      begin
+        runner = IRSimulatorRunner.new(:interpret)
+      rescue RuntimeError => e
+        skip "IR interpreter not available: #{e.message}"
+      rescue JSON::NestingError => e
+        skip "MOS6502 CPU IR is too deeply nested for JSON conversion: #{e.message}"
+      end
+
+      rom_bytes = File.binread(appleiigo_rom).bytes
+      mem_bytes = File.binread(karateka_mem).bytes
+
+      runner.load_rom(rom_bytes, base_addr: 0xD000)
+      runner.load_ram(mem_bytes, base_addr: 0x0000)
+
+      # Set up reset vector (bypass ROM protection)
+      set_reset_vector(runner.bus, 0xB82A)
+
+      runner.reset
+
+      state = runner.cpu_state
+      expect(state[:pc]).to be_a(Integer)
+
+      # Run some cycles (HDL mode is slower)
+      runner.run_steps(100)
+
+      new_state = runner.cpu_state
+      expect(new_state[:cycles]).to be > 0
+    end
+  end
+
+  describe 'ISA mode behavior consistency' do
+    let(:runner) do
+      bus = MOS6502::Apple2Bus.new("test_bus")
+      cpu = MOS6502::ISASimulator.new(bus)
+      RubyISARunner.new(bus, cpu)
+    end
+
+    it 'executes deterministically - same input produces same output' do
+      rom_bytes = File.binread(appleiigo_rom).bytes
+      mem_bytes = File.binread(karateka_mem).bytes
+
+      # First run
+      runner.load_rom(rom_bytes, base_addr: 0xD000)
+      runner.load_ram(mem_bytes, base_addr: 0x0000)
+      set_reset_vector(runner.bus, 0xB82A)
+      runner.reset
+      runner.run_steps(500)
+      state1 = runner.cpu_state
+
+      # Create new runner and do second run
+      bus2 = MOS6502::Apple2Bus.new("test_bus2")
+      cpu2 = MOS6502::ISASimulator.new(bus2)
+      runner2 = RubyISARunner.new(bus2, cpu2)
+
+      runner2.load_rom(rom_bytes, base_addr: 0xD000)
+      runner2.load_ram(mem_bytes, base_addr: 0x0000)
+      set_reset_vector(runner2.bus, 0xB82A)
+      runner2.reset
+      runner2.run_steps(500)
+      state2 = runner2.cpu_state
+
+      # Should produce identical results
+      expect(state2[:pc]).to eq(state1[:pc])
+      expect(state2[:a]).to eq(state1[:a])
+      expect(state2[:x]).to eq(state1[:x])
+      expect(state2[:y]).to eq(state1[:y])
+      expect(state2[:sp]).to eq(state1[:sp])
+    end
+  end
+end
