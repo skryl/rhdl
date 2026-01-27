@@ -332,11 +332,11 @@ module MOS6502
       }, default: 0)
 
       # load_addr_hi: load address latch high byte
+      # NOTE: Only STATE_ADDR_HI should set this - for indirect addressing modes
+      # RTS/RTI/BRK use return_addr = cat(data_in, alatch_addr_lo) directly,
+      # so we must NOT corrupt addr_hi with stack/vector data here
       load_addr_hi <= case_select(state, {
-        STATE_ADDR_HI => lit(1, width: 1),
-        STATE_RTS_PULL_HI => lit(1, width: 1),
-        STATE_RTI_PULL_HI => lit(1, width: 1),
-        STATE_BRK_VEC_HI => lit(1, width: 1)
+        STATE_ADDR_HI => lit(1, width: 1)
       }, default: 0)
 
       # load_data: load data latch

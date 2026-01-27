@@ -134,9 +134,31 @@ class IRSimulatorRunner
       hi = @bus.read(0xFFFD)
     end
     target_addr = (hi << 8) | lo
+
+    # Get the opcode at target address - we'll need this for IR loading
+    if @use_rust_memory
+      opcode = @sim.read_mos6502_memory(target_addr)
+    else
+      opcode = @bus.read(target_addr)
+    end
+
+    # Do the ext_pc_load with a custom clock cycle that loads data_in correctly
     @sim.poke('ext_pc_load_data', target_addr)
     @sim.poke('ext_pc_load_en', 1)
-    clock_tick
+
+    # Manual clock cycle with correct timing:
+    # 1. Falling edge - combinational logic updates (addr won't be correct yet)
+    @sim.poke('clk', 0)
+    @sim.tick
+
+    # 2. Set data_in to the opcode AFTER falling edge, BEFORE rising edge
+    # This ensures IR captures the correct opcode during FETCH→DECODE
+    @sim.poke('data_in', opcode)
+
+    # 3. Rising edge - PC loads from ext_pc_load_data, IR loads from data_in
+    @sim.poke('clk', 1)
+    @sim.tick
+
     @sim.poke('ext_pc_load_en', 0)
 
     @cycles = 0
@@ -170,8 +192,16 @@ class IRSimulatorRunner
   end
 
   # Run one clock cycle with memory bridging (Ruby fallback path)
+  # Timing matches the Rust run_mos6502_cycles implementation:
+  # 1. Clock falling edge - combinational logic updates (addr becomes valid)
+  # 2. Sample address and do memory bridging
+  # 3. Clock rising edge - registers capture values
   def clock_tick
-    # Get address and read/write signal from CPU
+    # Clock falling edge - combinational logic updates
+    @sim.poke('clk', 0)
+    @sim.tick
+
+    # NOW get address and read/write signal from CPU (reflects current state)
     addr = @sim.peek('addr')
     rw = @sim.peek('rw')
 
@@ -185,9 +215,7 @@ class IRSimulatorRunner
       @bus.write(addr, data)
     end
 
-    # Advance clock
-    @sim.poke('clk', 0)
-    @sim.tick
+    # Clock rising edge - registers capture values
     @sim.poke('clk', 1)
     @sim.tick
   end
