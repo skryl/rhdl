@@ -6,7 +6,7 @@
 require 'spec_helper'
 require 'rhdl'
 
-RSpec.describe 'JIT Divergence Trace', :hdl do
+RSpec.describe 'JIT Divergence Trace', :hdl, :slow do
   ROM_PATH = File.expand_path('../../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
   KARATEKA_MEM_PATH = File.expand_path('../../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
 
@@ -88,8 +88,58 @@ RSpec.describe 'JIT Divergence Trace', :hdl do
     # Run in chunks to find approximate divergence point
     # Use "steps" which is instructions for ISA and cycles for JIT
     # The Rust run_mos6502_cycles actually runs instructions internally
-    chunk_size = 50_000
-    total_steps = 0
+    # Start by checking the initial state
+    puts "Initial state:"
+    puts "  ISA PC=$#{isa[:cpu].pc.to_s(16).upcase}"
+    puts "  JIT PC=$#{jit.cpu_state[:pc].to_s(16).upcase}"
+
+
+    # Show what bytes are at the start address
+    puts "\nMemory at $B82A:"
+    (0..15).each do |i|
+      addr = 0xB82A + i
+      byte = isa[:bus].mem_read(addr)
+      opcode_name = decode_opcode(byte) if i == 0 || i == 2 || i == 4
+      puts "  $#{addr.to_s(16).upcase}: $#{byte.to_s(16).upcase.rjust(2,'0')} #{opcode_name || ''}"
+    end
+
+    # Trace first 20 instructions in detail (use larger cycle batches per instruction)
+    puts "\nTracing first 20 instructions..."
+    20.times do |i|
+      jit_pc_before = jit.cpu_state[:pc]
+      jit_a_before = jit.cpu_state[:a]
+      jit_x_before = jit.cpu_state[:x]
+      jit_y_before = jit.cpu_state[:y]
+
+      opcode = jit.bus.read(jit_pc_before)
+      op1 = jit.bus.read(jit_pc_before + 1) rescue 0
+      op2 = jit.bus.read(jit_pc_before + 2) rescue 0
+
+      # Run enough cycles for one instruction (max 7 cycles for complex ops)
+      jit.run_steps(7)
+
+      jit_pc_after = jit.cpu_state[:pc]
+      jit_a_after = jit.cpu_state[:a]
+      jit_x_after = jit.cpu_state[:x]
+      jit_y_after = jit.cpu_state[:y]
+
+      puts "  Instr #{i}: PC=$#{jit_pc_before.to_s(16).upcase} opcode=$#{opcode.to_s(16).upcase} (#{decode_opcode(opcode)}) " +
+           "ops=$#{op1.to_s(16).upcase.rjust(2,'0')},$#{op2.to_s(16).upcase.rjust(2,'0')} " +
+           "-> PC=$#{jit_pc_after.to_s(16).upcase} A=$#{jit_a_after.to_s(16).upcase} X=$#{jit_x_after.to_s(16).upcase} Y=$#{jit_y_after.to_s(16).upcase}"
+
+      if jit.halted?
+        puts "    ** JIT HALTED **"
+        break
+      end
+
+      # Check for bad jump
+      if jit_pc_after < 0x800 || (jit_pc_after >= 0x2000 && jit_pc_after < 0xC000 && jit_pc_after != jit_pc_before + 1 && jit_pc_after != jit_pc_before + 2 && jit_pc_after != jit_pc_before + 3)
+        puts "    ** SUSPICIOUS JUMP to $#{jit_pc_after.to_s(16).upcase} **"
+      end
+    end
+
+    chunk_size = 100_000
+    total_steps = 140  # 20 instructions * 7 cycles
     max_steps = 2_500_000
 
     last_match_steps = 0
