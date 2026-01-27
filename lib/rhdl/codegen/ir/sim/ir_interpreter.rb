@@ -159,7 +159,7 @@ module RHDL
       # Ruby fallback simulator for when native extension is not available
       class RubyIrSim
         def initialize(json)
-          @ir = JSON.parse(json, symbolize_names: true)
+          @ir = JSON.parse(json, symbolize_names: true, max_nesting: false)
           @signals = {}
           @widths = {}
           @inputs = []
@@ -373,7 +373,7 @@ module RHDL
             assigns: ir.assigns.map { |a| assign_to_hash(a) },
             processes: ir.processes.map { |p| process_to_hash(p) },
             memories: (ir.memories || []).map { |m| memory_to_hash(m) }
-          }.to_json
+          }.to_json(max_nesting: false)
         end
 
         def port_to_hash(port)
