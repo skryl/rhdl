@@ -28,10 +28,6 @@ module RHDL
         ].freeze
 
         def run
-          if dry_run?
-            return dry_run_describe
-          end
-
           if options[:info]
             show_disk_info
           elsif options[:extract_boot]
@@ -45,22 +41,6 @@ module RHDL
           else
             convert_disk_to_binary
           end
-        end
-
-        def dry_run_describe
-          input_file = options[:input] || options[:disk]
-          if options[:info]
-            would :show_disk_info, disk: input_file
-          elsif options[:extract_boot]
-            would :extract_boot, disk: input_file, output: options[:output]
-          elsif options[:extract_tracks]
-            would :extract_tracks, disk: input_file, start_track: options[:start_track], end_track: options[:end_track]
-          elsif options[:dump_after_boot]
-            would :dump_after_boot, disk: input_file, rom: options[:rom], output: options[:output]
-          else
-            would :convert_disk, disk: input_file, output: options[:output], base_addr: options[:base_addr]
-          end
-          dry_run_output
         end
 
         # Convert entire disk to a flat binary image for direct memory loading

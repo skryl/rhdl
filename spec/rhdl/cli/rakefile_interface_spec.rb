@@ -233,62 +233,6 @@ RSpec.describe 'Rakefile interface' do
       end
     end
 
-    it 'all task classes implement dry_run_describe method' do
-      require 'rhdl/cli'
-
-      task_classes = [
-        RHDL::CLI::Tasks::Apple2Task,
-        RHDL::CLI::Tasks::BenchmarkTask,
-        RHDL::CLI::Tasks::DepsTask,
-        RHDL::CLI::Tasks::DiagramTask,
-        RHDL::CLI::Tasks::DiskConvertTask,
-        RHDL::CLI::Tasks::ExportTask,
-        RHDL::CLI::Tasks::GatesTask,
-        RHDL::CLI::Tasks::GenerateTask,
-        RHDL::CLI::Tasks::MOS6502Task,
-        RHDL::CLI::Tasks::NativeTask,
-        RHDL::CLI::Tasks::TuiTask
-      ]
-
-      task_classes.each do |klass|
-        expect(klass.instance_methods(false)).to include(:dry_run_describe),
-          "Expected #{klass} to define dry_run_describe method"
-      end
-    end
-  end
-
-  describe 'dry_run functionality' do
-    it 'Task base class provides dry_run? method' do
-      task = RHDL::CLI::Task.new(dry_run: true)
-      expect(task.dry_run?).to be true
-
-      task = RHDL::CLI::Task.new
-      expect(task.dry_run?).to be false
-    end
-
-    it 'Task base class provides would method for recording actions' do
-      task = RHDL::CLI::Task.new(dry_run: true)
-      task.would(:test_action, foo: 'bar')
-      expect(task.dry_run_output).to eq([{ action: :test_action, foo: 'bar' }])
-    end
-
-    it 'dry_run mode returns action descriptions instead of executing' do
-      # Test a few representative task classes
-      deps_task = RHDL::CLI::Tasks::DepsTask.new(dry_run: true)
-      result = deps_task.run
-      expect(result).to be_an(Array)
-      expect(result.first[:action]).to eq(:install_deps)
-
-      benchmark_task = RHDL::CLI::Tasks::BenchmarkTask.new(type: :gates, dry_run: true)
-      result = benchmark_task.run
-      expect(result).to be_an(Array)
-      expect(result.first[:action]).to eq(:benchmark_gates)
-
-      native_task = RHDL::CLI::Tasks::NativeTask.new(build: true, dry_run: true)
-      result = native_task.run
-      expect(result).to be_an(Array)
-      expect(result.first[:action]).to eq(:cargo_build)
-    end
   end
 
   describe 'SPEC_PATHS constant' do

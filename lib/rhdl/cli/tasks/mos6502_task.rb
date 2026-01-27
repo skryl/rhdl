@@ -9,10 +9,6 @@ module RHDL
       # Task for MOS 6502 emulator
       class MOS6502Task < Task
         def run
-          if dry_run?
-            return dry_run_describe
-          end
-
           if options[:clean]
             clean
           elsif options[:build]
@@ -26,23 +22,6 @@ module RHDL
           else
             run_emulator
           end
-        end
-
-        def dry_run_describe
-          if options[:clean]
-            would :clean_rom, dir: Config.rom_output_dir
-          elsif options[:build]
-            would :build_rom, output_dir: Config.rom_output_dir, run_after: options[:run]
-          elsif options[:demo]
-            would :run_demo, description: "Run MOS 6502 emulator in demo mode"
-          elsif options[:appleiigo]
-            would :run_appleiigo, rom: File.join(Config.roms_dir, 'appleiigo.rom')
-          elsif options[:karateka]
-            would :run_karateka, description: "Run Karateka from pre-loaded memory dump"
-          else
-            would :run_emulator, rom: options[:rom], mode: options[:mode], sim: options[:sim]
-          end
-          dry_run_output
         end
 
         # Build the mini monitor ROM

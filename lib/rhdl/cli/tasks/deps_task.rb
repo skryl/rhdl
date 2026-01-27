@@ -9,24 +9,11 @@ module RHDL
       # Task for managing test dependencies
       class DepsTask < Task
         def run
-          if dry_run?
-            return dry_run_describe
-          end
-
           if options[:check]
             check_status
           else
             install
           end
-        end
-
-        def dry_run_describe
-          if options[:check]
-            would :check_deps, description: "Check test dependencies status (iverilog, dot, ruby, bundler)"
-          else
-            would :install_deps, description: "Install test dependencies (iverilog)", platform: detect_platform
-          end
-          dry_run_output
         end
 
         # Install test dependencies

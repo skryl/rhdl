@@ -9,10 +9,6 @@ module RHDL
       # Task for Apple II HDL emulator
       class Apple2Task < Task
         def run
-          if dry_run?
-            return dry_run_describe
-          end
-
           if options[:demo]
             run_demo
           elsif options[:appleiigo]
@@ -22,19 +18,6 @@ module RHDL
           else
             run_emulator
           end
-        end
-
-        def dry_run_describe
-          if options[:demo]
-            would :run_demo, description: "Run Apple II emulator in demo mode"
-          elsif options[:appleiigo]
-            would :run_appleiigo, rom: File.join(Config.roms_dir, 'appleiigo.rom')
-          elsif options[:karateka]
-            would :run_karateka, description: "Run Karateka from pre-loaded memory dump"
-          else
-            would :run_emulator, rom: options[:rom], mode: options[:mode], sim: options[:sim]
-          end
-          dry_run_output
         end
 
         # Run emulator in demo mode
