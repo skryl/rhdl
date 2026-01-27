@@ -1504,7 +1504,14 @@ impl RtlSimulator {
         let clk_list_idx = self.clock_indices.iter().position(|&ci| ci == self.mos6502_clk_idx);
 
         for _ in 0..n {
-            // Get address and R/W from CPU
+            // Clock falling edge - combinational logic updates
+            if let Some(idx) = clk_list_idx {
+                self.old_clocks[idx] = 1; // Previous state was high
+            }
+            unsafe { *self.signals.get_unchecked_mut(self.mos6502_clk_idx) = 0; }
+            self.evaluate();
+
+            // NOW get address and R/W from CPU (after evaluate, addr is valid)
             let addr = unsafe { *self.signals.get_unchecked(self.mos6502_addr_idx) } as usize & 0xFFFF;
             let rw = unsafe { *self.signals.get_unchecked(self.mos6502_rw_idx) };
 
@@ -1520,16 +1527,7 @@ impl RtlSimulator {
                 }
             }
 
-            // Clock falling edge
-            // First save current clock state, then set to 0, then tick
-            if let Some(idx) = clk_list_idx {
-                self.old_clocks[idx] = 1; // Previous state was high
-            }
-            unsafe { *self.signals.get_unchecked_mut(self.mos6502_clk_idx) = 0; }
-            self.evaluate();
-
             // Clock rising edge - this is where registers update
-            // Save current clock state (0), then set to 1, then full tick for register sampling
             if let Some(idx) = clk_list_idx {
                 self.old_clocks[idx] = 0; // Previous state was low
             }
@@ -1546,6 +1544,13 @@ impl RtlSimulator {
             self.mos6502_memory[addr]
         } else {
             0
+        }
+    }
+
+    /// Write to MOS6502 memory (respects ROM mask)
+    fn write_mos6502_memory(&mut self, addr: usize, data: u8) {
+        if addr < self.mos6502_memory.len() && !self.mos6502_rom_mask[addr] {
+            self.mos6502_memory[addr] = data;
         }
     }
 }
@@ -1746,6 +1751,10 @@ impl RubyRtlSim {
     fn read_mos6502_memory(&self, addr: usize) -> u8 {
         self.sim.borrow().read_mos6502_memory(addr)
     }
+
+    fn write_mos6502_memory(&self, addr: usize, data: u8) {
+        self.sim.borrow_mut().write_mos6502_memory(addr, data);
+    }
 }
 
 #[magnus::init]
@@ -1780,6 +1789,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("set_mos6502_reset_vector", method!(RubyRtlSim::set_mos6502_reset_vector, 1))?;
     class.define_method("run_mos6502_cycles", method!(RubyRtlSim::run_mos6502_cycles, 1))?;
     class.define_method("read_mos6502_memory", method!(RubyRtlSim::read_mos6502_memory, 1))?;
+    class.define_method("write_mos6502_memory", method!(RubyRtlSim::write_mos6502_memory, 2))?;
 
     Ok(())
 }
