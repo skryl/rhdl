@@ -118,7 +118,8 @@ RSpec.describe 'MOS6502 Karateka Mode' do
     # Note: HDL mode tests are marked slow and may be skipped in normal runs
     # They require the IR simulator which may not have native extensions built
 
-    it 'loads and runs with IR simulator if available' do
+    # Helper to create and run an IR simulator with the given backend
+    def run_hdl_test(sim_type, rom_bytes, mem_bytes)
       begin
         require_relative '../../../examples/mos6502/utilities/ir_simulator_runner'
       rescue LoadError => e
@@ -126,15 +127,12 @@ RSpec.describe 'MOS6502 Karateka Mode' do
       end
 
       begin
-        runner = IRSimulatorRunner.new(:interpret)
+        runner = IRSimulatorRunner.new(sim_type)
       rescue RuntimeError => e
-        skip "IR interpreter not available: #{e.message}"
+        skip "IR #{sim_type} backend not available: #{e.message}"
       rescue JSON::NestingError => e
         skip "MOS6502 CPU IR is too deeply nested for JSON conversion: #{e.message}"
       end
-
-      rom_bytes = File.binread(appleiigo_rom).bytes
-      mem_bytes = File.binread(karateka_mem).bytes
 
       runner.load_rom(rom_bytes, base_addr: 0xD000)
       runner.load_ram(mem_bytes, base_addr: 0x0000)
@@ -152,6 +150,24 @@ RSpec.describe 'MOS6502 Karateka Mode' do
 
       new_state = runner.cpu_state
       expect(new_state[:cycles]).to be > 0
+    end
+
+    it 'loads and runs with IR interpret backend' do
+      rom_bytes = File.binread(appleiigo_rom).bytes
+      mem_bytes = File.binread(karateka_mem).bytes
+      run_hdl_test(:interpret, rom_bytes, mem_bytes)
+    end
+
+    it 'loads and runs with IR jit backend' do
+      rom_bytes = File.binread(appleiigo_rom).bytes
+      mem_bytes = File.binread(karateka_mem).bytes
+      run_hdl_test(:jit, rom_bytes, mem_bytes)
+    end
+
+    it 'loads and runs with IR compile backend' do
+      rom_bytes = File.binread(appleiigo_rom).bytes
+      mem_bytes = File.binread(karateka_mem).bytes
+      run_hdl_test(:compile, rom_bytes, mem_bytes)
     end
   end
 
