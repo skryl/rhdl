@@ -245,6 +245,26 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
                   cp[:text_match] ? "yes" : "NO")
     end
 
+    # Calculate match percentages
+    total = checkpoints.size.to_f
+    pc_match_pct = (checkpoints.count { |cp| cp[:pc_match] } / total * 100).round(1)
+    regs_match_pct = (checkpoints.count { |cp| cp[:regs_match] } / total * 100).round(1)
+    hires_match_pct = (checkpoints.count { |cp| cp[:hires_match] } / total * 100).round(1)
+    text_match_pct = (checkpoints.count { |cp| cp[:text_match] } / total * 100).round(1)
+
+    puts "\nMatch Percentages:"
+    puts format("  PC:     %5.1f%% (%d/%d checkpoints)", pc_match_pct, checkpoints.count { |cp| cp[:pc_match] }, checkpoints.size)
+    puts format("  Regs:   %5.1f%% (%d/%d checkpoints)", regs_match_pct, checkpoints.count { |cp| cp[:regs_match] }, checkpoints.size)
+    puts format("  HiRes:  %5.1f%% (%d/%d checkpoints)", hires_match_pct, checkpoints.count { |cp| cp[:hires_match] }, checkpoints.size)
+    puts format("  Text:   %5.1f%% (%d/%d checkpoints)", text_match_pct, checkpoints.count { |cp| cp[:text_match] }, checkpoints.size)
+
+    # Note about PC timing differences
+    if pc_match_pct < 100 && hires_match_pct > 50
+      puts "\n  Note: PC mismatches are expected due to timing differences between"
+      puts "        ISA (instruction-level) and IR (cycle-accurate HDL) simulators."
+      puts "        Graphics matching indicates correct functional behavior."
+    end
+
     expect(checkpoints.size).to be >= 10, "Should have at least 10 checkpoints"
   end
 end
