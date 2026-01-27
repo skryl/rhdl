@@ -751,15 +751,20 @@ impl IrSimulator {
         }
 
         // Generate evaluate function (inline for performance)
-        code.push_str("/// Evaluate all combinational assignments\n");
+        // Use topologically sorted levels to ensure dependencies are evaluated before dependents
+        code.push_str("/// Evaluate all combinational assignments (topologically sorted)\n");
         code.push_str("#[inline(always)]\n");
         code.push_str("unsafe fn evaluate_inline(signals: &mut [u64]) {\n");
 
-        for assign in &self.ir.assigns {
-            if let Some(&idx) = self.name_to_idx.get(&assign.target) {
-                let width = self.widths.get(idx).copied().unwrap_or(64);
-                let expr_code = self.expr_to_rust(&assign.expr);
-                code.push_str(&format!("    signals[{}] = ({}) & {};\n", idx, expr_code, Self::mask_const(width)));
+        let levels = self.compute_assignment_levels();
+        for level in &levels {
+            for &assign_idx in level {
+                let assign = &self.ir.assigns[assign_idx];
+                if let Some(&idx) = self.name_to_idx.get(&assign.target) {
+                    let width = self.widths.get(idx).copied().unwrap_or(64);
+                    let expr_code = self.expr_to_rust(&assign.expr);
+                    code.push_str(&format!("    signals[{}] = ({}) & {};\n", idx, expr_code, Self::mask_const(width)));
+                }
             }
         }
 
@@ -1363,6 +1368,11 @@ impl IrSimulator {
 
     /// Run N CPU cycles with internalized memory bridging for MOS6502
     /// Returns the number of cycles actually run
+    ///
+    /// Timing matches the JIT and Ruby fallback (IRSimulatorRunner::clock_tick):
+    /// 1. Clock falling edge - combinational logic updates (addr becomes valid)
+    /// 2. Sample address and do memory bridging
+    /// 3. Clock rising edge - registers capture values
     fn run_mos6502_cycles(&mut self, n: usize) -> usize {
         if !self.mos6502_mode {
             return 0;
@@ -1372,7 +1382,14 @@ impl IrSimulator {
         let clk_list_idx = self.clock_indices.iter().position(|&ci| ci == self.mos6502_clk_idx);
 
         for _ in 0..n {
-            // Get address and R/W from CPU
+            // Clock falling edge - combinational logic updates
+            if let Some(idx) = clk_list_idx {
+                self.old_clocks[idx] = 1; // Previous state was high
+            }
+            self.signals[self.mos6502_clk_idx] = 0;
+            self.evaluate();
+
+            // NOW get address and R/W from CPU (after evaluate, addr is valid)
             let addr = self.signals[self.mos6502_addr_idx] as usize & 0xFFFF;
             let rw = self.signals[self.mos6502_rw_idx];
 
@@ -1388,16 +1405,7 @@ impl IrSimulator {
                 }
             }
 
-            // Clock falling edge
-            // First save current clock state, then set to 0, then evaluate
-            if let Some(idx) = clk_list_idx {
-                self.old_clocks[idx] = 1; // Previous state was high
-            }
-            self.signals[self.mos6502_clk_idx] = 0;
-            self.evaluate();
-
-            // Clock rising edge - this is where registers update
-            // Save current clock state (0), then set to 1, then full tick for register sampling
+            // Clock rising edge - registers capture values
             if let Some(idx) = clk_list_idx {
                 self.old_clocks[idx] = 0; // Previous state was low
             }
@@ -1414,6 +1422,13 @@ impl IrSimulator {
             self.mos6502_memory[addr]
         } else {
             0
+        }
+    }
+
+    /// Write to MOS6502 memory (respects ROM protection)
+    fn write_mos6502_memory(&mut self, addr: usize, data: u8) {
+        if addr < self.mos6502_memory.len() && !self.mos6502_rom_mask[addr] {
+            self.mos6502_memory[addr] = data;
         }
     }
 }
@@ -1624,6 +1639,10 @@ impl RubyIrCompiler {
     fn read_mos6502_memory(&self, addr: usize) -> u8 {
         self.sim.borrow().read_mos6502_memory(addr)
     }
+
+    fn write_mos6502_memory(&self, addr: usize, data: i64) {
+        self.sim.borrow_mut().write_mos6502_memory(addr, data as u8);
+    }
 }
 
 #[magnus::init]
@@ -1661,6 +1680,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("set_mos6502_reset_vector", method!(RubyIrCompiler::set_mos6502_reset_vector, 1))?;
     class.define_method("run_mos6502_cycles", method!(RubyIrCompiler::run_mos6502_cycles, 1))?;
     class.define_method("read_mos6502_memory", method!(RubyIrCompiler::read_mos6502_memory, 1))?;
+    class.define_method("write_mos6502_memory", method!(RubyIrCompiler::write_mos6502_memory, 2))?;
 
     Ok(())
 }
