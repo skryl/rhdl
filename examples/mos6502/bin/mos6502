@@ -123,10 +123,14 @@ class Apple2Terminal
   end
 
   def update_terminal_size
-    if $stdout.respond_to?(:winsize)
-      rows, cols = $stdout.winsize
-      @term_rows = [rows, DISPLAY_HEIGHT].max
-      @term_cols = [cols, DISPLAY_WIDTH].max
+    if $stdout.respond_to?(:winsize) && $stdout.tty?
+      begin
+        rows, cols = $stdout.winsize
+        @term_rows = [rows, DISPLAY_HEIGHT].max
+        @term_cols = [cols, DISPLAY_WIDTH].max
+      rescue Errno::ENOTTY
+        # Not a TTY, use defaults
+      end
     end
 
     # Calculate padding to center the text display
@@ -979,6 +983,10 @@ parser = OptionParser.new do |opts|
     options[:audio] = false
   end
 
+  opts.on("--dry-run", "Load configuration and display engine info without running emulator") do
+    options[:dry_run] = true
+  end
+
   opts.on("-h", "--help", "Show this help message") do
     puts opts
     exit
@@ -1127,6 +1135,15 @@ if options[:init_hires]
   bus.read(0xC057)  # HIRES - hi-res mode
   # Push video state to native CPU so it matches Ruby bus
   terminal.runner.sync_video_to_native if terminal.runner.respond_to?(:sync_video_to_native)
+end
+
+# Handle dry-run mode - output engine info and memory dump without running
+if options[:dry_run]
+  require 'json'
+  runner = terminal.runner
+  info = runner.dry_run_info
+  puts JSON.pretty_generate(info)
+  exit 0
 end
 
 # Run the emulator
