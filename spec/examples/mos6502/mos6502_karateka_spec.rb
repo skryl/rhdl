@@ -136,8 +136,8 @@ RSpec.describe 'MOS6502 Karateka Mode' do
         skip "MOS6502 CPU IR is too deeply nested for JSON conversion: #{e.message}"
       end
 
-      # Set up reset vector (bypass ROM protection)
-      set_reset_vector(runner.bus, 0xB82A)
+      # Set up reset vector (bypass ROM protection - uses runner method for Rust+Ruby sync)
+      runner.set_reset_vector(0xB82A)
 
       runner.reset
 
