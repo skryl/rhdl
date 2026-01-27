@@ -144,8 +144,8 @@ class IRSimulatorRunner
       a: @sim.peek('cpu__a_reg'),
       x: @sim.peek('cpu__x_reg'),
       y: @sim.peek('cpu__y_reg'),
-      sp: @sim.peek('cpu__sp_reg'),
-      p: @sim.peek('cpu__p_reg'),
+      sp: @sim.peek('cpu__s_reg'),
+      p: @sim.peek('cpu__debug_p'),
       cycles: @cycles,
       halted: @halted,
       simulator_type: simulator_type
