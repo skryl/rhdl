@@ -24,7 +24,7 @@ class IRSimulatorRunner
   def create_simulator
     case @sim_backend
     when :interpret
-      raise "IR Interpreter not available" unless RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
+      # IrInterpreterWrapper has built-in Ruby fallback if native extension unavailable
       RHDL::Codegen::IR::IrInterpreterWrapper.new(@ir_json)
     when :jit
       raise "IR JIT not available" unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
