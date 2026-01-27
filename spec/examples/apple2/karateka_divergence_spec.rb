@@ -12,7 +12,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   KARATEKA_MEM_PATH = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
 
   # Test parameters
-  TOTAL_CYCLES = 10_000_000
+  TOTAL_CYCLES = 20_000_000
   CHECKPOINT_INTERVAL = 500_000  # Check every 500K cycles
 
   before(:all) do
@@ -107,7 +107,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     checksum
   end
 
-  it 'compares ISA vs IR compiler over 10M cycles', timeout: 600 do
+  it 'compares ISA vs IR compiler over 20M cycles', timeout: 1200 do
     skip 'AppleIIgo ROM not found' unless @rom_available
     skip 'Karateka memory dump not found' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
@@ -245,6 +245,6 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
                   cp[:text_match] ? "yes" : "NO")
     end
 
-    expect(checkpoints.size).to be >= 10, "Should have at least 10 checkpoints"
+    expect(checkpoints.size).to be >= 20, "Should have at least 20 checkpoints"
   end
 end
