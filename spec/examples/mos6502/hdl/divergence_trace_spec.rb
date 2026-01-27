@@ -140,7 +140,7 @@ RSpec.describe 'JIT Divergence Trace', :hdl, :slow do
 
     chunk_size = 100_000
     total_steps = 140  # 20 instructions * 7 cycles
-    max_steps = 2_500_000
+    max_steps = 10_000_000
 
     last_match_steps = 0
     last_match_isa_pc = nil
