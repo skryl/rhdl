@@ -2,7 +2,7 @@
 
 # Wrapper for IR-based simulators (HDL mode with interpret/jit/compile backends)
 # Provides a unified interface for different simulation backends
-# Uses MOS6502::CPU IR with Apple2Bus for memory/I/O (like ISA simulator)
+# Uses MOS6502::CPU IR with internalized memory in Rust (or Ruby fallback)
 class IRSimulatorRunner
   attr_reader :bus
 
@@ -15,6 +15,7 @@ class IRSimulatorRunner
     @sim = nil
     @cycles = 0
     @halted = false
+    @use_rust_memory = false  # Will be set true if Rust MOS6502 mode available
 
     # Generate IR JSON from MOS6502::CPU component
     ir = MOS6502::CPU.to_flat_ir
@@ -22,7 +23,7 @@ class IRSimulatorRunner
   end
 
   def create_simulator
-    case @sim_backend
+    sim = case @sim_backend
     when :interpret
       # IrInterpreterWrapper has built-in Ruby fallback if native extension unavailable
       RHDL::Codegen::IR::IrInterpreterWrapper.new(@ir_json)
@@ -35,6 +36,11 @@ class IRSimulatorRunner
     else
       raise "Unknown IR backend: #{@sim_backend}"
     end
+
+    # Check if Rust MOS6502 mode is available
+    @use_rust_memory = sim.respond_to?(:mos6502_mode?) && sim.mos6502_mode?
+
+    sim
   end
 
   def native?
@@ -52,12 +58,26 @@ class IRSimulatorRunner
   def load_rom(bytes, base_addr:)
     @sim ||= create_simulator
     bytes_array = bytes.is_a?(String) ? bytes.bytes : bytes
+
+    if @use_rust_memory
+      # Load directly into Rust memory (rom = true for ROM protection)
+      @sim.load_mos6502_memory(bytes_array, base_addr, true)
+    end
+
+    # Also load into Ruby bus (for screen reading, etc.)
     @bus.load_rom(bytes_array, base_addr: base_addr)
   end
 
   def load_ram(bytes, base_addr:)
     @sim ||= create_simulator
     bytes_array = bytes.is_a?(String) ? bytes.bytes : bytes
+
+    if @use_rust_memory
+      # Load directly into Rust memory (rom = false for RAM)
+      @sim.load_mos6502_memory(bytes_array, base_addr, false)
+    end
+
+    # Also load into Ruby bus (for screen reading, etc.)
     @bus.load_ram(bytes_array, base_addr: base_addr)
   end
 
@@ -67,6 +87,22 @@ class IRSimulatorRunner
 
   def disk_loaded?(drive: 0)
     @bus.disk_loaded?(drive: drive)
+  end
+
+  # Set reset vector directly (bypasses ROM protection)
+  # This is needed for tests that want to start at a specific address
+  def set_reset_vector(addr)
+    @sim ||= create_simulator
+
+    if @use_rust_memory
+      # Set in Rust memory
+      @sim.set_mos6502_reset_vector(addr)
+    end
+
+    # Also set in Ruby bus memory (bypassing ROM protection)
+    memory = @bus.instance_variable_get(:@memory)
+    memory[0xFFFC] = addr & 0xFF
+    memory[0xFFFD] = (addr >> 8) & 0xFF
   end
 
   def reset
@@ -92,15 +128,31 @@ class IRSimulatorRunner
 
   def run_steps(steps)
     @sim ||= create_simulator
-    steps.times do
-      break if @halted
-      clock_tick
-      @cycles += 1
+
+    if @use_rust_memory
+      # Use batched Rust execution - no Ruby FFI per cycle!
+      return if @halted
+
+      cycles_run = @sim.run_mos6502_cycles(steps)
+      @cycles += cycles_run
+
+      # Sync text page from Rust memory to Ruby bus for screen reading
+      sync_text_page_from_rust
+
+      # Check halted state
       @halted = @sim.peek('halted') == 1
+    else
+      # Fallback: Ruby memory bridging (slow but works without native extension)
+      steps.times do
+        break if @halted
+        clock_tick
+        @cycles += 1
+        @halted = @sim.peek('halted') == 1
+      end
     end
   end
 
-  # Run one clock cycle with memory bridging
+  # Run one clock cycle with memory bridging (Ruby fallback path)
   def clock_tick
     # Get address and read/write signal from CPU
     addr = @sim.peek('addr')
@@ -189,6 +241,19 @@ class IRSimulatorRunner
   end
 
   private
+
+  # Sync text page ($0400-$07FF) from Rust memory to Ruby bus
+  # This allows screen reading to work even when using Rust memory
+  def sync_text_page_from_rust
+    return unless @use_rust_memory
+
+    # Text page 1 is at $0400-$07FF (1024 bytes)
+    (0...1024).each do |i|
+      addr = 0x0400 + i
+      byte = @sim.read_mos6502_memory(addr)
+      @bus.write(addr, byte)
+    end
+  end
 
   # Return a sample of memory for verification
   def memory_sample
