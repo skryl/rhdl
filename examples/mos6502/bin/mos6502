@@ -459,7 +459,7 @@ class Apple2Terminal
 
     # Render hi-res using braille characters
     # Use fast Rust rendering when available (native mode)
-    hires_output = if @runner.native? && @runner.cpu.respond_to?(:render_hires_braille)
+    hires_output = if @runner.native? && @runner.respond_to?(:cpu) && @runner.cpu.respond_to?(:render_hires_braille)
                      @runner.cpu.render_hires_braille(@hires_width, true)
                    else
                      @runner.bus.render_hires_braille(chars_wide: @hires_width, invert: true)
@@ -1117,7 +1117,7 @@ end
 if options[:init_hires]
   runner = terminal.runner
   # For native mode, also set video state on the CPU (soft switches are handled in Rust)
-  if runner.native?
+  if runner.native? && runner.respond_to?(:cpu) && runner.cpu.respond_to?(:set_video_state)
     runner.cpu.set_video_state(false, false, false, true)  # text=false, mixed=false, page2=false, hires=true
   end
   bus = runner.bus
