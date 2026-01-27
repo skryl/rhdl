@@ -11,6 +11,7 @@ module RHDL
 
       def initialize(options = {})
         @options = options
+        @dry_run_output = []
       end
 
       # Execute the task - must be implemented by subclasses
@@ -24,6 +25,30 @@ module RHDL
       rescue => e
         handle_error(e)
         false
+      end
+
+      # Check if running in dry_run mode
+      def dry_run?
+        !!options[:dry_run]
+      end
+
+      # Get dry run output (for testing)
+      def dry_run_output
+        @dry_run_output
+      end
+
+      # Record an action that would be performed in dry_run mode
+      # Returns the description for chaining
+      def would(action, details = {})
+        entry = { action: action }.merge(details)
+        @dry_run_output << entry
+        entry
+      end
+
+      # Describe what this task does (for dry_run output)
+      # Subclasses should override this
+      def describe
+        { task: self.class.name, options: options.reject { |k, _| k == :dry_run } }
       end
 
       protected
@@ -57,7 +82,7 @@ module RHDL
 
       # Ensure a directory exists
       def ensure_dir(path)
-        FileUtils.mkdir_p(path)
+        FileUtils.mkdir_p(path) unless dry_run?
       end
 
       # Handle an error during task execution
