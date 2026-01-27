@@ -136,8 +136,8 @@ class IRSimulatorRunner
       cycles_run = @sim.run_mos6502_cycles(steps)
       @cycles += cycles_run
 
-      # Sync text page from Rust memory to Ruby bus for screen reading
-      sync_text_page_from_rust
+      # Sync screen memory from Rust memory to Ruby bus for screen reading
+      sync_screen_memory_from_rust
 
       # Check halted state
       @halted = @sim.peek('halted') == 1
@@ -242,16 +242,28 @@ class IRSimulatorRunner
 
   private
 
-  # Sync text page ($0400-$07FF) from Rust memory to Ruby bus
+  # Sync screen memory from Rust memory to Ruby bus
   # This allows screen reading to work even when using Rust memory
-  def sync_text_page_from_rust
+  # Syncs: text page 1, HiRes page 1, HiRes page 2
+  def sync_screen_memory_from_rust
     return unless @use_rust_memory
 
-    # Text page 1 is at $0400-$07FF (1024 bytes)
+    # Get direct access to bus memory for faster writes
+    memory = @bus.instance_variable_get(:@memory)
+
+    # Text page 1: $0400-$07FF (1024 bytes)
     (0...1024).each do |i|
-      addr = 0x0400 + i
-      byte = @sim.read_mos6502_memory(addr)
-      @bus.write(addr, byte)
+      memory[0x0400 + i] = @sim.read_mos6502_memory(0x0400 + i)
+    end
+
+    # HiRes page 1: $2000-$3FFF (8192 bytes)
+    (0...8192).each do |i|
+      memory[0x2000 + i] = @sim.read_mos6502_memory(0x2000 + i)
+    end
+
+    # HiRes page 2: $4000-$5FFF (8192 bytes)
+    (0...8192).each do |i|
+      memory[0x4000 + i] = @sim.read_mos6502_memory(0x4000 + i)
     end
   end
 

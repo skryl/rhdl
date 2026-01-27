@@ -54,6 +54,20 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     cpu = MOS6502::ISASimulatorNative.new(bus)
     cpu.load_bytes(@karateka_mem, 0x0000)
     cpu.load_bytes(karateka_rom, 0xD000)
+
+    # Give bus a reference to CPU for screen reading via mem_read
+    # (matches what ISARunner does in apple2_harness.rb)
+    bus.instance_variable_set(:@native_cpu, cpu)
+
+    # Initialize HIRES soft switches (like emulator does)
+    bus.read(0xC050)  # TXTCLR - graphics mode
+    bus.read(0xC052)  # MIXCLR - full screen
+    bus.read(0xC054)  # PAGE1 - page 1
+    bus.read(0xC057)  # HIRES - hi-res mode
+
+    # Sync video state to native CPU
+    cpu.set_video_state(false, false, false, true)  # text=false, mixed=false, page2=false, hires=true
+
     cpu.reset
 
     [cpu, bus]
@@ -94,7 +108,8 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     base_addr ||= hires_page_base_isa(bus)
     checksum = 0
     (base_addr..(base_addr + 0x1FFF)).each do |addr|
-      checksum = (checksum + bus.read(addr)) & 0xFFFFFFFF
+      # Use mem_read to read from native CPU memory (not bus memory)
+      checksum = (checksum + bus.mem_read(addr)) & 0xFFFFFFFF
     end
     checksum
   end
@@ -110,7 +125,8 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   def text_checksum_isa(bus)
     checksum = 0
     (0x0400..0x07FF).each do |addr|
-      checksum = (checksum + bus.read(addr)) & 0xFFFFFFFF
+      # Use mem_read to read from native CPU memory (not bus memory)
+      checksum = (checksum + bus.mem_read(addr)) & 0xFFFFFFFF
     end
     checksum
   end
@@ -138,7 +154,8 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       line = []
       line_addr = hires_line_address(row, base_addr)
       40.times do |col|
-        byte = bus.read(line_addr + col) || 0
+        # Use mem_read to read from native CPU memory (not bus memory)
+        byte = bus.mem_read(line_addr + col) || 0
         7.times do |bit|
           line << ((byte >> bit) & 1)
         end
@@ -276,14 +293,19 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
       isa_pg = isa_page == 0x2000 ? 1 : 2
       ir_pg = ir_page == 0x2000 ? 1 : 2
-      puts format("  %5.1f%% | %7.1fM cycles | PC: ISA=%04X IR=%04X %s | Page: ISA=%d IR=%d | HiRes: %s | Text: %s | %.2fM/s",
+
+      # Also compute checksums for BOTH pages to see if anything is changing
+      isa_hires_p1 = hires_checksum_isa(isa_bus, 0x2000)
+      isa_hires_p2 = hires_checksum_isa(isa_bus, 0x4000)
+      ir_hires_p1 = hires_checksum_ir(ir_sim, 0x2000)
+      ir_hires_p2 = hires_checksum_ir(ir_sim, 0x4000)
+
+      puts format("  %5.1f%% | %7.1fM | PC: ISA=%04X IR=%04X | ISA P1/P2: %08X/%08X | IR P1/P2: %08X/%08X | %.2fM/s",
                   pct,
                   cycles_run / 1_000_000.0,
                   isa_pc, ir_pc,
-                  isa_pc == ir_pc ? "=" : "≠",
-                  isa_pg, ir_pg,
-                  checkpoint[:hires_match] ? "match" : "DIFF",
-                  checkpoint[:text_match] ? "match" : "DIFF",
+                  isa_hires_p1, isa_hires_p2,
+                  ir_hires_p1, ir_hires_p2,
                   rate)
 
       # Print HiRes screen at intervals (using active page)
