@@ -14,8 +14,12 @@ require_relative '../examples/apple2/hdl/apple2'
 ROM_PATH = File.expand_path('../examples/apple2/software/roms/appleiigo.rom', __dir__)
 KARATEKA_MEM_PATH = File.expand_path('../examples/apple2/software/disks/karateka_mem.bin', __dir__)
 
-TOTAL_CYCLES = 10_000_000
+# Note: ISA simulator runs INSTRUCTIONS, IR compiler runs CLOCK CYCLES
+# Average 6502 instruction takes ~3.5 clock cycles
+# So to compare at the same simulation point, we need to account for this
+TOTAL_INSTRUCTIONS = 10_000_000
 CHECKPOINT_INTERVAL = 500_000
+AVG_CYCLES_PER_INSTRUCTION = 4  # Conservative estimate (actual ~3.5)
 
 def create_karateka_rom(rom_data)
   rom = rom_data.dup
@@ -94,7 +98,8 @@ end
 # Main
 puts "=" * 70
 puts "Karateka ISA vs IR Compiler Divergence Analysis"
-puts "Total cycles: #{TOTAL_CYCLES.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
+puts "Total instructions: #{TOTAL_INSTRUCTIONS.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
+puts "IR cycles per ISA instruction: #{AVG_CYCLES_PER_INSTRUCTION}"
 puts "=" * 70
 
 unless File.exist?(ROM_PATH)
@@ -120,25 +125,26 @@ puts "  IR:  Rust IR Compiler (sub_cycles=14)"
 checkpoints = []
 divergence_point = nil
 
-cycles_run = 0
+instructions_run = 0
 start_time = Time.now
 
 puts "\nRunning comparison..."
 puts "-" * 70
 
-while cycles_run < TOTAL_CYCLES
-  batch_size = [CHECKPOINT_INTERVAL, TOTAL_CYCLES - cycles_run].min
+while instructions_run < TOTAL_INSTRUCTIONS
+  batch_size = [CHECKPOINT_INTERVAL, TOTAL_INSTRUCTIONS - instructions_run].min
 
-  # Run ISA
+  # Run ISA (instruction-level)
   batch_size.times do
     break if isa_cpu.halted?
     isa_cpu.step
   end
 
-  # Run IR
-  ir_sim.run_cpu_cycles(batch_size, 0, false)
+  # Run IR (cycle-level) - scale by average cycles per instruction
+  ir_cycles = batch_size * AVG_CYCLES_PER_INSTRUCTION
+  ir_sim.run_cpu_cycles(ir_cycles, 0, false)
 
-  cycles_run += batch_size
+  instructions_run += batch_size
 
   # Checkpoint
   isa_pc = isa_cpu.pc
@@ -158,7 +164,7 @@ while cycles_run < TOTAL_CYCLES
   ir_y = ir_sim.peek('cpu__y_reg')
 
   checkpoint = {
-    cycles: cycles_run,
+    instructions: instructions_run,
     isa_pc: isa_pc,
     ir_pc: ir_pc,
     pc_match: isa_pc == ir_pc,
@@ -179,12 +185,12 @@ while cycles_run < TOTAL_CYCLES
   end
 
   elapsed = Time.now - start_time
-  rate = cycles_run / elapsed / 1_000_000
-  pct = (cycles_run.to_f / TOTAL_CYCLES * 100).round(1)
+  rate = instructions_run / elapsed / 1_000_000
+  pct = (instructions_run.to_f / TOTAL_INSTRUCTIONS * 100).round(1)
 
-  puts format("  %5.1f%% | %7.1fM cycles | PC: ISA=%04X IR=%04X %s | HiRes: %s | Text: %s | %.2fM/s",
+  puts format("  %5.1f%% | %7.1fM instr | PC: ISA=%04X IR=%04X %s | HiRes: %s | Text: %s | %.2fM/s",
               pct,
-              cycles_run / 1_000_000.0,
+              instructions_run / 1_000_000.0,
               isa_pc, ir_pc,
               isa_pc == ir_pc ? "=" : "≠",
               checkpoint[:hires_match] ? "match" : "DIFF",
@@ -194,14 +200,14 @@ end
 
 elapsed = Time.now - start_time
 puts "-" * 70
-puts format("Completed in %.1f seconds (%.2fM cycles/sec)", elapsed, TOTAL_CYCLES / elapsed / 1_000_000)
+puts format("Completed in %.1f seconds (%.2fM instr/sec)", elapsed, TOTAL_INSTRUCTIONS / elapsed / 1_000_000)
 
 puts "\n" + "=" * 70
 puts "ANALYSIS"
 puts "=" * 70
 
 if divergence_point
-  puts "\n🔴 DIVERGENCE DETECTED at #{divergence_point[:cycles].to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse} cycles"
+  puts "\n🔴 DIVERGENCE DETECTED at #{divergence_point[:instructions].to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse} instructions"
   puts "   ISA PC: 0x#{divergence_point[:isa_pc].to_s(16).upcase}"
   puts "   IR  PC: 0x#{divergence_point[:ir_pc].to_s(16).upcase}"
   puts "   ISA Regs: A=#{divergence_point[:isa_regs][:a].to_s(16)} X=#{divergence_point[:isa_regs][:x].to_s(16)} Y=#{divergence_point[:isa_regs][:y].to_s(16)}"
@@ -209,15 +215,15 @@ if divergence_point
   puts "   HiRes checksum: ISA=#{divergence_point[:isa_hires].to_s(16)} IR=#{divergence_point[:ir_hires].to_s(16)}"
   puts "   Text checksum:  ISA=#{divergence_point[:isa_text].to_s(16)} IR=#{divergence_point[:ir_text].to_s(16)}"
 else
-  puts "\n🟢 No screen divergence detected over #{TOTAL_CYCLES.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse} cycles"
+  puts "\n🟢 No screen divergence detected over #{TOTAL_INSTRUCTIONS.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse} instructions"
 end
 
 puts "\nCheckpoint Summary:"
-puts "  Cycles     | PC Match | Regs Match | HiRes Match | Text Match"
+puts "  Instr     | PC Match | Regs Match | HiRes Match | Text Match"
 puts "  " + "-" * 60
 checkpoints.each do |cp|
   puts format("  %9s | %-8s | %-10s | %-11s | %-10s",
-              "#{cp[:cycles] / 1_000_000.0}M",
+              "#{cp[:instructions] / 1_000_000.0}M",
               cp[:pc_match] ? "yes" : "NO",
               cp[:regs_match] ? "yes" : "NO",
               cp[:hires_match] ? "yes" : "NO",
