@@ -1,469 +1,263 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'rake'
 require 'rhdl/cli'
 
 RSpec.describe 'Rakefile interface' do
-  # Test that all rake tasks that use CLI task classes work correctly
-  # by running them in dry_run mode and verifying the expected actions
+  # Load the Rakefile once for all tests
+  before(:all) do
+    @rake = Rake::Application.new
+    Rake.application = @rake
+    # Silence rake output during tests
+    @rake.options.silent = true
+    # Load the Rakefile
+    load File.expand_path('../../../Rakefile', __dir__)
+  end
 
-  describe 'deps tasks' do
-    it 'deps:install runs DepsTask with install action' do
-      task = RHDL::CLI::Tasks::DepsTask.new(dry_run: true)
-      result = task.run
+  after(:all) do
+    Rake.application.clear
+  end
 
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:install_deps)
+  # Reset task invocation state before each test
+  before(:each) do
+    Rake.application.tasks.each(&:reenable)
+  end
+
+  # Helper to capture task instantiation
+  def expect_task_class(task_class, expected_options = {})
+    task_instance = instance_double(task_class)
+    allow(task_instance).to receive(:run)
+
+    expect(task_class).to receive(:new) do |actual_options|
+      expected_options.each do |key, value|
+        expect(actual_options[key]).to eq(value),
+          "Expected #{task_class}.new to receive #{key}: #{value.inspect}, got #{actual_options[key].inspect}"
+      end
+      task_instance
     end
 
-    it 'deps:check runs DepsTask with check action' do
-      task = RHDL::CLI::Tasks::DepsTask.new(check: true, dry_run: true)
-      result = task.run
+    task_instance
+  end
 
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:check_deps)
+  describe 'deps tasks' do
+    it 'deps:install invokes DepsTask with no options' do
+      expect_task_class(RHDL::CLI::Tasks::DepsTask, {})
+      Rake::Task['deps:install'].invoke
+    end
+
+    it 'deps:check invokes DepsTask with check: true' do
+      expect_task_class(RHDL::CLI::Tasks::DepsTask, check: true)
+      Rake::Task['deps:check'].invoke
     end
   end
 
   describe 'bench tasks' do
-    it 'bench:gates runs BenchmarkTask with gates type' do
-      task = RHDL::CLI::Tasks::BenchmarkTask.new(type: :gates, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:benchmark_gates)
+    it 'bench:gates invokes BenchmarkTask with type: :gates' do
+      expect_task_class(RHDL::CLI::Tasks::BenchmarkTask, type: :gates)
+      Rake::Task['bench:gates'].invoke
     end
 
-    it 'bench:ir runs BenchmarkTask with ir type' do
-      task = RHDL::CLI::Tasks::BenchmarkTask.new(type: :ir, cycles: 50_000, dry_run: true)
-      result = task.run
+    it 'bench:ir invokes BenchmarkTask with type: :ir and cycles' do
+      task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
+      allow(task_instance).to receive(:run)
 
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:benchmark_ir)
-      expect(result.first[:description]).to include('50000')
+      expect(RHDL::CLI::Tasks::BenchmarkTask).to receive(:new) do |opts|
+        expect(opts[:type]).to eq(:ir)
+        expect(opts[:cycles]).to be_a(Integer)
+        task_instance
+      end
+
+      Rake::Task['bench:ir'].invoke
     end
   end
 
   describe 'benchmark tasks' do
-    it 'benchmark:timing runs BenchmarkTask with timing type' do
-      task = RHDL::CLI::Tasks::BenchmarkTask.new(type: :timing, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:benchmark_timing)
+    it 'benchmark:timing invokes BenchmarkTask with type: :timing' do
+      expect_task_class(RHDL::CLI::Tasks::BenchmarkTask, type: :timing)
+      Rake::Task['benchmark:timing'].invoke
     end
 
-    it 'benchmark:quick runs BenchmarkTask with quick type' do
-      task = RHDL::CLI::Tasks::BenchmarkTask.new(type: :quick, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:benchmark_quick)
+    it 'benchmark:quick invokes BenchmarkTask with type: :quick' do
+      expect_task_class(RHDL::CLI::Tasks::BenchmarkTask, type: :quick)
+      Rake::Task['benchmark:quick'].invoke
     end
   end
 
   describe 'spec:bench tasks' do
-    it 'spec:bench:all runs BenchmarkTask with tests type for all specs' do
-      task = RHDL::CLI::Tasks::BenchmarkTask.new(type: :tests, pattern: 'spec/', dry_run: true)
-      result = task.run
+    it 'spec:bench:all invokes BenchmarkTask with type: :tests for all specs' do
+      task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
+      allow(task_instance).to receive(:run)
 
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:benchmark_tests)
-      expect(result.first[:pattern]).to eq('spec/')
+      expect(RHDL::CLI::Tasks::BenchmarkTask).to receive(:new) do |opts|
+        expect(opts[:type]).to eq(:tests)
+        expect(opts[:pattern]).to eq('spec/')
+        expect(opts[:count]).to eq(20)
+        task_instance
+      end
+
+      Rake::Task['spec:bench:all'].invoke
     end
 
-    it 'spec:bench:lib runs BenchmarkTask with tests type for lib specs' do
-      task = RHDL::CLI::Tasks::BenchmarkTask.new(type: :tests, pattern: 'spec/rhdl/', dry_run: true)
-      result = task.run
+    it 'spec:bench:lib invokes BenchmarkTask with lib pattern' do
+      task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
+      allow(task_instance).to receive(:run)
 
-      expect(result).to be_an(Array)
-      expect(result.first[:action]).to eq(:benchmark_tests)
-      expect(result.first[:pattern]).to eq('spec/rhdl/')
+      expect(RHDL::CLI::Tasks::BenchmarkTask).to receive(:new) do |opts|
+        expect(opts[:type]).to eq(:tests)
+        expect(opts[:pattern]).to eq('spec/rhdl/')
+        task_instance
+      end
+
+      Rake::Task['spec:bench:lib'].invoke
     end
 
-    it 'spec:bench:hdl runs BenchmarkTask with tests type for hdl specs' do
-      task = RHDL::CLI::Tasks::BenchmarkTask.new(type: :tests, pattern: 'spec/rhdl/hdl/', dry_run: true)
-      result = task.run
+    it 'spec:bench:hdl invokes BenchmarkTask with hdl pattern' do
+      task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
+      allow(task_instance).to receive(:run)
 
-      expect(result).to be_an(Array)
-      expect(result.first[:action]).to eq(:benchmark_tests)
-      expect(result.first[:pattern]).to eq('spec/rhdl/hdl/')
+      expect(RHDL::CLI::Tasks::BenchmarkTask).to receive(:new) do |opts|
+        expect(opts[:type]).to eq(:tests)
+        expect(opts[:pattern]).to eq('spec/rhdl/hdl/')
+        task_instance
+      end
+
+      Rake::Task['spec:bench:hdl'].invoke
     end
 
-    it 'spec:bench:mos6502 runs BenchmarkTask with tests type for mos6502 specs' do
-      task = RHDL::CLI::Tasks::BenchmarkTask.new(type: :tests, pattern: 'spec/examples/mos6502/', dry_run: true)
-      result = task.run
+    it 'spec:bench:mos6502 invokes BenchmarkTask with mos6502 pattern' do
+      task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
+      allow(task_instance).to receive(:run)
 
-      expect(result).to be_an(Array)
-      expect(result.first[:action]).to eq(:benchmark_tests)
-      expect(result.first[:pattern]).to eq('spec/examples/mos6502/')
+      expect(RHDL::CLI::Tasks::BenchmarkTask).to receive(:new) do |opts|
+        expect(opts[:type]).to eq(:tests)
+        expect(opts[:pattern]).to eq('spec/examples/mos6502/')
+        task_instance
+      end
+
+      Rake::Task['spec:bench:mos6502'].invoke
     end
 
-    it 'spec:bench:apple2 runs BenchmarkTask with tests type for apple2 specs' do
-      task = RHDL::CLI::Tasks::BenchmarkTask.new(type: :tests, pattern: 'spec/examples/apple2/', dry_run: true)
-      result = task.run
+    it 'spec:bench:apple2 invokes BenchmarkTask with apple2 pattern' do
+      task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
+      allow(task_instance).to receive(:run)
 
-      expect(result).to be_an(Array)
-      expect(result.first[:action]).to eq(:benchmark_tests)
-      expect(result.first[:pattern]).to eq('spec/examples/apple2/')
+      expect(RHDL::CLI::Tasks::BenchmarkTask).to receive(:new) do |opts|
+        expect(opts[:type]).to eq(:tests)
+        expect(opts[:pattern]).to eq('spec/examples/apple2/')
+        task_instance
+      end
+
+      Rake::Task['spec:bench:apple2'].invoke
     end
   end
 
   describe 'native tasks' do
-    it 'native:build runs NativeTask with build action' do
-      task = RHDL::CLI::Tasks::NativeTask.new(build: true, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to be > 0
-      expect(result.first[:action]).to eq(:cargo_build)
-      expect(result.first).to have_key(:extension)
-      expect(result.first).to have_key(:name)
+    it 'native:build invokes NativeTask with build: true' do
+      expect_task_class(RHDL::CLI::Tasks::NativeTask, build: true)
+      Rake::Task['native:build'].invoke
     end
 
-    it 'native:clean runs NativeTask with clean action' do
-      task = RHDL::CLI::Tasks::NativeTask.new(clean: true, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to be > 0
-      expect(result.first[:action]).to eq(:clean_extension)
+    it 'native:clean invokes NativeTask with clean: true' do
+      expect_task_class(RHDL::CLI::Tasks::NativeTask, clean: true)
+      Rake::Task['native:clean'].invoke
     end
 
-    it 'native:check runs NativeTask with check action' do
-      task = RHDL::CLI::Tasks::NativeTask.new(check: true, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to be > 0
-      expect(result.first[:action]).to eq(:check_extension)
+    it 'native:check invokes NativeTask with check: true' do
+      expect_task_class(RHDL::CLI::Tasks::NativeTask, check: true)
+      Rake::Task['native:check'].invoke
     end
   end
 
-  describe 'gates tasks' do
-    it 'gates:export runs GatesTask with export_all action' do
-      task = RHDL::CLI::Tasks::GatesTask.new(dry_run: true)
-      result = task.run
+  describe 'task class loading' do
+    it 'loads all task classes via load_cli_tasks' do
+      # Verify the CLI module and all task classes are loadable
+      require 'rhdl/cli'
 
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:export_all)
-      expect(result.first).to have_key(:output_dir)
+      expect(defined?(RHDL::CLI::Tasks::Apple2Task)).to eq('constant')
+      expect(defined?(RHDL::CLI::Tasks::BenchmarkTask)).to eq('constant')
+      expect(defined?(RHDL::CLI::Tasks::DepsTask)).to eq('constant')
+      expect(defined?(RHDL::CLI::Tasks::DiagramTask)).to eq('constant')
+      expect(defined?(RHDL::CLI::Tasks::DiskConvertTask)).to eq('constant')
+      expect(defined?(RHDL::CLI::Tasks::ExportTask)).to eq('constant')
+      expect(defined?(RHDL::CLI::Tasks::GatesTask)).to eq('constant')
+      expect(defined?(RHDL::CLI::Tasks::GenerateTask)).to eq('constant')
+      expect(defined?(RHDL::CLI::Tasks::MOS6502Task)).to eq('constant')
+      expect(defined?(RHDL::CLI::Tasks::NativeTask)).to eq('constant')
+      expect(defined?(RHDL::CLI::Tasks::TuiTask)).to eq('constant')
     end
 
-    it 'gates:clean runs GatesTask with clean action' do
-      task = RHDL::CLI::Tasks::GatesTask.new(clean: true, dry_run: true)
-      result = task.run
+    it 'all task classes inherit from Task base class' do
+      require 'rhdl/cli'
 
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:clean_gates)
+      task_classes = [
+        RHDL::CLI::Tasks::Apple2Task,
+        RHDL::CLI::Tasks::BenchmarkTask,
+        RHDL::CLI::Tasks::DepsTask,
+        RHDL::CLI::Tasks::DiagramTask,
+        RHDL::CLI::Tasks::DiskConvertTask,
+        RHDL::CLI::Tasks::ExportTask,
+        RHDL::CLI::Tasks::GatesTask,
+        RHDL::CLI::Tasks::GenerateTask,
+        RHDL::CLI::Tasks::MOS6502Task,
+        RHDL::CLI::Tasks::NativeTask,
+        RHDL::CLI::Tasks::TuiTask
+      ]
+
+      task_classes.each do |klass|
+        expect(klass.ancestors).to include(RHDL::CLI::Task),
+          "Expected #{klass} to inherit from RHDL::CLI::Task"
+      end
     end
 
-    it 'gates:stats runs GatesTask with stats action' do
-      task = RHDL::CLI::Tasks::GatesTask.new(stats: true, dry_run: true)
-      result = task.run
+    it 'all task classes implement run method' do
+      require 'rhdl/cli'
 
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:show_stats)
+      task_classes = [
+        RHDL::CLI::Tasks::Apple2Task,
+        RHDL::CLI::Tasks::BenchmarkTask,
+        RHDL::CLI::Tasks::DepsTask,
+        RHDL::CLI::Tasks::DiagramTask,
+        RHDL::CLI::Tasks::DiskConvertTask,
+        RHDL::CLI::Tasks::ExportTask,
+        RHDL::CLI::Tasks::GatesTask,
+        RHDL::CLI::Tasks::GenerateTask,
+        RHDL::CLI::Tasks::MOS6502Task,
+        RHDL::CLI::Tasks::NativeTask,
+        RHDL::CLI::Tasks::TuiTask
+      ]
+
+      task_classes.each do |klass|
+        expect(klass.instance_methods(false)).to include(:run),
+          "Expected #{klass} to define its own run method"
+      end
     end
 
-    it 'gates:simcpu runs GatesTask with simcpu action' do
-      task = RHDL::CLI::Tasks::GatesTask.new(simcpu: true, dry_run: true)
-      result = task.run
+    it 'all task classes implement dry_run_describe method' do
+      require 'rhdl/cli'
 
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:export_simcpu)
-    end
-  end
+      task_classes = [
+        RHDL::CLI::Tasks::Apple2Task,
+        RHDL::CLI::Tasks::BenchmarkTask,
+        RHDL::CLI::Tasks::DepsTask,
+        RHDL::CLI::Tasks::DiagramTask,
+        RHDL::CLI::Tasks::DiskConvertTask,
+        RHDL::CLI::Tasks::ExportTask,
+        RHDL::CLI::Tasks::GatesTask,
+        RHDL::CLI::Tasks::GenerateTask,
+        RHDL::CLI::Tasks::MOS6502Task,
+        RHDL::CLI::Tasks::NativeTask,
+        RHDL::CLI::Tasks::TuiTask
+      ]
 
-  describe 'export tasks' do
-    it 'export:all runs ExportTask with all action' do
-      task = RHDL::CLI::Tasks::ExportTask.new(all: true, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:export_all)
-      expect(result.first).to have_key(:output_dir)
-    end
-
-    it 'export:clean runs ExportTask with clean action' do
-      task = RHDL::CLI::Tasks::ExportTask.new(clean: true, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:clean_verilog)
-    end
-
-    it 'export:single runs ExportTask with single action' do
-      task = RHDL::CLI::Tasks::ExportTask.new(
-        component: 'RHDL::HDL::ALU',
-        lang: 'verilog',
-        out: '/tmp/test',
-        dry_run: true
-      )
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:export_single)
-      expect(result.first[:component]).to eq('RHDL::HDL::ALU')
-    end
-  end
-
-  describe 'diagram tasks' do
-    it 'diagrams:generate runs DiagramTask with all action' do
-      task = RHDL::CLI::Tasks::DiagramTask.new(all: true, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:generate_all)
-      expect(result.first).to have_key(:output_dir)
-    end
-
-    it 'diagrams:clean runs DiagramTask with clean action' do
-      task = RHDL::CLI::Tasks::DiagramTask.new(clean: true, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:clean_diagrams)
-    end
-
-    it 'diagrams:single runs DiagramTask with single action' do
-      task = RHDL::CLI::Tasks::DiagramTask.new(
-        component: 'RHDL::HDL::ALU',
-        level: 'component',
-        format: 'svg',
-        out: '/tmp/test',
-        dry_run: true
-      )
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:generate_single)
-      expect(result.first[:component]).to eq('RHDL::HDL::ALU')
+      task_classes.each do |klass|
+        expect(klass.instance_methods(false)).to include(:dry_run_describe),
+          "Expected #{klass} to define dry_run_describe method"
+      end
     end
   end
 
-  describe 'generate tasks' do
-    it 'generate:all runs GenerateTask with generate action' do
-      task = RHDL::CLI::Tasks::GenerateTask.new(dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:generate_all)
-    end
-
-    it 'generate:clean runs GenerateTask with clean action' do
-      task = RHDL::CLI::Tasks::GenerateTask.new(action: :clean, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:clean_all)
-    end
-
-    it 'generate:regenerate runs GenerateTask with regenerate action' do
-      task = RHDL::CLI::Tasks::GenerateTask.new(action: :regenerate, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:regenerate_all)
-    end
-  end
-
-  describe 'tui tasks' do
-    it 'tui:list runs TuiTask with list action' do
-      task = RHDL::CLI::Tasks::TuiTask.new(list: true, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:list_components)
-    end
-
-    it 'tui:run runs TuiTask with run action' do
-      task = RHDL::CLI::Tasks::TuiTask.new(component: 'sequential/counter', dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:run_tui)
-      expect(result.first[:component]).to eq('sequential/counter')
-    end
-  end
-
-  describe 'apple2 tasks' do
-    it 'apple2:demo runs Apple2Task with demo action' do
-      task = RHDL::CLI::Tasks::Apple2Task.new(demo: true, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:run_demo)
-    end
-
-    it 'apple2:appleiigo runs Apple2Task with appleiigo action' do
-      task = RHDL::CLI::Tasks::Apple2Task.new(appleiigo: true, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:run_appleiigo)
-      expect(result.first).to have_key(:rom)
-    end
-
-    it 'apple2:karateka runs Apple2Task with karateka action' do
-      task = RHDL::CLI::Tasks::Apple2Task.new(karateka: true, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:run_karateka)
-    end
-
-    it 'apple2 default runs Apple2Task with emulator action' do
-      task = RHDL::CLI::Tasks::Apple2Task.new(rom: '/path/to/rom', mode: :hdl, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:run_emulator)
-    end
-  end
-
-  describe 'mos6502 tasks' do
-    it 'mos6502:build runs MOS6502Task with build action' do
-      task = RHDL::CLI::Tasks::MOS6502Task.new(build: true, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:build_rom)
-    end
-
-    it 'mos6502:clean runs MOS6502Task with clean action' do
-      task = RHDL::CLI::Tasks::MOS6502Task.new(clean: true, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:clean_rom)
-    end
-
-    it 'mos6502:demo runs MOS6502Task with demo action' do
-      task = RHDL::CLI::Tasks::MOS6502Task.new(demo: true, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:run_demo)
-    end
-
-    it 'mos6502:appleiigo runs MOS6502Task with appleiigo action' do
-      task = RHDL::CLI::Tasks::MOS6502Task.new(appleiigo: true, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:run_appleiigo)
-    end
-
-    it 'mos6502:karateka runs MOS6502Task with karateka action' do
-      task = RHDL::CLI::Tasks::MOS6502Task.new(karateka: true, dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:run_karateka)
-    end
-
-    it 'mos6502 default runs MOS6502Task with emulator action' do
-      task = RHDL::CLI::Tasks::MOS6502Task.new(rom: '/path/to/rom', dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:run_emulator)
-    end
-  end
-
-  describe 'disk tasks' do
-    it 'disk:info runs DiskConvertTask with info action' do
-      task = RHDL::CLI::Tasks::DiskConvertTask.new(info: true, disk: '/path/to/disk.dsk', dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:show_disk_info)
-      expect(result.first[:disk]).to eq('/path/to/disk.dsk')
-    end
-
-    it 'disk:convert runs DiskConvertTask with convert action' do
-      task = RHDL::CLI::Tasks::DiskConvertTask.new(convert: true, disk: '/path/to/disk.dsk', dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:convert_disk)
-    end
-
-    it 'disk:extract_boot runs DiskConvertTask with extract_boot action' do
-      task = RHDL::CLI::Tasks::DiskConvertTask.new(extract_boot: true, disk: '/path/to/disk.dsk', dry_run: true)
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:extract_boot)
-    end
-
-    it 'disk:extract_tracks runs DiskConvertTask with extract_tracks action' do
-      task = RHDL::CLI::Tasks::DiskConvertTask.new(
-        extract_tracks: true,
-        disk: '/path/to/disk.dsk',
-        start_track: 0,
-        end_track: 2,
-        dry_run: true
-      )
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:extract_tracks)
-    end
-
-    it 'disk:dump_after_boot runs DiskConvertTask with dump_after_boot action' do
-      task = RHDL::CLI::Tasks::DiskConvertTask.new(
-        dump_after_boot: true,
-        disk: '/path/to/disk.dsk',
-        rom: '/path/to/rom',
-        dry_run: true
-      )
-      result = task.run
-
-      expect(result).to be_an(Array)
-      expect(result.length).to eq(1)
-      expect(result.first[:action]).to eq(:dump_after_boot)
-    end
-  end
-
-  describe 'dry_run option inheritance' do
+  describe 'dry_run functionality' do
     it 'Task base class provides dry_run? method' do
       task = RHDL::CLI::Task.new(dry_run: true)
       expect(task.dry_run?).to be true
@@ -478,10 +272,51 @@ RSpec.describe 'Rakefile interface' do
       expect(task.dry_run_output).to eq([{ action: :test_action, foo: 'bar' }])
     end
 
-    it 'ensure_dir is a no-op in dry_run mode' do
-      task = RHDL::CLI::Task.new(dry_run: true)
-      # Should not raise or create directory
-      expect { task.send(:ensure_dir, '/nonexistent/path/that/should/not/be/created') }.not_to raise_error
+    it 'dry_run mode returns action descriptions instead of executing' do
+      # Test a few representative task classes
+      deps_task = RHDL::CLI::Tasks::DepsTask.new(dry_run: true)
+      result = deps_task.run
+      expect(result).to be_an(Array)
+      expect(result.first[:action]).to eq(:install_deps)
+
+      benchmark_task = RHDL::CLI::Tasks::BenchmarkTask.new(type: :gates, dry_run: true)
+      result = benchmark_task.run
+      expect(result).to be_an(Array)
+      expect(result.first[:action]).to eq(:benchmark_gates)
+
+      native_task = RHDL::CLI::Tasks::NativeTask.new(build: true, dry_run: true)
+      result = native_task.run
+      expect(result).to be_an(Array)
+      expect(result.first[:action]).to eq(:cargo_build)
+    end
+  end
+
+  describe 'SPEC_PATHS constant' do
+    it 'defines correct spec paths' do
+      expect(SPEC_PATHS[:all]).to eq('spec/')
+      expect(SPEC_PATHS[:lib]).to eq('spec/rhdl/')
+      expect(SPEC_PATHS[:hdl]).to eq('spec/rhdl/hdl/')
+      expect(SPEC_PATHS[:mos6502]).to eq('spec/examples/mos6502/')
+      expect(SPEC_PATHS[:apple2]).to eq('spec/examples/apple2/')
+    end
+  end
+
+  describe 'rake task existence' do
+    # Verify all custom rake tasks exist
+    %w[
+      spec spec:lib spec:hdl spec:mos6502 spec:apple2
+      spec:bench spec:bench:all spec:bench:lib spec:bench:hdl spec:bench:mos6502 spec:bench:apple2
+      pspec pspec:lib pspec:hdl pspec:mos6502 pspec:apple2 pspec:n pspec:prepare pspec:balanced
+      deps deps:install deps:check
+      bench bench:gates bench:ir
+      benchmark benchmark:timing benchmark:quick
+      native native:build native:clean native:check
+      setup setup:binstubs
+    ].each do |task_name|
+      it "defines #{task_name} task" do
+        expect(Rake::Task.task_defined?(task_name)).to be(true),
+          "Expected rake task '#{task_name}' to be defined"
+      end
     end
   end
 end
