@@ -123,6 +123,8 @@ module RHDL
           exec_args += ["--rom-address", options[:rom_address]] if options[:rom_address]
           add_common_args(exec_args)
           exec_args += extra_args
+          # Add positional argument (program file) if provided
+          exec_args << options[:program] if options[:program]
           exec_args += options[:remaining_args] if options[:remaining_args]
           exec(*exec_args)
         end
@@ -146,6 +148,10 @@ module RHDL
           exec_args.push("--disk", options[:disk]) if options[:disk]
           exec_args.push("--disk2", options[:disk2]) if options[:disk2]
           exec_args.push("-b", options[:bin]) if options[:bin]
+          exec_args.push("-e", options[:entry]) if options[:entry]
+          exec_args << "--init-hires" if options[:init_hires]
+          exec_args << "--no-audio" if options[:no_audio]
+          exec_args << "--dry-run" if options[:dry_run]
         end
       end
     end

@@ -65,6 +65,8 @@ module RHDL
           exec_args += ["-a", options[:address]] if options[:address]
           add_common_args(exec_args)
           exec_args += extra_args
+          # Add positional argument (program file) if provided
+          exec_args << options[:program] if options[:program]
           exec_args += options[:remaining_args] if options[:remaining_args]
           exec(*exec_args)
         end
@@ -84,10 +86,14 @@ module RHDL
           exec_args << "-g" if options[:green]
           exec_args << "-A" if options[:audio]
           exec_args << "-H" if options[:hires]
+          exec_args << "-C" if options[:color]
           exec_args.push("--hires-width", options[:hires_width].to_s) if options[:hires_width]
+          exec_args.push("--memdump", options[:memdump]) if options[:memdump]
+          exec_args.push("--pc", options[:pc]) if options[:pc]
           exec_args.push("--disk", options[:disk]) if options[:disk]
           # Sub-cycles: 14=full accuracy, 7=~2x speed, 2=~7x speed (compile backend only)
           exec_args.push("--sub-cycles", options[:sub_cycles].to_s) if options[:sub_cycles]
+          exec_args << "--dry-run" if options[:dry_run]
         end
       end
     end
