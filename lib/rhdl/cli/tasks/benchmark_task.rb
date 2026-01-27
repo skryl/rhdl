@@ -276,16 +276,26 @@ module RHDL
 
               init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
 
-              # Load ROM and RAM into bus
+              # Check if Rust MOS6502 mode is available
+              use_rust_memory = sim.respond_to?(:mos6502_mode?) && sim.mos6502_mode?
+
+              # Load ROM and RAM
               print "loading... "
               $stdout.flush
+
+              # Always load into Ruby bus (needed for reset sequence)
               bus.load_rom(rom_data, base_addr: 0xD000)
               bus.load_ram(karateka_mem, base_addr: 0x0000)
-
-              # Set reset vector directly in memory (bypass ROM protection)
               memory = bus.instance_variable_get(:@memory)
               memory[0xFFFC] = 0x2A  # low byte of $B82A
               memory[0xFFFD] = 0xB8  # high byte of $B82A
+
+              if use_rust_memory
+                # Also load into Rust memory for batched execution
+                sim.load_mos6502_memory(rom_data, 0xD000, true)   # ROM
+                sim.load_mos6502_memory(karateka_mem, 0x0000, false)  # RAM
+                sim.set_mos6502_reset_vector(0xB82A)
+              end
 
               # Reset CPU
               sim.poke('rst', 1)
@@ -299,7 +309,7 @@ module RHDL
               sim.poke('ext_y_load_en', 0)
               sim.poke('ext_sp_load_en', 0)
 
-              # Clock tick with memory bridging
+              # Clock tick with memory bridging (Ruby fallback)
               clock_tick = lambda do
                 addr = sim.peek('addr')
                 rw = sim.peek('rw')
@@ -325,7 +335,13 @@ module RHDL
               print "running #{cycles} cycles... "
               $stdout.flush
               run_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-              cycles.times { clock_tick.call }
+              if use_rust_memory
+                # Use batched Rust execution - no FFI per cycle!
+                sim.run_mos6502_cycles(cycles)
+              else
+                # Ruby memory bridging (fallback)
+                cycles.times { clock_tick.call }
+              end
               run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
 
               cycles_per_sec = cycles / run_elapsed
