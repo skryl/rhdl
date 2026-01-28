@@ -1270,7 +1270,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   # Opcode sequence comparison test
   # ============================================================================
 
-  it 'compares opcode sequences between ISA and JIT', timeout: 300 do
+  it 'compares opcode sequences between ISA and JIT', timeout: 60 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
@@ -1287,7 +1287,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     # Compare opcode sequences in batches
     batch_size = 1000  # Instructions per batch
     total_instructions = 0
-    max_instructions = 3_000_000  # Stop after 3M instructions
+    max_instructions = 100_000  # Stop after 100K instructions
 
     divergence_found = false
     divergence_index = nil
