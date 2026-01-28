@@ -96,6 +96,10 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       expect { described_class.new(hires: true, hires_width: 140) }.not_to raise_error
     end
 
+    it 'can be instantiated with color option' do
+      expect { described_class.new(color: true) }.not_to raise_error
+    end
+
     it 'can be instantiated with karateka option' do
       expect { described_class.new(karateka: true) }.not_to raise_error
     end
@@ -226,6 +230,27 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       task.send(:add_common_args, exec_args)
 
       expect(exec_args).to include('-H')
+      expect(exec_args).to include('--hires-width')
+      expect(exec_args).to include('140')
+    end
+
+    it 'adds color flag when color option is set' do
+      task = described_class.new(color: true)
+      exec_args = []
+
+      task.send(:add_common_args, exec_args)
+
+      expect(exec_args).to include('-C')
+    end
+
+    it 'adds both hires and color flags together' do
+      task = described_class.new(hires: true, color: true, hires_width: 140)
+      exec_args = []
+
+      task.send(:add_common_args, exec_args)
+
+      expect(exec_args).to include('-H')
+      expect(exec_args).to include('-C')
       expect(exec_args).to include('--hires-width')
       expect(exec_args).to include('140')
     end
