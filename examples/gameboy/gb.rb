@@ -28,9 +28,9 @@ module GameBoy
 
     # Configuration
     input :joystick, width: 8
-    input :isGBC              # Game Boy Color mode
+    input :is_gbc              # Game Boy Color mode
     input :real_cgb_boot      # Real CGB boot ROM
-    input :isSGB              # Super Game Boy mode
+    input :is_sgb              # Super Game Boy mode
     input :extra_spr_en       # Extra sprites enable
 
     # Cartridge interface (up to 1MB ROM)
@@ -79,7 +79,7 @@ module GameBoy
 
     # GBC specific outputs
     output :speed
-    output :DMA_on
+    output :dma_on
 
     # Game Genie
     input :gg_reset
@@ -103,27 +103,27 @@ module GameBoy
     output :sleep_savestate
 
     # External savestate interface
-    output :SaveStateExt_Din, width: 64
-    output :SaveStateExt_Adr, width: 10
-    output :SaveStateExt_wren
-    output :SaveStateExt_rst
-    input :SaveStateExt_Dout, width: 64
-    output :SaveStateExt_load
+    output :save_state_ext_din, width: 64
+    output :save_state_ext_adr, width: 10
+    output :save_state_ext_wren
+    output :save_state_ext_rst
+    input :save_state_ext_dout, width: 64
+    output :save_state_ext_load
 
     # Cart RAM savestate interface
-    output :Savestate_CRAMAddr, width: 20
-    output :Savestate_CRAMRWrEn
-    output :Savestate_CRAMWriteData, width: 8
-    input :Savestate_CRAMReadData, width: 8
+    output :savestate_cram_addr, width: 20
+    output :savestate_cram_wren
+    output :savestate_cram_write_data, width: 8
+    input :savestate_cram_read_data, width: 8
 
     # Save out interface
-    output :SAVE_out_Din, width: 64
-    input :SAVE_out_Dout, width: 64
-    output :SAVE_out_Adr, width: 26
-    output :SAVE_out_rnw
-    output :SAVE_out_ena
-    output :SAVE_out_be, width: 8
-    input :SAVE_out_done
+    output :save_out_din, width: 64
+    input :save_out_dout, width: 64
+    output :save_out_adr, width: 26
+    output :save_out_rnw
+    output :save_out_ena
+    output :save_out_be, width: 8
+    input :save_out_done
 
     # Rewind
     input :rewind_on
@@ -235,17 +235,17 @@ module GameBoy
     port :reset => [:timer_unit, :reset]
 
     # CPU connections
-    port [:cpu, :A] => :cpu_addr
-    port [:cpu, :DO] => :cpu_do
-    port :cpu_di => [:cpu, :DI]
-    port [:cpu, :WR_n] => :cpu_wr_n
-    port [:cpu, :RD_n] => :cpu_rd_n
-    port [:cpu, :IORQ_n] => :cpu_iorq_n
-    port [:cpu, :M1_n] => :cpu_m1_n
-    port [:cpu, :MREQ_n] => :cpu_mreq_n
-    port :cpu_clken => [:cpu, :CLKEN]
-    port :irq_n => [:cpu, :INT_n]
-    port :isGBC => [:cpu, :isGBC]
+    port [:cpu, :addr_bus] => :cpu_addr
+    port [:cpu, :data_out] => :cpu_do
+    port :cpu_di => [:cpu, :data_in]
+    port [:cpu, :wr_n] => :cpu_wr_n
+    port [:cpu, :rd_n] => :cpu_rd_n
+    port [:cpu, :iorq_n] => :cpu_iorq_n
+    port [:cpu, :m1_n] => :cpu_m1_n
+    port [:cpu, :mreq_n] => :cpu_mreq_n
+    port :cpu_clken => [:cpu, :clken]
+    port :irq_n => [:cpu, :int_n]
+    port :is_gbc => [:cpu, :is_gbc]
 
     # Timer connections
     port :sel_timer => [:timer_unit, :cpu_sel]
@@ -292,7 +292,7 @@ module GameBoy
       # Memory select signals (directly from gb.v lines 156-172)
       sel_timer <= (cpu_addr[15..4] == lit(0xFF0, width: 12)) & (cpu_addr[3..2] == lit(1, width: 2))
       sel_video_reg <= (cpu_addr[15..4] == lit(0xFF4, width: 12)) |
-                       (isGBC & (cpu_addr[15..4] == lit(0xFF6, width: 12)) &
+                       (is_gbc & (cpu_addr[15..4] == lit(0xFF6, width: 12)) &
                         (cpu_addr[3..0] >= lit(8, width: 4)) & (cpu_addr[3..0] <= lit(0xC, width: 4)))
       sel_video_oam <= cpu_addr[15..8] == lit(0xFE, width: 8)
       sel_joy <= cpu_addr == lit(0xFF00, width: 16)
@@ -313,7 +313,7 @@ module GameBoy
       sel_ext_bus <= sel_rom | sel_cram | sel_wram
 
       # CPU clock enable (HDMA can stop CPU on GBC)
-      cpu_clken <= ~(isGBC & hdma_active & cpu_rd_n & cpu_wr_n) & ce
+      cpu_clken <= ~(is_gbc & hdma_active & cpu_rd_n & cpu_wr_n) & ce
 
       # IRQ acknowledge
       irq_ack <= ~cpu_iorq_n & ~cpu_m1_n
@@ -327,7 +327,7 @@ module GameBoy
                      lit(0x00, width: 8))))))
 
       # IRQ active when any enabled interrupt is pending
-      irq_n <= ~(ie_r[4..0] & if_r).reduce_or
+      irq_n <= ~reduce_or(ie_r[4..0] & if_r)
 
       # CPU data input mux (priority-encoded)
       cpu_di <= mux(irq_ack, irq_vec,
@@ -337,9 +337,9 @@ module GameBoy
                 mux(sel_video_oam & oam_cpu_allow, video_do,
                 mux(sel_audio, audio_do,
                 mux(sel_boot_rom, boot_do,
-                mux(isGBC & sel_wram, wram_do,
+                mux(is_gbc & sel_wram, wram_do,
                 mux(sel_ext_bus, ext_bus_di,
-                mux(sel_vram & vram_cpu_allow, mux(isGBC & vram_bank, vram1_do, vram_do),
+                mux(sel_vram & vram_cpu_allow, mux(is_gbc & vram_bank, vram1_do, vram_do),
                 mux(sel_zpram, zpram_do,
                 mux(sel_ie, ie_r,
                     lit(0xFF, width: 8)))))))))))))
@@ -351,7 +351,7 @@ module GameBoy
       speed <= cpu_speed
 
       # DMA on signal
-      DMA_on <= (ext_bus_rom_sel | ext_bus_cram_sel) & (hdma_active | dma_rd)
+      dma_on <= (ext_bus_rom_sel | ext_bus_cram_sel) & (hdma_active | dma_rd)
 
       # Cart interface
       cart_di <= cpu_do

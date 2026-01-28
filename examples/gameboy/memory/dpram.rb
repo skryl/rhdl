@@ -21,7 +21,7 @@ module GameBoy
     DATA_WIDTH = 8
     DEPTH = 8192
 
-    # Port A
+    # Port addr_bus
     input :clock_a
     input :address_a, width: ADDR_WIDTH
     input :wren_a, default: 0

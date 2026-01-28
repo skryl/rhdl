@@ -28,7 +28,7 @@ module GameBoy
     input :ce              # 4 MHz CPU clock enable
     input :ce_n            # 4 MHz inverted clock enable
     input :ce_cpu          # CPU clock enable (4 or 8 MHz)
-    input :isGBC           # Game Boy Color mode
+    input :is_gbc           # Game Boy Color mode
     input :isGBC_mode      # GBC mode enabled
     input :megaduck        # Megaduck mode
 
@@ -74,10 +74,10 @@ module GameBoy
     input :extra_wait
 
     # Save state interface (simplified)
-    input :Savestate_OAMRAMAddr, width: 8
-    input :Savestate_OAMRAMRWrEn
-    input :Savestate_OAMRAMWriteData, width: 8
-    output :Savestate_OAMRAMReadData, width: 8
+    input :savestate_oamram_addr, width: 8
+    input :savestate_oamram_wren
+    input :savestate_oamram_write_data, width: 8
+    output :savestate_oamram_read_data, width: 8
 
     # Internal registers
     # FF40 - LCDC (LCD Control)
@@ -155,7 +155,7 @@ module GameBoy
       lcdc_bg_tile_map <= mux(megaduck, lcdc[2], lcdc[3])
       lcdc_spr_siz <= mux(megaduck, lcdc[1], lcdc[2])
       lcdc_spr_ena <= mux(megaduck, lcdc[0], lcdc[1])
-      lcdc_bg_ena <= mux(megaduck, lcdc[6], lcdc[0]) | (isGBC & isGBC_mode)
+      lcdc_bg_ena <= mux(megaduck, lcdc[6], lcdc[0]) | (is_gbc & isGBC_mode)
 
       # LCD on output
       lcd_on <= lcdc_on

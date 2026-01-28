@@ -5,7 +5,7 @@
 # - 8-bit arithmetic (ADD, ADC, SUB, SBC)
 # - 8-bit logic (AND, OR, XOR, CP)
 # - Rotates and shifts (RL, RR, RLC, RRC, SLA, SRA, SRL, SWAP)
-# - 16-bit add for HL
+# - 16-bit add for hl
 # - DAA (decimal adjust)
 #
 # Flag positions for Game Boy (Mode=3):

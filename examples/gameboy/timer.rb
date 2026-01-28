@@ -60,7 +60,7 @@ module GameBoy
     wire :timer_tick
     wire :timer_enabled
 
-    # Write to DIV resets internal counter
+    # write_sig to DIV resets internal counter
     wire :reset_div
 
     # Combinational logic
