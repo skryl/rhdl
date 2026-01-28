@@ -20,4 +20,8 @@ module HdlToolchain
   def firtool_available?
     which("firtool")
   end
+
+  def verilator_available?
+    which("verilator")
+  end
 end

@@ -22,6 +22,8 @@ module RHDL
             benchmark_apple2
           when :mos6502
             benchmark_mos6502
+          when :verilator
+            benchmark_verilator
           else
             benchmark_gates
           end
@@ -241,13 +243,29 @@ module RHDL
           runners = [
             { name: 'Interpreter', backend: :interpreter, available_const: :IR_INTERPRETER_AVAILABLE },
             { name: 'JIT', backend: :jit, available_const: :IR_JIT_AVAILABLE },
-            { name: 'Compiler', backend: :compiler, available_const: :IR_COMPILER_AVAILABLE }
+            { name: 'Compiler', backend: :compiler, available_const: :IR_COMPILER_AVAILABLE },
+            { name: 'Verilator', backend: :verilator }
           ]
 
           results = []
 
           runners.each do |runner|
-            available = RHDL::Codegen::IR.const_get(runner[:available_const]) rescue false
+            # Skip Interpreter for large cycle counts (too slow)
+            if runner[:backend] == :interpreter && cycles > 100_000
+              puts "\n#{runner[:name]}: SKIPPED (cycles > 100K, too slow)"
+              results << { name: runner[:name], status: :skipped }
+              next
+            end
+
+            # Check availability
+            if runner[:available_const]
+              available = RHDL::Codegen::IR.const_get(runner[:available_const]) rescue false
+            elsif runner[:backend] == :verilator
+              available = verilator_available?
+            else
+              available = false
+            end
+
             unless available
               puts "\n#{runner[:name]}: SKIPPED (not available)"
               results << { name: runner[:name], status: :skipped }
@@ -263,79 +281,101 @@ module RHDL
               $stdout.flush
               init_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
-              bus = MOS6502::Apple2Bus.new("bench_bus")
+              is_verilator = runner[:backend] == :verilator
+              bus = nil
+              sim = nil
 
-              sim = case runner[:backend]
-              when :interpreter
-                RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json)
-              when :jit
-                RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
-              when :compiler
-                RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json)
+              if is_verilator
+                require_relative '../../../../examples/mos6502/utilities/mos6502_verilator'
+                sim = MOS6502::VerilatorRunner.new
+              else
+                bus = MOS6502::Apple2Bus.new("bench_bus")
+
+                sim = case runner[:backend]
+                when :interpreter
+                  RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json)
+                when :jit
+                  RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
+                when :compiler
+                  RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json)
+                end
               end
 
               init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
-
-              # Check if Rust MOS6502 mode is available
-              use_rust_memory = sim.respond_to?(:mos6502_mode?) && sim.mos6502_mode?
 
               # Load ROM and RAM
               print "loading... "
               $stdout.flush
 
-              # Always load into Ruby bus (needed for reset sequence)
-              bus.load_rom(rom_data, base_addr: 0xD000)
-              bus.load_ram(karateka_mem, base_addr: 0x0000)
-              memory = bus.instance_variable_get(:@memory)
-              memory[0xFFFC] = 0x2A  # low byte of $B82A
-              memory[0xFFFD] = 0xB8  # high byte of $B82A
+              if is_verilator
+                # Verilator: load memory and set reset vector
+                sim.load_memory(rom_data, 0xD000)
+                sim.load_memory(karateka_mem, 0x0000)
+                sim.set_reset_vector(0xB82A)
+              else
+                # Check if Rust MOS6502 mode is available
+                use_rust_memory = sim.respond_to?(:mos6502_mode?) && sim.mos6502_mode?
 
-              if use_rust_memory
-                # Also load into Rust memory for batched execution
-                sim.load_mos6502_memory(rom_data, 0xD000, true)   # ROM
-                sim.load_mos6502_memory(karateka_mem, 0x0000, false)  # RAM
-                sim.set_mos6502_reset_vector(0xB82A)
+                # Always load into Ruby bus (needed for reset sequence)
+                bus.load_rom(rom_data, base_addr: 0xD000)
+                bus.load_ram(karateka_mem, base_addr: 0x0000)
+                memory = bus.instance_variable_get(:@memory)
+                memory[0xFFFC] = 0x2A  # low byte of $B82A
+                memory[0xFFFD] = 0xB8  # high byte of $B82A
+
+                if use_rust_memory
+                  # Also load into Rust memory for batched execution
+                  sim.load_mos6502_memory(rom_data, 0xD000, true)   # ROM
+                  sim.load_mos6502_memory(karateka_mem, 0x0000, false)  # RAM
+                  sim.set_mos6502_reset_vector(0xB82A)
+                end
               end
 
               # Reset CPU
-              sim.poke('rst', 1)
-              sim.poke('rdy', 1)
-              sim.poke('irq', 1)
-              sim.poke('nmi', 1)
-              sim.poke('data_in', 0)
-              sim.poke('ext_pc_load_en', 0)
-              sim.poke('ext_a_load_en', 0)
-              sim.poke('ext_x_load_en', 0)
-              sim.poke('ext_y_load_en', 0)
-              sim.poke('ext_sp_load_en', 0)
+              if is_verilator
+                sim.reset
+              else
+                sim.poke('rst', 1)
+                sim.poke('rdy', 1)
+                sim.poke('irq', 1)
+                sim.poke('nmi', 1)
+                sim.poke('data_in', 0)
+                sim.poke('ext_pc_load_en', 0)
+                sim.poke('ext_a_load_en', 0)
+                sim.poke('ext_x_load_en', 0)
+                sim.poke('ext_y_load_en', 0)
+                sim.poke('ext_sp_load_en', 0)
 
-              # Clock tick with memory bridging (Ruby fallback)
-              clock_tick = lambda do
-                addr = sim.peek('addr')
-                rw = sim.peek('rw')
-                if rw == 1
-                  data = bus.read(addr)
-                  sim.poke('data_in', data)
-                else
-                  data = sim.peek('data_out')
-                  bus.write(addr, data)
+                # Clock tick with memory bridging (Ruby fallback)
+                clock_tick = lambda do
+                  addr = sim.peek('addr')
+                  rw = sim.peek('rw')
+                  if rw == 1
+                    data = bus.read(addr)
+                    sim.poke('data_in', data)
+                  else
+                    data = sim.peek('data_out')
+                    bus.write(addr, data)
+                  end
+                  sim.poke('clk', 0)
+                  sim.tick
+                  sim.poke('clk', 1)
+                  sim.tick
                 end
-                sim.poke('clk', 0)
-                sim.tick
-                sim.poke('clk', 1)
-                sim.tick
-              end
 
-              # Run reset sequence
-              clock_tick.call
-              sim.poke('rst', 0)
-              6.times { clock_tick.call }
+                # Run reset sequence
+                clock_tick.call
+                sim.poke('rst', 0)
+                6.times { clock_tick.call }
+              end
 
               # Benchmark
               print "running #{cycles} cycles... "
               $stdout.flush
               run_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-              if use_rust_memory
+              if is_verilator
+                sim.run_cycles(cycles)
+              elsif use_rust_memory
                 # Use batched Rust execution - no FFI per cycle!
                 sim.run_mos6502_cycles(cycles)
               else
@@ -345,7 +385,7 @@ module RHDL
               run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
 
               cycles_per_sec = cycles / run_elapsed
-              pc = sim.peek('reg_pc')
+              pc = is_verilator ? sim.pc : sim.peek('reg_pc')
 
               puts "done"
               puts "  Init time: #{format('%.3f', init_elapsed)}s"
@@ -424,13 +464,29 @@ module RHDL
           runners = [
             { name: 'Interpreter', backend: :interpreter, available_const: :IR_INTERPRETER_AVAILABLE },
             { name: 'JIT', backend: :jit, available_const: :IR_JIT_AVAILABLE },
-            { name: 'Compiler', backend: :compiler, available_const: :IR_COMPILER_AVAILABLE }
+            { name: 'Compiler', backend: :compiler, available_const: :IR_COMPILER_AVAILABLE },
+            { name: 'Verilator', backend: :verilator }
           ]
 
           results = []
 
           runners.each do |runner|
-            available = RHDL::Codegen::IR.const_get(runner[:available_const]) rescue false
+            # Skip Interpreter for large cycle counts (too slow)
+            if runner[:backend] == :interpreter && cycles > 100_000
+              puts "\n#{runner[:name]}: SKIPPED (cycles > 100K, too slow)"
+              results << { name: runner[:name], status: :skipped }
+              next
+            end
+
+            # Check availability
+            if runner[:available_const]
+              available = RHDL::Codegen::IR.const_get(runner[:available_const]) rescue false
+            elsif runner[:backend] == :verilator
+              available = verilator_available?
+            else
+              available = false
+            end
+
             unless available
               puts "\n#{runner[:name]}: SKIPPED (not available)"
               results << { name: runner[:name], status: :skipped }
@@ -446,6 +502,7 @@ module RHDL
               $stdout.flush
               init_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
+              is_verilator = runner[:backend] == :verilator
               sim = case runner[:backend]
               when :interpreter
                 RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json)
@@ -453,6 +510,9 @@ module RHDL
                 RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
               when :compiler
                 RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json)
+              when :verilator
+                require_relative '../../../../examples/apple2/utilities/apple2_verilator'
+                RHDL::Apple2::VerilatorRunner.new(sub_cycles: 14)
               end
 
               init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
@@ -460,26 +520,43 @@ module RHDL
               # Load ROM and RAM
               print "loading... "
               $stdout.flush
-              sim.load_rom(karateka_rom)
-              sim.load_ram(karateka_mem.first(48 * 1024), 0)
+              if is_verilator
+                sim.load_rom(karateka_rom, base_addr: 0xD000)
+                sim.load_ram(karateka_mem.first(48 * 1024), base_addr: 0)
+              else
+                sim.load_rom(karateka_rom)
+                sim.load_ram(karateka_mem.first(48 * 1024), 0)
+              end
 
               # Reset
-              sim.poke('reset', 1)
-              sim.tick
-              sim.poke('reset', 0)
+              if is_verilator
+                sim.reset
+              else
+                sim.poke('reset', 1)
+                sim.tick
+                sim.poke('reset', 0)
+              end
 
               # Warmup - run a few cycles to get past reset
-              3.times { sim.run_cpu_cycles(1, 0, false) }
+              if is_verilator
+                sim.run_steps(3)
+              else
+                3.times { sim.run_cpu_cycles(1, 0, false) }
+              end
 
               # Benchmark
               print "running #{cycles} cycles... "
               $stdout.flush
               run_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-              sim.run_cpu_cycles(cycles, 0, false)
+              if is_verilator
+                sim.run_steps(cycles)
+              else
+                sim.run_cpu_cycles(cycles, 0, false)
+              end
               run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
 
               cycles_per_sec = cycles / run_elapsed
-              pc = sim.peek('cpu__pc_reg')
+              pc = is_verilator ? sim.pc : sim.peek('cpu__pc_reg')
 
               puts "done"
               puts "  Init time: #{format('%.3f', init_elapsed)}s"
@@ -503,6 +580,107 @@ module RHDL
           end
 
           print_benchmark_summary(results, cycles)
+        end
+
+        # Benchmark Verilator simulation
+        def benchmark_verilator
+          # Check if Verilator is available
+          verilator_path = ENV['PATH'].split(File::PATH_SEPARATOR).find do |path|
+            File.executable?(File.join(path, 'verilator'))
+          end
+
+          unless verilator_path
+            puts "Error: Verilator not found in PATH"
+            puts "Install Verilator:"
+            puts "  Ubuntu/Debian: sudo apt-get install verilator"
+            puts "  macOS: brew install verilator"
+            return
+          end
+
+          # Paths to ROM and memory dump
+          rom_path = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __dir__)
+          karateka_path = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __dir__)
+
+          unless File.exist?(rom_path)
+            puts "Error: AppleIIgo ROM not found at #{rom_path}"
+            puts "Please ensure the ROM file exists."
+            return
+          end
+
+          unless File.exist?(karateka_path)
+            puts "Error: Karateka memory dump not found at #{karateka_path}"
+            puts "Please ensure the memory dump file exists."
+            return
+          end
+
+          cycles = options[:cycles] || 100_000
+
+          puts_header("Verilator Simulation Benchmark - Apple II")
+
+          # Check Verilator version
+          version = `verilator --version 2>&1`.lines.first&.strip
+          puts "Verilator: #{version}"
+          puts "Cycles: #{cycles}"
+          puts "ROM: #{rom_path}"
+          puts "Memory dump: #{karateka_path}"
+          puts
+
+          begin
+            # Load RHDL and the Verilator runner
+            require 'rhdl'
+            $LOAD_PATH.unshift(File.expand_path('../../../../examples/apple2/utilities', __dir__))
+            require 'apple2_verilator'
+
+            # Create and initialize runner (includes Verilator build)
+            print "Building Verilator simulation... "
+            $stdout.flush
+            init_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            runner = RHDL::Apple2::VerilatorRunner.new(sub_cycles: 14)
+            init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
+            puts "done (#{format('%.2f', init_elapsed)}s)"
+
+            # Load ROM and memory
+            print "Loading ROM and memory... "
+            $stdout.flush
+            rom_data = File.binread(rom_path).bytes
+            karateka_mem = File.binread(karateka_path).bytes
+
+            runner.load_rom(rom_data, base_addr: 0xD000)
+            runner.load_ram(karateka_mem, base_addr: 0x0000)
+
+            # Set reset vector to game entry ($B82A)
+            runner.write_memory(0xFFFC, 0x2A)  # low byte
+            runner.write_memory(0xFFFD, 0xB8)  # high byte
+            puts "done"
+
+            # Reset
+            print "Resetting CPU... "
+            $stdout.flush
+            runner.reset
+            puts "done"
+
+            # Run benchmark
+            print "Running #{cycles} cycles... "
+            $stdout.flush
+            run_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            runner.run_steps(cycles)
+            run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
+
+            cycles_per_sec = cycles / run_elapsed
+            puts "done"
+
+            puts
+            puts "Results:"
+            puts "  Build time: #{format('%.3f', init_elapsed)}s"
+            puts "  Run time:   #{format('%.3f', run_elapsed)}s"
+            puts "  Rate:       #{format('%.0f', cycles_per_sec)} cycles/s (#{format('%.2f', cycles_per_sec / 1_000_000)}M/s)"
+            puts "  PC:         0x#{runner.pc.to_s(16).upcase}"
+
+          rescue => e
+            puts "FAILED"
+            puts "  Error: #{e.message}"
+            puts "  #{e.backtrace.first(5).join("\n  ")}" if options[:verbose]
+          end
         end
 
         private
@@ -540,6 +718,12 @@ module RHDL
         def rspec_cmd
           binstub = File.join(Config.project_root, 'bin/rspec')
           File.executable?(binstub) ? binstub : 'rspec'
+        end
+
+        def verilator_available?
+          ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
+            File.executable?(File.join(path, 'verilator'))
+          end
         end
       end
     end

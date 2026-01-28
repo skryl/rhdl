@@ -35,6 +35,7 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
     it 'can be instantiated with mode option' do
       expect { described_class.new(mode: :hdl) }.not_to raise_error
       expect { described_class.new(mode: :netlist) }.not_to raise_error
+      expect { described_class.new(mode: :verilog) }.not_to raise_error
     end
 
     it 'can be instantiated with sim option' do
@@ -43,7 +44,7 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       expect { described_class.new(sim: :compile) }.not_to raise_error
     end
 
-    it 'can be instantiated with all 6 mode/sim combinations' do
+    it 'can be instantiated with all mode/sim combinations' do
       # hdl mode with all sim options
       expect { described_class.new(mode: :hdl, sim: :interpret) }.not_to raise_error
       expect { described_class.new(mode: :hdl, sim: :jit) }.not_to raise_error
@@ -53,6 +54,9 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       expect { described_class.new(mode: :netlist, sim: :interpret) }.not_to raise_error
       expect { described_class.new(mode: :netlist, sim: :jit) }.not_to raise_error
       expect { described_class.new(mode: :netlist, sim: :compile) }.not_to raise_error
+
+      # verilog mode (uses Verilator, sim option not applicable)
+      expect { described_class.new(mode: :verilog) }.not_to raise_error
     end
 
     it 'can be instantiated with program option' do
@@ -305,6 +309,16 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
 
       expect(exec_args).to include('-m')
       expect(exec_args).to include('netlist')
+    end
+
+    it 'passes -m for verilog mode' do
+      task = described_class.new(mode: :verilog)
+      exec_args = []
+
+      task.send(:add_common_args, exec_args)
+
+      expect(exec_args).to include('-m')
+      expect(exec_args).to include('verilog')
     end
 
     it 'does not pass --sim for jit backend (default)' do
