@@ -101,6 +101,78 @@ RSpec.describe MOS6502::Apple2Speaker do
       expect(info).to include(:backend, :enabled, :running, :toggle_count)
     end
   end
+
+  describe '#sync_toggles' do
+    context 'when not running' do
+      it 'does not generate samples' do
+        speaker.sync_toggles(10, 0.033)
+        expect(speaker.samples_written).to eq(0)
+      end
+    end
+
+    context 'when running' do
+      before do
+        speaker.instance_variable_set(:@running, true)
+        speaker.instance_variable_set(:@enabled, true)
+        speaker.instance_variable_set(:@mutex, Mutex.new)
+        speaker.instance_variable_set(:@sample_buffer, [])
+        speaker.instance_variable_set(:@audio_pipe, nil)
+      end
+
+      it 'increments toggle count by the batched count' do
+        initial_count = speaker.toggle_count
+        speaker.sync_toggles(50, 0.033)
+        expect(speaker.toggle_count).to eq(initial_count + 50)
+      end
+
+      it 'generates samples based on average interval' do
+        # 10 toggles over 0.01 seconds = 1ms average interval
+        # At 22050 Hz, 1ms = ~22 samples per toggle
+        speaker.sync_toggles(10, 0.01)
+
+        buffer = speaker.instance_variable_get(:@sample_buffer)
+        # Should have samples: 10 toggles * (0.001 * 22050) = ~220 samples
+        expect(buffer.size).to be_between(200, 250)
+      end
+
+      it 'skips audio generation for intervals below MIN_TOGGLE_INTERVAL' do
+        # 100 toggles in 0.0001 seconds = 0.000001s average (below MIN_TOGGLE_INTERVAL)
+        speaker.sync_toggles(100, 0.0001)
+
+        buffer = speaker.instance_variable_get(:@sample_buffer)
+        expect(buffer.size).to eq(0)
+      end
+
+      it 'skips audio generation for intervals above MAX_TOGGLE_INTERVAL' do
+        # 2 toggles over 10 seconds = 5s average (above MAX_TOGGLE_INTERVAL)
+        speaker.sync_toggles(2, 10.0)
+
+        buffer = speaker.instance_variable_get(:@sample_buffer)
+        expect(buffer.size).to eq(0)
+      end
+
+      it 'alternates speaker state for each toggle' do
+        initial_state = speaker.instance_variable_get(:@speaker_state)
+        speaker.sync_toggles(5, 0.005)  # 5 toggles
+
+        # After 5 toggles, state should be inverted
+        final_state = speaker.instance_variable_get(:@speaker_state)
+        expect(final_state).to eq(!initial_state)
+      end
+
+      it 'does nothing with zero toggles' do
+        initial_count = speaker.toggle_count
+        speaker.sync_toggles(0, 0.033)
+        expect(speaker.toggle_count).to eq(initial_count)
+      end
+
+      it 'does nothing with zero elapsed time' do
+        initial_count = speaker.toggle_count
+        speaker.sync_toggles(10, 0)
+        expect(speaker.toggle_count).to eq(initial_count)
+      end
+    end
+  end
 end
 
 RSpec.describe MOS6502::Apple2SpeakerBeep do
