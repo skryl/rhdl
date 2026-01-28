@@ -117,6 +117,23 @@ module RHDL
         @halted = false
       end
 
+      # Write a single byte to memory
+      def write_memory(addr, byte)
+        if addr >= 0xD000
+          # ROM area
+          @rom[addr - 0xD000] = byte if addr - 0xD000 < @rom.size
+        else
+          # RAM area
+          @ram[addr] = byte if addr < @ram.size
+          verilator_write_ram(addr, byte) if addr < @ram.size
+        end
+      end
+
+      # Get current program counter
+      def pc
+        verilator_peek('pc_debug')
+      end
+
       # Main entry point for running cycles
       def run_steps(steps)
         steps.times { run_cpu_cycle }
@@ -410,10 +427,11 @@ module RHDL
         # Use the existing Verilog export infrastructure
         verilog_code = Apple2.to_verilog
 
-        # Also export all subcomponents
+        # Also export all subcomponents (including nested ones)
         subcomponent_verilog = []
+        # Main components
         [TimingGenerator, VideoGenerator, CharacterROM, SpeakerToggle,
-         CPU6502, DiskII, Keyboard].each do |component_class|
+         CPU6502, DiskII, DiskIIROM, Keyboard, PS2Controller].each do |component_class|
           begin
             subcomponent_verilog << component_class.to_verilog
           rescue StandardError => e
@@ -466,7 +484,8 @@ module RHDL
           extern "C" {
 
           void* sim_create(void) {
-              Verilated::commandArgs(0, nullptr);
+              const char* empty_args[] = {""};
+              Verilated::commandArgs(1, empty_args);
               SimContext* ctx = new SimContext();
               ctx->dut = new Vapple2();
               memset(ctx->ram, 0, sizeof(ctx->ram));
@@ -552,11 +571,16 @@ module RHDL
         lib_name = "libapple2_sim.#{lib_suffix}"
         lib_path = File.join(OBJ_DIR, lib_name)
 
-        # Verilate the design
+        # Verilate the design - top module is apple2_apple2
         verilate_cmd = [
           'verilator',
           '--cc',
           '--build',
+          '--top-module', 'apple2_apple2',
+          '-Wno-fatal',           # Continue despite warnings
+          '-Wno-WIDTHEXPAND',     # Suppress width expansion warnings
+          '-Wno-WIDTHTRUNC',      # Suppress width truncation warnings
+          '-Wno-UNOPTFLAT',       # Suppress unoptimized flattening warnings
           '-CFLAGS', '-fPIC',
           '-LDFLAGS', '-shared',
           '--Mdir', OBJ_DIR,

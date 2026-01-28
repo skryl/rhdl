@@ -511,9 +511,17 @@ module RHDL
 
             connections = inst_def[:connections].map do |port_name, signal|
               direction = port_directions[port_name] || :in
+              # For output ports, use intermediate wire name instead of parent signal
+              # This prevents BLKANDNBLK errors where output is driven by both
+              # instance port and assign statement
+              signal_name = if direction == :out
+                              "#{inst_def[:name]}__#{port_name}"
+                            else
+                              signal.to_s
+                            end
               RHDL::Export::IR::PortConnection.new(
                 port_name: port_name,
-                signal: signal.to_s,
+                signal: signal_name,
                 direction: direction
               )
             end
