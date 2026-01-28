@@ -16,6 +16,7 @@ class IRSimulatorRunner
     @cycles = 0
     @halted = false
     @use_rust_memory = false  # Will be set true if Rust MOS6502 mode available
+    @last_speaker_sync_time = nil
 
     # Generate IR JSON from MOS6502::CPU component
     ir = MOS6502::CPU.to_flat_ir
@@ -308,6 +309,27 @@ class IRSimulatorRunner
       cpu_state: cpu_state,
       memory_sample: memory_sample
     }
+  end
+
+  # Sync speaker toggles from Rust backend to Ruby speaker for audio generation
+  # Called each frame by the emulator main loop
+  def sync_speaker_state
+    return unless @use_rust_memory
+    return unless @sim.respond_to?(:mos6502_speaker_toggles)
+
+    current_toggles = @sim.mos6502_speaker_toggles
+    return if current_toggles == 0
+
+    # Calculate elapsed time since last sync for timing estimation
+    now = Time.now
+    elapsed = @last_speaker_sync_time ? (now - @last_speaker_sync_time) : 0.016  # Default ~60fps
+    @last_speaker_sync_time = now
+
+    # Forward toggles to speaker with timing info for proper audio generation
+    @bus.speaker.sync_toggles(current_toggles, elapsed)
+
+    # Reset the Rust toggle counter
+    @sim.reset_mos6502_speaker_toggles
   end
 
   private
