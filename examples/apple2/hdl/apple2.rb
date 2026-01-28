@@ -63,9 +63,13 @@ module RHDL
       output :hbl                        # Horizontal blanking
       output :vbl                        # Vertical blanking
 
-      # Keyboard interface
-      input :k, width: 8                 # Keyboard data
+      # Keyboard interface (directly from Keyboard HDL via PS/2)
+      input :ps2_clk                     # PS/2 clock input
+      input :ps2_data                    # PS/2 data input
       output :read_key                   # Keyboard read strobe
+
+      # Internal keyboard data wire (from Keyboard component)
+      wire :k, width: 8
 
       # Audio output
       output :speaker                    # 1-bit speaker output
@@ -108,6 +112,7 @@ module RHDL
       instance :speaker_toggle, SpeakerToggle
       instance :cpu, CPU6502
       instance :disk, DiskII
+      instance :keyboard, Keyboard
 
       # Internal wires for clocks
       wire :clk_7m
@@ -251,6 +256,14 @@ module RHDL
       port :cpu_addr => [:disk, :a]
       port :cpu_dout => [:disk, :d_in]
       port [:disk, :d_out] => :disk_dout
+
+      # Connect Keyboard controller (PS/2 to ASCII)
+      port :clk_14m => [:keyboard, :clk_14m]
+      port :reset => [:keyboard, :reset]
+      port :ps2_clk => [:keyboard, :ps2_clk]
+      port :ps2_data => [:keyboard, :ps2_data]
+      port :read_key => [:keyboard, :read]
+      port [:keyboard, :k] => :k
 
       # Soft switches state
       sequential clock: :q3, reset: :reset, reset_values: {
