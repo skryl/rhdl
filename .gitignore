@@ -40,3 +40,5 @@ lib/rhdl/codegen/ir/sim/ir_jit/lib/
 lib/rhdl/codegen/ir/sim/ir_compiler/target/
 lib/rhdl/codegen/ir/sim/ir_compiler/lib/
 examples/gameboy/reference/
+# Game Boy ROM files (binary, should not be tracked)
+examples/gameboy/software/roms/*.gb
