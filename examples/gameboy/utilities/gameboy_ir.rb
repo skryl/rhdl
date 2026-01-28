@@ -67,6 +67,9 @@ module RHDL
       WRAM_START = 0xC000
       WRAM_END = 0xDFFF
 
+      # Boot ROM paths (relative to the gameboy directory)
+      DMG_BOOT_ROM_PATH = File.expand_path('../reference/BootROMs/bin/dmg_boot.bin', __dir__)
+
       # Initialize the Game Boy IR runner
       # @param backend [Symbol] :interpret, :jit, or :compile
       def initialize(backend: :interpret)
@@ -170,6 +173,39 @@ module RHDL
             @ram[addr] = byte if addr < @ram.size
           end
         end
+      end
+
+      # Load the DMG boot ROM (256 bytes)
+      # @param bytes [String, Array<Integer>] boot ROM data or path to file
+      def load_boot_rom(bytes = nil)
+        # Default to DMG boot ROM if no data provided
+        if bytes.nil?
+          if File.exist?(DMG_BOOT_ROM_PATH)
+            bytes = File.binread(DMG_BOOT_ROM_PATH)
+            puts "Loading default DMG boot ROM from #{DMG_BOOT_ROM_PATH}"
+          else
+            puts "Warning: DMG boot ROM not found at #{DMG_BOOT_ROM_PATH}"
+            return
+          end
+        elsif bytes.is_a?(String) && File.exist?(bytes)
+          # If it's a path, read the file
+          bytes = File.binread(bytes)
+        end
+
+        bytes = bytes.bytes if bytes.is_a?(String)
+
+        if @use_batched && @sim.respond_to?(:load_boot_rom)
+          @sim.load_boot_rom(bytes)
+          puts "Loaded #{bytes.length} bytes boot ROM"
+          @boot_rom_loaded = true
+        else
+          puts "Warning: Boot ROM not supported in non-batched mode"
+          @boot_rom_loaded = false
+        end
+      end
+
+      def boot_rom_loaded?
+        @boot_rom_loaded || false
       end
 
       def reset

@@ -215,6 +215,9 @@ module GameBoy
     wire :vram_addr_ppu, width: 13     # PPU VRAM address
     wire :vram_data_ppu, width: 8      # PPU VRAM data read
 
+    # Boot ROM interface signals
+    wire :boot_rom_addr, width: 8      # Boot ROM address (lower 8 bits of cpu_addr)
+
     # Sub-component instances
     instance :cpu, SM83
     instance :timer_unit, Timer
@@ -347,6 +350,13 @@ module GameBoy
                     (cpu_addr[7..0] == lit(0x77, width: 8)))
       sel_ext_bus <= sel_rom | sel_cram | sel_wram
 
+      # Boot ROM select (0x0000-0x00FF when boot_rom_enabled, DMG mode)
+      # Reference: sel_boot_rom = boot_rom_enabled && (!boot_rom_addr[15:8] || sel_boot_rom_cgb) && ~megaduck
+      sel_boot_rom <= boot_rom_enabled & (cpu_addr[15..8] == lit(0, width: 8)) & ~megaduck
+
+      # Boot ROM address (lower 8 bits for DMG 256-byte boot ROM)
+      boot_rom_addr <= cpu_addr[7..0]
+
       # CPU clock enable (HDMA can stop CPU on GBC)
       cpu_clken <= ~(is_gbc & hdma_active & cpu_rd_n & cpu_wr_n) & ce
 
@@ -408,13 +418,13 @@ module GameBoy
     end
 
     # Sequential logic for registers
-    sequential clock: :clk_sys, reset: :reset do
+    # boot_rom_enabled starts as 1 and is disabled by writing to FF50
+    sequential clock: :clk_sys, reset: :reset, reset_values: { boot_rom_enabled: 1 } do
       # Boot ROM enable (disabled by writing to FF50)
-      boot_rom_enabled <= mux(boot_rom_enabled & ce &
-                              (cpu_addr == lit(0xFF50, width: 16)) &
-                              ~cpu_wr_n & cpu_do[0],
+      # When writing 1 to FF50, boot ROM is disabled (set to 0)
+      boot_rom_enabled <= mux(ce & (cpu_addr == lit(0xFF50, width: 16)) & ~cpu_wr_n & cpu_do[0],
                               lit(0, width: 1),
-                              mux(reset, lit(1, width: 1), boot_rom_enabled))
+                              boot_rom_enabled)
     end
 
   end

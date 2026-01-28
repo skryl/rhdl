@@ -225,6 +225,14 @@ struct IrSimulator {
     gb_vram_do_idx: usize,
     /// VRAM PPU data signal index (for compatibility)
     gb_vram_data_ppu_idx: usize,
+    /// Game Boy boot ROM (256 bytes for DMG)
+    gb_boot_rom: Vec<u8>,
+    /// Boot ROM enabled signal index
+    gb_sel_boot_rom_idx: usize,
+    /// Boot ROM address signal index (8 bits)
+    gb_boot_rom_addr_idx: usize,
+    /// Boot ROM data output signal index
+    gb_boot_do_idx: usize,
     /// Previous lcd_clkena value for edge detection
     prev_lcd_clkena: u64,
     /// Previous lcd_vsync value for edge detection
@@ -400,6 +408,16 @@ impl IrSimulator {
         let gb_vram_data_ppu_idx = *name_to_idx.get("gb_core__vram_data_ppu")
             .or_else(|| name_to_idx.get("vram_data_ppu"))
             .unwrap_or(&0);
+        // Boot ROM signal indices
+        let gb_sel_boot_rom_idx = *name_to_idx.get("gb_core__sel_boot_rom")
+            .or_else(|| name_to_idx.get("sel_boot_rom"))
+            .unwrap_or(&0);
+        let gb_boot_rom_addr_idx = *name_to_idx.get("gb_core__boot_rom_addr")
+            .or_else(|| name_to_idx.get("boot_rom_addr"))
+            .unwrap_or(&0);
+        let gb_boot_do_idx = *name_to_idx.get("gb_core__boot_do")
+            .or_else(|| name_to_idx.get("boot_do"))
+            .unwrap_or(&0);
         let gameboy_mode = name_to_idx.contains_key("lcd_clkena")
             && name_to_idx.contains_key("lcd_data_gb")
             && name_to_idx.contains_key("ce");
@@ -467,6 +485,10 @@ impl IrSimulator {
             gb_vram_addr_ppu_idx,
             gb_vram_do_idx,
             gb_vram_data_ppu_idx,
+            gb_boot_rom: vec![0u8; 256],  // 256 bytes for DMG boot ROM
+            gb_sel_boot_rom_idx,
+            gb_boot_rom_addr_idx,
+            gb_boot_do_idx,
             prev_lcd_clkena: 0,
             prev_lcd_vsync: 0,
             framebuffer: vec![0u8; 160 * 144],  // 160x144 Game Boy screen
@@ -1336,6 +1358,10 @@ impl IrSimulator {
         let gb_vram0_q_a_reg_idx = self.gb_vram0_q_a_reg_idx;
         let gb_vram0_q_b_reg_idx = self.gb_vram0_q_b_reg_idx;
         let gb_vram_addr_ppu_idx = self.gb_vram_addr_ppu_idx;
+        // Boot ROM interface indices
+        let gb_sel_boot_rom_idx = self.gb_sel_boot_rom_idx;
+        let gb_boot_rom_addr_idx = self.gb_boot_rom_addr_idx;
+        let gb_boot_do_idx = self.gb_boot_do_idx;
 
         let clock_indices: Vec<usize> = self.clock_indices.clone();
         let num_clocks = clock_indices.len().max(1);
@@ -1373,11 +1399,14 @@ impl IrSimulator {
         code.push_str("    rom_len: usize,\n");
         code.push_str("    vram_ptr: *mut u8,\n");
         code.push_str("    vram_len: usize,\n");
+        code.push_str("    boot_rom_ptr: *const u8,\n");
+        code.push_str("    boot_rom_len: usize,\n");
         code.push_str(") -> GbCycleResult {\n");
         code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, signals_len);\n");
         code.push_str("    let framebuffer = std::slice::from_raw_parts_mut(framebuffer, 160 * 144);\n");
         code.push_str("    let rom = std::slice::from_raw_parts(rom_ptr, rom_len);\n");
         code.push_str("    let vram = std::slice::from_raw_parts_mut(vram_ptr, vram_len);\n");
+        code.push_str("    let boot_rom = std::slice::from_raw_parts(boot_rom_ptr, boot_rom_len);\n");
         code.push_str(&format!("    let old_clocks: &mut [u64; {}] = &mut *(old_clocks_ptr as *mut [u64; {}]);\n", num_clocks, num_clocks));
         code.push_str(&format!("    let next_regs: &mut [u64; {}] = &mut *(next_regs_ptr as *mut [u64; {}]);\n", num_regs.max(1), num_regs.max(1)));
         code.push_str("    let state = &mut *lcd_state;\n");
@@ -1406,6 +1435,15 @@ impl IrSimulator {
         code.push_str("            evaluate_inline(signals); // Re-evaluate with ROM data\n");
         code.push_str("        }\n\n");
 
+        // Handle boot ROM read (when sel_boot_rom is active)
+        code.push_str("        // Boot ROM read - check sel_boot_rom and provide data\n");
+        code.push_str(&format!("        if signals[{}] != 0 && boot_rom_len > 0 {{ // sel_boot_rom\n", gb_sel_boot_rom_idx));
+        code.push_str(&format!("            let addr = (signals[{}] & 0xFF) as usize; // boot_rom_addr (8 bits)\n", gb_boot_rom_addr_idx));
+        code.push_str("            let data = if addr < boot_rom_len { boot_rom[addr] } else { 0xFF };\n");
+        code.push_str(&format!("            signals[{}] = data as u64; // boot_do\n", gb_boot_do_idx));
+        code.push_str("            evaluate_inline(signals); // Re-evaluate with boot ROM data\n");
+        code.push_str("        }\n\n");
+
         // Save old clock values BEFORE the rising edge (so we can detect the edge)
         for (i, &clk) in clock_indices.iter().enumerate() {
             code.push_str(&format!("        old_clocks[{}] = signals[{}];\n", i, clk));
@@ -1422,6 +1460,15 @@ impl IrSimulator {
         code.push_str("            let addr = (addr_hi << 15) | addr_lo;\n");
         code.push_str("            let data = if addr < rom_len { rom[addr] } else { 0xFF };\n");
         code.push_str(&format!("            signals[{}] = data as u64;\n", gb_cart_do_idx));
+        code.push_str("            evaluate_inline(signals);\n");
+        code.push_str("        }\n\n");
+
+        // Handle boot ROM read on rising edge
+        code.push_str("        // Boot ROM read on rising edge\n");
+        code.push_str(&format!("        if signals[{}] != 0 && boot_rom_len > 0 {{ // sel_boot_rom\n", gb_sel_boot_rom_idx));
+        code.push_str(&format!("            let addr = (signals[{}] & 0xFF) as usize;\n", gb_boot_rom_addr_idx));
+        code.push_str("            let data = if addr < boot_rom_len { boot_rom[addr] } else { 0xFF };\n");
+        code.push_str(&format!("            signals[{}] = data as u64;\n", gb_boot_do_idx));
         code.push_str("            evaluate_inline(signals);\n");
         code.push_str("        }\n\n");
 
@@ -1638,6 +1685,12 @@ impl IrSimulator {
         }
     }
 
+    /// Load Game Boy boot ROM (256 bytes for DMG)
+    fn load_boot_rom(&mut self, data: &[u8]) {
+        let len = data.len().min(self.gb_boot_rom.len());
+        self.gb_boot_rom[..len].copy_from_slice(&data[..len]);
+    }
+
     fn load_ram(&mut self, data: &[u8], offset: usize) {
         let end = (offset + data.len()).min(self.ram.len());
         let len = end.saturating_sub(offset);
@@ -1768,6 +1821,8 @@ impl IrSimulator {
                 rom_len: usize,
                 vram_ptr: *mut u8,
                 vram_len: usize,
+                boot_rom_ptr: *const u8,
+                boot_rom_len: usize,
             ) -> GbCycleResult;
 
             let func: libloading::Symbol<RunGbCyclesFn> = lib.get(b"run_gb_cycles")
@@ -1793,6 +1848,8 @@ impl IrSimulator {
                 self.gb_rom.len(),
                 self.gb_vram.as_mut_ptr(),
                 self.gb_vram.len(),
+                self.gb_boot_rom.as_ptr(),
+                self.gb_boot_rom.len(),
             );
 
             // Update state from result
@@ -1968,6 +2025,17 @@ impl RubyIrCompiler {
         Ok(())
     }
 
+    fn load_boot_rom(&self, data: RArray) -> Result<(), Error> {
+        let ruby = unsafe { Ruby::get_unchecked() };
+        let bytes: Vec<u8> = data.to_vec::<i64>()
+            .map_err(|e| Error::new(ruby.exception_runtime_error(), format!("Invalid boot ROM data: {}", e)))?
+            .into_iter()
+            .map(|v| v as u8)
+            .collect();
+        self.sim.borrow_mut().load_boot_rom(&bytes);
+        Ok(())
+    }
+
     fn run_cpu_cycles(&self, n: usize, key_data: i64, key_ready: bool) -> Result<RHash, Error> {
         let ruby = unsafe { Ruby::get_unchecked() };
         let result = self.sim.borrow_mut().run_cpu_cycles(n, key_data as u8, key_ready);
@@ -2120,6 +2188,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("output_names", method!(RubyIrCompiler::output_names, 0))?;
     class.define_method("load_rom", method!(RubyIrCompiler::load_rom, 1))?;
     class.define_method("load_ram", method!(RubyIrCompiler::load_ram, 2))?;
+    class.define_method("load_boot_rom", method!(RubyIrCompiler::load_boot_rom, 1))?;
     class.define_method("run_cpu_cycles", method!(RubyIrCompiler::run_cpu_cycles, 3))?;
     class.define_method("read_ram", method!(RubyIrCompiler::read_ram, 2))?;
     class.define_method("write_ram", method!(RubyIrCompiler::write_ram, 2))?;
