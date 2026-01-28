@@ -163,6 +163,26 @@ module GameBoy
       # VBlank detection
       vblank <= (v_cnt >= lit(144, width: 8))
 
+      # Mode timing (at 1MHz h_cnt rate, 114 values per line)
+      # Mode 2 (OAM Search): h_cnt 0-19 (80 dots)
+      # Mode 3 (Drawing):    h_cnt 20-62 (variable, ~172 dots)
+      # Mode 0 (HBlank):     h_cnt 63-113
+      oam_eval <= ~vblank & (h_cnt < lit(20, width: 7))
+      mode3 <= ~vblank & (h_cnt >= lit(20, width: 7)) & (h_cnt < lit(63, width: 7))
+
+      # LCD pixel output during mode 3
+      # lcd_clkena pulses when we output a pixel (during visible drawing)
+      lcd_clkena <= mode3 & lcdc_on & (pcnt < lit(160, width: 8)) & ce & (h_div_cnt == lit(0, width: 2))
+
+      # 2-bit pixel data - for now output a test pattern based on position
+      # Real implementation would fetch from VRAM and apply palette
+      lcd_data_gb <= mux(lcd_clkena,
+                        ((pcnt[3..2] ^ v_cnt[3..2])),  # Checkerboard pattern
+                        lit(0, width: 2))
+
+      # VSync signal - high during first line of VBlank
+      lcd_vsync <= (v_cnt == lit(144, width: 8)) & (h_cnt < lit(20, width: 7))
+
       # Mode calculation
       mode_wire <= mux(vblank,
                        lit(1, width: 2),  # Mode 1: VBlank
@@ -201,8 +221,10 @@ module GameBoy
     end
 
     # Sequential logic
+    # Note: LCDC initialized to 0x91 (post-boot-ROM state: LCD on, BG enabled)
+    # This allows simulation without running the boot ROM
     sequential clock: :clk, reset: :reset, reset_values: {
-      lcdc: 0x00,
+      lcdc: 0x91,
       stat: 0x00,
       scy: 0x00,
       scx: 0x00,
@@ -237,6 +259,18 @@ module GameBoy
                        lit(0, width: 8),
                        v_cnt + lit(1, width: 8)),
                    v_cnt)
+
+      # Pixel counter for Mode 3 rendering
+      # Reset at start of mode 3 (h_cnt == 20), increment when outputting pixels
+      pcnt <= mux(~lcdc_on,
+                  lit(0, width: 8),
+                  mux(ce & (h_div_cnt == lit(0, width: 2)) & (h_cnt == lit(20, width: 7)),
+                      lit(0, width: 8),  # Reset at start of mode 3
+                      mux(ce & (h_div_cnt == lit(0, width: 2)) &
+                          (h_cnt >= lit(20, width: 7)) & (h_cnt < lit(63, width: 7)) &
+                          (pcnt < lit(160, width: 8)) & ~vblank,
+                          pcnt + lit(1, width: 8),  # Increment during mode 3
+                          pcnt)))
 
       # DMA engine
       dma_active <= mux(ce_cpu & cpu_sel_reg & cpu_wr & (cpu_addr == lit(0x46, width: 8)),
