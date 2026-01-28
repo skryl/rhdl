@@ -76,6 +76,12 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     false
   end
 
+  def verilator_available?
+    ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
+      File.executable?(File.join(path, 'verilator'))
+    end
+  end
+
   # Simulator wrapper to provide uniform interface
   class SimulatorWrapper
     attr_reader :name, :type, :bus
@@ -450,6 +456,66 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     end
   end
 
+  # Verilator-based simulator wrapper
+  class VerilatorWrapper < SimulatorWrapper
+    def initialize(runner)
+      super("Verilator", :verilator)
+      @runner = runner
+    end
+
+    def pc; @runner.pc; end
+    def a; @runner.a; end
+    def x; @runner.x; end
+    def y; @runner.y; end
+    def sp; @runner.sp; end
+    def halted?; @runner.halted?; end
+
+    def run_steps(n)
+      @runner.run_cycles(n)
+    end
+
+    def read_memory(addr)
+      @runner.read_memory(addr)
+    end
+
+    def opcode
+      @runner.opcode
+    end
+
+    def state
+      @runner.state
+    end
+
+    # Run n instructions and return array of [pc, opcode, sp] tuples
+    # Verilator uses cycle-based execution, so we run until state transitions
+    def run_instructions_with_opcodes(n, trace_rts: false)
+      opcodes = []
+      last_state = state
+      max_cycles = n * 10  # Safety limit
+      cycles = 0
+
+      while opcodes.length < n && cycles < max_cycles && !halted?
+        current_state = state
+
+        # Run one clock cycle
+        @runner.clock_cycle
+        cycles += 1
+
+        new_state = state
+        # When we transition into DECODE (0x02) from another state, record instruction
+        if new_state == 0x02 && last_state != 0x02
+          current_opcode = opcode
+          current_sp = sp
+          opcode_pc = (pc - 1) & 0xFFFF
+          opcodes << [opcode_pc, current_opcode, current_sp]
+        end
+        last_state = new_state
+      end
+
+      opcodes
+    end
+  end
+
   def create_isa_simulator
     require_relative '../../../examples/mos6502/utilities/apple2_bus'
     require_relative '../../../examples/mos6502/utilities/isa_simulator_native'
@@ -505,6 +571,26 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     end
 
     IRWrapper.new(runner, backend_name)
+  end
+
+  def create_verilator_simulator
+    require_relative '../../../examples/mos6502/utilities/mos6502_verilator'
+
+    runner = MOS6502::VerilatorRunner.new
+
+    karateka_rom = create_karateka_rom
+
+    # Load ROM and RAM
+    runner.load_memory(karateka_rom, 0xD000)
+    runner.load_memory(@karateka_mem, 0x0000)
+
+    # Set reset vector to $B82A (Karateka entry point)
+    runner.set_reset_vector(0xB82A)
+
+    # Reset
+    runner.reset
+
+    VerilatorWrapper.new(runner)
   end
 
   def hires_checksum(sim, base_addr)
@@ -581,6 +667,18 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
       else
         puts "  [ ] IR #{backend.to_s.capitalize}: Not available (skipped)"
       end
+    end
+
+    # Verilator backend
+    if verilator_available?
+      begin
+        simulators[:verilator] = create_verilator_simulator
+        puts "  [x] Verilator: Native Verilator RTL simulation"
+      rescue StandardError => e
+        puts "  [ ] Verilator: Failed to initialize (#{e.message})"
+      end
+    else
+      puts "  [ ] Verilator: Not available (skipped)"
     end
 
     if simulators.size < 2
@@ -932,6 +1030,112 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     expect(result).to be true
   end
 
+  # Run Verilator backend against ISA for max_cycles clock cycles
+  # Returns true if they match throughout, false otherwise
+  def run_verilator_test(max_cycles)
+    isa = create_isa_simulator_simple
+    verilator = create_verilator_simulator_simple
+
+    chunk_size = 100_000
+    isa_time = 0.0
+    verilator_time = 0.0
+
+    while verilator.cycle_count < max_cycles
+      # Run ISA chunk with timing (run_cycles runs for N clock cycles)
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      isa[:cpu].run_cycles(chunk_size)
+      t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      isa_time += (t1 - t0)
+
+      # Run Verilator chunk with timing
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      verilator.run_cycles(chunk_size)
+      t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      verilator_time += (t1 - t0)
+
+      isa_cycles = isa[:cpu].cycles
+      verilator_cycles = verilator.cycle_count
+
+      isa_pc = isa[:cpu].pc
+      verilator_pc = verilator.pc
+
+      # Compare HiRes checksums
+      isa_hires = hires_checksum_simple(isa[:bus], 0x2000)
+      verilator_hires = verilator_hires_checksum(verilator, 0x2000)
+
+      if isa_hires != verilator_hires
+        puts "  Verilator: DIVERGED at #{verilator_cycles / 1_000_000.0}M cycles"
+        puts "    ISA PC=$#{isa_pc.to_s(16).upcase} HiRes=$#{isa_hires.to_s(16).upcase}"
+        puts "    Verilator PC=$#{verilator_pc.to_s(16).upcase} HiRes=$#{verilator_hires.to_s(16).upcase}"
+        return false
+      end
+
+      # Progress indicator every 1M cycles
+      if (verilator_cycles % 1_000_000) < chunk_size
+        isa_mhz = (isa_cycles / isa_time) / 1_000_000.0
+        verilator_mhz = (verilator_cycles / verilator_time) / 1_000_000.0
+        print "  Verilator: #{verilator_cycles / 1_000_000}M cycles - " \
+              "ISA: #{'%.2f' % isa_mhz} MHz, Verilator: #{'%.2f' % verilator_mhz} MHz\n"
+      end
+    end
+
+    # Final performance summary
+    isa_cycles = isa[:cpu].cycles
+    verilator_cycles = verilator.cycle_count
+    isa_mhz = (isa_cycles / isa_time) / 1_000_000.0
+    verilator_mhz = (verilator_cycles / verilator_time) / 1_000_000.0
+    speedup = verilator_mhz / isa_mhz
+
+    puts "  Verilator: PASSED #{verilator_cycles / 1_000_000}M cycles"
+    puts "  Performance: ISA=#{'%.2f' % isa_mhz} MHz, Verilator=#{'%.2f' % verilator_mhz} MHz " \
+         "(#{'%.1f' % speedup}x #{speedup >= 1.0 ? 'faster' : 'slower'})"
+    true
+  end
+
+  def create_verilator_simulator_simple
+    require_relative '../../../examples/mos6502/utilities/mos6502_verilator'
+
+    runner = MOS6502::VerilatorRunner.new
+    karateka_rom = create_karateka_rom
+
+    runner.load_memory(karateka_rom, 0xD000)
+    runner.load_memory(@karateka_mem, 0x0000)
+    runner.set_reset_vector(0xB82A)
+    runner.reset
+
+    runner
+  end
+
+  def verilator_hires_checksum(runner, base_addr)
+    checksum = 0
+    (base_addr..(base_addr + 0x1FFF)).each do |addr|
+      checksum = (checksum + runner.read_memory(addr)) & 0xFFFFFFFF
+    end
+    checksum
+  end
+
+  it 'verifies Verilator matches ISA for 5M cycles', timeout: 60 do
+    skip 'ROM not available' unless @rom_available
+    skip 'Karateka memory not available' unless @karateka_available
+    skip 'Native ISA simulator not available' unless native_isa_available?
+    skip 'Verilator not available' unless verilator_available?
+
+    puts "\n=== Testing Verilator against ISA ==="
+    result = run_verilator_test(5_000_000)
+    expect(result).to be true
+  end
+
+  it 'verifies Verilator matches ISA for 20M cycles', timeout: 120 do
+    skip 'ROM not available' unless @rom_available
+    skip 'Karateka memory not available' unless @karateka_available
+    skip 'Native ISA simulator not available' unless native_isa_available?
+    skip 'Verilator not available' unless verilator_available?
+
+    puts "\n=== Testing Verilator against ISA (20M cycles) ==="
+    result = run_verilator_test(20_000_000)
+    expect(result).to be true
+  end
+
   # ============================================================================
   # Combined benchmark test - all backends comparison
   # ============================================================================
@@ -953,19 +1157,31 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     isa = create_isa_simulator_simple
 
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    cycles.times do
-      break if isa[:cpu].halted?
-      isa[:cpu].step
-    end
+    isa[:cpu].run_cycles(cycles)
     t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
     elapsed = t1 - t0
-    mhz = (cycles / elapsed) / 1_000_000.0
+    actual_cycles = isa[:cpu].cycles
+    mhz = (actual_cycles / elapsed) / 1_000_000.0
 
-    { name: "ISA", cycles: cycles, elapsed: elapsed, mhz: mhz }
+    { name: "ISA", cycles: actual_cycles, elapsed: elapsed, mhz: mhz }
   end
 
-  it 'benchmarks all 4 implementations', :benchmark, timeout: 1800 do
+  def benchmark_verilator(cycles)
+    verilator = create_verilator_simulator_simple
+
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    verilator.run_cycles(cycles)
+    t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+    elapsed = t1 - t0
+    actual_cycles = verilator.cycle_count
+    mhz = (actual_cycles / elapsed) / 1_000_000.0
+
+    { name: "Verilator", cycles: actual_cycles, elapsed: elapsed, mhz: mhz }
+  end
+
+  it 'benchmarks all 5 implementations', :benchmark, timeout: 1800 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
@@ -973,7 +1189,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     cycles = 20_000_000  # 20M cycles for benchmark
 
     puts "\n" + "=" * 70
-    puts "  4-Way Implementation Benchmark (#{cycles / 1_000_000}M cycles each)"
+    puts "  5-Way Implementation Benchmark (#{cycles / 1_000_000}M cycles each)"
     puts "=" * 70
 
     results = []
@@ -1002,6 +1218,20 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     $stdout.flush
     results << benchmark_backend("Compile", :compile, cycles)
     puts " done (#{'%.2f' % results.last[:elapsed]}s)"
+
+    # Verilator (if available)
+    if verilator_available?
+      print "  Running Verilator..."
+      $stdout.flush
+      begin
+        results << benchmark_verilator(cycles)
+        puts " done (#{'%.2f' % results.last[:elapsed]}s)"
+      rescue StandardError => e
+        puts " failed (#{e.message})"
+      end
+    else
+      puts "  Skipping Verilator (not available)"
+    end
 
     # Summary table
     puts "\n" + "-" * 70
@@ -1032,7 +1262,8 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     puts "-" * 70
     puts "\n"
 
-    expect(results.size).to eq(4)
+    # At least 4 results (ISA, Interpret, JIT, Compile), 5 if Verilator available
+    expect(results.size).to be >= 4
   end
 
   # ============================================================================
