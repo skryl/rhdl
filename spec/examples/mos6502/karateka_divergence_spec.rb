@@ -1115,7 +1115,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     checksum
   end
 
-  it 'verifies Verilator matches ISA for 5M cycles', :slow, timeout: 600 do
+  it 'verifies Verilator matches ISA for 5M cycles', timeout: 60 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
@@ -1126,7 +1126,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     expect(result).to be true
   end
 
-  it 'verifies Verilator matches ISA for 20M cycles', :slow, timeout: 600 do
+  it 'verifies Verilator matches ISA for 20M cycles', timeout: 120 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
