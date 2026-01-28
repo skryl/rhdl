@@ -364,6 +364,11 @@ module MOS6502
     port :alatch_addr_lo => [:addr_gen, :indirect_lo]
     port :alatch_addr_hi => [:addr_gen, :indirect_hi]
 
+    # Tie unused address latch inputs to 0
+    # load_full is not used - we always load bytes individually via load_lo/load_hi
+    wire :addr_latch_load_full_tied_low
+    port :addr_latch_load_full_tied_low => [:addr_latch, :load_full]
+
     # Data latch connections
     port [:data_latch, :data] => :dlatch_data
     port :data_in => [:data_latch, :data_in]
@@ -376,12 +381,17 @@ module MOS6502
 
     # Combinational logic
     behavior do
+      # Tie unused inputs low
+      addr_latch_load_full_tied_low <= lit(0, width: 1)
+
       # Stack address computation (0x0100 + SP forms stack address in page 1)
       stack_addr <= cat(lit(0x01, width: 8), sp_val)
       # For PULL: compute address at SP+1 (where data to be pulled is located)
       # The 6502 stack wraps within 8 bits (page 1), so SP=$FF + 1 = $00, address $0100
       # Compute (SP+1) mod 256 first, then form the 16-bit stack page address
-      stack_addr_plus1 <= cat(lit(0x01, width: 8), (sp_val + lit(1, width: 8)))
+      # NOTE: Explicit [7..0] slice is required to ensure 8-bit result from addition,
+      # otherwise the IR JIT may produce a wider result that corrupts the cat operation
+      stack_addr_plus1 <= cat(lit(0x01, width: 8), (sp_val + lit(1, width: 8))[7..0])
 
       # PC byte extraction
       pc_hi_byte <= pc_val[15..8]
