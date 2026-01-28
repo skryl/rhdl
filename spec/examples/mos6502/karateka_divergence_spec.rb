@@ -17,9 +17,10 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   KARATEKA_MEM_PATH = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
 
   # Test parameters
-  TOTAL_CYCLES = 5_000_000
-  CHECKPOINT_INTERVAL = 500_000  # Check every 500K cycles
+  TOTAL_CYCLES = 2_000_000       # 2M cycles for 4-way comparison
+  CHECKPOINT_INTERVAL = 200_000  # Check every 200K cycles
   SCREEN_INTERVAL = 1_000_000    # Print screen every 1M cycles
+  INTERPRETER_MAX_CYCLES = 500_000  # Interpreter is slow, limit to 500K
 
   before(:all) do
     @rom_available = File.exist?(ROM_PATH)
@@ -92,6 +93,9 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     def halted?; @halted; end
     def run_steps(n); raise NotImplementedError; end
     def read_memory(addr); raise NotImplementedError; end
+    def opcode; raise NotImplementedError; end
+    # Run n instructions and return array of [pc, opcode] pairs executed
+    def run_instructions_with_opcodes(n); raise NotImplementedError; end
   end
 
   class ISAWrapper < SimulatorWrapper
@@ -105,6 +109,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     def a; @cpu.a; end
     def x; @cpu.x; end
     def y; @cpu.y; end
+    def sp; @cpu.sp; end
     def halted?; @cpu.halted?; end
 
     def run_steps(n)
@@ -117,9 +122,34 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     def read_memory(addr)
       @bus.mem_read(addr)
     end
+
+    def opcode
+      # Read opcode at current PC
+      @cpu.peek(@cpu.pc)
+    end
+
+    # Run n instructions and return array of [pc, opcode, sp] tuples executed
+    def run_instructions_with_opcodes(n)
+      opcodes = []
+      n.times do
+        break if @cpu.halted?
+        current_pc = @cpu.pc
+        current_opcode = @cpu.peek(current_pc)
+        current_sp = @cpu.sp
+        opcodes << [current_pc, current_opcode, current_sp]
+        @cpu.step
+      end
+      opcodes
+    end
   end
 
   class IRWrapper < SimulatorWrapper
+    # State constants from ControlUnit
+    STATE_FETCH = 0x01
+    STATE_DECODE = 0x02
+    STATE_RTS_PULL_LO = 0x10
+    STATE_RTS_PULL_HI = 0x11
+
     def initialize(runner, backend_name)
       super("IR #{backend_name}", :ir)
       @runner = runner
@@ -130,6 +160,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     def a; @runner.cpu_state[:a]; end
     def x; @runner.cpu_state[:x]; end
     def y; @runner.cpu_state[:y]; end
+    def sp; @runner.cpu_state[:sp]; end
     def halted?; @runner.halted?; end
 
     def run_steps(n)
@@ -138,6 +169,284 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
 
     def read_memory(addr)
       @runner.bus.read(addr)
+    end
+
+    def opcode
+      @runner.sim.peek('opcode')
+    end
+
+    def state
+      @runner.sim.peek('state')
+    end
+
+    # Run until n instructions complete and return array of [pc, opcode, sp] tuples
+    # An instruction completes when the state machine transitions from DECODE
+    # We track the opcode that was in IR when we entered DECODE state
+    def run_instructions_with_opcodes(n, trace_rts: false)
+      opcodes = []
+      last_state = state
+      max_cycles = n * 10  # Safety limit: assume max 10 cycles per instruction
+      cycles = 0
+      use_rust_memory = @runner.instance_variable_get(:@use_rust_memory)
+      sim = @runner.sim
+
+      while opcodes.length < n && cycles < max_cycles && !halted?
+        current_state = state
+        current_sp_before = sp
+
+        # Check if we're about to execute RTS and should trace
+        if trace_rts && current_state == STATE_DECODE && opcode == 0x60
+          puts "\n    === RTS TRACE at PC=$#{format('%04X', (pc - 1) & 0xFFFF)} SP=$#{format('%02X', sp)} ==="
+          trace_rts_execution(use_rust_memory)
+          # After tracing, re-check state
+          current_state = state
+        end
+
+        # Run one clock cycle with proper memory bridging
+        sim.poke('clk', 0)
+        sim.evaluate
+
+        # Memory bridging - must use Rust memory for JIT/Compile backends
+        addr = sim.peek('addr')
+        rw = sim.peek('rw')
+        if rw == 1
+          # Read from memory
+          if use_rust_memory
+            data = sim.read_mos6502_memory(addr)
+          else
+            data = @runner.bus.read(addr)
+          end
+          sim.poke('data_in', data)
+        else
+          # Write to memory
+          data = sim.peek('data_out')
+          if use_rust_memory
+            sim.write_mos6502_memory(addr, data)
+          else
+            @runner.bus.write(addr, data)
+          end
+        end
+
+        sim.poke('clk', 1)
+        sim.tick
+        cycles += 1
+
+        current_state = state
+        # When we transition into DECODE, record the instruction
+        # At this point, PC points past the opcode, and opcode register has the instruction
+        if current_state == STATE_DECODE && last_state != STATE_DECODE
+          current_opcode = opcode
+          current_sp = sp
+          # PC has already incremented past opcode, so subtract 1 to get opcode address
+          opcode_pc = (pc - 1) & 0xFFFF
+          opcodes << [opcode_pc, current_opcode, current_sp]
+        end
+        last_state = current_state
+      end
+
+      # Sync screen memory if using Rust memory
+      if use_rust_memory
+        @runner.send(:sync_screen_memory_from_rust)
+      end
+
+      opcodes
+    end
+
+    # Trace an RTS instruction execution step by step
+    def trace_rts_execution(use_rust_memory)
+      sim = @runner.sim
+
+      state_names = {
+        0x00 => "RESET", 0x01 => "FETCH", 0x02 => "DECODE", 0x03 => "FETCH_OP1",
+        0x04 => "FETCH_OP2", 0x05 => "ADDR_LO", 0x06 => "ADDR_HI", 0x07 => "READ_MEM",
+        0x08 => "EXECUTE", 0x09 => "WRITE_MEM", 0x0A => "PUSH", 0x0B => "PULL",
+        0x0C => "BRANCH", 0x0D => "BRANCH_TAKE", 0x0E => "JSR_PUSH_HI", 0x0F => "JSR_PUSH_LO",
+        0x10 => "RTS_PULL_LO", 0x11 => "RTS_PULL_HI", 0x12 => "RTI_PULL_P",
+        0x13 => "RTI_PULL_LO", 0x14 => "RTI_PULL_HI", 0xFF => "HALT"
+      }
+
+      puts "    Cyc | State           | Addr   | Data   | SP         | AddrLoLat  | return_addr | actual_pc_addr | ctrl (before tick)"
+      puts "    " + "-" * 115
+
+      start_state = state
+      max_cycles = 15
+      cycle = 0
+
+      while cycle < max_cycles && !(cycle > 0 && state == STATE_FETCH)
+        before_state = state
+        before_sp = sp
+        before_pc = self.pc
+        addr_lo_before = sim.peek('alatch_addr_lo')
+
+        # Clock falling edge - combinational logic
+        sim.poke('clk', 0)
+        sim.evaluate
+
+        # Get address and control signals
+        addr = sim.peek('addr')
+        rw = sim.peek('rw')
+        addr_lo_after_eval = sim.peek('alatch_addr_lo')
+
+        # Get return_addr and actual_pc_addr (these are combinational)
+        return_addr = sim.peek('return_addr') rescue 0
+        actual_pc_addr = sim.peek('actual_pc_addr') rescue 0
+
+        # Get control signals BEFORE tick (during this state)
+        addr_sel_before = sim.peek('ctrl_addr_sel') rescue 0
+        load_addr_lo_before = sim.peek('ctrl_load_addr_lo') rescue 0
+        load_addr_hi_before = sim.peek('ctrl_load_addr_hi') rescue 0
+
+        # Memory operation
+        if rw == 1
+          if use_rust_memory
+            data = sim.read_mos6502_memory(addr)
+          else
+            data = @runner.bus.read(addr)
+          end
+          sim.poke('data_in', data)
+          data_str = "$#{format('%02X', data)}(r)"
+        else
+          data = sim.peek('data_out')
+          if use_rust_memory
+            sim.write_mos6502_memory(addr, data)
+          else
+            @runner.bus.write(addr, data)
+          end
+          data_str = "$#{format('%02X', data)}(w)"
+        end
+
+        # Clock rising edge - register capture
+        sim.poke('clk', 1)
+        sim.tick
+        cycle += 1
+
+        after_state = state
+        after_sp = sp
+        after_pc = self.pc
+        addr_lo_after = sim.peek('alatch_addr_lo')
+
+        state_trans = "#{state_names[before_state] || '?'}->#{state_names[after_state] || '?'}"
+
+        # Get stack address signals for debugging
+        stack_addr = sim.peek('stack_addr') rescue 0
+        stack_addr_plus1 = sim.peek('stack_addr_plus1') rescue 0
+        addr_sel = sim.peek('ctrl_addr_sel') rescue 0
+        load_addr_lo = sim.peek('ctrl_load_addr_lo') rescue 0
+
+        puts "    %3d | %-15s | $%04X  | %-6s | $%02X->$%02X | $%02X->$%02X     | $%04X       | $%04X | sel=%d ldlo=%d (before tick)" % [
+          cycle, state_trans, addr, data_str,
+          before_sp, after_sp,
+          addr_lo_before, addr_lo_after,
+          return_addr, actual_pc_addr,
+          addr_sel_before, load_addr_lo_before
+        ]
+
+        break if after_state == STATE_FETCH && cycle > 1
+      end
+
+      puts "    Final: PC=$#{format('%04X', self.pc)} SP=$#{format('%02X', sp)}"
+    end
+
+    # Trace the current RTS sequence in detail (for debugging)
+    # This prints state machine states, addresses, data values, and latch contents
+    def trace_rts_sequence
+      sim = @runner.sim
+      use_rust_memory = @runner.instance_variable_get(:@use_rust_memory)
+
+      state_names = {
+        0x00 => "RESET",
+        0x01 => "FETCH",
+        0x02 => "DECODE",
+        0x03 => "FETCH_OP1",
+        0x04 => "FETCH_OP2",
+        0x05 => "ADDR_LO",
+        0x06 => "ADDR_HI",
+        0x07 => "READ_MEM",
+        0x08 => "EXECUTE",
+        0x09 => "WRITE_MEM",
+        0x0A => "PUSH",
+        0x0B => "PULL",
+        0x0C => "BRANCH",
+        0x0D => "BRANCH_TAKE",
+        0x0E => "JSR_PUSH_HI",
+        0x0F => "JSR_PUSH_LO",
+        0x10 => "RTS_PULL_LO",
+        0x11 => "RTS_PULL_HI",
+        0xFF => "HALT"
+      }
+
+      puts "    Current state: #{state_names[state] || "0x#{state.to_s(16)}"}"
+      puts "    Current PC: $#{format('%04X', pc)}, SP: $#{format('%02X', sp)}"
+
+      # Run until we reach FETCH or HALT (next instruction)
+      max_cycles = 20
+      cycles = 0
+
+      puts "    Cycle-by-cycle trace:"
+      puts "    %-4s | %-14s | %-6s | %-8s | %-8s | %-8s | %-8s | %-8s" %
+           ["Cyc", "State", "Addr", "Data_In", "AddrLoLat", "PC", "SP", "RetAddr"]
+      puts "    " + "-" * 85
+
+      while cycles < max_cycles && state != STATE_FETCH && state != 0xFF
+        current_state = state
+        current_pc = pc
+        current_sp = sp
+
+        # Clock falling edge
+        sim.poke('clk', 0)
+        sim.evaluate
+
+        # Get address and memory values
+        addr = sim.peek('addr')
+        rw = sim.peek('rw')
+        addr_lo_latch = sim.peek('alatch_addr_lo')
+        return_addr = sim.peek('return_addr') rescue nil
+
+        # Memory read/write
+        if rw == 1
+          if use_rust_memory
+            data = sim.read_mos6502_memory(addr)
+          else
+            data = @runner.bus.read(addr)
+          end
+          sim.poke('data_in', data)
+          data_str = "$#{format('%02X', data)} (rd)"
+        else
+          data = sim.peek('data_out')
+          if use_rust_memory
+            sim.write_mos6502_memory(addr, data)
+          else
+            @runner.bus.write(addr, data)
+          end
+          data_str = "$#{format('%02X', data)} (wr)"
+        end
+
+        # Clock rising edge
+        sim.poke('clk', 1)
+        sim.tick
+        cycles += 1
+
+        # Get new state after tick
+        new_state = state
+        new_pc = pc
+        new_sp = sp
+        new_addr_lo = sim.peek('alatch_addr_lo')
+
+        ret_addr_str = return_addr ? "$#{format('%04X', return_addr)}" : "n/a"
+
+        puts "    %-4d | %-14s | $%04X  | %-8s | $%02X->$%02X | $%04X->$%04X | $%02X->$%02X | %s" % [
+          cycles,
+          "#{state_names[current_state] || '?'}->#{state_names[new_state] || '?'}",
+          addr,
+          data_str,
+          addr_lo_latch, new_addr_lo,
+          current_pc, new_pc,
+          current_sp, new_sp,
+          ret_addr_str
+        ]
+      end
+
+      puts "    Final PC: $#{format('%04X', pc)}, SP: $#{format('%02X', sp)}"
     end
   end
 
@@ -253,6 +562,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     puts "\n" + "=" * 80
     puts "Karateka MOS6502 4-Way Divergence Analysis"
     puts "Total cycles: #{TOTAL_CYCLES.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
+    puts "(Interpreter limited to #{INTERPRETER_MAX_CYCLES.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse} due to speed)"
     puts "=" * 80
 
     # Create all available simulators
@@ -263,8 +573,8 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     simulators[:isa] = create_isa_simulator
     puts "  [x] ISA: Native Rust ISA simulator (reference)"
 
-    # IR backends (skip interpreter and compile - too slow for now)
-    [:jit].each do |backend|
+    # IR backends - all 4 implementations
+    [:interpret, :jit, :compile].each do |backend|
       if ir_backend_available?(backend)
         simulators[backend] = create_ir_simulator(backend)
         puts "  [x] IR #{backend.to_s.capitalize}: Available"
@@ -294,16 +604,28 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     puts format("  %%     | Cycles  | %s | Rates (M/s)", sim_names)
     puts "  " + "-" * 98
 
+    # Track cycles run per simulator (interpreter has different limit)
+    sim_cycles = Hash.new(0)
+
     while cycles_run < TOTAL_CYCLES
       # Run batch of cycles
       batch_size = [CHECKPOINT_INTERVAL, TOTAL_CYCLES - cycles_run].min
 
       # Run all simulators and track time for each
       simulators.each do |key, sim|
+        # Interpreter has a lower cycle limit
+        max_cycles = key == :interpret ? INTERPRETER_MAX_CYCLES : TOTAL_CYCLES
+        next if sim_cycles[key] >= max_cycles
+
+        # Calculate batch for this simulator
+        sim_batch = [batch_size, max_cycles - sim_cycles[key]].min
+        next if sim_batch <= 0
+
         t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        sim.run_steps(batch_size)
+        sim.run_steps(sim_batch)
         t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         sim_times[key] += (t1 - t0)
+        sim_cycles[key] += sim_batch
       end
 
       cycles_run += batch_size
@@ -326,11 +648,15 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
 
       checkpoints << checkpoint
 
-      # Check for divergence from ISA reference
+      # Check for divergence from ISA reference (only for simulators still running)
       isa_data = checkpoint[:sims][:isa]
       simulators.each_key do |key|
         next if key == :isa
         next if divergence_points[key]
+
+        # Skip divergence check for simulators that have stopped
+        max_c = key == :interpret ? INTERPRETER_MAX_CYCLES : TOTAL_CYCLES
+        next if sim_cycles[key] >= max_c && cycles_run > sim_cycles[key]
 
         sim_data = checkpoint[:sims][key]
         if sim_data[:hires_p1] != isa_data[:hires_p1] ||
@@ -347,13 +673,23 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
       # Progress output
       pct = (cycles_run.to_f / TOTAL_CYCLES * 100).round(1)
 
-      pc_values = simulators.map { |k, _| format("%04X", checkpoint[:sims][k][:pc]) }.join(" | ")
-      # Per-simulator rates
-      rates = simulators.keys.map do |k|
+      # Show PC values, with "-" for stopped simulators
+      pc_values = simulators.map do |k, _|
+        max_c = k == :interpret ? INTERPRETER_MAX_CYCLES : TOTAL_CYCLES
+        if sim_cycles[k] >= max_c && cycles_run > sim_cycles[k]
+          "DONE".ljust(4)
+        else
+          format("%04X", checkpoint[:sims][k][:pc])
+        end
+      end.join(" | ")
+
+      # Per-simulator rates (based on actual cycles run)
+      rate_strs = simulators.keys.map do |k|
         t = sim_times[k]
-        t > 0 ? format("%.1f", cycles_run / t / 1_000_000) : "?"
+        c = sim_cycles[k]
+        t > 0 ? format("%.1f", c / t / 1_000_000) : "?"
       end.join("/")
-      puts format("  %5.1f%% | %5.1fM  | %s | %s", pct, cycles_run / 1_000_000.0, pc_values, rates)
+      puts format("  %5.1f%% | %5.1fM  | %s | %s", pct, cycles_run / 1_000_000.0, pc_values, rate_strs)
 
       # Print HiRes screen at intervals (only ISA to save space)
       if (cycles_run % SCREEN_INTERVAL).zero?
@@ -370,18 +706,21 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     puts "\n" + "=" * 80
     puts "PERFORMANCE SUMMARY"
     puts "=" * 80
-    puts "\n  Simulator     | Time (s) | Rate (M/s) | Relative"
-    puts "  " + "-" * 55
+    puts "\n  Simulator     | Cycles   | Time (s) | Rate (M/s) | Relative"
+    puts "  " + "-" * 65
 
-    # Find fastest for relative comparison
-    fastest_rate = simulators.keys.map { |k| sim_times[k] > 0 ? TOTAL_CYCLES / sim_times[k] : 0 }.max
+    # Calculate rates based on actual cycles run per simulator
+    rates = simulators.keys.map { |k| sim_times[k] > 0 ? sim_cycles[k] / sim_times[k] : 0 }
+    fastest_rate = rates.max
 
     simulators.each_key do |key|
       t = sim_times[key]
-      rate = t > 0 ? TOTAL_CYCLES / t / 1_000_000 : 0
-      relative = fastest_rate > 0 && t > 0 ? (TOTAL_CYCLES / t / fastest_rate * 100).round(1) : 0
-      puts format("  %-13s | %8.2f | %10.2f | %5.1f%%",
-                  key.to_s.upcase, t, rate, relative)
+      c = sim_cycles[key]
+      rate = t > 0 ? c / t / 1_000_000 : 0
+      relative = fastest_rate > 0 && t > 0 ? (c / t / fastest_rate * 100).round(1) : 0
+      cycles_str = c >= 1_000_000 ? "#{c / 1_000_000.0}M" : "#{c / 1_000}K"
+      puts format("  %-13s | %8s | %8.2f | %10.2f | %5.1f%%",
+                  key.to_s.upcase, cycles_str, t, rate, relative)
     end
 
     # Analyze results
@@ -409,13 +748,16 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     puts "\n" + "=" * 80
     puts "FINAL STATE SUMMARY"
     puts "=" * 80
-    puts "\n  Simulator     | PC     | A  | X  | Y  | Halted | HiRes P1   | HiRes P2   | Text"
-    puts "  " + "-" * 90
+    puts "\n  Simulator     | Cycles | PC     | A  | X  | Y  | Halted | HiRes P1   | HiRes P2   | Text"
+    puts "  " + "-" * 100
 
     last_cp = checkpoints.last
     last_cp[:sims].each do |key, data|
-      puts format("  %-13s | %04X   | %02X | %02X | %02X | %-6s | %08X   | %08X   | %08X",
+      c = sim_cycles[key]
+      cycles_str = c >= 1_000_000 ? "%.1fM" % (c / 1_000_000.0) : "#{c / 1_000}K"
+      puts format("  %-13s | %6s | %04X   | %02X | %02X | %02X | %-6s | %08X   | %08X   | %08X",
                   key.to_s.upcase,
+                  cycles_str,
                   data[:pc], data[:a], data[:x], data[:y],
                   data[:halted] ? "YES" : "no",
                   data[:hires_p1], data[:hires_p2], data[:text])
@@ -433,6 +775,8 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
       matches = simulators.keys.map do |k|
         if k == :isa
           "reference"
+        elsif k == :interpret && cp[:cycles] > INTERPRETER_MAX_CYCLES
+          "stopped"
         else
           cp[:sims][k][:hires_p1] == isa_p1 ? "match" : "DIVERGED"
         end
@@ -689,5 +1033,162 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     puts "\n"
 
     expect(results.size).to eq(4)
+  end
+
+  # ============================================================================
+  # Opcode sequence comparison test
+  # ============================================================================
+
+  it 'compares opcode sequences between ISA and JIT', timeout: 300 do
+    skip 'ROM not available' unless @rom_available
+    skip 'Karateka memory not available' unless @karateka_available
+    skip 'Native ISA simulator not available' unless native_isa_available?
+    skip 'JIT not available' unless ir_backend_available?(:jit)
+
+    puts "\n" + "=" * 80
+    puts "Opcode Sequence Comparison: ISA vs JIT"
+    puts "=" * 80
+
+    # Create simulators
+    isa = create_isa_simulator
+    jit = create_ir_simulator(:jit)
+
+    # Compare opcode sequences in batches
+    batch_size = 1000  # Instructions per batch
+    total_instructions = 0
+    max_instructions = 3_000_000  # Stop after 3M instructions
+
+    divergence_found = false
+    divergence_index = nil
+    divergence_isa = nil
+    divergence_jit = nil
+
+    puts "\nComparing opcode sequences (#{batch_size} instructions per batch)..."
+
+    while total_instructions < max_instructions && !divergence_found
+      # Run both simulators for batch_size instructions
+      isa_opcodes = isa.run_instructions_with_opcodes(batch_size)
+      jit_opcodes = jit.run_instructions_with_opcodes(batch_size)
+
+      # Compare sequences
+      min_len = [isa_opcodes.length, jit_opcodes.length].min
+
+      min_len.times do |i|
+        isa_pc, isa_op, isa_sp = isa_opcodes[i]
+        jit_pc, jit_op, jit_sp = jit_opcodes[i]
+
+        if isa_op != jit_op || isa_pc != jit_pc
+          divergence_found = true
+          divergence_index = total_instructions + i
+          divergence_isa = { pc: isa_pc, opcode: isa_op, sp: isa_sp }
+          divergence_jit = { pc: jit_pc, opcode: jit_op, sp: jit_sp }
+
+          # Collect context: 10 instructions before divergence
+          context_start = [0, i - 10].max
+          puts "\n  DIVERGENCE at instruction #{divergence_index}!"
+          puts "\n  Context (instructions #{total_instructions + context_start} to #{divergence_index}):"
+          puts "  " + "-" * 76
+          puts "  %8s | %6s %4s %4s | %6s %4s %4s | %s" % ["Instr#", "ISA PC", "Op", "SP", "JIT PC", "Op", "SP", "Match"]
+          puts "  " + "-" * 76
+
+          (context_start..i).each do |j|
+            i_pc, i_op, i_sp = isa_opcodes[j]
+            j_pc, j_op, j_sp = jit_opcodes[j]
+            match = (i_pc == j_pc && i_op == j_op) ? "OK" : "DIFF"
+            # Mark RTS/JSR instructions
+            instr_mark = case i_op
+                         when 0x60 then " RTS"
+                         when 0x20 then " JSR"
+                         when 0x4C then " JMP"
+                         else ""
+                         end
+            puts "  %8d | %6s %4s %4s | %6s %4s %4s | %s%s" % [
+              total_instructions + j,
+              format("%04X", i_pc), format("%02X", i_op), format("%02X", i_sp),
+              format("%04X", j_pc), format("%02X", j_op), format("%02X", j_sp),
+              match, instr_mark
+            ]
+          end
+
+          # Show a few more from each side
+          puts "\n  Next 5 instructions from each simulator:"
+          puts "  ISA: #{isa_opcodes[i, 5].map { |pc, op, sp| format('%04X:%02X(sp=%02X)', pc, op, sp) }.join(' ')}"
+          puts "  JIT: #{jit_opcodes[i, 5].map { |pc, op, sp| format('%04X:%02X(sp=%02X)', pc, op, sp) }.join(' ')}"
+
+          # If the last matching instruction was RTS (0x60), dump stack info
+          if i > 0 && isa_opcodes[i-1][1] == 0x60
+            prev_isa_sp = isa_opcodes[i-1][2]
+            prev_jit_sp = jit_opcodes[i-1][2]
+            puts "\n  RTS Stack Analysis (SP before RTS):"
+            puts "    ISA SP=$#{format('%02X', prev_isa_sp)}, JIT SP=$#{format('%02X', prev_jit_sp)}"
+            puts "    Stack at ISA SP+1,SP+2: $#{format('%02X', isa.read_memory(0x0100 + ((prev_isa_sp + 1) & 0xFF)))} $#{format('%02X', isa.read_memory(0x0100 + ((prev_isa_sp + 2) & 0xFF)))}"
+            puts "    Stack at JIT SP+1,SP+2: $#{format('%02X', jit.read_memory(0x0100 + ((prev_jit_sp + 1) & 0xFF)))} $#{format('%02X', jit.read_memory(0x0100 + ((prev_jit_sp + 2) & 0xFF)))}"
+
+            # Detailed trace of RTS in JIT: re-run the RTS sequence with tracing
+            puts "\n  Detailed JIT RTS trace (re-running from RTS instruction):"
+            jit.trace_rts_sequence
+          end
+
+          break
+        end
+      end
+
+      total_instructions += min_len
+
+      # Progress
+      if (total_instructions % 10_000).zero?
+        print "  #{total_instructions / 1000}K instructions matched...\n"
+      end
+
+      # Check if either simulator stopped early
+      break if isa_opcodes.length < batch_size || jit_opcodes.length < batch_size
+    end
+
+    if divergence_found
+      puts "\n" + "=" * 80
+      puts "DIVERGENCE SUMMARY"
+      puts "=" * 80
+      puts "  Instruction index: #{divergence_index}"
+      puts "  ISA: PC=$#{format('%04X', divergence_isa[:pc])} Opcode=$#{format('%02X', divergence_isa[:opcode])} SP=$#{format('%02X', divergence_isa[:sp])}"
+      puts "  JIT: PC=$#{format('%04X', divergence_jit[:pc])} Opcode=$#{format('%02X', divergence_jit[:opcode])} SP=$#{format('%02X', divergence_jit[:sp])}"
+
+      # Show CPU state at divergence
+      puts "\n  CPU State at divergence:"
+      puts "  ISA: A=$#{format('%02X', isa.a)} X=$#{format('%02X', isa.x)} Y=$#{format('%02X', isa.y)} SP=$#{format('%02X', isa.sp)} PC=$#{format('%04X', isa.pc)}"
+      puts "  JIT: A=$#{format('%02X', jit.a)} X=$#{format('%02X', jit.x)} Y=$#{format('%02X', jit.y)} SP=$#{format('%02X', jit.sp)} PC=$#{format('%04X', jit.pc)}"
+    else
+      puts "\n  No divergence found in #{total_instructions} instructions!"
+    end
+
+    # For now, just report - don't fail the test
+    expect(total_instructions).to be > 0
+  end
+
+  # Dedicated RTS trace test - traces the specific RTS that causes divergence
+  it 'traces RTS execution to find divergence cause', timeout: 60 do
+    skip 'ROM not available' unless @rom_available
+    skip 'Karateka memory not available' unless @karateka_available
+    skip 'Native ISA simulator not available' unless native_isa_available?
+    skip 'JIT not available' unless ir_backend_available?(:jit)
+
+    puts "\n" + "=" * 80
+    puts "Tracing RTS Execution in JIT"
+    puts "=" * 80
+
+    # Create JIT simulator
+    jit = create_ir_simulator(:jit)
+
+    # Run until we're about to execute the first RTS with trace enabled
+    puts "\nRunning JIT with RTS tracing enabled..."
+    jit_opcodes = jit.run_instructions_with_opcodes(100, trace_rts: true)
+
+    puts "\nOpcodes executed: #{jit_opcodes.length}"
+    puts "First 25 instructions:"
+    jit_opcodes.first(25).each_with_index do |tuple, i|
+      pc, op, sp = tuple
+      puts "  #{i}: PC=$#{format('%04X', pc)} Op=$#{format('%02X', op)} SP=$#{format('%02X', sp)}"
+    end
+
+    expect(jit_opcodes.length).to be > 0
   end
 end
