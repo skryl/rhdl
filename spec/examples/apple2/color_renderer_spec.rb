@@ -137,6 +137,19 @@ RSpec.describe RHDL::Apple2::ColorRenderer do
 
       expect(bitmap[0][0]).to eq(:blue)
     end
+
+    context 'with callable RAM' do
+      let(:callable_ram) { ->(addr) { ram[addr] } }
+
+      it 'decodes colors from callable RAM' do
+        ram[0x2000] = 0x7F
+        bitmap = renderer.decode_hires_colors(callable_ram, 0x2000)
+
+        (0...7).each do |i|
+          expect(bitmap[0][i]).to eq(:white), "pixel #{i} should be white"
+        end
+      end
+    end
   end
 
   describe '#render' do
@@ -161,8 +174,10 @@ RSpec.describe RHDL::Apple2::ColorRenderer do
   end
 
   describe '#color_char' do
-    it 'returns space for black/black' do
-      expect(renderer.color_char(:black, :black)).to eq(" ")
+    it 'returns space with black background for black/black' do
+      result = renderer.color_char(:black, :black)
+      expect(result).to include(' ')
+      expect(result).to include("\e[48;2;0;0;0m")  # Black background
     end
 
     it 'returns full block for same non-black colors' do
@@ -189,20 +204,125 @@ RSpec.describe RHDL::Apple2::ColorRenderer do
     end
   end
 
-  describe 'COLORS constant' do
-    it 'defines all 6 hires colors' do
-      expect(described_class::COLORS.keys).to contain_exactly(
-        :black, :white, :green, :purple, :orange, :blue
+  describe 'PALETTES constant' do
+    it 'defines multiple color palettes' do
+      expect(described_class::PALETTES.keys).to include(
+        :ntsc, :applewin, :kegs, :crt, :iigs, :virtual2
       )
     end
 
-    it 'has RGB arrays with 3 values each' do
-      described_class::COLORS.each do |name, rgb|
-        expect(rgb.length).to eq(3), "#{name} should have 3 RGB values"
-        rgb.each do |v|
-          expect(v).to be_between(0, 255), "#{name} RGB values should be 0-255"
+    it 'has all 6 colors in each palette' do
+      described_class::PALETTES.each do |name, palette|
+        expect(palette.keys).to contain_exactly(
+          :black, :white, :green, :purple, :orange, :blue
+        ), "#{name} palette should have all 6 colors"
+      end
+    end
+
+    it 'has RGB arrays with valid values' do
+      described_class::PALETTES.each do |palette_name, palette|
+        palette.each do |color_name, rgb|
+          expect(rgb.length).to eq(3), "#{palette_name}:#{color_name} should have 3 RGB values"
+          rgb.each do |v|
+            expect(v).to be_between(0, 255), "#{palette_name}:#{color_name} RGB values should be 0-255"
+          end
         end
       end
+    end
+  end
+
+  describe 'PHOSPHORS constant' do
+    it 'defines multiple phosphor colors' do
+      expect(described_class::PHOSPHORS.keys).to include(
+        :green, :amber, :white, :cool, :warm
+      )
+    end
+
+    it 'has RGB arrays with valid values' do
+      described_class::PHOSPHORS.each do |name, rgb|
+        expect(rgb.length).to eq(3), "#{name} phosphor should have 3 RGB values"
+        rgb.each do |v|
+          expect(v).to be_between(0, 255), "#{name} phosphor RGB values should be 0-255"
+        end
+      end
+    end
+  end
+
+  describe 'initialization options' do
+    it 'uses default ntsc palette' do
+      r = described_class.new
+      expect(r.palette).to eq(described_class::PALETTES[:ntsc])
+    end
+
+    it 'accepts custom palette' do
+      r = described_class.new(palette: :applewin)
+      expect(r.palette).to eq(described_class::PALETTES[:applewin])
+    end
+
+    it 'accepts monochrome mode' do
+      r = described_class.new(monochrome: :green)
+      expect(r.monochrome).to eq(:green)
+    end
+
+    it 'accepts blend option' do
+      r = described_class.new(blend: true)
+      expect(r.blend).to be true
+    end
+
+    it 'accepts chars_wide option' do
+      r = described_class.new(chars_wide: 80)
+      expect(r.chars_wide).to eq(80)
+    end
+  end
+
+  describe 'monochrome mode' do
+    let(:mono_renderer) { described_class.new(monochrome: :green) }
+
+    it 'renders with monochrome colors' do
+      ram[0x2000] = 0x7F  # White pixels
+      output = mono_renderer.render(ram, base_addr: 0x2000, chars_wide: 40)
+
+      # Should contain green phosphor color (0x33, 0xFF, 0x33)
+      expect(output).to include("\e[38;2;51;255;51m")
+    end
+
+    it 'uses different intensities for different artifact colors' do
+      # The monochrome mode should produce different brightness levels
+      # for what would be different colors in color mode
+      renderer = described_class.new(monochrome: :amber)
+      ram[0x2000] = 0x01  # Single pixel (would be purple in color)
+
+      output = renderer.render(ram, base_addr: 0x2000, chars_wide: 40)
+      expect(output).to be_a(String)
+      expect(output.length).to be > 0
+    end
+  end
+
+  describe 'different palettes' do
+    it 'renders with AppleWin palette' do
+      renderer = described_class.new(palette: :applewin)
+      ram[0x2000] = 0x7F
+      output = renderer.render(ram, base_addr: 0x2000, chars_wide: 40)
+      expect(output).to be_a(String)
+    end
+
+    it 'renders with KEGS palette' do
+      renderer = described_class.new(palette: :kegs)
+      ram[0x2000] = 0x7F
+      output = renderer.render(ram, base_addr: 0x2000, chars_wide: 40)
+      expect(output).to be_a(String)
+    end
+
+    it 'renders with CRT palette' do
+      renderer = described_class.new(palette: :crt)
+      ram[0x2000] = 0x7F
+      output = renderer.render(ram, base_addr: 0x2000, chars_wide: 40)
+      expect(output).to be_a(String)
+    end
+
+    it 'falls back to ntsc for unknown palette' do
+      renderer = described_class.new(palette: :unknown)
+      expect(renderer.palette).to eq(described_class::PALETTES[:ntsc])
     end
   end
 
@@ -212,5 +332,106 @@ RSpec.describe RHDL::Apple2::ColorRenderer do
       expect(output).to be_a(String)
       expect(output.length).to be > 0
     end
+
+    it 'accepts palette option' do
+      output = described_class.render(ram, base_addr: 0x2000, chars_wide: 40, palette: :applewin)
+      expect(output).to be_a(String)
+    end
+
+    it 'accepts monochrome option' do
+      output = described_class.render(ram, base_addr: 0x2000, chars_wide: 40, monochrome: :green)
+      expect(output).to be_a(String)
+    end
+  end
+
+  describe '.available_palettes' do
+    it 'returns list of available palette names' do
+      palettes = described_class.available_palettes
+      expect(palettes).to include(:ntsc, :applewin, :kegs, :crt, :iigs, :virtual2)
+    end
+  end
+
+  describe '.available_phosphors' do
+    it 'returns list of available phosphor names' do
+      phosphors = described_class.available_phosphors
+      expect(phosphors).to include(:green, :amber, :white, :cool, :warm)
+    end
+  end
+
+  describe 'double hi-res mode' do
+    let(:dhires_renderer) { described_class.new(double_hires: true, chars_wide: 140) }
+
+    it 'can decode double hi-res colors' do
+      main_ram = Array.new(0x6000, 0)
+      aux_ram = Array.new(0x6000, 0)
+
+      # Set some pixels in both memory banks
+      main_ram[0x2000] = 0x55  # Alternating bits
+      aux_ram[0x2000] = 0xAA   # Opposite alternating bits
+
+      bitmap = dhires_renderer.decode_double_hires_colors(main_ram, aux_ram, 0x2000)
+      expect(bitmap.length).to eq(192)
+      expect(bitmap[0].length).to eq(560)  # Double width
+    end
+  end
+
+  describe 'blend mode' do
+    let(:blend_renderer) { described_class.new(blend: true) }
+
+    it 'applies blending when enabled' do
+      ram[0x2000] = 0x7F
+      output = blend_renderer.render(ram, base_addr: 0x2000, chars_wide: 40)
+      expect(output).to be_a(String)
+    end
+  end
+
+  describe 'HiResColorRenderer alias' do
+    it 'is an alias for ColorRenderer' do
+      expect(RHDL::Apple2::HiResColorRenderer).to eq(described_class)
+    end
+  end
+end
+
+# Test the MOS6502 namespace alias
+# Load the MOS6502 color renderer which re-exports RHDL::Apple2::ColorRenderer
+$LOAD_PATH.unshift File.expand_path('../../../examples/mos6502/utilities', __dir__)
+require_relative '../../../examples/mos6502/utilities/color_renderer'
+
+RSpec.describe MOS6502::ColorRenderer do
+  it 'is an alias for RHDL::Apple2::ColorRenderer' do
+    expect(described_class).to eq(RHDL::Apple2::ColorRenderer)
+  end
+
+  it 'provides HiResColorRenderer alias' do
+    expect(MOS6502::HiResColorRenderer).to eq(RHDL::Apple2::ColorRenderer)
+  end
+
+  it 'can be instantiated and used' do
+    renderer = described_class.new(chars_wide: 40)
+    ram = Array.new(0x6000, 0)
+    output = renderer.render(ram, base_addr: 0x2000)
+    expect(output).to be_a(String)
+  end
+
+  it 'supports callable RAM' do
+    renderer = described_class.new(chars_wide: 40)
+    ram = Array.new(0x6000, 0)
+    ram[0x2000] = 0x7F
+
+    callable_ram = ->(addr) { ram[addr] }
+    output = renderer.render(callable_ram, base_addr: 0x2000)
+    expect(output).to be_a(String)
+  end
+
+  it 'supports all new options from Apple2 version' do
+    renderer = described_class.new(
+      chars_wide: 40,
+      palette: :applewin,
+      monochrome: nil,
+      blend: false
+    )
+    ram = Array.new(0x6000, 0)
+    output = renderer.render(ram, base_addr: 0x2000)
+    expect(output).to be_a(String)
   end
 end
