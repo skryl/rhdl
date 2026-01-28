@@ -697,8 +697,8 @@ module RHDL
           '-Wno-WIDTHTRUNC',      # Suppress width truncation warnings
           '-Wno-UNOPTFLAT',       # Suppress unoptimized flattening warnings
           # C++ compiler flags for performance
-          '-CFLAGS', '-fPIC -O3 -march=native -flto',
-          '-LDFLAGS', '-shared -flto',
+          '-CFLAGS', '-fPIC -O3 -march=native',
+          '-LDFLAGS', '-shared',
           '--Mdir', OBJ_DIR,
           '--prefix', 'Vapple2',
           '-o', lib_name,
@@ -721,28 +721,18 @@ module RHDL
       end
 
       def build_shared_library(wrapper_file)
-        obj_files = Dir.glob(File.join(OBJ_DIR, '*.o'))
-
-        if obj_files.empty?
-          # Compile the generated C++ files with optimization
-          cpp_files = Dir.glob(File.join(OBJ_DIR, '*.cpp'))
-          cpp_files.each do |cpp|
-            obj = cpp.sub('.cpp', '.o')
-            system("g++ -c -fPIC -O3 -march=native -flto -I#{OBJ_DIR} -o #{obj} #{cpp}")
-          end
-          obj_files = Dir.glob(File.join(OBJ_DIR, '*.o'))
-        end
-
-        lib_suffix = case RbConfig::CONFIG['host_os']
-                     when /darwin/ then 'dylib'
-                     else 'so'
-                     end
-
+        # Link all object files and static libraries into shared library
         lib_path = shared_lib_path
+        lib_vapple2 = File.join(OBJ_DIR, 'libVapple2.a')
+        lib_verilated = File.join(OBJ_DIR, 'libverilated.a')
+
+        # Use whole-archive to include all symbols from static libs
         link_cmd = if RbConfig::CONFIG['host_os'] =~ /darwin/
-                     "g++ -shared -dynamiclib -flto -o #{lib_path} #{obj_files.join(' ')}"
+                     "g++ -shared -dynamiclib -o #{lib_path} " \
+                     "-Wl,-all_load #{lib_vapple2} #{lib_verilated}"
                    else
-                     "g++ -shared -flto -o #{lib_path} #{obj_files.join(' ')}"
+                     "g++ -shared -o #{lib_path} " \
+                     "-Wl,--whole-archive #{lib_vapple2} #{lib_verilated} -Wl,--no-whole-archive"
                    end
 
         system(link_cmd)
