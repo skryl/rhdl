@@ -682,6 +682,7 @@ module RHDL
 
         # Verilate the design - top module is apple2_apple2
         # Don't use --build so we can control the C++ compiler
+        # NOTE: --threads tested but 44x SLOWER due to sync overhead on sequential CPU
         verilate_cmd = [
           'verilator',
           '--cc',
