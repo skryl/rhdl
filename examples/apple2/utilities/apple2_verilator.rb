@@ -708,19 +708,23 @@ module RHDL
           verilog_file
         ]
 
-        Dir.chdir(VERILOG_DIR) do
-          result = system(*verilate_cmd, out: File::NULL, err: File::NULL)
-          unless result
-            raise "Verilator compilation failed. Check #{verilog_file} for errors."
+        # Redirect build output to log file
+        log_file = File.join(BUILD_DIR, 'build.log')
+        File.open(log_file, 'w') do |log|
+          Dir.chdir(VERILOG_DIR) do
+            result = system(*verilate_cmd, out: log, err: log)
+            unless result
+              raise "Verilator compilation failed. See #{log_file} for details."
+            end
           end
-        end
 
-        # Build with clang++ for better optimization
-        # Must pass CXX= on command line to override verilated.mk's hardcoded g++
-        Dir.chdir(OBJ_DIR) do
-          result = system('make', '-f', 'Vapple2.mk', 'CXX=clang++', out: File::NULL, err: File::NULL)
-          unless result
-            raise "Verilator make failed"
+          # Build with clang++ for better optimization
+          # Must pass CXX= on command line to override verilated.mk's hardcoded g++
+          Dir.chdir(OBJ_DIR) do
+            result = system('make', '-f', 'Vapple2.mk', 'CXX=clang++', out: log, err: log)
+            unless result
+              raise "Verilator make failed. See #{log_file} for details."
+            end
           end
         end
 
