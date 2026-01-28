@@ -192,6 +192,9 @@ class Apple2Terminal
     if @sim_type == :native && @runner.respond_to?(:native?) && @runner.native?
       @runner.cpu.poke(0xFFFC, addr & 0xFF)
       @runner.cpu.poke(0xFFFD, (addr >> 8) & 0xFF)
+    elsif @mode == :hdl && @runner.respond_to?(:set_reset_vector)
+      # HDL modes use Rust memory for JIT/Compile - must set in both places
+      @runner.set_reset_vector(addr)
     else
       @runner.bus.write(0xFFFC, addr & 0xFF)
       @runner.bus.write(0xFFFD, (addr >> 8) & 0xFF)
