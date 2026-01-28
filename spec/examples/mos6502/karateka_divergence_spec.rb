@@ -1030,24 +1030,20 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     expect(result).to be true
   end
 
-  # Run Verilator backend against ISA for max_steps cycles
+  # Run Verilator backend against ISA for max_cycles clock cycles
   # Returns true if they match throughout, false otherwise
-  def run_verilator_test(max_steps)
+  def run_verilator_test(max_cycles)
     isa = create_isa_simulator_simple
     verilator = create_verilator_simulator_simple
 
     chunk_size = 100_000
-    total_steps = 0
     isa_time = 0.0
     verilator_time = 0.0
 
-    while total_steps < max_steps
-      # Run ISA chunk with timing
+    while verilator.cycle_count < max_cycles
+      # Run ISA chunk with timing (run_cycles runs for N clock cycles)
       t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      chunk_size.times do
-        break if isa[:cpu].halted?
-        isa[:cpu].step
-      end
+      isa[:cpu].run_cycles(chunk_size)
       t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       isa_time += (t1 - t0)
 
@@ -1057,7 +1053,8 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
       t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       verilator_time += (t1 - t0)
 
-      total_steps += chunk_size
+      isa_cycles = isa[:cpu].cycles
+      verilator_cycles = verilator.cycle_count
 
       isa_pc = isa[:cpu].pc
       verilator_pc = verilator.pc
@@ -1067,27 +1064,29 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
       verilator_hires = verilator_hires_checksum(verilator, 0x2000)
 
       if isa_hires != verilator_hires
-        puts "  Verilator: DIVERGED at #{total_steps / 1_000_000.0}M cycles"
+        puts "  Verilator: DIVERGED at #{verilator_cycles / 1_000_000.0}M cycles"
         puts "    ISA PC=$#{isa_pc.to_s(16).upcase} HiRes=$#{isa_hires.to_s(16).upcase}"
         puts "    Verilator PC=$#{verilator_pc.to_s(16).upcase} HiRes=$#{verilator_hires.to_s(16).upcase}"
         return false
       end
 
       # Progress indicator every 1M cycles
-      if (total_steps % 1_000_000).zero?
-        isa_mhz = (total_steps / isa_time) / 1_000_000.0
-        verilator_mhz = (total_steps / verilator_time) / 1_000_000.0
-        print "  Verilator: #{total_steps / 1_000_000}M cycles - " \
+      if (verilator_cycles % 1_000_000) < chunk_size
+        isa_mhz = (isa_cycles / isa_time) / 1_000_000.0
+        verilator_mhz = (verilator_cycles / verilator_time) / 1_000_000.0
+        print "  Verilator: #{verilator_cycles / 1_000_000}M cycles - " \
               "ISA: #{'%.2f' % isa_mhz} MHz, Verilator: #{'%.2f' % verilator_mhz} MHz\n"
       end
     end
 
     # Final performance summary
-    isa_mhz = (total_steps / isa_time) / 1_000_000.0
-    verilator_mhz = (total_steps / verilator_time) / 1_000_000.0
+    isa_cycles = isa[:cpu].cycles
+    verilator_cycles = verilator.cycle_count
+    isa_mhz = (isa_cycles / isa_time) / 1_000_000.0
+    verilator_mhz = (verilator_cycles / verilator_time) / 1_000_000.0
     speedup = verilator_mhz / isa_mhz
 
-    puts "  Verilator: PASSED #{max_steps / 1_000_000}M cycles"
+    puts "  Verilator: PASSED #{verilator_cycles / 1_000_000}M cycles"
     puts "  Performance: ISA=#{'%.2f' % isa_mhz} MHz, Verilator=#{'%.2f' % verilator_mhz} MHz " \
          "(#{'%.1f' % speedup}x #{speedup >= 1.0 ? 'faster' : 'slower'})"
     true
@@ -1158,16 +1157,14 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     isa = create_isa_simulator_simple
 
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    cycles.times do
-      break if isa[:cpu].halted?
-      isa[:cpu].step
-    end
+    isa[:cpu].run_cycles(cycles)
     t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
     elapsed = t1 - t0
-    mhz = (cycles / elapsed) / 1_000_000.0
+    actual_cycles = isa[:cpu].cycles
+    mhz = (actual_cycles / elapsed) / 1_000_000.0
 
-    { name: "ISA", cycles: cycles, elapsed: elapsed, mhz: mhz }
+    { name: "ISA", cycles: actual_cycles, elapsed: elapsed, mhz: mhz }
   end
 
   def benchmark_verilator(cycles)
@@ -1178,9 +1175,10 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
     elapsed = t1 - t0
-    mhz = (cycles / elapsed) / 1_000_000.0
+    actual_cycles = verilator.cycle_count
+    mhz = (actual_cycles / elapsed) / 1_000_000.0
 
-    { name: "Verilator", cycles: cycles, elapsed: elapsed, mhz: mhz }
+    { name: "Verilator", cycles: actual_cycles, elapsed: elapsed, mhz: mhz }
   end
 
   it 'benchmarks all 5 implementations', :benchmark, timeout: 1800 do
