@@ -295,6 +295,8 @@ struct RtlSimulator {
     rom: Vec<u8>,
     /// RAM address signal index
     ram_addr_idx: usize,
+    /// CPU address register index (for memory access, not muxed with video)
+    cpu_addr_idx: usize,
     /// RAM data out signal index (input to CPU)
     ram_do_idx: usize,
     /// RAM write enable signal index
@@ -510,6 +512,7 @@ impl RtlSimulator {
 
         // Get Apple II specific signal indices
         let ram_addr_idx = *name_to_idx.get("ram_addr").unwrap_or(&0);
+        let cpu_addr_idx = *name_to_idx.get("cpu__addr_reg").unwrap_or(&0);
         let ram_do_idx = *name_to_idx.get("ram_do").unwrap_or(&0);
         let ram_we_idx = *name_to_idx.get("ram_we").unwrap_or(&0);
         let d_idx = *name_to_idx.get("d").unwrap_or(&0);
@@ -552,6 +555,7 @@ impl RtlSimulator {
             ram: vec![0u8; 48 * 1024],
             rom: vec![0u8; 12 * 1024],
             ram_addr_idx,
+            cpu_addr_idx,
             ram_do_idx,
             ram_we_idx,
             d_idx,
@@ -1299,7 +1303,8 @@ impl RtlSimulator {
         // $0000-$BFFF: RAM (48KB)
         // $C000-$CFFF: I/O space (soft switches, slot ROMs)
         // $D000-$FFFF: ROM (12KB)
-        let ram_addr = unsafe { *self.signals.get_unchecked(self.ram_addr_idx) } as usize;
+        // Use cpu_addr (not ram_addr which may be video address when phi0=0)
+        let ram_addr = unsafe { *self.signals.get_unchecked(self.cpu_addr_idx) } as usize;
         let ram_data = if ram_addr >= 0xD000 {
             // ROM space
             let rom_offset = ram_addr.wrapping_sub(0xD000);
@@ -1321,11 +1326,11 @@ impl RtlSimulator {
         unsafe { *self.signals.get_unchecked_mut(self.clk_idx) = 1; }
         self.tick_fast();
 
-        // Handle RAM writes
+        // Handle RAM writes (use cpu_addr, not ram_addr which may be video address)
         let mut text_dirty = false;
         let ram_we = unsafe { *self.signals.get_unchecked(self.ram_we_idx) };
         if ram_we == 1 {
-            let write_addr = unsafe { *self.signals.get_unchecked(self.ram_addr_idx) } as usize;
+            let write_addr = unsafe { *self.signals.get_unchecked(self.cpu_addr_idx) } as usize;
             if write_addr < 0xC000 {
                 let data = unsafe { (*self.signals.get_unchecked(self.d_idx) & 0xFF) as u8 };
                 unsafe { *self.ram.get_unchecked_mut(write_addr) = data; }
