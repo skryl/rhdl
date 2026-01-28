@@ -42,3 +42,4 @@ lib/rhdl/codegen/ir/sim/ir_compiler/lib/
 
 # Verilator build artifacts
 .verilator_build/
+.verilator_build_*/
