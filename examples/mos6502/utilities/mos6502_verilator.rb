@@ -338,6 +338,7 @@ module MOS6502
         unsigned char sim_read_memory(void* sim, unsigned int addr);
         void sim_run_cycles(void* sim, unsigned int n_cycles, unsigned int* halted_out);
         void sim_load_memory(void* sim, const unsigned char* data, unsigned int offset, unsigned int len);
+        unsigned int sim_run_instructions_with_opcodes(void* sim, unsigned int n, unsigned long* opcodes_out, unsigned int capacity, unsigned int* halted_out);
 
         #ifdef __cplusplus
         }
@@ -541,6 +542,59 @@ module MOS6502
             for (unsigned int i = 0; i < len && (offset + i) < sizeof(ctx->memory); i++) {
                 ctx->memory[offset + i] = data[i];
             }
+        }
+
+        // Run until N instructions complete, capturing (pc, opcode, sp) for each
+        // Each opcode_tuple is packed as: (pc << 16) | (opcode << 8) | sp
+        // STATE_DECODE = 0x02
+        unsigned int sim_run_instructions_with_opcodes(void* sim, unsigned int n, unsigned long* opcodes_out, unsigned int capacity, unsigned int* halted_out) {
+            SimContext* ctx = static_cast<SimContext*>(sim);
+            *halted_out = 0;
+            unsigned int instruction_count = 0;
+            unsigned int max_cycles = n * 10;  // Safety limit
+            unsigned int cycles = 0;
+            unsigned int last_state = ctx->dut->state;
+            const unsigned int STATE_DECODE = 0x02;
+
+            while (instruction_count < n && cycles < max_cycles) {
+                // Memory bridging
+                unsigned int addr = ctx->dut->addr;
+                unsigned int rw = ctx->dut->rw;
+                if (rw == 1) {  // Read
+                    ctx->dut->data_in = ctx->memory[addr];
+                } else {  // Write
+                    ctx->memory[addr] = ctx->dut->data_out & 0xFF;
+                }
+
+                // Falling edge
+                ctx->dut->clk = 0;
+                ctx->dut->eval();
+
+                // Rising edge
+                ctx->dut->clk = 1;
+                ctx->dut->eval();
+                cycles++;
+
+                // Check for state transition to DECODE
+                unsigned int current_state = ctx->dut->state;
+                if (current_state == STATE_DECODE && last_state != STATE_DECODE) {
+                    unsigned int opcode = ctx->dut->opcode & 0xFF;
+                    unsigned int pc = (ctx->dut->reg_pc - 1) & 0xFFFF;  // PC points past opcode
+                    unsigned int sp = ctx->dut->reg_sp & 0xFF;
+                    if (instruction_count < capacity) {
+                        opcodes_out[instruction_count] = ((unsigned long)pc << 16) | ((unsigned long)opcode << 8) | sp;
+                    }
+                    instruction_count++;
+                }
+                last_state = current_state;
+
+                // Check halted
+                if (ctx->dut->halted) {
+                    *halted_out = 1;
+                    break;
+                }
+            }
+            return instruction_count;
         }
 
         } // extern "C"

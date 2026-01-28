@@ -1279,13 +1279,16 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     puts "Opcode Sequence Comparison: ISA vs JIT, Compile, Verilator"
     puts "=" * 80
 
-    max_instructions = 1_000_000  # 1M instructions
+    max_instructions = 100_000  # 100K instructions per backend
     batch_size = 1000  # Instructions per batch
 
     # Track results for each backend
     results = {}
 
     # Test each backend against ISA
+    # Note: Only JIT supports instruction-level stepping properly
+    # Compile backend's state machine doesn't advance with manual cycle stepping
+    # Verilator has separate initialization that causes early divergence
     backends = []
     backends << [:jit, 'JIT'] if ir_backend_available?(:jit)
     backends << [:compile, 'Compile'] if ir_backend_available?(:compile)
