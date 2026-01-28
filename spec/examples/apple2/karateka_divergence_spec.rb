@@ -7,7 +7,7 @@ require_relative '../../../examples/apple2/utilities/braille_renderer'
 
 RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   # Test verifies that ISA and IR simulators execute the same code paths
-  # by checking that PC sequences match as subsequences (allowing timing drift)
+  # by checking that PC and opcode sequences match as subsequences (allowing timing drift)
 
   ROM_PATH = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
   KARATEKA_MEM_PATH = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
@@ -113,6 +113,82 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   # This groups nearby addresses together to tolerate minor timing differences
   def pc_page(pc)
     pc >> 8
+  end
+
+  # Categorize opcode into instruction type for sequence comparison
+  # Groups similar instructions together to tolerate minor execution differences
+  def opcode_category(opcode)
+    case opcode
+    when 0x00 then :brk
+    when 0x20 then :jsr
+    when 0x40 then :rti
+    when 0x60 then :rts
+    when 0x4C, 0x6C then :jmp
+    when 0x10, 0x30, 0x50, 0x70, 0x90, 0xB0, 0xD0, 0xF0 then :branch
+    when 0xA9, 0xA5, 0xB5, 0xAD, 0xBD, 0xB9, 0xA1, 0xB1 then :lda
+    when 0xA2, 0xA6, 0xB6, 0xAE, 0xBE then :ldx
+    when 0xA0, 0xA4, 0xB4, 0xAC, 0xBC then :ldy
+    when 0x85, 0x95, 0x8D, 0x9D, 0x99, 0x81, 0x91 then :sta
+    when 0x86, 0x96, 0x8E then :stx
+    when 0x84, 0x94, 0x8C then :sty
+    when 0x69, 0x65, 0x75, 0x6D, 0x7D, 0x79, 0x61, 0x71 then :adc
+    when 0xE9, 0xE5, 0xF5, 0xED, 0xFD, 0xF9, 0xE1, 0xF1 then :sbc
+    when 0x29, 0x25, 0x35, 0x2D, 0x3D, 0x39, 0x21, 0x31 then :and
+    when 0x09, 0x05, 0x15, 0x0D, 0x1D, 0x19, 0x01, 0x11 then :ora
+    when 0x49, 0x45, 0x55, 0x4D, 0x5D, 0x59, 0x41, 0x51 then :eor
+    when 0xC9, 0xC5, 0xD5, 0xCD, 0xDD, 0xD9, 0xC1, 0xD1 then :cmp
+    when 0xE0, 0xE4, 0xEC then :cpx
+    when 0xC0, 0xC4, 0xCC then :cpy
+    when 0xE6, 0xF6, 0xEE, 0xFE then :inc
+    when 0xC6, 0xD6, 0xCE, 0xDE then :dec
+    when 0x0A, 0x06, 0x16, 0x0E, 0x1E then :asl
+    when 0x4A, 0x46, 0x56, 0x4E, 0x5E then :lsr
+    when 0x2A, 0x26, 0x36, 0x2E, 0x3E then :rol
+    when 0x6A, 0x66, 0x76, 0x6E, 0x7E then :ror
+    when 0xAA then :tax
+    when 0x8A then :txa
+    when 0xA8 then :tay
+    when 0x98 then :tya
+    when 0xBA then :tsx
+    when 0x9A then :txs
+    when 0x48 then :pha
+    when 0x68 then :pla
+    when 0x08 then :php
+    when 0x28 then :plp
+    when 0xE8 then :inx
+    when 0xCA then :dex
+    when 0xC8 then :iny
+    when 0x88 then :dey
+    when 0x18 then :clc
+    when 0x38 then :sec
+    when 0x58 then :cli
+    when 0x78 then :sei
+    when 0xD8 then :cld
+    when 0xF8 then :sed
+    when 0xB8 then :clv
+    when 0x24, 0x2C then :bit
+    when 0xEA then :nop
+    else :other
+    end
+  end
+
+  # Get opcode name for display
+  def opcode_name(opcode)
+    names = {
+      0x00 => 'BRK', 0x20 => 'JSR', 0x40 => 'RTI', 0x60 => 'RTS',
+      0x4C => 'JMP', 0x6C => 'JMP()', 0xEA => 'NOP',
+      0x10 => 'BPL', 0x30 => 'BMI', 0x50 => 'BVC', 0x70 => 'BVS',
+      0x90 => 'BCC', 0xB0 => 'BCS', 0xD0 => 'BNE', 0xF0 => 'BEQ',
+      0xA9 => 'LDA#', 0xA5 => 'LDAzp', 0xAD => 'LDAabs',
+      0xA2 => 'LDX#', 0xA6 => 'LDXzp', 0xAE => 'LDXabs',
+      0xA0 => 'LDY#', 0xA4 => 'LDYzp', 0xAC => 'LDYabs',
+      0x85 => 'STAzp', 0x8D => 'STAabs',
+      0x86 => 'STXzp', 0x8E => 'STXabs',
+      0x84 => 'STYzp', 0x8C => 'STYabs',
+      0xE8 => 'INX', 0xCA => 'DEX', 0xC8 => 'INY', 0x88 => 'DEY',
+      0x48 => 'PHA', 0x68 => 'PLA', 0x08 => 'PHP', 0x28 => 'PLP',
+    }
+    names[opcode] || format('$%02X', opcode)
   end
 
   # Check if seq_a is a subsequence of seq_b (elements appear in same order)
@@ -267,11 +343,17 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     isa_page_sequence = []  # PC pages (256-byte granularity)
     ir_page_sequence = []
 
+    # Collect opcode sequences
+    isa_opcode_sequence = []
+    ir_opcode_sequence = []
+    isa_opcode_category_sequence = []
+    ir_opcode_category_sequence = []
+
     cycles_run = 0
     last_sample = 0
     start_time = Time.now
 
-    puts "\nCollecting PC sequences..."
+    puts "\nCollecting PC and opcode sequences..."
     puts "-" * 70
 
     while cycles_run < TOTAL_CYCLES
@@ -297,6 +379,15 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       ir_pc_sequence << ir_pc
       isa_page_sequence << pc_page(isa_pc)
       ir_page_sequence << pc_page(ir_pc)
+
+      # Sample opcode (read byte at current PC for ISA, use debug signal for IR)
+      isa_opcode = isa_bus.mem_read(isa_pc) & 0xFF
+      ir_opcode = ir_sim.peek('opcode_debug') & 0xFF
+
+      isa_opcode_sequence << isa_opcode
+      ir_opcode_sequence << ir_opcode
+      isa_opcode_category_sequence << opcode_category(isa_opcode)
+      ir_opcode_category_sequence << opcode_category(ir_opcode)
 
       # Progress output at checkpoints
       if cycles_run - last_sample >= CHECKPOINT_INTERVAL
@@ -386,6 +477,71 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     puts "  ISA: #{isa_region_counts.map { |r, c| "#{r}=#{c}" }.join(', ')}"
     puts "  IR:  #{ir_region_counts.map { |r, c| "#{r}=#{c}" }.join(', ')}"
 
+    # Opcode sequence analysis
+    puts "\n" + "=" * 70
+    puts "OPCODE SEQUENCE ANALYSIS"
+    puts "=" * 70
+
+    # Unique opcodes
+    isa_unique_opcodes = isa_opcode_sequence.uniq.sort
+    ir_unique_opcodes = ir_opcode_sequence.uniq.sort
+    common_opcodes = isa_unique_opcodes & ir_unique_opcodes
+
+    puts "\nUnique opcodes executed:"
+    puts "  ISA: #{isa_unique_opcodes.length} unique opcodes"
+    puts "  IR:  #{ir_unique_opcodes.length} unique opcodes"
+    puts "  Common: #{common_opcodes.length} opcodes used by both"
+
+    # Opcode category analysis (more tolerant comparison)
+    isa_unique_categories = isa_opcode_category_sequence.uniq
+    ir_unique_categories = ir_opcode_category_sequence.uniq
+    common_categories = isa_unique_categories & ir_unique_categories
+
+    puts "\nUnique opcode categories:"
+    puts "  ISA: #{isa_unique_categories.length} categories"
+    puts "  IR:  #{ir_unique_categories.length} categories"
+    puts "  Common: #{common_categories.length} categories"
+
+    # LCS on opcode category sequences
+    opcode_lcs_len = lcs_length(isa_opcode_category_sequence, ir_opcode_category_sequence)
+    opcode_lcs_pct_isa = (opcode_lcs_len.to_f / isa_opcode_category_sequence.length * 100).round(1)
+    opcode_lcs_pct_ir = (opcode_lcs_len.to_f / ir_opcode_category_sequence.length * 100).round(1)
+
+    puts "\nLongest Common Subsequence (opcode categories):"
+    puts "  LCS length: #{opcode_lcs_len}"
+    puts "  Coverage of ISA sequence: #{opcode_lcs_pct_isa}%"
+    puts "  Coverage of IR sequence: #{opcode_lcs_pct_ir}%"
+
+    # Opcode frequency distribution
+    isa_opcode_counts = isa_opcode_sequence.tally.sort_by { |_, v| -v }
+    ir_opcode_counts = ir_opcode_sequence.tally.sort_by { |_, v| -v }
+
+    puts "\nTop 10 opcodes by frequency:"
+    puts "  ISA: #{isa_opcode_counts.first(10).map { |op, c| "#{opcode_name(op)}=#{c}" }.join(', ')}"
+    puts "  IR:  #{ir_opcode_counts.first(10).map { |op, c| "#{opcode_name(op)}=#{c}" }.join(', ')}"
+
+    # Category frequency distribution
+    isa_category_counts = isa_opcode_category_sequence.tally.sort_by { |_, v| -v }
+    ir_category_counts = ir_opcode_category_sequence.tally.sort_by { |_, v| -v }
+
+    puts "\nOpcode category distribution:"
+    puts "  ISA: #{isa_category_counts.first(10).map { |cat, c| "#{cat}=#{c}" }.join(', ')}"
+    puts "  IR:  #{ir_category_counts.first(10).map { |cat, c| "#{cat}=#{c}" }.join(', ')}"
+
+    # Check for anomalous opcodes (executed from graphics memory, etc.)
+    ir_anomalous = ir_opcode_sequence.each_with_index.select do |op, idx|
+      ir_pc = ir_pc_sequence[idx]
+      pc_region(ir_pc) == :hires2 || pc_region(ir_pc) == :hires1
+    end
+
+    if ir_anomalous.any?
+      puts "\n  ⚠️  IR executed #{ir_anomalous.length} opcodes from HiRes memory regions"
+      # Show first few
+      ir_anomalous.first(5).each do |op, idx|
+        puts "    Sample #{idx}: PC=$#{ir_pc_sequence[idx].to_s(16).upcase} opcode=$#{op.to_s(16).upcase} (#{opcode_name(op)})"
+      end
+    end
+
     # Check for stuck behavior
     ir_stuck_in_one_region = ir_region_counts.first[1] > (ir_regions.length * 0.9)
     if ir_stuck_in_one_region
@@ -450,6 +606,35 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       issues << "Missing game loop visits"
     end
 
+    # Check 5: Opcode category LCS coverage > 30%
+    if opcode_lcs_pct_isa >= 30
+      puts "✅ Opcode category LCS coverage: #{opcode_lcs_pct_isa}% (>= 30% required)"
+    else
+      puts "❌ Opcode category LCS coverage: #{opcode_lcs_pct_isa}% (< 30% required)"
+      passing = false
+      issues << "Opcode LCS coverage too low"
+    end
+
+    # Check 6: Common opcode categories > 50%
+    # Note: Different thresholds may apply depending on execution phase differences
+    common_cat_pct = (common_categories.length.to_f / [isa_unique_categories.length, ir_unique_categories.length].max * 100).round(1)
+    if common_cat_pct >= 50
+      puts "✅ Common opcode categories: #{common_cat_pct}% (>= 50% required)"
+    else
+      puts "❌ Common opcode categories: #{common_cat_pct}% (< 50% required)"
+      passing = false
+      issues << "Common opcode categories too low"
+    end
+
+    # Check 7: No execution from HiRes memory
+    if ir_anomalous.empty?
+      puts "✅ No execution from HiRes memory"
+    else
+      puts "❌ IR executed #{ir_anomalous.length} opcodes from HiRes memory"
+      passing = false
+      issues << "IR executing from HiRes memory"
+    end
+
     puts "\n"
 
     # Assertions
@@ -464,5 +649,14 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
     expect(isa_visits_game && ir_visits_game).to be(true),
       "Both simulators should visit game loop (ROM/high_ram) regions"
+
+    expect(opcode_lcs_pct_isa).to be >= 30,
+      "Opcode category LCS coverage should be >= 30%, got #{opcode_lcs_pct_isa}%"
+
+    expect(common_cat_pct).to be >= 50,
+      "Common opcode categories should be >= 50%, got #{common_cat_pct}%"
+
+    expect(ir_anomalous).to be_empty,
+      "IR should not execute from HiRes memory regions"
   end
 end
