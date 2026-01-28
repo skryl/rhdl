@@ -22,6 +22,8 @@ module RHDL
             benchmark_apple2
           when :mos6502
             benchmark_mos6502
+          when :verilator
+            benchmark_verilator
           else
             benchmark_gates
           end
@@ -503,6 +505,107 @@ module RHDL
           end
 
           print_benchmark_summary(results, cycles)
+        end
+
+        # Benchmark Verilator simulation
+        def benchmark_verilator
+          # Check if Verilator is available
+          verilator_path = ENV['PATH'].split(File::PATH_SEPARATOR).find do |path|
+            File.executable?(File.join(path, 'verilator'))
+          end
+
+          unless verilator_path
+            puts "Error: Verilator not found in PATH"
+            puts "Install Verilator:"
+            puts "  Ubuntu/Debian: sudo apt-get install verilator"
+            puts "  macOS: brew install verilator"
+            return
+          end
+
+          # Paths to ROM and memory dump
+          rom_path = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __dir__)
+          karateka_path = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __dir__)
+
+          unless File.exist?(rom_path)
+            puts "Error: AppleIIgo ROM not found at #{rom_path}"
+            puts "Please ensure the ROM file exists."
+            return
+          end
+
+          unless File.exist?(karateka_path)
+            puts "Error: Karateka memory dump not found at #{karateka_path}"
+            puts "Please ensure the memory dump file exists."
+            return
+          end
+
+          cycles = options[:cycles] || 100_000
+
+          puts_header("Verilator Simulation Benchmark - Apple II")
+
+          # Check Verilator version
+          version = `verilator --version 2>&1`.lines.first&.strip
+          puts "Verilator: #{version}"
+          puts "Cycles: #{cycles}"
+          puts "ROM: #{rom_path}"
+          puts "Memory dump: #{karateka_path}"
+          puts
+
+          begin
+            # Load RHDL and the Verilator runner
+            require 'rhdl'
+            $LOAD_PATH.unshift(File.expand_path('../../../../examples/apple2/utilities', __dir__))
+            require 'apple2_verilator'
+
+            # Create and initialize runner (includes Verilator build)
+            print "Building Verilator simulation... "
+            $stdout.flush
+            init_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            runner = RHDL::Apple2::VerilatorRunner.new(sub_cycles: 14)
+            init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
+            puts "done (#{format('%.2f', init_elapsed)}s)"
+
+            # Load ROM and memory
+            print "Loading ROM and memory... "
+            $stdout.flush
+            rom_data = File.binread(rom_path).bytes
+            karateka_mem = File.binread(karateka_path).bytes
+
+            runner.load_rom(rom_data, base_addr: 0xD000)
+            runner.load_ram(karateka_mem, base_addr: 0x0000)
+
+            # Set reset vector to game entry ($B82A)
+            runner.write_memory(0xFFFC, 0x2A)  # low byte
+            runner.write_memory(0xFFFD, 0xB8)  # high byte
+            puts "done"
+
+            # Reset
+            print "Resetting CPU... "
+            $stdout.flush
+            runner.reset
+            puts "done"
+
+            # Run benchmark
+            print "Running #{cycles} cycles... "
+            $stdout.flush
+            run_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            runner.run_steps(cycles)
+            run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
+
+            cycles_per_sec = cycles / run_elapsed
+            puts "done"
+
+            puts
+            puts "Results:"
+            puts "  Build time: #{format('%.3f', init_elapsed)}s"
+            puts "  Run time:   #{format('%.3f', run_elapsed)}s"
+            puts "  Rate:       #{format('%.0f', cycles_per_sec)} cycles/s (#{format('%.2f', cycles_per_sec / 1_000_000)}M/s)"
+            puts "  PC:         0x#{runner.pc.to_s(16).upcase}"
+
+          rescue => e
+            puts "FAILED"
+            puts "  Error: #{e.message}"
+            puts "  #{e.backtrace.first(5).join("\n  ")}" if options[:verbose]
+          end
         end
 
         private
