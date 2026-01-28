@@ -709,7 +709,7 @@ module RHDL
         ]
 
         Dir.chdir(VERILOG_DIR) do
-          result = system(*verilate_cmd)
+          result = system(*verilate_cmd, out: File::NULL, err: File::NULL)
           unless result
             raise "Verilator compilation failed. Check #{verilog_file} for errors."
           end
@@ -718,7 +718,7 @@ module RHDL
         # Build with clang++ for better optimization
         # Must pass CXX= on command line to override verilated.mk's hardcoded g++
         Dir.chdir(OBJ_DIR) do
-          result = system('make', '-f', 'Vapple2.mk', 'CXX=clang++')
+          result = system('make', '-f', 'Vapple2.mk', 'CXX=clang++', out: File::NULL, err: File::NULL)
           unless result
             raise "Verilator make failed"
           end
@@ -726,7 +726,6 @@ module RHDL
 
         unless File.exist?(lib_path)
           # Try alternative build approach - build object files then link
-          puts "    Building shared library manually..."
           build_shared_library(wrapper_file)
         end
       end

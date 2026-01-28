@@ -586,7 +586,7 @@ module MOS6502
       ]
 
       Dir.chdir(VERILOG_DIR) do
-        result = system(*verilate_cmd)
+        result = system(*verilate_cmd, out: File::NULL, err: File::NULL)
         unless result
           raise "Verilator compilation failed. Check #{verilog_file} for errors."
         end
@@ -595,7 +595,7 @@ module MOS6502
       # Build with clang++ for better optimization
       # Must pass CXX= on command line to override verilated.mk's hardcoded g++
       Dir.chdir(OBJ_DIR) do
-        result = system('make', '-f', 'Vmos6502_cpu.mk', 'CXX=clang++')
+        result = system('make', '-f', 'Vmos6502_cpu.mk', 'CXX=clang++', out: File::NULL, err: File::NULL)
         unless result
           raise "Verilator make failed"
         end
@@ -603,7 +603,6 @@ module MOS6502
 
       unless File.exist?(lib_path)
         # Try alternative build approach - link static libraries
-        puts "    Building shared library manually..."
         build_shared_library(wrapper_file)
       end
     end
