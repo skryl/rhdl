@@ -977,8 +977,9 @@ impl IrSimulator {
         code.push_str(&format!("            signals[{}] = 0;\n", clk_idx));
         code.push_str("            evaluate_inline(signals);\n\n");
 
-        // Provide RAM/ROM data
-        code.push_str(&format!("            let addr = signals[{}] as usize;\n", ram_addr_idx));
+        // Provide RAM/ROM data based on CPU address (not muxed ram_addr which may be video address)
+        let cpu_addr_idx = self.cpu_addr_idx;
+        code.push_str(&format!("            let addr = signals[{}] as usize;\n", cpu_addr_idx));
         code.push_str(&format!("            signals[{}] = if addr >= 0xD000 {{\n", ram_do_idx));
         code.push_str("                let rom_offset = addr.wrapping_sub(0xD000);\n");
         code.push_str("                if rom_offset < rom.len() { rom[rom_offset] as u64 } else { 0 }\n");
@@ -990,9 +991,9 @@ impl IrSimulator {
         code.push_str(&format!("            signals[{}] = 1;\n", clk_idx));
         code.push_str("            tick_inline(signals, &mut old_clocks, &mut next_regs);\n\n");
 
-        // Handle RAM writes
+        // Handle RAM writes (use CPU address, not muxed ram_addr which may be video address)
         code.push_str(&format!("            if signals[{}] == 1 {{\n", ram_we_idx));
-        code.push_str(&format!("                let wa = signals[{}] as usize;\n", ram_addr_idx));
+        code.push_str(&format!("                let wa = signals[{}] as usize;\n", cpu_addr_idx));
         code.push_str("                if wa < 0xC000 && wa < ram.len() {\n");
         code.push_str(&format!("                    ram[wa] = (signals[{}] & 0xFF) as u8;\n", d_idx));
         code.push_str("                    if wa >= 0x0400 && wa <= 0x07FF { text_dirty = true; }\n");
