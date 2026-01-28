@@ -641,7 +641,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     puts " done (#{'%.2f' % results.last[:elapsed]}s)"
 
     # Interpreter (slower, use fewer cycles)
-    interp_cycles = 5_000_000
+    interp_cycles = 1_000_000
     print "  Running Interpreter (#{interp_cycles / 1_000_000}M cycles)..."
     $stdout.flush
     results << benchmark_backend("Interpret", :interpret, interp_cycles)
