@@ -812,7 +812,8 @@ module RHDL
         # Index calculation
         idx_val = mux(index_x, x_reg, mux(index_y, y_reg, lit(0, width: 8)))
         idx_sum = cat(lit(0, width: 1), t_reg) + cat(lit(0, width: 1), idx_val)
-        branch_sum = cat(lit(0, width: 1), t_reg) + cat(lit(0, width: 1), addr_reg[7..0])
+        # For branch, use pc_reg (PC after operand fetch), not addr_reg (operand address)
+        branch_sum = cat(lit(0, width: 1), t_reg) + cat(lit(0, width: 1), pc_reg[7..0])
         index_out <= mux(branch_bit, branch_sum, idx_sum)
 
         # Next address calculation based on state
@@ -839,13 +840,20 @@ module RHDL
           )
         )
 
-        # branch address - compute fresh using current t_reg and addr_reg
-        # (index_out has stale values from previous cycle)
-        branch_low = (t_reg + addr_reg[7..0])[7..0]
-        addr_branch = cat(addr_reg[15..8], branch_low)
+        # branch address - compute fresh using current t_reg and pc_reg
+        # The branch target is PC (after operand fetch) + signed offset
+        # pc_reg is updated to the address after the operand during CYCLE2
+        # Use full 16-bit addition with sign extension for correct carry handling
+        t_ext = mux(t_reg[7],
+          cat(lit(0xFF, width: 8), t_reg),  # Negative: sign extend with 1s
+          cat(lit(0, width: 8), t_reg)       # Positive: sign extend with 0s
+        )
+        addr_branch = (pc_reg + t_ext)[15..0]
+        # For page crossing, the low byte is already correct; just adjust high byte
+        branch_low = addr_branch[7..0]
         addr_branch_page = mux(t_reg[7],
-          cat((addr_reg[15..8] - lit(1, width: 8))[7..0], branch_low),
-          cat((addr_reg[15..8] + lit(1, width: 8))[7..0], branch_low)
+          cat((pc_reg[15..8] - lit(1, width: 8))[7..0], branch_low),
+          cat((pc_reg[15..8] + lit(1, width: 8))[7..0], branch_low)
         )
 
         # stack address - use current S register
@@ -991,9 +999,15 @@ module RHDL
         rmw_out = rmw_in
         rmw_c_out = flag_c
 
-        # Status register pack for PHP
+        # Status register pack for PHP/BRK (B flag set based on irq_active)
+        # When pushing via PHP/BRK (irq_active=0): B=1
+        # When pushing via IRQ/NMI (irq_active=1): B=0
         status_reg = cat(flag_n, flag_v, lit(1, width: 1), ~irq_active, flag_d, flag_i, flag_z, flag_c)
-        debug_p <= status_reg
+
+        # Debug status register (B flag is always 0, as it's not a real stored flag)
+        # This matches the ISA simulator which initializes P to $24 (B=0)
+        debug_status = cat(flag_n, flag_v, lit(1, width: 1), lit(0, width: 1), flag_d, flag_i, flag_z, flag_c)
+        debug_p <= debug_status
 
         rmw_out = mux(alu_mode1 == lit(ALU1_INP, width: 4), rmw_in,
           mux(alu_mode1 == lit(ALU1_P, width: 4), status_reg,
@@ -1122,7 +1136,8 @@ module RHDL
         # Index calculation for page crossing
         idx_val = mux(index_x, x_reg, mux(index_y, y_reg, lit(0, width: 8)))
         idx_sum = cat(lit(0, width: 1), t_reg) + cat(lit(0, width: 1), idx_val)
-        branch_sum = cat(lit(0, width: 1), t_reg) + cat(lit(0, width: 1), addr_reg[7..0])
+        # For branch, use pc_reg (PC after operand fetch), not addr_reg (operand address)
+        branch_sum = cat(lit(0, width: 1), t_reg) + cat(lit(0, width: 1), pc_reg[7..0])
         page_cross = mux(branch_bit, branch_sum[8] ^ t_reg[7], idx_sum[8])
 
         # State machine
