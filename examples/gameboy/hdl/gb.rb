@@ -332,15 +332,15 @@ module GameBoy
       sel_video_reg <= (cpu_addr[15..4] == lit(0xFF4, width: 12)) |
                        (is_gbc & (cpu_addr[15..4] == lit(0xFF6, width: 12)) &
                         (cpu_addr[3..0] >= lit(8, width: 4)) & (cpu_addr[3..0] <= lit(0xC, width: 4)))
-      sel_video_oam <= cpu_addr[15..8] == lit(0xFE, width: 8)
-      sel_joy <= cpu_addr == lit(0xFF00, width: 16)
-      sel_sb <= cpu_addr == lit(0xFF01, width: 16)
-      sel_sc <= cpu_addr == lit(0xFF02, width: 16)
+      sel_video_oam <= (cpu_addr[15..8] == lit(0xFE, width: 8))
+      sel_joy <= (cpu_addr == lit(0xFF00, width: 16))
+      sel_sb <= (cpu_addr == lit(0xFF01, width: 16))
+      sel_sc <= (cpu_addr == lit(0xFF02, width: 16))
       sel_rom <= ~cpu_addr[15]
-      sel_cram <= cpu_addr[15..13] == lit(0b101, width: 3)
-      sel_vram <= cpu_addr[15..13] == lit(0b100, width: 3)
-      sel_ie <= cpu_addr == lit(0xFFFF, width: 16)
-      sel_if <= cpu_addr == lit(0xFF0F, width: 16)
+      sel_cram <= (cpu_addr[15..13] == lit(0b101, width: 3))
+      sel_vram <= (cpu_addr[15..13] == lit(0b100, width: 3))
+      sel_ie <= (cpu_addr == lit(0xFFFF, width: 16))
+      sel_if <= (cpu_addr == lit(0xFF0F, width: 16))
       sel_wram <= (cpu_addr[15..14] == lit(0b11, width: 2)) & ~(cpu_addr[13..9] == lit(0b11111, width: 5))
       sel_zpram <= (cpu_addr[15..7] == lit(0b111111111, width: 9)) & (cpu_addr != lit(0xFFFF, width: 16))
       sel_audio <= (cpu_addr[15..8] == lit(0xFF, width: 8)) &
