@@ -199,9 +199,16 @@ module RHDL
 
       # Batched execution
       def run_steps_batched(steps)
-        result = @sim.run_cpu_cycles(steps, 0, false)
-        @cycles += result[:cycles_run]
-        @screen_dirty = true if result[:screen_dirty]
+        # Use Game Boy specific cycles if available (with framebuffer capture)
+        if @sim.respond_to?(:run_gb_cycles) && @sim.respond_to?(:gameboy_mode?) && @sim.gameboy_mode?
+          result = @sim.run_gb_cycles(steps)
+          @cycles += result[:cycles_run]
+          @screen_dirty = true if result[:frames_completed] > 0
+        else
+          result = @sim.run_cpu_cycles(steps, 0, false)
+          @cycles += result[:cycles_run]
+          @screen_dirty = true if result[:screen_dirty]
+        end
       end
 
       def run_machine_cycle
@@ -271,8 +278,19 @@ module RHDL
       end
 
       def read_framebuffer
-        # Placeholder - would need to read VRAM and render
-        Array.new(SCREEN_HEIGHT) { Array.new(SCREEN_WIDTH, 0) }
+        # Use native framebuffer capture if available
+        if @use_batched && @sim.respond_to?(:read_framebuffer) && @sim.respond_to?(:gameboy_mode?) && @sim.gameboy_mode?
+          # Get flat 1D array from native code and reshape to 2D
+          flat = @sim.read_framebuffer
+          Array.new(SCREEN_HEIGHT) do |y|
+            Array.new(SCREEN_WIDTH) do |x|
+              flat[y * SCREEN_WIDTH + x] || 0
+            end
+          end
+        else
+          # Placeholder when native capture not available
+          Array.new(SCREEN_HEIGHT) { Array.new(SCREEN_WIDTH, 0) }
+        end
       end
 
       def read_screen
