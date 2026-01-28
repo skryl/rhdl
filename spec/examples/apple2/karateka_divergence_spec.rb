@@ -13,9 +13,9 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   KARATEKA_MEM_PATH = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
 
   # Test parameters - can be overridden via environment variables
-  # Usage: START_CYCLES=25000000 END_CYCLES=35000000 rspec spec/examples/apple2/karateka_divergence_spec.rb
-  START_CYCLES = (ENV['START_CYCLES'] || 0).to_i
-  END_CYCLES = (ENV['END_CYCLES'] || 20_000_000).to_i
+  # Usage: START_CYCLES=0 END_CYCLES=20000000 rspec spec/examples/apple2/karateka_divergence_spec.rb
+  START_CYCLES = (ENV['START_CYCLES'] || 25_000_000).to_i
+  END_CYCLES = (ENV['END_CYCLES'] || 35_000_000).to_i
   TOTAL_CYCLES = END_CYCLES - START_CYCLES
   PC_SAMPLE_INTERVAL = 50_000     # Sample PC every 50K cycles for sequence
   CHECKPOINT_INTERVAL = 500_000   # Checkpoint every 500K cycles for progress
