@@ -130,6 +130,7 @@ module RHDL
         # Speaker audio simulation
         @speaker = Speaker.new
         @prev_speaker_state = 0
+        @last_speaker_sync_time = nil
 
         if @use_batched
           puts "  Batched execution: enabled (minimal FFI overhead)"
@@ -265,9 +266,12 @@ module RHDL
         @cycles += result[:cycles_run]
         @text_page_dirty = true if result[:text_dirty]
 
-        # Process speaker toggles for audio generation
+        # Process speaker toggles for audio generation with proper timing
         if result[:speaker_toggles] && result[:speaker_toggles] > 0
-          result[:speaker_toggles].times { @speaker.toggle }
+          now = Time.now
+          elapsed = @last_speaker_sync_time ? (now - @last_speaker_sync_time) : 0.033  # Default ~30fps
+          @last_speaker_sync_time = now
+          @speaker.sync_toggles(result[:speaker_toggles], elapsed)
         end
       end
 
