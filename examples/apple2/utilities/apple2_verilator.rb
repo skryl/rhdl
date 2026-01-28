@@ -87,18 +87,28 @@ module RHDL
 
       def load_rom(bytes, base_addr:)
         bytes = bytes.bytes if bytes.is_a?(String)
+        # Keep Ruby copy for compatibility
         bytes.each_with_index do |byte, i|
           @rom[i] = byte if i < @rom.size
+        end
+        # Bulk load into C++ side
+        if @sim_load_rom_fn && @sim_ctx
+          data_ptr = Fiddle::Pointer[bytes.pack('C*')]
+          @sim_load_rom_fn.call(@sim_ctx, data_ptr, bytes.size)
         end
       end
 
       def load_ram(bytes, base_addr:)
         bytes = bytes.bytes if bytes.is_a?(String)
+        # Keep Ruby copy for compatibility
         bytes.each_with_index do |byte, i|
           addr = base_addr + i
           @ram[addr] = byte if addr < @ram.size
-          # Also write to Verilator RAM
-          verilator_write_ram(addr, byte) if addr < @ram.size
+        end
+        # Bulk load into C++ side
+        if @sim_load_ram_fn && @sim_ctx
+          data_ptr = Fiddle::Pointer[bytes.pack('C*')]
+          @sim_load_ram_fn.call(@sim_ctx, data_ptr, base_addr, bytes.size)
         end
       end
 
@@ -121,7 +131,12 @@ module RHDL
       def write_memory(addr, byte)
         if addr >= 0xD000
           # ROM area
-          @rom[addr - 0xD000] = byte if addr - 0xD000 < @rom.size
+          offset = addr - 0xD000
+          @rom[offset] = byte if offset < @rom.size
+          # Also write to C++ ROM
+          if @sim_write_rom_fn && @sim_ctx && offset < @rom.size
+            @sim_write_rom_fn.call(@sim_ctx, offset, byte)
+          end
         else
           # RAM area
           @ram[addr] = byte if addr < @ram.size
@@ -136,7 +151,19 @@ module RHDL
 
       # Main entry point for running cycles
       def run_steps(steps)
-        steps.times { run_cpu_cycle }
+        if @sim_run_cycles_fn
+          # Use batch execution - run all 14MHz cycles in C++
+          n_14m_cycles = steps * @sub_cycles
+          text_dirty_ptr = Fiddle::Pointer.malloc(4)  # 4 bytes for unsigned int
+          speaker_toggles = @sim_run_cycles_fn.call(@sim_ctx, n_14m_cycles, text_dirty_ptr)
+          text_dirty = text_dirty_ptr.to_s(4).unpack1('L') # unsigned int
+          @text_page_dirty ||= (text_dirty != 0)
+          speaker_toggles.times { @speaker.toggle }
+          @cycles += steps
+        else
+          # Fallback to per-cycle Ruby execution
+          steps.times { run_cpu_cycle }
+        end
       end
 
       def run_cpu_cycle
@@ -479,6 +506,9 @@ module RHDL
           struct SimContext {
               Vapple2* dut;
               unsigned char ram[65536];  // 64KB RAM for Apple II
+              unsigned char rom[12288];  // 12KB ROM
+              unsigned char prev_speaker;
+              unsigned int speaker_toggles;
           };
 
           extern "C" {
@@ -489,6 +519,9 @@ module RHDL
               SimContext* ctx = new SimContext();
               ctx->dut = new Vapple2();
               memset(ctx->ram, 0, sizeof(ctx->ram));
+              memset(ctx->rom, 0, sizeof(ctx->rom));
+              ctx->prev_speaker = 0;
+              ctx->speaker_toggles = 0;
               return ctx;
           }
 
@@ -554,6 +587,82 @@ module RHDL
                   return ctx->ram[addr];
               }
               return 0;
+          }
+
+          void sim_write_rom(void* sim, unsigned int offset, unsigned char value) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              if (offset < sizeof(ctx->rom)) {
+                  ctx->rom[offset] = value;
+              }
+          }
+
+          // Batch cycle execution - runs N 14MHz cycles without FFI overhead
+          // Returns number of speaker toggles since last call
+          // text_dirty_out is set to 1 if text page was written
+          unsigned int sim_run_cycles(void* sim, unsigned int n_cycles, unsigned int* text_dirty_out) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              *text_dirty_out = 0;
+
+              for (unsigned int i = 0; i < n_cycles; i++) {
+                  // Falling edge
+                  ctx->dut->clk_14m = 0;
+                  ctx->dut->eval();
+
+                  // Memory read - provide data from RAM or ROM
+                  unsigned int ram_addr = ctx->dut->ram_addr;
+                  if (ram_addr >= 0xD000 && ram_addr <= 0xFFFF) {
+                      // ROM area
+                      unsigned int rom_offset = ram_addr - 0xD000;
+                      ctx->dut->ram_do = (rom_offset < sizeof(ctx->rom)) ? ctx->rom[rom_offset] : 0;
+                  } else if (ram_addr < sizeof(ctx->ram)) {
+                      ctx->dut->ram_do = ctx->ram[ram_addr];
+                  } else {
+                      ctx->dut->ram_do = 0;
+                  }
+                  ctx->dut->eval();
+
+                  // Rising edge
+                  ctx->dut->clk_14m = 1;
+                  ctx->dut->eval();
+
+                  // Handle RAM writes
+                  if (ctx->dut->ram_we) {
+                      unsigned int write_addr = ctx->dut->ram_addr;
+                      if (write_addr < sizeof(ctx->ram)) {
+                          ctx->ram[write_addr] = ctx->dut->d & 0xFF;
+                          // Check text page ($0400-$07FF)
+                          if (write_addr >= 0x0400 && write_addr <= 0x07FF) {
+                              *text_dirty_out = 1;
+                          }
+                      }
+                  }
+
+                  // Track speaker toggles
+                  unsigned char speaker = ctx->dut->speaker;
+                  if (speaker != ctx->prev_speaker) {
+                      ctx->speaker_toggles++;
+                      ctx->prev_speaker = speaker;
+                  }
+              }
+
+              unsigned int toggles = ctx->speaker_toggles;
+              ctx->speaker_toggles = 0;
+              return toggles;
+          }
+
+          // Load memory in bulk (faster than individual writes)
+          void sim_load_ram(void* sim, const unsigned char* data, unsigned int offset, unsigned int len) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              for (unsigned int i = 0; i < len && (offset + i) < sizeof(ctx->ram); i++) {
+                  ctx->ram[offset + i] = data[i];
+              }
+          }
+
+          void sim_load_rom(void* sim, const unsigned char* data, unsigned int len) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              for (unsigned int i = 0; i < len && i < sizeof(ctx->rom); i++) {
+                  ctx->rom[i] = data[i];
+              }
           }
 
           } // extern "C"
@@ -695,6 +804,30 @@ module RHDL
           @lib['sim_read_ram'],
           [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
           Fiddle::TYPE_CHAR
+        )
+
+        @sim_write_rom_fn = Fiddle::Function.new(
+          @lib['sim_write_rom'],
+          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_CHAR],
+          Fiddle::TYPE_VOID
+        )
+
+        @sim_run_cycles_fn = Fiddle::Function.new(
+          @lib['sim_run_cycles'],
+          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP],
+          Fiddle::TYPE_INT
+        )
+
+        @sim_load_ram_fn = Fiddle::Function.new(
+          @lib['sim_load_ram'],
+          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_INT],
+          Fiddle::TYPE_VOID
+        )
+
+        @sim_load_rom_fn = Fiddle::Function.new(
+          @lib['sim_load_rom'],
+          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
+          Fiddle::TYPE_VOID
         )
 
         # Create simulation context
