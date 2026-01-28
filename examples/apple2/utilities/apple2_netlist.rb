@@ -14,6 +14,7 @@
 #   runner = RHDL::Apple2::NetlistRunner.new
 
 require_relative '../hdl/apple2'
+require_relative 'ps2_encoder'
 require 'rhdl/codegen'
 
 # Load MOS6502 library (needed for lower.rb constants)
@@ -135,8 +136,9 @@ module RHDL
         @cycles = 0
         @halted = false
         @text_page_dirty = false
-        @key_data = 0
-        @key_ready = false
+
+        # PS/2 keyboard encoder for sending keys through the PS/2 protocol
+        @ps2_encoder = PS2Encoder.new
 
         # Initialize and reset
         @sim.reset
@@ -158,7 +160,8 @@ module RHDL
         poke_input(:reset, 0)
         poke_input(:ram_do, 0)
         poke_input(:pd, 0)
-        poke_input(:k, 0)
+        poke_input(:ps2_clk, 1)   # PS/2 idle state is high
+        poke_input(:ps2_data, 1)  # PS/2 idle state is high
         poke_input(:gameport, 0)
         poke_input(:pause, 0)
         @sim.evaluate
@@ -249,8 +252,10 @@ module RHDL
 
       # Run a single 14MHz clock cycle
       def run_14m_cycle
-        # Update keyboard input
-        poke_input(:k, @key_ready ? (@key_data | 0x80) : 0)
+        # Update PS/2 keyboard signals from encoder
+        ps2_clk, ps2_data = @ps2_encoder.next_ps2_state
+        poke_input(:ps2_clk, ps2_clk)
+        poke_input(:ps2_data, ps2_data)
 
         # Falling edge
         poke_input(:clk_14m, 0)
@@ -287,11 +292,6 @@ module RHDL
             end
           end
         end
-
-        # Check for keyboard strobe clear
-        if peek_output(:read_key) == 1
-          @key_ready = false
-        end
       end
 
       # Run N 14MHz cycles
@@ -299,18 +299,19 @@ module RHDL
         n.times { run_14m_cycle }
       end
 
-      # Inject a key into the keyboard buffer
+      # Inject a key through the PS/2 keyboard controller
+      # This queues the key for transmission via the PS/2 protocol
       def inject_key(ascii)
-        @key_data = ascii & 0x7F
-        @key_ready = true
+        @ps2_encoder.queue_key(ascii)
       end
 
+      # Check if there's a key being transmitted
       def key_ready?
-        @key_ready
+        @ps2_encoder.sending?
       end
 
       def clear_key
-        @key_ready = false
+        @ps2_encoder.clear
       end
 
       # Read the text page as a 2D array of character codes
