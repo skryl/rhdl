@@ -179,6 +179,34 @@ struct IrSimulator {
     mos6502_clk_idx: usize,
     /// MOS6502 speaker toggle counter (incremented on $C030 access)
     mos6502_speaker_toggles: u32,
+
+    // Game Boy LCD framebuffer capture
+    /// Game Boy mode flag
+    gameboy_mode: bool,
+    /// LCD clock enable signal index
+    lcd_clkena_idx: usize,
+    /// LCD data (2-bit grayscale) signal index
+    lcd_data_gb_idx: usize,
+    /// LCD hsync signal index
+    lcd_hsync_idx: usize,
+    /// LCD vsync signal index
+    lcd_vsync_idx: usize,
+    /// LCD on signal index
+    lcd_on_idx: usize,
+    /// Previous lcd_clkena value for edge detection
+    prev_lcd_clkena: u64,
+    /// Previous lcd_hsync value for edge detection
+    prev_lcd_hsync: u64,
+    /// Previous lcd_vsync value for edge detection
+    prev_lcd_vsync: u64,
+    /// Framebuffer (160x144 pixels, 2-bit grayscale stored as u8)
+    framebuffer: Vec<u8>,
+    /// Current pixel X position
+    lcd_x: usize,
+    /// Current pixel Y position
+    lcd_y: usize,
+    /// Frame count
+    frame_count: u64,
 }
 
 impl IrSimulator {
@@ -302,6 +330,15 @@ impl IrSimulator {
             && name_to_idx.contains_key("rw")
             && name_to_idx.contains_key("clk");
 
+        // Detect Game Boy mode (has lcd_clkena, lcd_data_gb signals)
+        let lcd_clkena_idx = *name_to_idx.get("lcd_clkena").unwrap_or(&0);
+        let lcd_data_gb_idx = *name_to_idx.get("lcd_data_gb").unwrap_or(&0);
+        let lcd_hsync_idx = *name_to_idx.get("lcd_hsync").unwrap_or(&0);
+        let lcd_vsync_idx = *name_to_idx.get("lcd_vsync").unwrap_or(&0);
+        let lcd_on_idx = *name_to_idx.get("lcd_on").unwrap_or(&0);
+        let gameboy_mode = name_to_idx.contains_key("lcd_clkena")
+            && name_to_idx.contains_key("lcd_data_gb");
+
         Ok(Self {
             ir,
             signals,
@@ -342,6 +379,20 @@ impl IrSimulator {
             mos6502_rw_idx,
             mos6502_clk_idx,
             mos6502_speaker_toggles: 0,
+            // Game Boy LCD
+            gameboy_mode,
+            lcd_clkena_idx,
+            lcd_data_gb_idx,
+            lcd_hsync_idx,
+            lcd_vsync_idx,
+            lcd_on_idx,
+            prev_lcd_clkena: 0,
+            prev_lcd_hsync: 0,
+            prev_lcd_vsync: 0,
+            framebuffer: vec![0u8; 160 * 144],  // 160x144 Game Boy screen
+            lcd_x: 0,
+            lcd_y: 0,
+            frame_count: 0,
         })
     }
 
@@ -632,6 +683,11 @@ impl IrSimulator {
         // Generate run_mos6502_cycles function (if in MOS6502 mode)
         if self.mos6502_mode {
             self.generate_run_mos6502_cycles(&mut code);
+        }
+
+        // Generate run_gb_cycles function (if in Game Boy mode)
+        if self.gameboy_mode {
+            self.generate_run_gb_cycles(&mut code);
         }
 
         code
@@ -1100,6 +1156,110 @@ impl IrSimulator {
         code.push_str("}\n");
     }
 
+    fn generate_run_gb_cycles(&self, code: &mut String) {
+        let lcd_clkena_idx = self.lcd_clkena_idx;
+        let lcd_data_gb_idx = self.lcd_data_gb_idx;
+        let lcd_hsync_idx = self.lcd_hsync_idx;
+        let lcd_vsync_idx = self.lcd_vsync_idx;
+
+        let clock_indices: Vec<usize> = self.clock_indices.clone();
+        let num_clocks = clock_indices.len().max(1);
+        let num_regs = self.seq_targets.len();
+
+        // Add LCD state struct to generated code
+        code.push_str("\n/// LCD state for Game Boy simulation\n");
+        code.push_str("#[repr(C)]\n");
+        code.push_str("struct GbLcdState {\n");
+        code.push_str("    x: u32,\n");
+        code.push_str("    y: u32,\n");
+        code.push_str("    prev_clkena: u32,\n");
+        code.push_str("    prev_hsync: u32,\n");
+        code.push_str("    prev_vsync: u32,\n");
+        code.push_str("    frame_count: u64,\n");
+        code.push_str("}\n\n");
+
+        code.push_str("/// Result from running Game Boy cycles\n");
+        code.push_str("#[repr(C)]\n");
+        code.push_str("struct GbCycleResult {\n");
+        code.push_str("    cycles_run: usize,\n");
+        code.push_str("    frames_completed: u32,\n");
+        code.push_str("}\n\n");
+
+        code.push_str("/// Run N Game Boy cycles with LCD framebuffer capture\n");
+        code.push_str("#[no_mangle]\n");
+        code.push_str("pub unsafe extern \"C\" fn run_gb_cycles(\n");
+        code.push_str("    signals: *mut u64,\n");
+        code.push_str("    signals_len: usize,\n");
+        code.push_str("    n: usize,\n");
+        code.push_str("    old_clocks_ptr: *mut u64,\n");
+        code.push_str("    next_regs_ptr: *mut u64,\n");
+        code.push_str("    framebuffer: *mut u8,\n");
+        code.push_str("    lcd_state: *mut GbLcdState,\n");
+        code.push_str(") -> GbCycleResult {\n");
+        code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, signals_len);\n");
+        code.push_str("    let framebuffer = std::slice::from_raw_parts_mut(framebuffer, 160 * 144);\n");
+        code.push_str(&format!("    let old_clocks: &mut [u64; {}] = &mut *(old_clocks_ptr as *mut [u64; {}]);\n", num_clocks, num_clocks));
+        code.push_str(&format!("    let next_regs: &mut [u64; {}] = &mut *(next_regs_ptr as *mut [u64; {}]);\n", num_regs.max(1), num_regs.max(1)));
+        code.push_str("    let state = &mut *lcd_state;\n");
+        code.push_str("    let mut frames_completed: u32 = 0;\n\n");
+
+        // Initialize old_clocks from signals
+        for (i, &clk) in clock_indices.iter().enumerate() {
+            code.push_str(&format!("    old_clocks[{}] = signals[{}];\n", i, clk));
+        }
+        code.push_str("\n");
+
+        code.push_str("    for _ in 0..n {\n");
+        code.push_str("        // Run one cycle: evaluate and tick\n");
+        code.push_str("        evaluate_inline(signals);\n");
+        code.push_str("        tick_inline(signals, old_clocks, next_regs);\n\n");
+
+        // LCD pixel capture logic
+        code.push_str("        // LCD pixel capture\n");
+        code.push_str(&format!("        let clkena = signals[{}];\n", lcd_clkena_idx));
+        code.push_str(&format!("        let hsync = signals[{}];\n", lcd_hsync_idx));
+        code.push_str(&format!("        let vsync = signals[{}];\n", lcd_vsync_idx));
+        code.push_str("\n");
+
+        // Detect vsync rising edge (new frame)
+        code.push_str("        // Detect vsync rising edge (new frame)\n");
+        code.push_str("        if vsync == 1 && state.prev_vsync == 0 {\n");
+        code.push_str("            state.x = 0;\n");
+        code.push_str("            state.y = 0;\n");
+        code.push_str("            state.frame_count += 1;\n");
+        code.push_str("            frames_completed += 1;\n");
+        code.push_str("        }\n\n");
+
+        // Detect hsync rising edge (new line)
+        code.push_str("        // Detect hsync rising edge (new line)\n");
+        code.push_str("        if hsync == 1 && state.prev_hsync == 0 {\n");
+        code.push_str("            state.x = 0;\n");
+        code.push_str("            if state.y < 144 {\n");
+        code.push_str("                state.y += 1;\n");
+        code.push_str("            }\n");
+        code.push_str("        }\n\n");
+
+        // Detect lcd_clkena rising edge (pixel output)
+        code.push_str("        // Detect lcd_clkena rising edge (pixel output)\n");
+        code.push_str("        if clkena == 1 && state.prev_clkena == 0 {\n");
+        code.push_str(&format!("            let pixel = (signals[{}] & 0x3) as u8;\n", lcd_data_gb_idx));
+        code.push_str("            if state.x < 160 && state.y < 144 {\n");
+        code.push_str("                let idx = (state.y as usize) * 160 + (state.x as usize);\n");
+        code.push_str("                framebuffer[idx] = pixel;\n");
+        code.push_str("            }\n");
+        code.push_str("            state.x += 1;\n");
+        code.push_str("        }\n\n");
+
+        // Save previous values
+        code.push_str("        state.prev_clkena = clkena as u32;\n");
+        code.push_str("        state.prev_hsync = hsync as u32;\n");
+        code.push_str("        state.prev_vsync = vsync as u32;\n");
+        code.push_str("    }\n\n");
+
+        code.push_str("    GbCycleResult { cycles_run: n, frames_completed }\n");
+        code.push_str("}\n");
+    }
+
     fn compile(&mut self) -> Result<bool, String> {
         let code = self.generate_code();
 
@@ -1300,6 +1460,110 @@ impl IrSimulator {
     fn reset_mos6502_speaker_toggles(&mut self) {
         self.mos6502_speaker_toggles = 0;
     }
+
+    // ========================================================================
+    // Game Boy LCD Framebuffer Capture
+    // ========================================================================
+
+    /// Check if this simulator is in Game Boy mode
+    fn is_gameboy_mode(&self) -> bool {
+        self.gameboy_mode
+    }
+
+    /// Run N Game Boy cycles with LCD framebuffer capture (requires compilation)
+    /// Captures pixels when lcd_clkena rises
+    fn run_gb_cycles(&mut self, n: usize) -> GbCycleResult {
+        if !self.gameboy_mode {
+            return GbCycleResult { cycles_run: 0, frames_completed: 0 };
+        }
+
+        let lib = self.compiled_lib.as_ref()
+            .expect("IR Compiler: run_gb_cycles() called but code not compiled. Call compile() first.");
+
+        unsafe {
+            type RunGbCyclesFn = unsafe extern "C" fn(
+                signals: *mut u64,
+                signals_len: usize,
+                n: usize,
+                old_clocks: *mut u64,
+                next_regs: *mut u64,
+                framebuffer: *mut u8,
+                lcd_state: *mut GbLcdState,
+            ) -> GbCycleResult;
+
+            let func: libloading::Symbol<RunGbCyclesFn> = lib.get(b"run_gb_cycles")
+                .expect("run_gb_cycles function not found in compiled library");
+
+            let mut lcd_state = GbLcdState {
+                x: self.lcd_x as u32,
+                y: self.lcd_y as u32,
+                prev_clkena: self.prev_lcd_clkena as u32,
+                prev_hsync: self.prev_lcd_hsync as u32,
+                prev_vsync: self.prev_lcd_vsync as u32,
+                frame_count: self.frame_count,
+            };
+
+            let result = func(
+                self.signals.as_mut_ptr(),
+                self.signals.len(),
+                n,
+                self.old_clocks.as_mut_ptr(),
+                self.next_regs.as_mut_ptr(),
+                self.framebuffer.as_mut_ptr(),
+                &mut lcd_state,
+            );
+
+            // Update state from result
+            self.lcd_x = lcd_state.x as usize;
+            self.lcd_y = lcd_state.y as usize;
+            self.prev_lcd_clkena = lcd_state.prev_clkena as u64;
+            self.prev_lcd_hsync = lcd_state.prev_hsync as u64;
+            self.prev_lcd_vsync = lcd_state.prev_vsync as u64;
+            self.frame_count = lcd_state.frame_count;
+
+            result
+        }
+    }
+
+    /// Read the framebuffer (160x144 2-bit pixels)
+    fn read_framebuffer(&self) -> &[u8] {
+        &self.framebuffer
+    }
+
+    /// Get current frame count
+    fn gb_frame_count(&self) -> u64 {
+        self.frame_count
+    }
+
+    /// Reset LCD state
+    fn reset_lcd_state(&mut self) {
+        self.lcd_x = 0;
+        self.lcd_y = 0;
+        self.prev_lcd_clkena = 0;
+        self.prev_lcd_hsync = 0;
+        self.prev_lcd_vsync = 0;
+        self.frame_count = 0;
+        self.framebuffer.fill(0);
+    }
+}
+
+/// LCD state for Game Boy simulation
+#[repr(C)]
+struct GbLcdState {
+    x: u32,
+    y: u32,
+    prev_clkena: u32,
+    prev_hsync: u32,
+    prev_vsync: u32,
+    frame_count: u64,
+}
+
+/// Result from running Game Boy cycles
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct GbCycleResult {
+    cycles_run: usize,
+    frames_completed: u32,
 }
 
 struct BatchResult {
@@ -1520,6 +1784,38 @@ impl RubyIrCompiler {
     fn reset_mos6502_speaker_toggles(&self) {
         self.sim.borrow_mut().reset_mos6502_speaker_toggles();
     }
+
+    // Game Boy LCD framebuffer methods
+
+    fn is_gameboy_mode(&self) -> bool {
+        self.sim.borrow().is_gameboy_mode()
+    }
+
+    fn run_gb_cycles(&self, n: usize) -> Result<RHash, Error> {
+        let ruby = unsafe { Ruby::get_unchecked() };
+        let result = self.sim.borrow_mut().run_gb_cycles(n);
+
+        let hash = ruby.hash_new();
+        hash.aset(ruby.sym_new("cycles_run"), result.cycles_run as i64)?;
+        hash.aset(ruby.sym_new("frames_completed"), result.frames_completed as i64)?;
+        Ok(hash)
+    }
+
+    fn read_framebuffer(&self) -> Result<RArray, Error> {
+        let ruby = unsafe { Ruby::get_unchecked() };
+        let sim = self.sim.borrow();
+        let fb = sim.read_framebuffer();
+        let data: Vec<i64> = fb.iter().map(|&b| b as i64).collect();
+        Ok(ruby.ary_from_vec(data))
+    }
+
+    fn gb_frame_count(&self) -> u64 {
+        self.sim.borrow().gb_frame_count()
+    }
+
+    fn reset_lcd_state(&self) {
+        self.sim.borrow_mut().reset_lcd_state();
+    }
 }
 
 #[magnus::init]
@@ -1560,6 +1856,13 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("write_mos6502_memory", method!(RubyIrCompiler::write_mos6502_memory, 2))?;
     class.define_method("mos6502_speaker_toggles", method!(RubyIrCompiler::mos6502_speaker_toggles, 0))?;
     class.define_method("reset_mos6502_speaker_toggles", method!(RubyIrCompiler::reset_mos6502_speaker_toggles, 0))?;
+
+    // Game Boy LCD framebuffer methods
+    class.define_method("gameboy_mode?", method!(RubyIrCompiler::is_gameboy_mode, 0))?;
+    class.define_method("run_gb_cycles", method!(RubyIrCompiler::run_gb_cycles, 1))?;
+    class.define_method("read_framebuffer", method!(RubyIrCompiler::read_framebuffer, 0))?;
+    class.define_method("gb_frame_count", method!(RubyIrCompiler::gb_frame_count, 0))?;
+    class.define_method("reset_lcd_state", method!(RubyIrCompiler::reset_lcd_state, 0))?;
 
     Ok(())
 }
