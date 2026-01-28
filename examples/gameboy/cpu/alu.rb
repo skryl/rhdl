@@ -42,15 +42,15 @@ module GameBoy
     ALU_CCF  = 15
 
     input :clk
-    input :A, width: 8          # First operand
-    input :B, width: 8          # Second operand
-    input :Op, width: 4         # ALU operation
-    input :F_In, width: 8       # Flags input
-    input :Arith16, default: 0  # 16-bit arithmetic mode
-    input :Z16, default: 0      # 16-bit zero flag mode
+    input :a, width: 8          # First operand
+    input :b, width: 8          # Second operand
+    input :op, width: 4         # ALU operation
+    input :f_in, width: 8       # Flags input
+    input :arith16, default: 0  # 16-bit arithmetic mode
+    input :z16, default: 0      # 16-bit zero flag mode
 
-    output :Q, width: 8         # Result
-    output :F_Out, width: 8     # Flags output
+    output :q, width: 8         # Result
+    output :f_out, width: 8     # Flags output
 
     # Internal signals
     wire :result, width: 9      # 9-bit for carry detection
@@ -61,50 +61,44 @@ module GameBoy
     wire :c_flag
 
     behavior do
-      # Extract input flags
-      c_in = F_In[4]
-      h_in = F_In[5]
-      n_in = F_In[6]
-      z_in = F_In[7]
-
       # ALU operations (combinational)
-      result <= case_select(Op, {
-        ALU_ADD => (cat(lit(0, width: 1), A) + cat(lit(0, width: 1), B)),
-        ALU_ADC => (cat(lit(0, width: 1), A) + cat(lit(0, width: 1), B) + cat(lit(0, width: 8), F_In[4])),
-        ALU_SUB => (cat(lit(0, width: 1), A) - cat(lit(0, width: 1), B)),
-        ALU_SBC => (cat(lit(0, width: 1), A) - cat(lit(0, width: 1), B) - cat(lit(0, width: 8), F_In[4])),
-        ALU_AND => cat(lit(0, width: 1), A & B),
-        ALU_XOR => cat(lit(0, width: 1), A ^ B),
-        ALU_OR  => cat(lit(0, width: 1), A | B),
-        ALU_CP  => (cat(lit(0, width: 1), A) - cat(lit(0, width: 1), B)),
-        ALU_RLC => cat(A[7], A[6..0], A[7]),
-        ALU_RRC => cat(A[0], A[0], A[7..1]),
-        ALU_RL  => cat(A[7], A[6..0], F_In[4]),
-        ALU_RR  => cat(A[0], F_In[4], A[7..1]),
-        ALU_DAA => cat(lit(0, width: 1), A),  # DAA handled separately
-        ALU_CPL => cat(lit(0, width: 1), ~A),
-        ALU_SCF => cat(lit(0, width: 1), A),
-        ALU_CCF => cat(lit(0, width: 1), A)
-      }, default: cat(lit(0, width: 1), A))
+      result <= case_select(op, {
+        ALU_ADD => (cat(lit(0, width: 1), a) + cat(lit(0, width: 1), b)),
+        ALU_ADC => (cat(lit(0, width: 1), a) + cat(lit(0, width: 1), b) + cat(lit(0, width: 8), f_in[4])),
+        ALU_SUB => (cat(lit(0, width: 1), a) - cat(lit(0, width: 1), b)),
+        ALU_SBC => (cat(lit(0, width: 1), a) - cat(lit(0, width: 1), b) - cat(lit(0, width: 8), f_in[4])),
+        ALU_AND => cat(lit(0, width: 1), a & b),
+        ALU_XOR => cat(lit(0, width: 1), a ^ b),
+        ALU_OR  => cat(lit(0, width: 1), a | b),
+        ALU_CP  => (cat(lit(0, width: 1), a) - cat(lit(0, width: 1), b)),
+        ALU_RLC => cat(a[7], a[6..0], a[7]),
+        ALU_RRC => cat(a[0], a[0], a[7..1]),
+        ALU_RL  => cat(a[7], a[6..0], f_in[4]),
+        ALU_RR  => cat(a[0], f_in[4], a[7..1]),
+        ALU_DAA => cat(lit(0, width: 1), a),  # DAA handled separately
+        ALU_CPL => cat(lit(0, width: 1), ~a),
+        ALU_SCF => cat(lit(0, width: 1), a),
+        ALU_CCF => cat(lit(0, width: 1), a)
+      }, default: cat(lit(0, width: 1), a))
 
       # Half-carry calculation (for ADD/ADC/SUB/SBC)
-      half_result <= case_select(Op, {
-        ALU_ADD => (cat(lit(0, width: 1), A[3..0]) + cat(lit(0, width: 1), B[3..0])),
-        ALU_ADC => (cat(lit(0, width: 1), A[3..0]) + cat(lit(0, width: 1), B[3..0]) + cat(lit(0, width: 4), F_In[4])),
-        ALU_SUB => (cat(lit(0, width: 1), A[3..0]) - cat(lit(0, width: 1), B[3..0])),
-        ALU_SBC => (cat(lit(0, width: 1), A[3..0]) - cat(lit(0, width: 1), B[3..0]) - cat(lit(0, width: 4), F_In[4])),
-        ALU_CP  => (cat(lit(0, width: 1), A[3..0]) - cat(lit(0, width: 1), B[3..0]))
+      half_result <= case_select(op, {
+        ALU_ADD => (cat(lit(0, width: 1), a[3..0]) + cat(lit(0, width: 1), b[3..0])),
+        ALU_ADC => (cat(lit(0, width: 1), a[3..0]) + cat(lit(0, width: 1), b[3..0]) + cat(lit(0, width: 4), f_in[4])),
+        ALU_SUB => (cat(lit(0, width: 1), a[3..0]) - cat(lit(0, width: 1), b[3..0])),
+        ALU_SBC => (cat(lit(0, width: 1), a[3..0]) - cat(lit(0, width: 1), b[3..0]) - cat(lit(0, width: 4), f_in[4])),
+        ALU_CP  => (cat(lit(0, width: 1), a[3..0]) - cat(lit(0, width: 1), b[3..0]))
       }, default: lit(0, width: 5))
 
       # Result output (low 8 bits)
-      Q <= result[7..0]
+      q <= result[7..0]
 
       # Flag calculation for Game Boy (Mode=3)
       # Z flag
       z_flag <= (result[7..0] == lit(0, width: 8))
 
       # N flag (set for subtraction operations)
-      n_flag <= case_select(Op, {
+      n_flag <= case_select(op, {
         ALU_SUB => lit(1, width: 1),
         ALU_SBC => lit(1, width: 1),
         ALU_CP  => lit(1, width: 1),
@@ -112,7 +106,7 @@ module GameBoy
       }, default: lit(0, width: 1))
 
       # H flag
-      h_flag <= case_select(Op, {
+      h_flag <= case_select(op, {
         ALU_ADD => half_result[4],
         ALU_ADC => half_result[4],
         ALU_SUB => half_result[4],
@@ -123,7 +117,7 @@ module GameBoy
       }, default: lit(0, width: 1))
 
       # C flag
-      c_flag <= case_select(Op, {
+      c_flag <= case_select(op, {
         ALU_ADD => result[8],
         ALU_ADC => result[8],
         ALU_SUB => result[8],
@@ -134,11 +128,11 @@ module GameBoy
         ALU_RL  => result[8],
         ALU_RR  => result[8],
         ALU_SCF => lit(1, width: 1),
-        ALU_CCF => ~F_In[4]
-      }, default: F_In[4])
+        ALU_CCF => ~f_in[4]
+      }, default: f_in[4])
 
       # Assemble flags output (GB format: ZNHC0000)
-      F_Out <= cat(z_flag, n_flag, h_flag, c_flag, lit(0, width: 4))
+      f_out <= cat(z_flag, n_flag, h_flag, c_flag, lit(0, width: 4))
     end
   end
 end
