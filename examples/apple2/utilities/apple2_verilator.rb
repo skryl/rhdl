@@ -697,6 +697,7 @@ module RHDL
           '-Wno-WIDTHEXPAND',     # Suppress width expansion warnings
           '-Wno-WIDTHTRUNC',      # Suppress width truncation warnings
           '-Wno-UNOPTFLAT',       # Suppress unoptimized flattening warnings
+          '-Wno-PINMISSING',      # Suppress missing pin warnings
           # C++ compiler flags for performance
           '-CFLAGS', '-fPIC -O3 -march=native',
           '-LDFLAGS', '-shared',
