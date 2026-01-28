@@ -207,6 +207,24 @@ struct IrSimulator {
     gb_ext_bus_a15_idx: usize,
     /// Game Boy ROM (up to 1MB)
     gb_rom: Vec<u8>,
+    /// Game Boy VRAM (8KB)
+    gb_vram: Vec<u8>,
+    /// VRAM CPU address signal index
+    gb_vram_addr_cpu_idx: usize,
+    /// VRAM CPU write enable signal index
+    gb_vram_wren_cpu_idx: usize,
+    /// CPU data output signal index
+    gb_cpu_do_idx: usize,
+    /// VRAM DPRAM port A register (CPU read result)
+    gb_vram0_q_a_reg_idx: usize,
+    /// VRAM DPRAM port B register (PPU read result)
+    gb_vram0_q_b_reg_idx: usize,
+    /// VRAM PPU address signal index
+    gb_vram_addr_ppu_idx: usize,
+    /// VRAM data output (to CPU) signal index (for compatibility)
+    gb_vram_do_idx: usize,
+    /// VRAM PPU data signal index (for compatibility)
+    gb_vram_data_ppu_idx: usize,
     /// Previous lcd_clkena value for edge detection
     prev_lcd_clkena: u64,
     /// Previous lcd_vsync value for edge detection
@@ -354,6 +372,34 @@ impl IrSimulator {
         let gb_cart_do_idx = *name_to_idx.get("cart_do").unwrap_or(&0);
         let gb_ext_bus_addr_idx = *name_to_idx.get("ext_bus_addr").unwrap_or(&0);
         let gb_ext_bus_a15_idx = *name_to_idx.get("ext_bus_a15").unwrap_or(&0);
+        // VRAM signal indices (try prefixed names first, then unprefixed)
+        let gb_vram_addr_cpu_idx = *name_to_idx.get("gb_core__vram_addr_cpu")
+            .or_else(|| name_to_idx.get("vram_addr_cpu"))
+            .unwrap_or(&0);
+        let gb_vram_wren_cpu_idx = *name_to_idx.get("gb_core__vram_wren_cpu")
+            .or_else(|| name_to_idx.get("vram_wren_cpu"))
+            .unwrap_or(&0);
+        let gb_cpu_do_idx = *name_to_idx.get("gb_core__cpu_do")
+            .or_else(|| name_to_idx.get("cpu_do"))
+            .unwrap_or(&0);
+        // For VRAM reads, inject into the DPRAM register outputs directly
+        // This avoids being overwritten by assignments during evaluate_inline
+        let gb_vram0_q_a_reg_idx = *name_to_idx.get("gb_core__vram0__q_a_reg")
+            .or_else(|| name_to_idx.get("vram0__q_a_reg"))
+            .unwrap_or(&0);
+        let gb_vram0_q_b_reg_idx = *name_to_idx.get("gb_core__vram0__q_b_reg")
+            .or_else(|| name_to_idx.get("vram0__q_b_reg"))
+            .unwrap_or(&0);
+        let gb_vram_addr_ppu_idx = *name_to_idx.get("gb_core__vram_addr_ppu")
+            .or_else(|| name_to_idx.get("vram_addr_ppu"))
+            .unwrap_or(&0);
+        // Keep these for write address
+        let gb_vram_do_idx = *name_to_idx.get("gb_core__vram_do")
+            .or_else(|| name_to_idx.get("vram_do"))
+            .unwrap_or(&0);
+        let gb_vram_data_ppu_idx = *name_to_idx.get("gb_core__vram_data_ppu")
+            .or_else(|| name_to_idx.get("vram_data_ppu"))
+            .unwrap_or(&0);
         let gameboy_mode = name_to_idx.contains_key("lcd_clkena")
             && name_to_idx.contains_key("lcd_data_gb")
             && name_to_idx.contains_key("ce");
@@ -412,6 +458,15 @@ impl IrSimulator {
             gb_ext_bus_addr_idx,
             gb_ext_bus_a15_idx,
             gb_rom: vec![0u8; 1024 * 1024],  // 1MB for Game Boy ROMs
+            gb_vram: vec![0u8; 8192],  // 8KB VRAM for Game Boy
+            gb_vram_addr_cpu_idx,
+            gb_vram_wren_cpu_idx,
+            gb_cpu_do_idx,
+            gb_vram0_q_a_reg_idx,
+            gb_vram0_q_b_reg_idx,
+            gb_vram_addr_ppu_idx,
+            gb_vram_do_idx,
+            gb_vram_data_ppu_idx,
             prev_lcd_clkena: 0,
             prev_lcd_vsync: 0,
             framebuffer: vec![0u8; 160 * 144],  // 160x144 Game Boy screen
@@ -1274,6 +1329,13 @@ impl IrSimulator {
         let gb_cart_do_idx = self.gb_cart_do_idx;
         let gb_ext_bus_addr_idx = self.gb_ext_bus_addr_idx;
         let gb_ext_bus_a15_idx = self.gb_ext_bus_a15_idx;
+        // VRAM interface indices
+        let gb_vram_addr_cpu_idx = self.gb_vram_addr_cpu_idx;
+        let gb_vram_wren_cpu_idx = self.gb_vram_wren_cpu_idx;
+        let gb_cpu_do_idx = self.gb_cpu_do_idx;
+        let gb_vram0_q_a_reg_idx = self.gb_vram0_q_a_reg_idx;
+        let gb_vram0_q_b_reg_idx = self.gb_vram0_q_b_reg_idx;
+        let gb_vram_addr_ppu_idx = self.gb_vram_addr_ppu_idx;
 
         let clock_indices: Vec<usize> = self.clock_indices.clone();
         let num_clocks = clock_indices.len().max(1);
@@ -1309,10 +1371,13 @@ impl IrSimulator {
         code.push_str("    lcd_state: *mut GbLcdState,\n");
         code.push_str("    rom_ptr: *const u8,\n");
         code.push_str("    rom_len: usize,\n");
+        code.push_str("    vram_ptr: *mut u8,\n");
+        code.push_str("    vram_len: usize,\n");
         code.push_str(") -> GbCycleResult {\n");
         code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, signals_len);\n");
         code.push_str("    let framebuffer = std::slice::from_raw_parts_mut(framebuffer, 160 * 144);\n");
         code.push_str("    let rom = std::slice::from_raw_parts(rom_ptr, rom_len);\n");
+        code.push_str("    let vram = std::slice::from_raw_parts_mut(vram_ptr, vram_len);\n");
         code.push_str(&format!("    let old_clocks: &mut [u64; {}] = &mut *(old_clocks_ptr as *mut [u64; {}]);\n", num_clocks, num_clocks));
         code.push_str(&format!("    let next_regs: &mut [u64; {}] = &mut *(next_regs_ptr as *mut [u64; {}]);\n", num_regs.max(1), num_regs.max(1)));
         code.push_str("    let state = &mut *lcd_state;\n");
@@ -1360,6 +1425,28 @@ impl IrSimulator {
         code.push_str("            evaluate_inline(signals);\n");
         code.push_str("        }\n\n");
 
+        // VRAM handling BEFORE tick - check vram_wren_cpu while ce is still high
+        code.push_str("        // VRAM write check (before tick, while ce may be high)\n");
+        code.push_str(&format!("        if signals[{}] != 0 {{ // vram_wren_cpu\n", gb_vram_wren_cpu_idx));
+        code.push_str(&format!("            let addr = (signals[{}] & 0x1FFF) as usize;\n", gb_vram_addr_cpu_idx));
+        code.push_str(&format!("            let data = (signals[{}] & 0xFF) as u8;\n", gb_cpu_do_idx));
+        code.push_str("            if addr < vram_len {\n");
+        code.push_str("                vram[addr] = data;\n");
+        code.push_str("            }\n");
+        code.push_str("        }\n\n");
+
+        // Inject VRAM data for reads (so PPU can see it)
+        code.push_str("        // VRAM read injection (before tick)\n");
+        code.push_str(&format!("        let va_cpu = (signals[{}] & 0x1FFF) as usize;\n", gb_vram_addr_cpu_idx));
+        code.push_str(&format!("        let va_ppu = (signals[{}] & 0x1FFF) as usize;\n", gb_vram_addr_ppu_idx));
+        code.push_str("        if va_cpu < vram_len {\n");
+        code.push_str(&format!("            signals[{}] = vram[va_cpu] as u64;\n", gb_vram0_q_a_reg_idx));
+        code.push_str("        }\n");
+        code.push_str("        if va_ppu < vram_len {\n");
+        code.push_str(&format!("            signals[{}] = vram[va_ppu] as u64;\n", gb_vram0_q_b_reg_idx));
+        code.push_str("        }\n");
+        code.push_str("        evaluate_inline(signals);\n\n");
+
         // Inline tick logic (sample registers and apply on rising edge)
         code.push_str("        tick_gb_inline(signals, old_clocks, next_regs);\n");
         // Evaluate again to propagate CE from SpeedControl to other components
@@ -1375,6 +1462,29 @@ impl IrSimulator {
         code.push_str(&format!("            signals[{}] = data as u64;\n", gb_cart_do_idx));
         code.push_str("            evaluate_inline(signals);\n");
         code.push_str("        }\n\n");
+
+        // VRAM handling - inject read data into DPRAM register outputs
+        // This is done after tick so the new values are available for next cycle's behavior
+        code.push_str("        // VRAM handling - inject into DPRAM register outputs\n");
+        code.push_str(&format!("        let vram_addr_cpu = (signals[{}] & 0x1FFF) as usize; // 13-bit address\n", gb_vram_addr_cpu_idx));
+        code.push_str(&format!("        let vram_addr_ppu = (signals[{}] & 0x1FFF) as usize; // 13-bit address\n", gb_vram_addr_ppu_idx));
+        code.push_str("        // CPU VRAM write\n");
+        code.push_str(&format!("        if signals[{}] != 0 {{ // vram_wren_cpu\n", gb_vram_wren_cpu_idx));
+        code.push_str(&format!("            let data = (signals[{}] & 0xFF) as u8;\n", gb_cpu_do_idx));
+        code.push_str("            if vram_addr_cpu < vram_len {\n");
+        code.push_str("                vram[vram_addr_cpu] = data;\n");
+        code.push_str("            }\n");
+        code.push_str("        }\n");
+        code.push_str("        // Inject VRAM read data into DPRAM register outputs\n");
+        code.push_str("        // q_a_reg: CPU side (port A)\n");
+        code.push_str("        if vram_addr_cpu < vram_len {\n");
+        code.push_str(&format!("            signals[{}] = vram[vram_addr_cpu] as u64;\n", gb_vram0_q_a_reg_idx));
+        code.push_str("        }\n");
+        code.push_str("        // q_b_reg: PPU side (port B)\n");
+        code.push_str("        if vram_addr_ppu < vram_len {\n");
+        code.push_str(&format!("            signals[{}] = vram[vram_addr_ppu] as u64;\n", gb_vram0_q_b_reg_idx));
+        code.push_str("        }\n");
+        code.push_str("        evaluate_inline(signals); // Propagate VRAM data through assignments\n\n");
 
         // LCD pixel capture logic
         code.push_str("        // LCD pixel capture\n");
@@ -1656,6 +1766,8 @@ impl IrSimulator {
                 lcd_state: *mut GbLcdState,
                 rom_ptr: *const u8,
                 rom_len: usize,
+                vram_ptr: *mut u8,
+                vram_len: usize,
             ) -> GbCycleResult;
 
             let func: libloading::Symbol<RunGbCyclesFn> = lib.get(b"run_gb_cycles")
@@ -1679,6 +1791,8 @@ impl IrSimulator {
                 &mut lcd_state,
                 self.gb_rom.as_ptr(),
                 self.gb_rom.len(),
+                self.gb_vram.as_mut_ptr(),
+                self.gb_vram.len(),
             );
 
             // Update state from result

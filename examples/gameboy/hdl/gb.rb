@@ -209,6 +209,12 @@ module GameBoy
     wire :ext_bus_cram_sel
     wire :ext_bus_rom_sel
 
+    # VRAM interface signals
+    wire :vram_addr_cpu, width: 13     # CPU VRAM address (0x8000-0x9FFF mapped to 0-0x1FFF)
+    wire :vram_wren_cpu                # CPU VRAM write enable
+    wire :vram_addr_ppu, width: 13     # PPU VRAM address
+    wire :vram_data_ppu, width: 8      # PPU VRAM data read
+
     # Sub-component instances
     instance :cpu, SM83
     instance :timer_unit, Timer
@@ -233,6 +239,16 @@ module GameBoy
 
     # Reset distribution
     port :reset => [:timer_unit, :reset]
+
+    # VRAM0 Port A (CPU side - read/write)
+    port :vram_addr_cpu => [:vram0, :address_a]
+    port :vram_wren_cpu => [:vram0, :wren_a]
+    port :cpu_do => [:vram0, :data_a]
+    port [:vram0, :q_a] => :vram_do
+
+    # VRAM0 Port B (PPU side - read only)
+    port :vram_addr_ppu => [:vram0, :address_b]
+    port [:vram0, :q_b] => :vram_data_ppu
 
     # CPU connections
     port [:cpu, :addr_bus] => :cpu_addr
@@ -266,6 +282,10 @@ module GameBoy
     # Video CPU interface
     port :sel_video_oam => [:video_unit, :cpu_sel_oam]
     port :sel_video_reg => [:video_unit, :cpu_sel_reg]
+
+    # Video VRAM interface (PPU reads tiles from VRAM)
+    port [:video_unit, :vram_addr] => :vram_addr_ppu
+    port :vram_data_ppu => [:video_unit, :vram_data]
 
     # Video connections
     port [:video_unit, :irq] => :video_irq
@@ -380,6 +400,11 @@ module GameBoy
 
       # External bus data input comes from cartridge
       ext_bus_di <= cart_do
+
+      # VRAM CPU interface
+      # CPU addresses 0x8000-0x9FFF map to VRAM addresses 0x0000-0x1FFF
+      vram_addr_cpu <= cpu_addr[12..0]
+      vram_wren_cpu <= sel_vram & ~cpu_mreq_n & ~cpu_wr_n & vram_cpu_allow & ce
     end
 
     # Sequential logic for registers

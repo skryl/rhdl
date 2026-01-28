@@ -134,9 +134,24 @@ module GameBoy
     wire :hblank
 
     # Rendering state
-    wire :pcnt, width: 8       # Pixel counter
+    wire :pcnt, width: 8       # Pixel counter (0-159)
     wire :win_line, width: 8   # Window line counter
     wire :win_col, width: 5    # Window column counter
+
+    # Tile fetcher state
+    wire :fetch_phase, width: 3     # 0-7: fetch phase within 8-pixel tile
+    wire :tile_num, width: 8        # Current tile number from tile map
+    wire :tile_data_lo, width: 8    # Low byte of tile row data
+    wire :tile_data_hi, width: 8    # High byte of tile row data
+
+    # Calculated addresses and pixel data
+    wire :bg_x, width: 8            # BG X position (SCX + pcnt)
+    wire :bg_y, width: 8            # BG Y position (SCY + v_cnt)
+    wire :tile_map_addr, width: 13  # Address in tile map
+    wire :tile_data_addr, width: 13 # Address of tile data
+    wire :pixel_in_tile, width: 3   # Which pixel in tile (0-7)
+    wire :pixel_color, width: 2     # Raw 2-bit color from tile
+    wire :palette_color, width: 2   # Color after palette lookup
 
     # Sprite instance
     instance :sprites_unit, Sprites
@@ -174,11 +189,72 @@ module GameBoy
       # lcd_clkena pulses when we output a pixel (during visible drawing)
       lcd_clkena <= mode3 & lcdc_on & (pcnt < lit(160, width: 8)) & ce & (h_div_cnt == lit(0, width: 2))
 
-      # 2-bit pixel data - for now output a test pattern based on position
-      # Real implementation would fetch from VRAM and apply palette
+      # =======================================================================
+      # Tile Fetcher - Calculate VRAM addresses for BG tiles
+      # =======================================================================
+
+      # Background position calculation
+      bg_x <= (scx + pcnt)[7..0]
+      bg_y <= (scy + v_cnt)[7..0]
+
+      # Pixel position within tile (0-7), from right to left for bit extraction
+      pixel_in_tile <= lit(7, width: 3) - bg_x[2..0]
+
+      # Tile map address calculation
+      # Tile map is 32x32 tiles, each tile is 8x8 pixels
+      # Tile map 0: 0x9800 = VRAM 0x1800
+      # Tile map 1: 0x9C00 = VRAM 0x1C00
+      # Address = base + (y_tile * 32) + x_tile
+      # where y_tile = bg_y[7:3], x_tile = bg_x[7:3]
+      tile_map_addr <= mux(lcdc_bg_tile_map,
+                           cat(lit(0b111, width: 3), bg_y[7..3], bg_x[7..3]),    # 0x1C00 + offset
+                           cat(lit(0b110, width: 3), bg_y[7..3], bg_x[7..3]))    # 0x1800 + offset
+
+      # Tile data address calculation
+      # Each tile is 16 bytes (2 bytes per row, 8 rows)
+      # When LCDC bit 4 = 1: tiles 0-255 at 0x8000 (VRAM 0x0000)
+      # When LCDC bit 4 = 0: tiles -128 to 127 at 0x8800 (VRAM 0x0800), tile 0 at 0x9000
+      # Address = base + tile_num * 16 + (bg_y % 8) * 2
+      tile_data_addr <= mux(lcdc_tile_data_sel,
+                            # Mode 1: unsigned, base 0x0000
+                            cat(lit(0, width: 1), tile_num, bg_y[2..0], lit(0, width: 1)),
+                            # Mode 0: signed, base 0x1000 (tile 0 at 0x1000)
+                            # For signed: tile_num is treated as signed, add 0x80 for unsigned offset
+                            cat(lit(1, width: 1), (tile_num ^ lit(0x80, width: 8)), bg_y[2..0], lit(0, width: 1)))
+
+      # VRAM address mux based on fetch phase
+      # Phase 0: Read tile map entry
+      # Phase 2: Read tile data low byte
+      # Phase 4: Read tile data high byte
+      vram_addr <= mux(fetch_phase[2..1] == lit(0, width: 2), tile_map_addr,
+                   mux(fetch_phase[2..1] == lit(1, width: 2), tile_data_addr,
+                   mux(fetch_phase[2..1] == lit(2, width: 2), tile_data_addr + lit(1, width: 13),
+                       tile_map_addr)))
+
+      # Extract 2-bit pixel color from tile data
+      # Low bit from tile_data_lo, high bit from tile_data_hi
+      pixel_color <= cat(tile_data_hi[pixel_in_tile], tile_data_lo[pixel_in_tile])
+
+      # Apply BGP palette
+      # BGP register: bits 7-6 = color 3, bits 5-4 = color 2, bits 3-2 = color 1, bits 1-0 = color 0
+      palette_color <= mux(pixel_color == lit(0, width: 2), bgp[1..0],
+                       mux(pixel_color == lit(1, width: 2), bgp[3..2],
+                       mux(pixel_color == lit(2, width: 2), bgp[5..4],
+                           bgp[7..6])))
+
+      # Output pixel data
+      # When BG is disabled, output color 0 (white on DMG)
       lcd_data_gb <= mux(lcd_clkena,
-                        ((pcnt[3..2] ^ v_cnt[3..2])),  # Checkerboard pattern
+                        mux(lcdc_bg_ena, palette_color, lit(0, width: 2)),
                         lit(0, width: 2))
+
+      # RGB555 output (for GBC compatibility - just grayscale for now)
+      lcd_data <= mux(lcd_clkena,
+                     mux(palette_color == lit(0, width: 2), lit(0x7FFF, width: 15),  # White
+                     mux(palette_color == lit(1, width: 2), lit(0x5294, width: 15),  # Light gray
+                     mux(palette_color == lit(2, width: 2), lit(0x294A, width: 15),  # Dark gray
+                         lit(0x0000, width: 15)))),  # Black
+                     lit(0, width: 15))
 
       # VSync signal - high during first line of VBlank
       lcd_vsync <= (v_cnt == lit(144, width: 8)) & (h_cnt < lit(20, width: 7))
@@ -198,9 +274,16 @@ module GameBoy
       oam_cpu_allow <= ~(oam_eval | mode3 | dma_active)
       vram_cpu_allow <= ~mode3
 
+      # VRAM read always active during mode 3
+      vram_rd <= mode3
+
       # DMA address
       dma_addr <= cat(dma_reg, dma_cnt[9..2])
       dma_rd <= dma_active
+
+      # Interrupts
+      vblank_irq <= (v_cnt == lit(144, width: 8)) & (h_cnt == lit(0, width: 7)) & (h_div_cnt == lit(0, width: 2))
+      irq <= vblank_irq  # Simplified - real GB has more STAT interrupt sources
 
       # CPU read data mux
       cpu_do <= mux(cpu_sel_oam, lit(0xFF, width: 8),  # OAM read handled by sprites
@@ -242,7 +325,11 @@ module GameBoy
       dma_cnt: 0,
       pcnt: 0,
       win_line: 0,
-      win_col: 0
+      win_col: 0,
+      fetch_phase: 0,
+      tile_num: 0,
+      tile_data_lo: 0,
+      tile_data_hi: 0
     } do
       # Horizontal counter (0-113 at 1MHz, so 0-454 at 4MHz with h_div_cnt)
       h_div_cnt <= mux(ce & lcdc_on, h_div_cnt + lit(1, width: 2), h_div_cnt)
@@ -271,6 +358,35 @@ module GameBoy
                           (pcnt < lit(160, width: 8)) & ~vblank,
                           pcnt + lit(1, width: 8),  # Increment during mode 3
                           pcnt)))
+
+      # Tile fetcher phase counter
+      # Cycles through 0-7 for each 8-pixel tile
+      # Phase 0-1: Fetch tile map entry
+      # Phase 2-3: Fetch tile data low
+      # Phase 4-5: Fetch tile data high
+      # Phase 6-7: Output pixels (data already fetched)
+      fetch_phase <= mux(~lcdc_on | ~mode3,
+                         lit(0, width: 3),
+                         mux(ce,
+                             mux(fetch_phase == lit(7, width: 3),
+                                 lit(0, width: 3),
+                                 fetch_phase + lit(1, width: 3)),
+                             fetch_phase))
+
+      # Capture tile number from VRAM read
+      tile_num <= mux(ce & mode3 & (fetch_phase == lit(1, width: 3)),
+                      vram_data,
+                      tile_num)
+
+      # Capture tile data low byte
+      tile_data_lo <= mux(ce & mode3 & (fetch_phase == lit(3, width: 3)),
+                          vram_data,
+                          tile_data_lo)
+
+      # Capture tile data high byte
+      tile_data_hi <= mux(ce & mode3 & (fetch_phase == lit(5, width: 3)),
+                          vram_data,
+                          tile_data_hi)
 
       # DMA engine
       dma_active <= mux(ce_cpu & cpu_sel_reg & cpu_wr & (cpu_addr == lit(0x46, width: 8)),
