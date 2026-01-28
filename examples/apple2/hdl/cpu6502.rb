@@ -692,8 +692,8 @@ module RHDL
         stack_data = opc_info[OPC_STACK_DATA]
         write_cycle = (cpu_state == lit(STATE_WRITE, width: 5))
 
-        s_inc = s_reg + lit(1, width: 8)
-        s_dec = s_reg - lit(1, width: 8)
+        s_inc = (s_reg + lit(1, width: 8))[7..0]
+        s_dec = (s_reg - lit(1, width: 8))[7..0]
         s_adj = mux(stack_up, s_inc, s_dec)
 
         s_update_stack1 = (next_state == lit(STATE_STACK1, width: 5)) & (stack_up | stack_data)
@@ -737,7 +737,7 @@ module RHDL
         second_byte = opc_info[OPC_SECOND_BYTE]
         absolute = opc_info[OPC_ABSOLUTE]
 
-        pc_incr = addr_reg + lit(1, width: 16)
+        pc_incr = (addr_reg + lit(1, width: 16))[15..0]
         pc_reg <= mux(enable,
           mux(fetch_cycle, addr_reg,
             mux(cycle2 & ~irq_active & second_byte, pc_incr,
@@ -776,7 +776,7 @@ module RHDL
         do_stack3 = (next_state == lit(STATE_STACK3, width: 5))
         do_rmw = (next_state == lit(STATE_RMW, width: 5))
 
-        addr_incr_h = addr_reg[15..8] + lit(1, width: 8)
+        addr_incr_h = (addr_reg[15..8] + lit(1, width: 8))[7..0]
 
         do_val = mux(in_h, alu_rmw_out & addr_incr_h, alu_rmw_out)
 
@@ -805,9 +805,9 @@ module RHDL
         jump_bit = opc_info[OPC_JUMP]
         branch_bit = opc_info[OPC_BRANCH]
 
-        addr_incr = addr_reg + lit(1, width: 16)
-        addr_incr_l = cat(addr_reg[15..8], addr_reg[7..0] + lit(1, width: 8))
-        addr_decr_h = cat(addr_reg[15..8] - lit(1, width: 8), addr_reg[7..0])
+        addr_incr = (addr_reg + lit(1, width: 16))[15..0]
+        addr_incr_l = cat(addr_reg[15..8], (addr_reg[7..0] + lit(1, width: 8))[7..0])
+        addr_decr_h = cat((addr_reg[15..8] - lit(1, width: 8))[7..0], addr_reg[7..0])
 
         # Index calculation
         idx_val = mux(index_x, x_reg, mux(index_y, y_reg, lit(0, width: 8)))
@@ -844,12 +844,16 @@ module RHDL
         branch_low = (t_reg + addr_reg[7..0])[7..0]
         addr_branch = cat(addr_reg[15..8], branch_low)
         addr_branch_page = mux(t_reg[7],
-          cat(addr_reg[15..8] - lit(1, width: 8), branch_low),
-          cat(addr_reg[15..8] + lit(1, width: 8), branch_low)
+          cat((addr_reg[15..8] - lit(1, width: 8))[7..0], branch_low),
+          cat((addr_reg[15..8] + lit(1, width: 8))[7..0], branch_low)
         )
 
-        # stack address - use current S register
-        addr_stack = cat(lit(0x01, width: 8), s_reg)
+        # stack address - for pull operations (stack_up), use incremented SP;
+        # for push operations, use current SP
+        addr_stack = mux(stack_up,
+          cat(lit(0x01, width: 8), s_inc),   # Pull: read from SP+1
+          cat(lit(0x01, width: 8), s_reg)    # Push: write to current SP
+        )
 
         # irq/nmi vector
         addr_irq = mux(nmi_reg, lit(0xFFFE, width: 16), lit(0xFFFA, width: 16))
@@ -874,7 +878,7 @@ module RHDL
                       mux(pre_read, zp_indexed_addr,
                         mux(read_cycle,
                           mux(jump_bit, addr_incr_l,
-                            mux(index_out[8], cat(addr_reg[15..8] + lit(1, width: 8), addr_reg[7..0]),
+                            mux(index_out[8], cat((addr_reg[15..8] + lit(1, width: 8))[7..0], addr_reg[7..0]),
                               mux(rmw_bit, addr_reg, pc_reg)
                             )
                           ),
@@ -884,7 +888,7 @@ module RHDL
                               addr_reg,
                               mux(pre_write,
                                 mux(zeropage, zp_indexed_addr,
-                                  mux(index_out[8], cat(addr_reg[15..8] + lit(1, width: 8), addr_reg[7..0]), addr_reg)
+                                  mux(index_out[8], cat((addr_reg[15..8] + lit(1, width: 8))[7..0], addr_reg[7..0]), addr_reg)
                                 ),
                                 mux(write_cycle, pc_reg,
                                   mux(stack1 | stack2, addr_stack,
@@ -997,8 +1001,8 @@ module RHDL
 
         rmw_out = mux(alu_mode1 == lit(ALU1_INP, width: 4), rmw_in,
           mux(alu_mode1 == lit(ALU1_P, width: 4), status_reg,
-            mux(alu_mode1 == lit(ALU1_INC, width: 4), rmw_in + lit(1, width: 8),
-              mux(alu_mode1 == lit(ALU1_DEC, width: 4), rmw_in - lit(1, width: 8),
+            mux(alu_mode1 == lit(ALU1_INC, width: 4), (rmw_in + lit(1, width: 8))[7..0],
+              mux(alu_mode1 == lit(ALU1_DEC, width: 4), (rmw_in - lit(1, width: 8))[7..0],
                 mux(alu_mode1 == lit(ALU1_FLG, width: 4), rmw_in,
                   mux(alu_mode1 == lit(ALU1_BIT, width: 4), rmw_in,
                     mux(alu_mode1 == lit(ALU1_LSR, width: 4), cat(lit(0, width: 1), rmw_in[7..1]),

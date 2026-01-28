@@ -75,8 +75,6 @@ class Apple2HDLTerminal
     @green_screen = options[:green] || false
     @hires_mode = options[:hires] || false
     @color_mode = options[:color] || false
-    # Default width is 140 for color mode (half-blocks), 80 for braille
-    @hires_width = options[:hires_width] || (@color_mode ? 140 : 80)
     @audio_enabled = options[:audio] || false
 
     # Terminal size and padding for centering
@@ -86,6 +84,8 @@ class Apple2HDLTerminal
     @pad_left = 0
     @hires_pad_top = 0
     @hires_pad_left = 0
+    # Preferred widths (will be capped to terminal size)
+    @preferred_hires_width = options[:hires_width]
     update_terminal_size
 
     # Performance monitoring
@@ -124,18 +124,24 @@ class Apple2HDLTerminal
     @pad_top = [(@term_rows - display_height) / 2, 0].max
     @pad_left = [(@term_cols - DISPLAY_WIDTH) / 2, 0].max
 
+    # Auto-adjust hires width to fit terminal
+    # Use preferred width if set, otherwise use mode-appropriate default capped to terminal
+    default_width = @color_mode ? 140 : 80
+    preferred = @preferred_hires_width || default_width
+    @hires_width = [preferred, @term_cols].min
+
     # Calculate padding for hires display
-    hires_content_height = HIRES_HEIGHT  # Always 48 braille chars tall
+    # Color mode uses half-blocks (2 pixels/char = 96 lines), braille uses 4 pixels/char (48 lines)
+    hires_content_height = @color_mode ? 96 : HIRES_HEIGHT
     debug_panel_height = @debug ? 8 : 1  # 6 lines debug box + 2 gap, or 1 line for disk status
     total_content_height = hires_content_height + debug_panel_height
-    hires_display_width = @hires_width
 
     if total_content_height <= @term_rows
       @hires_pad_top = [(@term_rows - total_content_height) / 2, 0].max
     else
       @hires_pad_top = @term_rows - total_content_height
     end
-    @hires_pad_left = [(@term_cols - hires_display_width) / 2, 0].max
+    @hires_pad_left = [(@term_cols - @hires_width) / 2, 0].max
   end
 
   def load_rom(path, base_addr: 0xD000)
@@ -393,8 +399,8 @@ class Apple2HDLTerminal
     when 67, 99 # C or c - toggle color mode
       @color_mode = !@color_mode
       @hires_mode = true if @color_mode  # Color implies hires
-      # Adjust width for the mode
-      @hires_width = @color_mode ? 140 : 80
+      # Recalculate width for the mode (auto-adjusts to terminal size)
+      update_terminal_size
       print CLEAR_SCREEN
     end
   end
@@ -735,7 +741,7 @@ options = {
   green: false,
   demo: false,
   hires: false,
-  hires_width: 80,
+  hires_width: nil,  # Auto-calculated based on mode and terminal size
   color: false,  # NTSC artifact color rendering
   audio: false,  # Audio output disabled by default
   mode: :hdl,  # Simulation mode: :hdl (default), :netlist
@@ -793,7 +799,7 @@ parser = OptionParser.new do |opts|
     options[:hires] = true
   end
 
-  opts.on("--hires-width WIDTH", Integer, "Hi-res display width in chars (default: 80, 140 for color)") do |v|
+  opts.on("--hires-width WIDTH", Integer, "Hi-res display width in chars (auto-adjusts to terminal)") do |v|
     options[:hires_width] = v
   end
 

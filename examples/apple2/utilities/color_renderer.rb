@@ -180,16 +180,16 @@ module RHDL
         if upper_color == lower_color
           # Same color - use full block or space
           if upper_color == :black
-            " "
+            NORMAL_VIDEO + " "
           else
             fg_color(upper_rgb) + FULL_BLOCK
           end
         elsif upper_color == :black
-          # Only lower pixel lit
-          fg_color(lower_rgb) + LOWER_HALF
+          # Only lower pixel lit - need bg black to avoid bleed
+          fg_color(lower_rgb) + bg_color(COLORS[:black]) + LOWER_HALF
         elsif lower_color == :black
-          # Only upper pixel lit
-          fg_color(upper_rgb) + UPPER_HALF
+          # Only upper pixel lit - need bg black to avoid bleed
+          fg_color(upper_rgb) + bg_color(COLORS[:black]) + UPPER_HALF
         else
           # Both different colors - use upper half with fg/bg
           fg_color(upper_rgb) + bg_color(lower_rgb) + UPPER_HALF
