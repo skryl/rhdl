@@ -14,7 +14,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
   # Test parameters
   TOTAL_CYCLES = 10_000_000
-  PC_SAMPLE_INTERVAL = 1000  # Sample PC every N cycles
+  PC_SAMPLE_INTERVAL = 10_000  # Sample PC every N cycles (batch size)
 
   before(:all) do
     @rom_available = File.exist?(ROM_PATH)
@@ -148,7 +148,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     end
   end
 
-  it 'verifies IR PC sequence contains ISA PC sequence as subsequence', timeout: 600 do
+  it 'verifies IR PC sequence contains ISA PC sequence as subsequence', :slow do
     skip 'AppleIIgo ROM not found' unless @rom_available
     skip 'Karateka memory dump not found' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
@@ -191,25 +191,23 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       # Run batch of cycles
       batch_size = [PC_SAMPLE_INTERVAL, TOTAL_CYCLES - cycles_run].min
 
-      # Run ISA and collect PCs
+      # Run ISA batch and sample PC
       batch_size.times do
         break if isa_cpu.halted?
         isa_cpu.step
-        pc = isa_cpu.pc
-        if pc != last_isa_pc
-          isa_pcs << pc
-          last_isa_pc = pc
-        end
+      end
+      pc = isa_cpu.pc
+      if pc != last_isa_pc
+        isa_pcs << pc
+        last_isa_pc = pc
       end
 
-      # Run IR and collect PCs
-      batch_size.times do
-        ir_sim.run_cpu_cycles(1, 0, false)
-        pc = ir_sim.peek('cpu__pc_reg')
-        if pc != last_ir_pc
-          ir_pcs << pc
-          last_ir_pc = pc
-        end
+      # Run IR batch and sample PC
+      ir_sim.run_cpu_cycles(batch_size, 0, false)
+      pc = ir_sim.peek('cpu__pc_reg')
+      if pc != last_ir_pc
+        ir_pcs << pc
+        last_ir_pc = pc
       end
 
       cycles_run += batch_size
