@@ -4,7 +4,7 @@
 # Provides a unified interface for different simulation backends
 # Uses MOS6502::CPU IR with internalized memory in Rust (or Ruby fallback)
 class IRSimulatorRunner
-  attr_reader :bus
+  attr_reader :bus, :sim
 
   def initialize(sim_backend = :interpret)
     require 'rhdl/codegen'
@@ -120,8 +120,61 @@ class IRSimulatorRunner
     @sim.poke('ext_sp_load_en', 0)
     clock_tick
     @sim.poke('rst', 0)
-    # Run reset sequence (6 cycles)
-    6.times { clock_tick }
+    # Don't run additional clock cycles - do ext_pc_load immediately while
+    # state=FETCH. Running cycles after reset would start executing from
+    # IR=0 (BRK), putting the CPU in BRK handling states.
+
+    # Load PC from reset vector (like harness.rb does)
+    # The HDL control unit doesn't automatically load PC from reset vector,
+    # so we use external PC load to do it
+    if @use_rust_memory
+      lo = @sim.read_mos6502_memory(0xFFFC)
+      hi = @sim.read_mos6502_memory(0xFFFD)
+    else
+      lo = @bus.read(0xFFFC)
+      hi = @bus.read(0xFFFD)
+    end
+    target_addr = (hi << 8) | lo
+
+    # Get the opcode at target address - we'll need this for IR loading
+    if @use_rust_memory
+      opcode = @sim.read_mos6502_memory(target_addr)
+    else
+      opcode = @bus.read(target_addr)
+    end
+
+    # Set PC to target address and IR to opcode in one clock cycle.
+    # ext_pc_load loads both PC (from ext_pc_load_data) and IR (from data_in).
+    # After this: PC=target, IR=opcode, state=DECODE
+    @sim.poke('ext_pc_load_data', target_addr)
+    @sim.poke('ext_pc_load_en', 1)
+    @sim.poke('data_in', opcode)
+
+    # Clock cycle to load PC and IR
+    # IMPORTANT: Use evaluate on falling edge, tick on rising edge
+    @sim.poke('clk', 0)
+    @sim.evaluate  # Combinational only
+    @sim.poke('clk', 1)
+    @sim.tick      # Registers capture
+
+    @sim.poke('ext_pc_load_en', 0)
+
+    # Now we're in DECODE state with PC=target and IR=opcode.
+    # But PC should point to operand (target+1) for the next phase.
+    # Run one cycle to transition from DECODE to FETCH_OP1 (for 2+ byte instructions).
+    # During this, PC increments to target+1.
+    if @use_rust_memory
+      # For Rust mode, use internal memory - just poke the memory value
+      @sim.poke('data_in', @sim.read_mos6502_memory(target_addr + 1))
+    else
+      # For Ruby fallback, use bus memory
+      @sim.poke('data_in', @bus.read(target_addr + 1))
+    end
+    @sim.poke('clk', 0)
+    @sim.evaluate  # Combinational only
+    @sim.poke('clk', 1)
+    @sim.tick      # Registers capture
+
     @cycles = 0
     @halted = false
   end
@@ -136,8 +189,8 @@ class IRSimulatorRunner
       cycles_run = @sim.run_mos6502_cycles(steps)
       @cycles += cycles_run
 
-      # Sync text page from Rust memory to Ruby bus for screen reading
-      sync_text_page_from_rust
+      # Sync screen memory from Rust memory to Ruby bus for screen reading
+      sync_screen_memory_from_rust
 
       # Check halted state
       @halted = @sim.peek('halted') == 1
@@ -152,25 +205,42 @@ class IRSimulatorRunner
     end
   end
 
-  # Run one clock cycle with memory bridging (Ruby fallback path)
+  # Run one clock cycle with memory bridging
+  # Timing matches the Rust run_mos6502_cycles implementation:
+  # 1. Clock falling edge - combinational logic updates (addr becomes valid)
+  # 2. Sample address and do memory bridging
+  # 3. Clock rising edge - registers capture values
+  #
+  # IMPORTANT: Uses Rust memory when @use_rust_memory is true, otherwise Ruby bus.
+  # This ensures memory isolation when running with Rust-based IR simulators.
   def clock_tick
-    # Get address and read/write signal from CPU
+    # Clock falling edge - ONLY combinational logic (no DFF update!)
+    @sim.poke('clk', 0)
+    @sim.evaluate  # Use evaluate, not tick - tick would update DFFs prematurely
+
+    # NOW get address and read/write signal from CPU (reflects current state)
     addr = @sim.peek('addr')
     rw = @sim.peek('rw')
 
     if rw == 1
-      # Read: get data from bus and provide to CPU
-      data = @bus.read(addr)
+      # Read: get data and provide to CPU
+      if @use_rust_memory
+        data = @sim.read_mos6502_memory(addr)
+      else
+        data = @bus.read(addr)
+      end
       @sim.poke('data_in', data)
     else
-      # Write: get data from CPU and write to bus
+      # Write: get data from CPU and write to memory
       data = @sim.peek('data_out')
-      @bus.write(addr, data)
+      if @use_rust_memory
+        @sim.write_mos6502_memory(addr, data)
+      else
+        @bus.write(addr, data)
+      end
     end
 
-    # Advance clock
-    @sim.poke('clk', 0)
-    @sim.tick
+    # Clock rising edge - registers capture values (DFFs update here)
     @sim.poke('clk', 1)
     @sim.tick
   end
@@ -242,16 +312,28 @@ class IRSimulatorRunner
 
   private
 
-  # Sync text page ($0400-$07FF) from Rust memory to Ruby bus
+  # Sync screen memory from Rust memory to Ruby bus
   # This allows screen reading to work even when using Rust memory
-  def sync_text_page_from_rust
+  # Syncs: text page 1, HiRes page 1, HiRes page 2
+  def sync_screen_memory_from_rust
     return unless @use_rust_memory
 
-    # Text page 1 is at $0400-$07FF (1024 bytes)
+    # Get direct access to bus memory for faster writes
+    memory = @bus.instance_variable_get(:@memory)
+
+    # Text page 1: $0400-$07FF (1024 bytes)
     (0...1024).each do |i|
-      addr = 0x0400 + i
-      byte = @sim.read_mos6502_memory(addr)
-      @bus.write(addr, byte)
+      memory[0x0400 + i] = @sim.read_mos6502_memory(0x0400 + i)
+    end
+
+    # HiRes page 1: $2000-$3FFF (8192 bytes)
+    (0...8192).each do |i|
+      memory[0x2000 + i] = @sim.read_mos6502_memory(0x2000 + i)
+    end
+
+    # HiRes page 2: $4000-$5FFF (8192 bytes)
+    (0...8192).each do |i|
+      memory[0x4000 + i] = @sim.read_mos6502_memory(0x4000 + i)
     end
   end
 

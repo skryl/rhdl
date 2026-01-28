@@ -126,6 +126,7 @@ module MOS6502
     wire :actual_load_y
     wire :actual_reg_data, width: 8
     wire :actual_pc_load
+    wire :actual_pc_inc
     wire :actual_pc_addr, width: 16
     wire :actual_sp_load
     wire :actual_sp_data, width: 8
@@ -323,7 +324,7 @@ module MOS6502
     port [:pc, :pc] => :pc_val
     port :actual_pc_load => [:pc, :load]
     port :actual_pc_addr => [:pc, :addr_in]
-    port :ctrl_pc_inc => [:pc, :inc]
+    port :actual_pc_inc => [:pc, :inc]
 
     # SP connections (use computed signals)
     port [:sp, :sp] => :sp_val
@@ -378,8 +379,9 @@ module MOS6502
       # Stack address computation (0x0100 + SP forms stack address in page 1)
       stack_addr <= cat(lit(0x01, width: 8), sp_val)
       # For PULL: compute address at SP+1 (where data to be pulled is located)
-      # Use full 16-bit addition to avoid width issues with 8-bit SP increment
-      stack_addr_plus1 <= stack_addr + lit(1, width: 16)
+      # The 6502 stack wraps within 8 bits (page 1), so SP=$FF + 1 = $00, address $0100
+      # Compute (SP+1) mod 256 first, then form the 16-bit stack page address
+      stack_addr_plus1 <= cat(lit(0x01, width: 8), (sp_val + lit(1, width: 8)))
 
       # PC byte extraction
       pc_hi_byte <= pc_val[15..8]
@@ -515,6 +517,12 @@ module MOS6502
       # This avoids race condition where PC would see old alatch_addr value
       # For BRK vector: same issue - need to use data_in directly
       actual_pc_load <= ext_pc_load_en | ctrl_pc_load
+      # PC increment: follows control unit
+      # ext_pc_load must happen when state=FETCH (ctrl_pc_inc=1), so PC becomes
+      # target+1. This is correct because ext_pc_load also loads the IR with
+      # the opcode, and state transitions FETCH->DECODE on that clock edge.
+      # In DECODE state, PC=target+1 points to the operand for the next fetch phase.
+      actual_pc_inc <= ctrl_pc_inc
       actual_pc_addr <= mux(ext_pc_load_en, ext_pc_load_data,
                             mux(is_rts_pull_hi | is_rti_pull_hi | is_brk_vec_hi,
                                 return_addr, agen_eff_addr))
@@ -577,13 +585,18 @@ module MOS6502
       reg_data_z <= (actual_reg_data == lit(0, width: 8))
 
       # Address bus mux (8-way based on ctrl_addr_sel)
-      addr <= mux(ctrl_addr_sel[2],
-                  mux(ctrl_addr_sel[1],
-                      mux(ctrl_addr_sel[0], lit(0xFFFE, width: 16), stack_addr_plus1),
-                      mux(ctrl_addr_sel[0], stack_addr, agen_eff_addr)),
-                  mux(ctrl_addr_sel[1],
-                      mux(ctrl_addr_sel[0], acalc_ptr_addr_hi, acalc_ptr_addr_lo),
-                      mux(ctrl_addr_sel[0], lit(0xFFFC, width: 16), pc_val)))
+      # Use case_select instead of nested mux to avoid potential IR JIT issues
+      # addr_sel: 0=PC, 1=FFFC, 2=acalc_lo, 3=acalc_hi, 4=eff_addr, 5=stack, 6=stack+1, 7=FFFE
+      addr <= case_select(ctrl_addr_sel, {
+        0 => pc_val,
+        1 => lit(0xFFFC, width: 16),
+        2 => acalc_ptr_addr_lo,
+        3 => acalc_ptr_addr_hi,
+        4 => agen_eff_addr,
+        5 => stack_addr,
+        6 => stack_addr_plus1,
+        7 => lit(0xFFFE, width: 16)
+      }, default: pc_val)
 
       # Data output mux (7-way based on ctrl_data_sel)
       # For JSR (data_sel 2,3), use PC-1 since 6502 pushes return address minus 1

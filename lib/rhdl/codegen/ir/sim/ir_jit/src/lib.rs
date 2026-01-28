@@ -10,7 +10,7 @@
 use magnus::{method, prelude::*, Error, RArray, RHash, Ruby, TryConvert, Value};
 use serde::Deserialize;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::mem;
 
 use cranelift::prelude::*;
@@ -400,7 +400,136 @@ impl JitCompiler {
         }
     }
 
-    /// Compile the evaluate function that runs all combinational logic
+    /// Extract signal indices that an expression depends on
+    fn expr_dependencies(&self, expr: &ExprDef) -> HashSet<usize> {
+        let mut deps = HashSet::new();
+        self.collect_expr_deps(expr, &mut deps);
+        deps
+    }
+
+    fn collect_expr_deps(&self, expr: &ExprDef, deps: &mut HashSet<usize>) {
+        match expr {
+            ExprDef::Signal { name, .. } => {
+                if let Some(&idx) = self.name_to_idx.get(name) {
+                    deps.insert(idx);
+                }
+            }
+            ExprDef::Literal { .. } => {}
+            ExprDef::UnaryOp { operand, .. } => {
+                self.collect_expr_deps(operand, deps);
+            }
+            ExprDef::BinaryOp { left, right, .. } => {
+                self.collect_expr_deps(left, deps);
+                self.collect_expr_deps(right, deps);
+            }
+            ExprDef::Mux { condition, when_true, when_false, .. } => {
+                self.collect_expr_deps(condition, deps);
+                self.collect_expr_deps(when_true, deps);
+                self.collect_expr_deps(when_false, deps);
+            }
+            ExprDef::Slice { base, .. } => {
+                self.collect_expr_deps(base, deps);
+            }
+            ExprDef::Concat { parts, .. } => {
+                for part in parts {
+                    self.collect_expr_deps(part, deps);
+                }
+            }
+            ExprDef::Resize { expr, .. } => {
+                self.collect_expr_deps(expr, deps);
+            }
+            ExprDef::MemRead { addr, .. } => {
+                self.collect_expr_deps(addr, deps);
+            }
+        }
+    }
+
+    /// Group assignments into levels based on dependencies (topological sort)
+    /// Each level contains assignments that can be computed in parallel
+    fn compute_assignment_levels(&self, assigns: &[AssignDef]) -> Vec<Vec<usize>> {
+        let n = assigns.len();
+
+        // Map: target signal idx -> assignment idx
+        let mut target_to_assign: HashMap<usize, usize> = HashMap::new();
+        for (i, assign) in assigns.iter().enumerate() {
+            if let Some(&idx) = self.name_to_idx.get(&assign.target) {
+                target_to_assign.insert(idx, i);
+            }
+        }
+
+        // Compute dependencies for each assignment (in terms of other assignment indices)
+        let mut assign_deps: Vec<HashSet<usize>> = Vec::with_capacity(n);
+        for assign in assigns {
+            let signal_deps = self.expr_dependencies(&assign.expr);
+            let mut deps = HashSet::new();
+            for sig_idx in signal_deps {
+                if let Some(&assign_idx) = target_to_assign.get(&sig_idx) {
+                    deps.insert(assign_idx);
+                }
+            }
+            assign_deps.push(deps);
+        }
+
+        // Assign levels (topological sort into levels)
+        let mut levels: Vec<Vec<usize>> = Vec::new();
+        let mut assigned_level: Vec<Option<usize>> = vec![None; n];
+
+        loop {
+            let mut made_progress = false;
+            for i in 0..n {
+                if assigned_level[i].is_some() {
+                    continue;
+                }
+                // Check if all dependencies have been assigned
+                let mut max_dep_level = None;
+                let mut all_deps_ready = true;
+                for &dep_idx in &assign_deps[i] {
+                    if dep_idx == i {
+                        // Self-dependency, ignore
+                        continue;
+                    }
+                    match assigned_level[dep_idx] {
+                        Some(lvl) => {
+                            max_dep_level = Some(max_dep_level.map_or(lvl, |m: usize| m.max(lvl)));
+                        }
+                        None => {
+                            all_deps_ready = false;
+                            break;
+                        }
+                    }
+                }
+                if all_deps_ready {
+                    let my_level = max_dep_level.map_or(0, |l| l + 1);
+                    assigned_level[i] = Some(my_level);
+                    while levels.len() <= my_level {
+                        levels.push(Vec::new());
+                    }
+                    levels[my_level].push(i);
+                    made_progress = true;
+                }
+            }
+            if !made_progress {
+                // Handle remaining (cycles or orphans) - put them at the end
+                let last_level = levels.len();
+                for i in 0..n {
+                    if assigned_level[i].is_none() {
+                        if levels.len() <= last_level {
+                            levels.push(Vec::new());
+                        }
+                        levels[last_level].push(i);
+                    }
+                }
+                break;
+            }
+            if assigned_level.iter().all(|l| l.is_some()) {
+                break;
+            }
+        }
+
+        levels
+    }
+
+    /// Compile the evaluate function that runs all combinational logic (topologically sorted)
     fn compile_evaluate(&mut self, assigns: &[AssignDef], num_memories: usize) -> Result<EvaluateFn, String> {
         let mut ctx = self.module.make_context();
         let pointer_type = self.module.target_config().pointer_type();
@@ -435,17 +564,22 @@ impl JitCompiler {
             mem_ptrs.push(mem_ptr);
         }
 
-        // Compile each assignment (skip unknown targets to avoid overwriting unrelated signals)
-        for assign in assigns {
-            let target_idx = match self.name_to_idx.get(&assign.target) {
-                Some(&idx) => idx,
-                None => continue,  // Skip unknown targets
-            };
-            let value = self.compile_expr(&mut builder, &assign.expr, signals_ptr, &mem_ptrs);
+        // Compile assignments in topologically sorted order to ensure dependencies
+        // are evaluated before their dependents (fixes addr bus mux issues)
+        let levels = self.compute_assignment_levels(assigns);
+        for level in &levels {
+            for &assign_idx in level {
+                let assign = &assigns[assign_idx];
+                let target_idx = match self.name_to_idx.get(&assign.target) {
+                    Some(&idx) => idx,
+                    None => continue,  // Skip unknown targets
+                };
+                let value = self.compile_expr(&mut builder, &assign.expr, signals_ptr, &mem_ptrs);
 
-            // Store to signals[target_idx]
-            let offset = (target_idx * 8) as i32;
-            builder.ins().store(MemFlags::trusted(), value, signals_ptr, offset);
+                // Store to signals[target_idx]
+                let offset = (target_idx * 8) as i32;
+                builder.ins().store(MemFlags::trusted(), value, signals_ptr, offset);
+            }
         }
 
         builder.ins().return_(&[]);
@@ -1159,6 +1293,13 @@ impl JitRtlSimulator {
             0
         }
     }
+
+    /// Write to MOS6502 memory (respects ROM protection)
+    fn write_mos6502_memory(&mut self, addr: usize, data: u8) {
+        if addr < self.mos6502_memory.len() && !self.mos6502_rom_mask[addr] {
+            self.mos6502_memory[addr] = data;
+        }
+    }
 }
 
 struct BatchResult {
@@ -1398,6 +1539,10 @@ impl RubyJitSim {
     fn read_mos6502_memory(&self, addr: usize) -> u8 {
         self.sim.borrow().read_mos6502_memory(addr)
     }
+
+    fn write_mos6502_memory(&self, addr: usize, data: i64) {
+        self.sim.borrow_mut().write_mos6502_memory(addr, data as u8);
+    }
 }
 
 #[magnus::init]
@@ -1438,6 +1583,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("set_mos6502_reset_vector", method!(RubyJitSim::set_mos6502_reset_vector, 1))?;
     class.define_method("run_mos6502_cycles", method!(RubyJitSim::run_mos6502_cycles, 1))?;
     class.define_method("read_mos6502_memory", method!(RubyJitSim::read_mos6502_memory, 1))?;
+    class.define_method("write_mos6502_memory", method!(RubyJitSim::write_mos6502_memory, 2))?;
 
     Ok(())
 }
