@@ -2,6 +2,9 @@
 //!
 //! Provides batched CPU cycle execution with memory bridging for Apple II
 
+mod ffi;
+pub use ffi::*;
+
 use std::collections::HashMap;
 use crate::core::CoreSimulator;
 
