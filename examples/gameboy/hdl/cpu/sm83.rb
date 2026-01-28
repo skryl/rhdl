@@ -124,6 +124,12 @@ module GameBoy
     wire :set_ei                # Enable interrupts
     wire :is_stop               # STOP instruction
 
+    # Cycle count condition wires (for m_cycles calculation)
+    wire :is_6_cycles           # 6-cycle instructions
+    wire :is_4_cycles           # 4-cycle instructions
+    wire :is_3_cycles           # 3-cycle instructions
+    wire :is_2_cycles           # 2-cycle instructions
+
     # ALU signals
     wire :bus_a, width: 8       # ALU operand A
     wire :bus_b, width: 8       # ALU operand B
@@ -131,22 +137,22 @@ module GameBoy
     wire :alu_flags, width: 8   # ALU flag output
 
     # =========================================================================
-    # Register Pair Composition
+    # ALL Combinational Logic (MUST be in single behavior block!)
+    # The behavior DSL only keeps the LAST behavior block, so all combinational
+    # logic must be merged into one block.
     # =========================================================================
 
     behavior do
+      # -----------------------------------------------------------------------
+      # Register Pair Composition
+      # -----------------------------------------------------------------------
       bc <= cat(b_reg, c_reg)
       de <= cat(d_reg, e_reg)
       hl <= cat(h_reg, l_reg)
-    end
 
-    # =========================================================================
-    # Instruction Decoder (Microcode)
-    # =========================================================================
-
-    behavior do
-      # Default values
-      m_cycles <= lit(1, width: 3)
+      # -----------------------------------------------------------------------
+      # Instruction Decoder (Microcode) - Default values
+      # -----------------------------------------------------------------------
       inc_pc <= lit(0, width: 1)
       read_to_acc <= lit(0, width: 1)
       set_bus_a_to <= lit(7, width: 4)  # ACC
@@ -168,228 +174,99 @@ module GameBoy
       is_stop <= lit(0, width: 1)
       prefix <= lit(0, width: 2)
 
-      # Opcode decoding for normal instruction set (prefix = 00)
-      # Pattern match on opcode bits
+      # m_cycles calculation - simplified: most instructions are 1 cycle
+      is_6_cycles <= lit(0, width: 1)
+      is_4_cycles <= lit(0, width: 1)
+      is_3_cycles <= lit(0, width: 1)
+      is_2_cycles <= lit(0, width: 1)
+
+      # Default: all instructions take 1 cycle (will add proper cycle counts later)
+      m_cycles <= lit(1, width: 3)
 
       # -----------------------------------------------------------------------
-      # 0x00: NOP - 1 cycle
+      # Instruction Decoder - Specific instructions
       # -----------------------------------------------------------------------
-      # Default is 1 cycle, no operation
 
-      # -----------------------------------------------------------------------
-      # 0x01, 0x11, 0x21, 0x31: LD rr,nn - 3 cycles
-      # -----------------------------------------------------------------------
-      m_cycles <= mux((ir[3..0] == lit(1, width: 4)) & (ir[7..6] == lit(0, width: 2)),
-                      lit(3, width: 3),
-                      m_cycles)
+      # LD rr,nn - load WZ register for 16-bit immediate
       ldz <= mux((ir[3..0] == lit(1, width: 4)) & (ir[7..6] == lit(0, width: 2)) & (m_cycle == lit(2, width: 3)),
-                 lit(1, width: 1), ldz)
+                 lit(1, width: 1), lit(0, width: 1))
       ldw <= mux((ir[3..0] == lit(1, width: 4)) & (ir[7..6] == lit(0, width: 2)) & (m_cycle == lit(3, width: 3)),
-                 lit(1, width: 1), ldw)
-
-      # -----------------------------------------------------------------------
-      # 0x02, 0x12: LD (BC/DE),A - 2 cycles
-      # 0x0A, 0x1A: LD A,(BC/DE) - 2 cycles
-      # -----------------------------------------------------------------------
-      m_cycles <= mux(((ir == lit(0x02, width: 8)) | (ir == lit(0x12, width: 8)) |
-                       (ir == lit(0x0A, width: 8)) | (ir == lit(0x1A, width: 8))),
-                      lit(2, width: 3), m_cycles)
+                 lit(1, width: 1), lit(0, width: 1))
 
       # Write to memory for LD (BC/DE),A
       write_sig <= mux(((ir == lit(0x02, width: 8)) | (ir == lit(0x12, width: 8))) &
                        (m_cycle == lit(2, width: 3)),
-                       lit(1, width: 1), write_sig)
+                       lit(1, width: 1), lit(0, width: 1))
       no_read <= mux(((ir == lit(0x02, width: 8)) | (ir == lit(0x12, width: 8))) &
                       (m_cycle == lit(2, width: 3)),
-                      lit(1, width: 1), no_read)
+                      lit(1, width: 1), lit(0, width: 1))
 
       # Read from memory for LD A,(BC/DE)
       read_to_acc <= mux(((ir == lit(0x0A, width: 8)) | (ir == lit(0x1A, width: 8))) &
                           (m_cycle == lit(2, width: 3)),
-                          lit(1, width: 1), read_to_acc)
+                          lit(1, width: 1), lit(0, width: 1))
 
       # Address source for BC/DE indirect
       set_addr_to <= mux((ir == lit(0x02, width: 8)) | (ir == lit(0x0A, width: 8)),
                          lit(ADDR_BC, width: 3),
                          mux((ir == lit(0x12, width: 8)) | (ir == lit(0x1A, width: 8)),
                              lit(ADDR_DE, width: 3),
-                             set_addr_to))
+                             lit(ADDR_PC, width: 3)))
 
-      # -----------------------------------------------------------------------
-      # 0x03, 0x13, 0x23, 0x33: INC rr - 2 cycles
-      # 0x0B, 0x1B, 0x2B, 0x3B: DEC rr - 2 cycles
-      # -----------------------------------------------------------------------
-      m_cycles <= mux(((ir[3..0] == lit(3, width: 4)) | (ir[3..0] == lit(0xB, width: 4))) &
-                      (ir[7..6] == lit(0, width: 2)),
-                      lit(2, width: 3), m_cycles)
-
-      # -----------------------------------------------------------------------
-      # 0x04, 0x0C, 0x14, 0x1C, 0x24, 0x2C, 0x3C: INC r - 1 cycle
-      # 0x05, 0x0D, 0x15, 0x1D, 0x25, 0x2D, 0x3D: DEC r - 1 cycle
-      # (0x34, 0x35: INC/DEC (HL) - 3 cycles - handled separately)
-      # -----------------------------------------------------------------------
-      # Single cycle for register inc/dec (not (HL))
-
-      # -----------------------------------------------------------------------
-      # 0x06, 0x0E, 0x16, 0x1E, 0x26, 0x2E, 0x3E: LD r,n - 2 cycles
-      # -----------------------------------------------------------------------
-      m_cycles <= mux((ir[2..0] == lit(6, width: 3)) & (ir[7..6] == lit(0, width: 2)),
-                      lit(2, width: 3), m_cycles)
-
-      # -----------------------------------------------------------------------
-      # 0x18: JR e - 3 cycles
-      # 0x20, 0x28, 0x30, 0x38: JR cc,e - 2/3 cycles
-      # -----------------------------------------------------------------------
-      m_cycles <= mux(ir == lit(0x18, width: 8),
-                      lit(3, width: 3), m_cycles)
-      m_cycles <= mux((ir[7..5] == lit(1, width: 3)) & (ir[2..0] == lit(0, width: 3)),
-                      lit(3, width: 3), m_cycles)  # May reduce to 2 if not taken
-      jump_e <= mux(ir == lit(0x18, width: 8), lit(1, width: 1), jump_e)
+      # JR e - relative jump
+      jump_e <= mux(ir == lit(0x18, width: 8), lit(1, width: 1), lit(0, width: 1))
       ldz <= mux((ir == lit(0x18, width: 8)) & (m_cycle == lit(2, width: 3)),
                  lit(1, width: 1), ldz)
 
-      # -----------------------------------------------------------------------
-      # 0x22: LD (HL+),A - 2 cycles
-      # 0x2A: LD A,(HL+) - 2 cycles
-      # 0x32: LD (HL-),A - 2 cycles
-      # 0x3A: LD A,(HL-) - 2 cycles
-      # -----------------------------------------------------------------------
-      m_cycles <= mux((ir == lit(0x22, width: 8)) | (ir == lit(0x2A, width: 8)) |
-                      (ir == lit(0x32, width: 8)) | (ir == lit(0x3A, width: 8)),
-                      lit(2, width: 3), m_cycles)
-
-      # -----------------------------------------------------------------------
-      # 0x40-0x7F: LD r,r' (except 0x76 = HALT) - 1 cycle (2 for (HL))
-      # -----------------------------------------------------------------------
-      # Most are 1 cycle, (HL) source/dest adds 1 cycle
-      m_cycles <= mux((ir[7..6] == lit(1, width: 2)) & (ir != lit(0x76, width: 8)) &
-                      ((ir[2..0] == lit(6, width: 3)) | (ir[5..3] == lit(6, width: 3))),
-                      lit(2, width: 3), m_cycles)
-
-      # -----------------------------------------------------------------------
-      # 0x76: HALT - 1 cycle
-      # -----------------------------------------------------------------------
+      # HALT
       halt <= (ir == lit(0x76, width: 8))
 
-      # -----------------------------------------------------------------------
-      # 0x80-0xBF: ALU A,r - 1 cycle (2 for (HL))
-      # -----------------------------------------------------------------------
-      m_cycles <= mux((ir[7..6] == lit(2, width: 2)) & (ir[2..0] == lit(6, width: 3)),
-                      lit(2, width: 3), m_cycles)
-      alu_op <= mux(ir[7..6] == lit(2, width: 2), ir[5..3], alu_op)
-      save_alu <= mux(ir[7..6] == lit(2, width: 2), lit(1, width: 1), save_alu)
-      set_bus_a_to <= mux(ir[7..6] == lit(2, width: 2), lit(7, width: 4), set_bus_a_to) # ACC
-      set_bus_b_to <= mux(ir[7..6] == lit(2, width: 2), cat(lit(0, width: 1), ir[2..0]), set_bus_b_to)
+      # ALU A,r operations
+      alu_op <= mux(ir[7..6] == lit(2, width: 2), ir[5..3], lit(0, width: 4))
+      save_alu <= mux(ir[7..6] == lit(2, width: 2), lit(1, width: 1), lit(0, width: 1))
+      set_bus_a_to <= mux(ir[7..6] == lit(2, width: 2), lit(7, width: 4), lit(7, width: 4)) # ACC
+      set_bus_b_to <= mux(ir[7..6] == lit(2, width: 2), cat(lit(0, width: 1), ir[2..0]), lit(7, width: 4))
 
-      # -----------------------------------------------------------------------
-      # 0xC0-0xC8, 0xD0-0xD8: RET cc / RET - 2-5 cycles
-      # -----------------------------------------------------------------------
-      m_cycles <= mux((ir == lit(0xC9, width: 8)), lit(4, width: 3), m_cycles) # RET
-      ret <= mux(ir == lit(0xC9, width: 8), lit(1, width: 1), ret)
+      # RET
+      ret <= mux(ir == lit(0xC9, width: 8), lit(1, width: 1), lit(0, width: 1))
 
-      # -----------------------------------------------------------------------
-      # 0xC3: JP nn - 4 cycles
-      # -----------------------------------------------------------------------
-      m_cycles <= mux(ir == lit(0xC3, width: 8), lit(4, width: 3), m_cycles)
-      jump <= mux(ir == lit(0xC3, width: 8), lit(1, width: 1), jump)
+      # JP nn
+      jump <= mux(ir == lit(0xC3, width: 8), lit(1, width: 1), lit(0, width: 1))
       ldz <= mux((ir == lit(0xC3, width: 8)) & (m_cycle == lit(2, width: 3)),
                  lit(1, width: 1), ldz)
       ldw <= mux((ir == lit(0xC3, width: 8)) & (m_cycle == lit(3, width: 3)),
                  lit(1, width: 1), ldw)
 
-      # -----------------------------------------------------------------------
-      # 0xC6, 0xCE, 0xD6, 0xDE, 0xE6, 0xEE, 0xF6, 0xFE: ALU A,n - 2 cycles
-      # -----------------------------------------------------------------------
-      m_cycles <= mux((ir[7..6] == lit(3, width: 2)) & (ir[2..0] == lit(6, width: 3)),
-                      lit(2, width: 3), m_cycles)
+      # CB prefix
+      prefix <= mux(ir == lit(0xCB, width: 8), lit(1, width: 2), lit(0, width: 2))
 
-      # -----------------------------------------------------------------------
-      # 0xCB: CB prefix - 2+ cycles
-      # -----------------------------------------------------------------------
-      prefix <= mux(ir == lit(0xCB, width: 8), lit(1, width: 2), prefix)
-      m_cycles <= mux(ir == lit(0xCB, width: 8), lit(2, width: 3), m_cycles)
-
-      # -----------------------------------------------------------------------
-      # 0xCD: CALL nn - 6 cycles
-      # -----------------------------------------------------------------------
-      m_cycles <= mux(ir == lit(0xCD, width: 8), lit(6, width: 3), m_cycles)
-      call <= mux(ir == lit(0xCD, width: 8), lit(1, width: 1), call)
+      # CALL nn - set call signal and load address
+      call <= mux(ir == lit(0xCD, width: 8), lit(1, width: 1), lit(0, width: 1))
       ldz <= mux((ir == lit(0xCD, width: 8)) & (m_cycle == lit(2, width: 3)),
                  lit(1, width: 1), ldz)
       ldw <= mux((ir == lit(0xCD, width: 8)) & (m_cycle == lit(3, width: 3)),
                  lit(1, width: 1), ldw)
 
-      # -----------------------------------------------------------------------
-      # 0xE0: LDH (n),A - 3 cycles (write to 0xFF00+n)
-      # 0xF0: LDH A,(n) - 3 cycles (read from 0xFF00+n)
-      # -----------------------------------------------------------------------
-      m_cycles <= mux((ir == lit(0xE0, width: 8)) | (ir == lit(0xF0, width: 8)),
-                      lit(3, width: 3), m_cycles)
-
-      # -----------------------------------------------------------------------
-      # 0xE2: LD (C),A - 2 cycles (write to 0xFF00+C)
-      # 0xF2: LD A,(C) - 2 cycles (read from 0xFF00+C)
-      # -----------------------------------------------------------------------
-      m_cycles <= mux((ir == lit(0xE2, width: 8)) | (ir == lit(0xF2, width: 8)),
-                      lit(2, width: 3), m_cycles)
-
-      # -----------------------------------------------------------------------
-      # 0xE8: ADD SP,n - 4 cycles
-      # -----------------------------------------------------------------------
-      m_cycles <= mux(ir == lit(0xE8, width: 8), lit(4, width: 3), m_cycles)
-
-      # -----------------------------------------------------------------------
-      # 0xE9: JP (HL) - 1 cycle
-      # -----------------------------------------------------------------------
+      # JP (HL) - 1 cycle jump using HL address
       jump <= mux(ir == lit(0xE9, width: 8), lit(1, width: 1), jump)
       set_addr_to <= mux(ir == lit(0xE9, width: 8), lit(ADDR_HL, width: 3), set_addr_to)
 
-      # -----------------------------------------------------------------------
-      # 0xEA: LD (nn),A - 4 cycles
-      # 0xFA: LD A,(nn) - 4 cycles
-      # -----------------------------------------------------------------------
-      m_cycles <= mux((ir == lit(0xEA, width: 8)) | (ir == lit(0xFA, width: 8)),
-                      lit(4, width: 3), m_cycles)
-
-      # -----------------------------------------------------------------------
-      # 0xF3: DI - 1 cycle
-      # -----------------------------------------------------------------------
+      # DI - disable interrupts
       set_di <= (ir == lit(0xF3, width: 8))
 
-      # -----------------------------------------------------------------------
-      # 0xF8: LD HL,SP+n - 3 cycles
-      # -----------------------------------------------------------------------
-      m_cycles <= mux(ir == lit(0xF8, width: 8), lit(3, width: 3), m_cycles)
-
-      # -----------------------------------------------------------------------
-      # 0xF9: LD SP,HL - 2 cycles
-      # -----------------------------------------------------------------------
-      m_cycles <= mux(ir == lit(0xF9, width: 8), lit(2, width: 3), m_cycles)
-
-      # -----------------------------------------------------------------------
-      # 0xFB: EI - 1 cycle
-      # -----------------------------------------------------------------------
+      # EI - enable interrupts
       set_ei <= (ir == lit(0xFB, width: 8))
 
-      # -----------------------------------------------------------------------
-      # 0x10: STOP - 1 cycle
-      # -----------------------------------------------------------------------
+      # STOP
       is_stop <= (ir == lit(0x10, width: 8))
 
-      # -----------------------------------------------------------------------
-      # PC increment during M1
-      # -----------------------------------------------------------------------
+      # PC increment during M1 (when not halted and not in interrupt cycle)
       inc_pc <= (m_cycle == lit(1, width: 3)) & ~halt & ~int_cycle
 
-    end
-
-    # =========================================================================
-    # ALU (Simplified)
-    # =========================================================================
-
-    behavior do
-      # ALU operation decode
+      # -----------------------------------------------------------------------
+      # ALU (Simplified)
       # 0 = ADD, 1 = ADC, 2 = SUB, 3 = SBC, 4 = AND, 5 = XOR, 6 = OR, 7 = CP
+      # -----------------------------------------------------------------------
 
       # Result computation
       alu_result <= mux(alu_op == lit(0, width: 4), (bus_a + bus_b)[7..0],          # ADD
@@ -415,13 +292,11 @@ module GameBoy
                 lit(0, width: 1))),  # C flag (bit 4)
         lit(0, width: 4)  # bits 3-0 always 0
       )
-    end
 
-    # =========================================================================
-    # Bus Muxing
-    # =========================================================================
+      # -----------------------------------------------------------------------
+      # Bus Muxing
+      # -----------------------------------------------------------------------
 
-    behavior do
       # Bus A mux (ALU operand A)
       bus_a <= mux(set_bus_a_to == lit(0, width: 4), b_reg,
                mux(set_bus_a_to == lit(1, width: 4), c_reg,
@@ -443,13 +318,11 @@ module GameBoy
                mux(set_bus_b_to == lit(6, width: 4), di_reg,
                mux(set_bus_b_to == lit(7, width: 4), acc,
                    acc))))))))
-    end
 
-    # =========================================================================
-    # Combinational Outputs
-    # =========================================================================
+      # -----------------------------------------------------------------------
+      # Combinational Outputs
+      # -----------------------------------------------------------------------
 
-    behavior do
       # STOP instruction detection
       stop_out <= is_stop
 
@@ -492,9 +365,9 @@ module GameBoy
       h_reg: 0x01, l_reg: 0x4D,
       sp: 0xFFFE, pc: 0x0100,
 
-      # State
+      # State - t_state starts at 1 (valid range is 1-4)
       ir: 0x00, wz: 0x0000,
-      m_cycle: 1, t_state: 0,
+      m_cycle: 1, t_state: 1,
       int_e_ff1: 0, int_e_ff2: 0,
       halt_ff: 0, int_cycle: 0,
 
