@@ -502,6 +502,26 @@ impl IrSimulator {
 
     /// Clock tick - sample registers on rising edges
     fn tick(&mut self) {
+        if let Some(ref lib) = self.compiled_lib {
+            // Use compiled tick function
+            unsafe {
+                type TickFn = unsafe extern "C" fn(*mut u64, usize, *mut u64, *mut u64);
+                let func: libloading::Symbol<TickFn> =
+                    lib.get(b"tick").expect("tick function not found");
+                func(
+                    self.signals.as_mut_ptr(),
+                    self.signals.len(),
+                    self.old_clocks.as_mut_ptr(),
+                    self.next_regs.as_mut_ptr(),
+                );
+            }
+        } else {
+            // Fallback to interpreted mode
+            self.tick_interpreted();
+        }
+    }
+
+    fn tick_interpreted(&mut self) {
         // Multi-clock domain timing:
         // 1. Sample ALL register expressions ONCE at tick start (before any updates)
         // 2. Evaluate combinational logic and detect clock edges
@@ -782,6 +802,11 @@ impl IrSimulator {
 
         // Generate run_cpu_cycles function
         self.generate_run_cpu_cycles(&mut code);
+
+        // Generate run_mos6502_cycles function (if in MOS6502 mode)
+        if self.mos6502_mode {
+            self.generate_run_mos6502_cycles(&mut code);
+        }
 
         code
     }
@@ -1165,6 +1190,76 @@ impl IrSimulator {
         code.push_str("}\n");
     }
 
+    fn generate_run_mos6502_cycles(&self, code: &mut String) {
+        let addr_idx = self.mos6502_addr_idx;
+        let data_in_idx = self.mos6502_data_in_idx;
+        let data_out_idx = self.mos6502_data_out_idx;
+        let rw_idx = self.mos6502_rw_idx;
+        let clk_idx = self.mos6502_clk_idx;
+
+        let clock_indices: Vec<usize> = self.clock_indices.clone();
+        let num_clocks = clock_indices.len().max(1);
+        let num_regs = self.seq_targets.len();
+
+        // Find clock list index for the MOS6502 clock
+        let clk_list_idx = clock_indices.iter().position(|&ci| ci == clk_idx);
+
+        code.push_str("\n/// Run N MOS6502 CPU cycles with internalized memory bridging\n");
+        code.push_str("#[no_mangle]\n");
+        code.push_str("pub unsafe extern \"C\" fn run_mos6502_cycles(\n");
+        code.push_str("    signals: *mut u64,\n");
+        code.push_str("    signals_len: usize,\n");
+        code.push_str("    memory: *mut u8,\n");
+        code.push_str("    rom_mask: *const bool,\n");
+        code.push_str("    n: usize,\n");
+        code.push_str(") -> usize {\n");
+        code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, signals_len);\n");
+        code.push_str("    let memory = std::slice::from_raw_parts_mut(memory, 65536);\n");
+        code.push_str("    let rom_mask = std::slice::from_raw_parts(rom_mask, 65536);\n");
+        code.push_str(&format!("    let mut old_clocks = [0u64; {}];\n", num_clocks));
+        code.push_str(&format!("    let mut next_regs = [0u64; {}];\n", num_regs.max(1)));
+        code.push_str("\n");
+
+        // Initialize old_clocks
+        for (i, &clk) in clock_indices.iter().enumerate() {
+            code.push_str(&format!("    old_clocks[{}] = signals[{}];\n", i, clk));
+        }
+        code.push_str("\n");
+
+        code.push_str("    for _ in 0..n {\n");
+
+        // Clock falling edge
+        if let Some(idx) = clk_list_idx {
+            code.push_str(&format!("        old_clocks[{}] = 1; // Previous state was high\n", idx));
+        }
+        code.push_str(&format!("        signals[{}] = 0;\n", clk_idx));
+        code.push_str("        evaluate_inline(signals);\n\n");
+
+        // Memory bridging (after evaluate, addr is valid)
+        code.push_str(&format!("        let addr = (signals[{}] as usize) & 0xFFFF;\n", addr_idx));
+        code.push_str(&format!("        let rw = signals[{}];\n", rw_idx));
+        code.push_str("\n");
+        code.push_str("        if rw == 1 {\n");
+        code.push_str("            // Read: provide data from memory to CPU\n");
+        code.push_str(&format!("            signals[{}] = memory[addr] as u64;\n", data_in_idx));
+        code.push_str("        } else {\n");
+        code.push_str("            // Write: store CPU data to memory (unless ROM protected)\n");
+        code.push_str("            if !rom_mask[addr] {\n");
+        code.push_str(&format!("                memory[addr] = (signals[{}] & 0xFF) as u8;\n", data_out_idx));
+        code.push_str("            }\n");
+        code.push_str("        }\n\n");
+
+        // Clock rising edge
+        if let Some(idx) = clk_list_idx {
+            code.push_str(&format!("        old_clocks[{}] = 0; // Previous state was low\n", idx));
+        }
+        code.push_str(&format!("        signals[{}] = 1;\n", clk_idx));
+        code.push_str("        tick_inline(signals, &mut old_clocks, &mut next_regs);\n");
+        code.push_str("    }\n\n");
+        code.push_str("    n\n");
+        code.push_str("}\n");
+    }
+
     fn compile(&mut self) -> Result<bool, String> {
         let code = self.generate_code();
 
@@ -1378,6 +1473,29 @@ impl IrSimulator {
             return 0;
         }
 
+        // Use compiled function if available
+        if let Some(ref lib) = self.compiled_lib {
+            unsafe {
+                type RunMos6502CyclesFn = unsafe extern "C" fn(
+                    *mut u64, usize, *mut u8, *const bool, usize
+                ) -> usize;
+                if let Ok(func) = lib.get::<RunMos6502CyclesFn>(b"run_mos6502_cycles") {
+                    return func(
+                        self.signals.as_mut_ptr(),
+                        self.signals.len(),
+                        self.mos6502_memory.as_mut_ptr(),
+                        self.mos6502_rom_mask.as_ptr(),
+                        n,
+                    );
+                }
+            }
+        }
+
+        // Fallback to interpreted mode
+        self.run_mos6502_cycles_interpreted(n)
+    }
+
+    fn run_mos6502_cycles_interpreted(&mut self, n: usize) -> usize {
         // Find clock index in our clock_indices array for proper edge detection
         let clk_list_idx = self.clock_indices.iter().position(|&ci| ci == self.mos6502_clk_idx);
 
