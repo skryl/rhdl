@@ -243,13 +243,22 @@ module RHDL
           runners = [
             { name: 'Interpreter', backend: :interpreter, available_const: :IR_INTERPRETER_AVAILABLE },
             { name: 'JIT', backend: :jit, available_const: :IR_JIT_AVAILABLE },
-            { name: 'Compiler', backend: :compiler, available_const: :IR_COMPILER_AVAILABLE }
+            { name: 'Compiler', backend: :compiler, available_const: :IR_COMPILER_AVAILABLE },
+            { name: 'Verilator', backend: :verilator }
           ]
 
           results = []
 
           runners.each do |runner|
-            available = RHDL::Codegen::IR.const_get(runner[:available_const]) rescue false
+            # Check availability
+            if runner[:available_const]
+              available = RHDL::Codegen::IR.const_get(runner[:available_const]) rescue false
+            elsif runner[:backend] == :verilator
+              available = verilator_available?
+            else
+              available = false
+            end
+
             unless available
               puts "\n#{runner[:name]}: SKIPPED (not available)"
               results << { name: runner[:name], status: :skipped }
@@ -265,79 +274,101 @@ module RHDL
               $stdout.flush
               init_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
-              bus = MOS6502::Apple2Bus.new("bench_bus")
+              is_verilator = runner[:backend] == :verilator
+              bus = nil
+              sim = nil
 
-              sim = case runner[:backend]
-              when :interpreter
-                RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json)
-              when :jit
-                RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
-              when :compiler
-                RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json)
+              if is_verilator
+                require_relative '../../../../examples/mos6502/utilities/mos6502_verilator'
+                sim = MOS6502::VerilatorRunner.new
+              else
+                bus = MOS6502::Apple2Bus.new("bench_bus")
+
+                sim = case runner[:backend]
+                when :interpreter
+                  RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json)
+                when :jit
+                  RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
+                when :compiler
+                  RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json)
+                end
               end
 
               init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
-
-              # Check if Rust MOS6502 mode is available
-              use_rust_memory = sim.respond_to?(:mos6502_mode?) && sim.mos6502_mode?
 
               # Load ROM and RAM
               print "loading... "
               $stdout.flush
 
-              # Always load into Ruby bus (needed for reset sequence)
-              bus.load_rom(rom_data, base_addr: 0xD000)
-              bus.load_ram(karateka_mem, base_addr: 0x0000)
-              memory = bus.instance_variable_get(:@memory)
-              memory[0xFFFC] = 0x2A  # low byte of $B82A
-              memory[0xFFFD] = 0xB8  # high byte of $B82A
+              if is_verilator
+                # Verilator: load memory and set reset vector
+                sim.load_memory(rom_data, 0xD000)
+                sim.load_memory(karateka_mem, 0x0000)
+                sim.set_reset_vector(0xB82A)
+              else
+                # Check if Rust MOS6502 mode is available
+                use_rust_memory = sim.respond_to?(:mos6502_mode?) && sim.mos6502_mode?
 
-              if use_rust_memory
-                # Also load into Rust memory for batched execution
-                sim.load_mos6502_memory(rom_data, 0xD000, true)   # ROM
-                sim.load_mos6502_memory(karateka_mem, 0x0000, false)  # RAM
-                sim.set_mos6502_reset_vector(0xB82A)
+                # Always load into Ruby bus (needed for reset sequence)
+                bus.load_rom(rom_data, base_addr: 0xD000)
+                bus.load_ram(karateka_mem, base_addr: 0x0000)
+                memory = bus.instance_variable_get(:@memory)
+                memory[0xFFFC] = 0x2A  # low byte of $B82A
+                memory[0xFFFD] = 0xB8  # high byte of $B82A
+
+                if use_rust_memory
+                  # Also load into Rust memory for batched execution
+                  sim.load_mos6502_memory(rom_data, 0xD000, true)   # ROM
+                  sim.load_mos6502_memory(karateka_mem, 0x0000, false)  # RAM
+                  sim.set_mos6502_reset_vector(0xB82A)
+                end
               end
 
               # Reset CPU
-              sim.poke('rst', 1)
-              sim.poke('rdy', 1)
-              sim.poke('irq', 1)
-              sim.poke('nmi', 1)
-              sim.poke('data_in', 0)
-              sim.poke('ext_pc_load_en', 0)
-              sim.poke('ext_a_load_en', 0)
-              sim.poke('ext_x_load_en', 0)
-              sim.poke('ext_y_load_en', 0)
-              sim.poke('ext_sp_load_en', 0)
+              if is_verilator
+                sim.reset
+              else
+                sim.poke('rst', 1)
+                sim.poke('rdy', 1)
+                sim.poke('irq', 1)
+                sim.poke('nmi', 1)
+                sim.poke('data_in', 0)
+                sim.poke('ext_pc_load_en', 0)
+                sim.poke('ext_a_load_en', 0)
+                sim.poke('ext_x_load_en', 0)
+                sim.poke('ext_y_load_en', 0)
+                sim.poke('ext_sp_load_en', 0)
 
-              # Clock tick with memory bridging (Ruby fallback)
-              clock_tick = lambda do
-                addr = sim.peek('addr')
-                rw = sim.peek('rw')
-                if rw == 1
-                  data = bus.read(addr)
-                  sim.poke('data_in', data)
-                else
-                  data = sim.peek('data_out')
-                  bus.write(addr, data)
+                # Clock tick with memory bridging (Ruby fallback)
+                clock_tick = lambda do
+                  addr = sim.peek('addr')
+                  rw = sim.peek('rw')
+                  if rw == 1
+                    data = bus.read(addr)
+                    sim.poke('data_in', data)
+                  else
+                    data = sim.peek('data_out')
+                    bus.write(addr, data)
+                  end
+                  sim.poke('clk', 0)
+                  sim.tick
+                  sim.poke('clk', 1)
+                  sim.tick
                 end
-                sim.poke('clk', 0)
-                sim.tick
-                sim.poke('clk', 1)
-                sim.tick
-              end
 
-              # Run reset sequence
-              clock_tick.call
-              sim.poke('rst', 0)
-              6.times { clock_tick.call }
+                # Run reset sequence
+                clock_tick.call
+                sim.poke('rst', 0)
+                6.times { clock_tick.call }
+              end
 
               # Benchmark
               print "running #{cycles} cycles... "
               $stdout.flush
               run_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-              if use_rust_memory
+              if is_verilator
+                sim.run_cycles(cycles)
+              elsif use_rust_memory
                 # Use batched Rust execution - no FFI per cycle!
                 sim.run_mos6502_cycles(cycles)
               else
@@ -347,7 +378,7 @@ module RHDL
               run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
 
               cycles_per_sec = cycles / run_elapsed
-              pc = sim.peek('reg_pc')
+              pc = is_verilator ? sim.pc : sim.peek('reg_pc')
 
               puts "done"
               puts "  Init time: #{format('%.3f', init_elapsed)}s"
