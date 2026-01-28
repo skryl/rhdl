@@ -12,8 +12,11 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   ROM_PATH = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
   KARATEKA_MEM_PATH = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
 
-  # Test parameters
-  TOTAL_CYCLES = 20_000_000
+  # Test parameters - can be overridden via environment variables
+  # Usage: START_CYCLES=25000000 END_CYCLES=35000000 rspec spec/examples/apple2/karateka_divergence_spec.rb
+  START_CYCLES = (ENV['START_CYCLES'] || 0).to_i
+  END_CYCLES = (ENV['END_CYCLES'] || 20_000_000).to_i
+  TOTAL_CYCLES = END_CYCLES - START_CYCLES
   PC_SAMPLE_INTERVAL = 50_000     # Sample PC every 50K cycles for sequence
   CHECKPOINT_INTERVAL = 500_000   # Checkpoint every 500K cycles for progress
   SCREEN_INTERVAL = 5_000_000     # Print screen every 5M cycles
@@ -325,7 +328,12 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
     puts "\n" + "=" * 70
     puts "Karateka PC Sequence Subsequence Matching"
-    puts "Total cycles: #{TOTAL_CYCLES.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
+    if START_CYCLES > 0
+      puts "Cycle range: #{START_CYCLES.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse} - #{END_CYCLES.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
+    else
+      puts "Total cycles: #{END_CYCLES.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
+    end
+    puts "Analysis cycles: #{TOTAL_CYCLES.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
     puts "PC sample interval: #{PC_SAMPLE_INTERVAL / 1000}K cycles"
     puts "=" * 70
 
@@ -336,6 +344,35 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
     puts "  ISA: Native Rust ISA simulator"
     puts "  IR:  Rust IR Compiler (sub_cycles=14)"
+
+    # Warmup phase - fast-forward to START_CYCLES if needed
+    if START_CYCLES > 0
+      puts "\nWarming up to #{START_CYCLES / 1_000_000.0}M cycles..."
+      warmup_start = Time.now
+      warmup_batch = 100_000
+      warmup_run = 0
+
+      while warmup_run < START_CYCLES
+        batch = [warmup_batch, START_CYCLES - warmup_run].min
+        batch.times { isa_cpu.step unless isa_cpu.halted? }
+        ir_sim.run_cpu_cycles(batch, 0, false)
+        warmup_run += batch
+
+        if warmup_run % 5_000_000 == 0
+          elapsed = Time.now - warmup_start
+          rate = warmup_run / elapsed / 1_000_000
+          puts "  Warmup: #{(warmup_run / 1_000_000.0).round(1)}M cycles (#{rate.round(2)}M/s)"
+        end
+      end
+
+      warmup_elapsed = Time.now - warmup_start
+      puts "  Warmup complete in #{warmup_elapsed.round(1)}s"
+
+      # Show state at warmup end
+      isa_pc = isa_cpu.pc
+      ir_pc = ir_sim.peek('cpu__pc_reg')
+      puts "  State at #{START_CYCLES / 1_000_000.0}M: ISA PC=$#{isa_pc.to_s(16).upcase.rjust(4, '0')} IR PC=$#{ir_pc.to_s(16).upcase.rjust(4, '0')}"
+    end
 
     # Collect PC sequences
     isa_pc_sequence = []
@@ -395,23 +432,24 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
         elapsed = Time.now - start_time
         rate = cycles_run / elapsed / 1_000_000
         pct = (cycles_run.to_f / TOTAL_CYCLES * 100).round(1)
+        absolute_cycles = START_CYCLES + cycles_run
 
         puts format("  %5.1f%% | %7.1fM | ISA PC=%04X region=%-8s | IR PC=%04X region=%-8s | %.2fM/s",
-                    pct, cycles_run / 1_000_000.0,
+                    pct, absolute_cycles / 1_000_000.0,
                     isa_pc, pc_region(isa_pc),
                     ir_pc, pc_region(ir_pc),
                     rate)
 
-        # Print screen at intervals
-        if (cycles_run % SCREEN_INTERVAL).zero?
+        # Print screen at intervals (based on absolute cycles)
+        if ((absolute_cycles) % SCREEN_INTERVAL).zero?
           isa_page = hires_page_base_isa(isa_bus)
           ir_page = hires_page_base_ir(ir_sim)
 
           isa_bitmap = decode_hires_isa(isa_bus, isa_page)
-          print_hires_screen("ISA HiRes (page #{isa_page == 0x2000 ? 1 : 2})", isa_bitmap, cycles_run)
+          print_hires_screen("ISA HiRes (page #{isa_page == 0x2000 ? 1 : 2})", isa_bitmap, absolute_cycles)
 
           ir_bitmap = decode_hires_ir(ir_sim, ir_page)
-          print_hires_screen("IR HiRes (page #{ir_page == 0x2000 ? 1 : 2})", ir_bitmap, cycles_run)
+          print_hires_screen("IR HiRes (page #{ir_page == 0x2000 ? 1 : 2})", ir_bitmap, absolute_cycles)
         end
       end
     end
