@@ -183,6 +183,10 @@ struct IrSimulator {
     // Game Boy LCD framebuffer capture
     /// Game Boy mode flag
     gameboy_mode: bool,
+    /// CLK_SYS signal index for Game Boy
+    gb_clk_sys_idx: usize,
+    /// CE (clock enable) signal index for Game Boy
+    gb_ce_idx: usize,
     /// LCD clock enable signal index
     lcd_clkena_idx: usize,
     /// LCD data (2-bit grayscale) signal index
@@ -195,8 +199,6 @@ struct IrSimulator {
     lcd_on_idx: usize,
     /// Previous lcd_clkena value for edge detection
     prev_lcd_clkena: u64,
-    /// Previous lcd_hsync value for edge detection
-    prev_lcd_hsync: u64,
     /// Previous lcd_vsync value for edge detection
     prev_lcd_vsync: u64,
     /// Framebuffer (160x144 pixels, 2-bit grayscale stored as u8)
@@ -331,13 +333,16 @@ impl IrSimulator {
             && name_to_idx.contains_key("clk");
 
         // Detect Game Boy mode (has lcd_clkena, lcd_data_gb signals)
+        let gb_clk_sys_idx = *name_to_idx.get("clk_sys").unwrap_or(&0);
+        let gb_ce_idx = *name_to_idx.get("ce").unwrap_or(&0);
         let lcd_clkena_idx = *name_to_idx.get("lcd_clkena").unwrap_or(&0);
         let lcd_data_gb_idx = *name_to_idx.get("lcd_data_gb").unwrap_or(&0);
         let lcd_hsync_idx = *name_to_idx.get("lcd_hsync").unwrap_or(&0);
         let lcd_vsync_idx = *name_to_idx.get("lcd_vsync").unwrap_or(&0);
         let lcd_on_idx = *name_to_idx.get("lcd_on").unwrap_or(&0);
         let gameboy_mode = name_to_idx.contains_key("lcd_clkena")
-            && name_to_idx.contains_key("lcd_data_gb");
+            && name_to_idx.contains_key("lcd_data_gb")
+            && name_to_idx.contains_key("ce");
 
         Ok(Self {
             ir,
@@ -381,13 +386,14 @@ impl IrSimulator {
             mos6502_speaker_toggles: 0,
             // Game Boy LCD
             gameboy_mode,
+            gb_clk_sys_idx,
+            gb_ce_idx,
             lcd_clkena_idx,
             lcd_data_gb_idx,
             lcd_hsync_idx,
             lcd_vsync_idx,
             lcd_on_idx,
             prev_lcd_clkena: 0,
-            prev_lcd_hsync: 0,
             prev_lcd_vsync: 0,
             framebuffer: vec![0u8; 160 * 144],  // 160x144 Game Boy screen
             lcd_x: 0,
@@ -1157,6 +1163,8 @@ impl IrSimulator {
     }
 
     fn generate_run_gb_cycles(&self, code: &mut String) {
+        let gb_clk_sys_idx = self.gb_clk_sys_idx;
+        let gb_ce_idx = self.gb_ce_idx;
         let lcd_clkena_idx = self.lcd_clkena_idx;
         let lcd_data_gb_idx = self.lcd_data_gb_idx;
         let lcd_hsync_idx = self.lcd_hsync_idx;
@@ -1173,7 +1181,6 @@ impl IrSimulator {
         code.push_str("    x: u32,\n");
         code.push_str("    y: u32,\n");
         code.push_str("    prev_clkena: u32,\n");
-        code.push_str("    prev_hsync: u32,\n");
         code.push_str("    prev_vsync: u32,\n");
         code.push_str("    frame_count: u64,\n");
         code.push_str("}\n\n");
@@ -1210,14 +1217,19 @@ impl IrSimulator {
         code.push_str("\n");
 
         code.push_str("    for _ in 0..n {\n");
-        code.push_str("        // Run one cycle: evaluate and tick\n");
+        code.push_str("        // Run one cycle: set CE high, toggle clk_sys, evaluate, tick\n");
+        code.push_str(&format!("        signals[{}] = 1; // CE = 1\n", gb_ce_idx));
+        // Falling edge
+        code.push_str(&format!("        signals[{}] = 0; // clk_sys = 0\n", gb_clk_sys_idx));
+        code.push_str("        evaluate_inline(signals);\n");
+        // Rising edge - triggers sequential logic
+        code.push_str(&format!("        signals[{}] = 1; // clk_sys = 1\n", gb_clk_sys_idx));
         code.push_str("        evaluate_inline(signals);\n");
         code.push_str("        tick_inline(signals, old_clocks, next_regs);\n\n");
 
         // LCD pixel capture logic
         code.push_str("        // LCD pixel capture\n");
         code.push_str(&format!("        let clkena = signals[{}];\n", lcd_clkena_idx));
-        code.push_str(&format!("        let hsync = signals[{}];\n", lcd_hsync_idx));
         code.push_str(&format!("        let vsync = signals[{}];\n", lcd_vsync_idx));
         code.push_str("\n");
 
@@ -1230,16 +1242,8 @@ impl IrSimulator {
         code.push_str("            frames_completed += 1;\n");
         code.push_str("        }\n\n");
 
-        // Detect hsync rising edge (new line)
-        code.push_str("        // Detect hsync rising edge (new line)\n");
-        code.push_str("        if hsync == 1 && state.prev_hsync == 0 {\n");
-        code.push_str("            state.x = 0;\n");
-        code.push_str("            if state.y < 144 {\n");
-        code.push_str("                state.y += 1;\n");
-        code.push_str("            }\n");
-        code.push_str("        }\n\n");
-
         // Detect lcd_clkena rising edge (pixel output)
+        // We track lines by pixel count: every 160 pixels is a new line
         code.push_str("        // Detect lcd_clkena rising edge (pixel output)\n");
         code.push_str("        if clkena == 1 && state.prev_clkena == 0 {\n");
         code.push_str(&format!("            let pixel = (signals[{}] & 0x3) as u8;\n", lcd_data_gb_idx));
@@ -1248,12 +1252,18 @@ impl IrSimulator {
         code.push_str("                framebuffer[idx] = pixel;\n");
         code.push_str("            }\n");
         code.push_str("            state.x += 1;\n");
+        code.push_str("            // New line when x reaches 160\n");
+        code.push_str("            if state.x >= 160 {\n");
+        code.push_str("                state.x = 0;\n");
+        code.push_str("                state.y += 1;\n");
+        code.push_str("            }\n");
         code.push_str("        }\n\n");
 
         // Save previous values
         code.push_str("        state.prev_clkena = clkena as u32;\n");
-        code.push_str("        state.prev_hsync = hsync as u32;\n");
         code.push_str("        state.prev_vsync = vsync as u32;\n");
+        // Reset CE for next cycle
+        code.push_str(&format!("        signals[{}] = 0; // CE = 0\n", gb_ce_idx));
         code.push_str("    }\n\n");
 
         code.push_str("    GbCycleResult { cycles_run: n, frames_completed }\n");
@@ -1498,7 +1508,6 @@ impl IrSimulator {
                 x: self.lcd_x as u32,
                 y: self.lcd_y as u32,
                 prev_clkena: self.prev_lcd_clkena as u32,
-                prev_hsync: self.prev_lcd_hsync as u32,
                 prev_vsync: self.prev_lcd_vsync as u32,
                 frame_count: self.frame_count,
             };
@@ -1517,7 +1526,6 @@ impl IrSimulator {
             self.lcd_x = lcd_state.x as usize;
             self.lcd_y = lcd_state.y as usize;
             self.prev_lcd_clkena = lcd_state.prev_clkena as u64;
-            self.prev_lcd_hsync = lcd_state.prev_hsync as u64;
             self.prev_lcd_vsync = lcd_state.prev_vsync as u64;
             self.frame_count = lcd_state.frame_count;
 
@@ -1540,7 +1548,6 @@ impl IrSimulator {
         self.lcd_x = 0;
         self.lcd_y = 0;
         self.prev_lcd_clkena = 0;
-        self.prev_lcd_hsync = 0;
         self.prev_lcd_vsync = 0;
         self.frame_count = 0;
         self.framebuffer.fill(0);
@@ -1553,7 +1560,6 @@ struct GbLcdState {
     x: u32,
     y: u32,
     prev_clkena: u32,
-    prev_hsync: u32,
     prev_vsync: u32,
     frame_count: u64,
 }
