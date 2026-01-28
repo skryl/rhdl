@@ -54,7 +54,7 @@ module GameBoy
     end
 
     # Memory is managed at instance level for simulation
-    def initialize(name = nil)
+    def initialize(name = nil, **kwargs)
       super
       @ram = Array.new(DEPTH, 0)
     end
