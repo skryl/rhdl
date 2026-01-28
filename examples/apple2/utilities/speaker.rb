@@ -76,6 +76,31 @@ module RHDL
         @last_toggle_time = now
       end
 
+      # Sync batched toggles from IR/native simulation with estimated timing
+      # Used when speaker toggles are handled in native code and synced periodically
+      # @param count [Integer] Number of toggles that occurred
+      # @param elapsed_time [Float] Time elapsed during which toggles occurred
+      def sync_toggles(count, elapsed_time)
+        return unless @enabled && @running
+        return if count <= 0 || elapsed_time <= 0
+
+        @toggle_count += count
+
+        # Calculate average interval between toggles
+        avg_interval = elapsed_time / count
+
+        # Only generate audio if in valid frequency range
+        return if avg_interval < MIN_TOGGLE_INTERVAL || avg_interval > MAX_TOGGLE_INTERVAL
+
+        # Generate samples for each toggle with estimated timing
+        count.times do
+          generate_samples(avg_interval)
+          @speaker_state = !@speaker_state
+        end
+
+        @last_toggle_time = Time.now
+      end
+
       # Generate audio samples for a time interval
       def generate_samples(interval)
         num_samples = (interval * SAMPLE_RATE).to_i
