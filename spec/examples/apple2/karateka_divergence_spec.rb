@@ -365,7 +365,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     bitmap
   end
 
-  it 'verifies PC and opcode sequences match through 5M cycles', timeout: 300 do
+  it 'verifies PC and opcode sequences match through 5M cycles', timeout: 600 do
     skip 'AppleIIgo ROM not found' unless @rom_available
     skip 'Karateka memory dump not found' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
@@ -377,14 +377,33 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       skip 'IR Codegen not available'
     end
 
+    # Check if Verilator is available (optional for this test)
+    verilator_sim = nil
+    if verilator_available?
+      puts "\nVerilator available - will include in comparison"
+    else
+      puts "\nVerilator not available - comparing ISA and IR only"
+    end
+
     puts "\n" + "=" * 70
     puts "Karateka PC and Opcode Verification (5M cycles)"
     puts "=" * 70
 
     # Create simulators
     puts "\nInitializing simulators..."
+    init_start = Time.now
     isa_cpu, isa_bus = create_isa_simulator
+    puts "  ISA: Native Rust ISA simulator (#{(Time.now - init_start).round(2)}s)"
+
+    ir_start = Time.now
     ir_sim = create_ir_compiler
+    puts "  IR:  Rust IR Compiler (#{(Time.now - ir_start).round(2)}s)"
+
+    if verilator_available?
+      verilator_start = Time.now
+      verilator_sim = create_verilator_runner
+      puts "  Verilator: HDL simulation (#{(Time.now - verilator_start).round(2)}s)"
+    end
 
     # Checkpoint cycle counts to verify (up to 5M cycles)
     checkpoints = [100_000, 500_000, 1_000_000, 2_000_000, 3_000_000, 4_000_000, 5_000_000]
@@ -457,29 +476,45 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
         end
       end
 
+      # Run Verilator for this checkpoint (batch execution)
+      if verilator_sim
+        verilator_sim.run_steps(cycles_to_run)
+      end
+
       cycles_run = target_cycles
 
       # Get current PCs for checkpoint
       isa_pc = isa_cpu.pc
       ir_pc = ir_sim.peek('cpu__pc_reg')
+      verilator_pc = verilator_sim&.pc
 
       isa_region = pc_region(isa_pc)
       ir_region = pc_region(ir_pc)
+      verilator_region = verilator_pc ? pc_region(verilator_pc) : nil
 
       pc_diff = (isa_pc - ir_pc).abs
       close = pc_diff < 256 || isa_region == ir_region
 
       status = close ? "OK" : "DIVERGED"
-      puts format("  %5.1fM: ISA PC=$%04X (%s) IR PC=$%04X (%s) ops=%d/%d - %s",
-                  target_cycles / 1_000_000.0, isa_pc, isa_region, ir_pc, ir_region,
-                  isa_instruction_count, ir_instruction_count, status)
+      if verilator_sim
+        puts format("  %5.1fM: ISA=$%04X (%s) IR=$%04X (%s) Ver=$%04X (%s) ops=%d/%d - %s",
+                    target_cycles / 1_000_000.0, isa_pc, isa_region, ir_pc, ir_region,
+                    verilator_pc, verilator_region,
+                    isa_instruction_count, ir_instruction_count, status)
+      else
+        puts format("  %5.1fM: ISA PC=$%04X (%s) IR PC=$%04X (%s) ops=%d/%d - %s",
+                    target_cycles / 1_000_000.0, isa_pc, isa_region, ir_pc, ir_region,
+                    isa_instruction_count, ir_instruction_count, status)
+      end
 
       results << {
         cycles: target_cycles,
         isa_pc: isa_pc,
         ir_pc: ir_pc,
+        verilator_pc: verilator_pc,
         isa_region: isa_region,
         ir_region: ir_region,
+        verilator_region: verilator_region,
         close: close
       }
     end
@@ -501,8 +536,26 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       if failed.any?
         puts "#{failed.length} checkpoints failed:"
         failed.each do |f|
-          puts "  #{f[:cycles] / 1_000_000.0}M: ISA=$#{f[:isa_pc].to_s(16).upcase} IR=$#{f[:ir_pc].to_s(16).upcase}"
+          ver_str = f[:verilator_pc] ? " Ver=$#{f[:verilator_pc].to_s(16).upcase}" : ""
+          puts "  #{f[:cycles] / 1_000_000.0}M: ISA=$#{f[:isa_pc].to_s(16).upcase} IR=$#{f[:ir_pc].to_s(16).upcase}#{ver_str}"
         end
+      end
+    end
+
+    # Verilator summary if available
+    if verilator_sim
+      verilator_unique_pcs = results.map { |r| r[:verilator_pc] }.compact.uniq
+      verilator_regions = results.map { |r| r[:verilator_region] }.compact.tally
+      puts "\nVerilator summary:"
+      puts "  Unique PCs at checkpoints: #{verilator_unique_pcs.length}"
+      puts "  Regions visited: #{verilator_regions.map { |r, c| "#{r}=#{c}" }.join(', ')}"
+
+      # Check if Verilator visits game regions
+      ver_visits_game = verilator_regions.keys.any? { |r| [:rom, :high_ram, :user].include?(r) }
+      if ver_visits_game
+        puts "  ✅ Verilator visits game regions"
+      else
+        puts "  ❌ Verilator not visiting game regions"
       end
     end
 
@@ -511,6 +564,13 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
     expect(failed).to be_empty,
       "All cycle checkpoints should have close PCs, but #{failed.length} diverged"
+
+    # Additional Verilator assertion if available
+    if verilator_sim
+      verilator_unique_pcs = results.map { |r| r[:verilator_pc] }.compact.uniq
+      expect(verilator_unique_pcs.length).to be > 1,
+        "Verilator should visit multiple PCs, not stuck at one location"
+    end
   end
 
   it 'compares ISA vs IR vs Verilator through 100K cycles', timeout: 300 do
@@ -693,7 +753,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       "ISA and IR should have close PCs at all checkpoints"
   end
 
-  it 'verifies PC sequence subsequence matching over 20M cycles', timeout: 1200 do
+  it 'verifies PC sequence subsequence matching over 20M cycles', timeout: 1800 do
     skip 'AppleIIgo ROM not found' unless @rom_available
     skip 'Karateka memory dump not found' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
@@ -703,6 +763,14 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
     rescue LoadError
       skip 'IR Codegen not available'
+    end
+
+    # Check if Verilator is available (optional for this test)
+    verilator_sim = nil
+    if verilator_available?
+      puts "\nVerilator available - will include in comparison"
+    else
+      puts "\nVerilator not available - comparing ISA and IR only"
     end
 
     puts "\n" + "=" * 70
@@ -718,11 +786,19 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
     # Create simulators
     puts "\nInitializing simulators..."
+    init_start = Time.now
     isa_cpu, isa_bus = create_isa_simulator
-    ir_sim = create_ir_compiler
+    puts "  ISA: Native Rust ISA simulator (#{(Time.now - init_start).round(2)}s)"
 
-    puts "  ISA: Native Rust ISA simulator"
-    puts "  IR:  Rust IR Compiler (sub_cycles=14)"
+    ir_start = Time.now
+    ir_sim = create_ir_compiler
+    puts "  IR:  Rust IR Compiler (sub_cycles=14) (#{(Time.now - ir_start).round(2)}s)"
+
+    if verilator_available?
+      verilator_start = Time.now
+      verilator_sim = create_verilator_runner
+      puts "  Verilator: HDL simulation (#{(Time.now - verilator_start).round(2)}s)"
+    end
 
     # Warmup phase - fast-forward to START_CYCLES if needed
     if START_CYCLES > 0
@@ -735,6 +811,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
         batch = [warmup_batch, START_CYCLES - warmup_run].min
         batch.times { isa_cpu.step unless isa_cpu.halted? }
         ir_sim.run_cpu_cycles(batch, 0, false)
+        verilator_sim&.run_steps(batch)
         warmup_run += batch
 
         if warmup_run % 5_000_000 == 0
@@ -750,20 +827,25 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       # Show state at warmup end
       isa_pc = isa_cpu.pc
       ir_pc = ir_sim.peek('cpu__pc_reg')
-      puts "  State at #{START_CYCLES / 1_000_000.0}M: ISA PC=$#{isa_pc.to_s(16).upcase.rjust(4, '0')} IR PC=$#{ir_pc.to_s(16).upcase.rjust(4, '0')}"
+      verilator_pc_str = verilator_sim ? " Ver=$#{verilator_sim.pc.to_s(16).upcase.rjust(4, '0')}" : ""
+      puts "  State at #{START_CYCLES / 1_000_000.0}M: ISA=$#{isa_pc.to_s(16).upcase.rjust(4, '0')} IR=$#{ir_pc.to_s(16).upcase.rjust(4, '0')}#{verilator_pc_str}"
     end
 
     # Collect PC sequences
     isa_pc_sequence = []
     ir_pc_sequence = []
+    verilator_pc_sequence = []
     isa_page_sequence = []  # PC pages (256-byte granularity)
     ir_page_sequence = []
+    verilator_page_sequence = []
 
     # Collect opcode sequences
     isa_opcode_sequence = []
     ir_opcode_sequence = []
+    verilator_opcode_sequence = []
     isa_opcode_category_sequence = []
     ir_opcode_category_sequence = []
+    verilator_opcode_category_sequence = []
 
     cycles_run = 0
     last_sample = 0
@@ -785,25 +867,34 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       # Run IR
       ir_sim.run_cpu_cycles(batch_size, 0, false)
 
+      # Run Verilator
+      verilator_sim&.run_steps(batch_size)
+
       cycles_run += batch_size
 
       # Sample PC
       isa_pc = isa_cpu.pc
       ir_pc = ir_sim.peek('cpu__pc_reg')
+      verilator_pc = verilator_sim&.pc
 
       isa_pc_sequence << isa_pc
       ir_pc_sequence << ir_pc
+      verilator_pc_sequence << verilator_pc if verilator_sim
       isa_page_sequence << pc_page(isa_pc)
       ir_page_sequence << pc_page(ir_pc)
+      verilator_page_sequence << pc_page(verilator_pc) if verilator_sim
 
       # Sample opcode (read byte at current PC for ISA, use debug signal for IR)
       isa_opcode = isa_bus.mem_read(isa_pc) & 0xFF
       ir_opcode = ir_sim.peek('opcode_debug') & 0xFF
+      verilator_opcode = verilator_sim ? (verilator_sim.read(verilator_pc) & 0xFF) : nil
 
       isa_opcode_sequence << isa_opcode
       ir_opcode_sequence << ir_opcode
+      verilator_opcode_sequence << verilator_opcode if verilator_sim
       isa_opcode_category_sequence << opcode_category(isa_opcode)
       ir_opcode_category_sequence << opcode_category(ir_opcode)
+      verilator_opcode_category_sequence << opcode_category(verilator_opcode) if verilator_sim
 
       # Progress output at checkpoints
       if cycles_run - last_sample >= CHECKPOINT_INTERVAL
@@ -813,10 +904,12 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
         pct = (cycles_run.to_f / TOTAL_CYCLES * 100).round(1)
         absolute_cycles = START_CYCLES + cycles_run
 
-        puts format("  %5.1f%% | %7.1fM | ISA PC=%04X region=%-8s | IR PC=%04X region=%-8s | %.2fM/s",
+        ver_str = verilator_sim ? format(" | Ver=%04X %-8s", verilator_pc, pc_region(verilator_pc)) : ""
+        puts format("  %5.1f%% | %7.1fM | ISA=%04X %-8s | IR=%04X %-8s%s | %.2fM/s",
                     pct, absolute_cycles / 1_000_000.0,
                     isa_pc, pc_region(isa_pc),
                     ir_pc, pc_region(ir_pc),
+                    ver_str,
                     rate)
 
         # Print screen at intervals (based on absolute cycles)
@@ -829,6 +922,11 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
           ir_bitmap = decode_hires_ir(ir_sim, ir_page)
           print_hires_screen("IR HiRes (page #{ir_page == 0x2000 ? 1 : 2})", ir_bitmap, absolute_cycles)
+
+          if verilator_sim
+            verilator_bitmap = decode_hires_verilator(verilator_sim, 0x2000)
+            print_hires_screen("Verilator HiRes", verilator_bitmap, absolute_cycles)
+          end
         end
       end
     end
@@ -845,26 +943,31 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     puts "\nSequence lengths:"
     puts "  ISA: #{isa_pc_sequence.length} samples"
     puts "  IR:  #{ir_pc_sequence.length} samples"
+    puts "  Verilator: #{verilator_pc_sequence.length} samples" if verilator_sim
 
     # Unique PCs visited
     isa_unique = isa_pc_sequence.uniq
     ir_unique = ir_pc_sequence.uniq
+    verilator_unique = verilator_pc_sequence.uniq if verilator_sim
     common_pcs = isa_unique & ir_unique
 
     puts "\nUnique PCs visited:"
     puts "  ISA: #{isa_unique.length} unique PCs"
     puts "  IR:  #{ir_unique.length} unique PCs"
-    puts "  Common: #{common_pcs.length} PCs visited by both"
+    puts "  Verilator: #{verilator_unique.length} unique PCs" if verilator_sim
+    puts "  Common (ISA & IR): #{common_pcs.length} PCs visited by both"
 
     # Page-level analysis (more tolerant of timing)
     isa_unique_pages = isa_page_sequence.uniq
     ir_unique_pages = ir_page_sequence.uniq
+    verilator_unique_pages = verilator_page_sequence.uniq if verilator_sim
     common_pages = isa_unique_pages & ir_unique_pages
 
     puts "\nUnique PC pages (256-byte granularity):"
     puts "  ISA: #{isa_unique_pages.length} unique pages"
     puts "  IR:  #{ir_unique_pages.length} unique pages"
-    puts "  Common: #{common_pages.length} pages visited by both"
+    puts "  Verilator: #{verilator_unique_pages.length} unique pages" if verilator_sim
+    puts "  Common (ISA & IR): #{common_pages.length} pages visited by both"
 
     # LCS analysis on page sequences
     lcs_len = lcs_length(isa_page_sequence, ir_page_sequence)
@@ -886,13 +989,16 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     # Region analysis
     isa_regions = isa_pc_sequence.map { |pc| pc_region(pc) }
     ir_regions = ir_pc_sequence.map { |pc| pc_region(pc) }
+    verilator_regions = verilator_pc_sequence.map { |pc| pc_region(pc) } if verilator_sim
 
     isa_region_counts = isa_regions.tally.sort_by { |_, v| -v }
     ir_region_counts = ir_regions.tally.sort_by { |_, v| -v }
+    verilator_region_counts = verilator_regions.tally.sort_by { |_, v| -v } if verilator_sim
 
     puts "\nRegion distribution:"
     puts "  ISA: #{isa_region_counts.map { |r, c| "#{r}=#{c}" }.join(', ')}"
     puts "  IR:  #{ir_region_counts.map { |r, c| "#{r}=#{c}" }.join(', ')}"
+    puts "  Verilator: #{verilator_region_counts.map { |r, c| "#{r}=#{c}" }.join(', ')}" if verilator_sim
 
     # Opcode sequence analysis
     puts "\n" + "=" * 70
@@ -902,22 +1008,26 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     # Unique opcodes
     isa_unique_opcodes = isa_opcode_sequence.uniq.sort
     ir_unique_opcodes = ir_opcode_sequence.uniq.sort
+    verilator_unique_opcodes = verilator_opcode_sequence.uniq.sort if verilator_sim
     common_opcodes = isa_unique_opcodes & ir_unique_opcodes
 
     puts "\nUnique opcodes executed:"
     puts "  ISA: #{isa_unique_opcodes.length} unique opcodes"
     puts "  IR:  #{ir_unique_opcodes.length} unique opcodes"
-    puts "  Common: #{common_opcodes.length} opcodes used by both"
+    puts "  Verilator: #{verilator_unique_opcodes.length} unique opcodes" if verilator_sim
+    puts "  Common (ISA & IR): #{common_opcodes.length} opcodes used by both"
 
     # Opcode category analysis (more tolerant comparison)
     isa_unique_categories = isa_opcode_category_sequence.uniq
     ir_unique_categories = ir_opcode_category_sequence.uniq
+    verilator_unique_categories = verilator_opcode_category_sequence.uniq if verilator_sim
     common_categories = isa_unique_categories & ir_unique_categories
 
     puts "\nUnique opcode categories:"
     puts "  ISA: #{isa_unique_categories.length} categories"
     puts "  IR:  #{ir_unique_categories.length} categories"
-    puts "  Common: #{common_categories.length} categories"
+    puts "  Verilator: #{verilator_unique_categories.length} categories" if verilator_sim
+    puts "  Common (ISA & IR): #{common_categories.length} categories"
 
     # LCS on opcode category sequences
     opcode_lcs_len = lcs_length(isa_opcode_category_sequence, ir_opcode_category_sequence)
@@ -968,12 +1078,15 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     # Text memory comparison
     isa_text = text_checksum_isa(isa_bus)
     ir_text = text_checksum_ir(ir_sim)
+    verilator_text = text_checksum_verilator(verilator_sim) if verilator_sim
     text_match = isa_text == ir_text
 
     puts "\nFinal text memory:"
     puts "  ISA checksum: #{isa_text.to_s(16)}"
     puts "  IR checksum:  #{ir_text.to_s(16)}"
-    puts "  Match: #{text_match ? 'YES' : 'NO'}"
+    puts "  Verilator checksum: #{verilator_text.to_s(16)}" if verilator_sim
+    puts "  ISA/IR Match: #{text_match ? 'YES' : 'NO'}"
+    puts "  ISA/Ver Match: #{isa_text == verilator_text ? 'YES' : 'NO'}" if verilator_sim
 
     # Summary
     puts "\n" + "=" * 70
@@ -1050,6 +1163,28 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       puts "❌ IR executed #{ir_anomalous.length} opcodes from HiRes memory"
       passing = false
       issues << "IR executing from HiRes memory"
+    end
+
+    # Verilator-specific checks (informational, not assertions)
+    if verilator_sim
+      puts "\nVerilator summary:"
+      verilator_visits_game = verilator_region_counts.any? { |r, _| [:rom, :high_ram, :user].include?(r) }
+      verilator_stuck = verilator_region_counts.first[1] > (verilator_regions.length * 0.9)
+
+      if verilator_visits_game
+        puts "  ✅ Verilator visits game regions"
+      else
+        puts "  ⚠️  Verilator not visiting game regions (may be timing difference)"
+      end
+
+      if !verilator_stuck
+        puts "  ✅ Verilator visits multiple regions"
+      else
+        puts "  ⚠️  Verilator appears stuck in #{verilator_region_counts.first[0]} region"
+      end
+
+      verilator_unique_at_samples = verilator_pc_sequence.uniq.length
+      puts "  Unique PCs at samples: #{verilator_unique_at_samples}"
     end
 
     puts "\n"
