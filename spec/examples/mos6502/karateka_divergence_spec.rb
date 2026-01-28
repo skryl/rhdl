@@ -17,9 +17,10 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   KARATEKA_MEM_PATH = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
 
   # Test parameters
-  TOTAL_CYCLES = 5_000_000
-  CHECKPOINT_INTERVAL = 500_000  # Check every 500K cycles
+  TOTAL_CYCLES = 2_000_000       # 2M cycles for 4-way comparison
+  CHECKPOINT_INTERVAL = 200_000  # Check every 200K cycles
   SCREEN_INTERVAL = 1_000_000    # Print screen every 1M cycles
+  INTERPRETER_MAX_CYCLES = 500_000  # Interpreter is slow, limit to 500K
 
   before(:all) do
     @rom_available = File.exist?(ROM_PATH)
@@ -253,6 +254,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     puts "\n" + "=" * 80
     puts "Karateka MOS6502 4-Way Divergence Analysis"
     puts "Total cycles: #{TOTAL_CYCLES.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
+    puts "(Interpreter limited to #{INTERPRETER_MAX_CYCLES.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse} due to speed)"
     puts "=" * 80
 
     # Create all available simulators
@@ -263,8 +265,8 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     simulators[:isa] = create_isa_simulator
     puts "  [x] ISA: Native Rust ISA simulator (reference)"
 
-    # IR backends (skip interpreter and compile - too slow for now)
-    [:jit].each do |backend|
+    # IR backends - all 4 implementations
+    [:interpret, :jit, :compile].each do |backend|
       if ir_backend_available?(backend)
         simulators[backend] = create_ir_simulator(backend)
         puts "  [x] IR #{backend.to_s.capitalize}: Available"
@@ -294,16 +296,28 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     puts format("  %%     | Cycles  | %s | Rates (M/s)", sim_names)
     puts "  " + "-" * 98
 
+    # Track cycles run per simulator (interpreter has different limit)
+    sim_cycles = Hash.new(0)
+
     while cycles_run < TOTAL_CYCLES
       # Run batch of cycles
       batch_size = [CHECKPOINT_INTERVAL, TOTAL_CYCLES - cycles_run].min
 
       # Run all simulators and track time for each
       simulators.each do |key, sim|
+        # Interpreter has a lower cycle limit
+        max_cycles = key == :interpret ? INTERPRETER_MAX_CYCLES : TOTAL_CYCLES
+        next if sim_cycles[key] >= max_cycles
+
+        # Calculate batch for this simulator
+        sim_batch = [batch_size, max_cycles - sim_cycles[key]].min
+        next if sim_batch <= 0
+
         t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        sim.run_steps(batch_size)
+        sim.run_steps(sim_batch)
         t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         sim_times[key] += (t1 - t0)
+        sim_cycles[key] += sim_batch
       end
 
       cycles_run += batch_size
@@ -326,11 +340,15 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
 
       checkpoints << checkpoint
 
-      # Check for divergence from ISA reference
+      # Check for divergence from ISA reference (only for simulators still running)
       isa_data = checkpoint[:sims][:isa]
       simulators.each_key do |key|
         next if key == :isa
         next if divergence_points[key]
+
+        # Skip divergence check for simulators that have stopped
+        max_c = key == :interpret ? INTERPRETER_MAX_CYCLES : TOTAL_CYCLES
+        next if sim_cycles[key] >= max_c && cycles_run > sim_cycles[key]
 
         sim_data = checkpoint[:sims][key]
         if sim_data[:hires_p1] != isa_data[:hires_p1] ||
@@ -347,13 +365,23 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
       # Progress output
       pct = (cycles_run.to_f / TOTAL_CYCLES * 100).round(1)
 
-      pc_values = simulators.map { |k, _| format("%04X", checkpoint[:sims][k][:pc]) }.join(" | ")
-      # Per-simulator rates
-      rates = simulators.keys.map do |k|
+      # Show PC values, with "-" for stopped simulators
+      pc_values = simulators.map do |k, _|
+        max_c = k == :interpret ? INTERPRETER_MAX_CYCLES : TOTAL_CYCLES
+        if sim_cycles[k] >= max_c && cycles_run > sim_cycles[k]
+          "DONE".ljust(4)
+        else
+          format("%04X", checkpoint[:sims][k][:pc])
+        end
+      end.join(" | ")
+
+      # Per-simulator rates (based on actual cycles run)
+      rate_strs = simulators.keys.map do |k|
         t = sim_times[k]
-        t > 0 ? format("%.1f", cycles_run / t / 1_000_000) : "?"
+        c = sim_cycles[k]
+        t > 0 ? format("%.1f", c / t / 1_000_000) : "?"
       end.join("/")
-      puts format("  %5.1f%% | %5.1fM  | %s | %s", pct, cycles_run / 1_000_000.0, pc_values, rates)
+      puts format("  %5.1f%% | %5.1fM  | %s | %s", pct, cycles_run / 1_000_000.0, pc_values, rate_strs)
 
       # Print HiRes screen at intervals (only ISA to save space)
       if (cycles_run % SCREEN_INTERVAL).zero?
@@ -370,18 +398,21 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     puts "\n" + "=" * 80
     puts "PERFORMANCE SUMMARY"
     puts "=" * 80
-    puts "\n  Simulator     | Time (s) | Rate (M/s) | Relative"
-    puts "  " + "-" * 55
+    puts "\n  Simulator     | Cycles   | Time (s) | Rate (M/s) | Relative"
+    puts "  " + "-" * 65
 
-    # Find fastest for relative comparison
-    fastest_rate = simulators.keys.map { |k| sim_times[k] > 0 ? TOTAL_CYCLES / sim_times[k] : 0 }.max
+    # Calculate rates based on actual cycles run per simulator
+    rates = simulators.keys.map { |k| sim_times[k] > 0 ? sim_cycles[k] / sim_times[k] : 0 }
+    fastest_rate = rates.max
 
     simulators.each_key do |key|
       t = sim_times[key]
-      rate = t > 0 ? TOTAL_CYCLES / t / 1_000_000 : 0
-      relative = fastest_rate > 0 && t > 0 ? (TOTAL_CYCLES / t / fastest_rate * 100).round(1) : 0
-      puts format("  %-13s | %8.2f | %10.2f | %5.1f%%",
-                  key.to_s.upcase, t, rate, relative)
+      c = sim_cycles[key]
+      rate = t > 0 ? c / t / 1_000_000 : 0
+      relative = fastest_rate > 0 && t > 0 ? (c / t / fastest_rate * 100).round(1) : 0
+      cycles_str = c >= 1_000_000 ? "#{c / 1_000_000.0}M" : "#{c / 1_000}K"
+      puts format("  %-13s | %8s | %8.2f | %10.2f | %5.1f%%",
+                  key.to_s.upcase, cycles_str, t, rate, relative)
     end
 
     # Analyze results
@@ -409,13 +440,16 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     puts "\n" + "=" * 80
     puts "FINAL STATE SUMMARY"
     puts "=" * 80
-    puts "\n  Simulator     | PC     | A  | X  | Y  | Halted | HiRes P1   | HiRes P2   | Text"
-    puts "  " + "-" * 90
+    puts "\n  Simulator     | Cycles | PC     | A  | X  | Y  | Halted | HiRes P1   | HiRes P2   | Text"
+    puts "  " + "-" * 100
 
     last_cp = checkpoints.last
     last_cp[:sims].each do |key, data|
-      puts format("  %-13s | %04X   | %02X | %02X | %02X | %-6s | %08X   | %08X   | %08X",
+      c = sim_cycles[key]
+      cycles_str = c >= 1_000_000 ? "%.1fM" % (c / 1_000_000.0) : "#{c / 1_000}K"
+      puts format("  %-13s | %6s | %04X   | %02X | %02X | %02X | %-6s | %08X   | %08X   | %08X",
                   key.to_s.upcase,
+                  cycles_str,
                   data[:pc], data[:a], data[:x], data[:y],
                   data[:halted] ? "YES" : "no",
                   data[:hires_p1], data[:hires_p2], data[:text])
@@ -433,6 +467,8 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
       matches = simulators.keys.map do |k|
         if k == :isa
           "reference"
+        elsif k == :interpret && cp[:cycles] > INTERPRETER_MAX_CYCLES
+          "stopped"
         else
           cp[:sims][k][:hires_p1] == isa_p1 ? "match" : "DIVERGED"
         end
