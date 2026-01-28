@@ -103,6 +103,30 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     sim
   end
 
+  def verilator_runner_available?
+    return false unless verilator_available?
+    begin
+      require_relative '../../../examples/apple2/utilities/apple2_verilator'
+      true
+    rescue LoadError
+      false
+    end
+  end
+
+  def create_verilator_runner
+    require_relative '../../../examples/apple2/utilities/apple2_verilator'
+
+    runner = RHDL::Apple2::VerilatorRunner.new(sub_cycles: 14)
+
+    karateka_rom = create_karateka_rom
+    runner.load_rom(karateka_rom, base_addr: 0xD000)
+    runner.load_ram(@karateka_mem, base_addr: 0x0000)
+
+    runner.reset
+
+    runner
+  end
+
   # Categorize PC into memory regions
   def pc_region(pc)
     case pc
@@ -321,6 +345,26 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     checksum
   end
 
+  def text_checksum_verilator(runner)
+    checksum = 0
+    (0x0400..0x07FF).each { |addr| checksum = (checksum + runner.read(addr)) & 0xFFFFFFFF }
+    checksum
+  end
+
+  def decode_hires_verilator(runner, base_addr = 0x2000)
+    bitmap = []
+    192.times do |row|
+      line = []
+      line_addr = hires_line_address(row, base_addr)
+      40.times do |col|
+        byte = runner.read(line_addr + col) || 0
+        7.times { |bit| line << ((byte >> bit) & 1) }
+      end
+      bitmap << line
+    end
+    bitmap
+  end
+
   it 'verifies PC and opcode sequences match through 5M cycles', timeout: 300 do
     skip 'AppleIIgo ROM not found' unless @rom_available
     skip 'Karateka memory dump not found' unless @karateka_available
@@ -467,6 +511,186 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
     expect(failed).to be_empty,
       "All cycle checkpoints should have close PCs, but #{failed.length} diverged"
+  end
+
+  it 'compares ISA vs IR vs Verilator through 100K cycles', timeout: 300 do
+    skip 'AppleIIgo ROM not found' unless @rom_available
+    skip 'Karateka memory dump not found' unless @karateka_available
+    skip 'Native ISA simulator not available' unless native_isa_available?
+    skip 'Verilator not available' unless verilator_available?
+
+    begin
+      require 'rhdl/codegen'
+      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+    rescue LoadError
+      skip 'IR Codegen not available'
+    end
+
+    puts "\n" + "=" * 70
+    puts "ISA vs IR vs Verilator Comparison (100K cycles)"
+    puts "=" * 70
+
+    # Create all three simulators
+    puts "\nInitializing simulators..."
+    init_start = Time.now
+
+    isa_cpu, isa_bus = create_isa_simulator
+    puts "  ISA: Native Rust ISA simulator (#{(Time.now - init_start).round(2)}s)"
+
+    ir_start = Time.now
+    ir_sim = create_ir_compiler
+    puts "  IR:  Rust IR Compiler (#{(Time.now - ir_start).round(2)}s)"
+
+    verilator_start = Time.now
+    verilator_runner = create_verilator_runner
+    puts "  Verilator: HDL simulation (#{(Time.now - verilator_start).round(2)}s)"
+
+    total_init = Time.now - init_start
+    puts "  Total init: #{total_init.round(2)}s"
+
+    # Checkpoint cycle counts
+    checkpoints = [10_000, 25_000, 50_000, 75_000, 100_000]
+    total_cycles = 100_000
+
+    cycles_run = 0
+    results = []
+
+    # Track IR opcode changes
+    prev_ir_opcode = ir_sim.peek('opcode_debug')
+
+    puts "\nRunning simulation with PC comparison..."
+    puts "-" * 70
+    puts format("  %8s  %12s  %12s  %12s  %s", "Cycles", "ISA PC", "IR PC", "Verilator PC", "Status")
+    puts "-" * 70
+
+    checkpoints.each do |target_cycles|
+      cycles_to_run = target_cycles - cycles_run
+
+      # Run all three simulators
+      # ISA: step-based
+      cycles_to_run.times do
+        break if isa_cpu.halted?
+        isa_cpu.step
+      end
+
+      # IR: cycle-based
+      ir_sim.run_cpu_cycles(cycles_to_run, 0, false)
+
+      # Verilator: step-based (1 step = 1 CPU cycle = 14 sub-cycles)
+      verilator_runner.run_steps(cycles_to_run)
+
+      cycles_run = target_cycles
+
+      # Get current PCs
+      isa_pc = isa_cpu.pc
+      ir_pc = ir_sim.peek('cpu__pc_reg')
+      verilator_pc = verilator_runner.pc
+
+      isa_region = pc_region(isa_pc)
+      ir_region = pc_region(ir_pc)
+      verilator_region = pc_region(verilator_pc)
+
+      # Check if all three are close (within same region or 256 bytes)
+      isa_ir_close = (isa_pc - ir_pc).abs < 256 || isa_region == ir_region
+      isa_ver_close = (isa_pc - verilator_pc).abs < 256 || isa_region == verilator_region
+      ir_ver_close = (ir_pc - verilator_pc).abs < 256 || ir_region == verilator_region
+
+      all_close = isa_ir_close && isa_ver_close && ir_ver_close
+      status = all_close ? "OK" : "DIVERGED"
+
+      puts format("  %8d  $%04X (%-6s)  $%04X (%-6s)  $%04X (%-6s)  %s",
+                  target_cycles,
+                  isa_pc, isa_region,
+                  ir_pc, ir_region,
+                  verilator_pc, verilator_region,
+                  status)
+
+      results << {
+        cycles: target_cycles,
+        isa_pc: isa_pc,
+        ir_pc: ir_pc,
+        verilator_pc: verilator_pc,
+        isa_region: isa_region,
+        ir_region: ir_region,
+        verilator_region: verilator_region,
+        all_close: all_close
+      }
+    end
+
+    puts "-" * 70
+
+    # Compare final memory state
+    puts "\nFinal memory comparison:"
+    isa_text = text_checksum_isa(isa_bus)
+    ir_text = text_checksum_ir(ir_sim)
+    verilator_text = text_checksum_verilator(verilator_runner)
+
+    puts format("  Text page checksum: ISA=%08X IR=%08X Verilator=%08X",
+                isa_text, ir_text, verilator_text)
+
+    isa_ir_text_match = isa_text == ir_text
+    isa_ver_text_match = isa_text == verilator_text
+
+    # Summary
+    puts "\n" + "=" * 70
+    puts "SUMMARY"
+    puts "=" * 70
+
+    failed = results.reject { |r| r[:all_close] }
+
+    # Check 1: All checkpoints close
+    if failed.empty?
+      puts "✅ All #{results.length} checkpoints have close PCs"
+    else
+      puts "❌ #{failed.length} checkpoints diverged"
+      failed.each do |f|
+        puts format("   %d: ISA=$%04X IR=$%04X Ver=$%04X",
+                    f[:cycles], f[:isa_pc], f[:ir_pc], f[:verilator_pc])
+      end
+    end
+
+    # Check 2: All visit game regions
+    isa_visits_game = results.any? { |r| [:rom, :high_ram, :user].include?(r[:isa_region]) }
+    ir_visits_game = results.any? { |r| [:rom, :high_ram, :user].include?(r[:ir_region]) }
+    ver_visits_game = results.any? { |r| [:rom, :high_ram, :user].include?(r[:verilator_region]) }
+
+    if isa_visits_game && ir_visits_game && ver_visits_game
+      puts "✅ All simulators visit game regions"
+    else
+      puts "❌ Not all simulators visit game regions (ISA=#{isa_visits_game}, IR=#{ir_visits_game}, Ver=#{ver_visits_game})"
+    end
+
+    # Check 3: Final PCs are in valid regions
+    final = results.last
+    valid_regions = [:rom, :high_ram, :user, :zp_stack]
+    all_valid = valid_regions.include?(final[:isa_region]) &&
+                valid_regions.include?(final[:ir_region]) &&
+                valid_regions.include?(final[:verilator_region])
+
+    if all_valid
+      puts "✅ All final PCs in valid game regions"
+    else
+      puts "❌ Some final PCs in unexpected regions"
+    end
+
+    puts "\n"
+
+    # Assertions - be lenient since Verilator may have timing differences
+    # Require that all simulators visit game regions
+    expect(isa_visits_game && ir_visits_game && ver_visits_game).to be(true),
+      "All simulators should visit game loop regions"
+
+    # Require that Verilator visits multiple unique PCs (not stuck)
+    verilator_unique_pcs = results.map { |r| r[:verilator_pc] }.uniq
+    expect(verilator_unique_pcs.length).to be > 1,
+      "Verilator should visit multiple PCs, not stuck at one location"
+
+    # ISA and IR should be close (they use same timing model)
+    isa_ir_diverged = results.reject { |r|
+      (r[:isa_pc] - r[:ir_pc]).abs < 256 || r[:isa_region] == r[:ir_region]
+    }
+    expect(isa_ir_diverged).to be_empty,
+      "ISA and IR should have close PCs at all checkpoints"
   end
 
   it 'verifies PC sequence subsequence matching over 20M cycles', timeout: 1200 do
@@ -913,9 +1137,6 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     skip 'Verilator not available' unless verilator_available?
     skip 'AppleIIgo ROM not found' unless @rom_available
     skip 'Karateka memory dump not found' unless @karateka_available
-    skip 'Slow Verilator test - set RUN_VERILATOR_TESTS=1 to run' unless ENV['RUN_VERILATOR_TESTS']
-    # TODO: Verilog export has structural issues (BLKANDNBLK errors) that need to be fixed
-    skip 'Verilog export needs structural fixes for hierarchical designs'
 
     require_relative '../../../examples/apple2/utilities/apple2_verilator'
 
