@@ -1273,8 +1273,8 @@ impl IrSimulator {
                 self.signals[self.clk_idx] = 0;
                 self.evaluate();
 
-                // Provide RAM/ROM data (use cpu_addr, not ram_addr which may be video address)
-                let addr = self.signals[self.cpu_addr_idx] as usize;
+                // Provide RAM/ROM data (use ram_addr to match Ruby behavior simulator)
+                let addr = self.signals[self.ram_addr_idx] as usize;
                 self.signals[self.ram_do_idx] = if addr >= 0xD000 {
                     let rom_offset = addr.wrapping_sub(0xD000);
                     if rom_offset < self.rom.len() { self.rom[rom_offset] as u64 } else { 0 }
@@ -1290,9 +1290,9 @@ impl IrSimulator {
                 self.signals[self.clk_idx] = 1;
                 self.tick();
 
-                // Handle RAM writes (use cpu_addr, not ram_addr which may be video address)
+                // Handle RAM writes
                 if self.signals[self.ram_we_idx] == 1 {
-                    let write_addr = self.signals[self.cpu_addr_idx] as usize;
+                    let write_addr = self.signals[self.ram_addr_idx] as usize;
                     if write_addr < 0xC000 && write_addr < self.ram.len() {
                         self.ram[write_addr] = (self.signals[self.d_idx] & 0xFF) as u8;
                         if write_addr >= 0x0400 && write_addr <= 0x07FF {
