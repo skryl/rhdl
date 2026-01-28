@@ -6,6 +6,7 @@ require 'spec_helper'
 require_relative '../../../examples/mos6502/utilities/apple2_bus'
 require_relative '../../../examples/mos6502/utilities/isa_simulator'
 require_relative '../../../examples/mos6502/utilities/ruby_isa_runner'
+require_relative '../../../examples/mos6502/utilities/color_renderer'
 
 RSpec.describe 'MOS6502 Karateka Mode' do
   let(:karateka_mem) { File.expand_path('../../../examples/mos6502/software/disks/karateka_mem.bin', __dir__) }
@@ -207,6 +208,114 @@ RSpec.describe 'MOS6502 Karateka Mode' do
       expect(state2[:x]).to eq(state1[:x])
       expect(state2[:y]).to eq(state1[:y])
       expect(state2[:sp]).to eq(state1[:sp])
+    end
+  end
+
+  describe 'Color graphics rendering', :slow do
+    let(:runner) do
+      bus = MOS6502::Apple2Bus.new("test_bus")
+      cpu = MOS6502::ISASimulator.new(bus)
+      RubyISARunner.new(bus, cpu)
+    end
+
+    it 'produces color graphics output after 6 million cycles' do
+      rom_bytes = File.binread(appleiigo_rom).bytes
+      mem_bytes = File.binread(karateka_mem).bytes
+
+      runner.load_rom(rom_bytes, base_addr: 0xD000)
+      runner.load_ram(mem_bytes, base_addr: 0x0000)
+
+      # Set up reset vector (bypass ROM protection)
+      set_reset_vector(runner.bus, 0xB82A)
+
+      # Set HIRES mode soft switches
+      runner.bus.read(0xC050)  # TXTCLR - graphics mode
+      runner.bus.read(0xC052)  # MIXCLR - full screen
+      runner.bus.read(0xC054)  # PAGE1 - page 1
+      runner.bus.read(0xC057)  # HIRES - hi-res mode
+
+      runner.reset
+
+      # Run 6 million cycles to get through intro animation
+      runner.run_steps(6_000_000)
+
+      state = runner.cpu_state
+      expect(state[:halted]).to be(false)
+      expect(state[:cycles]).to be >= 6_000_000
+
+      # Render color graphics
+      color_output = runner.bus.render_hires_color(chars_wide: 70)
+
+      # Verify we got output
+      expect(color_output).to be_a(String)
+      expect(color_output.length).to be > 0
+
+      # Color output should have ANSI escape sequences for colors
+      expect(color_output).to include("\e[")
+
+      # Should have multiple lines (96 lines in color mode for 192 pixels / 2)
+      lines = color_output.split("\n")
+      expect(lines.length).to eq(96)
+
+      # Verify the renderer uses color escape sequences (truecolor format)
+      # The output may be mostly black during loading, but should have some color content
+      # or at minimum the structure of the color output
+      color_escapes = color_output.scan(/\e\[38;2;\d+;\d+;\d+m/)
+      reset_escapes = color_output.scan(/\e\[0m/)
+
+      # At minimum, we should have reset sequences (for line endings)
+      expect(reset_escapes.length).to be >= 96, "Expected reset sequences at end of each line"
+
+      # Check that the color renderer can produce the expected NTSC colors
+      # These are the hex values for the color palette
+      # Green: 20, 245, 60 (0x14, 0xF5, 0x3C)
+      # Purple: 214, 96, 239 (0xD6, 0x60, 0xEF)
+      # Orange: 255, 106, 60 (0xFF, 0x6A, 0x3C)
+      # Blue: 20, 207, 253 (0x14, 0xCF, 0xFD)
+      # White: 255, 255, 255
+      # If there are any foreground colors, verify they're from the expected palette
+      if color_escapes.any?
+        valid_colors = [
+          "38;2;20;245;60",   # green
+          "38;2;214;96;239",  # purple
+          "38;2;255;106;60",  # orange
+          "38;2;20;207;253",  # blue
+          "38;2;255;255;255"  # white
+        ]
+        colors_found = color_escapes.map { |e| e.gsub(/\e\[/, "").gsub(/m$/, "") }
+        colors_found.each do |color|
+          expect(valid_colors).to include(color), "Unexpected color: #{color}"
+        end
+      end
+
+      # Verify the hires page has been modified (has non-zero content)
+      hires_bytes = (0x2000..0x3FFF).map { |addr| runner.bus.read(addr) }
+      non_zero_bytes = hires_bytes.count { |b| b != 0 }
+      expect(non_zero_bytes).to be > 0, "Expected hi-res page to have content after 6M cycles"
+    end
+
+    it 'color renderer produces valid output for hires memory' do
+      rom_bytes = File.binread(appleiigo_rom).bytes
+      mem_bytes = File.binread(karateka_mem).bytes
+
+      runner.load_rom(rom_bytes, base_addr: 0xD000)
+      runner.load_ram(mem_bytes, base_addr: 0x0000)
+
+      # The karateka memory dump already has graphics content at HIRES page 1 ($2000-$3FFF)
+      # Test that the color renderer can process it directly
+      renderer = MOS6502::ColorRenderer.new(chars_wide: 70)
+
+      # Create a memory accessor that reads from the bus
+      ram = ->(addr) { runner.bus.read(addr) }
+
+      color_output = renderer.render(ram, base_addr: 0x2000, chars_wide: 70)
+
+      expect(color_output).to be_a(String)
+      expect(color_output.length).to be > 0
+
+      # Should have 96 lines (192 pixels / 2 for half-block chars)
+      lines = color_output.split("\n")
+      expect(lines.length).to eq(96)
     end
   end
 end

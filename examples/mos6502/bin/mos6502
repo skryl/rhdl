@@ -15,6 +15,7 @@ require 'apple2_harness'
 require 'isa_simulator'
 require 'ruby_isa_runner'
 require 'ir_simulator_runner'
+require 'color_renderer'
 
 # Apple II Terminal class
 class Apple2Terminal
@@ -91,7 +92,9 @@ class Apple2Terminal
     @debug = options[:debug] || false
     @green_screen = options[:green] || false
     @hires_mode = options[:hires] || false
-    @hires_width = options[:hires_width] || 80
+    @color_mode = options[:color] || false
+    @preferred_hires_width = options[:hires_width]
+    @hires_width = @preferred_hires_width || (@color_mode ? 140 : 80)
     @audio_enabled = options[:audio] != false
 
     # Terminal size and padding for centering
@@ -140,12 +143,17 @@ class Apple2Terminal
     @pad_top = [(@term_rows - display_height) / 2, 0].max
     @pad_left = [(@term_cols - DISPLAY_WIDTH) / 2, 0].max
 
+    # Auto-adjust hires width to fit terminal
+    # Use preferred width if set, otherwise use mode-appropriate default capped to terminal
+    default_width = @color_mode ? 140 : 80
+    preferred = @preferred_hires_width || default_width
+    @hires_width = [preferred, @term_cols].min
+
     # Calculate padding for hires display
-    # Hires output is always 48 lines tall (192 pixels / 4 dots per braille char)
-    # Width can vary, but height is fixed
+    # Color mode uses half-blocks (2 pixels/char = 96 lines), braille uses 4 pixels/char (48 lines)
     # Debug mode adds bordered debug window: 2 gap + 6 lines (border + 4 content + border)
     # Non-debug adds 1 for disk loading indicator
-    hires_content_height = HIRES_HEIGHT  # Always 48 braille chars tall
+    hires_content_height = @color_mode ? 96 : HIRES_HEIGHT
     debug_panel_height = @debug ? 8 : 1  # 6 lines debug box + 2 gap, or 1 line for disk status
     total_content_height = hires_content_height + debug_panel_height
     hires_display_width = @hires_width
@@ -425,6 +433,13 @@ class Apple2Terminal
     case ascii
     when 72, 104 # H or h - toggle hires mode
       @hires_mode = !@hires_mode
+      print CLEAR_SCREEN
+    when 67, 99 # C or c - toggle color mode
+      @color_mode = !@color_mode
+      @hires_mode = true if @color_mode  # Color implies hires
+      # Recalculate width for the mode (auto-adjusts to terminal size)
+      update_terminal_size
+      print CLEAR_SCREEN
     when 65, 97 # A or a - toggle audio
       if @audio_enabled
         @runner.bus.stop_audio
@@ -456,18 +471,20 @@ class Apple2Terminal
   def render_hires_screen
     output = String.new
 
-    if @green_screen
+    if @green_screen && !@color_mode
       output << GREEN_FG
       output << BLACK_BG
     end
 
-    # Render hi-res using braille characters
-    # Use fast Rust rendering when available (native mode)
-    hires_output = if @runner.native? && @runner.respond_to?(:cpu) && @runner.cpu.respond_to?(:render_hires_braille)
-                     @runner.cpu.render_hires_braille(@hires_width, true)
-                   else
-                     @runner.bus.render_hires_braille(chars_wide: @hires_width, invert: true)
-                   end
+    # Render hi-res using color or braille characters
+    if @color_mode
+      hires_output = @runner.bus.render_hires_color(chars_wide: @hires_width)
+    elsif @runner.native? && @runner.respond_to?(:cpu) && @runner.cpu.respond_to?(:render_hires_braille)
+      # Use fast Rust rendering when available (native mode)
+      hires_output = @runner.cpu.render_hires_braille(@hires_width, true)
+    else
+      hires_output = @runner.bus.render_hires_braille(chars_wide: @hires_width, invert: true)
+    end
     hires_lines = hires_output.split("\n")
 
     # Render each line of hires output with proper centering
@@ -491,9 +508,10 @@ class Apple2Terminal
       sim_type = (state[:simulator_type] || 'unknown').to_s.upcase
 
       # Line 1: Registers
-      line1 = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X [HIRES]",
+      mode_label = @color_mode ? "[COLOR]" : "[HIRES]"
+      line1 = format("PC:%04X A:%02X X:%02X Y:%02X SP:%02X P:%02X %s",
                      state[:pc], state[:a], state[:x], state[:y],
-                     state[:sp], state[:p])
+                     state[:sp], state[:p], mode_label)
 
       # Line 2: Sim type / cycles / speed / uptime
       line2 = format("Sim:%-6s Cyc:%s %s %.1ffps Spd:%s",
@@ -895,7 +913,8 @@ options = {
   mode: :isa,      # Simulator mode: isa, hdl, or netlist
   sim: :jit,       # Sim backend: interpret, jit, or compile (ignored for ISA mode)
   hires: false,
-  hires_width: 80,
+  hires_width: nil,  # Auto-calculated based on mode and terminal size
+  color: false,  # NTSC artifact color rendering
   audio: true  # Audio enabled by default
 }
 
@@ -946,7 +965,12 @@ parser = OptionParser.new do |opts|
     options[:hires] = true
   end
 
-  opts.on("--hires-width WIDTH", Integer, "Hi-res display width in chars (default: 80)") do |v|
+  opts.on("-C", "--color", "Enable NTSC artifact color rendering (implies --hires)") do
+    options[:color] = true
+    options[:hires] = true
+  end
+
+  opts.on("--hires-width WIDTH", Integer, "Hi-res display width in chars (auto-adjusts to terminal)") do |v|
     options[:hires_width] = v
   end
 
@@ -970,9 +994,10 @@ parser = OptionParser.new do |opts|
     options[:init_hires] = true
   end
 
-  opts.on("-k", "--karateka", "Load Karateka memory dump (ready to play)") do
+  opts.on("-k", "--karateka", "Load Karateka memory dump (enables color mode)") do
     options[:karateka] = true
-    options[:hires] = true  # Karateka uses hi-res graphics mode
+    options[:hires] = true   # Karateka uses hi-res graphics mode
+    options[:color] = true   # Enable NTSC artifact colors
   end
 
   opts.on("--appleiigo", "Load AppleIIGo ROM and boot from it") do
