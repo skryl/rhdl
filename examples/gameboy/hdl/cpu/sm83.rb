@@ -164,6 +164,8 @@ module GameBoy
     port :hl => [:regs, :hl_out]
     port :sp => [:regs, :sp_out]
     port :pc => [:regs, :pc_out]
+    port :clken => [:regs, :cen]
+    port :inc_pc => [:regs, :pc_inc]
 
     # Combinational logic
     behavior do
@@ -184,6 +186,20 @@ module GameBoy
 
       # halt_sig output
       halt_n <= ~halt_ff
+
+      # Address bus mux - select based on set_addr_to from microcode
+      # 0 = PC (opcode fetch), 1 = SP, 2 = HL, 3 = DE, 4 = BC
+      # For M1 cycle, always use PC
+      addr_bus <= mux(m_cycle == lit(1, width: 3), pc,
+                  mux(set_addr_to == lit(0, width: 3), pc,
+                  mux(set_addr_to == lit(1, width: 3), sp,
+                  mux(set_addr_to == lit(2, width: 3), hl,
+                  mux(set_addr_to == lit(3, width: 3), de,
+                  mux(set_addr_to == lit(4, width: 3), bc,
+                      pc))))))
+
+      # Data output (for writes)
+      data_out <= acc
     end
 
     # Main state machine (from T80.vhd lines 196-1309)
