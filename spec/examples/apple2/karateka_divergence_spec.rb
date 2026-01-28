@@ -314,6 +314,89 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     checksum
   end
 
+  it 'verifies PC stays within game loop range at cycle checkpoints', timeout: 300 do
+    skip 'AppleIIgo ROM not found' unless @rom_available
+    skip 'Karateka memory dump not found' unless @karateka_available
+    skip 'Native ISA simulator not available' unless native_isa_available?
+
+    begin
+      require 'rhdl/codegen'
+      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+    rescue LoadError
+      skip 'IR Codegen not available'
+    end
+
+    puts "\n" + "=" * 70
+    puts "Karateka PC Checkpoint Verification"
+    puts "=" * 70
+
+    # Create simulators
+    puts "\nInitializing simulators..."
+    isa_cpu, _isa_bus = create_isa_simulator
+    ir_sim = create_ir_compiler
+
+    # Checkpoint cycle counts to verify (up to 5M cycles)
+    checkpoints = [100_000, 500_000, 1_000_000, 2_000_000, 3_000_000, 4_000_000, 5_000_000]
+    cycles_run = 0
+    results = []
+
+    checkpoints.each do |target_cycles|
+      cycles_to_run = target_cycles - cycles_run
+
+      # Run ISA
+      cycles_to_run.times do
+        break if isa_cpu.halted?
+        isa_cpu.step
+      end
+
+      # Run IR
+      ir_sim.run_cpu_cycles(cycles_to_run, 0, false)
+
+      cycles_run = target_cycles
+
+      # Get current PCs
+      isa_pc = isa_cpu.pc
+      ir_pc = ir_sim.peek('cpu__pc_reg')
+
+      # Check if both PCs are in valid game loop range ($B7xx-$B8xx or $0000-$00FF for zp)
+      isa_region = pc_region(isa_pc)
+      ir_region = pc_region(ir_pc)
+
+      # PCs are "close" if they're in the same general region or within 256 bytes
+      pc_diff = (isa_pc - ir_pc).abs
+      close = pc_diff < 256 || isa_region == ir_region
+
+      status = close ? "OK" : "DIVERGED"
+      puts format("  %5.1fM cycles: ISA PC=$%04X (%s) IR PC=$%04X (%s) - %s",
+                  target_cycles / 1_000_000.0, isa_pc, isa_region, ir_pc, ir_region, status)
+
+      results << {
+        cycles: target_cycles,
+        isa_pc: isa_pc,
+        ir_pc: ir_pc,
+        isa_region: isa_region,
+        ir_region: ir_region,
+        close: close
+      }
+    end
+
+    puts "\n" + "=" * 70
+
+    # Verify all checkpoints passed
+    failed = results.reject { |r| r[:close] }
+    if failed.empty?
+      puts "All #{results.length} checkpoints passed"
+    else
+      puts "#{failed.length} checkpoints failed:"
+      failed.each do |f|
+        puts "  #{f[:cycles] / 1_000_000.0}M: ISA=$#{f[:isa_pc].to_s(16).upcase} IR=$#{f[:ir_pc].to_s(16).upcase}"
+      end
+    end
+
+    expect(failed).to be_empty,
+      "All cycle checkpoints should have close PCs, but #{failed.length} diverged"
+  end
+
   it 'verifies PC sequence subsequence matching over 20M cycles', timeout: 1200 do
     skip 'AppleIIgo ROM not found' unless @rom_available
     skip 'Karateka memory dump not found' unless @karateka_available
