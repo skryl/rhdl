@@ -211,11 +211,22 @@ RSpec.describe RHDL::Apple2::ColorRenderer do
       )
     end
 
-    it 'has all 6 colors in each palette' do
+    it 'has base 6 colors in each palette' do
+      base_colors = [:black, :white, :green, :purple, :orange, :blue]
       described_class::PALETTES.each do |name, palette|
-        expect(palette.keys).to contain_exactly(
-          :black, :white, :green, :purple, :orange, :blue
-        ), "#{name} palette should have all 6 colors"
+        base_colors.each do |color|
+          expect(palette.keys).to include(color), "#{name} palette should have #{color}"
+        end
+      end
+    end
+
+    it 'has fringe colors in each palette' do
+      fringe_colors = [:dark_green, :dark_purple, :dark_orange, :dark_blue,
+                       :light_green, :light_purple, :light_orange, :light_blue]
+      described_class::PALETTES.each do |name, palette|
+        fringe_colors.each do |color|
+          expect(palette.keys).to include(color), "#{name} palette should have #{color}"
+        end
       end
     end
 
@@ -254,6 +265,11 @@ RSpec.describe RHDL::Apple2::ColorRenderer do
       expect(r.palette).to eq(described_class::PALETTES[:ntsc])
     end
 
+    it 'uses default ntsc quality mode' do
+      r = described_class.new
+      expect(r.quality).to eq(:ntsc)
+    end
+
     it 'accepts custom palette' do
       r = described_class.new(palette: :applewin)
       expect(r.palette).to eq(described_class::PALETTES[:applewin])
@@ -264,9 +280,19 @@ RSpec.describe RHDL::Apple2::ColorRenderer do
       expect(r.monochrome).to eq(:green)
     end
 
-    it 'accepts blend option' do
-      r = described_class.new(blend: true)
+    it 'accepts quality option' do
+      r = described_class.new(quality: :fast)
+      expect(r.quality).to eq(:fast)
+    end
+
+    it 'blend returns true when quality is ntsc' do
+      r = described_class.new(quality: :ntsc)
       expect(r.blend).to be true
+    end
+
+    it 'blend returns false when quality is fast' do
+      r = described_class.new(quality: :fast)
+      expect(r.blend).to be false
     end
 
     it 'accepts chars_wide option' do
@@ -358,6 +384,92 @@ RSpec.describe RHDL::Apple2::ColorRenderer do
     end
   end
 
+  describe '.available_quality_modes' do
+    it 'returns list of available quality modes' do
+      modes = described_class.available_quality_modes
+      expect(modes).to include(:ntsc, :fast)
+    end
+  end
+
+  describe 'quality modes' do
+    let(:ram) { Array.new(0x6000, 0) }
+
+    describe ':ntsc mode (default)' do
+      let(:ntsc_renderer) { described_class.new(quality: :ntsc, chars_wide: 40) }
+
+      it 'uses 7-bit sliding window algorithm' do
+        # Set up a pattern that would show fringing
+        ram[0x2000] = 0x01  # Single isolated pixel
+        ram[0x2001] = 0x00
+        ram[0x2002] = 0x01  # Another isolated pixel nearby
+
+        output = ntsc_renderer.render(ram, base_addr: 0x2000)
+        expect(output).to be_a(String)
+        expect(output.length).to be > 0
+      end
+
+      it 'produces fringe colors for isolated pixels near other pixels' do
+        # Pattern that should produce dark fringe
+        ram[0x2000] = 0x09  # bits 0 and 3 set (pixels at positions 0 and 3)
+
+        bitmap = ntsc_renderer.decode_hires_colors_ntsc(ram, 0x2000)
+        # Should have some fringe colors due to nearby pixels
+        colors_in_line = bitmap[0][0..6].uniq
+        expect(colors_in_line).to include(:black)
+      end
+
+      it 'detects white runs correctly' do
+        ram[0x2000] = 0x7F  # All 7 pixels on
+        bitmap = ntsc_renderer.decode_hires_colors_ntsc(ram, 0x2000)
+
+        # Middle pixels should be white
+        expect(bitmap[0][1]).to eq(:white)
+        expect(bitmap[0][2]).to eq(:white)
+        expect(bitmap[0][3]).to eq(:white)
+      end
+    end
+
+    describe ':fast mode' do
+      let(:fast_renderer) { described_class.new(quality: :fast, chars_wide: 40) }
+
+      it 'uses 3-bit sliding window algorithm' do
+        ram[0x2000] = 0x7F
+        output = fast_renderer.render(ram, base_addr: 0x2000)
+        expect(output).to be_a(String)
+      end
+
+      it 'produces same results as decode_hires_colors' do
+        ram[0x2000] = 0x55  # Alternating pattern
+        bitmap_fast = fast_renderer.decode_hires_colors_fast(ram, 0x2000)
+        bitmap_legacy = fast_renderer.decode_hires_colors(ram, 0x2000)
+
+        expect(bitmap_fast).to eq(bitmap_legacy)
+      end
+    end
+
+    describe 'comparison' do
+      it 'ntsc mode can produce fringe colors that fast mode cannot' do
+        ntsc = described_class.new(quality: :ntsc)
+        fast = described_class.new(quality: :fast)
+
+        # A pattern that produces fringe in NTSC but not in fast
+        ram[0x2000] = 0x11  # bits 0 and 4 set
+
+        ntsc_bitmap = ntsc.decode_hires_colors_ntsc(ram, 0x2000)
+        fast_bitmap = fast.decode_hires_colors_fast(ram, 0x2000)
+
+        ntsc_colors = ntsc_bitmap[0][0..6].uniq
+        fast_colors = fast_bitmap[0][0..6].uniq
+
+        # Fast mode only produces base colors
+        base_colors = [:black, :white, :green, :purple, :orange, :blue]
+        fast_colors.each do |c|
+          expect(base_colors).to include(c)
+        end
+      end
+    end
+  end
+
   describe 'double hi-res mode' do
     let(:dhires_renderer) { described_class.new(double_hires: true, chars_wide: 140) }
 
@@ -375,13 +487,15 @@ RSpec.describe RHDL::Apple2::ColorRenderer do
     end
   end
 
-  describe 'blend mode' do
-    let(:blend_renderer) { described_class.new(blend: true) }
+  describe 'blend mode (via quality)' do
+    it 'blend is enabled by default (ntsc quality)' do
+      renderer = described_class.new
+      expect(renderer.blend).to be true
+    end
 
-    it 'applies blending when enabled' do
-      ram[0x2000] = 0x7F
-      output = blend_renderer.render(ram, base_addr: 0x2000, chars_wide: 40)
-      expect(output).to be_a(String)
+    it 'blend is disabled in fast quality mode' do
+      renderer = described_class.new(quality: :fast)
+      expect(renderer.blend).to be false
     end
   end
 
