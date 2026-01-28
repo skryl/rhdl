@@ -44,3 +44,5 @@ lib/rhdl/codegen/ir/sim/ir_compiler/lib/
 .verilator_build/
 .verilator_build_*/
 examples/gameboy/reference/
+# Game Boy ROM files (binary, should not be tracked)
+examples/gameboy/software/roms/*.gb
