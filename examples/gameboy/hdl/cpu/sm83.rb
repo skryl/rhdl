@@ -174,14 +174,22 @@ module GameBoy
       is_stop <= lit(0, width: 1)
       prefix <= lit(0, width: 2)
 
-      # m_cycles calculation - simplified: most instructions are 1 cycle
+      # m_cycles calculation
       is_6_cycles <= lit(0, width: 1)
       is_4_cycles <= lit(0, width: 1)
-      is_3_cycles <= lit(0, width: 1)
-      is_2_cycles <= lit(0, width: 1)
+      # 3-cycle instructions: LDH (E0, F0), LD rr,nn (01, 11, 21, 31), JP nn (C3), CALL (CD)
+      is_3_cycles <= (ir == lit(0xE0, width: 8)) | (ir == lit(0xF0, width: 8)) |
+                     ((ir[3..0] == lit(1, width: 4)) & (ir[7..6] == lit(0, width: 2))) |
+                     (ir == lit(0xC3, width: 8)) | (ir == lit(0xCD, width: 8))
+      # 2-cycle instructions: LD (BC),A, LD (DE),A, LD A,(BC), LD A,(DE), JR e
+      is_2_cycles <= (ir == lit(0x02, width: 8)) | (ir == lit(0x12, width: 8)) |
+                     (ir == lit(0x0A, width: 8)) | (ir == lit(0x1A, width: 8)) |
+                     (ir == lit(0x18, width: 8))
 
-      # Default: all instructions take 1 cycle (will add proper cycle counts later)
-      m_cycles <= lit(1, width: 3)
+      # Default: 1 cycle, unless specific cycle count
+      m_cycles <= mux(is_3_cycles, lit(3, width: 3),
+                  mux(is_2_cycles, lit(2, width: 3),
+                      lit(1, width: 3)))
 
       # -----------------------------------------------------------------------
       # Instruction Decoder - Specific instructions
@@ -259,6 +267,28 @@ module GameBoy
 
       # STOP
       is_stop <= (ir == lit(0x10, width: 8))
+
+      # LDH (a8), A (E0) - Write A to (0xFF00 + n)
+      # M2: Read immediate n from (PC), store in wz[7:0]
+      # M3: Write A to (0xFF00 + n)
+      ldz <= mux((ir == lit(0xE0, width: 8)) & (m_cycle == lit(2, width: 3)),
+                 lit(1, width: 1), ldz)
+      set_addr_to <= mux((ir == lit(0xE0, width: 8)) & (m_cycle == lit(3, width: 3)),
+                         lit(ADDR_IO, width: 3), set_addr_to)
+      write_sig <= mux((ir == lit(0xE0, width: 8)) & (m_cycle == lit(3, width: 3)),
+                       lit(1, width: 1), write_sig)
+      no_read <= mux((ir == lit(0xE0, width: 8)) & (m_cycle == lit(3, width: 3)),
+                     lit(1, width: 1), no_read)
+
+      # LDH A, (a8) (F0) - Read from (0xFF00 + n) to A
+      # M2: Read immediate n from (PC), store in wz[7:0]
+      # M3: Read from (0xFF00 + n) to A
+      ldz <= mux((ir == lit(0xF0, width: 8)) & (m_cycle == lit(2, width: 3)),
+                 lit(1, width: 1), ldz)
+      set_addr_to <= mux((ir == lit(0xF0, width: 8)) & (m_cycle == lit(3, width: 3)),
+                         lit(ADDR_IO, width: 3), set_addr_to)
+      read_to_acc <= mux((ir == lit(0xF0, width: 8)) & (m_cycle == lit(3, width: 3)),
+                         lit(1, width: 1), read_to_acc)
 
       # PC increment during M1 (when not halted and not in interrupt cycle)
       inc_pc <= (m_cycle == lit(1, width: 3)) & ~halt & ~int_cycle
@@ -347,7 +377,8 @@ module GameBoy
                   mux(set_addr_to == lit(ADDR_DE, width: 3), de,
                   mux(set_addr_to == lit(ADDR_BC, width: 3), bc,
                   mux(set_addr_to == lit(ADDR_WZ, width: 3), wz,
-                      pc)))))))
+                  mux(set_addr_to == lit(ADDR_IO, width: 3), cat(lit(0xFF, width: 8), wz[7..0]),
+                      pc))))))))
 
       # Data output (for writes)
       data_out <= acc
@@ -358,12 +389,14 @@ module GameBoy
     # =========================================================================
 
     sequential clock: :clk, reset: :reset_n, reset_values: {
-      # Registers - post-boot ROM values for DMG
-      acc: 0x01, f_reg: 0xB0,
-      b_reg: 0x00, c_reg: 0x13,
-      d_reg: 0x00, e_reg: 0xD8,
-      h_reg: 0x01, l_reg: 0x4D,
-      sp: 0xFFFE, pc: 0x0100,
+      # Registers - initial values for boot ROM execution
+      # Boot ROM will set these to their final state (A=0x01, F=0xB0, etc.)
+      # before jumping to cartridge at 0x0100
+      acc: 0x00, f_reg: 0x00,
+      b_reg: 0x00, c_reg: 0x00,
+      d_reg: 0x00, e_reg: 0x00,
+      h_reg: 0x00, l_reg: 0x00,
+      sp: 0x0000, pc: 0x0000,
 
       # State - t_state starts at 1 (valid range is 1-4)
       ir: 0x00, wz: 0x0000,
