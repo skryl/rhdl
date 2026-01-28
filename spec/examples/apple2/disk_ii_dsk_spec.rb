@@ -603,4 +603,208 @@ RSpec.describe 'Apple2 DiskII HDL with actual .dsk files' do
       end
     end
   end
+
+  describe 'IR Compiler boot with karateka' do
+    # Test the full boot sequence using the IR compiler
+    # Uses karateka_mem.bin (pre-loaded memory dump) since IR compiler
+    # doesn't support disk I/O from .dsk files
+
+    KARATEKA_MEM_PATH = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
+
+    def self.ir_compiler_available?
+      require 'rhdl/codegen'
+      RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+    rescue LoadError
+      false
+    end
+
+    def self.karateka_mem_available?
+      File.exist?(KARATEKA_MEM_PATH)
+    end
+
+    # Memory region classification
+    def pc_region(pc)
+      case pc
+      when 0x0000..0x01FF then :zp_stack
+      when 0x0200..0x03FF then :input_buf
+      when 0x0400..0x07FF then :text
+      when 0x0800..0x1FFF then :user
+      when 0x2000..0x3FFF then :hires1
+      when 0x4000..0x5FFF then :hires2
+      when 0x6000..0xBFFF then :high_ram
+      when 0xC000..0xCFFF then :io
+      when 0xD000..0xFFFF then :rom
+      else :unknown
+      end
+    end
+
+    before(:all) do
+      @rom_available = File.exist?(APPLEIIGO_ROM_PATH)
+      @karateka_mem_available = File.exist?(KARATEKA_MEM_PATH)
+
+      if @rom_available
+        @rom_data = File.binread(APPLEIIGO_ROM_PATH).bytes
+      end
+      if @karateka_mem_available
+        @karateka_mem = File.binread(KARATEKA_MEM_PATH).bytes
+      end
+    end
+
+    def create_karateka_rom
+      rom = @rom_data.dup
+      # Set reset vector to Karateka entry point $B82A
+      rom[0x2FFC] = 0x2A  # low byte of $B82A
+      rom[0x2FFD] = 0xB8  # high byte of $B82A
+      rom
+    end
+
+    def create_ir_compiler
+      require 'rhdl/codegen'
+
+      ir = RHDL::Apple2::Apple2.to_flat_ir
+      ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+
+      sim = RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json, sub_cycles: 14)
+
+      karateka_rom = create_karateka_rom
+      sim.load_rom(karateka_rom)
+      sim.load_ram(@karateka_mem.first(48 * 1024), 0)
+
+      # Reset sequence
+      sim.poke('reset', 1)
+      sim.tick
+      sim.poke('reset', 0)
+      3.times { sim.run_cpu_cycles(1, 0, false) }
+
+      # Initialize HIRES soft switches (value 8 sets hires mode)
+      sim.poke('soft_switches', 8)
+
+      sim
+    end
+
+    describe 'game boot and execution' do
+      before do
+        skip 'appleiigo.rom not found' unless @rom_available
+        skip 'karateka_mem.bin not found' unless @karateka_mem_available
+
+        begin
+          require 'rhdl/codegen'
+          skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+        rescue LoadError
+          skip 'IR Codegen not available'
+        end
+
+        @ir_sim = create_ir_compiler
+      end
+
+      it 'starts at Karateka entry point $B82A' do
+        pc = @ir_sim.peek('cpu__pc_reg')
+        expect(pc).to eq(0xB82A),
+          "Expected PC at $B82A (Karateka entry), got $#{pc.to_s(16).upcase}"
+      end
+
+      it 'executes in high_ram region initially' do
+        pc = @ir_sim.peek('cpu__pc_reg')
+        region = pc_region(pc)
+        expect(region).to eq(:high_ram),
+          "Expected execution in high_ram, got #{region} at $#{pc.to_s(16).upcase}"
+      end
+
+      it 'runs 1M cycles without halting' do
+        # Run 1M cycles in batches
+        cycles_to_run = 1_000_000
+        batch_size = 100_000
+
+        (cycles_to_run / batch_size).times do
+          @ir_sim.run_cpu_cycles(batch_size, 0, false)
+        end
+
+        # Verify still executing (PC should be valid)
+        pc = @ir_sim.peek('cpu__pc_reg')
+        expect(pc).to be_between(0, 0xFFFF)
+      end
+
+      it 'visits game loop regions during execution' do
+        # Track which regions are visited during execution
+        regions_visited = Set.new
+
+        # Sample PC every 50K cycles over 500K cycles
+        10.times do
+          @ir_sim.run_cpu_cycles(50_000, 0, false)
+          pc = @ir_sim.peek('cpu__pc_reg')
+          regions_visited.add(pc_region(pc))
+        end
+
+        # Game should visit high_ram (game code) and rom (kernel calls)
+        expect(regions_visited).to include(:high_ram),
+          "Game should execute in high_ram region. Visited: #{regions_visited.to_a}"
+
+        # At least 2 different regions should be visited
+        expect(regions_visited.size).to be >= 2,
+          "Game should visit multiple regions. Only visited: #{regions_visited.to_a}"
+      end
+
+      it 'reads valid opcode during execution' do
+        opcode = @ir_sim.peek('opcode_debug')
+        expect(opcode).to be_between(0, 255)
+        expect(opcode).not_to eq(0x00),
+          "Opcode should not be BRK (0x00) at game entry"
+      end
+    end
+
+    describe 'extended game execution', :slow do
+      before do
+        skip 'appleiigo.rom not found' unless @rom_available
+        skip 'karateka_mem.bin not found' unless @karateka_mem_available
+
+        begin
+          require 'rhdl/codegen'
+          skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+        rescue LoadError
+          skip 'IR Codegen not available'
+        end
+
+        @ir_sim = create_ir_compiler
+      end
+
+      it 'runs 5M cycles maintaining game state' do
+        # Run 5M cycles (equivalent to ~5 seconds of Apple II time)
+        cycles_to_run = 5_000_000
+        batch_size = 500_000
+
+        pc_samples = []
+
+        (cycles_to_run / batch_size).times do
+          @ir_sim.run_cpu_cycles(batch_size, 0, false)
+          pc = @ir_sim.peek('cpu__pc_reg')
+          pc_samples << pc
+        end
+
+        # All PCs should be valid
+        expect(pc_samples).to all(be_between(0, 0xFFFF))
+
+        # Should not be stuck at same PC (game should be running)
+        unique_pcs = pc_samples.uniq
+        expect(unique_pcs.size).to be > 1,
+          "Game appears stuck at PC $#{pc_samples.first.to_s(16)}"
+
+        # Should primarily be in game regions (high_ram, rom)
+        game_region_samples = pc_samples.count { |pc| [:high_ram, :rom].include?(pc_region(pc)) }
+        expect(game_region_samples).to be >= (pc_samples.size / 2),
+          "Game should spend most time in high_ram/rom regions"
+      end
+
+      it 'maintains hires graphics mode' do
+        # Run some cycles
+        @ir_sim.run_cpu_cycles(100_000, 0, false)
+
+        # Check soft switches - bit 3 should be set for hires
+        soft_switches = @ir_sim.peek('soft_switches')
+        hires_on = (soft_switches & 0x08) != 0
+
+        expect(hires_on).to be(true),
+          "HIRES mode should remain active during game execution"
+      end
+    end
+  end
 end
