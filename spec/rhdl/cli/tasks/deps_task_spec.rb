@@ -39,6 +39,12 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
 
         expect { task.run }.to output(/iverilog/).to_stdout
       end
+
+      it 'shows verilator in dependency check' do
+        task = described_class.new(check: true)
+
+        expect { task.run }.to output(/verilator/).to_stdout
+      end
     end
 
     context 'without check option (install)' do
@@ -52,6 +58,12 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
         task = described_class.new
 
         expect { task.run }.to output(/iverilog/).to_stdout
+      end
+
+      it 'checks for verilator availability' do
+        task = described_class.new
+
+        expect { task.run }.to output(/verilator/).to_stdout
       end
     end
   end
@@ -77,6 +89,12 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
     it 'shows iverilog status' do
       output = capture_stdout { task.check_status }
       expect(output).to match(/iverilog/)
+      expect(output).to match(/\[(OK|OPTIONAL)\]/)
+    end
+
+    it 'shows verilator status' do
+      output = capture_stdout { task.check_status }
+      expect(output).to match(/verilator/)
       expect(output).to match(/\[(OK|OPTIONAL)\]/)
     end
   end
