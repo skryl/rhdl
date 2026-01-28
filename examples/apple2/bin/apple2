@@ -53,6 +53,10 @@ class Apple2HDLTerminal
                 backend_names = { interpret: "Interpreter", jit: "JIT", compile: "Compiler" }
                 puts "Initializing netlist (gate-level) simulation [#{backend_names[@sim_backend]}]..."
                 RHDL::Apple2::NetlistRunner.new(backend: @sim_backend)
+              when :verilog
+                require 'apple2_verilator'
+                sub_cycles = options[:sub_cycles] || 14
+                RHDL::Apple2::VerilatorRunner.new(sub_cycles: sub_cycles)
               else  # :hdl (default)
                 if @sim_backend == :ruby
                   # Pure Ruby HDL simulation
@@ -778,7 +782,7 @@ parser = OptionParser.new do |opts|
     options[:audio] = true
   end
 
-  opts.on("-m", "--mode TYPE", [:hdl, :netlist], "Simulation mode: hdl (default), netlist (gate-level)") do |v|
+  opts.on("-m", "--mode TYPE", [:hdl, :netlist, :verilog], "Simulation mode: hdl (default), netlist (gate-level), verilog (Verilator)") do |v|
     options[:mode] = v
   end
 
