@@ -2,7 +2,7 @@
 //!
 //! C ABI exports for MOS6502 CPU specific functionality
 
-use std::os::raw::{c_int, c_uint};
+use std::os::raw::{c_int, c_uint, c_ulong};
 use std::slice;
 
 use crate::ffi::IrSimContext;
@@ -121,5 +121,37 @@ pub unsafe extern "C" fn ir_sim_mos6502_reset_speaker_toggles(ctx: *mut IrSimCon
     let ctx = &mut *ctx;
     if let Some(ref mut ext) = ctx.mos6502 {
         ext.reset_speaker_toggles();
+    }
+}
+
+/// Run MOS6502 instructions and capture (pc, opcode, sp) tuples
+/// Each opcode_tuple is packed as: (pc << 16) | (opcode << 8) | sp
+/// Returns the number of instructions captured
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_mos6502_run_instructions_with_opcodes(
+    ctx: *mut IrSimContext,
+    n: c_uint,
+    opcodes_out: *mut c_ulong,
+    opcodes_capacity: c_uint,
+) -> c_uint {
+    if ctx.is_null() || opcodes_out.is_null() {
+        return 0;
+    }
+    let ctx = &mut *ctx;
+    if let Some(ref mut ext) = ctx.mos6502 {
+        let mut opcodes: Vec<(u16, u8, u8)> = Vec::with_capacity(n as usize);
+        let count = ext.run_instructions_with_opcodes(&mut ctx.core, n as usize, &mut opcodes);
+
+        // Pack results into output buffer
+        let out_slice = slice::from_raw_parts_mut(opcodes_out, opcodes_capacity as usize);
+        for (i, (pc, opcode, sp)) in opcodes.iter().enumerate() {
+            if i >= opcodes_capacity as usize {
+                break;
+            }
+            out_slice[i] = ((*pc as u64) << 16) | ((*opcode as u64) << 8) | (*sp as u64);
+        }
+        count as c_uint
+    } else {
+        0
     }
 }
