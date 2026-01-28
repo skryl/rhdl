@@ -177,6 +177,8 @@ struct IrSimulator {
     mos6502_rw_idx: usize,
     /// MOS6502 clock signal index
     mos6502_clk_idx: usize,
+    /// MOS6502 speaker toggle counter (incremented on $C030 access)
+    mos6502_speaker_toggles: u32,
 }
 
 impl IrSimulator {
@@ -339,6 +341,7 @@ impl IrSimulator {
             mos6502_data_out_idx,
             mos6502_rw_idx,
             mos6502_clk_idx,
+            mos6502_speaker_toggles: 0,
         })
     }
 
@@ -1029,6 +1032,7 @@ impl IrSimulator {
         let clk_list_idx = clock_indices.iter().position(|&ci| ci == clk_idx);
 
         code.push_str("\n/// Run N MOS6502 CPU cycles with internalized memory bridging\n");
+        code.push_str("/// Returns cycles run, and writes speaker toggle count to out parameter\n");
         code.push_str("#[no_mangle]\n");
         code.push_str("pub unsafe extern \"C\" fn run_mos6502_cycles(\n");
         code.push_str("    signals: *mut u64,\n");
@@ -1036,12 +1040,14 @@ impl IrSimulator {
         code.push_str("    memory: *mut u8,\n");
         code.push_str("    rom_mask: *const bool,\n");
         code.push_str("    n: usize,\n");
+        code.push_str("    speaker_toggles_out: *mut u32,\n");
         code.push_str(") -> usize {\n");
         code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, signals_len);\n");
         code.push_str("    let memory = std::slice::from_raw_parts_mut(memory, 65536);\n");
         code.push_str("    let rom_mask = std::slice::from_raw_parts(rom_mask, 65536);\n");
         code.push_str(&format!("    let mut old_clocks = [0u64; {}];\n", num_clocks));
         code.push_str(&format!("    let mut next_regs = [0u64; {}];\n", num_regs.max(1)));
+        code.push_str("    let mut speaker_toggles: u32 = 0;\n");
         code.push_str("\n");
 
         // Initialize old_clocks
@@ -1063,6 +1069,12 @@ impl IrSimulator {
         code.push_str(&format!("        let addr = (signals[{}] as usize) & 0xFFFF;\n", addr_idx));
         code.push_str(&format!("        let rw = signals[{}];\n", rw_idx));
         code.push_str("\n");
+
+        // Detect speaker toggle ($C030) - any access triggers toggle
+        code.push_str("        if addr == 0xC030 {\n");
+        code.push_str("            speaker_toggles += 1;\n");
+        code.push_str("        }\n\n");
+
         code.push_str("        if rw == 1 {\n");
         code.push_str("            // Read: provide data from memory to CPU\n");
         code.push_str(&format!("            signals[{}] = memory[addr] as u64;\n", data_in_idx));
@@ -1080,6 +1092,10 @@ impl IrSimulator {
         code.push_str(&format!("        signals[{}] = 1;\n", clk_idx));
         code.push_str("        tick_inline(signals, &mut old_clocks, &mut next_regs);\n");
         code.push_str("    }\n\n");
+        code.push_str("    // Write speaker toggles to out parameter\n");
+        code.push_str("    if !speaker_toggles_out.is_null() {\n");
+        code.push_str("        *speaker_toggles_out = speaker_toggles;\n");
+        code.push_str("    }\n");
         code.push_str("    n\n");
         code.push_str("}\n");
     }
@@ -1241,17 +1257,21 @@ impl IrSimulator {
             .expect("IR Compiler: run_mos6502_cycles() called but code not compiled. Call compile() first.");
         unsafe {
             type RunMos6502CyclesFn = unsafe extern "C" fn(
-                *mut u64, usize, *mut u8, *const bool, usize
+                *mut u64, usize, *mut u8, *const bool, usize, *mut u32
             ) -> usize;
             let func: libloading::Symbol<RunMos6502CyclesFn> = lib.get(b"run_mos6502_cycles")
                 .expect("run_mos6502_cycles function not found in compiled library");
-            func(
+            let mut speaker_toggles: u32 = 0;
+            let result = func(
                 self.signals.as_mut_ptr(),
                 self.signals.len(),
                 self.mos6502_memory.as_mut_ptr(),
                 self.mos6502_rom_mask.as_ptr(),
                 n,
-            )
+                &mut speaker_toggles,
+            );
+            self.mos6502_speaker_toggles += speaker_toggles;
+            result
         }
     }
 
@@ -1269,6 +1289,16 @@ impl IrSimulator {
         if addr < self.mos6502_memory.len() && !self.mos6502_rom_mask[addr] {
             self.mos6502_memory[addr] = data;
         }
+    }
+
+    /// Get MOS6502 speaker toggle count (for audio generation)
+    fn mos6502_speaker_toggles(&self) -> u32 {
+        self.mos6502_speaker_toggles
+    }
+
+    /// Reset MOS6502 speaker toggle count (call after syncing to audio system)
+    fn reset_mos6502_speaker_toggles(&mut self) {
+        self.mos6502_speaker_toggles = 0;
     }
 }
 
@@ -1482,6 +1512,14 @@ impl RubyIrCompiler {
     fn write_mos6502_memory(&self, addr: usize, data: i64) {
         self.sim.borrow_mut().write_mos6502_memory(addr, data as u8);
     }
+
+    fn mos6502_speaker_toggles(&self) -> u32 {
+        self.sim.borrow().mos6502_speaker_toggles()
+    }
+
+    fn reset_mos6502_speaker_toggles(&self) {
+        self.sim.borrow_mut().reset_mos6502_speaker_toggles();
+    }
 }
 
 #[magnus::init]
@@ -1520,6 +1558,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("run_mos6502_cycles", method!(RubyIrCompiler::run_mos6502_cycles, 1))?;
     class.define_method("read_mos6502_memory", method!(RubyIrCompiler::read_mos6502_memory, 1))?;
     class.define_method("write_mos6502_memory", method!(RubyIrCompiler::write_mos6502_memory, 2))?;
+    class.define_method("mos6502_speaker_toggles", method!(RubyIrCompiler::mos6502_speaker_toggles, 0))?;
+    class.define_method("reset_mos6502_speaker_toggles", method!(RubyIrCompiler::reset_mos6502_speaker_toggles, 0))?;
 
     Ok(())
 }

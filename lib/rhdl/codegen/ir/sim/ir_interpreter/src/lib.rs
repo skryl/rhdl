@@ -339,6 +339,8 @@ struct RtlSimulator {
     mos6502_rw_idx: usize,
     /// MOS6502 clock signal index
     mos6502_clk_idx: usize,
+    /// MOS6502 speaker toggle counter (incremented on $C030 access)
+    mos6502_speaker_toggles: u32,
 }
 
 impl RtlSimulator {
@@ -576,6 +578,7 @@ impl RtlSimulator {
             mos6502_data_out_idx,
             mos6502_rw_idx,
             mos6502_clk_idx,
+            mos6502_speaker_toggles: 0,
         })
     }
 
@@ -1520,6 +1523,11 @@ impl RtlSimulator {
             let addr = unsafe { *self.signals.get_unchecked(self.mos6502_addr_idx) } as usize & 0xFFFF;
             let rw = unsafe { *self.signals.get_unchecked(self.mos6502_rw_idx) };
 
+            // Detect speaker toggle ($C030) - any access triggers toggle
+            if addr == 0xC030 {
+                self.mos6502_speaker_toggles += 1;
+            }
+
             if rw == 1 {
                 // Read: provide data from memory to CPU
                 let data = unsafe { *self.mos6502_memory.get_unchecked(addr) } as u64;
@@ -1557,6 +1565,16 @@ impl RtlSimulator {
         if addr < self.mos6502_memory.len() && !self.mos6502_rom_mask[addr] {
             self.mos6502_memory[addr] = data;
         }
+    }
+
+    /// Get MOS6502 speaker toggle count (for audio generation)
+    fn mos6502_speaker_toggles(&self) -> u32 {
+        self.mos6502_speaker_toggles
+    }
+
+    /// Reset MOS6502 speaker toggle count (call after syncing to audio system)
+    fn reset_mos6502_speaker_toggles(&mut self) {
+        self.mos6502_speaker_toggles = 0;
     }
 }
 
@@ -1760,6 +1778,14 @@ impl RubyRtlSim {
     fn write_mos6502_memory(&self, addr: usize, data: u8) {
         self.sim.borrow_mut().write_mos6502_memory(addr, data);
     }
+
+    fn mos6502_speaker_toggles(&self) -> u32 {
+        self.sim.borrow().mos6502_speaker_toggles()
+    }
+
+    fn reset_mos6502_speaker_toggles(&self) {
+        self.sim.borrow_mut().reset_mos6502_speaker_toggles();
+    }
 }
 
 #[magnus::init]
@@ -1795,6 +1821,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("run_mos6502_cycles", method!(RubyRtlSim::run_mos6502_cycles, 1))?;
     class.define_method("read_mos6502_memory", method!(RubyRtlSim::read_mos6502_memory, 1))?;
     class.define_method("write_mos6502_memory", method!(RubyRtlSim::write_mos6502_memory, 2))?;
+    class.define_method("mos6502_speaker_toggles", method!(RubyRtlSim::mos6502_speaker_toggles, 0))?;
+    class.define_method("reset_mos6502_speaker_toggles", method!(RubyRtlSim::reset_mos6502_speaker_toggles, 0))?;
 
     Ok(())
 }
