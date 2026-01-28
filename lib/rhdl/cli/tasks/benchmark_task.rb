@@ -250,6 +250,13 @@ module RHDL
           results = []
 
           runners.each do |runner|
+            # Skip Interpreter for large cycle counts (too slow)
+            if runner[:backend] == :interpreter && cycles > 100_000
+              puts "\n#{runner[:name]}: SKIPPED (cycles > 100K, too slow)"
+              results << { name: runner[:name], status: :skipped }
+              next
+            end
+
             # Check availability
             if runner[:available_const]
               available = RHDL::Codegen::IR.const_get(runner[:available_const]) rescue false
@@ -464,6 +471,13 @@ module RHDL
           results = []
 
           runners.each do |runner|
+            # Skip Interpreter for large cycle counts (too slow)
+            if runner[:backend] == :interpreter && cycles > 100_000
+              puts "\n#{runner[:name]}: SKIPPED (cycles > 100K, too slow)"
+              results << { name: runner[:name], status: :skipped }
+              next
+            end
+
             # Check availability
             if runner[:available_const]
               available = RHDL::Codegen::IR.const_get(runner[:available_const]) rescue false
