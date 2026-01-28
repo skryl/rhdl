@@ -314,7 +314,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     checksum
   end
 
-  it 'verifies PC stays within game loop range at cycle checkpoints', timeout: 300 do
+  it 'verifies PC and opcode sequences match through 5M cycles', timeout: 300 do
     skip 'AppleIIgo ROM not found' unless @rom_available
     skip 'Karateka memory dump not found' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
@@ -327,21 +327,97 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     end
 
     puts "\n" + "=" * 70
-    puts "Karateka PC Checkpoint Verification"
+    puts "Karateka PC and Opcode Verification (5M cycles)"
     puts "=" * 70
 
     # Create simulators
     puts "\nInitializing simulators..."
-    isa_cpu, _isa_bus = create_isa_simulator
+    isa_cpu, isa_bus = create_isa_simulator
     ir_sim = create_ir_compiler
+
+    # === Part 1: Opcode sequence verification ===
+    num_opcodes = 10_000
+
+    puts "\nCollecting #{num_opcodes} opcodes from ISA simulator..."
+    isa_opcodes = []
+    num_opcodes.times do
+      break if isa_cpu.halted?
+      pc = isa_cpu.pc
+      opcode = isa_bus.mem_read(pc)
+      isa_opcodes << { pc: pc, opcode: opcode }
+      isa_cpu.step
+    end
+
+    puts "Collecting opcodes from IR simulator (detecting instruction boundaries)..."
+    ir_opcodes = []
+    ir_cycles_for_opcodes = 0
+
+    # Get first instruction before any cycles
+    first_pc = ir_sim.peek('cpu__pc_reg')
+    first_opcode = ir_sim.peek('opcode_debug')
+    ir_opcodes << { pc: first_pc, opcode: first_opcode }
+    prev_opcode = first_opcode
+
+    while ir_opcodes.length < num_opcodes && ir_cycles_for_opcodes < 100_000
+      ir_sim.run_cpu_cycles(1, 0, false)
+      ir_cycles_for_opcodes += 1
+
+      pc = ir_sim.peek('cpu__pc_reg')
+      opcode = ir_sim.peek('opcode_debug')
+
+      # Detect instruction boundary when opcode changes
+      if opcode != prev_opcode
+        ir_opcodes << { pc: pc, opcode: opcode }
+        prev_opcode = opcode
+      end
+    end
+
+    puts "  Collected #{ir_opcodes.length} IR opcodes in #{ir_cycles_for_opcodes} cycles"
+
+    # Compare opcode sequences
+    puts "\n" + "-" * 70
+    puts "Comparing opcode sequences:"
+    puts "-" * 70
+
+    min_len = [isa_opcodes.length, ir_opcodes.length].min
+    mismatches = []
+
+    min_len.times do |i|
+      if isa_opcodes[i][:opcode] != ir_opcodes[i][:opcode]
+        mismatches << {
+          index: i,
+          isa_pc: isa_opcodes[i][:pc],
+          isa_opcode: isa_opcodes[i][:opcode],
+          ir_pc: ir_opcodes[i][:pc],
+          ir_opcode: ir_opcodes[i][:opcode]
+        }
+      end
+    end
+
+    if mismatches.empty?
+      puts "All #{min_len} opcodes match!"
+    else
+      puts "Found #{mismatches.length} mismatches:"
+      mismatches.first(10).each do |m|
+        puts format("  %d: ISA PC=$%04X op=$%02X | IR PC=$%04X op=$%02X",
+                    m[:index], m[:isa_pc], m[:isa_opcode], m[:ir_pc], m[:ir_opcode])
+      end
+      puts "  ..." if mismatches.length > 10
+    end
+
+    # === Part 2: PC checkpoint verification ===
+    puts "\n" + "-" * 70
+    puts "Verifying PC checkpoints:"
+    puts "-" * 70
 
     # Checkpoint cycle counts to verify (up to 5M cycles)
     checkpoints = [100_000, 500_000, 1_000_000, 2_000_000, 3_000_000, 4_000_000, 5_000_000]
-    cycles_run = 0
+    cycles_run = ir_cycles_for_opcodes  # Continue from where opcode collection left off
     results = []
 
     checkpoints.each do |target_cycles|
       cycles_to_run = target_cycles - cycles_run
+      next if cycles_to_run <= 0
 
       # Run ISA
       cycles_to_run.times do
@@ -358,7 +434,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       isa_pc = isa_cpu.pc
       ir_pc = ir_sim.peek('cpu__pc_reg')
 
-      # Check if both PCs are in valid game loop range ($B7xx-$B8xx or $0000-$00FF for zp)
+      # Check if both PCs are in valid game loop range
       isa_region = pc_region(isa_pc)
       ir_region = pc_region(ir_pc)
 
@@ -384,115 +460,25 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
     # Verify all checkpoints passed
     failed = results.reject { |r| r[:close] }
-    if failed.empty?
-      puts "All #{results.length} checkpoints passed"
+    if failed.empty? && mismatches.empty?
+      puts "All #{min_len} opcodes match and all #{results.length} checkpoints passed"
     else
-      puts "#{failed.length} checkpoints failed:"
-      failed.each do |f|
-        puts "  #{f[:cycles] / 1_000_000.0}M: ISA=$#{f[:isa_pc].to_s(16).upcase} IR=$#{f[:ir_pc].to_s(16).upcase}"
+      if mismatches.any?
+        puts "#{mismatches.length} opcode mismatches found"
+      end
+      if failed.any?
+        puts "#{failed.length} checkpoints failed:"
+        failed.each do |f|
+          puts "  #{f[:cycles] / 1_000_000.0}M: ISA=$#{f[:isa_pc].to_s(16).upcase} IR=$#{f[:ir_pc].to_s(16).upcase}"
+        end
       end
     end
-
-    expect(failed).to be_empty,
-      "All cycle checkpoints should have close PCs, but #{failed.length} diverged"
-  end
-
-  it 'verifies opcode sequences match through 5M cycles', timeout: 300 do
-    skip 'AppleIIgo ROM not found' unless @rom_available
-    skip 'Karateka memory dump not found' unless @karateka_available
-    skip 'Native ISA simulator not available' unless native_isa_available?
-
-    begin
-      require 'rhdl/codegen'
-      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
-    rescue LoadError
-      skip 'IR Codegen not available'
-    end
-
-    puts "\n" + "=" * 70
-    puts "Karateka Opcode Sequence Verification (5M cycles)"
-    puts "=" * 70
-
-    # Create simulators
-    puts "\nInitializing simulators..."
-    isa_cpu, isa_bus = create_isa_simulator
-    ir_sim = create_ir_compiler
-
-    # Collect opcodes from both simulators
-    num_opcodes = 10_000
-    total_cycles = 5_000_000
-
-    puts "\nCollecting #{num_opcodes} opcodes from ISA simulator..."
-    isa_opcodes = []
-    num_opcodes.times do
-      break if isa_cpu.halted?
-      pc = isa_cpu.pc
-      opcode = isa_bus.mem_read(pc)
-      isa_opcodes << { pc: pc, opcode: opcode }
-      isa_cpu.step
-    end
-
-    puts "Collecting opcodes from IR simulator (detecting instruction boundaries)..."
-    ir_opcodes = []
-    cycles_run = 0
-
-    # Get first instruction before any cycles
-    first_pc = ir_sim.peek('cpu__pc_reg')
-    first_opcode = ir_sim.peek('opcode_debug')
-    ir_opcodes << { pc: first_pc, opcode: first_opcode }
-    prev_opcode = first_opcode
-
-    while ir_opcodes.length < num_opcodes && cycles_run < total_cycles
-      ir_sim.run_cpu_cycles(1, 0, false)
-      cycles_run += 1
-
-      pc = ir_sim.peek('cpu__pc_reg')
-      opcode = ir_sim.peek('opcode_debug')
-
-      # Detect instruction boundary when opcode changes
-      if opcode != prev_opcode
-        ir_opcodes << { pc: pc, opcode: opcode }
-        prev_opcode = opcode
-      end
-    end
-
-    puts "  Collected #{ir_opcodes.length} IR opcodes in #{cycles_run} cycles"
-
-    # Compare sequences
-    puts "\n" + "-" * 70
-    puts "Comparing opcode sequences:"
-    puts "-" * 70
-
-    min_len = [isa_opcodes.length, ir_opcodes.length].min
-    mismatches = []
-
-    min_len.times do |i|
-      if isa_opcodes[i][:opcode] != ir_opcodes[i][:opcode]
-        mismatches << {
-          index: i,
-          isa_pc: isa_opcodes[i][:pc],
-          isa_opcode: isa_opcodes[i][:opcode],
-          ir_pc: ir_opcodes[i][:pc],
-          ir_opcode: ir_opcodes[i][:opcode]
-        }
-      end
-    end
-
-    if mismatches.empty?
-      puts "\nAll #{min_len} opcodes match!"
-    else
-      puts "\nFound #{mismatches.length} mismatches:"
-      mismatches.first(10).each do |m|
-        puts format("  %d: ISA PC=$%04X op=$%02X | IR PC=$%04X op=$%02X",
-                    m[:index], m[:isa_pc], m[:isa_opcode], m[:ir_pc], m[:ir_opcode])
-      end
-      puts "  ..." if mismatches.length > 10
-    end
-
-    puts "\n" + "=" * 70
 
     expect(mismatches).to be_empty,
       "All opcodes should match, but found #{mismatches.length} mismatches"
+
+    expect(failed).to be_empty,
+      "All cycle checkpoints should have close PCs, but #{failed.length} diverged"
   end
 
   it 'verifies PC sequence subsequence matching over 20M cycles', timeout: 1200 do
