@@ -3,6 +3,7 @@
 require_relative '../../../lib/rhdl/hdl'
 require_relative 'disk2'
 require_relative 'apple2_speaker'
+require_relative 'color_renderer'
 
 module MOS6502
   class Apple2Bus < RHDL::HDL::Component
@@ -400,6 +401,19 @@ module MOS6502
       end
 
       lines.join("\n")
+    end
+
+    # Render hi-res screen using NTSC artifact colors
+    # Uses half-block characters with truecolor ANSI escape sequences
+    # chars_wide: target width in characters (default 140 = full resolution)
+    def render_hires_color(chars_wide: 140)
+      base = hires_page_base
+      renderer = ColorRenderer.new(chars_wide: chars_wide)
+
+      # Build memory accessor that uses mem_read for native CPU support
+      ram = ->(addr) { mem_read(addr) }
+
+      renderer.render(ram, base_addr: base, chars_wide: chars_wide)
     end
 
     # Render using Unicode half-block characters (▀▄█ )
