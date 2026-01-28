@@ -8,8 +8,8 @@
 # is broken into machine cycles (m_cycles), and each machine cycle
 # has multiple T-states for timing.
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
 
 module GameBoy
   class SM83_MCode < RHDL::HDL::Component

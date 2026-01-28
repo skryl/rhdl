@@ -10,9 +10,9 @@
 # - DMA engines
 # - Serial link
 
-require_relative '../../lib/rhdl'
-require_relative '../../lib/rhdl/dsl/behavior'
-require_relative '../../lib/rhdl/dsl/sequential'
+require_relative '../../../lib/rhdl'
+require_relative '../../../lib/rhdl/dsl/behavior'
+require_relative '../../../lib/rhdl/dsl/sequential'
 
 module GameBoy
   class GB < RHDL::HDL::SequentialComponent
@@ -251,6 +251,21 @@ module GameBoy
     port :sel_timer => [:timer_unit, :cpu_sel]
     port [:timer_unit, :irq] => :timer_irq
     port [:timer_unit, :cpu_do] => :timer_do
+
+    # Video clock enables
+    port :ce => [:video_unit, :ce]
+    port :ce_n => [:video_unit, :ce_n]
+    port :ce => [:video_unit, :ce_cpu]  # Use ce for ce_cpu in DMG mode
+    port :is_gbc => [:video_unit, :is_gbc]
+    port :is_gbc => [:video_unit, :isGBC_mode]  # Same as is_gbc for now
+    port :reset => [:video_unit, :reset]
+    port :megaduck => [:video_unit, :megaduck]
+    port :boot_rom_enabled => [:video_unit, :boot_rom_en]
+    port :extra_spr_en => [:video_unit, :extra_spr_en]
+
+    # Video CPU interface
+    port :sel_video_oam => [:video_unit, :cpu_sel_oam]
+    port :sel_video_reg => [:video_unit, :cpu_sel_reg]
 
     # Video connections
     port [:video_unit, :irq] => :video_irq

@@ -10,9 +10,9 @@
 # - FF01: SB - Serial transfer data
 # - FF02: SC - Serial transfer control
 
-require_relative '../../lib/rhdl'
-require_relative '../../lib/rhdl/dsl/behavior'
-require_relative '../../lib/rhdl/dsl/sequential'
+require_relative '../../../lib/rhdl'
+require_relative '../../../lib/rhdl/dsl/behavior'
+require_relative '../../../lib/rhdl/dsl/sequential'
 
 module GameBoy
   class Link < RHDL::HDL::SequentialComponent

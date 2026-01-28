@@ -17,9 +17,9 @@
 # - FF26: Sound on/off
 # - FF30-FF3F: Wave pattern RAM
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module GameBoy
   class Sound < RHDL::HDL::SequentialComponent

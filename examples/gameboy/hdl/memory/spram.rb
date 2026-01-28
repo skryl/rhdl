@@ -6,9 +6,9 @@
 # This is a simplified placeholder. The Game Boy uses various memory
 # sizes instantiated as needed.
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module GameBoy
   class SPRAM < RHDL::HDL::SequentialComponent

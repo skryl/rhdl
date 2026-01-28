@@ -8,9 +8,9 @@
 # - 10 sprites per scanline limit
 # - Priority handling (DMG: X position, CGB: OAM order)
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module GameBoy
   class Sprites < RHDL::HDL::SequentialComponent

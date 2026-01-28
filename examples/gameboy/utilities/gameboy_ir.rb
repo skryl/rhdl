@@ -16,17 +16,17 @@ require_relative 'lcd_renderer'
 
 module RHDL
   module GameBoy
-    # Utility module for exporting GB component to IR
+    # Utility module for exporting Gameboy component to IR
     module GameBoyIr
       class << self
-        # Get the Behavior IR for the GB component (shallow, for Verilog export)
+        # Get the Behavior IR for the Gameboy component (shallow, for Verilog export)
         def behavior_ir
-          ::GameBoy::GB.to_ir
+          ::GameBoy::Gameboy.to_ir
         end
 
         # Get the flattened Behavior IR (includes all subcomponent logic)
         def flat_ir
-          ::GameBoy::GB.to_flat_ir
+          ::GameBoy::Gameboy.to_flat_ir
         end
 
         # Convert to JSON format for the simulator

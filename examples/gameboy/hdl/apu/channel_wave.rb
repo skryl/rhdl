@@ -6,9 +6,9 @@
 # - Selectable output volume (0%, 25%, 50%, 100%)
 # - Length counter
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module GameBoy
   class ChannelWave < RHDL::HDL::SequentialComponent

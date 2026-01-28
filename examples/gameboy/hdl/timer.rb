@@ -13,9 +13,9 @@
 # - TAC[1:0] = 10: 65536 Hz (CPU clock / 64)
 # - TAC[1:0] = 11: 16384 Hz (CPU clock / 256)
 
-require_relative '../../lib/rhdl'
-require_relative '../../lib/rhdl/dsl/behavior'
-require_relative '../../lib/rhdl/dsl/sequential'
+require_relative '../../../lib/rhdl'
+require_relative '../../../lib/rhdl/dsl/behavior'
+require_relative '../../../lib/rhdl/dsl/sequential'
 
 module GameBoy
   class Timer < RHDL::HDL::SequentialComponent

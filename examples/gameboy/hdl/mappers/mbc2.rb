@@ -14,9 +14,9 @@
 # - 0x0000-0x1FFF (A8=0): RAM Enable (0x0A enables)
 # - 0x2000-0x3FFF (A8=1): ROM Bank Number (4-bit, bank 0 maps to 1)
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module GameBoy
   class MBC2 < RHDL::HDL::SequentialComponent

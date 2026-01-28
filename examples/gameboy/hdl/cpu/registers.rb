@@ -12,9 +12,9 @@
 # Note: No shadow registers (AF', bc', de', hl') unlike Z80
 # Note: No IX, IY index registers unlike Z80
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module GameBoy
   class SM83_Registers < RHDL::HDL::SequentialComponent

@@ -4,9 +4,9 @@
 # Handles LCD timing and signal generation for display output.
 # This module is primarily for MiSTer FPGA output formatting.
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module GameBoy
   class LCD < RHDL::HDL::SequentialComponent

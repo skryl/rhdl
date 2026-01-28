@@ -17,9 +17,9 @@
 # - 0x4000-0x5FFF: RAM Bank or RTC Register Select
 # - 0x6000-0x7FFF: Latch Clock Data
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module GameBoy
   class MBC3 < RHDL::HDL::SequentialComponent
