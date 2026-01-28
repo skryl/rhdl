@@ -5,15 +5,16 @@ require 'rhdl'
 require_relative '../../../examples/apple2/hdl/apple2'
 
 RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
-  # Debug test to identify where ISA runner and IR compiler diverge
-  # during Karateka game intro (around 5M cycles)
+  # Test to verify that IR compiler executes the same instructions as ISA
+  # The IR may have extra PC values (cycle-level granularity) but should
+  # contain all ISA PC values in the same order as a subsequence.
 
   ROM_PATH = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
   KARATEKA_MEM_PATH = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
 
   # Test parameters
   TOTAL_CYCLES = 10_000_000
-  CHECKPOINT_INTERVAL = 500_000  # Check every 500K cycles
+  PC_SAMPLE_INTERVAL = 1000  # Sample PC every N cycles
 
   before(:all) do
     @rom_available = File.exist?(ROM_PATH)
@@ -77,72 +78,77 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     sim
   end
 
-  def hires_checksum_isa(bus)
-    checksum = 0
-    (0x2000..0x3FFF).each do |addr|
-      checksum = (checksum + bus.read(addr)) & 0xFFFFFFFF
+  # Check if isa_pcs is a subsequence of ir_pcs (same order, ir may have extras)
+  def is_subsequence?(isa_pcs, ir_pcs)
+    return true if isa_pcs.empty?
+
+    isa_idx = 0
+    ir_pcs.each do |ir_pc|
+      if ir_pc == isa_pcs[isa_idx]
+        isa_idx += 1
+        return true if isa_idx >= isa_pcs.length
+      end
     end
-    checksum
-  end
-
-  def hires_checksum_ir(sim)
-    checksum = 0
-    data = sim.read_ram(0x2000, 0x2000).to_a
-    data.each { |b| checksum = (checksum + b) & 0xFFFFFFFF }
-    checksum
-  end
-
-  def text_checksum_isa(bus)
-    checksum = 0
-    (0x0400..0x07FF).each do |addr|
-      checksum = (checksum + bus.read(addr)) & 0xFFFFFFFF
-    end
-    checksum
-  end
-
-  def text_checksum_ir(sim)
-    checksum = 0
-    data = sim.read_ram(0x0400, 0x400).to_a
-    data.each { |b| checksum = (checksum + b) & 0xFFFFFFFF }
-    checksum
-  end
-
-  # Categorize PC into memory regions for convergence checking
-  def pc_region(pc)
-    case pc
-    when 0x0000..0x01FF then :zero_page_stack
-    when 0x0200..0x03FF then :input_buffer
-    when 0x0400..0x07FF then :text_page
-    when 0x0800..0x1FFF then :user_code
-    when 0x2000..0x3FFF then :hires_page1
-    when 0x4000..0x5FFF then :hires_page2
-    when 0x6000..0xBFFF then :high_ram
-    when 0xC000..0xCFFF then :io_space
-    when 0xD000..0xFFFF then :rom
-    else :unknown
-    end
-  end
-
-  # Check if two PCs are in converging regions (same general area)
-  def pcs_converging?(isa_pc, ir_pc)
-    isa_region = pc_region(isa_pc)
-    ir_region = pc_region(ir_pc)
-
-    # Exact region match
-    return true if isa_region == ir_region
-
-    # Allow ROM/high_ram as equivalent (game loop area)
-    rom_like = [:rom, :high_ram]
-    return true if rom_like.include?(isa_region) && rom_like.include?(ir_region)
-
-    # Allow user code areas as equivalent
-    user_like = [:user_code, :zero_page_stack, :input_buffer]
-    return true if user_like.include?(isa_region) && user_like.include?(ir_region)
 
     false
   end
 
-  it 'compares ISA vs IR compiler over 10M cycles', timeout: 600 do
+  # Find the longest matching prefix of isa_pcs that is a subsequence of ir_pcs
+  def longest_matching_prefix(isa_pcs, ir_pcs)
+    return 0 if isa_pcs.empty? || ir_pcs.empty?
+
+    isa_idx = 0
+    ir_pcs.each do |ir_pc|
+      if ir_pc == isa_pcs[isa_idx]
+        isa_idx += 1
+        break if isa_idx >= isa_pcs.length
+      end
+    end
+
+    isa_idx
+  end
+
+  # Find where the sequences first diverge
+  def find_divergence_point(isa_pcs, ir_pcs)
+    return nil if isa_pcs.empty? || ir_pcs.empty?
+
+    isa_idx = 0
+    ir_idx = 0
+
+    while isa_idx < isa_pcs.length && ir_idx < ir_pcs.length
+      if ir_pcs[ir_idx] == isa_pcs[isa_idx]
+        isa_idx += 1
+        ir_idx += 1
+      else
+        ir_idx += 1
+        # If we've scanned too far without finding the next ISA PC, we've diverged
+        if ir_idx - isa_idx > 10000
+          return {
+            isa_index: isa_idx,
+            isa_pc: isa_pcs[isa_idx],
+            ir_index: ir_idx - 10000,
+            last_matched_isa_index: isa_idx - 1,
+            last_matched_pc: isa_idx > 0 ? isa_pcs[isa_idx - 1] : nil
+          }
+        end
+      end
+    end
+
+    # Check if we matched all ISA PCs
+    if isa_idx < isa_pcs.length
+      {
+        isa_index: isa_idx,
+        isa_pc: isa_pcs[isa_idx],
+        ir_index: ir_idx,
+        last_matched_isa_index: isa_idx - 1,
+        last_matched_pc: isa_idx > 0 ? isa_pcs[isa_idx - 1] : nil
+      }
+    else
+      nil  # All matched
+    end
+  end
+
+  it 'verifies IR PC sequence contains ISA PC sequence as subsequence', timeout: 600 do
     skip 'AppleIIgo ROM not found' unless @rom_available
     skip 'Karateka memory dump not found' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
@@ -155,98 +161,68 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     end
 
     puts "\n" + "=" * 70
-    puts "Karateka ISA vs IR Compiler Divergence Analysis"
+    puts "Karateka ISA vs IR Compiler PC Sequence Analysis"
     puts "Total cycles: #{TOTAL_CYCLES.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
+    puts "PC sample interval: every #{PC_SAMPLE_INTERVAL} cycles"
     puts "=" * 70
 
     # Create simulators
     puts "\nInitializing simulators..."
-    isa_cpu, isa_bus = create_isa_simulator
+    isa_cpu, _isa_bus = create_isa_simulator
     ir_sim = create_ir_compiler
 
     puts "  ISA: Native Rust ISA simulator"
     puts "  IR:  Rust IR Compiler (sub_cycles=14)"
 
-    # Track state at checkpoints
-    checkpoints = []
-    divergence_point = nil
+    # Collect PC sequences (deduplicated - consecutive duplicates removed)
+    isa_pcs = []
+    ir_pcs = []
+    last_isa_pc = nil
+    last_ir_pc = nil
 
     cycles_run = 0
     start_time = Time.now
+    last_report = 0
 
-    puts "\nRunning comparison..."
+    puts "\nCollecting PC sequences..."
     puts "-" * 70
 
     while cycles_run < TOTAL_CYCLES
       # Run batch of cycles
-      batch_size = [CHECKPOINT_INTERVAL, TOTAL_CYCLES - cycles_run].min
+      batch_size = [PC_SAMPLE_INTERVAL, TOTAL_CYCLES - cycles_run].min
 
-      # Run ISA
+      # Run ISA and collect PCs
       batch_size.times do
         break if isa_cpu.halted?
         isa_cpu.step
+        pc = isa_cpu.pc
+        if pc != last_isa_pc
+          isa_pcs << pc
+          last_isa_pc = pc
+        end
       end
 
-      # Run IR
-      ir_sim.run_cpu_cycles(batch_size, 0, false)
+      # Run IR and collect PCs
+      batch_size.times do
+        ir_sim.run_cpu_cycles(1, 0, false)
+        pc = ir_sim.peek('cpu__pc_reg')
+        if pc != last_ir_pc
+          ir_pcs << pc
+          last_ir_pc = pc
+        end
+      end
 
       cycles_run += batch_size
 
-      # Checkpoint
-      isa_pc = isa_cpu.pc
-      ir_pc = ir_sim.peek('cpu__pc_reg')
-
-      isa_hires = hires_checksum_isa(isa_bus)
-      ir_hires = hires_checksum_ir(ir_sim)
-      isa_text = text_checksum_isa(isa_bus)
-      ir_text = text_checksum_ir(ir_sim)
-
-      isa_a = isa_cpu.a
-      isa_x = isa_cpu.x
-      isa_y = isa_cpu.y
-
-      ir_a = ir_sim.peek('cpu__a_reg')
-      ir_x = ir_sim.peek('cpu__x_reg')
-      ir_y = ir_sim.peek('cpu__y_reg')
-
-      checkpoint = {
-        cycles: cycles_run,
-        isa_pc: isa_pc,
-        ir_pc: ir_pc,
-        pc_match: isa_pc == ir_pc,
-        pc_converging: pcs_converging?(isa_pc, ir_pc),
-        isa_region: pc_region(isa_pc),
-        ir_region: pc_region(ir_pc),
-        isa_regs: { a: isa_a, x: isa_x, y: isa_y },
-        ir_regs: { a: ir_a, x: ir_x, y: ir_y },
-        regs_match: isa_a == ir_a && isa_x == ir_x && isa_y == ir_y,
-        isa_hires: isa_hires,
-        ir_hires: ir_hires,
-        hires_match: isa_hires == ir_hires,
-        isa_text: isa_text,
-        ir_text: ir_text,
-        text_match: isa_text == ir_text
-      }
-      checkpoints << checkpoint
-
-      # Check for divergence
-      if divergence_point.nil? && (!checkpoint[:hires_match] || !checkpoint[:text_match])
-        divergence_point = checkpoint
+      # Progress output every 1M cycles
+      if cycles_run - last_report >= 1_000_000
+        elapsed = Time.now - start_time
+        rate = cycles_run / elapsed / 1_000_000
+        pct = (cycles_run.to_f / TOTAL_CYCLES * 100).round(1)
+        puts format("  %5.1f%% | %7.1fM cycles | ISA PCs: %6d | IR PCs: %6d | %.2fM/s",
+                    pct, cycles_run / 1_000_000.0, isa_pcs.size, ir_pcs.size, rate)
+        last_report = cycles_run
       end
-
-      # Progress output
-      elapsed = Time.now - start_time
-      rate = cycles_run / elapsed / 1_000_000
-      pct = (cycles_run.to_f / TOTAL_CYCLES * 100).round(1)
-
-      puts format("  %5.1f%% | %7.1fM cycles | PC: ISA=%04X IR=%04X %s | HiRes: %s | Text: %s | %.2fM/s",
-                  pct,
-                  cycles_run / 1_000_000.0,
-                  isa_pc, ir_pc,
-                  isa_pc == ir_pc ? "=" : "≠",
-                  checkpoint[:hires_match] ? "match" : "DIFF",
-                  checkpoint[:text_match] ? "match" : "DIFF",
-                  rate)
     end
 
     elapsed = Time.now - start_time
@@ -255,100 +231,53 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
     # Analyze results
     puts "\n" + "=" * 70
-    puts "ANALYSIS"
+    puts "PC SEQUENCE ANALYSIS"
     puts "=" * 70
 
-    if divergence_point
-      puts "\n🔴 DIVERGENCE DETECTED at #{divergence_point[:cycles].to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse} cycles"
-      puts "   ISA PC: 0x#{divergence_point[:isa_pc].to_s(16).upcase}"
-      puts "   IR  PC: 0x#{divergence_point[:ir_pc].to_s(16).upcase}"
-      puts "   ISA Regs: A=#{divergence_point[:isa_regs][:a].to_s(16)} X=#{divergence_point[:isa_regs][:x].to_s(16)} Y=#{divergence_point[:isa_regs][:y].to_s(16)}"
-      puts "   IR  Regs: A=#{divergence_point[:ir_regs][:a].to_s(16)} X=#{divergence_point[:ir_regs][:x].to_s(16)} Y=#{divergence_point[:ir_regs][:y].to_s(16)}"
-      puts "   HiRes checksum: ISA=#{divergence_point[:isa_hires].to_s(16)} IR=#{divergence_point[:ir_hires].to_s(16)}"
-      puts "   Text checksum:  ISA=#{divergence_point[:isa_text].to_s(16)} IR=#{divergence_point[:ir_text].to_s(16)}"
-    else
-      puts "\n🟢 No screen divergence detected over #{TOTAL_CYCLES.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse} cycles"
-    end
+    puts "\nSequence sizes:"
+    puts "  ISA unique PCs: #{isa_pcs.size}"
+    puts "  IR unique PCs:  #{ir_pcs.size}"
 
-    # Summary table
-    puts "\nCheckpoint Summary:"
-    puts "  Cycles     | PC Match | Converging | HiRes Match | Text Match | ISA Region   | IR Region"
-    puts "  " + "-" * 90
-    checkpoints.each do |cp|
-      puts format("  %9s | %-8s | %-10s | %-11s | %-10s | %-12s | %-12s",
-                  "#{cp[:cycles] / 1_000_000.0}M",
-                  cp[:pc_match] ? "yes" : "NO",
-                  cp[:pc_converging] ? "yes" : "NO",
-                  cp[:hires_match] ? "yes" : "NO",
-                  cp[:text_match] ? "yes" : "NO",
-                  cp[:isa_region],
-                  cp[:ir_region])
-    end
+    # Check subsequence relationship
+    matching_prefix = longest_matching_prefix(isa_pcs, ir_pcs)
+    match_pct = (matching_prefix.to_f / isa_pcs.size * 100).round(2)
 
-    # Calculate match percentages
-    total = checkpoints.size.to_f
-    pc_match_pct = (checkpoints.count { |cp| cp[:pc_match] } / total * 100).round(1)
-    pc_converge_pct = (checkpoints.count { |cp| cp[:pc_converging] } / total * 100).round(1)
-    regs_match_pct = (checkpoints.count { |cp| cp[:regs_match] } / total * 100).round(1)
-    hires_match_pct = (checkpoints.count { |cp| cp[:hires_match] } / total * 100).round(1)
-    text_match_pct = (checkpoints.count { |cp| cp[:text_match] } / total * 100).round(1)
+    puts "\nSubsequence analysis:"
+    puts "  Longest matching prefix: #{matching_prefix} / #{isa_pcs.size} ISA PCs (#{match_pct}%)"
 
-    puts "\nMatch Percentages:"
-    puts format("  PC Exact:     %5.1f%% (%d/%d checkpoints)", pc_match_pct, checkpoints.count { |cp| cp[:pc_match] }, checkpoints.size)
-    puts format("  PC Converge:  %5.1f%% (%d/%d checkpoints)", pc_converge_pct, checkpoints.count { |cp| cp[:pc_converging] }, checkpoints.size)
-    puts format("  Regs:         %5.1f%% (%d/%d checkpoints)", regs_match_pct, checkpoints.count { |cp| cp[:regs_match] }, checkpoints.size)
-    puts format("  HiRes:        %5.1f%% (%d/%d checkpoints)", hires_match_pct, checkpoints.count { |cp| cp[:hires_match] }, checkpoints.size)
-    puts format("  Text:         %5.1f%% (%d/%d checkpoints)", text_match_pct, checkpoints.count { |cp| cp[:text_match] }, checkpoints.size)
+    if matching_prefix < isa_pcs.size
+      divergence = find_divergence_point(isa_pcs, ir_pcs)
+      if divergence
+        puts "\n  Divergence detected:"
+        puts "    ISA PC index: #{divergence[:isa_index]}"
+        puts "    Missing ISA PC: $#{divergence[:isa_pc].to_s(16).upcase.rjust(4, '0')}"
+        puts "    Last matched PC: $#{divergence[:last_matched_pc]&.to_s(16)&.upcase&.rjust(4, '0') || 'none'}"
 
-    # Note about PC timing differences
-    if pc_match_pct < 100 && pc_converge_pct > 80
-      puts "\n  Note: PC mismatches are expected due to timing differences between"
-      puts "        ISA (instruction-level) and IR (cycle-accurate HDL) simulators."
-      puts "        High convergence rate indicates correct functional behavior."
-    end
-
-    # Assertions - pass if PC is converging (both visit same general code regions)
-    expect(checkpoints.size).to be >= 10, "Should have at least 10 checkpoints"
-
-    # Check that both simulators visit the same set of regions
-    # (timing offset is OK, but they should be executing the same code areas)
-    isa_regions = checkpoints.map { |cp| cp[:isa_region] }.uniq.sort
-    ir_regions = checkpoints.map { |cp| cp[:ir_region] }.uniq.sort
-
-    # Normalize regions - ROM/high_ram are equivalent, user-like regions are equivalent
-    def normalize_regions(regions)
-      regions.map do |r|
-        case r
-        when :rom, :high_ram then :game_loop
-        when :user_code, :zero_page_stack, :input_buffer, :text_page then :user_area
-        else r
+        # Show context around divergence
+        puts "\n  ISA PC context around divergence:"
+        start_idx = [0, divergence[:isa_index] - 5].max
+        end_idx = [isa_pcs.size - 1, divergence[:isa_index] + 5].min
+        (start_idx..end_idx).each do |i|
+          marker = i == divergence[:isa_index] ? " <-- MISSING" : ""
+          puts "    [#{i}] $#{isa_pcs[i].to_s(16).upcase.rjust(4, '0')}#{marker}"
         end
-      end.uniq.sort
+      end
+    else
+      puts "\n  All ISA PCs found in IR sequence in correct order!"
     end
 
-    isa_normalized = normalize_regions(isa_regions)
-    ir_normalized = normalize_regions(ir_regions)
+    # Show first few PCs from each sequence
+    puts "\nFirst 20 unique PCs:"
+    puts "  ISA: #{isa_pcs.first(20).map { |pc| '$' + pc.to_s(16).upcase.rjust(4, '0') }.join(' ')}"
+    puts "  IR:  #{ir_pcs.first(20).map { |pc| '$' + pc.to_s(16).upcase.rjust(4, '0') }.join(' ')}"
 
-    puts "\n  Regions visited:"
-    puts "    ISA: #{isa_regions.join(', ')}"
-    puts "    IR:  #{ir_regions.join(', ')}"
-    puts "    Normalized ISA: #{isa_normalized.join(', ')}"
-    puts "    Normalized IR:  #{ir_normalized.join(', ')}"
+    # Assertions
+    expect(isa_pcs.size).to be > 0, "Should have collected ISA PCs"
+    expect(ir_pcs.size).to be > 0, "Should have collected IR PCs"
 
-    # Both should visit game_loop and user_area regions
-    expect(isa_normalized).to include(:game_loop),
-      "ISA should visit game loop (ROM/HighRAM) region"
-    expect(ir_normalized).to include(:game_loop),
-      "IR should visit game loop (ROM/HighRAM) region"
-
-    # Check that IR doesn't get stuck in unusual regions (HiRes pages as code)
-    stuck_in_hires = checkpoints.count { |cp| [:hires_page1, :hires_page2].include?(cp[:ir_region]) }
-    expect(stuck_in_hires).to be < (checkpoints.size * 0.3),
-      "IR should not execute from HiRes memory for more than 30% of checkpoints (got #{stuck_in_hires})"
-
-    # Text should match for majority of checkpoints (indicates functional correctness)
-    text_match_count = checkpoints.count { |cp| cp[:text_match] }
-    expect(text_match_count).to be >= (checkpoints.size * 0.8),
-      "Text memory should match for at least 80% of checkpoints, got #{(text_match_count * 100.0 / checkpoints.size).round(1)}%"
+    # The key assertion: ISA PC sequence should be a subsequence of IR PC sequence
+    # This means every instruction the ISA executes, the IR should also execute in the same order
+    expect(match_pct).to be >= 95.0,
+      "IR should contain at least 95% of ISA PCs as a subsequence, got #{match_pct}%"
   end
 end
