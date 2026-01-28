@@ -502,14 +502,25 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
 
     chunk_size = 100_000
     total_steps = 0
+    isa_time = 0.0
+    ir_time = 0.0
 
     while total_steps < max_steps
-      # Run chunk
+      # Run ISA chunk with timing
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       chunk_size.times do
         break if isa[:cpu].halted?
         isa[:cpu].step
       end
+      t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      isa_time += (t1 - t0)
+
+      # Run IR chunk with timing
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       ir.run_steps(chunk_size)
+      t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      ir_time += (t1 - t0)
+
       total_steps += chunk_size
 
       isa_pc = isa[:cpu].pc
@@ -528,11 +539,21 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
 
       # Progress indicator every 1M cycles
       if (total_steps % 1_000_000).zero?
-        print "  #{backend_name}: #{total_steps / 1_000_000}M cycles - PC match at $#{isa_pc.to_s(16).upcase}\n"
+        isa_mhz = (total_steps / isa_time) / 1_000_000.0
+        ir_mhz = (total_steps / ir_time) / 1_000_000.0
+        print "  #{backend_name}: #{total_steps / 1_000_000}M cycles - " \
+              "ISA: #{'%.2f' % isa_mhz} MHz, IR: #{'%.2f' % ir_mhz} MHz\n"
       end
     end
 
+    # Final performance summary
+    isa_mhz = (total_steps / isa_time) / 1_000_000.0
+    ir_mhz = (total_steps / ir_time) / 1_000_000.0
+    speedup = ir_mhz / isa_mhz
+
     puts "  #{backend_name}: PASSED #{max_steps / 1_000_000}M cycles"
+    puts "  Performance: ISA=#{'%.2f' % isa_mhz} MHz, #{backend_name}=#{'%.2f' % ir_mhz} MHz " \
+         "(#{'%.1f' % speedup}x #{speedup >= 1.0 ? 'faster' : 'slower'})"
     true
   end
 
@@ -565,5 +586,108 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     puts "\n=== Testing IR Compiler against ISA ==="
     result = run_backend_test("Compile", :compile, 10_000_000)
     expect(result).to be true
+  end
+
+  # ============================================================================
+  # Combined benchmark test - all backends comparison
+  # ============================================================================
+
+  def benchmark_backend(backend_name, backend_sym, cycles)
+    ir = create_ir_simulator_simple(backend_sym)
+
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    ir.run_steps(cycles)
+    t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+    elapsed = t1 - t0
+    mhz = (cycles / elapsed) / 1_000_000.0
+
+    { name: backend_name, cycles: cycles, elapsed: elapsed, mhz: mhz }
+  end
+
+  def benchmark_isa(cycles)
+    isa = create_isa_simulator_simple
+
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    cycles.times do
+      break if isa[:cpu].halted?
+      isa[:cpu].step
+    end
+    t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+    elapsed = t1 - t0
+    mhz = (cycles / elapsed) / 1_000_000.0
+
+    { name: "ISA", cycles: cycles, elapsed: elapsed, mhz: mhz }
+  end
+
+  it 'benchmarks all 4 implementations', :benchmark, timeout: 1800 do
+    skip 'ROM not available' unless @rom_available
+    skip 'Karateka memory not available' unless @karateka_available
+    skip 'Native ISA simulator not available' unless native_isa_available?
+
+    cycles = 20_000_000  # 20M cycles for benchmark
+
+    puts "\n" + "=" * 70
+    puts "  4-Way Implementation Benchmark (#{cycles / 1_000_000}M cycles each)"
+    puts "=" * 70
+
+    results = []
+
+    # ISA (reference)
+    print "  Running ISA..."
+    $stdout.flush
+    results << benchmark_isa(cycles)
+    puts " done (#{'%.2f' % results.last[:elapsed]}s)"
+
+    # Interpreter (slower, use fewer cycles)
+    interp_cycles = 5_000_000
+    print "  Running Interpreter (#{interp_cycles / 1_000_000}M cycles)..."
+    $stdout.flush
+    results << benchmark_backend("Interpret", :interpret, interp_cycles)
+    puts " done (#{'%.2f' % results.last[:elapsed]}s)"
+
+    # JIT
+    print "  Running JIT..."
+    $stdout.flush
+    results << benchmark_backend("JIT", :jit, cycles)
+    puts " done (#{'%.2f' % results.last[:elapsed]}s)"
+
+    # Compiler
+    print "  Running Compiler..."
+    $stdout.flush
+    results << benchmark_backend("Compile", :compile, cycles)
+    puts " done (#{'%.2f' % results.last[:elapsed]}s)"
+
+    # Summary table
+    puts "\n" + "-" * 70
+    puts "  %-12s | %10s | %10s | %10s | %10s" % ["Backend", "Cycles", "Time (s)", "MHz", "vs ISA"]
+    puts "-" * 70
+
+    isa_mhz = results.find { |r| r[:name] == "ISA" }[:mhz]
+
+    results.each do |r|
+      speedup = r[:mhz] / isa_mhz
+      speedup_str = if r[:name] == "ISA"
+                      "-"
+                    elsif speedup >= 1.0
+                      "#{'%.1f' % speedup}x faster"
+                    else
+                      "#{'%.1f' % (1.0 / speedup)}x slower"
+                    end
+
+      puts "  %-12s | %10s | %10.2f | %10.2f | %10s" % [
+        r[:name],
+        "#{r[:cycles] / 1_000_000}M",
+        r[:elapsed],
+        r[:mhz],
+        speedup_str
+      ]
+    end
+
+    puts "-" * 70
+    puts "\n"
+
+    expect(results.size).to eq(4)
   end
 end
