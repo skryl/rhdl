@@ -99,6 +99,8 @@ module GameBoy
     wire :halt_ff               # Halt flag
     wire :int_cycle             # Interrupt cycle active
     wire :prefix, width: 2      # Instruction prefix (CB)
+    wire :cb_prefix             # CB prefix active (latched)
+    wire :cb_ir, width: 8       # CB instruction register
 
     # =========================================================================
     # Microcode Control Signals
@@ -127,6 +129,15 @@ module GameBoy
     wire :load_bc_wz            # Load BC from WZ
     wire :load_de_wz            # Load DE from WZ
     wire :load_hl_wz            # Load HL from WZ
+    wire :inc_hl                # Increment HL (for LDI)
+    wire :dec_hl                # Decrement HL (for LDD)
+    wire :write_hl              # Write to (HL)
+    wire :cond_true             # Condition true for conditional jump
+    wire :is_cond_jr            # Conditional JR instruction
+    wire :cb_bit                # CB BIT instruction
+    wire :cb_bit_flags, width: 8  # Flags result from CB BIT instruction
+    wire :cb_src, width: 8        # Source register for CB operation
+    wire :bit_mask, width: 8      # Bit mask for CB BIT
 
     # Cycle count condition wires (for m_cycles calculation)
     wire :is_6_cycles           # 6-cycle instructions
@@ -181,20 +192,33 @@ module GameBoy
       load_bc_wz <= lit(0, width: 1)
       load_de_wz <= lit(0, width: 1)
       load_hl_wz <= lit(0, width: 1)
+      inc_hl <= lit(0, width: 1)
+      dec_hl <= lit(0, width: 1)
+      write_hl <= lit(0, width: 1)
+      cond_true <= lit(0, width: 1)
+      is_cond_jr <= lit(0, width: 1)
+      cb_bit <= lit(0, width: 1)
 
       # m_cycles calculation
       is_6_cycles <= lit(0, width: 1)
       is_4_cycles <= lit(0, width: 1)
       # 3-cycle instructions: LDH (E0, F0), LD rr,nn (01, 11, 21, 31), JP nn (C3), CALL (CD)
+      # Also conditional JR when taken (we'll handle not-taken case separately)
       is_3_cycles <= (ir == lit(0xE0, width: 8)) | (ir == lit(0xF0, width: 8)) |
                      ((ir[3..0] == lit(1, width: 4)) & (ir[7..6] == lit(0, width: 2))) |
                      (ir == lit(0xC3, width: 8)) | (ir == lit(0xCD, width: 8))
       # 2-cycle instructions: LD (BC),A, LD (DE),A, LD A,(BC), LD A,(DE), JR e, LD A,n (3E)
+      # Also: LDD (HL),A (32), LDI (HL),A (22), CB prefix (CB), conditional JR (20, 28, 30, 38)
       is_2_cycles <= (ir == lit(0x02, width: 8)) | (ir == lit(0x12, width: 8)) |
                      (ir == lit(0x0A, width: 8)) | (ir == lit(0x1A, width: 8)) |
-                     (ir == lit(0x18, width: 8)) | (ir == lit(0x3E, width: 8))
+                     (ir == lit(0x18, width: 8)) | (ir == lit(0x3E, width: 8)) |
+                     (ir == lit(0x32, width: 8)) | (ir == lit(0x22, width: 8)) |
+                     (ir == lit(0xCB, width: 8)) |
+                     (ir == lit(0x20, width: 8)) | (ir == lit(0x28, width: 8)) |
+                     (ir == lit(0x30, width: 8)) | (ir == lit(0x38, width: 8))
 
       # Default: 1 cycle, unless specific cycle count
+      # For conditional JR: 2 cycles if not taken, 3 if taken (handled in M3 skip logic)
       m_cycles <= mux(is_3_cycles, lit(3, width: 3),
                   mux(is_2_cycles, lit(2, width: 3),
                       lit(1, width: 3)))
@@ -309,6 +333,47 @@ module GameBoy
       read_to_acc <= mux((ir == lit(0xF0, width: 8)) & (m_cycle == lit(3, width: 3)),
                          lit(1, width: 1), read_to_acc)
 
+      # LDD (HL), A (0x32) - Write A to (HL) then decrement HL
+      # M2: Write A to (HL), then decrement HL
+      set_addr_to <= mux((ir == lit(0x32, width: 8)) & (m_cycle == lit(2, width: 3)),
+                         lit(ADDR_HL, width: 3), set_addr_to)
+      write_sig <= mux((ir == lit(0x32, width: 8)) & (m_cycle == lit(2, width: 3)),
+                       lit(1, width: 1), write_sig)
+      no_read <= mux((ir == lit(0x32, width: 8)) & (m_cycle == lit(2, width: 3)),
+                     lit(1, width: 1), no_read)
+      dec_hl <= (ir == lit(0x32, width: 8)) & (m_cycle == lit(2, width: 3))
+
+      # LDI (HL), A (0x22) - Write A to (HL) then increment HL
+      # M2: Write A to (HL), then increment HL
+      set_addr_to <= mux((ir == lit(0x22, width: 8)) & (m_cycle == lit(2, width: 3)),
+                         lit(ADDR_HL, width: 3), set_addr_to)
+      write_sig <= mux((ir == lit(0x22, width: 8)) & (m_cycle == lit(2, width: 3)),
+                       lit(1, width: 1), write_sig)
+      no_read <= mux((ir == lit(0x22, width: 8)) & (m_cycle == lit(2, width: 3)),
+                     lit(1, width: 1), no_read)
+      inc_hl <= (ir == lit(0x22, width: 8)) & (m_cycle == lit(2, width: 3))
+
+      # Conditional JR (JR NZ/Z/NC/C) - 0x20/0x28/0x30/0x38
+      # M2: Read displacement, check condition
+      # M3: If condition true, add displacement to PC (extra cycle)
+      is_cond_jr <= (ir == lit(0x20, width: 8)) | (ir == lit(0x28, width: 8)) |
+                    (ir == lit(0x30, width: 8)) | (ir == lit(0x38, width: 8))
+      # Condition evaluation: 20=NZ (Z=0), 28=Z (Z=1), 30=NC (C=0), 38=C (C=1)
+      # ir[4:3] = condition code: 00=NZ, 01=Z, 10=NC, 11=C
+      cond_true <= mux(ir[4..3] == lit(0, width: 2), ~f_reg[FLAG_Z],     # NZ
+                   mux(ir[4..3] == lit(1, width: 2), f_reg[FLAG_Z],      # Z
+                   mux(ir[4..3] == lit(2, width: 2), ~f_reg[FLAG_C],     # NC
+                   mux(ir[4..3] == lit(3, width: 2), f_reg[FLAG_C],      # C
+                       lit(0, width: 1)))))
+      ldz <= mux(is_cond_jr & (m_cycle == lit(2, width: 3)),
+                 lit(1, width: 1), ldz)
+      jump_e <= mux(is_cond_jr & cond_true, lit(1, width: 1), jump_e)
+
+      # CB prefix - triggers CB instruction execution in M2
+      # The CB opcode is already in di_reg after M2, we process it in behavior
+      # CB BIT b, r - test bit b of register r, affect Z flag only
+      cb_bit <= cb_prefix & (cb_ir[7..6] == lit(1, width: 2))
+
       # PC increment during M1 (when not halted and not in interrupt cycle)
       # Also increment during operand reads when reading from instruction stream
       # Explicit conditions for each instruction type that reads operands from PC
@@ -326,7 +391,11 @@ module GameBoy
                 # CALL nn (0xCD) - M2 and M3 read address
                 ((ir == lit(0xCD, width: 8)) & (m_cycle >= lit(2, width: 3))) |
                 # JR e (0x18) - M2 reads displacement
-                ((ir == lit(0x18, width: 8)) & (m_cycle == lit(2, width: 3)))
+                ((ir == lit(0x18, width: 8)) & (m_cycle == lit(2, width: 3))) |
+                # Conditional JR (0x20, 0x28, 0x30, 0x38) - M2 reads displacement
+                (is_cond_jr & (m_cycle == lit(2, width: 3))) |
+                # CB prefix (0xCB) - M2 reads CB opcode
+                ((ir == lit(0xCB, width: 8)) & (m_cycle == lit(2, width: 3)))
 
       # -----------------------------------------------------------------------
       # ALU (Simplified)
@@ -423,6 +492,40 @@ module GameBoy
 
       # Data output (for writes)
       data_out <= acc
+
+      # -----------------------------------------------------------------------
+      # CB BIT instruction - compute flags
+      # CB BIT b, r - test bit b of register r, set Z flag if bit is 0
+      # cb_ir[7:6] = 01 (BIT), cb_ir[5:3] = bit number, cb_ir[2:0] = register
+      # -----------------------------------------------------------------------
+
+      # Get the source register value for CB operations
+      cb_src <= mux(cb_ir[2..0] == lit(0, width: 3), b_reg,
+                mux(cb_ir[2..0] == lit(1, width: 3), c_reg,
+                mux(cb_ir[2..0] == lit(2, width: 3), d_reg,
+                mux(cb_ir[2..0] == lit(3, width: 3), e_reg,
+                mux(cb_ir[2..0] == lit(4, width: 3), h_reg,
+                mux(cb_ir[2..0] == lit(5, width: 3), l_reg,
+                mux(cb_ir[2..0] == lit(6, width: 3), di_reg,  # (HL) - need memory read
+                mux(cb_ir[2..0] == lit(7, width: 3), acc,
+                    acc))))))))
+
+      # Compute the bit mask based on bit number
+      bit_mask <= mux(cb_ir[5..3] == lit(0, width: 3), lit(0x01, width: 8),
+                  mux(cb_ir[5..3] == lit(1, width: 3), lit(0x02, width: 8),
+                  mux(cb_ir[5..3] == lit(2, width: 3), lit(0x04, width: 8),
+                  mux(cb_ir[5..3] == lit(3, width: 3), lit(0x08, width: 8),
+                  mux(cb_ir[5..3] == lit(4, width: 3), lit(0x10, width: 8),
+                  mux(cb_ir[5..3] == lit(5, width: 3), lit(0x20, width: 8),
+                  mux(cb_ir[5..3] == lit(6, width: 3), lit(0x40, width: 8),
+                  mux(cb_ir[5..3] == lit(7, width: 3), lit(0x80, width: 8),
+                      lit(0x01, width: 8)))))))))
+
+      # Test the specified bit - Z flag is set if bit is 0
+      bit_is_zero = (cb_src & bit_mask) == lit(0, width: 8)
+
+      # Compute flags for CB BIT: Z=result, N=0, H=1, C=unchanged
+      cb_bit_flags <= cat(bit_is_zero, lit(0, width: 1), lit(1, width: 1), f_reg[FLAG_C], lit(0, width: 4))
     end
 
     # =========================================================================
@@ -444,6 +547,7 @@ module GameBoy
       m_cycle: 1, t_state: 1,
       int_e_ff1: 0, int_e_ff2: 0,
       halt_ff: 0, int_cycle: 0,
+      cb_prefix: 0, cb_ir: 0x00,
 
       # Bus control
       m1_n: 1, mreq_n: 1, rd_n: 1, wr_n: 1,
@@ -537,9 +641,13 @@ module GameBoy
                      acc))
 
       # Flags - update at T3 (pre-edge timing)
+      # Also update for CB BIT instruction
+      is_cb_bit_update = cb_prefix & (cb_ir[7..6] == lit(1, width: 2))
       f_reg <= mux(clken & save_alu & (t_state == lit(3, width: 3)),
                    alu_flags,
-                   f_reg)
+                   mux(clken & is_cb_bit_update & (m_cycle == lit(2, width: 3)) & (t_state == lit(3, width: 3)),
+                       cb_bit_flags,  # CB BIT updates flags
+                       f_reg))
 
       # -----------------------------------------------------------------------
       # Register Pair Updates from WZ (for LD rr,nn instructions)
@@ -567,12 +675,40 @@ module GameBoy
                    e_reg)
 
       # HL register pair - use di_reg directly for high byte to avoid race with WZ update
+      # Also handle LDI (inc_hl) and LDD (dec_hl)
+      hl_new = cat(h_reg, l_reg)
+      hl_inc = hl_new + lit(1, width: 16)
+      hl_dec = hl_new - lit(1, width: 16)
       h_reg <= mux(clken & load_hl_wz & (t_state == lit(3, width: 3)),
                    di_reg,  # High byte from di_reg (loaded in M3)
-                   h_reg)
+                   mux(clken & inc_hl & (t_state == lit(3, width: 3)),
+                       hl_inc[15..8],  # High byte from incremented HL
+                       mux(clken & dec_hl & (t_state == lit(3, width: 3)),
+                           hl_dec[15..8],  # High byte from decremented HL
+                           h_reg)))
       l_reg <= mux(clken & load_hl_wz & (t_state == lit(3, width: 3)),
                    wz[7..0],  # Low byte from WZ (loaded in M2)
-                   l_reg)
+                   mux(clken & inc_hl & (t_state == lit(3, width: 3)),
+                       hl_inc[7..0],  # Low byte from incremented HL
+                       mux(clken & dec_hl & (t_state == lit(3, width: 3)),
+                           hl_dec[7..0],  # Low byte from decremented HL
+                           l_reg)))
+
+      # -----------------------------------------------------------------------
+      # CB Prefix Handling
+      # -----------------------------------------------------------------------
+
+      # Latch CB prefix flag when ir == 0xCB and instruction starts
+      cb_prefix <= mux(clken & (ir == lit(0xCB, width: 8)) & (m_cycle == lit(1, width: 3)) & (t_state == lit(3, width: 3)),
+                       lit(1, width: 1),
+                       mux(clken & cb_prefix & (m_cycle == lit(2, width: 3)) & (t_state == lit(3, width: 3)),
+                           lit(0, width: 1),  # Clear after M2 completes
+                           cb_prefix))
+
+      # Latch CB opcode from di_reg during M2
+      cb_ir <= mux(clken & (ir == lit(0xCB, width: 8)) & (m_cycle == lit(2, width: 3)) & (t_state == lit(2, width: 3)),
+                   data_in,  # Latch CB opcode
+                   cb_ir)
 
       # -----------------------------------------------------------------------
       # Interrupt Enable
