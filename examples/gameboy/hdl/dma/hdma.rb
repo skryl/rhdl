@@ -12,9 +12,9 @@
 # - FF54: HDMA4 - Destination Low (lower 4 bits ignored)
 # - FF55: HDMA5 - Length/Mode/Start
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module GameBoy
   class HDMA < RHDL::HDL::SequentialComponent

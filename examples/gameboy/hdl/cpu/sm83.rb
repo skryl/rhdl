@@ -10,9 +10,9 @@
 #
 # This implementation follows the T80 core with Mode=3 (Game Boy mode)
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module GameBoy
   class SM83 < RHDL::HDL::SequentialComponent

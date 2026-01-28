@@ -14,9 +14,9 @@
 # - Mode 2 (OAM Search): CPU can access VRAM only
 # - Mode 3 (Drawing): CPU cannot access VRAM or OAM
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module GameBoy
   class Video < RHDL::HDL::SequentialComponent

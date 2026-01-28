@@ -17,9 +17,9 @@
 # - 0x4000-0x5FFF: RAM Bank Number / Upper ROM Bank Bits
 # - 0x6000-0x7FFF: Banking Mode (0=ROM, 1=RAM)
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module GameBoy
   class MBC1 < RHDL::HDL::SequentialComponent

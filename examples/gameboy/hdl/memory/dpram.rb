@@ -7,9 +7,9 @@
 # This is a simplified placeholder. The Game Boy uses various memory
 # sizes instantiated as needed (VRAM 8KB, WRAM 8KB, etc.)
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module GameBoy
   class DPRAM < RHDL::HDL::SequentialComponent

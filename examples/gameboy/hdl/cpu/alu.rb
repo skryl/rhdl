@@ -15,9 +15,9 @@
 # - Bit 4: C (Carry)
 # - Bits 3-0: Always 0
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module GameBoy
   class SM83_ALU < RHDL::HDL::Component

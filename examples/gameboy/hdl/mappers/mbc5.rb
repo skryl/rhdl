@@ -17,9 +17,9 @@
 # - 0x3000-0x3FFF: ROM Bank High bit (bit 8)
 # - 0x4000-0x5FFF: RAM Bank Number (4-bit, bit 3 is rumble on some carts)
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module GameBoy
   class MBC5 < RHDL::HDL::SequentialComponent
