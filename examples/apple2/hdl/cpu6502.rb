@@ -848,12 +848,8 @@ module RHDL
           cat((addr_reg[15..8] + lit(1, width: 8))[7..0], branch_low)
         )
 
-        # stack address - for pull operations (stack_up), use incremented SP;
-        # for push operations, use current SP
-        addr_stack = mux(stack_up,
-          cat(lit(0x01, width: 8), s_inc),   # Pull: read from SP+1
-          cat(lit(0x01, width: 8), s_reg)    # Push: write to current SP
-        )
+        # stack address - use current S register
+        addr_stack = cat(lit(0x01, width: 8), s_reg)
 
         # irq/nmi vector
         addr_irq = mux(nmi_reg, lit(0xFFFE, width: 16), lit(0xFFFA, width: 16))
