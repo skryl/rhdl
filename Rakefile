@@ -290,21 +290,21 @@ namespace :bench do
   desc "Benchmark MOS6502 CPU IR with memory bridging"
   task :mos6502, [:cycles] do |_, args|
     load_cli_tasks
-    cycles = args[:cycles]&.to_i || 100_000
+    cycles = args[:cycles]&.to_i || 5_000_000
     RHDL::CLI::Tasks::BenchmarkTask.new(type: :mos6502, cycles: cycles).run
   end
 
   desc "Benchmark Apple2 full system IR"
   task :apple2, [:cycles] do |_, args|
     load_cli_tasks
-    cycles = args[:cycles]&.to_i || 100_000
+    cycles = args[:cycles]&.to_i || 5_000_000
     RHDL::CLI::Tasks::BenchmarkTask.new(type: :apple2, cycles: cycles).run
   end
 
   desc "Benchmark Verilator simulation"
   task :verilator, [:cycles] do |_, args|
     load_cli_tasks
-    cycles = args[:cycles]&.to_i || 100_000
+    cycles = args[:cycles]&.to_i || 5_000_000
     RHDL::CLI::Tasks::BenchmarkTask.new(type: :verilator, cycles: cycles).run
   end
 
