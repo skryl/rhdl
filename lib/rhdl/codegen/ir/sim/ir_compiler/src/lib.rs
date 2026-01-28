@@ -365,124 +365,14 @@ impl IrSimulator {
         }
     }
 
-    /// Evaluate an expression (interpreter mode)
-    fn eval_expr(&self, expr: &ExprDef) -> u64 {
-        match expr {
-            ExprDef::Signal { name, width } => {
-                let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
-                self.signals.get(idx).copied().unwrap_or(0) & Self::mask(*width)
-            }
-            ExprDef::Literal { value, width } => {
-                (*value as u64) & Self::mask(*width)
-            }
-            ExprDef::UnaryOp { op, operand, width } => {
-                let val = self.eval_expr(operand);
-                let m = Self::mask(*width);
-                match op.as_str() {
-                    "~" | "not" => (!val) & m,
-                    "&" | "reduce_and" => {
-                        let op_width = self.expr_width(operand);
-                        let op_mask = Self::mask(op_width);
-                        if (val & op_mask) == op_mask { 1 } else { 0 }
-                    }
-                    "|" | "reduce_or" => if val != 0 { 1 } else { 0 },
-                    "^" | "reduce_xor" => (val.count_ones() & 1) as u64,
-                    _ => val,
-                }
-            }
-            ExprDef::BinaryOp { op, left, right, width } => {
-                let l = self.eval_expr(left);
-                let r = self.eval_expr(right);
-                let m = Self::mask(*width);
-                match op.as_str() {
-                    "&" => l & r,
-                    "|" => l | r,
-                    "^" => l ^ r,
-                    "+" => l.wrapping_add(r) & m,
-                    "-" => l.wrapping_sub(r) & m,
-                    "*" => l.wrapping_mul(r) & m,
-                    "/" => if r != 0 { l / r } else { 0 },
-                    "%" => if r != 0 { l % r } else { 0 },
-                    "<<" => (l << r.min(63)) & m,
-                    ">>" => l >> r.min(63),
-                    "==" => if l == r { 1 } else { 0 },
-                    "!=" => if l != r { 1 } else { 0 },
-                    "<" => if l < r { 1 } else { 0 },
-                    ">" => if l > r { 1 } else { 0 },
-                    "<=" | "le" => if l <= r { 1 } else { 0 },
-                    ">=" => if l >= r { 1 } else { 0 },
-                    _ => 0,
-                }
-            }
-            ExprDef::Mux { condition, when_true, when_false, width } => {
-                let cond = self.eval_expr(condition);
-                let m = Self::mask(*width);
-                if cond != 0 {
-                    self.eval_expr(when_true) & m
-                } else {
-                    self.eval_expr(when_false) & m
-                }
-            }
-            ExprDef::Slice { base, low, width, .. } => {
-                let val = self.eval_expr(base);
-                (val >> low) & Self::mask(*width)
-            }
-            ExprDef::Concat { parts, width } => {
-                // Parts are ordered [high, ..., low], process in reverse
-                let mut result = 0u64;
-                let mut shift = 0usize;
-                for part in parts.iter().rev() {
-                    let part_val = self.eval_expr(part);
-                    let part_width = self.expr_width(part);
-                    result |= (part_val & Self::mask(part_width)) << shift;
-                    shift += part_width;
-                }
-                result & Self::mask(*width)
-            }
-            ExprDef::Resize { expr, width } => {
-                self.eval_expr(expr) & Self::mask(*width)
-            }
-            ExprDef::MemRead { memory, addr, width } => {
-                if let Some(&mem_idx) = self.memory_name_to_idx.get(memory) {
-                    if let Some(arr) = self.memory_arrays.get(mem_idx) {
-                        let addr_val = self.eval_expr(addr) as usize;
-                        if addr_val < arr.len() {
-                            arr[addr_val] & Self::mask(*width)
-                        } else {
-                            0
-                        }
-                    } else {
-                        0
-                    }
-                } else {
-                    0
-                }
-            }
-        }
-    }
-
-    /// Evaluate all combinational assignments
+    /// Evaluate all combinational assignments (requires compilation)
     fn evaluate(&mut self) {
-        if let Some(ref lib) = self.compiled_lib {
-            // Use compiled evaluate function
-            unsafe {
-                let func: libloading::Symbol<unsafe extern "C" fn(*mut u64, usize)> =
-                    lib.get(b"evaluate").expect("evaluate function not found");
-                func(self.signals.as_mut_ptr(), self.signals.len());
-            }
-        } else {
-            // Interpreted mode
-            self.evaluate_interpreted();
-        }
-    }
-
-    fn evaluate_interpreted(&mut self) {
-        for assign in self.ir.assigns.clone() {
-            if let Some(&idx) = self.name_to_idx.get(&assign.target) {
-                let value = self.eval_expr(&assign.expr);
-                let width = self.widths.get(idx).copied().unwrap_or(64);
-                self.signals[idx] = value & Self::mask(width);
-            }
+        let lib = self.compiled_lib.as_ref()
+            .expect("IR Compiler: evaluate() called but code not compiled. Call compile() first.");
+        unsafe {
+            let func: libloading::Symbol<unsafe extern "C" fn(*mut u64, usize)> =
+                lib.get(b"evaluate").expect("evaluate function not found");
+            func(self.signals.as_mut_ptr(), self.signals.len());
         }
     }
 
@@ -500,87 +390,20 @@ impl IrSimulator {
         Ok(self.signals[idx])
     }
 
-    /// Clock tick - sample registers on rising edges
+    /// Clock tick - sample registers on rising edges (requires compilation)
     fn tick(&mut self) {
-        if let Some(ref lib) = self.compiled_lib {
-            // Use compiled tick function
-            unsafe {
-                type TickFn = unsafe extern "C" fn(*mut u64, usize, *mut u64, *mut u64);
-                let func: libloading::Symbol<TickFn> =
-                    lib.get(b"tick").expect("tick function not found");
-                func(
-                    self.signals.as_mut_ptr(),
-                    self.signals.len(),
-                    self.old_clocks.as_mut_ptr(),
-                    self.next_regs.as_mut_ptr(),
-                );
-            }
-        } else {
-            // Fallback to interpreted mode
-            self.tick_interpreted();
-        }
-    }
-
-    fn tick_interpreted(&mut self) {
-        // Multi-clock domain timing:
-        // 1. Sample ALL register expressions ONCE at tick start (before any updates)
-        // 2. Evaluate combinational logic and detect clock edges
-        // 3. Update registers for clocks with rising edges
-        // 4. Iterate for derived clock domains
-
-        // Save old clock values FIRST (before evaluate changes them)
-        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
-            self.old_clocks[i] = self.signals[clk_idx];
-        }
-
-        // Evaluate combinational logic (may change derived clocks)
-        self.evaluate();
-
-        // Sample ALL register inputs
-        let mut reg_idx = 0;
-        for process in self.ir.processes.clone() {
-            if !process.clocked {
-                continue;
-            }
-            for stmt in &process.statements {
-                let value = self.eval_expr(&stmt.expr);
-                let target_idx = self.seq_targets[reg_idx];
-                let width = self.widths.get(target_idx).copied().unwrap_or(64);
-                self.next_regs[reg_idx] = value & Self::mask(width);
-                reg_idx += 1;
-            }
-        }
-
-        // Iterate for derived clock domains
-        // Each iteration may cause new clock edges as registers update
-        const MAX_ITERATIONS: usize = 10;
-        for _ in 0..MAX_ITERATIONS {
-            let mut any_edge = false;
-
-            for (clock_list_idx, &clk_idx) in self.clock_indices.iter().enumerate() {
-                let old_val = self.old_clocks[clock_list_idx];
-                let new_val = self.signals[clk_idx];
-
-                // Check for rising edge (0 -> 1)
-                if old_val == 0 && new_val == 1 {
-                    any_edge = true;
-
-                    // Update only registers clocked by this signal (pre-grouped for efficiency)
-                    for &(seq_idx, target_idx) in &self.clock_domain_assigns[clock_list_idx] {
-                        self.signals[target_idx] = self.next_regs[seq_idx];
-                    }
-
-                    // Mark this clock as processed (set old to 1 to prevent re-triggering)
-                    self.old_clocks[clock_list_idx] = 1;
-                }
-            }
-
-            if !any_edge {
-                break;
-            }
-
-            // Re-evaluate combinational logic (may trigger derived clocks)
-            self.evaluate();
+        let lib = self.compiled_lib.as_ref()
+            .expect("IR Compiler: tick() called but code not compiled. Call compile() first.");
+        unsafe {
+            type TickFn = unsafe extern "C" fn(*mut u64, usize, *mut u64, *mut u64);
+            let func: libloading::Symbol<TickFn> =
+                lib.get(b"tick").expect("tick function not found");
+            func(
+                self.signals.as_mut_ptr(),
+                self.signals.len(),
+                self.old_clocks.as_mut_ptr(),
+                self.next_regs.as_mut_ptr(),
+            );
         }
     }
 
@@ -1333,89 +1156,29 @@ impl IrSimulator {
     }
 
     fn run_cpu_cycles(&mut self, n: usize, key_data: u8, key_ready: bool) -> BatchResult {
-        if let Some(ref lib) = self.compiled_lib {
-            unsafe {
-                #[allow(improper_ctypes_definitions)]
-                type RunCpuCyclesFn = unsafe extern "C" fn(
-                    *mut u64, usize, *mut u8, usize, *const u8, usize, usize, u8, bool, *mut u64
-                ) -> (bool, bool, u32);
-                let func: libloading::Symbol<RunCpuCyclesFn> =
-                    lib.get(b"run_cpu_cycles").expect("run_cpu_cycles not found");
-                let (text_dirty, key_cleared, speaker_toggles) = func(
-                    self.signals.as_mut_ptr(),
-                    self.signals.len(),
-                    self.ram.as_mut_ptr(),
-                    self.ram.len(),
-                    self.rom.as_ptr(),
-                    self.rom.len(),
-                    n,
-                    key_data,
-                    key_ready,
-                    &mut self.prev_speaker,
-                );
-                return BatchResult { cycles_run: n, text_dirty, key_cleared, speaker_toggles };
-            }
+        let lib = self.compiled_lib.as_ref()
+            .expect("IR Compiler: run_cpu_cycles() called but code not compiled. Call compile() first.");
+        unsafe {
+            #[allow(improper_ctypes_definitions)]
+            type RunCpuCyclesFn = unsafe extern "C" fn(
+                *mut u64, usize, *mut u8, usize, *const u8, usize, usize, u8, bool, *mut u64
+            ) -> (bool, bool, u32);
+            let func: libloading::Symbol<RunCpuCyclesFn> =
+                lib.get(b"run_cpu_cycles").expect("run_cpu_cycles not found");
+            let (text_dirty, key_cleared, speaker_toggles) = func(
+                self.signals.as_mut_ptr(),
+                self.signals.len(),
+                self.ram.as_mut_ptr(),
+                self.ram.len(),
+                self.rom.as_ptr(),
+                self.rom.len(),
+                n,
+                key_data,
+                key_ready,
+                &mut self.prev_speaker,
+            );
+            BatchResult { cycles_run: n, text_dirty, key_cleared, speaker_toggles }
         }
-
-        // Fallback to interpreted mode
-        let mut text_dirty = false;
-        let mut key_cleared = false;
-        let mut key_is_ready = key_ready;
-        let mut speaker_toggles: u32 = 0;
-
-        for _ in 0..n {
-            for _ in 0..14 {
-                // Set keyboard input
-                self.signals[self.k_idx] = if key_is_ready { (key_data as u64) | 0x80 } else { 0 };
-
-                // Falling edge
-                self.signals[self.clk_idx] = 0;
-                self.evaluate();
-
-                // Provide RAM/ROM data (use ram_addr to match Ruby behavior simulator)
-                let addr = self.signals[self.ram_addr_idx] as usize;
-                self.signals[self.ram_do_idx] = if addr >= 0xD000 {
-                    let rom_offset = addr.wrapping_sub(0xD000);
-                    if rom_offset < self.rom.len() { self.rom[rom_offset] as u64 } else { 0 }
-                } else if addr >= 0xC000 {
-                    0
-                } else if addr < self.ram.len() {
-                    self.ram[addr] as u64
-                } else {
-                    0
-                };
-
-                // Rising edge
-                self.signals[self.clk_idx] = 1;
-                self.tick();
-
-                // Handle RAM writes
-                if self.signals[self.ram_we_idx] == 1 {
-                    let write_addr = self.signals[self.ram_addr_idx] as usize;
-                    if write_addr < 0xC000 && write_addr < self.ram.len() {
-                        self.ram[write_addr] = (self.signals[self.d_idx] & 0xFF) as u8;
-                        if write_addr >= 0x0400 && write_addr <= 0x07FF {
-                            text_dirty = true;
-                        }
-                    }
-                }
-
-                // Check keyboard strobe
-                if self.signals[self.read_key_idx] == 1 {
-                    key_is_ready = false;
-                    key_cleared = true;
-                }
-
-                // Check speaker toggle (edge detection)
-                let speaker = self.signals[self.speaker_idx];
-                if speaker != self.prev_speaker {
-                    speaker_toggles += 1;
-                    self.prev_speaker = speaker;
-                }
-            }
-        }
-
-        BatchResult { cycles_run: n, text_dirty, key_cleared, speaker_toggles }
     }
 
     fn load_rom(&mut self, data: &[u8]) {
@@ -1461,7 +1224,7 @@ impl IrSimulator {
         self.mos6502_memory[0xFFFD] = ((addr >> 8) & 0xFF) as u8;
     }
 
-    /// Run N CPU cycles with internalized memory bridging for MOS6502
+    /// Run N CPU cycles with internalized memory bridging for MOS6502 (requires compilation)
     /// Returns the number of cycles actually run
     ///
     /// Timing matches the JIT and Ruby fallback (IRSimulatorRunner::clock_tick):
@@ -1473,65 +1236,22 @@ impl IrSimulator {
             return 0;
         }
 
-        // Use compiled function if available
-        if let Some(ref lib) = self.compiled_lib {
-            unsafe {
-                type RunMos6502CyclesFn = unsafe extern "C" fn(
-                    *mut u64, usize, *mut u8, *const bool, usize
-                ) -> usize;
-                if let Ok(func) = lib.get::<RunMos6502CyclesFn>(b"run_mos6502_cycles") {
-                    return func(
-                        self.signals.as_mut_ptr(),
-                        self.signals.len(),
-                        self.mos6502_memory.as_mut_ptr(),
-                        self.mos6502_rom_mask.as_ptr(),
-                        n,
-                    );
-                }
-            }
+        let lib = self.compiled_lib.as_ref()
+            .expect("IR Compiler: run_mos6502_cycles() called but code not compiled. Call compile() first.");
+        unsafe {
+            type RunMos6502CyclesFn = unsafe extern "C" fn(
+                *mut u64, usize, *mut u8, *const bool, usize
+            ) -> usize;
+            let func: libloading::Symbol<RunMos6502CyclesFn> = lib.get(b"run_mos6502_cycles")
+                .expect("run_mos6502_cycles function not found in compiled library");
+            func(
+                self.signals.as_mut_ptr(),
+                self.signals.len(),
+                self.mos6502_memory.as_mut_ptr(),
+                self.mos6502_rom_mask.as_ptr(),
+                n,
+            )
         }
-
-        // Fallback to interpreted mode
-        self.run_mos6502_cycles_interpreted(n)
-    }
-
-    fn run_mos6502_cycles_interpreted(&mut self, n: usize) -> usize {
-        // Find clock index in our clock_indices array for proper edge detection
-        let clk_list_idx = self.clock_indices.iter().position(|&ci| ci == self.mos6502_clk_idx);
-
-        for _ in 0..n {
-            // Clock falling edge - combinational logic updates
-            if let Some(idx) = clk_list_idx {
-                self.old_clocks[idx] = 1; // Previous state was high
-            }
-            self.signals[self.mos6502_clk_idx] = 0;
-            self.evaluate();
-
-            // NOW get address and R/W from CPU (after evaluate, addr is valid)
-            let addr = self.signals[self.mos6502_addr_idx] as usize & 0xFFFF;
-            let rw = self.signals[self.mos6502_rw_idx];
-
-            if rw == 1 {
-                // Read: provide data from memory to CPU
-                let data = self.mos6502_memory[addr] as u64;
-                self.signals[self.mos6502_data_in_idx] = data;
-            } else {
-                // Write: store CPU data to memory (unless ROM protected)
-                if !self.mos6502_rom_mask[addr] {
-                    let data = self.signals[self.mos6502_data_out_idx] as u8;
-                    self.mos6502_memory[addr] = data;
-                }
-            }
-
-            // Clock rising edge - registers capture values
-            if let Some(idx) = clk_list_idx {
-                self.old_clocks[idx] = 0; // Previous state was low
-            }
-            self.signals[self.mos6502_clk_idx] = 1;
-            self.tick();
-        }
-
-        n
     }
 
     /// Read from MOS6502 memory
