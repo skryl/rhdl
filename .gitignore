@@ -39,3 +39,6 @@ lib/rhdl/codegen/ir/sim/ir_jit/target/
 lib/rhdl/codegen/ir/sim/ir_jit/lib/
 lib/rhdl/codegen/ir/sim/ir_compiler/target/
 lib/rhdl/codegen/ir/sim/ir_compiler/lib/
+
+# Verilator build artifacts
+.verilator_build/
