@@ -55,6 +55,7 @@ impl IrSimContext {
 
         if self.mos6502.is_some() {
             code.push_str(&Mos6502Extension::generate_code(&self.core));
+            code.push_str(&Mos6502Extension::generate_code_run_instructions_with_opcodes(&self.core));
         }
 
         code
