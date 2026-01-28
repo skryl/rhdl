@@ -29,7 +29,7 @@ module GameBoy
     input :reset
 
     input :lcd_on          # LCD enable
-    input :isGBC           # Game Boy Color mode
+    input :is_gbc           # Game Boy Color mode
 
     # Pixel input from PPU
     input :pixel_data, width: 15   # RGB555

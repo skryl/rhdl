@@ -21,7 +21,7 @@ module GameBoy
     input :ce
     input :ce_cpu
     input :size16          # 8x16 sprite mode
-    input :isGBC           # Game Boy Color mode
+    input :is_gbc           # Game Boy Color mode
     input :sprite_en       # Sprites enabled
     input :lcd_on          # LCD on
 
@@ -65,10 +65,10 @@ module GameBoy
     output :spr_extra_index, width: 4
 
     # Save state interface
-    input :Savestate_OAMRAMAddr, width: 8
-    input :Savestate_OAMRAMRWrEn
-    input :Savestate_OAMRAMWriteData, width: 8
-    output :Savestate_OAMRAMReadData, width: 8
+    input :savestate_oamram_addr, width: 8
+    input :savestate_oamram_wren
+    input :savestate_oamram_write_data, width: 8
+    output :savestate_oamram_read_data, width: 8
 
     # Internal OAM storage (160 bytes = 40 sprites x 4 bytes)
     # Each sprite: Y, X, Tile, Attributes

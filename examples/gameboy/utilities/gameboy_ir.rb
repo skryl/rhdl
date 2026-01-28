@@ -136,7 +136,7 @@ module RHDL
         poke_input('clk_sys', 0)
         poke_input('ce', 0)
         poke_input('joystick', 0xFF)
-        poke_input('isGBC', 0)
+        poke_input('is_gbc', 0)
         @sim.evaluate
       end
 

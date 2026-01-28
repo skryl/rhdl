@@ -29,7 +29,7 @@ module GameBoy
     # CPU interface
     input :sel_reg            # HDMA registers selected (FF51-FF55)
     input :addr, width: 4     # Register address (1-5)
-    input :wr                 # Write
+    input :wr                 # write_sig
     output :dout, width: 8    # Data out
     input :din, width: 8      # Data in
 

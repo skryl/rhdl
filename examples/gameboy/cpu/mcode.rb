@@ -5,7 +5,7 @@
 # for each machine cycle and T-state of instruction execution.
 #
 # The SM83 uses a microcode-like approach where each instruction
-# is broken into machine cycles (MCycles), and each machine cycle
+# is broken into machine cycles (m_cycles), and each machine cycle
 # has multiple T-states for timing.
 
 require_relative '../../../lib/rhdl'
@@ -27,116 +27,116 @@ module GameBoy
 
     # Instruction inputs
     input :clk
-    input :IR, width: 8         # Instruction register
-    input :ISet, width: 2       # Instruction set (00=normal, 01=CB prefix)
-    input :MCycle, width: 3     # Current machine cycle
-    input :F, width: 8          # Flags
-    input :NMICycle             # NMI active
-    input :IntCycle             # Interrupt active
-    input :XY_State, width: 2   # IX/IY state (unused in GB)
+    input :ir, width: 8         # Instruction register
+    input :i_set, width: 2       # Instruction set (00=normal, 01=CB prefix)
+    input :m_cycle, width: 3     # Current machine cycle
+    input :flags, width: 8          # Flags
+    input :nmi_cycle             # NMI active
+    input :int_cycle             # Interrupt active
+    input :xy_state, width: 2   # IX/IY state (unused in GB)
 
     # Control outputs
-    output :MCycles, width: 3       # Machine cycles for this instruction
-    output :TStates, width: 3       # T-states for current machine cycle
-    output :Prefix, width: 2        # Prefix for next instruction
-    output :Inc_PC                  # Increment PC
-    output :Inc_WZ                  # Increment WZ temp register
-    output :IncDec_16, width: 4     # 16-bit inc/dec control
-    output :Read_To_Acc             # Read to accumulator
-    output :Read_To_Reg             # Read to register
-    output :Set_BusB_To, width: 4   # Bus B source select
-    output :Set_BusA_To, width: 4   # Bus A source select
-    output :ALU_Op, width: 4        # ALU operation
-    output :Save_ALU                # Save ALU result
-    output :Rot_Akku                # Rotate accumulator
-    output :PreserveC               # Preserve carry flag
-    output :Arith16                 # 16-bit arithmetic
-    output :Set_Addr_To, width: 3   # Address bus source
-    output :IORQ                    # I/O request
-    output :Jump                    # Jump instruction
-    output :JumpE                   # Relative jump
-    output :JumpXY                  # Jump to HL/IX/IY
-    output :Call                    # Call instruction
-    output :RstP                    # RST instruction
-    output :LDZ                     # Load Z register
-    output :LDW                     # Load W register
-    output :LDSPHL                  # LD SP,HL
-    output :LDHLSP                  # LD HL,SP+n
-    output :ADDSPdd                 # ADD SP,dd
-    output :Special_LD, width: 3    # Special load operations
-    output :ExchangeDH              # Exchange D and H (unused in GB)
-    output :ExchangeRp              # Exchange register pairs (unused in GB)
-    output :ExchangeAF              # Exchange AF (unused in GB)
-    output :ExchangeRS              # Exchange register sets (unused in GB)
-    output :I_DJNZ                  # DJNZ instruction (STOP on GB)
-    output :I_CPL                   # CPL instruction
-    output :I_CCF                   # CCF instruction
-    output :I_SCF                   # SCF instruction
-    output :I_RETN                  # RETI instruction
-    output :I_BT                    # Block transfer (unused in GB)
-    output :I_BC                    # Block compare (unused in GB)
-    output :I_BTR                   # Block transfer repeat (unused in GB)
-    output :I_RLD                   # RLD instruction (unused in GB)
-    output :I_RRD                   # RRD instruction (unused in GB)
-    output :I_INRC                  # IN r,(C) (unused in GB)
-    output :SetDI                   # Disable interrupts
-    output :SetEI                   # Enable interrupts
-    output :IMode, width: 2         # Interrupt mode (unused in GB)
-    output :Halt                    # HALT instruction
-    output :NoRead                  # Suppress memory read
-    output :Write                   # Memory write
+    output :m_cycles, width: 3       # Machine cycles for this instruction
+    output :t_states, width: 3       # T-states for current machine cycle
+    output :prefix, width: 2        # prefix for next instruction
+    output :inc_pc                  # Increment pc
+    output :inc_wz                  # Increment WZ temp register
+    output :inc_dec_16, width: 4     # 16-bit inc/dec control
+    output :read_to_acc             # Read to accumulator
+    output :read_to_reg             # Read to register
+    output :set_bus_b_to, width: 4   # Bus B source select
+    output :set_bus_a_to, width: 4   # Bus addr_bus source select
+    output :alu_op, width: 4        # ALU operation
+    output :save_alu                # Save ALU result
+    output :rot_akku                # Rotate accumulator
+    output :preserve_c               # Preserve carry flag
+    output :arith16                 # 16-bit arithmetic
+    output :set_addr_to, width: 3   # Address bus source
+    output :iorq                    # I/O request
+    output :jump                    # jump instruction
+    output :jump_e                   # Relative jump
+    output :jump_xy                  # jump to hl/IX/IY
+    output :call_out                    # call_out instruction
+    output :rst_p                    # RST instruction
+    output :ldz                     # Load Z register
+    output :ldw                     # Load W register
+    output :ldsphl                  # LD sp,hl
+    output :ldhlsp                  # LD hl,sp+n
+    output :addsp_dd                 # ADD sp,dd
+    output :special_ld, width: 3    # Special load operations
+    output :exchange_dh              # Exchange D and H (unused in GB)
+    output :exchange_rp              # Exchange register pairs (unused in GB)
+    output :exchange_af              # Exchange AF (unused in GB)
+    output :exchange_rs              # Exchange register sets (unused in GB)
+    output :i_djnz                  # DJNZ instruction (stop_out on GB)
+    output :i_cpl                   # CPL instruction
+    output :i_ccf                   # CCF instruction
+    output :i_scf                   # SCF instruction
+    output :i_retn                  # RETI instruction
+    output :i_bt                    # Block transfer (unused in GB)
+    output :i_bc                    # Block compare (unused in GB)
+    output :i_btr                   # Block transfer repeat (unused in GB)
+    output :i_rld                   # RLD instruction (unused in GB)
+    output :i_rrd                   # RRD instruction (unused in GB)
+    output :i_inrc                  # IN r,(C) (unused in GB)
+    output :set_di                   # Disable interrupts
+    output :set_ei                   # Enable interrupts
+    output :i_mode, width: 2         # Interrupt mode (unused in GB)
+    output :halt_sig                    # HALT instruction
+    output :no_read                  # Suppress memory read
+    output :write_sig                   # Memory write
 
     behavior do
       # Default values
-      MCycles <= lit(1, width: 3)
-      TStates <= lit(4, width: 3)
-      Prefix <= lit(0, width: 2)
-      Inc_PC <= lit(0, width: 1)
-      Inc_WZ <= lit(0, width: 1)
-      IncDec_16 <= lit(0, width: 4)
-      Read_To_Acc <= lit(0, width: 1)
-      Read_To_Reg <= lit(0, width: 1)
-      Set_BusB_To <= lit(0, width: 4)
-      Set_BusA_To <= lit(0, width: 4)
-      ALU_Op <= lit(0, width: 4)
-      Save_ALU <= lit(0, width: 1)
-      Rot_Akku <= lit(0, width: 1)
-      PreserveC <= lit(0, width: 1)
-      Arith16 <= lit(0, width: 1)
-      Set_Addr_To <= lit(0, width: 3)
-      IORQ <= lit(0, width: 1)
-      Jump <= lit(0, width: 1)
-      JumpE <= lit(0, width: 1)
-      JumpXY <= lit(0, width: 1)
-      Call <= lit(0, width: 1)
-      RstP <= lit(0, width: 1)
-      LDZ <= lit(0, width: 1)
-      LDW <= lit(0, width: 1)
-      LDSPHL <= lit(0, width: 1)
-      LDHLSP <= lit(0, width: 1)
-      ADDSPdd <= lit(0, width: 1)
-      Special_LD <= lit(0, width: 3)
-      ExchangeDH <= lit(0, width: 1)
-      ExchangeRp <= lit(0, width: 1)
-      ExchangeAF <= lit(0, width: 1)
-      ExchangeRS <= lit(0, width: 1)
-      I_DJNZ <= lit(0, width: 1)
-      I_CPL <= lit(0, width: 1)
-      I_CCF <= lit(0, width: 1)
-      I_SCF <= lit(0, width: 1)
-      I_RETN <= lit(0, width: 1)
-      I_BT <= lit(0, width: 1)
-      I_BC <= lit(0, width: 1)
-      I_BTR <= lit(0, width: 1)
-      I_RLD <= lit(0, width: 1)
-      I_RRD <= lit(0, width: 1)
-      I_INRC <= lit(0, width: 1)
-      SetDI <= lit(0, width: 1)
-      SetEI <= lit(0, width: 1)
-      IMode <= lit(0, width: 2)
-      Halt <= lit(0, width: 1)
-      NoRead <= lit(0, width: 1)
-      Write <= lit(0, width: 1)
+      m_cycles <= lit(1, width: 3)
+      t_states <= lit(4, width: 3)
+      prefix <= lit(0, width: 2)
+      inc_pc <= lit(0, width: 1)
+      inc_wz <= lit(0, width: 1)
+      inc_dec_16 <= lit(0, width: 4)
+      read_to_acc <= lit(0, width: 1)
+      read_to_reg <= lit(0, width: 1)
+      set_bus_b_to <= lit(0, width: 4)
+      set_bus_a_to <= lit(0, width: 4)
+      alu_op <= lit(0, width: 4)
+      save_alu <= lit(0, width: 1)
+      rot_akku <= lit(0, width: 1)
+      preserve_c <= lit(0, width: 1)
+      arith16 <= lit(0, width: 1)
+      set_addr_to <= lit(0, width: 3)
+      iorq <= lit(0, width: 1)
+      jump <= lit(0, width: 1)
+      jump_e <= lit(0, width: 1)
+      jump_xy <= lit(0, width: 1)
+      call_out <= lit(0, width: 1)
+      rst_p <= lit(0, width: 1)
+      ldz <= lit(0, width: 1)
+      ldw <= lit(0, width: 1)
+      ldsphl <= lit(0, width: 1)
+      ldhlsp <= lit(0, width: 1)
+      addsp_dd <= lit(0, width: 1)
+      special_ld <= lit(0, width: 3)
+      exchange_dh <= lit(0, width: 1)
+      exchange_rp <= lit(0, width: 1)
+      exchange_af <= lit(0, width: 1)
+      exchange_rs <= lit(0, width: 1)
+      i_djnz <= lit(0, width: 1)
+      i_cpl <= lit(0, width: 1)
+      i_ccf <= lit(0, width: 1)
+      i_scf <= lit(0, width: 1)
+      i_retn <= lit(0, width: 1)
+      i_bt <= lit(0, width: 1)
+      i_bc <= lit(0, width: 1)
+      i_btr <= lit(0, width: 1)
+      i_rld <= lit(0, width: 1)
+      i_rrd <= lit(0, width: 1)
+      i_inrc <= lit(0, width: 1)
+      set_di <= lit(0, width: 1)
+      set_ei <= lit(0, width: 1)
+      i_mode <= lit(0, width: 2)
+      halt_sig <= lit(0, width: 1)
+      no_read <= lit(0, width: 1)
+      write_sig <= lit(0, width: 1)
 
       # Instruction decoding based on opcode
       # This is a simplified version - full implementation would decode all GB opcodes
@@ -145,58 +145,58 @@ module GameBoy
       # NOP (0x00)
       # LD r,r' (0x40-0x7F except 0x76)
       # LD r,n (0x06, 0x0E, 0x16, 0x1E, 0x26, 0x2E, 0x3E)
-      # ALU A,r (0x80-0xBF)
+      # ALU addr_bus,r (0x80-0xBF)
       # etc.
 
       # CB prefix detection
-      Prefix <= mux(IR == lit(0xCB, width: 8),
+      prefix <= mux(ir == lit(0xCB, width: 8),
                     lit(1, width: 2),
                     lit(0, width: 2))
 
       # Basic instruction timing (simplified)
       # Most instructions are 1-4 machine cycles
       # Each machine cycle is 4 T-states on GB (not the 3-6 of Z80)
-      TStates <= lit(4, width: 3)
+      t_states <= lit(4, width: 3)
 
       # HALT instruction (0x76)
-      Halt <= (IR == lit(0x76, width: 8)) & (ISet == lit(0, width: 2))
+      halt_sig <= (ir == lit(0x76, width: 8)) & (i_set == lit(0, width: 2))
 
-      # STOP instruction (0x10) - shows as I_DJNZ in T80
-      I_DJNZ <= (IR == lit(0x10, width: 8)) & (ISet == lit(0, width: 2))
+      # stop_out instruction (0x10) - shows as i_djnz in T80
+      i_djnz <= (ir == lit(0x10, width: 8)) & (i_set == lit(0, width: 2))
 
-      # DI instruction (0xF3)
-      SetDI <= (IR == lit(0xF3, width: 8)) & (ISet == lit(0, width: 2))
+      # data_in instruction (0xF3)
+      set_di <= (ir == lit(0xF3, width: 8)) & (i_set == lit(0, width: 2))
 
       # EI instruction (0xFB)
-      SetEI <= (IR == lit(0xFB, width: 8)) & (ISet == lit(0, width: 2))
+      set_ei <= (ir == lit(0xFB, width: 8)) & (i_set == lit(0, width: 2))
 
       # CPL instruction (0x2F)
-      I_CPL <= (IR == lit(0x2F, width: 8)) & (ISet == lit(0, width: 2))
+      i_cpl <= (ir == lit(0x2F, width: 8)) & (i_set == lit(0, width: 2))
 
       # CCF instruction (0x3F)
-      I_CCF <= (IR == lit(0x3F, width: 8)) & (ISet == lit(0, width: 2))
+      i_ccf <= (ir == lit(0x3F, width: 8)) & (i_set == lit(0, width: 2))
 
       # SCF instruction (0x37)
-      I_SCF <= (IR == lit(0x37, width: 8)) & (ISet == lit(0, width: 2))
+      i_scf <= (ir == lit(0x37, width: 8)) & (i_set == lit(0, width: 2))
 
       # RETI instruction (0xD9) - note: different from Z80's EXX
-      I_RETN <= (IR == lit(0xD9, width: 8)) & (ISet == lit(0, width: 2))
+      i_retn <= (ir == lit(0xD9, width: 8)) & (i_set == lit(0, width: 2))
 
-      # LD SP,HL (0xF9)
-      LDSPHL <= (IR == lit(0xF9, width: 8)) & (ISet == lit(0, width: 2))
+      # LD sp,hl (0xF9)
+      ldsphl <= (ir == lit(0xF9, width: 8)) & (i_set == lit(0, width: 2))
 
-      # LD HL,SP+n (0xF8)
-      LDHLSP <= (IR == lit(0xF8, width: 8)) & (ISet == lit(0, width: 2))
+      # LD hl,sp+n (0xF8)
+      ldhlsp <= (ir == lit(0xF8, width: 8)) & (i_set == lit(0, width: 2))
 
-      # ADD SP,dd (0xE8)
-      ADDSPdd <= (IR == lit(0xE8, width: 8)) & (ISet == lit(0, width: 2))
+      # ADD sp,dd (0xE8)
+      addsp_dd <= (ir == lit(0xE8, width: 8)) & (i_set == lit(0, width: 2))
 
-      # Increment PC for most instructions during fetch
-      Inc_PC <= (MCycle == lit(1, width: 3))
+      # Increment pc for most instructions during fetch
+      inc_pc <= (m_cycle == lit(1, width: 3))
 
-      # Read/Write control based on instruction type
-      NoRead <= lit(0, width: 1)  # Default to allow reads
-      Write <= lit(0, width: 1)   # Default to no writes
+      # Read/write_sig control based on instruction type
+      no_read <= lit(0, width: 1)  # Default to allow reads
+      write_sig <= lit(0, width: 1)   # Default to no writes
     end
   end
 end

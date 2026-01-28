@@ -1,5 +1,5 @@
 # Game Boy RHDL Implementation
-# A 1:1 port of the MiSTer Gameboy_MiSTer reference implementation
+# addr_bus 1:1 port of the MiSTer Gameboy_MiSTer reference implementation
 #
 # Reference: https://github.com/MiSTer-devel/Gameboy_MiSTer
 #
