@@ -686,12 +686,19 @@ module RHDL
           '--cc',
           '--build',
           '--top-module', 'apple2_apple2',
+          # Optimization flags
+          '-O3',                  # Maximum Verilator optimization
+          '--x-assign', 'fast',   # Faster X state handling
+          '--x-initial', 'fast',  # Faster initialization
+          '--noassert',           # Disable assertions
+          # Warning suppressions
           '-Wno-fatal',           # Continue despite warnings
           '-Wno-WIDTHEXPAND',     # Suppress width expansion warnings
           '-Wno-WIDTHTRUNC',      # Suppress width truncation warnings
           '-Wno-UNOPTFLAT',       # Suppress unoptimized flattening warnings
-          '-CFLAGS', '-fPIC',
-          '-LDFLAGS', '-shared',
+          # C++ compiler flags for performance
+          '-CFLAGS', '-fPIC -O3 -march=native -flto',
+          '-LDFLAGS', '-shared -flto',
           '--Mdir', OBJ_DIR,
           '--prefix', 'Vapple2',
           '-o', lib_name,
@@ -717,11 +724,11 @@ module RHDL
         obj_files = Dir.glob(File.join(OBJ_DIR, '*.o'))
 
         if obj_files.empty?
-          # Compile the generated C++ files
+          # Compile the generated C++ files with optimization
           cpp_files = Dir.glob(File.join(OBJ_DIR, '*.cpp'))
           cpp_files.each do |cpp|
             obj = cpp.sub('.cpp', '.o')
-            system("g++ -c -fPIC -I#{OBJ_DIR} -o #{obj} #{cpp}")
+            system("g++ -c -fPIC -O3 -march=native -flto -I#{OBJ_DIR} -o #{obj} #{cpp}")
           end
           obj_files = Dir.glob(File.join(OBJ_DIR, '*.o'))
         end
@@ -733,9 +740,9 @@ module RHDL
 
         lib_path = shared_lib_path
         link_cmd = if RbConfig::CONFIG['host_os'] =~ /darwin/
-                     "g++ -shared -dynamiclib -o #{lib_path} #{obj_files.join(' ')}"
+                     "g++ -shared -dynamiclib -flto -o #{lib_path} #{obj_files.join(' ')}"
                    else
-                     "g++ -shared -o #{lib_path} #{obj_files.join(' ')}"
+                     "g++ -shared -flto -o #{lib_path} #{obj_files.join(' ')}"
                    end
 
         system(link_cmd)
