@@ -335,116 +335,93 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     isa_cpu, isa_bus = create_isa_simulator
     ir_sim = create_ir_compiler
 
-    # === Part 1: Opcode sequence verification ===
-    num_opcodes = 10_000
-
-    puts "\nCollecting #{num_opcodes} opcodes from ISA simulator..."
-    isa_opcodes = []
-    num_opcodes.times do
-      break if isa_cpu.halted?
-      pc = isa_cpu.pc
-      opcode = isa_bus.mem_read(pc)
-      isa_opcodes << { pc: pc, opcode: opcode }
-      isa_cpu.step
-    end
-
-    puts "Collecting opcodes from IR simulator (detecting instruction boundaries)..."
-    ir_opcodes = []
-    ir_cycles_for_opcodes = 0
-
-    # Get first instruction before any cycles
-    first_pc = ir_sim.peek('cpu__pc_reg')
-    first_opcode = ir_sim.peek('opcode_debug')
-    ir_opcodes << { pc: first_pc, opcode: first_opcode }
-    prev_opcode = first_opcode
-
-    while ir_opcodes.length < num_opcodes && ir_cycles_for_opcodes < 100_000
-      ir_sim.run_cpu_cycles(1, 0, false)
-      ir_cycles_for_opcodes += 1
-
-      pc = ir_sim.peek('cpu__pc_reg')
-      opcode = ir_sim.peek('opcode_debug')
-
-      # Detect instruction boundary when opcode changes
-      if opcode != prev_opcode
-        ir_opcodes << { pc: pc, opcode: opcode }
-        prev_opcode = opcode
-      end
-    end
-
-    puts "  Collected #{ir_opcodes.length} IR opcodes in #{ir_cycles_for_opcodes} cycles"
-
-    # Compare opcode sequences
-    puts "\n" + "-" * 70
-    puts "Comparing opcode sequences:"
-    puts "-" * 70
-
-    min_len = [isa_opcodes.length, ir_opcodes.length].min
-    mismatches = []
-
-    min_len.times do |i|
-      if isa_opcodes[i][:opcode] != ir_opcodes[i][:opcode]
-        mismatches << {
-          index: i,
-          isa_pc: isa_opcodes[i][:pc],
-          isa_opcode: isa_opcodes[i][:opcode],
-          ir_pc: ir_opcodes[i][:pc],
-          ir_opcode: ir_opcodes[i][:opcode]
-        }
-      end
-    end
-
-    if mismatches.empty?
-      puts "All #{min_len} opcodes match!"
-    else
-      puts "Found #{mismatches.length} mismatches:"
-      mismatches.first(10).each do |m|
-        puts format("  %d: ISA PC=$%04X op=$%02X | IR PC=$%04X op=$%02X",
-                    m[:index], m[:isa_pc], m[:isa_opcode], m[:ir_pc], m[:ir_opcode])
-      end
-      puts "  ..." if mismatches.length > 10
-    end
-
-    # === Part 2: PC checkpoint verification ===
-    puts "\n" + "-" * 70
-    puts "Verifying PC checkpoints:"
-    puts "-" * 70
-
     # Checkpoint cycle counts to verify (up to 5M cycles)
     checkpoints = [100_000, 500_000, 1_000_000, 2_000_000, 3_000_000, 4_000_000, 5_000_000]
-    cycles_run = ir_cycles_for_opcodes  # Continue from where opcode collection left off
+    total_cycles = 5_000_000
+
+    cycles_run = 0
+    isa_instruction_count = 0
+    ir_instruction_count = 0
+    mismatches = []
     results = []
+
+    # Track IR opcode changes - IR starts with first instruction already fetched
+    prev_ir_opcode = ir_sim.peek('opcode_debug')
+
+    # Sync: verify first instruction matches
+    first_ir_pc = ir_sim.peek('cpu__pc_reg')
+    first_isa_pc = isa_cpu.pc
+    first_isa_opcode = isa_bus.mem_read(first_isa_pc)
+
+    if first_isa_opcode != prev_ir_opcode && mismatches.length < 10
+      mismatches << {
+        instr: 0,
+        isa_pc: first_isa_pc,
+        isa_opcode: first_isa_opcode,
+        ir_pc: first_ir_pc,
+        ir_opcode: prev_ir_opcode
+      }
+    end
+
+    # Step ISA for first instruction (IR already has it)
+    isa_cpu.step
+    isa_instruction_count += 1
+    ir_instruction_count += 1
+
+    puts "\nRunning simulation with continuous opcode verification..."
+    puts "-" * 70
 
     checkpoints.each do |target_cycles|
       cycles_to_run = target_cycles - cycles_run
-      next if cycles_to_run <= 0
 
-      # Run ISA
+      # Run IR cycles, step ISA at instruction boundaries
       cycles_to_run.times do
-        break if isa_cpu.halted?
-        isa_cpu.step
-      end
+        # Run IR one cycle
+        ir_sim.run_cpu_cycles(1, 0, false)
 
-      # Run IR
-      ir_sim.run_cpu_cycles(cycles_to_run, 0, false)
+        # Check for IR instruction boundary (opcode changed)
+        ir_opcode = ir_sim.peek('opcode_debug')
+        if ir_opcode != prev_ir_opcode
+          ir_pc = ir_sim.peek('cpu__pc_reg')
+          ir_instruction_count += 1
+
+          # Step ISA to match
+          break if isa_cpu.halted?
+          isa_pc = isa_cpu.pc
+          isa_opcode = isa_bus.mem_read(isa_pc)
+          isa_cpu.step
+          isa_instruction_count += 1
+
+          # Compare opcodes
+          if isa_opcode != ir_opcode && mismatches.length < 10
+            mismatches << {
+              instr: ir_instruction_count,
+              isa_pc: isa_pc,
+              isa_opcode: isa_opcode,
+              ir_pc: ir_pc,
+              ir_opcode: ir_opcode
+            }
+          end
+          prev_ir_opcode = ir_opcode
+        end
+      end
 
       cycles_run = target_cycles
 
-      # Get current PCs
+      # Get current PCs for checkpoint
       isa_pc = isa_cpu.pc
       ir_pc = ir_sim.peek('cpu__pc_reg')
 
-      # Check if both PCs are in valid game loop range
       isa_region = pc_region(isa_pc)
       ir_region = pc_region(ir_pc)
 
-      # PCs are "close" if they're in the same general region or within 256 bytes
       pc_diff = (isa_pc - ir_pc).abs
       close = pc_diff < 256 || isa_region == ir_region
 
       status = close ? "OK" : "DIVERGED"
-      puts format("  %5.1fM cycles: ISA PC=$%04X (%s) IR PC=$%04X (%s) - %s",
-                  target_cycles / 1_000_000.0, isa_pc, isa_region, ir_pc, ir_region, status)
+      puts format("  %5.1fM: ISA PC=$%04X (%s) IR PC=$%04X (%s) ops=%d/%d - %s",
+                  target_cycles / 1_000_000.0, isa_pc, isa_region, ir_pc, ir_region,
+                  isa_instruction_count, ir_instruction_count, status)
 
       results << {
         cycles: target_cycles,
@@ -458,13 +435,17 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
     puts "\n" + "=" * 70
 
-    # Verify all checkpoints passed
+    # Summary
     failed = results.reject { |r| r[:close] }
     if failed.empty? && mismatches.empty?
-      puts "All #{min_len} opcodes match and all #{results.length} checkpoints passed"
+      puts "All #{isa_instruction_count} ISA ops verified, all #{results.length} checkpoints passed"
     else
       if mismatches.any?
-        puts "#{mismatches.length} opcode mismatches found"
+        puts "Found #{mismatches.length} opcode mismatches:"
+        mismatches.each do |m|
+          puts format("  #%d: ISA PC=$%04X op=$%02X | IR PC=$%04X op=$%02X",
+                      m[:instr], m[:isa_pc], m[:isa_opcode], m[:ir_pc], m[:ir_opcode])
+        end
       end
       if failed.any?
         puts "#{failed.length} checkpoints failed:"
