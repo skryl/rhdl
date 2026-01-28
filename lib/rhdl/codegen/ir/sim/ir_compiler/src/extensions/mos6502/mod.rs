@@ -2,8 +2,12 @@
 //!
 //! Provides batched cycle execution with internal memory bridging for MOS6502 CPU
 
+mod ffi;
+
 use std::collections::HashMap;
 use crate::core::CoreSimulator;
+
+pub use ffi::*;
 
 /// MOS6502 CPU specific extension state
 pub struct Mos6502Extension {

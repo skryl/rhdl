@@ -5,15 +5,21 @@
 //!
 //! The module is organized as:
 //! - core.rs: Generic IR simulation infrastructure
-//! - examples/: Example-specific extensions (Apple II, MOS6502)
-//! - ffi.rs: C ABI function exports
+//! - extensions/: Example-specific extensions
+//!   - apple2/: Apple II full system simulation (mod.rs, ffi.rs)
+//!   - mos6502/: MOS6502 CPU standalone simulation (mod.rs, ffi.rs)
+//! - ffi.rs: Core C ABI function exports
 
 mod core;
-mod examples;
+mod extensions;
 mod ffi;
 
 pub use core::CoreSimulator;
-pub use examples::{Apple2Extension, Mos6502Extension};
+pub use extensions::{Apple2Extension, Mos6502Extension};
 
 // Re-export FFI functions at crate root for easier linking
 pub use ffi::*;
+
+// Re-export extension FFI functions
+pub use extensions::apple2::*;
+pub use extensions::mos6502::*;
