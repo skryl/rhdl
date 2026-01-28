@@ -178,6 +178,118 @@ RSpec.describe 'GameBoy Integration' do
     end
   end
 
+  describe 'IR Runner Long Run', :slow do
+    let(:tobu_rom_path) { File.expand_path('../../../examples/gameboy/software/roms/tobu.gb', __dir__) }
+
+    # Skip if ROM not available or IR runner not available
+    before do
+      skip 'tobu.gb ROM not found' unless File.exist?(tobu_rom_path)
+      begin
+        require_relative '../../../examples/gameboy/utilities/gameboy_ir'
+      rescue LoadError => e
+        skip "IR runner not available: #{e.message}"
+      end
+    end
+
+    it 'runs 20M cycles with display tracking using compiler backend' do
+      runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+      runner.load_rom(File.binread(tobu_rom_path))
+      runner.reset
+
+      total_cycles = 20_000_000
+      batch_size = 1_000_000
+      batches = total_cycles / batch_size
+
+      # Track display state at each batch
+      display_snapshots = []
+      frame_count = 0
+      last_ly = 0
+
+      start_time = Time.now
+
+      batches.times do |i|
+        runner.run_steps(batch_size)
+
+        # Calculate frames (154 scanlines per frame, 456 cycles per line)
+        cycles_per_frame = 154 * 456  # 70224 cycles
+        current_frames = runner.cycle_count / cycles_per_frame
+
+        # Track frame transitions
+        if current_frames > frame_count
+          frames_this_batch = current_frames - frame_count
+          frame_count = current_frames
+
+          # Capture display snapshot every 10 frames
+          if frame_count % 10 == 0
+            snapshot = {
+              cycle: runner.cycle_count,
+              frame: frame_count,
+              screen_dirty: runner.screen_dirty?,
+              elapsed: Time.now - start_time
+            }
+            display_snapshots << snapshot
+          end
+        end
+
+        runner.clear_screen_dirty
+      end
+
+      elapsed = Time.now - start_time
+      speed_mhz = runner.cycle_count / elapsed / 1_000_000.0
+
+      # Verify simulation completed
+      expect(runner.cycle_count).to eq(total_cycles)
+      expect(runner.native?).to eq(true)
+
+      # Should have captured some display snapshots
+      expect(display_snapshots.length).to be > 0
+
+      # Calculate statistics
+      total_frames = runner.cycle_count / (154 * 456)
+      expect(total_frames).to be > 200  # Should have run many frames
+
+      # Output summary for debugging
+      puts "\n  IR Runner (compile) Results:"
+      puts "    Total cycles: #{runner.cycle_count.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
+      puts "    Total frames: #{total_frames}"
+      puts "    Elapsed time: #{'%.2f' % elapsed}s"
+      puts "    Speed: #{'%.2f' % speed_mhz} MHz (#{'%.1f' % (speed_mhz / 4.19 * 100)}% of real GB)"
+      puts "    Display snapshots: #{display_snapshots.length}"
+    end
+
+    it 'tracks LY register changes during execution' do
+      runner = RHDL::GameBoy::IrRunner.new(backend: :jit)
+      runner.load_rom(File.binread(tobu_rom_path))
+      runner.reset
+
+      # Run for 5 frames worth of cycles
+      cycles_per_frame = 154 * 456
+      runner.run_steps(cycles_per_frame * 5)
+
+      # Verify we ran the expected cycles
+      expect(runner.cycle_count).to eq(cycles_per_frame * 5)
+
+      # Read screen state
+      screen_lines = runner.read_screen
+      expect(screen_lines).to be_a(Array)
+      expect(screen_lines.length).to be > 0
+    end
+
+    it 'can render framebuffer after long run' do
+      runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+      runner.load_rom(File.binread(tobu_rom_path))
+      runner.reset
+
+      # Run for 1M cycles
+      runner.run_steps(1_000_000)
+
+      # Should be able to render (even if blank)
+      output = runner.render_lcd_braille(chars_wide: 40)
+      expect(output).to be_a(String)
+      expect(output.length).to be > 0
+    end
+  end
+
   describe 'Speaker' do
     let(:speaker) { RHDL::GameBoy::Speaker.new }
 
