@@ -681,10 +681,10 @@ module RHDL
         lib_path = File.join(OBJ_DIR, lib_name)
 
         # Verilate the design - top module is apple2_apple2
+        # Don't use --build so we can control the C++ compiler
         verilate_cmd = [
           'verilator',
           '--cc',
-          '--build',
           '--top-module', 'apple2_apple2',
           # Optimization flags
           '-O3',                  # Maximum Verilator optimization
@@ -713,6 +713,15 @@ module RHDL
           end
         end
 
+        # Build with clang++ for better optimization
+        # Must pass CXX= on command line to override verilated.mk's hardcoded g++
+        Dir.chdir(OBJ_DIR) do
+          result = system('make', '-f', 'Vapple2.mk', 'CXX=clang++')
+          unless result
+            raise "Verilator make failed"
+          end
+        end
+
         unless File.exist?(lib_path)
           # Try alternative build approach - build object files then link
           puts "    Building shared library manually..."
@@ -727,12 +736,13 @@ module RHDL
         lib_verilated = File.join(OBJ_DIR, 'libverilated.a')
 
         # Use whole-archive to include all symbols from static libs
+        # -latomic needed for clang++ on Linux
         link_cmd = if RbConfig::CONFIG['host_os'] =~ /darwin/
-                     "g++ -shared -dynamiclib -o #{lib_path} " \
+                     "clang++ -shared -dynamiclib -o #{lib_path} " \
                      "-Wl,-all_load #{lib_vapple2} #{lib_verilated}"
                    else
-                     "g++ -shared -o #{lib_path} " \
-                     "-Wl,--whole-archive #{lib_vapple2} #{lib_verilated} -Wl,--no-whole-archive"
+                     "clang++ -shared -o #{lib_path} " \
+                     "-Wl,--whole-archive #{lib_vapple2} #{lib_verilated} -Wl,--no-whole-archive -latomic"
                    end
 
         system(link_cmd)
