@@ -368,8 +368,18 @@ module GameBoy
       # DMA on signal
       dma_on <= (ext_bus_rom_sel | ext_bus_cram_sel) & (hdma_active | dma_rd)
 
-      # Cart interface
+      # Cart interface - directly expose CPU address and control signals
+      ext_bus_addr <= cpu_addr[14..0]
+      ext_bus_a15 <= cpu_addr[15]
+
+      # Cart read when CPU is doing a memory read from ROM space
+      # ROM space is when A15=0 (addresses 0x0000-0x7FFF)
+      cart_rd <= sel_rom & ~cpu_mreq_n & ~cpu_rd_n
+      cart_wr <= sel_rom & ~cpu_mreq_n & ~cpu_wr_n
       cart_di <= cpu_do
+
+      # External bus data input comes from cartridge
+      ext_bus_di <= cart_do
     end
 
     # Sequential logic for registers
