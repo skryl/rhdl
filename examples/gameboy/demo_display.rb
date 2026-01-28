@@ -28,7 +28,10 @@ runner.reset
 
 renderer = RHDL::GameBoy::LcdRenderer.new(chars_wide: 80, invert: false)
 
-cycles_per_frame = 154 * 456  # 70224 cycles per frame
+# 70224 CPU cycles per frame, but SpeedControl divides clk_sys by 8 to get CE
+# So we need 8x more clk_sys cycles
+cpu_cycles_per_frame = 154 * 456  # 70224 CPU cycles
+cycles_per_frame = cpu_cycles_per_frame * 8  # 561792 clk_sys cycles
 frame_count = 0
 
 puts "\nRunning simulation...\n"
@@ -43,7 +46,8 @@ while frame_count < total_frames
   # Display every 10 frames
   if frame_count % 10 == 0 || frame_count == 1
     elapsed = Time.now - start_time
-    speed_mhz = runner.cycle_count / elapsed / 1_000_000.0
+    # cycle_count is clk_sys cycles, divide by 8 for CPU MHz
+    speed_mhz = runner.cycle_count / 8 / elapsed / 1_000_000.0
 
     # Clear screen and move cursor to top
     print "\e[2J\e[H"
@@ -61,7 +65,9 @@ while frame_count < total_frames
     puts framed
 
     puts "\n" + "=" * 80
-    puts "LY: #{(runner.cycle_count / 456) % 154} | Screen dirty: #{runner.screen_dirty?}"
+    # cycle_count is clk_sys, divide by 8 to get CPU cycles for LY calculation
+    cpu_cycles = runner.cycle_count / 8
+    puts "LY: #{(cpu_cycles / 456) % 154} | Screen dirty: #{runner.screen_dirty?}"
 
     runner.clear_screen_dirty
   end
@@ -70,5 +76,6 @@ end
 elapsed = Time.now - start_time
 puts "\n" + "=" * 80
 puts "Completed #{frame_count} frames in #{'%.2f' % elapsed}s"
-puts "Average speed: #{'%.2f' % (runner.cycle_count / elapsed / 1_000_000.0)} MHz"
+# cycle_count is clk_sys cycles, divide by 8 for CPU MHz
+puts "Average speed: #{'%.2f' % (runner.cycle_count / 8 / elapsed / 1_000_000.0)} MHz"
 puts "=" * 80

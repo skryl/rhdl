@@ -173,7 +173,14 @@ module RHDL
       end
 
       def reset
-        if @use_batched
+        if @use_batched && @sim.respond_to?(:gameboy_mode?) && @sim.gameboy_mode?
+          # Use run_gb_cycles for Game Boy - run_cpu_cycles corrupts signals[0] (reset)
+          poke_input('reset', 1)
+          @sim.run_gb_cycles(10)
+          poke_input('reset', 0)
+          @sim.run_gb_cycles(100)
+          @sim.reset_lcd_state if @sim.respond_to?(:reset_lcd_state)
+        elsif @use_batched
           poke_input('reset', 1)
           @sim.run_cpu_cycles(1, 0, false)
           poke_input('reset', 0)

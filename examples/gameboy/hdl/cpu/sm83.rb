@@ -21,7 +21,7 @@ module GameBoy
 
     # Control signals
     input :reset_n         # Active-low reset
-    input :clk_n           # Clock
+    input :clk             # Clock (active edge)
     input :clken           # Clock enable
     input :wait_n          # Wait signal
     input :int_n           # Interrupt request (active low)
@@ -121,7 +121,7 @@ module GameBoy
     instance :regs, SM83_Registers
 
     # Clock to subcomponents
-    port :clk_n => [[:alu, :clk], [:mcode, :clk], [:regs, :clk]]
+    port :clk => [[:alu, :clk], [:mcode, :clk], [:regs, :clk]]
 
     # MCode connections
     port :ir => [:mcode, :ir]
@@ -187,7 +187,7 @@ module GameBoy
     end
 
     # Main state machine (from T80.vhd lines 196-1309)
-    sequential clock: :clk_n, reset: :reset_n, reset_values: {
+    sequential clock: :clk, reset: :reset_n, reset_values: {
       m1_n: 1, mreq_n: 1, iorq_n: 1, rd_n: 1, wr_n: 1,
       m_cycle: 1, t_state: 0, int_e_ff1: 0, int_e_ff2: 0,
       halt_ff: 0, int_cycle: 0, nmi_cycle: 0
