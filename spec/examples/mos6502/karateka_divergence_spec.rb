@@ -640,7 +640,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     puts renderer.render(bitmap, invert: false)
   end
 
-  it 'compares ISA, JIT, Compile, Verilator over 2M cycles', timeout: 600 do
+  it 'compares HiRes checksums: ISA, JIT, Compile, Verilator (2M cycles)', timeout: 600 do
     skip 'AppleIIgo ROM not found' unless @rom_available
     skip 'Karateka memory dump not found' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
@@ -1120,7 +1120,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     checksum
   end
 
-  it 'verifies JIT, Compiler, and Verilator match ISA for 5M cycles', timeout: 180 do
+  it 'compares HiRes checksums: ISA vs JIT, Compile, Verilator (5M cycles)', timeout: 180 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
@@ -1166,7 +1166,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     expect(failed_backends).to be_empty, "All backends must pass, but #{failed_backends.join(', ')} failed"
   end
 
-  it 'verifies JIT, Compiler, and Verilator match ISA for 20M cycles', timeout: 360 do
+  it 'compares HiRes checksums: ISA vs JIT, Compile, Verilator (20M cycles)', timeout: 360 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
