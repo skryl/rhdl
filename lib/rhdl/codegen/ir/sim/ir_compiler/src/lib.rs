@@ -678,19 +678,36 @@ impl IrSimulator {
         }
 
         // Compute dependencies for each assignment (in terms of other assignment indices)
-        // Key insight: when an assignment references a signal, it should depend on the
-        // most recent PREVIOUS assignment to that signal, not the last assignment.
+        // For each signal referenced in the expression, we depend on any assignment to that signal.
+        // For multiple assignments to the same signal, prefer the most recent one before current_idx.
+        // If none exists before, depend on the first assignment regardless of index.
         let mut assign_deps: Vec<HashSet<usize>> = Vec::with_capacity(n);
         for (current_idx, assign) in assigns.iter().enumerate() {
             let signal_deps = self.expr_dependencies(&assign.expr);
             let mut deps = HashSet::new();
             for sig_idx in signal_deps {
                 if let Some(assign_indices) = target_to_assigns.get(&sig_idx) {
-                    // Find the most recent assignment to this signal that comes BEFORE current_idx
+                    if assign_indices.is_empty() {
+                        continue;
+                    }
+
+                    // First, try to find the most recent assignment BEFORE current_idx
+                    let mut found_before = false;
                     for &prev_assign_idx in assign_indices.iter().rev() {
-                        if prev_assign_idx < current_idx {
+                        if prev_assign_idx < current_idx && prev_assign_idx != current_idx {
                             deps.insert(prev_assign_idx);
+                            found_before = true;
                             break;  // Only depend on the most recent previous assignment
+                        }
+                    }
+
+                    // If no assignment before current_idx, depend on the first assignment
+                    // (which must come after current_idx in list order, but we still need
+                    // to ensure it's evaluated first via topological sort)
+                    if !found_before {
+                        let first_assign_idx = assign_indices[0];
+                        if first_assign_idx != current_idx {
+                            deps.insert(first_assign_idx);
                         }
                     }
                 }
@@ -1057,14 +1074,10 @@ impl IrSimulator {
         code.push_str(&format!("unsafe fn tick_inline(signals: &mut [u64], old_clocks: &mut [u64; {}], next_regs: &mut [u64; {}]) {{\n", num_clocks, num_regs.max(1)));
         code.push_str("\n");
 
-        // Save old clock values FIRST (before evaluate changes derived clocks)
-        // At this point clk_14m=1 but derived clocks haven't propagated yet
-        for (i, &clk_idx) in clock_indices.iter().enumerate() {
-            code.push_str(&format!("    old_clocks[{}] = signals[{}];\n", i, clk_idx));
-        }
-        code.push_str("\n");
+        // DON'T save old_clocks at start - they persist from last tick
+        // This allows proper edge detection when user pokes clock before calling tick
 
-        // Call evaluate (propagates clk_14m=1 to derived clocks)
+        // Call evaluate (propagates clock to derived clocks)
         code.push_str("    evaluate_inline(signals);\n\n");
 
         // Sample all register inputs
@@ -1101,13 +1114,18 @@ impl IrSimulator {
                 }
             }
 
-            code.push_str(&format!("            old_clocks[{}] = 1;\n", clock_list_idx));
+            // Don't update old_clocks[i] = 1 here - we'll update all clocks at the end
             code.push_str("        }\n");
         }
 
         code.push_str("\n        if !any_edge { break; }\n");
         code.push_str("        evaluate_inline(signals);\n");
-        code.push_str("    }\n");
+        code.push_str("    }\n\n");
+
+        // Update old_clocks to current values for next tick's edge detection
+        for (i, &clk_idx) in clock_indices.iter().enumerate() {
+            code.push_str(&format!("    old_clocks[{}] = signals[{}];\n", i, clk_idx));
+        }
         code.push_str("}\n\n");
 
         // Generate extern "C" wrapper for tick (for external callers)
@@ -1187,13 +1205,18 @@ impl IrSimulator {
                 }
             }
 
-            code.push_str(&format!("            old_clocks[{}] = 1;\n", clock_list_idx));
+            // Don't update old_clocks[i] = 1 here - we'll update all clocks at the end
             code.push_str("        }\n");
         }
 
         code.push_str("\n        if !any_edge { break; }\n");
         code.push_str("        evaluate_inline(signals);\n");
-        code.push_str("    }\n");
+        code.push_str("    }\n\n");
+
+        // Update old_clocks to current values for next tick's edge detection
+        for (i, &clk_idx) in clock_indices.iter().enumerate() {
+            code.push_str(&format!("    old_clocks[{}] = signals[{}];\n", i, clk_idx));
+        }
         code.push_str("}\n\n");
     }
 
