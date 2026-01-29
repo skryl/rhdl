@@ -243,6 +243,57 @@ module RHDL
           @fn_apple2_write_ram.call(@ctx, offset, data, data.bytesize)
         end
 
+        # ====================================================================
+        # Memory Access Methods (for disk track loading, etc.)
+        # ====================================================================
+
+        # Get list of available memory names
+        def memory_names
+          ptr = @fn_memory_names.call(@ctx)
+          return [] if ptr.null?
+          names = ptr.to_s.split(',')
+          @fn_free_string.call(ptr)
+          names
+        end
+
+        # Write data to a named memory array
+        # @param name [String] Memory name (e.g., 'disk__track_memory')
+        # @param data [Array<Integer>] Byte array to write
+        # @param offset [Integer] Starting offset in the memory
+        # @return [Integer] Number of bytes written, or -1 on error
+        def write_memory(name, data, offset: 0)
+          data = data.pack('C*') if data.is_a?(Array)
+          @fn_write_memory.call(@ctx, name, offset, data, data.bytesize)
+        end
+
+        # Read data from a named memory array
+        # @param name [String] Memory name
+        # @param length [Integer] Number of bytes to read
+        # @param offset [Integer] Starting offset
+        # @return [Array<Integer>] Byte array, or empty array on error
+        def read_memory(name, length, offset: 0)
+          buf = Fiddle::Pointer.malloc(length)
+          actual_len = @fn_read_memory.call(@ctx, name, offset, buf, length)
+          return [] if actual_len < 0
+          buf[0, actual_len].unpack('C*')
+        end
+
+        # Get size of a named memory
+        # @param name [String] Memory name
+        # @return [Integer] Size in entries, or 0 if not found
+        def memory_size(name)
+          @fn_memory_size.call(@ctx, name)
+        end
+
+        # Load disk track data into the DiskII track memory
+        # This is a convenience method for disk boot testing
+        # @param track_data [Array<Integer>] Nibblized track data
+        # @return [Integer] Number of bytes written
+        def load_disk_track(track_data)
+          # The DiskII track memory is named 'disk__track_memory' in the flattened IR
+          write_memory('disk__track_memory', track_data, offset: 0)
+        end
+
         private
 
         def load_library
@@ -441,6 +492,31 @@ module RHDL
             @lib['ir_sim_apple2_write_ram'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
             Fiddle::TYPE_VOID
+          )
+
+          # Memory access functions (for disk track loading, etc.)
+          @fn_memory_names = Fiddle::Function.new(
+            @lib['ir_sim_memory_names'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOIDP
+          )
+
+          @fn_write_memory = Fiddle::Function.new(
+            @lib['ir_sim_write_memory'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_read_memory = Fiddle::Function.new(
+            @lib['ir_sim_read_memory'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_memory_size = Fiddle::Function.new(
+            @lib['ir_sim_memory_size'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
           )
         end
 

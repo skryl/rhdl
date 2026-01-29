@@ -292,3 +292,115 @@ pub unsafe extern "C" fn ir_sim_output_names(ctx: *const IrSimContext) -> *mut c
     let names = (*ctx).core.output_names.join(",");
     CString::new(names).unwrap().into_raw()
 }
+
+/// Get memory names (comma-separated, caller must free)
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_memory_names(ctx: *const IrSimContext) -> *mut c_char {
+    if ctx.is_null() {
+        return ptr::null_mut();
+    }
+    let names: Vec<String> = (*ctx).core.memory_name_to_idx.keys().cloned().collect();
+    CString::new(names.join(",")).unwrap().into_raw()
+}
+
+/// Write data to a named memory array
+/// Returns number of bytes written, or -1 on error
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_write_memory(
+    ctx: *mut IrSimContext,
+    name: *const c_char,
+    offset: c_uint,
+    data: *const u8,
+    len: c_uint,
+) -> c_int {
+    if ctx.is_null() || name.is_null() || data.is_null() {
+        return -1;
+    }
+    let ctx = &mut *ctx;
+    let name = match CStr::from_ptr(name).to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    let mem_idx = match ctx.core.memory_name_to_idx.get(name) {
+        Some(&idx) => idx,
+        None => return -1,
+    };
+
+    let data_slice = slice::from_raw_parts(data, len as usize);
+    let mem = &mut ctx.core.memory_arrays[mem_idx];
+    let offset = offset as usize;
+
+    let mut written = 0;
+    for (i, &byte) in data_slice.iter().enumerate() {
+        let addr = offset + i;
+        if addr < mem.len() {
+            mem[addr] = byte as u64;
+            written += 1;
+        }
+    }
+
+    written
+}
+
+/// Read data from a named memory array
+/// Returns number of bytes read, or -1 on error
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_read_memory(
+    ctx: *const IrSimContext,
+    name: *const c_char,
+    offset: c_uint,
+    buf: *mut u8,
+    len: c_uint,
+) -> c_int {
+    if ctx.is_null() || name.is_null() || buf.is_null() {
+        return -1;
+    }
+    let ctx = &*ctx;
+    let name = match CStr::from_ptr(name).to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    let mem_idx = match ctx.core.memory_name_to_idx.get(name) {
+        Some(&idx) => idx,
+        None => return -1,
+    };
+
+    let mem = &ctx.core.memory_arrays[mem_idx];
+    let offset = offset as usize;
+    let buf_slice = slice::from_raw_parts_mut(buf, len as usize);
+
+    let mut read = 0;
+    for (i, byte) in buf_slice.iter_mut().enumerate() {
+        let addr = offset + i;
+        if addr < mem.len() {
+            *byte = (mem[addr] & 0xFF) as u8;
+            read += 1;
+        }
+    }
+
+    read
+}
+
+/// Get memory size by name
+/// Returns size in entries, or 0 if not found
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_memory_size(
+    ctx: *const IrSimContext,
+    name: *const c_char,
+) -> c_uint {
+    if ctx.is_null() || name.is_null() {
+        return 0;
+    }
+    let ctx = &*ctx;
+    let name = match CStr::from_ptr(name).to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+
+    match ctx.core.memory_name_to_idx.get(name) {
+        Some(&idx) => ctx.core.memory_arrays[idx].len() as c_uint,
+        None => 0,
+    }
+}

@@ -25,9 +25,9 @@ pub struct Apple2Extension {
     pub rom: Vec<u8>,
     /// Signal indices for memory bridging
     pub ram_addr_idx: usize,
+    /// RAM/ROM data input to HDL (feeds into cpu_din mux)
     pub ram_do_idx: usize,
     pub ram_we_idx: usize,
-    pub d_idx: usize,
     pub clk_idx: usize,
     pub k_idx: usize,
     pub read_key_idx: usize,
@@ -48,9 +48,9 @@ impl Apple2Extension {
             ram: vec![0u8; 48 * 1024],
             rom: vec![0u8; 12 * 1024],
             ram_addr_idx: *name_to_idx.get("ram_addr").unwrap_or(&0),
+            // ram_do is the external memory data input that feeds into cpu_din mux
             ram_do_idx: *name_to_idx.get("ram_do").unwrap_or(&0),
             ram_we_idx: *name_to_idx.get("ram_we").unwrap_or(&0),
-            d_idx: *name_to_idx.get("d").unwrap_or(&0),
             clk_idx: *name_to_idx.get("clk").unwrap_or(&0),
             k_idx: *name_to_idx.get("k").unwrap_or(&0),
             read_key_idx: *name_to_idx.get("read_key").unwrap_or(&0),
@@ -136,9 +136,10 @@ impl Apple2Extension {
         let mut code = String::new();
 
         let ram_addr_idx = *core.name_to_idx.get("ram_addr").unwrap_or(&0);
+        // ram_do is the RAM/ROM data input that feeds into the cpu_din mux
+        // The HDL handles address decoding internally
         let ram_do_idx = *core.name_to_idx.get("ram_do").unwrap_or(&0);
         let ram_we_idx = *core.name_to_idx.get("ram_we").unwrap_or(&0);
-        let d_idx = *core.name_to_idx.get("d").unwrap_or(&0);
         let clk_idx = *core.name_to_idx.get("clk").unwrap_or(&0);
         let k_idx = *core.name_to_idx.get("k").unwrap_or(&0);
         let read_key_idx = *core.name_to_idx.get("read_key").unwrap_or(&0);
@@ -197,7 +198,7 @@ impl Apple2Extension {
         code.push_str("        } else {\n");
         code.push_str("            0\n");
         code.push_str("        };\n");
-        code.push_str(&format!("        signals[{}] = d;\n\n", d_idx));
+        code.push_str(&format!("        signals[{}] = d;\n\n", ram_do_idx));
 
         // Set keyboard input
         code.push_str(&format!("        signals[{}] = if key_ready {{ (key_data as u64) | 0x80 }} else {{ key_data as u64 }};\n\n", k_idx));
