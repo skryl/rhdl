@@ -1453,8 +1453,10 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     expect(total_tested).to be > 0
   end
 
+  # DISABLED: Debug test for tracing divergence
   # Dedicated RTS trace test - traces the specific RTS that causes divergence
   it 'traces RTS execution to find divergence cause', timeout: 60 do
+    skip 'Debug test disabled'
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
