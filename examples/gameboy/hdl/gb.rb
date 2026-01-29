@@ -144,6 +144,8 @@ module GameBoy
     wire :sel_timer
     wire :sel_video_reg
     wire :sel_video_oam
+    wire :video_wr               # Video unit write enable (active high)
+    wire :video_addr, width: 8   # Video unit address low byte
     wire :sel_joy
     wire :sel_sb
     wire :sel_sc
@@ -285,6 +287,9 @@ module GameBoy
     # Video CPU interface
     port :sel_video_oam => [:video_unit, :cpu_sel_oam]
     port :sel_video_reg => [:video_unit, :cpu_sel_reg]
+    port :video_addr => [:video_unit, :cpu_addr]     # Address low byte for register select
+    port :video_wr => [:video_unit, :cpu_wr]         # Write enable (active high)
+    port :cpu_do => [:video_unit, :cpu_di]           # Write data from CPU
 
     # Video VRAM interface (PPU reads tiles from VRAM)
     port [:video_unit, :vram_addr] => :vram_addr_ppu
@@ -333,6 +338,10 @@ module GameBoy
                        (is_gbc & (cpu_addr[15..4] == lit(0xFF6, width: 12)) &
                         (cpu_addr[3..0] >= lit(8, width: 4)) & (cpu_addr[3..0] <= lit(0xC, width: 4)))
       sel_video_oam <= (cpu_addr[15..8] == lit(0xFE, width: 8))
+
+      # Video write interface - PPU needs low byte of address and write enable
+      video_addr <= cpu_addr[7..0]
+      video_wr <= sel_video_reg & ~cpu_mreq_n & ~cpu_wr_n
       sel_joy <= (cpu_addr == lit(0xFF00, width: 16))
       sel_sb <= (cpu_addr == lit(0xFF01, width: 16))
       sel_sc <= (cpu_addr == lit(0xFF02, width: 16))
