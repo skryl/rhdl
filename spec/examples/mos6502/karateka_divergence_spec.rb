@@ -189,12 +189,18 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     # An instruction completes when the state machine transitions from DECODE
     # We track the opcode that was in IR when we entered DECODE state
     def run_instructions_with_opcodes(n, trace_rts: false)
+      # Use native method if available (works for JIT and Compiler backends)
+      sim = @runner.sim
+      if sim.respond_to?(:mos6502_run_instructions_with_opcodes)
+        return sim.mos6502_run_instructions_with_opcodes(n)
+      end
+
+      # Fallback to manual cycle stepping (for Ruby interpreter or testing)
       opcodes = []
       last_state = state
       max_cycles = n * 10  # Safety limit: assume max 10 cycles per instruction
       cycles = 0
       use_rust_memory = @runner.instance_variable_get(:@use_rust_memory)
-      sim = @runner.sim
 
       while opcodes.length < n && cycles < max_cycles && !halted?
         current_state = state

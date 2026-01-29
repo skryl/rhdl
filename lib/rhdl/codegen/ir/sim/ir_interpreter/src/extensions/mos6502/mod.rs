@@ -155,7 +155,7 @@ impl Mos6502Extension {
         // Get signal indices for state, opcode, pc, sp
         let state_idx = *core.name_to_idx.get("state").unwrap_or(&0);
         let opcode_idx = *core.name_to_idx.get("opcode").unwrap_or(&0);
-        let pc_idx = *core.name_to_idx.get("pc").unwrap_or(&0);
+        let pc_idx = *core.name_to_idx.get("reg_pc").unwrap_or(&0);
         let sp_idx = *core.name_to_idx.get("reg_sp").unwrap_or(&0);
 
         // Find clock index in clock_indices array for proper edge detection
