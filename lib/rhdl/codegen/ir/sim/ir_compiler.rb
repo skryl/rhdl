@@ -154,24 +154,24 @@ module RHDL
           @fn_is_mos6502_mode.call(@ctx) != 0
         end
 
-        def load_mos6502_memory(data, offset, is_rom)
+        def mos6502_load_memory(data, offset, is_rom)
           data = data.pack('C*') if data.is_a?(Array)
           @fn_mos6502_load_memory.call(@ctx, data, data.bytesize, offset, is_rom ? 1 : 0)
         end
 
-        def set_mos6502_reset_vector(addr)
+        def mos6502_set_reset_vector(addr)
           @fn_mos6502_set_reset_vector.call(@ctx, addr)
         end
 
-        def run_mos6502_cycles(n)
+        def mos6502_run_cycles(n)
           @fn_mos6502_run_cycles.call(@ctx, n)
         end
 
-        def read_mos6502_memory(addr)
+        def mos6502_read_memory(addr)
           @fn_mos6502_read_memory.call(@ctx, addr)
         end
 
-        def write_mos6502_memory(addr, data)
+        def mos6502_write_memory(addr, data)
           @fn_mos6502_write_memory.call(@ctx, addr, data)
         end
 
@@ -179,13 +179,13 @@ module RHDL
           @fn_mos6502_speaker_toggles.call(@ctx)
         end
 
-        def reset_mos6502_speaker_toggles
+        def mos6502_reset_speaker_toggles
           @fn_mos6502_reset_speaker_toggles.call(@ctx)
         end
 
         # Run N instructions and return array of [pc, opcode, sp] tuples
         # Uses Rust-native instruction stepping for accurate state tracking
-        def run_mos6502_instructions_with_opcodes(n)
+        def mos6502_run_instructions_with_opcodes(n)
           # Allocate buffer for packed results (each is u64: pc<<16 | opcode<<8 | sp)
           buf = Fiddle::Pointer.malloc(n * 8)  # 8 bytes per u64
           count = @fn_mos6502_run_instructions_with_opcodes.call(@ctx, n, buf, n)
@@ -208,17 +208,17 @@ module RHDL
           @fn_is_apple2_mode.call(@ctx) != 0
         end
 
-        def load_rom(data)
+        def apple2_load_rom(data)
           data = data.pack('C*') if data.is_a?(Array)
           @fn_apple2_load_rom.call(@ctx, data, data.bytesize)
         end
 
-        def load_ram(data, offset)
+        def apple2_load_ram(data, offset)
           data = data.pack('C*') if data.is_a?(Array)
           @fn_apple2_load_ram.call(@ctx, data, data.bytesize, offset)
         end
 
-        def run_cpu_cycles(n, key_data, key_ready)
+        def apple2_run_cpu_cycles(n, key_data, key_ready)
           # Result struct: text_dirty (int), key_cleared (int), cycles_run (uint), speaker_toggles (uint)
           result_buf = Fiddle::Pointer.malloc(16)  # 4 x 4 bytes
           @fn_apple2_run_cpu_cycles.call(@ctx, n, key_data, key_ready ? 1 : 0, result_buf)
@@ -232,13 +232,13 @@ module RHDL
           }
         end
 
-        def read_ram(offset, length)
+        def apple2_read_ram(offset, length)
           buf = Fiddle::Pointer.malloc(length)
           actual_len = @fn_apple2_read_ram.call(@ctx, offset, buf, length)
           buf[0, actual_len].unpack('C*')
         end
 
-        def write_ram(offset, data)
+        def apple2_write_ram(offset, data)
           data = data.pack('C*') if data.is_a?(Array)
           @fn_apple2_write_ram.call(@ctx, offset, data, data.bytesize)
         end

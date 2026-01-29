@@ -218,7 +218,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
         if rw == 1
           # Read from memory
           if use_rust_memory
-            data = sim.read_mos6502_memory(addr)
+            data = sim.mos6502_read_memory(addr)
           else
             data = @runner.bus.read(addr)
           end
@@ -227,7 +227,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
           # Write to memory
           data = sim.peek('data_out')
           if use_rust_memory
-            sim.write_mos6502_memory(addr, data)
+            sim.mos6502_write_memory(addr, data)
           else
             @runner.bus.write(addr, data)
           end
@@ -305,7 +305,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
         # Memory operation
         if rw == 1
           if use_rust_memory
-            data = sim.read_mos6502_memory(addr)
+            data = sim.mos6502_read_memory(addr)
           else
             data = @runner.bus.read(addr)
           end
@@ -314,7 +314,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
         else
           data = sim.peek('data_out')
           if use_rust_memory
-            sim.write_mos6502_memory(addr, data)
+            sim.mos6502_write_memory(addr, data)
           else
             @runner.bus.write(addr, data)
           end
@@ -411,7 +411,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
         # Memory read/write
         if rw == 1
           if use_rust_memory
-            data = sim.read_mos6502_memory(addr)
+            data = sim.mos6502_read_memory(addr)
           else
             data = @runner.bus.read(addr)
           end
@@ -420,7 +420,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
         else
           data = sim.peek('data_out')
           if use_rust_memory
-            sim.write_mos6502_memory(addr, data)
+            sim.mos6502_write_memory(addr, data)
           else
             @runner.bus.write(addr, data)
           end
