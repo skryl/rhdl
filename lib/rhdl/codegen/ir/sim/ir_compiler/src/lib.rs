@@ -91,6 +91,25 @@ struct MemoryDef {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct WritePortDef {
+    memory: String,
+    clock: String,
+    addr: ExprDef,
+    data: ExprDef,
+    enable: ExprDef,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SyncReadPortDef {
+    memory: String,
+    clock: String,
+    addr: ExprDef,
+    data: String,
+    #[serde(default)]
+    enable: Option<ExprDef>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct ModuleIR {
     #[allow(dead_code)]
     name: String,
@@ -101,6 +120,10 @@ struct ModuleIR {
     processes: Vec<ProcessDef>,
     #[serde(default)]
     memories: Vec<MemoryDef>,
+    #[serde(default)]
+    write_ports: Vec<WritePortDef>,
+    #[serde(default)]
+    sync_read_ports: Vec<SyncReadPortDef>,
 }
 
 // ============================================================================
@@ -390,13 +413,15 @@ impl IrSimulator {
         let gb_cpu_do_idx = *name_to_idx.get("gb_core__cpu_do")
             .or_else(|| name_to_idx.get("cpu_do"))
             .unwrap_or(&0);
-        // For VRAM reads, inject into the DPRAM register outputs directly
-        // This avoids being overwritten by assignments during evaluate_inline
-        let gb_vram0_q_a_reg_idx = *name_to_idx.get("gb_core__vram0__q_a_reg")
-            .or_else(|| name_to_idx.get("vram0__q_a_reg"))
+        // For VRAM reads, inject into the DPRAM output signals directly
+        // The outputs are q_a and q_b (not q_a_reg - those don't exist in flattened IR)
+        let gb_vram0_q_a_reg_idx = *name_to_idx.get("gb_core__vram0__q_a")
+            .or_else(|| name_to_idx.get("gb_core__vram0__q_a_reg"))
+            .or_else(|| name_to_idx.get("vram0__q_a"))
             .unwrap_or(&0);
-        let gb_vram0_q_b_reg_idx = *name_to_idx.get("gb_core__vram0__q_b_reg")
-            .or_else(|| name_to_idx.get("vram0__q_b_reg"))
+        let gb_vram0_q_b_reg_idx = *name_to_idx.get("gb_core__vram0__q_b")
+            .or_else(|| name_to_idx.get("gb_core__vram0__q_b_reg"))
+            .or_else(|| name_to_idx.get("vram0__q_b"))
             .unwrap_or(&0);
         let gb_vram_addr_ppu_idx = *name_to_idx.get("gb_core__vram_addr_ppu")
             .or_else(|| name_to_idx.get("vram_addr_ppu"))
@@ -2163,6 +2188,28 @@ impl RubyIrCompiler {
     fn reset_lcd_state(&self) {
         self.sim.borrow_mut().reset_lcd_state();
     }
+
+    fn read_vram(&self, start: usize, length: usize) -> Result<RArray, Error> {
+        let ruby = unsafe { Ruby::get_unchecked() };
+        let sim = self.sim.borrow();
+        let end = (start + length).min(sim.gb_vram.len());
+        let data: Vec<i64> = sim.gb_vram[start..end].iter().map(|&b| b as i64).collect();
+        Ok(ruby.ary_from_vec(data))
+    }
+
+    fn write_vram(&self, start: usize, data: RArray) -> Result<(), Error> {
+        let ruby = unsafe { Ruby::get_unchecked() };
+        let bytes: Vec<u8> = data.to_vec::<i64>()
+            .map_err(|e| Error::new(ruby.exception_runtime_error(), format!("Invalid data: {}", e)))?
+            .into_iter()
+            .map(|v| v as u8)
+            .collect();
+        let mut sim = self.sim.borrow_mut();
+        let end = (start + bytes.len()).min(sim.gb_vram.len());
+        let len = end - start;
+        sim.gb_vram[start..end].copy_from_slice(&bytes[..len]);
+        Ok(())
+    }
 }
 
 #[magnus::init]
@@ -2211,6 +2258,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("read_framebuffer", method!(RubyIrCompiler::read_framebuffer, 0))?;
     class.define_method("gb_frame_count", method!(RubyIrCompiler::gb_frame_count, 0))?;
     class.define_method("reset_lcd_state", method!(RubyIrCompiler::reset_lcd_state, 0))?;
+    class.define_method("read_vram", method!(RubyIrCompiler::read_vram, 2))?;
+    class.define_method("write_vram", method!(RubyIrCompiler::write_vram, 2))?;
 
     Ok(())
 }

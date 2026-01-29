@@ -144,10 +144,12 @@ module RHDL
           # Generate memory IR from Memory DSL if included
           memories = []
           write_ports = []
+          sync_read_ports = []
           if respond_to?(:_memories) && !_memories.empty?
             memory_ir = memory_dsl_to_ir
             memories = memory_ir[:memories]
             write_ports = memory_ir[:write_ports]
+            sync_read_ports = memory_ir[:sync_read_ports] || []
             assigns = assigns + memory_ir[:assigns]
           end
 
@@ -162,6 +164,7 @@ module RHDL
             reg_ports: reg_ports,
             memories: memories,
             write_ports: write_ports,
+            sync_read_ports: sync_read_ports,
             parameters: parameters
           )
         end
