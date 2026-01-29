@@ -4,67 +4,68 @@
 # True dual-port RAM with independent read/write ports.
 # Used for VRAM, WRAM, etc.
 #
-# This is a simplified placeholder. The Game Boy uses various memory
-# sizes instantiated as needed (VRAM 8KB, WRAM 8KB, etc.)
+# Uses the Memory DSL for proper simulation and synthesis support.
 
 require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl/dsl/memory'
 
 module GameBoy
   class DPRAM < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
+    include RHDL::DSL::Memory
 
-    # Fixed 8KB configuration (common for VRAM/WRAM)
-    ADDR_WIDTH = 13
+    # Default 8KB configuration (common for VRAM/WRAM)
+    # Can be overridden via addr_width parameter
+    DEFAULT_ADDR_WIDTH = 13
     DATA_WIDTH = 8
-    DEPTH = 8192
 
-    # Port addr_bus
+    # Port A (read/write)
     input :clock_a
-    input :address_a, width: ADDR_WIDTH
+    input :address_a, width: DEFAULT_ADDR_WIDTH
     input :wren_a, default: 0
     input :data_a, width: DATA_WIDTH
     output :q_a, width: DATA_WIDTH
 
-    # Port B
+    # Port B (read/write)
     input :clock_b
-    input :address_b, width: ADDR_WIDTH
+    input :address_b, width: DEFAULT_ADDR_WIDTH
     input :wren_b, default: 0
     input :data_b, width: DATA_WIDTH
     output :q_b, width: DATA_WIDTH
 
-    # Internal registers for output
-    wire :q_a_reg, width: DATA_WIDTH
-    wire :q_b_reg, width: DATA_WIDTH
+    # Define the dual-port memory
+    # Depth is 2^addr_width (default 8192 for 13-bit address)
+    memory :mem, depth: 2**DEFAULT_ADDR_WIDTH, width: DATA_WIDTH do |m|
+      # Port A: write and synchronous read
+      m.write_port clock: :clock_a, enable: :wren_a, addr: :address_a, data: :data_a
+      m.sync_read_port clock: :clock_a, addr: :address_a, output: :q_a
 
-    behavior do
-      q_a <= q_a_reg
-      q_b <= q_b_reg
+      # Port B: write and synchronous read
+      m.write_port clock: :clock_b, enable: :wren_b, addr: :address_b, data: :data_b
+      m.sync_read_port clock: :clock_b, addr: :address_b, output: :q_b
     end
 
-    sequential clock: :clock_a, reset_values: { q_a_reg: 0 } do
-      # Placeholder - actual memory behavior in simulator
-      q_a_reg <= q_a_reg
+    # Instance initialization
+    def initialize(name = nil, addr_width: DEFAULT_ADDR_WIDTH, **kwargs)
+      @addr_width = addr_width
+      super(name, **kwargs)
     end
 
-    sequential clock: :clock_b, reset_values: { q_b_reg: 0 } do
-      q_b_reg <= q_b_reg
-    end
-
-    # Memory is managed at instance level for simulation
-    def initialize(name = nil, **kwargs)
-      super
-      @ram = Array.new(DEPTH, 0)
-    end
-
+    # Direct memory access for external use (debugging, initialization)
     def read_mem(addr)
-      @ram[addr & (DEPTH - 1)] || 0
+      mem_read(:mem, addr & ((1 << @addr_width) - 1))
     end
 
     def write_mem(addr, data)
-      @ram[addr & (DEPTH - 1)] = data & 0xFF
+      mem_write(:mem, addr & ((1 << @addr_width) - 1), data, DATA_WIDTH)
+    end
+
+    # Get the memory array for bulk operations
+    def memory_array
+      @_memory_arrays[:mem]
     end
   end
 end

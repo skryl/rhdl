@@ -419,12 +419,34 @@ module GameBoy
 
     # Sequential logic for registers
     # boot_rom_enabled starts as 1 and is disabled by writing to FF50
-    sequential clock: :clk_sys, reset: :reset, reset_values: { boot_rom_enabled: 1 } do
+    sequential clock: :clk_sys, reset: :reset, reset_values: { boot_rom_enabled: 1, if_r: 0 } do
       # Boot ROM enable (disabled by writing to FF50)
       # When writing 1 to FF50, boot ROM is disabled (set to 0)
       boot_rom_enabled <= mux(ce & (cpu_addr == lit(0xFF50, width: 16)) & ~cpu_wr_n & cpu_do[0],
                               lit(0, width: 1),
                               boot_rom_enabled)
+
+      # Interrupt Flag register ($FF0F)
+      # Bit 0: V-Blank, Bit 1: LCD STAT, Bit 2: Timer, Bit 3: Serial, Bit 4: Joypad
+      # Set by interrupt sources, cleared by CPU writing 1 to the bit
+      #
+      # Start with current value
+      if_r_new = if_r
+
+      # Set bits when interrupts fire (on rising edge via pulse signals from sources)
+      if_r_new = mux(vblank_irq, if_r_new | lit(0x01, width: 5), if_r_new)
+      if_r_new = mux(video_irq, if_r_new | lit(0x02, width: 5), if_r_new)
+      if_r_new = mux(timer_irq, if_r_new | lit(0x04, width: 5), if_r_new)
+      if_r_new = mux(serial_irq, if_r_new | lit(0x08, width: 5), if_r_new)
+      # Note: Joypad interrupt (bit 4) would be added here when implemented
+
+      # CPU can clear interrupt flags by writing to $FF0F
+      # Writing 1 to a bit clears it (standard interrupt acknowledge)
+      if_r_new = mux(ce & sel_if & ~cpu_wr_n,
+                     if_r_new & ~cpu_do[4..0],
+                     if_r_new)
+
+      if_r <= if_r_new
     end
 
   end

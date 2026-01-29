@@ -372,7 +372,9 @@ module RHDL
             regs: ir.regs.map { |r| reg_to_hash(r) },
             assigns: ir.assigns.map { |a| assign_to_hash(a) },
             processes: ir.processes.map { |p| process_to_hash(p) },
-            memories: (ir.memories || []).map { |m| memory_to_hash(m) }
+            memories: (ir.memories || []).map { |m| memory_to_hash(m) },
+            write_ports: (ir.write_ports || []).map { |wp| write_port_to_hash(wp) },
+            sync_read_ports: (ir.sync_read_ports || []).map { |rp| sync_read_port_to_hash(rp) }
           }.to_json(max_nesting: false)
         end
 
@@ -502,6 +504,27 @@ module RHDL
             width: mem.width
           }
           hash[:initial_data] = mem.initial_data if mem.initial_data
+          hash
+        end
+
+        def write_port_to_hash(wp)
+          {
+            memory: wp.memory.to_s,
+            clock: wp.clock.to_s,
+            addr: expr_to_hash(wp.addr),
+            data: expr_to_hash(wp.data),
+            enable: expr_to_hash(wp.enable)
+          }
+        end
+
+        def sync_read_port_to_hash(rp)
+          hash = {
+            memory: rp.memory.to_s,
+            clock: rp.clock.to_s,
+            addr: expr_to_hash(rp.addr),
+            data: rp.data.to_s
+          }
+          hash[:enable] = expr_to_hash(rp.enable) if rp.enable
           hash
         end
 
