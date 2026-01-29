@@ -349,75 +349,75 @@ module RHDL
 
           # MOS6502 extension functions
           @fn_is_mos6502_mode = Fiddle::Function.new(
-            @lib['ir_sim_is_mos6502_mode'],
+            @lib['mos6502_ir_sim_is_mode'],
             [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_INT
           )
           @fn_mos6502_load_memory = Fiddle::Function.new(
-            @lib['ir_sim_mos6502_load_memory'],
+            @lib['mos6502_ir_sim_load_memory'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_INT],
             Fiddle::TYPE_VOID
           )
           @fn_mos6502_set_reset_vector = Fiddle::Function.new(
-            @lib['ir_sim_mos6502_set_reset_vector'],
+            @lib['mos6502_ir_sim_set_reset_vector'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_SHORT],
             Fiddle::TYPE_VOID
           )
           @fn_mos6502_run_cycles = Fiddle::Function.new(
-            @lib['ir_sim_mos6502_run_cycles'],
+            @lib['mos6502_ir_sim_run_cycles'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
             Fiddle::TYPE_SIZE_T
           )
           @fn_mos6502_read_memory = Fiddle::Function.new(
-            @lib['ir_sim_mos6502_read_memory'],
+            @lib['mos6502_ir_sim_read_memory'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
             Fiddle::TYPE_CHAR
           )
           @fn_mos6502_write_memory = Fiddle::Function.new(
-            @lib['ir_sim_mos6502_write_memory'],
+            @lib['mos6502_ir_sim_write_memory'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_CHAR],
             Fiddle::TYPE_VOID
           )
           @fn_mos6502_speaker_toggles = Fiddle::Function.new(
-            @lib['ir_sim_mos6502_speaker_toggles'],
+            @lib['mos6502_ir_sim_speaker_toggles'],
             [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_INT
           )
           @fn_mos6502_reset_speaker_toggles = Fiddle::Function.new(
-            @lib['ir_sim_mos6502_reset_speaker_toggles'],
+            @lib['mos6502_ir_sim_reset_speaker_toggles'],
             [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_VOID
           )
 
           # Apple II extension functions
           @fn_is_apple2_mode = Fiddle::Function.new(
-            @lib['ir_sim_is_apple2_mode'],
+            @lib['apple2_ir_sim_is_mode'],
             [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_INT
           )
           @fn_apple2_load_rom = Fiddle::Function.new(
-            @lib['ir_sim_apple2_load_rom'],
+            @lib['apple2_ir_sim_load_rom'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
             Fiddle::TYPE_VOID
           )
           @fn_apple2_load_ram = Fiddle::Function.new(
-            @lib['ir_sim_apple2_load_ram'],
+            @lib['apple2_ir_sim_load_ram'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_SIZE_T],
             Fiddle::TYPE_VOID
           )
           @fn_apple2_run_cpu_cycles = Fiddle::Function.new(
-            @lib['ir_sim_apple2_run_cpu_cycles'],
+            @lib['apple2_ir_sim_run_cpu_cycles'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_CHAR, Fiddle::TYPE_INT,
              Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_VOID
           )
           @fn_apple2_read_ram = Fiddle::Function.new(
-            @lib['ir_sim_apple2_read_ram'],
+            @lib['apple2_ir_sim_read_ram'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
             Fiddle::TYPE_SIZE_T
           )
           @fn_apple2_write_ram = Fiddle::Function.new(
-            @lib['ir_sim_apple2_write_ram'],
+            @lib['apple2_ir_sim_write_ram'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
             Fiddle::TYPE_VOID
           )
