@@ -193,8 +193,10 @@ impl Mos6502Extension {
         let num_clocks = clock_indices.len().max(1);
         let num_regs = core.seq_targets.len();
 
-        // Find clock list index for the MOS6502 clock
-        let clk_list_idx = clock_indices.iter().position(|&ci| ci == clk_idx);
+        // Find ALL clock domain indices derived from the MOS6502 input clock
+        // All internal clock wires (registers__clk, status_reg__clk, etc.) are
+        // assigned from the input clk, so we need to update all of them for proper edge detection
+        let clk_domain_indices = core.find_clock_domains_for_input(clk_idx);
 
         code.push_str("\n// ============================================================================\n");
         code.push_str("// MOS6502 Extension: Batched CPU Cycle Execution with Internal Memory\n");
@@ -227,8 +229,8 @@ impl Mos6502Extension {
 
         code.push_str("    for _ in 0..n {\n");
 
-        // Clock falling edge
-        if let Some(idx) = clk_list_idx {
+        // Clock falling edge - set all derived clock domains to "previous high"
+        for &idx in &clk_domain_indices {
             code.push_str(&format!("        old_clocks[{}] = 1; // Previous state was high\n", idx));
         }
         code.push_str(&format!("        signals[{}] = 0;\n", clk_idx));
@@ -254,8 +256,8 @@ impl Mos6502Extension {
         code.push_str("            }\n");
         code.push_str("        }\n\n");
 
-        // Clock rising edge
-        if let Some(idx) = clk_list_idx {
+        // Clock rising edge - set all derived clock domains to "previous low"
+        for &idx in &clk_domain_indices {
             code.push_str(&format!("        old_clocks[{}] = 0; // Previous state was low\n", idx));
         }
         code.push_str(&format!("        signals[{}] = 1;\n", clk_idx));
@@ -282,15 +284,17 @@ impl Mos6502Extension {
         let clk_idx = *core.name_to_idx.get("clk").unwrap_or(&0);
         let state_idx = *core.name_to_idx.get("state").unwrap_or(&0);
         let opcode_idx = *core.name_to_idx.get("opcode").unwrap_or(&0);
-        let pc_idx = *core.name_to_idx.get("pc").unwrap_or(&0);
+        let pc_idx = *core.name_to_idx.get("reg_pc").unwrap_or(&0);
         let sp_idx = *core.name_to_idx.get("reg_sp").unwrap_or(&0);
 
         let clock_indices: Vec<usize> = core.clock_indices.clone();
         let num_clocks = clock_indices.len().max(1);
         let num_regs = core.seq_targets.len();
 
-        // Find clock list index for the MOS6502 clock
-        let clk_list_idx = clock_indices.iter().position(|&ci| ci == clk_idx);
+        // Find ALL clock domain indices derived from the MOS6502 input clock
+        // All internal clock wires (registers__clk, status_reg__clk, etc.) are
+        // assigned from the input clk, so we need to update all of them for proper edge detection
+        let clk_domain_indices = core.find_clock_domains_for_input(clk_idx);
 
         code.push_str("\n// ============================================================================\n");
         code.push_str("// MOS6502 Extension: Instruction-Level Execution with Opcode Capture\n");
@@ -352,15 +356,15 @@ impl Mos6502Extension {
         code.push_str("            }\n");
         code.push_str("        }\n\n");
 
-        // Clock falling edge
-        if let Some(idx) = clk_list_idx {
+        // Clock falling edge - set all derived clock domains to "previous high"
+        for &idx in &clk_domain_indices {
             code.push_str(&format!("        old_clocks[{}] = 1; // Previous state was high\n", idx));
         }
         code.push_str(&format!("        signals[{}] = 0;\n", clk_idx));
         code.push_str("        evaluate_inline(signals);\n\n");
 
-        // Clock rising edge
-        if let Some(idx) = clk_list_idx {
+        // Clock rising edge - set all derived clock domains to "previous low"
+        for &idx in &clk_domain_indices {
             code.push_str(&format!("        old_clocks[{}] = 0; // Previous state was low\n", idx));
         }
         code.push_str(&format!("        signals[{}] = 1;\n", clk_idx));
