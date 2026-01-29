@@ -1162,15 +1162,50 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     expect(failed_backends).to be_empty, "All backends must pass, but #{failed_backends.join(', ')} failed"
   end
 
-  it 'verifies Verilator matches ISA for 20M cycles', timeout: 120 do
+  it 'verifies JIT, Compiler, and Verilator match ISA for 20M cycles', timeout: 360 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
-    skip 'Verilator not available' unless verilator_available?
 
-    puts "\n=== Testing Verilator against ISA (20M cycles) ==="
-    result = run_verilator_test(20_000_000)
-    expect(result).to be true
+    cycles = 20_000_000
+    puts "\n=== Testing JIT, Compiler, Verilator against ISA (#{cycles / 1_000_000}M cycles) ==="
+
+    results = {}
+
+    # Test JIT
+    if ir_backend_available?(:jit)
+      puts "\n--- JIT vs ISA ---"
+      results[:jit] = run_backend_test("JIT", :jit, cycles)
+    else
+      puts "\n--- JIT: Not available (skipped) ---"
+    end
+
+    # Test Compiler
+    if ir_backend_available?(:compile)
+      puts "\n--- Compiler vs ISA ---"
+      results[:compile] = run_backend_test("Compile", :compile, cycles)
+    else
+      puts "\n--- Compiler: Not available (skipped) ---"
+    end
+
+    # Test Verilator
+    if verilator_available?
+      puts "\n--- Verilator vs ISA ---"
+      results[:verilator] = run_verilator_test(cycles)
+    else
+      puts "\n--- Verilator: Not available (skipped) ---"
+    end
+
+    # Summary
+    puts "\n=== Summary ==="
+    results.each do |backend, passed|
+      status = passed ? "PASSED" : "FAILED"
+      puts "  #{backend.to_s.upcase}: #{status}"
+    end
+
+    # All backends must pass
+    failed_backends = results.select { |_k, v| !v }.keys
+    expect(failed_backends).to be_empty, "All backends must pass, but #{failed_backends.join(', ')} failed"
   end
 
   # ============================================================================
