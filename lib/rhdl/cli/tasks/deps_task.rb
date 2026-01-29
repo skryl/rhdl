@@ -45,6 +45,28 @@ module RHDL
             end
           end
 
+          # Check for verilator
+          puts
+          verilator_available = command_available?('verilator')
+
+          if verilator_available
+            version = `verilator --version 2>&1`.lines.first&.strip
+            puts "[OK] verilator is installed: #{version}"
+          else
+            puts "[MISSING] verilator is not installed"
+            puts
+
+            install_verilator(platform)
+
+            puts
+            if command_available?('verilator')
+              version = `verilator --version 2>&1`.lines.first&.strip
+              puts "[OK] verilator installed successfully: #{version}"
+            else
+              puts "[WARN] verilator installation may have failed. Check above for errors."
+            end
+          end
+
           puts
           puts '=' * 50
           puts "Dependency check complete."
@@ -56,6 +78,7 @@ module RHDL
 
           deps = {
             'iverilog' => { cmd: 'iverilog -V', optional: true, desc: 'Icarus Verilog (for gate-level simulation tests)' },
+            'verilator' => { cmd: 'verilator --version', optional: true, desc: 'Verilator (for high-performance Verilog simulation)' },
             'dot' => { cmd: 'dot -V', optional: true, desc: 'Graphviz (for diagram rendering)' },
             'ruby' => { cmd: 'ruby --version', optional: false, desc: 'Ruby interpreter' },
             'bundler' => { cmd: 'bundle --version', optional: false, desc: 'Ruby Bundler' }
@@ -134,6 +157,58 @@ module RHDL
             puts "Homebrew not found. Please install Homebrew first:"
             puts "  /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
             puts "Then run: brew install icarus-verilog"
+          end
+        end
+
+        def install_verilator(platform)
+          case platform
+          when :linux
+            install_verilator_linux
+          when :macos
+            install_verilator_macos
+          when :windows
+            puts "On Windows, please install verilator manually:"
+            puts "  1. Use WSL and install via apt-get"
+            puts "  2. Or build from source: https://verilator.org/guide/latest/install.html"
+          else
+            puts "Unknown platform. Please install verilator manually."
+          end
+        end
+
+        def install_verilator_linux
+          if File.exist?('/etc/debian_version') || command_available?('apt-get')
+            puts "Installing verilator via apt-get..."
+            if ENV['USER'] == 'root'
+              system('apt-get update && apt-get install -y verilator')
+            else
+              system('sudo apt-get update && sudo apt-get install -y verilator')
+            end
+          elsif command_available?('dnf')
+            puts "Installing verilator via dnf..."
+            system('sudo dnf install -y verilator')
+          elsif command_available?('yum')
+            puts "Installing verilator via yum..."
+            system('sudo yum install -y verilator')
+          elsif command_available?('pacman')
+            puts "Installing verilator via pacman..."
+            system('sudo pacman -S --noconfirm verilator')
+          else
+            puts "Could not detect package manager."
+            puts "Please install verilator manually:"
+            puts "  Ubuntu/Debian: sudo apt-get install verilator"
+            puts "  Fedora: sudo dnf install verilator"
+            puts "  Arch: sudo pacman -S verilator"
+          end
+        end
+
+        def install_verilator_macos
+          if command_available?('brew')
+            puts "Installing verilator via Homebrew..."
+            system('brew install verilator')
+          else
+            puts "Homebrew not found. Please install Homebrew first:"
+            puts "  /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+            puts "Then run: brew install verilator"
           end
         end
       end

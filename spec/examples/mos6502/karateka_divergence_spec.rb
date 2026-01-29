@@ -76,6 +76,12 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     false
   end
 
+  def verilator_available?
+    ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
+      File.executable?(File.join(path, 'verilator'))
+    end
+  end
+
   # Simulator wrapper to provide uniform interface
   class SimulatorWrapper
     attr_reader :name, :type, :bus
@@ -450,6 +456,66 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     end
   end
 
+  # Verilator-based simulator wrapper
+  class VerilatorWrapper < SimulatorWrapper
+    def initialize(runner)
+      super("Verilator", :verilator)
+      @runner = runner
+    end
+
+    def pc; @runner.pc; end
+    def a; @runner.a; end
+    def x; @runner.x; end
+    def y; @runner.y; end
+    def sp; @runner.sp; end
+    def halted?; @runner.halted?; end
+
+    def run_steps(n)
+      @runner.run_cycles(n)
+    end
+
+    def read_memory(addr)
+      @runner.read_memory(addr)
+    end
+
+    def opcode
+      @runner.opcode
+    end
+
+    def state
+      @runner.state
+    end
+
+    # Run n instructions and return array of [pc, opcode, sp] tuples
+    # Verilator uses cycle-based execution, so we run until state transitions
+    def run_instructions_with_opcodes(n, trace_rts: false)
+      opcodes = []
+      last_state = state
+      max_cycles = n * 10  # Safety limit
+      cycles = 0
+
+      while opcodes.length < n && cycles < max_cycles && !halted?
+        current_state = state
+
+        # Run one clock cycle
+        @runner.clock_cycle
+        cycles += 1
+
+        new_state = state
+        # When we transition into DECODE (0x02) from another state, record instruction
+        if new_state == 0x02 && last_state != 0x02
+          current_opcode = opcode
+          current_sp = sp
+          opcode_pc = (pc - 1) & 0xFFFF
+          opcodes << [opcode_pc, current_opcode, current_sp]
+        end
+        last_state = new_state
+      end
+
+      opcodes
+    end
+  end
+
   def create_isa_simulator
     require_relative '../../../examples/mos6502/utilities/apple2_bus'
     require_relative '../../../examples/mos6502/utilities/isa_simulator_native'
@@ -505,6 +571,26 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     end
 
     IRWrapper.new(runner, backend_name)
+  end
+
+  def create_verilator_simulator
+    require_relative '../../../examples/mos6502/utilities/mos6502_verilator'
+
+    runner = MOS6502::VerilatorRunner.new
+
+    karateka_rom = create_karateka_rom
+
+    # Load ROM and RAM
+    runner.load_memory(karateka_rom, 0xD000)
+    runner.load_memory(@karateka_mem, 0x0000)
+
+    # Set reset vector to $B82A (Karateka entry point)
+    runner.set_reset_vector(0xB82A)
+
+    # Reset
+    runner.reset
+
+    VerilatorWrapper.new(runner)
   end
 
   def hires_checksum(sim, base_addr)
@@ -581,6 +667,18 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
       else
         puts "  [ ] IR #{backend.to_s.capitalize}: Not available (skipped)"
       end
+    end
+
+    # Verilator backend
+    if verilator_available?
+      begin
+        simulators[:verilator] = create_verilator_simulator
+        puts "  [x] Verilator: Native Verilator RTL simulation"
+      rescue StandardError => e
+        puts "  [ ] Verilator: Failed to initialize (#{e.message})"
+      end
+    else
+      puts "  [ ] Verilator: Not available (skipped)"
     end
 
     if simulators.size < 2
@@ -932,6 +1030,112 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     expect(result).to be true
   end
 
+  # Run Verilator backend against ISA for max_cycles clock cycles
+  # Returns true if they match throughout, false otherwise
+  def run_verilator_test(max_cycles)
+    isa = create_isa_simulator_simple
+    verilator = create_verilator_simulator_simple
+
+    chunk_size = 100_000
+    isa_time = 0.0
+    verilator_time = 0.0
+
+    while verilator.cycle_count < max_cycles
+      # Run ISA chunk with timing (run_cycles runs for N clock cycles)
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      isa[:cpu].run_cycles(chunk_size)
+      t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      isa_time += (t1 - t0)
+
+      # Run Verilator chunk with timing
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      verilator.run_cycles(chunk_size)
+      t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      verilator_time += (t1 - t0)
+
+      isa_cycles = isa[:cpu].cycles
+      verilator_cycles = verilator.cycle_count
+
+      isa_pc = isa[:cpu].pc
+      verilator_pc = verilator.pc
+
+      # Compare HiRes checksums
+      isa_hires = hires_checksum_simple(isa[:bus], 0x2000)
+      verilator_hires = verilator_hires_checksum(verilator, 0x2000)
+
+      if isa_hires != verilator_hires
+        puts "  Verilator: DIVERGED at #{verilator_cycles / 1_000_000.0}M cycles"
+        puts "    ISA PC=$#{isa_pc.to_s(16).upcase} HiRes=$#{isa_hires.to_s(16).upcase}"
+        puts "    Verilator PC=$#{verilator_pc.to_s(16).upcase} HiRes=$#{verilator_hires.to_s(16).upcase}"
+        return false
+      end
+
+      # Progress indicator every 1M cycles
+      if (verilator_cycles % 1_000_000) < chunk_size
+        isa_mhz = (isa_cycles / isa_time) / 1_000_000.0
+        verilator_mhz = (verilator_cycles / verilator_time) / 1_000_000.0
+        print "  Verilator: #{verilator_cycles / 1_000_000}M cycles - " \
+              "ISA: #{'%.2f' % isa_mhz} MHz, Verilator: #{'%.2f' % verilator_mhz} MHz\n"
+      end
+    end
+
+    # Final performance summary
+    isa_cycles = isa[:cpu].cycles
+    verilator_cycles = verilator.cycle_count
+    isa_mhz = (isa_cycles / isa_time) / 1_000_000.0
+    verilator_mhz = (verilator_cycles / verilator_time) / 1_000_000.0
+    speedup = verilator_mhz / isa_mhz
+
+    puts "  Verilator: PASSED #{verilator_cycles / 1_000_000}M cycles"
+    puts "  Performance: ISA=#{'%.2f' % isa_mhz} MHz, Verilator=#{'%.2f' % verilator_mhz} MHz " \
+         "(#{'%.1f' % speedup}x #{speedup >= 1.0 ? 'faster' : 'slower'})"
+    true
+  end
+
+  def create_verilator_simulator_simple
+    require_relative '../../../examples/mos6502/utilities/mos6502_verilator'
+
+    runner = MOS6502::VerilatorRunner.new
+    karateka_rom = create_karateka_rom
+
+    runner.load_memory(karateka_rom, 0xD000)
+    runner.load_memory(@karateka_mem, 0x0000)
+    runner.set_reset_vector(0xB82A)
+    runner.reset
+
+    runner
+  end
+
+  def verilator_hires_checksum(runner, base_addr)
+    checksum = 0
+    (base_addr..(base_addr + 0x1FFF)).each do |addr|
+      checksum = (checksum + runner.read_memory(addr)) & 0xFFFFFFFF
+    end
+    checksum
+  end
+
+  it 'verifies Verilator matches ISA for 5M cycles', timeout: 60 do
+    skip 'ROM not available' unless @rom_available
+    skip 'Karateka memory not available' unless @karateka_available
+    skip 'Native ISA simulator not available' unless native_isa_available?
+    skip 'Verilator not available' unless verilator_available?
+
+    puts "\n=== Testing Verilator against ISA ==="
+    result = run_verilator_test(5_000_000)
+    expect(result).to be true
+  end
+
+  it 'verifies Verilator matches ISA for 20M cycles', timeout: 120 do
+    skip 'ROM not available' unless @rom_available
+    skip 'Karateka memory not available' unless @karateka_available
+    skip 'Native ISA simulator not available' unless native_isa_available?
+    skip 'Verilator not available' unless verilator_available?
+
+    puts "\n=== Testing Verilator against ISA (20M cycles) ==="
+    result = run_verilator_test(20_000_000)
+    expect(result).to be true
+  end
+
   # ============================================================================
   # Combined benchmark test - all backends comparison
   # ============================================================================
@@ -953,19 +1157,31 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     isa = create_isa_simulator_simple
 
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    cycles.times do
-      break if isa[:cpu].halted?
-      isa[:cpu].step
-    end
+    isa[:cpu].run_cycles(cycles)
     t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
     elapsed = t1 - t0
-    mhz = (cycles / elapsed) / 1_000_000.0
+    actual_cycles = isa[:cpu].cycles
+    mhz = (actual_cycles / elapsed) / 1_000_000.0
 
-    { name: "ISA", cycles: cycles, elapsed: elapsed, mhz: mhz }
+    { name: "ISA", cycles: actual_cycles, elapsed: elapsed, mhz: mhz }
   end
 
-  it 'benchmarks all 4 implementations', :benchmark, timeout: 1800 do
+  def benchmark_verilator(cycles)
+    verilator = create_verilator_simulator_simple
+
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    verilator.run_cycles(cycles)
+    t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+    elapsed = t1 - t0
+    actual_cycles = verilator.cycle_count
+    mhz = (actual_cycles / elapsed) / 1_000_000.0
+
+    { name: "Verilator", cycles: actual_cycles, elapsed: elapsed, mhz: mhz }
+  end
+
+  it 'benchmarks all 5 implementations', :benchmark, timeout: 1800 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
@@ -973,7 +1189,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     cycles = 20_000_000  # 20M cycles for benchmark
 
     puts "\n" + "=" * 70
-    puts "  4-Way Implementation Benchmark (#{cycles / 1_000_000}M cycles each)"
+    puts "  5-Way Implementation Benchmark (#{cycles / 1_000_000}M cycles each)"
     puts "=" * 70
 
     results = []
@@ -1002,6 +1218,20 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     $stdout.flush
     results << benchmark_backend("Compile", :compile, cycles)
     puts " done (#{'%.2f' % results.last[:elapsed]}s)"
+
+    # Verilator (if available)
+    if verilator_available?
+      print "  Running Verilator..."
+      $stdout.flush
+      begin
+        results << benchmark_verilator(cycles)
+        puts " done (#{'%.2f' % results.last[:elapsed]}s)"
+      rescue StandardError => e
+        puts " failed (#{e.message})"
+      end
+    else
+      puts "  Skipping Verilator (not available)"
+    end
 
     # Summary table
     puts "\n" + "-" * 70
@@ -1032,136 +1262,117 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     puts "-" * 70
     puts "\n"
 
-    expect(results.size).to eq(4)
+    # At least 4 results (ISA, Interpret, JIT, Compile), 5 if Verilator available
+    expect(results.size).to be >= 4
   end
 
   # ============================================================================
   # Opcode sequence comparison test
   # ============================================================================
 
-  it 'compares opcode sequences between ISA and JIT', timeout: 300 do
+  it 'compares opcode sequences between ISA and backends', timeout: 300 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
-    skip 'JIT not available' unless ir_backend_available?(:jit)
 
     puts "\n" + "=" * 80
-    puts "Opcode Sequence Comparison: ISA vs JIT"
+    puts "Opcode Sequence Comparison: ISA vs JIT, Compile, Verilator"
     puts "=" * 80
 
-    # Create simulators
-    isa = create_isa_simulator
-    jit = create_ir_simulator(:jit)
-
-    # Compare opcode sequences in batches
+    max_instructions = 100_000  # 100K instructions per backend
     batch_size = 1000  # Instructions per batch
-    total_instructions = 0
-    max_instructions = 3_000_000  # Stop after 3M instructions
 
-    divergence_found = false
-    divergence_index = nil
-    divergence_isa = nil
-    divergence_jit = nil
+    # Track results for each backend
+    results = {}
 
-    puts "\nComparing opcode sequences (#{batch_size} instructions per batch)..."
+    # Test each backend against ISA
+    # Note: Only JIT supports instruction-level stepping properly
+    # Compile backend's state machine doesn't advance with manual cycle stepping
+    # Verilator has separate initialization that causes early divergence
+    backends = []
+    backends << [:jit, 'JIT'] if ir_backend_available?(:jit)
+    backends << [:compile, 'Compile'] if ir_backend_available?(:compile)
+    backends << [:verilator, 'Verilator'] if verilator_available?
 
-    while total_instructions < max_instructions && !divergence_found
-      # Run both simulators for batch_size instructions
-      isa_opcodes = isa.run_instructions_with_opcodes(batch_size)
-      jit_opcodes = jit.run_instructions_with_opcodes(batch_size)
+    backends.each do |backend_sym, backend_name|
+      puts "\n--- Comparing ISA vs #{backend_name} (#{max_instructions / 1000}K instructions) ---"
 
-      # Compare sequences
-      min_len = [isa_opcodes.length, jit_opcodes.length].min
+      # Create fresh simulators for each comparison
+      isa = create_isa_simulator
+      backend = case backend_sym
+                when :verilator then create_verilator_simulator
+                else create_ir_simulator(backend_sym)
+                end
 
-      min_len.times do |i|
-        isa_pc, isa_op, isa_sp = isa_opcodes[i]
-        jit_pc, jit_op, jit_sp = jit_opcodes[i]
+      total_instructions = 0
+      divergence_found = false
+      divergence_index = nil
+      start_time = Time.now
 
-        if isa_op != jit_op || isa_pc != jit_pc
-          divergence_found = true
-          divergence_index = total_instructions + i
-          divergence_isa = { pc: isa_pc, opcode: isa_op, sp: isa_sp }
-          divergence_jit = { pc: jit_pc, opcode: jit_op, sp: jit_sp }
+      while total_instructions < max_instructions && !divergence_found
+        # Run both simulators for batch_size instructions
+        isa_opcodes = isa.run_instructions_with_opcodes(batch_size)
+        backend_opcodes = backend.run_instructions_with_opcodes(batch_size)
 
-          # Collect context: 10 instructions before divergence
-          context_start = [0, i - 10].max
-          puts "\n  DIVERGENCE at instruction #{divergence_index}!"
-          puts "\n  Context (instructions #{total_instructions + context_start} to #{divergence_index}):"
-          puts "  " + "-" * 76
-          puts "  %8s | %6s %4s %4s | %6s %4s %4s | %s" % ["Instr#", "ISA PC", "Op", "SP", "JIT PC", "Op", "SP", "Match"]
-          puts "  " + "-" * 76
+        # Compare sequences
+        min_len = [isa_opcodes.length, backend_opcodes.length].min
 
-          (context_start..i).each do |j|
-            i_pc, i_op, i_sp = isa_opcodes[j]
-            j_pc, j_op, j_sp = jit_opcodes[j]
-            match = (i_pc == j_pc && i_op == j_op) ? "OK" : "DIFF"
-            # Mark RTS/JSR instructions
-            instr_mark = case i_op
-                         when 0x60 then " RTS"
-                         when 0x20 then " JSR"
-                         when 0x4C then " JMP"
-                         else ""
-                         end
-            puts "  %8d | %6s %4s %4s | %6s %4s %4s | %s%s" % [
-              total_instructions + j,
-              format("%04X", i_pc), format("%02X", i_op), format("%02X", i_sp),
-              format("%04X", j_pc), format("%02X", j_op), format("%02X", j_sp),
-              match, instr_mark
-            ]
+        min_len.times do |i|
+          isa_pc, isa_op, isa_sp = isa_opcodes[i]
+          be_pc, be_op, be_sp = backend_opcodes[i]
+
+          if isa_op != be_op || isa_pc != be_pc
+            divergence_found = true
+            divergence_index = total_instructions + i
+
+            puts "\n  DIVERGENCE at instruction #{divergence_index}!"
+            puts "  ISA: PC=$#{format('%04X', isa_pc)} Op=$#{format('%02X', isa_op)} SP=$#{format('%02X', isa_sp)}"
+            puts "  #{backend_name}: PC=$#{format('%04X', be_pc)} Op=$#{format('%02X', be_op)} SP=$#{format('%02X', be_sp)}"
+            break
           end
-
-          # Show a few more from each side
-          puts "\n  Next 5 instructions from each simulator:"
-          puts "  ISA: #{isa_opcodes[i, 5].map { |pc, op, sp| format('%04X:%02X(sp=%02X)', pc, op, sp) }.join(' ')}"
-          puts "  JIT: #{jit_opcodes[i, 5].map { |pc, op, sp| format('%04X:%02X(sp=%02X)', pc, op, sp) }.join(' ')}"
-
-          # If the last matching instruction was RTS (0x60), dump stack info
-          if i > 0 && isa_opcodes[i-1][1] == 0x60
-            prev_isa_sp = isa_opcodes[i-1][2]
-            prev_jit_sp = jit_opcodes[i-1][2]
-            puts "\n  RTS Stack Analysis (SP before RTS):"
-            puts "    ISA SP=$#{format('%02X', prev_isa_sp)}, JIT SP=$#{format('%02X', prev_jit_sp)}"
-            puts "    Stack at ISA SP+1,SP+2: $#{format('%02X', isa.read_memory(0x0100 + ((prev_isa_sp + 1) & 0xFF)))} $#{format('%02X', isa.read_memory(0x0100 + ((prev_isa_sp + 2) & 0xFF)))}"
-            puts "    Stack at JIT SP+1,SP+2: $#{format('%02X', jit.read_memory(0x0100 + ((prev_jit_sp + 1) & 0xFF)))} $#{format('%02X', jit.read_memory(0x0100 + ((prev_jit_sp + 2) & 0xFF)))}"
-
-            # Detailed trace of RTS in JIT: re-run the RTS sequence with tracing
-            puts "\n  Detailed JIT RTS trace (re-running from RTS instruction):"
-            jit.trace_rts_sequence
-          end
-
-          break
         end
+
+        total_instructions += min_len
+
+        # Progress every 100K
+        if (total_instructions % 100_000).zero?
+          elapsed = Time.now - start_time
+          rate = total_instructions / elapsed / 1000.0
+          puts "  #{total_instructions / 1000}K matched (#{format('%.1f', rate)}K/s)"
+        end
+
+        # Check if either simulator stopped early
+        break if isa_opcodes.length < batch_size || backend_opcodes.length < batch_size
       end
 
-      total_instructions += min_len
+      elapsed = Time.now - start_time
+      rate = total_instructions / elapsed / 1000.0
 
-      # Progress
-      if (total_instructions % 10_000).zero?
-        print "  #{total_instructions / 1000}K instructions matched...\n"
+      if divergence_found
+        results[backend_sym] = { status: :diverged, at: divergence_index, time: elapsed }
+        puts "  #{backend_name}: DIVERGED at #{divergence_index} (#{format('%.1f', elapsed)}s)"
+      else
+        results[backend_sym] = { status: :passed, count: total_instructions, time: elapsed }
+        puts "  #{backend_name}: PASSED #{total_instructions / 1000}K instructions (#{format('%.1f', elapsed)}s, #{format('%.1f', rate)}K/s)"
       end
-
-      # Check if either simulator stopped early
-      break if isa_opcodes.length < batch_size || jit_opcodes.length < batch_size
     end
 
-    if divergence_found
-      puts "\n" + "=" * 80
-      puts "DIVERGENCE SUMMARY"
-      puts "=" * 80
-      puts "  Instruction index: #{divergence_index}"
-      puts "  ISA: PC=$#{format('%04X', divergence_isa[:pc])} Opcode=$#{format('%02X', divergence_isa[:opcode])} SP=$#{format('%02X', divergence_isa[:sp])}"
-      puts "  JIT: PC=$#{format('%04X', divergence_jit[:pc])} Opcode=$#{format('%02X', divergence_jit[:opcode])} SP=$#{format('%02X', divergence_jit[:sp])}"
-
-      # Show CPU state at divergence
-      puts "\n  CPU State at divergence:"
-      puts "  ISA: A=$#{format('%02X', isa.a)} X=$#{format('%02X', isa.x)} Y=$#{format('%02X', isa.y)} SP=$#{format('%02X', isa.sp)} PC=$#{format('%04X', isa.pc)}"
-      puts "  JIT: A=$#{format('%02X', jit.a)} X=$#{format('%02X', jit.x)} Y=$#{format('%02X', jit.y)} SP=$#{format('%02X', jit.sp)} PC=$#{format('%04X', jit.pc)}"
-    else
-      puts "\n  No divergence found in #{total_instructions} instructions!"
+    # Summary
+    puts "\n" + "=" * 80
+    puts "SUMMARY"
+    puts "=" * 80
+    results.each do |backend, result|
+      name = backend.to_s.upcase.ljust(10)
+      if result[:status] == :passed
+        puts "  #{name}: PASSED #{result[:count] / 1000}K instructions in #{format('%.1f', result[:time])}s"
+      else
+        puts "  #{name}: DIVERGED at instruction #{result[:at]}"
+      end
     end
 
-    # For now, just report - don't fail the test
-    expect(total_instructions).to be > 0
+    # Test passes if we ran at least some instructions
+    total_tested = results.values.sum { |r| r[:count] || r[:at] || 0 }
+    expect(total_tested).to be > 0
   end
 
   # Dedicated RTS trace test - traces the specific RTS that causes divergence

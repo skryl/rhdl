@@ -41,7 +41,10 @@ module RHDL
         lines << ");"
         lines << ""
 
+        # Skip regs that are already declared as output reg in the port list
+        output_reg_names = module_def.reg_ports.map { |n| n.to_s }
         module_def.regs.each do |reg|
+          next if output_reg_names.include?(reg.name.to_s)
           lines << "  reg #{width_decl(reg.width)}#{sanitize(reg.name)};"
         end
         module_def.nets.each do |net|
