@@ -1157,9 +1157,9 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
       puts "  #{backend.to_s.upcase}: #{status}"
     end
 
-    # Require at least 2 backends to pass
-    passed_count = results.values.count { |v| v }
-    expect(passed_count).to be >= 2, "At least 2 backends should pass, but only #{passed_count} did"
+    # All backends must pass
+    failed_backends = results.select { |_k, v| !v }.keys
+    expect(failed_backends).to be_empty, "All backends must pass, but #{failed_backends.join(', ')} failed"
   end
 
   it 'verifies Verilator matches ISA for 20M cycles', timeout: 120 do
