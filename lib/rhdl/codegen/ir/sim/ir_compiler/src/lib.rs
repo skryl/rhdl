@@ -668,22 +668,31 @@ impl IrSimulator {
         let assigns = &self.ir.assigns;
         let n = assigns.len();
 
-        // Map: target signal idx -> assignment idx
-        let mut target_to_assign: HashMap<usize, usize> = HashMap::new();
+        // Map: target signal idx -> list of assignment indices (in order)
+        // This handles cascading assignments where the same signal is assigned multiple times
+        let mut target_to_assigns: HashMap<usize, Vec<usize>> = HashMap::new();
         for (i, assign) in assigns.iter().enumerate() {
             if let Some(&idx) = self.name_to_idx.get(&assign.target) {
-                target_to_assign.insert(idx, i);
+                target_to_assigns.entry(idx).or_insert_with(Vec::new).push(i);
             }
         }
 
         // Compute dependencies for each assignment (in terms of other assignment indices)
+        // Key insight: when an assignment references a signal, it should depend on the
+        // most recent PREVIOUS assignment to that signal, not the last assignment.
         let mut assign_deps: Vec<HashSet<usize>> = Vec::with_capacity(n);
-        for assign in assigns {
+        for (current_idx, assign) in assigns.iter().enumerate() {
             let signal_deps = self.expr_dependencies(&assign.expr);
             let mut deps = HashSet::new();
             for sig_idx in signal_deps {
-                if let Some(&assign_idx) = target_to_assign.get(&sig_idx) {
-                    deps.insert(assign_idx);
+                if let Some(assign_indices) = target_to_assigns.get(&sig_idx) {
+                    // Find the most recent assignment to this signal that comes BEFORE current_idx
+                    for &prev_assign_idx in assign_indices.iter().rev() {
+                        if prev_assign_idx < current_idx {
+                            deps.insert(prev_assign_idx);
+                            break;  // Only depend on the most recent previous assignment
+                        }
+                    }
                 }
             }
             assign_deps.push(deps);
