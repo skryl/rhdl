@@ -21,9 +21,9 @@ module RHDL
       # Determine library path based on platform
       IR_JIT_EXT_DIR = File.expand_path('ir_jit/lib', __dir__)
       IR_JIT_LIB_NAME = case RbConfig::CONFIG['host_os']
-      when /darwin/ then 'libir_jit.dylib'
+      when /darwin/ then 'ir_jit.dylib'
       when /mswin|mingw/ then 'ir_jit.dll'
-      else 'libir_jit.so'
+      else 'ir_jit.so'
       end
       IR_JIT_LIB_PATH = File.join(IR_JIT_EXT_DIR, IR_JIT_LIB_NAME)
 
@@ -173,29 +173,29 @@ module RHDL
           @fn_is_mos6502_mode.call(@ctx) != 0
         end
 
-        def load_mos6502_memory(data, offset, is_rom)
-          return @sim.load_mos6502_memory(data, offset, is_rom) if @fallback && @sim.respond_to?(:load_mos6502_memory)
+        def mos6502_load_memory(data, offset, is_rom)
+          return @sim.mos6502_load_memory(data, offset, is_rom) if @fallback && @sim.respond_to?(:mos6502_load_memory)
           data = data.pack('C*') if data.is_a?(Array)
           @fn_mos6502_load_memory.call(@ctx, data, data.bytesize, offset, is_rom ? 1 : 0)
         end
 
-        def set_mos6502_reset_vector(addr)
-          return @sim.set_mos6502_reset_vector(addr) if @fallback && @sim.respond_to?(:set_mos6502_reset_vector)
+        def mos6502_set_reset_vector(addr)
+          return @sim.mos6502_set_reset_vector(addr) if @fallback && @sim.respond_to?(:mos6502_set_reset_vector)
           @fn_mos6502_set_reset_vector.call(@ctx, addr)
         end
 
-        def run_mos6502_cycles(n)
-          return @sim.run_mos6502_cycles(n) if @fallback && @sim.respond_to?(:run_mos6502_cycles)
+        def mos6502_run_cycles(n)
+          return @sim.mos6502_run_cycles(n) if @fallback && @sim.respond_to?(:mos6502_run_cycles)
           @fn_mos6502_run_cycles.call(@ctx, n)
         end
 
-        def read_mos6502_memory(addr)
-          return @sim.read_mos6502_memory(addr) if @fallback && @sim.respond_to?(:read_mos6502_memory)
+        def mos6502_read_memory(addr)
+          return @sim.mos6502_read_memory(addr) if @fallback && @sim.respond_to?(:mos6502_read_memory)
           @fn_mos6502_read_memory.call(@ctx, addr)
         end
 
-        def write_mos6502_memory(addr, data)
-          return @sim.write_mos6502_memory(addr, data) if @fallback && @sim.respond_to?(:write_mos6502_memory)
+        def mos6502_write_memory(addr, data)
+          return @sim.mos6502_write_memory(addr, data) if @fallback && @sim.respond_to?(:mos6502_write_memory)
           @fn_mos6502_write_memory.call(@ctx, addr, data)
         end
 
@@ -204,16 +204,16 @@ module RHDL
           @fn_mos6502_speaker_toggles.call(@ctx)
         end
 
-        def reset_mos6502_speaker_toggles
-          return @sim.reset_mos6502_speaker_toggles if @fallback && @sim.respond_to?(:reset_mos6502_speaker_toggles)
+        def mos6502_reset_speaker_toggles
+          return @sim.mos6502_reset_speaker_toggles if @fallback && @sim.respond_to?(:mos6502_reset_speaker_toggles)
           @fn_mos6502_reset_speaker_toggles.call(@ctx)
         end
 
         # Run N instructions and return array of [pc, opcode, sp] tuples
         # Uses Rust-native instruction stepping for accurate state tracking
-        def run_mos6502_instructions_with_opcodes(n)
-          if @fallback && @sim.respond_to?(:run_mos6502_instructions_with_opcodes)
-            return @sim.run_mos6502_instructions_with_opcodes(n)
+        def mos6502_run_instructions_with_opcodes(n)
+          if @fallback && @sim.respond_to?(:mos6502_run_instructions_with_opcodes)
+            return @sim.mos6502_run_instructions_with_opcodes(n)
           end
 
           # Allocate buffer for packed results (each is u64: pc<<16 | opcode<<8 | sp)
@@ -239,21 +239,21 @@ module RHDL
           @fn_is_apple2_mode.call(@ctx) != 0
         end
 
-        def load_rom(data)
-          return @sim.load_rom(data) if @fallback && @sim.respond_to?(:load_rom)
+        def apple2_load_rom(data)
+          return @sim.apple2_load_rom(data) if @fallback && @sim.respond_to?(:apple2_load_rom)
           data = data.pack('C*') if data.is_a?(Array)
           @fn_apple2_load_rom.call(@ctx, data, data.bytesize)
         end
 
-        def load_ram(data, offset)
-          return @sim.load_ram(data, offset) if @fallback && @sim.respond_to?(:load_ram)
+        def apple2_load_ram(data, offset)
+          return @sim.apple2_load_ram(data, offset) if @fallback && @sim.respond_to?(:apple2_load_ram)
           data = data.pack('C*') if data.is_a?(Array)
           @fn_apple2_load_ram.call(@ctx, data, data.bytesize, offset)
         end
 
-        def run_cpu_cycles(n, key_data, key_ready)
-          if @fallback && @sim.respond_to?(:run_cpu_cycles)
-            return @sim.run_cpu_cycles(n, key_data, key_ready)
+        def apple2_run_cpu_cycles(n, key_data, key_ready)
+          if @fallback && @sim.respond_to?(:apple2_run_cpu_cycles)
+            return @sim.apple2_run_cpu_cycles(n, key_data, key_ready)
           end
 
           # Result struct: text_dirty (int), key_cleared (int), cycles_run (uint), speaker_toggles (uint)
@@ -269,17 +269,17 @@ module RHDL
           }
         end
 
-        def read_ram(offset, length)
-          if @fallback && @sim.respond_to?(:read_ram)
-            return @sim.read_ram(offset, length)
+        def apple2_read_ram(offset, length)
+          if @fallback && @sim.respond_to?(:apple2_read_ram)
+            return @sim.apple2_read_ram(offset, length)
           end
           buf = Fiddle::Pointer.malloc(length)
           actual_len = @fn_apple2_read_ram.call(@ctx, offset, buf, length)
           buf[0, actual_len].unpack('C*')
         end
 
-        def write_ram(offset, data)
-          return @sim.write_ram(offset, data) if @fallback && @sim.respond_to?(:write_ram)
+        def apple2_write_ram(offset, data)
+          return @sim.apple2_write_ram(offset, data) if @fallback && @sim.respond_to?(:apple2_write_ram)
           data = data.pack('C*') if data.is_a?(Array)
           @fn_apple2_write_ram.call(@ctx, offset, data, data.bytesize)
         end
@@ -412,92 +412,92 @@ module RHDL
 
           # MOS6502 extension functions
           @fn_is_mos6502_mode = Fiddle::Function.new(
-            @lib['jit_sim_is_mos6502_mode'],
+            @lib['mos6502_jit_sim_is_mode'],
             [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_INT
           )
 
           @fn_mos6502_load_memory = Fiddle::Function.new(
-            @lib['jit_sim_mos6502_load_memory'],
+            @lib['mos6502_jit_sim_load_memory'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_INT, Fiddle::TYPE_INT],
             Fiddle::TYPE_VOID
           )
 
           @fn_mos6502_set_reset_vector = Fiddle::Function.new(
-            @lib['jit_sim_mos6502_set_reset_vector'],
+            @lib['mos6502_jit_sim_set_reset_vector'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
             Fiddle::TYPE_VOID
           )
 
           @fn_mos6502_run_cycles = Fiddle::Function.new(
-            @lib['jit_sim_mos6502_run_cycles'],
+            @lib['mos6502_jit_sim_run_cycles'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
             Fiddle::TYPE_INT
           )
 
           @fn_mos6502_read_memory = Fiddle::Function.new(
-            @lib['jit_sim_mos6502_read_memory'],
+            @lib['mos6502_jit_sim_read_memory'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
             Fiddle::TYPE_CHAR
           )
 
           @fn_mos6502_write_memory = Fiddle::Function.new(
-            @lib['jit_sim_mos6502_write_memory'],
+            @lib['mos6502_jit_sim_write_memory'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_CHAR],
             Fiddle::TYPE_VOID
           )
 
           @fn_mos6502_speaker_toggles = Fiddle::Function.new(
-            @lib['jit_sim_mos6502_speaker_toggles'],
+            @lib['mos6502_jit_sim_speaker_toggles'],
             [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_INT
           )
 
           @fn_mos6502_reset_speaker_toggles = Fiddle::Function.new(
-            @lib['jit_sim_mos6502_reset_speaker_toggles'],
+            @lib['mos6502_jit_sim_reset_speaker_toggles'],
             [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_VOID
           )
 
           @fn_mos6502_run_instructions_with_opcodes = Fiddle::Function.new(
-            @lib['jit_sim_mos6502_run_instructions_with_opcodes'],
+            @lib['mos6502_jit_sim_run_instructions_with_opcodes'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
             Fiddle::TYPE_INT
           )
 
           # Apple II extension functions
           @fn_is_apple2_mode = Fiddle::Function.new(
-            @lib['jit_sim_is_apple2_mode'],
+            @lib['apple2_jit_sim_is_mode'],
             [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_INT
           )
 
           @fn_apple2_load_rom = Fiddle::Function.new(
-            @lib['jit_sim_apple2_load_rom'],
+            @lib['apple2_jit_sim_load_rom'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
             Fiddle::TYPE_VOID
           )
 
           @fn_apple2_load_ram = Fiddle::Function.new(
-            @lib['jit_sim_apple2_load_ram'],
+            @lib['apple2_jit_sim_load_ram'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_INT],
             Fiddle::TYPE_VOID
           )
 
           @fn_apple2_run_cpu_cycles = Fiddle::Function.new(
-            @lib['jit_sim_apple2_run_cpu_cycles'],
+            @lib['apple2_jit_sim_run_cpu_cycles'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_CHAR, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_VOID
           )
 
           @fn_apple2_read_ram = Fiddle::Function.new(
-            @lib['jit_sim_apple2_read_ram'],
+            @lib['apple2_jit_sim_read_ram'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
             Fiddle::TYPE_SIZE_T
           )
 
           @fn_apple2_write_ram = Fiddle::Function.new(
-            @lib['jit_sim_apple2_write_ram'],
+            @lib['apple2_jit_sim_write_ram'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
             Fiddle::TYPE_VOID
           )

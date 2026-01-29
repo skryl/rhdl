@@ -208,7 +208,9 @@ impl CoreSimulator {
             }
         }
 
-        let clock_indices: Vec<usize> = clock_indices_set.into_iter().collect();
+        // Sort clock indices for deterministic ordering (HashSet iteration order is undefined)
+        let mut clock_indices: Vec<usize> = clock_indices_set.into_iter().collect();
+        clock_indices.sort();
         let old_clocks = vec![0u64; clock_indices.len()];
         let next_regs = vec![0u64; seq_targets.len()];
 
@@ -479,6 +481,46 @@ impl CoreSimulator {
         }
 
         levels
+    }
+
+    /// Find ALL clock domain indices that are derived from a given input clock signal
+    /// This traces signal propagation to find which clocks in clock_indices
+    /// are derived from the input clock (either directly or via assignment)
+    pub fn find_clock_domains_for_input(&self, input_clk_idx: usize) -> Vec<usize> {
+        let mut domains = Vec::new();
+
+        // First check if input clock is directly in clock_indices
+        if let Some(pos) = self.clock_indices.iter().position(|&ci| ci == input_clk_idx) {
+            domains.push(pos);
+        }
+
+        // Find all signals that are direct copies of the input clock
+        // These are assignments of the form: signals[X] = signals[input_clk_idx]
+        for assign in &self.ir.assigns {
+            if let ExprDef::Signal { name, .. } = &assign.expr {
+                // Check if this assignment copies from the input clock
+                if let Some(&source_idx) = self.name_to_idx.get(name) {
+                    if source_idx == input_clk_idx {
+                        // Found an assignment that copies from input clock
+                        if let Some(&target_idx) = self.name_to_idx.get(&assign.target) {
+                            // Check if this target is in clock_indices
+                            if let Some(pos) = self.clock_indices.iter().position(|&ci| ci == target_idx) {
+                                if !domains.contains(&pos) {
+                                    domains.push(pos);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // If no domains found, try all domains as fallback (single-clock design assumption)
+        if domains.is_empty() && !self.clock_indices.is_empty() {
+            domains.extend(0..self.clock_indices.len());
+        }
+
+        domains
     }
 
     // ========================================================================

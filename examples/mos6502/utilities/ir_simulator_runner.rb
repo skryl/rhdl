@@ -62,7 +62,7 @@ class IRSimulatorRunner
 
     if @use_rust_memory
       # Load directly into Rust memory (rom = true for ROM protection)
-      @sim.load_mos6502_memory(bytes_array, base_addr, true)
+      @sim.mos6502_load_memory(bytes_array, base_addr, true)
     end
 
     # Also load into Ruby bus (for screen reading, etc.)
@@ -75,7 +75,7 @@ class IRSimulatorRunner
 
     if @use_rust_memory
       # Load directly into Rust memory (rom = false for RAM)
-      @sim.load_mos6502_memory(bytes_array, base_addr, false)
+      @sim.mos6502_load_memory(bytes_array, base_addr, false)
     end
 
     # Also load into Ruby bus (for screen reading, etc.)
@@ -97,7 +97,7 @@ class IRSimulatorRunner
 
     if @use_rust_memory
       # Set in Rust memory
-      @sim.set_mos6502_reset_vector(addr)
+      @sim.mos6502_set_reset_vector(addr)
     end
 
     # Also set in Ruby bus memory (bypassing ROM protection)
@@ -129,8 +129,8 @@ class IRSimulatorRunner
     # The HDL control unit doesn't automatically load PC from reset vector,
     # so we use external PC load to do it
     if @use_rust_memory
-      lo = @sim.read_mos6502_memory(0xFFFC)
-      hi = @sim.read_mos6502_memory(0xFFFD)
+      lo = @sim.mos6502_read_memory(0xFFFC)
+      hi = @sim.mos6502_read_memory(0xFFFD)
     else
       lo = @bus.read(0xFFFC)
       hi = @bus.read(0xFFFD)
@@ -139,7 +139,7 @@ class IRSimulatorRunner
 
     # Get the opcode at target address - we'll need this for IR loading
     if @use_rust_memory
-      opcode = @sim.read_mos6502_memory(target_addr)
+      opcode = @sim.mos6502_read_memory(target_addr)
     else
       opcode = @bus.read(target_addr)
     end
@@ -166,7 +166,7 @@ class IRSimulatorRunner
     # During this, PC increments to target+1.
     if @use_rust_memory
       # For Rust mode, use internal memory - just poke the memory value
-      @sim.poke('data_in', @sim.read_mos6502_memory(target_addr + 1))
+      @sim.poke('data_in', @sim.mos6502_read_memory(target_addr + 1))
     else
       # For Ruby fallback, use bus memory
       @sim.poke('data_in', @bus.read(target_addr + 1))
@@ -187,7 +187,7 @@ class IRSimulatorRunner
       # Use batched Rust execution - no Ruby FFI per cycle!
       return if @halted
 
-      cycles_run = @sim.run_mos6502_cycles(steps)
+      cycles_run = @sim.mos6502_run_cycles(steps)
       @cycles += cycles_run
 
       # Sync screen memory from Rust memory to Ruby bus for screen reading
@@ -226,7 +226,7 @@ class IRSimulatorRunner
     if rw == 1
       # Read: get data and provide to CPU
       if @use_rust_memory
-        data = @sim.read_mos6502_memory(addr)
+        data = @sim.mos6502_read_memory(addr)
       else
         data = @bus.read(addr)
       end
@@ -235,7 +235,7 @@ class IRSimulatorRunner
       # Write: get data from CPU and write to memory
       data = @sim.peek('data_out')
       if @use_rust_memory
-        @sim.write_mos6502_memory(addr, data)
+        @sim.mos6502_write_memory(addr, data)
       else
         @bus.write(addr, data)
       end
@@ -329,7 +329,7 @@ class IRSimulatorRunner
     @bus.speaker.sync_toggles(current_toggles, elapsed)
 
     # Reset the Rust toggle counter
-    @sim.reset_mos6502_speaker_toggles
+    @sim.mos6502_reset_speaker_toggles
   end
 
   private
@@ -345,17 +345,17 @@ class IRSimulatorRunner
 
     # Text page 1: $0400-$07FF (1024 bytes)
     (0...1024).each do |i|
-      memory[0x0400 + i] = @sim.read_mos6502_memory(0x0400 + i)
+      memory[0x0400 + i] = @sim.mos6502_read_memory(0x0400 + i)
     end
 
     # HiRes page 1: $2000-$3FFF (8192 bytes)
     (0...8192).each do |i|
-      memory[0x2000 + i] = @sim.read_mos6502_memory(0x2000 + i)
+      memory[0x2000 + i] = @sim.mos6502_read_memory(0x2000 + i)
     end
 
     # HiRes page 2: $4000-$5FFF (8192 bytes)
     (0...8192).each do |i|
-      memory[0x4000 + i] = @sim.read_mos6502_memory(0x4000 + i)
+      memory[0x4000 + i] = @sim.mos6502_read_memory(0x4000 + i)
     end
   end
 

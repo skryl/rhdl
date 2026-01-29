@@ -2,14 +2,14 @@
 //!
 //! C ABI exports for MOS6502-specific functionality.
 
-use std::os::raw::c_int;
+use std::os::raw::{c_int, c_uint, c_ulong};
 use std::slice;
 
 use crate::ffi::IrSimContext;
 
 /// Check if MOS6502 mode is enabled
 #[no_mangle]
-pub unsafe extern "C" fn ir_sim_is_mos6502_mode(ctx: *const IrSimContext) -> c_int {
+pub unsafe extern "C" fn mos6502_ir_sim_is_mode(ctx: *const IrSimContext) -> c_int {
     if ctx.is_null() {
         return 0;
     }
@@ -18,7 +18,7 @@ pub unsafe extern "C" fn ir_sim_is_mos6502_mode(ctx: *const IrSimContext) -> c_i
 
 /// Load memory for MOS6502
 #[no_mangle]
-pub unsafe extern "C" fn ir_sim_mos6502_load_memory(
+pub unsafe extern "C" fn mos6502_ir_sim_load_memory(
     ctx: *mut IrSimContext,
     data: *const u8,
     len: usize,
@@ -37,7 +37,7 @@ pub unsafe extern "C" fn ir_sim_mos6502_load_memory(
 
 /// Set reset vector for MOS6502
 #[no_mangle]
-pub unsafe extern "C" fn ir_sim_mos6502_set_reset_vector(
+pub unsafe extern "C" fn mos6502_ir_sim_set_reset_vector(
     ctx: *mut IrSimContext,
     addr: u16,
 ) {
@@ -52,7 +52,7 @@ pub unsafe extern "C" fn ir_sim_mos6502_set_reset_vector(
 
 /// Run cycles for MOS6502, returns number of cycles run
 #[no_mangle]
-pub unsafe extern "C" fn ir_sim_mos6502_run_cycles(
+pub unsafe extern "C" fn mos6502_ir_sim_run_cycles(
     ctx: *mut IrSimContext,
     n: usize,
 ) -> usize {
@@ -68,7 +68,7 @@ pub unsafe extern "C" fn ir_sim_mos6502_run_cycles(
 
 /// Read memory for MOS6502
 #[no_mangle]
-pub unsafe extern "C" fn ir_sim_mos6502_read_memory(
+pub unsafe extern "C" fn mos6502_ir_sim_read_memory(
     ctx: *const IrSimContext,
     addr: usize,
 ) -> u8 {
@@ -84,7 +84,7 @@ pub unsafe extern "C" fn ir_sim_mos6502_read_memory(
 
 /// Write memory for MOS6502
 #[no_mangle]
-pub unsafe extern "C" fn ir_sim_mos6502_write_memory(
+pub unsafe extern "C" fn mos6502_ir_sim_write_memory(
     ctx: *mut IrSimContext,
     addr: usize,
     data: u8,
@@ -100,7 +100,7 @@ pub unsafe extern "C" fn ir_sim_mos6502_write_memory(
 
 /// Get speaker toggles for MOS6502
 #[no_mangle]
-pub unsafe extern "C" fn ir_sim_mos6502_speaker_toggles(
+pub unsafe extern "C" fn mos6502_ir_sim_speaker_toggles(
     ctx: *const IrSimContext,
 ) -> u32 {
     if ctx.is_null() {
@@ -115,7 +115,7 @@ pub unsafe extern "C" fn ir_sim_mos6502_speaker_toggles(
 
 /// Reset speaker toggles for MOS6502
 #[no_mangle]
-pub unsafe extern "C" fn ir_sim_mos6502_reset_speaker_toggles(
+pub unsafe extern "C" fn mos6502_ir_sim_reset_speaker_toggles(
     ctx: *mut IrSimContext,
 ) {
     if ctx.is_null() {
@@ -124,5 +124,37 @@ pub unsafe extern "C" fn ir_sim_mos6502_reset_speaker_toggles(
     let ctx = &mut *ctx;
     if let Some(ref mut mos6502) = ctx.mos6502 {
         mos6502.reset_speaker_toggles();
+    }
+}
+
+/// Run MOS6502 instructions and capture (pc, opcode, sp) tuples
+/// Each opcode_tuple is packed as: (pc << 16) | (opcode << 8) | sp
+/// Returns the number of instructions captured
+#[no_mangle]
+pub unsafe extern "C" fn mos6502_ir_sim_run_instructions_with_opcodes(
+    ctx: *mut IrSimContext,
+    n: c_uint,
+    opcodes_out: *mut c_ulong,
+    opcodes_capacity: c_uint,
+) -> c_uint {
+    if ctx.is_null() || opcodes_out.is_null() {
+        return 0;
+    }
+    let ctx = &mut *ctx;
+    if let Some(ref mut ext) = ctx.mos6502 {
+        let mut opcodes: Vec<(u16, u8, u8)> = Vec::with_capacity(n as usize);
+        let count = ext.run_instructions_with_opcodes(&mut ctx.core, n as usize, &mut opcodes);
+
+        // Pack results into output buffer
+        let out_slice = slice::from_raw_parts_mut(opcodes_out, opcodes_capacity as usize);
+        for (i, (pc, opcode, sp)) in opcodes.iter().enumerate() {
+            if i >= opcodes_capacity as usize {
+                break;
+            }
+            out_slice[i] = ((*pc as u64) << 16) | ((*opcode as u64) << 8) | (*sp as u64);
+        }
+        count as c_uint
+    } else {
+        0
     }
 }

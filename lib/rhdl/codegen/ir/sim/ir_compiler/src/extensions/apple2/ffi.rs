@@ -19,7 +19,7 @@ pub struct Apple2CycleResult {
 
 /// Check if Apple II mode is active
 #[no_mangle]
-pub unsafe extern "C" fn ir_sim_is_apple2_mode(ctx: *const IrSimContext) -> c_int {
+pub unsafe extern "C" fn apple2_ir_sim_is_mode(ctx: *const IrSimContext) -> c_int {
     if ctx.is_null() {
         return 0;
     }
@@ -28,7 +28,7 @@ pub unsafe extern "C" fn ir_sim_is_apple2_mode(ctx: *const IrSimContext) -> c_in
 
 /// Load Apple II ROM
 #[no_mangle]
-pub unsafe extern "C" fn ir_sim_apple2_load_rom(
+pub unsafe extern "C" fn apple2_ir_sim_load_rom(
     ctx: *mut IrSimContext,
     data: *const u8,
     data_len: usize,
@@ -45,7 +45,7 @@ pub unsafe extern "C" fn ir_sim_apple2_load_rom(
 
 /// Load Apple II RAM
 #[no_mangle]
-pub unsafe extern "C" fn ir_sim_apple2_load_ram(
+pub unsafe extern "C" fn apple2_ir_sim_load_ram(
     ctx: *mut IrSimContext,
     data: *const u8,
     data_len: usize,
@@ -63,7 +63,7 @@ pub unsafe extern "C" fn ir_sim_apple2_load_ram(
 
 /// Run Apple II CPU cycles
 #[no_mangle]
-pub unsafe extern "C" fn ir_sim_apple2_run_cpu_cycles(
+pub unsafe extern "C" fn apple2_ir_sim_run_cpu_cycles(
     ctx: *mut IrSimContext,
     n: c_uint,
     key_data: u8,
@@ -87,7 +87,7 @@ pub unsafe extern "C" fn ir_sim_apple2_run_cpu_cycles(
 
 /// Read Apple II RAM (returns bytes in buffer, up to buf_len)
 #[no_mangle]
-pub unsafe extern "C" fn ir_sim_apple2_read_ram(
+pub unsafe extern "C" fn apple2_ir_sim_read_ram(
     ctx: *const IrSimContext,
     offset: c_uint,
     buf: *mut u8,
@@ -111,7 +111,7 @@ pub unsafe extern "C" fn ir_sim_apple2_read_ram(
 
 /// Write Apple II RAM
 #[no_mangle]
-pub unsafe extern "C" fn ir_sim_apple2_write_ram(
+pub unsafe extern "C" fn apple2_ir_sim_write_ram(
     ctx: *mut IrSimContext,
     offset: c_uint,
     data: *const u8,
