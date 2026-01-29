@@ -866,16 +866,16 @@ module GameBoy
                   mux(is_ldh_m3, io_addr,  # Direct override for LDH instructions
                   mux(is_rst_m3, sp_minus_1,  # RST M3: Write PC high to SP-1
                   mux(is_rst_m4, sp_minus_2,  # RST M4: Write PC low to SP-2
-                  case_select(set_addr_to, {
-                    ADDR_PC => pc,
-                    ADDR_SP => sp,
-                    ADDR_HL => hl,
-                    ADDR_DE => de,
-                    ADDR_BC => bc,
-                    ADDR_WZ => wz,
-                    ADDR_IO => io_addr,
-                    ADDR_IOC => io_addr_c
-                  }, default: pc)))))
+                  # Address select based on set_addr_to
+                  mux(set_addr_to == lit(ADDR_PC, width: 3), pc,
+                  mux(set_addr_to == lit(ADDR_SP, width: 3), sp,
+                  mux(set_addr_to == lit(ADDR_HL, width: 3), hl,
+                  mux(set_addr_to == lit(ADDR_DE, width: 3), de,
+                  mux(set_addr_to == lit(ADDR_BC, width: 3), bc,
+                  mux(set_addr_to == lit(ADDR_WZ, width: 3), wz,
+                  mux(set_addr_to == lit(ADDR_IO, width: 3), io_addr,
+                  mux(set_addr_to == lit(ADDR_IOC, width: 3), io_addr_c,
+                      pc))))))))))))
 
       # Data output (for writes) - select based on instruction
       # For LD (HL),r, use the source register from bus_b
