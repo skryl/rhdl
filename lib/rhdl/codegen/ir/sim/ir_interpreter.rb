@@ -185,6 +185,27 @@ module RHDL
           @fn_mos6502_reset_speaker_toggles.call(@ctx)
         end
 
+        # Run N instructions and return array of [pc, opcode, sp] tuples
+        # Uses Rust-native instruction stepping for accurate state tracking
+        def run_mos6502_instructions_with_opcodes(n)
+          if @fallback && @sim.respond_to?(:run_mos6502_instructions_with_opcodes)
+            return @sim.run_mos6502_instructions_with_opcodes(n)
+          end
+
+          # Allocate buffer for packed results (each is u64: pc<<16 | opcode<<8 | sp)
+          buf = Fiddle::Pointer.malloc(n * 8)  # 8 bytes per u64
+          count = @fn_mos6502_run_instructions_with_opcodes.call(@ctx, n, buf, n)
+
+          # Unpack results
+          packed = buf[0, count * 8].unpack('Q*')
+          packed.map do |v|
+            pc = (v >> 16) & 0xFFFF
+            opcode = (v >> 8) & 0xFF
+            sp = v & 0xFF
+            [pc, opcode, sp]
+          end
+        end
+
         # ====================================================================
         # Apple II Extension Methods
         # ====================================================================
@@ -387,6 +408,11 @@ module RHDL
             @lib['mos6502_ir_sim_reset_speaker_toggles'],
             [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_VOID
+          )
+          @fn_mos6502_run_instructions_with_opcodes = Fiddle::Function.new(
+            @lib['mos6502_ir_sim_run_instructions_with_opcodes'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
+            Fiddle::TYPE_INT
           )
 
           # Apple II extension functions
