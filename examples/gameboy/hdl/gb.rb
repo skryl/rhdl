@@ -159,6 +159,7 @@ module GameBoy
     wire :sel_audio
     wire :sel_ext_bus
     wire :sel_boot_rom
+    wire :sel_ff50                     # Boot ROM disable register ($FF50)
 
     # Register file
     wire :boot_rom_enabled
@@ -188,6 +189,8 @@ module GameBoy
     wire :vram_do, width: 8
     wire :vram1_do, width: 8
     wire :zpram_do, width: 8
+    wire :zpram_addr, width: 7
+    wire :zpram_wren
     wire :wram_do, width: 8
     wire :hdma_do, width: 8
 
@@ -257,6 +260,12 @@ module GameBoy
     # VRAM0 Port B (PPU side - read only)
     port :vram_addr_ppu => [:vram0, :address_b]
     port [:vram0, :q_b] => :vram_data_ppu
+
+    # ZPRAM (High RAM $FF80-$FFFE) - CPU read/write
+    port :zpram_addr => [:zpram, :address_a]
+    port :zpram_wren => [:zpram, :wren_a]
+    port :cpu_do => [:zpram, :data_a]
+    port [:zpram, :q_a] => :zpram_do
 
     # CPU connections
     port [:cpu, :addr_bus] => :cpu_addr
@@ -366,6 +375,9 @@ module GameBoy
                     (cpu_addr[7..0] == lit(0x77, width: 8)))
       sel_ext_bus <= sel_rom | sel_cram | sel_wram
 
+      # Boot ROM disable register ($FF50) - SameBoy fast boot check reads this
+      sel_ff50 <= (cpu_addr == lit(0xFF50, width: 16))
+
       # Boot ROM select (0x0000-0x00FF when boot_rom_enabled, DMG mode)
       # Reference: sel_boot_rom = boot_rom_enabled && (!boot_rom_addr[15:8] || sel_boot_rom_cgb) && ~megaduck
       sel_boot_rom <= boot_rom_enabled & (cpu_addr[15..8] == lit(0, width: 8)) & ~megaduck
@@ -403,7 +415,8 @@ module GameBoy
                 mux(sel_vram & vram_cpu_allow, mux(is_gbc & vram_bank, vram1_do, vram_do),
                 mux(sel_zpram, zpram_do,
                 mux(sel_ie, ie_r,
-                    lit(0xFF, width: 8)))))))))))))
+                mux(sel_ff50, lit(0x00, width: 8),   # FF50 returns 0 (fast boot disabled)
+                    lit(0xFF, width: 8))))))))))))))
 
       # Joypad output
       joy_do <= cat(lit(0b11, width: 2), joy_p54, joy_din)
@@ -431,6 +444,11 @@ module GameBoy
       # CPU addresses 0x8000-0x9FFF map to VRAM addresses 0x0000-0x1FFF
       vram_addr_cpu <= cpu_addr[12..0]
       vram_wren_cpu <= sel_vram & ~cpu_mreq_n & ~cpu_wr_n & vram_cpu_allow & ce
+
+      # ZPRAM CPU interface
+      # CPU addresses 0xFF80-0xFFFE map to ZPRAM addresses 0x00-0x7E (127 bytes)
+      zpram_addr <= cpu_addr[6..0]
+      zpram_wren <= sel_zpram & ~cpu_wr_n & ~cpu_mreq_n & ce
     end
 
     # Sequential logic for registers

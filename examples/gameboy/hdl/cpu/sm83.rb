@@ -386,7 +386,7 @@ module GameBoy
       # Read from memory for LD A,(BC/DE)
       read_to_acc <= mux(((ir == lit(0x0A, width: 8)) | (ir == lit(0x1A, width: 8))) &
                           (m_cycle == lit(2, width: 3)),
-                          lit(1, width: 1), lit(0, width: 1))
+                          lit(1, width: 1), read_to_acc)
 
       # Address source for BC/DE indirect
       set_addr_to <= mux((ir == lit(0x02, width: 8)) | (ir == lit(0x0A, width: 8)),
@@ -422,8 +422,14 @@ module GameBoy
                           lit(6, width: 4),  # 6 = di_reg (data input register)
                           set_bus_b_to)
 
-      # RET
+      # RET - Return from call (4 cycles: M1=fetch, M2=read low from SP, M3=read high from SP+1, M4=jump)
       ret <= mux(ir == lit(0xC9, width: 8), lit(1, width: 1), lit(0, width: 1))
+      # RET loads return address from stack into WZ
+      ldz <= mux((ir == lit(0xC9, width: 8)) & (m_cycle == lit(2, width: 3)),
+                 lit(1, width: 1), ldz)
+      ldw <= mux((ir == lit(0xC9, width: 8)) & (m_cycle == lit(3, width: 3)),
+                 lit(1, width: 1), ldw)
+      # RET reads from SP during M2 and M3 (handled via set_addr_to below)
 
       # JP nn
       jump <= mux(ir == lit(0xC3, width: 8), lit(1, width: 1), lit(0, width: 1))
@@ -436,11 +442,17 @@ module GameBoy
       prefix <= mux(ir == lit(0xCB, width: 8), lit(1, width: 2), lit(0, width: 2))
 
       # CALL nn - set call signal and load address
+      # M1: fetch, M2: read low addr, M3: read high addr, M4: push PC high, M5: push PC low, M6: jump
       call <= mux(ir == lit(0xCD, width: 8), lit(1, width: 1), lit(0, width: 1))
       ldz <= mux((ir == lit(0xCD, width: 8)) & (m_cycle == lit(2, width: 3)),
                  lit(1, width: 1), ldz)
       ldw <= mux((ir == lit(0xCD, width: 8)) & (m_cycle == lit(3, width: 3)),
                  lit(1, width: 1), ldw)
+      # CALL M4 and M5: write return address to stack
+      write_sig <= mux((ir == lit(0xCD, width: 8)) & ((m_cycle == lit(4, width: 3)) | (m_cycle == lit(5, width: 3))),
+                       lit(1, width: 1), write_sig)
+      no_read <= mux((ir == lit(0xCD, width: 8)) & ((m_cycle == lit(4, width: 3)) | (m_cycle == lit(5, width: 3))),
+                     lit(1, width: 1), no_read)
 
       # JP (HL) - 1 cycle jump using HL address
       jump <= mux(ir == lit(0xE9, width: 8), lit(1, width: 1), jump)
@@ -745,8 +757,8 @@ module GameBoy
       # Also increment during operand reads when reading from instruction stream
       # Explicit conditions for each instruction type that reads operands from PC
       inc_pc <= ((m_cycle == lit(1, width: 3)) & ~halt & ~int_cycle) |
-                # LD A, n (0x3E) - M2 reads immediate
-                ((ir == lit(0x3E, width: 8)) & (m_cycle == lit(2, width: 3))) |
+                # LD r, n (0x06, 0x0E, 0x16, 0x1E, 0x26, 0x2E, 0x3E) - M2 reads immediate
+                (is_ld_r_n & (m_cycle == lit(2, width: 3))) |
                 # LDH (n), A (0xE0) - M2 reads offset
                 ((ir == lit(0xE0, width: 8)) & (m_cycle == lit(2, width: 3))) |
                 # LDH A, (n) (0xF0) - M2 reads offset
@@ -854,18 +866,27 @@ module GameBoy
       is_ldh_m3 = (ir == lit(0xE0, width: 8)) & (m_cycle == lit(3, width: 3)) |
                   (ir == lit(0xF0, width: 8)) & (m_cycle == lit(3, width: 3))
 
-      # RST/PUSH stack push addresses - pre-compute for stack operations
-      # M3: Write high byte to SP-1
-      # M4: Write low byte to SP-2
+      # RST/CALL/PUSH stack push addresses - pre-compute for stack operations
+      # RST: M3 write high byte to SP-1, M4 write low byte to SP-2
+      # CALL: M4 write high byte to SP-1, M5 write low byte to SP-2
       sp_minus_1 = sp - lit(1, width: 16)
       sp_minus_2 = sp - lit(2, width: 16)
+      sp_plus_1 = sp + lit(1, width: 16)
       is_rst_m3 = is_rst & (m_cycle == lit(3, width: 3))
       is_rst_m4 = is_rst & (m_cycle == lit(4, width: 3))
+      is_call_m4 = call & (m_cycle == lit(4, width: 3))
+      is_call_m5 = call & (m_cycle == lit(5, width: 3))
+      is_ret_m2 = ret & (m_cycle == lit(2, width: 3))
+      is_ret_m3 = ret & (m_cycle == lit(3, width: 3))
 
       addr_bus <= mux(m_cycle == lit(1, width: 3), pc,
                   mux(is_ldh_m3, io_addr,  # Direct override for LDH instructions
                   mux(is_rst_m3, sp_minus_1,  # RST M3: Write PC high to SP-1
                   mux(is_rst_m4, sp_minus_2,  # RST M4: Write PC low to SP-2
+                  mux(is_call_m4, sp_minus_1, # CALL M4: Write PC high to SP-1
+                  mux(is_call_m5, sp_minus_2, # CALL M5: Write PC low to SP-2
+                  mux(is_ret_m2, sp,          # RET M2: Read low byte from SP
+                  mux(is_ret_m3, sp_plus_1,   # RET M3: Read high byte from SP+1
                   # Address select based on set_addr_to
                   mux(set_addr_to == lit(ADDR_PC, width: 3), pc,
                   mux(set_addr_to == lit(ADDR_SP, width: 3), sp,
@@ -875,19 +896,22 @@ module GameBoy
                   mux(set_addr_to == lit(ADDR_WZ, width: 3), wz,
                   mux(set_addr_to == lit(ADDR_IO, width: 3), io_addr,
                   mux(set_addr_to == lit(ADDR_IOC, width: 3), io_addr_c,
-                      pc))))))))))))
+                      pc))))))))))))))))
 
       # Data output (for writes) - select based on instruction
       # For LD (HL),r, use the source register from bus_b
       # For LD (HL),n, use wz[7:0] (the immediate value)
       # For RST: M3 outputs PC[15:8], M4 outputs PC[7:0]
+      # For CALL: M4 outputs PC[15:8], M5 outputs PC[7:0]
       data_out <= mux(is_rst_m3, pc[15..8],  # RST M3: Push PC high byte
                   mux(is_rst_m4, pc[7..0],   # RST M4: Push PC low byte
+                  mux(is_call_m4, pc[15..8], # CALL M4: Push PC high byte
+                  mux(is_call_m5, pc[7..0],  # CALL M5: Push PC low byte
                   mux(is_ld_hl_r, bus_b,
                   mux((ir == lit(0x36, width: 8)) & (m_cycle == lit(3, width: 3)), wz[7..0],
                   mux(((ir == lit(0x34, width: 8)) | (ir == lit(0x35, width: 8))) & (m_cycle == lit(3, width: 3)),
                       alu_result,  # INC/DEC (HL) - write ALU result back
-                      acc)))))
+                      acc)))))))
 
       # -----------------------------------------------------------------------
       # CB BIT instruction - compute flags
@@ -1021,9 +1045,11 @@ module GameBoy
                     pc_rel,  # Relative jump: PC + signed displacement
                 mux(clken & call & (m_cycle == m_cycles) & (t_state == lit(3, width: 3)),
                     wz,  # CALL: jump to address stored in WZ
+                mux(clken & ret & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
+                    wz,  # RET: jump to address popped from stack (stored in WZ)
                 mux(clken & is_rst & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
                     cat(lit(0, width: 8), rst_addr),  # RST jump address: 0x00nn
-                    pc)))))
+                    pc))))))
 
       # -----------------------------------------------------------------------
       # Temporary Address Register (WZ)
@@ -1231,6 +1257,8 @@ module GameBoy
       # 2. LD SP,HL (ld_sp_hl)
       # 3. INC/DEC SP (is_incdec_sp)
       # 4. RST (decrement by 2 at end of M4)
+      # 5. CALL (decrement by 2 at end of M5)
+      # 6. RET (increment by 2 at end of M4)
       sp <= mux(clken & load_sp_wz & (t_state == lit(3, width: 3)),
                 cat(di_reg, wz[7..0]),  # LD SP,nn
             mux(clken & ld_sp_hl & (m_cycle == lit(2, width: 3)) & (t_state == lit(3, width: 3)),
@@ -1239,7 +1267,11 @@ module GameBoy
                 sp_16_new,              # INC/DEC SP
             mux(clken & is_rst & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
                 sp - lit(2, width: 16), # RST: decrement SP by 2
-                sp))))
+            mux(clken & call & (m_cycle == lit(5, width: 3)) & (t_state == lit(3, width: 3)),
+                sp - lit(2, width: 16), # CALL: decrement SP by 2
+            mux(clken & ret & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
+                sp + lit(2, width: 16), # RET: increment SP by 2
+                sp))))))
 
       # -----------------------------------------------------------------------
       # CB Prefix Handling

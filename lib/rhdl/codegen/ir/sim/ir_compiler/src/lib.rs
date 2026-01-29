@@ -256,6 +256,16 @@ struct IrSimulator {
     gb_boot_rom_addr_idx: usize,
     /// Boot ROM data output signal index
     gb_boot_do_idx: usize,
+    /// Game Boy ZPRAM/HRAM (127 bytes, $FF80-$FFFE)
+    gb_zpram: Vec<u8>,
+    /// ZPRAM address signal index (7 bits)
+    gb_zpram_addr_idx: usize,
+    /// ZPRAM write enable signal index
+    gb_zpram_wren_idx: usize,
+    /// ZPRAM data output signal index
+    gb_zpram_do_idx: usize,
+    /// ZPRAM DPRAM q_a output signal index (for injection)
+    gb_zpram_q_a_idx: usize,
     /// Previous lcd_clkena value for edge detection
     prev_lcd_clkena: u64,
     /// Previous lcd_vsync value for edge detection
@@ -443,6 +453,19 @@ impl IrSimulator {
         let gb_boot_do_idx = *name_to_idx.get("gb_core__boot_do")
             .or_else(|| name_to_idx.get("boot_do"))
             .unwrap_or(&0);
+        // ZPRAM/HRAM signal indices
+        let gb_zpram_addr_idx = *name_to_idx.get("gb_core__zpram_addr")
+            .or_else(|| name_to_idx.get("zpram_addr"))
+            .unwrap_or(&0);
+        let gb_zpram_wren_idx = *name_to_idx.get("gb_core__zpram_wren")
+            .or_else(|| name_to_idx.get("zpram_wren"))
+            .unwrap_or(&0);
+        let gb_zpram_do_idx = *name_to_idx.get("gb_core__zpram_do")
+            .or_else(|| name_to_idx.get("zpram_do"))
+            .unwrap_or(&0);
+        let gb_zpram_q_a_idx = *name_to_idx.get("gb_core__zpram__q_a")
+            .or_else(|| name_to_idx.get("zpram__q_a"))
+            .unwrap_or(&0);
         let gameboy_mode = name_to_idx.contains_key("lcd_clkena")
             && name_to_idx.contains_key("lcd_data_gb")
             && name_to_idx.contains_key("ce");
@@ -514,6 +537,11 @@ impl IrSimulator {
             gb_sel_boot_rom_idx,
             gb_boot_rom_addr_idx,
             gb_boot_do_idx,
+            gb_zpram: vec![0u8; 127],  // 127 bytes for HRAM ($FF80-$FFFE)
+            gb_zpram_addr_idx,
+            gb_zpram_wren_idx,
+            gb_zpram_do_idx,
+            gb_zpram_q_a_idx,
             prev_lcd_clkena: 0,
             prev_lcd_vsync: 0,
             framebuffer: vec![0u8; 160 * 144],  // 160x144 Game Boy screen
@@ -1419,6 +1447,11 @@ impl IrSimulator {
         let gb_sel_boot_rom_idx = self.gb_sel_boot_rom_idx;
         let gb_boot_rom_addr_idx = self.gb_boot_rom_addr_idx;
         let gb_boot_do_idx = self.gb_boot_do_idx;
+        // ZPRAM/HRAM interface indices
+        let gb_zpram_addr_idx = self.gb_zpram_addr_idx;
+        let gb_zpram_wren_idx = self.gb_zpram_wren_idx;
+        let gb_zpram_do_idx = self.gb_zpram_do_idx;
+        let gb_zpram_q_a_idx = self.gb_zpram_q_a_idx;
 
         let clock_indices: Vec<usize> = self.clock_indices.clone();
         let num_clocks = clock_indices.len().max(1);
@@ -1458,12 +1491,15 @@ impl IrSimulator {
         code.push_str("    vram_len: usize,\n");
         code.push_str("    boot_rom_ptr: *const u8,\n");
         code.push_str("    boot_rom_len: usize,\n");
+        code.push_str("    zpram_ptr: *mut u8,\n");
+        code.push_str("    zpram_len: usize,\n");
         code.push_str(") -> GbCycleResult {\n");
         code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, signals_len);\n");
         code.push_str("    let framebuffer = std::slice::from_raw_parts_mut(framebuffer, 160 * 144);\n");
         code.push_str("    let rom = std::slice::from_raw_parts(rom_ptr, rom_len);\n");
         code.push_str("    let vram = std::slice::from_raw_parts_mut(vram_ptr, vram_len);\n");
         code.push_str("    let boot_rom = std::slice::from_raw_parts(boot_rom_ptr, boot_rom_len);\n");
+        code.push_str("    let zpram = std::slice::from_raw_parts_mut(zpram_ptr, zpram_len);\n");
         code.push_str(&format!("    let old_clocks: &mut [u64; {}] = &mut *(old_clocks_ptr as *mut [u64; {}]);\n", num_clocks, num_clocks));
         code.push_str(&format!("    let next_regs: &mut [u64; {}] = &mut *(next_regs_ptr as *mut [u64; {}]);\n", num_regs.max(1), num_regs.max(1)));
         code.push_str("    let state = &mut *lcd_state;\n");
@@ -1551,6 +1587,23 @@ impl IrSimulator {
         code.push_str("        }\n");
         code.push_str("        evaluate_inline(signals);\n\n");
 
+        // ZPRAM handling BEFORE tick - check zpram_wren while ce is still high
+        code.push_str("        // ZPRAM write check (before tick)\n");
+        code.push_str(&format!("        if signals[{}] != 0 {{ // zpram_wren\n", gb_zpram_wren_idx));
+        code.push_str(&format!("            let addr = (signals[{}] & 0x7F) as usize;\n", gb_zpram_addr_idx));
+        code.push_str(&format!("            let data = (signals[{}] & 0xFF) as u8;\n", gb_cpu_do_idx));
+        code.push_str("            if addr < zpram_len {\n");
+        code.push_str("                zpram[addr] = data;\n");
+        code.push_str("            }\n");
+        code.push_str("        }\n");
+        // Inject ZPRAM data for reads (before tick) - inject into DPRAM q_a output
+        code.push_str("        // ZPRAM read injection (before tick) into DPRAM q_a\n");
+        code.push_str(&format!("        let za = (signals[{}] & 0x7F) as usize;\n", gb_zpram_addr_idx));
+        code.push_str("        if za < zpram_len {\n");
+        code.push_str(&format!("            signals[{}] = zpram[za] as u64;\n", gb_zpram_q_a_idx));
+        code.push_str("        }\n");
+        code.push_str("        evaluate_inline(signals);\n\n");
+
         // Inline tick logic (sample registers and apply on rising edge)
         code.push_str("        tick_gb_inline(signals, old_clocks, next_regs);\n");
         // Evaluate again to propagate CE from SpeedControl to other components
@@ -1589,6 +1642,22 @@ impl IrSimulator {
         code.push_str(&format!("            signals[{}] = vram[vram_addr_ppu] as u64;\n", gb_vram0_q_b_reg_idx));
         code.push_str("        }\n");
         code.push_str("        evaluate_inline(signals); // Propagate VRAM data through assignments\n\n");
+
+        // ZPRAM/HRAM handling (127 bytes, $FF80-$FFFE)
+        code.push_str("        // ZPRAM/HRAM handling\n");
+        code.push_str(&format!("        let zpram_addr = (signals[{}] & 0x7F) as usize; // 7-bit address\n", gb_zpram_addr_idx));
+        code.push_str("        // CPU ZPRAM write\n");
+        code.push_str(&format!("        if signals[{}] != 0 {{ // zpram_wren\n", gb_zpram_wren_idx));
+        code.push_str(&format!("            let data = (signals[{}] & 0xFF) as u8;\n", gb_cpu_do_idx));
+        code.push_str("            if zpram_addr < zpram_len {\n");
+        code.push_str("                zpram[zpram_addr] = data;\n");
+        code.push_str("            }\n");
+        code.push_str("        }\n");
+        code.push_str("        // Inject ZPRAM read data into DPRAM q_a\n");
+        code.push_str("        if zpram_addr < zpram_len {\n");
+        code.push_str(&format!("            signals[{}] = zpram[zpram_addr] as u64;\n", gb_zpram_q_a_idx));
+        code.push_str("        }\n");
+        code.push_str("        evaluate_inline(signals); // Propagate ZPRAM data through assignments\n\n");
 
         // LCD pixel capture logic
         code.push_str("        // LCD pixel capture\n");
@@ -1880,6 +1949,8 @@ impl IrSimulator {
                 vram_len: usize,
                 boot_rom_ptr: *const u8,
                 boot_rom_len: usize,
+                zpram_ptr: *mut u8,
+                zpram_len: usize,
             ) -> GbCycleResult;
 
             let func: libloading::Symbol<RunGbCyclesFn> = lib.get(b"run_gb_cycles")
@@ -1907,6 +1978,8 @@ impl IrSimulator {
                 self.gb_vram.len(),
                 self.gb_boot_rom.as_ptr(),
                 self.gb_boot_rom.len(),
+                self.gb_zpram.as_mut_ptr(),
+                self.gb_zpram.len(),
             );
 
             // Update state from result
