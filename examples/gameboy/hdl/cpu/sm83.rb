@@ -755,8 +755,8 @@ module GameBoy
                 ((ir[3..0] == lit(1, width: 4)) & (ir[7..6] == lit(0, width: 2)) & (m_cycle >= lit(2, width: 3))) |
                 # JP nn (0xC3) - M2 and M3 read address
                 ((ir == lit(0xC3, width: 8)) & (m_cycle >= lit(2, width: 3))) |
-                # CALL nn (0xCD) - M2 and M3 read address
-                ((ir == lit(0xCD, width: 8)) & (m_cycle >= lit(2, width: 3))) |
+                # CALL nn (0xCD) - M2 and M3 read address (not M4-M6 which push/jump)
+                ((ir == lit(0xCD, width: 8)) & ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3)))) |
                 # JR e (0x18) - M2 reads displacement
                 ((ir == lit(0x18, width: 8)) & (m_cycle == lit(2, width: 3))) |
                 # Conditional JR (0x20, 0x28, 0x30, 0x38) - M2 reads displacement
@@ -1019,9 +1019,11 @@ module GameBoy
                     cat(di_reg, wz[7..0]),  # Jump address: high byte from di_reg, low from WZ
                 mux(clken & jump_e & (m_cycle == m_cycles) & (t_state == lit(3, width: 3)),
                     pc_rel,  # Relative jump: PC + signed displacement
+                mux(clken & call & (m_cycle == m_cycles) & (t_state == lit(3, width: 3)),
+                    wz,  # CALL: jump to address stored in WZ
                 mux(clken & is_rst & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
                     cat(lit(0, width: 8), rst_addr),  # RST jump address: 0x00nn
-                    pc))))
+                    pc)))))
 
       # -----------------------------------------------------------------------
       # Temporary Address Register (WZ)
