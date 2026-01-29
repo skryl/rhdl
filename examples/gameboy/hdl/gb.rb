@@ -220,6 +220,9 @@ module GameBoy
     # Boot ROM interface signals
     wire :boot_rom_addr, width: 8      # Boot ROM address (lower 8 bits of cpu_addr)
 
+    # Reset signal (active-low for CPU)
+    wire :reset_n                      # Active-low reset for CPU (inverted from active-high reset input)
+
     # Sub-component instances
     instance :cpu, SM83
     instance :timer_unit, Timer
@@ -267,6 +270,7 @@ module GameBoy
     port :cpu_clken => [:cpu, :clken]
     port :irq_n => [:cpu, :int_n]
     port :is_gbc => [:cpu, :is_gbc]
+    port :reset_n => [:cpu, :reset_n]
 
     # Timer connections
     port :sel_timer => [:timer_unit, :cpu_sel]
@@ -332,6 +336,9 @@ module GameBoy
 
     # Combinational logic for address decoding and data muxing
     behavior do
+      # Invert reset for CPU (active-low reset_n from active-high reset input)
+      reset_n <= ~reset
+
       # Memory select signals (directly from gb.v lines 156-172)
       sel_timer <= (cpu_addr[15..4] == lit(0xFF0, width: 12)) & (cpu_addr[3..2] == lit(1, width: 2))
       sel_video_reg <= (cpu_addr[15..4] == lit(0xFF4, width: 12)) |
