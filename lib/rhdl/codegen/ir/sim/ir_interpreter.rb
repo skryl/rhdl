@@ -16,9 +16,9 @@ module RHDL
       # Determine library path based on platform
       IR_INTERPRETER_EXT_DIR = File.expand_path('ir_interpreter/lib', __dir__)
       IR_INTERPRETER_LIB_NAME = case RbConfig::CONFIG['host_os']
-      when /darwin/ then 'libir_interpreter.dylib'
+      when /darwin/ then 'ir_interpreter.dylib'
       when /mswin|mingw/ then 'ir_interpreter.dll'
-      else 'libir_interpreter.so'
+      else 'ir_interpreter.so'
       end
       IR_INTERPRETER_LIB_PATH = File.join(IR_INTERPRETER_EXT_DIR, IR_INTERPRETER_LIB_NAME)
 

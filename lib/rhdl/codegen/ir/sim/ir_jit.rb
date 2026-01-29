@@ -21,9 +21,9 @@ module RHDL
       # Determine library path based on platform
       IR_JIT_EXT_DIR = File.expand_path('ir_jit/lib', __dir__)
       IR_JIT_LIB_NAME = case RbConfig::CONFIG['host_os']
-      when /darwin/ then 'libir_jit.dylib'
+      when /darwin/ then 'ir_jit.dylib'
       when /mswin|mingw/ then 'ir_jit.dll'
-      else 'libir_jit.so'
+      else 'ir_jit.so'
       end
       IR_JIT_LIB_PATH = File.join(IR_JIT_EXT_DIR, IR_JIT_LIB_NAME)
 

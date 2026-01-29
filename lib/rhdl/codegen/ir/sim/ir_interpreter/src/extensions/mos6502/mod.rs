@@ -140,4 +140,80 @@ impl Mos6502Extension {
 
         n
     }
+
+    /// Run until n instructions complete, returning (pc, opcode, sp) for each
+    /// An instruction completes when state transitions to DECODE (0x02)
+    pub fn run_instructions_with_opcodes(
+        &mut self,
+        core: &mut CoreSimulator,
+        n: usize,
+        opcodes_out: &mut Vec<(u16, u8, u8)>,
+    ) -> usize {
+        const STATE_DECODE: u64 = 0x02;
+        let max_cycles = n * 10; // Safety limit
+
+        // Get signal indices for state, opcode, pc, sp
+        let state_idx = *core.name_to_idx.get("state").unwrap_or(&0);
+        let opcode_idx = *core.name_to_idx.get("opcode").unwrap_or(&0);
+        let pc_idx = *core.name_to_idx.get("pc").unwrap_or(&0);
+        let sp_idx = *core.name_to_idx.get("reg_sp").unwrap_or(&0);
+
+        // Find clock index in clock_indices array for proper edge detection
+        let clk_list_idx = core.clock_indices.iter().position(|&ci| ci == self.clk_idx);
+
+        let mut instruction_count = 0usize;
+        let mut cycles = 0usize;
+        let mut last_state = unsafe { *core.signals.get_unchecked(state_idx) };
+
+        while instruction_count < n && cycles < max_cycles {
+            // Get address and R/W from CPU
+            let addr = unsafe { *core.signals.get_unchecked(self.addr_idx) } as usize & 0xFFFF;
+            let rw = unsafe { *core.signals.get_unchecked(self.rw_idx) };
+
+            // Detect speaker toggle ($C030)
+            if addr == 0xC030 {
+                self.speaker_toggles += 1;
+            }
+
+            if rw == 1 {
+                // Read: provide data from memory to CPU
+                let data = unsafe { *self.memory.get_unchecked(addr) } as u64;
+                unsafe { *core.signals.get_unchecked_mut(self.data_in_idx) = data; }
+            } else {
+                // Write: store CPU data to memory (unless ROM protected)
+                if !unsafe { *self.rom_mask.get_unchecked(addr) } {
+                    let data = unsafe { *core.signals.get_unchecked(self.data_out_idx) } as u8;
+                    unsafe { *self.memory.get_unchecked_mut(addr) = data; }
+                }
+            }
+
+            // Clock falling edge
+            if let Some(idx) = clk_list_idx {
+                core.prev_clock_values[idx] = 1; // Previous state was high
+            }
+            unsafe { *core.signals.get_unchecked_mut(self.clk_idx) = 0; }
+            core.evaluate();
+
+            // Clock rising edge
+            if let Some(idx) = clk_list_idx {
+                core.prev_clock_values[idx] = 0; // Previous state was low
+            }
+            unsafe { *core.signals.get_unchecked_mut(self.clk_idx) = 1; }
+            core.tick();
+            cycles += 1;
+
+            // Check for state transition to DECODE
+            let current_state = unsafe { *core.signals.get_unchecked(state_idx) };
+            if current_state == STATE_DECODE && last_state != STATE_DECODE {
+                let opcode = unsafe { *core.signals.get_unchecked(opcode_idx) } as u8;
+                let pc = (unsafe { *core.signals.get_unchecked(pc_idx) }.wrapping_sub(1) & 0xFFFF) as u16;
+                let sp = unsafe { *core.signals.get_unchecked(sp_idx) } as u8;
+                opcodes_out.push((pc, opcode, sp));
+                instruction_count += 1;
+            }
+            last_state = current_state;
+        }
+
+        instruction_count
+    }
 }
