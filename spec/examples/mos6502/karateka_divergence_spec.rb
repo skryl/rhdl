@@ -640,7 +640,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     puts renderer.render(bitmap, invert: false)
   end
 
-  it 'compares all 4 MOS6502 simulators over 5M cycles', timeout: 600 do
+  it 'compares ISA, JIT, Compile, Verilator over 2M cycles', timeout: 600 do
     skip 'AppleIIgo ROM not found' unless @rom_available
     skip 'Karateka memory dump not found' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
@@ -1257,7 +1257,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     { name: "Verilator", cycles: actual_cycles, elapsed: elapsed, mhz: mhz }
   end
 
-  it 'benchmarks all 5 implementations', :benchmark, timeout: 1800 do
+  it 'benchmarks ISA, JIT, Compile, Verilator (20M cycles)', :benchmark, timeout: 1800 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
@@ -1348,7 +1348,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   # Opcode sequence comparison test
   # ============================================================================
 
-  it 'compares opcode sequences between ISA and backends', timeout: 300 do
+  it 'compares opcode sequences: ISA vs JIT, Compile, Verilator (100K instructions)', timeout: 300 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
