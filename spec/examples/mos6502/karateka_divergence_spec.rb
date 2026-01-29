@@ -1348,7 +1348,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   # Opcode sequence comparison test
   # ============================================================================
 
-  it 'compares opcode sequences: ISA vs JIT, Compile, Verilator (100K instructions)', timeout: 300 do
+  it 'compares opcode sequences: ISA vs JIT, Compile, Verilator (1M instructions)', timeout: 300 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
@@ -1357,7 +1357,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     puts "Opcode Sequence Comparison: ISA vs JIT, Compile, Verilator"
     puts "=" * 80
 
-    max_instructions = 100_000  # 100K instructions per backend
+    max_instructions = 1_000_000  # 1M instructions per backend
     batch_size = 1000  # Instructions per batch
 
     # Track results for each backend
