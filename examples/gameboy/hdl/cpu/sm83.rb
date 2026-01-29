@@ -1038,12 +1038,8 @@ module GameBoy
       # Register Updates
       # -----------------------------------------------------------------------
 
-      # Accumulator - update at T3 (pre-edge timing)
-      acc <= mux(clken & save_alu & (t_state == lit(3, width: 3)) & (alu_op != lit(7, width: 4)),
-                 alu_result,  # Save ALU result (except for CP)
-                 mux(clken & read_to_acc & (t_state == lit(3, width: 3)),
-                     di_reg,  # Load from memory
-                     acc))
+      # NOTE: Accumulator combined update is at the end of the sequential block,
+      # after all its dependencies (rot_result, reg_write_data) are defined.
 
       # Flags - update at T3 (pre-edge timing)
       # Combined update for all flag-modifying instructions to avoid multiple assignment override
@@ -1114,10 +1110,7 @@ module GameBoy
 
       # B, C, D, E, H, L register updates are handled later with all conditions combined
       # (includes read_to_reg for LD r,r' / LD r,n / INC r / DEC r)
-      # Accumulator update for LD A,r (write_reg == 7)
-      acc <= mux(clken & read_to_reg & (write_reg == lit(7, width: 3)) & (t_state == lit(3, width: 3)),
-                 mux(is_inc_r | is_dec_r, alu_result, reg_write_data),
-                 acc)
+      # NOTE: Accumulator update for LD A,r is now in the combined acc <= statement above
 
       # -----------------------------------------------------------------------
       # Rotate Accumulator Instructions (RLCA, RLA, RRCA, RRA)
@@ -1143,18 +1136,13 @@ module GameBoy
                   mux(ir == lit(0x1F, width: 8), acc[0],
                       f_reg[FLAG_C]))))
 
-      acc <= mux(clken & rot_akku & (t_state == lit(3, width: 3)),
-                 rot_result,
-                 acc)
-
+      # NOTE: acc update for rotate is now in the combined acc <= statement above
       # Rotate flags are now handled in the combined f_reg update above
 
       # -----------------------------------------------------------------------
       # CPL - Complement A (2F)
       # -----------------------------------------------------------------------
-      acc <= mux(clken & cpl_op & (t_state == lit(3, width: 3)),
-                 ~acc,
-                 acc)
+      # NOTE: acc update for CPL is now in the combined acc <= statement above
       # CPL flags are now handled in the combined f_reg update above
 
       # CCF and SCF flags are now handled in the combined f_reg update above
@@ -1302,6 +1290,28 @@ module GameBoy
                      mux(int_cycle | (int_n == lit(0, width: 1)),
                          lit(0, width: 1),  # Exit halt on interrupt
                          halt_ff))
+
+      # -----------------------------------------------------------------------
+      # Accumulator - Combined update at T3
+      # -----------------------------------------------------------------------
+      # All accumulator-modifying conditions in priority order:
+      # 1. save_alu - ALU operations (ADD, SUB, AND, OR, XOR, INC, DEC) except CP
+      # 2. read_to_acc - Load from memory (LD A,(nn), LD A,(BC), etc.)
+      # 3. read_to_reg with write_reg==7 - LD A,r / INC A / DEC A
+      # 4. rot_akku - Rotate accumulator (RLCA/RLA/RRCA/RRA)
+      # 5. cpl_op - Complement A
+      # Note: CP (alu_op==7) tests but doesn't store result
+      acc <= mux(clken & save_alu & (t_state == lit(3, width: 3)) & (alu_op != lit(7, width: 4)),
+                 alu_result,  # Save ALU result (ADD/SUB/AND/OR/XOR/INC/DEC, but not CP)
+             mux(clken & read_to_acc & (t_state == lit(3, width: 3)),
+                 di_reg,  # Load from memory
+             mux(clken & read_to_reg & (write_reg == lit(7, width: 3)) & (t_state == lit(3, width: 3)),
+                 mux(is_inc_r | is_dec_r, alu_result, reg_write_data),  # LD A,r / INC A / DEC A
+             mux(clken & rot_akku & (t_state == lit(3, width: 3)),
+                 rot_result,  # RLCA/RLA/RRCA/RRA
+             mux(clken & cpl_op & (t_state == lit(3, width: 3)),
+                 ~acc,  # CPL
+                 acc)))))
 
     end
 
