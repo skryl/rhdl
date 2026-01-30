@@ -1,19 +1,14 @@
 # frozen_string_literal: true
 
-# IR-level JIT compiler with Cranelift backend (Fiddle-based)
+# IR-level JIT compiler with Cranelift backend
 #
 # This simulator generates native machine code at load time using Cranelift,
 # eliminating all interpretation dispatch overhead. The generated code
 # directly computes signal values with no runtime type checking.
 #
-# Uses Fiddle (Ruby's built-in FFI) to call the Rust library directly,
-# similar to the Verilator runners.
+# Performance target: ~4M cycles/sec (80x faster than interpreter)
 
 require 'json'
-require 'fiddle'
-require 'fiddle/import'
-require 'rbconfig'
-require_relative 'ir_interpreter'  # For IRToJson module and fallback
 
 module RHDL
   module Codegen
@@ -21,40 +16,52 @@ module RHDL
       # Determine library path based on platform
       IR_JIT_EXT_DIR = File.expand_path('ir_jit/lib', __dir__)
       IR_JIT_LIB_NAME = case RbConfig::CONFIG['host_os']
-      when /darwin/ then 'libir_jit.dylib'
+      when /darwin/ then 'ir_jit.bundle'
       when /mswin|mingw/ then 'ir_jit.dll'
-      else 'libir_jit.so'
+      else 'ir_jit.so'
       end
       IR_JIT_LIB_PATH = File.join(IR_JIT_EXT_DIR, IR_JIT_LIB_NAME)
 
       # Try to load JIT extension
-      IR_JIT_AVAILABLE = File.exist?(IR_JIT_LIB_PATH)
+      IR_JIT_AVAILABLE = begin
+        if File.exist?(IR_JIT_LIB_PATH)
+          $LOAD_PATH.unshift(IR_JIT_EXT_DIR) unless $LOAD_PATH.include?(IR_JIT_EXT_DIR)
+          require 'ir_jit'
+          true
+        else
+          false
+        end
+      rescue LoadError => e
+        warn "IrJit extension not available: #{e.message}" if ENV['RHDL_DEBUG']
+        false
+      end
 
       # Backwards compatibility alias
       RTL_JIT_AVAILABLE = IR_JIT_AVAILABLE
 
-      # Wrapper class that uses Fiddle to call Rust JIT
+      # Wrapper class that uses Cranelift JIT if available
       class IrJitWrapper
         attr_reader :ir_json, :sub_cycles
 
         # @param ir_json [String] JSON representation of the IR
         # @param allow_fallback [Boolean] Allow fallback to interpreter
         # @param sub_cycles [Integer] Number of sub-cycles per CPU cycle (default: 14)
+        #   - 14: Full timing accuracy
+        #   - 7: ~2x faster, good accuracy
+        #   - 2: ~7x faster, minimal accuracy
         def initialize(ir_json, allow_fallback: true, sub_cycles: 14)
           @ir_json = ir_json
           @sub_cycles = sub_cycles.clamp(1, 14)
 
           if IR_JIT_AVAILABLE
-            load_library
-            create_simulator
+            @sim = IrJit.new(ir_json, @sub_cycles)
             @backend = :jit
           elsif allow_fallback
             require_relative 'ir_interpreter'
             @sim = IrInterpreterWrapper.new(ir_json, allow_fallback: true, sub_cycles: @sub_cycles)
             @backend = @sim.native? ? :interpret : :ruby
-            @fallback = true
           else
-            raise LoadError, "IR JIT library not found at: #{IR_JIT_LIB_PATH}\nRun 'rake native:build' to build it."
+            raise LoadError, "IR JIT extension not found at: #{IR_JIT_LIB_PATH}\nRun 'rake native:build' to build it."
           end
         end
 
@@ -71,456 +78,108 @@ module RHDL
         end
 
         def poke(name, value)
-          return @sim.poke(name, value) if @fallback
-          @fn_poke.call(@ctx, name, value)
+          @sim.poke(name, value)
         end
 
         def peek(name)
-          return @sim.peek(name) if @fallback
-          @fn_peek.call(@ctx, name)
-        end
-
-        def has_signal?(name)
-          return @sim.has_signal?(name) if @fallback && @sim.respond_to?(:has_signal?)
-          @fn_has_signal.call(@ctx, name) != 0
+          @sim.peek(name)
         end
 
         def evaluate
-          return @sim.evaluate if @fallback
-          @fn_evaluate.call(@ctx)
+          @sim.evaluate
         end
 
         def tick
-          return @sim.tick if @fallback
-          @fn_tick.call(@ctx)
+          @sim.tick
         end
 
         def reset
-          return @sim.reset if @fallback
-          @fn_reset.call(@ctx)
+          @sim.reset
         end
 
         def signal_count
-          return @sim.signal_count if @fallback
-          @fn_signal_count.call(@ctx)
+          @sim.signal_count
         end
 
         def reg_count
-          return @sim.reg_count if @fallback
-          @fn_reg_count.call(@ctx)
+          @sim.reg_count
         end
 
         def input_names
-          return @sim.input_names if @fallback
-          ptr = @fn_input_names.call(@ctx)
-          return [] if ptr.null?
-          names = ptr.to_s.split(',')
-          @fn_free_string.call(ptr)
-          names
+          @sim.input_names
         end
 
         def output_names
-          return @sim.output_names if @fallback
-          ptr = @fn_output_names.call(@ctx)
-          return [] if ptr.null?
-          names = ptr.to_s.split(',')
-          @fn_free_string.call(ptr)
-          names
+          @sim.output_names
         end
 
         def stats
-          return @sim.stats if @fallback
-          {
-            signals: signal_count,
-            regs: reg_count,
-            apple2_mode: apple2_mode?,
-            mos6502_mode: mos6502_mode?
-          }
+          @sim.stats
         end
 
-        # Batched tick execution
+        # Batched execution methods
+        def load_rom(data)
+          @sim.load_rom(data) if @sim.respond_to?(:load_rom)
+        end
+
+        def load_ram(data, offset)
+          @sim.load_ram(data, offset) if @sim.respond_to?(:load_ram)
+        end
+
+        def run_cpu_cycles(n, key_data, key_ready)
+          if @sim.respond_to?(:run_cpu_cycles)
+            @sim.run_cpu_cycles(n, key_data, key_ready)
+          else
+            { cycles_run: 0, text_dirty: false, key_cleared: false }
+          end
+        end
+
+        def read_ram(start, length)
+          if @sim.respond_to?(:read_ram)
+            @sim.read_ram(start, length)
+          else
+            []
+          end
+        end
+
+        def write_ram(start, data)
+          @sim.write_ram(start, data) if @sim.respond_to?(:write_ram)
+        end
+
+        # Batched tick execution - eliminates FFI overhead for bulk simulation
         def run_ticks(n)
-          return @sim.run_ticks(n) if @fallback && @sim.respond_to?(:run_ticks)
-          return n.times { tick } if @fallback
-          @fn_run_ticks.call(@ctx, n)
+          if @sim.respond_to?(:run_ticks)
+            @sim.run_ticks(n)
+          else
+            n.times { @sim.tick }
+          end
         end
 
         # Get signal index by name (for caching)
         def get_signal_idx(name)
-          return @sim.get_signal_idx(name) if @fallback && @sim.respond_to?(:get_signal_idx)
-          idx = @fn_get_signal_idx.call(@ctx, name)
-          idx >= 0 ? idx : nil
+          @sim.get_signal_idx(name) if @sim.respond_to?(:get_signal_idx)
         end
 
         # Poke by index - faster than by name when index is cached
         def poke_by_idx(idx, value)
-          return @sim.poke_by_idx(idx, value) if @fallback && @sim.respond_to?(:poke_by_idx)
-          @fn_poke_by_idx.call(@ctx, idx, value)
+          @sim.poke_by_idx(idx, value) if @sim.respond_to?(:poke_by_idx)
         end
 
         # Peek by index - faster than by name when index is cached
         def peek_by_idx(idx)
-          return @sim.peek_by_idx(idx) if @fallback && @sim.respond_to?(:peek_by_idx)
-          @fn_peek_by_idx.call(@ctx, idx)
-        end
-
-        # ====================================================================
-        # MOS6502 Extension Methods
-        # ====================================================================
-
-        def mos6502_mode?
-          return @sim.mos6502_mode? if @fallback && @sim.respond_to?(:mos6502_mode?)
-          @fn_is_mos6502_mode.call(@ctx) != 0
-        end
-
-        def load_mos6502_memory(data, offset, is_rom)
-          return @sim.load_mos6502_memory(data, offset, is_rom) if @fallback && @sim.respond_to?(:load_mos6502_memory)
-          data = data.pack('C*') if data.is_a?(Array)
-          @fn_mos6502_load_memory.call(@ctx, data, data.bytesize, offset, is_rom ? 1 : 0)
-        end
-
-        def set_mos6502_reset_vector(addr)
-          return @sim.set_mos6502_reset_vector(addr) if @fallback && @sim.respond_to?(:set_mos6502_reset_vector)
-          @fn_mos6502_set_reset_vector.call(@ctx, addr)
-        end
-
-        def run_mos6502_cycles(n)
-          return @sim.run_mos6502_cycles(n) if @fallback && @sim.respond_to?(:run_mos6502_cycles)
-          @fn_mos6502_run_cycles.call(@ctx, n)
-        end
-
-        def read_mos6502_memory(addr)
-          return @sim.read_mos6502_memory(addr) if @fallback && @sim.respond_to?(:read_mos6502_memory)
-          @fn_mos6502_read_memory.call(@ctx, addr)
-        end
-
-        def write_mos6502_memory(addr, data)
-          return @sim.write_mos6502_memory(addr, data) if @fallback && @sim.respond_to?(:write_mos6502_memory)
-          @fn_mos6502_write_memory.call(@ctx, addr, data)
-        end
-
-        def mos6502_speaker_toggles
-          return @sim.mos6502_speaker_toggles if @fallback && @sim.respond_to?(:mos6502_speaker_toggles)
-          @fn_mos6502_speaker_toggles.call(@ctx)
-        end
-
-        def reset_mos6502_speaker_toggles
-          return @sim.reset_mos6502_speaker_toggles if @fallback && @sim.respond_to?(:reset_mos6502_speaker_toggles)
-          @fn_mos6502_reset_speaker_toggles.call(@ctx)
-        end
-
-        # Run N instructions and return array of [pc, opcode, sp] tuples
-        # Uses Rust-native instruction stepping for accurate state tracking
-        def run_mos6502_instructions_with_opcodes(n)
-          if @fallback && @sim.respond_to?(:run_mos6502_instructions_with_opcodes)
-            return @sim.run_mos6502_instructions_with_opcodes(n)
-          end
-
-          # Allocate buffer for packed results (each is u64: pc<<16 | opcode<<8 | sp)
-          buf = Fiddle::Pointer.malloc(n * 8)  # 8 bytes per u64
-          count = @fn_mos6502_run_instructions_with_opcodes.call(@ctx, n, buf, n)
-
-          # Unpack results
-          packed = buf[0, count * 8].unpack('Q*')
-          packed.map do |v|
-            pc = (v >> 16) & 0xFFFF
-            opcode = (v >> 8) & 0xFF
-            sp = v & 0xFF
-            [pc, opcode, sp]
-          end
-        end
-
-        # ====================================================================
-        # Apple II Extension Methods
-        # ====================================================================
-
-        def apple2_mode?
-          return @sim.apple2_mode? if @fallback && @sim.respond_to?(:apple2_mode?)
-          @fn_is_apple2_mode.call(@ctx) != 0
-        end
-
-        def load_rom(data)
-          return @sim.load_rom(data) if @fallback && @sim.respond_to?(:load_rom)
-          data = data.pack('C*') if data.is_a?(Array)
-          @fn_apple2_load_rom.call(@ctx, data, data.bytesize)
-        end
-
-        def load_ram(data, offset)
-          return @sim.load_ram(data, offset) if @fallback && @sim.respond_to?(:load_ram)
-          data = data.pack('C*') if data.is_a?(Array)
-          @fn_apple2_load_ram.call(@ctx, data, data.bytesize, offset)
-        end
-
-        def run_cpu_cycles(n, key_data, key_ready)
-          if @fallback && @sim.respond_to?(:run_cpu_cycles)
-            return @sim.run_cpu_cycles(n, key_data, key_ready)
-          end
-
-          # Result struct: text_dirty (int), key_cleared (int), cycles_run (uint), speaker_toggles (uint)
-          result_buf = Fiddle::Pointer.malloc(16)  # 4 x 4 bytes
-          @fn_apple2_run_cpu_cycles.call(@ctx, n, key_data, key_ready ? 1 : 0, result_buf)
-
-          values = result_buf[0, 16].unpack('llLL')
-          {
-            text_dirty: values[0] != 0,
-            key_cleared: values[1] != 0,
-            cycles_run: values[2],
-            speaker_toggles: values[3]
-          }
-        end
-
-        def read_ram(offset, length)
-          if @fallback && @sim.respond_to?(:read_ram)
-            return @sim.read_ram(offset, length)
-          end
-          buf = Fiddle::Pointer.malloc(length)
-          actual_len = @fn_apple2_read_ram.call(@ctx, offset, buf, length)
-          buf[0, actual_len].unpack('C*')
-        end
-
-        def write_ram(offset, data)
-          return @sim.write_ram(offset, data) if @fallback && @sim.respond_to?(:write_ram)
-          data = data.pack('C*') if data.is_a?(Array)
-          @fn_apple2_write_ram.call(@ctx, offset, data, data.bytesize)
+          @sim.peek_by_idx(idx) if @sim.respond_to?(:peek_by_idx)
         end
 
         def respond_to_missing?(method_name, include_private = false)
-          (@fallback && @sim.respond_to?(method_name)) || super
+          @sim.respond_to?(method_name) || super
         end
 
         def method_missing(method_name, *args, &block)
-          if @fallback && @sim.respond_to?(method_name)
+          if @sim.respond_to?(method_name)
             @sim.send(method_name, *args, &block)
           else
             super
           end
-        end
-
-        private
-
-        def load_library
-          @lib = Fiddle.dlopen(IR_JIT_LIB_PATH)
-
-          # Core functions
-          @fn_create = Fiddle::Function.new(
-            @lib['jit_sim_create'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOIDP
-          )
-
-          @fn_destroy = Fiddle::Function.new(
-            @lib['jit_sim_destroy'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
-
-          @fn_free_error = Fiddle::Function.new(
-            @lib['jit_sim_free_error'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
-
-          @fn_free_string = Fiddle::Function.new(
-            @lib['jit_sim_free_string'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
-
-          @fn_poke = Fiddle::Function.new(
-            @lib['jit_sim_poke'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_ULONG],
-            Fiddle::TYPE_INT
-          )
-
-          @fn_peek = Fiddle::Function.new(
-            @lib['jit_sim_peek'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_ULONG
-          )
-
-          @fn_has_signal = Fiddle::Function.new(
-            @lib['jit_sim_has_signal'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
-
-          @fn_get_signal_idx = Fiddle::Function.new(
-            @lib['jit_sim_get_signal_idx'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
-
-          @fn_poke_by_idx = Fiddle::Function.new(
-            @lib['jit_sim_poke_by_idx'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_ULONG],
-            Fiddle::TYPE_VOID
-          )
-
-          @fn_peek_by_idx = Fiddle::Function.new(
-            @lib['jit_sim_peek_by_idx'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-            Fiddle::TYPE_ULONG
-          )
-
-          @fn_evaluate = Fiddle::Function.new(
-            @lib['jit_sim_evaluate'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
-
-          @fn_tick = Fiddle::Function.new(
-            @lib['jit_sim_tick'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
-
-          @fn_run_ticks = Fiddle::Function.new(
-            @lib['jit_sim_run_ticks'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-            Fiddle::TYPE_VOID
-          )
-
-          @fn_reset = Fiddle::Function.new(
-            @lib['jit_sim_reset'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
-
-          @fn_signal_count = Fiddle::Function.new(
-            @lib['jit_sim_signal_count'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
-
-          @fn_reg_count = Fiddle::Function.new(
-            @lib['jit_sim_reg_count'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
-
-          @fn_input_names = Fiddle::Function.new(
-            @lib['jit_sim_input_names'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOIDP
-          )
-
-          @fn_output_names = Fiddle::Function.new(
-            @lib['jit_sim_output_names'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOIDP
-          )
-
-          # MOS6502 extension functions
-          @fn_is_mos6502_mode = Fiddle::Function.new(
-            @lib['jit_sim_is_mos6502_mode'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
-
-          @fn_mos6502_load_memory = Fiddle::Function.new(
-            @lib['jit_sim_mos6502_load_memory'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_INT, Fiddle::TYPE_INT],
-            Fiddle::TYPE_VOID
-          )
-
-          @fn_mos6502_set_reset_vector = Fiddle::Function.new(
-            @lib['jit_sim_mos6502_set_reset_vector'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-            Fiddle::TYPE_VOID
-          )
-
-          @fn_mos6502_run_cycles = Fiddle::Function.new(
-            @lib['jit_sim_mos6502_run_cycles'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-            Fiddle::TYPE_INT
-          )
-
-          @fn_mos6502_read_memory = Fiddle::Function.new(
-            @lib['jit_sim_mos6502_read_memory'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-            Fiddle::TYPE_CHAR
-          )
-
-          @fn_mos6502_write_memory = Fiddle::Function.new(
-            @lib['jit_sim_mos6502_write_memory'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_CHAR],
-            Fiddle::TYPE_VOID
-          )
-
-          @fn_mos6502_speaker_toggles = Fiddle::Function.new(
-            @lib['jit_sim_mos6502_speaker_toggles'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
-
-          @fn_mos6502_reset_speaker_toggles = Fiddle::Function.new(
-            @lib['jit_sim_mos6502_reset_speaker_toggles'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
-
-          @fn_mos6502_run_instructions_with_opcodes = Fiddle::Function.new(
-            @lib['jit_sim_mos6502_run_instructions_with_opcodes'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-            Fiddle::TYPE_INT
-          )
-
-          # Apple II extension functions
-          @fn_is_apple2_mode = Fiddle::Function.new(
-            @lib['jit_sim_is_apple2_mode'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
-
-          @fn_apple2_load_rom = Fiddle::Function.new(
-            @lib['jit_sim_apple2_load_rom'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
-            Fiddle::TYPE_VOID
-          )
-
-          @fn_apple2_load_ram = Fiddle::Function.new(
-            @lib['jit_sim_apple2_load_ram'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_INT],
-            Fiddle::TYPE_VOID
-          )
-
-          @fn_apple2_run_cpu_cycles = Fiddle::Function.new(
-            @lib['jit_sim_apple2_run_cpu_cycles'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_CHAR, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
-
-          @fn_apple2_read_ram = Fiddle::Function.new(
-            @lib['jit_sim_apple2_read_ram'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
-            Fiddle::TYPE_SIZE_T
-          )
-
-          @fn_apple2_write_ram = Fiddle::Function.new(
-            @lib['jit_sim_apple2_write_ram'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
-            Fiddle::TYPE_VOID
-          )
-        end
-
-        def create_simulator
-          error_ptr = Fiddle::Pointer.malloc(Fiddle::SIZEOF_VOIDP)
-          error_ptr[0, Fiddle::SIZEOF_VOIDP] = [0].pack('Q')  # Initialize to null
-
-          @ctx = @fn_create.call(@ir_json, @ir_json.bytesize, @sub_cycles, error_ptr)
-
-          if @ctx.null?
-            error_str_ptr = error_ptr[0, Fiddle::SIZEOF_VOIDP].unpack1('Q')
-            if error_str_ptr != 0
-              error_msg = Fiddle::Pointer.new(error_str_ptr).to_s
-              @fn_free_error.call(error_str_ptr)
-              raise RuntimeError, "Failed to create JIT simulator: #{error_msg}"
-            end
-            raise RuntimeError, "Failed to create JIT simulator"
-          end
-
-          # Set up destructor for cleanup
-          @destructor = @fn_destroy
         end
       end
 
