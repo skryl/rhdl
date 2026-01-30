@@ -13,23 +13,23 @@ require 'rbconfig'
 module RHDL
   module Codegen
     module IR
-      # Determine library path based on platform
-      IR_INTERPRETER_EXT_DIR = File.expand_path('ir_interpreter/lib', __dir__)
-      IR_INTERPRETER_LIB_NAME = case RbConfig::CONFIG['host_os']
-      when /darwin/ then 'ir_interpreter.dylib'
-      when /mswin|mingw/ then 'ir_interpreter.dll'
-      else 'ir_interpreter.so'
-      end
-      IR_INTERPRETER_LIB_PATH = File.join(IR_INTERPRETER_EXT_DIR, IR_INTERPRETER_LIB_NAME)
+      # Refactored module contains the modularized extension architecture versions
+      # These use Fiddle FFI and have separate extensions/ directories
+      module Refactored
+        # Determine library path based on platform
+        INTERPRETER_EXT_DIR = File.expand_path('ir_interpreter/lib', __dir__)
+        INTERPRETER_LIB_NAME = case RbConfig::CONFIG['host_os']
+        when /darwin/ then 'ir_interpreter.dylib'
+        when /mswin|mingw/ then 'ir_interpreter.dll'
+        else 'ir_interpreter.so'
+        end
+        INTERPRETER_LIB_PATH = File.join(INTERPRETER_EXT_DIR, INTERPRETER_LIB_NAME)
 
-      # Try to load interpreter extension via Fiddle
-      IR_INTERPRETER_AVAILABLE = File.exist?(IR_INTERPRETER_LIB_PATH)
+        # Try to load interpreter extension via Fiddle
+        INTERPRETER_AVAILABLE = File.exist?(INTERPRETER_LIB_PATH)
 
-      # Backwards compatibility alias
-      RTL_INTERPRETER_AVAILABLE = IR_INTERPRETER_AVAILABLE
-
-      # Wrapper class that uses Rust interpreter if available
-      class IrInterpreterWrapper
+        # Wrapper class that uses Rust interpreter via Fiddle
+        class IrInterpreterWrapper
         attr_reader :ir_json, :sub_cycles
 
         # @param ir_json [String] JSON representation of the IR
@@ -39,7 +39,7 @@ module RHDL
           @ir_json = ir_json
           @sub_cycles = sub_cycles.clamp(1, 14)
 
-          if IR_INTERPRETER_AVAILABLE
+          if INTERPRETER_AVAILABLE
             begin
               load_library
               create_simulator
@@ -56,7 +56,7 @@ module RHDL
             @backend = :ruby
             @fallback = true
           else
-            raise LoadError, "IR interpreter extension not found at: #{IR_INTERPRETER_LIB_PATH}\nRun 'rake native:build' to build it."
+            raise LoadError, "IR interpreter extension not found at: #{INTERPRETER_LIB_PATH}\nRun 'rake native:build' to build it."
           end
         end
 
@@ -65,7 +65,7 @@ module RHDL
         end
 
         def native?
-          IR_INTERPRETER_AVAILABLE && @backend == :interpret
+          INTERPRETER_AVAILABLE && @backend == :interpret
         end
 
         def poke(name, value)
@@ -280,7 +280,7 @@ module RHDL
         private
 
         def load_library
-          @lib = Fiddle.dlopen(IR_INTERPRETER_LIB_PATH)
+          @lib = Fiddle.dlopen(INTERPRETER_LIB_PATH)
 
           # Core functions
           @fn_create = Fiddle::Function.new(
@@ -468,13 +468,14 @@ module RHDL
             end
           end
         end
-      end
+      end  # class IrInterpreterWrapper
 
       # Backwards compatibility alias
       RtlInterpreterWrapper = IrInterpreterWrapper
+    end  # module Refactored
 
-      # Ruby fallback simulator for when native extension is not available
-      class RubyIrSim
+    # Ruby fallback simulator for when native extension is not available
+    class RubyIrSim
         def initialize(json)
           @ir = JSON.parse(json, symbolize_names: true, max_nesting: false)
           @signals = {}

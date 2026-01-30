@@ -11,23 +11,45 @@ require 'spec_helper'
 require 'rhdl'
 require 'rhdl/codegen'
 
+# Load refactored wrappers (these are in RHDL::Codegen::IR::Refactored module)
+require_relative 'ir_interpreter'
+require_relative 'ir_compiler'
+require_relative 'ir_jit'
+
 RSpec.describe 'Refactored vs Monolithic IR Simulator Divergence' do
-  ROM_PATH = File.expand_path('../../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
+  ROM_PATH = File.expand_path('../../../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
 
   before(:all) do
     @rom_available = File.exist?(ROM_PATH)
     if @rom_available
       @rom_data = File.binread(ROM_PATH).bytes
     end
+
+    # Check availability of both sets of simulators
+    @monolithic_interpreter_available = RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
+    @monolithic_compiler_available = RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+    @monolithic_jit_available = RHDL::Codegen::IR::IR_JIT_AVAILABLE
+
+    @refactored_interpreter_available = RHDL::Codegen::IR::Refactored::INTERPRETER_AVAILABLE
+    @refactored_compiler_available = RHDL::Codegen::IR::Refactored::COMPILER_AVAILABLE
+    @refactored_jit_available = RHDL::Codegen::IR::Refactored::JIT_AVAILABLE
+
+    puts "\n  Extension availability:"
+    puts "  Monolithic Interpreter: #{@monolithic_interpreter_available}"
+    puts "  Monolithic Compiler: #{@monolithic_compiler_available}"
+    puts "  Monolithic JIT: #{@monolithic_jit_available}"
+    puts "  Refactored Interpreter: #{@refactored_interpreter_available}"
+    puts "  Refactored Compiler: #{@refactored_compiler_available}"
+    puts "  Refactored JIT: #{@refactored_jit_available}"
   end
 
   def create_ir_json
-    require_relative '../../../../examples/apple2/hdl/apple2'
+    require_relative '../../../../../examples/apple2/hdl/apple2'
     ir = RHDL::Apple2::Apple2.to_flat_ir
     RHDL::Codegen::IR::IRToJson.convert(ir)
   end
 
-  # Create monolithic simulator (from sim/)
+  # Create monolithic simulators (from sim/)
   def create_monolithic_interpreter
     ir_json = create_ir_json
     RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json)
@@ -38,21 +60,50 @@ RSpec.describe 'Refactored vs Monolithic IR Simulator Divergence' do
     RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json)
   end
 
-  # Create refactored simulator (from sim-refactor/)
-  # We need to load the refactored versions with different module names
-  def create_refactored_interpreter
-    # Load refactored version - it's in a different directory
-    require_relative 'ir_interpreter'
+  def create_monolithic_jit
     ir_json = create_ir_json
-    # The refactored version uses the same class name but from a different file
-    # We need to handle this carefully - for now, skip if not distinct
-    skip 'Refactored interpreter not separately loadable yet'
+    RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
+  end
+
+  # Create refactored simulators (from sim-refactor/)
+  def create_refactored_interpreter
+    ir_json = create_ir_json
+    RHDL::Codegen::IR::Refactored::IrInterpreterWrapper.new(ir_json)
   end
 
   def create_refactored_compiler
-    require_relative 'ir_compiler'
     ir_json = create_ir_json
-    skip 'Refactored compiler not separately loadable yet'
+    RHDL::Codegen::IR::Refactored::IrCompilerWrapper.new(ir_json)
+  end
+
+  def create_refactored_jit
+    ir_json = create_ir_json
+    RHDL::Codegen::IR::Refactored::IrJitWrapper.new(ir_json)
+  end
+
+  # Adapter methods to handle different APIs between monolithic and refactored
+  def sim_load_rom(sim, data)
+    if sim.respond_to?(:apple2_load_rom)
+      sim.apple2_load_rom(data)
+    else
+      sim.load_rom(data)
+    end
+  end
+
+  def sim_run_cpu_cycles(sim, n, key_data, key_ready)
+    if sim.respond_to?(:apple2_run_cpu_cycles)
+      sim.apple2_run_cpu_cycles(n, key_data, key_ready)
+    else
+      sim.run_cpu_cycles(n, key_data, key_ready)
+    end
+  end
+
+  def sim_read_ram(sim, offset, length)
+    if sim.respond_to?(:apple2_read_ram)
+      sim.apple2_read_ram(offset, length)
+    else
+      sim.read_ram(offset, length)
+    end
   end
 
   # Boot simulator through reset sequence
@@ -60,7 +111,7 @@ RSpec.describe 'Refactored vs Monolithic IR Simulator Divergence' do
     sim.poke('reset', 1)
     sim.tick
     sim.poke('reset', 0)
-    10.times { sim.apple2_run_cpu_cycles(1, 0, false) }
+    10.times { sim_run_cpu_cycles(sim, 1, 0, false) }
   end
 
   # Collect PC and opcode values for N cycles
@@ -70,7 +121,7 @@ RSpec.describe 'Refactored vs Monolithic IR Simulator Divergence' do
       pc = sim.peek('cpu__pc_reg')
       opcode = sim.peek('opcode_debug') rescue 0
       trace << { cycle: i, pc: pc, opcode: opcode }
-      sim.apple2_run_cpu_cycles(1, 0, false)
+      sim_run_cpu_cycles(sim, 1, 0, false)
     end
     trace
   end
@@ -96,286 +147,302 @@ RSpec.describe 'Refactored vs Monolithic IR Simulator Divergence' do
     divergences
   end
 
-  describe 'Interpreter vs Compiler (monolithic)' do
+  # ============================================================================
+  # Monolithic vs Refactored Interpreter Tests
+  # ============================================================================
+
+  describe 'Monolithic vs Refactored Interpreter' do
     it 'produces identical PC sequence for 1000 cycles' do
       skip 'ROM not available' unless @rom_available
-      skip 'IR Interpreter not available' unless RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
-      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+      skip 'Monolithic Interpreter not available' unless @monolithic_interpreter_available
+      skip 'Refactored Interpreter not available' unless @refactored_interpreter_available
 
-      interpreter = create_monolithic_interpreter
-      compiler = create_monolithic_compiler
+      mono = create_monolithic_interpreter
+      refac = create_refactored_interpreter
 
-      interpreter.apple2_load_rom(@rom_data)
-      compiler.apple2_load_rom(@rom_data)
+      sim_load_rom(mono, @rom_data)
+      sim_load_rom(refac, @rom_data)
 
-      boot_simulator(interpreter)
-      boot_simulator(compiler)
+      boot_simulator(mono)
+      boot_simulator(refac)
 
       num_cycles = 1000
-      interp_trace = collect_trace(interpreter, num_cycles)
-      comp_trace = collect_trace(compiler, num_cycles)
+      mono_trace = collect_trace(mono, num_cycles)
+      refac_trace = collect_trace(refac, num_cycles)
 
-      divergences = compare_traces(interp_trace, comp_trace, 'interp', 'comp')
+      divergences = compare_traces(mono_trace, refac_trace, 'mono', 'refac')
 
-      puts "\n  Monolithic Interpreter vs Compiler comparison:"
+      puts "\n  Monolithic vs Refactored Interpreter comparison:"
       puts "  Cycles compared: #{num_cycles}"
       puts "  Divergences: #{divergences.length}"
 
       if divergences.any?
         puts "  First 10 divergences:"
         divergences.first(10).each do |d|
-          puts format("    Cycle %d: interp PC=$%04X op=$%02X | comp PC=$%04X op=$%02X",
-                      d[:cycle], d[:interp_pc], d[:interp_opcode],
-                      d[:comp_pc], d[:comp_opcode])
+          mono_pc = d[:mono_pc] || 0
+          mono_opcode = d[:mono_opcode] || 0
+          refac_pc = d[:refac_pc] || 0
+          refac_opcode = d[:refac_opcode] || 0
+          puts format("    Cycle %d: mono PC=$%04X op=$%02X | refac PC=$%04X op=$%02X",
+                      d[:cycle], mono_pc, mono_opcode, refac_pc, refac_opcode)
         end
       end
 
-      # Allow some divergence due to timing differences, but require >95% match
       match_rate = 1.0 - (divergences.length.to_f / num_cycles)
       puts "  Match rate: #{(match_rate * 100).round(1)}%"
 
-      expect(match_rate).to be >= 0.95,
-        "Expected at least 95% match rate, got #{(match_rate * 100).round(1)}%"
+      expect(divergences.length).to eq(0),
+        "Expected identical behavior, got #{divergences.length} divergences"
     end
   end
 
-  describe 'Boot sequence verification' do
-    it 'both monolithic sims reach same state after boot' do
+  # ============================================================================
+  # Monolithic vs Refactored Compiler Tests
+  # ============================================================================
+
+  describe 'Monolithic vs Refactored Compiler' do
+    it 'produces identical PC sequence for 1000 cycles' do
       skip 'ROM not available' unless @rom_available
-      skip 'IR Interpreter not available' unless RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
-      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+      skip 'Monolithic Compiler not available' unless @monolithic_compiler_available
+      skip 'Refactored Compiler not available' unless @refactored_compiler_available
 
-      interpreter = create_monolithic_interpreter
-      compiler = create_monolithic_compiler
+      mono = create_monolithic_compiler
+      refac = create_refactored_compiler
 
-      interpreter.apple2_load_rom(@rom_data)
-      compiler.apple2_load_rom(@rom_data)
+      sim_load_rom(mono, @rom_data)
+      sim_load_rom(refac, @rom_data)
 
-      boot_simulator(interpreter)
-      boot_simulator(compiler)
+      boot_simulator(mono)
+      boot_simulator(refac)
 
-      # Run 100 warmup cycles
-      100.times do
-        interpreter.apple2_run_cpu_cycles(1, 0, false)
-        compiler.apple2_run_cpu_cycles(1, 0, false)
-      end
+      num_cycles = 1000
+      mono_trace = collect_trace(mono, num_cycles)
+      refac_trace = collect_trace(refac, num_cycles)
 
-      interp_pc = interpreter.peek('cpu__pc_reg')
-      comp_pc = compiler.peek('cpu__pc_reg')
+      divergences = compare_traces(mono_trace, refac_trace, 'mono', 'refac')
 
-      puts "\n  After boot + 100 cycles:"
-      puts "  Interpreter PC: $#{interp_pc.to_s(16).upcase}"
-      puts "  Compiler PC: $#{comp_pc.to_s(16).upcase}"
+      puts "\n  Monolithic vs Refactored Compiler comparison:"
+      puts "  Cycles compared: #{num_cycles}"
+      puts "  Divergences: #{divergences.length}"
 
-      # Both should be in ROM region (0xD000-0xFFFF) or valid execution area
-      expect(interp_pc).to be_between(0x0000, 0xFFFF)
-      expect(comp_pc).to be_between(0x0000, 0xFFFF)
-
-      # PCs should be close (within 256 bytes) or in same region
-      pc_diff = (interp_pc - comp_pc).abs
-      same_page = (interp_pc >> 8) == (comp_pc >> 8)
-
-      puts "  PC difference: #{pc_diff} bytes"
-      puts "  Same page: #{same_page}"
-
-      expect(pc_diff < 256 || same_page).to be(true),
-        "PCs should be close after boot"
-    end
-  end
-
-  describe 'Extended execution verification' do
-    it 'both monolithic sims execute same opcode sequence for 10K cycles' do
-      skip 'ROM not available' unless @rom_available
-      skip 'IR Interpreter not available' unless RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
-      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
-
-      interpreter = create_monolithic_interpreter
-      compiler = create_monolithic_compiler
-
-      interpreter.apple2_load_rom(@rom_data)
-      compiler.apple2_load_rom(@rom_data)
-
-      boot_simulator(interpreter)
-      boot_simulator(compiler)
-
-      # Track opcodes executed
-      num_cycles = 10_000
-      interp_opcodes = []
-      comp_opcodes = []
-
-      prev_interp_opcode = interpreter.peek('opcode_debug') rescue 0
-      prev_comp_opcode = compiler.peek('opcode_debug') rescue 0
-
-      num_cycles.times do |i|
-        interpreter.apple2_run_cpu_cycles(1, 0, false)
-        compiler.apple2_run_cpu_cycles(1, 0, false)
-
-        # Detect opcode changes (instruction boundaries)
-        interp_opcode = interpreter.peek('opcode_debug') rescue 0
-        comp_opcode = compiler.peek('opcode_debug') rescue 0
-
-        if interp_opcode != prev_interp_opcode
-          interp_pc = interpreter.peek('cpu__pc_reg')
-          interp_opcodes << { pc: interp_pc, opcode: interp_opcode }
-          prev_interp_opcode = interp_opcode
-        end
-
-        if comp_opcode != prev_comp_opcode
-          comp_pc = compiler.peek('cpu__pc_reg')
-          comp_opcodes << { pc: comp_pc, opcode: comp_opcode }
-          prev_comp_opcode = comp_opcode
+      if divergences.any?
+        puts "  First 10 divergences:"
+        divergences.first(10).each do |d|
+          mono_pc = d[:mono_pc] || 0
+          mono_opcode = d[:mono_opcode] || 0
+          refac_pc = d[:refac_pc] || 0
+          refac_opcode = d[:refac_opcode] || 0
+          puts format("    Cycle %d: mono PC=$%04X op=$%02X | refac PC=$%04X op=$%02X",
+                      d[:cycle], mono_pc, mono_opcode, refac_pc, refac_opcode)
         end
       end
 
-      puts "\n  Extended execution comparison (#{num_cycles} cycles):"
-      puts "  Interpreter instructions: #{interp_opcodes.length}"
-      puts "  Compiler instructions: #{comp_opcodes.length}"
-
-      # Find common subsequence
-      common = 0
-      comp_idx = 0
-      interp_opcodes.each do |interp|
-        while comp_idx < comp_opcodes.length
-          comp = comp_opcodes[comp_idx]
-          if interp[:opcode] == comp[:opcode]
-            common += 1
-            comp_idx += 1
-            break
-          end
-          comp_idx += 1
-        end
-      end
-
-      min_len = [interp_opcodes.length, comp_opcodes.length].min
-      match_rate = min_len > 0 ? common.to_f / min_len : 0
-
-      puts "  Common opcode subsequence: #{common}"
+      match_rate = 1.0 - (divergences.length.to_f / num_cycles)
       puts "  Match rate: #{(match_rate * 100).round(1)}%"
 
-      # Show first few opcodes from each
-      puts "  First 10 interpreter opcodes: #{interp_opcodes.first(10).map { |o| format('$%02X@%04X', o[:opcode], o[:pc]) }.join(', ')}"
-      puts "  First 10 compiler opcodes:    #{comp_opcodes.first(10).map { |o| format('$%02X@%04X', o[:opcode], o[:pc]) }.join(', ')}"
-
-      expect(match_rate).to be >= 0.80,
-        "Expected at least 80% opcode match rate, got #{(match_rate * 100).round(1)}%"
+      expect(divergences.length).to eq(0),
+        "Expected identical behavior, got #{divergences.length} divergences"
     end
   end
 
-  describe 'Memory state verification' do
-    it 'both monolithic sims have identical RAM after execution' do
+  # ============================================================================
+  # Monolithic vs Refactored JIT Tests
+  # ============================================================================
+
+  describe 'Monolithic vs Refactored JIT' do
+    it 'produces identical PC sequence for 1000 cycles' do
       skip 'ROM not available' unless @rom_available
-      skip 'IR Interpreter not available' unless RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
-      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+      skip 'Monolithic JIT not available' unless @monolithic_jit_available
+      skip 'Refactored JIT not available' unless @refactored_jit_available
 
-      interpreter = create_monolithic_interpreter
-      compiler = create_monolithic_compiler
+      mono = create_monolithic_jit
+      refac = create_refactored_jit
 
-      interpreter.apple2_load_rom(@rom_data)
-      compiler.apple2_load_rom(@rom_data)
+      sim_load_rom(mono, @rom_data)
+      sim_load_rom(refac, @rom_data)
 
-      boot_simulator(interpreter)
-      boot_simulator(compiler)
+      boot_simulator(mono)
+      boot_simulator(refac)
+
+      num_cycles = 1000
+      mono_trace = collect_trace(mono, num_cycles)
+      refac_trace = collect_trace(refac, num_cycles)
+
+      divergences = compare_traces(mono_trace, refac_trace, 'mono', 'refac')
+
+      puts "\n  Monolithic vs Refactored JIT comparison:"
+      puts "  Cycles compared: #{num_cycles}"
+      puts "  Divergences: #{divergences.length}"
+
+      if divergences.any?
+        puts "  First 10 divergences:"
+        divergences.first(10).each do |d|
+          mono_pc = d[:mono_pc] || 0
+          mono_opcode = d[:mono_opcode] || 0
+          refac_pc = d[:refac_pc] || 0
+          refac_opcode = d[:refac_opcode] || 0
+          puts format("    Cycle %d: mono PC=$%04X op=$%02X | refac PC=$%04X op=$%02X",
+                      d[:cycle], mono_pc, mono_opcode, refac_pc, refac_opcode)
+        end
+      end
+
+      match_rate = 1.0 - (divergences.length.to_f / num_cycles)
+      puts "  Match rate: #{(match_rate * 100).round(1)}%"
+
+      expect(divergences.length).to eq(0),
+        "Expected identical behavior, got #{divergences.length} divergences"
+    end
+  end
+
+  # ============================================================================
+  # All Simulators Comparison (sanity check)
+  # ============================================================================
+
+  describe 'All six simulators' do
+    it 'all produce identical PC sequence for 500 cycles' do
+      skip 'ROM not available' unless @rom_available
+      skip 'Monolithic Interpreter not available' unless @monolithic_interpreter_available
+      skip 'Monolithic Compiler not available' unless @monolithic_compiler_available
+      skip 'Monolithic JIT not available' unless @monolithic_jit_available
+      skip 'Refactored Interpreter not available' unless @refactored_interpreter_available
+      skip 'Refactored Compiler not available' unless @refactored_compiler_available
+      skip 'Refactored JIT not available' unless @refactored_jit_available
+
+      sims = {
+        'mono_interp' => create_monolithic_interpreter,
+        'mono_comp' => create_monolithic_compiler,
+        'mono_jit' => create_monolithic_jit,
+        'refac_interp' => create_refactored_interpreter,
+        'refac_comp' => create_refactored_compiler,
+        'refac_jit' => create_refactored_jit
+      }
+
+      sims.each { |_, sim| sim_load_rom(sim, @rom_data) }
+      sims.each { |_, sim| boot_simulator(sim) }
+
+      num_cycles = 500
+      traces = {}
+      sims.each { |name, sim| traces[name] = collect_trace(sim, num_cycles) }
+
+      # Compare all pairs
+      puts "\n  All six simulators comparison (#{num_cycles} cycles):"
+
+      pairs = sims.keys.combination(2).to_a
+      all_match = true
+
+      pairs.each do |name_a, name_b|
+        divergences = compare_traces(traces[name_a], traces[name_b], name_a, name_b)
+        match = divergences.empty?
+        all_match &&= match
+        status = match ? 'MATCH' : "#{divergences.length} divergences"
+        puts "    #{name_a} vs #{name_b}: #{status}"
+      end
+
+      expect(all_match).to be(true), "Not all simulator pairs produced identical traces"
+    end
+  end
+
+  # ============================================================================
+  # Extended Execution Tests (longer runs)
+  # ============================================================================
+
+  describe 'Extended execution verification', :slow do
+    it 'monolithic vs refactored interpreter for 10K cycles' do
+      skip 'ROM not available' unless @rom_available
+      skip 'Monolithic Interpreter not available' unless @monolithic_interpreter_available
+      skip 'Refactored Interpreter not available' unless @refactored_interpreter_available
+
+      mono = create_monolithic_interpreter
+      refac = create_refactored_interpreter
+
+      sim_load_rom(mono, @rom_data)
+      sim_load_rom(refac, @rom_data)
+
+      boot_simulator(mono)
+      boot_simulator(refac)
+
+      num_cycles = 10_000
+      divergence_count = 0
+      first_divergence = nil
+
+      num_cycles.times do |i|
+        mono_pc = mono.peek('cpu__pc_reg')
+        refac_pc = refac.peek('cpu__pc_reg')
+
+        if mono_pc != refac_pc
+          divergence_count += 1
+          first_divergence ||= { cycle: i, mono_pc: mono_pc, refac_pc: refac_pc }
+        end
+
+        sim_run_cpu_cycles(mono, 1, 0, false)
+        sim_run_cpu_cycles(refac, 1, 0, false)
+      end
+
+      puts "\n  Extended Interpreter comparison (#{num_cycles} cycles):"
+      puts "  Divergences: #{divergence_count}"
+
+      if first_divergence
+        puts format("  First divergence at cycle %d: mono=$%04X refac=$%04X",
+                    first_divergence[:cycle], first_divergence[:mono_pc], first_divergence[:refac_pc])
+      end
+
+      expect(divergence_count).to eq(0),
+        "Expected identical behavior, got #{divergence_count} divergences"
+    end
+  end
+
+  # ============================================================================
+  # Memory State Comparison
+  # ============================================================================
+
+  describe 'Memory state verification' do
+    it 'monolithic vs refactored have identical RAM after execution' do
+      skip 'ROM not available' unless @rom_available
+      skip 'Monolithic Interpreter not available' unless @monolithic_interpreter_available
+      skip 'Refactored Interpreter not available' unless @refactored_interpreter_available
+
+      mono = create_monolithic_interpreter
+      refac = create_refactored_interpreter
+
+      sim_load_rom(mono, @rom_data)
+      sim_load_rom(refac, @rom_data)
+
+      boot_simulator(mono)
+      boot_simulator(refac)
 
       # Run some cycles
       1000.times do
-        interpreter.apple2_run_cpu_cycles(1, 0, false)
-        compiler.apple2_run_cpu_cycles(1, 0, false)
+        sim_run_cpu_cycles(mono, 1, 0, false)
+        sim_run_cpu_cycles(refac, 1, 0, false)
       end
 
-      # Compare zero page (most important for 6502)
-      interp_zp = interpreter.apple2_read_ram(0x00, 0x100).to_a rescue []
-      comp_zp = compiler.apple2_read_ram(0x00, 0x100).to_a rescue []
+      # Compare zero page
+      mono_zp = sim_read_ram(mono, 0x00, 0x100).to_a rescue []
+      refac_zp = sim_read_ram(refac, 0x00, 0x100).to_a rescue []
 
-      if interp_zp.any? && comp_zp.any?
-        zp_diff = interp_zp.zip(comp_zp).each_with_index.count { |(a, b), _| a != b }
-        zp_match = ((256 - zp_diff).to_f / 256 * 100).round(1)
+      if mono_zp.any? && refac_zp.any?
+        zp_diff = mono_zp.zip(refac_zp).each_with_index.count { |(a, b), _| a != b }
 
         puts "\n  Zero page comparison after 1000 cycles:"
         puts "  Differences: #{zp_diff} / 256 bytes"
-        puts "  Match rate: #{zp_match}%"
 
-        expect(zp_match).to be >= 90,
-          "Expected at least 90% zero page match, got #{zp_match}%"
-      else
-        puts "\n  Zero page read not available"
+        expect(zp_diff).to eq(0),
+          "Expected identical zero page, got #{zp_diff} differences"
       end
 
       # Compare stack area
-      interp_stack = interpreter.apple2_read_ram(0x100, 0x100).to_a rescue []
-      comp_stack = compiler.apple2_read_ram(0x100, 0x100).to_a rescue []
+      mono_stack = sim_read_ram(mono, 0x100, 0x100).to_a rescue []
+      refac_stack = sim_read_ram(refac, 0x100, 0x100).to_a rescue []
 
-      if interp_stack.any? && comp_stack.any?
-        stack_diff = interp_stack.zip(comp_stack).each_with_index.count { |(a, b), _| a != b }
-        stack_match = ((256 - stack_diff).to_f / 256 * 100).round(1)
+      if mono_stack.any? && refac_stack.any?
+        stack_diff = mono_stack.zip(refac_stack).each_with_index.count { |(a, b), _| a != b }
 
         puts "  Stack comparison:"
         puts "  Differences: #{stack_diff} / 256 bytes"
-        puts "  Match rate: #{stack_match}%"
 
-        expect(stack_match).to be >= 90,
-          "Expected at least 90% stack match, got #{stack_match}%"
+        expect(stack_diff).to eq(0),
+          "Expected identical stack, got #{stack_diff} differences"
       end
-    end
-  end
-
-  describe 'Long-running verification', :slow do
-    it 'both monolithic sims stay synchronized for 100K cycles' do
-      skip 'ROM not available' unless @rom_available
-      skip 'IR Interpreter not available' unless RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
-      skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
-
-      interpreter = create_monolithic_interpreter
-      compiler = create_monolithic_compiler
-
-      interpreter.apple2_load_rom(@rom_data)
-      compiler.apple2_load_rom(@rom_data)
-
-      boot_simulator(interpreter)
-      boot_simulator(compiler)
-
-      total_cycles = 100_000
-      checkpoint_interval = 10_000
-      checkpoints = []
-
-      puts "\n  Long-running synchronization test (#{total_cycles} cycles):"
-
-      cycles_run = 0
-      while cycles_run < total_cycles
-        batch = [checkpoint_interval, total_cycles - cycles_run].min
-
-        batch.times do
-          interpreter.apple2_run_cpu_cycles(1, 0, false)
-          compiler.apple2_run_cpu_cycles(1, 0, false)
-        end
-
-        cycles_run += batch
-
-        interp_pc = interpreter.peek('cpu__pc_reg')
-        comp_pc = compiler.peek('cpu__pc_reg')
-        pc_diff = (interp_pc - comp_pc).abs
-
-        checkpoint = {
-          cycles: cycles_run,
-          interp_pc: interp_pc,
-          comp_pc: comp_pc,
-          diff: pc_diff,
-          close: pc_diff < 256 || (interp_pc >> 8) == (comp_pc >> 8)
-        }
-        checkpoints << checkpoint
-
-        status = checkpoint[:close] ? 'OK' : 'DIVERGED'
-        puts format("    %6dK: interp=$%04X comp=$%04X diff=%d %s",
-                    cycles_run / 1000, interp_pc, comp_pc, pc_diff, status)
-      end
-
-      diverged = checkpoints.reject { |c| c[:close] }
-
-      puts "\n  Summary:"
-      puts "  Checkpoints: #{checkpoints.length}"
-      puts "  Diverged: #{diverged.length}"
-
-      expect(diverged.length).to be <= (checkpoints.length * 0.1),
-        "At most 10% of checkpoints should diverge, but #{diverged.length} / #{checkpoints.length} diverged"
     end
   end
 end

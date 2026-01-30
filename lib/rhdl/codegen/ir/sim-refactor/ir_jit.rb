@@ -18,23 +18,22 @@ require_relative 'ir_interpreter'  # For IRToJson module and fallback
 module RHDL
   module Codegen
     module IR
-      # Determine library path based on platform
-      IR_JIT_EXT_DIR = File.expand_path('ir_jit/lib', __dir__)
-      IR_JIT_LIB_NAME = case RbConfig::CONFIG['host_os']
-      when /darwin/ then 'ir_jit.dylib'
-      when /mswin|mingw/ then 'ir_jit.dll'
-      else 'ir_jit.so'
-      end
-      IR_JIT_LIB_PATH = File.join(IR_JIT_EXT_DIR, IR_JIT_LIB_NAME)
+      # Refactored module contains the modularized extension architecture versions
+      module Refactored
+        # Determine library path based on platform
+        JIT_EXT_DIR = File.expand_path('ir_jit/lib', __dir__)
+        JIT_LIB_NAME = case RbConfig::CONFIG['host_os']
+        when /darwin/ then 'ir_jit.dylib'
+        when /mswin|mingw/ then 'ir_jit.dll'
+        else 'ir_jit.so'
+        end
+        JIT_LIB_PATH = File.join(JIT_EXT_DIR, JIT_LIB_NAME)
 
-      # Try to load JIT extension
-      IR_JIT_AVAILABLE = File.exist?(IR_JIT_LIB_PATH)
+        # Try to load JIT extension
+        JIT_AVAILABLE = File.exist?(JIT_LIB_PATH)
 
-      # Backwards compatibility alias
-      RTL_JIT_AVAILABLE = IR_JIT_AVAILABLE
-
-      # Wrapper class that uses Fiddle to call Rust JIT
-      class IrJitWrapper
+        # Wrapper class that uses Fiddle to call Rust JIT
+        class IrJitWrapper
         attr_reader :ir_json, :sub_cycles
 
         # @param ir_json [String] JSON representation of the IR
@@ -44,17 +43,17 @@ module RHDL
           @ir_json = ir_json
           @sub_cycles = sub_cycles.clamp(1, 14)
 
-          if IR_JIT_AVAILABLE
+          if JIT_AVAILABLE
             load_library
             create_simulator
             @backend = :jit
           elsif allow_fallback
             require_relative 'ir_interpreter'
-            @sim = IrInterpreterWrapper.new(ir_json, allow_fallback: true, sub_cycles: @sub_cycles)
+            @sim = Refactored::IrInterpreterWrapper.new(ir_json, allow_fallback: true, sub_cycles: @sub_cycles)
             @backend = @sim.native? ? :interpret : :ruby
             @fallback = true
           else
-            raise LoadError, "IR JIT library not found at: #{IR_JIT_LIB_PATH}\nRun 'rake native:build' to build it."
+            raise LoadError, "IR JIT library not found at: #{JIT_LIB_PATH}\nRun 'rake native:build' to build it."
           end
         end
 
@@ -63,7 +62,7 @@ module RHDL
         end
 
         def native?
-          IR_JIT_AVAILABLE && @backend == :jit
+          JIT_AVAILABLE && @backend == :jit
         end
 
         def backend
@@ -300,7 +299,7 @@ module RHDL
         private
 
         def load_library
-          @lib = Fiddle.dlopen(IR_JIT_LIB_PATH)
+          @lib = Fiddle.dlopen(JIT_LIB_PATH)
 
           # Core functions
           @fn_create = Fiddle::Function.new(
@@ -523,10 +522,11 @@ module RHDL
           # Set up destructor for cleanup
           @destructor = @fn_destroy
         end
-      end
+      end  # class IrJitWrapper
 
       # Backwards compatibility alias
       RtlJitWrapper = IrJitWrapper
-    end
-  end
-end
+    end  # module Refactored
+    end  # module IR
+  end  # module Codegen
+end  # module RHDL
