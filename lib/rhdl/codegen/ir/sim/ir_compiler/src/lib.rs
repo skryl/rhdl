@@ -802,6 +802,70 @@ impl IrSimulator {
         levels
     }
 
+    /// Compute which assignment indices depend (transitively) on a set of root signal indices
+    /// This is used to partition signals for partial evaluation
+    fn compute_dependent_assigns(&self, root_signal_indices: &HashSet<usize>) -> Vec<usize> {
+        let assigns = &self.ir.assigns;
+        let n = assigns.len();
+
+        // Build reverse dependency map: signal idx -> which assignments write to it
+        let mut signal_to_assigns: HashMap<usize, Vec<usize>> = HashMap::new();
+        for (i, assign) in assigns.iter().enumerate() {
+            if let Some(&idx) = self.name_to_idx.get(&assign.target) {
+                signal_to_assigns.entry(idx).or_insert_with(Vec::new).push(i);
+            }
+        }
+
+        // Track which signals are "dirty" (depend on roots)
+        let mut dirty_signals: HashSet<usize> = root_signal_indices.clone();
+        let mut dirty_assigns: HashSet<usize> = HashSet::new();
+
+        // Iterate until fixed point
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for (i, assign) in assigns.iter().enumerate() {
+                if dirty_assigns.contains(&i) {
+                    continue;
+                }
+                // Check if this assignment depends on any dirty signal
+                let deps = self.expr_dependencies(&assign.expr);
+                if deps.iter().any(|d| dirty_signals.contains(d)) {
+                    dirty_assigns.insert(i);
+                    // Mark target signal as dirty too
+                    if let Some(&idx) = self.name_to_idx.get(&assign.target) {
+                        if dirty_signals.insert(idx) {
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Return sorted assignment indices that need evaluation
+        let mut result: Vec<usize> = dirty_assigns.into_iter().collect();
+        result.sort();
+        result
+    }
+
+    /// Get the set of signal indices that are memory/ROM inputs for Game Boy
+    fn get_gb_memory_root_signals(&self) -> HashSet<usize> {
+        let mut roots = HashSet::new();
+        // ROM data
+        if self.gb_cart_do_idx > 0 { roots.insert(self.gb_cart_do_idx); }
+        // Boot ROM data
+        if self.gb_boot_do_idx > 0 { roots.insert(self.gb_boot_do_idx); }
+        // VRAM port A (CPU)
+        if self.gb_vram0_q_a_reg_idx > 0 { roots.insert(self.gb_vram0_q_a_reg_idx); }
+        // VRAM port B (PPU)
+        if self.gb_vram0_q_b_reg_idx > 0 { roots.insert(self.gb_vram0_q_b_reg_idx); }
+        // ZPRAM
+        if self.gb_zpram_q_a_idx > 0 { roots.insert(self.gb_zpram_q_a_idx); }
+        // Clock (changes between phases)
+        if self.gb_clk_sys_idx > 0 { roots.insert(self.gb_clk_sys_idx); }
+        roots
+    }
+
     fn generate_code(&self) -> String {
         let mut code = String::new();
 
@@ -847,6 +911,38 @@ impl IrSimulator {
         }
 
         code.push_str("}\n\n");
+
+        // Generate partial evaluate for memory-dependent signals only (Game Boy optimization)
+        if self.gameboy_mode {
+            let roots = self.get_gb_memory_root_signals();
+            let mem_assigns = self.compute_dependent_assigns(&roots);
+
+            code.push_str("/// Evaluate only memory/clock-dependent assignments (partial evaluation)\n");
+            code.push_str(&format!("/// {} of {} assignments ({:.1}% of circuit)\n",
+                mem_assigns.len(), self.ir.assigns.len(),
+                100.0 * mem_assigns.len() as f64 / self.ir.assigns.len().max(1) as f64));
+            code.push_str("#[inline(always)]\n");
+            code.push_str("unsafe fn evaluate_memory_inline(signals: &mut [u64]) {\n");
+
+            // Need to evaluate in topological order
+            let levels = self.compute_assignment_levels();
+            for level in &levels {
+                for &assign_idx in level {
+                    // Only include if this assignment is memory-dependent
+                    if !mem_assigns.contains(&assign_idx) {
+                        continue;
+                    }
+                    let assign = &self.ir.assigns[assign_idx];
+                    if let Some(&idx) = self.name_to_idx.get(&assign.target) {
+                        let width = self.widths.get(idx).copied().unwrap_or(64);
+                        let expr_code = self.expr_to_rust(&assign.expr);
+                        code.push_str(&format!("    signals[{}] = ({}) & {};\n", idx, expr_code, Self::mask_const(width)));
+                    }
+                }
+            }
+
+            code.push_str("}\n\n");
+        }
 
         // Generate extern "C" wrapper for evaluate (for external callers)
         code.push_str("#[no_mangle]\n");
@@ -1512,152 +1608,96 @@ impl IrSimulator {
         code.push_str("\n");
 
         code.push_str("    for _ in 0..n {\n");
-        code.push_str("        // Run one cycle: toggle clk_sys, let SpeedControl generate CE\n");
-        // Falling edge
+        code.push_str("        // === PHASE 1: Falling edge ===\n");
         code.push_str(&format!("        signals[{}] = 0; // clk_sys = 0\n", gb_clk_sys_idx));
-        code.push_str("        evaluate_inline(signals);\n");
 
-        // Handle ROM read on falling edge (cart_rd may be asserted)
-        code.push_str("        // Handle ROM read - check cart_rd and provide data\n");
-        code.push_str(&format!("        if signals[{}] != 0 {{ // cart_rd\n", gb_cart_rd_idx));
-        code.push_str(&format!("            let addr_lo = signals[{}] as usize; // ext_bus_addr (15 bits)\n", gb_ext_bus_addr_idx));
-        code.push_str(&format!("            let addr_hi = signals[{}] as usize; // ext_bus_a15\n", gb_ext_bus_a15_idx));
-        code.push_str("            let addr = (addr_hi << 15) | addr_lo;\n");
-        code.push_str("            let data = if addr < rom_len { rom[addr] } else { 0xFF };\n");
-        code.push_str(&format!("            signals[{}] = data as u64; // cart_do\n", gb_cart_do_idx));
-        code.push_str("            evaluate_inline(signals); // Re-evaluate with ROM data\n");
-        code.push_str("        }\n\n");
+        // Inject ROM data (unconditionally read, only used if cart_rd is set)
+        code.push_str("        // ROM data injection\n");
+        code.push_str(&format!("        let rom_addr = ((signals[{}] as usize) << 15) | (signals[{}] as usize);\n",
+                              gb_ext_bus_a15_idx, gb_ext_bus_addr_idx));
+        code.push_str("        let rom_data = if rom_addr < rom_len { rom[rom_addr] } else { 0xFF };\n");
+        code.push_str(&format!("        signals[{}] = rom_data as u64;\n", gb_cart_do_idx));
 
-        // Handle boot ROM read (when sel_boot_rom is active)
-        code.push_str("        // Boot ROM read - check sel_boot_rom and provide data\n");
-        code.push_str(&format!("        if signals[{}] != 0 && boot_rom_len > 0 {{ // sel_boot_rom\n", gb_sel_boot_rom_idx));
-        code.push_str(&format!("            let addr = (signals[{}] & 0xFF) as usize; // boot_rom_addr (8 bits)\n", gb_boot_rom_addr_idx));
-        code.push_str("            let data = if addr < boot_rom_len { boot_rom[addr] } else { 0xFF };\n");
-        code.push_str(&format!("            signals[{}] = data as u64; // boot_do\n", gb_boot_do_idx));
-        code.push_str("            evaluate_inline(signals); // Re-evaluate with boot ROM data\n");
-        code.push_str("        }\n\n");
+        // Inject boot ROM data
+        code.push_str("        // Boot ROM data injection\n");
+        code.push_str(&format!("        let boot_addr = (signals[{}] & 0xFF) as usize;\n", gb_boot_rom_addr_idx));
+        code.push_str("        let boot_data = if boot_addr < boot_rom_len { boot_rom[boot_addr] } else { 0xFF };\n");
+        code.push_str(&format!("        signals[{}] = boot_data as u64;\n", gb_boot_do_idx));
 
-        // Save old clock values BEFORE the rising edge (so we can detect the edge)
+        code.push_str("        evaluate_memory_inline(signals); // Partial evaluate (memory/clock only)\n\n");
+
+        // Save old clock values BEFORE the rising edge
+        code.push_str("        // === PHASE 2: Save clocks, rising edge ===\n");
         for (i, &clk) in clock_indices.iter().enumerate() {
             code.push_str(&format!("        old_clocks[{}] = signals[{}];\n", i, clk));
         }
-        // Rising edge - triggers sequential logic (including SpeedControl's clkdiv)
         code.push_str(&format!("        signals[{}] = 1; // clk_sys = 1\n", gb_clk_sys_idx));
-        code.push_str("        evaluate_inline(signals);\n");
 
-        // Handle ROM read on rising edge too
-        code.push_str("        // Handle ROM read on rising edge\n");
-        code.push_str(&format!("        if signals[{}] != 0 {{ // cart_rd\n", gb_cart_rd_idx));
-        code.push_str(&format!("            let addr_lo = signals[{}] as usize;\n", gb_ext_bus_addr_idx));
-        code.push_str(&format!("            let addr_hi = signals[{}] as usize;\n", gb_ext_bus_a15_idx));
-        code.push_str("            let addr = (addr_hi << 15) | addr_lo;\n");
-        code.push_str("            let data = if addr < rom_len { rom[addr] } else { 0xFF };\n");
-        code.push_str(&format!("            signals[{}] = data as u64;\n", gb_cart_do_idx));
-        code.push_str("            evaluate_inline(signals);\n");
-        code.push_str("        }\n\n");
+        // Re-inject ROM/boot ROM (addresses may have changed)
+        code.push_str(&format!("        let rom_addr = ((signals[{}] as usize) << 15) | (signals[{}] as usize);\n",
+                              gb_ext_bus_a15_idx, gb_ext_bus_addr_idx));
+        code.push_str("        let rom_data = if rom_addr < rom_len { rom[rom_addr] } else { 0xFF };\n");
+        code.push_str(&format!("        signals[{}] = rom_data as u64;\n", gb_cart_do_idx));
+        code.push_str(&format!("        let boot_addr = (signals[{}] & 0xFF) as usize;\n", gb_boot_rom_addr_idx));
+        code.push_str("        let boot_data = if boot_addr < boot_rom_len { boot_rom[boot_addr] } else { 0xFF };\n");
+        code.push_str(&format!("        signals[{}] = boot_data as u64;\n", gb_boot_do_idx));
 
-        // Handle boot ROM read on rising edge
-        code.push_str("        // Boot ROM read on rising edge\n");
-        code.push_str(&format!("        if signals[{}] != 0 && boot_rom_len > 0 {{ // sel_boot_rom\n", gb_sel_boot_rom_idx));
-        code.push_str(&format!("            let addr = (signals[{}] & 0xFF) as usize;\n", gb_boot_rom_addr_idx));
-        code.push_str("            let data = if addr < boot_rom_len { boot_rom[addr] } else { 0xFF };\n");
-        code.push_str(&format!("            signals[{}] = data as u64;\n", gb_boot_do_idx));
-        code.push_str("            evaluate_inline(signals);\n");
-        code.push_str("        }\n\n");
+        code.push_str("        evaluate_memory_inline(signals); // Partial evaluate (memory/clock only)\n\n");
 
-        // VRAM handling BEFORE tick - check vram_wren_cpu while ce is still high
-        code.push_str("        // VRAM write check (before tick, while ce may be high)\n");
+        // Combined VRAM + ZPRAM handling before tick
+        code.push_str("        // === PHASE 3: Memory writes/reads before tick ===\n");
+        // VRAM write
         code.push_str(&format!("        if signals[{}] != 0 {{ // vram_wren_cpu\n", gb_vram_wren_cpu_idx));
         code.push_str(&format!("            let addr = (signals[{}] & 0x1FFF) as usize;\n", gb_vram_addr_cpu_idx));
         code.push_str(&format!("            let data = (signals[{}] & 0xFF) as u8;\n", gb_cpu_do_idx));
-        code.push_str("            if addr < vram_len {\n");
-        code.push_str("                vram[addr] = data;\n");
-        code.push_str("            }\n");
-        code.push_str("        }\n\n");
-
-        // Inject VRAM data for reads (so PPU can see it)
-        code.push_str("        // VRAM read injection (before tick)\n");
-        code.push_str(&format!("        let va_cpu = (signals[{}] & 0x1FFF) as usize;\n", gb_vram_addr_cpu_idx));
-        code.push_str(&format!("        let va_ppu = (signals[{}] & 0x1FFF) as usize;\n", gb_vram_addr_ppu_idx));
-        code.push_str("        if va_cpu < vram_len {\n");
-        code.push_str(&format!("            signals[{}] = vram[va_cpu] as u64;\n", gb_vram0_q_a_reg_idx));
+        code.push_str("            if addr < vram_len { vram[addr] = data; }\n");
         code.push_str("        }\n");
-        code.push_str("        if va_ppu < vram_len {\n");
-        code.push_str(&format!("            signals[{}] = vram[va_ppu] as u64;\n", gb_vram0_q_b_reg_idx));
-        code.push_str("        }\n");
-        code.push_str("        evaluate_inline(signals);\n\n");
-
-        // ZPRAM handling BEFORE tick - check zpram_wren while ce is still high
-        code.push_str("        // ZPRAM write check (before tick)\n");
+        // ZPRAM write
         code.push_str(&format!("        if signals[{}] != 0 {{ // zpram_wren\n", gb_zpram_wren_idx));
         code.push_str(&format!("            let addr = (signals[{}] & 0x7F) as usize;\n", gb_zpram_addr_idx));
         code.push_str(&format!("            let data = (signals[{}] & 0xFF) as u8;\n", gb_cpu_do_idx));
-        code.push_str("            if addr < zpram_len {\n");
-        code.push_str("                zpram[addr] = data;\n");
-        code.push_str("            }\n");
+        code.push_str("            if addr < zpram_len { zpram[addr] = data; }\n");
         code.push_str("        }\n");
-        // Inject ZPRAM data for reads (before tick) - inject into DPRAM q_a output
-        code.push_str("        // ZPRAM read injection (before tick) into DPRAM q_a\n");
+        // VRAM read injection
+        code.push_str(&format!("        let va_cpu = (signals[{}] & 0x1FFF) as usize;\n", gb_vram_addr_cpu_idx));
+        code.push_str(&format!("        let va_ppu = (signals[{}] & 0x1FFF) as usize;\n", gb_vram_addr_ppu_idx));
+        code.push_str(&format!("        if va_cpu < vram_len {{ signals[{}] = vram[va_cpu] as u64; }}\n", gb_vram0_q_a_reg_idx));
+        code.push_str(&format!("        if va_ppu < vram_len {{ signals[{}] = vram[va_ppu] as u64; }}\n", gb_vram0_q_b_reg_idx));
+        // ZPRAM read injection
         code.push_str(&format!("        let za = (signals[{}] & 0x7F) as usize;\n", gb_zpram_addr_idx));
-        code.push_str("        if za < zpram_len {\n");
-        code.push_str(&format!("            signals[{}] = zpram[za] as u64;\n", gb_zpram_q_a_idx));
-        code.push_str("        }\n");
-        code.push_str("        evaluate_inline(signals);\n\n");
+        code.push_str(&format!("        if za < zpram_len {{ signals[{}] = zpram[za] as u64; }}\n", gb_zpram_q_a_idx));
 
-        // Inline tick logic (sample registers and apply on rising edge)
+        code.push_str("        evaluate_memory_inline(signals); // Partial evaluate (memory/clock only)\n\n");
+
+        // Tick
+        code.push_str("        // === PHASE 4: Sequential tick ===\n");
         code.push_str("        tick_gb_inline(signals, old_clocks, next_regs);\n");
-        // Evaluate again to propagate CE from SpeedControl to other components
-        code.push_str("        evaluate_inline(signals);\n");
+        code.push_str("        evaluate_inline(signals); // Full evaluate after tick (registers changed)\n\n");
 
-        // Handle ROM read after tick too
-        code.push_str("        // Handle ROM read after tick\n");
-        code.push_str(&format!("        if signals[{}] != 0 {{ // cart_rd\n", gb_cart_rd_idx));
-        code.push_str(&format!("            let addr_lo = signals[{}] as usize;\n", gb_ext_bus_addr_idx));
-        code.push_str(&format!("            let addr_hi = signals[{}] as usize;\n", gb_ext_bus_a15_idx));
-        code.push_str("            let addr = (addr_hi << 15) | addr_lo;\n");
-        code.push_str("            let data = if addr < rom_len { rom[addr] } else { 0xFF };\n");
-        code.push_str(&format!("            signals[{}] = data as u64;\n", gb_cart_do_idx));
-        code.push_str("            evaluate_inline(signals);\n");
-        code.push_str("        }\n\n");
+        // After tick: combined memory handling
+        code.push_str("        // === PHASE 5: Memory after tick ===\n");
+        // ROM injection
+        code.push_str(&format!("        let rom_addr = ((signals[{}] as usize) << 15) | (signals[{}] as usize);\n",
+                              gb_ext_bus_a15_idx, gb_ext_bus_addr_idx));
+        code.push_str("        let rom_data = if rom_addr < rom_len { rom[rom_addr] } else { 0xFF };\n");
+        code.push_str(&format!("        signals[{}] = rom_data as u64;\n", gb_cart_do_idx));
+        code.push_str(&format!("        let boot_addr = (signals[{}] & 0xFF) as usize;\n", gb_boot_rom_addr_idx));
+        code.push_str("        let boot_data = if boot_addr < boot_rom_len { boot_rom[boot_addr] } else { 0xFF };\n");
+        code.push_str(&format!("        signals[{}] = boot_data as u64;\n", gb_boot_do_idx));
+        // VRAM write + read
+        code.push_str(&format!("        let vram_addr_cpu = (signals[{}] & 0x1FFF) as usize;\n", gb_vram_addr_cpu_idx));
+        code.push_str(&format!("        let vram_addr_ppu = (signals[{}] & 0x1FFF) as usize;\n", gb_vram_addr_ppu_idx));
+        code.push_str(&format!("        if signals[{}] != 0 && vram_addr_cpu < vram_len {{ vram[vram_addr_cpu] = (signals[{}] & 0xFF) as u8; }}\n",
+                              gb_vram_wren_cpu_idx, gb_cpu_do_idx));
+        code.push_str(&format!("        if vram_addr_cpu < vram_len {{ signals[{}] = vram[vram_addr_cpu] as u64; }}\n", gb_vram0_q_a_reg_idx));
+        code.push_str(&format!("        if vram_addr_ppu < vram_len {{ signals[{}] = vram[vram_addr_ppu] as u64; }}\n", gb_vram0_q_b_reg_idx));
+        // ZPRAM write + read
+        code.push_str(&format!("        let zpram_addr = (signals[{}] & 0x7F) as usize;\n", gb_zpram_addr_idx));
+        code.push_str(&format!("        if signals[{}] != 0 && zpram_addr < zpram_len {{ zpram[zpram_addr] = (signals[{}] & 0xFF) as u8; }}\n",
+                              gb_zpram_wren_idx, gb_cpu_do_idx));
+        code.push_str(&format!("        if zpram_addr < zpram_len {{ signals[{}] = zpram[zpram_addr] as u64; }}\n", gb_zpram_q_a_idx));
 
-        // VRAM handling - inject read data into DPRAM register outputs
-        // This is done after tick so the new values are available for next cycle's behavior
-        code.push_str("        // VRAM handling - inject into DPRAM register outputs\n");
-        code.push_str(&format!("        let vram_addr_cpu = (signals[{}] & 0x1FFF) as usize; // 13-bit address\n", gb_vram_addr_cpu_idx));
-        code.push_str(&format!("        let vram_addr_ppu = (signals[{}] & 0x1FFF) as usize; // 13-bit address\n", gb_vram_addr_ppu_idx));
-        code.push_str("        // CPU VRAM write\n");
-        code.push_str(&format!("        if signals[{}] != 0 {{ // vram_wren_cpu\n", gb_vram_wren_cpu_idx));
-        code.push_str(&format!("            let data = (signals[{}] & 0xFF) as u8;\n", gb_cpu_do_idx));
-        code.push_str("            if vram_addr_cpu < vram_len {\n");
-        code.push_str("                vram[vram_addr_cpu] = data;\n");
-        code.push_str("            }\n");
-        code.push_str("        }\n");
-        code.push_str("        // Inject VRAM read data into DPRAM register outputs\n");
-        code.push_str("        // q_a_reg: CPU side (port A)\n");
-        code.push_str("        if vram_addr_cpu < vram_len {\n");
-        code.push_str(&format!("            signals[{}] = vram[vram_addr_cpu] as u64;\n", gb_vram0_q_a_reg_idx));
-        code.push_str("        }\n");
-        code.push_str("        // q_b_reg: PPU side (port B)\n");
-        code.push_str("        if vram_addr_ppu < vram_len {\n");
-        code.push_str(&format!("            signals[{}] = vram[vram_addr_ppu] as u64;\n", gb_vram0_q_b_reg_idx));
-        code.push_str("        }\n");
-        code.push_str("        evaluate_inline(signals); // Propagate VRAM data through assignments\n\n");
-
-        // ZPRAM/HRAM handling (127 bytes, $FF80-$FFFE)
-        code.push_str("        // ZPRAM/HRAM handling\n");
-        code.push_str(&format!("        let zpram_addr = (signals[{}] & 0x7F) as usize; // 7-bit address\n", gb_zpram_addr_idx));
-        code.push_str("        // CPU ZPRAM write\n");
-        code.push_str(&format!("        if signals[{}] != 0 {{ // zpram_wren\n", gb_zpram_wren_idx));
-        code.push_str(&format!("            let data = (signals[{}] & 0xFF) as u8;\n", gb_cpu_do_idx));
-        code.push_str("            if zpram_addr < zpram_len {\n");
-        code.push_str("                zpram[zpram_addr] = data;\n");
-        code.push_str("            }\n");
-        code.push_str("        }\n");
-        code.push_str("        // Inject ZPRAM read data into DPRAM q_a\n");
-        code.push_str("        if zpram_addr < zpram_len {\n");
-        code.push_str(&format!("            signals[{}] = zpram[zpram_addr] as u64;\n", gb_zpram_q_a_idx));
-        code.push_str("        }\n");
-        code.push_str("        evaluate_inline(signals); // Propagate ZPRAM data through assignments\n\n");
+        code.push_str("        evaluate_memory_inline(signals); // Partial evaluate (memory/clock only)\n\n");
 
         // LCD pixel capture logic
         code.push_str("        // LCD pixel capture\n");
