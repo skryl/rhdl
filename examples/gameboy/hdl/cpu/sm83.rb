@@ -1009,9 +1009,15 @@ module GameBoy
                       lit(1, width: 1)),
                   rd_n)
 
-      # Write strobe (active during T1-T3 when writing)
+      # Write strobe (active during T2-T3 when writing)
+      # Note: Using t_state < 3 (not < 4) because:
+      # - Sequential blocks use pre-tick t_state to compute wr_n_new
+      # - At T2: t_state_old=1, wr_n=0 (write active)
+      # - At T3: t_state_old=2, wr_n=0 (write active)
+      # - At T4: t_state_old=3, wr_n=1 (write INACTIVE - prevents wrong data after PC jump)
+      # This is critical for CALL/RST which update PC at T3 but need correct pre-jump PC for stack push
       wr_n <= mux(clken,
-                  mux((t_state >= lit(1, width: 3)) & (t_state < lit(4, width: 3)) & write_sig,
+                  mux((t_state >= lit(1, width: 3)) & (t_state < lit(3, width: 3)) & write_sig,
                       lit(0, width: 1),
                       lit(1, width: 1)),
                   wr_n)
@@ -1259,6 +1265,8 @@ module GameBoy
       # 4. RST (decrement by 2 at end of M4)
       # 5. CALL (decrement by 2 at end of M5)
       # 6. RET (increment by 2 at end of M4)
+      # 7. PUSH (decrement by 2 at end of M4)
+      # 8. POP (increment by 2 at end of M3)
       sp <= mux(clken & load_sp_wz & (t_state == lit(3, width: 3)),
                 cat(di_reg, wz[7..0]),  # LD SP,nn
             mux(clken & ld_sp_hl & (m_cycle == lit(2, width: 3)) & (t_state == lit(3, width: 3)),
@@ -1271,7 +1279,11 @@ module GameBoy
                 sp - lit(2, width: 16), # CALL: decrement SP by 2
             mux(clken & ret & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
                 sp + lit(2, width: 16), # RET: increment SP by 2
-                sp))))))
+            mux(clken & push_op & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
+                sp - lit(2, width: 16), # PUSH: decrement SP by 2
+            mux(clken & pop_op & (m_cycle == lit(3, width: 3)) & (t_state == lit(3, width: 3)),
+                sp + lit(2, width: 16), # POP: increment SP by 2
+                sp))))))))
 
       # -----------------------------------------------------------------------
       # CB Prefix Handling
