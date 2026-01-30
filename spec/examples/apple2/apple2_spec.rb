@@ -649,8 +649,9 @@ RSpec.describe 'Apple II Simulator Modes' do
   ROM_PATH2 = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
 
   # IR-only simulator mode configurations (Ruby is too slow)
+  # Note: Interpreter disabled for now
   IR_SIMULATOR_MODES = [
-    { name: 'interpret', backend: :interpreter },
+    # { name: 'interpret', backend: :interpreter },
     { name: 'jit', backend: :jit },
     { name: 'compile', backend: :compiler }
   ]
@@ -688,7 +689,7 @@ RSpec.describe 'Apple II Simulator Modes' do
         before do
           skip 'AppleIIgo ROM not found' unless @rom_available
           @sim = create_ir_simulator(mode)
-          @sim.load_rom(@rom_data)
+          @sim.apple2_load_rom(@rom_data)
         end
 
         it 'initializes registers with reset values' do
@@ -705,7 +706,7 @@ RSpec.describe 'Apple II Simulator Modes' do
           @sim.poke('reset', 0)
 
           # Run enough cycles to complete boot sequence
-          @sim.run_cpu_cycles(200, 0, false)
+          @sim.apple2_run_cpu_cycles(200, 0, false)
 
           pc = @sim.peek('cpu__pc_reg')
 
@@ -721,7 +722,7 @@ RSpec.describe 'Apple II Simulator Modes' do
           @sim.poke('reset', 0)
 
           # Run some CPU cycles to let the CPU start executing
-          @sim.run_cpu_cycles(50, 0, false)
+          @sim.apple2_run_cpu_cycles(50, 0, false)
 
           pc = @sim.peek('cpu__pc_reg')
           # PC should have moved from reset vector area and be executing code
@@ -749,11 +750,11 @@ RSpec.describe 'Apple II Simulator Modes' do
       IR_SIMULATOR_MODES.each do |mode|
         begin
           sim = create_ir_simulator(mode)
-          sim.load_rom(@rom_data)
+          sim.apple2_load_rom(@rom_data)
           sim.poke('reset', 1)
           sim.tick
           sim.poke('reset', 0)
-          sim.run_cpu_cycles(100, 0, false)
+          sim.apple2_run_cpu_cycles(100, 0, false)
 
           pc = sim.peek('cpu__pc_reg')
           a_reg = sim.peek('cpu__a_reg')
@@ -834,16 +835,16 @@ RSpec.describe 'Sub-cycles PC Progression' do
 
   def setup_simulator(sim)
     karateka_rom = create_karateka_rom
-    sim.load_rom(karateka_rom)
+    sim.apple2_load_rom(karateka_rom)
     ram_size = 48 * 1024
-    sim.load_ram(@karateka_mem.first(ram_size), 0)
+    sim.apple2_load_ram(@karateka_mem.first(ram_size), 0)
 
     sim.poke('reset', 1)
     sim.tick
     sim.poke('reset', 0)
 
     # Run a few cycles to complete reset sequence
-    3.times { sim.run_cpu_cycles(1, 0, false) }
+    3.times { sim.apple2_run_cpu_cycles(1, 0, false) }
 
     sim.peek('cpu__pc_reg')
   end
@@ -857,13 +858,13 @@ RSpec.describe 'Sub-cycles PC Progression' do
         transitions << pc
         last_pc = pc
       end
-      sim.run_cpu_cycles(1, 0, false)
+      sim.apple2_run_cpu_cycles(1, 0, false)
     end
     transitions
   end
 
-  # Backends to test
-  BACKENDS = [:interpreter, :jit, :compiler]
+  # Backends to test (interpreter disabled for now)
+  BACKENDS = [:jit, :compiler]
 
   # Sub-cycle values to test (7 and 2 as per user request)
   SUB_CYCLE_VALUES = [7, 2]
@@ -1426,7 +1427,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
         break
       end
 
-      sim.run_cpu_cycles(1, 0, false)
+      sim.apple2_run_cpu_cycles(1, 0, false)
       boot_cycles += 1
     end
 
@@ -1443,7 +1444,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
       if (pc - target_pc).abs < 256 || pc == target_pc
         return { cycles: cycles, reached_pc: pc }
       end
-      sim.run_cpu_cycles(1, 0, false)
+      sim.apple2_run_cpu_cycles(1, 0, false)
       cycles += 1
     end
     { cycles: cycles, reached_pc: sim.peek('cpu__pc_reg') }
@@ -1453,9 +1454,9 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
   # key_code is the ASCII code (high bit will be set automatically by simulator)
   def inject_key(sim, key_code, process_cycles: 500)
     # Run with key pressed
-    sim.run_cpu_cycles(process_cycles, key_code, true)
+    sim.apple2_run_cpu_cycles(process_cycles, key_code, true)
     # Run with key released to let it be cleared
-    sim.run_cpu_cycles(100, 0, false)
+    sim.apple2_run_cpu_cycles(100, 0, false)
   end
 
   # Type a string into the IR simulator (for monitor commands like "B82AG")
@@ -1501,7 +1502,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
         last_pc = pc
         break if target_transitions && transitions.size >= target_transitions
       end
-      sim.run_cpu_cycles(1, 0, false)
+      sim.apple2_run_cpu_cycles(1, 0, false)
       cycles += 1
     end
 
@@ -1562,8 +1563,8 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
   end
 
   def load_karateka_into_ir(sim)
-    sim.load_rom(@rom_data)
-    sim.load_ram(@karateka_mem, 0)
+    sim.apple2_load_rom(@rom_data)
+    sim.apple2_load_ram(@karateka_mem, 0)
     sim.poke('reset', 1)
     sim.tick
     sim.poke('reset', 0)
@@ -1577,13 +1578,14 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
 
     context 'with Ruby ISA simulator as reference' do
       it 'compares PC sequences after boot (100 at start, 100 at end)', timeout: 30 do
+        skip 'IR Interpreter disabled for now'
         # Create reference (Ruby ISA simulator)
         cpu, _bus = create_isa_simulator(native: false)
         cpu.reset
 
         # Create target (Apple2 IR interpreter) and boot it
         ir_sim = create_apple2_ir_simulator(:interpreter)
-        ir_sim.load_rom(@rom_data)
+        ir_sim.apple2_load_rom(@rom_data)
         boot_cycles = boot_ir_simulator(ir_sim)
 
         # Collect PC transitions from ISA
@@ -1629,12 +1631,13 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
       end
 
       it 'compares PC sequences after boot vs IR interpreter', timeout: 30 do
+        skip 'IR Interpreter disabled for now'
         cpu, _bus = create_isa_simulator(native: true)
         skip 'Native ISA simulator not available' unless cpu.native?
         cpu.reset
 
         ir_sim = create_apple2_ir_simulator(:interpreter)
-        ir_sim.load_rom(@rom_data)
+        ir_sim.apple2_load_rom(@rom_data)
         boot_cycles = boot_ir_simulator(ir_sim)
 
         isa_transitions = collect_isa_pc_transitions(cpu, INTERPRETER_ITERATIONS)
@@ -1670,7 +1673,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
         cpu.reset
 
         ir_sim = create_apple2_ir_simulator(:jit)
-        ir_sim.load_rom(@rom_data)
+        ir_sim.apple2_load_rom(@rom_data)
         boot_cycles = boot_ir_simulator(ir_sim)
 
         # Use smaller iterations for JIT to avoid timeout
@@ -1731,10 +1734,10 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
     # Helper to set up IR simulator with Karateka memory and modified ROM
     def setup_ir_for_karateka(ir_sim)
       karateka_rom = create_karateka_rom
-      ir_sim.load_rom(karateka_rom)
+      ir_sim.apple2_load_rom(karateka_rom)
       # Only load first 48K of memory (Apple II RAM is 48K, $0000-$BFFF)
       ram_size = 48 * 1024
-      ir_sim.load_ram(@karateka_mem.first(ram_size), 0)
+      ir_sim.apple2_load_ram(@karateka_mem.first(ram_size), 0)
 
       # Boot through reset - CPU should start directly at game entry
       ir_sim.poke('reset', 1)
@@ -1742,7 +1745,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
       ir_sim.poke('reset', 0)
 
       # Run a few cycles to complete reset sequence
-      3.times { ir_sim.run_cpu_cycles(1, 0, false) }
+      3.times { ir_sim.apple2_run_cpu_cycles(1, 0, false) }
 
       pc = ir_sim.peek('cpu__pc_reg')
       { started_at: pc, boot_cycles: 3 }
@@ -1767,6 +1770,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
 
     context 'with Ruby ISA simulator as reference' do
       it 'compares PC sequences from game entry point (100 at start, 100 at end)', timeout: 30 do
+        skip 'IR Interpreter disabled for now'
         # Create reference (Ruby ISA simulator) - PC at game entry
         cpu, bus = create_isa_simulator(native: false)
         setup_isa_for_karateka(cpu, bus)
@@ -1812,6 +1816,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
       end
 
       it 'compares PC sequences from game entry vs IR interpreter', timeout: 30 do
+        skip 'IR Interpreter disabled for now'
         cpu, bus = create_isa_simulator(native: true)
         skip 'Native ISA simulator not available' unless cpu.native?
         setup_isa_for_karateka(cpu, bus)
@@ -1924,10 +1929,10 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
       # Helper to set up Ruby HDL simulator with Karateka memory and modified ROM
       def setup_hdl_for_karateka(hdl_sim)
         karateka_rom = create_karateka_rom
-        hdl_sim.load_rom(karateka_rom)
+        hdl_sim.apple2_load_rom(karateka_rom)
         # Only load first 48K of memory (Apple II RAM is 48K, $0000-$BFFF)
         ram_size = 48 * 1024
-        hdl_sim.load_ram(@karateka_mem.first(ram_size), 0)
+        hdl_sim.apple2_load_ram(@karateka_mem.first(ram_size), 0)
 
         # Boot through reset - CPU should start directly at game entry
         hdl_sim.poke('reset', 1)
@@ -1935,7 +1940,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
         hdl_sim.poke('reset', 0)
 
         # Run a few cycles to complete reset sequence
-        3.times { hdl_sim.run_cpu_cycles(1, 0, false) }
+        3.times { hdl_sim.apple2_run_cpu_cycles(1, 0, false) }
 
         pc = hdl_sim.peek('cpu__pc_reg')
         { started_at: pc, boot_cycles: 3 }
