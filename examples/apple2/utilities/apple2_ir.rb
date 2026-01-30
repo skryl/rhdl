@@ -181,7 +181,7 @@ module RHDL
 
         if @use_batched
           # Also load into Rust memory for simulation
-          @sim.load_rom(bytes)
+          @sim.apple2_load_rom(bytes)
         end
       end
 
@@ -190,7 +190,7 @@ module RHDL
 
         if @use_batched
           # Load directly into Rust memory
-          @sim.load_ram(bytes, base_addr)
+          @sim.apple2_load_ram(bytes, base_addr)
         else
           # Fallback: store locally
           @ram ||= Array.new(48 * 1024, 0)
@@ -224,9 +224,9 @@ module RHDL
         if @use_batched
           # Use batched reset sequence
           poke_input('reset', 1)
-          @sim.run_cpu_cycles(1, 0, false)
+          @sim.apple2_run_cpu_cycles(1, 0, false)
           poke_input('reset', 0)
-          @sim.run_cpu_cycles(10, 0, false)
+          @sim.apple2_run_cpu_cycles(10, 0, false)
         else
           poke_input('reset', 1)
           run_14m_cycles(14)
@@ -261,7 +261,7 @@ module RHDL
           # PS2 protocol is not fully simulated
         end
 
-        result = @sim.run_cpu_cycles(steps, key_data, key_ready)
+        result = @sim.apple2_run_cpu_cycles(steps, key_data, key_ready)
 
         @cycles += result[:cycles_run]
         @text_page_dirty = true if result[:text_dirty]
@@ -366,7 +366,7 @@ module RHDL
         result = []
         24.times do |row|
           base = text_line_address(row)
-          line_data = @sim.read_ram(base, 40)
+          line_data = @sim.apple2_read_ram(base, 40)
           result << line_data.to_a
         end
         result
@@ -413,7 +413,7 @@ module RHDL
         HIRES_HEIGHT.times do |row|
           line = []
           line_addr = hires_line_address(row, HIRES_PAGE1_START)
-          line_bytes = @sim.read_ram(line_addr, HIRES_BYTES_PER_LINE).to_a
+          line_bytes = @sim.apple2_read_ram(line_addr, HIRES_BYTES_PER_LINE).to_a
 
           line_bytes.each do |byte|
             7.times do |bit|
@@ -506,7 +506,7 @@ module RHDL
 
         # Read hi-res page data from Rust backend
         # The hi-res page is 8KB at $2000-$3FFF
-        hires_data = @sim.read_ram(HIRES_PAGE1_START, HIRES_PAGE1_END - HIRES_PAGE1_START + 1).to_a
+        hires_data = @sim.apple2_read_ram(HIRES_PAGE1_START, HIRES_PAGE1_END - HIRES_PAGE1_START + 1).to_a
         hires_data.each_with_index { |b, i| hires_ram[HIRES_PAGE1_START + i] = b }
 
         renderer = ColorRenderer.new(chars_wide: chars_wide)
@@ -608,7 +608,7 @@ module RHDL
 
         # RAM addresses use batched Rust backend when available
         if @use_batched
-          data = @sim.read_ram(addr, 1)
+          data = @sim.apple2_read_ram(addr, 1)
           data[0] || 0
         else
           @ram ||= Array.new(48 * 1024, 0)
@@ -618,7 +618,7 @@ module RHDL
 
       def write(addr, value)
         if @use_batched
-          @sim.write_ram(addr, [value & 0xFF])
+          @sim.apple2_write_ram(addr, [value & 0xFF])
         else
           @ram ||= Array.new(48 * 1024, 0)
           if addr < @ram.size

@@ -50,13 +50,13 @@ def create_ir_compiler(rom_data, karateka_mem)
   sim = RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json, sub_cycles: 14)
 
   karateka_rom = create_karateka_rom(rom_data)
-  sim.load_rom(karateka_rom)
-  sim.load_ram(karateka_mem.first(48 * 1024), 0)
+  sim.apple2_load_rom(karateka_rom)
+  sim.apple2_load_ram(karateka_mem.first(48 * 1024), 0)
 
   sim.poke('reset', 1)
   sim.tick
   sim.poke('reset', 0)
-  3.times { sim.run_cpu_cycles(1, 0, false) }
+  3.times { sim.apple2_run_cpu_cycles(1, 0, false) }
 
   sim
 end
@@ -71,7 +71,7 @@ end
 
 def hires_checksum_ir(sim)
   checksum = 0
-  data = sim.read_ram(0x2000, 0x2000).to_a
+  data = sim.apple2_read_ram(0x2000, 0x2000).to_a
   data.each { |b| checksum = (checksum + b) & 0xFFFFFFFF }
   checksum
 end
@@ -86,7 +86,7 @@ end
 
 def text_checksum_ir(sim)
   checksum = 0
-  data = sim.read_ram(0x0400, 0x400).to_a
+  data = sim.apple2_read_ram(0x0400, 0x400).to_a
   data.each { |b| checksum = (checksum + b) & 0xFFFFFFFF }
   checksum
 end
@@ -136,7 +136,7 @@ while cycles_run < TOTAL_CYCLES
   end
 
   # Run IR
-  ir_sim.run_cpu_cycles(batch_size, 0, false)
+  ir_sim.apple2_run_cpu_cycles(batch_size, 0, false)
 
   cycles_run += batch_size
 
