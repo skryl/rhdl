@@ -125,26 +125,29 @@ module MOS6502
 
     # Run a single clock cycle
     def clock_cycle
-      # Falling edge
+      # Falling edge - state transitions happen here in negedge-clocked design
       verilator_poke('clk', 0)
       verilator_eval
 
-      # Memory read
-      addr = verilator_peek('addr')
-      rw = verilator_peek('rw')
-      if rw == 1  # Read
-        verilator_poke('data_in', @memory[addr] || 0)
-      end
-      verilator_eval
-
-      # Rising edge
+      # Rising edge - typically where state transitions happen
       verilator_poke('clk', 1)
       verilator_eval
 
-      # Memory write
-      if rw == 0  # Write
+      # After rising edge, combinational logic settles with new state
+      # Now read addr/rw which should reflect current state
+      addr = verilator_peek('addr')
+      rw = verilator_peek('rw')
+
+      # Memory bridging - read or write based on rw signal
+      if rw == 1  # Read
+        data_val = @memory[addr] || 0
+        verilator_poke('data_in', data_val)
+        verilator_eval  # Let CPU see the data
+      else  # Write
         data_out = verilator_peek('data_out')
         @memory[addr] = data_out & 0xFF
+        # Also update C++ memory so subsequent reads see the write
+        verilator_write_memory(addr, data_out & 0xFF)
       end
 
       @cycle_count += 1
@@ -247,6 +250,33 @@ module MOS6502
              a, x, y, sp, pc, p, flags, @cycle_count)
     end
 
+    # Run N instructions using fast C++ batch execution
+    # Returns array of [pc, opcode, sp] tuples
+    def run_instructions_with_opcodes(n)
+      return [] unless @sim_ctx && @sim_run_instructions_fn
+
+      # Allocate buffers for results
+      # Each opcode is packed as: (pc << 16) | (opcode << 8) | sp
+      opcodes_buf = Fiddle::Pointer.malloc(n * 8)  # unsigned long = 8 bytes
+      halted_buf = Fiddle::Pointer.malloc(4)       # unsigned int = 4 bytes
+
+      count = @sim_run_instructions_fn.call(@sim_ctx, n, opcodes_buf, n, halted_buf)
+      @halted = halted_buf.to_s(4).unpack1('L') != 0
+
+      # Unpack results
+      results = []
+      raw = opcodes_buf.to_s(count * 8)
+      count.times do |i|
+        packed = raw[i * 8, 8].unpack1('Q')
+        pc = (packed >> 16) & 0xFFFF
+        opcode = (packed >> 8) & 0xFF
+        sp = packed & 0xFF
+        results << [pc, opcode, sp]
+      end
+
+      results
+    end
+
     private
 
     def check_verilator_available!
@@ -338,6 +368,7 @@ module MOS6502
         unsigned char sim_read_memory(void* sim, unsigned int addr);
         void sim_run_cycles(void* sim, unsigned int n_cycles, unsigned int* halted_out);
         void sim_load_memory(void* sim, const unsigned char* data, unsigned int offset, unsigned int len);
+        unsigned int sim_run_instructions_with_opcodes(void* sim, unsigned int n, unsigned long* opcodes_out, unsigned int capacity, unsigned int* halted_out);
 
         #ifdef __cplusplus
         }
@@ -543,6 +574,61 @@ module MOS6502
             }
         }
 
+        // Run until N instructions complete, capturing (pc, opcode, sp) for each
+        // Each opcode_tuple is packed as: (pc << 16) | (opcode << 8) | sp
+        // STATE_DECODE = 0x02
+        unsigned int sim_run_instructions_with_opcodes(void* sim, unsigned int n, unsigned long* opcodes_out, unsigned int capacity, unsigned int* halted_out) {
+            SimContext* ctx = static_cast<SimContext*>(sim);
+            *halted_out = 0;
+            unsigned int instruction_count = 0;
+            unsigned int max_cycles = n * 10;  // Safety limit
+            unsigned int cycles = 0;
+            unsigned int last_state = ctx->dut->state;
+            const unsigned int STATE_DECODE = 0x02;
+
+            while (instruction_count < n && cycles < max_cycles) {
+                // Falling edge
+                ctx->dut->clk = 0;
+                ctx->dut->eval();
+
+                // Rising edge - state transitions happen here
+                ctx->dut->clk = 1;
+                ctx->dut->eval();
+                cycles++;
+
+                // Memory bridging AFTER rising edge - combinational logic has settled
+                // and addr/rw now reflect the current state's control signals
+                unsigned int addr = ctx->dut->addr;
+                unsigned int rw = ctx->dut->rw;
+                if (rw == 1) {  // Read
+                    ctx->dut->data_in = ctx->memory[addr];
+                    ctx->dut->eval();  // Let CPU see the data
+                } else {  // Write
+                    ctx->memory[addr] = ctx->dut->data_out & 0xFF;
+                }
+
+                // Check for state transition to DECODE
+                unsigned int current_state = ctx->dut->state;
+                if (current_state == STATE_DECODE && last_state != STATE_DECODE) {
+                    unsigned int opcode = ctx->dut->opcode & 0xFF;
+                    unsigned int pc = (ctx->dut->reg_pc - 1) & 0xFFFF;  // PC points past opcode
+                    unsigned int sp = ctx->dut->reg_sp & 0xFF;
+                    if (instruction_count < capacity) {
+                        opcodes_out[instruction_count] = ((unsigned long)pc << 16) | ((unsigned long)opcode << 8) | sp;
+                    }
+                    instruction_count++;
+                }
+                last_state = current_state;
+
+                // Check halted
+                if (ctx->dut->halted) {
+                    *halted_out = 1;
+                    break;
+                }
+            }
+            return instruction_count;
+        }
+
         } // extern "C"
       CPP
     end
@@ -705,6 +791,12 @@ module MOS6502
         @lib['sim_load_memory'],
         [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_INT],
         Fiddle::TYPE_VOID
+      )
+
+      @sim_run_instructions_fn = Fiddle::Function.new(
+        @lib['sim_run_instructions_with_opcodes'],
+        [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP],
+        Fiddle::TYPE_INT
       )
 
       # Create simulation context

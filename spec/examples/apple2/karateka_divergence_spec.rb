@@ -89,13 +89,13 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     sim = RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json, sub_cycles: 14)
 
     karateka_rom = create_karateka_rom
-    sim.load_rom(karateka_rom)
-    sim.load_ram(@karateka_mem.first(48 * 1024), 0)
+    sim.apple2_load_rom(karateka_rom)
+    sim.apple2_load_ram(@karateka_mem.first(48 * 1024), 0)
 
     sim.poke('reset', 1)
     sim.tick
     sim.poke('reset', 0)
-    3.times { sim.run_cpu_cycles(1, 0, false) }
+    3.times { sim.apple2_run_cpu_cycles(1, 0, false) }
 
     # Initialize HIRES soft switches
     sim.poke('soft_switches', 8)
@@ -313,7 +313,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   end
 
   def decode_hires_ir(sim, base_addr = 0x2000)
-    ram = sim.read_ram(base_addr, 0x2000).to_a
+    ram = sim.apple2_read_ram(base_addr, 0x2000).to_a
     bitmap = []
     192.times do |row|
       line = []
@@ -341,7 +341,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
   def text_checksum_ir(sim)
     checksum = 0
-    sim.read_ram(0x0400, 0x400).to_a.each { |b| checksum = (checksum + b) & 0xFFFFFFFF }
+    sim.apple2_read_ram(0x0400, 0x400).to_a.each { |b| checksum = (checksum + b) & 0xFFFFFFFF }
     checksum
   end
 
@@ -447,7 +447,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       # Run IR cycles, step ISA at instruction boundaries
       cycles_to_run.times do
         # Run IR one cycle
-        ir_sim.run_cpu_cycles(1, 0, false)
+        ir_sim.apple2_run_cpu_cycles(1, 0, false)
 
         # Check for IR instruction boundary (opcode changed)
         ir_opcode = ir_sim.peek('opcode_debug')
@@ -634,7 +634,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       end
 
       # IR: cycle-based
-      ir_sim.run_cpu_cycles(cycles_to_run, 0, false)
+      ir_sim.apple2_run_cpu_cycles(cycles_to_run, 0, false)
 
       # Verilator: step-based (1 step = 1 CPU cycle = 14 sub-cycles)
       verilator_runner.run_steps(cycles_to_run)
@@ -810,7 +810,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       while warmup_run < START_CYCLES
         batch = [warmup_batch, START_CYCLES - warmup_run].min
         batch.times { isa_cpu.step unless isa_cpu.halted? }
-        ir_sim.run_cpu_cycles(batch, 0, false)
+        ir_sim.apple2_run_cpu_cycles(batch, 0, false)
         verilator_sim&.run_steps(batch)
         warmup_run += batch
 
@@ -865,7 +865,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       end
 
       # Run IR
-      ir_sim.run_cpu_cycles(batch_size, 0, false)
+      ir_sim.apple2_run_cpu_cycles(batch_size, 0, false)
 
       # Run Verilator
       verilator_sim&.run_steps(batch_size)
