@@ -183,6 +183,10 @@ struct IrSimulator {
     /// Number of sub-cycles per CPU cycle (default: 14 for full accuracy)
     sub_cycles: usize,
 
+    // Apple II mode: has clk_14m, ram_do, k signals
+    /// True if this is an Apple II IR
+    apple2_mode: bool,
+
     // MOS6502 CPU-only mode: memory bridging internalized
     /// True if this is a MOS6502 CPU IR (has addr, data_in, data_out, rw signals)
     mos6502_mode: bool,
@@ -401,6 +405,11 @@ impl IrSimulator {
             && name_to_idx.contains_key("rw")
             && name_to_idx.contains_key("clk");
 
+        // Detect Apple II mode (has clk_14m, ram_do, k signals)
+        let apple2_mode = name_to_idx.contains_key("clk_14m")
+            && name_to_idx.contains_key("ram_do")
+            && name_to_idx.contains_key("k");
+
         // Detect Game Boy mode (has lcd_clkena, lcd_data_gb signals)
         let gb_clk_sys_idx = *name_to_idx.get("clk_sys").unwrap_or(&0);
         let gb_ce_idx = *name_to_idx.get("ce").unwrap_or(&0);
@@ -501,6 +510,7 @@ impl IrSimulator {
             prev_speaker: 0,
             cpu_addr_idx,
             sub_cycles: sub_cycles.max(1).min(14),  // Clamp to 1-14
+            apple2_mode,
             mos6502_mode,
             mos6502_memory: vec![0u8; 64 * 1024],
             mos6502_rom_mask: vec![false; 64 * 1024],
@@ -866,6 +876,18 @@ impl IrSimulator {
         roots
     }
 
+    /// Get the set of signal indices that are memory/clock inputs for Apple II
+    fn get_apple2_memory_root_signals(&self) -> HashSet<usize> {
+        let mut roots = HashSet::new();
+        // RAM data input (injected from RAM/ROM)
+        if self.ram_do_idx > 0 { roots.insert(self.ram_do_idx); }
+        // Keyboard data
+        if self.k_idx > 0 { roots.insert(self.k_idx); }
+        // Clock
+        if self.clk_idx > 0 { roots.insert(self.clk_idx); }
+        roots
+    }
+
     fn generate_code(&self) -> String {
         let mut code = String::new();
 
@@ -923,6 +945,38 @@ impl IrSimulator {
                 100.0 * mem_assigns.len() as f64 / self.ir.assigns.len().max(1) as f64));
             code.push_str("#[inline(always)]\n");
             code.push_str("unsafe fn evaluate_memory_inline(signals: &mut [u64]) {\n");
+
+            // Need to evaluate in topological order
+            let levels = self.compute_assignment_levels();
+            for level in &levels {
+                for &assign_idx in level {
+                    // Only include if this assignment is memory-dependent
+                    if !mem_assigns.contains(&assign_idx) {
+                        continue;
+                    }
+                    let assign = &self.ir.assigns[assign_idx];
+                    if let Some(&idx) = self.name_to_idx.get(&assign.target) {
+                        let width = self.widths.get(idx).copied().unwrap_or(64);
+                        let expr_code = self.expr_to_rust(&assign.expr);
+                        code.push_str(&format!("    signals[{}] = ({}) & {};\n", idx, expr_code, Self::mask_const(width)));
+                    }
+                }
+            }
+
+            code.push_str("}\n\n");
+        }
+
+        // Generate partial evaluate for Apple II (memory/clock-dependent signals only)
+        if self.apple2_mode {
+            let roots = self.get_apple2_memory_root_signals();
+            let mem_assigns = self.compute_dependent_assigns(&roots);
+
+            code.push_str("/// Evaluate only memory/clock-dependent assignments for Apple II (partial evaluation)\n");
+            code.push_str(&format!("/// {} of {} assignments ({:.1}% of circuit)\n",
+                mem_assigns.len(), self.ir.assigns.len(),
+                100.0 * mem_assigns.len() as f64 / self.ir.assigns.len().max(1) as f64));
+            code.push_str("#[inline(always)]\n");
+            code.push_str("unsafe fn evaluate_apple2_partial_inline(signals: &mut [u64]) {\n");
 
             // Need to evaluate in topological order
             let levels = self.compute_assignment_levels();
