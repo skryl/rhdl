@@ -362,8 +362,8 @@ module RHDL
 
       def cpu_state
         {
-          pc: safe_peek('pc_debug'),
-          a: safe_peek('a_debug'),
+          pc: safe_peek('gb_core__cpu__pc'),
+          a: safe_peek('gb_core__cpu__acc'),
           f: 0,
           cycles: @cycles,
           halted: @halted,

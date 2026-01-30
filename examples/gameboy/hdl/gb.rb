@@ -385,6 +385,11 @@ module GameBoy
       # Boot ROM address (lower 8 bits for DMG 256-byte boot ROM)
       boot_rom_addr <= cpu_addr[7..0]
 
+      # Boot ROM data output - placeholder for IR export
+      # The actual boot ROM data is injected by the native Rust simulator
+      # which reads from gb_boot_rom[] and writes to this signal
+      boot_do <= lit(0xFF, width: 8)
+
       # CPU clock enable (HDMA can stop CPU on GBC)
       cpu_clken <= ~(is_gbc & hdma_active & cpu_rd_n & cpu_wr_n) & ce
 
