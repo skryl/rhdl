@@ -18,23 +18,22 @@ require_relative 'ir_interpreter'  # For IRToJson module
 module RHDL
   module Codegen
     module IR
-      # Determine library path based on platform
-      IR_COMPILER_EXT_DIR = File.expand_path('ir_compiler/lib', __dir__)
-      IR_COMPILER_LIB_NAME = case RbConfig::CONFIG['host_os']
-      when /darwin/ then 'ir_compiler.dylib'
-      when /mswin|mingw/ then 'ir_compiler.dll'
-      else 'ir_compiler.so'
-      end
-      IR_COMPILER_LIB_PATH = File.join(IR_COMPILER_EXT_DIR, IR_COMPILER_LIB_NAME)
+      # Refactored module contains the modularized extension architecture versions
+      module Refactored
+        # Determine library path based on platform
+        COMPILER_EXT_DIR = File.expand_path('ir_compiler/lib', __dir__)
+        COMPILER_LIB_NAME = case RbConfig::CONFIG['host_os']
+        when /darwin/ then 'ir_compiler.dylib'
+        when /mswin|mingw/ then 'ir_compiler.dll'
+        else 'ir_compiler.so'
+        end
+        COMPILER_LIB_PATH = File.join(COMPILER_EXT_DIR, COMPILER_LIB_NAME)
 
-      # Try to load compiler extension
-      IR_COMPILER_AVAILABLE = File.exist?(IR_COMPILER_LIB_PATH)
+        # Try to load compiler extension
+        COMPILER_AVAILABLE = File.exist?(COMPILER_LIB_PATH)
 
-      # Backwards compatibility alias
-      RTL_COMPILER_AVAILABLE = IR_COMPILER_AVAILABLE
-
-      # Wrapper class that uses Fiddle to call Rust IR Compiler
-      class IrCompilerWrapper
+        # Wrapper class that uses Fiddle to call Rust IR Compiler
+        class IrCompilerWrapper
         attr_reader :ir_json, :sub_cycles
 
         # @param ir_json [String] JSON representation of the IR
@@ -43,8 +42,8 @@ module RHDL
           @ir_json = ir_json
           @sub_cycles = sub_cycles.clamp(1, 14)
 
-          unless IR_COMPILER_AVAILABLE
-            raise LoadError, "IR Compiler library not found at: #{IR_COMPILER_LIB_PATH}\nRun 'rake native:build' to build it."
+          unless COMPILER_AVAILABLE
+            raise LoadError, "IR Compiler library not found at: #{COMPILER_LIB_PATH}\nRun 'rake native:build' to build it."
           end
 
           load_library
@@ -247,7 +246,7 @@ module RHDL
         private
 
         def load_library
-          @lib = Fiddle.dlopen(IR_COMPILER_LIB_PATH)
+          @lib = Fiddle.dlopen(COMPILER_LIB_PATH)
 
           # Core functions
           @fn_create = Fiddle::Function.new(
@@ -464,10 +463,11 @@ module RHDL
           # Set up destructor for cleanup (called explicitly or on GC)
           @destructor = @fn_destroy
         end
-      end
+      end  # class IrCompilerWrapper
 
       # Backwards compatibility alias
       RtlCompilerWrapper = IrCompilerWrapper
-    end
-  end
-end
+    end  # module Refactored
+    end  # module IR
+  end  # module Codegen
+end  # module RHDL
