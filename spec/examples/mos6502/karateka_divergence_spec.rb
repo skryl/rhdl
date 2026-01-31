@@ -173,6 +173,11 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
       @runner.run_steps(n)
     end
 
+    # Run instructions until n cycles have elapsed (matches ISA run_cycles semantics)
+    def run_cycles(n)
+      @runner.run_cycles(n)
+    end
+
     def read_memory(addr)
       # Use Rust memory when available for native backends
       use_rust_memory = @runner.instance_variable_get(:@use_rust_memory)
@@ -943,9 +948,9 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
       t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       isa_time += (t1 - t0)
 
-      # Run IR chunk with timing (run_steps also runs clock cycles)
+      # Run IR chunk with timing (run_cycles runs instructions like ISA)
       t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      ir.run_steps(chunk_size)
+      ir.run_cycles(chunk_size)
       t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       ir_time += (t1 - t0)
 
