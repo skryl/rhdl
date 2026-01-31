@@ -92,7 +92,7 @@ RSpec.describe 'GameBoy Integration' do
 
       it 'tracks screen state' do
         runner.run_steps(100)
-        expect(runner.screen_dirty?).to be_in([true, false])
+        expect([true, false]).to include(runner.screen_dirty?)
         runner.clear_screen_dirty
         expect(runner.screen_dirty?).to eq(false)
       end
