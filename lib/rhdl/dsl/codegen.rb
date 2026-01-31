@@ -113,6 +113,8 @@ module RHDL
           all_assigns = []
           all_processes = []
           all_memories = []
+          all_write_ports = []
+          all_sync_read_ports = []
 
           # Get this component's IR
           ir = to_ir(top_name: name)
@@ -158,6 +160,16 @@ module RHDL
             )
           end
 
+          # Add this component's write_ports with prefix
+          ir.write_ports&.each do |wp|
+            all_write_ports << prefix_write_port(wp, prefix)
+          end
+
+          # Add this component's sync_read_ports with prefix
+          ir.sync_read_ports&.each do |rp|
+            all_sync_read_ports << prefix_sync_read_port(rp, prefix)
+          end
+
           # Recursively flatten each instance
           _instance_defs.each do |inst_def|
             inst_name = inst_def[:name]
@@ -174,6 +186,8 @@ module RHDL
               all_assigns.concat(sub_ir.assigns)
               all_processes.concat(sub_ir.processes)
               all_memories.concat(sub_ir.memories) if sub_ir.memories
+              all_write_ports.concat(sub_ir.write_ports) if sub_ir.write_ports
+              all_sync_read_ports.concat(sub_ir.sync_read_ports) if sub_ir.sync_read_ports
 
               # Create assignments for port connections
               inst_def[:connections].each do |port_name, parent_signal|
@@ -216,7 +230,8 @@ module RHDL
             processes: all_processes,
             instances: [],  # Flattened - no instances
             memories: all_memories,
-            write_ports: ir.write_ports,
+            write_ports: all_write_ports,
+            sync_read_ports: all_sync_read_ports,
             parameters: ir.parameters
           )
         end
@@ -325,6 +340,32 @@ module RHDL
           end
         end
 
+        # Prefix all signal references in a memory write port
+        def prefix_write_port(wp, prefix)
+          return wp if prefix.empty?
+
+          RHDL::Export::IR::MemoryWritePort.new(
+            memory: "#{prefix}__#{wp.memory}",
+            clock: "#{prefix}__#{wp.clock}",
+            addr: prefix_expr(wp.addr, prefix),
+            data: prefix_expr(wp.data, prefix),
+            enable: prefix_expr(wp.enable, prefix)
+          )
+        end
+
+        # Prefix all signal references in a memory sync read port
+        def prefix_sync_read_port(rp, prefix)
+          return rp if prefix.empty?
+
+          RHDL::Export::IR::MemorySyncReadPort.new(
+            memory: "#{prefix}__#{rp.memory}",
+            clock: "#{prefix}__#{rp.clock}",
+            addr: prefix_expr(rp.addr, prefix),
+            data: "#{prefix}__#{rp.data}",
+            enable: rp.enable ? prefix_expr(rp.enable, prefix) : nil
+          )
+        end
+
         # Generate IR ModuleDef from the component
         def to_ir(top_name: nil)
           name = top_name || verilog_module_name
@@ -409,10 +450,12 @@ module RHDL
           # Generate memory IR from Memory DSL if included
           memories = []
           write_ports = []
+          sync_read_ports = []
           if respond_to?(:_memories) && !_memories.empty?
             memory_ir = memory_dsl_to_ir
             memories = memory_ir[:memories]
             write_ports = memory_ir[:write_ports]
+            sync_read_ports = memory_ir[:sync_read_ports] || []
             assigns = assigns + memory_ir[:assigns]
           end
 
@@ -426,6 +469,7 @@ module RHDL
             instances: instances,
             memories: memories,
             write_ports: write_ports,
+            sync_read_ports: sync_read_ports,
             parameters: parameters
           )
         end
@@ -484,17 +528,50 @@ module RHDL
               addr_width = mem_def&.addr_width || 8
               data_width = mem_def&.width || 8
 
+              # Handle enable as expression or simple signal
+              enable_ir = if write_def.enable_is_expression?
+                           write_def.enable_to_ir({})
+                         else
+                           RHDL::Export::IR::Signal.new(name: write_def.enable, width: 1)
+                         end
+
               write_ports << RHDL::Export::IR::MemoryWritePort.new(
                 memory: write_def.memory,
                 clock: write_def.clock,
                 addr: RHDL::Export::IR::Signal.new(name: write_def.addr, width: addr_width),
                 data: RHDL::Export::IR::Signal.new(name: write_def.data, width: data_width),
-                enable: RHDL::Export::IR::Signal.new(name: write_def.enable, width: 1)
+                enable: enable_ir
               )
             end
           end
 
-          { memories: memories, assigns: assigns, write_ports: write_ports }
+          # Generate sync read ports
+          sync_read_ports = []
+          if respond_to?(:_sync_reads)
+            _sync_reads.each do |read_def|
+              mem_def = mem_defs[read_def.memory]
+              addr_width = mem_def&.addr_width || 8
+
+              # Handle enable as expression or simple signal
+              enable_ir = if read_def.enable_is_expression?
+                           read_def.enable_to_ir({})
+                         elsif read_def.enable
+                           RHDL::Export::IR::Signal.new(name: read_def.enable, width: 1)
+                         else
+                           nil
+                         end
+
+              sync_read_ports << RHDL::Export::IR::MemorySyncReadPort.new(
+                memory: read_def.memory,
+                clock: read_def.clock,
+                addr: RHDL::Export::IR::Signal.new(name: read_def.addr, width: addr_width),
+                data: read_def.output.to_s,
+                enable: enable_ir
+              )
+            end
+          end
+
+          { memories: memories, assigns: assigns, write_ports: write_ports, sync_read_ports: sync_read_ports }
         end
 
         # Generate IR instances from structure definitions
