@@ -1076,7 +1076,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
     end
   end
 
-  # Create IrRunner with Karateka memory loaded
+  # Create IrSimulatorRunner with Karateka memory loaded
   # Tries JIT first, falls back to interpreter if not available
   # Returns nil if no native backends are available
   def create_ir_runner_with_karateka(backend: :jit)
@@ -1085,12 +1085,12 @@ RSpec.describe 'Hi-res Rendering Modes' do
     # Try the requested backend, fall back to interpreter
     runner = nil
     begin
-      runner = RHDL::Apple2::IrRunner.new(backend: backend)
+      runner = RHDL::Apple2::IrSimulatorRunner.new(backend: backend)
     rescue LoadError => e
       if backend == :jit
         # Fall back to interpreter
         begin
-          runner = RHDL::Apple2::IrRunner.new(backend: :interpret)
+          runner = RHDL::Apple2::IrSimulatorRunner.new(backend: :interpret)
         rescue LoadError
           return nil  # No native backends available
         end
@@ -1127,7 +1127,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
     runner
   end
 
-  describe 'IrRunner braille rendering' do
+  describe 'IrSimulatorRunner braille rendering' do
     before do
       skip 'AppleIIgo ROM not found' unless @rom_available
       skip 'Karateka memory dump not found' unless @karateka_available
@@ -1155,7 +1155,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
       non_blank_lines = lines.count { |line| line.chars.any? { |c| c.ord > 0x2800 && c.ord <= 0x28FF } }
       expect(non_blank_lines).to be > 0, "Should have at least some lines with non-blank braille content"
 
-      puts "\n  IrRunner braille rendering:"
+      puts "\n  IrSimulatorRunner braille rendering:"
       puts "    Output length: #{output.length} chars"
       puts "    Lines: #{lines.length}"
       puts "    Non-blank lines: #{non_blank_lines}/#{lines.length}"
@@ -1174,7 +1174,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
     end
   end
 
-  describe 'IrRunner color rendering' do
+  describe 'IrSimulatorRunner color rendering' do
     before do
       skip 'AppleIIgo ROM not found' unless @rom_available
       skip 'Karateka memory dump not found' unless @karateka_available
@@ -1205,7 +1205,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
       non_blank_lines = lines.count { |line| line.gsub(/\e\[[^m]*m/, '').strip.length > 0 }
       expect(non_blank_lines).to be > 0, "Should have at least some lines with colored content"
 
-      puts "\n  IrRunner color rendering:"
+      puts "\n  IrSimulatorRunner color rendering:"
       puts "    Output length: #{output.length} chars"
       puts "    Lines: #{lines.length}"
       puts "    Non-blank lines: #{non_blank_lines}/#{lines.length}"
@@ -1285,7 +1285,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
       skip 'Karateka memory dump not found' unless @karateka_available
     end
 
-    it 'IrRunner reads hi-res memory correctly from batched backend' do
+    it 'IrSimulatorRunner reads hi-res memory correctly from batched backend' do
       runner = create_ir_runner_with_karateka(backend: :jit)
       skip 'No native IR backends available' if runner.nil?
 
