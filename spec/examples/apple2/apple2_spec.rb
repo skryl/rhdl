@@ -1080,7 +1080,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
   # Tries JIT first, falls back to interpreter if not available
   # Returns nil if no native backends are available
   def create_ir_runner_with_karateka(backend: :jit)
-    require_relative '../../../examples/apple2/utilities/apple2_ir'
+    require_relative '../../../examples/apple2/utilities/ir_simulator_runner'
 
     # Try the requested backend, fall back to interpreter
     runner = nil
