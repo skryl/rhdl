@@ -853,11 +853,8 @@ impl CoreSimulator {
 
     #[inline(always)]
     pub fn tick(&mut self) {
-        // Sample clock values BEFORE any evaluation
-        let mut initial_clock_values: Vec<u64> = Vec::with_capacity(self.clock_indices.len());
-        for &clk_idx in &self.clock_indices {
-            initial_clock_values.push(self.signals[clk_idx]);
-        }
+        // Use prev_clock_values as "before" state (set by caller or previous tick)
+        // This allows callers to control edge detection by setting prev_clock_values
 
         // Evaluate to propagate any external input changes
         self.evaluate();
@@ -877,10 +874,10 @@ impl CoreSimulator {
         let mut updated: Vec<bool> = vec![false; self.seq_targets.len()];
         let max_iterations = 10;
 
-        // Detect rising edges from initial state
+        // Detect rising edges using prev_clock_values as "before"
         let mut rising_clocks: Vec<bool> = vec![false; self.signals.len()];
         for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
-            let before = initial_clock_values[i];
+            let before = self.prev_clock_values[i];
             let after = self.signals[clk_idx];
             if before == 0 && after == 1 {
                 rising_clocks[clk_idx] = true;
@@ -927,6 +924,97 @@ impl CoreSimulator {
                     updated[i] = true;
                 }
             }
+        }
+
+        // Update prev_clock_values for next tick
+        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+            self.prev_clock_values[i] = self.signals[clk_idx];
+        }
+
+        self.evaluate();
+    }
+
+    /// Tick with forced edge detection using prev_clock_values
+    /// This is used by extensions that manually control the clock sequence
+    /// and set prev_clock_values before calling this function.
+    #[inline(always)]
+    pub fn tick_forced(&mut self) {
+        // Use prev_clock_values as "before" values (set by caller)
+        // instead of sampling from signals
+
+        // Evaluate to propagate external input changes
+        self.evaluate();
+
+        // Sample ALL register input expressions ONCE
+        let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
+            .map(|arr| arr.as_ptr())
+            .collect();
+        unsafe {
+            (self.seq_sample_fn)(
+                self.signals.as_mut_ptr(),
+                self.next_regs.as_mut_ptr(),
+                mem_ptrs.as_ptr()
+            );
+        }
+
+        let mut updated: Vec<bool> = vec![false; self.seq_targets.len()];
+        let max_iterations = 10;
+
+        // Detect rising edges using prev_clock_values (set by caller)
+        let mut rising_clocks: Vec<bool> = vec![false; self.signals.len()];
+        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+            let before = self.prev_clock_values[i];
+            let after = self.signals[clk_idx];
+            if before == 0 && after == 1 {
+                rising_clocks[clk_idx] = true;
+            }
+        }
+
+        // Apply updates for clocks that rose
+        for (i, &target_idx) in self.seq_targets.iter().enumerate() {
+            let clk_idx = self.seq_clocks[i];
+            if rising_clocks[clk_idx] && !updated[i] {
+                self.signals[target_idx] = self.next_regs[i];
+                updated[i] = true;
+            }
+        }
+
+        // Iterate for derived clocks
+        for _iteration in 0..max_iterations {
+            let mut clock_before: Vec<u64> = Vec::with_capacity(self.clock_indices.len());
+            for &clk_idx in &self.clock_indices {
+                clock_before.push(self.signals[clk_idx]);
+            }
+
+            self.evaluate();
+
+            let mut rising_clocks: Vec<bool> = vec![false; self.signals.len()];
+            let mut any_rising = false;
+            for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+                let before = clock_before[i];
+                let after = self.signals[clk_idx];
+                if before == 0 && after == 1 {
+                    rising_clocks[clk_idx] = true;
+                    any_rising = true;
+                }
+            }
+
+            if !any_rising {
+                break;
+            }
+
+            for (i, &target_idx) in self.seq_targets.iter().enumerate() {
+                let clk_idx = self.seq_clocks[i];
+                if rising_clocks[clk_idx] && !updated[i] {
+                    self.signals[target_idx] = self.next_regs[i];
+                    updated[i] = true;
+                }
+            }
+        }
+
+        // Update prev_clock_values to current values for next cycle
+        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+            self.prev_clock_values[i] = self.signals[clk_idx];
         }
 
         self.evaluate();
