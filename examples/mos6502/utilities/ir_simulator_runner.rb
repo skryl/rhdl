@@ -117,7 +117,7 @@ class IRSimulatorRunner
 
   def reset
     @sim ||= create_simulator
-    # Pulse reset
+    # Pulse reset - matches harness.rb exactly
     @sim.poke('rst', 1)
     @sim.poke('rdy', 1)
     @sim.poke('irq', 1)
@@ -128,15 +128,14 @@ class IRSimulatorRunner
     @sim.poke('ext_x_load_en', 0)
     @sim.poke('ext_y_load_en', 0)
     @sim.poke('ext_sp_load_en', 0)
-    clock_tick
+    clock_tick  # 1 cycle with rst=1
     @sim.poke('rst', 0)
-    # Don't run additional clock cycles - do ext_pc_load immediately while
-    # state=FETCH. Running cycles after reset would start executing from
-    # IR=0 (BRK), putting the CPU in BRK handling states.
 
-    # Load PC from reset vector (like harness.rb does)
-    # The HDL control unit doesn't automatically load PC from reset vector,
-    # so we use external PC load to do it
+    # Need 5 more cycles for reset_step to reach 5 and state to transition to FETCH
+    # (matches harness.rb: "5.times { clock_cycle(rst: 0) }")
+    5.times { clock_tick }
+
+    # Now CPU is in STATE_FETCH. Load PC with reset vector value.
     if @use_rust_memory
       lo = @sim.mos6502_read_memory(0xFFFC)
       hi = @sim.mos6502_read_memory(0xFFFD)
@@ -153,38 +152,23 @@ class IRSimulatorRunner
       opcode = @bus.read(target_addr)
     end
 
-    # Set PC to target address and IR to opcode in one clock cycle.
-    # ext_pc_load loads both PC (from ext_pc_load_data) and IR (from data_in).
-    # After this: PC=target, IR=opcode, state=DECODE
+    # Set PC to target address and provide opcode on data_in
+    # This matches harness.rb ext_pc_load sequence exactly
     @sim.poke('ext_pc_load_data', target_addr)
     @sim.poke('ext_pc_load_en', 1)
     @sim.poke('data_in', opcode)
 
-    # Clock cycle to load PC and IR
-    # IMPORTANT: Use evaluate on falling edge, tick on rising edge
+    # Clock cycle to load PC and IR (matches harness low/high phase)
     @sim.poke('clk', 0)
-    @sim.evaluate  # Combinational only
+    @sim.evaluate  # Combinational only (low phase)
     @sim.poke('clk', 1)
-    @sim.tick      # Registers capture
+    @sim.tick      # Registers capture (high phase)
 
+    # Clear external load enable (matches harness clear_ext_loads)
     @sim.poke('ext_pc_load_en', 0)
 
-    # Now we're in DECODE state with PC=target and IR=opcode.
-    # But PC should point to operand (target+1) for the next phase.
-    # Run one cycle to transition from DECODE to FETCH_OP1 (for 2+ byte instructions).
-    # During this, PC increments to target+1.
-    if @use_rust_memory
-      # For Rust mode, use internal memory - just poke the memory value
-      @sim.poke('data_in', @sim.mos6502_read_memory(target_addr + 1))
-    else
-      # For Ruby fallback, use bus memory
-      @sim.poke('data_in', @bus.read(target_addr + 1))
-    end
-    @sim.poke('clk', 0)
-    @sim.evaluate  # Combinational only
-    @sim.poke('clk', 1)
-    @sim.tick      # Registers capture
-
+    # After this: PC=target_addr, ready to execute first instruction
+    # Do NOT run extra cycles - harness.rb doesn't either
     @cycles = 0
     @halted = false
   end
@@ -213,6 +197,70 @@ class IRSimulatorRunner
         @halted = @sim.peek('halted') == 1
       end
     end
+  end
+
+  # Execute one complete instruction and return the number of cycles it took.
+  # This matches ISA simulator's step() method.
+  # Detects instruction completion by monitoring state transitions to FETCH.
+  # @param sync_screen [Boolean] Whether to sync screen memory after (default: false for perf)
+  # @return [Integer] The number of cycles the instruction took
+  def step_instruction(sync_screen: false)
+    @sim ||= create_simulator
+    return 0 if @halted
+
+    state_fetch = 1  # STATE_FETCH constant from CPU
+    cycles = 0
+    max_cycles = 20  # Safety limit (longest 6502 instruction is 7 cycles)
+
+    # Get initial state
+    prev_state = @sim.peek('state')
+
+    loop do
+      # Run one clock cycle
+      if @use_rust_memory
+        @sim.mos6502_run_cycles(1)
+      else
+        clock_tick
+      end
+      cycles += 1
+      @cycles += 1
+      @halted = @sim.peek('halted') == 1
+
+      state = @sim.peek('state')
+
+      # Instruction is complete when we transition TO FETCH from another state
+      # (not when we're already in FETCH from the start)
+      if state == state_fetch && prev_state != state_fetch
+        break
+      end
+
+      prev_state = state
+      break if cycles >= max_cycles || @halted
+    end
+
+    # Only sync screen memory if explicitly requested (expensive operation)
+    sync_screen_memory_from_rust if sync_screen && @use_rust_memory
+
+    cycles
+  end
+
+  # Run complete instructions until target_cycles have elapsed.
+  # This matches ISA simulator's run_cycles semantics exactly.
+  # May overshoot target_cycles by completing the current instruction.
+  # @param target_cycles [Integer] The minimum number of cycles to run
+  # @return [Integer] The actual number of cycles run
+  def run_cycles(target_cycles)
+    @sim ||= create_simulator
+    return 0 if @halted
+
+    cycles_run = 0
+
+    while cycles_run < target_cycles && !@halted
+      instruction_cycles = step_instruction
+      cycles_run += instruction_cycles
+    end
+
+    cycles_run
   end
 
   # Run one clock cycle with memory bridging
