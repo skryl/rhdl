@@ -30,6 +30,9 @@ module RHDL
         # Try to load JIT extension
         JIT_AVAILABLE = File.exist?(JIT_LIB_PATH)
 
+        # Backwards compatibility alias
+        IR_JIT_AVAILABLE = JIT_AVAILABLE
+
         # Wrapper class that uses Fiddle to call Rust JIT
         class IrJitWrapper
         attr_reader :ir_json, :sub_cycles
