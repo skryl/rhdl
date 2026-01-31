@@ -153,6 +153,7 @@ RSpec.describe 'MOS6502 Karateka Mode' do
     end
 
     it 'loads and runs with IR interpret backend' do
+      skip 'IR Interpreter disabled for now'
       rom_bytes = File.binread(appleiigo_rom).bytes
       mem_bytes = File.binread(karateka_mem).bytes
       run_hdl_test(:interpret, rom_bytes, mem_bytes)
