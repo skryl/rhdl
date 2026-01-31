@@ -176,14 +176,16 @@ impl CoreSimulator {
         }
 
         // Then regs (with optional reset values)
+        // Initialize signals with reset values directly (like monolithic version)
         let mut reset_values = Vec::new();
         for reg in &ir.regs {
             let idx = signals.len();
-            signals.push(0u64);
+            let reset_val = reg.reset_value.unwrap_or(0);
+            signals.push(reset_val);
             widths.push(reg.width);
             name_to_idx.insert(reg.name.clone(), idx);
-            if let Some(rst) = reg.reset_value {
-                reset_values.push((idx, rst));
+            if reset_val != 0 {
+                reset_values.push((idx, reset_val));
             }
         }
 
