@@ -6,6 +6,7 @@
 //! Extension-specific FFI functions are in their respective modules:
 //! - extensions/apple2/ffi.rs
 //! - extensions/mos6502/ffi.rs
+//! - extensions/gameboy/ffi.rs
 
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_uint, c_ulong};
@@ -13,7 +14,7 @@ use std::ptr;
 use std::slice;
 
 use crate::core::CoreSimulator;
-use crate::extensions::{Apple2Extension, Mos6502Extension};
+use crate::extensions::{Apple2Extension, GameBoyExtension, Mos6502Extension};
 
 // ============================================================================
 // Simulator Context
@@ -23,6 +24,7 @@ use crate::extensions::{Apple2Extension, Mos6502Extension};
 pub struct IrSimContext {
     pub core: CoreSimulator,
     pub apple2: Option<Apple2Extension>,
+    pub gameboy: Option<GameBoyExtension>,
     pub mos6502: Option<Mos6502Extension>,
 }
 
@@ -37,13 +39,19 @@ impl IrSimContext {
             None
         };
 
+        let gameboy = if GameBoyExtension::is_gameboy_ir(&core.name_to_idx) {
+            Some(GameBoyExtension::new(&core))
+        } else {
+            None
+        };
+
         let mos6502 = if Mos6502Extension::is_mos6502_ir(&core.name_to_idx) {
             Some(Mos6502Extension::new(&core))
         } else {
             None
         };
 
-        Ok(Self { core, apple2, mos6502 })
+        Ok(Self { core, apple2, gameboy, mos6502 })
     }
 
     fn generate_code(&self) -> String {
@@ -51,6 +59,10 @@ impl IrSimContext {
 
         if self.apple2.is_some() {
             code.push_str(&Apple2Extension::generate_code(&self.core));
+        }
+
+        if self.gameboy.is_some() {
+            code.push_str(&GameBoyExtension::generate_code(&self.core));
         }
 
         if self.mos6502.is_some() {

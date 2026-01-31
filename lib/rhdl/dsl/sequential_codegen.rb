@@ -144,10 +144,12 @@ module RHDL
           # Generate memory IR from Memory DSL if included
           memories = []
           write_ports = []
+          sync_read_ports = []
           if respond_to?(:_memories) && !_memories.empty?
             memory_ir = memory_dsl_to_ir
             memories = memory_ir[:memories]
             write_ports = memory_ir[:write_ports]
+            sync_read_ports = memory_ir[:sync_read_ports] || []
             assigns = assigns + memory_ir[:assigns]
           end
 
@@ -162,6 +164,7 @@ module RHDL
             reg_ports: reg_ports,
             memories: memories,
             write_ports: write_ports,
+            sync_read_ports: sync_read_ports,
             parameters: parameters
           )
         end
@@ -199,11 +202,29 @@ module RHDL
             end
 
             # Wrap in if-else
-            statements << RHDL::Export::IR::If.new(
-              condition: RHDL::Export::IR::Signal.new(name: seq_ir.reset, width: 1),
-              then_statements: reset_stmts,
-              else_statements: normal_stmts
-            )
+            # Determine if reset is active-low (ends with _n) or active-high
+            reset_name = seq_ir.reset.to_s
+            active_low = reset_name.end_with?('_n')
+
+            # For active-low reset (reset_n):
+            #   - when reset_n=1 (not in reset): run normal logic
+            #   - when reset_n=0 (in reset): apply reset values
+            # For active-high reset:
+            #   - when reset=1 (in reset): apply reset values
+            #   - when reset=0 (not in reset): run normal logic
+            if active_low
+              statements << RHDL::Export::IR::If.new(
+                condition: RHDL::Export::IR::Signal.new(name: seq_ir.reset, width: 1),
+                then_statements: normal_stmts,
+                else_statements: reset_stmts
+              )
+            else
+              statements << RHDL::Export::IR::If.new(
+                condition: RHDL::Export::IR::Signal.new(name: seq_ir.reset, width: 1),
+                then_statements: reset_stmts,
+                else_statements: normal_stmts
+              )
+            end
           else
             # No reset - just the assignments
             statements = seq_ir.assignments.map do |assign|
