@@ -1,6 +1,0 @@
-/target/
-/lib/*.so
-/lib/*.dylib
-/lib/*.dll
-/lib/*.bundle
-Cargo.lock

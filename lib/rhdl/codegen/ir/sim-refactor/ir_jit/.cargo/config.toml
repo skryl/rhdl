@@ -1,8 +1,0 @@
-# macOS linker flags for Ruby native extensions
-# Allows undefined symbols that get resolved at runtime when loaded by Ruby
-
-[target.x86_64-apple-darwin]
-rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
-
-[target.aarch64-apple-darwin]
-rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
