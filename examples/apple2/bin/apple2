@@ -63,9 +63,9 @@ class Apple2HDLTerminal
                   RHDL::Apple2::HdlRunner.new
                 else
                   # IR simulation with native backends (interpret, jit, compile)
-                  require 'apple2_ir'
+                  require 'ir_simulator_runner'
                   sub_cycles = options[:sub_cycles] || 14
-                  RHDL::Apple2::IrRunner.new(backend: @sim_backend, sub_cycles: sub_cycles)
+                  RHDL::Apple2::IrSimulatorRunner.new(backend: @sim_backend, sub_cycles: sub_cycles)
                 end
               end
 

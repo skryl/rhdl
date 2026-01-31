@@ -325,9 +325,9 @@ module RHDL
 
                 if use_rust_memory
                   # Also load into Rust memory for batched execution
-                  sim.load_mos6502_memory(rom_data, 0xD000, true)   # ROM
-                  sim.load_mos6502_memory(karateka_mem, 0x0000, false)  # RAM
-                  sim.set_mos6502_reset_vector(0xB82A)
+                  sim.mos6502_load_memory(rom_data, 0xD000, true)   # ROM
+                  sim.mos6502_load_memory(karateka_mem, 0x0000, false)  # RAM
+                  sim.mos6502_set_reset_vector(0xB82A)
                 end
               end
 
@@ -377,7 +377,7 @@ module RHDL
                 sim.run_cycles(cycles)
               elsif use_rust_memory
                 # Use batched Rust execution - no FFI per cycle!
-                sim.run_mos6502_cycles(cycles)
+                sim.mos6502_run_cycles(cycles)
               else
                 # Ruby memory bridging (fallback)
                 cycles.times { clock_tick.call }
@@ -524,8 +524,8 @@ module RHDL
                 sim.load_rom(karateka_rom, base_addr: 0xD000)
                 sim.load_ram(karateka_mem.first(48 * 1024), base_addr: 0)
               else
-                sim.load_rom(karateka_rom)
-                sim.load_ram(karateka_mem.first(48 * 1024), 0)
+                sim.apple2_load_rom(karateka_rom)
+                sim.apple2_load_ram(karateka_mem.first(48 * 1024), 0)
               end
 
               # Reset
@@ -541,7 +541,7 @@ module RHDL
               if is_verilator
                 sim.run_steps(3)
               else
-                3.times { sim.run_cpu_cycles(1, 0, false) }
+                3.times { sim.apple2_run_cpu_cycles(1, 0, false) }
               end
 
               # Benchmark
@@ -551,7 +551,7 @@ module RHDL
               if is_verilator
                 sim.run_steps(cycles)
               else
-                sim.run_cpu_cycles(cycles, 0, false)
+                sim.apple2_run_cpu_cycles(cycles, 0, false)
               end
               run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
 

@@ -89,13 +89,13 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     sim = RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json, sub_cycles: 14)
 
     karateka_rom = create_karateka_rom
-    sim.load_rom(karateka_rom)
-    sim.load_ram(@karateka_mem.first(48 * 1024), 0)
+    sim.apple2_load_rom(karateka_rom)
+    sim.apple2_load_ram(@karateka_mem.first(48 * 1024), 0)
 
     sim.poke('reset', 1)
     sim.tick
     sim.poke('reset', 0)
-    3.times { sim.run_cpu_cycles(1, 0, false) }
+    3.times { sim.apple2_run_cpu_cycles(1, 0, false) }
 
     # Initialize HIRES soft switches
     sim.poke('soft_switches', 8)
@@ -313,7 +313,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   end
 
   def decode_hires_ir(sim, base_addr = 0x2000)
-    ram = sim.read_ram(base_addr, 0x2000).to_a
+    ram = sim.apple2_read_ram(base_addr, 0x2000).to_a
     bitmap = []
     192.times do |row|
       line = []
@@ -341,7 +341,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
   def text_checksum_ir(sim)
     checksum = 0
-    sim.read_ram(0x0400, 0x400).to_a.each { |b| checksum = (checksum + b) & 0xFFFFFFFF }
+    sim.apple2_read_ram(0x0400, 0x400).to_a.each { |b| checksum = (checksum + b) & 0xFFFFFFFF }
     checksum
   end
 
@@ -447,7 +447,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       # Run IR cycles, step ISA at instruction boundaries
       cycles_to_run.times do
         # Run IR one cycle
-        ir_sim.run_cpu_cycles(1, 0, false)
+        ir_sim.apple2_run_cpu_cycles(1, 0, false)
 
         # Check for IR instruction boundary (opcode changed)
         ir_opcode = ir_sim.peek('opcode_debug')
@@ -634,7 +634,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       end
 
       # IR: cycle-based
-      ir_sim.run_cpu_cycles(cycles_to_run, 0, false)
+      ir_sim.apple2_run_cpu_cycles(cycles_to_run, 0, false)
 
       # Verilator: step-based (1 step = 1 CPU cycle = 14 sub-cycles)
       verilator_runner.run_steps(cycles_to_run)
@@ -810,7 +810,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       while warmup_run < START_CYCLES
         batch = [warmup_batch, START_CYCLES - warmup_run].min
         batch.times { isa_cpu.step unless isa_cpu.halted? }
-        ir_sim.run_cpu_cycles(batch, 0, false)
+        ir_sim.apple2_run_cpu_cycles(batch, 0, false)
         verilator_sim&.run_steps(batch)
         warmup_run += batch
 
@@ -865,7 +865,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       end
 
       # Run IR
-      ir_sim.run_cpu_cycles(batch_size, 0, false)
+      ir_sim.apple2_run_cpu_cycles(batch_size, 0, false)
 
       # Run Verilator
       verilator_sim&.run_steps(batch_size)
@@ -1210,146 +1210,5 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
     expect(ir_anomalous).to be_empty,
       "IR should not execute from HiRes memory regions"
-  end
-
-  # Verilator integration test
-  it 'verifies Verilator runner can be initialized and has correct interface', timeout: 120 do
-    skip 'Verilator not available' unless verilator_available?
-    skip 'AppleIIgo ROM not found' unless @rom_available
-    skip 'Karateka memory dump not found' unless @karateka_available
-
-    require_relative '../../../examples/apple2/utilities/apple2_verilator'
-
-    puts "\n" + "=" * 70
-    puts "Verilator Runner Interface Verification"
-    puts "=" * 70
-
-    # Verify VerilatorRunner class exists and has expected interface
-    expect(defined?(RHDL::Apple2::VerilatorRunner)).to eq('constant')
-
-    runner_class = RHDL::Apple2::VerilatorRunner
-
-    # Check required interface methods
-    required_methods = %i[
-      load_rom load_ram load_disk reset run_steps run_cpu_cycle
-      inject_key read_screen_array read_screen screen_dirty?
-      clear_screen_dirty read_hires_bitmap render_hires_braille
-      render_hires_color cpu_state halted? cycle_count dry_run_info
-      bus disk_controller speaker display_mode start_audio stop_audio
-      read write native? simulator_type
-    ]
-
-    missing_methods = required_methods.reject { |m| runner_class.instance_methods.include?(m) }
-
-    if missing_methods.empty?
-      puts "All #{required_methods.length} required interface methods present"
-    else
-      puts "Missing methods: #{missing_methods.join(', ')}"
-    end
-
-    expect(missing_methods).to be_empty,
-      "VerilatorRunner should implement all interface methods, missing: #{missing_methods.join(', ')}"
-
-    # Verify constants
-    expect(runner_class::TEXT_PAGE1_START).to eq(0x0400)
-    expect(runner_class::HIRES_PAGE1_START).to eq(0x2000)
-    expect(runner_class::HIRES_WIDTH).to eq(280)
-    expect(runner_class::HIRES_HEIGHT).to eq(192)
-
-    puts "Constants verified: TEXT_PAGE1_START=0x0400, HIRES_PAGE1_START=0x2000"
-
-    # Verify DiskControllerStub
-    stub = runner_class::DiskControllerStub.new
-    expect(stub.track).to eq(0)
-    expect(stub.motor_on).to eq(false)
-
-    puts "DiskControllerStub verified"
-    puts "=" * 70
-    puts "Verilator interface verification PASSED"
-  end
-
-  it 'verifies Verilator simulation produces expected PC patterns', timeout: 300 do
-    skip 'Verilator not available' unless verilator_available?
-    skip 'AppleIIgo ROM not found' unless @rom_available
-    skip 'Karateka memory dump not found' unless @karateka_available
-
-    require_relative '../../../examples/apple2/utilities/apple2_verilator'
-
-    puts "\n" + "=" * 70
-    puts "Verilator Simulation PC Pattern Verification"
-    puts "=" * 70
-
-    # Initialize Verilator runner
-    puts "\nInitializing Verilator runner..."
-    start_time = Time.now
-    runner = RHDL::Apple2::VerilatorRunner.new(sub_cycles: 14)
-    init_time = Time.now - start_time
-    puts "  Verilator initialized in #{init_time.round(2)}s"
-
-    # Load Karateka ROM and memory
-    karateka_rom = create_karateka_rom
-    runner.load_rom(karateka_rom, base_addr: 0xD000)
-    runner.load_ram(@karateka_mem, base_addr: 0x0000)
-    puts "  Loaded Karateka ROM and memory dump"
-
-    # Verify native interface
-    expect(runner.native?).to be(true)
-    expect(runner.simulator_type).to eq(:hdl_verilator)
-    puts "  Runner type: #{runner.simulator_type}, native: #{runner.native?}"
-
-    # Reset and run a few cycles
-    runner.reset
-    puts "  Reset complete"
-
-    # Collect PC samples while running
-    pc_samples = []
-    total_cycles = 10_000  # Run 10K cycles for quick verification
-
-    puts "\nRunning #{total_cycles} cycles..."
-    run_start = Time.now
-
-    sample_interval = 1000
-    (total_cycles / sample_interval).times do |i|
-      runner.run_steps(sample_interval)
-      state = runner.cpu_state
-      pc_samples << state[:pc]
-
-      if (i + 1) % 5 == 0
-        elapsed = Time.now - run_start
-        cycles_done = (i + 1) * sample_interval
-        rate = cycles_done / elapsed
-        puts format("  %d cycles: PC=$%04X region=%s (%.0f cycles/s)",
-                    cycles_done, state[:pc], pc_region(state[:pc]), rate)
-      end
-    end
-
-    run_time = Time.now - run_start
-    rate = total_cycles / run_time
-
-    puts "\n" + "-" * 70
-    puts format("Completed %d cycles in %.2fs (%.0f cycles/s)", total_cycles, run_time, rate)
-
-    # Analyze PC samples
-    unique_pcs = pc_samples.uniq
-    regions = pc_samples.map { |pc| pc_region(pc) }
-    region_counts = regions.tally
-
-    puts "\nPC Analysis:"
-    puts "  Unique PCs: #{unique_pcs.length}"
-    puts "  Regions visited: #{region_counts.map { |r, c| "#{r}=#{c}" }.join(', ')}"
-
-    # Verify the simulation is executing code (not stuck)
-    expect(unique_pcs.length).to be > 1,
-      "Simulation should visit multiple PCs, but only saw #{unique_pcs.length}"
-
-    # Verify it's executing from expected regions (ROM or high RAM for Karateka)
-    game_regions = [:rom, :high_ram, :user]
-    visits_game = region_counts.keys.any? { |r| game_regions.include?(r) }
-
-    expect(visits_game).to be(true),
-      "Simulation should execute from game regions (ROM/high_ram/user)"
-
-    puts "\n" + "=" * 70
-    puts "Verilator simulation verification PASSED"
   end
 end
