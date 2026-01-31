@@ -19,42 +19,6 @@ require 'rhdl/codegen/ir/sim/ir_interpreter'
 
 module RHDL
   module Apple2
-    # Utility module for exporting Apple2 component to IR
-    module Apple2Ir
-      class << self
-        # Get the Behavior IR for the Apple2 component (shallow, for Verilog export)
-        def behavior_ir
-          Apple2.to_ir
-        end
-
-        # Get the flattened Behavior IR (includes all subcomponent logic)
-        def flat_ir
-          Apple2.to_flat_ir
-        end
-
-        # Convert to JSON format for the simulator
-        # Uses flattened IR so all subcomponent logic is included
-        def ir_json
-          ir = flat_ir
-          RHDL::Codegen::IR::IRToJson.convert(ir)
-        end
-
-        # Get stats about the IR
-        def stats
-          ir = behavior_ir
-          {
-            port_count: ir.ports.length,
-            net_count: ir.nets.length,
-            reg_count: ir.regs.length,
-            assign_count: ir.assigns.length,
-            process_count: ir.processes.length,
-            inputs: ir.ports.select { |p| p.direction == :in }.map(&:name),
-            outputs: ir.ports.select { |p| p.direction == :out }.map(&:name)
-          }
-        end
-      end
-    end
-
     # High-performance IR-level runner using batched Rust execution
     class IrRunner
       attr_reader :sim, :ir_json
@@ -93,8 +57,9 @@ module RHDL
         puts "Initializing Apple2 IR simulation [#{backend_names[backend]}]..."
         start_time = Time.now
 
-        # Generate IR JSON
-        @ir_json = Apple2Ir.ir_json
+        # Generate IR JSON from Apple2 component
+        ir = Apple2.to_flat_ir
+        @ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
         @backend = backend
         @sub_cycles = sub_cycles.clamp(1, 14)
 
