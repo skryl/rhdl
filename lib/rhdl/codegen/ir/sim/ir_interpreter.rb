@@ -90,6 +90,27 @@ module RHDL
           @fn_tick.call(@ctx)
         end
 
+        def tick_forced
+          return @sim.tick if @fallback  # Ruby fallback doesn't need edge detection
+          @fn_tick_forced.call(@ctx)
+        end
+
+        def set_prev_clock(clock_list_idx, value)
+          return if @fallback  # Ruby fallback doesn't track prev clocks
+          @fn_set_prev_clock.call(@ctx, clock_list_idx, value)
+        end
+
+        def get_clock_list_idx(signal_idx)
+          return -1 if @fallback
+          @fn_get_clock_list_idx.call(@ctx, signal_idx)
+        end
+
+        def get_signal_idx(name)
+          return nil if @fallback
+          idx = @fn_get_signal_idx.call(@ctx, name)
+          idx >= 0 ? idx : nil
+        end
+
         def reset
           return @sim.reset if @fallback
           @fn_reset.call(@ctx)
@@ -315,6 +336,11 @@ module RHDL
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_INT
           )
+          @fn_get_signal_idx = Fiddle::Function.new(
+            @lib['ir_sim_get_signal_idx'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
           @fn_evaluate = Fiddle::Function.new(
             @lib['ir_sim_evaluate'],
             [Fiddle::TYPE_VOIDP],
@@ -324,6 +350,21 @@ module RHDL
             @lib['ir_sim_tick'],
             [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_VOID
+          )
+          @fn_tick_forced = Fiddle::Function.new(
+            @lib['ir_sim_tick_forced'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOID
+          )
+          @fn_set_prev_clock = Fiddle::Function.new(
+            @lib['ir_sim_set_prev_clock'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_ULONG],
+            Fiddle::TYPE_VOID
+          )
+          @fn_get_clock_list_idx = Fiddle::Function.new(
+            @lib['ir_sim_get_clock_list_idx'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
+            Fiddle::TYPE_INT
           )
           @fn_reset = Fiddle::Function.new(
             @lib['ir_sim_reset'],

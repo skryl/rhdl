@@ -98,11 +98,18 @@ impl Mos6502Extension {
 
     /// Run batched CPU cycles with internal memory bridging
     pub fn run_cycles(&mut self, core: &mut CoreSimulator, n: usize) -> usize {
-        // Find clock index in clock_indices array for proper edge detection
-        let clk_list_idx = core.clock_indices.iter().position(|&ci| ci == self.clk_idx);
+        let num_clocks = core.prev_clock_values.len();
 
         for _ in 0..n {
-            // Get address and R/W from CPU
+            // Clock falling edge FIRST - combinational outputs update (addr/rw become valid)
+            // Set ALL clocks' prev values to 1 (previous state was high)
+            for i in 0..num_clocks {
+                core.prev_clock_values[i] = 1;
+            }
+            unsafe { *core.signals.get_unchecked_mut(self.clk_idx) = 0; }
+            core.evaluate();
+
+            // NOW get address and R/W from CPU (after evaluate, they reflect current state)
             let addr = unsafe { *core.signals.get_unchecked(self.addr_idx) } as usize & 0xFFFF;
             let rw = unsafe { *core.signals.get_unchecked(self.rw_idx) };
 
@@ -123,19 +130,13 @@ impl Mos6502Extension {
                 }
             }
 
-            // Clock falling edge
-            if let Some(idx) = clk_list_idx {
-                core.prev_clock_values[idx] = 1; // Previous state was high
-            }
-            unsafe { *core.signals.get_unchecked_mut(self.clk_idx) = 0; }
-            core.evaluate();
-
-            // Clock rising edge
-            if let Some(idx) = clk_list_idx {
-                core.prev_clock_values[idx] = 0; // Previous state was low
+            // Clock rising edge - registers capture values (including data_in we just set)
+            // Set ALL clocks' prev values to 0 (previous state was low)
+            for i in 0..num_clocks {
+                core.prev_clock_values[i] = 0;
             }
             unsafe { *core.signals.get_unchecked_mut(self.clk_idx) = 1; }
-            core.tick();
+            core.tick_forced();
         }
 
         n
@@ -158,15 +159,22 @@ impl Mos6502Extension {
         let pc_idx = *core.name_to_idx.get("reg_pc").unwrap_or(&0);
         let sp_idx = *core.name_to_idx.get("reg_sp").unwrap_or(&0);
 
-        // Find clock index in clock_indices array for proper edge detection
-        let clk_list_idx = core.clock_indices.iter().position(|&ci| ci == self.clk_idx);
+        let num_clocks = core.prev_clock_values.len();
 
         let mut instruction_count = 0usize;
         let mut cycles = 0usize;
         let mut last_state = unsafe { *core.signals.get_unchecked(state_idx) };
 
         while instruction_count < n && cycles < max_cycles {
-            // Get address and R/W from CPU
+            // Clock falling edge FIRST - combinational outputs update (addr/rw become valid)
+            // Set ALL clocks' prev values to 1 (previous state was high)
+            for i in 0..num_clocks {
+                core.prev_clock_values[i] = 1;
+            }
+            unsafe { *core.signals.get_unchecked_mut(self.clk_idx) = 0; }
+            core.evaluate();
+
+            // NOW get address and R/W from CPU (after evaluate, they reflect current state)
             let addr = unsafe { *core.signals.get_unchecked(self.addr_idx) } as usize & 0xFFFF;
             let rw = unsafe { *core.signals.get_unchecked(self.rw_idx) };
 
@@ -187,19 +195,13 @@ impl Mos6502Extension {
                 }
             }
 
-            // Clock falling edge
-            if let Some(idx) = clk_list_idx {
-                core.prev_clock_values[idx] = 1; // Previous state was high
-            }
-            unsafe { *core.signals.get_unchecked_mut(self.clk_idx) = 0; }
-            core.evaluate();
-
-            // Clock rising edge
-            if let Some(idx) = clk_list_idx {
-                core.prev_clock_values[idx] = 0; // Previous state was low
+            // Clock rising edge - registers capture values (including data_in we just set)
+            // Set ALL clocks' prev values to 0 (previous state was low)
+            for i in 0..num_clocks {
+                core.prev_clock_values[i] = 0;
             }
             unsafe { *core.signals.get_unchecked_mut(self.clk_idx) = 1; }
-            core.tick();
+            core.tick_forced();
             cycles += 1;
 
             // Check for state transition to DECODE

@@ -229,8 +229,15 @@ impl Mos6502Extension {
 
         code.push_str("    for _ in 0..n {\n");
 
-        // Memory bridging FIRST (before clock edges, like JIT)
-        // CPU outputs addr/rw based on current state, sample before clock edge
+        // Clock falling edge FIRST - combinational outputs update (addr/rw become valid)
+        // Set ALL clocks' old_clocks to 1 (previous state was high) for proper edge detection
+        for i in 0..num_clocks {
+            code.push_str(&format!("        old_clocks[{}] = 1; // Previous state was high\n", i));
+        }
+        code.push_str(&format!("        signals[{}] = 0;\n", clk_idx));
+        code.push_str("        evaluate_inline(signals);\n\n");
+
+        // NOW do memory bridging (after evaluate, addr/rw reflect current state)
         code.push_str(&format!("        let addr = (signals[{}] as usize) & 0xFFFF;\n", addr_idx));
         code.push_str(&format!("        let rw = signals[{}];\n", rw_idx));
         code.push_str("\n");
@@ -250,18 +257,15 @@ impl Mos6502Extension {
         code.push_str("            }\n");
         code.push_str("        }\n\n");
 
-        // Clock falling edge - set all derived clock domains to "previous high"
-        for &idx in &clk_domain_indices {
-            code.push_str(&format!("        old_clocks[{}] = 1; // Previous state was high\n", idx));
-        }
-        code.push_str(&format!("        signals[{}] = 0;\n", clk_idx));
-        code.push_str("        evaluate_inline(signals);\n\n");
-
-        // Clock rising edge - set all derived clock domains to "previous low"
-        for &idx in &clk_domain_indices {
-            code.push_str(&format!("        old_clocks[{}] = 0; // Previous state was low\n", idx));
+        // Clock rising edge - registers capture values (including data_in we just set)
+        // Set ALL clocks' old_clocks to 0 (previous state was low) for proper edge detection
+        for i in 0..num_clocks {
+            code.push_str(&format!("        old_clocks[{}] = 0; // Previous state was low\n", i));
         }
         code.push_str(&format!("        signals[{}] = 1;\n", clk_idx));
+        // IMPORTANT: Must call evaluate_inline to propagate clk to internal clock signals
+        // before tick_inline checks for rising edges on those internal signals
+        code.push_str("        evaluate_inline(signals);\n");
         code.push_str("        tick_inline(signals, &mut old_clocks, &mut next_regs);\n");
         code.push_str("    }\n\n");
         code.push_str("    // Write speaker toggles to out parameter\n");
@@ -337,7 +341,15 @@ impl Mos6502Extension {
 
         code.push_str("    while instruction_count < n && cycles < max_cycles {\n");
 
-        // Memory bridging first (before clock edge)
+        // Clock falling edge FIRST - combinational outputs update (addr/rw become valid)
+        // Set ALL clocks' old_clocks to 1 (previous state was high) for proper edge detection
+        for i in 0..num_clocks {
+            code.push_str(&format!("        old_clocks[{}] = 1; // Previous state was high\n", i));
+        }
+        code.push_str(&format!("        signals[{}] = 0;\n", clk_idx));
+        code.push_str("        evaluate_inline(signals);\n\n");
+
+        // NOW do memory bridging (after evaluate, addr/rw reflect current state)
         code.push_str(&format!("        let addr = (signals[{}] as usize) & 0xFFFF;\n", addr_idx));
         code.push_str(&format!("        let rw = signals[{}];\n", rw_idx));
         code.push_str("\n");
@@ -357,18 +369,15 @@ impl Mos6502Extension {
         code.push_str("            }\n");
         code.push_str("        }\n\n");
 
-        // Clock falling edge - set all derived clock domains to "previous high"
-        for &idx in &clk_domain_indices {
-            code.push_str(&format!("        old_clocks[{}] = 1; // Previous state was high\n", idx));
-        }
-        code.push_str(&format!("        signals[{}] = 0;\n", clk_idx));
-        code.push_str("        evaluate_inline(signals);\n\n");
-
-        // Clock rising edge - set all derived clock domains to "previous low"
-        for &idx in &clk_domain_indices {
-            code.push_str(&format!("        old_clocks[{}] = 0; // Previous state was low\n", idx));
+        // Clock rising edge - registers capture values (including data_in we just set)
+        // Set ALL clocks' old_clocks to 0 (previous state was low) for proper edge detection
+        for i in 0..num_clocks {
+            code.push_str(&format!("        old_clocks[{}] = 0; // Previous state was low\n", i));
         }
         code.push_str(&format!("        signals[{}] = 1;\n", clk_idx));
+        // IMPORTANT: Must call evaluate_inline to propagate clk to internal clock signals
+        // before tick_inline checks for rising edges on those internal signals
+        code.push_str("        evaluate_inline(signals);\n");
         code.push_str("        tick_inline(signals, &mut old_clocks, &mut next_regs);\n");
         code.push_str("        cycles += 1;\n\n");
 

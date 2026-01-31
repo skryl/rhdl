@@ -296,6 +296,15 @@ impl CoreSimulator {
                 lib.get(b"evaluate").expect("evaluate function not found");
             func(self.signals.as_mut_ptr(), self.signals.len());
         }
+
+        // Update old_clocks to current clock values after evaluation
+        // This ensures that after poke('clk', 0); evaluate(), old_clocks will be 0,
+        // so the subsequent tick() will properly detect the rising edge (0->1)
+        for (list_idx, &clk_idx) in self.clock_indices.iter().enumerate() {
+            if list_idx < self.old_clocks.len() {
+                self.old_clocks[list_idx] = self.signals[clk_idx];
+            }
+        }
     }
 
     pub fn poke(&mut self, name: &str, value: u64) -> Result<(), String> {
@@ -687,19 +696,11 @@ impl CoreSimulator {
         let num_regs = self.seq_targets.len();
 
         code.push_str("/// Combined tick: evaluate + edge-triggered register update\n");
-        code.push_str("/// Matches JIT behavior: captures initial clocks, evaluates, samples next_regs,\n");
-        code.push_str("/// then loops to handle derived clock propagation\n");
+        code.push_str("/// Uses old_clocks (set by caller) for edge detection, not current signal values.\n");
+        code.push_str("/// This allows the caller to control exactly what \"previous\" clock state means.\n");
         code.push_str("#[inline(always)]\n");
         code.push_str(&format!("pub unsafe fn tick_inline(signals: &mut [u64], old_clocks: &mut [u64; {}], next_regs: &mut [u64; {}]) {{\n",
                                num_clocks, num_regs.max(1)));
-
-        // Capture initial clock values BEFORE evaluate (like JIT does)
-        // This is critical: we need to know what the clocks were at the START of this tick
-        code.push_str(&format!("    let mut initial_clocks = [0u64; {}];\n", num_clocks));
-        for (domain_idx, &clk_idx) in clock_indices.iter().enumerate() {
-            code.push_str(&format!("    initial_clocks[{}] = signals[{}];\n", domain_idx, clk_idx));
-        }
-        code.push_str("\n");
 
         // Evaluate combinational logic (this propagates clock changes to derived clocks)
         code.push_str("    evaluate_inline(signals);\n\n");
@@ -724,10 +725,10 @@ impl CoreSimulator {
         // Track which registers have been updated (like JIT)
         code.push_str(&format!("    let mut updated = [false; {}];\n\n", num_regs.max(1)));
 
-        // Check for rising edges using initial_clocks (from START of tick) vs current signals
+        // Check for rising edges using old_clocks (set by caller) vs current signals
         for (domain_idx, &clk_idx) in clock_indices.iter().enumerate() {
             code.push_str(&format!("    // Clock domain {} (signal {})\n", domain_idx, clk_idx));
-            code.push_str(&format!("    if initial_clocks[{}] == 0 && signals[{}] == 1 {{\n", domain_idx, clk_idx));
+            code.push_str(&format!("    if old_clocks[{}] == 0 && signals[{}] == 1 {{\n", domain_idx, clk_idx));
 
             for &(seq_idx, target_idx) in &self.clock_domain_assigns[domain_idx] {
                 code.push_str(&format!("        if !updated[{}] {{ signals[{}] = next_regs[{}]; updated[{}] = true; }}\n",
@@ -768,20 +769,27 @@ impl CoreSimulator {
         // Final evaluate (like JIT)
         code.push_str("    evaluate_inline(signals);\n\n");
 
-        // Update old_clocks for caller (not used internally, but may be used by extensions)
-        for (domain_idx, &clk_idx) in clock_indices.iter().enumerate() {
-            code.push_str(&format!("    old_clocks[{}] = signals[{}];\n", domain_idx, clk_idx));
-        }
+        // Note: Do NOT update old_clocks here - caller manages it
+        // This is consistent with interpreter's tick_forced behavior
+        // The MOS6502 extension manages old_clocks explicitly before each tick_inline call
 
         code.push_str("}\n\n");
 
         // Generate extern "C" wrapper
+        // This wrapper updates old_clocks AFTER tick_inline for the regular tick() path
+        // (MOS6502 extension calls tick_inline directly and manages old_clocks itself)
         code.push_str("#[no_mangle]\n");
         code.push_str(&format!("pub unsafe extern \"C\" fn tick(signals: *mut u64, len: usize, old_clocks: *mut u64, next_regs: *mut u64) {{\n"));
         code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, len);\n");
         code.push_str(&format!("    let old_clocks = &mut *(old_clocks as *mut [u64; {}]);\n", num_clocks));
         code.push_str(&format!("    let next_regs = &mut *(next_regs as *mut [u64; {}]);\n", num_regs.max(1)));
         code.push_str("    tick_inline(signals, old_clocks, next_regs);\n");
+
+        // Update old_clocks to current clock signal values for next tick() call
+        for (domain_idx, &clk_idx) in clock_indices.iter().enumerate() {
+            code.push_str(&format!("    old_clocks[{}] = signals[{}];\n", domain_idx, clk_idx));
+        }
+
         code.push_str("}\n");
     }
 

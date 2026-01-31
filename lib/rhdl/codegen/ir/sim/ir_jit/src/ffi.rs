@@ -223,6 +223,40 @@ pub unsafe extern "C" fn jit_sim_tick(ctx: *mut JitSimContext) {
     }
 }
 
+/// Tick with forced edge detection using prev_clock_values set by caller
+/// Use set_prev_clock before calling this to control edge detection
+#[no_mangle]
+pub unsafe extern "C" fn jit_sim_tick_forced(ctx: *mut JitSimContext) {
+    if !ctx.is_null() {
+        (*ctx).core.tick_forced();
+    }
+}
+
+/// Set previous clock value for a clock index (for forced edge detection)
+#[no_mangle]
+pub unsafe extern "C" fn jit_sim_set_prev_clock(ctx: *mut JitSimContext, clock_list_idx: c_uint, value: c_ulong) {
+    if !ctx.is_null() {
+        let ctx = &mut *ctx;
+        let idx = clock_list_idx as usize;
+        if idx < ctx.core.prev_clock_values.len() {
+            ctx.core.prev_clock_values[idx] = value;
+        }
+    }
+}
+
+/// Get clock list index for a signal index
+#[no_mangle]
+pub unsafe extern "C" fn jit_sim_get_clock_list_idx(ctx: *const JitSimContext, signal_idx: c_uint) -> c_int {
+    if ctx.is_null() {
+        return -1;
+    }
+    let sig_idx = signal_idx as usize;
+    match (*ctx).core.clock_indices.iter().position(|&ci| ci == sig_idx) {
+        Some(pos) => pos as c_int,
+        None => -1,
+    }
+}
+
 /// Run N ticks
 #[no_mangle]
 pub unsafe extern "C" fn jit_sim_run_ticks(ctx: *mut JitSimContext, n: c_uint) {

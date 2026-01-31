@@ -1005,9 +1005,8 @@ impl CoreSimulator {
 
     #[inline(always)]
     pub fn tick(&mut self) {
-        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
-            self.prev_clock_values[i] = self.signals[clk_idx];
-        }
+        // Use prev_clock_values as "before" state (set by caller or previous tick)
+        // This allows callers to control edge detection
 
         self.evaluate();
 
@@ -1043,6 +1042,63 @@ impl CoreSimulator {
                         unsafe { *self.signals.get_unchecked_mut(target_idx) = self.next_regs[seq_idx]; }
                     }
                     self.prev_clock_values[clock_list_idx] = 1;
+                }
+            }
+
+            if !any_edge {
+                break;
+            }
+
+            self.evaluate();
+        }
+
+        // Update prev_clock_values for next tick
+        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+            self.prev_clock_values[i] = self.signals[clk_idx];
+        }
+    }
+
+    /// Tick with forced edge detection using prev_clock_values set by caller
+    /// This skips the initial save of clock values, allowing extensions
+    /// to manually control edge detection by setting prev_clock_values first.
+    #[inline(always)]
+    pub fn tick_forced(&mut self) {
+        // Skip saving current clock values - use prev_clock_values set by caller
+
+        self.evaluate();
+
+        for (i, fast_path) in self.seq_fast_paths.iter().enumerate() {
+            if let Some((src_idx, mask)) = fast_path {
+                let val = unsafe { *self.signals.get_unchecked(*src_idx) } & mask;
+                unsafe { *self.next_regs.get_unchecked_mut(i) = val; }
+            }
+        }
+
+        for op in &self.all_seq_ops {
+            match op.op_type {
+                OP_STORE_NEXT_REG => {
+                    let val = FlatOp::get_operand(&self.signals, &self.temps, op.arg0) & op.arg2;
+                    unsafe { *self.next_regs.get_unchecked_mut(op.dst) = val; }
+                }
+                _ => {
+                    Self::execute_flat_op(&mut self.signals, &mut self.temps, &self.memory_arrays, op);
+                }
+            }
+        }
+
+        const MAX_ITERATIONS: usize = 10;
+        for _ in 0..MAX_ITERATIONS {
+            let mut any_edge = false;
+            for (clock_list_idx, &clk_idx) in self.clock_indices.iter().enumerate() {
+                let old_val = self.prev_clock_values[clock_list_idx];
+                let new_val = unsafe { *self.signals.get_unchecked(clk_idx) };
+
+                if old_val == 0 && new_val == 1 {
+                    any_edge = true;
+                    for &(seq_idx, target_idx) in &self.clock_domain_assigns[clock_list_idx] {
+                        unsafe { *self.signals.get_unchecked_mut(target_idx) = self.next_regs[seq_idx]; }
+                    }
+                    // Note: Do NOT update prev_clock_values here - caller manages it
                 }
             }
 
