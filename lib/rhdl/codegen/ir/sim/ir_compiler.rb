@@ -30,6 +30,9 @@ module RHDL
         # Try to load compiler extension
         COMPILER_AVAILABLE = File.exist?(COMPILER_LIB_PATH)
 
+        # Backwards compatibility alias
+        IR_COMPILER_AVAILABLE = COMPILER_AVAILABLE
+
         # Wrapper class that uses Fiddle to call Rust IR Compiler
         class IrCompilerWrapper
         attr_reader :ir_json, :sub_cycles
