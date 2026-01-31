@@ -212,10 +212,14 @@ struct IrSimulator {
     gameboy_mode: bool,
     /// CLK_SYS signal index for Game Boy
     gb_clk_sys_idx: usize,
-    /// CE (clock enable) signal index for Game Boy
+    /// CE (clock enable) signal index for Game Boy (top-level)
     gb_ce_idx: usize,
     /// SpeedControl CE output (internal) - must be set to 1 to keep ce=1
     speed_ctrl_ce_idx: usize,
+    /// gb_core internal ce signal index
+    gb_core_ce_idx: usize,
+    /// video_unit internal ce signal index (used by PPU h_div_cnt)
+    video_unit_ce_idx: usize,
     /// CPU clock enable signal index - must be set to 1 for DMG mode
     cpu_clken_idx: usize,
     /// SM83 CPU clken input signal index (the CPU's internal clken, connected to cpu_clken)
@@ -230,6 +234,14 @@ struct IrSimulator {
     lcd_vsync_idx: usize,
     /// LCD on signal index
     lcd_on_idx: usize,
+    /// PPU mode3 signal index (pixel transfer mode)
+    ppu_mode3_idx: usize,
+    /// PPU internal lcdc_on signal index
+    ppu_lcdc_on_idx: usize,
+    /// PPU h_div_cnt register index (horizontal divider)
+    ppu_h_div_cnt_idx: usize,
+    /// PPU pcnt register index (pixel counter)
+    ppu_pcnt_idx: usize,
     /// Cart read signal index
     gb_cart_rd_idx: usize,
     /// Cart data out signal index (cart provides data to CPU)
@@ -425,6 +437,10 @@ impl IrSimulator {
             .unwrap_or(&0);
         // SpeedControl internal CE output - must be set to 1 to keep ce=1 during full evaluate
         let speed_ctrl_ce_idx = *name_to_idx.get("speed_ctrl__ce").unwrap_or(&0);
+        // gb_core internal ce - propagates from top-level ce
+        let gb_core_ce_idx = *name_to_idx.get("gb_core__ce").unwrap_or(&0);
+        // video_unit internal ce - used by PPU h_div_cnt and lcd_clkena
+        let video_unit_ce_idx = *name_to_idx.get("gb_core__video_unit__ce").unwrap_or(&0);
         // CPU clock enable - must be set to 1 for DMG mode (bypasses SpeedControl)
         let cpu_clken_idx = *name_to_idx.get("gb_core__cpu_clken")
             .or_else(|| name_to_idx.get("cpu_clken"))
@@ -438,6 +454,19 @@ impl IrSimulator {
         let lcd_hsync_idx = *name_to_idx.get("lcd_hsync").unwrap_or(&0);
         let lcd_vsync_idx = *name_to_idx.get("lcd_vsync").unwrap_or(&0);
         let lcd_on_idx = *name_to_idx.get("lcd_on").unwrap_or(&0);
+        // PPU internal signals for debugging lcd_clkena
+        let ppu_mode3_idx = *name_to_idx.get("gb_core__video_unit__mode3")
+            .or_else(|| name_to_idx.get("video_unit__mode3"))
+            .unwrap_or(&0);
+        let ppu_lcdc_on_idx = *name_to_idx.get("gb_core__video_unit__lcdc_on")
+            .or_else(|| name_to_idx.get("video_unit__lcdc_on"))
+            .unwrap_or(&0);
+        let ppu_h_div_cnt_idx = *name_to_idx.get("gb_core__video_unit__h_div_cnt")
+            .or_else(|| name_to_idx.get("video_unit__h_div_cnt"))
+            .unwrap_or(&0);
+        let ppu_pcnt_idx = *name_to_idx.get("gb_core__video_unit__pcnt")
+            .or_else(|| name_to_idx.get("video_unit__pcnt"))
+            .unwrap_or(&0);
         let gb_cart_rd_idx = *name_to_idx.get("cart_rd").unwrap_or(&0);
         let gb_cart_do_idx = *name_to_idx.get("cart_do").unwrap_or(&0);
         let gb_ext_bus_addr_idx = *name_to_idx.get("ext_bus_addr").unwrap_or(&0);
@@ -507,6 +536,12 @@ impl IrSimulator {
         eprintln!("  lcd_vsync_idx: {} (found: {})", lcd_vsync_idx, name_to_idx.contains_key("lcd_vsync"));
         eprintln!("  lcd_hsync_idx: {} (found: {})", lcd_hsync_idx, name_to_idx.contains_key("lcd_hsync"));
         eprintln!("  lcd_on_idx: {} (found: {})", lcd_on_idx, name_to_idx.contains_key("lcd_on"));
+        // Debug PPU signal indices
+        eprintln!("[IR Compiler] PPU signal debug:");
+        eprintln!("  ppu_mode3_idx: {} (found: {})", ppu_mode3_idx, name_to_idx.contains_key("gb_core__video_unit__mode3"));
+        eprintln!("  ppu_lcdc_on_idx: {} (found: {})", ppu_lcdc_on_idx, name_to_idx.contains_key("gb_core__video_unit__lcdc_on"));
+        eprintln!("  ppu_h_div_cnt_idx: {} (found: {})", ppu_h_div_cnt_idx, name_to_idx.contains_key("gb_core__video_unit__h_div_cnt"));
+        eprintln!("  ppu_pcnt_idx: {} (found: {})", ppu_pcnt_idx, name_to_idx.contains_key("gb_core__video_unit__pcnt"));
         // Debug VRAM signal indices
         eprintln!("[IR Compiler] VRAM signal debug:");
         eprintln!("  gb_vram_addr_cpu_idx: {}", gb_vram_addr_cpu_idx);
@@ -529,6 +564,8 @@ impl IrSimulator {
         eprintln!("  sm83_clken_idx: {} (gb_core__cpu__clken found: {})",
             sm83_clken_idx, name_to_idx.contains_key("gb_core__cpu__clken"));
         eprintln!("  speed_ctrl_ce_idx: {}", speed_ctrl_ce_idx);
+        eprintln!("  gb_core_ce_idx: {}", gb_core_ce_idx);
+        eprintln!("  video_unit_ce_idx: {}", video_unit_ce_idx);
         // List all signals containing "cpu__" to find the correct clken signal name
         let cpu_signals: Vec<_> = name_to_idx.keys().filter(|k| k.contains("cpu__")).collect();
         eprintln!("  All cpu__ signals: {:?}", cpu_signals);
@@ -582,6 +619,8 @@ impl IrSimulator {
             gb_clk_sys_idx,
             gb_ce_idx,
             speed_ctrl_ce_idx,
+            gb_core_ce_idx,
+            video_unit_ce_idx,
             cpu_clken_idx,
             sm83_clken_idx,
             lcd_clkena_idx,
@@ -589,6 +628,10 @@ impl IrSimulator {
             lcd_hsync_idx,
             lcd_vsync_idx,
             lcd_on_idx,
+            ppu_mode3_idx,
+            ppu_lcdc_on_idx,
+            ppu_h_div_cnt_idx,
+            ppu_pcnt_idx,
             gb_cart_rd_idx,
             gb_cart_do_idx,
             gb_ext_bus_addr_idx,
@@ -1430,22 +1473,55 @@ impl IrSimulator {
         let num_clocks = clock_indices.len().max(1);
         let num_regs = self.seq_targets.len();
 
+        // Get boot ROM signal indices for tick_gb_inline
+        let gb_boot_rom_addr_idx_for_tick = *self.name_to_idx.get("gb_core__boot_rom_addr").unwrap_or(&0);
+        let gb_boot_do_idx_for_tick = *self.name_to_idx.get("gb_core__boot_do").unwrap_or(&0);
+        let gb_cpu_di_idx_for_tick = *self.name_to_idx.get("gb_core__cpu_di").unwrap_or(&0);
+        let gb_data_in_idx_for_tick = *self.name_to_idx.get("gb_core__cpu__data_in").unwrap_or(&0);
+        let gb_sel_boot_rom_idx_for_tick = self.gb_sel_boot_rom_idx;
+
         code.push_str("/// Game Boy tick - sample registers on rising edges (old_clocks pre-saved by caller)\n");
         code.push_str("#[inline(always)]\n");
-        code.push_str(&format!("unsafe fn tick_gb_inline(signals: &mut [u64], old_clocks: &mut [u64; {}], next_regs: &mut [u64; {}]) {{\n", num_clocks, num_regs.max(1)));
+        code.push_str(&format!("unsafe fn tick_gb_inline(signals: &mut [u64], old_clocks: &mut [u64; {}], next_regs: &mut [u64; {}], boot_rom: &[u8], boot_rom_len: usize) {{\n", num_clocks, num_regs.max(1)));
         code.push_str("\n");
 
         // NOTE: We do NOT save old_clocks here - the caller has already done it before the rising edge
         // Just call evaluate to propagate clock changes to derived clocks
         code.push_str("    evaluate_inline(signals);\n");
 
-        // DMG mode: Force cpu_clken=1 and sm83_clken=1 after evaluate (otherwise SpeedControl resets it)
-        // Both signals need to be forced because clken is the CPU's internal signal used in register update expressions
+        // CRITICAL: Re-inject boot ROM data IMMEDIATELY after evaluate_inline
+        // evaluate_inline recomputes boot_do = 0xFF from HDL placeholder, which corrupts cpu_di and data_in
+        // We must fix this BEFORE sampling register inputs (next_regs computation)
+        code.push_str("\n    // Re-inject boot ROM data after evaluate_inline (HDL placeholder = 0xFF)\n");
+        code.push_str(&format!("    let boot_addr_tick = (signals[{}] & 0xFF) as usize;\n", gb_boot_rom_addr_idx_for_tick));
+        code.push_str("    let boot_data_tick = if boot_addr_tick < boot_rom_len { boot_rom[boot_addr_tick] } else { 0xFF };\n");
+        code.push_str(&format!("    signals[{}] = boot_data_tick as u64; // boot_do\n", gb_boot_do_idx_for_tick));
+        // Also fix cpu_di which is computed from boot_do when sel_boot_rom=1
+        code.push_str(&format!("    if signals[{}] == 1 {{ // sel_boot_rom\n", gb_sel_boot_rom_idx_for_tick));
+        code.push_str(&format!("        signals[{}] = boot_data_tick as u64; // cpu_di = boot_do\n", gb_cpu_di_idx_for_tick));
+        code.push_str(&format!("        signals[{}] = boot_data_tick as u64; // data_in = cpu_di\n", gb_data_in_idx_for_tick));
+        code.push_str("    }\n");
+
+        // DMG mode: Force ALL ce signals to 1 after evaluate (otherwise SpeedControl resets them)
+        // Must force the entire ce chain: ce -> gb_core__ce -> gb_core__video_unit__ce
+        // PPU h_div_cnt uses video_unit's ce in its register update expression
+        if self.gb_ce_idx > 0 {
+            code.push_str(&format!("    signals[{}] = 1; // ce = 1 (DMG mode in tick)\n", self.gb_ce_idx));
+        }
+        if self.speed_ctrl_ce_idx > 0 {
+            code.push_str(&format!("    signals[{}] = 1; // speed_ctrl__ce = 1\n", self.speed_ctrl_ce_idx));
+        }
+        if self.gb_core_ce_idx > 0 && self.gb_core_ce_idx != self.gb_ce_idx {
+            code.push_str(&format!("    signals[{}] = 1; // gb_core__ce = 1\n", self.gb_core_ce_idx));
+        }
+        if self.video_unit_ce_idx > 0 {
+            code.push_str(&format!("    signals[{}] = 1; // video_unit__ce = 1 (for PPU h_div_cnt)\n", self.video_unit_ce_idx));
+        }
         if self.cpu_clken_idx > 0 {
-            code.push_str(&format!("    signals[{}] = 1; // cpu_clken = 1 (DMG mode in tick)\n", self.cpu_clken_idx));
+            code.push_str(&format!("    signals[{}] = 1; // cpu_clken = 1 (DMG mode)\n", self.cpu_clken_idx));
         }
         if self.sm83_clken_idx > 0 {
-            code.push_str(&format!("    signals[{}] = 1; // sm83_clken = 1 (DMG mode in tick)\n", self.sm83_clken_idx));
+            code.push_str(&format!("    signals[{}] = 1; // sm83_clken = 1 (DMG mode)\n", self.sm83_clken_idx));
         }
         code.push_str("\n");
 
@@ -1489,12 +1565,32 @@ impl IrSimulator {
 
         code.push_str("\n        if !any_edge { break; }\n");
         code.push_str("        evaluate_inline(signals);\n");
-        // DMG mode: Force cpu_clken=1 and sm83_clken=1 after evaluate in derived clock iteration
+        // Re-inject boot ROM data after evaluate in iteration (same reason as above)
+        code.push_str(&format!("        let boot_addr_iter = (signals[{}] & 0xFF) as usize;\n", gb_boot_rom_addr_idx_for_tick));
+        code.push_str("        let boot_data_iter = if boot_addr_iter < boot_rom_len { boot_rom[boot_addr_iter] } else { 0xFF };\n");
+        code.push_str(&format!("        signals[{}] = boot_data_iter as u64;\n", gb_boot_do_idx_for_tick));
+        code.push_str(&format!("        if signals[{}] == 1 {{\n", gb_sel_boot_rom_idx_for_tick));
+        code.push_str(&format!("            signals[{}] = boot_data_iter as u64;\n", gb_cpu_di_idx_for_tick));
+        code.push_str(&format!("            signals[{}] = boot_data_iter as u64;\n", gb_data_in_idx_for_tick));
+        code.push_str("        }\n");
+        // DMG mode: Force ALL ce signals after evaluate in derived clock iteration
+        if self.gb_ce_idx > 0 {
+            code.push_str(&format!("        signals[{}] = 1; // ce = 1 (iteration)\n", self.gb_ce_idx));
+        }
+        if self.speed_ctrl_ce_idx > 0 {
+            code.push_str(&format!("        signals[{}] = 1; // speed_ctrl__ce = 1 (iteration)\n", self.speed_ctrl_ce_idx));
+        }
+        if self.gb_core_ce_idx > 0 && self.gb_core_ce_idx != self.gb_ce_idx {
+            code.push_str(&format!("        signals[{}] = 1; // gb_core__ce = 1 (iteration)\n", self.gb_core_ce_idx));
+        }
+        if self.video_unit_ce_idx > 0 {
+            code.push_str(&format!("        signals[{}] = 1; // video_unit__ce = 1 (iteration)\n", self.video_unit_ce_idx));
+        }
         if self.cpu_clken_idx > 0 {
-            code.push_str(&format!("        signals[{}] = 1; // cpu_clken = 1 (DMG mode in tick iteration)\n", self.cpu_clken_idx));
+            code.push_str(&format!("        signals[{}] = 1; // cpu_clken = 1 (iteration)\n", self.cpu_clken_idx));
         }
         if self.sm83_clken_idx > 0 {
-            code.push_str(&format!("        signals[{}] = 1; // sm83_clken = 1 (DMG mode in tick iteration)\n", self.sm83_clken_idx));
+            code.push_str(&format!("        signals[{}] = 1; // sm83_clken = 1 (iteration)\n", self.sm83_clken_idx));
         }
         code.push_str("    }\n\n");
 
@@ -1771,11 +1867,16 @@ impl IrSimulator {
         code.push_str("    for _ in 0..n {\n");
         code.push_str("        // === PHASE 1: Falling edge ===\n");
         code.push_str(&format!("        signals[{}] = 0; // clk_sys = 0\n", gb_clk_sys_idx));
-        // Set ce=1 (clock enable) - DMG always has ce=1 at 4MHz
-        // Also set speed_ctrl__ce=1 so full evaluate doesn't override ce
+        // Set ALL ce signals to 1 - DMG always has ce=1 at 4MHz
         code.push_str(&format!("        signals[{}] = 1; // ce = 1\n", self.gb_ce_idx));
         if self.speed_ctrl_ce_idx > 0 {
             code.push_str(&format!("        signals[{}] = 1; // speed_ctrl__ce = 1\n", self.speed_ctrl_ce_idx));
+        }
+        if self.gb_core_ce_idx > 0 && self.gb_core_ce_idx != self.gb_ce_idx {
+            code.push_str(&format!("        signals[{}] = 1; // gb_core__ce = 1\n", self.gb_core_ce_idx));
+        }
+        if self.video_unit_ce_idx > 0 {
+            code.push_str(&format!("        signals[{}] = 1; // video_unit__ce = 1\n", self.video_unit_ce_idx));
         }
 
         // Inject ROM data (unconditionally read, only used if cart_rd is set)
@@ -1792,10 +1893,16 @@ impl IrSimulator {
         code.push_str(&format!("        signals[{}] = boot_data as u64;\n", gb_boot_do_idx));
 
         code.push_str("        evaluate_memory_inline(signals); // Partial evaluate (memory/clock only)\n");
-        // Re-set ce=1 and speed_ctrl__ce=1 after evaluate (they may have been reset)
+        // Re-set ALL ce signals after evaluate (they may have been reset)
         code.push_str(&format!("        signals[{}] = 1; // ce = 1 (re-set)\n", self.gb_ce_idx));
         if self.speed_ctrl_ce_idx > 0 {
             code.push_str(&format!("        signals[{}] = 1; // speed_ctrl__ce = 1 (re-set)\n", self.speed_ctrl_ce_idx));
+        }
+        if self.gb_core_ce_idx > 0 && self.gb_core_ce_idx != self.gb_ce_idx {
+            code.push_str(&format!("        signals[{}] = 1; // gb_core__ce = 1 (re-set)\n", self.gb_core_ce_idx));
+        }
+        if self.video_unit_ce_idx > 0 {
+            code.push_str(&format!("        signals[{}] = 1; // video_unit__ce = 1 (re-set)\n", self.video_unit_ce_idx));
         }
         // DMG mode: Force cpu_clken=1 and sm83_clken=1 (bypasses SpeedControl)
         if self.cpu_clken_idx > 0 {
@@ -1840,10 +1947,16 @@ impl IrSimulator {
         code.push_str(&format!("        signals[{}] = boot_data as u64;\n", gb_boot_do_idx));
 
         code.push_str("        evaluate_memory_inline(signals); // Partial evaluate (memory/clock only)\n");
-        // Re-set ce=1 and speed_ctrl__ce=1 after evaluate (they may have been reset)
+        // Re-set ALL ce signals after evaluate (they may have been reset)
         code.push_str(&format!("        signals[{}] = 1; // ce = 1 (re-set)\n", self.gb_ce_idx));
         if self.speed_ctrl_ce_idx > 0 {
             code.push_str(&format!("        signals[{}] = 1; // speed_ctrl__ce = 1 (re-set)\n", self.speed_ctrl_ce_idx));
+        }
+        if self.gb_core_ce_idx > 0 && self.gb_core_ce_idx != self.gb_ce_idx {
+            code.push_str(&format!("        signals[{}] = 1; // gb_core__ce = 1 (re-set)\n", self.gb_core_ce_idx));
+        }
+        if self.video_unit_ce_idx > 0 {
+            code.push_str(&format!("        signals[{}] = 1; // video_unit__ce = 1 (re-set)\n", self.video_unit_ce_idx));
         }
         // DMG mode: Force cpu_clken=1 and sm83_clken=1 (bypasses SpeedControl)
         if self.cpu_clken_idx > 0 {
@@ -1856,6 +1969,81 @@ impl IrSimulator {
 
         // Combined VRAM + ZPRAM handling before tick
         code.push_str("        // === PHASE 3: Memory writes/reads before tick ===\n");
+        // Debug: Track PC progression - when PC exits the VRAM clear loop (goes to $000B+)
+        let gb_cpu_pc_idx = *self.name_to_idx.get("gb_core__cpu__pc").unwrap_or(&0);
+        code.push_str("        static PC_MAX_EVER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("        static PC_EXIT_CLEAR_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str(&format!("        let pc_val = signals[{}] as usize;\n", gb_cpu_pc_idx));
+        code.push_str("        PC_MAX_EVER.fetch_max(pc_val, std::sync::atomic::Ordering::Relaxed);\n");
+        // Track when PC enters new boot ROM sections (milestone addresses)
+        code.push_str("        static PC_MILESTONES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);\n");
+        code.push_str("        let milestones = PC_MILESTONES.load(std::sync::atomic::Ordering::Relaxed);\n");
+        // Track when PC first reaches specific addresses
+        code.push_str("        if pc_val == 0x0C && (milestones & 1) == 0 {\n");
+        code.push_str(&format!("            let hl = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__hl").copied().unwrap_or(0)));
+        code.push_str("            PC_MILESTONES.fetch_or(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("            eprintln!(\"MILESTONE: PC first reached 0x000C (after VRAM clear), HL=0x{:04X}\", hl);\n");
+        code.push_str("        }\n");
+        code.push_str("        if pc_val == 0x20 && (milestones & 2) == 0 {\n");
+        code.push_str("            PC_MILESTONES.fetch_or(2, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("            eprintln!(\"MILESTONE: PC first reached 0x0020 (F0 50 boot check)\");\n");
+        code.push_str("        }\n");
+        code.push_str("        if pc_val == 0x36 && (milestones & 4) == 0 {\n");
+        code.push_str("            PC_MILESTONES.fetch_or(4, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("            eprintln!(\"MILESTONE: PC first reached 0x0036 (logo read start)\");\n");
+        code.push_str("        }\n");
+        code.push_str("        if pc_val >= 0xFC && pc_val <= 0xFF && (milestones & 8) == 0 {\n");
+        code.push_str("            PC_MILESTONES.fetch_or(8, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("            eprintln!(\"MILESTONE: PC reached 0x00FC-0x00FF (boot disable area)\");\n");
+        code.push_str("        }\n");
+        // Original debug for JR Z and $000B
+        code.push_str("        if pc_val == 0x09 || (pc_val >= 0x0B && pc_val < 0x0C) {\n");
+        code.push_str("            let count = PC_EXIT_CLEAR_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("            if count < 20 {\n");
+        code.push_str(&format!("                let ir = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__ir").copied().unwrap_or(0)));
+        code.push_str(&format!("                let hl = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__hl").copied().unwrap_or(0)));
+        code.push_str(&format!("                let f_reg = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__f_reg").copied().unwrap_or(0)));
+        code.push_str(&format!("                let cond = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__cond_true").copied().unwrap_or(0)));
+        code.push_str(&format!("                let h_reg = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__h_reg").copied().unwrap_or(0)));
+        code.push_str("                let z_flag = (f_reg >> 7) & 1;\n");
+        code.push_str("                let bit5_h = (h_reg >> 5) & 1;\n");
+        code.push_str(&format!("                let jump_e = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__jump_e").copied().unwrap_or(0)));
+        code.push_str(&format!("                let m_cycle = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__m_cycle").copied().unwrap_or(0)));
+        code.push_str(&format!("                let m_cycles = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__m_cycles").copied().unwrap_or(0)));
+        code.push_str(&format!("                let is_cond_jr = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__is_cond_jr").copied().unwrap_or(0)));
+        code.push_str("                eprintln!(\"PC_LOOP #{}: PC=0x{:04X}, IR=0x{:02X}, m_cycle={}, m_cycles={}, jump_e={}, is_cond_jr={}, cond={}, Z={}\", count, pc_val, ir, m_cycle, m_cycles, jump_e, is_cond_jr, cond, z_flag);\n");
+        code.push_str("            }\n");
+        code.push_str("        }\n");
+        code.push_str("        let old_max = PC_MAX_EVER.load(std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("        if pc_val > old_max && pc_val >= 0x10 && pc_val <= 0x100 {\n");
+        code.push_str(&format!("            let ir = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__ir").copied().unwrap_or(0)));
+        code.push_str(&format!("            let hl = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__hl").copied().unwrap_or(0)));
+        code.push_str(&format!("            let de = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__de").copied().unwrap_or(0)));
+        code.push_str(&format!("            let acc = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__acc").copied().unwrap_or(0)));
+        code.push_str(&format!("            let data_out = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__data_out").copied().unwrap_or(0)));
+        code.push_str("            eprintln!(\"PC NEW MAX: 0x{:04X}, IR=0x{:02X}, HL=0x{:04X}, DE=0x{:04X}, A=0x{:02X}, data_out=0x{:02X}\", pc_val, ir, hl, de, acc, data_out);\n");
+        code.push_str("        }\n");
+        // Debug: Track VRAM write enable activity
+        code.push_str(&format!("        static VRAM_WREN_CHECK_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n"));
+        code.push_str(&format!("        static VRAM_WREN_ACTIVE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n"));
+        code.push_str(&format!("        let vram_wren_val = signals[{}];\n", gb_vram_wren_cpu_idx));
+        code.push_str("        if vram_wren_val != 0 {\n");
+        code.push_str("            let count = VRAM_WREN_ACTIVE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("            if count < 5 {\n");
+        code.push_str(&format!("                let addr = (signals[{}] & 0x1FFF) as usize;\n", gb_vram_addr_cpu_idx));
+        code.push_str(&format!("                let data = (signals[{}] & 0xFF) as u8;\n", gb_cpu_do_idx));
+        code.push_str(&format!("                let acc_val = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__acc").copied().unwrap_or(0)));
+        code.push_str(&format!("                let data_out_val = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__data_out").copied().unwrap_or(0)));
+        code.push_str(&format!("                let pc_wr = signals[{}];\n", gb_cpu_pc_idx));
+        code.push_str(&format!("                let ir_wr = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__ir").copied().unwrap_or(0)));
+        code.push_str("                eprintln!(\"[VRAM_WREN ACTIVE #{}] addr=0x{:04X}, cpu_do=0x{:02X}, A=0x{:02X}, data_out=0x{:02X}, PC=0x{:04X}, IR=0x{:02X}\", count, addr, data, acc_val, data_out_val, pc_wr, ir_wr);\n");
+        code.push_str("            }\n");
+        code.push_str("        }\n");
+        code.push_str("        let check_count = VRAM_WREN_CHECK_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("        if check_count == 50000 {\n");
+        code.push_str("            let active = VRAM_WREN_ACTIVE_COUNT.load(std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str(&format!("            eprintln!(\"[VRAM DEBUG] After 50K cycles: vram_wren_cpu (idx {}) was active {{}} times\", active);\n", gb_vram_wren_cpu_idx));
+        code.push_str("        }\n");
         // VRAM write with debug
         code.push_str(&format!("        if signals[{}] != 0 {{ // vram_wren_cpu\n", gb_vram_wren_cpu_idx));
         code.push_str(&format!("            let addr = (signals[{}] & 0x1FFF) as usize;\n", gb_vram_addr_cpu_idx));
@@ -1910,11 +2098,16 @@ impl IrSimulator {
         code.push_str("        }\n");
 
         code.push_str("        evaluate_memory_inline(signals); // Partial evaluate (memory/clock only)\n");
-        // Re-set ce=1 and speed_ctrl__ce=1 after evaluate (they may have been reset)
-        // CRITICAL: These must be set before tick/full-evaluate so cpu_clken is computed correctly
+        // Re-set ALL ce signals after evaluate - CRITICAL before tick so registers see ce=1
         code.push_str(&format!("        signals[{}] = 1; // ce = 1 (re-set)\n", self.gb_ce_idx));
         if self.speed_ctrl_ce_idx > 0 {
             code.push_str(&format!("        signals[{}] = 1; // speed_ctrl__ce = 1 (re-set)\n", self.speed_ctrl_ce_idx));
+        }
+        if self.gb_core_ce_idx > 0 && self.gb_core_ce_idx != self.gb_ce_idx {
+            code.push_str(&format!("        signals[{}] = 1; // gb_core__ce = 1 (re-set)\n", self.gb_core_ce_idx));
+        }
+        if self.video_unit_ce_idx > 0 {
+            code.push_str(&format!("        signals[{}] = 1; // video_unit__ce = 1 (re-set)\n", self.video_unit_ce_idx));
         }
         // DMG mode: Force cpu_clken=1 and sm83_clken=1 (bypasses SpeedControl)
         if self.cpu_clken_idx > 0 {
@@ -1925,12 +2118,19 @@ impl IrSimulator {
         }
         code.push_str("\n");
 
-        // Tick - with PC transition tracing
+        // Tick - sequential register updates
         code.push_str("        // === PHASE 4: Sequential tick ===\n");
-        // Save PC before tick for debugging
-        code.push_str(&format!("        let pc_before = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__pc").or_else(|| self.name_to_idx.get("pc")).copied().unwrap_or(0)));
-        code.push_str("        tick_gb_inline(signals, old_clocks, next_regs);\n");
+        code.push_str("        tick_gb_inline(signals, old_clocks, next_regs, boot_rom, boot_rom_len);\n");
         code.push_str("        evaluate_inline(signals); // Full evaluate after tick (registers changed)\n");
+        // Re-inject boot ROM data immediately after full evaluate (HDL has boot_do <= 0xFF placeholder)
+        code.push_str(&format!("        let boot_addr_ph4 = (signals[{}] & 0xFF) as usize;\n", gb_boot_rom_addr_idx));
+        code.push_str("        let boot_data_ph4 = if boot_addr_ph4 < boot_rom_len { boot_rom[boot_addr_ph4] } else { 0xFF };\n");
+        code.push_str(&format!("        signals[{}] = boot_data_ph4 as u64;\n", gb_boot_do_idx));
+        // Re-inject cart ROM data too (same reason)
+        code.push_str(&format!("        let rom_addr_ph4 = ((signals[{}] as usize) << 15) | (signals[{}] as usize);\n",
+                              gb_ext_bus_a15_idx, gb_ext_bus_addr_idx));
+        code.push_str("        let rom_data_ph4 = if rom_addr_ph4 < rom_len { rom[rom_addr_ph4] } else { 0xFF };\n");
+        code.push_str(&format!("        signals[{}] = rom_data_ph4 as u64;\n", gb_cart_do_idx));
         // DMG mode: Force cpu_clken=1 and sm83_clken=1 after full evaluate (bypasses SpeedControl which gates ce)
         if self.cpu_clken_idx > 0 {
             code.push_str(&format!("        signals[{}] = 1; // cpu_clken = 1 (DMG mode bypass)\n", self.cpu_clken_idx));
@@ -1938,24 +2138,6 @@ impl IrSimulator {
         if self.sm83_clken_idx > 0 {
             code.push_str(&format!("        signals[{}] = 1; // sm83_clken = 1 (DMG mode bypass)\n", self.sm83_clken_idx));
         }
-        // PC transition tracing - catch when PC changes unexpectedly in V-blank loop area
-        code.push_str(&format!("        let pc_after = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__pc").or_else(|| self.name_to_idx.get("pc")).copied().unwrap_or(0)));
-        code.push_str("        // Trace PC when in critical area ($C0-$E0) or when jumping to unexpected locations\n");
-        code.push_str("        if (pc_before >= 0xC0 && pc_before <= 0xE0) || (pc_after >= 0xC0 && pc_after <= 0xE0) || (pc_after == 0x00CA) {\n");
-        code.push_str(&format!("            let ir_dbg = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__ir").or_else(|| self.name_to_idx.get("ir")).copied().unwrap_or(0)));
-        code.push_str(&format!("            let m_cyc_dbg = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__m_cycle").or_else(|| self.name_to_idx.get("m_cycle")).copied().unwrap_or(0)));
-        code.push_str(&format!("            let t_st_dbg = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__t_state").or_else(|| self.name_to_idx.get("t_state")).copied().unwrap_or(0)));
-        code.push_str(&format!("            let jump_e_dbg = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__jump_e").or_else(|| self.name_to_idx.get("jump_e")).copied().unwrap_or(0)));
-        code.push_str(&format!("            let sp_dbg = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__sp").or_else(|| self.name_to_idx.get("sp")).copied().unwrap_or(0)));
-        code.push_str(&format!("            let wz_dbg = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__wz").or_else(|| self.name_to_idx.get("wz")).copied().unwrap_or(0)));
-        code.push_str(&format!("            let cb_prefix_dbg = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__cb_prefix").or_else(|| self.name_to_idx.get("cb_prefix")).copied().unwrap_or(0)));
-        code.push_str(&format!("            let cb_ir_dbg = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__cb_ir").or_else(|| self.name_to_idx.get("cb_ir")).copied().unwrap_or(0)));
-        code.push_str(&format!("            let pop_op_dbg = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__pop_op").or_else(|| self.name_to_idx.get("pop_op")).copied().unwrap_or(0)));
-        code.push_str(&format!("            let push_op_dbg = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__push_op").or_else(|| self.name_to_idx.get("push_op")).copied().unwrap_or(0)));
-        code.push_str("            eprintln!(\"PC: ${:04X} -> ${:04X} | IR=${:02X} M={} T={} | pop={} push={} | SP=${:04X}\",\n");
-        code.push_str("                pc_before, pc_after, ir_dbg, m_cyc_dbg, t_st_dbg, pop_op_dbg, push_op_dbg, sp_dbg);\n");
-        code.push_str("        }\n\n");
-
         // After tick: combined memory handling
         code.push_str("        // === PHASE 5: Memory after tick ===\n");
         // ROM injection
@@ -1984,19 +2166,27 @@ impl IrSimulator {
         }
         code.push_str("        }\n");
 
-        code.push_str("        evaluate_memory_inline(signals); // Partial evaluate (memory/clock only)\n");
-        // Re-set ce=1 and speed_ctrl__ce=1 after evaluate (they may have been reset)
-        code.push_str(&format!("        signals[{}] = 1; // ce = 1 (re-set)\n", self.gb_ce_idx));
+        // CRITICAL: Force ALL ce signals BEFORE evaluate_memory_inline so lcd_clkena is computed correctly
+        // lcd_clkena = mode3 & lcdc_on & (pcnt < 160) & ce & (h_div_cnt == 0)
+        // Must force entire ce chain: ce -> gb_core__ce -> gb_core__video_unit__ce
+        code.push_str(&format!("        signals[{}] = 1; // ce = 1 (BEFORE evaluate)\n", self.gb_ce_idx));
         if self.speed_ctrl_ce_idx > 0 {
-            code.push_str(&format!("        signals[{}] = 1; // speed_ctrl__ce = 1 (re-set)\n", self.speed_ctrl_ce_idx));
+            code.push_str(&format!("        signals[{}] = 1; // speed_ctrl__ce = 1\n", self.speed_ctrl_ce_idx));
         }
-        // DMG mode: Force cpu_clken=1 and sm83_clken=1 after final partial evaluate (bypasses SpeedControl)
+        if self.gb_core_ce_idx > 0 && self.gb_core_ce_idx != self.gb_ce_idx {
+            code.push_str(&format!("        signals[{}] = 1; // gb_core__ce = 1\n", self.gb_core_ce_idx));
+        }
+        if self.video_unit_ce_idx > 0 {
+            code.push_str(&format!("        signals[{}] = 1; // video_unit__ce = 1 (for lcd_clkena)\n", self.video_unit_ce_idx));
+        }
         if self.cpu_clken_idx > 0 {
-            code.push_str(&format!("        signals[{}] = 1; // cpu_clken = 1 (DMG mode bypass)\n", self.cpu_clken_idx));
+            code.push_str(&format!("        signals[{}] = 1; // cpu_clken = 1\n", self.cpu_clken_idx));
         }
         if self.sm83_clken_idx > 0 {
-            code.push_str(&format!("        signals[{}] = 1; // sm83_clken = 1 (DMG mode bypass)\n", self.sm83_clken_idx));
+            code.push_str(&format!("        signals[{}] = 1; // sm83_clken = 1\n", self.sm83_clken_idx));
         }
+
+        code.push_str("        evaluate_memory_inline(signals); // Partial evaluate - uses ce=1 for lcd_clkena\n");
         code.push_str("\n");
 
         // LCD pixel capture logic
@@ -2352,6 +2542,24 @@ impl IrSimulator {
                 let lcd_on = self.signals[self.lcd_on_idx];
                 let lcd_data_gb = self.signals[self.lcd_data_gb_idx];
                 eprintln!("  lcd_clkena_sig={}, lcd_vsync_sig={}, lcd_on_sig={}, lcd_data_gb_sig={}", lcd_clkena, lcd_vsync, lcd_on, lcd_data_gb);
+                eprintln!("  [DEBUG] About to access PPU signals, indices: mode3={}, lcdc_on={}, h_div={}, pcnt={}",
+                         self.ppu_mode3_idx, self.ppu_lcdc_on_idx, self.ppu_h_div_cnt_idx, self.ppu_pcnt_idx);
+                eprintln!("  [DEBUG] Signals array len: {}", self.signals.len());
+                // PPU internal signals for debugging lcd_clkena
+                let ppu_mode3 = if self.ppu_mode3_idx < self.signals.len() { self.signals[self.ppu_mode3_idx] } else { 999 };
+                let ppu_lcdc_on = if self.ppu_lcdc_on_idx < self.signals.len() { self.signals[self.ppu_lcdc_on_idx] } else { 999 };
+                let ppu_h_div_cnt = if self.ppu_h_div_cnt_idx < self.signals.len() { self.signals[self.ppu_h_div_cnt_idx] } else { 999 };
+                let ppu_pcnt = if self.ppu_pcnt_idx < self.signals.len() { self.signals[self.ppu_pcnt_idx] } else { 999 };
+                eprintln!("  PPU: mode3={}, lcdc_on={}, h_div_cnt={}, pcnt={}", ppu_mode3, ppu_lcdc_on, ppu_h_div_cnt, ppu_pcnt);
+                // Additional PPU signals for debugging mode3
+                let vblank_idx = *self.name_to_idx.get("gb_core__video_unit__vblank").unwrap_or(&0);
+                let h_cnt_idx = *self.name_to_idx.get("gb_core__video_unit__h_cnt").unwrap_or(&0);
+                let v_cnt_idx = *self.name_to_idx.get("gb_core__video_unit__v_cnt").unwrap_or(&0);
+                let vblank = self.signals.get(vblank_idx).copied().unwrap_or(999);
+                let h_cnt = self.signals.get(h_cnt_idx).copied().unwrap_or(999);
+                let v_cnt = self.signals.get(v_cnt_idx).copied().unwrap_or(999);
+                eprintln!("  PPU counters: vblank={}, h_cnt={}, v_cnt={} (idx: {},{},{})",
+                         vblank, h_cnt, v_cnt, vblank_idx, h_cnt_idx, v_cnt_idx);
                 // Count non-zero pixels in framebuffer
                 let non_zero = self.framebuffer.iter().filter(|&&p| p > 0).count();
                 eprintln!("  framebuffer non-zero pixels: {}/{}", non_zero, self.framebuffer.len());
