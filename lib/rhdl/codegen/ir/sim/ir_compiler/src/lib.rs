@@ -270,6 +270,8 @@ struct IrSimulator {
     gb_vram_do_idx: usize,
     /// VRAM PPU data signal index (for compatibility)
     gb_vram_data_ppu_idx: usize,
+    /// Video unit VRAM data input signal index (PPU tile fetcher input)
+    gb_video_unit_vram_data_idx: usize,
     /// Game Boy boot ROM (256 bytes for DMG)
     gb_boot_rom: Vec<u8>,
     /// Boot ROM enabled signal index
@@ -501,6 +503,10 @@ impl IrSimulator {
         let gb_vram_data_ppu_idx = *name_to_idx.get("gb_core__vram_data_ppu")
             .or_else(|| name_to_idx.get("vram_data_ppu"))
             .unwrap_or(&0);
+        // PPU vram_data input - needs to be set for tile fetcher to work
+        let gb_video_unit_vram_data_idx = *name_to_idx.get("gb_core__video_unit__vram_data")
+            .or_else(|| name_to_idx.get("video_unit__vram_data"))
+            .unwrap_or(&0);
         // Boot ROM signal indices
         let gb_sel_boot_rom_idx = *name_to_idx.get("gb_core__sel_boot_rom")
             .or_else(|| name_to_idx.get("sel_boot_rom"))
@@ -646,6 +652,7 @@ impl IrSimulator {
             gb_vram_addr_ppu_idx,
             gb_vram_do_idx,
             gb_vram_data_ppu_idx,
+            gb_video_unit_vram_data_idx,
             gb_boot_rom: vec![0u8; 256],  // 256 bytes for DMG boot ROM
             gb_sel_boot_rom_idx,
             gb_boot_rom_addr_idx,
@@ -1026,9 +1033,28 @@ impl IrSimulator {
         code.push_str("unsafe fn evaluate_inline(signals: &mut [u64]) {\n");
 
         let levels = self.compute_assignment_levels();
+
+        // Skip signals that are controlled by injection code, not HDL assignments
+        // These would otherwise be overwritten during evaluate, corrupting injected values
+        let skip_targets: std::collections::HashSet<&str> = [
+            // Boot ROM output (HDL has placeholder `boot_do <= 0xFF`)
+            "gb_core__boot_do", "boot_do",
+            // VRAM data chain for PPU tile fetcher
+            // HDL: vram_data_ppu <= vram0.q_b, video_unit.vram_data <= vram_data_ppu
+            // We inject directly into all three signals in the chain
+            "gb_core__vram_data_ppu", "vram_data_ppu",
+            "gb_core__video_unit__vram_data", "video_unit__vram_data",
+            // Don't skip cart_do - it's an input from cartridge, not a placeholder
+            // Don't skip vram0.q_b - that's a register output, not a wire
+        ].iter().copied().collect();
+
         for level in &levels {
             for &assign_idx in level {
                 let assign = &self.ir.assigns[assign_idx];
+                // Skip ROM output signals that are injected externally
+                if skip_targets.contains(assign.target.as_str()) {
+                    continue;
+                }
                 if let Some(&idx) = self.name_to_idx.get(&assign.target) {
                     let width = self.widths.get(idx).copied().unwrap_or(64);
                     let expr_code = self.expr_to_rust(&assign.expr);
@@ -1074,6 +1100,13 @@ impl IrSimulator {
             code.push_str("#[inline(always)]\n");
             code.push_str("unsafe fn evaluate_memory_inline(signals: &mut [u64]) {\n");
 
+            // Skip signals that are controlled by injection code
+            let skip_targets: std::collections::HashSet<&str> = [
+                "gb_core__boot_do", "boot_do",
+                "gb_core__vram_data_ppu", "vram_data_ppu",
+                "gb_core__video_unit__vram_data", "video_unit__vram_data",
+            ].iter().copied().collect();
+
             // Need to evaluate in topological order
             let levels = self.compute_assignment_levels();
             for level in &levels {
@@ -1083,6 +1116,10 @@ impl IrSimulator {
                         continue;
                     }
                     let assign = &self.ir.assigns[assign_idx];
+                    // Skip boot ROM output - it's injected externally
+                    if skip_targets.contains(assign.target.as_str()) {
+                        continue;
+                    }
                     if let Some(&idx) = self.name_to_idx.get(&assign.target) {
                         let width = self.widths.get(idx).copied().unwrap_or(64);
                         let expr_code = self.expr_to_rust(&assign.expr);
@@ -2022,6 +2059,41 @@ impl IrSimulator {
         code.push_str(&format!("            let acc = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__acc").copied().unwrap_or(0)));
         code.push_str(&format!("            let data_out = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__data_out").copied().unwrap_or(0)));
         code.push_str("            eprintln!(\"PC NEW MAX: 0x{:04X}, IR=0x{:02X}, HL=0x{:04X}, DE=0x{:04X}, A=0x{:02X}, data_out=0x{:02X}\", pc_val, ir, hl, de, acc, data_out);\n");
+        code.push_str("            PC_MAX_EVER.store(pc_val, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("        }\n");
+        // Debug: Track when PC jumps backwards significantly (potential reset or bug)
+        code.push_str("        static PC_PREV_TICK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);\n");
+        code.push_str("        static PC_BACKWARD_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("        let pc_prev_tick = PC_PREV_TICK.swap(pc_val, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("        // Detect significant backward jump (more than 0x30 bytes backwards, past known loop ranges)\n");
+        code.push_str("        if pc_prev_tick > pc_val + 0x30 && pc_prev_tick < 0x100 && pc_val < 0x100 {\n");
+        code.push_str("            let count = PC_BACKWARD_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("            if count < 30 {\n");
+        code.push_str(&format!("                let ir_bk = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__ir").copied().unwrap_or(0)));
+        code.push_str(&format!("                let reset_sig = signals[{}];\n", self.name_to_idx.get("reset").or_else(|| self.name_to_idx.get("gb_core__reset")).copied().unwrap_or(0)));
+        code.push_str(&format!("                let sp_val = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__sp").copied().unwrap_or(0)));
+        code.push_str("                eprintln!(\"PC BACKWARD JUMP #{}: 0x{:04X} -> 0x{:04X}, IR=0x{:02X}, reset={}, SP=0x{:04X}\", count, pc_prev_tick, pc_val, ir_bk, reset_sig, sp_val);\n");
+        code.push_str("            }\n");
+        code.push_str("        }\n");
+        // Debug: Track sel_boot_rom transitions
+        code.push_str(&format!("        static SEL_BOOT_ROM_PREV: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);\n"));
+        code.push_str(&format!("        let sel_boot_rom = signals[{}];\n", gb_sel_boot_rom_idx));
+        code.push_str("        let prev_sel = SEL_BOOT_ROM_PREV.swap(sel_boot_rom, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("        if sel_boot_rom != prev_sel {\n");
+        code.push_str("            eprintln!(\"SEL_BOOT_ROM changed: {} -> {}, PC=0x{:04X}\", prev_sel, sel_boot_rom, pc_val);\n");
+        code.push_str("        }\n");
+        // Debug: Track LD HL, $8010 instruction execution (PC=0x0038)
+        code.push_str(&format!("        static LD_HL_TRACE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n"));
+        code.push_str("        if pc_val == 0x0038 || pc_val == 0x0039 || pc_val == 0x003A || pc_val == 0x003B {\n");
+        code.push_str("            let ld_count = LD_HL_TRACE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("            if ld_count < 20 {\n");
+        code.push_str(&format!("                let ir = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__ir").copied().unwrap_or(0)));
+        code.push_str(&format!("                let hl = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__hl").copied().unwrap_or(0)));
+        code.push_str(&format!("                let wz = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__wz").copied().unwrap_or(0)));
+        code.push_str(&format!("                let m_cycle = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__m_cycle").copied().unwrap_or(0)));
+        code.push_str(&format!("                let di_reg = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__di_reg").copied().unwrap_or(0)));
+        code.push_str("                eprintln!(\"LD_HL_TRACE #{}: PC=0x{:04X}, IR=0x{:02X}, HL=0x{:04X}, WZ=0x{:04X}, M={}, DI=0x{:02X}\", ld_count, pc_val, ir, hl, wz, m_cycle, di_reg);\n");
+        code.push_str("            }\n");
         code.push_str("        }\n");
         // Debug: Track VRAM write enable activity
         code.push_str(&format!("        static VRAM_WREN_CHECK_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n"));
@@ -2036,13 +2108,57 @@ impl IrSimulator {
         code.push_str(&format!("                let data_out_val = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__data_out").copied().unwrap_or(0)));
         code.push_str(&format!("                let pc_wr = signals[{}];\n", gb_cpu_pc_idx));
         code.push_str(&format!("                let ir_wr = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__ir").copied().unwrap_or(0)));
-        code.push_str("                eprintln!(\"[VRAM_WREN ACTIVE #{}] addr=0x{:04X}, cpu_do=0x{:02X}, A=0x{:02X}, data_out=0x{:02X}, PC=0x{:04X}, IR=0x{:02X}\", count, addr, data, acc_val, data_out_val, pc_wr, ir_wr);\n");
+        code.push_str(&format!("                let hl_wr = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__hl").copied().unwrap_or(0)));
+        code.push_str("                eprintln!(\"[VRAM_WREN ACTIVE #{}] addr=0x{:04X}, HL=0x{:04X}, cpu_do=0x{:02X}, A=0x{:02X}, PC=0x{:04X}, IR=0x{:02X}\", count, addr, hl_wr, data, acc_val, pc_wr, ir_wr);\n");
+        code.push_str("            }\n");
+        // Also trace writes from the logo decompression area (PC around 0x00C6-0x00C9)
+        code.push_str(&format!("            let pc_deco = signals[{}];\n", gb_cpu_pc_idx));
+        code.push_str("            if pc_deco >= 0x00C0 && pc_deco <= 0x00D0 {\n");
+        code.push_str("                static DECO_WRITE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("                let deco_ct = DECO_WRITE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("                if deco_ct < 30 {\n");
+        code.push_str(&format!("                    let addr_d = (signals[{}] & 0x1FFF) as usize;\n", gb_vram_addr_cpu_idx));
+        code.push_str(&format!("                    let data_d = (signals[{}] & 0xFF) as u8;\n", gb_cpu_do_idx));
+        code.push_str(&format!("                    let hl_d = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__hl").copied().unwrap_or(0)));
+        code.push_str("                    eprintln!(\"DECO_WRITE #{}: PC=0x{:04X}, addr=0x{:04X}, HL=0x{:04X}, data=0x{:02X}\", deco_ct, pc_deco, addr_d, hl_d, data_d);\n");
+        code.push_str("                }\n");
         code.push_str("            }\n");
         code.push_str("        }\n");
         code.push_str("        let check_count = VRAM_WREN_CHECK_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
         code.push_str("        if check_count == 50000 {\n");
         code.push_str("            let active = VRAM_WREN_ACTIVE_COUNT.load(std::sync::atomic::Ordering::Relaxed);\n");
         code.push_str(&format!("            eprintln!(\"[VRAM DEBUG] After 50K cycles: vram_wren_cpu (idx {}) was active {{}} times\", active);\n", gb_vram_wren_cpu_idx));
+        code.push_str("        }\n");
+        // Debug: Check when HL is in tile data range but vram_wren is 0
+        code.push_str(&format!("        let hl_check = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__hl").copied().unwrap_or(0)));
+        code.push_str(&format!("        let ir_check = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__ir").copied().unwrap_or(0)));
+        // Trace ALL LD [HL+], A executions when HL is in VRAM range
+        code.push_str("        if ir_check == 0x22 && hl_check >= 0x8000 && hl_check < 0xA000 {\n");
+        code.push_str("            static LD_HLP_TRACE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("            let ldhlp_ct = LD_HLP_TRACE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("            if ldhlp_ct < 30 {\n");
+        code.push_str(&format!("                let pc_ldhlp = signals[{}];\n", gb_cpu_pc_idx));
+        code.push_str(&format!("                let m_cycle_ldhlp = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__m_cycle").copied().unwrap_or(0)));
+        code.push_str(&format!("                let acc_ldhlp = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__acc").copied().unwrap_or(0)));
+        code.push_str(&format!("                let vram_wren_ldhlp = signals[{}];\n", gb_vram_wren_cpu_idx));
+        code.push_str(&format!("                let vram_addr_ldhlp = signals[{}];\n", gb_vram_addr_cpu_idx));
+        code.push_str(&format!("                let cpu_do_ldhlp = signals[{}];\n", gb_cpu_do_idx));
+        code.push_str("                eprintln!(\"LD_HLP #{}: PC=0x{:04X}, M={}, HL=0x{:04X}, A=0x{:02X}, vram_wren={}, vram_addr=0x{:04X}, cpu_do=0x{:02X}\", ldhlp_ct, pc_ldhlp, m_cycle_ldhlp, hl_check, acc_ldhlp, vram_wren_ldhlp, vram_addr_ldhlp, cpu_do_ldhlp);\n");
+        code.push_str("            }\n");
+        code.push_str("        }\n");
+        code.push_str("        // Check for LD [HL+], A (IR=0x22) or LD [HL-], A (IR=0x32) when HL is in tile data range\n");
+        code.push_str(&format!("        if (ir_check == 0x22 || ir_check == 0x32) && hl_check >= 0x8010 && hl_check < 0x8180 && signals[{}] == 0 {{\n", gb_vram_wren_cpu_idx));
+        code.push_str("            static HL_TILE_NO_WREN_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("            let no_wren_ct = HL_TILE_NO_WREN_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("            if no_wren_ct < 20 {\n");
+        code.push_str(&format!("                let pc_nw = signals[{}];\n", gb_cpu_pc_idx));
+        code.push_str(&format!("                let vram_addr_nw = signals[{}];\n", gb_vram_addr_cpu_idx));
+        code.push_str(&format!("                let sel_vram_nw = signals[{}];\n", self.name_to_idx.get("gb_core__sel_vram").copied().unwrap_or(0)));
+        code.push_str(&format!("                let cpu_wr_n_nw = signals[{}];\n", self.name_to_idx.get("gb_core__cpu_wr_n").or_else(|| self.name_to_idx.get("gb_core__cpu__wr_n")).copied().unwrap_or(0)));
+        code.push_str(&format!("                let cpu_mreq_n_nw = signals[{}];\n", self.name_to_idx.get("gb_core__cpu_mreq_n").or_else(|| self.name_to_idx.get("gb_core__cpu__mreq_n")).copied().unwrap_or(0)));
+        code.push_str(&format!("                let vram_cpu_allow_nw = signals[{}];\n", self.name_to_idx.get("gb_core__vram_cpu_allow").copied().unwrap_or(0)));
+        code.push_str("                eprintln!(\"HL_TILE_NO_WREN #{}: IR=0x{:02X}, HL=0x{:04X}, PC=0x{:04X}, vram_addr=0x{:04X}, sel_vram={}, wr_n={}, mreq_n={}, vram_allow={}\", no_wren_ct, ir_check, hl_check, pc_nw, vram_addr_nw, sel_vram_nw, cpu_wr_n_nw, cpu_mreq_n_nw, vram_cpu_allow_nw);\n");
+        code.push_str("            }\n");
         code.push_str("        }\n");
         // VRAM write with debug
         code.push_str(&format!("        if signals[{}] != 0 {{ // vram_wren_cpu\n", gb_vram_wren_cpu_idx));
@@ -2052,13 +2168,60 @@ impl IrSimulator {
         code.push_str("            if data != 0 {\n");
         code.push_str("                static VRAM_NONZERO_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
         code.push_str("                let count = VRAM_NONZERO_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                if count < 10 {\n");
-        code.push_str("                    eprintln!(\"VRAM NON-ZERO WRITE #{}: addr=0x{:04X}, data=0x{:02X}\", count, addr, data);\n");
-        code.push_str("                } else if count == 10 {\n");
+        code.push_str(&format!("                let pc_v = signals[{}];\n", gb_cpu_pc_idx));
+        code.push_str(&format!("                let hl_v = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__hl").or_else(|| self.name_to_idx.get("cpu__hl")).copied().unwrap_or(0)));
+        code.push_str(&format!("                let ir_v = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__ir").copied().unwrap_or(0)));
+        code.push_str("                if count < 20 {\n");
+        code.push_str("                    eprintln!(\"VRAM NON-ZERO WRITE #{}: addr=0x{:04X}, data=0x{:02X}, PC=0x{:04X}, HL=0x{:04X}, IR=0x{:02X}\", count, addr, data, pc_v, hl_v, ir_v);\n");
+        code.push_str("                } else if count == 20 {\n");
         code.push_str("                    eprintln!(\"(suppressing further non-zero VRAM write messages...)\");\n");
         code.push_str("                }\n");
         code.push_str("            }\n");
-        code.push_str("            if addr < vram_len { vram[addr] = data; }\n");
+        code.push_str("            if addr < vram_len {\n");
+        code.push_str("                vram[addr] = data;\n");
+        // Debug: trace ALL tile data area writes (0x0010-0x017F = tiles 1-23) regardless of data value
+        code.push_str("                if addr >= 0x0010 && addr < 0x0180 {\n");
+        code.push_str("                    static TILE_DATA_WRITE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("                    let td_count = TILE_DATA_WRITE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("                    if td_count < 30 {\n");
+        code.push_str(&format!("                        let pc_td = signals[{}];\n", gb_cpu_pc_idx));
+        code.push_str(&format!("                        let hl_td = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__hl").copied().unwrap_or(0)));
+        code.push_str("                        eprintln!(\"TILE_DATA_WRITE #{}: addr=0x{:04X}, data=0x{:02X}, PC=0x{:04X}, HL=0x{:04X}\", td_count, addr, data, pc_td, hl_td);\n");
+        code.push_str("                    } else if td_count == 30 {\n");
+        code.push_str("                        eprintln!(\"(suppressing further tile data write messages...)\");\n");
+        code.push_str("                    }\n");
+        code.push_str("                }\n");
+        // Also trace ALL writes when HL is in tile data range (0x8010-0x817F)
+        code.push_str(&format!("                let hl_trace = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__hl").copied().unwrap_or(0)));
+        code.push_str("                if hl_trace >= 0x8010 && hl_trace < 0x8180 {\n");
+        code.push_str("                    static HL_TILE_WRITE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("                    let hl_td_count = HL_TILE_WRITE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("                    if hl_td_count < 30 {\n");
+        code.push_str(&format!("                        let pc_hl_td = signals[{}];\n", gb_cpu_pc_idx));
+        code.push_str("                        eprintln!(\"HL_IN_TILE_RANGE_WRITE #{}: addr=0x{:04X}, data=0x{:02X}, PC=0x{:04X}, HL=0x{:04X}\", hl_td_count, addr, data, pc_hl_td, hl_trace);\n");
+        code.push_str("                    }\n");
+        code.push_str("                }\n");
+        // Debug: verify write to specific tilemap location
+        code.push_str("                if addr == 0x1910 {\n");
+        code.push_str(&format!("                    let pc_1910 = signals[{}];\n", gb_cpu_pc_idx));
+        code.push_str(&format!("                    let ir_1910 = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__ir").copied().unwrap_or(0)));
+        code.push_str(&format!("                    let hl_1910 = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__hl").copied().unwrap_or(0)));
+        code.push_str(&format!("                    let cpu_addr_1910 = signals[{}];\n", gb_vram_addr_cpu_idx));
+        code.push_str(&format!("                    let m_cycle_1910 = signals[{}];\n", self.name_to_idx.get("gb_core__cpu__m_cycle").copied().unwrap_or(0)));
+        code.push_str("                    eprintln!(\"VRAM WRITE 0x1910: data=0x{:02X}, after=0x{:02X}, PC=0x{:04X}, IR=0x{:02X}, HL=0x{:04X}, cpu_addr=0x{:04X}, M={}\", data, vram[0x1910], pc_1910, ir_1910, hl_1910, cpu_addr_1910, m_cycle_1910);\n");
+        code.push_str("                }\n");
+        code.push_str("            }\n");
+        // Also trace tilemap writes (0x1800-0x1FFF)
+        code.push_str("            if addr >= 0x1800 && addr < 0x2000 && data != 0 {\n");
+        code.push_str("                static TILEMAP_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("                let tm_count = TILEMAP_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str(&format!("                let pc_tm = signals[{}];\n", gb_cpu_pc_idx));
+        code.push_str("                if tm_count < 20 {\n");
+        code.push_str("                    eprintln!(\"TILEMAP WRITE #{}: addr=0x{:04X}, tile_idx=0x{:02X}, PC=0x{:04X}\", tm_count, addr, data, pc_tm);\n");
+        code.push_str("                } else if tm_count == 20 {\n");
+        code.push_str("                    eprintln!(\"(suppressing further tilemap write messages...)\");\n");
+        code.push_str("                }\n");
+        code.push_str("            }\n");
         code.push_str("        }\n");
         // ZPRAM write (with debug tracing for stack area)
         code.push_str(&format!("        if signals[{}] != 0 {{ // zpram_wren\n", gb_zpram_wren_idx));
@@ -2082,11 +2245,40 @@ impl IrSimulator {
         code.push_str("                zpram[addr] = data;\n");
         code.push_str("            }\n");
         code.push_str("        }\n");
-        // VRAM read injection
+        // VRAM read injection - inject into all signals in the chain for proper propagation
+        // Chain: vram0.q_b -> vram_data_ppu -> video_unit.vram_data
         code.push_str(&format!("        let va_cpu = (signals[{}] & 0x1FFF) as usize;\n", gb_vram_addr_cpu_idx));
         code.push_str(&format!("        let va_ppu = (signals[{}] & 0x1FFF) as usize;\n", gb_vram_addr_ppu_idx));
         code.push_str(&format!("        if va_cpu < vram_len {{ signals[{}] = vram[va_cpu] as u64; }}\n", gb_vram0_q_a_reg_idx));
-        code.push_str(&format!("        if va_ppu < vram_len {{ signals[{}] = vram[va_ppu] as u64; }}\n", gb_vram0_q_b_reg_idx));
+        code.push_str(&format!("        if va_ppu < vram_len {{\n"));
+        code.push_str(&format!("            let vram_ppu_data = vram[va_ppu] as u64;\n"));
+        // Debug: trace PPU VRAM reads from logo area
+        code.push_str("            static PPU_READ_TRACE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("            static PPU_READ_MAX_ADDR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        // Track max PPU address seen
+        code.push_str("            let old_max_addr = PPU_READ_MAX_ADDR.load(std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("            if va_ppu > old_max_addr {\n");
+        code.push_str("                PPU_READ_MAX_ADDR.store(va_ppu, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("                if va_ppu >= 0x0010 && va_ppu < 0x0400 {\n");
+        code.push_str(&format!("                    let v_cnt_m = signals[{}];\n", self.name_to_idx.get("gb_core__video_unit__v_cnt").copied().unwrap_or(0)));
+        code.push_str(&format!("                    let fetch_ph_m = signals[{}];\n", self.name_to_idx.get("gb_core__video_unit__fetch_phase").copied().unwrap_or(0)));
+        code.push_str("                    eprintln!(\"PPU_VRAM_MAX_ADDR: new max 0x{:04X}, data=0x{:02X}, v_cnt={}, fetch_phase={}\", va_ppu, vram_ppu_data, v_cnt_m, fetch_ph_m);\n");
+        code.push_str("                }\n");
+        code.push_str("            }\n");
+        code.push_str("            // Trace reads from tile data area 0x0010+ where logo tiles should be\n");
+        code.push_str("            if vram_ppu_data != 0 && va_ppu >= 0x0010 && va_ppu < 0x0200 {\n");
+        code.push_str("                let trace_ct = PPU_READ_TRACE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("                if trace_ct < 20 {\n");
+        code.push_str(&format!("                    let v_cnt_v = signals[{}];\n", self.name_to_idx.get("gb_core__video_unit__v_cnt").copied().unwrap_or(0)));
+        code.push_str(&format!("                    let h_cnt_v = signals[{}];\n", self.name_to_idx.get("gb_core__video_unit__h_cnt").copied().unwrap_or(0)));
+        code.push_str(&format!("                    let fetch_ph_v = signals[{}];\n", self.name_to_idx.get("gb_core__video_unit__fetch_phase").copied().unwrap_or(0)));
+        code.push_str("                    eprintln!(\"PPU_VRAM_READ #{}: addr=0x{:04X}, data=0x{:02X}, v_cnt={}, h_cnt={}, fetch_phase={}\", trace_ct, va_ppu, vram_ppu_data, v_cnt_v, h_cnt_v, fetch_ph_v);\n");
+        code.push_str("                }\n");
+        code.push_str("            }\n");
+        code.push_str(&format!("            signals[{}] = vram_ppu_data; // vram0.q_b\n", gb_vram0_q_b_reg_idx));
+        code.push_str(&format!("            signals[{}] = vram_ppu_data; // vram_data_ppu\n", self.gb_vram_data_ppu_idx));
+        code.push_str(&format!("            signals[{}] = vram_ppu_data; // video_unit.vram_data\n", self.gb_video_unit_vram_data_idx));
+        code.push_str(&format!("        }}\n"));
         // ZPRAM read injection - inject into both q_a and zpram_do for proper propagation
         code.push_str(&format!("        let za = (signals[{}] & 0x7F) as usize;\n", gb_zpram_addr_idx));
         code.push_str("        if za < zpram_len {\n");
@@ -2148,13 +2340,18 @@ impl IrSimulator {
         code.push_str(&format!("        let boot_addr = (signals[{}] & 0xFF) as usize;\n", gb_boot_rom_addr_idx));
         code.push_str("        let boot_data = if boot_addr < boot_rom_len { boot_rom[boot_addr] } else { 0xFF };\n");
         code.push_str(&format!("        signals[{}] = boot_data as u64;\n", gb_boot_do_idx));
-        // VRAM write + read
+        // VRAM read only - write was done in Phase 3 with correct pre-tick cpu_do value
+        // Phase 5 cpu_do is POST-tick which would be wrong for instructions that are ending
         code.push_str(&format!("        let vram_addr_cpu = (signals[{}] & 0x1FFF) as usize;\n", gb_vram_addr_cpu_idx));
         code.push_str(&format!("        let vram_addr_ppu = (signals[{}] & 0x1FFF) as usize;\n", gb_vram_addr_ppu_idx));
-        code.push_str(&format!("        if signals[{}] != 0 && vram_addr_cpu < vram_len {{ vram[vram_addr_cpu] = (signals[{}] & 0xFF) as u8; }}\n",
-                              gb_vram_wren_cpu_idx, gb_cpu_do_idx));
+        // NO VRAM write here - already done in Phase 3 with correct values
         code.push_str(&format!("        if vram_addr_cpu < vram_len {{ signals[{}] = vram[vram_addr_cpu] as u64; }}\n", gb_vram0_q_a_reg_idx));
-        code.push_str(&format!("        if vram_addr_ppu < vram_len {{ signals[{}] = vram[vram_addr_ppu] as u64; }}\n", gb_vram0_q_b_reg_idx));
+        code.push_str(&format!("        if vram_addr_ppu < vram_len {{\n"));
+        code.push_str(&format!("            let vram_ppu_data_ph5 = vram[vram_addr_ppu] as u64;\n"));
+        code.push_str(&format!("            signals[{}] = vram_ppu_data_ph5; // vram0.q_b\n", gb_vram0_q_b_reg_idx));
+        code.push_str(&format!("            signals[{}] = vram_ppu_data_ph5; // vram_data_ppu\n", self.gb_vram_data_ppu_idx));
+        code.push_str(&format!("            signals[{}] = vram_ppu_data_ph5; // video_unit.vram_data\n", self.gb_video_unit_vram_data_idx));
+        code.push_str(&format!("        }}\n"));
         // ZPRAM read ONLY in Phase 5 (write already done in Phase 3 with correct pre-tick values)
         // Phase 5 writes would use POST-tick cpu_do which is wrong when instruction ends
         code.push_str(&format!("        let zpram_addr = (signals[{}] & 0x7F) as usize;\n", gb_zpram_addr_idx));
