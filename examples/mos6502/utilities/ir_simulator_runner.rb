@@ -41,6 +41,15 @@ class IRSimulatorRunner
     # Check if Rust MOS6502 mode is available
     @use_rust_memory = sim.respond_to?(:mos6502_mode?) && sim.mos6502_mode?
 
+    # Cache clock signal and list indices for proper edge detection in clock_tick
+    # Only needed when using Ruby memory bridging (not @use_rust_memory)
+    if sim.respond_to?(:get_signal_idx) && sim.respond_to?(:get_clock_list_idx)
+      clk_sig_idx = sim.get_signal_idx('clk')
+      @clk_list_idx = clk_sig_idx ? sim.get_clock_list_idx(clk_sig_idx) : -1
+    else
+      @clk_list_idx = -1
+    end
+
     sim
   end
 
@@ -239,6 +248,12 @@ class IRSimulatorRunner
       else
         @bus.write(addr, data)
       end
+    end
+
+    # Set prev_clock to 0 so tick() detects rising edge (0->1)
+    # This is needed because tick() uses prev_clock_values for edge detection
+    if @clk_list_idx && @clk_list_idx >= 0 && @sim.respond_to?(:set_prev_clock)
+      @sim.set_prev_clock(@clk_list_idx, 0)
     end
 
     # Clock rising edge - registers capture values (DFFs update here)
