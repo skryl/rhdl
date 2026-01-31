@@ -1,59 +1,64 @@
 # frozen_string_literal: true
 
-# IR-level bytecode interpreter with Rust backend via Fiddle
+# IR-level bytecode interpreter with Rust backend
 #
 # This simulator operates at the IR level, interpreting Behavior IR using
-# a bytecode interpreter. It's faster than gate-level netlist simulation
-# because it operates on whole words instead of individual bits.
+# a stack-based bytecode interpreter. It's faster than gate-level netlist
+# simulation because it operates on whole words instead of individual bits.
 
 require 'json'
-require 'fiddle'
-require 'rbconfig'
 
 module RHDL
   module Codegen
     module IR
-        # Determine library path based on platform
-        INTERPRETER_EXT_DIR = File.expand_path('ir_interpreter/lib', __dir__)
-        INTERPRETER_LIB_NAME = case RbConfig::CONFIG['host_os']
-        when /darwin/ then 'ir_interpreter.dylib'
-        when /mswin|mingw/ then 'ir_interpreter.dll'
-        else 'ir_interpreter.so'
+      # Determine library path based on platform
+      IR_INTERPRETER_EXT_DIR = File.expand_path('ir_interpreter/lib', __dir__)
+      IR_INTERPRETER_LIB_NAME = case RbConfig::CONFIG['host_os']
+      when /darwin/ then 'ir_interpreter.bundle'
+      when /mswin|mingw/ then 'ir_interpreter.dll'
+      else 'ir_interpreter.so'
+      end
+      IR_INTERPRETER_LIB_PATH = File.join(IR_INTERPRETER_EXT_DIR, IR_INTERPRETER_LIB_NAME)
+
+      # Try to load interpreter extension
+      IR_INTERPRETER_AVAILABLE = begin
+        if File.exist?(IR_INTERPRETER_LIB_PATH)
+          $LOAD_PATH.unshift(IR_INTERPRETER_EXT_DIR) unless $LOAD_PATH.include?(IR_INTERPRETER_EXT_DIR)
+          require 'ir_interpreter'
+          true
+        else
+          false
         end
-        INTERPRETER_LIB_PATH = File.join(INTERPRETER_EXT_DIR, INTERPRETER_LIB_NAME)
+      rescue LoadError => e
+        warn "IrInterpreter extension not available: #{e.message}" if ENV['RHDL_DEBUG']
+        false
+      end
 
-        # Try to load interpreter extension via Fiddle
-        INTERPRETER_AVAILABLE = File.exist?(INTERPRETER_LIB_PATH)
+      # Backwards compatibility alias
+      RTL_INTERPRETER_AVAILABLE = IR_INTERPRETER_AVAILABLE
 
-        # Wrapper class that uses Rust interpreter via Fiddle
-        class IrInterpreterWrapper
+      # Wrapper class that uses Rust interpreter if available
+      class IrInterpreterWrapper
         attr_reader :ir_json, :sub_cycles
 
         # @param ir_json [String] JSON representation of the IR
         # @param allow_fallback [Boolean] Allow fallback to Ruby implementation
         # @param sub_cycles [Integer] Number of sub-cycles per CPU cycle (default: 14)
+        #   - 14: Full timing accuracy
+        #   - 7: ~2x faster, good accuracy
+        #   - 2: ~7x faster, minimal accuracy
         def initialize(ir_json, allow_fallback: true, sub_cycles: 14)
           @ir_json = ir_json
           @sub_cycles = sub_cycles.clamp(1, 14)
 
-          if INTERPRETER_AVAILABLE
-            begin
-              load_library
-              create_simulator
-              @backend = :interpret
-            rescue => e
-              raise e unless allow_fallback
-              warn "Native interpreter failed: #{e.message}, falling back to Ruby" if ENV['RHDL_DEBUG']
-              @sim = RubyIrSim.new(ir_json)
-              @backend = :ruby
-              @fallback = true
-            end
+          if IR_INTERPRETER_AVAILABLE
+            @sim = IrInterpreter.new(ir_json, @sub_cycles)
+            @backend = :interpret
           elsif allow_fallback
             @sim = RubyIrSim.new(ir_json)
             @backend = :ruby
-            @fallback = true
           else
-            raise LoadError, "IR interpreter extension not found at: #{INTERPRETER_LIB_PATH}\nRun 'rake native:build' to build it."
+            raise LoadError, "IR interpreter extension not found at: #{IR_INTERPRETER_LIB_PATH}\nRun 'rake native:build' to build it."
           end
         end
 
@@ -62,100 +67,47 @@ module RHDL
         end
 
         def native?
-          INTERPRETER_AVAILABLE && @backend == :interpret
+          IR_INTERPRETER_AVAILABLE && @backend == :interpret
         end
 
         def poke(name, value)
-          return @sim.poke(name, value) if @fallback
-          @fn_poke.call(@ctx, name, value)
+          @sim.poke(name, value)
         end
 
         def peek(name)
-          return @sim.peek(name) if @fallback
-          @fn_peek.call(@ctx, name)
-        end
-
-        def has_signal?(name)
-          return @sim.has_signal?(name) if @fallback && @sim.respond_to?(:has_signal?)
-          @fn_has_signal.call(@ctx, name) != 0
+          @sim.peek(name)
         end
 
         def evaluate
-          return @sim.evaluate if @fallback
-          @fn_evaluate.call(@ctx)
+          @sim.evaluate
         end
 
         def tick
-          return @sim.tick if @fallback
-          @fn_tick.call(@ctx)
-        end
-
-        def tick_forced
-          return @sim.tick if @fallback  # Ruby fallback doesn't need edge detection
-          @fn_tick_forced.call(@ctx)
-        end
-
-        def set_prev_clock(clock_list_idx, value)
-          return if @fallback  # Ruby fallback doesn't track prev clocks
-          @fn_set_prev_clock.call(@ctx, clock_list_idx, value)
-        end
-
-        def get_clock_list_idx(signal_idx)
-          return -1 if @fallback
-          @fn_get_clock_list_idx.call(@ctx, signal_idx)
-        end
-
-        def get_signal_idx(name)
-          return nil if @fallback
-          idx = @fn_get_signal_idx.call(@ctx, name)
-          idx >= 0 ? idx : nil
+          @sim.tick
         end
 
         def reset
-          return @sim.reset if @fallback
-          @fn_reset.call(@ctx)
+          @sim.reset
         end
 
         def signal_count
-          return @sim.signal_count if @fallback
-          @fn_signal_count.call(@ctx)
+          @sim.signal_count
         end
 
         def reg_count
-          return @sim.reg_count if @fallback
-          @fn_reg_count.call(@ctx)
+          @sim.reg_count
         end
 
         def input_names
-          return @sim.input_names if @fallback
-          ptr = @fn_input_names.call(@ctx)
-          return [] if ptr.null?
-          names = ptr.to_s.split(',')
-          @fn_free_string.call(ptr)
-          names
+          @sim.input_names
         end
 
         def output_names
-          return @sim.output_names if @fallback
-          ptr = @fn_output_names.call(@ctx)
-          return [] if ptr.null?
-          names = ptr.to_s.split(',')
-          @fn_free_string.call(ptr)
-          names
+          @sim.output_names
         end
 
         def stats
-          return @sim.stats if @fallback
-          {
-            signal_count: signal_count,
-            reg_count: reg_count,
-            input_count: input_names.length,
-            output_count: output_names.length,
-            comb_op_count: @fn_comb_op_count.call(@ctx),
-            seq_assign_count: @fn_seq_assign_count.call(@ctx),
-            seq_fast_count: @fn_seq_fast_count.call(@ctx),
-            mos6502_mode: mos6502_mode?
-          }
+          @sim.stats
         end
 
         # ====================================================================
@@ -300,235 +252,23 @@ module RHDL
         end
 
         def respond_to_missing?(method_name, include_private = false)
-          (@fallback && @sim.respond_to?(method_name)) || super
+          @sim.respond_to?(method_name) || super
         end
 
         def method_missing(method_name, *args, &block)
-          if @fallback && @sim.respond_to?(method_name)
+          if @sim.respond_to?(method_name)
             @sim.send(method_name, *args, &block)
           else
             super
           end
         end
-
-        private
-
-        def load_library
-          @lib = Fiddle.dlopen(INTERPRETER_LIB_PATH)
-
-          # Core functions
-          @fn_create = Fiddle::Function.new(
-            @lib['ir_sim_create'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOIDP
-          )
-          @fn_destroy = Fiddle::Function.new(
-            @lib['ir_sim_destroy'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
-          @fn_free_error = Fiddle::Function.new(
-            @lib['ir_sim_free_error'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
-          @fn_free_string = Fiddle::Function.new(
-            @lib['ir_sim_free_string'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
-          @fn_poke = Fiddle::Function.new(
-            @lib['ir_sim_poke'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_ULONG],
-            Fiddle::TYPE_INT
-          )
-          @fn_peek = Fiddle::Function.new(
-            @lib['ir_sim_peek'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_ULONG
-          )
-          @fn_has_signal = Fiddle::Function.new(
-            @lib['ir_sim_has_signal'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
-          @fn_get_signal_idx = Fiddle::Function.new(
-            @lib['ir_sim_get_signal_idx'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
-          @fn_evaluate = Fiddle::Function.new(
-            @lib['ir_sim_evaluate'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
-          @fn_tick = Fiddle::Function.new(
-            @lib['ir_sim_tick'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
-          @fn_tick_forced = Fiddle::Function.new(
-            @lib['ir_sim_tick_forced'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
-          @fn_set_prev_clock = Fiddle::Function.new(
-            @lib['ir_sim_set_prev_clock'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_ULONG],
-            Fiddle::TYPE_VOID
-          )
-          @fn_get_clock_list_idx = Fiddle::Function.new(
-            @lib['ir_sim_get_clock_list_idx'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-            Fiddle::TYPE_INT
-          )
-          @fn_reset = Fiddle::Function.new(
-            @lib['ir_sim_reset'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
-          @fn_signal_count = Fiddle::Function.new(
-            @lib['ir_sim_signal_count'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
-          @fn_reg_count = Fiddle::Function.new(
-            @lib['ir_sim_reg_count'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
-          @fn_input_names = Fiddle::Function.new(
-            @lib['ir_sim_input_names'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOIDP
-          )
-          @fn_output_names = Fiddle::Function.new(
-            @lib['ir_sim_output_names'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOIDP
-          )
-          @fn_comb_op_count = Fiddle::Function.new(
-            @lib['ir_sim_comb_op_count'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
-          @fn_seq_assign_count = Fiddle::Function.new(
-            @lib['ir_sim_seq_assign_count'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
-          @fn_seq_fast_count = Fiddle::Function.new(
-            @lib['ir_sim_seq_fast_count'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
-
-          # MOS6502 extension functions
-          @fn_is_mos6502_mode = Fiddle::Function.new(
-            @lib['mos6502_ir_sim_is_mode'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
-          @fn_mos6502_load_memory = Fiddle::Function.new(
-            @lib['mos6502_ir_sim_load_memory'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_INT],
-            Fiddle::TYPE_VOID
-          )
-          @fn_mos6502_set_reset_vector = Fiddle::Function.new(
-            @lib['mos6502_ir_sim_set_reset_vector'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_SHORT],
-            Fiddle::TYPE_VOID
-          )
-          @fn_mos6502_run_cycles = Fiddle::Function.new(
-            @lib['mos6502_ir_sim_run_cycles'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
-            Fiddle::TYPE_SIZE_T
-          )
-          @fn_mos6502_read_memory = Fiddle::Function.new(
-            @lib['mos6502_ir_sim_read_memory'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
-            Fiddle::TYPE_CHAR
-          )
-          @fn_mos6502_write_memory = Fiddle::Function.new(
-            @lib['mos6502_ir_sim_write_memory'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_CHAR],
-            Fiddle::TYPE_VOID
-          )
-          @fn_mos6502_speaker_toggles = Fiddle::Function.new(
-            @lib['mos6502_ir_sim_speaker_toggles'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
-          @fn_mos6502_reset_speaker_toggles = Fiddle::Function.new(
-            @lib['mos6502_ir_sim_reset_speaker_toggles'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
-          @fn_mos6502_run_instructions_with_opcodes = Fiddle::Function.new(
-            @lib['mos6502_ir_sim_run_instructions_with_opcodes'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-            Fiddle::TYPE_INT
-          )
-
-          # Apple II extension functions
-          @fn_is_apple2_mode = Fiddle::Function.new(
-            @lib['apple2_ir_sim_is_mode'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
-          @fn_apple2_load_rom = Fiddle::Function.new(
-            @lib['apple2_ir_sim_load_rom'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
-            Fiddle::TYPE_VOID
-          )
-          @fn_apple2_load_ram = Fiddle::Function.new(
-            @lib['apple2_ir_sim_load_ram'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_SIZE_T],
-            Fiddle::TYPE_VOID
-          )
-          @fn_apple2_run_cpu_cycles = Fiddle::Function.new(
-            @lib['apple2_ir_sim_run_cpu_cycles'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_CHAR, Fiddle::TYPE_INT,
-             Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
-          @fn_apple2_read_ram = Fiddle::Function.new(
-            @lib['apple2_ir_sim_read_ram'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
-            Fiddle::TYPE_SIZE_T
-          )
-          @fn_apple2_write_ram = Fiddle::Function.new(
-            @lib['apple2_ir_sim_write_ram'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
-            Fiddle::TYPE_VOID
-          )
-        end
-
-        def create_simulator
-          error_ptr = Fiddle::Pointer.malloc(Fiddle::SIZEOF_VOIDP)
-          error_ptr[0, Fiddle::SIZEOF_VOIDP] = "\x00" * Fiddle::SIZEOF_VOIDP
-
-          @ctx = @fn_create.call(@ir_json, @ir_json.bytesize, @sub_cycles, error_ptr)
-
-          if @ctx.null?
-            error_addr = error_ptr[0, Fiddle::SIZEOF_VOIDP].unpack1('Q')
-            if error_addr != 0
-              error_str_ptr = Fiddle::Pointer.new(error_addr)
-              error_msg = error_str_ptr.to_s
-              @fn_free_error.call(error_str_ptr)
-              raise "Failed to create IR simulator: #{error_msg}"
-            else
-              raise "Failed to create IR simulator: unknown error"
-            end
-          end
-        end
-      end  # class IrInterpreterWrapper
+      end
 
       # Backwards compatibility alias
       RtlInterpreterWrapper = IrInterpreterWrapper
 
       # Ruby fallback simulator for when native extension is not available
-    class RubyIrSim
+      class RubyIrSim
         def initialize(json)
           @ir = JSON.parse(json, symbolize_names: true, max_nesting: false)
           @signals = {}
@@ -743,7 +483,9 @@ module RHDL
             regs: ir.regs.map { |r| reg_to_hash(r) },
             assigns: ir.assigns.map { |a| assign_to_hash(a) },
             processes: ir.processes.map { |p| process_to_hash(p) },
-            memories: (ir.memories || []).map { |m| memory_to_hash(m) }
+            memories: (ir.memories || []).map { |m| memory_to_hash(m) },
+            write_ports: (ir.write_ports || []).map { |wp| write_port_to_hash(wp) },
+            sync_read_ports: (ir.sync_read_ports || []).map { |rp| sync_read_port_to_hash(rp) }
           }.to_json(max_nesting: false)
         end
 
@@ -873,6 +615,27 @@ module RHDL
             width: mem.width
           }
           hash[:initial_data] = mem.initial_data if mem.initial_data
+          hash
+        end
+
+        def write_port_to_hash(wp)
+          {
+            memory: wp.memory.to_s,
+            clock: wp.clock.to_s,
+            addr: expr_to_hash(wp.addr),
+            data: expr_to_hash(wp.data),
+            enable: expr_to_hash(wp.enable)
+          }
+        end
+
+        def sync_read_port_to_hash(rp)
+          hash = {
+            memory: rp.memory.to_s,
+            clock: rp.clock.to_s,
+            addr: expr_to_hash(rp.addr),
+            data: rp.data.to_s
+          }
+          hash[:enable] = expr_to_hash(rp.enable) if rp.enable
           hash
         end
 
