@@ -296,14 +296,17 @@ RSpec.describe 'GameBoy RHDL Implementation' do
     end
   end
 
-  describe 'IR Runner Long Run', :slow do
+  describe 'IR Runner Long Run' do
     let(:tobu_rom_path) { File.expand_path('../../../examples/gameboy/software/roms/tobu.gb', __dir__) }
 
     before do
       skip 'tobu.gb ROM not found' unless File.exist?(tobu_rom_path)
       begin
         require_relative '../../../examples/gameboy/utilities/gameboy_ir'
-      rescue LoadError => e
+        # Check if native library is available by trying to create a runner
+        test_runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+        test_runner = nil
+      rescue LoadError, RuntimeError => e
         skip "IR runner not available: #{e.message}"
       end
     end
@@ -364,7 +367,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
     end
 
     it 'tracks LY register changes during execution' do
-      runner = RHDL::GameBoy::IrRunner.new(backend: :jit)
+      runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
       runner.load_rom(File.binread(tobu_rom_path))
       runner.reset
 
