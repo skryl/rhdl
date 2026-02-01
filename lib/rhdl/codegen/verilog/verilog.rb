@@ -58,6 +58,9 @@ module RHDL
         lines << "" unless module_def.regs.empty? && module_def.nets.empty? && module_def.memories.empty?
 
         module_def.assigns.each do |assign|
+          # Skip circular assignments (assign x = x) which can happen with unconditional mux fallbacks
+          next if circular_assign?(assign)
+
           lines << "  assign #{sanitize(assign.target)} = #{expr(assign.expr)};"
         end
 
@@ -131,19 +134,7 @@ module RHDL
               when :inout then "inout"
               else "input"
               end
-        decl = "#{dir} #{width_decl(port.width)}#{sanitize(port.name)}".strip
-
-        # Add default value for input ports if specified
-        if port.direction == :in && port.default
-          default_val = if port.width == 1
-                          port.default == 0 ? "1'b0" : "1'b1"
-                        else
-                          "#{port.width}'d#{port.default}"
-                        end
-          decl = "#{decl} = #{default_val}"
-        end
-
-        decl
+        "#{dir} #{width_decl(port.width)}#{sanitize(port.name)}".strip
       end
 
       def width_decl(width)
@@ -374,6 +365,9 @@ module RHDL
         case op
         when :~ then "~"
         when :! then "!"
+        when :reduce_or then "|"
+        when :reduce_and then "&"
+        when :reduce_xor then "^"
         else op.to_s
         end
       end
@@ -397,6 +391,30 @@ module RHDL
           :/ => "/",
           :% => "%"
         }.fetch(op)
+      end
+
+      # Check if an assignment is circular (assign x = x)
+      # This can happen when mux fallback references the target
+      def circular_assign?(assign)
+        target = assign.target.to_s
+        is_self_ref?(assign.expr, target)
+      end
+
+      # Recursively check if an expression is just a reference to the target
+      # or a mux where both branches are the target (condition ? x : x = x)
+      def is_self_ref?(expr_node, target_name)
+        case expr_node
+        when IR::Signal
+          sanitize(expr_node.name) == sanitize(target_name)
+        when IR::Resize
+          is_self_ref?(expr_node.expr, target_name)
+        when IR::Mux
+          # A mux is self-referential if both branches are self-referential
+          is_self_ref?(expr_node.when_true, target_name) &&
+            is_self_ref?(expr_node.when_false, target_name)
+        else
+          false
+        end
       end
 
       def sanitize(name)
