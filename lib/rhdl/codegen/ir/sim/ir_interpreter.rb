@@ -164,43 +164,51 @@ module RHDL
 
         def mos6502_mode?
           return @sim.mos6502_mode? if @fallback && @sim.respond_to?(:mos6502_mode?)
+          return false if @fallback  # Ruby fallback doesn't support MOS6502 mode
           @fn_is_mos6502_mode.call(@ctx) != 0
         end
 
         def mos6502_load_memory(data, offset, is_rom = false)
           return @sim.mos6502_load_memory(data, offset, is_rom) if @fallback && @sim.respond_to?(:mos6502_load_memory)
+          return if @fallback  # Ruby fallback doesn't support MOS6502 memory operations
           data = data.pack('C*') if data.is_a?(Array)
           @fn_mos6502_load_memory.call(@ctx, data, data.bytesize, offset, is_rom ? 1 : 0)
         end
 
         def mos6502_set_reset_vector(addr)
           return @sim.mos6502_set_reset_vector(addr) if @fallback && @sim.respond_to?(:mos6502_set_reset_vector)
+          return if @fallback  # Ruby fallback doesn't support this operation
           @fn_mos6502_set_reset_vector.call(@ctx, addr)
         end
 
         def mos6502_run_cycles(n)
           return @sim.mos6502_run_cycles(n) if @fallback && @sim.respond_to?(:mos6502_run_cycles)
+          return 0 if @fallback  # Ruby fallback doesn't support MOS6502 batched cycles
           @fn_mos6502_run_cycles.call(@ctx, n)
         end
 
         def mos6502_read_memory(addr)
           return @sim.mos6502_read_memory(addr) if @fallback && @sim.respond_to?(:mos6502_read_memory)
+          return 0 if @fallback  # Ruby fallback doesn't support MOS6502 memory operations
           # Mask to unsigned byte (Fiddle::TYPE_CHAR is signed)
           @fn_mos6502_read_memory.call(@ctx, addr) & 0xFF
         end
 
         def mos6502_write_memory(addr, data)
           return @sim.mos6502_write_memory(addr, data) if @fallback && @sim.respond_to?(:mos6502_write_memory)
+          return if @fallback  # Ruby fallback doesn't support MOS6502 memory operations
           @fn_mos6502_write_memory.call(@ctx, addr, data)
         end
 
         def mos6502_speaker_toggles
           return @sim.mos6502_speaker_toggles if @fallback && @sim.respond_to?(:mos6502_speaker_toggles)
+          return 0 if @fallback  # Ruby fallback doesn't support speaker toggles
           @fn_mos6502_speaker_toggles.call(@ctx)
         end
 
         def mos6502_reset_speaker_toggles
           return @sim.mos6502_reset_speaker_toggles if @fallback && @sim.respond_to?(:mos6502_reset_speaker_toggles)
+          return if @fallback  # Ruby fallback doesn't support speaker toggles
           @fn_mos6502_reset_speaker_toggles.call(@ctx)
         end
 
@@ -210,6 +218,7 @@ module RHDL
           if @fallback && @sim.respond_to?(:mos6502_run_instructions_with_opcodes)
             return @sim.mos6502_run_instructions_with_opcodes(n)
           end
+          return [] if @fallback  # Ruby fallback doesn't support instruction stepping
 
           # Allocate buffer for packed results (each is u64: pc<<16 | opcode<<8 | sp)
           buf = Fiddle::Pointer.malloc(n * 8)  # 8 bytes per u64
@@ -231,17 +240,20 @@ module RHDL
 
         def apple2_mode?
           return @sim.apple2_mode? if @fallback && @sim.respond_to?(:apple2_mode?)
+          return false if @fallback  # Ruby fallback doesn't support Apple II mode
           @fn_is_apple2_mode.call(@ctx) != 0
         end
 
         def apple2_load_rom(data)
           return @sim.apple2_load_rom(data) if @fallback && @sim.respond_to?(:apple2_load_rom)
+          return if @fallback  # Ruby fallback doesn't support Apple II ROM loading
           data = data.pack('C*') if data.is_a?(Array)
           @fn_apple2_load_rom.call(@ctx, data, data.bytesize)
         end
 
         def apple2_load_ram(data, offset)
           return @sim.apple2_load_ram(data, offset) if @fallback && @sim.respond_to?(:apple2_load_ram)
+          return if @fallback  # Ruby fallback doesn't support Apple II RAM loading
           data = data.pack('C*') if data.is_a?(Array)
           @fn_apple2_load_ram.call(@ctx, data, data.bytesize, offset)
         end
@@ -250,6 +262,8 @@ module RHDL
           if @fallback && @sim.respond_to?(:apple2_run_cpu_cycles)
             return @sim.apple2_run_cpu_cycles(n, key_data, key_ready)
           end
+          # Ruby fallback doesn't support Apple II batched cycles
+          return { text_dirty: false, key_cleared: false, cycles_run: 0, speaker_toggles: 0 } if @fallback
 
           # Result params: text_dirty (int*), key_cleared (int*), cycles_run (size_t*), speaker_toggles (uint*)
           text_dirty_buf = Fiddle::Pointer.malloc(4)
@@ -272,6 +286,7 @@ module RHDL
           if @fallback && @sim.respond_to?(:apple2_read_ram)
             return @sim.apple2_read_ram(offset, length)
           end
+          return Array.new(length, 0) if @fallback  # Ruby fallback returns zeros
           buf = Fiddle::Pointer.malloc(length)
           actual_len = @fn_apple2_read_ram.call(@ctx, offset, buf, length)
           buf[0, actual_len].unpack('C*')
@@ -279,6 +294,7 @@ module RHDL
 
         def apple2_write_ram(offset, data)
           return @sim.apple2_write_ram(offset, data) if @fallback && @sim.respond_to?(:apple2_write_ram)
+          return if @fallback  # Ruby fallback doesn't support Apple II RAM writing
           data = data.pack('C*') if data.is_a?(Array)
           @fn_apple2_write_ram.call(@ctx, offset, data, data.bytesize)
         end
