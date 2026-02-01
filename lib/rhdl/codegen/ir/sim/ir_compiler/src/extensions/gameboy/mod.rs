@@ -364,8 +364,8 @@ impl GameBoyExtension {
         code.push_str("    signals: *mut u64,\n");
         code.push_str("    signals_len: usize,\n");
         code.push_str("    n: usize,\n");
-        code.push_str("    old_clocks: *mut u64,\n");
-        code.push_str("    next_regs: *mut u64,\n");
+        code.push_str("    _old_clocks: *mut u64,\n");
+        code.push_str("    _next_regs: *mut u64,\n");
         code.push_str("    framebuffer: *mut u8,\n");
         code.push_str("    lcd_state: *mut GbLcdState,\n");
         code.push_str("    rom: *const u8,\n");
@@ -378,8 +378,8 @@ impl GameBoyExtension {
         code.push_str("    zpram_len: usize,\n");
         code.push_str(") -> GbCycleResult {\n");
         code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, signals_len);\n");
-        code.push_str(&format!("    let old_clocks = std::slice::from_raw_parts_mut(old_clocks, {});\n", num_clocks));
-        code.push_str(&format!("    let next_regs = std::slice::from_raw_parts_mut(next_regs, {});\n", num_regs.max(1)));
+        code.push_str(&format!("    let mut old_clocks = [0u64; {}];\n", num_clocks));
+        code.push_str(&format!("    let mut next_regs = [0u64; {}];\n", num_regs.max(1)));
         code.push_str("    let framebuffer = std::slice::from_raw_parts_mut(framebuffer, 160 * 144);\n");
         code.push_str("    let lcd = &mut *lcd_state;\n");
         code.push_str("    let rom = std::slice::from_raw_parts(rom, rom_len);\n");
@@ -387,6 +387,12 @@ impl GameBoyExtension {
         code.push_str("    let boot_rom = std::slice::from_raw_parts(boot_rom, boot_rom_len);\n");
         code.push_str("    let zpram = std::slice::from_raw_parts_mut(zpram, zpram_len);\n");
         code.push_str("    let mut frames_completed: u32 = 0;\n\n");
+
+        // Initialize old_clocks from current signal values
+        for (i, &clk) in clock_indices.iter().enumerate() {
+            code.push_str(&format!("    old_clocks[{}] = signals[{}];\n", i, clk));
+        }
+        code.push_str("\n");
 
         code.push_str("    for _ in 0..n {\n");
 
@@ -459,7 +465,7 @@ impl GameBoyExtension {
             code.push_str(&format!("        old_clocks[{}] = signals[{}];\n", i, clk));
         }
         code.push_str(&format!("        signals[{}] = 1; // clk_sys high\n", clk_sys_idx));
-        code.push_str("        tick_inline(signals, old_clocks, next_regs);\n\n");
+        code.push_str("        tick_inline(signals, &mut old_clocks, &mut next_regs);\n\n");
 
         // VRAM write
         code.push_str(&format!("        let vram_wren = signals[{}];\n", vram_wren_cpu_idx));
