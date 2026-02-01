@@ -121,17 +121,20 @@ rhdl/
 │   │   └── hdl/                 # HDL component tests
 │   └── support/                 # Test helpers
 │
-├── docs/                        # Documentation
-│   ├── hdl_overview.md          # HDL framework intro
-│   ├── simulation_engine.md     # Simulation infrastructure
-│   ├── components.md            # Component reference
-│   ├── cpu_datapath.md          # CPU architecture
-│   ├── mos6502.md               # MOS 6502 implementation
+├── docs/                        # Documentation (13 files)
+│   ├── overview.md              # HDL framework intro
+│   ├── dsl.md                   # Synthesizable DSL guide
+│   ├── simulation.md            # Simulation engine & backends
+│   ├── components.md            # Component reference (50+ components)
+│   ├── 8bit_cpu.md              # Sample 8-bit CPU architecture
+│   ├── mos6502_cpu.md           # MOS 6502 implementation
 │   ├── debugging.md             # Debug/TUI guide
 │   ├── diagrams.md              # Diagram generation
-│   ├── hdl_export.md            # Verilog export
+│   ├── export.md                # Verilog export guide
 │   ├── gate_level_backend.md    # Gate-level synthesis details
-│   └── apple2_io.md             # Apple II I/O support
+│   ├── cli.md                   # CLI reference
+│   ├── apple2.md                # Apple II emulation
+│   └── chisel_feature_gap_analysis.md  # Chisel comparison
 │
 ├── export/                      # Generated exports (all output files)
 │   ├── verilog/                 # Generated Verilog files
@@ -211,19 +214,19 @@ The test suite supports parallel execution for faster test runs (~40% faster wit
 bundle exec rake pspec
 
 # Run with specific number of processes
-bundle exec rake parallel:spec_n[8]
+bundle exec rake pspec:n[8]
 
-# Run 6502 tests in parallel
-bundle exec rake parallel:spec_6502
-
-# Run HDL tests in parallel
-bundle exec rake parallel:spec_hdl
+# Run specific test suites in parallel
+bundle exec rake pspec:mos6502
+bundle exec rake pspec:hdl
+bundle exec rake pspec:lib
+bundle exec rake pspec:apple2
 
 # Record runtimes for optimal load balancing
-bundle exec rake parallel:prepare
+bundle exec rake pspec:prepare
 
 # Run with runtime-based balancing
-bundle exec rake parallel:spec_balanced
+bundle exec rake pspec:balanced
 ```
 
 ### Serial Testing
@@ -235,11 +238,11 @@ bundle exec rake spec
 # Run specific test file
 bundle exec rspec spec/some_spec.rb
 
-# Run 6502 CPU tests
-bundle exec rake spec_6502
-
-# Run with documentation format
-bundle exec rake spec_doc
+# Run specific test suites
+bundle exec rake spec:mos6502
+bundle exec rake spec:hdl
+bundle exec rake spec:lib
+bundle exec rake spec:apple2
 ```
 
 ### Test Coverage
@@ -277,80 +280,128 @@ These tests are conditional (`if: HdlToolchain.iverilog_available?`) and automat
 
 ### Rake Tasks
 
-The project includes rake tasks for development operations. CLI operations are done via the `rhdl` binary.
+The project includes rake tasks for development operations. Run `bundle exec rake -T` to see all available tasks.
 
+**Setup & Dependencies:**
 ```bash
-# Setup development environment (generates binstubs)
-rake setup
+rake setup              # Setup development environment (install deps + binstubs)
+rake deps:install       # Check and install test dependencies (iverilog)
+rake deps:check         # Check test dependencies status
+```
 
-# Check/install test dependencies (iverilog, etc.)
-rake deps:install
-rake deps:check
+**Testing (Serial):**
+```bash
+rake spec               # Run all RSpec tests
+rake spec:mos6502       # Run MOS 6502 specs
+rake spec:hdl           # Run HDL component specs
+rake spec:lib           # Run lib/rhdl specs
+rake spec:apple2        # Run Apple II specs
+```
 
-# Run gate-level simulation benchmark
-rake bench:gates
+**Testing (Parallel - Recommended):**
+```bash
+rake pspec              # Run all tests in parallel (auto-detects CPU count)
+rake pspec:n[8]         # Run with specific number of processes
+rake pspec:mos6502      # Run MOS 6502 specs in parallel
+rake pspec:hdl          # Run HDL specs in parallel
+rake pspec:lib          # Run lib/rhdl specs in parallel
+rake pspec:apple2       # Run Apple II specs in parallel
+rake pspec:prepare      # Record test file runtimes for balancing
+rake pspec:balanced     # Run with runtime-based grouping
+```
 
-# Benchmark tests and show slowest N tests (default 20)
-rake benchmark:tests[30]
+**Benchmarking:**
+```bash
+rake bench              # Run gate benchmark (alias for bench:gates)
+rake bench:gates        # Benchmark gate-level simulation
+rake bench:apple2[N]    # Benchmark Apple2 full system IR (N cycles)
+rake bench:mos6502[N]   # Benchmark MOS6502 CPU IR with memory bridging
+rake bench:verilator[N] # Benchmark Verilator simulation
+rake benchmark          # Benchmark tests showing 20 slowest
+rake benchmark:quick    # Quick benchmark of test categories
+rake benchmark:timing   # Run full test timing analysis
+rake spec:bench:all[N]  # Benchmark all specs (show N slowest)
+rake spec:bench:hdl[N]  # Benchmark HDL specs
+rake spec:bench:mos6502[N] # Benchmark MOS 6502 specs
+```
 
-# Benchmark 6502 tests only
-rake benchmark:tests_6502
+**Native Extension:**
+```bash
+rake native             # Build native ISA simulator (alias for native:build)
+rake native:build       # Build the native ISA simulator Rust extension
+rake native:check       # Check if native extension is available
+rake native:clean       # Clean native extension build artifacts
+```
 
-# Benchmark HDL tests only
-rake benchmark:tests_hdl
-
-# Detailed per-file timing analysis
-rake benchmark:timing
-
-# Quick benchmark by test category
-rake benchmark:quick
-
-# Build native ISA simulator (Rust)
-rake native:build
-
-# Check native extension status
-rake native:check
-
-# Clean native extension build artifacts
-rake native:clean
+**Build & Release:**
+```bash
+rake build              # Build rhdl gem into pkg directory
+rake install            # Build and install gem into system gems
+rake clean              # Remove any temporary products
+rake clobber            # Remove any generated files
 ```
 
 ### CLI Binary (`rhdl`)
 
-All CLI operations are done via the `rhdl` binary:
+All CLI operations are done via the `rhdl` binary. Run `rhdl --help` or `rhdl <command> --help` for detailed options.
 
+**Diagram Generation:**
 ```bash
-# Generate circuit diagrams
-rhdl diagram --all
-
-# Export components to Verilog
-rhdl export --all
-
-# Gate-level synthesis
-rhdl gates --export
-rhdl gates --simcpu
-rhdl gates --stats
-rhdl gates --clean
-
-# TUI debugger
-rhdl tui
-
-# Apple II emulator
-rhdl apple2 --appleiigo --disk game.dsk --hires
-rhdl apple2 --karateka  # Quick start with Karateka
-
-# Disk image utilities
-rhdl disk info disk.dsk
-rhdl disk convert disk.dsk
-rhdl disk memdump disk.dsk --rom appleiigo.rom
-
-# Combined operations
-rhdl generate    # Generate all output files
-rhdl clean       # Clean all generated files
-rhdl regenerate  # Clean and regenerate
+rhdl diagram --all                    # Generate all component diagrams
+rhdl diagram --all --mode gate        # Generate gate-level diagrams
+rhdl diagram RHDL::HDL::ALU --level component --format svg
+rhdl diagram --clean                  # Clean generated diagrams
 ```
 
-**Note:** Binstubs are automatically generated by `bundle install` via `.bundle/config`. If needed, run `bundle binstubs rake rspec parallel_tests` manually.
+**Verilog Export:**
+```bash
+rhdl export --all                     # Export all components to Verilog
+rhdl export --all --scope lib         # Export only lib components
+rhdl export RHDL::HDL::Counter --lang verilog --out ./output
+rhdl export --clean                   # Clean generated Verilog
+```
+
+**Gate-Level Synthesis:**
+```bash
+rhdl gates                            # Export all to gate-level IR (default)
+rhdl gates --export                   # Same as above
+rhdl gates --simcpu                   # Export SimCPU datapath
+rhdl gates --stats                    # Show synthesis statistics
+rhdl gates --clean                    # Clean gate-level output
+```
+
+**TUI Debugger:**
+```bash
+rhdl tui RHDL::HDL::Counter           # Debug a specific component
+rhdl tui sequential/counter           # Use short path
+rhdl tui --list                       # List available components
+rhdl tui --signals inputs --format hex  # Customize display
+```
+
+**Example Emulators:**
+```bash
+rhdl examples mos6502 --demo          # Run 6502 demo
+rhdl examples mos6502 --karateka      # Play Karateka
+rhdl examples mos6502 --mode hdl --sim compile --karateka  # HDL mode
+rhdl examples apple2 --appleiigo --disk game.dsk --hires   # Apple II with disk
+rhdl examples apple2 --mode netlist --sim jit --demo       # Netlist simulation
+```
+
+**Disk Utilities:**
+```bash
+rhdl disk info game.dsk               # Show disk image info
+rhdl disk convert game.dsk -o out.bin # Convert to binary
+rhdl disk memdump game.dsk -r rom.bin # Dump memory after boot
+```
+
+**Combined Operations:**
+```bash
+rhdl generate                         # Generate all output files
+rhdl clean                            # Clean all generated files
+rhdl regenerate                       # Clean and regenerate
+```
+
+**Note:** Binstubs are automatically generated by `bundle install` via `.bundle/config`. See `docs/cli.md` for complete CLI reference.
 
 ### HDL Export
 
@@ -417,46 +468,103 @@ Multi-level diagrams with hierarchy support are available. See `docs/diagrams.md
 
 ## Recent Changes
 
-### Latest Updates (January 2025)
+### Latest Updates (2025)
 - **Class-level hierarchical DSL** - Components use `instance`, `wire`, and `port` methods
   - Replaced block-based `structure do ... end` with class-level declarations
   - `instance :name, ComponentClass, params` - Instantiate sub-components
   - `wire :signal_name, width: N` - Define internal wires (signals)
   - `port :signal => [:component, :port]` - Connect signals to sub-component ports
   - Supports fan-out: `port :clk => [[:comp1, :clk], [:comp2, :clk]]`
-  - Generates Verilog module instantiations automatically
   - Naming aligns with Verilog: `wire` for internal signals, `port` for connections
 - **Parallel test execution** - Test suite runs ~40% faster with parallel_tests gem
-  - New rake tasks: `pspec`, `parallel:spec`, `parallel:spec_6502`, `parallel:spec_hdl`
-  - Runtime-based load balancing with `parallel:prepare` and `parallel:spec_balanced`
+  - Rake tasks: `pspec`, `pspec:mos6502`, `pspec:hdl`, `pspec:lib`, `pspec:apple2`
+  - Runtime-based load balancing with `pspec:prepare` and `pspec:balanced`
   - Auto-detects CPU count for optimal parallelization
 - **Gate-level synthesis** - Complete gate-level lowering for 53 HDL components
   - Primitive gates: AND, OR, XOR, NOT, MUX, BUF, CONST, DFF
   - Complex components: Multiplier (array), Divider (restoring), ALU
   - Hierarchical synthesis for SynthDatapath CPU (505 gates, 24 DFFs)
   - JSON netlist export with statistics
-- **Export directory consolidation** - All output now in `/export/` directory
+- **Multiple simulation backends** - Ruby behavioral, gate-level, native Rust
+  - ISA-level simulation (fastest), HDL behavioral, netlist (gate-level)
+  - Simulator backends: ruby, interpret, jit, compile
+- **Apple II emulation** - Full system with disk support
+  - Video modes: text, lo-res, hi-res with NTSC color artifacts
+  - Disk II controller with DOS 3.3 support
+- **Export directory consolidation** - All output in `/export/`
   - `/export/verilog/` - Generated Verilog files
   - `/export/gates/` - Gate-level JSON netlists
-- **New rake tasks** - `gates:export`, `gates:simcpu`, `gates:stats`, `gates:clean`
-
-### Previous Updates (2025)
-- **Rake task migration** - Moved scripts to rake tasks (`rake diagrams:generate`, `rake hdl:export`, `rake bench:gates`)
-- **MOS 6502 CPU timing fixes** - Fixed RMW instruction timing for shifts
-- **Multi-level diagram generation** - Hierarchical component diagrams
-- **HDL export improvements** - Fixed Verilog resize and export tests
-- **Apple II I/O support** - Memory-mapped I/O for Apple II bus
-- **FIG Forth interpreter tests** - Threaded program execution
 
 ### Documentation
 
-Detailed documentation is available in `/docs/`:
-- Start with `hdl_overview.md` for architecture concepts
-- See `components.md` for the full component reference
-- See `mos6502.md` for MOS 6502 CPU implementation details
-- Use `debugging.md` for TUI and debugging guide
+Detailed documentation is available in `/docs/` (13 files):
+
+**Getting Started:**
+- `overview.md` - HDL framework architecture and concepts
+- `cli.md` - Complete CLI reference
+
+**Design & Implementation:**
+- `dsl.md` - Comprehensive synthesizable DSL guide (ports, behaviors, Vec, Bundle)
+- `components.md` - Full component reference (50+ components)
+- `8bit_cpu.md` - Sample 8-bit CPU architecture
+- `mos6502_cpu.md` - MOS 6502 implementation (189+ tests)
+
+**Simulation & Testing:**
+- `simulation.md` - Simulation backends (Ruby, gate-level, native Rust)
+- `debugging.md` - TUI debugger, breakpoints, watchpoints, VCD export
+
+**Synthesis & Export:**
+- `export.md` - Verilog export guide
+- `gate_level_backend.md` - Gate-level synthesis (53 components, 7 primitives)
+- `diagrams.md` - Diagram generation (SVG, PNG, DOT)
+
+**Advanced:**
+- `apple2.md` - Apple II emulation with disk support
+- `chisel_feature_gap_analysis.md` - Chisel HDL feature comparison
 
 ## Development Guidelines
+
+### Bug Fix Workflow (Test-First)
+
+**When a bug is reported, follow this workflow:**
+
+1. **Do NOT immediately try to fix the bug.** Resist the urge to dive into the code.
+
+2. **Write a failing test first** that reproduces the bug:
+   - Create a test in the appropriate spec file that demonstrates the incorrect behavior
+   - The test should fail with the current code, proving the bug exists
+   - Keep the test focused and minimal - isolate the bug
+
+3. **Use subagents to fix the bug:**
+   - Launch a subagent to investigate and implement the fix
+   - The subagent should run the test to prove the fix works
+   - The test must pass before the fix is considered complete
+
+4. **Verify the fix:**
+   - Run the full test suite to ensure no regressions
+   - The originally failing test should now pass
+
+**Example workflow:**
+```
+User: "The ALU gives wrong results for subtraction with carry"
+
+1. Write test in spec/rhdl/hdl/arithmetic_spec.rb:
+   it "handles subtraction with carry correctly" do
+     # Test case that reproduces the bug
+   end
+
+2. Run test to confirm it fails (proves bug exists)
+
+3. Launch subagent to fix the bug and verify with passing test
+
+4. Run full suite: bundle exec rake pspec:hdl
+```
+
+**Why test-first?**
+- Proves the bug actually exists and is reproducible
+- Prevents regressions - the test remains in the suite forever
+- Provides clear success criteria for the fix
+- Documents the expected behavior
 
 ### CLI Task Classes
 
