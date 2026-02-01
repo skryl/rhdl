@@ -244,6 +244,29 @@ module RHDL
           @fn_apple2_write_ram.call(@ctx, offset, data, data.bytesize)
         end
 
+        # Disk II extension methods
+        def apple2_load_disk_rom(data)
+          data = data.pack('C*') if data.is_a?(Array)
+          @fn_apple2_load_disk_rom.call(@ctx, data, data.bytesize)
+        end
+
+        def apple2_load_track(track, data)
+          data = data.pack('C*') if data.is_a?(Array)
+          @fn_apple2_load_track.call(@ctx, track, data, data.bytesize)
+        end
+
+        def apple2_get_track
+          @fn_apple2_get_track.call(@ctx)
+        end
+
+        def apple2_is_motor_on?
+          @fn_apple2_is_motor_on.call(@ctx) != 0
+        end
+
+        def apple2_get_disk_byte_pos
+          @fn_apple2_get_disk_byte_pos.call(@ctx)
+        end
+
         # Backward compatibility aliases for Apple II methods
         # These allow test code written for the old API to work with the new prefixed API
         alias_method :load_rom, :apple2_load_rom
@@ -251,6 +274,11 @@ module RHDL
         alias_method :run_cpu_cycles, :apple2_run_cpu_cycles
         alias_method :read_ram, :apple2_read_ram
         alias_method :write_ram, :apple2_write_ram
+        alias_method :load_disk_rom, :apple2_load_disk_rom
+        alias_method :load_track, :apple2_load_track
+        alias_method :get_track, :apple2_get_track
+        alias_method :is_motor_on?, :apple2_is_motor_on?
+        alias_method :get_disk_byte_pos, :apple2_get_disk_byte_pos
 
         private
 
@@ -450,6 +478,37 @@ module RHDL
             @lib['apple2_ir_sim_write_ram'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
             Fiddle::TYPE_VOID
+          )
+
+          # Disk II extension functions
+          @fn_apple2_load_disk_rom = Fiddle::Function.new(
+            @lib['apple2_ir_sim_load_disk_rom'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_apple2_load_track = Fiddle::Function.new(
+            @lib['apple2_ir_sim_load_track'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_apple2_get_track = Fiddle::Function.new(
+            @lib['apple2_ir_sim_get_track'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_apple2_is_motor_on = Fiddle::Function.new(
+            @lib['apple2_ir_sim_is_motor_on'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_apple2_get_disk_byte_pos = Fiddle::Function.new(
+            @lib['apple2_ir_sim_get_disk_byte_pos'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
           )
         end
 

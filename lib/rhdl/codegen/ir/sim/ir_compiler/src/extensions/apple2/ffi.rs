@@ -130,3 +130,77 @@ pub unsafe extern "C" fn apple2_ir_sim_write_ram(
         }
     }
 }
+
+/// Load Disk II slot ROM (P5 PROM boot code at $C600-$C6FF)
+#[no_mangle]
+pub unsafe extern "C" fn apple2_ir_sim_load_disk_rom(
+    ctx: *mut IrSimContext,
+    data: *const u8,
+    data_len: usize,
+) {
+    if ctx.is_null() || data.is_null() {
+        return;
+    }
+    let ctx = &mut *ctx;
+    if let Some(ref mut ext) = ctx.apple2 {
+        let data = slice::from_raw_parts(data, data_len);
+        ext.load_disk_rom(data);
+    }
+}
+
+/// Load track nibble data
+#[no_mangle]
+pub unsafe extern "C" fn apple2_ir_sim_load_track(
+    ctx: *mut IrSimContext,
+    track: c_uint,
+    data: *const u8,
+    data_len: usize,
+) {
+    if ctx.is_null() || data.is_null() {
+        return;
+    }
+    let ctx = &mut *ctx;
+    if let Some(ref mut ext) = ctx.apple2 {
+        let data = slice::from_raw_parts(data, data_len);
+        ext.load_track(track as usize, data);
+    }
+}
+
+/// Get current disk track number
+#[no_mangle]
+pub unsafe extern "C" fn apple2_ir_sim_get_track(ctx: *const IrSimContext) -> c_uint {
+    if ctx.is_null() {
+        return 0;
+    }
+    if let Some(ref ext) = (*ctx).apple2 {
+        ext.get_track() as c_uint
+    } else {
+        0
+    }
+}
+
+/// Check if disk motor is on
+#[no_mangle]
+pub unsafe extern "C" fn apple2_ir_sim_is_motor_on(ctx: *const IrSimContext) -> c_int {
+    if ctx.is_null() {
+        return 0;
+    }
+    if let Some(ref ext) = (*ctx).apple2 {
+        if ext.is_motor_on() { 1 } else { 0 }
+    } else {
+        0
+    }
+}
+
+/// Get disk byte position within current track
+#[no_mangle]
+pub unsafe extern "C" fn apple2_ir_sim_get_disk_byte_pos(ctx: *const IrSimContext) -> c_uint {
+    if ctx.is_null() {
+        return 0;
+    }
+    if let Some(ref ext) = (*ctx).apple2 {
+        ext.disk_byte_pos as c_uint
+    } else {
+        0
+    }
+}
