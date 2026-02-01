@@ -26,14 +26,16 @@ class IRSimulatorRunner
   def create_simulator
     sim = case @sim_backend
     when :interpret
-      # IrInterpreterWrapper has built-in Ruby fallback if native extension unavailable
-      RHDL::Codegen::IR::IrInterpreterWrapper.new(@ir_json)
+      # Requires native Rust extension - will raise LoadError if unavailable
+      RHDL::Codegen::IR::IrInterpreterWrapper.new(@ir_json, allow_fallback: false)
     when :jit
-      raise "IR JIT not available" unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
-      RHDL::Codegen::IR::IrJitWrapper.new(@ir_json)
+      # Requires native Rust JIT extension - will raise LoadError if unavailable
+      require 'rhdl/codegen/ir/sim/ir_jit'
+      RHDL::Codegen::IR::IrJitWrapper.new(@ir_json, allow_fallback: false)
     when :compile
-      raise "IR Compiler not available" unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
-      RHDL::Codegen::IR::IrCompilerWrapper.new(@ir_json)
+      # Requires native Rust compiler extension - will raise LoadError if unavailable
+      require 'rhdl/codegen/ir/sim/ir_compiler'
+      RHDL::Codegen::IR::IrCompilerWrapper.new(@ir_json, allow_fallback: false)
     else
       raise "Unknown IR backend: #{@sim_backend}"
     end

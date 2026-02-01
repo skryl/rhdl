@@ -38,34 +38,47 @@ module RHDL
         attr_reader :ir_json, :sub_cycles
 
         # @param ir_json [String] JSON representation of the IR
+        # @param allow_fallback [Boolean] Allow fallback to interpreter if compiler unavailable
         # @param sub_cycles [Integer] Number of sub-cycles per CPU cycle (default: 14)
-        def initialize(ir_json, sub_cycles: 14)
+        def initialize(ir_json, allow_fallback: true, sub_cycles: 14)
           @ir_json = ir_json
           @sub_cycles = sub_cycles.clamp(1, 14)
 
-          unless COMPILER_AVAILABLE
+          if COMPILER_AVAILABLE
+            load_library
+            create_simulator
+            # Auto-compile for performance
+            compile
+            @backend = :compile
+          elsif allow_fallback
+            require_relative 'ir_interpreter'
+            @sim = IrInterpreterWrapper.new(ir_json, allow_fallback: true, sub_cycles: @sub_cycles)
+            @backend = @sim.native? ? :interpret : :ruby
+            @fallback = true
+          else
             raise LoadError, "IR Compiler library not found at: #{COMPILER_LIB_PATH}\nRun 'rake native:build' to build it."
           end
-
-          load_library
-          create_simulator
-          # Auto-compile for performance
-          compile
         end
 
         def simulator_type
-          :hdl_compile
+          :"hdl_#{@backend}"
         end
 
         def native?
-          true
+          COMPILER_AVAILABLE && @backend == :compile
+        end
+
+        def backend
+          @backend
         end
 
         def compiled?
+          return false if @fallback
           @fn_is_compiled.call(@ctx) != 0
         end
 
         def compile
+          return true if @fallback  # No-op for fallback
           error_ptr = Fiddle::Pointer.malloc(Fiddle::SIZEOF_VOIDP)
           result = @fn_compile.call(@ctx, error_ptr)
           if result < 0
@@ -81,6 +94,7 @@ module RHDL
         end
 
         def generated_code
+          return "" if @fallback
           ptr = @fn_generated_code.call(@ctx)
           return "" if ptr.null?
           code = ptr.to_s
@@ -89,38 +103,47 @@ module RHDL
         end
 
         def poke(name, value)
+          return @sim.poke(name, value) if @fallback
           @fn_poke.call(@ctx, name, value)
         end
 
         def peek(name)
+          return @sim.peek(name) if @fallback
           @fn_peek.call(@ctx, name)
         end
 
         def has_signal?(name)
+          return @sim.has_signal?(name) if @fallback && @sim.respond_to?(:has_signal?)
           @fn_has_signal.call(@ctx, name) != 0
         end
 
         def evaluate
+          return @sim.evaluate if @fallback
           @fn_evaluate.call(@ctx)
         end
 
         def tick
+          return @sim.tick if @fallback
           @fn_tick.call(@ctx)
         end
 
         def reset
+          return @sim.reset if @fallback
           @fn_reset.call(@ctx)
         end
 
         def signal_count
+          return @sim.signal_count if @fallback
           @fn_signal_count.call(@ctx)
         end
 
         def reg_count
+          return @sim.reg_count if @fallback
           @fn_reg_count.call(@ctx)
         end
 
         def input_names
+          return @sim.input_names if @fallback
           ptr = @fn_input_names.call(@ctx)
           return [] if ptr.null?
           names = ptr.to_s.split(',')
@@ -129,6 +152,7 @@ module RHDL
         end
 
         def output_names
+          return @sim.output_names if @fallback
           ptr = @fn_output_names.call(@ctx)
           return [] if ptr.null?
           names = ptr.to_s.split(',')
@@ -137,6 +161,7 @@ module RHDL
         end
 
         def stats
+          return @sim.stats if @fallback
           {
             signals: signal_count,
             regs: reg_count,
@@ -151,42 +176,54 @@ module RHDL
         # ====================================================================
 
         def mos6502_mode?
+          return @sim.mos6502_mode? if @fallback && @sim.respond_to?(:mos6502_mode?)
           @fn_is_mos6502_mode.call(@ctx) != 0
         end
 
         def mos6502_load_memory(data, offset, is_rom)
+          return @sim.mos6502_load_memory(data, offset, is_rom) if @fallback && @sim.respond_to?(:mos6502_load_memory)
           data = data.pack('C*') if data.is_a?(Array)
           @fn_mos6502_load_memory.call(@ctx, data, data.bytesize, offset, is_rom ? 1 : 0)
         end
 
         def mos6502_set_reset_vector(addr)
+          return @sim.mos6502_set_reset_vector(addr) if @fallback && @sim.respond_to?(:mos6502_set_reset_vector)
           @fn_mos6502_set_reset_vector.call(@ctx, addr)
         end
 
         def mos6502_run_cycles(n)
+          return @sim.mos6502_run_cycles(n) if @fallback && @sim.respond_to?(:mos6502_run_cycles)
           @fn_mos6502_run_cycles.call(@ctx, n)
         end
 
         def mos6502_read_memory(addr)
+          return @sim.mos6502_read_memory(addr) if @fallback && @sim.respond_to?(:mos6502_read_memory)
           # Mask to unsigned byte (Fiddle::TYPE_CHAR is signed)
           @fn_mos6502_read_memory.call(@ctx, addr) & 0xFF
         end
 
         def mos6502_write_memory(addr, data)
+          return @sim.mos6502_write_memory(addr, data) if @fallback && @sim.respond_to?(:mos6502_write_memory)
           @fn_mos6502_write_memory.call(@ctx, addr, data)
         end
 
         def mos6502_speaker_toggles
+          return @sim.mos6502_speaker_toggles if @fallback && @sim.respond_to?(:mos6502_speaker_toggles)
           @fn_mos6502_speaker_toggles.call(@ctx)
         end
 
         def mos6502_reset_speaker_toggles
+          return @sim.mos6502_reset_speaker_toggles if @fallback && @sim.respond_to?(:mos6502_reset_speaker_toggles)
           @fn_mos6502_reset_speaker_toggles.call(@ctx)
         end
 
         # Run N instructions and return array of [pc, opcode, sp] tuples
         # Uses Rust-native instruction stepping for accurate state tracking
         def mos6502_run_instructions_with_opcodes(n)
+          if @fallback && @sim.respond_to?(:mos6502_run_instructions_with_opcodes)
+            return @sim.mos6502_run_instructions_with_opcodes(n)
+          end
+
           # Allocate buffer for packed results (each is u64: pc<<16 | opcode<<8 | sp)
           buf = Fiddle::Pointer.malloc(n * 8)  # 8 bytes per u64
           count = @fn_mos6502_run_instructions_with_opcodes.call(@ctx, n, buf, n)
@@ -206,20 +243,27 @@ module RHDL
         # ====================================================================
 
         def apple2_mode?
+          return @sim.apple2_mode? if @fallback && @sim.respond_to?(:apple2_mode?)
           @fn_is_apple2_mode.call(@ctx) != 0
         end
 
         def apple2_load_rom(data)
+          return @sim.apple2_load_rom(data) if @fallback && @sim.respond_to?(:apple2_load_rom)
           data = data.pack('C*') if data.is_a?(Array)
           @fn_apple2_load_rom.call(@ctx, data, data.bytesize)
         end
 
         def apple2_load_ram(data, offset)
+          return @sim.apple2_load_ram(data, offset) if @fallback && @sim.respond_to?(:apple2_load_ram)
           data = data.pack('C*') if data.is_a?(Array)
           @fn_apple2_load_ram.call(@ctx, data, data.bytesize, offset)
         end
 
         def apple2_run_cpu_cycles(n, key_data, key_ready)
+          if @fallback && @sim.respond_to?(:apple2_run_cpu_cycles)
+            return @sim.apple2_run_cpu_cycles(n, key_data, key_ready)
+          end
+
           # Result struct: text_dirty (int), key_cleared (int), cycles_run (uint), speaker_toggles (uint)
           result_buf = Fiddle::Pointer.malloc(16)  # 4 x 4 bytes
           @fn_apple2_run_cpu_cycles.call(@ctx, n, key_data, key_ready ? 1 : 0, result_buf)
@@ -234,14 +278,30 @@ module RHDL
         end
 
         def apple2_read_ram(offset, length)
+          if @fallback && @sim.respond_to?(:apple2_read_ram)
+            return @sim.apple2_read_ram(offset, length)
+          end
           buf = Fiddle::Pointer.malloc(length)
           actual_len = @fn_apple2_read_ram.call(@ctx, offset, buf, length)
           buf[0, actual_len].unpack('C*')
         end
 
         def apple2_write_ram(offset, data)
+          return @sim.apple2_write_ram(offset, data) if @fallback && @sim.respond_to?(:apple2_write_ram)
           data = data.pack('C*') if data.is_a?(Array)
           @fn_apple2_write_ram.call(@ctx, offset, data, data.bytesize)
+        end
+
+        def respond_to_missing?(method_name, include_private = false)
+          (@fallback && @sim.respond_to?(method_name)) || super
+        end
+
+        def method_missing(method_name, *args, &block)
+          if @fallback && @sim.respond_to?(method_name)
+            @sim.send(method_name, *args, &block)
+          else
+            super
+          end
         end
 
         private
