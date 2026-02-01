@@ -84,7 +84,7 @@ RSpec.describe RHDL::Apple2::Apple2 do
     end
   end
 
-  describe 'clock generation' do
+  describe 'clock generation', :slow do
     it 'generates clk_2m from timing generator' do
       reset_system
       values = []
@@ -310,7 +310,7 @@ RSpec.describe RHDL::Apple2::Apple2 do
     end
   end
 
-  describe 'video generation' do
+  describe 'video generation', :slow do
     before do
       reset_system
     end
