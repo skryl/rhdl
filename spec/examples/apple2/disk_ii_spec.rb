@@ -413,6 +413,255 @@ RSpec.describe RHDL::Apple2::DiskII do
     end
   end
 
+  describe 'actual DSK file reading' do
+    # Paths to disk images
+    DISK_DIR = File.join(__dir__, '../../../examples/apple2/software/disks')
+    KARATEKA_DSK_PATH = File.join(DISK_DIR, 'karateka.dsk')
+    KARATEKA_AVAILABLE = File.exist?(KARATEKA_DSK_PATH)
+
+    # DOS 3.3 sector interleave table
+    DOS33_INTERLEAVE = [0x00, 0x07, 0x0E, 0x06, 0x0D, 0x05, 0x0C, 0x04,
+                        0x0B, 0x03, 0x0A, 0x02, 0x09, 0x01, 0x08, 0x0F].freeze
+
+    # 6-and-2 translation table
+    TRANSLATE_62 = [0x96, 0x97, 0x9A, 0x9B, 0x9D, 0x9E, 0x9F, 0xA6,
+                    0xA7, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF, 0xB2, 0xB3,
+                    0xB4, 0xB5, 0xB6, 0xB7, 0xB9, 0xBA, 0xBB, 0xBC,
+                    0xBD, 0xBE, 0xBF, 0xCB, 0xCD, 0xCE, 0xCF, 0xD3,
+                    0xD6, 0xD7, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE,
+                    0xDF, 0xE5, 0xE6, 0xE7, 0xE9, 0xEA, 0xEB, 0xEC,
+                    0xED, 0xEE, 0xEF, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6,
+                    0xF7, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF].freeze
+
+    def convert_track_to_nibbles(dsk_data, track_num)
+      track_offset = track_num * 16 * 256
+      nibbles = []
+
+      16.times do |sector|
+        physical_sector = DOS33_INTERLEAVE[sector]
+        sector_data = dsk_data[track_offset + physical_sector * 256, 256] || Array.new(256, 0)
+
+        # Sync bytes (self-sync FF bytes)
+        48.times { nibbles << 0xFF }
+
+        # Address field prologue
+        nibbles.concat([0xD5, 0xAA, 0x96])
+        # Volume (4-and-4 encoded)
+        nibbles.concat(encode_4_and_4(0xFE))
+        # Track (4-and-4 encoded)
+        nibbles.concat(encode_4_and_4(track_num))
+        # Sector (4-and-4 encoded)
+        nibbles.concat(encode_4_and_4(sector))
+        # Checksum (4-and-4 encoded)
+        nibbles.concat(encode_4_and_4(0xFE ^ track_num ^ sector))
+        # Address field epilogue
+        nibbles.concat([0xDE, 0xAA, 0xEB])
+
+        # Gap between address and data
+        6.times { nibbles << 0xFF }
+
+        # Data field prologue
+        nibbles.concat([0xD5, 0xAA, 0xAD])
+        # Encoded sector data (6-and-2)
+        nibbles.concat(encode_6_and_2(sector_data))
+        # Data field epilogue
+        nibbles.concat([0xDE, 0xAA, 0xEB])
+      end
+
+      # Pad to standard track size (6656 bytes)
+      while nibbles.length < 6656
+        nibbles << 0xFF
+      end
+      nibbles[0, 6656]
+    end
+
+    def encode_4_and_4(value)
+      [(value >> 1) | 0xAA, value | 0xAA]
+    end
+
+    def encode_6_and_2(sector_data)
+      # Build auxiliary buffer (86 bytes of 2-bit values)
+      aux = Array.new(86, 0)
+      86.times do |i|
+        val = 0
+        val |= ((sector_data[i] & 0x01) << 1) | ((sector_data[i] & 0x02) >> 1) if i < 256
+        val |= ((sector_data[i + 86] & 0x01) << 3) | ((sector_data[i + 86] & 0x02) << 1) if i + 86 < 256
+        val |= ((sector_data[i + 172] & 0x01) << 5) | ((sector_data[i + 172] & 0x02) << 3) if i + 172 < 256
+        aux[i] = val & 0x3F
+      end
+
+      # Build main data (256 bytes shifted right by 2)
+      main = sector_data.map { |b| (b >> 2) & 0x3F }
+
+      # Combine and translate with running checksum
+      combined = aux + main
+      result = []
+      checksum = 0
+      combined.each do |val|
+        result << TRANSLATE_62[val ^ checksum]
+        checksum = val
+      end
+      result << TRANSLATE_62[checksum]  # Final checksum byte
+
+      result
+    end
+
+    context 'with Karateka disk image', if: KARATEKA_AVAILABLE do
+      before do
+        @dsk_data = File.binread(KARATEKA_DSK_PATH).bytes
+      end
+
+      it 'converts and loads track 0 nibbles correctly' do
+        track_nibbles = convert_track_to_nibbles(@dsk_data, 0)
+
+        # Load track data into disk controller
+        disk.load_track(0, track_nibbles)
+
+        # Verify address field prologue exists in track data using direct read
+        # Search first 500 bytes for the pattern
+        found_address_mark = false
+        (0..497).each do |i|
+          if disk.read_track_byte(i) == 0xD5 &&
+             disk.read_track_byte(i + 1) == 0xAA &&
+             disk.read_track_byte(i + 2) == 0x96
+            found_address_mark = true
+            break
+          end
+        end
+
+        expect(found_address_mark).to be(true),
+          "Failed to find address field prologue (D5 AA 96) in track data"
+      end
+
+      it 'contains all 16 sector addresses on track 0' do
+        track_nibbles = convert_track_to_nibbles(@dsk_data, 0)
+        disk.load_track(0, track_nibbles)
+
+        # Count address marks in track data using direct read
+        address_marks_found = 0
+
+        (0..(RHDL::Apple2::DiskII::TRACK_SIZE - 3)).each do |i|
+          if disk.read_track_byte(i) == 0xD5 &&
+             disk.read_track_byte(i + 1) == 0xAA &&
+             disk.read_track_byte(i + 2) == 0x96
+            address_marks_found += 1
+          end
+        end
+
+        # May find more than 16 due to D5 AA 96 patterns in encoded data
+        expect(address_marks_found).to be >= 16,
+          "Expected at least 16 address marks, found #{address_marks_found}"
+      end
+
+      it 'contains data field prologue after address field' do
+        track_nibbles = convert_track_to_nibbles(@dsk_data, 0)
+        disk.load_track(0, track_nibbles)
+
+        # Look for data field prologue (D5 AA AD)
+        found_data_mark = false
+
+        (0..(RHDL::Apple2::DiskII::TRACK_SIZE - 3)).each do |i|
+          if disk.read_track_byte(i) == 0xD5 &&
+             disk.read_track_byte(i + 1) == 0xAA &&
+             disk.read_track_byte(i + 2) == 0xAD
+            found_data_mark = true
+            break
+          end
+        end
+
+        expect(found_data_mark).to be(true),
+          "Failed to find data field prologue (D5 AA AD)"
+      end
+
+      it 'contains all 16 data field prologues on track 0' do
+        track_nibbles = convert_track_to_nibbles(@dsk_data, 0)
+        disk.load_track(0, track_nibbles)
+
+        # Count data field prologues
+        data_marks_found = 0
+
+        (0..(RHDL::Apple2::DiskII::TRACK_SIZE - 3)).each do |i|
+          if disk.read_track_byte(i) == 0xD5 &&
+             disk.read_track_byte(i + 1) == 0xAA &&
+             disk.read_track_byte(i + 2) == 0xAD
+            data_marks_found += 1
+          end
+        end
+
+        # May find more than 16 due to D5 AA AD patterns in encoded data
+        expect(data_marks_found).to be >= 16,
+          "Expected at least 16 data marks, found #{data_marks_found}"
+      end
+
+      it 'correctly encodes sector data with 6-and-2 encoding' do
+        track_nibbles = convert_track_to_nibbles(@dsk_data, 0)
+        disk.load_track(0, track_nibbles)
+
+        # Find first data field and verify it has valid 6-and-2 encoded bytes
+        # All 6-and-2 encoded bytes have bit patterns in TRANSLATE_62 table
+        data_start = nil
+
+        (0..(RHDL::Apple2::DiskII::TRACK_SIZE - 350)).each do |i|
+          if disk.read_track_byte(i) == 0xD5 &&
+             disk.read_track_byte(i + 1) == 0xAA &&
+             disk.read_track_byte(i + 2) == 0xAD
+            data_start = i + 3
+            break
+          end
+        end
+
+        expect(data_start).not_to be_nil, "Could not find data field"
+
+        # Check that encoded bytes are valid (all should be >= 0x96)
+        # 6-and-2 encoding produces 343 bytes (342 data + 1 checksum)
+        valid_bytes = 0
+        343.times do |j|
+          byte = disk.read_track_byte(data_start + j)
+          valid_bytes += 1 if byte >= 0x96
+        end
+
+        expect(valid_bytes).to eq(343),
+          "Expected all 343 encoded bytes to be >= 0x96, only #{valid_bytes} were"
+      end
+    end
+
+    context 'without disk image' do
+      it 'can load and read synthetic track data' do
+        # Create a minimal valid track with one sector
+        nibbles = []
+        48.times { nibbles << 0xFF }  # Sync
+        nibbles.concat([0xD5, 0xAA, 0x96])  # Address prologue
+        nibbles.concat(encode_4_and_4(0xFE))  # Volume
+        nibbles.concat(encode_4_and_4(0))     # Track 0
+        nibbles.concat(encode_4_and_4(0))     # Sector 0
+        nibbles.concat(encode_4_and_4(0xFE))  # Checksum
+        nibbles.concat([0xDE, 0xAA, 0xEB])    # Epilogue
+        6.times { nibbles << 0xFF }           # Gap
+        nibbles.concat([0xD5, 0xAA, 0xAD])    # Data prologue
+        343.times { nibbles << 0x96 }         # Dummy encoded data
+        nibbles.concat([0xDE, 0xAA, 0xEB])    # Epilogue
+
+        # Pad to track size
+        while nibbles.length < 6656
+          nibbles << 0xFF
+        end
+
+        disk.load_track(0, nibbles)
+
+        # Verify track data using direct read
+        # Find address prologue at expected position (after 48 sync bytes)
+        expect(disk.read_track_byte(48)).to eq(0xD5)
+        expect(disk.read_track_byte(49)).to eq(0xAA)
+        expect(disk.read_track_byte(50)).to eq(0x96)
+
+        # Find data prologue (after address field: 48 sync + 3 prologue + 8 addr + 3 epilogue + 6 gap = 68)
+        expect(disk.read_track_byte(68)).to eq(0xD5)
+        expect(disk.read_track_byte(69)).to eq(0xAA)
+        expect(disk.read_track_byte(70)).to eq(0xAD)
+      end
+    end
+  end
+
   describe 'VHDL reference comparison', if: HdlToolchain.ghdl_available? do
     include VhdlReferenceHelper
 
