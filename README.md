@@ -29,13 +29,14 @@ RHDL is a Domain Specific Language (DSL) for designing hardware using Ruby's fle
 | [CLI Reference](docs/cli.md) | Command line interface reference |
 | [DSL Guide](docs/dsl.md) | DSL reference for synthesizable components |
 | [Components](docs/components.md) | Complete reference for all HDL components |
+| [Simulation](docs/simulation.md) | Core simulation engine infrastructure |
 | [Export](docs/export.md) | Verilog and gate-level export |
+| [Gate-Level Backend](docs/gate_level_backend.md) | Gate-level synthesis and simulation |
+| [Diagrams](docs/diagrams.md) | Multi-level circuit diagrams |
+| [Debugging](docs/debugging.md) | Signal probing, breakpoints, and TUI |
 | [8-bit CPU](docs/8bit_cpu.md) | Sample 8-bit CPU reference |
 | [MOS 6502](docs/mos6502_cpu.md) | MOS 6502 CPU implementation |
 | [Apple II](docs/apple2.md) | Apple II emulation |
-| [Simulation](docs/simulation.md) | Core simulation infrastructure |
-| [Debugging](docs/debugging.md) | Signal probing, breakpoints, and TUI |
-| [Diagrams](docs/diagrams.md) | Multi-level circuit diagrams |
 
 ## Quick Start
 
@@ -53,19 +54,19 @@ RHDL provides several DSL constructs for synthesizable hardware:
 #### Combinational Logic
 
 ```ruby
-class SimpleALU < RHDL::HDL::SimComponent
-  port_input :a, width: 8
-  port_input :b, width: 8
-  port_input :op, width: 2
-  port_output :result, width: 8
+class SimpleALU < RHDL::Sim::Component
+  input :a, width: 8
+  input :b, width: 8
+  input :op, width: 2
+  output :result, width: 8
 
   behavior do
-    result <= case_of(op,
+    result <= case_select(op, {
       0 => a + b,
       1 => a - b,
       2 => a & b,
       3 => a | b
-    )
+    }, default: 0)
   end
 end
 ```
@@ -73,11 +74,11 @@ end
 #### Sequential Logic
 
 ```ruby
-class Counter < RHDL::HDL::SequentialComponent
-  port_input :clk
-  port_input :rst
-  port_input :en
-  port_output :count, width: 8
+class Counter < RHDL::Sim::SequentialComponent
+  input :clk
+  input :rst
+  input :en
+  output :count, width: 8
 
   sequential clock: :clk, reset: :rst, reset_values: { count: 0 } do
     count <= mux(en, count + 1, count)
@@ -88,14 +89,14 @@ end
 #### Memory Components
 
 ```ruby
-class RAM256x8 < RHDL::HDL::SimComponent
-  include RHDL::DSL::MemoryDSL
+class RAM256x8 < RHDL::Sim::Component
+  include RHDL::DSL::Memory
 
-  port_input :clk
-  port_input :we
-  port_input :addr, width: 8
-  port_input :din, width: 8
-  port_output :dout, width: 8
+  input :clk
+  input :we
+  input :addr, width: 8
+  input :din, width: 8
+  output :dout, width: 8
 
   memory :mem, depth: 256, width: 8
   sync_write :mem, clock: :clk, enable: :we, addr: :addr, data: :din
@@ -106,13 +107,15 @@ end
 #### State Machines
 
 ```ruby
-class TrafficLight < RHDL::HDL::SequentialComponent
-  include RHDL::DSL::StateMachineDSL
+class TrafficLight < RHDL::Sim::SequentialComponent
+  include RHDL::DSL::StateMachine
 
-  port_input :clk
-  port_input :rst
-  port_input :sensor
-  port_output :red, :yellow, :green
+  input :clk
+  input :rst
+  input :sensor
+  output :red
+  output :yellow
+  output :green
 
   state_machine clock: :clk, reset: :rst do
     state :RED, value: 0 do
@@ -140,12 +143,12 @@ end
 Build complex components from sub-components using `instance`, `wire`, and `port`:
 
 ```ruby
-class MyDatapath < RHDL::HDL::SimComponent
-  port_input :clk
-  port_input :rst
-  port_input :a, width: 8
-  port_input :b, width: 8
-  port_output :result, width: 8
+class MyDatapath < RHDL::Sim::Component
+  input :clk
+  input :rst
+  input :a, width: 8
+  input :b, width: 8
+  output :result, width: 8
 
   # Internal wire
   wire :alu_out, width: 8
