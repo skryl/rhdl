@@ -129,6 +129,10 @@ module GameBoy
     input :rewind_on
     input :rewind_active
 
+    # Debug outputs (for Verilator simulation visibility)
+    output :debug_cpu_pc, width: 16    # CPU Program counter
+    output :debug_cpu_acc, width: 8    # CPU Accumulator
+
     # Internal signals
     wire :cpu_addr, width: 16
     wire :cpu_do, width: 8
@@ -280,6 +284,8 @@ module GameBoy
     port :irq_n => [:cpu, :int_n]
     port :is_gbc => [:cpu, :is_gbc]
     port :reset_n => [:cpu, :reset_n]
+    port [:cpu, :debug_pc] => :debug_cpu_pc
+    port [:cpu, :debug_acc] => :debug_cpu_acc
 
     # Timer connections
     port :sel_timer => [:timer_unit, :cpu_sel]
