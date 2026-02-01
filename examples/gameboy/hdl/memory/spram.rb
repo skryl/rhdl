@@ -2,18 +2,18 @@
 # Corresponds to: reference/rtl/spram.vhd
 #
 # Simple single-port RAM with single clock domain.
-#
-# This is a simplified placeholder. The Game Boy uses various memory
-# sizes instantiated as needed.
+# Uses the Memory DSL for proper simulation and Verilog export.
 
 require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl/dsl/memory'
 
 module GameBoy
   class SPRAM < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
+    include RHDL::DSL::Memory
 
     # Fixed 8KB configuration
     ADDR_WIDTH = 13
@@ -26,30 +26,26 @@ module GameBoy
     input :data_in, width: DATA_WIDTH
     output :data_out, width: DATA_WIDTH
 
-    # Internal register
-    wire :data_out_reg, width: DATA_WIDTH
-
-    behavior do
-      data_out <= data_out_reg
+    # Define single-port memory using Memory DSL
+    memory :mem, depth: DEPTH, width: DATA_WIDTH do |m|
+      # Write port
+      m.write_port clock: :clock, enable: :wren, addr: :address, data: :data_in
+      # Synchronous read port
+      m.sync_read_port clock: :clock, addr: :address, output: :data_out
     end
 
-    sequential clock: :clock, reset_values: { data_out_reg: 0 } do
-      # Placeholder - actual memory behavior in simulator
-      data_out_reg <= data_out_reg
-    end
-
-    # Memory is managed at instance level for simulation
-    def initialize(name = nil, **kwargs)
-      super
-      @ram = Array.new(DEPTH, 0)
-    end
-
+    # Direct memory access for external use (debugging, initialization)
     def read_mem(addr)
-      @ram[addr & (DEPTH - 1)] || 0
+      mem_read(:mem, addr & (DEPTH - 1))
     end
 
     def write_mem(addr, data)
-      @ram[addr & (DEPTH - 1)] = data & 0xFF
+      mem_write(:mem, addr & (DEPTH - 1), data, DATA_WIDTH)
+    end
+
+    # Get the memory array for bulk operations
+    def memory_array
+      @_memory_arrays[:mem]
     end
   end
 end

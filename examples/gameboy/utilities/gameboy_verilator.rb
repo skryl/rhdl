@@ -233,7 +233,20 @@ module RHDL
       end
 
       def read_framebuffer
-        @framebuffer
+        # Read framebuffer from C++ side
+        if @sim_read_framebuffer_fn && @sim_ctx
+          buffer = Fiddle::Pointer.malloc(160 * 144)
+          @sim_read_framebuffer_fn.call(@sim_ctx, buffer)
+          flat = buffer.to_s(160 * 144).bytes
+          # Reshape to 2D array
+          Array.new(SCREEN_HEIGHT) do |y|
+            Array.new(SCREEN_WIDTH) do |x|
+              flat[y * SCREEN_WIDTH + x]
+            end
+          end
+        else
+          @framebuffer
+        end
       end
 
       def read_screen
@@ -471,6 +484,10 @@ module RHDL
         verilog = verilog.gsub(/output\s+(\[\d+:\d+\]\s+)(q_a|q_b)/, 'output reg \1\2')
         verilog = verilog.gsub(/output\s+(q_a|q_b)/, 'output reg \1')
 
+        # Fix SPRAM outputs - data_out should be reg since assigned in always block
+        verilog = verilog.gsub(/output\s+(\[\d+:\d+\]\s+)(data_out)(\s*[;)])/, 'output reg \1\2\3')
+        verilog = verilog.gsub(/output\s+(data_out)(\s*[;)])/, 'output reg \1\2')
+
         verilog
       end
 
@@ -499,6 +516,10 @@ module RHDL
           void sim_load_boot_rom(void* sim, const unsigned char* data, unsigned int len);
           void sim_write_vram(void* sim, unsigned int addr, unsigned char value);
           unsigned char sim_read_vram(void* sim, unsigned int addr);
+
+          // Framebuffer access
+          void sim_read_framebuffer(void* sim, unsigned char* out_buffer);
+          unsigned long sim_get_frame_count(void* sim);
 
           // Cycle result struct
           struct GbCycleResult {
@@ -535,6 +556,7 @@ module RHDL
               unsigned char prev_lcd_clkena;
               unsigned char prev_lcd_vsync;
               unsigned long frame_count;
+              unsigned int clk_counter;       // System clock counter for CPU cycle estimation
           };
 
           extern "C" {
@@ -553,6 +575,7 @@ module RHDL
               ctx->prev_lcd_clkena = 0;
               ctx->prev_lcd_vsync = 0;
               ctx->frame_count = 0;
+              ctx->clk_counter = 0;
               return ctx;
           }
 
@@ -581,14 +604,14 @@ module RHDL
                   ctx->dut->eval();
               }
 
-              // Disable boot ROM mode so CPU reads from cartridge directly
-              // (matches IR simulator behavior which has empty boot ROM = NOPs)
-              ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__boot_rom_enabled = 0;
+              // Note: boot_rom_enabled is internal and may not be accessible
+              // The CPU will start executing from wherever it is after reset
               ctx->dut->eval();
 
               ctx->lcd_x = 0;
               ctx->lcd_y = 0;
               ctx->frame_count = 0;
+              ctx->clk_counter = 0;  // Reset clock counter
               memset(ctx->framebuffer, 0, sizeof(ctx->framebuffer));
           }
 
@@ -621,14 +644,9 @@ module RHDL
               else if (strcmp(name, "joystick") == 0) return ctx->dut->joystick;
               else if (strcmp(name, "debug_pc") == 0) return ctx->dut->debug_pc;
               else if (strcmp(name, "debug_acc") == 0) return ctx->dut->debug_acc;
-              // Internal debug signals (accessed via rootp)
-              else if (strcmp(name, "_clkdiv") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__speed_ctrl__DOT__clkdiv;
-              else if (strcmp(name, "_cpu_clken") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__cpu_clken;
-              else if (strcmp(name, "_t_state") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__cpu__DOT__t_state;
-              else if (strcmp(name, "_ir") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__cpu__DOT__ir;
-              else if (strcmp(name, "_boot_rom_enabled") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__boot_rom_enabled;
-              else if (strcmp(name, "_pc") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__cpu__DOT__pc;
-              else if (strcmp(name, "_acc") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__cpu__DOT__acc;
+              // Internal signals not accessible - return estimated values
+              else if (strcmp(name, "_clkdiv") == 0) return ctx->clk_counter & 7;  // Estimate clkdiv
+              // Other internal signals not accessible
               return 0;
           }
 
@@ -661,13 +679,25 @@ module RHDL
               return 0;
           }
 
-          // Batch cycle execution
+          void sim_read_framebuffer(void* sim, unsigned char* out_buffer) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              memcpy(out_buffer, ctx->framebuffer, 160 * 144);
+          }
+
+          unsigned long sim_get_frame_count(void* sim) {
+              SimContext* ctx = static_cast<SimContext*>(sim);
+              return ctx->frame_count;
+          }
+
+          // Batch cycle execution - runs until n_cycles CPU cycles completed
+          // CPU cycles occur every 8 system clocks (SpeedControl divider)
+          // This aligns with IR Compiler which counts effective CPU cycles
           void sim_run_cycles(void* sim, unsigned int n_cycles, struct GbCycleResult* result) {
               SimContext* ctx = static_cast<SimContext*>(sim);
               result->cycles_run = 0;
               result->frames_completed = 0;
 
-              for (unsigned int i = 0; i < n_cycles; i++) {
+              while (result->cycles_run < n_cycles) {
                   // Falling edge
                   ctx->dut->clk_sys = 0;
                   ctx->dut->eval();
@@ -686,6 +716,12 @@ module RHDL
                   // Rising edge
                   ctx->dut->clk_sys = 1;
                   ctx->dut->eval();
+
+                  // Count CPU cycles every 8 system clocks (SpeedControl divides by 8)
+                  ctx->clk_counter++;
+                  if ((ctx->clk_counter & 7) == 0) {
+                      result->cycles_run++;
+                  }
 
                   // Capture LCD output
                   unsigned char lcd_clkena = ctx->dut->lcd_clkena;
@@ -714,7 +750,6 @@ module RHDL
 
                   ctx->prev_lcd_clkena = lcd_clkena;
                   ctx->prev_lcd_vsync = lcd_vsync;
-                  result->cycles_run++;
               }
           }
 
@@ -874,6 +909,18 @@ module RHDL
           @lib['sim_read_vram'],
           [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
           Fiddle::TYPE_CHAR
+        )
+
+        @sim_read_framebuffer_fn = Fiddle::Function.new(
+          @lib['sim_read_framebuffer'],
+          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+          Fiddle::TYPE_VOID
+        )
+
+        @sim_get_frame_count_fn = Fiddle::Function.new(
+          @lib['sim_get_frame_count'],
+          [Fiddle::TYPE_VOIDP],
+          Fiddle::TYPE_LONG
         )
 
         @sim_run_cycles_fn = Fiddle::Function.new(

@@ -526,7 +526,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
   end
 
   describe 'Backend Comparison (IR Compiler vs Verilator)' do
-    let(:tobu_rom_path) { File.expand_path('../../../examples/gameboy/software/roms/tobu.gb', __dir__) }
+    let(:test_rom_path) { File.expand_path('../../../examples/gameboy/software/roms/cpu_instrs.gb', __dir__) }
 
     def verilator_available?
       ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
@@ -535,7 +535,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
     end
 
     before do
-      skip 'tobu.gb ROM not found' unless File.exist?(tobu_rom_path)
+      skip 'cpu_instrs.gb ROM not found' unless File.exist?(test_rom_path)
       skip 'Verilator not available' unless verilator_available?
 
       begin
@@ -550,8 +550,33 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       end
     end
 
+    # Helper to check if a framebuffer is blank (all same value)
+    def framebuffer_blank?(fb)
+      return true if fb.nil? || fb.empty?
+      first_val = fb.flatten.first
+      fb.flatten.all? { |v| v == first_val }
+    end
+
+    # Helper to count non-zero pixels in framebuffer
+    def non_zero_pixel_count(fb)
+      return 0 if fb.nil? || fb.empty?
+      fb.flatten.count { |v| v != 0 }
+    end
+
+    # Helper to count unique pixel values in framebuffer
+    def unique_pixel_values(fb)
+      return [] if fb.nil? || fb.empty?
+      fb.flatten.uniq.sort
+    end
+
+    # Helper to compute framebuffer hash for comparison
+    def framebuffer_hash(fb)
+      return nil if fb.nil? || fb.empty?
+      fb.flatten.hash
+    end
+
     it 'compares 1000 frames between IR Compiler and Verilator backends', timeout: 600 do
-      rom_data = File.binread(tobu_rom_path)
+      rom_data = File.binread(test_rom_path)
 
       # Initialize both runners
       puts "\n  Initializing runners..."
@@ -575,6 +600,12 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       ir_snapshots = []
       verilator_snapshots = []
 
+      # Track blank frames
+      ir_blank_frames = 0
+      ir_total_sampled = 0
+      verilator_blank_frames = 0
+      verilator_total_sampled = 0
+
       puts "  Running #{target_frames} frames on each backend..."
       puts ""
 
@@ -587,12 +618,21 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       (target_frames / snapshot_interval).times do |i|
         ir_runner.run_steps(cycles_per_snapshot)
         ir_frames = ir_runner.cycle_count / cycles_per_frame
+        fb = ir_runner.read_framebuffer
+        is_blank = framebuffer_blank?(fb)
+        ir_blank_frames += 1 if is_blank
+        ir_total_sampled += 1
+
         ir_snapshots << {
           frame: ir_frames,
           cycle: ir_runner.cycle_count,
           pc: ir_runner.cpu_state[:pc],
           a: ir_runner.cpu_state[:a],
-          elapsed: Time.now - ir_start
+          elapsed: Time.now - ir_start,
+          fb_blank: is_blank,
+          fb_pixels: non_zero_pixel_count(fb),
+          fb_hash: framebuffer_hash(fb),
+          fb_unique: unique_pixel_values(fb)
         }
       end
       ir_elapsed = Time.now - ir_start
@@ -601,6 +641,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
 
       puts "    Completed #{ir_total_frames} frames in #{'%.2f' % ir_elapsed}s"
       puts "    Speed: #{'%.2f' % ir_speed} MHz (#{'%.1f' % (ir_speed / 4.19 * 100)}% of real GB)"
+      puts "    Non-blank snapshots: #{ir_total_sampled - ir_blank_frames}/#{ir_total_sampled} (#{'%.1f' % ((ir_total_sampled - ir_blank_frames) * 100.0 / ir_total_sampled)}%)"
       puts ""
 
       # Run Verilator (use actual frame count)
@@ -614,12 +655,21 @@ RSpec.describe 'GameBoy RHDL Implementation' do
         # Take snapshot every snapshot_interval frames
         current_frame = verilator_runner.frame_count
         if current_frame >= last_snapshot_frame + snapshot_interval
+          fb = verilator_runner.read_framebuffer
+          is_blank = framebuffer_blank?(fb)
+          verilator_blank_frames += 1 if is_blank
+          verilator_total_sampled += 1
+
           verilator_snapshots << {
             frame: current_frame,
             cycle: verilator_runner.cycle_count,
             pc: verilator_runner.cpu_state[:pc],
             a: verilator_runner.cpu_state[:a],
-            elapsed: Time.now - verilator_start
+            elapsed: Time.now - verilator_start,
+            fb_blank: is_blank,
+            fb_pixels: non_zero_pixel_count(fb),
+            fb_hash: framebuffer_hash(fb),
+            fb_unique: unique_pixel_values(fb)
           }
           last_snapshot_frame = current_frame
         end
@@ -629,15 +679,17 @@ RSpec.describe 'GameBoy RHDL Implementation' do
 
       puts "    Completed #{verilator_runner.frame_count} frames in #{'%.2f' % verilator_elapsed}s"
       puts "    Speed: #{'%.2f' % verilator_speed} MHz (#{'%.1f' % (verilator_speed / 4.19 * 100)}% of real GB)"
+      puts "    Non-blank snapshots: #{verilator_total_sampled - verilator_blank_frames}/#{verilator_total_sampled} (#{'%.1f' % ((verilator_total_sampled - verilator_blank_frames) * 100.0 / verilator_total_sampled)}%)"
       puts ""
 
       # Compare results
-      puts "  CPU State Comparison (every #{snapshot_interval} frames):"
-      puts "  " + "-" * 78
-      puts "  #{'Frame'.ljust(10)} | #{'IR PC'.ljust(8)} | #{'VL PC'.ljust(8)} | #{'IR A'.ljust(6)} | #{'VL A'.ljust(6)} | #{'Match'.ljust(5)}"
-      puts "  " + "-" * 78
+      puts "  CPU State & Framebuffer Comparison (every #{snapshot_interval} frames):"
+      puts "  " + "-" * 115
+      puts "  #{'Frame'.ljust(8)} | #{'IR PC'.ljust(8)} | #{'VL PC'.ljust(8)} | #{'IR A'.ljust(5)} | #{'VL A'.ljust(5)} | #{'IR px'.ljust(7)} | #{'VL px'.ljust(7)} | #{'IR uniq'.ljust(10)} | #{'Match'.ljust(5)}"
+      puts "  " + "-" * 115
 
       mismatches = 0
+      fb_mismatches = 0
       num_comparisons = [ir_snapshots.size, verilator_snapshots.size].min
       num_comparisons.times do |i|
         ir_snap = ir_snapshots[i]
@@ -645,21 +697,26 @@ RSpec.describe 'GameBoy RHDL Implementation' do
 
         pc_match = ir_snap[:pc] == vl_snap[:pc]
         a_match = ir_snap[:a] == vl_snap[:a]
+        fb_match = ir_snap[:fb_hash] == vl_snap[:fb_hash]
         all_match = pc_match && a_match
 
         mismatches += 1 unless all_match
+        fb_mismatches += 1 unless fb_match
 
-        frame_str = "#{ir_snap[:frame]}".ljust(10)
+        frame_str = "#{ir_snap[:frame]}".ljust(8)
         ir_pc_str = ("0x%04X" % ir_snap[:pc]).ljust(8)
         vl_pc_str = ("0x%04X" % vl_snap[:pc]).ljust(8)
-        ir_a_str = ("0x%02X" % ir_snap[:a]).ljust(6)
-        vl_a_str = ("0x%02X" % vl_snap[:a]).ljust(6)
-        match_str = all_match ? "YES" : "NO"
+        ir_a_str = ("0x%02X" % ir_snap[:a]).ljust(5)
+        vl_a_str = ("0x%02X" % vl_snap[:a]).ljust(5)
+        ir_px_str = ir_snap[:fb_pixels].to_s.ljust(7)
+        vl_px_str = vl_snap[:fb_pixels].to_s.ljust(7)
+        ir_uniq_str = ir_snap[:fb_unique].inspect.ljust(10)
+        match_str = all_match ? (fb_match ? "YES" : "cpu") : "NO"
 
-        puts "  #{frame_str} | #{ir_pc_str} | #{vl_pc_str} | #{ir_a_str} | #{vl_a_str} | #{match_str}"
+        puts "  #{frame_str} | #{ir_pc_str} | #{vl_pc_str} | #{ir_a_str} | #{vl_a_str} | #{ir_px_str} | #{vl_px_str} | #{ir_uniq_str} | #{match_str}"
       end
 
-      puts "  " + "-" * 78
+      puts "  " + "-" * 115
       puts ""
 
       # Speed comparison
@@ -684,12 +741,26 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       else
         puts "    CPU state: All #{num_comparisons} snapshots matched"
       end
+      puts "    Framebuffer mismatches: #{fb_mismatches}/#{num_comparisons}"
+      puts ""
+
+      # Blank frame analysis
+      ir_non_blank_pct = (ir_total_sampled - ir_blank_frames) * 100.0 / ir_total_sampled
+      vl_non_blank_pct = (verilator_total_sampled - verilator_blank_frames) * 100.0 / verilator_total_sampled
+      puts "  Blank Frame Analysis:"
+      puts "    IR Compiler:  #{'%.1f' % ir_non_blank_pct}% non-blank (#{ir_total_sampled - ir_blank_frames}/#{ir_total_sampled})"
+      puts "    Verilator:    #{'%.1f' % vl_non_blank_pct}% non-blank (#{verilator_total_sampled - verilator_blank_frames}/#{verilator_total_sampled})"
 
       # Assertions - both should reach target frames
       expect(ir_total_frames).to be >= target_frames
       expect(verilator_runner.frame_count).to be >= target_frames
       expect(ir_runner.native?).to eq(true)
       expect(verilator_runner.native?).to eq(true)
+
+      # Assert that we're not just comparing blank frames
+      # At least 50% of snapshots should have non-blank content
+      expect(ir_non_blank_pct).to be > 50, "IR Compiler has too many blank frames (#{ir_blank_frames}/#{ir_total_sampled})"
+      expect(vl_non_blank_pct).to be > 50, "Verilator has too many blank frames (#{verilator_blank_frames}/#{verilator_total_sampled})"
     end
   end
 
