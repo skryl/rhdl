@@ -374,8 +374,14 @@ impl Apple2Extension {
         let speaker_idx = *core.name_to_idx.get("speaker").unwrap_or(&0);
         let cpu_addr_idx = *core.name_to_idx.get("cpu__addr_reg").unwrap_or(&0);
 
-        // CPU data input - we need to write directly to cpu__di after evaluate_inline
-        // because the HDL mux computes disk_dout from an unloaded ROM component
+        // Disk controller output - we inject disk data here instead of into cpu__di
+        // This preserves the HDL mux architecture: cpu_din = mux(disk_select, disk_dout, ram_do, ...)
+        // By injecting into disk__d_out, the mux correctly routes our data when disk_select is true
+        let disk_d_out_idx = core.name_to_idx.get("disk__d_out")
+            .copied()
+            .unwrap_or(0);
+
+        // CPU data input - for debug tracing only (HDL mux computes this from disk_dout and ram_do)
         let cpu_di_idx = core.name_to_idx.get("cpu__di")
             .or_else(|| core.name_to_idx.get("cpu_di"))
             .copied()
@@ -387,8 +393,8 @@ impl Apple2Extension {
         let cpu_flag_n_idx = core.name_to_idx.get("cpu__flag_n").copied().unwrap_or(0);
         let cpu_opcode_idx = core.name_to_idx.get("cpu__opcode").copied().unwrap_or(0);
 
-        eprintln!("Apple2 generate_code: cpu_addr_idx={}, ram_do_idx={}, cpu_di_idx={}",
-                  cpu_addr_idx, ram_do_idx, cpu_di_idx);
+        eprintln!("Apple2 generate_code: cpu_addr_idx={}, ram_do_idx={}, disk_d_out_idx={}",
+                  cpu_addr_idx, ram_do_idx, disk_d_out_idx);
         eprintln!("Apple2 generate_code: cpu_y_reg_idx={}, cpu_a_reg_idx={}, cpu_flag_n_idx={}, cpu_opcode_idx={}",
                   cpu_y_reg_idx, cpu_a_reg_idx, cpu_flag_n_idx, cpu_opcode_idx);
 
@@ -405,38 +411,38 @@ impl Apple2Extension {
         code.push_str("const TRACK_SIZE: usize = 6656;\n");
         code.push_str("const NUM_TRACKS: usize = 35;\n\n");
 
-        // Generate a custom evaluate function that SKIPS cpu__di
-        // This is critical: the HDL mux computes cpu__di from disk_dout which reads
-        // from an unloaded ROM. We need to inject ram_data into cpu__di manually,
-        // and prevent evaluate from overwriting it.
-        code.push_str("/// Custom evaluate function that skips cpu__di assignment\n");
-        code.push_str("/// cpu__di is injected manually from ram_data\n");
+        // Generate a custom evaluate function that SKIPS disk__d_out
+        // This is the architectural fix: instead of skipping cpu__di (which breaks the HDL mux),
+        // we skip disk__d_out and inject disk data there. The HDL mux then correctly routes
+        // disk data to cpu_din when disk_select is true, or ram_do when disk_select is false.
+        code.push_str("/// Custom evaluate function that skips disk__d_out assignment\n");
+        code.push_str("/// disk__d_out is injected from Rust-side disk emulation\n");
         code.push_str("#[inline(always)]\n");
         code.push_str("unsafe fn evaluate_apple2_inline(signals: &mut [u64]) {\n");
-        let skip_signals = vec![cpu_di_idx];
+        let skip_signals = vec![disk_d_out_idx];
         let eval_body = core.generate_evaluate_with_skips(&skip_signals);
         code.push_str(&eval_body);
         code.push_str("}\n\n");
 
-        // Generate custom Apple2 tick function that takes ram_data as parameter
-        // This is needed because the HDL disk controller computes d_out from an
-        // unloaded ROM component. We need to write the correct value to cpu__di
-        // after evaluate_inline but before the register sampling.
-        code.push_str("/// Custom Apple2 tick function that injects ram_data into cpu__di\n");
-        code.push_str("/// Uses evaluate_apple2_inline which skips cpu__di computation.\n");
+        // Generate custom Apple2 tick function
+        // Injects disk data into disk__d_out, letting the HDL mux compute cpu__di correctly
+        code.push_str("/// Custom Apple2 tick function that injects disk data into disk__d_out\n");
+        code.push_str("/// The HDL mux then correctly routes disk_dout or ram_do to cpu_din.\n");
         code.push_str("#[inline(always)]\n");
         code.push_str(&format!("unsafe fn tick_apple2_inline(\n"));
         code.push_str("    signals: &mut [u64],\n");
         code.push_str(&format!("    old_clocks: &mut [u64; {}],\n", num_clocks));
         code.push_str(&format!("    next_regs: &mut [u64; {}],\n", num_regs.max(1)));
-        code.push_str("    ram_data: u64,\n");
+        code.push_str("    disk_data: u64,\n");
         code.push_str(") {\n");
 
-        // Step 1: Inject ram_data into cpu__di FIRST
-        code.push_str(&format!("    // Inject ram_data into cpu__di BEFORE evaluate\n"));
-        code.push_str(&format!("    signals[{}] = ram_data;\n\n", cpu_di_idx));
+        // Step 1: Inject disk_data into disk__d_out FIRST
+        // This is the data that will be used when the CPU accesses disk I/O or slot ROM
+        code.push_str(&format!("    // Inject disk data into disk__d_out BEFORE evaluate\n"));
+        code.push_str(&format!("    signals[{}] = disk_data;\n\n", disk_d_out_idx));
 
-        // Step 2: Evaluate combinational logic (skips cpu__di, so our value is preserved)
+        // Step 2: Evaluate combinational logic (skips disk__d_out, so our value is preserved)
+        // The HDL mux will now correctly compute cpu__di from disk__d_out when disk_select is true
         code.push_str("    evaluate_apple2_inline(signals);\n\n");
 
         // Step 4: Compute next values for all registers (copied from CoreSimulator)
@@ -449,25 +455,6 @@ impl Apple2Extension {
                 if let Some(&target_idx) = core.name_to_idx.get(&stmt.target) {
                     let width = core.widths.get(target_idx).copied().unwrap_or(64);
                     let expr_code = core.expr_to_rust(&stmt.expr);
-                    // Debug: print y_reg computation with full dependency chain
-                    if stmt.target == "cpu__y_reg" {
-                        eprintln!("Y_REG EXPRESSION: {}", expr_code);
-                        // Get signal indices for alu_input (130) and alu_reg_out (133)
-                        let alu_input_idx = core.name_to_idx.get("cpu__alu_input").copied().unwrap_or(130);
-                        let alu_reg_out_idx = core.name_to_idx.get("cpu__alu_reg_out").copied().unwrap_or(133);
-                        code.push_str(&format!("    // Debug: Y reg next value with dependency chain\n"));
-                        code.push_str(&format!("    {{\n"));
-                        code.push_str(&format!("        static Y_DEBUG: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n"));
-                        code.push_str(&format!("        let y_cnt = Y_DEBUG.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n"));
-                        code.push_str(&format!("        let y_next_val = ({}) & {};\n", expr_code, CoreSimulator::mask_const(width)));
-                        code.push_str(&format!("        let cpu_di_val = signals[{}];\n", cpu_di_idx));
-                        code.push_str(&format!("        let alu_input_val = signals[{}];\n", alu_input_idx));
-                        code.push_str(&format!("        let alu_reg_out_val = signals[{}];\n", alu_reg_out_idx));
-                        code.push_str(&format!("        if y_cnt < 500 || (cpu_di_val == 0x50 || cpu_di_val == 0xA0) {{\n"));
-                        code.push_str(&format!("            eprintln!(\"Y_NEXT#{{}} = ${{:02X}}, di=${{:02X}}, alu_in=${{:02X}}, alu_out=${{:02X}}, ram=${{:02X}}\", y_cnt, y_next_val, cpu_di_val, alu_input_val, alu_reg_out_val, ram_data);\n"));
-                        code.push_str(&format!("        }}\n"));
-                        code.push_str(&format!("    }}\n"));
-                    }
                     code.push_str(&format!("    next_regs[{}] = ({}) & {};\n",
                                            seq_idx, expr_code, CoreSimulator::mask_const(width)));
                     seq_idx += 1;
@@ -518,7 +505,7 @@ impl Apple2Extension {
         code.push_str("        if !any_rising { break; }\n");
         code.push_str("    }\n\n");
 
-        // Step 7: Final evaluate (cpu__di is preserved since we use evaluate_apple2_inline)
+        // Step 7: Final evaluate (disk__d_out is preserved since we use evaluate_apple2_inline)
         code.push_str("    evaluate_apple2_inline(signals);\n");
         code.push_str("}\n\n");
 
@@ -645,14 +632,13 @@ impl Apple2Extension {
         code.push_str("            }\n");
         code.push_str("        }\n\n");
 
-        // Compute RAM/ROM/disk data BEFORE evaluate_inline
-        // Compute on every sub-cycle so the CPU always sees correct data for the current address
-        // But only clear latch_valid on sub-cycle 0 so we only "consume" the [HI] once per CPU cycle
-        code.push_str("        let ram_data = if cpu_addr >= 0xD000 {\n");
-        code.push_str("            // Main ROM ($D000-$FFFF)\n");
-        code.push_str("            let rom_idx = cpu_addr - 0xD000;\n");
-        code.push_str("            if rom_idx < rom_len { rom[rom_idx] as u64 } else { 0 }\n");
-        code.push_str("        } else if cpu_addr >= 0xC600 && cpu_addr < 0xC700 {\n");
+        // Compute disk_data and ram_data separately for proper HDL mux routing
+        // - disk_data: for disk addresses ($C600-$C6FF slot ROM, $C0E0-$C0EF disk I/O) -> disk__d_out
+        // - ram_data: for everything else (RAM, main ROM, other I/O) -> ram_do
+        // The HDL mux then correctly selects: cpu_din = mux(disk_select, disk_dout, ram_do, ...)
+
+        // First compute disk_data for disk addresses
+        code.push_str("        let disk_data = if cpu_addr >= 0xC600 && cpu_addr < 0xC700 {\n");
         code.push_str("            // Slot 6 ROM ($C600-$C6FF) - Disk II boot ROM\n");
         code.push_str("            let rom_idx = cpu_addr - 0xC600;\n");
         code.push_str("            if rom_idx < slot_rom.len() { slot_rom[rom_idx] as u64 } else { 0 }\n");
@@ -866,39 +852,53 @@ impl Apple2Extension {
         code.push_str("                // Q7=1 (write mode) or other register - return 0\n");
         code.push_str("                0\n");
         code.push_str("            }\n");
+        code.push_str("        } else {\n");
+        code.push_str("            // Not a disk address - return 0 for disk_data\n");
+        code.push_str("            0u64\n");
+        code.push_str("        };\n\n");
+
+        // Now compute ram_data for non-disk addresses (RAM, main ROM, other I/O)
+        code.push_str("        let ram_data = if cpu_addr >= 0xD000 {\n");
+        code.push_str("            // Main ROM ($D000-$FFFF)\n");
+        code.push_str("            let rom_idx = cpu_addr - 0xD000;\n");
+        code.push_str("            if rom_idx < rom_len { rom[rom_idx] as u64 } else { 0 }\n");
         code.push_str("        } else if cpu_addr >= 0xC000 {\n");
-        code.push_str("            // Other I/O space\n");
+        code.push_str("            // I/O space - return 0 (keyboard etc. handled by HDL)\n");
         code.push_str("            0u64\n");
         code.push_str("        } else if cpu_addr < ram_len {\n");
+        code.push_str("            // RAM ($0000-$BFFF)\n");
         code.push_str("            ram[cpu_addr] as u64\n");
         code.push_str("        } else {\n");
         code.push_str("            0u64\n");
         code.push_str("        };\n\n");
 
-        // Write data to ram_do for non-disk addresses
-        // For RAM/ROM, the HDL mux will route ram_do to cpu_din
+        // Inject disk_data into disk__d_out for disk controller output
+        // The HDL mux will route this to cpu_din when disk_select is true
+        code.push_str(&format!("        signals[{}] = disk_data;  // disk__d_out\n", disk_d_out_idx));
+        // Inject ram_data into ram_do for RAM/ROM accesses
+        // The HDL mux will route this to cpu_din when disk_select is false
         code.push_str(&format!("        signals[{}] = ram_data;  // ram_do\n", ram_do_idx));
-        // Also write directly to cpu__di so combinational logic sees correct value
-        code.push_str(&format!("        signals[{}] = ram_data;  // cpu__di direct\n", cpu_di_idx));
 
         // Clock falling edge - evaluate to settle combinational logic
-        // Use evaluate_apple2_inline which skips cpu__di (preserving our injected value)
+        // evaluate_apple2_inline skips disk__d_out so our injected value is preserved
         code.push_str(&format!("        signals[{}] = 0;\n", clk_idx));
         code.push_str("        evaluate_apple2_inline(signals);\n\n");
 
-        // Clock rising edge - use custom tick that injects ram_data into cpu__di
+        // Clock rising edge - tick function injects disk_data into disk__d_out
+        // The HDL mux will then compute cpu__di from disk_dout or ram_do
         for (i, &clk) in clock_indices.iter().enumerate() {
             code.push_str(&format!("        old_clocks[{}] = signals[{}];\n", i, clk));
         }
         code.push_str(&format!("        signals[{}] = 1;\n", clk_idx));
-        code.push_str("        tick_apple2_inline(signals, &mut old_clocks, &mut next_regs, ram_data);\n");
-        // Debug: verify cpu__di after tick for disk accesses
+        code.push_str("        tick_apple2_inline(signals, &mut old_clocks, &mut next_regs, disk_data);\n");
+        // Debug: verify cpu__di after tick (HDL mux should have computed it correctly)
         code.push_str(&format!("        static TICK_DEBUG: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n"));
-        code.push_str(&format!("        if cpu_addr == 0xC0EC {{\n"));
+        code.push_str(&format!("        if cpu_addr == 0xC0EC || cpu_addr >= 0xC600 && cpu_addr < 0xC700 {{\n"));
         code.push_str(&format!("            let tick_count = TICK_DEBUG.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n"));
         code.push_str(&format!("            if tick_count < 5 {{\n"));
         code.push_str(&format!("                let cpu_di_val = signals[{}];\n", cpu_di_idx));
-        code.push_str(&format!("                eprintln!(\"TICK#{{}} addr=${{:04X}} ram_data=${{:02X}} cpu_di=${{:02X}}\", tick_count, cpu_addr, ram_data, cpu_di_val);\n"));
+        code.push_str(&format!("                let disk_d_out_val = signals[{}];\n", disk_d_out_idx));
+        code.push_str(&format!("                eprintln!(\"TICK#{{}} addr=${{:04X}} disk_data=${{:02X}} disk_d_out=${{:02X}} cpu_di=${{:02X}}\", tick_count, cpu_addr, disk_data, disk_d_out_val, cpu_di_val);\n"));
         code.push_str(&format!("            }}\n"));
         code.push_str(&format!("        }}\n\n"));
 
