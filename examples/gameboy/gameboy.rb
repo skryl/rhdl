@@ -93,6 +93,10 @@ module GameBoy
     output :audio_l, width: 16
     output :audio_r, width: 16
 
+    # Debug outputs (for Verilator simulation visibility)
+    output :debug_pc, width: 16    # CPU Program counter
+    output :debug_acc, width: 8    # CPU Accumulator
+
     # Internal clock enable signals
     wire :ce
     wire :ce_n
@@ -161,6 +165,10 @@ module GameBoy
     port [:gb_core, :audio_l] => :audio_l
     port [:gb_core, :audio_r] => :audio_r
     port :const_zero => [:gb_core, :audio_no_pops]
+
+    # Debug outputs
+    port [:gb_core, :debug_cpu_pc] => :debug_pc
+    port [:gb_core, :debug_cpu_acc] => :debug_acc
 
     # Unused GB inputs - tie off to defaults
     port :const_zero => [:gb_core, :real_cgb_boot]
