@@ -62,6 +62,12 @@ pub struct GameBoyExtension {
     pub ppu_lcdc_on_idx: usize,
     pub ppu_h_div_cnt_idx: usize,
     pub ppu_pcnt_idx: usize,
+    pub ppu_h_cnt_idx: usize,
+    pub ppu_v_cnt_idx: usize,
+    pub ppu_vblank_irq_idx: usize,
+
+    // Interrupt signals
+    pub if_r_idx: usize,
 
     // Cart/ROM signals
     pub cart_rd_idx: usize,
@@ -135,6 +141,11 @@ impl GameBoyExtension {
             ppu_lcdc_on_idx: find(&["gb_core__video_unit__lcdc_on", "video_unit__lcdc_on"]),
             ppu_h_div_cnt_idx: find(&["gb_core__video_unit__h_div_cnt", "video_unit__h_div_cnt"]),
             ppu_pcnt_idx: find(&["gb_core__video_unit__pcnt", "video_unit__pcnt"]),
+            ppu_h_cnt_idx: find(&["gb_core__video_unit__h_cnt", "video_unit__h_cnt"]),
+            ppu_v_cnt_idx: find(&["gb_core__video_unit__v_cnt", "video_unit__v_cnt"]),
+            ppu_vblank_irq_idx: find(&["gb_core__vblank_irq", "vblank_irq", "gb_core__video_unit__vblank_irq", "video_unit__vblank_irq"]),
+
+            if_r_idx: find(&["gb_core__if_r", "if_r"]),
 
             cart_rd_idx: find(&["cart_rd"]),
             cart_do_idx: find(&["cart_do"]),
@@ -422,6 +433,28 @@ impl GameBoyExtension {
         // Clock falling edge
         code.push_str(&format!("        signals[{}] = 0; // clk_sys low\n", clk_sys_idx));
         code.push_str("        evaluate_inline(signals);\n\n");
+
+        // Force CE signals AFTER evaluate to override speed_ctrl clock divider
+        // (speed_ctrl__ce is computed based on a counter, but we want ce=1 every cycle)
+        if ce_idx > 0 {
+            code.push_str(&format!("        signals[{}] = 1; // ce (force after eval)\n", ce_idx));
+        }
+        if speed_ctrl_ce_idx > 0 {
+            code.push_str(&format!("        signals[{}] = 1; // speed_ctrl__ce (force after eval)\n", speed_ctrl_ce_idx));
+        }
+        if gb_core_ce_idx > 0 {
+            code.push_str(&format!("        signals[{}] = 1; // gb_core__ce (force after eval)\n", gb_core_ce_idx));
+        }
+        if video_unit_ce_idx > 0 {
+            code.push_str(&format!("        signals[{}] = 1; // video_unit__ce (force after eval)\n", video_unit_ce_idx));
+        }
+        if cpu_clken_idx > 0 {
+            code.push_str(&format!("        signals[{}] = 1; // cpu_clken (force after eval)\n", cpu_clken_idx));
+        }
+        if sm83_clken_idx > 0 {
+            code.push_str(&format!("        signals[{}] = 1; // sm83_clken (force after eval)\n", sm83_clken_idx));
+        }
+        code.push_str("\n");
 
         // ROM read handling
         code.push_str(&format!("        let cart_rd = signals[{}];\n", cart_rd_idx));

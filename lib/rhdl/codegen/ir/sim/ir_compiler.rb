@@ -359,6 +359,35 @@ module RHDL
           @fn_gameboy_reset_lcd.call(@ctx)
         end
 
+        # Debug methods for PPU/interrupt signals
+        def get_v_cnt
+          @fn_gameboy_get_v_cnt.call(@ctx)
+        end
+
+        def get_h_cnt
+          @fn_gameboy_get_h_cnt.call(@ctx)
+        end
+
+        def get_vblank_irq
+          @fn_gameboy_get_vblank_irq.call(@ctx)
+        end
+
+        def get_if_r
+          @fn_gameboy_get_if_r.call(@ctx)
+        end
+
+        def get_signal(idx)
+          @fn_gameboy_get_signal.call(@ctx, idx)
+        end
+
+        def get_lcdc_on
+          @fn_gameboy_get_lcdc_on.call(@ctx)
+        end
+
+        def get_h_div_cnt
+          @fn_gameboy_get_h_div_cnt.call(@ctx)
+        end
+
         def respond_to_missing?(method_name, include_private = false)
           (@fallback && @sim.respond_to?(method_name)) || super
         end
@@ -648,6 +677,48 @@ module RHDL
             @lib['gameboy_ir_sim_reset_lcd'],
             [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_VOID
+          )
+
+          @fn_gameboy_get_v_cnt = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_get_v_cnt'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_UINT
+          )
+
+          @fn_gameboy_get_h_cnt = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_get_h_cnt'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_UINT
+          )
+
+          @fn_gameboy_get_vblank_irq = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_get_vblank_irq'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_UINT
+          )
+
+          @fn_gameboy_get_if_r = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_get_if_r'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_UINT
+          )
+
+          @fn_gameboy_get_signal = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_get_signal'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT],
+            Fiddle::TYPE_LONG_LONG
+          )
+
+          @fn_gameboy_get_lcdc_on = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_get_lcdc_on'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_UINT
+          )
+
+          @fn_gameboy_get_h_div_cnt = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_get_h_div_cnt'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_UINT
           )
         end
 

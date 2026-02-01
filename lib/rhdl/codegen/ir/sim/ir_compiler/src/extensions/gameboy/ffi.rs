@@ -219,3 +219,102 @@ pub unsafe extern "C" fn gameboy_ir_sim_lcd_state(
         *state_out = ext.lcd_state;
     }
 }
+
+/// Get PPU v_cnt (vertical line counter)
+#[no_mangle]
+pub unsafe extern "C" fn gameboy_ir_sim_get_v_cnt(ctx: *const IrSimContext) -> c_uint {
+    if ctx.is_null() {
+        return 0;
+    }
+    let ctx = &*ctx;
+    if let Some(ref ext) = ctx.gameboy {
+        ctx.core.signals[ext.ppu_v_cnt_idx] as c_uint
+    } else {
+        0
+    }
+}
+
+/// Get PPU h_cnt (horizontal counter)
+#[no_mangle]
+pub unsafe extern "C" fn gameboy_ir_sim_get_h_cnt(ctx: *const IrSimContext) -> c_uint {
+    if ctx.is_null() {
+        return 0;
+    }
+    let ctx = &*ctx;
+    if let Some(ref ext) = ctx.gameboy {
+        ctx.core.signals[ext.ppu_h_cnt_idx] as c_uint
+    } else {
+        0
+    }
+}
+
+/// Get vblank_irq signal
+#[no_mangle]
+pub unsafe extern "C" fn gameboy_ir_sim_get_vblank_irq(ctx: *const IrSimContext) -> c_uint {
+    if ctx.is_null() {
+        return 0;
+    }
+    let ctx = &*ctx;
+    if let Some(ref ext) = ctx.gameboy {
+        ctx.core.signals[ext.ppu_vblank_irq_idx] as c_uint
+    } else {
+        0
+    }
+}
+
+/// Get IF register value
+#[no_mangle]
+pub unsafe extern "C" fn gameboy_ir_sim_get_if_r(ctx: *const IrSimContext) -> c_uint {
+    if ctx.is_null() {
+        return 0;
+    }
+    let ctx = &*ctx;
+    if let Some(ref ext) = ctx.gameboy {
+        ctx.core.signals[ext.if_r_idx] as c_uint
+    } else {
+        0
+    }
+}
+
+/// Get a raw signal value by index
+#[no_mangle]
+pub unsafe extern "C" fn gameboy_ir_sim_get_signal(ctx: *const IrSimContext, idx: c_uint) -> u64 {
+    if ctx.is_null() {
+        return 0;
+    }
+    let ctx = &*ctx;
+    let idx = idx as usize;
+    if idx < ctx.core.signals.len() {
+        ctx.core.signals[idx]
+    } else {
+        0
+    }
+}
+
+/// Get PPU lcdc_on value
+#[no_mangle]
+pub unsafe extern "C" fn gameboy_ir_sim_get_lcdc_on(ctx: *const IrSimContext) -> c_uint {
+    if ctx.is_null() {
+        return 0;
+    }
+    let ctx = &*ctx;
+    if let Some(ref ext) = ctx.gameboy {
+        ctx.core.signals[ext.ppu_lcdc_on_idx] as c_uint
+    } else {
+        0
+    }
+}
+
+/// Get PPU h_div_cnt value
+#[no_mangle]
+pub unsafe extern "C" fn gameboy_ir_sim_get_h_div_cnt(ctx: *const IrSimContext) -> c_uint {
+    if ctx.is_null() {
+        return 0;
+    }
+    let ctx = &*ctx;
+    if let Some(ref ext) = ctx.gameboy {
+        ctx.core.signals[ext.ppu_h_div_cnt_idx] as c_uint
+    } else {
+        0
+    }
+}
