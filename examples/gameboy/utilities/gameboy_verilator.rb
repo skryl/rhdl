@@ -261,8 +261,8 @@ module RHDL
 
       def cpu_state
         {
-          pc: verilator_peek('pc_debug') || 0,
-          a: verilator_peek('a_debug') || 0,
+          pc: verilator_peek('debug_pc') || 0,
+          a: verilator_peek('debug_acc') || 0,
           f: 0,
           cycles: @cycles,
           halted: @halted,
@@ -519,6 +519,7 @@ module RHDL
         # Create C++ wrapper implementation
         File.write(cpp_file, <<~CPP)
           #include "Vgame_boy_gameboy.h"
+          #include "Vgame_boy_gameboy___024root.h"  // For internal signal access
           #include "verilated.h"
           #include "sim_wrapper.h"
           #include <cstring>
@@ -563,10 +564,28 @@ module RHDL
 
           void sim_reset(void* sim) {
               SimContext* ctx = static_cast<SimContext*>(sim);
+              // Hold reset high and clock a few times to properly reset sequential logic
               ctx->dut->reset = 1;
-              ctx->dut->eval();
+              for (int i = 0; i < 10; i++) {
+                  ctx->dut->clk_sys = 0;
+                  ctx->dut->eval();
+                  ctx->dut->clk_sys = 1;
+                  ctx->dut->eval();
+              }
+              // Release reset and clock to let the system initialize
               ctx->dut->reset = 0;
+              for (int i = 0; i < 100; i++) {
+                  ctx->dut->clk_sys = 0;
+                  ctx->dut->eval();
+                  ctx->dut->clk_sys = 1;
+                  ctx->dut->eval();
+              }
+
+              // Disable boot ROM mode so CPU reads from cartridge directly
+              // (matches IR simulator behavior which has empty boot ROM = NOPs)
+              ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__boot_rom_enabled = 0;
               ctx->dut->eval();
+
               ctx->lcd_x = 0;
               ctx->lcd_y = 0;
               ctx->frame_count = 0;
@@ -600,6 +619,16 @@ module RHDL
               else if (strcmp(name, "lcd_vsync") == 0) return ctx->dut->lcd_vsync;
               else if (strcmp(name, "lcd_on") == 0) return ctx->dut->lcd_on;
               else if (strcmp(name, "joystick") == 0) return ctx->dut->joystick;
+              else if (strcmp(name, "debug_pc") == 0) return ctx->dut->debug_pc;
+              else if (strcmp(name, "debug_acc") == 0) return ctx->dut->debug_acc;
+              // Internal debug signals (accessed via rootp)
+              else if (strcmp(name, "_clkdiv") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__speed_ctrl__DOT__clkdiv;
+              else if (strcmp(name, "_cpu_clken") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__cpu_clken;
+              else if (strcmp(name, "_t_state") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__cpu__DOT__t_state;
+              else if (strcmp(name, "_ir") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__cpu__DOT__ir;
+              else if (strcmp(name, "_boot_rom_enabled") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__boot_rom_enabled;
+              else if (strcmp(name, "_pc") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__cpu__DOT__pc;
+              else if (strcmp(name, "_acc") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__cpu__DOT__acc;
               return 0;
           }
 
