@@ -43,9 +43,9 @@ RSpec.describe RHDL::Apple2::DiskII do
     disk.set_input(:ram_di, 0)
     disk.set_input(:ram_we, 0)
 
-    # Reset
+    # Reset - disk controller uses clk_14m for sequential logic
     disk.set_input(:reset, 1)
-    clock_2m
+    clock_14m
     disk.set_input(:reset, 0)
   end
 
@@ -65,10 +65,12 @@ RSpec.describe RHDL::Apple2::DiskII do
 
   def access_io(addr_low)
     # Access device I/O at C0Ex
+    # The disk controller uses clk_14m for sequential logic, so we must
+    # clock 14m for registers to update, not clk_2m
     disk.set_input(:a, 0xC0E0 | addr_low)
     disk.set_input(:device_select, 1)
     disk.set_input(:pre_phase_zero, 1)
-    clock_2m
+    clock_14m
     disk.set_input(:device_select, 0)
     disk.set_input(:pre_phase_zero, 0)
   end
@@ -88,7 +90,7 @@ RSpec.describe RHDL::Apple2::DiskII do
 
     it 'turns motor on when accessing C089' do
       access_io(MOTOR_ON)
-      clock_2m
+      clock_14m
 
       d1_active = disk.get_output(:d1_active)
       expect(d1_active).to eq(1)
@@ -97,11 +99,11 @@ RSpec.describe RHDL::Apple2::DiskII do
     it 'turns motor off when accessing C088' do
       # First turn on
       access_io(MOTOR_ON)
-      clock_2m
+      clock_14m
 
       # Then turn off
       access_io(MOTOR_OFF)
-      clock_2m
+      clock_14m
 
       d1_active = disk.get_output(:d1_active)
       expect(d1_active).to eq(0)
@@ -113,7 +115,7 @@ RSpec.describe RHDL::Apple2::DiskII do
 
     it 'selects drive 1 by default' do
       access_io(MOTOR_ON)
-      clock_2m
+      clock_14m
 
       d1_active = disk.get_output(:d1_active)
       d2_active = disk.get_output(:d2_active)
@@ -124,9 +126,9 @@ RSpec.describe RHDL::Apple2::DiskII do
 
     it 'selects drive 2 when accessing C08B' do
       access_io(MOTOR_ON)
-      clock_2m
+      clock_14m
       access_io(DRIVE2)
-      clock_2m
+      clock_14m
 
       d1_active = disk.get_output(:d1_active)
       d2_active = disk.get_output(:d2_active)
@@ -138,9 +140,9 @@ RSpec.describe RHDL::Apple2::DiskII do
     it 'returns to drive 1 when accessing C08A' do
       access_io(MOTOR_ON)
       access_io(DRIVE2)
-      clock_2m
+      clock_14m
       access_io(DRIVE1)
-      clock_2m
+      clock_14m
 
       d1_active = disk.get_output(:d1_active)
       expect(d1_active).to eq(1)
@@ -157,21 +159,21 @@ RSpec.describe RHDL::Apple2::DiskII do
 
     it 'sets Q6 with C08C (off) and C08D (on)' do
       access_io(Q6_OFF)
-      clock_2m
+      clock_14m
       # Q6 should be 0
 
       access_io(Q6_ON)
-      clock_2m
+      clock_14m
       # Q6 should be 1
     end
 
     it 'sets Q7 with C08E (off) and C08F (on)' do
       access_io(Q7_OFF)
-      clock_2m
+      clock_14m
       # Q7 should be 0 (read mode)
 
       access_io(Q7_ON)
-      clock_2m
+      clock_14m
       # Q7 should be 1 (write mode)
     end
   end
@@ -183,31 +185,31 @@ RSpec.describe RHDL::Apple2::DiskII do
 
     it 'controls phase 0 with C080/C081' do
       access_io(PHASE0_ON)
-      clock_2m
+      clock_14m
       # Phase 0 enabled
 
       access_io(PHASE0_OFF)
-      clock_2m
+      clock_14m
       # Phase 0 disabled
     end
 
     it 'controls all 4 phases independently' do
       # Enable phases in sequence
       access_io(PHASE0_ON)
-      clock_2m
+      clock_14m
       access_io(PHASE1_ON)
-      clock_2m
+      clock_14m
       access_io(PHASE2_ON)
-      clock_2m
+      clock_14m
       access_io(PHASE3_ON)
-      clock_2m
+      clock_14m
 
       # Disable all
       access_io(PHASE0_OFF)
       access_io(PHASE1_OFF)
       access_io(PHASE2_OFF)
       access_io(PHASE3_OFF)
-      clock_2m
+      clock_14m
     end
   end
 
@@ -260,7 +262,7 @@ RSpec.describe RHDL::Apple2::DiskII do
         disk.set_input(:a, 0xC0EC)
         disk.set_input(:device_select, 1)
         disk.set_input(:pre_phase_zero, 1)
-        clock_2m
+        clock_14m
         disk.set_input(:device_select, 0)
         disk.set_input(:pre_phase_zero, 0)
       end
@@ -346,7 +348,7 @@ RSpec.describe RHDL::Apple2::DiskII do
       initial_addr = disk.get_output(:track_addr)
 
       # Run for many cycles
-      100.times { clock_2m }
+      100.times { clock_14m }
 
       final_addr = disk.get_output(:track_addr)
       # Address should change over time (disk spinning)
@@ -360,13 +362,13 @@ RSpec.describe RHDL::Apple2::DiskII do
       access_io(MOTOR_ON)
       access_io(PHASE0_ON)
       access_io(PHASE1_ON)
-      clock_2m
+      clock_14m
 
       # Reset
       disk.set_input(:reset, 1)
-      clock_2m
+      clock_14m
       disk.set_input(:reset, 0)
-      clock_2m
+      clock_14m
 
       # Motor should be off after reset
       d1_active = disk.get_output(:d1_active)
@@ -376,13 +378,15 @@ RSpec.describe RHDL::Apple2::DiskII do
     it 'resets track byte address' do
       # Run to advance address
       access_io(MOTOR_ON)
-      50.times { clock_2m }
+      50.times { clock_14m }
 
       # Reset
       disk.set_input(:reset, 1)
-      clock_2m
+      clock_14m
       disk.set_input(:reset, 0)
-      clock_2m
+      # Note: Don't clock after deasserting reset - the byte_delay starts at 0
+      # which causes an immediate advance. Just check the address after reset.
+      disk.propagate
 
       track_addr = disk.get_output(:track_addr)
       expect(track_addr).to eq(0)
