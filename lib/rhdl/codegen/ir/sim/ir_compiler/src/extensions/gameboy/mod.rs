@@ -153,7 +153,8 @@ impl GameBoyExtension {
 
             sel_boot_rom_idx: find(&["gb_core__sel_boot_rom", "sel_boot_rom"]),
             boot_rom_addr_idx: find(&["gb_core__boot_rom_addr", "boot_rom_addr"]),
-            boot_do_idx: find(&["gb_core__boot_do", "boot_do"]),
+            // IMPORTANT: Write to top-level INPUT port, not internal net (which gets overwritten by evaluate)
+            boot_do_idx: find(&["boot_rom_do", "gb_core__boot_rom_do"]),
 
             zpram_addr_idx: find(&["gb_core__zpram_addr", "zpram_addr"]),
             zpram_wren_idx: find(&["gb_core__zpram_wren", "zpram_wren"]),
@@ -325,7 +326,8 @@ impl GameBoyExtension {
 
         let sel_boot_rom_idx = find(&["gb_core__sel_boot_rom", "sel_boot_rom"]);
         let boot_rom_addr_idx = find(&["gb_core__boot_rom_addr", "boot_rom_addr"]);
-        let boot_do_idx = find(&["gb_core__boot_do", "boot_do"]);
+        // IMPORTANT: Write to top-level INPUT port, not internal net (which gets overwritten by evaluate)
+        let boot_do_idx = find(&["boot_rom_do", "gb_core__boot_rom_do"]);
 
         let zpram_addr_idx = find(&["gb_core__zpram_addr", "zpram_addr"]);
         let zpram_wren_idx = find(&["gb_core__zpram_wren", "zpram_wren"]);
