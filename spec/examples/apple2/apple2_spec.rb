@@ -1578,7 +1578,6 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
 
     context 'with Ruby ISA simulator as reference' do
       it 'compares PC sequences after boot (100 at start, 100 at end)', timeout: 30 do
-        skip 'IR Interpreter disabled for now'
         # Create reference (Ruby ISA simulator)
         cpu, _bus = create_isa_simulator(native: false)
         cpu.reset
@@ -1631,7 +1630,6 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
       end
 
       it 'compares PC sequences after boot vs IR interpreter', timeout: 30 do
-        skip 'IR Interpreter disabled for now'
         cpu, _bus = create_isa_simulator(native: true)
         skip 'Native ISA simulator not available' unless cpu.native?
         cpu.reset
@@ -1770,7 +1768,6 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
 
     context 'with Ruby ISA simulator as reference' do
       it 'compares PC sequences from game entry point (100 at start, 100 at end)', timeout: 30 do
-        skip 'IR Interpreter disabled for now'
         # Create reference (Ruby ISA simulator) - PC at game entry
         cpu, bus = create_isa_simulator(native: false)
         setup_isa_for_karateka(cpu, bus)
@@ -1816,7 +1813,6 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
       end
 
       it 'compares PC sequences from game entry vs IR interpreter', timeout: 30 do
-        skip 'IR Interpreter disabled for now'
         cpu, bus = create_isa_simulator(native: true)
         skip 'Native ISA simulator not available' unless cpu.native?
         setup_isa_for_karateka(cpu, bus)
