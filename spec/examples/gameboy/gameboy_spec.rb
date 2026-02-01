@@ -403,8 +403,6 @@ RSpec.describe 'GameBoy RHDL Implementation' do
 
     before do
       skip 'Verilator not available' unless verilator_available?
-      # Skip until Verilog export is Verilator-compatible (circular assignments, etc.)
-      skip 'Verilog export not yet Verilator-compatible'
       begin
         require_relative '../../../examples/gameboy/utilities/gameboy_verilator'
       rescue LoadError => e
