@@ -75,6 +75,10 @@ module GameBoy
     output :stop_out           # STOP instruction executed
     input :is_gbc              # Game Boy Color mode
 
+    # Debug outputs (for Verilator simulation visibility)
+    output :debug_pc, width: 16    # Program counter for debugging
+    output :debug_acc, width: 8    # Accumulator for debugging
+
     # =========================================================================
     # Internal Registers
     # =========================================================================
@@ -211,9 +215,15 @@ module GameBoy
       hl <= cat(h_reg, l_reg)
 
       # -----------------------------------------------------------------------
+      # Debug Outputs
+      # -----------------------------------------------------------------------
+      debug_pc <= pc
+      debug_acc <= acc
+
+      # -----------------------------------------------------------------------
       # Instruction Decoder (Microcode) - Default values
       # -----------------------------------------------------------------------
-      inc_pc <= lit(0, width: 1)
+      # Note: inc_pc is set comprehensively below (around line 769)
       read_to_acc <= lit(0, width: 1)
       set_bus_a_to <= lit(7, width: 4)  # ACC
       set_bus_b_to <= lit(7, width: 4)  # ACC
@@ -542,9 +552,7 @@ module GameBoy
       read_to_acc <= mux(is_ld_r_imm & (ir[5..3] == lit(7, width: 3)) & (m_cycle == lit(2, width: 3)),
                          lit(1, width: 1), read_to_acc)
       write_reg <= mux(is_ld_r_imm & (m_cycle == lit(2, width: 3)), ir[5..3], write_reg)
-      # PC increment for LD r,n M2
-      inc_pc <= mux(is_ld_r_imm & (ir[5..3] != lit(6, width: 3)) & (m_cycle == lit(2, width: 3)),
-                    lit(1, width: 1), inc_pc)
+      # PC increment for LD r,n M2 - covered by comprehensive inc_pc below
 
       # -----------------------------------------------------------------------
       # LD r,(HL) - Load from (HL) into register (01xxx110 except 76=HALT)
@@ -578,9 +586,7 @@ module GameBoy
                        lit(1, width: 1), write_sig)
       no_read <= mux((ir == lit(0x36, width: 8)) & (m_cycle == lit(3, width: 3)),
                      lit(1, width: 1), no_read)
-      # PC increment for LD (HL),n M2
-      inc_pc <= mux((ir == lit(0x36, width: 8)) & (m_cycle == lit(2, width: 3)),
-                    lit(1, width: 1), inc_pc)
+      # PC increment for LD (HL),n M2 - covered by comprehensive inc_pc below
 
       # -----------------------------------------------------------------------
       # LDD A,(HL) (3A) - Load from (HL) to A, decrement HL
@@ -730,9 +736,7 @@ module GameBoy
                  lit(1, width: 1), ldz)
       ldw <= mux(((ir == lit(0xEA, width: 8)) | (ir == lit(0xFA, width: 8))) & (m_cycle == lit(3, width: 3)),
                  lit(1, width: 1), ldw)
-      inc_pc <= mux(((ir == lit(0xEA, width: 8)) | (ir == lit(0xFA, width: 8))) &
-                    ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3))),
-                    lit(1, width: 1), inc_pc)
+      # PC increment for 0xEA/0xFA M2-M3 - covered by comprehensive inc_pc below
       set_addr_to <= mux(((ir == lit(0xEA, width: 8)) | (ir == lit(0xFA, width: 8))) & (m_cycle == lit(4, width: 3)),
                          lit(ADDR_WZ, width: 3), set_addr_to)
       write_sig <= mux((ir == lit(0xEA, width: 8)) & (m_cycle == lit(4, width: 3)),
@@ -759,6 +763,8 @@ module GameBoy
       inc_pc <= ((m_cycle == lit(1, width: 3)) & ~halt & ~int_cycle) |
                 # LD r, n (0x06, 0x0E, 0x16, 0x1E, 0x26, 0x2E, 0x3E) - M2 reads immediate
                 (is_ld_r_n & (m_cycle == lit(2, width: 3))) |
+                # LD (HL), n (0x36) - M2 reads immediate
+                ((ir == lit(0x36, width: 8)) & (m_cycle == lit(2, width: 3))) |
                 # LDH (n), A (0xE0) - M2 reads offset
                 ((ir == lit(0xE0, width: 8)) & (m_cycle == lit(2, width: 3))) |
                 # LDH A, (n) (0xF0) - M2 reads offset
@@ -769,6 +775,8 @@ module GameBoy
                 ((ir == lit(0xC3, width: 8)) & (m_cycle >= lit(2, width: 3))) |
                 # CALL nn (0xCD) - M2 and M3 read address (not M4-M6 which push/jump)
                 ((ir == lit(0xCD, width: 8)) & ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3)))) |
+                # LD (nn), A (0xEA) / LD A, (nn) (0xFA) - M2 and M3 read 16-bit address
+                (((ir == lit(0xEA, width: 8)) | (ir == lit(0xFA, width: 8))) & ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3)))) |
                 # JR e (0x18) - M2 reads displacement
                 ((ir == lit(0x18, width: 8)) & (m_cycle == lit(2, width: 3))) |
                 # Conditional JR (0x20, 0x28, 0x30, 0x38) - M2 reads displacement
