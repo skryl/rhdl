@@ -56,6 +56,7 @@ module GameBoy
     # Boot ROM features
     input :boot_gba_en
     input :fast_boot_en
+    input :boot_rom_do, width: 8  # Boot ROM data input (directly connected)
 
     # Audio outputs
     output :audio_l, width: 16
@@ -132,6 +133,7 @@ module GameBoy
     # Debug outputs (for Verilator simulation visibility)
     output :debug_cpu_pc, width: 16    # CPU Program counter
     output :debug_cpu_acc, width: 8    # CPU Accumulator
+    output :boot_rom_addr, width: 8    # Boot ROM address (for external boot ROM)
 
     # Internal signals
     wire :cpu_addr, width: 16
@@ -223,9 +225,6 @@ module GameBoy
     wire :vram_wren_cpu                # CPU VRAM write enable
     wire :vram_addr_ppu, width: 13     # PPU VRAM address
     wire :vram_data_ppu, width: 8      # PPU VRAM data read
-
-    # Boot ROM interface signals
-    wire :boot_rom_addr, width: 8      # Boot ROM address (lower 8 bits of cpu_addr)
 
     # Reset signal (active-low for CPU)
     wire :reset_n                      # Active-low reset for CPU (inverted from active-high reset input)
@@ -391,10 +390,8 @@ module GameBoy
       # Boot ROM address (lower 8 bits for DMG 256-byte boot ROM)
       boot_rom_addr <= cpu_addr[7..0]
 
-      # Boot ROM data output - placeholder for IR export
-      # The actual boot ROM data is injected by the native Rust simulator
-      # which reads from gb_boot_rom[] and writes to this signal
-      boot_do <= lit(0xFF, width: 8)
+      # Boot ROM data comes from external input (Verilator provides this)
+      boot_do <= boot_rom_do
 
       # CPU clock enable (HDMA can stop CPU on GBC)
       cpu_clken <= ~(is_gbc & hdma_active & cpu_rd_n & cpu_wr_n) & ce
@@ -463,11 +460,11 @@ module GameBoy
     end
 
     # Sequential logic for registers
-    # boot_rom_enabled starts as 1 and is disabled by writing to FF50
+    # boot_rom_enabled: 1 to run boot ROM (initializes hardware properly)
     sequential clock: :clk_sys, reset: :reset, reset_values: { boot_rom_enabled: 1, if_r: 0 } do
       # Boot ROM enable (disabled by writing to FF50)
-      # When writing 1 to FF50, boot ROM is disabled (set to 0)
-      boot_rom_enabled <= mux(ce & (cpu_addr == lit(0xFF50, width: 16)) & ~cpu_wr_n & cpu_do[0],
+      # Disable boot ROM on any write to FF50 (MiSTer boot ROM writes 0, original writes non-zero)
+      boot_rom_enabled <= mux(ce & (cpu_addr == lit(0xFF50, width: 16)) & ~cpu_wr_n,
                               lit(0, width: 1),
                               boot_rom_enabled)
 
