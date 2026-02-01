@@ -64,6 +64,7 @@ module RHDL
         @sub_cycles = sub_cycles.clamp(1, 14)
 
         # Create the simulator based on backend choice
+        # All wrappers require native Rust extensions - will raise LoadError if unavailable
         @sim = case backend
                when :interpret
                  RHDL::Codegen::IR::IrInterpreterWrapper.new(@ir_json, allow_fallback: false, sub_cycles: @sub_cycles)
@@ -72,7 +73,7 @@ module RHDL
                  RHDL::Codegen::IR::IrJitWrapper.new(@ir_json, allow_fallback: false, sub_cycles: @sub_cycles)
                when :compile
                  require 'rhdl/codegen/ir/sim/ir_compiler'
-                 RHDL::Codegen::IR::IrCompilerWrapper.new(@ir_json, sub_cycles: @sub_cycles)
+                 RHDL::Codegen::IR::IrCompilerWrapper.new(@ir_json, allow_fallback: false, sub_cycles: @sub_cycles)
                else
                  raise ArgumentError, "Unknown backend: #{backend}. Use :interpret, :jit, or :compile"
                end
