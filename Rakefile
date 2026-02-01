@@ -308,8 +308,12 @@ namespace :bench do
     RHDL::CLI::Tasks::BenchmarkTask.new(type: :verilator, cycles: cycles).run
   end
 
-  desc "Benchmark IR runners (alias for bench:apple2)"
-  task :ir, [:cycles] => :apple2
+  desc "Benchmark IR runners"
+  task :ir, [:cycles] do |_, args|
+    load_cli_tasks
+    cycles = args[:cycles]&.to_i || 5_000_000
+    RHDL::CLI::Tasks::BenchmarkTask.new(type: :ir, cycles: cycles).run
+  end
 end
 
 desc "Run gate benchmark (alias for bench:gates)"
