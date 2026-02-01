@@ -417,7 +417,61 @@ module RHDL
         end
 
         all_verilog = [verilog_code, *subcomponent_verilog].join("\n\n")
+
+        # Post-process for Verilator compatibility
+        all_verilog = make_verilator_compatible(all_verilog)
+
         File.write(output_file, all_verilog)
+      end
+
+      def make_verilator_compatible(verilog)
+        # Add Verilator lint pragmas at the top
+        pragmas = <<~PRAGMAS
+          /* verilator lint_off IMPLICIT */
+          /* verilator lint_off UNUSED */
+          /* verilator lint_off UNDRIVEN */
+          /* verilator lint_off PINMISSING */
+
+        PRAGMAS
+
+        verilog = pragmas + verilog
+
+        # Replace true/false with 1'b1/1'b0
+        verilog = verilog.gsub(/\(true\)/, "(1'b1)")
+        verilog = verilog.gsub(/\(false\)/, "(1'b0)")
+        verilog = verilog.gsub(/= true\b/, "= 1'b1")
+        verilog = verilog.gsub(/= false\b/, "= 1'b0")
+
+        # Remove default values from input declarations
+        # Pattern: input name = value -> input name
+        verilog = verilog.gsub(/^(\s*input\s+(?:\[[^\]]+\]\s+)?(\w+))\s*=\s*[^,;\n]+([,;])/) do
+          "#{$1}#{$3}"
+        end
+
+        # Replace reduce_or(expr) with |expr
+        verilog = verilog.gsub(/reduce_or\(([^)]+)\)/, '|\1')
+
+        # Replace reduce_and(expr) with &expr
+        verilog = verilog.gsub(/reduce_and\(([^)]+)\)/, '&\1')
+
+        # Replace reduce_xor(expr) with ^expr
+        verilog = verilog.gsub(/reduce_xor\(([^)]+)\)/, '^\1')
+
+        # Remove parameter overrides that don't exist in module definitions
+        # Pattern: game_boy_dpram #(.addr_width(N)) name -> game_boy_dpram name
+        verilog = verilog.gsub(/game_boy_dpram\s+#\(\s*\.addr_width\(\d+\)\s*\)\s+(\w+)/, 'game_boy_dpram \1')
+        verilog = verilog.gsub(/game_boy_spram\s+#\(\s*\.addr_width\(\d+\)\s*\)\s+(\w+)/, 'game_boy_spram \1')
+        verilog = verilog.gsub(/game_boy_channel_square\s+#\(\s*\.has_sweep\([^)]+\)\s*\)\s+(\w+)/, 'game_boy_channel_square \1')
+
+        # Fix unsized constants in concatenations: {0'd0, -> {1'b0,
+        verilog = verilog.gsub(/\{0'd0,/, "{1'b0,")
+
+        # Fix DPRAM outputs - they should be reg not wire since assigned in always blocks
+        # Pattern: output [7:0] q_a, -> output reg [7:0] q_a,
+        verilog = verilog.gsub(/output\s+(\[\d+:\d+\]\s+)(q_a|q_b)/, 'output reg \1\2')
+        verilog = verilog.gsub(/output\s+(q_a|q_b)/, 'output reg \1')
+
+        verilog
       end
 
       def create_cpp_wrapper(cpp_file, header_file)
@@ -464,13 +518,13 @@ module RHDL
 
         # Create C++ wrapper implementation
         File.write(cpp_file, <<~CPP)
-          #include "Vgameboy.h"
+          #include "Vgame_boy_gameboy.h"
           #include "verilated.h"
           #include "sim_wrapper.h"
           #include <cstring>
 
           struct SimContext {
-              Vgameboy* dut;
+              Vgame_boy_gameboy* dut;
               unsigned char rom[1048576];     // 1MB ROM
               unsigned char boot_rom[256];    // 256 byte DMG boot ROM
               unsigned char vram[8192];       // 8KB VRAM
@@ -488,7 +542,7 @@ module RHDL
               const char* empty_args[] = {""};
               Verilated::commandArgs(1, empty_args);
               SimContext* ctx = new SimContext();
-              ctx->dut = new Vgameboy();
+              ctx->dut = new Vgame_boy_gameboy();
               memset(ctx->rom, 0, sizeof(ctx->rom));
               memset(ctx->boot_rom, 0, sizeof(ctx->boot_rom));
               memset(ctx->vram, 0, sizeof(ctx->vram));
@@ -650,11 +704,11 @@ module RHDL
         lib_name = "libgameboy_sim.#{lib_suffix}"
         lib_path = File.join(OBJ_DIR, lib_name)
 
-        # Verilate the design - top module is gameboy_gameboy
+        # Verilate the design - top module is game_boy_gameboy
         verilate_cmd = [
           'verilator',
           '--cc',
-          '--top-module', 'gameboy_gameboy',
+          '--top-module', 'game_boy_gameboy',
           # Optimization flags
           '-O3',
           '--x-assign', 'fast',
@@ -670,7 +724,7 @@ module RHDL
           '-CFLAGS', '-fPIC -O3 -march=native',
           '-LDFLAGS', '-shared',
           '--Mdir', OBJ_DIR,
-          '--prefix', 'Vgameboy',
+          '--prefix', 'Vgame_boy_gameboy',
           '-o', lib_name,
           wrapper_file,
           verilog_file
@@ -688,7 +742,7 @@ module RHDL
 
           # Build with clang++ for better optimization
           Dir.chdir(OBJ_DIR) do
-            result = system('make', '-f', 'Vgameboy.mk', 'CXX=clang++', out: log, err: log)
+            result = system('make', '-f', 'Vgame_boy_gameboy.mk', 'CXX=clang++', out: log, err: log)
             unless result
               raise "Verilator make failed. See #{log_file} for details."
             end
@@ -702,7 +756,7 @@ module RHDL
 
       def build_shared_library(wrapper_file)
         lib_path = shared_lib_path
-        lib_vgameboy = File.join(OBJ_DIR, 'libVgameboy.a')
+        lib_vgameboy = File.join(OBJ_DIR, 'libVgame_boy_gameboy.a')
         lib_verilated = File.join(OBJ_DIR, 'libverilated.a')
 
         link_cmd = if RbConfig::CONFIG['host_os'] =~ /darwin/
