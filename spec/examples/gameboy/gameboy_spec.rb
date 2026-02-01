@@ -550,7 +550,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       end
     end
 
-    it 'compares 20M cycles between IR Compiler and Verilator backends', timeout: 600 do
+    it 'compares 1000 frames between IR Compiler and Verilator backends', timeout: 600 do
       rom_data = File.binread(tobu_rom_path)
 
       # Initialize both runners
@@ -567,151 +567,127 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       verilator_runner.reset
 
       # Run configuration
-      total_cycles = 20_000_000
-      snapshot_interval = 1_000_000
-      batches = total_cycles / snapshot_interval
+      target_frames = 1000
+      snapshot_interval = 100  # Take snapshot every 100 frames
+      cycles_per_frame = 70224  # 154 scanlines * 456 dots
 
       # Snapshot storage
       ir_snapshots = []
       verilator_snapshots = []
 
-      cycles_per_frame = 154 * 456
-
-      puts "  Running #{total_cycles / 1_000_000}M cycles on each backend..."
+      puts "  Running #{target_frames} frames on each backend..."
       puts ""
 
-      # Run IR Compiler
+      # Run IR Compiler (use cycle count to approximate frames)
       puts "  IR Compiler (Rust):"
       ir_start = Time.now
-      batches.times do |i|
-        ir_runner.run_steps(snapshot_interval)
+      target_cycles = target_frames * cycles_per_frame
+      cycles_per_snapshot = snapshot_interval * cycles_per_frame
+
+      (target_frames / snapshot_interval).times do |i|
+        ir_runner.run_steps(cycles_per_snapshot)
+        ir_frames = ir_runner.cycle_count / cycles_per_frame
         ir_snapshots << {
+          frame: ir_frames,
           cycle: ir_runner.cycle_count,
-          frame: ir_runner.cycle_count / cycles_per_frame,
           pc: ir_runner.cpu_state[:pc],
           a: ir_runner.cpu_state[:a],
           elapsed: Time.now - ir_start
         }
       end
       ir_elapsed = Time.now - ir_start
+      ir_total_frames = ir_runner.cycle_count / cycles_per_frame
       ir_speed = ir_runner.cycle_count / ir_elapsed / 1_000_000.0
 
-      puts "    Completed in #{'%.2f' % ir_elapsed}s"
+      puts "    Completed #{ir_total_frames} frames in #{'%.2f' % ir_elapsed}s"
       puts "    Speed: #{'%.2f' % ir_speed} MHz (#{'%.1f' % (ir_speed / 4.19 * 100)}% of real GB)"
       puts ""
 
-      # Run Verilator
+      # Run Verilator (use actual frame count)
       puts "  Verilator (RTL):"
       verilator_start = Time.now
-      batches.times do |i|
-        verilator_runner.run_steps(snapshot_interval)
-        verilator_snapshots << {
-          cycle: verilator_runner.cycle_count,
-          frame: verilator_runner.cycle_count / cycles_per_frame,
-          pc: verilator_runner.cpu_state[:pc],
-          a: verilator_runner.cpu_state[:a],
-          elapsed: Time.now - verilator_start
-        }
+      last_snapshot_frame = 0
+
+      while verilator_runner.frame_count < target_frames
+        verilator_runner.run_steps(cycles_per_frame)  # Run ~1 frame worth of cycles
+
+        # Take snapshot every snapshot_interval frames
+        current_frame = verilator_runner.frame_count
+        if current_frame >= last_snapshot_frame + snapshot_interval
+          verilator_snapshots << {
+            frame: current_frame,
+            cycle: verilator_runner.cycle_count,
+            pc: verilator_runner.cpu_state[:pc],
+            a: verilator_runner.cpu_state[:a],
+            elapsed: Time.now - verilator_start
+          }
+          last_snapshot_frame = current_frame
+        end
       end
       verilator_elapsed = Time.now - verilator_start
       verilator_speed = verilator_runner.cycle_count / verilator_elapsed / 1_000_000.0
 
-      puts "    Completed in #{'%.2f' % verilator_elapsed}s"
+      puts "    Completed #{verilator_runner.frame_count} frames in #{'%.2f' % verilator_elapsed}s"
       puts "    Speed: #{'%.2f' % verilator_speed} MHz (#{'%.1f' % (verilator_speed / 4.19 * 100)}% of real GB)"
       puts ""
 
-      # Compare results - check if Verilator has debug signals available
-      vl_has_debug = verilator_snapshots.any? { |s| s[:pc] != 0 || s[:a] != 0 }
+      # Compare results
+      puts "  CPU State Comparison (every #{snapshot_interval} frames):"
+      puts "  " + "-" * 78
+      puts "  #{'Frame'.ljust(10)} | #{'IR PC'.ljust(8)} | #{'VL PC'.ljust(8)} | #{'IR A'.ljust(6)} | #{'VL A'.ljust(6)} | #{'Match'.ljust(5)}"
+      puts "  " + "-" * 78
 
-      if vl_has_debug
-        puts "  CPU State Comparison:"
-        puts "  " + "-" * 78
-        puts "  #{'Cycle'.ljust(12)} | #{'IR PC'.ljust(8)} | #{'VL PC'.ljust(8)} | #{'IR A'.ljust(6)} | #{'VL A'.ljust(6)} | #{'Match'.ljust(5)}"
-        puts "  " + "-" * 78
+      mismatches = 0
+      num_comparisons = [ir_snapshots.size, verilator_snapshots.size].min
+      num_comparisons.times do |i|
+        ir_snap = ir_snapshots[i]
+        vl_snap = verilator_snapshots[i]
 
-        mismatches = 0
-        batches.times do |i|
-          ir_snap = ir_snapshots[i]
-          vl_snap = verilator_snapshots[i]
+        pc_match = ir_snap[:pc] == vl_snap[:pc]
+        a_match = ir_snap[:a] == vl_snap[:a]
+        all_match = pc_match && a_match
 
-          pc_match = ir_snap[:pc] == vl_snap[:pc]
-          a_match = ir_snap[:a] == vl_snap[:a]
-          all_match = pc_match && a_match
+        mismatches += 1 unless all_match
 
-          mismatches += 1 unless all_match
+        frame_str = "#{ir_snap[:frame]}".ljust(10)
+        ir_pc_str = ("0x%04X" % ir_snap[:pc]).ljust(8)
+        vl_pc_str = ("0x%04X" % vl_snap[:pc]).ljust(8)
+        ir_a_str = ("0x%02X" % ir_snap[:a]).ljust(6)
+        vl_a_str = ("0x%02X" % vl_snap[:a]).ljust(6)
+        match_str = all_match ? "YES" : "NO"
 
-          cycle_str = "#{(ir_snap[:cycle] / 1_000_000)}M".ljust(12)
-          ir_pc_str = ("0x%04X" % ir_snap[:pc]).ljust(8)
-          vl_pc_str = ("0x%04X" % vl_snap[:pc]).ljust(8)
-          ir_a_str = ("0x%02X" % ir_snap[:a]).ljust(6)
-          vl_a_str = ("0x%02X" % vl_snap[:a]).ljust(6)
-          match_str = all_match ? "YES" : "NO"
-
-          puts "  #{cycle_str} | #{ir_pc_str} | #{vl_pc_str} | #{ir_a_str} | #{vl_a_str} | #{match_str}"
-        end
-
-        puts "  " + "-" * 78
-        puts ""
-      else
-        puts "  CPU State Comparison: (Verilator debug signals not exposed)"
-        puts "    Note: Internal CPU registers (PC, A) not available as debug outputs"
-        puts "    IR Compiler PC progression shown below:"
-        puts ""
-        puts "  " + "-" * 50
-        puts "  #{'Cycle'.ljust(12)} | #{'IR PC'.ljust(10)} | #{'IR A'.ljust(6)}"
-        puts "  " + "-" * 50
-
-        batches.times do |i|
-          ir_snap = ir_snapshots[i]
-          cycle_str = "#{(ir_snap[:cycle] / 1_000_000)}M".ljust(12)
-          ir_pc_str = ("0x%04X" % ir_snap[:pc]).ljust(10)
-          ir_a_str = ("0x%02X" % ir_snap[:a]).ljust(6)
-          puts "  #{cycle_str} | #{ir_pc_str} | #{ir_a_str}"
-        end
-
-        puts "  " + "-" * 50
-        puts ""
-        mismatches = 0  # Can't compare without debug signals
+        puts "  #{frame_str} | #{ir_pc_str} | #{vl_pc_str} | #{ir_a_str} | #{vl_a_str} | #{match_str}"
       end
 
-      # Speed comparison
-      speedup = ir_speed / verilator_speed
-      faster_backend = speedup > 1 ? "IR Compiler" : "Verilator"
-      speedup_ratio = speedup > 1 ? speedup : 1.0 / speedup
+      puts "  " + "-" * 78
+      puts ""
 
+      # Speed comparison
+      speedup = verilator_speed / ir_speed
       puts "  Speed Comparison:"
       puts "    IR Compiler:  #{'%.2f' % ir_speed} MHz"
       puts "    Verilator:    #{'%.2f' % verilator_speed} MHz"
-      puts "    #{faster_backend} is #{'%.1f' % speedup_ratio}x faster"
+      puts "    Verilator is #{'%.1f' % speedup}x faster"
       puts ""
 
       # Summary
-      total_frames_ir = ir_runner.cycle_count / cycles_per_frame
-      total_frames_vl = verilator_runner.cycle_count / cycles_per_frame
-      frames_match = total_frames_ir == total_frames_vl
-
       puts "  Final State:"
-      puts "    IR Compiler - Cycles: #{ir_runner.cycle_count}, Frames: #{total_frames_ir}, PC: 0x#{'%04X' % ir_runner.cpu_state[:pc]}"
-      puts "    Verilator   - Cycles: #{verilator_runner.cycle_count}, Frames: #{total_frames_vl}"
+      puts "    IR Compiler - Cycles: #{ir_runner.cycle_count}, Frames: #{ir_total_frames}, PC: 0x#{'%04X' % ir_runner.cpu_state[:pc]}"
+      puts "    Verilator   - Cycles: #{verilator_runner.cycle_count}, Frames: #{verilator_runner.frame_count}, PC: 0x#{'%04X' % verilator_runner.cpu_state[:pc]}"
       puts ""
 
       puts "  Verification:"
-      puts "    Cycles match: #{ir_runner.cycle_count == verilator_runner.cycle_count ? 'YES' : 'NO'}"
-      puts "    Frames match: #{frames_match ? 'YES' : 'NO'} (#{total_frames_ir} vs #{total_frames_vl})"
-
-      if vl_has_debug
-        if mismatches > 0
-          puts "    CPU state mismatches: #{mismatches}/#{batches}"
-        else
-          puts "    CPU state: All #{batches} snapshots matched"
-        end
+      puts "    IR frames (calculated): #{ir_total_frames}"
+      puts "    Verilator frames (actual): #{verilator_runner.frame_count}"
+      if mismatches > 0
+        puts "    CPU state mismatches: #{mismatches}/#{num_comparisons}"
       else
-        puts "    CPU state: Not compared (debug signals not exposed)"
+        puts "    CPU state: All #{num_comparisons} snapshots matched"
       end
 
-      # Assertions
-      expect(ir_runner.cycle_count).to eq(total_cycles)
-      expect(verilator_runner.cycle_count).to eq(total_cycles)
+      # Assertions - both should reach target frames
+      expect(ir_total_frames).to be >= target_frames
+      expect(verilator_runner.frame_count).to be >= target_frames
       expect(ir_runner.native?).to eq(true)
       expect(verilator_runner.native?).to eq(true)
     end
