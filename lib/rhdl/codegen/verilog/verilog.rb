@@ -19,6 +19,125 @@ module RHDL
 
       module_function
 
+      # Consolidate multiple assigns to the same target into a single assign.
+      # When the DSL has:
+      #   x <= mux(cond1, val1, x)
+      #   x <= mux(cond2, val2, x)
+      # This consolidates them into:
+      #   x = mux(cond2, val2, mux(cond1, val1, default))
+      # Later assigns have priority over earlier ones.
+      def consolidate_assigns(assigns)
+        # Group assigns by target
+        by_target = assigns.group_by { |a| a.target.to_s }
+
+        consolidated = []
+        by_target.each do |target, target_assigns|
+          if target_assigns.length == 1
+            consolidated << target_assigns.first
+          else
+            # Multiple assigns to same target - need to merge
+            merged_expr = merge_conditional_assigns(target, target_assigns)
+            consolidated << IR::Assign.new(target: target, expr: merged_expr)
+          end
+        end
+
+        consolidated
+      end
+
+      # Merge multiple conditional assigns into a single expression.
+      # Each assign should be in the form: target = mux(cond, val, target) or target = expr
+      # The result is a nested mux where later conditions have priority.
+      def merge_conditional_assigns(target, assigns)
+        # Start with a default value (first non-conditional assign or zero)
+        # Work through assigns in order, building a mux chain where later assigns
+        # wrap earlier ones, giving them priority.
+
+        # Find the width from the first assign's expression
+        width = assigns.first.expr.width
+
+        # Build from the first assign, then layer subsequent ones on top
+        result = nil
+        assigns.each do |assign|
+          expr = assign.expr
+
+          if expr.is_a?(IR::Mux) && is_self_reference?(expr.when_false, target)
+            # This is a conditional assign: x = mux(cond, val, x)
+            # Replace the self-reference with our accumulated result
+            if result.nil?
+              # First conditional - need a default value
+              # Try to find a non-conditional assign, otherwise use 0
+              default = find_default_value(assigns, target, width)
+              result = IR::Mux.new(
+                condition: expr.condition,
+                when_true: expr.when_true,
+                when_false: default,
+                width: width
+              )
+            else
+              # Layer this condition on top of previous result
+              result = IR::Mux.new(
+                condition: expr.condition,
+                when_true: expr.when_true,
+                when_false: result,
+                width: width
+              )
+            end
+          elsif expr.is_a?(IR::Mux) && is_self_reference?(expr.when_true, target)
+            # Inverted conditional: x = mux(cond, x, val)
+            # This means: when cond is false, assign val
+            if result.nil?
+              default = find_default_value(assigns, target, width)
+              # Invert: when !cond, use val; else use default
+              result = IR::Mux.new(
+                condition: expr.condition,
+                when_true: default,
+                when_false: expr.when_false,
+                width: width
+              )
+            else
+              result = IR::Mux.new(
+                condition: expr.condition,
+                when_true: result,
+                when_false: expr.when_false,
+                width: width
+              )
+            end
+          else
+            # Unconditional assign - this becomes the new base
+            result = expr
+          end
+        end
+
+        result || IR::Literal.new(value: 0, width: width)
+      end
+
+      # Check if an expression is a reference to the target signal
+      def is_self_reference?(expr, target)
+        case expr
+        when IR::Signal
+          sanitize(expr.name) == sanitize(target)
+        when IR::Resize
+          is_self_reference?(expr.expr, target)
+        else
+          false
+        end
+      end
+
+      # Find a suitable default value from the assigns
+      def find_default_value(assigns, target, width)
+        # Look for an unconditional assign
+        assigns.each do |assign|
+          expr = assign.expr
+          next if expr.is_a?(IR::Mux) && (is_self_reference?(expr.when_false, target) ||
+                                           is_self_reference?(expr.when_true, target))
+          # Found an unconditional assign
+          return expr
+        end
+
+        # No unconditional assign found - use zero as default
+        IR::Literal.new(value: 0, width: width)
+      end
+
       def generate(module_def)
         lines = []
 
@@ -57,7 +176,12 @@ module RHDL
         end
         lines << "" unless module_def.regs.empty? && module_def.nets.empty? && module_def.memories.empty?
 
-        module_def.assigns.each do |assign|
+        # Consolidate multiple assigns to the same target into a single assign
+        consolidated = consolidate_assigns(module_def.assigns)
+        consolidated.each do |assign|
+          # Skip circular assignments (assign x = x) which can happen with unconditional mux fallbacks
+          next if circular_assign?(assign)
+
           lines << "  assign #{sanitize(assign.target)} = #{expr(assign.expr)};"
         end
 
@@ -131,19 +255,7 @@ module RHDL
               when :inout then "inout"
               else "input"
               end
-        decl = "#{dir} #{width_decl(port.width)}#{sanitize(port.name)}".strip
-
-        # Add default value for input ports if specified
-        if port.direction == :in && port.default
-          default_val = if port.width == 1
-                          port.default == 0 ? "1'b0" : "1'b1"
-                        else
-                          "#{port.width}'d#{port.default}"
-                        end
-          decl = "#{decl} = #{default_val}"
-        end
-
-        decl
+        "#{dir} #{width_decl(port.width)}#{sanitize(port.name)}".strip
       end
 
       def width_decl(width)
@@ -374,6 +486,9 @@ module RHDL
         case op
         when :~ then "~"
         when :! then "!"
+        when :reduce_or then "|"
+        when :reduce_and then "&"
+        when :reduce_xor then "^"
         else op.to_s
         end
       end
@@ -397,6 +512,30 @@ module RHDL
           :/ => "/",
           :% => "%"
         }.fetch(op)
+      end
+
+      # Check if an assignment is circular (assign x = x)
+      # This can happen when mux fallback references the target
+      def circular_assign?(assign)
+        target = assign.target.to_s
+        is_self_ref?(assign.expr, target)
+      end
+
+      # Recursively check if an expression is just a reference to the target
+      # or a mux where both branches are the target (condition ? x : x = x)
+      def is_self_ref?(expr_node, target_name)
+        case expr_node
+        when IR::Signal
+          sanitize(expr_node.name) == sanitize(target_name)
+        when IR::Resize
+          is_self_ref?(expr_node.expr, target_name)
+        when IR::Mux
+          # A mux is self-referential if both branches are self-referential
+          is_self_ref?(expr_node.when_true, target_name) &&
+            is_self_ref?(expr_node.when_false, target_name)
+        else
+          false
+        end
       end
 
       def sanitize(name)
