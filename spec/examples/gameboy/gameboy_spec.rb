@@ -528,6 +528,11 @@ RSpec.describe 'GameBoy RHDL Implementation' do
   describe 'Backend Comparison (IR Compiler vs Verilator)' do
     let(:test_rom_path) { File.expand_path('../../../examples/gameboy/software/roms/pop.gb', __dir__) }
 
+    # Constants for boot ROM testing
+    CYCLES_PER_FRAME = 70224  # 154 scanlines * 456 dots
+    BOOT_ROM_COMPLETE_PC = 0x0100
+    MAX_BOOT_CYCLES = 500_000  # Safety limit for boot ROM
+
     def verilator_available?
       ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
         File.executable?(File.join(path, 'verilator'))
@@ -548,6 +553,101 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       rescue LoadError, RuntimeError => e
         skip "Runners not available: #{e.message}"
       end
+    end
+
+    it 'completes boot ROM at the same cycle on both backends', timeout: 120 do
+      rom_data = File.binread(test_rom_path)
+
+      puts "\n  Boot ROM Completion Test"
+      puts "  " + "=" * 50
+
+      # Initialize both runners
+      ir_runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+      verilator_runner = RHDL::GameBoy::VerilatorRunner.new
+
+      # Load ROM into both
+      ir_runner.load_rom(rom_data)
+      verilator_runner.load_rom(rom_data)
+
+      # Reset both
+      ir_runner.reset
+      verilator_runner.reset
+
+      # --- IR Compiler Boot ---
+      puts "  IR Compiler:"
+      ir_start = Time.now
+      ir_boot_cycle = nil
+      ir_snapshots = []
+      batch_size = 10_000
+      cycles_run = 0
+
+      while cycles_run < MAX_BOOT_CYCLES
+        ir_runner.run_steps(batch_size)
+        cycles_run += batch_size
+        pc = ir_runner.cpu_state[:pc]
+
+        if cycles_run % 50_000 == 0
+          ir_snapshots << { cycle: cycles_run, pc: pc }
+        end
+
+        if pc >= BOOT_ROM_COMPLETE_PC
+          ir_boot_cycle = cycles_run
+          break
+        end
+      end
+
+      ir_elapsed = Time.now - ir_start
+      puts "    Boot completed at cycle #{ir_boot_cycle} (#{'%.3f' % ir_elapsed}s)"
+
+      # --- Verilator Boot ---
+      puts "  Verilator:"
+      vl_start = Time.now
+      vl_boot_cycle = nil
+      vl_snapshots = []
+      cycles_run = 0
+
+      while cycles_run < MAX_BOOT_CYCLES
+        verilator_runner.run_steps(batch_size)
+        cycles_run += batch_size
+        pc = verilator_runner.cpu_state[:pc]
+
+        if cycles_run % 50_000 == 0
+          vl_snapshots << { cycle: cycles_run, pc: pc }
+        end
+
+        if pc >= BOOT_ROM_COMPLETE_PC
+          vl_boot_cycle = cycles_run
+          break
+        end
+      end
+
+      vl_elapsed = Time.now - vl_start
+      puts "    Boot completed at cycle #{vl_boot_cycle} (#{'%.3f' % vl_elapsed}s)"
+
+      # --- Comparison ---
+      puts ""
+      puts "  Comparison:"
+      if ir_boot_cycle && vl_boot_cycle
+        cycle_diff = (ir_boot_cycle - vl_boot_cycle).abs
+        puts "    IR Compiler: #{ir_boot_cycle} cycles"
+        puts "    Verilator:   #{vl_boot_cycle} cycles"
+        puts "    Difference:  #{cycle_diff} cycles"
+
+        # Verify PC snapshots match
+        mismatch_count = 0
+        [ir_snapshots.size, vl_snapshots.size].min.times do |i|
+          if ir_snapshots[i][:pc] != vl_snapshots[i][:pc]
+            mismatch_count += 1
+          end
+        end
+        puts "    PC mismatches: #{mismatch_count}/#{[ir_snapshots.size, vl_snapshots.size].min}"
+
+        expect(cycle_diff).to be < 10_000, "Boot cycle difference too large: #{cycle_diff}"
+        expect(mismatch_count).to eq(0), "PC values diverged during boot"
+      end
+
+      expect(ir_boot_cycle).not_to be_nil, "IR Compiler failed to complete boot ROM"
+      expect(vl_boot_cycle).not_to be_nil, "Verilator failed to complete boot ROM"
     end
 
     # Helper to check if a framebuffer is blank (all same value)
