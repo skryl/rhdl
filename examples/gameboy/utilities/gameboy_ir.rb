@@ -129,6 +129,9 @@ module RHDL
 
         @sim.reset
         initialize_inputs unless @use_batched
+
+        # Load boot ROM if available
+        load_boot_rom if File.exist?(DMG_BOOT_ROM_PATH)
       end
 
       def native?

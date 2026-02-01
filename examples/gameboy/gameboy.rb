@@ -97,6 +97,10 @@ module GameBoy
     output :debug_pc, width: 16    # CPU Program counter
     output :debug_acc, width: 8    # CPU Accumulator
 
+    # Boot ROM interface (directly connected to simulation)
+    input :boot_rom_do, width: 8     # Boot ROM data from external simulation
+    output :boot_rom_addr, width: 8  # Boot ROM address for external lookup
+
     # Internal clock enable signals
     wire :ce
     wire :ce_n
@@ -169,6 +173,10 @@ module GameBoy
     # Debug outputs
     port [:gb_core, :debug_cpu_pc] => :debug_pc
     port [:gb_core, :debug_cpu_acc] => :debug_acc
+
+    # Boot ROM interface
+    port :boot_rom_do => [:gb_core, :boot_rom_do]
+    port [:gb_core, :boot_rom_addr] => :boot_rom_addr
 
     # Unused GB inputs - tie off to defaults
     port :const_zero => [:gb_core, :real_cgb_boot]
