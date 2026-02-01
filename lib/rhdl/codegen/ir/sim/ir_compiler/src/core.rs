@@ -414,11 +414,13 @@ impl CoreSimulator {
         let assigns = &self.ir.assigns;
         let n = assigns.len();
 
-        // Map: target signal idx -> assignment idx
-        let mut target_to_assign: HashMap<usize, usize> = HashMap::new();
+        // Map: target signal idx -> ALL assignment indices that write to it
+        // This is needed because signals like set_addr_to may have many conditional
+        // mux assignments, and any reader needs to depend on ALL of them
+        let mut target_to_assigns: HashMap<usize, Vec<usize>> = HashMap::new();
         for (i, assign) in assigns.iter().enumerate() {
             if let Some(&idx) = self.name_to_idx.get(&assign.target) {
-                target_to_assign.insert(idx, i);
+                target_to_assigns.entry(idx).or_insert_with(Vec::new).push(i);
             }
         }
 
@@ -428,8 +430,11 @@ impl CoreSimulator {
             let signal_deps = self.expr_dependencies(&assign.expr);
             let mut deps = HashSet::new();
             for sig_idx in signal_deps {
-                if let Some(&assign_idx) = target_to_assign.get(&sig_idx) {
-                    deps.insert(assign_idx);
+                // Add dependencies on ALL assignments to this signal
+                if let Some(assign_indices) = target_to_assigns.get(&sig_idx) {
+                    for &assign_idx in assign_indices {
+                        deps.insert(assign_idx);
+                    }
                 }
             }
             assign_deps.push(deps);
