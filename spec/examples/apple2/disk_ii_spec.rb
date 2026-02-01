@@ -623,6 +623,87 @@ RSpec.describe RHDL::Apple2::DiskII do
         expect(valid_bytes).to eq(343),
           "Expected all 343 encoded bytes to be >= 0x96, only #{valid_bytes} were"
       end
+
+      it 'loads and verifies all 35 tracks from Karateka disk' do
+        # This test verifies the complete disk can be read - all game data
+        # Karateka uses tracks 0-34 (35 tracks total, 140KB)
+        tracks_verified = 0
+        total_sectors = 0
+        failed_tracks = []
+
+        35.times do |track_num|
+          track_nibbles = convert_track_to_nibbles(@dsk_data, track_num)
+          disk.load_track(track_num, track_nibbles)
+
+          # Count address marks (should be at least 16 per track)
+          address_marks = 0
+          data_marks = 0
+
+          (0..(RHDL::Apple2::DiskII::TRACK_SIZE - 3)).each do |i|
+            if disk.read_track_byte(i) == 0xD5 &&
+               disk.read_track_byte(i + 1) == 0xAA
+              if disk.read_track_byte(i + 2) == 0x96
+                address_marks += 1
+              elsif disk.read_track_byte(i + 2) == 0xAD
+                data_marks += 1
+              end
+            end
+          end
+
+          if address_marks >= 16 && data_marks >= 16
+            tracks_verified += 1
+            total_sectors += 16
+          else
+            failed_tracks << { track: track_num, addr: address_marks, data: data_marks }
+          end
+        end
+
+        # All 35 tracks should be valid
+        expect(tracks_verified).to eq(35),
+          "Only #{tracks_verified}/35 tracks verified. Failed: #{failed_tracks.inspect}"
+
+        # Total of 560 sectors (35 tracks * 16 sectors)
+        expect(total_sectors).to eq(560),
+          "Expected 560 sectors, found #{total_sectors}"
+      end
+
+      it 'calculates correct disk capacity' do
+        # Verify we can read the full 140KB disk
+        # 35 tracks * 16 sectors * 256 bytes = 143,360 bytes
+        total_bytes = 0
+
+        35.times do |track_num|
+          track_nibbles = convert_track_to_nibbles(@dsk_data, track_num)
+          disk.load_track(track_num, track_nibbles)
+
+          # Each track has 16 sectors of 256 bytes = 4096 bytes of user data
+          # Encoded in 343 nibble bytes per sector
+          sectors_found = 0
+
+          (0..(RHDL::Apple2::DiskII::TRACK_SIZE - 350)).each do |i|
+            if disk.read_track_byte(i) == 0xD5 &&
+               disk.read_track_byte(i + 1) == 0xAA &&
+               disk.read_track_byte(i + 2) == 0xAD
+              # Found a data field - verify it has 343 valid encoded bytes
+              valid = true
+              343.times do |j|
+                byte = disk.read_track_byte(i + 3 + j)
+                if byte < 0x96
+                  valid = false
+                  break
+                end
+              end
+              sectors_found += 1 if valid
+            end
+          end
+
+          total_bytes += sectors_found * 256
+        end
+
+        # Should have 140KB of data (35 * 16 * 256)
+        expect(total_bytes).to eq(143_360),
+          "Expected 143360 bytes (140KB), found #{total_bytes}"
+      end
     end
 
     context 'without disk image' do
