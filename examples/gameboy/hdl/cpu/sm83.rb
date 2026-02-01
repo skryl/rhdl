@@ -690,6 +690,11 @@ module GameBoy
       # M1: fetch, M2: delay, M3: write high, M4: write low
       # -----------------------------------------------------------------------
       push_op <= is_push
+      # PUSH M3 and M4: write to stack
+      write_sig <= mux(is_push & ((m_cycle == lit(3, width: 3)) | (m_cycle == lit(4, width: 3))),
+                       lit(1, width: 1), write_sig)
+      no_read <= mux(is_push & ((m_cycle == lit(3, width: 3)) | (m_cycle == lit(4, width: 3))),
+                     lit(1, width: 1), no_read)
 
       # -----------------------------------------------------------------------
       # POP qq - Pop 16-bit register from stack (C1/D1/E1/F1)
@@ -775,8 +780,8 @@ module GameBoy
                 ((ir == lit(0xF0, width: 8)) & (m_cycle == lit(2, width: 3))) |
                 # LD rr, nn - M2 and M3 read 16-bit immediate
                 ((ir[3..0] == lit(1, width: 4)) & (ir[7..6] == lit(0, width: 2)) & (m_cycle >= lit(2, width: 3))) |
-                # JP nn (0xC3) - M2 and M3 read address
-                ((ir == lit(0xC3, width: 8)) & (m_cycle >= lit(2, width: 3))) |
+                # JP nn (0xC3) - M2 and M3 read address (not M4 which jumps)
+                ((ir == lit(0xC3, width: 8)) & ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3)))) |
                 # CALL nn (0xCD) - M2 and M3 read address (not M4-M6 which push/jump)
                 ((ir == lit(0xCD, width: 8)) & ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3)))) |
                 # LD (nn), A (0xEA) / LD A, (nn) (0xFA) - M2 and M3 read 16-bit address
@@ -1058,7 +1063,7 @@ module GameBoy
       pc <= mux(clken & (t_state == lit(3, width: 3)) & inc_pc,
                 pc + lit(1, width: 16),
                 mux(clken & jump & (m_cycle == m_cycles) & (t_state == lit(3, width: 3)),
-                    cat(di_reg, wz[7..0]),  # Jump address: high byte from di_reg, low from WZ
+                    wz,  # Jump address stored in WZ (loaded during M2/M3)
                 mux(clken & jump_e & (m_cycle == m_cycles) & (t_state == lit(3, width: 3)),
                     pc_rel,  # Relative jump: PC + signed displacement
                 mux(clken & call & (m_cycle == m_cycles) & (t_state == lit(3, width: 3)),
