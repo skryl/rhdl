@@ -85,6 +85,9 @@ module RHDL
         @speaker = Speaker.new
 
         reset_simulation
+
+        # Load boot ROM if available
+        load_boot_rom if File.exist?(DMG_BOOT_ROM_PATH)
       end
 
       def native?
@@ -701,6 +704,10 @@ module RHDL
                   // Falling edge
                   ctx->dut->clk_sys = 0;
                   ctx->dut->eval();
+
+                  // Provide boot ROM data based on boot_rom_addr
+                  unsigned int boot_addr = ctx->dut->boot_rom_addr & 0xFF;
+                  ctx->dut->boot_rom_do = ctx->boot_rom[boot_addr];
 
                   // Handle ROM read
                   if (ctx->dut->cart_rd) {
