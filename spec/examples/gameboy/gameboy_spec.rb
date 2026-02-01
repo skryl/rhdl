@@ -526,7 +526,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
   end
 
   describe 'Backend Comparison (IR Compiler vs Verilator)' do
-    let(:test_rom_path) { File.expand_path('../../../examples/gameboy/software/roms/cpu_instrs.gb', __dir__) }
+    let(:test_rom_path) { File.expand_path('../../../examples/gameboy/software/roms/pop.gb', __dir__) }
 
     def verilator_available?
       ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
@@ -535,7 +535,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
     end
 
     before do
-      skip 'cpu_instrs.gb ROM not found' unless File.exist?(test_rom_path)
+      skip 'pop.gb ROM not found' unless File.exist?(test_rom_path)
       skip 'Verilator not available' unless verilator_available?
 
       begin
