@@ -394,6 +394,107 @@ RSpec.describe 'GameBoy RHDL Implementation' do
     end
   end
 
+  describe 'Verilator Runner' do
+    def verilator_available?
+      ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
+        File.executable?(File.join(path, 'verilator'))
+      end
+    end
+
+    before do
+      skip 'Verilator not available' unless verilator_available?
+      begin
+        require_relative '../../../examples/gameboy/utilities/gameboy_verilator'
+      rescue LoadError => e
+        skip "Verilator runner not available: #{e.message}"
+      end
+    end
+
+    it 'can be instantiated', timeout: 300 do
+      runner = RHDL::GameBoy::VerilatorRunner.new
+      expect(runner).to be_a(RHDL::GameBoy::VerilatorRunner)
+      expect(runner.native?).to eq(true)
+      expect(runner.simulator_type).to eq(:hdl_verilator)
+    end
+
+    context 'with demo ROM', timeout: 300 do
+      let(:runner) do
+        r = RHDL::GameBoy::VerilatorRunner.new
+        r.load_rom(create_demo_rom)
+        r
+      end
+
+      it 'loads the ROM' do
+        expect(runner.read(0x104)).to eq(0xCE)
+        expect(runner.read(0x105)).to eq(0xED)
+      end
+
+      it 'can reset' do
+        runner.reset
+        expect(runner.cycle_count).to eq(0)
+        expect(runner.halted?).to eq(false)
+      end
+
+      it 'can run steps' do
+        runner.reset
+        runner.run_steps(100)
+        expect(runner.cycle_count).to eq(100)
+      end
+
+      it 'provides CPU state' do
+        runner.reset
+        state = runner.cpu_state
+        expect(state).to be_a(Hash)
+        expect(state).to have_key(:pc)
+        expect(state).to have_key(:cycles)
+      end
+
+      it 'provides dry run info' do
+        info = runner.dry_run_info
+        expect(info[:mode]).to eq(:verilog)
+        expect(info[:simulator_type]).to eq(:hdl_verilator)
+        expect(info[:native]).to eq(true)
+      end
+    end
+
+    context 'with tobu.gb ROM', timeout: 300 do
+      let(:tobu_rom_path) { File.expand_path('../../../examples/gameboy/software/roms/tobu.gb', __dir__) }
+
+      before do
+        skip 'tobu.gb ROM not found' unless File.exist?(tobu_rom_path)
+      end
+
+      it 'can run 1M cycles' do
+        runner = RHDL::GameBoy::VerilatorRunner.new
+        runner.load_rom(File.binread(tobu_rom_path))
+        runner.reset
+
+        start_time = Time.now
+        runner.run_steps(1_000_000)
+        elapsed = Time.now - start_time
+
+        expect(runner.cycle_count).to eq(1_000_000)
+        speed_mhz = runner.cycle_count / elapsed / 1_000_000.0
+
+        puts "\n  Verilator Runner Results:"
+        puts "    Total cycles: #{runner.cycle_count.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
+        puts "    Elapsed time: #{'%.2f' % elapsed}s"
+        puts "    Speed: #{'%.2f' % speed_mhz} MHz (#{'%.1f' % (speed_mhz / 4.19 * 100)}% of real GB)"
+      end
+
+      it 'can render framebuffer' do
+        runner = RHDL::GameBoy::VerilatorRunner.new
+        runner.load_rom(File.binread(tobu_rom_path))
+        runner.reset
+        runner.run_steps(100_000)
+
+        output = runner.render_lcd_braille(chars_wide: 40)
+        expect(output).to be_a(String)
+        expect(output.length).to be > 0
+      end
+    end
+  end
+
   describe 'Speaker' do
     let(:speaker) { RHDL::GameBoy::Speaker.new }
 
