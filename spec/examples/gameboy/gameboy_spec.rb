@@ -862,6 +862,211 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       expect(ir_non_blank_pct).to be > 50, "IR Compiler has too many blank frames (#{ir_blank_frames}/#{ir_total_sampled})"
       expect(vl_non_blank_pct).to be > 50, "Verilator has too many blank frames (#{verilator_blank_frames}/#{verilator_total_sampled})"
     end
+
+    it 'compares available backends: IR Compiler, IR JIT, IR Interpreter, and Verilator', timeout: 600 do
+      rom_data = File.binread(test_rom_path)
+
+      puts "\n  Multi-Backend Comparison Test"
+      puts "  " + "=" * 60
+
+      # Initialize all runners
+      runners = {}
+      backends = []
+
+      # IR Compiler
+      begin
+        require_relative '../../../lib/rhdl/codegen/ir/sim/ir_compiler'
+        if RHDL::Codegen::IR::COMPILER_AVAILABLE
+          runners[:compiler] = RHDL::GameBoy::IrRunner.new(backend: :compile)
+          backends << :compiler
+        end
+      rescue LoadError, RuntimeError => e
+        puts "  Skipping IR Compiler: #{e.message}"
+      end
+
+      # IR JIT (may have issues, validate before including)
+      begin
+        require_relative '../../../lib/rhdl/codegen/ir/sim/ir_jit'
+        if RHDL::Codegen::IR::JIT_AVAILABLE
+          jit_runner = RHDL::GameBoy::IrRunner.new(backend: :jit)
+          # Quick validation: run a few cycles and check if PC changes
+          jit_runner.load_rom(rom_data)
+          jit_runner.reset
+          jit_runner.run_steps(1000)
+          if jit_runner.cpu_state[:pc] != 0
+            runners[:jit] = jit_runner
+            backends << :jit
+          else
+            puts "  Skipping IR JIT: simulation not executing (PC stuck at 0)"
+          end
+        end
+      rescue LoadError, RuntimeError => e
+        puts "  Skipping IR JIT: #{e.message}"
+      end
+
+      # IR Interpreter (native extension may not be available, uses Ruby fallback)
+      begin
+        require_relative '../../../lib/rhdl/codegen/ir/sim/ir_interpreter'
+        # Note: IR_INTERPRETER_AVAILABLE may be false if native extension failed to load,
+        # but IrInterpreterWrapper will fall back to Ruby implementation
+        interp_runner = RHDL::GameBoy::IrRunner.new(backend: :interpret)
+        # Quick validation
+        interp_runner.load_rom(rom_data)
+        interp_runner.reset
+        interp_runner.run_steps(1000)
+        if interp_runner.cpu_state[:pc] != 0
+          runners[:interpreter] = interp_runner
+          backends << :interpreter
+        else
+          puts "  Skipping IR Interpreter: simulation not executing (PC stuck at 0)"
+        end
+      rescue LoadError, RuntimeError => e
+        puts "  Skipping IR Interpreter: #{e.message}"
+      end
+
+      # Verilator
+      begin
+        runners[:verilator] = RHDL::GameBoy::VerilatorRunner.new
+        backends << :verilator
+      rescue LoadError, RuntimeError => e
+        puts "  Skipping Verilator: #{e.message}"
+      end
+
+      # Need at least 2 backends to compare
+      skip "Need at least 2 backends available for comparison" if backends.size < 2
+
+      puts "  Available backends: #{backends.join(', ')}"
+      puts ""
+
+      # Reload ROM and reset all runners (JIT/Interpreter may have been tested above)
+      runners.each do |name, runner|
+        runner.load_rom(rom_data)
+        runner.reset
+      end
+
+      # Run configuration - shorter for multi-backend test
+      target_frames = 100
+      snapshot_interval = 20
+      cycles_per_frame = 70224
+
+      # Storage for results
+      results = {}
+
+      # Run each backend
+      backends.each do |backend|
+        runner = runners[backend]
+        results[backend] = {
+          snapshots: [],
+          elapsed: 0,
+          total_cycles: 0,
+          total_frames: 0,
+          speed_mhz: 0
+        }
+
+        puts "  Running #{backend.to_s.capitalize}..."
+        start_time = Time.now
+        target_cycles = target_frames * cycles_per_frame
+        cycles_per_snapshot = snapshot_interval * cycles_per_frame
+
+        (target_frames / snapshot_interval).times do |i|
+          runner.run_steps(cycles_per_snapshot)
+          frames = runner.cycle_count / cycles_per_frame
+          state = runner.cpu_state
+
+          results[backend][:snapshots] << {
+            frame: frames,
+            cycle: runner.cycle_count,
+            pc: state[:pc],
+            a: state[:a],
+            f: state[:f],
+            sp: state[:sp]
+          }
+        end
+
+        elapsed = Time.now - start_time
+        results[backend][:elapsed] = elapsed
+        results[backend][:total_cycles] = runner.cycle_count
+        results[backend][:total_frames] = runner.cycle_count / cycles_per_frame
+        results[backend][:speed_mhz] = runner.cycle_count / elapsed / 1_000_000.0
+
+        puts "    #{results[backend][:total_frames]} frames in #{'%.2f' % elapsed}s (#{'%.2f' % results[backend][:speed_mhz]} MHz)"
+      end
+
+      puts ""
+
+      # Compare all backends
+      puts "  CPU State Comparison (every #{snapshot_interval} frames):"
+      puts "  " + "-" * 100
+
+      # Header
+      header = "Frame".ljust(8)
+      backends.each do |b|
+        header += " | #{b.to_s[0..7].ljust(8)}"
+      end
+      header += " | Match"
+      puts "  #{header}"
+      puts "  " + "-" * 100
+
+      # Compare snapshots
+      num_snapshots = results.values.map { |r| r[:snapshots].size }.min
+      mismatches = 0
+
+      num_snapshots.times do |i|
+        # Get PC from each backend
+        pcs = backends.map { |b| results[b][:snapshots][i][:pc] }
+        all_match = pcs.uniq.size == 1
+
+        mismatches += 1 unless all_match
+
+        frame = results[backends.first][:snapshots][i][:frame]
+        row = "#{frame}".ljust(8)
+        backends.each_with_index do |b, idx|
+          pc = results[b][:snapshots][i][:pc]
+          row += " | #{'%04X' % pc}".ljust(11)
+        end
+        row += " | #{all_match ? 'YES' : 'NO'}"
+        puts "  #{row}"
+      end
+
+      puts "  " + "-" * 100
+      puts ""
+
+      # Speed comparison table
+      puts "  Speed Comparison:"
+      puts "  " + "-" * 50
+      base_speed = results[backends.first][:speed_mhz]
+      backends.each do |b|
+        speed = results[b][:speed_mhz]
+        rel_speed = speed / base_speed
+        pct_real = speed / 4.19 * 100
+        puts "    #{b.to_s.capitalize.ljust(12)}: #{'%.2f' % speed} MHz (#{'%.1f' % pct_real}% of real GB, #{'%.2f' % rel_speed}x vs #{backends.first})"
+      end
+      puts ""
+
+      # Final state comparison
+      puts "  Final State:"
+      backends.each do |b|
+        state = runners[b].cpu_state
+        puts "    #{b.to_s.capitalize.ljust(12)}: PC=0x#{'%04X' % state[:pc]} A=0x#{'%02X' % state[:a]} F=0x#{'%02X' % state[:f]} SP=0x#{'%04X' % state[:sp]}"
+      end
+      puts ""
+
+      # Summary
+      puts "  Summary:"
+      puts "    Backends tested: #{backends.size}"
+      puts "    Snapshots compared: #{num_snapshots}"
+      puts "    CPU state mismatches: #{mismatches}"
+      puts ""
+
+      # Assertions
+      expect(backends.size).to be >= 2, "Need at least 2 backends for comparison"
+      expect(mismatches).to eq(0), "All #{backends.size} backends should produce identical CPU state at each snapshot"
+
+      # All backends should reach target frames
+      backends.each do |b|
+        expect(results[b][:total_frames]).to be >= target_frames, "#{b} failed to reach #{target_frames} frames"
+      end
+    end
   end
 
   private

@@ -251,6 +251,96 @@ module RHDL
           @fn_apple2_write_ram.call(@ctx, offset, data, data.bytesize)
         end
 
+        # ====================================================================
+        # Game Boy Extension Methods
+        # ====================================================================
+
+        def gameboy_mode?
+          return @sim.gameboy_mode? if @sim.respond_to?(:gameboy_mode?)
+          false
+        end
+
+        def load_rom(data)
+          return @sim.load_rom(data) if @sim.respond_to?(:load_rom)
+        end
+
+        def load_boot_rom(data)
+          return @sim.load_boot_rom(data) if @sim.respond_to?(:load_boot_rom)
+        end
+
+        def run_gb_cycles(n)
+          return @sim.run_gb_cycles(n) if @sim.respond_to?(:run_gb_cycles)
+          { cycles_run: 0, frames_completed: 0 }
+        end
+
+        def read_vram(addr)
+          return @sim.read_vram(addr) if @sim.respond_to?(:read_vram)
+          0
+        end
+
+        def write_vram(addr, data)
+          @sim.write_vram(addr, data) if @sim.respond_to?(:write_vram)
+        end
+
+        def read_zpram(addr)
+          return @sim.read_zpram(addr) if @sim.respond_to?(:read_zpram)
+          0
+        end
+
+        def write_zpram(addr, data)
+          @sim.write_zpram(addr, data) if @sim.respond_to?(:write_zpram)
+        end
+
+        def read_framebuffer
+          return @sim.read_framebuffer if @sim.respond_to?(:read_framebuffer)
+          []
+        end
+
+        def frame_count
+          return @sim.frame_count if @sim.respond_to?(:frame_count)
+          0
+        end
+
+        def reset_lcd_state
+          @sim.reset_lcd_state if @sim.respond_to?(:reset_lcd_state)
+        end
+
+        # Debug methods for PPU/interrupt signals
+        def get_v_cnt
+          return @sim.get_v_cnt if @sim.respond_to?(:get_v_cnt)
+          0
+        end
+
+        def get_h_cnt
+          return @sim.get_h_cnt if @sim.respond_to?(:get_h_cnt)
+          0
+        end
+
+        def get_vblank_irq
+          return @sim.get_vblank_irq if @sim.respond_to?(:get_vblank_irq)
+          0
+        end
+
+        def get_if_r
+          return @sim.get_if_r if @sim.respond_to?(:get_if_r)
+          0
+        end
+
+        def get_signal(idx)
+          return @sim.get_signal(idx) if @sim.respond_to?(:get_signal)
+          0
+        end
+
+        def get_lcdc_on
+          return @sim.get_lcdc_on if @sim.respond_to?(:get_lcdc_on)
+          0
+        end
+
+        def get_h_div_cnt
+          return @sim.get_h_div_cnt if @sim.respond_to?(:get_h_div_cnt)
+          0
+        end
+
         def respond_to_missing?(method_name, include_private = false)
           @sim.respond_to?(method_name) || super
         end
