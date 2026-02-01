@@ -133,6 +133,27 @@ module GameBoy
     # Debug outputs (for Verilator simulation visibility)
     output :debug_cpu_pc, width: 16    # CPU Program counter
     output :debug_cpu_acc, width: 8    # CPU Accumulator
+    output :debug_f, width: 8          # CPU Flags register
+    output :debug_b, width: 8          # CPU B register
+    output :debug_c, width: 8          # CPU C register
+    output :debug_d, width: 8          # CPU D register
+    output :debug_e, width: 8          # CPU E register
+    output :debug_h, width: 8          # CPU H register
+    output :debug_l, width: 8          # CPU L register
+    output :debug_sp, width: 16        # CPU Stack pointer
+    output :debug_ir, width: 8         # Current instruction register
+    output :debug_save_alu             # ALU save signal
+    output :debug_t_state, width: 3    # T-state counter
+    output :debug_m_cycle, width: 3    # M-cycle counter
+    output :debug_alu_flags, width: 8  # ALU flags output
+    output :debug_clken                # Clock enable signal
+    output :debug_alu_op, width: 4     # ALU operation
+    output :debug_bus_a, width: 8      # ALU input A
+    output :debug_bus_b, width: 8      # ALU input B
+    output :debug_alu_result, width: 8 # ALU result
+    output :debug_z_flag               # Direct zero flag for debugging
+    output :debug_bus_a_zero           # Test if bus_a is zero
+    output :debug_const_one            # Constant 1 for testing
     output :boot_rom_addr, width: 8    # Boot ROM address (for external boot ROM)
 
     # Internal signals
@@ -285,6 +306,27 @@ module GameBoy
     port :reset_n => [:cpu, :reset_n]
     port [:cpu, :debug_pc] => :debug_cpu_pc
     port [:cpu, :debug_acc] => :debug_cpu_acc
+    port [:cpu, :debug_f] => :debug_f
+    port [:cpu, :debug_b] => :debug_b
+    port [:cpu, :debug_c] => :debug_c
+    port [:cpu, :debug_d] => :debug_d
+    port [:cpu, :debug_e] => :debug_e
+    port [:cpu, :debug_h] => :debug_h
+    port [:cpu, :debug_l] => :debug_l
+    port [:cpu, :debug_sp] => :debug_sp
+    port [:cpu, :debug_ir] => :debug_ir
+    port [:cpu, :debug_save_alu] => :debug_save_alu
+    port [:cpu, :debug_t_state] => :debug_t_state
+    port [:cpu, :debug_m_cycle] => :debug_m_cycle
+    port [:cpu, :debug_alu_flags] => :debug_alu_flags
+    port [:cpu, :debug_clken] => :debug_clken
+    port [:cpu, :debug_alu_op] => :debug_alu_op
+    port [:cpu, :debug_bus_a] => :debug_bus_a
+    port [:cpu, :debug_bus_b] => :debug_bus_b
+    port [:cpu, :debug_alu_result] => :debug_alu_result
+    port [:cpu, :debug_z_flag] => :debug_z_flag
+    port [:cpu, :debug_bus_a_zero] => :debug_bus_a_zero
+    port [:cpu, :debug_const_one] => :debug_const_one
 
     # Timer connections
     port :sel_timer => [:timer_unit, :cpu_sel]

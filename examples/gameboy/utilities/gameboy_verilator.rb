@@ -279,7 +279,14 @@ module RHDL
         {
           pc: verilator_peek('debug_pc') || 0,
           a: verilator_peek('debug_acc') || 0,
-          f: 0,
+          f: verilator_peek('debug_f') || 0,
+          b: verilator_peek('debug_b') || 0,
+          c: verilator_peek('debug_c') || 0,
+          d: verilator_peek('debug_d') || 0,
+          e: verilator_peek('debug_e') || 0,
+          h: verilator_peek('debug_h') || 0,
+          l: verilator_peek('debug_l') || 0,
+          sp: verilator_peek('debug_sp') || 0,
           cycles: @cycles,
           halted: @halted,
           simulator_type: simulator_type
@@ -599,17 +606,29 @@ module RHDL
                   ctx->dut->eval();
               }
               // Release reset and clock to let the system initialize
+              // IMPORTANT: Must provide boot ROM data during these cycles!
               ctx->dut->reset = 0;
               for (int i = 0; i < 100; i++) {
                   ctx->dut->clk_sys = 0;
                   ctx->dut->eval();
+
+                  // Provide boot ROM data (same as in sim_run_cycles)
+                  unsigned int boot_addr = ctx->dut->boot_rom_addr & 0xFF;
+                  ctx->dut->boot_rom_do = ctx->boot_rom[boot_addr];
+
+                  // Handle ROM read if needed
+                  if (ctx->dut->cart_rd) {
+                      unsigned int addr = ctx->dut->ext_bus_addr;
+                      unsigned int a15 = ctx->dut->ext_bus_a15;
+                      unsigned int full_addr = (a15 << 15) | addr;
+                      if (full_addr < sizeof(ctx->rom)) {
+                          ctx->dut->cart_do = ctx->rom[full_addr];
+                      }
+                  }
+
                   ctx->dut->clk_sys = 1;
                   ctx->dut->eval();
               }
-
-              // Note: boot_rom_enabled is internal and may not be accessible
-              // The CPU will start executing from wherever it is after reset
-              ctx->dut->eval();
 
               ctx->lcd_x = 0;
               ctx->lcd_y = 0;
@@ -647,6 +666,27 @@ module RHDL
               else if (strcmp(name, "joystick") == 0) return ctx->dut->joystick;
               else if (strcmp(name, "debug_pc") == 0) return ctx->dut->debug_pc;
               else if (strcmp(name, "debug_acc") == 0) return ctx->dut->debug_acc;
+              else if (strcmp(name, "debug_f") == 0) return ctx->dut->debug_f;
+              else if (strcmp(name, "debug_b") == 0) return ctx->dut->debug_b;
+              else if (strcmp(name, "debug_c") == 0) return ctx->dut->debug_c;
+              else if (strcmp(name, "debug_d") == 0) return ctx->dut->debug_d;
+              else if (strcmp(name, "debug_e") == 0) return ctx->dut->debug_e;
+              else if (strcmp(name, "debug_h") == 0) return ctx->dut->debug_h;
+              else if (strcmp(name, "debug_l") == 0) return ctx->dut->debug_l;
+              else if (strcmp(name, "debug_sp") == 0) return ctx->dut->debug_sp;
+              else if (strcmp(name, "debug_ir") == 0) return ctx->dut->debug_ir;
+              else if (strcmp(name, "debug_save_alu") == 0) return ctx->dut->debug_save_alu;
+              else if (strcmp(name, "debug_t_state") == 0) return ctx->dut->debug_t_state;
+              else if (strcmp(name, "debug_m_cycle") == 0) return ctx->dut->debug_m_cycle;
+              else if (strcmp(name, "debug_alu_flags") == 0) return ctx->dut->debug_alu_flags;
+              else if (strcmp(name, "debug_clken") == 0) return ctx->dut->debug_clken;
+              else if (strcmp(name, "debug_alu_op") == 0) return ctx->dut->debug_alu_op;
+              else if (strcmp(name, "debug_bus_a") == 0) return ctx->dut->debug_bus_a;
+              else if (strcmp(name, "debug_bus_b") == 0) return ctx->dut->debug_bus_b;
+              else if (strcmp(name, "debug_alu_result") == 0) return ctx->dut->debug_alu_result;
+              else if (strcmp(name, "debug_z_flag") == 0) return ctx->dut->debug_z_flag;
+              else if (strcmp(name, "debug_bus_a_zero") == 0) return ctx->dut->debug_bus_a_zero;
+              else if (strcmp(name, "debug_const_one") == 0) return ctx->dut->debug_const_one;
               // Internal signals not accessible - return estimated values
               else if (strcmp(name, "_clkdiv") == 0) return ctx->clk_counter & 7;  // Estimate clkdiv
               // Other internal signals not accessible
@@ -724,11 +764,10 @@ module RHDL
                   ctx->dut->clk_sys = 1;
                   ctx->dut->eval();
 
-                  // Count CPU cycles every 8 system clocks (SpeedControl divides by 8)
+                  // Count every system clock as a CPU cycle
+                  // SpeedControl outputs ce=1 always (no division), so CPU executes every clock
                   ctx->clk_counter++;
-                  if ((ctx->clk_counter & 7) == 0) {
-                      result->cycles_run++;
-                  }
+                  result->cycles_run++;
 
                   // Capture LCD output
                   unsigned char lcd_clkena = ctx->dut->lcd_clkena;

@@ -78,6 +78,27 @@ module GameBoy
     # Debug outputs (for Verilator simulation visibility)
     output :debug_pc, width: 16    # Program counter for debugging
     output :debug_acc, width: 8    # Accumulator for debugging
+    output :debug_f, width: 8      # Flags register for debugging
+    output :debug_b, width: 8      # B register for debugging
+    output :debug_c, width: 8      # C register for debugging
+    output :debug_d, width: 8      # D register for debugging
+    output :debug_e, width: 8      # E register for debugging
+    output :debug_h, width: 8      # H register for debugging
+    output :debug_l, width: 8      # L register for debugging
+    output :debug_sp, width: 16    # Stack pointer for debugging
+    output :debug_ir, width: 8     # Current instruction register
+    output :debug_save_alu         # ALU save signal
+    output :debug_t_state, width: 3 # T-state counter
+    output :debug_m_cycle, width: 3 # M-cycle counter
+    output :debug_alu_flags, width: 8 # ALU flags output
+    output :debug_clken            # Clock enable signal
+    output :debug_alu_op, width: 4 # ALU operation
+    output :debug_bus_a, width: 8  # ALU input A
+    output :debug_bus_b, width: 8  # ALU input B
+    output :debug_alu_result, width: 8 # ALU result
+    output :debug_z_flag               # Direct zero flag computation for debugging
+    output :debug_bus_a_zero           # Test if bus_a is zero
+    output :debug_const_one            # Constant 1 for testing
 
     # =========================================================================
     # Internal Registers
@@ -219,6 +240,27 @@ module GameBoy
       # -----------------------------------------------------------------------
       debug_pc <= pc
       debug_acc <= acc
+      debug_f <= f_reg
+      debug_b <= b_reg
+      debug_c <= c_reg
+      debug_d <= d_reg
+      debug_e <= e_reg
+      debug_h <= h_reg
+      debug_l <= l_reg
+      debug_sp <= sp
+      debug_ir <= ir
+      debug_save_alu <= save_alu
+      debug_t_state <= t_state
+      debug_m_cycle <= m_cycle
+      debug_alu_flags <= alu_flags
+      debug_clken <= clken
+      debug_alu_op <= alu_op
+      debug_bus_a <= bus_a
+      debug_bus_b <= bus_b
+      debug_alu_result <= alu_result
+      debug_z_flag <= (alu_result == lit(0, width: 8))  # Direct zero flag check
+      debug_bus_a_zero <= (bus_a == lit(0, width: 8))  # Test bus_a is zero
+      debug_const_one <= lit(1, width: 1)  # Always 1 for testing
 
       # -----------------------------------------------------------------------
       # Instruction Decoder (Microcode) - Default values
@@ -811,19 +853,21 @@ module GameBoy
                    mux(alu_op == lit(7, width: 4), (bus_a - bus_b)[7..0],          # CP (same as SUB but don't save)
                        bus_a))))))))
 
-      # Zero flag - set if result is 0
-      alu_flags <= cat(
-        (alu_result == lit(0, width: 8)),  # Z flag (bit 7)
-        mux((alu_op == lit(2, width: 4)) | (alu_op == lit(3, width: 4)) | (alu_op == lit(7, width: 4)),
-            lit(1, width: 1), lit(0, width: 1)),  # N flag (bit 6) - set for sub ops
-        lit(0, width: 1),  # H flag (bit 5) - TODO: proper half-carry
-        mux((alu_op == lit(0, width: 4)) | (alu_op == lit(1, width: 4)),
-            (bus_a + bus_b)[8],  # C flag for ADD
-            mux((alu_op == lit(2, width: 4)) | (alu_op == lit(3, width: 4)) | (alu_op == lit(7, width: 4)),
-                (bus_b > bus_a),  # C flag for SUB (borrow)
-                lit(0, width: 1))),  # C flag (bit 4)
-        lit(0, width: 4)  # bits 3-0 always 0
-      )
+      # ALU flags computation using explicit bit operations to avoid Verilator cat() bug
+      # Z flag (bit 7) - set if result is 0
+      z_bit = mux(alu_result == lit(0, width: 8), lit(0x80, width: 8), lit(0, width: 8))
+      # N flag (bit 6) - set for sub ops
+      n_bit = mux((alu_op == lit(2, width: 4)) | (alu_op == lit(3, width: 4)) | (alu_op == lit(7, width: 4)),
+                  lit(0x40, width: 8), lit(0, width: 8))
+      # H flag (bit 5) - TODO: proper half-carry
+      h_bit = lit(0, width: 8)
+      # C flag (bit 4)
+      c_bit = mux((alu_op == lit(0, width: 4)) | (alu_op == lit(1, width: 4)),
+                  mux((bus_a + bus_b)[8], lit(0x10, width: 8), lit(0, width: 8)),
+                  mux((alu_op == lit(2, width: 4)) | (alu_op == lit(3, width: 4)) | (alu_op == lit(7, width: 4)),
+                      mux(bus_b > bus_a, lit(0x10, width: 8), lit(0, width: 8)),
+                      lit(0, width: 8)))
+      alu_flags <= (z_bit | n_bit | h_bit | c_bit)
 
       # -----------------------------------------------------------------------
       # Bus Muxing
