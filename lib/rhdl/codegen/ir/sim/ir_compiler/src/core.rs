@@ -695,6 +695,28 @@ impl CoreSimulator {
         }
     }
 
+    /// Generate evaluate code that skips specific signal assignments
+    /// This is used by Apple II extension to skip cpu__di (which is injected manually)
+    pub fn generate_evaluate_with_skips(&self, skip_signals: &[usize]) -> String {
+        let mut code = String::new();
+        let levels = self.compute_assignment_levels();
+        for level in &levels {
+            for &assign_idx in level {
+                let assign = &self.ir.assigns[assign_idx];
+                if let Some(&idx) = self.name_to_idx.get(&assign.target) {
+                    // Skip this assignment if signal is in skip list
+                    if skip_signals.contains(&idx) {
+                        continue;
+                    }
+                    let width = self.widths.get(idx).copied().unwrap_or(64);
+                    let expr_code = self.expr_to_rust(&assign.expr);
+                    code.push_str(&format!("    signals[{}] = ({}) & {};\n", idx, expr_code, Self::mask_const(width)));
+                }
+            }
+        }
+        code
+    }
+
     fn generate_tick_function(&self, code: &mut String) {
         let clock_indices: Vec<usize> = self.clock_indices.clone();
         let num_clocks = clock_indices.len().max(1);
