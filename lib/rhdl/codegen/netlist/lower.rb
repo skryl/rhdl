@@ -4108,7 +4108,7 @@ module RHDL
             lower_adder(left_nets, right_nets, expr.width)
           when :-
             # Subtraction (twos complement)
-            lower_subtractor(left_nets, right_nets, expr.width)
+            lower_sub_expression(left_nets, right_nets, expr.width)
           when :==
             # Equality comparison
             xor_results = max_width.times.map do |i|
@@ -4392,8 +4392,8 @@ module RHDL
         result
       end
 
-      # Lower subtractor (twos complement: a - b = a + ~b + 1)
-      def lower_subtractor(a_nets, b_nets, width)
+      # Lower subtraction expression (twos complement: a - b = a + ~b + 1)
+      def lower_sub_expression(a_nets, b_nets, width)
         # Invert b
         b_inv = b_nets.map do |b|
           out = new_temp
