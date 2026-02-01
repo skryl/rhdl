@@ -853,10 +853,14 @@ impl CoreSimulator {
 
     #[inline(always)]
     pub fn tick(&mut self) {
-        // Use prev_clock_values as "before" state (set by caller or previous tick)
-        // This allows callers to control edge detection by setting prev_clock_values
+        // Save current clock values BEFORE evaluate so we can detect edges correctly
+        // At this point, the user has poked clk=1 but not evaluated yet, so derived
+        // clocks are still at their previous (low) values from the falling edge.
+        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
+            self.prev_clock_values[i] = self.signals[clk_idx];
+        }
 
-        // Evaluate to propagate any external input changes
+        // Evaluate to propagate any external input changes (including clock)
         self.evaluate();
 
         // Sample ALL register input expressions ONCE
@@ -926,10 +930,8 @@ impl CoreSimulator {
             }
         }
 
-        // Update prev_clock_values for next tick
-        for (i, &clk_idx) in self.clock_indices.iter().enumerate() {
-            self.prev_clock_values[i] = self.signals[clk_idx];
-        }
+        // prev_clock_values is saved at the start of tick(), not here
+        // This ensures we capture the clock values BEFORE evaluate propagates them
 
         self.evaluate();
     }
