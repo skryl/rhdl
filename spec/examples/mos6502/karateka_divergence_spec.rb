@@ -991,9 +991,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   end
 
   # Interpreter is slower, so only test 5M cycles (still validates correctness)
-  # DISABLED: IR Interpreter temporarily disabled pending fixes
   it 'verifies IR Interpreter matches ISA for 5M cycles', :slow, timeout: 600 do
-    skip 'IR Interpreter disabled for now'
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
@@ -1003,9 +1001,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     expect(result).to be true
   end
 
-  # DISABLED: Redundant with combined 5M/20M tests
   it 'verifies IR JIT matches ISA for 10M cycles', :slow, timeout: 120 do
-    skip 'Disabled - use combined 5M/20M tests instead'
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
@@ -1015,9 +1011,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     expect(result).to be true
   end
 
-  # DISABLED: Redundant with combined 5M/20M tests
   it 'verifies IR Compiler matches ISA for 10M cycles', :slow, timeout: 600 do
-    skip 'Disabled - use combined 5M/20M tests instead'
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
@@ -1444,10 +1438,9 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     expect(total_tested).to be > 0
   end
 
-  # DISABLED: Debug test for tracing divergence
+  # Debug test for tracing divergence
   # Dedicated RTS trace test - traces the specific RTS that causes divergence
   it 'traces RTS execution to find divergence cause', timeout: 60 do
-    skip 'Debug test disabled'
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?

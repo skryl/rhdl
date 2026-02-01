@@ -62,7 +62,7 @@ RSpec.describe 'RHDL CLI examples --dry-run', :slow do
     describe 'HDL mode' do
       # All HDL modes for mos6502 require native IR extension
       before(:each) do
-        skip 'HDL mode for mos6502 requires native IR extension'
+        skip 'HDL mode for mos6502 requires native IR extension' unless ir_interpreter_available?
       end
 
       it 'selects HDL mode with -m hdl' do
@@ -91,7 +91,7 @@ RSpec.describe 'RHDL CLI examples --dry-run', :slow do
 
     describe 'Netlist mode' do
       before(:each) do
-        skip 'Netlist requires native extension'
+        skip 'Netlist requires native extension' unless ir_interpreter_available?
       end
 
       it 'selects netlist mode with -m netlist' do
@@ -247,7 +247,7 @@ RSpec.describe 'RHDL CLI examples --dry-run', :slow do
 
     describe 'HDL mode with IR interpret backend' do
       before(:each) do
-        skip 'IR Interpreter requires native extension'
+        skip 'IR Interpreter requires native extension' unless ir_interpreter_available?
       end
 
       it 'selects HDL mode with interpret backend' do
@@ -259,7 +259,7 @@ RSpec.describe 'RHDL CLI examples --dry-run', :slow do
 
     describe 'HDL mode with IR jit backend' do
       before(:each) do
-        skip 'IR JIT requires native extension'
+        skip 'IR JIT requires native extension' unless ir_jit_available?
       end
 
       it 'selects HDL mode with jit backend' do
@@ -271,7 +271,7 @@ RSpec.describe 'RHDL CLI examples --dry-run', :slow do
 
     describe 'HDL mode with IR compile backend' do
       before(:each) do
-        skip 'IR Compiler requires native extension'
+        skip 'IR Compiler requires native extension' unless ir_compiler_available?
       end
 
       it 'selects HDL mode with compile backend' do
@@ -289,7 +289,7 @@ RSpec.describe 'RHDL CLI examples --dry-run', :slow do
 
     describe 'Netlist mode' do
       before(:each) do
-        skip 'Netlist requires native extension'
+        skip 'Netlist requires native extension' unless ir_interpreter_available?
       end
 
       it 'selects netlist mode with -m netlist' do
@@ -405,5 +405,31 @@ RSpec.describe 'RHDL CLI examples --dry-run', :slow do
         end
       end
     end
+  end
+
+  private
+
+  # Check if IR interpreter is available
+  def ir_interpreter_available?
+    require 'rhdl/codegen'
+    RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
+  rescue LoadError, NameError
+    false
+  end
+
+  # Check if IR JIT is available
+  def ir_jit_available?
+    require 'rhdl/codegen'
+    RHDL::Codegen::IR::IR_JIT_AVAILABLE
+  rescue LoadError, NameError
+    false
+  end
+
+  # Check if IR Compiler is available
+  def ir_compiler_available?
+    require 'rhdl/codegen'
+    RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+  rescue LoadError, NameError
+    false
   end
 end

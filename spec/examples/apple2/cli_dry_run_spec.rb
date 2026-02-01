@@ -87,9 +87,9 @@ RSpec.describe 'Apple2 CLI --dry-run', :slow do
   end
 
   describe 'HDL mode with IR interpret backend' do
-    # Skip - IR Interpreter requires native extension
+    # Skip if IR Interpreter is not available
     before(:each) do
-      skip 'IR Interpreter requires native extension'
+      skip 'IR Interpreter requires native extension' unless ir_interpreter_available?
     end
 
     it 'selects HDL mode with interpret backend' do
@@ -112,9 +112,9 @@ RSpec.describe 'Apple2 CLI --dry-run', :slow do
   end
 
   describe 'HDL mode with IR jit backend' do
-    # Skip - IR JIT requires native extension
+    # Skip if IR JIT is not available
     before(:each) do
-      skip 'IR JIT requires native extension'
+      skip 'IR JIT requires native extension' unless ir_jit_available?
     end
 
     it 'selects HDL mode with jit backend' do
@@ -136,9 +136,9 @@ RSpec.describe 'Apple2 CLI --dry-run', :slow do
   end
 
   describe 'HDL mode with IR compile backend' do
-    # Skip - IR Compiler requires native extension
+    # Skip if IR Compiler is not available
     before(:each) do
-      skip 'IR Compiler requires native extension'
+      skip 'IR Compiler requires native extension' unless ir_compiler_available?
     end
 
     it 'selects HDL mode with compile backend' do
@@ -166,9 +166,9 @@ RSpec.describe 'Apple2 CLI --dry-run', :slow do
   end
 
   describe 'Netlist mode with interpret backend' do
-    # Skip - Netlist requires native extension
+    # Skip if Netlist Interpreter is not available
     before(:each) do
-      skip 'Netlist Interpreter requires native extension'
+      skip 'Netlist Interpreter requires native extension' unless ir_interpreter_available?
     end
 
     it 'selects netlist mode with interpret backend' do
@@ -185,9 +185,9 @@ RSpec.describe 'Apple2 CLI --dry-run', :slow do
   end
 
   describe 'Netlist mode with jit backend' do
-    # Skip - Netlist JIT requires native extension
+    # Skip if Netlist JIT is not available
     before(:each) do
-      skip 'Netlist JIT requires native extension'
+      skip 'Netlist JIT requires native extension' unless ir_jit_available?
     end
 
     it 'selects netlist mode with jit backend' do
@@ -203,9 +203,9 @@ RSpec.describe 'Apple2 CLI --dry-run', :slow do
   end
 
   describe 'Netlist mode with compile backend' do
-    # Skip - Netlist Compiler requires native extension
+    # Skip if Netlist Compiler is not available
     before(:each) do
-      skip 'Netlist Compiler requires native extension'
+      skip 'Netlist Compiler requires native extension' unless ir_compiler_available?
     end
 
     it 'selects netlist mode with compile backend' do
@@ -335,5 +335,31 @@ RSpec.describe 'Apple2 CLI --dry-run', :slow do
         expect(result[:mode]).to eq('hdl')
       end
     end
+  end
+
+  private
+
+  # Check if IR interpreter is available
+  def ir_interpreter_available?
+    require 'rhdl/codegen'
+    RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
+  rescue LoadError, NameError
+    false
+  end
+
+  # Check if IR JIT is available
+  def ir_jit_available?
+    require 'rhdl/codegen'
+    RHDL::Codegen::IR::IR_JIT_AVAILABLE
+  rescue LoadError, NameError
+    false
+  end
+
+  # Check if IR Compiler is available
+  def ir_compiler_available?
+    require 'rhdl/codegen'
+    RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+  rescue LoadError, NameError
+    false
   end
 end
