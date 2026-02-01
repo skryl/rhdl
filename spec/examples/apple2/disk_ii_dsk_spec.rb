@@ -124,14 +124,6 @@ RSpec.describe 'Apple2 DiskII HDL with actual .dsk files', :slow do
 
     describe 'basic disk boot' do
       before(:each) do
-        # Skip this test - the IR compiler's Apple II extension doesn't support disk I/O yet.
-        # The extension only handles RAM/ROM, not the disk controller's track memory.
-        # This test requires:
-        # 1. Boot ROM at $C600-$C6FF to be accessible (currently returns 0 for I/O space)
-        # 2. Disk I/O registers at $C0E0-$C0EF to work
-        # 3. Track data to be loadable into the disk controller's memory
-        skip 'IR compiler Apple II extension does not support disk I/O yet'
-
         skip 'Boot ROM not available' unless BOOT_ROM_AVAILABLE
 
         @ir_sim = RHDL::Codegen::IR::IrCompilerWrapper.new(@ir_json, sub_cycles: 14)
