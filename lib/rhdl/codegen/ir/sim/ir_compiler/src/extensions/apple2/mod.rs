@@ -53,8 +53,10 @@ pub struct Apple2Extension {
     pub disk_slot_rom: Vec<u8>,
     /// Track data for all 35 tracks (each 6656 bytes)
     pub disk_tracks: Vec<Vec<u8>>,
-    /// Current track number (0-34)
+    /// Current track number (0-34) - computed from half_track
     pub disk_current_track: usize,
+    /// Half-track position (0-69) - the actual stepper position
+    pub disk_half_track: usize,
     /// Current byte position within track
     pub disk_byte_pos: usize,
     /// Cycle counter for disk byte timing
@@ -100,6 +102,7 @@ impl Apple2Extension {
             disk_slot_rom: vec![0u8; 256],
             disk_tracks: (0..NUM_TRACKS).map(|_| vec![0u8; TRACK_SIZE]).collect(),
             disk_current_track: 0,
+            disk_half_track: 0,
             disk_byte_pos: 0,
             disk_cycle_counter: 0,
             disk_motor_on: false,
@@ -295,6 +298,7 @@ impl Apple2Extension {
                 disk_q6: *mut bool,
                 disk_q7: *mut bool,
                 disk_current_track: *mut usize,
+                disk_half_track: *mut usize,
                 disk_latch_valid: *mut bool,
                 disk_data_latch: *mut u8,
                 disk_last_read: *mut u8,
@@ -339,6 +343,7 @@ impl Apple2Extension {
                 &mut self.disk_q6,
                 &mut self.disk_q7,
                 &mut self.disk_current_track,
+                &mut self.disk_half_track,
                 &mut self.disk_latch_valid,
                 &mut self.disk_data_latch,
                 &mut self.disk_last_read,
@@ -399,6 +404,17 @@ impl Apple2Extension {
                   cpu_y_reg_idx, cpu_a_reg_idx, cpu_flag_n_idx, cpu_opcode_idx);
 
         let clock_indices: Vec<usize> = core.clock_indices.clone();
+
+        // Print clock domain info
+        eprintln!("Apple2 generate_code: {} clock domains", clock_indices.len());
+        for (i, &clk_idx) in clock_indices.iter().enumerate() {
+            // Find signal name for this clock
+            let clk_name = core.name_to_idx.iter()
+                .find(|(_, &v)| v == clk_idx)
+                .map(|(k, _)| k.as_str())
+                .unwrap_or("unknown");
+            eprintln!("  Clock domain {}: signal {} ({})", i, clk_idx, clk_name);
+        }
         let num_clocks = clock_indices.len().max(1);
         let num_regs = core.seq_targets.len();
 
@@ -529,6 +545,7 @@ impl Apple2Extension {
         code.push_str("    disk_q6: *mut bool,\n");
         code.push_str("    disk_q7: *mut bool,\n");
         code.push_str("    disk_current_track: *mut usize,\n");
+        code.push_str("    disk_half_track: *mut usize,\n");
         code.push_str("    disk_latch_valid: *mut bool,\n");
         code.push_str("    disk_data_latch: *mut u8,\n");
         code.push_str("    disk_last_read: *mut u8,\n");
@@ -568,34 +585,55 @@ impl Apple2Extension {
         // Read CPU address BEFORE clock edge (it's a register, so stable value from previous cycle)
         code.push_str(&format!("        let cpu_addr = (signals[{}] as usize) & 0xFFFF;\n\n", cpu_addr_idx));
 
-        // Debug: trace CPU address every 5000 cycles
+        // Minimal debug: track cycle count every 100K cycles and key boot ROM addresses
         code.push_str("        {\n");
         code.push_str("            static CYCLE_DEBUG: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
         code.push_str("            let cycle_count = CYCLE_DEBUG.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("            if cycle_count < 10 || cycle_count % 5000 == 0 {\n");
-        code.push_str("                eprintln!(\"CYCLE#{}: cpu_addr=${:04X} motor={}\", cycle_count, cpu_addr, *disk_motor_on);\n");
+        code.push_str("            if cycle_count % 100000 == 0 {\n");
+        code.push_str("                eprintln!(\"CYCLE#{}: cpu_addr=${:04X} motor={} track={}\", cycle_count, cpu_addr, *disk_motor_on, *disk_current_track);\n");
         code.push_str("            }\n");
-        // Trace when CPU accesses key boot ROM addresses - trace delay loop
-        code.push_str("            if cpu_addr >= 0xC638 && cpu_addr <= 0xC656 && sub_cycle_counter == 0 {\n");
-        code.push_str("                static BOOT_TRACE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str("                let trace_cnt = BOOT_TRACE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                if trace_cnt < 500 {\n");
-        code.push_str(&format!("                    let cpu_di = signals[{}];\n", cpu_di_idx));
-        code.push_str(&format!("                    let cpu_y = signals[{}];\n", cpu_y_reg_idx));
-        code.push_str(&format!("                    let cpu_a = signals[{}];\n", cpu_a_reg_idx));
-        code.push_str(&format!("                    let cpu_n = signals[{}];\n", cpu_flag_n_idx));
-        code.push_str("                    eprintln!(\"BOOT_ADDR#{}: addr=${:04X} di=${:02X} A=${:02X} Y=${:02X} N={}\", trace_cnt, cpu_addr, cpu_di, cpu_a, cpu_y, cpu_n);\n");
+        // Track key boot ROM addresses on sub_cycle 0
+        code.push_str("            if sub_cycle_counter == 0 {\n");
+        code.push_str("                // Track D5 search loop and key addresses\n");
+        code.push_str(&format!("                let cpu_x = signals[{}];\n",
+            core.name_to_idx.get("cpu__x").copied().unwrap_or(202)));
+        // Track key boot ROM addresses
+        code.push_str("                let _ = cpu_x;  // Suppress unused warning\n");
+        // Trace when CPU A register changes (any value)
+        code.push_str(&format!("                let cpu_a = signals[{}];\n", cpu_a_reg_idx));
+        code.push_str(&format!("                let cpu_di = signals[{}];\n", cpu_di_idx));
+        code.push_str(&format!("                let disk_dout = signals[{}];\n", disk_d_out_idx));
+        code.push_str("                static LAST_A: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);\n");
+        code.push_str("                let last_a = LAST_A.load(std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("                if cpu_a != last_a {\n");
+        code.push_str("                    static A_CHANGE_CNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("                    let change_cnt = A_CHANGE_CNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("                    // Log first 30 A register changes to see what values it receives\n");
+        code.push_str("                    if change_cnt < 30 {\n");
+        code.push_str("                        eprintln!(\"A_CHANGE#{}: A=${:02X} -> ${:02X} addr=${:04X} cpu_di=${:02X} disk_dout=${:02X}\", change_cnt, last_a, cpu_a, cpu_addr, cpu_di, disk_dout);\n");
+        code.push_str("                    }\n");
+        code.push_str("                    LAST_A.store(cpu_a, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("                    if cpu_a == 0xD5 || cpu_a == 0xAA || cpu_a == 0x96 || cpu_a == 0xAD {\n");
+        code.push_str("                        static KEY_A_CNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("                        let cnt = KEY_A_CNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("                        if cnt < 20 {\n");
+        code.push_str("                            eprintln!(\"CPU_A#{}: A=${:02X} at addr=${:04X}\", cnt, cpu_a, cpu_addr);\n");
+        code.push_str("                        }\n");
+        code.push_str("                    }\n");
         code.push_str("                }\n");
-        code.push_str("            }\n");
-        // Trace zero page accesses during boot - specifically $26-$2B and $3D, $41
-        code.push_str(&format!("            let cpu_we = signals[{}];\n", cpu_we_idx));
-        code.push_str(&format!("            let ram_we = signals[{}];\n", ram_we_idx));
-        code.push_str(&format!("            let d_val = signals[{}] & 0xFF;\n", d_idx));
-        code.push_str("            if (cpu_addr >= 0x0026 && cpu_addr <= 0x002B) || cpu_addr == 0x003D || cpu_addr == 0x0041 {\n");
-        code.push_str("                static ZP_TRACE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str("                let zp_cnt = ZP_TRACE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str(&format!("                if zp_cnt < 200 && ram_we == 1 {{\n"));
-        code.push_str("                    eprintln!(\"ZP_WRITE#{}: addr=${:04X} d=${:02X} sub={}\", zp_cnt, cpu_addr, d_val, sub_cycle_counter);\n");
+        code.push_str("                // $C69A: sector comparison, $C6A4: branch after sector match, $C6A6: data reading start\n");
+        code.push_str("                if cpu_addr == 0xC69A || cpu_addr == 0xC6A4 || cpu_addr == 0xC6A6 {\n");
+        code.push_str("                    static BOOT_ADDR_CNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("                    let cnt = BOOT_ADDR_CNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("                    if cnt < 20 {\n");
+        code.push_str(&format!("                        let cpu_a = signals[{}];\n", cpu_a_reg_idx));
+        code.push_str(&format!("                        let cpu_p = signals[{}] | (signals[{}] << 1) | (signals[{}] << 6) | (signals[{}] << 7);\n",
+            core.name_to_idx.get("cpu__flag_c").copied().unwrap_or(0),
+            core.name_to_idx.get("cpu__flag_z").copied().unwrap_or(0),
+            core.name_to_idx.get("cpu__flag_v").copied().unwrap_or(0),
+            core.name_to_idx.get("cpu__flag_n").copied().unwrap_or(0)));
+        code.push_str("                        eprintln!(\"BOOT_ROM#{}: addr=${:04X} A=${:02X} P=${:02X}\", cnt, cpu_addr, cpu_a, cpu_p);\n");
+        code.push_str("                    }\n");
         code.push_str("                }\n");
         code.push_str("            }\n");
         code.push_str("        }\n\n");
@@ -604,21 +642,22 @@ impl Apple2Extension {
         // We advance by 14 sub-cycles per CPU cycle to match the simulation rate
         code.push_str("        if sub_cycle_counter == 0 && *disk_motor_on && !all_tracks.is_empty() {\n");
         code.push_str("            let old_byte_pos = *disk_byte_pos;\n");
-        // Debug: trace position advancement
-        code.push_str("            static POS_DEBUG_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str("            let pos_count = POS_DEBUG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("            if pos_count < 10 {\n");
-        code.push_str("                eprintln!(\"POS_ADV#{}: cycle_counter={} byte_pos={}\", pos_count, *disk_cycle_counter, *disk_byte_pos);\n");
-        code.push_str("            }\n");
+        code.push_str("            let old_cycle = *disk_cycle_counter;\n");
         code.push_str("            *disk_cycle_counter += 14;  // One CPU cycle worth of sub-cycles\n");
+        // Debug: track disk advance timing
+        code.push_str("            static DISK_ADVANCE_CNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("            let advance_cnt = DISK_ADVANCE_CNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("            if advance_cnt < 5 || advance_cnt % 100000 == 0 {\n");
+        code.push_str("                eprintln!(\"DISK_ADVANCE#{}: old_cycle={} new_cycle={} pos={}\", advance_cnt, old_cycle, *disk_cycle_counter, *disk_byte_pos);\n");
+        code.push_str("            }\n");
         code.push_str("            while *disk_cycle_counter >= DISK_BYTE_CYCLES {\n");
         code.push_str("                *disk_cycle_counter -= DISK_BYTE_CYCLES;  // Preserve fractional timing\n");
-        code.push_str("                let old_pos = *disk_byte_pos;\n");
         code.push_str("                *disk_byte_pos = (*disk_byte_pos + 1) % TRACK_SIZE;\n");
-        code.push_str("                static ADV_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str("                let adv = ADV_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                if adv < 5 || adv % 1000 == 0 {\n");
-        code.push_str("                    eprintln!(\"BYTE_ADV#{}: {} -> {}\", adv, old_pos, *disk_byte_pos);\n");
+        // Debug: track when position actually changes
+        code.push_str("                static POS_CHANGE_CNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("                let pos_cnt = POS_CHANGE_CNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("                if pos_cnt < 10 || pos_cnt % 10000 == 0 {\n");
+        code.push_str("                    eprintln!(\"POS_CHANGE#{}: new_pos={} track={}\", pos_cnt, *disk_byte_pos, *disk_current_track);\n");
         code.push_str("                }\n");
         code.push_str("            }\n");
         code.push_str("            // If byte position changed, latch new byte and set latch_valid\n");
@@ -626,8 +665,10 @@ impl Apple2Extension {
         code.push_str("                let track = *disk_current_track;\n");
         code.push_str("                let pos = *disk_byte_pos;\n");
         code.push_str("                if track < num_tracks && pos < track_size {\n");
-        code.push_str("                    *disk_data_latch = all_tracks[track * track_size + pos];\n");
+        code.push_str("                    let new_byte = all_tracks[track * track_size + pos];\n");
+        code.push_str("                    *disk_data_latch = new_byte;\n");
         code.push_str("                    *disk_latch_valid = true;  // New byte is ready\n");
+        // BYTE_LATCH debug disabled
         code.push_str("                }\n");
         code.push_str("            }\n");
         code.push_str("        }\n\n");
@@ -683,165 +724,117 @@ impl Apple2Extension {
         code.push_str("                }\n");
         code.push_str("                // Handle stepper motor track stepping\n");
         code.push_str("                let newly_on = *disk_phases & !old_phases;\n");
+        // Stepper motor logic using half-tracks (matching HDL implementation)
+        // Half-track position: 0-69 for 35 tracks (2 half-tracks per track)
+        // Current quadrant = half_track / 2 % 4
         code.push_str("                if newly_on != 0 {\n");
         code.push_str("                    let new_phase = newly_on.trailing_zeros() as i32;\n");
         code.push_str("                    if new_phase < 4 {\n");
-        code.push_str("                        let current_track = *disk_current_track as i32;\n");
-        code.push_str("                        let current_phase = if old_phases != 0 {\n");
-        code.push_str("                            old_phases.trailing_zeros() as i32\n");
-        code.push_str("                        } else {\n");
-        code.push_str("                            (current_track % 4) as i32\n");
-        code.push_str("                        };\n");
-        code.push_str("                        let diff = (new_phase - current_phase).rem_euclid(4);\n");
-        code.push_str("                        if diff == 1 && current_track < (NUM_TRACKS as i32 - 1) {\n");
-        code.push_str("                            *disk_current_track = (current_track + 1) as usize;\n");
-        code.push_str("                        } else if diff == 3 && current_track > 0 {\n");
-        code.push_str("                            *disk_current_track = (current_track - 1) as usize;\n");
+        code.push_str("                        let half_track = *disk_half_track as i32;\n");
+        code.push_str("                        let current_quadrant = (half_track / 2) % 4;\n");
+        code.push_str("                        let next_quadrant = (current_quadrant + 1) % 4;\n");
+        code.push_str("                        let prev_quadrant = (current_quadrant + 3) % 4;\n");
+        code.push_str("                        let old_track = *disk_current_track;\n");
+        // Step inward if active phase matches next quadrant
+        code.push_str("                        if new_phase == next_quadrant && half_track < 69 {\n");
+        code.push_str("                            *disk_half_track = (half_track + 1) as usize;\n");
+        code.push_str("                            *disk_current_track = *disk_half_track / 2;\n");
+        code.push_str("                        } else if new_phase == prev_quadrant && half_track > 0 {\n");
+        // Step outward if active phase matches prev quadrant
+        code.push_str("                            *disk_half_track = (half_track - 1) as usize;\n");
+        code.push_str("                            *disk_current_track = *disk_half_track / 2;\n");
+        code.push_str("                        }\n");
+        // Only log when actual track changes (not half-track)
+        code.push_str("                        if old_track != *disk_current_track {\n");
+        code.push_str("                            eprintln!(\"TRACK_CHANGE: {} -> {}\", old_track, *disk_current_track);\n");
         code.push_str("                        }\n");
         code.push_str("                    }\n");
         code.push_str("                }\n");
         code.push_str("            }\n");
         code.push_str("            // Read data register ($C0EC with Q6=0, Q7=0)\n");
-        code.push_str("            // Real Disk II: bit 7 is set when data is valid (byte ready)\n");
-        code.push_str("            // Bit 7 stays set for ALL reads of the same byte - it's part of the data!\n");
-        code.push_str("            // Valid disk nibbles already have bit 7 set (range $96-$FF)\n");
-        code.push_str("            // We clear bit 7 only when no new data is ready yet (latch_valid=false)\n");
-        // Debug: trace ALL reads from $C0EC with state info
-        code.push_str("            if reg == 0xC && sub_cycle_counter == 0 {\n");
-        code.push_str("                static READ_DEBUG: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str("                let read_cnt = READ_DEBUG.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                if read_cnt < 20 || (read_cnt >= 1000 && read_cnt < 1010) {\n");
-        code.push_str("                    eprintln!(\"DISKRD#{}: q7={} motor={} latch={:02X} valid={}\", read_cnt, *disk_q7, *disk_motor_on, *disk_data_latch, *disk_latch_valid);\n");
-        code.push_str("                }\n");
-        code.push_str("            }\n");
         code.push_str("            if reg == 0xC && !*disk_q7 && *disk_motor_on {\n");
         code.push_str("                let latched = *disk_data_latch;\n");
-        code.push_str("                // latch_valid indicates a new byte is ready\n");
-        code.push_str("                // On sub_cycle 0 (CPU cycle boundary), we consume the valid byte\n");
-        code.push_str("                // This gives the CPU one full cycle to sample the valid byte\n");
         code.push_str("                let is_valid = *disk_latch_valid;\n");
+        // Debug: log when CPU reads $C0EC with latch_valid status
+        code.push_str("                static READ_DEBUG_CNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("                let read_cnt = READ_DEBUG_CNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        // KEY_READ debug disabled
+        code.push_str("                // Real Disk II: byte stays valid until NEXT byte arrives\n");
+        code.push_str("                // The latch holds the byte with bit 7 set until replaced by the next byte\n");
+        code.push_str("                // Don't clear latch_valid on read - it's cleared implicitly when next byte arrives\n");
+        code.push_str("                // (by setting latch_valid=true for the new byte)\n");
         code.push_str("                let result = if is_valid {\n");
-        code.push_str("                    // Data valid - return latch (bit 7 naturally set for valid nibbles)\n");
-        code.push_str("                    // Clear latch_valid only on sub_cycle 0 to ensure CPU sees valid byte\n");
-        code.push_str("                    if sub_cycle_counter == 0 {\n");
-        code.push_str("                        *disk_latch_valid = false;  // Consumed the byte\n");
-        code.push_str("                    }\n");
         code.push_str("                    latched as u64\n");
         code.push_str("                } else {\n");
-        code.push_str("                    // Data not ready - return with bit 7 clear\n");
+        code.push_str("                    // Motor just started - first few bytes may not be valid yet\n");
         code.push_str("                    (latched & 0x7F) as u64\n");
         code.push_str("                };\n");
-        // Debug: track sequential reads after D5 is found - ONLY on sub_cycle 0 when byte is consumed
+        // Minimal debug: track sector address headers found
+        // Only process state machine when byte position changes (new byte arrived)
         code.push_str("                static D5_STATE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);\n");
-        code.push_str("                static SEQ_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str("                if is_valid && sub_cycle_counter == 0 {\n");
-        code.push_str("                    let seq = SEQ_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("                static SECTOR_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("                static LAST_BYTE_POS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(usize::MAX);\n");
+        code.push_str("                let current_pos = *disk_byte_pos;\n");
+        code.push_str("                let last_pos = LAST_BYTE_POS.load(std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("                let new_byte = current_pos != last_pos;\n");
+        code.push_str("                if new_byte {\n");
+        code.push_str("                    LAST_BYTE_POS.store(current_pos, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("                }\n");
+        code.push_str("                if new_byte && is_valid {\n");
         code.push_str("                    let d5_state = D5_STATE.load(std::sync::atomic::Ordering::Relaxed);\n");
         // State machine: 0=idle, 1=saw D5, 2=saw D5 AA, 3-10=reading address field
         code.push_str("                    if latched == 0xD5 && d5_state == 0 {\n");
-        code.push_str("                        static D5_FOUND: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str("                        let d5cnt = D5_FOUND.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                        if d5cnt < 20 {\n");
-        code.push_str("                            eprintln!(\"D5_FOUND#{}: pos={}\", d5cnt, *disk_byte_pos);\n");
-        code.push_str("                        }\n");
         code.push_str("                        D5_STATE.store(1, std::sync::atomic::Ordering::Relaxed);\n");
         code.push_str("                    } else if d5_state == 1 {\n");
-        code.push_str("                        static D5_AA_CHECK: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str("                        let chk = D5_AA_CHECK.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                        if chk < 20 {\n");
-        code.push_str("                            eprintln!(\"D5_AA_CHECK#{}: latched={:02X} pos={} (expect AA)\", chk, latched, *disk_byte_pos);\n");
-        code.push_str("                        }\n");
-        code.push_str("                        if latched == 0xAA {\n");
-        code.push_str("                            D5_STATE.store(2, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                        } else {\n");
-        code.push_str("                            D5_STATE.store(0, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                        }\n");
+        code.push_str("                        D5_STATE.store(if latched == 0xAA { 2 } else { 0 }, std::sync::atomic::Ordering::Relaxed);\n");
         code.push_str("                    } else if d5_state == 2 {\n");
-        code.push_str("                        static D5_AA_TYPE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str("                        let typecnt = D5_AA_TYPE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                        if typecnt < 20 {\n");
-        code.push_str("                            eprintln!(\"D5_AA_TYPE#{}: latched={:02X} pos={} (expect 96 or AD)\", typecnt, latched, *disk_byte_pos);\n");
-        code.push_str("                        }\n");
         code.push_str("                        if latched == 0x96 {\n");
-        // Start reading address field: vol_odd, vol_even, trk_odd, trk_even, sec_odd, sec_even, chk_odd, chk_even
         code.push_str("                            D5_STATE.store(3, std::sync::atomic::Ordering::Relaxed);\n");
         code.push_str("                        } else if latched == 0xAD {\n");
-        // Data prologue found! D5 AA AD - start tracking data field
+        // Data prologue found - log it
         code.push_str("                            static DATA_PROLOGUE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
         code.push_str("                            let dp_cnt = DATA_PROLOGUE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                            if dp_cnt < 5 {\n");
-        code.push_str("                                eprintln!(\"DATA_PROLOGUE#{}: D5 AA AD found at pos={}\", dp_cnt, *disk_byte_pos);\n");
+        code.push_str("                            if dp_cnt < 20 {\n");
+        code.push_str("                                eprintln!(\"DATA_PROLOGUE#{}: D5 AA AD found\", dp_cnt);\n");
         code.push_str("                            }\n");
-        // Start reading data field (343 bytes: 342 data + 1 checksum)
         code.push_str("                            D5_STATE.store(20, std::sync::atomic::Ordering::Relaxed);\n");
         code.push_str("                        } else {\n");
         code.push_str("                            D5_STATE.store(0, std::sync::atomic::Ordering::Relaxed);\n");
         code.push_str("                        }\n");
         code.push_str("                    } else if d5_state >= 3 && d5_state <= 10 {\n");
-        // Read address field bytes and decode 4-and-4
+        // Read address field bytes
         code.push_str("                        static ADDR_BYTES: [std::sync::atomic::AtomicU8; 8] = [\n");
-        code.push_str("                            std::sync::atomic::AtomicU8::new(0),\n");
-        code.push_str("                            std::sync::atomic::AtomicU8::new(0),\n");
-        code.push_str("                            std::sync::atomic::AtomicU8::new(0),\n");
-        code.push_str("                            std::sync::atomic::AtomicU8::new(0),\n");
-        code.push_str("                            std::sync::atomic::AtomicU8::new(0),\n");
-        code.push_str("                            std::sync::atomic::AtomicU8::new(0),\n");
-        code.push_str("                            std::sync::atomic::AtomicU8::new(0),\n");
-        code.push_str("                            std::sync::atomic::AtomicU8::new(0),\n");
+        code.push_str("                            std::sync::atomic::AtomicU8::new(0), std::sync::atomic::AtomicU8::new(0),\n");
+        code.push_str("                            std::sync::atomic::AtomicU8::new(0), std::sync::atomic::AtomicU8::new(0),\n");
+        code.push_str("                            std::sync::atomic::AtomicU8::new(0), std::sync::atomic::AtomicU8::new(0),\n");
+        code.push_str("                            std::sync::atomic::AtomicU8::new(0), std::sync::atomic::AtomicU8::new(0),\n");
         code.push_str("                        ];\n");
         code.push_str("                        let idx = (d5_state - 3) as usize;\n");
         code.push_str("                        ADDR_BYTES[idx].store(latched as u8, std::sync::atomic::Ordering::Relaxed);\n");
         code.push_str("                        if d5_state == 10 {\n");
-        // Decode and print address field
-        code.push_str("                            let vol_odd = ADDR_BYTES[0].load(std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                            let vol_even = ADDR_BYTES[1].load(std::sync::atomic::Ordering::Relaxed);\n");
+        // Decode and log address field
         code.push_str("                            let trk_odd = ADDR_BYTES[2].load(std::sync::atomic::Ordering::Relaxed);\n");
         code.push_str("                            let trk_even = ADDR_BYTES[3].load(std::sync::atomic::Ordering::Relaxed);\n");
         code.push_str("                            let sec_odd = ADDR_BYTES[4].load(std::sync::atomic::Ordering::Relaxed);\n");
         code.push_str("                            let sec_even = ADDR_BYTES[5].load(std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                            let chk_odd = ADDR_BYTES[6].load(std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                            let chk_even = ADDR_BYTES[7].load(std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                            let vol = ((vol_odd << 1) | 1) & vol_even;\n");
         code.push_str("                            let trk = ((trk_odd << 1) | 1) & trk_even;\n");
         code.push_str("                            let sec = ((sec_odd << 1) | 1) & sec_even;\n");
-        code.push_str("                            let chk = ((chk_odd << 1) | 1) & chk_even;\n");
-        code.push_str("                            let expected_chk = vol ^ trk ^ sec;\n");
-        code.push_str("                            static ADDR_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str("                            let addr_cnt = ADDR_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                            if addr_cnt < 30 {\n");
-        code.push_str("                                eprintln!(\"ADDR#{}: vol={:02X} trk={} sec={} chk={:02X} (expected {:02X}) pos={}\", addr_cnt, vol, trk, sec, chk, expected_chk, *disk_byte_pos);\n");
+        code.push_str("                            let cnt = SECTOR_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("                            if cnt < 20 {\n");
+        code.push_str("                                eprintln!(\"SECTOR#{}: trk={} sec={}\", cnt, trk, sec);\n");
         code.push_str("                            }\n");
         code.push_str("                            D5_STATE.store(0, std::sync::atomic::Ordering::Relaxed);\n");
         code.push_str("                        } else {\n");
         code.push_str("                            D5_STATE.store(d5_state + 1, std::sync::atomic::Ordering::Relaxed);\n");
         code.push_str("                        }\n");
         code.push_str("                    } else if d5_state >= 20 {\n");
-        // Reading data field bytes (state 20 = first byte, state 362 = checksum, state 363 = done)
-        code.push_str("                        static DATA_BYTES_READ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str("                        static DATA_CHECKSUM: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);\n");
         code.push_str("                        let data_idx = d5_state as usize - 20;\n");
-        code.push_str("                        if data_idx == 0 {\n");
-        code.push_str("                            DATA_CHECKSUM.store(0, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                        }\n");
-        // Print first few data bytes
-        code.push_str("                        let total_data_read = DATA_BYTES_READ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                        if total_data_read < 10 {\n");
-        code.push_str("                            eprintln!(\"DATA_BYTE#{}: idx={} val={:02X} pos={}\", total_data_read, data_idx, latched, *disk_byte_pos);\n");
-        code.push_str("                        }\n");
         code.push_str("                        if data_idx < 343 {\n");
         code.push_str("                            D5_STATE.store((d5_state + 1) as u8, std::sync::atomic::Ordering::Relaxed);\n");
         code.push_str("                        } else {\n");
         // Done reading data field
         code.push_str("                            D5_STATE.store(0, std::sync::atomic::Ordering::Relaxed);\n");
         code.push_str("                        }\n");
-        code.push_str("                    }\n");
-        code.push_str("                }\n");
-        // Debug: show what's actually returned (limited) - only on sub_cycle 0
-        code.push_str("                static RET_DEBUG: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str("                if sub_cycle_counter == 0 {\n");
-        code.push_str("                    let ret_cnt = RET_DEBUG.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                    if ret_cnt < 5 {\n");
-        code.push_str("                        eprintln!(\"RET#{}: valid={} latch={:02X} result={:02X} pos={}\", ret_cnt, is_valid, latched, result, *disk_byte_pos);\n");
         code.push_str("                    }\n");
         code.push_str("                }\n");
         code.push_str("                result\n");
@@ -878,6 +871,35 @@ impl Apple2Extension {
         // Inject ram_data into ram_do for RAM/ROM accesses
         // The HDL mux will route this to cpu_din when disk_select is false
         code.push_str(&format!("        signals[{}] = ram_data;  // ram_do\n", ram_do_idx));
+        // Debug: track what cpu__di receives when reading disk data
+        code.push_str(&format!("        let cpu_di = signals[{}];\n", cpu_di_idx));
+        code.push_str("        if cpu_addr == 0xC0EC && disk_data == 0xD5 {\n");
+        code.push_str("            static DI_DEBUG_CNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("            let cnt = DI_DEBUG_CNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("            if cnt < 10 {\n");
+        code.push_str(&format!("                let disk_dout = signals[{}];\n", disk_d_out_idx));
+        code.push_str(&format!("                let ram_do = signals[{}];\n", ram_do_idx));
+        code.push_str("                eprintln!(\"DI_DEBUG#{}: disk_data=$D5 disk__d_out=${:02X} ram_do=${:02X} cpu__di=${:02X}\", cnt, disk_dout, ram_do, cpu_di);\n");
+        code.push_str("            }\n");
+        code.push_str("        }\n");
+        // Debug: track when latch has D5 vs when CPU reads
+        code.push_str("        {\n");
+        code.push_str("            static D5_LATCH_CYCLES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("            static CPU_READ_DURING_D5: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("            let latch = *disk_data_latch;\n");
+        code.push_str("            if latch == 0xD5 && *disk_motor_on {\n");
+        code.push_str("                let d5_cycles = D5_LATCH_CYCLES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("                if cpu_addr == 0xC0EC {\n");
+        code.push_str("                    let reads = CPU_READ_DURING_D5.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("                    if reads < 10 {\n");
+        code.push_str("                        eprintln!(\"D5_READ#{}: latch=D5 cpu_addr=C0EC disk_data=${:02X}\", reads, disk_data);\n");
+        code.push_str("                    }\n");
+        code.push_str("                }\n");
+        code.push_str("                if d5_cycles % 10000 == 0 {\n");
+        code.push_str("                    eprintln!(\"D5_LATCH: {} cycles with D5, {} CPU reads, cpu_addr=${:04X}\", d5_cycles, CPU_READ_DURING_D5.load(std::sync::atomic::Ordering::Relaxed), cpu_addr);\n");
+        code.push_str("                }\n");
+        code.push_str("            }\n");
+        code.push_str("        }\n");
 
         // Clock falling edge - evaluate to settle combinational logic
         // evaluate_apple2_inline skips disk__d_out so our injected value is preserved
@@ -890,68 +912,48 @@ impl Apple2Extension {
             code.push_str(&format!("        old_clocks[{}] = signals[{}];\n", i, clk));
         }
         code.push_str(&format!("        signals[{}] = 1;\n", clk_idx));
-        code.push_str("        tick_apple2_inline(signals, &mut old_clocks, &mut next_regs, disk_data);\n");
-        // Debug: verify cpu__di after tick (HDL mux should have computed it correctly)
-        code.push_str(&format!("        static TICK_DEBUG: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n"));
-        code.push_str(&format!("        if cpu_addr == 0xC0EC || cpu_addr >= 0xC600 && cpu_addr < 0xC700 {{\n"));
-        code.push_str(&format!("            let tick_count = TICK_DEBUG.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n"));
-        code.push_str(&format!("            if tick_count < 5 {{\n"));
-        code.push_str(&format!("                let cpu_di_val = signals[{}];\n", cpu_di_idx));
-        code.push_str(&format!("                let disk_d_out_val = signals[{}];\n", disk_d_out_idx));
-        code.push_str(&format!("                eprintln!(\"TICK#{{}} addr=${{:04X}} disk_data=${{:02X}} disk_d_out=${{:02X}} cpu_di=${{:02X}}\", tick_count, cpu_addr, disk_data, disk_d_out_val, cpu_di_val);\n"));
-        code.push_str(&format!("            }}\n"));
-        code.push_str(&format!("        }}\n\n"));
+        code.push_str("        tick_apple2_inline(signals, &mut old_clocks, &mut next_regs, disk_data);\n\n");
+        // Find cpu__clk signal index
+        let cpu_clk_idx = core.name_to_idx.get("cpu__clk").copied().unwrap_or(138);
+        // Debug: track cpu__clk rising edges and A register updates
+        code.push_str(&format!("        let cpu_clk = signals[{}];\n", cpu_clk_idx));
+        code.push_str(&format!("        static PREV_CPU_CLK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);\n"));
+        code.push_str("        let prev_cpu_clk = PREV_CPU_CLK.load(std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("        if prev_cpu_clk == 0 && cpu_clk == 1 {\n");
+        code.push_str("            // cpu__clk just rose\n");
+        code.push_str("            static CPU_CLK_RISE_CNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str("            let rise_cnt = CPU_CLK_RISE_CNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str(&format!("            let cpu_di = signals[{}];\n", cpu_di_idx));
+        code.push_str(&format!("            let cpu_a = signals[{}];\n", cpu_a_reg_idx));
+        code.push_str(&format!("            let disk_dout = signals[{}];\n", disk_d_out_idx));
+        code.push_str("            // Print periodically when motor is on and in disk search area\n");
+        code.push_str("            let in_disk_search = cpu_addr >= 0xC65D && cpu_addr <= 0xC670;\n");
+        code.push_str("            let show_msg = rise_cnt < 10 || (rise_cnt % 100000 == 0) || (rise_cnt < 300 && disk_data == 0xD5);\n");
+        code.push_str("            if show_msg {\n");
+        code.push_str("                eprintln!(\"CPU_CLK_RISE#{}: cpu_addr=${:04X} disk_data=${:02X} disk_dout=${:02X} cpu_di=${:02X} cpu_a=${:02X} sub_cycle={} motor={}\", rise_cnt, cpu_addr, disk_data, disk_dout, cpu_di, cpu_a, sub_cycle_counter, *disk_motor_on);\n");
+        code.push_str("            }\n");
+        code.push_str("        }\n");
+        code.push_str(&format!("        PREV_CPU_CLK.store(cpu_clk, std::sync::atomic::Ordering::Relaxed);\n\n"));
 
-        // Handle RAM write (read from d signal, NOT ram_do)
-        // Debug: Get signal indices for ram_we components
+        // Handle RAM write
         let cpu_we_idx = core.name_to_idx.get("cpu_we").copied().unwrap_or(0);
-        let ras_n_idx = core.name_to_idx.get("ras_n").copied().unwrap_or(0);
-        let phi0_idx = core.name_to_idx.get("phi0").copied().unwrap_or(0);
-        eprintln!("CODEGEN: ram_we_idx={}, cpu_we_idx={}, ras_n_idx={}, phi0_idx={}",
-                  ram_we_idx, cpu_we_idx, ras_n_idx, phi0_idx);
         code.push_str(&format!("        let ram_we = signals[{}];\n", ram_we_idx));
-        code.push_str(&format!("        let cpu_we = signals[{}];\n", cpu_we_idx));
-        code.push_str(&format!("        let ras_n = signals[{}];\n", ras_n_idx));
-        code.push_str(&format!("        let phi0 = signals[{}];\n", phi0_idx));
-        code.push_str("        {{\n");
-        code.push_str("            static CPU_WE_EVER_SET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);\n");
-        code.push_str("            static CPU_WE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str("            if cpu_we == 1 && !CPU_WE_EVER_SET.swap(true, std::sync::atomic::Ordering::Relaxed) {\n");
-        code.push_str("                eprintln!(\"CPU_WE first set at cycle {}\", CPU_WE_COUNT.load(std::sync::atomic::Ordering::Relaxed));\n");
-        code.push_str("            }\n");
-        code.push_str("            if ram_we == 1 {\n");
-        code.push_str(&format!("                eprintln!(\"RAM_WE=1: addr=${{:04X}} cpu_we={{}} ras_n={{}} phi0={{}}\", (signals[{}] as usize) & 0xFFFF, cpu_we, ras_n, phi0);\n", cpu_addr_idx));
-        code.push_str("            }\n");
-        code.push_str("            CPU_WE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("        }}\n");
         code.push_str("        if ram_we == 1 {\n");
         code.push_str(&format!("            let write_addr = (signals[{}] as usize) & 0xFFFF;\n", cpu_addr_idx));
         code.push_str("            if write_addr < 0xC000 && write_addr < ram_len {\n");
         code.push_str(&format!("                ram[write_addr] = (signals[{}] & 0xFF) as u8;\n", d_idx));
-        // Debug: track writes to boot sector region and aux/table region
-        code.push_str("                static BOOT_WRITE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str("                static AUX_WRITE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str("                static RAM_WRITE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str(&format!("                let val = signals[{}] & 0xFF;\n", d_idx));
-        code.push_str("                let ram_wr_cnt = RAM_WRITE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                if ram_wr_cnt < 10 {\n");
-        code.push_str("                    eprintln!(\"RAM_WRITE#{}: addr=${:04X} val=${:02X}\", ram_wr_cnt, write_addr, val);\n");
-        code.push_str("                }\n");
-        code.push_str("                if write_addr >= 0x0800 && write_addr <= 0x08FF {\n");
-        code.push_str("                    let wr_cnt = BOOT_WRITE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                    if wr_cnt < 20 {\n");
-        code.push_str("                        eprintln!(\"BOOT_WRITE#{}: addr=${:04X} val=${:02X}\", wr_cnt, write_addr, val);\n");
-        code.push_str("                    }\n");
-        code.push_str("                }\n");
-        code.push_str("                if write_addr >= 0x0300 && write_addr <= 0x03FF {\n");
-        code.push_str("                    let aux_cnt = AUX_WRITE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                    if aux_cnt < 20 {\n");
-        code.push_str("                        eprintln!(\"AUX_WRITE#{}: addr=${:04X} val=${:02X}\", aux_cnt, write_addr, val);\n");
-        code.push_str("                    }\n");
-        code.push_str("                }\n");
-        code.push_str("                // Check for text page write ($0400-$07FF)\n");
+        // Check for text page write ($0400-$07FF)
         code.push_str("                if write_addr >= 0x0400 && write_addr <= 0x07FF {\n");
         code.push_str("                    text_dirty = true;\n");
+        code.push_str("                }\n");
+        // Debug: track boot sector writes ($0800-$08FF)
+        code.push_str("                if write_addr >= 0x0800 && write_addr <= 0x08FF {\n");
+        code.push_str("                    static BOOT_WRITE_CNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
+        code.push_str(&format!("                    let val = signals[{}] & 0xFF;\n", d_idx));
+        code.push_str("                    let cnt = BOOT_WRITE_CNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
+        code.push_str("                    if cnt < 10 {\n");
+        code.push_str("                        eprintln!(\"BOOT_WRITE#{}: addr=${:04X} val=${:02X}\", cnt, write_addr, val);\n");
+        code.push_str("                    }\n");
         code.push_str("                }\n");
         code.push_str("            }\n");
         code.push_str("        }\n\n");
