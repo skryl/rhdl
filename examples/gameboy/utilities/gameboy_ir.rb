@@ -115,10 +115,16 @@ module RHDL
         @speaker = Speaker.new
         @prev_audio = 0
 
-        @use_batched = @sim.native? && @sim.respond_to?(:run_cpu_cycles)
+        # Check for either Game Boy batched cycles or Apple II batched cycles
+        @use_batched = @sim.native? && (@sim.respond_to?(:run_gb_cycles) || @sim.respond_to?(:run_cpu_cycles))
 
         if @use_batched
           puts "  Batched execution: enabled"
+        end
+
+        # Check for Game Boy mode specifically
+        if @sim.respond_to?(:gameboy_mode?) && @sim.gameboy_mode?
+          puts "  Game Boy mode: enabled"
         end
 
         @sim.reset
