@@ -167,6 +167,21 @@ module RHDL
         end
       end
 
+      # 6-and-2 encoding translation table
+      TRANSLATE_62 = [
+        0x96, 0x97, 0x9A, 0x9B, 0x9D, 0x9E, 0x9F, 0xA6,
+        0xA7, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF, 0xB2, 0xB3,
+        0xB4, 0xB5, 0xB6, 0xB7, 0xB9, 0xBA, 0xBB, 0xBC,
+        0xBD, 0xBE, 0xBF, 0xCB, 0xCD, 0xCE, 0xCF, 0xD3,
+        0xD6, 0xD7, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE,
+        0xDF, 0xE5, 0xE6, 0xE7, 0xE9, 0xEA, 0xEB, 0xEC,
+        0xED, 0xEE, 0xEF, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6,
+        0xF7, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF
+      ].freeze
+
+      # Nibble track size
+      NIBBLE_TRACK_SIZE = 6656
+
       def load_disk(path_or_bytes, drive: 0)
         bytes = if path_or_bytes.is_a?(String)
                   File.binread(path_or_bytes).bytes
@@ -178,13 +193,132 @@ module RHDL
           raise ArgumentError, "Invalid disk image size: #{bytes.length} (expected #{DISK_SIZE})"
         end
 
+        @dsk_data = bytes
         @disk_loaded = true
-        puts "Warning: Disk support in IR mode is limited"
+
+        # Convert and load all 35 tracks
+        if @use_batched && @sim.respond_to?(:apple2_load_track)
+          puts "  Loading disk image: converting DSK to nibbles..."
+          TRACKS.times do |track|
+            nibbles = convert_track_to_nibbles(bytes, track)
+            @sim.apple2_load_track(track, nibbles)
+          end
+          puts "  Loaded #{TRACKS} tracks"
+        else
+          puts "Warning: Disk support in IR mode is limited"
+        end
+      end
+
+      def load_disk_rom(data)
+        if @use_batched && @sim.respond_to?(:apple2_load_disk_rom)
+          data = data.bytes if data.is_a?(String)
+          @sim.apple2_load_disk_rom(data)
+        end
       end
 
       def disk_loaded?(drive: 0)
         @disk_loaded || false
       end
+
+      def disk_track
+        if @use_batched && @sim.respond_to?(:apple2_get_track)
+          @sim.apple2_get_track
+        else
+          0
+        end
+      end
+
+      def disk_motor_on?
+        if @use_batched && @sim.respond_to?(:apple2_is_motor_on?)
+          @sim.apple2_is_motor_on?
+        else
+          false
+        end
+      end
+
+      private
+
+      # Convert DSK track to nibblized format
+      def convert_track_to_nibbles(dsk_data, track_num)
+        nibbles = []
+        track_offset = track_num * SECTORS_PER_TRACK * BYTES_PER_SECTOR
+
+        SECTORS_PER_TRACK.times do |logical_sector|
+          physical_sector = DOS33_INTERLEAVE[logical_sector]
+          sector_data = dsk_data[track_offset + physical_sector * BYTES_PER_SECTOR, BYTES_PER_SECTOR] || Array.new(BYTES_PER_SECTOR, 0)
+
+          # Sync bytes (gap 1)
+          48.times { nibbles << 0xFF }
+
+          # Address field prologue
+          nibbles.concat([0xD5, 0xAA, 0x96])
+
+          # Address field (4-and-4 encoded)
+          volume = 0xFE
+          checksum = volume ^ track_num ^ logical_sector
+          nibbles.concat(encode_4_and_4(volume))
+          nibbles.concat(encode_4_and_4(track_num))
+          nibbles.concat(encode_4_and_4(logical_sector))
+          nibbles.concat(encode_4_and_4(checksum))
+
+          # Address field epilogue
+          nibbles.concat([0xDE, 0xAA, 0xEB])
+
+          # Gap 2
+          6.times { nibbles << 0xFF }
+
+          # Data field prologue
+          nibbles.concat([0xD5, 0xAA, 0xAD])
+
+          # Data field (6-and-2 encoded)
+          nibbles.concat(encode_6_and_2(sector_data))
+
+          # Data field epilogue
+          nibbles.concat([0xDE, 0xAA, 0xEB])
+
+          # Gap 3
+          27.times { nibbles << 0xFF }
+        end
+
+        # Pad to track size
+        while nibbles.length < NIBBLE_TRACK_SIZE
+          nibbles << 0xFF
+        end
+
+        nibbles[0, NIBBLE_TRACK_SIZE]
+      end
+
+      # 4-and-4 encoding (used for address fields)
+      def encode_4_and_4(byte)
+        [((byte >> 1) | 0xAA), (byte | 0xAA)]
+      end
+
+      # 6-and-2 encoding (used for data fields)
+      def encode_6_and_2(sector_data)
+        # Pre-nibblize: separate bottom 2 bits
+        aux = Array.new(86, 0)
+        sector_data.each_with_index do |byte, i|
+          aux_idx = i % 86
+          shift = (i / 86) * 2
+          aux[aux_idx] |= ((byte & 0x01) << (shift + 1)) | ((byte & 0x02) >> 1 << shift)
+        end
+
+        # Combine into 342-byte buffer
+        combined = aux.reverse + sector_data.map { |b| b >> 2 }
+
+        # XOR encode and translate
+        result = []
+        checksum = 0
+        combined.each do |val|
+          result << TRANSLATE_62[val ^ checksum]
+          checksum = val
+        end
+        result << TRANSLATE_62[checksum]  # Final checksum byte
+
+        result
+      end
+
+      public
 
       def reset
         if @use_batched
