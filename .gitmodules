@@ -1,3 +1,6 @@
 [submodule "examples/apple2/reference"]
 	path = examples/apple2/reference
 	url = https://github.com/zf3/neoapple2
+[submodule "examples/gameboy/reference"]
+	path = examples/gameboy/reference
+	url = https://github.com/MiSTer-devel/Gameboy_MiSTer.git
