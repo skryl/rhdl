@@ -9,6 +9,7 @@ RSpec.describe RHDL::Apple2::Apple2 do
   let(:ram) { Array.new(48 * 1024, 0) }  # 48KB RAM
 
   before do
+    @rom_data = nil  # Will be set by load_rom
     apple2
     # Initialize inputs
     apple2.set_input(:clk_14m, 0)
@@ -27,10 +28,14 @@ RSpec.describe RHDL::Apple2::Apple2 do
     apple2.set_input(:clk_14m, 0)
     apple2.propagate
 
-    # Get RAM address and provide data
-    ram_addr = apple2.get_output(:ram_addr)
-    if ram_addr < ram.size
-      apple2.set_input(:ram_do, ram[ram_addr])
+    # Get address and provide data from RAM or ROM
+    addr = apple2.get_output(:ram_addr)
+    if addr >= 0xD000 && @rom_data
+      # ROM address range ($D000-$FFFF) - map to ROM array
+      rom_addr = addr - 0xD000
+      apple2.set_input(:ram_do, @rom_data[rom_addr] || 0)
+    elsif addr < ram.size
+      apple2.set_input(:ram_do, ram[addr])
     end
     apple2.propagate
 
@@ -64,6 +69,7 @@ RSpec.describe RHDL::Apple2::Apple2 do
   end
 
   def load_rom(data)
+    @rom_data = data  # Store for clock_14m_cycle to serve
     apple2.load_rom(data)
   end
 
@@ -546,17 +552,22 @@ RSpec.describe 'Apple II ROM Integration' do
     apple2.set_input(:pause, 0)
 
     # Load the AppleIIgo ROM
-    rom_data = File.binread(ROM_PATH).bytes
-    apple2.load_rom(rom_data)
+    @rom_data = File.binread(ROM_PATH).bytes
+    apple2.load_rom(@rom_data)
   end
 
   def clock_14m_cycle
     apple2.set_input(:clk_14m, 0)
     apple2.propagate
 
-    ram_addr = apple2.get_output(:ram_addr)
-    if ram_addr < ram.size
-      apple2.set_input(:ram_do, ram[ram_addr])
+    # Get address and provide data from RAM or ROM
+    addr = apple2.get_output(:ram_addr)
+    if addr >= 0xD000 && @rom_data
+      # ROM address range ($D000-$FFFF) - map to ROM array
+      rom_addr = addr - 0xD000
+      apple2.set_input(:ram_do, @rom_data[rom_addr] || 0)
+    elsif addr < ram.size
+      apple2.set_input(:ram_do, ram[addr])
     end
     apple2.propagate
 
@@ -626,7 +637,7 @@ RSpec.describe 'Apple II ROM Integration' do
       rom[0x2FFC] = 0x00
       rom[0x2FFD] = 0xF0
 
-      apple2.load_rom(rom)
+      load_rom(rom)
       reset_system
     end
 
