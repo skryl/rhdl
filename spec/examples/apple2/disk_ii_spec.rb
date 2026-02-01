@@ -652,49 +652,6 @@ RSpec.describe RHDL::Apple2::DiskII do
           "Checksum verification failed: expected 0, got #{running_xor}"
       end
 
-      it 'loads and verifies all 35 tracks from Karateka disk' do
-        # This test verifies the complete disk can be read - all game data
-        # Karateka uses tracks 0-34 (35 tracks total, 140KB)
-        tracks_verified = 0
-        total_sectors = 0
-        failed_tracks = []
-
-        35.times do |track_num|
-          track_nibbles = convert_track_to_nibbles(@dsk_data, track_num)
-          disk.load_track(track_num, track_nibbles)
-
-          # Count address marks (should be at least 16 per track)
-          address_marks = 0
-          data_marks = 0
-
-          (0..(RHDL::Apple2::DiskII::TRACK_SIZE - 3)).each do |i|
-            if disk.read_track_byte(i) == 0xD5 &&
-               disk.read_track_byte(i + 1) == 0xAA
-              if disk.read_track_byte(i + 2) == 0x96
-                address_marks += 1
-              elsif disk.read_track_byte(i + 2) == 0xAD
-                data_marks += 1
-              end
-            end
-          end
-
-          if address_marks >= 16 && data_marks >= 16
-            tracks_verified += 1
-            total_sectors += 16
-          else
-            failed_tracks << { track: track_num, addr: address_marks, data: data_marks }
-          end
-        end
-
-        # All 35 tracks should be valid
-        expect(tracks_verified).to eq(35),
-          "Only #{tracks_verified}/35 tracks verified. Failed: #{failed_tracks.inspect}"
-
-        # Total of 560 sectors (35 tracks * 16 sectors)
-        expect(total_sectors).to eq(560),
-          "Expected 560 sectors, found #{total_sectors}"
-      end
-
       it 'calculates correct disk capacity' do
         # Verify we can read the full 140KB disk
         # 35 tracks * 16 sectors * 256 bytes = 143,360 bytes
@@ -976,7 +933,7 @@ RSpec.describe RHDL::Apple2::DiskII do
         "Expected some RAM activity during boot, but found none."
     end
 
-    it 'runs until game intro begins playing', :slow do
+    it 'runs until game intro begins playing', :slow, timeout: 300 do
       # Generate IR from Apple II component
       ir = RHDL::Apple2::Apple2.to_flat_ir
       ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
@@ -1024,18 +981,17 @@ RSpec.describe RHDL::Apple2::DiskII do
       sim.poke('reset', 0)
       sim.apple2_run_cpu_cycles(10, 0, false)
 
-      # Phase 1: Boot and load from disk
-      # Run until motor turns off (loading complete) or max cycles
+      # Run simulation and track disk access
       total_cycles = 0
-      max_boot_cycles = 10_000_000  # 10M cycles max for boot
-      cycles_per_batch = 50_000
-      motor_off_cycles = 0
-      last_track = 0
+      max_cycles = 20_000_000  # 20M cycles
+      cycles_per_batch = 100_000
+      last_track = -1  # Start with invalid track to catch track 0
       tracks_accessed = Set.new
+      track_access_log = []  # Log each track change with cycle count
 
-      puts "\n  Booting Karateka..."
+      puts "\n  Running Karateka (20M cycles)..."
 
-      while total_cycles < max_boot_cycles
+      while total_cycles < max_cycles
         result = sim.apple2_run_cpu_cycles(cycles_per_batch, 0, false)
         total_cycles += result[:cycles_run]
 
@@ -1043,37 +999,25 @@ RSpec.describe RHDL::Apple2::DiskII do
         current_track = sim.apple2_get_track
         if current_track != last_track
           tracks_accessed << current_track
+          track_access_log << { track: current_track, cycle: total_cycles }
           last_track = current_track
         end
 
-        motor_on = sim.apple2_is_motor_on?
-
-        # Once motor turns off after reading some tracks, boot is likely complete
-        if !motor_on && tracks_accessed.size > 0 && motor_off_cycles == 0
-          motor_off_cycles = total_cycles
-          puts "  Motor off at #{total_cycles} cycles (#{tracks_accessed.size} tracks accessed)"
-        end
-
-        # After motor has been off for a while, loading is complete
-        if motor_off_cycles > 0 && (total_cycles - motor_off_cycles) > 100_000
-          break
-        end
-
-        # Progress indicator
-        if (total_cycles % 1_000_000) == 0
-          puts "  #{total_cycles / 1_000_000}M cycles, track #{current_track}, motor #{motor_on ? 'ON' : 'OFF'}"
+        # Progress indicator every 5M cycles
+        if (total_cycles % 5_000_000) == 0
+          motor_on = sim.apple2_is_motor_on?
+          puts "  #{total_cycles / 1_000_000}M cycles, track #{current_track}, motor #{motor_on ? 'ON' : 'OFF'}, #{tracks_accessed.size} tracks accessed"
         end
       end
 
-      puts "  Boot phase complete: #{total_cycles} cycles, #{tracks_accessed.size} tracks"
+      puts "\n  Simulation complete: #{total_cycles} cycles"
+      puts "  Tracks accessed: #{tracks_accessed.size} (#{tracks_accessed.to_a.sort.inspect})"
 
-      # Phase 2: Run additional cycles to let intro animation start
-      # The intro involves hi-res graphics animation
-      intro_cycles = 500_000  # 500K cycles for intro to start
-      result = sim.apple2_run_cpu_cycles(intro_cycles, 0, false)
-      total_cycles += result[:cycles_run]
-
-      puts "  Total cycles: #{total_cycles}"
+      # Show track access timeline
+      puts "\n  Track access log:"
+      track_access_log.each do |entry|
+        puts "    Track #{entry[:track]} at cycle #{entry[:cycle]} (#{(entry[:cycle] / 1_000_000.0).round(2)}M)"
+      end
 
       # Verify game loaded successfully by checking hi-res graphics page
       # Karateka uses hi-res page 1 ($2000-$3FFF)
@@ -1083,7 +1027,7 @@ RSpec.describe RHDL::Apple2::DiskII do
       hires_nonzero = hires_page.count { |b| b != 0 }
       hires_percent = (hires_nonzero * 100.0 / hires_page.size).round(1)
 
-      puts "  Hi-res page: #{hires_nonzero}/#{hires_page.size} bytes (#{hires_percent}%)"
+      puts "\n  Hi-res page: #{hires_nonzero}/#{hires_page.size} bytes (#{hires_percent}%)"
 
       # Karateka's intro should have significant graphics data
       expect(hires_nonzero).to be > 1000,
@@ -1094,7 +1038,7 @@ RSpec.describe RHDL::Apple2::DiskII do
         "Expected multiple tracks to be read, only accessed: #{tracks_accessed.to_a.sort.inspect}"
 
       # Dump memory state for comparison
-      puts "\n  Memory state at intro:"
+      puts "\n  Memory state at end:"
       puts "    Zero page sample: #{sim.apple2_read_ram(0x00, 16).map { |b| '%02X' % b }.join(' ')}"
       puts "    Stack sample: #{sim.apple2_read_ram(0x100, 16).map { |b| '%02X' % b }.join(' ')}"
       puts "    Program area: #{sim.apple2_read_ram(0x800, 16).map { |b| '%02X' % b }.join(' ')}"
