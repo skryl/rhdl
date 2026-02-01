@@ -30,13 +30,13 @@ module GameBoy
     wire :clkdiv, width: 3   # Clock divider counter
 
     behavior do
-      # In normal mode:
-      # ce    = 1 when clkdiv == 0
-      # ce_n  = 1 when clkdiv == 4
-      # ce_2x = 1 when clkdiv[1:0] == 0
-      ce <= ~pause & (clkdiv == lit(0, width: 3))
-      ce_n <= ~pause & (clkdiv == lit(4, width: 3))
-      ce_2x <= ~pause & (clkdiv[1..0] == lit(0, width: 2))
+      # For IR simulation, we run at 4MHz (1 cycle = 1 Game Boy cycle),
+      # so ce should always be 1 (no clock division needed).
+      # The original hardware runs at 32MHz and divides by 8.
+      # Setting ce=1 always makes simulation run at effective 4MHz.
+      ce <= ~pause
+      ce_n <= ~pause
+      ce_2x <= ~pause
     end
 
     sequential clock: :clk_sys, reset: :reset, reset_values: {
