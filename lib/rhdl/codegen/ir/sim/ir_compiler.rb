@@ -142,7 +142,8 @@ module RHDL
             regs: reg_count,
             compiled: compiled?,
             apple2_mode: apple2_mode?,
-            mos6502_mode: mos6502_mode?
+            mos6502_mode: mos6502_mode?,
+            gameboy_mode: gameboy_mode?
           }
         end
 
@@ -242,6 +243,72 @@ module RHDL
         def apple2_write_ram(offset, data)
           data = data.pack('C*') if data.is_a?(Array)
           @fn_apple2_write_ram.call(@ctx, offset, data, data.bytesize)
+        end
+
+        # ====================================================================
+        # Game Boy Extension Methods
+        # ====================================================================
+
+        def gameboy_mode?
+          @fn_is_gameboy_mode.call(@ctx) != 0
+        end
+
+        def load_rom(data)
+          data = data.pack('C*') if data.is_a?(Array)
+          @fn_gameboy_load_rom.call(@ctx, data, data.bytesize)
+        end
+
+        def load_boot_rom(data)
+          data = data.pack('C*') if data.is_a?(Array)
+          @fn_gameboy_load_boot_rom.call(@ctx, data, data.bytesize)
+        end
+
+        def run_gb_cycles(n)
+          # Result struct: cycles_run (usize), frames_completed (u32)
+          result_buf = Fiddle::Pointer.malloc(16)  # usize + u32 with padding
+          @fn_gameboy_run_cycles_full.call(@ctx, n, result_buf)
+
+          # Unpack: usize (8 bytes on 64-bit) + u32 (4 bytes)
+          values = result_buf[0, 16].unpack('QL')
+          {
+            cycles_run: values[0],
+            frames_completed: values[1]
+          }
+        end
+
+        def read_vram(addr)
+          @fn_gameboy_read_vram.call(@ctx, addr) & 0xFF
+        end
+
+        def write_vram(addr, data)
+          @fn_gameboy_write_vram.call(@ctx, addr, data)
+        end
+
+        def read_zpram(addr)
+          @fn_gameboy_read_zpram.call(@ctx, addr) & 0xFF
+        end
+
+        def write_zpram(addr, data)
+          @fn_gameboy_write_zpram.call(@ctx, addr, data)
+        end
+
+        def read_framebuffer
+          len = @fn_gameboy_framebuffer_len.call(@ctx)
+          return [] if len == 0
+
+          ptr = @fn_gameboy_framebuffer.call(@ctx)
+          return [] if ptr.null?
+
+          # Read the framebuffer data
+          Fiddle::Pointer.new(ptr)[0, len].unpack('C*')
+        end
+
+        def frame_count
+          @fn_gameboy_frame_count.call(@ctx)
+        end
+
+        def reset_lcd_state
+          @fn_gameboy_reset_lcd.call(@ctx)
         end
 
         private
@@ -441,6 +508,85 @@ module RHDL
           @fn_apple2_write_ram = Fiddle::Function.new(
             @lib['apple2_ir_sim_write_ram'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
+            Fiddle::TYPE_VOID
+          )
+
+          # Game Boy extension functions
+          @fn_is_gameboy_mode = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_is_mode'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_gameboy_load_rom = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_load_rom'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_gameboy_load_boot_rom = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_load_boot_rom'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_gameboy_run_cycles = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_run_cycles'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_gameboy_run_cycles_full = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_run_cycles_full'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_gameboy_read_vram = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_read_vram'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
+            Fiddle::TYPE_CHAR
+          )
+
+          @fn_gameboy_write_vram = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_write_vram'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_CHAR],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_gameboy_read_zpram = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_read_zpram'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
+            Fiddle::TYPE_CHAR
+          )
+
+          @fn_gameboy_write_zpram = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_write_zpram'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_CHAR],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_gameboy_framebuffer = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_framebuffer'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOIDP
+          )
+
+          @fn_gameboy_framebuffer_len = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_framebuffer_len'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_SIZE_T
+          )
+
+          @fn_gameboy_frame_count = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_frame_count'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_ULONG
+          )
+
+          @fn_gameboy_reset_lcd = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_reset_lcd'],
+            [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_VOID
           )
         end
