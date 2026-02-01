@@ -311,7 +311,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       end
     end
 
-    it 'runs 20M cycles with display tracking using compiler backend' do
+    it 'runs 20M cycles with display tracking using compiler backend', timeout: 300 do
       runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
       runner.load_rom(File.binread(tobu_rom_path))
       runner.reset
