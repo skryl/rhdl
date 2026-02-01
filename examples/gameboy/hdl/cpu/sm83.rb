@@ -232,10 +232,45 @@ module GameBoy
       set_addr_to <= lit(0, width: 3)   # PC
       no_read <= lit(0, width: 1)
       write_sig <= lit(0, width: 1)
-      ldz <= lit(0, width: 1)
-      ldw <= lit(0, width: 1)
-      jump <= lit(0, width: 1)
-      jump_e <= lit(0, width: 1)
+      # ldz - Load WZ low byte (consolidated from all instruction handlers)
+      ldz <= # LD rr,nn M2
+             ((ir[3..0] == lit(1, width: 4)) & (ir[7..6] == lit(0, width: 2)) & (m_cycle == lit(2, width: 3))) |
+             # JR e M2
+             ((ir == lit(0x18, width: 8)) & (m_cycle == lit(2, width: 3))) |
+             # RET M2
+             ((ir == lit(0xC9, width: 8)) & (m_cycle == lit(2, width: 3))) |
+             # JP nn M2
+             ((ir == lit(0xC3, width: 8)) & (m_cycle == lit(2, width: 3))) |
+             # CALL nn M2
+             ((ir == lit(0xCD, width: 8)) & (m_cycle == lit(2, width: 3))) |
+             # LDH (a8),A M2
+             ((ir == lit(0xE0, width: 8)) & (m_cycle == lit(2, width: 3))) |
+             # LDH A,(a8) M2
+             ((ir == lit(0xF0, width: 8)) & (m_cycle == lit(2, width: 3))) |
+             # Conditional JR M2
+             (is_cond_jr & (m_cycle == lit(2, width: 3))) |
+             # LD (HL),n M2
+             ((ir == lit(0x36, width: 8)) & (m_cycle == lit(2, width: 3))) |
+             # LD (a16),A / LD A,(a16) M2
+             (((ir == lit(0xEA, width: 8)) | (ir == lit(0xFA, width: 8))) & (m_cycle == lit(2, width: 3)))
+
+      # ldw - Load WZ high byte (consolidated from all instruction handlers)
+      ldw <= # LD rr,nn M3
+             ((ir[3..0] == lit(1, width: 4)) & (ir[7..6] == lit(0, width: 2)) & (m_cycle == lit(3, width: 3))) |
+             # RET M3
+             ((ir == lit(0xC9, width: 8)) & (m_cycle == lit(3, width: 3))) |
+             # JP nn M3
+             ((ir == lit(0xC3, width: 8)) & (m_cycle == lit(3, width: 3))) |
+             # CALL nn M3
+             ((ir == lit(0xCD, width: 8)) & (m_cycle == lit(3, width: 3))) |
+             # LD (a16),A / LD A,(a16) M3
+             (((ir == lit(0xEA, width: 8)) | (ir == lit(0xFA, width: 8))) & (m_cycle == lit(3, width: 3)))
+
+      # jump - Absolute jump (consolidated from JP nn and JP (HL))
+      jump <= (ir == lit(0xC3, width: 8)) | (ir == lit(0xE9, width: 8))
+
+      # jump_e - Relative jump (consolidated from JR e and conditional JR)
+      jump_e <= (ir == lit(0x18, width: 8)) | (is_cond_jr & cond_true)
       call <= lit(0, width: 1)
       ret <= lit(0, width: 1)
       halt <= lit(0, width: 1)
@@ -369,10 +404,7 @@ module GameBoy
       # -----------------------------------------------------------------------
 
       # LD rr,nn - load WZ register for 16-bit immediate (01=BC, 11=DE, 21=HL, 31=SP)
-      ldz <= mux((ir[3..0] == lit(1, width: 4)) & (ir[7..6] == lit(0, width: 2)) & (m_cycle == lit(2, width: 3)),
-                 lit(1, width: 1), lit(0, width: 1))
-      ldw <= mux((ir[3..0] == lit(1, width: 4)) & (ir[7..6] == lit(0, width: 2)) & (m_cycle == lit(3, width: 3)),
-                 lit(1, width: 1), lit(0, width: 1))
+      # ldz/ldw consolidated above
       # At end of M3, copy WZ to the target register pair based on bits 5:4
       # 01 (00): BC, 11 (01): DE, 21 (10): HL, 31 (11): SP
       load_bc_wz <= (ir == lit(0x01, width: 8)) & (m_cycle == lit(3, width: 3))
@@ -406,9 +438,7 @@ module GameBoy
                              lit(ADDR_PC, width: 3)))
 
       # JR e - relative jump
-      jump_e <= mux(ir == lit(0x18, width: 8), lit(1, width: 1), lit(0, width: 1))
-      ldz <= mux((ir == lit(0x18, width: 8)) & (m_cycle == lit(2, width: 3)),
-                 lit(1, width: 1), ldz)
+      # jump_e and ldz consolidated above
 
       # HALT
       halt <= (ir == lit(0x76, width: 8))
@@ -434,19 +464,10 @@ module GameBoy
 
       # RET - Return from call (4 cycles: M1=fetch, M2=read low from SP, M3=read high from SP+1, M4=jump)
       ret <= mux(ir == lit(0xC9, width: 8), lit(1, width: 1), lit(0, width: 1))
-      # RET loads return address from stack into WZ
-      ldz <= mux((ir == lit(0xC9, width: 8)) & (m_cycle == lit(2, width: 3)),
-                 lit(1, width: 1), ldz)
-      ldw <= mux((ir == lit(0xC9, width: 8)) & (m_cycle == lit(3, width: 3)),
-                 lit(1, width: 1), ldw)
+      # ldz/ldw consolidated above
       # RET reads from SP during M2 and M3 (handled via set_addr_to below)
 
-      # JP nn
-      jump <= mux(ir == lit(0xC3, width: 8), lit(1, width: 1), lit(0, width: 1))
-      ldz <= mux((ir == lit(0xC3, width: 8)) & (m_cycle == lit(2, width: 3)),
-                 lit(1, width: 1), ldz)
-      ldw <= mux((ir == lit(0xC3, width: 8)) & (m_cycle == lit(3, width: 3)),
-                 lit(1, width: 1), ldw)
+      # JP nn - jump/ldz/ldw consolidated above
 
       # CB prefix
       prefix <= mux(ir == lit(0xCB, width: 8), lit(1, width: 2), lit(0, width: 2))
@@ -454,18 +475,14 @@ module GameBoy
       # CALL nn - set call signal and load address
       # M1: fetch, M2: read low addr, M3: read high addr, M4: push PC high, M5: push PC low, M6: jump
       call <= mux(ir == lit(0xCD, width: 8), lit(1, width: 1), lit(0, width: 1))
-      ldz <= mux((ir == lit(0xCD, width: 8)) & (m_cycle == lit(2, width: 3)),
-                 lit(1, width: 1), ldz)
-      ldw <= mux((ir == lit(0xCD, width: 8)) & (m_cycle == lit(3, width: 3)),
-                 lit(1, width: 1), ldw)
+      # ldz/ldw consolidated above
       # CALL M4 and M5: write return address to stack
       write_sig <= mux((ir == lit(0xCD, width: 8)) & ((m_cycle == lit(4, width: 3)) | (m_cycle == lit(5, width: 3))),
                        lit(1, width: 1), write_sig)
       no_read <= mux((ir == lit(0xCD, width: 8)) & ((m_cycle == lit(4, width: 3)) | (m_cycle == lit(5, width: 3))),
                      lit(1, width: 1), no_read)
 
-      # JP (HL) - 1 cycle jump using HL address
-      jump <= mux(ir == lit(0xE9, width: 8), lit(1, width: 1), jump)
+      # JP (HL) - 1 cycle jump using HL address (jump consolidated above)
       set_addr_to <= mux(ir == lit(0xE9, width: 8), lit(ADDR_HL, width: 3), set_addr_to)
 
       # DI - disable interrupts
@@ -478,10 +495,8 @@ module GameBoy
       is_stop <= (ir == lit(0x10, width: 8))
 
       # LDH (a8), A (E0) - Write A to (0xFF00 + n)
-      # M2: Read immediate n from (PC), store in wz[7:0]
+      # M2: Read immediate n from (PC), store in wz[7:0] (ldz consolidated above)
       # M3: Write A to (0xFF00 + n)
-      ldz <= mux((ir == lit(0xE0, width: 8)) & (m_cycle == lit(2, width: 3)),
-                 lit(1, width: 1), ldz)
       set_addr_to <= mux((ir == lit(0xE0, width: 8)) & (m_cycle == lit(3, width: 3)),
                          lit(ADDR_IO, width: 3), set_addr_to)
       write_sig <= mux((ir == lit(0xE0, width: 8)) & (m_cycle == lit(3, width: 3)),
@@ -490,10 +505,8 @@ module GameBoy
                      lit(1, width: 1), no_read)
 
       # LDH A, (a8) (F0) - Read from (0xFF00 + n) to A
-      # M2: Read immediate n from (PC), store in wz[7:0]
+      # M2: Read immediate n from (PC), store in wz[7:0] (ldz consolidated above)
       # M3: Read from (0xFF00 + n) to A
-      ldz <= mux((ir == lit(0xF0, width: 8)) & (m_cycle == lit(2, width: 3)),
-                 lit(1, width: 1), ldz)
       set_addr_to <= mux((ir == lit(0xF0, width: 8)) & (m_cycle == lit(3, width: 3)),
                          lit(ADDR_IO, width: 3), set_addr_to)
       read_to_acc <= mux((ir == lit(0xF0, width: 8)) & (m_cycle == lit(3, width: 3)),
@@ -520,12 +533,9 @@ module GameBoy
       inc_hl <= (ir == lit(0x22, width: 8)) & (m_cycle == lit(2, width: 3))
 
       # Conditional JR (JR NZ/Z/NC/C) - 0x20/0x28/0x30/0x38
-      # M2: Read displacement to WZ low, check condition
+      # M2: Read displacement to WZ low, check condition (ldz consolidated above)
       # M3: If condition true, add displacement to PC (extra cycle for is_cond_jr & cond_true)
-      # Note: is_cond_jr and cond_true are defined earlier for cycle counting
-      ldz <= mux(is_cond_jr & (m_cycle == lit(2, width: 3)),
-                 lit(1, width: 1), ldz)
-      jump_e <= mux(is_cond_jr & cond_true, lit(1, width: 1), jump_e)
+      # Note: is_cond_jr, cond_true, and jump_e are defined/consolidated above
 
       # -----------------------------------------------------------------------
       # LD r,r' - Register to register loads (01xxxyyy except 76=HALT)
@@ -576,10 +586,8 @@ module GameBoy
 
       # -----------------------------------------------------------------------
       # LD (HL),n - Store immediate to (HL) (36)
-      # M1: fetch, M2: read immediate, M3: write to (HL)
+      # M1: fetch, M2: read immediate (ldz consolidated above), M3: write to (HL)
       # -----------------------------------------------------------------------
-      ldz <= mux((ir == lit(0x36, width: 8)) & (m_cycle == lit(2, width: 3)),
-                 lit(1, width: 1), ldz)
       set_addr_to <= mux((ir == lit(0x36, width: 8)) & (m_cycle == lit(3, width: 3)),
                          lit(ADDR_HL, width: 3), set_addr_to)
       write_sig <= mux((ir == lit(0x36, width: 8)) & (m_cycle == lit(3, width: 3)),
@@ -730,12 +738,8 @@ module GameBoy
       # -----------------------------------------------------------------------
       # LD (a16),A (EA) - Write A to 16-bit address
       # LD A,(a16) (FA) - Read from 16-bit address to A
-      # M2: read low address, M3: read high address, M4: read/write
+      # M2: read low address, M3: read high address (ldz/ldw consolidated above), M4: read/write
       # -----------------------------------------------------------------------
-      ldz <= mux(((ir == lit(0xEA, width: 8)) | (ir == lit(0xFA, width: 8))) & (m_cycle == lit(2, width: 3)),
-                 lit(1, width: 1), ldz)
-      ldw <= mux(((ir == lit(0xEA, width: 8)) | (ir == lit(0xFA, width: 8))) & (m_cycle == lit(3, width: 3)),
-                 lit(1, width: 1), ldw)
       # PC increment for 0xEA/0xFA M2-M3 - covered by comprehensive inc_pc below
       set_addr_to <= mux(((ir == lit(0xEA, width: 8)) | (ir == lit(0xFA, width: 8))) & (m_cycle == lit(4, width: 3)),
                          lit(ADDR_WZ, width: 3), set_addr_to)
