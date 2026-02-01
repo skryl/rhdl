@@ -244,6 +244,14 @@ module RHDL
           @fn_apple2_write_ram.call(@ctx, offset, data, data.bytesize)
         end
 
+        # Backward compatibility aliases for Apple II methods
+        # These allow test code written for the old API to work with the new prefixed API
+        alias_method :load_rom, :apple2_load_rom
+        alias_method :load_ram, :apple2_load_ram
+        alias_method :run_cpu_cycles, :apple2_run_cpu_cycles
+        alias_method :read_ram, :apple2_read_ram
+        alias_method :write_ram, :apple2_write_ram
+
         private
 
         def load_library
