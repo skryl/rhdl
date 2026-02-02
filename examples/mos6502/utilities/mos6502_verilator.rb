@@ -384,6 +384,9 @@ module MOS6502
         #include "sim_wrapper.h"
         #include <cstring>
 
+        // Verilator time stamp function (required by verilator runtime on some platforms)
+        double sc_time_stamp() { return 0; }
+
         struct SimContext {
             Vmos6502_cpu* dut;
             unsigned char memory[65536];  // 64KB memory
@@ -397,20 +400,10 @@ module MOS6502
             SimContext* ctx = new SimContext();
             ctx->dut = new Vmos6502_cpu();
             memset(ctx->memory, 0, sizeof(ctx->memory));
-            return ctx;
-        }
 
-        void sim_destroy(void* sim) {
-            SimContext* ctx = static_cast<SimContext*>(sim);
-            delete ctx->dut;
-            delete ctx;
-        }
-
-        void sim_reset(void* sim) {
-            SimContext* ctx = static_cast<SimContext*>(sim);
-            // Initialize all inputs
+            // Initialize inputs to safe defaults
             ctx->dut->clk = 0;
-            ctx->dut->rst = 0;
+            ctx->dut->rst = 1;  // Start in reset
             ctx->dut->rdy = 1;
             ctx->dut->irq = 1;
             ctx->dut->nmi = 1;
@@ -425,23 +418,55 @@ module MOS6502
             ctx->dut->ext_y_load_data = 0;
             ctx->dut->ext_sp_load_en = 0;
             ctx->dut->ext_sp_load_data = 0;
+
+            // Run initial eval to trigger initial block execution
             ctx->dut->eval();
 
-            // Pulse reset
+            return ctx;
+        }
+
+        void sim_destroy(void* sim) {
+            SimContext* ctx = static_cast<SimContext*>(sim);
+            delete ctx->dut;
+            delete ctx;
+        }
+
+        void sim_reset(void* sim) {
+            SimContext* ctx = static_cast<SimContext*>(sim);
+
+            // Hold reset high and run clock cycles for proper 6502 reset
+            // The 6502 needs reset held for at least 2 clock cycles
+            // We run extra cycles to ensure all state machines initialize
             ctx->dut->rst = 1;
-            ctx->dut->clk = 0;
-            ctx->dut->eval();
-            ctx->dut->clk = 1;
-            ctx->dut->eval();
+            ctx->dut->rdy = 1;
+            ctx->dut->irq = 1;
+            ctx->dut->nmi = 1;
+            ctx->dut->data_in = 0;
+            ctx->dut->ext_pc_load_en = 0;
+            ctx->dut->ext_pc_load_data = 0;
+            ctx->dut->ext_a_load_en = 0;
+            ctx->dut->ext_a_load_data = 0;
+            ctx->dut->ext_x_load_en = 0;
+            ctx->dut->ext_x_load_data = 0;
+            ctx->dut->ext_y_load_en = 0;
+            ctx->dut->ext_y_load_data = 0;
+            ctx->dut->ext_sp_load_en = 0;
+            ctx->dut->ext_sp_load_data = 0;
 
+            for (int i = 0; i < 50; i++) {
+                ctx->dut->clk = 0;
+                ctx->dut->eval();
+                ctx->dut->clk = 1;
+                ctx->dut->eval();
+            }
+
+            // Release reset and run more cycles to stabilize
             ctx->dut->rst = 0;
-
-            // Run 5 cycles to complete reset sequence
-            for (int i = 0; i < 5; i++) {
+            for (int i = 0; i < 20; i++) {
                 ctx->dut->clk = 0;
                 ctx->dut->eval();
 
-                // Provide memory data
+                // Provide memory data during reset sequence
                 unsigned int addr = ctx->dut->addr;
                 ctx->dut->data_in = ctx->memory[addr];
                 ctx->dut->eval();
@@ -652,8 +677,8 @@ module MOS6502
         '--top-module', 'mos6502_cpu',
         # Optimization flags
         '-O3',                  # Maximum Verilator optimization
-        '--x-assign', 'fast',   # Faster X state handling
-        '--x-initial', 'fast',  # Faster initialization
+        '--x-assign', '0',      # Initialize X to 0 (required for proper simulation)
+        '--x-initial', 'unique', # Proper initial block handling (required for timing generator)
         '--noassert',           # Disable assertions
         # Warning suppressions
         '-Wno-fatal',           # Continue despite warnings
