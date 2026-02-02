@@ -26,8 +26,23 @@ module RHDL
       end
       IR_INTERPRETER_LIB_PATH = File.join(IR_INTERPRETER_EXT_DIR, IR_INTERPRETER_LIB_NAME)
 
-      # Check if interpreter extension is available
-      IR_INTERPRETER_AVAILABLE = File.exist?(IR_INTERPRETER_LIB_PATH)
+      # Check if interpreter extension is available and functional
+      # We need to verify the library can be loaded and has required symbols
+      IR_INTERPRETER_AVAILABLE = begin
+        if File.exist?(IR_INTERPRETER_LIB_PATH)
+          # Try to load the library and check for required symbols
+          _test_lib = Fiddle.dlopen(IR_INTERPRETER_LIB_PATH)
+          # Check for core symbols to verify the library is valid and up-to-date
+          _test_lib['ir_sim_create']
+          _test_lib['ir_sim_poke_by_idx']
+          _test_lib['ir_sim_peek_by_idx']
+          true
+        else
+          false
+        end
+      rescue Fiddle::DLError
+        false
+      end
 
       # Backwards compatibility alias
       RTL_INTERPRETER_AVAILABLE = IR_INTERPRETER_AVAILABLE

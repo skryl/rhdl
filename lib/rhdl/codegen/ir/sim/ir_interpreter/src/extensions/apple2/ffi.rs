@@ -2,11 +2,20 @@
 //!
 //! C ABI exports for Apple II-specific functionality.
 
-use std::os::raw::c_int;
+use std::os::raw::{c_int, c_uint};
 use std::ptr;
 use std::slice;
 
 use crate::ffi::IrSimContext;
+
+/// Result struct for Apple II run_cpu_cycles
+#[repr(C)]
+pub struct Apple2CycleResult {
+    pub text_dirty: c_int,
+    pub key_cleared: c_int,
+    pub cycles_run: c_uint,
+    pub speaker_toggles: c_uint,
+}
 
 /// Check if Apple II mode is enabled
 #[no_mangle]
@@ -53,35 +62,26 @@ pub unsafe extern "C" fn apple2_interp_sim_load_ram(
 }
 
 /// Run CPU cycles for Apple II, returns batch result
-/// Result is written to output parameters
+/// Result is written to result struct pointer
 #[no_mangle]
 pub unsafe extern "C" fn apple2_interp_sim_run_cpu_cycles(
     ctx: *mut IrSimContext,
-    n: usize,
+    n: c_uint,
     key_data: u8,
     key_ready: c_int,
-    out_text_dirty: *mut c_int,
-    out_key_cleared: *mut c_int,
-    out_cycles_run: *mut usize,
-    out_speaker_toggles: *mut u32,
+    result_out: *mut Apple2CycleResult,
 ) {
     if ctx.is_null() {
         return;
     }
     let ctx = &mut *ctx;
     if let Some(ref mut apple2) = ctx.apple2 {
-        let result = apple2.run_cpu_cycles(&mut ctx.core, n, key_data, key_ready != 0);
-        if !out_text_dirty.is_null() {
-            *out_text_dirty = result.text_dirty as c_int;
-        }
-        if !out_key_cleared.is_null() {
-            *out_key_cleared = result.key_cleared as c_int;
-        }
-        if !out_cycles_run.is_null() {
-            *out_cycles_run = result.cycles_run;
-        }
-        if !out_speaker_toggles.is_null() {
-            *out_speaker_toggles = result.speaker_toggles;
+        let result = apple2.run_cpu_cycles(&mut ctx.core, n as usize, key_data, key_ready != 0);
+        if !result_out.is_null() {
+            (*result_out).text_dirty = if result.text_dirty { 1 } else { 0 };
+            (*result_out).key_cleared = if result.key_cleared { 1 } else { 0 };
+            (*result_out).cycles_run = result.cycles_run as c_uint;
+            (*result_out).speaker_toggles = result.speaker_toggles;
         }
     }
 }
