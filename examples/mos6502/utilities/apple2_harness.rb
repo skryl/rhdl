@@ -205,6 +205,27 @@ module Apple2Harness
       end
     end
 
+    # Write a single byte to memory
+    # In native mode, writes to CPU internal memory
+    # Also writes to bus for I/O region ($C000-$CFFF)
+    def write(addr, value)
+      if native?
+        @cpu.poke(addr, value)
+      end
+      # Always write to bus (for I/O and non-native mode)
+      @bus.write(addr, value)
+    end
+
+    # Read a single byte from memory
+    # In native mode, reads from CPU internal memory
+    def read(addr)
+      if native?
+        @cpu.peek(addr)
+      else
+        @bus.read(addr)
+      end
+    end
+
     private
 
     def to_bytes(source)
