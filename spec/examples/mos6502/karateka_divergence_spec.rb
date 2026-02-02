@@ -1242,7 +1242,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     { name: "Verilator", cycles: actual_cycles, elapsed: elapsed, mhz: mhz }
   end
 
-  it 'benchmarks ISA, JIT, Compile, Verilator (20M cycles)', :benchmark, timeout: 1800 do
+  it 'benchmarks ISA, JIT, Compile, Verilator (20M cycles)', :slow, :benchmark, timeout: 1800 do
     skip 'ROM not available' unless @rom_available
     skip 'Karateka memory not available' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?

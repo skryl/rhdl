@@ -171,7 +171,7 @@ RSpec.describe RHDL::Apple2::Apple2 do
     end
   end
 
-  describe 'ROM access' do
+  describe 'ROM access', :slow do
     before do
       # Create ROM with identifiable pattern
       rom = Array.new(12 * 1024, 0)
@@ -593,7 +593,12 @@ RSpec.describe 'Apple II ROM Integration' do
     apple2.set_input(:reset, 0)
   end
 
-  describe 'ROM boot' do
+  def load_rom(data)
+    @rom_data = data  # Store for clock_14m_cycle to serve
+    apple2.load_rom(data)
+  end
+
+  describe 'ROM boot', :slow do
     before do
       reset_system
     end
@@ -618,7 +623,7 @@ RSpec.describe 'Apple II ROM Integration' do
     end
   end
 
-  describe 'screen memory routing' do
+  describe 'screen memory routing', :slow do
     before do
       # Create ROM that writes to screen
       rom = Array.new(12 * 1024, 0xEA)
