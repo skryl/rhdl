@@ -541,6 +541,33 @@ All backends include automatic fallback to Ruby when native extensions aren't av
 
 See [Simulation](docs/simulation.md) and [Gate-Level Backend](docs/gate_level_backend.md) for complete details.
 
+## Performance Benchmarks
+
+RHDL includes benchmarking tasks to measure simulation performance across backends:
+
+```bash
+rake bench:mos6502[cycles]    # Benchmark MOS 6502 CPU
+rake bench:apple2[cycles]     # Benchmark Apple II full system
+rake bench:gameboy[frames]    # Benchmark GameBoy with Prince of Persia
+rake bench:gates              # Benchmark gate-level simulation
+```
+
+**Sample Results (1M cycles):**
+
+| System | JIT | Compiler | Verilator | Compiler Speedup |
+|--------|-----|----------|-----------|------------------|
+| MOS 6502 | 0.23M/s | 1.58M/s | ~5.6M/s | 6.8x vs JIT |
+| Apple II | 0.06M/s | 0.28M/s | ~5.6M/s | 4.8x vs JIT |
+| GameBoy | - | 1.27 MHz | ~5.8 MHz | 30% real-time |
+
+**Backend Selection Guide:**
+- **< 100K cycles**: Use JIT (fast startup)
+- **100K - 1M cycles**: Use JIT or Compiler
+- **> 1M cycles**: Use Compiler or Verilator
+- **Maximum speed**: Use Verilator (requires installation)
+
+See [Performance Guide](docs/performance.md) for detailed benchmarks and optimization tips.
+
 ## Rake Tasks
 
 ```bash
