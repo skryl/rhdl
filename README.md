@@ -503,16 +503,32 @@ sim.compile
 sim.run_ticks(1_000_000)
 ```
 
-### ISA Simulator (Native)
+### Verilog Export & External Simulation
 
-Specialized native Rust emulator for MOS 6502, 15-20x faster than Ruby ISA simulator:
+Export components to Verilog for synthesis or simulation with industry-standard tools:
 
 ```ruby
-cpu = MOS6502::ISASimulatorNative.new(io_handler)
-cpu.load_bytes(program, 0x8000)
-cpu.reset
-1_000_000.times { cpu.step }
+# Export component to Verilog
+verilog_code = RHDL::Codegen.verilog(component)
+File.write('alu.v', verilog_code)
 ```
+
+**External simulators:**
+
+| Tool | Speed | Use Case |
+|------|-------|----------|
+| iverilog | ~100K cycles/s | Functional verification, golden reference |
+| Verilator | ~5.7M cycles/s | High-performance simulation, benchmarking |
+
+```bash
+# Compile and run with iverilog
+iverilog -o sim alu.v testbench.v && vvp sim
+
+# Compile with Verilator for maximum performance
+verilator --cc alu.v --exe testbench.cpp
+```
+
+When iverilog is installed, RHDL automatically runs gate-level verification tests comparing synthesized Verilog against behavioral simulation.
 
 ### Building Native Extensions
 
