@@ -116,7 +116,7 @@ module RHDL
         @prev_audio = 0
 
         # Check for either Game Boy batched cycles or Apple II batched cycles
-        @use_batched = @sim.native? && (@sim.respond_to?(:run_gb_cycles) || @sim.respond_to?(:run_cpu_cycles))
+        @use_batched = @sim.native? && (@sim.respond_to?(:run_gb_cycles) || @sim.respond_to?(:apple2_run_cpu_cycles))
 
         if @use_batched
           puts "  Batched execution: enabled"
@@ -227,9 +227,9 @@ module RHDL
           @sim.reset_lcd_state if @sim.respond_to?(:reset_lcd_state)
         elsif @use_batched
           poke_input('reset', 1)
-          @sim.run_cpu_cycles(1, 0, false)
+          @sim.apple2_run_cpu_cycles(1, 0, false)
           poke_input('reset', 0)
-          @sim.run_cpu_cycles(10, 0, false)
+          @sim.apple2_run_cpu_cycles(10, 0, false)
         else
           poke_input('reset', 1)
           run_cycles(10)
@@ -257,7 +257,7 @@ module RHDL
           @cycles += result[:cycles_run]
           @screen_dirty = true if result[:frames_completed] > 0
         else
-          result = @sim.run_cpu_cycles(steps, 0, false)
+          result = @sim.apple2_run_cpu_cycles(steps, 0, false)
           @cycles += result[:cycles_run]
           @screen_dirty = true if result[:screen_dirty]
         end
