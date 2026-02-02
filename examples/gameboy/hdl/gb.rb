@@ -229,6 +229,8 @@ module GameBoy
     wire :zpram_addr, width: 7
     wire :zpram_wren
     wire :wram_do, width: 8
+    wire :wram_addr, width: 15     # WRAM address (15 bits for banking)
+    wire :wram_wren                # WRAM write enable
     wire :hdma_do, width: 8
 
     # OAM/VRAM access control
@@ -300,6 +302,14 @@ module GameBoy
     port :zpram_wren => [:zpram, :wren_a]
     port :cpu_do => [:zpram, :data_a]
     port [:zpram, :q_a] => :zpram_do
+
+    # WRAM (Work RAM $C000-$DFFF) - CPU read/write
+    # Note: For DMG, WRAM access goes through external bus
+    # For GBC, there's a separate WRAM bus with banking
+    port :wram_addr => [:wram, :address_a]
+    port :wram_wren => [:wram, :wren_a]
+    port :cpu_do => [:wram, :data_a]
+    port [:wram, :q_a] => :wram_do
 
     # CPU connections
     port [:cpu, :addr_bus] => :cpu_addr
@@ -479,7 +489,7 @@ module GameBoy
                 mux(sel_video_oam & oam_cpu_allow, video_do,
                 mux(sel_audio, audio_do,
                 mux(sel_boot_rom, boot_do,
-                mux(is_gbc & sel_wram, wram_do,
+                mux(sel_wram, wram_do,   # WRAM data for both DMG and GBC
                 mux(sel_ext_bus, ext_bus_di,
                 mux(sel_vram & vram_cpu_allow, mux(is_gbc & vram_bank, vram1_do, vram_do),
                 mux(sel_zpram, zpram_do,
@@ -525,6 +535,24 @@ module GameBoy
       # CPU addresses 0xFF80-0xFFFE map to ZPRAM addresses 0x00-0x7E (127 bytes)
       zpram_addr <= cpu_addr[6..0]
       zpram_wren <= sel_zpram & ~cpu_wr_n & ~cpu_mreq_n & ce
+
+      # WRAM CPU interface
+      # CPU addresses 0xC000-0xDFFF map to WRAM
+      # For DMG: WRAM is accessed through ext_bus, but we still connect directly
+      # For GBC: WRAM has banking (bank 0 at $C000-$CFFF, bank 1-7 at $D000-$DFFF)
+      # Address bit 12 selects between bank 0 and banked area
+      # wram_bank_eff: If wram_bank is 0, use bank 1 (per GB spec)
+      wram_bank_eff = mux(wram_bank == lit(0, width: 3), lit(1, width: 3), wram_bank)
+
+      # WRAM address: for $C000-$CFFF use bank 0, for $D000-$DFFF use wram_bank
+      wram_addr_lo = cpu_addr[11..0]
+      wram_addr_bank = mux(cpu_addr[12],
+                           cat(wram_bank_eff, wram_addr_lo),  # $D000-$DFFF: banked
+                           cat(lit(0, width: 3), wram_addr_lo)) # $C000-$CFFF: bank 0
+      wram_addr <= wram_addr_bank
+
+      # WRAM write enable (when sel_wram active and CPU writes)
+      wram_wren <= sel_wram & ~cpu_wr_n & ~cpu_mreq_n & ce
     end
 
     # Sequential logic for registers
