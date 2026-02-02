@@ -365,3 +365,16 @@ end
 
 desc "Build native ISA simulator (alias for native:build)"
 task native: 'native:build'
+
+# =============================================================================
+# Debug Tasks
+# =============================================================================
+
+namespace :debug do
+  desc "Debug Game Boy interrupt handling with VCD tracing"
+  task :interrupt do
+    load_cli_tasks
+    require_relative 'lib/rhdl/cli/tasks/debug_interrupt_task'
+    RHDL::CLI::Tasks::DebugInterruptTask.new.run
+  end
+end

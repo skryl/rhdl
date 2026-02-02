@@ -444,12 +444,14 @@ module GameBoy
                      (ir == lit(0xE2, width: 8)) | (ir == lit(0xF2, width: 8))
 
       # Default: 1 cycle for NOP, LD r,r', ALU A,r, INC/DEC r, rotates, etc.
-      m_cycles <= mux(is_6_cycles, lit(6, width: 3),
+      # Interrupt cycle takes 5 M-cycles
+      m_cycles <= mux(int_cycle, lit(5, width: 3),
+                  mux(is_6_cycles, lit(6, width: 3),
                   mux(is_5_cycles, lit(5, width: 3),
                   mux(is_4_cycles, lit(4, width: 3),
                   mux(is_3_cycles, lit(3, width: 3),
                   mux(is_2_cycles, lit(2, width: 3),
-                      lit(1, width: 3))))))
+                      lit(1, width: 3)))))))
 
       # -----------------------------------------------------------------------
       # Instruction Decoder - Specific instructions
@@ -835,6 +837,12 @@ module GameBoy
       no_read <= mux(is_ld_nn_sp & (m_cycle == lit(5, width: 3)),
                      lit(1, width: 1), no_read)
 
+      # Interrupt cycle - M2 and M3 write PC to stack, M1/M4/M5 don't access memory
+      write_sig <= mux(int_cycle & ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3))),
+                       lit(1, width: 1), write_sig)
+      no_read <= mux(int_cycle,
+                     lit(1, width: 1), no_read)  # No reads during interrupt cycle (we read vector from data bus directly)
+
       # CB prefix - triggers CB instruction execution
       # The CB opcode is in cb_ir after M2
       # CB BIT b, r - test bit b of register r, affect Z flag only
@@ -970,7 +978,11 @@ module GameBoy
       halt_n <= ~halt_ff
 
       # I/O request (always inactive for now)
-      iorq_n <= lit(1, width: 1)
+      # I/O request for interrupt acknowledge (active low with M1 during int cycle M4/M5)
+      # This tells the GB to put the interrupt vector on the data bus
+      iorq_n <= mux(int_cycle & ((m_cycle == lit(4, width: 3)) | (m_cycle == lit(5, width: 3))),
+                    lit(0, width: 1),
+                    lit(1, width: 1))
 
       # Address bus mux - select based on set_addr_to and state
       # During M1, always use PC for opcode fetch
@@ -1009,7 +1021,14 @@ module GameBoy
       is_pop_hl = pop_op & (pop_pair == lit(2, width: 2))
       is_pop_af = pop_op & (pop_pair == lit(3, width: 2))
 
-      addr_bus <= mux(m_cycle == lit(1, width: 3), pc,
+      # Interrupt cycle address conditions
+      is_int_m2 = int_cycle & (m_cycle == lit(2, width: 3))  # Push PC high to SP-1
+      is_int_m3 = int_cycle & (m_cycle == lit(3, width: 3))  # Push PC low to SP-2
+
+      addr_bus <= mux(int_cycle & (m_cycle == lit(1, width: 3)), pc,  # Int M1: No memory access (use PC as placeholder)
+                  mux(is_int_m2, sp_minus_1,  # Int M2: Write PC high to SP-1
+                  mux(is_int_m3, sp_minus_2,  # Int M3: Write PC low to SP-2
+                  mux(m_cycle == lit(1, width: 3), pc,
                   mux(is_ldh_m3, io_addr,  # Direct override for LDH instructions
                   mux(is_rst_m3, sp_minus_1,  # RST M3: Write PC high to SP-1
                   mux(is_rst_m4, sp_minus_2,  # RST M4: Write PC low to SP-2
@@ -1032,7 +1051,7 @@ module GameBoy
                   mux(set_addr_to == lit(ADDR_WZ, width: 3), wz,
                   mux(set_addr_to == lit(ADDR_IO, width: 3), io_addr,
                   mux(set_addr_to == lit(ADDR_IOC, width: 3), io_addr_c,
-                      pc))))))))))))))))))))))
+                      pc)))))))))))))))))))))))))
 
       # Data output (for writes) - select based on instruction
       # For LD (HL),r, use the source register from bus_b
@@ -1050,7 +1069,10 @@ module GameBoy
                  mux(push_pair == lit(1, width: 2), e_reg,
                  mux(push_pair == lit(2, width: 2), l_reg,
                      f_reg)))  # AF: F is low
-      data_out <= mux(is_rst_m3, pc[15..8],  # RST M3: Push PC high byte
+      # Interrupt cycle: M2 pushes PC high, M3 pushes PC low
+      data_out <= mux(is_int_m2, pc[15..8],  # Int M2: Push PC high byte
+                  mux(is_int_m3, pc[7..0],   # Int M3: Push PC low byte
+                  mux(is_rst_m3, pc[15..8],  # RST M3: Push PC high byte
                   mux(is_rst_m4, pc[7..0],   # RST M4: Push PC low byte
                   mux(is_call_m4, pc[15..8], # CALL M4: Push PC high byte
                   mux(is_call_m5, pc[7..0],  # CALL M5: Push PC low byte
@@ -1062,7 +1084,7 @@ module GameBoy
                       alu_result,  # INC/DEC (HL) - write ALU result back
                   mux(is_ld_nn_sp_m4, sp[7..0],  # LD (nn),SP M4: SP low byte
                   mux(is_ld_nn_sp_m5, sp[15..8], # LD (nn),SP M5: SP high byte
-                      acc)))))))))))
+                      acc)))))))))))))
 
       # -----------------------------------------------------------------------
       # CB BIT instruction - compute flags
@@ -1225,9 +1247,11 @@ module GameBoy
                          m_cycle + lit(1, width: 3)),  # Next machine cycle
                      m_cycle)
 
-      # M1 indicator (low during opcode fetch)
+      # M1 indicator (low during opcode fetch, also during interrupt acknowledge)
+      # For interrupt acknowledge, m1_n must be low with iorq_n for GB to provide vector
+      is_int_ack = int_cycle & ((m_cycle == lit(4, width: 3)) | (m_cycle == lit(5, width: 3)))
       m1_n <= mux(clken,
-                  mux(m_cycle == lit(1, width: 3), lit(0, width: 1), lit(1, width: 1)),
+                  mux((m_cycle == lit(1, width: 3)) | is_int_ack, lit(0, width: 1), lit(1, width: 1)),
                   m1_n)
 
       # Memory request (active during T1-T3 of each cycle for both reads AND writes)
@@ -1282,6 +1306,8 @@ module GameBoy
 
       pc <= mux(clken & (t_state == lit(3, width: 3)) & inc_pc,
                 pc + lit(1, width: 16),
+                mux(clken & int_cycle & (m_cycle == lit(5, width: 3)) & (t_state == lit(3, width: 3)),
+                    cat(lit(0, width: 8), wz[7..0]),  # Interrupt: vector at 0x00XX (low byte from M4)
                 mux(clken & jump & (m_cycle == m_cycles) & (t_state == lit(3, width: 3)),
                     wz,  # Jump address stored in WZ (loaded during M2/M3)
                 mux(clken & jump_e & (m_cycle == m_cycles) & (t_state == lit(3, width: 3)),
@@ -1292,18 +1318,24 @@ module GameBoy
                     wz,  # RET: jump to address popped from stack (stored in WZ)
                 mux(clken & is_rst & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
                     cat(lit(0, width: 8), rst_addr),  # RST jump address: 0x00nn
-                    pc))))))
+                    pc)))))))
 
       # -----------------------------------------------------------------------
       # Temporary Address Register (WZ)
       # -----------------------------------------------------------------------
 
       # Load low byte at T3 (when clken=1, t_state is still 3 pre-edge)
-      wz <= mux(clken & ldz & (t_state == lit(3, width: 3)),
-                cat(wz[15..8], di_reg),
+      # Also load interrupt vector during interrupt cycle M4 (low) and M5 (high=0x00)
+      # Game Boy interrupt vectors are all in low memory (0x0040, 0x0048, 0x0050, 0x0058, 0x0060)
+      wz <= mux(clken & int_cycle & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
+                cat(wz[15..8], di_reg),  # Int M4: Load vector low byte from data bus
+                mux(clken & int_cycle & (m_cycle == lit(5, width: 3)) & (t_state == lit(3, width: 3)),
+                    cat(lit(0, width: 8), wz[7..0]),  # Int M5: Set high byte to 0x00 (vectors are 0x00xx)
+                mux(clken & ldz & (t_state == lit(3, width: 3)),
+                    cat(wz[15..8], di_reg),
                 mux(clken & ldw & (t_state == lit(3, width: 3)),
                     cat(di_reg, wz[7..0]),
-                    wz))
+                    wz))))
 
       # -----------------------------------------------------------------------
       # Register Updates
@@ -1638,7 +1670,10 @@ module GameBoy
       # 6. RET (increment by 2 at end of M4)
       # 7. PUSH (decrement by 2 at end of M4)
       # 8. POP (increment by 2 at end of M3)
-      sp <= mux(clken & load_sp_wz & (t_state == lit(3, width: 3)),
+      # 9. Interrupt cycle (decrement by 2 at end of M3)
+      sp <= mux(clken & int_cycle & (m_cycle == lit(3, width: 3)) & (t_state == lit(3, width: 3)),
+                sp - lit(2, width: 16), # Interrupt: decrement SP by 2 (after pushing PC)
+            mux(clken & load_sp_wz & (t_state == lit(3, width: 3)),
                 cat(di_reg, wz[7..0]),  # LD SP,nn
             mux(clken & ld_sp_hl & (m_cycle == lit(2, width: 3)) & (t_state == lit(3, width: 3)),
                 cat(h_reg, l_reg),      # LD SP,HL
@@ -1656,7 +1691,7 @@ module GameBoy
                 sp + lit(2, width: 16), # POP: increment SP by 2
             mux(clken & is_add_sp_n & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
                 add_sp_n_result,        # ADD SP,n: set SP to SP+n
-                sp)))))))))
+                sp))))))))))
 
       # -----------------------------------------------------------------------
       # CB Prefix Handling
@@ -1685,20 +1720,69 @@ module GameBoy
                    cb_ir)
 
       # -----------------------------------------------------------------------
+      # Interrupt Cycle State Machine
+      # -----------------------------------------------------------------------
+      # Interrupt occurs when:
+      # 1. IME (int_e_ff1) is enabled
+      # 2. An interrupt is pending (int_n == 0)
+      # 3. Current instruction is completing (m_cycle == m_cycles, t_state == 4)
+      #
+      # Interrupt cycle takes 5 M-cycles:
+      # M1: Internal - no memory access
+      # M2: Push PC high to SP-1
+      # M3: Push PC low to SP-2, SP = SP-2
+      # M4: Read vector low byte from GB (iorq_n asserted)
+      # M5: Read vector high byte, jump to vector
+
+      # Detect when we should enter interrupt cycle
+      int_pending = int_e_ff1 & (int_n == lit(0, width: 1))
+      instruction_ending = (m_cycle == m_cycles) & (t_state == lit(4, width: 3))
+      enter_interrupt = clken & int_pending & instruction_ending & ~int_cycle
+
+      # int_cycle: set when entering interrupt, clear when M5 completes
+      int_cycle <= mux(enter_interrupt,
+                       lit(1, width: 1),
+                       mux(clken & int_cycle & (m_cycle == lit(5, width: 3)) & (t_state == lit(4, width: 3)),
+                           lit(0, width: 1),  # Clear at end of M5
+                           int_cycle))
+
+      # -----------------------------------------------------------------------
       # Interrupt Enable
       # -----------------------------------------------------------------------
+      # IME (int_e_ff1) is:
+      # - Set by EI delay (int_e_ff2) when the NEXT instruction ends
+      # - Set by RETI (at instruction completion)
+      # - Cleared by DI
+      # - Cleared when entering interrupt cycle
+      #
+      # int_e_ff2 is a delay flip-flop for EI:
+      # - Set by EI at the end of EI instruction
+      # - Cleared when copied to int_e_ff1 (at end of next instruction)
+      # - Cleared by DI
+      #
+      # SM83/LR35902 behavior: EI enables interrupts AFTER the following instruction
 
-      int_e_ff1 <= mux(clken & set_ei & (t_state == lit(3, width: 3)),
-                       lit(1, width: 1),
-                       mux(clken & set_di & (t_state == lit(3, width: 3)),
-                           lit(0, width: 1),
-                           int_e_ff1))
+      # Condition for copying EI delay to IME: instruction is ending, delay is set,
+      # and we're NOT currently executing EI (set_ei would be high during EI)
+      ei_delay_copy = instruction_ending & int_e_ff2 & ~set_ei
+
+      int_e_ff1 <= mux(enter_interrupt,
+                       lit(0, width: 1),  # Clear IME when entering interrupt
+                       mux(ei_delay_copy,
+                           lit(1, width: 1),  # Copy EI delay to IME
+                           mux(clken & reti_op & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
+                               lit(1, width: 1),  # RETI enables interrupts immediately
+                               mux(clken & set_di & (t_state == lit(3, width: 3)),
+                                   lit(0, width: 1),  # DI clears IME
+                                   int_e_ff1))))
 
       int_e_ff2 <= mux(clken & set_ei & (t_state == lit(3, width: 3)),
-                       lit(1, width: 1),
-                       mux(clken & set_di & (t_state == lit(3, width: 3)),
-                           lit(0, width: 1),
-                           int_e_ff2))
+                       lit(1, width: 1),  # EI sets delay flag
+                       mux(ei_delay_copy,
+                           lit(0, width: 1),  # Clear after copied to IME
+                           mux(clken & set_di & (t_state == lit(3, width: 3)),
+                               lit(0, width: 1),  # DI clears delay
+                               int_e_ff2)))
 
       # -----------------------------------------------------------------------
       # Halt
