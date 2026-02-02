@@ -242,6 +242,38 @@ RSpec.describe 'Apple2 CLI --dry-run', :slow do
       program_area = result[:memory_sample][:program_area]
       expect(program_area.any? { |b| b != 0 }).to be true
     end
+
+    it 'sets PC near $0800 for demo program' do
+      result = run_cli('--demo', '-m', 'verilog')
+      pc = result[:cpu_state][:pc]
+      # PC should be near $0800 (2048) - allowing a few bytes for instruction fetch
+      expect(pc).to be >= 0x0800
+      expect(pc).to be <= 0x0820
+    end
+
+    context 'with karateka' do
+      let(:karateka_memdump) { File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__) }
+
+      before(:each) do
+        skip 'Karateka memdump not available' unless File.exist?(karateka_memdump)
+      end
+
+      it 'sets PC near $B82A for karateka' do
+        result = run_cli('--karateka', '-m', 'verilog')
+        pc = result[:cpu_state][:pc]
+        # PC should be near $B82A - allowing a few bytes for instruction fetch
+        expect(pc).to be >= 0xB82A
+        expect(pc).to be <= 0xB840
+      end
+
+      it 'sets reset vector to $B82A for karateka' do
+        result = run_cli('--karateka', '-m', 'verilog')
+        reset_vector = result[:memory_sample][:reset_vector]
+        # Reset vector should point to $B82A
+        expect(reset_vector[0]).to eq(0x2A)  # Low byte
+        expect(reset_vector[1]).to eq(0xB8)  # High byte
+      end
+    end
   end
 
   describe 'dry-run output structure' do
