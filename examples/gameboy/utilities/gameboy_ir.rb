@@ -236,6 +236,10 @@ module RHDL
           poke_input('reset', 0)
           run_cycles(100)
         end
+
+        # Initialize joystick to all buttons released (active low, 0xFF = no buttons)
+        poke_input('joystick', 0xFF)
+
         @cycles = 0
         @halted = false
       end

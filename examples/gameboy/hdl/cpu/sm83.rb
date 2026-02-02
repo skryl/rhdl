@@ -172,6 +172,7 @@ module GameBoy
     wire :write_hl              # Write to (HL)
     wire :cond_true             # Condition true for conditional jump
     wire :is_cond_jr            # Conditional JR instruction
+    wire :is_cond_jp            # Conditional JP instruction
     wire :cb_bit                # CB BIT instruction
     wire :cb_bit_flags, width: 8  # Flags result from CB BIT instruction
     wire :cb_src, width: 8        # Source register for CB operation
@@ -280,8 +281,8 @@ module GameBoy
              ((ir[3..0] == lit(1, width: 4)) & (ir[7..6] == lit(0, width: 2)) & (m_cycle == lit(2, width: 3))) |
              # JR e M2
              ((ir == lit(0x18, width: 8)) & (m_cycle == lit(2, width: 3))) |
-             # RET M2
-             ((ir == lit(0xC9, width: 8)) & (m_cycle == lit(2, width: 3))) |
+             # RET/RETI M2
+             (((ir == lit(0xC9, width: 8)) | (ir == lit(0xD9, width: 8))) & (m_cycle == lit(2, width: 3))) |
              # JP nn M2
              ((ir == lit(0xC3, width: 8)) & (m_cycle == lit(2, width: 3))) |
              # CALL nn M2
@@ -295,19 +296,27 @@ module GameBoy
              # LD (HL),n M2
              ((ir == lit(0x36, width: 8)) & (m_cycle == lit(2, width: 3))) |
              # LD (a16),A / LD A,(a16) M2
-             (((ir == lit(0xEA, width: 8)) | (ir == lit(0xFA, width: 8))) & (m_cycle == lit(2, width: 3)))
+             (((ir == lit(0xEA, width: 8)) | (ir == lit(0xFA, width: 8))) & (m_cycle == lit(2, width: 3))) |
+             # LD (a16),SP M2
+             ((ir == lit(0x08, width: 8)) & (m_cycle == lit(2, width: 3))) |
+             # LD HL,SP+n M2 - read signed offset
+             ((ir == lit(0xF8, width: 8)) & (m_cycle == lit(2, width: 3))) |
+             # ADD SP,n M2 - read signed offset
+             ((ir == lit(0xE8, width: 8)) & (m_cycle == lit(2, width: 3)))
 
       # ldw - Load WZ high byte (consolidated from all instruction handlers)
       ldw <= # LD rr,nn M3
              ((ir[3..0] == lit(1, width: 4)) & (ir[7..6] == lit(0, width: 2)) & (m_cycle == lit(3, width: 3))) |
-             # RET M3
-             ((ir == lit(0xC9, width: 8)) & (m_cycle == lit(3, width: 3))) |
+             # RET/RETI M3
+             (((ir == lit(0xC9, width: 8)) | (ir == lit(0xD9, width: 8))) & (m_cycle == lit(3, width: 3))) |
              # JP nn M3
              ((ir == lit(0xC3, width: 8)) & (m_cycle == lit(3, width: 3))) |
              # CALL nn M3
              ((ir == lit(0xCD, width: 8)) & (m_cycle == lit(3, width: 3))) |
              # LD (a16),A / LD A,(a16) M3
-             (((ir == lit(0xEA, width: 8)) | (ir == lit(0xFA, width: 8))) & (m_cycle == lit(3, width: 3)))
+             (((ir == lit(0xEA, width: 8)) | (ir == lit(0xFA, width: 8))) & (m_cycle == lit(3, width: 3))) |
+             # LD (a16),SP M3
+             ((ir == lit(0x08, width: 8)) & (m_cycle == lit(3, width: 3)))
 
       # jump - Absolute jump (consolidated from JP nn and JP (HL))
       jump <= (ir == lit(0xC3, width: 8)) | (ir == lit(0xE9, width: 8))
@@ -359,6 +368,25 @@ module GameBoy
       # 5-cycle instructions: LD (a16),SP (08)
       is_5_cycles <= (ir == lit(0x08, width: 8))
 
+      # Conditional JR detection (needed for cycle count)
+      # JR NZ/Z/NC/C - 0x20/0x28/0x30/0x38
+      # 2 cycles if condition false, 3 cycles if condition true
+      is_cond_jr <= (ir == lit(0x20, width: 8)) | (ir == lit(0x28, width: 8)) |
+                    (ir == lit(0x30, width: 8)) | (ir == lit(0x38, width: 8))
+
+      # Conditional JP detection - JP NZ/Z/NC/C,nn (0xC2/0xCA/0xD2/0xDA)
+      # 4 cycles if condition true (jump taken), 3 cycles if condition false
+      is_cond_jp <= (ir == lit(0xC2, width: 8)) | (ir == lit(0xCA, width: 8)) |
+                    (ir == lit(0xD2, width: 8)) | (ir == lit(0xDA, width: 8))
+
+      # Condition evaluation: applies to both JR and JP conditional instructions
+      # ir[4:3] = condition code: 00=NZ, 01=Z, 10=NC, 11=C
+      cond_true <= mux(ir[4..3] == lit(0, width: 2), ~f_reg[FLAG_Z],     # NZ
+                   mux(ir[4..3] == lit(1, width: 2), f_reg[FLAG_Z],      # Z
+                   mux(ir[4..3] == lit(2, width: 2), ~f_reg[FLAG_C],     # NC
+                   mux(ir[4..3] == lit(3, width: 2), f_reg[FLAG_C],      # C
+                       lit(0, width: 1)))))
+
       # 4-cycle instructions: PUSH (C5/D5/E5/F5), RET (C9), RST (C7/CF/D7/DF/E7/EF/F7/FF),
       # RETI (D9), JP nn (C3), LD A,(a16) (FA), LD (a16),A (EA)
       # Also: CB rotate/set/res with (HL) operand (cb_ir[2:0] = 6, cb_ir[7:6] != 01)
@@ -378,20 +406,9 @@ module GameBoy
                      (ir == lit(0xC9, width: 8)) | (ir == lit(0xD9, width: 8)) |
                      (ir == lit(0xC3, width: 8)) |
                      (ir == lit(0xFA, width: 8)) | (ir == lit(0xEA, width: 8)) |
-                     is_cb_rw_hl  # CB rotate/set/res (HL) = 4 cycles
-
-      # Conditional JR detection (needed for cycle count) - must be before is_3_cycles
-      # JR NZ/Z/NC/C - 0x20/0x28/0x30/0x38
-      # 2 cycles if condition false, 3 cycles if condition true
-      is_cond_jr <= (ir == lit(0x20, width: 8)) | (ir == lit(0x28, width: 8)) |
-                    (ir == lit(0x30, width: 8)) | (ir == lit(0x38, width: 8))
-      # Condition evaluation: 20=NZ (Z=0), 28=Z (Z=1), 30=NC (C=0), 38=C (C=1)
-      # ir[4:3] = condition code: 00=NZ, 01=Z, 10=NC, 11=C
-      cond_true <= mux(ir[4..3] == lit(0, width: 2), ~f_reg[FLAG_Z],     # NZ
-                   mux(ir[4..3] == lit(1, width: 2), f_reg[FLAG_Z],      # Z
-                   mux(ir[4..3] == lit(2, width: 2), ~f_reg[FLAG_C],     # NC
-                   mux(ir[4..3] == lit(3, width: 2), f_reg[FLAG_C],      # C
-                       lit(0, width: 1)))))
+                     (ir == lit(0xE8, width: 8)) |  # ADD SP,n = 4 cycles
+                     is_cb_rw_hl |  # CB rotate/set/res (HL) = 4 cycles
+                     (is_cond_jp & cond_true)  # Conditional JP taken = 4 cycles
 
       # 3-cycle instructions: LDH (E0, F0), LD rr,nn (01, 11, 21, 31), POP (C1/D1/E1/F1)
       # LD r,(HL) (46/4E/56/5E/66/6E/7E), LD (HL),r (70-77 except 76=HALT)
@@ -407,6 +424,7 @@ module GameBoy
                      (ir == lit(0x36, width: 8)) | (ir == lit(0x18, width: 8)) |
                      (ir == lit(0xF8, width: 8)) |
                      (is_cond_jr & cond_true) |  # Conditional JR taken = 3 cycles
+                     (is_cond_jp & ~cond_true) |  # Conditional JP not taken = 3 cycles
                      is_cb_bit_hl  # CB BIT (HL) = 3 cycles (read from memory, no write)
 
       # 2-cycle instructions: LD (BC),A, LD (DE),A, LD A,(BC), LD A,(DE), LD r,n
@@ -419,6 +437,10 @@ module GameBoy
       is_add_hl_rr = (ir[3..0] == lit(9, width: 4)) & (ir[7..6] == lit(0, width: 2))
       is_alu_imm <= (ir[7..6] == lit(3, width: 2)) & (ir[2..0] == lit(6, width: 3))
 
+      # ALU A,(HL) - ADD/ADC/SUB/SBC/AND/XOR/OR/CP A,(HL) (86/8E/96/9E/A6/AE/B6/BE)
+      # These are 2-cycle instructions: M1=fetch, M2=read from (HL) and execute ALU
+      is_alu_hl = (ir[7..6] == lit(2, width: 2)) & (ir[2..0] == lit(6, width: 3))
+
       # CB with register operand (not (HL)) - 2 cycles
       # is_cb_hl is defined above - it's true when cb_ir[2:0] == 6
       is_cb_reg = is_cb & ~is_cb_hl
@@ -430,17 +452,19 @@ module GameBoy
                      (ir == lit(0x3A, width: 8)) | (ir == lit(0x2A, width: 8)) |
                      is_cb_reg |  # CB with register operand = 2 cycles
                      (is_cond_jr & ~cond_true) |
-                     is_alu_imm | is_ld_r_n | is_inc_rr | is_dec_rr | is_add_hl_rr |
+                     is_alu_imm | is_alu_hl | is_ld_r_n | is_inc_rr | is_dec_rr | is_add_hl_rr |
                      (ir == lit(0xF9, width: 8)) |
                      (ir == lit(0xE2, width: 8)) | (ir == lit(0xF2, width: 8))
 
       # Default: 1 cycle for NOP, LD r,r', ALU A,r, INC/DEC r, rotates, etc.
-      m_cycles <= mux(is_6_cycles, lit(6, width: 3),
+      # Interrupt cycle takes 5 M-cycles
+      m_cycles <= mux(int_cycle, lit(5, width: 3),
+                  mux(is_6_cycles, lit(6, width: 3),
                   mux(is_5_cycles, lit(5, width: 3),
                   mux(is_4_cycles, lit(4, width: 3),
                   mux(is_3_cycles, lit(3, width: 3),
                   mux(is_2_cycles, lit(2, width: 3),
-                      lit(1, width: 3))))))
+                      lit(1, width: 3)))))))
 
       # -----------------------------------------------------------------------
       # Instruction Decoder - Specific instructions
@@ -487,10 +511,27 @@ module GameBoy
       halt <= (ir == lit(0x76, width: 8))
 
       # ALU A,r operations (10xxxrrr - ADD/ADC/SUB/SBC/AND/XOR/OR/CP A,r)
-      alu_op <= mux(ir[7..6] == lit(2, width: 2), ir[5..3], lit(0, width: 4))
-      save_alu <= mux(ir[7..6] == lit(2, width: 2), lit(1, width: 1), lit(0, width: 1))
-      set_bus_a_to <= mux(ir[7..6] == lit(2, width: 2), lit(7, width: 4), lit(7, width: 4)) # ACC
-      set_bus_b_to <= mux(ir[7..6] == lit(2, width: 2), cat(lit(0, width: 1), ir[2..0]), lit(7, width: 4))
+      # Note: When ir[2:0]=6, this is ALU A,(HL) which needs special handling (memory read)
+      is_alu_r_not_hl = (ir[7..6] == lit(2, width: 2)) & (ir[2..0] != lit(6, width: 3))
+      alu_op <= mux(is_alu_r_not_hl, ir[5..3], lit(0, width: 4))
+      save_alu <= mux(is_alu_r_not_hl, lit(1, width: 1), lit(0, width: 1))
+      set_bus_a_to <= mux(is_alu_r_not_hl, lit(7, width: 4), lit(7, width: 4)) # ACC
+      set_bus_b_to <= mux(is_alu_r_not_hl, cat(lit(0, width: 1), ir[2..0]), lit(7, width: 4))
+
+      # ALU A,(HL) operations (10xxx110 - ADD/ADC/SUB/SBC/AND/XOR/OR/CP A,(HL))
+      # These are 2-cycle instructions: M1=fetch opcode, M2=read from (HL) and execute
+      # di_reg holds the value read from (HL) during M2
+      is_alu_hl_local = (ir[7..6] == lit(2, width: 2)) & (ir[2..0] == lit(6, width: 3))
+      # Only execute ALU operation during M2 (when memory read has been done into di_reg)
+      alu_op <= mux(is_alu_hl_local & (m_cycle == lit(2, width: 3)), ir[5..3], alu_op)
+      save_alu <= mux(is_alu_hl_local & (m_cycle == lit(2, width: 3)), lit(1, width: 1), save_alu)
+      set_bus_a_to <= mux(is_alu_hl_local & (m_cycle == lit(2, width: 3)), lit(7, width: 4), set_bus_a_to)  # ACC
+      # For ALU (HL), bus_b comes from di_reg (value 6) during M2
+      set_bus_b_to <= mux(is_alu_hl_local & (m_cycle == lit(2, width: 3)),
+                          lit(6, width: 4),  # 6 = di_reg (data input register)
+                          set_bus_b_to)
+      # Set address to HL for memory read
+      set_addr_to <= mux(is_alu_hl_local, lit(ADDR_HL, width: 3), set_addr_to)
 
       # ALU A,n operations (11xxx110 - ADD/ADC/SUB/SBC/AND/XOR/OR/CP A,n)
       # These are 2-cycle instructions: M1=fetch opcode, M2=read immediate and execute
@@ -506,7 +547,7 @@ module GameBoy
                           set_bus_b_to)
 
       # RET - Return from call (4 cycles: M1=fetch, M2=read low from SP, M3=read high from SP+1, M4=jump)
-      ret <= mux(ir == lit(0xC9, width: 8), lit(1, width: 1), lit(0, width: 1))
+      ret <= mux((ir == lit(0xC9, width: 8)) | (ir == lit(0xD9, width: 8)), lit(1, width: 1), lit(0, width: 1))
       # ldz/ldw consolidated above
       # RET reads from SP during M2 and M3 (handled via set_addr_to below)
 
@@ -731,6 +772,12 @@ module GameBoy
       scf_op <= (ir == lit(0x37, width: 8))
 
       # -----------------------------------------------------------------------
+      # DAA - Decimal Adjust Accumulator (27)
+      # Adjusts A for BCD after ADD/SUB operations
+      # -----------------------------------------------------------------------
+      daa_op <= (ir == lit(0x27, width: 8))
+
+      # -----------------------------------------------------------------------
       # PUSH qq - Push 16-bit register to stack (C5/D5/E5/F5)
       # M1: fetch, M2: delay, M3: write high, M4: write low
       # -----------------------------------------------------------------------
@@ -800,6 +847,32 @@ module GameBoy
       read_to_acc <= mux((ir == lit(0xFA, width: 8)) & (m_cycle == lit(4, width: 3)),
                          lit(1, width: 1), read_to_acc)
 
+      # -----------------------------------------------------------------------
+      # LD (a16),SP (08) - Write SP to 16-bit address
+      # M2: read low address, M3: read high address, M4: write SP low, M5: write SP high
+      # -----------------------------------------------------------------------
+      is_ld_nn_sp = (ir == lit(0x08, width: 8))
+      # M4: write SP low to WZ
+      set_addr_to <= mux(is_ld_nn_sp & (m_cycle == lit(4, width: 3)),
+                         lit(ADDR_WZ, width: 3), set_addr_to)
+      write_sig <= mux(is_ld_nn_sp & (m_cycle == lit(4, width: 3)),
+                       lit(1, width: 1), write_sig)
+      no_read <= mux(is_ld_nn_sp & (m_cycle == lit(4, width: 3)),
+                     lit(1, width: 1), no_read)
+      # M5: write SP high to WZ+1 (address bus mux handles WZ+1 directly)
+      set_addr_to <= mux(is_ld_nn_sp & (m_cycle == lit(5, width: 3)),
+                         lit(ADDR_WZ, width: 3), set_addr_to)
+      write_sig <= mux(is_ld_nn_sp & (m_cycle == lit(5, width: 3)),
+                       lit(1, width: 1), write_sig)
+      no_read <= mux(is_ld_nn_sp & (m_cycle == lit(5, width: 3)),
+                     lit(1, width: 1), no_read)
+
+      # Interrupt cycle - M2 and M3 write PC to stack, M1/M4/M5 don't access memory
+      write_sig <= mux(int_cycle & ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3))),
+                       lit(1, width: 1), write_sig)
+      no_read <= mux(int_cycle,
+                     lit(1, width: 1), no_read)  # No reads during interrupt cycle (we read vector from data bus directly)
+
       # CB prefix - triggers CB instruction execution
       # The CB opcode is in cb_ir after M2
       # CB BIT b, r - test bit b of register r, affect Z flag only
@@ -811,10 +884,13 @@ module GameBoy
       set_addr_to <= mux(is_cb_hl & (m_cycle == lit(3, width: 3)),
                          lit(ADDR_HL, width: 3), set_addr_to)
 
-      # PC increment during M1 (when not halted and not in interrupt cycle)
+      # PC increment during M1 (when not halted) or during operand reads
       # Also increment during operand reads when reading from instruction stream
       # Explicit conditions for each instruction type that reads operands from PC
-      inc_pc <= ((m_cycle == lit(1, width: 3)) & ~halt & ~int_cycle) |
+      # IMPORTANT: All conditions are gated by ~int_cycle to prevent PC changes during interrupt handling
+      inc_pc <= ~int_cycle & (
+                # M1: opcode fetch increments PC
+                ((m_cycle == lit(1, width: 3)) & ~halt) |
                 # LD r, n (0x06, 0x0E, 0x16, 0x1E, 0x26, 0x2E, 0x3E) - M2 reads immediate
                 (is_ld_r_n & (m_cycle == lit(2, width: 3))) |
                 # LD (HL), n (0x36) - M2 reads immediate
@@ -827,6 +903,8 @@ module GameBoy
                 ((ir[3..0] == lit(1, width: 4)) & (ir[7..6] == lit(0, width: 2)) & (m_cycle >= lit(2, width: 3))) |
                 # JP nn (0xC3) - M2 and M3 read address (not M4 which jumps)
                 ((ir == lit(0xC3, width: 8)) & ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3)))) |
+                # Conditional JP (0xC2, 0xCA, 0xD2, 0xDA) - M2 and M3 read 16-bit address
+                (is_cond_jp & ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3)))) |
                 # CALL nn (0xCD) - M2 and M3 read address (not M4-M6 which push/jump)
                 ((ir == lit(0xCD, width: 8)) & ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3)))) |
                 # LD (nn), A (0xEA) / LD A, (nn) (0xFA) - M2 and M3 read 16-bit address
@@ -838,7 +916,13 @@ module GameBoy
                 # CB prefix (0xCB) - M2 reads CB opcode
                 ((ir == lit(0xCB, width: 8)) & (m_cycle == lit(2, width: 3))) |
                 # ALU A,n immediate ops (C6, CE, D6, DE, E6, EE, F6, FE) - M2 reads immediate
-                (is_alu_imm & (m_cycle == lit(2, width: 3)))
+                (is_alu_imm & (m_cycle == lit(2, width: 3))) |
+                # LD (a16),SP (0x08) - M2 and M3 read 16-bit address
+                ((ir == lit(0x08, width: 8)) & ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3)))) |
+                # LD HL,SP+n (0xF8) - M2 reads signed offset
+                ((ir == lit(0xF8, width: 8)) & (m_cycle == lit(2, width: 3))) |
+                # ADD SP,n (0xE8) - M2 reads signed offset
+                ((ir == lit(0xE8, width: 8)) & (m_cycle == lit(2, width: 3))))
 
       # -----------------------------------------------------------------------
       # ALU (Simplified)
@@ -862,8 +946,17 @@ module GameBoy
       # N flag (bit 6) - set for sub ops
       n_bit = mux((alu_op == lit(2, width: 4)) | (alu_op == lit(3, width: 4)) | (alu_op == lit(7, width: 4)),
                   lit(0x40, width: 8), lit(0, width: 8))
-      # H flag (bit 5) - TODO: proper half-carry
-      h_bit = lit(0, width: 8)
+      # H flag (bit 5) - Half-carry for 8-bit ALU ops
+      # ADD/ADC: H set when carry from bit 3 to bit 4 (low nibble overflow)
+      # SUB/SBC/CP: H set when borrow from bit 4 (low nibble underflow)
+      h_add_sum = cat(lit(0, width: 1), bus_a[3..0]) + cat(lit(0, width: 1), bus_b[3..0])
+      h_add = h_add_sum[4]  # Carry out of bit 3
+      h_sub = bus_a[3..0] < bus_b[3..0]  # Borrow for subtraction
+      h_bit = mux((alu_op == lit(0, width: 4)) | (alu_op == lit(1, width: 4)),
+                  mux(h_add, lit(0x20, width: 8), lit(0, width: 8)),  # ADD/ADC half-carry
+                  mux((alu_op == lit(2, width: 4)) | (alu_op == lit(3, width: 4)) | (alu_op == lit(7, width: 4)),
+                      mux(h_sub, lit(0x20, width: 8), lit(0, width: 8)),  # SUB/SBC/CP half-borrow
+                      lit(0, width: 8)))
       # C flag (bit 4)
       c_bit = mux((alu_op == lit(0, width: 4)) | (alu_op == lit(1, width: 4)),
                   mux((bus_a + bus_b)[8], lit(0x10, width: 8), lit(0, width: 8)),
@@ -920,7 +1013,11 @@ module GameBoy
       halt_n <= ~halt_ff
 
       # I/O request (always inactive for now)
-      iorq_n <= lit(1, width: 1)
+      # I/O request for interrupt acknowledge (active low with M1 during int cycle M4/M5)
+      # This tells the GB to put the interrupt vector on the data bus
+      iorq_n <= mux(int_cycle & ((m_cycle == lit(4, width: 3)) | (m_cycle == lit(5, width: 3))),
+                    lit(0, width: 1),
+                    lit(1, width: 1))
 
       # Address bus mux - select based on set_addr_to and state
       # During M1, always use PC for opcode fetch
@@ -948,6 +1045,9 @@ module GameBoy
       is_push_m4 = is_push & (m_cycle == lit(4, width: 3))
       is_pop_m2 = pop_op & (m_cycle == lit(2, width: 3))
       is_pop_m3 = pop_op & (m_cycle == lit(3, width: 3))
+      is_ld_nn_sp_m4 = is_ld_nn_sp & (m_cycle == lit(4, width: 3))
+      is_ld_nn_sp_m5 = is_ld_nn_sp & (m_cycle == lit(5, width: 3))
+      wz_plus_1 = wz + lit(1, width: 16)
 
       # POP register pair decoding: ir[5:4] = 00:BC, 01:DE, 10:HL, 11:AF
       pop_pair = ir[5..4]
@@ -956,7 +1056,14 @@ module GameBoy
       is_pop_hl = pop_op & (pop_pair == lit(2, width: 2))
       is_pop_af = pop_op & (pop_pair == lit(3, width: 2))
 
-      addr_bus <= mux(m_cycle == lit(1, width: 3), pc,
+      # Interrupt cycle address conditions
+      is_int_m2 = int_cycle & (m_cycle == lit(2, width: 3))  # Push PC high to SP-1
+      is_int_m3 = int_cycle & (m_cycle == lit(3, width: 3))  # Push PC low to SP-2
+
+      addr_bus <= mux(int_cycle & (m_cycle == lit(1, width: 3)), pc,  # Int M1: No memory access (use PC as placeholder)
+                  mux(is_int_m2, sp_minus_1,  # Int M2: Write PC high to SP-1
+                  mux(is_int_m3, sp_minus_2,  # Int M3: Write PC low to SP-2
+                  mux(m_cycle == lit(1, width: 3), pc,
                   mux(is_ldh_m3, io_addr,  # Direct override for LDH instructions
                   mux(is_rst_m3, sp_minus_1,  # RST M3: Write PC high to SP-1
                   mux(is_rst_m4, sp_minus_2,  # RST M4: Write PC low to SP-2
@@ -968,6 +1075,8 @@ module GameBoy
                   mux(is_push_m4, sp_minus_2, # PUSH M4: Write low byte to SP-2
                   mux(is_pop_m2, sp,          # POP M2: Read low byte from SP
                   mux(is_pop_m3, sp_plus_1,   # POP M3: Read high byte from SP+1
+                  mux(is_ld_nn_sp_m4, wz,     # LD (nn),SP M4: Write SP low to WZ
+                  mux(is_ld_nn_sp_m5, wz_plus_1, # LD (nn),SP M5: Write SP high to WZ+1
                   # Address select based on set_addr_to
                   mux(set_addr_to == lit(ADDR_PC, width: 3), pc,
                   mux(set_addr_to == lit(ADDR_SP, width: 3), sp,
@@ -977,7 +1086,7 @@ module GameBoy
                   mux(set_addr_to == lit(ADDR_WZ, width: 3), wz,
                   mux(set_addr_to == lit(ADDR_IO, width: 3), io_addr,
                   mux(set_addr_to == lit(ADDR_IOC, width: 3), io_addr_c,
-                      pc))))))))))))))))))))
+                      pc)))))))))))))))))))))))))
 
       # Data output (for writes) - select based on instruction
       # For LD (HL),r, use the source register from bus_b
@@ -995,7 +1104,10 @@ module GameBoy
                  mux(push_pair == lit(1, width: 2), e_reg,
                  mux(push_pair == lit(2, width: 2), l_reg,
                      f_reg)))  # AF: F is low
-      data_out <= mux(is_rst_m3, pc[15..8],  # RST M3: Push PC high byte
+      # Interrupt cycle: M2 pushes PC high, M3 pushes PC low
+      data_out <= mux(is_int_m2, pc[15..8],  # Int M2: Push PC high byte
+                  mux(is_int_m3, pc[7..0],   # Int M3: Push PC low byte
+                  mux(is_rst_m3, pc[15..8],  # RST M3: Push PC high byte
                   mux(is_rst_m4, pc[7..0],   # RST M4: Push PC low byte
                   mux(is_call_m4, pc[15..8], # CALL M4: Push PC high byte
                   mux(is_call_m5, pc[7..0],  # CALL M5: Push PC low byte
@@ -1005,7 +1117,9 @@ module GameBoy
                   mux((ir == lit(0x36, width: 8)) & (m_cycle == lit(3, width: 3)), wz[7..0],
                   mux(((ir == lit(0x34, width: 8)) | (ir == lit(0x35, width: 8))) & (m_cycle == lit(3, width: 3)),
                       alu_result,  # INC/DEC (HL) - write ALU result back
-                      acc)))))))))
+                  mux(is_ld_nn_sp_m4, sp[7..0],  # LD (nn),SP M4: SP low byte
+                  mux(is_ld_nn_sp_m5, sp[15..8], # LD (nn),SP M5: SP high byte
+                      acc)))))))))))))
 
       # -----------------------------------------------------------------------
       # CB BIT instruction - compute flags
@@ -1168,9 +1282,11 @@ module GameBoy
                          m_cycle + lit(1, width: 3)),  # Next machine cycle
                      m_cycle)
 
-      # M1 indicator (low during opcode fetch)
+      # M1 indicator (low during opcode fetch, also during interrupt acknowledge)
+      # For interrupt acknowledge, m1_n must be low with iorq_n for GB to provide vector
+      is_int_ack = int_cycle & ((m_cycle == lit(4, width: 3)) | (m_cycle == lit(5, width: 3)))
       m1_n <= mux(clken,
-                  mux(m_cycle == lit(1, width: 3), lit(0, width: 1), lit(1, width: 1)),
+                  mux((m_cycle == lit(1, width: 3)) | is_int_ack, lit(0, width: 1), lit(1, width: 1)),
                   m1_n)
 
       # Memory request (active during T1-T3 of each cycle for both reads AND writes)
@@ -1225,6 +1341,8 @@ module GameBoy
 
       pc <= mux(clken & (t_state == lit(3, width: 3)) & inc_pc,
                 pc + lit(1, width: 16),
+                mux(clken & int_cycle & (m_cycle == lit(5, width: 3)) & (t_state == lit(3, width: 3)),
+                    cat(lit(0, width: 8), wz[7..0]),  # Interrupt: vector at 0x00XX (low byte from M4)
                 mux(clken & jump & (m_cycle == m_cycles) & (t_state == lit(3, width: 3)),
                     wz,  # Jump address stored in WZ (loaded during M2/M3)
                 mux(clken & jump_e & (m_cycle == m_cycles) & (t_state == lit(3, width: 3)),
@@ -1235,18 +1353,24 @@ module GameBoy
                     wz,  # RET: jump to address popped from stack (stored in WZ)
                 mux(clken & is_rst & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
                     cat(lit(0, width: 8), rst_addr),  # RST jump address: 0x00nn
-                    pc))))))
+                    pc)))))))
 
       # -----------------------------------------------------------------------
       # Temporary Address Register (WZ)
       # -----------------------------------------------------------------------
 
       # Load low byte at T3 (when clken=1, t_state is still 3 pre-edge)
-      wz <= mux(clken & ldz & (t_state == lit(3, width: 3)),
-                cat(wz[15..8], di_reg),
+      # Also load interrupt vector during interrupt cycle M4 (low) and M5 (high=0x00)
+      # Game Boy interrupt vectors are all in low memory (0x0040, 0x0048, 0x0050, 0x0058, 0x0060)
+      wz <= mux(clken & int_cycle & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
+                cat(wz[15..8], di_reg),  # Int M4: Load vector low byte from data bus
+                mux(clken & int_cycle & (m_cycle == lit(5, width: 3)) & (t_state == lit(3, width: 3)),
+                    cat(lit(0, width: 8), wz[7..0]),  # Int M5: Set high byte to 0x00 (vectors are 0x00xx)
+                mux(clken & ldz & (t_state == lit(3, width: 3)),
+                    cat(wz[15..8], di_reg),
                 mux(clken & ldw & (t_state == lit(3, width: 3)),
                     cat(di_reg, wz[7..0]),
-                    wz))
+                    wz))))
 
       # -----------------------------------------------------------------------
       # Register Updates
@@ -1284,6 +1408,53 @@ module GameBoy
       # SCF flags: N=0, H=0, C=1, Z unchanged
       scf_flags_local = cat(f_reg[FLAG_Z], lit(0, width: 1), lit(0, width: 1), lit(1, width: 1), lit(0, width: 4))
 
+      # DAA - Decimal Adjust Accumulator
+      # Game Boy mode: H is always cleared after DAA
+      # After ADD (N=0): if low nibble > 9 or H=1, add 6; if high nibble > 9 or C=1, add 0x60
+      # After SUB (N=1): if H=1, subtract 6; if C=1, subtract 0x60
+      daa_acc_9bit = cat(lit(0, width: 1), acc)  # 9-bit for carry detection
+
+      # Step 1: Low nibble adjustment
+      daa_add_low = (acc[3..0] > lit(9, width: 4)) | f_reg[FLAG_H]
+      daa_sub_low = f_reg[FLAG_H]
+      daa_after_low = mux(f_reg[FLAG_N],
+                          mux(daa_sub_low, daa_acc_9bit - lit(6, width: 9), daa_acc_9bit),
+                          mux(daa_add_low, daa_acc_9bit + lit(6, width: 9), daa_acc_9bit))
+
+      # Step 2: High nibble adjustment (check after low adjustment)
+      daa_add_high = (daa_after_low[7..4] > lit(9, width: 4)) | f_reg[FLAG_C] | daa_after_low[8]
+      daa_sub_high = f_reg[FLAG_C]
+      daa_result_9bit = mux(f_reg[FLAG_N],
+                            mux(daa_sub_high, daa_after_low - lit(0x60, width: 9), daa_after_low),
+                            mux(daa_add_high, daa_after_low + lit(0x60, width: 9), daa_after_low))
+
+      daa_result_local = daa_result_9bit[7..0]
+      daa_carry = f_reg[FLAG_C] | daa_result_9bit[8]
+      daa_z = mux(daa_result_local == lit(0, width: 8), lit(1, width: 1), lit(0, width: 1))
+      daa_flags_local = cat(daa_z, f_reg[FLAG_N], lit(0, width: 1), daa_carry, lit(0, width: 4))
+
+      # LD HL,SP+n (0xF8) - add signed offset to SP and store in HL
+      # The offset is in wz[7..0] (read at M2)
+      # Sign extend the 8-bit offset to 16 bits
+      ld_hl_sp_n_offset = wz[7..0]
+      ld_hl_sp_n_sign_ext = mux(ld_hl_sp_n_offset[7], lit(0xFF, width: 8), lit(0, width: 8))
+      ld_hl_sp_n_offset_16 = cat(ld_hl_sp_n_sign_ext, ld_hl_sp_n_offset)
+      ld_hl_sp_n_result = sp + ld_hl_sp_n_offset_16
+      # Flags: Z=0, N=0, H and C from low byte unsigned add (SP[7:0] + offset)
+      ld_hl_sp_n_low_sum = cat(lit(0, width: 1), sp[7..0]) + cat(lit(0, width: 1), ld_hl_sp_n_offset)
+      ld_hl_sp_n_c = ld_hl_sp_n_low_sum[8]
+      ld_hl_sp_n_h_sum = cat(lit(0, width: 1), sp[3..0]) + cat(lit(0, width: 1), ld_hl_sp_n_offset[3..0])
+      ld_hl_sp_n_h = ld_hl_sp_n_h_sum[4]
+      ld_hl_sp_n_flags = cat(lit(0, width: 1), lit(0, width: 1), ld_hl_sp_n_h, ld_hl_sp_n_c, lit(0, width: 4))
+      is_ld_hl_sp_n = (ir == lit(0xF8, width: 8))
+
+      # ADD SP,n (0xE8) - add signed offset to SP
+      # The offset is in wz[7..0] (read at M2), uses same computation as LD HL,SP+n
+      # Result updates SP at M4, flags same as LD HL,SP+n
+      is_add_sp_n = (ir == lit(0xE8, width: 8))
+      add_sp_n_result = ld_hl_sp_n_result  # Reuse same computation
+      add_sp_n_flags = ld_hl_sp_n_flags    # Flags: Z=0, N=0, H, C
+
       # POP register pair decoding (local to sequential block)
       pop_pair_seq = ir[5..4]
       is_pop_m2_seq = pop_op & (m_cycle == lit(2, width: 3))
@@ -1318,9 +1489,15 @@ module GameBoy
                    ccf_flags_local,  # CCF
                mux(clken & scf_op & (t_state == lit(3, width: 3)),
                    scf_flags_local,  # SCF
+               mux(clken & daa_op & (t_state == lit(3, width: 3)),
+                   daa_flags_local,  # DAA
+               mux(clken & is_ld_hl_sp_n & (m_cycle == lit(3, width: 3)) & (t_state == lit(3, width: 3)),
+                   ld_hl_sp_n_flags,  # LD HL,SP+n flags (Z=0, N=0, H, C)
+               mux(clken & is_add_sp_n & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
+                   add_sp_n_flags,  # ADD SP,n flags (Z=0, N=0, H, C)
                mux(clken & is_cb_rot_seq & is_cb_write_m2_seq & (t_state == lit(3, width: 3)),
                    cb_rot_flags,  # CB rotate/shift flags at M2
-                   f_reg))))))))
+                   f_reg)))))))))))
 
       # -----------------------------------------------------------------------
       # Register Pair Updates from WZ (for LD rr,nn instructions)
@@ -1494,7 +1671,9 @@ module GameBoy
                    hl_16_new[15..8],  # INC/DEC HL
                mux(clken & read_to_reg & (write_reg == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
                    mux(is_inc_r | is_dec_r, alu_result, reg_write_data),  # LD H,r / INC H / DEC H
-                   h_reg))))))))
+               mux(clken & is_ld_hl_sp_n & (m_cycle == lit(3, width: 3)) & (t_state == lit(3, width: 3)),
+                   ld_hl_sp_n_result[15..8],  # LD HL,SP+n - high byte
+                   h_reg)))))))))
       # L register combined update
       # POP HL loads low byte (L) at M2
       # CB write to L when cb_ir[2:0] = 5 (L)
@@ -1514,7 +1693,9 @@ module GameBoy
                    hl_16_new[7..0],  # INC/DEC HL
                mux(clken & read_to_reg & (write_reg == lit(5, width: 3)) & (t_state == lit(3, width: 3)),
                    mux(is_inc_r | is_dec_r, alu_result, reg_write_data),  # LD L,r / INC L / DEC L
-                   l_reg))))))))
+               mux(clken & is_ld_hl_sp_n & (m_cycle == lit(3, width: 3)) & (t_state == lit(3, width: 3)),
+                   ld_hl_sp_n_result[7..0],  # LD HL,SP+n - low byte
+                   l_reg)))))))))
       # SP combined update - all SP-modifying instructions:
       # 1. LD SP,nn (load_sp_wz) - highest priority
       # 2. LD SP,HL (ld_sp_hl)
@@ -1524,7 +1705,10 @@ module GameBoy
       # 6. RET (increment by 2 at end of M4)
       # 7. PUSH (decrement by 2 at end of M4)
       # 8. POP (increment by 2 at end of M3)
-      sp <= mux(clken & load_sp_wz & (t_state == lit(3, width: 3)),
+      # 9. Interrupt cycle (decrement by 2 at end of M3)
+      sp <= mux(clken & int_cycle & (m_cycle == lit(3, width: 3)) & (t_state == lit(3, width: 3)),
+                sp - lit(2, width: 16), # Interrupt: decrement SP by 2 (after pushing PC)
+            mux(clken & load_sp_wz & (t_state == lit(3, width: 3)),
                 cat(di_reg, wz[7..0]),  # LD SP,nn
             mux(clken & ld_sp_hl & (m_cycle == lit(2, width: 3)) & (t_state == lit(3, width: 3)),
                 cat(h_reg, l_reg),      # LD SP,HL
@@ -1540,7 +1724,9 @@ module GameBoy
                 sp - lit(2, width: 16), # PUSH: decrement SP by 2
             mux(clken & pop_op & (m_cycle == lit(3, width: 3)) & (t_state == lit(3, width: 3)),
                 sp + lit(2, width: 16), # POP: increment SP by 2
-                sp))))))))
+            mux(clken & is_add_sp_n & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
+                add_sp_n_result,        # ADD SP,n: set SP to SP+n
+                sp))))))))))
 
       # -----------------------------------------------------------------------
       # CB Prefix Handling
@@ -1569,20 +1755,69 @@ module GameBoy
                    cb_ir)
 
       # -----------------------------------------------------------------------
+      # Interrupt Cycle State Machine
+      # -----------------------------------------------------------------------
+      # Interrupt occurs when:
+      # 1. IME (int_e_ff1) is enabled
+      # 2. An interrupt is pending (int_n == 0)
+      # 3. Current instruction is completing (m_cycle == m_cycles, t_state == 4)
+      #
+      # Interrupt cycle takes 5 M-cycles:
+      # M1: Internal - no memory access
+      # M2: Push PC high to SP-1
+      # M3: Push PC low to SP-2, SP = SP-2
+      # M4: Read vector low byte from GB (iorq_n asserted)
+      # M5: Read vector high byte, jump to vector
+
+      # Detect when we should enter interrupt cycle
+      int_pending = int_e_ff1 & (int_n == lit(0, width: 1))
+      instruction_ending = (m_cycle == m_cycles) & (t_state == lit(4, width: 3))
+      enter_interrupt = clken & int_pending & instruction_ending & ~int_cycle
+
+      # int_cycle: set when entering interrupt, clear when M5 completes
+      int_cycle <= mux(enter_interrupt,
+                       lit(1, width: 1),
+                       mux(clken & int_cycle & (m_cycle == lit(5, width: 3)) & (t_state == lit(4, width: 3)),
+                           lit(0, width: 1),  # Clear at end of M5
+                           int_cycle))
+
+      # -----------------------------------------------------------------------
       # Interrupt Enable
       # -----------------------------------------------------------------------
+      # IME (int_e_ff1) is:
+      # - Set by EI delay (int_e_ff2) when the NEXT instruction ends
+      # - Set by RETI (at instruction completion)
+      # - Cleared by DI
+      # - Cleared when entering interrupt cycle
+      #
+      # int_e_ff2 is a delay flip-flop for EI:
+      # - Set by EI at the end of EI instruction
+      # - Cleared when copied to int_e_ff1 (at end of next instruction)
+      # - Cleared by DI
+      #
+      # SM83/LR35902 behavior: EI enables interrupts AFTER the following instruction
 
-      int_e_ff1 <= mux(clken & set_ei & (t_state == lit(3, width: 3)),
-                       lit(1, width: 1),
-                       mux(clken & set_di & (t_state == lit(3, width: 3)),
-                           lit(0, width: 1),
-                           int_e_ff1))
+      # Condition for copying EI delay to IME: instruction is ending, delay is set,
+      # and we're NOT currently executing EI (set_ei would be high during EI)
+      ei_delay_copy = instruction_ending & int_e_ff2 & ~set_ei
+
+      int_e_ff1 <= mux(enter_interrupt,
+                       lit(0, width: 1),  # Clear IME when entering interrupt
+                       mux(ei_delay_copy,
+                           lit(1, width: 1),  # Copy EI delay to IME
+                           mux(clken & reti_op & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
+                               lit(1, width: 1),  # RETI enables interrupts immediately
+                               mux(clken & set_di & (t_state == lit(3, width: 3)),
+                                   lit(0, width: 1),  # DI clears IME
+                                   int_e_ff1))))
 
       int_e_ff2 <= mux(clken & set_ei & (t_state == lit(3, width: 3)),
-                       lit(1, width: 1),
-                       mux(clken & set_di & (t_state == lit(3, width: 3)),
-                           lit(0, width: 1),
-                           int_e_ff2))
+                       lit(1, width: 1),  # EI sets delay flag
+                       mux(ei_delay_copy,
+                           lit(0, width: 1),  # Clear after copied to IME
+                           mux(clken & set_di & (t_state == lit(3, width: 3)),
+                               lit(0, width: 1),  # DI clears delay
+                               int_e_ff2)))
 
       # -----------------------------------------------------------------------
       # Halt
@@ -1620,7 +1855,9 @@ module GameBoy
                  rot_result,  # RLCA/RLA/RRCA/RRA
              mux(clken & cpl_op & (t_state == lit(3, width: 3)),
                  ~acc,  # CPL
-                 acc)))))))
+             mux(clken & daa_op & (t_state == lit(3, width: 3)),
+                 daa_result_local,  # DAA
+                 acc))))))))
 
     end
 

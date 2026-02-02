@@ -173,6 +173,8 @@ module GameBoy
     wire :sel_video_oam
     wire :video_wr               # Video unit write enable (active high)
     wire :video_addr, width: 8   # Video unit address low byte
+    wire :timer_wr               # Timer unit write enable (active high)
+    wire :timer_addr, width: 2   # Timer unit address (0=DIV, 1=TIMA, 2=TMA, 3=TAC)
     wire :sel_joy
     wire :sel_sb
     wire :sel_sc
@@ -193,7 +195,7 @@ module GameBoy
     wire :wram_bank, width: 3
     wire :vram_bank
     wire :if_r, width: 5
-    wire :ie_r, width: 8
+    wire :ie_r, width: 8  # Updated in sequential block
     wire :cpu_speed
     wire :prepare_switch
 
@@ -205,6 +207,14 @@ module GameBoy
     wire :vblank_irq
     wire :timer_irq
     wire :serial_irq
+    wire :joypad_irq
+
+    # Joypad edge detection pipeline
+    # joy_din_sampled: registered version of joy_din (1 cycle delay)
+    # joy_din_prev: previous joy_din_sampled (2 cycles delay)
+    # This ensures proper edge detection timing in simulation
+    wire :joy_din_sampled, width: 4
+    wire :joy_din_prev, width: 4
 
     # Data outputs from subsystems
     wire :joy_do, width: 8
@@ -219,6 +229,8 @@ module GameBoy
     wire :zpram_addr, width: 7
     wire :zpram_wren
     wire :wram_do, width: 8
+    wire :wram_addr, width: 15     # WRAM address (15 bits for banking)
+    wire :wram_wren                # WRAM write enable
     wire :hdma_do, width: 8
 
     # OAM/VRAM access control
@@ -291,6 +303,14 @@ module GameBoy
     port :cpu_do => [:zpram, :data_a]
     port [:zpram, :q_a] => :zpram_do
 
+    # WRAM (Work RAM $C000-$DFFF) - CPU read/write
+    # Note: For DMG, WRAM access goes through external bus
+    # For GBC, there's a separate WRAM bus with banking
+    port :wram_addr => [:wram, :address_a]
+    port :wram_wren => [:wram, :wren_a]
+    port :cpu_do => [:wram, :data_a]
+    port [:wram, :q_a] => :wram_do
+
     # CPU connections
     port [:cpu, :addr_bus] => :cpu_addr
     port [:cpu, :data_out] => :cpu_do
@@ -329,7 +349,11 @@ module GameBoy
     port [:cpu, :debug_const_one] => :debug_const_one
 
     # Timer connections
+    port :ce => [:timer_unit, :ce]
     port :sel_timer => [:timer_unit, :cpu_sel]
+    port :timer_addr => [:timer_unit, :cpu_addr]
+    port :timer_wr => [:timer_unit, :cpu_wr]
+    port :cpu_do => [:timer_unit, :cpu_di]
     port [:timer_unit, :irq] => :timer_irq
     port [:timer_unit, :cpu_do] => :timer_do
 
@@ -405,6 +429,11 @@ module GameBoy
       # Video write interface - PPU needs low byte of address and write enable
       video_addr <= cpu_addr[7..0]
       video_wr <= sel_video_reg & ~cpu_mreq_n & ~cpu_wr_n
+
+      # Timer write interface - Timer needs 2-bit address and write enable
+      timer_addr <= cpu_addr[1..0]
+      timer_wr <= ~cpu_wr_n
+
       sel_joy <= (cpu_addr == lit(0xFF00, width: 16))
       sel_sb <= (cpu_addr == lit(0xFF01, width: 16))
       sel_sc <= (cpu_addr == lit(0xFF02, width: 16))
@@ -460,7 +489,7 @@ module GameBoy
                 mux(sel_video_oam & oam_cpu_allow, video_do,
                 mux(sel_audio, audio_do,
                 mux(sel_boot_rom, boot_do,
-                mux(is_gbc & sel_wram, wram_do,
+                mux(sel_wram, wram_do,   # WRAM data for both DMG and GBC
                 mux(sel_ext_bus, ext_bus_di,
                 mux(sel_vram & vram_cpu_allow, mux(is_gbc & vram_bank, vram1_do, vram_do),
                 mux(sel_zpram, zpram_do,
@@ -470,6 +499,13 @@ module GameBoy
 
       # Joypad output
       joy_do <= cat(lit(0b11, width: 2), joy_p54, joy_din)
+
+      # Joypad interrupt: fires when any button transitions from released (1) to pressed (0)
+      # This is a falling edge on joy_din_sampled bits
+      # joy_din_prev was high (1), joy_din_sampled is now low (0) = button just pressed
+      # Note: We use joy_din_sampled (registered) vs joy_din_prev for proper pipeline timing
+      joy_falling_edge = joy_din_prev & ~joy_din_sampled
+      joypad_irq <= reduce_or(joy_falling_edge)
 
       # Speed output (GBC)
       speed <= cpu_speed
@@ -499,20 +535,47 @@ module GameBoy
       # CPU addresses 0xFF80-0xFFFE map to ZPRAM addresses 0x00-0x7E (127 bytes)
       zpram_addr <= cpu_addr[6..0]
       zpram_wren <= sel_zpram & ~cpu_wr_n & ~cpu_mreq_n & ce
+
+      # WRAM CPU interface
+      # CPU addresses 0xC000-0xDFFF map to WRAM
+      # For DMG: WRAM is accessed through ext_bus, but we still connect directly
+      # For GBC: WRAM has banking (bank 0 at $C000-$CFFF, bank 1-7 at $D000-$DFFF)
+      # Address bit 12 selects between bank 0 and banked area
+      # wram_bank_eff: If wram_bank is 0, use bank 1 (per GB spec)
+      wram_bank_eff = mux(wram_bank == lit(0, width: 3), lit(1, width: 3), wram_bank)
+
+      # WRAM address: for $C000-$CFFF use bank 0, for $D000-$DFFF use wram_bank
+      wram_addr_lo = cpu_addr[11..0]
+      wram_addr_bank = mux(cpu_addr[12],
+                           cat(wram_bank_eff, wram_addr_lo),  # $D000-$DFFF: banked
+                           cat(lit(0, width: 3), wram_addr_lo)) # $C000-$CFFF: bank 0
+      wram_addr <= wram_addr_bank
+
+      # WRAM write enable (when sel_wram active and CPU writes)
+      wram_wren <= sel_wram & ~cpu_wr_n & ~cpu_mreq_n & ce
     end
 
     # Sequential logic for registers
     # boot_rom_enabled: 1 to run boot ROM (initializes hardware properly)
-    sequential clock: :clk_sys, reset: :reset, reset_values: { boot_rom_enabled: 1, if_r: 0 } do
+    # joy_din_sampled/joy_din_prev: 0xF = all buttons released (active low)
+    sequential clock: :clk_sys, reset: :reset, reset_values: { boot_rom_enabled: 1, if_r: 0, ie_r: 0, joy_din_sampled: 0xF, joy_din_prev: 0xF } do
       # Boot ROM enable (disabled by writing to FF50)
       # Disable boot ROM on any write to FF50 (MiSTer boot ROM writes 0, original writes non-zero)
       boot_rom_enabled <= mux(ce & (cpu_addr == lit(0xFF50, width: 16)) & ~cpu_wr_n,
                               lit(0, width: 1),
                               boot_rom_enabled)
 
+      # Interrupt Enable register ($FFFF)
+      # Bit 0: V-Blank, Bit 1: LCD STAT, Bit 2: Timer, Bit 3: Serial, Bit 4: Joypad
+      # CPU writes to enable/disable interrupts
+      ie_r <= mux(ce & sel_ie & ~cpu_wr_n,
+                  cpu_do,
+                  ie_r)
+
       # Interrupt Flag register ($FF0F)
       # Bit 0: V-Blank, Bit 1: LCD STAT, Bit 2: Timer, Bit 3: Serial, Bit 4: Joypad
-      # Set by interrupt sources, cleared by CPU writing 1 to the bit
+      # Set by interrupt sources, cleared by CPU writing 1 to the bit OR automatically
+      # when the interrupt is acknowledged by the CPU.
       #
       # Start with current value
       if_r_new = if_r
@@ -522,7 +585,7 @@ module GameBoy
       if_r_new = mux(video_irq, if_r_new | lit(0x02, width: 5), if_r_new)
       if_r_new = mux(timer_irq, if_r_new | lit(0x04, width: 5), if_r_new)
       if_r_new = mux(serial_irq, if_r_new | lit(0x08, width: 5), if_r_new)
-      # Note: Joypad interrupt (bit 4) would be added here when implemented
+      if_r_new = mux(joypad_irq, if_r_new | lit(0x10, width: 5), if_r_new)
 
       # CPU can clear interrupt flags by writing to $FF0F
       # Writing 1 to a bit clears it (standard interrupt acknowledge)
@@ -530,7 +593,29 @@ module GameBoy
                      if_r_new & ~cpu_do[4..0],
                      if_r_new)
 
+      # Auto-clear IF bit when interrupt is acknowledged by CPU
+      # The bit to clear corresponds to the highest-priority pending interrupt
+      # Priority: VBlank > LCD STAT > Timer > Serial > Joypad
+      irq_clear_mask = mux(if_r[0] & ie_r[0], lit(0x01, width: 5),
+                       mux(if_r[1] & ie_r[1], lit(0x02, width: 5),
+                       mux(if_r[2] & ie_r[2], lit(0x04, width: 5),
+                       mux(if_r[3] & ie_r[3], lit(0x08, width: 5),
+                       mux(if_r[4] & ie_r[4], lit(0x10, width: 5),
+                           lit(0x00, width: 5))))))
+
+      if_r_new = mux(irq_ack,
+                     if_r_new & ~irq_clear_mask,
+                     if_r_new)
+
       if_r <= if_r_new
+
+      # Joypad edge detection pipeline registers
+      # joy_din_sampled captures the current joy_din input (1 cycle delay)
+      # joy_din_prev captures the previous joy_din_sampled (2 cycles delay from input)
+      # Edge detection in behavior block compares joy_din_prev with joy_din_sampled
+      # Note: Order matters in simulation - update joy_din_prev first (from old joy_din_sampled)
+      joy_din_prev <= mux(ce, joy_din_sampled, joy_din_prev)
+      joy_din_sampled <= mux(ce, joy_din, joy_din_sampled)
     end
 
   end

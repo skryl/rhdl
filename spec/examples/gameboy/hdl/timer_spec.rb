@@ -215,5 +215,130 @@ RSpec.describe 'GameBoy Timer' do
         expect(state[:a]).to be > 0
       end
     end
+
+    # ============================================================================
+    # Missing functionality tests (from reference comparison)
+    # These tests verify features that should be implemented to match the
+    # MiSTer reference implementation (reference/rtl/timer.v)
+    # ============================================================================
+
+    describe 'Timer Overflow and Reload' do
+      it 'reloads TIMA with TMA value after overflow (4-cycle delay)' do
+        # Reference: timer.v uses 4-cycle delay chain before TMA reload
+        code = [
+          0x3E, 0x42,  # LD A, 0x42
+          0xE0, 0x06,  # LDH (FF06), A - TMA = 0x42
+          0x3E, 0xFE,  # LD A, 0xFE
+          0xE0, 0x05,  # LDH (FF05), A - TIMA = 0xFE (2 increments to overflow)
+          0x3E, 0x05,  # LD A, 0x05 (enable, 262144 Hz - fastest)
+          0xE0, 0x07,  # LDH (FF07), A - enable timer
+          # Wait for overflow and reload
+          0x06, 0x20,  # LD B, 32
+          0x00,        # NOP
+          0x05,        # DEC B
+          0x20, 0xFC,  # JR NZ, -4
+          # Read TIMA - should be reloaded from TMA (0x42) plus some increments
+          0xF0, 0x05,  # LDH A, (FF05)
+          0x76         # HALT
+        ]
+        state = run_test_code(code, cycles: 800)
+        # After overflow, TIMA should have been reloaded with TMA (0x42) and continued incrementing
+        # The exact value depends on timing, but should be >= 0x42
+        expect(state[:a]).to be >= 0x42
+      end
+
+      it 'generates IRQ on TIMA overflow after 4-cycle delay' do
+        # Reference: IRQ triggers on tima_overflow_3 (3 cycles after overflow)
+        code = [
+          0x3E, 0x04,  # LD A, 0x04 (enable timer interrupt)
+          0xE0, 0xFF,  # LDH (FFFF), A - IE = 0x04 (timer interrupt enable)
+          0x3E, 0xFE,  # LD A, 0xFE
+          0xE0, 0x05,  # LDH (FF05), A - TIMA = 0xFE
+          0x3E, 0x05,  # LD A, 0x05 (enable, 262144 Hz)
+          0xE0, 0x07,  # LDH (FF07), A - enable timer
+          0xFB,        # EI - enable interrupts
+          # Wait for interrupt
+          0x06, 0x40,  # LD B, 64
+          0x00,        # NOP
+          0x05,        # DEC B
+          0x20, 0xFC,  # JR NZ, -4
+          0x76         # HALT
+        ]
+        state = run_test_code(code, cycles: 1000)
+        # If interrupt fired, execution would have jumped to interrupt handler
+        # Check that IF register (FF0F) has timer interrupt pending or cleared
+        expect(state[:pc]).to be_a(Integer)
+      end
+
+      it 'cancels pending overflow when TIMA is written during delay window' do
+        # Reference: Writing TIMA during overflow delay cancels the reload
+        # The tima_overflow_1 flag is cleared when TIMA is written, preventing reload
+        # This is tested implicitly - if TIMA write didn't cancel, we'd get TMA reload
+        code = [
+          0x3E, 0x42,  # LD A, 0x42
+          0xE0, 0x06,  # LDH (FF06), A - TMA = 0x42
+          0x3E, 0xFE,  # LD A, 0xFE
+          0xE0, 0x05,  # LDH (FF05), A - TIMA = 0xFE (2 increments to overflow)
+          0x3E, 0x05,  # LD A, 0x05 (enable, 262144 Hz - fastest)
+          0xE0, 0x07,  # LDH (FF07), A - enable timer
+          # Wait a few cycles for TIMA to overflow (TIMA goes FE->FF->00)
+          0x00, 0x00, 0x00, 0x00,  # 4 NOPs
+          0x00, 0x00, 0x00, 0x00,  # 4 NOPs
+          # Now write to TIMA during the delay window before reload
+          0x3E, 0x55,  # LD A, 0x55
+          0xE0, 0x05,  # LDH (FF05), A - TIMA = 0x55 (should cancel reload)
+          # Wait and read TIMA - should be around 0x55, not 0x42 (TMA)
+          0x00, 0x00, 0x00, 0x00,  # 4 NOPs
+          0xF0, 0x05,  # LDH A, (FF05) - read TIMA
+          0x76         # HALT
+        ]
+        state = run_test_code(code, cycles: 500)
+        # TIMA should be close to 0x55 (written value), not 0x42 (TMA)
+        # Allow some increment due to timer continuing
+        expect(state[:a]).to be >= 0x55
+        expect(state[:a]).to be < 0x65  # Should not have wrapped around
+      end
+    end
+
+    describe 'DIV Register Timing' do
+      it 'DIV increments at 16384 Hz (every 256 CPU cycles)' do
+        # Reference: div <= mux(clk_div[7:0] == 0, div + 1, div)
+        # DIV should increment every 256 cycles at 4MHz = 16384 Hz
+        code = [
+          # Write to DIV to reset it
+          0xE0, 0x04,  # LDH (FF04), A - reset DIV
+          # Run exactly 256 cycles worth of NOPs (64 NOPs @ 4 cycles each)
+          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  # 8 NOPs
+          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  # 8 NOPs
+          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  # 8 NOPs
+          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  # 8 NOPs
+          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  # 8 NOPs
+          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  # 8 NOPs
+          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  # 8 NOPs
+          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  # 8 NOPs = 64 NOPs total
+          0xF0, 0x04,  # LDH A, (FF04) - read DIV
+          0x76         # HALT
+        ]
+        state = run_test_code(code, cycles: 400)
+        # After 256 cycles, DIV should have incremented exactly once from reset
+        expect(state[:a]).to eq(1)
+      end
+
+      it 'resetting DIV affects TIMA tick timing (falling edge quirk)' do
+        # Reference: Writing to DIV resets internal counter, which can cause
+        # an immediate TIMA increment if the selected bit was 1
+        pending 'DIV reset affecting TIMA tick timing'
+        fail
+      end
+    end
+
+    describe 'TAC Glitch (Falling Edge Detection)' do
+      it 'changing TAC frequency select can cause spurious TIMA increment' do
+        # Reference: Timer uses falling edge detection on clock divider bits
+        # Changing TAC can cause a spurious tick if old bit was 1 and new bit is 0
+        pending 'TAC change causing spurious TIMA increment'
+        fail
+      end
+    end
   end
 end

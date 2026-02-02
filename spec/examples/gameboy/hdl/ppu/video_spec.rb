@@ -448,4 +448,241 @@ RSpec.describe GameBoy::Video do
       expect(video.get_output(:lcd_on)).to eq(0)
     end
   end
+
+  # ============================================================================
+  # Missing functionality tests (from reference comparison)
+  # These tests verify features that should be implemented to match the
+  # MiSTer reference implementation (reference/rtl/video.v)
+  # ============================================================================
+
+  describe 'Pixel FIFO' do
+    before do
+      video.set_input(:reset, 1)
+      clock_cycle(video)
+      video.set_input(:reset, 0)
+      clock_cycle(video)
+    end
+
+    it 'uses shift registers for background pixel serialization' do
+      # Reference: tile_shift_0, tile_shift_1 for BG pixel FIFO
+      pending 'Background pixel FIFO shift registers'
+      fail
+    end
+
+    it 'uses shift registers for sprite pixel serialization' do
+      # Reference: spr_tile_shift_0, spr_tile_shift_1 for sprite FIFO
+      pending 'Sprite pixel FIFO shift registers'
+      fail
+    end
+
+    it 'pauses background rendering during sprite fetch' do
+      # Reference: bg_paused signal when sprites are being fetched
+      pending 'Background pause during sprite fetch'
+      fail
+    end
+  end
+
+  describe 'Sprite X/Y Flip' do
+    before do
+      video.set_input(:reset, 1)
+      clock_cycle(video)
+      video.set_input(:reset, 0)
+      clock_cycle(video)
+    end
+
+    it 'supports horizontal flip via sprite attribute bit 5' do
+      # Reference: bit_reverse() function for X-flip
+      pending 'Sprite X-flip support'
+      fail
+    end
+
+    it 'supports vertical flip via sprite attribute bit 6' do
+      # Reference: Y-flip support in tile fetch address calculation
+      pending 'Sprite Y-flip support'
+      fail
+    end
+  end
+
+  describe 'GBC Background Attributes' do
+    before do
+      video.set_input(:reset, 1)
+      clock_cycle(video)
+      video.set_input(:reset, 0)
+      clock_cycle(video)
+      video.set_input(:is_gbc, 1)
+      video.set_input(:isGBC_mode, 1)
+    end
+
+    it 'reads tile attributes from VRAM bank 1' do
+      # Reference: bg_tile_attr_new from vram1_data
+      pending 'GBC background tile attributes from VRAM bank 1'
+      fail
+    end
+
+    it 'supports background X-flip via attribute bit 5' do
+      # Reference: bg_tile_attr[5] for horizontal flip
+      pending 'GBC background X-flip'
+      fail
+    end
+
+    it 'supports background Y-flip via attribute bit 6' do
+      # Reference: bg_tile_attr[6] for vertical flip
+      pending 'GBC background Y-flip'
+      fail
+    end
+
+    it 'supports per-tile VRAM bank selection via attribute bit 3' do
+      # Reference: bg_tile_attr[3] selects tile data bank
+      pending 'GBC per-tile VRAM bank selection'
+      fail
+    end
+
+    it 'supports per-tile palette selection via attribute bits 0-2' do
+      # Reference: bg_tile_attr[2:0] for CGB palette index
+      pending 'GBC per-tile palette selection'
+      fail
+    end
+  end
+
+  describe 'Sprite Priority' do
+    before do
+      video.set_input(:reset, 1)
+      clock_cycle(video)
+      video.set_input(:reset, 0)
+      clock_cycle(video)
+    end
+
+    it 'handles sprite-to-background priority based on attribute bit 7' do
+      # Reference: sprite_attr[7] determines BG-over-sprite priority
+      pending 'Sprite priority attribute handling'
+      fail
+    end
+
+    it 'handles GBC OBJ priority mode (FF6C register)' do
+      # Reference: obj_prio_dmg_mode from FF6C
+      pending 'GBC OBJ priority mode register'
+      fail
+    end
+  end
+
+  describe 'Window Rendering Edge Cases' do
+    before do
+      video.set_input(:reset, 1)
+      clock_cycle(video)
+      video.set_input(:reset, 0)
+      clock_cycle(video)
+    end
+
+    it 'handles WX=166 window glitch' do
+      # Reference: Special handling when WX is at edge of screen
+      pending 'WX=166 edge case handling'
+      fail
+    end
+
+    it 'handles WX=0 & SCX=7 combined glitch' do
+      # Reference: Combined WX and SCX edge case
+      pending 'WX=0 & SCX=7 combined glitch handling'
+      fail
+    end
+
+    it 'tracks window line counter independently of LY' do
+      # Reference: win_line separate from v_cnt
+      pending 'Independent window line counter'
+      fail
+    end
+  end
+
+  describe 'STAT Interrupt Edge Detection' do
+    before do
+      video.set_input(:reset, 1)
+      clock_cycle(video)
+      video.set_input(:reset, 0)
+      clock_cycle(video)
+    end
+
+    it 'triggers STAT interrupt on rising edge only' do
+      # Reference: vblank_t, lyc_match_t for edge detection
+      pending 'STAT interrupt edge detection'
+      fail
+    end
+
+    it 'combines multiple STAT sources correctly (STAT blocking bug)' do
+      # Reference: Complex edge detection across multiple sources
+      pending 'STAT blocking bug emulation'
+      fail
+    end
+  end
+
+  describe 'DMG STAT Bug' do
+    before do
+      video.set_input(:reset, 1)
+      clock_cycle(video)
+      video.set_input(:reset, 0)
+      clock_cycle(video)
+      video.set_input(:is_gbc, 0)
+      video.set_input(:isGBC_mode, 0)
+    end
+
+    it 'mode reads as 0 during transition between VBlank and Mode 2' do
+      # Reference: DMG-specific quirk where mode briefly reads as 0
+      pending 'DMG STAT mode transition quirk'
+      fail
+    end
+  end
+
+  describe 'GBC Palette Registers' do
+    before do
+      video.set_input(:reset, 1)
+      clock_cycle(video)
+      video.set_input(:reset, 0)
+      clock_cycle(video)
+      video.set_input(:is_gbc, 1)
+      video.set_input(:isGBC_mode, 1)
+    end
+
+    it 'auto-increments BGPI/OBPI on palette data write' do
+      # Reference: Auto-increment latch tracking per palette
+      pending 'GBC palette auto-increment'
+      fail
+    end
+
+    it 'reads correct palette data from BGPD (FF69)' do
+      # Reference: Palette RAM readback through FF69
+      pending 'GBC background palette data read'
+      fail
+    end
+
+    it 'reads correct palette data from OBPD (FF6B)' do
+      # Reference: Palette RAM readback through FF6B
+      pending 'GBC sprite palette data read'
+      fail
+    end
+  end
+
+  describe 'Mode 3 Variable Length' do
+    before do
+      video.set_input(:reset, 1)
+      clock_cycle(video)
+      video.set_input(:reset, 0)
+      clock_cycle(video)
+    end
+
+    it 'mode 3 length varies based on sprite count' do
+      # Reference: mode3_end depends on sprite_found, pcnt_end, win_first_fetch
+      pending 'Variable Mode 3 length based on sprites'
+      fail
+    end
+
+    it 'mode 3 length affected by window first fetch' do
+      # Reference: win_first_fetch adds cycles to Mode 3
+      pending 'Window fetch affecting Mode 3 length'
+      fail
+    end
+
+    it 'mode 3 length affected by SCX fine scroll' do
+      # Reference: SCX[2:0] affects initial fetch timing
+      pending 'SCX fine scroll affecting Mode 3 length'
+      fail
+    end
+  end
 end
