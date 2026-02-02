@@ -848,6 +848,19 @@ RSpec.describe RHDL::Apple2::DiskII do
       @boot_rom = File.binread(BOOT_ROM_PATH).bytes
       @main_rom = File.binread(APPLEIIGO_ROM_PATH).bytes
 
+      # Patch boot ROM for slot 6
+      # The ROM starts with LDX #$20 (for slot 2) but we need slot 6 ($60)
+      #
+      # The P5 PROM builds a denibble table in a loop starting at offset 4: LDX #$03
+      # This loop iterates from X=$03 to X=$7F (128 iterations), taking ~7000 cycles.
+      # By patching offset 5 to $60, we make the loop start at X=$60 (only 32 iterations).
+      # This is OK because we inject the complete denibble table at $0356 anyway.
+      #
+      # After the loop, the P5 PROM detects the slot from the return address of JSR $FF58:
+      # the high byte ($C6) gets shifted left 4 times to give $60 (slot 6 * 16).
+      @boot_rom[1] = 0x60   # Patch initial LDX operand to slot 6
+      @boot_rom[5] = 0x60   # Make denibble loop start at X=$60 (faster, we inject full table anyway)
+
       # Patch reset vector to point to disk boot ROM at $C600
       # ROM is mapped at $D000-$FFFF, so $FFFC is at offset 0x2FFC
       @main_rom[0x2FFC] = 0x00  # Low byte of $C600
@@ -966,6 +979,20 @@ RSpec.describe RHDL::Apple2::DiskII do
       # The CPU has a bug with the BCS/LSR loop that causes wrong patterns to be accepted
       inject_denibble_table(sim)
       puts "  Injected correct denibble table at $0356"
+
+      # Initialize P5 PROM zero page variables
+      # The P5 PROM uses these zero page locations:
+      # - $26/$27: Buffer pointer (destination for sector data)
+      # - $3D: Target sector number (which sector to load)
+      # - $41: Copy of buffer high byte
+      # - $2B: Slot * 16 (for indexed I/O addressing)
+      # This ROM doesn't initialize these correctly, so we do it here
+      sim.apple2_write_ram(0x0026, [0x00])  # Buffer low = $00
+      sim.apple2_write_ram(0x0027, [0x08])  # Buffer high = $08 (load to $0800)
+      sim.apple2_write_ram(0x003D, [0x00])  # Target sector = 0 (boot sector)
+      sim.apple2_write_ram(0x0041, [0x08])  # Copy of buffer high
+      sim.apple2_write_ram(0x002B, [0x60])  # Slot * 16 for slot 6
+      puts "  Initialized P5 PROM zero page: buffer=$0800, sector=0, slot=6"
 
       # Verify the table is now correct
       test_nibbles = [0x96, 0x97, 0x9A, 0x9B]
