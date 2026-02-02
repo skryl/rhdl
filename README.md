@@ -37,6 +37,8 @@ RHDL is a Domain Specific Language (DSL) for designing hardware using Ruby's fle
 | [8-bit CPU](docs/8bit_cpu.md) | Sample 8-bit CPU reference |
 | [MOS 6502](docs/mos6502_cpu.md) | MOS 6502 CPU implementation |
 | [Apple II](docs/apple2.md) | Apple II emulation |
+| [Game Boy](docs/gameboy.md) | Game Boy (DMG/GBC/SGB) emulation |
+| [RISC-V](docs/riscv.md) | RISC-V RV32I CPU implementation |
 
 ## Quick Start
 
@@ -216,19 +218,53 @@ alu.propagate
 puts alu.get_output(:result)  # => 15
 ```
 
-## MOS 6502 CPU Example
+## Examples
 
-The `examples/mos6502/` directory contains a complete behavior simulation of the MOS 6502 microprocessor, demonstrating RHDL's capabilities for complex hardware designs.
+RHDL includes four comprehensive example implementations demonstrating the framework's capabilities for building complex hardware systems.
 
-### Features
+| Example | Type | CPU | Description |
+|---------|------|-----|-------------|
+| [MOS 6502](docs/mos6502_cpu.md) | Processor | 8-bit | Classic 1970s microprocessor |
+| [Apple II](docs/apple2.md) | Computer | 6502 | Complete 1977 personal computer |
+| [Game Boy](docs/gameboy.md) | Console | SM83 | Nintendo handheld (DMG/GBC/SGB) |
+| [RISC-V](docs/riscv.md) | Processor | 32-bit | Modern RISC instruction set |
 
-- **Full 6502 implementation**: All official instructions and addressing modes
-- **Clock-cycle accurate**: Proper timing for all operations
-- **Two-pass assembler**: Write programs in 6502 assembly
-- **BCD arithmetic**: Full decimal mode support
+### MOS 6502 CPU
 
-### Quick Example
+Complete behavior simulation of the MOS 6502 with all 56 instructions, 13 addressing modes, and BCD arithmetic.
 
+```
++-----------------------------------------------------------+
+|                      MOS6502::CPU                          |
++-----------------------------------------------------------+
+|  +-----------------------------------------------------+  |
+|  |                     Datapath                         |  |
+|  |  +-------+  +-------+  +-------+  +-------------+   |  |
+|  |  | A(8b) |  | X(8b) |  | Y(8b) |  | Status(8b)  |   |  |
+|  |  +-------+  +-------+  +-------+  | N V - B D I Z C|  |
+|  |  +--------+  +-------+           +-------------+   |  |
+|  |  | PC(16b)|  | SP(8b)|                             |  |
+|  |  +--------+  +-------+                             |  |
+|  |  +-------------------------------------------------+  |
+|  |  |              ALU (14 operations)                |  |
+|  |  +-------------------------------------------------+  |
+|  +-----------------------------------------------------+  |
+|  +-----------------------------------------------------+  |
+|  |         Control Unit (26-state FSM)                 |  |
+|  +-----------------------------------------------------+  |
+|  +-----------------------------------------------------+  |
+|  |      Instruction Decoder (151 opcodes)              |  |
+|  +-----------------------------------------------------+  |
++-----------------------------------------------------------+
+```
+
+**CLI Options:**
+```bash
+rhdl examples mos6502 --demo           # Run demo program
+rhdl examples mos6502 --karateka       # Play Karateka game
+```
+
+**Quick Example:**
 ```ruby
 require_relative 'examples/mos6502/cpu'
 
@@ -240,33 +276,128 @@ cpu.assemble_and_load(<<~ASM, 0x8000)
 ASM
 cpu.reset
 cpu.run
-
 puts cpu.status_string  # A:42 X:00 Y:00 SP:FD PC:8006
 ```
 
-### Apple II Bus Emulation
+### Apple II
 
-The 6502 implementation includes Apple II-style I/O bus support for running unmodified Apple II binaries:
+Complete Apple II emulation with video modes, keyboard, speaker, and Disk II controller.
 
-- **Keyboard**: Memory-mapped at $C000 with strobe at $C010
-- **Speaker**: Click toggle at $C030
-- **Video switches**: Text/graphics modes, page selection, hi-res mode
-- **RAM/ROM regions**: Full 64KB address space
-
-```ruby
-require_relative 'examples/mos6502/apple2_bus'
-
-bus = MOS6502::Apple2Bus.new
-cpu = MOS6502::CPU.new(bus: bus)
-
-# Simulate keyboard input
-bus.key_press('A')
-
-# Run program
-cpu.run
+```
++-----------------------------------------------------------------------+
+|                           Apple II System                              |
++-----------------------------------------------------------------------+
+|  +-----------+     +----------+     +--------------------------+      |
+|  |  MOS 6502 |     |  Timing  |     |     Video Generator      |      |
+|  |    CPU    |<--->|Generator |---->|  - Text (40x24)          |      |
+|  |   1 MHz   |     |  14 MHz  |     |  - Lo-res (40x48)        |      |
+|  +-----------+     +----------+     |  - Hi-res (280x192)      |      |
+|        |                            +--------------------------+      |
+|  +-----+--------------------------------------------------+           |
+|  |                   Address/Data Bus                      |           |
+|  +--+--------+--------+--------+--------+---------+-------+           |
+|     |        |        |        |        |         |                   |
+|  +--+--+  +--+--+  +--+--+  +--+--+  +--+---+  +--+--+                |
+|  | 48KB|  | 12KB|  | I/O |  |Disk |  |Key- |  |Speak|                |
+|  | RAM |  | ROM |  | Page|  | II  |  |board|  | er  |                |
+|  +-----+  +-----+  +-----+  +-----+  +-----+  +-----+                |
++-----------------------------------------------------------------------+
 ```
 
-See [Apple II](docs/apple2.md) for details.
+**CLI Options:**
+```bash
+rhdl examples apple2 --appleiigo              # Run with AppleIIGo ROM
+rhdl examples apple2 --karateka --hires       # Play Karateka in hi-res
+rhdl examples apple2 --appleiigo --disk g.dsk # Load disk image
+rhdl examples apple2 --demo                   # Run demo program
+```
+
+### Game Boy
+
+Nintendo Game Boy emulation based on MiSTer reference, supporting DMG, GBC, and SGB modes.
+
+```
++-----------------------------------------------------------------------+
+|                          Game Boy System                               |
++-----------------------------------------------------------------------+
+|  +---------+    +-------+    +---------------------------+            |
+|  |  SM83   |    | Timer |    |      PPU (Video)          |            |
+|  |  CPU    |<-->|Counter|--->|  - Background layer       |            |
+|  | 4.19MHz |    +-------+    |  - Window layer           |            |
+|  +----+----+                 |  - 40 sprites (8x8/8x16)  |            |
+|       |                      |  - 160x144 LCD            |            |
+|  +----+--------------------------------------------------+            |
+|  |                  Address/Data Bus                      |            |
+|  +--+------+------+------+------+------+------+----------+            |
+|     |      |      |      |      |      |      |                       |
+|  +--+-+  +-+-+  +-+-+  +-+-+  +-+-+  +-+-+  +-+----+                  |
+|  |ROM |  |VRAM|  |WRAM|  |OAM |  |HRAM|  |I/O|  | APU  |              |
+|  |0-8M|  |8KB |  |8KB |  |160B|  |127B|  |   |  | 4ch  |              |
+|  +----+  +---+  +----+  +----+  +----+  +---+  +------+              |
++-----------------------------------------------------------------------+
+```
+
+**CLI Options:**
+```bash
+rhdl examples gameboy --rom cpu_instrs.gb     # Run test ROM
+rhdl examples gameboy --demo                  # Run demo display
+rhdl examples gameboy --rom game.gb --gbc     # Force GBC mode
+rhdl examples gameboy --rom game.gb --audio   # Enable audio
+```
+
+### RISC-V RV32I
+
+Modern 32-bit RISC-V processor with single-cycle and 5-stage pipelined implementations.
+
+**Single-Cycle Datapath:**
+```
++-----------------------------------------------------------------------+
+|                    RV32I Single-Cycle Datapath                         |
++-----------------------------------------------------------------------+
+|  +------+    +------+    +-------+    +-------+                       |
+|  |  PC  |--->| Inst |--->|Decoder|--->|Control|                       |
+|  | Reg  |    | Mem  |    |       |    |Signals|                       |
+|  +--+---+    +------+    +-------+    +---+---+                       |
+|     |                                     |                            |
+|  +--+-------------------------------------+--+                         |
+|  |              Datapath Muxes               |                         |
+|  +--+--------+-------------------+-----------+                         |
+|     |        |                   |                                     |
+|  +--+--+  +--+--+            +---+--+    +------+                      |
+|  | PC  |  | Reg |  rs1/rs2   | ALU  |--->| Data |                      |
+|  |+4/Br|  |File |----------->|      |    | Mem  |                      |
+|  +-----+  |32x32|            +------+    +------+                      |
+|           +--+--+                |           |                         |
+|              ^                   v           v                         |
+|              +--------[ Write Back ]<--------+                         |
++-----------------------------------------------------------------------+
+```
+
+**5-Stage Pipeline:**
+```
++------+    +------+    +------+    +------+    +------+
+|  IF  |--->|  ID  |--->|  EX  |--->| MEM  |--->|  WB  |
++------+    +------+    +------+    +------+    +------+
+ Fetch      Decode      Execute     Memory     Write
+ Inst       Regs/Imm    ALU/Br      Access     Back
+```
+
+**Usage:**
+```ruby
+require_relative 'examples/riscv/hdl/harness'
+
+harness = RISCV::Harness.new
+harness.load_program([
+  0x00500093,  # addi x1, x0, 5
+  0x00A00113,  # addi x2, x0, 10
+  0x002081B3,  # add x3, x1, x2
+])
+harness.reset!
+harness.run_cycles(10)
+puts "x3 = #{harness.read_reg(3)}"  # => 15
+```
+
+See each example's documentation for complete details on architecture, instruction sets, and CLI options.
 
 ## Project Structure
 
@@ -283,7 +414,10 @@ rhdl/
 │   ├── tui/            # Terminal GUI
 │   └── diagram/        # Diagram rendering
 ├── examples/           # Example implementations
-│   └── mos6502/        # MOS 6502 CPU with Apple II support
+│   ├── mos6502/        # MOS 6502 CPU (8-bit, 189+ tests)
+│   ├── apple2/         # Apple II computer emulation
+│   ├── gameboy/        # Game Boy (DMG/GBC/SGB)
+│   └── riscv/          # RISC-V RV32I CPU (single + pipelined)
 ├── export/             # Generated output files
 │   ├── verilog/        # Generated Verilog
 │   └── gates/          # Gate-level JSON netlists
