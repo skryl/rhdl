@@ -50,6 +50,9 @@ RSpec.describe RHDL::CLI::Tasks::NativeTask do
       it 'can be called' do
         task = described_class.new(clean: true)
 
+        # Mock FileUtils to avoid actually cleaning built extensions
+        allow(FileUtils).to receive(:rm_rf)
+
         # Clean should not raise even if directories don't exist
         expect { task.run }.to output(/cleaned/).to_stdout
       end
@@ -74,6 +77,9 @@ RSpec.describe RHDL::CLI::Tasks::NativeTask do
     let(:task) { described_class.new(clean: true) }
 
     it 'displays cleaned message' do
+      # Mock FileUtils to avoid actually cleaning built extensions
+      allow(FileUtils).to receive(:rm_rf)
+
       expect { task.clean }.to output(/cleaned/).to_stdout
     end
   end

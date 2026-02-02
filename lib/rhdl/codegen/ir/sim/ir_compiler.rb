@@ -27,8 +27,20 @@ module RHDL
         end
         COMPILER_LIB_PATH = File.join(COMPILER_EXT_DIR, COMPILER_LIB_NAME)
 
-        # Try to load compiler extension
-        COMPILER_AVAILABLE = File.exist?(COMPILER_LIB_PATH)
+        # Check if compiler extension is available and functional
+        COMPILER_AVAILABLE = begin
+          if File.exist?(COMPILER_LIB_PATH)
+            # Try to load the library and check for required symbols
+            _test_lib = Fiddle.dlopen(COMPILER_LIB_PATH)
+            _test_lib['ir_sim_create']
+            _test_lib['ir_sim_compile']
+            true
+          else
+            false
+          end
+        rescue Fiddle::DLError
+          false
+        end
 
         # Backwards compatibility alias
         IR_COMPILER_AVAILABLE = COMPILER_AVAILABLE

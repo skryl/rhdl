@@ -444,7 +444,7 @@ RSpec.describe RHDL::Apple2::CPU6502 do
   describe 'TSX' do
     before do
       set_reset_vector(0x0200)
-      # TSX (stack pointer should be $FF after reset)
+      # TSX (stack pointer is $FD after reset - 6502 reset performs 3 dummy pushes)
       load_program([0xBA], 0x0200)
       reset_cpu
       run_cycles(3)
@@ -452,7 +452,7 @@ RSpec.describe RHDL::Apple2::CPU6502 do
 
     it 'transfers S to X' do
       run_cycles(2)  # TSX
-      expect(cpu.get_output(:debug_x)).to eq(0xFF)
+      expect(cpu.get_output(:debug_x)).to eq(0xFD)
     end
   end
 
