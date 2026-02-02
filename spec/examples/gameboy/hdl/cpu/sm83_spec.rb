@@ -58,8 +58,8 @@ RSpec.describe 'SM83 CPU Instructions' do
 
   before(:all) do
     begin
-      require_relative '../../../examples/gameboy/gameboy'
-      require_relative '../../../examples/gameboy/utilities/gameboy_ir'
+      require_relative '../../../../../examples/gameboy/gameboy'
+      require_relative '../../../../../examples/gameboy/utilities/gameboy_ir'
 
       # Check if IR compiler is available
       @ir_available = RHDL::Codegen::IR::COMPILER_AVAILABLE rescue false
@@ -734,11 +734,14 @@ RSpec.describe 'SM83 CPU Instructions' do
   # ==========================================================================
   describe 'Call and Return Instructions' do
     it 'CALL nn (0xCD) calls subroutine' do
+      # Layout: CALL 0x0106, LD A 0x22, HALT, LD A 0x11, RET
+      # Addresses: 0x0100-0x0102 (CALL), 0x0103-0x0104 (LD A), 0x0105 (HALT),
+      #            0x0106-0x0107 (subroutine LD A), 0x0108 (RET)
       code = [
-        0xCD, 0x07, 0x01,  # CALL 0x0107
+        0xCD, 0x06, 0x01,  # CALL 0x0106 (subroutine at offset 6)
         0x3E, 0x22,        # LD A, 0x22 (after return)
         0x76,              # HALT
-        0x3E, 0x11,        # LD A, 0x11 (subroutine)
+        0x3E, 0x11,        # LD A, 0x11 (subroutine at 0x0106)
         0xC9               # RET
       ]
       state = run_test_code(code)
