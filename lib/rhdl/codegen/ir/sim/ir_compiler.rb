@@ -795,12 +795,14 @@ module RHDL
             Fiddle::TYPE_INT
           )
 
-          # Game Boy extension functions
-          @fn_is_gameboy_mode = Fiddle::Function.new(
-            @lib['gameboy_ir_sim_is_mode'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
+          # Game Boy extension functions (optional - may not be compiled in)
+          @gameboy_available = false
+          begin
+            @fn_is_gameboy_mode = Fiddle::Function.new(
+              @lib['gameboy_ir_sim_is_mode'],
+              [Fiddle::TYPE_VOIDP],
+              Fiddle::TYPE_INT
+            )
 
           @fn_gameboy_load_rom = Fiddle::Function.new(
             @lib['gameboy_ir_sim_load_rom'],
@@ -927,6 +929,11 @@ module RHDL
             [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_UINT
           )
+            @gameboy_available = true
+          rescue Fiddle::DLError
+            # Game Boy extension not compiled in - that's OK
+            @gameboy_available = false
+          end
 
           # VCD Tracing functions
           @fn_trace_start = Fiddle::Function.new(
