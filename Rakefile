@@ -308,6 +308,13 @@ namespace :bench do
     RHDL::CLI::Tasks::BenchmarkTask.new(type: :verilator, cycles: cycles).run
   end
 
+  desc "Benchmark GameBoy with Prince of Persia ROM"
+  task :gameboy, [:frames] do |_, args|
+    load_cli_tasks
+    frames = args[:frames]&.to_i || 1000
+    RHDL::CLI::Tasks::BenchmarkTask.new(type: :gameboy, frames: frames).run
+  end
+
   desc "Benchmark IR runners (alias for bench:apple2)"
   task :ir, [:cycles] => :apple2
 end
