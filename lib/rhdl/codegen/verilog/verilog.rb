@@ -176,6 +176,18 @@ module RHDL
         end
         lines << "" unless module_def.regs.empty? && module_def.nets.empty? && module_def.memories.empty?
 
+        # Generate initial block for regs with reset_values (for simulation)
+        # This is needed for Verilator and other simulators when there's no reset signal
+        regs_with_init = module_def.regs.select { |reg| reg.reset_value }
+        unless regs_with_init.empty?
+          lines << "  initial begin"
+          regs_with_init.each do |reg|
+            lines << "    #{sanitize(reg.name)} = #{literal(reg.reset_value, reg.width)};"
+          end
+          lines << "  end"
+          lines << ""
+        end
+
         # Consolidate multiple assigns to the same target into a single assign
         consolidated = consolidate_assigns(module_def.assigns)
         consolidated.each do |assign|

@@ -438,7 +438,8 @@ module RHDL
         lib_file = shared_lib_path
         needs_build = !File.exist?(lib_file) ||
                       File.mtime(verilog_file) > File.mtime(lib_file) ||
-                      File.mtime(wrapper_file) > File.mtime(lib_file)
+                      File.mtime(wrapper_file) > File.mtime(lib_file) ||
+                      File.mtime(__FILE__) > File.mtime(lib_file)
 
         if needs_build
           puts "  Compiling with Verilator..."
@@ -689,8 +690,8 @@ module RHDL
           '--top-module', 'apple2_apple2',
           # Optimization flags
           '-O3',                  # Maximum Verilator optimization
-          '--x-assign', 'fast',   # Faster X state handling
-          '--x-initial', 'fast',  # Faster initialization
+          '--x-assign', '0',      # Initialize X to 0 (required for proper simulation)
+          '--x-initial', 'unique', # Proper initial block handling (required for timing generator)
           '--noassert',           # Disable assertions
           # Warning suppressions
           '-Wno-fatal',           # Continue despite warnings
