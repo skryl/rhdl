@@ -334,6 +334,12 @@ module RHDL
         def apple2_load_track(track, data)
           data = data.pack('C*') if data.is_a?(Array)
           @fn_apple2_load_track.call(@ctx, track, data, data.bytesize)
+          # Also load into HDL memory
+          @fn_apple2_load_track_into_hdl.call(@ctx, track)
+        end
+
+        def apple2_load_track_into_hdl(track)
+          @fn_apple2_load_track_into_hdl.call(@ctx, track)
         end
 
         def apple2_get_track
@@ -800,6 +806,12 @@ module RHDL
           @fn_apple2_load_track = Fiddle::Function.new(
             @lib['apple2_ir_sim_load_track'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_apple2_load_track_into_hdl = Fiddle::Function.new(
+            @lib['apple2_ir_sim_load_track_into_hdl'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
             Fiddle::TYPE_VOID
           )
 

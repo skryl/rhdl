@@ -1,7 +1,8 @@
 //! Apple II full system simulation extension
 //!
-//! Provides batched CPU cycle execution with memory bridging for Apple II
-//! including Disk II controller emulation for disk boot support.
+//! Provides batched CPU cycle execution with memory bridging for Apple II.
+//! The disk controller is fully HDL-driven - this extension only provides
+//! RAM/ROM bridging and track data loading into HDL memory.
 
 mod ffi;
 
@@ -16,9 +17,6 @@ pub const TRACK_SIZE: usize = 6656;
 /// Number of tracks on a disk
 pub const NUM_TRACKS: usize = 35;
 
-/// Cycles between disk bytes (~32 CPU cycles at 1MHz, ~430 at 14MHz)
-pub const DISK_BYTE_CYCLES: usize = 430;
-
 /// Result from batched Apple II CPU cycle execution
 pub struct Apple2BatchResult {
     pub text_dirty: bool,
@@ -28,13 +26,22 @@ pub struct Apple2BatchResult {
 }
 
 /// Apple II specific extension state
+///
+/// This extension provides:
+/// - RAM (48KB) bridging between HDL and external memory
+/// - ROM (12KB) bridging for main ROM at $D000-$FFFF
+/// - Track data storage for disk (loaded into HDL memory)
+/// - Slot ROM storage for disk boot ROM
+///
+/// The disk controller is FULLY HDL-driven. This extension does NOT
+/// implement disk controller logic - it only loads track data into
+/// the HDL's track_memory.
 pub struct Apple2Extension {
     /// RAM (48KB)
     pub ram: Vec<u8>,
     /// ROM (12KB) - main ROM at $D000-$FFFF
     pub rom: Vec<u8>,
     /// Signal indices for memory bridging
-    pub ram_addr_idx: usize,
     pub ram_do_idx: usize,
     pub ram_we_idx: usize,
     pub d_idx: usize,
@@ -48,35 +55,21 @@ pub struct Apple2Extension {
     /// Number of sub-cycles per CPU cycle (default: 14)
     pub sub_cycles: usize,
 
-    // Disk II controller state
+    // Disk data storage (for loading into HDL memory)
     /// Slot ROM (256 bytes) at $C600-$C6FF for slot 6
     pub disk_slot_rom: Vec<u8>,
     /// Track data for all 35 tracks (each 6656 bytes)
     pub disk_tracks: Vec<Vec<u8>>,
-    /// Current track number (0-34) - computed from half_track
-    pub disk_current_track: usize,
-    /// Half-track position (0-69) - the actual stepper position
-    pub disk_half_track: usize,
-    /// Current byte position within track
-    pub disk_byte_pos: usize,
-    /// Cycle counter for disk byte timing
-    pub disk_cycle_counter: usize,
-    /// Motor on flag
-    pub disk_motor_on: bool,
-    /// Stepper motor phases (4 bits)
-    pub disk_phases: u8,
-    /// Q6 latch state
-    pub disk_q6: bool,
-    /// Q7 latch state
-    pub disk_q7: bool,
-    /// Drive select (false = drive 1, true = drive 2)
-    pub disk_drive2: bool,
-    /// Data latch for read operations
-    pub disk_data_latch: u8,
-    /// Data latch valid (high bit set when new data ready)
-    pub disk_latch_valid: bool,
-    /// Last byte actually returned to CPU (for tracking new bytes)
-    pub disk_last_read: u8,
+    /// Index of track_memory in memory_arrays
+    pub track_memory_idx: Option<usize>,
+    /// Index of disk ROM in memory_arrays
+    pub disk_rom_idx: Option<usize>,
+    /// Last track loaded into HDL memory
+    pub last_loaded_track: Option<usize>,
+    /// Signal index for HDL track output
+    pub disk_track_idx: usize,
+    /// Signal index for HDL motor status
+    pub disk_motor_idx: usize,
 }
 
 impl Apple2Extension {
@@ -84,10 +77,19 @@ impl Apple2Extension {
     pub fn new(core: &CoreSimulator, sub_cycles: usize) -> Self {
         let name_to_idx = &core.name_to_idx;
 
+        // Find memory indices for disk
+        let track_memory_idx = core.memory_name_to_idx.get("disk__track_memory").copied();
+        let disk_rom_idx = core.memory_name_to_idx.get("disk__rom__rom").copied();
+
+        if track_memory_idx.is_some() {
+            eprintln!("Apple2Extension: Found disk__track_memory at index {:?}", track_memory_idx);
+        } else {
+            eprintln!("Apple2Extension: WARNING - disk__track_memory not found in IR");
+        }
+
         Self {
             ram: vec![0u8; 48 * 1024],
             rom: vec![0u8; 12 * 1024],
-            ram_addr_idx: *name_to_idx.get("ram_addr").unwrap_or(&0),
             ram_do_idx: *name_to_idx.get("ram_do").unwrap_or(&0),
             ram_we_idx: *name_to_idx.get("ram_we").unwrap_or(&0),
             d_idx: *name_to_idx.get("d").unwrap_or(&0),
@@ -98,21 +100,13 @@ impl Apple2Extension {
             cpu_addr_idx: *name_to_idx.get("cpu__addr_reg").unwrap_or(&0),
             prev_speaker: 0,
             sub_cycles,
-            // Initialize disk controller state
             disk_slot_rom: vec![0u8; 256],
             disk_tracks: (0..NUM_TRACKS).map(|_| vec![0u8; TRACK_SIZE]).collect(),
-            disk_current_track: 0,
-            disk_half_track: 0,
-            disk_byte_pos: 0,
-            disk_cycle_counter: 0,
-            disk_motor_on: false,
-            disk_phases: 0,
-            disk_q6: false,
-            disk_q7: false,
-            disk_drive2: false,
-            disk_data_latch: 0,
-            disk_latch_valid: true,  // Start valid so first read works
-            disk_last_read: 0x00,  // Initialize to 0 (never a valid disk nibble, since all valid nibbles have bit 7 set)
+            track_memory_idx,
+            disk_rom_idx,
+            last_loaded_track: None,
+            disk_track_idx: *name_to_idx.get("disk__track").unwrap_or(&0),
+            disk_motor_idx: *name_to_idx.get("disk__d1_active").unwrap_or(&0),
         }
     }
 
@@ -122,7 +116,7 @@ impl Apple2Extension {
         self.disk_slot_rom[..len].copy_from_slice(&data[..len]);
     }
 
-    /// Load track nibble data
+    /// Load track nibble data into extension storage
     pub fn load_track(&mut self, track: usize, data: &[u8]) {
         if track < NUM_TRACKS {
             let len = data.len().min(TRACK_SIZE);
@@ -130,130 +124,66 @@ impl Apple2Extension {
         }
     }
 
-    /// Get current track number
-    pub fn get_track(&self) -> usize {
-        self.disk_current_track
-    }
-
-    /// Check if motor is on
-    pub fn is_motor_on(&self) -> bool {
-        self.disk_motor_on
-    }
-
-    /// Handle disk I/O access ($C0E0-$C0EF for slot 6)
-    /// Returns (read_data, is_read)
-    pub fn handle_disk_io(&mut self, addr: u16) -> (u8, bool) {
-        let reg = addr & 0x0F;
-
-        match reg {
-            // Phase control (C0E0-C0E7)
-            0x0 => { self.disk_phases &= !0x01; self.update_track_from_phases(); }
-            0x1 => { self.disk_phases |= 0x01; self.update_track_from_phases(); }
-            0x2 => { self.disk_phases &= !0x02; self.update_track_from_phases(); }
-            0x3 => { self.disk_phases |= 0x02; self.update_track_from_phases(); }
-            0x4 => { self.disk_phases &= !0x04; self.update_track_from_phases(); }
-            0x5 => { self.disk_phases |= 0x04; self.update_track_from_phases(); }
-            0x6 => { self.disk_phases &= !0x08; self.update_track_from_phases(); }
-            0x7 => { self.disk_phases |= 0x08; self.update_track_from_phases(); }
-            // Motor control
-            0x8 => { self.disk_motor_on = false; }
-            0x9 => { self.disk_motor_on = true; }
-            // Drive select
-            0xA => { self.disk_drive2 = false; }
-            0xB => { self.disk_drive2 = true; }
-            // Q6/Q7 latches
-            0xC => { self.disk_q6 = false; }
-            0xD => { self.disk_q6 = true; }
-            0xE => { self.disk_q7 = false; }
-            0xF => { self.disk_q7 = true; }
-            _ => {}
-        }
-
-        // Read mode: Q6=0, Q7=0 reads data at $C0EC
-        if reg == 0xC && !self.disk_q7 {
-            // Read data from disk
-            let data = self.read_disk_byte();
-            return (data, true);
-        }
-
-        (0, false)
-    }
-
-    /// Read next byte from disk (advances position based on timing)
-    fn read_disk_byte(&mut self) -> u8 {
-        if !self.disk_motor_on {
-            return 0;
-        }
-
-        let track = self.disk_current_track;
+    /// Load track data into HDL's track_memory
+    /// This should be called to sync track data into the HDL memory array
+    pub fn load_track_into_hdl(&mut self, core: &mut CoreSimulator, track: usize) {
         if track >= NUM_TRACKS {
-            return 0;
+            return;
         }
 
-        let byte = self.disk_tracks[track][self.disk_byte_pos];
-        self.disk_data_latch = byte;
-        byte
+        if let Some(mem_idx) = self.track_memory_idx {
+            if mem_idx < core.memory_arrays.len() {
+                let track_data = &self.disk_tracks[track];
+                let mem = &mut core.memory_arrays[mem_idx];
+                for (i, &byte) in track_data.iter().enumerate() {
+                    if i < mem.len() {
+                        mem[i] = byte as u64;
+                    }
+                }
+                self.last_loaded_track = Some(track);
+                eprintln!("Loaded track {} into HDL track_memory", track);
+            }
+        }
     }
 
-    /// Advance disk byte position (called based on cycle timing)
-    pub fn advance_disk_position(&mut self) {
-        if self.disk_motor_on {
-            self.disk_cycle_counter += 1;
-            if self.disk_cycle_counter >= DISK_BYTE_CYCLES {
-                self.disk_cycle_counter = 0;
-                self.disk_byte_pos = (self.disk_byte_pos + 1) % TRACK_SIZE;
+    /// Load disk ROM into HDL's disk ROM memory
+    pub fn load_disk_rom_into_hdl(&self, core: &mut CoreSimulator) {
+        if let Some(mem_idx) = self.disk_rom_idx {
+            if mem_idx < core.memory_arrays.len() {
+                let mem = &mut core.memory_arrays[mem_idx];
+                for (i, &byte) in self.disk_slot_rom.iter().enumerate() {
+                    if i < mem.len() {
+                        mem[i] = byte as u64;
+                    }
+                }
+                // Debug: verify the load
+                eprintln!("Loaded disk ROM into HDL disk__rom__rom (mem_idx={})", mem_idx);
+                eprintln!("  First 8 bytes: {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}",
+                    mem.get(0).copied().unwrap_or(0),
+                    mem.get(1).copied().unwrap_or(0),
+                    mem.get(2).copied().unwrap_or(0),
+                    mem.get(3).copied().unwrap_or(0),
+                    mem.get(4).copied().unwrap_or(0),
+                    mem.get(5).copied().unwrap_or(0),
+                    mem.get(6).copied().unwrap_or(0),
+                    mem.get(7).copied().unwrap_or(0));
             }
         }
     }
 
-    /// Update track position based on stepper phases
-    fn update_track_from_phases(&mut self) {
-        // Simple stepper motor emulation
-        // Each track has 4 phases, phases are at 90 degree intervals
-        // The stepper moves based on which adjacent phase is activated
+    /// Get current track from HDL
+    pub fn get_hdl_track(&self, core: &CoreSimulator) -> usize {
+        (core.signals[self.disk_track_idx] as usize) & 0x3F
+    }
 
-        // Count set phases
-        let phase_count = self.disk_phases.count_ones();
-        if phase_count != 1 {
-            return; // Need exactly one phase active for movement
-        }
-
-        // Find the active phase (0-3)
-        let active_phase = match self.disk_phases {
-            0x01 => 0,
-            0x02 => 1,
-            0x04 => 2,
-            0x08 => 3,
-            _ => return,
-        };
-
-        // Current track maps to phase: track 0 = phase 0, track 1 = phase 2, etc.
-        // Half-tracks: even tracks use phases 0,2, odd use 1,3
-        let current_phase = (self.disk_current_track * 2) % 4;
-
-        // Calculate phase difference
-        let diff = (active_phase as i32 - current_phase as i32 + 4) % 4;
-
-        match diff {
-            1 => {
-                // Step in (towards center)
-                if self.disk_current_track < NUM_TRACKS - 1 {
-                    self.disk_current_track += 1;
-                }
-            }
-            3 => {
-                // Step out (towards edge)
-                if self.disk_current_track > 0 {
-                    self.disk_current_track -= 1;
-                }
-            }
-            _ => {}
-        }
+    /// Check if motor is on from HDL
+    pub fn is_motor_on(&self, core: &CoreSimulator) -> bool {
+        core.signals[self.disk_motor_idx] != 0
     }
 
     /// Check if the simulator has Apple II specific signals
     pub fn is_apple2_ir(name_to_idx: &HashMap<String, usize>) -> bool {
-        name_to_idx.contains_key("ram_addr") && name_to_idx.contains_key("ram_do")
+        name_to_idx.contains_key("ram_do")
     }
 
     /// Load ROM data
@@ -271,7 +201,14 @@ impl Apple2Extension {
         }
     }
 
-    /// Run batched CPU cycles with memory bridging and disk I/O
+    /// Run batched CPU cycles with memory bridging
+    ///
+    /// This function:
+    /// - Bridges RAM reads/writes between HDL and external memory
+    /// - Bridges ROM reads
+    /// - Passes memory arrays for dynamic HDL memory access (disk ROM, track memory)
+    /// - Lets the HDL disk controller run naturally
+    /// - Monitors HDL track changes and reloads track data as needed
     pub fn run_cpu_cycles(&mut self, core: &mut CoreSimulator, n: usize, key_data: u8, key_ready: bool) -> Apple2BatchResult {
         if !core.compiled {
             return Apple2BatchResult {
@@ -284,24 +221,13 @@ impl Apple2Extension {
 
         let lib = core.compiled_lib.as_ref().unwrap();
         unsafe {
-            // Extended function signature with disk support - all tracks passed
+            // Function signature with memory array pointers for dynamic HDL memory access
             type RunCpuCyclesFn = unsafe extern "C" fn(
                 signals: *mut u64, signals_len: usize,
                 ram: *mut u8, ram_len: usize,
                 rom: *const u8, rom_len: usize,
                 slot_rom: *const u8, slot_rom_len: usize,
-                all_tracks: *const u8, num_tracks: usize, track_size: usize,
-                disk_byte_pos: *mut usize,
-                disk_cycle_counter: *mut usize,
-                disk_motor_on: *mut bool,
-                disk_phases: *mut u8,
-                disk_q6: *mut bool,
-                disk_q7: *mut bool,
-                disk_current_track: *mut usize,
-                disk_half_track: *mut usize,
-                disk_latch_valid: *mut bool,
-                disk_data_latch: *mut u8,
-                disk_last_read: *mut u8,
+                mem_ptrs: *const *const u64, mem_lens: *const usize,
                 n: usize,
                 key_data: u8,
                 key_ready: bool,
@@ -318,11 +244,22 @@ impl Apple2Extension {
             let mut key_cleared = false;
             let mut speaker_toggles: u32 = 0;
 
-            // Flatten all track data into a single contiguous array for the generated code
-            // This allows track switching during execution
-            let all_tracks_flat: Vec<u8> = self.disk_tracks.iter()
-                .flat_map(|t| t.iter().copied())
+            // Build arrays of memory pointers and lengths
+            let mem_ptrs: Vec<*const u64> = core.memory_arrays.iter()
+                .map(|arr| arr.as_ptr())
                 .collect();
+            let mem_lens: Vec<usize> = core.memory_arrays.iter()
+                .map(|arr| arr.len())
+                .collect();
+
+            // Debug: verify disk ROM memory is being passed (index 4 is disk__rom__rom)
+            if n == self.sub_cycles && core.memory_arrays.len() > 4 {
+                let disk_rom = &core.memory_arrays[4];
+                if !disk_rom.is_empty() {
+                    eprintln!("run_cpu_cycles: disk_rom[0..4] = {:02X} {:02X} {:02X} {:02X}",
+                        disk_rom[0], disk_rom[1], disk_rom[2], disk_rom[3]);
+                }
+            }
 
             let cycles_run = func(
                 core.signals.as_mut_ptr(),
@@ -333,20 +270,8 @@ impl Apple2Extension {
                 self.rom.len(),
                 self.disk_slot_rom.as_ptr(),
                 self.disk_slot_rom.len(),
-                all_tracks_flat.as_ptr(),
-                NUM_TRACKS,
-                TRACK_SIZE,
-                &mut self.disk_byte_pos,
-                &mut self.disk_cycle_counter,
-                &mut self.disk_motor_on,
-                &mut self.disk_phases,
-                &mut self.disk_q6,
-                &mut self.disk_q7,
-                &mut self.disk_current_track,
-                &mut self.disk_half_track,
-                &mut self.disk_latch_valid,
-                &mut self.disk_data_latch,
-                &mut self.disk_last_read,
+                mem_ptrs.as_ptr(),
+                mem_lens.as_ptr(),
                 n * self.sub_cycles,
                 key_data,
                 key_ready,
@@ -355,6 +280,12 @@ impl Apple2Extension {
                 &mut key_cleared,
                 &mut speaker_toggles,
             );
+
+            // Check if HDL track changed and reload if needed
+            let hdl_track = self.get_hdl_track(core);
+            if self.last_loaded_track != Some(hdl_track) {
+                self.load_track_into_hdl(core, hdl_track);
+            }
 
             Apple2BatchResult {
                 text_dirty,
@@ -366,7 +297,6 @@ impl Apple2Extension {
     }
 
     /// Run CPU cycles with VCD tracing - captures signals after each CPU cycle
-    /// This is slower than run_cpu_cycles but provides full signal visibility
     pub fn run_cpu_cycles_traced(
         &mut self,
         core: &mut CoreSimulator,
@@ -400,13 +330,18 @@ impl Apple2Extension {
         total_result
     }
 
-    /// Generate Apple II specific batched execution code with disk I/O support
+    /// Generate Apple II specific batched execution code
+    ///
+    /// This generates code that:
+    /// - Bridges RAM reads/writes
+    /// - Bridges ROM reads
+    /// - Lets HDL handle ALL disk controller logic
+    /// - Uses evaluate_inline_mem for dynamic memory access (disk ROM, track memory)
     pub fn generate_code(core: &CoreSimulator) -> String {
         let mut code = String::new();
 
         let ram_do_idx = *core.name_to_idx.get("ram_do").unwrap_or(&0);
         let ram_we_idx = *core.name_to_idx.get("ram_we").unwrap_or(&0);
-        let cpu_we_idx = core.name_to_idx.get("cpu_we").copied().unwrap_or(0);
         let d_idx = *core.name_to_idx.get("d").unwrap_or(&0);
         let clk_idx = *core.name_to_idx.get("clk_14m").unwrap_or(&0);
         let k_idx = *core.name_to_idx.get("k").unwrap_or(&0);
@@ -414,152 +349,27 @@ impl Apple2Extension {
         let speaker_idx = *core.name_to_idx.get("speaker").unwrap_or(&0);
         let cpu_addr_idx = *core.name_to_idx.get("cpu__addr_reg").unwrap_or(&0);
 
-        // Disk controller output - we inject disk data here instead of into cpu__di
-        // This preserves the HDL mux architecture: cpu_din = mux(disk_select, disk_dout, ram_do, ...)
-        // By injecting into disk__d_out, the mux correctly routes our data when disk_select is true
-        let disk_d_out_idx = core.name_to_idx.get("disk__d_out")
-            .copied()
-            .unwrap_or(0);
+        let num_mems = core.ir.memories.len();
 
-        // CPU data input - for debug tracing only (HDL mux computes this from disk_dout and ram_do)
-        let cpu_di_idx = core.name_to_idx.get("cpu__di")
-            .or_else(|| core.name_to_idx.get("cpu_di"))
-            .copied()
-            .unwrap_or(0);
+        eprintln!("Apple2 generate_code (HDL-driven): cpu_addr_idx={}, ram_do_idx={}, clk_idx={}, num_mems={}",
+                  cpu_addr_idx, ram_do_idx, clk_idx, num_mems);
 
-        // CPU debug registers
-        let cpu_y_reg_idx = core.name_to_idx.get("cpu__y_reg").copied().unwrap_or(0);
-        let cpu_a_reg_idx = core.name_to_idx.get("cpu__a_reg").copied().unwrap_or(0);
-        let cpu_flag_n_idx = core.name_to_idx.get("cpu__flag_n").copied().unwrap_or(0);
-        let cpu_opcode_idx = core.name_to_idx.get("cpu__opcode").copied().unwrap_or(0);
-
-        eprintln!("Apple2 generate_code: cpu_addr_idx={}, ram_do_idx={}, disk_d_out_idx={}",
-                  cpu_addr_idx, ram_do_idx, disk_d_out_idx);
-        eprintln!("Apple2 generate_code: cpu_y_reg_idx={}, cpu_a_reg_idx={}, cpu_flag_n_idx={}, cpu_opcode_idx={}",
-                  cpu_y_reg_idx, cpu_a_reg_idx, cpu_flag_n_idx, cpu_opcode_idx);
+        // Debug: print if clk_14m was found
+        if core.name_to_idx.get("clk_14m").is_none() {
+            eprintln!("WARNING: clk_14m not found in signals! Disk controller won't work.");
+        }
 
         let clock_indices: Vec<usize> = core.clock_indices.clone();
-
-        // Print clock domain info
-        eprintln!("Apple2 generate_code: {} clock domains", clock_indices.len());
-        for (i, &clk_idx) in clock_indices.iter().enumerate() {
-            // Find signal name for this clock
-            let clk_name = core.name_to_idx.iter()
-                .find(|(_, &v)| v == clk_idx)
-                .map(|(k, _)| k.as_str())
-                .unwrap_or("unknown");
-            eprintln!("  Clock domain {}: signal {} ({})", i, clk_idx, clk_name);
-        }
         let num_clocks = clock_indices.len().max(1);
         let num_regs = core.seq_targets.len();
 
         code.push_str("\n// ============================================================================\n");
-        code.push_str("// Apple II Extension: Batched CPU Cycle Execution with Disk I/O\n");
+        code.push_str("// Apple II Extension: HDL-Driven Simulation with Memory Bridging\n");
+        code.push_str("// Disk controller is fully HDL-driven - this only bridges RAM/ROM\n");
+        code.push_str("// Uses evaluate_inline_mem for dynamic memory (disk ROM, track memory)\n");
         code.push_str("// ============================================================================\n\n");
 
-        // Constants for disk timing
-        code.push_str("const DISK_BYTE_CYCLES: usize = 430;\n");
-        code.push_str("const TRACK_SIZE: usize = 6656;\n");
-        code.push_str("const NUM_TRACKS: usize = 35;\n\n");
-
-        // Generate a custom evaluate function that SKIPS disk__d_out
-        // This is the architectural fix: instead of skipping cpu__di (which breaks the HDL mux),
-        // we skip disk__d_out and inject disk data there. The HDL mux then correctly routes
-        // disk data to cpu_din when disk_select is true, or ram_do when disk_select is false.
-        code.push_str("/// Custom evaluate function that skips disk__d_out assignment\n");
-        code.push_str("/// disk__d_out is injected from Rust-side disk emulation\n");
-        code.push_str("#[inline(always)]\n");
-        code.push_str("unsafe fn evaluate_apple2_inline(signals: &mut [u64]) {\n");
-        let skip_signals = vec![disk_d_out_idx];
-        let eval_body = core.generate_evaluate_with_skips(&skip_signals);
-        code.push_str(&eval_body);
-        code.push_str("}\n\n");
-
-        // Generate custom Apple2 tick function
-        // Injects disk data into disk__d_out, letting the HDL mux compute cpu__di correctly
-        code.push_str("/// Custom Apple2 tick function that injects disk data into disk__d_out\n");
-        code.push_str("/// The HDL mux then correctly routes disk_dout or ram_do to cpu_din.\n");
-        code.push_str("#[inline(always)]\n");
-        code.push_str(&format!("unsafe fn tick_apple2_inline(\n"));
-        code.push_str("    signals: &mut [u64],\n");
-        code.push_str(&format!("    old_clocks: &mut [u64; {}],\n", num_clocks));
-        code.push_str(&format!("    next_regs: &mut [u64; {}],\n", num_regs.max(1)));
-        code.push_str("    disk_data: u64,\n");
-        code.push_str(") {\n");
-
-        // Step 1: Inject disk_data into disk__d_out FIRST
-        // This is the data that will be used when the CPU accesses disk I/O or slot ROM
-        code.push_str(&format!("    // Inject disk data into disk__d_out BEFORE evaluate\n"));
-        code.push_str(&format!("    signals[{}] = disk_data;\n\n", disk_d_out_idx));
-
-        // Step 2: Evaluate combinational logic (skips disk__d_out, so our value is preserved)
-        // The HDL mux will now correctly compute cpu__di from disk__d_out when disk_select is true
-        code.push_str("    evaluate_apple2_inline(signals);\n\n");
-
-        // Step 4: Compute next values for all registers (copied from CoreSimulator)
-        let mut seq_idx = 0;
-        for process in &core.ir.processes {
-            if !process.clocked {
-                continue;
-            }
-            for stmt in &process.statements {
-                if let Some(&target_idx) = core.name_to_idx.get(&stmt.target) {
-                    let width = core.widths.get(target_idx).copied().unwrap_or(64);
-                    let expr_code = core.expr_to_rust(&stmt.expr);
-                    code.push_str(&format!("    next_regs[{}] = ({}) & {};\n",
-                                           seq_idx, expr_code, CoreSimulator::mask_const(width)));
-                    seq_idx += 1;
-                }
-            }
-        }
-        code.push_str("\n");
-
-        // Step 4: Track which registers have been updated
-        code.push_str(&format!("    let mut updated = [false; {}];\n\n", num_regs.max(1)));
-
-        // Step 5: Check for rising edges
-        for (domain_idx, &clk) in clock_indices.iter().enumerate() {
-            code.push_str(&format!("    // Clock domain {} (signal {})\n", domain_idx, clk));
-            code.push_str(&format!("    if old_clocks[{}] == 0 && signals[{}] == 1 {{\n", domain_idx, clk));
-
-            for &(seq_idx, target_idx) in &core.clock_domain_assigns[domain_idx] {
-                code.push_str(&format!("        if !updated[{}] {{ signals[{}] = next_regs[{}]; updated[{}] = true; }}\n",
-                                       seq_idx, target_idx, seq_idx, seq_idx));
-            }
-
-            code.push_str("    }\n");
-        }
-        code.push_str("\n");
-
-        // Step 6: Loop for derived clock propagation
-        code.push_str("    // Loop for derived clock propagation\n");
-        code.push_str("    for _iter in 0..10 {\n");
-        code.push_str(&format!("        let mut clock_before = [0u64; {}];\n", num_clocks));
-        for (domain_idx, &clk) in clock_indices.iter().enumerate() {
-            code.push_str(&format!("        clock_before[{}] = signals[{}];\n", domain_idx, clk));
-        }
-        code.push_str("\n");
-        code.push_str("        evaluate_apple2_inline(signals);\n");
-
-        // Check for NEW rising edges
-        code.push_str("        let mut any_rising = false;\n");
-        for (domain_idx, &clk) in clock_indices.iter().enumerate() {
-            code.push_str(&format!("        if clock_before[{}] == 0 && signals[{}] == 1 {{\n", domain_idx, clk));
-            code.push_str("            any_rising = true;\n");
-            for &(seq_idx, target_idx) in &core.clock_domain_assigns[domain_idx] {
-                code.push_str(&format!("            if !updated[{}] {{ signals[{}] = next_regs[{}]; updated[{}] = true; }}\n",
-                                       seq_idx, target_idx, seq_idx, seq_idx));
-            }
-            code.push_str("        }\n");
-        }
-        code.push_str("\n");
-        code.push_str("        if !any_rising { break; }\n");
-        code.push_str("    }\n\n");
-
-        // Step 7: Final evaluate (disk__d_out is preserved since we use evaluate_apple2_inline)
-        code.push_str("    evaluate_apple2_inline(signals);\n");
-        code.push_str("}\n\n");
-
+        // Generate the main run_cpu_cycles function with memory arrays
         code.push_str("#[no_mangle]\n");
         code.push_str("pub unsafe extern \"C\" fn run_cpu_cycles(\n");
         code.push_str("    signals: *mut u64,\n");
@@ -570,20 +380,9 @@ impl Apple2Extension {
         code.push_str("    rom_len: usize,\n");
         code.push_str("    slot_rom: *const u8,\n");
         code.push_str("    slot_rom_len: usize,\n");
-        code.push_str("    all_tracks: *const u8,\n");
-        code.push_str("    num_tracks: usize,\n");
-        code.push_str("    track_size: usize,\n");
-        code.push_str("    disk_byte_pos: *mut usize,\n");
-        code.push_str("    disk_cycle_counter: *mut usize,\n");
-        code.push_str("    disk_motor_on: *mut bool,\n");
-        code.push_str("    disk_phases: *mut u8,\n");
-        code.push_str("    disk_q6: *mut bool,\n");
-        code.push_str("    disk_q7: *mut bool,\n");
-        code.push_str("    disk_current_track: *mut usize,\n");
-        code.push_str("    disk_half_track: *mut usize,\n");
-        code.push_str("    disk_latch_valid: *mut bool,\n");
-        code.push_str("    disk_data_latch: *mut u8,\n");
-        code.push_str("    disk_last_read: *mut u8,\n");
+        // Add memory array pointers and lengths
+        code.push_str("    mem_ptrs: *const *const u64,\n");
+        code.push_str("    mem_lens: *const usize,\n");
         code.push_str("    n: usize,\n");
         code.push_str("    key_data: u8,\n");
         code.push_str("    key_ready: bool,\n");
@@ -595,171 +394,48 @@ impl Apple2Extension {
         code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, signals_len);\n");
         code.push_str("    let ram = std::slice::from_raw_parts_mut(ram, ram_len);\n");
         code.push_str("    let rom = std::slice::from_raw_parts(rom, rom_len);\n");
-        code.push_str("    let slot_rom = if slot_rom.is_null() { &[] as &[u8] } else { std::slice::from_raw_parts(slot_rom, slot_rom_len) };\n");
-        code.push_str("    let all_tracks_len = num_tracks * track_size;\n");
-        code.push_str("    let all_tracks = if all_tracks.is_null() { &[] as &[u8] } else { std::slice::from_raw_parts(all_tracks, all_tracks_len) };\n");
+        code.push_str("    let _slot_rom = if slot_rom.is_null() { &[] as &[u8] } else { std::slice::from_raw_parts(slot_rom, slot_rom_len) };\n");
+
+        // Convert memory pointers to slices
+        code.push_str(&format!("    let mem_ptrs = std::slice::from_raw_parts(mem_ptrs, {});\n", num_mems));
+        code.push_str(&format!("    let mem_lens = std::slice::from_raw_parts(mem_lens, {});\n", num_mems));
+
+        // Create the mems array for evaluate_inline_mem
+        code.push_str(&format!("    let mems: [&[u64]; {}] = [\n", num_mems));
+        for i in 0..num_mems {
+            code.push_str(&format!("        std::slice::from_raw_parts(mem_ptrs[{}], mem_lens[{}]),\n", i, i));
+        }
+        code.push_str("    ];\n\n");
+
         code.push_str(&format!("    let mut old_clocks = [0u64; {}];\n", num_clocks));
         code.push_str(&format!("    let mut next_regs = [0u64; {}];\n", num_regs.max(1)));
         code.push_str("    let mut text_dirty = false;\n");
         code.push_str("    let mut key_cleared = false;\n");
         code.push_str("    let mut speaker_toggles: u32 = 0;\n");
-        code.push_str("    let mut prev_speaker = *prev_speaker_ptr;\n");
-        code.push_str("    let mut sub_cycle_counter: usize = 0;  // Track sub-cycles within CPU cycle\n\n");
+        code.push_str("    let mut prev_speaker = *prev_speaker_ptr;\n\n");
 
-        // Initialize old_clocks from current signal values
+        // Initialize old_clocks
         for (i, &clk) in clock_indices.iter().enumerate() {
             code.push_str(&format!("    old_clocks[{}] = signals[{}];\n", i, clk));
         }
         code.push_str("\n");
 
-        code.push_str("    for cycle_num in 0..n {\n");
+        code.push_str("    for _cycle_num in 0..n {\n");
 
         // Set keyboard input
         code.push_str(&format!("        signals[{}] = if key_ready {{ (key_data as u64) | 0x80 }} else {{ key_data as u64 }};\n\n", k_idx));
 
-        // Read CPU address BEFORE clock edge (it's a register, so stable value from previous cycle)
+        // Read CPU address
         code.push_str(&format!("        let cpu_addr = (signals[{}] as usize) & 0xFFFF;\n\n", cpu_addr_idx));
 
-        // Advance disk position on sub-cycle 0 only (before computing ram_data)
-        // We advance by 14 sub-cycles per CPU cycle to match the simulation rate
-        code.push_str("        if sub_cycle_counter == 0 && *disk_motor_on && !all_tracks.is_empty() {\n");
-        code.push_str("            let old_byte_pos = *disk_byte_pos;\n");
-        code.push_str("            *disk_cycle_counter += 14;  // One CPU cycle worth of sub-cycles\n");
-        code.push_str("            while *disk_cycle_counter >= DISK_BYTE_CYCLES {\n");
-        code.push_str("                *disk_cycle_counter -= DISK_BYTE_CYCLES;  // Preserve fractional timing\n");
-        code.push_str("                *disk_byte_pos = (*disk_byte_pos + 1) % TRACK_SIZE;\n");
-        code.push_str("            }\n");
-        code.push_str("            // If byte position changed, latch new byte and set latch_valid\n");
-        code.push_str("            if *disk_byte_pos != old_byte_pos {\n");
-        code.push_str("                let track = *disk_current_track;\n");
-        code.push_str("                let pos = *disk_byte_pos;\n");
-        code.push_str("                if track < num_tracks && pos < track_size {\n");
-        code.push_str("                    let new_byte = all_tracks[track * track_size + pos];\n");
-        code.push_str("                    *disk_data_latch = new_byte;\n");
-        code.push_str("                    *disk_latch_valid = true;  // New byte is ready\n");
-        // Debug: trace D5 bytes being latched
-        code.push_str("                    static D5_LATCH_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str("                    if new_byte == 0xD5 {\n");
-        code.push_str("                        let cnt = D5_LATCH_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                        if cnt < 10 { eprintln!(\"D5_LATCH[{}]: pos={} cycle_ctr={}\", cnt, pos, *disk_cycle_counter); }\n");
-        code.push_str("                    }\n");
-        code.push_str("                }\n");
-        code.push_str("            }\n");
-        code.push_str("        }\n\n");
-
-        // Compute disk_data and ram_data separately for proper HDL mux routing
-        // - disk_data: for disk addresses ($C600-$C6FF slot ROM, $C0E0-$C0EF disk I/O) -> disk__d_out
-        // - ram_data: for everything else (RAM, main ROM, other I/O) -> ram_do
-        // The HDL mux then correctly selects: cpu_din = mux(disk_select, disk_dout, ram_do, ...)
-
-        // First compute disk_data for disk addresses
-        code.push_str("        let disk_data = if cpu_addr >= 0xC600 && cpu_addr < 0xC700 {\n");
-        code.push_str("            // Slot 6 ROM ($C600-$C6FF) - Disk II boot ROM\n");
-        code.push_str("            let rom_idx = cpu_addr - 0xC600;\n");
-        code.push_str("            (if rom_idx < slot_rom.len() { slot_rom[rom_idx] } else { 0 }) as u64\n");
-        code.push_str("        } else if cpu_addr >= 0xC0E0 && cpu_addr < 0xC0F0 {\n");
-        code.push_str("            // Disk II I/O ($C0E0-$C0EF for slot 6)\n");
-        code.push_str("            let reg = cpu_addr & 0x0F;\n");
-        code.push_str("            // Q6/Q7 and motor latches update on EVERY access (address-triggered)\n");
-        code.push_str("            match reg {\n");
-        code.push_str("                0x8 => { *disk_motor_on = false; }\n");
-        code.push_str("                0x9 => {\n");
-        code.push_str("                    if !*disk_motor_on && !all_tracks.is_empty() {\n");
-        code.push_str("                        // Motor just turned on - latch current byte and set valid\n");
-        code.push_str("                        let track = *disk_current_track;\n");
-        code.push_str("                        let pos = *disk_byte_pos;\n");
-        code.push_str("                        if track < num_tracks && pos < track_size {\n");
-        code.push_str("                            *disk_data_latch = all_tracks[track * track_size + pos];\n");
-        code.push_str("                            *disk_latch_valid = true;  // First byte is ready\n");
-        code.push_str("                        }\n");
-        code.push_str("                    }\n");
-        code.push_str("                    *disk_motor_on = true;\n");
-        code.push_str("                }\n");
-        code.push_str("                0xC => { *disk_q6 = false; }\n");
-        code.push_str("                0xD => { *disk_q6 = true; }\n");
-        code.push_str("                0xE => { *disk_q7 = false; }\n");
-        code.push_str("                0xF => { *disk_q7 = true; }\n");
-        code.push_str("                _ => {}\n");
-        code.push_str("            }\n");
-        code.push_str("            // Handle phase changes only on sub-cycle 0 to avoid repeated updates\n");
-        code.push_str("            if sub_cycle_counter == 0 {\n");
-        code.push_str("                let old_phases = *disk_phases;\n");
-        code.push_str("                match reg {\n");
-        code.push_str("                    // Phase control\n");
-        code.push_str("                    0x0 => { *disk_phases &= !0x01; }\n");
-        code.push_str("                    0x1 => { *disk_phases |= 0x01; }\n");
-        code.push_str("                    0x2 => { *disk_phases &= !0x02; }\n");
-        code.push_str("                    0x3 => { *disk_phases |= 0x02; }\n");
-        code.push_str("                    0x4 => { *disk_phases &= !0x04; }\n");
-        code.push_str("                    0x5 => { *disk_phases |= 0x04; }\n");
-        code.push_str("                    0x6 => { *disk_phases &= !0x08; }\n");
-        code.push_str("                    0x7 => { *disk_phases |= 0x08; }\n");
-        code.push_str("                    _ => {}\n");
-        code.push_str("                }\n");
-        code.push_str("                // Handle stepper motor track stepping\n");
-        code.push_str("                let newly_on = *disk_phases & !old_phases;\n");
-        // Stepper motor logic using half-tracks (matching HDL implementation)
-        // Half-track position: 0-69 for 35 tracks (2 half-tracks per track)
-        // Current quadrant = half_track / 2 % 4
-        code.push_str("                if newly_on != 0 {\n");
-        code.push_str("                    let new_phase = newly_on.trailing_zeros() as i32;\n");
-        code.push_str("                    if new_phase < 4 {\n");
-        code.push_str("                        let half_track = *disk_half_track as i32;\n");
-        code.push_str("                        let current_quadrant = (half_track / 2) % 4;\n");
-        code.push_str("                        let next_quadrant = (current_quadrant + 1) % 4;\n");
-        code.push_str("                        let prev_quadrant = (current_quadrant + 3) % 4;\n");
-        code.push_str("                        let old_track = *disk_current_track;\n");
-        // Step inward if active phase matches next quadrant
-        code.push_str("                        if new_phase == next_quadrant && half_track < 69 {\n");
-        code.push_str("                            *disk_half_track = (half_track + 1) as usize;\n");
-        code.push_str("                            *disk_current_track = *disk_half_track / 2;\n");
-        code.push_str("                        } else if new_phase == prev_quadrant && half_track > 0 {\n");
-        // Step outward if active phase matches prev quadrant
-        code.push_str("                            *disk_half_track = (half_track - 1) as usize;\n");
-        code.push_str("                            *disk_current_track = *disk_half_track / 2;\n");
-        code.push_str("                        }\n");
-        // Only log when actual track changes (not half-track)
-        code.push_str("                        if old_track != *disk_current_track {\n");
-        code.push_str("                            eprintln!(\"TRACK_CHANGE: {} -> {}\", old_track, *disk_current_track);\n");
-        code.push_str("                        }\n");
-        code.push_str("                    }\n");
-        code.push_str("                }\n");
-        code.push_str("            }\n");
-        code.push_str("            // Read data register ($C0EC with Q6=0, Q7=0)\n");
-        code.push_str("            if reg == 0xC && !*disk_q7 && *disk_motor_on {\n");
-        code.push_str("                let latched = *disk_data_latch;\n");
-        // Time-based freshness matching HDL behavior:
-        // HDL: byte_delay counts DOWN from 429 to 0
-        // byte_fresh = (byte_delay > 329), i.e. fresh when delay is 330-429 (first 100 cycles)
-        // Rust: disk_cycle_counter counts UP from 0 to 429
-        // So fresh when disk_cycle_counter < 100 (same 100 cycle window)
-        code.push_str("                // Fresh window: first 100 of 430 cycles per byte (matches HDL)\n");
-        code.push_str("                let fresh = *disk_cycle_counter < 100;\n");
-        code.push_str("                let result = if fresh {\n");
-        code.push_str("                    latched as u64  // Fresh byte: bit 7 intact\n");
-        code.push_str("                } else {\n");
-        code.push_str("                    (latched & 0x7F) as u64  // Stale byte: clear bit 7\n");
-        code.push_str("                };\n");
-        code.push_str("                result\n");
-        code.push_str("            } else if reg == 0xC && !*disk_q7 {\n");
-        code.push_str("                // Motor is off - return 0\n");
-        code.push_str("                0\n");
-        code.push_str("            } else {\n");
-        code.push_str("                // Q7=1 (write mode) or other register - return 0\n");
-        code.push_str("                0\n");
-        code.push_str("            }\n");
-        code.push_str("        } else {\n");
-        code.push_str("            // Not a disk address - return 0 for disk_data\n");
-        code.push_str("            0u64\n");
-        code.push_str("        };\n\n");
-
-        // Now compute ram_data for non-disk addresses (RAM, main ROM, other I/O)
+        // Compute ram_data for RAM/ROM addresses
+        // The HDL disk controller handles $C0E0-$C0EF and $C600-$C6FF
         code.push_str("        let ram_data = if cpu_addr >= 0xD000 {\n");
         code.push_str("            // Main ROM ($D000-$FFFF)\n");
         code.push_str("            let rom_idx = cpu_addr - 0xD000;\n");
         code.push_str("            if rom_idx < rom_len { rom[rom_idx] as u64 } else { 0 }\n");
         code.push_str("        } else if cpu_addr >= 0xC000 {\n");
-        code.push_str("            // I/O space - return 0 (keyboard etc. handled by HDL)\n");
+        code.push_str("            // I/O space - handled by HDL\n");
         code.push_str("            0u64\n");
         code.push_str("        } else if cpu_addr < ram_len {\n");
         code.push_str("            // RAM ($0000-$BFFF)\n");
@@ -768,25 +444,22 @@ impl Apple2Extension {
         code.push_str("            0u64\n");
         code.push_str("        };\n\n");
 
-        // Inject disk_data into disk__d_out for disk controller output
-        // The HDL mux will route this to cpu_din when disk_select is true
-        code.push_str(&format!("        signals[{}] = disk_data;  // disk__d_out\n", disk_d_out_idx));
-        // Inject ram_data into ram_do for RAM/ROM accesses
-        // The HDL mux will route this to cpu_din when disk_select is false
-        code.push_str(&format!("        signals[{}] = ram_data;  // ram_do\n", ram_do_idx));
+        // Inject ram_data into ram_do
+        code.push_str(&format!("        signals[{}] = ram_data;  // ram_do\n\n", ram_do_idx));
 
-        // Clock falling edge - evaluate to settle combinational logic
-        // evaluate_apple2_inline skips disk__d_out so our injected value is preserved
+        // Clock falling edge - set input clock low and propagate using dynamic memory
         code.push_str(&format!("        signals[{}] = 0;\n", clk_idx));
-        code.push_str("        evaluate_apple2_inline(signals);\n\n");
+        code.push_str("        evaluate_inline_mem(signals, &mems);  // Propagate clock with dynamic memory\n\n");
 
-        // Clock rising edge - tick function injects disk_data into disk__d_out
-        // The HDL mux will then compute cpu__di from disk_dout or ram_do
+        // Capture old clock values AFTER propagation
         for (i, &clk) in clock_indices.iter().enumerate() {
             code.push_str(&format!("        old_clocks[{}] = signals[{}];\n", i, clk));
         }
+        code.push_str("\n");
+
+        // Clock rising edge - set input clock high, propagate, THEN tick (using dynamic memory)
         code.push_str(&format!("        signals[{}] = 1;\n", clk_idx));
-        code.push_str("        tick_apple2_inline(signals, &mut old_clocks, &mut next_regs, disk_data);\n\n");
+        code.push_str("        tick_inline_mem(signals, &mut old_clocks, &mut next_regs, &mems);\n\n");
 
         // Handle RAM write
         code.push_str(&format!("        let ram_we = signals[{}];\n", ram_we_idx));
@@ -810,10 +483,7 @@ impl Apple2Extension {
         code.push_str("        if speaker != prev_speaker {\n");
         code.push_str("            speaker_toggles += 1;\n");
         code.push_str("            prev_speaker = speaker;\n");
-        code.push_str("        }\n\n");
-
-        // Increment sub-cycle counter (wraps every 14 sub-cycles = 1 CPU cycle)
-        code.push_str("        sub_cycle_counter = (sub_cycle_counter + 1) % 14;\n");
+        code.push_str("        }\n");
 
         code.push_str("    }\n\n");
 

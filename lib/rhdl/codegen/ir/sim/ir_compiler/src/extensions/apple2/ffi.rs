@@ -1,6 +1,8 @@
 //! Apple II extension FFI functions
 //!
-//! C ABI exports for Apple II specific functionality
+//! C ABI exports for Apple II specific functionality.
+//! The disk controller is fully HDL-driven - these functions only provide
+//! memory bridging and track data loading into HDL memory.
 
 use std::os::raw::{c_int, c_uint};
 use std::ptr;
@@ -61,7 +63,7 @@ pub unsafe extern "C" fn apple2_ir_sim_load_ram(
     }
 }
 
-/// Run Apple II CPU cycles
+/// Run Apple II CPU cycles (HDL-driven simulation)
 #[no_mangle]
 pub unsafe extern "C" fn apple2_ir_sim_run_cpu_cycles(
     ctx: *mut IrSimContext,
@@ -87,7 +89,6 @@ pub unsafe extern "C" fn apple2_ir_sim_run_cpu_cycles(
 
 /// Run Apple II CPU cycles with VCD tracing
 /// Captures signals after each CPU cycle for full visibility
-/// This is slower than apple2_ir_sim_run_cpu_cycles but provides tracing
 #[no_mangle]
 pub unsafe extern "C" fn apple2_ir_sim_run_cpu_cycles_traced(
     ctx: *mut IrSimContext,
@@ -164,6 +165,7 @@ pub unsafe extern "C" fn apple2_ir_sim_write_ram(
 }
 
 /// Load Disk II slot ROM (P5 PROM boot code at $C600-$C6FF)
+/// Also loads into HDL disk ROM memory if available
 #[no_mangle]
 pub unsafe extern "C" fn apple2_ir_sim_load_disk_rom(
     ctx: *mut IrSimContext,
@@ -177,10 +179,12 @@ pub unsafe extern "C" fn apple2_ir_sim_load_disk_rom(
     if let Some(ref mut ext) = ctx.apple2 {
         let data = slice::from_raw_parts(data, data_len);
         ext.load_disk_rom(data);
+        // Also load into HDL memory
+        ext.load_disk_rom_into_hdl(&mut ctx.core);
     }
 }
 
-/// Load track nibble data
+/// Load track nibble data into extension storage
 #[no_mangle]
 pub unsafe extern "C" fn apple2_ir_sim_load_track(
     ctx: *mut IrSimContext,
@@ -198,40 +202,60 @@ pub unsafe extern "C" fn apple2_ir_sim_load_track(
     }
 }
 
-/// Get current disk track number
+/// Load track data into HDL's track_memory
+/// Call this after load_track to sync data into HDL
+#[no_mangle]
+pub unsafe extern "C" fn apple2_ir_sim_load_track_into_hdl(
+    ctx: *mut IrSimContext,
+    track: c_uint,
+) {
+    if ctx.is_null() {
+        return;
+    }
+    let ctx = &mut *ctx;
+    if let Some(ref mut ext) = ctx.apple2 {
+        ext.load_track_into_hdl(&mut ctx.core, track as usize);
+    }
+}
+
+/// Get current disk track number from HDL
 #[no_mangle]
 pub unsafe extern "C" fn apple2_ir_sim_get_track(ctx: *const IrSimContext) -> c_uint {
     if ctx.is_null() {
         return 0;
     }
-    if let Some(ref ext) = (*ctx).apple2 {
-        ext.get_track() as c_uint
+    let ctx_ref = &*ctx;
+    if let Some(ref ext) = ctx_ref.apple2 {
+        ext.get_hdl_track(&ctx_ref.core) as c_uint
     } else {
         0
     }
 }
 
-/// Check if disk motor is on
+/// Check if disk motor is on (from HDL signal)
 #[no_mangle]
 pub unsafe extern "C" fn apple2_ir_sim_is_motor_on(ctx: *const IrSimContext) -> c_int {
     if ctx.is_null() {
         return 0;
     }
-    if let Some(ref ext) = (*ctx).apple2 {
-        if ext.is_motor_on() { 1 } else { 0 }
+    let ctx_ref = &*ctx;
+    if let Some(ref ext) = ctx_ref.apple2 {
+        if ext.is_motor_on(&ctx_ref.core) { 1 } else { 0 }
     } else {
         0
     }
 }
 
-/// Get disk byte position within current track
+/// Get disk byte position from HDL track_addr signal
 #[no_mangle]
 pub unsafe extern "C" fn apple2_ir_sim_get_disk_byte_pos(ctx: *const IrSimContext) -> c_uint {
     if ctx.is_null() {
         return 0;
     }
-    if let Some(ref ext) = (*ctx).apple2 {
-        ext.disk_byte_pos as c_uint
+    let ctx_ref = &*ctx;
+    // Get track_addr signal from HDL
+    if let Some(track_addr_idx) = ctx_ref.core.name_to_idx.get("disk__track_addr") {
+        (ctx_ref.core.signals[*track_addr_idx] as c_uint) & 0x3FFF
     } else {
         0
     }
