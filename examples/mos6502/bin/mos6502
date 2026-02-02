@@ -67,8 +67,13 @@ class Apple2Terminal
               when :netlist
                 # Netlist mode uses gate-level simulators (not yet implemented)
                 raise "Netlist mode not yet implemented"
+              when :verilog
+                # Verilog mode uses Verilator-compiled simulation
+                require_relative '../../../examples/apple2/utilities/apple2_verilator'
+                @sim_type = :hdl_verilator
+                RHDL::Apple2::VerilatorRunner.new
               else
-                raise "Unknown mode: #{@mode}. Valid modes: isa, hdl, netlist"
+                raise "Unknown mode: #{@mode}. Valid modes: isa, hdl, netlist, verilog"
               end
 
     @running = false
@@ -86,6 +91,7 @@ class Apple2Terminal
                       when :compile then 10_000
                       end
                     when :netlist then 10
+                    when :verilog then 17_030  # Verilator is fast like native
                     else 17_030
                     end
     @cycles_per_frame = options[:speed] || default_speed
@@ -232,6 +238,7 @@ class Apple2Terminal
       hdl_interpret: "HDL (IR Interpret)",
       hdl_jit: "HDL (IR JIT)",
       hdl_compile: "HDL (IR Compile)",
+      hdl_verilator: "HDL (Verilator)",
       netlist_interpret: "Netlist (Interpret)",
       netlist_jit: "Netlist (JIT)",
       netlist_compile: "Netlist (Compile)"
@@ -952,7 +959,7 @@ parser = OptionParser.new do |opts|
     options[:green] = true
   end
 
-  opts.on("-m", "--mode TYPE", [:isa, :hdl, :netlist], "Simulator mode: isa (default), hdl, netlist") do |v|
+  opts.on("-m", "--mode TYPE", [:isa, :hdl, :netlist, :verilog], "Simulator mode: isa (default), hdl, netlist, verilog") do |v|
     options[:mode] = v
   end
 
