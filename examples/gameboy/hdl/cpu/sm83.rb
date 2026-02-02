@@ -875,10 +875,13 @@ module GameBoy
       set_addr_to <= mux(is_cb_hl & (m_cycle == lit(3, width: 3)),
                          lit(ADDR_HL, width: 3), set_addr_to)
 
-      # PC increment during M1 (when not halted and not in interrupt cycle)
+      # PC increment during M1 (when not halted) or during operand reads
       # Also increment during operand reads when reading from instruction stream
       # Explicit conditions for each instruction type that reads operands from PC
-      inc_pc <= ((m_cycle == lit(1, width: 3)) & ~halt & ~int_cycle) |
+      # IMPORTANT: All conditions are gated by ~int_cycle to prevent PC changes during interrupt handling
+      inc_pc <= ~int_cycle & (
+                # M1: opcode fetch increments PC
+                ((m_cycle == lit(1, width: 3)) & ~halt) |
                 # LD r, n (0x06, 0x0E, 0x16, 0x1E, 0x26, 0x2E, 0x3E) - M2 reads immediate
                 (is_ld_r_n & (m_cycle == lit(2, width: 3))) |
                 # LD (HL), n (0x36) - M2 reads immediate
@@ -908,7 +911,7 @@ module GameBoy
                 # LD HL,SP+n (0xF8) - M2 reads signed offset
                 ((ir == lit(0xF8, width: 8)) & (m_cycle == lit(2, width: 3))) |
                 # ADD SP,n (0xE8) - M2 reads signed offset
-                ((ir == lit(0xE8, width: 8)) & (m_cycle == lit(2, width: 3)))
+                ((ir == lit(0xE8, width: 8)) & (m_cycle == lit(2, width: 3))))
 
       # -----------------------------------------------------------------------
       # ALU (Simplified)

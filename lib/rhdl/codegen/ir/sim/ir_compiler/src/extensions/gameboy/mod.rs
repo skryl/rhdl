@@ -34,6 +34,8 @@ pub struct GameBoyExtension {
     pub rom: Vec<u8>,
     /// Game Boy VRAM (8KB)
     pub vram: Vec<u8>,
+    /// Game Boy WRAM (32KB for GBC, 8KB for DMG)
+    pub wram: Vec<u8>,
     /// Game Boy boot ROM (256 bytes for DMG)
     pub boot_rom: Vec<u8>,
     /// Game Boy ZPRAM/HRAM (127 bytes, $FF80-$FFFE)
@@ -97,6 +99,12 @@ pub struct GameBoyExtension {
     pub zpram_do_idx: usize,
     pub zpram_q_a_idx: usize,
 
+    // WRAM signals
+    pub wram_addr_idx: usize,
+    pub wram_wren_idx: usize,
+    pub wram_do_idx: usize,
+    pub wram_q_a_idx: usize,
+
     // LCD state
     pub lcd_state: GbLcdState,
 }
@@ -119,6 +127,7 @@ impl GameBoyExtension {
         Self {
             rom: vec![0u8; 1024 * 1024],  // 1MB for Game Boy ROMs
             vram: vec![0u8; 8192],         // 8KB VRAM
+            wram: vec![0u8; 32768],        // 32KB WRAM (8KB for DMG, up to 32KB for GBC)
             boot_rom: vec![0u8; 256],      // 256 bytes for DMG boot ROM
             zpram: vec![0u8; 127],         // 127 bytes for HRAM ($FF80-$FFFE)
             framebuffer: vec![0u8; 160 * 144],
@@ -171,6 +180,11 @@ impl GameBoyExtension {
             zpram_wren_idx: find(&["gb_core__zpram_wren", "zpram_wren"]),
             zpram_do_idx: find(&["gb_core__zpram_do", "zpram_do"]),
             zpram_q_a_idx: find(&["gb_core__zpram__q_a", "zpram__q_a"]),
+
+            wram_addr_idx: find(&["gb_core__wram_addr", "wram_addr"]),
+            wram_wren_idx: find(&["gb_core__wram_wren", "wram_wren"]),
+            wram_do_idx: find(&["gb_core__wram_do", "wram_do"]),
+            wram_q_a_idx: find(&["gb_core__wram__q_a", "wram__q_a"]),
 
             lcd_state: GbLcdState::default(),
         }
@@ -227,6 +241,22 @@ impl GameBoyExtension {
         }
     }
 
+    /// Read from WRAM
+    pub fn read_wram(&self, addr: usize) -> u8 {
+        if addr < self.wram.len() {
+            self.wram[addr]
+        } else {
+            0
+        }
+    }
+
+    /// Write to WRAM
+    pub fn write_wram(&mut self, addr: usize, data: u8) {
+        if addr < self.wram.len() {
+            self.wram[addr] = data;
+        }
+    }
+
     /// Get framebuffer reference
     pub fn framebuffer(&self) -> &[u8] {
         &self.framebuffer
@@ -267,6 +297,8 @@ impl GameBoyExtension {
                 boot_rom_len: usize,
                 zpram: *mut u8,
                 zpram_len: usize,
+                wram: *mut u8,
+                wram_len: usize,
             ) -> GbCycleResult;
 
             let func: libloading::Symbol<RunGbCyclesFn> = lib.get(b"run_gb_cycles")
@@ -288,6 +320,8 @@ impl GameBoyExtension {
                 self.boot_rom.len(),
                 self.zpram.as_mut_ptr(),
                 self.zpram.len(),
+                self.wram.as_mut_ptr(),
+                self.wram.len(),
             );
 
             result
@@ -344,6 +378,10 @@ impl GameBoyExtension {
         let zpram_wren_idx = find(&["gb_core__zpram_wren", "zpram_wren"]);
         let zpram_q_a_idx = find(&["gb_core__zpram__q_a", "zpram__q_a"]);
 
+        let wram_addr_idx = find(&["gb_core__wram_addr", "wram_addr"]);
+        let wram_wren_idx = find(&["gb_core__wram_wren", "wram_wren"]);
+        let wram_q_a_idx = find(&["gb_core__wram__q_a", "wram__q_a"]);
+
         let clock_indices: Vec<usize> = core.clock_indices.clone();
         let num_clocks = clock_indices.len().max(1);
         let num_regs = core.seq_targets.len();
@@ -389,6 +427,8 @@ impl GameBoyExtension {
         code.push_str("    boot_rom_len: usize,\n");
         code.push_str("    zpram: *mut u8,\n");
         code.push_str("    zpram_len: usize,\n");
+        code.push_str("    wram: *mut u8,\n");
+        code.push_str("    wram_len: usize,\n");
         code.push_str(") -> GbCycleResult {\n");
         code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, signals_len);\n");
         code.push_str(&format!("    let mut old_clocks = [0u64; {}];\n", num_clocks));
@@ -399,6 +439,7 @@ impl GameBoyExtension {
         code.push_str("    let vram = std::slice::from_raw_parts_mut(vram, vram_len);\n");
         code.push_str("    let boot_rom = std::slice::from_raw_parts(boot_rom, boot_rom_len);\n");
         code.push_str("    let zpram = std::slice::from_raw_parts_mut(zpram, zpram_len);\n");
+        code.push_str("    let wram = std::slice::from_raw_parts_mut(wram, wram_len);\n");
         code.push_str("    let mut frames_completed: u32 = 0;\n\n");
 
         // Initialize old_clocks from current signal values
@@ -495,6 +536,12 @@ impl GameBoyExtension {
         code.push_str(&format!("            signals[{}] = zpram[zpram_addr] as u64;\n", zpram_q_a_idx));
         code.push_str("        }\n\n");
 
+        // WRAM read (inject into DPRAM output)
+        code.push_str(&format!("        let wram_addr = (signals[{}] as usize) & 0x7FFF;\n", wram_addr_idx));
+        code.push_str("        if wram_addr < wram_len {\n");
+        code.push_str(&format!("            signals[{}] = wram[wram_addr] as u64;\n", wram_q_a_idx));
+        code.push_str("        }\n\n");
+
         // Clock rising edge
         for (i, &clk) in clock_indices.iter().enumerate() {
             code.push_str(&format!("        old_clocks[{}] = signals[{}];\n", i, clk));
@@ -517,6 +564,15 @@ impl GameBoyExtension {
         code.push_str(&format!("            let addr = (signals[{}] as usize) & 0x7F;\n", zpram_addr_idx));
         code.push_str("            if addr < zpram_len {\n");
         code.push_str(&format!("                zpram[addr] = (signals[{}] & 0xFF) as u8;\n", cpu_do_idx));
+        code.push_str("            }\n");
+        code.push_str("        }\n\n");
+
+        // WRAM write
+        code.push_str(&format!("        let wram_wren = signals[{}];\n", wram_wren_idx));
+        code.push_str("        if wram_wren != 0 {\n");
+        code.push_str(&format!("            let addr = (signals[{}] as usize) & 0x7FFF;\n", wram_addr_idx));
+        code.push_str("            if addr < wram_len {\n");
+        code.push_str(&format!("                wram[addr] = (signals[{}] & 0xFF) as u8;\n", cpu_do_idx));
         code.push_str("            }\n");
         code.push_str("        }\n\n");
 
