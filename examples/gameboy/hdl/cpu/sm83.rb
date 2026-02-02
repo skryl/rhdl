@@ -172,6 +172,7 @@ module GameBoy
     wire :write_hl              # Write to (HL)
     wire :cond_true             # Condition true for conditional jump
     wire :is_cond_jr            # Conditional JR instruction
+    wire :is_cond_jp            # Conditional JP instruction
     wire :cb_bit                # CB BIT instruction
     wire :cb_bit_flags, width: 8  # Flags result from CB BIT instruction
     wire :cb_src, width: 8        # Source register for CB operation
@@ -367,6 +368,25 @@ module GameBoy
       # 5-cycle instructions: LD (a16),SP (08)
       is_5_cycles <= (ir == lit(0x08, width: 8))
 
+      # Conditional JR detection (needed for cycle count)
+      # JR NZ/Z/NC/C - 0x20/0x28/0x30/0x38
+      # 2 cycles if condition false, 3 cycles if condition true
+      is_cond_jr <= (ir == lit(0x20, width: 8)) | (ir == lit(0x28, width: 8)) |
+                    (ir == lit(0x30, width: 8)) | (ir == lit(0x38, width: 8))
+
+      # Conditional JP detection - JP NZ/Z/NC/C,nn (0xC2/0xCA/0xD2/0xDA)
+      # 4 cycles if condition true (jump taken), 3 cycles if condition false
+      is_cond_jp <= (ir == lit(0xC2, width: 8)) | (ir == lit(0xCA, width: 8)) |
+                    (ir == lit(0xD2, width: 8)) | (ir == lit(0xDA, width: 8))
+
+      # Condition evaluation: applies to both JR and JP conditional instructions
+      # ir[4:3] = condition code: 00=NZ, 01=Z, 10=NC, 11=C
+      cond_true <= mux(ir[4..3] == lit(0, width: 2), ~f_reg[FLAG_Z],     # NZ
+                   mux(ir[4..3] == lit(1, width: 2), f_reg[FLAG_Z],      # Z
+                   mux(ir[4..3] == lit(2, width: 2), ~f_reg[FLAG_C],     # NC
+                   mux(ir[4..3] == lit(3, width: 2), f_reg[FLAG_C],      # C
+                       lit(0, width: 1)))))
+
       # 4-cycle instructions: PUSH (C5/D5/E5/F5), RET (C9), RST (C7/CF/D7/DF/E7/EF/F7/FF),
       # RETI (D9), JP nn (C3), LD A,(a16) (FA), LD (a16),A (EA)
       # Also: CB rotate/set/res with (HL) operand (cb_ir[2:0] = 6, cb_ir[7:6] != 01)
@@ -387,20 +407,8 @@ module GameBoy
                      (ir == lit(0xC3, width: 8)) |
                      (ir == lit(0xFA, width: 8)) | (ir == lit(0xEA, width: 8)) |
                      (ir == lit(0xE8, width: 8)) |  # ADD SP,n = 4 cycles
-                     is_cb_rw_hl  # CB rotate/set/res (HL) = 4 cycles
-
-      # Conditional JR detection (needed for cycle count) - must be before is_3_cycles
-      # JR NZ/Z/NC/C - 0x20/0x28/0x30/0x38
-      # 2 cycles if condition false, 3 cycles if condition true
-      is_cond_jr <= (ir == lit(0x20, width: 8)) | (ir == lit(0x28, width: 8)) |
-                    (ir == lit(0x30, width: 8)) | (ir == lit(0x38, width: 8))
-      # Condition evaluation: 20=NZ (Z=0), 28=Z (Z=1), 30=NC (C=0), 38=C (C=1)
-      # ir[4:3] = condition code: 00=NZ, 01=Z, 10=NC, 11=C
-      cond_true <= mux(ir[4..3] == lit(0, width: 2), ~f_reg[FLAG_Z],     # NZ
-                   mux(ir[4..3] == lit(1, width: 2), f_reg[FLAG_Z],      # Z
-                   mux(ir[4..3] == lit(2, width: 2), ~f_reg[FLAG_C],     # NC
-                   mux(ir[4..3] == lit(3, width: 2), f_reg[FLAG_C],      # C
-                       lit(0, width: 1)))))
+                     is_cb_rw_hl |  # CB rotate/set/res (HL) = 4 cycles
+                     (is_cond_jp & cond_true)  # Conditional JP taken = 4 cycles
 
       # 3-cycle instructions: LDH (E0, F0), LD rr,nn (01, 11, 21, 31), POP (C1/D1/E1/F1)
       # LD r,(HL) (46/4E/56/5E/66/6E/7E), LD (HL),r (70-77 except 76=HALT)
@@ -416,6 +424,7 @@ module GameBoy
                      (ir == lit(0x36, width: 8)) | (ir == lit(0x18, width: 8)) |
                      (ir == lit(0xF8, width: 8)) |
                      (is_cond_jr & cond_true) |  # Conditional JR taken = 3 cycles
+                     (is_cond_jp & ~cond_true) |  # Conditional JP not taken = 3 cycles
                      is_cb_bit_hl  # CB BIT (HL) = 3 cycles (read from memory, no write)
 
       # 2-cycle instructions: LD (BC),A, LD (DE),A, LD A,(BC), LD A,(DE), LD r,n
@@ -894,6 +903,8 @@ module GameBoy
                 ((ir[3..0] == lit(1, width: 4)) & (ir[7..6] == lit(0, width: 2)) & (m_cycle >= lit(2, width: 3))) |
                 # JP nn (0xC3) - M2 and M3 read address (not M4 which jumps)
                 ((ir == lit(0xC3, width: 8)) & ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3)))) |
+                # Conditional JP (0xC2, 0xCA, 0xD2, 0xDA) - M2 and M3 read 16-bit address
+                (is_cond_jp & ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3)))) |
                 # CALL nn (0xCD) - M2 and M3 read address (not M4-M6 which push/jump)
                 ((ir == lit(0xCD, width: 8)) & ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3)))) |
                 # LD (nn), A (0xEA) / LD A, (nn) (0xFA) - M2 and M3 read 16-bit address
