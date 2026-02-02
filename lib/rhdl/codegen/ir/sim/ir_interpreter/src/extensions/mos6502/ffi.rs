@@ -9,7 +9,7 @@ use crate::ffi::IrSimContext;
 
 /// Check if MOS6502 mode is enabled
 #[no_mangle]
-pub unsafe extern "C" fn mos6502_ir_sim_is_mode(ctx: *const IrSimContext) -> c_int {
+pub unsafe extern "C" fn mos6502_interp_sim_is_mode(ctx: *const IrSimContext) -> c_int {
     if ctx.is_null() {
         return 0;
     }
@@ -18,7 +18,7 @@ pub unsafe extern "C" fn mos6502_ir_sim_is_mode(ctx: *const IrSimContext) -> c_i
 
 /// Load memory for MOS6502
 #[no_mangle]
-pub unsafe extern "C" fn mos6502_ir_sim_load_memory(
+pub unsafe extern "C" fn mos6502_interp_sim_load_memory(
     ctx: *mut IrSimContext,
     data: *const u8,
     len: usize,
@@ -37,7 +37,7 @@ pub unsafe extern "C" fn mos6502_ir_sim_load_memory(
 
 /// Set reset vector for MOS6502
 #[no_mangle]
-pub unsafe extern "C" fn mos6502_ir_sim_set_reset_vector(
+pub unsafe extern "C" fn mos6502_interp_sim_set_reset_vector(
     ctx: *mut IrSimContext,
     addr: u16,
 ) {
@@ -52,7 +52,7 @@ pub unsafe extern "C" fn mos6502_ir_sim_set_reset_vector(
 
 /// Run cycles for MOS6502, returns number of cycles run
 #[no_mangle]
-pub unsafe extern "C" fn mos6502_ir_sim_run_cycles(
+pub unsafe extern "C" fn mos6502_interp_sim_run_cycles(
     ctx: *mut IrSimContext,
     n: usize,
 ) -> usize {
@@ -68,7 +68,7 @@ pub unsafe extern "C" fn mos6502_ir_sim_run_cycles(
 
 /// Read memory for MOS6502
 #[no_mangle]
-pub unsafe extern "C" fn mos6502_ir_sim_read_memory(
+pub unsafe extern "C" fn mos6502_interp_sim_read_memory(
     ctx: *const IrSimContext,
     addr: usize,
 ) -> u8 {
@@ -84,7 +84,7 @@ pub unsafe extern "C" fn mos6502_ir_sim_read_memory(
 
 /// Write memory for MOS6502
 #[no_mangle]
-pub unsafe extern "C" fn mos6502_ir_sim_write_memory(
+pub unsafe extern "C" fn mos6502_interp_sim_write_memory(
     ctx: *mut IrSimContext,
     addr: usize,
     data: u8,
@@ -100,7 +100,7 @@ pub unsafe extern "C" fn mos6502_ir_sim_write_memory(
 
 /// Get speaker toggles for MOS6502
 #[no_mangle]
-pub unsafe extern "C" fn mos6502_ir_sim_speaker_toggles(
+pub unsafe extern "C" fn mos6502_interp_sim_speaker_toggles(
     ctx: *const IrSimContext,
 ) -> u32 {
     if ctx.is_null() {
@@ -115,7 +115,7 @@ pub unsafe extern "C" fn mos6502_ir_sim_speaker_toggles(
 
 /// Reset speaker toggles for MOS6502
 #[no_mangle]
-pub unsafe extern "C" fn mos6502_ir_sim_reset_speaker_toggles(
+pub unsafe extern "C" fn mos6502_interp_sim_reset_speaker_toggles(
     ctx: *mut IrSimContext,
 ) {
     if ctx.is_null() {
@@ -131,7 +131,7 @@ pub unsafe extern "C" fn mos6502_ir_sim_reset_speaker_toggles(
 /// Each opcode_tuple is packed as: (pc << 16) | (opcode << 8) | sp
 /// Returns the number of instructions captured
 #[no_mangle]
-pub unsafe extern "C" fn mos6502_ir_sim_run_instructions_with_opcodes(
+pub unsafe extern "C" fn mos6502_interp_sim_run_instructions_with_opcodes(
     ctx: *mut IrSimContext,
     n: c_uint,
     opcodes_out: *mut c_ulong,

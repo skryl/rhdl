@@ -315,3 +315,51 @@ pub unsafe extern "C" fn ir_sim_seq_fast_count(ctx: *const IrSimContext) -> c_ui
     }
     (*ctx).core.seq_assigns.iter().filter(|a| a.fast_source.is_some()).count() as c_uint
 }
+
+/// Poke a signal value by index (faster than by name)
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_poke_by_idx(
+    ctx: *mut IrSimContext,
+    idx: c_int,
+    value: c_ulong,
+) {
+    if ctx.is_null() || idx < 0 {
+        return;
+    }
+    let ctx = &mut *ctx;
+    let i = idx as usize;
+    if i < ctx.core.signals.len() {
+        let mask = crate::core::CoreSimulator::compute_mask(ctx.core.widths[i]);
+        ctx.core.signals[i] = value as u64 & mask;
+    }
+}
+
+/// Peek a signal value by index (faster than by name)
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_peek_by_idx(
+    ctx: *const IrSimContext,
+    idx: c_int,
+) -> c_ulong {
+    if ctx.is_null() || idx < 0 {
+        return 0;
+    }
+    let ctx = &*ctx;
+    let i = idx as usize;
+    if i < ctx.core.signals.len() {
+        ctx.core.signals[i] as c_ulong
+    } else {
+        0
+    }
+}
+
+/// Run multiple ticks (for batched execution)
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_run_ticks(ctx: *mut IrSimContext, n: c_int) {
+    if ctx.is_null() || n <= 0 {
+        return;
+    }
+    let ctx = &mut *ctx;
+    for _ in 0..n {
+        ctx.core.tick();
+    }
+}
