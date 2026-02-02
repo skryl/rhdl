@@ -48,21 +48,30 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
     end
 
     context 'without check option (install)' do
-      it 'displays platform information' do
-        task = described_class.new
+      let(:task) { described_class.new }
 
+      before do
+        # Mock command_available? to simulate tools are already installed
+        # This prevents actual package manager commands from running
+        allow(task).to receive(:command_available?).and_call_original
+        allow(task).to receive(:command_available?).with('iverilog').and_return(true)
+        allow(task).to receive(:command_available?).with('verilator').and_return(true)
+
+        # Mock backtick operator for version queries
+        allow(task).to receive(:`).and_call_original
+        allow(task).to receive(:`).with('iverilog -V 2>&1').and_return("Icarus Verilog version 11.0 (stable)\n")
+        allow(task).to receive(:`).with('verilator --version 2>&1').and_return("Verilator 4.038 2020-07-11\n")
+      end
+
+      it 'displays platform information' do
         expect { task.run }.to output(/Platform:/).to_stdout
       end
 
       it 'checks for iverilog availability' do
-        task = described_class.new
-
         expect { task.run }.to output(/iverilog/).to_stdout
       end
 
       it 'checks for verilator availability' do
-        task = described_class.new
-
         expect { task.run }.to output(/verilator/).to_stdout
       end
     end
@@ -101,6 +110,19 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
 
   describe '#install' do
     let(:task) { described_class.new }
+
+    before do
+      # Mock command_available? to simulate tools are already installed
+      # This prevents actual package manager commands from running
+      allow(task).to receive(:command_available?).and_call_original
+      allow(task).to receive(:command_available?).with('iverilog').and_return(true)
+      allow(task).to receive(:command_available?).with('verilator').and_return(true)
+
+      # Mock backtick operator for version queries
+      allow(task).to receive(:`).and_call_original
+      allow(task).to receive(:`).with('iverilog -V 2>&1').and_return("Icarus Verilog version 11.0 (stable)\n")
+      allow(task).to receive(:`).with('verilator --version 2>&1').and_return("Verilator 4.038 2020-07-11\n")
+    end
 
     it 'displays installer header' do
       expect { task.install }.to output(/Test Dependencies Installer/).to_stdout

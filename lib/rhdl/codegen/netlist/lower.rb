@@ -259,6 +259,9 @@ module RHDL
             lower_mos6502_control_unit(component)
           when MOS6502::CPU
             lower_mos6502_cpu(component)
+          when MOS6502::Memory
+            # Large behavior memory (64KB) cannot be lowered to gate-level primitives
+            raise ArgumentError, "Unsupported component for gate-level lowering: #{component.class}"
           else
             # Check for Apple II components by class name
             class_name = component.class.name
