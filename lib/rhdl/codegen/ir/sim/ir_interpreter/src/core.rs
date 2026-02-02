@@ -309,15 +309,21 @@ impl CoreSimulator {
         // Build memory arrays
         let (memory_arrays, mem_name_to_idx) = Self::build_memory_arrays(&ir.memories);
 
-        // Compile combinational assignments
+        // Topologically sort combinational assignments
+        let sorted_assign_indices = Self::topological_sort_assigns(&ir.assigns, &name_to_idx);
+
+        // Compile combinational assignments in topological order
         let mut max_temps = 0usize;
         let mut all_comb_ops: Vec<FlatOp> = Vec::new();
 
-        for assign in &ir.assigns {
-            let target_idx = *name_to_idx.get(&assign.target).unwrap_or(&0);
-            let (ops, temps_used) = Self::compile_to_flat_ops(&assign.expr, target_idx, &name_to_idx, &mem_name_to_idx, &widths);
-            max_temps = max_temps.max(temps_used);
-            all_comb_ops.extend(ops);
+        for assign_idx in sorted_assign_indices {
+            let assign = &ir.assigns[assign_idx];
+            // Skip assigns with unknown targets (same as compiler behavior)
+            if let Some(&target_idx) = name_to_idx.get(&assign.target) {
+                let (ops, temps_used) = Self::compile_to_flat_ops(&assign.expr, target_idx, &name_to_idx, &mem_name_to_idx, &widths);
+                max_temps = max_temps.max(temps_used);
+                all_comb_ops.extend(ops);
+            }
         }
 
         // Compile sequential assignments
@@ -336,14 +342,16 @@ impl CoreSimulator {
             clock_set.insert(clock_idx);
 
             for stmt in &process.statements {
-                let target_idx = *name_to_idx.get(&stmt.target).unwrap_or(&0);
-                let (ops, temps_used) = Self::compile_to_flat_ops(&stmt.expr, target_idx, &name_to_idx, &mem_name_to_idx, &widths);
-                max_temps = max_temps.max(temps_used);
+                // Skip sequential statements with unknown targets (same as compiler behavior)
+                if let Some(&target_idx) = name_to_idx.get(&stmt.target) {
+                    let (ops, temps_used) = Self::compile_to_flat_ops(&stmt.expr, target_idx, &name_to_idx, &mem_name_to_idx, &widths);
+                    max_temps = max_temps.max(temps_used);
 
-                let fast_source = Self::detect_fast_source(&stmt.expr, &name_to_idx, &widths);
-                seq_assigns.push(CompiledAssign { ops, final_target: target_idx, fast_source });
-                seq_targets.push(target_idx);
-                seq_clocks.push(clock_idx);
+                    let fast_source = Self::detect_fast_source(&stmt.expr, &name_to_idx, &widths);
+                    seq_assigns.push(CompiledAssign { ops, final_target: target_idx, fast_source });
+                    seq_targets.push(target_idx);
+                    seq_clocks.push(clock_idx);
+                }
             }
         }
 
@@ -445,6 +453,137 @@ impl CoreSimulator {
         (arrays, name_to_idx)
     }
 
+    /// Extract signal dependencies from an expression
+    fn expr_dependencies(expr: &ExprDef, name_to_idx: &HashMap<String, usize>, deps: &mut std::collections::HashSet<usize>) {
+        match expr {
+            ExprDef::Signal { name, .. } => {
+                if let Some(&idx) = name_to_idx.get(name) {
+                    deps.insert(idx);
+                }
+            }
+            ExprDef::Literal { .. } => {}
+            ExprDef::UnaryOp { operand, .. } => {
+                Self::expr_dependencies(operand, name_to_idx, deps);
+            }
+            ExprDef::BinaryOp { left, right, .. } => {
+                Self::expr_dependencies(left, name_to_idx, deps);
+                Self::expr_dependencies(right, name_to_idx, deps);
+            }
+            ExprDef::Mux { condition, when_true, when_false, .. } => {
+                Self::expr_dependencies(condition, name_to_idx, deps);
+                Self::expr_dependencies(when_true, name_to_idx, deps);
+                Self::expr_dependencies(when_false, name_to_idx, deps);
+            }
+            ExprDef::Concat { parts, .. } => {
+                for part in parts {
+                    Self::expr_dependencies(part, name_to_idx, deps);
+                }
+            }
+            ExprDef::Slice { base, .. } => {
+                Self::expr_dependencies(base, name_to_idx, deps);
+            }
+            ExprDef::Resize { expr, .. } => {
+                Self::expr_dependencies(expr, name_to_idx, deps);
+            }
+            ExprDef::MemRead { addr, .. } => {
+                Self::expr_dependencies(addr, name_to_idx, deps);
+            }
+        }
+    }
+
+    /// Topologically sort assigns based on signal dependencies
+    fn topological_sort_assigns(assigns: &[AssignDef], name_to_idx: &HashMap<String, usize>) -> Vec<usize> {
+        let n = assigns.len();
+        if n == 0 {
+            return Vec::new();
+        }
+
+        // Map: target signal idx -> ALL assignment indices that write to it
+        let mut target_to_assigns: HashMap<usize, Vec<usize>> = HashMap::new();
+        for (i, assign) in assigns.iter().enumerate() {
+            if let Some(&idx) = name_to_idx.get(&assign.target) {
+                target_to_assigns.entry(idx).or_insert_with(Vec::new).push(i);
+            }
+        }
+
+        // Compute dependencies for each assignment
+        let mut assign_deps: Vec<std::collections::HashSet<usize>> = Vec::with_capacity(n);
+        for assign in assigns {
+            let mut signal_deps = std::collections::HashSet::new();
+            Self::expr_dependencies(&assign.expr, name_to_idx, &mut signal_deps);
+
+            // Convert signal dependencies to assignment dependencies
+            let mut deps = std::collections::HashSet::new();
+            for sig_idx in signal_deps {
+                if let Some(assign_indices) = target_to_assigns.get(&sig_idx) {
+                    for &assign_idx in assign_indices {
+                        deps.insert(assign_idx);
+                    }
+                }
+            }
+            assign_deps.push(deps);
+        }
+
+        // Topological sort using level-based approach
+        let mut levels: Vec<Vec<usize>> = Vec::new();
+        let mut assigned_level: Vec<Option<usize>> = vec![None; n];
+
+        loop {
+            let mut made_progress = false;
+            for i in 0..n {
+                if assigned_level[i].is_some() {
+                    continue;
+                }
+                // Check if all dependencies have been assigned
+                let mut max_dep_level = None;
+                let mut all_deps_ready = true;
+                for &dep_idx in &assign_deps[i] {
+                    if dep_idx == i {
+                        // Self-dependency, ignore
+                        continue;
+                    }
+                    match assigned_level[dep_idx] {
+                        Some(lvl) => {
+                            max_dep_level = Some(max_dep_level.map_or(lvl, |m: usize| m.max(lvl)));
+                        }
+                        None => {
+                            all_deps_ready = false;
+                            break;
+                        }
+                    }
+                }
+                if all_deps_ready {
+                    let my_level = max_dep_level.map_or(0, |l| l + 1);
+                    assigned_level[i] = Some(my_level);
+                    while levels.len() <= my_level {
+                        levels.push(Vec::new());
+                    }
+                    levels[my_level].push(i);
+                    made_progress = true;
+                }
+            }
+            if !made_progress {
+                // Handle remaining (cycles or orphans) - put them at the end
+                let last_level = levels.len();
+                for i in 0..n {
+                    if assigned_level[i].is_none() {
+                        if levels.len() <= last_level {
+                            levels.push(Vec::new());
+                        }
+                        levels[last_level].push(i);
+                    }
+                }
+                break;
+            }
+            if assigned_level.iter().all(|l| l.is_some()) {
+                break;
+            }
+        }
+
+        // Flatten levels into single sorted list
+        levels.into_iter().flatten().collect()
+    }
+
     fn compile_to_flat_ops(
         expr: &ExprDef,
         final_target: usize,
@@ -494,8 +633,12 @@ impl CoreSimulator {
     ) -> Operand {
         match expr {
             ExprDef::Signal { name, .. } => {
-                let idx = *name_to_idx.get(name).unwrap_or(&0);
-                Operand::Signal(idx)
+                // Unknown signals evaluate to 0 (not index 0 which is reset)
+                if let Some(&idx) = name_to_idx.get(name) {
+                    Operand::Signal(idx)
+                } else {
+                    Operand::Immediate(0)
+                }
             }
             ExprDef::Literal { value, width } => {
                 let mask = Self::compute_mask(*width);
@@ -677,20 +820,24 @@ impl CoreSimulator {
                 Operand::Temp(dst)
             }
             ExprDef::MemRead { memory, addr, width } => {
-                let addr_op = Self::compile_expr_to_flat(addr, name_to_idx, mem_name_to_idx, widths, ops, temp_counter);
-                let mem_idx = *mem_name_to_idx.get(memory).unwrap_or(&0);
-                let mask = Self::compute_mask(*width);
-                let dst = *temp_counter;
-                *temp_counter += 1;
+                // Unknown memories return 0
+                if let Some(&mem_idx) = mem_name_to_idx.get(memory) {
+                    let addr_op = Self::compile_expr_to_flat(addr, name_to_idx, mem_name_to_idx, widths, ops, temp_counter);
+                    let mask = Self::compute_mask(*width);
+                    let dst = *temp_counter;
+                    *temp_counter += 1;
 
-                ops.push(FlatOp {
-                    op_type: OP_MEM_READ,
-                    dst,
-                    arg0: mem_idx as u64,
-                    arg1: FlatOp::encode_operand(addr_op),
-                    arg2: mask,
-                });
-                Operand::Temp(dst)
+                    ops.push(FlatOp {
+                        op_type: OP_MEM_READ,
+                        dst,
+                        arg0: mem_idx as u64,
+                        arg1: FlatOp::encode_operand(addr_op),
+                        arg2: mask,
+                    });
+                    Operand::Temp(dst)
+                } else {
+                    Operand::Immediate(0)
+                }
             }
         }
     }
@@ -892,6 +1039,51 @@ impl CoreSimulator {
                 };
                 unsafe { *temps.get_unchecked_mut(op.dst) = result & op.arg2; }
             }
+            // Specialized signal-signal operations (must be in execute_flat_op, not just evaluate)
+            OP_AND_SS => {
+                let result = unsafe { *signals.get_unchecked(op.arg0 as usize) & *signals.get_unchecked(op.arg1 as usize) };
+                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+            }
+            OP_OR_SS => {
+                let result = unsafe { *signals.get_unchecked(op.arg0 as usize) | *signals.get_unchecked(op.arg1 as usize) };
+                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+            }
+            OP_XOR_SS => {
+                let result = unsafe { *signals.get_unchecked(op.arg0 as usize) ^ *signals.get_unchecked(op.arg1 as usize) };
+                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+            }
+            OP_EQ_SS => {
+                let result = unsafe { (*signals.get_unchecked(op.arg0 as usize) == *signals.get_unchecked(op.arg1 as usize)) as u64 };
+                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+            }
+            OP_MUX_SSS => {
+                let c = unsafe { *signals.get_unchecked(op.arg0 as usize) };
+                let t = unsafe { *signals.get_unchecked(op.arg1 as usize) };
+                let f = unsafe { *signals.get_unchecked(op.arg2 as usize) };
+                let select = (c != 0) as u64;
+                let result = (select.wrapping_neg() & t) | ((!select.wrapping_neg()) & f);
+                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+            }
+            OP_COPY_SIG_TO_SIG => {
+                let val = unsafe { *signals.get_unchecked(op.arg0 as usize) } & op.arg2;
+                unsafe { *signals.get_unchecked_mut(op.dst) = val; }
+            }
+            OP_AND_SI => {
+                let result = unsafe { *signals.get_unchecked(op.arg0 as usize) } & op.arg1;
+                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+            }
+            OP_OR_SI => {
+                let result = unsafe { *signals.get_unchecked(op.arg0 as usize) } | op.arg1;
+                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+            }
+            OP_SLICE_S => {
+                let result = (unsafe { *signals.get_unchecked(op.arg0 as usize) } >> op.arg1 as u32) & op.arg2;
+                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+            }
+            OP_NOT_S => {
+                let result = (!unsafe { *signals.get_unchecked(op.arg0 as usize) }) & op.arg2;
+                unsafe { *temps.get_unchecked_mut(op.dst) = result; }
+            }
             _ => {}
         }
     }
@@ -903,11 +1095,11 @@ impl CoreSimulator {
         let memories = &self.memory_arrays;
 
         for op in &self.all_comb_ops {
-            match op.op_type {
-                OP_COPY_TO_SIG => {
-                    let val = FlatOp::get_operand(signals, temps, op.arg0) & op.arg2;
-                    unsafe { *signals.get_unchecked_mut(op.dst) = val; }
-                }
+                match op.op_type {
+                    OP_COPY_TO_SIG => {
+                        let val = FlatOp::get_operand(signals, temps, op.arg0) & op.arg2;
+                        unsafe { *signals.get_unchecked_mut(op.dst) = val; }
+                    }
                 OP_AND => {
                     let result = FlatOp::get_operand(signals, temps, op.arg0) & FlatOp::get_operand(signals, temps, op.arg1);
                     unsafe { *temps.get_unchecked_mut(op.dst) = result; }
@@ -978,10 +1170,10 @@ impl CoreSimulator {
                     let result = (select.wrapping_neg() & t) | ((!select.wrapping_neg()) & f);
                     unsafe { *temps.get_unchecked_mut(op.dst) = result; }
                 }
-                OP_COPY_SIG_TO_SIG => {
-                    let val = unsafe { *signals.get_unchecked(op.arg0 as usize) } & op.arg2;
-                    unsafe { *signals.get_unchecked_mut(op.dst) = val; }
-                }
+                    OP_COPY_SIG_TO_SIG => {
+                        let val = unsafe { *signals.get_unchecked(op.arg0 as usize) } & op.arg2;
+                        unsafe { *signals.get_unchecked_mut(op.dst) = val; }
+                    }
                 OP_AND_SI => {
                     let result = unsafe { *signals.get_unchecked(op.arg0 as usize) } & op.arg1;
                     unsafe { *temps.get_unchecked_mut(op.dst) = result; }
@@ -998,8 +1190,8 @@ impl CoreSimulator {
                     let result = (!unsafe { *signals.get_unchecked(op.arg0 as usize) }) & op.arg2;
                     unsafe { *temps.get_unchecked_mut(op.dst) = result; }
                 }
-                _ => Self::execute_flat_op(signals, temps, memories, op),
-            }
+                    _ => Self::execute_flat_op(signals, temps, memories, op),
+                }
         }
     }
 
@@ -1067,6 +1259,7 @@ impl CoreSimulator {
     pub fn tick_forced(&mut self) {
         // Skip saving current clock values - use prev_clock_values set by caller
 
+        // Assigns are now topologically sorted, so a single evaluate pass is sufficient
         self.evaluate();
 
         for (i, fast_path) in self.seq_fast_paths.iter().enumerate() {
@@ -1076,7 +1269,7 @@ impl CoreSimulator {
             }
         }
 
-        for op in &self.all_seq_ops {
+        for op in self.all_seq_ops.iter() {
             match op.op_type {
                 OP_STORE_NEXT_REG => {
                     let val = FlatOp::get_operand(&self.signals, &self.temps, op.arg0) & op.arg2;
@@ -1088,8 +1281,12 @@ impl CoreSimulator {
             }
         }
 
+        // Track which registers have been updated to prevent double updates
+        let num_seq = self.next_regs.len();
+        let mut updated = vec![false; num_seq];
+
         const MAX_ITERATIONS: usize = 10;
-        for _ in 0..MAX_ITERATIONS {
+        for _iter in 0..MAX_ITERATIONS {
             let mut any_edge = false;
             for (clock_list_idx, &clk_idx) in self.clock_indices.iter().enumerate() {
                 let old_val = self.prev_clock_values[clock_list_idx];
@@ -1098,9 +1295,14 @@ impl CoreSimulator {
                 if old_val == 0 && new_val == 1 {
                     any_edge = true;
                     for &(seq_idx, target_idx) in &self.clock_domain_assigns[clock_list_idx] {
-                        unsafe { *self.signals.get_unchecked_mut(target_idx) = self.next_regs[seq_idx]; }
+                        // Only update if not already updated (prevents double updates)
+                        if !updated[seq_idx] {
+                            unsafe { *self.signals.get_unchecked_mut(target_idx) = self.next_regs[seq_idx]; }
+                            updated[seq_idx] = true;
+                        }
                     }
-                    // Note: Do NOT update prev_clock_values here - caller manages it
+                    // Update prev_clock_values to prevent re-triggering in this iteration
+                    self.prev_clock_values[clock_list_idx] = 1;
                 }
             }
 
@@ -1131,4 +1333,5 @@ impl CoreSimulator {
     pub fn reg_count(&self) -> usize {
         self.reg_count
     }
+
 }
