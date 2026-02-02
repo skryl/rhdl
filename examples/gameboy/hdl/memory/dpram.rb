@@ -52,6 +52,7 @@ module GameBoy
     def initialize(name = nil, addr_width: DEFAULT_ADDR_WIDTH, **kwargs)
       @addr_width = addr_width
       super(name, **kwargs)
+      initialize_memories
     end
 
     # Direct memory access for external use (debugging, initialization)
