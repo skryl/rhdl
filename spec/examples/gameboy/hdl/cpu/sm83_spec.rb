@@ -1229,6 +1229,91 @@ RSpec.describe 'SM83 CPU Instructions' do
       state = run_test_code(code)
       expect(state[:a]).to eq(0x88)
     end
+
+    it 'LDH A,(n) reads video registers correctly (LY at FF44)' do
+      # Read LY register many times and track min/max
+      # LY cycles 0-153 (154 lines), so we need to run long enough to see all values
+      # Use nested loops: outer loop (E) * inner loop (D) = total iterations
+      # 256 * 256 = 65536 iterations, each ~12 cycles = ~786K cycles
+      # This covers multiple complete frames (70K cycles/frame)
+      code = [
+        0x06, 0xFF,        # LD B, 0xFF - min = 255
+        0x0E, 0x00,        # LD C, 0x00 - max = 0
+        0x1E, 0x10,        # LD E, 0x10 - outer count (16 iterations * 256 inner = 4096 total)
+        # outer_loop:
+        0x16, 0x00,        # LD D, 0x00 - inner count (256 iterations)
+        # inner_loop:
+        0xF0, 0x44,        # LDH A, (0x44) - read LY
+        0xB8,              # CP B - compare with min
+        0x30, 0x01,        # JR NC, +1 - skip if A >= B
+        0x47,              # LD B, A - new min
+        0xB9,              # CP C - compare with max
+        0x38, 0x01,        # JR C, +1 - skip if A < C
+        0x4F,              # LD C, A - new max
+        0x15,              # DEC D
+        0x20, 0xF3,        # JR NZ, inner_loop (-13, target=0x108 from 0x115)
+        0x1D,              # DEC E
+        0x20, 0xEE,        # JR NZ, outer_loop (-18, target=0x106 from 0x118)
+        # Store results in ZPRAM for verification
+        0x78,              # LD A, B - min
+        0xE0, 0x80,        # LDH (0x80), A
+        0x79,              # LD A, C - max
+        0xE0, 0x81,        # LDH (0x81), A
+        0x76               # HALT
+      ]
+      # Run longer to ensure we see full LY range (0-153)
+      # Test runs 4096 iterations * ~14 cycles = ~57K cycles (about 1 frame)
+      # This should see most of the LY range
+      # Need more cycles to complete the loop
+      state = run_test_code(code, cycles: 500_000)
+
+      # The min should be 0 and max should be 153 (or close to it)
+      # Note: we check the ZPRAM values, not registers (which might have changed)
+      # ZPRAM address is 7 bits: addr - 0xFF80, so 0xFF80 -> 0, 0xFF81 -> 1
+      min_ly = @runner.sim.read_zpram(0)  # 0xFF80
+      max_ly = @runner.sim.read_zpram(1)  # 0xFF81
+
+      expect(min_ly).to eq(0), "Expected LY min to be 0, got #{min_ly}"
+      expect(max_ly).to eq(153), "Expected LY max to be 153, got #{max_ly}"
+    end
+
+    it 'reads LY via (HL) indirect addressing correctly' do
+      # Similar to Prince of Persia which uses CP (HL) to check LY
+      # This test uses LD A,(HL) with HL=0xFF44 to read LY
+      code = [
+        0x21, 0x44, 0xFF,  # LD HL, 0xFF44 (LY register address)
+        0x06, 0xFF,        # LD B, 0xFF - min = 255
+        0x0E, 0x00,        # LD C, 0x00 - max = 0
+        0x1E, 0x10,        # LD E, 0x10 - outer count (16 iterations * 256 inner = 4096 total)
+        # outer_loop (0x10A):
+        0x16, 0x00,        # LD D, 0x00 - inner count (256 iterations)
+        # inner_loop (0x10C):
+        0x7E,              # LD A, (HL) - read LY via indirect
+        0xB8,              # CP B - compare with min
+        0x30, 0x01,        # JR NC, +1 - skip if A >= B
+        0x47,              # LD B, A - new min
+        0xB9,              # CP C - compare with max
+        0x38, 0x01,        # JR C, +1 - skip if A < C
+        0x4F,              # LD C, A - new max
+        0x15,              # DEC D
+        0x20, 0xF4,        # JR NZ, inner_loop (-12, target=0x10C from 0x118)
+        0x1D,              # DEC E
+        0x20, 0xEF,        # JR NZ, outer_loop (-17, target=0x10A from 0x11B)
+        # Store results in ZPRAM
+        0x78,              # LD A, B - min
+        0xE0, 0x80,        # LDH (0x80), A
+        0x79,              # LD A, C - max
+        0xE0, 0x81,        # LDH (0x81), A
+        0x76               # HALT
+      ]
+      state = run_test_code(code, cycles: 500_000)
+
+      min_ly = @runner.sim.read_zpram(0)  # 0xFF80
+      max_ly = @runner.sim.read_zpram(1)  # 0xFF81
+
+      expect(min_ly).to eq(0), "Expected LY min to be 0, got #{min_ly}"
+      expect(max_ly).to eq(153), "Expected LY max to be 153, got #{max_ly}"
+    end
   end
 
   describe 'Stack Pointer Instructions' do
@@ -1514,6 +1599,225 @@ RSpec.describe 'SM83 CPU Instructions' do
   end
 
   describe 'Interrupt Handling' do
+    it 'services VBlank interrupt when IME is enabled' do
+      # This test verifies that the CPU correctly services interrupts:
+      # 1. Enable VBlank interrupt (write 0x01 to IE at 0xFFFF)
+      # 2. Enable interrupts (EI)
+      # 3. Wait for VBlank (polling LY until line 144+)
+      # 4. Verify the CPU jumps to VBlank handler at 0x0040
+      #
+      # The VBlank interrupt fires when LY transitions to 144.
+      # Test ROM layout:
+      # - 0x0040: VBlank handler (set A=0x42 and store to ZPRAM, then RETI)
+      # - 0x0100: Main code (enable interrupts, wait for VBlank, check result)
+      rom = Array.new(32 * 1024, 0x00)
+
+      # Nintendo logo (required for boot)
+      nintendo_logo = [
+        0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B,
+        0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D,
+        0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E,
+        0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99,
+        0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC,
+        0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E
+      ]
+      nintendo_logo.each_with_index { |b, i| rom[0x104 + i] = b }
+
+      # Title
+      "INTTEST".bytes.each_with_index { |b, i| rom[0x134 + i] = b }
+
+      # Header checksum
+      checksum = 0
+      (0x134...0x14D).each { |i| checksum = (checksum - rom[i] - 1) & 0xFF }
+      rom[0x14D] = checksum
+
+      # VBlank interrupt handler at 0x0040
+      # Set A = 0x42, store at 0xFF80, then RETI
+      handler_code = [
+        0x3E, 0x42,        # LD A, 0x42
+        0xE0, 0x80,        # LDH (0x80), A - store flag
+        0xD9               # RETI
+      ]
+      handler_code.each_with_index { |b, i| rom[0x0040 + i] = b }
+
+      # Main code at 0x0100
+      main_code = [
+        # Entry point jump
+        0xC3, 0x50, 0x01,  # JP 0x0150
+
+        # Code at 0x0150:
+        # 1. Clear flag at 0xFF80
+        # 2. Enable VBlank interrupt
+        # 3. Enable IME
+        # 4. Wait long enough for VBlank to fire
+        # 5. Check if handler was called
+      ]
+      rom[0x100] = main_code[0]
+      rom[0x101] = main_code[1]
+      rom[0x102] = main_code[2]
+
+      code_at_150 = [
+        0x3E, 0x00,        # LD A, 0x00
+        0xE0, 0x80,        # LDH (0x80), A - clear flag
+        0x3E, 0x01,        # LD A, 0x01 (VBlank enable bit)
+        0xE0, 0xFF,        # LDH (0xFF), A - IE = 0x01 (enable VBlank)
+        0xFB,              # EI - enable interrupts
+        # Wait loop - run for about 2 frames worth of cycles
+        0x01, 0x00, 0x08,  # LD BC, 0x0800 (2048 iterations)
+        # wait_loop:
+        0x0B,              # DEC BC
+        0x78,              # LD A, B
+        0xB1,              # OR C
+        0x20, 0xFB,        # JR NZ, wait_loop (-5)
+        # Check result
+        0xF0, 0x80,        # LDH A, (0x80) - load flag
+        0xE0, 0x81,        # LDH (0x81), A - copy to 0xFF81 for test
+        0x76               # HALT
+      ]
+      code_at_150.each_with_index { |b, i| rom[0x0150 + i] = b }
+
+      @runner.load_rom(rom.pack('C*'))
+      @runner.reset
+
+      # Run through boot ROM with coarse steps first
+      while @runner.cpu_state[:pc] < 0x0100 && @runner.cycle_count < 300_000
+        @runner.run_steps(1000)
+      end
+
+      # Fine-grained stepping to catch exact boot exit
+      while @runner.cpu_state[:pc] < 0x0100 && @runner.cycle_count < 500_000
+        @runner.run_steps(1)
+      end
+
+      boot_cycles = @runner.cycle_count
+      puts "Boot complete at #{boot_cycles} cycles, PC=0x#{@runner.cpu_state[:pc].to_s(16)}"
+
+      # Now run through our test code with fine-grained steps to observe interrupt handling
+      # Code at 0x0150:
+      # 0x0150: LD A, 0x00       (2 cycles)
+      # 0x0152: LDH (0x80), A    (3 cycles)
+      # 0x0154: LD A, 0x01       (2 cycles)
+      # 0x0156: LDH (0xFF), A    (3 cycles) - enables VBlank interrupt
+      # 0x0158: EI               (1 cycle)
+      # 0x0159: LD BC, 0x0800    (3 cycles) - IME becomes 1 after this
+      # Wait for interrupt...
+
+      puts "\nTracing through test code:"
+      100.times do |i|
+        @runner.run_steps(1)
+        pc = @runner.cpu_state[:pc]
+        ime = @runner.sim.peek('gb_core__cpu__int_e_ff1') rescue -1
+        ime2 = @runner.sim.peek('gb_core__cpu__int_e_ff2') rescue -1
+        int_cycle = @runner.sim.peek('gb_core__cpu__int_cycle') rescue -1
+        if_r = @runner.sim.peek('gb_core__if_r') rescue -1
+        ir = @runner.sim.peek('gb_core__cpu__ir') rescue -1
+
+        # Only print important transitions
+        if pc == 0x0040 || pc == 0x0150 || int_cycle == 1 || ime != ime2
+          puts "Cycle +#{i+1}: PC=0x#{pc.to_s(16)}, IR=0x#{ir.to_s(16)}, IME=#{ime}, IME2=#{ime2}, IF=0x#{if_r.to_s(16)}, INT_CYCLE=#{int_cycle}"
+        end
+      end
+
+      # Run remaining cycles for the test
+      @runner.run_steps(299900)
+
+      # Check if the VBlank handler was called
+      flag = @runner.sim.read_zpram(0)  # 0xFF80
+      result = @runner.sim.read_zpram(1)  # 0xFF81
+
+      # Debug output
+      state = @runner.cpu_state
+      ime = @runner.sim.peek('gb_core__cpu__int_e_ff1') rescue -1
+      ie = @runner.sim.peek('gb_core__ie_r') rescue -1
+      if_r = @runner.sim.peek('gb_core__if_r') rescue -1
+      irq_n = @runner.sim.peek('gb_core__irq_n') rescue -1
+      int_cycle = @runner.sim.peek('gb_core__cpu__int_cycle') rescue -1
+
+      puts "CPU state: PC=0x#{state[:pc].to_s(16)}, halted=#{state[:halted]}"
+      puts "Cycles: #{@runner.cycle_count}"
+      puts "IME=#{ime}, IE=0x#{ie.to_s(16)}, IF=0x#{if_r.to_s(16)}, IRQ_N=#{irq_n}, INT_CYCLE=#{int_cycle}"
+      puts "ZPRAM[0] (flag)=#{flag}, ZPRAM[1] (result)=#{result}"
+
+      # The handler sets A=0x42 and stores it at 0xFF80
+      # The main code copies 0xFF80 to 0xFF81
+      expect(result).to eq(0x42), "Expected VBlank handler to set flag to 0x42, got #{result}"
+    end
+
+    it 'EI sets the Interrupt Master Enable (IME) flag' do
+      # EI (0xFB) should set int_e_ff1 (IME) to 1
+      # The SM83 enables interrupts after the NEXT instruction, but for now
+      # we test that IME is eventually set.
+      code = [
+        0xFB,              # EI - enable interrupts
+        0x00,              # NOP - allows EI to take effect
+        0x76               # HALT
+      ]
+
+      # Run the test
+      @runner.load_rom(create_test_rom(code))
+      @runner.reset
+
+      # Run through boot ROM
+      while @runner.cpu_state[:pc] < 0x0100 && @runner.cycle_count < 500_000
+        @runner.run_steps(1000)
+      end
+
+      # Run just enough to execute EI and NOP
+      # At 0x0100: EI (1 cycle = 4 T-states)
+      # At 0x0101: NOP (1 cycle = 4 T-states)
+      # At 0x0102: HALT
+      # After 100 cycles, we should have executed all and IME should be 1
+      @runner.run_steps(100)
+
+      # Check IME flag
+      ime = @runner.sim.peek('gb_core__cpu__int_e_ff1') rescue -1
+
+      # Debug output
+      state = @runner.cpu_state
+      puts "After EI: PC=0x#{state[:pc].to_s(16)}, halted=#{state[:halted]}, IME=#{ime}"
+
+      expect(ime).to eq(1), "Expected IME (int_e_ff1) to be 1 after EI, got #{ime}"
+    end
+
+    it 'EI sets IME with preceding instructions' do
+      # Test that EI works when preceded by LDH instructions
+      # Note: We write 0 to IE to disable all interrupts, so IME stays 1 after EI
+      # (If we enabled an interrupt, it would fire and clear IME - that's correct behavior)
+      code = [
+        0x3E, 0x00,        # LD A, 0x00
+        0xE0, 0x80,        # LDH (0x80), A - write to ZPRAM
+        0x3E, 0x00,        # LD A, 0x00 (disable all interrupts)
+        0xE0, 0xFF,        # LDH (0xFF), A - write to IE register (IE=0)
+        0xFB,              # EI - enable interrupts
+        0x00,              # NOP
+        0x76               # HALT
+      ]
+
+      @runner.load_rom(create_test_rom(code))
+      @runner.reset
+
+      # Run through boot ROM
+      while @runner.cpu_state[:pc] < 0x0100 && @runner.cycle_count < 500_000
+        @runner.run_steps(1000)
+      end
+
+      # Check IME immediately after boot loop
+      ime0 = @runner.sim.peek('gb_core__cpu__int_e_ff1') rescue -1
+      pc0 = @runner.cpu_state[:pc]
+      puts "After boot: PC=0x#{pc0.to_s(16)}, IME=#{ime0}"
+
+      # Run more cycles
+      @runner.run_steps(100)
+
+      ime = @runner.sim.peek('gb_core__cpu__int_e_ff1') rescue -1
+      ie = @runner.sim.peek('gb_core__ie_r') rescue -1
+      state = @runner.cpu_state
+
+      puts "After 100 cycles: PC=0x#{state[:pc].to_s(16)}, halted=#{state[:halted]}, IME=#{ime}, IE=0x#{ie.to_s(16)}"
+
+      expect(ime).to eq(1), "Expected IME to be 1 after EI with preceding LDH, got #{ime}"
+    end
+
     it 'disables interrupts for one instruction after DI' do
       # Reference: IntE_FF1, IntE_FF2 interaction
       pending 'DI interrupt delay testing requires external interrupt injection'

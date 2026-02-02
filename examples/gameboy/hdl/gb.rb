@@ -195,7 +195,7 @@ module GameBoy
     wire :wram_bank, width: 3
     wire :vram_bank
     wire :if_r, width: 5
-    wire :ie_r, width: 8
+    wire :ie_r, width: 8  # Updated in sequential block
     wire :cpu_speed
     wire :prepare_switch
 
@@ -514,16 +514,24 @@ module GameBoy
 
     # Sequential logic for registers
     # boot_rom_enabled: 1 to run boot ROM (initializes hardware properly)
-    sequential clock: :clk_sys, reset: :reset, reset_values: { boot_rom_enabled: 1, if_r: 0 } do
+    sequential clock: :clk_sys, reset: :reset, reset_values: { boot_rom_enabled: 1, if_r: 0, ie_r: 0 } do
       # Boot ROM enable (disabled by writing to FF50)
       # Disable boot ROM on any write to FF50 (MiSTer boot ROM writes 0, original writes non-zero)
       boot_rom_enabled <= mux(ce & (cpu_addr == lit(0xFF50, width: 16)) & ~cpu_wr_n,
                               lit(0, width: 1),
                               boot_rom_enabled)
 
+      # Interrupt Enable register ($FFFF)
+      # Bit 0: V-Blank, Bit 1: LCD STAT, Bit 2: Timer, Bit 3: Serial, Bit 4: Joypad
+      # CPU writes to enable/disable interrupts
+      ie_r <= mux(ce & sel_ie & ~cpu_wr_n,
+                  cpu_do,
+                  ie_r)
+
       # Interrupt Flag register ($FF0F)
       # Bit 0: V-Blank, Bit 1: LCD STAT, Bit 2: Timer, Bit 3: Serial, Bit 4: Joypad
-      # Set by interrupt sources, cleared by CPU writing 1 to the bit
+      # Set by interrupt sources, cleared by CPU writing 1 to the bit OR automatically
+      # when the interrupt is acknowledged by the CPU.
       #
       # Start with current value
       if_r_new = if_r
@@ -539,6 +547,20 @@ module GameBoy
       # Writing 1 to a bit clears it (standard interrupt acknowledge)
       if_r_new = mux(ce & sel_if & ~cpu_wr_n,
                      if_r_new & ~cpu_do[4..0],
+                     if_r_new)
+
+      # Auto-clear IF bit when interrupt is acknowledged by CPU
+      # The bit to clear corresponds to the highest-priority pending interrupt
+      # Priority: VBlank > LCD STAT > Timer > Serial > Joypad
+      irq_clear_mask = mux(if_r[0] & ie_r[0], lit(0x01, width: 5),
+                       mux(if_r[1] & ie_r[1], lit(0x02, width: 5),
+                       mux(if_r[2] & ie_r[2], lit(0x04, width: 5),
+                       mux(if_r[3] & ie_r[3], lit(0x08, width: 5),
+                       mux(if_r[4] & ie_r[4], lit(0x10, width: 5),
+                           lit(0x00, width: 5))))))
+
+      if_r_new = mux(irq_ack,
+                     if_r_new & ~irq_clear_mask,
                      if_r_new)
 
       if_r <= if_r_new
