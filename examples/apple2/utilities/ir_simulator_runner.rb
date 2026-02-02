@@ -91,7 +91,7 @@ module RHDL
         # PS/2 keyboard encoder for sending keys through the PS/2 protocol
         @ps2_encoder = PS2Encoder.new
 
-        @use_batched = @sim.native? && @sim.respond_to?(:run_cpu_cycles)
+        @use_batched = @sim.native? && @sim.respond_to?(:apple2_run_cpu_cycles)
 
         # Speaker audio simulation
         @speaker = Speaker.new
