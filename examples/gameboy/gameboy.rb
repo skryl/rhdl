@@ -138,6 +138,10 @@ module GameBoy
     wire :const_zero_129, width: 129
     wire :const_zero_2, width: 2
 
+    # Joypad logic
+    wire :joy_p54, width: 2       # P14/P15 selection from GB core
+    wire :joy_din_computed, width: 4  # Computed button state for GB core
+
     # Sub-component instances
     instance :speed_ctrl, SpeedControl
     instance :gb_core, GB
@@ -230,7 +234,8 @@ module GameBoy
     port :const_zero_16 => [:gb_core, :ioctl_dout]
     port :const_zero => [:gb_core, :boot_gba_en]
     port :const_zero => [:gb_core, :fast_boot_en]
-    port :const_zero_4 => [:gb_core, :joy_din]
+    port :joy_din_computed => [:gb_core, :joy_din]
+    port [:gb_core, :joy_p54] => :joy_p54
     port :const_zero => [:gb_core, :gg_reset]
     port :const_zero => [:gb_core, :gg_en]
     port :const_zero_129 => [:gb_core, :gg_code]
@@ -253,7 +258,7 @@ module GameBoy
       const_zero <= lit(0, width: 1)
       const_one <= lit(1, width: 1)
       const_zero_2 <= lit(0, width: 2)
-      const_zero_4 <= lit(0xF, width: 4)  # joy_din is active low
+      const_zero_4 <= lit(0xF, width: 4)
       const_zero_8 <= lit(0, width: 8)
       const_zero_16 <= lit(0, width: 16)
       const_zero_25 <= lit(0, width: 25)
@@ -261,6 +266,26 @@ module GameBoy
 
       # Cart activity for speed control
       cart_act <= cart_rd | cart_wr
+
+      # Joypad logic
+      # joystick input: bits 0-3 = Right,Left,Up,Down, bits 4-7 = A,B,Select,Start
+      # Both input and output are active-low (0 = pressed, 1 = released)
+      # joy_p54[0] = P14 (low = select directions)
+      # joy_p54[1] = P15 (low = select buttons)
+      #
+      # When P14 low: return direction buttons from joystick[3:0]
+      # When P15 low: return action buttons from joystick[7:4]
+      # When selection bit is high: return 1s (no buttons pressed)
+      # When both low: AND the results (for diagnostic mode)
+      joy_dir = joystick[3..0]  # Direction buttons (active low passthrough)
+      joy_btn = joystick[7..4]  # Action buttons (active low passthrough)
+
+      # Mask by selection bits (when selection bit is high, return all 1s = released)
+      joy_dir_masked = joy_dir | cat(joy_p54[0], joy_p54[0], joy_p54[0], joy_p54[0])
+      joy_btn_masked = joy_btn | cat(joy_p54[1], joy_p54[1], joy_p54[1], joy_p54[1])
+
+      # AND the results (both button sets can be read simultaneously)
+      joy_din_computed <= joy_dir_masked & joy_btn_masked
     end
   end
 end

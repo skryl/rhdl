@@ -207,6 +207,14 @@ module GameBoy
     wire :vblank_irq
     wire :timer_irq
     wire :serial_irq
+    wire :joypad_irq
+
+    # Joypad edge detection pipeline
+    # joy_din_sampled: registered version of joy_din (1 cycle delay)
+    # joy_din_prev: previous joy_din_sampled (2 cycles delay)
+    # This ensures proper edge detection timing in simulation
+    wire :joy_din_sampled, width: 4
+    wire :joy_din_prev, width: 4
 
     # Data outputs from subsystems
     wire :joy_do, width: 8
@@ -482,6 +490,13 @@ module GameBoy
       # Joypad output
       joy_do <= cat(lit(0b11, width: 2), joy_p54, joy_din)
 
+      # Joypad interrupt: fires when any button transitions from released (1) to pressed (0)
+      # This is a falling edge on joy_din_sampled bits
+      # joy_din_prev was high (1), joy_din_sampled is now low (0) = button just pressed
+      # Note: We use joy_din_sampled (registered) vs joy_din_prev for proper pipeline timing
+      joy_falling_edge = joy_din_prev & ~joy_din_sampled
+      joypad_irq <= reduce_or(joy_falling_edge)
+
       # Speed output (GBC)
       speed <= cpu_speed
 
@@ -514,7 +529,8 @@ module GameBoy
 
     # Sequential logic for registers
     # boot_rom_enabled: 1 to run boot ROM (initializes hardware properly)
-    sequential clock: :clk_sys, reset: :reset, reset_values: { boot_rom_enabled: 1, if_r: 0, ie_r: 0 } do
+    # joy_din_sampled/joy_din_prev: 0xF = all buttons released (active low)
+    sequential clock: :clk_sys, reset: :reset, reset_values: { boot_rom_enabled: 1, if_r: 0, ie_r: 0, joy_din_sampled: 0xF, joy_din_prev: 0xF } do
       # Boot ROM enable (disabled by writing to FF50)
       # Disable boot ROM on any write to FF50 (MiSTer boot ROM writes 0, original writes non-zero)
       boot_rom_enabled <= mux(ce & (cpu_addr == lit(0xFF50, width: 16)) & ~cpu_wr_n,
@@ -541,7 +557,7 @@ module GameBoy
       if_r_new = mux(video_irq, if_r_new | lit(0x02, width: 5), if_r_new)
       if_r_new = mux(timer_irq, if_r_new | lit(0x04, width: 5), if_r_new)
       if_r_new = mux(serial_irq, if_r_new | lit(0x08, width: 5), if_r_new)
-      # Note: Joypad interrupt (bit 4) would be added here when implemented
+      if_r_new = mux(joypad_irq, if_r_new | lit(0x10, width: 5), if_r_new)
 
       # CPU can clear interrupt flags by writing to $FF0F
       # Writing 1 to a bit clears it (standard interrupt acknowledge)
@@ -564,6 +580,14 @@ module GameBoy
                      if_r_new)
 
       if_r <= if_r_new
+
+      # Joypad edge detection pipeline registers
+      # joy_din_sampled captures the current joy_din input (1 cycle delay)
+      # joy_din_prev captures the previous joy_din_sampled (2 cycles delay from input)
+      # Edge detection in behavior block compares joy_din_prev with joy_din_sampled
+      # Note: Order matters in simulation - update joy_din_prev first (from old joy_din_sampled)
+      joy_din_prev <= mux(ce, joy_din_sampled, joy_din_prev)
+      joy_din_sampled <= mux(ce, joy_din, joy_din_sampled)
     end
 
   end
