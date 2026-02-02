@@ -524,6 +524,7 @@ options = {
   debug: false,
   dmg_colors: true,
   demo: false,
+  pop: false,
   audio: false,
   mode: :hdl,
   sim: :ruby
@@ -563,6 +564,10 @@ parser = OptionParser.new do |opts|
     options[:demo] = true
   end
 
+  opts.on("--pop", "Load Prince of Persia ROM") do
+    options[:pop] = true
+  end
+
   opts.on("--lcd-width WIDTH", Integer, "LCD display width in chars (default: 80)") do |v|
     options[:lcd_width] = v
   end
@@ -589,6 +594,15 @@ if rom_file
     exit 1
   end
   terminal.load_rom(rom_file)
+elsif options[:pop]
+  pop_rom = File.expand_path('../software/roms/pop.gb', __dir__)
+  if File.exist?(pop_rom)
+    puts "Loading Prince of Persia..."
+    terminal.load_rom(pop_rom)
+  else
+    puts "Error: Prince of Persia ROM not found: #{pop_rom}"
+    exit 1
+  end
 elsif options[:demo]
   puts "Loading demo ROM..."
   demo_rom = create_demo_rom
@@ -596,7 +610,7 @@ elsif options[:demo]
 else
   puts parser
   puts ""
-  puts "Error: No ROM specified. Use --demo or provide a ROM file."
+  puts "Error: No ROM specified. Use --demo, --pop, or provide a ROM file."
   exit 1
 end
 
