@@ -451,6 +451,123 @@ rhdl apple2 --demo                       # Run demo mode
 rhdl apple2 --build                      # Build mini monitor ROM
 ```
 
+## Execution Backends
+
+RHDL provides multiple simulation backends with different performance/flexibility tradeoffs:
+
+### Behavioral Simulation (Ruby)
+
+Pure Ruby execution at the behavior block level. Best for development and debugging.
+
+```ruby
+sim = RHDL::Sim::Simulator.new
+sim.add_component(alu)
+sim.add_clock(clk)
+sim.run(100)  # 100 clock cycles
+```
+
+### Gate-Level (Netlist) Simulation
+
+Simulates primitive gate netlists (AND, OR, XOR, NOT, MUX, DFF). Four backend options:
+
+| Backend | Speed | Startup | Use Case |
+|---------|-------|---------|----------|
+| Ruby SimCPU | 22K iter/s | Immediate | Development, small circuits |
+| Rust Interpreter | 427K iter/s (20x) | Immediate | Functional verification |
+| Rust JIT (Cranelift) | 50-100M gates/s | 0.1-0.5s | Fast interactive simulation |
+| Rust Compiler (SIMD) | 100M+ gates/s | 1-2s | Maximum throughput, batch testing |
+
+The compiler supports AVX2/AVX512 for 256-512 parallel test vectors.
+
+```ruby
+ir = RHDL::Codegen::Netlist::Lower.from_components([alu])
+sim = RHDL::Codegen::Netlist::NetlistInterpreterWrapper.new(ir, lanes: 64)
+sim.poke('a', 0xFF)
+sim.evaluate
+result = sim.peek('y')
+```
+
+### IR-Level Simulation (Word-Level)
+
+Word-level bytecode simulation for complex designs like CPUs:
+
+| Backend | Speed | Startup | Use Case |
+|---------|-------|---------|----------|
+| Interpreter | 60K cycles/s | Immediate | Interactive CPU debugging |
+| JIT (Cranelift) | 600K cycles/s (10x) | 0.1-0.5s | Moderate simulations |
+| AOT Compiler | 2.3M cycles/s (38x) | 0.5-2s | Long simulations, games |
+
+```ruby
+sim = RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
+sim.compile
+sim.run_ticks(1_000_000)
+```
+
+### Verilog Export & External Simulation
+
+Export components to Verilog for synthesis or simulation with industry-standard tools:
+
+```ruby
+# Export component to Verilog
+verilog_code = RHDL::Codegen.verilog(component)
+File.write('alu.v', verilog_code)
+```
+
+**External simulators:**
+
+| Tool | Speed | Use Case |
+|------|-------|----------|
+| iverilog | ~100K cycles/s | Functional verification, golden reference |
+| Verilator | ~5.7M cycles/s | High-performance simulation, benchmarking |
+
+```bash
+# Compile and run with iverilog
+iverilog -o sim alu.v testbench.v && vvp sim
+
+# Compile with Verilator for maximum performance
+verilator --cc alu.v --exe testbench.cpp
+```
+
+When iverilog is installed, RHDL automatically runs gate-level verification tests comparing synthesized Verilog against behavioral simulation.
+
+### Building Native Extensions
+
+```bash
+rake native:build    # Build all Rust extensions
+rake native:check    # Check availability
+```
+
+All backends include automatic fallback to Ruby when native extensions aren't available.
+
+See [Simulation](docs/simulation.md) and [Gate-Level Backend](docs/gate_level_backend.md) for complete details.
+
+## Performance Benchmarks
+
+RHDL includes benchmarking tasks to measure simulation performance across backends:
+
+```bash
+rake bench:mos6502[cycles]    # Benchmark MOS 6502 CPU
+rake bench:apple2[cycles]     # Benchmark Apple II full system
+rake bench:gameboy[frames]    # Benchmark GameBoy with Prince of Persia
+rake bench:gates              # Benchmark gate-level simulation
+```
+
+**Sample Results (1M cycles):**
+
+| System | JIT | Compiler | Verilator | Compiler Speedup |
+|--------|-----|----------|-----------|------------------|
+| MOS 6502 | 0.23M/s | 1.58M/s | ~5.6M/s | 6.8x vs JIT |
+| Apple II | 0.06M/s | 0.28M/s | ~5.6M/s | 4.8x vs JIT |
+| GameBoy | - | 1.27 MHz | ~5.8 MHz | 30% real-time |
+
+**Backend Selection Guide:**
+- **< 100K cycles**: Use JIT (fast startup)
+- **100K - 1M cycles**: Use JIT or Compiler
+- **> 1M cycles**: Use Compiler or Verilator
+- **Maximum speed**: Use Verilator (requires installation)
+
+See [Performance Guide](docs/performance.md) for detailed benchmarks and optimization tips.
+
 ## Rake Tasks
 
 ```bash
