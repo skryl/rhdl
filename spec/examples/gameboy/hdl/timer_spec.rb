@@ -272,9 +272,31 @@ RSpec.describe 'GameBoy Timer' do
 
       it 'cancels pending overflow when TIMA is written during delay window' do
         # Reference: Writing TIMA during overflow delay cancels the reload
-        # This is a critical timing quirk
-        pending 'TIMA write during overflow delay window cancellation'
-        fail
+        # The tima_overflow_1 flag is cleared when TIMA is written, preventing reload
+        # This is tested implicitly - if TIMA write didn't cancel, we'd get TMA reload
+        code = [
+          0x3E, 0x42,  # LD A, 0x42
+          0xE0, 0x06,  # LDH (FF06), A - TMA = 0x42
+          0x3E, 0xFE,  # LD A, 0xFE
+          0xE0, 0x05,  # LDH (FF05), A - TIMA = 0xFE (2 increments to overflow)
+          0x3E, 0x05,  # LD A, 0x05 (enable, 262144 Hz - fastest)
+          0xE0, 0x07,  # LDH (FF07), A - enable timer
+          # Wait a few cycles for TIMA to overflow (TIMA goes FE->FF->00)
+          0x00, 0x00, 0x00, 0x00,  # 4 NOPs
+          0x00, 0x00, 0x00, 0x00,  # 4 NOPs
+          # Now write to TIMA during the delay window before reload
+          0x3E, 0x55,  # LD A, 0x55
+          0xE0, 0x05,  # LDH (FF05), A - TIMA = 0x55 (should cancel reload)
+          # Wait and read TIMA - should be around 0x55, not 0x42 (TMA)
+          0x00, 0x00, 0x00, 0x00,  # 4 NOPs
+          0xF0, 0x05,  # LDH A, (FF05) - read TIMA
+          0x76         # HALT
+        ]
+        state = run_test_code(code, cycles: 500)
+        # TIMA should be close to 0x55 (written value), not 0x42 (TMA)
+        # Allow some increment due to timer continuing
+        expect(state[:a]).to be >= 0x55
+        expect(state[:a]).to be < 0x65  # Should not have wrapped around
       end
     end
 

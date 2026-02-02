@@ -173,6 +173,8 @@ module GameBoy
     wire :sel_video_oam
     wire :video_wr               # Video unit write enable (active high)
     wire :video_addr, width: 8   # Video unit address low byte
+    wire :timer_wr               # Timer unit write enable (active high)
+    wire :timer_addr, width: 2   # Timer unit address (0=DIV, 1=TIMA, 2=TMA, 3=TAC)
     wire :sel_joy
     wire :sel_sb
     wire :sel_sc
@@ -329,7 +331,11 @@ module GameBoy
     port [:cpu, :debug_const_one] => :debug_const_one
 
     # Timer connections
+    port :ce => [:timer_unit, :ce]
     port :sel_timer => [:timer_unit, :cpu_sel]
+    port :timer_addr => [:timer_unit, :cpu_addr]
+    port :timer_wr => [:timer_unit, :cpu_wr]
+    port :cpu_do => [:timer_unit, :cpu_di]
     port [:timer_unit, :irq] => :timer_irq
     port [:timer_unit, :cpu_do] => :timer_do
 
@@ -405,6 +411,11 @@ module GameBoy
       # Video write interface - PPU needs low byte of address and write enable
       video_addr <= cpu_addr[7..0]
       video_wr <= sel_video_reg & ~cpu_mreq_n & ~cpu_wr_n
+
+      # Timer write interface - Timer needs 2-bit address and write enable
+      timer_addr <= cpu_addr[1..0]
+      timer_wr <= ~cpu_wr_n
+
       sel_joy <= (cpu_addr == lit(0xFF00, width: 16))
       sel_sb <= (cpu_addr == lit(0xFF01, width: 16))
       sel_sc <= (cpu_addr == lit(0xFF02, width: 16))
