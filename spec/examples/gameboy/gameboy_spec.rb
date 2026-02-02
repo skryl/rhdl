@@ -674,6 +674,13 @@ RSpec.describe 'GameBoy RHDL Implementation' do
         # Progress output
         speed_mhz = (runner.cycle_count - start_cycle) / elapsed / 1_000_000.0
         puts "    Frame #{current_frame}: FB=#{fb_non_zero} px, VRAM tiles=#{tile_data_non_zero}, BG map=#{tilemap_bg_non_zero} (#{'%.2f' % speed_mhz} MHz)"
+
+        # Render framebuffer visually every 100 frames
+        puts ""
+        puts "    Framebuffer at frame #{current_frame}:"
+        output = runner.render_lcd_braille(chars_wide: 40)
+        output.each_line { |line| puts "      #{line}" }
+        puts ""
       end
 
       game_elapsed = Time.now - game_start
