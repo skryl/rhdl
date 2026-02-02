@@ -1184,7 +1184,6 @@ RSpec.describe 'SM83 CPU Instructions' do
     end
 
     it 'LD (nn),SP stores SP at 16-bit immediate address' do
-      pending 'LD (nn),SP implementation needed in SM83 CPU'
       # Store SP to ZPRAM, then load back to verify
       code = [
         0x31, 0xFE, 0xDF,  # LD SP, 0xDFFE
@@ -1250,7 +1249,6 @@ RSpec.describe 'SM83 CPU Instructions' do
     end
 
     it 'LD HL,SP+n adds signed offset to SP and stores in HL' do
-      pending 'LD HL,SP+n (0xF8) instruction implementation needed'
       # Set SP, then LD HL,SP+n to get SP + signed offset in HL
       code = [
         0x31, 0x00, 0xFF,  # LD SP, 0xFF00
@@ -1263,7 +1261,6 @@ RSpec.describe 'SM83 CPU Instructions' do
     end
 
     it 'LD HL,SP+n handles negative offset correctly' do
-      pending 'LD HL,SP+n (0xF8) instruction implementation needed'
       # Test with negative offset
       code = [
         0x31, 0x10, 0xFF,  # LD SP, 0xFF10
@@ -1276,7 +1273,6 @@ RSpec.describe 'SM83 CPU Instructions' do
     end
 
     it 'ADD SP,n adds signed 8-bit immediate to SP' do
-      pending 'ADD SP,n (0xE8) instruction implementation needed'
       # Add positive offset to SP
       code = [
         0x31, 0x00, 0xFF,  # LD SP, 0xFF00
@@ -1304,8 +1300,6 @@ RSpec.describe 'SM83 CPU Instructions' do
         0x4F,              # LD C, A
         0x76               # HALT
       ]
-      # Note: This test relies on LD (nn),SP which is not implemented
-      pending 'ADD SP,n verification needs LD (nn),SP implementation'
       state = run_test_code(code)
       expect(state[:b]).to eq(0x10)  # Low byte of 0xFF10
       expect(state[:c]).to eq(0xFF)  # High byte of 0xFF10
@@ -1314,14 +1308,30 @@ RSpec.describe 'SM83 CPU Instructions' do
 
   describe 'ALU Flag Behavior' do
     it 'DAA correctly adjusts for BCD after addition' do
-      # Reference: T80_ALU.vhd has full DAA with Mode=3 specific behavior
-      pending 'DAA instruction implementation needed in SM83 CPU'
-      fail
+      # 0x15 + 0x27 = 0x3C in hex, which DAA should adjust to 0x42 (15+27=42 in BCD)
+      code = [
+        0x3E, 0x15,        # LD A, 0x15
+        0xC6, 0x27,        # ADD A, 0x27 -> A = 0x3C, H flag set (5+7=12 > 15)
+        0x27,              # DAA -> A should become 0x42
+        0x76               # HALT
+      ]
+      state = run_test_code(code)
+      expect(state[:a]).to eq(0x42)  # BCD result of 15 + 27
+      expect(state[:f] & 0x80).to eq(0x00)  # Z flag clear (result not zero)
+      expect(state[:f] & 0x10).to eq(0x00)  # C flag clear (no BCD overflow)
     end
 
     it 'DAA correctly adjusts for BCD after subtraction' do
-      pending 'DAA instruction implementation needed in SM83 CPU'
-      fail
+      # 0x42 - 0x15 = 0x2D in hex, which DAA should adjust to 0x27 (42-15=27 in BCD)
+      code = [
+        0x3E, 0x42,        # LD A, 0x42
+        0xD6, 0x15,        # SUB A, 0x15 -> A = 0x2D, N flag set
+        0x27,              # DAA -> A should become 0x27
+        0x76               # HALT
+      ]
+      state = run_test_code(code)
+      expect(state[:a]).to eq(0x27)  # BCD result of 42 - 15
+      expect(state[:f] & 0x80).to eq(0x00)  # Z flag clear (result not zero)
     end
 
     describe 'RLCA/RLA/RRCA/RRA suppress Z flag' do
@@ -1524,13 +1534,7 @@ RSpec.describe 'SM83 CPU Instructions' do
 
     describe 'RETI instruction' do
       it 'RETI returns from subroutine like RET' do
-        # RETI (0xD9) should work like RET but also enable interrupts.
-        # BUG: Current SM83 implementation only checks ir==0xC9 (RET) for:
-        # - ldz/ldw to load return address from stack
-        # - Stack address generation (is_ret_m2, is_ret_m3)
-        # - PC update from WZ
-        # RETI (0xD9) needs to be added to these checks alongside RET.
-        pending 'RETI implementation incomplete - needs same ldz/ldw/PC logic as RET (0xC9)'
+        # RETI (0xD9) works like RET but also enables interrupts.
         code = [
           0xCD, 0x06, 0x01,  # CALL 0x0106 (subroutine at offset 6)
           0x3E, 0x22,        # LD A, 0x22 (after return at 0x0103)
