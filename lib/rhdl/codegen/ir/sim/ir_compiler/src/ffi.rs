@@ -15,6 +15,7 @@ use std::slice;
 
 use crate::core::CoreSimulator;
 use crate::extensions::{Apple2Extension, GameBoyExtension, Mos6502Extension};
+use crate::vcd::{VcdTracer, TraceMode};
 
 // ============================================================================
 // Simulator Context
@@ -26,6 +27,7 @@ pub struct IrSimContext {
     pub apple2: Option<Apple2Extension>,
     pub gameboy: Option<GameBoyExtension>,
     pub mos6502: Option<Mos6502Extension>,
+    pub tracer: VcdTracer,
 }
 
 impl IrSimContext {
@@ -51,7 +53,15 @@ impl IrSimContext {
             None
         };
 
-        Ok(Self { core, apple2, gameboy, mos6502 })
+        // Initialize VCD tracer with signal metadata
+        let mut tracer = VcdTracer::new();
+        let signal_names: Vec<String> = core.name_to_idx.keys().cloned().collect();
+        let signal_widths: Vec<usize> = signal_names.iter()
+            .map(|name| core.widths.get(*core.name_to_idx.get(name).unwrap()).copied().unwrap_or(1))
+            .collect();
+        tracer.init(signal_names, signal_widths);
+
+        Ok(Self { core, apple2, gameboy, mos6502, tracer })
     }
 
     fn generate_code(&self) -> String {
@@ -303,4 +313,220 @@ pub unsafe extern "C" fn ir_sim_output_names(ctx: *const IrSimContext) -> *mut c
     }
     let names = (*ctx).core.output_names.join(",");
     CString::new(names).unwrap().into_raw()
+}
+
+// ============================================================================
+// VCD Tracing FFI Functions
+// ============================================================================
+
+/// Start VCD tracing in buffer mode
+/// Returns 0 on success, -1 on error
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_trace_start(ctx: *mut IrSimContext) -> c_int {
+    if ctx.is_null() {
+        return -1;
+    }
+    let ctx = &mut *ctx;
+    ctx.tracer.set_mode(TraceMode::Buffer);
+    ctx.tracer.start();
+    0
+}
+
+/// Start VCD tracing in streaming mode to a file
+/// Returns 0 on success, -1 on error
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_trace_start_streaming(
+    ctx: *mut IrSimContext,
+    path: *const c_char,
+) -> c_int {
+    if ctx.is_null() || path.is_null() {
+        return -1;
+    }
+    let ctx = &mut *ctx;
+    let path = match CStr::from_ptr(path).to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    if let Err(_) = ctx.tracer.open_file(path) {
+        return -1;
+    }
+    ctx.tracer.start();
+    0
+}
+
+/// Stop VCD tracing
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_trace_stop(ctx: *mut IrSimContext) {
+    if !ctx.is_null() {
+        (*ctx).tracer.stop();
+    }
+}
+
+/// Check if tracing is enabled
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_trace_enabled(ctx: *const IrSimContext) -> c_int {
+    if ctx.is_null() {
+        return 0;
+    }
+    if (*ctx).tracer.is_enabled() { 1 } else { 0 }
+}
+
+/// Capture current signal values (call each simulation step)
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_trace_capture(ctx: *mut IrSimContext) {
+    if !ctx.is_null() {
+        let ctx = &mut *ctx;
+        ctx.tracer.capture(&ctx.core.signals);
+    }
+}
+
+/// Add a signal to trace by name
+/// Returns 0 if signal found and added, -1 if not found
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_trace_add_signal(
+    ctx: *mut IrSimContext,
+    name: *const c_char,
+) -> c_int {
+    if ctx.is_null() || name.is_null() {
+        return -1;
+    }
+    let ctx = &mut *ctx;
+    let name = match CStr::from_ptr(name).to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    if ctx.tracer.add_signal_by_name(name) { 0 } else { -1 }
+}
+
+/// Add signals matching a pattern (substring match)
+/// Returns the number of signals added
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_trace_add_signals_matching(
+    ctx: *mut IrSimContext,
+    pattern: *const c_char,
+) -> c_int {
+    if ctx.is_null() || pattern.is_null() {
+        return 0;
+    }
+    let ctx = &mut *ctx;
+    let pattern = match CStr::from_ptr(pattern).to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+
+    ctx.tracer.add_signals_matching(pattern) as c_int
+}
+
+/// Trace all signals
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_trace_all_signals(ctx: *mut IrSimContext) {
+    if !ctx.is_null() {
+        (*ctx).tracer.trace_all_signals();
+    }
+}
+
+/// Clear the set of traced signals
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_trace_clear_signals(ctx: *mut IrSimContext) {
+    if !ctx.is_null() {
+        (*ctx).tracer.clear_signals();
+    }
+}
+
+/// Get VCD output as string (caller must free with ir_sim_free_string)
+/// Returns null if tracing not in buffer mode or no data
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_trace_to_vcd(ctx: *const IrSimContext) -> *mut c_char {
+    if ctx.is_null() {
+        return ptr::null_mut();
+    }
+    let vcd = (*ctx).tracer.to_vcd();
+    CString::new(vcd).unwrap().into_raw()
+}
+
+/// Save VCD output to a file
+/// Returns 0 on success, -1 on error
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_trace_save_vcd(
+    ctx: *const IrSimContext,
+    path: *const c_char,
+) -> c_int {
+    if ctx.is_null() || path.is_null() {
+        return -1;
+    }
+    let path = match CStr::from_ptr(path).to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    match (*ctx).tracer.save_vcd(path) {
+        Ok(()) => 0,
+        Err(_) => -1,
+    }
+}
+
+/// Clear all buffered trace data
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_trace_clear(ctx: *mut IrSimContext) {
+    if !ctx.is_null() {
+        (*ctx).tracer.clear();
+    }
+}
+
+/// Get the number of recorded changes
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_trace_change_count(ctx: *const IrSimContext) -> c_ulong {
+    if ctx.is_null() {
+        return 0;
+    }
+    (*ctx).tracer.change_count() as c_ulong
+}
+
+/// Get the number of traced signals
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_trace_signal_count(ctx: *const IrSimContext) -> c_uint {
+    if ctx.is_null() {
+        return 0;
+    }
+    (*ctx).tracer.stats().traced_signals as c_uint
+}
+
+/// Set the VCD timescale (e.g., "1ns", "1ps")
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_trace_set_timescale(
+    ctx: *mut IrSimContext,
+    timescale: *const c_char,
+) -> c_int {
+    if ctx.is_null() || timescale.is_null() {
+        return -1;
+    }
+    let ctx = &mut *ctx;
+    let timescale = match CStr::from_ptr(timescale).to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    ctx.tracer.set_timescale(timescale);
+    0
+}
+
+/// Set the VCD module name
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_trace_set_module_name(
+    ctx: *mut IrSimContext,
+    name: *const c_char,
+) -> c_int {
+    if ctx.is_null() || name.is_null() {
+        return -1;
+    }
+    let ctx = &mut *ctx;
+    let name = match CStr::from_ptr(name).to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    ctx.tracer.set_module_name(name);
+    0
 }
