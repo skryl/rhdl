@@ -286,6 +286,7 @@ impl GameBoyExtension {
             }
 
             // Clock falling edge
+            // Assigns are topologically sorted, so a single evaluate pass is sufficient
             Self::poke(core, self.clk_sys_idx, 0);
             core.evaluate();
 
