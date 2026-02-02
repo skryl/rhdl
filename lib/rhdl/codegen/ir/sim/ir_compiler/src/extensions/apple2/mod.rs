@@ -365,6 +365,41 @@ impl Apple2Extension {
         }
     }
 
+    /// Run CPU cycles with VCD tracing - captures signals after each CPU cycle
+    /// This is slower than run_cpu_cycles but provides full signal visibility
+    pub fn run_cpu_cycles_traced(
+        &mut self,
+        core: &mut CoreSimulator,
+        tracer: &mut crate::vcd::VcdTracer,
+        n: usize,
+        key_data: u8,
+        key_ready: bool,
+    ) -> Apple2BatchResult {
+        let mut total_result = Apple2BatchResult {
+            text_dirty: false,
+            key_cleared: false,
+            cycles_run: 0,
+            speaker_toggles: 0,
+        };
+
+        // Run one CPU cycle at a time, capturing after each
+        for _ in 0..n {
+            let result = self.run_cpu_cycles(core, 1, key_data, key_ready);
+
+            // Capture signal state for this cycle
+            if tracer.is_enabled() {
+                tracer.capture(&core.signals);
+            }
+
+            total_result.text_dirty |= result.text_dirty;
+            total_result.key_cleared |= result.key_cleared;
+            total_result.cycles_run += result.cycles_run;
+            total_result.speaker_toggles += result.speaker_toggles;
+        }
+
+        total_result
+    }
+
     /// Generate Apple II specific batched execution code with disk I/O support
     pub fn generate_code(core: &CoreSimulator) -> String {
         let mut code = String::new();
@@ -694,44 +729,17 @@ impl Apple2Extension {
         code.push_str("            if reg == 0xC && !*disk_q7 && *disk_motor_on {\n");
         code.push_str("                let latched = *disk_data_latch;\n");
         // Time-based freshness matching HDL behavior:
-        // HDL: byte_fresh = (byte_delay > 329) where byte_delay counts DOWN from 429
-        // Rust: disk_cycle_counter counts UP from 0, so fresh when < 100
-        //
-        // The disk rotates continuously - bytes are available for a TIME WINDOW,
-        // not based on whether they've been read. Multiple CPU instructions can
-        // see bit 7 set within the fresh window, which is correct behavior.
-        //
-        // Sub-cycle caching ensures all 14 sub-cycles of one CPU instruction
-        // see the same value, preventing the original bug where flag was cleared
-        // on every sub-cycle.
-        code.push_str("                // Time-based freshness: byte is fresh for first ~100 of 430 cycles\n");
-        code.push_str("                static DATA_READY_CACHE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);\n");
-        code.push_str("                static D5_READ_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str("                let data_ready = if sub_cycle_counter == 0 {\n");
-        code.push_str("                    // On first sub-cycle: compute freshness from cycle counter\n");
-        code.push_str("                    let fresh = *disk_cycle_counter < 100;\n");
-        code.push_str("                    DATA_READY_CACHE.store(fresh, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                    // Debug D5 reads\n");
-        code.push_str("                    if latched == 0xD5 {\n");
-        code.push_str("                        let cnt = D5_READ_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                        if cnt < 10 { eprintln!(\"D5_READ[{}]: cycle_ctr={} fresh={} pos={}\", cnt, *disk_cycle_counter, fresh, *disk_byte_pos); }\n");
-        code.push_str("                    }\n");
-        code.push_str("                    fresh\n");
-        code.push_str("                } else {\n");
-        code.push_str("                    // On sub-cycles 1-13: use cached value from sub-cycle 0\n");
-        code.push_str("                    DATA_READY_CACHE.load(std::sync::atomic::Ordering::Relaxed)\n");
-        code.push_str("                };\n");
-        code.push_str("                let result = if data_ready {\n");
+        // HDL: byte_delay counts DOWN from 429 to 0
+        // byte_fresh = (byte_delay > 329), i.e. fresh when delay is 330-429 (first 100 cycles)
+        // Rust: disk_cycle_counter counts UP from 0 to 429
+        // So fresh when disk_cycle_counter < 100 (same 100 cycle window)
+        code.push_str("                // Fresh window: first 100 of 430 cycles per byte (matches HDL)\n");
+        code.push_str("                let fresh = *disk_cycle_counter < 100;\n");
+        code.push_str("                let result = if fresh {\n");
         code.push_str("                    latched as u64  // Fresh byte: bit 7 intact\n");
         code.push_str("                } else {\n");
         code.push_str("                    (latched & 0x7F) as u64  // Stale byte: clear bit 7\n");
         code.push_str("                };\n");
-        code.push_str("                // Debug: trace stale D5 reads\n");
-        code.push_str("                static STALE_D5_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str("                if !data_ready && latched == 0xD5 && sub_cycle_counter == 0 {\n");
-        code.push_str("                    let cnt = STALE_D5_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str("                    if cnt < 5 { eprintln!(\"STALE_D5[{}]: result={:02X} cycle_ctr={}\", cnt, result, *disk_cycle_counter); }\n");
-        code.push_str("                }\n");
         code.push_str("                result\n");
         code.push_str("            } else if reg == 0xC && !*disk_q7 {\n");
         code.push_str("                // Motor is off - return 0\n");
@@ -803,18 +811,6 @@ impl Apple2Extension {
         code.push_str("            speaker_toggles += 1;\n");
         code.push_str("            prev_speaker = speaker;\n");
         code.push_str("        }\n\n");
-
-        // Debug: trace disk reads at $C0EC to see cpu_din and A values
-        code.push_str("        static DISK_READ_TRACE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n");
-        code.push_str(&format!("        if sub_cycle_counter == 13 && cpu_addr == 0xC0EC {{\n"));
-        code.push_str("            let cnt = DISK_READ_TRACE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n");
-        code.push_str(&format!("            let cpu_a = signals[{}];\n", cpu_a_reg_idx));
-        code.push_str(&format!("            let cpu_di = signals[{}];\n", cpu_di_idx));
-        code.push_str(&format!("            let disk_dout = signals[{}];\n", disk_d_out_idx));
-        code.push_str("            if cnt < 20 {\n");
-        code.push_str("                eprintln!(\"DISK_READ_TRACE[{}]: disk_data={:02X} disk_dout={:02X} cpu_di={:02X} cpu_a={:02X}\", cnt, disk_data, disk_dout, cpu_di, cpu_a);\n");
-        code.push_str("            }\n");
-        code.push_str("        }\n");
 
         // Increment sub-cycle counter (wraps every 14 sub-cycles = 1 CPU cycle)
         code.push_str("        sub_cycle_counter = (sub_cycle_counter + 1) % 14;\n");

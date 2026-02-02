@@ -290,6 +290,26 @@ module RHDL
           }
         end
 
+        # Run CPU cycles with VCD tracing - captures signals after each CPU cycle
+        # This is slower but provides full signal visibility for debugging
+        # Tracing must be started with trace_start before calling this
+        def apple2_run_cpu_cycles_traced(n, key_data, key_ready)
+          if @fallback && @sim.respond_to?(:apple2_run_cpu_cycles_traced)
+            return @sim.apple2_run_cpu_cycles_traced(n, key_data, key_ready)
+          end
+
+          result_buf = Fiddle::Pointer.malloc(16)
+          @fn_apple2_run_cpu_cycles_traced.call(@ctx, n, key_data, key_ready ? 1 : 0, result_buf)
+
+          values = result_buf[0, 16].unpack('llLL')
+          {
+            text_dirty: values[0] != 0,
+            key_cleared: values[1] != 0,
+            cycles_run: values[2],
+            speaker_toggles: values[3]
+          }
+        end
+
         def apple2_read_ram(offset, length)
           if @fallback && @sim.respond_to?(:apple2_read_ram)
             return @sim.apple2_read_ram(offset, length)
@@ -748,6 +768,12 @@ module RHDL
 
           @fn_apple2_run_cpu_cycles = Fiddle::Function.new(
             @lib['apple2_ir_sim_run_cpu_cycles'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_CHAR, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_apple2_run_cpu_cycles_traced = Fiddle::Function.new(
+            @lib['apple2_ir_sim_run_cpu_cycles_traced'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_CHAR, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_VOID
           )

@@ -85,6 +85,38 @@ pub unsafe extern "C" fn apple2_ir_sim_run_cpu_cycles(
     }
 }
 
+/// Run Apple II CPU cycles with VCD tracing
+/// Captures signals after each CPU cycle for full visibility
+/// This is slower than apple2_ir_sim_run_cpu_cycles but provides tracing
+#[no_mangle]
+pub unsafe extern "C" fn apple2_ir_sim_run_cpu_cycles_traced(
+    ctx: *mut IrSimContext,
+    n: c_uint,
+    key_data: u8,
+    key_ready: c_int,
+    result_out: *mut Apple2CycleResult,
+) {
+    if ctx.is_null() {
+        return;
+    }
+    let ctx = &mut *ctx;
+    if let Some(ref mut ext) = ctx.apple2 {
+        let result = ext.run_cpu_cycles_traced(
+            &mut ctx.core,
+            &mut ctx.tracer,
+            n as usize,
+            key_data,
+            key_ready != 0,
+        );
+        if !result_out.is_null() {
+            (*result_out).text_dirty = if result.text_dirty { 1 } else { 0 };
+            (*result_out).key_cleared = if result.key_cleared { 1 } else { 0 };
+            (*result_out).cycles_run = result.cycles_run as c_uint;
+            (*result_out).speaker_toggles = result.speaker_toggles;
+        }
+    }
+}
+
 /// Read Apple II RAM (returns bytes in buffer, up to buf_len)
 #[no_mangle]
 pub unsafe extern "C" fn apple2_ir_sim_read_ram(
