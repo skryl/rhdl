@@ -525,6 +525,218 @@ RSpec.describe 'GameBoy RHDL Implementation' do
     end
   end
 
+  describe 'Prince of Persia Long Run with VRAM/Framebuffer Tracing' do
+    let(:pop_rom_path) { File.expand_path('../../../examples/gameboy/software/roms/pop.gb', __dir__) }
+
+    before do
+      skip 'pop.gb ROM not found' unless File.exist?(pop_rom_path)
+
+      begin
+        require_relative '../../../examples/gameboy/utilities/gameboy_ir'
+        # Check if native library is available
+        test_runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+        test_runner = nil
+      rescue LoadError, RuntimeError => e
+        skip "IR runner not available: #{e.message}"
+      end
+    end
+
+    # Helper to read VRAM using the sim's read_vram method
+    # VRAM is at 0x8000-0x9FFF, read_vram takes offset from 0x8000
+    def read_vram_byte(runner, addr)
+      return 0 unless runner.sim.respond_to?(:read_vram)
+      runner.sim.read_vram(addr - 0x8000)
+    end
+
+    # Helper to read VRAM tile data (0x8000-0x97FF)
+    def read_vram_tiles(runner, start_tile: 0, num_tiles: 16)
+      tiles = []
+      base_addr = 0x8000
+      (start_tile...(start_tile + num_tiles)).each do |tile_idx|
+        tile_addr = base_addr + (tile_idx * 16)  # Each tile is 16 bytes
+        tile_data = (0...16).map { |i| read_vram_byte(runner, tile_addr + i) }
+        tiles << { index: tile_idx, addr: tile_addr, data: tile_data }
+      end
+      tiles
+    end
+
+    # Helper to count non-zero bytes in VRAM region (0x8000-0x9FFF)
+    def vram_non_zero_count(runner, start_addr, length)
+      return 0 unless runner.sim.respond_to?(:read_vram)
+      count = 0
+      length.times do |i|
+        addr = start_addr + i
+        next unless addr >= 0x8000 && addr < 0xA000  # VRAM range
+        count += 1 if runner.sim.read_vram(addr - 0x8000) != 0
+      end
+      count
+    end
+
+    # Helper to count non-zero bytes in OAM (0xFE00-0xFE9F)
+    def oam_non_zero_count(runner)
+      # OAM isn't accessible via read_vram, check framebuffer sprites instead
+      # For now, return 0 as we can't directly read OAM
+      0
+    end
+
+    it 'runs Prince of Persia for 1000 frames with VRAM and framebuffer tracing', timeout: 600 do
+      rom_data = File.binread(pop_rom_path)
+
+      # Local constants
+      cycles_per_frame = 70224  # 154 scanlines * 456 dots
+      boot_complete_pc = 0x0100
+      max_boot_cycles = 500_000
+
+      puts "\n  Prince of Persia - 1000 Frame Test with VRAM/Framebuffer Tracing"
+      puts "  " + "=" * 70
+
+      # Initialize runner
+      runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+      runner.load_rom(rom_data)
+      runner.reset
+
+      # === Phase 1: Boot ROM ===
+      puts "\n  Phase 1: Boot ROM Execution"
+      puts "  " + "-" * 50
+
+      boot_start = Time.now
+      boot_cycles = 0
+
+      # Run through boot ROM with coarse steps
+      while runner.cpu_state[:pc] < boot_complete_pc && boot_cycles < max_boot_cycles
+        runner.run_steps(10_000)
+        boot_cycles = runner.cycle_count
+      end
+
+      boot_elapsed = Time.now - boot_start
+      boot_pc = runner.cpu_state[:pc]
+      puts "    Boot completed at cycle #{boot_cycles} (PC=0x#{boot_pc.to_s(16)})"
+      puts "    Boot time: #{'%.3f' % boot_elapsed}s"
+
+      expect(boot_pc).to be >= boot_complete_pc, "Boot ROM did not complete (PC=0x#{boot_pc.to_s(16)})"
+
+      # === Phase 2: Run 1000 frames with tracing ===
+      puts "\n  Phase 2: Running 1000 frames with tracing"
+      puts "  " + "-" * 50
+
+      target_frames = 1000
+      snapshot_interval = 100  # Snapshot every 100 frames
+      cycles_per_snapshot = snapshot_interval * cycles_per_frame
+
+      snapshots = []
+      game_start = Time.now
+      start_cycle = runner.cycle_count
+
+      (target_frames / snapshot_interval).times do |i|
+        runner.run_steps(cycles_per_snapshot)
+
+        current_frame = (runner.cycle_count - start_cycle) / cycles_per_frame
+        elapsed = Time.now - game_start
+
+        # Read framebuffer
+        fb = runner.read_framebuffer
+        fb_non_zero = fb.flatten.count { |v| v != 0 }
+        fb_unique = fb.flatten.uniq.sort
+        fb_hash = fb.flatten.hash
+
+        # Read VRAM statistics (tile data: 0x8000-0x97FF, tilemaps: 0x9800-0x9FFF)
+        tile_data_non_zero = vram_non_zero_count(runner, 0x8000, 0x1800)  # Tile data
+        tilemap_bg_non_zero = vram_non_zero_count(runner, 0x9800, 0x400)   # BG tilemap
+        tilemap_win_non_zero = vram_non_zero_count(runner, 0x9C00, 0x400)  # Window tilemap
+
+        # Read a few tiles for detailed inspection
+        sample_tiles = read_vram_tiles(runner, start_tile: 0, num_tiles: 4)
+        tiles_with_data = sample_tiles.count { |t| t[:data].any? { |b| b != 0 } }
+
+        # CPU state
+        cpu = runner.cpu_state
+
+        snapshot = {
+          frame: current_frame,
+          cycle: runner.cycle_count,
+          elapsed: elapsed,
+          pc: cpu[:pc],
+          sp: cpu[:sp],
+          a: cpu[:a],
+          # Framebuffer stats
+          fb_non_zero_pixels: fb_non_zero,
+          fb_unique_colors: fb_unique,
+          fb_hash: fb_hash,
+          fb_is_blank: fb_non_zero == 0,
+          # VRAM stats
+          vram_tile_data_bytes: tile_data_non_zero,
+          vram_bg_tilemap_bytes: tilemap_bg_non_zero,
+          vram_win_tilemap_bytes: tilemap_win_non_zero,
+          sample_tiles_with_data: tiles_with_data
+        }
+        snapshots << snapshot
+
+        # Progress output
+        speed_mhz = (runner.cycle_count - start_cycle) / elapsed / 1_000_000.0
+        puts "    Frame #{current_frame}: FB=#{fb_non_zero} px, VRAM tiles=#{tile_data_non_zero}, BG map=#{tilemap_bg_non_zero} (#{'%.2f' % speed_mhz} MHz)"
+      end
+
+      game_elapsed = Time.now - game_start
+      total_game_cycles = runner.cycle_count - start_cycle
+      total_frames = total_game_cycles / cycles_per_frame
+      speed_mhz = total_game_cycles / game_elapsed / 1_000_000.0
+
+      # === Phase 3: Analysis ===
+      puts "\n  Phase 3: Analysis"
+      puts "  " + "-" * 50
+
+      # Count frames with actual content
+      frames_with_fb_content = snapshots.count { |s| !s[:fb_is_blank] }
+      frames_with_vram_tiles = snapshots.count { |s| s[:vram_tile_data_bytes] > 100 }
+      frames_with_bg_map = snapshots.count { |s| s[:vram_bg_tilemap_bytes] > 100 }
+
+      puts "    Total frames: #{total_frames}"
+      puts "    Elapsed time: #{'%.2f' % game_elapsed}s"
+      puts "    Speed: #{'%.2f' % speed_mhz} MHz (#{'%.1f' % (speed_mhz / 4.19 * 100)}% of real GB)"
+      puts ""
+      puts "    Framebuffer Analysis (#{snapshots.size} samples):"
+      puts "      Frames with pixel content: #{frames_with_fb_content}/#{snapshots.size} (#{'%.1f' % (frames_with_fb_content * 100.0 / snapshots.size)}%)"
+      puts ""
+      puts "    VRAM Analysis:"
+      puts "      Frames with tile data (>100 bytes): #{frames_with_vram_tiles}/#{snapshots.size}"
+      puts "      Frames with BG tilemap (>100 bytes): #{frames_with_bg_map}/#{snapshots.size}"
+
+      # Show unique color distribution across all samples
+      all_colors = snapshots.flat_map { |s| s[:fb_unique_colors] }.uniq.sort
+      puts ""
+      puts "    Unique pixel values seen: #{all_colors.inspect}"
+
+      # Show frame hash changes (indicates screen is updating)
+      unique_fb_hashes = snapshots.map { |s| s[:fb_hash] }.uniq.size
+      puts "    Unique framebuffer states: #{unique_fb_hashes}/#{snapshots.size}"
+
+      # Final framebuffer render
+      puts "\n  Final Frame Render:"
+      puts "  " + "-" * 50
+      final_fb = runner.read_framebuffer
+      output = runner.render_lcd_braille(chars_wide: 40)
+      output.each_line { |line| puts "    #{line}" }
+
+      # === Assertions ===
+      expect(total_frames).to be >= target_frames, "Did not complete #{target_frames} frames"
+
+      # Check framebuffer has ANY content (not completely black)
+      any_fb_content = snapshots.any? { |s| s[:fb_non_zero_pixels] > 0 }
+      expect(any_fb_content).to eq(true), "Framebuffer is completely blank - no pixels rendered"
+
+      # Check VRAM has ANY tile data (even if below threshold)
+      any_vram_content = snapshots.any? { |s| s[:vram_tile_data_bytes] > 0 }
+      expect(any_vram_content).to eq(true), "VRAM has no tile data loaded"
+
+      # Report on screen update status (informational, not assertion)
+      if unique_fb_hashes == 1
+        puts "\n  ⚠ Note: Screen did not update during test (possibly waiting for input)"
+      end
+
+      puts "\n  ✓ All assertions passed"
+    end
+  end
+
   describe 'Backend Comparison (IR Compiler vs Verilator)' do
     let(:test_rom_path) { File.expand_path('../../../examples/gameboy/software/roms/pop.gb', __dir__) }
 
