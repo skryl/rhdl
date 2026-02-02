@@ -566,6 +566,37 @@ User: "The ALU gives wrong results for subtraction with carry"
 - Provides clear success criteria for the fix
 - Documents the expected behavior
 
+### Signal Tracing and Debugging
+
+**Any complex signal tracing should be done using the VCD tracing function built into the Rust IR compiler.**
+
+The IR compiler includes VCD (Value Change Dump) tracing support for debugging signal-level issues:
+
+```ruby
+sim = runner.sim
+
+# Configure which signals to trace
+sim.trace_add_signals_matching('cpu_addr')
+sim.trace_add_signals_matching('vram_wren')
+sim.trace_add_signals_matching('cpu__a')  # CPU internal registers
+
+# Start tracing (streaming mode for large traces)
+sim.trace_start_streaming('/path/to/output.vcd')
+
+# Run simulation with capture
+100.times do
+  runner.run_steps(1)
+  sim.trace_capture
+end
+
+# Stop and flush
+sim.trace_stop
+```
+
+View VCD files in GTKWave: `gtkwave /path/to/output.vcd`
+
+Do NOT write custom signal polling loops when debugging complex timing issues - use VCD tracing instead.
+
 ### CLI Task Classes
 
 **All rake and CLI task logic MUST live in task classes in `lib/rhdl/cli/tasks/`.** The Rakefile and CLI binary both call into these shared task classes.
