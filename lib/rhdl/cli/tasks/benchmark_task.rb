@@ -22,8 +22,8 @@ module RHDL
             benchmark_apple2
           when :mos6502
             benchmark_mos6502
-          when :verilator
-            benchmark_verilator
+          when :gameboy
+            benchmark_gameboy
           else
             benchmark_gates
           end
@@ -582,104 +582,161 @@ module RHDL
           print_benchmark_summary(results, cycles)
         end
 
-        # Benchmark Verilator simulation
-        def benchmark_verilator
-          # Check if Verilator is available
-          verilator_path = ENV['PATH'].split(File::PATH_SEPARATOR).find do |path|
-            File.executable?(File.join(path, 'verilator'))
-          end
-
-          unless verilator_path
-            puts "Error: Verilator not found in PATH"
-            puts "Install Verilator:"
-            puts "  Ubuntu/Debian: sudo apt-get install verilator"
-            puts "  macOS: brew install verilator"
-            return
-          end
-
-          # Paths to ROM and memory dump
-          rom_path = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __dir__)
-          karateka_path = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __dir__)
+        # Benchmark GameBoy with Prince of Persia ROM
+        def benchmark_gameboy
+          rom_path = File.expand_path('../../../../examples/gameboy/software/roms/pop.gb', __dir__)
 
           unless File.exist?(rom_path)
-            puts "Error: AppleIIgo ROM not found at #{rom_path}"
+            puts "Error: Prince of Persia ROM not found at #{rom_path}"
             puts "Please ensure the ROM file exists."
             return
           end
 
-          unless File.exist?(karateka_path)
-            puts "Error: Karateka memory dump not found at #{karateka_path}"
-            puts "Please ensure the memory dump file exists."
-            return
-          end
+          frames = options[:frames] || 1000
+          cycles_per_frame = 70224  # 154 scanlines * 456 dots
 
-          cycles = options[:cycles] || 100_000
-
-          puts_header("Verilator Simulation Benchmark - Apple II")
-
-          # Check Verilator version
-          version = `verilator --version 2>&1`.lines.first&.strip
-          puts "Verilator: #{version}"
-          puts "Cycles: #{cycles}"
+          puts_header("GameBoy Benchmark - Prince of Persia")
+          puts "Frames: #{frames}"
+          puts "Cycles per frame: #{cycles_per_frame}"
+          puts "Total cycles: #{frames * cycles_per_frame}"
           puts "ROM: #{rom_path}"
-          puts "Memory dump: #{karateka_path}"
           puts
 
-          begin
-            # Load RHDL and the Verilator runner
-            require 'rhdl'
-            $LOAD_PATH.unshift(File.expand_path('../../../../examples/apple2/utilities', __dir__))
-            require 'apple2_verilator'
+          rom_data = File.binread(rom_path)
 
-            # Create and initialize runner (includes Verilator build)
-            print "Building Verilator simulation... "
+          # Define runners to benchmark
+          runners = [
+            { name: 'IR Compiler', backend: :compile },
+            { name: 'Verilator', backend: :verilator }
+          ]
+
+          results = []
+
+          runners.each do |runner_config|
+            is_verilator = runner_config[:backend] == :verilator
+
+            # Check availability
+            if is_verilator
+              unless verilator_available?
+                puts "\n#{runner_config[:name]}: SKIPPED (not available)"
+                results << { name: runner_config[:name], status: :skipped }
+                next
+              end
+            else
+              begin
+                require_relative '../../../../examples/gameboy/utilities/gameboy_ir'
+                unless RHDL::Codegen::IR::COMPILER_AVAILABLE
+                  puts "\n#{runner_config[:name]}: SKIPPED (not available)"
+                  results << { name: runner_config[:name], status: :skipped }
+                  next
+                end
+              rescue LoadError => e
+                puts "\n#{runner_config[:name]}: SKIPPED (#{e.message})"
+                results << { name: runner_config[:name], status: :skipped }
+                next
+              end
+            end
+
+            print "\n#{runner_config[:name]}: "
             $stdout.flush
-            init_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-            runner = RHDL::Apple2::VerilatorRunner.new(sub_cycles: 14)
-            init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
-            puts "done (#{format('%.2f', init_elapsed)}s)"
 
-            # Load ROM and memory
-            print "Loading ROM and memory... "
-            $stdout.flush
-            rom_data = File.binread(rom_path).bytes
-            karateka_mem = File.binread(karateka_path).bytes
+            begin
+              # Initialize runner
+              print "initializing... "
+              $stdout.flush
+              init_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
-            runner.load_rom(rom_data, base_addr: 0xD000)
-            runner.load_ram(karateka_mem, base_addr: 0x0000)
+              if is_verilator
+                require_relative '../../../../examples/gameboy/utilities/gameboy_verilator'
+                runner = RHDL::GameBoy::VerilatorRunner.new
+              else
+                runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+              end
 
-            # Set reset vector to game entry ($B82A)
-            runner.write_memory(0xFFFC, 0x2A)  # low byte
-            runner.write_memory(0xFFFD, 0xB8)  # high byte
-            puts "done"
+              init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
 
-            # Reset
-            print "Resetting CPU... "
-            $stdout.flush
-            runner.reset
-            puts "done"
+              # Load ROM
+              print "loading... "
+              $stdout.flush
+              runner.load_rom(rom_data)
+              runner.reset
 
-            # Run benchmark
-            print "Running #{cycles} cycles... "
-            $stdout.flush
-            run_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-            runner.run_steps(cycles)
-            run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
+              # Run benchmark
+              print "running #{frames} frames... "
+              $stdout.flush
+              run_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
-            cycles_per_sec = cycles / run_elapsed
-            puts "done"
+              if is_verilator
+                # Verilator: run until we reach target frames
+                while runner.frame_count < frames
+                  runner.run_steps(cycles_per_frame)
+                end
+              else
+                # IR: run total cycles
+                target_cycles = frames * cycles_per_frame
+                runner.run_steps(target_cycles)
+              end
 
+              run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
+
+              total_cycles = runner.cycle_count
+              actual_frames = total_cycles / cycles_per_frame
+              cycles_per_sec = total_cycles / run_elapsed
+              speed_mhz = cycles_per_sec / 1_000_000.0
+              pct_realtime = speed_mhz / 4.19 * 100
+
+              puts "done"
+              puts "  Init time:  #{format('%.3f', init_elapsed)}s"
+              puts "  Run time:   #{format('%.3f', run_elapsed)}s"
+              puts "  Frames:     #{actual_frames}"
+              puts "  Cycles:     #{total_cycles}"
+              puts "  Rate:       #{format('%.0f', cycles_per_sec)} cycles/s (#{format('%.2f', speed_mhz)} MHz)"
+              puts "  Speed:      #{format('%.1f', pct_realtime)}% of real GameBoy (4.19 MHz)"
+
+              results << {
+                name: runner_config[:name],
+                status: :success,
+                init_time: init_elapsed,
+                run_time: run_elapsed,
+                cycles_per_sec: cycles_per_sec,
+                frames: actual_frames,
+                speed_mhz: speed_mhz
+              }
+            rescue => e
+              puts "FAILED"
+              puts "  Error: #{e.message}"
+              puts "  #{e.backtrace.first(3).join("\n  ")}" if options[:verbose]
+              results << { name: runner_config[:name], status: :failed, error: e.message }
+            end
+          end
+
+          # Summary
+          puts
+          puts_header("Summary")
+          puts "#{'Runner'.ljust(15)} #{'Status'.ljust(10)} #{'Init'.rjust(10)} #{'Run'.rjust(10)} #{'Frames'.rjust(10)} #{'Speed'.rjust(15)}"
+          puts_separator
+
+          results.each do |r|
+            if r[:status] == :success
+              speed_str = "#{format('%.2f', r[:speed_mhz])} MHz"
+              puts "#{r[:name].ljust(15)} #{'OK'.ljust(10)} #{format('%8.3f', r[:init_time])}s #{format('%8.3f', r[:run_time])}s #{r[:frames].to_s.rjust(10)} #{speed_str.rjust(15)}"
+            elsif r[:status] == :skipped
+              puts "#{r[:name].ljust(15)} #{'SKIP'.ljust(10)} #{'-'.rjust(10)} #{'-'.rjust(10)} #{'-'.rjust(10)} #{'-'.rjust(15)}"
+            else
+              puts "#{r[:name].ljust(15)} #{'FAIL'.ljust(10)} #{'-'.rjust(10)} #{'-'.rjust(10)} #{'-'.rjust(10)} #{'-'.rjust(15)}"
+            end
+          end
+
+          # Performance comparison
+          successful = results.select { |r| r[:status] == :success }
+          if successful.length >= 2
             puts
-            puts "Results:"
-            puts "  Build time: #{format('%.3f', init_elapsed)}s"
-            puts "  Run time:   #{format('%.3f', run_elapsed)}s"
-            puts "  Rate:       #{format('%.0f', cycles_per_sec)} cycles/s (#{format('%.2f', cycles_per_sec / 1_000_000)}M/s)"
-            puts "  PC:         0x#{runner.pc.to_s(16).upcase}"
-
-          rescue => e
-            puts "FAILED"
-            puts "  Error: #{e.message}"
-            puts "  #{e.backtrace.first(5).join("\n  ")}" if options[:verbose]
+            puts "Performance Ratios:"
+            base = successful.first
+            successful[1..].each do |r|
+              ratio = r[:cycles_per_sec] / base[:cycles_per_sec]
+              puts "  #{r[:name]} vs #{base[:name]}: #{format('%.1f', ratio)}x"
+            end
           end
         end
 
