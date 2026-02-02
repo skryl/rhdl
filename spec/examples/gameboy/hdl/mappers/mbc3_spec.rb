@@ -443,4 +443,160 @@ RSpec.describe 'GameBoy::MBC3' do
       expect([0, 1]).to include(mbc3.get_output(:rtc_overflow))
     end
   end
+
+  # ============================================================================
+  # Missing functionality tests (from reference comparison)
+  # These tests verify features that should be implemented to match the
+  # MiSTer reference implementation (reference/rtl/mappers/mbc3.v)
+  # ============================================================================
+
+  describe 'External RTC Time Sync' do
+    it 'accepts RTC_time input for host system time sync' do
+      # Reference: RTC_time[33] input for real-time synchronization
+      pending 'External RTC time input (RTC_time[33])'
+      fail
+    end
+
+    it 'syncs with host system time during play' do
+      # Reference: Enables proper time progression during emulation
+      pending 'RTC sync with host system time'
+      fail
+    end
+  end
+
+  describe 'RTC Timestamp Persistence' do
+    it 'outputs current Unix timestamp (RTC_timestampOut)' do
+      # Reference: RTC_timestampOut[32] for save file storage
+      pending 'RTC timestamp output for persistence'
+      fail
+    end
+
+    it 'outputs saved time for backup RAM (RTC_savedtimeOut)' do
+      # Reference: RTC_savedtimeOut[48] for full RTC state backup
+      pending 'RTC saved time output'
+      fail
+    end
+
+    it 'outputs RTC in-use flag' do
+      # Reference: RTC_inuse tracks whether game actively uses RTC
+      pending 'RTC in-use flag output'
+      fail
+    end
+  end
+
+  describe 'RTC Backup/Restore' do
+    it 'accepts backup write enable signal (bk_rtc_wr)' do
+      # Reference: bk_rtc_wr input for loading RTC from savefile
+      pending 'RTC backup write enable input'
+      fail
+    end
+
+    it 'accepts backup address (bk_addr)' do
+      # Reference: bk_addr[17] for addressing RTC save data
+      pending 'RTC backup address input'
+      fail
+    end
+
+    it 'accepts backup data (bk_data)' do
+      # Reference: bk_data[16] for loading RTC state
+      pending 'RTC backup data input'
+      fail
+    end
+
+    it 'restores RTC state from savefile on power-on' do
+      # Reference: Loads RTC from save file bytes 0-3 (timestamp) and 2-3 (saved time)
+      pending 'RTC restore from savefile'
+      fail
+    end
+  end
+
+  describe 'RTC Fast-Forward' do
+    it 'advances RTC quickly when loaded save is older than current time' do
+      # Reference: diffSeconds counter advances RTC at faster rate
+      pending 'RTC fast-forward for loaded saves'
+      fail
+    end
+
+    it 'uses fast-count mechanism to catch up' do
+      # Reference: diffSeconds_fast_count logic
+      pending 'RTC diffSeconds fast-count mechanism'
+      fail
+    end
+  end
+
+  describe 'RTC Register Read' do
+    it 'returns latched seconds via rtc_return mux' do
+      # Reference: rtc_return multiplexes latched RTC values
+      pending 'RTC register-addressed read via rtc_return'
+      fail
+    end
+
+    it 'returns proper control byte for day high register (0x0C)' do
+      # Reference: Control byte includes halt, overflow, and day MSB
+      pending 'RTC control byte read'
+      fail
+    end
+  end
+
+  describe 'Data Output Masking' do
+    it 'returns 0xFF for disabled RAM reads' do
+      # Reference: cram_do = ram_enabled ? cram_di : 8'hFF
+      pending 'Return 0xFF when RAM is disabled'
+      fail
+    end
+
+    it 'returns RTC register value when in RTC mode' do
+      # Reference: cram_do_r = rtc_return when in RTC mode
+      pending 'Return RTC register in RTC mode reads'
+      fail
+    end
+  end
+
+  describe 'Cart Output Enable' do
+    it 'has cart_oe output for bus control' do
+      # Reference: cart_oe output for tristate bus arbitration
+      pending 'cart_oe output for bus control'
+      fail
+    end
+
+    it 'asserts cart_oe during valid read cycles' do
+      # Reference: cart_oe = cart_rd AND (ROM access OR (RAM access AND enabled))
+      pending 'cart_oe assertion during reads'
+      fail
+    end
+  end
+
+  describe 'Savestate Support' do
+    it 'has savestate_load input' do
+      # Reference: savestate_load for MiSTer save/load
+      pending 'Savestate load input'
+      fail
+    end
+
+    it 'has savestate_data input for state restore' do
+      # Reference: savestate_data[16] input
+      pending 'Savestate data input'
+      fail
+    end
+
+    it 'has savestate_back output for state save' do
+      # Reference: savestate_back[16] output
+      pending 'Savestate back output'
+      fail
+    end
+  end
+
+  describe 'Multi-Mapper Enable' do
+    it 'has enable input for multi-mapper systems' do
+      # Reference: enable input for bus arbitration in multi-mapper designs
+      pending 'Enable input for multi-mapper support'
+      fail
+    end
+
+    it 'ignores operations when enable=0' do
+      # Reference: Mapper only responds when enabled
+      pending 'Ignore operations when disabled'
+      fail
+    end
+  end
 end

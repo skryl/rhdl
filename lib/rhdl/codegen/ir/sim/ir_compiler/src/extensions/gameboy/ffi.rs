@@ -149,6 +149,38 @@ pub unsafe extern "C" fn gameboy_ir_sim_write_zpram(
     }
 }
 
+/// Read from WRAM
+#[no_mangle]
+pub unsafe extern "C" fn gameboy_ir_sim_read_wram(
+    ctx: *const IrSimContext,
+    addr: c_uint,
+) -> u8 {
+    if ctx.is_null() {
+        return 0;
+    }
+    if let Some(ref ext) = (*ctx).gameboy {
+        ext.read_wram(addr as usize)
+    } else {
+        0
+    }
+}
+
+/// Write to WRAM
+#[no_mangle]
+pub unsafe extern "C" fn gameboy_ir_sim_write_wram(
+    ctx: *mut IrSimContext,
+    addr: c_uint,
+    data: u8,
+) {
+    if ctx.is_null() {
+        return;
+    }
+    let ctx = &mut *ctx;
+    if let Some(ref mut ext) = ctx.gameboy {
+        ext.write_wram(addr as usize, data);
+    }
+}
+
 /// Get framebuffer pointer
 #[no_mangle]
 pub unsafe extern "C" fn gameboy_ir_sim_framebuffer(
