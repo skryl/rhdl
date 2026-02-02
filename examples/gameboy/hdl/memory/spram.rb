@@ -34,6 +34,12 @@ module GameBoy
       m.sync_read_port clock: :clock, addr: :address, output: :data_out
     end
 
+    # Instance initialization - ensure memory arrays are initialized
+    def initialize(name = nil, **kwargs)
+      super(name, **kwargs)
+      initialize_memories
+    end
+
     # Direct memory access for external use (debugging, initialization)
     def read_mem(addr)
       mem_read(:mem, addr & (DEPTH - 1))

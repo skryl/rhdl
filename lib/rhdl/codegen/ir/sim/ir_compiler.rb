@@ -400,6 +400,127 @@ module RHDL
           @fn_gameboy_get_h_div_cnt.call(@ctx)
         end
 
+        # ====================================================================
+        # VCD Tracing Methods
+        # ====================================================================
+
+        # Start VCD tracing in buffer mode (accumulate in memory)
+        # @return [Boolean] true on success
+        def trace_start
+          return false if @fallback
+          @fn_trace_start.call(@ctx) == 0
+        end
+
+        # Start VCD tracing in streaming mode (write directly to file)
+        # @param path [String] Path to the VCD file
+        # @return [Boolean] true on success
+        def trace_start_streaming(path)
+          return false if @fallback
+          @fn_trace_start_streaming.call(@ctx, path) == 0
+        end
+
+        # Stop VCD tracing
+        def trace_stop
+          return if @fallback
+          @fn_trace_stop.call(@ctx)
+        end
+
+        # Check if tracing is enabled
+        # @return [Boolean]
+        def trace_enabled?
+          return false if @fallback
+          @fn_trace_enabled.call(@ctx) != 0
+        end
+
+        # Capture current signal values (call each simulation step)
+        def trace_capture
+          return if @fallback
+          @fn_trace_capture.call(@ctx)
+        end
+
+        # Add a signal to trace by name
+        # @param name [String] Signal name
+        # @return [Boolean] true if signal found and added
+        def trace_add_signal(name)
+          return false if @fallback
+          @fn_trace_add_signal.call(@ctx, name) == 0
+        end
+
+        # Add signals matching a pattern (substring match)
+        # @param pattern [String] Pattern to match
+        # @return [Integer] Number of signals added
+        def trace_add_signals_matching(pattern)
+          return 0 if @fallback
+          @fn_trace_add_signals_matching.call(@ctx, pattern)
+        end
+
+        # Trace all signals
+        def trace_all_signals
+          return if @fallback
+          @fn_trace_all_signals.call(@ctx)
+        end
+
+        # Clear the set of traced signals
+        def trace_clear_signals
+          return if @fallback
+          @fn_trace_clear_signals.call(@ctx)
+        end
+
+        # Get VCD output as string
+        # @return [String] VCD formatted output
+        def trace_to_vcd
+          return "" if @fallback
+          ptr = @fn_trace_to_vcd.call(@ctx)
+          return "" if ptr.null?
+          vcd = ptr.to_s
+          @fn_free_string.call(ptr)
+          vcd
+        end
+
+        # Save VCD output to a file
+        # @param path [String] Path to save the VCD file
+        # @return [Boolean] true on success
+        def trace_save_vcd(path)
+          return false if @fallback
+          @fn_trace_save_vcd.call(@ctx, path) == 0
+        end
+
+        # Clear all buffered trace data
+        def trace_clear
+          return if @fallback
+          @fn_trace_clear.call(@ctx)
+        end
+
+        # Get the number of recorded changes
+        # @return [Integer]
+        def trace_change_count
+          return 0 if @fallback
+          @fn_trace_change_count.call(@ctx)
+        end
+
+        # Get the number of traced signals
+        # @return [Integer]
+        def trace_signal_count
+          return 0 if @fallback
+          @fn_trace_signal_count.call(@ctx)
+        end
+
+        # Set the VCD timescale (e.g., "1ns", "1ps")
+        # @param timescale [String]
+        # @return [Boolean] true on success
+        def trace_set_timescale(timescale)
+          return false if @fallback
+          @fn_trace_set_timescale.call(@ctx, timescale) == 0
+        end
+
+        # Set the VCD module name
+        # @param name [String]
+        # @return [Boolean] true on success
+        def trace_set_module_name(name)
+          return false if @fallback
+          @fn_trace_set_module_name.call(@ctx, name) == 0
+        end
+
         def respond_to_missing?(method_name, include_private = false)
           (@fallback && @sim.respond_to?(method_name)) || super
         end
@@ -731,6 +852,103 @@ module RHDL
             @lib['gameboy_ir_sim_get_h_div_cnt'],
             [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_UINT
+          )
+
+          # VCD Tracing functions
+          @fn_trace_start = Fiddle::Function.new(
+            @lib['ir_sim_trace_start'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_trace_start_streaming = Fiddle::Function.new(
+            @lib['ir_sim_trace_start_streaming'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_trace_stop = Fiddle::Function.new(
+            @lib['ir_sim_trace_stop'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_trace_enabled = Fiddle::Function.new(
+            @lib['ir_sim_trace_enabled'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_trace_capture = Fiddle::Function.new(
+            @lib['ir_sim_trace_capture'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_trace_add_signal = Fiddle::Function.new(
+            @lib['ir_sim_trace_add_signal'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_trace_add_signals_matching = Fiddle::Function.new(
+            @lib['ir_sim_trace_add_signals_matching'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_trace_all_signals = Fiddle::Function.new(
+            @lib['ir_sim_trace_all_signals'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_trace_clear_signals = Fiddle::Function.new(
+            @lib['ir_sim_trace_clear_signals'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_trace_to_vcd = Fiddle::Function.new(
+            @lib['ir_sim_trace_to_vcd'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOIDP
+          )
+
+          @fn_trace_save_vcd = Fiddle::Function.new(
+            @lib['ir_sim_trace_save_vcd'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_trace_clear = Fiddle::Function.new(
+            @lib['ir_sim_trace_clear'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_trace_change_count = Fiddle::Function.new(
+            @lib['ir_sim_trace_change_count'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_ULONG
+          )
+
+          @fn_trace_signal_count = Fiddle::Function.new(
+            @lib['ir_sim_trace_signal_count'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_trace_set_timescale = Fiddle::Function.new(
+            @lib['ir_sim_trace_set_timescale'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_trace_set_module_name = Fiddle::Function.new(
+            @lib['ir_sim_trace_set_module_name'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
           )
         end
 

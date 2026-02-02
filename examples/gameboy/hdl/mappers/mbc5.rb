@@ -84,15 +84,13 @@ module GameBoy
                     (cpu_di == lit(0x0A, width: 8)),
                     ram_en)
 
-      # ROM Bank Low (0x2000-0x2FFF)
+      # ROM Bank Low (0x2000-0x2FFF) and High (0x3000-0x3FFF)
+      # Combined into nested mux to avoid assignment conflicts
       rom_bank_reg <= mux(ce & cpu_wr & (cpu_addr[15..12] == lit(2, width: 4)),
                           cat(rom_bank_reg[8], cpu_di),
-                          rom_bank_reg)
-
-      # ROM Bank High (0x3000-0x3FFF)
-      rom_bank_reg <= mux(ce & cpu_wr & (cpu_addr[15..12] == lit(3, width: 4)),
-                          cat(cpu_di[0], rom_bank_reg[7..0]),
-                          rom_bank_reg)
+                          mux(ce & cpu_wr & (cpu_addr[15..12] == lit(3, width: 4)),
+                              cat(cpu_di[0], rom_bank_reg[7..0]),
+                              rom_bank_reg))
 
       # RAM Bank Number (0x4000-0x5FFF)
       ram_bank_reg <= mux(ce & cpu_wr & (cpu_addr[15..13] == lit(2, width: 3)),

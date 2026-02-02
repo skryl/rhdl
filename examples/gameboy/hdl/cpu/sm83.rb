@@ -196,6 +196,7 @@ module GameBoy
     wire :cb_set_op             # CB SET operation
     wire :cb_res_op             # CB RES operation
     wire :cb_result, width: 8   # Result of CB operation
+    wire :cb_rot_flags, width: 8  # Flags for CB rotate/shift operations
 
     # Cycle count condition wires (for m_cycles calculation)
     wire :is_6_cycles           # 6-cycle instructions (CALL)
@@ -700,10 +701,12 @@ module GameBoy
       # INC rr / DEC rr - Increment/Decrement 16-bit register pair (00xx0011/00xx1011)
       # These are 2-cycle instructions in Game Boy mode
       # -----------------------------------------------------------------------
+      # Encoding: [3:2]=direction (01=inc, 10=dec), [1:0]=pair (00=BC, 01=DE, 10=HL, 11=SP)
+      # Using 01 for increment (not 00) ensures incdec_16 is non-zero for all valid operations
       incdec_16 <= mux(is_inc_rr & (m_cycle == lit(2, width: 3)),
-                       cat(lit(0, width: 2), ir[5..4]),  # increment, pair from bits 5:4
+                       cat(lit(1, width: 2), ir[5..4]),  # increment (01), pair from bits 5:4
                        mux(is_dec_rr & (m_cycle == lit(2, width: 3)),
-                           cat(lit(2, width: 2), ir[5..4]),  # decrement, pair from bits 5:4
+                           cat(lit(2, width: 2), ir[5..4]),  # decrement (10), pair from bits 5:4
                            lit(0, width: 4)))
 
       # -----------------------------------------------------------------------
@@ -930,6 +933,8 @@ module GameBoy
       # RST/CALL/PUSH stack push addresses - pre-compute for stack operations
       # RST: M3 write high byte to SP-1, M4 write low byte to SP-2
       # CALL: M4 write high byte to SP-1, M5 write low byte to SP-2
+      # PUSH: M3 write high byte to SP-1, M4 write low byte to SP-2
+      # POP: M2 read low byte from SP, M3 read high byte from SP+1
       sp_minus_1 = sp - lit(1, width: 16)
       sp_minus_2 = sp - lit(2, width: 16)
       sp_plus_1 = sp + lit(1, width: 16)
@@ -939,6 +944,17 @@ module GameBoy
       is_call_m5 = call & (m_cycle == lit(5, width: 3))
       is_ret_m2 = ret & (m_cycle == lit(2, width: 3))
       is_ret_m3 = ret & (m_cycle == lit(3, width: 3))
+      is_push_m3 = is_push & (m_cycle == lit(3, width: 3))
+      is_push_m4 = is_push & (m_cycle == lit(4, width: 3))
+      is_pop_m2 = pop_op & (m_cycle == lit(2, width: 3))
+      is_pop_m3 = pop_op & (m_cycle == lit(3, width: 3))
+
+      # POP register pair decoding: ir[5:4] = 00:BC, 01:DE, 10:HL, 11:AF
+      pop_pair = ir[5..4]
+      is_pop_bc = pop_op & (pop_pair == lit(0, width: 2))
+      is_pop_de = pop_op & (pop_pair == lit(1, width: 2))
+      is_pop_hl = pop_op & (pop_pair == lit(2, width: 2))
+      is_pop_af = pop_op & (pop_pair == lit(3, width: 2))
 
       addr_bus <= mux(m_cycle == lit(1, width: 3), pc,
                   mux(is_ldh_m3, io_addr,  # Direct override for LDH instructions
@@ -948,6 +964,10 @@ module GameBoy
                   mux(is_call_m5, sp_minus_2, # CALL M5: Write PC low to SP-2
                   mux(is_ret_m2, sp,          # RET M2: Read low byte from SP
                   mux(is_ret_m3, sp_plus_1,   # RET M3: Read high byte from SP+1
+                  mux(is_push_m3, sp_minus_1, # PUSH M3: Write high byte to SP-1
+                  mux(is_push_m4, sp_minus_2, # PUSH M4: Write low byte to SP-2
+                  mux(is_pop_m2, sp,          # POP M2: Read low byte from SP
+                  mux(is_pop_m3, sp_plus_1,   # POP M3: Read high byte from SP+1
                   # Address select based on set_addr_to
                   mux(set_addr_to == lit(ADDR_PC, width: 3), pc,
                   mux(set_addr_to == lit(ADDR_SP, width: 3), sp,
@@ -957,22 +977,35 @@ module GameBoy
                   mux(set_addr_to == lit(ADDR_WZ, width: 3), wz,
                   mux(set_addr_to == lit(ADDR_IO, width: 3), io_addr,
                   mux(set_addr_to == lit(ADDR_IOC, width: 3), io_addr_c,
-                      pc))))))))))))))))
+                      pc))))))))))))))))))))
 
       # Data output (for writes) - select based on instruction
       # For LD (HL),r, use the source register from bus_b
       # For LD (HL),n, use wz[7:0] (the immediate value)
       # For RST: M3 outputs PC[15:8], M4 outputs PC[7:0]
       # For CALL: M4 outputs PC[15:8], M5 outputs PC[7:0]
+      # For PUSH: M3 outputs high byte, M4 outputs low byte
+      #   ir[5:4] = 00: BC, 01: DE, 10: HL, 11: AF
+      push_pair = ir[5..4]
+      push_high = mux(push_pair == lit(0, width: 2), b_reg,
+                  mux(push_pair == lit(1, width: 2), d_reg,
+                  mux(push_pair == lit(2, width: 2), h_reg,
+                      acc)))  # AF: A is high
+      push_low = mux(push_pair == lit(0, width: 2), c_reg,
+                 mux(push_pair == lit(1, width: 2), e_reg,
+                 mux(push_pair == lit(2, width: 2), l_reg,
+                     f_reg)))  # AF: F is low
       data_out <= mux(is_rst_m3, pc[15..8],  # RST M3: Push PC high byte
                   mux(is_rst_m4, pc[7..0],   # RST M4: Push PC low byte
                   mux(is_call_m4, pc[15..8], # CALL M4: Push PC high byte
                   mux(is_call_m5, pc[7..0],  # CALL M5: Push PC low byte
+                  mux(is_push_m3, push_high, # PUSH M3: Push high byte
+                  mux(is_push_m4, push_low,  # PUSH M4: Push low byte
                   mux(is_ld_hl_r, bus_b,
                   mux((ir == lit(0x36, width: 8)) & (m_cycle == lit(3, width: 3)), wz[7..0],
                   mux(((ir == lit(0x34, width: 8)) | (ir == lit(0x35, width: 8))) & (m_cycle == lit(3, width: 3)),
                       alu_result,  # INC/DEC (HL) - write ALU result back
-                      acc)))))))
+                      acc)))))))))
 
       # -----------------------------------------------------------------------
       # CB BIT instruction - compute flags
@@ -1007,6 +1040,92 @@ module GameBoy
 
       # Compute flags for CB BIT: Z=result, N=0, H=1, C=unchanged
       cb_bit_flags <= cat(bit_is_zero, lit(0, width: 1), lit(1, width: 1), f_reg[FLAG_C], lit(0, width: 4))
+
+      # -----------------------------------------------------------------------
+      # CB Rotate/Shift/SET/RES Operations
+      # cb_ir[7:6] = 00: rotate/shift, 01: BIT, 10: RES, 11: SET
+      # For rotate/shift, cb_ir[5:3] determines operation:
+      #   000: RLC, 001: RRC, 010: RL, 011: RR, 100: SLA, 101: SRA, 110: SWAP, 111: SRL
+      # -----------------------------------------------------------------------
+      cb_rot_op = cb_ir[5..3]
+
+      # RLC: rotate left circular - Q = {src[6:0], src[7]}, C = src[7]
+      cb_rlc_result = cat(cb_src[6..0], cb_src[7])
+      cb_rlc_carry = cb_src[7]
+
+      # RRC: rotate right circular - Q = {src[0], src[7:1]}, C = src[0]
+      cb_rrc_result = cat(cb_src[0], cb_src[7..1])
+      cb_rrc_carry = cb_src[0]
+
+      # RL: rotate left through carry - Q = {src[6:0], C}, C = src[7]
+      cb_rl_result = cat(cb_src[6..0], f_reg[FLAG_C])
+      cb_rl_carry = cb_src[7]
+
+      # RR: rotate right through carry - Q = {C, src[7:1]}, C = src[0]
+      cb_rr_result = cat(f_reg[FLAG_C], cb_src[7..1])
+      cb_rr_carry = cb_src[0]
+
+      # SLA: shift left arithmetic - Q = {src[6:0], 0}, C = src[7]
+      cb_sla_result = cat(cb_src[6..0], lit(0, width: 1))
+      cb_sla_carry = cb_src[7]
+
+      # SRA: shift right arithmetic (preserve sign) - Q = {src[7], src[7:1]}, C = src[0]
+      cb_sra_result = cat(cb_src[7], cb_src[7..1])
+      cb_sra_carry = cb_src[0]
+
+      # SWAP: swap nibbles - Q = {src[3:0], src[7:4]}, C = 0
+      cb_swap_result = cat(cb_src[3..0], cb_src[7..4])
+      cb_swap_carry = lit(0, width: 1)
+
+      # SRL: shift right logical - Q = {0, src[7:1]}, C = src[0]
+      cb_srl_result = cat(lit(0, width: 1), cb_src[7..1])
+      cb_srl_carry = cb_src[0]
+
+      # CB SET: set bit - Q = src | bit_mask
+      cb_set_result = cb_src | bit_mask
+
+      # CB RES: reset bit - Q = src & ~bit_mask
+      cb_res_result = cb_src & ~bit_mask
+
+      # Select rotate/shift result based on cb_ir[5:3]
+      cb_rot_result_val = mux(cb_rot_op == lit(0, width: 3), cb_rlc_result,
+                          mux(cb_rot_op == lit(1, width: 3), cb_rrc_result,
+                          mux(cb_rot_op == lit(2, width: 3), cb_rl_result,
+                          mux(cb_rot_op == lit(3, width: 3), cb_rr_result,
+                          mux(cb_rot_op == lit(4, width: 3), cb_sla_result,
+                          mux(cb_rot_op == lit(5, width: 3), cb_sra_result,
+                          mux(cb_rot_op == lit(6, width: 3), cb_swap_result,
+                              cb_srl_result)))))))
+
+      cb_rot_carry_val = mux(cb_rot_op == lit(0, width: 3), cb_rlc_carry,
+                         mux(cb_rot_op == lit(1, width: 3), cb_rrc_carry,
+                         mux(cb_rot_op == lit(2, width: 3), cb_rl_carry,
+                         mux(cb_rot_op == lit(3, width: 3), cb_rr_carry,
+                         mux(cb_rot_op == lit(4, width: 3), cb_sla_carry,
+                         mux(cb_rot_op == lit(5, width: 3), cb_sra_carry,
+                         mux(cb_rot_op == lit(6, width: 3), cb_swap_carry,
+                             cb_srl_carry)))))))
+
+      # Final CB result based on operation type (cb_ir[7:6])
+      cb_op_type = cb_ir[7..6]
+      cb_result <= mux(cb_op_type == lit(0, width: 2), cb_rot_result_val,  # Rotate/Shift
+                   mux(cb_op_type == lit(2, width: 2), cb_res_result,       # RES
+                   mux(cb_op_type == lit(3, width: 2), cb_set_result,       # SET
+                       cb_src)))  # BIT (no result needed)
+
+      # CB operation flags (for rotate/shift)
+      cb_result_is_zero = cb_result == lit(0, width: 8)
+      cb_rot_flags <= cat(cb_result_is_zero, lit(0, width: 1), lit(0, width: 1), cb_rot_carry_val, lit(0, width: 4))
+
+      # Flag whether this is a CB non-BIT operation that needs to write back
+      is_cb_rot = cb_prefix & (cb_op_type == lit(0, width: 2))  # Rotate/Shift
+      is_cb_set = cb_prefix & (cb_op_type == lit(3, width: 2))  # SET
+      is_cb_res = cb_prefix & (cb_op_type == lit(2, width: 2))  # RES
+      is_cb_write = is_cb_rot | is_cb_set | is_cb_res
+
+      # CB write happens at M2/T3 for register operand, M4/T3 for (HL) operand
+      cb_is_hl_operand = (cb_ir[2..0] == lit(6, width: 3))
+      is_cb_write_m2 = is_cb_write & ~cb_is_hl_operand & (m_cycle == lit(2, width: 3))
     end
 
     # =========================================================================
@@ -1165,8 +1284,29 @@ module GameBoy
       # SCF flags: N=0, H=0, C=1, Z unchanged
       scf_flags_local = cat(f_reg[FLAG_Z], lit(0, width: 1), lit(0, width: 1), lit(1, width: 1), lit(0, width: 4))
 
+      # POP register pair decoding (local to sequential block)
+      pop_pair_seq = ir[5..4]
+      is_pop_m2_seq = pop_op & (m_cycle == lit(2, width: 3))
+      is_pop_m3_seq = pop_op & (m_cycle == lit(3, width: 3))
+      is_pop_bc_seq = pop_op & (pop_pair_seq == lit(0, width: 2))
+      is_pop_de_seq = pop_op & (pop_pair_seq == lit(1, width: 2))
+      is_pop_hl_seq = pop_op & (pop_pair_seq == lit(2, width: 2))
+      is_pop_af_seq = pop_op & (pop_pair_seq == lit(3, width: 2))
+
+      # CB operation decoding (local to sequential block)
+      cb_op_type_seq = cb_ir[7..6]
+      cb_is_hl_operand_seq = (cb_ir[2..0] == lit(6, width: 3))
+      is_cb_rot_seq = cb_prefix & (cb_op_type_seq == lit(0, width: 2))  # Rotate/Shift
+      is_cb_set_seq = cb_prefix & (cb_op_type_seq == lit(3, width: 2))  # SET
+      is_cb_res_seq = cb_prefix & (cb_op_type_seq == lit(2, width: 2))  # RES
+      is_cb_write_seq = is_cb_rot_seq | is_cb_set_seq | is_cb_res_seq
+      is_cb_write_m2_seq = is_cb_write_seq & ~cb_is_hl_operand_seq & (m_cycle == lit(2, width: 3))
+
       # Combined f_reg update - all conditions in priority order
-      f_reg <= mux(clken & save_alu & (t_state == lit(3, width: 3)),
+      # POP AF loads F from memory at M2 (low byte, with lower 4 bits masked to 0)
+      f_reg <= mux(clken & is_pop_af_seq & is_pop_m2_seq & (t_state == lit(3, width: 3)),
+                   di_reg & lit(0xF0, width: 8),  # POP AF - low byte (F) at M2, mask low nibble
+               mux(clken & save_alu & (t_state == lit(3, width: 3)),
                    alu_flags,
                mux(clken & is_cb_bit_update & (t_state == lit(3, width: 3)),
                    cb_bit_flags,  # CB BIT updates flags at M2/T3 (reg) or M3/T3 (HL)
@@ -1178,7 +1318,9 @@ module GameBoy
                    ccf_flags_local,  # CCF
                mux(clken & scf_op & (t_state == lit(3, width: 3)),
                    scf_flags_local,  # SCF
-                   f_reg))))))
+               mux(clken & is_cb_rot_seq & is_cb_write_m2_seq & (t_state == lit(3, width: 3)),
+                   cb_rot_flags,  # CB rotate/shift flags at M2
+                   f_reg))))))))
 
       # -----------------------------------------------------------------------
       # Register Pair Updates from WZ (for LD rr,nn instructions)
@@ -1262,42 +1404,88 @@ module GameBoy
       hl_16_new = mux(is_dec_16, hl_16 - lit(1, width: 16), hl_16 + lit(1, width: 16))
       sp_16_new = mux(is_dec_16, sp - lit(1, width: 16), sp + lit(1, width: 16))
 
+      # -----------------------------------------------------------------------
+      # ADD HL,rr - Add 16-bit register pair to HL (00xx1001)
+      # ir[5:4] selects source: 00=BC, 01=DE, 10=HL, 11=SP
+      # -----------------------------------------------------------------------
+      is_add_hl_rr_seq = (ir[3..0] == lit(9, width: 4)) & (ir[7..6] == lit(0, width: 2))
+      add_hl_pair = ir[5..4]
+      add_hl_src = mux(add_hl_pair == lit(0, width: 2), bc_16,
+                   mux(add_hl_pair == lit(1, width: 2), de_16,
+                   mux(add_hl_pair == lit(2, width: 2), hl_16,
+                       sp)))
+      add_hl_result = hl_16 + add_hl_src
+
+      # CB destination register is cb_ir[2:0]
+      cb_dest_reg = cb_ir[2..0]
+
       # B register combined update
+      # POP BC loads high byte (B) at M3
+      # CB write to B when cb_ir[2:0] = 0 (B)
       b_reg <= mux(clken & load_bc_wz & (t_state == lit(3, width: 3)),
                    di_reg,  # LD BC,nn - high byte from di_reg
+               mux(clken & is_pop_bc_seq & is_pop_m3_seq & (t_state == lit(3, width: 3)),
+                   di_reg,  # POP BC - high byte (B) at M3
+               mux(clken & is_cb_write_m2_seq & (cb_dest_reg == lit(0, width: 3)) & (t_state == lit(3, width: 3)),
+                   cb_result,  # CB rot/set/res B at M2
                mux(clken & is_incdec_bc & (t_state == lit(3, width: 3)),
                    bc_16_new[15..8],  # INC/DEC BC
                mux(clken & read_to_reg & (write_reg == lit(0, width: 3)) & (t_state == lit(3, width: 3)),
                    mux(is_inc_r | is_dec_r, alu_result, reg_write_data),  # LD B,r / INC B / DEC B
-                   b_reg)))
+                   b_reg)))))
       # C register combined update
+      # POP BC loads low byte (C) at M2
+      # CB write to C when cb_ir[2:0] = 1 (C)
       c_reg <= mux(clken & load_bc_wz & (t_state == lit(3, width: 3)),
                    wz[7..0],  # LD BC,nn - low byte from WZ
+               mux(clken & is_pop_bc_seq & is_pop_m2_seq & (t_state == lit(3, width: 3)),
+                   di_reg,  # POP BC - low byte (C) at M2
+               mux(clken & is_cb_write_m2_seq & (cb_dest_reg == lit(1, width: 3)) & (t_state == lit(3, width: 3)),
+                   cb_result,  # CB rot/set/res C at M2
                mux(clken & is_incdec_bc & (t_state == lit(3, width: 3)),
                    bc_16_new[7..0],  # INC/DEC BC
                mux(clken & read_to_reg & (write_reg == lit(1, width: 3)) & (t_state == lit(3, width: 3)),
                    mux(is_inc_r | is_dec_r, alu_result, reg_write_data),  # LD C,r / INC C / DEC C
-                   c_reg)))
+                   c_reg)))))
       # D register combined update
+      # POP DE loads high byte (D) at M3
+      # CB write to D when cb_ir[2:0] = 2 (D)
       d_reg <= mux(clken & load_de_wz & (t_state == lit(3, width: 3)),
                    di_reg,  # LD DE,nn - high byte from di_reg
+               mux(clken & is_pop_de_seq & is_pop_m3_seq & (t_state == lit(3, width: 3)),
+                   di_reg,  # POP DE - high byte (D) at M3
+               mux(clken & is_cb_write_m2_seq & (cb_dest_reg == lit(2, width: 3)) & (t_state == lit(3, width: 3)),
+                   cb_result,  # CB rot/set/res D at M2
                mux(clken & is_incdec_de & (t_state == lit(3, width: 3)),
                    de_16_new[15..8],  # INC/DEC DE
                mux(clken & read_to_reg & (write_reg == lit(2, width: 3)) & (t_state == lit(3, width: 3)),
                    mux(is_inc_r | is_dec_r, alu_result, reg_write_data),  # LD D,r / INC D / DEC D
-                   d_reg)))
+                   d_reg)))))
       # E register combined update
+      # POP DE loads low byte (E) at M2
+      # CB write to E when cb_ir[2:0] = 3 (E)
       e_reg <= mux(clken & load_de_wz & (t_state == lit(3, width: 3)),
                    wz[7..0],  # LD DE,nn - low byte from WZ
+               mux(clken & is_pop_de_seq & is_pop_m2_seq & (t_state == lit(3, width: 3)),
+                   di_reg,  # POP DE - low byte (E) at M2
+               mux(clken & is_cb_write_m2_seq & (cb_dest_reg == lit(3, width: 3)) & (t_state == lit(3, width: 3)),
+                   cb_result,  # CB rot/set/res E at M2
                mux(clken & is_incdec_de & (t_state == lit(3, width: 3)),
                    de_16_new[7..0],  # INC/DEC DE
                mux(clken & read_to_reg & (write_reg == lit(3, width: 3)) & (t_state == lit(3, width: 3)),
                    mux(is_inc_r | is_dec_r, alu_result, reg_write_data),  # LD E,r / INC E / DEC E
-                   e_reg)))
+                   e_reg)))))
       # H register combined update - all H-modifying instructions:
-      # Priority: 1. LD HL,nn, 2. LDI/LDD, 3. INC/DEC HL, 4. LD H,r/INC H/DEC H
+      # Priority: 1. LD HL,nn, 2. POP HL, 3. CB, 4. LDI/LDD, 5. INC/DEC HL, 6. LD H,r/INC H/DEC H
+      # CB write to H when cb_ir[2:0] = 4 (H)
       h_reg <= mux(clken & load_hl_wz & (t_state == lit(3, width: 3)),
                    di_reg,  # LD HL,nn - high byte from di_reg
+               mux(clken & is_pop_hl_seq & is_pop_m3_seq & (t_state == lit(3, width: 3)),
+                   di_reg,  # POP HL - high byte (H) at M3
+               mux(clken & is_cb_write_m2_seq & (cb_dest_reg == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
+                   cb_result,  # CB rot/set/res H at M2
+               mux(clken & is_add_hl_rr_seq & (m_cycle == lit(2, width: 3)) & (t_state == lit(3, width: 3)),
+                   add_hl_result[15..8],  # ADD HL,rr - high byte
                mux(clken & inc_hl & (t_state == lit(3, width: 3)),
                    hl_inc[15..8],  # LDI - increment HL
                mux(clken & dec_hl & (t_state == lit(3, width: 3)),
@@ -1306,10 +1494,18 @@ module GameBoy
                    hl_16_new[15..8],  # INC/DEC HL
                mux(clken & read_to_reg & (write_reg == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
                    mux(is_inc_r | is_dec_r, alu_result, reg_write_data),  # LD H,r / INC H / DEC H
-                   h_reg)))))
+                   h_reg))))))))
       # L register combined update
+      # POP HL loads low byte (L) at M2
+      # CB write to L when cb_ir[2:0] = 5 (L)
       l_reg <= mux(clken & load_hl_wz & (t_state == lit(3, width: 3)),
                    wz[7..0],  # LD HL,nn - low byte from WZ
+               mux(clken & is_pop_hl_seq & is_pop_m2_seq & (t_state == lit(3, width: 3)),
+                   di_reg,  # POP HL - low byte (L) at M2
+               mux(clken & is_cb_write_m2_seq & (cb_dest_reg == lit(5, width: 3)) & (t_state == lit(3, width: 3)),
+                   cb_result,  # CB rot/set/res L at M2
+               mux(clken & is_add_hl_rr_seq & (m_cycle == lit(2, width: 3)) & (t_state == lit(3, width: 3)),
+                   add_hl_result[7..0],  # ADD HL,rr - low byte
                mux(clken & inc_hl & (t_state == lit(3, width: 3)),
                    hl_inc[7..0],  # LDI - increment HL
                mux(clken & dec_hl & (t_state == lit(3, width: 3)),
@@ -1318,7 +1514,7 @@ module GameBoy
                    hl_16_new[7..0],  # INC/DEC HL
                mux(clken & read_to_reg & (write_reg == lit(5, width: 3)) & (t_state == lit(3, width: 3)),
                    mux(is_inc_r | is_dec_r, alu_result, reg_write_data),  # LD L,r / INC L / DEC L
-                   l_reg)))))
+                   l_reg))))))))
       # SP combined update - all SP-modifying instructions:
       # 1. LD SP,nn (load_sp_wz) - highest priority
       # 2. LD SP,HL (ld_sp_hl)
@@ -1402,13 +1598,19 @@ module GameBoy
       # Accumulator - Combined update at T3
       # -----------------------------------------------------------------------
       # All accumulator-modifying conditions in priority order:
-      # 1. save_alu - ALU operations (ADD, SUB, AND, OR, XOR, INC, DEC) except CP
-      # 2. read_to_acc - Load from memory (LD A,(nn), LD A,(BC), etc.)
-      # 3. read_to_reg with write_reg==7 - LD A,r / INC A / DEC A
-      # 4. rot_akku - Rotate accumulator (RLCA/RLA/RRCA/RRA)
-      # 5. cpl_op - Complement A
+      # 1. POP AF - Load A from memory at M3 (high byte)
+      # 2. CB write to A when cb_ir[2:0] = 7 (A)
+      # 3. save_alu - ALU operations (ADD, SUB, AND, OR, XOR, INC, DEC) except CP
+      # 4. read_to_acc - Load from memory (LD A,(nn), LD A,(BC), etc.)
+      # 5. read_to_reg with write_reg==7 - LD A,r / INC A / DEC A
+      # 6. rot_akku - Rotate accumulator (RLCA/RLA/RRCA/RRA)
+      # 7. cpl_op - Complement A
       # Note: CP (alu_op==7) tests but doesn't store result
-      acc <= mux(clken & save_alu & (t_state == lit(3, width: 3)) & (alu_op != lit(7, width: 4)),
+      acc <= mux(clken & is_pop_af_seq & is_pop_m3_seq & (t_state == lit(3, width: 3)),
+                 di_reg,  # POP AF - high byte (A) at M3
+             mux(clken & is_cb_write_m2_seq & (cb_dest_reg == lit(7, width: 3)) & (t_state == lit(3, width: 3)),
+                 cb_result,  # CB rot/set/res A at M2
+             mux(clken & save_alu & (t_state == lit(3, width: 3)) & (alu_op != lit(7, width: 4)),
                  alu_result,  # Save ALU result (ADD/SUB/AND/OR/XOR/INC/DEC, but not CP)
              mux(clken & read_to_acc & (t_state == lit(3, width: 3)),
                  di_reg,  # Load from memory
@@ -1418,7 +1620,7 @@ module GameBoy
                  rot_result,  # RLCA/RLA/RRCA/RRA
              mux(clken & cpl_op & (t_state == lit(3, width: 3)),
                  ~acc,  # CPL
-                 acc)))))
+                 acc)))))))
 
     end
 

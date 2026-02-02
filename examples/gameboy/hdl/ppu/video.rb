@@ -182,8 +182,10 @@ module GameBoy
       # Mode 2 (OAM Search): h_cnt 0-19 (80 dots)
       # Mode 3 (Drawing):    h_cnt 20-62 (variable, ~172 dots)
       # Mode 0 (HBlank):     h_cnt 63-113
-      oam_eval <= ~vblank & (h_cnt < lit(20, width: 7))
-      mode3 <= ~vblank & (h_cnt >= lit(20, width: 7)) & (h_cnt < lit(63, width: 7))
+      # OAM eval only active when LCD is on
+      oam_eval <= lcdc_on & ~vblank & (h_cnt < lit(20, width: 7))
+      # Mode3 only active when LCD is on (allowing VRAM access when LCD is disabled)
+      mode3 <= lcdc_on & ~vblank & (h_cnt >= lit(20, width: 7)) & (h_cnt < lit(63, width: 7))
 
       # LCD pixel output during mode 3
       # lcd_clkena pulses when we output a pixel (during visible drawing)
