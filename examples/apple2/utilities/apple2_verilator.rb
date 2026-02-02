@@ -504,6 +504,9 @@ module RHDL
           #include "sim_wrapper.h"
           #include <cstring>
 
+          // Verilator time stamp function (required by verilator runtime on some platforms)
+          double sc_time_stamp() { return 0; }
+
           struct SimContext {
               Vapple2* dut;
               unsigned char ram[65536];  // 64KB RAM for Apple II
