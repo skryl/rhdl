@@ -27,8 +27,19 @@ module RHDL
         end
         JIT_LIB_PATH = File.join(JIT_EXT_DIR, JIT_LIB_NAME)
 
-        # Try to load JIT extension
-        JIT_AVAILABLE = File.exist?(JIT_LIB_PATH)
+        # Check if JIT extension is available and functional
+        JIT_AVAILABLE = begin
+          if File.exist?(JIT_LIB_PATH)
+            # Try to load the library and check for required symbols
+            _test_lib = Fiddle.dlopen(JIT_LIB_PATH)
+            _test_lib['jit_sim_create']
+            true
+          else
+            false
+          end
+        rescue Fiddle::DLError
+          false
+        end
 
         # Backwards compatibility alias
         IR_JIT_AVAILABLE = JIT_AVAILABLE
@@ -307,6 +318,7 @@ module RHDL
 
         def gameboy_mode?
           return @sim.gameboy_mode? if @fallback && @sim.respond_to?(:gameboy_mode?)
+          return false unless @gameboy_available
           @fn_is_gameboy_mode.call(@ctx) != 0
         end
 
@@ -650,126 +662,133 @@ module RHDL
             Fiddle::TYPE_VOID
           )
 
-          # Game Boy extension functions
-          @fn_is_gameboy_mode = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_is_mode'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          )
+          # Game Boy extension functions (optional - may not be built into library)
+          begin
+            @fn_is_gameboy_mode = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_is_mode'],
+              [Fiddle::TYPE_VOIDP],
+              Fiddle::TYPE_INT
+            )
 
-          @fn_gameboy_load_rom = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_load_rom'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
-            Fiddle::TYPE_VOID
-          )
+            @fn_gameboy_load_rom = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_load_rom'],
+              [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
+              Fiddle::TYPE_VOID
+            )
 
-          @fn_gameboy_load_boot_rom = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_load_boot_rom'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
-            Fiddle::TYPE_VOID
-          )
+            @fn_gameboy_load_boot_rom = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_load_boot_rom'],
+              [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
+              Fiddle::TYPE_VOID
+            )
 
-          @fn_gameboy_run_cycles = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_run_cycles'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-            Fiddle::TYPE_INT
-          )
+            @fn_gameboy_run_cycles = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_run_cycles'],
+              [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
+              Fiddle::TYPE_INT
+            )
 
-          @fn_gameboy_run_cycles_full = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_run_cycles_full'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
+            @fn_gameboy_run_cycles_full = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_run_cycles_full'],
+              [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP],
+              Fiddle::TYPE_VOID
+            )
 
-          @fn_gameboy_read_vram = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_read_vram'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-            Fiddle::TYPE_CHAR
-          )
+            @fn_gameboy_read_vram = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_read_vram'],
+              [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
+              Fiddle::TYPE_CHAR
+            )
 
-          @fn_gameboy_write_vram = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_write_vram'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_CHAR],
-            Fiddle::TYPE_VOID
-          )
+            @fn_gameboy_write_vram = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_write_vram'],
+              [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_CHAR],
+              Fiddle::TYPE_VOID
+            )
 
-          @fn_gameboy_read_zpram = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_read_zpram'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
-            Fiddle::TYPE_CHAR
-          )
+            @fn_gameboy_read_zpram = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_read_zpram'],
+              [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
+              Fiddle::TYPE_CHAR
+            )
 
-          @fn_gameboy_write_zpram = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_write_zpram'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_CHAR],
-            Fiddle::TYPE_VOID
-          )
+            @fn_gameboy_write_zpram = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_write_zpram'],
+              [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_CHAR],
+              Fiddle::TYPE_VOID
+            )
 
-          @fn_gameboy_framebuffer = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_framebuffer'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOIDP
-          )
+            @fn_gameboy_framebuffer = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_framebuffer'],
+              [Fiddle::TYPE_VOIDP],
+              Fiddle::TYPE_VOIDP
+            )
 
-          @fn_gameboy_framebuffer_len = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_framebuffer_len'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_SIZE_T
-          )
+            @fn_gameboy_framebuffer_len = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_framebuffer_len'],
+              [Fiddle::TYPE_VOIDP],
+              Fiddle::TYPE_SIZE_T
+            )
 
-          @fn_gameboy_frame_count = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_frame_count'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_ULONG
-          )
+            @fn_gameboy_frame_count = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_frame_count'],
+              [Fiddle::TYPE_VOIDP],
+              Fiddle::TYPE_ULONG
+            )
 
-          @fn_gameboy_reset_lcd = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_reset_lcd'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          )
+            @fn_gameboy_reset_lcd = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_reset_lcd'],
+              [Fiddle::TYPE_VOIDP],
+              Fiddle::TYPE_VOID
+            )
 
-          @fn_gameboy_get_v_cnt = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_get_v_cnt'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_UINT
-          )
+            @fn_gameboy_get_v_cnt = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_get_v_cnt'],
+              [Fiddle::TYPE_VOIDP],
+              Fiddle::TYPE_UINT
+            )
 
-          @fn_gameboy_get_h_cnt = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_get_h_cnt'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_UINT
-          )
+            @fn_gameboy_get_h_cnt = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_get_h_cnt'],
+              [Fiddle::TYPE_VOIDP],
+              Fiddle::TYPE_UINT
+            )
 
-          @fn_gameboy_get_vblank_irq = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_get_vblank_irq'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_UINT
-          )
+            @fn_gameboy_get_vblank_irq = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_get_vblank_irq'],
+              [Fiddle::TYPE_VOIDP],
+              Fiddle::TYPE_UINT
+            )
 
-          @fn_gameboy_get_if_r = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_get_if_r'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_UINT
-          )
+            @fn_gameboy_get_if_r = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_get_if_r'],
+              [Fiddle::TYPE_VOIDP],
+              Fiddle::TYPE_UINT
+            )
 
-          @fn_gameboy_get_signal = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_get_signal'],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT],
-            Fiddle::TYPE_LONG_LONG
-          )
+            @fn_gameboy_get_signal = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_get_signal'],
+              [Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT],
+              Fiddle::TYPE_LONG_LONG
+            )
 
-          @fn_gameboy_get_lcdc_on = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_get_lcdc_on'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_UINT
-          )
+            @fn_gameboy_get_lcdc_on = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_get_lcdc_on'],
+              [Fiddle::TYPE_VOIDP],
+              Fiddle::TYPE_UINT
+            )
 
-          @fn_gameboy_get_h_div_cnt = Fiddle::Function.new(
-            @lib['gameboy_jit_sim_get_h_div_cnt'],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_UINT
-          )
+            @fn_gameboy_get_h_div_cnt = Fiddle::Function.new(
+              @lib['gameboy_jit_sim_get_h_div_cnt'],
+              [Fiddle::TYPE_VOIDP],
+              Fiddle::TYPE_UINT
+            )
+
+            @gameboy_available = true
+          rescue Fiddle::DLError
+            # Game Boy functions not available in this library build
+            @gameboy_available = false
+          end
         end
 
         def create_simulator

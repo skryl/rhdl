@@ -753,7 +753,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
       "ISA and IR should have close PCs at all checkpoints"
   end
 
-  it 'verifies PC sequence subsequence matching over 20M cycles', timeout: 1800 do
+  it 'verifies PC sequence subsequence matching over 20M cycles', :slow, timeout: 1800 do
     skip 'AppleIIgo ROM not found' unless @rom_available
     skip 'Karateka memory dump not found' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
