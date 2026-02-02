@@ -451,6 +451,80 @@ rhdl apple2 --demo                       # Run demo mode
 rhdl apple2 --build                      # Build mini monitor ROM
 ```
 
+## Execution Backends
+
+RHDL provides multiple simulation backends with different performance/flexibility tradeoffs:
+
+### Behavioral Simulation (Ruby)
+
+Pure Ruby execution at the behavior block level. Best for development and debugging.
+
+```ruby
+sim = RHDL::Sim::Simulator.new
+sim.add_component(alu)
+sim.add_clock(clk)
+sim.run(100)  # 100 clock cycles
+```
+
+### Gate-Level (Netlist) Simulation
+
+Simulates primitive gate netlists (AND, OR, XOR, NOT, MUX, DFF). Four backend options:
+
+| Backend | Speed | Startup | Use Case |
+|---------|-------|---------|----------|
+| Ruby SimCPU | 22K iter/s | Immediate | Development, small circuits |
+| Rust Interpreter | 427K iter/s (20x) | Immediate | Functional verification |
+| Rust JIT (Cranelift) | 50-100M gates/s | 0.1-0.5s | Fast interactive simulation |
+| Rust Compiler (SIMD) | 100M+ gates/s | 1-2s | Maximum throughput, batch testing |
+
+The compiler supports AVX2/AVX512 for 256-512 parallel test vectors.
+
+```ruby
+ir = RHDL::Codegen::Netlist::Lower.from_components([alu])
+sim = RHDL::Codegen::Netlist::NetlistInterpreterWrapper.new(ir, lanes: 64)
+sim.poke('a', 0xFF)
+sim.evaluate
+result = sim.peek('y')
+```
+
+### IR-Level Simulation (Word-Level)
+
+Word-level bytecode simulation for complex designs like CPUs:
+
+| Backend | Speed | Startup | Use Case |
+|---------|-------|---------|----------|
+| Interpreter | 60K cycles/s | Immediate | Interactive CPU debugging |
+| JIT (Cranelift) | 600K cycles/s (10x) | 0.1-0.5s | Moderate simulations |
+| AOT Compiler | 2.3M cycles/s (38x) | 0.5-2s | Long simulations, games |
+
+```ruby
+sim = RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
+sim.compile
+sim.run_ticks(1_000_000)
+```
+
+### ISA Simulator (Native)
+
+Specialized native Rust emulator for MOS 6502, 15-20x faster than Ruby ISA simulator:
+
+```ruby
+cpu = MOS6502::ISASimulatorNative.new(io_handler)
+cpu.load_bytes(program, 0x8000)
+cpu.reset
+1_000_000.times { cpu.step }
+```
+
+### Building Native Extensions
+
+```bash
+rake native:build    # Build all Rust extensions
+rake native:check    # Check availability
+```
+
+All backends include automatic fallback to Ruby when native extensions aren't available.
+
+See [Simulation](docs/simulation.md) and [Gate-Level Backend](docs/gate_level_backend.md) for complete details.
+
 ## Rake Tasks
 
 ```bash
