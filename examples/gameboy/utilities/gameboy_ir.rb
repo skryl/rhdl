@@ -68,7 +68,7 @@ module RHDL
       WRAM_END = 0xDFFF
 
       # Boot ROM paths (relative to the gameboy directory)
-      DMG_BOOT_ROM_PATH = File.expand_path('../reference/BootROMs/bin/dmg_boot.bin', __dir__)
+      DMG_BOOT_ROM_PATH = File.expand_path('../software/roms/dmg_boot.bin', __dir__)
 
       # Initialize the Game Boy IR runner
       # @param backend [Symbol] :interpret, :jit, or :compile
