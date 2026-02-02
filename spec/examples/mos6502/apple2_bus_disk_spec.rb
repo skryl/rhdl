@@ -48,8 +48,8 @@ RSpec.describe 'Apple2Bus disk integration' do
         0x00               # BRK
       ]
       runner.load_ram(program, base_addr: 0x0800)
-      runner.write_memory(0xFFFC, 0x00)  # Reset vector low
-      runner.write_memory(0xFFFD, 0x08)  # Reset vector high
+      runner.write(0xFFFC, 0x00)  # Reset vector low
+      runner.write(0xFFFD, 0x08)  # Reset vector high
       runner.reset
 
       # Run until BRK
@@ -98,8 +98,8 @@ RSpec.describe 'Apple2Bus disk integration' do
         0x00               # BRK
       ]
       runner.load_ram(program, base_addr: 0x0800)
-      runner.write_memory(0xFFFC, 0x00)  # Reset vector low
-      runner.write_memory(0xFFFD, 0x08)  # Reset vector high
+      runner.write(0xFFFC, 0x00)  # Reset vector low
+      runner.write(0xFFFD, 0x08)  # Reset vector high
       runner.reset
 
       # Initially in text mode
@@ -108,8 +108,8 @@ RSpec.describe 'Apple2Bus disk integration' do
       # Run the program
       runner.run_until(max_cycles: 100) { runner.halted? }
 
-      # Sync video state from native CPU to bus (native CPU handles soft switches internally)
-      runner.sync_video_state
+      # Sync video state from native CPU to Ruby bus for verification
+      runner.sync_video_state if runner.native?
 
       # Now should be in hires mode
       expect(bus.hires_mode?).to be true

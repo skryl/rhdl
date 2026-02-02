@@ -205,18 +205,20 @@ module Apple2Harness
       end
     end
 
-    # Write a single byte to memory (handles native vs non-native mode)
-    # Use this for setting up test vectors, reset vector, etc.
-    def write_memory(addr, value)
+    # Write a single byte to memory
+    # In native mode, writes to CPU internal memory
+    # Also writes to bus for I/O region ($C000-$CFFF)
+    def write(addr, value)
       if native?
         @cpu.poke(addr, value)
-      else
-        @bus.write(addr, value)
       end
+      # Always write to bus (for I/O and non-native mode)
+      @bus.write(addr, value)
     end
 
-    # Read a single byte from memory (handles native vs non-native mode)
-    def read_memory(addr)
+    # Read a single byte from memory
+    # In native mode, reads from CPU internal memory
+    def read(addr)
       if native?
         @cpu.peek(addr)
       else
