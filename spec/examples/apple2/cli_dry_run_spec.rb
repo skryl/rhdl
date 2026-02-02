@@ -220,6 +220,30 @@ RSpec.describe 'Apple2 CLI --dry-run', :slow do
     end
   end
 
+  describe 'Verilog mode' do
+    # Skip if Verilator is not available
+    before(:each) do
+      skip 'Verilator not available' unless verilator_available?
+    end
+
+    it 'selects verilog mode' do
+      result = run_cli('--demo', '-m', 'verilog')
+      expect(result[:mode]).to eq('verilog')
+      expect(result[:simulator_type]).to eq('hdl_verilator')
+    end
+
+    it 'sets native flag to true for verilog' do
+      result = run_cli('--demo', '-m', 'verilog')
+      expect(result[:native]).to be true
+    end
+
+    it 'loads demo program into Verilator memory' do
+      result = run_cli('--demo', '-m', 'verilog')
+      program_area = result[:memory_sample][:program_area]
+      expect(program_area.any? { |b| b != 0 }).to be true
+    end
+  end
+
   describe 'dry-run output structure' do
     it 'returns all required fields' do
       result = run_cli('--demo')
@@ -361,5 +385,10 @@ RSpec.describe 'Apple2 CLI --dry-run', :slow do
     RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
   rescue LoadError, NameError
     false
+  end
+
+  # Check if Verilator is available
+  def verilator_available?
+    system('which verilator > /dev/null 2>&1')
   end
 end
