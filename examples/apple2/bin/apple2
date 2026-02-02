@@ -74,7 +74,7 @@ class Apple2HDLTerminal
 
     @running = false
     @last_screen = nil
-    @cycles_per_frame = options[:speed] || 100  # HDL is slow, default to small value
+    @cycles_per_frame = options[:speed]  # Speed is auto-adjusted based on backend
     @debug = options[:debug] || false
     @green_screen = options[:green] || false
     @hires_mode = options[:hires] || false
@@ -740,7 +740,7 @@ end
 
 # Parse options
 options = {
-  speed: 100,
+  speed: nil,  # nil means auto-detect based on backend
   debug: false,
   green: false,
   demo: false,
@@ -766,7 +766,7 @@ parser = OptionParser.new do |opts|
     options[:load_addr] = v.to_i(16)
   end
 
-  opts.on("-s", "--speed CYCLES", Integer, "Cycles per frame (default: 100)") do |v|
+  opts.on("-s", "--speed CYCLES", Integer, "Cycles per frame (auto: 33333 for jit/compile, 10000 for interpret, 100 for ruby)") do |v|
     options[:speed] = v
   end
 
@@ -844,6 +844,22 @@ parser = OptionParser.new do |opts|
 end
 
 parser.parse!(ARGV)
+
+# Auto-adjust speed based on backend if user didn't explicitly set --speed
+# Apple II runs at ~1MHz. At 30fps, real-time needs ~33,333 cycles/frame.
+if options[:speed].nil?
+  options[:speed] = case options[:sim]
+                    when :compile, :jit
+                      # Compiler and JIT are fast enough for real-time
+                      33_333
+                    when :interpret
+                      # Interpreter is slower, but still faster than Ruby
+                      10_000
+                    else
+                      # Ruby HDL is slow, use conservative default
+                      100
+                    end
+end
 
 terminal = Apple2HDLTerminal.new(options)
 
