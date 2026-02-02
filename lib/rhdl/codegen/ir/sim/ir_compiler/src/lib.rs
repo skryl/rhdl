@@ -14,9 +14,11 @@
 mod core;
 mod extensions;
 mod ffi;
+mod vcd;
 
 pub use core::CoreSimulator;
 pub use extensions::{Apple2Extension, GameBoyExtension, Mos6502Extension};
+pub use vcd::{VcdTracer, TraceMode, SignalChange, TraceStats};
 
 // Re-export FFI functions at crate root for easier linking
 pub use ffi::*;
