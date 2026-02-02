@@ -526,6 +526,21 @@ module RHDL
               memset(ctx->rom, 0, sizeof(ctx->rom));
               ctx->prev_speaker = 0;
               ctx->speaker_toggles = 0;
+
+              // Initialize inputs to safe defaults
+              ctx->dut->clk_14m = 0;
+              ctx->dut->flash_clk = 0;
+              ctx->dut->reset = 1;  // Start in reset
+              ctx->dut->ram_do = 0;
+              ctx->dut->pd = 0;
+              ctx->dut->ps2_clk = 1;
+              ctx->dut->ps2_data = 1;
+              ctx->dut->gameport = 0;
+              ctx->dut->pause = 0;
+
+              // Run initial eval to trigger initial block execution
+              ctx->dut->eval();
+
               return ctx;
           }
 
@@ -537,10 +552,26 @@ module RHDL
 
           void sim_reset(void* sim) {
               SimContext* ctx = static_cast<SimContext*>(sim);
+
+              // Hold reset high and run clock cycles for proper 6502 reset
+              // The 6502 needs reset held for at least 2 clock cycles
+              // We run extra cycles to ensure timing generator also initializes
               ctx->dut->reset = 1;
-              ctx->dut->eval();
+              for (int i = 0; i < 100; i++) {
+                  ctx->dut->clk_14m = 0;
+                  ctx->dut->eval();
+                  ctx->dut->clk_14m = 1;
+                  ctx->dut->eval();
+              }
+
+              // Release reset and run more cycles to stabilize
               ctx->dut->reset = 0;
-              ctx->dut->eval();
+              for (int i = 0; i < 100; i++) {
+                  ctx->dut->clk_14m = 0;
+                  ctx->dut->eval();
+                  ctx->dut->clk_14m = 1;
+                  ctx->dut->eval();
+              }
           }
 
           void sim_eval(void* sim) {
