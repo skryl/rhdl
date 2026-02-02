@@ -236,7 +236,7 @@ module RHDL
 
         def dst_lib_name(ext)
           case host_os
-          when /darwin/ then "#{ext[:crate_name]}.bundle"
+          when /darwin/ then "#{ext[:crate_name]}.dylib"
           when /linux/ then "#{ext[:crate_name]}.so"
           when /mswin|mingw/ then "#{ext[:crate_name]}.dll"
           else "#{ext[:crate_name]}.so"
