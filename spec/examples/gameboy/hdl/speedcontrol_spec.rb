@@ -121,4 +121,132 @@ RSpec.describe 'GameBoy SpeedControl' do
       expect(defined?(GameBoy::Gameboy)).to eq('constant')
     end
   end
+
+  # ============================================================================
+  # Missing functionality tests (from reference comparison)
+  # These tests verify features that should be implemented to match the
+  # MiSTer reference implementation (reference/rtl/speedcontrol.vhd)
+  # ============================================================================
+
+  describe 'Clock Divider' do
+    it 'uses 3-bit divider (0-7) for 8x clock division' do
+      # Reference: Proper clkdiv counter creates 8x division from system clock
+      pending 'Clock divider implementation'
+      fail
+    end
+
+    it 'generates ce at clkdiv=0' do
+      # Reference: ce active when clkdiv reaches 0
+      pending 'ce generation at clkdiv=0'
+      fail
+    end
+
+    it 'generates ce_n at clkdiv=4 (180 degrees out of phase)' do
+      # Reference: ce and ce_n are 180 degrees out of phase
+      # Currently both are ~pause which is incorrect
+      pending 'ce_n 180 degree phase offset from ce'
+      fail
+    end
+  end
+
+  describe 'State Machine' do
+    it 'has 6 states: NORMAL, PAUSED, FASTFORWARDSTART, FASTFORWARD, FASTFORWARDEND, RAMACCESS' do
+      # Reference: Full FSM with 6 states for different operating modes
+      pending 'Complete 6-state FSM implementation'
+      fail
+    end
+
+    it 'transitions to PAUSED state when pause=1' do
+      # Reference: Pause transitions to PAUSED state
+      pending 'Pause state transition'
+      fail
+    end
+
+    it 'uses unpause_cnt for gradual pause exit (0-15)' do
+      # Reference: unpause_cnt counter for debouncing/gradual exit
+      pending 'Unpause counter implementation'
+      fail
+    end
+
+    it 'transitions to FASTFORWARD state when speedup=1' do
+      # Reference: Fast-forward mode with entry/exit delays
+      pending 'Fast-forward state transition'
+      fail
+    end
+
+    it 'uses fastforward_cnt for fast-forward timing' do
+      # Reference: fastforward_cnt counter for mode delays
+      pending 'Fast-forward counter implementation'
+      fail
+    end
+
+    it 'transitions to RAMACCESS state during SDRAM operations' do
+      # Reference: RAMACCESS state with sdram_busy counter
+      pending 'RAM access state implementation'
+      fail
+    end
+  end
+
+  describe 'RAM Access Handling' do
+    it 'tracks SDRAM busy with sdram_busy counter' do
+      # Reference: sdram_busy counter for memory access timing
+      pending 'SDRAM busy counter'
+      fail
+    end
+
+    it 'generates refresh signal for SDRAM' do
+      # Reference: refreshcnt for SDRAM refresh timing
+      pending 'SDRAM refresh signal generation'
+      fail
+    end
+
+    it 'outputs refresh signal' do
+      # Reference: refresh output for SDRAM controller
+      pending 'Refresh output signal'
+      fail
+    end
+  end
+
+  describe 'Fast-Forward Mode' do
+    it 'outputs ff_on signal when in fast-forward mode' do
+      # Reference: ff_on output indicates fast-forward active
+      pending 'ff_on output signal'
+      fail
+    end
+
+    it 'uses FASTFORWARDSTART state for entry delay' do
+      # Reference: Entry delay before full fast-forward
+      pending 'Fast-forward start delay'
+      fail
+    end
+
+    it 'uses FASTFORWARDEND state for exit delay' do
+      # Reference: Exit delay before returning to normal
+      pending 'Fast-forward end delay'
+      fail
+    end
+  end
+
+  describe 'ce_2x Behavior' do
+    it 'generates ce_2x at specific clkdiv phases for double-speed' do
+      # Reference: ce_2x only active at specific clkdiv values in various modes
+      # Currently always ~pause which is incorrect
+      pending 'ce_2x phase-specific generation'
+      fail
+    end
+
+    it 'ce_2x has different timing than ce' do
+      # Reference: ce_2x for GBC double-speed mode has specific timing
+      pending 'ce_2x distinct timing from ce'
+      fail
+    end
+  end
+
+  describe 'Savestate Support' do
+    it 'has savestate interface' do
+      # Reference: SaveState bus signals for MiSTer
+      pending 'Savestate interface'
+      fail
+    end
+  end
 end

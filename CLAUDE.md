@@ -174,31 +174,37 @@ The project uses these gems:
 
 ### Installation
 
-1. Install bundler (use version 2.x, avoid 4.x which has known issues):
+1. Clone the repository and initialize submodules:
+```bash
+git clone <repo-url>
+cd rhdl
+git submodule update --init --recursive
+```
+
+2. Install bundler (use version 2.x, avoid 4.x which has known issues):
 ```bash
 gem install bundler -v '~> 2.5'
 ```
 
-2. Install all dependencies and generate binstubs:
+3. Install all dependencies and generate binstubs:
 ```bash
 bundle install
+bundle binstubs rake rspec parallel_tests
 ```
 
-The `.bundle/config` file configures Bundler to automatically generate binstubs in `bin/` during installation. This eliminates the need for a separate setup step.
-
-3. (Optional) Install system dependencies:
+4. (Optional) Install system dependencies:
 ```bash
-bundle exec rake deps:install
+./bin/rake deps:install
 ```
 
-4. Verify installation:
+5. (Optional) Build native Rust extensions for high-performance simulation:
+```bash
+./bin/rake native:build
+```
+
+6. Verify installation:
 ```bash
 ./bin/rake --version
-```
-
-**Note:** If binstubs are not generated (e.g., `.bundle/config` is missing), you can manually generate them:
-```bash
-bundle binstubs rake rspec parallel_tests
 ```
 
 ## Running Tests
