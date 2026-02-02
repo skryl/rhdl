@@ -428,6 +428,10 @@ module GameBoy
       is_add_hl_rr = (ir[3..0] == lit(9, width: 4)) & (ir[7..6] == lit(0, width: 2))
       is_alu_imm <= (ir[7..6] == lit(3, width: 2)) & (ir[2..0] == lit(6, width: 3))
 
+      # ALU A,(HL) - ADD/ADC/SUB/SBC/AND/XOR/OR/CP A,(HL) (86/8E/96/9E/A6/AE/B6/BE)
+      # These are 2-cycle instructions: M1=fetch, M2=read from (HL) and execute ALU
+      is_alu_hl = (ir[7..6] == lit(2, width: 2)) & (ir[2..0] == lit(6, width: 3))
+
       # CB with register operand (not (HL)) - 2 cycles
       # is_cb_hl is defined above - it's true when cb_ir[2:0] == 6
       is_cb_reg = is_cb & ~is_cb_hl
@@ -439,7 +443,7 @@ module GameBoy
                      (ir == lit(0x3A, width: 8)) | (ir == lit(0x2A, width: 8)) |
                      is_cb_reg |  # CB with register operand = 2 cycles
                      (is_cond_jr & ~cond_true) |
-                     is_alu_imm | is_ld_r_n | is_inc_rr | is_dec_rr | is_add_hl_rr |
+                     is_alu_imm | is_alu_hl | is_ld_r_n | is_inc_rr | is_dec_rr | is_add_hl_rr |
                      (ir == lit(0xF9, width: 8)) |
                      (ir == lit(0xE2, width: 8)) | (ir == lit(0xF2, width: 8))
 
@@ -498,10 +502,27 @@ module GameBoy
       halt <= (ir == lit(0x76, width: 8))
 
       # ALU A,r operations (10xxxrrr - ADD/ADC/SUB/SBC/AND/XOR/OR/CP A,r)
-      alu_op <= mux(ir[7..6] == lit(2, width: 2), ir[5..3], lit(0, width: 4))
-      save_alu <= mux(ir[7..6] == lit(2, width: 2), lit(1, width: 1), lit(0, width: 1))
-      set_bus_a_to <= mux(ir[7..6] == lit(2, width: 2), lit(7, width: 4), lit(7, width: 4)) # ACC
-      set_bus_b_to <= mux(ir[7..6] == lit(2, width: 2), cat(lit(0, width: 1), ir[2..0]), lit(7, width: 4))
+      # Note: When ir[2:0]=6, this is ALU A,(HL) which needs special handling (memory read)
+      is_alu_r_not_hl = (ir[7..6] == lit(2, width: 2)) & (ir[2..0] != lit(6, width: 3))
+      alu_op <= mux(is_alu_r_not_hl, ir[5..3], lit(0, width: 4))
+      save_alu <= mux(is_alu_r_not_hl, lit(1, width: 1), lit(0, width: 1))
+      set_bus_a_to <= mux(is_alu_r_not_hl, lit(7, width: 4), lit(7, width: 4)) # ACC
+      set_bus_b_to <= mux(is_alu_r_not_hl, cat(lit(0, width: 1), ir[2..0]), lit(7, width: 4))
+
+      # ALU A,(HL) operations (10xxx110 - ADD/ADC/SUB/SBC/AND/XOR/OR/CP A,(HL))
+      # These are 2-cycle instructions: M1=fetch opcode, M2=read from (HL) and execute
+      # di_reg holds the value read from (HL) during M2
+      is_alu_hl_local = (ir[7..6] == lit(2, width: 2)) & (ir[2..0] == lit(6, width: 3))
+      # Only execute ALU operation during M2 (when memory read has been done into di_reg)
+      alu_op <= mux(is_alu_hl_local & (m_cycle == lit(2, width: 3)), ir[5..3], alu_op)
+      save_alu <= mux(is_alu_hl_local & (m_cycle == lit(2, width: 3)), lit(1, width: 1), save_alu)
+      set_bus_a_to <= mux(is_alu_hl_local & (m_cycle == lit(2, width: 3)), lit(7, width: 4), set_bus_a_to)  # ACC
+      # For ALU (HL), bus_b comes from di_reg (value 6) during M2
+      set_bus_b_to <= mux(is_alu_hl_local & (m_cycle == lit(2, width: 3)),
+                          lit(6, width: 4),  # 6 = di_reg (data input register)
+                          set_bus_b_to)
+      # Set address to HL for memory read
+      set_addr_to <= mux(is_alu_hl_local, lit(ADDR_HL, width: 3), set_addr_to)
 
       # ALU A,n operations (11xxx110 - ADD/ADC/SUB/SBC/AND/XOR/OR/CP A,n)
       # These are 2-cycle instructions: M1=fetch opcode, M2=read immediate and execute

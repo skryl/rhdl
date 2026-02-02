@@ -574,26 +574,41 @@ User: "The ALU gives wrong results for subtraction with carry"
 
 ### Signal Tracing and Debugging
 
-**Any complex signal tracing should be done using the VCD tracing function built into the Rust IR compiler.**
+**IMPORTANT: Always use VCD tracing for complex signal analysis. Do NOT write custom signal polling loops or Ruby scripts that manually sample signals - always use the built-in VCD tracing instead.**
 
-The IR compiler includes VCD (Value Change Dump) tracing support for debugging signal-level issues:
+The IR compiler includes VCD (Value Change Dump) tracing support for debugging signal-level issues. VCD tracing captures every signal change with cycle-accurate timing, which is essential for debugging:
+- Interrupt handling and timing
+- PPU/LCD state transitions
+- Memory access patterns
+- CPU instruction execution flow
+- Any multi-cycle operations
 
 ```ruby
 sim = runner.sim
 
-# Configure which signals to trace
-sim.trace_add_signals_matching('cpu_addr')
-sim.trace_add_signals_matching('vram_wren')
-sim.trace_add_signals_matching('cpu__a')  # CPU internal registers
+# Configure which signals to trace - use pattern matching
+sim.trace_add_signals_matching('cpu__pc')       # CPU program counter
+sim.trace_add_signals_matching('cpu__a_r')      # CPU A register
+sim.trace_add_signals_matching('ppu__ly')       # PPU scanline counter
+sim.trace_add_signals_matching('ppu__lcdc')     # LCD control register
+sim.trace_add_signals_matching('cpu_addr')      # Memory address bus
+sim.trace_add_signals_matching('cpu_wren')      # Memory write enable
 
 # Start tracing (streaming mode for large traces)
 sim.trace_start_streaming('/path/to/output.vcd')
 
-# Run simulation with capture
-100.times do
-  runner.run_steps(1)
+# Run simulation with capture at appropriate granularity
+# For scanline-level analysis:
+154.times do |scanline|
+  runner.run_steps(456)  # One scanline
   sim.trace_capture
 end
+
+# For cycle-accurate analysis:
+# 1000.times do
+#   runner.run_steps(1)
+#   sim.trace_capture
+# end
 
 # Stop and flush
 sim.trace_stop
@@ -601,7 +616,12 @@ sim.trace_stop
 
 View VCD files in GTKWave: `gtkwave /path/to/output.vcd`
 
-Do NOT write custom signal polling loops when debugging complex timing issues - use VCD tracing instead.
+**Why VCD tracing over manual polling:**
+- Captures exact signal transition timing (not sampled/aliased)
+- GTKWave provides professional waveform visualization
+- Can trace many signals simultaneously without performance impact
+- VCD files can be shared and analyzed offline
+- Supports hierarchical signal browsing
 
 ### CLI Task Classes
 
