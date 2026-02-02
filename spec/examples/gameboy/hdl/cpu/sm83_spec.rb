@@ -835,4 +835,369 @@ RSpec.describe 'SM83 CPU Instructions' do
       expect(state[:f] & 0x10).to eq(0x00)  # Carry flag clear
     end
   end
+
+  # ============================================================================
+  # Missing functionality tests (from reference comparison)
+  # These tests verify features that should be implemented to match the
+  # MiSTer reference implementation (reference/rtl/T80/*.vhd)
+  # ============================================================================
+
+  describe 'Instruction Timing' do
+    it 'conditional JP takes fewer cycles when condition is false' do
+      # Reference: T80 reduces cycles when conditional branches not taken
+      pending 'Conditional jump cycle reduction'
+      fail
+    end
+
+    it 'conditional CALL takes fewer cycles when condition is false' do
+      # Reference: T80 reduces cycles for untaken conditional calls
+      pending 'Conditional call cycle reduction'
+      fail
+    end
+
+    it 'conditional RET takes fewer cycles when condition is false' do
+      # Reference: T80 reduces cycles for untaken conditional returns
+      pending 'Conditional return cycle reduction'
+      fail
+    end
+
+    it 'applies proper M-cycle timing for each instruction' do
+      # Reference: Different instructions have different cycle counts
+      pending 'M-cycle timing per instruction'
+      fail
+    end
+  end
+
+  describe 'CB Prefix Instructions (Complete Set)' do
+    describe 'BIT instructions (all 64 combinations)' do
+      it 'BIT 0-7,B tests all bits of B' do
+        # Reference: T80_MCode.vhd implements all 8 bit tests for each register
+        pending 'Complete BIT n,B implementation'
+        fail
+      end
+
+      it 'BIT 0-7,C tests all bits of C' do
+        pending 'Complete BIT n,C implementation'
+        fail
+      end
+
+      it 'BIT 0-7,D tests all bits of D' do
+        pending 'Complete BIT n,D implementation'
+        fail
+      end
+
+      it 'BIT 0-7,E tests all bits of E' do
+        pending 'Complete BIT n,E implementation'
+        fail
+      end
+
+      it 'BIT 0-7,H tests all bits of H' do
+        pending 'Complete BIT n,H implementation'
+        fail
+      end
+
+      it 'BIT 0-7,L tests all bits of L' do
+        pending 'Complete BIT n,L implementation'
+        fail
+      end
+
+      it 'BIT 0-7,(HL) tests all bits of memory at HL' do
+        pending 'Complete BIT n,(HL) implementation'
+        fail
+      end
+    end
+
+    describe 'SET instructions (all 64 combinations)' do
+      it 'SET 0-7,r sets all bits for all registers' do
+        # Reference: T80_MCode.vhd implements all 64 SET operations
+        pending 'Complete SET instruction set'
+        fail
+      end
+
+      it 'SET 0-7,(HL) sets bits in memory at HL' do
+        pending 'Complete SET n,(HL) implementation'
+        fail
+      end
+    end
+
+    describe 'RES instructions (all 64 combinations)' do
+      it 'RES 0-7,r resets all bits for all registers' do
+        # Reference: T80_MCode.vhd implements all 64 RES operations
+        pending 'Complete RES instruction set'
+        fail
+      end
+
+      it 'RES 0-7,(HL) resets bits in memory at HL' do
+        pending 'Complete RES n,(HL) implementation'
+        fail
+      end
+    end
+
+    describe 'Rotate/Shift (all register variants)' do
+      it 'RLC r rotates left for all registers' do
+        pending 'Complete RLC r implementation'
+        fail
+      end
+
+      it 'RRC r rotates right for all registers' do
+        pending 'Complete RRC r implementation'
+        fail
+      end
+
+      it 'RL r rotates left through carry for all registers' do
+        pending 'Complete RL r implementation'
+        fail
+      end
+
+      it 'RR r rotates right through carry for all registers' do
+        pending 'Complete RR r implementation'
+        fail
+      end
+
+      it 'SLA r shifts left arithmetic for all registers' do
+        pending 'Complete SLA r implementation'
+        fail
+      end
+
+      it 'SRA r shifts right arithmetic for all registers' do
+        pending 'Complete SRA r implementation'
+        fail
+      end
+
+      it 'SRL r shifts right logical for all registers' do
+        pending 'Complete SRL r implementation'
+        fail
+      end
+
+      it 'SWAP r swaps nibbles for all registers' do
+        pending 'Complete SWAP r implementation'
+        fail
+      end
+    end
+  end
+
+  describe 'Memory Indirect Load Instructions' do
+    it 'LD (BC),A stores A at address BC' do
+      pending 'LD (BC),A implementation'
+      fail
+    end
+
+    it 'LD (DE),A stores A at address DE' do
+      pending 'LD (DE),A implementation'
+      fail
+    end
+
+    it 'LD A,(BC) loads from address BC into A' do
+      pending 'LD A,(BC) implementation'
+      fail
+    end
+
+    it 'LD A,(DE) loads from address DE into A' do
+      pending 'LD A,(DE) implementation'
+      fail
+    end
+
+    it 'LDI (HL),A stores A at HL then increments HL' do
+      # Reference: LD (HL+),A or LDI (HL),A
+      pending 'LDI (HL),A implementation'
+      fail
+    end
+
+    it 'LDD (HL),A stores A at HL then decrements HL' do
+      # Reference: LD (HL-),A or LDD (HL),A
+      pending 'LDD (HL),A implementation'
+      fail
+    end
+
+    it 'LDI A,(HL) loads from HL into A then increments HL' do
+      pending 'LDI A,(HL) implementation'
+      fail
+    end
+
+    it 'LDD A,(HL) loads from HL into A then decrements HL' do
+      pending 'LDD A,(HL) implementation'
+      fail
+    end
+
+    it 'LD (nn),A stores A at 16-bit immediate address' do
+      pending 'LD (nn),A implementation'
+      fail
+    end
+
+    it 'LD A,(nn) loads from 16-bit immediate address into A' do
+      pending 'LD A,(nn) implementation'
+      fail
+    end
+
+    it 'LD (nn),SP stores SP at 16-bit immediate address' do
+      pending 'LD (nn),SP implementation'
+      fail
+    end
+  end
+
+  describe 'Zero Page (High RAM) Instructions' do
+    it 'LDH (C),A stores A at FF00+C' do
+      pending 'LDH (C),A implementation'
+      fail
+    end
+
+    it 'LDH A,(C) loads from FF00+C into A' do
+      pending 'LDH A,(C) implementation'
+      fail
+    end
+  end
+
+  describe 'Stack Pointer Instructions' do
+    it 'LD SP,HL copies HL to SP' do
+      pending 'LD SP,HL implementation'
+      fail
+    end
+
+    it 'LD HL,SP+n adds signed offset to SP and stores in HL' do
+      pending 'LD HL,SP+n implementation'
+      fail
+    end
+
+    it 'ADD SP,n adds signed 8-bit immediate to SP' do
+      pending 'ADD SP,n implementation'
+      fail
+    end
+  end
+
+  describe 'ALU Flag Behavior' do
+    it 'DAA correctly adjusts for BCD after addition' do
+      # Reference: T80_ALU.vhd has full DAA with Mode=3 specific behavior
+      pending 'DAA after addition'
+      fail
+    end
+
+    it 'DAA correctly adjusts for BCD after subtraction' do
+      pending 'DAA after subtraction'
+      fail
+    end
+
+    it 'RLCA/RLA/RRCA/RRA suppress Z flag (Rot_Akku behavior)' do
+      # Reference: T80_ALU handles Rot_Akku signal to suppress Z flag
+      pending 'Rotate accumulator Z flag suppression'
+      fail
+    end
+
+    it 'ADC sets flags correctly for all cases' do
+      pending 'ADC flag behavior'
+      fail
+    end
+
+    it 'SBC sets flags correctly for all cases' do
+      pending 'SBC flag behavior'
+      fail
+    end
+  end
+
+  describe 'Interrupt Handling' do
+    it 'disables interrupts for one instruction after DI' do
+      # Reference: IntE_FF1, IntE_FF2 interaction
+      pending 'DI interrupt delay'
+      fail
+    end
+
+    it 'enables interrupts for one instruction after EI' do
+      # Reference: EI enables interrupts after next instruction
+      pending 'EI interrupt delay'
+      fail
+    end
+
+    it 'handles interrupt during HALT correctly' do
+      # Reference: Complex timing for interrupt during HALT
+      pending 'Interrupt during HALT timing'
+      fail
+    end
+
+    it 'RETI enables interrupts and returns' do
+      pending 'RETI implementation'
+      fail
+    end
+
+    it 'RST vectors push PC and jump to vector address' do
+      # Reference: 8 RST vectors (0x00, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38)
+      pending 'RST vector implementation'
+      fail
+    end
+  end
+
+  describe 'HALT and STOP Modes' do
+    it 'HALT waits for interrupt' do
+      pending 'HALT mode implementation'
+      fail
+    end
+
+    it 'STOP enters low-power mode' do
+      pending 'STOP mode implementation'
+      fail
+    end
+
+    it 'HALT bug: skips next byte when IME=0 and interrupt pending' do
+      # Reference: DMG HALT bug
+      pending 'HALT bug implementation'
+      fail
+    end
+  end
+
+  describe 'Microcode Coverage' do
+    it 'decodes all 256 main opcodes' do
+      # Reference: T80_MCode.vhd decodes all 256 main opcodes
+      pending 'Complete main opcode decoding'
+      fail
+    end
+
+    it 'decodes all 256 CB-prefixed opcodes' do
+      # Reference: T80_MCode.vhd decodes all 256 CB prefix opcodes
+      pending 'Complete CB prefix opcode decoding'
+      fail
+    end
+  end
+
+  describe '16-bit Arithmetic' do
+    it 'ADD HL,DE adds DE to HL' do
+      pending 'ADD HL,DE implementation'
+      fail
+    end
+
+    it 'ADD HL,HL doubles HL' do
+      pending 'ADD HL,HL implementation'
+      fail
+    end
+
+    it 'ADD HL,SP adds SP to HL' do
+      pending 'ADD HL,SP implementation'
+      fail
+    end
+
+    it 'DEC DE decrements DE' do
+      pending 'DEC DE implementation'
+      fail
+    end
+
+    it 'DEC HL decrements HL' do
+      pending 'DEC HL implementation'
+      fail
+    end
+
+    it 'DEC SP decrements SP' do
+      pending 'DEC SP implementation'
+      fail
+    end
+
+    it 'INC SP increments SP' do
+      pending 'INC SP implementation'
+      fail
+    end
+  end
+
+  describe 'Savestate Support' do
+    it 'has savestate interface for CPU state preservation' do
+      # Reference: T80 has comprehensive savestate interface
+      pending 'CPU savestate interface'
+      fail
+    end
+  end
 end
