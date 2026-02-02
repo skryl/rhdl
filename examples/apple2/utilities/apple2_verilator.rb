@@ -349,6 +349,8 @@ module RHDL
       end
 
       def dry_run_info
+        # Reset to apply the reset vector that was set after initialization
+        reset
         {
           mode: :verilog,
           simulator_type: simulator_type,
@@ -394,10 +396,8 @@ module RHDL
       end
 
       def write(addr, value)
-        if addr < @ram.size
-          @ram[addr] = value & 0xFF
-          verilator_write_ram(addr, value & 0xFF)
-        end
+        # Use write_memory which handles both RAM and ROM addresses
+        write_memory(addr, value & 0xFF)
       end
 
       private
@@ -564,11 +564,28 @@ module RHDL
                   ctx->dut->eval();
               }
 
-              // Release reset and run more cycles to stabilize
+              // Release reset and run more cycles with memory bridging
+              // The CPU needs to read the reset vector from $FFFC-$FFFD
               ctx->dut->reset = 0;
               for (int i = 0; i < 100; i++) {
+                  // Falling edge
                   ctx->dut->clk_14m = 0;
                   ctx->dut->eval();
+
+                  // Memory bridging - provide data from RAM or ROM
+                  unsigned int ram_addr = ctx->dut->ram_addr;
+                  if (ram_addr >= 0xD000 && ram_addr <= 0xFFFF) {
+                      // ROM area
+                      unsigned int rom_offset = ram_addr - 0xD000;
+                      ctx->dut->ram_do = (rom_offset < sizeof(ctx->rom)) ? ctx->rom[rom_offset] : 0;
+                  } else if (ram_addr < sizeof(ctx->ram)) {
+                      ctx->dut->ram_do = ctx->ram[ram_addr];
+                  } else {
+                      ctx->dut->ram_do = 0;
+                  }
+                  ctx->dut->eval();
+
+                  // Rising edge
                   ctx->dut->clk_14m = 1;
                   ctx->dut->eval();
               }
