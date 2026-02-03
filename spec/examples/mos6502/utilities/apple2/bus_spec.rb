@@ -4,7 +4,7 @@ require 'spec_helper'
 require_relative '../../../../../examples/mos6502/utilities/apple2/harness'
 
 RSpec.describe 'Apple2Bus disk integration' do
-  let(:runner) { Apple2Harness::ISARunner.new }
+  let(:runner) { RHDL::Examples::MOS6502::Apple2Harness::ISARunner.new }
   let(:bus) { runner.bus }
   let(:disk_path) { File.join(__dir__, '../../../../../examples/mos6502/software/disks/karateka.dsk') }
 
@@ -15,7 +15,7 @@ RSpec.describe 'Apple2Bus disk integration' do
     end
 
     it 'exposes disk controller through bus' do
-      expect(bus.disk_controller).to be_a(MOS6502::Disk2)
+      expect(bus.disk_controller).to be_a(RHDL::Examples::MOS6502::Disk2)
     end
   end
 

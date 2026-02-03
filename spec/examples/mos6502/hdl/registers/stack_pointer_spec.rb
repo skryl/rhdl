@@ -2,7 +2,7 @@
 
 require_relative '../../spec_helper'
 
-RSpec.describe MOS6502::StackPointer do
+RSpec.describe RHDL::Examples::MOS6502::StackPointer do
   let(:sp) { described_class.new('test_sp') }
 
   describe 'simulation' do

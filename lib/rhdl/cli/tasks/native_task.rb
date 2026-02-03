@@ -17,7 +17,7 @@ module RHDL
             ext_dir: File.expand_path('examples/mos6502/utilities/simulators/isa_simulator_native', Config.project_root),
             crate_name: 'isa_simulator_native',
             load_path: 'examples/mos6502/utilities/simulators',
-            check_const: 'MOS6502::NATIVE_AVAILABLE'
+            check_const: 'RHDL::Examples::MOS6502::NATIVE_AVAILABLE'
           },
 
           # Gate-level netlist simulators (netlist backend)
@@ -212,7 +212,7 @@ module RHDL
           return unless key == :isa_simulator
 
           puts "  Creating test instance..."
-          cpu = MOS6502::ISASimulatorNative.new(nil)
+          cpu = RHDL::Examples::MOS6502::ISASimulatorNative.new(nil)
           puts "    PC: 0x#{cpu.pc.to_s(16).upcase}"
           puts "    A:  0x#{cpu.a.to_s(16).upcase}"
           puts "    X:  0x#{cpu.x.to_s(16).upcase}"

@@ -5,9 +5,11 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module MOS6502
-  # Data Latch - Synthesizable via Sequential DSL
-  class DataLatch < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module MOS6502
+      # Data Latch - Synthesizable via Sequential DSL
+      class DataLatch < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -23,5 +25,7 @@ module MOS6502
       data <= mux(load, data_in, data)
     end
 
+    end
   end
+end
 end

@@ -5,8 +5,10 @@ require_relative '../input/disk2'
 require_relative '../output/speaker'
 require_relative '../renderers/color_renderer'
 
-module MOS6502
-  class Apple2Bus < RHDL::HDL::Component
+module RHDL
+  module Examples
+    module MOS6502
+      class Apple2Bus < RHDL::HDL::Component
     IO_PAGE_START = 0xC000
     IO_PAGE_END = 0xC0FF
 
@@ -658,6 +660,8 @@ module MOS6502
       return source.bytes if source.is_a?(String)
 
       source
+    end
+      end
     end
   end
 end

@@ -5,9 +5,11 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module MOS6502
-  # 6502 Program Counter - Synthesizable via Sequential DSL
-  class ProgramCounter < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module MOS6502
+      # 6502 Program Counter - Synthesizable via Sequential DSL
+      class ProgramCounter < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -44,5 +46,7 @@ module MOS6502
     def read_pc; read_reg(:pc) || 0xFFFC; end
     def write_pc(v); write_reg(:pc, v & 0xFFFF); end
 
+    end
   end
+end
 end

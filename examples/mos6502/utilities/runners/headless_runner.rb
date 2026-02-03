@@ -9,8 +9,10 @@
 require_relative '../apple2/harness'
 require_relative 'isa_runner'
 
-module MOS6502
-  class HeadlessRunner
+module RHDL
+  module Examples
+    module MOS6502
+      class HeadlessRunner
     attr_reader :runner, :mode, :sim_backend
 
     # Create a headless runner with the specified options
@@ -24,16 +26,16 @@ module MOS6502
       @runner = case mode
                 when :isa
                   # ISA mode ignores --sim option
-                  Apple2Harness::ISARunner.new
+                  RHDL::Examples::MOS6502::Apple2Harness::ISARunner.new
                 when :hdl
                   # HDL mode uses IR-based simulators
                   require_relative 'ir_runner'
-                  IRSimulatorRunner.new(sim)
+                  RHDL::Examples::MOS6502::IRSimulatorRunner.new(sim)
                 when :netlist
                   raise "Netlist mode not yet implemented for MOS6502"
                 when :verilog
                   require_relative 'verilator_runner'
-                  MOS6502::VerilatorRunner.new
+                  RHDL::Examples::MOS6502::VerilatorRunner.new
                 else
                   raise "Unknown mode: #{mode}. Valid modes: isa, hdl, netlist, verilog"
                 end
@@ -214,6 +216,8 @@ module MOS6502
       runner.load_program_bytes(mem_data.first(48 * 1024), base_addr: 0x0000)
 
       runner
+    end
+      end
     end
   end
 end

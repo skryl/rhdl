@@ -42,7 +42,7 @@ module RHDL
           puts "Size: #{source.length} bytes"
           puts
 
-          assembler = MOS6502::Assembler.new
+          assembler = RHDL::Examples::MOS6502::Assembler.new
           bytes = assembler.assemble(source, 0xF800)
           puts "Assembled: #{bytes.length} bytes"
 

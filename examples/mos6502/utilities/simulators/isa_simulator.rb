@@ -4,8 +4,10 @@
 # Fast instruction-level simulator for performance-critical applications
 # Executes instructions directly without HDL simulation overhead
 
-module MOS6502
-  class ISASimulator
+module RHDL
+  module Examples
+    module MOS6502
+      class ISASimulator
     # Status flag bit positions
     FLAG_C = 0  # Carry
     FLAG_Z = 1  # Zero
@@ -640,6 +642,8 @@ module MOS6502
       end
 
       @cycles
+    end
+      end
     end
   end
 end

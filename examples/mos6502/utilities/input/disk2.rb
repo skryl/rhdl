@@ -1,8 +1,10 @@
 # Apple II Disk II Controller Emulation
 # Emulates the Disk II controller card for slot 6 (addresses $C0E0-$C0EF)
 
-module MOS6502
-  class Disk2
+module RHDL
+  module Examples
+    module MOS6502
+      class Disk2
     # Disk geometry constants
     TRACKS = 35
     SECTORS_PER_TRACK = 16
@@ -367,11 +369,13 @@ module MOS6502
     # Get the Disk II boot ROM for slot 6 ($C600-$C6FF)
     # Loads the real Apple II Disk II boot ROM (P5 - 341-0027)
     def self.boot_rom
-      rom_path = File.join(File.dirname(__FILE__), '../software/roms/disk2_boot.bin')
+      rom_path = File.join(File.dirname(__FILE__), '../../software/roms/disk2_boot.bin')
       if File.exist?(rom_path)
         return File.binread(rom_path).bytes
       end
       raise "Disk II boot ROM not found at #{rom_path}. Please download the real ROM."
+    end
+      end
     end
   end
 end

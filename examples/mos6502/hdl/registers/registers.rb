@@ -5,9 +5,11 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module MOS6502
-  # 8-bit General Purpose Registers (A, X, Y) - Synthesizable via Sequential DSL
-  class Registers < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module MOS6502
+      # 8-bit General Purpose Registers (A, X, Y) - Synthesizable via Sequential DSL
+      class Registers < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -40,5 +42,7 @@ module MOS6502
     def write_x(v); write_reg(:x, v & 0xFF); end
     def write_y(v); write_reg(:y, v & 0xFF); end
 
+    end
   end
+end
 end

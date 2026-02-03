@@ -223,14 +223,14 @@ module RHDL
           puts
 
           # Generate IR once for all runners
-          print "Generating MOS6502::CPU IR... "
+          print "Generating RHDL::Examples::MOS6502::CPU IR... "
           $stdout.flush
 
           require_relative '../../../../examples/mos6502/hdl/cpu'
           require_relative '../../../../examples/mos6502/utilities/apple2/bus'
 
           ir_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          ir = MOS6502::CPU.to_flat_ir
+          ir = RHDL::Examples::MOS6502::CPU.to_flat_ir
           ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
           ir_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - ir_start
           puts "done (#{format('%.3f', ir_elapsed)}s)"
@@ -287,9 +287,9 @@ module RHDL
 
               if is_verilator
                 require_relative '../../../../examples/mos6502/utilities/runners/verilator_runner'
-                sim = MOS6502::VerilatorRunner.new
+                sim = RHDL::Examples::MOS6502::VerilatorRunner.new
               else
-                bus = MOS6502::Apple2Bus.new("bench_bus")
+                bus = RHDL::Examples::MOS6502::Apple2Bus.new("bench_bus")
 
                 sim = case runner[:backend]
                 when :interpreter

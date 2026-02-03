@@ -1,8 +1,10 @@
 # Apple II Speaker Emulation
 # Generates audio from speaker toggle events at $C030
 
-module MOS6502
-  class Apple2Speaker
+module RHDL
+  module Examples
+    module MOS6502
+      class Apple2Speaker
     # Audio sample rate (standard)
     SAMPLE_RATE = 22050
 
@@ -385,6 +387,8 @@ module MOS6502
 
     def self.available?
       true
+    end
+      end
     end
   end
 end
