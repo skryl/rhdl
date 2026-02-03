@@ -4,7 +4,7 @@ require 'spec_helper'
 
 # Load the runner utilities
 require_relative '../../../examples/mos6502/utilities/apple2/bus'
-require_relative '../../../examples/mos6502/utilities/isa_simulator'
+require_relative '../../../examples/mos6502/utilities/simulators/isa_simulator'
 require_relative '../../../examples/mos6502/utilities/runners/isa_runner'
 require_relative '../../../examples/mos6502/utilities/renderers/color_renderer'
 

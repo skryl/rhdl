@@ -12,7 +12,7 @@ $LOAD_PATH.unshift File.expand_path('../utilities', __dir__)
 
 require 'rhdl'
 require_relative '../utilities/apple2/harness'
-require_relative '../utilities/isa_simulator'
+require_relative '../utilities/simulators/isa_simulator'
 require_relative '../utilities/runners/isa_runner'
 require_relative '../utilities/runners/ir_runner'
 require_relative '../utilities/renderers/color_renderer'

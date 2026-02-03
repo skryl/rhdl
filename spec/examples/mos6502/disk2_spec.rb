@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require_relative '../../../examples/mos6502/utilities/disk2'
+require_relative '../../../examples/mos6502/utilities/input/disk2'
 
 RSpec.describe MOS6502::Disk2 do
   let(:disk) { described_class.new }
