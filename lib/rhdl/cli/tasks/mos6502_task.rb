@@ -24,6 +24,48 @@ module RHDL
           end
         end
 
+        # Create a headless runner with the configured options
+        # @return [MOS6502::HeadlessRunner] Initialized runner ready for use
+        def create_runner
+          require File.join(Config.project_root, 'examples/mos6502/utilities/headless_runner')
+
+          mode = options[:mode] || :isa
+          sim = options[:sim] || :jit
+
+          runner = MOS6502::HeadlessRunner.new(mode: mode, sim: sim)
+
+          # Load ROM if specified
+          if options[:rom]
+            rom_address = options[:rom_address] ? options[:rom_address].to_i(16) : 0xF800
+            runner.load_rom(options[:rom], base_addr: rom_address)
+          end
+
+          # Load program if specified
+          if options[:program]
+            load_address = options[:address] ? options[:address].to_i(16) : 0x0800
+            runner.load_program(options[:program], base_addr: load_address)
+            entry = options[:entry] ? options[:entry].to_i(16) : load_address
+            runner.setup_reset_vector(entry)
+          end
+
+          # Load disk if specified
+          runner.load_disk(options[:disk], drive: 0) if options[:disk]
+          runner.load_disk(options[:disk2], drive: 1) if options[:disk2]
+
+          runner
+        end
+
+        # Create a headless runner with demo program loaded
+        # @return [MOS6502::HeadlessRunner] Runner with demo program
+        def create_demo_runner
+          require File.join(Config.project_root, 'examples/mos6502/utilities/headless_runner')
+
+          mode = options[:mode] || :isa
+          sim = options[:sim] || :jit
+
+          MOS6502::HeadlessRunner.with_demo(mode: mode, sim: sim)
+        end
+
         # Build the mini monitor ROM
         def build_rom
           require File.join(Config.project_root, 'examples/mos6502/utilities/assembler')
