@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require_relative '../../../examples/mos6502/utilities/input/disk2'
+require_relative '../../../../../examples/mos6502/utilities/input/disk2'
 
 RSpec.describe MOS6502::Disk2 do
   let(:disk) { described_class.new }
-  let(:disk_path) { File.join(__dir__, '../../../examples/mos6502/software/disks/karateka.dsk') }
+  let(:disk_path) { File.join(__dir__, '../../../../../examples/mos6502/software/disks/karateka.dsk') }
 
   describe '#initialize' do
     it 'starts with motor off' do

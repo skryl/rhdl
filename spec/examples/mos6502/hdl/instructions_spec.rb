@@ -1,5 +1,5 @@
-require_relative 'spec_helper'
-require_relative '../../../examples/mos6502/hdl/harness'
+require_relative '../spec_helper'
+require_relative '../../../../examples/mos6502/hdl/harness'
 
 RSpec.describe 'MOS6502 Instructions' do
   let(:cpu) { MOS6502::Harness.new }
