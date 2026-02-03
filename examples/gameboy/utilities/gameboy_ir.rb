@@ -367,6 +367,11 @@ module RHDL
         renderer.render_braille(read_framebuffer)
       end
 
+      def render_lcd_color(chars_wide: 80, invert: false)
+        renderer = LcdRenderer.new(chars_wide: chars_wide, invert: invert)
+        renderer.render_color(read_framebuffer)
+      end
+
       def safe_peek(name)
         peek_output(name)
       rescue StandardError
