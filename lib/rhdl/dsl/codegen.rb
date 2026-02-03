@@ -53,16 +53,16 @@ module RHDL
         alias_method :to_firrtl_hierarchy, :to_circt_hierarchy
 
         # Returns the Verilog module name for this component
-        # Derived from the class's full module path, filtering out RHDL/HDL namespaces
+        # Derived from the class's full module path, filtering out RHDL/HDL/Examples namespaces
         # Examples:
         #   RHDL::HDL::RAM => "ram"
-        #   MOS6502::ALU => "mos6502_alu"
-        #   RISCV::Decoder => "riscv_decoder"
+        #   RHDL::Examples::MOS6502::ALU => "mos6502_alu"
+        #   RHDL::Examples::RISCV::Decoder => "riscv_decoder"
         # @return [String] The module name used in generated Verilog
         def verilog_module_name
           parts = self.name.split('::')
-          # Filter out RHDL and HDL namespace modules
-          filtered = parts.reject { |p| %w[RHDL HDL].include?(p) }
+          # Filter out RHDL, HDL, and Examples namespace modules
+          filtered = parts.reject { |p| %w[RHDL HDL Examples].include?(p) }
           # Convert each part to snake_case and join with underscore
           filtered.map { |p| p.underscore }.join('_')
         end

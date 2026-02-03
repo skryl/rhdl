@@ -6,7 +6,7 @@ require 'tempfile'
 # Load the headless runner using require_relative
 require_relative '../../../../../examples/mos6502/utilities/runners/headless_runner'
 
-RSpec.describe MOS6502::HeadlessRunner, :slow do
+RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner, :slow do
   let(:demo_program) { [0xA9, 0x42, 0x00] }  # LDA #$42, BRK
 
   # Helper to create a temp binary file with test program

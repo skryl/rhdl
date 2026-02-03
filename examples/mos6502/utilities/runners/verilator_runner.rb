@@ -8,7 +8,7 @@
 # FFI overhead.
 #
 # Usage:
-#   runner = MOS6502::VerilatorRunner.new
+#   runner = RHDL::Examples::MOS6502::VerilatorRunner.new
 #   runner.load_program([0xA9, 0x42, 0x00], 0x8000)  # LDA #$42; BRK
 #   runner.reset
 #   runner.run_cycles(100)
@@ -21,10 +21,12 @@ require 'fiddle'
 require 'fiddle/import'
 require 'rbconfig'
 
-module MOS6502
-  # Verilator-based runner for MOS 6502 simulation
-  # Compiles RHDL Verilog export to native code via Verilator
-  class VerilatorRunner
+module RHDL
+  module Examples
+    module MOS6502
+      # Verilator-based runner for MOS 6502 simulation
+      # Compiles RHDL Verilog export to native code via Verilator
+      class VerilatorRunner
     # Build directory for Verilator output
     BUILD_DIR = File.expand_path('../../../.verilator_build_6502', __dir__)
     VERILOG_DIR = File.join(BUILD_DIR, 'verilog')
@@ -345,7 +347,7 @@ module MOS6502
       all_verilog = []
 
       # Main CPU
-      all_verilog << MOS6502::CPU.to_verilog
+      all_verilog << RHDL::Examples::MOS6502::CPU.to_verilog
 
       # Subcomponents
       [Registers, StatusRegister, ProgramCounter, StackPointer,
@@ -863,6 +865,8 @@ module MOS6502
     def verilator_write_memory(addr, value)
       return unless @sim_ctx
       @sim_write_memory_fn.call(@sim_ctx, addr, value)
+    end
+      end
     end
   end
 end

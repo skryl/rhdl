@@ -2,7 +2,7 @@
 
 require_relative '../../spec_helper'
 
-RSpec.describe MOS6502::AddressLatch do
+RSpec.describe RHDL::Examples::MOS6502::AddressLatch do
   let(:latch) { described_class.new('test_addr_latch') }
 
   describe 'simulation' do

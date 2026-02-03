@@ -5,8 +5,10 @@
 require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
 
-module MOS6502
-  class ALU < RHDL::HDL::Component
+module RHDL
+  module Examples
+    module MOS6502
+      class ALU < RHDL::HDL::Component
     include RHDL::DSL::Behavior
 
     # ALU Operation codes
@@ -191,5 +193,7 @@ module MOS6502
       }, default: 0)
     end
 
+    end
   end
+end
 end

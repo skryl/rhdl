@@ -3,7 +3,7 @@
 require 'spec_helper'
 require_relative '../../../../../examples/mos6502/utilities/input/disk2'
 
-RSpec.describe MOS6502::Disk2 do
+RSpec.describe RHDL::Examples::MOS6502::Disk2 do
   let(:disk) { described_class.new }
   let(:disk_path) { File.join(__dir__, '../../../../../examples/mos6502/software/disks/karateka.dsk') }
 

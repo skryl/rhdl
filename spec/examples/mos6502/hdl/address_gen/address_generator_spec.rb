@@ -2,7 +2,7 @@
 
 require_relative '../../spec_helper'
 
-RSpec.describe MOS6502::AddressGenerator do
+RSpec.describe RHDL::Examples::MOS6502::AddressGenerator do
   let(:ag) { described_class.new('test_ag') }
 
   describe 'simulation' do
@@ -20,7 +20,7 @@ RSpec.describe MOS6502::AddressGenerator do
     end
 
     it 'computes zero page address' do
-      ag.set_input(:mode, MOS6502::AddressGenerator::MODE_ZERO_PAGE)
+      ag.set_input(:mode, RHDL::Examples::MOS6502::AddressGenerator::MODE_ZERO_PAGE)
       ag.set_input(:operand_lo, 0x80)
       ag.propagate
 
@@ -29,7 +29,7 @@ RSpec.describe MOS6502::AddressGenerator do
     end
 
     it 'computes absolute address' do
-      ag.set_input(:mode, MOS6502::AddressGenerator::MODE_ABSOLUTE)
+      ag.set_input(:mode, RHDL::Examples::MOS6502::AddressGenerator::MODE_ABSOLUTE)
       ag.set_input(:operand_lo, 0x34)
       ag.set_input(:operand_hi, 0x12)
       ag.propagate
@@ -38,7 +38,7 @@ RSpec.describe MOS6502::AddressGenerator do
     end
 
     it 'computes zero page X indexed address' do
-      ag.set_input(:mode, MOS6502::AddressGenerator::MODE_ZERO_PAGE_X)
+      ag.set_input(:mode, RHDL::Examples::MOS6502::AddressGenerator::MODE_ZERO_PAGE_X)
       ag.set_input(:operand_lo, 0x80)
       ag.set_input(:x_reg, 0x10)
       ag.propagate
@@ -48,7 +48,7 @@ RSpec.describe MOS6502::AddressGenerator do
     end
 
     it 'computes absolute X indexed address' do
-      ag.set_input(:mode, MOS6502::AddressGenerator::MODE_ABSOLUTE_X)
+      ag.set_input(:mode, RHDL::Examples::MOS6502::AddressGenerator::MODE_ABSOLUTE_X)
       ag.set_input(:operand_lo, 0x00)
       ag.set_input(:operand_hi, 0x10)
       ag.set_input(:x_reg, 0x20)
@@ -58,7 +58,7 @@ RSpec.describe MOS6502::AddressGenerator do
     end
 
     it 'computes stack address' do
-      ag.set_input(:mode, MOS6502::AddressGenerator::MODE_STACK)
+      ag.set_input(:mode, RHDL::Examples::MOS6502::AddressGenerator::MODE_STACK)
       ag.set_input(:sp, 0xFD)
       ag.propagate
 
@@ -106,22 +106,22 @@ RSpec.describe MOS6502::AddressGenerator do
         base_inputs = { operand_lo: 0, operand_hi: 0, x_reg: 0, y_reg: 0, pc: 0, sp: 0xFF, indirect_lo: 0, indirect_hi: 0 }
 
         # Test zero page mode
-        behavior.set_input(:mode, MOS6502::AddressGenerator::MODE_ZERO_PAGE)
+        behavior.set_input(:mode, RHDL::Examples::MOS6502::AddressGenerator::MODE_ZERO_PAGE)
         behavior.set_input(:operand_lo, 0x80)
         base_inputs.each { |k, v| behavior.set_input(k, v) unless k == :mode || k == :operand_lo }
         behavior.propagate
         vectors << {
-          inputs: base_inputs.merge(mode: MOS6502::AddressGenerator::MODE_ZERO_PAGE, operand_lo: 0x80),
+          inputs: base_inputs.merge(mode: RHDL::Examples::MOS6502::AddressGenerator::MODE_ZERO_PAGE, operand_lo: 0x80),
           expected: { eff_addr: behavior.get_output(:eff_addr), is_zero_page: behavior.get_output(:is_zero_page), page_cross: behavior.get_output(:page_cross) }
         }
 
         # Test absolute mode
-        behavior.set_input(:mode, MOS6502::AddressGenerator::MODE_ABSOLUTE)
+        behavior.set_input(:mode, RHDL::Examples::MOS6502::AddressGenerator::MODE_ABSOLUTE)
         behavior.set_input(:operand_lo, 0x34)
         behavior.set_input(:operand_hi, 0x12)
         behavior.propagate
         vectors << {
-          inputs: base_inputs.merge(mode: MOS6502::AddressGenerator::MODE_ABSOLUTE, operand_lo: 0x34, operand_hi: 0x12),
+          inputs: base_inputs.merge(mode: RHDL::Examples::MOS6502::AddressGenerator::MODE_ABSOLUTE, operand_lo: 0x34, operand_hi: 0x12),
           expected: { eff_addr: behavior.get_output(:eff_addr), is_zero_page: behavior.get_output(:is_zero_page), page_cross: behavior.get_output(:page_cross) }
         }
 
@@ -173,22 +173,22 @@ RSpec.describe MOS6502::AddressGenerator do
         base_inputs = { operand_lo: 0, operand_hi: 0, x_reg: 0, y_reg: 0, pc: 0, sp: 0xFF, indirect_lo: 0, indirect_hi: 0 }
 
         # Test zero page mode
-        behavior.set_input(:mode, MOS6502::AddressGenerator::MODE_ZERO_PAGE)
+        behavior.set_input(:mode, RHDL::Examples::MOS6502::AddressGenerator::MODE_ZERO_PAGE)
         behavior.set_input(:operand_lo, 0x80)
         base_inputs.each { |k, v| behavior.set_input(k, v) unless k == :mode || k == :operand_lo }
         behavior.propagate
         vectors << {
-          inputs: base_inputs.merge(mode: MOS6502::AddressGenerator::MODE_ZERO_PAGE, operand_lo: 0x80),
+          inputs: base_inputs.merge(mode: RHDL::Examples::MOS6502::AddressGenerator::MODE_ZERO_PAGE, operand_lo: 0x80),
           expected: { eff_addr: behavior.get_output(:eff_addr), is_zero_page: behavior.get_output(:is_zero_page), page_cross: behavior.get_output(:page_cross) }
         }
 
         # Test absolute mode
-        behavior.set_input(:mode, MOS6502::AddressGenerator::MODE_ABSOLUTE)
+        behavior.set_input(:mode, RHDL::Examples::MOS6502::AddressGenerator::MODE_ABSOLUTE)
         behavior.set_input(:operand_lo, 0x34)
         behavior.set_input(:operand_hi, 0x12)
         behavior.propagate
         vectors << {
-          inputs: base_inputs.merge(mode: MOS6502::AddressGenerator::MODE_ABSOLUTE, operand_lo: 0x34, operand_hi: 0x12),
+          inputs: base_inputs.merge(mode: RHDL::Examples::MOS6502::AddressGenerator::MODE_ABSOLUTE, operand_lo: 0x34, operand_hi: 0x12),
           expected: { eff_addr: behavior.get_output(:eff_addr), is_zero_page: behavior.get_output(:is_zero_page), page_cross: behavior.get_output(:page_cross) }
         }
 

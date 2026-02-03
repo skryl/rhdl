@@ -6,8 +6,10 @@ require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
 require_relative 'alu'
 
-module MOS6502
-  class InstructionDecoder < RHDL::HDL::Component
+module RHDL
+  module Examples
+    module MOS6502
+      class InstructionDecoder < RHDL::HDL::Component
     include RHDL::DSL::Behavior
     # Instruction types
     TYPE_ALU       = 0x00
@@ -390,5 +392,7 @@ module MOS6502
       illegal <= case_select(opcode, DECODE_CASES[:addr_mode].transform_values { 0 }, default: 1)
     end
 
+    end
   end
+end
 end

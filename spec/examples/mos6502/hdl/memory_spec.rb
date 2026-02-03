@@ -1,8 +1,8 @@
 require_relative '../spec_helper'
 require_relative '../../../../examples/mos6502/hdl/memory'
 
-RSpec.describe MOS6502::Memory do
-  let(:mem) { MOS6502::Memory.new }
+RSpec.describe RHDL::Examples::MOS6502::Memory do
+  let(:mem) { RHDL::Examples::MOS6502::Memory.new }
 
   it 'reads and writes RAM' do
     mem.write(0x0000, 0x42)
@@ -26,12 +26,12 @@ RSpec.describe MOS6502::Memory do
 
   describe 'synthesis' do
     it 'generates valid Verilog' do
-      verilog = MOS6502::Memory.to_verilog
+      verilog = RHDL::Examples::MOS6502::Memory.to_verilog
       expect(verilog).to include('module mos6502_memory')
     end
 
     it 'generates valid FIRRTL' do
-      firrtl = MOS6502::Memory.to_circt
+      firrtl = RHDL::Examples::MOS6502::Memory.to_circt
       expect(firrtl).to include('FIRRTL version')
       expect(firrtl).to include('circuit mos6502_memory')
       expect(firrtl).to include('input clk')
@@ -41,7 +41,7 @@ RSpec.describe MOS6502::Memory do
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
       it 'firtool can compile FIRRTL to Verilog' do
         result = CirctHelper.validate_firrtl_syntax(
-          MOS6502::Memory,
+          RHDL::Examples::MOS6502::Memory,
           base_dir: 'tmp/circt_test/mos6502_memory'
         )
 
@@ -54,7 +54,7 @@ RSpec.describe MOS6502::Memory do
     # Memory uses behavior RAM which cannot be lowered to primitive gates
     # Gate-level synthesis is not supported for memory components
     it 'is not supported for behavior memory' do
-      component = MOS6502::Memory.new('mos6502_memory')
+      component = RHDL::Examples::MOS6502::Memory.new('mos6502_memory')
       expect {
         RHDL::Export::Structure::Lower.from_components([component], name: 'mos6502_memory')
       }.to raise_error(ArgumentError, /Unsupported component/)

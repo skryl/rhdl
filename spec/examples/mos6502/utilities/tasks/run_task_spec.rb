@@ -3,7 +3,7 @@
 require 'spec_helper'
 require_relative '../../../../../examples/mos6502/utilities/tasks/run_task'
 
-RSpec.describe MOS6502::Tasks::RunTask do
+RSpec.describe RHDL::Examples::MOS6502::Tasks::RunTask do
   describe '#initialize' do
     it 'accepts options hash' do
       task = described_class.new(mode: :isa, sim: :jit)
@@ -23,7 +23,7 @@ RSpec.describe MOS6502::Tasks::RunTask do
 
     it 'creates HeadlessRunner internally' do
       task = described_class.new(mode: :isa)
-      expect(task.runner).to be_a(MOS6502::HeadlessRunner)
+      expect(task.runner).to be_a(RHDL::Examples::MOS6502::HeadlessRunner)
     end
   end
 
@@ -101,7 +101,7 @@ RSpec.describe MOS6502::Tasks::RunTask do
   end
 end
 
-RSpec.describe MOS6502::HeadlessRunner do
+RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner do
   describe '.create_demo_program' do
     let(:program) { described_class.create_demo_program }
 

@@ -12,13 +12,17 @@ require_relative 'registers/instruction_register'
 require_relative 'registers/address_latch'
 require_relative 'registers/data_latch'
 
-module MOS6502
-  # Register selection constants
-  REG_A = 0
-  REG_X = 1
-  REG_Y = 2
+module RHDL
+  module Examples
+    module MOS6502
+      # Register selection constants
+      REG_A = 0
+      REG_X = 1
+      REG_Y = 2
 
-  # Aliases for backward compatibility
-  StackPointer6502 = StackPointer
-  ProgramCounter6502 = ProgramCounter
+      # Aliases for backward compatibility
+      StackPointer6502 = StackPointer
+      ProgramCounter6502 = ProgramCounter
+    end
+  end
 end

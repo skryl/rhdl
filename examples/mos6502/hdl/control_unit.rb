@@ -6,8 +6,10 @@ require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
 require_relative '../../../lib/rhdl/dsl/sequential'
 
-module MOS6502
-  class ControlUnit < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module MOS6502
+      class ControlUnit < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
     # CPU States (same as original)
@@ -916,5 +918,7 @@ module MOS6502
       VERILOG
     end
 
+    end
   end
+end
 end

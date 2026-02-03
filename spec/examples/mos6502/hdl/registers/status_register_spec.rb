@@ -2,7 +2,7 @@
 
 require_relative '../../spec_helper'
 
-RSpec.describe MOS6502::StatusRegister do
+RSpec.describe RHDL::Examples::MOS6502::StatusRegister do
   let(:sr) { described_class.new('test_sr') }
 
   describe 'simulation' do

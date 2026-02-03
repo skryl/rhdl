@@ -3,7 +3,7 @@
 require_relative '../../spec_helper'
 require_relative '../../../../../examples/mos6502/utilities/output/speaker'
 
-RSpec.describe MOS6502::Apple2Speaker do
+RSpec.describe RHDL::Examples::MOS6502::Apple2Speaker do
   subject(:speaker) { described_class.new }
 
   describe '#initialize' do
@@ -175,7 +175,7 @@ RSpec.describe MOS6502::Apple2Speaker do
   end
 end
 
-RSpec.describe MOS6502::Apple2SpeakerBeep do
+RSpec.describe RHDL::Examples::MOS6502::Apple2SpeakerBeep do
   subject(:speaker) { described_class.new }
 
   describe '#initialize' do

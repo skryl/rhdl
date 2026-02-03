@@ -206,19 +206,19 @@ module RHDL
 
       # Example components with to_verilog methods
       EXAMPLE_COMPONENTS = {
-        'mos6502/mos6502_registers' => ['examples/mos6502/hdl/registers/registers', 'MOS6502::Registers'],
-        'mos6502/mos6502_stack_pointer' => ['examples/mos6502/hdl/registers/stack_pointer', 'MOS6502::StackPointer'],
-        'mos6502/mos6502_program_counter' => ['examples/mos6502/hdl/registers/program_counter', 'MOS6502::ProgramCounter'],
-        'mos6502/mos6502_instruction_register' => ['examples/mos6502/hdl/registers/instruction_register', 'MOS6502::InstructionRegister'],
-        'mos6502/mos6502_address_latch' => ['examples/mos6502/hdl/registers/address_latch', 'MOS6502::AddressLatch'],
-        'mos6502/mos6502_data_latch' => ['examples/mos6502/hdl/registers/data_latch', 'MOS6502::DataLatch'],
-        'mos6502/mos6502_status_register' => ['examples/mos6502/hdl/registers/status_register', 'MOS6502::StatusRegister'],
-        'mos6502/mos6502_address_generator' => ['examples/mos6502/hdl/address_gen/address_generator', 'MOS6502::AddressGenerator'],
-        'mos6502/mos6502_indirect_addr_calc' => ['examples/mos6502/hdl/address_gen/indirect_address_calc', 'MOS6502::IndirectAddressCalc'],
-        'mos6502/mos6502_alu' => ['examples/mos6502/hdl/alu', 'MOS6502::ALU'],
-        'mos6502/mos6502_instruction_decoder' => ['examples/mos6502/hdl/instruction_decoder', 'MOS6502::InstructionDecoder'],
-        'mos6502/mos6502_control_unit' => ['examples/mos6502/hdl/control_unit', 'MOS6502::ControlUnit'],
-        'mos6502/mos6502_memory' => ['examples/mos6502/hdl/memory', 'MOS6502::Memory']
+        'mos6502/mos6502_registers' => ['examples/mos6502/hdl/registers/registers', 'RHDL::Examples::MOS6502::Registers'],
+        'mos6502/mos6502_stack_pointer' => ['examples/mos6502/hdl/registers/stack_pointer', 'RHDL::Examples::MOS6502::StackPointer'],
+        'mos6502/mos6502_program_counter' => ['examples/mos6502/hdl/registers/program_counter', 'RHDL::Examples::MOS6502::ProgramCounter'],
+        'mos6502/mos6502_instruction_register' => ['examples/mos6502/hdl/registers/instruction_register', 'RHDL::Examples::MOS6502::InstructionRegister'],
+        'mos6502/mos6502_address_latch' => ['examples/mos6502/hdl/registers/address_latch', 'RHDL::Examples::MOS6502::AddressLatch'],
+        'mos6502/mos6502_data_latch' => ['examples/mos6502/hdl/registers/data_latch', 'RHDL::Examples::MOS6502::DataLatch'],
+        'mos6502/mos6502_status_register' => ['examples/mos6502/hdl/registers/status_register', 'RHDL::Examples::MOS6502::StatusRegister'],
+        'mos6502/mos6502_address_generator' => ['examples/mos6502/hdl/address_gen/address_generator', 'RHDL::Examples::MOS6502::AddressGenerator'],
+        'mos6502/mos6502_indirect_addr_calc' => ['examples/mos6502/hdl/address_gen/indirect_address_calc', 'RHDL::Examples::MOS6502::IndirectAddressCalc'],
+        'mos6502/mos6502_alu' => ['examples/mos6502/hdl/alu', 'RHDL::Examples::MOS6502::ALU'],
+        'mos6502/mos6502_instruction_decoder' => ['examples/mos6502/hdl/instruction_decoder', 'RHDL::Examples::MOS6502::InstructionDecoder'],
+        'mos6502/mos6502_control_unit' => ['examples/mos6502/hdl/control_unit', 'RHDL::Examples::MOS6502::ControlUnit'],
+        'mos6502/mos6502_memory' => ['examples/mos6502/hdl/memory', 'RHDL::Examples::MOS6502::Memory']
       }.freeze
 
       # Instantiate a component by name
