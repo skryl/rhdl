@@ -266,4 +266,281 @@ RSpec.describe MOS6502::HeadlessRunner do
       expect(state[:cycles]).to be > 0
     end
   end
+
+  describe 'Karateka PC progression' do
+    # Helper to categorize PC into memory regions
+    def pc_region(pc)
+      case pc
+      when 0x0000..0x01FF then :zp_stack
+      when 0x0200..0x03FF then :input_buf
+      when 0x0400..0x07FF then :text
+      when 0x0800..0x1FFF then :user
+      when 0x2000..0x3FFF then :hires1
+      when 0x4000..0x5FFF then :hires2
+      when 0x6000..0xBFFF then :high_ram
+      when 0xC000..0xCFFF then :io
+      when 0xD000..0xFFFF then :rom
+      else :unknown
+      end
+    end
+
+    # Game regions where Karateka executes (including IO for soft switch access)
+    GAME_REGIONS = [:rom, :high_ram, :user, :zp_stack, :io].freeze
+
+    # Cycles to run for each test
+    KARATEKA_TEST_CYCLES = 10_000
+
+    before(:all) do
+      @karateka_available = described_class.karateka_available?
+      @verilator_available = described_class.verilator_available?
+    end
+
+    shared_examples 'karateka pc progression' do |mode, sim, cycles|
+      it "advances PC through game regions with #{mode}/#{sim}" do
+        skip 'Karateka resources not available' unless @karateka_available
+
+        begin
+          runner = described_class.with_karateka(mode: mode, sim: sim)
+        rescue LoadError, StandardError => e
+          skip "Backend not available: #{e.message}"
+        end
+
+        runner.reset
+
+        # Collect PC samples
+        pc_samples = []
+        regions_visited = Set.new
+
+        # Run in batches, sampling PC
+        (cycles / 1000).times do
+          runner.run_steps(1000)
+          pc = runner.cpu_state[:pc]
+          pc_samples << pc
+          regions_visited << pc_region(pc)
+        end
+
+        # Verify PC changed (not stuck)
+        unique_pcs = pc_samples.uniq
+        expect(unique_pcs.length).to be > 1,
+          "PC should change during execution, but stayed at #{pc_samples.first.to_s(16)}"
+
+        # Verify visited game regions
+        game_regions_visited = regions_visited & GAME_REGIONS.to_set
+        expect(game_regions_visited).not_to be_empty,
+          "Should visit game regions #{GAME_REGIONS}, but only visited #{regions_visited.to_a}"
+      end
+    end
+
+    context 'with isa backend' do
+      include_examples 'karateka pc progression', :isa, :jit, 10_000
+    end
+
+    context 'with hdl/jit backend' do
+      include_examples 'karateka pc progression', :hdl, :jit, 10_000
+    end
+
+    context 'with hdl/compile backend' do
+      include_examples 'karateka pc progression', :hdl, :compile, 10_000
+    end
+
+    context 'with verilator backend' do
+      it 'advances PC through game regions with verilator' do
+        skip 'Karateka resources not available' unless @karateka_available
+        skip 'Verilator not available' unless @verilator_available
+
+        begin
+          runner = described_class.with_karateka(mode: :verilog)
+        rescue LoadError, StandardError => e
+          skip "Verilator backend not available: #{e.message}"
+        end
+
+        runner.reset
+
+        # Collect PC samples
+        pc_samples = []
+        regions_visited = Set.new
+
+        10.times do
+          runner.run_steps(1000)
+          pc = runner.cpu_state[:pc]
+          pc_samples << pc
+          regions_visited << pc_region(pc)
+        end
+
+        # Verify PC changed
+        unique_pcs = pc_samples.uniq
+        expect(unique_pcs.length).to be > 1,
+          "PC should change during execution, but stayed at #{pc_samples.first.to_s(16)}"
+
+        # Verify visited game regions
+        game_regions_visited = regions_visited & GAME_REGIONS.to_set
+        expect(game_regions_visited).not_to be_empty,
+          "Should visit game regions #{GAME_REGIONS}, but only visited #{regions_visited.to_a}"
+      end
+    end
+
+    context 'cross-backend comparison' do
+      # Sample interval for PC collection
+      SAMPLE_INTERVAL = 500
+      TOTAL_SAMPLES = 20
+
+      # Helper to collect PC and opcode sequences from a backend
+      def collect_sequences(runner, samples: TOTAL_SAMPLES, interval: SAMPLE_INTERVAL)
+        runner.reset
+        pc_sequence = []
+        opcode_sequence = []
+
+        samples.times do
+          runner.run_steps(interval)
+          pc = runner.cpu_state[:pc]
+          pc_sequence << pc
+          # Read opcode at current PC
+          opcode = runner.read(pc) & 0xFF
+          opcode_sequence << opcode
+        end
+
+        {
+          pcs: pc_sequence,
+          opcodes: opcode_sequence,
+          final_pc: pc_sequence.last
+        }
+      end
+
+      # Helper to run all backends and collect sequences
+      def run_all_backends_with_sequences(samples: TOTAL_SAMPLES, interval: SAMPLE_INTERVAL)
+        results = {}
+
+        backends = [
+          [:isa, :jit],
+          [:hdl, :jit],
+          [:hdl, :compile]
+        ]
+
+        backends.each do |mode, sim|
+          begin
+            runner = described_class.with_karateka(mode: mode, sim: sim)
+            results["#{mode}/#{sim}"] = collect_sequences(runner, samples: samples, interval: interval)
+          rescue LoadError, StandardError
+            next
+          end
+        end
+
+        # Add verilator if available
+        if @verilator_available
+          begin
+            runner = described_class.with_karateka(mode: :verilog)
+            results['verilog'] = collect_sequences(runner, samples: samples, interval: interval)
+          rescue LoadError, StandardError
+            # Skip if verilator fails
+          end
+        end
+
+        results
+      end
+
+      it 'all backends have identical PC sequences' do
+        skip 'Karateka resources not available' unless @karateka_available
+
+        results = run_all_backends_with_sequences
+        skip 'No backends available for comparison' if results.length < 2
+
+        backend_names = results.keys
+        reference = backend_names.first
+        ref_pcs = results[reference][:pcs]
+
+        puts "\nPC sequence comparison:"
+        puts "  Reference: #{reference}"
+        puts "    PCs: #{ref_pcs.map { |pc| '$' + pc.to_s(16).upcase }.join(', ')}"
+
+        backend_names[1..].each do |backend|
+          pcs = results[backend][:pcs]
+          puts "  #{backend}:"
+          puts "    PCs: #{pcs.map { |pc| '$' + pc.to_s(16).upcase }.join(', ')}"
+
+          # All backends should have identical PC sequences
+          expect(pcs).to eq(ref_pcs),
+            "#{backend} PC sequence differs from #{reference}"
+        end
+      end
+
+      it 'all backends have identical opcode sequences' do
+        skip 'Karateka resources not available' unless @karateka_available
+
+        results = run_all_backends_with_sequences
+        skip 'No backends available for comparison' if results.length < 2
+
+        backend_names = results.keys
+        reference = backend_names.first
+        ref_opcodes = results[reference][:opcodes]
+
+        puts "\nOpcode sequence comparison:"
+        puts "  Reference: #{reference}"
+        puts "    Opcodes: #{ref_opcodes.map { |op| '$' + op.to_s(16).upcase.rjust(2, '0') }.join(', ')}"
+
+        backend_names[1..].each do |backend|
+          opcodes = results[backend][:opcodes]
+          puts "  #{backend}:"
+          puts "    Opcodes: #{opcodes.map { |op| '$' + op.to_s(16).upcase.rjust(2, '0') }.join(', ')}"
+
+          # All backends should have identical opcode sequences
+          expect(opcodes).to eq(ref_opcodes),
+            "#{backend} opcode sequence differs from #{reference}"
+        end
+      end
+
+      it 'detects first divergence point between backends' do
+        skip 'Karateka resources not available' unless @karateka_available
+
+        results = run_all_backends_with_sequences
+        skip 'Need at least 2 backends for comparison' if results.length < 2
+
+        backend_names = results.keys
+        divergences = []
+
+        backend_names.combination(2).each do |a, b|
+          pcs_a = results[a][:pcs]
+          pcs_b = results[b][:pcs]
+          opcodes_a = results[a][:opcodes]
+          opcodes_b = results[b][:opcodes]
+
+          # Find first PC divergence
+          first_pc_diff = pcs_a.zip(pcs_b).find_index { |pa, pb| pa != pb }
+
+          # Find first opcode divergence
+          first_op_diff = opcodes_a.zip(opcodes_b).find_index { |oa, ob| oa != ob }
+
+          divergences << {
+            backends: [a, b],
+            first_pc_diff: first_pc_diff,
+            first_op_diff: first_op_diff,
+            pcs_at_diff: first_pc_diff ? [pcs_a[first_pc_diff], pcs_b[first_pc_diff]] : nil,
+            ops_at_diff: first_op_diff ? [opcodes_a[first_op_diff], opcodes_b[first_op_diff]] : nil
+          }
+        end
+
+        puts "\nDivergence analysis:"
+        divergences.each do |d|
+          if d[:first_pc_diff].nil? && d[:first_op_diff].nil?
+            puts "  #{d[:backends].join(' vs ')}: IDENTICAL"
+          else
+            puts "  #{d[:backends].join(' vs ')}: DIVERGED"
+            if d[:first_pc_diff]
+              puts "    First PC diff at sample #{d[:first_pc_diff]}: $#{d[:pcs_at_diff][0].to_s(16).upcase} vs $#{d[:pcs_at_diff][1].to_s(16).upcase}"
+            end
+            if d[:first_op_diff]
+              puts "    First opcode diff at sample #{d[:first_op_diff]}: $#{d[:ops_at_diff][0].to_s(16).upcase.rjust(2, '0')} vs $#{d[:ops_at_diff][1].to_s(16).upcase.rjust(2, '0')}"
+            end
+          end
+        end
+
+        # ALL backends should have identical sequences (no divergence allowed)
+        divergences.each do |d|
+          expect(d[:first_pc_diff]).to be_nil,
+            "#{d[:backends].join(' vs ')} PC sequences diverged at sample #{d[:first_pc_diff]}"
+          expect(d[:first_op_diff]).to be_nil,
+            "#{d[:backends].join(' vs ')} opcode sequences diverged at sample #{d[:first_op_diff]}"
+        end
+      end
+    end
+  end
 end

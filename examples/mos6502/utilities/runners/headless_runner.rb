@@ -169,5 +169,51 @@ module MOS6502
       runner.setup_reset_vector(0x0800)
       runner
     end
+
+    # Read a byte from memory
+    def read(addr)
+      if @runner.respond_to?(:read_memory)
+        @runner.read_memory(addr)
+      else
+        @runner.bus.read(addr)
+      end
+    end
+
+    # Paths for Karateka resources
+    KARATEKA_ROM_PATH = File.expand_path('../../software/roms/appleiigo.rom', __dir__)
+    KARATEKA_MEM_PATH = File.expand_path('../../software/disks/karateka_mem.bin', __dir__)
+
+    # Check if Karateka resources are available
+    def self.karateka_available?
+      File.exist?(KARATEKA_ROM_PATH) && File.exist?(KARATEKA_MEM_PATH)
+    end
+
+    # Check if verilator is available
+    def self.verilator_available?
+      ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
+        File.executable?(File.join(path, 'verilator'))
+      end
+    end
+
+    # Create a headless runner with Karateka loaded (from memory dump)
+    # This loads the game state from a memory dump, bypassing disk I/O
+    def self.with_karateka(mode: :isa, sim: :jit)
+      raise "Karateka ROM not found at #{KARATEKA_ROM_PATH}" unless File.exist?(KARATEKA_ROM_PATH)
+      raise "Karateka memory dump not found at #{KARATEKA_MEM_PATH}" unless File.exist?(KARATEKA_MEM_PATH)
+
+      runner = new(mode: mode, sim: sim)
+
+      # Load ROM with modified reset vector pointing to game entry point ($B82A)
+      rom_data = File.binread(KARATEKA_ROM_PATH).bytes
+      rom_data[0x2FFC] = 0x2A  # low byte of $B82A
+      rom_data[0x2FFD] = 0xB8  # high byte of $B82A
+      runner.load_rom(rom_data, base_addr: 0xD000)
+
+      # Load Karateka memory dump
+      mem_data = File.binread(KARATEKA_MEM_PATH).bytes
+      runner.load_program_bytes(mem_data.first(48 * 1024), base_addr: 0x0000)
+
+      runner
+    end
   end
 end
