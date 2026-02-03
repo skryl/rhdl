@@ -6,6 +6,7 @@ require 'tempfile'
 # Require the headless runners with explicit paths
 require_relative '../../../examples/mos6502/utilities/headless_runner'
 require_relative '../../../examples/apple2/utilities/headless_runner'
+require_relative '../../../examples/gameboy/utilities/headless_runner'
 
 RSpec.describe 'Headless Runners', :slow do
   let(:demo_program) { [0xA9, 0x42, 0x00] }  # LDA #$42, BRK
@@ -249,6 +250,86 @@ RSpec.describe 'Headless Runners', :slow do
         expect(memory[:text_page].size).to eq(1024)
         expect(memory[:program_area].size).to eq(256)
         expect(memory[:reset_vector].size).to eq(2)
+      end
+    end
+  end
+
+  describe 'RHDL::GameBoy::HeadlessRunner' do
+    describe 'HDL mode with Ruby backend (default)' do
+      it 'creates HDL mode runner by default' do
+        runner = RHDL::GameBoy::HeadlessRunner.new
+        expect(runner.mode).to eq(:hdl)
+        expect(runner.backend).to eq(:ruby)
+        expect(runner.simulator_type).to eq(:hdl_ruby)
+      end
+
+      it 'sets native flag to false for Ruby backend' do
+        runner = RHDL::GameBoy::HeadlessRunner.new
+        expect(runner.native?).to be false
+      end
+
+      it 'loads test ROM' do
+        runner = RHDL::GameBoy::HeadlessRunner.with_test_rom
+        expect(runner.rom_size).to be > 0
+      end
+    end
+
+    describe 'HDL mode with IR interpret backend' do
+      before(:each) do
+        skip 'IR Interpreter requires native extension' unless ir_interpreter_available?
+      end
+
+      it 'creates HDL mode runner with interpret backend' do
+        runner = RHDL::GameBoy::HeadlessRunner.new(sim: :interpret)
+        expect(runner.mode).to eq(:hdl)
+        expect(runner.backend).to eq(:interpret)
+      end
+    end
+
+    describe 'HDL mode with IR jit backend' do
+      before(:each) do
+        skip 'IR JIT requires native extension' unless ir_jit_available?
+      end
+
+      it 'creates HDL mode runner with jit backend' do
+        runner = RHDL::GameBoy::HeadlessRunner.new(sim: :jit)
+        expect(runner.mode).to eq(:hdl)
+        expect(runner.backend).to eq(:jit)
+      end
+    end
+
+    describe 'HDL mode with IR compile backend' do
+      before(:each) do
+        skip 'IR Compiler requires native extension' unless ir_compiler_available?
+      end
+
+      it 'creates HDL mode runner with compile backend' do
+        runner = RHDL::GameBoy::HeadlessRunner.new(sim: :compile)
+        expect(runner.mode).to eq(:hdl)
+        expect(runner.backend).to eq(:compile)
+      end
+    end
+
+    describe 'runner interface' do
+      it 'returns all required fields' do
+        runner = RHDL::GameBoy::HeadlessRunner.with_test_rom
+        expect(runner.mode).to eq(:hdl)
+        expect(runner.simulator_type).to eq(:hdl_ruby)
+        expect(runner.native?).to be false
+        expect(runner.backend).to eq(:ruby)
+        expect(runner.cpu_state).to be_a(Hash)
+      end
+
+      it 'returns cpu_state with all register fields' do
+        runner = RHDL::GameBoy::HeadlessRunner.with_test_rom
+        cpu_state = runner.cpu_state
+        expect(cpu_state).to have_key(:pc)
+        expect(cpu_state).to have_key(:a)
+        expect(cpu_state).to have_key(:f)
+        expect(cpu_state).to have_key(:sp)
+        expect(cpu_state).to have_key(:cycles)
+        expect(cpu_state).to have_key(:halted)
+        expect(cpu_state).to have_key(:simulator_type)
       end
     end
   end
