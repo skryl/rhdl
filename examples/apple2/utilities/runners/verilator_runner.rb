@@ -11,10 +11,10 @@
 #   runner.reset
 #   runner.run_steps(100)
 
-require_relative '../hdl/apple2'
-require_relative 'speaker'
-require_relative 'color_renderer'
-require_relative 'ps2_encoder'
+require_relative '../../hdl/apple2'
+require_relative '../output/speaker'
+require_relative '../output/color_renderer'
+require_relative '../input/ps2_encoder'
 require 'rhdl/codegen'
 require 'fileutils'
 require 'fiddle'

@@ -511,7 +511,7 @@ module RHDL
               when :compiler
                 RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json)
               when :verilator
-                require_relative '../../../../examples/apple2/utilities/apple2_verilator'
+                require_relative '../../../../examples/apple2/utilities/runners/verilator_runner'
                 RHDL::Apple2::VerilatorRunner.new(sub_cycles: 14)
               end
 

@@ -6,7 +6,7 @@
 # This provides the same runner creation logic as Apple2HDLTerminal
 # but without any terminal/display dependencies.
 
-require_relative 'apple2_hdl'
+require_relative 'hdl_runner'
 
 module RHDL
   module Apple2
@@ -25,10 +25,10 @@ module RHDL
         # Create runner based on mode and sim backend
         @runner = case mode
                   when :netlist
-                    require_relative 'apple2_netlist'
+                    require_relative 'netlist_runner'
                     RHDL::Apple2::NetlistRunner.new(backend: sim)
                   when :verilog
-                    require_relative 'apple2_verilator'
+                    require_relative 'verilator_runner'
                     RHDL::Apple2::VerilatorRunner.new(sub_cycles: sub_cycles)
                   else  # :hdl (default)
                     if sim == :ruby
@@ -36,7 +36,7 @@ module RHDL
                       RHDL::Apple2::HdlRunner.new
                     else
                       # IR simulation with native backends (interpret, jit, compile)
-                      require_relative 'ir_simulator_runner'
+                      require_relative 'ir_runner'
                       RHDL::Apple2::IrSimulatorRunner.new(backend: sim, sub_cycles: sub_cycles)
                     end
                   end
@@ -76,7 +76,7 @@ module RHDL
         @runner.load_ram(bytes, base_addr: 0x0000)
 
         if use_appleiigo
-          rom_file = File.expand_path('../software/roms/appleiigo.rom', __dir__)
+          rom_file = File.expand_path('../../software/roms/appleiigo.rom', __dir__)
           load_rom(rom_file) if File.exist?(rom_file)
         end
 

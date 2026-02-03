@@ -5,7 +5,7 @@ require 'tempfile'
 
 # Add the utilities path to load the headless runner
 $LOAD_PATH.unshift(File.expand_path('../../../../examples/apple2/utilities', __FILE__))
-require 'headless_runner'
+require 'runners/headless_runner'
 
 RSpec.describe RHDL::Apple2::HeadlessRunner, :slow do
   let(:demo_program) { [0xA9, 0x42, 0x00] }  # LDA #$42, BRK

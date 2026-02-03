@@ -3,7 +3,7 @@
 require 'spec_helper'
 require 'rhdl'
 require_relative '../../../examples/apple2/hdl/apple2'
-require_relative '../../../examples/apple2/utilities/braille_renderer'
+require_relative '../../../examples/apple2/utilities/output/braille_renderer'
 
 # Verilator availability check
 def verilator_available?
@@ -106,7 +106,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   def verilator_runner_available?
     return false unless verilator_available?
     begin
-      require_relative '../../../examples/apple2/utilities/apple2_verilator'
+      require_relative '../../../examples/apple2/utilities/runners/verilator_runner'
       true
     rescue LoadError
       false
@@ -114,7 +114,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   end
 
   def create_verilator_runner
-    require_relative '../../../examples/apple2/utilities/apple2_verilator'
+    require_relative '../../../examples/apple2/utilities/runners/verilator_runner'
 
     runner = RHDL::Apple2::VerilatorRunner.new(sub_cycles: 14)
 
