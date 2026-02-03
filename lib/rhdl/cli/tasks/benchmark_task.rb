@@ -227,7 +227,7 @@ module RHDL
           $stdout.flush
 
           require_relative '../../../../examples/mos6502/hdl/cpu'
-          require_relative '../../../../examples/mos6502/utilities/apple2_bus'
+          require_relative '../../../../examples/mos6502/utilities/apple2/bus'
 
           ir_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
           ir = MOS6502::CPU.to_flat_ir
@@ -286,7 +286,7 @@ module RHDL
               sim = nil
 
               if is_verilator
-                require_relative '../../../../examples/mos6502/utilities/mos6502_verilator'
+                require_relative '../../../../examples/mos6502/utilities/runners/verilator_runner'
                 sim = MOS6502::VerilatorRunner.new
               else
                 bus = MOS6502::Apple2Bus.new("bench_bus")
@@ -511,7 +511,7 @@ module RHDL
               when :compiler
                 RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json)
               when :verilator
-                require_relative '../../../../examples/apple2/utilities/apple2_verilator'
+                require_relative '../../../../examples/apple2/utilities/runners/verilator_runner'
                 RHDL::Apple2::VerilatorRunner.new(sub_cycles: 14)
               end
 
@@ -624,7 +624,7 @@ module RHDL
               end
             else
               begin
-                require_relative '../../../../examples/gameboy/utilities/gameboy_ir'
+                require_relative '../../../../examples/gameboy/utilities/runners/ir_runner'
                 unless RHDL::Codegen::IR::COMPILER_AVAILABLE
                   puts "\n#{runner_config[:name]}: SKIPPED (not available)"
                   results << { name: runner_config[:name], status: :skipped }
@@ -647,7 +647,7 @@ module RHDL
               init_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
               if is_verilator
-                require_relative '../../../../examples/gameboy/utilities/gameboy_verilator'
+                require_relative '../../../../examples/gameboy/utilities/runners/verilator_runner'
                 runner = RHDL::GameBoy::VerilatorRunner.new
               else
                 runner = RHDL::GameBoy::IrRunner.new(backend: :compile)

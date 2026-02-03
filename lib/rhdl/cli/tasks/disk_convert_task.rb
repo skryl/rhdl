@@ -195,8 +195,7 @@ module RHDL
 
           # Load dependencies
           require 'rhdl'
-          $LOAD_PATH.unshift File.expand_path('examples/mos6502/utilities')
-          require 'apple2_harness'
+          require_relative '../../../../examples/mos6502/utilities/apple2/harness'
 
           # Create runner with disk
           runner = Apple2Harness::ISARunner.new

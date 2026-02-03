@@ -26,7 +26,7 @@ module RHDL
 
         # Build the mini monitor ROM
         def build_rom
-          require File.join(Config.project_root, 'examples/mos6502/utilities/assembler')
+          require File.join(Config.project_root, 'spec/support/mos6502_assembler')
 
           puts "MOS 6502 ROM Assembler"
           puts '=' * 50
@@ -152,7 +152,6 @@ module RHDL
           exec_args.push("-e", options[:entry]) if options[:entry]
           exec_args << "--init-hires" if options[:init_hires]
           exec_args << "--no-audio" if options[:no_audio]
-          exec_args << "--dry-run" if options[:dry_run]
         end
       end
     end

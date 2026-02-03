@@ -728,9 +728,16 @@ Follow these conventions for file organization:
 
 **One spec per file:**
 - Each spec file should test exactly one class or module
-- Spec files should mirror the lib directory structure (e.g., `spec/rhdl/simulation/simulator_spec.rb` for `lib/rhdl/simulation/simulator.rb`)
 - Name spec files with `_spec.rb` suffix matching the class being tested
 - **IMPORTANT: Always add a test file when creating a new source file.** Every new class or module should have a corresponding spec file.
+
+**Test directory structure must mirror code structure:**
+- Spec directory hierarchy should match the source code directory hierarchy as closely as possible
+- For `lib/rhdl/` code: specs go in `spec/rhdl/` with matching subdirectories
+- For `examples/mos6502/` code: specs go in `spec/examples/mos6502/` with matching subdirectories
+- Example: `examples/mos6502/hdl/alu.rb` → `spec/examples/mos6502/hdl/alu_spec.rb`
+- Example: `examples/mos6502/utilities/runners/headless_runner.rb` → `spec/examples/mos6502/utilities/runners/headless_runner_spec.rb`
+- This makes it easy to find tests for any given source file and vice versa
 
 **HDL directory organization:**
 - The `lib/rhdl/hdl/` directory should only contain component definitions

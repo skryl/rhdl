@@ -429,7 +429,7 @@ lines = renderer.render(screen_memory)
 puts lines.join("\n")
 ```
 
-### Color Renderer (`utilities/color_renderer.rb`)
+### Color Renderer (`utilities/renderers/color_renderer.rb`)
 
 ANSI color terminal output.
 
@@ -512,12 +512,12 @@ bus.inject_key('X'.ord)
 key = bus.read(0xC000)
 ```
 
-### Apple2Harness (`examples/mos6502/utilities/apple2_harness.rb`)
+### Apple2Harness (`examples/mos6502/utilities/runners/apple2_harness.rb`)
 
 Test harness for running programs.
 
 ```ruby
-require_relative 'examples/mos6502/utilities/apple2_harness'
+require_relative 'examples/mos6502/utilities/runners/apple2_harness'
 
 runner = Apple2Harness::Runner.new
 

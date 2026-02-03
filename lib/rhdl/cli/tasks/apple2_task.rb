@@ -9,7 +9,9 @@ module RHDL
       # Task for Apple II HDL emulator
       class Apple2Task < Task
         def run
-          if options[:demo]
+          if options[:clean]
+            clean
+          elsif options[:demo]
             run_demo
           elsif options[:appleiigo]
             run_appleiigo
@@ -17,6 +19,15 @@ module RHDL
             run_karateka
           else
             run_emulator
+          end
+        end
+
+        # Clean generated ROM files
+        def clean
+          dir = Config.rom_output_dir
+          if Dir.exist?(dir)
+            FileUtils.rm_rf(dir)
+            puts "Cleaned: #{dir}"
           end
         end
 
@@ -93,7 +104,6 @@ module RHDL
           exec_args.push("--disk", options[:disk]) if options[:disk]
           # Sub-cycles: 14=full accuracy, 7=~2x speed, 2=~7x speed (compile backend only)
           exec_args.push("--sub-cycles", options[:sub_cycles].to_s) if options[:sub_cycles]
-          exec_args << "--dry-run" if options[:dry_run]
         end
       end
     end
