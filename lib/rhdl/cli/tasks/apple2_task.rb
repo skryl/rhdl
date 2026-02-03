@@ -9,7 +9,9 @@ module RHDL
       # Task for Apple II HDL emulator
       class Apple2Task < Task
         def run
-          if options[:demo]
+          if options[:clean]
+            clean
+          elsif options[:demo]
             run_demo
           elsif options[:appleiigo]
             run_appleiigo
@@ -17,6 +19,14 @@ module RHDL
             run_karateka
           else
             run_emulator
+          end
+        end
+
+        # Clean ROM output files
+        def clean
+          if Dir.exist?(Config.rom_output_dir)
+            FileUtils.rm_rf(Config.rom_output_dir)
+            puts "Cleaned: #{Config.rom_output_dir}"
           end
         end
 
