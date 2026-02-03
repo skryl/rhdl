@@ -11,11 +11,11 @@ $LOAD_PATH.unshift File.expand_path('../../../lib', __dir__)
 $LOAD_PATH.unshift File.expand_path('../utilities', __dir__)
 
 require 'rhdl'
-require 'apple2_harness'
-require 'isa_simulator'
-require 'ruby_isa_runner'
-require 'ir_simulator_runner'
-require 'color_renderer'
+require_relative '../utilities/apple2/harness'
+require_relative '../utilities/simulators/isa_simulator'
+require_relative '../utilities/runners/isa_runner'
+require_relative '../utilities/runners/ir_runner'
+require_relative '../utilities/renderers/color_renderer'
 
 # Apple II Terminal class
 class Apple2Terminal
@@ -69,7 +69,7 @@ class Apple2Terminal
                 raise "Netlist mode not yet implemented"
               when :verilog
                 # Verilog mode uses Verilator-compiled simulation
-                require_relative '../../../examples/apple2/utilities/apple2_verilator'
+                require_relative '../../../examples/apple2/utilities/runners/verilator_runner'
                 @sim_type = :hdl_verilator
                 RHDL::Apple2::VerilatorRunner.new
               else
@@ -1018,10 +1018,6 @@ parser = OptionParser.new do |opts|
     options[:audio] = false
   end
 
-  opts.on("--dry-run", "Load configuration and display engine info without running emulator") do
-    options[:dry_run] = true
-  end
-
   opts.on("-h", "--help", "Show this help message") do
     puts opts
     exit
@@ -1170,15 +1166,6 @@ if options[:init_hires]
   bus.read(0xC057)  # HIRES - hi-res mode
   # Push video state to native CPU so it matches Ruby bus
   terminal.runner.sync_video_to_native if terminal.runner.respond_to?(:sync_video_to_native)
-end
-
-# Handle dry-run mode - output engine info and memory dump without running
-if options[:dry_run]
-  require 'json'
-  runner = terminal.runner
-  info = runner.dry_run_info
-  puts JSON.pretty_generate(info)
-  exit 0
 end
 
 # Run the emulator

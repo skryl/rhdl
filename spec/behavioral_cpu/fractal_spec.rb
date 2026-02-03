@@ -1,5 +1,5 @@
 require 'spec_helper'
-require 'support/assembler'
+require 'support/isa_assembler'
 require 'support/display_helper'
 
 RSpec.describe RHDL::Components::CPU::CPU do

@@ -59,7 +59,7 @@ RSpec.describe 'SM83 CPU Instructions' do
   before(:all) do
     begin
       require_relative '../../../../../examples/gameboy/gameboy'
-      require_relative '../../../../../examples/gameboy/utilities/gameboy_ir'
+      require_relative '../../../../../examples/gameboy/utilities/runners/ir_runner'
 
       # Check if IR compiler is available
       @ir_available = RHDL::Codegen::IR::COMPILER_AVAILABLE rescue false

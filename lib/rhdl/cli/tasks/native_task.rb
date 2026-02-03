@@ -14,9 +14,9 @@ module RHDL
           # MOS 6502 ISA simulator (behavioral)
           isa_simulator: {
             name: 'ISA Simulator',
-            ext_dir: File.expand_path('examples/mos6502/utilities/isa_simulator_native', Config.project_root),
+            ext_dir: File.expand_path('examples/mos6502/utilities/simulators/isa_simulator_native', Config.project_root),
             crate_name: 'isa_simulator_native',
-            load_path: 'examples/mos6502/utilities',
+            load_path: 'examples/mos6502/utilities/simulators',
             check_const: 'MOS6502::NATIVE_AVAILABLE'
           },
 
