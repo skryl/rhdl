@@ -91,30 +91,4 @@ class RubyISARunner
   def cycle_count
     @cpu.cycles
   end
-
-  # Return dry-run information for testing without starting emulation
-  # @return [Hash] Information about engine configuration and memory state
-  def dry_run_info
-    {
-      mode: :isa,
-      simulator_type: simulator_type,
-      native: native?,
-      backend: nil,  # Ruby ISA doesn't use IR backend
-      cpu_state: cpu_state,
-      memory_sample: memory_sample
-    }
-  end
-
-  private
-
-  # Return a sample of memory for verification
-  def memory_sample
-    {
-      zero_page: (0...256).map { |i| @bus.read(i) },
-      stack: (0...256).map { |i| @bus.read(0x0100 + i) },
-      text_page: (0...1024).map { |i| @bus.read(0x0400 + i) },
-      program_area: (0...256).map { |i| @bus.read(0x0800 + i) },
-      reset_vector: [@bus.read(0xFFFC), @bus.read(0xFFFD)]
-    }
-  end
 end
