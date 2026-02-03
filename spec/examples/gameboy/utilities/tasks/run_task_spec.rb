@@ -164,6 +164,66 @@ RSpec.describe RHDL::GameBoy::Tasks::RunTask do
     end
   end
 
+  describe 'PC progression' do
+    let(:task) { described_class.new(headless: true, demo: true, mode: :hdl, sim: :ruby, cycles: 10) }
+
+    it 'has valid PC after running' do
+      result = task.run
+      # PC should be a valid 16-bit address
+      expect(result[:pc]).to be_a(Integer)
+      expect(result[:pc]).to be_between(0x0000, 0xFFFF)
+    end
+
+    it 'executes instructions and changes cycle count' do
+      result = task.run
+      expect(result[:cycles]).to eq(10)
+    end
+
+    it 'cycle count increases with more cycles' do
+      task1 = described_class.new(headless: true, demo: true, mode: :hdl, sim: :ruby, cycles: 10)
+      task2 = described_class.new(headless: true, demo: true, mode: :hdl, sim: :ruby, cycles: 100)
+
+      result1 = task1.run
+      result2 = task2.run
+
+      # More cycles should result in more execution
+      expect(result2[:cycles]).to be > result1[:cycles]
+    end
+
+    it 'provides valid CPU state' do
+      result = task.run
+      expect(result).to include(:pc, :a, :f, :cycles)
+      expect(result[:a]).to be_between(0, 255)
+      expect(result[:f]).to be_between(0, 255)
+    end
+  end
+
+  describe 'configuration validation' do
+    context 'with hdl mode and ruby backend' do
+      let(:task) { described_class.new(headless: true, demo: true, mode: :hdl, sim: :ruby, cycles: 10) }
+
+      it 'creates runner with hdl mode' do
+        task.run
+        expect(task.runner.mode).to eq(:hdl)
+      end
+
+      it 'creates runner with ruby backend' do
+        task.run
+        expect(task.runner.sim_backend).to eq(:ruby)
+      end
+
+      it 'reports hdl_ruby simulator type' do
+        task.run
+        expect(task.runner.simulator_type).to eq(:hdl_ruby)
+      end
+
+      it 'returns false for native?' do
+        task.run
+        expect(task.runner.native?).to eq(false)
+      end
+    end
+  end
+
   describe 'constants' do
     it 'defines screen dimensions' do
       expect(described_class::SCREEN_WIDTH).to eq(160)
