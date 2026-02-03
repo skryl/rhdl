@@ -2,9 +2,9 @@
 
 require 'spec_helper'
 require 'rhdl'
-require_relative '../../../examples/apple2/hdl/disk_ii'
-require_relative '../../support/vhdl_reference_helper'
-require_relative '../../support/hdl_toolchain'
+require_relative '../../../../examples/apple2/hdl/disk_ii'
+require_relative '../../../support/vhdl_reference_helper'
+require_relative '../../../support/hdl_toolchain'
 
 RSpec.describe RHDL::Apple2::DiskII do
   extend VhdlReferenceHelper

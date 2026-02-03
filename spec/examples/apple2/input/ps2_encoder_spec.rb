@@ -3,7 +3,7 @@
 require 'spec_helper'
 
 # Load the PS2 encoder
-require_relative '../../../examples/apple2/utilities/ps2_encoder'
+require_relative '../../../../examples/apple2/utilities/input/ps2_encoder'
 
 RSpec.describe RHDL::Apple2::PS2Encoder do
   let(:encoder) { described_class.new }

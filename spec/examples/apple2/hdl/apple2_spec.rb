@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 require 'rhdl'
-require_relative '../../../examples/apple2/hdl/apple2'
+require_relative '../../../../examples/apple2/hdl/apple2'
 
 RSpec.describe RHDL::Apple2::Apple2 do
   let(:apple2) { described_class.new('apple2') }
@@ -535,7 +535,7 @@ RSpec.describe 'Apple II ROM Integration' do
   let(:apple2) { RHDL::Apple2::Apple2.new('apple2') }
   let(:ram) { Array.new(48 * 1024, 0) }
 
-  ROM_PATH = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
+  ROM_PATH = File.expand_path('../../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
 
   before do
     skip 'AppleIIgo ROM not found' unless File.exist?(ROM_PATH)
@@ -662,7 +662,7 @@ RSpec.describe 'Apple II Simulator Modes' do
   #
   # Note: Ruby HDL simulation is tested elsewhere and is too slow for these tests
 
-  ROM_PATH2 = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
+  ROM_PATH2 = File.expand_path('../../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
 
   # IR-only simulator mode configurations (Ruby is too slow)
   # Note: Interpreter disabled for now
@@ -807,8 +807,8 @@ RSpec.describe 'Sub-cycles PC Progression' do
   # - 7:  ~2x faster, good accuracy
   # - 2:  ~7x faster, minimal accuracy
 
-  ROM_PATH_SUB = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
-  KARATEKA_MEM_PATH_SUB = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
+  ROM_PATH_SUB = File.expand_path('../../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
+  KARATEKA_MEM_PATH_SUB = File.expand_path('../../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
   KARATEKA_ENTRY_SUB = 0xB82A
 
   before(:all) do
@@ -1078,8 +1078,8 @@ RSpec.describe 'Hi-res Rendering Modes' do
   # Tests that braille and color rendering modes produce non-empty output
   # when running with the Karateka memory dump, which contains actual game graphics
 
-  ROM_PATH_RENDER = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
-  KARATEKA_MEM_PATH_RENDER = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
+  ROM_PATH_RENDER = File.expand_path('../../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
+  KARATEKA_MEM_PATH_RENDER = File.expand_path('../../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
 
   before(:all) do
     @rom_available = File.exist?(ROM_PATH_RENDER)
@@ -1096,7 +1096,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
   # Tries JIT first, falls back to interpreter if not available
   # Returns nil if no native backends are available
   def create_ir_runner_with_karateka(backend: :jit)
-    require_relative '../../../examples/apple2/utilities/runners/ir_runner'
+    require_relative '../../../../examples/apple2/utilities/runners/ir_runner'
 
     # Try the requested backend, fall back to interpreter
     runner = nil
@@ -1128,7 +1128,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
 
   # Create HdlRunner with Karateka memory loaded
   def create_hdl_runner_with_karateka
-    require_relative '../../../examples/apple2/utilities/runners/hdl_runner'
+    require_relative '../../../../examples/apple2/utilities/runners/hdl_runner'
 
     runner = RHDL::Apple2::HdlRunner.new
 
@@ -1338,8 +1338,8 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
   # - Rust ISA simulator (100k iterations) - fast native
   # - Rust JIT IR simulator (100k iterations) - full HDL JIT
 
-  ROM_PATH_ISA = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
-  KARATEKA_MEM_PATH = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
+  ROM_PATH_ISA = File.expand_path('../../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
+  KARATEKA_MEM_PATH = File.expand_path('../../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
 
   # Karateka game entry point (where execution starts in the memory dump)
   KARATEKA_ENTRY = 0xB82A
@@ -1367,7 +1367,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
 
   # Check if native ISA simulator is available
   def native_isa_available?
-    require_relative '../../../examples/mos6502/utilities/isa_simulator_native'
+    require_relative '../../../../examples/mos6502/utilities/isa_simulator_native'
     MOS6502::NATIVE_AVAILABLE
   rescue LoadError
     false
@@ -1375,18 +1375,18 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
 
   # Helper to create ISA simulator with Apple2 bus
   def create_isa_simulator(native: false)
-    require_relative '../../../examples/mos6502/utilities/apple2_bus'
+    require_relative '../../../../examples/mos6502/utilities/apple2_bus'
 
     bus = MOS6502::Apple2Bus.new
     bus.load_rom(@rom_data, base_addr: 0xD000)
 
     if native
-      require_relative '../../../examples/mos6502/utilities/isa_simulator_native'
+      require_relative '../../../../examples/mos6502/utilities/isa_simulator_native'
       cpu = MOS6502::ISASimulatorNative.new(bus)
       # Load ROM into native CPU's internal memory too
       cpu.load_bytes(@rom_data, 0xD000)
     else
-      require_relative '../../../examples/mos6502/utilities/isa_simulator'
+      require_relative '../../../../examples/mos6502/utilities/isa_simulator'
       cpu = MOS6502::ISASimulator.new(bus)
     end
 

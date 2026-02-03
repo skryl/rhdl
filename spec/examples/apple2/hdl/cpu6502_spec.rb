@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require_relative '../../../examples/apple2/hdl/cpu6502'
+require_relative '../../../../examples/apple2/hdl/cpu6502'
 
 RSpec.describe RHDL::Apple2::CPU6502 do
   let(:cpu) { RHDL::Apple2::CPU6502.new('cpu') }

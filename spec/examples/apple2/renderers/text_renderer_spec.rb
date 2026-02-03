@@ -2,8 +2,7 @@
 
 require 'spec_helper'
 
-$LOAD_PATH.unshift File.expand_path('../../../examples/apple2/utilities', __dir__)
-require 'text_renderer'
+require_relative '../../../../examples/apple2/utilities/renderers/text_renderer'
 
 RSpec.describe RHDL::Apple2::TextRenderer do
   let(:renderer) { described_class.new }
