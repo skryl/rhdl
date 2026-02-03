@@ -286,7 +286,7 @@ module RHDL
               sim = nil
 
               if is_verilator
-                require_relative '../../../../examples/mos6502/utilities/mos6502_verilator'
+                require_relative '../../../../examples/mos6502/utilities/runners/mos6502_verilator'
                 sim = MOS6502::VerilatorRunner.new
               else
                 bus = MOS6502::Apple2Bus.new("bench_bus")
@@ -624,7 +624,7 @@ module RHDL
               end
             else
               begin
-                require_relative '../../../../examples/gameboy/utilities/gameboy_ir'
+                require_relative '../../../../examples/gameboy/utilities/runners/ir_runner'
                 unless RHDL::Codegen::IR::COMPILER_AVAILABLE
                   puts "\n#{runner_config[:name]}: SKIPPED (not available)"
                   results << { name: runner_config[:name], status: :skipped }
@@ -647,7 +647,7 @@ module RHDL
               init_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
               if is_verilator
-                require_relative '../../../../examples/gameboy/utilities/gameboy_verilator'
+                require_relative '../../../../examples/gameboy/utilities/runners/verilator_runner'
                 runner = RHDL::GameBoy::VerilatorRunner.new
               else
                 runner = RHDL::GameBoy::IrRunner.new(backend: :compile)

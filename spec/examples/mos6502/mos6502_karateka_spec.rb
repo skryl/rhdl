@@ -5,8 +5,8 @@ require 'spec_helper'
 # Load the runner utilities
 require_relative '../../../examples/mos6502/utilities/apple2_bus'
 require_relative '../../../examples/mos6502/utilities/isa_simulator'
-require_relative '../../../examples/mos6502/utilities/ruby_isa_runner'
-require_relative '../../../examples/mos6502/utilities/color_renderer'
+require_relative '../../../examples/mos6502/utilities/runners/ruby_isa_runner'
+require_relative '../../../examples/mos6502/utilities/renderers/color_renderer'
 
 RSpec.describe 'MOS6502 Karateka Mode' do
   let(:karateka_mem) { File.expand_path('../../../examples/mos6502/software/disks/karateka_mem.bin', __dir__) }
@@ -122,7 +122,7 @@ RSpec.describe 'MOS6502 Karateka Mode' do
     # Helper to create and run an IR simulator with the given backend
     def run_hdl_test(sim_type, rom_bytes, mem_bytes)
       begin
-        require_relative '../../../examples/mos6502/utilities/ir_simulator_runner'
+        require_relative '../../../examples/mos6502/utilities/runners/ir_simulator_runner'
       rescue LoadError => e
         skip "IR simulator runner not available: #{e.message}"
       end

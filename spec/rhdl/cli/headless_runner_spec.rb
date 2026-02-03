@@ -4,9 +4,9 @@ require 'spec_helper'
 require 'tempfile'
 
 # Require the headless runners with explicit paths
-require_relative '../../../examples/mos6502/utilities/headless_runner'
+require_relative '../../../examples/mos6502/utilities/runners/headless_runner'
 require_relative '../../../examples/apple2/utilities/runners/headless_runner'
-require_relative '../../../examples/gameboy/utilities/headless_runner'
+require_relative '../../../examples/gameboy/utilities/runners/headless_runner'
 
 RSpec.describe 'Headless Runners', :slow do
   let(:demo_program) { [0xA9, 0x42, 0x00] }  # LDA #$42, BRK

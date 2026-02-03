@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 require_relative '../../../examples/gameboy/gameboy'
-require_relative '../../../examples/gameboy/utilities/gameboy_hdl'
+require_relative '../../../examples/gameboy/utilities/runners/hdl_runner'
 
 RSpec.describe 'GameBoy RHDL Implementation' do
   describe 'Module Loading' do
@@ -302,7 +302,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
     before do
       skip 'tobu.gb ROM not found' unless File.exist?(tobu_rom_path)
       begin
-        require_relative '../../../examples/gameboy/utilities/gameboy_ir'
+        require_relative '../../../examples/gameboy/utilities/runners/ir_runner'
         # Check if native library is available by trying to create a runner
         test_runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
         test_runner = nil
@@ -404,7 +404,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
     before do
       skip 'Verilator not available' unless verilator_available?
       begin
-        require_relative '../../../examples/gameboy/utilities/gameboy_verilator'
+        require_relative '../../../examples/gameboy/utilities/runners/verilator_runner'
       rescue LoadError => e
         skip "Verilator runner not available: #{e.message}"
       end
@@ -532,7 +532,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       skip 'pop.gb ROM not found' unless File.exist?(pop_rom_path)
 
       begin
-        require_relative '../../../examples/gameboy/utilities/gameboy_ir'
+        require_relative '../../../examples/gameboy/utilities/runners/ir_runner'
         # Check if native library is available
         test_runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
         test_runner = nil
@@ -763,8 +763,8 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       skip 'Verilator not available' unless verilator_available?
 
       begin
-        require_relative '../../../examples/gameboy/utilities/gameboy_ir'
-        require_relative '../../../examples/gameboy/utilities/gameboy_verilator'
+        require_relative '../../../examples/gameboy/utilities/runners/ir_runner'
+        require_relative '../../../examples/gameboy/utilities/runners/verilator_runner'
 
         # Verify both runners can be instantiated
         test_ir = RHDL::GameBoy::IrRunner.new(backend: :compile)

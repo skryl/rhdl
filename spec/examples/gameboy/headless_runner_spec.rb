@@ -3,7 +3,7 @@
 require 'spec_helper'
 
 # Add the utilities path to load the headless runner
-$LOAD_PATH.unshift(File.expand_path('../../../../examples/gameboy/utilities', __FILE__))
+$LOAD_PATH.unshift(File.expand_path('../../../../examples/gameboy/utilities/runners', __FILE__))
 require 'headless_runner'
 
 RSpec.describe RHDL::GameBoy::HeadlessRunner, :slow do

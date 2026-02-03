@@ -13,8 +13,8 @@
 #   runner.reset
 #   runner.run_cycles(100)
 
-require_relative '../hdl/cpu'
-require_relative '../hdl/memory'
+require_relative '../../hdl/cpu'
+require_relative '../../hdl/memory'
 require 'rhdl/codegen'
 require 'fileutils'
 require 'fiddle'

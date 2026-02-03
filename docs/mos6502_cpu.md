@@ -270,7 +270,7 @@ sim = MOS6502::ISASimulatorNative.new
 | Ruby ISA | ~500,000 | 10x |
 | Native Rust | ~3,500,000 | 70x |
 
-### Ruby ISA Runner (`utilities/ruby_isa_runner.rb`)
+### Ruby ISA Runner (`utilities/runners/ruby_isa_runner.rb`)
 
 Convenience wrapper for running programs with the ISA simulator.
 
@@ -282,7 +282,7 @@ runner.reset
 runner.run_until(max_cycles: 100_000) { runner.halted? }
 ```
 
-### IR Simulator (`utilities/ir_simulator_runner.rb`)
+### IR Simulator (`utilities/runners/ir_simulator_runner.rb`)
 
 Runs programs using the gate-level intermediate representation.
 

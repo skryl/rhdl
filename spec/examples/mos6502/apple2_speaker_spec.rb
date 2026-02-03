@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../../spec_helper'
-require_relative '../../../examples/mos6502/utilities/apple2_speaker'
+require_relative '../../../examples/mos6502/utilities/output/apple2_speaker'
 
 RSpec.describe MOS6502::Apple2Speaker do
   subject(:speaker) { described_class.new }

@@ -8,7 +8,7 @@ class IRSimulatorRunner
 
   def initialize(sim_backend = :interpret)
     require 'rhdl/codegen'
-    require_relative '../hdl/cpu'
+    require_relative '../../hdl/cpu'
 
     @bus = MOS6502::Apple2Bus.new("apple2_bus")
     @sim_backend = sim_backend

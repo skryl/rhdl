@@ -1,8 +1,8 @@
-require_relative 'spec_helper'
-require_relative '../lib/rhdl/diagram'
-require_relative '../lib/rhdl/codegen/netlist/lower'
-require_relative '../lib/rhdl/hdl/gates'
-require_relative '../lib/rhdl/hdl/sequential'
+require_relative '../../spec_helper'
+require_relative '../../../lib/rhdl/diagram'
+require_relative '../../../lib/rhdl/codegen/netlist/lower'
+require_relative '../../../lib/rhdl/hdl/gates'
+require_relative '../../../lib/rhdl/hdl/sequential'
 
 RSpec.describe RHDL::Diagram do
   describe '.gate_level' do

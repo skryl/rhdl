@@ -1,6 +1,6 @@
-require_relative 'spec_helper'
-require_relative '../lib/rhdl/diagram'
-require_relative '../lib/rhdl/hdl/arithmetic'
+require_relative '../../spec_helper'
+require_relative '../../../lib/rhdl/diagram'
+require_relative '../../../lib/rhdl/hdl/arithmetic'
 
 RSpec.describe RHDL::Diagram do
   describe '.component' do
