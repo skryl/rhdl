@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 require 'rhdl'
-require_relative '../../../examples/apple2/utilities/braille_renderer'
+require_relative '../../../examples/apple2/utilities/renderers/braille_renderer'
 
 RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   # Compare all 4 MOS6502 simulators:
