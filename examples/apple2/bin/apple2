@@ -11,7 +11,7 @@ $LOAD_PATH.unshift File.expand_path('../../../lib', __dir__)
 $LOAD_PATH.unshift File.expand_path('../utilities', __dir__)
 
 require 'rhdl'
-require 'apple2_hdl'
+require 'runners/hdl_runner'
 
 # Apple II Terminal class for HDL simulation
 # Supports both HDL and netlist simulation modes
@@ -49,12 +49,12 @@ class Apple2HDLTerminal
     # Create runner based on simulation mode and backend
     @runner = case @sim_mode
               when :netlist
-                require 'apple2_netlist'
+                require 'runners/netlist_runner'
                 backend_names = { interpret: "Interpreter", jit: "JIT", compile: "Compiler" }
                 puts "Initializing netlist (gate-level) simulation [#{backend_names[@sim_backend]}]..."
                 RHDL::Apple2::NetlistRunner.new(backend: @sim_backend)
               when :verilog
-                require 'apple2_verilator'
+                require 'runners/verilator_runner'
                 sub_cycles = options[:sub_cycles] || 14
                 RHDL::Apple2::VerilatorRunner.new(sub_cycles: sub_cycles)
               else  # :hdl (default)
@@ -63,7 +63,7 @@ class Apple2HDLTerminal
                   RHDL::Apple2::HdlRunner.new
                 else
                   # IR simulation with native backends (interpret, jit, compile)
-                  require 'ir_simulator_runner'
+                  require 'runners/ir_runner'
                   sub_cycles = options[:sub_cycles] || 14
                   RHDL::Apple2::IrSimulatorRunner.new(backend: @sim_backend, sub_cycles: sub_cycles)
                 end

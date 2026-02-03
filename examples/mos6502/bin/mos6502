@@ -69,7 +69,7 @@ class Apple2Terminal
                 raise "Netlist mode not yet implemented"
               when :verilog
                 # Verilog mode uses Verilator-compiled simulation
-                require_relative '../../../examples/apple2/utilities/apple2_verilator'
+                require_relative '../../../examples/apple2/utilities/runners/verilator_runner'
                 @sim_type = :hdl_verilator
                 RHDL::Apple2::VerilatorRunner.new
               else

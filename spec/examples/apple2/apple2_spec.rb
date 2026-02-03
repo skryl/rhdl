@@ -1096,7 +1096,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
   # Tries JIT first, falls back to interpreter if not available
   # Returns nil if no native backends are available
   def create_ir_runner_with_karateka(backend: :jit)
-    require_relative '../../../examples/apple2/utilities/ir_simulator_runner'
+    require_relative '../../../examples/apple2/utilities/runners/ir_runner'
 
     # Try the requested backend, fall back to interpreter
     runner = nil
@@ -1128,7 +1128,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
 
   # Create HdlRunner with Karateka memory loaded
   def create_hdl_runner_with_karateka
-    require_relative '../../../examples/apple2/utilities/apple2_hdl'
+    require_relative '../../../examples/apple2/utilities/runners/hdl_runner'
 
     runner = RHDL::Apple2::HdlRunner.new
 

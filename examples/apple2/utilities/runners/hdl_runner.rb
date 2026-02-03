@@ -1,71 +1,20 @@
 # frozen_string_literal: true
 
-# Apple II Netlist Export and Runner
-# Provides gate-level netlist simulation for the Apple2 HDL component
-#
-# Usage:
-#   # Export netlist to JSON
-#   Apple2Netlist.export('apple2.json')
-#
-#   # Get gate-level IR
-#   ir = Apple2Netlist.gate_ir
-#
-#   # Create netlist runner for simulation
-#   runner = RHDL::Apple2::NetlistRunner.new
+# Apple II HDL Runner
+# Wraps the Apple2 HDL component for use in emulation
 
-require_relative '../hdl/apple2'
-require_relative 'ps2_encoder'
-require 'rhdl/codegen'
-
-# Load MOS6502 library (needed for lower.rb constants)
-begin
-  mos6502_cpu_path = File.expand_path('../../mos6502/hdl/cpu', __dir__)
-  require mos6502_cpu_path
-rescue LoadError
-  # MOS6502 library not available, continue without it
-end
+require_relative '../../hdl/apple2'
+require_relative '../output/speaker'
+require_relative '../output/text_renderer'
+require_relative '../output/braille_renderer'
+require_relative '../output/color_renderer'
+require_relative '../input/ps2_encoder'
 
 module RHDL
   module Apple2
-    # Utility module for exporting Apple2 component to gate-level netlist
-    module Apple2Netlist
-      class << self
-        # Export Apple2 component to gate-level IR
-        def gate_ir
-          apple2 = Apple2.new('apple2')
-          RHDL::Codegen::Netlist::Lower.from_components([apple2], name: 'apple2')
-        end
-
-        # Export to JSON file
-        def export(path)
-          ir = gate_ir
-          File.write(path, ir.to_json)
-          puts "Exported Apple2 netlist to #{path}"
-          puts "  Nets: #{ir.net_count}"
-          puts "  Gates: #{ir.gates.length}"
-          puts "  DFFs: #{ir.dffs.length}"
-          ir
-        end
-
-        # Get stats about the netlist
-        def stats
-          ir = gate_ir
-          {
-            net_count: ir.net_count,
-            gate_count: ir.gates.length,
-            dff_count: ir.dffs.length,
-            input_count: ir.inputs.length,
-            output_count: ir.outputs.length,
-            inputs: ir.inputs.keys,
-            outputs: ir.outputs.keys
-          }
-        end
-      end
-    end
-
-    # HDL-based runner using native Rust gate-level simulation
-    class NetlistRunner
-      attr_reader :sim, :ram, :ir
+    # HDL-based runner using cycle-accurate Apple2 simulation
+    class HdlRunner
+      attr_reader :apple2, :ram
 
       # Text page constants
       TEXT_PAGE1_START = 0x0400
@@ -95,44 +44,10 @@ module RHDL
         0x0B, 0x03, 0x0A, 0x02, 0x09, 0x01, 0x08, 0x0F
       ].freeze
 
-      # Backend options:
-      #   :interpret - Pure Rust interpreter (slowest, fastest startup)
-      #   :jit       - Cranelift JIT (default, balanced)
-      #   :compile   - Rustc compiled (fastest, slow startup)
-      def initialize(backend: :jit, simd: :auto)
-        @backend = backend
-        @simd = simd
-
-        backend_names = { interpret: "Interpreter", jit: "Cranelift JIT", compile: "Rustc Compiler" }
-        puts "Initializing Apple2 netlist simulation (#{backend_names[backend] || backend})..."
-        start_time = Time.now
-
-        # Generate gate-level IR
-        @ir = Apple2Netlist.gate_ir
-
-        # Create the simulator wrapper based on backend selection
-        # allow_fallback: false ensures we get an error if the native extension is missing
-        @sim = case backend
-               when :interpret
-                 RHDL::Codegen::Netlist::NetlistInterpreterWrapper.new(@ir, lanes: 1, allow_fallback: false)
-               when :jit
-                 RHDL::Codegen::Netlist::NetlistJitWrapper.new(@ir, lanes: 1, allow_fallback: false)
-               when :compile
-                 RHDL::Codegen::Netlist::NetlistCompilerWrapper.new(@ir, simd: simd, lanes: 1, allow_fallback: false)
-               else
-                 raise ArgumentError, "Unknown backend: #{backend}. Valid: :interpret, :jit, :compile"
-               end
-
-        elapsed = Time.now - start_time
-        puts "  Netlist loaded in #{elapsed.round(2)}s"
-        puts "  Native backend: #{@sim.native? ? 'Rust' : 'Ruby (fallback)'}"
-        puts "  Gates: #{@ir.gates.length}, DFFs: #{@ir.dffs.length}"
-        if backend == :compile && @sim.respond_to?(:simd_mode)
-          puts "  SIMD mode: #{@sim.simd_mode}"
-        end
-
+      def initialize
+        @apple2 = Apple2.new('apple2')
         @ram = Array.new(48 * 1024, 0)  # 48KB RAM
-        @rom = Array.new(12 * 1024, 0)  # 12KB ROM (loaded separately)
+        @rom = Array.new(12 * 1024, 0)  # 12KB ROM ($D000-$FFFF)
         @cycles = 0
         @halted = false
         @text_page_dirty = false
@@ -140,56 +55,33 @@ module RHDL
         # PS/2 keyboard encoder for sending keys through the PS/2 protocol
         @ps2_encoder = PS2Encoder.new
 
-        # Initialize and reset
-        @sim.reset
-        initialize_inputs
+        # Initialize system inputs
+        @apple2.set_input(:clk_14m, 0)
+        @apple2.set_input(:flash_clk, 0)
+        @apple2.set_input(:reset, 0)
+        @apple2.set_input(:ram_do, 0)
+        @apple2.set_input(:pd, 0)
+        @apple2.set_input(:ps2_clk, 1)   # PS/2 idle state is high
+        @apple2.set_input(:ps2_data, 1)  # PS/2 idle state is high
+        @apple2.set_input(:gameport, 0)
+        @apple2.set_input(:pause, 0)
+
+        # Track Q3 for cycle counting
+        @prev_q3 = 0
+
+        # Speaker audio simulation
+        @speaker = Speaker.new
+        @prev_speaker_state = 0
       end
 
-      def native?
-        @sim.native?
-      end
-
-      def simulator_type
-        :"netlist_#{@backend}"
-      end
-
-      # Initialize all input signals to safe defaults
-      def initialize_inputs
-        poke_input(:clk_14m, 0)
-        poke_input(:flash_clk, 0)
-        poke_input(:reset, 0)
-        poke_input(:ram_do, 0)
-        poke_input(:pd, 0)
-        poke_input(:ps2_clk, 1)   # PS/2 idle state is high
-        poke_input(:ps2_data, 1)  # PS/2 idle state is high
-        poke_input(:gameport, 0)
-        poke_input(:pause, 0)
-        @sim.evaluate
-      end
-
-      # Poke an input signal (handles port naming convention)
-      def poke_input(name, value)
-        @sim.poke("apple2.#{name}", value)
-      end
-
-      # Peek an output signal (handles port naming convention)
-      # Converts multi-bit arrays to integers
-      def peek_output(name)
-        result = @sim.peek("apple2.#{name}")
-        if result.is_a?(Array)
-          # Convert array of bit values to integer (LSB first)
-          result.each_with_index.reduce(0) { |acc, (bit, i)| acc | ((bit & 1) << i) }
-        else
-          result
-        end
-      end
-
-      # Load ROM data
+      # Load ROM data into the Apple2 component
       def load_rom(bytes, base_addr:)
         bytes = bytes.bytes if bytes.is_a?(String)
+        # Store ROM locally for read() access and ram_do provision
         bytes.each_with_index do |byte, i|
           @rom[i] = byte if i < @rom.size
         end
+        @apple2.load_rom(bytes)
       end
 
       # Load data into RAM
@@ -213,21 +105,43 @@ module RHDL
           raise ArgumentError, "Invalid disk image size: #{bytes.length} (expected #{DISK_SIZE})"
         end
 
-        # For now, just store disk data - disk controller support TBD
-        @disk_loaded = true
+        # Load disk boot ROM
+        load_disk_boot_rom
+
+        # Convert DSK to nibblized tracks and load each track
         @disk_tracks = encode_disk(bytes)
-        puts "Warning: Disk support in netlist mode is limited"
+        @disk_loaded = true
+        @current_track = 0
+
+        # Load initial track (track 0)
+        load_track_to_controller(0)
       end
 
       def disk_loaded?(drive: 0)
         @disk_loaded || false
       end
 
+      def load_disk_boot_rom
+        boot_rom_path = File.expand_path('../../software/roms/disk2_boot.bin', __dir__)
+        if File.exist?(boot_rom_path)
+          rom_data = File.binread(boot_rom_path).bytes
+          @apple2.load_disk_boot_rom(rom_data)
+        else
+          warn "Disk II boot ROM not found at #{boot_rom_path}"
+        end
+      end
+
+      def load_track_to_controller(track_num)
+        return unless @disk_tracks && track_num < @disk_tracks.length
+        track_data = @disk_tracks[track_num]
+        @apple2.load_disk_track(track_num, track_data)
+      end
+
       # Reset the system
       def reset
-        poke_input(:reset, 1)
+        @apple2.set_input(:reset, 1)
         run_14m_cycles(14)  # Hold reset for a few cycles
-        poke_input(:reset, 0)
+        @apple2.set_input(:reset, 0)
         run_14m_cycles(14 * 10)  # Let system settle
         @cycles = 0
         @halted = false
@@ -243,7 +157,7 @@ module RHDL
 
       # Run a single CPU cycle
       def run_cpu_cycle
-        # Run 14MHz cycles until we complete a CPU cycle
+        # Run 14MHz cycles until we see a Q3 rising edge with enable
         14.times do
           run_14m_cycle
         end
@@ -254,43 +168,48 @@ module RHDL
       def run_14m_cycle
         # Update PS/2 keyboard signals from encoder
         ps2_clk, ps2_data = @ps2_encoder.next_ps2_state
-        poke_input(:ps2_clk, ps2_clk)
-        poke_input(:ps2_data, ps2_data)
+        @apple2.set_input(:ps2_clk, ps2_clk)
+        @apple2.set_input(:ps2_data, ps2_data)
 
         # Falling edge
-        poke_input(:clk_14m, 0)
-        @sim.evaluate
+        @apple2.set_input(:clk_14m, 0)
+        @apple2.propagate
 
         # Provide RAM/ROM data based on address
-        ram_addr = peek_output(:ram_addr)
+        ram_addr = @apple2.get_output(:ram_addr)
         if ram_addr >= 0xD000 && ram_addr <= 0xFFFF
-          # ROM access
+          # ROM range ($D000-$FFFF)
           rom_offset = ram_addr - 0xD000
-          poke_input(:ram_do, @rom[rom_offset] || 0)
+          @apple2.set_input(:ram_do, @rom[rom_offset] || 0)
         elsif ram_addr < @ram.size
-          # RAM access
-          poke_input(:ram_do, @ram[ram_addr] || 0)
+          @apple2.set_input(:ram_do, @ram[ram_addr] || 0)
         else
-          poke_input(:ram_do, 0)
+          @apple2.set_input(:ram_do, 0)
         end
-        @sim.evaluate
+        @apple2.propagate
 
-        # Rising edge - use tick for DFF state update
-        poke_input(:clk_14m, 1)
-        @sim.tick
+        # Rising edge
+        @apple2.set_input(:clk_14m, 1)
+        @apple2.propagate
 
         # Handle RAM writes
-        ram_we = peek_output(:ram_we)
+        ram_we = @apple2.get_output(:ram_we)
         if ram_we == 1
-          write_addr = peek_output(:ram_addr)
+          write_addr = @apple2.get_output(:ram_addr)
           if write_addr < @ram.size
-            data = peek_output(:d)
-            @ram[write_addr] = data & 0xFF
+            @ram[write_addr] = @apple2.get_output(:d)
             # Mark text page dirty
             if write_addr >= TEXT_PAGE1_START && write_addr <= TEXT_PAGE1_END
               @text_page_dirty = true
             end
           end
+        end
+
+        # Monitor speaker output for state changes
+        speaker_state = @apple2.get_output(:speaker)
+        if speaker_state != @prev_speaker_state
+          @speaker.toggle
+          @prev_speaker_state = speaker_state
         end
       end
 
@@ -345,8 +264,9 @@ module RHDL
       end
 
       # Read hi-res graphics as raw bitmap (192 rows x 280 pixels)
+      # Returns 2D array of 0/1 values
       def read_hires_bitmap
-        base = HIRES_PAGE1_START
+        base = HIRES_PAGE1_START  # Always use page 1 for now
         bitmap = []
 
         HIRES_HEIGHT.times do |row|
@@ -355,6 +275,7 @@ module RHDL
 
           HIRES_BYTES_PER_LINE.times do |col|
             byte = @ram[line_addr + col] || 0
+            # Each byte has 7 pixels (bit 7 is color/palette select)
             7.times do |bit|
               line << ((byte >> bit) & 1)
             end
@@ -366,79 +287,50 @@ module RHDL
         bitmap
       end
 
-      # Render hi-res screen using Unicode braille characters
+      # Render hi-res screen using Unicode braille characters (2x4 dots per char)
+      # This gives much higher resolution than ASCII art
+      # chars_wide: target width in characters (default 80)
       def render_hires_braille(chars_wide: 80, invert: false)
         bitmap = read_hires_bitmap
-
-        chars_tall = (HIRES_HEIGHT / 4.0).ceil
-        x_scale = HIRES_WIDTH.to_f / (chars_wide * 2)
-        y_scale = HIRES_HEIGHT.to_f / (chars_tall * 4)
-
-        dot_map = [
-          [0x01, 0x08],
-          [0x02, 0x10],
-          [0x04, 0x20],
-          [0x40, 0x80]
-        ]
-
-        lines = []
-        chars_tall.times do |char_y|
-          line = String.new
-          chars_wide.times do |char_x|
-            pattern = 0
-
-            4.times do |dy|
-              2.times do |dx|
-                px = ((char_x * 2 + dx) * x_scale).to_i
-                py = ((char_y * 4 + dy) * y_scale).to_i
-                px = [px, HIRES_WIDTH - 1].min
-                py = [py, HIRES_HEIGHT - 1].min
-
-                pixel = bitmap[py][px]
-                pixel = 1 - pixel if invert
-                pattern |= dot_map[dy][dx] if pixel == 1
-              end
-            end
-
-            line << (0x2800 + pattern).chr(Encoding::UTF_8)
-          end
-          lines << line
-        end
-
-        lines.join("\n")
+        renderer = BrailleRenderer.new(chars_wide: chars_wide, invert: invert)
+        renderer.render(bitmap)
       end
 
-      # Hi-res screen line address calculation
+      # Render hi-res screen with NTSC artifact colors
+      # chars_wide: target width in characters (default 140)
+      def render_hires_color(chars_wide: 140)
+        renderer = ColorRenderer.new(chars_wide: chars_wide)
+        renderer.render(@ram, base_addr: HIRES_PAGE1_START)
+      end
+
+      # Hi-res screen line address calculation (Apple II interleaved layout)
       def hires_line_address(row, base = HIRES_PAGE1_START)
-        section = row / 64
+        # row 0-191
+        # Each group of 8 consecutive rows is separated by 0x400 bytes
+        # Groups of 8 lines within a section are 0x80 apart
+        # Sections (0-63, 64-127, 128-191) are 0x28 apart
+
+        section = row / 64           # 0, 1, or 2
         row_in_section = row % 64
-        group = row_in_section / 8
-        line_in_group = row_in_section % 8
+        group = row_in_section / 8   # 0-7
+        line_in_group = row_in_section % 8  # 0-7
 
         base + (line_in_group * 0x400) + (group * 0x80) + (section * 0x28)
       end
 
       # Get CPU state for debugging
-      # Netlist mode uses fully flattened gate-level IR, so debug signals should work
       def cpu_state
         {
-          pc: safe_peek(:pc_debug),
-          a: safe_peek(:a_debug),
-          x: safe_peek(:x_debug),
-          y: safe_peek(:y_debug),
+          pc: @apple2.get_output(:pc_debug),
+          a: @apple2.get_output(:a_debug),
+          x: @apple2.get_output(:x_debug),
+          y: @apple2.get_output(:y_debug),
           sp: 0xFF,  # TODO: Add S register debug output
           p: 0,      # TODO: Add P register debug output
           cycles: @cycles,
           halted: @halted,
-          simulator_type: simulator_type
+          simulator_type: :hdl_ruby
         }
-      end
-
-      # Safely peek an output, returning 0 on error
-      def safe_peek(name)
-        peek_output(name)
-      rescue StandardError
-        0
       end
 
       def halted?
@@ -449,13 +341,22 @@ module RHDL
         @cycles
       end
 
+      def simulator_type
+        :hdl_ruby
+      end
+
+      def native?
+        false
+      end
+
       # Bus-like interface for compatibility
       def bus
         self
       end
 
+      # Stub methods for compatibility with Apple2Terminal
       def tick(cycles)
-        # No-op for netlist
+        # No-op for HDL
       end
 
       def disk_controller
@@ -463,7 +364,7 @@ module RHDL
       end
 
       def speaker
-        @speaker ||= SpeakerStub.new
+        @speaker
       end
 
       def display_mode
@@ -471,18 +372,19 @@ module RHDL
       end
 
       def start_audio
-        # No-op
+        @speaker.start
       end
 
       def stop_audio
-        # No-op
+        @speaker.stop
       end
 
       def read(addr)
-        if addr < @ram.size
-          @ram[addr]
-        elsif addr >= 0xD000 && addr <= 0xFFFF
+        if addr >= 0xD000 && addr <= 0xFFFF
+          # ROM range
           @rom[addr - 0xD000] || 0
+        elsif addr < @ram.size
+          @ram[addr]
         else
           0
         end
@@ -497,7 +399,10 @@ module RHDL
       private
 
       # Apple II text screen line address calculation
+      # The text screen uses an interleaved memory layout
       def text_line_address(row)
+        # Apple II text page memory layout (base $0400)
+        # Lines are interleaved in groups of 8
         group = row / 8
         line_in_group = row % 8
         TEXT_PAGE1_START + (line_in_group * 0x80) + (group * 0x28)
@@ -523,6 +428,7 @@ module RHDL
         tracks
       end
 
+      # Encode a single sector with address field, gaps, and data field
       def encode_sector(track, sector, data)
         encoded = []
 
@@ -562,6 +468,7 @@ module RHDL
         encoded
       end
 
+      # 4-and-4 encoding for address field
       def encode_4and4(byte)
         [
           ((byte >> 1) & 0x55) | 0xAA,
@@ -569,6 +476,7 @@ module RHDL
         ]
       end
 
+      # 6-and-2 encoding for data field
       def encode_6and2(data)
         translate = [
           0x96, 0x97, 0x9A, 0x9B, 0x9D, 0x9E, 0x9F, 0xA6,
@@ -583,6 +491,7 @@ module RHDL
 
         buffer = Array.new(342, 0)
 
+        # Extract 2-bit values
         86.times do |i|
           val = 0
           val |= ((data[i] || 0) & 0x01) << 1
@@ -594,10 +503,12 @@ module RHDL
           buffer[i] = val
         end
 
+        # Store 6-bit values
         256.times do |i|
           buffer[86 + i] = (data[i] || 0) >> 2
         end
 
+        # XOR encode and translate
         encoded = []
         checksum = 0
 
@@ -607,13 +518,14 @@ module RHDL
           encoded << translate[val & 0x3F]
         end
 
+        # Append checksum
         encoded << translate[checksum & 0x3F]
 
         encoded
       end
     end
 
-    # Stub for disk controller (reuse from harness)
+    # Stub for disk controller (not yet implemented)
     class DiskControllerStub
       def track
         0
@@ -624,7 +536,7 @@ module RHDL
       end
     end
 
-    # Stub for speaker (reuse from harness)
+    # Stub for speaker (not yet implemented)
     class SpeakerStub
       def status
         "OFF"

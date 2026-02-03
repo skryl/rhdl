@@ -3,7 +3,7 @@
 require 'spec_helper'
 require 'rhdl'
 require_relative '../../../examples/apple2/hdl/apple2'
-require_relative '../../../examples/apple2/utilities/braille_renderer'
+require_relative '../../../examples/apple2/utilities/output/braille_renderer'
 
 RSpec.describe 'VerilatorRunner' do
   # Only run tests if Verilator is available
@@ -19,7 +19,7 @@ RSpec.describe 'VerilatorRunner' do
 
   before(:all) do
     if verilator_available?
-      require_relative '../../../examples/apple2/utilities/apple2_verilator'
+      require_relative '../../../examples/apple2/utilities/runners/verilator_runner'
     end
     @rom_available = File.exist?(ROM_PATH)
     @karateka_available = File.exist?(KARATEKA_MEM_PATH)

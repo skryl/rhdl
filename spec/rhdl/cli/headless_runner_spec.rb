@@ -5,7 +5,7 @@ require 'tempfile'
 
 # Require the headless runners with explicit paths
 require_relative '../../../examples/mos6502/utilities/headless_runner'
-require_relative '../../../examples/apple2/utilities/headless_runner'
+require_relative '../../../examples/apple2/utilities/runners/headless_runner'
 require_relative '../../../examples/gameboy/utilities/headless_runner'
 
 RSpec.describe 'Headless Runners', :slow do
