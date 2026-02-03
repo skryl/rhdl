@@ -23,6 +23,7 @@
 *.dylib
 /examples/mos6502/utilities/isa_simulator_native/target/
 /examples/mos6502/utilities/isa_simulator_native/lib/
+/examples/mos6502/utilities/simulators/
 
 # Native extension build artifacts (netlist/sim)
 lib/rhdl/codegen/netlist/sim/netlist_interpreter/target/
