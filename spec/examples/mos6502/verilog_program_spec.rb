@@ -4,7 +4,7 @@
 
 require_relative 'spec_helper'
 require_relative '../../../examples/mos6502/hdl/harness'
-require_relative '../../../examples/mos6502/utilities/assembler'
+require_relative '../../../examples/mos6502/utilities/asm/assembler'
 require 'fileutils'
 
 RSpec.describe 'MOS6502 Verilog Program Execution', :slow, if: HdlToolchain.iverilog_available? do
