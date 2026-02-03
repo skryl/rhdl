@@ -1,6 +1,6 @@
 # Apple ][-style memory bus with I/O page and soft switches
 
-require_relative '../../../lib/rhdl/hdl'
+require_relative '../../../../lib/rhdl/hdl'
 require_relative '../input/disk2'
 require_relative '../output/speaker'
 require_relative '../renderers/color_renderer'

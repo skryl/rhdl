@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 require 'rhdl'
-require_relative '../../../examples/apple2/utilities/renderers/braille_renderer'
+require_relative '../../../../examples/apple2/utilities/renderers/braille_renderer'
 
 RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   # Compare all 4 MOS6502 simulators:
@@ -13,8 +13,8 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   #
   # All use internalized memory - this isolates CPU behavior differences
 
-  ROM_PATH = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
-  KARATEKA_MEM_PATH = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
+  ROM_PATH = File.expand_path('../../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
+  KARATEKA_MEM_PATH = File.expand_path('../../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
 
   # Test parameters
   TOTAL_CYCLES = 2_000_000       # 2M cycles for 4-way comparison

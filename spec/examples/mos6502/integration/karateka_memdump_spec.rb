@@ -3,15 +3,15 @@
 require 'spec_helper'
 require 'rhdl'
 
-require_relative '../../../examples/mos6502/utilities/apple2/harness'
+require_relative '../../../../examples/mos6502/utilities/apple2/harness'
 
 RSpec.describe 'Karateka memory dump' do
   let(:karateka_bin) do
-    File.expand_path('../../../../examples/mos6502/software/disks/karateka_mem.bin', __FILE__)
+    File.expand_path('../../../../../examples/mos6502/software/disks/karateka_mem.bin', __FILE__)
   end
 
   let(:karateka_meta) do
-    File.expand_path('../../../../examples/mos6502/software/disks/karateka_mem_meta.txt', __FILE__)
+    File.expand_path('../../../../../examples/mos6502/software/disks/karateka_mem_meta.txt', __FILE__)
   end
 
   describe 'memory dump file' do

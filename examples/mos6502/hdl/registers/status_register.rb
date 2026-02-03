@@ -9,9 +9,9 @@
 #   Bit 1: Z - Zero
 #   Bit 0: C - Carry
 
-require_relative '../../../lib/rhdl'
-require_relative '../../../lib/rhdl/dsl/behavior'
-require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../../lib/rhdl'
+require_relative '../../../../lib/rhdl/dsl/behavior'
+require_relative '../../../../lib/rhdl/dsl/sequential'
 
 module MOS6502
   class StatusRegister < RHDL::HDL::SequentialComponent

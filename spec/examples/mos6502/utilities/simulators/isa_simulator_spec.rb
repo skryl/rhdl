@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'rspec'
-require_relative '../../../../lib/rhdl'
-require_relative '../../../../examples/mos6502/utilities/simulators/isa_simulator'
-require_relative '../../../support/mos6502_assembler'
+require_relative '../../../../../lib/rhdl'
+require_relative '../../../../../examples/mos6502/utilities/simulators/isa_simulator'
+require_relative '../../../../support/mos6502_assembler'
 
 RSpec.describe MOS6502::ISASimulator do
   let(:sim) { MOS6502::ISASimulator.new }
