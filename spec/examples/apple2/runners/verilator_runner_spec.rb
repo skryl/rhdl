@@ -2,8 +2,8 @@
 
 require 'spec_helper'
 require 'rhdl'
-require_relative '../../../examples/apple2/hdl/apple2'
-require_relative '../../../examples/apple2/utilities/output/braille_renderer'
+require_relative '../../../../examples/apple2/hdl/apple2'
+require_relative '../../../../examples/apple2/utilities/output/braille_renderer'
 
 RSpec.describe 'VerilatorRunner' do
   # Only run tests if Verilator is available
@@ -14,12 +14,12 @@ RSpec.describe 'VerilatorRunner' do
   end
 
   # ROM and memory paths for Karateka tests
-  ROM_PATH = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
-  KARATEKA_MEM_PATH = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
+  ROM_PATH = File.expand_path('../../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
+  KARATEKA_MEM_PATH = File.expand_path('../../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
 
   before(:all) do
     if verilator_available?
-      require_relative '../../../examples/apple2/utilities/runners/verilator_runner'
+      require_relative '../../../../examples/apple2/utilities/runners/verilator_runner'
     end
     @rom_available = File.exist?(ROM_PATH)
     @karateka_available = File.exist?(KARATEKA_MEM_PATH)

@@ -2,8 +2,7 @@
 
 require 'spec_helper'
 
-$LOAD_PATH.unshift File.expand_path('../../../examples/apple2/utilities', __dir__)
-require 'braille_renderer'
+require_relative '../../../../examples/apple2/utilities/renderers/braille_renderer'
 
 RSpec.describe RHDL::Apple2::BrailleRenderer do
   let(:renderer) { described_class.new }

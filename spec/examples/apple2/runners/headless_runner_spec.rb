@@ -4,7 +4,7 @@ require 'spec_helper'
 require 'tempfile'
 
 # Add the utilities path to load the headless runner
-$LOAD_PATH.unshift(File.expand_path('../../../../examples/apple2/utilities', __FILE__))
+$LOAD_PATH.unshift(File.expand_path('../../../../../examples/apple2/utilities', __FILE__))
 require 'runners/headless_runner'
 
 RSpec.describe RHDL::Apple2::HeadlessRunner, :slow do
@@ -235,7 +235,7 @@ RSpec.describe RHDL::Apple2::HeadlessRunner, :slow do
     end
 
     context 'with karateka' do
-      let(:karateka_memdump) { File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__) }
+      let(:karateka_memdump) { File.expand_path('../../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__) }
 
       before(:each) do
         skip 'Karateka memdump not available' unless File.exist?(karateka_memdump)

@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 require 'rhdl'
-require_relative '../../../examples/apple2/hdl/video_generator'
+require_relative '../../../../examples/apple2/hdl/video_generator'
 
 RSpec.describe RHDL::Apple2::VideoGenerator do
   let(:video_gen) { described_class.new('video_gen') }

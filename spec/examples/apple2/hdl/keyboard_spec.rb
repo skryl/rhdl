@@ -2,9 +2,9 @@
 
 require 'spec_helper'
 require 'rhdl'
-require_relative '../../../examples/apple2/hdl/keyboard'
-require_relative '../../support/vhdl_reference_helper'
-require_relative '../../support/hdl_toolchain'
+require_relative '../../../../examples/apple2/hdl/keyboard'
+require_relative '../../../support/vhdl_reference_helper'
+require_relative '../../../support/hdl_toolchain'
 
 RSpec.describe RHDL::Apple2::Keyboard do
   extend VhdlReferenceHelper

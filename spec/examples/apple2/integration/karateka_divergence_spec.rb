@@ -2,8 +2,8 @@
 
 require 'spec_helper'
 require 'rhdl'
-require_relative '../../../examples/apple2/hdl/apple2'
-require_relative '../../../examples/apple2/utilities/output/braille_renderer'
+require_relative '../../../../examples/apple2/hdl/apple2'
+require_relative '../../../../examples/apple2/utilities/output/braille_renderer'
 
 # Verilator availability check
 def verilator_available?
@@ -16,8 +16,8 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   # Test verifies that ISA and IR simulators execute the same code paths
   # by checking that PC and opcode sequences match as subsequences (allowing timing drift)
 
-  ROM_PATH = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
-  KARATEKA_MEM_PATH = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
+  ROM_PATH = File.expand_path('../../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
+  KARATEKA_MEM_PATH = File.expand_path('../../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
 
   # Test parameters - can be overridden via environment variables
   # Usage: START_CYCLES=0 END_CYCLES=20000000 rspec spec/examples/apple2/karateka_divergence_spec.rb
@@ -47,15 +47,15 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   end
 
   def native_isa_available?
-    require_relative '../../../examples/mos6502/utilities/isa_simulator_native'
+    require_relative '../../../../examples/mos6502/utilities/isa_simulator_native'
     MOS6502::NATIVE_AVAILABLE
   rescue LoadError
     false
   end
 
   def create_isa_simulator
-    require_relative '../../../examples/mos6502/utilities/apple2_bus'
-    require_relative '../../../examples/mos6502/utilities/isa_simulator_native'
+    require_relative '../../../../examples/mos6502/utilities/apple2_bus'
+    require_relative '../../../../examples/mos6502/utilities/isa_simulator_native'
 
     karateka_rom = create_karateka_rom
     bus = MOS6502::Apple2Bus.new
@@ -106,7 +106,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   def verilator_runner_available?
     return false unless verilator_available?
     begin
-      require_relative '../../../examples/apple2/utilities/runners/verilator_runner'
+      require_relative '../../../../examples/apple2/utilities/runners/verilator_runner'
       true
     rescue LoadError
       false
@@ -114,7 +114,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   end
 
   def create_verilator_runner
-    require_relative '../../../examples/apple2/utilities/runners/verilator_runner'
+    require_relative '../../../../examples/apple2/utilities/runners/verilator_runner'
 
     runner = RHDL::Apple2::VerilatorRunner.new(sub_cycles: 14)
 
