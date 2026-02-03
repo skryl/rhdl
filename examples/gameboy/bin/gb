@@ -42,7 +42,7 @@ class GameBoyTerminal
   def initialize(options = {})
     @options = options
     @sim_mode = options[:mode] || :hdl
-    @sim_backend = options[:sim] || :ruby
+    @sim_backend = options[:sim] || :compile
 
     # Create runner based on simulation mode and backend
     @runner = case @sim_mode
@@ -52,11 +52,27 @@ class GameBoyTerminal
                   RHDL::GameBoy::HdlRunner.new
                 else
                   # IR simulation with native backends
-                  require 'gameboy_ir'
-                  RHDL::GameBoy::IrRunner.new(backend: @sim_backend)
+                  begin
+                    require 'gameboy_ir'
+                    RHDL::GameBoy::IrRunner.new(backend: @sim_backend)
+                  rescue LoadError, NoMethodError => e
+                    # Fall back to Ruby simulation if native extensions unavailable
+                    puts "Warning: Native backend '#{@sim_backend}' not available: #{e.message}"
+                    puts "Falling back to Ruby simulation..."
+                    @sim_backend = :ruby
+                    RHDL::GameBoy::HdlRunner.new
+                  end
+                end
+              when :verilog
+                # Verilator RTL simulation
+                begin
+                  require 'gameboy_verilator'
+                  RHDL::GameBoy::VerilatorRunner.new
+                rescue LoadError => e
+                  raise ArgumentError, "Verilator mode requires Verilator to be installed: #{e.message}"
                 end
               else
-                raise ArgumentError, "Unknown mode: #{@sim_mode}. Use :hdl"
+                raise ArgumentError, "Unknown mode: #{@sim_mode}. Use :hdl or :verilog"
               end
 
     @sim_type = @runner.simulator_type
@@ -66,6 +82,7 @@ class GameBoyTerminal
     @debug = options[:debug] || false
     @dmg_colors = options[:dmg_colors] || true
     @audio_enabled = options[:audio] || false
+    @renderer_type = options[:renderer] || :color
 
     # Terminal size
     @term_rows = 24
@@ -105,9 +122,13 @@ class GameBoyTerminal
       end
     end
 
+    # Calculate LCD height based on renderer type
+    # Braille: 144/4 = 36 rows, Color: 144/2 = 72 rows
+    @lcd_height = @renderer_type == :braille ? LCD_CHARS_TALL : (SCREEN_HEIGHT / 2.0).ceil
+
     # Calculate padding for LCD display
-    lcd_height = LCD_CHARS_TALL + (@debug ? 8 : 2)
-    @pad_top = [(@term_rows - lcd_height) / 2, 0].max
+    lcd_height_with_debug = @lcd_height + (@debug ? 8 : 2)
+    @pad_top = [(@term_rows - lcd_height_with_debug) / 2, 0].max
     @pad_left = [(@term_cols - @lcd_width) / 2, 0].max
   end
 
@@ -325,8 +346,12 @@ class GameBoyTerminal
 
   def handle_command_key(ascii)
     case ascii
-    when 67, 99  # C - toggle color mode
+    when 67, 99  # C - toggle DMG color mode (green tint)
       @dmg_colors = !@dmg_colors
+      print CLEAR_SCREEN
+    when 82, 114  # R - toggle renderer (color/braille)
+      @renderer_type = @renderer_type == :color ? :braille : :color
+      update_terminal_size
       print CLEAR_SCREEN
     end
   end
@@ -334,13 +359,18 @@ class GameBoyTerminal
   def render_screen
     output = String.new
 
-    if @dmg_colors
-      output << GREEN_FG
-      output << BLACK_BG
+    # Render LCD using selected renderer
+    if @renderer_type == :braille
+      if @dmg_colors
+        output << GREEN_FG
+        output << BLACK_BG
+      end
+      lcd_output = @runner.render_lcd_braille(chars_wide: @lcd_width, invert: false)
+    else
+      # Color renderer
+      lcd_output = @runner.render_lcd_color(chars_wide: @lcd_width)
     end
 
-    # Render LCD using braille characters
-    lcd_output = @runner.render_lcd_braille(chars_wide: @lcd_width, invert: false)
     lcd_lines = lcd_output.split("\n")
 
     # Render each line with proper centering
@@ -349,7 +379,7 @@ class GameBoyTerminal
       output << line
     end
 
-    output << NORMAL_VIDEO if @dmg_colors
+    output << NORMAL_VIDEO if @dmg_colors && @renderer_type == :braille
 
     # Debug window
     if @debug
@@ -372,11 +402,11 @@ class GameBoyTerminal
       # Line 3: Input / mode
       spk = @runner.speaker
       audio_status = @audio_enabled ? (spk.active? ? "PLAY" : spk.status) : "off"
-      line3 = format("Key:%-3s | KB:%s | Aud:%s",
-                     format_key(@last_key), kb_mode, audio_status)
+      line3 = format("Key:%-3s | KB:%s | Aud:%s | Rend:%s",
+                     format_key(@last_key), kb_mode, audio_status, @renderer_type)
 
       # Line 4: Help
-      line4 = "ESC:cmd | C:color | Arrows:speed | ZXAS:ABSS"
+      line4 = "ESC:cmd | R:renderer | Arrows:speed | ZXAS:ABSS"
 
       line1 = line1.ljust(debug_width)[0, debug_width]
       line2 = line2.ljust(debug_width)[0, debug_width]
@@ -466,9 +496,9 @@ class GameBoyTerminal
 
     print SHOW_CURSOR
     print NORMAL_VIDEO
-    exit_row = @pad_top + LCD_CHARS_TALL + (@debug ? 11 : 5)
+    exit_row = @pad_top + @lcd_height + (@debug ? 11 : 5)
     print move_cursor(exit_row, 1)
-    puts "Game Boy HDL emulator terminated."
+    puts "Game Boy emulator terminated."
   end
 end
 
@@ -530,7 +560,8 @@ options = {
   pop: false,
   audio: false,
   mode: :hdl,
-  sim: :ruby
+  sim: :compile,
+  renderer: :color  # Default to color renderer instead of braille
 }
 
 parser = OptionParser.new do |opts|
@@ -539,12 +570,20 @@ parser = OptionParser.new do |opts|
   opts.separator "Game Boy HDL Terminal Emulator - Cycle-accurate simulation"
   opts.separator ""
 
-  opts.on("-m", "--mode TYPE", [:hdl], "Simulation mode: hdl (default)") do |v|
+  opts.on("-m", "--mode TYPE", [:hdl, :verilog], "Simulation mode: hdl (default), verilog (Verilator RTL)") do |v|
     options[:mode] = v
   end
 
-  opts.on("--sim TYPE", [:ruby, :interpret, :jit, :compile], "Simulator backend: ruby (default), interpret, jit, compile") do |v|
+  opts.on("--sim TYPE", [:ruby, :interpret, :jit, :compile], "Simulator backend: ruby, interpret, jit, compile (default)") do |v|
     options[:sim] = v
+  end
+
+  opts.on("--color", "Use color renderer (default)") do
+    options[:renderer] = :color
+  end
+
+  opts.on("--braille", "Use braille renderer") do
+    options[:renderer] = :braille
   end
 
   opts.on("-s", "--speed CYCLES", Integer, "Cycles per frame (default: 100)") do |v|

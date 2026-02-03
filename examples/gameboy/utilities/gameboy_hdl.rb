@@ -269,6 +269,12 @@ module RHDL
         renderer.render_braille(read_framebuffer)
       end
 
+      # Render screen using color half-block characters
+      def render_lcd_color(chars_wide: 80, invert: false)
+        renderer = LcdRenderer.new(chars_wide: chars_wide, invert: invert)
+        renderer.render_color(read_framebuffer)
+      end
+
       # Get CPU state
       def cpu_state
         {
