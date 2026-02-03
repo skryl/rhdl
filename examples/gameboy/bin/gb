@@ -614,10 +614,6 @@ parser = OptionParser.new do |opts|
     options[:lcd_width] = v
   end
 
-  opts.on("--dry-run", "Output engine info without running") do
-    options[:dry_run] = true
-  end
-
   opts.on("-h", "--help", "Show help") do
     puts opts
     exit
@@ -654,14 +650,6 @@ else
   puts ""
   puts "Error: No ROM specified. Use --demo, --pop, or provide a ROM file."
   exit 1
-end
-
-# Handle dry-run mode
-if options[:dry_run]
-  require 'json'
-  info = terminal.runner.dry_run_info
-  puts JSON.pretty_generate(info)
-  exit 0
 end
 
 terminal.run

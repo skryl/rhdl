@@ -404,17 +404,6 @@ module RHDL
         @cycles
       end
 
-      def dry_run_info
-        {
-          mode: :hdl,
-          simulator_type: simulator_type,
-          native: native?,
-          backend: @backend,
-          cpu_state: cpu_state,
-          rom_size: @rom.length
-        }
-      end
-
       def speaker
         @speaker
       end
