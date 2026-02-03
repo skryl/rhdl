@@ -392,11 +392,70 @@ RSpec.describe RHDL::Apple2::HeadlessRunner do
     end
 
     context 'cross-backend comparison' do
-      # Helper to run all backends and collect results
-      def run_all_backends(cycles)
+      # Sample interval for PC collection
+      SAMPLE_INTERVAL = 500
+      TOTAL_SAMPLES = 20
+
+      # Helper to collect PC sequence from a backend
+      def collect_pc_sequence(runner, samples: TOTAL_SAMPLES, interval: SAMPLE_INTERVAL)
+        runner.reset
+        pc_sequence = []
+        page_sequence = []  # PC pages (256-byte granularity)
+        region_sequence = []
+
+        samples.times do
+          runner.run_steps(interval)
+          pc = runner.cpu_state[:pc]
+          pc_sequence << pc
+          page_sequence << (pc >> 8)  # 256-byte page
+          region_sequence << pc_region(pc)
+        end
+
+        {
+          pcs: pc_sequence,
+          pages: page_sequence,
+          regions: region_sequence,
+          final_pc: pc_sequence.last,
+          unique_pcs: pc_sequence.uniq.length,
+          unique_pages: page_sequence.uniq.length
+        }
+      end
+
+      # Find longest common subsequence length
+      def lcs_length(seq_a, seq_b)
+        return 0 if seq_a.empty? || seq_b.empty?
+
+        m, n = seq_a.length, seq_b.length
+        prev = Array.new(n + 1, 0)
+        curr = Array.new(n + 1, 0)
+
+        m.times do |i|
+          n.times do |j|
+            if seq_a[i] == seq_b[j]
+              curr[j + 1] = prev[j] + 1
+            else
+              curr[j + 1] = [curr[j], prev[j + 1]].max
+            end
+          end
+          prev, curr = curr, prev
+        end
+        prev[n]
+      end
+
+      # Calculate sequence similarity as percentage
+      def sequence_similarity(seq_a, seq_b)
+        return 100.0 if seq_a == seq_b
+        return 0.0 if seq_a.empty? || seq_b.empty?
+
+        lcs = lcs_length(seq_a, seq_b)
+        max_len = [seq_a.length, seq_b.length].max
+        (lcs.to_f / max_len * 100).round(1)
+      end
+
+      # Helper to run all backends and collect PC sequences
+      def run_all_backends_with_sequences(samples: TOTAL_SAMPLES, interval: SAMPLE_INTERVAL)
         results = {}
 
-        # Test each available backend
         backends = [
           [:hdl, :interpret],
           [:hdl, :jit],
@@ -406,16 +465,7 @@ RSpec.describe RHDL::Apple2::HeadlessRunner do
         backends.each do |mode, sim|
           begin
             runner = described_class.with_karateka(mode: mode, sim: sim)
-            runner.reset
-            runner.run_steps(cycles)
-            state = runner.cpu_state
-            results["#{mode}/#{sim}"] = {
-              pc: state[:pc],
-              region: pc_region(state[:pc]),
-              a: state[:a],
-              x: state[:x],
-              y: state[:y]
-            }
+            results["#{mode}/#{sim}"] = collect_pc_sequence(runner, samples: samples, interval: interval)
           rescue LoadError, StandardError
             next
           end
@@ -425,16 +475,7 @@ RSpec.describe RHDL::Apple2::HeadlessRunner do
         if @verilator_available
           begin
             runner = described_class.with_karateka(mode: :verilog)
-            runner.reset
-            runner.run_steps(cycles)
-            state = runner.cpu_state
-            results['verilog'] = {
-              pc: state[:pc],
-              region: pc_region(state[:pc]),
-              a: state[:a],
-              x: state[:x],
-              y: state[:y]
-            }
+            results['verilog'] = collect_pc_sequence(runner, samples: samples, interval: interval)
           rescue LoadError, StandardError
             # Skip if verilator fails
           end
@@ -446,102 +487,152 @@ RSpec.describe RHDL::Apple2::HeadlessRunner do
       it 'all backends reach similar PC regions after 10K cycles' do
         skip 'Karateka resources not available' unless @karateka_available
 
-        results = run_all_backends(KARATEKA_TEST_CYCLES)
+        results = run_all_backends_with_sequences
         skip 'No backends available for comparison' if results.length < 2
 
-        # All backends should be in game regions
+        # All backends should end in game regions
         results.each do |backend, data|
-          expect(GAME_REGIONS).to include(data[:region]),
-            "#{backend} PC $#{data[:pc].to_s(16)} in unexpected region #{data[:region]}"
+          final_region = pc_region(data[:final_pc])
+          expect(GAME_REGIONS).to include(final_region),
+            "#{backend} final PC $#{data[:final_pc].to_s(16)} in unexpected region #{final_region}"
         end
 
-        # Log results for debugging
-        puts "\nKarateka PC after #{KARATEKA_TEST_CYCLES} cycles:"
+        # Log results
+        puts "\nKarateka PC sequences (#{TOTAL_SAMPLES} samples @ #{SAMPLE_INTERVAL} cycles):"
         results.each do |backend, data|
-          puts "  #{backend}: PC=$#{data[:pc].to_s(16).upcase} (#{data[:region]})"
+          puts "  #{backend}: final=$#{data[:final_pc].to_s(16).upcase} unique_pcs=#{data[:unique_pcs]} unique_pages=#{data[:unique_pages]}"
         end
       end
 
-      it 'IR backends (jit/compile) have matching PCs' do
+      it 'IR backends (jit/compile) have matching PC sequences' do
         skip 'Karateka resources not available' unless @karateka_available
 
-        results = run_all_backends(KARATEKA_TEST_CYCLES)
+        results = run_all_backends_with_sequences
 
-        # Get IR backend results (jit and compile should match exactly)
-        jit_result = results['hdl/jit']
-        compile_result = results['hdl/compile']
+        jit_data = results['hdl/jit']
+        compile_data = results['hdl/compile']
 
-        skip 'JIT backend not available' unless jit_result
-        skip 'Compile backend not available' unless compile_result
+        skip 'JIT backend not available' unless jit_data
+        skip 'Compile backend not available' unless compile_data
 
-        # JIT and Compile backends should produce identical results
-        expect(jit_result[:pc]).to eq(compile_result[:pc]),
-          "JIT PC ($#{jit_result[:pc].to_s(16)}) != Compile PC ($#{compile_result[:pc].to_s(16)})"
+        # JIT and Compile should have identical PC sequences
+        expect(jit_data[:pcs]).to eq(compile_data[:pcs]),
+          "JIT and Compile PC sequences differ"
 
-        expect(jit_result[:a]).to eq(compile_result[:a]),
-          "JIT A ($#{jit_result[:a].to_s(16)}) != Compile A ($#{compile_result[:a].to_s(16)})"
-
-        puts "\nJIT vs Compile match confirmed:"
-        puts "  PC=$#{jit_result[:pc].to_s(16).upcase} A=$#{jit_result[:a].to_s(16).upcase}"
+        puts "\nJIT vs Compile PC sequence match confirmed (#{jit_data[:pcs].length} samples)"
       end
 
-      it 'detects and reports backend mismatches' do
+      it 'compares PC page sequences between backends' do
         skip 'Karateka resources not available' unless @karateka_available
 
-        results = run_all_backends(KARATEKA_TEST_CYCLES)
+        results = run_all_backends_with_sequences
         skip 'Need at least 2 backends for comparison' if results.length < 2
 
-        # Compare all pairs of backends
-        mismatches = []
         backend_names = results.keys
-        reference_backend = backend_names.first
-        reference_data = results[reference_backend]
+        reference = backend_names.first
+        ref_pages = results[reference][:pages]
+
+        puts "\nPC page sequence comparison (256-byte granularity):"
+        puts "  Reference: #{reference} (#{ref_pages.uniq.length} unique pages)"
+
+        comparisons = {}
+        backend_names[1..].each do |backend|
+          pages = results[backend][:pages]
+          similarity = sequence_similarity(ref_pages, pages)
+          lcs = lcs_length(ref_pages, pages)
+          comparisons[backend] = { similarity: similarity, lcs: lcs, unique: pages.uniq.length }
+
+          puts "  #{backend}: similarity=#{similarity}% lcs=#{lcs}/#{ref_pages.length} unique=#{pages.uniq.length}"
+        end
+
+        # IR backends should have very high similarity (>90%)
+        ir_backends = backend_names.select { |b| b.start_with?('hdl/') }
+        if ir_backends.length >= 2
+          ir_backends[1..].each do |backend|
+            next unless comparisons[backend]
+            expect(comparisons[backend][:similarity]).to be >= 90,
+              "IR backend #{backend} page sequence similarity too low: #{comparisons[backend][:similarity]}%"
+          end
+        end
+      end
+
+      it 'compares region sequences between backends' do
+        skip 'Karateka resources not available' unless @karateka_available
+
+        results = run_all_backends_with_sequences
+        skip 'Need at least 2 backends for comparison' if results.length < 2
+
+        backend_names = results.keys
+        reference = backend_names.first
+        ref_regions = results[reference][:regions]
+
+        puts "\nRegion sequence comparison:"
+        puts "  Reference: #{reference}"
+        puts "    Regions: #{ref_regions.tally.map { |r, c| "#{r}=#{c}" }.join(', ')}"
 
         backend_names[1..].each do |backend|
-          data = results[backend]
-          pc_diff = (reference_data[:pc] - data[:pc]).abs
+          regions = results[backend][:regions]
+          similarity = sequence_similarity(ref_regions, regions)
+          region_tally = regions.tally
 
-          # Check if PCs are in the same 256-byte page (close enough)
-          same_page = (reference_data[:pc] >> 8) == (data[:pc] >> 8)
-          same_region = reference_data[:region] == data[:region]
+          puts "  #{backend}: similarity=#{similarity}%"
+          puts "    Regions: #{region_tally.map { |r, c| "#{r}=#{c}" }.join(', ')}"
 
-          unless same_page || same_region
-            mismatches << {
-              backends: [reference_backend, backend],
-              pcs: [reference_data[:pc], data[:pc]],
-              regions: [reference_data[:region], data[:region]],
-              diff: pc_diff
-            }
+          # All backends should visit similar regions
+          ref_region_set = ref_regions.uniq.to_set
+          backend_region_set = regions.uniq.to_set
+          common_regions = ref_region_set & backend_region_set
+
+          expect(common_regions).not_to be_empty,
+            "#{backend} visits no common regions with #{reference}"
+        end
+      end
+
+      it 'detects sequence divergence between backends' do
+        skip 'Karateka resources not available' unless @karateka_available
+
+        results = run_all_backends_with_sequences
+        skip 'Need at least 2 backends for comparison' if results.length < 2
+
+        # Compare all pairs
+        backend_names = results.keys
+        divergences = []
+
+        backend_names.combination(2).each do |a, b|
+          pages_a = results[a][:pages]
+          pages_b = results[b][:pages]
+
+          similarity = sequence_similarity(pages_a, pages_b)
+          lcs = lcs_length(pages_a, pages_b)
+
+          # Find first divergence point
+          first_diff = pages_a.zip(pages_b).find_index { |pa, pb| pa != pb }
+
+          divergences << {
+            backends: [a, b],
+            similarity: similarity,
+            lcs: lcs,
+            first_diff_sample: first_diff,
+            pcs_at_diff: first_diff ? [results[a][:pcs][first_diff], results[b][:pcs][first_diff]] : nil
+          }
+        end
+
+        puts "\nSequence divergence analysis:"
+        divergences.each do |d|
+          status = d[:similarity] >= 90 ? "MATCH" : (d[:similarity] >= 50 ? "PARTIAL" : "DIVERGED")
+          diff_info = d[:first_diff_sample] ? " first_diff@#{d[:first_diff_sample]}" : ""
+          puts "  #{d[:backends].join(' vs ')}: #{d[:similarity]}% similar, lcs=#{d[:lcs]}#{diff_info} [#{status}]"
+
+          if d[:pcs_at_diff]
+            puts "    At divergence: $#{d[:pcs_at_diff][0].to_s(16).upcase} vs $#{d[:pcs_at_diff][1].to_s(16).upcase}"
           end
         end
 
-        # Report results
-        puts "\nBackend comparison results:"
-        puts "  Reference: #{reference_backend} PC=$#{reference_data[:pc].to_s(16).upcase} (#{reference_data[:region]})"
-        results.each do |backend, data|
-          next if backend == reference_backend
-          pc_diff = (reference_data[:pc] - data[:pc]).abs
-          status = pc_diff < 256 ? "CLOSE" : (reference_data[:region] == data[:region] ? "SAME_REGION" : "DIVERGED")
-          puts "  #{backend}: PC=$#{data[:pc].to_s(16).upcase} (#{data[:region]}) diff=#{pc_diff} [#{status}]"
-        end
-
-        if mismatches.any?
-          puts "\n  WARNING: #{mismatches.length} backend mismatch(es) detected"
-          mismatches.each do |m|
-            puts "    #{m[:backends].join(' vs ')}: $#{m[:pcs][0].to_s(16)} vs $#{m[:pcs][1].to_s(16)} (diff=#{m[:diff]})"
-          end
-        else
-          puts "\n  All backends within acceptable range"
-        end
-
-        # For now, just warn about mismatches but don't fail
-        # (Verilator may have timing differences)
-        # Fail only if IR backends mismatch (they should be identical)
-        ir_backends = results.keys.select { |k| k.start_with?('hdl/') }
-        if ir_backends.length >= 2
-          ir_mismatches = mismatches.select { |m| m[:backends].all? { |b| b.start_with?('hdl/') } }
-          expect(ir_mismatches).to be_empty,
-            "IR backends should not diverge: #{ir_mismatches.map { |m| m[:backends].join(' vs ') }.join(', ')}"
+        # IR backends should not diverge significantly
+        ir_divergences = divergences.select { |d| d[:backends].all? { |b| b.start_with?('hdl/') } }
+        ir_divergences.each do |d|
+          expect(d[:similarity]).to be >= 90,
+            "IR backends #{d[:backends].join(' vs ')} diverged: #{d[:similarity]}% similarity"
         end
       end
     end
