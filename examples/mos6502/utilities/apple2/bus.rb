@@ -1,9 +1,9 @@
 # Apple ][-style memory bus with I/O page and soft switches
 
 require_relative '../../../lib/rhdl/hdl'
-require_relative 'disk2'
-require_relative 'output/apple2_speaker'
-require_relative 'renderers/color_renderer'
+require_relative '../input/disk2'
+require_relative '../output/speaker'
+require_relative '../renderers/color_renderer'
 
 module MOS6502
   class Apple2Bus < RHDL::HDL::Component

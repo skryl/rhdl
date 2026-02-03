@@ -47,7 +47,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   end
 
   def native_isa_available?
-    require_relative '../../../../examples/mos6502/utilities/isa_simulator_native'
+    require_relative '../../../../examples/mos6502/utilities/simulators/isa_simulator_native'
     MOS6502::NATIVE_AVAILABLE
   rescue LoadError
     false
@@ -55,7 +55,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
   def create_isa_simulator
     require_relative '../../../../examples/mos6502/utilities/apple2/bus'
-    require_relative '../../../../examples/mos6502/utilities/isa_simulator_native'
+    require_relative '../../../../examples/mos6502/utilities/simulators/isa_simulator_native'
 
     karateka_rom = create_karateka_rom
     bus = MOS6502::Apple2Bus.new

@@ -4,7 +4,7 @@ require 'spec_helper'
 require 'rhdl'
 
 require_relative '../../../examples/mos6502/utilities/apple2/harness'
-require_relative '../../../examples/mos6502/utilities/isa_simulator'
+require_relative '../../../examples/mos6502/utilities/simulators/isa_simulator'
 
 RSpec.describe 'Simulator mode selection', :slow do
   describe 'Apple2Harness::ISARunner' do

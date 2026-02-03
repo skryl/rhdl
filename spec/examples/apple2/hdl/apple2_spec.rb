@@ -1367,7 +1367,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
 
   # Check if native ISA simulator is available
   def native_isa_available?
-    require_relative '../../../../examples/mos6502/utilities/isa_simulator_native'
+    require_relative '../../../../examples/mos6502/utilities/simulators/isa_simulator_native'
     MOS6502::NATIVE_AVAILABLE
   rescue LoadError
     false
@@ -1381,12 +1381,12 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
     bus.load_rom(@rom_data, base_addr: 0xD000)
 
     if native
-      require_relative '../../../../examples/mos6502/utilities/isa_simulator_native'
+      require_relative '../../../../examples/mos6502/utilities/simulators/isa_simulator_native'
       cpu = MOS6502::ISASimulatorNative.new(bus)
       # Load ROM into native CPU's internal memory too
       cpu.load_bytes(@rom_data, 0xD000)
     else
-      require_relative '../../../../examples/mos6502/utilities/isa_simulator'
+      require_relative '../../../../examples/mos6502/utilities/simulators/isa_simulator'
       cpu = MOS6502::ISASimulator.new(bus)
     end
 

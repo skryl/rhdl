@@ -2,8 +2,8 @@
 
 require_relative '../../hdl/harness'
 require_relative 'bus'
-require_relative '../isa_simulator_native'
-require_relative '../isa_simulator'
+require_relative '../simulators/isa_simulator_native'
+require_relative '../simulators/isa_simulator'
 
 module Apple2Harness
   # HDL-based runner using cycle-accurate simulation
