@@ -12,7 +12,7 @@
 
 require_relative '../../hdl/apple2'
 require_relative '../output/speaker'
-require_relative '../output/color_renderer'
+require_relative '../renderers/color_renderer'
 require_relative '../input/ps2_encoder'
 require 'rhdl/codegen'
 require 'rhdl/codegen/ir/sim/ir_interpreter'
