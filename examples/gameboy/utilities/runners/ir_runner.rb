@@ -10,9 +10,9 @@
 #   runner.reset
 #   runner.run_steps(100)
 
-require_relative '../gameboy'
-require_relative 'speaker'
-require_relative 'lcd_renderer'
+require_relative '../../gameboy'
+require_relative '../output/speaker'
+require_relative '../renderers/lcd_renderer'
 
 module RHDL
   module GameBoy
@@ -68,7 +68,7 @@ module RHDL
       WRAM_END = 0xDFFF
 
       # Boot ROM paths (relative to the gameboy directory)
-      DMG_BOOT_ROM_PATH = File.expand_path('../software/roms/dmg_boot.bin', __dir__)
+      DMG_BOOT_ROM_PATH = File.expand_path('../../software/roms/dmg_boot.bin', __dir__)
 
       # Initialize the Game Boy IR runner
       # @param backend [Symbol] :interpret, :jit, or :compile

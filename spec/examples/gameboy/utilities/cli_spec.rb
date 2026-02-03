@@ -2,8 +2,8 @@
 
 require 'spec_helper'
 require_relative '../../../../examples/gameboy/gameboy'
-require_relative '../../../../examples/gameboy/utilities/gameboy_hdl'
-require_relative '../../../../examples/gameboy/utilities/lcd_renderer'
+require_relative '../../../../examples/gameboy/utilities/runners/hdl_runner'
+require_relative '../../../../examples/gameboy/utilities/renderers/lcd_renderer'
 
 RSpec.describe 'Game Boy CLI' do
   # Create a minimal demo ROM for testing
@@ -121,7 +121,7 @@ RSpec.describe 'Game Boy CLI' do
     before(:all) do
       @ir_available = false
       begin
-        require_relative '../../../../examples/gameboy/utilities/gameboy_ir'
+        require_relative '../../../../examples/gameboy/utilities/runners/ir_runner'
         # Try to actually create an IrRunner to see if it works
         test_runner = RHDL::GameBoy::IrRunner.new(backend: :interpret)
         test_runner.reset
@@ -211,7 +211,7 @@ RSpec.describe 'Game Boy CLI' do
       skip "Verilator not available" unless @verilator_available
 
       begin
-        require_relative '../../../../examples/gameboy/utilities/gameboy_verilator'
+        require_relative '../../../../examples/gameboy/utilities/runners/verilator_runner'
       rescue LoadError => e
         @verilator_available = false
         skip "VerilatorRunner not available: #{e.message}"
@@ -385,7 +385,7 @@ RSpec.describe 'Game Boy CLI' do
       before do
         @ir_interface_available = false
         begin
-          require_relative '../../../../examples/gameboy/utilities/gameboy_ir'
+          require_relative '../../../../examples/gameboy/utilities/runners/ir_runner'
           # Try to actually create an IrRunner
           test_runner = RHDL::GameBoy::IrRunner.new(backend: :interpret)
           test_runner.reset
@@ -409,7 +409,7 @@ RSpec.describe 'Game Boy CLI' do
         @verilator_available = system('which verilator > /dev/null 2>&1')
         if @verilator_available
           begin
-            require_relative '../../../../examples/gameboy/utilities/gameboy_verilator'
+            require_relative '../../../../examples/gameboy/utilities/runners/verilator_runner'
           rescue LoadError
             @verilator_available = false
           end

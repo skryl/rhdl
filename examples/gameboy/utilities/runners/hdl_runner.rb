@@ -4,8 +4,8 @@
 # Behavioral simulation of Game Boy hardware
 # Note: Full HDL component integration pending signal naming fixes
 
-require_relative 'speaker'
-require_relative 'lcd_renderer'
+require_relative '../output/speaker'
+require_relative '../renderers/lcd_renderer'
 
 module RHDL
   module GameBoy

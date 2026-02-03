@@ -94,7 +94,7 @@ RSpec.describe 'GameBoy Timer' do
   describe 'Timer Integration Tests' do
     before(:all) do
       begin
-        require_relative '../../../../examples/gameboy/utilities/gameboy_ir'
+        require_relative '../../../../examples/gameboy/utilities/runners/ir_runner'
         @ir_available = RHDL::Codegen::IR::COMPILER_AVAILABLE rescue false
         # Try to actually initialize a runner to verify it works
         if @ir_available

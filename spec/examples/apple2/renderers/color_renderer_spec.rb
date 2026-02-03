@@ -507,8 +507,8 @@ end
 
 # Test the MOS6502 namespace alias
 # Load the MOS6502 color renderer which re-exports RHDL::Apple2::ColorRenderer
-$LOAD_PATH.unshift File.expand_path('../../../../examples/mos6502/utilities', __dir__)
-require_relative '../../../../examples/mos6502/utilities/color_renderer'
+$LOAD_PATH.unshift File.expand_path('../../../../examples/mos6502/utilities/renderers', __dir__)
+require_relative '../../../../examples/mos6502/utilities/renderers/color_renderer'
 
 RSpec.describe MOS6502::ColorRenderer do
   it 'is an alias for RHDL::Apple2::ColorRenderer' do

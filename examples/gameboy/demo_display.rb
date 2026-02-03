@@ -5,7 +5,7 @@
 
 $LOAD_PATH.unshift File.expand_path('../../lib', __dir__)
 
-require_relative 'utilities/gameboy_ir'
+require_relative 'utilities/runners/ir_runner'
 
 rom_path = ARGV[0] || File.join(__dir__, 'software/roms/tobu.gb')
 total_frames = (ARGV[1] || 60).to_i

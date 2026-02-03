@@ -6,7 +6,7 @@
 # This provides the same runner creation logic as GameBoyTerminal
 # but without any terminal/display dependencies.
 
-require_relative 'gameboy_hdl'
+require_relative 'hdl_runner'
 
 module RHDL
   module GameBoy
@@ -23,7 +23,7 @@ module RHDL
         # Create runner based on mode and sim backend
         @runner = case mode
                   when :verilog
-                    require_relative 'gameboy_verilator'
+                    require_relative 'verilator_runner'
                     RHDL::GameBoy::VerilatorRunner.new
                   else  # :hdl (default)
                     if sim == :ruby
@@ -31,7 +31,7 @@ module RHDL
                       RHDL::GameBoy::HdlRunner.new
                     else
                       # IR simulation with native backends (interpret, jit, compile)
-                      require_relative 'gameboy_ir'
+                      require_relative 'ir_runner'
                       RHDL::GameBoy::IrRunner.new(backend: sim)
                     end
                   end

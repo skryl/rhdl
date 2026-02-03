@@ -12,9 +12,9 @@
 #   runner.reset
 #   runner.run_steps(100)
 
-require_relative '../gameboy'
-require_relative 'speaker'
-require_relative 'lcd_renderer'
+require_relative '../../gameboy'
+require_relative '../output/speaker'
+require_relative '../renderers/lcd_renderer'
 require 'rhdl/codegen'
 require 'fileutils'
 require 'fiddle'
@@ -40,12 +40,12 @@ module RHDL
       HRAM_END = 0xFFFE
 
       # Build directory for Verilator output
-      BUILD_DIR = File.expand_path('../../../.verilator_build_gb', __dir__)
+      BUILD_DIR = File.expand_path('../../../../.verilator_build_gb', __dir__)
       VERILOG_DIR = File.join(BUILD_DIR, 'verilog')
       OBJ_DIR = File.join(BUILD_DIR, 'obj_dir')
 
       # Boot ROM path
-      DMG_BOOT_ROM_PATH = File.expand_path('../software/roms/dmg_boot.bin', __dir__)
+      DMG_BOOT_ROM_PATH = File.expand_path('../../software/roms/dmg_boot.bin', __dir__)
 
       # Initialize the Game Boy Verilator runner
       def initialize

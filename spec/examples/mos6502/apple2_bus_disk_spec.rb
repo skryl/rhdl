@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require_relative '../../../examples/mos6502/utilities/apple2_harness'
+require_relative '../../../examples/mos6502/utilities/runners/apple2_harness'
 
 RSpec.describe 'Apple2Bus disk integration' do
   let(:runner) { Apple2Harness::ISARunner.new }
