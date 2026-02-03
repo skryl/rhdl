@@ -4,7 +4,7 @@
 # Interactive terminal emulator for Apple II HDL simulation
 
 require 'io/console'
-require_relative '../runners/hdl_runner'
+require_relative '../runners/headless_runner'
 
 module RHDL
   module Apple2
@@ -42,8 +42,18 @@ module RHDL
           @sim_mode = options[:mode] || :hdl
           @sim_backend = options[:sim] || :ruby  # Default to :ruby for HDL mode
 
-          # Create runner based on simulation mode and backend
-          @runner = create_runner
+          # Print status for netlist mode
+          if @sim_mode == :netlist
+            backend_names = { interpret: "Interpreter", jit: "JIT", compile: "Compiler" }
+            puts "Initializing netlist (gate-level) simulation [#{backend_names[@sim_backend]}]..."
+          end
+
+          # Create runner using HeadlessRunner factory
+          @runner = HeadlessRunner.new(
+            mode: @sim_mode,
+            sim: @sim_backend,
+            sub_cycles: options[:sub_cycles] || 14
+          )
 
           # For compatibility
           @sim_type = @runner.simulator_type
@@ -87,30 +97,6 @@ module RHDL
           @keyboard_mode = :normal
         end
 
-        def create_runner
-          case @sim_mode
-          when :netlist
-            require_relative '../runners/netlist_runner'
-            backend_names = { interpret: "Interpreter", jit: "JIT", compile: "Compiler" }
-            puts "Initializing netlist (gate-level) simulation [#{backend_names[@sim_backend]}]..."
-            NetlistRunner.new(backend: @sim_backend)
-          when :verilog
-            require_relative '../runners/verilator_runner'
-            sub_cycles = @options[:sub_cycles] || 14
-            VerilatorRunner.new(sub_cycles: sub_cycles)
-          else  # :hdl (default)
-            if @sim_backend == :ruby
-              # Pure Ruby HDL simulation
-              HdlRunner.new
-            else
-              # IR simulation with native backends (interpret, jit, compile)
-              require_relative '../runners/ir_runner'
-              sub_cycles = @options[:sub_cycles] || 14
-              IrSimulatorRunner.new(backend: @sim_backend, sub_cycles: sub_cycles)
-            end
-          end
-        end
-
         def update_terminal_size
           if $stdout.respond_to?(:winsize) && $stdout.tty?
             begin
@@ -150,23 +136,20 @@ module RHDL
 
         def load_rom(path, base_addr: 0xD000)
           puts "Loading ROM: #{path}"
-          bytes = File.binread(path)
-          @runner.load_rom(bytes, base_addr: base_addr)
+          @runner.load_rom(path, base_addr: base_addr)
         end
 
         def load_program(path, base_addr: 0x0800)
           puts "Loading program: #{path} at $#{base_addr.to_s(16).upcase}"
-          bytes = File.binread(path)
-          @runner.load_ram(bytes, base_addr: base_addr)
+          @runner.load_program(path, base_addr: base_addr)
         end
 
         def load_program_bytes(bytes, base_addr: 0x0800)
-          @runner.load_ram(bytes, base_addr: base_addr)
+          @runner.load_program_bytes(bytes, base_addr: base_addr)
         end
 
         def setup_reset_vector(addr)
-          @runner.write(0xFFFC, addr & 0xFF)
-          @runner.write(0xFFFD, (addr >> 8) & 0xFF)
+          @runner.setup_reset_vector(addr)
         end
 
         def load_disk(path, drive: 0)
@@ -176,8 +159,7 @@ module RHDL
 
         def load_memdump(path, pc: nil, use_appleiigo: false)
           puts "Loading memory dump: #{path}"
-          bytes = File.binread(path)
-          @runner.load_ram(bytes, base_addr: 0x0000)
+          @runner.load_program(path, base_addr: 0x0000)
           if pc
             puts "Setting PC to $#{pc.to_s(16).upcase}"
             if use_appleiigo

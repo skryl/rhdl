@@ -118,6 +118,70 @@ module RHDL
         @runner.simulator_type
       end
 
+      # Delegate keyboard input to runner
+      def inject_key(ascii)
+        @runner.inject_key(ascii)
+      end
+
+      # Delegate screen methods to runner
+      def read_screen_array
+        @runner.read_screen_array
+      end
+
+      def read_screen
+        @runner.read_screen
+      end
+
+      def screen_dirty?
+        @runner.screen_dirty?
+      end
+
+      def clear_screen_dirty
+        @runner.clear_screen_dirty
+      end
+
+      # Delegate hi-res rendering to runner
+      def render_hires_color(chars_wide: 140)
+        @runner.render_hires_color(chars_wide: chars_wide)
+      end
+
+      def render_hires_braille(chars_wide: 80, invert: false)
+        @runner.render_hires_braille(chars_wide: chars_wide, invert: invert)
+      end
+
+      # Delegate disk controller access
+      def disk_controller
+        @runner.disk_controller
+      end
+
+      # Delegate speaker access
+      def speaker
+        @runner.speaker
+      end
+
+      def start_audio
+        @runner.start_audio
+      end
+
+      def stop_audio
+        @runner.stop_audio
+      end
+
+      # Delegate memory write
+      def write(addr, value)
+        @runner.write(addr, value)
+      end
+
+      # Delegate memory read
+      def read(addr)
+        @runner.read(addr)
+      end
+
+      # Delegate bus access
+      def bus
+        @runner.bus
+      end
+
       # Get backend
       def backend
         case @mode
