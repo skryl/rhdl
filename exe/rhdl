@@ -350,8 +350,7 @@ def handle_examples_mos6502(args)
     init_hires: false,
     no_audio: false,
     disk: nil,
-    disk2: nil,
-    dry_run: false
+    disk2: nil
   }
 
   parser = OptionParser.new do |opts|
@@ -408,7 +407,6 @@ def handle_examples_mos6502(args)
     opts.on('-e', '--entry ADDR', 'Entry point address (hex, default: load address)') { |v| options[:entry] = v }
     opts.on('--init-hires', 'Initialize HIRES mode soft switches before start') { options[:init_hires] = true }
     opts.on('--no-audio', 'Disable audio output') { options[:no_audio] = true }
-    opts.on('--dry-run', 'Load configuration and display engine info without running') { options[:dry_run] = true }
     opts.on('-h', '--help', 'Show this help') do
       puts opts
       exit 0
@@ -441,8 +439,7 @@ def handle_examples_apple2(args)
     color: false,
     memdump: nil,
     pc: nil,
-    disk: nil,
-    dry_run: false
+    disk: nil
   }
 
   parser = OptionParser.new do |opts|
@@ -495,7 +492,6 @@ def handle_examples_apple2(args)
     opts.on('--memdump FILE', 'Load memory dump at $0000') { |v| options[:memdump] = v }
     opts.on('--pc ADDR', 'Set initial PC (hex)') { |v| options[:pc] = v }
     opts.on('--disk FILE', 'Load disk image (.dsk)') { |v| options[:disk] = v }
-    opts.on('--dry-run', 'Load configuration and display engine info without running') { options[:dry_run] = true }
     opts.on('-h', '--help', 'Show this help') do
       puts opts
       exit 0

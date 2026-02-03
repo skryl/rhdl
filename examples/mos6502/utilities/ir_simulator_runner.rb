@@ -362,20 +362,6 @@ class IRSimulatorRunner
     @cycles
   end
 
-  # Return dry-run information for testing without starting emulation
-  # @return [Hash] Information about engine configuration and memory state
-  def dry_run_info
-    @sim ||= create_simulator
-    {
-      mode: :hdl,
-      simulator_type: simulator_type,
-      native: native?,
-      backend: @sim_backend,
-      cpu_state: cpu_state,
-      memory_sample: memory_sample
-    }
-  end
-
   # Sync speaker toggles from Rust backend to Ruby speaker for audio generation
   # Called each frame by the emulator main loop
   def sync_speaker_state
@@ -422,16 +408,5 @@ class IRSimulatorRunner
     (0...8192).each do |i|
       memory[0x4000 + i] = @sim.mos6502_read_memory(0x4000 + i)
     end
-  end
-
-  # Return a sample of memory for verification
-  def memory_sample
-    {
-      zero_page: (0...256).map { |i| @bus.read(i) },
-      stack: (0...256).map { |i| @bus.read(0x0100 + i) },
-      text_page: (0...1024).map { |i| @bus.read(0x0400 + i) },
-      program_area: (0...256).map { |i| @bus.read(0x0800 + i) },
-      reset_vector: [@bus.read(0xFFFC), @bus.read(0xFFFD)]
-    }
   end
 end

@@ -152,7 +152,6 @@ module RHDL
           exec_args.push("-e", options[:entry]) if options[:entry]
           exec_args << "--init-hires" if options[:init_hires]
           exec_args << "--no-audio" if options[:no_audio]
-          exec_args << "--dry-run" if options[:dry_run]
         end
       end
     end

@@ -348,18 +348,6 @@ module RHDL
         @cycles
       end
 
-      def dry_run_info
-        # Reset to apply the reset vector that was set after initialization
-        reset
-        {
-          mode: :verilog,
-          simulator_type: simulator_type,
-          native: native?,
-          cpu_state: cpu_state,
-          memory_sample: memory_sample
-        }
-      end
-
       def bus
         self
       end
@@ -956,16 +944,6 @@ module RHDL
         line_in_group = row_in_section % 8
 
         base + (line_in_group * 0x400) + (group * 0x80) + (section * 0x28)
-      end
-
-      def memory_sample
-        {
-          zero_page: (0...256).map { |i| read(i) },
-          stack: (0...256).map { |i| read(0x0100 + i) },
-          text_page: (0...1024).map { |i| read(0x0400 + i) },
-          program_area: (0...256).map { |i| read(0x0800 + i) },
-          reset_vector: [read(0xFFFC), read(0xFFFD)]
-        }
       end
 
       # Stub class for disk controller

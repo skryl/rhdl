@@ -121,32 +121,6 @@ module Apple2Harness
     def native?
       false
     end
-
-    # Return dry-run information for testing without starting emulation
-    # @return [Hash] Information about engine configuration and memory state
-    def dry_run_info
-      {
-        mode: :hdl,
-        simulator_type: simulator_type,
-        native: native?,
-        backend: nil,  # HDL mode doesn't use IR backend
-        cpu_state: cpu_state,
-        memory_sample: memory_sample
-      }
-    end
-
-    private
-
-    # Return a sample of memory for verification
-    def memory_sample
-      {
-        zero_page: (0...256).map { |i| @bus.read(i) },
-        stack: (0...256).map { |i| @bus.read(0x0100 + i) },
-        text_page: (0...1024).map { |i| @bus.read(0x0400 + i) },
-        program_area: (0...256).map { |i| @bus.read(0x0800 + i) },
-        reset_vector: [@bus.read(0xFFFC), @bus.read(0xFFFD)]
-      }
-    end
   end
 
   # ISA-level runner using fast instruction-level simulation
@@ -374,44 +348,6 @@ module Apple2Harness
     # @return [Symbol] :native for Rust implementation, :ruby for pure Ruby
     def simulator_type
       native? ? :native : :ruby
-    end
-
-    # Return dry-run information for testing without starting emulation
-    # @return [Hash] Information about engine configuration and memory state
-    def dry_run_info
-      {
-        mode: :isa,
-        simulator_type: simulator_type,
-        native: native?,
-        backend: nil,  # ISA mode doesn't use IR backend
-        cpu_state: cpu_state,
-        memory_sample: memory_sample
-      }
-    end
-
-    private
-
-    # Return a sample of memory for verification
-    def memory_sample
-      if native?
-        # For native mode, read from CPU memory
-        {
-          zero_page: (0...256).map { |i| @cpu.peek(i) },
-          stack: (0...256).map { |i| @cpu.peek(0x0100 + i) },
-          text_page: (0...1024).map { |i| @cpu.peek(0x0400 + i) },
-          program_area: (0...256).map { |i| @cpu.peek(0x0800 + i) },
-          reset_vector: [@cpu.peek(0xFFFC), @cpu.peek(0xFFFD)]
-        }
-      else
-        # For Ruby mode, read from bus using read method
-        {
-          zero_page: (0...256).map { |i| @bus.read(i) },
-          stack: (0...256).map { |i| @bus.read(0x0100 + i) },
-          text_page: (0...1024).map { |i| @bus.read(0x0400 + i) },
-          program_area: (0...256).map { |i| @bus.read(0x0800 + i) },
-          reset_vector: [@bus.read(0xFFFC), @bus.read(0xFFFD)]
-        }
-      end
     end
   end
 end
