@@ -20,6 +20,51 @@ module RHDL
           end
         end
 
+        # Create a headless runner with the configured options
+        # @return [RHDL::Apple2::HeadlessRunner] Initialized runner ready for use
+        def create_runner
+          require File.join(Config.project_root, 'examples/apple2/utilities/headless_runner')
+
+          mode = options[:mode] || :hdl
+          sim = options[:sim] || :ruby
+          sub_cycles = options[:sub_cycles] || 14
+
+          runner = RHDL::Apple2::HeadlessRunner.new(mode: mode, sim: sim, sub_cycles: sub_cycles)
+
+          # Load ROM if specified
+          runner.load_rom(options[:rom]) if options[:rom]
+
+          # Load program if specified
+          if options[:program]
+            load_address = options[:address] ? options[:address].to_i(16) : 0x0800
+            runner.load_program(options[:program], base_addr: load_address)
+            runner.setup_reset_vector(load_address)
+          end
+
+          # Load memory dump if specified
+          if options[:memdump]
+            pc = options[:pc] ? options[:pc].to_i(16) : 0x0800
+            runner.load_memdump(options[:memdump], pc: pc, use_appleiigo: options[:appleiigo])
+          end
+
+          # Load disk if specified
+          runner.load_disk(options[:disk]) if options[:disk]
+
+          runner
+        end
+
+        # Create a headless runner with demo program loaded
+        # @return [RHDL::Apple2::HeadlessRunner] Runner with demo program
+        def create_demo_runner
+          require File.join(Config.project_root, 'examples/apple2/utilities/headless_runner')
+
+          mode = options[:mode] || :hdl
+          sim = options[:sim] || :ruby
+          sub_cycles = options[:sub_cycles] || 14
+
+          RHDL::Apple2::HeadlessRunner.with_demo(mode: mode, sim: sim, sub_cycles: sub_cycles)
+        end
+
         # Run emulator in demo mode
         def run_demo
           exec_script('--demo')
