@@ -3,7 +3,7 @@
 require 'rspec'
 require_relative '../../../../lib/rhdl'
 require_relative '../../../../examples/mos6502/utilities/simulators/isa_simulator'
-require_relative '../../../../examples/mos6502/utilities/assembler'
+require_relative '../../../../examples/mos6502/utilities/asm/assembler'
 
 RSpec.describe MOS6502::ISASimulator do
   let(:sim) { MOS6502::ISASimulator.new }
