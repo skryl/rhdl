@@ -334,16 +334,17 @@ module GameBoy
       tile_data_hi: 0
     } do
       # Horizontal counter (0-113 at 1MHz, so 0-454 at 4MHz with h_div_cnt)
-      h_div_cnt <= mux(ce & lcdc_on, h_div_cnt + lit(1, width: 2), h_div_cnt)
+      # Note: Counters run even when LCD is off - only rendering is disabled
+      h_div_cnt <= mux(ce, h_div_cnt + lit(1, width: 2), h_div_cnt)
 
-      h_cnt <= mux(ce & lcdc_on & (h_div_cnt == lit(3, width: 2)),
+      h_cnt <= mux(ce & (h_div_cnt == lit(3, width: 2)),
                    mux(h_cnt == lit(113, width: 7),
                        lit(0, width: 7),
                        h_cnt + lit(1, width: 7)),
                    h_cnt)
 
       # Vertical counter (0-153)
-      v_cnt <= mux(ce & lcdc_on & (h_div_cnt == lit(3, width: 2)) & (h_cnt == lit(113, width: 7)),
+      v_cnt <= mux(ce & (h_div_cnt == lit(3, width: 2)) & (h_cnt == lit(113, width: 7)),
                    mux(v_cnt == lit(153, width: 8),
                        lit(0, width: 8),
                        v_cnt + lit(1, width: 8)),
