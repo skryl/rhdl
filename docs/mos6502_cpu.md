@@ -332,7 +332,7 @@ LOOP:   INC COUNT       ; Increment
 
 **API Usage:**
 ```ruby
-require_relative 'examples/mos6502/utilities/asm/assembler'
+require_relative 'spec/support/mos6502_assembler'
 
 program = MOS6502::Assembler.assemble(source_code, org: 0x8000)
 File.binwrite("program.bin", program.pack("C*"))

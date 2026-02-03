@@ -26,7 +26,7 @@ module RHDL
 
         # Build the mini monitor ROM
         def build_rom
-          require File.join(Config.project_root, 'examples/mos6502/utilities/asm/assembler')
+          require File.join(Config.project_root, 'spec/support/mos6502_assembler')
 
           puts "MOS 6502 ROM Assembler"
           puts '=' * 50
