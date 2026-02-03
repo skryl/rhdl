@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Game Boy HDL Terminal Emulator
+# Game Boy HDL CLI Emulator
 # Runs the Game Boy HDL component with cycle-accurate simulation
 
 require 'io/console'
@@ -13,9 +13,9 @@ $LOAD_PATH.unshift File.expand_path('../utilities', __dir__)
 require 'rhdl'
 require 'gameboy_hdl'
 
-# Game Boy Terminal class for HDL simulation
+# Game Boy CLI class for HDL simulation
 # Supports HDL mode with multiple simulation backends
-class GameBoyTerminal
+class GameBoyCli
   # Game Boy screen dimensions
   SCREEN_WIDTH = 160
   SCREEN_HEIGHT = 144
@@ -551,23 +551,25 @@ def create_demo_rom
   rom.pack('C*')
 end
 
-# Parse options
-options = {
-  speed: 100,
-  debug: false,
-  dmg_colors: true,
-  demo: false,
-  pop: false,
-  audio: false,
-  mode: :hdl,
-  sim: :compile,
-  renderer: :color  # Default to color renderer instead of braille
-}
+# Only run CLI when executed directly (not when required/loaded for testing)
+if __FILE__ == $0 || __FILE__ == $PROGRAM_NAME
+  # Parse options
+  options = {
+    speed: 100,
+    debug: false,
+    dmg_colors: true,
+    demo: false,
+    pop: false,
+    audio: false,
+    mode: :hdl,
+    sim: :compile,
+    renderer: :color  # Default to color renderer instead of braille
+  }
 
-parser = OptionParser.new do |opts|
+  parser = OptionParser.new do |opts|
   opts.banner = "Usage: bin/gb [options] [rom.gb]"
   opts.separator ""
-  opts.separator "Game Boy HDL Terminal Emulator - Cycle-accurate simulation"
+  opts.separator "Game Boy HDL CLI Emulator - Cycle-accurate simulation"
   opts.separator ""
 
   opts.on("-m", "--mode TYPE", [:hdl, :verilog], "Simulation mode: hdl (default), verilog (Verilator RTL)") do |v|
@@ -622,7 +624,7 @@ end
 
 parser.parse!(ARGV)
 
-terminal = GameBoyTerminal.new(options)
+cli = GameBoyCli.new(options)
 
 # Load ROM
 rom_file = ARGV.shift
@@ -631,12 +633,12 @@ if rom_file
     puts "Error: ROM file not found: #{rom_file}"
     exit 1
   end
-  terminal.load_rom(rom_file)
+  cli.load_rom(rom_file)
 elsif options[:pop]
   pop_rom = File.expand_path('../software/roms/pop.gb', __dir__)
   if File.exist?(pop_rom)
     puts "Loading Prince of Persia..."
-    terminal.load_rom(pop_rom)
+    cli.load_rom(pop_rom)
   else
     puts "Error: Prince of Persia ROM not found: #{pop_rom}"
     exit 1
@@ -644,7 +646,7 @@ elsif options[:pop]
 elsif options[:demo]
   puts "Loading demo ROM..."
   demo_rom = create_demo_rom
-  terminal.runner.load_rom(demo_rom)
+  cli.runner.load_rom(demo_rom)
 else
   puts parser
   puts ""
@@ -652,4 +654,5 @@ else
   exit 1
 end
 
-terminal.run
+cli.run
+end
