@@ -307,6 +307,14 @@ module RHDL
         false
       end
 
+      def dry_run_info
+        {
+          mode: :hdl,
+          simulator_type: :hdl_ruby,
+          native: false
+        }
+      end
+
       def speaker
         @speaker
       end

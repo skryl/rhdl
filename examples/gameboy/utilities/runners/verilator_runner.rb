@@ -98,6 +98,14 @@ module RHDL
         :hdl_verilator
       end
 
+      def dry_run_info
+        {
+          mode: :verilog,
+          simulator_type: :hdl_verilator,
+          native: true
+        }
+      end
+
       # Load ROM data
       def load_rom(bytes)
         bytes = bytes.bytes if bytes.is_a?(String)

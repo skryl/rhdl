@@ -3,14 +3,14 @@
 require 'spec_helper'
 
 # Load the runner utilities
-require_relative '../../../examples/mos6502/utilities/apple2/bus'
-require_relative '../../../examples/mos6502/utilities/simulators/isa_simulator'
-require_relative '../../../examples/mos6502/utilities/runners/isa_runner'
-require_relative '../../../examples/mos6502/utilities/renderers/color_renderer'
+require_relative '../../../../examples/mos6502/utilities/apple2/bus'
+require_relative '../../../../examples/mos6502/utilities/simulators/isa_simulator'
+require_relative '../../../../examples/mos6502/utilities/runners/isa_runner'
+require_relative '../../../../examples/mos6502/utilities/renderers/color_renderer'
 
 RSpec.describe 'MOS6502 Karateka Mode' do
-  let(:karateka_mem) { File.expand_path('../../../examples/mos6502/software/disks/karateka_mem.bin', __dir__) }
-  let(:appleiigo_rom) { File.expand_path('../../../examples/mos6502/software/roms/appleiigo.rom', __dir__) }
+  let(:karateka_mem) { File.expand_path('../../../../examples/mos6502/software/disks/karateka_mem.bin', __dir__) }
+  let(:appleiigo_rom) { File.expand_path('../../../../examples/mos6502/software/roms/appleiigo.rom', __dir__) }
 
   before(:each) do
     skip "Karateka memory dump not found" unless File.exist?(karateka_mem)

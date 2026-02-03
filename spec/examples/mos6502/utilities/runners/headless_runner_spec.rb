@@ -3,9 +3,8 @@
 require 'spec_helper'
 require 'tempfile'
 
-# Add the utilities path to load the headless runner
-$LOAD_PATH.unshift(File.expand_path('../../../../../examples/mos6502/utilities/runners', __FILE__))
-require 'headless_runner'
+# Load the headless runner using require_relative
+require_relative '../../../../../examples/mos6502/utilities/runners/headless_runner'
 
 RSpec.describe MOS6502::HeadlessRunner, :slow do
   let(:demo_program) { [0xA9, 0x42, 0x00] }  # LDA #$42, BRK
