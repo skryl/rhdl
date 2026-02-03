@@ -10,7 +10,7 @@ $LOAD_PATH.unshift File.expand_path('../../../lib', __dir__)
 $LOAD_PATH.unshift File.expand_path('../utilities', __dir__)
 
 require 'rhdl'
-require_relative '../utilities/tasks/terminal_task'
+require_relative '../utilities/tasks/run_task'
 require_relative '../utilities/tasks/demo_program'
 
 # Parse options
@@ -132,7 +132,7 @@ if options[:speed].nil?
                     end
 end
 
-terminal = RHDL::Apple2::Tasks::TerminalTask.new(options)
+terminal = RHDL::Apple2::Tasks::RunTask.new(options)
 
 # Load AppleIIGo ROM if requested
 if options[:appleiigo] || options[:disk]
