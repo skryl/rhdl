@@ -269,6 +269,12 @@ module RHDL
         renderer.render_braille(read_framebuffer)
       end
 
+      # Render screen using color half-block characters
+      def render_lcd_color(chars_wide: 80, invert: false)
+        renderer = LcdRenderer.new(chars_wide: chars_wide, invert: invert)
+        renderer.render_color(read_framebuffer)
+      end
+
       # Get CPU state
       def cpu_state
         {
@@ -299,18 +305,6 @@ module RHDL
 
       def native?
         false
-      end
-
-      # Return dry-run information
-      def dry_run_info
-        {
-          mode: :hdl,
-          simulator_type: simulator_type,
-          native: native?,
-          backend: :ruby,
-          cpu_state: cpu_state,
-          rom_size: @rom.length
-        }
       end
 
       def speaker
