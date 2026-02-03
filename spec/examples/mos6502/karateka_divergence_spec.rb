@@ -511,7 +511,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   end
 
   def create_isa_simulator
-    require_relative '../../../examples/mos6502/utilities/apple2_bus'
+    require_relative '../../../examples/mos6502/utilities/apple2/bus'
     require_relative '../../../examples/mos6502/utilities/isa_simulator_native'
 
     karateka_rom = create_karateka_rom
@@ -541,8 +541,8 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   end
 
   def create_ir_simulator(backend)
-    require_relative '../../../examples/mos6502/utilities/runners/ir_simulator_runner'
-    require_relative '../../../examples/mos6502/utilities/apple2_bus'
+    require_relative '../../../examples/mos6502/utilities/runners/ir_runner'
+    require_relative '../../../examples/mos6502/utilities/apple2/bus'
 
     runner = IRSimulatorRunner.new(backend)
 
@@ -568,7 +568,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   end
 
   def create_verilator_simulator
-    require_relative '../../../examples/mos6502/utilities/runners/mos6502_verilator'
+    require_relative '../../../examples/mos6502/utilities/runners/verilator_runner'
 
     runner = MOS6502::VerilatorRunner.new
 
@@ -885,7 +885,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   # ============================================================================
 
   def create_isa_simulator_simple
-    require_relative '../../../examples/mos6502/utilities/apple2_bus'
+    require_relative '../../../examples/mos6502/utilities/apple2/bus'
     require_relative '../../../examples/mos6502/utilities/isa_simulator_native'
 
     karateka_rom = create_karateka_rom
@@ -909,7 +909,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   end
 
   def create_ir_simulator_simple(backend)
-    require_relative '../../../examples/mos6502/utilities/runners/ir_simulator_runner'
+    require_relative '../../../examples/mos6502/utilities/runners/ir_runner'
 
     runner = IRSimulatorRunner.new(backend)
     karateka_rom = create_karateka_rom
@@ -1084,7 +1084,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   end
 
   def create_verilator_simulator_simple
-    require_relative '../../../examples/mos6502/utilities/runners/mos6502_verilator'
+    require_relative '../../../examples/mos6502/utilities/runners/verilator_runner'
 
     runner = MOS6502::VerilatorRunner.new
     karateka_rom = create_karateka_rom

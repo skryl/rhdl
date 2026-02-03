@@ -3,9 +3,8 @@
 require 'spec_helper'
 require 'rhdl'
 
-$LOAD_PATH.unshift File.expand_path('../../../../examples/mos6502/utilities', __FILE__)
-require 'apple2_harness'
-require 'isa_simulator'
+require_relative '../../../examples/mos6502/utilities/apple2/harness'
+require_relative '../../../examples/mos6502/utilities/isa_simulator'
 
 RSpec.describe 'Simulator mode selection', :slow do
   describe 'Apple2Harness::ISARunner' do

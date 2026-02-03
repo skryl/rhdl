@@ -10,6 +10,7 @@ class IRSimulatorRunner
     require 'rhdl/codegen'
     require_relative '../../hdl/cpu'
 
+    require_relative '../apple2/bus'
     @bus = MOS6502::Apple2Bus.new("apple2_bus")
     @sim_backend = sim_backend
     @sim = nil
