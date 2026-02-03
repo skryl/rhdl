@@ -1,5 +1,5 @@
 require 'spec_helper'
-require 'support/assembler'
+require 'support/isa_assembler'
 
 RSpec.describe Assembler do
   describe 'instruction assembly' do
