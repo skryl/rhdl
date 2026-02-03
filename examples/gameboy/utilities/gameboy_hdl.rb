@@ -307,18 +307,6 @@ module RHDL
         false
       end
 
-      # Return dry-run information
-      def dry_run_info
-        {
-          mode: :hdl,
-          simulator_type: simulator_type,
-          native: native?,
-          backend: :ruby,
-          cpu_state: cpu_state,
-          rom_size: @rom.length
-        }
-      end
-
       def speaker
         @speaker
       end

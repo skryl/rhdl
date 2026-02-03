@@ -79,14 +79,9 @@ RSpec.describe 'Game Boy CLI' do
       expect(state[:simulator_type]).to eq(:hdl_ruby)
     end
 
-    it 'provides dry_run_info' do
-      info = runner.dry_run_info
-
-      expect(info[:mode]).to eq(:hdl)
-      expect(info[:simulator_type]).to eq(:hdl_ruby)
-      expect(info[:native]).to eq(false)
-      expect(info[:backend]).to eq(:ruby)
-      expect(info[:rom_size]).to eq(rom.length)
+    it 'exposes simulator properties directly' do
+      expect(runner.simulator_type).to eq(:hdl_ruby)
+      expect(runner.native?).to eq(false)
     end
 
     it 'maintains framebuffer independently' do
@@ -168,12 +163,9 @@ RSpec.describe 'Game Boy CLI' do
         expect(state[:cycles]).to be > 0
       end
 
-      it 'provides dry_run_info' do
-        info = runner.dry_run_info
-
-        expect(info[:mode]).to eq(:hdl)
-        expect(info[:backend]).to eq(backend)
-        expect(info[:rom_size]).to eq(rom.length)
+      it 'exposes simulator properties directly' do
+        expect(runner.simulator_type).to be_a(Symbol)
+        expect(runner.native?).to eq(true)
       end
 
       it 'maintains framebuffer independently' do
@@ -256,12 +248,9 @@ RSpec.describe 'Game Boy CLI' do
       expect(state).to include(:pc, :a, :cycles)
     end
 
-    it 'provides dry_run_info' do
-      info = runner.dry_run_info
-
-      expect(info[:mode]).to eq(:verilog)
-      expect(info[:simulator_type]).to eq(:hdl_verilator)
-      expect(info[:native]).to eq(true)
+    it 'exposes simulator properties directly' do
+      expect(runner.simulator_type).to eq(:hdl_verilator)
+      expect(runner.native?).to eq(true)
     end
 
     it 'maintains framebuffer independently' do
@@ -377,7 +366,7 @@ RSpec.describe 'Game Boy CLI' do
         :simulator_type, :native?,
         :read_framebuffer, :screen_dirty?, :clear_screen_dirty,
         :render_lcd_braille, :render_lcd_color,
-        :dry_run_info, :speaker, :start_audio, :stop_audio,
+        :speaker, :start_audio, :stop_audio,
         :inject_key, :release_key
       ]
     end
