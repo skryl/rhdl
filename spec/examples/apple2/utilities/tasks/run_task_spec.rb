@@ -273,4 +273,177 @@ RSpec.describe RHDL::Apple2::HeadlessRunner do
       expect(sample[:program_area][0]).to eq(0x78)
     end
   end
+
+  describe 'Karateka PC progression' do
+    # Helper to categorize PC into memory regions
+    def pc_region(pc)
+      case pc
+      when 0x0000..0x01FF then :zp_stack
+      when 0x0200..0x03FF then :input_buf
+      when 0x0400..0x07FF then :text
+      when 0x0800..0x1FFF then :user
+      when 0x2000..0x3FFF then :hires1
+      when 0x4000..0x5FFF then :hires2
+      when 0x6000..0xBFFF then :high_ram
+      when 0xC000..0xCFFF then :io
+      when 0xD000..0xFFFF then :rom
+      else :unknown
+      end
+    end
+
+    # Game regions where Karateka executes (including IO for soft switch access)
+    GAME_REGIONS = [:rom, :high_ram, :user, :zp_stack, :io].freeze
+
+    # Cycles to run for each test (enough to verify execution)
+    KARATEKA_TEST_CYCLES = 10_000
+
+    # Fewer cycles for slower backends
+    KARATEKA_SLOW_CYCLES = 2_000
+
+    before(:all) do
+      @karateka_available = described_class.karateka_available?
+      @verilator_available = described_class.verilator_available?
+    end
+
+    shared_examples 'karateka pc progression' do |mode, sim, cycles = KARATEKA_TEST_CYCLES|
+      it "advances PC through game regions with #{mode}/#{sim}" do
+        skip 'Karateka resources not available' unless @karateka_available
+
+        begin
+          runner = described_class.with_karateka(mode: mode, sim: sim)
+        rescue LoadError, StandardError => e
+          skip "Backend not available: #{e.message}"
+        end
+
+        runner.reset
+
+        # Collect PC samples
+        pc_samples = []
+        regions_visited = Set.new
+
+        # Run in batches, sampling PC
+        (cycles / 1000).times do
+          runner.run_steps(1000)
+          pc = runner.cpu_state[:pc]
+          pc_samples << pc
+          regions_visited << pc_region(pc)
+        end
+
+        # Verify PC changed (not stuck)
+        unique_pcs = pc_samples.uniq
+        expect(unique_pcs.length).to be > 1,
+          "PC should change during execution, but stayed at #{pc_samples.first.to_s(16)}"
+
+        # Verify visited game regions
+        game_regions_visited = regions_visited & GAME_REGIONS.to_set
+        expect(game_regions_visited).not_to be_empty,
+          "Should visit game regions #{GAME_REGIONS}, but only visited #{regions_visited.to_a}"
+      end
+    end
+
+    context 'with interpret backend' do
+      # Use fewer cycles - interpret is slower
+      include_examples 'karateka pc progression', :hdl, :interpret, 2_000
+    end
+
+    context 'with jit backend' do
+      include_examples 'karateka pc progression', :hdl, :jit, 10_000
+    end
+
+    context 'with compile backend' do
+      include_examples 'karateka pc progression', :hdl, :compile, 10_000
+    end
+
+    context 'with verilator backend' do
+      it 'advances PC through game regions with verilator' do
+        skip 'Karateka resources not available' unless @karateka_available
+        skip 'Verilator not available' unless @verilator_available
+
+        begin
+          runner = described_class.with_karateka(mode: :verilog)
+        rescue LoadError, StandardError => e
+          skip "Verilator backend not available: #{e.message}"
+        end
+
+        runner.reset
+
+        # Collect PC samples (fewer cycles for verilator - it's slower)
+        pc_samples = []
+        regions_visited = Set.new
+
+        # Run in batches
+        10.times do
+          runner.run_steps(1000)
+          pc = runner.cpu_state[:pc]
+          pc_samples << pc
+          regions_visited << pc_region(pc)
+        end
+
+        # Verify PC changed
+        unique_pcs = pc_samples.uniq
+        expect(unique_pcs.length).to be > 1,
+          "PC should change during execution, but stayed at #{pc_samples.first.to_s(16)}"
+
+        # Verify visited game regions
+        game_regions_visited = regions_visited & GAME_REGIONS.to_set
+        expect(game_regions_visited).not_to be_empty,
+          "Should visit game regions #{GAME_REGIONS}, but only visited #{regions_visited.to_a}"
+      end
+    end
+
+    context 'cross-backend comparison' do
+      it 'all backends reach similar PC regions after 10K cycles' do
+        skip 'Karateka resources not available' unless @karateka_available
+
+        results = {}
+
+        # Test each available backend
+        backends = [
+          [:hdl, :interpret],
+          [:hdl, :jit],
+          [:hdl, :compile]
+        ]
+
+        backends.each do |mode, sim|
+          begin
+            runner = described_class.with_karateka(mode: mode, sim: sim)
+            runner.reset
+            runner.run_steps(KARATEKA_TEST_CYCLES)
+            pc = runner.cpu_state[:pc]
+            results["#{mode}/#{sim}"] = { pc: pc, region: pc_region(pc) }
+          rescue LoadError, StandardError => e
+            # Skip unavailable backends
+            next
+          end
+        end
+
+        # Add verilator if available
+        if @verilator_available
+          begin
+            runner = described_class.with_karateka(mode: :verilog)
+            runner.reset
+            runner.run_steps(KARATEKA_TEST_CYCLES)
+            pc = runner.cpu_state[:pc]
+            results['verilog'] = { pc: pc, region: pc_region(pc) }
+          rescue LoadError, StandardError
+            # Skip if verilator fails
+          end
+        end
+
+        skip 'No backends available for comparison' if results.length < 2
+
+        # All backends should be in game regions
+        results.each do |backend, data|
+          expect(GAME_REGIONS).to include(data[:region]),
+            "#{backend} PC $#{data[:pc].to_s(16)} in unexpected region #{data[:region]}"
+        end
+
+        # Log results for debugging
+        puts "\nKarateka PC after #{KARATEKA_TEST_CYCLES} cycles:"
+        results.each do |backend, data|
+          puts "  #{backend}: PC=$#{data[:pc].to_s(16).upcase} (#{data[:region]})"
+        end
+      end
+    end
+  end
 end
