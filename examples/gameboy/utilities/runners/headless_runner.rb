@@ -39,7 +39,11 @@ module RHDL
 
       # Load ROM
       def load_rom(path_or_bytes, base_addr: 0)
-        bytes = path_or_bytes.is_a?(String) && File.exist?(path_or_bytes) ? File.binread(path_or_bytes) : path_or_bytes
+        bytes = if path_or_bytes.is_a?(String) && !path_or_bytes.include?("\x00") && File.exist?(path_or_bytes)
+                  File.binread(path_or_bytes)
+                else
+                  path_or_bytes
+                end
         @runner.load_rom(bytes, base_addr: base_addr)
       end
 
