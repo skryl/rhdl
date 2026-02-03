@@ -1,7 +1,7 @@
 # Apple ][ test harness for MOS6502 CPU
 
 require_relative '../../hdl/harness'
-require_relative '../apple2_bus'
+require_relative 'bus'
 require_relative '../isa_simulator_native'
 require_relative '../isa_simulator'
 

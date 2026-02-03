@@ -227,7 +227,7 @@ module RHDL
           $stdout.flush
 
           require_relative '../../../../examples/mos6502/hdl/cpu'
-          require_relative '../../../../examples/mos6502/utilities/apple2_bus'
+          require_relative '../../../../examples/mos6502/utilities/apple2/bus'
 
           ir_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
           ir = MOS6502::CPU.to_flat_ir
@@ -286,7 +286,7 @@ module RHDL
               sim = nil
 
               if is_verilator
-                require_relative '../../../../examples/mos6502/utilities/runners/mos6502_verilator'
+                require_relative '../../../../examples/mos6502/utilities/runners/verilator_runner'
                 sim = MOS6502::VerilatorRunner.new
               else
                 bus = MOS6502::Apple2Bus.new("bench_bus")

@@ -6,8 +6,8 @@
 # This provides the same runner creation logic as Apple2Terminal
 # but without any terminal/display dependencies.
 
-require_relative 'apple2_harness'
-require_relative 'ruby_isa_runner'
+require_relative '../apple2/harness'
+require_relative 'isa_runner'
 
 module MOS6502
   class HeadlessRunner
@@ -27,12 +27,12 @@ module MOS6502
                   Apple2Harness::ISARunner.new
                 when :hdl
                   # HDL mode uses IR-based simulators
-                  require_relative 'ir_simulator_runner'
+                  require_relative 'ir_runner'
                   IRSimulatorRunner.new(sim)
                 when :netlist
                   raise "Netlist mode not yet implemented for MOS6502"
                 when :verilog
-                  require_relative 'mos6502_verilator'
+                  require_relative 'verilator_runner'
                   RHDL::MOS6502::VerilatorRunner.new
                 else
                   raise "Unknown mode: #{mode}. Valid modes: isa, hdl, netlist, verilog"

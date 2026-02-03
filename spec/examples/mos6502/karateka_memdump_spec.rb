@@ -3,8 +3,7 @@
 require 'spec_helper'
 require 'rhdl'
 
-$LOAD_PATH.unshift File.expand_path('../../../../examples/mos6502/utilities', __FILE__)
-require 'apple2_harness'
+require_relative '../../../examples/mos6502/utilities/apple2/harness'
 
 RSpec.describe 'Karateka memory dump' do
   let(:karateka_bin) do

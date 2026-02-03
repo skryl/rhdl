@@ -3,7 +3,7 @@
 require 'spec_helper'
 require 'rhdl'
 require_relative '../../../../examples/apple2/hdl/apple2'
-require_relative '../../../../examples/apple2/utilities/output/braille_renderer'
+require_relative '../../../../examples/apple2/utilities/renderers/braille_renderer'
 
 # Verilator availability check
 def verilator_available?
@@ -54,7 +54,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   end
 
   def create_isa_simulator
-    require_relative '../../../../examples/mos6502/utilities/apple2_bus'
+    require_relative '../../../../examples/mos6502/utilities/apple2/bus'
     require_relative '../../../../examples/mos6502/utilities/isa_simulator_native'
 
     karateka_rom = create_karateka_rom

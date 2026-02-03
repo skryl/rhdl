@@ -1375,7 +1375,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
 
   # Helper to create ISA simulator with Apple2 bus
   def create_isa_simulator(native: false)
-    require_relative '../../../../examples/mos6502/utilities/apple2_bus'
+    require_relative '../../../../examples/mos6502/utilities/apple2/bus'
 
     bus = MOS6502::Apple2Bus.new
     bus.load_rom(@rom_data, base_addr: 0xD000)
