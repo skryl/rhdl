@@ -97,7 +97,7 @@ module RHDL
       # @param framebuffer [Array<Array<Integer>>] 2D array of 2-bit color values
       # @return [String] Rendered output with ANSI colors
       def render_color(framebuffer)
-        return empty_screen if framebuffer.nil? || framebuffer.empty?
+        return empty_color_screen if framebuffer.nil? || framebuffer.empty?
 
         # Each char represents 2 vertical pixels using half-blocks
         chars_tall = (SCREEN_HEIGHT / 2.0).ceil
@@ -131,7 +131,7 @@ module RHDL
             bg = "\e[48;2;#{bot_rgb[0]};#{bot_rgb[1]};#{bot_rgb[2]}m"
             line << fg << bg << "\u2580"
           end
-          lines << line << RESET
+          lines << (line + RESET)
         end
 
         lines.join("\n")
@@ -174,19 +174,24 @@ module RHDL
       # @return [String] Framed content
       def frame(content, title: nil)
         lines = content.split("\n")
-        max_width = lines.map { |l| l.gsub(/\e\[[0-9;]*m/, '').length }.max || @chars_wide
+        content_width = lines.map { |l| l.gsub(/\e\[[0-9;]*m/, '').length }.max || @chars_wide
+
+        # Ensure frame is wide enough for title
+        title_width = title ? title.length + 4 : 0  # +4 for " title " and spaces
+        max_width = [content_width, title_width].max
 
         output = String.new
         if title
-          padding = (max_width - title.length - 2) / 2
-          output << "+" << ("-" * padding) << " #{title} " << ("-" * (max_width - padding - title.length - 2)) << "+\n"
+          padding = [(max_width - title.length - 2) / 2, 0].max
+          right_padding = [max_width - padding - title.length - 2, 0].max
+          output << "+" << ("-" * padding) << " #{title} " << ("-" * right_padding) << "+\n"
         else
           output << "+" << ("-" * max_width) << "+\n"
         end
 
         lines.each do |line|
           visible_length = line.gsub(/\e\[[0-9;]*m/, '').length
-          padding = max_width - visible_length
+          padding = [max_width - visible_length, 0].max
           output << "|" << line << (" " * padding) << "|\n"
         end
 
@@ -201,6 +206,19 @@ module RHDL
         chars_tall = (SCREEN_HEIGHT / 4.0).ceil
         chars_tall.times do
           lines << ("\u2800" * @chars_wide)
+        end
+        lines.join("\n")
+      end
+
+      def empty_color_screen
+        # Show empty screen with lightest DMG color (off state)
+        lines = []
+        chars_tall = (SCREEN_HEIGHT / 2.0).ceil
+        bg_rgb = DMG_COLORS[0]  # Lightest color
+        bg = "\e[48;2;#{bg_rgb[0]};#{bg_rgb[1]};#{bg_rgb[2]}m"
+
+        chars_tall.times do
+          lines << (bg + (" " * @chars_wide) + RESET)
         end
         lines.join("\n")
       end

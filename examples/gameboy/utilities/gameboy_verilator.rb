@@ -305,16 +305,6 @@ module RHDL
         @frame_count
       end
 
-      def dry_run_info
-        {
-          mode: :verilog,
-          simulator_type: simulator_type,
-          native: native?,
-          cpu_state: cpu_state,
-          rom_size: @rom.compact.size
-        }
-      end
-
       def speaker
         @speaker
       end
