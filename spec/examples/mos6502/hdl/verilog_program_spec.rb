@@ -2,9 +2,9 @@
 # Tests that verify the synthesizable 6502 CPU executes programs correctly in Verilog simulation
 # Compares Ruby behavioral simulation with Icarus Verilog simulation
 
-require_relative 'spec_helper'
-require_relative '../../../examples/mos6502/hdl/harness'
-require_relative '../../support/mos6502_assembler'
+require_relative '../spec_helper'
+require_relative '../../../../examples/mos6502/hdl/harness'
+require_relative '../../../support/mos6502_assembler'
 require 'fileutils'
 
 RSpec.describe 'MOS6502 Verilog Program Execution', :slow, if: HdlToolchain.iverilog_available? do

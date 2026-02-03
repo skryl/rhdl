@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative '../spec_helper'
+require_relative '../../spec_helper'
 
 RSpec.describe MOS6502::ProgramCounter do
   let(:pc) { described_class.new('test_pc') }

@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require_relative '../../../examples/mos6502/utilities/apple2/harness'
+require_relative '../../../../../examples/mos6502/utilities/apple2/harness'
 
 RSpec.describe 'Apple2Bus disk integration' do
   let(:runner) { Apple2Harness::ISARunner.new }
   let(:bus) { runner.bus }
-  let(:disk_path) { File.join(__dir__, '../../../examples/mos6502/software/disks/karateka.dsk') }
+  let(:disk_path) { File.join(__dir__, '../../../../../examples/mos6502/software/disks/karateka.dsk') }
 
   describe 'disk loading through harness' do
     it 'loads disk into drive 0' do
