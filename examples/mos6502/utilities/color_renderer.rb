@@ -17,7 +17,7 @@
 #   blend:         Enable color blending (default: false)
 #   double_hires:  Enable double hi-res mode (default: false)
 
-require_relative '../../apple2/utilities/output/color_renderer'
+require_relative '../../apple2/utilities/renderers/color_renderer'
 
 module MOS6502
   # Re-export the Apple2 ColorRenderer under the MOS6502 namespace

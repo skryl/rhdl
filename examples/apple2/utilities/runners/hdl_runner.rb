@@ -5,9 +5,9 @@
 
 require_relative '../../hdl/apple2'
 require_relative '../output/speaker'
-require_relative '../output/text_renderer'
-require_relative '../output/braille_renderer'
-require_relative '../output/color_renderer'
+require_relative '../renderers/text_renderer'
+require_relative '../renderers/braille_renderer'
+require_relative '../renderers/color_renderer'
 require_relative '../input/ps2_encoder'
 
 module RHDL
