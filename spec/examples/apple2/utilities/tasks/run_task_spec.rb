@@ -392,9 +392,8 @@ RSpec.describe RHDL::Apple2::HeadlessRunner do
     end
 
     context 'cross-backend comparison' do
-      it 'all backends reach similar PC regions after 10K cycles' do
-        skip 'Karateka resources not available' unless @karateka_available
-
+      # Helper to run all backends and collect results
+      def run_all_backends(cycles)
         results = {}
 
         # Test each available backend
@@ -408,11 +407,16 @@ RSpec.describe RHDL::Apple2::HeadlessRunner do
           begin
             runner = described_class.with_karateka(mode: mode, sim: sim)
             runner.reset
-            runner.run_steps(KARATEKA_TEST_CYCLES)
-            pc = runner.cpu_state[:pc]
-            results["#{mode}/#{sim}"] = { pc: pc, region: pc_region(pc) }
-          rescue LoadError, StandardError => e
-            # Skip unavailable backends
+            runner.run_steps(cycles)
+            state = runner.cpu_state
+            results["#{mode}/#{sim}"] = {
+              pc: state[:pc],
+              region: pc_region(state[:pc]),
+              a: state[:a],
+              x: state[:x],
+              y: state[:y]
+            }
+          rescue LoadError, StandardError
             next
           end
         end
@@ -422,14 +426,27 @@ RSpec.describe RHDL::Apple2::HeadlessRunner do
           begin
             runner = described_class.with_karateka(mode: :verilog)
             runner.reset
-            runner.run_steps(KARATEKA_TEST_CYCLES)
-            pc = runner.cpu_state[:pc]
-            results['verilog'] = { pc: pc, region: pc_region(pc) }
+            runner.run_steps(cycles)
+            state = runner.cpu_state
+            results['verilog'] = {
+              pc: state[:pc],
+              region: pc_region(state[:pc]),
+              a: state[:a],
+              x: state[:x],
+              y: state[:y]
+            }
           rescue LoadError, StandardError
             # Skip if verilator fails
           end
         end
 
+        results
+      end
+
+      it 'all backends reach similar PC regions after 10K cycles' do
+        skip 'Karateka resources not available' unless @karateka_available
+
+        results = run_all_backends(KARATEKA_TEST_CYCLES)
         skip 'No backends available for comparison' if results.length < 2
 
         # All backends should be in game regions
@@ -442,6 +459,89 @@ RSpec.describe RHDL::Apple2::HeadlessRunner do
         puts "\nKarateka PC after #{KARATEKA_TEST_CYCLES} cycles:"
         results.each do |backend, data|
           puts "  #{backend}: PC=$#{data[:pc].to_s(16).upcase} (#{data[:region]})"
+        end
+      end
+
+      it 'IR backends (jit/compile) have matching PCs' do
+        skip 'Karateka resources not available' unless @karateka_available
+
+        results = run_all_backends(KARATEKA_TEST_CYCLES)
+
+        # Get IR backend results (jit and compile should match exactly)
+        jit_result = results['hdl/jit']
+        compile_result = results['hdl/compile']
+
+        skip 'JIT backend not available' unless jit_result
+        skip 'Compile backend not available' unless compile_result
+
+        # JIT and Compile backends should produce identical results
+        expect(jit_result[:pc]).to eq(compile_result[:pc]),
+          "JIT PC ($#{jit_result[:pc].to_s(16)}) != Compile PC ($#{compile_result[:pc].to_s(16)})"
+
+        expect(jit_result[:a]).to eq(compile_result[:a]),
+          "JIT A ($#{jit_result[:a].to_s(16)}) != Compile A ($#{compile_result[:a].to_s(16)})"
+
+        puts "\nJIT vs Compile match confirmed:"
+        puts "  PC=$#{jit_result[:pc].to_s(16).upcase} A=$#{jit_result[:a].to_s(16).upcase}"
+      end
+
+      it 'detects and reports backend mismatches' do
+        skip 'Karateka resources not available' unless @karateka_available
+
+        results = run_all_backends(KARATEKA_TEST_CYCLES)
+        skip 'Need at least 2 backends for comparison' if results.length < 2
+
+        # Compare all pairs of backends
+        mismatches = []
+        backend_names = results.keys
+        reference_backend = backend_names.first
+        reference_data = results[reference_backend]
+
+        backend_names[1..].each do |backend|
+          data = results[backend]
+          pc_diff = (reference_data[:pc] - data[:pc]).abs
+
+          # Check if PCs are in the same 256-byte page (close enough)
+          same_page = (reference_data[:pc] >> 8) == (data[:pc] >> 8)
+          same_region = reference_data[:region] == data[:region]
+
+          unless same_page || same_region
+            mismatches << {
+              backends: [reference_backend, backend],
+              pcs: [reference_data[:pc], data[:pc]],
+              regions: [reference_data[:region], data[:region]],
+              diff: pc_diff
+            }
+          end
+        end
+
+        # Report results
+        puts "\nBackend comparison results:"
+        puts "  Reference: #{reference_backend} PC=$#{reference_data[:pc].to_s(16).upcase} (#{reference_data[:region]})"
+        results.each do |backend, data|
+          next if backend == reference_backend
+          pc_diff = (reference_data[:pc] - data[:pc]).abs
+          status = pc_diff < 256 ? "CLOSE" : (reference_data[:region] == data[:region] ? "SAME_REGION" : "DIVERGED")
+          puts "  #{backend}: PC=$#{data[:pc].to_s(16).upcase} (#{data[:region]}) diff=#{pc_diff} [#{status}]"
+        end
+
+        if mismatches.any?
+          puts "\n  WARNING: #{mismatches.length} backend mismatch(es) detected"
+          mismatches.each do |m|
+            puts "    #{m[:backends].join(' vs ')}: $#{m[:pcs][0].to_s(16)} vs $#{m[:pcs][1].to_s(16)} (diff=#{m[:diff]})"
+          end
+        else
+          puts "\n  All backends within acceptable range"
+        end
+
+        # For now, just warn about mismatches but don't fail
+        # (Verilator may have timing differences)
+        # Fail only if IR backends mismatch (they should be identical)
+        ir_backends = results.keys.select { |k| k.start_with?('hdl/') }
+        if ir_backends.length >= 2
+          ir_mismatches = mismatches.select { |m| m[:backends].all? { |b| b.start_with?('hdl/') } }
+          expect(ir_mismatches).to be_empty,
+            "IR backends should not diverge: #{ir_mismatches.map { |m| m[:backends].join(' vs ') }.join(', ')}"
         end
       end
     end
