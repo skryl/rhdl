@@ -86,6 +86,16 @@ module MOS6502
       end
     end
 
+    # Alias for HeadlessRunner compatibility
+    def load_rom(bytes, base_addr: 0xD000)
+      load_memory(bytes, base_addr)
+    end
+
+    # Alias for HeadlessRunner compatibility
+    def load_ram(bytes, base_addr: 0x0000)
+      load_memory(bytes, base_addr)
+    end
+
     # Write a single byte to memory
     def write_memory(addr, byte)
       @memory[addr & 0xFFFF] = byte & 0xFF
@@ -122,6 +132,9 @@ module MOS6502
         n.times { clock_cycle }
       end
     end
+
+    # Alias for HeadlessRunner compatibility
+    alias run_steps run_cycles
 
     # Run a single clock cycle
     def clock_cycle

@@ -33,7 +33,7 @@ module MOS6502
                   raise "Netlist mode not yet implemented for MOS6502"
                 when :verilog
                   require_relative 'verilator_runner'
-                  RHDL::MOS6502::VerilatorRunner.new
+                  MOS6502::VerilatorRunner.new
                 else
                   raise "Unknown mode: #{mode}. Valid modes: isa, hdl, netlist, verilog"
                 end
