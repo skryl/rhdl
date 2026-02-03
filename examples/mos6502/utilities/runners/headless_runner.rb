@@ -60,6 +60,9 @@ module MOS6502
     def setup_reset_vector(addr)
       if @runner.respond_to?(:set_reset_vector)
         @runner.set_reset_vector(addr)
+      elsif @runner.respond_to?(:write_memory)
+        @runner.write_memory(0xFFFC, addr & 0xFF)
+        @runner.write_memory(0xFFFD, (addr >> 8) & 0xFF)
       else
         @runner.bus.write(0xFFFC, addr & 0xFF)
         @runner.bus.write(0xFFFD, (addr >> 8) & 0xFF)
@@ -122,13 +125,20 @@ module MOS6502
 
     # Get memory sample for verification
     def memory_sample
-      bus = @runner.bus
+      # Use read_memory if available (handles native vs non-native mode)
+      # Otherwise fall back to bus.read
+      read_fn = if @runner.respond_to?(:read_memory)
+                  ->(addr) { @runner.read_memory(addr) }
+                else
+                  ->(addr) { @runner.bus.read(addr) }
+                end
+
       {
-        zero_page: (0...256).map { |i| bus.read(i) },
-        stack: (0...256).map { |i| bus.read(0x0100 + i) },
-        text_page: (0...1024).map { |i| bus.read(0x0400 + i) },
-        program_area: (0...256).map { |i| bus.read(0x0800 + i) },
-        reset_vector: [bus.read(0xFFFC), bus.read(0xFFFD)]
+        zero_page: (0...256).map { |i| read_fn.call(i) },
+        stack: (0...256).map { |i| read_fn.call(0x0100 + i) },
+        text_page: (0...1024).map { |i| read_fn.call(0x0400 + i) },
+        program_area: (0...256).map { |i| read_fn.call(0x0800 + i) },
+        reset_vector: [read_fn.call(0xFFFC), read_fn.call(0xFFFD)]
       }
     end
 
