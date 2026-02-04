@@ -24,6 +24,10 @@
 - [10 - Hardware Description Languages](10-hardware-description-languages.md) - Verilog, VHDL, and RHDL compared
 - [11 - Synthesis and Implementation](11-synthesis-and-implementation.md) - From HDL to silicon: FPGAs, ASICs, and the synthesis flow
 
+### Appendices
+- [Appendix A - Ada Lovelace's Program](appendix-a-ada-lovelace-program.md) - Complete Bernoulli number algorithm with original notation, pseudocode, and Ruby implementation
+- [Appendix B - Turing Machine Programs](appendix-b-turing-machines.md) - Example Turing machine programs with state tables and execution traces
+
 ---
 
 ## Chapter Status
@@ -42,6 +46,8 @@
 | 09 - MOS 6502 | Outline | Key concepts identified |
 | 10 - HDLs | Outline | Key concepts identified |
 | 11 - Synthesis | Outline | Key concepts identified |
+| Appendix A | Draft | Ada's complete program |
+| Appendix B | Draft | Turing machine examples |
 
 ## Key Themes
 
