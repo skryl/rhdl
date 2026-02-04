@@ -563,8 +563,8 @@ The G80 proved that GPUs could be general-purpose parallel processors. Every mod
 
 ## Appendix Reference
 
-See [Appendix Y - NVIDIA G80 Implementation](appendix-y-g80.md) for complete RHDL implementations of SM components, warp schedulers, and memory systems.
+See [Appendix U - NVIDIA G80 Implementation](appendix-u-g80.md) for complete RHDL implementations of SM components, warp schedulers, and memory systems.
 
 ---
 
-[← Previous: The Cray-1](22-cray1.md) | [Index](INDEX.md) | [Next: The RISC-V RV32I →](24-riscv.md)
+[← Previous: CGRAs](20-cgra.md) | [Index](INDEX.md) | [Next: The RISC-V RV32I →](22-riscv.md)

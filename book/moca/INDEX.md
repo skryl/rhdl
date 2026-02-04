@@ -46,13 +46,11 @@
 
 ### Part VII: Case Studies
 
-- [21 - The MOS 6502](21-mos6502.md) - (1975) The classic CPU that powered the Apple II, C64, and NES
-- [22 - The Cray-1](22-cray1.md) - (1976) The supercomputer that defined vector processing
-- [23 - The NVIDIA G80](23-nvidia-g80.md) - (2006) The first CUDA GPU: unified shaders and GPGPU revolution
-- [24 - The RISC-V RV32I](24-riscv.md) - (2010) The open ISA: clean design, modular extensions, and modern RISC
-- [25 - The Google TPU v1](25-tpu.md) - (2016) A 256x256 systolic array for neural network inference
-- [26 - The Cerebras WSE](26-cerebras.md) - (2019) The largest chip ever built: 850K cores on a single wafer
-- [27 - The Groq LPU](27-groq.md) - (2020) Deterministic dataflow for AI inference: time as the program counter
+- [21 - The NVIDIA G80](21-nvidia-g80.md) - (2006) The first CUDA GPU: unified shaders and GPGPU revolution
+- [22 - The RISC-V RV32I](22-riscv.md) - (2010) The open ISA: clean design, modular extensions, and modern RISC
+- [23 - The Google TPU v1](23-tpu.md) - (2016) A 256x256 systolic array for neural network inference
+- [24 - The Cerebras WSE](24-cerebras.md) - (2019) The largest chip ever built: 850K cores on a single wafer
+- [25 - The Groq LPU](25-groq.md) - (2020) Deterministic dataflow for AI inference: time as the program counter
 
 ---
 
@@ -80,11 +78,9 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix R - Analog Simulation](appendix-r-analog.md) - Ruby simulation of op-amps, ODEs, and analog neural networks
 - [Appendix S - FPGA Implementation](appendix-s-fpga.md) - LUTs, CLBs, routing, and FPGA primitives in RHDL
 - [Appendix T - CGRA Implementation](appendix-t-cgra.md) - PE arrays, interconnect, and configuration in RHDL
-- [Appendix U - MOS 6502 Implementation](appendix-u-mos6502.md) - Full 6502 in RHDL with test suite
-- [Appendix V - Cray-1 Implementation](appendix-v-cray1.md) - Vector registers, functional units, chaining, and memory in RHDL
+- [Appendix U - NVIDIA G80 Implementation](appendix-u-g80.md) - Streaming multiprocessors, warp scheduler, and shared memory in RHDL
+- [Appendix V - RISC-V Implementation](appendix-v-riscv.md) - RV32I decoder, ALU, pipeline stages, cache, TLB, and MMU
 - [Appendix W - TPU Implementation](appendix-w-tpu.md) - Systolic array, weight FIFOs, and matrix multiply in RHDL
-- [Appendix X - RISC-V Implementation](appendix-x-riscv.md) - RV32I decoder, ALU, pipeline stages, cache, TLB, and MMU
-- [Appendix Y - NVIDIA G80 Implementation](appendix-y-g80.md) - Streaming multiprocessors, warp scheduler, and shared memory in RHDL
 
 ---
 
@@ -135,9 +131,8 @@ Each appendix provides complete RHDL implementations and formal details for its 
 |                                                              |
 +-------------------------------------------------------------+
 |                                                              |
-|   Case Studies:    6502 (1975) | Cray-1 (1976) | G80 (2006)        |
-|   (chronological)  RISC-V (2010) | TPU (2016) | Cerebras (2019)    |
-|                    Groq (2020)                                      |
+|   Case Studies:    G80 (2006) | RISC-V (2010) | TPU (2016)        |
+|   (chronological)  Cerebras (2019) | Groq (2020)                    |
 |                                                              |
 +-------------------------------------------------------------+
 ```
@@ -188,15 +183,13 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 18 | Analog Computing | R | Analog Simulation (Ruby) |
 | 19 | FPGAs | S | FPGA Implementation |
 | 20 | CGRAs | T | CGRA Implementation |
-| 21 | The MOS 6502 | U | 6502 RHDL Implementation |
-| 22 | The Cray-1 | V | Cray-1 Implementation |
-| 23 | The NVIDIA G80 | Y | G80 RHDL Implementation |
-| 24 | The RISC-V RV32I | X | RISC-V Implementation |
-| 25 | The Google TPU v1 | W | TPU Implementation |
-| 26 | The Cerebras WSE | J | (see Wafer-Scale appendix) |
-| 27 | The Groq LPU | G | (see Dataflow appendix) |
+| 21 | The NVIDIA G80 | U | G80 Implementation |
+| 22 | The RISC-V RV32I | V | RISC-V Implementation |
+| 23 | The Google TPU v1 | W | TPU Implementation |
+| 24 | The Cerebras WSE | J | (see Wafer-Scale appendix) |
+| 25 | The Groq LPU | G | (see Dataflow appendix) |
 
-*Note: Chapters 26 and 27 share appendices with their corresponding paradigm chapters, as they are case studies of those architectures.*
+*Note: Chapters 24 and 25 share appendices with their corresponding paradigm chapters, as they are case studies of those architectures.*
 
 ---
 
