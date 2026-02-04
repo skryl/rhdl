@@ -2,9 +2,8 @@ require 'spec_helper'
 require 'support/cpu_test_helper'
 require 'support/isa_assembler'
 require 'support/display_helper'
-require_relative '../../../../../../examples/mos6502/utilities/simulators/isa_simulator/loader'
 
-RSpec.describe RHDL::Examples::MOS6502::Components::CPU::CPU, 'ConwayGameOfLife' do
+RSpec.describe RHDL::Components::CPU::CPU, 'ConwayGameOfLife' do
   include CpuTestHelper
   include DisplayHelper
 
