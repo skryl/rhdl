@@ -9,7 +9,7 @@ RSpec.describe RHDL::Components::CPU::CPU, 'ConwayGameOfLife' do
 
   before(:each) do
     @memory = MemorySimulator::Memory.new
-    @cpu = described_class.new(@memory)
+    @cpu = cpu_class.new(@memory)
     @cpu.reset
   end
 
@@ -613,18 +613,18 @@ RSpec.describe RHDL::Components::CPU::CPU, 'ConwayGameOfLife' do
     @cpu.instance_variable_set(:@pc, 0x300)
 
     # Verify low memory is clear for variables
-    expect(@memory.read(0x0)).to eq(0x00)
+    expect(@cpu.memory.read(0x0)).to eq(0x00)
     puts "Program loaded at memory address 0x300"
 
     # We'll store row=28 => memory[0xE4], col=80 => memory[0xE3], etc.
     # And row=27 => memory[0xE9], col=79 => memory[0xEA].
     # Also store 1 in memory[0xE2].
     # Then the code can do boundary checks properly.
-    @memory.write(0xE2, 0x01)  # For increments
-    @memory.write(0xE3, 80)    # For col compare
-    @memory.write(0xE4, 28)    # For row compare
-    @memory.write(0xE9, 27)    # row boundary check
-    @memory.write(0xEA, 79)    # col boundary check
+    @cpu.memory.write(0xE2, 0x01)  # For increments
+    @cpu.memory.write(0xE3, 80)    # For col compare
+    @cpu.memory.write(0xE4, 28)    # For row compare
+    @cpu.memory.write(0xE9, 27)    # row boundary check
+    @cpu.memory.write(0xEA, 79)    # col boundary check
 
     # Seed an example glider at buffer A (0x0100..)
     glider = [
@@ -660,7 +660,7 @@ RSpec.describe RHDL::Components::CPU::CPU, 'ConwayGameOfLife' do
     glider.each_with_index do |line, row|
       line.each_char.with_index do |ch, col|
         val = (ch == 'X') ? 'X'.ord : '.'.ord
-        @memory.write(0x100 + row*80 + col, val)
+        @cpu.memory.write(0x100 + row*80 + col, val)
       end
     end
 

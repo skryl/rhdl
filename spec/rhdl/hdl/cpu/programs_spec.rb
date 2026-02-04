@@ -10,7 +10,7 @@ RSpec.describe RHDL::Components::CPU::CPU do
   describe 'program tests' do
     before(:each) do
       @memory = MemorySimulator::Memory.new
-      @cpu = described_class.new(@memory)
+      @cpu = cpu_class.new(@memory)
       @cpu.reset
     end
 
@@ -23,11 +23,11 @@ RSpec.describe RHDL::Components::CPU::CPU do
       end
 
       load_program(program)
-      @memory.write(0xE, 0x24)
-      @memory.write(0xF, 0x18)
+      @cpu.memory.write(0xE, 0x24)
+      @cpu.memory.write(0xF, 0x18)
       simulate_cycles(10)
 
-      expect(@memory.read(0xD)).to eq(0x3C)
+      expect(@cpu.memory.read(0xD)).to eq(0x3C)
       expect(@cpu.halted).to be true
     end
 
@@ -48,11 +48,11 @@ RSpec.describe RHDL::Components::CPU::CPU do
       end
 
       load_program(program)
-      @memory.write(0xE, 0x42)
-      @memory.write(0xF, 0x24)
+      @cpu.memory.write(0xE, 0x42)
+      @cpu.memory.write(0xF, 0x24)
       simulate_cycles(20)
 
-      expect(@memory.read(0xD)).to eq(0x42)
+      expect(@cpu.memory.read(0xD)).to eq(0x42)
       expect(@cpu.halted).to be true
     end
 
@@ -69,12 +69,12 @@ RSpec.describe RHDL::Components::CPU::CPU do
       end
 
       load_program(program)
-      @memory.write(0xE, 0x05)
-      @memory.write(0xD, 0x01)
+      @cpu.memory.write(0xE, 0x05)
+      @cpu.memory.write(0xD, 0x01)
       simulate_cycles(50)
 
       expect(@cpu.halted).to be true
-      expect(@memory.read(0xE)).to eq(0)
+      expect(@cpu.memory.read(0xE)).to eq(0)
     end
 
     it 'calculates factorial of a small number' do
@@ -95,13 +95,13 @@ RSpec.describe RHDL::Components::CPU::CPU do
       # Total: 10 bytes, so halt is at offset 9, which fits in nibble for JZ
 
       load_program(program)
-      @memory.write(0xE, 5)   # N=5
-      @memory.write(0xD, 1)   # decrement value=1
-      @memory.write(0xF, 1)   # result=1
+      @cpu.memory.write(0xE, 5)   # N=5
+      @cpu.memory.write(0xD, 1)   # decrement value=1
+      @cpu.memory.write(0xF, 1)   # result=1
       simulate_cycles(100)
 
       expect(@cpu.halted).to be true
-      expect(@memory.read(0xF)).to eq(120)
+      expect(@cpu.memory.read(0xF)).to eq(120)
     end
 
     it 'doubles a number' do
@@ -113,11 +113,11 @@ RSpec.describe RHDL::Components::CPU::CPU do
       end
 
       load_program(program)
-      @memory.write(0xE, 0x10)  # 0x10 (16 decimal)
+      @cpu.memory.write(0xE, 0x10)  # 0x10 (16 decimal)
       simulate_cycles(10)
 
       expect(@cpu.halted).to be true
-      expect(@memory.read(0xD)).to eq(0x20)  # 16 doubled is 32
+      expect(@cpu.memory.read(0xD)).to eq(0x20)  # 16 doubled is 32
     end
   end
 end
