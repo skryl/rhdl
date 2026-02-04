@@ -83,7 +83,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix S - FPGA Implementation](appendix-s-fpga.md) - LUTs, CLBs, routing, and FPGA primitives in RHDL
 - [Appendix T - CGRA Implementation](appendix-t-cgra.md) - PE arrays, interconnect, and configuration in RHDL
 - [Appendix U - MOS 6502 Implementation](appendix-u-mos6502.md) - Full 6502 in RHDL with test suite
-- [Appendix V - VideoCore IV Implementation](appendix-v-videocore.md) - QPU cores, VPM, and sample assembly programs
+- [Appendix V - Cray-1 Implementation](appendix-v-cray1.md) - Vector registers, functional units, chaining, and memory in RHDL
 - [Appendix W - TPU Implementation](appendix-w-tpu.md) - Systolic array, weight FIFOs, and matrix multiply in RHDL
 - [Appendix X - RISC-V Implementation](appendix-x-riscv.md) - RV32I decoder, ALU, pipeline stages, cache, TLB, and MMU
 - [Appendix Y - Transputer Implementation](appendix-y-transputer.md) - Links, channels, scheduler, and ALT controller in RHDL
@@ -192,7 +192,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 19 | FPGAs | S | FPGA Implementation |
 | 20 | CGRAs | T | CGRA Implementation |
 | 21 | The MOS 6502 | U | 6502 RHDL Implementation |
-| 22 | The Cray-1 | K | (see Vector appendix) |
+| 22 | The Cray-1 | V | Cray-1 Implementation |
 | 23 | The Transputer | Y | Transputer Implementation |
 | 24 | The NVIDIA G80 | I | (see GPU appendix) |
 | 25 | The RISC-V RV32I | X | RISC-V Implementation |
@@ -201,7 +201,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 28 | The Groq LPU | G | (see Dataflow appendix) |
 | 29 | RHDL | Z | RHDL Reference |
 
-*Note: Chapters 22, 24, 27, and 28 share appendices with their corresponding paradigm chapters, as they are case studies of those architectures.*
+*Note: Chapters 24, 27, and 28 share appendices with their corresponding paradigm chapters, as they are case studies of those architectures.*
 
 ---
 
