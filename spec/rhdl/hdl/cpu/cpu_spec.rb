@@ -14,19 +14,15 @@ RSpec.describe RHDL::HDL::CPU::CPU do
       # Clock and reset
       expect(cpu.inputs.keys).to include(:clk, :rst)
 
-      # Memory interface
+      # Memory interface - this is the ONLY external interface besides clock/reset
       expect(cpu.inputs.keys).to include(:mem_data_in)
       expect(cpu.outputs.keys).to include(:mem_data_out, :mem_addr, :mem_write_en, :mem_read_en)
 
-      # Control inputs (acc_load_data removed - CPU now uses internal mux for ACC source)
-      expect(cpu.inputs.keys).to include(:acc_load_en, :pc_load_en, :pc_load_data)
-      expect(cpu.inputs.keys).to include(:sp_push, :sp_pop, :zero_flag_load_en)
-
       # Status outputs
-      expect(cpu.outputs.keys).to include(:pc_out, :acc_out, :sp_out, :halt_out, :zero_flag_out)
+      expect(cpu.outputs.keys).to include(:pc_out, :acc_out, :sp_out, :halted, :state_out, :zero_flag_out)
 
-      # Decoder outputs
-      expect(cpu.outputs.keys).to include(:dec_alu_op, :dec_branch, :dec_jump, :dec_halt)
+      # The new CPU has internal control - no external control inputs
+      expect(cpu.inputs.keys).not_to include(:instruction, :acc_load_en, :pc_load_en)
     end
   end
 
@@ -37,7 +33,7 @@ RSpec.describe RHDL::HDL::CPU::CPU do
 
       # Check ports exist (port names are symbols)
       port_names = ir.ports.map(&:name)
-      expect(port_names).to include(:clk, :rst, :mem_data_in, :mem_addr, :halt_out)
+      expect(port_names).to include(:clk, :rst, :mem_data_in, :mem_addr, :halted)
     end
 
     it 'generates valid Verilog' do
@@ -47,13 +43,13 @@ RSpec.describe RHDL::HDL::CPU::CPU do
       expect(verilog).to include('input rst')
       expect(verilog).to include('input [7:0] mem_data_in')
       expect(verilog).to include('output [15:0] mem_addr')
-      expect(verilog).to include('output halt_out')
+      expect(verilog).to include('output halted')
     end
 
     it 'includes submodule instantiations in Verilog' do
       verilog = RHDL::HDL::CPU::CPU.to_verilog
       # Structure components should have instance declarations
-      expect(verilog).to include('instruction_decoder') | include('alu') | include('program_counter')
+      expect(verilog).to include('instruction_decoder') | include('alu') | include('control_unit')
     end
   end
 
@@ -63,11 +59,11 @@ RSpec.describe RHDL::HDL::CPU::CPU do
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('cpu.clk', 'cpu.rst', 'cpu.mem_data_in')
-      expect(ir.outputs.keys).to include('cpu.mem_addr', 'cpu.halt_out')
+      expect(ir.outputs.keys).to include('cpu.mem_addr', 'cpu.halted')
     end
 
     it 'generates gates from subcomponents' do
-      # CPU should have gates from ALU, decoder, etc.
+      # CPU should have gates from ALU, decoder, control unit, etc.
       expect(ir.gates.length).to be > 100  # Complex component
     end
 
@@ -75,15 +71,16 @@ RSpec.describe RHDL::HDL::CPU::CPU do
       verilog = NetlistHelper.ir_to_structure_verilog(ir)
       expect(verilog).to include('module cpu')
       expect(verilog).to include('input clk')
-      expect(verilog).to include('output halt_out')
+      expect(verilog).to include('output halted')
     end
 
     describe 'simulator comparison' do
       it 'all simulators produce matching results' do
+        # New CPU only has clk, rst, mem_data_in as inputs
         test_cases = [
-          { rst: 1, instruction: 0, mem_data_in: 0, acc_load_en: 0, pc_load_en: 0, pc_load_data: 0, sp_push: 0, sp_pop: 0, zero_flag_load_en: 0 },
-          { rst: 0, instruction: 0, mem_data_in: 0, acc_load_en: 0, pc_load_en: 0, pc_load_data: 0, sp_push: 0, sp_pop: 0, zero_flag_load_en: 0 },
-          { rst: 0, instruction: 0, mem_data_in: 0xF0, acc_load_en: 0, pc_load_en: 0, pc_load_data: 0, sp_push: 0, sp_pop: 0, zero_flag_load_en: 0 }
+          { rst: 1, mem_data_in: 0 },
+          { rst: 0, mem_data_in: 0 },
+          { rst: 0, mem_data_in: 0xF0 }
         ]
 
         NetlistHelper.compare_and_validate!(

@@ -173,10 +173,13 @@ module RHDL
           zero_flag_load_en <= mux(state == lit(S_EXECUTE, width: 8), is_reg_write, 0)
 
           # pc_inc_en: Increment PC after instruction fetch/decode
+          # Don't increment for CALL (return addr calc), branches/jumps (pc_load handles),
+          # or instructions that will halt
+          no_inc = is_call | is_branch | is_jump | is_halt | (is_ret & sp_empty)
           pc_inc_en <= case_select(state, {
-            S_DECODE => mux(instr_length == lit(1, width: 2), 1, 0),
-            S_FETCH_OP1 => mux(instr_length == lit(2, width: 2), 1, 0),
-            S_FETCH_OP2 => lit(1, width: 1)
+            S_DECODE => mux((instr_length == lit(1, width: 2)) & ~no_inc, 1, 0),
+            S_FETCH_OP1 => mux((instr_length == lit(2, width: 2)) & ~no_inc, 1, 0),
+            S_FETCH_OP2 => mux(~no_inc, 1, 0)
           }, default: 0)
 
           # pc_load_en: Load PC for branches/jumps (NOT for RET - handled separately)
