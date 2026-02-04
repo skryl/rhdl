@@ -334,6 +334,153 @@ The medium doesn't matter:
 - Electrons flowing or not flowing
 - Crabs present or absent
 
+## Biological Computation
+
+Life itself computes. From DNA replication to neural networks, biological systems process information using the same fundamental principles as silicon chips—just with different substrates.
+
+### DNA: The Original Digital Storage
+
+DNA stores information in a 4-symbol alphabet: A, T, G, C (adenine, thymine, guanine, cytosine). This is more information-dense than binary:
+
+```
+Binary:     2 symbols  →  1 bit per symbol
+DNA:        4 symbols  →  2 bits per symbol
+
+Human genome: ~3 billion base pairs
+            = ~6 billion bits
+            = ~750 megabytes
+
+All in a nucleus 6 micrometers across!
+```
+
+But DNA isn't just storage—it's also a computing substrate.
+
+### DNA Computing (1994)
+
+Leonard Adleman solved a computational problem using DNA molecules:
+
+**The Problem:** Find a path visiting all cities exactly once (Hamiltonian path)
+
+**The DNA Solution:**
+1. Encode each city as a DNA sequence
+2. Encode each edge as a sequence that bridges two cities
+3. Mix all sequences together
+4. DNA strands self-assemble into all possible paths
+5. Filter for correct length (visiting all cities)
+6. Extract the answer
+
+```
+Cities:          DNA encoding:
+  A              ACTTGCAG
+  B              TCGTACGA
+  C              GGCTATGT
+
+Edge A→B:        ...GCAG-TCGT...
+                 (end of A + start of B)
+```
+
+The computation happens through **chemistry**—billions of molecules exploring all paths simultaneously. It's massively parallel but slow per operation.
+
+### Neurons as Logic Gates
+
+Biological neurons implement threshold logic:
+
+```
+         BIOLOGICAL NEURON
+
+    Input 1 ──┐
+              │    ┌─────────────┐
+    Input 2 ──┼───▶│   Σ weights │───▶ If sum > threshold: fire
+              │    │   + bias    │     Else: don't fire
+    Input 3 ──┘    └─────────────┘
+
+    This is essentially: output = (w₁x₁ + w₂x₂ + w₃x₃ > θ) ? 1 : 0
+```
+
+A single neuron can implement:
+- **AND**: High threshold, all inputs needed
+- **OR**: Low threshold, any input sufficient
+- **NOT**: Inhibitory input with threshold
+
+Your brain has ~86 billion neurons, each with ~7,000 synaptic connections. That's roughly 600 trillion "wires"—far more than any chip.
+
+### Cellular Automata: Simple Rules, Complex Behavior
+
+Perhaps the most striking example of computation from simple rules is **cellular automata**. A grid of cells, each following the same simple rule, can produce astonishing complexity.
+
+**Rule 110** is one of the simplest universal computers:
+
+```
+Current pattern:  111  110  101  100  011  010  001  000
+New center cell:   0    1    1    0    1    1    1    0
+                   ─────────────────────────────────────
+                   Binary: 01101110 = 110 (hence "Rule 110")
+```
+
+Just 8 rules. Yet Rule 110 is **Turing complete**—it can compute anything!
+
+```
+Rule 110 evolution (each row = next generation):
+
+Generation 0:  ......................................#.
+Generation 1:  .....................................##.
+Generation 2:  ....................................###.
+Generation 3:  ...................................##.#.
+Generation 4:  ..................................#####.
+Generation 5:  .................................##...#.
+Generation 6:  ................................###..##.
+...
+              (complex triangular patterns emerge)
+```
+
+> See [Appendix D](appendix-d-cellular-automata.md) for detailed cellular automata rules, Game of Life patterns, and how Rule 110 achieves universal computation.
+
+### The Game of Life
+
+John Conway's Game of Life (1970) uses even simpler rules on a 2D grid:
+
+```
+Rules:
+1. A live cell with 2-3 neighbors survives
+2. A dead cell with exactly 3 neighbors becomes alive
+3. All other cells die or stay dead
+
+That's it. Yet from these rules emerge:
+- Gliders (moving patterns)
+- Glider guns (patterns that emit gliders)
+- Universal computers
+- Self-replicating machines
+```
+
+People have built working computers inside the Game of Life—CPUs with RAM, running programs, displaying output. All from three rules about counting neighbors.
+
+### Why Biology Matters for Hardware Design
+
+Understanding biological computation reveals:
+
+1. **Computation is physics** - Any physical system that can represent states and transitions can compute
+
+2. **Parallelism is natural** - Biology computes with billions of units simultaneously; silicon is catching up
+
+3. **Simple rules suffice** - Rule 110, Game of Life, neurons—complex behavior from simple components
+
+4. **Energy matters** - The brain runs on ~20 watts; understanding biological efficiency informs chip design
+
+5. **Self-organization works** - DNA self-assembles; future hardware may grow rather than be manufactured
+
+### The Continuum of Computation
+
+```
+          SLOW ←─────────────────────────────────────→ FAST
+
+DNA computing     Neurons        Relays      Transistors
+(hours)          (milliseconds)  (10ms)      (nanoseconds)
+
+          DIFFERENT SUBSTRATES, SAME COMPUTATION
+```
+
+When you design hardware in RHDL, you're working at the level of abstraction that spans all these substrates. The logic is the same whether it runs on proteins or silicon.
+
 ## The Transistor: Just a Faster Switch
 
 ### What a Transistor Actually Does

@@ -28,6 +28,7 @@
 - [Appendix A - Ada Lovelace's Program](appendix-a-ada-lovelace-program.md) - Complete Bernoulli number algorithm with original notation, pseudocode, and Ruby implementation
 - [Appendix B - Turing Machines & Symbol Manipulation](appendix-b-turing-machines.md) - Computation as symbol manipulation, string rewriting systems, Turing machine programs with execution traces
 - [Appendix C - Lambda Calculus](appendix-c-lambda-calculus.md) - Church's alternative model of computation, Church encodings, Y combinator, connection to functional programming and hardware
+- [Appendix D - Cellular Automata](appendix-d-cellular-automata.md) - Elementary automata, Rule 110 universality, Conway's Game of Life, Wireworld circuits, emergence from simple rules
 
 ---
 
@@ -50,6 +51,7 @@
 | Appendix A | Draft | Ada's complete program |
 | Appendix B | Draft | Symbol manipulation, Turing machines |
 | Appendix C | Draft | Lambda calculus and functional computation |
+| Appendix D | Draft | Cellular automata and emergent computation |
 
 ## Key Themes
 
