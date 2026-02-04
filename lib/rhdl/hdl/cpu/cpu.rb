@@ -70,6 +70,7 @@ module RHDL
         wire :dec_instr_length, width: 2
         wire :dec_is_lda
         wire :dec_sta_indirect
+        wire :dec_lda_indirect
 
         # Control unit outputs
         wire :ctrl_state, width: 8
@@ -144,6 +145,7 @@ module RHDL
         port [:decoder, :instr_length] => :dec_instr_length
         port [:decoder, :is_lda] => :dec_is_lda
         port [:decoder, :sta_indirect] => :dec_sta_indirect
+        port [:decoder, :lda_indirect] => :dec_lda_indirect
 
         # Control unit connections
         port :clk => [:ctrl, :clk]
@@ -159,6 +161,7 @@ module RHDL
         port :dec_mem_write => [:ctrl, :is_mem_write]
         port :dec_mem_read => [:ctrl, :is_mem_read]
         port :dec_sta_indirect => [:ctrl, :is_sta_indirect]
+        port :dec_lda_indirect => [:ctrl, :is_lda_indirect]
         port :dec_pc_src => [:ctrl, :pc_src]
         port :dec_alu_src => [:ctrl, :alu_src]
         port [:sp, :empty] => [:ctrl, :sp_empty]
@@ -298,11 +301,11 @@ module RHDL
 
           # Combine operand bytes into 16-bit value
           # Assembler uses big-endian: operand_lo (at PC+1) is high byte, operand_hi (at PC+2) is low byte
-          operand_16 <= (operand_lo[7..0] << lit(8, width: 4)) | operand_hi[7..0]
+          operand_16 <= operand_lo.concat(operand_hi)
 
           # Indirect address from latched pointer bytes
           # indirect_hi is the high byte, indirect_lo is the low byte
-          indirect_addr <= (indirect_hi[7..0] << lit(8, width: 4)) | indirect_lo[7..0]
+          indirect_addr <= indirect_hi.concat(indirect_lo)
 
           # ACC data input - for LDI use latched operand, for LDA use latched memory data
           acc_data_in <= mux(dec_alu_src,

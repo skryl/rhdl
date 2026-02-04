@@ -36,10 +36,12 @@ module Assembler
   
         offsets = []
         current_address = 0
-        @instructions.each_with_index do |(opcode, operand), index|
+        @instructions.each_with_index do |instr, index|
           offsets << current_address
+          opcode = instr[0]
+          operand = instr[1]
           # Calculate instruction size based on opcode and operand
-          if operand.is_a?(Array)
+          if instr.size == 3
             # 3-element instruction (indirect addressing)
             current_address += 3
           elsif needs_four_bytes?(opcode)
@@ -53,6 +55,17 @@ module Assembler
             else
               current_address += 2  # 2-byte direct (0x21 + operand)
             end
+          elsif opcode == :LDA && !operand.is_a?(Symbol)
+            # LDA has special encoding: indirect (3 bytes), direct (2 bytes), or nibble (1 byte)
+            # 0x10 = indirect, 0x11 = direct, 0x12-0x1F = nibble
+            if lda_can_use_nibble?(operand)
+              current_address += 1  # Nibble-encoded (0x12-0x1F)
+            else
+              current_address += 2  # 2-byte direct (0x11 + operand)
+            end
+          elsif opcode == :CALL
+            # CALL always uses 2-byte encoding to ensure correct label resolution
+            current_address += 2
           elsif is_nibble_encoded?(opcode) && (!operand.is_a?(Symbol) && operand <= 0x0F)
             # Nibble-encoded with operand that fits in nibble
             current_address += 1
@@ -66,10 +79,12 @@ module Assembler
         end
   
         # Now convert any label references into the correct offset from the "offsets" array.
-        @instructions.each_with_index do |(opcode, operand), index|
+        @instructions.each_with_index do |instr, index|
+          opcode = instr[0]
+          operand = instr[1]
           # Verify opcode is valid
           raise ArgumentError, "Unknown instruction: #{opcode}" unless valid_opcode?(opcode)
-          
+
           if operand.is_a?(Symbol)
             # The instruction wants to jump to a label. Let's see which instruction that label is on:
             label_index = @labels[operand]
@@ -103,6 +118,20 @@ module Assembler
                flat_instructions << 0x21
                flat_instructions << operand
              end
+           # Handle LDA specially due to reserved opcodes (0x10=indirect, 0x11=direct)
+           elsif opcode == :LDA
+             if lda_can_use_nibble?(operand)
+               # Nibble-encoded: 0x12-0x1F
+               flat_instructions << (0x10 | (operand & 0x0F))
+             else
+               # 2-byte direct LDA: 0x11 + operand
+               flat_instructions << 0x11
+               flat_instructions << operand
+             end
+           # CALL always uses 2-byte encoding for consistent label resolution
+           elsif opcode == :CALL
+             flat_instructions << 0xC0  # CALL opcode
+             flat_instructions << operand
            # Check if this is a nibble-encoded instruction (1 byte) AND operand fits in nibble
            elsif is_nibble_encoded?(opcode) && operand <= 0x0F
              # Encode as single byte: high nibble = opcode, low nibble = operand
@@ -162,6 +191,13 @@ module Assembler
       # Only operands 2-15 (0x02-0x0F) can use nibble encoding
       # 0x20 = indirect STA, 0x21 = 2-byte direct STA
       def sta_can_use_nibble?(operand)
+        operand.is_a?(Integer) && operand >= 2 && operand <= 0x0F
+      end
+
+      # Check if LDA operand can use nibble encoding
+      # Only operands 2-15 (0x02-0x0F) can use nibble encoding
+      # 0x10 = indirect LDA (3 bytes), 0x11 = 2-byte direct LDA
+      def lda_can_use_nibble?(operand)
         operand.is_a?(Integer) && operand >= 2 && operand <= 0x0F
       end
 
