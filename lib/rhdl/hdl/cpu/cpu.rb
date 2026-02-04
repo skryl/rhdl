@@ -44,6 +44,9 @@ module RHDL
         wire :operand_16, width: 16       # Combined operand
         wire :effective_operand, width: 8 # Either embedded nibble or full operand byte
         wire :mem_data_latched, width: 8  # Latched memory data from S_READ_MEM
+        wire :indirect_hi, width: 8       # Indirect address high byte
+        wire :indirect_lo, width: 8       # Indirect address low byte
+        wire :indirect_addr, width: 16    # Combined indirect address
 
         wire :alu_result, width: 8
         wire :alu_zero
@@ -66,10 +69,11 @@ module RHDL
         wire :dec_ret
         wire :dec_instr_length, width: 2
         wire :dec_is_lda
+        wire :dec_sta_indirect
 
         # Control unit outputs
         wire :ctrl_state, width: 8
-        wire :ctrl_mem_addr_sel, width: 3
+        wire :ctrl_mem_addr_sel, width: 4
         wire :ctrl_mem_read_en
         wire :ctrl_mem_write_en
         wire :ctrl_instr_latch_en
@@ -85,6 +89,8 @@ module RHDL
         wire :ctrl_halted
         wire :ctrl_done
         wire :ctrl_mem_data_latch_en       # Latch memory data for ALU
+        wire :ctrl_indirect_hi_latch_en    # Latch indirect address high byte
+        wire :ctrl_indirect_lo_latch_en    # Latch indirect address low byte
 
         # PC control wires
         wire :pc_next, width: 16
@@ -99,6 +105,9 @@ module RHDL
         ADDR_OPERAND_16 = 4
         ADDR_SP      = 5
         ADDR_SP_PLUS_1 = 6  # For RET (pop reads from SP+1)
+        ADDR_PTR_HI  = 7    # Address from operand_lo (pointer to high byte)
+        ADDR_PTR_LO  = 8    # Address from operand_hi (pointer to low byte)
+        ADDR_INDIRECT = 9   # Indirect 16-bit address
 
         # Sub-components
         instance :decoder, InstructionDecoder
@@ -115,6 +124,8 @@ module RHDL
         instance :op_lo_reg, Register, width: 8
         instance :op_hi_reg, Register, width: 8
         instance :mem_data_reg, Register, width: 8  # Latch memory data for ALU
+        instance :indirect_hi_reg, Register, width: 8  # Indirect address high byte
+        instance :indirect_lo_reg, Register, width: 8  # Indirect address low byte
 
         # Decoder connections
         port :instruction_reg => [:decoder, :instruction]
@@ -132,6 +143,7 @@ module RHDL
         port [:decoder, :ret] => :dec_ret
         port [:decoder, :instr_length] => :dec_instr_length
         port [:decoder, :is_lda] => :dec_is_lda
+        port [:decoder, :sta_indirect] => :dec_sta_indirect
 
         # Control unit connections
         port :clk => [:ctrl, :clk]
@@ -146,6 +158,7 @@ module RHDL
         port :dec_reg_write => [:ctrl, :is_reg_write]
         port :dec_mem_write => [:ctrl, :is_mem_write]
         port :dec_mem_read => [:ctrl, :is_mem_read]
+        port :dec_sta_indirect => [:ctrl, :is_sta_indirect]
         port :dec_pc_src => [:ctrl, :pc_src]
         port :dec_alu_src => [:ctrl, :alu_src]
         port [:sp, :empty] => [:ctrl, :sp_empty]
@@ -168,6 +181,8 @@ module RHDL
         port [:ctrl, :data_out_sel] => :ctrl_data_out_sel
         port [:ctrl, :halted] => :ctrl_halted
         port [:ctrl, :mem_data_latch_en] => :ctrl_mem_data_latch_en
+        port [:ctrl, :indirect_hi_latch_en] => :ctrl_indirect_hi_latch_en
+        port [:ctrl, :indirect_lo_latch_en] => :ctrl_indirect_lo_latch_en
 
         # Instruction register
         port :clk => [:instr_reg, :clk]
@@ -196,6 +211,20 @@ module RHDL
         port :mem_data_in => [:mem_data_reg, :d]
         port :ctrl_mem_data_latch_en => [:mem_data_reg, :en]
         port [:mem_data_reg, :q] => :mem_data_latched
+
+        # Indirect high byte register
+        port :clk => [:indirect_hi_reg, :clk]
+        port :rst => [:indirect_hi_reg, :rst]
+        port :mem_data_in => [:indirect_hi_reg, :d]
+        port :ctrl_indirect_hi_latch_en => [:indirect_hi_reg, :en]
+        port [:indirect_hi_reg, :q] => :indirect_hi
+
+        # Indirect low byte register
+        port :clk => [:indirect_lo_reg, :clk]
+        port :rst => [:indirect_lo_reg, :rst]
+        port :mem_data_in => [:indirect_lo_reg, :d]
+        port :ctrl_indirect_lo_latch_en => [:indirect_lo_reg, :en]
+        port [:indirect_lo_reg, :q] => :indirect_lo
 
         # Zero flag register
         port :clk => [:zero_flag_reg, :clk]
@@ -271,6 +300,10 @@ module RHDL
           # Assembler uses big-endian: operand_lo (at PC+1) is high byte, operand_hi (at PC+2) is low byte
           operand_16 <= (operand_lo[7..0] << lit(8, width: 4)) | operand_hi[7..0]
 
+          # Indirect address from latched pointer bytes
+          # indirect_hi is the high byte, indirect_lo is the low byte
+          indirect_addr <= (indirect_hi[7..0] << lit(8, width: 4)) | indirect_lo[7..0]
+
           # ACC data input - for LDI use latched operand, for LDA use latched memory data
           acc_data_in <= mux(dec_alu_src,
             operand_lo,        # LDI: use latched operand
@@ -294,7 +327,10 @@ module RHDL
             ADDR_OPERAND => effective_operand,  # 8-bit operand address
             ADDR_OPERAND_16 => operand_16,      # 16-bit operand address
             ADDR_SP => sp_out,                  # Stack pointer (8-bit, zero-extended)
-            ADDR_SP_PLUS_1 => sp_out + lit(1, width: 8)  # SP+1 for RET pop
+            ADDR_SP_PLUS_1 => sp_out + lit(1, width: 8),  # SP+1 for RET pop
+            ADDR_PTR_HI => operand_lo,          # Read pointer high byte from addr in operand_lo
+            ADDR_PTR_LO => operand_hi,          # Read pointer low byte from addr in operand_hi
+            ADDR_INDIRECT => indirect_addr      # Write to indirect 16-bit address
           }, default: pc_current)
 
           # Memory data out (for writes)

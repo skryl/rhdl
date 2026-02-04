@@ -46,6 +46,13 @@ module Assembler
             current_address += 3  # opcode + high byte + low byte
           elsif is_single_byte?(opcode)
             current_address += 1  # just opcode
+          elsif opcode == :STA && !operand.is_a?(Symbol)
+            # STA has special encoding: indirect (3 bytes), extended (2 bytes), or nibble (1 byte)
+            if sta_can_use_nibble?(operand)
+              current_address += 1  # Nibble-encoded (0x22-0x2F)
+            else
+              current_address += 2  # 2-byte direct (0x21 + operand)
+            end
           elsif is_nibble_encoded?(opcode) && (!operand.is_a?(Symbol) && operand <= 0x0F)
             # Nibble-encoded with operand that fits in nibble
             current_address += 1
@@ -86,8 +93,18 @@ module Assembler
          case instr.size
          when 2
            opcode, operand = instr
+           # Handle STA specially due to reserved opcodes (0x20=indirect, 0x21=extended)
+           if opcode == :STA
+             if sta_can_use_nibble?(operand)
+               # Nibble-encoded: 0x22-0x2F
+               flat_instructions << (0x20 | (operand & 0x0F))
+             else
+               # 2-byte direct STA: 0x21 + operand
+               flat_instructions << 0x21
+               flat_instructions << operand
+             end
            # Check if this is a nibble-encoded instruction (1 byte) AND operand fits in nibble
-           if is_nibble_encoded?(opcode) && operand <= 0x0F
+           elsif is_nibble_encoded?(opcode) && operand <= 0x0F
              # Encode as single byte: high nibble = opcode, low nibble = operand
              flat_instructions << (encode_opcode(opcode) | (operand & 0x0F))
            elsif is_single_byte?(opcode)
@@ -102,14 +119,8 @@ module Assembler
              flat_instructions << low_byte
            else
              # Two-byte instruction: opcode + operand
-             if opcode == :STA
-               # 2-byte direct STA uses 0x21 (not 0x20 which is indirect)
-               flat_instructions << 0x21
-               flat_instructions << operand
-             else
-               flat_instructions << encode_opcode(opcode)
-               flat_instructions << operand
-             end
+             flat_instructions << encode_opcode(opcode)
+             flat_instructions << operand
            end
          when 3
            opcode, high, low = instr
@@ -142,8 +153,16 @@ module Assembler
       private
 
       # Return true if this is a nibble-encoded instruction (1 byte total)
+      # Note: STA is handled specially since 0x20 and 0x21 are reserved for indirect/extended
       def is_nibble_encoded?(opcode)
-        [:NOP, :LDA, :STA, :ADD, :SUB, :AND, :OR, :XOR, :JZ, :JNZ, :JMP, :CALL, :RET, :DIV].include?(opcode)
+        [:NOP, :LDA, :ADD, :SUB, :AND, :OR, :XOR, :JZ, :JNZ, :JMP, :CALL, :RET, :DIV].include?(opcode)
+      end
+
+      # Check if STA operand can use nibble encoding
+      # Only operands 2-15 (0x02-0x0F) can use nibble encoding
+      # 0x20 = indirect STA, 0x21 = 2-byte direct STA
+      def sta_can_use_nibble?(operand)
+        operand.is_a?(Integer) && operand >= 2 && operand <= 0x0F
       end
 
       # Return true if this is a single-byte instruction with no operand

@@ -8,15 +8,15 @@ RSpec.describe RHDL::Components::CPU::CPU, 'ConwayGameOfLife' do
   include DisplayHelper
 
   before(:each) do
-    # Conway requires 64K memory with addresses like 0x300
-    # Use behavioral CPU which supports full 16-bit addressing
+    # Conway requires bank switching and complex memory operations
+    # that are only supported by the behavioral CPU (not the synthesizable HDL CPU)
     use_behavior_cpu!
     @memory = MemorySimulator::Memory.new
     @cpu = cpu_class.new(@memory)
     @cpu.reset
   end
 
-  it 'runs an actual Conway program on a double-buffered 28×80 board' do
+  it 'runs an actual Conway program on a double-buffered 28×80 board', :slow do
     # NOTE: This code is extremely large and may not fit in typical 8-bit memory.
 
     # Build program with base address 0x300 to avoid data overlap
