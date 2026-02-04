@@ -1,4 +1,4 @@
-# Chapter 15: Photonic Computing
+# Chapter 16: Photonic Computing
 
 *Computing at the speed of light*
 
@@ -414,7 +414,7 @@ class MZI < SimComponent
 end
 ```
 
-Instead, see [Appendix O](appendix-o-photonic.md) for a Ruby complex-number simulation that captures the physics of optical interference.
+Instead, see [Appendix P](appendix-p-photonic.md) for a Ruby complex-number simulation that captures the physics of optical interference.
 
 ---
 
@@ -452,4 +452,4 @@ Instead, see [Appendix O](appendix-o-photonic.md) for a Ruby complex-number simu
 
 *Previous: [Chapter 14 - Neuromorphic Computing](14-neuromorphic-computing.md)*
 
-*Appendix: [Appendix O - Photonic Simulation](appendix-o-photonic.md)*
+*Appendix: [Appendix P - Photonic Simulation](appendix-p-photonic.md)*

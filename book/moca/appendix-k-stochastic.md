@@ -1,6 +1,6 @@
-# Appendix J: Stochastic Implementation
+# Appendix K: Stochastic Implementation
 
-*Companion appendix to [Chapter 10: Stochastic Computing](10-stochastic-computing.md)*
+*Companion appendix to [Chapter 11: Stochastic Computing](11-stochastic-computing.md)*
 
 ## Overview
 
@@ -786,4 +786,4 @@ end
 - Alaghi & Hayes, "Survey of Stochastic Computing" (2013)
 - Brown & Card, "Stochastic Neural Computation" (2001)
 
-> Return to [Chapter 10](10-stochastic-computing.md) for conceptual introduction.
+> Return to [Chapter 11](11-stochastic-computing.md) for conceptual introduction.

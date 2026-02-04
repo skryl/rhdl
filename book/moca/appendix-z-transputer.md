@@ -1,4 +1,4 @@
-# Appendix Y: Transputer Implementation
+# Appendix Z: Transputer Implementation
 
 *CSP hardware in RHDL*
 
@@ -1280,4 +1280,4 @@ Potential extensions:
 
 ---
 
-*Back to [Chapter 25 - Transputer](25-transputer.md)*
+*Back to [Chapter 26 - Transputer](26-transputer.md)*

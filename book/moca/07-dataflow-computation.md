@@ -224,6 +224,72 @@ But dataflow ideas survived in:
 
 ## Modern Dataflow
 
+### Groq: Deterministic Dataflow
+
+Groq's LPU (Language Processing Unit) is perhaps the purest modern dataflow architecture:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    GROQ LPU ARCHITECTURE                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   ┌──────────────────────────────────────────────────────────┐  │
+│   │                    Instruction Stream                     │  │
+│   └──────────────────────────────────────────────────────────┘  │
+│                              │                                   │
+│                              ▼                                   │
+│   ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐  │
+│   │  MXM   │──│  MXM   │──│  MXM   │──│  MXM   │──│  MXM   │  │
+│   │ (mat)  │  │ (mat)  │  │ (mat)  │  │ (mat)  │  │ (mat)  │  │
+│   └────────┘  └────────┘  └────────┘  └────────┘  └────────┘  │
+│       │           │           │           │           │         │
+│       ▼           ▼           ▼           ▼           ▼         │
+│   ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐  │
+│   │  VXM   │──│  VXM   │──│  VXM   │──│  VXM   │──│  VXM   │  │
+│   │ (vec)  │  │ (vec)  │  │ (vec)  │  │ (vec)  │  │ (vec)  │  │
+│   └────────┘  └────────┘  └────────┘  └────────┘  └────────┘  │
+│       │           │           │           │           │         │
+│       └───────────┴───────────┴───────────┴───────────┘         │
+│                              │                                   │
+│                              ▼                                   │
+│                      Global SRAM (230MB)                         │
+│                                                                  │
+│   Key insight: Data flows through functional units in a          │
+│   DETERMINISTIC pipeline. No caches, no speculation.             │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Why Groq is pure dataflow:**
+
+1. **No caches** - All memory is SRAM with deterministic latency
+2. **No speculation** - Every operation completes in known time
+3. **Explicit data movement** - Compiler schedules all data transfers
+4. **Temporal execution** - Time IS the program counter
+
+```
+Traditional CPU:                Groq LPU:
+┌─────────────────┐            ┌─────────────────┐
+│  PC → Fetch     │            │  Cycle 0: MXM₀  │
+│       ↓         │            │  Cycle 1: MXM₁  │
+│     Decode      │            │  Cycle 2: VXM₀  │
+│       ↓         │            │  ...            │
+│   Execute (?)   │            │  Cycle N: Done  │
+│       ↓         │            │                 │
+│  Cache (miss?)  │            │  Time IS the    │
+│       ↓         │            │  program!       │
+│   Writeback     │            │                 │
+└─────────────────┘            └─────────────────┘
+   Unpredictable                  Deterministic
+```
+
+The Groq compiler unrolls computations into a **temporal dataflow graph** where each cycle is explicitly scheduled. If your model needs 47,832 cycles, it will take exactly 47,832 cycles—every time.
+
+This determinism enables:
+- **Predictable latency** for real-time inference
+- **Maximum utilization** (no stalls waiting for cache)
+- **Simpler hardware** (no branch predictors, no cache coherence)
+
 ### GPUs as Dataflow Engines
 
 Modern GPUs are essentially dataflow machines:

@@ -1,6 +1,6 @@
-# Appendix W: Cray-1 Implementation
+# Appendix X: Cray-1 Implementation
 
-*Companion appendix to [Chapter 23: The Cray-1](23-cray1.md)*
+*Companion appendix to [Chapter 24: The Cray-1](24-cray1.md)*
 
 ## Overview
 
@@ -693,4 +693,4 @@ end
 - Russell, "The Cray-1 Computer System" (CACM 1978)
 - Hennessy & Patterson, "Computer Architecture: A Quantitative Approach"
 
-> Return to [Chapter 23](23-cray1.md) for conceptual introduction.
+> Return to [Chapter 24](24-cray1.md) for conceptual introduction.

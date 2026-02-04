@@ -1,4 +1,4 @@
-# Appendix Z: Cerebras Implementation
+# Appendix J: Wafer-Scale Implementation
 
 *Network-on-Chip components in RHDL*
 
@@ -967,4 +967,4 @@ RHDL simulation:
 
 ---
 
-*Back to [Chapter 26 - Cerebras](26-cerebras.md)*
+*Back to [Chapter 10 - Cerebras](10-wafer-scale.md)*

@@ -1,4 +1,4 @@
-# Chapter 16: Analog Computing
+# Chapter 17: Analog Computing
 
 *Computation with continuous values*
 
@@ -506,7 +506,7 @@ Why now?
 
 ## RHDL?
 
-Analog circuits don't map naturally to RHDL's digital model. Instead, see [Appendix P](appendix-p-analog.md) for Ruby simulation of analog components using continuous-time differential equations.
+Analog circuits don't map naturally to RHDL's digital model. Instead, see [Appendix Q](appendix-q-analog.md) for Ruby simulation of analog components using continuous-time differential equations.
 
 ```ruby
 # This captures the physics better than RHDL
@@ -558,4 +558,4 @@ end
 
 *Previous: [Chapter 15 - Photonic Computing](15-photonic-computing.md)*
 
-*Appendix: [Appendix P - Analog Simulation](appendix-p-analog.md)*
+*Appendix: [Appendix Q - Analog Simulation](appendix-q-analog.md)*

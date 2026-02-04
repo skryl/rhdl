@@ -1,4 +1,4 @@
-# Chapter 10: Stochastic Computing
+# Chapter 11: Stochastic Computing
 
 *When randomness becomes computation*
 
@@ -386,7 +386,7 @@ The renewed interest comes from:
 
 ## RHDL Implementation
 
-See [Appendix J](appendix-j-stochastic.md) for complete implementations:
+See [Appendix K](appendix-k-stochastic.md) for complete implementations:
 
 ```ruby
 # Stochastic multiplier = AND gate!
@@ -436,4 +436,4 @@ end
 
 *Next: [Chapter 11 - Reversible Computation](11-reversible-computation.md)*
 
-*Appendix: [Appendix J - Stochastic Implementation](appendix-j-stochastic.md)*
+*Appendix: [Appendix K - Stochastic Implementation](appendix-k-stochastic.md)*

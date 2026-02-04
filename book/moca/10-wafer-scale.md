@@ -1,6 +1,6 @@
-# Chapter 26: Case Study - Cerebras WSE
+# Chapter 10: Wafer-Scale Computing
 
-*Network-on-Chip at wafer scale*
+*When a single die is the entire wafer*
 
 ---
 
@@ -501,7 +501,7 @@ What changed?
 
 ## RHDL Implementation
 
-See [Appendix Z](appendix-z-cerebras.md) for complete implementations:
+See [Appendix J](appendix-j-wafer-scale.md) for complete implementations:
 
 ```ruby
 # Cerebras-style mesh router
@@ -560,6 +560,6 @@ end
 
 ---
 
-*Previous: [Chapter 23 - Transputer](25-transputer.md)*
+*Previous: [Chapter 09 - GPU Architecture](09-gpu-architecture.md)
 
-*Appendix: [Appendix Z - Cerebras Implementation](appendix-z-cerebras.md)*
+*Appendix: [Appendix J - Cerebras Implementation](appendix-j-wafer-scale.md)*

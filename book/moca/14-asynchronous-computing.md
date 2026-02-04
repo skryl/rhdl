@@ -368,6 +368,6 @@ The principles of local synchronization and handshaking will likely blend with s
 
 ---
 
-*Next: [Chapter 13 - Neuromorphic Computing](13-neuromorphic-computing.md)*
+*Next: [Chapter 14 - Neuromorphic Computing](13-neuromorphic-computing.md)*
 
 *Appendix: [Appendix L - Asynchronous Implementation](appendix-l-asynchronous.md)*

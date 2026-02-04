@@ -1,4 +1,4 @@
-# Appendix P: Analog Computing Simulation
+# Appendix Q: Analog Computing Simulation
 
 *Ruby simulation of continuous-time analog circuits*
 
@@ -991,4 +991,4 @@ Key insight: **Analog computers solve differential equations naturally** because
 
 ---
 
-*Back to [Chapter 16 - Analog Computing](16-analog-computing.md)*
+*Back to [Chapter 17 - Analog Computing](17-analog-computing.md)*
