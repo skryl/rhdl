@@ -1,6 +1,6 @@
 # Appendix K: Quantum Circuits
 
-*Companion appendix to [Chapter 11: Quantum Computing](11-quantum-computing.md)*
+*Companion appendix to [Chapter 10: Quantum Computing](10-quantum-computing.md)*
 
 ## Overview
 
@@ -426,4 +426,4 @@ Cons:
 - IBM Qiskit documentation and tutorials
 - Quirk quantum circuit simulator (online)
 
-> Return to [Chapter 11](11-quantum-computing.md) for conceptual introduction.
+> Return to [Chapter 10](10-quantum-computing.md) for conceptual introduction.

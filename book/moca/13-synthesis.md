@@ -1,4 +1,4 @@
-# Chapter 12: Synthesis and Implementation
+# Chapter 13: Synthesis and Implementation
 
 ## Overview
 

@@ -1,4 +1,4 @@
-# Appendix E: Hardware Description Languages
+# Appendix L: Hardware Description Languages
 
 ## Overview
 

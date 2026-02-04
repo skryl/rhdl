@@ -1,4 +1,4 @@
-# Appendix H: Reversible Gates
+# Appendix J: Reversible Gates
 
 *Companion appendix to [Chapter 7: Reversible Computation](07-reversible-computation.md)*
 

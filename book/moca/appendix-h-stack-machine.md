@@ -1,4 +1,4 @@
-# Appendix F: Stack Machine ISA
+# Appendix H: Stack Machine ISA
 
 *Companion appendix to [Chapter 5: Stack Machines](05-stack-machines.md)*
 

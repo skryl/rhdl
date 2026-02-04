@@ -1,4 +1,4 @@
-# Chapter 9: The MOS 6502
+# Appendix N: MOS 6502 Implementation
 
 ## Overview
 

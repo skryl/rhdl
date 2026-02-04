@@ -17,12 +17,12 @@
 
 - [05 - Dataflow Computation](05-dataflow-computation.md) - Data-driven execution, token machines, why HDL is naturally dataflow
 - [06 - Systolic Arrays](06-systolic-arrays.md) - Regular structures, matrix operations, and modern AI accelerators
+- [07 - GPU Architecture](07-gpu-architecture.md) - SIMD/SIMT execution, streaming multiprocessors, and massively parallel computing
 
 ### Part III: Stack and Register Machines
 
-- [07 - Stack Machines](07-stack-machines.md) - Forth, JVM, and the simplest computer architecture
-- [08 - Register Machines](08-register-machines.md) - The von Neumann architecture that dominates modern computing
-- [09 - The MOS 6502](09-mos6502.md) - Deep dive into the classic CPU that powered the Apple II, C64, and NES
+- [08 - Stack Machines](08-stack-machines.md) - Forth, JVM, and the simplest computer architecture
+- [09 - Register Machines](09-register-machines.md) - The von Neumann architecture that dominates modern computing
 
 ### Part IV: Quantum and Reversible Computing
 
@@ -33,6 +33,10 @@
 
 - [12 - Hardware Description Languages](12-hdl.md) - Verilog, VHDL, and RHDL compared
 - [13 - Synthesis and Implementation](13-synthesis.md) - From HDL to silicon: FPGAs, ASICs, and the synthesis flow
+
+### Part VI: Case Studies
+
+- [14 - The MOS 6502](14-mos6502.md) - Deep dive into the classic CPU that powered the Apple II, C64, and NES
 
 ---
 
@@ -46,13 +50,14 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix D - Cellular Automata](appendix-d-cellular-automata.md) - Rule 110, Game of Life, and emergent computation
 - [Appendix E - Dataflow Architectures](appendix-e-dataflow.md) - Token machines, static vs dynamic dataflow, RHDL examples
 - [Appendix F - Systolic Array Patterns](appendix-f-systolic.md) - Matrix multiply, convolution, and other array algorithms
-- [Appendix G - Stack Machine ISA](appendix-g-stack-machine.md) - Complete Forth-like instruction set with RHDL implementation
-- [Appendix H - Register Machine ISA](appendix-h-register-machine.md) - Complete 8-bit instruction set with RHDL CPU
-- [Appendix I - MOS 6502 Implementation](appendix-i-mos6502.md) - Full 6502 in RHDL with test suite
+- [Appendix G - GPU Implementation](appendix-g-gpu.md) - CUDA-like execution model and RHDL streaming multiprocessor
+- [Appendix H - Stack Machine ISA](appendix-h-stack-machine.md) - Complete Forth-like instruction set with RHDL implementation
+- [Appendix I - Register Machine ISA](appendix-i-register-machine.md) - Complete 8-bit instruction set with RHDL CPU
 - [Appendix J - Reversible Gates](appendix-j-reversible.md) - Fredkin, Toffoli, and building circuits that lose no information
 - [Appendix K - Quantum Circuits](appendix-k-quantum.md) - Quantum gate implementations and simulators
 - [Appendix L - HDL Comparison](appendix-l-hdl.md) - Verilog, VHDL, Chisel, and RHDL side-by-side
 - [Appendix M - Synthesis Details](appendix-m-synthesis.md) - Gate-level synthesis, optimization, and FPGA mapping
+- [Appendix N - MOS 6502 Implementation](appendix-n-mos6502.md) - Full 6502 in RHDL with test suite
 
 ---
 
@@ -70,15 +75,15 @@ Each appendix provides complete RHDL implementations and formal details for its 
 │                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│   Spatial:         Dataflow ─────── Systolic Arrays         │
-│                    (data-driven)    (regular structure)      │
+│   Spatial:         Dataflow ─── Systolic ─── GPU            │
+│                    (data-driven)  (regular)   (SIMD/SIMT)   │
 │                                                              │
 │   Sequential:      Stack ─────────── Register               │
 │                    (operand stack)  (von Neumann)           │
 │                         │               │                    │
 │                         └───────┬───────┘                    │
 │                                 ▼                            │
-│   Dominant:          Modern CPUs (MOS 6502, x86, ARM)        │
+│                           Modern CPUs                        │
 │                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
@@ -87,6 +92,10 @@ Each appendix provides complete RHDL implementations and formal details for its 
 │                         ▼              ▼                     │
 │                    Zero energy    Exponential speedup        │
 │                    (theoretical)  (for some problems)        │
+│                                                              │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│   Case Study:      MOS 6502 - Where theory meets practice    │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -115,13 +124,14 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 04 | Biological Computation | D | Cellular Automata |
 | 05 | Dataflow Computation | E | Dataflow RHDL |
 | 06 | Systolic Arrays | F | Systolic Patterns |
-| 07 | Stack Machines | G | Stack Machine ISA |
-| 08 | Register Machines | H | Register Machine ISA |
-| 09 | The MOS 6502 | I | 6502 RHDL Implementation |
+| 07 | GPU Architecture | G | GPU Implementation |
+| 08 | Stack Machines | H | Stack Machine ISA |
+| 09 | Register Machines | I | Register Machine ISA |
 | 10 | Reversible Computation | J | Reversible Gates |
 | 11 | Quantum Computing | K | Quantum Circuits |
 | 12 | Hardware Description Languages | L | HDL Comparison |
 | 13 | Synthesis and Implementation | M | Synthesis Details |
+| 14 | The MOS 6502 | N | 6502 RHDL Implementation |
 
 ---
 

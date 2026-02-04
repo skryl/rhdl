@@ -1,4 +1,4 @@
-# Chapter 7: Reversible Computation
+# Chapter 10: Reversible Computation
 
 ## Overview
 

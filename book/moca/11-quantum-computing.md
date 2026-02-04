@@ -183,7 +183,7 @@ This is why quantum computers threaten current cryptography.
 └─────────────────────────────────────────────────────────────┘
 ```
 
-The Toffoli gate from Chapter 10 is a valid quantum gate.
+The Toffoli gate from Chapter 9 is a valid quantum gate.
 
 ## Quantum Error Correction
 
@@ -245,4 +245,4 @@ n qubits = 2^n complex amplitudes
 5. **Limited speedups** - Exponential only for specific problems (factoring, simulation)
 6. **Errors are the enemy** - Decoherence and noise dominate current systems
 
-> See [Appendix K](appendix-k-quantum.md) for quantum circuit implementations and simulators.
+> See [Appendix J](appendix-j-quantum.md) for quantum circuit implementations and simulators.

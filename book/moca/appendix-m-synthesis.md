@@ -1,4 +1,4 @@
-# Appendix F: Synthesis and Implementation
+# Appendix M: Synthesis and Implementation
 
 ## Overview
 

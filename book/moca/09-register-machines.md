@@ -1,4 +1,4 @@
-# Chapter 8: Register Machines
+# Chapter 9: Register Machines
 
 ## Overview
 
