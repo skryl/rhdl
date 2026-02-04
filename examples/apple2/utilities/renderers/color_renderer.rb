@@ -269,19 +269,8 @@ module RHDL
         mid_next = window[5]   # x+2
         far_next = window[6]   # x+3
 
-        # Check for palette transitions (high bit changes between bytes)
-        prev_byte_idx = [byte_idx - 1, 0].max
-        next_byte_idx = [byte_idx + 1, HIRES_BYTES_PER_LINE - 1].min
-        prev_high = (line_bytes[prev_byte_idx] >> 7) & 1
-        next_high = (line_bytes[next_byte_idx] >> 7) & 1
-
         # Current pixel is off
         return :black if curr == 0
-
-        # Count neighbors for density analysis
-        near_neighbors = prev + nxt
-        far_neighbors = mid_prev + mid_next
-        total_neighbors = near_neighbors + far_neighbors + far_prev + far_next
 
         # Determine base color from position and palette
         base_color = if high_bit == 0
@@ -290,36 +279,20 @@ module RHDL
                        x_pos.even? ? :blue : :orange
                      end
 
-        # White detection: pixel with immediate neighbors
-        if near_neighbors >= 1
-          # Check for solid white run
-          if prev == 1 && nxt == 1
-            return :white
-          end
-          # Edge of white region - use lighter fringe
-          if prev == 1 || nxt == 1
-            return :white if total_neighbors >= 3
-            return light_fringe(base_color)
-          end
-        end
+        # A pixel with both immediate neighbors lit is part of a solid run -> white.
+        return :white if prev == 1 && nxt == 1
 
-        # Isolated pixel analysis
-        if near_neighbors == 0
-          # Completely isolated - full color
-          if far_neighbors == 0
-            return base_color
-          end
-          # Near other pixels but not adjacent - dark fringe
-          return dark_fringe(base_color)
-        end
-
-        # Single neighbor - transitional
-        if near_neighbors == 1
-          if total_neighbors >= 2
-            return light_fringe(base_color)
-          end
+        # If we have a single immediate neighbor, we're at the edge of a run.
+        # Use the base hue (not light fringe) to avoid speckly/washed-out output in terminals.
+        if prev == 1 || nxt == 1
+          # Longer runs (3+) should still look white.
+          return :white if (prev == 1 && mid_prev == 1) || (nxt == 1 && mid_next == 1)
           return base_color
         end
+
+        # Isolated pixel: if there are nearby pixels (distance 2-3), darken slightly to
+        # approximate bleed without introducing bright fringe speckles.
+        return dark_fringe(base_color) if mid_prev == 1 || mid_next == 1 || far_prev == 1 || far_next == 1
 
         base_color
       end
