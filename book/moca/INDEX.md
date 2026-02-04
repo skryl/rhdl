@@ -15,13 +15,13 @@
 - [02 - Symbol Manipulation](02-symbol-manipulation.md) - The essence of computation: symbols, rules, and Turing machines
 - [03 - Lambda Calculus](03-lambda-calculus.md) - Computation as function application
 - [04 - Interaction Nets](04-interaction-nets.md) - Graph rewriting, linear logic, and optimal reduction
+- [05 - Computing with Memory](05-computing-with-memory.md) - LUTs, truth tables, ROM microcode, CAM, memoization, and the compute-vs-store tradeoff
 
 ### Part II: Physical and Natural Computation
 
-- [05 - Mechanical Computation](05-mechanical-computation.md) - Babbage, Ada Lovelace, Zuse, and relay computers
-- [06 - Biological Computation](06-biological-computation.md) - DNA computing, neurons as gates, cellular automata
-- [07 - Analog Computing](07-analog-computing.md) - Continuous values: op-amps, integrators, and differential equations in real-time
-- [08 - Computing with Memory](08-computing-with-memory.md) - LUTs, truth tables, ROM microcode, CAM, memoization, and the compute-vs-store tradeoff
+- [06 - Mechanical Computation](06-mechanical-computation.md) - Babbage, Ada Lovelace, Zuse, and relay computers
+- [07 - Biological Computation](07-biological-computation.md) - DNA computing, neurons as gates, cellular automata
+- [08 - Analog Computing](08-analog-computing.md) - Continuous values: op-amps, integrators, and differential equations in real-time
 
 ### Part III: Sequential Architectures
 
@@ -71,10 +71,10 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix A - Turing Machines](appendix-a-turing-machines.md) - Formal definition, examples, and universality
 - [Appendix B - Lambda Calculus](appendix-b-lambda-calculus.md) - Church encodings and RHDL implementations
 - [Appendix C - Interaction Nets](appendix-c-interaction-nets.md) - Agents, rules, optimal lambda reduction in RHDL
-- [Appendix D - Ada Lovelace's Program](appendix-d-ada-lovelace.md) - The first program, before hardware existed
-- [Appendix E - Cellular Automata](appendix-e-cellular-automata.md) - Rule 110, Game of Life, and emergent computation
-- [Appendix F - Analog Simulation](appendix-f-analog.md) - Ruby simulation of op-amps, ODEs, and analog neural networks
-- [Appendix G - Memory-Based Computation](appendix-g-memory-computation.md) - LUTs, CAM cells, ROM microcode, and memoization patterns in RHDL
+- [Appendix D - Memory-Based Computation](appendix-d-memory-computation.md) - LUTs, CAM cells, ROM microcode, and memoization patterns in RHDL
+- [Appendix E - Ada Lovelace's Program](appendix-e-ada-lovelace.md) - The first program, before hardware existed
+- [Appendix F - Cellular Automata](appendix-f-cellular-automata.md) - Rule 110, Game of Life, and emergent computation
+- [Appendix G - Analog Simulation](appendix-g-analog.md) - Ruby simulation of op-amps, ODEs, and analog neural networks
 - [Appendix H - Stack Machine ISA](appendix-h-stack-machine.md) - Complete Forth-like instruction set with RHDL implementation
 - [Appendix I - Register Machine ISA](appendix-i-register-machine.md) - Complete 8-bit instruction set with RHDL CPU
 - [Appendix J - Modern CPU Implementation](appendix-j-modern-cpu.md) - Pipelines, superscalar, reorder buffers, and Tomasulo's algorithm in RHDL
@@ -103,13 +103,13 @@ Each appendix provides complete RHDL implementations and formal details for its 
 |                  MODELS OF COMPUTATION                       |
 +-------------------------------------------------------------+
 |                                                              |
-|   Theoretical:     Turing <-> Lambda <-> Interaction Nets    |
-|                      |          |            |               |
-|                      v          v            v               |
-|   All equivalent:  They compute the same things              |
+|   Theoretical:  Turing <-> Lambda <-> Interaction Nets <-> Memory
+|                    |          |            |              |  |
+|                    v          v            v              v  |
+|   All equivalent: They compute the same things (LUTs/CAM)    |
 |                                                              |
-|   Physical:    Mechanical --- Biological --- Analog --- Memory
-|               (gears/relays) (DNA/neurons) (op-amps) (LUTs/CAM)|
+|   Physical:       Mechanical ----- Biological ----- Analog   |
+|                  (gears/relays)   (DNA/neurons)   (op-amps)  |
 |                                                              |
 +-------------------------------------------------------------+
 |                                                              |
@@ -184,10 +184,10 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 02 | Symbol Manipulation | A | Turing Machines (formal) |
 | 03 | Lambda Calculus | B | Church encodings, RHDL |
 | 04 | Interaction Nets | C | Agents, rules, optimal reduction |
-| 05 | Mechanical Computation | D | Ada Lovelace's Program |
-| 06 | Biological Computation | E | Cellular Automata |
-| 07 | Analog Computing | F | Analog Simulation (Ruby) |
-| 08 | Computing with Memory | G | Memory-Based Computation |
+| 05 | Computing with Memory | D | Memory-Based Computation |
+| 06 | Mechanical Computation | E | Ada Lovelace's Program |
+| 07 | Biological Computation | F | Cellular Automata |
+| 08 | Analog Computing | G | Analog Simulation (Ruby) |
 | 09 | Stack Machines | H | Stack Machine ISA |
 | 10 | Register Machines | I | Register Machine ISA |
 | 11 | Modern CPU Architectures | J | Modern CPU Implementation |
