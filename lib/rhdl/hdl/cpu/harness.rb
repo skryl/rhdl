@@ -11,24 +11,179 @@ require_relative 'cpu'
 module RHDL
   module HDL
     module CPU
-      # Memory interface for the harness
-      class Memory
-        def initialize(ram)
-          @ram = ram
+      # 64K Memory for harness (16-bit addressing)
+      # Uses a simple Ruby array instead of HDL RAM component
+      # to support full 16-bit address space
+      class Memory64K
+        def initialize
+          @data = Array.new(0x10000, 0)
         end
 
         def read(addr)
-          @ram.read_mem(addr & 0xFFFF)
+          @data[addr & 0xFFFF] || 0
         end
+        alias read_mem read
 
         def write(addr, value)
-          @ram.write_mem(addr & 0xFFFF, value & 0xFF)
+          @data[addr & 0xFFFF] = value & 0xFF
         end
+        alias write_mem write
 
         def load(program, start_addr = 0)
           program.each_with_index do |byte, i|
             write(start_addr + i, byte)
           end
+        end
+      end
+
+      # Fast Harness using IR Compiler for high-performance simulation
+      # Uses native Rust backend instead of Ruby behavioral simulation
+      class FastHarness
+        attr_reader :memory, :halted, :cycle_count
+
+        def initialize(external_memory = nil, sim: :compile)
+          require 'rhdl/codegen'
+
+          @cycle_count = 0
+          @halted = false
+          @memory = Memory64K.new
+          @sim_backend = sim
+
+          # Generate IR from CPU component
+          ir = RHDL::HDL::CPU::CPU.to_flat_ir
+          ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
+
+          # Create simulator based on backend
+          @sim = case sim
+          when :interpret
+            require 'rhdl/codegen/ir/sim/ir_interpreter'
+            RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json, allow_fallback: true)
+          when :jit
+            require 'rhdl/codegen/ir/sim/ir_jit'
+            RHDL::Codegen::IR::IrJitWrapper.new(ir_json, allow_fallback: true)
+          when :compile
+            require 'rhdl/codegen/ir/sim/ir_compiler'
+            RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json, allow_fallback: true)
+          else
+            raise "Unknown sim backend: #{sim}"
+          end
+
+          # Copy external memory if provided
+          if external_memory && !external_memory.is_a?(String)
+            (0..0xFFFF).each do |addr|
+              val = external_memory.read(addr)
+              @memory.write(addr, val) if val != 0
+            end
+          end
+
+          reset
+        end
+
+        def native?
+          @sim.native?
+        end
+
+        def backend
+          @sim.backend
+        end
+
+        # Read CPU state
+        def acc
+          @sim.peek('acc_out')
+        end
+
+        def pc
+          @sim.peek('pc_out')
+        end
+
+        def sp
+          @sim.peek('sp_out')
+        end
+
+        def pc=(value)
+          # Set PC by poking the register value directly
+          @sim.poke('pc_reg__q', value & 0xFFFF)
+          @sim.evaluate
+        end
+
+        def state
+          @sim.peek('state_out')
+        end
+
+        def zero_flag
+          @sim.peek('zero_flag_out') == 1
+        end
+
+        # Legacy accessors
+        def acc_value; acc; end
+        def pc_value; pc; end
+        def sp_value; sp; end
+        def zero_flag_value; zero_flag ? 1 : 0; end
+
+        def reset
+          @halted = false
+          @cycle_count = 0
+
+          @sim.poke('rst', 1)
+          @sim.poke('mem_data_in', 0)
+          clock_cycle
+          @sim.poke('rst', 0)
+          @sim.evaluate
+        end
+
+        def clock_cycle
+          # Get memory address and control signals
+          addr = @sim.peek('mem_addr')
+          write_en = @sim.peek('mem_write_en')
+
+          # Memory write
+          if write_en == 1
+            data = @sim.peek('mem_data_out')
+            @memory.write(addr, data)
+          end
+
+          # Provide memory data
+          data = @memory.read(addr)
+          @sim.poke('mem_data_in', data)
+          @sim.evaluate
+
+          # Clock edge
+          @sim.poke('clk', 0)
+          @sim.evaluate
+          @sim.poke('clk', 1)
+          @sim.tick
+
+          # Check for halt
+          @halted = true if @sim.peek('halted') == 1
+        end
+
+        def run(max_cycles = 10000)
+          cycles = 0
+          until @halted || cycles >= max_cycles
+            clock_cycle
+            cycles += 1
+            @cycle_count += 1
+          end
+          cycles
+        end
+
+        # Expose ram for backwards compatibility
+        def ram
+          @memory
+        end
+
+        # Expose cpu-like interface for test compatibility
+        def cpu
+          self
+        end
+
+        def get_output(name)
+          @sim.peek(name.to_s)
+        end
+
+        def get_input(name)
+          # Not directly supported in IR sim
+          0
         end
       end
 
@@ -41,14 +196,14 @@ module RHDL
           @cycle_count = 0
           @halted = false
 
-          # Create CPU (with internal control unit) and RAM
+          # Create CPU (with internal control unit) and 64K memory
           @cpu = CPU.new(name || "cpu")
-          @ram = RAM.new("mem", data_width: 8, addr_width: 16)
-          @memory = Memory.new(@ram)
+          @memory = Memory64K.new
+          @ram = @memory  # Alias for backwards compatibility
 
           # Load initial memory contents
           memory_contents.each_with_index do |byte, addr|
-            @ram.write_mem(addr, byte)
+            @memory.write(addr, byte)
           end
 
           # Copy external memory if provided

@@ -7,31 +7,45 @@ module RHDL
     class Context
       attr_reader :assignments, :locals
 
-      def initialize(component_class)
+      # @param component_class [Class] The component class
+      # @param parameters [Hash] Instance parameters to override defaults (e.g., {width: 8})
+      def initialize(component_class, parameters: {})
         @component_class = component_class
         @assignments = []
         @locals = []
         @port_widths = {}
         @vec_defs = {}
+        @parameters = parameters
 
-        # Build port width map (use _ports/_signals which resolve parameterized widths)
-        component_class._ports.each do |p|
-          @port_widths[p.name] = p.width
-        end
-        component_class._signals.each do |s|
-          @port_widths[s.name] = s.width
+        # Build resolved parameter values (defaults + overrides)
+        param_defs = component_class._parameter_defs
+        @resolved_params = param_defs.merge(parameters)
+
+        # Helper to resolve parameterized widths
+        resolve_width = ->(raw_width) do
+          raw_width.is_a?(Symbol) ? (@resolved_params[raw_width] || 1) : raw_width
         end
 
-        # Create accessor methods for all ports and signals
-        component_class._ports.each do |p|
-          if p.direction == :out
-            define_singleton_method(p.name) { OutputProxy.new(p.name, p.width, self) }
+        # Build port width map with resolved parameterized widths
+        component_class._port_defs.each do |p|
+          @port_widths[p[:name]] = resolve_width.call(p[:width])
+        end
+        component_class._signal_defs.each do |s|
+          @port_widths[s[:name]] = resolve_width.call(s[:width])
+        end
+
+        # Create accessor methods for all ports and signals with resolved widths
+        component_class._port_defs.each do |p|
+          resolved_width = resolve_width.call(p[:width])
+          if p[:direction] == :out
+            define_singleton_method(p[:name]) { OutputProxy.new(p[:name], resolved_width, self) }
           else
-            define_singleton_method(p.name) { SignalProxy.new(p.name, p.width) }
+            define_singleton_method(p[:name]) { SignalProxy.new(p[:name], resolved_width) }
           end
         end
-        component_class._signals.each do |s|
-          define_singleton_method(s.name) { OutputProxy.new(s.name, s.width, self) }
+        component_class._signal_defs.each do |s|
+          resolved_width = resolve_width.call(s[:width])
+          define_singleton_method(s[:name]) { OutputProxy.new(s[:name], resolved_width, self) }
         end
 
         # Create accessor methods for Vecs
