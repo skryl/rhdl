@@ -24,20 +24,22 @@
 - [08 - Systolic Arrays](08-systolic-arrays.md) - Regular structures, matrix operations, and modern AI accelerators
 - [09 - GPU Architecture](09-gpu-architecture.md) - SIMD/SIMT execution, streaming multiprocessors, and massively parallel computing
 
-### Part IV: Quantum and Reversible Computing
+### Part IV: Beyond Classical Computing
 
 - [10 - Reversible Computation](10-reversible-computation.md) - Fredkin gates, Toffoli gates, and the thermodynamics of computing
 - [11 - Quantum Computing](11-quantum-computing.md) - Qubits, superposition, entanglement, and quantum algorithms
+- [12 - Neuromorphic Computing](12-neuromorphic-computing.md) - Brain-inspired architectures: spiking neurons, STDP, and memristors
 
 ### Part V: Hardware Practice
 
-- [12 - Hardware Description Languages](12-hdl.md) - Verilog, VHDL, and RHDL compared
-- [13 - Synthesis and Implementation](13-synthesis.md) - From HDL to silicon: FPGAs, ASICs, and the synthesis flow
+- [13 - Hardware Description Languages](13-hdl.md) - Verilog, VHDL, and RHDL compared
+- [14 - Synthesis and Implementation](14-synthesis.md) - From HDL to silicon: FPGAs, ASICs, and the synthesis flow
 
 ### Part VI: Case Studies
 
-- [14 - The MOS 6502](14-mos6502.md) - Deep dive into the classic CPU that powered the Apple II, C64, and NES
-- [15 - The VideoCore IV](15-videocore-iv.md) - The Raspberry Pi GPU: 12 QPUs, SIMD, and tile-based rendering
+- [15 - The MOS 6502](15-mos6502.md) - Deep dive into the classic CPU that powered the Apple II, C64, and NES
+- [16 - The VideoCore IV](16-videocore-iv.md) - The Raspberry Pi GPU: 12 QPUs, SIMD, and tile-based rendering
+- [17 - The Google TPU v1](17-tpu.md) - A 256×256 systolic array for neural network inference
 
 ---
 
@@ -56,10 +58,12 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix I - GPU Implementation](appendix-i-gpu.md) - CUDA-like execution model and RHDL streaming multiprocessor
 - [Appendix J - Reversible Gates](appendix-j-reversible.md) - Fredkin, Toffoli, and building circuits that lose no information
 - [Appendix K - Quantum Circuits](appendix-k-quantum.md) - Quantum gate implementations and simulators
-- [Appendix L - HDL Comparison](appendix-l-hdl.md) - Verilog, VHDL, Chisel, and RHDL side-by-side
-- [Appendix M - Synthesis Details](appendix-m-synthesis.md) - Gate-level synthesis, optimization, and FPGA mapping
-- [Appendix N - MOS 6502 Implementation](appendix-n-mos6502.md) - Full 6502 in RHDL with test suite
-- [Appendix O - VideoCore IV Implementation](appendix-o-videocore.md) - QPU cores, VPM, and sample assembly programs
+- [Appendix L - Neuromorphic Implementation](appendix-l-neuromorphic.md) - LIF neurons, STDP synapses, and spiking networks in RHDL
+- [Appendix M - HDL Comparison](appendix-m-hdl.md) - Verilog, VHDL, Chisel, and RHDL side-by-side
+- [Appendix N - Synthesis Details](appendix-n-synthesis.md) - Gate-level synthesis, optimization, and FPGA mapping
+- [Appendix O - MOS 6502 Implementation](appendix-o-mos6502.md) - Full 6502 in RHDL with test suite
+- [Appendix P - VideoCore IV Implementation](appendix-p-videocore.md) - QPU cores, VPM, and sample assembly programs
+- [Appendix Q - TPU Implementation](appendix-q-tpu.md) - Systolic array, weight FIFOs, and matrix multiply in RHDL
 
 ---
 
@@ -89,15 +93,15 @@ Each appendix provides complete RHDL implementations and formal details for its 
 │                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│   Beyond Classical: Reversible ──→ Quantum                   │
-│                         │              │                     │
-│                         ▼              ▼                     │
-│                    Zero energy    Exponential speedup        │
-│                    (theoretical)  (for some problems)        │
+│   Beyond Classical: Reversible ─── Quantum ─── Neuromorphic │
+│                         │              │            │        │
+│                         ▼              ▼            ▼        │
+│                    Zero energy    Exponential    Brain-like  │
+│                    (theoretical)  speedup        learning    │
 │                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│   Case Studies:    MOS 6502 (CPU), VideoCore IV (GPU)        │
+│   Case Studies:    6502 (CPU) │ VideoCore (GPU) │ TPU (ML)  │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -113,6 +117,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 5. **Reversible computing bridges classical and quantum** - Same gates work in both
 6. **Quantum offers new possibilities** - But only for certain problem classes
 7. **Thermodynamics constrains computation** - Reversible computing may be the future
+8. **Neuromorphic computing learns from biology** - Spiking neurons, local learning, massive parallelism
 
 ---
 
@@ -131,10 +136,12 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 09 | GPU Architecture | I | GPU Implementation |
 | 10 | Reversible Computation | J | Reversible Gates |
 | 11 | Quantum Computing | K | Quantum Circuits |
-| 12 | Hardware Description Languages | L | HDL Comparison |
-| 13 | Synthesis and Implementation | M | Synthesis Details |
-| 14 | The MOS 6502 | N | 6502 RHDL Implementation |
-| 15 | The VideoCore IV | O | VideoCore IV Implementation |
+| 12 | Neuromorphic Computing | L | Neuromorphic Implementation |
+| 13 | Hardware Description Languages | M | HDL Comparison |
+| 14 | Synthesis and Implementation | N | Synthesis Details |
+| 15 | The MOS 6502 | O | 6502 RHDL Implementation |
+| 16 | The VideoCore IV | P | VideoCore IV Implementation |
+| 17 | The Google TPU v1 | Q | TPU Implementation |
 
 ---
 
