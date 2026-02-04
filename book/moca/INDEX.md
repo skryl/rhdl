@@ -44,14 +44,6 @@
 - [19 - FPGAs](19-fpga.md) - Field-programmable gate arrays: LUTs, CLBs, routing, and fine-grained reconfiguration
 - [20 - Coarse-Grained Reconfigurable Arrays](20-cgra.md) - CGRAs: word-level datapaths, spatial computing, and domain-specific acceleration
 
-### Part VII: Case Studies
-
-- [21 - The NVIDIA G80](21-nvidia-g80.md) - (2006) The first CUDA GPU: unified shaders and GPGPU revolution
-- [22 - The RISC-V RV32I](22-riscv.md) - (2010) The open ISA: clean design, modular extensions, and modern RISC
-- [23 - The Google TPU v1](23-tpu.md) - (2016) A 256x256 systolic array for neural network inference
-- [24 - The Cerebras WSE](24-cerebras.md) - (2019) The largest chip ever built: 850K cores on a single wafer
-- [25 - The Groq LPU](25-groq.md) - (2020) Deterministic dataflow for AI inference: time as the program counter
-
 ---
 
 ## Appendices
@@ -78,9 +70,6 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix R - Analog Simulation](appendix-r-analog.md) - Ruby simulation of op-amps, ODEs, and analog neural networks
 - [Appendix S - FPGA Implementation](appendix-s-fpga.md) - LUTs, CLBs, routing, and FPGA primitives in RHDL
 - [Appendix T - CGRA Implementation](appendix-t-cgra.md) - PE arrays, interconnect, and configuration in RHDL
-- [Appendix U - NVIDIA G80 Implementation](appendix-u-g80.md) - Streaming multiprocessors, warp scheduler, and shared memory in RHDL
-- [Appendix V - RISC-V Implementation](appendix-v-riscv.md) - RV32I decoder, ALU, pipeline stages, cache, TLB, and MMU
-- [Appendix W - TPU Implementation](appendix-w-tpu.md) - Systolic array, weight FIFOs, and matrix multiply in RHDL
 
 ---
 
@@ -128,11 +117,6 @@ Each appendix provides complete RHDL implementations and formal details for its 
 |                      |               |                       |
 |                      v               v                       |
 |                  Light/MZI     Continuous/Op-amps            |
-|                                                              |
-+-------------------------------------------------------------+
-|                                                              |
-|   Case Studies:    G80 (2006) | RISC-V (2010) | TPU (2016)        |
-|   (chronological)  Cerebras (2019) | Groq (2020)                    |
 |                                                              |
 +-------------------------------------------------------------+
 ```
@@ -183,13 +167,6 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 18 | Analog Computing | R | Analog Simulation (Ruby) |
 | 19 | FPGAs | S | FPGA Implementation |
 | 20 | CGRAs | T | CGRA Implementation |
-| 21 | The NVIDIA G80 | U | G80 Implementation |
-| 22 | The RISC-V RV32I | V | RISC-V Implementation |
-| 23 | The Google TPU v1 | W | TPU Implementation |
-| 24 | The Cerebras WSE | J | (see Wafer-Scale appendix) |
-| 25 | The Groq LPU | G | (see Dataflow appendix) |
-
-*Note: Chapters 24 and 25 share appendices with their corresponding paradigm chapters, as they are case studies of those architectures.*
 
 ---
 
