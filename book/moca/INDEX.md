@@ -34,7 +34,7 @@
 
 - [13 - Message Passing Systems](13-message-passing.md) - MPI, CSP, actors, and communication as the basis of parallel computation
 - [14 - Distributed Shared Memory](14-distributed-shared-memory.md) - NUMA, cache coherence, directory protocols, and the illusion of shared state
-- [15 - GPU and Vector Architecture](15-gpu-vector-architecture.md) - From Cray vectors to CUDA: SIMD, SIMT, and massively parallel computing
+- [15 - GPU and Vector Architecture](15-gpu-vector-architecture.md) - Vector ISA and chaining; SIMT warps and occupancy; memory coalescing and divergence
 
 ### Part V: Dataflow and Spatial Architectures
 
