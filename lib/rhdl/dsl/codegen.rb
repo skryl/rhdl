@@ -104,7 +104,10 @@ module RHDL
 
         # Generate flattened IR for simulation (inlines all subcomponent logic)
         # This produces a single flat IR with no instances - suitable for RTL simulation
-        def to_flat_ir(top_name: nil, prefix: '')
+        # @param top_name [String] Optional name override for top module
+        # @param prefix [String] Signal name prefix for hierarchical flattening
+        # @param parameters [Hash] Instance parameters for parameterized components
+        def to_flat_ir(top_name: nil, prefix: '', parameters: {})
           name = top_name || verilog_module_name
 
           all_ports = []
@@ -116,8 +119,8 @@ module RHDL
           all_write_ports = []
           all_sync_read_ports = []
 
-          # Get this component's IR
-          ir = to_ir(top_name: name)
+          # Get this component's IR, passing instance parameters for width resolution
+          ir = to_ir(top_name: name, parameters: parameters)
 
           # Add top-level ports (only for the root component, not prefixed subcomponents)
           if prefix.empty?
@@ -128,6 +131,20 @@ module RHDL
           ir.nets.each do |net|
             prefixed_name = prefix.empty? ? net.name : :"#{prefix}__#{net.name}"
             all_nets << RHDL::Export::IR::Net.new(name: prefixed_name, width: net.width)
+          end
+
+          # When flattening as a subcomponent (non-empty prefix), also add output ports as nets
+          # Output ports like 'empty' and 'full' need to be declared as signals in the parent
+          unless prefix.empty?
+            ir.ports.each do |port|
+              next unless port.direction.to_s == 'out'
+              prefixed_name = :"#{prefix}__#{port.name}"
+              # Only add if not already present (might overlap with regs for sequential outputs)
+              unless all_nets.any? { |n| n.name.to_s == prefixed_name.to_s } ||
+                     all_regs.any? { |r| r.name.to_s == prefixed_name.to_s }
+                all_nets << RHDL::Export::IR::Net.new(name: prefixed_name, width: port.width)
+              end
+            end
           end
 
           ir.regs.each do |reg|
@@ -176,9 +193,9 @@ module RHDL
             component_class = inst_def[:component_class]
             inst_prefix = prefix.empty? ? inst_name.to_s : "#{prefix}__#{inst_name}"
 
-            # Get flattened IR from subcomponent
+            # Get flattened IR from subcomponent, passing instance parameters
             if component_class.respond_to?(:to_flat_ir)
-              sub_ir = component_class.to_flat_ir(prefix: inst_prefix)
+              sub_ir = component_class.to_flat_ir(prefix: inst_prefix, parameters: inst_def[:parameters] || {})
 
               # Merge subcomponent's flattened IR
               all_nets.concat(sub_ir.nets)
@@ -190,14 +207,32 @@ module RHDL
               all_sync_read_ports.concat(sub_ir.sync_read_ports) if sub_ir.sync_read_ports
 
               # Create assignments for port connections
+              connected_ports = Set.new
+              inst_params = inst_def[:parameters] || {}
               inst_def[:connections].each do |port_name, parent_signal|
-                # Find port direction
+                connected_ports.add(port_name)
+                # Find port direction and width from port definitions
+                # Resolve parameterized widths using instance parameters
                 port_def = component_class._port_defs.find { |p| p[:name] == port_name }
                 direction = port_def ? port_def[:direction] : :in
-                port_width = port_def ? port_def[:width] : 1
+                raw_width = port_def ? port_def[:width] : 1
+                # Resolve parameterized width (e.g., :width -> 8 from inst_params)
+                port_width = if raw_width.is_a?(Symbol)
+                  inst_params[raw_width] || component_class._parameter_defs[raw_width] || 1
+                else
+                  raw_width
+                end
 
                 child_signal = "#{inst_prefix}__#{port_name}"
-                parent_sig = prefix.empty? ? parent_signal.to_s : "#{prefix}__#{parent_signal}"
+                # Handle instance-to-instance connections (parent_signal is [:inst, :port])
+                parent_sig = if parent_signal.is_a?(Array) && parent_signal.length == 2
+                  # Instance-to-instance: [:sp, :empty] -> "sp__empty" or "prefix__sp__empty"
+                  src_inst, src_port = parent_signal
+                  prefix.empty? ? "#{src_inst}__#{src_port}" : "#{prefix}__#{src_inst}__#{src_port}"
+                else
+                  # Signal connection: :signal -> "signal" or "prefix__signal"
+                  prefix.empty? ? parent_signal.to_s : "#{prefix}__#{parent_signal}"
+                end
 
                 if direction == :in
                   # Input: parent drives child
@@ -213,9 +248,39 @@ module RHDL
                   )
                 end
 
-                # Add net for child port signal if not already present
-                unless all_nets.any? { |n| n.name.to_s == child_signal }
+                # Add net for child port signal if not already present in nets or regs
+                # Note: Sequential component outputs (like sp__q) are already in regs, so don't add as net
+                unless all_nets.any? { |n| n.name.to_s == child_signal } || all_regs.any? { |r| r.name.to_s == child_signal }
                   all_nets << RHDL::Export::IR::Net.new(name: child_signal.to_sym, width: port_width)
+                end
+              end
+
+              # Create assignments for unconnected input ports with default values
+              # This ensures the native IR compiler handles defaults correctly
+              component_class._port_defs.each do |port_def|
+                next if connected_ports.include?(port_def[:name])
+                next unless port_def[:direction] == :in
+                next if port_def[:default].nil?
+
+                child_signal = "#{inst_prefix}__#{port_def[:name]}"
+                default_value = port_def[:default].is_a?(Proc) ? port_def[:default].call : port_def[:default].to_i
+
+                # Resolve parameterized width using instance parameters
+                raw_width = port_def[:width]
+                resolved_width = if raw_width.is_a?(Symbol)
+                  inst_params[raw_width] || component_class._parameter_defs[raw_width] || 1
+                else
+                  raw_width
+                end
+
+                all_assigns << RHDL::Export::IR::Assign.new(
+                  target: child_signal,
+                  expr: RHDL::Export::IR::Literal.new(value: default_value, width: resolved_width)
+                )
+
+                # Add net for unconnected port if not already present in nets or regs
+                unless all_nets.any? { |n| n.name.to_s == child_signal } || all_regs.any? { |r| r.name.to_s == child_signal }
+                  all_nets << RHDL::Export::IR::Net.new(name: child_signal.to_sym, width: resolved_width)
                 end
               end
             end
@@ -367,21 +432,14 @@ module RHDL
         end
 
         # Generate IR ModuleDef from the component
-        def to_ir(top_name: nil)
+        # @param top_name [String] Optional name override for module
+        # @param parameters [Hash] Instance parameters to override defaults
+        def to_ir(top_name: nil, parameters: {})
           name = top_name || verilog_module_name
 
-          ports = _ports.map do |p|
-            RHDL::Export::IR::Port.new(
-              name: p.name,
-              direction: p.direction,
-              width: p.width,
-              default: p.default
-            )
-          end
-
           # Build parameters hash from class-level parameter definitions
-          # Convert Procs to their evaluated values using default values
-          parameters = {}
+          # then merge in any instance-specific parameters
+          resolved_params = {}
           _parameter_defs.each do |param_name, default_val|
             if default_val.is_a?(Proc)
               # For class-level evaluation, use default parameter values
@@ -391,14 +449,29 @@ module RHDL
                 next if v.is_a?(Proc)
                 eval_context.instance_variable_set(:"@#{k}", v)
               end
-              parameters[param_name] = eval_context.instance_exec(&default_val)
+              resolved_params[param_name] = eval_context.instance_exec(&default_val)
             else
-              parameters[param_name] = default_val
+              resolved_params[param_name] = default_val
             end
+          end
+          # Override with instance parameters
+          resolved_params.merge!(parameters)
+
+          # Resolve port widths using the resolved parameters
+          ports = _port_defs.map do |p|
+            raw_width = p[:width]
+            resolved_width = raw_width.is_a?(Symbol) ? (resolved_params[raw_width] || 1) : raw_width
+            RHDL::Export::IR::Port.new(
+              name: p[:name],
+              direction: p[:direction],
+              width: resolved_width,
+              default: p[:default]
+            )
           end
 
           # Get behavior assigns first so we can identify which signals are assign-driven
-          behavior_result = behavior_to_ir_assigns
+          # Pass resolved parameters for parameterized width resolution
+          behavior_result = behavior_to_ir_assigns(parameters: resolved_params)
           assigns = behavior_result[:assigns]
 
           # Identify signals driven by instance outputs (these must be wires, not regs)
@@ -470,7 +543,7 @@ module RHDL
             memories: memories,
             write_ports: write_ports,
             sync_read_ports: sync_read_ports,
-            parameters: parameters
+            parameters: resolved_params
           )
         end
 
@@ -628,10 +701,11 @@ module RHDL
 
         # Generate IR assigns and wire declarations from the behavior block
         # Used by the export/lowering system for HDL generation
-        def behavior_to_ir_assigns
+        # @param parameters [Hash] Instance parameters for parameterized widths
+        def behavior_to_ir_assigns(parameters: {})
           return { assigns: [], wires: [] } unless behavior_defined?
 
-          ctx = RHDL::Synth::Context.new(self)
+          ctx = RHDL::Synth::Context.new(self, parameters: parameters)
           ctx.evaluate(&@_behavior_block.block)
           {
             assigns: ctx.to_ir_assigns,
