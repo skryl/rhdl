@@ -2,7 +2,7 @@ module CpuTestHelper
   # Set this to switch between behavior and HDL CPU implementations
   # Override in specific test files or use shared examples
   def cpu_class
-    @cpu_class || RHDL::Components::CPU::CPU
+    @cpu_class || RHDL::Examples::MOS6502::Components::CPU::CPU
   end
 
   def use_hdl_cpu!
@@ -10,7 +10,7 @@ module CpuTestHelper
   end
 
   def use_behavior_cpu!
-    @cpu_class = RHDL::Components::CPU::CPU
+    @cpu_class = RHDL::Examples::MOS6502::Components::CPU::CPU
   end
 
   def create_test_program(instructions)
