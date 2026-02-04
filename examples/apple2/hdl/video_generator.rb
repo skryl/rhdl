@@ -14,8 +14,9 @@
 require 'rhdl/hdl'
 
 module RHDL
-  module Apple2
-    class VideoGenerator < RHDL::HDL::SequentialComponent
+  module Examples
+    module Apple2
+      class VideoGenerator < RHDL::HDL::SequentialComponent
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
@@ -190,5 +191,6 @@ module RHDL
         hires <= hires_mode & graphics_time_3
       end
     end
+  end
   end
 end

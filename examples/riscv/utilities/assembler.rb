@@ -2,8 +2,10 @@
 # Simple assembler for generating test programs
 # Supports all RV32I instructions
 
-module RISCV
-  class Assembler
+module RHDL
+  module Examples
+    module RISCV
+      class Assembler
     # Register name mapping
     REGISTERS = {
       'x0' => 0, 'zero' => 0,
@@ -427,6 +429,8 @@ module RISCV
       imm_11 = (imm >> 11) & 0x1
       imm_19_12 = (imm >> 12) & 0xFF
       (imm_20 << 31) | (imm_10_1 << 21) | (imm_11 << 20) | (imm_19_12 << 12) | (rd << 7) | opcode
+    end
+      end
     end
   end
 end

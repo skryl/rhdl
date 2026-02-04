@@ -17,8 +17,9 @@
 require 'rhdl/hdl'
 
 module RHDL
-  module Apple2
-    class TimingGenerator < RHDL::HDL::SequentialComponent
+  module Examples
+    module Apple2
+      class TimingGenerator < RHDL::HDL::SequentialComponent
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
@@ -171,5 +172,6 @@ module RHDL
         )
       end
     end
+  end
   end
 end

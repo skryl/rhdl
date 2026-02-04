@@ -5,7 +5,7 @@ require 'spec_helper'
 # MBC1 Memory Bank Controller Tests
 # Tests bank switching, RAM enable, and banking modes
 
-RSpec.describe 'GameBoy::MBC1' do
+RSpec.describe 'RHDL::Examples::GameBoy::MBC1' do
   before(:all) do
     require_relative '../../../../../examples/gameboy/gameboy'
   end
@@ -27,7 +27,7 @@ RSpec.describe 'GameBoy::MBC1' do
     component.set_input(:cpu_wr, 0)
   end
 
-  let(:mbc1) { GameBoy::MBC1.new('mbc1') }
+  let(:mbc1) { RHDL::Examples::GameBoy::MBC1.new('mbc1') }
 
   before do
     # Initialize with default values
@@ -49,18 +49,18 @@ RSpec.describe 'GameBoy::MBC1' do
 
   describe 'Component Definition' do
     it 'is a SequentialComponent' do
-      expect(GameBoy::MBC1.ancestors).to include(RHDL::HDL::SequentialComponent)
+      expect(RHDL::Examples::GameBoy::MBC1.ancestors).to include(RHDL::HDL::SequentialComponent)
     end
 
     it 'has the expected inputs' do
-      input_names = GameBoy::MBC1._port_defs.select { |p| p[:direction] == :in }.map { |p| p[:name] }
+      input_names = RHDL::Examples::GameBoy::MBC1._port_defs.select { |p| p[:direction] == :in }.map { |p| p[:name] }
       expect(input_names).to include(:clk, :ce, :reset)
       expect(input_names).to include(:cpu_addr, :cpu_di, :cpu_wr)
       expect(input_names).to include(:rom_mask, :ram_mask)
     end
 
     it 'has the expected outputs' do
-      output_names = GameBoy::MBC1._port_defs.select { |p| p[:direction] == :out }.map { |p| p[:name] }
+      output_names = RHDL::Examples::GameBoy::MBC1._port_defs.select { |p| p[:direction] == :out }.map { |p| p[:name] }
       expect(output_names).to include(:rom_bank, :rom_bank_0)
       expect(output_names).to include(:ram_bank, :ram_enable)
     end

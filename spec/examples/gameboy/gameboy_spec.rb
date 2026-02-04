@@ -7,135 +7,135 @@ require_relative '../../../examples/gameboy/utilities/runners/hdl_runner'
 RSpec.describe 'GameBoy RHDL Implementation' do
   describe 'Module Loading' do
     it 'loads the GameBoy module' do
-      expect(defined?(GameBoy)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy)).to eq('constant')
     end
 
     it 'has version information' do
-      expect(GameBoy::VERSION).to eq('0.1.0')
+      expect(RHDL::Examples::GameBoy::VERSION).to eq('0.1.0')
     end
   end
 
   describe 'CPU Components' do
     it 'defines SM83 CPU' do
-      expect(defined?(GameBoy::SM83)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::SM83)).to eq('constant')
     end
 
     it 'defines SM83_ALU' do
-      expect(defined?(GameBoy::SM83_ALU)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::SM83_ALU)).to eq('constant')
     end
 
     it 'defines SM83_Registers' do
-      expect(defined?(GameBoy::SM83_Registers)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::SM83_Registers)).to eq('constant')
     end
 
     it 'defines SM83_MCode' do
-      expect(defined?(GameBoy::SM83_MCode)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::SM83_MCode)).to eq('constant')
     end
   end
 
   describe 'PPU Components' do
     it 'defines Video' do
-      expect(defined?(GameBoy::Video)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::Video)).to eq('constant')
     end
 
     it 'defines Sprites' do
-      expect(defined?(GameBoy::Sprites)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::Sprites)).to eq('constant')
     end
 
     it 'defines LCD' do
-      expect(defined?(GameBoy::LCD)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::LCD)).to eq('constant')
     end
   end
 
   describe 'APU Components' do
     it 'defines Sound' do
-      expect(defined?(GameBoy::Sound)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::Sound)).to eq('constant')
     end
 
     it 'defines ChannelSquare' do
-      expect(defined?(GameBoy::ChannelSquare)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::ChannelSquare)).to eq('constant')
     end
 
     it 'defines ChannelWave' do
-      expect(defined?(GameBoy::ChannelWave)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::ChannelWave)).to eq('constant')
     end
 
     it 'defines ChannelNoise' do
-      expect(defined?(GameBoy::ChannelNoise)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::ChannelNoise)).to eq('constant')
     end
   end
 
   describe 'Memory Components' do
     it 'defines DPRAM' do
-      expect(defined?(GameBoy::DPRAM)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::DPRAM)).to eq('constant')
     end
 
     it 'defines SPRAM' do
-      expect(defined?(GameBoy::SPRAM)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::SPRAM)).to eq('constant')
     end
 
     it 'defines HDMA' do
-      expect(defined?(GameBoy::HDMA)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::HDMA)).to eq('constant')
     end
   end
 
   describe 'Mapper Components' do
     it 'defines MBC1' do
-      expect(defined?(GameBoy::MBC1)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::MBC1)).to eq('constant')
     end
 
     it 'defines MBC2' do
-      expect(defined?(GameBoy::MBC2)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::MBC2)).to eq('constant')
     end
 
     it 'defines MBC3' do
-      expect(defined?(GameBoy::MBC3)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::MBC3)).to eq('constant')
     end
 
     it 'defines MBC5' do
-      expect(defined?(GameBoy::MBC5)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::MBC5)).to eq('constant')
     end
 
     it 'defines mapper type constants' do
-      expect(GameBoy::Mappers::ROM_ONLY).to eq(0x00)
-      expect(GameBoy::Mappers::MBC1).to eq(0x01)
-      expect(GameBoy::Mappers::MBC2).to eq(0x05)
-      expect(GameBoy::Mappers::MBC3).to eq(0x11)
-      expect(GameBoy::Mappers::MBC5).to eq(0x19)
+      expect(RHDL::Examples::GameBoy::Mappers::ROM_ONLY).to eq(0x00)
+      expect(RHDL::Examples::GameBoy::Mappers::MBC1).to eq(0x01)
+      expect(RHDL::Examples::GameBoy::Mappers::MBC2).to eq(0x05)
+      expect(RHDL::Examples::GameBoy::Mappers::MBC3).to eq(0x11)
+      expect(RHDL::Examples::GameBoy::Mappers::MBC5).to eq(0x19)
     end
 
     it 'defines ROM size constants' do
-      expect(GameBoy::Mappers::ROM_SIZES[0x00]).to eq(32 * 1024)
-      expect(GameBoy::Mappers::ROM_SIZES[0x05]).to eq(1024 * 1024)
+      expect(RHDL::Examples::GameBoy::Mappers::ROM_SIZES[0x00]).to eq(32 * 1024)
+      expect(RHDL::Examples::GameBoy::Mappers::ROM_SIZES[0x05]).to eq(1024 * 1024)
     end
 
     it 'defines RAM size constants' do
-      expect(GameBoy::Mappers::RAM_SIZES[0x00]).to eq(0)
-      expect(GameBoy::Mappers::RAM_SIZES[0x03]).to eq(32 * 1024)
+      expect(RHDL::Examples::GameBoy::Mappers::RAM_SIZES[0x00]).to eq(0)
+      expect(RHDL::Examples::GameBoy::Mappers::RAM_SIZES[0x03]).to eq(32 * 1024)
     end
   end
 
   describe 'Other Components' do
     it 'defines Timer' do
-      expect(defined?(GameBoy::Timer)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::Timer)).to eq('constant')
     end
 
     it 'defines Link' do
-      expect(defined?(GameBoy::Link)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::Link)).to eq('constant')
     end
 
     it 'defines GB (top-level)' do
-      expect(defined?(GameBoy::GB)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::GB)).to eq('constant')
     end
   end
 
   # Integration Tests
   describe 'HDL Runner' do
-    let(:runner) { RHDL::GameBoy::HdlRunner.new }
+    let(:runner) { RHDL::Examples::GameBoy::HdlRunner.new }
     let(:rom_path) { File.expand_path('../../../examples/gameboy/software/roms/cpu_instrs.gb', __dir__) }
 
     it 'can be instantiated' do
-      expect(runner).to be_a(RHDL::GameBoy::HdlRunner)
+      expect(runner).to be_a(RHDL::Examples::GameBoy::HdlRunner)
     end
 
     it 'starts with zero cycles' do
@@ -226,7 +226,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
   end
 
   describe 'Memory Operations' do
-    let(:runner) { RHDL::GameBoy::HdlRunner.new }
+    let(:runner) { RHDL::Examples::GameBoy::HdlRunner.new }
 
     it 'reads and writes WRAM' do
       runner.write(0xC000, 0x42)
@@ -254,10 +254,10 @@ RSpec.describe 'GameBoy RHDL Implementation' do
   end
 
   describe 'LCD Renderer' do
-    let(:renderer) { RHDL::GameBoy::LcdRenderer.new(chars_wide: 40) }
+    let(:renderer) { RHDL::Examples::GameBoy::LcdRenderer.new(chars_wide: 40) }
 
     it 'can be instantiated' do
-      expect(renderer).to be_a(RHDL::GameBoy::LcdRenderer)
+      expect(renderer).to be_a(RHDL::Examples::GameBoy::LcdRenderer)
     end
 
     it 'renders empty framebuffer' do
@@ -304,7 +304,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       begin
         require_relative '../../../examples/gameboy/utilities/runners/ir_runner'
         # Check if native library is available by trying to create a runner
-        test_runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+        test_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
         test_runner = nil
       rescue LoadError, RuntimeError => e
         skip "IR runner not available: #{e.message}"
@@ -312,7 +312,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
     end
 
     it 'runs 20M cycles with display tracking using compiler backend', timeout: 300 do
-      runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+      runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
       runner.load_rom(File.binread(tobu_rom_path))
       runner.reset
 
@@ -367,7 +367,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
     end
 
     it 'tracks LY register changes during execution' do
-      runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+      runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
       runner.load_rom(File.binread(tobu_rom_path))
       runner.reset
 
@@ -382,7 +382,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
     end
 
     it 'can render framebuffer after long run' do
-      runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+      runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
       runner.load_rom(File.binread(tobu_rom_path))
       runner.reset
 
@@ -411,15 +411,15 @@ RSpec.describe 'GameBoy RHDL Implementation' do
     end
 
     it 'can be instantiated', timeout: 300 do
-      runner = RHDL::GameBoy::VerilatorRunner.new
-      expect(runner).to be_a(RHDL::GameBoy::VerilatorRunner)
+      runner = RHDL::Examples::GameBoy::VerilatorRunner.new
+      expect(runner).to be_a(RHDL::Examples::GameBoy::VerilatorRunner)
       expect(runner.native?).to eq(true)
       expect(runner.simulator_type).to eq(:hdl_verilator)
     end
 
     context 'with demo ROM', timeout: 300 do
       let(:runner) do
-        r = RHDL::GameBoy::VerilatorRunner.new
+        r = RHDL::Examples::GameBoy::VerilatorRunner.new
         r.load_rom(create_demo_rom)
         r
       end
@@ -465,7 +465,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       end
 
       it 'can run 1M cycles' do
-        runner = RHDL::GameBoy::VerilatorRunner.new
+        runner = RHDL::Examples::GameBoy::VerilatorRunner.new
         runner.load_rom(File.binread(tobu_rom_path))
         runner.reset
 
@@ -483,7 +483,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       end
 
       it 'can render framebuffer' do
-        runner = RHDL::GameBoy::VerilatorRunner.new
+        runner = RHDL::Examples::GameBoy::VerilatorRunner.new
         runner.load_rom(File.binread(tobu_rom_path))
         runner.reset
         runner.run_steps(100_000)
@@ -496,10 +496,10 @@ RSpec.describe 'GameBoy RHDL Implementation' do
   end
 
   describe 'Speaker' do
-    let(:speaker) { RHDL::GameBoy::Speaker.new }
+    let(:speaker) { RHDL::Examples::GameBoy::Speaker.new }
 
     it 'can be instantiated' do
-      expect(speaker).to be_a(RHDL::GameBoy::Speaker)
+      expect(speaker).to be_a(RHDL::Examples::GameBoy::Speaker)
     end
 
     it 'starts disabled' do
@@ -534,7 +534,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       begin
         require_relative '../../../examples/gameboy/utilities/runners/ir_runner'
         # Check if native library is available
-        test_runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+        test_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
         test_runner = nil
       rescue LoadError, RuntimeError => e
         skip "IR runner not available: #{e.message}"
@@ -591,7 +591,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       puts "  " + "=" * 70
 
       # Initialize runner
-      runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+      runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
       runner.load_rom(rom_data)
       runner.reset
 
@@ -767,7 +767,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
         require_relative '../../../examples/gameboy/utilities/runners/verilator_runner'
 
         # Verify both runners can be instantiated
-        test_ir = RHDL::GameBoy::IrRunner.new(backend: :compile)
+        test_ir = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
         test_ir = nil
       rescue LoadError, RuntimeError => e
         skip "Runners not available: #{e.message}"
@@ -781,8 +781,8 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       puts "  " + "=" * 50
 
       # Initialize both runners
-      ir_runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
-      verilator_runner = RHDL::GameBoy::VerilatorRunner.new
+      ir_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
+      verilator_runner = RHDL::Examples::GameBoy::VerilatorRunner.new
 
       # Load ROM into both
       ir_runner.load_rom(rom_data)
@@ -899,8 +899,8 @@ RSpec.describe 'GameBoy RHDL Implementation' do
 
       # Initialize both runners
       puts "\n  Initializing runners..."
-      ir_runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
-      verilator_runner = RHDL::GameBoy::VerilatorRunner.new
+      ir_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
+      verilator_runner = RHDL::Examples::GameBoy::VerilatorRunner.new
 
       # Load ROM into both
       ir_runner.load_rom(rom_data)
@@ -1096,7 +1096,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       begin
         require_relative '../../../lib/rhdl/codegen/ir/sim/ir_compiler'
         if RHDL::Codegen::IR::COMPILER_AVAILABLE
-          runners[:compiler] = RHDL::GameBoy::IrRunner.new(backend: :compile)
+          runners[:compiler] = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
           backends << :compiler
         end
       rescue LoadError, RuntimeError => e
@@ -1107,7 +1107,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       begin
         require_relative '../../../lib/rhdl/codegen/ir/sim/ir_jit'
         if RHDL::Codegen::IR::JIT_AVAILABLE
-          jit_runner = RHDL::GameBoy::IrRunner.new(backend: :jit)
+          jit_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :jit)
           # Quick validation: run a few cycles and check if PC changes
           jit_runner.load_rom(rom_data)
           jit_runner.reset
@@ -1128,7 +1128,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
         require_relative '../../../lib/rhdl/codegen/ir/sim/ir_interpreter'
         # Note: IR_INTERPRETER_AVAILABLE may be false if native extension failed to load,
         # but IrInterpreterWrapper will fall back to Ruby implementation
-        interp_runner = RHDL::GameBoy::IrRunner.new(backend: :interpret)
+        interp_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :interpret)
         # Quick validation
         interp_runner.load_rom(rom_data)
         interp_runner.reset
@@ -1145,7 +1145,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
 
       # Verilator
       begin
-        runners[:verilator] = RHDL::GameBoy::VerilatorRunner.new
+        runners[:verilator] = RHDL::Examples::GameBoy::VerilatorRunner.new
         backends << :verilator
       rescue LoadError, RuntimeError => e
         puts "  Skipping Verilator: #{e.message}"

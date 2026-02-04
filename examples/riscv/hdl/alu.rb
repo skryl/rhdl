@@ -6,8 +6,10 @@ require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
 require_relative 'constants'
 
-module RISCV
-  class ALU < RHDL::HDL::Component
+module RHDL
+  module Examples
+    module RISCV
+      class ALU < RHDL::HDL::Component
     include RHDL::DSL::Behavior
 
     # ALU Operation codes
@@ -111,5 +113,7 @@ module RISCV
       zero <= alu_result == lit(0, width: 32)
     end
 
+      end
+    end
   end
 end

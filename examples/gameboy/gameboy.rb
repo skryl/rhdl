@@ -52,10 +52,12 @@ require_relative 'hdl/speedcontrol'
 # Top-level Game Boy module (requires all above)
 require_relative 'hdl/gb'
 
-module GameBoy
-  VERSION = '0.1.0'
+module RHDL
+  module Examples
+    module GameBoy
+      VERSION = '0.1.0'
 
-  # Game Boy Top-Level Wrapper
+      # Game Boy Top-Level Wrapper
   # Includes GB core and SpeedControl clock generator
   #
   # This is the complete Game Boy system with internal clock generation.
@@ -286,6 +288,8 @@ module GameBoy
 
       # AND the results (both button sets can be read simultaneously)
       joy_din_computed <= joy_dir_masked & joy_btn_masked
+    end
+      end
     end
   end
 end

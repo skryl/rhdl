@@ -37,8 +37,9 @@ require_relative 'disk_ii'
 require_relative 'cpu6502'
 
 module RHDL
-  module Apple2
-    class Apple2 < RHDL::HDL::SequentialComponent
+  module Examples
+    module Apple2
+      class Apple2 < RHDL::HDL::SequentialComponent
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
       include RHDL::DSL::Memory
@@ -512,5 +513,6 @@ module RHDL
         vga_b <= mux(active & pixel_data, lit(0xF, width: 4), lit(0, width: 4))
       end
     end
+  end
   end
 end

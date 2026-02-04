@@ -21,16 +21,16 @@ require_relative '../../../../examples/gameboy/gameboy'
 RSpec.describe 'GameBoy GB Top-Level Module' do
   describe 'Module Loading' do
     it 'defines the GB class' do
-      expect(defined?(GameBoy::GB)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::GB)).to eq('constant')
     end
 
     it 'inherits from SequentialComponent' do
-      expect(GameBoy::GB.superclass).to eq(RHDL::HDL::SequentialComponent)
+      expect(RHDL::Examples::GameBoy::GB.superclass).to eq(RHDL::HDL::SequentialComponent)
     end
   end
 
   describe 'GB Component Structure' do
-    let(:gb) { GameBoy::GB.new('gb') }
+    let(:gb) { RHDL::Examples::GameBoy::GB.new('gb') }
     let(:ir) { gb.class.to_ir }
     let(:port_names) { ir.ports.map { |p| p.name.to_sym } }
 
@@ -179,7 +179,7 @@ RSpec.describe 'GameBoy GB Top-Level Module' do
         @ir_available = RHDL::Codegen::IR::COMPILER_AVAILABLE rescue false
         # Try to actually initialize a runner to verify it works
         if @ir_available
-          test_runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+          test_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
           test_runner = nil
         end
       rescue LoadError, NameError, RuntimeError => e
@@ -190,7 +190,7 @@ RSpec.describe 'GameBoy GB Top-Level Module' do
 
     before(:each) do
       skip "IR compiler not available: #{@ir_error}" unless @ir_available
-      @runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+      @runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
     end
 
     # Helper to create a simple test ROM

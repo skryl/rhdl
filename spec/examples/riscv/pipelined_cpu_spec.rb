@@ -5,9 +5,9 @@ require 'spec_helper'
 require_relative '../../../examples/riscv/hdl/pipeline/cpu'
 require_relative '../../../examples/riscv/utilities/assembler'
 
-RSpec.describe RISCV::Pipeline::PipelinedCPU do
+RSpec.describe RHDL::Examples::RISCV::Pipeline::PipelinedCPU do
   let(:cpu) { described_class.new('test_cpu') }
-  let(:asm) { RISCV::Assembler }
+  let(:asm) { RHDL::Examples::RISCV::Assembler }
 
   before(:each) do
     cpu.reset!

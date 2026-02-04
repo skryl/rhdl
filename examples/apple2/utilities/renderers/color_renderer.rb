@@ -18,8 +18,9 @@
 # - Configurable scaling and aspect ratio
 
 module RHDL
-  module Apple2
-    # Renders Apple II hi-res graphics with NTSC artifact colors
+  module Examples
+    module Apple2
+      # Renders Apple II hi-res graphics with NTSC artifact colors
     # Default quality mode uses 7-bit sliding window for accurate NTSC simulation
     class ColorRenderer
       HIRES_WIDTH = 280          # Standard hi-res pixels
@@ -615,5 +616,6 @@ module RHDL
 
     # Legacy alias for backwards compatibility
     HiResColorRenderer = ColorRenderer
+  end
   end
 end

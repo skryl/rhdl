@@ -9,8 +9,9 @@
 require 'rhdl/hdl'
 
 module RHDL
-  module Apple2
-    # PS/2 Controller - handles low-level PS/2 protocol
+  module Examples
+    module Apple2
+      # PS/2 Controller - handles low-level PS/2 protocol
     class PS2Controller < RHDL::HDL::SequentialComponent
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
@@ -315,5 +316,6 @@ module RHDL
         )
       end
     end
+  end
   end
 end

@@ -20,7 +20,7 @@
 #   require 'examples/apple2/hdl'
 #
 #   # Create Apple II instance
-#   apple = RHDL::Apple2::Apple2.new('apple2')
+#   apple = RHDL::Examples::Apple2::Apple2.new('apple2')
 #
 #   # Load ROM
 #   apple.load_rom(rom_data)
@@ -42,8 +42,9 @@ require_relative 'hdl/disk_ii'
 require_relative 'hdl/apple2'
 
 module RHDL
-  module Apple2
-    VERSION = '0.1.0'
+  module Examples
+    module Apple2
+      VERSION = '0.1.0'
 
     # Default clock frequency (14.31818 MHz)
     MASTER_CLOCK_HZ = 14_318_180
@@ -106,5 +107,6 @@ module RHDL
 
       apple
     end
+  end
   end
 end

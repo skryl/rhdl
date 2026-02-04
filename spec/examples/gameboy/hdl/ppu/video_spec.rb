@@ -10,7 +10,7 @@ require_relative '../../../../../examples/gameboy/gameboy'
 # - LCD timing and mode control
 # - VRAM and OAM access arbitration
 # - DMA transfers
-RSpec.describe GameBoy::Video do
+RSpec.describe RHDL::Examples::GameBoy::Video do
   def clock_cycle(component, enable_ce: true)
     component.set_input(:ce, enable_ce ? 1 : 0)
     component.set_input(:clk, 0)
@@ -23,7 +23,7 @@ RSpec.describe GameBoy::Video do
     n.times { clock_cycle(component, enable_ce: enable_ce) }
   end
 
-  let(:video) { GameBoy::Video.new }
+  let(:video) { RHDL::Examples::GameBoy::Video.new }
 
   before do
     # Initialize inputs to default values
@@ -54,7 +54,7 @@ RSpec.describe GameBoy::Video do
 
   describe 'component instantiation' do
     it 'creates a Video component' do
-      expect(video).to be_a(GameBoy::Video)
+      expect(video).to be_a(RHDL::Examples::GameBoy::Video)
     end
 
     it 'has LCD control outputs' do

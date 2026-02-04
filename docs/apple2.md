@@ -466,7 +466,7 @@ High-level runner for HDL simulation.
 ```ruby
 require_relative 'examples/apple2/utilities/apple2_hdl'
 
-runner = RHDL::Apple2::HdlRunner.new
+runner = RHDL::Examples::Apple2::HdlRunner.new
 
 # Load ROM
 rom = File.binread("appleiigo.rom")

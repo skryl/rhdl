@@ -10,8 +10,9 @@
 require 'rhdl/hdl'
 
 module RHDL
-  module Apple2
-    class CPU6502 < RHDL::HDL::SequentialComponent
+  module Examples
+    module Apple2
+      class CPU6502 < RHDL::HDL::SequentialComponent
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
       include RHDL::DSL::Memory
@@ -1257,5 +1258,6 @@ module RHDL
         next_state <= ns
       end
     end
+  end
   end
 end

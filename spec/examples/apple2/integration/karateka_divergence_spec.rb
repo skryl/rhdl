@@ -48,7 +48,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
 
   def native_isa_available?
     require_relative '../../../../examples/mos6502/utilities/simulators/isa_simulator_native'
-    MOS6502::NATIVE_AVAILABLE
+    RHDL::Examples::MOS6502::NATIVE_AVAILABLE
   rescue LoadError
     false
   end
@@ -58,11 +58,11 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     require_relative '../../../../examples/mos6502/utilities/simulators/isa_simulator_native'
 
     karateka_rom = create_karateka_rom
-    bus = MOS6502::Apple2Bus.new
+    bus = RHDL::Examples::MOS6502::Apple2Bus.new
     bus.load_rom(karateka_rom, base_addr: 0xD000)
     bus.load_ram(@karateka_mem, base_addr: 0x0000)
 
-    cpu = MOS6502::ISASimulatorNative.new(bus)
+    cpu = RHDL::Examples::MOS6502::ISASimulatorNative.new(bus)
     cpu.load_bytes(@karateka_mem, 0x0000)
     cpu.load_bytes(karateka_rom, 0xD000)
 
@@ -83,7 +83,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   def create_ir_compiler
     require 'rhdl/codegen'
 
-    ir = RHDL::Apple2::Apple2.to_flat_ir
+    ir = RHDL::Examples::Apple2::Apple2.to_flat_ir
     ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
 
     sim = RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json, sub_cycles: 14)
@@ -116,7 +116,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   def create_verilator_runner
     require_relative '../../../../examples/apple2/utilities/runners/verilator_runner'
 
-    runner = RHDL::Apple2::VerilatorRunner.new(sub_cycles: 14)
+    runner = RHDL::Examples::Apple2::VerilatorRunner.new(sub_cycles: 14)
 
     karateka_rom = create_karateka_rom
     runner.load_rom(karateka_rom, base_addr: 0xD000)
@@ -328,7 +328,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   end
 
   def print_hires_screen(label, bitmap, cycles)
-    renderer = RHDL::Apple2::BrailleRenderer.new(chars_wide: 70)
+    renderer = RHDL::Examples::Apple2::BrailleRenderer.new(chars_wide: 70)
     puts "\n#{label} @ #{cycles / 1_000_000.0}M cycles:"
     puts renderer.render(bitmap, invert: false)
   end

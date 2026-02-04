@@ -4,7 +4,7 @@ require 'spec_helper'
 require 'tempfile'
 require_relative '../../../../../examples/gameboy/utilities/tasks/demo_task'
 
-RSpec.describe RHDL::GameBoy::Tasks::DemoTask do
+RSpec.describe RHDL::Examples::GameBoy::Tasks::DemoTask do
   describe 'NINTENDO_LOGO constant' do
     it 'has 48 bytes' do
       expect(described_class::NINTENDO_LOGO.length).to eq(48)

@@ -28,7 +28,7 @@ RSpec.describe 'SM83 Registers' do
 
   before(:each) do
     skip 'GameBoy module not available' unless @gameboy_available
-    @regs = GameBoy::SM83_Registers.new('test_regs')
+    @regs = RHDL::Examples::GameBoy::SM83_Registers.new('test_regs')
     reset_all_write_enables
     @regs.set_input(:cen, 1)  # Clock enable
     @regs.set_input(:rst, 0)  # Not in reset

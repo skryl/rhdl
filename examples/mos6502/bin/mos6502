@@ -71,7 +71,7 @@ class Apple2Terminal
                 # Verilog mode uses Verilator-compiled simulation
                 require_relative '../../../examples/apple2/utilities/runners/verilator_runner'
                 @sim_type = :hdl_verilator
-                RHDL::Apple2::VerilatorRunner.new
+                RHDL::Examples::Apple2::VerilatorRunner.new
               else
                 raise "Unknown mode: #{@mode}. Valid modes: isa, hdl, netlist, verilog"
               end

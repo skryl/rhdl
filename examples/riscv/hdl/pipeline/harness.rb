@@ -4,15 +4,17 @@
 require_relative 'cpu'
 require_relative '../memory'
 
-module RISCV
-  module Pipeline
-    class Harness
+module RHDL
+  module Examples
+    module RISCV
+      module Pipeline
+        class Harness
       attr_reader :clock_count
 
       def initialize(name = nil)
         @cpu = CPU.new(name || 'cpu')
-        @inst_mem = RISCV::Memory.new('inst_mem')
-        @data_mem = RISCV::Memory.new('data_mem')
+        @inst_mem = Memory.new('inst_mem')
+        @data_mem = Memory.new('data_mem')
         @clock_count = 0
         reset!
       end
@@ -150,9 +152,11 @@ module RISCV
         @cpu.set_input(:data_rdata, data_rdata)
         @cpu.propagate
       end
-    end
+        end
 
-    # Keep the old class name for backwards compatibility with tests
-    PipelinedCPU = Harness
+        # Keep the old class name for backwards compatibility with tests
+        PipelinedCPU = Harness
+      end
+    end
   end
 end

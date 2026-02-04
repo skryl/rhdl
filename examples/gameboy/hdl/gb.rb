@@ -14,8 +14,10 @@ require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
 require_relative '../../../lib/rhdl/dsl/sequential'
 
-module GameBoy
-  class GB < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module GameBoy
+      class GB < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -618,5 +620,7 @@ module GameBoy
       joy_din_sampled <= mux(ce, joy_din, joy_din_sampled)
     end
 
+      end
+    end
   end
 end

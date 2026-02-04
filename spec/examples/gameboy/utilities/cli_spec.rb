@@ -51,7 +51,7 @@ RSpec.describe 'Game Boy CLI' do
   end
 
   describe 'HdlRunner (Ruby backend)' do
-    let(:runner) { RHDL::GameBoy::HdlRunner.new }
+    let(:runner) { RHDL::Examples::GameBoy::HdlRunner.new }
     let(:rom) { create_test_rom }
 
     before do
@@ -123,7 +123,7 @@ RSpec.describe 'Game Boy CLI' do
       begin
         require_relative '../../../../examples/gameboy/utilities/runners/ir_runner'
         # Try to actually create an IrRunner to see if it works
-        test_runner = RHDL::GameBoy::IrRunner.new(backend: :interpret)
+        test_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :interpret)
         test_runner.reset
         @ir_available = true
       rescue LoadError, NoMethodError, Fiddle::DLError => e
@@ -136,7 +136,7 @@ RSpec.describe 'Game Boy CLI' do
     shared_examples 'IR backend behavior' do |backend|
       let(:runner) do
         skip @ir_skip_reason unless @ir_available
-        RHDL::GameBoy::IrRunner.new(backend: backend)
+        RHDL::Examples::GameBoy::IrRunner.new(backend: backend)
       end
 
       before do
@@ -146,7 +146,7 @@ RSpec.describe 'Game Boy CLI' do
       end
 
       it "initializes with #{backend} backend" do
-        expect(runner).to be_a(RHDL::GameBoy::IrRunner)
+        expect(runner).to be_a(RHDL::Examples::GameBoy::IrRunner)
       end
 
       it 'runs cycles without a terminal connected' do
@@ -221,7 +221,7 @@ RSpec.describe 'Game Boy CLI' do
     let(:rom) { create_test_rom }
     let(:runner) do
       skip "Verilator not available" unless @verilator_available
-      RHDL::GameBoy::VerilatorRunner.new
+      RHDL::Examples::GameBoy::VerilatorRunner.new
     end
 
     before do
@@ -277,7 +277,7 @@ RSpec.describe 'Game Boy CLI' do
   end
 
   describe 'LcdRenderer' do
-    let(:renderer) { RHDL::GameBoy::LcdRenderer.new(chars_wide: 40) }
+    let(:renderer) { RHDL::Examples::GameBoy::LcdRenderer.new(chars_wide: 40) }
     let(:empty_framebuffer) { [] }
     let(:valid_framebuffer) do
       Array.new(144) { Array.new(160, 0) }
@@ -372,7 +372,7 @@ RSpec.describe 'Game Boy CLI' do
     end
 
     describe 'HdlRunner' do
-      let(:runner) { RHDL::GameBoy::HdlRunner.new }
+      let(:runner) { RHDL::Examples::GameBoy::HdlRunner.new }
 
       it 'implements all required interface methods' do
         required_methods.each do |method|
@@ -387,7 +387,7 @@ RSpec.describe 'Game Boy CLI' do
         begin
           require_relative '../../../../examples/gameboy/utilities/runners/ir_runner'
           # Try to actually create an IrRunner
-          test_runner = RHDL::GameBoy::IrRunner.new(backend: :interpret)
+          test_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :interpret)
           test_runner.reset
           @ir_interface_available = true
         rescue LoadError, NoMethodError, Fiddle::DLError
@@ -397,7 +397,7 @@ RSpec.describe 'Game Boy CLI' do
 
       it 'implements all required interface methods' do
         skip "IrRunner not available" unless @ir_interface_available
-        runner = RHDL::GameBoy::IrRunner.new(backend: :interpret)
+        runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :interpret)
         required_methods.each do |method|
           expect(runner).to respond_to(method), "Expected IrRunner to respond to #{method}"
         end
@@ -418,7 +418,7 @@ RSpec.describe 'Game Boy CLI' do
 
       it 'implements all required interface methods' do
         skip "Verilator not available" unless @verilator_available
-        runner = RHDL::GameBoy::VerilatorRunner.new
+        runner = RHDL::Examples::GameBoy::VerilatorRunner.new
         required_methods.each do |method|
           expect(runner).to respond_to(method), "Expected VerilatorRunner to respond to #{method}"
         end
@@ -427,7 +427,7 @@ RSpec.describe 'Game Boy CLI' do
   end
 
   describe 'Long-running simulation tests' do
-    let(:runner) { RHDL::GameBoy::HdlRunner.new }
+    let(:runner) { RHDL::Examples::GameBoy::HdlRunner.new }
     let(:rom) { create_test_rom }
 
     before do

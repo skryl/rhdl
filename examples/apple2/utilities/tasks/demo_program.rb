@@ -4,9 +4,10 @@
 # Creates a simple demo program that clears the screen and echoes keyboard input
 
 module RHDL
-  module Apple2
-    module Tasks
-      # Generates a simple demo program for Apple II
+  module Examples
+    module Apple2
+      module Tasks
+        # Generates a simple demo program for Apple II
       # Clears screen, prints "HDL READY", and echoes typed characters
       class DemoProgram
         def self.create
@@ -67,5 +68,6 @@ module RHDL
         end
       end
     end
+  end
   end
 end

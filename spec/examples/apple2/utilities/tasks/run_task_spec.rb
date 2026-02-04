@@ -3,7 +3,7 @@
 require 'spec_helper'
 require_relative '../../../../../examples/apple2/utilities/tasks/run_task'
 
-RSpec.describe RHDL::Apple2::Tasks::RunTask do
+RSpec.describe RHDL::Examples::Apple2::Tasks::RunTask do
   describe '#initialize' do
     it 'accepts options hash' do
       task = described_class.new(mode: :hdl, sim: :ruby)
@@ -23,7 +23,7 @@ RSpec.describe RHDL::Apple2::Tasks::RunTask do
 
     it 'creates HeadlessRunner internally' do
       task = described_class.new(mode: :hdl, sim: :ruby)
-      expect(task.runner).to be_a(RHDL::Apple2::HeadlessRunner)
+      expect(task.runner).to be_a(RHDL::Examples::Apple2::HeadlessRunner)
     end
   end
 
@@ -69,7 +69,7 @@ RSpec.describe RHDL::Apple2::Tasks::RunTask do
   end
 end
 
-RSpec.describe RHDL::Apple2::HeadlessRunner do
+RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
   describe '.create_demo_program' do
     let(:program) { described_class.create_demo_program }
 

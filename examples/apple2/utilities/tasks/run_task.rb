@@ -7,8 +7,9 @@ require 'io/console'
 require_relative '../runners/headless_runner'
 
 module RHDL
-  module Apple2
-    module Tasks
+  module Examples
+    module Apple2
+      module Tasks
       # Apple II Run task for HDL simulation
       # Supports HDL, netlist, and Verilog simulation modes
       class RunTask
@@ -671,5 +672,6 @@ module RHDL
         end
       end
     end
+  end
   end
 end

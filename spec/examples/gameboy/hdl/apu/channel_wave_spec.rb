@@ -12,7 +12,7 @@ require 'spec_helper'
 # - DAC enable/disable
 # - Output generation
 
-RSpec.describe 'GameBoy::ChannelWave' do
+RSpec.describe 'RHDL::Examples::GameBoy::ChannelWave' do
   before(:all) do
     begin
       require_relative '../../../../../examples/gameboy/gameboy'
@@ -41,7 +41,7 @@ RSpec.describe 'GameBoy::ChannelWave' do
   end
 
   describe 'ChannelWave' do
-    let(:channel) { GameBoy::ChannelWave.new('ch3') }
+    let(:channel) { RHDL::Examples::GameBoy::ChannelWave.new('ch3') }
 
     before do
       # Initialize default inputs

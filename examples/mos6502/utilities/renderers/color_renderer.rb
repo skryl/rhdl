@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 # MOS6502 Color Renderer
-# Wrapper around RHDL::Apple2::ColorRenderer for MOS6502 namespace compatibility
+# Wrapper around RHDL::Examples::Apple2::ColorRenderer for MOS6502 namespace compatibility
 #
 # This module provides backwards compatibility for code using RHDL::Examples::MOS6502::ColorRenderer
-# while delegating all functionality to the shared RHDL::Apple2::ColorRenderer.
+# while delegating all functionality to the shared RHDL::Examples::Apple2::ColorRenderer.
 #
 # Usage:
 #   renderer = RHDL::Examples::MOS6502::ColorRenderer.new(chars_wide: 140, palette: :ntsc)
@@ -24,10 +24,10 @@ module RHDL
     module MOS6502
       # Re-export the Apple2 ColorRenderer under the MOS6502 namespace
       # This maintains backwards compatibility while avoiding code duplication
-      ColorRenderer = RHDL::Apple2::ColorRenderer
+      ColorRenderer = RHDL::Examples::Apple2::ColorRenderer
 
       # Also provide the legacy alias
-      HiResColorRenderer = RHDL::Apple2::ColorRenderer
+      HiResColorRenderer = RHDL::Examples::Apple2::ColorRenderer
     end
   end
 end
