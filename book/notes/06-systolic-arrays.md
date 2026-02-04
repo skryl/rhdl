@@ -151,164 +151,26 @@ Cycle 3:  All PEs have accumulated their results
 
 ## RHDL Implementation
 
-### Processing Element
+Systolic arrays map elegantly to RHDL's component-based design:
 
-```ruby
-class SystolicPE < SimComponent
-  input :clk
-  input :reset
-  input :a_in, width: 8
-  input :b_in, width: 8
-  output :a_out, width: 8
-  output :b_out, width: 8
-  output :result, width: 16
+### Key Components
 
-  register :accumulator, width: 16
-  register :a_reg, width: 8
-  register :b_reg, width: 8
+| Component | Function |
+|-----------|----------|
+| **SystolicPE** | Single processing element with MAC and data pass-through |
+| **SystolicArray2x2** | 2×2 array connecting 4 PEs with proper data flow |
+| **SystolicInputStager** | Generates staggered input timing for matrix operands |
+| **ConvolutionPE** | Processing element for 1D convolution/FIR filters |
 
-  behavior do
-    on_rising_edge(clk) do
-      if reset
-        accumulator <= 0
-        a_reg <= 0
-        b_reg <= 0
-      else
-        # Multiply-accumulate
-        accumulator <= accumulator + (a_in * b_in)
+### Hardware Complexity
 
-        # Pass data through
-        a_reg <= a_in
-        b_reg <= b_in
-      end
-    end
+| Component | Multipliers | Adders | Registers |
+|-----------|-------------|--------|-----------|
+| SystolicPE | 1 | 1 | 3 (acc + a_reg + b_reg) |
+| 2×2 Array | 4 | 4 | 12 |
+| N×N Array | N² | N² | 3N² |
 
-    # Outputs
-    a_out <= a_reg
-    b_out <= b_reg
-    result <= accumulator
-  end
-end
-```
-
-### 2×2 Systolic Array
-
-```ruby
-class SystolicArray2x2 < SimComponent
-  input :clk
-  input :reset
-
-  # Staggered inputs for rows and columns
-  input :a0, width: 8    # Row 0 input
-  input :a1, width: 8    # Row 1 input
-  input :b0, width: 8    # Column 0 input
-  input :b1, width: 8    # Column 1 input
-
-  # Results
-  output :c00, width: 16
-  output :c01, width: 16
-  output :c10, width: 16
-  output :c11, width: 16
-
-  # Instantiate 4 PEs
-  instance :pe00, SystolicPE
-  instance :pe01, SystolicPE
-  instance :pe10, SystolicPE
-  instance :pe11, SystolicPE
-
-  # Internal wires for data flow
-  wire :a00_to_01, width: 8
-  wire :a10_to_11, width: 8
-  wire :b00_to_10, width: 8
-  wire :b01_to_11, width: 8
-
-  # Connect clocks and resets
-  port :clk => [[:pe00, :clk], [:pe01, :clk],
-                [:pe10, :clk], [:pe11, :clk]]
-  port :reset => [[:pe00, :reset], [:pe01, :reset],
-                  [:pe10, :reset], [:pe11, :reset]]
-
-  # Row inputs
-  port :a0 => [:pe00, :a_in]
-  port :a1 => [:pe10, :a_in]
-
-  # Column inputs
-  port :b0 => [:pe00, :b_in]
-  port :b1 => [:pe01, :b_in]
-
-  # Horizontal data flow (a values flow right)
-  port [:pe00, :a_out] => :a00_to_01
-  port :a00_to_01 => [:pe01, :a_in]
-  port [:pe10, :a_out] => :a10_to_11
-  port :a10_to_11 => [:pe11, :a_in]
-
-  # Vertical data flow (b values flow down)
-  port [:pe00, :b_out] => :b00_to_10
-  port :b00_to_10 => [:pe10, :b_in]
-  port [:pe01, :b_out] => :b01_to_11
-  port :b01_to_11 => [:pe11, :b_in]
-
-  # Results
-  port [:pe00, :result] => :c00
-  port [:pe01, :result] => :c01
-  port [:pe10, :result] => :c10
-  port [:pe11, :result] => :c11
-end
-```
-
-### Input Staging (Staggered Entry)
-
-```ruby
-class SystolicInputStager < SimComponent
-  input :clk
-  input :start
-  input :row0, width: 8, count: 2  # [a00, a01]
-  input :row1, width: 8, count: 2  # [a10, a11]
-  input :col0, width: 8, count: 2  # [b00, b10]
-  input :col1, width: 8, count: 2  # [b01, b11]
-
-  output :a0, width: 8
-  output :a1, width: 8
-  output :b0, width: 8
-  output :b1, width: 8
-
-  register :cycle, width: 3
-
-  behavior do
-    on_rising_edge(clk) do
-      if start
-        cycle <= 0
-      else
-        cycle <= cycle + 1
-      end
-    end
-
-    # Staggered input schedule
-    case cycle
-    when 0
-      a0 <= row0[0]  # a00
-      b0 <= col0[0]  # b00
-      a1 <= 0
-      b1 <= 0
-    when 1
-      a0 <= row0[1]  # a01
-      b0 <= col0[1]  # b10
-      a1 <= row1[0]  # a10
-      b1 <= col1[0]  # b01
-    when 2
-      a0 <= 0
-      b0 <= 0
-      a1 <= row1[1]  # a11
-      b1 <= col1[1]  # b11
-    else
-      a0 <= 0
-      a1 <= 0
-      b0 <= 0
-      b1 <= 0
-    end
-  end
-end
-```
+> See [Appendix G](appendix-g-systolic.md) for complete RHDL implementations of all systolic components.
 
 ## Other Systolic Algorithms
 
@@ -327,27 +189,7 @@ x[n] →[PE]──→[PE]──→[PE]──→ y[n]
       (accumulate)
 ```
 
-```ruby
-class ConvolutionPE < SimComponent
-  input :clk
-  input :x_in, width: 8
-  input :coeff, width: 8
-  input :acc_in, width: 16
-  output :x_out, width: 8
-  output :acc_out, width: 16
-
-  register :x_reg, width: 8
-
-  behavior do
-    on_rising_edge(clk) do
-      x_reg <= x_in
-    end
-
-    x_out <= x_reg
-    acc_out <= acc_in + (x_in * coeff)
-  end
-end
-```
+> See [Appendix G](appendix-g-systolic.md) for convolution PE implementation.
 
 ### Sorting
 

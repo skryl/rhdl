@@ -64,25 +64,8 @@ In dataflow, operations are **nodes** and data flows along **edges**:
 
 ### Combinational Logic
 
-Every combinational circuit in RHDL is dataflow:
+Every combinational circuit is dataflow. When you write RHDL, you're describing a dataflow graph:
 
-```ruby
-class DataflowExample < SimComponent
-  input :a, width: 8
-  input :b, width: 8
-  input :c, width: 8
-  input :d, width: 8
-  output :z, width: 8
-
-  behavior do
-    x = a + b        # Fires when a, b change
-    y = c * d        # Fires when c, d change (parallel!)
-    z <= x + y       # Fires when x, y ready
-  end
-end
-```
-
-This synthesizes to:
 ```
       a ──┐
           ├──[Adder]──┐
@@ -93,7 +76,7 @@ This synthesizes to:
       d ──┘
 ```
 
-The hardware **is** the dataflow graph. No control needed—data flows through combinational logic at the speed of electrons.
+The hardware **is** the dataflow graph. No control needed—data flows through combinational logic at the speed of electrons. The `+` and `*` operations fire simultaneously when their inputs are ready.
 
 ### Signals as Data Tokens
 
@@ -102,12 +85,7 @@ In dataflow terminology:
 - **Components** are nodes that consume and produce tokens
 - **Connections** are edges in the dataflow graph
 
-```ruby
-# This RHDL code IS a dataflow graph
-port :a => [:adder, :a]       # Edge from a to adder.a
-port :b => [:adder, :b]       # Edge from b to adder.b
-port [:adder, :sum] => :result  # Edge from adder.sum to result
-```
+> See [Appendix E](appendix-e-dataflow.md) for RHDL implementations of dataflow components.
 
 ## Dataflow Architectures
 
@@ -170,106 +148,29 @@ In RHDL with clock edges, this matching happens at clock boundaries—all signal
 
 ## Dataflow in RHDL
 
+RHDL naturally expresses dataflow computation:
+
 ### Pure Combinational Dataflow
 
-```ruby
-class PureDataflow < SimComponent
-  input :x, width: 16
-  input :y, width: 16
-  output :result, width: 16
-
-  # These all execute "simultaneously" in hardware
-  behavior do
-    a = x + y
-    b = x - y
-    c = a * b        # (x+y)(x-y) = x² - y²
-    result <= c
-  end
-end
-```
-
-No clocks, no state—pure dataflow. Changes propagate instantly (in simulation, within one delta cycle).
+Without clocks, changes propagate instantly through the dataflow graph. This is **pure dataflow**—no state, no sequencing.
 
 ### Clocked Dataflow (Synchronous)
 
-```ruby
-class SyncDataflow < SimComponent
-  input :clk
-  input :x, width: 16
-  output :result, width: 16
-
-  wire :stage1, width: 16
-  wire :stage2, width: 16
-
-  # Pipeline: data flows through registers
-  behavior do
-    on_rising_edge(clk) do
-      stage1 <= x * x           # Stage 1: square
-      stage2 <= stage1 + 1      # Stage 2: add 1
-      result <= stage2 * 2      # Stage 3: double
-    end
-  end
-end
-```
-
-Each clock edge advances tokens through the pipeline—synchronous dataflow.
+Adding registers creates **synchronous dataflow** where clock edges advance tokens through a pipeline. Each stage holds its value until the next clock.
 
 ### Dataflow Patterns
 
-**Map (apply function to stream):**
-```ruby
-class Map < SimComponent
-  input :data_in, width: 8
-  input :valid_in
-  output :data_out, width: 8
-  output :valid_out
+Common dataflow patterns map directly to hardware:
 
-  behavior do
-    data_out <= data_in * 2    # The function
-    valid_out <= valid_in
-  end
-end
-```
+| Pattern | Description | Hardware |
+|---------|-------------|----------|
+| **Map** | Apply function to each token | Combinational logic |
+| **Filter** | Pass tokens matching condition | Mux + valid logic |
+| **Reduce** | Accumulate stream to single value | Register + adder |
+| **Fork** | Duplicate token to multiple outputs | Wire fanout |
+| **Join** | Combine tokens from multiple inputs | AND of valid signals |
 
-**Filter (select matching tokens):**
-```ruby
-class Filter < SimComponent
-  input :data_in, width: 8
-  input :valid_in
-  output :data_out, width: 8
-  output :valid_out
-
-  behavior do
-    passes = (data_in > 100)
-    data_out <= data_in
-    valid_out <= valid_in & passes
-  end
-end
-```
-
-**Reduce (accumulate stream):**
-```ruby
-class Reduce < SimComponent
-  input :clk
-  input :data_in, width: 8
-  input :valid_in
-  input :reset
-  output :sum, width: 16
-
-  register :accumulator, width: 16
-
-  behavior do
-    on_rising_edge(clk) do
-      if reset
-        accumulator <= 0
-      elsif valid_in
-        accumulator <= accumulator + data_in
-      end
-    end
-    sum <= accumulator
-  end
-end
-```
+> See [Appendix E](appendix-e-dataflow.md) for complete RHDL implementations of all dataflow patterns.
 
 ## Historical Dataflow Machines
 
@@ -383,83 +284,6 @@ Modern ML accelerators use dataflow for matrix operations:
          Output Stream
 ```
 
-## RHDL Dataflow Examples
-
-### Token-Based Pipeline
-
-```ruby
-class TokenPipeline < SimComponent
-  input :clk
-  input :data_in, width: 8
-  input :valid_in
-  output :data_out, width: 8
-  output :valid_out
-
-  # Internal pipeline registers
-  register :stage1_data, width: 8
-  register :stage1_valid
-  register :stage2_data, width: 8
-  register :stage2_valid
-
-  behavior do
-    on_rising_edge(clk) do
-      # Stage 1: Double
-      stage1_data <= data_in << 1
-      stage1_valid <= valid_in
-
-      # Stage 2: Add offset
-      stage2_data <= stage1_data + 10
-      stage2_valid <= stage1_valid
-    end
-
-    # Output
-    data_out <= stage2_data
-    valid_out <= stage2_valid
-  end
-end
-```
-
-### Dataflow Join (Synchronize Two Streams)
-
-```ruby
-class DataflowJoin < SimComponent
-  input :clk
-  input :a_data, width: 8
-  input :a_valid
-  input :b_data, width: 8
-  input :b_valid
-  output :sum, width: 9
-  output :valid_out
-
-  behavior do
-    # Only output when both inputs valid
-    both_ready = a_valid & b_valid
-    sum <= a_data + b_data
-    valid_out <= both_ready
-  end
-end
-```
-
-### Dataflow Fork (Split Stream)
-
-```ruby
-class DataflowFork < SimComponent
-  input :data_in, width: 8
-  input :valid_in
-  output :out_a, width: 8
-  output :out_b, width: 8
-  output :valid_a
-  output :valid_b
-
-  behavior do
-    out_a <= data_in
-    out_b <= data_in
-    valid_a <= valid_in
-    valid_b <= valid_in
-  end
-end
-```
-
 ## Hands-On Exercises
 
 ### Exercise 1: Dataflow Graph
@@ -478,14 +302,11 @@ Given a 3-stage pipeline with operations taking 1, 2, and 1 cycles respectively:
 - What is the throughput (items per cycle)?
 - How many items can be "in flight"?
 
-### Exercise 3: RHDL Dataflow Filter
+### Exercise 3: Dataflow Filter
 
-Implement a filter that passes only even numbers:
-```ruby
-class EvenFilter < SimComponent
-  # Pass through only when (data_in & 1) == 0
-end
-```
+Design a filter component that passes only even numbers. What signals do you need? How do you compute the valid output?
+
+> Implement your solution using the patterns in [Appendix E](appendix-e-dataflow.md).
 
 ## Key Takeaways
 

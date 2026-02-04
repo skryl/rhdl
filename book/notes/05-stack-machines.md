@@ -256,188 +256,28 @@ istore 4         // Store to result
 
 ## RHDL Stack Machine Implementation
 
-### Basic Stack
+Stack machines are remarkably simple to implement in hardware:
 
-```ruby
-class Stack < SimComponent
-  input :clk
-  input :push
-  input :pop
-  input :data_in, width: 8
-  output :data_out, width: 8
-  output :empty
-  output :full
+### Key Components
 
-  DEPTH = 16
+| Component | Function |
+|-----------|----------|
+| **Data Stack** | Holds operands (16-deep, 8-bit) |
+| **Return Stack** | Holds return addresses (16-deep, 16-bit) |
+| **Stack ALU** | Operates on TOS and NOS |
+| **Control Unit** | Fetches and decodes instructions |
 
-  # Stack memory and pointer
-  register :memory, width: 8, count: DEPTH
-  register :sp, width: 4  # Stack pointer
+### Hardware Simplicity
 
-  behavior do
-    on_rising_edge(clk) do
-      if push && !full
-        memory[sp] <= data_in
-        sp <= sp + 1
-      elsif pop && !empty
-        sp <= sp - 1
-      end
-    end
+A stack CPU needs only:
+- Two stack pointers (4 bits each for 16-deep stacks)
+- Two small memories (stacks)
+- Simple ALU
+- Minimal control logic
 
-    # Output top of stack (TOS)
-    data_out <= (sp > 0) ? memory[sp - 1] : 0
-    empty <= (sp == 0)
-    full <= (sp == DEPTH)
-  end
-end
-```
+The instruction decoder is trivial because there are no register operands to decode—everything operates on the implicit top of stack.
 
-### Stack ALU
-
-```ruby
-class StackALU < SimComponent
-  input :clk
-  input :op, width: 4      # Operation code
-  input :push_val, width: 8
-  output :tos, width: 8    # Top of stack
-  output :nos, width: 8    # Next on stack
-
-  # Operations
-  OP_NOP  = 0
-  OP_PUSH = 1
-  OP_POP  = 2
-  OP_DUP  = 3
-  OP_SWAP = 4
-  OP_ADD  = 5
-  OP_SUB  = 6
-  OP_MUL  = 7
-  OP_AND  = 8
-  OP_OR   = 9
-  OP_XOR  = 10
-  OP_NOT  = 11
-
-  DEPTH = 16
-  register :stack, width: 8, count: DEPTH
-  register :sp, width: 4
-
-  behavior do
-    on_rising_edge(clk) do
-      case op
-      when OP_PUSH
-        stack[sp] <= push_val
-        sp <= sp + 1
-
-      when OP_POP
-        sp <= sp - 1
-
-      when OP_DUP
-        stack[sp] <= stack[sp - 1]
-        sp <= sp + 1
-
-      when OP_SWAP
-        temp = stack[sp - 1]
-        stack[sp - 1] <= stack[sp - 2]
-        stack[sp - 2] <= temp
-
-      when OP_ADD
-        stack[sp - 2] <= stack[sp - 2] + stack[sp - 1]
-        sp <= sp - 1
-
-      when OP_SUB
-        stack[sp - 2] <= stack[sp - 2] - stack[sp - 1]
-        sp <= sp - 1
-
-      when OP_MUL
-        stack[sp - 2] <= stack[sp - 2] * stack[sp - 1]
-        sp <= sp - 1
-
-      when OP_AND
-        stack[sp - 2] <= stack[sp - 2] & stack[sp - 1]
-        sp <= sp - 1
-
-      when OP_OR
-        stack[sp - 2] <= stack[sp - 2] | stack[sp - 1]
-        sp <= sp - 1
-
-      when OP_XOR
-        stack[sp - 2] <= stack[sp - 2] ^ stack[sp - 1]
-        sp <= sp - 1
-
-      when OP_NOT
-        stack[sp - 1] <= ~stack[sp - 1]
-      end
-    end
-
-    tos <= (sp > 0) ? stack[sp - 1] : 0
-    nos <= (sp > 1) ? stack[sp - 2] : 0
-  end
-end
-```
-
-### Complete Stack CPU
-
-```ruby
-class StackCPU < SimComponent
-  input :clk
-  input :reset
-  input :mem_data_in, width: 8
-  output :mem_addr, width: 16
-  output :mem_data_out, width: 8
-  output :mem_write
-
-  # Registers
-  register :pc, width: 16        # Program counter
-  register :data_sp, width: 4    # Data stack pointer
-  register :ret_sp, width: 4     # Return stack pointer
-
-  # Stack memories
-  register :data_stack, width: 8, count: 16
-  register :ret_stack, width: 16, count: 16
-
-  # Instruction set
-  PUSH_LIT = 0x00   # Push literal (next byte)
-  DUP      = 0x01
-  DROP     = 0x02
-  SWAP     = 0x03
-  OVER     = 0x04
-  ADD      = 0x10
-  SUB      = 0x11
-  MUL      = 0x12
-  DIV      = 0x13
-  AND      = 0x14
-  OR       = 0x15
-  XOR      = 0x16
-  NOT      = 0x17
-  FETCH    = 0x20   # Memory fetch
-  STORE    = 0x21   # Memory store
-  CALL     = 0x30
-  RET      = 0x31
-  JMP      = 0x32
-  JZ       = 0x33   # Jump if zero
-
-  behavior do
-    on_rising_edge(clk) do
-      if reset
-        pc <= 0
-        data_sp <= 0
-        ret_sp <= 0
-      else
-        # Fetch-decode-execute
-        opcode = mem_data_in
-        execute_instruction(opcode)
-      end
-    end
-
-    mem_addr <= pc
-    mem_write <= 0  # Default: reading
-  end
-
-  def execute_instruction(opcode)
-    # Implementation of each instruction...
-    # (See Appendix F for full implementation)
-  end
-end
-```
+> See [Appendix F](appendix-f-stack-machine.md) for complete RHDL implementations of Stack, StackALU, and StackCPU.
 
 ## Hardware Stack Machines
 
@@ -513,10 +353,14 @@ What value is printed?
 
 ### Exercise 2: Implement ROT
 
-Add the ROT operation to the StackALU:
+Design how to add the ROT operation to a stack ALU:
 ```
 ROT: ( a b c -- b c a )
 ```
+
+How many stack accesses are needed? What temporary storage is required?
+
+> See [Appendix F](appendix-f-stack-machine.md) for the implementation.
 
 ### Exercise 3: Fibonacci in Forth
 

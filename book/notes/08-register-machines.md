@@ -261,180 +261,34 @@ For our 8-bit CPU, we'll use:
 
 ## Register Machine in RHDL
 
-### Register File
+The von Neumann architecture maps directly to RHDL components:
 
-```ruby
-class RegisterFile < SimComponent
-  input :clk
-  input :read_addr1, width: 2   # 4 registers
-  input :read_addr2, width: 2
-  input :write_addr, width: 2
-  input :write_data, width: 8
-  input :write_en
-  output :read_data1, width: 8
-  output :read_data2, width: 8
+### Key Components
 
-  register :regs, width: 8, count: 4
+| Component | Function |
+|-----------|----------|
+| **RegisterFile** | Fast storage with 2 read ports, 1 write port |
+| **ALU** | Arithmetic and logic operations with flags |
+| **SimpleCPU** | Complete CPU with fetch-decode-execute FSM |
+| **ControlUnit** | Instruction decoder and sequencer |
 
-  behavior do
-    # Reads are combinational
-    read_data1 <= regs[read_addr1]
-    read_data2 <= regs[read_addr2]
+### Hardware Resources
 
-    # Writes are clocked
-    on_rising_edge(clk) do
-      if write_en
-        regs[write_addr] <= write_data
-      end
-    end
-  end
-end
+| Component | Registers | Logic |
+|-----------|-----------|-------|
+| Register File (4×8-bit) | 4 | Mux + decoder |
+| ALU | 0 | Adder, logic ops, shifters |
+| CPU Core | 3 (PC, IR, state) | FSM, instruction decoder |
+
+### CPU State Machine
+
+```
+FETCH → DECODE → EXECUTE → (FETCH or HALT)
 ```
 
-### Simple CPU Core
+Each state takes one clock cycle. Memory operations may add cycles.
 
-```ruby
-class SimpleCPU < SimComponent
-  input :clk
-  input :reset
-  input :mem_data_in, width: 8
-  output :mem_addr, width: 8
-  output :mem_data_out, width: 8
-  output :mem_write
-  output :halted
-
-  # Internal state
-  register :pc, width: 8
-  register :ir, width: 8          # Instruction register
-  register :state, width: 2       # FSM state
-
-  # Register file
-  register :regs, width: 8, count: 4
-
-  # ALU result
-  wire :alu_result, width: 8
-  wire :zero_flag
-
-  # State constants
-  FETCH   = 0
-  DECODE  = 1
-  EXECUTE = 2
-  HALT    = 3
-
-  behavior do
-    on_rising_edge(clk) do
-      if reset
-        pc <= 0
-        state <= FETCH
-      else
-        case state
-        when FETCH
-          ir <= mem_data_in
-          state <= DECODE
-
-        when DECODE
-          # Decode happens combinationally
-          state <= EXECUTE
-
-        when EXECUTE
-          execute_instruction
-          if opcode != 0xF  # Not HALT
-            pc <= next_pc
-            state <= FETCH
-          else
-            state <= HALT
-          end
-
-        when HALT
-          # Stay halted
-        end
-      end
-    end
-
-    # Memory interface
-    mem_addr <= pc
-    mem_write <= 0
-    halted <= (state == HALT)
-  end
-
-  def opcode
-    ir >> 4
-  end
-
-  def reg1
-    (ir >> 2) & 0x3
-  end
-
-  def reg2
-    ir & 0x3
-  end
-
-  def execute_instruction
-    case opcode
-    when 0x1  # LDI
-      regs[reg1] <= reg2  # Immediate is low 2 bits
-    when 0x5  # ADD
-      regs[reg1] <= regs[reg1] + regs[reg2]
-    when 0x6  # SUB
-      regs[reg1] <= regs[reg1] - regs[reg2]
-    # ... other instructions
-    end
-  end
-
-  def next_pc
-    case opcode
-    when 0xD  # JMP
-      ir & 0xF  # Target address
-    when 0xE  # JZ
-      zero_flag ? (ir & 0xF) : (pc + 1)
-    else
-      pc + 1
-    end
-  end
-end
-```
-
-### ALU
-
-```ruby
-class ALU < SimComponent
-  input :a, width: 8
-  input :b, width: 8
-  input :op, width: 4
-  output :result, width: 8
-  output :zero
-  output :carry
-  output :negative
-
-  ALU_ADD = 0
-  ALU_SUB = 1
-  ALU_AND = 2
-  ALU_OR  = 3
-  ALU_XOR = 4
-  ALU_NOT = 5
-  ALU_SHL = 6
-  ALU_SHR = 7
-
-  behavior do
-    full_result = case op
-    when ALU_ADD then a + b
-    when ALU_SUB then a - b
-    when ALU_AND then a & b
-    when ALU_OR  then a | b
-    when ALU_XOR then a ^ b
-    when ALU_NOT then ~a
-    when ALU_SHL then a << 1
-    when ALU_SHR then a >> 1
-    else 0
-    end
-
-    result <= full_result & 0xFF
-    zero <= (result == 0) ? 1 : 0
-    carry <= (full_result > 0xFF) ? 1 : 0
-    negative <= result[7]
-  end
-end
-```
+> See [Appendix I](appendix-i-register-machine.md) for complete RHDL implementations of RegisterFile, ALU, and SimpleCPU.
 
 ## The von Neumann Bottleneck
 

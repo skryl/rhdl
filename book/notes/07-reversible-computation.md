@@ -195,135 +195,28 @@ A ────[⊕]─── NOT A
 
 ## RHDL Implementation
 
-### Fredkin Gate
+Reversible gates map directly to RHDL with explicit input preservation:
 
-```ruby
-class FredkinGate < SimComponent
-  input :c       # Control
-  input :a
-  input :b
-  output :c_out
-  output :a_out
-  output :b_out
+### Key Components
 
-  behavior do
-    c_out <= c
+| Component | Inputs | Outputs | Function |
+|-----------|--------|---------|----------|
+| **ToffoliGate** | a, b, c | a', b', c' | c' = c XOR (a AND b) |
+| **FredkinGate** | c, a, b | c', a', b' | Conditional swap |
+| **ReversibleAnd** | a, b | a', b', result | AND with preserved inputs |
+| **ReversibleFullAdder** | a, b, cin | a', b', sum, cout | Addition with garbage |
 
-    if c == 1
-      # Swap a and b
-      a_out <= b
-      b_out <= a
-    else
-      # Pass through
-      a_out <= a
-      b_out <= b
-    end
-  end
-end
-```
+### Gate Costs
 
-### Toffoli Gate
+| Circuit | Toffoli Gates | Garbage Bits |
+|---------|---------------|--------------|
+| NOT | 1 | 0 |
+| AND | 1 | 2 (inputs preserved) |
+| OR | 3 | 2 |
+| Full Adder | 4 | 2 |
+| N-bit Adder | 4N | 2N |
 
-```ruby
-class ToffoliGate < SimComponent
-  input :a
-  input :b
-  input :c
-  output :a_out
-  output :b_out
-  output :c_out
-
-  behavior do
-    a_out <= a
-    b_out <= b
-    c_out <= c ^ (a & b)  # XOR with AND of controls
-  end
-end
-```
-
-### Reversible AND (using Toffoli)
-
-```ruby
-class ReversibleAnd < SimComponent
-  input :a
-  input :b
-  output :a_out      # Preserved
-  output :b_out      # Preserved
-  output :result     # a AND b
-
-  instance :toffoli, ToffoliGate
-
-  # Wire constant 0 as third input
-  wire :zero
-
-  behavior do
-    zero <= 0
-  end
-
-  port :a => [:toffoli, :a]
-  port :b => [:toffoli, :b]
-  port :zero => [:toffoli, :c]
-  port [:toffoli, :a_out] => :a_out
-  port [:toffoli, :b_out] => :b_out
-  port [:toffoli, :c_out] => :result
-end
-```
-
-### Reversible Full Adder
-
-```ruby
-class ReversibleFullAdder < SimComponent
-  input :a
-  input :b
-  input :cin
-  output :a_out       # Preserved (garbage)
-  output :b_out       # Preserved (garbage)
-  output :sum
-  output :cout
-
-  # Uses 4 Toffoli gates
-  instance :t1, ToffoliGate
-  instance :t2, ToffoliGate
-  instance :t3, ToffoliGate
-  instance :t4, ToffoliGate
-
-  wire :zero1, :zero2
-  wire :w1, :w2, :w3
-
-  behavior do
-    zero1 <= 0
-    zero2 <= 0
-  end
-
-  # T1: Compute a XOR b (using cin as target with 0)
-  port :a => [:t1, :a]
-  port :b => [:t1, :b]
-  port :zero1 => [:t1, :c]
-  port [:t1, :c_out] => :w1  # a XOR b
-
-  # T2: Compute (a XOR b) XOR cin = sum
-  port :w1 => [:t2, :a]
-  port :cin => [:t2, :b]
-  port :zero2 => [:t2, :c]
-  port [:t2, :c_out] => :sum
-
-  # T3: Compute (a XOR b) AND cin
-  port :w1 => [:t3, :a]
-  port :cin => [:t3, :b]
-  port :zero1 => [:t3, :c]
-  port [:t3, :c_out] => :w2
-
-  # T4: Compute a AND b, XOR with previous
-  port :a => [:t4, :a]
-  port :b => [:t4, :b]
-  port :w2 => [:t4, :c]
-  port [:t4, :c_out] => :cout
-
-  # Garbage outputs
-  port :a => :a_out
-  port :b => :b_out
-end
-```
+> See [Appendix H](appendix-h-reversible.md) for complete RHDL implementations of all reversible gates and circuits.
 
 ## The Garbage Problem
 
@@ -447,56 +340,6 @@ As we approach 10⁻²¹ J/op, reversible computing becomes necessary, not optio
 │   (dissipated)        (recoverable)     │
 │                                         │
 └─────────────────────────────────────────┘
-```
-
-## RHDL Reversible Circuit Patterns
-
-### Reversible Swap
-
-```ruby
-class ReversibleSwap < SimComponent
-  input :a
-  input :b
-  output :a_out  # Will contain original b
-  output :b_out  # Will contain original a
-
-  # Three CNOTs implement SWAP reversibly
-  wire :w1, :w2
-
-  behavior do
-    # CNOT 1: a XOR b
-    w1 = a ^ b
-    # CNOT 2: b XOR (a XOR b) = a
-    w2 = b ^ w1  # w2 = a
-    # CNOT 3: (a XOR b) XOR a = b
-    a_out <= w1 ^ w2
-    b_out <= w2
-  end
-end
-```
-
-### Reversible Comparator
-
-```ruby
-class ReversibleComparator < SimComponent
-  input :a, width: 8
-  input :b, width: 8
-  output :a_out, width: 8    # Preserved
-  output :b_out, width: 8    # Preserved
-  output :a_gt_b             # Result: a > b
-  output :a_eq_b             # Result: a == b
-
-  behavior do
-    # Preserve inputs
-    a_out <= a
-    b_out <= b
-
-    # Comparison (these erase information, so not fully reversible)
-    # Full reversibility would need auxiliary bits
-    a_gt_b <= (a > b) ? 1 : 0
-    a_eq_b <= (a == b) ? 1 : 0
-  end
-end
 ```
 
 ## Hands-On Exercises
