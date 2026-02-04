@@ -12,30 +12,30 @@ What if, instead of cutting a wafer into hundreds of small chips, you kept the *
 Traditional Approach:
 ┌─────────────────────────────────────────────────────────────┐
 │  ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐   │
-│  │GPU│ │GPU│ │GPU│ │GPU│ │GPU│ │GPU│ │GPU│ │GPU│ │GPU│   │
+│  │Die│ │Die│ │Die│ │Die│ │Die│ │Die│ │Die│ │Die│ │Die│   │
 │  └───┘ └───┘ └───┘ └───┘ └───┘ └───┘ └───┘ └───┘ └───┘   │
 │  ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐   │
-│  │GPU│ │GPU│ │GPU│ │GPU│ │GPU│ │GPU│ │GPU│ │GPU│ │GPU│   │
+│  │Die│ │Die│ │Die│ │Die│ │Die│ │Die│ │Die│ │Die│ │Die│   │
 │  └───┘ └───┘ └───┘ └───┘ └───┘ └───┘ └───┘ └───┘ └───┘   │
 │        Cut into individual chips, package separately        │
 └─────────────────────────────────────────────────────────────┘
 
-Cerebras Approach:
+Wafer-Scale Approach:
 ┌─────────────────────────────────────────────────────────────┐
 │                                                             │
 │                    ONE GIANT CHIP                           │
 │                                                             │
-│     850,000 cores connected by on-chip network              │
+│     Hundreds of thousands of cores on single wafer          │
 │                                                             │
-│     40 GB SRAM (no external memory!)                        │
+│     Massive on-chip SRAM (no external memory!)              │
 │                                                             │
-│     220 Pb/s interconnect bandwidth                         │
+│     Petabytes/s of interconnect bandwidth                   │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
          Don't cut it. Use the whole wafer.
 ```
 
-This is the **Cerebras Wafer Scale Engine (WSE)**—the largest chip ever built.
+This is **wafer-scale integration (WSI)**—building the largest possible chips by using an entire silicon wafer as a single device.
 
 ---
 
@@ -43,56 +43,56 @@ This is the **Cerebras Wafer Scale Engine (WSE)**—the largest chip ever built.
 
 ### The Memory Wall
 
-Modern AI is bottlenecked by memory bandwidth, not compute:
+Modern AI workloads are bottlenecked by memory bandwidth, not compute:
 
 ```
-GPU Architecture:
+Traditional Architecture:
 ┌────────────────┐
-│     GPU        │
+│   Processor    │
 │   (compute)    │◄──────┐
 └────────────────┘       │
         ▲                │  Memory bandwidth
         │                │  bottleneck!
 ┌───────┴────────┐       │
-│   HBM Memory   │───────┘
-│    (off-chip)  │
+│   DRAM/HBM     │───────┘
+│   (off-chip)   │
 └────────────────┘
 
 Time breakdown for large models:
-  Compute:     10%
-  Waiting for memory: 90%  ◄── The problem!
+  Compute:              10%
+  Waiting for memory:   90%  ◄── The problem!
 ```
 
 ### The Communication Wall
 
-Multi-GPU training has another bottleneck:
+Multi-chip systems have another bottleneck:
 
 ```
-Multi-GPU Cluster:
+Multi-Chip Cluster:
 ┌─────┐   ┌─────┐   ┌─────┐   ┌─────┐
-│GPU 0│   │GPU 1│   │GPU 2│   │GPU 3│
+│Chip0│   │Chip1│   │Chip2│   │Chip3│
 └──┬──┘   └──┬──┘   └──┬──┘   └──┬──┘
    │         │         │         │
-═══╧═════════╧═════════╧═════════╧═══  NVLink/PCIe
+═══╧═════════╧═════════╧═════════╧═══  PCIe/NVLink
                                        (relatively slow)
 
-Synchronization overhead:
-  - AllReduce across GPUs: milliseconds
-  - On-chip communication: nanoseconds
-  - Ratio: ~1,000,000× slower!
+Communication latency comparison:
+  - Cross-chip: microseconds
+  - On-chip: nanoseconds
+  - Ratio: ~1,000× slower!
 ```
 
-### Cerebras Solution: Everything On-Chip
+### Wafer-Scale Solution: Everything On-Chip
 
 ```
-Cerebras WSE:
+Wafer-Scale Processor:
 ┌─────────────────────────────────────────────────────────────┐
 │                                                             │
-│   40 GB SRAM distributed across 850K cores                  │
+│   Massive SRAM distributed across cores                     │
 │                                                             │
-│   Memory bandwidth: 20 PB/s (vs ~3 TB/s for top GPU)       │
+│   Memory bandwidth: 10-20+ PB/s (vs ~TB/s for packages)    │
 │                                                             │
-│   No external memory access needed for most models!         │
+│   All communication is on-chip!                             │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 
@@ -101,24 +101,90 @@ Result: Memory bandwidth is NOT the bottleneck
 
 ---
 
-## WSE Architecture
+## Architectural Challenges
 
-### The Numbers (WSE-2)
+### 1. Manufacturing Defects
 
-| Specification | WSE-2 | For Comparison (A100) |
-|---------------|-------|----------------------|
-| Transistors | 2.6 trillion | 54 billion |
-| Cores | 850,000 | 6,912 CUDA cores |
-| On-chip SRAM | 40 GB | 40 MB |
-| Memory bandwidth | 20 PB/s | 2 TB/s |
-| Interconnect | 220 Pb/s | ~600 GB/s NVLink |
-| Die size | 46,225 mm² | 826 mm² |
-| Process | 7nm TSMC | 7nm TSMC |
-| TDP | 15-23 kW | 400W |
+No wafer is perfect. A 300mm wafer will have defects:
 
-### Tile-Based Architecture
+```
+┌─────────────────────────────────────┐
+│  ●  ○  ○  ○  ○  ○  ○  ○  ○  ○  ●   │
+│  ○  ○  ○  ○  ●  ○  ○  ○  ○  ○  ○   │
+│  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○   │
+│  ○  ○  ○  ●  ○  ○  ○  ○  ○  ○  ○   │
+│  ○  ○  ○  ○  ○  ○  ○  ●  ○  ○  ○   │
+│  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○  ○   │
+│  ○  ●  ○  ○  ○  ○  ○  ○  ○  ○  ○   │
+└─────────────────────────────────────┘
+        ● = defective area
+        ○ = working area
 
-The WSE is built from repeated **tiles**, each containing:
+Traditional: discard dies with defects
+Wafer-scale: must work AROUND defects
+```
+
+**Solutions:**
+- Redundant rows/columns of processing elements
+- Configurable routing to bypass defective units
+- Graceful degradation (partial functionality)
+
+### 2. Power Delivery
+
+A wafer-scale chip may consume 15-30+ kW:
+
+```
+Power Challenges:
+┌─────────────────────────────────────┐
+│                                     │
+│   Current: 1000s of amps           │
+│   Voltage drop across wafer        │
+│   IR drop = big problem            │
+│                                     │
+└─────────────────────────────────────┘
+
+Solutions:
+  - Multiple power connections around perimeter
+  - On-chip voltage regulation
+  - Careful power grid design
+  - Advanced packaging with dense power delivery
+```
+
+### 3. Heat Dissipation
+
+```
+Heat Density Challenge:
+┌─────────────────────────────────────┐
+│   ████████████████████████████████  │
+│   ████████████████████████████████  │  All this
+│   ████████████████████████████████  │  generates
+│   ████████████████████████████████  │  HEAT
+│   ████████████████████████████████  │
+└─────────────────────────────────────┘
+         ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+
+Solutions:
+  - Advanced liquid cooling
+  - Water-cooled cold plates
+  - Thermal paste and heat spreaders
+  - Careful activity spreading across wafer
+```
+
+### 4. Testing and Yield
+
+```
+Test Challenge:
+  - Can't test before dicing
+  - Must test on-wafer or post-assembly
+  - Need built-in self-test (BIST)
+  - Scan chains must work around defects
+```
+
+---
+
+## Tile-Based Architecture
+
+Wafer-scale designs use a regular **tiled** structure:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -126,10 +192,11 @@ The WSE is built from repeated **tiles**, each containing:
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │                 PROCESSING ELEMENT                   │    │
 │  │  ┌─────────┐  ┌─────────────────┐  ┌─────────────┐  │    │
-│  │  │ Tensor  │  │    48 KB        │  │   Router    │  │    │
+│  │  │ Compute │  │    Local        │  │   Router    │  │    │
 │  │  │ Core    │  │    SRAM         │  │             │  │    │
 │  │  │         │  │                 │  │  N S E W   │  │    │
-│  │  │ FMAC    │  │  (local memory) │  │             │  │    │
+│  │  │ ALU/FPU │  │  (weights,      │  │             │  │    │
+│  │  │         │  │   activations)  │  │             │  │    │
 │  │  └─────────┘  └─────────────────┘  └──┬──┬──┬──┬─┘  │    │
 │  │       │              │                │  │  │  │    │    │
 │  │       └──────────────┴────────────────┘  │  │  │    │    │
@@ -140,16 +207,26 @@ The WSE is built from repeated **tiles**, each containing:
                                     To neighboring tiles
 ```
 
-Each tile:
-- **Tensor Core**: Optimized for ML operations (matrix multiply, activation)
-- **48 KB SRAM**: Local memory for weights and activations
-- **Router**: 5-port crossbar (N, S, E, W, Local)
+Each tile contains:
+- **Compute core**: Optimized for target workload (ML, HPC, etc.)
+- **Local SRAM**: Memory distributed to avoid bottleneck
+- **Router**: Connects to neighboring tiles
+
+### Why Tiled Design?
+
+1. **Regularity**: Design once, replicate many times
+2. **Scalability**: Add more tiles for more compute
+3. **Defect tolerance**: Replace bad tiles with spares
+4. **Predictable timing**: Uniform structure simplifies design
+5. **Easier verification**: Verify one tile, trust replication
 
 ---
 
-## The Network-on-Chip
+## Network-on-Chip (NoC)
 
 ### 2D Mesh Topology
+
+The most common wafer-scale network topology:
 
 ```
 ┌─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┐
@@ -170,7 +247,7 @@ PE = Processing Element (core + SRAM + router)
 
 ### Router Architecture
 
-Each router is a 5×5 crossbar with input buffering:
+Each router is typically a 5×5 crossbar:
 
 ```
                     From North
@@ -228,24 +305,22 @@ Hops: 6
 
 ## Dataflow Execution Model
 
-### Static Dataflow
-
-Unlike GPUs (which schedule threads), Cerebras uses **static dataflow**:
+Wafer-scale architectures naturally support **dataflow execution**:
 
 ```
-Traditional (GPU):
+Traditional (von Neumann):
   Program counter advances through instructions
   Data fetched from memory as needed
 
-Cerebras (Dataflow):
-  Data flows through a graph of operations
+Wafer-Scale (Dataflow):
+  Data flows through a grid of processing elements
   Each PE executes when inputs arrive
   No program counter—execution is data-driven
 ```
 
-### Layer-by-Layer Mapping
+### Spatial Mapping
 
-A neural network maps directly to the physical fabric:
+Neural networks map directly to the physical fabric:
 
 ```
 Neural Network:                Physical Layout:
@@ -270,7 +345,7 @@ Data flows spatially through the chip!
 
 ### Pipelining
 
-With dataflow, the entire network processes simultaneously:
+With spatial mapping, the entire network processes simultaneously:
 
 ```
 Time →
@@ -293,7 +368,7 @@ After warmup: one output per cycle!
 
 ## Handling Defects
 
-A wafer this large *will* have defects. Cerebras handles them with redundancy:
+A wafer this large *will* have defects. Solutions:
 
 ### Spare Rows and Columns
 
@@ -328,108 +403,59 @@ If B is defective:
 
 ---
 
-## Comparison with GPU Clusters
+## Historical Context
 
-### Single Large Model
+### Early Attempts
 
-```
-Task: Train GPT-3 (175B parameters)
+| Year | Project | Outcome |
+|------|---------|---------|
+| 1980s | Trilogy Systems | Failed (yield, cooling) |
+| 1989 | Anamartic | Limited success |
+| 1990s | Various research | Incremental progress |
 
-GPU Cluster (1000 A100s):
-  - Model split across GPUs (tensor/pipeline parallelism)
-  - Communication: NVLink + InfiniBand
-  - Synchronization overhead: significant
-  - Utilization: ~30-50% typical
+**Why early attempts failed:**
+- Insufficient defect handling
+- Heat dissipation challenges
+- Packaging technology limitations
+- No compelling application
 
-Cerebras CS-2:
-  - Model fits in 40GB on-chip (for many models)
-  - Communication: on-chip fabric (nanoseconds)
-  - No external synchronization
-  - Utilization: 80-90%+ for suitable workloads
-```
+### Modern Success Factors
 
-### When Cerebras Excels
+What changed to enable modern wafer-scale computing:
 
-| Workload | Cerebras Advantage |
-|----------|-------------------|
+1. **Better defect handling** - Redundancy and routing around faults
+2. **Advanced cooling** - Liquid cooling capable of 15+ kW
+3. **NoC maturity** - Decades of research into on-chip networks
+4. **AI workloads** - Ideal fit for dataflow and spatial computing
+5. **Advanced packaging** - Better power delivery and heat removal
+
+> See [Chapter 28 - The Cerebras WSE](28-cerebras.md) for a detailed case study of modern wafer-scale implementation.
+
+---
+
+## When Wafer-Scale Excels
+
+| Workload | Wafer-Scale Advantage |
+|----------|----------------------|
 | Large sparse models | On-chip memory hides latency |
 | Low-batch inference | No batching needed for throughput |
-| Models that fit in 40GB | Zero memory bandwidth bottleneck |
-| Research iteration | Fast compile, quick experiments |
+| Models that fit in on-chip SRAM | Zero external memory bottleneck |
+| Communication-heavy workloads | On-chip fabric is 1000× faster |
 
-### When GPUs Win
+### When Traditional Approaches Win
 
-| Workload | GPU Advantage |
-|----------|--------------|
-| Models > 40GB | External memory capacity |
-| Dense batch training | High arithmetic intensity |
-| Multi-tenant serving | Better cost sharing |
-| General compute | Broader software ecosystem |
-
----
-
-## Software Stack
-
-### Compilation Flow
-
-```
-┌─────────────────┐
-│  PyTorch/TF    │  User writes standard framework code
-│    Model        │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│   Graph         │  Extract computation graph
-│   Extraction    │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│   Placement     │  Map operations to tiles
-│   & Routing     │  Route data between tiles
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│   Code Gen      │  Generate per-tile programs
-│                 │  Configure routers
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│   WSE Binary    │  Load onto hardware
-└─────────────────┘
-```
-
-### Programming Model
-
-Users don't program routers directly—the compiler handles placement:
-
-```python
-# User code (PyTorch)
-class MyModel(nn.Module):
-    def __init__(self):
-        self.layer1 = nn.Linear(1024, 2048)
-        self.layer2 = nn.Linear(2048, 1024)
-
-    def forward(self, x):
-        x = F.relu(self.layer1(x))
-        x = self.layer2(x)
-        return x
-
-# Cerebras compiler automatically:
-# 1. Partitions layers across tiles
-# 2. Places weights in local SRAM
-# 3. Routes activations between layers
-# 4. Generates router configurations
-```
+| Workload | Traditional Advantage |
+|----------|----------------------|
+| Models larger than on-chip SRAM | External memory capacity |
+| Highly optimized dense workloads | Mature software ecosystem |
+| Multi-tenant/shared systems | Better resource sharing |
+| Cost-sensitive deployments | Lower capital expense |
 
 ---
 
-## NoC Design Lessons
+## NoC Design Principles
 
-What makes the WSE network work at this scale?
+What makes wafer-scale networks work at extreme scale?
 
 ### 1. Regularity
 
@@ -438,7 +464,7 @@ Every tile is identical:
   Same PE, same router, same connections
 
 Benefits:
-  - Design once, replicate 850K times
+  - Design once, replicate N times
   - Predictable timing
   - Easy to verify
   - Manufacturing yield (defects are local)
@@ -464,7 +490,7 @@ XY routing is deterministic:
   - No deadlock possible
   - Predictable latency
 
-Simplicity enables 850K routers!
+Simplicity enables massive scale!
 ```
 
 ### 4. Flow Control
@@ -479,32 +505,12 @@ Credit-based flow control:
 
 ---
 
-## Historical Context
-
-### Wafer-Scale Integration Attempts
-
-| Year | Project | Outcome |
-|------|---------|---------|
-| 1980s | Trilogy Systems | Failed (yield, heat) |
-| 1989 | Anamartic | Limited success |
-| 2019 | Cerebras WSE-1 | First successful large-scale |
-| 2021 | Cerebras WSE-2 | 2.6T transistors |
-| 2024 | Cerebras WSE-3 | 4T transistors, 44GB |
-
-What changed?
-- Better defect handling (redundancy)
-- Advanced cooling (water-cooled, 15kW+)
-- NoC maturity (decades of research)
-- AI workloads (ideal fit for dataflow)
-
----
-
 ## RHDL Implementation
 
 See [Appendix J](appendix-j-wafer-scale.md) for complete implementations:
 
 ```ruby
-# Cerebras-style mesh router
+# Wafer-scale mesh router
 class MeshRouter < SimComponent
   parameter :data_width, default: 256
   parameter :num_vcs, default: 4      # Virtual channels
@@ -530,12 +536,12 @@ end
 ## Summary
 
 - **Wafer-scale**: Don't cut the wafer—use it all
-- **850K cores**: Each with 48KB SRAM and a router
+- **Hundreds of thousands of cores**: Each with local SRAM and a router
 - **2D mesh NoC**: Simple, scalable, deterministic
-- **Dataflow execution**: Data flows through the network
-- **40GB on-chip**: No external memory bottleneck
-- **220 Pb/s bandwidth**: Orders of magnitude beyond GPUs
-- **Static mapping**: Compiler places neural network layers
+- **Dataflow execution**: Data flows through the network spatially
+- **Massive on-chip memory**: No external memory bottleneck
+- **Petabytes/s bandwidth**: Orders of magnitude beyond packaged chips
+- **Static mapping**: Compiler places workload across tiles
 - **Defect tolerance**: Spare rows/columns, configurable routing
 - **Ideal for AI**: Large sparse models, low-latency inference
 
@@ -546,20 +552,21 @@ end
 1. Calculate the hop count for a packet traveling corner-to-corner on a 1000×1000 mesh
 2. Implement XY routing decision logic in RHDL
 3. Design a credit-based flow control mechanism
-4. Compare bandwidth: 850K tiles × local links vs. GPU memory bus
-5. Analyze why sparse models benefit from Cerebras architecture
+4. Compare bandwidth: N tiles × local links vs. external memory bus
+5. Analyze why sparse models benefit from wafer-scale architecture
 
 ---
 
 ## Further Reading
 
-- Cerebras, "Cerebras Architecture White Paper" (2019)
-- Lie et al., "Cerebras: An Architecture for Accelerating Deep Learning" (Hot Chips 2019)
 - Dally & Towles, "Principles and Practices of Interconnection Networks" (2003)
-- "Wafer-Scale Integration" IEEE JSSC retrospective
+- IEEE JSSC retrospective on Wafer-Scale Integration
+- Research papers on Networks-on-Chip design
 
 ---
 
-*Previous: [Chapter 09 - GPU Architecture](09-gpu-architecture.md)
+*Previous: [Chapter 09 - GPU Architecture](09-gpu-architecture.md)*
 
-*Appendix: [Appendix J - Cerebras Implementation](appendix-j-wafer-scale.md)*
+*Next: [Chapter 11 - Vector Processing](11-vector-processing.md)*
+
+*Appendix: [Appendix J - Wafer-Scale Implementation](appendix-j-wafer-scale.md)*

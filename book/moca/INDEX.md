@@ -20,11 +20,11 @@
 
 ### Part III: Dataflow and Spatial Architectures
 
-- [07 - Dataflow Computation](07-dataflow-computation.md) - Data-driven execution, Groq's deterministic dataflow, token machines
+- [07 - Dataflow Computation](07-dataflow-computation.md) - Data-driven execution, token machines, and deterministic pipelines
 - [08 - Systolic Arrays](08-systolic-arrays.md) - Regular structures, matrix operations, and modern AI accelerators
 - [09 - GPU Architecture](09-gpu-architecture.md) - SIMD/SIMT execution, streaming multiprocessors, and massively parallel computing
-- [10 - Wafer-Scale Computing](10-wafer-scale.md) - Cerebras WSE: 850K cores, 2D mesh NoC, dataflow at extreme scale
-- [11 - Vector Processing](11-vector-processing.md) - SIMD with vector registers: the Cray way
+- [10 - Wafer-Scale Computing](10-wafer-scale.md) - Using entire wafers: 2D mesh NoC, dataflow at extreme scale
+- [11 - Vector Processing](11-vector-processing.md) - SIMD with vector registers: pipelining, chaining, and memory banking
 
 ### Part IV: Beyond Classical Computing
 
@@ -49,6 +49,9 @@
 - [24 - The Google TPU v1](24-tpu.md) - A 256x256 systolic array for neural network inference
 - [25 - The RISC-V RV32I](25-riscv.md) - The open ISA: clean design, modular extensions, and modern RISC
 - [26 - The Transputer](26-transputer.md) - CSP in hardware: message passing, links, and occam
+- [27 - The Groq LPU](27-groq.md) - Deterministic dataflow for AI inference: time as the program counter
+- [28 - The Cerebras WSE](28-cerebras.md) - The largest chip ever built: 850K cores on a single wafer
+- [29 - The Cray-1](29-cray1.md) - The supercomputer that defined vector processing
 
 ---
 
@@ -103,7 +106,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 |                    (operand stack)  (von Neumann)            |
 |                                                              |
 |   Spatial:   Dataflow - Systolic - GPU - Wafer-Scale - Vector|
-|             (Groq)    (regular) (SIMT) (Cerebras)   (Cray)   |
+|             (tokens)  (regular)  (SIMT) (mesh)      (SIMD)   |
 |                  |         |       |        |          |     |
 |                  +---------+-------+--------+----------+     |
 |                                |                             |
@@ -125,8 +128,10 @@ Each appendix provides complete RHDL implementations and formal details for its 
 |                                                              |
 +-------------------------------------------------------------+
 |                                                              |
-|   Case Studies:    6502 (CISC) | VideoCore (GPU) | TPU (ML)  |
+|   Case Studies:    6502 (8-bit) | VideoCore (GPU) | TPU (ML) |
 |                    RISC-V (open ISA) | Transputer (CSP)      |
+|                    Groq (dataflow) | Cerebras (wafer-scale)  |
+|                    Cray-1 (vector)                           |
 |                                                              |
 +-------------------------------------------------------------+
 ```
@@ -148,6 +153,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 11. **Hardware can be software** - FPGAs bridge the gap between flexibility and performance
 12. **Scale changes everything** - Wafer-scale integration enables new architectural possibilities
 13. **Vectors unlock throughput** - Single instruction, multiple data paths
+14. **Determinism enables efficiency** - Static scheduling maximizes utilization
 
 ---
 
@@ -165,7 +171,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 08 | Systolic Arrays | H | Systolic Patterns |
 | 09 | GPU Architecture | I | GPU Implementation |
 | 10 | Wafer-Scale Computing | J | Wafer-Scale/NoC Implementation |
-| 11 | Vector Processing | K | Vector/Cray Implementation |
+| 11 | Vector Processing | K | Vector Implementation |
 | 12 | Stochastic Computing | L | Stochastic Implementation |
 | 13 | Reversible Computation | M | Reversible Gates |
 | 14 | Quantum Computing | N | Quantum Circuits |
@@ -181,6 +187,11 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 24 | The Google TPU v1 | X | TPU Implementation |
 | 25 | The RISC-V RV32I | Y | RISC-V Implementation |
 | 26 | The Transputer | Z | Transputer Implementation |
+| 27 | The Groq LPU | G | (see Dataflow appendix) |
+| 28 | The Cerebras WSE | J | (see Wafer-Scale appendix) |
+| 29 | The Cray-1 | K | (see Vector appendix) |
+
+*Note: Chapters 27-29 share appendices with their corresponding paradigm chapters (07, 10, 11), as they are case studies of those architectures.*
 
 ---
 
