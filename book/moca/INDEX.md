@@ -26,8 +26,8 @@
 
 ### Part III: Sequential Architectures
 
-- [10 - Stack Machines](10-stack-machines.md) - Forth, JVM, and the simplest computer architecture
-- [11 - Register Machines](11-register-machines.md) - The von Neumann architecture that dominates modern computing
+- [10 - Register Machines](10-register-machines.md) - The von Neumann architecture that dominates modern computing
+- [11 - Stack Machines](11-stack-machines.md) - Forth, JVM, and the simplest computer architecture
 - [12 - Asynchronous Computing](12-asynchronous-computing.md) - Clockless circuits: self-timed logic, bundled-data vs dual-rail, handshakes, and GALS
 - [13 - Modern CPU Architectures](13-modern-cpu-architectures.md) - Pipelining, superscalar execution, out-of-order, and speculation
 
@@ -73,8 +73,8 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix E - Ada Lovelace's Program](appendix-e-ada-lovelace.md) - The first program, before hardware existed
 - [Appendix F - Cellular Automata](appendix-f-cellular-automata.md) - Rule 110, Game of Life, and emergent computation
 - [Appendix G - Analog Simulation](appendix-g-analog.md) - Ruby simulation of op-amps, ODEs, and analog neural networks
-- [Appendix H - Stack Machine ISA](appendix-h-stack-machine.md) - Complete Forth-like instruction set with RHDL implementation
-- [Appendix I - Register Machine ISA](appendix-i-register-machine.md) - Complete 8-bit instruction set with RHDL CPU
+- [Appendix H - Register Machine ISA](appendix-h-register-machine.md) - Complete 8-bit instruction set with RHDL CPU
+- [Appendix I - Stack Machine ISA](appendix-i-stack-machine.md) - Complete Forth-like instruction set with RHDL implementation
 - [Appendix J - Asynchronous Implementation](appendix-j-asynchronous.md) - C-elements, dual-rail logic, and self-timed circuits in RHDL
 - [Appendix K - Modern CPU Implementation](appendix-k-modern-cpu.md) - Pipelines, superscalar, reorder buffers, and Tomasulo's algorithm in RHDL
 - [Appendix L - Message Passing Implementation](appendix-l-message-passing.md) - Channels, routers, and MPI-style primitives in RHDL
@@ -111,8 +111,8 @@ Each appendix provides complete RHDL implementations and formal details for its 
 |                                                              |
 +-------------------------------------------------------------+
 |                                                              |
-|   Sequential:   Stack ---- Register ---- Async ---- Modern CPUs |
-|                (Forth)  (von Neumann)  (clockless)  (pipeline/OoO)|
+|   Sequential:   Register ---- Stack ---- Async ---- Modern CPUs |
+|                (von Neumann)  (Forth)  (clockless)  (pipeline/OoO)|
 |                                                              |
 |   Parallel:    Message Passing --- DSM/NUMA --- GPU/Vector   |
 |                (MPI, actors)     (coherence)   (SIMD/SIMT)   |
@@ -180,8 +180,8 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 07 | Mechanical Computation | E | Ada Lovelace's Program |
 | 08 | Biological Computation | F | Cellular Automata |
 | 09 | Analog Computing | G | Analog Simulation (Ruby) |
-| 10 | Stack Machines | H | Stack Machine ISA |
-| 11 | Register Machines | I | Register Machine ISA |
+| 10 | Register Machines | H | Register Machine ISA |
+| 11 | Stack Machines | I | Stack Machine ISA |
 | 12 | Asynchronous Computing | J | Asynchronous Implementation |
 | 13 | Modern CPU Architectures | K | Modern CPU Implementation |
 | 14 | Message Passing Systems | L | Message Passing Implementation |
