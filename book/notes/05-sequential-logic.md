@@ -1,4 +1,4 @@
-# Chapter 4: Sequential Logic
+# Chapter 5: Sequential Logic
 
 ## Overview
 

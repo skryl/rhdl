@@ -1,4 +1,4 @@
-# Chapter 2: Digital Logic Fundamentals
+# Chapter 3: Digital Logic Fundamentals
 
 ## Overview
 

@@ -1,4 +1,4 @@
-# Chapter 7: Building a CPU
+# Chapter 8: Building a CPU
 
 ## Overview
 

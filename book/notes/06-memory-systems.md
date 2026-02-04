@@ -1,4 +1,4 @@
-# Chapter 5: Memory Systems
+# Chapter 6: Memory Systems
 
 ## Overview
 

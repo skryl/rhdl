@@ -1,4 +1,4 @@
-# Chapter 6: Computer Architecture Basics
+# Chapter 7: Computer Architecture Basics
 
 ## Overview
 

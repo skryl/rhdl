@@ -1,4 +1,4 @@
-# Chapter 1: Thinking in Hardware
+# Chapter 2: Thinking in Hardware
 
 ## Overview
 

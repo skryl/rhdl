@@ -1,4 +1,4 @@
-# Chapter 3: Combinational Logic
+# Chapter 4: Combinational Logic
 
 ## Overview
 

@@ -1,4 +1,4 @@
-# Chapter 10: Synthesis and Implementation
+# Chapter 11: Synthesis and Implementation
 
 ## Overview
 
