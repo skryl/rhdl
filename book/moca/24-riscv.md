@@ -1,4 +1,4 @@
-# Chapter 22: RISC-V RV32I
+# Chapter 24: RISC-V RV32I
 
 *The open instruction set architecture reshaping computing*
 
@@ -357,7 +357,7 @@ beq  x1, x2, target  # Compare AND branch
 
 ## RHDL Implementation
 
-See [Appendix V](appendix-v-riscv.md) for complete implementation:
+See [Appendix X](appendix-x-riscv.md) for complete implementation:
 
 ```ruby
 # RV32I instruction decoder
@@ -419,4 +419,4 @@ end
 
 *Next: [Chapter 23 - The Transputer](23-transputer.md)*
 
-*Appendix: [Appendix V - RISC-V Implementation](appendix-v-riscv.md)*
+*Appendix: [Appendix X - RISC-V Implementation](appendix-x-riscv.md)*

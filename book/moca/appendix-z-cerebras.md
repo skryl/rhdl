@@ -1,4 +1,4 @@
-# Appendix X: Cerebras Implementation
+# Appendix Z: Cerebras Implementation
 
 *Network-on-Chip components in RHDL*
 
@@ -967,4 +967,4 @@ RHDL simulation:
 
 ---
 
-*Back to [Chapter 24 - Cerebras](24-cerebras.md)*
+*Back to [Chapter 26 - Cerebras](26-cerebras.md)*

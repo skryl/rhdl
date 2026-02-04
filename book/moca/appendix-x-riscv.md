@@ -1,6 +1,6 @@
-# Appendix V: RISC-V Implementation
+# Appendix X: RISC-V Implementation
 
-*Companion appendix to [Chapter 22: RISC-V RV32I](22-riscv.md)*
+*Companion appendix to [Chapter 24: RISC-V RV32I](24-riscv.md)*
 
 ## Overview
 
@@ -1301,4 +1301,4 @@ end
 - "The RISC-V Reader" by Patterson & Waterman
 - PicoRV32 reference implementation
 
-> Return to [Chapter 22](22-riscv.md) for conceptual introduction.
+> Return to [Chapter 24](24-riscv.md) for conceptual introduction.

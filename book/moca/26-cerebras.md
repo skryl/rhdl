@@ -1,4 +1,4 @@
-# Chapter 24: Case Study - Cerebras WSE
+# Chapter 26: Case Study - Cerebras WSE
 
 *Network-on-Chip at wafer scale*
 
@@ -501,7 +501,7 @@ What changed?
 
 ## RHDL Implementation
 
-See [Appendix X](appendix-x-cerebras.md) for complete implementations:
+See [Appendix Z](appendix-z-cerebras.md) for complete implementations:
 
 ```ruby
 # Cerebras-style mesh router
@@ -560,6 +560,6 @@ end
 
 ---
 
-*Previous: [Chapter 23 - Transputer](23-transputer.md)*
+*Previous: [Chapter 23 - Transputer](25-transputer.md)*
 
-*Appendix: [Appendix X - Cerebras Implementation](appendix-x-cerebras.md)*
+*Appendix: [Appendix Z - Cerebras Implementation](appendix-z-cerebras.md)*

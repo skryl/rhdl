@@ -1,4 +1,4 @@
-# Chapter 23: Case Study - Transputer
+# Chapter 25: Case Study - Transputer
 
 *Hardware-native message passing*
 
@@ -681,7 +681,7 @@ Scaling:
 
 ## RHDL Implementation
 
-See [Appendix W](appendix-w-transputer.md) for complete implementations:
+See [Appendix Y](appendix-y-transputer.md) for complete implementations:
 
 ```ruby
 # Transputer link engine
@@ -739,6 +739,6 @@ end
 
 ---
 
-*Previous: [Chapter 22 - RISC-V RV32I](22-riscv.md)*
+*Previous: [Chapter 22 - RISC-V RV32I](24-riscv.md)*
 
-*Appendix: [Appendix W - Transputer Implementation](appendix-w-transputer.md)*
+*Appendix: [Appendix Y - Transputer Implementation](appendix-y-transputer.md)*

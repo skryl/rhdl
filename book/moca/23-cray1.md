@@ -1,4 +1,4 @@
-# Chapter 21: The Cray-1
+# Chapter 23: The Cray-1
 
 *The world's first supercomputer: vector processing at its finest*
 
@@ -337,7 +337,7 @@ The Cray-1's philosophy—same operation on many data elements—remains central
 
 ## RHDL Implementation
 
-See [Appendix U](appendix-u-cray1.md) for complete implementation:
+See [Appendix W](appendix-w-cray1.md) for complete implementation:
 
 ```ruby
 # Simplified Cray-1 vector register file
@@ -390,4 +390,4 @@ end
 
 *Next: [Chapter 22 - RISC-V RV32I](22-riscv.md)*
 
-*Appendix: [Appendix U - Cray-1 Implementation](appendix-u-cray1.md)*
+*Appendix: [Appendix W - Cray-1 Implementation](appendix-w-cray1.md)*

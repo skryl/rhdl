@@ -467,6 +467,6 @@ See [Appendix P](appendix-p-reconfigurable.md) for LUT-based implementations.
 
 ---
 
-*Next: [Chapter 17 - The MOS 6502](17-mos6502.md)*
+*Next: [Chapter 19 - The MOS 6502](17-mos6502.md)*
 
 *Appendix: [Appendix P - FPGA Implementation](appendix-p-reconfigurable.md)*
