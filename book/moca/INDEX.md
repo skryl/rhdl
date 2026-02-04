@@ -13,7 +13,7 @@
 - [03 - Mechanical Computation](03-mechanical-computation.md) - Babbage, Ada Lovelace, Zuse, and relay computers
 - [04 - Biological Computation](04-biological-computation.md) - DNA computing, neurons as gates, cellular automata
 
-### Part II: Stack and Register Machines
+### Part II: Sequential Architectures
 
 - [05 - Stack Machines](05-stack-machines.md) - Forth, JVM, and the simplest computer architecture
 - [06 - Register Machines](06-register-machines.md) - The von Neumann architecture that dominates modern computing
