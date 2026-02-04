@@ -5,7 +5,5 @@
 
 module RHDL
   module Examples
-    # Autoload example modules
-    autoload :MOS6502, 'rhdl/examples/mos6502'
   end
 end
