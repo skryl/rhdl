@@ -468,6 +468,219 @@ S: A more complex routing circuit
 
 This suggests a minimal universal computing element.
 
+### RHDL: Church Booleans as Hardware
+
+The deepest connection between lambda calculus and hardware is this:
+
+**Church booleans ARE multiplexers.**
+
+```
+TRUE  = λx.λy.x    -- Select first input
+FALSE = λx.λy.y    -- Select second input
+```
+
+A multiplexer does exactly this: given a selector and two inputs, output one of them.
+
+```ruby
+# Church Booleans implemented in hardware
+# This demonstrates that lambda calculus selection = mux selection
+
+class ChurchBooleanALU < SimComponent
+  # Inputs
+  input :a, width: 8           # First operand
+  input :b, width: 8           # Second operand
+  input :sel                   # Selector (TRUE=1, FALSE=0)
+
+  # Operation select
+  input :op, width: 2          # 00=IF, 01=AND, 10=OR, 11=NOT
+
+  output :result, width: 8
+
+  # Internal wires for each operation
+  wire :if_result, width: 8
+  wire :and_result, width: 8
+  wire :or_result, width: 8
+  wire :not_result, width: 8
+
+  behavior do
+    # IF sel THEN a ELSE b
+    # Church: sel a b
+    # TRUE a b  = (λx.λy.x) a b = a
+    # FALSE a b = (λx.λy.y) a b = b
+    # Hardware: mux with sel choosing between a and b
+    if_result <= sel == 1 ? a : b
+
+    # AND a b = a b FALSE
+    # If a is TRUE:  TRUE b FALSE  = b
+    # If a is FALSE: FALSE b FALSE = FALSE
+    # Hardware: mux with a choosing between b and 0
+    and_result <= a[0] == 1 ? b : 0
+
+    # OR a b = a TRUE b
+    # If a is TRUE:  TRUE TRUE b  = TRUE (0xFF for 8-bit)
+    # If a is FALSE: FALSE TRUE b = b
+    # Hardware: mux with a choosing between 0xFF and b
+    or_result <= a[0] == 1 ? 0xFF : b
+
+    # NOT a = a FALSE TRUE
+    # If a is TRUE:  TRUE FALSE TRUE  = FALSE
+    # If a is FALSE: FALSE FALSE TRUE = TRUE
+    # Hardware: mux with a choosing between 0 and 0xFF
+    not_result <= a[0] == 1 ? 0 : 0xFF
+
+    # Final output mux (also a Church-style selection!)
+    case op
+    when 0 then result <= if_result
+    when 1 then result <= and_result
+    when 2 then result <= or_result
+    when 3 then result <= not_result
+    end
+  end
+end
+```
+
+**The insight:** Every `case`/`if` in hardware is a Church boolean application. When you write:
+
+```ruby
+result <= condition ? value_if_true : value_if_false
+```
+
+You're implementing:
+
+```
+condition value_if_true value_if_false
+```
+
+Where `condition` behaves like TRUE (λx.λy.x) or FALSE (λx.λy.y).
+
+### Church Numerals as Iteration Hardware
+
+Church numerals represent numbers as repeated application. In hardware, this corresponds to **chained operations**:
+
+```ruby
+# Church numeral hardware: apply an operation N times
+# N = λf.λx. f(f(f(...f(x)...)))  -- f applied N times
+
+class ChurchIterator < SimComponent
+  input :clk
+  input :reset
+  input :start
+  input :n, width: 4           # How many times to apply (0-15)
+  input :x, width: 8           # Initial value
+  input :f_select, width: 2    # Which function: 00=inc, 01=double, 10=square
+
+  output :result, width: 8
+  output :done
+
+  wire :count, width: 4
+  wire :acc, width: 8          # Accumulator
+  wire :state, width: 2
+
+  IDLE = 0
+  RUN  = 1
+  DONE_STATE = 2
+
+  behavior do
+    if reset == 1
+      state <= IDLE
+      done <= 0
+    elsif rising_edge(clk)
+      case state
+      when IDLE
+        if start == 1
+          acc <= x
+          count <= n
+          state <= RUN
+          done <= 0
+        end
+
+      when RUN
+        if count == 0
+          state <= DONE_STATE
+        else
+          # Apply f once: acc <= f(acc)
+          case f_select
+          when 0 then acc <= acc + 1      # Successor
+          when 1 then acc <= acc << 1     # Double
+          when 2 then acc <= acc * acc    # Square (simplified)
+          end
+          count <= count - 1
+        end
+
+      when DONE_STATE
+        result <= acc
+        done <= 1
+        if start == 0
+          state <= IDLE
+          done <= 0
+        end
+      end
+    end
+  end
+end
+
+# Usage:
+# n=3, x=1, f=successor → 1+1+1+1 = 4 (Church 3 applied to succ and 1)
+# n=3, x=2, f=double    → 2*2*2*2 = 16
+# n=2, x=2, f=square    → (2²)² = 16
+```
+
+**Church numeral 3** is λf.λx.f(f(f(x))) — apply f three times.
+
+In hardware:
+- `n` is the Church numeral (as a binary number for practicality)
+- `f` is the operation to apply
+- `x` is the initial value
+- The state machine applies f exactly n times
+
+This is how loops work in hardware: a counter controlling repeated application of combinational logic.
+
+### The Y Combinator and Feedback
+
+The Y combinator enables recursion: `Y f = f (Y f)`.
+
+In hardware, recursion manifests as **feedback loops**:
+
+```ruby
+# Y combinator as hardware feedback
+# The output feeds back to become part of the input
+
+class FeedbackCounter < SimComponent
+  input :clk
+  input :reset
+  input :enable
+
+  output :count, width: 8
+
+  # This register IS the fixed point
+  # count_next = f(count) where f = λx.(x+1)
+  # The register "finds" the fixed point through time
+
+  wire :count_reg, width: 8
+
+  behavior do
+    if reset == 1
+      count_reg <= 0
+    elsif rising_edge(clk) && enable == 1
+      # Y combinator: the output becomes the input
+      # count_reg <= f(count_reg)
+      count_reg <= count_reg + 1
+    end
+
+    count <= count_reg
+  end
+end
+```
+
+The register creates a temporal fixed point: at each clock, the output equals the function applied to the previous output. This is exactly what Y does, unrolled through time.
+
+```
+Lambda:   Y f = f (f (f (f ...)))     -- infinite tower
+Hardware: reg → f → reg → f → reg    -- same tower, one step per clock
+```
+
+**Key insight:** Sequential hardware (registers + combinational logic) is lambda calculus with the Y combinator built into the clocking mechanism.
+
 ## Exercises
 
 ### Exercise 1: Evaluate by Hand
