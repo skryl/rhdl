@@ -473,7 +473,6 @@ module RHDL
         output = String.new
 
         width = @double_hires ? DHIRES_WIDTH : HIRES_WIDTH
-        x_scale = width.to_f / chars_wide
 
         # Process 2 rows at a time (upper/lower half blocks)
         (HIRES_HEIGHT / 2).times do |char_row|
@@ -481,9 +480,17 @@ module RHDL
           lower_row = char_row * 2 + 1
 
           chars_wide.times do |char_col|
-            # Sample pixel at this position
-            px = (char_col * x_scale).to_i
-            px = [px, width - 1].min
+            # Map each terminal column to an input pixel range.
+            # When downscaling (e.g. 280px -> 140 chars), always sampling the first pixel
+            # biases the Apple II artifact phase and can drop warm colors (orange/green).
+            x_start = (char_col * width) / chars_wide
+            x_end = (((char_col + 1) * width) / chars_wide) - 1
+            x_end = [x_end, width - 1].min
+            x_end = x_start if x_end < x_start
+
+            # Choose a stable sample within the range that alternates phases across columns.
+            range_len = x_end - x_start + 1
+            px = x_start + (char_col % range_len)
 
             upper_color = color_bitmap[upper_row][px]
             lower_color = color_bitmap[lower_row][px]
