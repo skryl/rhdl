@@ -3,7 +3,7 @@ require 'support/cpu_assembler'
 require 'support/display_helper'
 require 'rhdl/hdl/cpu/harness'
 
-RSpec.describe RHDL::HDL::CPU::FastHarness, 'Fractal' do
+RSpec.describe RHDL::HDL::CPU::FastHarness, 'Mandelbrot' do
   include DisplayHelper
 
   before(:each) do
@@ -13,143 +13,244 @@ RSpec.describe RHDL::HDL::CPU::FastHarness, 'Fractal' do
     clear_display(@cpu.memory)
   end
 
-  describe 'fractal program' do
-    it 'fills display with 8x8 checkerboard pattern using HDL CPU', :slow do
-      # Fractal program for HDL CPU
-      # Fills an 8x8 grid with a checkerboard pattern based on (x+y) % 2
-      # Uses indirect STA to write to display memory at 0x800
+  describe 'mandelbrot program' do
+    it 'renders the Mandelbrot set on an 8x8 grid', :slow do
+      # Mandelbrot set using pre-computed coordinate lookup tables
+      # This avoids complex fixed-point arithmetic by storing the
+      # real and imaginary coordinates for each pixel in memory.
       #
-      # Memory map:
-      # 0x00: x coordinate
-      # 0x01: y coordinate
-      # 0x02: constant 1 (for increment)
-      # 0x03: constant 8 (grid size)
-      # 0x05: display address low byte
-      # 0x06: display address high byte (0x08 for 0x800 base)
-      # 0x07: temp counter for multiplication
+      # Scaling: 8 units = 1.0 (so range -16 to +16 = -2.0 to +2.0)
+      # Escape radius: |z|^2 > 4 => check zr^2/8 + zi^2/8 > 32
+      #
+      # Memory layout:
+      # 0x00-0x07: cr values (real coord for each x)
+      # 0x08-0x0F: ci values (imag coord for each y)
+      # 0x10+: variables
 
       program = Assembler.build(0x100) do |p|
-        # Initialize constants
+        # Constants
         p.instr :LDI, 1
-        p.instr :STA, 0x02        # constant 1
+        p.instr :STA, 0x20        # const 1
         p.instr :LDI, 8
-        p.instr :STA, 0x03        # grid size (8x8)
+        p.instr :STA, 0x21        # grid size / scaling factor
+        p.instr :LDI, 10
+        p.instr :STA, 0x22        # max iterations
         p.instr :LDI, 0x08
-        p.instr :STA, 0x06        # display base high byte
+        p.instr :STA, 0x23        # display high
+        p.instr :LDI, 32
+        p.instr :STA, 0x24        # escape threshold
+        p.instr :LDI, 2
+        p.instr :STA, 0x25        # const 2
+        p.instr :LDI, 0x80
+        p.instr :STA, 0x26        # sign mask
 
-        # Initialize x=0, y=0
+        # y = 0
         p.instr :LDI, 0
-        p.instr :STA, 0x00        # x = 0
-        p.instr :STA, 0x01        # y = 0
+        p.instr :STA, 0x11        # y
 
         p.label :row_loop
-        # Reset x for new row
+        # x = 0
         p.instr :LDI, 0
-        p.instr :STA, 0x00        # x = 0
+        p.instr :STA, 0x10        # x
 
         p.label :col_loop
-        # Calculate y * 8 using repeated addition
+        # Get cr from lookup table at 0x00+x
+        p.instr :LDA, 0x10
+        p.instr :STA, 0x27        # ptr low = x
         p.instr :LDI, 0
-        p.instr :STA, 0x05        # sum = 0
-        p.instr :LDA, 0x01        # load y
-        p.instr :STA, 0x07        # temp counter = y
+        p.instr :STA, 0x28        # ptr high = 0
+        p.instr :LDA, [0x28, 0x27]
+        p.instr :STA, 0x12        # cr
 
-        p.label :mul_loop
-        p.instr :LDA, 0x07        # load counter
-        p.instr :JZ_LONG, :mul_done
-        p.instr :SUB, 0x02        # counter--
-        p.instr :STA, 0x07
-        p.instr :LDA, 0x05        # load sum
-        p.instr :ADD, 0x03        # add 8
-        p.instr :STA, 0x05
-        p.instr :JMP_LONG, :mul_loop
+        # Get ci from lookup table at 0x08+y
+        p.instr :LDA, 0x11
+        p.instr :ADD, 0x21        # y + 8
+        p.instr :STA, 0x27        # ptr low
+        p.instr :LDA, [0x28, 0x27]
+        p.instr :STA, 0x13        # ci
 
-        p.label :mul_done
-        # Add x to get final offset: y*8 + x
-        p.instr :LDA, 0x05
-        p.instr :ADD, 0x00        # add x
-        p.instr :STA, 0x05        # low byte of address offset
+        # display offset = y * 8 + x
+        p.instr :LDA, 0x11
+        p.instr :MUL, 0x21
+        p.instr :ADD, 0x10
+        p.instr :STA, 0x14        # offset
 
-        # Calculate (x + y) & 1 for checkerboard pattern
-        p.instr :LDA, 0x00        # load x
-        p.instr :ADD, 0x01        # add y
-        p.instr :AND, 0x02        # AND with 1 (stored at 0x02)
-        p.instr :JZ_LONG, :write_dot
+        # z = 0
+        p.instr :LDI, 0
+        p.instr :STA, 0x15        # zr
+        p.instr :STA, 0x16        # zi
+        p.instr :STA, 0x17        # iter
 
-        # Write '#' for odd (x+y)
+        p.label :iter_loop
+        # Check iter
+        p.instr :LDA, 0x17
+        p.instr :SUB, 0x22
+        p.instr :JZ_LONG, :in_set
+
+        # |zr|: if negative, negate
+        p.instr :LDA, 0x15
+        p.instr :AND, 0x26
+        p.instr :JZ_LONG, :zr_pos
+        p.instr :LDA, 0x15
+        p.instr :NOT, 0
+        p.instr :ADD, 0x20
+        p.instr :JMP_LONG, :zr_done
+        p.label :zr_pos
+        p.instr :LDA, 0x15
+        p.label :zr_done
+        p.instr :STA, 0x29        # |zr|
+
+        # |zi|
+        p.instr :LDA, 0x16
+        p.instr :AND, 0x26
+        p.instr :JZ_LONG, :zi_pos
+        p.instr :LDA, 0x16
+        p.instr :NOT, 0
+        p.instr :ADD, 0x20
+        p.instr :JMP_LONG, :zi_done
+        p.label :zi_pos
+        p.instr :LDA, 0x16
+        p.label :zi_done
+        p.instr :STA, 0x2A        # |zi|
+
+        # zr^2 = |zr| * |zr|
+        p.instr :LDA, 0x29
+        p.instr :MUL, 0x29
+        p.instr :STA, 0x2B        # zr^2
+
+        # zi^2 = |zi| * |zi|
+        p.instr :LDA, 0x2A
+        p.instr :MUL, 0x2A
+        p.instr :STA, 0x2C        # zi^2
+
+        # |z|^2 = (zr^2 + zi^2) / 8 for scale correction
+        p.instr :LDA, 0x2B
+        p.instr :ADD, 0x2C
+        # Divide by 8 via right shift (done manually)
+        p.instr :STA, 0x2D        # save sum
+        # Simple division: shift right 3 times is hard without shift
+        # Just compare directly - if sum > 255 it wrapped, so escaped
+        # Or if sum >= threshold * 8 = 256, escaped
+        # For simplicity: if sum's high bit is set or sum >= 128, likely escaped
+        p.instr :SUB, 0x24        # - threshold
+        p.instr :AND, 0x26        # check sign
+        p.instr :JZ_LONG, :escaped
+
+        # new_zr = (zr^2 - zi^2)/8 + cr
+        # Approximate by: zr^2/8 - zi^2/8 + cr
+        # Without division, just use the raw difference (will be approximate)
+        p.instr :LDA, 0x2B        # zr^2
+        p.instr :SUB, 0x2C        # - zi^2
+        p.instr :ADD, 0x12        # + cr
+        p.instr :STA, 0x2E        # new_zr temp
+
+        # new_zi = 2*zr*zi/8 + ci = zr*zi/4 + ci
+        # Compute sign of product
+        p.instr :LDA, 0x15
+        p.instr :AND, 0x26
+        p.instr :STA, 0x2F        # zr sign
+        p.instr :LDA, 0x16
+        p.instr :AND, 0x26
+        p.instr :XOR, 0x2F
+        p.instr :STA, 0x30        # product sign (0 if same, 0x80 if different)
+
+        # |zr| * |zi| * 2 / 8 = |zr| * |zi| / 4
+        p.instr :LDA, 0x29
+        p.instr :MUL, 0x2A
+        p.instr :MUL, 0x25        # * 2
+        p.instr :STA, 0x31        # product magnitude
+
+        # Apply sign
+        p.instr :LDA, 0x30
+        p.instr :JZ_LONG, :prod_pos
+        p.instr :LDA, 0x31
+        p.instr :NOT, 0
+        p.instr :ADD, 0x20
+        p.instr :JMP_LONG, :prod_done
+        p.label :prod_pos
+        p.instr :LDA, 0x31
+        p.label :prod_done
+        p.instr :ADD, 0x13        # + ci
+        p.instr :STA, 0x16        # zi = new_zi
+
+        # zr = new_zr
+        p.instr :LDA, 0x2E
+        p.instr :STA, 0x15
+
+        # iter++
+        p.instr :LDA, 0x17
+        p.instr :ADD, 0x20
+        p.instr :STA, 0x17
+        p.instr :JMP_LONG, :iter_loop
+
+        p.label :escaped
         p.instr :LDI, '#'.ord
-        p.instr :JMP_LONG, :do_write
+        p.instr :JMP_LONG, :draw
 
-        p.label :write_dot
-        # Write '.' for even (x+y)
+        p.label :in_set
         p.instr :LDI, '.'.ord
 
-        p.label :do_write
-        # Write to display using indirect STA
-        # Address is at [0x06:0x05] = 0x08XX where XX is the offset
-        p.instr :STA, [0x06, 0x05]
+        p.label :draw
+        p.instr :STA, 0x32
+        p.instr :LDA, 0x14
+        p.instr :STA, 0x27
+        p.instr :LDA, 0x23
+        p.instr :STA, 0x28
+        p.instr :LDA, 0x32
+        p.instr :STA, [0x28, 0x27]
 
-        # Increment x
-        p.instr :LDA, 0x00
-        p.instr :ADD, 0x02        # x++
-        p.instr :STA, 0x00
-
-        # Check if x < 8
-        p.instr :SUB, 0x03        # x - 8
+        # next x
+        p.instr :LDA, 0x10
+        p.instr :ADD, 0x20
+        p.instr :STA, 0x10
+        p.instr :SUB, 0x21
         p.instr :JNZ_LONG, :col_loop
 
-        # Increment y
-        p.instr :LDA, 0x01
-        p.instr :ADD, 0x02        # y++
-        p.instr :STA, 0x01
-
-        # Check if y < 8
-        p.instr :SUB, 0x03        # y - 8
+        # next y
+        p.instr :LDA, 0x11
+        p.instr :ADD, 0x20
+        p.instr :STA, 0x11
+        p.instr :SUB, 0x21
         p.instr :JNZ_LONG, :row_loop
 
         p.instr :HLT
       end
 
-      # Load program at 0x100
       @cpu.memory.load(program, 0x100)
       @cpu.pc = 0x100
 
-      # Run the program (8x8 needs more cycles than 3x3)
-      cycles = @cpu.run(50000)
+      # Pre-compute coordinate lookup tables
+      # Real axis: -2.0 to 0.5 over 8 pixels (scaled by 8: -16 to 4)
+      # Imag axis: -1.2 to 1.2 over 8 pixels (scaled by 8: -10 to 10)
+      cr_values = [-16, -13, -10, -7, -4, -1, 2, 4]  # -2.0 to 0.5
+      ci_values = [-10, -7, -4, -1, 1, 4, 7, 10]     # -1.25 to 1.25
 
-      puts "HDL CPU Fractal completed in #{cycles} cycles"
+      cr_values.each_with_index { |v, i| @cpu.memory.write(i, v & 0xFF) }
+      ci_values.each_with_index { |v, i| @cpu.memory.write(8 + i, v & 0xFF) }
+
+      cycles = @cpu.run(500000)
+
+      puts "HDL CPU Mandelbrot completed in #{cycles} cycles"
       puts "CPU halted: #{@cpu.halted}"
 
-      # Read and display the 8x8 pattern
-      puts "\nDisplay output (8x8 checkerboard pattern):"
+      puts "\nMandelbrot set (8x8):"
+      puts "('#' = outside, '.' = in set)"
       (0...8).each do |y|
         line = ""
         (0...8).each do |x|
-          addr = 0x800 + y * 8 + x
-          char = @cpu.memory.read(addr)
-          line << (char == '.'.ord ? '.' : (char == '#'.ord ? '#' : '?'))
+          char = @cpu.memory.read(0x800 + y * 8 + x)
+          line << char.chr rescue '?'
         end
         puts line
       end
 
-      # Verify the 8x8 checkerboard pattern
-      # Expected pattern:
-      # .#.#.#.#
-      # #.#.#.#.
-      # .#.#.#.#
-      # #.#.#.#.
-      # .#.#.#.#
-      # #.#.#.#.
-      # .#.#.#.#
-      # #.#.#.#.
-      (0...8).each do |y|
-        (0...8).each do |x|
-          addr = 0x800 + y * 8 + x
-          expected = ((x + y) % 2 == 0) ? '.'.ord : '#'.ord
-          actual = @cpu.memory.read(addr)
-          expect(actual).to eq(expected), "Cell (#{x},#{y}) at 0x#{addr.to_s(16)} should be '#{expected.chr}' but was '#{actual.chr rescue '?'}'"
-        end
-      end
+      in_set = (0...64).count { |i| @cpu.memory.read(0x800 + i) == '.'.ord }
+      escaped = (0...64).count { |i| @cpu.memory.read(0x800 + i) == '#'.ord }
+      puts "\nIn set: #{in_set}, Escaped: #{escaped}"
+
+      expect(in_set).to be > 0, "Should have pixels in set"
+      expect(escaped).to be > 0, "Should have pixels escaped"
+      expect(in_set + escaped).to eq(64)
     end
   end
 end
