@@ -345,21 +345,21 @@ task default: :spec
 
 namespace :native do
   desc "Build the native ISA simulator Rust extension"
-  task :build do
+  task :build, [:target] do |_t, args|
     load_cli_tasks
-    RHDL::CLI::Tasks::NativeTask.new(build: true).run
+    RHDL::CLI::Tasks::NativeTask.new(build: true, target: args[:target]).run
   end
 
   desc "Clean native extension build artifacts"
-  task :clean do
+  task :clean, [:target] do |_t, args|
     load_cli_tasks
-    RHDL::CLI::Tasks::NativeTask.new(clean: true).run
+    RHDL::CLI::Tasks::NativeTask.new(clean: true, target: args[:target]).run
   end
 
   desc "Check if native extension is available"
-  task :check do
+  task :check, [:target] do |_t, args|
     load_cli_tasks
-    RHDL::CLI::Tasks::NativeTask.new(check: true).run
+    RHDL::CLI::Tasks::NativeTask.new(check: true, target: args[:target]).run
   end
 end
 
