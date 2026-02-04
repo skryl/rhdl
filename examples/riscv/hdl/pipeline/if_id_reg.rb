@@ -5,9 +5,11 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module RISCV
-  module Pipeline
-    class IF_ID_Reg < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module RISCV
+      module Pipeline
+        class IF_ID_Reg < RHDL::HDL::SequentialComponent
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
@@ -42,6 +44,8 @@ module RISCV
                          mux(stall, pc_plus4_out, pc_plus4_in))
       end
 
+        end
+      end
     end
   end
 end

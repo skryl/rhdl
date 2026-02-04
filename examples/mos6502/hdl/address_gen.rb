@@ -8,6 +8,10 @@ require_relative '../../../lib/rhdl'
 require_relative 'address_gen/address_generator'
 require_relative 'address_gen/indirect_address_calc'
 
-module MOS6502
-  # Module is populated by the required files
+module RHDL
+  module Examples
+    module MOS6502
+      # Module is populated by the required files
+    end
+  end
 end

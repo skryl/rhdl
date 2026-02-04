@@ -6,7 +6,7 @@ require_relative '../../../../examples/apple2/hdl/ram'
 require_relative '../../../support/vhdl_reference_helper'
 require_relative '../../../support/hdl_toolchain'
 
-RSpec.describe RHDL::Apple2::RAM do
+RSpec.describe RHDL::Examples::Apple2::RAM do
   extend VhdlReferenceHelper
   let(:ram) { described_class.new('ram') }
 
@@ -341,7 +341,7 @@ RSpec.describe RHDL::Apple2::RAM do
   end
 end
 
-RSpec.describe RHDL::Apple2::DualPortRAM do
+RSpec.describe RHDL::Examples::Apple2::DualPortRAM do
   let(:dpram) { described_class.new('dpram') }
 
   before do

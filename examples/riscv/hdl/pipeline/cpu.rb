@@ -24,9 +24,11 @@ require_relative 'mem_wb_reg'
 require_relative 'hazard_unit'
 require_relative 'forwarding_unit'
 
-module RISCV
-  module Pipeline
-    class CPU < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module RISCV
+      module Pipeline
+        class CPU < RHDL::HDL::SequentialComponent
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
@@ -221,17 +223,17 @@ module RISCV
       # see the current instruction, not the previous one.
       # ========================================
       # Pipeline registers first (output instruction/data for this stage)
-      instance :pc_reg, RISCV::ProgramCounter
+      instance :pc_reg, ProgramCounter
       instance :if_id, IF_ID_Reg
       instance :id_ex, ID_EX_Reg
       instance :ex_mem, EX_MEM_Reg
       instance :mem_wb, MEM_WB_Reg
 
       # Combinational components (depend on pipeline register outputs)
-      instance :decoder, RISCV::Decoder
-      instance :imm_gen, RISCV::ImmGen
-      instance :regfile, RISCV::RegisterFile, forwarding: true
-      instance :alu, RISCV::ALU
+      instance :decoder, Decoder
+      instance :imm_gen, ImmGen
+      instance :regfile, RegisterFile, forwarding: true
+      instance :alu, ALU
       # Note: branch_cond logic is computed inline in behavior block
       # to ensure it uses properly forwarded values
       instance :hazard_unit, HazardUnit
@@ -600,6 +602,8 @@ module RISCV
       def self.to_verilog(top_name: nil)
         name = top_name || verilog_module_name
         RHDL::Export::Verilog.generate(to_ir(top_name: name))
+      end
+        end
       end
     end
   end

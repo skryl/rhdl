@@ -13,8 +13,10 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module MOS6502
-  class StatusRegister < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module MOS6502
+      class StatusRegister < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -104,5 +106,7 @@ module MOS6502
     # Test helper accessor (use DSL state management)
     def read_p; read_reg(:p) || 0x24; end
 
+    end
   end
+end
 end

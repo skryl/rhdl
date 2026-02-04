@@ -9,8 +9,10 @@
 require_relative '../apple2/harness'
 require_relative 'isa_runner'
 
-module MOS6502
-  class HeadlessRunner
+module RHDL
+  module Examples
+    module MOS6502
+      class HeadlessRunner
     attr_reader :runner, :mode, :sim_backend
 
     # Create a headless runner with the specified options
@@ -24,16 +26,16 @@ module MOS6502
       @runner = case mode
                 when :isa
                   # ISA mode ignores --sim option
-                  Apple2Harness::ISARunner.new
+                  RHDL::Examples::MOS6502::Apple2Harness::ISARunner.new
                 when :hdl
                   # HDL mode uses IR-based simulators
                   require_relative 'ir_runner'
-                  IRSimulatorRunner.new(sim)
+                  RHDL::Examples::MOS6502::IRSimulatorRunner.new(sim)
                 when :netlist
                   raise "Netlist mode not yet implemented for MOS6502"
                 when :verilog
                   require_relative 'verilator_runner'
-                  RHDL::MOS6502::VerilatorRunner.new
+                  RHDL::Examples::MOS6502::VerilatorRunner.new
                 else
                   raise "Unknown mode: #{mode}. Valid modes: isa, hdl, netlist, verilog"
                 end
@@ -60,6 +62,9 @@ module MOS6502
     def setup_reset_vector(addr)
       if @runner.respond_to?(:set_reset_vector)
         @runner.set_reset_vector(addr)
+      elsif @runner.respond_to?(:write_memory)
+        @runner.write_memory(0xFFFC, addr & 0xFF)
+        @runner.write_memory(0xFFFD, (addr >> 8) & 0xFF)
       else
         @runner.bus.write(0xFFFC, addr & 0xFF)
         @runner.bus.write(0xFFFD, (addr >> 8) & 0xFF)
@@ -122,13 +127,20 @@ module MOS6502
 
     # Get memory sample for verification
     def memory_sample
-      bus = @runner.bus
+      # Use read_memory if available (handles native vs non-native mode)
+      # Otherwise fall back to bus.read
+      read_fn = if @runner.respond_to?(:read_memory)
+                  ->(addr) { @runner.read_memory(addr) }
+                else
+                  ->(addr) { @runner.bus.read(addr) }
+                end
+
       {
-        zero_page: (0...256).map { |i| bus.read(i) },
-        stack: (0...256).map { |i| bus.read(0x0100 + i) },
-        text_page: (0...1024).map { |i| bus.read(0x0400 + i) },
-        program_area: (0...256).map { |i| bus.read(0x0800 + i) },
-        reset_vector: [bus.read(0xFFFC), bus.read(0xFFFD)]
+        zero_page: (0...256).map { |i| read_fn.call(i) },
+        stack: (0...256).map { |i| read_fn.call(0x0100 + i) },
+        text_page: (0...1024).map { |i| read_fn.call(0x0400 + i) },
+        program_area: (0...256).map { |i| read_fn.call(0x0800 + i) },
+        reset_vector: [read_fn.call(0xFFFC), read_fn.call(0xFFFD)]
       }
     end
 
@@ -158,6 +170,54 @@ module MOS6502
       runner.load_program_bytes(demo, base_addr: 0x0800)
       runner.setup_reset_vector(0x0800)
       runner
+    end
+
+    # Read a byte from memory
+    def read(addr)
+      if @runner.respond_to?(:read_memory)
+        @runner.read_memory(addr)
+      else
+        @runner.bus.read(addr)
+      end
+    end
+
+    # Paths for Karateka resources
+    KARATEKA_ROM_PATH = File.expand_path('../../software/roms/appleiigo.rom', __dir__)
+    KARATEKA_MEM_PATH = File.expand_path('../../software/disks/karateka_mem.bin', __dir__)
+
+    # Check if Karateka resources are available
+    def self.karateka_available?
+      File.exist?(KARATEKA_ROM_PATH) && File.exist?(KARATEKA_MEM_PATH)
+    end
+
+    # Check if verilator is available
+    def self.verilator_available?
+      ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
+        File.executable?(File.join(path, 'verilator'))
+      end
+    end
+
+    # Create a headless runner with Karateka loaded (from memory dump)
+    # This loads the game state from a memory dump, bypassing disk I/O
+    def self.with_karateka(mode: :isa, sim: :jit)
+      raise "Karateka ROM not found at #{KARATEKA_ROM_PATH}" unless File.exist?(KARATEKA_ROM_PATH)
+      raise "Karateka memory dump not found at #{KARATEKA_MEM_PATH}" unless File.exist?(KARATEKA_MEM_PATH)
+
+      runner = new(mode: mode, sim: sim)
+
+      # Load ROM with modified reset vector pointing to game entry point ($B82A)
+      rom_data = File.binread(KARATEKA_ROM_PATH).bytes
+      rom_data[0x2FFC] = 0x2A  # low byte of $B82A
+      rom_data[0x2FFD] = 0xB8  # high byte of $B82A
+      runner.load_rom(rom_data, base_addr: 0xD000)
+
+      # Load Karateka memory dump
+      mem_data = File.binread(KARATEKA_MEM_PATH).bytes
+      runner.load_program_bytes(mem_data.first(48 * 1024), base_addr: 0x0000)
+
+      runner
+    end
+      end
     end
   end
 end

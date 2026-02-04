@@ -12,7 +12,7 @@ require 'spec_helper'
 # - DAC enable/disable logic
 # - Output generation
 
-RSpec.describe 'GameBoy::ChannelSquare' do
+RSpec.describe 'RHDL::Examples::GameBoy::ChannelSquare' do
   before(:all) do
     begin
       require_relative '../../../../../examples/gameboy/gameboy'
@@ -56,7 +56,7 @@ RSpec.describe 'GameBoy::ChannelSquare' do
   end
 
   describe 'ChannelSquare without sweep (channel 2)' do
-    let(:channel) { GameBoy::ChannelSquare.new('ch2', has_sweep: false) }
+    let(:channel) { RHDL::Examples::GameBoy::ChannelSquare.new('ch2', has_sweep: false) }
 
     before do
       # Initialize default inputs
@@ -152,7 +152,7 @@ RSpec.describe 'GameBoy::ChannelSquare' do
   end
 
   describe 'ChannelSquare with sweep (channel 1)' do
-    let(:channel) { GameBoy::ChannelSquare.new('ch1', has_sweep: true) }
+    let(:channel) { RHDL::Examples::GameBoy::ChannelSquare.new('ch1', has_sweep: true) }
 
     before do
       channel.set_input(:ce, 1)
@@ -168,7 +168,7 @@ RSpec.describe 'GameBoy::ChannelSquare' do
     end
 
     it 'creates channel with sweep capability' do
-      expect(channel).to be_a(GameBoy::ChannelSquare)
+      expect(channel).to be_a(RHDL::Examples::GameBoy::ChannelSquare)
     end
 
     it 'accepts sweep_reg input' do
@@ -177,7 +177,7 @@ RSpec.describe 'GameBoy::ChannelSquare' do
   end
 
   describe 'duty cycle input handling' do
-    let(:channel) { GameBoy::ChannelSquare.new('ch_duty', has_sweep: false) }
+    let(:channel) { RHDL::Examples::GameBoy::ChannelSquare.new('ch_duty', has_sweep: false) }
 
     before do
       channel.set_input(:ce, 1)
@@ -219,7 +219,7 @@ RSpec.describe 'GameBoy::ChannelSquare' do
   end
 
   describe 'envelope input handling' do
-    let(:channel) { GameBoy::ChannelSquare.new('ch_env', has_sweep: false) }
+    let(:channel) { RHDL::Examples::GameBoy::ChannelSquare.new('ch_env', has_sweep: false) }
 
     before do
       channel.set_input(:ce, 1)
@@ -250,7 +250,7 @@ RSpec.describe 'GameBoy::ChannelSquare' do
   end
 
   describe 'frequency input handling' do
-    let(:channel) { GameBoy::ChannelSquare.new('ch_freq', has_sweep: false) }
+    let(:channel) { RHDL::Examples::GameBoy::ChannelSquare.new('ch_freq', has_sweep: false) }
 
     before do
       channel.set_input(:ce, 1)
@@ -282,7 +282,7 @@ RSpec.describe 'GameBoy::ChannelSquare' do
   end
 
   describe 'frame sequencer input handling' do
-    let(:channel) { GameBoy::ChannelSquare.new('ch_frame', has_sweep: false) }
+    let(:channel) { RHDL::Examples::GameBoy::ChannelSquare.new('ch_frame', has_sweep: false) }
 
     before do
       channel.set_input(:ce, 1)

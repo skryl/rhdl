@@ -10,8 +10,9 @@
 require 'rhdl/hdl'
 
 module RHDL
-  module Apple2
-    class RAM < RHDL::HDL::Component
+  module Examples
+    module Apple2
+      class RAM < RHDL::HDL::Component
       include RHDL::DSL::Memory
 
       # Parameters
@@ -106,5 +107,6 @@ module RHDL
         mem_write(:mem, effective_addr, data, 8)
       end
     end
+  end
   end
 end

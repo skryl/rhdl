@@ -124,29 +124,29 @@ RSpec.describe 'Headless Runners', :slow do
     end
   end
 
-  describe 'RHDL::Apple2::HeadlessRunner' do
+  describe 'RHDL::Examples::Apple2::HeadlessRunner' do
     describe 'HDL mode with Ruby backend (default)' do
       it 'creates HDL mode runner by default with demo' do
-        runner = RHDL::Apple2::HeadlessRunner.with_demo
+        runner = RHDL::Examples::Apple2::HeadlessRunner.with_demo
         expect(runner.mode).to eq(:hdl)
         expect(runner.backend).to eq(:ruby)
         expect(runner.simulator_type).to eq(:hdl_ruby)
       end
 
       it 'sets native flag to false for Ruby backend' do
-        runner = RHDL::Apple2::HeadlessRunner.with_demo
+        runner = RHDL::Examples::Apple2::HeadlessRunner.with_demo
         expect(runner.native?).to be false
       end
 
       it 'loads demo program into memory' do
-        runner = RHDL::Apple2::HeadlessRunner.with_demo
+        runner = RHDL::Examples::Apple2::HeadlessRunner.with_demo
         program_area = runner.memory_sample[:program_area]
         expect(program_area.any? { |b| b != 0 }).to be true
       end
 
       it 'loads binary file' do
         with_temp_program do |path|
-          runner = RHDL::Apple2::HeadlessRunner.new
+          runner = RHDL::Examples::Apple2::HeadlessRunner.new
           runner.load_program(path, base_addr: 0x0800)
           runner.setup_reset_vector(0x0800)
           program_area = runner.memory_sample[:program_area]
@@ -163,7 +163,7 @@ RSpec.describe 'Headless Runners', :slow do
       end
 
       it 'creates HDL mode runner with interpret backend' do
-        runner = RHDL::Apple2::HeadlessRunner.new(sim: :interpret)
+        runner = RHDL::Examples::Apple2::HeadlessRunner.new(sim: :interpret)
         expect(runner.mode).to eq(:hdl)
         expect(runner.backend).to eq(:interpret)
       end
@@ -175,7 +175,7 @@ RSpec.describe 'Headless Runners', :slow do
       end
 
       it 'creates HDL mode runner with jit backend' do
-        runner = RHDL::Apple2::HeadlessRunner.new(sim: :jit)
+        runner = RHDL::Examples::Apple2::HeadlessRunner.new(sim: :jit)
         expect(runner.mode).to eq(:hdl)
         expect(runner.backend).to eq(:jit)
       end
@@ -187,13 +187,13 @@ RSpec.describe 'Headless Runners', :slow do
       end
 
       it 'creates HDL mode runner with compile backend' do
-        runner = RHDL::Apple2::HeadlessRunner.new(sim: :compile)
+        runner = RHDL::Examples::Apple2::HeadlessRunner.new(sim: :compile)
         expect(runner.mode).to eq(:hdl)
         expect(runner.backend).to eq(:compile)
       end
 
       it 'respects sub-cycles option' do
-        runner = RHDL::Apple2::HeadlessRunner.new(sim: :compile, sub_cycles: 7)
+        runner = RHDL::Examples::Apple2::HeadlessRunner.new(sim: :compile, sub_cycles: 7)
         expect(runner.mode).to eq(:hdl)
         expect(runner.backend).to eq(:compile)
       end
@@ -205,14 +205,14 @@ RSpec.describe 'Headless Runners', :slow do
       end
 
       it 'creates netlist mode runner' do
-        runner = RHDL::Apple2::HeadlessRunner.new(mode: :netlist, sim: :interpret)
+        runner = RHDL::Examples::Apple2::HeadlessRunner.new(mode: :netlist, sim: :interpret)
         expect(runner.mode).to eq(:netlist)
       end
     end
 
     describe 'runner interface' do
       it 'returns all required fields' do
-        runner = RHDL::Apple2::HeadlessRunner.with_demo
+        runner = RHDL::Examples::Apple2::HeadlessRunner.with_demo
         expect(runner.mode).to eq(:hdl)
         expect(runner.simulator_type).to eq(:hdl_ruby)
         expect(runner.native?).to be false
@@ -222,7 +222,7 @@ RSpec.describe 'Headless Runners', :slow do
       end
 
       it 'returns cpu_state with all register fields' do
-        runner = RHDL::Apple2::HeadlessRunner.with_demo
+        runner = RHDL::Examples::Apple2::HeadlessRunner.with_demo
         cpu_state = runner.cpu_state
         expect(cpu_state).to have_key(:pc)
         expect(cpu_state).to have_key(:a)
@@ -236,7 +236,7 @@ RSpec.describe 'Headless Runners', :slow do
       end
 
       it 'returns memory_sample with all memory regions' do
-        runner = RHDL::Apple2::HeadlessRunner.with_demo
+        runner = RHDL::Examples::Apple2::HeadlessRunner.with_demo
         memory = runner.memory_sample
         expect(memory).to have_key(:zero_page)
         expect(memory).to have_key(:stack)
@@ -254,22 +254,22 @@ RSpec.describe 'Headless Runners', :slow do
     end
   end
 
-  describe 'RHDL::GameBoy::HeadlessRunner' do
+  describe 'RHDL::Examples::GameBoy::HeadlessRunner' do
     describe 'HDL mode with Ruby backend (default)' do
       it 'creates HDL mode runner by default' do
-        runner = RHDL::GameBoy::HeadlessRunner.new
+        runner = RHDL::Examples::GameBoy::HeadlessRunner.new
         expect(runner.mode).to eq(:hdl)
         expect(runner.backend).to eq(:ruby)
         expect(runner.simulator_type).to eq(:hdl_ruby)
       end
 
       it 'sets native flag to false for Ruby backend' do
-        runner = RHDL::GameBoy::HeadlessRunner.new
+        runner = RHDL::Examples::GameBoy::HeadlessRunner.new
         expect(runner.native?).to be false
       end
 
       it 'loads test ROM' do
-        runner = RHDL::GameBoy::HeadlessRunner.with_test_rom
+        runner = RHDL::Examples::GameBoy::HeadlessRunner.with_test_rom
         expect(runner.rom_size).to be > 0
       end
     end
@@ -280,7 +280,7 @@ RSpec.describe 'Headless Runners', :slow do
       end
 
       it 'creates HDL mode runner with interpret backend' do
-        runner = RHDL::GameBoy::HeadlessRunner.new(sim: :interpret)
+        runner = RHDL::Examples::GameBoy::HeadlessRunner.new(sim: :interpret)
         expect(runner.mode).to eq(:hdl)
         expect(runner.backend).to eq(:interpret)
       end
@@ -292,7 +292,7 @@ RSpec.describe 'Headless Runners', :slow do
       end
 
       it 'creates HDL mode runner with jit backend' do
-        runner = RHDL::GameBoy::HeadlessRunner.new(sim: :jit)
+        runner = RHDL::Examples::GameBoy::HeadlessRunner.new(sim: :jit)
         expect(runner.mode).to eq(:hdl)
         expect(runner.backend).to eq(:jit)
       end
@@ -304,7 +304,7 @@ RSpec.describe 'Headless Runners', :slow do
       end
 
       it 'creates HDL mode runner with compile backend' do
-        runner = RHDL::GameBoy::HeadlessRunner.new(sim: :compile)
+        runner = RHDL::Examples::GameBoy::HeadlessRunner.new(sim: :compile)
         expect(runner.mode).to eq(:hdl)
         expect(runner.backend).to eq(:compile)
       end
@@ -312,7 +312,7 @@ RSpec.describe 'Headless Runners', :slow do
 
     describe 'runner interface' do
       it 'returns all required fields' do
-        runner = RHDL::GameBoy::HeadlessRunner.with_test_rom
+        runner = RHDL::Examples::GameBoy::HeadlessRunner.with_test_rom
         expect(runner.mode).to eq(:hdl)
         expect(runner.simulator_type).to eq(:hdl_ruby)
         expect(runner.native?).to be false
@@ -321,7 +321,7 @@ RSpec.describe 'Headless Runners', :slow do
       end
 
       it 'returns cpu_state with all register fields' do
-        runner = RHDL::GameBoy::HeadlessRunner.with_test_rom
+        runner = RHDL::Examples::GameBoy::HeadlessRunner.with_test_rom
         cpu_state = runner.cpu_state
         expect(cpu_state).to have_key(:pc)
         expect(cpu_state).to have_key(:a)

@@ -2,7 +2,7 @@
 
 require_relative '../../spec_helper'
 
-RSpec.describe MOS6502::IndirectAddressCalc do
+RSpec.describe RHDL::Examples::MOS6502::IndirectAddressCalc do
   let(:calc) { described_class.new('test_iac') }
 
   describe 'simulation' do
@@ -15,7 +15,7 @@ RSpec.describe MOS6502::IndirectAddressCalc do
     end
 
     it 'computes indexed indirect (zp,X) pointer address' do
-      calc.set_input(:mode, MOS6502::AddressGenerator::MODE_INDEXED_IND)
+      calc.set_input(:mode, RHDL::Examples::MOS6502::AddressGenerator::MODE_INDEXED_IND)
       calc.set_input(:operand_lo, 0x40)
       calc.set_input(:x_reg, 0x10)
       calc.propagate
@@ -25,7 +25,7 @@ RSpec.describe MOS6502::IndirectAddressCalc do
     end
 
     it 'computes indirect indexed (zp),Y pointer address' do
-      calc.set_input(:mode, MOS6502::AddressGenerator::MODE_INDIRECT_IDX)
+      calc.set_input(:mode, RHDL::Examples::MOS6502::AddressGenerator::MODE_INDIRECT_IDX)
       calc.set_input(:operand_lo, 0x80)
       calc.propagate
 
@@ -34,7 +34,7 @@ RSpec.describe MOS6502::IndirectAddressCalc do
     end
 
     it 'wraps zero page addresses for indexed indirect' do
-      calc.set_input(:mode, MOS6502::AddressGenerator::MODE_INDEXED_IND)
+      calc.set_input(:mode, RHDL::Examples::MOS6502::AddressGenerator::MODE_INDEXED_IND)
       calc.set_input(:operand_lo, 0xF0)
       calc.set_input(:x_reg, 0x20)
       calc.propagate
@@ -80,22 +80,22 @@ RSpec.describe MOS6502::IndirectAddressCalc do
         outputs = { ptr_addr_lo: 8, ptr_addr_hi: 8 }
 
         # Test indexed indirect (zp,X)
-        behavior.set_input(:mode, MOS6502::AddressGenerator::MODE_INDEXED_IND)
+        behavior.set_input(:mode, RHDL::Examples::MOS6502::AddressGenerator::MODE_INDEXED_IND)
         behavior.set_input(:operand_lo, 0x40)
         behavior.set_input(:operand_hi, 0)
         behavior.set_input(:x_reg, 0x10)
         behavior.propagate
         vectors << {
-          inputs: { mode: MOS6502::AddressGenerator::MODE_INDEXED_IND, operand_lo: 0x40, operand_hi: 0, x_reg: 0x10 },
+          inputs: { mode: RHDL::Examples::MOS6502::AddressGenerator::MODE_INDEXED_IND, operand_lo: 0x40, operand_hi: 0, x_reg: 0x10 },
           expected: { ptr_addr_lo: behavior.get_output(:ptr_addr_lo), ptr_addr_hi: behavior.get_output(:ptr_addr_hi) }
         }
 
         # Test indirect indexed (zp),Y
-        behavior.set_input(:mode, MOS6502::AddressGenerator::MODE_INDIRECT_IDX)
+        behavior.set_input(:mode, RHDL::Examples::MOS6502::AddressGenerator::MODE_INDIRECT_IDX)
         behavior.set_input(:operand_lo, 0x80)
         behavior.propagate
         vectors << {
-          inputs: { mode: MOS6502::AddressGenerator::MODE_INDIRECT_IDX, operand_lo: 0x80, operand_hi: 0, x_reg: 0 },
+          inputs: { mode: RHDL::Examples::MOS6502::AddressGenerator::MODE_INDIRECT_IDX, operand_lo: 0x80, operand_hi: 0, x_reg: 0 },
           expected: { ptr_addr_lo: behavior.get_output(:ptr_addr_lo), ptr_addr_hi: behavior.get_output(:ptr_addr_hi) }
         }
 
@@ -145,22 +145,22 @@ RSpec.describe MOS6502::IndirectAddressCalc do
         vectors = []
 
         # Test indexed indirect (zp,X)
-        behavior.set_input(:mode, MOS6502::AddressGenerator::MODE_INDEXED_IND)
+        behavior.set_input(:mode, RHDL::Examples::MOS6502::AddressGenerator::MODE_INDEXED_IND)
         behavior.set_input(:operand_lo, 0x40)
         behavior.set_input(:operand_hi, 0)
         behavior.set_input(:x_reg, 0x10)
         behavior.propagate
         vectors << {
-          inputs: { mode: MOS6502::AddressGenerator::MODE_INDEXED_IND, operand_lo: 0x40, operand_hi: 0, x_reg: 0x10 },
+          inputs: { mode: RHDL::Examples::MOS6502::AddressGenerator::MODE_INDEXED_IND, operand_lo: 0x40, operand_hi: 0, x_reg: 0x10 },
           expected: { ptr_addr_lo: behavior.get_output(:ptr_addr_lo), ptr_addr_hi: behavior.get_output(:ptr_addr_hi) }
         }
 
         # Test indirect indexed (zp),Y
-        behavior.set_input(:mode, MOS6502::AddressGenerator::MODE_INDIRECT_IDX)
+        behavior.set_input(:mode, RHDL::Examples::MOS6502::AddressGenerator::MODE_INDIRECT_IDX)
         behavior.set_input(:operand_lo, 0x80)
         behavior.propagate
         vectors << {
-          inputs: { mode: MOS6502::AddressGenerator::MODE_INDIRECT_IDX, operand_lo: 0x80, operand_hi: 0, x_reg: 0 },
+          inputs: { mode: RHDL::Examples::MOS6502::AddressGenerator::MODE_INDIRECT_IDX, operand_lo: 0x80, operand_hi: 0, x_reg: 0 },
           expected: { ptr_addr_lo: behavior.get_output(:ptr_addr_lo), ptr_addr_hi: behavior.get_output(:ptr_addr_hi) }
         }
 

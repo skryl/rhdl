@@ -14,8 +14,10 @@ require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
 require_relative '../../../lib/rhdl/dsl/sequential'
 
-module GameBoy
-  class Link < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module GameBoy
+      class Link < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -136,6 +138,8 @@ module GameBoy
       serial_irq <= mux(ce & clock_tick & (shift_counter == lit(7, width: 3)),
                         lit(1, width: 1),
                         serial_irq)
+    end
+      end
     end
   end
 end

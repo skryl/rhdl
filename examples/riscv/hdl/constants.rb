@@ -1,7 +1,9 @@
 # RV32I RISC-V Constants and Encoding
 # Based on RISC-V ISA specification
 
-module RISCV
+module RHDL
+  module Examples
+    module RISCV
   # Opcodes (7-bit field at bits [6:0])
   module Opcode
     LUI     = 0b0110111  # Load Upper Immediate
@@ -91,5 +93,7 @@ module RISCV
     BRANCH = 1  # Branch target
     JAL    = 2  # JAL target
     JALR   = 3  # JALR target
+  end
+    end
   end
 end

@@ -233,54 +233,54 @@ module RHDL
           when RHDL::HDL::CPU::CPU
             lower_cpu(component)
           # MOS6502 components
-          when MOS6502::Registers
+          when RHDL::Examples::MOS6502::Registers
             lower_mos6502_registers(component)
-          when MOS6502::StackPointer
+          when RHDL::Examples::MOS6502::StackPointer
             lower_mos6502_stack_pointer(component)
-          when MOS6502::ProgramCounter
+          when RHDL::Examples::MOS6502::ProgramCounter
             lower_mos6502_program_counter(component)
-          when MOS6502::InstructionRegister
+          when RHDL::Examples::MOS6502::InstructionRegister
             lower_mos6502_instruction_register(component)
-          when MOS6502::AddressLatch
+          when RHDL::Examples::MOS6502::AddressLatch
             lower_mos6502_address_latch(component)
-          when MOS6502::DataLatch
+          when RHDL::Examples::MOS6502::DataLatch
             lower_mos6502_data_latch(component)
-          when MOS6502::StatusRegister
+          when RHDL::Examples::MOS6502::StatusRegister
             lower_mos6502_status_register(component)
-          when MOS6502::AddressGenerator
+          when RHDL::Examples::MOS6502::AddressGenerator
             lower_mos6502_address_generator(component)
-          when MOS6502::IndirectAddressCalc
+          when RHDL::Examples::MOS6502::IndirectAddressCalc
             lower_mos6502_indirect_addr_calc(component)
-          when MOS6502::ALU
+          when RHDL::Examples::MOS6502::ALU
             lower_mos6502_alu(component)
-          when MOS6502::InstructionDecoder
+          when RHDL::Examples::MOS6502::InstructionDecoder
             lower_mos6502_instruction_decoder(component)
-          when MOS6502::ControlUnit
+          when RHDL::Examples::MOS6502::ControlUnit
             lower_mos6502_control_unit(component)
-          when MOS6502::CPU
+          when RHDL::Examples::MOS6502::CPU
             lower_mos6502_cpu(component)
-          when MOS6502::Memory
+          when RHDL::Examples::MOS6502::Memory
             # Large behavior memory (64KB) cannot be lowered to gate-level primitives
             raise ArgumentError, "Unsupported component for gate-level lowering: #{component.class}"
           else
             # Check for Apple II components by class name
             class_name = component.class.name
             case class_name
-            when 'RHDL::Apple2::Apple2'
+            when 'RHDL::Examples::Apple2::Apple2'
               lower_apple2(component)
-            when 'RHDL::Apple2::TimingGenerator'
+            when 'RHDL::Examples::Apple2::TimingGenerator'
               lower_apple2_timing_generator(component)
-            when 'RHDL::Apple2::VideoGenerator'
+            when 'RHDL::Examples::Apple2::VideoGenerator'
               lower_apple2_video_generator(component)
-            when 'RHDL::Apple2::CharacterROM'
+            when 'RHDL::Examples::Apple2::CharacterROM'
               lower_apple2_character_rom(component)
-            when 'RHDL::Apple2::SpeakerToggle'
+            when 'RHDL::Examples::Apple2::SpeakerToggle'
               lower_apple2_speaker_toggle(component)
-            when 'RHDL::Apple2::CPU6502'
+            when 'RHDL::Examples::Apple2::CPU6502'
               lower_apple2_cpu6502(component)
-            when 'RHDL::Apple2::DiskII'
+            when 'RHDL::Examples::Apple2::DiskII'
               lower_apple2_disk_ii(component)
-            when 'RHDL::Apple2::DiskIIROM'
+            when 'RHDL::Examples::Apple2::DiskIIROM'
               lower_memory_component(component)
             else
               # Try generic hierarchical lowering for components with instance definitions

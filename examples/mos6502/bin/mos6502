@@ -53,7 +53,7 @@ class Apple2Terminal
     @runner = case @mode
               when :isa
                 # ISA mode ignores --sim option
-                runner = Apple2Harness::ISARunner.new
+                runner = RHDL::Examples::MOS6502::Apple2Harness::ISARunner.new
                 # Verify we got native, warn if fell back to ruby
                 unless runner.native?
                   warn "Warning: Native simulator not available, using Ruby ISA simulator"
@@ -63,7 +63,7 @@ class Apple2Terminal
               when :hdl
                 # HDL mode uses IR-based simulators
                 @sim_type = :"hdl_#{@sim_backend}"
-                IRSimulatorRunner.new(@sim_backend)
+                RHDL::Examples::MOS6502::IRSimulatorRunner.new(@sim_backend)
               when :netlist
                 # Netlist mode uses gate-level simulators (not yet implemented)
                 raise "Netlist mode not yet implemented"
@@ -71,7 +71,7 @@ class Apple2Terminal
                 # Verilog mode uses Verilator-compiled simulation
                 require_relative '../../../examples/apple2/utilities/runners/verilator_runner'
                 @sim_type = :hdl_verilator
-                RHDL::Apple2::VerilatorRunner.new
+                RHDL::Examples::Apple2::VerilatorRunner.new
               else
                 raise "Unknown mode: #{@mode}. Valid modes: isa, hdl, netlist, verilog"
               end

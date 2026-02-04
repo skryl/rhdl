@@ -27,9 +27,9 @@ RSpec.describe 'MOS6502 Karateka Mode' do
 
   describe 'ISA mode with karateka' do
     let(:runner) do
-      bus = MOS6502::Apple2Bus.new("test_bus")
-      cpu = MOS6502::ISASimulator.new(bus)
-      RubyISARunner.new(bus, cpu)
+      bus = RHDL::Examples::MOS6502::Apple2Bus.new("test_bus")
+      cpu = RHDL::Examples::MOS6502::ISASimulator.new(bus)
+      RHDL::Examples::MOS6502::RubyISARunner.new(bus, cpu)
     end
 
     it 'loads ROM and memory dump successfully' do
@@ -173,9 +173,9 @@ RSpec.describe 'MOS6502 Karateka Mode' do
 
   describe 'ISA mode behavior consistency' do
     let(:runner) do
-      bus = MOS6502::Apple2Bus.new("test_bus")
-      cpu = MOS6502::ISASimulator.new(bus)
-      RubyISARunner.new(bus, cpu)
+      bus = RHDL::Examples::MOS6502::Apple2Bus.new("test_bus")
+      cpu = RHDL::Examples::MOS6502::ISASimulator.new(bus)
+      RHDL::Examples::MOS6502::RubyISARunner.new(bus, cpu)
     end
 
     it 'executes deterministically - same input produces same output' do
@@ -191,9 +191,9 @@ RSpec.describe 'MOS6502 Karateka Mode' do
       state1 = runner.cpu_state
 
       # Create new runner and do second run
-      bus2 = MOS6502::Apple2Bus.new("test_bus2")
-      cpu2 = MOS6502::ISASimulator.new(bus2)
-      runner2 = RubyISARunner.new(bus2, cpu2)
+      bus2 = RHDL::Examples::MOS6502::Apple2Bus.new("test_bus2")
+      cpu2 = RHDL::Examples::MOS6502::ISASimulator.new(bus2)
+      runner2 = RHDL::Examples::MOS6502::RubyISARunner.new(bus2, cpu2)
 
       runner2.load_rom(rom_bytes, base_addr: 0xD000)
       runner2.load_ram(mem_bytes, base_addr: 0x0000)
@@ -213,9 +213,9 @@ RSpec.describe 'MOS6502 Karateka Mode' do
 
   describe 'Color graphics rendering', :slow do
     let(:runner) do
-      bus = MOS6502::Apple2Bus.new("test_bus")
-      cpu = MOS6502::ISASimulator.new(bus)
-      RubyISARunner.new(bus, cpu)
+      bus = RHDL::Examples::MOS6502::Apple2Bus.new("test_bus")
+      cpu = RHDL::Examples::MOS6502::ISASimulator.new(bus)
+      RHDL::Examples::MOS6502::RubyISARunner.new(bus, cpu)
     end
 
     it 'produces color graphics output after 6 million cycles' do
@@ -303,7 +303,7 @@ RSpec.describe 'MOS6502 Karateka Mode' do
 
       # The karateka memory dump already has graphics content at HIRES page 1 ($2000-$3FFF)
       # Test that the color renderer can process it directly
-      renderer = MOS6502::ColorRenderer.new(chars_wide: 70)
+      renderer = RHDL::Examples::MOS6502::ColorRenderer.new(chars_wide: 70)
 
       # Create a memory accessor that reads from the bus
       ram = ->(addr) { runner.bus.read(addr) }

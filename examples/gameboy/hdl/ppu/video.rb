@@ -18,8 +18,10 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module GameBoy
-  class Video < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module GameBoy
+      class Video < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -427,6 +429,8 @@ module GameBoy
                 cpu_di, wy)
       wx <= mux(ce_cpu & cpu_sel_reg & cpu_wr & (cpu_addr == lit(0x4B, width: 8)),
                 cpu_di, wx)
+    end
+      end
     end
   end
 end

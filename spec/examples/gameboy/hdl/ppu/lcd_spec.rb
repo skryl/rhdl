@@ -15,7 +15,7 @@ require_relative '../../../../../examples/gameboy/gameboy'
 # - 456 dots per line (including HBlank)
 # - 154 lines per frame (including VBlank)
 # - 59.7275 Hz frame rate
-RSpec.describe GameBoy::LCD do
+RSpec.describe RHDL::Examples::GameBoy::LCD do
   # Display constants (matching lcd.rb)
   SCREEN_WIDTH = 160
   SCREEN_HEIGHT = 144
@@ -34,7 +34,7 @@ RSpec.describe GameBoy::LCD do
     n.times { clock_cycle(component, enable_ce: enable_ce) }
   end
 
-  let(:lcd) { GameBoy::LCD.new }
+  let(:lcd) { RHDL::Examples::GameBoy::LCD.new }
 
   before do
     # Initialize inputs to default values
@@ -50,7 +50,7 @@ RSpec.describe GameBoy::LCD do
 
   describe 'component instantiation' do
     it 'creates an LCD component' do
-      expect(lcd).to be_a(GameBoy::LCD)
+      expect(lcd).to be_a(RHDL::Examples::GameBoy::LCD)
     end
 
     it 'has LCD timing outputs' do

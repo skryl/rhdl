@@ -20,7 +20,7 @@ RSpec.describe 'SM83 MCode' do
 
   before(:each) do
     skip 'GameBoy module not available' unless @gameboy_available
-    @mcode = GameBoy::SM83_MCode.new('test_mcode')
+    @mcode = RHDL::Examples::GameBoy::SM83_MCode.new('test_mcode')
     @mcode.set_input(:clk, 0)
     @mcode.set_input(:i_set, 0)      # Normal instruction set
     @mcode.set_input(:m_cycle, 1)    # First machine cycle

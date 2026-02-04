@@ -4,7 +4,7 @@ require 'spec_helper'
 
 require_relative '../../../../examples/apple2/utilities/renderers/color_renderer'
 
-RSpec.describe RHDL::Apple2::ColorRenderer do
+RSpec.describe RHDL::Examples::Apple2::ColorRenderer do
   let(:renderer) { described_class.new }
 
   # Create test RAM with hi-res page at $2000
@@ -500,23 +500,23 @@ RSpec.describe RHDL::Apple2::ColorRenderer do
 
   describe 'HiResColorRenderer alias' do
     it 'is an alias for ColorRenderer' do
-      expect(RHDL::Apple2::HiResColorRenderer).to eq(described_class)
+      expect(RHDL::Examples::Apple2::HiResColorRenderer).to eq(described_class)
     end
   end
 end
 
 # Test the MOS6502 namespace alias
-# Load the MOS6502 color renderer which re-exports RHDL::Apple2::ColorRenderer
+# Load the MOS6502 color renderer which re-exports RHDL::Examples::Apple2::ColorRenderer
 $LOAD_PATH.unshift File.expand_path('../../../../examples/mos6502/utilities/renderers', __dir__)
 require_relative '../../../../examples/mos6502/utilities/renderers/color_renderer'
 
-RSpec.describe MOS6502::ColorRenderer do
-  it 'is an alias for RHDL::Apple2::ColorRenderer' do
-    expect(described_class).to eq(RHDL::Apple2::ColorRenderer)
+RSpec.describe RHDL::Examples::MOS6502::ColorRenderer do
+  it 'is an alias for RHDL::Examples::Apple2::ColorRenderer' do
+    expect(described_class).to eq(RHDL::Examples::Apple2::ColorRenderer)
   end
 
   it 'provides HiResColorRenderer alias' do
-    expect(MOS6502::HiResColorRenderer).to eq(RHDL::Apple2::ColorRenderer)
+    expect(RHDL::Examples::MOS6502::HiResColorRenderer).to eq(RHDL::Examples::Apple2::ColorRenderer)
   end
 
   it 'can be instantiated and used' do

@@ -20,3 +20,6 @@ end
 # HDL simulation framework
 require_relative "rhdl/diagram"
 require_relative "rhdl/hdl"
+
+# Examples namespace (autoloaded)
+require_relative "rhdl/examples"

@@ -21,8 +21,10 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module GameBoy
-  class Sound < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module GameBoy
+      class Sound < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -244,6 +246,8 @@ module GameBoy
       nr52 <= mux(ce & s1_write & (s1_addr == lit(0x16, width: 7)),
                   cat(s1_writedata[7], lit(0, width: 7)),  # Only bit 7 writable
                   nr52)
+    end
+      end
     end
   end
 end

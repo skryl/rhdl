@@ -7,7 +7,7 @@
 # and provides a native simulation interface similar to the Rust IR runners.
 #
 # Usage:
-#   runner = RHDL::Apple2::VerilatorRunner.new(sub_cycles: 14)
+#   runner = RHDL::Examples::Apple2::VerilatorRunner.new(sub_cycles: 14)
 #   runner.reset
 #   runner.run_steps(100)
 
@@ -21,8 +21,9 @@ require 'fiddle'
 require 'fiddle/import'
 
 module RHDL
-  module Apple2
-    # Verilator-based runner for Apple II simulation
+  module Examples
+    module Apple2
+      # Verilator-based runner for Apple II simulation
     # Compiles RHDL Verilog export to native code via Verilator
     class VerilatorRunner
       # Text page constants
@@ -957,5 +958,6 @@ module RHDL
         end
       end
     end
+  end
   end
 end

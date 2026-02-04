@@ -8,8 +8,9 @@ require_relative '../output/speaker'
 require_relative '../renderers/lcd_renderer'
 
 module RHDL
-  module GameBoy
-    # HDL-based runner using behavioral Game Boy simulation
+  module Examples
+    module GameBoy
+      # HDL-based runner using behavioral Game Boy simulation
     # This is a simplified runner that models Game Boy behavior
     # without requiring the full HDL component hierarchy
     class HdlRunner
@@ -325,6 +326,7 @@ module RHDL
 
       def stop_audio
         @speaker.stop
+      end
       end
     end
   end

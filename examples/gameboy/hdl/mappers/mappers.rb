@@ -12,8 +12,10 @@ require_relative 'mbc2'
 require_relative 'mbc3'
 require_relative 'mbc5'
 
-module GameBoy
-  module Mappers
+module RHDL
+  module Examples
+    module GameBoy
+      module Mappers
     # Mapper type constants (from cart header byte 0x147)
     ROM_ONLY         = 0x00
     MBC1             = 0x01
@@ -69,5 +71,7 @@ module GameBoy
       0x04 => 128 * 1024,   # 128KB (16 banks)
       0x05 => 64 * 1024     # 64KB (8 banks)
     }
+      end
+    end
   end
 end

@@ -2,7 +2,7 @@
 
 require_relative '../spec_helper'
 
-RSpec.describe MOS6502::ControlUnit do
+RSpec.describe RHDL::Examples::MOS6502::ControlUnit do
   let(:cu) { described_class.new('test_cu') }
 
   describe 'simulation' do

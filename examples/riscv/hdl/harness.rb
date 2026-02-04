@@ -10,10 +10,12 @@ require_relative 'constants'
 require_relative 'cpu'
 require_relative 'memory'
 
-module RISCV
-  # Simulation harness for the synthesizable CPU
-  # All interaction with CPU is through ports only
-  class Harness
+module RHDL
+  module Examples
+    module RISCV
+      # Simulation harness for the synthesizable CPU
+      # All interaction with CPU is through ports only
+      class Harness
     attr_reader :clock_count
 
     def initialize(mem_size: Memory::DEFAULT_SIZE)
@@ -177,6 +179,8 @@ module RISCV
       # Feed memory data back to CPU for LOAD instructions
       @cpu.set_input(:data_rdata, data_rdata)
       @cpu.propagate
+    end
+      end
     end
   end
 end

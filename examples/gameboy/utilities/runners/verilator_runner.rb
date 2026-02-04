@@ -7,7 +7,7 @@
 # and provides a native simulation interface similar to the Rust IR runners.
 #
 # Usage:
-#   runner = RHDL::GameBoy::VerilatorRunner.new
+#   runner = RHDL::ExamplesRHDL::Examples::GameBoy::VerilatorRunner.new
 #   runner.load_rom(File.binread('game.gb'))
 #   runner.reset
 #   runner.run_steps(100)
@@ -21,8 +21,9 @@ require 'fiddle'
 require 'fiddle/import'
 
 module RHDL
-  module GameBoy
-    # Verilator-based runner for Game Boy simulation
+  module Examples
+    module GameBoy
+      # Verilator-based runner for Game Boy simulation
     # Compiles RHDL Verilog export to native code via Verilator
     class VerilatorRunner
       # Screen dimensions
@@ -406,29 +407,29 @@ module RHDL
 
       def export_verilog(output_file)
         # Use the existing Verilog export infrastructure
-        verilog_code = ::GameBoy::Gameboy.to_verilog
+        verilog_code = RHDL::Examples::GameBoy::Gameboy.to_verilog
 
         # Also export all subcomponents
         subcomponent_verilog = []
         [
-          ::GameBoy::SpeedControl,
-          ::GameBoy::GB,
-          ::GameBoy::SM83,
-          ::GameBoy::SM83_ALU,
-          ::GameBoy::SM83_Registers,
-          ::GameBoy::SM83_MCode,
-          ::GameBoy::Timer,
-          ::GameBoy::Video,
-          ::GameBoy::Sprites,
-          ::GameBoy::LCD,
-          ::GameBoy::Sound,
-          ::GameBoy::ChannelSquare,
-          ::GameBoy::ChannelWave,
-          ::GameBoy::ChannelNoise,
-          ::GameBoy::HDMA,
-          ::GameBoy::Link,
-          ::GameBoy::DPRAM,
-          ::GameBoy::SPRAM
+          RHDL::Examples::GameBoy::SpeedControl,
+          RHDL::Examples::GameBoy::GB,
+          RHDL::Examples::GameBoy::SM83,
+          RHDL::Examples::GameBoy::SM83_ALU,
+          RHDL::Examples::GameBoy::SM83_Registers,
+          RHDL::Examples::GameBoy::SM83_MCode,
+          RHDL::Examples::GameBoy::Timer,
+          RHDL::Examples::GameBoy::Video,
+          RHDL::Examples::GameBoy::Sprites,
+          RHDL::Examples::GameBoy::LCD,
+          RHDL::Examples::GameBoy::Sound,
+          RHDL::Examples::GameBoy::ChannelSquare,
+          RHDL::Examples::GameBoy::ChannelWave,
+          RHDL::Examples::GameBoy::ChannelNoise,
+          RHDL::Examples::GameBoy::HDMA,
+          RHDL::Examples::GameBoy::Link,
+          RHDL::Examples::GameBoy::DPRAM,
+          RHDL::Examples::GameBoy::SPRAM
         ].each do |component_class|
           begin
             subcomponent_verilog << component_class.to_verilog
@@ -1017,6 +1018,7 @@ module RHDL
       def verilator_read_vram(addr)
         return 0 unless @sim_ctx
         @sim_read_vram_fn.call(@sim_ctx, addr)
+      end
       end
     end
   end

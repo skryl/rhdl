@@ -36,7 +36,7 @@ RSpec.describe 'Karateka memory dump' do
   end
 
   describe 'loading into Native ISA simulator' do
-    let(:runner) { Apple2Harness::ISARunner.new }
+    let(:runner) { RHDL::Examples::MOS6502::Apple2Harness::ISARunner.new }
     let(:bytes) { File.binread(karateka_bin).bytes }
 
     before do
@@ -94,8 +94,8 @@ RSpec.describe 'Karateka memory dump' do
   end
 
   describe 'loading into Ruby ISA simulator' do
-    let(:bus) { MOS6502::Apple2Bus.new('test_bus') }
-    let(:runner) { MOS6502::ISASimulator.new(bus) }
+    let(:bus) { RHDL::Examples::MOS6502::Apple2Bus.new('test_bus') }
+    let(:runner) { RHDL::Examples::MOS6502::ISASimulator.new(bus) }
     let(:bytes) { File.binread(karateka_bin).bytes }
 
     before do

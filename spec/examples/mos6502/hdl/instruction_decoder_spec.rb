@@ -2,7 +2,7 @@
 
 require_relative '../spec_helper'
 
-RSpec.describe MOS6502::InstructionDecoder do
+RSpec.describe RHDL::Examples::MOS6502::InstructionDecoder do
   let(:decoder) { described_class.new('test_decoder') }
 
   describe 'simulation' do
@@ -10,8 +10,8 @@ RSpec.describe MOS6502::InstructionDecoder do
       decoder.set_input(:opcode, 0x69)
       decoder.propagate
 
-      expect(decoder.get_output(:addr_mode)).to eq(MOS6502::InstructionDecoder::MODE_IMMEDIATE)
-      expect(decoder.get_output(:alu_op)).to eq(MOS6502::InstructionDecoder::OP_ADC)
+      expect(decoder.get_output(:addr_mode)).to eq(RHDL::Examples::MOS6502::InstructionDecoder::MODE_IMMEDIATE)
+      expect(decoder.get_output(:alu_op)).to eq(RHDL::Examples::MOS6502::InstructionDecoder::OP_ADC)
       expect(decoder.get_output(:illegal)).to eq(0)
     end
 
@@ -19,32 +19,32 @@ RSpec.describe MOS6502::InstructionDecoder do
       decoder.set_input(:opcode, 0xA5)
       decoder.propagate
 
-      expect(decoder.get_output(:addr_mode)).to eq(MOS6502::InstructionDecoder::MODE_ZERO_PAGE)
-      expect(decoder.get_output(:instr_type)).to eq(MOS6502::InstructionDecoder::TYPE_LOAD)
+      expect(decoder.get_output(:addr_mode)).to eq(RHDL::Examples::MOS6502::InstructionDecoder::MODE_ZERO_PAGE)
+      expect(decoder.get_output(:instr_type)).to eq(RHDL::Examples::MOS6502::InstructionDecoder::TYPE_LOAD)
     end
 
     it 'decodes STA absolute (0x8D)' do
       decoder.set_input(:opcode, 0x8D)
       decoder.propagate
 
-      expect(decoder.get_output(:addr_mode)).to eq(MOS6502::InstructionDecoder::MODE_ABSOLUTE)
-      expect(decoder.get_output(:instr_type)).to eq(MOS6502::InstructionDecoder::TYPE_STORE)
+      expect(decoder.get_output(:addr_mode)).to eq(RHDL::Examples::MOS6502::InstructionDecoder::MODE_ABSOLUTE)
+      expect(decoder.get_output(:instr_type)).to eq(RHDL::Examples::MOS6502::InstructionDecoder::TYPE_STORE)
     end
 
     it 'decodes BEQ (0xF0)' do
       decoder.set_input(:opcode, 0xF0)
       decoder.propagate
 
-      expect(decoder.get_output(:addr_mode)).to eq(MOS6502::InstructionDecoder::MODE_RELATIVE)
-      expect(decoder.get_output(:instr_type)).to eq(MOS6502::InstructionDecoder::TYPE_BRANCH)
+      expect(decoder.get_output(:addr_mode)).to eq(RHDL::Examples::MOS6502::InstructionDecoder::MODE_RELATIVE)
+      expect(decoder.get_output(:instr_type)).to eq(RHDL::Examples::MOS6502::InstructionDecoder::TYPE_BRANCH)
     end
 
     it 'decodes JMP absolute (0x4C)' do
       decoder.set_input(:opcode, 0x4C)
       decoder.propagate
 
-      expect(decoder.get_output(:addr_mode)).to eq(MOS6502::InstructionDecoder::MODE_ABSOLUTE)
-      expect(decoder.get_output(:instr_type)).to eq(MOS6502::InstructionDecoder::TYPE_JUMP)
+      expect(decoder.get_output(:addr_mode)).to eq(RHDL::Examples::MOS6502::InstructionDecoder::MODE_ABSOLUTE)
+      expect(decoder.get_output(:instr_type)).to eq(RHDL::Examples::MOS6502::InstructionDecoder::TYPE_JUMP)
     end
 
     it 'identifies illegal opcodes' do

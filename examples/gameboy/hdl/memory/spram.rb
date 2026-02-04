@@ -9,8 +9,10 @@ require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 require_relative '../../../../lib/rhdl/dsl/memory'
 
-module GameBoy
-  class SPRAM < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module GameBoy
+      class SPRAM < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
     include RHDL::DSL::Memory
@@ -52,6 +54,8 @@ module GameBoy
     # Get the memory array for bulk operations
     def memory_array
       @_memory_arrays[:mem]
+    end
+      end
     end
   end
 end

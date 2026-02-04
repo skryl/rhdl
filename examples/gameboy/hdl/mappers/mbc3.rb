@@ -21,8 +21,10 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module GameBoy
-  class MBC3 < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module GameBoy
+      class MBC3 < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -239,6 +241,8 @@ module GameBoy
       rtc_days_latch <= mux(latch_trigger, rtc_dys, rtc_days_latch)
       rtc_halt_latch <= mux(latch_trigger, rtc_hlt, rtc_halt_latch)
       rtc_overflow_latch <= mux(latch_trigger, rtc_ovf, rtc_overflow_latch)
+    end
+      end
     end
   end
 end

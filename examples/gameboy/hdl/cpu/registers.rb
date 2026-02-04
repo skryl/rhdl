@@ -16,8 +16,10 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module GameBoy
-  class SM83_Registers < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module GameBoy
+      class SM83_Registers < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -143,6 +145,8 @@ module GameBoy
                     mux(cen & pc_inc,
                         reg_PC + lit(1, width: 16),
                         reg_PC))
+    end
+      end
     end
   end
 end

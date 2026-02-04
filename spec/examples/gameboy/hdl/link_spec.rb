@@ -19,16 +19,16 @@ require_relative '../../../../examples/gameboy/gameboy'
 RSpec.describe 'GameBoy Link Port' do
   describe 'Module Loading' do
     it 'defines the Link class' do
-      expect(defined?(GameBoy::Link)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::Link)).to eq('constant')
     end
 
     it 'inherits from SequentialComponent' do
-      expect(GameBoy::Link.superclass).to eq(RHDL::HDL::SequentialComponent)
+      expect(RHDL::Examples::GameBoy::Link.superclass).to eq(RHDL::HDL::SequentialComponent)
     end
   end
 
   describe 'Link Component Structure' do
-    let(:link) { GameBoy::Link.new('link') }
+    let(:link) { RHDL::Examples::GameBoy::Link.new('link') }
     let(:ir) { link.class.to_ir }
     let(:port_names) { ir.ports.map { |p| p.name.to_sym } }
 
@@ -106,7 +106,7 @@ RSpec.describe 'GameBoy Link Port' do
 
     describe 'Constants' do
       it 'defines CLOCK_DIV constant' do
-        expect(GameBoy::Link::CLOCK_DIV).to eq(512)
+        expect(RHDL::Examples::GameBoy::Link::CLOCK_DIV).to eq(512)
       end
     end
 
@@ -135,7 +135,7 @@ RSpec.describe 'GameBoy Link Port' do
         @ir_available = RHDL::Codegen::IR::COMPILER_AVAILABLE rescue false
         # Try to actually initialize a runner to verify it works
         if @ir_available
-          test_runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+          test_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
           test_runner = nil
         end
       rescue LoadError, NameError, RuntimeError => e
@@ -146,7 +146,7 @@ RSpec.describe 'GameBoy Link Port' do
 
     before(:each) do
       skip "IR compiler not available: #{@ir_error}" unless @ir_available
-      @runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+      @runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
     end
 
     # Helper to create ROM that accesses serial registers

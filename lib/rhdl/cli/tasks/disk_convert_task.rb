@@ -198,7 +198,7 @@ module RHDL
           require_relative '../../../../examples/mos6502/utilities/apple2/harness'
 
           # Create runner with disk
-          runner = Apple2Harness::ISARunner.new
+          runner = RHDL::Examples::MOS6502::Apple2Harness::ISARunner.new
           puts "Simulator: #{runner.simulator_type}"
 
           # Load ROM

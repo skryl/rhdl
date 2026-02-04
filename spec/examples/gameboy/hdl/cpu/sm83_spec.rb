@@ -71,7 +71,7 @@ RSpec.describe 'SM83 CPU Instructions' do
   before(:each) do
     skip 'IR compiler not available' unless @ir_available
 
-    @runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+    @runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
   end
 
   # ==========================================================================

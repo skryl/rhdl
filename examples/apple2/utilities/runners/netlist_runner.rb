@@ -11,7 +11,7 @@
 #   ir = Apple2Netlist.gate_ir
 #
 #   # Create netlist runner for simulation
-#   runner = RHDL::Apple2::NetlistRunner.new
+#   runner = RHDL::Examples::Apple2::NetlistRunner.new
 
 require_relative '../../hdl/apple2'
 require_relative '../input/ps2_encoder'
@@ -26,8 +26,9 @@ rescue LoadError
 end
 
 module RHDL
-  module Apple2
-    # Utility module for exporting Apple2 component to gate-level netlist
+  module Examples
+    module Apple2
+      # Utility module for exporting Apple2 component to gate-level netlist
     module Apple2Netlist
       class << self
         # Export Apple2 component to gate-level IR
@@ -642,5 +643,6 @@ module RHDL
         0
       end
     end
+  end
   end
 end

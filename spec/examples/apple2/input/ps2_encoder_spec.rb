@@ -5,7 +5,7 @@ require 'spec_helper'
 # Load the PS2 encoder
 require_relative '../../../../examples/apple2/utilities/input/ps2_encoder'
 
-RSpec.describe RHDL::Apple2::PS2Encoder do
+RSpec.describe RHDL::Examples::Apple2::PS2Encoder do
   let(:encoder) { described_class.new }
 
   describe '#initialize' do
@@ -91,7 +91,7 @@ RSpec.describe RHDL::Apple2::PS2Encoder do
       [0x40, 0x1E, true],  # @ (shifted 2)
     ].each do |ascii, expected_scancode, needs_shift|
       it "maps ASCII #{ascii.to_s(16)} correctly" do
-        mapping = RHDL::Apple2::PS2Encoder::ASCII_TO_SCANCODE[ascii]
+        mapping = RHDL::Examples::Apple2::PS2Encoder::ASCII_TO_SCANCODE[ascii]
         expect(mapping).not_to be_nil, "Missing mapping for ASCII #{ascii.to_s(16)}"
         scancode, shift = mapping
         expect(scancode).to eq(expected_scancode)

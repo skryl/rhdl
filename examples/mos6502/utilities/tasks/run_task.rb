@@ -1,16 +1,18 @@
 # frozen_string_literal: true
 
-# MOS6502 Terminal Task
+# MOS6502 Run Task
 # Interactive terminal emulator for MOS6502/Apple II simulation
 
 require 'io/console'
 require_relative '../runners/headless_runner'
 
-module MOS6502
-  module Tasks
-    # Terminal emulator for MOS6502/Apple II simulation
-    # Supports ISA, HDL, and Verilog simulation modes
-    class TerminalTask
+module RHDL
+  module Examples
+    module MOS6502
+      module Tasks
+        # Run task for MOS6502/Apple II simulation
+        # Supports ISA, HDL, and Verilog simulation modes
+        class RunTask
       SCREEN_ROWS = 24
       SCREEN_COLS = 40
 
@@ -630,6 +632,8 @@ module MOS6502
         exit_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 9 : 3)
         print move_cursor(exit_row, 1)
         puts "Apple ][ emulator terminated."
+      end
+        end
       end
     end
   end

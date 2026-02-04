@@ -17,9 +17,11 @@ require_relative 'mem_wb_reg'
 require_relative 'hazard_unit'
 require_relative 'forwarding_unit'
 
-module RISCV
-  module Pipeline
-    class PipelinedDatapath < RHDL::HDL::Component
+module RHDL
+  module Examples
+    module RISCV
+      module Pipeline
+        class PipelinedDatapath < RHDL::HDL::Component
       input :clk
       input :rst
 
@@ -47,22 +49,22 @@ module RISCV
         super(name)
 
         # Instantiate components
-        @pc = RISCV::ProgramCounter.new('pc')
-        @regfile = RISCV::RegisterFile.new('regfile')
-        @decoder = RISCV::Decoder.new('decoder')
-        @imm_gen = RISCV::ImmGen.new('imm_gen')
-        @alu = RISCV::ALU.new('alu')
-        @branch_cond = RISCV::BranchCond.new('branch_cond')
+        @pc = ProgramCounter.new('pc')
+        @regfile = RegisterFile.new('regfile')
+        @decoder = Decoder.new('decoder')
+        @imm_gen = ImmGen.new('imm_gen')
+        @alu = ALU.new('alu')
+        @branch_cond = BranchCond.new('branch_cond')
 
         # Pipeline registers
-        @if_id = RISCV::Pipeline::IF_ID_Reg.new('if_id')
-        @id_ex = RISCV::Pipeline::ID_EX_Reg.new('id_ex')
-        @ex_mem = RISCV::Pipeline::EX_MEM_Reg.new('ex_mem')
-        @mem_wb = RISCV::Pipeline::MEM_WB_Reg.new('mem_wb')
+        @if_id = IF_ID_Reg.new('if_id')
+        @id_ex = ID_EX_Reg.new('id_ex')
+        @ex_mem = EX_MEM_Reg.new('ex_mem')
+        @mem_wb = MEM_WB_Reg.new('mem_wb')
 
         # Control units
-        @hazard_unit = RISCV::Pipeline::HazardUnit.new('hazard')
-        @forward_unit = RISCV::Pipeline::ForwardingUnit.new('forward')
+        @hazard_unit = HazardUnit.new('hazard')
+        @forward_unit = ForwardingUnit.new('forward')
 
         # Cached values for next cycle (latched on rising edge)
         @next_cycle_values = {}
@@ -386,6 +388,8 @@ module RISCV
 
       public
 
+        end
+      end
     end
   end
 end

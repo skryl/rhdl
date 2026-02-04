@@ -11,7 +11,7 @@ require 'spec_helper'
 # - Audio output generation
 # - CPU interface
 
-RSpec.describe 'GameBoy::Sound' do
+RSpec.describe 'RHDL::Examples::GameBoy::Sound' do
   before(:all) do
     begin
       require_relative '../../../../../examples/gameboy/gameboy'
@@ -40,7 +40,7 @@ RSpec.describe 'GameBoy::Sound' do
   end
 
   describe 'Sound (APU)' do
-    let(:apu) { GameBoy::Sound.new('apu') }
+    let(:apu) { RHDL::Examples::GameBoy::Sound.new('apu') }
 
     before do
       # Initialize default inputs

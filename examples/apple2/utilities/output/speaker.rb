@@ -4,8 +4,9 @@
 # Generates audio from speaker state changes in the HDL simulation
 
 module RHDL
-  module Apple2
-    # Speaker simulation that converts HDL speaker state changes to audio
+  module Examples
+    module Apple2
+      # Speaker simulation that converts HDL speaker state changes to audio
     # Uses external audio tools (sox, ffplay, paplay, aplay) for playback
     class Speaker
       # Audio sample rate (standard)
@@ -353,5 +354,6 @@ module RHDL
         end
       end
     end
+  end
   end
 end

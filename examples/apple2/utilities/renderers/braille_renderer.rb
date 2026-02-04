@@ -4,8 +4,9 @@
 # Renders Apple II hi-res screen using Unicode braille characters (2x4 dots per char)
 
 module RHDL
-  module Apple2
-    # Renders Apple II hi-res graphics using Unicode braille characters
+  module Examples
+    module Apple2
+      # Renders Apple II hi-res graphics using Unicode braille characters
     # Each braille character is 2 dots wide x 4 dots tall, providing
     # high-resolution monochrome display in terminal
     class BrailleRenderer
@@ -87,5 +88,6 @@ module RHDL
         render(bitmap, chars_wide: chars_wide, invert: invert).split("\n")
       end
     end
+  end
   end
 end

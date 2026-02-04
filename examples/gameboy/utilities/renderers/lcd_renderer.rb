@@ -4,8 +4,9 @@
 # Renders the Game Boy screen (160x144) using various terminal formats
 
 module RHDL
-  module GameBoy
-    # LCD renderer for Game Boy display
+  module Examples
+    module GameBoy
+      # LCD renderer for Game Boy display
     # Supports braille characters for high-resolution terminal output
     class LcdRenderer
       # Game Boy screen dimensions
@@ -221,6 +222,7 @@ module RHDL
           lines << (bg + (" " * @chars_wide) + RESET)
         end
         lines.join("\n")
+      end
       end
     end
   end

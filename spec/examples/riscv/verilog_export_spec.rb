@@ -19,7 +19,7 @@ require_relative '../../../examples/riscv/hdl/pipeline/forwarding_unit'
 RSpec.describe 'RISC-V Verilog Export' do
   describe 'Basic Components' do
     it 'exports ALU to Verilog' do
-      verilog = RISCV::ALU.to_verilog
+      verilog = RHDL::Examples::RISCV::ALU.to_verilog
       expect(verilog).to include('module riscv_alu')
       expect(verilog).to include('input [31:0] a')
       expect(verilog).to include('input [31:0] b')
@@ -28,7 +28,7 @@ RSpec.describe 'RISC-V Verilog Export' do
     end
 
     it 'exports Decoder to Verilog' do
-      verilog = RISCV::Decoder.to_verilog
+      verilog = RHDL::Examples::RISCV::Decoder.to_verilog
       expect(verilog).to include('module riscv_decoder')
       expect(verilog).to include('input [31:0] inst')
       expect(verilog).to include('output [4:0] rs1')
@@ -38,7 +38,7 @@ RSpec.describe 'RISC-V Verilog Export' do
     end
 
     it 'exports ImmGen to Verilog' do
-      verilog = RISCV::ImmGen.to_verilog
+      verilog = RHDL::Examples::RISCV::ImmGen.to_verilog
       expect(verilog).to include('module riscv_imm_gen')
       expect(verilog).to include('input [31:0] inst')
       expect(verilog).to include('output [31:0] imm')
@@ -46,14 +46,14 @@ RSpec.describe 'RISC-V Verilog Export' do
     end
 
     it 'exports BranchCond to Verilog' do
-      verilog = RISCV::BranchCond.to_verilog
+      verilog = RHDL::Examples::RISCV::BranchCond.to_verilog
       expect(verilog).to include('module riscv_branch_cond')
       expect(verilog).to include('output branch_taken')
       expect(verilog).to include('endmodule')
     end
 
     it 'exports ProgramCounter to Verilog' do
-      verilog = RISCV::ProgramCounter.to_verilog
+      verilog = RHDL::Examples::RISCV::ProgramCounter.to_verilog
       expect(verilog).to include('module riscv_program_counter')
       expect(verilog).to include('input clk')
       expect(verilog).to include('input rst')
@@ -62,7 +62,7 @@ RSpec.describe 'RISC-V Verilog Export' do
     end
 
     it 'exports RegisterFile to Verilog' do
-      verilog = RISCV::RegisterFile.to_verilog
+      verilog = RHDL::Examples::RISCV::RegisterFile.to_verilog
       expect(verilog).to include('module riscv_register_file')
       expect(verilog).to include('input [4:0] rs1_addr')
       expect(verilog).to include('input [4:0] rs2_addr')
@@ -72,7 +72,7 @@ RSpec.describe 'RISC-V Verilog Export' do
     end
 
     it 'exports Memory to Verilog' do
-      verilog = RISCV::Memory.to_verilog
+      verilog = RHDL::Examples::RISCV::Memory.to_verilog
       expect(verilog).to include('module riscv_memory')
       expect(verilog).to include('input [31:0] addr')
       expect(verilog).to include('output [31:0] read_data')
@@ -82,7 +82,7 @@ RSpec.describe 'RISC-V Verilog Export' do
 
   describe 'Pipeline Registers' do
     it 'exports IF_ID_Reg to Verilog' do
-      verilog = RISCV::Pipeline::IF_ID_Reg.to_verilog
+      verilog = RHDL::Examples::RISCV::Pipeline::IF_ID_Reg.to_verilog
       expect(verilog).to include('module riscv_pipeline_if_id_reg')
       expect(verilog).to include('input clk')
       expect(verilog).to include('input rst')
@@ -97,7 +97,7 @@ RSpec.describe 'RISC-V Verilog Export' do
     end
 
     it 'exports ID_EX_Reg to Verilog' do
-      verilog = RISCV::Pipeline::ID_EX_Reg.to_verilog
+      verilog = RHDL::Examples::RISCV::Pipeline::ID_EX_Reg.to_verilog
       expect(verilog).to include('module riscv_pipeline_id_ex_reg')
       expect(verilog).to include('input clk')
       expect(verilog).to include('input [31:0] rs1_data_in')
@@ -106,7 +106,7 @@ RSpec.describe 'RISC-V Verilog Export' do
     end
 
     it 'exports EX_MEM_Reg to Verilog' do
-      verilog = RISCV::Pipeline::EX_MEM_Reg.to_verilog
+      verilog = RHDL::Examples::RISCV::Pipeline::EX_MEM_Reg.to_verilog
       expect(verilog).to include('module riscv_pipeline_ex_mem_reg')
       expect(verilog).to include('input clk')
       expect(verilog).to include('input [31:0] alu_result_in')
@@ -115,7 +115,7 @@ RSpec.describe 'RISC-V Verilog Export' do
     end
 
     it 'exports MEM_WB_Reg to Verilog' do
-      verilog = RISCV::Pipeline::MEM_WB_Reg.to_verilog
+      verilog = RHDL::Examples::RISCV::Pipeline::MEM_WB_Reg.to_verilog
       expect(verilog).to include('module riscv_pipeline_mem_wb_reg')
       expect(verilog).to include('input clk')
       expect(verilog).to include('output reg [31:0] alu_result_out')  # reg for sequential output
@@ -126,7 +126,7 @@ RSpec.describe 'RISC-V Verilog Export' do
 
   describe 'Control Units' do
     it 'exports HazardUnit to Verilog' do
-      verilog = RISCV::Pipeline::HazardUnit.to_verilog
+      verilog = RHDL::Examples::RISCV::Pipeline::HazardUnit.to_verilog
       expect(verilog).to include('module riscv_pipeline_hazard_unit')
       expect(verilog).to include('input [4:0] id_rs1_addr')
       expect(verilog).to include('input [4:0] id_rs2_addr')
@@ -137,7 +137,7 @@ RSpec.describe 'RISC-V Verilog Export' do
     end
 
     it 'exports ForwardingUnit to Verilog' do
-      verilog = RISCV::Pipeline::ForwardingUnit.to_verilog
+      verilog = RHDL::Examples::RISCV::Pipeline::ForwardingUnit.to_verilog
       expect(verilog).to include('module riscv_pipeline_forwarding_unit')
       expect(verilog).to include('input [4:0] ex_rs1_addr')
       expect(verilog).to include('input [4:0] ex_rs2_addr')
@@ -150,12 +150,12 @@ RSpec.describe 'RISC-V Verilog Export' do
   describe 'Verilog Syntax Validity' do
     it 'generates valid module declarations' do
       [
-        RISCV::ALU,
-        RISCV::Decoder,
-        RISCV::ProgramCounter,
-        RISCV::Pipeline::IF_ID_Reg,
-        RISCV::Pipeline::HazardUnit,
-        RISCV::Pipeline::ForwardingUnit
+        RHDL::Examples::RISCV::ALU,
+        RHDL::Examples::RISCV::Decoder,
+        RHDL::Examples::RISCV::ProgramCounter,
+        RHDL::Examples::RISCV::Pipeline::IF_ID_Reg,
+        RHDL::Examples::RISCV::Pipeline::HazardUnit,
+        RHDL::Examples::RISCV::Pipeline::ForwardingUnit
       ].each do |component|
         verilog = component.to_verilog
         expect(verilog).to match(/module\s+\w+/)

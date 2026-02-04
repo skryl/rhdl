@@ -21,7 +21,7 @@ RSpec.describe 'GameBoy HDMA' do
     begin
       require_relative '../../../../../examples/gameboy/gameboy'
       require_relative '../../../../../examples/gameboy/hdl/dma/hdma'
-      @component_available = defined?(GameBoy::HDMA)
+      @component_available = defined?(RHDL::Examples::GameBoy::HDMA)
     rescue LoadError => e
       @component_available = false
       @load_error = e.message
@@ -37,21 +37,21 @@ RSpec.describe 'GameBoy HDMA' do
   # ==========================================================================
   describe 'Component Definition' do
     it 'defines HDMA class' do
-      expect(defined?(GameBoy::HDMA)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::HDMA)).to eq('constant')
     end
 
     it 'can be instantiated' do
-      hdma = GameBoy::HDMA.new('test_hdma')
-      expect(hdma).to be_a(GameBoy::HDMA)
+      hdma = RHDL::Examples::GameBoy::HDMA.new('test_hdma')
+      expect(hdma).to be_a(RHDL::Examples::GameBoy::HDMA)
     end
 
     it 'inherits from SequentialComponent' do
-      expect(GameBoy::HDMA.superclass).to eq(RHDL::HDL::SequentialComponent)
+      expect(RHDL::Examples::GameBoy::HDMA.superclass).to eq(RHDL::HDL::SequentialComponent)
     end
   end
 
   describe 'HDMA Component Structure' do
-    let(:hdma) { GameBoy::HDMA.new('hdma') }
+    let(:hdma) { RHDL::Examples::GameBoy::HDMA.new('hdma') }
     let(:ir) { hdma.class.to_ir }
     let(:port_names) { ir.ports.map { |p| p.name.to_sym } }
 
@@ -140,7 +140,7 @@ RSpec.describe 'GameBoy HDMA' do
   # Register Access Tests (via read_reg/write_reg methods)
   # ==========================================================================
   describe 'Register State Access' do
-    let(:hdma) { GameBoy::HDMA.new('hdma') }
+    let(:hdma) { RHDL::Examples::GameBoy::HDMA.new('hdma') }
 
     before(:each) do
       # Initialize default inputs

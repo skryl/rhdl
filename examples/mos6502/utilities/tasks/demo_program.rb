@@ -2,9 +2,11 @@
 
 # Demo program generator for MOS6502 terminal emulator
 
-module MOS6502
-  module Tasks
-    class DemoProgram
+module RHDL
+  module Examples
+    module MOS6502
+      module Tasks
+        class DemoProgram
       def self.create
         new.generate
       end
@@ -126,6 +128,8 @@ module MOS6502
         asm[beq_offset_idx] = (new_line - (beq_offset_idx + 1)) & 0xFF
 
         asm
+      end
+        end
       end
     end
   end
