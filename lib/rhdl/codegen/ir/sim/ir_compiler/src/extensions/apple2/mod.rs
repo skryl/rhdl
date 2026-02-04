@@ -172,6 +172,7 @@ impl Apple2Extension {
         code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, signals_len);\n");
         code.push_str("    let ram = std::slice::from_raw_parts_mut(ram, ram_len);\n");
         code.push_str("    let rom = std::slice::from_raw_parts(rom, rom_len);\n");
+        code.push_str("    let s = signals.as_mut_ptr();\n");
         code.push_str(&format!("    let mut old_clocks = [0u64; {}];\n", num_clocks));
         code.push_str(&format!("    let mut next_regs = [0u64; {}];\n", num_regs.max(1)));
         code.push_str("    let mut text_dirty = false;\n");
@@ -181,21 +182,21 @@ impl Apple2Extension {
 
         // Initialize old_clocks from current signal values
         for (i, &clk) in clock_indices.iter().enumerate() {
-            code.push_str(&format!("    old_clocks[{}] = signals[{}];\n", i, clk));
+            code.push_str(&format!("    old_clocks[{}] = *s.add({});\n", i, clk));
         }
         code.push_str("\n");
 
         code.push_str("    for _ in 0..n {\n");
 
         // Set keyboard input
-        code.push_str(&format!("        signals[{}] = if key_ready {{ (key_data as u64) | 0x80 }} else {{ key_data as u64 }};\n\n", k_idx));
+        code.push_str(&format!("        *s.add({}) = if key_ready {{ (key_data as u64) | 0x80 }} else {{ key_data as u64 }};\n\n", k_idx));
 
         // Clock falling edge
-        code.push_str(&format!("        signals[{}] = 0;\n", clk_idx));
+        code.push_str(&format!("        *s.add({}) = 0;\n", clk_idx));
         code.push_str("        evaluate_inline(signals);\n\n");
 
         // Provide RAM/ROM data based on CPU address (AFTER falling edge, like interpreter)
-        code.push_str(&format!("        let cpu_addr = (signals[{}] as usize) & 0xFFFF;\n", cpu_addr_idx));
+        code.push_str(&format!("        let cpu_addr = (*s.add({}) as usize) & 0xFFFF;\n", cpu_addr_idx));
         code.push_str("        let ram_data = if cpu_addr >= 0xD000 {\n");
         code.push_str("            let rom_idx = cpu_addr - 0xD000;\n");
         code.push_str("            if rom_idx < rom_len { rom[rom_idx] as u64 } else { 0 }\n");
@@ -207,21 +208,21 @@ impl Apple2Extension {
         code.push_str("            0\n");
         code.push_str("        };\n");
         // Write to ram_do signal (NOT d - that's the write data bus)
-        code.push_str(&format!("        signals[{}] = ram_data;\n\n", ram_do_idx));
+        code.push_str(&format!("        *s.add({}) = ram_data;\n\n", ram_do_idx));
 
         // Clock rising edge
         for (i, &clk) in clock_indices.iter().enumerate() {
-            code.push_str(&format!("        old_clocks[{}] = signals[{}];\n", i, clk));
+            code.push_str(&format!("        old_clocks[{}] = *s.add({});\n", i, clk));
         }
-        code.push_str(&format!("        signals[{}] = 1;\n", clk_idx));
+        code.push_str(&format!("        *s.add({}) = 1;\n", clk_idx));
         code.push_str("        tick_inline(signals, &mut old_clocks, &mut next_regs);\n\n");
 
         // Handle RAM write (read from d signal, NOT ram_do)
-        code.push_str(&format!("        let ram_we = signals[{}];\n", ram_we_idx));
+        code.push_str(&format!("        let ram_we = *s.add({});\n", ram_we_idx));
         code.push_str("        if ram_we == 1 {\n");
-        code.push_str(&format!("            let write_addr = (signals[{}] as usize) & 0xFFFF;\n", cpu_addr_idx));
+        code.push_str(&format!("            let write_addr = (*s.add({}) as usize) & 0xFFFF;\n", cpu_addr_idx));
         code.push_str("            if write_addr < 0xC000 && write_addr < ram_len {\n");
-        code.push_str(&format!("                ram[write_addr] = (signals[{}] & 0xFF) as u8;\n", d_idx));
+        code.push_str(&format!("                ram[write_addr] = (*s.add({}) & 0xFF) as u8;\n", d_idx));
         code.push_str("                // Check for text page write ($0400-$07FF)\n");
         code.push_str("                if write_addr >= 0x0400 && write_addr <= 0x07FF {\n");
         code.push_str("                    text_dirty = true;\n");
@@ -230,12 +231,12 @@ impl Apple2Extension {
         code.push_str("        }\n\n");
 
         // Check for keyboard strobe clear
-        code.push_str(&format!("        if signals[{}] == 1 {{\n", read_key_idx));
+        code.push_str(&format!("        if *s.add({}) == 1 {{\n", read_key_idx));
         code.push_str("            key_cleared = true;\n");
         code.push_str("        }\n\n");
 
         // Check for speaker toggle
-        code.push_str(&format!("        let speaker = signals[{}];\n", speaker_idx));
+        code.push_str(&format!("        let speaker = *s.add({});\n", speaker_idx));
         code.push_str("        if speaker != prev_speaker {\n");
         code.push_str("            speaker_toggles += 1;\n");
         code.push_str("            prev_speaker = speaker;\n");
