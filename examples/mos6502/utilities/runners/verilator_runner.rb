@@ -323,7 +323,12 @@ module RHDL
 
       # Export MOS6502 CPU to Verilog
       verilog_file = File.join(VERILOG_DIR, 'mos6502.v')
-      unless File.exist?(verilog_file) && File.mtime(verilog_file) > File.mtime(__FILE__)
+      verilog_codegen = File.expand_path('../../../../lib/rhdl/codegen/verilog/verilog.rb', __dir__)
+      export_deps = [__FILE__, verilog_codegen].select { |p| File.exist?(p) }
+      needs_export = !File.exist?(verilog_file) ||
+                     export_deps.any? { |p| File.mtime(p) > File.mtime(verilog_file) }
+
+      if needs_export
         puts "  Exporting MOS6502 to Verilog..."
         export_verilog(verilog_file)
       end
