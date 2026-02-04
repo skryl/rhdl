@@ -235,11 +235,15 @@ module RHDL
 
           # ALU operations
           if reg_write == 1
+            opcode_nibble = (instruction >> 4) & 0x0F
             if alu_src == 1
-              # Immediate load
+              # Immediate load (LDI)
               result = operand & 0xFF
+            elsif opcode_nibble == 1
+              # LDA - direct memory load, bypass ALU
+              result = @ram.read_mem(operand & 0xFF)
             else
-              # Memory operand through ALU
+              # Memory operand through ALU (ADD, SUB, AND, OR, XOR, etc.)
               mem_operand = @ram.read_mem(operand & 0xFF)
               # Provide memory data to CPU for ALU computation
               @cpu.set_input(:mem_data_in, mem_operand)
