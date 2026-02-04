@@ -1,4 +1,4 @@
-# Chapter 10: Hardware Description Languages
+# Appendix E: Hardware Description Languages
 
 ## Overview
 

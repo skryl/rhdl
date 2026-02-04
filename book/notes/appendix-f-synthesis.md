@@ -1,4 +1,4 @@
-# Chapter 11: Synthesis and Implementation
+# Appendix F: Synthesis and Implementation
 
 ## Overview
 
