@@ -3,7 +3,7 @@
 require 'spec_helper'
 require_relative '../../../../examples/apple2/utilities/output/speaker'
 
-RSpec.describe RHDL::Apple2::Speaker do
+RSpec.describe RHDL::Examples::Apple2::Speaker do
   let(:speaker) { described_class.new }
 
   describe '#initialize' do

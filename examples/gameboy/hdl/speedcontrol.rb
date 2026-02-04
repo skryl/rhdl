@@ -10,8 +10,10 @@ require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
 require_relative '../../../lib/rhdl/dsl/sequential'
 
-module GameBoy
-  class SpeedControl < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module GameBoy
+      class SpeedControl < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -47,6 +49,8 @@ module GameBoy
       clkdiv <= mux(pause,
                     clkdiv,  # Hold when paused
                     (clkdiv + lit(1, width: 3)) & lit(7, width: 3))
+    end
+      end
     end
   end
 end

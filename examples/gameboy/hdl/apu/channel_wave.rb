@@ -10,8 +10,10 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module GameBoy
-  class ChannelWave < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module GameBoy
+      class ChannelWave < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -111,6 +113,8 @@ module GameBoy
       length_counter <= mux(ce & trigger,
                             lit(256, width: 8) - cat(lit(0, width: 0), length_reg),
                             length_counter)
+    end
+      end
     end
   end
 end

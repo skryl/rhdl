@@ -236,7 +236,7 @@ impl Default for AppleIIState {
 /// - Disk controller ($C0E0-$C0EF): Calls Ruby I/O handler
 ///
 /// External devices can access internal memory via peek/poke methods.
-#[magnus::wrap(class = "MOS6502::ISASimulatorNative")]
+#[magnus::wrap(class = "RHDL::Examples::MOS6502::ISASimulatorNative")]
 struct RubyCpu {
     cpu: RefCell<Cpu6502Core>,
     memory: RefCell<Vec<u8>>,           // Internal 64KB memory
@@ -1125,10 +1125,12 @@ impl RubyCpu {
 
 #[magnus::init]
 fn init(ruby: &Ruby) -> Result<(), Error> {
-    // Define module MOS6502
-    let module = ruby.define_module("MOS6502")?;
+    // Define module hierarchy RHDL::Examples::MOS6502
+    let rhdl = ruby.define_module("RHDL")?;
+    let examples = rhdl.define_module("Examples")?;
+    let module = examples.define_module("MOS6502")?;
 
-    // Define class MOS6502::ISASimulatorNative
+    // Define class RHDL::Examples::MOS6502::ISASimulatorNative
     let class = module.define_class("ISASimulatorNative", ruby.class_object())?;
 
     class.define_alloc_func::<RubyCpu>();

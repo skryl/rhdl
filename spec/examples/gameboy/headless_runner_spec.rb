@@ -6,7 +6,7 @@ require 'spec_helper'
 $LOAD_PATH.unshift(File.expand_path('../../../../examples/gameboy/utilities/runners', __FILE__))
 require 'headless_runner'
 
-RSpec.describe RHDL::GameBoy::HeadlessRunner, :slow do
+RSpec.describe RHDL::Examples::GameBoy::HeadlessRunner, :slow do
   describe 'HDL mode with Ruby backend (default)' do
     it 'creates HDL mode runner with Ruby backend by default' do
       runner = described_class.new

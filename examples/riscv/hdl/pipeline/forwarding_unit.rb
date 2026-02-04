@@ -6,10 +6,12 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../constants'
 
-module RISCV
-  module Pipeline
-    # Forward source selection
-    module ForwardSel
+module RHDL
+  module Examples
+    module RISCV
+      module Pipeline
+        # Forward source selection
+        module ForwardSel
       NONE    = 0  # No forwarding, use register file
       EX_MEM  = 1  # Forward from EX/MEM (ALU result)
       MEM_WB  = 2  # Forward from MEM/WB (memory or ALU result)
@@ -68,6 +70,8 @@ module RISCV
                         lit(ForwardSel::NONE, width: 2)))
       end
 
+        end
+      end
     end
   end
 end

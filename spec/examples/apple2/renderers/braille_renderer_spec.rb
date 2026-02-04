@@ -4,7 +4,7 @@ require 'spec_helper'
 
 require_relative '../../../../examples/apple2/utilities/renderers/braille_renderer'
 
-RSpec.describe RHDL::Apple2::BrailleRenderer do
+RSpec.describe RHDL::Examples::Apple2::BrailleRenderer do
   let(:renderer) { described_class.new }
 
   # Create a test bitmap (192 rows x 280 pixels)

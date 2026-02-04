@@ -7,31 +7,31 @@ require_relative '../../../../../examples/mos6502/utilities/apple2/harness'
 require_relative '../../../../../examples/mos6502/utilities/simulators/isa_simulator'
 
 RSpec.describe 'Simulator mode selection', :slow do
-  describe 'Apple2Harness::ISARunner' do
+  describe 'RHDL::Examples::MOS6502::Apple2Harness::ISARunner' do
     it 'creates a runner that responds to native?' do
-      runner = Apple2Harness::ISARunner.new
+      runner = RHDL::Examples::MOS6502::Apple2Harness::ISARunner.new
       expect(runner).to respond_to(:native?)
     end
 
     it 'returns :native or :ruby for simulator_type' do
-      runner = Apple2Harness::ISARunner.new
+      runner = RHDL::Examples::MOS6502::Apple2Harness::ISARunner.new
       expect([:native, :ruby]).to include(runner.simulator_type)
     end
 
     it 'uses native simulator when available' do
-      skip 'Native extension not available' unless MOS6502::NATIVE_AVAILABLE
-      runner = Apple2Harness::ISARunner.new
+      skip 'Native extension not available' unless RHDL::Examples::MOS6502::NATIVE_AVAILABLE
+      runner = RHDL::Examples::MOS6502::Apple2Harness::ISARunner.new
       expect(runner.native?).to be true
       expect(runner.simulator_type).to eq(:native)
     end
   end
 
   describe 'pure Ruby ISASimulator' do
-    let(:bus) { MOS6502::Apple2Bus.new('test_bus') }
-    let(:cpu) { MOS6502::ISASimulator.new(bus) }
+    let(:bus) { RHDL::Examples::MOS6502::Apple2Bus.new('test_bus') }
+    let(:cpu) { RHDL::Examples::MOS6502::ISASimulator.new(bus) }
 
     it 'is a Ruby class' do
-      expect(cpu).to be_a(MOS6502::ISASimulator)
+      expect(cpu).to be_a(RHDL::Examples::MOS6502::ISASimulator)
     end
 
     it 'responds to standard CPU methods' do
@@ -62,12 +62,12 @@ RSpec.describe 'Simulator mode selection', :slow do
 
   describe 'HDL Runner' do
     it 'creates a cycle-accurate runner' do
-      runner = Apple2Harness::Runner.new
+      runner = RHDL::Examples::MOS6502::Apple2Harness::Runner.new
       expect(runner.simulator_type).to eq(:hdl)
     end
 
     it 'responds to standard runner methods' do
-      runner = Apple2Harness::Runner.new
+      runner = RHDL::Examples::MOS6502::Apple2Harness::Runner.new
       expect(runner).to respond_to(:cpu)
       expect(runner).to respond_to(:bus)
       expect(runner).to respond_to(:reset)
@@ -81,9 +81,9 @@ RSpec.describe 'Simulator mode selection', :slow do
 
     context 'with :native mode' do
       it 'uses ISARunner which prefers native extension' do
-        runner = Apple2Harness::ISARunner.new
+        runner = RHDL::Examples::MOS6502::Apple2Harness::ISARunner.new
         # ISARunner automatically uses native if available
-        if MOS6502::NATIVE_AVAILABLE
+        if RHDL::Examples::MOS6502::NATIVE_AVAILABLE
           expect(runner.native?).to be true
         else
           expect(runner.native?).to be false
@@ -93,18 +93,18 @@ RSpec.describe 'Simulator mode selection', :slow do
 
     context 'with :ruby mode' do
       it 'can create pure Ruby ISASimulator directly' do
-        bus = MOS6502::Apple2Bus.new('test_bus')
-        cpu = MOS6502::ISASimulator.new(bus)
+        bus = RHDL::Examples::MOS6502::Apple2Bus.new('test_bus')
+        cpu = RHDL::Examples::MOS6502::ISASimulator.new(bus)
 
         # This is the Ruby implementation
-        expect(cpu.class.name).to eq('MOS6502::ISASimulator')
+        expect(cpu.class.name).to eq('RHDL::Examples::MOS6502::ISASimulator')
         expect(cpu).not_to respond_to(:native?)
       end
     end
 
     context 'with :hdl mode' do
       it 'creates cycle-accurate HDL runner' do
-        runner = Apple2Harness::Runner.new
+        runner = RHDL::Examples::MOS6502::Apple2Harness::Runner.new
         expect(runner.simulator_type).to eq(:hdl)
       end
     end
@@ -128,7 +128,7 @@ RSpec.describe 'Simulator mode selection', :slow do
     end
 
     it 'ISARunner produces correct result' do
-      runner = Apple2Harness::ISARunner.new
+      runner = RHDL::Examples::MOS6502::Apple2Harness::ISARunner.new
       runner.load_ram(test_program, base_addr: 0x0800)
 
       # For native mode, write reset vector to CPU memory
@@ -153,8 +153,8 @@ RSpec.describe 'Simulator mode selection', :slow do
     end
 
     it 'Ruby ISASimulator produces correct result' do
-      bus = MOS6502::Apple2Bus.new('test_bus')
-      cpu = MOS6502::ISASimulator.new(bus)
+      bus = RHDL::Examples::MOS6502::Apple2Bus.new('test_bus')
+      cpu = RHDL::Examples::MOS6502::ISASimulator.new(bus)
       bus.load_ram(test_program, base_addr: 0x0800)
       bus.write(0xFFFC, 0x00)
       bus.write(0xFFFD, 0x08)
@@ -166,7 +166,7 @@ RSpec.describe 'Simulator mode selection', :slow do
     end
 
     it 'HDL Runner produces correct result' do
-      runner = Apple2Harness::Runner.new
+      runner = RHDL::Examples::MOS6502::Apple2Harness::Runner.new
       runner.load_ram(test_program, base_addr: 0x0800)
       runner.bus.write(0xFFFC, 0x00)
       runner.bus.write(0xFFFD, 0x08)

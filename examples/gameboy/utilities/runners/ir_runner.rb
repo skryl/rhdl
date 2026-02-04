@@ -4,9 +4,9 @@
 # High-performance IR-level simulation using batched Rust execution
 #
 # Usage:
-#   runner = RHDL::GameBoy::IrRunner.new(backend: :interpret)
-#   runner = RHDL::GameBoy::IrRunner.new(backend: :jit)
-#   runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+#   runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :interpret)
+#   runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :jit)
+#   runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
 #   runner.reset
 #   runner.run_steps(100)
 
@@ -15,18 +15,19 @@ require_relative '../output/speaker'
 require_relative '../renderers/lcd_renderer'
 
 module RHDL
-  module GameBoy
-    # Utility module for exporting Gameboy component to IR
-    module GameBoyIr
+  module Examples
+    module GameBoy
+      # Utility module for exporting Gameboy component to IR
+      module GameBoyIr
       class << self
         # Get the Behavior IR for the Gameboy component (shallow, for Verilog export)
         def behavior_ir
-          ::GameBoy::Gameboy.to_ir
+          ::RHDL::Examples::GameBoy::Gameboy.to_ir
         end
 
         # Get the flattened Behavior IR (includes all subcomponent logic)
         def flat_ir
-          ::GameBoy::Gameboy.to_flat_ir
+          ::RHDL::Examples::GameBoy::Gameboy.to_flat_ir
         end
 
         # Convert to JSON format for the simulator
@@ -414,6 +415,7 @@ module RHDL
 
       def stop_audio
         @speaker.stop
+      end
       end
     end
   end

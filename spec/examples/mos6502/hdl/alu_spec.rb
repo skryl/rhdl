@@ -1,8 +1,8 @@
 require_relative '../spec_helper'
 require_relative '../../../../examples/mos6502/hdl/alu'
 
-RSpec.describe MOS6502::ALU do
-  let(:alu) { MOS6502::ALU.new }
+RSpec.describe RHDL::Examples::MOS6502::ALU do
+  let(:alu) { RHDL::Examples::MOS6502::ALU.new }
 
   before do
     alu.set_input(:c_in, 0)
@@ -13,7 +13,7 @@ RSpec.describe MOS6502::ALU do
     it 'adds two numbers' do
       alu.set_input(:a, 0x10)
       alu.set_input(:b, 0x20)
-      alu.set_input(:op, MOS6502::ALU::OP_ADC)
+      alu.set_input(:op, RHDL::Examples::MOS6502::ALU::OP_ADC)
       alu.propagate
 
       expect(alu.get_output(:result)).to eq(0x30)
@@ -26,7 +26,7 @@ RSpec.describe MOS6502::ALU do
       alu.set_input(:a, 0x10)
       alu.set_input(:b, 0x20)
       alu.set_input(:c_in, 1)
-      alu.set_input(:op, MOS6502::ALU::OP_ADC)
+      alu.set_input(:op, RHDL::Examples::MOS6502::ALU::OP_ADC)
       alu.propagate
 
       expect(alu.get_output(:result)).to eq(0x31)
@@ -35,7 +35,7 @@ RSpec.describe MOS6502::ALU do
     it 'sets carry on overflow' do
       alu.set_input(:a, 0xFF)
       alu.set_input(:b, 0x01)
-      alu.set_input(:op, MOS6502::ALU::OP_ADC)
+      alu.set_input(:op, RHDL::Examples::MOS6502::ALU::OP_ADC)
       alu.propagate
 
       expect(alu.get_output(:result)).to eq(0x00)
@@ -49,7 +49,7 @@ RSpec.describe MOS6502::ALU do
       alu.set_input(:a, 0x30)
       alu.set_input(:b, 0x10)
       alu.set_input(:c_in, 1)  # Carry set means no borrow
-      alu.set_input(:op, MOS6502::ALU::OP_SBC)
+      alu.set_input(:op, RHDL::Examples::MOS6502::ALU::OP_SBC)
       alu.propagate
 
       expect(alu.get_output(:result)).to eq(0x20)
@@ -61,7 +61,7 @@ RSpec.describe MOS6502::ALU do
     it 'performs AND' do
       alu.set_input(:a, 0xF0)
       alu.set_input(:b, 0x0F)
-      alu.set_input(:op, MOS6502::ALU::OP_AND)
+      alu.set_input(:op, RHDL::Examples::MOS6502::ALU::OP_AND)
       alu.propagate
 
       expect(alu.get_output(:result)).to eq(0x00)
@@ -71,7 +71,7 @@ RSpec.describe MOS6502::ALU do
     it 'performs ORA' do
       alu.set_input(:a, 0xF0)
       alu.set_input(:b, 0x0F)
-      alu.set_input(:op, MOS6502::ALU::OP_ORA)
+      alu.set_input(:op, RHDL::Examples::MOS6502::ALU::OP_ORA)
       alu.propagate
 
       expect(alu.get_output(:result)).to eq(0xFF)
@@ -82,7 +82,7 @@ RSpec.describe MOS6502::ALU do
   describe 'Shift operations' do
     it 'performs ASL' do
       alu.set_input(:a, 0x81)
-      alu.set_input(:op, MOS6502::ALU::OP_ASL)
+      alu.set_input(:op, RHDL::Examples::MOS6502::ALU::OP_ASL)
       alu.propagate
 
       expect(alu.get_output(:result)).to eq(0x02)
@@ -91,7 +91,7 @@ RSpec.describe MOS6502::ALU do
 
     it 'performs LSR' do
       alu.set_input(:a, 0x81)
-      alu.set_input(:op, MOS6502::ALU::OP_LSR)
+      alu.set_input(:op, RHDL::Examples::MOS6502::ALU::OP_LSR)
       alu.propagate
 
       expect(alu.get_output(:result)).to eq(0x40)
@@ -103,7 +103,7 @@ RSpec.describe MOS6502::ALU do
     it 'compares equal values' do
       alu.set_input(:a, 0x42)
       alu.set_input(:b, 0x42)
-      alu.set_input(:op, MOS6502::ALU::OP_CMP)
+      alu.set_input(:op, RHDL::Examples::MOS6502::ALU::OP_CMP)
       alu.propagate
 
       expect(alu.get_output(:z)).to eq(1)
@@ -113,7 +113,7 @@ RSpec.describe MOS6502::ALU do
 
   describe 'synthesis' do
     it 'generates valid Verilog' do
-      verilog = MOS6502::ALU.to_verilog
+      verilog = RHDL::Examples::MOS6502::ALU.to_verilog
       expect(verilog).to include('module mos6502_alu')
       expect(verilog).to include('input [3:0] op')
       expect(verilog).to include('output')
@@ -121,7 +121,7 @@ RSpec.describe MOS6502::ALU do
     end
 
     it 'generates valid FIRRTL' do
-      firrtl = MOS6502::ALU.to_circt
+      firrtl = RHDL::Examples::MOS6502::ALU.to_circt
       expect(firrtl).to include('FIRRTL version')
       expect(firrtl).to include('circuit mos6502_alu')
       expect(firrtl).to include('input a')
@@ -132,7 +132,7 @@ RSpec.describe MOS6502::ALU do
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? do
       it 'firtool can compile FIRRTL to Verilog' do
         result = CirctHelper.validate_firrtl_syntax(
-          MOS6502::ALU,
+          RHDL::Examples::MOS6502::ALU,
           base_dir: 'tmp/circt_test/mos6502_alu'
         )
 
@@ -142,8 +142,8 @@ RSpec.describe MOS6502::ALU do
 
     context 'when iverilog is available', :slow, if: HdlToolchain.iverilog_available? do
       it 'behavior Verilog matches RHDL simulation' do
-        verilog = MOS6502::ALU.to_verilog
-        behavior = MOS6502::ALU.new
+        verilog = RHDL::Examples::MOS6502::ALU.to_verilog
+        behavior = RHDL::Examples::MOS6502::ALU.new
         vectors = []
 
         inputs = { a: 8, b: 8, op: 4, c_in: 1, d_flag: 1 }
@@ -152,32 +152,32 @@ RSpec.describe MOS6502::ALU do
         # Test ADC: 0x10 + 0x20 = 0x30
         behavior.set_input(:a, 0x10)
         behavior.set_input(:b, 0x20)
-        behavior.set_input(:op, MOS6502::ALU::OP_ADC)
+        behavior.set_input(:op, RHDL::Examples::MOS6502::ALU::OP_ADC)
         behavior.set_input(:c_in, 0)
         behavior.set_input(:d_flag, 0)
         behavior.propagate
         vectors << {
-          inputs: { a: 0x10, b: 0x20, op: MOS6502::ALU::OP_ADC, c_in: 0, d_flag: 0 },
+          inputs: { a: 0x10, b: 0x20, op: RHDL::Examples::MOS6502::ALU::OP_ADC, c_in: 0, d_flag: 0 },
           expected: { result: behavior.get_output(:result), n: behavior.get_output(:n), z: behavior.get_output(:z), c: behavior.get_output(:c), v: behavior.get_output(:v) }
         }
 
         # Test AND: 0xF0 & 0x0F = 0x00
         behavior.set_input(:a, 0xF0)
         behavior.set_input(:b, 0x0F)
-        behavior.set_input(:op, MOS6502::ALU::OP_AND)
+        behavior.set_input(:op, RHDL::Examples::MOS6502::ALU::OP_AND)
         behavior.propagate
         vectors << {
-          inputs: { a: 0xF0, b: 0x0F, op: MOS6502::ALU::OP_AND, c_in: 0, d_flag: 0 },
+          inputs: { a: 0xF0, b: 0x0F, op: RHDL::Examples::MOS6502::ALU::OP_AND, c_in: 0, d_flag: 0 },
           expected: { result: behavior.get_output(:result), n: behavior.get_output(:n), z: behavior.get_output(:z), c: behavior.get_output(:c), v: behavior.get_output(:v) }
         }
 
         # Test ORA: 0xF0 | 0x0F = 0xFF
         behavior.set_input(:a, 0xF0)
         behavior.set_input(:b, 0x0F)
-        behavior.set_input(:op, MOS6502::ALU::OP_ORA)
+        behavior.set_input(:op, RHDL::Examples::MOS6502::ALU::OP_ORA)
         behavior.propagate
         vectors << {
-          inputs: { a: 0xF0, b: 0x0F, op: MOS6502::ALU::OP_ORA, c_in: 0, d_flag: 0 },
+          inputs: { a: 0xF0, b: 0x0F, op: RHDL::Examples::MOS6502::ALU::OP_ORA, c_in: 0, d_flag: 0 },
           expected: { result: behavior.get_output(:result), n: behavior.get_output(:n), z: behavior.get_output(:z), c: behavior.get_output(:c), v: behavior.get_output(:v) }
         }
 
@@ -200,7 +200,7 @@ RSpec.describe MOS6502::ALU do
   end
 
   describe 'gate-level netlist' do
-    let(:component) { MOS6502::ALU.new('mos6502_alu') }
+    let(:component) { RHDL::Examples::MOS6502::ALU.new('mos6502_alu') }
     let(:ir) { RHDL::Export::Structure::Lower.from_components([component], name: 'mos6502_alu') }
 
     it 'generates correct IR structure' do
@@ -226,49 +226,49 @@ RSpec.describe MOS6502::ALU do
     context 'when iverilog is available', :slow, if: HdlToolchain.iverilog_available? do
       it 'matches behavior simulation for ADC operations' do
         # Run behavior simulation to get expected results
-        behavior = MOS6502::ALU.new
+        behavior = RHDL::Examples::MOS6502::ALU.new
         vectors = []
 
         # Test ADC: 0x10 + 0x20 = 0x30
         behavior.set_input(:a, 0x10)
         behavior.set_input(:b, 0x20)
-        behavior.set_input(:op, MOS6502::ALU::OP_ADC)
+        behavior.set_input(:op, RHDL::Examples::MOS6502::ALU::OP_ADC)
         behavior.set_input(:c_in, 0)
         behavior.set_input(:d_flag, 0)
         behavior.propagate
         vectors << {
-          inputs: { a: 0x10, b: 0x20, op: MOS6502::ALU::OP_ADC, c_in: 0, d_flag: 0 },
+          inputs: { a: 0x10, b: 0x20, op: RHDL::Examples::MOS6502::ALU::OP_ADC, c_in: 0, d_flag: 0 },
           expected: { result: behavior.get_output(:result), n: behavior.get_output(:n), z: behavior.get_output(:z), c: behavior.get_output(:c), v: behavior.get_output(:v) }
         }
 
         # Test ADC with carry: 0xFF + 0x01 = 0x00 with carry
         behavior.set_input(:a, 0xFF)
         behavior.set_input(:b, 0x01)
-        behavior.set_input(:op, MOS6502::ALU::OP_ADC)
+        behavior.set_input(:op, RHDL::Examples::MOS6502::ALU::OP_ADC)
         behavior.set_input(:c_in, 0)
         behavior.propagate
         vectors << {
-          inputs: { a: 0xFF, b: 0x01, op: MOS6502::ALU::OP_ADC, c_in: 0, d_flag: 0 },
+          inputs: { a: 0xFF, b: 0x01, op: RHDL::Examples::MOS6502::ALU::OP_ADC, c_in: 0, d_flag: 0 },
           expected: { result: behavior.get_output(:result), n: behavior.get_output(:n), z: behavior.get_output(:z), c: behavior.get_output(:c), v: behavior.get_output(:v) }
         }
 
         # Test AND: 0xF0 & 0x0F = 0x00
         behavior.set_input(:a, 0xF0)
         behavior.set_input(:b, 0x0F)
-        behavior.set_input(:op, MOS6502::ALU::OP_AND)
+        behavior.set_input(:op, RHDL::Examples::MOS6502::ALU::OP_AND)
         behavior.propagate
         vectors << {
-          inputs: { a: 0xF0, b: 0x0F, op: MOS6502::ALU::OP_AND, c_in: 0, d_flag: 0 },
+          inputs: { a: 0xF0, b: 0x0F, op: RHDL::Examples::MOS6502::ALU::OP_AND, c_in: 0, d_flag: 0 },
           expected: { result: behavior.get_output(:result), n: behavior.get_output(:n), z: behavior.get_output(:z), c: behavior.get_output(:c), v: behavior.get_output(:v) }
         }
 
         # Test ORA: 0xF0 | 0x0F = 0xFF
         behavior.set_input(:a, 0xF0)
         behavior.set_input(:b, 0x0F)
-        behavior.set_input(:op, MOS6502::ALU::OP_ORA)
+        behavior.set_input(:op, RHDL::Examples::MOS6502::ALU::OP_ORA)
         behavior.propagate
         vectors << {
-          inputs: { a: 0xF0, b: 0x0F, op: MOS6502::ALU::OP_ORA, c_in: 0, d_flag: 0 },
+          inputs: { a: 0xF0, b: 0x0F, op: RHDL::Examples::MOS6502::ALU::OP_ORA, c_in: 0, d_flag: 0 },
           expected: { result: behavior.get_output(:result), n: behavior.get_output(:n), z: behavior.get_output(:z), c: behavior.get_output(:c), v: behavior.get_output(:v) }
         }
 

@@ -8,10 +8,12 @@ require_relative 'cpu'
 require_relative 'memory'
 require_relative '../../../spec/support/mos6502_assembler'
 
-module MOS6502
-  # Simulation harness for the synthesizable CPU
-  # All interaction with CPU is through ports only
-  class Harness
+module RHDL
+  module Examples
+    module MOS6502
+      # Simulation harness for the synthesizable CPU
+      # All interaction with CPU is through ports only
+      class Harness
     attr_reader :memory, :clock_count
 
     def initialize(memory = nil)
@@ -310,8 +312,8 @@ module MOS6502
     end
   end
 
-  # Simple disassembler for debugging
-  module Disassembler
+    # Simple disassembler for debugging
+    module Disassembler
     MNEMONICS = {
       0x00 => ['BRK', :imp], 0x01 => ['ORA', :indx], 0x05 => ['ORA', :zp],
       0x06 => ['ASL', :zp], 0x08 => ['PHP', :imp], 0x09 => ['ORA', :imm],
@@ -425,5 +427,7 @@ module MOS6502
       else [1, '']
       end
     end
+    end
   end
+end
 end

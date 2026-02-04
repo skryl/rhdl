@@ -6,7 +6,7 @@ require_relative '../../../../examples/apple2/hdl/audio_pwm'
 require_relative '../../../support/vhdl_reference_helper'
 require_relative '../../../support/hdl_toolchain'
 
-RSpec.describe RHDL::Apple2::AudioPWM do
+RSpec.describe RHDL::Examples::Apple2::AudioPWM do
   extend VhdlReferenceHelper
   let(:pwm) { described_class.new('pwm') }
 
@@ -259,7 +259,7 @@ RSpec.describe RHDL::Apple2::AudioPWM do
   end
 end
 
-RSpec.describe RHDL::Apple2::SpeakerToggle do
+RSpec.describe RHDL::Examples::Apple2::SpeakerToggle do
   let(:speaker) { described_class.new('speaker') }
 
   before do
@@ -355,7 +355,7 @@ RSpec.describe RHDL::Apple2::SpeakerToggle do
   end
 end
 
-RSpec.describe RHDL::Apple2::AudioMixer do
+RSpec.describe RHDL::Examples::Apple2::AudioMixer do
   let(:mixer) { described_class.new('mixer') }
 
   before do

@@ -25,8 +25,9 @@
 require 'rhdl/hdl'
 
 module RHDL
-  module Apple2
-    # Disk II ROM (256 bytes boot ROM at $C600-$C6FF)
+  module Examples
+    module Apple2
+      # Disk II ROM (256 bytes boot ROM at $C600-$C6FF)
     # Pure DSL component - ROM data loaded via simulation helper or initial: parameter
     class DiskIIROM < RHDL::HDL::Component
       include RHDL::DSL::Memory
@@ -235,5 +236,6 @@ module RHDL
         mem_read(:track_memory, addr & (TRACK_SIZE - 1))
       end
     end
+  end
   end
 end

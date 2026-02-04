@@ -24,7 +24,7 @@ RSpec.describe 'IrCompiler VCD Tracing' do
     require_relative '../../../../../examples/gameboy/gameboy'
     require_relative '../../../../../examples/gameboy/utilities/runners/ir_runner'
 
-    runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+    runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
     if @rom_available
       rom_data = File.binread(@rom_path)
       runner.load_rom(rom_data)

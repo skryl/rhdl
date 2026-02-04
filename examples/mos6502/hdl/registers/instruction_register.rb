@@ -5,9 +5,11 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module MOS6502
-  # Instruction Register and Operand Latches - Synthesizable via Sequential DSL
-  class InstructionRegister < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module MOS6502
+      # Instruction Register and Operand Latches - Synthesizable via Sequential DSL
+      class InstructionRegister < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -39,5 +41,7 @@ module MOS6502
     def read_opcode; read_reg(:opcode) || 0; end
     def read_operand; ((read_reg(:operand_hi) || 0) << 8) | (read_reg(:operand_lo) || 0); end
 
+    end
   end
+end
 end

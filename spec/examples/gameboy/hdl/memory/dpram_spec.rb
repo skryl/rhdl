@@ -10,7 +10,7 @@ RSpec.describe 'GameBoy DPRAM' do
     begin
       require_relative '../../../../../examples/gameboy/gameboy'
       require_relative '../../../../../examples/gameboy/hdl/memory/dpram'
-      @component_available = defined?(GameBoy::DPRAM)
+      @component_available = defined?(RHDL::Examples::GameBoy::DPRAM)
     rescue LoadError => e
       @component_available = false
       @load_error = e.message
@@ -50,20 +50,20 @@ RSpec.describe 'GameBoy DPRAM' do
   # ==========================================================================
   describe 'Component Definition' do
     it 'defines DPRAM class' do
-      expect(defined?(GameBoy::DPRAM)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::DPRAM)).to eq('constant')
     end
 
     it 'can be instantiated' do
-      dpram = GameBoy::DPRAM.new('test_dpram')
-      expect(dpram).to be_a(GameBoy::DPRAM)
+      dpram = RHDL::Examples::GameBoy::DPRAM.new('test_dpram')
+      expect(dpram).to be_a(RHDL::Examples::GameBoy::DPRAM)
     end
 
     it 'has correct default address width (13-bit for 8KB)' do
-      expect(GameBoy::DPRAM::DEFAULT_ADDR_WIDTH).to eq(13)
+      expect(RHDL::Examples::GameBoy::DPRAM::DEFAULT_ADDR_WIDTH).to eq(13)
     end
 
     it 'has correct data width (8-bit)' do
-      expect(GameBoy::DPRAM::DATA_WIDTH).to eq(8)
+      expect(RHDL::Examples::GameBoy::DPRAM::DATA_WIDTH).to eq(8)
     end
   end
 
@@ -71,7 +71,7 @@ RSpec.describe 'GameBoy DPRAM' do
   # Port A Operations
   # ==========================================================================
   describe 'Port A Operations' do
-    let(:dpram) { GameBoy::DPRAM.new('dpram_a') }
+    let(:dpram) { RHDL::Examples::GameBoy::DPRAM.new('dpram_a') }
 
     it 'writes data via Port A' do
       dpram.set_input(:address_a, 0x100)
@@ -139,7 +139,7 @@ RSpec.describe 'GameBoy DPRAM' do
   # Port B Operations
   # ==========================================================================
   describe 'Port B Operations' do
-    let(:dpram) { GameBoy::DPRAM.new('dpram_b') }
+    let(:dpram) { RHDL::Examples::GameBoy::DPRAM.new('dpram_b') }
 
     it 'writes data via Port B' do
       dpram.set_input(:address_b, 0x400)
@@ -182,7 +182,7 @@ RSpec.describe 'GameBoy DPRAM' do
   # Dual-Port Operations (Simultaneous Access)
   # ==========================================================================
   describe 'Dual-Port Operations' do
-    let(:dpram) { GameBoy::DPRAM.new('dpram_dual') }
+    let(:dpram) { RHDL::Examples::GameBoy::DPRAM.new('dpram_dual') }
 
     it 'allows simultaneous read from both ports at different addresses' do
       # Pre-write data using direct memory access
@@ -250,7 +250,7 @@ RSpec.describe 'GameBoy DPRAM' do
   # Direct Memory Access
   # ==========================================================================
   describe 'Direct Memory Access' do
-    let(:dpram) { GameBoy::DPRAM.new('dpram_direct') }
+    let(:dpram) { RHDL::Examples::GameBoy::DPRAM.new('dpram_direct') }
 
     it 'supports direct read via read_mem' do
       dpram.write_mem(0x50, 0x12)
@@ -284,7 +284,7 @@ RSpec.describe 'GameBoy DPRAM' do
   # Boundary Conditions
   # ==========================================================================
   describe 'Boundary Conditions' do
-    let(:dpram) { GameBoy::DPRAM.new('dpram_boundary') }
+    let(:dpram) { RHDL::Examples::GameBoy::DPRAM.new('dpram_boundary') }
 
     it 'handles address 0' do
       dpram.set_input(:address_a, 0x000)
@@ -333,8 +333,8 @@ RSpec.describe 'GameBoy DPRAM' do
   describe 'Configuration' do
     it 'supports custom address width' do
       # Create DPRAM with 10-bit address (1KB)
-      dpram = GameBoy::DPRAM.new('small_dpram', addr_width: 10)
-      expect(dpram).to be_a(GameBoy::DPRAM)
+      dpram = RHDL::Examples::GameBoy::DPRAM.new('small_dpram', addr_width: 10)
+      expect(dpram).to be_a(RHDL::Examples::GameBoy::DPRAM)
 
       # Should work for addresses up to 1023
       dpram.write_mem(1023, 0x42)

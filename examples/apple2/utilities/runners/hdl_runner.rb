@@ -11,8 +11,9 @@ require_relative '../renderers/color_renderer'
 require_relative '../input/ps2_encoder'
 
 module RHDL
-  module Apple2
-    # HDL-based runner using cycle-accurate Apple2 simulation
+  module Examples
+    module Apple2
+      # HDL-based runner using cycle-accurate Apple2 simulation
     class HdlRunner
       attr_reader :apple2, :ram
 
@@ -554,5 +555,6 @@ module RHDL
         0
       end
     end
+  end
   end
 end

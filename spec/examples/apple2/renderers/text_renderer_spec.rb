@@ -4,7 +4,7 @@ require 'spec_helper'
 
 require_relative '../../../../examples/apple2/utilities/renderers/text_renderer'
 
-RSpec.describe RHDL::Apple2::TextRenderer do
+RSpec.describe RHDL::Examples::Apple2::TextRenderer do
   let(:renderer) { described_class.new }
 
   # Create a test screen array (24 rows x 40 cols)

@@ -5,9 +5,11 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module MOS6502
-  # 6502 Stack Pointer - Synthesizable via Sequential DSL
-  class StackPointer < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module MOS6502
+      # 6502 Stack Pointer - Synthesizable via Sequential DSL
+      class StackPointer < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -45,5 +47,7 @@ module MOS6502
     def read_sp; read_reg(:sp) || 0xFD; end
     def write_sp(v); write_reg(:sp, v & 0xFF); end
 
+    end
   end
+end
 end

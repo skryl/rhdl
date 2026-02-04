@@ -5,10 +5,12 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module MOS6502
-  # Address Latch - Synthesizable via Sequential DSL
-  # Uses internal registers and derives outputs combinationally
-  class AddressLatch < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module MOS6502
+      # Address Latch - Synthesizable via Sequential DSL
+      # Uses internal registers and derives outputs combinationally
+      class AddressLatch < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -39,5 +41,7 @@ module MOS6502
       addr <= cat(addr_hi, addr_lo)
     end
 
+    end
   end
+end
 end

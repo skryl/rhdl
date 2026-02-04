@@ -6,7 +6,7 @@ require_relative '../../../../examples/apple2/hdl/character_rom'
 require_relative '../../../support/vhdl_reference_helper'
 require_relative '../../../support/hdl_toolchain'
 
-RSpec.describe RHDL::Apple2::CharacterROM do
+RSpec.describe RHDL::Examples::Apple2::CharacterROM do
   extend VhdlReferenceHelper
   let(:char_rom) { described_class.new('char_rom') }
 

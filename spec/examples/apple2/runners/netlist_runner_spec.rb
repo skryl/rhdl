@@ -4,7 +4,7 @@ require 'spec_helper'
 require 'rhdl'
 require_relative '../../../../examples/apple2/utilities/runners/netlist_runner'
 
-RSpec.describe RHDL::Apple2::NetlistRunner do
+RSpec.describe RHDL::Examples::Apple2::NetlistRunner do
   # These tests verify all 3 backend options for netlist mode
   # Combined with hdl mode, this covers all 6 mode/sim combinations
 

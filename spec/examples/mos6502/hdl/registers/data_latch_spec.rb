@@ -2,7 +2,7 @@
 
 require_relative '../../spec_helper'
 
-RSpec.describe MOS6502::DataLatch do
+RSpec.describe RHDL::Examples::MOS6502::DataLatch do
   let(:latch) { described_class.new('test_data_latch') }
 
   describe 'simulation' do

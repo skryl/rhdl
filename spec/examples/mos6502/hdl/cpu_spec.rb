@@ -2,7 +2,7 @@
 
 require_relative '../spec_helper'
 
-RSpec.describe MOS6502::CPU do
+RSpec.describe RHDL::Examples::MOS6502::CPU do
   describe 'structure' do
     it 'has structure defined' do
       expect(described_class.structure_defined?).to be_truthy

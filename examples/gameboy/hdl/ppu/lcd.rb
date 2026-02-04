@@ -8,8 +8,10 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module GameBoy
-  class LCD < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module GameBoy
+      class LCD < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -92,6 +94,8 @@ module GameBoy
       # Reset counters when LCD is turned off
       h_counter <= mux(~lcd_on, lit(0, width: 9), h_counter)
       v_counter <= mux(~lcd_on, lit(0, width: 8), v_counter)
+    end
+      end
     end
   end
 end

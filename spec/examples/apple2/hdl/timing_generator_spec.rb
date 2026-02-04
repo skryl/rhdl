@@ -4,7 +4,7 @@ require 'spec_helper'
 require 'rhdl'
 require_relative '../../../../examples/apple2/hdl/timing_generator'
 
-RSpec.describe RHDL::Apple2::TimingGenerator do
+RSpec.describe RHDL::Examples::Apple2::TimingGenerator do
   let(:timing_gen) { described_class.new('timing_gen') }
 
   before do

@@ -4,9 +4,9 @@
 # High-performance IR-level simulation using batched Rust execution
 #
 # Usage:
-#   runner = RHDL::Apple2::IrSimulatorRunner.new(backend: :interpret)
-#   runner = RHDL::Apple2::IrSimulatorRunner.new(backend: :jit)
-#   runner = RHDL::Apple2::IrSimulatorRunner.new(backend: :compile)
+#   runner = RHDL::Examples::Apple2::IrSimulatorRunner.new(backend: :interpret)
+#   runner = RHDL::Examples::Apple2::IrSimulatorRunner.new(backend: :jit)
+#   runner = RHDL::Examples::Apple2::IrSimulatorRunner.new(backend: :compile)
 #   runner.reset
 #   runner.run_steps(100)
 
@@ -18,8 +18,9 @@ require 'rhdl/codegen'
 require 'rhdl/codegen/ir/sim/ir_interpreter'
 
 module RHDL
-  module Apple2
-    # High-performance IR-level runner using batched Rust execution
+  module Examples
+    module Apple2
+      # High-performance IR-level runner using batched Rust execution
     class IrSimulatorRunner
       attr_reader :sim, :ir_json
 
@@ -600,5 +601,6 @@ module RHDL
       end
 
     end
+  end
   end
 end

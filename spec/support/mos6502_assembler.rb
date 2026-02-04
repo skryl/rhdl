@@ -1,8 +1,10 @@
 # MOS 6502 Assembler
 # Simple two-pass assembler for 6502 assembly language
 
-module MOS6502
-  class Assembler
+module RHDL
+  module Examples
+    module MOS6502
+      class Assembler
     # Instruction definitions: mnemonic => { mode => [opcode, size] }
     INSTRUCTIONS = {
       'ADC' => { imm: [0x69, 2], zp: [0x65, 2], zpx: [0x75, 2], abs: [0x6D, 3],
@@ -413,6 +415,8 @@ module MOS6502
 
     def parse_word_list(str)
       str.split(',').map(&:strip)
+    end
+      end
     end
   end
 end

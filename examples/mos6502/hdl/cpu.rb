@@ -14,8 +14,10 @@ require_relative 'address_gen'
 require_relative 'instruction_decoder'
 require_relative 'control_unit'
 
-module MOS6502
-  class CPU < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module MOS6502
+      class CPU < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -513,14 +515,14 @@ module MOS6502
       # The register will capture on the clock edge entering EXECUTE
       actual_load_a <= ext_a_load_en |
                        (ctrl_reg_write &
-                        (dec_dst_reg == lit(MOS6502::REG_A, width: 2)))
+                        (dec_dst_reg == lit(RHDL::Examples::MOS6502::REG_A, width: 2)))
       actual_load_x <= ext_x_load_en |
                        (ctrl_reg_write &
-                        (dec_dst_reg == lit(MOS6502::REG_X, width: 2))) |
+                        (dec_dst_reg == lit(RHDL::Examples::MOS6502::REG_X, width: 2))) |
                        (is_tsx_instr & ctrl_reg_write)
       actual_load_y <= ext_y_load_en |
                        (ctrl_reg_write &
-                        (dec_dst_reg == lit(MOS6502::REG_Y, width: 2)))
+                        (dec_dst_reg == lit(RHDL::Examples::MOS6502::REG_Y, width: 2)))
 
       # PC control
       # For RTS/RTI: PC loads from return_addr (cat(data_in, alatch_addr_lo))
@@ -637,5 +639,7 @@ module MOS6502
       cycle_count <= ctrl_cycle_count
     end
 
+    end
   end
+end
 end

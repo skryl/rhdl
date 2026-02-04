@@ -10,7 +10,7 @@ require_relative '../../../../../examples/gameboy/gameboy'
 # - Sprite rendering during Mode 3
 # - 10 sprites per scanline limit
 # - Priority handling
-RSpec.describe GameBoy::Sprites do
+RSpec.describe RHDL::Examples::GameBoy::Sprites do
   def clock_cycle(component, enable_ce: true)
     component.set_input(:ce, enable_ce ? 1 : 0)
     component.set_input(:clk, 0)
@@ -23,7 +23,7 @@ RSpec.describe GameBoy::Sprites do
     n.times { clock_cycle(component, enable_ce: enable_ce) }
   end
 
-  let(:sprites) { GameBoy::Sprites.new }
+  let(:sprites) { RHDL::Examples::GameBoy::Sprites.new }
 
   before do
     # Initialize inputs to default values
@@ -56,7 +56,7 @@ RSpec.describe GameBoy::Sprites do
 
   describe 'component instantiation' do
     it 'creates a Sprites component' do
-      expect(sprites).to be_a(GameBoy::Sprites)
+      expect(sprites).to be_a(RHDL::Examples::GameBoy::Sprites)
     end
 
     it 'has sprite fetch outputs' do

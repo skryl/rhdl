@@ -4,7 +4,7 @@ require 'spec_helper'
 require 'rhdl'
 require_relative '../../../../examples/apple2/hdl/apple2'
 
-RSpec.describe RHDL::Apple2::Apple2 do
+RSpec.describe RHDL::Examples::Apple2::Apple2 do
   let(:apple2) { described_class.new('apple2') }
   let(:ram) { Array.new(48 * 1024, 0) }  # 48KB RAM
 
@@ -75,12 +75,12 @@ RSpec.describe RHDL::Apple2::Apple2 do
 
   describe 'component integration' do
     it 'elaborates all sub-components' do
-      expect(apple2.instance_variable_get(:@timing)).to be_a(RHDL::Apple2::TimingGenerator)
-      expect(apple2.instance_variable_get(:@video_gen)).to be_a(RHDL::Apple2::VideoGenerator)
-      expect(apple2.instance_variable_get(:@char_rom)).to be_a(RHDL::Apple2::CharacterROM)
-      expect(apple2.instance_variable_get(:@speaker_toggle)).to be_a(RHDL::Apple2::SpeakerToggle)
-      expect(apple2.instance_variable_get(:@cpu)).to be_a(RHDL::Apple2::CPU6502)
-      expect(apple2.instance_variable_get(:@keyboard)).to be_a(RHDL::Apple2::Keyboard)
+      expect(apple2.instance_variable_get(:@timing)).to be_a(RHDL::Examples::Apple2::TimingGenerator)
+      expect(apple2.instance_variable_get(:@video_gen)).to be_a(RHDL::Examples::Apple2::VideoGenerator)
+      expect(apple2.instance_variable_get(:@char_rom)).to be_a(RHDL::Examples::Apple2::CharacterROM)
+      expect(apple2.instance_variable_get(:@speaker_toggle)).to be_a(RHDL::Examples::Apple2::SpeakerToggle)
+      expect(apple2.instance_variable_get(:@cpu)).to be_a(RHDL::Examples::Apple2::CPU6502)
+      expect(apple2.instance_variable_get(:@keyboard)).to be_a(RHDL::Examples::Apple2::Keyboard)
     end
   end
 
@@ -412,7 +412,7 @@ RSpec.describe RHDL::Apple2::Apple2 do
   end
 end
 
-RSpec.describe RHDL::Apple2::VGAOutput do
+RSpec.describe RHDL::Examples::Apple2::VGAOutput do
   let(:vga) { described_class.new('vga') }
 
   before do
@@ -532,7 +532,7 @@ RSpec.describe 'Apple II ROM Integration' do
   # Integration test using only the Apple2 HDL component
   # Verifies ROM loading and memory map access via cpu_din
 
-  let(:apple2) { RHDL::Apple2::Apple2.new('apple2') }
+  let(:apple2) { RHDL::Examples::Apple2::Apple2.new('apple2') }
   let(:ram) { Array.new(48 * 1024, 0) }
 
   ROM_PATH = File.expand_path('../../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
@@ -676,7 +676,7 @@ RSpec.describe 'Apple II Simulator Modes' do
     require 'rhdl/codegen'
 
     # Use the component's to_flat_ir method which flattens all subcomponents
-    ir = RHDL::Apple2::Apple2.to_flat_ir
+    ir = RHDL::Examples::Apple2::Apple2.to_flat_ir
     ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
 
     case mode[:backend]
@@ -833,7 +833,7 @@ RSpec.describe 'Sub-cycles PC Progression' do
   def create_ir_simulator(backend, sub_cycles:)
     require 'rhdl/codegen'
 
-    ir = RHDL::Apple2::Apple2.to_flat_ir
+    ir = RHDL::Examples::Apple2::Apple2.to_flat_ir
     ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
 
     case backend
@@ -1041,7 +1041,7 @@ RSpec.describe 'Sub-cycles PC Progression' do
     it 'clamps sub_cycles to valid range (1-14)' do
       require 'rhdl/codegen'
 
-      ir = RHDL::Apple2::Apple2.to_flat_ir
+      ir = RHDL::Examples::Apple2::Apple2.to_flat_ir
       ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
 
       # Test interpreter wrapper clamps values
@@ -1101,12 +1101,12 @@ RSpec.describe 'Hi-res Rendering Modes' do
     # Try the requested backend, fall back to interpreter
     runner = nil
     begin
-      runner = RHDL::Apple2::IrSimulatorRunner.new(backend: backend)
+      runner = RHDL::Examples::Apple2::IrSimulatorRunner.new(backend: backend)
     rescue LoadError => e
       if backend == :jit
         # Fall back to interpreter
         begin
-          runner = RHDL::Apple2::IrSimulatorRunner.new(backend: :interpret)
+          runner = RHDL::Examples::Apple2::IrSimulatorRunner.new(backend: :interpret)
         rescue LoadError
           return nil  # No native backends available
         end
@@ -1130,7 +1130,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
   def create_hdl_runner_with_karateka
     require_relative '../../../../examples/apple2/utilities/runners/hdl_runner'
 
-    runner = RHDL::Apple2::HdlRunner.new
+    runner = RHDL::Examples::Apple2::HdlRunner.new
 
     # Modify reset vector to point to game entry
     rom = @rom_data.dup
@@ -1368,7 +1368,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
   # Check if native ISA simulator is available
   def native_isa_available?
     require_relative '../../../../examples/mos6502/utilities/simulators/isa_simulator_native'
-    MOS6502::NATIVE_AVAILABLE
+    RHDL::Examples::MOS6502::NATIVE_AVAILABLE
   rescue LoadError
     false
   end
@@ -1377,17 +1377,17 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
   def create_isa_simulator(native: false)
     require_relative '../../../../examples/mos6502/utilities/apple2/bus'
 
-    bus = MOS6502::Apple2Bus.new
+    bus = RHDL::Examples::MOS6502::Apple2Bus.new
     bus.load_rom(@rom_data, base_addr: 0xD000)
 
     if native
       require_relative '../../../../examples/mos6502/utilities/simulators/isa_simulator_native'
-      cpu = MOS6502::ISASimulatorNative.new(bus)
+      cpu = RHDL::Examples::MOS6502::ISASimulatorNative.new(bus)
       # Load ROM into native CPU's internal memory too
       cpu.load_bytes(@rom_data, 0xD000)
     else
       require_relative '../../../../examples/mos6502/utilities/simulators/isa_simulator'
-      cpu = MOS6502::ISASimulator.new(bus)
+      cpu = RHDL::Examples::MOS6502::ISASimulator.new(bus)
     end
 
     [cpu, bus]
@@ -1397,7 +1397,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
   def create_apple2_ir_simulator(backend)
     require 'rhdl/codegen'
 
-    ir = RHDL::Apple2::Apple2.to_flat_ir
+    ir = RHDL::Examples::Apple2::Apple2.to_flat_ir
     ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
 
     case backend

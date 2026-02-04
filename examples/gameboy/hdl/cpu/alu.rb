@@ -19,8 +19,10 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module GameBoy
-  class SM83_ALU < RHDL::HDL::Component
+module RHDL
+  module Examples
+    module GameBoy
+      class SM83_ALU < RHDL::HDL::Component
     include RHDL::DSL::Behavior
 
     # ALU operation codes (from T80_Pack.vhd)
@@ -133,6 +135,8 @@ module GameBoy
 
       # Assemble flags output (GB format: ZNHC0000)
       f_out <= cat(z_flag, n_flag, h_flag, c_flag, lit(0, width: 4))
+    end
+      end
     end
   end
 end

@@ -10,7 +10,7 @@ RSpec.describe 'GameBoy SPRAM' do
     begin
       require_relative '../../../../../examples/gameboy/gameboy'
       require_relative '../../../../../examples/gameboy/hdl/memory/spram'
-      @component_available = defined?(GameBoy::SPRAM)
+      @component_available = defined?(RHDL::Examples::GameBoy::SPRAM)
     rescue LoadError => e
       @component_available = false
       @load_error = e.message
@@ -34,24 +34,24 @@ RSpec.describe 'GameBoy SPRAM' do
   # ==========================================================================
   describe 'Component Definition' do
     it 'defines SPRAM class' do
-      expect(defined?(GameBoy::SPRAM)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::SPRAM)).to eq('constant')
     end
 
     it 'can be instantiated' do
-      spram = GameBoy::SPRAM.new('test_spram')
-      expect(spram).to be_a(GameBoy::SPRAM)
+      spram = RHDL::Examples::GameBoy::SPRAM.new('test_spram')
+      expect(spram).to be_a(RHDL::Examples::GameBoy::SPRAM)
     end
 
     it 'has correct address width (13-bit for 8KB)' do
-      expect(GameBoy::SPRAM::ADDR_WIDTH).to eq(13)
+      expect(RHDL::Examples::GameBoy::SPRAM::ADDR_WIDTH).to eq(13)
     end
 
     it 'has correct data width (8-bit)' do
-      expect(GameBoy::SPRAM::DATA_WIDTH).to eq(8)
+      expect(RHDL::Examples::GameBoy::SPRAM::DATA_WIDTH).to eq(8)
     end
 
     it 'has correct depth (8192 entries)' do
-      expect(GameBoy::SPRAM::DEPTH).to eq(8192)
+      expect(RHDL::Examples::GameBoy::SPRAM::DEPTH).to eq(8192)
     end
   end
 
@@ -59,7 +59,7 @@ RSpec.describe 'GameBoy SPRAM' do
   # Basic Write Operations
   # ==========================================================================
   describe 'Write Operations' do
-    let(:spram) { GameBoy::SPRAM.new('spram_write') }
+    let(:spram) { RHDL::Examples::GameBoy::SPRAM.new('spram_write') }
 
     it 'writes data to memory' do
       spram.set_input(:address, 0x100)
@@ -80,7 +80,7 @@ RSpec.describe 'GameBoy SPRAM' do
     end
 
     it 'writes to maximum address' do
-      max_addr = GameBoy::SPRAM::DEPTH - 1  # 0x1FFF
+      max_addr = RHDL::Examples::GameBoy::SPRAM::DEPTH - 1  # 0x1FFF
 
       spram.set_input(:address, max_addr)
       spram.set_input(:data_in, 0xFF)
@@ -117,7 +117,7 @@ RSpec.describe 'GameBoy SPRAM' do
   # Basic Read Operations
   # ==========================================================================
   describe 'Read Operations' do
-    let(:spram) { GameBoy::SPRAM.new('spram_read') }
+    let(:spram) { RHDL::Examples::GameBoy::SPRAM.new('spram_read') }
 
     it 'reads data from memory (synchronous)' do
       spram.write_mem(0x100, 0xCD)
@@ -189,7 +189,7 @@ RSpec.describe 'GameBoy SPRAM' do
   # Direct Memory Access
   # ==========================================================================
   describe 'Direct Memory Access' do
-    let(:spram) { GameBoy::SPRAM.new('spram_direct') }
+    let(:spram) { RHDL::Examples::GameBoy::SPRAM.new('spram_direct') }
 
     it 'supports direct read via read_mem' do
       spram.write_mem(0x50, 0x12)
@@ -223,7 +223,7 @@ RSpec.describe 'GameBoy SPRAM' do
   # Sequential Access Patterns
   # ==========================================================================
   describe 'Sequential Access Patterns' do
-    let(:spram) { GameBoy::SPRAM.new('spram_seq') }
+    let(:spram) { RHDL::Examples::GameBoy::SPRAM.new('spram_seq') }
 
     it 'handles burst write pattern' do
       base_addr = 0x100
@@ -289,7 +289,7 @@ RSpec.describe 'GameBoy SPRAM' do
   # Boundary Conditions
   # ==========================================================================
   describe 'Boundary Conditions' do
-    let(:spram) { GameBoy::SPRAM.new('spram_boundary') }
+    let(:spram) { RHDL::Examples::GameBoy::SPRAM.new('spram_boundary') }
 
     it 'handles all bits of address' do
       # Test various address patterns
@@ -331,7 +331,7 @@ RSpec.describe 'GameBoy SPRAM' do
   # Memory Initialization
   # ==========================================================================
   describe 'Memory Initialization' do
-    let(:spram) { GameBoy::SPRAM.new('spram_init') }
+    let(:spram) { RHDL::Examples::GameBoy::SPRAM.new('spram_init') }
 
     it 'can fill memory with a pattern' do
       # Fill first 10 locations with incrementing values
@@ -363,7 +363,7 @@ RSpec.describe 'GameBoy SPRAM' do
   # Clock Edge Behavior
   # ==========================================================================
   describe 'Clock Edge Behavior' do
-    let(:spram) { GameBoy::SPRAM.new('spram_clock') }
+    let(:spram) { RHDL::Examples::GameBoy::SPRAM.new('spram_clock') }
 
     it 'write takes effect on rising edge' do
       spram.set_input(:address, 0x100)

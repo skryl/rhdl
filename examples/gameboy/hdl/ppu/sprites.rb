@@ -12,8 +12,10 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module GameBoy
-  class Sprites < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module GameBoy
+      class Sprites < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -136,6 +138,8 @@ module GameBoy
       render_idx <= mux(sprite_fetch_done,
                         render_idx + lit(1, width: 4),
                         mux(oam_eval_reset, lit(0, width: 4), render_idx))
+    end
+      end
     end
   end
 end

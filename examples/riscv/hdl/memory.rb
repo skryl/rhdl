@@ -8,8 +8,10 @@ require_relative '../../../lib/rhdl/dsl/behavior'
 require_relative '../../../lib/rhdl/dsl/sequential'
 require_relative 'constants'
 
-module RISCV
-  class Memory < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module RISCV
+      class Memory < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -137,5 +139,7 @@ module RISCV
       @mem[addr] = value & 0xFF
     end
 
+      end
+    end
   end
 end

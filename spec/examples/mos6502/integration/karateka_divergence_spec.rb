@@ -42,7 +42,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
 
   def native_isa_available?
     require_relative '../../../examples/mos6502/utilities/simulators/isa_simulator_native'
-    MOS6502::NATIVE_AVAILABLE
+    RHDL::Examples::MOS6502::NATIVE_AVAILABLE
   rescue LoadError
     false
   end
@@ -58,14 +58,14 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
       return false unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
       # Check if MOS6502 mode is available
       require_relative '../../../examples/mos6502/hdl/cpu'
-      ir = MOS6502::CPU.to_flat_ir
+      ir = RHDL::Examples::MOS6502::CPU.to_flat_ir
       ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
       sim = RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
       sim.respond_to?(:mos6502_mode?) && sim.mos6502_mode?
     when :compile
       return false unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
       require_relative '../../../examples/mos6502/hdl/cpu'
-      ir = MOS6502::CPU.to_flat_ir
+      ir = RHDL::Examples::MOS6502::CPU.to_flat_ir
       ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
       sim = RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json)
       sim.respond_to?(:mos6502_mode?) && sim.mos6502_mode?
@@ -515,11 +515,11 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     require_relative '../../../examples/mos6502/utilities/simulators/isa_simulator_native'
 
     karateka_rom = create_karateka_rom
-    bus = MOS6502::Apple2Bus.new
+    bus = RHDL::Examples::MOS6502::Apple2Bus.new
     bus.load_rom(karateka_rom, base_addr: 0xD000)
     bus.load_ram(@karateka_mem, base_addr: 0x0000)
 
-    cpu = MOS6502::ISASimulatorNative.new(bus)
+    cpu = RHDL::Examples::MOS6502::ISASimulatorNative.new(bus)
     cpu.load_bytes(@karateka_mem, 0x0000)
     cpu.load_bytes(karateka_rom, 0xD000)
 
@@ -570,7 +570,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   def create_verilator_simulator
     require_relative '../../../examples/mos6502/utilities/runners/verilator_runner'
 
-    runner = MOS6502::VerilatorRunner.new
+    runner = RHDL::Examples::MOS6502::VerilatorRunner.new
 
     karateka_rom = create_karateka_rom
 
@@ -629,7 +629,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   end
 
   def print_hires_screen(label, bitmap, cycles)
-    renderer = RHDL::Apple2::BrailleRenderer.new(chars_wide: 70)
+    renderer = RHDL::Examples::Apple2::BrailleRenderer.new(chars_wide: 70)
     puts "\n#{label} @ #{cycles / 1_000_000.0}M cycles:"
     puts renderer.render(bitmap, invert: false)
   end
@@ -889,11 +889,11 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     require_relative '../../../examples/mos6502/utilities/simulators/isa_simulator_native'
 
     karateka_rom = create_karateka_rom
-    bus = MOS6502::Apple2Bus.new
+    bus = RHDL::Examples::MOS6502::Apple2Bus.new
     bus.load_rom(karateka_rom, base_addr: 0xD000)
     bus.load_ram(@karateka_mem, base_addr: 0x0000)
 
-    cpu = MOS6502::ISASimulatorNative.new(bus)
+    cpu = RHDL::Examples::MOS6502::ISASimulatorNative.new(bus)
     cpu.load_bytes(@karateka_mem, 0x0000)
     cpu.load_bytes(karateka_rom, 0xD000)
 
@@ -1086,7 +1086,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   def create_verilator_simulator_simple
     require_relative '../../../examples/mos6502/utilities/runners/verilator_runner'
 
-    runner = MOS6502::VerilatorRunner.new
+    runner = RHDL::Examples::MOS6502::VerilatorRunner.new
     karateka_rom = create_karateka_rom
 
     runner.load_memory(karateka_rom, 0xD000)

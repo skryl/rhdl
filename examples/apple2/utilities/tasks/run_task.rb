@@ -1,17 +1,18 @@
 # frozen_string_literal: true
 
-# Apple II HDL Terminal Task
+# Apple II HDL Run Task
 # Interactive terminal emulator for Apple II HDL simulation
 
 require 'io/console'
 require_relative '../runners/headless_runner'
 
 module RHDL
-  module Apple2
-    module Tasks
-      # Apple II Terminal class for HDL simulation
+  module Examples
+    module Apple2
+      module Tasks
+      # Apple II Run task for HDL simulation
       # Supports HDL, netlist, and Verilog simulation modes
-      class TerminalTask
+      class RunTask
         SCREEN_ROWS = 24
         SCREEN_COLS = 40
 
@@ -671,5 +672,6 @@ module RHDL
         end
       end
     end
+  end
   end
 end

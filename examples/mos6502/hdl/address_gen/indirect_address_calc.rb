@@ -5,9 +5,11 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative 'address_generator'
 
-module MOS6502
-  # Helper for computing indirect address fetch locations - Synthesizable via Behavior DSL
-  class IndirectAddressCalc < RHDL::HDL::Component
+module RHDL
+  module Examples
+    module MOS6502
+      # Helper for computing indirect address fetch locations - Synthesizable via Behavior DSL
+      class IndirectAddressCalc < RHDL::HDL::Component
     include RHDL::DSL::Behavior
 
     # Mode constants
@@ -49,5 +51,7 @@ module MOS6502
       }, default: 0)
     end
 
+    end
   end
+end
 end
