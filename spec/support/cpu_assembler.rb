@@ -53,6 +53,17 @@ module Assembler
             else
               current_address += 2  # 2-byte direct (0x21 + operand)
             end
+          elsif opcode == :LDA && !operand.is_a?(Symbol)
+            # LDA has special encoding: indirect (3 bytes), direct (2 bytes), or nibble (1 byte)
+            # 0x10 = indirect, 0x11 = direct, 0x12-0x1F = nibble
+            if lda_can_use_nibble?(operand)
+              current_address += 1  # Nibble-encoded (0x12-0x1F)
+            else
+              current_address += 2  # 2-byte direct (0x11 + operand)
+            end
+          elsif opcode == :CALL
+            # CALL always uses 2-byte encoding to ensure correct label resolution
+            current_address += 2
           elsif is_nibble_encoded?(opcode) && (!operand.is_a?(Symbol) && operand <= 0x0F)
             # Nibble-encoded with operand that fits in nibble
             current_address += 1
@@ -103,6 +114,20 @@ module Assembler
                flat_instructions << 0x21
                flat_instructions << operand
              end
+           # Handle LDA specially due to reserved opcodes (0x10=indirect, 0x11=direct)
+           elsif opcode == :LDA
+             if lda_can_use_nibble?(operand)
+               # Nibble-encoded: 0x12-0x1F
+               flat_instructions << (0x10 | (operand & 0x0F))
+             else
+               # 2-byte direct LDA: 0x11 + operand
+               flat_instructions << 0x11
+               flat_instructions << operand
+             end
+           # CALL always uses 2-byte encoding for consistent label resolution
+           elsif opcode == :CALL
+             flat_instructions << 0xC0  # CALL opcode
+             flat_instructions << operand
            # Check if this is a nibble-encoded instruction (1 byte) AND operand fits in nibble
            elsif is_nibble_encoded?(opcode) && operand <= 0x0F
              # Encode as single byte: high nibble = opcode, low nibble = operand
@@ -147,7 +172,7 @@ module Assembler
     
     # Return true if this opcode occupies four bytes in memory (for 16-bit operands)
     def needs_four_bytes?(opcode)
-      [:JMP_LONG, :JZ_LONG, :JNZ_LONG].include?(opcode)  # All long jump variants
+      [:JMP_LONG, :JZ_LONG, :JNZ_LONG, :CALL_LONG].include?(opcode)  # All long variants
     end
   
       private
@@ -162,6 +187,13 @@ module Assembler
       # Only operands 2-15 (0x02-0x0F) can use nibble encoding
       # 0x20 = indirect STA, 0x21 = 2-byte direct STA
       def sta_can_use_nibble?(operand)
+        operand.is_a?(Integer) && operand >= 2 && operand <= 0x0F
+      end
+
+      # Check if LDA operand can use nibble encoding
+      # Only operands 2-15 (0x02-0x0F) can use nibble encoding
+      # 0x10 = indirect LDA (3 bytes), 0x11 = 2-byte direct LDA
+      def lda_can_use_nibble?(operand)
         operand.is_a?(Integer) && operand >= 2 && operand <= 0x0F
       end
 
@@ -180,7 +212,7 @@ module Assembler
         [
           :NOP, :LDA, :STA, :ADD, :SUB, :AND, :OR, :XOR,
           :JZ, :JNZ, :LDI, :JMP, :CALL, :RET, :DIV, :HLT,
-          :MUL, :NOT, :JZ_LONG, :JMP_LONG, :JNZ_LONG, :CMP
+          :MUL, :NOT, :JZ_LONG, :JMP_LONG, :JNZ_LONG, :CMP, :CALL_LONG
         ].include?(opcode)
       end
   
@@ -208,6 +240,7 @@ module Assembler
         when :JZ_LONG  then 0xF8
         when :JMP_LONG then 0xF9
         when :JNZ_LONG then 0xFA
+        when :CALL_LONG then 0xFB
         else
           raise ArgumentError, "Unknown opcode: #{opcode}"
         end
