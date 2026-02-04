@@ -16,16 +16,16 @@
 - [03 - Symbol Manipulation](03-symbol-manipulation.md) - The essence of computation: symbols, rules, and Turing machines
 - [04 - Lambda Calculus](04-lambda-calculus.md) - Computation as function application
 - [05 - Interaction Nets](05-interaction-nets.md) - Graph rewriting, linear logic, and optimal reduction
-- [06 - Computing with Memory](06-computing-with-memory.md) - Precomputation and content addressing: LUTs, ROM microcode, CAM, and associative lookup
 
 ### Part II: Physical and Natural Computation
 
-- [07 - Mechanical Computation](07-mechanical-computation.md) - Babbage, Ada Lovelace, Zuse, and relay computers
-- [08 - Biological Computation](08-biological-computation.md) - DNA computing, neurons as gates, cellular automata
-- [09 - Analog Computing](09-analog-computing.md) - Continuous values: op-amps, integrators, and differential equations in real-time
+- [06 - Mechanical Computation](06-mechanical-computation.md) - Babbage, Ada Lovelace, Zuse, and relay computers
+- [07 - Biological Computation](07-biological-computation.md) - DNA computing, neurons as gates, cellular automata
+- [08 - Analog Computing](08-analog-computing.md) - Continuous values: op-amps, integrators, and differential equations in real-time
 
 ### Part III: Sequential Architectures
 
+- [09 - Computing with Memory](09-computing-with-memory.md) - Precomputation and content addressing: LUTs, ROM microcode, CAM, and associative lookup
 - [10 - Register Machines](10-register-machines.md) - The von Neumann architecture that dominates modern computing
 - [11 - Stack Machines](11-stack-machines.md) - Forth, JVM, and the simplest computer architecture
 - [12 - Asynchronous Computing](12-asynchronous-computing.md) - Clockless circuits: self-timed logic, bundled-data vs dual-rail, handshakes, and GALS
@@ -69,10 +69,10 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix A - Turing Machines](appendix-a-turing-machines.md) - Formal definition, examples, and universality
 - [Appendix B - Lambda Calculus](appendix-b-lambda-calculus.md) - Church encodings and RHDL implementations
 - [Appendix C - Interaction Nets](appendix-c-interaction-nets.md) - Agents, rules, optimal lambda reduction in RHDL
-- [Appendix D - Memory-Based Computation](appendix-d-memory-computation.md) - LUTs, CAM cells, ROM microcode, and memoization patterns in RHDL
-- [Appendix E - Ada Lovelace's Program](appendix-e-ada-lovelace.md) - The first program, before hardware existed
-- [Appendix F - Cellular Automata](appendix-f-cellular-automata.md) - Rule 110, Game of Life, and emergent computation
-- [Appendix G - Analog Simulation](appendix-g-analog.md) - Ruby simulation of op-amps, ODEs, and analog neural networks
+- [Appendix D - Ada Lovelace's Program](appendix-d-ada-lovelace.md) - The first program, before hardware existed
+- [Appendix E - Cellular Automata](appendix-e-cellular-automata.md) - Rule 110, Game of Life, and emergent computation
+- [Appendix F - Analog Simulation](appendix-f-analog.md) - Ruby simulation of op-amps, ODEs, and analog neural networks
+- [Appendix G - Memory-Based Computation](appendix-g-memory-computation.md) - LUTs, CAM cells, ROM microcode, and memoization patterns in RHDL
 - [Appendix H - Register Machine ISA](appendix-h-register-machine.md) - Complete 8-bit instruction set with RHDL CPU
 - [Appendix I - Stack Machine ISA](appendix-i-stack-machine.md) - Complete Forth-like instruction set with RHDL implementation
 - [Appendix J - Asynchronous Implementation](appendix-j-asynchronous.md) - C-elements, dual-rail logic, and self-timed circuits in RHDL
@@ -101,18 +101,18 @@ Each appendix provides complete RHDL implementations and formal details for its 
 |                  MODELS OF COMPUTATION                       |
 +-------------------------------------------------------------+
 |                                                              |
-|   Theoretical:  Turing <-> Lambda <-> Interaction Nets <-> Memory
-|                    |          |            |              |  |
-|                    v          v            v              v  |
-|   All equivalent: They compute the same things (LUTs/CAM)    |
+|   Theoretical:     Turing <-> Lambda <-> Interaction Nets    |
+|                      |          |            |               |
+|                      v          v            v               |
+|   All equivalent:  They compute the same things              |
 |                                                              |
 |   Physical:       Mechanical ----- Biological ----- Analog   |
 |                  (gears/relays)   (DNA/neurons)   (op-amps)  |
 |                                                              |
 +-------------------------------------------------------------+
 |                                                              |
-|   Sequential:   Register ---- Stack ---- Async ---- Modern CPUs |
-|                (von Neumann)  (Forth)  (clockless)  (pipeline/OoO)|
+|   Sequential: Memory -- Register -- Stack -- Async -- Modern CPUs|
+|               (LUTs)  (von Neumann) (Forth) (clockless) (OoO)    |
 |                                                              |
 |   Parallel:    Message Passing --- DSM/NUMA --- GPU/Vector   |
 |                (MPI, actors)     (coherence)   (SIMD/SIMT)   |
@@ -176,10 +176,10 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 03 | Symbol Manipulation | A | Turing Machines (formal) |
 | 04 | Lambda Calculus | B | Church encodings, RHDL |
 | 05 | Interaction Nets | C | Agents, rules, optimal reduction |
-| 06 | Computing with Memory | D | Memory-Based Computation |
-| 07 | Mechanical Computation | E | Ada Lovelace's Program |
-| 08 | Biological Computation | F | Cellular Automata |
-| 09 | Analog Computing | G | Analog Simulation (Ruby) |
+| 06 | Mechanical Computation | D | Ada Lovelace's Program |
+| 07 | Biological Computation | E | Cellular Automata |
+| 08 | Analog Computing | F | Analog Simulation (Ruby) |
+| 09 | Computing with Memory | G | Memory-Based Computation |
 | 10 | Register Machines | H | Register Machine ISA |
 | 11 | Stack Machines | I | Stack Machine ISA |
 | 12 | Asynchronous Computing | J | Asynchronous Implementation |
