@@ -9,61 +9,62 @@
 ### Part 0: Introduction
 
 - [01 - What Makes an Architecture](01-what-makes-an-architecture.md) - ISA vs microarchitecture, abstraction layers, and the design space of computation
+- [02 - Metrics and Limits](02-metrics-and-limits.md) - Roofline, Amdahl/Gustafson, work/span; data movement and energy as the common currency
 
 ### Part I: Theoretical Foundations
 
-- [02 - Symbol Manipulation](02-symbol-manipulation.md) - The essence of computation: symbols, rules, and Turing machines
-- [03 - Lambda Calculus](03-lambda-calculus.md) - Computation as function application
-- [04 - Interaction Nets](04-interaction-nets.md) - Graph rewriting, linear logic, and optimal reduction
-- [05 - Computing with Memory](05-computing-with-memory.md) - Precomputation and content addressing: LUTs, ROM microcode, CAM, and associative lookup
+- [03 - Symbol Manipulation](03-symbol-manipulation.md) - The essence of computation: symbols, rules, and Turing machines
+- [04 - Lambda Calculus](04-lambda-calculus.md) - Computation as function application
+- [05 - Interaction Nets](05-interaction-nets.md) - Graph rewriting, linear logic, and optimal reduction
+- [06 - Computing with Memory](06-computing-with-memory.md) - Precomputation and content addressing: LUTs, ROM microcode, CAM, and associative lookup
 
 ### Part II: Physical and Natural Computation
 
-- [06 - Mechanical Computation](06-mechanical-computation.md) - Babbage, Ada Lovelace, Zuse, and relay computers
-- [07 - Biological Computation](07-biological-computation.md) - DNA computing, neurons as gates, cellular automata
-- [08 - Analog Computing](08-analog-computing.md) - Continuous values: op-amps, integrators, and differential equations in real-time
+- [07 - Mechanical Computation](07-mechanical-computation.md) - Babbage, Ada Lovelace, Zuse, and relay computers
+- [08 - Biological Computation](08-biological-computation.md) - DNA computing, neurons as gates, cellular automata
+- [09 - Analog Computing](09-analog-computing.md) - Continuous values: op-amps, integrators, and differential equations in real-time
 
 ### Part III: Sequential Architectures
 
-- [09 - Stack Machines](09-stack-machines.md) - Forth, JVM, and the simplest computer architecture
-- [10 - Register Machines](10-register-machines.md) - The von Neumann architecture that dominates modern computing
-- [11 - Modern CPU Architectures](11-modern-cpu-architectures.md) - Pipelining, superscalar execution, out-of-order, and speculation
-- [12 - Asynchronous Computing](12-asynchronous-computing.md) - Clockless circuits: self-timed logic, bundled-data vs dual-rail, handshakes, and GALS
+- [10 - Stack Machines](10-stack-machines.md) - Forth, JVM, and the simplest computer architecture
+- [11 - Register Machines](11-register-machines.md) - The von Neumann architecture that dominates modern computing
+- [12 - Modern CPU Architectures](12-modern-cpu-architectures.md) - Pipelining, superscalar execution, out-of-order, and speculation
+- [13 - Asynchronous Computing](13-asynchronous-computing.md) - Clockless circuits: self-timed logic, bundled-data vs dual-rail, handshakes, and GALS
 
 ### Part IV: Parallel and Distributed Architectures
 
-- [13 - Message Passing Systems](13-message-passing.md) - MPI, CSP, actors, and communication as the basis of parallel computation
-- [14 - Distributed Shared Memory](14-distributed-shared-memory.md) - NUMA, cache coherence, directory protocols, and the illusion of shared state
-- [15 - GPU and Vector Architecture](15-gpu-vector-architecture.md) - Vector ISA and chaining; SIMT warps and occupancy; memory coalescing and divergence
+- [14 - Message Passing Systems](14-message-passing.md) - MPI, CSP, actors, and communication as the basis of parallel computation
+- [15 - Distributed Shared Memory](15-distributed-shared-memory.md) - NUMA, cache coherence, directory protocols, and the illusion of shared state
+- [16 - GPU and Vector Architecture](16-gpu-vector-architecture.md) - Vector ISA and chaining; SIMT warps and occupancy; memory coalescing and divergence
 
 ### Part V: Dataflow and Spatial Architectures
 
-- [16 - Dataflow Computation](16-dataflow-computation.md) - Data-driven execution, token machines, and deterministic pipelines
-- [17 - Systolic Arrays](17-systolic-arrays.md) - Regular structures, matrix operations, and modern AI accelerators
-- [18 - Wafer-Scale Computing](18-wafer-scale.md) - Using entire wafers: 2D mesh NoC, dataflow at extreme scale
+- [17 - Dataflow Computation](17-dataflow-computation.md) - Data-driven execution, token machines, and deterministic pipelines
+- [18 - Systolic Arrays](18-systolic-arrays.md) - Regular structures, matrix operations, and modern AI accelerators
+- [19 - Wafer-Scale Computing](19-wafer-scale.md) - Using entire wafers: 2D mesh NoC, dataflow at extreme scale
 
 ### Part VI: Brain-Inspired Architectures
 
-- [19 - Neural Networks](19-neural-networks.md) - Perceptrons to transformers: layers, backpropagation, and hardware acceleration
-- [20 - Neuromorphic Computing](20-neuromorphic-computing.md) - Spiking neurons, STDP, memristors, and event-driven computation
+- [20 - Neural Networks](20-neural-networks.md) - Perceptrons to transformers: layers, backpropagation, and hardware acceleration
+- [21 - Neuromorphic Computing](21-neuromorphic-computing.md) - Spiking neurons, STDP, memristors, and event-driven computation
 
 ### Part VII: Reconfigurable Computing
 
-- [21 - FPGAs](21-fpga.md) - Field-programmable gate arrays: LUTs, CLBs, routing, and fine-grained reconfiguration
-- [22 - Coarse-Grained Reconfigurable Arrays](22-cgra.md) - CGRAs: word-level datapaths, spatial computing, and domain-specific acceleration
+- [22 - FPGAs](22-fpga.md) - Field-programmable gate arrays: LUTs, CLBs, routing, and fine-grained reconfiguration
+- [23 - Coarse-Grained Reconfigurable Arrays](23-cgra.md) - CGRAs: word-level datapaths, spatial computing, and domain-specific acceleration
 
 ### Part VIII: Unconventional Computing Models
 
-- [23 - Stochastic Computing](23-stochastic-computing.md) - Probability as data: AND gates multiply, MUX gates add
-- [24 - Reversible Computation](24-reversible-computation.md) - Fredkin gates, Toffoli gates, and the thermodynamics of computing
-- [25 - Photonic Computing](25-photonic-computing.md) - Computing with light: MZI meshes, optical matrix multiply, and interference
-- [26 - Quantum Computing](26-quantum-computing.md) - Qubits, superposition, entanglement, and quantum algorithms
+- [24 - Stochastic Computing](24-stochastic-computing.md) - Probability as data: AND gates multiply, MUX gates add
+- [25 - Reversible Computation](25-reversible-computation.md) - Fredkin gates, Toffoli gates, and the thermodynamics of computing
+- [26 - Photonic Computing](26-photonic-computing.md) - Computing with light: MZI meshes, optical matrix multiply, and interference
+- [27 - Quantum Computing](27-quantum-computing.md) - Qubits, superposition, entanglement, and quantum algorithms
 
 ---
 
 ## Appendices
 
-Each appendix provides complete RHDL implementations and formal details for its corresponding chapter. Chapter 01 (Introduction) has no appendix.
+Each appendix provides complete RHDL implementations and formal details for its corresponding chapter. Chapters 01-02 (Introduction) have no appendices.
 
 - [Appendix A - Turing Machines](appendix-a-turing-machines.md) - Formal definition, examples, and universality
 - [Appendix B - Lambda Calculus](appendix-b-lambda-calculus.md) - Church encodings and RHDL implementations
@@ -171,31 +172,32 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | Chapter | Topic | Appendix | Contents |
 |---------|-------|----------|----------|
 | 01 | What Makes an Architecture | — | (Introduction, no appendix) |
-| 02 | Symbol Manipulation | A | Turing Machines (formal) |
-| 03 | Lambda Calculus | B | Church encodings, RHDL |
-| 04 | Interaction Nets | C | Agents, rules, optimal reduction |
-| 05 | Computing with Memory | D | Memory-Based Computation |
-| 06 | Mechanical Computation | E | Ada Lovelace's Program |
-| 07 | Biological Computation | F | Cellular Automata |
-| 08 | Analog Computing | G | Analog Simulation (Ruby) |
-| 09 | Stack Machines | H | Stack Machine ISA |
-| 10 | Register Machines | I | Register Machine ISA |
-| 11 | Modern CPU Architectures | J | Modern CPU Implementation |
-| 12 | Asynchronous Computing | K | Asynchronous Implementation |
-| 13 | Message Passing Systems | L | Message Passing Implementation |
-| 14 | Distributed Shared Memory | M | DSM/NUMA Implementation |
-| 15 | GPU and Vector Architecture | N | GPU and Vector Implementation |
-| 16 | Dataflow Computation | O | Dataflow RHDL |
-| 17 | Systolic Arrays | P | Systolic Patterns |
-| 18 | Wafer-Scale Computing | Q | Wafer-Scale/NoC Implementation |
-| 19 | Neural Networks | R | Neural Network Implementation |
-| 20 | Neuromorphic Computing | S | Neuromorphic Implementation |
-| 21 | FPGAs | T | FPGA Implementation |
-| 22 | CGRAs | U | CGRA Implementation |
-| 23 | Stochastic Computing | V | Stochastic Implementation |
-| 24 | Reversible Computation | W | Reversible Gates |
-| 25 | Photonic Computing | X | Photonic Simulation (Ruby) |
-| 26 | Quantum Computing | Y | Quantum Circuits |
+| 02 | Metrics and Limits | — | (Introduction, no appendix) |
+| 03 | Symbol Manipulation | A | Turing Machines (formal) |
+| 04 | Lambda Calculus | B | Church encodings, RHDL |
+| 05 | Interaction Nets | C | Agents, rules, optimal reduction |
+| 06 | Computing with Memory | D | Memory-Based Computation |
+| 07 | Mechanical Computation | E | Ada Lovelace's Program |
+| 08 | Biological Computation | F | Cellular Automata |
+| 09 | Analog Computing | G | Analog Simulation (Ruby) |
+| 10 | Stack Machines | H | Stack Machine ISA |
+| 11 | Register Machines | I | Register Machine ISA |
+| 12 | Modern CPU Architectures | J | Modern CPU Implementation |
+| 13 | Asynchronous Computing | K | Asynchronous Implementation |
+| 14 | Message Passing Systems | L | Message Passing Implementation |
+| 15 | Distributed Shared Memory | M | DSM/NUMA Implementation |
+| 16 | GPU and Vector Architecture | N | GPU and Vector Implementation |
+| 17 | Dataflow Computation | O | Dataflow RHDL |
+| 18 | Systolic Arrays | P | Systolic Patterns |
+| 19 | Wafer-Scale Computing | Q | Wafer-Scale/NoC Implementation |
+| 20 | Neural Networks | R | Neural Network Implementation |
+| 21 | Neuromorphic Computing | S | Neuromorphic Implementation |
+| 22 | FPGAs | T | FPGA Implementation |
+| 23 | CGRAs | U | CGRA Implementation |
+| 24 | Stochastic Computing | V | Stochastic Implementation |
+| 25 | Reversible Computation | W | Reversible Gates |
+| 26 | Photonic Computing | X | Photonic Simulation (Ruby) |
+| 27 | Quantum Computing | Y | Quantum Circuits |
 
 ---
 
