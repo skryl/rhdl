@@ -106,7 +106,12 @@ module RHDL
 
     # Read a single byte from memory
     def read_memory(addr)
-      @memory[addr & 0xFFFF]
+      addr = addr & 0xFFFF
+      if @sim_read_memory_fn && @sim_ctx
+        return @sim_read_memory_fn.call(@sim_ctx, addr) & 0xFF
+      end
+
+      @memory[addr]
     end
 
     # Set reset vector
@@ -140,29 +145,31 @@ module RHDL
 
     # Run a single clock cycle
     def clock_cycle
-      # Falling edge - state transitions happen here in negedge-clocked design
+      # Match examples/mos6502/hdl/harness.rb clock_cycle timing:
+      # - Evaluate CPU at clk=0 (low phase) to produce addr/rw/data_out
+      # - Provide data_in from memory for clk=1 (high phase)
+      # - Commit writes on the rising edge using the low-phase data_out
+
+      # Low phase
       verilator_poke('clk', 0)
       verilator_eval
 
-      # Rising edge - typically where state transitions happen
+      addr = verilator_peek('addr') & 0xFFFF
+      rw = verilator_peek('rw')
+      write_data = verilator_peek('data_out') & 0xFF
+
+      # Combinational memory read (always present, even on write cycles)
+      verilator_poke('data_in', @memory[addr] || 0)
+      verilator_eval
+
+      # High phase
       verilator_poke('clk', 1)
       verilator_eval
 
-      # After rising edge, combinational logic settles with new state
-      # Now read addr/rw which should reflect current state
-      addr = verilator_peek('addr')
-      rw = verilator_peek('rw')
-
-      # Memory bridging - read or write based on rw signal
-      if rw == 1  # Read
-        data_val = @memory[addr] || 0
-        verilator_poke('data_in', data_val)
-        verilator_eval  # Let CPU see the data
-      else  # Write
-        data_out = verilator_peek('data_out')
-        @memory[addr] = data_out & 0xFF
-        # Also update C++ memory so subsequent reads see the write
-        verilator_write_memory(addr, data_out & 0xFF)
+      # Commit write on rising edge
+      if rw == 0
+        @memory[addr] = write_data
+        verilator_write_memory(addr, write_data) if @sim_write_memory_fn && @sim_ctx
       end
 
       @cycle_count += 1
@@ -364,8 +371,7 @@ module RHDL
     end
 
     def create_cpp_wrapper(cpp_file, header_file)
-      # Create C++ header for FFI
-      File.write(header_file, <<~HEADER)
+      header_content = <<~HEADER
         #ifndef SIM_WRAPPER_H
         #define SIM_WRAPPER_H
 
@@ -392,8 +398,7 @@ module RHDL
         #endif // SIM_WRAPPER_H
       HEADER
 
-      # Create C++ wrapper implementation
-      File.write(cpp_file, <<~CPP)
+      cpp_content = <<~CPP
         #include "Vmos6502_cpu.h"
         #include "verilated.h"
         #include "sim_wrapper.h"
@@ -449,10 +454,13 @@ module RHDL
         void sim_reset(void* sim) {
             SimContext* ctx = static_cast<SimContext*>(sim);
 
-            // Hold reset high and run clock cycles for proper 6502 reset
-            // The 6502 needs reset held for at least 2 clock cycles
-            // We run extra cycles to ensure all state machines initialize
-            ctx->dut->rst = 1;
+            // Match examples/mos6502/hdl/harness.rb reset sequence exactly:
+            //   1) 1 cycle with rst=1
+            //   2) 5 cycles with rst=0 (reach FETCH state)
+            //   3) ext_pc_load_en cycle to load PC from reset vector and fetch first opcode
+
+            // Initialize inputs to safe defaults
+            ctx->dut->clk = 0;
             ctx->dut->rdy = 1;
             ctx->dut->irq = 1;
             ctx->dut->nmi = 1;
@@ -468,26 +476,37 @@ module RHDL
             ctx->dut->ext_sp_load_en = 0;
             ctx->dut->ext_sp_load_data = 0;
 
-            for (int i = 0; i < 50; i++) {
-                ctx->dut->clk = 0;
-                ctx->dut->eval();
-                ctx->dut->clk = 1;
-                ctx->dut->eval();
-            }
+        auto clock_cycle = [&](unsigned int rst_val) {
+            ctx->dut->rst = rst_val;
 
-            // Release reset and run more cycles to stabilize
-            ctx->dut->rst = 0;
-            for (int i = 0; i < 20; i++) {
-                ctx->dut->clk = 0;
-                ctx->dut->eval();
+            // Low phase
+            ctx->dut->clk = 0;
+            ctx->dut->eval();
 
-                // Provide memory data during reset sequence
                 unsigned int addr = ctx->dut->addr;
-                ctx->dut->data_in = ctx->memory[addr];
-                ctx->dut->eval();
+                unsigned int rw = ctx->dut->rw;
+                unsigned char write_data = ctx->dut->data_out & 0xFF;
 
-                ctx->dut->clk = 1;
-                ctx->dut->eval();
+            // Provide memory data for the high phase (combinational read)
+            ctx->dut->data_in = ctx->memory[addr];
+            ctx->dut->eval();
+
+            // High phase (posedge)
+            ctx->dut->clk = 1;
+            ctx->dut->eval();
+
+                // Commit write on rising edge
+                if (rw == 0) {
+                    ctx->memory[addr] = write_data;
+                }
+            };
+
+            // Pulse reset for 1 cycle
+            clock_cycle(1);
+
+            // Run 5 more cycles with reset released
+            for (int i = 0; i < 5; i++) {
+                clock_cycle(0);
             }
 
             // Load PC from reset vector
@@ -495,19 +514,22 @@ module RHDL
             unsigned int reset_hi = ctx->memory[0xFFFD];
             unsigned int target_addr = (reset_hi << 8) | reset_lo;
 
+            // Provide opcode from target address during the ext_pc_load cycle
+            ctx->dut->rst = 0;
             ctx->dut->ext_pc_load_data = target_addr;
             ctx->dut->ext_pc_load_en = 1;
 
+            // Low phase
             ctx->dut->clk = 0;
             ctx->dut->eval();
 
-            // Provide data from target address
+            // High phase: latch PC and fetch opcode
             ctx->dut->data_in = ctx->memory[target_addr];
             ctx->dut->eval();
-
             ctx->dut->clk = 1;
             ctx->dut->eval();
 
+            // Clear external load enables
             ctx->dut->ext_pc_load_en = 0;
             ctx->dut->eval();
         }
@@ -577,25 +599,25 @@ module RHDL
             *halted_out = 0;
 
             for (unsigned int i = 0; i < n_cycles; i++) {
-                // Falling edge
+                // Low phase: produce addr/rw/data_out
                 ctx->dut->clk = 0;
                 ctx->dut->eval();
 
-                // Memory read
                 unsigned int addr = ctx->dut->addr;
                 unsigned int rw = ctx->dut->rw;
-                if (rw == 1) {  // Read
-                    ctx->dut->data_in = ctx->memory[addr];
-                }
+                unsigned char write_data = ctx->dut->data_out & 0xFF;
+
+                // Combinational read value provided to CPU during high phase
+                ctx->dut->data_in = ctx->memory[addr];
                 ctx->dut->eval();
 
-                // Rising edge
+                // High phase (posedge)
                 ctx->dut->clk = 1;
                 ctx->dut->eval();
 
-                // Memory write
-                if (rw == 0) {  // Write
-                    ctx->memory[addr] = ctx->dut->data_out & 0xFF;
+                // Commit write on rising edge using low-phase data_out
+                if (rw == 0) {
+                    ctx->memory[addr] = write_data;
                 }
 
                 // Check halted
@@ -627,24 +649,26 @@ module RHDL
             const unsigned int STATE_DECODE = 0x02;
 
             while (instruction_count < n && cycles < max_cycles) {
-                // Falling edge
+                // Low phase
                 ctx->dut->clk = 0;
                 ctx->dut->eval();
 
-                // Rising edge - state transitions happen here
+                unsigned int addr = ctx->dut->addr;
+                unsigned int rw = ctx->dut->rw;
+                unsigned char write_data = ctx->dut->data_out & 0xFF;
+
+                // Provide memory data for high phase
+                ctx->dut->data_in = ctx->memory[addr];
+                ctx->dut->eval();
+
+                // High phase (posedge)
                 ctx->dut->clk = 1;
                 ctx->dut->eval();
                 cycles++;
 
-                // Memory bridging AFTER rising edge - combinational logic has settled
-                // and addr/rw now reflect the current state's control signals
-                unsigned int addr = ctx->dut->addr;
-                unsigned int rw = ctx->dut->rw;
-                if (rw == 1) {  // Read
-                    ctx->dut->data_in = ctx->memory[addr];
-                    ctx->dut->eval();  // Let CPU see the data
-                } else {  // Write
-                    ctx->memory[addr] = ctx->dut->data_out & 0xFF;
+                // Commit write on rising edge
+                if (rw == 0) {
+                    ctx->memory[addr] = write_data;
                 }
 
                 // Check for state transition to DECODE
@@ -671,6 +695,14 @@ module RHDL
 
         } // extern "C"
       CPP
+
+      write_file_if_changed(header_file, header_content)
+      write_file_if_changed(cpp_file, cpp_content)
+    end
+
+    def write_file_if_changed(path, content)
+      return if File.exist?(path) && File.read(path) == content
+      File.write(path, content)
     end
 
     def compile_verilator(verilog_file, wrapper_file)
@@ -731,8 +763,15 @@ module RHDL
         end
       end
 
-      unless File.exist?(lib_path)
-        # Try alternative build approach - link static libraries
+      # On some platforms (notably macOS), Verilator's make output may not update the
+      # requested shared library even if compilation succeeds. Ensure the dylib/so
+      # is freshly linked from the static archives when needed.
+      lib_vcpu = File.join(OBJ_DIR, 'libVmos6502_cpu.a')
+      lib_verilated = File.join(OBJ_DIR, 'libverilated.a')
+      newest_input = [lib_vcpu, lib_verilated].filter_map { |p| File.exist?(p) ? File.mtime(p) : nil }.max
+      lib_mtime = File.exist?(lib_path) ? File.mtime(lib_path) : nil
+
+      if lib_mtime.nil? || (!newest_input.nil? && lib_mtime < newest_input)
         build_shared_library(wrapper_file)
       end
     end
@@ -753,7 +792,9 @@ module RHDL
                    "-Wl,--whole-archive #{lib_vcpu} #{lib_verilated} -Wl,--no-whole-archive -latomic"
                  end
 
-      system(link_cmd)
+      unless system(link_cmd)
+        raise "Failed to link Verilator shared library: #{lib_path}"
+      end
     end
 
     def shared_lib_path

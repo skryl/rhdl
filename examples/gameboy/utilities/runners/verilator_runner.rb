@@ -276,12 +276,12 @@ module RHDL
 
       def render_lcd_braille(chars_wide: 40, invert: false)
         renderer = LcdRenderer.new(chars_wide: chars_wide, invert: invert)
-        renderer.render_braille(@framebuffer)
+        renderer.render_braille(read_framebuffer)
       end
 
       def render_lcd_color(chars_wide: 80)
         renderer = LcdRenderer.new(chars_wide: chars_wide)
-        renderer.render_color(@framebuffer)
+        renderer.render_color(read_framebuffer)
       end
 
       def cpu_state
@@ -501,8 +501,7 @@ module RHDL
       end
 
       def create_cpp_wrapper(cpp_file, header_file)
-        # Create C++ header for FFI
-        File.write(header_file, <<~HEADER)
+        header_content = <<~HEADER
           #ifndef SIM_WRAPPER_H
           #define SIM_WRAPPER_H
 
@@ -546,8 +545,7 @@ module RHDL
           #endif // SIM_WRAPPER_H
         HEADER
 
-        # Create C++ wrapper implementation
-        File.write(cpp_file, <<~CPP)
+        cpp_content = <<~CPP
           #include "Vgame_boy_gameboy.h"
           #include "Vgame_boy_gameboy___024root.h"  // For internal signal access
           #include "verilated.h"
@@ -800,6 +798,14 @@ module RHDL
 
           } // extern "C"
         CPP
+
+        write_file_if_changed(header_file, header_content)
+        write_file_if_changed(cpp_file, cpp_content)
+      end
+
+      def write_file_if_changed(path, content)
+        return if File.exist?(path) && File.read(path) == content
+        File.write(path, content)
       end
 
       def compile_verilator(verilog_file, wrapper_file)
@@ -858,7 +864,15 @@ module RHDL
           end
         end
 
-        unless File.exist?(lib_path)
+        # On some platforms (notably macOS), Verilator's make output may not update the
+        # requested shared library even if compilation succeeds. Ensure the dylib/so
+        # is freshly linked from the static archives when needed.
+        lib_vgameboy = File.join(OBJ_DIR, 'libVgame_boy_gameboy.a')
+        lib_verilated = File.join(OBJ_DIR, 'libverilated.a')
+        newest_input = [lib_vgameboy, lib_verilated].filter_map { |p| File.exist?(p) ? File.mtime(p) : nil }.max
+        lib_mtime = File.exist?(lib_path) ? File.mtime(lib_path) : nil
+
+        if lib_mtime.nil? || (!newest_input.nil? && lib_mtime < newest_input)
           build_shared_library(wrapper_file)
         end
       end
@@ -876,7 +890,9 @@ module RHDL
                      "-Wl,--whole-archive #{lib_vgameboy} #{lib_verilated} -Wl,--no-whole-archive -latomic"
                    end
 
-        system(link_cmd)
+        unless system(link_cmd)
+          raise "Failed to link Verilator shared library: #{lib_path}"
+        end
       end
 
       def shared_lib_path
@@ -1017,7 +1033,7 @@ module RHDL
 
       def verilator_read_vram(addr)
         return 0 unless @sim_ctx
-        @sim_read_vram_fn.call(@sim_ctx, addr)
+        @sim_read_vram_fn.call(@sim_ctx, addr) & 0xFF
       end
       end
     end
