@@ -629,7 +629,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   end
 
   def print_hires_screen(label, bitmap, cycles)
-    renderer = RHDL::Apple2::BrailleRenderer.new(chars_wide: 70)
+    renderer = RHDL::Examples::Apple2::BrailleRenderer.new(chars_wide: 70)
     puts "\n#{label} @ #{cycles / 1_000_000.0}M cycles:"
     puts renderer.render(bitmap, invert: false)
   end

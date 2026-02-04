@@ -4,8 +4,9 @@
 # Renders Apple II text screen (40x24 characters)
 
 module RHDL
-  module Apple2
-    # Renders Apple II text mode screen to terminal
+  module Examples
+    module Apple2
+      # Renders Apple II text mode screen to terminal
     class TextRenderer
       SCREEN_ROWS = 24
       SCREEN_COLS = 40
@@ -54,5 +55,6 @@ module RHDL
         render(screen_array).split("\n")
       end
     end
+  end
   end
 end

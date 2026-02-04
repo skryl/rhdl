@@ -20,7 +20,7 @@ RSpec.describe 'IrCompiler vs IrInterpreter PC Progression' do
 
   def create_ir_json
     require_relative '../../../../../examples/apple2/hdl/apple2'
-    ir = RHDL::Apple2::Apple2.to_flat_ir
+    ir = RHDL::Examples::Apple2::Apple2.to_flat_ir
     RHDL::Codegen::IR::IRToJson.convert(ir)
   end
 

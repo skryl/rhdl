@@ -16,8 +16,10 @@ require_relative 'decoder'
 require_relative 'branch_cond'
 require_relative 'program_counter'
 
-module RISCV
-  class CPU < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module RISCV
+      class CPU < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -236,6 +238,8 @@ module RISCV
       parts << to_verilog(top_name: top_name)
 
       parts.join("\n\n")
+    end
+      end
     end
   end
 end

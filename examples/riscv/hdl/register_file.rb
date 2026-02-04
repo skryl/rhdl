@@ -7,8 +7,10 @@ require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
 require_relative '../../../lib/rhdl/dsl/sequential'
 
-module RISCV
-  class RegisterFile < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module RISCV
+      class RegisterFile < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -117,5 +119,7 @@ module RISCV
       @regs[index] = value & 0xFFFFFFFF unless index == 0
     end
 
+      end
+    end
   end
 end

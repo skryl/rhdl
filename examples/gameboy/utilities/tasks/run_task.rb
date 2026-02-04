@@ -4,9 +4,10 @@ require 'io/console'
 require 'optparse'
 
 module RHDL
-  module GameBoy
-    module Tasks
-      # Base class for Game Boy tasks
+  module Examples
+    module GameBoy
+      module Tasks
+        # Base class for Game Boy tasks
       class Task
         attr_reader :options
 
@@ -596,6 +597,7 @@ module RHDL
           exit_row = @pad_top + @lcd_height + (@debug ? 11 : 5)
           print move_cursor(exit_row, 1)
           puts "Game Boy emulator terminated."
+        end
         end
       end
     end

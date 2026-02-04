@@ -19,16 +19,16 @@ require_relative '../../../../examples/gameboy/gameboy'
 RSpec.describe 'GameBoy SpeedControl' do
   describe 'Module Loading' do
     it 'defines the SpeedControl class' do
-      expect(defined?(GameBoy::SpeedControl)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::SpeedControl)).to eq('constant')
     end
 
     it 'inherits from SequentialComponent' do
-      expect(GameBoy::SpeedControl.superclass).to eq(RHDL::HDL::SequentialComponent)
+      expect(RHDL::Examples::GameBoy::SpeedControl.superclass).to eq(RHDL::HDL::SequentialComponent)
     end
   end
 
   describe 'SpeedControl Component Structure' do
-    let(:speed_ctrl) { GameBoy::SpeedControl.new('speedcontrol') }
+    let(:speed_ctrl) { RHDL::Examples::GameBoy::SpeedControl.new('speedcontrol') }
     let(:ir) { speed_ctrl.class.to_ir }
     let(:port_names) { ir.ports.map { |p| p.name.to_sym } }
 
@@ -118,7 +118,7 @@ RSpec.describe 'GameBoy SpeedControl' do
 
     it 'is part of the full Gameboy system' do
       # The Gameboy component uses SpeedControl to generate clock enables
-      expect(defined?(GameBoy::Gameboy)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::Gameboy)).to eq('constant')
     end
   end
 

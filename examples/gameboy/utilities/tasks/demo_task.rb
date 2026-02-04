@@ -3,9 +3,10 @@
 require_relative 'run_task'
 
 module RHDL
-  module GameBoy
-    module Tasks
-      # Task for creating and running demo ROMs
+  module Examples
+    module GameBoy
+      module Tasks
+        # Task for creating and running demo ROMs
       # Provides utilities for generating test ROMs for the Game Boy
       class DemoTask < Task
         # Nintendo logo bytes (required for boot verification)
@@ -166,6 +167,7 @@ module RHDL
           rom[pc] = 0x00; pc += 1  # NOP
           rom[pc] = 0x18; pc += 1  # JR offset
           rom[pc] = (loop_addr - pc - 1) & 0xFF  # Relative jump back
+        end
         end
       end
     end

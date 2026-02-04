@@ -5,9 +5,11 @@
 require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 
-module RISCV
-  module Pipeline
-    class HazardUnit < RHDL::HDL::Component
+module RHDL
+  module Examples
+    module RISCV
+      module Pipeline
+        class HazardUnit < RHDL::HDL::Component
       include RHDL::DSL::Behavior
 
       # From ID stage (current instruction being decoded)
@@ -54,6 +56,8 @@ module RISCV
         flush_id_ex <= branch_taken | jump | load_use_hazard
       end
 
+        end
+      end
     end
   end
 end

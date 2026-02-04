@@ -11,8 +11,10 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module GameBoy
-  class ChannelNoise < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module GameBoy
+      class ChannelNoise < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -136,6 +138,8 @@ module GameBoy
       length_counter <= mux(ce & trigger,
                             lit(64, width: 6) - cat(lit(0, width: 2), length_reg[5..0]),
                             length_counter)
+    end
+      end
     end
   end
 end

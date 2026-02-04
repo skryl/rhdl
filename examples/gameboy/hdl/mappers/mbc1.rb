@@ -21,8 +21,10 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module GameBoy
-  class MBC1 < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module GameBoy
+      class MBC1 < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -102,6 +104,8 @@ module GameBoy
       mode <= mux(ce & cpu_wr & (cpu_addr[15..13] == lit(3, width: 3)),
                   cpu_di[0],
                   mode)
+    end
+      end
     end
   end
 end

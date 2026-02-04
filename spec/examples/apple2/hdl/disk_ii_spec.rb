@@ -6,7 +6,7 @@ require_relative '../../../../examples/apple2/hdl/disk_ii'
 require_relative '../../../support/vhdl_reference_helper'
 require_relative '../../../support/hdl_toolchain'
 
-RSpec.describe RHDL::Apple2::DiskII do
+RSpec.describe RHDL::Examples::Apple2::DiskII do
   extend VhdlReferenceHelper
   let(:disk) { described_class.new('disk') }
 
@@ -467,7 +467,7 @@ RSpec.describe RHDL::Apple2::DiskII do
   end
 end
 
-RSpec.describe RHDL::Apple2::DiskIIROM do
+RSpec.describe RHDL::Examples::Apple2::DiskIIROM do
   let(:rom) { described_class.new('disk_rom') }
 
   before do

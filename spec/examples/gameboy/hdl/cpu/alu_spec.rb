@@ -30,7 +30,7 @@ RSpec.describe 'SM83 ALU' do
 
   before(:each) do
     skip 'GameBoy module not available' unless @gameboy_available
-    @alu = GameBoy::SM83_ALU.new('test_alu')
+    @alu = RHDL::Examples::GameBoy::SM83_ALU.new('test_alu')
     @alu.set_input(:clk, 0)
     @alu.set_input(:f_in, 0)
     @alu.set_input(:arith16, 0)
@@ -62,7 +62,7 @@ RSpec.describe 'SM83 ALU' do
       it 'adds two positive numbers' do
         @alu.set_input(:a, 0x10)
         @alu.set_input(:b, 0x05)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_ADD)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_ADD)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x15)
@@ -73,7 +73,7 @@ RSpec.describe 'SM83 ALU' do
       it 'sets zero flag when result is zero' do
         @alu.set_input(:a, 0x00)
         @alu.set_input(:b, 0x00)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_ADD)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_ADD)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x00)
@@ -83,7 +83,7 @@ RSpec.describe 'SM83 ALU' do
       it 'sets carry flag on overflow' do
         @alu.set_input(:a, 0xFF)
         @alu.set_input(:b, 0x01)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_ADD)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_ADD)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x00)
@@ -94,7 +94,7 @@ RSpec.describe 'SM83 ALU' do
       it 'sets half-carry flag when carry from bit 3 to 4' do
         @alu.set_input(:a, 0x0F)
         @alu.set_input(:b, 0x01)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_ADD)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_ADD)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x10)
@@ -107,7 +107,7 @@ RSpec.describe 'SM83 ALU' do
         @alu.set_input(:a, 0x10)
         @alu.set_input(:b, 0x05)
         @alu.set_input(:f_in, 0x10)  # Carry flag set
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_ADC)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_ADC)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x16)
@@ -117,7 +117,7 @@ RSpec.describe 'SM83 ALU' do
         @alu.set_input(:a, 0x10)
         @alu.set_input(:b, 0x05)
         @alu.set_input(:f_in, 0x00)  # Carry flag clear
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_ADC)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_ADC)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x15)
@@ -128,7 +128,7 @@ RSpec.describe 'SM83 ALU' do
       it 'subtracts two positive numbers' do
         @alu.set_input(:a, 0x20)
         @alu.set_input(:b, 0x08)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_SUB)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_SUB)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x18)
@@ -138,7 +138,7 @@ RSpec.describe 'SM83 ALU' do
       it 'sets zero flag when result is zero' do
         @alu.set_input(:a, 0x42)
         @alu.set_input(:b, 0x42)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_SUB)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_SUB)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x00)
@@ -149,7 +149,7 @@ RSpec.describe 'SM83 ALU' do
       it 'sets carry flag on underflow' do
         @alu.set_input(:a, 0x00)
         @alu.set_input(:b, 0x01)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_SUB)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_SUB)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0xFF)
@@ -159,7 +159,7 @@ RSpec.describe 'SM83 ALU' do
       it 'sets half-carry flag on borrow from bit 4' do
         @alu.set_input(:a, 0x10)
         @alu.set_input(:b, 0x01)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_SUB)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_SUB)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x0F)
@@ -172,7 +172,7 @@ RSpec.describe 'SM83 ALU' do
         @alu.set_input(:a, 0x20)
         @alu.set_input(:b, 0x08)
         @alu.set_input(:f_in, 0x10)  # Carry flag set (borrow)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_SBC)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_SBC)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x17)
@@ -183,7 +183,7 @@ RSpec.describe 'SM83 ALU' do
         @alu.set_input(:a, 0x20)
         @alu.set_input(:b, 0x08)
         @alu.set_input(:f_in, 0x00)  # Carry flag clear
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_SBC)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_SBC)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x18)
@@ -199,7 +199,7 @@ RSpec.describe 'SM83 ALU' do
       it 'performs bitwise AND' do
         @alu.set_input(:a, 0xF0)
         @alu.set_input(:b, 0x0F)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_AND)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_AND)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x00)
@@ -210,7 +210,7 @@ RSpec.describe 'SM83 ALU' do
       it 'performs bitwise AND with non-zero result' do
         @alu.set_input(:a, 0xFF)
         @alu.set_input(:b, 0xAA)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_AND)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_AND)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0xAA)
@@ -223,7 +223,7 @@ RSpec.describe 'SM83 ALU' do
       it 'performs bitwise XOR' do
         @alu.set_input(:a, 0xFF)
         @alu.set_input(:b, 0xF0)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_XOR)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_XOR)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x0F)
@@ -233,7 +233,7 @@ RSpec.describe 'SM83 ALU' do
       it 'XOR A,A zeros the result' do
         @alu.set_input(:a, 0x42)
         @alu.set_input(:b, 0x42)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_XOR)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_XOR)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x00)
@@ -245,7 +245,7 @@ RSpec.describe 'SM83 ALU' do
       it 'performs bitwise OR' do
         @alu.set_input(:a, 0xF0)
         @alu.set_input(:b, 0x0F)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_OR)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_OR)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0xFF)
@@ -255,7 +255,7 @@ RSpec.describe 'SM83 ALU' do
       it 'sets zero flag when both inputs are zero' do
         @alu.set_input(:a, 0x00)
         @alu.set_input(:b, 0x00)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_OR)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_OR)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x00)
@@ -267,7 +267,7 @@ RSpec.describe 'SM83 ALU' do
       it 'compares two equal values (sets Z flag)' do
         @alu.set_input(:a, 0x42)
         @alu.set_input(:b, 0x42)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_CP)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_CP)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x00)
@@ -278,7 +278,7 @@ RSpec.describe 'SM83 ALU' do
       it 'compares two different values (clears Z flag)' do
         @alu.set_input(:a, 0x42)
         @alu.set_input(:b, 0x41)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_CP)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_CP)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x01)
@@ -289,7 +289,7 @@ RSpec.describe 'SM83 ALU' do
       it 'sets carry flag when B > A' do
         @alu.set_input(:a, 0x10)
         @alu.set_input(:b, 0x20)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_CP)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_CP)
         @alu.propagate
 
         expect(c_flag(@alu.get_output(:f_out))).to eq(1)
@@ -305,7 +305,7 @@ RSpec.describe 'SM83 ALU' do
       it 'rotates left through carry (MSB to LSB and carry)' do
         @alu.set_input(:a, 0x80)  # 10000000
         @alu.set_input(:b, 0x00)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_RLC)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_RLC)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x01)  # 00000001
@@ -315,7 +315,7 @@ RSpec.describe 'SM83 ALU' do
       it 'rotates value with bit 7 clear' do
         @alu.set_input(:a, 0x01)  # 00000001
         @alu.set_input(:b, 0x00)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_RLC)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_RLC)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x02)  # 00000010
@@ -327,7 +327,7 @@ RSpec.describe 'SM83 ALU' do
       it 'rotates right through carry (LSB to MSB and carry)' do
         @alu.set_input(:a, 0x01)  # 00000001
         @alu.set_input(:b, 0x00)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_RRC)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_RRC)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x80)  # 10000000
@@ -337,7 +337,7 @@ RSpec.describe 'SM83 ALU' do
       it 'rotates value with bit 0 clear' do
         @alu.set_input(:a, 0x80)  # 10000000
         @alu.set_input(:b, 0x00)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_RRC)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_RRC)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x40)  # 01000000
@@ -350,7 +350,7 @@ RSpec.describe 'SM83 ALU' do
         @alu.set_input(:a, 0x80)  # 10000000
         @alu.set_input(:b, 0x00)
         @alu.set_input(:f_in, 0x10)  # Carry set
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_RL)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_RL)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x01)  # Old carry becomes bit 0
@@ -361,7 +361,7 @@ RSpec.describe 'SM83 ALU' do
         @alu.set_input(:a, 0x80)  # 10000000
         @alu.set_input(:b, 0x00)
         @alu.set_input(:f_in, 0x00)  # Carry clear
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_RL)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_RL)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x00)  # Old carry (0) becomes bit 0
@@ -374,7 +374,7 @@ RSpec.describe 'SM83 ALU' do
         @alu.set_input(:a, 0x01)  # 00000001
         @alu.set_input(:b, 0x00)
         @alu.set_input(:f_in, 0x10)  # Carry set
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_RR)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_RR)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x80)  # Old carry becomes bit 7
@@ -385,7 +385,7 @@ RSpec.describe 'SM83 ALU' do
         @alu.set_input(:a, 0x01)  # 00000001
         @alu.set_input(:b, 0x00)
         @alu.set_input(:f_in, 0x00)  # Carry clear
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_RR)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_RR)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x00)  # Old carry (0) becomes bit 7
@@ -402,7 +402,7 @@ RSpec.describe 'SM83 ALU' do
       it 'complements all bits of A' do
         @alu.set_input(:a, 0xAA)  # 10101010
         @alu.set_input(:b, 0x00)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_CPL)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_CPL)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x55)  # 01010101
@@ -413,7 +413,7 @@ RSpec.describe 'SM83 ALU' do
       it 'complements 0x00 to 0xFF' do
         @alu.set_input(:a, 0x00)
         @alu.set_input(:b, 0x00)
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_CPL)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_CPL)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0xFF)
@@ -425,7 +425,7 @@ RSpec.describe 'SM83 ALU' do
         @alu.set_input(:a, 0x42)
         @alu.set_input(:b, 0x00)
         @alu.set_input(:f_in, 0x00)  # Carry clear
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_SCF)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_SCF)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x42)  # A unchanged
@@ -438,7 +438,7 @@ RSpec.describe 'SM83 ALU' do
         @alu.set_input(:a, 0x42)
         @alu.set_input(:b, 0x00)
         @alu.set_input(:f_in, 0x10)  # Carry set
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_CCF)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_CCF)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x42)  # A unchanged
@@ -449,7 +449,7 @@ RSpec.describe 'SM83 ALU' do
         @alu.set_input(:a, 0x42)
         @alu.set_input(:b, 0x00)
         @alu.set_input(:f_in, 0x00)  # Carry clear
-        @alu.set_input(:op, GameBoy::SM83_ALU::ALU_CCF)
+        @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_CCF)
         @alu.propagate
 
         expect(@alu.get_output(:q)).to eq(0x42)  # A unchanged
@@ -465,7 +465,7 @@ RSpec.describe 'SM83 ALU' do
     it 'lower 4 bits of flags output are always 0' do
       @alu.set_input(:a, 0xFF)
       @alu.set_input(:b, 0x01)
-      @alu.set_input(:op, GameBoy::SM83_ALU::ALU_ADD)
+      @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_ADD)
       @alu.propagate
 
       f_out = @alu.get_output(:f_out)
@@ -473,7 +473,7 @@ RSpec.describe 'SM83 ALU' do
     end
 
     it 'N flag is set for subtraction operations' do
-      [GameBoy::SM83_ALU::ALU_SUB, GameBoy::SM83_ALU::ALU_SBC, GameBoy::SM83_ALU::ALU_CP].each do |op|
+      [RHDL::Examples::GameBoy::SM83_ALU::ALU_SUB, RHDL::Examples::GameBoy::SM83_ALU::ALU_SBC, RHDL::Examples::GameBoy::SM83_ALU::ALU_CP].each do |op|
         @alu.set_input(:a, 0x10)
         @alu.set_input(:b, 0x05)
         @alu.set_input(:op, op)
@@ -484,9 +484,9 @@ RSpec.describe 'SM83 ALU' do
     end
 
     it 'N flag is clear for non-subtraction operations' do
-      [GameBoy::SM83_ALU::ALU_ADD, GameBoy::SM83_ALU::ALU_ADC,
-       GameBoy::SM83_ALU::ALU_AND, GameBoy::SM83_ALU::ALU_OR,
-       GameBoy::SM83_ALU::ALU_XOR].each do |op|
+      [RHDL::Examples::GameBoy::SM83_ALU::ALU_ADD, RHDL::Examples::GameBoy::SM83_ALU::ALU_ADC,
+       RHDL::Examples::GameBoy::SM83_ALU::ALU_AND, RHDL::Examples::GameBoy::SM83_ALU::ALU_OR,
+       RHDL::Examples::GameBoy::SM83_ALU::ALU_XOR].each do |op|
         @alu.set_input(:a, 0x10)
         @alu.set_input(:b, 0x05)
         @alu.set_input(:op, op)
@@ -504,7 +504,7 @@ RSpec.describe 'SM83 ALU' do
     it 'handles maximum values' do
       @alu.set_input(:a, 0xFF)
       @alu.set_input(:b, 0xFF)
-      @alu.set_input(:op, GameBoy::SM83_ALU::ALU_ADD)
+      @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_ADD)
       @alu.propagate
 
       expect(@alu.get_output(:q)).to eq(0xFE)
@@ -514,7 +514,7 @@ RSpec.describe 'SM83 ALU' do
     it 'handles zero values' do
       @alu.set_input(:a, 0x00)
       @alu.set_input(:b, 0x00)
-      @alu.set_input(:op, GameBoy::SM83_ALU::ALU_ADD)
+      @alu.set_input(:op, RHDL::Examples::GameBoy::SM83_ALU::ALU_ADD)
       @alu.propagate
 
       expect(@alu.get_output(:q)).to eq(0x00)

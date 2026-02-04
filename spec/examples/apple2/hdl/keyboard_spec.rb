@@ -6,7 +6,7 @@ require_relative '../../../../examples/apple2/hdl/keyboard'
 require_relative '../../../support/vhdl_reference_helper'
 require_relative '../../../support/hdl_toolchain'
 
-RSpec.describe RHDL::Apple2::Keyboard do
+RSpec.describe RHDL::Examples::Apple2::Keyboard do
   extend VhdlReferenceHelper
   let(:keyboard) { described_class.new('keyboard') }
 
@@ -367,7 +367,7 @@ RSpec.describe RHDL::Apple2::Keyboard do
   end
 end
 
-RSpec.describe RHDL::Apple2::PS2Controller do
+RSpec.describe RHDL::Examples::Apple2::PS2Controller do
   let(:ps2_ctrl) { described_class.new('ps2_ctrl') }
 
   before do

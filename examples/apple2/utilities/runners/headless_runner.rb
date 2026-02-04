@@ -9,8 +9,9 @@
 require_relative 'hdl_runner'
 
 module RHDL
-  module Apple2
-    class HeadlessRunner
+  module Examples
+    module Apple2
+      class HeadlessRunner
       attr_reader :runner, :mode, :sim_backend
 
       # Create a headless runner with the specified options
@@ -26,18 +27,18 @@ module RHDL
         @runner = case mode
                   when :netlist
                     require_relative 'netlist_runner'
-                    RHDL::Apple2::NetlistRunner.new(backend: sim)
+                    RHDL::Examples::Apple2::NetlistRunner.new(backend: sim)
                   when :verilog
                     require_relative 'verilator_runner'
-                    RHDL::Apple2::VerilatorRunner.new(sub_cycles: sub_cycles)
+                    RHDL::Examples::Apple2::VerilatorRunner.new(sub_cycles: sub_cycles)
                   else  # :hdl (default)
                     if sim == :ruby
                       # Pure Ruby HDL simulation
-                      RHDL::Apple2::HdlRunner.new
+                      RHDL::Examples::Apple2::HdlRunner.new
                     else
                       # IR simulation with native backends (interpret, jit, compile)
                       require_relative 'ir_runner'
-                      RHDL::Apple2::IrSimulatorRunner.new(backend: sim, sub_cycles: sub_cycles)
+                      RHDL::Examples::Apple2::IrSimulatorRunner.new(backend: sim, sub_cycles: sub_cycles)
                     end
                   end
       end
@@ -272,5 +273,6 @@ module RHDL
         runner
       end
     end
+  end
   end
 end

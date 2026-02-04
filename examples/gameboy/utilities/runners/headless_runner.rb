@@ -9,8 +9,9 @@
 require_relative 'hdl_runner'
 
 module RHDL
-  module GameBoy
-    class HeadlessRunner
+  module Examples
+    module GameBoy
+      class HeadlessRunner
       attr_reader :runner, :mode, :sim_backend
 
       # Create a headless runner with the specified options
@@ -24,15 +25,15 @@ module RHDL
         @runner = case mode
                   when :verilog
                     require_relative 'verilator_runner'
-                    RHDL::GameBoy::VerilatorRunner.new
+                    RHDL::Examples::GameBoy::VerilatorRunner.new
                   else  # :hdl (default)
                     if sim == :ruby
                       # Pure Ruby HDL simulation
-                      RHDL::GameBoy::HdlRunner.new
+                      RHDL::Examples::GameBoy::HdlRunner.new
                     else
                       # IR simulation with native backends (interpret, jit, compile)
                       require_relative 'ir_runner'
-                      RHDL::GameBoy::IrRunner.new(backend: sim)
+                      RHDL::Examples::GameBoy::IrRunner.new(backend: sim)
                     end
                   end
       end
@@ -166,6 +167,7 @@ module RHDL
         test_rom = create_test_rom
         runner.load_rom(test_rom)
         runner
+      end
       end
     end
   end

@@ -16,8 +16,10 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module GameBoy
-  class HDMA < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module GameBoy
+      class HDMA < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -138,6 +140,8 @@ module GameBoy
                        remaining)
       byte_counter <= mux(ce & hdma_active & (byte_counter == lit(15, width: 4)),
                           lit(0, width: 4), byte_counter)
+    end
+      end
     end
   end
 end

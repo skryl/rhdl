@@ -3,7 +3,7 @@
 require 'spec_helper'
 require_relative '../../../../../examples/gameboy/utilities/tasks/run_task'
 
-RSpec.describe RHDL::GameBoy::Tasks::RunTask do
+RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
   describe '.create_demo_rom' do
     let(:rom) { described_class.create_demo_rom }
 
@@ -90,7 +90,7 @@ RSpec.describe RHDL::GameBoy::Tasks::RunTask do
 
     it 'uses HeadlessRunner internally' do
       task.run
-      expect(task.runner).to be_a(RHDL::GameBoy::HeadlessRunner)
+      expect(task.runner).to be_a(RHDL::Examples::GameBoy::HeadlessRunner)
     end
   end
 

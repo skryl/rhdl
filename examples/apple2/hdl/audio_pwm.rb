@@ -10,8 +10,9 @@
 require 'rhdl/hdl'
 
 module RHDL
-  module Apple2
-    class AudioPWM < RHDL::HDL::SequentialComponent
+  module Examples
+    module Apple2
+      class AudioPWM < RHDL::HDL::SequentialComponent
       include RHDL::DSL::Behavior
       include RHDL::DSL::Sequential
 
@@ -119,5 +120,6 @@ module RHDL
         audio_out <= speaker_level
       end
     end
+  end
   end
 end

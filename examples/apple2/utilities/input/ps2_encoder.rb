@@ -4,8 +4,9 @@
 # Converts ASCII key codes to PS/2 scancodes and bit-bangs the PS/2 protocol
 
 module RHDL
-  module Apple2
-    # PS/2 keyboard encoder - converts ASCII to PS/2 scancodes
+  module Examples
+    module Apple2
+      # PS/2 keyboard encoder - converts ASCII to PS/2 scancodes
     # and handles the PS/2 protocol bit-banging
     class PS2Encoder
       # PS/2 special codes
@@ -176,5 +177,6 @@ module RHDL
         @ps2_queue.length
       end
     end
+  end
   end
 end

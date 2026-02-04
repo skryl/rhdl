@@ -26,8 +26,10 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module GameBoy
-  class SM83 < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module GameBoy
+      class SM83 < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -1861,5 +1863,7 @@ module GameBoy
 
     end
 
+      end
+    end
   end
 end

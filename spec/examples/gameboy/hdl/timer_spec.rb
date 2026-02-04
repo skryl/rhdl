@@ -19,16 +19,16 @@ require_relative '../../../../examples/gameboy/gameboy'
 RSpec.describe 'GameBoy Timer' do
   describe 'Module Loading' do
     it 'defines the Timer class' do
-      expect(defined?(GameBoy::Timer)).to eq('constant')
+      expect(defined?(RHDL::Examples::GameBoy::Timer)).to eq('constant')
     end
 
     it 'inherits from SequentialComponent' do
-      expect(GameBoy::Timer.superclass).to eq(RHDL::HDL::SequentialComponent)
+      expect(RHDL::Examples::GameBoy::Timer.superclass).to eq(RHDL::HDL::SequentialComponent)
     end
   end
 
   describe 'Timer Component Structure' do
-    let(:timer) { GameBoy::Timer.new('timer') }
+    let(:timer) { RHDL::Examples::GameBoy::Timer.new('timer') }
     let(:ir) { timer.class.to_ir }
     let(:port_names) { ir.ports.map { |p| p.name.to_sym } }
 
@@ -98,7 +98,7 @@ RSpec.describe 'GameBoy Timer' do
         @ir_available = RHDL::Codegen::IR::COMPILER_AVAILABLE rescue false
         # Try to actually initialize a runner to verify it works
         if @ir_available
-          test_runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+          test_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
           test_runner = nil
         end
       rescue LoadError, NameError, RuntimeError => e
@@ -109,7 +109,7 @@ RSpec.describe 'GameBoy Timer' do
 
     before(:each) do
       skip "IR compiler not available: #{@ir_error}" unless @ir_available
-      @runner = RHDL::GameBoy::IrRunner.new(backend: :compile)
+      @runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
     end
 
     # Helper to create ROM that accesses timer registers

@@ -11,8 +11,9 @@
 require 'rhdl/hdl'
 
 module RHDL
-  module Apple2
-    class CharacterROM < RHDL::HDL::Component
+  module Examples
+    module Apple2
+      class CharacterROM < RHDL::HDL::Component
       include RHDL::DSL::Memory
 
       input :clk
@@ -159,5 +160,6 @@ module RHDL
       # Asynchronous read (combinational)
       async_read :dout, from: :rom, addr: :addr
     end
+  end
   end
 end

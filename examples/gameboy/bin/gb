@@ -108,7 +108,7 @@ elsif !options[:demo] && !options[:pop]
 end
 
 # Run the emulator using RunTask
-task = RHDL::GameBoy::Tasks::RunTask.new(options)
+task = RHDL::Examples::GameBoy::Tasks::RunTask.new(options)
 
 begin
   result = task.run

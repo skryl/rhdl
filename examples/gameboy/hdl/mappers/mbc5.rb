@@ -21,8 +21,10 @@ require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 require_relative '../../../../lib/rhdl/dsl/sequential'
 
-module GameBoy
-  class MBC5 < RHDL::HDL::SequentialComponent
+module RHDL
+  module Examples
+    module GameBoy
+      class MBC5 < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
 
@@ -96,6 +98,8 @@ module GameBoy
       ram_bank_reg <= mux(ce & cpu_wr & (cpu_addr[15..13] == lit(2, width: 3)),
                           cpu_di[3..0],
                           ram_bank_reg)
+    end
+      end
     end
   end
 end

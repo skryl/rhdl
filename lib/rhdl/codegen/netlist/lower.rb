@@ -266,21 +266,21 @@ module RHDL
             # Check for Apple II components by class name
             class_name = component.class.name
             case class_name
-            when 'RHDL::Apple2::Apple2'
+            when 'RHDL::Examples::Apple2::Apple2'
               lower_apple2(component)
-            when 'RHDL::Apple2::TimingGenerator'
+            when 'RHDL::Examples::Apple2::TimingGenerator'
               lower_apple2_timing_generator(component)
-            when 'RHDL::Apple2::VideoGenerator'
+            when 'RHDL::Examples::Apple2::VideoGenerator'
               lower_apple2_video_generator(component)
-            when 'RHDL::Apple2::CharacterROM'
+            when 'RHDL::Examples::Apple2::CharacterROM'
               lower_apple2_character_rom(component)
-            when 'RHDL::Apple2::SpeakerToggle'
+            when 'RHDL::Examples::Apple2::SpeakerToggle'
               lower_apple2_speaker_toggle(component)
-            when 'RHDL::Apple2::CPU6502'
+            when 'RHDL::Examples::Apple2::CPU6502'
               lower_apple2_cpu6502(component)
-            when 'RHDL::Apple2::DiskII'
+            when 'RHDL::Examples::Apple2::DiskII'
               lower_apple2_disk_ii(component)
-            when 'RHDL::Apple2::DiskIIROM'
+            when 'RHDL::Examples::Apple2::DiskIIROM'
               lower_memory_component(component)
             else
               # Try generic hierarchical lowering for components with instance definitions

@@ -11,8 +11,10 @@
 require_relative '../../../../lib/rhdl'
 require_relative '../../../../lib/rhdl/dsl/behavior'
 
-module GameBoy
-  class SM83_MCode < RHDL::HDL::Component
+module RHDL
+  module Examples
+    module GameBoy
+      class SM83_MCode < RHDL::HDL::Component
     include RHDL::DSL::Behavior
 
     # Address mode constants
@@ -197,6 +199,8 @@ module GameBoy
       # Read/write_sig control based on instruction type
       no_read <= lit(0, width: 1)  # Default to allow reads
       write_sig <= lit(0, width: 1)   # Default to no writes
+    end
+      end
     end
   end
 end

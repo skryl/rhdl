@@ -5,9 +5,11 @@ require_relative '../../../../lib/rhdl'
 require_relative '../memory'
 require_relative 'pipelined_datapath'
 
-module RISCV
-  module Pipeline
-    class PipelinedCPU < RHDL::HDL::Component
+module RHDL
+  module Examples
+    module RISCV
+      module Pipeline
+        class PipelinedCPU < RHDL::HDL::Component
       input :clk
       input :rst
 
@@ -22,8 +24,8 @@ module RISCV
       def initialize(name = nil)
         super(name)
         @datapath = PipelinedDatapath.new('datapath')
-        @inst_mem = RISCV::Memory.new('inst_mem')
-        @data_mem = RISCV::Memory.new('data_mem')
+        @inst_mem = Memory.new('inst_mem')
+        @data_mem = Memory.new('data_mem')
         add_subcomponent(:datapath, @datapath)
         add_subcomponent(:inst_mem, @inst_mem)
         add_subcomponent(:data_mem, @data_mem)
@@ -146,6 +148,8 @@ module RISCV
         @datapath.get_output(:debug_inst)
       end
 
+        end
+      end
     end
   end
 end

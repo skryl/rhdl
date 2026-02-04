@@ -4,8 +4,9 @@
 # Generates audio from the APU outputs in the HDL simulation
 
 module RHDL
-  module GameBoy
-    # Speaker simulation that converts APU output to audio
+  module Examples
+    module GameBoy
+      # Speaker simulation that converts APU output to audio
     # Uses external audio tools (sox, ffplay, paplay, aplay) for playback
     class Speaker
       # Audio sample rate (Game Boy runs at ~32768 Hz APU)
@@ -285,6 +286,7 @@ module RHDL
         rescue => e
           @last_error = "Write: #{e.class}"
         end
+      end
       end
     end
   end

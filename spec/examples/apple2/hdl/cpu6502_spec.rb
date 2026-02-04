@@ -3,8 +3,8 @@
 require 'spec_helper'
 require_relative '../../../../examples/apple2/hdl/cpu6502'
 
-RSpec.describe RHDL::Apple2::CPU6502 do
-  let(:cpu) { RHDL::Apple2::CPU6502.new('cpu') }
+RSpec.describe RHDL::Examples::Apple2::CPU6502 do
+  let(:cpu) { RHDL::Examples::Apple2::CPU6502.new('cpu') }
 
   # Memory simulation (64KB)
   let(:memory) { Array.new(65536, 0) }
@@ -69,7 +69,7 @@ RSpec.describe RHDL::Apple2::CPU6502 do
     end
 
     it 'creates a CPU instance' do
-      expect(cpu).to be_a(RHDL::Apple2::CPU6502)
+      expect(cpu).to be_a(RHDL::Examples::Apple2::CPU6502)
     end
 
     it 'has required inputs' do
