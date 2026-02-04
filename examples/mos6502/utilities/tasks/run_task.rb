@@ -59,8 +59,9 @@ module RHDL
         @green_screen = options[:green] || false
         @hires_mode = options[:hires] || false
         @color_mode = options[:color] || false
+        @composite = options[:composite] || false
         @preferred_hires_width = options[:hires_width]
-        @hires_width = @preferred_hires_width || (@color_mode ? 140 : 80)
+        @hires_width = @preferred_hires_width || (@color_mode ? 280 : 80)
         @audio_enabled = options[:audio] != false
 
         # Terminal size and padding for centering
@@ -124,7 +125,7 @@ module RHDL
         @pad_left = [(@term_cols - DISPLAY_WIDTH) / 2, 0].max
 
         # Auto-adjust hires width to fit terminal
-        default_width = @color_mode ? 140 : 80
+        default_width = @color_mode ? 280 : 80
         preferred = @preferred_hires_width || default_width
         @hires_width = [preferred, @term_cols].min
 
@@ -389,7 +390,7 @@ module RHDL
         end
 
         if @color_mode
-          hires_output = @runner.bus.render_hires_color(chars_wide: @hires_width)
+          hires_output = @runner.bus.render_hires_color(chars_wide: @hires_width, composite: @composite)
         elsif @runner.native? && @runner.respond_to?(:cpu) && @runner.cpu.respond_to?(:render_hires_braille)
           hires_output = @runner.cpu.render_hires_braille(@hires_width, true)
         else
