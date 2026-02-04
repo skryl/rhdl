@@ -2797,6 +2797,7 @@ module RHDL
         call_net = map_bus(component.outputs[:call]).first
         ret_net = map_bus(component.outputs[:ret]).first
         instr_length_nets = map_bus(component.outputs[:instr_length])
+        is_lda_net = map_bus(component.outputs[:is_lda]).first
 
         # Extract opcode (high 4 bits)
         opcode_nets = instr_nets[4..7]
@@ -2917,6 +2918,12 @@ module RHDL
         # ret: opcode 13
         opcode_is_13 = lower_compare_const(opcode_nets, 13)
         @ir.add_gate(type: Primitives::BUF, inputs: [opcode_is_13], output: ret_net)
+
+        # is_lda: LDA (opcode 1) or LDI (opcode 10) - bypass ALU
+        opcode_is_1 = lower_compare_const(opcode_nets, 1)
+        is_lda_or = new_temp
+        @ir.add_gate(type: Primitives::OR, inputs: [opcode_is_1, opcode_is_10], output: is_lda_or)
+        @ir.add_gate(type: Primitives::BUF, inputs: [is_lda_or], output: is_lda_net)
 
         # instr_length: default 1
         const_one = new_temp

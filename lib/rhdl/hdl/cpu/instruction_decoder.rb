@@ -136,7 +136,10 @@ module RHDL
 
           # is_lda: LDA or LDI instruction - bypass ALU, load directly from memory/immediate
           # LDA (opcode 1) loads from memory, LDI (opcode 10) loads immediate
-          is_lda <= mux((opcode == 1) | (opcode == 10), 1, 0)
+          is_lda <= case_select(opcode, {
+            1 => 1,   # LDA
+            10 => 1   # LDI
+          }, default: 0)
 
           # instr_length: 1, 2, or 3 bytes
           # Most are 1 byte

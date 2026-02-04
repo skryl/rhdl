@@ -8,6 +8,9 @@ RSpec.describe RHDL::Components::CPU::CPU, 'ConwayGameOfLife' do
   include DisplayHelper
 
   before(:each) do
+    # Conway requires 64K memory with addresses like 0x300
+    # Use behavioral CPU which supports full 16-bit addressing
+    use_behavior_cpu!
     @memory = MemorySimulator::Memory.new
     @cpu = cpu_class.new(@memory)
     @cpu.reset

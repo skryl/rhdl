@@ -213,6 +213,11 @@ module RHDL
 
           # Handle CALL - push return address to stack
           if call == 1
+            # Check for stack overflow before pushing
+            if @cpu.get_output(:sp_full) == 1
+              @halted = true
+              return
+            end
             sp_val = sp
             @ram.write_mem(sp_val, (pc_val + instr_length) & 0xFF)
             @cpu.set_input(:sp_push, 1)

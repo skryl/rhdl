@@ -7,6 +7,9 @@ RSpec.describe RHDL::Components::CPU::CPU do
   include DisplayHelper
 
   before(:each) do
+    # Fractal requires 64K memory with addresses like 0x100
+    # Use behavioral CPU which supports full 16-bit addressing
+    use_behavior_cpu!
     @memory = MemorySimulator::Memory.new
     @cpu = cpu_class.new(@memory)
     @cpu.reset
