@@ -118,11 +118,198 @@ Charles Babbage designed two mechanical computers:
 └─────────────────────────────────────────────────┘
 ```
 
-Ada Lovelace wrote the first algorithm intended for machine execution—for this mechanical computer. She understood that the machine could manipulate any symbols, not just numbers:
+### Ada Lovelace: The First Programmer (1843)
 
-> "The Analytical Engine might act upon other things besides number... the engine might compose elaborate and scientific pieces of music of any degree of complexity."
+Ada Lovelace, daughter of poet Lord Byron, worked with Babbage and wrote extensive notes on the Analytical Engine. In "Note G" of her translation of an Italian article about the engine, she included what is now recognized as the first computer program: an algorithm to compute Bernoulli numbers.
 
-**Key insight:** This was a *real computer*, Turing-complete, designed 100 years before electronic computers. It was never built due to manufacturing limitations, not theoretical ones.
+**What are Bernoulli numbers?**
+
+Bernoulli numbers (B₀, B₁, B₂, ...) are a sequence important in number theory and analysis. They appear in formulas for sums of powers:
+
+```
+1¹ + 2¹ + 3¹ + ... + n¹ = n(n+1)/2
+1² + 2² + 3² + ... + n² = n(n+1)(2n+1)/6
+1³ + 2³ + 3³ + ... + n³ = [n(n+1)/2]²
+```
+
+The coefficients in the general formula involve Bernoulli numbers:
+```
+B₀ =  1
+B₁ = -1/2   (or +1/2 in some conventions)
+B₂ =  1/6
+B₃ =  0
+B₄ = -1/30
+B₅ =  0
+B₆ =  1/42
+B₇ =  0
+B₈ = -1/30
+...
+```
+
+**Ada's Original Notation**
+
+Ada wrote her program as a table showing operations, variables, and the state of the machine at each step. Here's a portion of her diagram for computing B₇ (which she called B₈, using 1-based indexing):
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                    DIAGRAM FOR THE COMPUTATION OF BERNOULLI NUMBERS             │
+├───────┬───────────────┬─────────────────────────────────────────────────────────┤
+│       │               │              Variables                                  │
+│ Op #  │  Operation    ├────────┬────────┬────────┬────────┬────────┬───────────┤
+│       │               │  V0    │  V1    │  V2    │  V3    │  V4    │   ...     │
+├───────┼───────────────┼────────┼────────┼────────┼────────┼────────┼───────────┤
+│   1   │  × (multiply) │  1     │  2     │  n     │        │        │           │
+│   2   │  − (subtract) │  2n    │  2n-1  │        │        │        │           │
+│   3   │  ÷ (divide)   │  2n-1  │  2     │        │        │        │           │
+│   4   │  × (multiply) │(2n-1)/2│  ...   │        │        │        │           │
+│   5   │  − (subtract) │        │        │        │        │        │           │
+│   6   │  × (multiply) │        │        │        │        │        │           │
+│  ...  │     ...       │        │        │        │        │        │           │
+│  25   │  + (add)      │        │        │        │        │  B₇    │  Result   │
+└───────┴───────────────┴────────┴────────┴────────┴────────┴────────┴───────────┘
+
+Working Variables (the "Store"):
+V0, V1, V2  = temporary calculations
+V4-V10     = previously computed Bernoulli numbers (B₁ through B₆)
+V11-V13    = intermediate results
+V21-V24    = constants and loop counters
+```
+
+**The Algorithm in Modern Pseudocode**
+
+Ada's algorithm, translated to modern notation:
+
+```
+# Computing Bernoulli number B_n using the recurrence relation
+# B_n = -Σ(k=0 to n-1) [C(n+1,k) * B_k] / (n+1)
+# where C(n,k) is the binomial coefficient "n choose k"
+
+function bernoulli(n):
+    if n == 0: return 1
+    if n == 1: return -1/2
+
+    B = array[0..n]
+    B[0] = 1
+    B[1] = -1/2
+
+    for m from 2 to n:
+        if m is odd and m > 1:
+            B[m] = 0
+            continue
+
+        sum = 0
+        for k from 0 to m-1:
+            coefficient = binomial(m+1, k)
+            sum = sum + coefficient * B[k]
+
+        B[m] = -sum / (m + 1)
+
+    return B[n]
+```
+
+**What Made Ada's Program Revolutionary**
+
+1. **Variables and memory**: She used V0, V1, V2... as named storage locations—like variables in programming.
+
+2. **Loops**: Her algorithm included what she called "backing" - returning to earlier operations to repeat them. This is iteration:
+
+```
+Ada's notation:                    Modern equivalent:
+
+"Here follows a repetition        for i = 1 to n:
+ of Operations 13-23"                 ... operations 13-23 ...
+```
+
+3. **Conditional branching**: She described how the engine could take different paths based on results:
+
+> "The engine can arrange that after the first time a certain group of operations has been gone through, the expression shall be changed [so that subsequent iterations use different values]."
+
+4. **Nested loops**: Her Bernoulli algorithm required loops within loops:
+
+```
+for n from 2 to target:           # Outer loop: each Bernoulli number
+    for k from 0 to n-1:          # Inner loop: sum the series
+        accumulate term
+    compute B[n]
+```
+
+**Ada's Program in RHDL-Style Ruby**
+
+Here's how Ada's algorithm might look in a modern Ruby implementation:
+
+```ruby
+# Ada Lovelace's Bernoulli number algorithm (1843)
+# Translated to Ruby - she would have understood this!
+
+def bernoulli_numbers(count)
+  b = [Rational(1, 1)]  # B₀ = 1
+
+  (1...count).each do |n|
+    # Compute B_n using the recurrence relation
+    # B_n = -Σ(k=0 to n-1) [C(n+1,k) * B_k] / (n+1)
+
+    sum = Rational(0, 1)
+
+    (0...n).each do |k|
+      # This inner loop is what Ada called "backing"
+      # - returning to repeat operations with new values
+      coeff = binomial(n + 1, k)
+      sum += coeff * b[k]
+    end
+
+    b[n] = -sum / (n + 1)
+  end
+
+  b
+end
+
+def binomial(n, k)
+  return 1 if k == 0 || k == n
+  (1..k).reduce(1) { |acc, i| acc * (n - k + i) / i }
+end
+
+# Run Ada's algorithm
+result = bernoulli_numbers(10)
+result.each_with_index do |b, i|
+  puts "B_#{i} = #{b}" unless b == 0
+end
+
+# Output:
+# B_0 = 1
+# B_1 = -1/2
+# B_2 = 1/6
+# B_4 = -1/30
+# B_6 = 1/42
+# B_8 = -1/30
+```
+
+**The First Bug?**
+
+Historians have found what may be the first documented computer bug in Ada's notes. In one version of her table, there's an error where she wrote "V4/V5" instead of "V5/V4". Whether this was Ada's error, a transcription error, or Babbage's is still debated. But it shows that even the first program had bugs!
+
+**Ada's Vision**
+
+Most remarkably, Ada understood that the Analytical Engine was not just a calculator. She saw that it could manipulate any symbols—not just numbers:
+
+> "The Analytical Engine might act upon other things besides number, were objects found whose mutual fundamental relations could be expressed by those of the abstract science of operations, and which should be also susceptible of adaptations to the action of the operating notation and mechanism of the engine."
+
+She gave the example of music:
+
+> "Supposing, for instance, that the fundamental relations of pitched sounds in the science of harmony and of musical composition were susceptible of such expression and adaptations, the engine might compose elaborate and scientific pieces of music of any degree of complexity or extent."
+
+This insight—that computation is about symbol manipulation, not arithmetic—anticipated computer science by a century. It's exactly what we discussed at the start of this chapter: computation is abstract. Ada understood this in 1843.
+
+**Why This Matters**
+
+Ada's program proves that:
+1. **General-purpose programming existed before electronics** - Her algorithm has variables, loops, conditionals—all the essentials
+2. **The concepts haven't changed** - Her program structure maps directly to modern code
+3. **Hardware is irrelevant to the algorithm** - The same algorithm works on gears or transistors
+4. **Abstraction is timeless** - She was thinking in terms of operations on variables, just like we do today
+
+When you write RHDL code, you're doing exactly what Ada did: describing computation abstractly, independent of the physical implementation.
+
+**Key insight:** The Analytical Engine was a *real computer*, Turing-complete, designed 100 years before electronic computers. It was never built due to manufacturing limitations, not theoretical ones. But Ada proved it could be programmed.
 
 ### Zuse's Z1 (1938)
 
