@@ -19,6 +19,8 @@ module RHDL
 
       module_function
 
+      TEMP_SLICE_CTX_KEY = :rhdl_verilog_temp_slice_ctx
+
       # Consolidate multiple assigns to the same target into a single assign.
       # When the DSL has:
       #   x <= mux(cond1, val1, x)
@@ -139,6 +141,15 @@ module RHDL
       end
 
       def generate(module_def)
+        previous_ctx = Thread.current[TEMP_SLICE_CTX_KEY]
+        ctx = {
+          slice_counter: 0,
+          slice_map: {},
+          slice_decls: [],
+          slice_assigns: []
+        }
+        Thread.current[TEMP_SLICE_CTX_KEY] = ctx
+
         lines = []
 
         # Module declaration with optional parameters
@@ -176,6 +187,8 @@ module RHDL
         end
         lines << "" unless module_def.regs.empty? && module_def.nets.empty? && module_def.memories.empty?
 
+        temp_slice_insert_idx = lines.length
+
         # Generate initial block for regs with reset_values (for simulation)
         # This is needed for Verilator and other simulators when there's no reset signal
         regs_with_init = module_def.regs.select { |reg| reg.reset_value }
@@ -184,6 +197,43 @@ module RHDL
           regs_with_init.each do |reg|
             lines << "    #{sanitize(reg.name)} = #{literal(reg.reset_value, reg.width)};"
           end
+          lines << "  end"
+          lines << ""
+        end
+
+        # Generate initial blocks for memories with initial_data (RAM/ROM/tables)
+        #
+        # Notes:
+        # - The DSL initializes memories to 0 unless explicitly set; Verilog does not.
+        # - We keep output compact by clearing to 0 in a loop and then applying only
+        #   the non-zero initial values.
+        # - This avoids huge generated Verilog for large memories while still
+        #   matching Ruby/IR simulator semantics.
+        module_def.memories.each do |mem|
+          init_data = mem.initial_data
+          next unless init_data
+
+          mask = (1 << mem.width) - 1
+          non_zero_inits = []
+          init_data.each_with_index do |raw, idx|
+            value = (raw || 0).to_i & mask
+            next if value == 0
+            non_zero_inits << [idx, value]
+          end
+
+          mem_name = sanitize(mem.name)
+          block_name = sanitize("init_#{mem.name}")
+
+          lines << "  initial begin : #{block_name}"
+          lines << "    integer i;"
+          lines << "    for (i = 0; i < #{mem.depth}; i = i + 1) begin"
+          lines << "      #{mem_name}[i] = #{literal(0, mem.width)};"
+          lines << "    end"
+
+          non_zero_inits.each do |idx, value|
+            lines << "    #{mem_name}[#{idx}] = #{literal(value, mem.width)};"
+          end
+
           lines << "  end"
           lines << ""
         end
@@ -232,9 +282,23 @@ module RHDL
           lines << instance_block(instance)
         end
 
+        # Insert temporary wires/assigns for complex slices, if any.
+        #
+        # Verilog-2001 does not allow part-selects on arbitrary expressions, so we lower
+        # complex slices into shift operations assigned to a sized temporary wire. The
+        # net declaration width provides the required truncation.
+        temp_decls = ctx[:slice_decls]
+        temp_assigns = ctx[:slice_assigns]
+        unless temp_decls.empty? && temp_assigns.empty?
+          temp_lines = [*temp_decls, *temp_assigns, ""]
+          lines.insert(temp_slice_insert_idx, *temp_lines)
+        end
+
         lines << ""
         lines << "endmodule"
         lines.join("\n")
+      ensure
+        Thread.current[TEMP_SLICE_CTX_KEY] = previous_ctx
       end
 
       # Generate module instantiation
@@ -351,8 +415,32 @@ module RHDL
               "#{base}[#{high}:#{low}]"
             end
           else
-            # Complex expression - use shift and mask to extract bits
-            # (expr >> low) & mask
+            # Complex expression - Verilog-2001 does not allow part-select on expressions.
+            #
+            # Lower into a temporary, sized wire:
+            #   wire [W-1:0] tmp;
+            #   assign tmp = (expr >> low);
+            #
+            # The wire width provides truncation to exactly W bits, avoiding width
+            # propagation bugs when the slice is used inside concatenations.
+            slice_width = high - low + 1
+            ctx = Thread.current[TEMP_SLICE_CTX_KEY]
+            if ctx
+              key = [base, low, slice_width]
+              tmp_name = ctx[:slice_map][key]
+              unless tmp_name
+                tmp_name = sanitize("__slice_#{ctx[:slice_counter]}")
+                ctx[:slice_counter] += 1
+
+                ctx[:slice_decls] << "  wire #{width_decl(slice_width)}#{tmp_name};"
+                shift_expr = low == 0 ? base : "(#{base} >> #{low})"
+                ctx[:slice_assigns] << "  assign #{tmp_name} = #{shift_expr};"
+                ctx[:slice_map][key] = tmp_name
+              end
+              tmp_name
+            else
+              # Fallback (shouldn't happen): shift/mask
+              # (expr >> low) & mask
             slice_width = high - low + 1
             if low == 0
               if slice_width == 1
@@ -366,6 +454,7 @@ module RHDL
               else
                 "((#{base} >> #{low}) & #{slice_width}'d#{(1 << slice_width) - 1})"
               end
+            end
             end
           end
         when IR::Resize
