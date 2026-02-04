@@ -37,6 +37,7 @@
 ### Part VI: Case Studies
 
 - [14 - The MOS 6502](14-mos6502.md) - Deep dive into the classic CPU that powered the Apple II, C64, and NES
+- [15 - The VideoCore IV](15-videocore-iv.md) - The Raspberry Pi GPU: 12 QPUs, SIMD, and tile-based rendering
 
 ---
 
@@ -58,6 +59,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix L - HDL Comparison](appendix-l-hdl.md) - Verilog, VHDL, Chisel, and RHDL side-by-side
 - [Appendix M - Synthesis Details](appendix-m-synthesis.md) - Gate-level synthesis, optimization, and FPGA mapping
 - [Appendix N - MOS 6502 Implementation](appendix-n-mos6502.md) - Full 6502 in RHDL with test suite
+- [Appendix O - VideoCore IV Implementation](appendix-o-videocore.md) - QPU cores, VPM, and sample assembly programs
 
 ---
 
@@ -95,7 +97,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 │                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│   Case Study:      MOS 6502 - Where theory meets practice    │
+│   Case Studies:    MOS 6502 (CPU), VideoCore IV (GPU)        │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -132,6 +134,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 12 | Hardware Description Languages | L | HDL Comparison |
 | 13 | Synthesis and Implementation | M | Synthesis Details |
 | 14 | The MOS 6502 | N | 6502 RHDL Implementation |
+| 15 | The VideoCore IV | O | VideoCore IV Implementation |
 
 ---
 
