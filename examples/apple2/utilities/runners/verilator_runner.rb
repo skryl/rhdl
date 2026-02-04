@@ -86,6 +86,14 @@ module RHDL
         :hdl_verilator
       end
 
+      def dry_run_info
+        {
+          mode: :verilog,
+          simulator_type: :hdl_verilator,
+          native: true
+        }
+      end
+
       def load_rom(bytes, base_addr:)
         bytes = bytes.bytes if bytes.is_a?(String)
         # Keep Ruby copy for compatibility
@@ -239,7 +247,7 @@ module RHDL
           line = []
           base = text_line_address(row)
           40.times do |col|
-            line << (@ram[base + col] || 0)
+            line << read_ram_byte(base + col)
           end
           result << line
         end
@@ -269,7 +277,7 @@ module RHDL
           line_addr = hires_line_address(row, base)
 
           HIRES_BYTES_PER_LINE.times do |col|
-            byte = @ram[line_addr + col] || 0
+            byte = read_ram_byte(line_addr + col)
             7.times do |bit|
               line << ((byte >> bit) & 1)
             end
@@ -378,10 +386,12 @@ module RHDL
       end
 
       def read(addr)
-        if addr >= 0xD000 && addr <= 0xFFFF
+        addr &= 0xFFFF
+        if addr >= 0xD000
           return @rom[addr - 0xD000] || 0
         end
-        addr < @ram.size ? @ram[addr] : 0
+
+        read_ram_byte(addr)
       end
 
       def write(addr, value)
@@ -461,8 +471,7 @@ module RHDL
       end
 
       def create_cpp_wrapper(cpp_file, header_file)
-        # Create C++ header for FFI
-        File.write(header_file, <<~HEADER)
+        header_content = <<~HEADER
           #ifndef SIM_WRAPPER_H
           #define SIM_WRAPPER_H
 
@@ -486,8 +495,7 @@ module RHDL
           #endif // SIM_WRAPPER_H
         HEADER
 
-        # Create C++ wrapper implementation
-        File.write(cpp_file, <<~CPP)
+        cpp_content = <<~CPP
           #include "Vapple2.h"
           #include "verilated.h"
           #include "sim_wrapper.h"
@@ -542,29 +550,22 @@ module RHDL
           void sim_reset(void* sim) {
               SimContext* ctx = static_cast<SimContext*>(sim);
 
-              // Hold reset high and run clock cycles for proper 6502 reset
-              // The 6502 needs reset held for at least 2 clock cycles
-              // We run extra cycles to ensure timing generator also initializes
-              ctx->dut->reset = 1;
-              for (int i = 0; i < 100; i++) {
-                  ctx->dut->clk_14m = 0;
-                  ctx->dut->eval();
-                  ctx->dut->clk_14m = 1;
-                  ctx->dut->eval();
-              }
+              // Match examples/apple2/utilities/runners/hdl_runner.rb reset sequence:
+              //   1) reset=1 for 14x 14MHz cycles (1 CPU cycle)
+              //   2) reset=0 for 140x 14MHz cycles (10 CPU cycles)
+              //
+              // Use the same memory-bridging/write-commit timing as sim_run_cycles.
 
-              // Release reset and run more cycles with memory bridging
-              // The CPU needs to read the reset vector from $FFFC-$FFFD
-              ctx->dut->reset = 0;
-              for (int i = 0; i < 100; i++) {
+              ctx->speaker_toggles = 0;
+
+              auto run_14m_cycle = [&]() {
                   // Falling edge
                   ctx->dut->clk_14m = 0;
                   ctx->dut->eval();
 
-                  // Memory bridging - provide data from RAM or ROM
+                  // Provide RAM/ROM data based on address
                   unsigned int ram_addr = ctx->dut->ram_addr;
                   if (ram_addr >= 0xD000 && ram_addr <= 0xFFFF) {
-                      // ROM area
                       unsigned int rom_offset = ram_addr - 0xD000;
                       ctx->dut->ram_do = (rom_offset < sizeof(ctx->rom)) ? ctx->rom[rom_offset] : 0;
                   } else if (ram_addr < sizeof(ctx->ram)) {
@@ -577,6 +578,31 @@ module RHDL
                   // Rising edge
                   ctx->dut->clk_14m = 1;
                   ctx->dut->eval();
+
+                  // Handle RAM writes
+                  if (ctx->dut->ram_we) {
+                      unsigned int write_addr = ctx->dut->ram_addr;
+                      if (write_addr < sizeof(ctx->ram)) {
+                          ctx->ram[write_addr] = ctx->dut->d & 0xFF;
+                      }
+                  }
+
+                  // Track speaker toggles
+                  unsigned char speaker = ctx->dut->speaker;
+                  if (speaker != ctx->prev_speaker) {
+                      ctx->speaker_toggles++;
+                      ctx->prev_speaker = speaker;
+                  }
+              };
+
+              ctx->dut->reset = 1;
+              for (int i = 0; i < 14; i++) {
+                  run_14m_cycle();
+              }
+
+              ctx->dut->reset = 0;
+              for (int i = 0; i < 140; i++) {
+                  run_14m_cycle();
               }
           }
 
@@ -708,6 +734,14 @@ module RHDL
 
           } // extern "C"
         CPP
+
+        write_file_if_changed(header_file, header_content)
+        write_file_if_changed(cpp_file, cpp_content)
+      end
+
+      def write_file_if_changed(path, content)
+        return if File.exist?(path) && File.read(path) == content
+        File.write(path, content)
       end
 
       def compile_verilator(verilog_file, wrapper_file)
@@ -769,8 +803,15 @@ module RHDL
           end
         end
 
-        unless File.exist?(lib_path)
-          # Try alternative build approach - build object files then link
+        # On some platforms (notably macOS), Verilator's make output may not update the
+        # requested shared library even if compilation succeeds. Ensure the dylib/so
+        # is freshly linked from the static archives when needed.
+        lib_vapple2 = File.join(OBJ_DIR, 'libVapple2.a')
+        lib_verilated = File.join(OBJ_DIR, 'libverilated.a')
+        newest_input = [lib_vapple2, lib_verilated].filter_map { |p| File.exist?(p) ? File.mtime(p) : nil }.max
+        lib_mtime = File.exist?(lib_path) ? File.mtime(lib_path) : nil
+
+        if lib_mtime.nil? || (!newest_input.nil? && lib_mtime < newest_input)
           build_shared_library(wrapper_file)
         end
       end
@@ -791,7 +832,9 @@ module RHDL
                      "-Wl,--whole-archive #{lib_vapple2} #{lib_verilated} -Wl,--no-whole-archive -latomic"
                    end
 
-        system(link_cmd)
+        unless system(link_cmd)
+          raise "Failed to link Verilator shared library: #{lib_path}"
+        end
       end
 
       def shared_lib_path
@@ -889,22 +932,6 @@ module RHDL
 
       def reset_simulation
         @sim_reset&.call(@sim_ctx) if @sim_ctx
-        initialize_inputs
-      end
-
-      def initialize_inputs
-        return unless @sim_ctx
-
-        verilator_poke('clk_14m', 0)
-        verilator_poke('flash_clk', 0)
-        verilator_poke('reset', 0)
-        verilator_poke('ram_do', 0)
-        verilator_poke('pd', 0)
-        verilator_poke('ps2_clk', 1)
-        verilator_poke('ps2_data', 1)
-        verilator_poke('gameport', 0)
-        verilator_poke('pause', 0)
-        verilator_eval
       end
 
       def verilator_poke(name, value)
@@ -929,7 +956,18 @@ module RHDL
 
       def verilator_read_ram(addr)
         return 0 unless @sim_ctx
-        @sim_read_ram_fn.call(@sim_ctx, addr)
+        @sim_read_ram_fn.call(@sim_ctx, addr) & 0xFF
+      end
+
+      def read_ram_byte(addr)
+        addr &= 0xFFFF
+        return 0 unless addr < @ram.size
+
+        if @sim_read_ram_fn && @sim_ctx
+          return verilator_read_ram(addr)
+        end
+
+        @ram[addr] || 0
       end
 
       def text_line_address(row)
