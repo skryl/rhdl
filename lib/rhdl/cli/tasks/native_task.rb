@@ -44,26 +44,33 @@ module RHDL
           },
 
           # IR-level simulators (Behavior IR backend)
+          # These use Fiddle (C ABI) instead of Magnus (Ruby native extension)
           ir_interpreter: {
             name: 'IR Interpreter',
             ext_dir: File.expand_path('lib/rhdl/codegen/ir/sim/ir_interpreter', Config.project_root),
             crate_name: 'ir_interpreter',
             load_path: 'lib/rhdl/codegen/ir/sim/ir_interpreter/lib',
-            check_const: 'RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE'
+            check_const: 'RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE',
+            fiddle: true,  # Uses Fiddle, not Magnus - requires Ruby wrapper
+            ruby_require: 'rhdl/codegen/ir/sim/ir_interpreter'
           },
           ir_jit: {
             name: 'IR JIT (Cranelift)',
             ext_dir: File.expand_path('lib/rhdl/codegen/ir/sim/ir_jit', Config.project_root),
             crate_name: 'ir_jit',
             load_path: 'lib/rhdl/codegen/ir/sim/ir_jit/lib',
-            check_const: 'RHDL::Codegen::IR::IR_JIT_AVAILABLE'
+            check_const: 'RHDL::Codegen::IR::IR_JIT_AVAILABLE',
+            fiddle: true,
+            ruby_require: 'rhdl/codegen/ir/sim/ir_jit'
           },
           ir_compiler: {
             name: 'IR Compiler (AOT)',
             ext_dir: File.expand_path('lib/rhdl/codegen/ir/sim/ir_compiler', Config.project_root),
             crate_name: 'ir_compiler',
             load_path: 'lib/rhdl/codegen/ir/sim/ir_compiler/lib',
-            check_const: 'RHDL::Codegen::IR::IR_COMPILER_AVAILABLE'
+            check_const: 'RHDL::Codegen::IR::IR_COMPILER_AVAILABLE',
+            fiddle: true,
+            ruby_require: 'rhdl/codegen/ir/sim/ir_compiler'
           }
         }.freeze
 
@@ -172,11 +179,17 @@ module RHDL
         end
 
         def check_extension(key, ext)
-          load_path = File.expand_path(ext[:load_path], Config.project_root)
-          $LOAD_PATH.unshift(load_path) unless $LOAD_PATH.include?(load_path)
-
           begin
-            require ext[:crate_name]
+            # Fiddle-based extensions need to require the Ruby wrapper file
+            # Magnus-based extensions can require the .so directly
+            if ext[:fiddle]
+              require ext[:ruby_require]
+            else
+              load_path = File.expand_path(ext[:load_path], Config.project_root)
+              $LOAD_PATH.unshift(load_path) unless $LOAD_PATH.include?(load_path)
+              require ext[:crate_name]
+            end
+
             const_parts = ext[:check_const].split('::')
             const_value = const_parts.reduce(Object) { |mod, name| mod.const_get(name) }
 
@@ -198,10 +211,14 @@ module RHDL
         end
 
         def extension_available?(ext)
-          load_path = File.expand_path(ext[:load_path], Config.project_root)
-          $LOAD_PATH.unshift(load_path) unless $LOAD_PATH.include?(load_path)
+          if ext[:fiddle]
+            require ext[:ruby_require]
+          else
+            load_path = File.expand_path(ext[:load_path], Config.project_root)
+            $LOAD_PATH.unshift(load_path) unless $LOAD_PATH.include?(load_path)
+            require ext[:crate_name]
+          end
 
-          require ext[:crate_name]
           const_parts = ext[:check_const].split('::')
           const_parts.reduce(Object) { |mod, name| mod.const_get(name) }
         rescue LoadError, NameError
