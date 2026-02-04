@@ -74,8 +74,6 @@ module RHDL
         @speaker = Speaker.new
         @prev_speaker_state = 0
         @last_speaker_sync_time = nil
-
-        reset_simulation
       end
 
       def native?
@@ -423,7 +421,12 @@ module RHDL
 
         # Export Apple2 to Verilog
         verilog_file = File.join(VERILOG_DIR, 'apple2.v')
-        unless File.exist?(verilog_file) && File.mtime(verilog_file) > File.mtime(__FILE__)
+        verilog_codegen = File.expand_path('../../../../lib/rhdl/codegen/verilog/verilog.rb', __dir__)
+        export_deps = [__FILE__, verilog_codegen].select { |p| File.exist?(p) }
+        needs_export = !File.exist?(verilog_file) ||
+                       export_deps.any? { |p| File.mtime(p) > File.mtime(verilog_file) }
+
+        if needs_export
           puts "  Exporting Apple2 to Verilog..."
           export_verilog(verilog_file)
         end
@@ -497,6 +500,7 @@ module RHDL
 
         cpp_content = <<~CPP
           #include "Vapple2.h"
+          #include "Vapple2___024root.h"
           #include "verilated.h"
           #include "sim_wrapper.h"
           #include <cstring>
@@ -563,26 +567,34 @@ module RHDL
                   ctx->dut->clk_14m = 0;
                   ctx->dut->eval();
 
-                  // Provide RAM/ROM data based on address
-                  unsigned int ram_addr = ctx->dut->ram_addr;
-                  if (ram_addr >= 0xD000 && ram_addr <= 0xFFFF) {
-                      unsigned int rom_offset = ram_addr - 0xD000;
+                  // Provide RAM/ROM data based on CPU address.
+                  //
+                  // NOTE: The Rust IR batched runner bridges memory based on the CPU address register
+                  // (cpu__addr_reg) rather than the top-level ram_addr output, to avoid video-cycle
+                  // contention and match the IR timing model. We do the same here to ensure
+                  // cross-backend determinism in tests.
+                  unsigned int cpu_addr = ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__addr_reg & 0xFFFF;
+                  if (cpu_addr >= 0xD000 && cpu_addr <= 0xFFFF) {
+                      unsigned int rom_offset = cpu_addr - 0xD000;
                       ctx->dut->ram_do = (rom_offset < sizeof(ctx->rom)) ? ctx->rom[rom_offset] : 0;
-                  } else if (ram_addr < sizeof(ctx->ram)) {
-                      ctx->dut->ram_do = ctx->ram[ram_addr];
-                  } else {
+                  } else if (cpu_addr >= 0xC000) {
                       ctx->dut->ram_do = 0;
+                  } else {
+                      ctx->dut->ram_do = ctx->ram[cpu_addr];
                   }
                   ctx->dut->eval();
 
                   // Rising edge
                   ctx->dut->clk_14m = 1;
                   ctx->dut->eval();
+                  // Ensure any derived-clock sequential logic (e.g. Q3-domain) runs in the same 14MHz tick
+                  // to match the IR batched runner's deterministic tick ordering.
+                  ctx->dut->eval();
 
                   // Handle RAM writes
                   if (ctx->dut->ram_we) {
-                      unsigned int write_addr = ctx->dut->ram_addr;
-                      if (write_addr < sizeof(ctx->ram)) {
+                      unsigned int write_addr = ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__addr_reg & 0xFFFF;
+                      if (write_addr < 0xC000) {
                           ctx->ram[write_addr] = ctx->dut->d & 0xFF;
                       }
                   }
@@ -624,14 +636,20 @@ module RHDL
               else if (strcmp(name, "pause") == 0) ctx->dut->pause = value;
           }
 
-          unsigned int sim_peek(void* sim, const char* name) {
-              SimContext* ctx = static_cast<SimContext*>(sim);
-              if (strcmp(name, "ram_addr") == 0) return ctx->dut->ram_addr;
-              else if (strcmp(name, "ram_we") == 0) return ctx->dut->ram_we;
-              else if (strcmp(name, "d") == 0) return ctx->dut->d;
-              else if (strcmp(name, "video") == 0) return ctx->dut->video;
-              else if (strcmp(name, "speaker") == 0) return ctx->dut->speaker;
-              else if (strcmp(name, "pc_debug") == 0) return ctx->dut->pc_debug;
+	          unsigned int sim_peek(void* sim, const char* name) {
+	              SimContext* ctx = static_cast<SimContext*>(sim);
+	              if (strcmp(name, "ram_addr") == 0) return ctx->dut->ram_addr;
+	              else if (strcmp(name, "ram_we") == 0) return ctx->dut->ram_we;
+	              else if (strcmp(name, "d") == 0) return ctx->dut->d;
+	              else if (strcmp(name, "cpu_addr") == 0) return ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__addr_reg;
+	              else if (strcmp(name, "cpu_state") == 0) return ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__cpu_state;
+	              else if (strcmp(name, "cpu_next_state") == 0) return ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__next_state;
+	              else if (strcmp(name, "cpu_t_reg") == 0) return ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__t_reg;
+	              else if (strcmp(name, "cpu_pc_reg") == 0) return ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__pc_reg;
+	              else if (strcmp(name, "cpu_addr_reg") == 0) return ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__addr_reg;
+	              else if (strcmp(name, "video") == 0) return ctx->dut->video;
+	              else if (strcmp(name, "speaker") == 0) return ctx->dut->speaker;
+	              else if (strcmp(name, "pc_debug") == 0) return ctx->dut->pc_debug;
               else if (strcmp(name, "opcode_debug") == 0) return ctx->dut->opcode_debug;
               else if (strcmp(name, "a_debug") == 0) return ctx->dut->a_debug;
               else if (strcmp(name, "x_debug") == 0) return ctx->dut->x_debug;
@@ -675,27 +693,30 @@ module RHDL
                   ctx->dut->clk_14m = 0;
                   ctx->dut->eval();
 
-                  // Memory read - provide data from RAM or ROM
-                  unsigned int ram_addr = ctx->dut->ram_addr;
-                  if (ram_addr >= 0xD000 && ram_addr <= 0xFFFF) {
+                  // Memory read - provide data from RAM or ROM based on CPU address (see sim_reset note)
+                  unsigned int cpu_addr = ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__addr_reg & 0xFFFF;
+                  if (cpu_addr >= 0xD000 && cpu_addr <= 0xFFFF) {
                       // ROM area
-                      unsigned int rom_offset = ram_addr - 0xD000;
+                      unsigned int rom_offset = cpu_addr - 0xD000;
                       ctx->dut->ram_do = (rom_offset < sizeof(ctx->rom)) ? ctx->rom[rom_offset] : 0;
-                  } else if (ram_addr < sizeof(ctx->ram)) {
-                      ctx->dut->ram_do = ctx->ram[ram_addr];
-                  } else {
+                  } else if (cpu_addr >= 0xC000) {
                       ctx->dut->ram_do = 0;
+                  } else {
+                      ctx->dut->ram_do = ctx->ram[cpu_addr];
                   }
                   ctx->dut->eval();
 
                   // Rising edge
                   ctx->dut->clk_14m = 1;
                   ctx->dut->eval();
+                  // Ensure any derived-clock sequential logic (e.g. Q3-domain) runs in the same 14MHz tick
+                  // to match the IR batched runner's deterministic tick ordering.
+                  ctx->dut->eval();
 
                   // Handle RAM writes
                   if (ctx->dut->ram_we) {
-                      unsigned int write_addr = ctx->dut->ram_addr;
-                      if (write_addr < sizeof(ctx->ram)) {
+                      unsigned int write_addr = ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__addr_reg & 0xFFFF;
+                      if (write_addr < 0xC000) {
                           ctx->ram[write_addr] = ctx->dut->d & 0xFF;
                           // Check text page ($0400-$07FF)
                           if (write_addr >= 0x0400 && write_addr <= 0x07FF) {
