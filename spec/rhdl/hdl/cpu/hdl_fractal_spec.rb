@@ -1,15 +1,13 @@
 require 'spec_helper'
 require 'support/cpu_assembler'
 require 'support/display_helper'
+require 'rhdl/hdl/cpu/harness'
 
-RSpec.describe RHDL::HDL::CPU::Harness, 'Fractal' do
-  include CpuTestHelper
+RSpec.describe RHDL::HDL::CPU::FastHarness, 'Fractal' do
   include DisplayHelper
 
   before(:each) do
-    use_hdl_cpu!
-    @memory = MemorySimulator::Memory.new
-    @cpu = cpu_class.new(@memory)
+    @cpu = RHDL::HDL::CPU::FastHarness.new(nil, sim: :compile)
     @cpu.reset
 
     clear_display(@cpu.memory)

@@ -15,21 +15,14 @@ module RHDL
 
       class_methods do
         # Override to_ir to include sequential processes
-        def to_ir(top_name: nil)
+        # @param top_name [String] Optional name override for module
+        # @param parameters [Hash] Instance parameters to override defaults
+        def to_ir(top_name: nil, parameters: {})
           name = top_name || verilog_module_name
 
-          ports = _ports.map do |p|
-            RHDL::Export::IR::Port.new(
-              name: p.name,
-              direction: p.direction,
-              width: p.width,
-              default: p.default
-            )
-          end
-
           # Build parameters hash from class-level parameter definitions
-          # Convert Procs to their evaluated values using default values
-          parameters = {}
+          # then merge in any instance-specific parameters
+          resolved_params = {}
           _parameter_defs.each do |param_name, default_val|
             if default_val.is_a?(Proc)
               # For class-level evaluation, use default parameter values
@@ -38,10 +31,24 @@ module RHDL
                 next if v.is_a?(Proc)
                 eval_context.instance_variable_set(:"@#{k}", v)
               end
-              parameters[param_name] = eval_context.instance_exec(&default_val)
+              resolved_params[param_name] = eval_context.instance_exec(&default_val)
             else
-              parameters[param_name] = default_val
+              resolved_params[param_name] = default_val
             end
+          end
+          # Override with instance parameters
+          resolved_params.merge!(parameters)
+
+          # Resolve port widths using the resolved parameters
+          ports = _port_defs.map do |p|
+            raw_width = p[:width]
+            resolved_width = raw_width.is_a?(Symbol) ? (resolved_params[raw_width] || 1) : raw_width
+            RHDL::Export::IR::Port.new(
+              name: p[:name],
+              direction: p[:direction],
+              width: resolved_width,
+              default: p[:default]
+            )
           end
 
           # Get sequential IR if defined
@@ -60,10 +67,11 @@ module RHDL
           end
 
           # Only mark outputs as registers if they are assigned in the sequential block
-          reg_ports = _ports.select { |p| p.direction == :out && sequential_targets.include?(p.name) }.map(&:name)
+          reg_ports = _port_defs.select { |p| p[:direction] == :out && sequential_targets.include?(p[:name]) }.map { |p| p[:name] }
 
           # Also check for behavior blocks (for combinational parts)
-          behavior_result = behavior_to_ir_assigns
+          # Pass resolved parameters for parameterized width resolution
+          behavior_result = behavior_to_ir_assigns(parameters: resolved_params)
           assigns = behavior_result[:assigns]
 
           # Generate instances from structure definitions
@@ -165,7 +173,7 @@ module RHDL
             memories: memories,
             write_ports: write_ports,
             sync_read_ports: sync_read_ports,
-            parameters: parameters
+            parameters: resolved_params
           )
         end
 
