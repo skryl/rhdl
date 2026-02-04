@@ -27,23 +27,27 @@
 - [11 - Wafer-Scale Computing](11-wafer-scale.md) - Using entire wafers: 2D mesh NoC, dataflow at extreme scale
 - [12 - Vector Processing](12-vector-processing.md) - SIMD with vector registers: pipelining, chaining, and memory banking
 
-### Part IV: Alternative Substrates
+### Part IV: Brain-Inspired Architectures
 
-- [13 - Asynchronous Computing](13-asynchronous-computing.md) - Clockless circuits: self-timed logic, handshaking, and NULL convention
-- [14 - Neuromorphic Computing](14-neuromorphic-computing.md) - Brain-inspired architectures: spiking neurons, STDP, and memristors
-- [15 - Photonic Computing](15-photonic-computing.md) - Computing with light: MZI meshes, optical matrix multiply, and interference
-- [16 - Analog Computing](16-analog-computing.md) - Continuous values: op-amps, integrators, and differential equations in real-time
+- [13 - Neural Networks](13-neural-networks.md) - Perceptrons to transformers: layers, backpropagation, and hardware acceleration
+- [14 - Neuromorphic Computing](14-neuromorphic-computing.md) - Spiking neurons, STDP, memristors, and event-driven computation
 
-### Part V: Reconfigurable Computing
+### Part V: Alternative Substrates
 
-- [17 - FPGAs](17-fpga.md) - Field-programmable gate arrays: LUTs, CLBs, routing, and fine-grained reconfiguration
-- [18 - Coarse-Grained Reconfigurable Arrays](18-cgra.md) - CGRAs: word-level datapaths, spatial computing, and domain-specific acceleration
+- [15 - Asynchronous Computing](15-asynchronous-computing.md) - Clockless circuits: self-timed logic, handshaking, and NULL convention
+- [16 - Photonic Computing](16-photonic-computing.md) - Computing with light: MZI meshes, optical matrix multiply, and interference
+- [17 - Analog Computing](17-analog-computing.md) - Continuous values: op-amps, integrators, and differential equations in real-time
 
-### Part VI: Non-Classical Computing
+### Part VI: Reconfigurable Computing
 
-- [19 - Stochastic Computing](19-stochastic-computing.md) - Probability as data: AND gates multiply, MUX gates add
-- [20 - Reversible Computation](20-reversible-computation.md) - Fredkin gates, Toffoli gates, and the thermodynamics of computing
-- [21 - Quantum Computing](21-quantum-computing.md) - Qubits, superposition, entanglement, and quantum algorithms
+- [18 - FPGAs](18-fpga.md) - Field-programmable gate arrays: LUTs, CLBs, routing, and fine-grained reconfiguration
+- [19 - Coarse-Grained Reconfigurable Arrays](19-cgra.md) - CGRAs: word-level datapaths, spatial computing, and domain-specific acceleration
+
+### Part VII: Non-Classical Computing
+
+- [20 - Stochastic Computing](20-stochastic-computing.md) - Probability as data: AND gates multiply, MUX gates add
+- [21 - Reversible Computation](21-reversible-computation.md) - Fredkin gates, Toffoli gates, and the thermodynamics of computing
+- [22 - Quantum Computing](22-quantum-computing.md) - Qubits, superposition, entanglement, and quantum algorithms
 
 ---
 
@@ -63,15 +67,16 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix J - GPU Implementation](appendix-j-gpu.md) - CUDA-like execution model and RHDL streaming multiprocessor
 - [Appendix K - Wafer-Scale Implementation](appendix-k-wafer-scale.md) - Mesh routers, crossbars, virtual channels, and NoC in RHDL
 - [Appendix L - Vector Implementation](appendix-l-vector.md) - Vector registers, chaining controller, and banked memory in RHDL
-- [Appendix M - Asynchronous Implementation](appendix-m-asynchronous.md) - C-elements, dual-rail logic, and self-timed circuits in RHDL
+- [Appendix M - Neural Network Implementation](appendix-m-neural-networks.md) - Layers, activations, backprop, and inference accelerators in RHDL
 - [Appendix N - Neuromorphic Implementation](appendix-n-neuromorphic.md) - LIF neurons, STDP synapses, and spiking networks in RHDL
-- [Appendix O - Photonic Simulation](appendix-o-photonic.md) - Ruby simulation of MZIs, interference, and optical neural networks
-- [Appendix P - Analog Simulation](appendix-p-analog.md) - Ruby simulation of op-amps, ODEs, and analog neural networks
-- [Appendix Q - FPGA Implementation](appendix-q-fpga.md) - LUTs, CLBs, routing, and FPGA primitives in RHDL
-- [Appendix R - CGRA Implementation](appendix-r-cgra.md) - PE arrays, interconnect, and configuration in RHDL
-- [Appendix S - Stochastic Implementation](appendix-s-stochastic.md) - LFSRs, stochastic multipliers, and probabilistic neural networks
-- [Appendix T - Reversible Gates](appendix-t-reversible.md) - Fredkin, Toffoli, and building circuits that lose no information
-- [Appendix U - Quantum Circuits](appendix-u-quantum.md) - Quantum gate implementations and simulators
+- [Appendix O - Asynchronous Implementation](appendix-o-asynchronous.md) - C-elements, dual-rail logic, and self-timed circuits in RHDL
+- [Appendix P - Photonic Simulation](appendix-p-photonic.md) - Ruby simulation of MZIs, interference, and optical neural networks
+- [Appendix Q - Analog Simulation](appendix-q-analog.md) - Ruby simulation of op-amps, ODEs, and analog neural networks
+- [Appendix R - FPGA Implementation](appendix-r-fpga.md) - LUTs, CLBs, routing, and FPGA primitives in RHDL
+- [Appendix S - CGRA Implementation](appendix-s-cgra.md) - PE arrays, interconnect, and configuration in RHDL
+- [Appendix T - Stochastic Implementation](appendix-t-stochastic.md) - LFSRs, stochastic multipliers, and probabilistic neural networks
+- [Appendix U - Reversible Gates](appendix-u-reversible.md) - Fredkin, Toffoli, and building circuits that lose no information
+- [Appendix V - Quantum Circuits](appendix-v-quantum.md) - Quantum gate implementations and simulators
 
 ---
 
@@ -103,15 +108,18 @@ Each appendix provides complete RHDL implementations and formal details for its 
 |                                                              |
 +-------------------------------------------------------------+
 |                                                              |
-|   Alternative      Async ----- Neuromorphic                  |
-|   Substrates:        |             |                         |
-|   (still classical)  v             v                         |
-|                   Clockless    Brain-inspired                |
+|   Brain-Inspired:  Neural Networks --- Neuromorphic          |
+|                         |                   |                |
+|                         v                   v                |
+|                    Perceptrons        Spiking neurons        |
+|                    to transformers    STDP, memristors       |
 |                                                              |
-|                   Photonic ------- Analog                    |
-|                      |               |                       |
-|                      v               v                       |
-|                  Light/MZI     Continuous/Op-amps            |
++-------------------------------------------------------------+
+|                                                              |
+|   Alternative      Async ----- Photonic ----- Analog         |
+|   Substrates:        |            |             |            |
+|   (still classical)  v            v             v            |
+|                   Clockless    Light/MZI   Continuous        |
 |                                                              |
 +-------------------------------------------------------------+
 |                                                              |
@@ -162,15 +170,16 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 10 | GPU Architecture | J | GPU Implementation |
 | 11 | Wafer-Scale Computing | K | Wafer-Scale/NoC Implementation |
 | 12 | Vector Processing | L | Vector Implementation |
-| 13 | Asynchronous Computing | M | Asynchronous Implementation |
+| 13 | Neural Networks | M | Neural Network Implementation |
 | 14 | Neuromorphic Computing | N | Neuromorphic Implementation |
-| 15 | Photonic Computing | O | Photonic Simulation (Ruby) |
-| 16 | Analog Computing | P | Analog Simulation (Ruby) |
-| 17 | FPGAs | Q | FPGA Implementation |
-| 18 | CGRAs | R | CGRA Implementation |
-| 19 | Stochastic Computing | S | Stochastic Implementation |
-| 20 | Reversible Computation | T | Reversible Gates |
-| 21 | Quantum Computing | U | Quantum Circuits |
+| 15 | Asynchronous Computing | O | Asynchronous Implementation |
+| 16 | Photonic Computing | P | Photonic Simulation (Ruby) |
+| 17 | Analog Computing | Q | Analog Simulation (Ruby) |
+| 18 | FPGAs | R | FPGA Implementation |
+| 19 | CGRAs | S | CGRA Implementation |
+| 20 | Stochastic Computing | T | Stochastic Implementation |
+| 21 | Reversible Computation | U | Reversible Gates |
+| 22 | Quantum Computing | V | Quantum Circuits |
 
 ---
 
