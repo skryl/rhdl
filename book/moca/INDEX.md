@@ -13,22 +13,26 @@
 - [03 - Mechanical Computation](03-mechanical-computation.md) - Babbage, Ada Lovelace, Zuse, and relay computers
 - [04 - Biological Computation](04-biological-computation.md) - DNA computing, neurons as gates, cellular automata
 
-### Part II: Alternative Architectures
+### Part II: Dataflow and Spatial Architectures
 
 - [05 - Dataflow Computation](05-dataflow-computation.md) - Data-driven execution, token machines, why HDL is naturally dataflow
-- [06 - Stack Machines](06-stack-machines.md) - Forth, JVM, and the simplest computer architecture
-- [07 - Systolic Arrays](07-systolic-arrays.md) - Regular structures, matrix operations, and modern AI accelerators
-- [08 - Reversible Computation](08-reversible-computation.md) - Fredkin gates, Toffoli gates, and the thermodynamics of computing
+- [06 - Systolic Arrays](06-systolic-arrays.md) - Regular structures, matrix operations, and modern AI accelerators
 
-### Part III: The Register Machine
+### Part III: Stack and Register Machines
 
-- [09 - Register Machines](09-register-machines.md) - The von Neumann architecture that dominates modern computing
-- [10 - The MOS 6502](10-mos6502.md) - Deep dive into the classic CPU that powered the Apple II, C64, and NES
+- [07 - Stack Machines](07-stack-machines.md) - Forth, JVM, and the simplest computer architecture
+- [08 - Register Machines](08-register-machines.md) - The von Neumann architecture that dominates modern computing
+- [09 - The MOS 6502](09-mos6502.md) - Deep dive into the classic CPU that powered the Apple II, C64, and NES
 
-### Part IV: Hardware Practice
+### Part IV: Quantum and Reversible Computing
 
-- [11 - Hardware Description Languages](11-hdl.md) - Verilog, VHDL, and RHDL compared
-- [12 - Synthesis and Implementation](12-synthesis.md) - From HDL to silicon: FPGAs, ASICs, and the synthesis flow
+- [10 - Reversible Computation](10-reversible-computation.md) - Fredkin gates, Toffoli gates, and the thermodynamics of computing
+- [11 - Quantum Computing](11-quantum-computing.md) - Qubits, superposition, entanglement, and quantum algorithms
+
+### Part V: Hardware Practice
+
+- [12 - Hardware Description Languages](12-hdl.md) - Verilog, VHDL, and RHDL compared
+- [13 - Synthesis and Implementation](13-synthesis.md) - From HDL to silicon: FPGAs, ASICs, and the synthesis flow
 
 ---
 
@@ -41,13 +45,14 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix C - Ada Lovelace's Program](appendix-c-ada-lovelace.md) - The first program, before hardware existed
 - [Appendix D - Cellular Automata](appendix-d-cellular-automata.md) - Rule 110, Game of Life, and emergent computation
 - [Appendix E - Dataflow Architectures](appendix-e-dataflow.md) - Token machines, static vs dynamic dataflow, RHDL examples
-- [Appendix F - Stack Machine ISA](appendix-f-stack-machine.md) - Complete Forth-like instruction set with RHDL implementation
-- [Appendix G - Systolic Array Patterns](appendix-g-systolic.md) - Matrix multiply, convolution, and other array algorithms
-- [Appendix H - Reversible Gates](appendix-h-reversible.md) - Fredkin, Toffoli, and building circuits that lose no information
-- [Appendix I - Register Machine ISA](appendix-i-register-machine.md) - Complete 8-bit instruction set with RHDL CPU
-- [Appendix J - MOS 6502 Implementation](appendix-j-mos6502.md) - Full 6502 in RHDL with test suite
-- [Appendix K - HDL Comparison](appendix-k-hdl.md) - Verilog, VHDL, Chisel, and RHDL side-by-side
-- [Appendix L - Synthesis Details](appendix-l-synthesis.md) - Gate-level synthesis, optimization, and FPGA mapping
+- [Appendix F - Systolic Array Patterns](appendix-f-systolic.md) - Matrix multiply, convolution, and other array algorithms
+- [Appendix G - Stack Machine ISA](appendix-g-stack-machine.md) - Complete Forth-like instruction set with RHDL implementation
+- [Appendix H - Register Machine ISA](appendix-h-register-machine.md) - Complete 8-bit instruction set with RHDL CPU
+- [Appendix I - MOS 6502 Implementation](appendix-i-mos6502.md) - Full 6502 in RHDL with test suite
+- [Appendix J - Reversible Gates](appendix-j-reversible.md) - Fredkin, Toffoli, and building circuits that lose no information
+- [Appendix K - Quantum Circuits](appendix-k-quantum.md) - Quantum gate implementations and simulators
+- [Appendix L - HDL Comparison](appendix-l-hdl.md) - Verilog, VHDL, Chisel, and RHDL side-by-side
+- [Appendix M - Synthesis Details](appendix-m-synthesis.md) - Gate-level synthesis, optimization, and FPGA mapping
 
 ---
 
@@ -65,14 +70,23 @@ Each appendix provides complete RHDL implementations and formal details for its 
 │                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│   Architectural:   Dataflow   Stack   Systolic  Reversible  │
-│                       │         │        │          │        │
-│                       └────┬────┴────┬───┴────┬─────┘        │
-│                            ▼         ▼        ▼              │
-│                       Register Machine (von Neumann)         │
-│                            │                                 │
-│                            ▼                                 │
+│   Spatial:         Dataflow ─────── Systolic Arrays         │
+│                    (data-driven)    (regular structure)      │
+│                                                              │
+│   Sequential:      Stack ─────────── Register               │
+│                    (operand stack)  (von Neumann)           │
+│                         │               │                    │
+│                         └───────┬───────┘                    │
+│                                 ▼                            │
 │   Dominant:          Modern CPUs (MOS 6502, x86, ARM)        │
+│                                                              │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│   Beyond Classical: Reversible ──→ Quantum                   │
+│                         │              │                     │
+│                         ▼              ▼                     │
+│                    Zero energy    Exponential speedup        │
+│                    (theoretical)  (for some problems)        │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -83,10 +97,11 @@ Each appendix provides complete RHDL implementations and formal details for its 
 
 1. **Computation is substrate-independent** - Gears, relays, DNA, transistors—same computation
 2. **Many roads to the same destination** - Turing machines, lambda calculus, cellular automata are equivalent
-3. **Architecture is a choice** - Dataflow, stack, systolic, reversible are all valid
+3. **Spatial vs sequential** - Dataflow/systolic process in space; stack/register process in time
 4. **Register machines won for practical reasons** - Not because they're theoretically superior
-5. **Understanding alternatives illuminates the mainstream** - Why does x86 look the way it does?
-6. **Thermodynamics constrains computation** - Reversible computing may be the future
+5. **Reversible computing bridges classical and quantum** - Same gates work in both
+6. **Quantum offers new possibilities** - But only for certain problem classes
+7. **Thermodynamics constrains computation** - Reversible computing may be the future
 
 ---
 
@@ -99,13 +114,14 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 03 | Mechanical Computation | C | Ada Lovelace's Program |
 | 04 | Biological Computation | D | Cellular Automata |
 | 05 | Dataflow Computation | E | Dataflow RHDL |
-| 06 | Stack Machines | F | Stack Machine ISA |
-| 07 | Systolic Arrays | G | Systolic Patterns |
-| 08 | Reversible Computation | H | Reversible Gates |
-| 09 | Register Machines | I | Register Machine ISA |
-| 10 | The MOS 6502 | J | 6502 RHDL Implementation |
-| 11 | Hardware Description Languages | K | HDL Comparison |
-| 12 | Synthesis and Implementation | L | Synthesis Details |
+| 06 | Systolic Arrays | F | Systolic Patterns |
+| 07 | Stack Machines | G | Stack Machine ISA |
+| 08 | Register Machines | H | Register Machine ISA |
+| 09 | The MOS 6502 | I | 6502 RHDL Implementation |
+| 10 | Reversible Computation | J | Reversible Gates |
+| 11 | Quantum Computing | K | Quantum Circuits |
+| 12 | Hardware Description Languages | L | HDL Comparison |
+| 13 | Synthesis and Implementation | M | Synthesis Details |
 
 ---
 
@@ -123,6 +139,7 @@ Readers who want to understand:
 - What computation fundamentally *is*
 - Why there are many equivalent models (Turing, lambda, cellular automata)
 - How different architectures trade off different concerns
+- The connection between reversible and quantum computing
 - The theoretical limits of computation (halting problem, thermodynamics)
 - Complete working implementations of alternative architectures
 
