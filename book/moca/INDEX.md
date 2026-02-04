@@ -28,7 +28,7 @@
 - [09 - Stack Machines](09-stack-machines.md) - Forth, JVM, and the simplest computer architecture
 - [10 - Register Machines](10-register-machines.md) - The von Neumann architecture that dominates modern computing
 - [11 - Modern CPU Architectures](11-modern-cpu-architectures.md) - Pipelining, superscalar execution, out-of-order, and speculation
-- [12 - Asynchronous Computing](12-asynchronous-computing.md) - Clockless circuits: self-timed logic, handshaking, and NULL convention
+- [12 - Asynchronous Computing](12-asynchronous-computing.md) - Clockless circuits: self-timed logic, bundled-data vs dual-rail, handshakes, and GALS
 
 ### Part IV: Parallel and Distributed Architectures
 
