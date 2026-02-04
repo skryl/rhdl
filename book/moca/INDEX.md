@@ -11,7 +11,7 @@
 - [01 - What Makes an Architecture](01-what-makes-an-architecture.md) - ISA vs microarchitecture, abstraction layers, and the design space of computation
 - [02 - Metrics and Limits](02-metrics-and-limits.md) - Roofline, Amdahl/Gustafson, work/span; data movement and energy as the common currency
 
-### Part I: Theoretical Foundations
+### Part I: Theoretical Computation
 
 - [03 - Symbol Manipulation](03-symbol-manipulation.md) - The essence of computation: symbols, rules, and Turing machines
 - [04 - Lambda Calculus](04-lambda-calculus.md) - Computation as function application
