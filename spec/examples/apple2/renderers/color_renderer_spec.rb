@@ -162,6 +162,17 @@ RSpec.describe RHDL::Examples::Apple2::ColorRenderer do
       lines = output.split("\n")
       expect(lines.length).to eq(96)  # 192 / 2 = 96 half-block rows
     end
+
+    it 'preserves orange phase colors when downscaling width' do
+      # Place an isolated palette-1 pixel at x=3 (odd position -> orange).
+      # When rendering at 140 columns (280px -> 140 chars), a naive sampler that always
+      # picks the first pixel of each 2px block would miss this pixel entirely.
+      line_addr = renderer.hires_line_address(0, 0x2000)
+      ram[line_addr] = 0x80 | (1 << 3) # high bit + bit3 => x=3
+
+      output = renderer.render(ram, base_addr: 0x2000, chars_wide: 140)
+      expect(output).to include("\e[38;2;255;106;60m") # ntsc palette orange
+    end
   end
 
   describe '#render_lines' do
