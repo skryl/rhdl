@@ -17,7 +17,7 @@ RSpec.shared_examples 'a CPU implementation' do
     end
 
     it 'executes LDA instruction' do
-      @memory.write(0x0F, 0x42)
+      @cpu.memory.write(0x0F, 0x42)
       load_program([[:LDA, 0xF]])
       @cpu.step
       verify_cpu_state(acc: 0x42, pc: 1, halted: false, zero_flag: false, sp: 0xFF)
@@ -37,7 +37,7 @@ RSpec.shared_examples 'a CPU implementation' do
     end
 
     it 'executes ADD instruction' do
-      @memory.write(0x0E, 0x24)
+      @cpu.memory.write(0x0E, 0x24)
       load_program([[:LDI, 0x20], [:ADD, 0xE]])
       2.times { @cpu.step }
       verify_cpu_state(acc: 0x44, pc: 3, halted: false, zero_flag: false, sp: 0xFF)

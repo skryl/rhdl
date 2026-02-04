@@ -30,6 +30,8 @@ module RHDL
         output :call                   # Call instruction
         output :ret                    # Return instruction
         output :instr_length, width: 2 # 1, 2, or 3 bytes
+        output :is_lda                 # LDA instruction (bypass ALU)
+        output :sta_indirect           # STA indirect addressing mode (0x20)
 
         behavior do
           # Extract opcode nibble (high 4 bits: values 0-15)
@@ -132,6 +134,16 @@ module RHDL
 
           # ret: return instruction (RET = opcode 13)
           ret <= mux(opcode == 13, 1, 0)
+
+          # is_lda: LDA or LDI instruction - bypass ALU, load directly from memory/immediate
+          # LDA (opcode 1) loads from memory, LDI (opcode 10) loads immediate
+          is_lda <= case_select(opcode, {
+            1 => 1,   # LDA
+            10 => 1   # LDI
+          }, default: 0)
+
+          # sta_indirect: STA with indirect addressing (instruction 0x20)
+          sta_indirect <= mux(instruction == 0x20, 1, 0)
 
           # instr_length: 1, 2, or 3 bytes
           # Most are 1 byte

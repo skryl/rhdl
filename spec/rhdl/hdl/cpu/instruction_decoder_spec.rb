@@ -129,8 +129,8 @@ RSpec.describe RHDL::HDL::CPU::InstructionDecoder do
     it 'generates valid IR' do
       ir = RHDL::HDL::CPU::InstructionDecoder.to_ir
       expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
-      # 2 inputs (instruction, zero_flag) + 12 outputs
-      expect(ir.ports.length).to eq(14)
+      # 2 inputs (instruction, zero_flag) + 13 outputs (including is_lda)
+      expect(ir.ports.length).to eq(15)
     end
 
     it 'generates valid Verilog' do
@@ -149,7 +149,7 @@ RSpec.describe RHDL::HDL::CPU::InstructionDecoder do
 
     it 'generates correct IR structure' do
       expect(ir.inputs.keys).to include('decoder.instruction', 'decoder.zero_flag')
-      expect(ir.outputs.keys).to include('decoder.alu_op', 'decoder.halt', 'decoder.reg_write')
+      expect(ir.outputs.keys).to include('decoder.alu_op', 'decoder.halt', 'decoder.reg_write', 'decoder.is_lda')
     end
 
     it 'generates valid structure Verilog' do
