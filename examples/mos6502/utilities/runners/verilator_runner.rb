@@ -52,8 +52,6 @@ module RHDL
 
       # Memory array (64KB)
       @memory = Array.new(65536, 0)
-
-      reset_simulation
     end
 
     def native?
