@@ -9,6 +9,26 @@ use crate::core::CoreSimulator;
 
 pub use ffi::*;
 
+type RunMos6502CyclesFn = unsafe extern "C" fn(
+    *mut u64,
+    usize,
+    *mut u8,
+    *const bool,
+    usize,
+    *mut u32,
+) -> usize;
+
+type RunMos6502InstructionsFn = unsafe extern "C" fn(
+    *mut u64,
+    usize,
+    *mut u8,
+    *const bool,
+    usize,
+    *mut u64,
+    usize,
+    *mut u32,
+) -> usize;
+
 /// MOS6502 CPU specific extension state
 pub struct Mos6502Extension {
     /// Unified 64KB memory
@@ -23,6 +43,10 @@ pub struct Mos6502Extension {
     pub clk_idx: usize,
     /// Speaker toggle counter (for $C030 access)
     pub speaker_toggles: u32,
+    /// Cached compiled function pointer for cycle runner
+    pub run_cycles_fn: Option<RunMos6502CyclesFn>,
+    /// Cached compiled function pointer for instruction runner
+    pub run_instructions_fn: Option<RunMos6502InstructionsFn>,
 }
 
 impl Mos6502Extension {
@@ -39,6 +63,8 @@ impl Mos6502Extension {
             rw_idx: *name_to_idx.get("rw").unwrap_or(&0),
             clk_idx: *name_to_idx.get("clk").unwrap_or(&0),
             speaker_toggles: 0,
+            run_cycles_fn: None,
+            run_instructions_fn: None,
         }
     }
 
@@ -105,14 +131,17 @@ impl Mos6502Extension {
             return 0;
         }
 
-        let lib = core.compiled_lib.as_ref().unwrap();
         unsafe {
-            type RunMos6502CyclesFn = unsafe extern "C" fn(
-                *mut u64, usize, *mut u8, *const bool, usize, *mut u32
-            ) -> usize;
-
-            let func: libloading::Symbol<RunMos6502CyclesFn> = lib.get(b"run_mos6502_cycles")
-                .expect("run_mos6502_cycles function not found - is this a MOS6502 IR?");
+            let func = if let Some(func) = self.run_cycles_fn {
+                func
+            } else {
+                let lib = core.compiled_lib.as_ref().unwrap();
+                let func: libloading::Symbol<RunMos6502CyclesFn> = lib.get(b"run_mos6502_cycles")
+                    .expect("run_mos6502_cycles function not found - is this a MOS6502 IR?");
+                let func = *func;
+                self.run_cycles_fn = Some(func);
+                func
+            };
 
             let mut speaker_toggles: u32 = 0;
             let result = func(
@@ -140,14 +169,17 @@ impl Mos6502Extension {
             return 0;
         }
 
-        let lib = core.compiled_lib.as_ref().unwrap();
         unsafe {
-            type RunInstructionsFn = unsafe extern "C" fn(
-                *mut u64, usize, *mut u8, *const bool, usize, *mut u64, usize, *mut u32
-            ) -> usize;
-
-            let func: libloading::Symbol<RunInstructionsFn> = lib.get(b"run_mos6502_instructions_with_opcodes")
-                .expect("run_mos6502_instructions_with_opcodes function not found");
+            let func = if let Some(func) = self.run_instructions_fn {
+                func
+            } else {
+                let lib = core.compiled_lib.as_ref().unwrap();
+                let func: libloading::Symbol<RunMos6502InstructionsFn> = lib.get(b"run_mos6502_instructions_with_opcodes")
+                    .expect("run_mos6502_instructions_with_opcodes function not found");
+                let func = *func;
+                self.run_instructions_fn = Some(func);
+                func
+            };
 
             // Allocate output buffer for packed opcodes
             let mut packed_out: Vec<u64> = vec![0; n];

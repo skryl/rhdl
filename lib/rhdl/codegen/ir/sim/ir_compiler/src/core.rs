@@ -135,8 +135,18 @@ pub struct CoreSimulator {
     pub memory_arrays: Vec<Vec<u64>>,
     /// Memory name to index
     pub memory_name_to_idx: HashMap<String, usize>,
+    /// Bit masks for each signal width
+    pub signal_masks: Vec<u64>,
+    /// Whether any clocks are driven by combinational assigns
+    pub has_derived_clocks: bool,
+    /// Whether any sequential targets are duplicated
+    pub has_duplicate_seq_targets: bool,
     /// Compiled library (if compilation succeeded)
     pub compiled_lib: Option<libloading::Library>,
+    /// Cached compiled evaluate function
+    pub eval_fn: Option<unsafe extern "C" fn(*mut u64, usize)>,
+    /// Cached compiled tick function
+    pub tick_fn: Option<unsafe extern "C" fn(*mut u64, usize, *mut u64, *mut u64)>,
     /// Whether compilation succeeded
     pub compiled: bool,
 }
@@ -180,7 +190,7 @@ impl CoreSimulator {
         let mut reset_values = Vec::new();
         for reg in &ir.regs {
             let idx = signals.len();
-            let reset_val = reg.reset_value.unwrap_or(0);
+            let reset_val = reg.reset_value.unwrap_or(0) & Self::mask(reg.width);
             signals.push(reset_val);
             widths.push(reg.width);
             name_to_idx.insert(reg.name.clone(), idx);
@@ -238,6 +248,30 @@ impl CoreSimulator {
             memory_name_to_idx.insert(mem.name.clone(), idx);
         }
 
+        let signal_masks: Vec<u64> = widths.iter().map(|&w| Self::mask(w)).collect();
+
+        let mut has_duplicate_seq_targets = false;
+        if !seq_targets.is_empty() {
+            let mut seen = HashSet::new();
+            for &target in &seq_targets {
+                if !seen.insert(target) {
+                    has_duplicate_seq_targets = true;
+                    break;
+                }
+            }
+        }
+
+        let has_derived_clocks = if clock_indices.is_empty() {
+            false
+        } else {
+            let clock_set: HashSet<usize> = clock_indices.iter().copied().collect();
+            ir.assigns.iter().any(|assign| {
+                name_to_idx
+                    .get(&assign.target)
+                    .map_or(false, |idx| clock_set.contains(idx))
+            })
+        };
+
         Ok(Self {
             ir,
             signals,
@@ -254,7 +288,12 @@ impl CoreSimulator {
             clock_domain_assigns,
             memory_arrays,
             memory_name_to_idx,
+            signal_masks,
+            has_derived_clocks,
+            has_duplicate_seq_targets,
             compiled_lib: None,
+            eval_fn: None,
+            tick_fn: None,
             compiled: false,
         })
     }
@@ -289,12 +328,18 @@ impl CoreSimulator {
         if !self.compiled {
             return;
         }
-        let lib = self.compiled_lib.as_ref().unwrap();
-        unsafe {
-            type EvalFn = unsafe extern "C" fn(*mut u64, usize);
-            let func: libloading::Symbol<EvalFn> =
-                lib.get(b"evaluate").expect("evaluate function not found");
-            func(self.signals.as_mut_ptr(), self.signals.len());
+        if let Some(func) = self.eval_fn {
+            unsafe {
+                func(self.signals.as_mut_ptr(), self.signals.len());
+            }
+        } else {
+            let lib = self.compiled_lib.as_ref().unwrap();
+            unsafe {
+                type EvalFn = unsafe extern "C" fn(*mut u64, usize);
+                let func: libloading::Symbol<EvalFn> =
+                    lib.get(b"evaluate").expect("evaluate function not found");
+                func(self.signals.as_mut_ptr(), self.signals.len());
+            }
         }
 
         // Update old_clocks to current clock values after evaluation
@@ -309,8 +354,8 @@ impl CoreSimulator {
 
     pub fn poke(&mut self, name: &str, value: u64) -> Result<(), String> {
         if let Some(&idx) = self.name_to_idx.get(name) {
-            let width = self.widths.get(idx).copied().unwrap_or(64);
-            self.signals[idx] = value & Self::mask(width);
+            let mask = self.signal_masks.get(idx).copied().unwrap_or(u64::MAX);
+            self.signals[idx] = value & mask;
             Ok(())
         } else {
             Err(format!("Unknown signal: {}", name))
@@ -329,17 +374,28 @@ impl CoreSimulator {
         if !self.compiled {
             return;
         }
-        let lib = self.compiled_lib.as_ref().unwrap();
-        unsafe {
-            type TickFn = unsafe extern "C" fn(*mut u64, usize, *mut u64, *mut u64);
-            let func: libloading::Symbol<TickFn> =
-                lib.get(b"tick").expect("tick function not found");
-            func(
-                self.signals.as_mut_ptr(),
-                self.signals.len(),
-                self.old_clocks.as_mut_ptr(),
-                self.next_regs.as_mut_ptr(),
-            );
+        if let Some(func) = self.tick_fn {
+            unsafe {
+                func(
+                    self.signals.as_mut_ptr(),
+                    self.signals.len(),
+                    self.old_clocks.as_mut_ptr(),
+                    self.next_regs.as_mut_ptr(),
+                );
+            }
+        } else {
+            let lib = self.compiled_lib.as_ref().unwrap();
+            unsafe {
+                type TickFn = unsafe extern "C" fn(*mut u64, usize, *mut u64, *mut u64);
+                let func: libloading::Symbol<TickFn> =
+                    lib.get(b"tick").expect("tick function not found");
+                func(
+                    self.signals.as_mut_ptr(),
+                    self.signals.len(),
+                    self.old_clocks.as_mut_ptr(),
+                    self.next_regs.as_mut_ptr(),
+                );
+            }
         }
     }
 
@@ -605,9 +661,9 @@ impl CoreSimulator {
 
     pub fn expr_to_rust_ptr(&self, expr: &ExprDef, signals_ptr: &str) -> String {
         match expr {
-            ExprDef::Signal { name, width } => {
+            ExprDef::Signal { name, .. } => {
                 let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
-                format!("((*{}.add({})) & {})", signals_ptr, idx, Self::mask_const(*width))
+                format!("(*{}.add({}))", signals_ptr, idx)
             }
             ExprDef::Literal { value, width } => {
                 let masked = (*value as u64) & Self::mask(*width);
@@ -690,8 +746,11 @@ impl CoreSimulator {
             ExprDef::MemRead { memory, addr, width } => {
                 let mem_idx = self.memory_name_to_idx.get(memory).copied().unwrap_or(0);
                 let addr_code = self.expr_to_rust_ptr(addr, signals_ptr);
-                format!("(MEM_{}.get({} as usize).copied().unwrap_or(0) & {})",
-                        mem_idx, addr_code, Self::mask_const(*width))
+                let read_expr = format!(
+                    "{{ let idx = ({} as usize); if idx < MEM_{}.len() {{ unsafe {{ *MEM_{}.get_unchecked(idx) }} }} else {{ 0u64 }} }}",
+                    addr_code, mem_idx, mem_idx
+                );
+                format!("({} & {})", read_expr, Self::mask_const(*width))
             }
         }
     }
@@ -700,6 +759,7 @@ impl CoreSimulator {
         let clock_indices: Vec<usize> = self.clock_indices.clone();
         let num_clocks = clock_indices.len().max(1);
         let num_regs = self.seq_targets.len();
+        let needs_update_tracking = self.has_derived_clocks || self.has_duplicate_seq_targets;
 
         code.push_str("/// Combined tick: evaluate + edge-triggered register update\n");
         code.push_str("/// Uses old_clocks (set by caller) for edge detection, not current signal values.\n");
@@ -729,8 +789,10 @@ impl CoreSimulator {
         }
         code.push_str("\n");
 
-        // Track which registers have been updated (like JIT)
-        code.push_str(&format!("    let mut updated = [false; {}];\n\n", num_regs.max(1)));
+        if needs_update_tracking {
+            // Track which registers have been updated (like JIT)
+            code.push_str(&format!("    let mut updated = [false; {}];\n\n", num_regs.max(1)));
+        }
 
         // Check for rising edges using old_clocks (set by caller) vs current signals
         for (domain_idx, &clk_idx) in clock_indices.iter().enumerate() {
@@ -738,43 +800,52 @@ impl CoreSimulator {
             code.push_str(&format!("    if old_clocks[{}] == 0 && *s.add({}) == 1 {{\n", domain_idx, clk_idx));
 
             for &(seq_idx, target_idx) in &self.clock_domain_assigns[domain_idx] {
-                code.push_str(&format!("        if !updated[{}] {{ *s.add({}) = next_regs[{}]; updated[{}] = true; }}\n",
-                                       seq_idx, target_idx, seq_idx, seq_idx));
+                if needs_update_tracking {
+                    code.push_str(&format!("        if !updated[{}] {{ *s.add({}) = next_regs[{}]; updated[{}] = true; }}\n",
+                                           seq_idx, target_idx, seq_idx, seq_idx));
+                } else {
+                    code.push_str(&format!("        *s.add({}) = next_regs[{}];\n", target_idx, seq_idx));
+                }
             }
 
             code.push_str("    }\n");
         }
         code.push_str("\n");
 
-        // Loop to handle derived clocks (like JIT's iteration loop)
-        // After updating registers, re-evaluate to propagate changes that might cause
-        // additional clock edges in derived/gated clocks
-        code.push_str("    // Loop for derived clock propagation (like JIT)\n");
-        code.push_str("    for _iter in 0..10 {\n");
-        code.push_str(&format!("        let mut clock_before = [0u64; {}];\n", num_clocks));
-        for (domain_idx, &clk_idx) in clock_indices.iter().enumerate() {
-            code.push_str(&format!("        clock_before[{}] = *s.add({});\n", domain_idx, clk_idx));
-        }
-        code.push_str("\n");
-        code.push_str("        evaluate_inline(signals);\n\n");
-
-        // Check for NEW rising edges
-        code.push_str("        let mut any_rising = false;\n");
-        for (domain_idx, &clk_idx) in clock_indices.iter().enumerate() {
-            code.push_str(&format!("        if clock_before[{}] == 0 && *s.add({}) == 1 {{\n", domain_idx, clk_idx));
-            code.push_str("            any_rising = true;\n");
-            for &(seq_idx, target_idx) in &self.clock_domain_assigns[domain_idx] {
-                code.push_str(&format!("            if !updated[{}] {{ *s.add({}) = next_regs[{}]; updated[{}] = true; }}\n",
-                                       seq_idx, target_idx, seq_idx, seq_idx));
+        if self.has_derived_clocks {
+            // Loop to handle derived clocks (like JIT's iteration loop)
+            // After updating registers, re-evaluate to propagate changes that might cause
+            // additional clock edges in derived/gated clocks
+            code.push_str("    // Loop for derived clock propagation (like JIT)\n");
+            code.push_str(&format!("    let mut clock_before = [0u64; {}];\n", num_clocks));
+            code.push_str("    for _iter in 0..10 {\n");
+            for (domain_idx, &clk_idx) in clock_indices.iter().enumerate() {
+                code.push_str(&format!("        clock_before[{}] = *s.add({});\n", domain_idx, clk_idx));
             }
-            code.push_str("        }\n");
-        }
-        code.push_str("\n");
-        code.push_str("        if !any_rising { return; }\n");
-        code.push_str("    }\n\n");
+            code.push_str("\n");
+            code.push_str("        evaluate_inline(signals);\n\n");
 
-        // Final evaluate (like JIT)
-        code.push_str("    evaluate_inline(signals);\n\n");
+            // Check for NEW rising edges
+            code.push_str("        let mut any_rising = false;\n");
+            for (domain_idx, &clk_idx) in clock_indices.iter().enumerate() {
+                code.push_str(&format!("        if clock_before[{}] == 0 && *s.add({}) == 1 {{\n", domain_idx, clk_idx));
+                code.push_str("            any_rising = true;\n");
+                for &(seq_idx, target_idx) in &self.clock_domain_assigns[domain_idx] {
+                    code.push_str(&format!("            if !updated[{}] {{ *s.add({}) = next_regs[{}]; updated[{}] = true; }}\n",
+                                           seq_idx, target_idx, seq_idx, seq_idx));
+                }
+                code.push_str("        }\n");
+            }
+            code.push_str("\n");
+            code.push_str("        if !any_rising { return; }\n");
+            code.push_str("    }\n\n");
+
+            // Final evaluate (like JIT)
+            code.push_str("    evaluate_inline(signals);\n\n");
+        } else {
+            // No derived clocks: one post-update evaluation is sufficient.
+            code.push_str("    evaluate_inline(signals);\n\n");
+        }
 
         // Note: Do NOT update old_clocks here - caller manages it
         // This is consistent with interpreter's tick_forced behavior
@@ -803,6 +874,21 @@ impl CoreSimulator {
     // ========================================================================
     // Compilation
     // ========================================================================
+
+    fn bind_compiled_symbols(&mut self) -> Result<(), String> {
+        let lib = self.compiled_lib.as_ref().ok_or_else(|| "No compiled library loaded".to_string())?;
+        unsafe {
+            type EvalFn = unsafe extern "C" fn(*mut u64, usize);
+            type TickFn = unsafe extern "C" fn(*mut u64, usize, *mut u64, *mut u64);
+
+            let eval: libloading::Symbol<EvalFn> = lib.get(b"evaluate").map_err(|e| e.to_string())?;
+            let tick: libloading::Symbol<TickFn> = lib.get(b"tick").map_err(|e| e.to_string())?;
+
+            self.eval_fn = Some(*eval);
+            self.tick_fn = Some(*tick);
+        }
+        Ok(())
+    }
 
     pub fn compile_code(&mut self, code: &str) -> Result<bool, String> {
         // Compute hash for caching
@@ -836,6 +922,7 @@ impl CoreSimulator {
                 let lib = libloading::Library::new(&lib_path).map_err(|e| e.to_string())?;
                 self.compiled_lib = Some(lib);
             }
+            self.bind_compiled_symbols()?;
             self.compiled = true;
             return Ok(true);
         }
@@ -869,6 +956,7 @@ impl CoreSimulator {
             let lib = libloading::Library::new(&lib_path).map_err(|e| e.to_string())?;
             self.compiled_lib = Some(lib);
         }
+        self.bind_compiled_symbols()?;
         self.compiled = true;
         Ok(false)
     }

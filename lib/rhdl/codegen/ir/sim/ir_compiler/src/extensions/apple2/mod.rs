@@ -9,6 +9,22 @@ use crate::core::CoreSimulator;
 
 pub use ffi::*;
 
+type RunCpuCyclesFn = unsafe extern "C" fn(
+    *mut u64,
+    usize,
+    *mut u8,
+    usize,
+    *const u8,
+    usize,
+    usize,
+    u8,
+    bool,
+    *mut u64,
+    *mut bool,
+    *mut bool,
+    *mut u32,
+) -> usize;
+
 /// Result from batched Apple II CPU cycle execution
 pub struct Apple2BatchResult {
     pub text_dirty: bool,
@@ -37,6 +53,8 @@ pub struct Apple2Extension {
     pub prev_speaker: u64,
     /// Number of sub-cycles per CPU cycle (default: 14)
     pub sub_cycles: usize,
+    /// Cached compiled function pointer
+    pub run_cpu_cycles_fn: Option<RunCpuCyclesFn>,
 }
 
 impl Apple2Extension {
@@ -58,6 +76,7 @@ impl Apple2Extension {
             cpu_addr_idx: *name_to_idx.get("cpu__addr_reg").unwrap_or(&0),
             prev_speaker: 0,
             sub_cycles,
+            run_cpu_cycles_fn: None,
         }
     }
 
@@ -92,15 +111,17 @@ impl Apple2Extension {
             };
         }
 
-        let lib = core.compiled_lib.as_ref().unwrap();
         unsafe {
-            type RunCpuCyclesFn = unsafe extern "C" fn(
-                *mut u64, usize, *mut u8, usize, *const u8, usize,
-                usize, u8, bool, *mut u64, *mut bool, *mut bool, *mut u32
-            ) -> usize;
-
-            let func: libloading::Symbol<RunCpuCyclesFn> = lib.get(b"run_cpu_cycles")
-                .expect("run_cpu_cycles function not found - is this an Apple II IR?");
+            let func = if let Some(func) = self.run_cpu_cycles_fn {
+                func
+            } else {
+                let lib = core.compiled_lib.as_ref().unwrap();
+                let func: libloading::Symbol<RunCpuCyclesFn> = lib.get(b"run_cpu_cycles")
+                    .expect("run_cpu_cycles function not found - is this an Apple II IR?");
+                let func = *func;
+                self.run_cpu_cycles_fn = Some(func);
+                func
+            };
 
             let mut text_dirty = false;
             let mut key_cleared = false;
