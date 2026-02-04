@@ -22,12 +22,11 @@
 ### Part III: The Register Machine
 - [07 - Computer Architecture](07-computer-architecture.md) - CPU fundamentals, fetch-decode-execute cycle
 - [08 - Building a CPU](08-building-a-cpu.md) - Hands-on construction of an 8-bit processor
-- [09 - The MOS 6502](09-the-mos-6502.md) - Deep dive into the classic CPU that powered the Apple II, C64, and NES
 
 ### Part IV: From Hardware to Lambda
-- [10 - Assembly and the Stack](10-assembly-and-stack.md) - Subroutines, call/return, stack frames, the software/hardware boundary
-- [11 - A Lisp Interpreter](11-lisp-interpreter.md) - S-expressions, cons cells, eval/apply—building Lisp on our CPU
-- [12 - Lambda Comes Full Circle](12-lambda-full-circle.md) - The revelation: muxes are Church booleans, registers are Y combinators, we were computing lambda all along
+- [09 - Assembly and the Stack](09-assembly-and-stack.md) - Subroutines, call/return, stack frames, the software/hardware boundary
+- [10 - A Lisp Interpreter](10-lisp-interpreter.md) - S-expressions, cons cells, eval/apply—building Lisp on our CPU
+- [11 - Lambda Comes Full Circle](11-lambda-full-circle.md) - The revelation: muxes are Church booleans, registers are Y combinators, we were computing lambda all along
 
 ### Appendices
 
@@ -41,6 +40,9 @@
 - [Appendix E - Hardware Description Languages](appendix-e-hdl.md) - Verilog, VHDL, and RHDL compared
 - [Appendix F - Synthesis and Implementation](appendix-f-synthesis.md) - From HDL to silicon: FPGAs, ASICs, and the synthesis flow
 
+#### Case Studies
+- [Appendix G - The MOS 6502](appendix-g-mos6502.md) - Deep dive into the classic CPU that powered the Apple II, C64, and NES
+
 ---
 
 ## The Journey
@@ -48,13 +50,13 @@
 ```
 SICP (top-down):              This book (bottom-up):
 
-λ calculus                    12: Lambda revealed
+λ calculus                    11: Lambda revealed
     ↓                             ↑
-Lisp                          11: Lisp interpreter
+Lisp                          10: Lisp interpreter
     ↓                             ↑
-procedures & state            10: Assembly and stack
+procedures & state            09: Assembly and stack
     ↓                             ↑
-interpreters                  07-09: CPU (the register machine)
+interpreters                  07-08: CPU (the register machine)
     ↓                             ↑
 register machines             05-06: Memory and time
                                   ↑
@@ -81,16 +83,16 @@ register machines             05-06: Memory and time
 | 06 - Memory | Outline | Key concepts identified |
 | 07 - Architecture | Outline | Key concepts identified |
 | 08 - Building a CPU | Outline | Key concepts identified |
-| 09 - MOS 6502 | Outline | Key concepts identified |
-| 10 - Assembly/Stack | Planned | New chapter |
-| 11 - Lisp Interpreter | Planned | New chapter |
-| 12 - Lambda Full Circle | Planned | New chapter - the punchline |
+| 09 - Assembly/Stack | Planned | New chapter |
+| 10 - Lisp Interpreter | Planned | New chapter |
+| 11 - Lambda Full Circle | Planned | New chapter - the punchline |
 | Appendix A | Draft | Ada's complete program |
 | Appendix B | Draft | Symbol manipulation, Turing machines |
 | Appendix C | Draft | Lambda calculus (with RHDL examples) |
 | Appendix D | Draft | Cellular automata and emergent computation |
-| Appendix E | Outline | Moved from Ch 10 |
-| Appendix F | Outline | Moved from Ch 11 |
+| Appendix E | Outline | HDL comparison |
+| Appendix F | Outline | Synthesis and implementation |
+| Appendix G | Outline | MOS 6502 deep dive (moved from Ch 09) |
 
 ## Key Themes
 
