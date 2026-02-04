@@ -15,7 +15,7 @@
 - [02 - Symbol Manipulation](02-symbol-manipulation.md) - The essence of computation: symbols, rules, and Turing machines
 - [03 - Lambda Calculus](03-lambda-calculus.md) - Computation as function application
 - [04 - Interaction Nets](04-interaction-nets.md) - Graph rewriting, linear logic, and optimal reduction
-- [05 - Computing with Memory](05-computing-with-memory.md) - LUTs, truth tables, ROM microcode, CAM, memoization, and the compute-vs-store tradeoff
+- [05 - Computing with Memory](05-computing-with-memory.md) - Precomputation and content addressing: LUTs, ROM microcode, CAM, and associative lookup
 
 ### Part II: Physical and Natural Computation
 
@@ -52,7 +52,7 @@
 - [21 - FPGAs](21-fpga.md) - Field-programmable gate arrays: LUTs, CLBs, routing, and fine-grained reconfiguration
 - [22 - Coarse-Grained Reconfigurable Arrays](22-cgra.md) - CGRAs: word-level datapaths, spatial computing, and domain-specific acceleration
 
-### Part VIII: Alternative Substrates
+### Part VIII: Unconventional Computing Models
 
 - [23 - Stochastic Computing](23-stochastic-computing.md) - Probability as data: AND gates multiply, MUX gates add
 - [24 - Reversible Computation](24-reversible-computation.md) - Fredkin gates, Toffoli gates, and the thermodynamics of computing
@@ -132,8 +132,8 @@ Each appendix provides complete RHDL implementations and formal details for its 
 |                                                              |
 +-------------------------------------------------------------+
 |                                                              |
-|   Alternative    Stochastic -- Reversible -- Photonic -- Quantum
-|   Substrates:        |             |            |          | |
+|   Unconventional: Stochastic -- Reversible -- Photonic -- Quantum
+|                       |             |            |          | |
 |                      v             v            v          v |
 |                  Probability    Zero        Light/MZI  Superposition
 |                  as data       energy                  entanglement
