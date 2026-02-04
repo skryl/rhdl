@@ -99,8 +99,9 @@ class Apple2Terminal
     @green_screen = options[:green] || false
     @hires_mode = options[:hires] || false
     @color_mode = options[:color] || false
+    @composite = options[:composite] || false
     @preferred_hires_width = options[:hires_width]
-    @hires_width = @preferred_hires_width || (@color_mode ? 140 : 80)
+    @hires_width = @preferred_hires_width || (@color_mode ? 280 : 80)
     @audio_enabled = options[:audio] != false
 
     # Terminal size and padding for centering
@@ -151,7 +152,7 @@ class Apple2Terminal
 
     # Auto-adjust hires width to fit terminal
     # Use preferred width if set, otherwise use mode-appropriate default capped to terminal
-    default_width = @color_mode ? 140 : 80
+    default_width = @color_mode ? 280 : 80
     preferred = @preferred_hires_width || default_width
     @hires_width = [preferred, @term_cols].min
 
@@ -488,7 +489,7 @@ class Apple2Terminal
 
     # Render hi-res using color or braille characters
     if @color_mode
-      hires_output = @runner.bus.render_hires_color(chars_wide: @hires_width)
+      hires_output = @runner.bus.render_hires_color(chars_wide: @hires_width, composite: @composite)
     elsif @runner.native? && @runner.respond_to?(:cpu) && @runner.cpu.respond_to?(:render_hires_braille)
       # Use fast Rust rendering when available (native mode)
       hires_output = @runner.cpu.render_hires_braille(@hires_width, true)
@@ -925,11 +926,12 @@ options = {
   hires: false,
   hires_width: nil,  # Auto-calculated based on mode and terminal size
   color: false,  # NTSC artifact color rendering
+  composite: false, # Optional horizontal low-pass filter for color mode
   audio: true  # Audio enabled by default
 }
 
 parser = OptionParser.new do |opts|
-  opts.banner = "Usage: bin/apple2 [options] [program.bin]"
+  opts.banner = "Usage: bin/mos6502 [options] [program.bin]"
   opts.separator ""
   opts.separator "Apple ][ Terminal Emulator - 6502 CPU Simulation"
   opts.separator ""
@@ -978,6 +980,10 @@ parser = OptionParser.new do |opts|
   opts.on("-C", "--color", "Enable NTSC artifact color rendering (implies --hires)") do
     options[:color] = true
     options[:hires] = true
+  end
+
+  opts.on("--composite", "Apply composite-like horizontal blur in color mode (reduces speckle/shimmer)") do
+    options[:composite] = true
   end
 
   opts.on("--hires-width WIDTH", Integer, "Hi-res display width in chars (auto-adjusts to terminal)") do |v|

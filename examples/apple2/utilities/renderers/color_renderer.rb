@@ -35,6 +35,9 @@ module RHDL
       # Quality modes
       QUALITY_MODES = [:ntsc, :fast].freeze
 
+      # Downscale modes for mapping 280px -> terminal columns
+      DOWNSCALE_MODES = [:auto, :sample, :majority, :average].freeze
+
       # Color palettes - different emulator/monitor profiles
       # Each palette has RGB values for the 6 artifact colors plus fringe colors
       PALETTES = {
@@ -177,6 +180,11 @@ module RHDL
         @quality = options[:quality] || :ntsc  # :ntsc (default) or :fast
         @aspect_correction = options[:aspect_correction] || false
         @double_hires = options[:double_hires] || false
+        @downscale = (options[:downscale] || :auto).to_sym
+        @composite = options[:composite] || false
+        @black_threshold = options.key?(:black_threshold) ? options[:black_threshold].to_i : (@composite ? 8 : 0)
+
+        @downscale = :auto unless DOWNSCALE_MODES.include?(@downscale)
 
         # Precompute effective colors based on settings
         @colors = build_color_table
@@ -452,24 +460,26 @@ module RHDL
           upper_row = char_row * 2
           lower_row = char_row * 2 + 1
 
+          upper_rgbs = Array.new(chars_wide)
+          lower_rgbs = Array.new(chars_wide)
+
           chars_wide.times do |char_col|
-            # Map each terminal column to an input pixel range.
-            # When downscaling (e.g. 280px -> 140 chars), always sampling the first pixel
-            # biases the Apple II artifact phase and can drop warm colors (orange/green).
             x_start = (char_col * width) / chars_wide
             x_end = (((char_col + 1) * width) / chars_wide) - 1
             x_end = [x_end, width - 1].min
             x_end = x_start if x_end < x_start
 
-            # Choose a stable sample within the range that alternates phases across columns.
-            range_len = x_end - x_start + 1
-            px = x_start + (char_col % range_len)
+            upper_rgbs[char_col] = downscale_rgb(color_bitmap[upper_row], x_start, x_end, char_col, chars_wide, width)
+            lower_rgbs[char_col] = downscale_rgb(color_bitmap[lower_row], x_start, x_end, char_col, chars_wide, width)
+          end
 
-            upper_color = color_bitmap[upper_row][px]
-            lower_color = color_bitmap[lower_row][px]
+          if @composite
+            upper_rgbs = horizontal_low_pass(upper_rgbs)
+            lower_rgbs = horizontal_low_pass(lower_rgbs)
+          end
 
-            # Generate character with appropriate colors
-            output << color_char(upper_color, lower_color)
+          chars_wide.times do |char_col|
+            output << color_char(upper_rgbs[char_col], lower_rgbs[char_col])
           end
 
           output << NORMAL_VIDEO << "\n"
@@ -480,20 +490,22 @@ module RHDL
 
       # Generate a colored character for upper/lower pixel colors
       def color_char(upper_color, lower_color)
-        upper_rgb = @colors[upper_color] || @colors[:black]
-        lower_rgb = @colors[lower_color] || @colors[:black]
+        upper_rgb = resolve_rgb(upper_color)
+        lower_rgb = resolve_rgb(lower_color)
+        upper_black = rgb_black?(upper_rgb)
+        lower_black = rgb_black?(lower_rgb)
 
-        if upper_color == lower_color
+        if upper_rgb == lower_rgb
           # Same color - use full block or space
-          if upper_color == :black
+          if upper_black
             bg_color(@colors[:black]) + " "
           else
             fg_color(upper_rgb) + bg_color(@colors[:black]) + FULL_BLOCK
           end
-        elsif upper_color == :black
+        elsif upper_black
           # Only lower pixel lit
           fg_color(lower_rgb) + bg_color(@colors[:black]) + LOWER_HALF
-        elsif lower_color == :black
+        elsif lower_black
           # Only upper pixel lit
           fg_color(upper_rgb) + bg_color(@colors[:black]) + UPPER_HALF
         else
@@ -591,6 +603,96 @@ module RHDL
       # Scale a color by a factor (for monochrome brightness levels)
       def scale_color(rgb, factor)
         rgb.map { |c| (c * factor).to_i.clamp(0, 255) }
+      end
+
+      # Resolve either a palette symbol (e.g. :orange) or a raw RGB triple.
+      def resolve_rgb(color_or_rgb)
+        return color_or_rgb if color_or_rgb.is_a?(Array) && color_or_rgb.length >= 3
+        @colors[color_or_rgb] || @colors[:black]
+      end
+
+      def rgb_black?(rgb)
+        t = @black_threshold
+        rgb[0] <= t && rgb[1] <= t && rgb[2] <= t
+      end
+
+      def downscale_rgb(row, x_start, x_end, char_col, chars_wide, width)
+        mode = @downscale
+        mode = (x_end > x_start ? :majority : :sample) if mode == :auto
+
+        case mode
+        when :average
+          average_rgb(row, x_start, x_end)
+        when :majority
+          resolve_rgb(majority_color(row, x_start, x_end, char_col))
+        else # :sample
+          px = sample_px(x_start, x_end, char_col)
+          resolve_rgb(row[px])
+        end
+      end
+
+      def sample_px(x_start, x_end, char_col)
+        range_len = x_end - x_start + 1
+        x_start + (char_col % range_len)
+      end
+
+      def majority_color(row, x_start, x_end, char_col)
+        counts = Hash.new(0)
+        x_start.upto(x_end) { |x| counts[row[x]] += 1 }
+
+        max = counts.values.max
+        tied = counts.select { |_k, v| v == max }.keys
+        return tied.first if tied.length == 1
+
+        # Prefer non-black in ties so thin features don't disappear when downscaling.
+        non_black = tied - [:black]
+        tied = non_black unless non_black.empty?
+        return tied.first if tied.length == 1
+
+        # Stable tie-break based on column so we don't bias NTSC phase.
+        px = sample_px(x_start, x_end, char_col)
+        row[px]
+      end
+
+      def average_rgb(row, x_start, x_end)
+        sum_r = 0
+        sum_g = 0
+        sum_b = 0
+        count = 0
+
+        x_start.upto(x_end) do |x|
+          rgb = resolve_rgb(row[x])
+          sum_r += rgb[0]
+          sum_g += rgb[1]
+          sum_b += rgb[2]
+          count += 1
+        end
+
+        [
+          (sum_r / count).to_i.clamp(0, 255),
+          (sum_g / count).to_i.clamp(0, 255),
+          (sum_b / count).to_i.clamp(0, 255)
+        ]
+      end
+
+      # Simple 3-tap horizontal low-pass filter (1,2,1)/4.
+      def horizontal_low_pass(line_rgbs)
+        return line_rgbs if line_rgbs.length < 2
+
+        last_idx = line_rgbs.length - 1
+        out = Array.new(line_rgbs.length)
+
+        line_rgbs.each_with_index do |rgb, i|
+          left = line_rgbs[i.zero? ? 0 : i - 1]
+          right = line_rgbs[i == last_idx ? last_idx : i + 1]
+          out[i] = [
+            ((left[0] + (rgb[0] * 2) + right[0]) / 4.0).round.clamp(0, 255),
+            ((left[1] + (rgb[1] * 2) + right[1]) / 4.0).round.clamp(0, 255),
+            ((left[2] + (rgb[2] * 2) + right[2]) / 4.0).round.clamp(0, 255)
+          ]
+        end
+
+        out
       end
     end
 

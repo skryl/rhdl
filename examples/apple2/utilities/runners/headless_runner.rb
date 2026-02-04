@@ -142,8 +142,8 @@ module RHDL
       end
 
       # Delegate hi-res rendering to runner
-      def render_hires_color(chars_wide: 140)
-        @runner.render_hires_color(chars_wide: chars_wide)
+      def render_hires_color(chars_wide: 140, composite: false)
+        @runner.render_hires_color(chars_wide: chars_wide, composite: composite)
       end
 
       def render_hires_braille(chars_wide: 80, invert: false)

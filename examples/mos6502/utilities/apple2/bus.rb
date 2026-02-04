@@ -407,10 +407,10 @@ module RHDL
 
     # Render hi-res screen using NTSC artifact colors
     # Uses half-block characters with truecolor ANSI escape sequences
-    # chars_wide: target width in characters (default 140 = full resolution)
-    def render_hires_color(chars_wide: 140)
+    # chars_wide: target width in characters (default 140, try 280 for max detail)
+    def render_hires_color(chars_wide: 140, composite: false)
       base = hires_page_base
-      renderer = ColorRenderer.new(chars_wide: chars_wide)
+      renderer = ColorRenderer.new(chars_wide: chars_wide, composite: composite)
 
       # Build memory accessor that uses mem_read for native CPU support
       ram = ->(addr) { mem_read(addr) }

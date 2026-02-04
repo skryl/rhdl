@@ -322,8 +322,8 @@ module RHDL
         lines.join("\n")
       end
 
-      def render_hires_color(chars_wide: 140)
-        renderer = ColorRenderer.new(chars_wide: chars_wide)
+      def render_hires_color(chars_wide: 140, composite: false)
+        renderer = ColorRenderer.new(chars_wide: chars_wide, composite: composite)
         renderer.render(@ram, base_addr: HIRES_PAGE1_START)
       end
 
