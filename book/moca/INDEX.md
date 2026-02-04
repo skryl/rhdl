@@ -48,13 +48,12 @@
 
 - [21 - The MOS 6502](21-mos6502.md) - (1975) The classic CPU that powered the Apple II, C64, and NES
 - [22 - The Cray-1](22-cray1.md) - (1976) The supercomputer that defined vector processing
-- [23 - The Transputer](23-transputer.md) - (1985) CSP in hardware: message passing, links, and occam
-- [24 - The NVIDIA G80](24-nvidia-g80.md) - (2006) The first CUDA GPU: unified shaders and GPGPU revolution
-- [25 - The RISC-V RV32I](25-riscv.md) - (2010) The open ISA: clean design, modular extensions, and modern RISC
-- [26 - The Google TPU v1](26-tpu.md) - (2016) A 256x256 systolic array for neural network inference
-- [27 - The Cerebras WSE](27-cerebras.md) - (2019) The largest chip ever built: 850K cores on a single wafer
-- [28 - The Groq LPU](28-groq.md) - (2020) Deterministic dataflow for AI inference: time as the program counter
-- [29 - RHDL](29-rhdl.md) - A Ruby-based HDL: DSL design, synthesis, and simulation
+- [23 - The NVIDIA G80](23-nvidia-g80.md) - (2006) The first CUDA GPU: unified shaders and GPGPU revolution
+- [24 - The RISC-V RV32I](24-riscv.md) - (2010) The open ISA: clean design, modular extensions, and modern RISC
+- [25 - The Google TPU v1](25-tpu.md) - (2016) A 256x256 systolic array for neural network inference
+- [26 - The Cerebras WSE](26-cerebras.md) - (2019) The largest chip ever built: 850K cores on a single wafer
+- [27 - The Groq LPU](27-groq.md) - (2020) Deterministic dataflow for AI inference: time as the program counter
+- [28 - RHDL](28-rhdl.md) - A Ruby-based HDL: DSL design, synthesis, and simulation
 
 ---
 
@@ -86,7 +85,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix V - Cray-1 Implementation](appendix-v-cray1.md) - Vector registers, functional units, chaining, and memory in RHDL
 - [Appendix W - TPU Implementation](appendix-w-tpu.md) - Systolic array, weight FIFOs, and matrix multiply in RHDL
 - [Appendix X - RISC-V Implementation](appendix-x-riscv.md) - RV32I decoder, ALU, pipeline stages, cache, TLB, and MMU
-- [Appendix Y - Transputer Implementation](appendix-y-transputer.md) - Links, channels, scheduler, and ALT controller in RHDL
+- [Appendix Y - NVIDIA G80 Implementation](appendix-y-g80.md) - Streaming multiprocessors, warp scheduler, and shared memory in RHDL
 - [Appendix Z - RHDL Reference](appendix-z-rhdl.md) - Complete DSL reference, synthesis details, Verilog comparison
 
 ---
@@ -138,9 +137,9 @@ Each appendix provides complete RHDL implementations and formal details for its 
 |                                                              |
 +-------------------------------------------------------------+
 |                                                              |
-|   Case Studies:    6502 (1975) | Cray-1 (1976) | Transputer (1985) |
-|   (chronological)  G80 (2006) | RISC-V (2010) | TPU (2016)         |
-|                    Cerebras (2019) | Groq (2020) | RHDL             |
+|   Case Studies:    6502 (1975) | Cray-1 (1976) | G80 (2006)        |
+|   (chronological)  RISC-V (2010) | TPU (2016) | Cerebras (2019)    |
+|                    Groq (2020) | RHDL                               |
 |                                                              |
 +-------------------------------------------------------------+
 ```
@@ -193,15 +192,14 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 20 | CGRAs | T | CGRA Implementation |
 | 21 | The MOS 6502 | U | 6502 RHDL Implementation |
 | 22 | The Cray-1 | V | Cray-1 Implementation |
-| 23 | The Transputer | Y | Transputer Implementation |
-| 24 | The NVIDIA G80 | I | (see GPU appendix) |
-| 25 | The RISC-V RV32I | X | RISC-V Implementation |
-| 26 | The Google TPU v1 | W | TPU Implementation |
-| 27 | The Cerebras WSE | J | (see Wafer-Scale appendix) |
-| 28 | The Groq LPU | G | (see Dataflow appendix) |
-| 29 | RHDL | Z | RHDL Reference |
+| 23 | The NVIDIA G80 | Y | G80 RHDL Implementation |
+| 24 | The RISC-V RV32I | X | RISC-V Implementation |
+| 25 | The Google TPU v1 | W | TPU Implementation |
+| 26 | The Cerebras WSE | J | (see Wafer-Scale appendix) |
+| 27 | The Groq LPU | G | (see Dataflow appendix) |
+| 28 | RHDL | Z | RHDL Reference |
 
-*Note: Chapters 24, 27, and 28 share appendices with their corresponding paradigm chapters, as they are case studies of those architectures.*
+*Note: Chapters 26 and 27 share appendices with their corresponding paradigm chapters, as they are case studies of those architectures.*
 
 ---
 
