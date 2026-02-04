@@ -48,6 +48,7 @@
 - [23 - The Transputer](23-transputer.md) - CSP in hardware: message passing, links, and occam
 - [24 - The Cerebras WSE](24-cerebras.md) - Wafer-scale computing: 850K cores, 2D mesh NoC, dataflow at extreme scale
 - [25 - Photonic Computing](25-photonic-computing.md) - Computing with light: MZI meshes, optical matrix multiply, and interference
+- [26 - Analog Computing](26-analog-computing.md) - Continuous values: op-amps, integrators, and differential equations in real-time
 
 ---
 
@@ -80,6 +81,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix W - Transputer Implementation](appendix-w-transputer.md) - Links, channels, scheduler, and ALT controller in RHDL
 - [Appendix X - Cerebras Implementation](appendix-x-cerebras.md) - Mesh routers, crossbars, virtual channels, and NoC in RHDL
 - [Appendix Y - Photonic Simulation](appendix-y-photonic.md) - Ruby simulation of MZIs, interference, and optical neural networks
+- [Appendix Z - Analog Simulation](appendix-z-analog.md) - Ruby simulation of op-amps, ODEs, and analog neural networks
 
 ---
 
@@ -120,7 +122,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 │                                                              │
 │   Case Studies:    6502 (CISC) │ VideoCore (GPU) │ TPU (ML)  │
 │                    Cray-1 (Vector) │ RISC-V │ Transputer (CSP) │
-│                    Cerebras (NoC) │ Photonic (Optical)         │
+│                    Cerebras (NoC) │ Photonic │ Analog           │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -172,6 +174,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 23 | The Transputer | W | Transputer Implementation |
 | 24 | The Cerebras WSE | X | Cerebras/NoC Implementation |
 | 25 | Photonic Computing | Y | Photonic Simulation (Ruby) |
+| 26 | Analog Computing | Z | Analog Simulation (Ruby) |
 
 ---
 
