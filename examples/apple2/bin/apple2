@@ -22,6 +22,7 @@ options = {
   hires: false,
   hires_width: nil,  # Auto-calculated based on mode and terminal size
   color: false,  # NTSC artifact color rendering
+  composite: false, # Optional horizontal low-pass filter for color mode
   audio: false,  # Audio output disabled by default
   mode: :hdl,  # Simulation mode: :hdl (default), :netlist
   sim: :ruby   # Simulator backend: :ruby (default), :interpret, :jit, :compile
@@ -76,6 +77,10 @@ parser = OptionParser.new do |opts|
   opts.on("-C", "--color", "Enable NTSC artifact color rendering (implies --hires)") do
     options[:color] = true
     options[:hires] = true
+  end
+
+  opts.on("--composite", "Apply composite-like horizontal blur in color mode (reduces speckle/shimmer)") do
+    options[:composite] = true
   end
 
   opts.on("--hires-width WIDTH", Integer, "Hi-res display width in chars (auto-adjusts to terminal)") do |v|
