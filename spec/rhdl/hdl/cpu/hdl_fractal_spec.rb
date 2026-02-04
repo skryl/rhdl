@@ -14,16 +14,16 @@ RSpec.describe RHDL::HDL::CPU::FastHarness, 'Fractal' do
   end
 
   describe 'fractal program' do
-    it 'fills display with checkerboard pattern using HDL CPU', :slow do
-      # Simplified fractal program for HDL CPU
-      # Fills a 3x3 grid with a checkerboard pattern based on (x+y) % 2
+    it 'fills display with 8x8 checkerboard pattern using HDL CPU', :slow do
+      # Fractal program for HDL CPU
+      # Fills an 8x8 grid with a checkerboard pattern based on (x+y) % 2
       # Uses indirect STA to write to display memory at 0x800
       #
       # Memory map:
       # 0x00: x coordinate
       # 0x01: y coordinate
       # 0x02: constant 1 (for increment)
-      # 0x03: constant 3 (grid size)
+      # 0x03: constant 8 (grid size)
       # 0x05: display address low byte
       # 0x06: display address high byte (0x08 for 0x800 base)
       # 0x07: temp counter for multiplication
@@ -32,8 +32,8 @@ RSpec.describe RHDL::HDL::CPU::FastHarness, 'Fractal' do
         # Initialize constants
         p.instr :LDI, 1
         p.instr :STA, 0x02        # constant 1
-        p.instr :LDI, 3
-        p.instr :STA, 0x03        # grid size
+        p.instr :LDI, 8
+        p.instr :STA, 0x03        # grid size (8x8)
         p.instr :LDI, 0x08
         p.instr :STA, 0x06        # display base high byte
 
@@ -48,7 +48,7 @@ RSpec.describe RHDL::HDL::CPU::FastHarness, 'Fractal' do
         p.instr :STA, 0x00        # x = 0
 
         p.label :col_loop
-        # Calculate y * 3 using repeated addition
+        # Calculate y * 8 using repeated addition
         p.instr :LDI, 0
         p.instr :STA, 0x05        # sum = 0
         p.instr :LDA, 0x01        # load y
@@ -60,12 +60,12 @@ RSpec.describe RHDL::HDL::CPU::FastHarness, 'Fractal' do
         p.instr :SUB, 0x02        # counter--
         p.instr :STA, 0x07
         p.instr :LDA, 0x05        # load sum
-        p.instr :ADD, 0x03        # add 3
+        p.instr :ADD, 0x03        # add 8
         p.instr :STA, 0x05
         p.instr :JMP_LONG, :mul_loop
 
         p.label :mul_done
-        # Add x to get final offset: y*3 + x
+        # Add x to get final offset: y*8 + x
         p.instr :LDA, 0x05
         p.instr :ADD, 0x00        # add x
         p.instr :STA, 0x05        # low byte of address offset
@@ -94,8 +94,8 @@ RSpec.describe RHDL::HDL::CPU::FastHarness, 'Fractal' do
         p.instr :ADD, 0x02        # x++
         p.instr :STA, 0x00
 
-        # Check if x < 3
-        p.instr :SUB, 0x03        # x - 3
+        # Check if x < 8
+        p.instr :SUB, 0x03        # x - 8
         p.instr :JNZ_LONG, :col_loop
 
         # Increment y
@@ -103,8 +103,8 @@ RSpec.describe RHDL::HDL::CPU::FastHarness, 'Fractal' do
         p.instr :ADD, 0x02        # y++
         p.instr :STA, 0x01
 
-        # Check if y < 3
-        p.instr :SUB, 0x03        # y - 3
+        # Check if y < 8
+        p.instr :SUB, 0x03        # y - 8
         p.instr :JNZ_LONG, :row_loop
 
         p.instr :HLT
@@ -114,41 +114,42 @@ RSpec.describe RHDL::HDL::CPU::FastHarness, 'Fractal' do
       @cpu.memory.load(program, 0x100)
       @cpu.pc = 0x100
 
-      # Run the program
-      cycles = @cpu.run(10000)
+      # Run the program (8x8 needs more cycles than 3x3)
+      cycles = @cpu.run(50000)
 
       puts "HDL CPU Fractal completed in #{cycles} cycles"
       puts "CPU halted: #{@cpu.halted}"
 
-      # Read and display the pattern
-      puts "\nDisplay output (3x3 checkerboard pattern):"
-      (0...3).each do |y|
+      # Read and display the 8x8 pattern
+      puts "\nDisplay output (8x8 checkerboard pattern):"
+      (0...8).each do |y|
         line = ""
-        (0...3).each do |x|
-          addr = 0x800 + y * 3 + x
+        (0...8).each do |x|
+          addr = 0x800 + y * 8 + x
           char = @cpu.memory.read(addr)
           line << (char == '.'.ord ? '.' : (char == '#'.ord ? '#' : '?'))
         end
         puts line
       end
 
-      # Verify the checkerboard pattern
-      # Note: Don't require halt - just check pattern after enough cycles
-
-      # Check specific cells for checkerboard pattern
+      # Verify the 8x8 checkerboard pattern
       # Expected pattern:
-      # .#.
-      # #.#
-      # .#.
-      expect(@cpu.memory.read(0x800)).to eq('.'.ord), "Cell (0,0) should be '.'"
-      expect(@cpu.memory.read(0x801)).to eq('#'.ord), "Cell (1,0) should be '#'"
-      expect(@cpu.memory.read(0x802)).to eq('.'.ord), "Cell (2,0) should be '.'"
-      expect(@cpu.memory.read(0x803)).to eq('#'.ord), "Cell (0,1) should be '#'"
-      expect(@cpu.memory.read(0x804)).to eq('.'.ord), "Cell (1,1) should be '.'"
-      expect(@cpu.memory.read(0x805)).to eq('#'.ord), "Cell (2,1) should be '#'"
-      expect(@cpu.memory.read(0x806)).to eq('.'.ord), "Cell (0,2) should be '.'"
-      expect(@cpu.memory.read(0x807)).to eq('#'.ord), "Cell (1,2) should be '#'"
-      expect(@cpu.memory.read(0x808)).to eq('.'.ord), "Cell (2,2) should be '.'"
+      # .#.#.#.#
+      # #.#.#.#.
+      # .#.#.#.#
+      # #.#.#.#.
+      # .#.#.#.#
+      # #.#.#.#.
+      # .#.#.#.#
+      # #.#.#.#.
+      (0...8).each do |y|
+        (0...8).each do |x|
+          addr = 0x800 + y * 8 + x
+          expected = ((x + y) % 2 == 0) ? '.'.ord : '#'.ord
+          actual = @cpu.memory.read(addr)
+          expect(actual).to eq(expected), "Cell (#{x},#{y}) at 0x#{addr.to_s(16)} should be '#{expected.chr}' but was '#{actual.chr rescue '?'}'"
+        end
+      end
     end
   end
 end

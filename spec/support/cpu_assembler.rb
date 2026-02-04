@@ -36,10 +36,12 @@ module Assembler
   
         offsets = []
         current_address = 0
-        @instructions.each_with_index do |(opcode, operand), index|
+        @instructions.each_with_index do |instr, index|
           offsets << current_address
+          opcode = instr[0]
+          operand = instr[1]
           # Calculate instruction size based on opcode and operand
-          if operand.is_a?(Array)
+          if instr.size == 3
             # 3-element instruction (indirect addressing)
             current_address += 3
           elsif needs_four_bytes?(opcode)
@@ -77,10 +79,12 @@ module Assembler
         end
   
         # Now convert any label references into the correct offset from the "offsets" array.
-        @instructions.each_with_index do |(opcode, operand), index|
+        @instructions.each_with_index do |instr, index|
+          opcode = instr[0]
+          operand = instr[1]
           # Verify opcode is valid
           raise ArgumentError, "Unknown instruction: #{opcode}" unless valid_opcode?(opcode)
-          
+
           if operand.is_a?(Symbol)
             # The instruction wants to jump to a label. Let's see which instruction that label is on:
             label_index = @labels[operand]
