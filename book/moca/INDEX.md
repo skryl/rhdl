@@ -45,7 +45,7 @@
 
 - [18 - Neural Networks](18-neural-networks.md) - Perceptrons to transformers: layers, backpropagation, and hardware acceleration
 - [19 - Neuromorphic Computing](19-neuromorphic-computing.md) - Spiking neurons, STDP, memristors, and event-driven computation
-- [20 - Associative Memory](20-associative-memory.md) - Content-addressable memory, Hopfield networks, and processing-in-memory
+- [20 - Computing with Memory](20-computing-with-memory.md) - LUTs, truth tables, ROM microcode, CAM, memoization, and the compute-vs-store tradeoff
 
 ### Part VII: Reconfigurable Computing
 
@@ -87,7 +87,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix P - Wafer-Scale Implementation](appendix-p-wafer-scale.md) - Mesh routers, crossbars, virtual channels, and NoC in RHDL
 - [Appendix Q - Neural Network Implementation](appendix-q-neural-networks.md) - Layers, activations, backprop, and inference accelerators in RHDL
 - [Appendix R - Neuromorphic Implementation](appendix-r-neuromorphic.md) - LIF neurons, STDP synapses, and spiking networks in RHDL
-- [Appendix S - Associative Memory Implementation](appendix-s-associative-memory.md) - CAM cells, Hopfield networks, and PIM architectures in RHDL
+- [Appendix S - Memory-Based Computation](appendix-s-memory-computation.md) - LUTs, CAM cells, ROM microcode, and memoization patterns in RHDL
 - [Appendix T - FPGA Implementation](appendix-t-fpga.md) - LUTs, CLBs, routing, and FPGA primitives in RHDL
 - [Appendix U - CGRA Implementation](appendix-u-cgra.md) - PE arrays, interconnect, and configuration in RHDL
 - [Appendix V - Asynchronous Implementation](appendix-v-asynchronous.md) - C-elements, dual-rail logic, and self-timed circuits in RHDL
@@ -129,11 +129,11 @@ Each appendix provides complete RHDL implementations and formal details for its 
 |                                                              |
 +-------------------------------------------------------------+
 |                                                              |
-|   Brain-Inspired:  Neural Nets -- Neuromorphic -- Associative|
+|   Brain-Inspired:  Neural Nets -- Neuromorphic -- Memory     |
 |                         |              |              |      |
 |                         v              v              v      |
-|                    Perceptrons    Spiking       CAM, PIM,    |
-|                    transformers   neurons       Hopfield     |
+|                    Perceptrons    Spiking        LUTs, CAM,  |
+|                    transformers   neurons        memoization |
 |                                                              |
 +-------------------------------------------------------------+
 |                                                              |
@@ -201,7 +201,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 17 | Wafer-Scale Computing | P | Wafer-Scale/NoC Implementation |
 | 18 | Neural Networks | Q | Neural Network Implementation |
 | 19 | Neuromorphic Computing | R | Neuromorphic Implementation |
-| 20 | Associative Memory | S | Associative Memory Implementation |
+| 20 | Computing with Memory | S | Memory-Based Computation |
 | 21 | FPGAs | T | FPGA Implementation |
 | 22 | CGRAs | U | CGRA Implementation |
 | 23 | Asynchronous Computing | V | Asynchronous Implementation |
