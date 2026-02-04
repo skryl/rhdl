@@ -49,8 +49,8 @@
 - [21 - The MOS 6502](21-mos6502.md) - (1975) The classic CPU that powered the Apple II, C64, and NES
 - [22 - The Cray-1](22-cray1.md) - (1976) The supercomputer that defined vector processing
 - [23 - The Transputer](23-transputer.md) - (1985) CSP in hardware: message passing, links, and occam
-- [24 - The RISC-V RV32I](24-riscv.md) - (2010) The open ISA: clean design, modular extensions, and modern RISC
-- [25 - The VideoCore IV](25-videocore-iv.md) - (2012) The Raspberry Pi GPU: 12 QPUs, SIMD, and tile-based rendering
+- [24 - The NVIDIA G80](24-nvidia-g80.md) - (2006) The first CUDA GPU: unified shaders and GPGPU revolution
+- [25 - The RISC-V RV32I](25-riscv.md) - (2010) The open ISA: clean design, modular extensions, and modern RISC
 - [26 - The Google TPU v1](26-tpu.md) - (2016) A 256x256 systolic array for neural network inference
 - [27 - The Cerebras WSE](27-cerebras.md) - (2019) The largest chip ever built: 850K cores on a single wafer
 - [28 - The Groq LPU](28-groq.md) - (2020) Deterministic dataflow for AI inference: time as the program counter
@@ -139,8 +139,8 @@ Each appendix provides complete RHDL implementations and formal details for its 
 +-------------------------------------------------------------+
 |                                                              |
 |   Case Studies:    6502 (1975) | Cray-1 (1976) | Transputer (1985) |
-|   (chronological)  RISC-V (2010) | VideoCore (2012) | TPU (2016)   |
-|                    Cerebras (2019) | Groq (2020) | RHDL           |
+|   (chronological)  G80 (2006) | RISC-V (2010) | TPU (2016)         |
+|                    Cerebras (2019) | Groq (2020) | RHDL             |
 |                                                              |
 +-------------------------------------------------------------+
 ```
@@ -194,14 +194,14 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 21 | The MOS 6502 | U | 6502 RHDL Implementation |
 | 22 | The Cray-1 | K | (see Vector appendix) |
 | 23 | The Transputer | Y | Transputer Implementation |
-| 24 | The RISC-V RV32I | X | RISC-V Implementation |
-| 25 | The VideoCore IV | V | VideoCore IV Implementation |
+| 24 | The NVIDIA G80 | I | (see GPU appendix) |
+| 25 | The RISC-V RV32I | X | RISC-V Implementation |
 | 26 | The Google TPU v1 | W | TPU Implementation |
 | 27 | The Cerebras WSE | J | (see Wafer-Scale appendix) |
 | 28 | The Groq LPU | G | (see Dataflow appendix) |
 | 29 | RHDL | Z | RHDL Reference |
 
-*Note: Chapters 22, 27, and 28 share appendices with their corresponding paradigm chapters, as they are case studies of those architectures.*
+*Note: Chapters 22, 24, 27, and 28 share appendices with their corresponding paradigm chapters, as they are case studies of those architectures.*
 
 ---
 
