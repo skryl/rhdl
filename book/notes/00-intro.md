@@ -1,4 +1,4 @@
-# Hardware Design for Software Engineers
+# SICH: Structure and Interpretation of Computer Hardware
 
 ## Introduction
 
