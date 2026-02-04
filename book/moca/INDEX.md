@@ -31,6 +31,8 @@
 - [12 - Quantum Computing](12-quantum-computing.md) - Qubits, superposition, entanglement, and quantum algorithms
 - [13 - Asynchronous Computing](13-asynchronous-computing.md) - Clockless circuits: self-timed logic, handshaking, and NULL convention
 - [14 - Neuromorphic Computing](14-neuromorphic-computing.md) - Brain-inspired architectures: spiking neurons, STDP, and memristors
+- [25 - Photonic Computing](25-photonic-computing.md) - Computing with light: MZI meshes, optical matrix multiply, and interference
+- [26 - Analog Computing](26-analog-computing.md) - Continuous values: op-amps, integrators, and differential equations in real-time
 
 ### Part V: Hardware Practice
 
@@ -47,8 +49,6 @@
 - [22 - The RISC-V RV32I](22-riscv.md) - The open ISA: clean design, modular extensions, and modern RISC
 - [23 - The Transputer](23-transputer.md) - CSP in hardware: message passing, links, and occam
 - [24 - The Cerebras WSE](24-cerebras.md) - Wafer-scale computing: 850K cores, 2D mesh NoC, dataflow at extreme scale
-- [25 - Photonic Computing](25-photonic-computing.md) - Computing with light: MZI meshes, optical matrix multiply, and interference
-- [26 - Analog Computing](26-analog-computing.md) - Continuous values: op-amps, integrators, and differential equations in real-time
 
 ---
 
@@ -118,11 +118,16 @@ Each appendix provides complete RHDL implementations and formal details for its 
 │                     Prob    Zero     Exponential No    Brain │
 │                     math    energy   speedup    clock  learn │
 │                                                              │
+│                    Photonic ─────────────── Analog           │
+│                       │                       │              │
+│                       ▼                       ▼              │
+│                   Light/MZI           Continuous/Op-amps     │
+│                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
 │   Case Studies:    6502 (CISC) │ VideoCore (GPU) │ TPU (ML)  │
-│                    Cray-1 (Vector) │ RISC-V │ Transputer (CSP) │
-│                    Cerebras (NoC) │ Photonic │ Analog           │
+│                    Cray-1 (Vector) │ RISC-V │ Transputer (CSP)│
+│                    Cerebras (NoC)                            │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
