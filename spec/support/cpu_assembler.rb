@@ -172,7 +172,7 @@ module Assembler
     
     # Return true if this opcode occupies four bytes in memory (for 16-bit operands)
     def needs_four_bytes?(opcode)
-      [:JMP_LONG, :JZ_LONG, :JNZ_LONG, :CALL_LONG].include?(opcode)  # All long variants
+      [:JMP_LONG, :JZ_LONG, :JNZ_LONG].include?(opcode)  # All long jump variants
     end
   
       private
@@ -212,7 +212,7 @@ module Assembler
         [
           :NOP, :LDA, :STA, :ADD, :SUB, :AND, :OR, :XOR,
           :JZ, :JNZ, :LDI, :JMP, :CALL, :RET, :DIV, :HLT,
-          :MUL, :NOT, :JZ_LONG, :JMP_LONG, :JNZ_LONG, :CMP, :CALL_LONG
+          :MUL, :NOT, :JZ_LONG, :JMP_LONG, :JNZ_LONG, :CMP
         ].include?(opcode)
       end
   
@@ -240,7 +240,6 @@ module Assembler
         when :JZ_LONG  then 0xF8
         when :JMP_LONG then 0xF9
         when :JNZ_LONG then 0xFA
-        when :CALL_LONG then 0xFB
         else
           raise ArgumentError, "Unknown opcode: #{opcode}"
         end
