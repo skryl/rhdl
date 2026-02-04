@@ -19,36 +19,41 @@
 - [06 - Stack Machines](06-stack-machines.md) - Forth, JVM, and the simplest computer architecture
 - [07 - Register Machines](07-register-machines.md) - The von Neumann architecture that dominates modern computing
 
-### Part III: Dataflow and Spatial Architectures
+### Part III: Parallel and Distributed Architectures
 
-- [08 - Dataflow Computation](08-dataflow-computation.md) - Data-driven execution, token machines, and deterministic pipelines
-- [09 - Systolic Arrays](09-systolic-arrays.md) - Regular structures, matrix operations, and modern AI accelerators
+- [08 - Message Passing Systems](08-message-passing.md) - MPI, CSP, actors, and communication as the basis of parallel computation
+- [09 - Distributed Shared Memory](09-distributed-shared-memory.md) - NUMA, cache coherence, directory protocols, and the illusion of shared state
 - [10 - GPU Architecture](10-gpu-architecture.md) - SIMD/SIMT execution, streaming multiprocessors, and massively parallel computing
-- [11 - Wafer-Scale Computing](11-wafer-scale.md) - Using entire wafers: 2D mesh NoC, dataflow at extreme scale
-- [12 - Vector Processing](12-vector-processing.md) - SIMD with vector registers: pipelining, chaining, and memory banking
+- [11 - Vector Processing](11-vector-processing.md) - SIMD with vector registers: pipelining, chaining, and memory banking
 
-### Part IV: Brain-Inspired Architectures
+### Part IV: Dataflow and Spatial Architectures
 
-- [13 - Neural Networks](13-neural-networks.md) - Perceptrons to transformers: layers, backpropagation, and hardware acceleration
-- [14 - Neuromorphic Computing](14-neuromorphic-computing.md) - Spiking neurons, STDP, memristors, and event-driven computation
-- [15 - Associative Memory](15-associative-memory.md) - Content-addressable memory, Hopfield networks, and processing-in-memory
+- [12 - Dataflow Computation](12-dataflow-computation.md) - Data-driven execution, token machines, and deterministic pipelines
+- [13 - Systolic Arrays](13-systolic-arrays.md) - Regular structures, matrix operations, and modern AI accelerators
+- [14 - Wafer-Scale Computing](14-wafer-scale.md) - Using entire wafers: 2D mesh NoC, dataflow at extreme scale
 
-### Part V: Alternative Substrates
+### Part V: Brain-Inspired Architectures
 
-- [16 - Asynchronous Computing](16-asynchronous-computing.md) - Clockless circuits: self-timed logic, handshaking, and NULL convention
-- [17 - Photonic Computing](17-photonic-computing.md) - Computing with light: MZI meshes, optical matrix multiply, and interference
-- [18 - Analog Computing](18-analog-computing.md) - Continuous values: op-amps, integrators, and differential equations in real-time
+- [15 - Neural Networks](15-neural-networks.md) - Perceptrons to transformers: layers, backpropagation, and hardware acceleration
+- [16 - Neuromorphic Computing](16-neuromorphic-computing.md) - Spiking neurons, STDP, memristors, and event-driven computation
+- [17 - Associative Memory](17-associative-memory.md) - Content-addressable memory, Hopfield networks, and processing-in-memory
 
 ### Part VI: Reconfigurable Computing
 
-- [19 - FPGAs](19-fpga.md) - Field-programmable gate arrays: LUTs, CLBs, routing, and fine-grained reconfiguration
-- [20 - Coarse-Grained Reconfigurable Arrays](20-cgra.md) - CGRAs: word-level datapaths, spatial computing, and domain-specific acceleration
+- [18 - FPGAs](18-fpga.md) - Field-programmable gate arrays: LUTs, CLBs, routing, and fine-grained reconfiguration
+- [19 - Coarse-Grained Reconfigurable Arrays](19-cgra.md) - CGRAs: word-level datapaths, spatial computing, and domain-specific acceleration
 
-### Part VII: Non-Classical Computing
+### Part VII: Alternative Substrates
 
-- [21 - Stochastic Computing](21-stochastic-computing.md) - Probability as data: AND gates multiply, MUX gates add
-- [22 - Reversible Computation](22-reversible-computation.md) - Fredkin gates, Toffoli gates, and the thermodynamics of computing
-- [23 - Quantum Computing](23-quantum-computing.md) - Qubits, superposition, entanglement, and quantum algorithms
+- [20 - Asynchronous Computing](20-asynchronous-computing.md) - Clockless circuits: self-timed logic, handshaking, and NULL convention
+- [21 - Photonic Computing](21-photonic-computing.md) - Computing with light: MZI meshes, optical matrix multiply, and interference
+- [22 - Analog Computing](22-analog-computing.md) - Continuous values: op-amps, integrators, and differential equations in real-time
+
+### Part VIII: Non-Classical Computing
+
+- [23 - Stochastic Computing](23-stochastic-computing.md) - Probability as data: AND gates multiply, MUX gates add
+- [24 - Reversible Computation](24-reversible-computation.md) - Fredkin gates, Toffoli gates, and the thermodynamics of computing
+- [25 - Quantum Computing](25-quantum-computing.md) - Qubits, superposition, entanglement, and quantum algorithms
 
 ---
 
@@ -63,22 +68,24 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix E - Cellular Automata](appendix-e-cellular-automata.md) - Rule 110, Game of Life, and emergent computation
 - [Appendix F - Stack Machine ISA](appendix-f-stack-machine.md) - Complete Forth-like instruction set with RHDL implementation
 - [Appendix G - Register Machine ISA](appendix-g-register-machine.md) - Complete 8-bit instruction set with RHDL CPU
-- [Appendix H - Dataflow Architectures](appendix-h-dataflow.md) - Token machines, static vs dynamic dataflow, RHDL examples
-- [Appendix I - Systolic Array Patterns](appendix-i-systolic.md) - Matrix multiply, convolution, and other array algorithms
+- [Appendix H - Message Passing Implementation](appendix-h-message-passing.md) - Channels, routers, and MPI-style primitives in RHDL
+- [Appendix I - DSM/NUMA Implementation](appendix-i-dsm-numa.md) - Directory protocols, cache coherence, and NUMA simulation in RHDL
 - [Appendix J - GPU Implementation](appendix-j-gpu.md) - CUDA-like execution model and RHDL streaming multiprocessor
-- [Appendix K - Wafer-Scale Implementation](appendix-k-wafer-scale.md) - Mesh routers, crossbars, virtual channels, and NoC in RHDL
-- [Appendix L - Vector Implementation](appendix-l-vector.md) - Vector registers, chaining controller, and banked memory in RHDL
-- [Appendix M - Neural Network Implementation](appendix-m-neural-networks.md) - Layers, activations, backprop, and inference accelerators in RHDL
-- [Appendix N - Neuromorphic Implementation](appendix-n-neuromorphic.md) - LIF neurons, STDP synapses, and spiking networks in RHDL
-- [Appendix O - Associative Memory Implementation](appendix-o-associative-memory.md) - CAM cells, Hopfield networks, and PIM architectures in RHDL
-- [Appendix P - Asynchronous Implementation](appendix-p-asynchronous.md) - C-elements, dual-rail logic, and self-timed circuits in RHDL
-- [Appendix Q - Photonic Simulation](appendix-q-photonic.md) - Ruby simulation of MZIs, interference, and optical neural networks
-- [Appendix R - Analog Simulation](appendix-r-analog.md) - Ruby simulation of op-amps, ODEs, and analog neural networks
-- [Appendix S - FPGA Implementation](appendix-s-fpga.md) - LUTs, CLBs, routing, and FPGA primitives in RHDL
-- [Appendix T - CGRA Implementation](appendix-t-cgra.md) - PE arrays, interconnect, and configuration in RHDL
-- [Appendix U - Stochastic Implementation](appendix-u-stochastic.md) - LFSRs, stochastic multipliers, and probabilistic neural networks
-- [Appendix V - Reversible Gates](appendix-v-reversible.md) - Fredkin, Toffoli, and building circuits that lose no information
-- [Appendix W - Quantum Circuits](appendix-w-quantum.md) - Quantum gate implementations and simulators
+- [Appendix K - Vector Implementation](appendix-k-vector.md) - Vector registers, chaining controller, and banked memory in RHDL
+- [Appendix L - Dataflow Architectures](appendix-l-dataflow.md) - Token machines, static vs dynamic dataflow, RHDL examples
+- [Appendix M - Systolic Array Patterns](appendix-m-systolic.md) - Matrix multiply, convolution, and other array algorithms
+- [Appendix N - Wafer-Scale Implementation](appendix-n-wafer-scale.md) - Mesh routers, crossbars, virtual channels, and NoC in RHDL
+- [Appendix O - Neural Network Implementation](appendix-o-neural-networks.md) - Layers, activations, backprop, and inference accelerators in RHDL
+- [Appendix P - Neuromorphic Implementation](appendix-p-neuromorphic.md) - LIF neurons, STDP synapses, and spiking networks in RHDL
+- [Appendix Q - Associative Memory Implementation](appendix-q-associative-memory.md) - CAM cells, Hopfield networks, and PIM architectures in RHDL
+- [Appendix R - FPGA Implementation](appendix-r-fpga.md) - LUTs, CLBs, routing, and FPGA primitives in RHDL
+- [Appendix S - CGRA Implementation](appendix-s-cgra.md) - PE arrays, interconnect, and configuration in RHDL
+- [Appendix T - Asynchronous Implementation](appendix-t-asynchronous.md) - C-elements, dual-rail logic, and self-timed circuits in RHDL
+- [Appendix U - Photonic Simulation](appendix-u-photonic.md) - Ruby simulation of MZIs, interference, and optical neural networks
+- [Appendix V - Analog Simulation](appendix-v-analog.md) - Ruby simulation of op-amps, ODEs, and analog neural networks
+- [Appendix W - Stochastic Implementation](appendix-w-stochastic.md) - LFSRs, stochastic multipliers, and probabilistic neural networks
+- [Appendix X - Reversible Gates](appendix-x-reversible.md) - Fredkin, Toffoli, and building circuits that lose no information
+- [Appendix Y - Quantum Circuits](appendix-y-quantum.md) - Quantum gate implementations and simulators
 
 ---
 
@@ -100,11 +107,12 @@ Each appendix provides complete RHDL implementations and formal details for its 
 |   Sequential:      Stack ----------- Register                |
 |                    (operand stack)  (von Neumann)            |
 |                                                              |
-|   Spatial:   Dataflow - Systolic - GPU - Wafer-Scale - Vector|
-|             (tokens)  (regular)  (SIMT) (mesh)      (SIMD)   |
-|                  |         |       |        |          |     |
-|                  +---------+-------+--------+----------+     |
-|                                |                             |
+|   Parallel:    Message Passing --- DSM/NUMA --- GPU - Vector |
+|                (MPI, actors)     (coherence)  (SIMT) (SIMD)  |
+|                                                              |
+|   Spatial:         Dataflow ----- Systolic ----- Wafer-Scale |
+|                   (tokens)      (regular)        (mesh)      |
+|                                                              |
 |                          Modern CPUs <---- Reconfigurable    |
 |                                          (FPGA, CGRA)        |
 |                                                              |
@@ -154,6 +162,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 14. **Determinism enables efficiency** - Static scheduling maximizes utilization
 15. **Light and continuous values are valid substrates** - Classical computation doesn't require digital electronics
 16. **Memory can compute** - Content-addressable memory and associative recall blur the line between storage and processing
+17. **Communication is computation** - Message passing and shared memory are dual approaches to parallel coordination
 
 ---
 
@@ -168,22 +177,24 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 05 | Biological Computation | E | Cellular Automata |
 | 06 | Stack Machines | F | Stack Machine ISA |
 | 07 | Register Machines | G | Register Machine ISA |
-| 08 | Dataflow Computation | H | Dataflow RHDL |
-| 09 | Systolic Arrays | I | Systolic Patterns |
+| 08 | Message Passing Systems | H | Message Passing Implementation |
+| 09 | Distributed Shared Memory | I | DSM/NUMA Implementation |
 | 10 | GPU Architecture | J | GPU Implementation |
-| 11 | Wafer-Scale Computing | K | Wafer-Scale/NoC Implementation |
-| 12 | Vector Processing | L | Vector Implementation |
-| 13 | Neural Networks | M | Neural Network Implementation |
-| 14 | Neuromorphic Computing | N | Neuromorphic Implementation |
-| 15 | Associative Memory | O | Associative Memory Implementation |
-| 16 | Asynchronous Computing | P | Asynchronous Implementation |
-| 17 | Photonic Computing | Q | Photonic Simulation (Ruby) |
-| 18 | Analog Computing | R | Analog Simulation (Ruby) |
-| 19 | FPGAs | S | FPGA Implementation |
-| 20 | CGRAs | T | CGRA Implementation |
-| 21 | Stochastic Computing | U | Stochastic Implementation |
-| 22 | Reversible Computation | V | Reversible Gates |
-| 23 | Quantum Computing | W | Quantum Circuits |
+| 11 | Vector Processing | K | Vector Implementation |
+| 12 | Dataflow Computation | L | Dataflow RHDL |
+| 13 | Systolic Arrays | M | Systolic Patterns |
+| 14 | Wafer-Scale Computing | N | Wafer-Scale/NoC Implementation |
+| 15 | Neural Networks | O | Neural Network Implementation |
+| 16 | Neuromorphic Computing | P | Neuromorphic Implementation |
+| 17 | Associative Memory | Q | Associative Memory Implementation |
+| 18 | FPGAs | R | FPGA Implementation |
+| 19 | CGRAs | S | CGRA Implementation |
+| 20 | Asynchronous Computing | T | Asynchronous Implementation |
+| 21 | Photonic Computing | U | Photonic Simulation (Ruby) |
+| 22 | Analog Computing | V | Analog Simulation (Ruby) |
+| 23 | Stochastic Computing | W | Stochastic Implementation |
+| 24 | Reversible Computation | X | Reversible Gates |
+| 25 | Quantum Computing | Y | Quantum Circuits |
 
 ---
 
