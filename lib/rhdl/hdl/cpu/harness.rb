@@ -37,7 +37,6 @@ module RHDL
         def initialize(external_memory = nil, name: nil, memory_contents: [])
           @cycle_count = 0
           @halted = false
-          @zero_flag = 0
 
           # Create CPU and RAM
           @cpu = CPU.new(name || "cpu")
@@ -74,7 +73,7 @@ module RHDL
         end
 
         def zero_flag
-          @zero_flag == 1
+          @cpu.get_output(:zero_flag_out) == 1
         end
 
         # Legacy accessors
@@ -91,18 +90,17 @@ module RHDL
         end
 
         def zero_flag_value
-          @zero_flag
+          @cpu.get_output(:zero_flag_out)
         end
 
         # Simulation control
         def reset
           @halted = false
           @cycle_count = 0
-          @zero_flag = 0
 
           # Reset CPU through rst port
           @cpu.set_input(:rst, 1)
-          @cpu.set_input(:zero_flag_in, 0)
+          @cpu.set_input(:zero_flag_load_en, 0)
           clock_cpu
           @cpu.set_input(:rst, 0)
 
@@ -112,8 +110,12 @@ module RHDL
           clock_cpu
           @cpu.set_input(:pc_load_en, 0)
 
-          # Initialize ACC to 0
-          @cpu.set_input(:acc_load_data, 0)
+          # Initialize ACC to 0 by providing 0 on mem_data_in and triggering load
+          # The acc_mux will select based on is_lda, but we need to force a zero load
+          # Set mem_data_in to 0 and enable acc_load to reset accumulator
+          @cpu.set_input(:mem_data_in, 0)
+          @cpu.set_input(:instruction, 0x10)  # LDA with operand 0 (is_lda=1)
+          @cpu.propagate
           @cpu.set_input(:acc_load_en, 1)
           clock_cpu
           @cpu.set_input(:acc_load_en, 0)
@@ -164,23 +166,18 @@ module RHDL
           instruction = @ram.read_mem(pc_val)
           operand_nibble = instruction & 0x0F
 
-          # Send instruction and zero flag to CPU for decoding
+          # Send instruction to CPU for decoding (zero flag is internal now)
           @cpu.set_input(:instruction, instruction)
-          @cpu.set_input(:zero_flag_in, @zero_flag)
           @cpu.propagate
 
           # Read decoded control signals from CPU ports
           instr_length = @cpu.get_output(:dec_instr_length)
           halt = @cpu.get_output(:dec_halt)
-          jump = @cpu.get_output(:dec_jump)
-          branch = @cpu.get_output(:dec_branch)
           call = @cpu.get_output(:dec_call)
           ret = @cpu.get_output(:dec_ret)
-          pc_src = @cpu.get_output(:dec_pc_src)
           reg_write = @cpu.get_output(:dec_reg_write)
           alu_src = @cpu.get_output(:dec_alu_src)
           mem_write = @cpu.get_output(:dec_mem_write)
-          alu_op = @cpu.get_output(:dec_alu_op)
 
           # Fetch operand bytes from memory
           operand = case instr_length
@@ -200,7 +197,11 @@ module RHDL
             return
           end
 
-          # Calculate new PC
+          # Calculate new PC based on decoder signals
+          pc_src = @cpu.get_output(:dec_pc_src)
+          jump = @cpu.get_output(:dec_jump)
+          branch = @cpu.get_output(:dec_branch)
+
           new_pc = pc_val + instr_length
 
           if jump == 1 || branch == 1
@@ -233,39 +234,36 @@ module RHDL
             new_pc = @ram.read_mem(sp_val)
           end
 
-          # ALU operations
+          # ALU/Load operations - CPU handles muxing between ALU result and memory data
           if reg_write == 1
-            opcode_nibble = (instruction >> 4) & 0x0F
             if alu_src == 1
-              # Immediate load (LDI)
-              result = operand & 0xFF
-            elsif opcode_nibble == 1
-              # LDA - direct memory load, bypass ALU
-              result = @ram.read_mem(operand & 0xFF)
+              # Immediate load (LDI) - provide operand as memory data
+              @cpu.set_input(:mem_data_in, operand & 0xFF)
             else
-              # Memory operand through ALU (ADD, SUB, AND, OR, XOR, etc.)
+              # Memory operand (LDA, ADD, SUB, AND, OR, XOR, etc.)
               mem_operand = @ram.read_mem(operand & 0xFF)
-              # Provide memory data to CPU for ALU computation
               @cpu.set_input(:mem_data_in, mem_operand)
-              @cpu.propagate
-              result = @cpu.get_output(:alu_result_out)
             end
+            @cpu.propagate
 
-            # Load result into accumulator
-            @cpu.set_input(:acc_load_data, result)
+            # Load result into accumulator (CPU's acc_mux selects ALU vs mem_data_in)
             @cpu.set_input(:acc_load_en, 1)
+            @cpu.set_input(:zero_flag_load_en, 1)
             clock_cpu
             @cpu.set_input(:acc_load_en, 0)
-
-            # Update zero flag based on result
-            @zero_flag = (result == 0) ? 1 : 0
+            @cpu.set_input(:zero_flag_load_en, 0)
           end
 
           # CMP - compare without storing (just updates zero flag)
+          # CMP uses ALU SUB operation, so we need to provide operand and capture zero flag
           if instruction == 0xF3
             mem_val = @ram.read_mem(operand & 0xFF)
-            result = (acc_val - mem_val) & 0xFF
-            @zero_flag = (result == 0) ? 1 : 0
+            @cpu.set_input(:mem_data_in, mem_val)
+            @cpu.propagate
+            # Update zero flag without writing to accumulator
+            @cpu.set_input(:zero_flag_load_en, 1)
+            clock_cpu
+            @cpu.set_input(:zero_flag_load_en, 0)
           end
 
           # Memory write (STA)

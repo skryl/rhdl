@@ -24,15 +24,14 @@ module RHDL
         # Instruction input
         input :instruction, width: 8
         input :operand, width: 16         # Operand (1 or 2 bytes)
-        input :zero_flag_in               # Zero flag input (computed by harness)
 
         # Control inputs for registers
         input :acc_load_en                # Load accumulator with acc_load_data
-        input :acc_load_data, width: 8    # Data to load into accumulator
         input :pc_load_en                 # Load PC with pc_load_data
         input :pc_load_data, width: 16    # Data to load into PC
         input :sp_push                    # Push stack pointer
         input :sp_pop                     # Pop stack pointer
+        input :zero_flag_load_en          # Load zero flag register
 
         # Status outputs
         output :pc_out, width: 16
@@ -40,6 +39,7 @@ module RHDL
         output :sp_out, width: 8
         output :sp_empty
         output :halt_out
+        output :zero_flag_out             # Current zero flag value
 
         # Decoder outputs (exposed for Harness to read control signals)
         output :dec_alu_op, width: 4
@@ -54,6 +54,7 @@ module RHDL
         output :dec_call
         output :dec_ret
         output :dec_instr_length, width: 2
+        output :dec_is_lda                # LDA instruction (bypass ALU)
 
         # ALU output
         output :alu_result_out, width: 8
@@ -64,6 +65,9 @@ module RHDL
         wire :alu_b, width: 8
         wire :alu_result, width: 8
         wire :alu_zero
+        wire :zero_flag_reg_out           # Zero flag register output
+        wire :zero_flag_next              # Next value for zero flag register
+        wire :acc_result, width: 8        # Result to load into accumulator (muxed)
 
         # Sub-components
         instance :decoder, InstructionDecoder
@@ -71,10 +75,12 @@ module RHDL
         instance :pc, ProgramCounter, width: 16
         instance :acc, Register, width: 8
         instance :sp, StackPointer, width: 8, initial: 0xFF
+        instance :zero_flag_reg, DFlipFlop  # Zero flag register
+        instance :acc_mux, Mux2, width: 8   # Mux to select ALU result vs memory data (LDA)
 
-        # Decoder connections - zero flag comes from input port
+        # Decoder connections - zero flag comes from internal register
         port :instruction => [:decoder, :instruction]
-        port :zero_flag_in => [:decoder, :zero_flag]
+        port :zero_flag_reg_out => [:decoder, :zero_flag]
         port [:decoder, :alu_op] => :dec_alu_op
         port [:decoder, :alu_src] => :dec_alu_src
         port [:decoder, :reg_write] => :dec_reg_write
@@ -87,6 +93,21 @@ module RHDL
         port [:decoder, :call] => :dec_call
         port [:decoder, :ret] => :dec_ret
         port [:decoder, :instr_length] => :dec_instr_length
+        port [:decoder, :is_lda] => :dec_is_lda
+
+        # Zero flag register connections
+        port :clk => [:zero_flag_reg, :clk]
+        port :rst => [:zero_flag_reg, :rst]
+        port :zero_flag_load_en => [:zero_flag_reg, :en]
+        port :zero_flag_next => [:zero_flag_reg, :d]
+        port [:zero_flag_reg, :q] => :zero_flag_reg_out
+        port :zero_flag_reg_out => :zero_flag_out
+
+        # ACC result mux: sel=0 -> ALU result, sel=1 -> mem_data_in (for LDA)
+        port :alu_result => [:acc_mux, :a]
+        port :mem_data_in => [:acc_mux, :b]
+        port :dec_is_lda => [:acc_mux, :sel]
+        port [:acc_mux, :y] => :acc_result
 
         # ALU connections
         port :alu_a => [:alu, :a]
@@ -106,10 +127,10 @@ module RHDL
         port :pc_load_en => [:pc, :load]
         port [:pc, :q] => :pc_out
 
-        # Accumulator connections
+        # Accumulator connections - now uses acc_result (muxed) instead of external data
         port :clk => [:acc, :clk]
         port :rst => [:acc, :rst]
-        port :acc_load_data => [:acc, :d]
+        port :acc_result => [:acc, :d]
         port :acc_load_en => [:acc, :en]
         port [:acc, :q] => :acc_out
 
@@ -134,6 +155,10 @@ module RHDL
         # Behavior for combinational control logic
         behavior do
           mem_addr <= pc_out
+
+          # Zero flag next value - capture ALU zero or (result == 0) for LDA/LDI
+          # When is_lda, check if mem_data_in is zero; otherwise use ALU zero
+          zero_flag_next <= mux(dec_is_lda, mux(mem_data_in == lit(0, width: 8), 1, 0), alu_zero)
         end
       end
     end
