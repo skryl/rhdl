@@ -43,6 +43,9 @@
 - [18 - The MOS 6502](18-mos6502.md) - Deep dive into the classic CPU that powered the Apple II, C64, and NES
 - [19 - The VideoCore IV](19-videocore-iv.md) - The Raspberry Pi GPU: 12 QPUs, SIMD, and tile-based rendering
 - [20 - The Google TPU v1](20-tpu.md) - A 256×256 systolic array for neural network inference
+- [21 - The Cray-1](21-cray1.md) - Vector processing pioneer: chaining, banking, and DAXPY in silicon
+- [22 - The RISC-V RV32I](22-riscv.md) - The open ISA: clean design, modular extensions, and modern RISC
+- [23 - The Transputer](23-transputer.md) - CSP in hardware: message passing, links, and occam
 
 ---
 
@@ -70,6 +73,9 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix R - MOS 6502 Implementation](appendix-r-mos6502.md) - Full 6502 in RHDL with test suite
 - [Appendix S - VideoCore IV Implementation](appendix-s-videocore.md) - QPU cores, VPM, and sample assembly programs
 - [Appendix T - TPU Implementation](appendix-t-tpu.md) - Systolic array, weight FIFOs, and matrix multiply in RHDL
+- [Appendix U - Cray-1 Implementation](appendix-u-cray1.md) - Vector registers, chaining controller, and banked memory in RHDL
+- [Appendix V - RISC-V Implementation](appendix-v-riscv.md) - RV32I decoder, ALU, pipeline stages, and hazard handling
+- [Appendix W - Transputer Implementation](appendix-w-transputer.md) - Links, channels, scheduler, and ALT controller in RHDL
 
 ---
 
@@ -108,7 +114,8 @@ Each appendix provides complete RHDL implementations and formal details for its 
 │                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│   Case Studies:    6502 (CPU) │ VideoCore (GPU) │ TPU (ML)  │
+│   Case Studies:    6502 (CISC) │ VideoCore (GPU) │ TPU (ML)  │
+│                    Cray-1 (Vector) │ RISC-V │ Transputer (CSP) │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -155,6 +162,9 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 18 | The MOS 6502 | R | 6502 RHDL Implementation |
 | 19 | The VideoCore IV | S | VideoCore IV Implementation |
 | 20 | The Google TPU v1 | T | TPU Implementation |
+| 21 | The Cray-1 | U | Cray-1 Implementation |
+| 22 | The RISC-V RV32I | V | RISC-V Implementation |
+| 23 | The Transputer | W | Transputer Implementation |
 
 ---
 
