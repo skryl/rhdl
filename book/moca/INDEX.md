@@ -24,29 +24,29 @@
 - [08 - Systolic Arrays](08-systolic-arrays.md) - Regular structures, matrix operations, and modern AI accelerators
 - [09 - GPU Architecture](09-gpu-architecture.md) - SIMD/SIMT execution, streaming multiprocessors, and massively parallel computing
 - [10 - Wafer-Scale Computing](10-wafer-scale.md) - Cerebras WSE: 850K cores, 2D mesh NoC, dataflow at extreme scale
+- [11 - Vector Processing](11-vector-processing.md) - SIMD with vector registers: the Cray way
 
 ### Part IV: Beyond Classical Computing
 
-- [11 - Stochastic Computing](11-stochastic-computing.md) - Probability as data: AND gates multiply, MUX gates add
-- [12 - Reversible Computation](12-reversible-computation.md) - Fredkin gates, Toffoli gates, and the thermodynamics of computing
-- [13 - Quantum Computing](13-quantum-computing.md) - Qubits, superposition, entanglement, and quantum algorithms
-- [14 - Asynchronous Computing](14-asynchronous-computing.md) - Clockless circuits: self-timed logic, handshaking, and NULL convention
-- [15 - Neuromorphic Computing](15-neuromorphic-computing.md) - Brain-inspired architectures: spiking neurons, STDP, and memristors
-- [16 - Photonic Computing](16-photonic-computing.md) - Computing with light: MZI meshes, optical matrix multiply, and interference
-- [17 - Analog Computing](17-analog-computing.md) - Continuous values: op-amps, integrators, and differential equations in real-time
+- [12 - Stochastic Computing](12-stochastic-computing.md) - Probability as data: AND gates multiply, MUX gates add
+- [13 - Reversible Computation](13-reversible-computation.md) - Fredkin gates, Toffoli gates, and the thermodynamics of computing
+- [14 - Quantum Computing](14-quantum-computing.md) - Qubits, superposition, entanglement, and quantum algorithms
+- [15 - Asynchronous Computing](15-asynchronous-computing.md) - Clockless circuits: self-timed logic, handshaking, and NULL convention
+- [16 - Neuromorphic Computing](16-neuromorphic-computing.md) - Brain-inspired architectures: spiking neurons, STDP, and memristors
+- [17 - Photonic Computing](17-photonic-computing.md) - Computing with light: MZI meshes, optical matrix multiply, and interference
+- [18 - Analog Computing](18-analog-computing.md) - Continuous values: op-amps, integrators, and differential equations in real-time
 
 ### Part V: Hardware Practice
 
-- [18 - Hardware Description Languages](18-hdl.md) - Verilog, VHDL, and RHDL compared
-- [19 - Synthesis and Implementation](19-synthesis.md) - From HDL to silicon: FPGAs, ASICs, and the synthesis flow
-- [20 - Reconfigurable Computing](20-reconfigurable-computing.md) - FPGAs: LUTs, CLBs, routing, and hardware that changes itself
+- [19 - Hardware Description Languages](19-hdl.md) - Verilog, VHDL, and RHDL compared
+- [20 - Synthesis and Implementation](20-synthesis.md) - From HDL to silicon: FPGAs, ASICs, and the synthesis flow
+- [21 - Reconfigurable Computing](21-reconfigurable-computing.md) - FPGAs: LUTs, CLBs, routing, and hardware that changes itself
 
 ### Part VI: Case Studies
 
-- [21 - The MOS 6502](21-mos6502.md) - Deep dive into the classic CPU that powered the Apple II, C64, and NES
-- [22 - The VideoCore IV](22-videocore-iv.md) - The Raspberry Pi GPU: 12 QPUs, SIMD, and tile-based rendering
-- [23 - The Google TPU v1](23-tpu.md) - A 256x256 systolic array for neural network inference
-- [24 - The Cray-1](24-cray1.md) - Vector processing pioneer: chaining, banking, and DAXPY in silicon
+- [22 - The MOS 6502](22-mos6502.md) - Deep dive into the classic CPU that powered the Apple II, C64, and NES
+- [23 - The VideoCore IV](23-videocore-iv.md) - The Raspberry Pi GPU: 12 QPUs, SIMD, and tile-based rendering
+- [24 - The Google TPU v1](24-tpu.md) - A 256x256 systolic array for neural network inference
 - [25 - The RISC-V RV32I](25-riscv.md) - The open ISA: clean design, modular extensions, and modern RISC
 - [26 - The Transputer](26-transputer.md) - CSP in hardware: message passing, links, and occam
 
@@ -66,20 +66,20 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix H - Systolic Array Patterns](appendix-h-systolic.md) - Matrix multiply, convolution, and other array algorithms
 - [Appendix I - GPU Implementation](appendix-i-gpu.md) - CUDA-like execution model and RHDL streaming multiprocessor
 - [Appendix J - Wafer-Scale Implementation](appendix-j-wafer-scale.md) - Mesh routers, crossbars, virtual channels, and NoC in RHDL
-- [Appendix K - Stochastic Implementation](appendix-k-stochastic.md) - LFSRs, stochastic multipliers, and probabilistic neural networks
-- [Appendix L - Reversible Gates](appendix-l-reversible.md) - Fredkin, Toffoli, and building circuits that lose no information
-- [Appendix M - Quantum Circuits](appendix-m-quantum.md) - Quantum gate implementations and simulators
-- [Appendix N - Asynchronous Implementation](appendix-n-asynchronous.md) - C-elements, dual-rail logic, and self-timed circuits in RHDL
-- [Appendix O - Neuromorphic Implementation](appendix-o-neuromorphic.md) - LIF neurons, STDP synapses, and spiking networks in RHDL
-- [Appendix P - Photonic Simulation](appendix-p-photonic.md) - Ruby simulation of MZIs, interference, and optical neural networks
-- [Appendix Q - Analog Simulation](appendix-q-analog.md) - Ruby simulation of op-amps, ODEs, and analog neural networks
-- [Appendix R - HDL Comparison](appendix-r-hdl.md) - Verilog, VHDL, Chisel, and RHDL side-by-side
-- [Appendix S - Synthesis Details](appendix-s-synthesis.md) - Gate-level synthesis, optimization, and FPGA mapping
-- [Appendix T - FPGA Implementation](appendix-t-reconfigurable.md) - LUTs, CLBs, routing, and FPGA primitives in RHDL
-- [Appendix U - MOS 6502 Implementation](appendix-u-mos6502.md) - Full 6502 in RHDL with test suite
-- [Appendix V - VideoCore IV Implementation](appendix-v-videocore.md) - QPU cores, VPM, and sample assembly programs
-- [Appendix W - TPU Implementation](appendix-w-tpu.md) - Systolic array, weight FIFOs, and matrix multiply in RHDL
-- [Appendix X - Cray-1 Implementation](appendix-x-cray1.md) - Vector registers, chaining controller, and banked memory in RHDL
+- [Appendix K - Vector Implementation](appendix-k-vector.md) - Vector registers, chaining controller, and banked memory in RHDL
+- [Appendix L - Stochastic Implementation](appendix-l-stochastic.md) - LFSRs, stochastic multipliers, and probabilistic neural networks
+- [Appendix M - Reversible Gates](appendix-m-reversible.md) - Fredkin, Toffoli, and building circuits that lose no information
+- [Appendix N - Quantum Circuits](appendix-n-quantum.md) - Quantum gate implementations and simulators
+- [Appendix O - Asynchronous Implementation](appendix-o-asynchronous.md) - C-elements, dual-rail logic, and self-timed circuits in RHDL
+- [Appendix P - Neuromorphic Implementation](appendix-p-neuromorphic.md) - LIF neurons, STDP synapses, and spiking networks in RHDL
+- [Appendix Q - Photonic Simulation](appendix-q-photonic.md) - Ruby simulation of MZIs, interference, and optical neural networks
+- [Appendix R - Analog Simulation](appendix-r-analog.md) - Ruby simulation of op-amps, ODEs, and analog neural networks
+- [Appendix S - HDL Comparison](appendix-s-hdl.md) - Verilog, VHDL, Chisel, and RHDL side-by-side
+- [Appendix T - Synthesis Details](appendix-t-synthesis.md) - Gate-level synthesis, optimization, and FPGA mapping
+- [Appendix U - FPGA Implementation](appendix-u-reconfigurable.md) - LUTs, CLBs, routing, and FPGA primitives in RHDL
+- [Appendix V - MOS 6502 Implementation](appendix-v-mos6502.md) - Full 6502 in RHDL with test suite
+- [Appendix W - VideoCore IV Implementation](appendix-w-videocore.md) - QPU cores, VPM, and sample assembly programs
+- [Appendix X - TPU Implementation](appendix-x-tpu.md) - Systolic array, weight FIFOs, and matrix multiply in RHDL
 - [Appendix Y - RISC-V Implementation](appendix-y-riscv.md) - RV32I decoder, ALU, pipeline stages, cache, TLB, and MMU
 - [Appendix Z - Transputer Implementation](appendix-z-transputer.md) - Links, channels, scheduler, and ALT controller in RHDL
 
@@ -102,10 +102,10 @@ Each appendix provides complete RHDL implementations and formal details for its 
 |   Sequential:      Stack ----------- Register                |
 |                    (operand stack)  (von Neumann)            |
 |                                                              |
-|   Spatial:     Dataflow --- Systolic --- GPU --- Wafer-Scale |
-|               (Groq)      (regular)   (SIMD)   (Cerebras)    |
-|                    |           |         |          |        |
-|                    +-----------+---------+----------+        |
+|   Spatial:   Dataflow - Systolic - GPU - Wafer-Scale - Vector|
+|             (Groq)    (regular) (SIMT) (Cerebras)   (Cray)   |
+|                  |         |       |        |          |     |
+|                  +---------+-------+--------+----------+     |
 |                                |                             |
 |                          Modern CPUs <---- FPGA              |
 |                                          (reconfigurable)    |
@@ -126,7 +126,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 +-------------------------------------------------------------+
 |                                                              |
 |   Case Studies:    6502 (CISC) | VideoCore (GPU) | TPU (ML)  |
-|                    Cray-1 (Vector) | RISC-V | Transputer (CSP)|
+|                    RISC-V (open ISA) | Transputer (CSP)      |
 |                                                              |
 +-------------------------------------------------------------+
 ```
@@ -147,6 +147,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 10. **Clocks are optional** - Asynchronous circuits trade complexity for power and average-case performance
 11. **Hardware can be software** - FPGAs bridge the gap between flexibility and performance
 12. **Scale changes everything** - Wafer-scale integration enables new architectural possibilities
+13. **Vectors unlock throughput** - Single instruction, multiple data paths
 
 ---
 
@@ -164,20 +165,20 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 08 | Systolic Arrays | H | Systolic Patterns |
 | 09 | GPU Architecture | I | GPU Implementation |
 | 10 | Wafer-Scale Computing | J | Wafer-Scale/NoC Implementation |
-| 11 | Stochastic Computing | K | Stochastic Implementation |
-| 12 | Reversible Computation | L | Reversible Gates |
-| 13 | Quantum Computing | M | Quantum Circuits |
-| 14 | Asynchronous Computing | N | Asynchronous Implementation |
-| 15 | Neuromorphic Computing | O | Neuromorphic Implementation |
-| 16 | Photonic Computing | P | Photonic Simulation (Ruby) |
-| 17 | Analog Computing | Q | Analog Simulation (Ruby) |
-| 18 | Hardware Description Languages | R | HDL Comparison |
-| 19 | Synthesis and Implementation | S | Synthesis Details |
-| 20 | Reconfigurable Computing | T | FPGA Implementation |
-| 21 | The MOS 6502 | U | 6502 RHDL Implementation |
-| 22 | The VideoCore IV | V | VideoCore IV Implementation |
-| 23 | The Google TPU v1 | W | TPU Implementation |
-| 24 | The Cray-1 | X | Cray-1 Implementation |
+| 11 | Vector Processing | K | Vector/Cray Implementation |
+| 12 | Stochastic Computing | L | Stochastic Implementation |
+| 13 | Reversible Computation | M | Reversible Gates |
+| 14 | Quantum Computing | N | Quantum Circuits |
+| 15 | Asynchronous Computing | O | Asynchronous Implementation |
+| 16 | Neuromorphic Computing | P | Neuromorphic Implementation |
+| 17 | Photonic Computing | Q | Photonic Simulation (Ruby) |
+| 18 | Analog Computing | R | Analog Simulation (Ruby) |
+| 19 | Hardware Description Languages | S | HDL Comparison |
+| 20 | Synthesis and Implementation | T | Synthesis Details |
+| 21 | Reconfigurable Computing | U | FPGA Implementation |
+| 22 | The MOS 6502 | V | 6502 RHDL Implementation |
+| 23 | The VideoCore IV | W | VideoCore IV Implementation |
+| 24 | The Google TPU v1 | X | TPU Implementation |
 | 25 | The RISC-V RV32I | Y | RISC-V Implementation |
 | 26 | The Transputer | Z | Transputer Implementation |
 

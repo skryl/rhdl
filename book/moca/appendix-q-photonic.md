@@ -1,4 +1,4 @@
-# Appendix P: Photonic Computing Simulation
+# Appendix Q: Photonic Computing Simulation
 
 *Ruby simulation of optical interference and matrix operations*
 
@@ -831,4 +831,4 @@ Key insight: **Interference IS computation**. The physics of light naturally per
 
 ---
 
-*Back to [Chapter 16 - Photonic Computing](16-photonic-computing.md)*
+*Back to [Chapter 17 - Photonic Computing](17-photonic-computing.md)*

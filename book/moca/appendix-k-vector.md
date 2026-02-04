@@ -1,6 +1,6 @@
-# Appendix X: Cray-1 Implementation
+# Appendix K: Vector Processing Implementation
 
-*Companion appendix to [Chapter 24: The Cray-1](24-cray1.md)*
+*Companion appendix to [Chapter 11: Vector Processing](11-vector-processing.md)*
 
 ## Overview
 
