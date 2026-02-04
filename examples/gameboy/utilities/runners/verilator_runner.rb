@@ -85,8 +85,6 @@ module RHDL
         # Speaker audio simulation
         @speaker = Speaker.new
 
-        reset_simulation
-
         # Load boot ROM if available
         load_boot_rom if File.exist?(DMG_BOOT_ROM_PATH)
       end
@@ -379,7 +377,12 @@ module RHDL
 
         # Export Gameboy to Verilog
         verilog_file = File.join(VERILOG_DIR, 'gameboy.v')
-        unless File.exist?(verilog_file) && File.mtime(verilog_file) > File.mtime(__FILE__)
+        verilog_codegen = File.expand_path('../../../../lib/rhdl/codegen/verilog/verilog.rb', __dir__)
+        export_deps = [__FILE__, verilog_codegen].select { |p| File.exist?(p) }
+        needs_export = !File.exist?(verilog_file) ||
+                       export_deps.any? { |p| File.mtime(p) > File.mtime(verilog_file) }
+
+        if needs_export
           puts "  Exporting Gameboy to Verilog..."
           export_verilog(verilog_file)
         end
@@ -551,6 +554,10 @@ module RHDL
           #include "verilated.h"
           #include "sim_wrapper.h"
           #include <cstring>
+
+          // Verilator runtime expects this symbol when linking libverilated.
+          // Our simulation doesn't use SystemC time, so return 0.
+          double sc_time_stamp() { return 0; }
 
           struct SimContext {
               Vgame_boy_gameboy* dut;
