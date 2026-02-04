@@ -267,21 +267,10 @@ RSpec.describe 'MOS6502 Karateka Mode' do
       expect(reset_escapes.length).to be >= 96, "Expected reset sequences at end of each line"
 
       # Check that the color renderer can produce the expected NTSC colors
-      # These are the hex values for the color palette
-      # Green: 20, 245, 60 (0x14, 0xF5, 0x3C)
-      # Purple: 214, 96, 239 (0xD6, 0x60, 0xEF)
-      # Orange: 255, 106, 60 (0xFF, 0x6A, 0x3C)
-      # Blue: 20, 207, 253 (0x14, 0xCF, 0xFD)
-      # White: 255, 255, 255
       # If there are any foreground colors, verify they're from the expected palette
       if color_escapes.any?
-        valid_colors = [
-          "38;2;20;245;60",   # green
-          "38;2;214;96;239",  # purple
-          "38;2;255;106;60",  # orange
-          "38;2;20;207;253",  # blue
-          "38;2;255;255;255"  # white
-        ]
+        palette = RHDL::Examples::MOS6502::ColorRenderer::PALETTES[:ntsc]
+        valid_colors = palette.values.map { |rgb| "38;2;#{rgb.join(';')}" }
         colors_found = color_escapes.map { |e| e.gsub(/\e\[/, "").gsub(/m$/, "") }
         colors_found.each do |color|
           expect(valid_colors).to include(color), "Unexpected color: #{color}"
