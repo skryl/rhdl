@@ -112,7 +112,7 @@
 
 This book provides the theoretical foundation for:
 
-**[SICH: Structure and Interpretation of Computer Hardware](../notes/INDEX.md)** - A hands-on guide to building a computer from gates to a working Lisp interpreter.
+**[SICH: Structure and Interpretation of Computer Hardware](../sich/INDEX.md)** - A hands-on guide to building a computer from gates to a working Lisp interpreter.
 
 ## Target Audience
 
