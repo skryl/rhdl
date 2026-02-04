@@ -30,8 +30,10 @@ RSpec.describe RHDL::Components::CPU::CPU do
         # 0x05: x^2 + y^2
         # 0x06: threshold (64)
         # 0x07: decrement value (1)
-        # 0x08: display address
-        # 0x09: display base address (0x800)
+        # 0x08: display address low byte
+        # 0x09: display base address high byte (0x08)
+        # 0x0A: constant 80 (row width for MUL/SUB)
+        # 0x0B: constant 3 (row count for comparison)
 
         # Setup code
         p.instr :LDI, 0x0      # Initialize x
@@ -46,6 +48,10 @@ RSpec.describe RHDL::Components::CPU::CPU do
         p.instr :STA, 0x7
         p.instr :LDI, 0x08     # display base address high byte (0x800)
         p.instr :STA, 0x09
+        p.instr :LDI, 80       # constant 80 for row width
+        p.instr :STA, 0x0A
+        p.instr :LDI, 3        # constant 3 for row count
+        p.instr :STA, 0x0B
 
         p.label :main_loop
         # Calculate x^2
@@ -65,7 +71,7 @@ RSpec.describe RHDL::Components::CPU::CPU do
 
         # Calculate display address: 0x800 + y*80 + x
         p.instr :LDA, 0x1      # load y
-        p.instr :MUL, 0x50     # multiply by 80 (0x50)
+        p.instr :MUL, 0x0A     # multiply by value at 0x0A (80)
         p.instr :ADD, 0x0      # add x
         p.instr :STA, 0x8      # store low byte of address
         p.instr :LDA, 0x09     # load high byte of base address (0x08)
@@ -80,7 +86,7 @@ RSpec.describe RHDL::Components::CPU::CPU do
         p.instr :LDA, 0x0
         p.instr :ADD, 0x7      # add 1
         p.instr :STA, 0x0
-        p.instr :SUB, 0x50     # compare with 80
+        p.instr :SUB, 0x0A     # compare with value at 0x0A (80)
         p.instr :JZ_LONG, :next_row
         p.instr :JMP_LONG, :reset_iter
 
@@ -91,7 +97,7 @@ RSpec.describe RHDL::Components::CPU::CPU do
         p.instr :LDA, 0x1
         p.instr :ADD, 0x7      # add 1
         p.instr :STA, 0x1
-        p.instr :SUB, 0x03     # compare with 3 (reduced from 28 due to 8-bit overflow)
+        p.instr :SUB, 0x0B     # compare with value at 0x0B (3, reduced from 28 due to 8-bit overflow)
         p.instr :JZ_LONG, :done
 
         p.label :reset_iter
