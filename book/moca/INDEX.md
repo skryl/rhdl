@@ -28,8 +28,8 @@
 
 - [10 - Stack Machines](10-stack-machines.md) - Forth, JVM, and the simplest computer architecture
 - [11 - Register Machines](11-register-machines.md) - The von Neumann architecture that dominates modern computing
-- [12 - Modern CPU Architectures](12-modern-cpu-architectures.md) - Pipelining, superscalar execution, out-of-order, and speculation
-- [13 - Asynchronous Computing](13-asynchronous-computing.md) - Clockless circuits: self-timed logic, bundled-data vs dual-rail, handshakes, and GALS
+- [12 - Asynchronous Computing](12-asynchronous-computing.md) - Clockless circuits: self-timed logic, bundled-data vs dual-rail, handshakes, and GALS
+- [13 - Modern CPU Architectures](13-modern-cpu-architectures.md) - Pipelining, superscalar execution, out-of-order, and speculation
 
 ### Part IV: Parallel and Distributed Architectures
 
@@ -75,8 +75,8 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix G - Analog Simulation](appendix-g-analog.md) - Ruby simulation of op-amps, ODEs, and analog neural networks
 - [Appendix H - Stack Machine ISA](appendix-h-stack-machine.md) - Complete Forth-like instruction set with RHDL implementation
 - [Appendix I - Register Machine ISA](appendix-i-register-machine.md) - Complete 8-bit instruction set with RHDL CPU
-- [Appendix J - Modern CPU Implementation](appendix-j-modern-cpu.md) - Pipelines, superscalar, reorder buffers, and Tomasulo's algorithm in RHDL
-- [Appendix K - Asynchronous Implementation](appendix-k-asynchronous.md) - C-elements, dual-rail logic, and self-timed circuits in RHDL
+- [Appendix J - Asynchronous Implementation](appendix-j-asynchronous.md) - C-elements, dual-rail logic, and self-timed circuits in RHDL
+- [Appendix K - Modern CPU Implementation](appendix-k-modern-cpu.md) - Pipelines, superscalar, reorder buffers, and Tomasulo's algorithm in RHDL
 - [Appendix L - Message Passing Implementation](appendix-l-message-passing.md) - Channels, routers, and MPI-style primitives in RHDL
 - [Appendix M - DSM/NUMA Implementation](appendix-m-dsm-numa.md) - Directory protocols, cache coherence, and NUMA simulation in RHDL
 - [Appendix N - GPU and Vector Implementation](appendix-n-gpu-vector.md) - Vector registers, CUDA execution model, and RHDL streaming multiprocessor
@@ -111,8 +111,8 @@ Each appendix provides complete RHDL implementations and formal details for its 
 |                                                              |
 +-------------------------------------------------------------+
 |                                                              |
-|   Sequential:   Stack ---- Register ---- Modern CPUs ---- Async |
-|                (Forth)  (von Neumann)  (pipeline/OoO)  (clockless)|
+|   Sequential:   Stack ---- Register ---- Async ---- Modern CPUs |
+|                (Forth)  (von Neumann)  (clockless)  (pipeline/OoO)|
 |                                                              |
 |   Parallel:    Message Passing --- DSM/NUMA --- GPU/Vector   |
 |                (MPI, actors)     (coherence)   (SIMD/SIMT)   |
@@ -182,8 +182,8 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 09 | Analog Computing | G | Analog Simulation (Ruby) |
 | 10 | Stack Machines | H | Stack Machine ISA |
 | 11 | Register Machines | I | Register Machine ISA |
-| 12 | Modern CPU Architectures | J | Modern CPU Implementation |
-| 13 | Asynchronous Computing | K | Asynchronous Implementation |
+| 12 | Asynchronous Computing | J | Asynchronous Implementation |
+| 13 | Modern CPU Architectures | K | Modern CPU Implementation |
 | 14 | Message Passing Systems | L | Message Passing Implementation |
 | 15 | Distributed Shared Memory | M | DSM/NUMA Implementation |
 | 16 | GPU and Vector Architecture | N | GPU and Vector Implementation |
