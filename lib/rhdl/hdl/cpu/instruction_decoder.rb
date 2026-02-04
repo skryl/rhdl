@@ -123,15 +123,16 @@ module RHDL
             15 => case_select(instruction, {
               0xF8 => mux(zero_flag, 2, 0),  # JZ_LONG
               0xF9 => 2,                      # JMP_LONG
-              0xFA => mux(zero_flag, 0, 2)   # JNZ_LONG
+              0xFA => mux(zero_flag, 0, 2),  # JNZ_LONG
+              0xFB => 2                       # CALL_LONG
             }, default: 0)
           }, default: 0)
 
           # halt: halt CPU (HLT = 0xF0)
           halt <= mux(instruction == 0xF0, 1, 0)
 
-          # call: call instruction (CALL = opcode 12)
-          call <= mux(opcode == 12, 1, 0)
+          # call: call instruction (CALL = opcode 12, CALL_LONG = 0xFB)
+          call <= mux((opcode == 12) | (instruction == 0xFB), 1, 0)
 
           # ret: return instruction (RET = opcode 13)
           ret <= mux(opcode == 13, 1, 0)
@@ -166,12 +167,16 @@ module RHDL
               0x21 => 2   # STA Direct
             }, default: 1),
             10 => 2,      # LDI
+            12 => case_select(instruction, {
+              0xC0 => 2   # CALL with 8-bit operand in next byte
+            }, default: 1),  # 0xC1-0xCF are 1-byte nibble-encoded
             15 => case_select(instruction, {
               0xF1 => 2,  # MUL
               0xF3 => 2,  # CMP
               0xF8 => 3,  # JZ_LONG
               0xF9 => 3,  # JMP_LONG
-              0xFA => 3   # JNZ_LONG
+              0xFA => 3,  # JNZ_LONG
+              0xFB => 3   # CALL_LONG
             }, default: 1)
           }, default: 1)
         end

@@ -118,13 +118,15 @@ module RHDL
             width: 8)
 
           # Fetch operand 2 next state
-          # For indirect STA/LDA, go to read pointer states; otherwise direct write or execute
+          # For indirect STA/LDA, go to read pointer states; for CALL_LONG, push; otherwise execute
           fetch_op2_next = local(:fetch_op2_next,
             mux(is_sta_indirect | is_lda_indirect,
               lit(S_READ_PTR_HI, width: 8),  # Indirect: read pointer bytes first
-              mux(is_mem_write,
-                lit(S_WRITE_MEM, width: 8),
-                lit(S_EXECUTE, width: 8))),
+              mux(is_call,
+                mux(sp_full, lit(S_HALT, width: 8), lit(S_CALL_PUSH, width: 8)),  # CALL_LONG
+                mux(is_mem_write,
+                  lit(S_WRITE_MEM, width: 8),
+                  lit(S_EXECUTE, width: 8)))),
             width: 8)
 
           # State transition
