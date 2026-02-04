@@ -65,7 +65,7 @@ Memory                        ─────────┘
 
 For advanced topics on computation theory and alternative architectures, see:
 
-**[Models of Computation](../computation/INDEX.md)** - Explores Turing machines, lambda calculus, dataflow, stack machines, systolic arrays, reversible computing, and the theoretical foundations underlying all computer architectures.
+**[MOCA: Models Of Computational Architectures](../moca/INDEX.md)** - Explores Turing machines, lambda calculus, dataflow, stack machines, systolic arrays, reversible computing, and the theoretical foundations underlying all computer architectures.
 
 ## Target Audience
 

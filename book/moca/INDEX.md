@@ -1,4 +1,4 @@
-# Models of Computation
+# MOCA: Models Of Computational Architectures
 
 *What is Computation? From Turing Machines to Silicon*
 
