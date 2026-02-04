@@ -1,4 +1,5 @@
 require 'spec_helper'
+require_relative 'shared_cpu_spec'
 
 RSpec.describe RHDL::Components::CPU::CPU do
   include CpuTestHelper

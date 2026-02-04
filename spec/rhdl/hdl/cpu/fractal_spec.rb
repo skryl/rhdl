@@ -8,7 +8,7 @@ RSpec.describe RHDL::Components::CPU::CPU do
 
   before(:each) do
     @memory = MemorySimulator::Memory.new
-    @cpu = described_class.new(@memory)
+    @cpu = cpu_class.new(@memory)
     @cpu.reset
 
     clear_display(@memory)
