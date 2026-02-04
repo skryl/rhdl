@@ -2,6 +2,139 @@
 
 This appendix contains example Turing machine programs with complete state tables and execution traces. These programs demonstrate that simple rules operating on symbols can perform any computation.
 
+## Computation as Symbol Manipulation
+
+Before diving into specific programs, let's understand what a Turing machine really does: it manipulates symbols according to rules. This is the essence of all computation.
+
+### The Key Insight
+
+A Turing machine doesn't "know" what its symbols mean. It doesn't understand that `1011` represents the number eleven. It simply:
+1. Reads a symbol
+2. Looks up a rule
+3. Writes a symbol
+4. Moves
+5. Repeats
+
+The *meaning* is in our interpretation, not in the machine. This is profound: **computation is purely syntactic manipulation**. Semantics (meaning) is layered on top by us.
+
+### Symbols Can Represent Anything
+
+The same Turing machine mechanism can manipulate:
+
+| Domain | Symbols | Example |
+|--------|---------|---------|
+| Numbers | 0, 1 | Binary arithmetic |
+| Text | a-z, A-Z, ... | Text processing |
+| Logic | T, F, ∧, ∨, ¬ | Theorem proving |
+| Music | ♩, ♪, ♫ | Composition |
+| Chemistry | H, O, C, bonds | Molecular simulation |
+| Programs | Instructions | Compilers, interpreters |
+
+Ada Lovelace understood this in 1843:
+
+> "The Analytical Engine might act upon other things besides number, were objects found whose mutual fundamental relations could be expressed by those of the abstract science of operations..."
+
+### String Rewriting: The Simplest Model
+
+Before Turing machines, mathematicians studied **string rewriting systems**—perhaps the purest form of symbol manipulation:
+
+**Rules:**
+```
+ab → ba    (swap adjacent a and b)
+```
+
+**Execution:**
+```
+aabb
+↓ (apply rule to first 'ab')
+abab
+↓ (apply rule to first 'ab')
+baab
+↓ (apply rule to 'ab')
+baba
+```
+
+This is computation! We transformed symbols according to rules. No numbers involved.
+
+### Thue Systems (1914)
+
+Axel Thue formalized string rewriting. A **Thue system** is a set of rewrite rules:
+
+```
+System T:
+  ac → ca
+  ad → da
+  bc → cb
+  bd → db
+  eca → ce
+  edb → de
+  cca → ccae
+  ddb → ddbe
+```
+
+Starting from `ecadb`, repeated application of rules produces:
+```
+ecadb → ceadb → cedab → cdab → dcab → ...
+```
+
+Thue proved that determining whether one string can be transformed into another is **undecidable** in general—there's no algorithm that always answers correctly. This predates Turing's work by decades!
+
+### Post Systems (1936)
+
+Emil Post independently developed a model equivalent to Turing machines using pure symbol manipulation:
+
+**A Post production system:**
+```
+Start: #aabb#
+Rules:
+  #a → a#       (move 'a' across #)
+  #b → b#       (move 'b' across #)
+  ## → HALT     (two markers = done)
+```
+
+This simple system sorts strings! It moves symbols across a marker one by one.
+
+### Markov Algorithms (1951)
+
+Andrey Markov formalized another rewriting approach:
+
+```
+Algorithm to convert unary to binary:
+1. |0 → 0||     (double zeros)
+2. 1| → 1       (remove trailing |)
+3. 1  → ε       (remove 1 when done)
+4. 0| → 1       (| after 0 becomes 1)
+5.    → 0       (start with 0)
+
+Input:  ||||  (4 in unary)
+Output: 100   (4 in binary)
+```
+
+Rules are tried in order; the first matching rule is applied. This is still Turing-complete!
+
+### Why This Matters for Hardware
+
+Understanding computation as symbol manipulation reveals why hardware design is universal:
+
+1. **Any symbol system works** - Binary is convenient, not fundamental
+2. **Rules can be implemented in any medium** - Gears, relays, transistors
+3. **The abstraction layer is powerful** - Design at symbol level, implement anywhere
+
+When you write RHDL:
+
+```ruby
+output :y <= a & b  # AND gate
+```
+
+You're defining a symbol transformation rule:
+- Input symbols: values of `a` and `b`
+- Output symbol: value of `y`
+- Rule: `y = 1` only when both inputs are `1`
+
+The HDL, simulator, and hardware all implement the same symbol manipulation.
+
+---
+
 ## Turing Machine Basics
 
 A Turing machine consists of:

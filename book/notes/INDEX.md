@@ -26,7 +26,8 @@
 
 ### Appendices
 - [Appendix A - Ada Lovelace's Program](appendix-a-ada-lovelace-program.md) - Complete Bernoulli number algorithm with original notation, pseudocode, and Ruby implementation
-- [Appendix B - Turing Machine Programs](appendix-b-turing-machines.md) - Example Turing machine programs with state tables and execution traces
+- [Appendix B - Turing Machines & Symbol Manipulation](appendix-b-turing-machines.md) - Computation as symbol manipulation, string rewriting systems, Turing machine programs with execution traces
+- [Appendix C - Lambda Calculus](appendix-c-lambda-calculus.md) - Church's alternative model of computation, Church encodings, Y combinator, connection to functional programming and hardware
 
 ---
 
@@ -47,7 +48,8 @@
 | 10 - HDLs | Outline | Key concepts identified |
 | 11 - Synthesis | Outline | Key concepts identified |
 | Appendix A | Draft | Ada's complete program |
-| Appendix B | Draft | Turing machine examples |
+| Appendix B | Draft | Symbol manipulation, Turing machines |
+| Appendix C | Draft | Lambda calculus and functional computation |
 
 ## Key Themes
 
