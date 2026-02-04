@@ -574,6 +574,7 @@ impl CoreSimulator {
         code.push_str("/// Evaluate all combinational assignments (topologically sorted)\n");
         code.push_str("#[inline(always)]\n");
         code.push_str("pub unsafe fn evaluate_inline(signals: &mut [u64]) {\n");
+        code.push_str("    let s = signals.as_mut_ptr();\n");
 
         let levels = self.compute_assignment_levels();
         for level in &levels {
@@ -581,8 +582,8 @@ impl CoreSimulator {
                 let assign = &self.ir.assigns[assign_idx];
                 if let Some(&idx) = self.name_to_idx.get(&assign.target) {
                     let width = self.widths.get(idx).copied().unwrap_or(64);
-                    let expr_code = self.expr_to_rust(&assign.expr);
-                    code.push_str(&format!("    signals[{}] = ({}) & {};\n", idx, expr_code, Self::mask_const(width)));
+                    let expr_code = self.expr_to_rust_ptr(&assign.expr, "s");
+                    code.push_str(&format!("    *s.add({}) = ({}) & {};\n", idx, expr_code, Self::mask_const(width)));
                 }
             }
         }
@@ -602,18 +603,18 @@ impl CoreSimulator {
         code
     }
 
-    pub fn expr_to_rust(&self, expr: &ExprDef) -> String {
+    pub fn expr_to_rust_ptr(&self, expr: &ExprDef, signals_ptr: &str) -> String {
         match expr {
             ExprDef::Signal { name, width } => {
                 let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
-                format!("(signals[{}] & {})", idx, Self::mask_const(*width))
+                format!("((*{}.add({})) & {})", signals_ptr, idx, Self::mask_const(*width))
             }
             ExprDef::Literal { value, width } => {
                 let masked = (*value as u64) & Self::mask(*width);
                 format!("{}u64", masked)
             }
             ExprDef::UnaryOp { op, operand, width } => {
-                let operand_code = self.expr_to_rust(operand);
+                let operand_code = self.expr_to_rust_ptr(operand, signals_ptr);
                 match op.as_str() {
                     "~" | "not" => format!("((!{}) & {})", operand_code, Self::mask_const(*width)),
                     "&" | "reduce_and" => {
@@ -628,8 +629,8 @@ impl CoreSimulator {
                 }
             }
             ExprDef::BinaryOp { op, left, right, width } => {
-                let l = self.expr_to_rust(left);
-                let r = self.expr_to_rust(right);
+                let l = self.expr_to_rust_ptr(left, signals_ptr);
+                let r = self.expr_to_rust_ptr(right, signals_ptr);
                 let m = Self::mask_const(*width);
                 match op.as_str() {
                     "&" => format!("({} & {})", l, r),
@@ -652,13 +653,13 @@ impl CoreSimulator {
                 }
             }
             ExprDef::Mux { condition, when_true, when_false, width } => {
-                let cond = self.expr_to_rust(condition);
-                let t = self.expr_to_rust(when_true);
-                let f = self.expr_to_rust(when_false);
+                let cond = self.expr_to_rust_ptr(condition, signals_ptr);
+                let t = self.expr_to_rust_ptr(when_true, signals_ptr);
+                let f = self.expr_to_rust_ptr(when_false, signals_ptr);
                 format!("(if {} != 0 {{ {} }} else {{ {} }} & {})", cond, t, f, Self::mask_const(*width))
             }
             ExprDef::Slice { base, low, width, .. } => {
-                let base_code = self.expr_to_rust(base);
+                let base_code = self.expr_to_rust_ptr(base, signals_ptr);
                 format!("(({} >> {}) & {})", base_code, low, Self::mask_const(*width))
             }
             ExprDef::Concat { parts, width } => {
@@ -666,7 +667,7 @@ impl CoreSimulator {
                 let mut shift = 0usize;
                 let mut first = true;
                 for part in parts.iter().rev() {
-                    let part_code = self.expr_to_rust(part);
+                    let part_code = self.expr_to_rust_ptr(part, signals_ptr);
                     let part_width = self.expr_width(part);
                     if !first {
                         result.push_str(" | ");
@@ -683,12 +684,12 @@ impl CoreSimulator {
                 result
             }
             ExprDef::Resize { expr, width } => {
-                let expr_code = self.expr_to_rust(expr);
+                let expr_code = self.expr_to_rust_ptr(expr, signals_ptr);
                 format!("({} & {})", expr_code, Self::mask_const(*width))
             }
             ExprDef::MemRead { memory, addr, width } => {
                 let mem_idx = self.memory_name_to_idx.get(memory).copied().unwrap_or(0);
-                let addr_code = self.expr_to_rust(addr);
+                let addr_code = self.expr_to_rust_ptr(addr, signals_ptr);
                 format!("(MEM_{}.get({} as usize).copied().unwrap_or(0) & {})",
                         mem_idx, addr_code, Self::mask_const(*width))
             }
@@ -706,6 +707,7 @@ impl CoreSimulator {
         code.push_str("#[inline(always)]\n");
         code.push_str(&format!("pub unsafe fn tick_inline(signals: &mut [u64], old_clocks: &mut [u64; {}], next_regs: &mut [u64; {}]) {{\n",
                                num_clocks, num_regs.max(1)));
+        code.push_str("    let s = signals.as_mut_ptr();\n");
 
         // Evaluate combinational logic (this propagates clock changes to derived clocks)
         code.push_str("    evaluate_inline(signals);\n\n");
@@ -719,7 +721,7 @@ impl CoreSimulator {
             for stmt in &process.statements {
                 if let Some(&target_idx) = self.name_to_idx.get(&stmt.target) {
                     let width = self.widths.get(target_idx).copied().unwrap_or(64);
-                    let expr_code = self.expr_to_rust(&stmt.expr);
+                    let expr_code = self.expr_to_rust_ptr(&stmt.expr, "s");
                     code.push_str(&format!("    next_regs[{}] = ({}) & {};\n", seq_idx, expr_code, Self::mask_const(width)));
                     seq_idx += 1;
                 }
@@ -733,10 +735,10 @@ impl CoreSimulator {
         // Check for rising edges using old_clocks (set by caller) vs current signals
         for (domain_idx, &clk_idx) in clock_indices.iter().enumerate() {
             code.push_str(&format!("    // Clock domain {} (signal {})\n", domain_idx, clk_idx));
-            code.push_str(&format!("    if old_clocks[{}] == 0 && signals[{}] == 1 {{\n", domain_idx, clk_idx));
+            code.push_str(&format!("    if old_clocks[{}] == 0 && *s.add({}) == 1 {{\n", domain_idx, clk_idx));
 
             for &(seq_idx, target_idx) in &self.clock_domain_assigns[domain_idx] {
-                code.push_str(&format!("        if !updated[{}] {{ signals[{}] = next_regs[{}]; updated[{}] = true; }}\n",
+                code.push_str(&format!("        if !updated[{}] {{ *s.add({}) = next_regs[{}]; updated[{}] = true; }}\n",
                                        seq_idx, target_idx, seq_idx, seq_idx));
             }
 
@@ -751,7 +753,7 @@ impl CoreSimulator {
         code.push_str("    for _iter in 0..10 {\n");
         code.push_str(&format!("        let mut clock_before = [0u64; {}];\n", num_clocks));
         for (domain_idx, &clk_idx) in clock_indices.iter().enumerate() {
-            code.push_str(&format!("        clock_before[{}] = signals[{}];\n", domain_idx, clk_idx));
+            code.push_str(&format!("        clock_before[{}] = *s.add({});\n", domain_idx, clk_idx));
         }
         code.push_str("\n");
         code.push_str("        evaluate_inline(signals);\n\n");
@@ -759,16 +761,16 @@ impl CoreSimulator {
         // Check for NEW rising edges
         code.push_str("        let mut any_rising = false;\n");
         for (domain_idx, &clk_idx) in clock_indices.iter().enumerate() {
-            code.push_str(&format!("        if clock_before[{}] == 0 && signals[{}] == 1 {{\n", domain_idx, clk_idx));
+            code.push_str(&format!("        if clock_before[{}] == 0 && *s.add({}) == 1 {{\n", domain_idx, clk_idx));
             code.push_str("            any_rising = true;\n");
             for &(seq_idx, target_idx) in &self.clock_domain_assigns[domain_idx] {
-                code.push_str(&format!("            if !updated[{}] {{ signals[{}] = next_regs[{}]; updated[{}] = true; }}\n",
+                code.push_str(&format!("            if !updated[{}] {{ *s.add({}) = next_regs[{}]; updated[{}] = true; }}\n",
                                        seq_idx, target_idx, seq_idx, seq_idx));
             }
             code.push_str("        }\n");
         }
         code.push_str("\n");
-        code.push_str("        if !any_rising { break; }\n");
+        code.push_str("        if !any_rising { return; }\n");
         code.push_str("    }\n\n");
 
         // Final evaluate (like JIT)
@@ -792,7 +794,7 @@ impl CoreSimulator {
 
         // Update old_clocks to current clock signal values for next tick() call
         for (domain_idx, &clk_idx) in clock_indices.iter().enumerate() {
-            code.push_str(&format!("    old_clocks[{}] = signals[{}];\n", domain_idx, clk_idx));
+            code.push_str(&format!("    old_clocks[{}] = *signals.get_unchecked({});\n", domain_idx, clk_idx));
         }
 
         code.push_str("}\n");
