@@ -26,23 +26,26 @@
 - [10 - Wafer-Scale Computing](10-wafer-scale.md) - Using entire wafers: 2D mesh NoC, dataflow at extreme scale
 - [11 - Vector Processing](11-vector-processing.md) - SIMD with vector registers: pipelining, chaining, and memory banking
 
-### Part IV: Beyond Classical Computing
+### Part IV: Non-Classical Computing
 
 - [12 - Stochastic Computing](12-stochastic-computing.md) - Probability as data: AND gates multiply, MUX gates add
 - [13 - Reversible Computation](13-reversible-computation.md) - Fredkin gates, Toffoli gates, and the thermodynamics of computing
 - [14 - Quantum Computing](14-quantum-computing.md) - Qubits, superposition, entanglement, and quantum algorithms
+
+### Part V: Alternative Substrates
+
 - [15 - Asynchronous Computing](15-asynchronous-computing.md) - Clockless circuits: self-timed logic, handshaking, and NULL convention
 - [16 - Neuromorphic Computing](16-neuromorphic-computing.md) - Brain-inspired architectures: spiking neurons, STDP, and memristors
 - [17 - Photonic Computing](17-photonic-computing.md) - Computing with light: MZI meshes, optical matrix multiply, and interference
 - [18 - Analog Computing](18-analog-computing.md) - Continuous values: op-amps, integrators, and differential equations in real-time
 
-### Part V: Hardware Practice
+### Part VI: Hardware Practice
 
 - [19 - Hardware Description Languages](19-hdl.md) - Verilog, VHDL, and RHDL compared
 - [20 - Synthesis and Implementation](20-synthesis.md) - From HDL to silicon: FPGAs, ASICs, and the synthesis flow
 - [21 - Reconfigurable Computing](21-reconfigurable-computing.md) - FPGAs: LUTs, CLBs, routing, and hardware that changes itself
 
-### Part VI: Case Studies
+### Part VII: Case Studies
 
 - [22 - The MOS 6502](22-mos6502.md) - Deep dive into the classic CPU that powered the Apple II, C64, and NES
 - [23 - The VideoCore IV](23-videocore-iv.md) - The Raspberry Pi GPU: 12 QPUs, SIMD, and tile-based rendering
@@ -115,16 +118,23 @@ Each appendix provides complete RHDL implementations and formal details for its 
 |                                                              |
 +-------------------------------------------------------------+
 |                                                              |
-|   Beyond Classical: Stoch - Reverse - Quantum - Async - Neuro|
-|                       |       |          |        |       |  |
-|                       v       v          v        v       v  |
-|                     Prob    Zero     Exponential No    Brain |
-|                     math    energy   speedup    clock  learn |
+|   Non-Classical:   Stochastic -- Reversible -- Quantum       |
+|                        |             |            |          |
+|                        v             v            v          |
+|                    Probability    Zero       Superposition   |
+|                    as data       energy      & entanglement  |
 |                                                              |
-|                    Photonic ------------- Analog             |
-|                       |                       |              |
-|                       v                       v              |
-|                   Light/MZI           Continuous/Op-amps     |
++-------------------------------------------------------------+
+|                                                              |
+|   Alternative      Async ----- Neuromorphic                  |
+|   Substrates:        |             |                         |
+|   (still classical)  v             v                         |
+|                   Clockless    Brain-inspired                |
+|                                                              |
+|                   Photonic ------- Analog                    |
+|                      |               |                       |
+|                      v               v                       |
+|                  Light/MZI     Continuous/Op-amps            |
 |                                                              |
 +-------------------------------------------------------------+
 |                                                              |
@@ -154,6 +164,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 12. **Scale changes everything** - Wafer-scale integration enables new architectural possibilities
 13. **Vectors unlock throughput** - Single instruction, multiple data paths
 14. **Determinism enables efficiency** - Static scheduling maximizes utilization
+15. **Light and continuous values are valid substrates** - Classical computation doesn't require digital electronics
 
 ---
 
