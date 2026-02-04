@@ -75,6 +75,17 @@ module RHDL
           @cpu.get_output(:sp_out)
         end
 
+        # Set PC directly (for loading programs at non-zero addresses)
+        def pc=(value)
+          # Directly set the PC register's state using write_reg
+          subcomponents = @cpu.instance_variable_get(:@subcomponents)
+          pc_reg = subcomponents[:pc_reg] if subcomponents
+          if pc_reg
+            pc_reg.write_reg(:q, value & 0xFFFF)
+            @cpu.propagate
+          end
+        end
+
         def state
           @cpu.get_output(:state_out)
         end

@@ -18,9 +18,12 @@ module RHDL
         S_FETCH_OP2  = 0x04  # Fetch second operand byte from memory[PC+2]
         S_READ_MEM   = 0x05  # Read memory operand (LDA, ADD, SUB, etc.)
         S_EXECUTE    = 0x06  # Execute ALU operation, update registers
-        S_WRITE_MEM  = 0x07  # Write ACC to memory (STA)
+        S_WRITE_MEM  = 0x07  # Write ACC to memory (STA direct)
         S_CALL_PUSH  = 0x08  # Push return address for CALL
         S_RET_POP    = 0x09  # Pop return address for RET
+        S_READ_PTR_HI = 0x0A # Read indirect pointer high byte
+        S_READ_PTR_LO = 0x0B # Read indirect pointer low byte
+        S_WRITE_INDIRECT = 0x0C # Write ACC to indirect address
         S_HALT       = 0xFF  # CPU halted
 
         # Address select values
@@ -31,6 +34,9 @@ module RHDL
         ADDR_OPERAND_16 = 4  # Operand address (16-bit for indirect)
         ADDR_SP      = 5  # Stack pointer
         ADDR_SP_PLUS_1 = 6  # Stack pointer + 1 (for RET pop)
+        ADDR_PTR_HI  = 7  # Address from operand_lo (pointer to high byte)
+        ADDR_PTR_LO  = 8  # Address from operand_hi (pointer to low byte)
+        ADDR_INDIRECT = 9 # Indirect 16-bit address
 
         input :clk
         input :rst
@@ -46,6 +52,7 @@ module RHDL
         input :is_reg_write              # Writes to accumulator
         input :is_mem_write              # Writes to memory (STA)
         input :is_mem_read               # Reads from memory
+        input :is_sta_indirect           # STA indirect addressing mode
         input :pc_src, width: 2          # PC source: 0=+len, 1=short, 2=long
         input :alu_src                   # 0=memory, 1=immediate
 
@@ -55,7 +62,7 @@ module RHDL
 
         # Control outputs
         output :state, width: 8          # Current state (for debugging)
-        output :mem_addr_sel, width: 3   # Memory address source select
+        output :mem_addr_sel, width: 4   # Memory address source select (expanded for indirect)
         output :mem_read_en              # Memory read enable
         output :mem_write_en             # Memory write enable
         output :instr_latch_en           # Latch instruction register
@@ -71,6 +78,8 @@ module RHDL
         output :halted                   # CPU is halted
         output :done                     # Instruction complete (ready for next)
         output :mem_data_latch_en        # Latch memory data for ALU operations
+        output :indirect_hi_latch_en     # Latch indirect address high byte
+        output :indirect_lo_latch_en     # Latch indirect address low byte
 
         # State register
         sequential clock: :clk, reset: :rst, reset_values: { state: S_RESET } do
@@ -107,10 +116,13 @@ module RHDL
             width: 8)
 
           # Fetch operand 2 next state
+          # For indirect STA, go to read pointer states; otherwise direct write or execute
           fetch_op2_next = local(:fetch_op2_next,
-            mux(is_mem_write,
-              lit(S_WRITE_MEM, width: 8),
-              lit(S_EXECUTE, width: 8)),
+            mux(is_sta_indirect,
+              lit(S_READ_PTR_HI, width: 8),  # Indirect STA: read pointer bytes first
+              mux(is_mem_write,
+                lit(S_WRITE_MEM, width: 8),
+                lit(S_EXECUTE, width: 8))),
             width: 8)
 
           # State transition
@@ -125,6 +137,9 @@ module RHDL
             S_WRITE_MEM => lit(S_FETCH, width: 8),
             S_CALL_PUSH => lit(S_EXECUTE, width: 8),
             S_RET_POP => lit(S_EXECUTE, width: 8),
+            S_READ_PTR_HI => lit(S_READ_PTR_LO, width: 8),  # After reading hi byte, read lo
+            S_READ_PTR_LO => lit(S_WRITE_INDIRECT, width: 8), # After reading lo, write
+            S_WRITE_INDIRECT => lit(S_FETCH, width: 8),    # After indirect write, fetch next
             S_HALT => lit(S_HALT, width: 8)
           }, default: S_FETCH)
         end
@@ -133,13 +148,16 @@ module RHDL
         behavior do
           # mem_addr_sel: Memory address source
           mem_addr_sel <= case_select(state, {
-            S_FETCH => lit(ADDR_PC, width: 3),
-            S_FETCH_OP1 => lit(ADDR_PC_1, width: 3),
-            S_FETCH_OP2 => lit(ADDR_PC_2, width: 3),
-            S_READ_MEM => lit(ADDR_OPERAND, width: 3),
-            S_WRITE_MEM => lit(ADDR_OPERAND, width: 3),
-            S_CALL_PUSH => lit(ADDR_SP, width: 3),
-            S_RET_POP => lit(ADDR_SP_PLUS_1, width: 3)  # Read from SP+1 for pop
+            S_FETCH => lit(ADDR_PC, width: 4),
+            S_FETCH_OP1 => lit(ADDR_PC_1, width: 4),
+            S_FETCH_OP2 => lit(ADDR_PC_2, width: 4),
+            S_READ_MEM => lit(ADDR_OPERAND, width: 4),
+            S_WRITE_MEM => lit(ADDR_OPERAND, width: 4),
+            S_CALL_PUSH => lit(ADDR_SP, width: 4),
+            S_RET_POP => lit(ADDR_SP_PLUS_1, width: 4),
+            S_READ_PTR_HI => lit(ADDR_PTR_HI, width: 4),  # Read from operand_lo address
+            S_READ_PTR_LO => lit(ADDR_PTR_LO, width: 4),  # Read from operand_hi address
+            S_WRITE_INDIRECT => lit(ADDR_INDIRECT, width: 4)  # Write to indirect address
           }, default: ADDR_PC)
 
           # mem_read_en: Read from memory
@@ -148,13 +166,16 @@ module RHDL
             S_FETCH_OP1 => lit(1, width: 1),
             S_FETCH_OP2 => lit(1, width: 1),
             S_READ_MEM => lit(1, width: 1),
-            S_RET_POP => lit(1, width: 1)
+            S_RET_POP => lit(1, width: 1),
+            S_READ_PTR_HI => lit(1, width: 1),
+            S_READ_PTR_LO => lit(1, width: 1)
           }, default: 0)
 
           # mem_write_en: Write to memory
           mem_write_en <= case_select(state, {
             S_WRITE_MEM => lit(1, width: 1),
-            S_CALL_PUSH => lit(1, width: 1)
+            S_CALL_PUSH => lit(1, width: 1),
+            S_WRITE_INDIRECT => lit(1, width: 1)
           }, default: 0)
 
           # instr_latch_en: Latch instruction register
@@ -207,6 +228,12 @@ module RHDL
 
           # mem_data_latch_en: Latch memory data during READ_MEM or RET_POP
           mem_data_latch_en <= (state == lit(S_READ_MEM, width: 8)) | (state == lit(S_RET_POP, width: 8))
+
+          # indirect_hi_latch_en: Latch indirect address high byte during S_READ_PTR_HI
+          indirect_hi_latch_en <= (state == lit(S_READ_PTR_HI, width: 8))
+
+          # indirect_lo_latch_en: Latch indirect address low byte during S_READ_PTR_LO
+          indirect_lo_latch_en <= (state == lit(S_READ_PTR_LO, width: 8))
         end
       end
     end
