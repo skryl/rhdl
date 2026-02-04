@@ -1,6 +1,6 @@
-# Chapter 16: Reconfigurable Computing
+# Chapter 19: FPGAs
 
-*Hardware that can change itself*
+*Field-programmable gate arrays: hardware that can change itself*
 
 ---
 
@@ -467,6 +467,8 @@ See [Appendix P](appendix-p-reconfigurable.md) for LUT-based implementations.
 
 ---
 
-*Next: [Chapter 21 - The MOS 6502](17-mos6502.md)*
+*Previous: [Chapter 18 - Analog Computing](18-analog-computing.md)*
 
-*Appendix: [Appendix P - FPGA Implementation](appendix-p-reconfigurable.md)*
+*Next: [Chapter 20 - Coarse-Grained Reconfigurable Arrays](20-cgra.md)*
+
+*Appendix: [Appendix S - FPGA Implementation](appendix-s-fpga.md)*

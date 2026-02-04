@@ -39,22 +39,22 @@
 - [17 - Photonic Computing](17-photonic-computing.md) - Computing with light: MZI meshes, optical matrix multiply, and interference
 - [18 - Analog Computing](18-analog-computing.md) - Continuous values: op-amps, integrators, and differential equations in real-time
 
-### Part VI: Hardware Practice
+### Part VI: Reconfigurable Computing
 
-- [19 - Hardware Description Languages](19-hdl.md) - Verilog, VHDL, and RHDL compared
-- [20 - Synthesis and Implementation](20-synthesis.md) - From HDL to silicon: FPGAs, ASICs, and the synthesis flow
-- [21 - Reconfigurable Computing](21-reconfigurable-computing.md) - FPGAs: LUTs, CLBs, routing, and hardware that changes itself
+- [19 - FPGAs](19-fpga.md) - Field-programmable gate arrays: LUTs, CLBs, routing, and fine-grained reconfiguration
+- [20 - Coarse-Grained Reconfigurable Arrays](20-cgra.md) - CGRAs: word-level datapaths, spatial computing, and domain-specific acceleration
 
 ### Part VII: Case Studies
 
-- [22 - The MOS 6502](22-mos6502.md) - Deep dive into the classic CPU that powered the Apple II, C64, and NES
-- [23 - The VideoCore IV](23-videocore-iv.md) - The Raspberry Pi GPU: 12 QPUs, SIMD, and tile-based rendering
-- [24 - The Google TPU v1](24-tpu.md) - A 256x256 systolic array for neural network inference
-- [25 - The RISC-V RV32I](25-riscv.md) - The open ISA: clean design, modular extensions, and modern RISC
-- [26 - The Transputer](26-transputer.md) - CSP in hardware: message passing, links, and occam
-- [27 - The Groq LPU](27-groq.md) - Deterministic dataflow for AI inference: time as the program counter
-- [28 - The Cerebras WSE](28-cerebras.md) - The largest chip ever built: 850K cores on a single wafer
-- [29 - The Cray-1](29-cray1.md) - The supercomputer that defined vector processing
+- [21 - The MOS 6502](21-mos6502.md) - Deep dive into the classic CPU that powered the Apple II, C64, and NES
+- [22 - The VideoCore IV](22-videocore-iv.md) - The Raspberry Pi GPU: 12 QPUs, SIMD, and tile-based rendering
+- [23 - The Google TPU v1](23-tpu.md) - A 256x256 systolic array for neural network inference
+- [24 - The RISC-V RV32I](24-riscv.md) - The open ISA: clean design, modular extensions, and modern RISC
+- [25 - The Transputer](25-transputer.md) - CSP in hardware: message passing, links, and occam
+- [26 - The Groq LPU](26-groq.md) - Deterministic dataflow for AI inference: time as the program counter
+- [27 - The Cerebras WSE](27-cerebras.md) - The largest chip ever built: 850K cores on a single wafer
+- [28 - The Cray-1](28-cray1.md) - The supercomputer that defined vector processing
+- [29 - RHDL](29-rhdl.md) - A Ruby-based HDL: DSL design, synthesis, and simulation
 
 ---
 
@@ -80,14 +80,14 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix P - Neuromorphic Implementation](appendix-p-neuromorphic.md) - LIF neurons, STDP synapses, and spiking networks in RHDL
 - [Appendix Q - Photonic Simulation](appendix-q-photonic.md) - Ruby simulation of MZIs, interference, and optical neural networks
 - [Appendix R - Analog Simulation](appendix-r-analog.md) - Ruby simulation of op-amps, ODEs, and analog neural networks
-- [Appendix S - HDL Comparison](appendix-s-hdl.md) - Verilog, VHDL, Chisel, and RHDL side-by-side
-- [Appendix T - Synthesis Details](appendix-t-synthesis.md) - Gate-level synthesis, optimization, and FPGA mapping
-- [Appendix U - FPGA Implementation](appendix-u-reconfigurable.md) - LUTs, CLBs, routing, and FPGA primitives in RHDL
-- [Appendix V - MOS 6502 Implementation](appendix-v-mos6502.md) - Full 6502 in RHDL with test suite
-- [Appendix W - VideoCore IV Implementation](appendix-w-videocore.md) - QPU cores, VPM, and sample assembly programs
-- [Appendix X - TPU Implementation](appendix-x-tpu.md) - Systolic array, weight FIFOs, and matrix multiply in RHDL
-- [Appendix Y - RISC-V Implementation](appendix-y-riscv.md) - RV32I decoder, ALU, pipeline stages, cache, TLB, and MMU
-- [Appendix Z - Transputer Implementation](appendix-z-transputer.md) - Links, channels, scheduler, and ALT controller in RHDL
+- [Appendix S - FPGA Implementation](appendix-s-fpga.md) - LUTs, CLBs, routing, and FPGA primitives in RHDL
+- [Appendix T - CGRA Implementation](appendix-t-cgra.md) - PE arrays, interconnect, and configuration in RHDL
+- [Appendix U - MOS 6502 Implementation](appendix-u-mos6502.md) - Full 6502 in RHDL with test suite
+- [Appendix V - VideoCore IV Implementation](appendix-v-videocore.md) - QPU cores, VPM, and sample assembly programs
+- [Appendix W - TPU Implementation](appendix-w-tpu.md) - Systolic array, weight FIFOs, and matrix multiply in RHDL
+- [Appendix X - RISC-V Implementation](appendix-x-riscv.md) - RV32I decoder, ALU, pipeline stages, cache, TLB, and MMU
+- [Appendix Y - Transputer Implementation](appendix-y-transputer.md) - Links, channels, scheduler, and ALT controller in RHDL
+- [Appendix Z - RHDL Reference](appendix-z-rhdl.md) - Complete DSL reference, synthesis details, Verilog comparison
 
 ---
 
@@ -113,8 +113,8 @@ Each appendix provides complete RHDL implementations and formal details for its 
 |                  |         |       |        |          |     |
 |                  +---------+-------+--------+----------+     |
 |                                |                             |
-|                          Modern CPUs <---- FPGA              |
-|                                          (reconfigurable)    |
+|                          Modern CPUs <---- Reconfigurable    |
+|                                          (FPGA, CGRA)        |
 |                                                              |
 +-------------------------------------------------------------+
 |                                                              |
@@ -141,7 +141,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 |   Case Studies:    6502 (8-bit) | VideoCore (GPU) | TPU (ML) |
 |                    RISC-V (open ISA) | Transputer (CSP)      |
 |                    Groq (dataflow) | Cerebras (wafer-scale)  |
-|                    Cray-1 (vector)                           |
+|                    Cray-1 (vector) | RHDL (HDL design)       |
 |                                                              |
 +-------------------------------------------------------------+
 ```
@@ -160,7 +160,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 8. **Thermodynamics constrains computation** - Reversible computing may be the future
 9. **Neuromorphic computing learns from biology** - Spiking neurons, local learning, massive parallelism
 10. **Clocks are optional** - Asynchronous circuits trade complexity for power and average-case performance
-11. **Hardware can be software** - FPGAs bridge the gap between flexibility and performance
+11. **Hardware can be software** - FPGAs and CGRAs bridge flexibility and performance
 12. **Scale changes everything** - Wafer-scale integration enables new architectural possibilities
 13. **Vectors unlock throughput** - Single instruction, multiple data paths
 14. **Determinism enables efficiency** - Static scheduling maximizes utilization
@@ -190,19 +190,19 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 16 | Neuromorphic Computing | P | Neuromorphic Implementation |
 | 17 | Photonic Computing | Q | Photonic Simulation (Ruby) |
 | 18 | Analog Computing | R | Analog Simulation (Ruby) |
-| 19 | Hardware Description Languages | S | HDL Comparison |
-| 20 | Synthesis and Implementation | T | Synthesis Details |
-| 21 | Reconfigurable Computing | U | FPGA Implementation |
-| 22 | The MOS 6502 | V | 6502 RHDL Implementation |
-| 23 | The VideoCore IV | W | VideoCore IV Implementation |
-| 24 | The Google TPU v1 | X | TPU Implementation |
-| 25 | The RISC-V RV32I | Y | RISC-V Implementation |
-| 26 | The Transputer | Z | Transputer Implementation |
-| 27 | The Groq LPU | G | (see Dataflow appendix) |
-| 28 | The Cerebras WSE | J | (see Wafer-Scale appendix) |
-| 29 | The Cray-1 | K | (see Vector appendix) |
+| 19 | FPGAs | S | FPGA Implementation |
+| 20 | CGRAs | T | CGRA Implementation |
+| 21 | The MOS 6502 | U | 6502 RHDL Implementation |
+| 22 | The VideoCore IV | V | VideoCore IV Implementation |
+| 23 | The Google TPU v1 | W | TPU Implementation |
+| 24 | The RISC-V RV32I | X | RISC-V Implementation |
+| 25 | The Transputer | Y | Transputer Implementation |
+| 26 | The Groq LPU | G | (see Dataflow appendix) |
+| 27 | The Cerebras WSE | J | (see Wafer-Scale appendix) |
+| 28 | The Cray-1 | K | (see Vector appendix) |
+| 29 | RHDL | Z | RHDL Reference |
 
-*Note: Chapters 27-29 share appendices with their corresponding paradigm chapters (07, 10, 11), as they are case studies of those architectures.*
+*Note: Chapters 26-28 share appendices with their corresponding paradigm chapters, as they are case studies of those architectures.*
 
 ---
 
