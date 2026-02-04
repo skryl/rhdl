@@ -266,8 +266,8 @@ RSpec.describe RHDL::HDL::CPU::FastHarness, 'Conway' do
         p.instr :RET
       end
 
-      # Load program
-      @cpu.memory.load(program, 0x300)
+      # Load program at address 0x10 (matching Assembler.build base address)
+      @cpu.memory.load(program, 0x10)
       @cpu.pc = 0x10
 
       # Initialize read buffer with blinker pattern (0x0100-0x0118)
