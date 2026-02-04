@@ -46,14 +46,14 @@
 
 ### Part VII: Case Studies
 
-- [21 - The MOS 6502](21-mos6502.md) - Deep dive into the classic CPU that powered the Apple II, C64, and NES
-- [22 - The VideoCore IV](22-videocore-iv.md) - The Raspberry Pi GPU: 12 QPUs, SIMD, and tile-based rendering
-- [23 - The Google TPU v1](23-tpu.md) - A 256x256 systolic array for neural network inference
-- [24 - The RISC-V RV32I](24-riscv.md) - The open ISA: clean design, modular extensions, and modern RISC
-- [25 - The Transputer](25-transputer.md) - CSP in hardware: message passing, links, and occam
-- [26 - The Groq LPU](26-groq.md) - Deterministic dataflow for AI inference: time as the program counter
-- [27 - The Cerebras WSE](27-cerebras.md) - The largest chip ever built: 850K cores on a single wafer
-- [28 - The Cray-1](28-cray1.md) - The supercomputer that defined vector processing
+- [21 - The MOS 6502](21-mos6502.md) - (1975) The classic CPU that powered the Apple II, C64, and NES
+- [22 - The Cray-1](22-cray1.md) - (1976) The supercomputer that defined vector processing
+- [23 - The Transputer](23-transputer.md) - (1985) CSP in hardware: message passing, links, and occam
+- [24 - The RISC-V RV32I](24-riscv.md) - (2010) The open ISA: clean design, modular extensions, and modern RISC
+- [25 - The VideoCore IV](25-videocore-iv.md) - (2012) The Raspberry Pi GPU: 12 QPUs, SIMD, and tile-based rendering
+- [26 - The Google TPU v1](26-tpu.md) - (2016) A 256x256 systolic array for neural network inference
+- [27 - The Cerebras WSE](27-cerebras.md) - (2019) The largest chip ever built: 850K cores on a single wafer
+- [28 - The Groq LPU](28-groq.md) - (2020) Deterministic dataflow for AI inference: time as the program counter
 - [29 - RHDL](29-rhdl.md) - A Ruby-based HDL: DSL design, synthesis, and simulation
 
 ---
@@ -138,10 +138,9 @@ Each appendix provides complete RHDL implementations and formal details for its 
 |                                                              |
 +-------------------------------------------------------------+
 |                                                              |
-|   Case Studies:    6502 (8-bit) | VideoCore (GPU) | TPU (ML) |
-|                    RISC-V (open ISA) | Transputer (CSP)      |
-|                    Groq (dataflow) | Cerebras (wafer-scale)  |
-|                    Cray-1 (vector) | RHDL (HDL design)       |
+|   Case Studies:    6502 (1975) | Cray-1 (1976) | Transputer (1985) |
+|   (chronological)  RISC-V (2010) | VideoCore (2012) | TPU (2016)   |
+|                    Cerebras (2019) | Groq (2020) | RHDL           |
 |                                                              |
 +-------------------------------------------------------------+
 ```
@@ -193,16 +192,16 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 19 | FPGAs | S | FPGA Implementation |
 | 20 | CGRAs | T | CGRA Implementation |
 | 21 | The MOS 6502 | U | 6502 RHDL Implementation |
-| 22 | The VideoCore IV | V | VideoCore IV Implementation |
-| 23 | The Google TPU v1 | W | TPU Implementation |
+| 22 | The Cray-1 | K | (see Vector appendix) |
+| 23 | The Transputer | Y | Transputer Implementation |
 | 24 | The RISC-V RV32I | X | RISC-V Implementation |
-| 25 | The Transputer | Y | Transputer Implementation |
-| 26 | The Groq LPU | G | (see Dataflow appendix) |
+| 25 | The VideoCore IV | V | VideoCore IV Implementation |
+| 26 | The Google TPU v1 | W | TPU Implementation |
 | 27 | The Cerebras WSE | J | (see Wafer-Scale appendix) |
-| 28 | The Cray-1 | K | (see Vector appendix) |
+| 28 | The Groq LPU | G | (see Dataflow appendix) |
 | 29 | RHDL | Z | RHDL Reference |
 
-*Note: Chapters 26-28 share appendices with their corresponding paradigm chapters, as they are case studies of those architectures.*
+*Note: Chapters 22, 27, and 28 share appendices with their corresponding paradigm chapters, as they are case studies of those architectures.*
 
 ---
 
