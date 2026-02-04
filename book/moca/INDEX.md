@@ -53,7 +53,6 @@
 - [25 - The Google TPU v1](25-tpu.md) - (2016) A 256x256 systolic array for neural network inference
 - [26 - The Cerebras WSE](26-cerebras.md) - (2019) The largest chip ever built: 850K cores on a single wafer
 - [27 - The Groq LPU](27-groq.md) - (2020) Deterministic dataflow for AI inference: time as the program counter
-- [28 - RHDL](28-rhdl.md) - A Ruby-based HDL: DSL design, synthesis, and simulation
 
 ---
 
@@ -86,7 +85,6 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix W - TPU Implementation](appendix-w-tpu.md) - Systolic array, weight FIFOs, and matrix multiply in RHDL
 - [Appendix X - RISC-V Implementation](appendix-x-riscv.md) - RV32I decoder, ALU, pipeline stages, cache, TLB, and MMU
 - [Appendix Y - NVIDIA G80 Implementation](appendix-y-g80.md) - Streaming multiprocessors, warp scheduler, and shared memory in RHDL
-- [Appendix Z - RHDL Reference](appendix-z-rhdl.md) - Complete DSL reference, synthesis details, Verilog comparison
 
 ---
 
@@ -139,7 +137,7 @@ Each appendix provides complete RHDL implementations and formal details for its 
 |                                                              |
 |   Case Studies:    6502 (1975) | Cray-1 (1976) | G80 (2006)        |
 |   (chronological)  RISC-V (2010) | TPU (2016) | Cerebras (2019)    |
-|                    Groq (2020) | RHDL                               |
+|                    Groq (2020)                                      |
 |                                                              |
 +-------------------------------------------------------------+
 ```
@@ -197,7 +195,6 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 25 | The Google TPU v1 | W | TPU Implementation |
 | 26 | The Cerebras WSE | J | (see Wafer-Scale appendix) |
 | 27 | The Groq LPU | G | (see Dataflow appendix) |
-| 28 | RHDL | Z | RHDL Reference |
 
 *Note: Chapters 26 and 27 share appendices with their corresponding paradigm chapters, as they are case studies of those architectures.*
 
