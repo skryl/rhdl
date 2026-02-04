@@ -17,6 +17,8 @@ module RHDL
             ext_dir: File.expand_path('examples/mos6502/utilities/simulators/isa_simulator_native', Config.project_root),
             crate_name: 'isa_simulator_native',
             load_path: 'examples/mos6502/utilities/simulators',
+            require_path: 'isa_simulator_native',
+            artifact: :ruby_ext,
             check_const: 'RHDL::Examples::MOS6502::NATIVE_AVAILABLE'
           },
 
@@ -25,21 +27,27 @@ module RHDL
             name: 'Netlist Interpreter (Gate-Level)',
             ext_dir: File.expand_path('lib/rhdl/codegen/netlist/sim/netlist_interpreter', Config.project_root),
             crate_name: 'netlist_interpreter',
-            load_path: 'lib/rhdl/codegen/netlist/sim/netlist_interpreter/lib',
+            load_path: 'lib',
+            require_path: 'rhdl/codegen/netlist/sim/netlist_interpreter',
+            artifact: :ruby_ext,
             check_const: 'RHDL::Codegen::Netlist::NETLIST_INTERPRETER_AVAILABLE'
           },
           netlist_jit: {
             name: 'Netlist JIT (Gate-Level Cranelift)',
             ext_dir: File.expand_path('lib/rhdl/codegen/netlist/sim/netlist_jit', Config.project_root),
             crate_name: 'netlist_jit',
-            load_path: 'lib/rhdl/codegen/netlist/sim/netlist_jit/lib',
+            load_path: 'lib',
+            require_path: 'rhdl/codegen/netlist/sim/netlist_jit',
+            artifact: :ruby_ext,
             check_const: 'RHDL::Codegen::Netlist::NETLIST_JIT_AVAILABLE'
           },
           netlist_compiler: {
             name: 'Netlist Compiler (Gate-Level SIMD)',
             ext_dir: File.expand_path('lib/rhdl/codegen/netlist/sim/netlist_compiler', Config.project_root),
             crate_name: 'netlist_compiler',
-            load_path: 'lib/rhdl/codegen/netlist/sim/netlist_compiler/lib',
+            load_path: 'lib',
+            require_path: 'rhdl/codegen/netlist/sim/netlist_compiler',
+            artifact: :ruby_ext,
             check_const: 'RHDL::Codegen::Netlist::NETLIST_COMPILER_AVAILABLE'
           },
 
@@ -48,21 +56,27 @@ module RHDL
             name: 'IR Interpreter',
             ext_dir: File.expand_path('lib/rhdl/codegen/ir/sim/ir_interpreter', Config.project_root),
             crate_name: 'ir_interpreter',
-            load_path: 'lib/rhdl/codegen/ir/sim/ir_interpreter/lib',
+            load_path: 'lib',
+            require_path: 'rhdl/codegen/ir/sim/ir_interpreter',
+            artifact: :fiddle_lib,
             check_const: 'RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE'
           },
           ir_jit: {
             name: 'IR JIT (Cranelift)',
             ext_dir: File.expand_path('lib/rhdl/codegen/ir/sim/ir_jit', Config.project_root),
             crate_name: 'ir_jit',
-            load_path: 'lib/rhdl/codegen/ir/sim/ir_jit/lib',
+            load_path: 'lib',
+            require_path: 'rhdl/codegen/ir/sim/ir_jit',
+            artifact: :fiddle_lib,
             check_const: 'RHDL::Codegen::IR::IR_JIT_AVAILABLE'
           },
           ir_compiler: {
             name: 'IR Compiler (AOT)',
             ext_dir: File.expand_path('lib/rhdl/codegen/ir/sim/ir_compiler', Config.project_root),
             crate_name: 'ir_compiler',
-            load_path: 'lib/rhdl/codegen/ir/sim/ir_compiler/lib',
+            load_path: 'lib',
+            require_path: 'rhdl/codegen/ir/sim/ir_compiler',
+            artifact: :fiddle_lib,
             check_const: 'RHDL::Codegen::IR::IR_COMPILER_AVAILABLE'
           }
         }.freeze
@@ -176,7 +190,7 @@ module RHDL
           $LOAD_PATH.unshift(load_path) unless $LOAD_PATH.include?(load_path)
 
           begin
-            require ext[:crate_name]
+            require(ext[:require_path] || ext[:crate_name])
             const_parts = ext[:check_const].split('::')
             const_value = const_parts.reduce(Object) { |mod, name| mod.const_get(name) }
 
@@ -201,7 +215,7 @@ module RHDL
           load_path = File.expand_path(ext[:load_path], Config.project_root)
           $LOAD_PATH.unshift(load_path) unless $LOAD_PATH.include?(load_path)
 
-          require ext[:crate_name]
+          require(ext[:require_path] || ext[:crate_name])
           const_parts = ext[:check_const].split('::')
           const_parts.reduce(Object) { |mod, name| mod.const_get(name) }
         rescue LoadError, NameError
@@ -236,7 +250,12 @@ module RHDL
 
         def dst_lib_name(ext)
           case host_os
-          when /darwin/ then "#{ext[:crate_name]}.dylib"
+          when /darwin/
+            if ext[:artifact] == :ruby_ext
+              "#{ext[:crate_name]}.bundle"
+            else
+              "#{ext[:crate_name]}.dylib"
+            end
           when /linux/ then "#{ext[:crate_name]}.so"
           when /mswin|mingw/ then "#{ext[:crate_name]}.dll"
           else "#{ext[:crate_name]}.so"
