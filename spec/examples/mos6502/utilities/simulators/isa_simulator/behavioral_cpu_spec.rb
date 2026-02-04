@@ -1,6 +1,7 @@
 require 'spec_helper'
+require_relative '../../../../../../examples/mos6502/utilities/simulators/isa_simulator/loader'
 
-RSpec.describe RHDL::Components::CPU::CPU do
+RSpec.describe RHDL::Examples::MOS6502::Components::CPU::CPU do
   include CpuTestHelper
 
   # Use behavior CPU implementation
