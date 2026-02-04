@@ -18,12 +18,12 @@ RSpec.describe RHDL::HDL::CPU::CPU do
       expect(cpu.inputs.keys).to include(:mem_data_in)
       expect(cpu.outputs.keys).to include(:mem_data_out, :mem_addr, :mem_write_en, :mem_read_en)
 
-      # Control inputs
-      expect(cpu.inputs.keys).to include(:acc_load_en, :acc_load_data, :pc_load_en, :pc_load_data)
-      expect(cpu.inputs.keys).to include(:sp_push, :sp_pop)
+      # Control inputs (acc_load_data removed - CPU now uses internal mux for ACC source)
+      expect(cpu.inputs.keys).to include(:acc_load_en, :pc_load_en, :pc_load_data)
+      expect(cpu.inputs.keys).to include(:sp_push, :sp_pop, :zero_flag_load_en)
 
       # Status outputs
-      expect(cpu.outputs.keys).to include(:pc_out, :acc_out, :sp_out, :halt_out)
+      expect(cpu.outputs.keys).to include(:pc_out, :acc_out, :sp_out, :halt_out, :zero_flag_out)
 
       # Decoder outputs
       expect(cpu.outputs.keys).to include(:dec_alu_op, :dec_branch, :dec_jump, :dec_halt)
@@ -81,9 +81,9 @@ RSpec.describe RHDL::HDL::CPU::CPU do
     describe 'simulator comparison' do
       it 'all simulators produce matching results' do
         test_cases = [
-          { rst: 1, mem_data_in: 0, acc_load_en: 0, acc_load_data: 0, pc_load_en: 0, pc_load_data: 0, sp_push: 0, sp_pop: 0 },
-          { rst: 0, mem_data_in: 0, acc_load_en: 0, acc_load_data: 0, pc_load_en: 0, pc_load_data: 0, sp_push: 0, sp_pop: 0 },
-          { rst: 0, mem_data_in: 0xF0, acc_load_en: 0, acc_load_data: 0, pc_load_en: 0, pc_load_data: 0, sp_push: 0, sp_pop: 0 }
+          { rst: 1, instruction: 0, mem_data_in: 0, acc_load_en: 0, pc_load_en: 0, pc_load_data: 0, sp_push: 0, sp_pop: 0, zero_flag_load_en: 0 },
+          { rst: 0, instruction: 0, mem_data_in: 0, acc_load_en: 0, pc_load_en: 0, pc_load_data: 0, sp_push: 0, sp_pop: 0, zero_flag_load_en: 0 },
+          { rst: 0, instruction: 0, mem_data_in: 0xF0, acc_load_en: 0, pc_load_en: 0, pc_load_data: 0, sp_push: 0, sp_pop: 0, zero_flag_load_en: 0 }
         ]
 
         NetlistHelper.compare_and_validate!(

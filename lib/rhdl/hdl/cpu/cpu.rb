@@ -38,6 +38,7 @@ module RHDL
         output :acc_out, width: 8
         output :sp_out, width: 8
         output :sp_empty
+        output :sp_full
         output :halt_out
         output :zero_flag_out             # Current zero flag value
 
@@ -145,6 +146,7 @@ module RHDL
         port :sp_pop => [:sp, :pop]
         port [:sp, :q] => :sp_out
         port [:sp, :empty] => :sp_empty
+        port [:sp, :full] => :sp_full
 
         # Output routing
         port :dec_halt => :halt_out
