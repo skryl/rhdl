@@ -1,4 +1,4 @@
-# Appendix G: GPU Implementation
+# Appendix I: GPU Implementation
 
 *Companion appendix to [Chapter 7: GPU Architecture](07-gpu-architecture.md)*
 

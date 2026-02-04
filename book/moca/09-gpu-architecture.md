@@ -1,4 +1,4 @@
-# Chapter 7: GPU Architecture
+# Chapter 9: GPU Architecture
 
 ## Overview
 

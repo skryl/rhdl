@@ -13,16 +13,16 @@
 - [03 - Mechanical Computation](03-mechanical-computation.md) - Babbage, Ada Lovelace, Zuse, and relay computers
 - [04 - Biological Computation](04-biological-computation.md) - DNA computing, neurons as gates, cellular automata
 
-### Part II: Dataflow and Spatial Architectures
+### Part II: Stack and Register Machines
 
-- [05 - Dataflow Computation](05-dataflow-computation.md) - Data-driven execution, token machines, why HDL is naturally dataflow
-- [06 - Systolic Arrays](06-systolic-arrays.md) - Regular structures, matrix operations, and modern AI accelerators
-- [07 - GPU Architecture](07-gpu-architecture.md) - SIMD/SIMT execution, streaming multiprocessors, and massively parallel computing
+- [05 - Stack Machines](05-stack-machines.md) - Forth, JVM, and the simplest computer architecture
+- [06 - Register Machines](06-register-machines.md) - The von Neumann architecture that dominates modern computing
 
-### Part III: Stack and Register Machines
+### Part III: Dataflow and Spatial Architectures
 
-- [08 - Stack Machines](08-stack-machines.md) - Forth, JVM, and the simplest computer architecture
-- [09 - Register Machines](09-register-machines.md) - The von Neumann architecture that dominates modern computing
+- [07 - Dataflow Computation](07-dataflow-computation.md) - Data-driven execution, token machines, why HDL is naturally dataflow
+- [08 - Systolic Arrays](08-systolic-arrays.md) - Regular structures, matrix operations, and modern AI accelerators
+- [09 - GPU Architecture](09-gpu-architecture.md) - SIMD/SIMT execution, streaming multiprocessors, and massively parallel computing
 
 ### Part IV: Quantum and Reversible Computing
 
@@ -48,11 +48,11 @@ Each appendix provides complete RHDL implementations and formal details for its 
 - [Appendix B - Lambda Calculus](appendix-b-lambda-calculus.md) - Church encodings and RHDL implementations
 - [Appendix C - Ada Lovelace's Program](appendix-c-ada-lovelace.md) - The first program, before hardware existed
 - [Appendix D - Cellular Automata](appendix-d-cellular-automata.md) - Rule 110, Game of Life, and emergent computation
-- [Appendix E - Dataflow Architectures](appendix-e-dataflow.md) - Token machines, static vs dynamic dataflow, RHDL examples
-- [Appendix F - Systolic Array Patterns](appendix-f-systolic.md) - Matrix multiply, convolution, and other array algorithms
-- [Appendix G - GPU Implementation](appendix-g-gpu.md) - CUDA-like execution model and RHDL streaming multiprocessor
-- [Appendix H - Stack Machine ISA](appendix-h-stack-machine.md) - Complete Forth-like instruction set with RHDL implementation
-- [Appendix I - Register Machine ISA](appendix-i-register-machine.md) - Complete 8-bit instruction set with RHDL CPU
+- [Appendix E - Stack Machine ISA](appendix-e-stack-machine.md) - Complete Forth-like instruction set with RHDL implementation
+- [Appendix F - Register Machine ISA](appendix-f-register-machine.md) - Complete 8-bit instruction set with RHDL CPU
+- [Appendix G - Dataflow Architectures](appendix-g-dataflow.md) - Token machines, static vs dynamic dataflow, RHDL examples
+- [Appendix H - Systolic Array Patterns](appendix-h-systolic.md) - Matrix multiply, convolution, and other array algorithms
+- [Appendix I - GPU Implementation](appendix-i-gpu.md) - CUDA-like execution model and RHDL streaming multiprocessor
 - [Appendix J - Reversible Gates](appendix-j-reversible.md) - Fredkin, Toffoli, and building circuits that lose no information
 - [Appendix K - Quantum Circuits](appendix-k-quantum.md) - Quantum gate implementations and simulators
 - [Appendix L - HDL Comparison](appendix-l-hdl.md) - Verilog, VHDL, Chisel, and RHDL side-by-side
@@ -75,11 +75,11 @@ Each appendix provides complete RHDL implementations and formal details for its 
 │                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│   Spatial:         Dataflow ─── Systolic ─── GPU            │
-│                    (data-driven)  (regular)   (SIMD/SIMT)   │
-│                                                              │
 │   Sequential:      Stack ─────────── Register               │
 │                    (operand stack)  (von Neumann)           │
+│                                                              │
+│   Spatial:         Dataflow ─── Systolic ─── GPU            │
+│                    (data-driven)  (regular)   (SIMD/SIMT)   │
 │                         │               │                    │
 │                         └───────┬───────┘                    │
 │                                 ▼                            │
@@ -122,11 +122,11 @@ Each appendix provides complete RHDL implementations and formal details for its 
 | 02 | Lambda Calculus | B | Church encodings, RHDL |
 | 03 | Mechanical Computation | C | Ada Lovelace's Program |
 | 04 | Biological Computation | D | Cellular Automata |
-| 05 | Dataflow Computation | E | Dataflow RHDL |
-| 06 | Systolic Arrays | F | Systolic Patterns |
-| 07 | GPU Architecture | G | GPU Implementation |
-| 08 | Stack Machines | H | Stack Machine ISA |
-| 09 | Register Machines | I | Register Machine ISA |
+| 05 | Stack Machines | E | Stack Machine ISA |
+| 06 | Register Machines | F | Register Machine ISA |
+| 07 | Dataflow Computation | G | Dataflow RHDL |
+| 08 | Systolic Arrays | H | Systolic Patterns |
+| 09 | GPU Architecture | I | GPU Implementation |
 | 10 | Reversible Computation | J | Reversible Gates |
 | 11 | Quantum Computing | K | Quantum Circuits |
 | 12 | Hardware Description Languages | L | HDL Comparison |

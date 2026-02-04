@@ -1,4 +1,4 @@
-# Appendix E: Dataflow Architectures
+# Appendix G: Dataflow Architectures
 
 *Companion appendix to [Chapter 4: Dataflow Computation](04-dataflow-computation.md)*
 

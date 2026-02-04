@@ -1,4 +1,4 @@
-# Chapter 8: Stack Machines
+# Chapter 5: Stack Machines
 
 ## Overview
 

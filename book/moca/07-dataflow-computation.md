@@ -1,4 +1,4 @@
-# Chapter 4: Dataflow Computation
+# Chapter 7: Dataflow Computation
 
 ## Overview
 

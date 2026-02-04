@@ -1,4 +1,4 @@
-# Chapter 6: Systolic Arrays
+# Chapter 8: Systolic Arrays
 
 ## Overview
 

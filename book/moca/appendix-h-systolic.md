@@ -1,4 +1,4 @@
-# Appendix G: Systolic Array Patterns
+# Appendix H: Systolic Array Patterns
 
 *Companion appendix to [Chapter 6: Systolic Arrays](06-systolic-arrays.md)*
 

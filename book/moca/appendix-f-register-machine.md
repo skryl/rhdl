@@ -1,4 +1,4 @@
-# Appendix I: Register Machine ISA
+# Appendix F: Register Machine ISA
 
 *Companion appendix to [Chapter 8: Register Machines](08-register-machines.md)*
 
