@@ -33,6 +33,8 @@ module RHDL
       # Hi-res graphics pages
       HIRES_PAGE1_START = 0x2000
       HIRES_PAGE1_END = 0x3FFF
+      HIRES_PAGE2_START = 0x4000
+      HIRES_PAGE2_END = 0x5FFF
       HIRES_WIDTH = 280
       HIRES_HEIGHT = 192
       HIRES_BYTES_PER_LINE = 40
@@ -147,6 +149,7 @@ module RHDL
         else
           # RAM area
           @ram[addr] = byte if addr < @ram.size
+          @text_page_dirty = true if display_memory_addr?(addr)
           verilator_write_ram(addr, byte) if addr < @ram.size
         end
       end
@@ -212,7 +215,7 @@ module RHDL
           if write_addr < @ram.size
             data = verilator_peek('d')
             @ram[write_addr] = data & 0xFF
-            if write_addr >= TEXT_PAGE1_START && write_addr <= TEXT_PAGE1_END
+            if display_memory_addr?(write_addr)
               @text_page_dirty = true
             end
           end
@@ -266,13 +269,12 @@ module RHDL
         @text_page_dirty = false
       end
 
-      def read_hires_bitmap
-        base = HIRES_PAGE1_START
+      def read_hires_bitmap(base_addr: HIRES_PAGE1_START)
         bitmap = []
 
         HIRES_HEIGHT.times do |row|
           line = []
-          line_addr = hires_line_address(row, base)
+          line_addr = hires_line_address(row, base_addr)
 
           HIRES_BYTES_PER_LINE.times do |col|
             byte = read_ram_byte(line_addr + col)
@@ -287,8 +289,8 @@ module RHDL
         bitmap
       end
 
-      def render_hires_braille(chars_wide: 80, invert: false)
-        bitmap = read_hires_bitmap
+      def render_hires_braille(chars_wide: 80, invert: false, base_addr: HIRES_PAGE1_START)
+        bitmap = read_hires_bitmap(base_addr: base_addr)
 
         chars_tall = (HIRES_HEIGHT / 4.0).ceil
         x_scale = HIRES_WIDTH.to_f / (chars_wide * 2)
@@ -328,9 +330,19 @@ module RHDL
         lines.join("\n")
       end
 
-      def render_hires_color(chars_wide: 140, composite: false)
+      def render_hires_color(chars_wide: 140, composite: false, base_addr: HIRES_PAGE1_START)
         renderer = ColorRenderer.new(chars_wide: chars_wide, composite: composite)
-        renderer.render(@ram, base_addr: HIRES_PAGE1_START)
+
+        if @sim_read_ram_fn && @sim_ctx
+          page_end = base_addr + 0x2000 - 1
+          hires_ram = Array.new(page_end + 1, 0)
+          (base_addr..page_end).each do |addr|
+            hires_ram[addr] = read_ram_byte(addr)
+          end
+          return renderer.render(hires_ram, base_addr: base_addr)
+        end
+
+        renderer.render(@ram, base_addr: base_addr)
       end
 
       def cpu_state
@@ -567,20 +579,16 @@ module RHDL
                   ctx->dut->clk_14m = 0;
                   ctx->dut->eval();
 
-                  // Provide RAM/ROM data based on CPU address.
-                  //
-                  // NOTE: The Rust IR batched runner bridges memory based on the CPU address register
-                  // (cpu__addr_reg) rather than the top-level ram_addr output, to avoid video-cycle
-                  // contention and match the IR timing model. We do the same here to ensure
-                  // cross-backend determinism in tests.
-                  unsigned int cpu_addr = ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__addr_reg & 0xFFFF;
-                  if (cpu_addr >= 0xD000 && cpu_addr <= 0xFFFF) {
-                      unsigned int rom_offset = cpu_addr - 0xD000;
+                  // Provide RAM/ROM data based on system memory address bus.
+                  // This keeps video fetches and CPU fetches coherent with the top-level design.
+                  unsigned int ram_addr = ctx->dut->ram_addr & 0xFFFF;
+                  if (ram_addr >= 0xD000 && ram_addr <= 0xFFFF) {
+                      unsigned int rom_offset = ram_addr - 0xD000;
                       ctx->dut->ram_do = (rom_offset < sizeof(ctx->rom)) ? ctx->rom[rom_offset] : 0;
-                  } else if (cpu_addr >= 0xC000) {
+                  } else if (ram_addr >= 0xC000) {
                       ctx->dut->ram_do = 0;
                   } else {
-                      ctx->dut->ram_do = ctx->ram[cpu_addr];
+                      ctx->dut->ram_do = ctx->ram[ram_addr];
                   }
                   ctx->dut->eval();
 
@@ -593,7 +601,7 @@ module RHDL
 
                   // Handle RAM writes
                   if (ctx->dut->ram_we) {
-                      unsigned int write_addr = ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__addr_reg & 0xFFFF;
+                      unsigned int write_addr = ctx->dut->ram_addr & 0xFFFF;
                       if (write_addr < 0xC000) {
                           ctx->ram[write_addr] = ctx->dut->d & 0xFF;
                       }
@@ -693,16 +701,16 @@ module RHDL
                   ctx->dut->clk_14m = 0;
                   ctx->dut->eval();
 
-                  // Memory read - provide data from RAM or ROM based on CPU address (see sim_reset note)
-                  unsigned int cpu_addr = ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__addr_reg & 0xFFFF;
-                  if (cpu_addr >= 0xD000 && cpu_addr <= 0xFFFF) {
+                  // Memory read - provide data from RAM or ROM based on system memory address bus
+                  unsigned int ram_addr = ctx->dut->ram_addr & 0xFFFF;
+                  if (ram_addr >= 0xD000 && ram_addr <= 0xFFFF) {
                       // ROM area
-                      unsigned int rom_offset = cpu_addr - 0xD000;
+                      unsigned int rom_offset = ram_addr - 0xD000;
                       ctx->dut->ram_do = (rom_offset < sizeof(ctx->rom)) ? ctx->rom[rom_offset] : 0;
-                  } else if (cpu_addr >= 0xC000) {
+                  } else if (ram_addr >= 0xC000) {
                       ctx->dut->ram_do = 0;
                   } else {
-                      ctx->dut->ram_do = ctx->ram[cpu_addr];
+                      ctx->dut->ram_do = ctx->ram[ram_addr];
                   }
                   ctx->dut->eval();
 
@@ -715,11 +723,12 @@ module RHDL
 
                   // Handle RAM writes
                   if (ctx->dut->ram_we) {
-                      unsigned int write_addr = ctx->dut->rootp->apple2_apple2__DOT__cpu__DOT__addr_reg & 0xFFFF;
+                      unsigned int write_addr = ctx->dut->ram_addr & 0xFFFF;
                       if (write_addr < 0xC000) {
                           ctx->ram[write_addr] = ctx->dut->d & 0xFF;
-                          // Check text page ($0400-$07FF)
-                          if (write_addr >= 0x0400 && write_addr <= 0x07FF) {
+                          // Mark display as dirty on text/graphics writes.
+                          if ((write_addr >= 0x0400 && write_addr <= 0x07FF) ||
+                              (write_addr >= 0x2000 && write_addr <= 0x5FFF)) {
                               *text_dirty_out = 1;
                           }
                       }
@@ -989,6 +998,11 @@ module RHDL
         end
 
         @ram[addr] || 0
+      end
+
+      def display_memory_addr?(addr)
+        (addr >= TEXT_PAGE1_START && addr <= TEXT_PAGE1_END) ||
+          (addr >= HIRES_PAGE1_START && addr <= HIRES_PAGE2_END)
       end
 
       def text_line_address(row)

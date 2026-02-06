@@ -9,7 +9,38 @@ module RHDL
     module MOS6502
       # Try to load the native extension
       NATIVE_AVAILABLE = begin
-        require_relative 'isa_simulator_native/lib/isa_simulator_native'
+        begin
+          require_relative 'isa_simulator_native/lib/isa_simulator_native'
+        rescue LoadError
+          require 'rbconfig'
+          require 'fileutils'
+          base = File.expand_path('isa_simulator_native/lib/isa_simulator_native', __dir__)
+          primary = "#{base}.#{RbConfig::CONFIG['DLEXT']}"
+          if !File.exist?(primary)
+            dylib = "#{base}.dylib"
+            if File.exist?(dylib)
+              begin
+                File.symlink(dylib, primary)
+              rescue StandardError
+                FileUtils.cp(dylib, primary)
+              end
+            end
+          end
+          candidates = [
+            primary,
+            "#{base}.bundle",
+            "#{base}.so",
+            "#{base}.dylib"
+          ].uniq
+          loaded = false
+          candidates.each do |path|
+            next unless File.exist?(path)
+            require path
+            loaded = true
+            break
+          end
+          raise LoadError, "Native ISA extension not found at #{candidates.join(', ')}" unless loaded
+        end
         true
       rescue LoadError => e
         warn "Native ISA simulator not available: #{e.message}" if ENV['DEBUG']
