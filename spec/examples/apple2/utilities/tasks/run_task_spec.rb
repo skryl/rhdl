@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'digest'
 require_relative '../../../../../examples/apple2/utilities/tasks/run_task'
 
 RSpec.describe RHDL::Examples::Apple2::Tasks::RunTask do
@@ -389,15 +390,67 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
         expect(game_regions_visited).not_to be_empty,
           "Should visit game regions #{GAME_REGIONS}, but only visited #{regions_visited.to_a}"
       end
+
+      it 'marks screen dirty on HIRES writes with verilator' do
+        skip 'Verilator not available' unless @verilator_available
+
+        runner = described_class.new(mode: :verilog)
+        runner.reset
+        runner.clear_screen_dirty
+
+        runner.write(0x2000, 0xAA)
+
+        expect(runner.screen_dirty?).to be(true)
+      end
     end
 
     context 'cross-backend comparison' do
-      # Sample interval for PC collection
-      SAMPLE_INTERVAL = 500
-      TOTAL_SAMPLES = 20
+      MIN_TOTAL_CYCLES = 20_000_000
+
+      def run_task_sample_interval
+        configured = (ENV['RUN_TASK_SAMPLE_INTERVAL'] || 100_000).to_i
+        configured > 0 ? configured : 100_000
+      end
+
+      def run_task_total_samples
+        raw = ENV['RUN_TASK_TOTAL_SAMPLES']
+        configured = (raw || 200).to_i
+        configured = 200 if configured <= 0
+        return configured if raw && !raw.strip.empty?
+
+        min_samples = (MIN_TOTAL_CYCLES.to_f / run_task_sample_interval).ceil
+        [configured, min_samples].max
+      end
+
+      def run_task_hires_sample_interval
+        configured = (ENV['RUN_TASK_HIRES_SAMPLE_INTERVAL'] || 1_000_000).to_i
+        configured > 0 ? configured : 1_000_000
+      end
+
+      def run_task_hires_total_samples
+        raw = ENV['RUN_TASK_HIRES_TOTAL_SAMPLES']
+        configured = (raw || 20).to_i
+        configured = 20 if configured <= 0
+        return configured if raw && !raw.strip.empty?
+
+        min_samples = (MIN_TOTAL_CYCLES.to_f / run_task_hires_sample_interval).ceil
+        [configured, min_samples].max
+      end
+
+      def requested_backends
+        raw = ENV['RUN_TASK_BACKENDS']
+        return { jit: true, compile: true, verilog: true } if raw.nil? || raw.strip.empty?
+
+        selected = raw.split(',').map { |token| token.strip.downcase }
+        {
+          jit: selected.include?('jit'),
+          compile: selected.include?('compile'),
+          verilog: selected.include?('verilog')
+        }
+      end
 
       # Helper to collect PC and opcode sequences from a backend
-      def collect_sequences(runner, samples: TOTAL_SAMPLES, interval: SAMPLE_INTERVAL)
+      def collect_sequences(runner, samples: run_task_total_samples, interval: run_task_sample_interval)
         runner.reset
         pc_sequence = []
         page_sequence = []  # PC pages (256-byte granularity)
@@ -424,6 +477,45 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
           unique_pcs: pc_sequence.uniq.length,
           unique_pages: page_sequence.uniq.length
         }
+      end
+
+      # Helper to collect rendered HIRES color output signatures from a backend
+      def collect_hires_color_signatures(runner, samples: run_task_hires_total_samples, interval: run_task_hires_sample_interval, chars_wide: 70)
+        runner.reset
+        signatures = []
+
+        samples.times do
+          runner.run_steps(interval)
+          rendered = runner.render_hires_color(chars_wide: chars_wide)
+          signatures << Digest::SHA256.hexdigest(rendered)
+        end
+
+        signatures
+      end
+
+      def checksum_memory_range(runner, start_addr, length)
+        checksum = 0
+        length.times do |offset|
+          checksum = ((checksum * 33) + (runner.read(start_addr + offset) & 0xFF)) & 0xFFFFFFFF
+        end
+        checksum
+      end
+
+      # Helper to collect text/hires memory signatures from a backend
+      def collect_video_memory_signatures(runner, samples: run_task_hires_total_samples, interval: run_task_hires_sample_interval)
+        runner.reset
+        signatures = []
+
+        samples.times do
+          runner.run_steps(interval)
+          signatures << {
+            text: checksum_memory_range(runner, 0x0400, 0x0400),
+            hires_page1: checksum_memory_range(runner, 0x2000, 0x2000),
+            hires_page2: checksum_memory_range(runner, 0x4000, 0x2000)
+          }
+        end
+
+        signatures
       end
 
       # Find longest common subsequence length
@@ -458,13 +550,13 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
       end
 
       # Helper to run all backends and collect sequences
-      def run_all_backends_with_sequences(samples: TOTAL_SAMPLES, interval: SAMPLE_INTERVAL)
+      def run_all_backends_with_sequences(samples: run_task_total_samples, interval: run_task_sample_interval)
         results = {}
+        selected = requested_backends
 
-        backends = [
-          [:hdl, :jit],
-          [:hdl, :compile]
-        ]
+        backends = []
+        backends << [:hdl, :jit] if selected[:jit]
+        backends << [:hdl, :compile] if selected[:compile]
 
         backends.each do |mode, sim|
           begin
@@ -476,7 +568,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
         end
 
         # Add verilator if available
-        if @verilator_available
+        if @verilator_available && selected[:verilog]
           begin
             runner = described_class.with_karateka(mode: :verilog)
             results['verilog'] = collect_sequences(runner, samples: samples, interval: interval)
@@ -536,6 +628,49 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
           expect(opcodes).to eq(ref_opcodes),
             "#{backend} opcode sequence differs from #{reference}"
         end
+      end
+
+      it 'compile and verilog have identical HIRES color output buffers' do
+        skip 'Karateka resources not available' unless @karateka_available
+        skip 'Verilator not available' unless @verilator_available
+
+        selected = requested_backends
+        skip 'Compile backend not selected' unless selected[:compile]
+        skip 'Verilog backend not selected' unless selected[:verilog]
+
+        compile_runner = described_class.with_karateka(mode: :hdl, sim: :compile)
+        verilog_runner = described_class.with_karateka(mode: :verilog)
+
+        compile_signatures = collect_hires_color_signatures(compile_runner)
+        verilog_signatures = collect_hires_color_signatures(verilog_runner)
+
+        first_diff = compile_signatures.zip(verilog_signatures).find_index { |a, b| a != b }
+        expect(first_diff).to be_nil,
+          "HIRES color output buffer diverged at sample #{first_diff}"
+      end
+
+      it 'compile and verilog have identical text and HIRES memory signatures' do
+        skip 'Karateka resources not available' unless @karateka_available
+        skip 'Verilator not available' unless @verilator_available
+
+        selected = requested_backends
+        skip 'Compile backend not selected' unless selected[:compile]
+        skip 'Verilog backend not selected' unless selected[:verilog]
+
+        compile_runner = described_class.with_karateka(mode: :hdl, sim: :compile)
+        verilog_runner = described_class.with_karateka(mode: :verilog)
+
+        compile_signatures = collect_video_memory_signatures(compile_runner)
+        verilog_signatures = collect_video_memory_signatures(verilog_runner)
+
+        first_diff = compile_signatures.zip(verilog_signatures).find_index { |a, b| a != b }
+        diff_message = if first_diff
+                         "text/HIRES memory diverged at sample #{first_diff}: compile=#{compile_signatures[first_diff]} verilog=#{verilog_signatures[first_diff]}"
+                       else
+                         'text/HIRES memory should match at every sample'
+                       end
+        expect(first_diff).to be_nil,
+          diff_message
       end
 
       it 'detects first divergence point between backends' do
