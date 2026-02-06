@@ -20,6 +20,7 @@ require 'fileutils'
 require 'fiddle'
 require 'fiddle/import'
 require 'rbconfig'
+require_relative '../renderers/color_renderer'
 
 module RHDL
   module Examples
@@ -27,6 +28,11 @@ module RHDL
       # Verilator-based runner for MOS 6502 simulation
       # Compiles RHDL Verilog export to native code via Verilator
       class VerilatorRunner
+    HIRES_PAGE1_START = 0x2000
+    HIRES_PAGE1_END = 0x3FFF
+    HIRES_PAGE2_START = 0x4000
+    HIRES_PAGE2_END = 0x5FFF
+
     # Build directory for Verilator output
     BUILD_DIR = File.expand_path('../../../.verilator_build_6502', __dir__)
     VERILOG_DIR = File.join(BUILD_DIR, 'verilog')
@@ -253,6 +259,21 @@ module RHDL
         halted: halted?,
         simulator_type: simulator_type
       }
+    end
+
+    def render_hires_color(chars_wide: 140, base_addr: HIRES_PAGE1_START)
+      renderer = RHDL::Examples::MOS6502::ColorRenderer.new(chars_wide: chars_wide)
+
+      if @sim_read_memory_fn && @sim_ctx
+        page_end = base_addr + 0x2000 - 1
+        hires_ram = Array.new(page_end + 1, 0)
+        (base_addr..page_end).each do |addr|
+          hires_ram[addr] = read_memory(addr)
+        end
+        return renderer.render(hires_ram, base_addr: base_addr)
+      end
+
+      renderer.render(@memory, base_addr: base_addr)
     end
 
     def status_string
