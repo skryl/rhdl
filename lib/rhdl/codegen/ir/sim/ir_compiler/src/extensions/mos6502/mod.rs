@@ -105,17 +105,10 @@ impl Mos6502Extension {
             return 0;
         }
 
-        let lib = core.compiled_lib.as_ref().unwrap();
+        #[cfg(feature = "aot")]
         unsafe {
-            type RunMos6502CyclesFn = unsafe extern "C" fn(
-                *mut u64, usize, *mut u8, *const bool, usize, *mut u32
-            ) -> usize;
-
-            let func: libloading::Symbol<RunMos6502CyclesFn> = lib.get(b"run_mos6502_cycles")
-                .expect("run_mos6502_cycles function not found - is this a MOS6502 IR?");
-
             let mut speaker_toggles: u32 = 0;
-            let result = func(
+            let result = crate::aot_generated::run_mos6502_cycles(
                 core.signals.as_mut_ptr(),
                 core.signals.len(),
                 self.memory.as_mut_ptr(),
@@ -125,6 +118,32 @@ impl Mos6502Extension {
             );
             self.speaker_toggles += speaker_toggles;
             result
+        }
+
+        #[cfg(not(feature = "aot"))]
+        {
+            let lib = core.compiled_lib.as_ref().unwrap();
+            unsafe {
+                type RunMos6502CyclesFn = unsafe extern "C" fn(
+                    *mut u64, usize, *mut u8, *const bool, usize, *mut u32
+                ) -> usize;
+
+                let func: libloading::Symbol<RunMos6502CyclesFn> =
+                    lib.get(b"run_mos6502_cycles")
+                        .expect("run_mos6502_cycles function not found - is this a MOS6502 IR?");
+
+                let mut speaker_toggles: u32 = 0;
+                let result = func(
+                    core.signals.as_mut_ptr(),
+                    core.signals.len(),
+                    self.memory.as_mut_ptr(),
+                    self.rom_mask.as_ptr(),
+                    n,
+                    &mut speaker_toggles,
+                );
+                self.speaker_toggles += speaker_toggles;
+                result
+            }
         }
     }
 
@@ -140,20 +159,13 @@ impl Mos6502Extension {
             return 0;
         }
 
-        let lib = core.compiled_lib.as_ref().unwrap();
+        #[cfg(feature = "aot")]
         unsafe {
-            type RunInstructionsFn = unsafe extern "C" fn(
-                *mut u64, usize, *mut u8, *const bool, usize, *mut u64, usize, *mut u32
-            ) -> usize;
-
-            let func: libloading::Symbol<RunInstructionsFn> = lib.get(b"run_mos6502_instructions_with_opcodes")
-                .expect("run_mos6502_instructions_with_opcodes function not found");
-
             // Allocate output buffer for packed opcodes
             let mut packed_out: Vec<u64> = vec![0; n];
             let mut speaker_toggles: u32 = 0;
 
-            let count = func(
+            let count = crate::aot_generated::run_mos6502_instructions_with_opcodes(
                 core.signals.as_mut_ptr(),
                 core.signals.len(),
                 self.memory.as_mut_ptr(),
@@ -176,6 +188,48 @@ impl Mos6502Extension {
             }
 
             count
+        }
+
+        #[cfg(not(feature = "aot"))]
+        {
+            let lib = core.compiled_lib.as_ref().unwrap();
+            unsafe {
+                type RunInstructionsFn = unsafe extern "C" fn(
+                    *mut u64, usize, *mut u8, *const bool, usize, *mut u64, usize, *mut u32
+                ) -> usize;
+
+                let func: libloading::Symbol<RunInstructionsFn> = lib
+                    .get(b"run_mos6502_instructions_with_opcodes")
+                    .expect("run_mos6502_instructions_with_opcodes function not found");
+
+                // Allocate output buffer for packed opcodes
+                let mut packed_out: Vec<u64> = vec![0; n];
+                let mut speaker_toggles: u32 = 0;
+
+                let count = func(
+                    core.signals.as_mut_ptr(),
+                    core.signals.len(),
+                    self.memory.as_mut_ptr(),
+                    self.rom_mask.as_ptr(),
+                    n,
+                    packed_out.as_mut_ptr(),
+                    packed_out.len(),
+                    &mut speaker_toggles,
+                );
+
+                self.speaker_toggles += speaker_toggles;
+
+                // Unpack results
+                for i in 0..count {
+                    let v = packed_out[i];
+                    let pc = ((v >> 16) & 0xFFFF) as u16;
+                    let opcode = ((v >> 8) & 0xFF) as u8;
+                    let sp = (v & 0xFF) as u8;
+                    opcodes_out.push((pc, opcode, sp));
+                }
+
+                count
+            }
         }
     }
 

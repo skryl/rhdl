@@ -279,8 +279,36 @@ impl GameBoyExtension {
             return GbCycleResult::default();
         }
 
-        let lib = core.compiled_lib.as_ref().unwrap();
+        #[cfg(feature = "aot")]
         unsafe {
+            let result = crate::aot_generated::run_gb_cycles(
+                core.signals.as_mut_ptr(),
+                core.signals.len(),
+                n,
+                core.old_clocks.as_mut_ptr(),
+                core.next_regs.as_mut_ptr(),
+                self.framebuffer.as_mut_ptr(),
+                (&mut self.lcd_state as *mut GbLcdState).cast::<crate::aot_generated::GbLcdState>(),
+                self.rom.as_ptr(),
+                self.rom.len(),
+                self.vram.as_mut_ptr(),
+                self.vram.len(),
+                self.boot_rom.as_ptr(),
+                self.boot_rom.len(),
+                self.zpram.as_mut_ptr(),
+                self.zpram.len(),
+                self.wram.as_mut_ptr(),
+                self.wram.len(),
+            );
+            GbCycleResult {
+                cycles_run: result.cycles_run,
+                frames_completed: result.frames_completed,
+            }
+        }
+
+        #[cfg(not(feature = "aot"))]
+        unsafe {
+            let lib = core.compiled_lib.as_ref().unwrap();
             type RunGbCyclesFn = unsafe extern "C" fn(
                 signals: *mut u64,
                 signals_len: usize,

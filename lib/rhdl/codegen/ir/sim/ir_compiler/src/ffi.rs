@@ -84,8 +84,18 @@ impl IrSimContext {
     }
 
     fn compile(&mut self) -> Result<bool, String> {
+        #[cfg(feature = "aot")]
+        {
+            self.core.compiled = true;
+            return Ok(true);
+        }
+
+        #[cfg(not(feature = "aot"))]
         let code = self.generate_code();
-        self.core.compile_code(&code)
+        #[cfg(not(feature = "aot"))]
+        {
+            self.core.compile_code(&code)
+        }
     }
 }
 
@@ -193,6 +203,25 @@ pub unsafe extern "C" fn ir_sim_free_string(s: *mut c_char) {
     }
 }
 
+/// Allocate memory in the simulator WASM heap for JS interop
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_wasm_alloc(size: usize) -> *mut u8 {
+    let mut buf = Vec::<u8>::with_capacity(size.max(1));
+    let ptr = buf.as_mut_ptr();
+    std::mem::forget(buf);
+    ptr
+}
+
+/// Free memory previously allocated with ir_sim_wasm_alloc
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_wasm_dealloc(ptr: *mut u8, size: usize) {
+    if ptr.is_null() {
+        return;
+    }
+    let cap = size.max(1);
+    drop(Vec::<u8>::from_raw_parts(ptr, 0, cap));
+}
+
 /// Poke a signal value
 /// Returns 0 on success, -1 on error (unknown signal)
 #[no_mangle]
@@ -253,6 +282,59 @@ pub unsafe extern "C" fn ir_sim_has_signal(
     if ctx.core.name_to_idx.contains_key(name) { 1 } else { 0 }
 }
 
+/// Get signal index by name
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_get_signal_idx(
+    ctx: *const IrSimContext,
+    name: *const c_char,
+) -> c_int {
+    if ctx.is_null() || name.is_null() {
+        return -1;
+    }
+    let ctx = &*ctx;
+    let name = match CStr::from_ptr(name).to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    ctx.core
+        .name_to_idx
+        .get(name)
+        .copied()
+        .map(|i| i as c_int)
+        .unwrap_or(-1)
+}
+
+/// Poke by signal index
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_poke_by_idx(
+    ctx: *mut IrSimContext,
+    idx: c_uint,
+    value: c_ulong,
+) {
+    if ctx.is_null() {
+        return;
+    }
+    let ctx = &mut *ctx;
+    let i = idx as usize;
+    if i < ctx.core.signals.len() {
+        let width = ctx.core.widths.get(i).copied().unwrap_or(64);
+        let mask = CoreSimulator::mask(width);
+        ctx.core.signals[i] = (value as u64) & mask;
+    }
+}
+
+/// Peek by signal index
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_peek_by_idx(ctx: *const IrSimContext, idx: c_uint) -> c_ulong {
+    if ctx.is_null() {
+        return 0;
+    }
+    let ctx = &*ctx;
+    let i = idx as usize;
+    ctx.core.signals.get(i).copied().unwrap_or(0) as c_ulong
+}
+
 /// Evaluate combinational logic
 #[no_mangle]
 pub unsafe extern "C" fn ir_sim_evaluate(ctx: *mut IrSimContext) {
@@ -266,6 +348,59 @@ pub unsafe extern "C" fn ir_sim_evaluate(ctx: *mut IrSimContext) {
 pub unsafe extern "C" fn ir_sim_tick(ctx: *mut IrSimContext) {
     if !ctx.is_null() {
         (*ctx).core.tick();
+    }
+}
+
+/// Tick with forced edge detection using old_clocks set by caller
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_tick_forced(ctx: *mut IrSimContext) {
+    if !ctx.is_null() {
+        (*ctx).core.tick();
+    }
+}
+
+/// Set previous clock value for a clock index (for forced edge detection)
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_set_prev_clock(
+    ctx: *mut IrSimContext,
+    clock_list_idx: c_uint,
+    value: c_ulong,
+) {
+    if ctx.is_null() {
+        return;
+    }
+    let ctx = &mut *ctx;
+    let idx = clock_list_idx as usize;
+    if idx < ctx.core.old_clocks.len() {
+        ctx.core.old_clocks[idx] = value as u64;
+    }
+}
+
+/// Get clock list index for a signal index
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_get_clock_list_idx(
+    ctx: *const IrSimContext,
+    signal_idx: c_uint,
+) -> c_int {
+    if ctx.is_null() {
+        return -1;
+    }
+    let sig_idx = signal_idx as usize;
+    match (*ctx).core.clock_indices.iter().position(|&ci| ci == sig_idx) {
+        Some(pos) => pos as c_int,
+        None => -1,
+    }
+}
+
+/// Run N ticks
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_run_ticks(ctx: *mut IrSimContext, n: c_uint) {
+    if ctx.is_null() {
+        return;
+    }
+    let ctx = &mut *ctx;
+    for _ in 0..(n as usize) {
+        ctx.core.tick();
     }
 }
 
@@ -444,6 +579,16 @@ pub unsafe extern "C" fn ir_sim_trace_to_vcd(ctx: *const IrSimContext) -> *mut c
     }
     let vcd = (*ctx).tracer.to_vcd();
     CString::new(vcd).unwrap().into_raw()
+}
+
+/// Get only new live VCD chunk since the last call (caller must free with ir_sim_free_string)
+#[no_mangle]
+pub unsafe extern "C" fn ir_sim_trace_take_live_vcd(ctx: *mut IrSimContext) -> *mut c_char {
+    if ctx.is_null() {
+        return ptr::null_mut();
+    }
+    let chunk = (*ctx).tracer.take_live_chunk();
+    CString::new(chunk).unwrap().into_raw()
 }
 
 /// Save VCD output to a file
