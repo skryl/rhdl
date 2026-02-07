@@ -2,7 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SIM_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SIM_DIR="${REPO_ROOT}/lib/rhdl/codegen/ir/sim"
 OUT_DIR="${SCRIPT_DIR}/pkg"
 AOT_IR="${AOT_IR:-${SCRIPT_DIR}/samples/apple2.json}"
 AOT_GEN="${SIM_DIR}/ir_compiler/src/aot_generated.rs"

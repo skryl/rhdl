@@ -11,7 +11,7 @@ module RHDL
       # Task for generating web simulator artifacts (IR, sources, schematics)
       class WebGenerateTask < Task
         PROJECT_ROOT = Config.project_root
-        SCRIPT_DIR = File.join(PROJECT_ROOT, 'lib/rhdl/codegen/ir/sim/web/samples')
+        SCRIPT_DIR = File.join(PROJECT_ROOT, 'web/samples')
 
         $LOAD_PATH.unshift(File.join(PROJECT_ROOT, 'lib'))
         require 'rhdl'

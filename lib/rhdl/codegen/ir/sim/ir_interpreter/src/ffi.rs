@@ -53,20 +53,20 @@ impl IrSimContext {
             None
         };
 
-        let mut signal_entries: Vec<(usize, String)> = core
-            .name_to_idx
-            .iter()
-            .map(|(name, &idx)| (idx, name.clone()))
-            .collect();
-        signal_entries.sort_by_key(|(idx, _)| *idx);
-
-        let signal_names: Vec<String> = signal_entries
-            .iter()
-            .map(|(_, name)| name.clone())
-            .collect();
-        let signal_widths: Vec<usize> = signal_entries
-            .iter()
-            .map(|(idx, _)| core.widths.get(*idx).copied().unwrap_or(1))
+        let signal_count = core.signal_count();
+        let mut signal_names = vec![String::new(); signal_count];
+        for (name, &idx) in core.name_to_idx.iter() {
+            if idx < signal_count && signal_names[idx].is_empty() {
+                signal_names[idx] = name.clone();
+            }
+        }
+        for (idx, name) in signal_names.iter_mut().enumerate() {
+            if name.is_empty() {
+                *name = format!("_sig_{}", idx);
+            }
+        }
+        let signal_widths: Vec<usize> = (0..signal_count)
+            .map(|idx| core.widths.get(idx).copied().unwrap_or(1))
             .collect();
 
         let mut tracer = VcdTracer::new();
