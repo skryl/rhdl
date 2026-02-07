@@ -32,7 +32,7 @@ This app runs RHDL IR simulator backends in the browser via WebAssembly and rend
 Use the helper script (builds backends for `wasm32-unknown-unknown` and copies artifacts into `web/pkg/`):
 
 ```bash
-cd lib/rhdl/codegen/ir/sim/web
+cd web
 ./build_wasm.sh
 ```
 
@@ -47,7 +47,7 @@ Manual equivalent (interpreter):
 cd lib/rhdl/codegen/ir/sim/ir_interpreter
 rustup target add wasm32-unknown-unknown
 cargo build --release --target wasm32-unknown-unknown
-cp target/wasm32-unknown-unknown/release/ir_interpreter.wasm ../web/pkg/ir_interpreter.wasm
+cp target/wasm32-unknown-unknown/release/ir_interpreter.wasm ../../../../../../web/pkg/ir_interpreter.wasm
 ```
 
 ## Run Web UI
@@ -55,7 +55,7 @@ cp target/wasm32-unknown-unknown/release/ir_interpreter.wasm ../web/pkg/ir_inter
 Serve the `web` directory with any static file server:
 
 ```bash
-cd lib/rhdl/codegen/ir/sim/web
+cd web
 python3 -m http.server 8080
 ```
 

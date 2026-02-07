@@ -53,12 +53,26 @@ impl IrSimContext {
             None
         };
 
-        // Initialize VCD tracer with signal metadata
-        let mut tracer = VcdTracer::new();
-        let signal_names: Vec<String> = core.name_to_idx.keys().cloned().collect();
-        let signal_widths: Vec<usize> = signal_names.iter()
-            .map(|name| core.widths.get(*core.name_to_idx.get(name).unwrap()).copied().unwrap_or(1))
+        // Initialize VCD tracer with a stable signal table indexed by slot.
+        // `name_to_idx` can be smaller than signal_count when the IR contains
+        // duplicate names in different declaration groups.
+        let signal_count = core.signal_count();
+        let mut signal_names = vec![String::new(); signal_count];
+        for (name, &idx) in core.name_to_idx.iter() {
+            if idx < signal_count && signal_names[idx].is_empty() {
+                signal_names[idx] = name.clone();
+            }
+        }
+        for (idx, name) in signal_names.iter_mut().enumerate() {
+            if name.is_empty() {
+                *name = format!("_sig_{}", idx);
+            }
+        }
+        let signal_widths: Vec<usize> = (0..signal_count)
+            .map(|idx| core.widths.get(idx).copied().unwrap_or(1))
             .collect();
+
+        let mut tracer = VcdTracer::new();
         tracer.init(signal_names, signal_widths);
 
         Ok(Self { core, apple2, gameboy, mos6502, tracer })
