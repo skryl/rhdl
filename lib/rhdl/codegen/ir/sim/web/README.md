@@ -19,6 +19,7 @@ This app runs RHDL IR simulator backends in the browser via WebAssembly and rend
   - `1. I/O`: Apple II display + `HIRES`, `COLOR`, `SOUND` toggles, keyboard input queue, debug registers
   - `2. VCD + Signals`: waveform canvas, watch table, event log
   - `3. Memory`: RAM browser + direct byte writes + memory dump loading
+  - `4. Components`: source-backed component details (`RHDL` + `Verilog`) when source bundles are present
 - Memory dump utilities:
   - `Save Dump` exports current Apple II RAM to `.bin` and stores it as "last saved"
   - `Download Snapshot` exports current Apple II RAM as a portable `.rhdlsnap` file (includes `startPc` when available)
@@ -68,8 +69,14 @@ Open [http://localhost:8080](http://localhost:8080).
 - `compiler` in the web UI is `ir_compiler` AOT (precompiled wasm), not runtime `rustc` compilation in-browser.
 - Apple II runner assets are included:
   - `samples/apple2.json` (from `examples/apple2/hdl/apple2`)
+  - `samples/apple2_sources.json` (`RHDL` + `Verilog` sources for Apple II components)
+  - `samples/apple2_schematic.json` (precomputed schematic connectivity for Apple II)
+  - `samples/cpu_sources.json` (`RHDL` + `Verilog` sources for CPU components)
+  - `samples/cpu_schematic.json` (precomputed schematic connectivity for CPU)
   - `samples/appleiigo.rom` (12KB system ROM)
   - `samples/karateka_mem.bin` + `samples/karateka_mem_meta.txt` for quick dump load
+- Regenerate web artifacts (IR + source + schematic):
+  - `bundle exec rake web:generate`
 - Memory tab supports:
   - arbitrary dump file load at offset (via Apple II RAM interface)
   - one-click Karateka dump load (patches reset vector and resets to dump PC)

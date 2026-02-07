@@ -13,12 +13,17 @@
     <link rel="stylesheet" href="./style.css" />
     <script src="https://cdn.jsdelivr.net/npm/p5@1.11.1/lib/p5.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js"></script>
   </head>
   <body>
     <div id="appShell" class="app-shell">
       <aside id="controlsPanel" class="panel controls">
-        <h1>RHDL IR Simulator</h1>
-        <p class="subtitle">p5.js + WASM interpreter with live VCD waveforms</p>
+        <h1>RHDL Simulator</h1>
+        <p class="subtitle">
+          <a href="https://github.com/skryl/rhdl" target="_blank" rel="noopener noreferrer">github.com/skryl/rhdl</a>
+          &middot;
+          <a href="https://twitter.com/ssskryl" target="_blank" rel="noopener noreferrer">@ssskryl</a>
+        </p>
 
         <section>
           <h2>Runners</h2>
@@ -28,7 +33,7 @@
               <option value="cpu">CPU (lib/rhdl/hdl/cpu)</option>
               <option value="apple2" selected>Apple II System Runner</option>
             </select>
-            <button id="loadRunnerBtn">Load Runner</button>
+            <button id="loadRunnerBtn">Load</button>
           </div>
           <p id="runnerStatus" class="status">Runner not initialized</p>
         </section>
@@ -111,14 +116,34 @@
       </aside>
 
       <main class="panel viewer">
-        <nav class="tabs" aria-label="Runner views">
-          <button id="sidebarToggleBtn" class="sidebar-toggle-btn" type="button" aria-expanded="true">Hide Config</button>
-          <button class="tab-btn active" data-tab="ioTab" aria-selected="true">1. I/O</button>
-          <button class="tab-btn" data-tab="vcdTab" aria-selected="false">2. VCD + Signals</button>
-          <button class="tab-btn" data-tab="memoryTab" aria-selected="false">3. Memory</button>
-          <button class="tab-btn" data-tab="componentTab" aria-selected="false">4. Components</button>
-          <button class="tab-btn" data-tab="componentGraphTab" aria-selected="false">5. Schematic</button>
-        </nav>
+        <div class="viewer-header">
+          <nav class="tabs" aria-label="Runner views">
+            <button class="tab-btn active" data-tab="ioTab" aria-selected="true">1. I/O</button>
+            <button class="tab-btn" data-tab="vcdTab" aria-selected="false">2. VCD + Signals</button>
+            <button class="tab-btn" data-tab="memoryTab" aria-selected="false">3. Memory</button>
+            <button class="tab-btn" data-tab="componentTab" aria-selected="false">4. Components</button>
+            <button class="tab-btn" data-tab="componentGraphTab" aria-selected="false">5. Schematic</button>
+          </nav>
+          <div class="viewer-toolbar">
+            <button
+              id="sidebarToggleBtn"
+              class="toolbar-icon-btn"
+              type="button"
+              aria-expanded="true"
+              aria-label="Hide Config"
+              title="Hide Config"
+            >&#9881;</button>
+            <button
+              id="terminalToggleBtn"
+              class="toolbar-icon-btn"
+              type="button"
+              aria-expanded="false"
+              aria-controls="terminalPanel"
+              aria-label="Show Terminal"
+              title="Show Terminal"
+            >&gt;_</button>
+          </div>
+        </div>
 
         <section id="ioTab" class="tab-panel active">
           <div class="io-layout">
@@ -166,7 +191,10 @@
         </section>
 
         <section id="vcdTab" class="tab-panel">
-          <div id="canvasWrap"></div>
+          <section class="subpanel">
+            <h2>Trace View</h2>
+            <div id="canvasWrap"></div>
+          </section>
 
           <div class="vcd-control-grid">
             <section class="subpanel">
@@ -209,6 +237,25 @@
 
         <section id="memoryTab" class="tab-panel">
           <section class="subpanel">
+            <h2>Memory Browser</h2>
+            <div class="row wrap">
+              <label for="memoryStart">Start</label>
+              <input id="memoryStart" type="text" value="0x0400" />
+              <label for="memoryLength">Length</label>
+              <input id="memoryLength" type="text" value="256" />
+              <button id="memoryRefreshBtn">Refresh</button>
+              <label class="toggle-pill memory-follow">
+                <input id="memoryFollowPc" type="checkbox" />
+                Follow PC
+              </label>
+            </div>
+            <div class="memory-split">
+              <pre id="memoryDump" class="memory-dump">Load the Apple II runner to browse memory.</pre>
+              <pre id="memoryDisassembly" class="memory-dump disasm-dump">Load the Apple II runner to view disassembly.</pre>
+            </div>
+          </section>
+
+          <section class="subpanel">
             <h2>Memory Dumps</h2>
             <div class="row wrap">
               <input id="memoryDumpFile" type="file" accept=".bin,.mem,.dat,.rhdlsnap,.snapshot,application/octet-stream,application/json" />
@@ -226,25 +273,6 @@
               <button id="memoryResetBtn">Reset (Vector)</button>
             </div>
             <p id="memoryDumpStatus" class="status"></p>
-          </section>
-
-          <section class="subpanel">
-            <h2>Memory Browser</h2>
-            <div class="row wrap">
-              <label for="memoryStart">Start</label>
-              <input id="memoryStart" type="text" value="0x0400" />
-              <label for="memoryLength">Length</label>
-              <input id="memoryLength" type="text" value="256" />
-              <button id="memoryRefreshBtn">Refresh</button>
-              <label class="toggle-pill memory-follow">
-                <input id="memoryFollowPc" type="checkbox" />
-                Follow PC
-              </label>
-            </div>
-            <div class="memory-split">
-              <pre id="memoryDump" class="memory-dump">Load the Apple II runner to browse memory.</pre>
-              <pre id="memoryDisassembly" class="memory-dump disasm-dump">Load the Apple II runner to view disassembly.</pre>
-            </div>
           </section>
 
           <section class="subpanel">
@@ -294,7 +322,11 @@
               <section class="subpanel component-detail-panel">
                 <h2 id="componentTitle">Component Details</h2>
                 <p id="componentMeta" class="status"></p>
-                <h2>IR / Code</h2>
+                <div class="row wrap component-code-controls">
+                  <h2>Source</h2>
+                  <button id="componentCodeViewRhdl" class="code-view-btn active" type="button">RHDL</button>
+                  <button id="componentCodeViewVerilog" class="code-view-btn" type="button">Verilog</button>
+                </div>
                 <pre id="componentCode" class="memory-dump component-code">Select a component to view details.</pre>
               </section>
             </div>
@@ -338,9 +370,22 @@
             </div>
           </section>
         </section>
+
+        <section id="terminalPanel" class="terminal-panel" hidden>
+          <div class="terminal-panel-header">
+            <h2>Terminal</h2>
+            <p class="status">Use `help` to list available commands.</p>
+          </div>
+          <pre id="terminalOutput" class="terminal-output" aria-live="polite"></pre>
+          <div class="terminal-input-row">
+            <span class="terminal-prompt">$</span>
+            <input id="terminalInput" type="text" placeholder="Type a command..." spellcheck="false" autocomplete="off" />
+            <button id="terminalRunBtn" type="button">Run</button>
+          </div>
+        </section>
       </main>
     </div>
 
-    <script type="module" src="./app.js"></script>
+    <script type="module" src="./app.js?v=20260207b"></script>
   </body>
 </html>
