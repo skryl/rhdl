@@ -28,12 +28,13 @@ module RHDL
     input :data_in, width: DATA_WIDTH
     output :data_out, width: DATA_WIDTH
 
-    # Define single-port memory using Memory DSL
+    # Define single-port memory using Memory DSL.
+    # Reference spram.vhd uses unregistered (asynchronous) read output.
     memory :mem, depth: DEPTH, width: DATA_WIDTH do |m|
       # Write port
       m.write_port clock: :clock, enable: :wren, addr: :address, data: :data_in
-      # Synchronous read port
-      m.sync_read_port clock: :clock, addr: :address, output: :data_out
+      # Asynchronous read port
+      m.async_read_port addr: :address, output: :data_out
     end
 
     # Instance initialization - ensure memory arrays are initialized

@@ -175,6 +175,8 @@ module RHDL
     wire :cond_true             # Condition true for conditional jump
     wire :is_cond_jr            # Conditional JR instruction
     wire :is_cond_jp            # Conditional JP instruction
+    wire :is_cond_ret           # Conditional RET instruction
+    wire :is_cond_call          # Conditional CALL instruction
     wire :cb_bit                # CB BIT instruction
     wire :cb_bit_flags, width: 8  # Flags result from CB BIT instruction
     wire :cb_src, width: 8        # Source register for CB operation
@@ -285,10 +287,16 @@ module RHDL
              ((ir == lit(0x18, width: 8)) & (m_cycle == lit(2, width: 3))) |
              # RET/RETI M2
              (((ir == lit(0xC9, width: 8)) | (ir == lit(0xD9, width: 8))) & (m_cycle == lit(2, width: 3))) |
+             # RET cc M3 (when taken)
+             (is_cond_ret & cond_true & (m_cycle == lit(3, width: 3))) |
              # JP nn M2
              ((ir == lit(0xC3, width: 8)) & (m_cycle == lit(2, width: 3))) |
+             # JP cc,nn M2 (conditional absolute jump)
+             (is_cond_jp & (m_cycle == lit(2, width: 3))) |
              # CALL nn M2
              ((ir == lit(0xCD, width: 8)) & (m_cycle == lit(2, width: 3))) |
+             # CALL cc,nn M2
+             (is_cond_call & (m_cycle == lit(2, width: 3))) |
              # LDH (a8),A M2
              ((ir == lit(0xE0, width: 8)) & (m_cycle == lit(2, width: 3))) |
              # LDH A,(a8) M2
@@ -311,17 +319,23 @@ module RHDL
              ((ir[3..0] == lit(1, width: 4)) & (ir[7..6] == lit(0, width: 2)) & (m_cycle == lit(3, width: 3))) |
              # RET/RETI M3
              (((ir == lit(0xC9, width: 8)) | (ir == lit(0xD9, width: 8))) & (m_cycle == lit(3, width: 3))) |
+             # RET cc M4 (when taken)
+             (is_cond_ret & cond_true & (m_cycle == lit(4, width: 3))) |
              # JP nn M3
              ((ir == lit(0xC3, width: 8)) & (m_cycle == lit(3, width: 3))) |
+             # JP cc,nn M3 (conditional absolute jump)
+             (is_cond_jp & (m_cycle == lit(3, width: 3))) |
              # CALL nn M3
              ((ir == lit(0xCD, width: 8)) & (m_cycle == lit(3, width: 3))) |
+             # CALL cc,nn M3
+             (is_cond_call & (m_cycle == lit(3, width: 3))) |
              # LD (a16),A / LD A,(a16) M3
              (((ir == lit(0xEA, width: 8)) | (ir == lit(0xFA, width: 8))) & (m_cycle == lit(3, width: 3))) |
              # LD (a16),SP M3
              ((ir == lit(0x08, width: 8)) & (m_cycle == lit(3, width: 3)))
 
-      # jump - Absolute jump (consolidated from JP nn and JP (HL))
-      jump <= (ir == lit(0xC3, width: 8)) | (ir == lit(0xE9, width: 8))
+      # jump - Absolute jump (JP nn / JP (HL) / taken JP cc,nn)
+      jump <= (ir == lit(0xC3, width: 8)) | (ir == lit(0xE9, width: 8)) | (is_cond_jp & cond_true)
 
       # jump_e - Relative jump (consolidated from JR e and conditional JR)
       jump_e <= (ir == lit(0x18, width: 8)) | (is_cond_jr & cond_true)
@@ -364,11 +378,11 @@ module RHDL
       # m_cycles calculation - categorize all GB instructions by cycle count
       # Reference: T80_MCode.vhd Mode=3 timings
 
-      # 6-cycle instructions: CALL nn (CD)
-      is_6_cycles <= (ir == lit(0xCD, width: 8))
+      # 6-cycle instructions: CALL nn (CD), CALL cc,nn taken
+      is_6_cycles <= (ir == lit(0xCD, width: 8)) | (is_cond_call & cond_true)
 
-      # 5-cycle instructions: LD (a16),SP (08)
-      is_5_cycles <= (ir == lit(0x08, width: 8))
+      # 5-cycle instructions: LD (a16),SP (08), RET cc taken
+      is_5_cycles <= (ir == lit(0x08, width: 8)) | (is_cond_ret & cond_true)
 
       # Conditional JR detection (needed for cycle count)
       # JR NZ/Z/NC/C - 0x20/0x28/0x30/0x38
@@ -380,6 +394,16 @@ module RHDL
       # 4 cycles if condition true (jump taken), 3 cycles if condition false
       is_cond_jp <= (ir == lit(0xC2, width: 8)) | (ir == lit(0xCA, width: 8)) |
                     (ir == lit(0xD2, width: 8)) | (ir == lit(0xDA, width: 8))
+
+      # Conditional RET detection - RET NZ/Z/NC/C (0xC0/0xC8/0xD0/0xD8)
+      # 5 cycles if condition true (taken), 2 cycles if condition false
+      is_cond_ret <= (ir == lit(0xC0, width: 8)) | (ir == lit(0xC8, width: 8)) |
+                     (ir == lit(0xD0, width: 8)) | (ir == lit(0xD8, width: 8))
+
+      # Conditional CALL detection - CALL NZ/Z/NC/C,nn (0xC4/0xCC/0xD4/0xDC)
+      # 6 cycles if condition true (taken), 3 cycles if condition false
+      is_cond_call <= (ir == lit(0xC4, width: 8)) | (ir == lit(0xCC, width: 8)) |
+                      (ir == lit(0xD4, width: 8)) | (ir == lit(0xDC, width: 8))
 
       # Condition evaluation: applies to both JR and JP conditional instructions
       # ir[4:3] = condition code: 00=NZ, 01=Z, 10=NC, 11=C
@@ -427,6 +451,7 @@ module RHDL
                      (ir == lit(0xF8, width: 8)) |
                      (is_cond_jr & cond_true) |  # Conditional JR taken = 3 cycles
                      (is_cond_jp & ~cond_true) |  # Conditional JP not taken = 3 cycles
+                     (is_cond_call & ~cond_true) |  # Conditional CALL not taken = 3 cycles
                      is_cb_bit_hl  # CB BIT (HL) = 3 cycles (read from memory, no write)
 
       # 2-cycle instructions: LD (BC),A, LD (DE),A, LD A,(BC), LD A,(DE), LD r,n
@@ -454,6 +479,7 @@ module RHDL
                      (ir == lit(0x3A, width: 8)) | (ir == lit(0x2A, width: 8)) |
                      is_cb_reg |  # CB with register operand = 2 cycles
                      (is_cond_jr & ~cond_true) |
+                     (is_cond_ret & ~cond_true) |
                      is_alu_imm | is_alu_hl | is_ld_r_n | is_inc_rr | is_dec_rr | is_add_hl_rr |
                      (ir == lit(0xF9, width: 8)) |
                      (ir == lit(0xE2, width: 8)) | (ir == lit(0xF2, width: 8))
@@ -548,24 +574,27 @@ module RHDL
                           lit(6, width: 4),  # 6 = di_reg (data input register)
                           set_bus_b_to)
 
-      # RET - Return from call (4 cycles: M1=fetch, M2=read low from SP, M3=read high from SP+1, M4=jump)
-      ret <= mux((ir == lit(0xC9, width: 8)) | (ir == lit(0xD9, width: 8)), lit(1, width: 1), lit(0, width: 1))
+      # RET / RETI / RET cc(taken)
+      # RET cc adds an internal M2 condition-check cycle before stack pops.
+      ret <= mux((ir == lit(0xC9, width: 8)) | (ir == lit(0xD9, width: 8)) | (is_cond_ret & cond_true), lit(1, width: 1), lit(0, width: 1))
       # ldz/ldw consolidated above
       # RET reads from SP during M2 and M3 (handled via set_addr_to below)
+      no_read <= mux(is_cond_ret & (m_cycle == lit(2, width: 3)),
+                     lit(1, width: 1), no_read)
 
       # JP nn - jump/ldz/ldw consolidated above
 
       # CB prefix
       prefix <= mux(ir == lit(0xCB, width: 8), lit(1, width: 2), lit(0, width: 2))
 
-      # CALL nn - set call signal and load address
+      # CALL nn / CALL cc(taken)
       # M1: fetch, M2: read low addr, M3: read high addr, M4: push PC high, M5: push PC low, M6: jump
-      call <= mux(ir == lit(0xCD, width: 8), lit(1, width: 1), lit(0, width: 1))
+      call <= mux((ir == lit(0xCD, width: 8)) | (is_cond_call & cond_true), lit(1, width: 1), lit(0, width: 1))
       # ldz/ldw consolidated above
       # CALL M4 and M5: write return address to stack
-      write_sig <= mux((ir == lit(0xCD, width: 8)) & ((m_cycle == lit(4, width: 3)) | (m_cycle == lit(5, width: 3))),
+      write_sig <= mux(call & ((m_cycle == lit(4, width: 3)) | (m_cycle == lit(5, width: 3))),
                        lit(1, width: 1), write_sig)
-      no_read <= mux((ir == lit(0xCD, width: 8)) & ((m_cycle == lit(4, width: 3)) | (m_cycle == lit(5, width: 3))),
+      no_read <= mux(call & ((m_cycle == lit(4, width: 3)) | (m_cycle == lit(5, width: 3))),
                      lit(1, width: 1), no_read)
 
       # JP (HL) - 1 cycle jump using HL address (jump consolidated above)
@@ -892,7 +921,7 @@ module RHDL
       # IMPORTANT: All conditions are gated by ~int_cycle to prevent PC changes during interrupt handling
       inc_pc <= ~int_cycle & (
                 # M1: opcode fetch increments PC
-                ((m_cycle == lit(1, width: 3)) & ~halt) |
+                ((m_cycle == lit(1, width: 3)) & ~halt_ff) |
                 # LD r, n (0x06, 0x0E, 0x16, 0x1E, 0x26, 0x2E, 0x3E) - M2 reads immediate
                 (is_ld_r_n & (m_cycle == lit(2, width: 3))) |
                 # LD (HL), n (0x36) - M2 reads immediate
@@ -907,8 +936,8 @@ module RHDL
                 ((ir == lit(0xC3, width: 8)) & ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3)))) |
                 # Conditional JP (0xC2, 0xCA, 0xD2, 0xDA) - M2 and M3 read 16-bit address
                 (is_cond_jp & ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3)))) |
-                # CALL nn (0xCD) - M2 and M3 read address (not M4-M6 which push/jump)
-                ((ir == lit(0xCD, width: 8)) & ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3)))) |
+                # CALL nn / CALL cc,nn - M2 and M3 read 16-bit address
+                (((ir == lit(0xCD, width: 8)) | is_cond_call) & ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3)))) |
                 # LD (nn), A (0xEA) / LD A, (nn) (0xFA) - M2 and M3 read 16-bit address
                 (((ir == lit(0xEA, width: 8)) | (ir == lit(0xFA, width: 8))) & ((m_cycle == lit(2, width: 3)) | (m_cycle == lit(3, width: 3)))) |
                 # JR e (0x18) - M2 reads displacement
@@ -948,12 +977,29 @@ module RHDL
       # N flag (bit 6) - set for sub ops
       n_bit = mux((alu_op == lit(2, width: 4)) | (alu_op == lit(3, width: 4)) | (alu_op == lit(7, width: 4)),
                   lit(0x40, width: 8), lit(0, width: 8))
-      # H flag (bit 5) - Half-carry for 8-bit ALU ops
-      # ADD/ADC: H set when carry from bit 3 to bit 4 (low nibble overflow)
-      # SUB/SBC/CP: H set when borrow from bit 4 (low nibble underflow)
-      h_add_sum = cat(lit(0, width: 1), bus_a[3..0]) + cat(lit(0, width: 1), bus_b[3..0])
-      h_add = h_add_sum[4]  # Carry out of bit 3
-      h_sub = bus_a[3..0] < bus_b[3..0]  # Borrow for subtraction
+      # H/C flags use explicitly widened arithmetic to keep behavior consistent
+      # across all backends and preserve carry/borrow bits.
+      add_carry_in = mux(alu_op == lit(1, width: 4), f_reg[FLAG_C], lit(0, width: 1)) # ADC only
+      sub_borrow_in = mux(alu_op == lit(3, width: 4), f_reg[FLAG_C], lit(0, width: 1)) # SBC only
+
+      add_sum_9 = cat(lit(0, width: 1), bus_a) +
+                  cat(lit(0, width: 1), bus_b) +
+                  cat(lit(0, width: 8), add_carry_in)
+      sub_diff_9 = cat(lit(0, width: 1), bus_a) -
+                   cat(lit(0, width: 1), bus_b) -
+                   cat(lit(0, width: 8), sub_borrow_in)
+      c_add = add_sum_9[8]
+      c_sub = sub_diff_9[8]
+
+      h_add_sum = cat(lit(0, width: 1), bus_a[3..0]) +
+                  cat(lit(0, width: 1), bus_b[3..0]) +
+                  cat(lit(0, width: 4), add_carry_in)
+      h_sub_diff = cat(lit(0, width: 1), bus_a[3..0]) -
+                   cat(lit(0, width: 1), bus_b[3..0]) -
+                   cat(lit(0, width: 4), sub_borrow_in)
+      h_add = h_add_sum[4]
+      h_sub = h_sub_diff[4]
+
       h_bit = mux((alu_op == lit(0, width: 4)) | (alu_op == lit(1, width: 4)),
                   mux(h_add, lit(0x20, width: 8), lit(0, width: 8)),  # ADD/ADC half-carry
                   mux((alu_op == lit(2, width: 4)) | (alu_op == lit(3, width: 4)) | (alu_op == lit(7, width: 4)),
@@ -961,9 +1007,9 @@ module RHDL
                       lit(0, width: 8)))
       # C flag (bit 4)
       c_bit = mux((alu_op == lit(0, width: 4)) | (alu_op == lit(1, width: 4)),
-                  mux((bus_a + bus_b)[8], lit(0x10, width: 8), lit(0, width: 8)),
+                  mux(c_add, lit(0x10, width: 8), lit(0, width: 8)),
                   mux((alu_op == lit(2, width: 4)) | (alu_op == lit(3, width: 4)) | (alu_op == lit(7, width: 4)),
-                      mux(bus_b > bus_a, lit(0x10, width: 8), lit(0, width: 8)),
+                      mux(c_sub, lit(0x10, width: 8), lit(0, width: 8)),
                       lit(0, width: 8)))
       alu_flags <= (z_bit | n_bit | h_bit | c_bit)
 
@@ -1041,8 +1087,11 @@ module RHDL
       is_rst_m4 = is_rst & (m_cycle == lit(4, width: 3))
       is_call_m4 = call & (m_cycle == lit(4, width: 3))
       is_call_m5 = call & (m_cycle == lit(5, width: 3))
-      is_ret_m2 = ret & (m_cycle == lit(2, width: 3))
-      is_ret_m3 = ret & (m_cycle == lit(3, width: 3))
+      ret_pop_low_cycle = mux(is_cond_ret, lit(3, width: 3), lit(2, width: 3))
+      ret_pop_high_cycle = mux(is_cond_ret, lit(4, width: 3), lit(3, width: 3))
+      ret_jump_cycle = mux(is_cond_ret, lit(5, width: 3), lit(4, width: 3))
+      is_ret_m2 = ret & (m_cycle == ret_pop_low_cycle)
+      is_ret_m3 = ret & (m_cycle == ret_pop_high_cycle)
       is_push_m3 = is_push & (m_cycle == lit(3, width: 3))
       is_push_m4 = is_push & (m_cycle == lit(4, width: 3))
       is_pop_m2 = pop_op & (m_cycle == lit(2, width: 3))
@@ -1351,7 +1400,7 @@ module RHDL
                     pc_rel,  # Relative jump: PC + signed displacement
                 mux(clken & call & (m_cycle == m_cycles) & (t_state == lit(3, width: 3)),
                     wz,  # CALL: jump to address stored in WZ
-                mux(clken & ret & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
+                mux(clken & ret & (m_cycle == mux(is_cond_ret, lit(5, width: 3), lit(4, width: 3))) & (t_state == lit(3, width: 3)),
                     wz,  # RET: jump to address popped from stack (stored in WZ)
                 mux(clken & is_rst & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
                     cat(lit(0, width: 8), rst_addr),  # RST jump address: 0x00nn
@@ -1720,7 +1769,7 @@ module RHDL
                 sp - lit(2, width: 16), # RST: decrement SP by 2
             mux(clken & call & (m_cycle == lit(5, width: 3)) & (t_state == lit(3, width: 3)),
                 sp - lit(2, width: 16), # CALL: decrement SP by 2
-            mux(clken & ret & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
+            mux(clken & ret & (m_cycle == mux(is_cond_ret, lit(5, width: 3), lit(4, width: 3))) & (t_state == lit(3, width: 3)),
                 sp + lit(2, width: 16), # RET: increment SP by 2
             mux(clken & push_op & (m_cycle == lit(4, width: 3)) & (t_state == lit(3, width: 3)),
                 sp - lit(2, width: 16), # PUSH: decrement SP by 2
@@ -1847,7 +1896,11 @@ module RHDL
                  di_reg,  # POP AF - high byte (A) at M3
              mux(clken & is_cb_write_m2_seq & (cb_dest_reg == lit(7, width: 3)) & (t_state == lit(3, width: 3)),
                  cb_result,  # CB rot/set/res A at M2
-             mux(clken & save_alu & (t_state == lit(3, width: 3)) & (alu_op != lit(7, width: 4)),
+             # INC/DEC r uses the ALU for flags/result generation, but only INC/DEC A
+             # should feed the accumulator. Other INC/DEC targets are written via read_to_reg.
+             mux(clken & save_alu & (t_state == lit(3, width: 3)) &
+                 (alu_op != lit(7, width: 4)) &
+                 (~(is_inc_r | is_dec_r) | (write_reg == lit(7, width: 3))),
                  alu_result,  # Save ALU result (ADD/SUB/AND/OR/XOR/INC/DEC, but not CP)
              mux(clken & read_to_acc & (t_state == lit(3, width: 3)),
                  di_reg,  # Load from memory

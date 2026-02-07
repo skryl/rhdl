@@ -22,18 +22,18 @@ module RHDL
         @sim_backend = sim
 
         # Create runner based on mode and sim backend
-        @runner = case mode
+        @runner = case @mode
                   when :verilog
                     require_relative 'verilator_runner'
                     RHDL::Examples::GameBoy::VerilatorRunner.new
                   else  # :hdl (default)
-                    if sim == :ruby
+                    if @sim_backend == :ruby
                       # Pure Ruby HDL simulation
                       RHDL::Examples::GameBoy::HdlRunner.new
                     else
                       # IR simulation with native backends (interpret, jit, compile)
                       require_relative 'ir_runner'
-                      RHDL::Examples::GameBoy::IrRunner.new(backend: sim)
+                      RHDL::Examples::GameBoy::IrRunner.new(backend: @sim_backend)
                     end
                   end
       end
