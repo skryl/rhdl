@@ -230,7 +230,7 @@
 
   - **Adding a Cache to Our CPU** - We integrate a simple cache into our CPU design, connecting it between the processor and main memory.
 
-- [20 - Pipelining](part-6-advanced/ch-20-pipelining/ch-20-chapter.md) - Overlapping instruction execution: how throughput decouples from latency.
+- [20 - Throughput and Pipelining](part-6-advanced/ch-20-throughput-and-pipelining/ch-20-chapter.md) - Overlapping instruction execution: how throughput decouples from latency.
 
   - **Latency vs Throughput** - Latency is the time for one instruction; throughput is instructions per second. Pipelining dramatically improves throughput.
 
@@ -342,7 +342,7 @@ Each chapter has an accompanying appendix with complete RHDL implementations. Ad
 | 17 | Lisp Interpreter | [Eval/Apply](part-5-metalinguistic/ch-17-lisp-interpreter/ch-17-appendix.md) |
 | 18 | Lambda Full Circle | [The Isomorphism](part-5-metalinguistic/ch-18-lambda-full-circle/ch-18-appendix.md) |
 | 19 | Memory Hierarchy | [Cache Implementation](part-6-advanced/ch-19-memory-hierarchy/ch-19-appendix.md) |
-| 20 | Pipelining | [Pipeline Implementation](part-6-advanced/ch-20-pipelining/ch-20-appendix.md) |
+| 20 | Throughput and Pipelining | [Pipeline Implementation](part-6-advanced/ch-20-throughput-and-pipelining/ch-20-appendix.md) |
 | 21 | Interrupts | [Interrupt Controller](part-6-advanced/ch-21-interrupts-exceptions/ch-21-appendix.md) |
 | 22 | Privilege | [Protection Implementation](part-6-advanced/ch-22-privilege-protection/ch-22-appendix.md) |
 | 23 | Virtual Memory | [MMU Implementation](part-6-advanced/ch-23-virtual-memory/ch-23-appendix.md) |
