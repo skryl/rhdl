@@ -25,6 +25,20 @@ module RHDL
           RHDL::Export::Verilog.generate(to_ir(top_name: top_name))
         end
 
+        # Export this component's Ruby source metadata/content
+        def to_source(relative_to: nil)
+          RHDL::Codegen::Source.component_entry(self, relative_to: relative_to)
+        end
+
+        # Export schematic bundle for this component hierarchy
+        def to_schematic(sim_ir: nil, runner: nil)
+          RHDL::Codegen::Schematic.bundle(
+            top_class: self,
+            sim_ir: (sim_ir || to_flat_ir),
+            runner: runner
+          )
+        end
+
         # Generate CIRCT FIRRTL from the component
         def to_circt(top_name: nil)
           RHDL::Export::CIRCT::FIRRTL.generate(to_ir(top_name: top_name))
