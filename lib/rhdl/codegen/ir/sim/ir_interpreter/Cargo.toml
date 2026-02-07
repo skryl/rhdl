@@ -7,7 +7,7 @@ description = "Bytecode-based IR interpreter for Behavior IR - pure Rust core + 
 license = "MIT"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

@@ -148,7 +148,8 @@ pub unsafe extern "C" fn mos6502_ir_sim_run_instructions_with_opcodes(
             if i >= opcodes_capacity as usize {
                 break;
             }
-            out_slice[i] = ((*pc as u64) << 16) | ((*opcode as u64) << 8) | (*sp as u64);
+            out_slice[i] =
+                (((*pc as u32) << 16) | ((*opcode as u32) << 8) | (*sp as u32)) as c_ulong;
         }
         count as c_uint
     } else {

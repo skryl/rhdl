@@ -4,10 +4,17 @@
 //! any example-specific code (Apple II, MOS6502, etc.)
 
 use std::collections::{HashMap, HashSet};
+#[cfg(not(feature = "aot"))]
 use std::fs;
+#[cfg(not(feature = "aot"))]
 use std::process::Command;
 
 use serde::Deserialize;
+
+#[cfg(feature = "aot")]
+type CompiledLibrary = ();
+#[cfg(not(feature = "aot"))]
+type CompiledLibrary = libloading::Library;
 
 // ============================================================================
 // IR Data Structures (matching JSON format from Ruby's IRToJson)
@@ -136,7 +143,7 @@ pub struct CoreSimulator {
     /// Memory name to index
     pub memory_name_to_idx: HashMap<String, usize>,
     /// Compiled library (if compilation succeeded)
-    pub compiled_lib: Option<libloading::Library>,
+    pub compiled_lib: Option<CompiledLibrary>,
     /// Whether compilation succeeded
     pub compiled: bool,
 }
@@ -255,7 +262,7 @@ impl CoreSimulator {
             memory_arrays,
             memory_name_to_idx,
             compiled_lib: None,
-            compiled: false,
+            compiled: cfg!(feature = "aot"),
         })
     }
 
@@ -289,12 +296,19 @@ impl CoreSimulator {
         if !self.compiled {
             return;
         }
-        let lib = self.compiled_lib.as_ref().unwrap();
+        #[cfg(feature = "aot")]
         unsafe {
-            type EvalFn = unsafe extern "C" fn(*mut u64, usize);
-            let func: libloading::Symbol<EvalFn> =
-                lib.get(b"evaluate").expect("evaluate function not found");
-            func(self.signals.as_mut_ptr(), self.signals.len());
+            crate::aot_generated::evaluate(self.signals.as_mut_ptr(), self.signals.len());
+        }
+        #[cfg(not(feature = "aot"))]
+        {
+            let lib = self.compiled_lib.as_ref().unwrap();
+            unsafe {
+                type EvalFn = unsafe extern "C" fn(*mut u64, usize);
+                let func: libloading::Symbol<EvalFn> =
+                    lib.get(b"evaluate").expect("evaluate function not found");
+                func(self.signals.as_mut_ptr(), self.signals.len());
+            }
         }
 
         // Update old_clocks to current clock values after evaluation
@@ -329,17 +343,29 @@ impl CoreSimulator {
         if !self.compiled {
             return;
         }
-        let lib = self.compiled_lib.as_ref().unwrap();
+        #[cfg(feature = "aot")]
         unsafe {
-            type TickFn = unsafe extern "C" fn(*mut u64, usize, *mut u64, *mut u64);
-            let func: libloading::Symbol<TickFn> =
-                lib.get(b"tick").expect("tick function not found");
-            func(
+            crate::aot_generated::tick(
                 self.signals.as_mut_ptr(),
                 self.signals.len(),
                 self.old_clocks.as_mut_ptr(),
                 self.next_regs.as_mut_ptr(),
             );
+        }
+        #[cfg(not(feature = "aot"))]
+        {
+            let lib = self.compiled_lib.as_ref().unwrap();
+            unsafe {
+                type TickFn = unsafe extern "C" fn(*mut u64, usize, *mut u64, *mut u64);
+                let func: libloading::Symbol<TickFn> =
+                    lib.get(b"tick").expect("tick function not found");
+                func(
+                    self.signals.as_mut_ptr(),
+                    self.signals.len(),
+                    self.old_clocks.as_mut_ptr(),
+                    self.next_regs.as_mut_ptr(),
+                );
+            }
         }
     }
 
@@ -803,6 +829,15 @@ impl CoreSimulator {
     // ========================================================================
 
     pub fn compile_code(&mut self, code: &str) -> Result<bool, String> {
+        #[cfg(feature = "aot")]
+        {
+            let _ = code;
+            self.compiled = true;
+            return Ok(true);
+        }
+
+        #[cfg(not(feature = "aot"))]
+        {
         // Compute hash for caching
         let code_hash = {
             let mut hash: u64 = 0xcbf29ce484222325;
@@ -869,5 +904,6 @@ impl CoreSimulator {
         }
         self.compiled = true;
         Ok(false)
+        }
     }
 }

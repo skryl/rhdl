@@ -12,6 +12,8 @@
 //! - ffi.rs: Core C ABI function exports
 
 mod core;
+#[cfg(feature = "aot")]
+mod aot_generated;
 mod extensions;
 mod ffi;
 mod vcd;
