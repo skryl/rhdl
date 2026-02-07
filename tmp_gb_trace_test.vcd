@@ -1,0 +1,22 @@
+$timescale 1ns $end
+$scope module top $end
+$var wire 8 !t gb_core__joy_do $end
+$var wire 1 "G gb_core__cpu_mreq_n $end
+$var wire 8 #0 joystick $end
+$var wire 1 $K gb_core__cpu_wr_n $end
+$var wire 2 $a gb_core__joy_p54 $end
+$var wire 16 &p gb_core__cpu_addr $end
+$var wire 1 '& gb_core__sel_joy $end
+$upscope $end
+$enddefinitions $end
+$dumpvars
+b00000000 !t
+0"G
+b00000000 #0
+0$K
+b00 $a
+b0000000000000000 &p
+0'&
+$end
+#0
+1$K

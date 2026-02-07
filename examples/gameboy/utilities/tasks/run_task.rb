@@ -156,7 +156,7 @@ module RHDL
 
         def initialize_terminal_state
           @running = false
-          @cycles_per_frame = options[:speed] || 100
+          @cycles_per_frame = options[:speed] || default_cycles_per_frame
           @debug = options[:debug] || false
           @dmg_colors = options[:dmg_colors] != false
           @audio_enabled = options[:audio] || false
@@ -184,6 +184,8 @@ module RHDL
           # Input tracking
           @last_key = nil
           @last_key_time = nil
+          @pressed_keys = {}
+          @key_hold_seconds = 0.08
 
           # Keyboard mode
           @keyboard_mode = :normal
@@ -252,6 +254,22 @@ module RHDL
           types[type] || "Unknown (#{type.to_s(16)})"
         end
 
+        def default_cycles_per_frame
+          mode = options[:mode] || :hdl
+          sim = options[:sim] || :compile
+
+          return 70_224 if mode == :verilog
+
+          case sim
+          when :compile, :jit
+            70_224
+          when :interpret
+            10_000
+          else
+            100
+          end
+        end
+
         def run_terminal
           @running = true
 
@@ -302,6 +320,7 @@ module RHDL
             frame_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
             handle_keyboard_input
+            release_expired_keys
             @runner.run_steps(@cycles_per_frame)
             update_performance_metrics
 
@@ -375,14 +394,14 @@ module RHDL
           end
 
           case ascii
-          when 65, 97, 90, 122  # A or Z - A button
-            inject_key(0)
-          when 83, 115, 88, 120  # S or X - B button
-            inject_key(1)
-          when 13, 10  # Enter - Start
-            inject_key(3)
-          when 127, 8  # Backspace - Select
-            inject_key(2)
+          when 90, 122  # Z - A button
+            inject_key(4)
+          when 88, 120  # X - B button
+            inject_key(5)
+          when 65, 97, 127, 8  # A / Backspace - Select
+            inject_key(6)
+          when 83, 115, 13, 10, 32  # S / Enter / Space - Start
+            inject_key(7)
           end
 
           @last_key = ascii
@@ -392,7 +411,26 @@ module RHDL
         end
 
         def inject_key(bit)
-          @runner.runner.inject_key(bit) if @runner.runner.respond_to?(:inject_key)
+          return unless @runner.runner.respond_to?(:inject_key)
+
+          @runner.runner.inject_key(bit)
+          @pressed_keys[bit] = Time.now + @key_hold_seconds
+        end
+
+        def release_key(bit)
+          return unless @runner.runner.respond_to?(:release_key)
+
+          @runner.runner.release_key(bit)
+          @pressed_keys.delete(bit)
+        end
+
+        def release_expired_keys
+          return if @pressed_keys.empty?
+
+          now = Time.now
+          @pressed_keys.keys.each do |bit|
+            release_key(bit) if now >= @pressed_keys[bit]
+          end
         end
 
         def handle_escape_sequence
@@ -409,13 +447,13 @@ module RHDL
               else
                 case seq
                 when '[A'  # Up
-                  inject_key(6)
+                  inject_key(2)
                 when '[B'  # Down
-                  inject_key(7)
+                  inject_key(3)
                 when '[C'  # Right
-                  inject_key(4)
+                  inject_key(0)
                 when '[D'  # Left
-                  inject_key(5)
+                  inject_key(1)
                 end
               end
             rescue IO::WaitReadable, Errno::EAGAIN
@@ -484,7 +522,7 @@ module RHDL
             line3 = format("Key:%-3s | KB:%s | Aud:%s | Rend:%s",
                            format_key(@last_key), kb_mode, audio_status, @renderer_type)
 
-            line4 = "ESC:cmd | R:renderer | Arrows:speed | ZXAS:ABSS"
+            line4 = "ESC:cmd | R:renderer | Arrows:speed | Z: A X: B A:Sel S:Sta"
 
             line1 = line1.ljust(debug_width)[0, debug_width]
             line2 = line2.ljust(debug_width)[0, debug_width]
@@ -588,6 +626,8 @@ module RHDL
         end
 
         def cleanup
+          @pressed_keys.keys.each { |bit| release_key(bit) } unless @pressed_keys.nil?
+
           if @audio_enabled && @runner.runner.respond_to?(:stop_audio)
             @runner.runner.stop_audio
           end

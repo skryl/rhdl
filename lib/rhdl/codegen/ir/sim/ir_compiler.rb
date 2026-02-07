@@ -361,6 +361,14 @@ module RHDL
           @fn_gameboy_write_wram.call(@ctx, addr, data)
         end
 
+        def read_oam(addr)
+          @fn_gameboy_read_oam.call(@ctx, addr) & 0xFF
+        end
+
+        def write_oam(addr, data)
+          @fn_gameboy_write_oam.call(@ctx, addr, data)
+        end
+
         def read_framebuffer
           len = @fn_gameboy_framebuffer_len.call(@ctx)
           return [] if len == 0
@@ -806,6 +814,18 @@ module RHDL
 
           @fn_gameboy_write_wram = Fiddle::Function.new(
             @lib['gameboy_ir_sim_write_wram'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_CHAR],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_gameboy_read_oam = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_read_oam'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
+            Fiddle::TYPE_CHAR
+          )
+
+          @fn_gameboy_write_oam = Fiddle::Function.new(
+            @lib['gameboy_ir_sim_write_oam'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_CHAR],
             Fiddle::TYPE_VOID
           )

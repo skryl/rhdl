@@ -6,15 +6,14 @@
 
 require 'optparse'
 
-$LOAD_PATH.unshift File.expand_path('../../..', __dir__)
-$LOAD_PATH.unshift File.expand_path('../utilities/tasks', __dir__)
+$LOAD_PATH.unshift File.expand_path('../../../lib', __dir__)
 
 require 'rhdl'
-require 'run_task'
+require_relative '../utilities/tasks/run_task'
 
 # Parse command line options
 options = {
-  speed: 100,
+  speed: nil,
   debug: false,
   dmg_colors: true,
   demo: false,
@@ -48,7 +47,7 @@ parser = OptionParser.new do |opts|
     options[:renderer] = :braille
   end
 
-  opts.on("-s", "--speed CYCLES", Integer, "Cycles per frame (default: 100)") do |v|
+  opts.on("-s", "--speed CYCLES", Integer, "Cycles per frame (auto by backend)") do |v|
     options[:speed] = v
   end
 
@@ -91,6 +90,25 @@ parser = OptionParser.new do |opts|
 end
 
 parser.parse!(ARGV)
+
+# Auto-select cycles/frame when user does not pass --speed.
+# 70_224 cycles = one full Game Boy frame (154 * 456 dots).
+# Using full-frame stepping avoids partial-frame tearing/noise in terminal output.
+if options[:speed].nil?
+  options[:speed] = case options[:mode]
+                    when :verilog
+                      70_224
+                    else
+                      case options[:sim]
+                      when :compile, :jit
+                        70_224
+                      when :interpret
+                        10_000
+                      else
+                        100
+                      end
+                    end
+end
 
 # Handle ROM file argument
 rom_file = ARGV.shift
