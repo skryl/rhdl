@@ -167,6 +167,7 @@ module RHDL
     wire :cpu_iorq_n
     wire :cpu_m1_n
     wire :cpu_mreq_n
+    wire :cpu_wr_n_edge
     wire :cpu_clken
 
     # Memory select signals
@@ -198,6 +199,12 @@ module RHDL
     wire :vram_bank
     wire :if_r, width: 5
     wire :ie_r, width: 8  # Updated in sequential block
+    wire :old_cpu_wr_n
+    wire :old_ack
+    wire :old_vblank_irq
+    wire :old_video_irq
+    wire :old_timer_irq
+    wire :old_serial_irq
     wire :cpu_speed
     wire :prepare_switch
 
@@ -221,6 +228,11 @@ module RHDL
     # Data outputs from subsystems
     wire :joy_do, width: 8
     wire :sb_o, width: 8
+    wire :sc_o, width: 8
+    wire :sc_start
+    wire :sc_int_clock
+    wire :sc_start_in
+    wire :sc_int_clock_in
     wire :timer_do, width: 8
     wire :video_do, width: 8
     wire :audio_do, width: 8
@@ -259,7 +271,14 @@ module RHDL
     wire :vram_addr_cpu, width: 13     # CPU VRAM address (0x8000-0x9FFF mapped to 0-0x1FFF)
     wire :vram_wren_cpu                # CPU VRAM write enable
     wire :vram_addr_ppu, width: 13     # PPU VRAM address
-    wire :vram_data_ppu, width: 8      # PPU VRAM data read
+    wire :vram_addr_mux, width: 13     # Shared VRAM address (CPU/PPU mux)
+    wire :vram_wren                    # VRAM bank 0 write enable
+    wire :vram1_wren                   # VRAM bank 1 write enable
+    wire :vram_rd                      # PPU VRAM read request (mode 3)
+    wire :vram_unused_addr, width: 13  # Unused B port tie-off
+    wire :vram_unused_data, width: 8   # Unused B port tie-off
+    wire :vram_unused_wren             # Unused B port tie-off
+    wire :dma_data, width: 8           # Source byte for OAM DMA engine
 
     # Reset signal (active-low for CPU)
     wire :reset_n                      # Active-low reset for CPU (inverted from active-high reset input)
@@ -273,10 +292,10 @@ module RHDL
     instance :link_unit, Link
 
     # Memory instances
-    instance :vram0, DPRAM, addr_width: 13
-    instance :vram1, DPRAM, addr_width: 13
-    instance :wram, DPRAM, addr_width: 15
-    instance :zpram, DPRAM, addr_width: 7
+    instance :vram0, DPRAM
+    instance :vram1, DPRAM
+    instance :wram, DPRAM15
+    instance :zpram, DPRAM7
 
     # Clock distribution
     port :clk_sys => [[:cpu, :clk], [:timer_unit, :clk_sys], [:video_unit, :clk],
@@ -287,17 +306,27 @@ module RHDL
                       [:zpram, :clock_a], [:zpram, :clock_b]]
 
     # Reset distribution
-    port :reset => [:timer_unit, :reset]
+    port :reset => [[:timer_unit, :reset], [:link_unit, :rst]]
 
-    # VRAM0 Port A (CPU side - read/write)
-    port :vram_addr_cpu => [:vram0, :address_a]
-    port :vram_wren_cpu => [:vram0, :wren_a]
+    # VRAM0 Port A (shared CPU/PPU side - read/write)
+    port :vram_addr_mux => [:vram0, :address_a]
+    port :vram_wren => [:vram0, :wren_a]
     port :cpu_do => [:vram0, :data_a]
     port [:vram0, :q_a] => :vram_do
 
-    # VRAM0 Port B (PPU side - read only)
-    port :vram_addr_ppu => [:vram0, :address_b]
-    port [:vram0, :q_b] => :vram_data_ppu
+    # VRAM0 Port B is unused in this model (reference uses it for savestate RAM bus).
+    port :vram_unused_addr => [:vram0, :address_b]
+    port :vram_unused_wren => [:vram0, :wren_b]
+    port :vram_unused_data => [:vram0, :data_b]
+
+    # VRAM1 mirrors VRAM0 wiring for CGB banked access.
+    port :vram_addr_mux => [:vram1, :address_a]
+    port :vram1_wren => [:vram1, :wren_a]
+    port :cpu_do => [:vram1, :data_a]
+    port [:vram1, :q_a] => :vram1_do
+    port :vram_unused_addr => [:vram1, :address_b]
+    port :vram_unused_wren => [:vram1, :wren_b]
+    port :vram_unused_data => [:vram1, :data_b]
 
     # ZPRAM (High RAM $FF80-$FFFE) - CPU read/write
     port :zpram_addr => [:zpram, :address_a]
@@ -377,9 +406,11 @@ module RHDL
     port :video_wr => [:video_unit, :cpu_wr]         # Write enable (active high)
     port :cpu_do => [:video_unit, :cpu_di]           # Write data from CPU
 
-    # Video VRAM interface (PPU reads tiles from VRAM)
+    # Video VRAM interface (PPU reads tiles from shared VRAM port A)
     port [:video_unit, :vram_addr] => :vram_addr_ppu
-    port :vram_data_ppu => [:video_unit, :vram_data]
+    port [:video_unit, :vram_rd] => :vram_rd
+    port :vram_do => [:video_unit, :vram_data]
+    port :vram1_do => [:video_unit, :vram1_data]
 
     # Video connections
     port [:video_unit, :irq] => :video_irq
@@ -395,6 +426,7 @@ module RHDL
     port [:video_unit, :vram_cpu_allow] => :vram_cpu_allow
     port [:video_unit, :dma_rd] => :dma_rd
     port [:video_unit, :dma_addr] => :dma_addr
+    port :dma_data => [:video_unit, :dma_data]
 
     # Audio connections
     port [:audio_unit, :snd_left] => :audio_l
@@ -409,7 +441,16 @@ module RHDL
     port [:hdma_unit, :dout] => :hdma_do
 
     # Link port connections
+    port :ce => [:link_unit, :ce]
+    port :sel_sc => [:link_unit, :sel_sc]
+    port :sel_sb => [:link_unit, :sel_sb]
+    port :cpu_wr_n_edge => [:link_unit, :cpu_wr_n]
+    port :sc_start_in => [:link_unit, :sc_start_in]
+    port :sc_int_clock_in => [:link_unit, :sc_int_clock_in]
+    port :cpu_do => [:link_unit, :sb_in]
     port [:link_unit, :sb] => :sb_o
+    port [:link_unit, :sc_start] => :sc_start
+    port [:link_unit, :sc_int_clock] => :sc_int_clock
     port [:link_unit, :serial_irq] => :serial_irq
     port [:link_unit, :serial_clk_out] => :serial_clk_out
     port [:link_unit, :serial_data_out] => :serial_data_out
@@ -430,11 +471,14 @@ module RHDL
 
       # Video write interface - PPU needs low byte of address and write enable
       video_addr <= cpu_addr[7..0]
-      video_wr <= sel_video_reg & ~cpu_mreq_n & ~cpu_wr_n
+      cpu_wr_n_edge <= mux(ce,
+                           ~(old_cpu_wr_n & ~cpu_wr_n),
+                           lit(1, width: 1))
+      video_wr <= ~cpu_wr_n_edge
 
       # Timer write interface - Timer needs 2-bit address and write enable
       timer_addr <= cpu_addr[1..0]
-      timer_wr <= ~cpu_wr_n
+      timer_wr <= ~cpu_wr_n_edge
 
       sel_joy <= (cpu_addr == lit(0xFF00, width: 16))
       sel_sb <= (cpu_addr == lit(0xFF01, width: 16))
@@ -483,21 +527,29 @@ module RHDL
       # IRQ active when any enabled interrupt is pending
       irq_n <= ~reduce_or(ie_r[4..0] & if_r)
 
+      sc_start_in <= cpu_do[7]
+      sc_int_clock_in <= cpu_do[0]
+      sc_o <= cat(sc_start, lit(0b111111, width: 6), sc_int_clock)
+
       # CPU data input mux (priority-encoded)
+      # Build from lowest-priority sources upward to keep parentheses manageable.
+      cpu_di_core = mux(sel_ff50, lit(0x00, width: 8), lit(0xFF, width: 8))
+      cpu_di_core = mux(sel_ie, ie_r, cpu_di_core)
+      cpu_di_core = mux(sel_zpram, zpram_do, cpu_di_core)
+      cpu_di_core = mux(sel_vram & vram_cpu_allow, mux(is_gbc & vram_bank, vram1_do, vram_do), cpu_di_core)
+      cpu_di_core = mux(sel_ext_bus, ext_bus_di, cpu_di_core)
+      cpu_di_core = mux(sel_wram, wram_do, cpu_di_core)
+      cpu_di_core = mux(sel_boot_rom, boot_do, cpu_di_core)
+      cpu_di_core = mux(sel_audio, audio_do, cpu_di_core)
+      cpu_di_core = mux(sel_video_oam & oam_cpu_allow, video_do, cpu_di_core)
+      cpu_di_core = mux(sel_video_reg, video_do, cpu_di_core)
+      cpu_di_core = mux(sel_timer, timer_do, cpu_di_core)
+      cpu_di_core = mux(sel_sc, sc_o, cpu_di_core)
+      cpu_di_core = mux(sel_sb, sb_o, cpu_di_core)
+      cpu_di_core = mux(sel_joy, joy_do, cpu_di_core)
+
       cpu_di <= mux(irq_ack, irq_vec,
-                mux(sel_if, cat(lit(0b111, width: 3), if_r),
-                mux(sel_timer, timer_do,
-                mux(sel_video_reg, video_do,
-                mux(sel_video_oam & oam_cpu_allow, video_do,
-                mux(sel_audio, audio_do,
-                mux(sel_boot_rom, boot_do,
-                mux(sel_wram, wram_do,   # WRAM data for both DMG and GBC
-                mux(sel_ext_bus, ext_bus_di,
-                mux(sel_vram & vram_cpu_allow, mux(is_gbc & vram_bank, vram1_do, vram_do),
-                mux(sel_zpram, zpram_do,
-                mux(sel_ie, ie_r,
-                mux(sel_ff50, lit(0x00, width: 8),   # FF50 returns 0 (fast boot disabled)
-                    lit(0xFF, width: 8))))))))))))))
+                mux(sel_if, cat(lit(0b111, width: 3), if_r), cpu_di_core))
 
       # Joypad output
       joy_do <= cat(lit(0b11, width: 2), joy_p54, joy_din)
@@ -519,24 +571,42 @@ module RHDL
       ext_bus_addr <= cpu_addr[14..0]
       ext_bus_a15 <= cpu_addr[15]
 
-      # Cart read when CPU is doing a memory read from ROM space
-      # ROM space is when A15=0 (addresses 0x0000-0x7FFF)
-      cart_rd <= sel_rom & ~cpu_mreq_n & ~cpu_rd_n
-      cart_wr <= sel_rom & ~cpu_mreq_n & ~cpu_wr_n
+      # Cartridge bus accesses: ROM (0000-7FFF) and external cart RAM (A000-BFFF).
+      cart_rd <= (sel_rom | sel_cram) & ~cpu_rd_n
+      cart_wr <= (sel_rom | sel_cram) & ~cpu_wr_n_edge
       cart_di <= cpu_do
 
       # External bus data input comes from cartridge
       ext_bus_di <= cart_do
 
+      # OAM DMA source byte.
+      # The source decode in the full reference design is richer; this keeps
+      # the simplified model deterministic and non-floating.
+      dma_data <= mux(dma_addr[15..13] == lit(0b100, width: 3),
+                      mux(is_gbc & vram_bank, vram1_do, vram_do),
+                      mux(dma_addr[15..13] == lit(0b110, width: 3),
+                          wram_do,
+                          ext_bus_di))
+
       # VRAM CPU interface
       # CPU addresses 0x8000-0x9FFF map to VRAM addresses 0x0000-0x1FFF
       vram_addr_cpu <= cpu_addr[12..0]
-      vram_wren_cpu <= sel_vram & ~cpu_mreq_n & ~cpu_wr_n & vram_cpu_allow & ce
+      vram_wren_cpu <= sel_vram & ~cpu_wr_n & vram_cpu_allow
+      vram_addr_mux <= mux(vram_rd, vram_addr_ppu, vram_addr_cpu)
+      vram_wren <= mux(vram_rd,
+                       lit(0, width: 1),
+                       vram_wren_cpu & ~(is_gbc & vram_bank))
+      vram1_wren <= mux(vram_rd,
+                        lit(0, width: 1),
+                        vram_wren_cpu & (is_gbc & vram_bank))
+      vram_unused_addr <= lit(0, width: 13)
+      vram_unused_wren <= lit(0, width: 1)
+      vram_unused_data <= lit(0, width: 8)
 
       # ZPRAM CPU interface
       # CPU addresses 0xFF80-0xFFFE map to ZPRAM addresses 0x00-0x7E (127 bytes)
       zpram_addr <= cpu_addr[6..0]
-      zpram_wren <= sel_zpram & ~cpu_wr_n & ~cpu_mreq_n & ce
+      zpram_wren <= sel_zpram & ~cpu_wr_n
 
       # WRAM CPU interface
       # CPU addresses 0xC000-0xDFFF map to WRAM
@@ -554,62 +624,59 @@ module RHDL
       wram_addr <= wram_addr_bank
 
       # WRAM write enable (when sel_wram active and CPU writes)
-      wram_wren <= sel_wram & ~cpu_wr_n & ~cpu_mreq_n & ce
+      wram_wren <= sel_wram & ~cpu_wr_n_edge
     end
 
     # Sequential logic for registers
     # boot_rom_enabled: 1 to run boot ROM (initializes hardware properly)
     # joy_din_sampled/joy_din_prev: 0xF = all buttons released (active low)
-    sequential clock: :clk_sys, reset: :reset, reset_values: { boot_rom_enabled: 1, if_r: 0, ie_r: 0, joy_din_sampled: 0xF, joy_din_prev: 0xF } do
+    sequential clock: :clk_sys, reset: :reset, reset_values: { boot_rom_enabled: 1, if_r: 0, ie_r: 0, joy_p54: 0x3, joy_din_sampled: 0xF, joy_din_prev: 0xF, old_cpu_wr_n: 1, old_ack: 0, old_vblank_irq: 0, old_video_irq: 0, old_timer_irq: 0, old_serial_irq: 0 } do
       # Boot ROM enable (disabled by writing to FF50)
-      # Disable boot ROM on any write to FF50 (MiSTer boot ROM writes 0, original writes non-zero)
-      boot_rom_enabled <= mux(ce & (cpu_addr == lit(0xFF50, width: 16)) & ~cpu_wr_n,
+      # Match reference: disable only when bit 0 is written as 1.
+      boot_rom_enabled <= mux(ce & (cpu_addr == lit(0xFF50, width: 16)) & ~cpu_wr_n_edge & cpu_do[0],
                               lit(0, width: 1),
                               boot_rom_enabled)
 
       # Interrupt Enable register ($FFFF)
       # Bit 0: V-Blank, Bit 1: LCD STAT, Bit 2: Timer, Bit 3: Serial, Bit 4: Joypad
       # CPU writes to enable/disable interrupts
-      ie_r <= mux(ce & sel_ie & ~cpu_wr_n,
+      ie_r <= mux(ce & sel_ie & ~cpu_wr_n_edge,
                   cpu_do,
                   ie_r)
 
       # Interrupt Flag register ($FF0F)
-      # Bit 0: V-Blank, Bit 1: LCD STAT, Bit 2: Timer, Bit 3: Serial, Bit 4: Joypad
-      # Set by interrupt sources, cleared by CPU writing 1 to the bit OR automatically
-      # when the interrupt is acknowledged by the CPU.
-      #
-      # Start with current value
-      if_r_new = if_r
+      # Match reference edge behavior: set IF bits on rising edges.
+      old_vblank_irq <= mux(ce, vblank_irq, old_vblank_irq)
+      old_video_irq <= mux(ce, video_irq, old_video_irq)
+      old_timer_irq <= mux(ce, timer_irq, old_timer_irq)
+      old_serial_irq <= mux(ce, serial_irq, old_serial_irq)
 
-      # Set bits when interrupts fire (on rising edge via pulse signals from sources)
-      if_r_new = mux(vblank_irq, if_r_new | lit(0x01, width: 5), if_r_new)
-      if_r_new = mux(video_irq, if_r_new | lit(0x02, width: 5), if_r_new)
-      if_r_new = mux(timer_irq, if_r_new | lit(0x04, width: 5), if_r_new)
-      if_r_new = mux(serial_irq, if_r_new | lit(0x08, width: 5), if_r_new)
+      if_r_new = if_r
+      if_r_new = mux(~old_vblank_irq & vblank_irq, if_r_new | lit(0x01, width: 5), if_r_new)
+      if_r_new = mux(~old_video_irq & video_irq, if_r_new | lit(0x02, width: 5), if_r_new)
+      if_r_new = mux(~old_timer_irq & timer_irq, if_r_new | lit(0x04, width: 5), if_r_new)
+      if_r_new = mux(~old_serial_irq & serial_irq, if_r_new | lit(0x08, width: 5), if_r_new)
       if_r_new = mux(joypad_irq, if_r_new | lit(0x10, width: 5), if_r_new)
 
-      # CPU can clear interrupt flags by writing to $FF0F
-      # Writing 1 to a bit clears it (standard interrupt acknowledge)
-      if_r_new = mux(ce & sel_if & ~cpu_wr_n,
-                     if_r_new & ~cpu_do[4..0],
-                     if_r_new)
+      # Reference behavior: clear highest-priority IF bit on irq-ack falling edge.
+      ack_fall = old_ack & ~irq_ack
+      if_r_new = mux(ack_fall & if_r[0] & ie_r[0], if_r_new & ~lit(0x01, width: 5), if_r_new)
+      if_r_new = mux(ack_fall & ~(if_r[0] & ie_r[0]) & if_r[1] & ie_r[1], if_r_new & ~lit(0x02, width: 5), if_r_new)
+      if_r_new = mux(ack_fall & ~(if_r[0] & ie_r[0]) & ~(if_r[1] & ie_r[1]) & if_r[2] & ie_r[2], if_r_new & ~lit(0x04, width: 5), if_r_new)
+      if_r_new = mux(ack_fall & ~(if_r[0] & ie_r[0]) & ~(if_r[1] & ie_r[1]) & ~(if_r[2] & ie_r[2]) & if_r[3] & ie_r[3], if_r_new & ~lit(0x08, width: 5), if_r_new)
+      if_r_new = mux(ack_fall & ~(if_r[0] & ie_r[0]) & ~(if_r[1] & ie_r[1]) & ~(if_r[2] & ie_r[2]) & ~(if_r[3] & ie_r[3]) & if_r[4] & ie_r[4], if_r_new & ~lit(0x10, width: 5), if_r_new)
 
-      # Auto-clear IF bit when interrupt is acknowledged by CPU
-      # The bit to clear corresponds to the highest-priority pending interrupt
-      # Priority: VBlank > LCD STAT > Timer > Serial > Joypad
-      irq_clear_mask = mux(if_r[0] & ie_r[0], lit(0x01, width: 5),
-                       mux(if_r[1] & ie_r[1], lit(0x02, width: 5),
-                       mux(if_r[2] & ie_r[2], lit(0x04, width: 5),
-                       mux(if_r[3] & ie_r[3], lit(0x08, width: 5),
-                       mux(if_r[4] & ie_r[4], lit(0x10, width: 5),
-                           lit(0x00, width: 5))))))
+      # Match reference ordering: direct IF write overrides same-cycle set/clear.
+      if_r_new = mux(ce & sel_if & ~cpu_wr_n_edge, cpu_do[4..0], if_r_new)
+      if_r <= mux(ce, if_r_new, if_r)
+      old_ack <= mux(ce, irq_ack, old_ack)
+      old_cpu_wr_n <= mux(ce, cpu_wr_n, old_cpu_wr_n)
 
-      if_r_new = mux(irq_ack,
-                     if_r_new & ~irq_clear_mask,
-                     if_r_new)
-
-      if_r <= if_r_new
+      # Joypad select register (FF00 bits P15/P14).
+      # 1 = not selected, 0 = selected (active low).
+      joy_p54 <= mux(ce & sel_joy & ~cpu_wr_n_edge,
+                     cpu_do[5..4],
+                     joy_p54)
 
       # Joypad edge detection pipeline registers
       # joy_din_sampled captures the current joy_din input (1 cycle delay)

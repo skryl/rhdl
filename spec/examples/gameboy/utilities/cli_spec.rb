@@ -325,6 +325,19 @@ RSpec.describe 'Game Boy CLI' do
         lines = output.split("\n")
         expect(lines.length).to eq(72)  # 144 / 2 rows
       end
+
+      it 'samples different source rows for top and bottom half-blocks' do
+        # Row 0 = lightest color, row 1 = darkest color.
+        # The first rendered line should use row 0 for foreground and row 1 for background.
+        framebuffer = Array.new(144) { Array.new(160, 0) }
+        framebuffer[1] = Array.new(160, 3)
+
+        output = renderer.render_color(framebuffer)
+        first_line = output.split("\n").first
+
+        expect(first_line).to include("\e[38;2;155;188;15m")
+        expect(first_line).to include("\e[48;2;15;56;15m")
+      end
     end
 
     describe '#frame' do

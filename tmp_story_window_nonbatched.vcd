@@ -1,0 +1,67 @@
+$timescale 1ns $end
+$scope module top $end
+$var wire 1 & gb_core__video_unit__lcd_clkena $end
+$var wire 8 ) gb_core__ie_r $end
+$var wire 8 H gb_core__video_unit__pcnt $end
+$var wire 1 ] gb_core__cpu_wr_n_edge $end
+$var wire 7 _ gb_core__video_unit__h_cnt $end
+$var wire 3 q gb_core__cpu__m_cycle $end
+$var wire 1 !" gb_core__irq_ack $end
+$var wire 1 !2 gb_core__sel_vram $end
+$var wire 1 !3 gb_core__cpu__halt $end
+$var wire 8 !O gb_core__video_unit__v_cnt $end
+$var wire 16 !Q gb_core__cpu_addr $end
+$var wire 1 "h gb_core__cpu_wr_n $end
+$var wire 1 #" gb_core__joypad_irq $end
+$var wire 8 #C gb_core__video_unit__vram_data $end
+$var wire 8 #X gb_core__cpu_di $end
+$var wire 8 #w gb_core__joy_do $end
+$var wire 2 $? gb_core__video_unit__mode $end
+$var wire 5 $X gb_core__if_r $end
+$var wire 8 $i gb_core__cpu_do $end
+$var wire 1 $~ gb_core__irq_n $end
+$var wire 13 &2 gb_core__video_unit__vram_addr $end
+$var wire 4 &S gb_core__joy_din $end
+$var wire 3 &[ gb_core__cpu__t_state $end
+$var wire 1 &\ gb_core__cpu_rd_n $end
+$var wire 16 &p gb_core__cpu__debug_pc $end
+$var wire 8 'I gb_core__vram_do $end
+$upscope $end
+$enddefinitions $end
+$dumpvars
+0&
+b00000000 )
+b00000000 H
+0]
+b0000000 _
+b000 q
+0!"
+0!2
+0!3
+b00000000 !O
+b0000000000000000 !Q
+0"h
+0#"
+b00000000 #C
+b00000000 #X
+b00000000 #w
+b00 $?
+b00000 $X
+b00000000 $i
+0$~
+b0000000000000 &2
+b0000 &S
+b000 &[
+0&\
+b0000000000000000 &p
+b00000000 'I
+$end
+#0
+1&
+1!2
+1!3
+b00000001 #C
+b1100110111110101 $?
+b11011111 &[
+b0000000000000001 &p
+b01110011 'I

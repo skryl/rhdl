@@ -46,11 +46,12 @@ module RHDL
     output :sc_int_clock      # Internal clock selected
 
     # Internal state
-    wire :sb_reg, width: 8        # Serial buffer register
-    wire :shift_counter, width: 3 # Bit counter (0-7)
-    wire :transfer_active         # Transfer in progress
-    wire :clock_counter, width: 9 # Clock divider for 8192 Hz
-    wire :prev_ext_clk            # Previous external clock state
+    wire :sb_reg, width: 8            # Serial buffer register
+    wire :shift_counter, width: 3     # Bit counter (0-7)
+    wire :transfer_active             # Transfer in progress
+    wire :clock_counter, width: 9     # Clock divider for 8192 Hz
+    wire :prev_ext_clk                # Previous external clock state
+    wire :sc_int_clock_reg            # Internal clock select latch
 
     # Clock rate: 8192 Hz internal (4MHz / 512)
     CLOCK_DIV = 512
@@ -61,13 +62,13 @@ module RHDL
 
       # Control signals
       sc_start <= transfer_active
-      sc_int_clock <= sc_int_clock
+      sc_int_clock <= sc_int_clock_reg
 
       # Serial data output is MSB of shift register
       serial_data_out <= sb_reg[7]
 
       # Clock output when using internal clock
-      serial_clk_out <= mux(sc_int_clock & transfer_active,
+      serial_clk_out <= mux(sc_int_clock_reg & transfer_active,
                             clock_counter[8],
                             lit(1, width: 1))
     end
@@ -79,65 +80,57 @@ module RHDL
       clock_counter: 0,
       prev_ext_clk: 0,
       serial_irq: 0,
-      sc_int_clock: 0
+      sc_int_clock_reg: 0
     } do
-      # Clear IRQ each cycle (single pulse)
-      serial_irq <= lit(0, width: 1)
-
-      # SB register write
-      sb_reg <= mux(ce & sel_sb & ~cpu_wr_n,
-                    sb_in,
-                    sb_reg)
-
-      # SC register write - start transfer
-      transfer_active <= mux(ce & sel_sc & ~cpu_wr_n & sc_start_in,
-                             lit(1, width: 1),
-                             transfer_active)
-      sc_int_clock <= mux(ce & sel_sc & ~cpu_wr_n,
-                          sc_int_clock_in,
-                          sc_int_clock)
-
-      # Reset shift counter on transfer start
-      shift_counter <= mux(ce & sel_sc & ~cpu_wr_n & sc_start_in,
-                           lit(0, width: 3),
-                           shift_counter)
-
-      # Internal clock counter
-      clock_counter <= mux(ce & transfer_active & sc_int_clock,
-                           clock_counter + lit(1, width: 9),
-                           clock_counter)
-
-      # External clock edge detection
-      prev_ext_clk <= serial_clk_in
+      write_sb = ce & sel_sb & ~cpu_wr_n
+      write_sc = ce & sel_sc & ~cpu_wr_n
+      start_transfer = write_sc & sc_start_in
 
       # Shift on clock edge (internal or external)
-      internal_clock_tick = sc_int_clock & (clock_counter == lit(CLOCK_DIV - 1, width: 9))
-      external_clock_tick = ~sc_int_clock & prev_ext_clk & ~serial_clk_in
-
+      internal_clock_tick = sc_int_clock_reg & (clock_counter == lit(CLOCK_DIV - 1, width: 9))
+      external_clock_tick = ~sc_int_clock_reg & prev_ext_clk & ~serial_clk_in
       clock_tick = transfer_active & (internal_clock_tick | external_clock_tick)
+      transfer_done = ce & clock_tick & (shift_counter == lit(7, width: 3))
 
-      # Shift register operation
-      sb_reg <= mux(ce & clock_tick,
-                    cat(sb_reg[6..0], serial_data_in),
-                    sb_reg)
+      # Build deterministic next-state values once per register.
+      sb_next = sb_reg
+      shift_counter_next = shift_counter
+      transfer_active_next = transfer_active
+      clock_counter_next = clock_counter
+      sc_int_clock_next = sc_int_clock_reg
+      serial_irq_next = lit(0, width: 1)
 
-      shift_counter <= mux(ce & clock_tick,
-                           shift_counter + lit(1, width: 3),
-                           shift_counter)
+      # CPU register writes.
+      sb_next = mux(write_sb, sb_in, sb_next)
+      sc_int_clock_next = mux(write_sc, sc_int_clock_in, sc_int_clock_next)
+      transfer_active_next = mux(start_transfer, lit(1, width: 1), transfer_active_next)
+      shift_counter_next = mux(start_transfer, lit(0, width: 3), shift_counter_next)
 
-      # Reset clock counter after tick
-      clock_counter <= mux(ce & internal_clock_tick,
-                           lit(0, width: 9),
-                           clock_counter)
+      # Internal clock divider.
+      clock_counter_next = mux(ce & transfer_active & sc_int_clock_reg,
+                               clock_counter + lit(1, width: 9),
+                               clock_counter_next)
 
-      # Transfer complete after 8 bits
-      transfer_active <= mux(ce & clock_tick & (shift_counter == lit(7, width: 3)),
-                             lit(0, width: 1),
-                             transfer_active)
+      # Transfer shift + counter updates.
+      sb_next = mux(ce & clock_tick, cat(sb_reg[6..0], serial_data_in), sb_next)
+      shift_counter_next = mux(ce & clock_tick,
+                               shift_counter + lit(1, width: 3),
+                               shift_counter_next)
+      clock_counter_next = mux(ce & internal_clock_tick,
+                               lit(0, width: 9),
+                               clock_counter_next)
 
-      serial_irq <= mux(ce & clock_tick & (shift_counter == lit(7, width: 3)),
-                        lit(1, width: 1),
-                        serial_irq)
+      # Transfer completion and IRQ pulse.
+      transfer_active_next = mux(transfer_done, lit(0, width: 1), transfer_active_next)
+      serial_irq_next = mux(transfer_done, lit(1, width: 1), serial_irq_next)
+
+      sb_reg <= sb_next
+      shift_counter <= shift_counter_next
+      transfer_active <= transfer_active_next
+      clock_counter <= clock_counter_next
+      sc_int_clock_reg <= sc_int_clock_next
+      serial_irq <= serial_irq_next
+      prev_ext_clk <= serial_clk_in
     end
       end
     end

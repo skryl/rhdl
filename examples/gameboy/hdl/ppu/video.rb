@@ -130,10 +130,11 @@ module RHDL
 
     # Mode signals
     wire :mode_wire, width: 2
+    wire :mode_prev, width: 2
     wire :vblank
     wire :oam_eval
     wire :mode3
-    wire :hblank
+    wire :lyc_match_prev
 
     # Rendering state
     wire :pcnt, width: 8       # Pixel counter (0-159)
@@ -189,9 +190,10 @@ module RHDL
       # Mode3 only active when LCD is on (allowing VRAM access when LCD is disabled)
       mode3 <= lcdc_on & ~vblank & (h_cnt >= lit(20, width: 7)) & (h_cnt < lit(63, width: 7))
 
-      # LCD pixel output during mode 3
-      # lcd_clkena pulses when we output a pixel (during visible drawing)
-      lcd_clkena <= mode3 & lcdc_on & (pcnt < lit(160, width: 8)) & ce & (h_div_cnt == lit(0, width: 2))
+      # LCD pixel output during mode 3.
+      # One pixel is emitted per `ce` tick while drawing (up to 160 visible pixels).
+      # `h_cnt/h_div_cnt` still define the overall 456-dot line timing.
+      lcd_clkena <= mode3 & lcdc_on & (pcnt < lit(160, width: 8)) & ce
 
       # =======================================================================
       # Tile Fetcher - Calculate VRAM addresses for BG tiles
@@ -222,9 +224,10 @@ module RHDL
       tile_data_addr <= mux(lcdc_tile_data_sel,
                             # Mode 1: unsigned, base 0x0000
                             cat(lit(0, width: 1), tile_num, bg_y[2..0], lit(0, width: 1)),
-                            # Mode 0: signed, base 0x1000 (tile 0 at 0x1000)
-                            # For signed: tile_num is treated as signed, add 0x80 for unsigned offset
-                            cat(lit(1, width: 1), (tile_num ^ lit(0x80, width: 8)), bg_y[2..0], lit(0, width: 1)))
+                            # Mode 0: signed, base 0x0800 with XOR bias.
+                            # This maps tile 0 -> 0x1000, -128 -> 0x0800, +127 -> 0x17F0.
+                            cat(lit(0, width: 1), (tile_num ^ lit(0x80, width: 8)), bg_y[2..0], lit(0, width: 1)) +
+                            lit(0x0800, width: 13))
 
       # VRAM address mux based on fetch phase
       # Phase 0: Read tile map entry
@@ -286,8 +289,17 @@ module RHDL
       dma_rd <= dma_active
 
       # Interrupts
-      vblank_irq <= (v_cnt == lit(144, width: 8)) & (h_cnt == lit(0, width: 7)) & (h_div_cnt == lit(0, width: 2))
-      irq <= vblank_irq  # Simplified - real GB has more STAT interrupt sources
+      # Reference contract: video exports level-style interrupt sources and the
+      # top-level IF logic in gb.rb latches rising edges.
+      lyc_match = lyc == v_cnt
+      int_lyc = lcdc_on & stat[6] & lyc_match
+      int_oam = lcdc_on & stat[5] & (mode_wire == lit(2, width: 2))
+      int_vbl = lcdc_on & stat[4] & (mode_wire == lit(1, width: 2))
+      int_hbl = lcdc_on & stat[3] & (mode_wire == lit(0, width: 2)) & ~vblank
+      irq <= int_lyc | int_oam | int_hbl | int_vbl
+
+      # VBlank source for IF bit 0: active for mode 1.
+      vblank_irq <= lcdc_on & (mode_wire == lit(1, width: 2))
 
       # CPU read data mux
       cpu_do <= mux(cpu_sel_oam, lit(0xFF, width: 8),  # OAM read handled by sprites
@@ -333,32 +345,41 @@ module RHDL
       fetch_phase: 0,
       tile_num: 0,
       tile_data_lo: 0,
-      tile_data_hi: 0
+      tile_data_hi: 0,
+      mode_prev: 0,
+      lyc_match_prev: 0
     } do
-      # Horizontal counter (0-113 at 1MHz, so 0-454 at 4MHz with h_div_cnt)
-      # Note: Counters run even when LCD is off - only rendering is disabled
-      h_div_cnt <= mux(ce, h_div_cnt + lit(1, width: 2), h_div_cnt)
+      # Horizontal/vertical timing counters.
+      # Match DMG behavior more closely: when LCD is off, LY timing resets.
+      h_div_cnt <= mux(~lcdc_on,
+                       lit(0, width: 2),
+                       mux(ce, h_div_cnt + lit(1, width: 2), h_div_cnt))
 
-      h_cnt <= mux(ce & (h_div_cnt == lit(3, width: 2)),
-                   mux(h_cnt == lit(113, width: 7),
-                       lit(0, width: 7),
-                       h_cnt + lit(1, width: 7)),
-                   h_cnt)
+      h_cnt <= mux(~lcdc_on,
+                   lit(0, width: 7),
+                   mux(ce & (h_div_cnt == lit(3, width: 2)),
+                       mux(h_cnt == lit(113, width: 7),
+                           lit(0, width: 7),
+                           h_cnt + lit(1, width: 7)),
+                       h_cnt))
 
       # Vertical counter (0-153)
-      v_cnt <= mux(ce & (h_div_cnt == lit(3, width: 2)) & (h_cnt == lit(113, width: 7)),
-                   mux(v_cnt == lit(153, width: 8),
-                       lit(0, width: 8),
-                       v_cnt + lit(1, width: 8)),
-                   v_cnt)
+      v_cnt <= mux(~lcdc_on,
+                   lit(0, width: 8),
+                   mux(ce & (h_div_cnt == lit(3, width: 2)) & (h_cnt == lit(113, width: 7)),
+                       mux(v_cnt == lit(153, width: 8),
+                           lit(0, width: 8),
+                           v_cnt + lit(1, width: 8)),
+                       v_cnt))
 
-      # Pixel counter for Mode 3 rendering
-      # Reset at start of mode 3 (h_cnt == 20), increment when outputting pixels
+      # Pixel counter for Mode 3 rendering.
+      # Reset at start of mode 3 (h_cnt == 20, h_div_cnt == 0), then increment
+      # each `ce` tick while in mode 3 until 160 visible pixels are produced.
       pcnt <= mux(~lcdc_on,
                   lit(0, width: 8),
                   mux(ce & (h_div_cnt == lit(0, width: 2)) & (h_cnt == lit(20, width: 7)),
                       lit(0, width: 8),  # Reset at start of mode 3
-                      mux(ce & (h_div_cnt == lit(0, width: 2)) &
+                      mux(ce &
                           (h_cnt >= lit(20, width: 7)) & (h_cnt < lit(63, width: 7)) &
                           (pcnt < lit(160, width: 8)) & ~vblank,
                           pcnt + lit(1, width: 8),  # Increment during mode 3
@@ -429,6 +450,14 @@ module RHDL
                 cpu_di, wy)
       wx <= mux(ce_cpu & cpu_sel_reg & cpu_wr & (cpu_addr == lit(0x4B, width: 8)),
                 cpu_di, wx)
+
+      # Latches for interrupt transition detection.
+      mode_prev <= mux(~lcdc_on,
+                       lit(0, width: 2),
+                       mux(ce, mode_wire, mode_prev))
+      lyc_match_prev <= mux(~lcdc_on,
+                            lit(0, width: 1),
+                            mux(ce, lyc == v_cnt, lyc_match_prev))
     end
       end
     end

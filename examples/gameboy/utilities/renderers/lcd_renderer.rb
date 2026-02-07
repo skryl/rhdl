@@ -110,8 +110,9 @@ module RHDL
           line = String.new
           @chars_wide.times do |char_x|
             px = (char_x * x_scale).to_i
-            py_top = ((char_y * 2) * y_scale / 2).to_i
-            py_bot = ((char_y * 2 + 1) * y_scale / 2).to_i
+            # Sample two vertically adjacent source pixels for each half-block cell.
+            py_top = ((char_y * 2) * y_scale).to_i
+            py_bot = ((char_y * 2 + 1) * y_scale).to_i
 
             px = [px, SCREEN_WIDTH - 1].min
             py_top = [py_top, SCREEN_HEIGHT - 1].min

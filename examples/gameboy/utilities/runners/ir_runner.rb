@@ -13,6 +13,7 @@
 require_relative '../../gameboy'
 require_relative '../output/speaker'
 require_relative '../renderers/lcd_renderer'
+require_relative '../renderers/framebuffer_decoder'
 
 module RHDL
   module Examples
@@ -107,6 +108,8 @@ module RHDL
         @cycles = 0
         @halted = false
         @screen_dirty = false
+        @decoded_framebuffer_rows = Array.new(SCREEN_HEIGHT) { Array.new(SCREEN_WIDTH, 0) }
+        @decoded_frame_count = -1
 
         # Memory
         @rom = []
@@ -129,7 +132,15 @@ module RHDL
         end
 
         @sim.reset
-        initialize_inputs unless @use_batched
+        if @use_batched
+          # Batched paths skip initialize_inputs, so ensure deterministic defaults.
+          poke_input('reset', 0)
+          poke_input('joystick', 0xFF)
+          poke_input('is_gbc', 0)
+          poke_input('is_sgb', 0) rescue nil
+        else
+          initialize_inputs
+        end
 
         # Load boot ROM if available
         load_boot_rom if File.exist?(DMG_BOOT_ROM_PATH)
@@ -219,6 +230,10 @@ module RHDL
       end
 
       def reset
+        # Ensure inputs are stable before running reset cycles.
+        # In particular, joypad is active-low and must default to all released.
+        poke_input('joystick', 0xFF)
+
         if @use_batched && @sim.respond_to?(:gameboy_mode?) && @sim.gameboy_mode?
           # Use run_gb_cycles for Game Boy - run_cpu_cycles corrupts signals[0] (reset)
           poke_input('reset', 1)
@@ -243,6 +258,8 @@ module RHDL
 
         @cycles = 0
         @halted = false
+        @decoded_framebuffer_rows.each { |row| row.fill(0) } if @decoded_framebuffer_rows
+        @decoded_frame_count = -1
       end
 
       # Run N machine cycles
@@ -335,19 +352,60 @@ module RHDL
       end
 
       def read_framebuffer
-        # Use native framebuffer capture if available
-        if @use_batched && @sim.respond_to?(:read_framebuffer) && @sim.respond_to?(:gameboy_mode?) && @sim.gameboy_mode?
-          # Get flat 1D array from native code and reshape to 2D
+        # Prefer native framebuffer captured from LCD pixel stream.
+        # The VRAM decoder cannot represent mid-frame register effects and can
+        # produce repeated/corrupted imagery for real games like Prince of Persia.
+        if @use_batched && @sim.respond_to?(:read_framebuffer)
           flat = @sim.read_framebuffer
-          Array.new(SCREEN_HEIGHT) do |y|
-            Array.new(SCREEN_WIDTH) do |x|
-              flat[y * SCREEN_WIDTH + x] || 0
-            end
-          end
-        else
-          # Placeholder when native capture not available
-          Array.new(SCREEN_HEIGHT) { Array.new(SCREEN_WIDTH, 0) }
+          return FramebufferDecoder.flat_to_rows(flat)
         end
+
+        # Fallback for environments without native framebuffer capture.
+        if @use_batched && @sim.respond_to?(:gameboy_mode?) && @sim.gameboy_mode?
+          return decode_framebuffer_from_memory
+        end
+
+        Array.new(SCREEN_HEIGHT) { Array.new(SCREEN_WIDTH, 0) }
+      end
+
+      def decode_framebuffer_from_memory
+        frame_id = @sim.respond_to?(:frame_count) ? @sim.frame_count : (@cycles / 70_224)
+        return @decoded_framebuffer_rows if frame_id == @decoded_frame_count
+
+        lcdc = safe_peek('gb_core__video_unit__lcdc') & 0xFF
+        scx = safe_peek('gb_core__video_unit__scx') & 0xFF
+        scy = safe_peek('gb_core__video_unit__scy') & 0xFF
+        bgp = safe_peek('gb_core__video_unit__bgp') & 0xFF
+        obp0 = safe_peek('gb_core__video_unit__obp0') & 0xFF
+        obp1 = safe_peek('gb_core__video_unit__obp1') & 0xFF
+        wx = safe_peek('gb_core__video_unit__wx') & 0xFF
+        wy = safe_peek('gb_core__video_unit__wy') & 0xFF
+
+        vram = Array.new(8192) { |i| @sim.read_vram(i) & 0xFF }
+        oam = if @sim.respond_to?(:read_oam)
+                Array.new(160) { |i| @sim.read_oam(i) & 0xFF }
+              else
+                Array.new(160, 0)
+              end
+
+        flat = FramebufferDecoder.decode_dmg_flat(
+          vram: vram,
+          oam: oam,
+          lcdc: lcdc,
+          scx: scx,
+          scy: scy,
+          bgp: bgp,
+          obp0: obp0,
+          obp1: obp1,
+          wx: wx,
+          wy: wy
+        )
+
+        @decoded_framebuffer_rows = FramebufferDecoder.flat_to_rows(flat)
+        @decoded_frame_count = frame_id
+        @decoded_framebuffer_rows
+      rescue StandardError
+        @decoded_framebuffer_rows
       end
 
       def read_screen
