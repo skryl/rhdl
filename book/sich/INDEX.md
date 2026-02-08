@@ -204,17 +204,17 @@
 
   - **Implementing Apply** - Function application binds arguments to parameters and evaluates the body. We manage environments and handle primitive vs compound procedures.
 
-- [18 - Lambda Comes Full Circle](part-5-metalinguistic/ch-18-lambda-full-circle/ch-18-chapter.md) - The revelation: muxes are Church booleans, registers are Y combinators—we were computing lambda all along.
+- [18 - Lambda Comes Full Circle](part-5-metalinguistic/ch-18-lambda-full-circle/ch-18-chapter.md) - The metacircular moment: our Lisp simulates the CPU that runs our Lisp.
 
-  - **Church Booleans and Muxes** - True and False as functions that select their first or second argument. A multiplexer implements exactly this selection—it IS a Church boolean.
+  - **Gates as Functions** - AND, OR, NOT, MUX are just Lisp functions. A gate netlist is an s-expression. We write a gate simulator in 50 lines.
 
-  - **Church Numerals and Counters** - Numbers as repeated function application. A counter's tick is successor; the count is encoded in the state—hardware implements Church numerals.
+  - **Loading Our CPU's Netlist** - We export our CPU to a gate-level netlist and load it into Lisp. The machine becomes data.
 
-  - **The Y Combinator and Feedback** - Fixed-point combinators enable recursion without naming. Flip-flops create fixed points through feedback—they ARE Y combinators.
+  - **The Metacircular Machine** - Our Lisp interpreter simulates the CPU it's running on. We run Lisp on the simulated CPU. The loop closes.
 
-  - **Hardware as Lambda Calculus** - Every circuit computes a lambda term. Wires are variables, gates are applications, feedback is fixed-point. The isomorphism is complete.
+  - **Why This Works** - Muxes are Church booleans, flip-flops are fixed points. Hardware was always lambda calculus. The metacircular loop reveals the isomorphism.
 
-  - **The Isomorphism Revealed** - We started with transistors and arrived at lambda. But lambda was there all along, in every mux and every flip-flop. Hardware and software are one.
+  - **Hardware and Software Are One** - We started with transistors and arrived at lambda. But lambda was there all along, in every gate. The simulation proves it.
 
 ### Part VI: Advanced Topics
 
