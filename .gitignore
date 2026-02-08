@@ -53,3 +53,7 @@ web/node_modules/
 
 # Web wasm build artifacts
 web/assets/pkg/*
+
+# Local Game Boy debug artifacts
+/tmp_*
+/examples/gameboy/tmp_*

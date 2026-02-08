@@ -1,0 +1,77 @@
+$timescale 1ns $end
+$scope module gameboy $end
+$var wire 8 I gb_core__video_unit__scx $end
+$var wire 8 N gb_core__vram_do $end
+$var wire 8 != gb_core__video_unit__tile_data_lo $end
+$var wire 8 !B gb_core__video_unit__wx $end
+$var wire 1 !S gb_core__vblank_irq $end
+$var wire 8 !T gb_core__video_unit__scy $end
+$var wire 1 !Z gb_core__vram_wren $end
+$var wire 13 !_ gb_core__vram_addr_ppu $end
+$var wire 8 "2 gb_core__video_unit__wy $end
+$var wire 2 "A gb_core__video_unit__mode_wire $end
+$var wire 13 "X gb_core__video_unit__vram_addr $end
+$var wire 1 #) gb_core__irq_n $end
+$var wire 8 #F gb_core__ie_r $end
+$var wire 7 #e gb_core__video_unit__h_cnt $end
+$var wire 8 #g gb_core__video_unit__tile_num $end
+$var wire 13 #q gb_core__vram_addr_mux $end
+$var wire 1 $_ gb_core__irq_ack $end
+$var wire 2 $g gb_core__video_unit__mode $end
+$var wire 3 $p gb_core__video_unit__fetch_phase $end
+$var wire 1 %* gb_core__video_irq $end
+$var wire 8 %4 gb_core__video_unit__vram_data $end
+$var wire 8 %A gb_core__video_unit__pcnt $end
+$var wire 8 %I gb_core__video_unit__tile_data_hi $end
+$var wire 8 %x gb_core__video_unit__v_cnt $end
+$var wire 2 &9 gb_core__video_unit__h_div_cnt $end
+$var wire 16 &A debug_pc $end
+$var wire 1 &l gb_core__video_unit__vram_rd $end
+$var wire 1 '1 gb_core__joypad_irq $end
+$var wire 5 '2 gb_core__if_r $end
+$upscope $end
+$enddefinitions $end
+$dumpvars
+b00000000 I
+b00000000 N
+b00000000 !=
+b00000000 !B
+0!S
+b00000000 !T
+0!Z
+b0000000000000 !_
+b00000000 "2
+b00 "A
+b0000000000000 "X
+0#)
+b00000000 #F
+b0000000 #e
+b00000000 #g
+b0000000000000 #q
+0$_
+b00 $g
+b000 $p
+0%*
+b00000000 %4
+b00000000 %A
+b00000000 %I
+b00000000 %x
+b00 &9
+b0000000000000000 &A
+0&l
+0'1
+b00000 '2
+$end
+#0
+b00000001 I
+b00000001 N
+b00010101 !=
+b0000010000000 !_
+0#)
+b00000111 #F
+1$_
+b1100101 $p
+b00000001 %A
+b01 &9
+1&l
+b00100 '2

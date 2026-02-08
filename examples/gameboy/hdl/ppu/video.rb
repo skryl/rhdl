@@ -146,10 +146,21 @@ module RHDL
     wire :tile_num, width: 8        # Current tile number from tile map
     wire :tile_data_lo, width: 8    # Low byte of tile row data
     wire :tile_data_hi, width: 8    # High byte of tile row data
+    wire :tile_shift_lo, width: 8   # Active low bitplane shift register
+    wire :tile_shift_hi, width: 8   # Active high bitplane shift register
+    wire :tile_fetch_x, width: 8    # Tile fetch X (advances every tile)
+    wire :pixel_ready               # First tile row fetched on current line
 
     # Calculated addresses and pixel data
     wire :bg_x, width: 8            # BG X position (SCX + pcnt)
     wire :bg_y, width: 8            # BG Y position (SCY + v_cnt)
+    wire :win_x, width: 8           # Window X position (pcnt - (WX-7))
+    wire :win_y, width: 8           # Window Y position (LY - WY)
+    wire :win_start_x, width: 8     # Saturating WX-7 start column
+    wire :window_active             # Window pixel select for current dot
+    wire :fetch_x, width: 8         # Tile fetch X (window or BG)
+    wire :fetch_y, width: 8         # Tile fetch Y (window or BG)
+    wire :tile_map_sel              # Tile map select (window/bg)
     wire :tile_map_addr, width: 13  # Address in tile map
     wire :tile_data_addr, width: 13 # Address of tile data
     wire :pixel_in_tile, width: 3   # Which pixel in tile (0-7)
@@ -191,42 +202,51 @@ module RHDL
       mode3 <= lcdc_on & ~vblank & (h_cnt >= lit(20, width: 7)) & (h_cnt < lit(63, width: 7))
 
       # LCD pixel output during mode 3.
-      # One pixel is emitted per `ce` tick while drawing (up to 160 visible pixels).
-      # `h_cnt/h_div_cnt` still define the overall 456-dot line timing.
-      lcd_clkena <= mode3 & lcdc_on & (pcnt < lit(160, width: 8)) & ce
+      # Pixels are valid only after the first tile row has been fetched.
+      lcd_clkena <= mode3 & lcdc_on & pixel_ready & (pcnt < lit(160, width: 8)) & ce
 
       # =======================================================================
       # Tile Fetcher - Calculate VRAM addresses for BG tiles
       # =======================================================================
 
-      # Background position calculation
+      # Background/window position calculation.
+      # The fetch side is tile-stepped (tile_fetch_x), while output uses shift
+      # registers loaded once a full tile row fetch completes.
       bg_x <= (scx + pcnt)[7..0]
       bg_y <= (scy + v_cnt)[7..0]
+      win_start_x <= mux(wx > lit(7, width: 8), wx - lit(7, width: 8), lit(0, width: 8))
+      win_x <= (pcnt - win_start_x)[7..0]
+      win_y <= (v_cnt - wy)[7..0]
 
-      # Pixel position within tile (0-7), from right to left for bit extraction
-      pixel_in_tile <= lit(7, width: 3) - bg_x[2..0]
+      # Keep fetch path BG-only for now; window timing/pipeline alignment is
+      # implemented when full reference PPU behavior is ported.
+      window_active <= lit(0, width: 1)
+      fetch_x <= tile_fetch_x
+      fetch_y <= bg_y
+      tile_map_sel <= lcdc_bg_tile_map
+      pixel_in_tile <= lit(7, width: 3)
 
       # Tile map address calculation
       # Tile map is 32x32 tiles, each tile is 8x8 pixels
       # Tile map 0: 0x9800 = VRAM 0x1800
       # Tile map 1: 0x9C00 = VRAM 0x1C00
       # Address = base + (y_tile * 32) + x_tile
-      # where y_tile = bg_y[7:3], x_tile = bg_x[7:3]
-      tile_map_addr <= mux(lcdc_bg_tile_map,
-                           cat(lit(0b111, width: 3), bg_y[7..3], bg_x[7..3]),    # 0x1C00 + offset
-                           cat(lit(0b110, width: 3), bg_y[7..3], bg_x[7..3]))    # 0x1800 + offset
+      # where y_tile = fetch_y[7:3], x_tile = fetch_x[7:3]
+      tile_map_addr <= mux(tile_map_sel,
+                           cat(lit(0b111, width: 3), fetch_y[7..3], fetch_x[7..3]),    # 0x1C00 + offset
+                           cat(lit(0b110, width: 3), fetch_y[7..3], fetch_x[7..3]))    # 0x1800 + offset
 
       # Tile data address calculation
       # Each tile is 16 bytes (2 bytes per row, 8 rows)
       # When LCDC bit 4 = 1: tiles 0-255 at 0x8000 (VRAM 0x0000)
       # When LCDC bit 4 = 0: tiles -128 to 127 at 0x8800 (VRAM 0x0800), tile 0 at 0x9000
-      # Address = base + tile_num * 16 + (bg_y % 8) * 2
+      # Address = base + tile_num * 16 + (fetch_y % 8) * 2
       tile_data_addr <= mux(lcdc_tile_data_sel,
                             # Mode 1: unsigned, base 0x0000
-                            cat(lit(0, width: 1), tile_num, bg_y[2..0], lit(0, width: 1)),
+                            cat(lit(0, width: 1), tile_num, fetch_y[2..0], lit(0, width: 1)),
                             # Mode 0: signed, base 0x0800 with XOR bias.
                             # This maps tile 0 -> 0x1000, -128 -> 0x0800, +127 -> 0x17F0.
-                            cat(lit(0, width: 1), (tile_num ^ lit(0x80, width: 8)), bg_y[2..0], lit(0, width: 1)) +
+                            cat(lit(0, width: 1), (tile_num ^ lit(0x80, width: 8)), fetch_y[2..0], lit(0, width: 1)) +
                             lit(0x0800, width: 13))
 
       # VRAM address mux based on fetch phase
@@ -238,9 +258,10 @@ module RHDL
                    mux(fetch_phase[2..1] == lit(2, width: 2), tile_data_addr + lit(1, width: 13),
                        tile_map_addr)))
 
-      # Extract 2-bit pixel color from tile data
-      # Low bit from tile_data_lo, high bit from tile_data_hi
-      pixel_color <= cat(tile_data_hi[pixel_in_tile], tile_data_lo[pixel_in_tile])
+      # Extract 2-bit pixel color from active shift registers.
+      pixel_color <= mux(pixel_ready,
+                         cat(tile_shift_hi[7], tile_shift_lo[7]),
+                         lit(0, width: 2))
 
       # Apply BGP palette
       # BGP register: bits 7-6 = color 3, bits 5-4 = color 2, bits 3-2 = color 1, bits 1-0 = color 0
@@ -346,6 +367,10 @@ module RHDL
       tile_num: 0,
       tile_data_lo: 0,
       tile_data_hi: 0,
+      tile_shift_lo: 0,
+      tile_shift_hi: 0,
+      tile_fetch_x: 0,
+      pixel_ready: 0,
       mode_prev: 0,
       lyc_match_prev: 0
     } do
@@ -379,9 +404,7 @@ module RHDL
                   lit(0, width: 8),
                   mux(ce & (h_div_cnt == lit(0, width: 2)) & (h_cnt == lit(20, width: 7)),
                       lit(0, width: 8),  # Reset at start of mode 3
-                      mux(ce &
-                          (h_cnt >= lit(20, width: 7)) & (h_cnt < lit(63, width: 7)) &
-                          (pcnt < lit(160, width: 8)) & ~vblank,
+                      mux(ce & mode3 & pixel_ready & (pcnt < lit(160, width: 8)),
                           pcnt + lit(1, width: 8),  # Increment during mode 3
                           pcnt)))
 
@@ -399,6 +422,16 @@ module RHDL
                                  fetch_phase + lit(1, width: 3)),
                              fetch_phase))
 
+      # Tile fetch X starts from SCX at mode 3 start and advances one tile
+      # every fetch-phase wrap.
+      tile_fetch_x <= mux(~lcdc_on,
+                          lit(0, width: 8),
+                          mux(ce & (h_div_cnt == lit(0, width: 2)) & (h_cnt == lit(20, width: 7)),
+                              scx,
+                              mux(ce & mode3 & (fetch_phase == lit(7, width: 3)),
+                                  tile_fetch_x + lit(8, width: 8),
+                                  tile_fetch_x)))
+
       # Capture tile number from VRAM read
       tile_num <= mux(ce & mode3 & (fetch_phase == lit(1, width: 3)),
                       vram_data,
@@ -413,6 +446,29 @@ module RHDL
       tile_data_hi <= mux(ce & mode3 & (fetch_phase == lit(5, width: 3)),
                           vram_data,
                           tile_data_hi)
+
+      # Pixel shift registers:
+      # - load once high-byte fetch completes (phase 5)
+      # - then shift one pixel each active output cycle
+      load_tile = ce & mode3 & (fetch_phase == lit(5, width: 3))
+      shift_pixel = ce & mode3 & pixel_ready & (pcnt < lit(160, width: 8))
+
+      tile_shift_lo <= mux(load_tile,
+                           tile_data_lo,
+                           mux(shift_pixel,
+                               cat(tile_shift_lo[6..0], lit(0, width: 1)),
+                               tile_shift_lo))
+      tile_shift_hi <= mux(load_tile,
+                           vram_data,
+                           mux(shift_pixel,
+                               cat(tile_shift_hi[6..0], lit(0, width: 1)),
+                               tile_shift_hi))
+
+      pixel_ready <= mux(~lcdc_on | ~mode3,
+                         lit(0, width: 1),
+                         mux(load_tile,
+                             lit(1, width: 1),
+                             pixel_ready))
 
       # DMA engine
       dma_active <= mux(ce_cpu & cpu_sel_reg & cpu_wr & (cpu_addr == lit(0x46, width: 8)),
