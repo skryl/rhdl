@@ -15,6 +15,9 @@ This app runs RHDL IR simulator backends in the browser via WebAssembly and rend
 - Watch list + current value table
 - Value breakpoints (`signal == value`)
 - Export full VCD file for GTKWave
+- Redux-backed UX state store (CDN, no build step) for tooling/automation
+- LitElement UI components with co-located styles (no build step)
+- Panel components split into modules under `web/app/components/*.mjs` (no build step)
 - Tabbed workspace:
   - `1. I/O`: Apple II display + `HIRES`, `COLOR`, `SOUND` toggles, keyboard input queue, debug registers
   - `2. VCD + Signals`: waveform canvas, watch table, event log
@@ -29,17 +32,17 @@ This app runs RHDL IR simulator backends in the browser via WebAssembly and rend
 
 ## Build WASM
 
-Use the helper script (builds backends for `wasm32-unknown-unknown` and copies artifacts into `web/pkg/`):
+Use the helper script (builds backends for `wasm32-unknown-unknown` and copies artifacts into `web/assets/pkg/`):
 
 ```bash
 cd web
-./build_wasm.sh
+./scripts/build_wasm.sh
 ```
 
 `ir_compiler` is built as AOT for web:
-- `build_wasm.sh` runs `ir_compiler`'s `aot_codegen` over `samples/apple2.json` by default.
+- `scripts/build_wasm.sh` runs `ir_compiler`'s `aot_codegen` over `assets/fixtures/apple2/apple2.json` by default.
 - Then it builds `ir_compiler.wasm` with `--features aot`.
-- Override the IR source with `AOT_IR=/absolute/or/relative/path/to/ir.json ./build_wasm.sh`.
+- Override the IR source with `AOT_IR=/absolute/or/relative/path/to/ir.json ./scripts/build_wasm.sh`.
 
 Manual equivalent (interpreter):
 
@@ -47,7 +50,7 @@ Manual equivalent (interpreter):
 cd lib/rhdl/codegen/ir/sim/ir_interpreter
 rustup target add wasm32-unknown-unknown
 cargo build --release --target wasm32-unknown-unknown
-cp target/wasm32-unknown-unknown/release/ir_interpreter.wasm ../../../../../../web/pkg/ir_interpreter.wasm
+cp target/wasm32-unknown-unknown/release/ir_interpreter.wasm ../../../../../../web/assets/pkg/ir_interpreter.wasm
 ```
 
 ## Run Web UI
@@ -61,20 +64,43 @@ python3 -m http.server 8080
 
 Open [http://localhost:8080](http://localhost:8080).
 
+## Run Tests
+
+Run all web unit tests (no build step required):
+
+```bash
+node --test $(find web/test -type f -name '*.test.mjs' | sort)
+```
+
+Run only browser integration smoke tests (Playwright):
+
+```bash
+cd web
+npm install
+npx playwright install chromium
+npm run test:integration
+```
+
+Run only state store tests:
+
+```bash
+node --test web/test/state/store.test.mjs
+```
+
 ## Notes
 
-- The selected dropdown sample is loaded automatically on startup (default: `samples/apple2.json`).
+- The selected dropdown sample is loaded automatically on startup (default: `assets/fixtures/apple2/apple2.json`).
 - Backend selection is in the left control panel.
 - `interpreter` is the default browser backend.
 - `compiler` in the web UI is `ir_compiler` AOT (precompiled wasm), not runtime `rustc` compilation in-browser.
-- Apple II runner assets are included:
-  - `samples/apple2.json` (from `examples/apple2/hdl/apple2`)
-  - `samples/apple2_sources.json` (`RHDL` + `Verilog` sources for Apple II components)
-  - `samples/apple2_schematic.json` (precomputed schematic connectivity for Apple II)
-  - `samples/cpu_sources.json` (`RHDL` + `Verilog` sources for CPU components)
-  - `samples/cpu_schematic.json` (precomputed schematic connectivity for CPU)
-  - `samples/appleiigo.rom` (12KB system ROM)
-  - `samples/karateka_mem.bin` + `samples/karateka_mem_meta.txt` for quick dump load
+- Apple II / CPU runner assets are included under `assets/fixtures/`:
+  - `assets/fixtures/apple2/apple2.json` (from `examples/apple2/hdl/apple2`)
+  - `assets/fixtures/apple2/apple2_sources.json` (`RHDL` + `Verilog` sources for Apple II components)
+  - `assets/fixtures/apple2/apple2_schematic.json` (precomputed schematic connectivity for Apple II)
+  - `assets/fixtures/cpu/cpu_sources.json` (`RHDL` + `Verilog` sources for CPU components)
+  - `assets/fixtures/cpu/cpu_schematic.json` (precomputed schematic connectivity for CPU)
+  - `assets/fixtures/apple2/appleiigo.rom` (12KB system ROM)
+  - `assets/fixtures/apple2/karateka_mem.bin` + `assets/fixtures/apple2/karateka_mem_meta.txt` for quick dump load
 - Regenerate web artifacts (IR + source + schematic):
   - `bundle exec rake web:generate`
 - Memory tab supports:
@@ -84,3 +110,7 @@ Open [http://localhost:8080](http://localhost:8080).
   - `forced`: direct process clock stepping (`tick_forced`)
   - `driven`: toggle external clock (for example top-level `clk`) and propagate through combinational logic
 - The UI consumes incremental VCD chunks from `trace_take_live_vcd()` each frame.
+- Redux state bridge (if `redux.min.js` loads):
+  - store: `window.__RHDL_REDUX_STORE__`
+  - current in-memory app state: `window.__RHDL_UX_STATE__`
+  - manual sync helper: `window.__RHDL_REDUX_SYNC__('manual')`

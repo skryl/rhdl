@@ -46,10 +46,12 @@ lib/rhdl/codegen/ir/sim/ir_compiler/*.json
 .verilator_build_*/
 
 # Web simulator generated artifacts
-web/samples/apple2.json
-web/samples/apple2_hier.json
-web/samples/cpu_lib_hdl.json
-web/samples/cpu_hier.json
-web/samples/*_sources.json
-web/samples/*_schematic.json
-web/samples/generated/
+web/assets/fixtures/apple2/apple2.json
+web/assets/fixtures/apple2/apple2_hier.json
+web/assets/fixtures/cpu/cpu_lib_hdl.json
+web/assets/fixtures/cpu/cpu_hier.json
+web/assets/fixtures/*/*_sources.json
+web/assets/fixtures/*/*_schematic.json
+
+# Web test dependencies
+web/node_modules/

@@ -1,0 +1,66 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import { parseHexOrDec, hexWord, hexByte } from '../../app/lib/numeric_utils.mjs';
+import { createApple2MemoryController } from '../../app/controllers/apple2_memory_controller.mjs';
+
+function createHarness() {
+  const renderCalls = [];
+  const statusMessages = [];
+  const dom = {
+    memoryDump: {},
+    memoryStart: { value: '0x0000' },
+    memoryLength: { value: '32' }
+  };
+  const state = {
+    memory: {
+      followPc: false,
+      disasmLines: 4
+    }
+  };
+  const runtime = {
+    sim: null
+  };
+  const controller = createApple2MemoryController({
+    dom,
+    state,
+    runtime,
+    isApple2UiEnabled: () => false,
+    parseHexOrDec,
+    hexWord,
+    hexByte,
+    renderMemoryPanel: (_dom, payload) => renderCalls.push(payload),
+    disassemble6502LinesWithMemory: () => ['LDA #$01'],
+    setMemoryDumpStatus: (message) => statusMessages.push(message),
+    addressSpace: 0x10000
+  });
+  return { controller, dom, state, runtime, renderCalls, statusMessages };
+}
+
+test('getApple2ProgramCounter returns null when unavailable', () => {
+  const { controller } = createHarness();
+  assert.equal(controller.getApple2ProgramCounter(), null);
+});
+
+test('readApple2MappedMemory returns empty without simulator', () => {
+  const { controller } = createHarness();
+  const bytes = controller.readApple2MappedMemory(0, 16);
+  assert.equal(bytes.length, 0);
+});
+
+test('refreshMemoryView shows placeholder when simulator is missing', () => {
+  const { controller, renderCalls } = createHarness();
+  controller.refreshMemoryView();
+  assert.equal(renderCalls.length, 1);
+  assert.equal(renderCalls[0].dumpText, '');
+  assert.equal(renderCalls[0].disasmText, '');
+});
+
+test('refreshMemoryView shows apple2-required message when disabled', () => {
+  const { controller, runtime, renderCalls, statusMessages } = createHarness();
+  runtime.sim = {};
+  controller.refreshMemoryView();
+  assert.equal(renderCalls.length, 1);
+  assert.match(renderCalls[0].dumpText, /Load the Apple II runner/);
+  assert.equal(statusMessages.includes('Memory dump loading requires the Apple II runner.'), true);
+});
