@@ -369,12 +369,8 @@
 ## The Journey
 
 ```
-Part I          Part II           Part III        Part IV
-Gates    --->   Circuits   --->   State    --->   Register Machine
-                                                        |
-                                                        v
-Part VII        Part VII          Part VII        Part V
-xv6 shell <---  RISC-V SoC  <---  RV32I    <---   Lambda revealed
+Part I   Part II    Part III   Part IV   Part V    Part VII
+Gates -> Circuits -> State -> CPU -> Lambda -> RISC-V -> xv6
 ```
 
 ---
