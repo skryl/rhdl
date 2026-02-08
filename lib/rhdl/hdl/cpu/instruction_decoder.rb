@@ -31,6 +31,7 @@ module RHDL
         output :ret                    # Return instruction
         output :instr_length, width: 2 # 1, 2, or 3 bytes
         output :is_lda                 # LDA instruction (bypass ALU)
+        output :is_cmp                 # CMP instruction (updates zero flag but not ACC)
         output :sta_indirect           # STA indirect addressing mode (0x20)
         output :lda_indirect           # LDA indirect addressing mode (0x10)
 
@@ -142,6 +143,9 @@ module RHDL
             1 => 1,   # LDA
             10 => 1   # LDI
           }, default: 0)
+
+          # is_cmp: CMP instruction (0xF3) - updates zero flag but not ACC
+          is_cmp <= mux(instruction == 0xF3, 1, 0)
 
           # sta_indirect: STA with indirect addressing (instruction 0x20)
           sta_indirect <= mux(instruction == 0x20, 1, 0)

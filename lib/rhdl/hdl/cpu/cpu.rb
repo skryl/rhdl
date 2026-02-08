@@ -69,6 +69,7 @@ module RHDL
         wire :dec_ret
         wire :dec_instr_length, width: 2
         wire :dec_is_lda
+        wire :dec_is_cmp
         wire :dec_sta_indirect
         wire :dec_lda_indirect
 
@@ -144,6 +145,7 @@ module RHDL
         port [:decoder, :ret] => :dec_ret
         port [:decoder, :instr_length] => :dec_instr_length
         port [:decoder, :is_lda] => :dec_is_lda
+        port [:decoder, :is_cmp] => :dec_is_cmp
         port [:decoder, :sta_indirect] => :dec_sta_indirect
         port [:decoder, :lda_indirect] => :dec_lda_indirect
 
@@ -162,6 +164,7 @@ module RHDL
         port :dec_mem_read => [:ctrl, :is_mem_read]
         port :dec_sta_indirect => [:ctrl, :is_sta_indirect]
         port :dec_lda_indirect => [:ctrl, :is_lda_indirect]
+        port :dec_is_cmp => [:ctrl, :is_cmp]
         port :dec_pc_src => [:ctrl, :pc_src]
         port :dec_alu_src => [:ctrl, :alu_src]
         port [:sp, :empty] => [:ctrl, :sp_empty]

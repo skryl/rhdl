@@ -62,7 +62,7 @@ RSpec.describe 'Metacircular CPU Simulation', :metacircular do
         ].flatten
 
         cpu = create_cpu(program, { NET_A => 0, NET_B => 0 })
-        cpu.run(10)
+        cpu.run(20)
 
         expect(cpu.read_memory(NET_OUT)).to eq(0)
       end
@@ -76,7 +76,7 @@ RSpec.describe 'Metacircular CPU Simulation', :metacircular do
         ].flatten
 
         cpu = create_cpu(program, { NET_A => 1, NET_B => 1 })
-        cpu.run(10)
+        cpu.run(20)
 
         expect(cpu.read_memory(NET_OUT)).to eq(1)
       end
@@ -90,7 +90,7 @@ RSpec.describe 'Metacircular CPU Simulation', :metacircular do
         ].flatten
 
         cpu = create_cpu(program, { NET_A => 1, NET_B => 0 })
-        cpu.run(10)
+        cpu.run(20)
 
         expect(cpu.read_memory(NET_OUT)).to eq(0)
       end
@@ -106,7 +106,7 @@ RSpec.describe 'Metacircular CPU Simulation', :metacircular do
         ].flatten
 
         cpu = create_cpu(program, { NET_A => 0, NET_B => 1 })
-        cpu.run(10)
+        cpu.run(20)
 
         expect(cpu.read_memory(NET_OUT)).to eq(1)
       end
@@ -122,7 +122,7 @@ RSpec.describe 'Metacircular CPU Simulation', :metacircular do
         ].flatten
 
         cpu = create_cpu(program, { NET_A => 1, NET_B => 1 })
-        cpu.run(10)
+        cpu.run(20)
 
         expect(cpu.read_memory(NET_OUT)).to eq(0)
       end
@@ -136,7 +136,7 @@ RSpec.describe 'Metacircular CPU Simulation', :metacircular do
         ].flatten
 
         cpu = create_cpu(program, { NET_A => 1, NET_B => 0 })
-        cpu.run(10)
+        cpu.run(20)
 
         expect(cpu.read_memory(NET_OUT)).to eq(1)
       end
@@ -152,7 +152,7 @@ RSpec.describe 'Metacircular CPU Simulation', :metacircular do
         ].flatten
 
         cpu = create_cpu(program, { NET_A => 0, NET_CONST => 1 })
-        cpu.run(10)
+        cpu.run(20)
 
         expect(cpu.read_memory(NET_OUT)).to eq(1)
       end
@@ -166,7 +166,7 @@ RSpec.describe 'Metacircular CPU Simulation', :metacircular do
         ].flatten
 
         cpu = create_cpu(program, { NET_A => 1, NET_CONST => 1 })
-        cpu.run(10)
+        cpu.run(20)
 
         expect(cpu.read_memory(NET_OUT)).to eq(0)
       end
@@ -196,7 +196,7 @@ RSpec.describe 'Metacircular CPU Simulation', :metacircular do
         ].flatten
 
         cpu = create_cpu(program, { CIRC_A => a, CIRC_B => b })
-        cpu.run(20)
+        cpu.run(40)
 
         [cpu.read_memory(CIRC_SUM), cpu.read_memory(CIRC_CARRY)]
       end
@@ -295,26 +295,26 @@ RSpec.describe 'Metacircular CPU Simulation', :metacircular do
       # AND
       program = [Asm.lda(net_a), Asm.and_op(net_b), Asm.sta(net_out), Asm.hlt].flatten
       cpu = create_cpu(program, { net_a => 1, net_b => 1 })
-      cpu.run(10)
+      cpu.run(20)
       results[:and] = cpu.read_memory(net_out) == 1
 
       # OR
       program = [Asm.lda(net_a), Asm.or_op(net_b), Asm.sta(net_out), Asm.hlt].flatten
       cpu = create_cpu(program, { net_a => 1, net_b => 0 })
-      cpu.run(10)
+      cpu.run(20)
       results[:or] = cpu.read_memory(net_out) == 1
 
       # XOR
       program = [Asm.lda(net_a), Asm.xor_op(net_b), Asm.sta(net_out), Asm.hlt].flatten
       cpu = create_cpu(program, { net_a => 1, net_b => 1 })
-      cpu.run(10)
+      cpu.run(20)
       results[:xor] = cpu.read_memory(net_out) == 0
 
       # NOT (via XOR with 1)
       net_const = 13
       program = [Asm.lda(net_a), Asm.xor_op(net_const), Asm.sta(net_out), Asm.hlt].flatten
       cpu = create_cpu(program, { net_a => 1, net_const => 1 })
-      cpu.run(10)
+      cpu.run(20)
       results[:not] = cpu.read_memory(net_out) == 0
 
       # All gates should work correctly

@@ -55,6 +55,7 @@ module RHDL
         input :is_mem_read               # Reads from memory
         input :is_sta_indirect           # STA indirect addressing mode
         input :is_lda_indirect           # LDA indirect addressing mode
+        input :is_cmp                    # CMP instruction (updates flags but not ACC)
         input :pc_src, width: 2          # PC source: 0=+len, 1=short, 2=long
         input :alu_src                   # 0=memory, 1=immediate
 
@@ -199,8 +200,9 @@ module RHDL
           # acc_load_en: Load accumulator (in EXECUTE state with reg_write)
           acc_load_en <= mux(state == lit(S_EXECUTE, width: 8), is_reg_write, 0)
 
-          # zero_flag_load_en: Load zero flag (in EXECUTE state with reg_write)
-          zero_flag_load_en <= mux(state == lit(S_EXECUTE, width: 8), is_reg_write, 0)
+          # zero_flag_load_en: Load zero flag (in EXECUTE state with reg_write OR is_cmp)
+          # CMP updates the zero flag even though it doesn't write to ACC
+          zero_flag_load_en <= mux(state == lit(S_EXECUTE, width: 8), is_reg_write | is_cmp, 0)
 
           # pc_inc_en: Increment PC after instruction fetch/decode
           # Don't increment for CALL (return addr calc), branches/jumps (pc_load handles),
