@@ -290,29 +290,103 @@
 
   - **Multiple Lisp REPLs** - The payoff: our hardware runs an OS that runs multiple Lisp interpreters, each in its own protected address space.
 
+### Part VII: The Real World
+
+- [25 - Introduction to RISC-V](part-7-riscv/ch-25-intro-to-riscv/ch-25-chapter.md) - From custom ISA to industry standard: why RISC-V and how it compares.
+
+  - **Why RISC-V?** - An open, royalty-free ISA with a thriving ecosystem. We explain why conforming to a standard matters.
+
+  - **The RISC-V Specification** - Reading the official spec: base integers, extensions, and the modular design philosophy.
+
+  - **RV32I Base Integer ISA** - The 40 instructions that form the foundation. We map them to our existing CPU's capabilities.
+
+  - **Instruction Encoding Formats** - R, I, S, B, U, J formats. The regular encoding simplifies decoder design.
+
+  - **Our CPU vs RISC-V** - A gap analysis: what we have, what we need, and the path forward.
+
+- [26 - Implementing RV32I](part-7-riscv/ch-26-implementing-rv32i/ch-26-chapter.md) - Adapting our datapath to execute the RISC-V base integer instruction set.
+
+  - **Refactoring the Decoder** - Our custom opcodes become RISC-V opcodes. We rebuild the instruction decoder.
+
+  - **Register File Changes** - 32 registers, x0 hardwired to zero. We adapt our register file to RISC-V conventions.
+
+  - **Branch and Jump Instructions** - JAL, JALR, and conditional branches. PC-relative addressing throughout.
+
+  - **Load/Store Variations** - Byte, halfword, word access with sign extension. We add width control to memory operations.
+
+  - **Verification with riscv-tests** - The official compliance test suite. We run it and fix what fails.
+
+- [27 - RISC-V Privileged Architecture](part-7-riscv/ch-27-privileged-architecture/ch-27-chapter.md) - Machine, Supervisor, User modes and the CSR system that controls them.
+
+  - **Privilege Levels Revisited** - M-mode, S-mode, U-mode. How RISC-V organizes privilege differently than our simple kernel/user split.
+
+  - **Control and Status Registers** - mstatus, mtvec, mepc, mcause, mie, mip. The registers that control trap handling.
+
+  - **Trap Handling the RISC-V Way** - Exception codes, interrupt delegation, and the precise semantics of mret/sret.
+
+  - **The Zicsr Extension** - CSRRW, CSRRS, CSRRC and their immediate variants. Atomic read-modify-write for CSRs.
+
+  - **Implementing CSRs in Hardware** - A CSR file alongside the register file. We add the required CSRs for M and S modes.
+
+- [28 - Standard Extensions](part-7-riscv/ch-28-standard-extensions/ch-28-chapter.md) - M for multiplication, A for atomics: the extensions xv6 requires.
+
+  - **The M Extension** - MUL, MULH, DIV, REM and their variants. We add a multiplier and divider to the ALU.
+
+  - **The A Extension** - LR/SC (load-reserved/store-conditional) and AMO (atomic memory operations). Essential for spinlocks.
+
+  - **Implementing Atomics** - The memory system changes needed for atomic operations. Cache coherence considerations.
+
+  - **Zifencei** - The instruction fence. Ensuring instruction cache coherence after code modification.
+
+  - **Testing Extensions** - Extended compliance tests. We verify each extension works correctly.
+
+- [29 - Platform and Peripherals](part-7-riscv/ch-29-platform-peripherals/ch-29-chapter.md) - CLINT, PLIC, UART: the SoC components xv6 expects.
+
+  - **The CLINT** - Core Local Interruptor: mtime, mtimecmp, and software interrupts. The heartbeat of the system.
+
+  - **The PLIC** - Platform Level Interrupt Controller. Priority, pending, enable, and claim/complete registers.
+
+  - **UART 16550** - A simple serial port. Transmit, receive, and interrupt-driven I/O for the console.
+
+  - **Memory Map** - Placing peripherals in the address space. We define a memory map compatible with QEMU's virt machine.
+
+  - **Building the SoC** - Connecting CPU, memory, and peripherals. The complete system-on-chip in RHDL.
+
+- [30 - Booting xv6](part-7-riscv/ch-30-booting-xv6/ch-30-chapter.md) - From power-on to shell prompt: running a real operating system.
+
+  - **The xv6 Boot Process** - Entry point, stack setup, and the jump to C code. We trace xv6's first instructions.
+
+  - **Hardware Initialization** - What xv6 expects from the hardware at boot. Setting up CSRs, page tables, and interrupts.
+
+  - **First User Process** - init, the shell, and the first fork/exec. We watch xv6 spawn user processes.
+
+  - **Running on QEMU vs RHDL** - Our implementation matches QEMU's virt machine. We can run the same xv6 binary.
+
+  - **Shell Prompt** - The finish line: typing commands at the xv6 shell, running on hardware we built from gates.
+
 ---
 
 ## The Journey
 
 ```
-Start here:                         End here:
+Start here:                              End here:
 
-Transistors & switches              Operating system
-    |                                   ^
-    v                                   |
-Logic gates (AND, OR, NOT)          Virtual memory & protection
-    |                                   ^
-    v                                   |
-Combinational circuits              Pipelining & caches
-    |                                   ^
-    v                                   |
-Sequential logic & state            Lambda revealed
-    |                                   ^
-    v                                   |
-Memory                              Lisp interpreter
-    |                                   ^
-    v                                   |
-Simple CPU  -----> Assembly -----> ISA as language
+Transistors & switches                   xv6 shell prompt
+    |                                        ^
+    v                                        |
+Logic gates (AND, OR, NOT)               RISC-V SoC
+    |                                        ^
+    v                                        |
+Combinational circuits                   Standard extensions (M, A)
+    |                                        ^
+    v                                        |
+Sequential logic & state                 Privileged architecture
+    |                                        ^
+    v                                        |
+Memory                                   RV32I implementation
+    |                                        ^
+    v                                        |
+Simple CPU  --> OS support --> Lambda --> RISC-V
 ```
 
 ---
@@ -347,6 +421,12 @@ Each chapter has an accompanying appendix with complete RHDL implementations. Ad
 | 22 | Memory Hierarchy and Caches | [Cache Implementation](part-6-advanced/ch-22-memory-hierarchy/ch-22-appendix.md) |
 | 23 | Throughput and Pipelining | [Pipeline Implementation](part-6-advanced/ch-23-throughput-and-pipelining/ch-23-appendix.md) |
 | 24 | Complete System | [OS Kernel](part-6-advanced/ch-24-complete-system/ch-24-appendix.md) |
+| 25 | Introduction to RISC-V | [RISC-V Quick Reference](part-7-riscv/ch-25-intro-to-riscv/ch-25-appendix.md) |
+| 26 | Implementing RV32I | [RV32I Implementation](part-7-riscv/ch-26-implementing-rv32i/ch-26-appendix.md) |
+| 27 | Privileged Architecture | [CSR Implementation](part-7-riscv/ch-27-privileged-architecture/ch-27-appendix.md) |
+| 28 | Standard Extensions | [M and A Extensions](part-7-riscv/ch-28-standard-extensions/ch-28-appendix.md) |
+| 29 | Platform and Peripherals | [SoC Implementation](part-7-riscv/ch-29-platform-peripherals/ch-29-appendix.md) |
+| 30 | Booting xv6 | [Complete System](part-7-riscv/ch-30-booting-xv6/ch-30-appendix.md) |
 
 ---
 
@@ -362,6 +442,7 @@ This book is an inverted SICP, ascending from hardware to lambda, then continuin
 | Ch 5: Register Machines | Part IV: Register Machines | The hardware foundation |
 | Ch 4: Interpreters | Part V: Metalinguistic | Languages all the way up |
 | — | Part VI: Advanced | Caches, pipelines, OS support |
+| — | Part VII: The Real World | RISC-V, xv6, production hardware |
 
 ---
 
