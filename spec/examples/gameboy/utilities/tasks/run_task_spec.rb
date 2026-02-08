@@ -224,6 +224,63 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
     end
   end
 
+  describe '#run_until_next_display_frame' do
+    let(:task) { described_class.new }
+
+    before do
+      task.instance_variable_set(:@cycles_per_frame, 70_224)
+    end
+
+    it 'advances in chunks until frame_count increments' do
+      fake_runner = Class.new do
+        attr_reader :calls
+
+        def initialize
+          @frame = 10
+          @calls = []
+        end
+
+        def frame_count
+          @frame
+        end
+
+        def run_steps(steps)
+          @calls << steps
+          @frame += 1 if @calls.length >= 3
+        end
+      end.new
+
+      task.instance_variable_set(:@runner, fake_runner)
+      task.send(:run_until_next_display_frame)
+
+      expect(fake_runner.calls.length).to eq(3)
+      expect(fake_runner.calls).to all(eq(8778))
+    end
+
+    it 'falls back to fixed stepping when frame_count is nil' do
+      fake_runner = Class.new do
+        attr_reader :calls
+
+        def initialize
+          @calls = []
+        end
+
+        def frame_count
+          nil
+        end
+
+        def run_steps(steps)
+          @calls << steps
+        end
+      end.new
+
+      task.instance_variable_set(:@runner, fake_runner)
+      task.send(:run_until_next_display_frame)
+
+      expect(fake_runner.calls).to eq([70_224])
+    end
+  end
+
   describe 'constants' do
     it 'defines screen dimensions' do
       expect(described_class::SCREEN_WIDTH).to eq(160)

@@ -321,7 +321,7 @@ module RHDL
 
             handle_keyboard_input
             release_expired_keys
-            @runner.run_steps(@cycles_per_frame)
+            run_until_next_display_frame
             update_performance_metrics
 
             if screen_dirty? || @frame_count % 10 == 0
@@ -354,6 +354,27 @@ module RHDL
 
         def clear_screen_dirty
           @runner.runner.clear_screen_dirty if @runner.runner.respond_to?(:clear_screen_dirty)
+        end
+
+        def run_until_next_display_frame
+          return @runner.run_steps(@cycles_per_frame) unless @runner.respond_to?(:frame_count)
+
+          start_frame = @runner.frame_count
+          return @runner.run_steps(@cycles_per_frame) unless start_frame
+
+          # Advance in chunks until at least one complete LCD frame is produced.
+          # This avoids sampling partially updated framebuffers when cadence drifts.
+          chunk = [@cycles_per_frame / 8, 1000].max
+          max_chunks = 256
+          chunks = 0
+
+          while @runner.frame_count == start_frame && chunks < max_chunks
+            @runner.run_steps(chunk)
+            chunks += 1
+          end
+
+          # Fallback for cores that temporarily stop frame signaling.
+          @runner.run_steps(@cycles_per_frame) if chunks >= max_chunks
         end
 
         def update_terminal_size

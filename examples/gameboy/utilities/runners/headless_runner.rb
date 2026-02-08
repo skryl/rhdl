@@ -78,6 +78,12 @@ module RHDL
         @runner.cycle_count
       end
 
+      def frame_count
+        return nil unless @runner.respond_to?(:frame_count)
+
+        @runner.frame_count
+      end
+
       # Check if using native implementation
       def native?
         @runner.native?

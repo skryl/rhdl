@@ -463,6 +463,14 @@ module RHDL
         @cycles
       end
 
+      def frame_count
+        if @use_batched && @sim.respond_to?(:frame_count)
+          @sim.frame_count
+        else
+          @cycles / 70_224
+        end
+      end
+
       def speaker
         @speaker
       end

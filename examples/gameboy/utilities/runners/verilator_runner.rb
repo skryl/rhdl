@@ -1245,7 +1245,7 @@ module RHDL
               else if (strcmp(name, "gb_core__video_unit__tile_num") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__video_unit__DOT__tile_num;
               else if (strcmp(name, "gb_core__video_unit__tile_data_lo") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__video_unit__DOT__tile_data_lo;
               else if (strcmp(name, "gb_core__video_unit__tile_data_hi") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__video_unit__DOT__tile_data_hi;
-              else if (strcmp(name, "gb_core__video_unit__vblank") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__video_unit__DOT__vblank;
+              else if (strcmp(name, "gb_core__video_unit__vblank") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__video_unit__DOT__v_cnt >= 144;
               else if (strcmp(name, "gb_core__video_unit__oam_eval") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__video_unit__DOT__oam_eval;
               else if (strcmp(name, "gb_core__video_unit__vram_rd") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__video_unit___05Fvram_rd;
               else if (strcmp(name, "gb_core__video_unit__dma_active") == 0) return ctx->dut->rootp->game_boy_gameboy__DOT__gb_core__DOT__video_unit__DOT__dma_active;
