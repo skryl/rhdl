@@ -10,13 +10,14 @@
       href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./style.css" />
+    <link rel="stylesheet" href="./assets/style.css" />
     <script src="https://cdn.jsdelivr.net/npm/p5@1.11.1/lib/p5.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/redux@4.2.1/dist/redux.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js"></script>
   </head>
   <body>
-    <div id="appShell" class="app-shell">
+    <rhdl-app-shell id="appShell" class="app-shell">
       <aside id="controlsPanel" class="panel controls">
         <h1>RHDL Simulator</h1>
         <p class="subtitle">
@@ -64,9 +65,8 @@
           <h2>IR Source</h2>
           <div class="row">
             <select id="sampleSelect">
-              <option value="./samples/apple2.json">Apple II (examples/apple2/hdl/apple2)</option>
-              <option value="./samples/cpu_lib_hdl.json">CPU (lib/rhdl/hdl/cpu)</option>
-              <option value="./samples/toggle.json">Toggle Demo</option>
+              <option value="./assets/fixtures/apple2/apple2.json">Apple II (examples/apple2/hdl/apple2)</option>
+              <option value="./assets/fixtures/cpu/cpu_lib_hdl.json">CPU (lib/rhdl/hdl/cpu)</option>
             </select>
             <button id="loadSampleBtn">Load Sample</button>
             <input id="irFileInput" type="file" accept=".json" />
@@ -165,15 +165,7 @@
 
             <section class="subpanel">
               <h2>Runner Debug</h2>
-              <table class="runner-debug-table">
-                <thead>
-                  <tr>
-                    <th>Signal</th>
-                    <th>Value</th>
-                  </tr>
-                </thead>
-                <tbody id="apple2DebugBody"></tbody>
-              </table>
+              <rhdl-apple2-debug id="apple2DebugBody"></rhdl-apple2-debug>
               <p id="apple2SpeakerToggles" class="status">Speaker toggles: -</p>
             </section>
 
@@ -203,7 +195,7 @@
                 <input id="watchSignal" type="text" placeholder="signal name" />
                 <button id="addWatchBtn">Add</button>
               </div>
-              <ul id="watchList" class="pill-list"></ul>
+              <rhdl-watch-list id="watchList" class="pill-list"></rhdl-watch-list>
             </section>
 
             <section class="subpanel">
@@ -216,22 +208,13 @@
                 <button id="addBpBtn">Add</button>
                 <button id="clearBpBtn">Clear</button>
               </div>
-              <ul id="bpList" class="pill-list"></ul>
+              <rhdl-breakpoint-list id="bpList" class="pill-list"></rhdl-breakpoint-list>
             </section>
           </div>
 
           <section class="subpanel">
             <h2>Watch Values</h2>
-            <table class="watch-values-table">
-              <thead>
-                <tr>
-                  <th>Signal</th>
-                  <th>Width</th>
-                  <th>Value</th>
-                </tr>
-              </thead>
-              <tbody id="watchTableBody"></tbody>
-            </table>
+            <rhdl-watch-table id="watchTableBody"></rhdl-watch-table>
           </section>
         </section>
 
@@ -250,8 +233,7 @@
               </label>
             </div>
             <div class="memory-split">
-              <pre id="memoryDump" class="memory-dump">Load the Apple II runner to browse memory.</pre>
-              <pre id="memoryDisassembly" class="memory-dump disasm-dump">Load the Apple II runner to view disassembly.</pre>
+              <rhdl-memory-view id="memoryDump">Load the Apple II runner to browse memory.</rhdl-memory-view>
             </div>
           </section>
 
@@ -293,27 +275,14 @@
             <div class="component-left">
               <section class="subpanel component-tree-panel">
                 <h2>Component Explorer</h2>
-                <div class="row">
-                  <input id="componentSearch" type="text" placeholder="Search components/signals" />
-                  <button id="componentSearchClearBtn">Clear</button>
-                </div>
-                <div id="componentTree" class="component-tree">Load IR to explore components.</div>
+                <rhdl-component-tree id="componentTree" class="component-tree">Load IR to explore components.</rhdl-component-tree>
               </section>
 
               <section class="subpanel component-signal-panel">
                 <h2>Signals</h2>
                 <p id="componentSignalMeta" class="status"></p>
                 <div class="component-signal-scroll">
-                  <table class="component-signal-table">
-                    <thead>
-                      <tr>
-                        <th>Signal</th>
-                        <th>Width</th>
-                        <th>Value</th>
-                      </tr>
-                    </thead>
-                    <tbody id="componentSignalBody"></tbody>
-                  </table>
+                  <rhdl-component-signal-table id="componentSignalBody"></rhdl-component-signal-table>
                 </div>
               </section>
             </div>
@@ -322,12 +291,7 @@
               <section class="subpanel component-detail-panel">
                 <h2 id="componentTitle">Component Details</h2>
                 <p id="componentMeta" class="status"></p>
-                <div class="row wrap component-code-controls">
-                  <h2>Source</h2>
-                  <button id="componentCodeViewRhdl" class="code-view-btn active" type="button">RHDL</button>
-                  <button id="componentCodeViewVerilog" class="code-view-btn" type="button">Verilog</button>
-                </div>
-                <pre id="componentCode" class="memory-dump component-code">Select a component to view details.</pre>
+                <rhdl-component-code-viewer id="componentCode" class="component-code-viewer"></rhdl-component-code-viewer>
               </section>
             </div>
           </div>
@@ -348,7 +312,7 @@
 
             <section class="subpanel component-live-panel">
               <h2>Live Signals</h2>
-              <div id="componentLiveSignals" class="component-live-signals">No live signals to display.</div>
+              <rhdl-component-live-signals id="componentLiveSignals" class="component-live-signals">No live signals to display.</rhdl-component-live-signals>
             </section>
           </div>
 
@@ -356,17 +320,7 @@
             <h2>Wire & Port Connections</h2>
             <p id="componentConnectionMeta" class="status">Select a component to inspect connections.</p>
             <div class="component-connection-scroll">
-              <table class="component-connection-table">
-                <thead>
-                  <tr>
-                    <th>Type</th>
-                    <th>Source</th>
-                    <th>Target</th>
-                    <th>Details</th>
-                  </tr>
-                </thead>
-                <tbody id="componentConnectionBody"></tbody>
-              </table>
+              <rhdl-component-connections id="componentConnectionBody"></rhdl-component-connections>
             </div>
           </section>
         </section>
@@ -384,8 +338,8 @@
           </div>
         </section>
       </main>
-    </div>
+    </rhdl-app-shell>
 
-    <script type="module" src="./app.js?v=20260207b"></script>
+    <script type="module" src="./app/main.mjs?v=20260207i"></script>
   </body>
 </html>

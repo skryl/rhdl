@@ -7,7 +7,7 @@ use ir_compiler::{Apple2Extension, CoreSimulator, GameBoyExtension, Mos6502Exten
 fn usage(program: &str) -> String {
     format!(
         "Usage: {program} <ir_json_path> [out_rs_path]\n\
-         Example: {program} /path/to/repo/web/samples/apple2.json src/aot_generated.rs"
+         Example: {program} /path/to/repo/web/assets/fixtures/apple2/apple2.json src/aot_generated.rs"
     )
 }
 

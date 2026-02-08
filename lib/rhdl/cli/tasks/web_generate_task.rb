@@ -11,7 +11,7 @@ module RHDL
       # Task for generating web simulator artifacts (IR, sources, schematics)
       class WebGenerateTask < Task
         PROJECT_ROOT = Config.project_root
-        SCRIPT_DIR = File.join(PROJECT_ROOT, 'web/samples')
+        SCRIPT_DIR = File.join(PROJECT_ROOT, 'web/assets/fixtures')
 
         $LOAD_PATH.unshift(File.join(PROJECT_ROOT, 'lib'))
         require 'rhdl'
@@ -30,6 +30,7 @@ module RHDL
 
         def generate_runner_assets(runner)
           puts "Generating web artifacts for #{runner[:id]}..."
+          ensure_dir(File.dirname(runner[:sim_ir]))
           top_class = load_runner_top_class(runner)
 
           flat_ir = top_class.to_flat_ir
@@ -83,7 +84,7 @@ module RHDL
         end
 
         def write_component_source_files(runner:, bundle:)
-          runner_dir = File.join(SCRIPT_DIR, 'generated', runner[:id])
+          runner_dir = File.join(SCRIPT_DIR, runner[:id])
           ruby_dir = File.join(runner_dir, 'ruby')
           verilog_dir = File.join(runner_dir, 'verilog')
           FileUtils.rm_rf(runner_dir)
@@ -129,19 +130,19 @@ module RHDL
             id: 'apple2',
             top_class_name: 'RHDL::Examples::Apple2::Apple2',
             requires: [File.join(PROJECT_ROOT, 'examples/apple2/hdl/apple2')],
-            source_output: File.join(SCRIPT_DIR, 'apple2_sources.json'),
-            sim_ir: File.join(SCRIPT_DIR, 'apple2.json'),
-            hier_ir: File.join(SCRIPT_DIR, 'apple2_hier.json'),
-            schematic_output: File.join(SCRIPT_DIR, 'apple2_schematic.json')
+            source_output: File.join(SCRIPT_DIR, 'apple2', 'apple2_sources.json'),
+            sim_ir: File.join(SCRIPT_DIR, 'apple2', 'apple2.json'),
+            hier_ir: File.join(SCRIPT_DIR, 'apple2', 'apple2_hier.json'),
+            schematic_output: File.join(SCRIPT_DIR, 'apple2', 'apple2_schematic.json')
           },
           {
             id: 'cpu',
             top_class_name: 'RHDL::HDL::CPU::CPU',
             requires: [File.join(PROJECT_ROOT, 'lib/rhdl/hdl/cpu/cpu')],
-            source_output: File.join(SCRIPT_DIR, 'cpu_sources.json'),
-            sim_ir: File.join(SCRIPT_DIR, 'cpu_lib_hdl.json'),
-            hier_ir: File.join(SCRIPT_DIR, 'cpu_hier.json'),
-            schematic_output: File.join(SCRIPT_DIR, 'cpu_schematic.json')
+            source_output: File.join(SCRIPT_DIR, 'cpu', 'cpu_sources.json'),
+            sim_ir: File.join(SCRIPT_DIR, 'cpu', 'cpu_lib_hdl.json'),
+            hier_ir: File.join(SCRIPT_DIR, 'cpu', 'cpu_hier.json'),
+            schematic_output: File.join(SCRIPT_DIR, 'cpu', 'cpu_schematic.json')
           }
         ].freeze
       end

@@ -1,0 +1,23 @@
+export const actionTypes = {
+  TOUCH: 'app/touch',
+  SET_BACKEND: 'app/setBackend',
+  SET_THEME: 'app/setTheme',
+  SET_RUNNER_PRESET: 'app/setRunnerPreset',
+  SET_ACTIVE_TAB: 'app/setActiveTab',
+  SET_SIDEBAR_COLLAPSED: 'app/setSidebarCollapsed',
+  SET_TERMINAL_OPEN: 'app/setTerminalOpen',
+  SET_RUNNING: 'sim/setRunning',
+  SET_CYCLE: 'sim/setCycle',
+  SET_UI_CYCLES_PENDING: 'sim/setUiCyclesPending',
+  SET_MEMORY_FOLLOW_PC: 'memory/setFollowPc',
+  SET_APPLE2_DISPLAY_HIRES: 'apple2/setDisplayHires',
+  SET_APPLE2_DISPLAY_COLOR: 'apple2/setDisplayColor',
+  SET_APPLE2_SOUND_ENABLED: 'apple2/setSoundEnabled',
+  WATCH_SET: 'watch/set',
+  WATCH_REMOVE: 'watch/remove',
+  WATCH_CLEAR: 'watch/clear',
+  BREAKPOINT_ADD_OR_REPLACE: 'breakpoint/addOrReplace',
+  BREAKPOINT_REMOVE: 'breakpoint/remove',
+  BREAKPOINT_CLEAR: 'breakpoint/clear',
+  MUTATE: 'state/mutate'
+};
