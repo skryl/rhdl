@@ -377,8 +377,6 @@ Part VII        Part VII          Part VII        Part V
 xv6 shell <---  RISC-V SoC  <---  RV32I    <---   Lambda revealed
 ```
 
-Part VI (Advanced Topics) stands alone as optional deep-dives into caches, pipelining, interrupts, privilege, and virtual memory.
-
 ---
 
 ## Appendices
