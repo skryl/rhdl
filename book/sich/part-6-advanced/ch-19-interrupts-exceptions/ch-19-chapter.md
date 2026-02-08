@@ -1,4 +1,4 @@
-# Chapter 21: Interrupts and Exceptions
+# Chapter 19: Interrupts and Exceptions
 
 *Asynchronous events, traps, and the hardware/software boundary.*
 

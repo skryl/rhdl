@@ -1,4 +1,4 @@
-# Chapter 22: Privilege and Protection
+# Chapter 20: Privilege and Protection
 
 *User mode, kernel mode, and the hardware foundations of security.*
 

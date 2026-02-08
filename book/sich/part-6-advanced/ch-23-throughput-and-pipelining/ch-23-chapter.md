@@ -1,4 +1,4 @@
-# Chapter 20: Throughput and Pipelining
+# Chapter 23: Throughput and Pipelining
 
 *Overlapping instruction execution: how throughput decouples from latency.*
 

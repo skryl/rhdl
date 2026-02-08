@@ -1,4 +1,4 @@
-# Chapter 19: Memory Hierarchy and Caches
+# Chapter 22: Memory Hierarchy and Caches
 
 *Hiding memory latency behind locality: from registers to DRAM.*
 

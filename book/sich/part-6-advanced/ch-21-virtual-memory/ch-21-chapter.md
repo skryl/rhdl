@@ -1,4 +1,4 @@
-# Chapter 23: Virtual Memory
+# Chapter 21: Virtual Memory
 
 *Address translation, page tables, and the illusion of infinite memory.*
 

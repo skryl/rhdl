@@ -218,31 +218,7 @@
 
 ### Part VI: Advanced Topics
 
-- [19 - Memory Hierarchy and Caches](part-6-advanced/ch-19-memory-hierarchy/ch-19-chapter.md) - Hiding memory latency behind locality: from registers to DRAM.
-
-  - **The Memory Wall** - Processors get faster, but memory doesn't keep up. We quantify the problem and see why caches are essential.
-
-  - **Locality of Reference** - Programs tend to access the same data repeatedly (temporal) and nearby data (spatial). We exploit these patterns to predict what to cache.
-
-  - **Cache Organization** - Direct-mapped, set-associative, fully-associative. We explore the tradeoffs between simplicity, hit rate, and hardware cost.
-
-  - **Cache Policies** - Write-through vs write-back, replacement policies (LRU, random). We design policies that balance performance and complexity.
-
-  - **Adding a Cache to Our CPU** - We integrate a simple cache into our CPU design, connecting it between the processor and main memory.
-
-- [20 - Throughput and Pipelining](part-6-advanced/ch-20-throughput-and-pipelining/ch-20-chapter.md) - Overlapping instruction execution: how throughput decouples from latency.
-
-  - **Latency vs Throughput** - Latency is the time for one instruction; throughput is instructions per second. Pipelining dramatically improves throughput.
-
-  - **Pipeline Stages** - Fetch, decode, execute, memory, writeback. We divide instruction execution into stages that operate in parallel.
-
-  - **Pipeline Hazards** - Data hazards, control hazards, structural hazards. When one instruction depends on another, the pipeline stalls.
-
-  - **Forwarding and Stalling** - Bypass networks forward results directly; stalls pause the pipeline. We implement both to handle hazards.
-
-  - **Pipelining Our CPU** - We transform our single-cycle CPU into a 5-stage pipeline, measuring the speedup and handling the hazards.
-
-- [21 - Interrupts and Exceptions](part-6-advanced/ch-21-interrupts-exceptions/ch-21-chapter.md) - Asynchronous events, traps, and the hardware/software boundary.
+- [19 - Interrupts and Exceptions](part-6-advanced/ch-19-interrupts-exceptions/ch-19-chapter.md) - Asynchronous events, traps, and the hardware/software boundary.
 
   - **The Metastability Problem** - External signals are asynchronous to the CPU clock. Flip-flops can enter undefined states; synchronizers reduce this risk.
 
@@ -254,7 +230,7 @@
 
   - **Adding Interrupts to Our CPU** - We extend our CPU with interrupt support, implementing a timer interrupt and UART for I/O.
 
-- [22 - Privilege and Protection](part-6-advanced/ch-22-privilege-protection/ch-22-chapter.md) - User mode, kernel mode, and the hardware foundations of security.
+- [20 - Privilege and Protection](part-6-advanced/ch-20-privilege-protection/ch-20-chapter.md) - User mode, kernel mode, and the hardware foundations of security.
 
   - **Why Protection Matters** - Without isolation, any program can crash the system or steal data. The OS needs hardware support to protect itself.
 
@@ -266,7 +242,7 @@
 
   - **Adding Protection to Our CPU** - We extend our CPU with a privilege bit, trap instruction, and return-from-exception.
 
-- [23 - Virtual Memory](part-6-advanced/ch-23-virtual-memory/ch-23-chapter.md) - Address translation, page tables, and the illusion of infinite memory.
+- [21 - Virtual Memory](part-6-advanced/ch-21-virtual-memory/ch-21-chapter.md) - Address translation, page tables, and the illusion of infinite memory.
 
   - **Address Spaces** - Each process sees its own private memory. Virtual addresses are translated to physical addresses by hardware.
 
@@ -277,6 +253,30 @@
   - **Page Faults** - When a page isn't in memory, the OS loads it from disk. We generate exceptions for missing pages.
 
   - **Adding an MMU to Our CPU** - We integrate address translation into our memory pipeline, connecting the TLB and page table walker.
+
+- [22 - Memory Hierarchy and Caches](part-6-advanced/ch-22-memory-hierarchy/ch-22-chapter.md) - Hiding memory latency behind locality: from registers to DRAM.
+
+  - **The Memory Wall** - Processors get faster, but memory doesn't keep up. We quantify the problem and see why caches are essential.
+
+  - **Locality of Reference** - Programs tend to access the same data repeatedly (temporal) and nearby data (spatial). We exploit these patterns to predict what to cache.
+
+  - **Cache Organization** - Direct-mapped, set-associative, fully-associative. We explore the tradeoffs between simplicity, hit rate, and hardware cost.
+
+  - **Cache Policies** - Write-through vs write-back, replacement policies (LRU, random). We design policies that balance performance and complexity.
+
+  - **Adding a Cache to Our CPU** - We integrate a simple cache into our CPU design, connecting it between the processor and main memory.
+
+- [23 - Throughput and Pipelining](part-6-advanced/ch-23-throughput-and-pipelining/ch-23-chapter.md) - Overlapping instruction execution: how throughput decouples from latency.
+
+  - **Latency vs Throughput** - Latency is the time for one instruction; throughput is instructions per second. Pipelining dramatically improves throughput.
+
+  - **Pipeline Stages** - Fetch, decode, execute, memory, writeback. We divide instruction execution into stages that operate in parallel.
+
+  - **Pipeline Hazards** - Data hazards, control hazards, structural hazards. When one instruction depends on another, the pipeline stalls.
+
+  - **Forwarding and Stalling** - Bypass networks forward results directly; stalls pause the pipeline. We implement both to handle hazards.
+
+  - **Pipelining Our CPU** - We transform our single-cycle CPU into a 5-stage pipeline, measuring the speedup and handling the hazards.
 
 - [24 - The Complete System](part-6-advanced/ch-24-complete-system/ch-24-chapter.md) - Integration, boot sequence, and running an operating system.
 
@@ -341,11 +341,11 @@ Each chapter has an accompanying appendix with complete RHDL implementations. Ad
 | 16 | Assembly and Stack | [Calling Convention](part-5-metalinguistic/ch-16-assembly-and-stack/ch-16-appendix.md) |
 | 17 | Lisp Interpreter | [Eval/Apply](part-5-metalinguistic/ch-17-lisp-interpreter/ch-17-appendix.md) |
 | 18 | Lambda Full Circle | [The Isomorphism](part-5-metalinguistic/ch-18-lambda-full-circle/ch-18-appendix.md) |
-| 19 | Memory Hierarchy | [Cache Implementation](part-6-advanced/ch-19-memory-hierarchy/ch-19-appendix.md) |
-| 20 | Throughput and Pipelining | [Pipeline Implementation](part-6-advanced/ch-20-throughput-and-pipelining/ch-20-appendix.md) |
-| 21 | Interrupts | [Interrupt Controller](part-6-advanced/ch-21-interrupts-exceptions/ch-21-appendix.md) |
-| 22 | Privilege | [Protection Implementation](part-6-advanced/ch-22-privilege-protection/ch-22-appendix.md) |
-| 23 | Virtual Memory | [MMU Implementation](part-6-advanced/ch-23-virtual-memory/ch-23-appendix.md) |
+| 19 | Interrupts and Exceptions | [Interrupt Controller](part-6-advanced/ch-19-interrupts-exceptions/ch-19-appendix.md) |
+| 20 | Privilege and Protection | [Protection Implementation](part-6-advanced/ch-20-privilege-protection/ch-20-appendix.md) |
+| 21 | Virtual Memory | [MMU Implementation](part-6-advanced/ch-21-virtual-memory/ch-21-appendix.md) |
+| 22 | Memory Hierarchy and Caches | [Cache Implementation](part-6-advanced/ch-22-memory-hierarchy/ch-22-appendix.md) |
+| 23 | Throughput and Pipelining | [Pipeline Implementation](part-6-advanced/ch-23-throughput-and-pipelining/ch-23-appendix.md) |
 | 24 | Complete System | [OS Kernel](part-6-advanced/ch-24-complete-system/ch-24-appendix.md) |
 
 ---
