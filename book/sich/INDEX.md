@@ -369,24 +369,14 @@
 ## The Journey
 
 ```
-Start here:                              End here:
+Part I          Part II           Part III        Part IV
+Gates    --->   Circuits   --->   State    --->   Register Machine
+                                                        |
+                                                        v
+Part VII        Part VII          Part VII        Part V
+xv6 shell <---  RISC-V SoC  <---  RV32I    <---   Lambda revealed
 
-Transistors & switches                   xv6 shell prompt
-    |                                        ^
-    v                                        |
-Logic gates (AND, OR, NOT)               RISC-V SoC
-    |                                        ^
-    v                                        |
-Combinational circuits                   Standard extensions (M, A)
-    |                                        ^
-    v                                        |
-Sequential logic & state                 Privileged architecture
-    |                                        ^
-    v                                        |
-Memory                                   RV32I implementation
-    |                                        ^
-    v                                        |
-Simple CPU  --> OS support --> Lambda --> RISC-V
+                    (Part VI: Advanced Topics - optional extras)
 ```
 
 ---
