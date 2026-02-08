@@ -192,29 +192,29 @@
 
   - **Recursion in Hardware** - With a stack, recursion works naturally. We implement factorial and Fibonacci, watching the stack grow and shrink.
 
-- [17 - A Lisp Interpreter](part-5-metalinguistic/ch-17-lisp-interpreter/ch-17-chapter.md) - Eval and apply on our CPU: building a language from cons cells and recursion.
+- [17 - The Netlist Interpreter](part-5-metalinguistic/ch-17-netlist-interpreter/ch-17-chapter.md) - Our CPU learns to simulate circuits: interpreting gate netlists as a language.
 
-  - **S-Expressions and Cons Cells** - Lists built from pairs: car, cdr, and cons. We represent Lisp data structures in our memory.
+  - **Netlists as Language** - A netlist has primitives (AND, OR, NOT), combination (wiring), and abstraction (subcircuits). It's already a language.
 
-  - **Memory Layout for Lisp** - Atoms, pairs, and symbols laid out in memory. We design tagging schemes to distinguish data types at runtime.
+  - **Data Structures for Gates** - Representing gates, wires, and connections in memory. A simple format our CPU can traverse.
 
-  - **The Read-Eval-Print Loop** - Parse input into S-expressions, evaluate them, print results. The REPL is the user interface to our interpreter.
+  - **The Gate Evaluator** - Dispatch on gate type: AND, OR, NOT, MUX, DFF. Maybe 100 lines of assembly. Simple and direct.
 
-  - **Implementing Eval** - The evaluator dispatches on expression type: self-evaluating, variable, quote, if, lambda, application. We write eval in assembly.
+  - **Simulating State** - DFFs need clock edges. We maintain state vectors and update them each cycle. The simulation ticks forward.
 
-  - **Implementing Apply** - Function application binds arguments to parameters and evaluates the body. We manage environments and handle primitive vs compound procedures.
+  - **Running a Netlist** - Load a circuit, provide inputs, clock it, read outputs. Our CPU becomes a universal circuit simulator.
 
-- [18 - Lambda Comes Full Circle](part-5-metalinguistic/ch-18-lambda-full-circle/ch-18-chapter.md) - The metacircular moment: our Lisp simulates the CPU that runs our Lisp.
+- [18 - The Metacircular Machine](part-5-metalinguistic/ch-18-metacircular-machine/ch-18-chapter.md) - The loop closes: our CPU simulates the CPU that runs the simulation.
 
-  - **Gates as Functions** - AND, OR, NOT, MUX are just Lisp functions. A gate netlist is an s-expression. We write a gate simulator in 50 lines.
+  - **Exporting Our CPU** - We export our CPU design to a gate-level netlist. The machine becomes data.
 
-  - **Loading Our CPU's Netlist** - We export our CPU to a gate-level netlist and load it into Lisp. The machine becomes data.
+  - **Loading Ourselves** - The netlist interpreter loads our CPU's netlist. We're about to simulate ourselves.
 
-  - **The Metacircular Machine** - Our Lisp interpreter simulates the CPU it's running on. We run Lisp on the simulated CPU. The loop closes.
+  - **The Metacircular Moment** - Run the simulation. The simulated CPU executes instructions. We run the netlist interpreter on it. Turtles all the way down.
 
-  - **Why This Works** - Muxes are Church booleans, flip-flops are fixed points. Hardware was always lambda calculus. The metacircular loop reveals the isomorphism.
+  - **Why This Works** - Gates are pure functions. Muxes select, flip-flops remember. Hardware is computation, computation is hardware.
 
-  - **Hardware and Software Are One** - We started with transistors and arrived at lambda. But lambda was there all along, in every gate. The simulation proves it.
+  - **The Isomorphism Revealed** - We built gates from transistors, CPUs from gates, interpreters from instructions. But interpretation was there from the start—in every gate.
 
 ### Part VI: Advanced Topics
 
@@ -396,8 +396,8 @@ Each chapter has an accompanying appendix with complete RHDL implementations. Ad
 | 14 | Explicit-Control | [Microcode](part-4-register-machines/ch-14-explicit-control-datapath/ch-14-appendix.md) |
 | 15 | ISA as Language | [Instruction Set](part-5-metalinguistic/ch-15-isa-as-language/ch-15-appendix.md) |
 | 16 | Assembly and Stack | [Calling Convention](part-5-metalinguistic/ch-16-assembly-and-stack/ch-16-appendix.md) |
-| 17 | Lisp Interpreter | [Eval/Apply](part-5-metalinguistic/ch-17-lisp-interpreter/ch-17-appendix.md) |
-| 18 | Lambda Full Circle | [The Isomorphism](part-5-metalinguistic/ch-18-lambda-full-circle/ch-18-appendix.md) |
+| 17 | Netlist Interpreter | [Gate Simulator](part-5-metalinguistic/ch-17-netlist-interpreter/ch-17-appendix.md) |
+| 18 | Metacircular Machine | [CPU Netlist](part-5-metalinguistic/ch-18-metacircular-machine/ch-18-appendix.md) |
 | 19 | Interrupts and Exceptions | [Interrupt Controller](part-6-advanced/ch-19-interrupts-exceptions/ch-19-appendix.md) |
 | 20 | Privilege and Protection | [Protection Implementation](part-6-advanced/ch-20-privilege-protection/ch-20-appendix.md) |
 | 21 | Virtual Memory | [MMU Implementation](part-6-advanced/ch-21-virtual-memory/ch-21-appendix.md) |
