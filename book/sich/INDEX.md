@@ -369,8 +369,7 @@
 ## The Journey
 
 ```
-Part I   Part II    Part III   Part IV   Part V    Part VII
-Gates -> Circuits -> State -> CPU -> Lambda -> RISC-V -> xv6
+Gates -> Circuits -> State -> CPU -> Lambda
 ```
 
 ---
