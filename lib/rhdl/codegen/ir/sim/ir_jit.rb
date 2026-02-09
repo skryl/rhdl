@@ -154,6 +154,119 @@ module RHDL
           names
         end
 
+        # VCD tracing methods
+        def trace_start
+          return @sim.trace_start if @fallback && @sim.respond_to?(:trace_start)
+          return false if @fallback
+          @fn_trace_start.call(@ctx) == 0
+        end
+
+        def trace_start_streaming(path)
+          return @sim.trace_start_streaming(path) if @fallback && @sim.respond_to?(:trace_start_streaming)
+          return false if @fallback
+          @fn_trace_start_streaming.call(@ctx, path) == 0
+        end
+
+        def trace_stop
+          return @sim.trace_stop if @fallback && @sim.respond_to?(:trace_stop)
+          return nil if @fallback
+          @fn_trace_stop.call(@ctx)
+        end
+
+        def trace_enabled?
+          return @sim.trace_enabled? if @fallback && @sim.respond_to?(:trace_enabled?)
+          return false if @fallback
+          @fn_trace_enabled.call(@ctx) != 0
+        end
+
+        def trace_capture
+          return @sim.trace_capture if @fallback && @sim.respond_to?(:trace_capture)
+          return nil if @fallback
+          @fn_trace_capture.call(@ctx)
+        end
+
+        def trace_add_signal(name)
+          return @sim.trace_add_signal(name) if @fallback && @sim.respond_to?(:trace_add_signal)
+          return false if @fallback
+          @fn_trace_add_signal.call(@ctx, name) == 0
+        end
+
+        def trace_add_signals_matching(pattern)
+          return @sim.trace_add_signals_matching(pattern) if @fallback && @sim.respond_to?(:trace_add_signals_matching)
+          return 0 if @fallback
+          @fn_trace_add_signals_matching.call(@ctx, pattern)
+        end
+
+        def trace_all_signals
+          return @sim.trace_all_signals if @fallback && @sim.respond_to?(:trace_all_signals)
+          return nil if @fallback
+          @fn_trace_all_signals.call(@ctx)
+        end
+
+        def trace_clear_signals
+          return @sim.trace_clear_signals if @fallback && @sim.respond_to?(:trace_clear_signals)
+          return nil if @fallback
+          @fn_trace_clear_signals.call(@ctx)
+        end
+
+        def trace_to_vcd
+          return @sim.trace_to_vcd if @fallback && @sim.respond_to?(:trace_to_vcd)
+          return '' if @fallback
+          ptr = @fn_trace_to_vcd.call(@ctx)
+          return '' if ptr.null?
+
+          vcd = ptr.to_s
+          @fn_free_string.call(ptr)
+          vcd
+        end
+
+        def trace_take_live_vcd
+          return @sim.trace_take_live_vcd if @fallback && @sim.respond_to?(:trace_take_live_vcd)
+          return '' if @fallback
+          ptr = @fn_trace_take_live_vcd.call(@ctx)
+          return '' if ptr.null?
+
+          chunk = ptr.to_s
+          @fn_free_string.call(ptr)
+          chunk
+        end
+
+        def trace_save_vcd(path)
+          return @sim.trace_save_vcd(path) if @fallback && @sim.respond_to?(:trace_save_vcd)
+          return false if @fallback
+          @fn_trace_save_vcd.call(@ctx, path) == 0
+        end
+
+        def trace_clear
+          return @sim.trace_clear if @fallback && @sim.respond_to?(:trace_clear)
+          return nil if @fallback
+          @fn_trace_clear.call(@ctx)
+        end
+
+        def trace_change_count
+          return @sim.trace_change_count if @fallback && @sim.respond_to?(:trace_change_count)
+          return 0 if @fallback
+          @fn_trace_change_count.call(@ctx)
+        end
+
+        def trace_signal_count
+          return @sim.trace_signal_count if @fallback && @sim.respond_to?(:trace_signal_count)
+          return 0 if @fallback
+          @fn_trace_signal_count.call(@ctx)
+        end
+
+        def trace_set_timescale(timescale)
+          return @sim.trace_set_timescale(timescale) if @fallback && @sim.respond_to?(:trace_set_timescale)
+          return false if @fallback
+          @fn_trace_set_timescale.call(@ctx, timescale) == 0
+        end
+
+        def trace_set_module_name(name)
+          return @sim.trace_set_module_name(name) if @fallback && @sim.respond_to?(:trace_set_module_name)
+          return false if @fallback
+          @fn_trace_set_module_name.call(@ctx, name) == 0
+        end
+
         def stats
           return @sim.stats if @fallback
           {
@@ -568,6 +681,109 @@ module RHDL
             @lib['jit_sim_output_names'],
             [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_VOIDP
+          )
+
+          # VCD trace functions
+          @fn_trace_start = Fiddle::Function.new(
+            @lib['jit_sim_trace_start'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_trace_start_streaming = Fiddle::Function.new(
+            @lib['jit_sim_trace_start_streaming'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_trace_stop = Fiddle::Function.new(
+            @lib['jit_sim_trace_stop'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_trace_enabled = Fiddle::Function.new(
+            @lib['jit_sim_trace_enabled'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_trace_capture = Fiddle::Function.new(
+            @lib['jit_sim_trace_capture'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_trace_add_signal = Fiddle::Function.new(
+            @lib['jit_sim_trace_add_signal'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_trace_add_signals_matching = Fiddle::Function.new(
+            @lib['jit_sim_trace_add_signals_matching'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_trace_all_signals = Fiddle::Function.new(
+            @lib['jit_sim_trace_all_signals'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_trace_clear_signals = Fiddle::Function.new(
+            @lib['jit_sim_trace_clear_signals'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_trace_to_vcd = Fiddle::Function.new(
+            @lib['jit_sim_trace_to_vcd'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOIDP
+          )
+
+          @fn_trace_take_live_vcd = Fiddle::Function.new(
+            @lib['jit_sim_trace_take_live_vcd'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOIDP
+          )
+
+          @fn_trace_save_vcd = Fiddle::Function.new(
+            @lib['jit_sim_trace_save_vcd'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_trace_clear = Fiddle::Function.new(
+            @lib['jit_sim_trace_clear'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOID
+          )
+
+          @fn_trace_change_count = Fiddle::Function.new(
+            @lib['jit_sim_trace_change_count'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_LONG_LONG
+          )
+
+          @fn_trace_signal_count = Fiddle::Function.new(
+            @lib['jit_sim_trace_signal_count'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_trace_set_timescale = Fiddle::Function.new(
+            @lib['jit_sim_trace_set_timescale'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_trace_set_module_name = Fiddle::Function.new(
+            @lib['jit_sim_trace_set_module_name'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
           )
 
           # MOS6502 extension functions

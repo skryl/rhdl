@@ -378,3 +378,15 @@ namespace :debug do
     RHDL::CLI::Tasks::DebugInterruptTask.new.run
   end
 end
+
+# =============================================================================
+# Web Tasks
+# =============================================================================
+
+namespace :web do
+  desc "Generate web simulator artifacts (IR, schematics, Ruby/Verilog source bundles)"
+  task :generate do
+    load_cli_tasks
+    RHDL::CLI::Tasks::WebGenerateTask.new.run
+  end
+end

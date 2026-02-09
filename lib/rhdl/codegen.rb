@@ -7,6 +7,8 @@ require_relative "codegen/ir/sim/ir_compiler"
 
 # Verilog codegen
 require_relative "codegen/verilog/verilog"
+require_relative "codegen/source/source"
+require_relative "codegen/schematic/schematic"
 
 # CIRCT codegen (FIRRTL)
 require_relative "codegen/circt/firrtl"

@@ -109,6 +109,37 @@ pub unsafe extern "C" fn apple2_ir_sim_read_ram(
     }
 }
 
+/// Read mapped Apple II memory (full 64KB CPU-visible address space)
+#[no_mangle]
+pub unsafe extern "C" fn apple2_ir_sim_read_memory(
+    ctx: *const IrSimContext,
+    offset: c_uint,
+    buf: *mut u8,
+    buf_len: usize,
+) -> usize {
+    if ctx.is_null() || buf.is_null() {
+        return 0;
+    }
+    if let Some(ref ext) = (*ctx).apple2 {
+        let mut addr = offset as usize & 0xFFFF;
+        for i in 0..buf_len {
+            let byte = if addr >= 0xD000 {
+                let rom_idx = addr - 0xD000;
+                ext.rom.get(rom_idx).copied().unwrap_or(0)
+            } else if addr >= 0xC000 {
+                0
+            } else {
+                ext.ram.get(addr).copied().unwrap_or(0)
+            };
+            *buf.add(i) = byte;
+            addr = (addr + 1) & 0xFFFF;
+        }
+        buf_len
+    } else {
+        0
+    }
+}
+
 /// Write Apple II RAM
 #[no_mangle]
 pub unsafe extern "C" fn apple2_ir_sim_write_ram(
