@@ -100,6 +100,24 @@ RSpec.describe 'IrCompiler vs IrInterpreter PC Progression' do
 
       expect(comp_addr).to eq(interp_addr), "Compiler reset state differs from interpreter"
     end
+
+    it 'batched Apple2 cycle call matches repeated single-cycle progression' do
+      skip 'ROM not available' unless @rom_available
+
+      stepped = create_compiler
+      batched = create_compiler
+
+      stepped.apple2_load_rom(@rom_data)
+      batched.apple2_load_rom(@rom_data)
+
+      boot_simulator(stepped)
+      boot_simulator(batched)
+
+      100.times { stepped.apple2_run_cpu_cycles(1, 0, false) }
+      batched.apple2_run_cpu_cycles(100, 0, false)
+
+      expect(batched.peek('cpu__pc_reg')).to eq(stepped.peek('cpu__pc_reg'))
+    end
   end
 
   describe 'PC progression comparison' do

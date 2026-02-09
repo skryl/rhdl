@@ -168,7 +168,6 @@ impl Apple2Extension {
     pub fn generate_code(core: &CoreSimulator) -> String {
         let mut code = String::new();
 
-        let ram_addr_idx = *core.name_to_idx.get("ram_addr").unwrap_or(&0);
         let ram_do_idx = *core.name_to_idx.get("ram_do").unwrap_or(&0);
         let ram_we_idx = *core.name_to_idx.get("ram_we").unwrap_or(&0);
         let d_idx = *core.name_to_idx.get("d").unwrap_or(&0);
@@ -212,21 +211,13 @@ impl Apple2Extension {
         code.push_str("    let mut key_cleared = false;\n");
         code.push_str("    let mut speaker_toggles: u32 = 0;\n");
         code.push_str("    let mut prev_speaker = *prev_speaker_ptr;\n\n");
-
-        // Initialize old_clocks from current signal values
-        for (i, &clk) in clock_indices.iter().enumerate() {
-            code.push_str(&format!("    old_clocks[{}] = *s.add({});\n", i, clk));
-        }
-        code.push_str("\n");
+        code.push_str("    let key_signal = if key_ready { (key_data as u64) | 0x80 } else { key_data as u64 };\n");
+        code.push_str(&format!("    *s.add({}) = key_signal;\n\n", k_idx));
 
         code.push_str("    for _ in 0..n {\n");
 
-        // Set keyboard input
-        code.push_str(&format!("        *s.add({}) = if key_ready {{ (key_data as u64) | 0x80 }} else {{ key_data as u64 }};\n\n", k_idx));
-
         // Clock falling edge
-        code.push_str(&format!("        *s.add({}) = 0;\n", clk_idx));
-        code.push_str("        evaluate_inline(signals);\n\n");
+        code.push_str(&format!("        drive_clock_low_inline(signals, {});\n\n", clk_idx));
 
         // Provide RAM/ROM data based on CPU address (AFTER falling edge, like interpreter)
         code.push_str(&format!("        let cpu_addr = (*s.add({}) as usize) & 0xFFFF;\n", cpu_addr_idx));
@@ -244,11 +235,7 @@ impl Apple2Extension {
         code.push_str(&format!("        *s.add({}) = ram_data;\n\n", ram_do_idx));
 
         // Clock rising edge
-        for (i, &clk) in clock_indices.iter().enumerate() {
-            code.push_str(&format!("        old_clocks[{}] = *s.add({});\n", i, clk));
-        }
-        code.push_str(&format!("        *s.add({}) = 1;\n", clk_idx));
-        code.push_str("        tick_inline(signals, &mut old_clocks, &mut next_regs);\n\n");
+        code.push_str(&format!("        drive_clock_high_tick_inline(signals, {}, &mut old_clocks, &mut next_regs);\n\n", clk_idx));
 
         // Handle RAM write (read from d signal, NOT ram_do)
         code.push_str(&format!("        let ram_we = *s.add({});\n", ram_we_idx));
