@@ -27,6 +27,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -40,14 +45,13 @@ jobs:
             lib/rhdl/codegen/ir/sim/ir_jit -> target
             lib/rhdl/codegen/ir/sim/ir_compiler -> target
 
-      - name: Build WASM backends
-        run: bash ./web/scripts/build_wasm.sh
+      - name: Generate web assets
+        run: bundle exec rake web:generate
 
       - name: Verify WASM artifacts
         run: |
           set -euo pipefail
           test -f web/assets/pkg/ir_interpreter.wasm
-          test -f web/assets/pkg/ir_jit.wasm
           test -f web/assets/pkg/ir_compiler.wasm
 
       - name: Assemble Pages artifact

@@ -36,7 +36,7 @@ export function createApple2RomResetService({
     }
 
     const preset = currentRunnerPreset();
-    const romPath = preset?.romPath || `${fixtureRoot}/appleiigo.rom`;
+    const romPath = preset?.romPath || `${fixtureRoot}/memory/appleiigo.rom`;
 
     try {
       const romResp = await fetchImpl(romPath);

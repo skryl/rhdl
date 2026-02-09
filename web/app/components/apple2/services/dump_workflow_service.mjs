@@ -231,9 +231,9 @@ export function createApple2DumpWorkflowService({
 
     try {
       const [romResp, dumpResp, metaResp] = await Promise.all([
-        fetchImpl(`${fixtureRoot}/appleiigo.rom`),
-        fetchImpl(`${fixtureRoot}/karateka_mem.bin`),
-        fetchImpl(`${fixtureRoot}/karateka_mem_meta.txt`)
+        fetchImpl(`${fixtureRoot}/memory/appleiigo.rom`),
+        fetchImpl(`${fixtureRoot}/memory/karateka_mem.bin`),
+        fetchImpl(`${fixtureRoot}/memory/karateka_mem_meta.txt`)
       ]);
 
       if (!romResp.ok || !dumpResp.ok) {
