@@ -1,4 +1,4 @@
-import './components/shell_panel.mjs';
-import { startMainApp } from './bootstrap.mjs';
+import './components/shell/ui/panel.mjs';
+import { startMainApp } from './core/bootstrap.mjs';
 
 startMainApp();

@@ -1,0 +1,3 @@
+export const REDUX_STORE_GLOBAL_KEY = '__RHDL_REDUX_STORE__';
+export const REDUX_SYNC_GLOBAL_KEY = '__RHDL_REDUX_SYNC__';
+export const REDUX_STATE_GLOBAL_KEY = '__RHDL_UX_STATE__';
