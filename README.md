@@ -12,6 +12,8 @@
 
 RHDL is a Domain Specific Language (DSL) for designing hardware using Ruby's flexible syntax and exporting to synthesizable Verilog. It provides Ruby developers with a comfortable environment to create hardware designs leveraging Ruby's metaprogramming capabilities.
 
+Demo: [Web Simulator](https://skryl.github.com/rhdl)
+
 ## Features
 
 - **Component DSLs**: Ruby-based DSLs for combinational, sequential, memory, and state machine components
@@ -39,6 +41,36 @@ RHDL is a Domain Specific Language (DSL) for designing hardware using Ruby's fle
 | [Apple II](docs/apple2.md) | Apple II emulation |
 | [Game Boy](docs/gameboy.md) | Game Boy (DMG/GBC/SGB) emulation |
 | [RISC-V](docs/riscv.md) | RISC-V RV32I CPU implementation |
+| [Web Simulator](docs/web_simulator.md) | Browser simulator (WASM + VCD + Apple II runner) |
+| [Web Architecture](docs/web_architecture.md) | Web app runtime architecture and module layout |
+
+## Web Simulator
+
+RHDL includes a browser-based simulator with WASM backends, live VCD tracing, Apple II runner tooling, memory dump workflows, and component/source exploration.
+
+- Demo: [https://skryl.github.com/rhdl](https://skryl.github.com/rhdl)
+- Docs: [Web Simulator Guide](docs/web_simulator.md)
+- Architecture: [Web App Architecture](docs/web_architecture.md)
+
+### I/O
+
+![Web simulator I/O tab](docs/screenshots/io.png)
+
+### VCD + Signals
+
+![Web simulator VCD and signals tab](docs/screenshots/signals.png)
+
+### Memory
+
+![Web simulator memory tab](docs/screenshots/memory.png)
+
+### Components
+
+![Web simulator component explorer tab](docs/screenshots/explorer.png)
+
+### Schematic
+
+![Web simulator schematic tab](docs/screenshots/schematic.png)
 
 ## Quick Start
 

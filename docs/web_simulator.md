@@ -2,7 +2,7 @@
 
 This app runs RHDL IR simulator backends in the browser via WebAssembly and renders live VCD waveforms with p5.js.
 
-Architecture reference: `web/docs/architecture.md`.
+Architecture reference: `web_architecture.md`.
 
 ## Features
 
@@ -31,6 +31,28 @@ Architecture reference: `web/docs/architecture.md`.
   - `Load Dump` accepts both raw binary dumps and `.rhdlsnap` snapshot files
   - `Load Last Saved` restores the most recently saved dump from browser storage
   - `Reset (Vector)` resets the Apple II runner from the Memory tab, with optional manual reset-vector override (`$B82A` / `0xB82A`)
+
+## Screenshots
+
+### I/O
+
+![I/O tab](screenshots/io.png)
+
+### VCD + Signals
+
+![VCD and signals tab](screenshots/signals.png)
+
+### Memory
+
+![Memory tab](screenshots/memory.png)
+
+### Components
+
+![Component explorer tab](screenshots/explorer.png)
+
+### Schematic
+
+![Schematic tab](screenshots/schematic.png)
 
 ## Build WASM
 
