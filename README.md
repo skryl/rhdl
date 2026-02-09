@@ -52,25 +52,7 @@ RHDL includes a browser-based simulator with WASM backends, live VCD tracing, Ap
 - Docs: [Web Simulator Guide](docs/web_simulator.md)
 - Architecture: [Web App Architecture](docs/web_architecture.md)
 
-### I/O
-
-![Web simulator I/O tab](docs/screenshots/io.png)
-
-### VCD + Signals
-
-![Web simulator VCD and signals tab](docs/screenshots/signals.png)
-
-### Memory
-
-![Web simulator memory tab](docs/screenshots/memory.png)
-
-### Components
-
-![Web simulator component explorer tab](docs/screenshots/explorer.png)
-
-### Schematic
-
-![Web simulator schematic tab](docs/screenshots/schematic.png)
+![Web simulator](docs/screenshots/2026-02-09-14.52.47.gif)
 
 ## Quick Start
 
