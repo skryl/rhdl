@@ -30,6 +30,7 @@ function createHarness(overrides = {}) {
     updateIrSourceVisibility: () => calls.push(['updateIrSourceVisibility']),
     loadRunnerIrBundle: async () => ({ simJson: '{}', explorerJson: '{}', explorerMeta: null, sourceBundle: null, schematicBundle: null }),
     initializeSimulator: async (options) => calls.push(['initializeSimulator', options]),
+    applyRunnerDefaults: async (preset) => calls.push(['applyRunnerDefaults', preset.id]),
     clearComponentSourceOverride: () => calls.push(['clearComponentSourceOverride']),
     resetComponentExplorerState: () => calls.push(['resetComponentExplorerState']),
     log: (msg) => calls.push(['log', msg]),
@@ -73,6 +74,7 @@ test('loadRunnerPreset runs manual preset initialization path', async () => {
   assert.equal(calls.some(([k]) => k === 'setRunnerPresetState'), true);
   assert.equal(calls.some(([k]) => k === 'updateIrSourceVisibility'), true);
   assert.equal(calls.some(([k]) => k === 'initializeSimulator'), true);
+  assert.equal(calls.some(([k]) => k === 'applyRunnerDefaults'), true);
   assert.equal(calls.some(([k]) => k === 'setActiveTab'), true);
   assert.equal(calls.some(([k]) => k === 'refreshStatus'), true);
 });

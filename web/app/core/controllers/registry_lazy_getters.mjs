@@ -41,6 +41,7 @@ export function createRegistryLazyGetters(options = {}) {
     loadRunnerPreset,
     loadRunnerIrBundle,
     initializeSimulator,
+    applyRunnerDefaults,
     clearComponentSourceOverride,
     resetComponentExplorerState,
     clearComponentSourceBundle,
@@ -125,6 +126,7 @@ export function createRegistryLazyGetters(options = {}) {
   requireFn('loadRunnerPreset', loadRunnerPreset);
   requireFn('loadRunnerIrBundle', loadRunnerIrBundle);
   requireFn('initializeSimulator', initializeSimulator);
+  requireFn('applyRunnerDefaults', applyRunnerDefaults);
   requireFn('clearComponentSourceOverride', clearComponentSourceOverride);
   requireFn('resetComponentExplorerState', resetComponentExplorerState);
   requireFn('clearComponentSourceBundle', clearComponentSourceBundle);
@@ -206,6 +208,7 @@ export function createRegistryLazyGetters(options = {}) {
     updateIrSourceVisibility,
     loadRunnerIrBundle,
     initializeSimulator,
+    applyRunnerDefaults,
     clearComponentSourceOverride,
     resetComponentExplorerState,
     isComponentTabActive,

@@ -71,6 +71,7 @@ export function createControllerRegistry(options = {}) {
     loadRunnerPreset,
     loadRunnerIrBundle,
     initializeSimulator,
+    applyRunnerDefaults,
     clearComponentSourceOverride,
     resetComponentExplorerState,
     clearComponentSourceBundle,
@@ -215,6 +216,36 @@ export function createControllerRegistry(options = {}) {
 
   async function loadRunnerIrBundle(preset, options = {}) {
     return lazy.getRunnerBundleLoader().loadRunnerIrBundle(preset, options);
+  }
+
+  async function applyRunnerDefaults(preset) {
+    const defaults = preset?.defaults;
+    if (!defaults || typeof defaults !== 'object') {
+      return;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(defaults, 'displayHires')) {
+      setApple2DisplayHiresState(!!defaults.displayHires);
+    }
+    if (Object.prototype.hasOwnProperty.call(defaults, 'displayColor')) {
+      setApple2DisplayColorState(!!defaults.displayColor);
+    }
+    if (Object.prototype.hasOwnProperty.call(defaults, 'memoryFollowPc')) {
+      setMemoryFollowPcState(!!defaults.memoryFollowPc);
+    }
+
+    if (!preset.enableApple2Ui) {
+      return;
+    }
+
+    updateIoToggleUi();
+    refreshApple2Screen();
+    refreshApple2Debug();
+    refreshMemoryView();
+
+    if (defaults.loadKaratekaDumpOnLoad) {
+      await loadKaratekaDump();
+    }
   }
 
   function setActiveTab(tabId) {
@@ -473,8 +504,8 @@ export function createControllerRegistry(options = {}) {
     return lazy.getRunnerActionsController().loadSample(samplePathOverride);
   }
 
-  async function loadRunnerPreset() {
-    return lazy.getRunnerActionsController().loadRunnerPreset();
+  async function loadRunnerPreset(options = {}) {
+    return lazy.getRunnerActionsController().loadRunnerPreset(options);
   }
 
   const shell = createShellDomainController({

@@ -13,6 +13,7 @@ export function createRunnerActionsController({
   updateIrSourceVisibility,
   loadRunnerIrBundle,
   initializeSimulator,
+  applyRunnerDefaults,
   clearComponentSourceOverride,
   resetComponentExplorerState,
   log,
@@ -34,6 +35,7 @@ export function createRunnerActionsController({
   requireFn('updateIrSourceVisibility', updateIrSourceVisibility);
   requireFn('loadRunnerIrBundle', loadRunnerIrBundle);
   requireFn('initializeSimulator', initializeSimulator);
+  requireFn('applyRunnerDefaults', applyRunnerDefaults);
   requireFn('clearComponentSourceOverride', clearComponentSourceOverride);
   requireFn('resetComponentExplorerState', resetComponentExplorerState);
   requireFn('log', log);
@@ -63,8 +65,16 @@ export function createRunnerActionsController({
     }
   }
 
-  async function loadRunnerPreset() {
-    const preset = getRunnerPreset(dom.runnerSelect?.value);
+  async function loadRunnerPreset(options = {}) {
+    const {
+      presetOverride = null,
+      logLoad = true,
+      setPreferredTab = true
+    } = options;
+    const preset = presetOverride || getRunnerPreset(dom.runnerSelect?.value);
+    if (dom.runnerSelect) {
+      dom.runnerSelect.value = preset.id;
+    }
     setRunnerPresetState(preset.id);
     updateIrSourceVisibility();
     try {
@@ -82,7 +92,7 @@ export function createRunnerActionsController({
           schematicBundle: null
         };
       } else {
-        bundle = await loadRunnerIrBundle(preset, { logLoad: true });
+        bundle = await loadRunnerIrBundle(preset, { logLoad: !!logLoad });
       }
 
       await initializeSimulator({
@@ -93,11 +103,14 @@ export function createRunnerActionsController({
         componentSourceBundle: bundle.sourceBundle || null,
         componentSchematicBundle: bundle.schematicBundle || null
       });
+      if (setPreferredTab) {
+        setActiveTab(preset.preferredTab || 'vcdTab');
+      }
+      await applyRunnerDefaults(preset);
     } catch (err) {
       log(`Failed to load runner ${preset.label}: ${err.message || err}`);
       return;
     }
-    setActiveTab(preset.preferredTab || 'vcdTab');
     refreshStatus();
   }
 
