@@ -602,14 +602,110 @@ impl CoreSimulator {
         code.push_str("pub unsafe fn evaluate_inline(signals: &mut [u64]) {\n");
         code.push_str("    let s = signals.as_mut_ptr();\n");
 
+        // Cache frequently-used signals to reduce pointer loads in hot evaluate loop.
+        // We cache:
+        // - stable signals (not assigned by combinational assigns) when used many times
+        // - combinational targets when used multiple times downstream
+        let mut comb_use_counts: HashMap<usize, usize> = HashMap::new();
+        for assign in &self.ir.assigns {
+            let deps = self.expr_dependencies(&assign.expr);
+            for sig_idx in deps {
+                *comb_use_counts.entry(sig_idx).or_insert(0) += 1;
+            }
+        }
+        let mut comb_targets: HashSet<usize> = HashSet::new();
+        for assign in &self.ir.assigns {
+            if let Some(&idx) = self.name_to_idx.get(&assign.target) {
+                comb_targets.insert(idx);
+            }
+        }
+
+        let stable_cache_threshold = 5usize;
+        let max_stable_cached = 32usize;
+        let max_target_cached = 128usize;
+
+        let mut stable_cached: Vec<(usize, usize)> = comb_use_counts
+            .iter()
+            .filter_map(|(&idx, &count)| {
+                if count > stable_cache_threshold && !comb_targets.contains(&idx) {
+                    Some((idx, count))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        stable_cached.sort_by(|(a_idx, a_count), (b_idx, b_count)| {
+            b_count.cmp(a_count).then(a_idx.cmp(b_idx))
+        });
+        stable_cached.truncate(max_stable_cached);
+
+        let mut cached_targets: Vec<(usize, usize)> = comb_use_counts
+            .iter()
+            .filter_map(|(&idx, &count)| {
+                if count > 1 && comb_targets.contains(&idx) {
+                    Some((idx, count))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        cached_targets.sort_by(|(a_idx, a_count), (b_idx, b_count)| {
+            b_count.cmp(a_count).then(a_idx.cmp(b_idx))
+        });
+        cached_targets.truncate(max_target_cached);
+        let cached_target_set: HashSet<usize> = cached_targets.iter().map(|(idx, _)| *idx).collect();
+
+        let mut comb_cache_names: HashMap<usize, String> = HashMap::new();
+        let mut comb_cache_counter: usize = 0;
+        for (idx, _count) in &stable_cached {
+            let name = format!("c{}", comb_cache_counter);
+            comb_cache_counter += 1;
+            code.push_str(&format!("    let {} = *s.add({});\n", name, idx));
+            comb_cache_names.insert(*idx, name);
+        }
+        if !stable_cached.is_empty() {
+            code.push_str("\n");
+        }
+
         let levels = self.compute_assignment_levels();
         for level in &levels {
             for &assign_idx in level {
                 let assign = &self.ir.assigns[assign_idx];
                 if let Some(&idx) = self.name_to_idx.get(&assign.target) {
                     let width = self.widths.get(idx).copied().unwrap_or(64);
-                    let expr_code = self.expr_to_rust_ptr(&assign.expr, "s");
-                    code.push_str(&format!("    *s.add({}) = ({}) & {};\n", idx, expr_code, Self::mask_const(width)));
+                    let expr_width = self.expr_width(&assign.expr);
+                    let expr_code = self.expr_to_rust_ptr_cached(&assign.expr, "s", &comb_cache_names);
+                    if expr_width == width {
+                        if cached_target_set.contains(&idx) {
+                            let name = format!("c{}", comb_cache_counter);
+                            comb_cache_counter += 1;
+                            code.push_str(&format!("    let {} = {};\n", name, expr_code));
+                            code.push_str(&format!("    *s.add({}) = {};\n", idx, name));
+                            comb_cache_names.insert(idx, name);
+                        } else {
+                            code.push_str(&format!("    *s.add({}) = {};\n", idx, expr_code));
+                        }
+                    } else {
+                        if cached_target_set.contains(&idx) {
+                            let name = format!("c{}", comb_cache_counter);
+                            comb_cache_counter += 1;
+                            code.push_str(&format!(
+                                "    let {} = ({}) & {};\n",
+                                name,
+                                expr_code,
+                                Self::mask_const(width)
+                            ));
+                            code.push_str(&format!("    *s.add({}) = {};\n", idx, name));
+                            comb_cache_names.insert(idx, name);
+                        } else {
+                            code.push_str(&format!(
+                                "    *s.add({}) = ({}) & {};\n",
+                                idx,
+                                expr_code,
+                                Self::mask_const(width)
+                            ));
+                        }
+                    }
                 }
             }
         }
@@ -631,9 +727,9 @@ impl CoreSimulator {
 
     pub fn expr_to_rust_ptr(&self, expr: &ExprDef, signals_ptr: &str) -> String {
         match expr {
-            ExprDef::Signal { name, width } => {
+            ExprDef::Signal { name, .. } => {
                 let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
-                format!("((*{}.add({})) & {})", signals_ptr, idx, Self::mask_const(*width))
+                format!("(*{}.add({}))", signals_ptr, idx)
             }
             ExprDef::Literal { value, width } => {
                 let masked = (*value as u64) & Self::mask(*width);
@@ -682,7 +778,13 @@ impl CoreSimulator {
                 let cond = self.expr_to_rust_ptr(condition, signals_ptr);
                 let t = self.expr_to_rust_ptr(when_true, signals_ptr);
                 let f = self.expr_to_rust_ptr(when_false, signals_ptr);
-                format!("(if {} != 0 {{ {} }} else {{ {} }} & {})", cond, t, f, Self::mask_const(*width))
+                format!(
+                    "((if {} != 0 {{ {} }} else {{ {} }}) & {})",
+                    cond,
+                    t,
+                    f,
+                    Self::mask_const(*width)
+                )
             }
             ExprDef::Slice { base, low, width, .. } => {
                 let base_code = self.expr_to_rust_ptr(base, signals_ptr);
@@ -722,10 +824,250 @@ impl CoreSimulator {
         }
     }
 
+    pub fn expr_to_rust_ptr_cached(
+        &self,
+        expr: &ExprDef,
+        signals_ptr: &str,
+        cache: &HashMap<usize, String>,
+    ) -> String {
+        match expr {
+            ExprDef::Signal { name, .. } => {
+                let idx = self.name_to_idx.get(name).copied().unwrap_or(0);
+                if let Some(temp) = cache.get(&idx) {
+                    temp.clone()
+                } else {
+                    format!("(*{}.add({}))", signals_ptr, idx)
+                }
+            }
+            ExprDef::Literal { value, width } => {
+                let masked = (*value as u64) & Self::mask(*width);
+                format!("{}u64", masked)
+            }
+            ExprDef::UnaryOp { op, operand, width } => {
+                let operand_code = self.expr_to_rust_ptr_cached(operand, signals_ptr, cache);
+                match op.as_str() {
+                    "~" | "not" => format!("((!{}) & {})", operand_code, Self::mask_const(*width)),
+                    "&" | "reduce_and" => {
+                        let op_width = self.expr_width(operand);
+                        let m = Self::mask_const(op_width);
+                        format!("(if ({} & {}) == {} {{ 1u64 }} else {{ 0u64 }})",
+                                operand_code, m, m)
+                    }
+                    "|" | "reduce_or" => format!("(if {} != 0 {{ 1u64 }} else {{ 0u64 }})", operand_code),
+                    "^" | "reduce_xor" => format!("(({}).count_ones() as u64 & 1)", operand_code),
+                    _ => operand_code,
+                }
+            }
+            ExprDef::BinaryOp { op, left, right, width } => {
+                let l = self.expr_to_rust_ptr_cached(left, signals_ptr, cache);
+                let r = self.expr_to_rust_ptr_cached(right, signals_ptr, cache);
+                let m = Self::mask_const(*width);
+                match op.as_str() {
+                    "&" => format!("({} & {})", l, r),
+                    "|" => format!("({} | {})", l, r),
+                    "^" => format!("({} ^ {})", l, r),
+                    "+" => format!("({}.wrapping_add({}) & {})", l, r, m),
+                    "-" => format!("({}.wrapping_sub({}) & {})", l, r, m),
+                    "*" => format!("({}.wrapping_mul({}) & {})", l, r, m),
+                    "/" => format!("(if {} != 0 {{ {} / {} }} else {{ 0u64 }})", r, l, r),
+                    "%" => format!("(if {} != 0 {{ {} % {} }} else {{ 0u64 }})", r, l, r),
+                    "<<" => format!("(({} << {}.min(63)) & {})", l, r, m),
+                    ">>" => format!("({} >> {}.min(63))", l, r),
+                    "==" => format!("(if {} == {} {{ 1u64 }} else {{ 0u64 }})", l, r),
+                    "!=" => format!("(if {} != {} {{ 1u64 }} else {{ 0u64 }})", l, r),
+                    "<" => format!("(if {} < {} {{ 1u64 }} else {{ 0u64 }})", l, r),
+                    ">" => format!("(if {} > {} {{ 1u64 }} else {{ 0u64 }})", l, r),
+                    "<=" | "le" => format!("(if {} <= {} {{ 1u64 }} else {{ 0u64 }})", l, r),
+                    ">=" => format!("(if {} >= {} {{ 1u64 }} else {{ 0u64 }})", l, r),
+                    _ => "0u64".to_string(),
+                }
+            }
+            ExprDef::Mux { condition, when_true, when_false, width } => {
+                let cond = self.expr_to_rust_ptr_cached(condition, signals_ptr, cache);
+                let t = self.expr_to_rust_ptr_cached(when_true, signals_ptr, cache);
+                let f = self.expr_to_rust_ptr_cached(when_false, signals_ptr, cache);
+                format!(
+                    "((if {} != 0 {{ {} }} else {{ {} }}) & {})",
+                    cond,
+                    t,
+                    f,
+                    Self::mask_const(*width)
+                )
+            }
+            ExprDef::Slice { base, low, width, .. } => {
+                let base_code = self.expr_to_rust_ptr_cached(base, signals_ptr, cache);
+                format!("(({} >> {}) & {})", base_code, low, Self::mask_const(*width))
+            }
+            ExprDef::Concat { parts, width } => {
+                let mut result = String::from("((");
+                let mut shift = 0usize;
+                let mut first = true;
+                for part in parts.iter().rev() {
+                    let part_code = self.expr_to_rust_ptr_cached(part, signals_ptr, cache);
+                    let part_width = self.expr_width(part);
+                    if !first {
+                        result.push_str(" | ");
+                    }
+                    first = false;
+                    if shift > 0 {
+                        result.push_str(&format!("(({} & {}) << {})", part_code, Self::mask_const(part_width), shift));
+                    } else {
+                        result.push_str(&format!("({} & {})", part_code, Self::mask_const(part_width)));
+                    }
+                    shift += part_width;
+                }
+                result.push_str(&format!(") & {})", Self::mask_const(*width)));
+                result
+            }
+            ExprDef::Resize { expr, width } => {
+                let expr_code = self.expr_to_rust_ptr_cached(expr, signals_ptr, cache);
+                format!("({} & {})", expr_code, Self::mask_const(*width))
+            }
+            ExprDef::MemRead { memory, addr, width } => {
+                let mem_idx = self.memory_name_to_idx.get(memory).copied().unwrap_or(0);
+                let addr_code = self.expr_to_rust_ptr_cached(addr, signals_ptr, cache);
+                format!("(MEM_{}.get({} as usize).copied().unwrap_or(0) & {})",
+                        mem_idx, addr_code, Self::mask_const(*width))
+            }
+        }
+    }
+
     fn generate_tick_function(&self, code: &mut String) {
         let clock_indices: Vec<usize> = self.clock_indices.clone();
         let num_clocks = clock_indices.len().max(1);
         let num_regs = self.seq_targets.len();
+
+        // Pre-generate sequential sampling code once so both generic and forced
+        // tick paths share identical register update semantics.
+        let mut seq_use_counts: HashMap<usize, usize> = HashMap::new();
+        for process in &self.ir.processes {
+            if !process.clocked {
+                continue;
+            }
+            for stmt in &process.statements {
+                let deps = self.expr_dependencies(&stmt.expr);
+                for sig_idx in deps {
+                    *seq_use_counts.entry(sig_idx).or_insert(0) += 1;
+                }
+            }
+        }
+        let mut seq_cached: Vec<usize> = seq_use_counts
+            .iter()
+            .filter_map(|(&sig_idx, &count)| if count > 1 { Some(sig_idx) } else { None })
+            .collect();
+        seq_cached.sort_unstable();
+
+        let mut seq_cache_names: HashMap<usize, String> = HashMap::new();
+        let mut seq_sample_code = String::new();
+        for (i, sig_idx) in seq_cached.iter().enumerate() {
+            let name = format!("r{}", i);
+            seq_sample_code.push_str(&format!("    let {} = *s.add({});\n", name, sig_idx));
+            seq_cache_names.insert(*sig_idx, name);
+        }
+
+        let mut seq_targets_order: Vec<usize> = Vec::new();
+        let mut seq_idx = 0usize;
+        for process in &self.ir.processes {
+            if !process.clocked {
+                continue;
+            }
+            for stmt in &process.statements {
+                if let Some(&target_idx) = self.name_to_idx.get(&stmt.target) {
+                    let width = self.widths.get(target_idx).copied().unwrap_or(64);
+                    let expr_width = self.expr_width(&stmt.expr);
+                    let expr_code = self.expr_to_rust_ptr_cached(&stmt.expr, "s", &seq_cache_names);
+                    if expr_width == width {
+                        seq_sample_code.push_str(&format!("    next_regs[{}] = {};\n", seq_idx, expr_code));
+                    } else {
+                        seq_sample_code.push_str(&format!(
+                            "    next_regs[{}] = ({}) & {};\n",
+                            seq_idx,
+                            expr_code,
+                            Self::mask_const(width)
+                        ));
+                    }
+                    seq_targets_order.push(target_idx);
+                    seq_idx += 1;
+                }
+            }
+        }
+
+        let mut seq_apply_code = String::new();
+        for (i, &target_idx) in seq_targets_order.iter().enumerate() {
+            seq_apply_code.push_str(&format!("    *s.add({}) = next_regs[{}];\n", target_idx, i));
+        }
+
+        code.push_str("/// Sample next values for all sequential targets\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str(&format!(
+            "pub unsafe fn sample_next_regs_inline(signals: &mut [u64], next_regs: &mut [u64; {}]) {{\n",
+            num_regs.max(1)
+        ));
+        code.push_str("    let s = signals.as_mut_ptr();\n");
+        code.push_str(&seq_sample_code);
+        code.push_str("}\n\n");
+
+        code.push_str("/// Apply sampled sequential values to target registers\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str(&format!(
+            "pub unsafe fn apply_next_regs_inline(signals: &mut [u64], next_regs: &[u64; {}]) {{\n",
+            num_regs.max(1)
+        ));
+        code.push_str("    let s = signals.as_mut_ptr();\n");
+        code.push_str(&seq_apply_code);
+        code.push_str("}\n\n");
+
+        code.push_str("/// Forced-edge tick for specialized batched runners.\n");
+        code.push_str("/// Evaluates combinational logic, samples sequential inputs, and applies all\n");
+        code.push_str("/// sequential updates unconditionally (one edge per call).\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str(&format!(
+            "pub unsafe fn tick_forced_inline(signals: &mut [u64], next_regs: &mut [u64; {}]) {{\n",
+            num_regs.max(1)
+        ));
+        code.push_str("    evaluate_inline(signals);\n\n");
+        code.push_str("    sample_next_regs_inline(signals, next_regs);\n");
+        code.push_str("    apply_next_regs_inline(signals, next_regs);\n");
+        code.push_str("}\n\n");
+
+        code.push_str("/// Drive a specific clock low and evaluate combinational logic.\n");
+        code.push_str("/// Reusable falling-edge helper for extension batched loops.\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("pub unsafe fn drive_clock_low_inline(signals: &mut [u64], clk_idx: usize) {\n");
+        code.push_str("    let s = signals.as_mut_ptr();\n");
+        code.push_str("    *s.add(clk_idx) = 0;\n");
+        code.push_str("    evaluate_inline(signals);\n");
+        code.push_str("}\n\n");
+
+        code.push_str("/// Drive a specific clock high and execute edge-triggered updates.\n");
+        code.push_str("/// Reusable rising-edge helper for extension batched loops using generic tick.\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str(&format!(
+            "pub unsafe fn drive_clock_high_tick_inline(signals: &mut [u64], clk_idx: usize, old_clocks: &mut [u64; {}], next_regs: &mut [u64; {}]) {{\n",
+            num_clocks,
+            num_regs.max(1)
+        ));
+        code.push_str("    let s = signals.as_mut_ptr();\n");
+        for (domain_idx, &clk_idx_domain) in clock_indices.iter().enumerate() {
+            code.push_str(&format!("    old_clocks[{}] = *s.add({});\n", domain_idx, clk_idx_domain));
+        }
+        code.push_str("    *s.add(clk_idx) = 1;\n");
+        code.push_str("    tick_inline(signals, old_clocks, next_regs);\n");
+        code.push_str("}\n\n");
+
+        code.push_str("/// Emit one full forced pulse: high edge update, then return low.\n");
+        code.push_str("/// Reusable helper for single-clock forced stepping loops.\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str(&format!(
+            "pub unsafe fn pulse_clock_forced_inline(signals: &mut [u64], clk_idx: usize, next_regs: &mut [u64; {}]) {{\n",
+            num_regs.max(1)
+        ));
+        code.push_str("    let s = signals.as_mut_ptr();\n");
+        code.push_str("    *s.add(clk_idx) = 1;\n");
+        code.push_str("    tick_forced_inline(signals, next_regs);\n");
+        code.push_str("    *s.add(clk_idx) = 0;\n");
+        code.push_str("    evaluate_inline(signals);\n");
+        code.push_str("}\n\n");
 
         code.push_str("/// Combined tick: evaluate + edge-triggered register update\n");
         code.push_str("/// Uses old_clocks (set by caller) for edge detection, not current signal values.\n");
@@ -739,21 +1081,7 @@ impl CoreSimulator {
         code.push_str("    evaluate_inline(signals);\n\n");
 
         // Compute next values for all registers ONCE (like JIT's seq_sample)
-        let mut seq_idx = 0;
-        for process in &self.ir.processes {
-            if !process.clocked {
-                continue;
-            }
-            for stmt in &process.statements {
-                if let Some(&target_idx) = self.name_to_idx.get(&stmt.target) {
-                    let width = self.widths.get(target_idx).copied().unwrap_or(64);
-                    let expr_code = self.expr_to_rust_ptr(&stmt.expr, "s");
-                    code.push_str(&format!("    next_regs[{}] = ({}) & {};\n", seq_idx, expr_code, Self::mask_const(width)));
-                    seq_idx += 1;
-                }
-            }
-        }
-        code.push_str("\n");
+        code.push_str("    sample_next_regs_inline(signals, next_regs);\n\n");
 
         // Track which registers have been updated (like JIT)
         code.push_str(&format!("    let mut updated = [false; {}];\n\n", num_regs.max(1)));
@@ -767,7 +1095,6 @@ impl CoreSimulator {
                 code.push_str(&format!("        if !updated[{}] {{ *s.add({}) = next_regs[{}]; updated[{}] = true; }}\n",
                                        seq_idx, target_idx, seq_idx, seq_idx));
             }
-
             code.push_str("    }\n");
         }
         code.push_str("\n");
@@ -786,15 +1113,15 @@ impl CoreSimulator {
 
         // Check for NEW rising edges
         code.push_str("        let mut any_rising = false;\n");
-        for (domain_idx, &clk_idx) in clock_indices.iter().enumerate() {
-            code.push_str(&format!("        if clock_before[{}] == 0 && *s.add({}) == 1 {{\n", domain_idx, clk_idx));
-            code.push_str("            any_rising = true;\n");
-            for &(seq_idx, target_idx) in &self.clock_domain_assigns[domain_idx] {
+            for (domain_idx, &clk_idx) in clock_indices.iter().enumerate() {
+                code.push_str(&format!("        if clock_before[{}] == 0 && *s.add({}) == 1 {{\n", domain_idx, clk_idx));
+                code.push_str("            any_rising = true;\n");
+                for &(seq_idx, target_idx) in &self.clock_domain_assigns[domain_idx] {
                 code.push_str(&format!("            if !updated[{}] {{ *s.add({}) = next_regs[{}]; updated[{}] = true; }}\n",
                                        seq_idx, target_idx, seq_idx, seq_idx));
+                }
+                code.push_str("        }\n");
             }
-            code.push_str("        }\n");
-        }
         code.push_str("\n");
         code.push_str("        if !any_rising { return; }\n");
         code.push_str("    }\n\n");
@@ -824,6 +1151,7 @@ impl CoreSimulator {
         }
 
         code.push_str("}\n");
+
     }
 
     // ========================================================================
