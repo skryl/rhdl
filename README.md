@@ -12,7 +12,7 @@
 
 RHDL is a Domain Specific Language (DSL) for designing hardware using Ruby's flexible syntax and exporting to synthesizable Verilog. It provides Ruby developers with a comfortable environment to create hardware designs leveraging Ruby's metaprogramming capabilities.
 
-Demo: [Web Simulator](https://skryl.github.com/rhdl)
+Demo: [Web Simulator](https://skryl.github.io/rhdl)
 
 ## Features
 
