@@ -215,6 +215,10 @@ module RHDL
           end
 
           cycles = options[:cycles] || 100_000
+          runner_filter = (ENV['RHDL_BENCH_BACKENDS'] || '')
+            .split(',')
+            .map { |name| name.strip.downcase.to_sym }
+            .reject(&:empty?)
 
           puts_header("MOS6502 CPU IR Benchmark - Karateka Game Code")
           puts "Cycles per run: #{cycles}"
@@ -250,6 +254,11 @@ module RHDL
           results = []
 
           runners.each do |runner|
+            if runner_filter.any? && !runner_filter.include?(runner[:backend])
+              results << { name: runner[:name], status: :skipped }
+              next
+            end
+
             # Skip Interpreter for large cycle counts (too slow)
             if runner[:backend] == :interpreter && cycles > 100_000
               puts "\n#{runner[:name]}: SKIPPED (cycles > 100K, too slow)"
@@ -390,7 +399,6 @@ module RHDL
               puts "done"
               puts "  Init time: #{format('%.3f', init_elapsed)}s"
               puts "  Run time:  #{format('%.3f', run_elapsed)}s"
-              puts "  Rate:      #{format('%.0f', cycles_per_sec)} cycles/s (#{format('%.2f', cycles_per_sec / 1_000_000)}M/s)"
               puts "  Final PC:  0x#{pc.to_s(16).upcase}"
 
               results << {
@@ -442,9 +450,15 @@ module RHDL
           karateka_rom[0x2FFD] = 0xB8  # high byte of $B82A
 
           cycles = options[:cycles] || 100_000
+          compiler_sub_cycles = 14
+          runner_filter = (ENV['RHDL_BENCH_BACKENDS'] || '')
+            .split(',')
+            .map { |name| name.strip.downcase.to_sym }
+            .reject(&:empty?)
 
           puts_header("Apple2 Full System IR Benchmark - Karateka Game Code")
           puts "Cycles per run: #{cycles}"
+          puts "Compiler sub-cycles: #{compiler_sub_cycles} (fixed)"
           puts "ROM: #{rom_path}"
           puts "Memory dump: #{karateka_path}"
           puts
@@ -467,6 +481,7 @@ module RHDL
             { name: 'Compiler', backend: :compiler, available_const: :IR_COMPILER_AVAILABLE },
             { name: 'Verilator', backend: :verilator }
           ]
+          runners.select! { |runner| runner_filter.include?(runner[:backend]) } unless runner_filter.empty?
 
           results = []
 
@@ -509,7 +524,7 @@ module RHDL
               when :jit
                 RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
               when :compiler
-                RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json)
+                RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json, sub_cycles: compiler_sub_cycles)
               when :verilator
                 require_relative '../../../../examples/apple2/utilities/runners/verilator_runner'
                 RHDL::Examples::Apple2::VerilatorRunner.new(sub_cycles: 14)
@@ -541,7 +556,7 @@ module RHDL
               if is_verilator
                 sim.run_steps(3)
               else
-                3.times { sim.apple2_run_cpu_cycles(1, 0, false) }
+                sim.apple2_run_cpu_cycles(3, 0, false)
               end
 
               # Benchmark
@@ -561,7 +576,6 @@ module RHDL
               puts "done"
               puts "  Init time: #{format('%.3f', init_elapsed)}s"
               puts "  Run time:  #{format('%.3f', run_elapsed)}s"
-              puts "  Rate:      #{format('%.0f', cycles_per_sec)} cycles/s (#{format('%.2f', cycles_per_sec / 1_000_000)}M/s)"
               puts "  Final PC:  0x#{pc.to_s(16).upcase}"
 
               results << {
@@ -745,29 +759,34 @@ module RHDL
         def print_benchmark_summary(results, cycles)
           puts
           puts_header("Summary")
-          puts "#{'Runner'.ljust(15)} #{'Status'.ljust(10)} #{'Init'.rjust(10)} #{'Run'.rjust(10)} #{'Rate'.rjust(15)}"
+          puts "#{'Runner'.ljust(15)} #{'Status'.ljust(10)} #{'Init'.rjust(10)} #{'Run'.rjust(10)}"
           puts_separator
 
           results.each do |r|
             if r[:status] == :success
-              rate_str = "#{format('%.2f', r[:cycles_per_sec] / 1_000_000)}M/s"
-              puts "#{r[:name].ljust(15)} #{'OK'.ljust(10)} #{format('%8.3f', r[:init_time])}s #{format('%8.3f', r[:run_time])}s #{rate_str.rjust(15)}"
+              puts "#{r[:name].ljust(15)} #{'OK'.ljust(10)} #{format('%8.3f', r[:init_time])}s #{format('%8.3f', r[:run_time])}s"
             elsif r[:status] == :skipped
-              puts "#{r[:name].ljust(15)} #{'SKIP'.ljust(10)} #{'-'.rjust(10)} #{'-'.rjust(10)} #{'-'.rjust(15)}"
+              puts "#{r[:name].ljust(15)} #{'SKIP'.ljust(10)} #{'-'.rjust(10)} #{'-'.rjust(10)}"
             else
-              puts "#{r[:name].ljust(15)} #{'FAIL'.ljust(10)} #{'-'.rjust(10)} #{'-'.rjust(10)} #{'-'.rjust(15)}"
+              puts "#{r[:name].ljust(15)} #{'FAIL'.ljust(10)} #{'-'.rjust(10)} #{'-'.rjust(10)}"
             end
           end
 
-          # Performance comparison
+          # Performance comparison (ratio-centric; do not report absolute speed)
           successful = results.select { |r| r[:status] == :success }
-          if successful.length >= 2
+          compiler = successful.find { |r| r[:name] == 'Compiler' }
+          verilator = successful.find { |r| r[:name] == 'Verilator' }
+          if compiler && verilator
+            puts
+            ratio = compiler[:cycles_per_sec] / verilator[:cycles_per_sec]
+            puts "Compiler/Verilator speed ratio: #{format('%.3f', ratio)}x"
+          elsif successful.length >= 2
             puts
             puts "Performance Ratios:"
             base = successful.first
             successful[1..].each do |r|
               ratio = r[:cycles_per_sec] / base[:cycles_per_sec]
-              puts "  #{r[:name]} vs #{base[:name]}: #{format('%.1f', ratio)}x"
+              puts "  #{r[:name]} vs #{base[:name]}: #{format('%.3f', ratio)}x"
             end
           end
         end

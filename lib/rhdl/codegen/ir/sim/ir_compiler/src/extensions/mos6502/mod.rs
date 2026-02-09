@@ -243,14 +243,7 @@ impl Mos6502Extension {
         let rw_idx = *core.name_to_idx.get("rw").unwrap_or(&0);
         let clk_idx = *core.name_to_idx.get("clk").unwrap_or(&0);
 
-        let clock_indices: Vec<usize> = core.clock_indices.clone();
-        let num_clocks = clock_indices.len().max(1);
         let num_regs = core.seq_targets.len();
-
-        // Find ALL clock domain indices derived from the MOS6502 input clock
-        // All internal clock wires (registers__clk, status_reg__clk, etc.) are
-        // assigned from the input clk, so we need to update all of them for proper edge detection
-        let clk_domain_indices = core.find_clock_domains_for_input(clk_idx);
 
         code.push_str("\n// ============================================================================\n");
         code.push_str("// MOS6502 Extension: Batched CPU Cycle Execution with Internal Memory\n");
@@ -270,30 +263,19 @@ impl Mos6502Extension {
         code.push_str("    let signals = std::slice::from_raw_parts_mut(signals, signals_len);\n");
         code.push_str("    let memory = std::slice::from_raw_parts_mut(memory, 65536);\n");
         code.push_str("    let rom_mask = std::slice::from_raw_parts(rom_mask, 65536);\n");
-        code.push_str(&format!("    let mut old_clocks = [0u64; {}];\n", num_clocks));
+        code.push_str("    let s = signals.as_mut_ptr();\n");
+        code.push_str("    let mem = memory.as_mut_ptr();\n");
+        code.push_str("    let rom = rom_mask.as_ptr();\n");
         code.push_str(&format!("    let mut next_regs = [0u64; {}];\n", num_regs.max(1)));
         code.push_str("    let mut speaker_toggles: u32 = 0;\n");
         code.push_str("\n");
-
-        // Initialize old_clocks
-        for (i, &clk) in clock_indices.iter().enumerate() {
-            code.push_str(&format!("    old_clocks[{}] = signals[{}];\n", i, clk));
-        }
-        code.push_str("\n");
+        code.push_str(&format!("    drive_clock_low_inline(signals, {});\n\n", clk_idx));
 
         code.push_str("    for _ in 0..n {\n");
 
-        // Clock falling edge FIRST - combinational outputs update (addr/rw become valid)
-        // Set ALL clocks' old_clocks to 1 (previous state was high) for proper edge detection
-        for i in 0..num_clocks {
-            code.push_str(&format!("        old_clocks[{}] = 1; // Previous state was high\n", i));
-        }
-        code.push_str(&format!("        signals[{}] = 0;\n", clk_idx));
-        code.push_str("        evaluate_inline(signals);\n\n");
-
-        // NOW do memory bridging (after evaluate, addr/rw reflect current state)
-        code.push_str(&format!("        let addr = (signals[{}] as usize) & 0xFFFF;\n", addr_idx));
-        code.push_str(&format!("        let rw = signals[{}];\n", rw_idx));
+        // Memory bridge on low phase using pre-evaluated bus outputs.
+        code.push_str(&format!("        let addr = ((*s.add({}) as usize) & 0xFFFF) as usize;\n", addr_idx));
+        code.push_str(&format!("        let rw = *s.add({});\n", rw_idx));
         code.push_str("\n");
 
         // Detect speaker toggle ($C030) - any access triggers toggle
@@ -303,24 +285,16 @@ impl Mos6502Extension {
 
         code.push_str("        if rw == 1 {\n");
         code.push_str("            // Read: provide data from memory to CPU\n");
-        code.push_str(&format!("            signals[{}] = memory[addr] as u64;\n", data_in_idx));
+        code.push_str(&format!("            *s.add({}) = *mem.add(addr) as u64;\n", data_in_idx));
         code.push_str("        } else {\n");
         code.push_str("            // Write: store CPU data to memory (unless ROM protected)\n");
-        code.push_str("            if !rom_mask[addr] {\n");
-        code.push_str(&format!("                memory[addr] = (signals[{}] & 0xFF) as u8;\n", data_out_idx));
+        code.push_str("            if !*rom.add(addr) {\n");
+        code.push_str(&format!("                *mem.add(addr) = (*s.add({}) & 0xFF) as u8;\n", data_out_idx));
         code.push_str("            }\n");
         code.push_str("        }\n\n");
 
-        // Clock rising edge - registers capture values (including data_in we just set)
-        // Set ALL clocks' old_clocks to 0 (previous state was low) for proper edge detection
-        for i in 0..num_clocks {
-            code.push_str(&format!("        old_clocks[{}] = 0; // Previous state was low\n", i));
-        }
-        code.push_str(&format!("        signals[{}] = 1;\n", clk_idx));
-        // IMPORTANT: Must call evaluate_inline to propagate clk to internal clock signals
-        // before tick_inline checks for rising edges on those internal signals
-        code.push_str("        evaluate_inline(signals);\n");
-        code.push_str("        tick_inline(signals, &mut old_clocks, &mut next_regs);\n");
+        // Rising edge: sample/commit sequential state once, then return to low phase.
+        code.push_str(&format!("        pulse_clock_forced_inline(signals, {}, &mut next_regs);\n", clk_idx));
         code.push_str("    }\n\n");
         code.push_str("    // Write speaker toggles to out parameter\n");
         code.push_str("    if !speaker_toggles_out.is_null() {\n");
@@ -346,14 +320,7 @@ impl Mos6502Extension {
         let pc_idx = *core.name_to_idx.get("reg_pc").unwrap_or(&0);
         let sp_idx = *core.name_to_idx.get("reg_sp").unwrap_or(&0);
 
-        let clock_indices: Vec<usize> = core.clock_indices.clone();
-        let num_clocks = clock_indices.len().max(1);
         let num_regs = core.seq_targets.len();
-
-        // Find ALL clock domain indices derived from the MOS6502 input clock
-        // All internal clock wires (registers__clk, status_reg__clk, etc.) are
-        // assigned from the input clk, so we need to update all of them for proper edge detection
-        let clk_domain_indices = core.find_clock_domains_for_input(clk_idx);
 
         code.push_str("\n// ============================================================================\n");
         code.push_str("// MOS6502 Extension: Instruction-Level Execution with Opcode Capture\n");
@@ -377,35 +344,24 @@ impl Mos6502Extension {
         code.push_str("    let memory = std::slice::from_raw_parts_mut(memory, 65536);\n");
         code.push_str("    let rom_mask = std::slice::from_raw_parts(rom_mask, 65536);\n");
         code.push_str("    let opcodes_out = std::slice::from_raw_parts_mut(opcodes_out, opcodes_capacity);\n");
-        code.push_str(&format!("    let mut old_clocks = [0u64; {}];\n", num_clocks));
+        code.push_str("    let s = signals.as_mut_ptr();\n");
+        code.push_str("    let mem = memory.as_mut_ptr();\n");
+        code.push_str("    let rom = rom_mask.as_ptr();\n");
         code.push_str(&format!("    let mut next_regs = [0u64; {}];\n", num_regs.max(1)));
         code.push_str("    let mut speaker_toggles: u32 = 0;\n");
         code.push_str("    let mut instruction_count: usize = 0;\n");
         code.push_str("    let max_cycles = n * 10; // Safety limit\n");
         code.push_str("    let mut cycles: usize = 0;\n");
-        code.push_str(&format!("    let mut last_state = signals[{}];\n", state_idx));
+        code.push_str(&format!("    drive_clock_low_inline(signals, {});\n", clk_idx));
+        code.push_str(&format!("    let mut last_state = *s.add({});\n", state_idx));
         code.push_str("    const STATE_DECODE: u64 = 0x02;\n");
-        code.push_str("\n");
-
-        // Initialize old_clocks
-        for (i, &clk) in clock_indices.iter().enumerate() {
-            code.push_str(&format!("    old_clocks[{}] = signals[{}];\n", i, clk));
-        }
         code.push_str("\n");
 
         code.push_str("    while instruction_count < n && cycles < max_cycles {\n");
 
-        // Clock falling edge FIRST - combinational outputs update (addr/rw become valid)
-        // Set ALL clocks' old_clocks to 1 (previous state was high) for proper edge detection
-        for i in 0..num_clocks {
-            code.push_str(&format!("        old_clocks[{}] = 1; // Previous state was high\n", i));
-        }
-        code.push_str(&format!("        signals[{}] = 0;\n", clk_idx));
-        code.push_str("        evaluate_inline(signals);\n\n");
-
-        // NOW do memory bridging (after evaluate, addr/rw reflect current state)
-        code.push_str(&format!("        let addr = (signals[{}] as usize) & 0xFFFF;\n", addr_idx));
-        code.push_str(&format!("        let rw = signals[{}];\n", rw_idx));
+        // Memory bridge on low phase using pre-evaluated bus outputs.
+        code.push_str(&format!("        let addr = ((*s.add({}) as usize) & 0xFFFF) as usize;\n", addr_idx));
+        code.push_str(&format!("        let rw = *s.add({});\n", rw_idx));
         code.push_str("\n");
 
         // Detect speaker toggle ($C030)
@@ -415,32 +371,23 @@ impl Mos6502Extension {
 
         code.push_str("        if rw == 1 {\n");
         code.push_str("            // Read: provide data from memory to CPU\n");
-        code.push_str(&format!("            signals[{}] = memory[addr] as u64;\n", data_in_idx));
+        code.push_str(&format!("            *s.add({}) = *mem.add(addr) as u64;\n", data_in_idx));
         code.push_str("        } else {\n");
         code.push_str("            // Write: store CPU data to memory (unless ROM protected)\n");
-        code.push_str("            if !rom_mask[addr] {\n");
-        code.push_str(&format!("                memory[addr] = (signals[{}] & 0xFF) as u8;\n", data_out_idx));
+        code.push_str("            if !*rom.add(addr) {\n");
+        code.push_str(&format!("                *mem.add(addr) = (*s.add({}) & 0xFF) as u8;\n", data_out_idx));
         code.push_str("            }\n");
         code.push_str("        }\n\n");
 
-        // Clock rising edge - registers capture values (including data_in we just set)
-        // Set ALL clocks' old_clocks to 0 (previous state was low) for proper edge detection
-        for i in 0..num_clocks {
-            code.push_str(&format!("        old_clocks[{}] = 0; // Previous state was low\n", i));
-        }
-        code.push_str(&format!("        signals[{}] = 1;\n", clk_idx));
-        // IMPORTANT: Must call evaluate_inline to propagate clk to internal clock signals
-        // before tick_inline checks for rising edges on those internal signals
-        code.push_str("        evaluate_inline(signals);\n");
-        code.push_str("        tick_inline(signals, &mut old_clocks, &mut next_regs);\n");
+        code.push_str(&format!("        pulse_clock_forced_inline(signals, {}, &mut next_regs);\n", clk_idx));
         code.push_str("        cycles += 1;\n\n");
 
         // Check for state transition to DECODE
-        code.push_str(&format!("        let current_state = signals[{}];\n", state_idx));
+        code.push_str(&format!("        let current_state = *s.add({});\n", state_idx));
         code.push_str("        if current_state == STATE_DECODE && last_state != STATE_DECODE {\n");
-        code.push_str(&format!("            let opcode = (signals[{}] & 0xFF) as u64;\n", opcode_idx));
-        code.push_str(&format!("            let pc = ((signals[{}] as u64).wrapping_sub(1)) & 0xFFFF;\n", pc_idx));
-        code.push_str(&format!("            let sp = (signals[{}] & 0xFF) as u64;\n", sp_idx));
+        code.push_str(&format!("            let opcode = (*s.add({}) & 0xFF) as u64;\n", opcode_idx));
+        code.push_str(&format!("            let pc = ((*s.add({}) as u64).wrapping_sub(1)) & 0xFFFF;\n", pc_idx));
+        code.push_str(&format!("            let sp = (*s.add({}) & 0xFF) as u64;\n", sp_idx));
         code.push_str("            opcodes_out[instruction_count] = (pc << 16) | (opcode << 8) | sp;\n");
         code.push_str("            instruction_count += 1;\n");
         code.push_str("        }\n");
