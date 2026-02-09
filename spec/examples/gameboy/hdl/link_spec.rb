@@ -185,7 +185,8 @@ RSpec.describe 'GameBoy Link Port' do
 
       if skip_boot
         while @runner.cpu_state[:pc] < 0x0100 && @runner.cycle_count < 500_000
-          @runner.run_steps(1000)
+          # Keep step size small so we don't run deep into test code before exiting boot wait.
+          @runner.run_steps(100)
         end
       end
 
@@ -237,6 +238,7 @@ RSpec.describe 'GameBoy Link Port' do
     describe 'Serial Transfer' do
       it 'transfer completes and clears start bit' do
         code = [
+          0xF3,        # DI (keep timing deterministic during long delay loop)
           0x3E, 0xFF,  # LD A, 0xFF
           0xE0, 0x01,  # LDH (FF01), A  - SB
           0x3E, 0x81,  # LD A, 0x81 (start, internal clock)
@@ -251,7 +253,7 @@ RSpec.describe 'GameBoy Link Port' do
           0xF0, 0x02,  # LDH A, (FF02)
           0x76         # HALT
         ]
-        state = run_test_code(code, cycles: 100000)
+        state = run_test_code(code, cycles: 300000)
         # After transfer completes, bit 7 should be cleared
         expect(state[:a] & 0x80).to eq(0x00)
       end

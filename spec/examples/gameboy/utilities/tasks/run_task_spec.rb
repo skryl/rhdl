@@ -279,6 +279,32 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
 
       expect(fake_runner.calls).to eq([70_224])
     end
+
+    it 'caps total stepping when frame_count stalls' do
+      fake_runner = Class.new do
+        attr_reader :calls
+
+        def initialize
+          @frame = 10
+          @calls = []
+        end
+
+        def frame_count
+          @frame
+        end
+
+        def run_steps(steps)
+          @calls << steps
+        end
+      end.new
+
+      task.instance_variable_set(:@runner, fake_runner)
+      task.send(:run_until_next_display_frame)
+
+      expect(fake_runner.calls.sum).to eq(70_224)
+      expect(fake_runner.calls).to all(be <= 8_778)
+      expect(fake_runner.calls.length).to be > 1
+    end
   end
 
   describe 'constants' do

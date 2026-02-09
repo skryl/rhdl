@@ -36,6 +36,7 @@ module RHDL
 
     # Trigger
     input :trigger
+    input :len_quirk
 
     # Outputs
     output :output, width: 4
@@ -51,6 +52,9 @@ module RHDL
     wire :sweep_timer, width: 3   # Sweep timer (if has_sweep)
     wire :sweep_enabled          # Sweep active
     wire :sweep_freq, width: 11  # Shadow frequency for sweep
+    wire :prev_frame_seq, width: 3
+    wire :prev_trigger
+    wire :prev_envelope, width: 8
 
     # Duty cycle patterns (indexed by duty[1:0] and duty_pos[2:0])
     # 0: 00000001 (12.5%)
@@ -94,8 +98,19 @@ module RHDL
       envelope_timer: 0,
       sweep_timer: 0,
       sweep_enabled: 0,
-      sweep_freq: 0
+      sweep_freq: 0,
+      prev_frame_seq: 0,
+      prev_trigger: 0,
+      prev_envelope: 0
     } do
+      frame_step = ce & (frame_seq != prev_frame_seq)
+      len_tick = frame_step & ((frame_seq == lit(0, width: 3)) |
+                               (frame_seq == lit(2, width: 3)) |
+                               (frame_seq == lit(4, width: 3)) |
+                               (frame_seq == lit(6, width: 3)))
+      env_tick = frame_step & (frame_seq == lit(7, width: 3))
+      trigger_pulse = trigger & ~prev_trigger
+
       # Frequency timer
       timer <= mux(ce,
                    mux(timer == lit(0, width: 12),
@@ -109,20 +124,20 @@ module RHDL
                       duty_pos)
 
       # Length counter (clocked at 256Hz = frame_seq[0])
-      length_counter <= mux(frame_seq == lit(0, width: 3) & freq_hi[6] &
+      length_counter <= mux((len_tick | len_quirk) & freq_hi[6] &
                             (length_counter > lit(0, width: 6)),
                             length_counter - lit(1, width: 6),
                             length_counter)
 
       # Envelope (clocked at 64Hz = frame_seq[7])
-      envelope_timer <= mux(frame_seq == lit(7, width: 3) & (envelope[2..0] != lit(0, width: 3)),
+      envelope_timer <= mux(env_tick & (envelope[2..0] != lit(0, width: 3)),
                             mux(envelope_timer == lit(0, width: 3),
                                 envelope[2..0],
                                 envelope_timer - lit(1, width: 3)),
                             envelope_timer)
 
       # Adjust volume on envelope tick
-      volume <= mux(frame_seq == lit(7, width: 3) &
+      volume <= mux(env_tick &
                     (envelope[2..0] != lit(0, width: 3)) &
                     (envelope_timer == lit(0, width: 3)),
                     mux(envelope[3],  # Direction: 1=increase, 0=decrease
@@ -130,18 +145,27 @@ module RHDL
                         mux(volume > lit(0, width: 4), volume - lit(1, width: 4), volume)),
                     volume)
 
+      # Envelope write while channel is active ("zombie mode" approximation).
+      volume <= mux(ce & (envelope != prev_envelope) & enabled,
+                    (volume + lit(1, width: 4)) & lit(0xF, width: 4),
+                    volume)
+
       # Trigger handling
-      timer <= mux(trigger, cat(lit(0b1, width: 1), ~frequency), timer)
-      volume <= mux(trigger, envelope[7..4], volume)
-      envelope_timer <= mux(trigger, envelope[2..0], envelope_timer)
-      length_counter <= mux(trigger & (length_counter == lit(0, width: 6)),
+      timer <= mux(trigger_pulse, cat(lit(0b1, width: 1), ~frequency), timer)
+      volume <= mux(trigger_pulse, envelope[7..4], volume)
+      envelope_timer <= mux(trigger_pulse, envelope[2..0], envelope_timer)
+      length_counter <= mux(trigger_pulse & (length_counter == lit(0, width: 6)),
                             lit(64, width: 6),
                             length_counter)
 
       # Length load
-      length_counter <= mux(ce & trigger,
+      length_counter <= mux(ce & trigger_pulse,
                             lit(64, width: 6) - cat(lit(0, width: 2), length_duty[5..0]),
                             length_counter)
+
+      prev_frame_seq <= mux(ce, frame_seq, prev_frame_seq)
+      prev_trigger <= mux(ce, trigger, prev_trigger)
+      prev_envelope <= mux(ce, envelope, prev_envelope)
     end
       end
     end

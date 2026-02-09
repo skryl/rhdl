@@ -503,6 +503,19 @@ impl GameBoyExtension {
         let video_unit_ce_idx = find(&["gb_core__video_unit__ce"]);
         let cpu_clken_idx = find(&["gb_core__cpu_clken", "cpu_clken"]);
         let sm83_clken_idx = find(&["gb_core__cpu__clken", "cpu__clken"]);
+        let cycle_enable_idx = if cpu_clken_idx != usize::MAX {
+            cpu_clken_idx
+        } else if sm83_clken_idx != usize::MAX {
+            sm83_clken_idx
+        } else if speed_ctrl_ce_idx != usize::MAX {
+            speed_ctrl_ce_idx
+        } else if gb_core_ce_idx != usize::MAX {
+            gb_core_ce_idx
+        } else if ce_idx != usize::MAX {
+            ce_idx
+        } else {
+            video_unit_ce_idx
+        };
 
         let lcd_clkena_idx = find(&["lcd_clkena"]);
         let lcd_data_gb_idx = find(&["lcd_data_gb"]);
@@ -772,7 +785,8 @@ impl GameBoyExtension {
         code.push_str("    let zpram = std::slice::from_raw_parts_mut(zpram, zpram_len);\n");
         code.push_str("    let wram = std::slice::from_raw_parts_mut(wram, wram_len);\n");
         code.push_str("    let oam = std::slice::from_raw_parts_mut(oam, oam_len);\n");
-        code.push_str("    let mut frames_completed: u32 = 0;\n\n");
+        code.push_str("    let mut frames_completed: u32 = 0;\n");
+        code.push_str("    let mut cycles_run: usize = 0;\n\n");
 
         // Initialize old_clocks from current signal values
         for (i, &clk) in clock_indices.iter().enumerate() {
@@ -780,7 +794,7 @@ impl GameBoyExtension {
         }
         code.push_str("\n");
 
-        code.push_str("    for _ in 0..n {\n");
+        code.push_str("    while cycles_run < n {\n");
 
         // Clock falling edge
         code.push_str(&format!("        signals[{}] = 0; // clk_sys low\n", clk_sys_idx));
@@ -967,11 +981,18 @@ impl GameBoyExtension {
 
         code.push_str("        lcd.prev_clkena = lcd_clkena as u32;\n");
         code.push_str("        lcd.prev_vsync = lcd_vsync as u32;\n");
+        if cycle_enable_idx != usize::MAX {
+            code.push_str(&format!("        if signals[{}] != 0 {{\n", cycle_enable_idx));
+            code.push_str("            cycles_run += 1;\n");
+            code.push_str("        }\n");
+        } else {
+            code.push_str("        cycles_run += 1;\n");
+        }
 
         code.push_str("    }\n\n");
 
         code.push_str("    GbCycleResult {\n");
-        code.push_str("        cycles_run: n,\n");
+        code.push_str("        cycles_run,\n");
         code.push_str("        frames_completed,\n");
         code.push_str("    }\n");
         code.push_str("}\n");

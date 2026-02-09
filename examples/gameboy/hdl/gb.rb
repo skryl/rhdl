@@ -192,11 +192,27 @@ module RHDL
     wire :sel_ext_bus
     wire :sel_boot_rom
     wire :sel_ff50                     # Boot ROM disable register ($FF50)
+    wire :sel_vram_bank                # VBK ($FF4F)
+    wire :sel_wram_bank                # SVBK ($FF70)
+    wire :sel_hdma                     # HDMA regs ($FF51-$FF55)
+    wire :sel_key0                     # KEY0 ($FF4C)
+    wire :sel_key1                     # KEY1 ($FF4D)
+    wire :sel_rp                       # RP ($FF56)
+    wire :sel_ff72
+    wire :sel_ff73
+    wire :sel_ff74
+    wire :sel_ff75
 
     # Register file
     wire :boot_rom_enabled
     wire :wram_bank, width: 3
     wire :vram_bank
+    wire :ff4c_key0, width: 2
+    wire :is_gbc_mode
+    wire :ff72, width: 8
+    wire :ff73, width: 8
+    wire :ff74, width: 8
+    wire :ff75, width: 3
     wire :if_r, width: 5
     wire :ie_r, width: 8  # Updated in sequential block
     wire :old_cpu_wr_n
@@ -207,6 +223,9 @@ module RHDL
     wire :old_serial_irq
     wire :cpu_speed
     wire :prepare_switch
+
+    # Clocking helpers
+    wire :ce_cpu
 
     # Interrupt signals
     wire :irq_n
@@ -236,6 +255,9 @@ module RHDL
     wire :timer_do, width: 8
     wire :video_do, width: 8
     wire :audio_do, width: 8
+    wire :audio_s1_read
+    wire :audio_s1_write
+    wire :audio_s1_addr, width: 7
     wire :boot_do, width: 8
     wire :vram_do, width: 8
     wire :vram1_do, width: 8
@@ -246,6 +268,10 @@ module RHDL
     wire :wram_addr, width: 15     # WRAM address (15 bits for banking)
     wire :wram_wren                # WRAM write enable
     wire :hdma_do, width: 8
+    wire :hdma_addr, width: 4
+    wire :hdma_wr
+    wire :cpu_stop
+    wire :const_one
 
     # OAM/VRAM access control
     wire :oam_cpu_allow
@@ -258,9 +284,27 @@ module RHDL
     wire :hdma_active
     wire :hdma_source_addr, width: 16
     wire :hdma_target_addr, width: 16
+    wire :hdma_sel_rom
+    wire :hdma_sel_cram
+    wire :hdma_sel_wram
+    wire :hdma_sel_ext_bus
+    wire :hdma_read_ext_bus
+    wire :hdma_read_wram_bus
+    wire :dma_sel_rom
+    wire :dma_sel_vram
+    wire :dma_sel_ext_bus_dmg
+    wire :dma_sel_ext_ram
+    wire :dma_sel_cram
+    wire :dma_sel_wram
+    wire :dma_sel_ext_bus_cgb
+    wire :dma_sel_ext_bus
+    wire :dma_read_ext_bus
+    wire :dma_read_wram_bus
+    wire :cart_sel
 
     # External bus signals
     wire :ext_bus_di, width: 8
+    wire :ext_bus_i, width: 16
     wire :ext_bus_rd
     wire :ext_bus_wr
     wire :ext_bus_wram_sel
@@ -378,9 +422,11 @@ module RHDL
     port [:cpu, :debug_z_flag] => :debug_z_flag
     port [:cpu, :debug_bus_a_zero] => :debug_bus_a_zero
     port [:cpu, :debug_const_one] => :debug_const_one
+    port [:cpu, :stop_out] => :cpu_stop
+    port :const_one => [:cpu, :wait_n]
 
     # Timer connections
-    port :ce => [:timer_unit, :ce]
+    port :ce_cpu => [:timer_unit, :ce]
     port :sel_timer => [:timer_unit, :cpu_sel]
     port :timer_addr => [:timer_unit, :cpu_addr]
     port :timer_wr => [:timer_unit, :cpu_wr]
@@ -391,9 +437,9 @@ module RHDL
     # Video clock enables
     port :ce => [:video_unit, :ce]
     port :ce_n => [:video_unit, :ce_n]
-    port :ce => [:video_unit, :ce_cpu]  # Use ce for ce_cpu in DMG mode
+    port :ce_cpu => [:video_unit, :ce_cpu]
     port :is_gbc => [:video_unit, :is_gbc]
-    port :is_gbc => [:video_unit, :isGBC_mode]  # Same as is_gbc for now
+    port :is_gbc_mode => [:video_unit, :isGBC_mode]
     port :reset => [:video_unit, :reset]
     port :megaduck => [:video_unit, :megaduck]
     port :boot_rom_enabled => [:video_unit, :boot_rom_en]
@@ -429,11 +475,27 @@ module RHDL
     port :dma_data => [:video_unit, :dma_data]
 
     # Audio connections
+    port :ce_2x => [:audio_unit, :ce]
+    port :reset => [:audio_unit, :reset]
+    port :is_gbc => [:audio_unit, :is_gbc]
+    port :audio_no_pops => [:audio_unit, :remove_pops]
+    port :audio_s1_read => [:audio_unit, :s1_read]
+    port :audio_s1_write => [:audio_unit, :s1_write]
+    port :audio_s1_addr => [:audio_unit, :s1_addr]
+    port :cpu_do => [:audio_unit, :s1_writedata]
     port [:audio_unit, :snd_left] => :audio_l
     port [:audio_unit, :snd_right] => :audio_r
     port [:audio_unit, :s1_readdata] => :audio_do
 
     # HDMA connections (GBC)
+    port :reset => [:hdma_unit, :reset]
+    port :ce_cpu => [:hdma_unit, :ce]
+    port :cpu_speed => [:hdma_unit, :speed]
+    port :sel_hdma => [:hdma_unit, :sel_reg]
+    port :hdma_addr => [:hdma_unit, :addr]
+    port :hdma_wr => [:hdma_unit, :wr]
+    port :cpu_do => [:hdma_unit, :din]
+    port :lcd_mode => [:hdma_unit, :lcd_mode]
     port [:hdma_unit, :hdma_rd] => :hdma_rd
     port [:hdma_unit, :hdma_active] => :hdma_active
     port [:hdma_unit, :hdma_source_addr] => :hdma_source_addr
@@ -441,7 +503,7 @@ module RHDL
     port [:hdma_unit, :dout] => :hdma_do
 
     # Link port connections
-    port :ce => [:link_unit, :ce]
+    port :ce_cpu => [:link_unit, :ce]
     port :sel_sc => [:link_unit, :sel_sc]
     port :sel_sb => [:link_unit, :sel_sb]
     port :cpu_wr_n_edge => [:link_unit, :cpu_wr_n]
@@ -461,6 +523,14 @@ module RHDL
     behavior do
       # Invert reset for CPU (active-low reset_n from active-high reset input)
       reset_n <= ~reset
+      const_one <= lit(1, width: 1)
+      ce_cpu <= mux(cpu_speed, ce_2x, ce)
+      is_gbc_mode <= (ff4c_key0 == lit(0, width: 2)) | boot_rom_enabled
+      audio_s1_read <= sel_audio & ~cpu_rd_n
+      audio_s1_write <= sel_audio & ~cpu_wr_n_edge
+      audio_s1_addr <= cpu_addr[6..0]
+      hdma_addr <= cpu_addr[3..0]
+      hdma_wr <= ~cpu_wr_n_edge
 
       # Memory select signals (directly from gb.v lines 156-172)
       sel_timer <= (cpu_addr[15..4] == lit(0xFF0, width: 12)) & (cpu_addr[3..2] == lit(1, width: 2))
@@ -471,9 +541,7 @@ module RHDL
 
       # Video write interface - PPU needs low byte of address and write enable
       video_addr <= cpu_addr[7..0]
-      cpu_wr_n_edge <= mux(ce,
-                           ~(old_cpu_wr_n & ~cpu_wr_n),
-                           lit(1, width: 1))
+      cpu_wr_n_edge <= ~(old_cpu_wr_n & ~cpu_wr_n)
       video_wr <= ~cpu_wr_n_edge
 
       # Timer write interface - Timer needs 2-bit address and write enable
@@ -499,6 +567,17 @@ module RHDL
 
       # Boot ROM disable register ($FF50) - SameBoy fast boot check reads this
       sel_ff50 <= (cpu_addr == lit(0xFF50, width: 16))
+      sel_vram_bank <= (cpu_addr == lit(0xFF4F, width: 16))
+      sel_wram_bank <= is_gbc & is_gbc_mode & (cpu_addr == lit(0xFF70, width: 16))
+      sel_hdma <= is_gbc & is_gbc_mode & (cpu_addr[15..4] == lit(0xFF5, width: 12)) &
+                  (cpu_addr[3..0] != lit(0, width: 4)) & (cpu_addr[3..0] < lit(6, width: 4))
+      sel_key0 <= is_gbc & boot_rom_enabled & (cpu_addr == lit(0xFF4C, width: 16))
+      sel_key1 <= is_gbc & is_gbc_mode & (cpu_addr == lit(0xFF4D, width: 16))
+      sel_rp <= is_gbc & is_gbc_mode & (cpu_addr == lit(0xFF56, width: 16))
+      sel_ff72 <= is_gbc & (cpu_addr == lit(0xFF72, width: 16))
+      sel_ff73 <= is_gbc & (cpu_addr == lit(0xFF73, width: 16))
+      sel_ff74 <= is_gbc & is_gbc_mode & (cpu_addr == lit(0xFF74, width: 16))
+      sel_ff75 <= is_gbc & (cpu_addr == lit(0xFF75, width: 16))
 
       # Boot ROM select (0x0000-0x00FF when boot_rom_enabled, DMG mode)
       # Reference: sel_boot_rom = boot_rom_enabled && (!boot_rom_addr[15:8] || sel_boot_rom_cgb) && ~megaduck
@@ -511,7 +590,7 @@ module RHDL
       boot_do <= boot_rom_do
 
       # CPU clock enable (HDMA can stop CPU on GBC)
-      cpu_clken <= ~(is_gbc & hdma_active & cpu_rd_n & cpu_wr_n) & ce
+      cpu_clken <= ~(is_gbc & hdma_active & cpu_rd_n & cpu_wr_n) & ce_cpu
 
       # IRQ acknowledge
       irq_ack <= ~cpu_iorq_n & ~cpu_m1_n
@@ -530,15 +609,26 @@ module RHDL
       sc_start_in <= cpu_do[7]
       sc_int_clock_in <= cpu_do[0]
       sc_o <= cat(sc_start, lit(0b111111, width: 6), sc_int_clock)
+      sc_int_clock2 <= sc_int_clock
 
       # CPU data input mux (priority-encoded)
       # Build from lowest-priority sources upward to keep parentheses manageable.
-      cpu_di_core = mux(sel_ff50, lit(0x00, width: 8), lit(0xFF, width: 8))
+      cpu_di_core = mux(sel_ff50, cat(lit(0, width: 6), fast_boot_en, boot_gba_en), lit(0xFF, width: 8))
+      cpu_di_core = mux(sel_ff75, cat(lit(1, width: 1), ff75, lit(0b1111, width: 4)), cpu_di_core)
+      cpu_di_core = mux(sel_ff74, ff74, cpu_di_core)
+      cpu_di_core = mux(sel_ff73, ff73, cpu_di_core)
+      cpu_di_core = mux(sel_ff72, ff72, cpu_di_core)
+      cpu_di_core = mux(sel_rp, lit(0x02, width: 8), cpu_di_core)
+      cpu_di_core = mux(sel_wram_bank, cat(lit(0x1F, width: 5), wram_bank), cpu_di_core)
+      cpu_di_core = mux(is_gbc & sel_vram_bank, cat(lit(0x7F, width: 7), vram_bank), cpu_di_core)
+      cpu_di_core = mux(sel_hdma, hdma_do, cpu_di_core)
+      cpu_di_core = mux(sel_key0, cat(lit(0xF, width: 4), ff4c_key0, lit(0b10, width: 2)), cpu_di_core)
+      cpu_di_core = mux(sel_key1, cat(cpu_speed, lit(0x3F, width: 6), prepare_switch), cpu_di_core)
       cpu_di_core = mux(sel_ie, ie_r, cpu_di_core)
       cpu_di_core = mux(sel_zpram, zpram_do, cpu_di_core)
       cpu_di_core = mux(sel_vram & vram_cpu_allow, mux(is_gbc & vram_bank, vram1_do, vram_do), cpu_di_core)
+      cpu_di_core = mux(is_gbc & sel_wram, wram_do, cpu_di_core)
       cpu_di_core = mux(sel_ext_bus, ext_bus_di, cpu_di_core)
-      cpu_di_core = mux(sel_wram, wram_do, cpu_di_core)
       cpu_di_core = mux(sel_boot_rom, boot_do, cpu_di_core)
       cpu_di_core = mux(sel_audio, audio_do, cpu_di_core)
       cpu_di_core = mux(sel_video_oam & oam_cpu_allow, video_do, cpu_di_core)
@@ -563,30 +653,63 @@ module RHDL
 
       # Speed output (GBC)
       speed <= cpu_speed
+      gg_available <= lit(0, width: 1)
 
       # DMA on signal
-      dma_on <= (ext_bus_rom_sel | ext_bus_cram_sel) & (hdma_active | dma_rd)
+      dma_on <= cart_sel & (hdma_active | dma_rd)
 
-      # Cart interface - directly expose CPU address and control signals
-      ext_bus_addr <= cpu_addr[14..0]
-      ext_bus_a15 <= cpu_addr[15]
+      # HDMA source decode
+      hdma_sel_rom <= ~hdma_source_addr[15]
+      hdma_sel_cram <= (hdma_source_addr[15..13] == lit(0b101, width: 3))
+      hdma_sel_wram <= (hdma_source_addr[15..13] == lit(0b110, width: 3))
+      hdma_sel_ext_bus <= hdma_sel_rom | hdma_sel_cram
 
-      # Cartridge bus accesses: ROM (0000-7FFF) and external cart RAM (A000-BFFF).
-      cart_rd <= (sel_rom | sel_cram) & ~cpu_rd_n
-      cart_wr <= (sel_rom | sel_cram) & ~cpu_wr_n_edge
+      # OAM DMA source decode
+      dma_sel_rom <= ~dma_addr[15]
+      dma_sel_vram <= (dma_addr[15..13] == lit(0b100, width: 3))
+      dma_sel_ext_bus_dmg <= ~dma_sel_vram
+      dma_sel_ext_ram <= ~dma_sel_rom
+      dma_sel_cram <= (dma_addr[15..13] == lit(0b101, width: 3))
+      dma_sel_wram <= (dma_addr[15..13] == lit(0b110, width: 3))
+      dma_sel_ext_bus_cgb <= dma_sel_rom | dma_sel_cram
+      dma_sel_ext_bus <= mux(is_gbc, dma_sel_ext_bus_cgb, dma_sel_ext_bus_dmg)
+      hdma_read_ext_bus <= is_gbc & hdma_rd & hdma_sel_ext_bus
+      dma_read_ext_bus <= dma_rd & dma_sel_ext_bus
+      hdma_read_wram_bus <= is_gbc & hdma_rd & hdma_sel_wram
+      dma_read_wram_bus <= dma_rd & dma_sel_wram
+      nCS <= ~(mux(hdma_read_ext_bus, hdma_sel_cram,
+                   mux(dma_read_ext_bus, dma_sel_ext_ram, sel_cram | sel_wram)))
+
+      ext_bus_i <= mux(hdma_read_ext_bus, hdma_source_addr,
+                       mux(dma_read_ext_bus, dma_addr, cpu_addr))
+      ext_bus_a15 <= ext_bus_i[15] | sel_boot_rom
+      ext_bus_addr <= ext_bus_i[14..0]
+      ext_bus_rd <= hdma_read_ext_bus | dma_read_ext_bus | (sel_ext_bus & ~cpu_rd_n)
+      ext_bus_wr <= (sel_ext_bus & ~cpu_wr_n_edge) & ~hdma_read_ext_bus & ~dma_read_ext_bus
+      ext_bus_wram_sel <= ~nCS & ext_bus_addr[14]
+      ext_bus_cram_sel <= ~nCS & ~ext_bus_addr[14]
+      ext_bus_rom_sel <= ~ext_bus_a15
+      cart_sel <= ext_bus_rom_sel | ext_bus_cram_sel
+
+      # Cartridge bus accesses.
+      cart_rd <= cart_sel & ext_bus_rd
+      cart_wr <= cart_sel & ext_bus_wr
       cart_di <= cpu_do
 
-      # External bus data input comes from cartridge
-      ext_bus_di <= cart_do
+      # External bus data input mirrors reference priority (DMG WRAM path first).
+      ext_bus_di <= mux(~is_gbc & ext_bus_wram_sel, wram_do,
+                        mux(cart_sel & cart_oe, cart_do, lit(0xFF, width: 8)))
 
       # OAM DMA source byte.
       # The source decode in the full reference design is richer; this keeps
       # the simplified model deterministic and non-floating.
-      dma_data <= mux(dma_addr[15..13] == lit(0b100, width: 3),
+      dma_data <= mux(is_gbc & dma_sel_wram,
+                      wram_do,
+                      mux(dma_sel_ext_bus,
+                          ext_bus_di,
+                          mux(dma_sel_vram,
                       mux(is_gbc & vram_bank, vram1_do, vram_do),
-                      mux(dma_addr[15..13] == lit(0b110, width: 3),
-                          wram_do,
-                          ext_bus_di))
+                              lit(0xFF, width: 8))))
 
       # VRAM CPU interface
       # CPU addresses 0x8000-0x9FFF map to VRAM addresses 0x0000-0x1FFF
@@ -616,40 +739,82 @@ module RHDL
       # wram_bank_eff: If wram_bank is 0, use bank 1 (per GB spec)
       wram_bank_eff = mux(wram_bank == lit(0, width: 3), lit(1, width: 3), wram_bank)
 
+      wram_addr_src = mux(~is_gbc,
+                          ext_bus_addr[12..0],
+                          mux(hdma_read_wram_bus, hdma_source_addr[12..0],
+                              mux(dma_read_wram_bus, dma_addr[12..0], cpu_addr[12..0])))
+
       # WRAM address: for $C000-$CFFF use bank 0, for $D000-$DFFF use wram_bank
-      wram_addr_lo = cpu_addr[11..0]
-      wram_addr_bank = mux(cpu_addr[12],
+      wram_addr_lo = wram_addr_src[11..0]
+      wram_addr_bank = mux(wram_addr_src[12],
                            cat(wram_bank_eff, wram_addr_lo),  # $D000-$DFFF: banked
                            cat(lit(0, width: 3), wram_addr_lo)) # $C000-$CFFF: bank 0
       wram_addr <= wram_addr_bank
 
       # WRAM write enable (when sel_wram active and CPU writes)
-      wram_wren <= sel_wram & ~cpu_wr_n_edge
+      wram_wren <= mux(~is_gbc,
+                       ext_bus_wram_sel & ext_bus_wr,
+                       sel_wram & ~cpu_wr_n_edge & ~hdma_read_wram_bus & ~dma_read_wram_bus)
+
+      # Save-state interfaces are currently stubbed at top-level integration.
+      sleep_savestate <= lit(0, width: 1)
+      save_state_ext_din <= lit(0, width: 64)
+      save_state_ext_adr <= lit(0, width: 10)
+      save_state_ext_wren <= lit(0, width: 1)
+      save_state_ext_rst <= lit(0, width: 1)
+      save_state_ext_load <= lit(0, width: 1)
+      savestate_cram_addr <= lit(0, width: 20)
+      savestate_cram_wren <= lit(0, width: 1)
+      savestate_cram_write_data <= lit(0, width: 8)
+      save_out_din <= lit(0, width: 64)
+      save_out_adr <= lit(0, width: 26)
+      save_out_rnw <= lit(0, width: 1)
+      save_out_ena <= lit(0, width: 1)
+      save_out_be <= lit(0, width: 8)
     end
 
     # Sequential logic for registers
     # boot_rom_enabled: 1 to run boot ROM (initializes hardware properly)
     # joy_din_sampled/joy_din_prev: 0xF = all buttons released (active low)
-    sequential clock: :clk_sys, reset: :reset, reset_values: { boot_rom_enabled: 1, if_r: 0, ie_r: 0, joy_p54: 0x3, joy_din_sampled: 0xF, joy_din_prev: 0xF, old_cpu_wr_n: 1, old_ack: 0, old_vblank_irq: 0, old_video_irq: 0, old_timer_irq: 0, old_serial_irq: 0 } do
+    sequential clock: :clk_sys, reset: :reset, reset_values: { boot_rom_enabled: 1, wram_bank: 0, vram_bank: 0, ff4c_key0: 0, cpu_speed: 0, prepare_switch: 0, ff72: 0, ff73: 0, ff74: 0, ff75: 0, if_r: 0, ie_r: 0, joy_p54: 0x3, joy_din_sampled: 0xF, joy_din_prev: 0xF, old_cpu_wr_n: 1, old_ack: 0, old_vblank_irq: 0, old_video_irq: 0, old_timer_irq: 0, old_serial_irq: 0 } do
       # Boot ROM enable (disabled by writing to FF50)
       # Match reference: disable only when bit 0 is written as 1.
       boot_rom_enabled <= mux(ce & (cpu_addr == lit(0xFF50, width: 16)) & ~cpu_wr_n_edge & cpu_do[0],
                               lit(0, width: 1),
                               boot_rom_enabled)
 
+      # GBC-only compatibility/unused registers and banking.
+      wram_bank <= mux(ce_cpu & sel_wram_bank & ~cpu_wr_n_edge, cpu_do[2..0], wram_bank)
+      vram_bank <= mux(ce_cpu & sel_vram_bank & ~cpu_wr_n_edge & is_gbc, cpu_do[0], vram_bank)
+      ff4c_key0 <= mux(ce_cpu & sel_key0 & ~cpu_wr_n_edge, cpu_do[3..2], ff4c_key0)
+      ff72 <= mux(ce_cpu & sel_ff72 & ~cpu_wr_n_edge, cpu_do, ff72)
+      ff73 <= mux(ce_cpu & sel_ff73 & ~cpu_wr_n_edge, cpu_do, ff73)
+      ff74 <= mux(ce_cpu & sel_ff74 & ~cpu_wr_n_edge, cpu_do, ff74)
+      ff75 <= mux(ce_cpu & sel_ff75 & ~cpu_wr_n_edge, cpu_do[6..4], ff75)
+
+      # KEY1 speed switch.
+      prepare_switch <= mux(ce_2x & sel_key1 & ~cpu_wr_n_edge,
+                            cpu_do[0],
+                            mux(ce_2x & is_gbc & prepare_switch & cpu_stop,
+                                lit(0, width: 1),
+                                prepare_switch))
+      cpu_speed <= mux(ce_2x & is_gbc & prepare_switch & cpu_stop,
+                       ~cpu_speed,
+                       cpu_speed)
+
       # Interrupt Enable register ($FFFF)
       # Bit 0: V-Blank, Bit 1: LCD STAT, Bit 2: Timer, Bit 3: Serial, Bit 4: Joypad
       # CPU writes to enable/disable interrupts
-      ie_r <= mux(ce & sel_ie & ~cpu_wr_n_edge,
+      ie_r <= mux(ce_cpu & sel_ie & ~cpu_wr_n_edge,
                   cpu_do,
                   ie_r)
 
       # Interrupt Flag register ($FF0F)
       # Match reference edge behavior: set IF bits on rising edges.
-      old_vblank_irq <= mux(ce, vblank_irq, old_vblank_irq)
-      old_video_irq <= mux(ce, video_irq, old_video_irq)
-      old_timer_irq <= mux(ce, timer_irq, old_timer_irq)
-      old_serial_irq <= mux(ce, serial_irq, old_serial_irq)
+      old_vblank_irq <= mux(ce_cpu, vblank_irq, old_vblank_irq)
+      old_video_irq <= mux(ce_cpu, video_irq, old_video_irq)
+      old_timer_irq <= mux(ce_cpu, timer_irq, old_timer_irq)
+      old_serial_irq <= mux(ce_cpu, serial_irq, old_serial_irq)
 
       if_r_new = if_r
       if_r_new = mux(~old_vblank_irq & vblank_irq, if_r_new | lit(0x01, width: 5), if_r_new)
@@ -668,13 +833,13 @@ module RHDL
 
       # Match reference ordering: direct IF write overrides same-cycle set/clear.
       if_r_new = mux(ce & sel_if & ~cpu_wr_n_edge, cpu_do[4..0], if_r_new)
-      if_r <= mux(ce, if_r_new, if_r)
-      old_ack <= mux(ce, irq_ack, old_ack)
-      old_cpu_wr_n <= mux(ce, cpu_wr_n, old_cpu_wr_n)
+      if_r <= mux(ce_cpu, if_r_new, if_r)
+      old_ack <= mux(ce_cpu, irq_ack, old_ack)
+      old_cpu_wr_n <= mux(ce_cpu, cpu_wr_n, old_cpu_wr_n)
 
       # Joypad select register (FF00 bits P15/P14).
       # 1 = not selected, 0 = selected (active low).
-      joy_p54 <= mux(ce & sel_joy & ~cpu_wr_n_edge,
+      joy_p54 <= mux(ce_cpu & sel_joy & ~cpu_wr_n_edge,
                      cpu_do[5..4],
                      joy_p54)
 
@@ -683,8 +848,8 @@ module RHDL
       # joy_din_prev captures the previous joy_din_sampled (2 cycles delay from input)
       # Edge detection in behavior block compares joy_din_prev with joy_din_sampled
       # Note: Order matters in simulation - update joy_din_prev first (from old joy_din_sampled)
-      joy_din_prev <= mux(ce, joy_din_sampled, joy_din_prev)
-      joy_din_sampled <= mux(ce, joy_din, joy_din_sampled)
+      joy_din_prev <= mux(ce_cpu, joy_din_sampled, joy_din_prev)
+      joy_din_sampled <= mux(ce_cpu, joy_din, joy_din_sampled)
     end
 
       end

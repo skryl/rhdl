@@ -39,6 +39,29 @@ RSpec.describe 'RHDL::Examples::GameBoy::Sound' do
     n.times { clock_cycle(component, ce: ce) }
   end
 
+  def reset_apu(component)
+    component.set_input(:reset, 1)
+    clock_cycle(component)
+    component.set_input(:reset, 0)
+    clock_cycle(component)
+  end
+
+  def apu_write(component, addr, value)
+    component.set_input(:s1_addr, addr)
+    component.set_input(:s1_writedata, value)
+    component.set_input(:s1_write, 1)
+    clock_cycle(component)
+    component.set_input(:s1_write, 0)
+    component.propagate
+  end
+
+  def apu_read(component, addr)
+    component.set_input(:s1_addr, addr)
+    component.set_input(:s1_read, 1)
+    component.propagate
+    component.get_output(:s1_readdata)
+  end
+
   describe 'Sound (APU)' do
     let(:apu) { RHDL::Examples::GameBoy::Sound.new('apu') }
 
@@ -255,82 +278,193 @@ RSpec.describe 'RHDL::Examples::GameBoy::Sound' do
 
     describe 'Frame Sequencer Timing' do
       it 'clocks length counters at 256 Hz (steps 0,2,4,6)' do
-        # Reference: Uses framecnt(0-7) with en_len at steps 0,2,4,6
-        pending 'Frame sequencer length counter timing'
-        fail
+        reset_apu(apu)
+
+        [0, 2, 4, 6].each do |step|
+          apu.write_reg(:frame_seq, step)
+          apu.write_reg(:frame_div, 16_383)
+          clock_cycle(apu)
+          expect(apu.read_reg(:en_len)).to eq(1)
+        end
       end
 
       it 'clocks sweep at 128 Hz (steps 2,6)' do
-        # Reference: en_sweep active at framecnt steps 2 and 6
-        pending 'Frame sequencer sweep timing'
-        fail
+        reset_apu(apu)
+
+        [2, 6].each do |step|
+          apu.write_reg(:frame_seq, step)
+          apu.write_reg(:frame_div, 16_383)
+          clock_cycle(apu)
+          expect(apu.read_reg(:en_sweep)).to eq(1)
+        end
+
+        apu.write_reg(:frame_seq, 0)
+        apu.write_reg(:frame_div, 16_383)
+        clock_cycle(apu)
+        expect(apu.read_reg(:en_sweep)).to eq(0)
       end
 
       it 'clocks envelope at 64 Hz (step 7)' do
-        # Reference: en_env active at framecnt step 7
-        pending 'Frame sequencer envelope timing'
-        fail
+        reset_apu(apu)
+
+        apu.write_reg(:frame_seq, 7)
+        apu.write_reg(:frame_div, 16_383)
+        clock_cycle(apu)
+        expect(apu.read_reg(:en_env)).to eq(1)
+
+        apu.write_reg(:frame_seq, 6)
+        apu.write_reg(:frame_div, 16_383)
+        clock_cycle(apu)
+        expect(apu.read_reg(:en_env)).to eq(0)
       end
     end
 
     describe 'Trigger Timing Delays' do
       it 'applies 2-4 cycle trigger delay for square channels' do
-        # Reference: sq1_trigger_cnt delays trigger by 2 cycles if already playing, 4 if not
-        pending 'Square channel trigger delay implementation'
-        fail
+        reset_apu(apu)
+        apu_write(apu, 0x01, 0xFF) # duty=3
+        apu_write(apu, 0x02, 0xF0) # DAC enabled, max volume
+
+        apu_write(apu, 0x04, 0x80)
+        expect(apu.read_reg(:ch1_trigger_cnt)).to eq(4)
+
+        3.times { clock_cycle(apu) }
+        expect(apu.read_reg(:ch1_trigger)).to eq(0)
+        clock_cycle(apu)
+        expect(apu.read_reg(:ch1_trigger)).to eq(1)
+
+        # Channel is now active, retrigger should use 2-cycle delay
+        2.times { clock_cycle(apu) }
+        expect(apu_read(apu, 0x16) & 0x01).to eq(1)
+        apu_write(apu, 0x04, 0x80)
+        expect(apu.read_reg(:ch1_trigger_cnt)).to eq(2)
       end
 
       it 'applies 2 cycle trigger delay for wave channel' do
-        # Reference: wav_trigger_cnt delays wave channel trigger by 2 cycles
-        pending 'Wave channel trigger delay implementation'
-        fail
+        reset_apu(apu)
+        apu_write(apu, 0x0A, 0x80) # wave DAC enable
+        apu_write(apu, 0x0E, 0x80)
+
+        expect(apu.read_reg(:ch3_trigger_cnt)).to eq(2)
+        clock_cycle(apu)
+        expect(apu.read_reg(:ch3_trigger)).to eq(0)
+        clock_cycle(apu)
+        expect(apu.read_reg(:ch3_trigger)).to eq(1)
       end
 
       it 'applies 2-4 cycle trigger delay for noise channel' do
-        # Reference: noi_trigger_cnt delays noise trigger
-        pending 'Noise channel trigger delay implementation'
-        fail
+        reset_apu(apu)
+        apu_write(apu, 0x11, 0xF0) # DAC enabled for CH4
+        apu_write(apu, 0x13, 0x80)
+
+        expect(apu.read_reg(:ch4_trigger_cnt)).to eq(2)
+        3.times { clock_cycle(apu) }
+        expect(apu_read(apu, 0x16) & 0x08).to eq(0x08)
+
+        # Retrigger while active takes the longer path.
+        apu_write(apu, 0x13, 0x80)
+        expect(apu.read_reg(:ch4_trigger_cnt)).to eq(4)
       end
     end
 
     describe 'Zombie Mode Envelope' do
       it 'modifies envelope on NR12/NR22/NR42 write while playing' do
-        # Reference: Zombie mode modifies volume when envelope register written mid-note
-        # sq1_envsgn_old, sq1_envper_old track previous state
-        pending 'Zombie mode envelope calculation'
-        fail
+        reset_apu(apu)
+        apu_write(apu, 0x01, 0xFF)
+        apu_write(apu, 0x02, 0xF3)
+        apu_write(apu, 0x04, 0x80)
+        6.times { clock_cycle(apu) }
+
+        expect(apu_read(apu, 0x16) & 0x01).to eq(1)
+        expect(apu.read_reg(:zombie_sq1)).to eq(0)
+
+        apu_write(apu, 0x02, 0x83)
+        expect(apu.read_reg(:zombie_sq1)).to eq(1)
+        clock_cycle(apu)
+        expect(apu.read_reg(:zombie_sq1)).to eq(0)
       end
     end
 
     describe 'Length Counter Quirk' do
       it 'extra length decrement when length enable transitions 0->1' do
-        # Reference: sq1_lenquirk signal triggers extra decrement on edge
-        pending 'Length enable edge quirk'
-        fail
+        reset_apu(apu)
+        apu.write_reg(:nr14, 0)
+        apu.write_reg(:frame_seq, 1)
+        apu_write(apu, 0x04, 0x40)
+        expect(apu.read_reg(:ch1_len_quirk)).to eq(1)
+
+        apu.write_reg(:nr14, 0)
+        apu.write_reg(:frame_seq, 0)
+        apu_write(apu, 0x04, 0x40)
+        expect(apu.read_reg(:ch1_len_quirk)).to eq(0)
       end
     end
 
     describe 'First Sample Suppression' do
       it 'suppresses first sample after APU power-on' do
-        # Reference: sq1_suppressed signal prevents first sample output
-        pending 'First sample suppression after power-on'
-        fail
+        reset_apu(apu)
+        apu.set_input(:is_gbc, 1)
+        apu.propagate
+
+        apu_write(apu, 0x01, 0xFF)
+        apu_write(apu, 0x02, 0xF0)
+        apu_write(apu, 0x04, 0x80)
+
+        4.times { clock_cycle(apu) }
+        expect(apu.read_reg(:ch1_suppressed)).to eq(1)
+        expect(apu_read(apu, 0x76) & 0x0F).to eq(0)
+
+        clock_cycle(apu)
+        expect(apu.read_reg(:ch1_suppressed)).to eq(0)
+        expect(apu_read(apu, 0x76) & 0x0F).to be > 0
       end
     end
 
     describe 'DAC Decay' do
       it 'applies 61ms decay when DAC is disabled' do
-        # Reference: apu_dac component has decay timer
-        pending 'DAC decay timer implementation'
-        fail
+        reset_apu(apu)
+        apu_write(apu, 0x01, 0xFF)
+        apu_write(apu, 0x02, 0xF0)
+        apu_write(apu, 0x04, 0x80)
+        6.times { clock_cycle(apu) }
+
+        start_dac = apu.read_reg(:ch1_dac)
+        expect(start_dac).to be > 0
+
+        apu_write(apu, 0x02, 0x00) # disable square1 DAC
+        run_cycles(apu, 110)
+        expect(apu.read_reg(:ch1_dac)).to be < start_dac
       end
     end
 
     describe 'Pop Removal' do
       it 'removes audio pops when remove_pops=1' do
-        # Reference: dac_invert logic prevents discontinuous jumps
-        pending 'Pop removal implementation'
-        fail
+        measure_drop = lambda do |pop_mode|
+          comp = RHDL::Examples::GameBoy::Sound.new("apu_pop_#{pop_mode}")
+          comp.set_input(:ce, 1)
+          comp.set_input(:reset, 0)
+          comp.set_input(:is_gbc, 0)
+          comp.set_input(:remove_pops, pop_mode)
+          comp.set_input(:s1_read, 0)
+          comp.set_input(:s1_write, 0)
+          comp.set_input(:s1_addr, 0)
+          comp.set_input(:s1_writedata, 0)
+          comp.propagate
+
+          reset_apu(comp)
+          apu_write(comp, 0x01, 0xFF)
+          apu_write(comp, 0x02, 0xF0)
+          apu_write(comp, 0x04, 0x80)
+          run_cycles(comp, 6)
+          before = comp.get_output(:snd_left)
+          apu_write(comp, 0x02, 0x00)
+          after = comp.get_output(:snd_left)
+          (after - before).abs
+        end
+
+        abrupt_drop = measure_drop.call(0)
+        smooth_drop = measure_drop.call(1)
+        expect(smooth_drop).to be < abrupt_drop
       end
     end
 
@@ -356,15 +490,32 @@ RSpec.describe 'RHDL::Examples::GameBoy::Sound' do
 
     describe 'GBC PCM Registers' do
       it 'reads PCM12 register (FF76) with current channel outputs' do
-        # Reference: PCM12 returns upper=SQ2, lower=SQ1 current output (GBC only)
-        pending 'PCM12 register implementation (GBC mode)'
-        fail
+        reset_apu(apu)
+        apu.set_input(:is_gbc, 1)
+        apu.propagate
+
+        apu_write(apu, 0x01, 0xFF)
+        apu_write(apu, 0x02, 0xF0)
+        apu_write(apu, 0x04, 0x80)
+        6.times { clock_cycle(apu) }
+
+        pcm12 = apu_read(apu, 0x76)
+        expect(pcm12 & 0x0F).to be > 0
+        expect(pcm12 & 0xF0).to eq(0)
       end
 
       it 'reads PCM34 register (FF77) with current channel outputs' do
-        # Reference: PCM34 returns upper=Noise, lower=Wave current output (GBC only)
-        pending 'PCM34 register implementation (GBC mode)'
-        fail
+        reset_apu(apu)
+        apu.set_input(:is_gbc, 1)
+        apu.propagate
+
+        pcm34_idle = apu_read(apu, 0x77)
+        expect(pcm34_idle).to eq(0)
+
+        # In non-GBC mode these undocumented registers return FF.
+        apu.set_input(:is_gbc, 0)
+        apu.propagate
+        expect(apu_read(apu, 0x77)).to eq(0xFF)
       end
     end
 

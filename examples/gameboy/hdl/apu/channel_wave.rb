@@ -33,6 +33,7 @@ module RHDL
 
     # Trigger
     input :trigger
+    input :len_quirk
 
     # Wave RAM interface
     input :wave_ram_data, width: 4
@@ -49,6 +50,8 @@ module RHDL
     wire :sample, width: 4        # Current sample
     wire :length_counter, width: 8 # Length counter (256 values)
     wire :volume_shift, width: 2  # Volume shift amount
+    wire :prev_frame_seq, width: 3
+    wire :prev_trigger
 
     behavior do
       # Extract frequency from registers
@@ -82,8 +85,17 @@ module RHDL
     sequential clock: :clk, reset: :reset, reset_values: {
       timer: 0,
       position: 0,
-      length_counter: 0
+      length_counter: 0,
+      prev_frame_seq: 0,
+      prev_trigger: 0
     } do
+      frame_step = ce & (frame_seq != prev_frame_seq)
+      len_tick = frame_step & ((frame_seq == lit(0, width: 3)) |
+                               (frame_seq == lit(2, width: 3)) |
+                               (frame_seq == lit(4, width: 3)) |
+                               (frame_seq == lit(6, width: 3)))
+      trigger_pulse = trigger & ~prev_trigger
+
       # Frequency timer (wave channel timer = (2048 - freq) * 2)
       timer <= mux(ce,
                    mux(timer == lit(0, width: 12),
@@ -97,22 +109,25 @@ module RHDL
                       position)
 
       # Length counter (clocked at 256Hz = frame_seq[0])
-      length_counter <= mux(frame_seq == lit(0, width: 3) & freq_hi[6] &
+      length_counter <= mux((len_tick | len_quirk) & freq_hi[6] &
                             (length_counter > lit(0, width: 8)),
                             length_counter - lit(1, width: 8),
                             length_counter)
 
       # Trigger handling
-      timer <= mux(trigger, cat(lit(0b1, width: 1), ~frequency, lit(0, width: 1)), timer)
-      position <= mux(trigger, lit(0, width: 5), position)
-      length_counter <= mux(trigger & (length_counter == lit(0, width: 8)),
+      timer <= mux(trigger_pulse, cat(lit(0b1, width: 1), ~frequency, lit(0, width: 1)), timer)
+      position <= mux(trigger_pulse, lit(0, width: 5), position)
+      length_counter <= mux(trigger_pulse & (length_counter == lit(0, width: 8)),
                             lit(256, width: 8),
                             length_counter)
 
       # Length load
-      length_counter <= mux(ce & trigger,
+      length_counter <= mux(ce & trigger_pulse,
                             lit(256, width: 8) - cat(lit(0, width: 0), length_reg),
                             length_counter)
+
+      prev_frame_seq <= mux(ce, frame_seq, prev_frame_seq)
+      prev_trigger <= mux(ce, trigger, prev_trigger)
     end
       end
     end

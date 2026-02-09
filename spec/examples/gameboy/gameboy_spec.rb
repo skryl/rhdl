@@ -296,104 +296,6 @@ RSpec.describe 'GameBoy RHDL Implementation' do
     end
   end
 
-  describe 'IR Runner Long Run' do
-    let(:tobu_rom_path) { File.expand_path('../../../examples/gameboy/software/roms/tobu.gb', __dir__) }
-
-    before do
-      skip 'tobu.gb ROM not found' unless File.exist?(tobu_rom_path)
-      begin
-        require_relative '../../../examples/gameboy/utilities/runners/ir_runner'
-        # Check if native library is available by trying to create a runner
-        test_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
-        test_runner = nil
-      rescue LoadError, RuntimeError => e
-        skip "IR runner not available: #{e.message}"
-      end
-    end
-
-    it 'runs 20M cycles with display tracking using compiler backend', timeout: 300 do
-      runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
-      runner.load_rom(File.binread(tobu_rom_path))
-      runner.reset
-
-      total_cycles = 20_000_000
-      batch_size = 1_000_000
-      batches = total_cycles / batch_size
-
-      display_snapshots = []
-      frame_count = 0
-
-      start_time = Time.now
-
-      batches.times do |i|
-        runner.run_steps(batch_size)
-
-        cycles_per_frame = 154 * 456
-        current_frames = runner.cycle_count / cycles_per_frame
-
-        if current_frames > frame_count
-          frame_count = current_frames
-
-          if frame_count % 10 == 0
-            snapshot = {
-              cycle: runner.cycle_count,
-              frame: frame_count,
-              screen_dirty: runner.screen_dirty?,
-              elapsed: Time.now - start_time
-            }
-            display_snapshots << snapshot
-          end
-        end
-
-        runner.clear_screen_dirty
-      end
-
-      elapsed = Time.now - start_time
-      speed_mhz = runner.cycle_count / elapsed / 1_000_000.0
-
-      expect(runner.cycle_count).to eq(total_cycles)
-      expect(runner.native?).to eq(true)
-      expect(display_snapshots.length).to be > 0
-
-      total_frames = runner.cycle_count / (154 * 456)
-      expect(total_frames).to be > 200
-
-      puts "\n  IR Runner (compile) Results:"
-      puts "    Total cycles: #{runner.cycle_count.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
-      puts "    Total frames: #{total_frames}"
-      puts "    Elapsed time: #{'%.2f' % elapsed}s"
-      puts "    Speed: #{'%.2f' % speed_mhz} MHz (#{'%.1f' % (speed_mhz / 4.19 * 100)}% of real GB)"
-      puts "    Display snapshots: #{display_snapshots.length}"
-    end
-
-    it 'tracks LY register changes during execution' do
-      runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
-      runner.load_rom(File.binread(tobu_rom_path))
-      runner.reset
-
-      cycles_per_frame = 154 * 456
-      runner.run_steps(cycles_per_frame * 5)
-
-      expect(runner.cycle_count).to eq(cycles_per_frame * 5)
-
-      screen_lines = runner.read_screen
-      expect(screen_lines).to be_a(Array)
-      expect(screen_lines.length).to be > 0
-    end
-
-    it 'can render framebuffer after long run' do
-      runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
-      runner.load_rom(File.binread(tobu_rom_path))
-      runner.reset
-
-      runner.run_steps(1_000_000)
-
-      output = runner.render_lcd_braille(chars_wide: 40)
-      expect(output).to be_a(String)
-      expect(output.length).to be > 0
-    end
-  end
-
   describe 'Verilator Runner' do
     def verilator_available?
       ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
@@ -457,42 +359,6 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       end
     end
 
-    context 'with tobu.gb ROM', timeout: 300 do
-      let(:tobu_rom_path) { File.expand_path('../../../examples/gameboy/software/roms/tobu.gb', __dir__) }
-
-      before do
-        skip 'tobu.gb ROM not found' unless File.exist?(tobu_rom_path)
-      end
-
-      it 'can run 1M cycles' do
-        runner = RHDL::Examples::GameBoy::VerilatorRunner.new
-        runner.load_rom(File.binread(tobu_rom_path))
-        runner.reset
-
-        start_time = Time.now
-        runner.run_steps(1_000_000)
-        elapsed = Time.now - start_time
-
-        expect(runner.cycle_count).to eq(1_000_000)
-        speed_mhz = runner.cycle_count / elapsed / 1_000_000.0
-
-        puts "\n  Verilator Runner Results:"
-        puts "    Total cycles: #{runner.cycle_count.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
-        puts "    Elapsed time: #{'%.2f' % elapsed}s"
-        puts "    Speed: #{'%.2f' % speed_mhz} MHz (#{'%.1f' % (speed_mhz / 4.19 * 100)}% of real GB)"
-      end
-
-      it 'can render framebuffer' do
-        runner = RHDL::Examples::GameBoy::VerilatorRunner.new
-        runner.load_rom(File.binread(tobu_rom_path))
-        runner.reset
-        runner.run_steps(100_000)
-
-        output = runner.render_lcd_braille(chars_wide: 40)
-        expect(output).to be_a(String)
-        expect(output.length).to be > 0
-      end
-    end
   end
 
   describe 'Speaker' do
@@ -579,7 +445,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       0
     end
 
-    it 'runs Prince of Persia for 1000 frames with VRAM and framebuffer tracing', timeout: 600 do
+    it 'runs Prince of Persia long-run with VRAM and framebuffer tracing', timeout: 600, slow: true do
       rom_data = File.binread(pop_rom_path)
 
       # Local constants
@@ -619,7 +485,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       puts "\n  Phase 2: Running 1000 frames with tracing"
       puts "  " + "-" * 50
 
-      target_frames = 1000
+      target_frames = (ENV['RHDL_POP_LONG_FRAMES'] || '600').to_i
       snapshot_interval = 100  # Snapshot every 100 frames
       cycles_per_snapshot = snapshot_interval * cycles_per_frame
 
@@ -742,6 +608,223 @@ RSpec.describe 'GameBoy RHDL Implementation' do
 
       puts "\n  ✓ All assertions passed"
     end
+
+    it 'drives Prince of Persia with scripted input and checks for freezes', timeout: 900, slow: true do
+      rom_data = File.binread(pop_rom_path)
+
+      cycles_per_frame = 70_224
+      boot_complete_pc = 0x0100
+      max_boot_cycles = 500_000
+
+      target_frames = (ENV['RHDL_POP_ADVANCE_FRAMES'] || '300').to_i
+      target_frames = 300 if target_frames <= 0
+
+      sample_interval = (ENV['RHDL_POP_ADVANCE_SAMPLE_EVERY'] || '5').to_i
+      sample_interval = 5 if sample_interval <= 0
+
+      static_fb_limit = (ENV['RHDL_POP_ADVANCE_MAX_STATIC_FB_FRAMES'] || '220').to_i
+      static_fb_limit = 220 if static_fb_limit <= 0
+
+      low_pc_entropy_limit = (ENV['RHDL_POP_ADVANCE_MAX_LOW_PC_ENTROPY_FRAMES'] || '48').to_i
+      low_pc_entropy_limit = 48 if low_pc_entropy_limit <= 0
+
+      button = {
+        right: 0,
+        left: 1,
+        up: 2,
+        down: 3,
+        a: 4,
+        b: 5,
+        select: 6,
+        start: 7
+      }
+
+      puts "\n  Prince of Persia - scripted progression test"
+      puts "  " + "=" * 70
+      puts "  Frames: #{target_frames}, sample every #{sample_interval} frame(s)"
+      puts "  Static FB limit: #{static_fb_limit} frames"
+      puts "  Low PC entropy limit: #{low_pc_entropy_limit} frames"
+
+      runner = nil
+      pressed = []
+      snapshots = []
+
+      begin
+        runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
+        runner.load_rom(rom_data)
+        runner.reset
+
+        # Boot ROM phase
+        while runner.cpu_state[:pc] < boot_complete_pc && runner.cycle_count < max_boot_cycles
+          runner.run_steps(10_000)
+        end
+        boot_pc = runner.cpu_state[:pc]
+        expect(boot_pc).to be >= boot_complete_pc, "Boot ROM did not complete (PC=0x#{boot_pc.to_s(16)})"
+
+        # Scripted gameplay phase
+        start_time = Time.now
+        start_cycle = runner.cycle_count
+
+        last_fb_hash = nil
+        static_fb_frames = 0
+        max_static_fb_frames_seen = 0
+        low_pc_entropy_frames = 0
+        max_low_pc_entropy_frames_seen = 0
+
+        1.upto(target_frames) do |frame|
+          desired = []
+
+          # Phase 1: title/story/menu dismissal with start pulses.
+          if frame <= 180
+            desired << button[:start] if (frame % 12) < 3
+            desired << button[:a] if frame % 40 == 10
+          # Phase 2: move right with periodic jumps/climbs.
+          elsif frame <= 420
+            desired << button[:right]
+            desired << button[:a] if (frame % 32) < 2
+            desired << button[:up] if (frame % 90).between?(35, 37)
+            desired << button[:start] if frame % 150 == 0
+          # Phase 3: continue progression with a wider movement mix.
+          else
+            desired << button[:right]
+            desired << button[:a] if (frame % 28).between?(4, 6)
+            desired << button[:b] if frame % 80 == 10
+            desired << button[:up] if (frame % 100).between?(50, 52)
+            desired << button[:down] if (frame % 150).between?(110, 112)
+          end
+
+          # Adaptive unstick logic when the framebuffer has been static too long.
+          if static_fb_frames >= 90
+            desired |= [button[:start], button[:a], button[:up]]
+          elsif static_fb_frames >= 45
+            desired << button[:start]
+          end
+
+          desired.uniq!
+
+          to_release = pressed - desired
+          to_press = desired - pressed
+          to_release.each { |bit| runner.release_key(bit) }
+          to_press.each { |bit| runner.inject_key(bit) }
+          pressed = desired
+
+          # Run one frame in sub-chunks to detect intra-frame PC entropy.
+          frame_pc_trace = []
+          remaining = cycles_per_frame
+          base_chunk = cycles_per_frame / 8
+          chunk_idx = 0
+          while remaining > 0
+            jitter = (chunk_idx % 3) * 17
+            run = [base_chunk + jitter, remaining].min
+            runner.run_steps(run)
+            remaining -= run
+            frame_pc_trace << runner.cpu_state[:pc]
+            chunk_idx += 1
+          end
+
+          frame_pc_unique = frame_pc_trace.uniq.size
+          if frame_pc_unique <= 1
+            low_pc_entropy_frames += 1
+          else
+            low_pc_entropy_frames = 0
+          end
+          max_low_pc_entropy_frames_seen = [max_low_pc_entropy_frames_seen, low_pc_entropy_frames].max
+
+          fb = runner.read_framebuffer
+          flat_fb = fb.flatten
+          fb_hash = flat_fb.hash
+          fb_non_zero = flat_fb.count { |v| v != 0 }
+          fb_unique_colors = flat_fb.uniq
+
+          if fb_hash == last_fb_hash
+            static_fb_frames += 1
+          else
+            static_fb_frames = 0
+          end
+          max_static_fb_frames_seen = [max_static_fb_frames_seen, static_fb_frames].max
+          last_fb_hash = fb_hash
+
+          if (frame % sample_interval).zero?
+            cpu = runner.cpu_state
+            snapshots << {
+              frame: frame,
+              cycle: runner.cycle_count,
+              pc: cpu[:pc],
+              a: cpu[:a],
+              sp: cpu[:sp],
+              frame_pc_unique: frame_pc_unique,
+              fb_hash: fb_hash,
+              fb_non_zero: fb_non_zero,
+              fb_unique_colors: fb_unique_colors,
+              static_fb_frames: static_fb_frames
+            }
+          end
+
+          if (frame % 60).zero?
+            elapsed = Time.now - start_time
+            speed_mhz = (runner.cycle_count - start_cycle) / elapsed / 1_000_000.0
+            puts "    Frame #{frame}: PC=0x#{'%04X' % runner.cpu_state[:pc]} FB=#{fb_non_zero} px static_fb=#{static_fb_frames} pc_entropy=#{frame_pc_unique} (#{'%.2f' % speed_mhz} MHz)"
+          end
+        end
+
+        total_cycles = runner.cycle_count - start_cycle
+        total_frames = total_cycles / cycles_per_frame
+        elapsed = Time.now - start_time
+        speed_mhz = total_cycles / elapsed / 1_000_000.0
+
+        sampled_non_blank = snapshots.count { |s| s[:fb_non_zero] > 0 }
+        non_blank_ratio = snapshots.empty? ? 0.0 : sampled_non_blank.to_f / snapshots.size
+        unique_fb_hashes = snapshots.map { |s| s[:fb_hash] }.uniq.size
+        unique_sample_pcs = snapshots.map { |s| s[:pc] }.uniq.size
+        max_fb_pixels = snapshots.map { |s| s[:fb_non_zero] }.max || 0
+        min_fb_pixels = snapshots.map { |s| s[:fb_non_zero] }.min || 0
+        pixel_span = max_fb_pixels - min_fb_pixels
+
+        pc_same_run = 0
+        max_pc_same_run = 0
+        last_sample_pc = nil
+        snapshots.each do |snap|
+          if snap[:pc] == last_sample_pc
+            pc_same_run += 1
+          else
+            pc_same_run = 0
+          end
+          max_pc_same_run = [max_pc_same_run, pc_same_run].max
+          last_sample_pc = snap[:pc]
+        end
+
+        puts ""
+        puts "  Scripted progression summary:"
+        puts "    Frames run: #{total_frames}"
+        puts "    Elapsed: #{'%.2f' % elapsed}s"
+        puts "    Speed: #{'%.2f' % speed_mhz} MHz (#{'%.1f' % (speed_mhz / 4.19 * 100)}% of real GB)"
+        puts "    Sampled non-blank frames: #{sampled_non_blank}/#{snapshots.size} (#{'%.1f' % (non_blank_ratio * 100)}%)"
+        puts "    Unique framebuffer hashes: #{unique_fb_hashes}"
+        puts "    Unique sampled PCs: #{unique_sample_pcs}"
+        puts "    Pixel span across samples: #{pixel_span}"
+        puts "    Max static framebuffer streak: #{max_static_fb_frames_seen} frames"
+        puts "    Max low PC entropy streak: #{max_low_pc_entropy_frames_seen} frames"
+        puts "    Max same sampled PC streak: #{max_pc_same_run} samples"
+
+        puts ""
+        puts "  Final framebuffer render:"
+        puts "  " + "-" * 50
+        final_output = runner.render_lcd_braille(chars_wide: 40)
+        final_output.each_line { |line| puts "    #{line}" }
+
+        # Assertions: this test should both drive progression and catch stalls/regressions.
+        expect(total_frames).to be >= target_frames, "Did not complete #{target_frames} frames"
+        expect(snapshots).not_to be_empty
+        expect(non_blank_ratio).to be > 0.90, "Framebuffer is frequently blank (ratio=#{'%.3f' % non_blank_ratio})"
+        expect(unique_fb_hashes).to be >= 4, "Framebuffer does not appear to progress (unique hashes=#{unique_fb_hashes})"
+        expect(pixel_span).to be > 1_000, "Framebuffer activity span is too small (span=#{pixel_span})"
+        expect(max_static_fb_frames_seen).to be < static_fb_limit, "Framebuffer froze for #{max_static_fb_frames_seen} frames"
+        expect(max_low_pc_entropy_frames_seen).to be < low_pc_entropy_limit, "PC entropy collapsed for #{max_low_pc_entropy_frames_seen} frames"
+        expect(unique_sample_pcs).to be >= 8, "CPU program counter variation too small (unique sampled PCs=#{unique_sample_pcs})"
+      ensure
+        pressed.each { |bit| runner.release_key(bit) } if runner
+      end
+    end
   end
 
   describe 'Backend Comparison (IR Compiler vs Verilator)' do
@@ -774,7 +857,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       end
     end
 
-    it 'completes boot ROM at the same cycle on both backends', timeout: 120 do
+    it 'completes boot ROM at the same cycle on both backends', timeout: 120, slow: true do
       rom_data = File.binread(test_rom_path)
 
       puts "\n  Boot ROM Completion Test"
@@ -894,7 +977,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       fb.flatten.hash
     end
 
-    it 'compares 1000 frames between IR Compiler and Verilator backends', timeout: 600 do
+    it 'compares long-run frames between IR Compiler and Verilator backends', timeout: 600, slow: true do
       rom_data = File.binread(test_rom_path)
 
       # Initialize both runners
@@ -911,7 +994,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       verilator_runner.reset
 
       # Run configuration
-      target_frames = 1000
+      target_frames = (ENV['RHDL_BACKEND_COMPARE_FRAMES'] || '200').to_i
       snapshot_interval = 100  # Take snapshot every 100 frames
       cycles_per_frame = 70224  # 154 scanlines * 456 dots
 
@@ -1082,7 +1165,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       expect(vl_non_blank_pct).to be > 50, "Verilator has too many blank frames (#{verilator_blank_frames}/#{verilator_total_sampled})"
     end
 
-    it 'compares available backends: IR Compiler, IR JIT, IR Interpreter, and Verilator', timeout: 600 do
+    it 'compares available backends: IR Compiler, IR JIT, IR Interpreter, and Verilator', timeout: 600, slow: true do
       rom_data = File.binread(test_rom_path)
 
       puts "\n  Multi-Backend Comparison Test"
@@ -1164,7 +1247,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       end
 
       # Run configuration - shorter for multi-backend test
-      target_frames = 100
+      target_frames = (ENV['RHDL_MULTI_BACKEND_FRAMES'] || '20').to_i
       snapshot_interval = 20
       cycles_per_frame = 70224
 

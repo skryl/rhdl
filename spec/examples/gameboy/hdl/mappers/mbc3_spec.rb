@@ -43,6 +43,25 @@ RSpec.describe 'RHDL::Examples::GameBoy::MBC3' do
     end
   end
 
+  def write_rtc_time(component, edge_bit, timestamp)
+    component.set_input(:rtc_time, ((edge_bit & 0x1) << 32) | (timestamp & 0xFFFF_FFFF))
+    clock_cycle(component)
+  end
+
+  def write_backup_word(component, addr, data)
+    component.set_input(:bk_addr, addr)
+    component.set_input(:bk_data, data & 0xFFFF)
+    component.set_input(:bk_rtc_wr, 1)
+    clock_cycle(component)
+    component.set_input(:bk_rtc_wr, 0)
+    clock_cycle(component)
+  end
+
+  def latch_rtc(component)
+    write_register(component, 0x6000, 0x00)
+    write_register(component, 0x6000, 0x01)
+  end
+
   let(:mbc3) { RHDL::Examples::GameBoy::MBC3.new('mbc3') }
 
   before do
@@ -50,12 +69,20 @@ RSpec.describe 'RHDL::Examples::GameBoy::MBC3' do
     mbc3.set_input(:clk, 0)
     mbc3.set_input(:ce, 1)
     mbc3.set_input(:reset, 0)
+    mbc3.set_input(:enable, 1)
     mbc3.set_input(:mbc30, 0)  # Standard MBC3
     mbc3.set_input(:cpu_addr, 0)
     mbc3.set_input(:cpu_di, 0)
     mbc3.set_input(:cpu_wr, 0)
     mbc3.set_input(:cpu_rd, 0)
+    mbc3.set_input(:cram_di, 0)
     mbc3.set_input(:ce_32k, 0)  # RTC clock
+    mbc3.set_input(:rtc_time, 0)
+    mbc3.set_input(:bk_rtc_wr, 0)
+    mbc3.set_input(:bk_addr, 0)
+    mbc3.set_input(:bk_data, 0)
+    mbc3.set_input(:savestate_load, 0)
+    mbc3.set_input(:savestate_data, 0)
     mbc3.set_input(:rom_mask, 0x7F)  # 128 banks (2MB)
     mbc3.set_input(:ram_mask, 0x03)  # 4 RAM banks (32KB)
     mbc3.set_input(:has_ram, 1)
@@ -76,9 +103,14 @@ RSpec.describe 'RHDL::Examples::GameBoy::MBC3' do
     it 'has the expected inputs' do
       input_names = RHDL::Examples::GameBoy::MBC3._port_defs.select { |p| p[:direction] == :in }.map { |p| p[:name] }
       expect(input_names).to include(:clk, :ce, :reset)
+      expect(input_names).to include(:enable)
       expect(input_names).to include(:mbc30)
       expect(input_names).to include(:cpu_addr, :cpu_di, :cpu_wr, :cpu_rd)
+      expect(input_names).to include(:cram_di)
       expect(input_names).to include(:ce_32k)
+      expect(input_names).to include(:rtc_time)
+      expect(input_names).to include(:bk_rtc_wr, :bk_addr, :bk_data)
+      expect(input_names).to include(:savestate_load, :savestate_data)
       expect(input_names).to include(:rom_mask, :ram_mask, :has_ram)
       expect(input_names).to include(:cart_mbc_type)
     end
@@ -88,9 +120,11 @@ RSpec.describe 'RHDL::Examples::GameBoy::MBC3' do
       expect(output_names).to include(:rom_bank, :ram_bank)
       expect(output_names).to include(:ram_enable, :has_battery)
       expect(output_names).to include(:rtc_mode)
+      expect(output_names).to include(:cram_do, :cart_oe, :savestate_back)
       expect(output_names).to include(:rtc_seconds, :rtc_minutes)
       expect(output_names).to include(:rtc_hours, :rtc_days)
       expect(output_names).to include(:rtc_halt, :rtc_overflow)
+      expect(output_names).to include(:rtc_timestamp_out, :rtc_savedtime_out, :rtc_inuse)
     end
   end
 
@@ -452,151 +486,242 @@ RSpec.describe 'RHDL::Examples::GameBoy::MBC3' do
 
   describe 'External RTC Time Sync' do
     it 'accepts RTC_time input for host system time sync' do
-      # Reference: RTC_time[33] input for real-time synchronization
-      pending 'External RTC time input (RTC_time[33])'
-      fail
+      write_rtc_time(mbc3, 1, 0x1234_5678)
+      expect(mbc3.get_output(:rtc_timestamp_out)).to eq(0x1234_5678)
     end
 
     it 'syncs with host system time during play' do
-      # Reference: Enables proper time progression during emulation
-      pending 'RTC sync with host system time'
-      fail
+      write_register(mbc3, 0x4000, 0x08) # RTC mode active
+      write_rtc_time(mbc3, 1, 100)
+      expect(mbc3.get_output(:rtc_timestamp_out)).to eq(100)
+
+      # No edge toggle - timestamp should not update.
+      mbc3.set_input(:rtc_time, (1 << 32) | 250)
+      clock_cycle(mbc3)
+      expect(mbc3.get_output(:rtc_timestamp_out)).to eq(100)
+
+      # Toggle the edge bit and update.
+      write_rtc_time(mbc3, 0, 250)
+      expect(mbc3.get_output(:rtc_timestamp_out)).to eq(250)
     end
   end
 
   describe 'RTC Timestamp Persistence' do
     it 'outputs current Unix timestamp (RTC_timestampOut)' do
-      # Reference: RTC_timestampOut[32] for save file storage
-      pending 'RTC timestamp output for persistence'
-      fail
+      write_rtc_time(mbc3, 1, 0x89AB_CDEF)
+      expect(mbc3.get_output(:rtc_timestamp_out)).to eq(0x89AB_CDEF)
     end
 
     it 'outputs saved time for backup RAM (RTC_savedtimeOut)' do
-      # Reference: RTC_savedtimeOut[48] for full RTC state backup
-      pending 'RTC saved time output'
-      fail
+      write_register(mbc3, 0x0000, 0x0A) # enable RAM/RTC
+
+      write_register(mbc3, 0x4000, 0x08)
+      write_register(mbc3, 0xA000, 0x2A) # seconds
+      write_register(mbc3, 0x4000, 0x09)
+      write_register(mbc3, 0xA000, 0x11) # minutes
+      write_register(mbc3, 0x4000, 0x0A)
+      write_register(mbc3, 0xA000, 0x07) # hours
+      write_register(mbc3, 0x4000, 0x0B)
+      write_register(mbc3, 0xA000, 0x34) # day low
+      write_register(mbc3, 0x4000, 0x0C)
+      write_register(mbc3, 0xA000, 0xC1) # day high + halt + overflow
+      clock_cycle(mbc3)
+
+      expected = (1 << 28) | (1 << 27) | (0x134 << 17) | (0x07 << 12) | (0x11 << 6) | 0x2A
+      saved = mbc3.get_output(:rtc_savedtime_out)
+      expect(saved & ((1 << 29) - 1)).to eq(expected)
+      expect(saved >> 29).to eq(0)
     end
 
     it 'outputs RTC in-use flag' do
-      # Reference: RTC_inuse tracks whether game actively uses RTC
-      pending 'RTC in-use flag output'
-      fail
+      expect(mbc3.get_output(:rtc_inuse)).to eq(0)
+      write_register(mbc3, 0x4000, 0x08)
+      clock_cycle(mbc3)
+      expect(mbc3.get_output(:rtc_inuse)).to eq(1)
     end
   end
 
   describe 'RTC Backup/Restore' do
     it 'accepts backup write enable signal (bk_rtc_wr)' do
-      # Reference: bk_rtc_wr input for loading RTC from savefile
-      pending 'RTC backup write enable input'
-      fail
+      input_names = RHDL::Examples::GameBoy::MBC3._port_defs.select { |p| p[:direction] == :in }.map { |p| p[:name] }
+      expect(input_names).to include(:bk_rtc_wr)
     end
 
     it 'accepts backup address (bk_addr)' do
-      # Reference: bk_addr[17] for addressing RTC save data
-      pending 'RTC backup address input'
-      fail
+      input_names = RHDL::Examples::GameBoy::MBC3._port_defs.select { |p| p[:direction] == :in }.map { |p| p[:name] }
+      expect(input_names).to include(:bk_addr)
     end
 
     it 'accepts backup data (bk_data)' do
-      # Reference: bk_data[16] for loading RTC state
-      pending 'RTC backup data input'
-      fail
+      input_names = RHDL::Examples::GameBoy::MBC3._port_defs.select { |p| p[:direction] == :in }.map { |p| p[:name] }
+      expect(input_names).to include(:bk_data)
     end
 
     it 'restores RTC state from savefile on power-on' do
-      # Reference: Loads RTC from save file bytes 0-3 (timestamp) and 2-3 (saved time)
-      pending 'RTC restore from savefile'
-      fail
+      write_rtc_time(mbc3, 1, 200)
+
+      saved_timestamp = 195
+      saved_time = (1 << 28) | (1 << 27) | (9 << 17) | (3 << 12) | (7 << 6) | 5
+
+      write_backup_word(mbc3, 0, saved_timestamp & 0xFFFF)
+      write_backup_word(mbc3, 1, (saved_timestamp >> 16) & 0xFFFF)
+      write_backup_word(mbc3, 2, saved_time & 0xFFFF)
+      write_backup_word(mbc3, 3, (saved_time >> 16) & 0xFFFF)
+      write_backup_word(mbc3, 4, 0)
+
+      latch_rtc(mbc3)
+      expect(mbc3.get_output(:rtc_seconds)).to eq(5)
+      expect(mbc3.get_output(:rtc_minutes)).to eq(7)
+      expect(mbc3.get_output(:rtc_hours)).to eq(3)
+      expect(mbc3.get_output(:rtc_days)).to eq(9)
+      expect(mbc3.get_output(:rtc_halt)).to eq(1)
+      expect(mbc3.get_output(:rtc_overflow)).to eq(1)
+      expect(mbc3.get_output(:rtc_inuse)).to eq(1)
     end
   end
 
   describe 'RTC Fast-Forward' do
     it 'advances RTC quickly when loaded save is older than current time' do
-      # Reference: diffSeconds counter advances RTC at faster rate
-      pending 'RTC fast-forward for loaded saves'
-      fail
+      mbc3.set_input(:ce_32k, 0)
+      write_rtc_time(mbc3, 1, 20)
+
+      saved_time = 1
+      write_backup_word(mbc3, 0, 10) # saved timestamp low (older)
+      write_backup_word(mbc3, 1, 0)
+      write_backup_word(mbc3, 2, saved_time & 0xFFFF)
+      write_backup_word(mbc3, 3, 0)
+      write_backup_word(mbc3, 4, 0)
+
+      latch_rtc(mbc3)
+      initial_seconds = mbc3.get_output(:rtc_seconds)
+      8.times { clock_cycle(mbc3) }
+      latch_rtc(mbc3)
+      expect(mbc3.get_output(:rtc_seconds)).to be > initial_seconds
     end
 
     it 'uses fast-count mechanism to catch up' do
-      # Reference: diffSeconds_fast_count logic
-      pending 'RTC diffSeconds fast-count mechanism'
-      fail
+      mbc3.set_input(:ce_32k, 0)
+      write_rtc_time(mbc3, 1, 6)
+
+      write_backup_word(mbc3, 0, 0)
+      write_backup_word(mbc3, 1, 0)
+      write_backup_word(mbc3, 2, 0)
+      write_backup_word(mbc3, 3, 0)
+      write_backup_word(mbc3, 4, 0)
+
+      6.times { clock_cycle(mbc3) }
+      latch_rtc(mbc3)
+      expect(mbc3.get_output(:rtc_seconds)).to be > 0
     end
   end
 
   describe 'RTC Register Read' do
     it 'returns latched seconds via rtc_return mux' do
-      # Reference: rtc_return multiplexes latched RTC values
-      pending 'RTC register-addressed read via rtc_return'
-      fail
+      write_register(mbc3, 0x0000, 0x0A)
+      write_register(mbc3, 0x4000, 0x08)
+      write_register(mbc3, 0xA000, 0x2D)
+      latch_rtc(mbc3)
+      expect(mbc3.get_output(:cram_do)).to eq(0x2D)
     end
 
     it 'returns proper control byte for day high register (0x0C)' do
-      # Reference: Control byte includes halt, overflow, and day MSB
-      pending 'RTC control byte read'
-      fail
+      write_register(mbc3, 0x0000, 0x0A)
+      write_register(mbc3, 0x4000, 0x0B)
+      write_register(mbc3, 0xA000, 0x00)
+      write_register(mbc3, 0x4000, 0x0C)
+      write_register(mbc3, 0xA000, 0xC1)
+      latch_rtc(mbc3)
+      expect(mbc3.get_output(:cram_do)).to eq(0xC1)
     end
   end
 
   describe 'Data Output Masking' do
     it 'returns 0xFF for disabled RAM reads' do
-      # Reference: cram_do = ram_enabled ? cram_di : 8'hFF
-      pending 'Return 0xFF when RAM is disabled'
-      fail
+      mbc3.set_input(:cram_di, 0x5A)
+      mbc3.set_input(:cpu_addr, 0xA000)
+      mbc3.propagate
+      expect(mbc3.get_output(:cram_do)).to eq(0xFF)
     end
 
     it 'returns RTC register value when in RTC mode' do
-      # Reference: cram_do_r = rtc_return when in RTC mode
-      pending 'Return RTC register in RTC mode reads'
-      fail
+      write_register(mbc3, 0x0000, 0x0A)
+      write_register(mbc3, 0x4000, 0x08)
+      write_register(mbc3, 0xA000, 0x21)
+      latch_rtc(mbc3)
+      expect(mbc3.get_output(:cram_do)).to eq(0x21)
     end
   end
 
   describe 'Cart Output Enable' do
     it 'has cart_oe output for bus control' do
-      # Reference: cart_oe output for tristate bus arbitration
-      pending 'cart_oe output for bus control'
-      fail
+      output_names = RHDL::Examples::GameBoy::MBC3._port_defs.select { |p| p[:direction] == :out }.map { |p| p[:name] }
+      expect(output_names).to include(:cart_oe)
     end
 
     it 'asserts cart_oe during valid read cycles' do
-      # Reference: cart_oe = cart_rd AND (ROM access OR (RAM access AND enabled))
-      pending 'cart_oe assertion during reads'
-      fail
+      mbc3.set_input(:cpu_addr, 0x1234) # ROM window
+      mbc3.set_input(:cpu_rd, 1)
+      mbc3.propagate
+      expect(mbc3.get_output(:cart_oe)).to eq(1)
+
+      mbc3.set_input(:cpu_addr, 0xA000) # CRAM window, disabled
+      mbc3.propagate
+      expect(mbc3.get_output(:cart_oe)).to eq(0)
+
+      write_register(mbc3, 0x0000, 0x0A) # enable RAM
+      mbc3.set_input(:cpu_addr, 0xA000)
+      mbc3.set_input(:cpu_rd, 1)
+      mbc3.propagate
+      expect(mbc3.get_output(:cart_oe)).to eq(1)
     end
   end
 
   describe 'Savestate Support' do
     it 'has savestate_load input' do
-      # Reference: savestate_load for MiSTer save/load
-      pending 'Savestate load input'
-      fail
+      input_names = RHDL::Examples::GameBoy::MBC3._port_defs.select { |p| p[:direction] == :in }.map { |p| p[:name] }
+      expect(input_names).to include(:savestate_load)
     end
 
     it 'has savestate_data input for state restore' do
-      # Reference: savestate_data[16] input
-      pending 'Savestate data input'
-      fail
+      input_names = RHDL::Examples::GameBoy::MBC3._port_defs.select { |p| p[:direction] == :in }.map { |p| p[:name] }
+      expect(input_names).to include(:savestate_data)
     end
 
     it 'has savestate_back output for state save' do
-      # Reference: savestate_back[16] output
-      pending 'Savestate back output'
-      fail
+      # Load a serialized state and confirm output serialization matches.
+      mbc3.set_input(:savestate_data, 0xC634) # ram_en=1, mode=1, ram_bank=3, rom_bank=0x34
+      mbc3.set_input(:savestate_load, 1)
+      clock_cycle(mbc3)
+      mbc3.set_input(:savestate_load, 0)
+      clock_cycle(mbc3)
+
+      expect(mbc3.get_output(:rom_bank)).to eq(0x34)
+      expect(mbc3.get_output(:rtc_mode)).to eq(1)
+      expect(mbc3.get_output(:savestate_back)).to eq(0xC634)
     end
   end
 
   describe 'Multi-Mapper Enable' do
     it 'has enable input for multi-mapper systems' do
-      # Reference: enable input for bus arbitration in multi-mapper designs
-      pending 'Enable input for multi-mapper support'
-      fail
+      input_names = RHDL::Examples::GameBoy::MBC3._port_defs.select { |p| p[:direction] == :in }.map { |p| p[:name] }
+      expect(input_names).to include(:enable)
     end
 
     it 'ignores operations when enable=0' do
-      # Reference: Mapper only responds when enabled
-      pending 'Ignore operations when disabled'
-      fail
+      write_register(mbc3, 0x2000, 0x22)
+      expect(mbc3.get_output(:rom_bank)).to eq(0x22)
+
+      mbc3.set_input(:enable, 0)
+      clock_cycle(mbc3)
+      expect(mbc3.get_output(:rom_bank)).to eq(1)
+
+      write_register(mbc3, 0x2000, 0x55)
+      expect(mbc3.get_output(:rom_bank)).to eq(1)
+
+      mbc3.set_input(:enable, 1)
+      clock_cycle(mbc3)
+      write_register(mbc3, 0x2000, 0x33)
+      expect(mbc3.get_output(:rom_bank)).to eq(0x33)
     end
   end
 end

@@ -185,7 +185,8 @@ module RHDL
           @last_key = nil
           @last_key_time = nil
           @pressed_keys = {}
-          @key_hold_seconds = 0.08
+          # Hold virtual buttons long enough to survive title/story polling loops.
+          @key_hold_seconds = 0.25
 
           # Keyboard mode
           @keyboard_mode = :normal
@@ -364,17 +365,16 @@ module RHDL
 
           # Advance in chunks until at least one complete LCD frame is produced.
           # This avoids sampling partially updated framebuffers when cadence drifts.
+          # Bound total work to one frame worth of cycles so LCD-off periods do not
+          # overshoot by millions of cycles per UI tick.
           chunk = [@cycles_per_frame / 8, 1000].max
-          max_chunks = 256
-          chunks = 0
+          remaining = @cycles_per_frame
 
-          while @runner.frame_count == start_frame && chunks < max_chunks
-            @runner.run_steps(chunk)
-            chunks += 1
+          while @runner.frame_count == start_frame && remaining > 0
+            run = [chunk, remaining].min
+            @runner.run_steps(run)
+            remaining -= run
           end
-
-          # Fallback for cores that temporarily stop frame signaling.
-          @runner.run_steps(@cycles_per_frame) if chunks >= max_chunks
         end
 
         def update_terminal_size

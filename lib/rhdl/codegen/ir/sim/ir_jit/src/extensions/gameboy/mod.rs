@@ -434,8 +434,9 @@ impl GameBoyExtension {
     /// Run batched Game Boy cycles using JIT-compiled evaluate/tick
     pub fn run_gb_cycles(&mut self, core: &mut CoreSimulator, n: usize) -> GbCycleResult {
         let mut frames_completed: u32 = 0;
+        let mut cycles_run: usize = 0;
 
-        for _ in 0..n {
+        while cycles_run < n {
             // Clock falling edge
             core.poke_by_idx(self.clk_sys_idx, 0);
             core.evaluate();
@@ -613,12 +614,26 @@ impl GameBoyExtension {
                 frames_completed += 1;
             }
 
+            // Count effective CPU cycles, not raw system clocks.
+            let cpu_enable = if self.cpu_clken_idx != usize::MAX {
+                core.peek_by_idx(self.cpu_clken_idx)
+            } else if self.sm83_clken_idx != usize::MAX {
+                core.peek_by_idx(self.sm83_clken_idx)
+            } else if self.speed_ctrl_ce_idx != usize::MAX {
+                core.peek_by_idx(self.speed_ctrl_ce_idx)
+            } else {
+                1
+            };
+            if cpu_enable != 0 {
+                cycles_run += 1;
+            }
+
             self.lcd_state.prev_clkena = lcd_clkena as u32;
             self.lcd_state.prev_vsync = lcd_vsync as u32;
         }
 
         GbCycleResult {
-            cycles_run: n,
+            cycles_run,
             frames_completed,
         }
     }

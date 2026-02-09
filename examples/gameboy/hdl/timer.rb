@@ -60,10 +60,17 @@ module RHDL
 
     # Timer tick detection
     wire :timer_tick
+    wire :timer_tick_effective
     wire :timer_enabled
+    wire :timer_input_old
+    wire :timer_input_new_tac
+    wire :timer_glitch_tick
 
     # write_sig to DIV resets internal counter
     wire :reset_div
+    wire :tac_write
+    wire :selected_clk_old
+    wire :selected_clk_new
 
     # Combinational logic
     behavior do
@@ -72,6 +79,24 @@ module RHDL
 
       # Reset divider on write to DIV (address 0)
       reset_div <= cpu_sel & cpu_wr & (cpu_addr == lit(0, width: 2))
+      tac_write <= cpu_sel & cpu_wr & (cpu_addr == lit(3, width: 2))
+
+      selected_clk_old <= case_select(tac[1..0], {
+        0 => clk_div[9],  # 4096 Hz
+        1 => clk_div[3],  # 262144 Hz
+        2 => clk_div[5],  # 65536 Hz
+        3 => clk_div[7]   # 16384 Hz
+      }, default: lit(0, width: 1))
+
+      selected_clk_new <= case_select(cpu_di[1..0], {
+        0 => clk_div[9],
+        1 => clk_div[3],
+        2 => clk_div[5],
+        3 => clk_div[7]
+      }, default: lit(0, width: 1))
+
+      timer_input_old <= timer_enabled & selected_clk_old
+      timer_input_new_tac <= cpu_di[2] & selected_clk_new
 
       # Timer tick edge detection based on TAC frequency select
       # Timer increments when the selected bit transitions from 1 to 0
@@ -82,6 +107,12 @@ module RHDL
           2 => (~clk_div[5] & clk_div_1_5),  # 65536 Hz
           3 => (~clk_div[7] & clk_div_1_7)   # 16384 Hz
         }, default: lit(0, width: 1))
+
+      # DMG quirk: timer input is effectively a muxed clock gate. Writing DIV
+      # or TAC can create a falling edge on this input and increment TIMA.
+      timer_glitch_tick <= (reset_div & timer_input_old) |
+                           (tac_write & timer_input_old & ~timer_input_new_tac)
+      timer_tick_effective <= timer_tick | timer_glitch_tick
 
       # CPU read data mux
       cpu_do <= case_select(cpu_addr, {
@@ -136,7 +167,7 @@ module RHDL
       # TIMA overflow flag - combined logic:
       # Set when timer_tick AND tima==0xFF, else clear each ce cycle
       tima_overflow <= mux(ce,
-                           mux(timer_tick & (tima == lit(0xFF, width: 8)),
+                           mux(timer_tick_effective & (tima == lit(0xFF, width: 8)),
                                lit(1, width: 1),
                                lit(0, width: 1)),
                            tima_overflow)
@@ -167,11 +198,11 @@ module RHDL
       tima <= mux(ce,
                   mux(tima_overflow_4 & cpu_sel & cpu_wr & (cpu_addr == lit(2, width: 2)),
                       cpu_di,                                         # TMA write during overflow_4
-                      mux(cpu_sel & cpu_wr & (cpu_addr == lit(1, width: 2)) & ~tima_overflow_4,
-                          cpu_di,                                     # TIMA write
-                          mux(tima_overflow_3,
-                              tma,                                    # Reload from TMA
-                              mux(timer_tick,
+                          mux(cpu_sel & cpu_wr & (cpu_addr == lit(1, width: 2)) & ~tima_overflow_4,
+                              cpu_di,                                     # TIMA write
+                              mux(tima_overflow_3,
+                                  tma,                                    # Reload from TMA
+                              mux(timer_tick_effective,
                                   tima + lit(1, width: 8),            # Increment
                                   tima)))),                           # Keep same
                   tima)                                               # Not ce: keep same

@@ -325,19 +325,89 @@ RSpec.describe 'GameBoy Timer' do
       end
 
       it 'resetting DIV affects TIMA tick timing (falling edge quirk)' do
-        # Reference: Writing to DIV resets internal counter, which can cause
-        # an immediate TIMA increment if the selected bit was 1
-        pending 'DIV reset affecting TIMA tick timing'
-        fail
+        timer = RHDL::Examples::GameBoy::Timer.new
+        {
+          reset: 0, clk_sys: 0, ce: 1,
+          cpu_sel: 0, cpu_addr: 0, cpu_wr: 0, cpu_di: 0
+        }.each { |k, v| timer.set_input(k, v) }
+        timer.propagate
+
+        timer_clock = lambda do
+          timer.set_input(:clk_sys, 0)
+          timer.propagate
+          timer.set_input(:clk_sys, 1)
+          timer.propagate
+        end
+        timer_write = lambda do |addr, value|
+          timer.set_input(:cpu_sel, 1)
+          timer.set_input(:cpu_addr, addr)
+          timer.set_input(:cpu_di, value)
+          timer.set_input(:cpu_wr, 1)
+          timer_clock.call
+          timer.set_input(:cpu_wr, 0)
+          timer.set_input(:cpu_sel, 0)
+        end
+
+        timer.set_input(:reset, 1)
+        timer_clock.call
+        timer.set_input(:reset, 0)
+        timer_clock.call
+
+        timer_write.call(1, 0x00) # TIMA
+        timer_write.call(3, 0x05) # TAC: enable + clk_div[3]
+
+        512.times do
+          break if (timer.read_reg(:clk_div) & 0x08) != 0
+          timer_clock.call
+        end
+        expect((timer.read_reg(:clk_div) & 0x08) != 0).to eq(true)
+
+        tima_before = timer.read_reg(:tima)
+        timer_write.call(0, 0x00) # DIV reset
+
+        expect(timer.read_reg(:tima)).to eq((tima_before + 1) & 0xFF)
       end
     end
 
     describe 'TAC Glitch (Falling Edge Detection)' do
       it 'changing TAC frequency select can cause spurious TIMA increment' do
-        # Reference: Timer uses falling edge detection on clock divider bits
-        # Changing TAC can cause a spurious tick if old bit was 1 and new bit is 0
-        pending 'TAC change causing spurious TIMA increment'
-        fail
+        timer = RHDL::Examples::GameBoy::Timer.new
+        {
+          reset: 0, clk_sys: 0, ce: 1,
+          cpu_sel: 0, cpu_addr: 0, cpu_wr: 0, cpu_di: 0
+        }.each { |k, v| timer.set_input(k, v) }
+        timer.propagate
+
+        timer_clock = lambda do
+          timer.set_input(:clk_sys, 0)
+          timer.propagate
+          timer.set_input(:clk_sys, 1)
+          timer.propagate
+        end
+        timer_write = lambda do |addr, value|
+          timer.set_input(:cpu_sel, 1)
+          timer.set_input(:cpu_addr, addr)
+          timer.set_input(:cpu_di, value)
+          timer.set_input(:cpu_wr, 1)
+          timer_clock.call
+          timer.set_input(:cpu_wr, 0)
+          timer.set_input(:cpu_sel, 0)
+        end
+
+        timer.set_input(:reset, 1)
+        timer_clock.call
+        timer.set_input(:reset, 0)
+        timer_clock.call
+
+        timer.write_reg(:clk_div, 0x008)      # bit3=1, bit5=0
+        timer.write_reg(:clk_div_1_3, 1)
+        timer.write_reg(:clk_div_1_5, 0)
+        timer.write_reg(:tima, 0x00)
+        timer.write_reg(:tac, 0x05)           # enable + freq select 01 (bit3)
+
+        timer_write.call(3, 0x06)             # enable + freq select 10 (bit5)
+
+        expect(timer.read_reg(:tima)).to eq(1)
       end
     end
   end

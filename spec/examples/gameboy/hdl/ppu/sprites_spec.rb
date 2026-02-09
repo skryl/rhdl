@@ -80,19 +80,14 @@ RSpec.describe RHDL::Examples::GameBoy::Sprites do
 
   describe 'reset behavior' do
     it 'resets sprite search state on oam_eval_reset' do
-      # Start OAM evaluation
-      sprites.set_input(:oam_eval, 1)
-      clock_cycles(sprites, 10)
-
-      # Reset OAM evaluation
       sprites.set_input(:oam_eval_reset, 1)
       clock_cycle(sprites)
 
-      sprites.set_input(:oam_eval_reset, 0)
-      clock_cycle(sprites)
+      expect(sprites.signal_val(:search_idx)).to eq(0)
+      expect(sprites.signal_val(:sprite_cnt)).to eq(0)
+      expect(sprites.signal_val(:sprite_x0)).to eq(0xFF)
 
-      # Render index should be reset
-      expect(sprites.get_output(:sprite_index)).to eq(0)
+      sprites.set_input(:oam_eval_reset, 0)
     end
   end
 
@@ -149,26 +144,32 @@ RSpec.describe RHDL::Examples::GameBoy::Sprites do
     end
 
     it 'increments render index when sprite fetch completes' do
+      sprites.write_reg(:sprite_cnt, 1)
+      sprites.write_reg(:sprite_x0, 5)
+      sprites.set_input(:h_cnt, 5)
+      sprites.set_input(:oam_fetch, 1)
+      sprites.propagate
+      expect(sprites.get_output(:sprite_fetch)).to eq(1)
+
       sprites.set_input(:oam_eval_reset, 0)
       sprites.set_input(:sprite_fetch_done, 1)
       clock_cycle(sprites)
+      sprites.set_input(:sprite_fetch_done, 0)
+      clock_cycle(sprites)
 
-      expect(sprites.get_output(:sprite_index)).to eq(1)
+      expect(sprites.signal_val(:sprite_x0)).to eq(0xFF)
     end
 
     it 'resets render index on oam_eval_reset' do
-      # Advance render index
-      sprites.set_input(:sprite_fetch_done, 1)
-      clock_cycles(sprites, 5)
+      sprites.write_reg(:sprite_cnt, 2)
+      sprites.write_reg(:sprite_x0, 12)
 
-      expect(sprites.get_output(:sprite_index)).to eq(5)
-
-      # Reset
-      sprites.set_input(:sprite_fetch_done, 0)
       sprites.set_input(:oam_eval_reset, 1)
       clock_cycle(sprites)
-
-      expect(sprites.get_output(:sprite_index)).to eq(0)
+      sprites.set_input(:oam_eval_reset, 0)
+      expect(sprites.get_output(:sprite_index)).to eq(9)
+      expect(sprites.signal_val(:sprite_cnt)).to eq(0)
+      expect(sprites.signal_val(:sprite_x0)).to eq(0xFF)
     end
   end
 
@@ -231,18 +232,18 @@ RSpec.describe RHDL::Examples::GameBoy::Sprites do
 
   describe 'sprite attributes' do
     it 'provides sprite index during fetch' do
-      sprites.set_input(:oam_eval_reset, 1)
-      clock_cycle(sprites)
-      sprites.set_input(:oam_eval_reset, 0)
-
+      sprites.write_reg(:sprite_cnt, 2)
+      sprites.write_reg(:sprite_x0, 12)
+      sprites.write_reg(:sprite_x1, 12)
+      sprites.set_input(:h_cnt, 12)
+      sprites.set_input(:oam_fetch, 1)
+      sprites.propagate
+      expect(sprites.get_output(:sprite_fetch)).to eq(1)
       expect(sprites.get_output(:sprite_index)).to eq(0)
 
-      sprites.set_input(:sprite_fetch_done, 1)
-      clock_cycle(sprites)
+      sprites.write_reg(:sprite_x0, 0xFF)
+      sprites.propagate
       expect(sprites.get_output(:sprite_index)).to eq(1)
-
-      clock_cycle(sprites)
-      expect(sprites.get_output(:sprite_index)).to eq(2)
     end
   end
 

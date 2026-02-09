@@ -417,7 +417,8 @@ module RHDL
       # RETI (D9), JP nn (C3), LD A,(a16) (FA), LD (a16),A (EA)
       # Also: CB rotate/set/res with (HL) operand (cb_ir[2:0] = 6, cb_ir[7:6] != 01)
       is_push <= (ir[3..0] == lit(5, width: 4)) & (ir[7..6] == lit(3, width: 2))
-      is_rst <= (ir[3..0] == lit(7, width: 4)) & (ir[7..6] == lit(3, width: 2))
+      # RST opcodes are x7/xF (bits [2:0] are always 111, bit 3 varies).
+      is_rst <= (ir[2..0] == lit(7, width: 3)) & (ir[7..6] == lit(3, width: 2))
 
       # CB (HL) instruction detection - cb_ir is available from M2/T2
       # cb_ir[2:0] = 6 means (HL) operand
