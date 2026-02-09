@@ -66,6 +66,18 @@ python3 -m http.server 8080
 
 Open [http://localhost:8080](http://localhost:8080).
 
+## Deploy To GitHub Pages
+
+- A workflow is included at `.github/workflows/pages.yml`.
+- It builds all web WASM backends (`interpreter`, `jit`, `compiler AOT`) via `web/scripts/build_wasm.sh`.
+- It publishes a static artifact containing:
+  - `web/index.html`
+  - `web/app/`
+  - `web/assets/`
+- Enable Pages in repository settings:
+  - `Settings -> Pages -> Source: GitHub Actions`
+- Deploy URL will be exposed in the workflow run after the `deploy` job completes.
+
 ## Run Tests
 
 Run all web unit tests (no build step required):

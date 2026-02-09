@@ -1,0 +1,77 @@
+name: Deploy Web Simulator (GitHub Pages)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - '.github/workflows/pages.yml'
+      - 'web/**'
+      - 'lib/rhdl/codegen/ir/sim/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            lib/rhdl/codegen/ir/sim/ir_interpreter -> target
+            lib/rhdl/codegen/ir/sim/ir_jit -> target
+            lib/rhdl/codegen/ir/sim/ir_compiler -> target
+
+      - name: Build WASM backends
+        run: bash ./web/scripts/build_wasm.sh
+
+      - name: Verify WASM artifacts
+        run: |
+          set -euo pipefail
+          test -f web/assets/pkg/ir_interpreter.wasm
+          test -f web/assets/pkg/ir_jit.wasm
+          test -f web/assets/pkg/ir_compiler.wasm
+
+      - name: Assemble Pages artifact
+        run: |
+          set -euo pipefail
+          rm -rf web-dist
+          mkdir -p web-dist
+          rsync -a web/index.html web-dist/
+          rsync -a web/app web-dist/
+          rsync -a web/assets web-dist/
+          touch web-dist/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web-dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
