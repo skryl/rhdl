@@ -1,0 +1,1 @@
+export const COMPONENT_SIGNAL_PREVIEW_LIMIT = 180;

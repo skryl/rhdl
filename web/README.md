@@ -2,6 +2,8 @@
 
 This app runs RHDL IR simulator backends in the browser via WebAssembly and renders live VCD waveforms with p5.js.
 
+Architecture reference: `web/docs/architecture.md`.
+
 ## Features
 
 - Load RHDL-generated IR JSON
