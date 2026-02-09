@@ -44,3 +44,12 @@ lib/rhdl/codegen/ir/sim/ir_compiler/*.json
 # Verilator build artifacts
 .verilator_build/
 .verilator_build_*/
+
+# Web simulator generated artifacts
+web/assets/fixtures/*
+
+# Web test dependencies
+web/node_modules/
+
+# Web wasm build artifacts
+web/assets/pkg/*

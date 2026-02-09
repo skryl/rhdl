@@ -1,0 +1,12 @@
+{
+  "name": "rhdl-web-simulator",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:unit": "node --test $(find test -type f -name '*.test.mjs' | sort)",
+    "test:integration": "node --test test/integration/*.test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.52.0"
+  }
+}

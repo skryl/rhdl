@@ -108,6 +108,26 @@ pub unsafe extern "C" fn apple2_interp_sim_read_ram(
     0
 }
 
+/// Read mapped Apple II memory (full 64KB CPU-visible address space)
+/// Returns bytes read into provided buffer
+#[no_mangle]
+pub unsafe extern "C" fn apple2_interp_sim_read_memory(
+    ctx: *const IrSimContext,
+    start: usize,
+    out_data: *mut u8,
+    len: usize,
+) -> usize {
+    if ctx.is_null() || out_data.is_null() {
+        return 0;
+    }
+    let ctx = &*ctx;
+    if let Some(ref apple2) = ctx.apple2 {
+        let out = slice::from_raw_parts_mut(out_data, len);
+        return apple2.read_memory(start, out);
+    }
+    0
+}
+
 /// Write RAM for Apple II
 #[no_mangle]
 pub unsafe extern "C" fn apple2_interp_sim_write_ram(

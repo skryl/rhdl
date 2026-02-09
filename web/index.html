@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RHDL IR WASM Simulator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+rhdl-app-shell {
+  display: block;
+  min-height: 100vh;
+}
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.11.1/lib/p5.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/redux@4.2.1/dist/redux.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js"></script>
+  </head>
+  <body>
+    <rhdl-app-shell id="appShell" class="app-shell">
+      <aside id="controlsPanel" class="panel controls">
+        <h1>RHDL Simulator</h1>
+        <p class="subtitle">
+          <a href="https://github.com/skryl/rhdl" target="_blank" rel="noopener noreferrer">github.com/skryl/rhdl</a>
+          &middot;
+          <a href="https://twitter.com/ssskryl" target="_blank" rel="noopener noreferrer">@ssskryl</a>
+        </p>
+
+        <section>
+          <h2>Runners</h2>
+          <div class="row">
+            <select id="runnerSelect">
+              <option value="generic">Generic IR Runner</option>
+              <option value="cpu">CPU (lib/rhdl/hdl/cpu)</option>
+              <option value="apple2" selected>Apple II System Runner</option>
+            </select>
+            <button id="loadRunnerBtn">Load</button>
+          </div>
+          <p id="runnerStatus" class="status">Runner not initialized</p>
+        </section>
+
+        <section>
+          <h2>Backend</h2>
+          <div class="row">
+            <select id="backendSelect">
+              <option value="interpreter">Interpreter (WASM)</option>
+              <option value="jit">JIT (WASM)</option>
+              <option value="compiler" selected>Compiler AOT (WASM)</option>
+            </select>
+          </div>
+          <p id="backendStatus" class="status">Backend: compiler</p>
+        </section>
+
+        <section>
+          <h2>Theme</h2>
+          <div class="row">
+            <select id="themeSelect">
+              <option value="shenzhen" selected>Shenzhen I/O</option>
+              <option value="original">Original</option>
+            </select>
+          </div>
+        </section>
+
+        <section id="irSourceSection">
+          <h2>IR Source</h2>
+          <div class="row">
+            <select id="sampleSelect">
+              <option value="./assets/fixtures/apple2/ir/apple2.json">Apple II (examples/apple2/hdl/apple2)</option>
+              <option value="./assets/fixtures/cpu/ir/cpu_lib_hdl.json">CPU (lib/rhdl/hdl/cpu)</option>
+            </select>
+            <button id="loadSampleBtn">Load Sample</button>
+            <input id="irFileInput" type="file" accept=".json" />
+          </div>
+          <textarea id="irJson" spellcheck="false" placeholder="Paste RHDL IR JSON here"></textarea>
+          <button id="initBtn" class="full">Initialize Simulator</button>
+        </section>
+
+        <section>
+          <h2>Trace</h2>
+          <div class="row wrap">
+            <button id="traceStartBtn">Start</button>
+            <button id="traceStopBtn">Stop</button>
+            <button id="traceClearBtn">Clear</button>
+            <button id="downloadVcdBtn">Save VCD</button>
+          </div>
+          <p id="traceStatus" class="status">Trace disabled</p>
+        </section>
+
+        <section>
+          <h2>Simulation</h2>
+          <div class="row">
+            <label>Clock</label>
+            <select id="clockSignal"></select>
+          </div>
+          <div class="row">
+            <label>Step</label>
+            <input id="stepTicks" type="number" min="1" value="1" />
+          </div>
+          <div class="row">
+            <label>Cycles/Frame</label>
+            <input id="runBatch" type="number" min="1" value="20000" />
+          </div>
+          <div class="row">
+            <label>UI Every</label>
+            <input id="uiUpdateCycles" type="number" min="1" value="20000" />
+          </div>
+          <div class="row wrap">
+            <button id="runBtn">Run</button>
+            <button id="pauseBtn">Pause</button>
+            <button id="stepBtn">Step</button>
+            <button id="resetBtn">Reset</button>
+          </div>
+          <p id="simStatus" class="status">WASM not initialized</p>
+        </section>
+
+      </aside>
+
+      <main class="panel viewer">
+        <div class="viewer-header">
+          <nav class="tabs" aria-label="Runner views">
+            <button class="tab-btn active" data-tab="ioTab" aria-selected="true">1. I/O</button>
+            <button class="tab-btn" data-tab="vcdTab" aria-selected="false">2. VCD + Signals</button>
+            <button class="tab-btn" data-tab="memoryTab" aria-selected="false">3. Memory</button>
+            <button class="tab-btn" data-tab="componentTab" aria-selected="false">4. Components</button>
+            <button class="tab-btn" data-tab="componentGraphTab" aria-selected="false">5. Schematic</button>
+          </nav>
+          <div class="viewer-toolbar">
+            <button
+              id="sidebarToggleBtn"
+              class="toolbar-icon-btn"
+              type="button"
+              aria-expanded="true"
+              aria-label="Hide Config"
+              title="Hide Config"
+            >&#9881;</button>
+            <button
+              id="terminalToggleBtn"
+              class="toolbar-icon-btn"
+              type="button"
+              aria-expanded="false"
+              aria-controls="terminalPanel"
+              aria-label="Show Terminal"
+              title="Show Terminal"
+            >&gt;_</button>
+          </div>
+        </div>
+
+        <section id="ioTab" class="tab-panel active">
+          <div class="io-layout">
+            <section class="subpanel">
+              <h2>Display</h2>
+              <div class="row wrap io-toggle-row">
+                <label class="toggle-pill"><input id="toggleHires" type="checkbox" /> HIRES</label>
+                <label class="toggle-pill"><input id="toggleColor" type="checkbox" /> COLOR</label>
+                <label class="toggle-pill"><input id="toggleSound" type="checkbox" /> SOUND</label>
+              </div>
+              <pre id="apple2TextScreen" tabindex="0" class="screen-output">Load the Apple II runner to use this tab.</pre>
+              <canvas id="apple2HiresCanvas" class="hires-canvas" width="280" height="192" hidden></canvas>
+            </section>
+
+            <section class="subpanel io-event-log">
+              <h2>Event Log</h2>
+              <pre id="eventLog"></pre>
+            </section>
+
+            <section class="subpanel">
+              <h2>Runner Debug</h2>
+              <rhdl-apple2-debug id="apple2DebugBody"></rhdl-apple2-debug>
+              <p id="apple2SpeakerToggles" class="status">Speaker toggles: -</p>
+            </section>
+
+            <section class="subpanel">
+              <h2>Keyboard</h2>
+              <div class="row">
+                <input id="apple2KeyInput" type="text" maxlength="1" placeholder="key" />
+                <button id="apple2SendKeyBtn">Send</button>
+                <button id="apple2ClearKeysBtn">Clear</button>
+              </div>
+              <p id="apple2KeyStatus" class="status">Keyboard queue: 0</p>
+              <p class="status">Click display and type keys directly for quick input.</p>
+            </section>
+          </div>
+        </section>
+
+        <section id="vcdTab" class="tab-panel">
+          <section class="subpanel">
+            <h2>Trace View</h2>
+            <div id="canvasWrap"></div>
+          </section>
+
+          <div class="vcd-control-grid">
+            <section class="subpanel">
+              <h2>Watches</h2>
+              <div class="row">
+                <input id="watchSignal" type="text" placeholder="signal name" />
+                <button id="addWatchBtn">Add</button>
+              </div>
+              <rhdl-watch-list id="watchList" class="pill-list"></rhdl-watch-list>
+            </section>
+
+            <section class="subpanel">
+              <h2>Breakpoints</h2>
+              <div class="row">
+                <input id="bpSignal" type="text" placeholder="signal" />
+                <input id="bpValue" type="text" placeholder="value (e.g. 0x1)" />
+              </div>
+              <div class="row">
+                <button id="addBpBtn">Add</button>
+                <button id="clearBpBtn">Clear</button>
+              </div>
+              <rhdl-breakpoint-list id="bpList" class="pill-list"></rhdl-breakpoint-list>
+            </section>
+          </div>
+
+          <section class="subpanel">
+            <h2>Watch Values</h2>
+            <rhdl-watch-table id="watchTableBody"></rhdl-watch-table>
+          </section>
+        </section>
+
+        <section id="memoryTab" class="tab-panel">
+          <section class="subpanel">
+            <h2>Memory Browser</h2>
+            <div class="row wrap">
+              <label for="memoryStart">Start</label>
+              <input id="memoryStart" type="text" value="0x0400" />
+              <label for="memoryLength">Length</label>
+              <input id="memoryLength" type="text" value="256" />
+              <button id="memoryRefreshBtn">Refresh</button>
+              <label class="toggle-pill memory-follow">
+                <input id="memoryFollowPc" type="checkbox" />
+                Follow PC
+              </label>
+            </div>
+            <div class="memory-split">
+              <rhdl-memory-view id="memoryDump">Load the Apple II runner to browse memory.</rhdl-memory-view>
+            </div>
+          </section>
+
+          <section class="subpanel">
+            <h2>Memory Dumps</h2>
+            <div class="row wrap">
+              <input id="memoryDumpFile" type="file" accept=".bin,.mem,.dat,.rhdlsnap,.snapshot,application/octet-stream,application/json" />
+              <label for="memoryDumpOffset">Offset</label>
+              <input id="memoryDumpOffset" type="text" value="0x0000" />
+              <button id="memoryDumpLoadBtn">Load Dump/Snapshot</button>
+              <button id="memoryDumpSaveBtn">Save Dump</button>
+              <button id="memorySnapshotSaveBtn">Download Snapshot</button>
+              <button id="memoryDumpLoadLastBtn">Load Last Saved</button>
+              <button id="loadKaratekaBtn">Load Karateka Dump</button>
+            </div>
+            <div class="row wrap">
+              <label for="memoryResetVector">Reset Vector</label>
+              <input id="memoryResetVector" type="text" placeholder="0xB82A or $B82A (optional)" />
+              <button id="memoryResetBtn">Reset (Vector)</button>
+            </div>
+            <p id="memoryDumpStatus" class="status"></p>
+          </section>
+
+          <section class="subpanel">
+            <h2>Direct Write</h2>
+            <div class="row">
+              <label for="memoryWriteAddr">Addr</label>
+              <input id="memoryWriteAddr" type="text" placeholder="0x0400" />
+              <label for="memoryWriteValue">Value</label>
+              <input id="memoryWriteValue" type="text" placeholder="0x41" />
+              <button id="memoryWriteBtn">Write</button>
+            </div>
+            <p id="memoryStatus" class="status"></p>
+          </section>
+        </section>
+
+        <section id="componentTab" class="tab-panel">
+          <div class="component-layout">
+            <div class="component-left">
+              <section class="subpanel component-tree-panel">
+                <h2>Component Explorer</h2>
+                <rhdl-component-tree id="componentTree" class="component-tree">Load IR to explore components.</rhdl-component-tree>
+              </section>
+
+              <section class="subpanel component-signal-panel">
+                <h2>Signals</h2>
+                <p id="componentSignalMeta" class="status"></p>
+                <div class="component-signal-scroll">
+                  <rhdl-component-signal-table id="componentSignalBody"></rhdl-component-signal-table>
+                </div>
+              </section>
+            </div>
+
+            <div class="component-right">
+              <section class="subpanel component-detail-panel">
+                <h2 id="componentTitle">Component Details</h2>
+                <p id="componentMeta" class="status"></p>
+                <rhdl-component-code-viewer id="componentCode" class="component-code-viewer"></rhdl-component-code-viewer>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <section id="componentGraphTab" class="tab-panel">
+          <div class="component-graph-layout">
+            <section class="subpanel component-visual-panel">
+              <h2 id="componentGraphTitle">Component Schematic</h2>
+              <p id="componentGraphMeta" class="status"></p>
+              <div class="row wrap component-graph-controls">
+                <button id="componentGraphTopBtn" type="button">Top</button>
+                <button id="componentGraphUpBtn" type="button">Up</button>
+                <span id="componentGraphFocusPath" class="status">Focus: top</span>
+              </div>
+              <div id="componentVisual" class="component-visual">Select a component to visualize.</div>
+            </section>
+
+            <section class="subpanel component-live-panel">
+              <h2>Live Signals</h2>
+              <rhdl-component-live-signals id="componentLiveSignals" class="component-live-signals">No live signals to display.</rhdl-component-live-signals>
+            </section>
+          </div>
+
+          <section class="subpanel component-connection-panel">
+            <h2>Wire & Port Connections</h2>
+            <p id="componentConnectionMeta" class="status">Select a component to inspect connections.</p>
+            <div class="component-connection-scroll">
+              <rhdl-component-connections id="componentConnectionBody"></rhdl-component-connections>
+            </div>
+          </section>
+        </section>
+
+        <section id="terminalPanel" class="terminal-panel" hidden>
+          <div class="terminal-panel-header">
+            <h2>Terminal</h2>
+            <p class="status">Use `help` to list available commands.</p>
+          </div>
+          <pre id="terminalOutput" class="terminal-output" aria-live="polite"></pre>
+          <div class="terminal-input-row">
+            <span class="terminal-prompt">$</span>
+            <input id="terminalInput" type="text" placeholder="Type a command..." spellcheck="false" autocomplete="off" />
+            <button id="terminalRunBtn" type="button">Run</button>
+          </div>
+        </section>
+      </main>
+    </rhdl-app-shell>
+
+    <script type="module" src="./app/main.mjs?v=20260207i"></script>
+  </body>
+</html>

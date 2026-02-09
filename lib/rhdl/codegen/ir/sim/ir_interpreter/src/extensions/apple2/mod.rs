@@ -97,6 +97,34 @@ impl Apple2Extension {
         &self.ram[start..end]
     }
 
+    /// Read a single byte from the Apple II CPU-visible address space.
+    #[inline(always)]
+    pub fn read_mapped_byte(&self, addr: usize) -> u8 {
+        let addr = addr & 0xFFFF;
+        if addr >= 0xD000 {
+            let rom_offset = addr - 0xD000;
+            if rom_offset < self.rom.len() {
+                self.rom[rom_offset]
+            } else {
+                0
+            }
+        } else if addr >= 0xC000 {
+            0
+        } else {
+            self.ram[addr]
+        }
+    }
+
+    /// Read from the full 64KB mapped address space into `out`.
+    pub fn read_memory(&self, start: usize, out: &mut [u8]) -> usize {
+        let mut addr = start & 0xFFFF;
+        for slot in out.iter_mut() {
+            *slot = self.read_mapped_byte(addr);
+            addr = (addr + 1) & 0xFFFF;
+        }
+        out.len()
+    }
+
     /// Write to RAM
     pub fn write_ram(&mut self, start: usize, data: &[u8]) {
         let end = (start + data.len()).min(self.ram.len());
@@ -117,18 +145,7 @@ impl Apple2Extension {
 
         // Provide RAM/ROM data
         let ram_addr = unsafe { *core.signals.get_unchecked(self.cpu_addr_idx) } as usize;
-        let ram_data = if ram_addr >= 0xD000 {
-            let rom_offset = ram_addr.wrapping_sub(0xD000);
-            if rom_offset < self.rom.len() {
-                unsafe { *self.rom.get_unchecked(rom_offset) }
-            } else {
-                0
-            }
-        } else if ram_addr >= 0xC000 {
-            0
-        } else {
-            unsafe { *self.ram.get_unchecked(ram_addr) }
-        };
+        let ram_data = self.read_mapped_byte(ram_addr);
         unsafe { *core.signals.get_unchecked_mut(self.ram_do_idx) = ram_data as u64; }
 
         // Rising edge

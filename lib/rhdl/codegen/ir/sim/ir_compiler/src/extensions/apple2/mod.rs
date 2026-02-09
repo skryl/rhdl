@@ -92,21 +92,13 @@ impl Apple2Extension {
             };
         }
 
-        let lib = core.compiled_lib.as_ref().unwrap();
+        #[cfg(feature = "aot")]
         unsafe {
-            type RunCpuCyclesFn = unsafe extern "C" fn(
-                *mut u64, usize, *mut u8, usize, *const u8, usize,
-                usize, u8, bool, *mut u64, *mut bool, *mut bool, *mut u32
-            ) -> usize;
-
-            let func: libloading::Symbol<RunCpuCyclesFn> = lib.get(b"run_cpu_cycles")
-                .expect("run_cpu_cycles function not found - is this an Apple II IR?");
-
             let mut text_dirty = false;
             let mut key_cleared = false;
             let mut speaker_toggles: u32 = 0;
 
-            let cycles_run = func(
+            let cycles_run = crate::aot_generated::run_cpu_cycles(
                 core.signals.as_mut_ptr(),
                 core.signals.len(),
                 self.ram.as_mut_ptr(),
@@ -127,6 +119,47 @@ impl Apple2Extension {
                 key_cleared,
                 cycles_run: cycles_run / self.sub_cycles,
                 speaker_toggles,
+            }
+        }
+
+        #[cfg(not(feature = "aot"))]
+        {
+            let lib = core.compiled_lib.as_ref().unwrap();
+            unsafe {
+                type RunCpuCyclesFn = unsafe extern "C" fn(
+                    *mut u64, usize, *mut u8, usize, *const u8, usize,
+                    usize, u8, bool, *mut u64, *mut bool, *mut bool, *mut u32
+                ) -> usize;
+
+                let func: libloading::Symbol<RunCpuCyclesFn> = lib.get(b"run_cpu_cycles")
+                    .expect("run_cpu_cycles function not found - is this an Apple II IR?");
+
+                let mut text_dirty = false;
+                let mut key_cleared = false;
+                let mut speaker_toggles: u32 = 0;
+
+                let cycles_run = func(
+                    core.signals.as_mut_ptr(),
+                    core.signals.len(),
+                    self.ram.as_mut_ptr(),
+                    self.ram.len(),
+                    self.rom.as_ptr(),
+                    self.rom.len(),
+                    n * self.sub_cycles,
+                    key_data,
+                    key_ready,
+                    &mut self.prev_speaker,
+                    &mut text_dirty,
+                    &mut key_cleared,
+                    &mut speaker_toggles,
+                );
+
+                Apple2BatchResult {
+                    text_dirty,
+                    key_cleared,
+                    cycles_run: cycles_run / self.sub_cycles,
+                    speaker_toggles,
+                }
             }
         }
     }

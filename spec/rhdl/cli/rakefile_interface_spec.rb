@@ -169,6 +169,13 @@ RSpec.describe 'Rakefile interface' do
     end
   end
 
+  describe 'web tasks' do
+    it 'web:generate invokes WebGenerateTask with no options' do
+      expect_task_class(RHDL::CLI::Tasks::WebGenerateTask, {})
+      Rake::Task['web:generate'].invoke
+    end
+  end
+
   describe 'task class loading' do
     it 'loads all task classes via load_cli_tasks' do
       # Verify the CLI module and all task classes are loadable
@@ -185,6 +192,7 @@ RSpec.describe 'Rakefile interface' do
       expect(defined?(RHDL::CLI::Tasks::MOS6502Task)).to eq('constant')
       expect(defined?(RHDL::CLI::Tasks::NativeTask)).to eq('constant')
       expect(defined?(RHDL::CLI::Tasks::TuiTask)).to eq('constant')
+      expect(defined?(RHDL::CLI::Tasks::WebGenerateTask)).to eq('constant')
     end
 
     it 'all task classes inherit from Task base class' do
@@ -201,7 +209,8 @@ RSpec.describe 'Rakefile interface' do
         RHDL::CLI::Tasks::GenerateTask,
         RHDL::CLI::Tasks::MOS6502Task,
         RHDL::CLI::Tasks::NativeTask,
-        RHDL::CLI::Tasks::TuiTask
+        RHDL::CLI::Tasks::TuiTask,
+        RHDL::CLI::Tasks::WebGenerateTask
       ]
 
       task_classes.each do |klass|
@@ -224,7 +233,8 @@ RSpec.describe 'Rakefile interface' do
         RHDL::CLI::Tasks::GenerateTask,
         RHDL::CLI::Tasks::MOS6502Task,
         RHDL::CLI::Tasks::NativeTask,
-        RHDL::CLI::Tasks::TuiTask
+        RHDL::CLI::Tasks::TuiTask,
+        RHDL::CLI::Tasks::WebGenerateTask
       ]
 
       task_classes.each do |klass|
@@ -255,6 +265,7 @@ RSpec.describe 'Rakefile interface' do
       bench bench:gates bench:ir
       benchmark benchmark:timing benchmark:quick
       native native:build native:clean native:check
+      web:generate
       setup setup:binstubs
     ].each do |task_name|
       it "defines #{task_name} task" do
