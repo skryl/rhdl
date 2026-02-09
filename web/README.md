@@ -34,26 +34,15 @@ Architecture reference: `web/docs/architecture.md`.
 
 ## Build WASM
 
-Use the helper script (builds backends for `wasm32-unknown-unknown` and copies artifacts into `web/assets/pkg/`):
+Build web artifacts (IR/source/schematic fixtures + memory fixtures + WASM backends):
 
 ```bash
-cd web
-./scripts/build_wasm.sh
+bundle exec rake web:generate
 ```
 
 `ir_compiler` is built as AOT for web:
-- `scripts/build_wasm.sh` runs `ir_compiler`'s `aot_codegen` over `assets/fixtures/apple2/apple2.json` by default.
+- `web:generate` runs `ir_compiler`'s `aot_codegen` over `assets/fixtures/apple2/ir/apple2.json` by default.
 - Then it builds `ir_compiler.wasm` with `--features aot`.
-- Override the IR source with `AOT_IR=/absolute/or/relative/path/to/ir.json ./scripts/build_wasm.sh`.
-
-Manual equivalent (interpreter):
-
-```bash
-cd lib/rhdl/codegen/ir/sim/ir_interpreter
-rustup target add wasm32-unknown-unknown
-cargo build --release --target wasm32-unknown-unknown
-cp target/wasm32-unknown-unknown/release/ir_interpreter.wasm ../../../../../../web/assets/pkg/ir_interpreter.wasm
-```
 
 ## Run Web UI
 
@@ -69,7 +58,7 @@ Open [http://localhost:8080](http://localhost:8080).
 ## Deploy To GitHub Pages
 
 - A workflow is included at `.github/workflows/pages.yml`.
-- It builds all web WASM backends (`interpreter`, `jit`, `compiler AOT`) via `web/scripts/build_wasm.sh`.
+- It builds all web artifacts via `bundle exec rake web:generate`.
 - It publishes a static artifact containing:
   - `web/index.html`
   - `web/app/`
@@ -103,18 +92,18 @@ node --test web/test/state/store.test.mjs
 
 ## Notes
 
-- The selected dropdown sample is loaded automatically on startup (default: `assets/fixtures/apple2/apple2.json`).
+- The selected dropdown sample is loaded automatically on startup (default: `assets/fixtures/apple2/ir/apple2.json`).
 - Backend selection is in the left control panel.
 - `interpreter` is the default browser backend.
 - `compiler` in the web UI is `ir_compiler` AOT (precompiled wasm), not runtime `rustc` compilation in-browser.
 - Apple II / CPU runner assets are included under `assets/fixtures/`:
-  - `assets/fixtures/apple2/apple2.json` (from `examples/apple2/hdl/apple2`)
-  - `assets/fixtures/apple2/apple2_sources.json` (`RHDL` + `Verilog` sources for Apple II components)
-  - `assets/fixtures/apple2/apple2_schematic.json` (precomputed schematic connectivity for Apple II)
-  - `assets/fixtures/cpu/cpu_sources.json` (`RHDL` + `Verilog` sources for CPU components)
-  - `assets/fixtures/cpu/cpu_schematic.json` (precomputed schematic connectivity for CPU)
-  - `assets/fixtures/apple2/appleiigo.rom` (12KB system ROM)
-  - `assets/fixtures/apple2/karateka_mem.bin` + `assets/fixtures/apple2/karateka_mem_meta.txt` for quick dump load
+  - `assets/fixtures/apple2/ir/apple2.json` (from `examples/apple2/hdl/apple2`)
+  - `assets/fixtures/apple2/ir/apple2_sources.json` (`RHDL` + `Verilog` sources for Apple II components)
+  - `assets/fixtures/apple2/ir/apple2_schematic.json` (precomputed schematic connectivity for Apple II)
+  - `assets/fixtures/cpu/ir/cpu_sources.json` (`RHDL` + `Verilog` sources for CPU components)
+  - `assets/fixtures/cpu/ir/cpu_schematic.json` (precomputed schematic connectivity for CPU)
+  - `assets/fixtures/apple2/memory/appleiigo.rom` (12KB system ROM)
+  - `assets/fixtures/apple2/memory/karateka_mem.bin` + `assets/fixtures/apple2/memory/karateka_mem_meta.txt` for quick dump load
 - Regenerate web artifacts (IR + source + schematic):
   - `bundle exec rake web:generate`
 - Memory tab supports:

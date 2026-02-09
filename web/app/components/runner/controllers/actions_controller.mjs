@@ -48,7 +48,7 @@ export function createRunnerActionsController({
   requireFn('fetchImpl', fetchImpl);
 
   async function loadSample(samplePathOverride = null) {
-    const samplePath = samplePathOverride || dom.sampleSelect?.value || './assets/fixtures/cpu/cpu_lib_hdl.json';
+    const samplePath = samplePathOverride || dom.sampleSelect?.value || './assets/fixtures/cpu/ir/cpu_lib_hdl.json';
     const sampleLabel = dom.sampleSelect?.selectedOptions?.[0]?.textContent?.trim() || samplePath;
     try {
       dom.irJson.value = await fetchTextAsset(samplePath, `sample ${samplePath}`, fetchImpl);
