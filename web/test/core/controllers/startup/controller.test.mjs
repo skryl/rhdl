@@ -62,9 +62,9 @@ function createHarness(overrides = {}) {
       }
     },
     updateIrSourceVisibility: () => calls.push(['runner.updateIrSourceVisibility']),
-    currentPreset: () => ({ id: 'apple2', usesManualIr: false }),
+    currentPreset: () => ({ id: 'apple2', usesManualIr: false, autoLoadOnBoot: true }),
     getActionsController: () => runnerActionsController,
-    loadPreset: async () => {},
+    loadPreset: async (options) => calls.push(['runner.loadPreset', options?.presetOverride?.id || null]),
     loadBundle: async () => ({ simJson: '{}', explorerJson: '{}', explorerMeta: null }),
     getPreset: (id) => ({ id, usesManualIr: id === 'generic' }),
     loadSample: async () => {}
@@ -235,7 +235,7 @@ test('startApp wires grouped shell/runner/apple2/sim/watch contracts into bindin
   assert.equal(harness.calls.some(([name, backend]) => name === 'runner.ensureBackendInstance' && backend === 'compiler'), true);
   assert.equal(harness.calls.some(([name, tab]) => name === 'shell.setActiveTab' && tab === 'vcdTab'), true);
   assert.equal(harness.calls.some(([name]) => name === 'sim.setupP5'), true);
-  assert.equal(harness.calls.some(([name, id]) => name === 'runner.preloadStartPreset' && id === 'apple2'), true);
+  assert.equal(harness.calls.some(([name, id]) => name === 'runner.loadPreset' && id === 'apple2'), true);
   assert.equal(harness.calls.some(([name]) => name === 'apple2.refreshMemoryView'), true);
 
   assert.equal(harness.bound.core.shell.submitTerminalInput, harness.terminal.submitInput);

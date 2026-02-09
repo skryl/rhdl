@@ -28,6 +28,13 @@ export const RUNNER_PRESETS = {
     romPath: './assets/fixtures/apple2/memory/appleiigo.rom',
     preferredTab: 'ioTab',
     enableApple2Ui: true,
-    usesManualIr: false
+    usesManualIr: false,
+    autoLoadOnBoot: true,
+    defaults: {
+      displayHires: true,
+      displayColor: true,
+      memoryFollowPc: true,
+      loadKaratekaDumpOnLoad: true
+    }
   }
 };

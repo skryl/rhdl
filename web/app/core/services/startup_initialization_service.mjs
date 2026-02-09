@@ -41,6 +41,7 @@ export function createStartupInitializationService({
   requireFn('shell.applyTheme', shell.applyTheme);
   requireFn('shell.setActiveTab', shell.setActiveTab);
   requireFn('runner.ensureBackendInstance', runner.ensureBackendInstance);
+  requireFn('runner.loadPreset', runner.loadPreset);
   requireFn('runner.updateIrSourceVisibility', runner.updateIrSourceVisibility);
   requireFn('runner.currentPreset', runner.currentPreset);
   requireFn('runner.getActionsController', runner.getActionsController);
@@ -92,7 +93,14 @@ export function createStartupInitializationService({
     sim.setupP5();
 
     const startPreset = runner.currentPreset();
-    await runner.getActionsController().preloadStartPreset(startPreset);
+    if (startPreset?.autoLoadOnBoot) {
+      await runner.loadPreset({
+        presetOverride: startPreset,
+        logLoad: false
+      });
+    } else {
+      await runner.getActionsController().preloadStartPreset(startPreset);
+    }
 
     apple2.refreshScreen();
     apple2.refreshDebug();

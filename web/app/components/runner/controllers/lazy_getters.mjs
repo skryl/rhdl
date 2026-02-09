@@ -18,6 +18,7 @@ export function createRunnerLazyGetters({
   updateIrSourceVisibility,
   loadRunnerIrBundle,
   initializeSimulator,
+  applyRunnerDefaults,
   clearComponentSourceOverride,
   resetComponentExplorerState,
   isComponentTabActive,
@@ -39,6 +40,7 @@ export function createRunnerLazyGetters({
   requireFn('updateIrSourceVisibility', updateIrSourceVisibility);
   requireFn('loadRunnerIrBundle', loadRunnerIrBundle);
   requireFn('initializeSimulator', initializeSimulator);
+  requireFn('applyRunnerDefaults', applyRunnerDefaults);
   requireFn('clearComponentSourceOverride', clearComponentSourceOverride);
   requireFn('resetComponentExplorerState', resetComponentExplorerState);
   requireFn('isComponentTabActive', isComponentTabActive);
@@ -75,6 +77,7 @@ export function createRunnerLazyGetters({
         updateIrSourceVisibility,
         loadRunnerIrBundle,
         initializeSimulator,
+        applyRunnerDefaults,
         clearComponentSourceOverride,
         resetComponentExplorerState,
         log,

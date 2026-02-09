@@ -96,6 +96,17 @@ rhdl-app-shell {
         </section>
 
         <section>
+          <h2>Trace</h2>
+          <div class="row wrap">
+            <button id="traceStartBtn">Start</button>
+            <button id="traceStopBtn">Stop</button>
+            <button id="traceClearBtn">Clear</button>
+            <button id="downloadVcdBtn">Save VCD</button>
+          </div>
+          <p id="traceStatus" class="status">Trace disabled</p>
+        </section>
+
+        <section>
           <h2>Simulation</h2>
           <div class="row">
             <label>Clock</label>
@@ -114,23 +125,12 @@ rhdl-app-shell {
             <input id="uiUpdateCycles" type="number" min="1" value="20000" />
           </div>
           <div class="row wrap">
-            <button id="resetBtn">Reset</button>
-            <button id="stepBtn">Step</button>
             <button id="runBtn">Run</button>
             <button id="pauseBtn">Pause</button>
+            <button id="stepBtn">Step</button>
+            <button id="resetBtn">Reset</button>
           </div>
           <p id="simStatus" class="status">WASM not initialized</p>
-        </section>
-
-        <section>
-          <h2>Trace</h2>
-          <div class="row wrap">
-            <button id="traceStartBtn">Start</button>
-            <button id="traceStopBtn">Stop</button>
-            <button id="traceClearBtn">Clear</button>
-            <button id="downloadVcdBtn">Save VCD</button>
-          </div>
-          <p id="traceStatus" class="status">Trace disabled</p>
         </section>
 
       </aside>

@@ -21,6 +21,7 @@ function createHarness(overrides = {}) {
     ensureBackendInstance: async (value) => calls.push(['runner.ensureBackendInstance', value]),
     updateIrSourceVisibility: () => calls.push(['runner.updateIrSourceVisibility']),
     currentPreset: () => ({ id: 'apple2' }),
+    loadPreset: async (options) => calls.push(['runner.loadPreset', options?.presetOverride?.id || null]),
     getActionsController: () => ({
       preloadStartPreset: async (preset) => calls.push(['runner.preloadStartPreset', preset.id])
     })
@@ -99,4 +100,16 @@ test('startup initialization service reads shell state with storage fallback', (
     terminalOpen: true,
     savedTheme: 'original'
   });
+});
+
+test('startup initialization service auto-loads preset when configured', async () => {
+  const { service, calls } = createHarness({
+    runner: {
+      currentPreset: () => ({ id: 'apple2', autoLoadOnBoot: true })
+    }
+  });
+  await service.initialize();
+
+  assert.equal(calls.some(([name, id]) => name === 'runner.loadPreset' && id === 'apple2'), true);
+  assert.equal(calls.some(([name]) => name === 'runner.preloadStartPreset'), false);
 });
