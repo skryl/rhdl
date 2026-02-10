@@ -2,12 +2,8 @@
 //!
 //! Provides batched cycle execution with memory bridging for Game Boy (DMG)
 
-mod ffi;
-
 use std::collections::HashMap;
 use crate::core::CoreSimulator;
-
-pub use ffi::*;
 
 /// Result from running Game Boy cycles
 #[repr(C)]

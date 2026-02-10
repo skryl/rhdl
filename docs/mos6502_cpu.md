@@ -287,7 +287,7 @@ runner.run_until(max_cycles: 100_000) { runner.halted? }
 Runs programs using the gate-level intermediate representation.
 
 ```ruby
-runner = MOS6502::IRSimulatorRunner.new(backend: :jit)
+runner = MOS6502::IrRunner.new(backend: :jit)
 runner.load_rom(rom_bytes, base_addr: 0xF800)
 runner.reset
 runner.run_cycles(10_000)

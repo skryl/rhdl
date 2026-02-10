@@ -158,6 +158,7 @@ module RHDL
         port :dec_jump => [:ctrl, :is_jump]
         port :dec_is_lda => [:ctrl, :is_lda]
         port :dec_reg_write => [:ctrl, :is_reg_write]
+        port :instruction_reg => [:ctrl, :instruction]
         port :dec_mem_write => [:ctrl, :is_mem_write]
         port :dec_mem_read => [:ctrl, :is_mem_read]
         port :dec_sta_indirect => [:ctrl, :is_sta_indirect]

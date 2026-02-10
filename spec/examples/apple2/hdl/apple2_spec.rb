@@ -117,7 +117,7 @@ RSpec.describe RHDL::Examples::Apple2::Apple2 do
     end
   end
 
-  describe 'boot sequence' do
+  describe 'boot sequence', :slow do
     before do
       # Create a simple ROM that:
       # 1. Sets up the stack
@@ -213,7 +213,7 @@ RSpec.describe RHDL::Examples::Apple2::Apple2 do
     end
   end
 
-  describe 'keyboard interface' do
+  describe 'keyboard interface', :slow do
     before do
       # Boot code that reads keyboard
       # $F000: LDA $C000  ; Read keyboard
@@ -281,7 +281,7 @@ RSpec.describe RHDL::Examples::Apple2::Apple2 do
     end
   end
 
-  describe 'speaker toggle' do
+  describe 'speaker toggle', :slow do
     it 'toggles speaker when $C030 is accessed' do
       # Boot code that toggles speaker
       rom = Array.new(12 * 1024, 0xEA)
@@ -340,7 +340,7 @@ RSpec.describe RHDL::Examples::Apple2::Apple2 do
     end
   end
 
-  describe 'debug outputs' do
+  describe 'debug outputs', :slow do
     before do
       # Simple ROM with known code
       rom = Array.new(12 * 1024, 0xEA)
@@ -682,13 +682,13 @@ RSpec.describe 'Apple II Simulator Modes' do
     case mode[:backend]
     when :interpreter
       skip 'IR Interpreter not available' unless RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
-      RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json)
+      RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :interpreter)
     when :jit
       skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
-      RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
+      RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit)
     when :compiler
       skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
-      RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json)
+      RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :compiler)
     end
   end
 
@@ -705,7 +705,7 @@ RSpec.describe 'Apple II Simulator Modes' do
         before do
           skip 'AppleIIgo ROM not found' unless @rom_available
           @sim = create_ir_simulator(mode)
-          @sim.apple2_load_rom(@rom_data)
+          @sim.runner_load_rom(@rom_data)
         end
 
         it 'initializes registers with reset values' do
@@ -722,7 +722,7 @@ RSpec.describe 'Apple II Simulator Modes' do
           @sim.poke('reset', 0)
 
           # Run enough cycles to complete boot sequence
-          @sim.apple2_run_cpu_cycles(200, 0, false)
+          @sim.runner_run_cycles(200, 0, false)
 
           pc = @sim.peek('cpu__pc_reg')
 
@@ -738,7 +738,7 @@ RSpec.describe 'Apple II Simulator Modes' do
           @sim.poke('reset', 0)
 
           # Run some CPU cycles to let the CPU start executing
-          @sim.apple2_run_cpu_cycles(50, 0, false)
+          @sim.runner_run_cycles(50, 0, false)
 
           pc = @sim.peek('cpu__pc_reg')
           # PC should have moved from reset vector area and be executing code
@@ -766,11 +766,11 @@ RSpec.describe 'Apple II Simulator Modes' do
       IR_SIMULATOR_MODES.each do |mode|
         begin
           sim = create_ir_simulator(mode)
-          sim.apple2_load_rom(@rom_data)
+          sim.runner_load_rom(@rom_data)
           sim.poke('reset', 1)
           sim.tick
           sim.poke('reset', 0)
-          sim.apple2_run_cpu_cycles(100, 0, false)
+          sim.runner_run_cycles(100, 0, false)
 
           pc = sim.peek('cpu__pc_reg')
           a_reg = sim.peek('cpu__a_reg')
@@ -839,28 +839,28 @@ RSpec.describe 'Sub-cycles PC Progression' do
     case backend
     when :interpreter
       skip 'IR Interpreter not available' unless RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
-      RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json, sub_cycles: sub_cycles)
+      RHDL::Codegen::IR::IrSimulator.new(ir_json, sub_cycles: sub_cycles, backend: :interpreter)
     when :jit
       skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
-      RHDL::Codegen::IR::IrJitWrapper.new(ir_json, sub_cycles: sub_cycles)
+      RHDL::Codegen::IR::IrSimulator.new(ir_json, sub_cycles: sub_cycles, backend: :jit)
     when :compiler
       skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
-      RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json, sub_cycles: sub_cycles)
+      RHDL::Codegen::IR::IrSimulator.new(ir_json, sub_cycles: sub_cycles, backend: :compiler)
     end
   end
 
   def setup_simulator(sim)
     karateka_rom = create_karateka_rom
-    sim.apple2_load_rom(karateka_rom)
+    sim.runner_load_rom(karateka_rom)
     ram_size = 48 * 1024
-    sim.apple2_load_ram(@karateka_mem.first(ram_size), 0)
+    sim.runner_load_memory(@karateka_mem.first(ram_size), 0, false)
 
     sim.poke('reset', 1)
     sim.tick
     sim.poke('reset', 0)
 
     # Run a few cycles to complete reset sequence
-    3.times { sim.apple2_run_cpu_cycles(1, 0, false) }
+    3.times { sim.runner_run_cycles(1, 0, false) }
 
     sim.peek('cpu__pc_reg')
   end
@@ -874,7 +874,7 @@ RSpec.describe 'Sub-cycles PC Progression' do
         transitions << pc
         last_pc = pc
       end
-      sim.apple2_run_cpu_cycles(1, 0, false)
+      sim.runner_run_cycles(1, 0, false)
     end
     transitions
   end
@@ -1046,35 +1046,35 @@ RSpec.describe 'Sub-cycles PC Progression' do
 
       # Test interpreter wrapper clamps values
       if RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
-        wrapper_low = RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json, sub_cycles: 0)
+        wrapper_low = RHDL::Codegen::IR::IrSimulator.new(ir_json, sub_cycles: 0, backend: :interpreter)
         expect(wrapper_low.sub_cycles).to eq(1)
 
-        wrapper_high = RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json, sub_cycles: 100)
+        wrapper_high = RHDL::Codegen::IR::IrSimulator.new(ir_json, sub_cycles: 100, backend: :interpreter)
         expect(wrapper_high.sub_cycles).to eq(14)
       end
 
       # Test JIT wrapper clamps values
       if RHDL::Codegen::IR::IR_JIT_AVAILABLE
-        wrapper_low = RHDL::Codegen::IR::IrJitWrapper.new(ir_json, sub_cycles: 0)
+        wrapper_low = RHDL::Codegen::IR::IrSimulator.new(ir_json, sub_cycles: 0, backend: :jit)
         expect(wrapper_low.sub_cycles).to eq(1)
 
-        wrapper_high = RHDL::Codegen::IR::IrJitWrapper.new(ir_json, sub_cycles: 100)
+        wrapper_high = RHDL::Codegen::IR::IrSimulator.new(ir_json, sub_cycles: 100, backend: :jit)
         expect(wrapper_high.sub_cycles).to eq(14)
       end
 
       # Test compiler wrapper clamps values
       if RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
-        wrapper_low = RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json, sub_cycles: 0)
+        wrapper_low = RHDL::Codegen::IR::IrSimulator.new(ir_json, sub_cycles: 0, backend: :compiler)
         expect(wrapper_low.sub_cycles).to eq(1)
 
-        wrapper_high = RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json, sub_cycles: 100)
+        wrapper_high = RHDL::Codegen::IR::IrSimulator.new(ir_json, sub_cycles: 100, backend: :compiler)
         expect(wrapper_high.sub_cycles).to eq(14)
       end
     end
   end
 end
 
-RSpec.describe 'Hi-res Rendering Modes' do
+RSpec.describe 'Hi-res Rendering Modes', :slow do
   # Tests that braille and color rendering modes produce non-empty output
   # when running with the Karateka memory dump, which contains actual game graphics
 
@@ -1092,7 +1092,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
     end
   end
 
-  # Create IrSimulatorRunner with Karateka memory loaded
+  # Create IrRunner with Karateka memory loaded
   # Tries JIT first, falls back to interpreter if not available
   # Returns nil if no native backends are available
   def create_ir_runner_with_karateka(backend: :jit)
@@ -1101,12 +1101,12 @@ RSpec.describe 'Hi-res Rendering Modes' do
     # Try the requested backend, fall back to interpreter
     runner = nil
     begin
-      runner = RHDL::Examples::Apple2::IrSimulatorRunner.new(backend: backend)
+      runner = RHDL::Examples::Apple2::IrRunner.new(backend: backend)
     rescue LoadError => e
       if backend == :jit
         # Fall back to interpreter
         begin
-          runner = RHDL::Examples::Apple2::IrSimulatorRunner.new(backend: :interpret)
+          runner = RHDL::Examples::Apple2::IrRunner.new(backend: :interpret)
         rescue LoadError
           return nil  # No native backends available
         end
@@ -1126,11 +1126,11 @@ RSpec.describe 'Hi-res Rendering Modes' do
     runner
   end
 
-  # Create HdlRunner with Karateka memory loaded
-  def create_hdl_runner_with_karateka
-    require_relative '../../../../examples/apple2/utilities/runners/hdl_runner'
+  # Create RubyRunner with Karateka memory loaded
+  def create_ruby_runner_with_karateka
+    require_relative '../../../../examples/apple2/utilities/runners/ruby_runner'
 
-    runner = RHDL::Examples::Apple2::HdlRunner.new
+    runner = RHDL::Examples::Apple2::RubyRunner.new
 
     # Modify reset vector to point to game entry
     rom = @rom_data.dup
@@ -1143,7 +1143,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
     runner
   end
 
-  describe 'IrSimulatorRunner braille rendering' do
+  describe 'IrRunner braille rendering' do
     before do
       skip 'AppleIIgo ROM not found' unless @rom_available
       skip 'Karateka memory dump not found' unless @karateka_available
@@ -1171,7 +1171,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
       non_blank_lines = lines.count { |line| line.chars.any? { |c| c.ord > 0x2800 && c.ord <= 0x28FF } }
       expect(non_blank_lines).to be > 0, "Should have at least some lines with non-blank braille content"
 
-      puts "\n  IrSimulatorRunner braille rendering:"
+      puts "\n  IrRunner braille rendering:"
       puts "    Output length: #{output.length} chars"
       puts "    Lines: #{lines.length}"
       puts "    Non-blank lines: #{non_blank_lines}/#{lines.length}"
@@ -1190,7 +1190,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
     end
   end
 
-  describe 'IrSimulatorRunner color rendering' do
+  describe 'IrRunner color rendering' do
     before do
       skip 'AppleIIgo ROM not found' unless @rom_available
       skip 'Karateka memory dump not found' unless @karateka_available
@@ -1221,7 +1221,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
       non_blank_lines = lines.count { |line| line.gsub(/\e\[[^m]*m/, '').strip.length > 0 }
       expect(non_blank_lines).to be > 0, "Should have at least some lines with colored content"
 
-      puts "\n  IrSimulatorRunner color rendering:"
+      puts "\n  IrRunner color rendering:"
       puts "    Output length: #{output.length} chars"
       puts "    Lines: #{lines.length}"
       puts "    Non-blank lines: #{non_blank_lines}/#{lines.length}"
@@ -1229,14 +1229,14 @@ RSpec.describe 'Hi-res Rendering Modes' do
     end
   end
 
-  describe 'HdlRunner braille rendering' do
+  describe 'RubyRunner braille rendering' do
     before do
       skip 'AppleIIgo ROM not found' unless @rom_available
       skip 'Karateka memory dump not found' unless @karateka_available
     end
 
     it 'produces non-empty braille output with Karateka graphics' do
-      runner = create_hdl_runner_with_karateka
+      runner = create_ruby_runner_with_karateka
 
       # Run a few cycles to stabilize (HDL is slower)
       runner.run_steps(50)
@@ -1253,21 +1253,21 @@ RSpec.describe 'Hi-res Rendering Modes' do
       non_blank_lines = lines.count { |line| line.chars.any? { |c| c.ord > 0x2800 && c.ord <= 0x28FF } }
       expect(non_blank_lines).to be > 0, "Should have at least some lines with non-blank braille content"
 
-      puts "\n  HdlRunner braille rendering:"
+      puts "\n  RubyRunner braille rendering:"
       puts "    Output length: #{output.length} chars"
       puts "    Lines: #{lines.length}"
       puts "    Non-blank lines: #{non_blank_lines}/#{lines.length}"
     end
   end
 
-  describe 'HdlRunner color rendering' do
+  describe 'RubyRunner color rendering' do
     before do
       skip 'AppleIIgo ROM not found' unless @rom_available
       skip 'Karateka memory dump not found' unless @karateka_available
     end
 
     it 'produces non-empty color output with Karateka graphics' do
-      runner = create_hdl_runner_with_karateka
+      runner = create_ruby_runner_with_karateka
 
       # Run a few cycles to stabilize (HDL is slower)
       runner.run_steps(50)
@@ -1287,7 +1287,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
       non_blank_lines = lines.count { |line| line.gsub(/\e\[[^m]*m/, '').strip.length > 0 }
       expect(non_blank_lines).to be > 0, "Should have at least some lines with colored content"
 
-      puts "\n  HdlRunner color rendering:"
+      puts "\n  RubyRunner color rendering:"
       puts "    Output length: #{output.length} chars"
       puts "    Lines: #{lines.length}"
       puts "    Non-blank lines: #{non_blank_lines}/#{lines.length}"
@@ -1301,7 +1301,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
       skip 'Karateka memory dump not found' unless @karateka_available
     end
 
-    it 'IrSimulatorRunner reads hi-res memory correctly from batched backend' do
+    it 'IrRunner reads hi-res memory correctly from batched backend' do
       runner = create_ir_runner_with_karateka(backend: :jit)
       skip 'No native IR backends available' if runner.nil?
 
@@ -1325,7 +1325,7 @@ RSpec.describe 'Hi-res Rendering Modes' do
   end
 end
 
-RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
+RSpec.describe 'MOS6502 ISA vs Apple2 Comparison', :slow do
   # Tests to verify the Apple2 system produces the same results as the
   # MOS6502 ISA runner reference implementation.
   #
@@ -1403,13 +1403,13 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
     case backend
     when :interpreter
       skip 'IR Interpreter not available' unless RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
-      RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json)
+      RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :interpreter)
     when :jit
       skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
-      RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
+      RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit)
     when :compiler
       skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
-      RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json)
+      RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :compiler)
     end
   end
 
@@ -1443,7 +1443,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
         break
       end
 
-      sim.apple2_run_cpu_cycles(1, 0, false)
+      sim.runner_run_cycles(1, 0, false)
       boot_cycles += 1
     end
 
@@ -1460,7 +1460,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
       if (pc - target_pc).abs < 256 || pc == target_pc
         return { cycles: cycles, reached_pc: pc }
       end
-      sim.apple2_run_cpu_cycles(1, 0, false)
+      sim.runner_run_cycles(1, 0, false)
       cycles += 1
     end
     { cycles: cycles, reached_pc: sim.peek('cpu__pc_reg') }
@@ -1470,9 +1470,9 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
   # key_code is the ASCII code (high bit will be set automatically by simulator)
   def inject_key(sim, key_code, process_cycles: 500)
     # Run with key pressed
-    sim.apple2_run_cpu_cycles(process_cycles, key_code, true)
+    sim.runner_run_cycles(process_cycles, key_code, true)
     # Run with key released to let it be cleared
-    sim.apple2_run_cpu_cycles(100, 0, false)
+    sim.runner_run_cycles(100, 0, false)
   end
 
   # Type a string into the IR simulator (for monitor commands like "B82AG")
@@ -1518,7 +1518,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
         last_pc = pc
         break if target_transitions && transitions.size >= target_transitions
       end
-      sim.apple2_run_cpu_cycles(1, 0, false)
+      sim.runner_run_cycles(1, 0, false)
       cycles += 1
     end
 
@@ -1579,8 +1579,8 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
   end
 
   def load_karateka_into_ir(sim)
-    sim.apple2_load_rom(@rom_data)
-    sim.apple2_load_ram(@karateka_mem, 0)
+    sim.runner_load_rom(@rom_data)
+    sim.runner_load_memory(@karateka_mem, 0, false)
     sim.poke('reset', 1)
     sim.tick
     sim.poke('reset', 0)
@@ -1600,7 +1600,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
 
         # Create target (Apple2 IR interpreter) and boot it
         ir_sim = create_apple2_ir_simulator(:interpreter)
-        ir_sim.apple2_load_rom(@rom_data)
+        ir_sim.runner_load_rom(@rom_data)
         boot_cycles = boot_ir_simulator(ir_sim)
 
         # Collect PC transitions from ISA
@@ -1651,7 +1651,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
         cpu.reset
 
         ir_sim = create_apple2_ir_simulator(:interpreter)
-        ir_sim.apple2_load_rom(@rom_data)
+        ir_sim.runner_load_rom(@rom_data)
         boot_cycles = boot_ir_simulator(ir_sim)
 
         isa_transitions = collect_isa_pc_transitions(cpu, INTERPRETER_ITERATIONS)
@@ -1687,7 +1687,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
         cpu.reset
 
         ir_sim = create_apple2_ir_simulator(:jit)
-        ir_sim.apple2_load_rom(@rom_data)
+        ir_sim.runner_load_rom(@rom_data)
         boot_cycles = boot_ir_simulator(ir_sim)
 
         # Use smaller iterations for JIT to avoid timeout
@@ -1748,10 +1748,10 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
     # Helper to set up IR simulator with Karateka memory and modified ROM
     def setup_ir_for_karateka(ir_sim)
       karateka_rom = create_karateka_rom
-      ir_sim.apple2_load_rom(karateka_rom)
+      ir_sim.runner_load_rom(karateka_rom)
       # Only load first 48K of memory (Apple II RAM is 48K, $0000-$BFFF)
       ram_size = 48 * 1024
-      ir_sim.apple2_load_ram(@karateka_mem.first(ram_size), 0)
+      ir_sim.runner_load_memory(@karateka_mem.first(ram_size), 0, false)
 
       # Boot through reset - CPU should start directly at game entry
       ir_sim.poke('reset', 1)
@@ -1759,7 +1759,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
       ir_sim.poke('reset', 0)
 
       # Run a few cycles to complete reset sequence
-      3.times { ir_sim.apple2_run_cpu_cycles(1, 0, false) }
+      3.times { ir_sim.runner_run_cycles(1, 0, false) }
 
       pc = ir_sim.peek('cpu__pc_reg')
       { started_at: pc, boot_cycles: 3 }
@@ -1941,10 +1941,10 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
       # Helper to set up Ruby HDL simulator with Karateka memory and modified ROM
       def setup_hdl_for_karateka(hdl_sim)
         karateka_rom = create_karateka_rom
-        hdl_sim.apple2_load_rom(karateka_rom)
+        hdl_sim.runner_load_rom(karateka_rom)
         # Only load first 48K of memory (Apple II RAM is 48K, $0000-$BFFF)
         ram_size = 48 * 1024
-        hdl_sim.apple2_load_ram(@karateka_mem.first(ram_size), 0)
+        hdl_sim.runner_load_memory(@karateka_mem.first(ram_size), 0, false)
 
         # Boot through reset - CPU should start directly at game entry
         hdl_sim.poke('reset', 1)
@@ -1952,7 +1952,7 @@ RSpec.describe 'MOS6502 ISA vs Apple2 Comparison' do
         hdl_sim.poke('reset', 0)
 
         # Run a few cycles to complete reset sequence
-        3.times { hdl_sim.apple2_run_cpu_cycles(1, 0, false) }
+        3.times { hdl_sim.runner_run_cycles(1, 0, false) }
 
         pc = hdl_sim.peek('cpu__pc_reg')
         { started_at: pc, boot_cycles: 3 }

@@ -57,7 +57,7 @@ Options:
   --disk FILE           Load .dsk disk image
   --memdump FILE        Load memory dump file
   --pc ADDR             Set initial PC (hex)
-  -m, --mode MODE       Simulation mode: hdl, netlist, verilog
+  -m, --mode MODE       Simulation mode: ruby, ir, netlist, verilog
   --sim BACKEND         Simulation backend: ruby, interpret, jit, compile
   --sub-cycles N        Sub-cycles per step (14=full, 7=2x, 2=7x speed)
   --dry-run             Initialize but don't run
@@ -263,12 +263,12 @@ end
 
 ## Simulation Backends
 
-### HDL Mode (Default)
+### Ruby Mode (Default)
 
-Cycle-accurate simulation using RHDL HDL components.
+Cycle-accurate simulation using Ruby-backed RHDL HDL components.
 
 ```bash
-rhdl apple2 --mode hdl --appleiigo
+rhdl apple2 --mode ruby --appleiigo
 ```
 
 **Characteristics:**
@@ -316,10 +316,10 @@ Within each mode, different backends control evaluation:
 **Example:**
 ```bash
 # Fast simulation with JIT backend
-rhdl apple2 --mode hdl --sim jit --appleiigo
+rhdl apple2 --mode ir --sim jit --appleiigo
 
 # Maximum speed with compiled backend
-rhdl apple2 --mode hdl --sim compile --appleiigo --sub-cycles 2
+rhdl apple2 --mode ir --sim compile --appleiigo --sub-cycles 2
 ```
 
 ## Disk II Controller
@@ -459,14 +459,14 @@ rhdl apple2 --karateka --hires --hires-width 280
 
 ## Ruby API
 
-### HdlRunner (`utilities/apple2_hdl.rb`)
+### RubyRunner (`utilities/apple2_hdl.rb`)
 
 High-level runner for HDL simulation.
 
 ```ruby
 require_relative 'examples/apple2/utilities/apple2_hdl'
 
-runner = RHDL::Examples::Apple2::HdlRunner.new
+runner = RHDL::Examples::Apple2::RubyRunner.new
 
 # Load ROM
 rom = File.binread("appleiigo.rom")
@@ -633,8 +633,8 @@ rhdl apple2 --karateka --sim compile --sub-cycles 2
 # Fast with full accuracy
 rhdl apple2 --karateka --sim jit
 
-# Debugging: full visibility
-rhdl apple2 --karateka --mode hdl --debug
+# Debugging: Ruby mode with full visibility
+rhdl apple2 --karateka --mode ruby --debug
 ```
 
 ## File Structure
@@ -654,7 +654,7 @@ examples/apple2/
 │   ├── ram.rb              # Main memory
 │   └── audio_pwm.rb        # Audio output
 ├── utilities/              # Support utilities
-│   ├── apple2_hdl.rb       # HDL runner
+│   ├── runners/ruby_runner.rb # Ruby runner
 │   ├── speaker.rb          # Audio simulation
 │   ├── text_renderer.rb    # ASCII display
 │   ├── braille_renderer.rb # Hi-res display

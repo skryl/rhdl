@@ -132,11 +132,13 @@ module RHDL
         def add_common_args(exec_args)
           exec_args << "-d" if options[:debug]
 
-          # mos6502 binary: --mode isa|hdl|netlist (default: isa), --sim interpret|jit|compile (default: jit)
-          if options[:mode] && options[:mode] != :isa
-            exec_args.push("-m", options[:mode].to_s)
+          mode = (options[:mode] || :isa).to_sym
+          if mode != :isa
+            exec_args.push("-m", mode.to_s)
           end
-          if options[:sim] && options[:sim] != :jit
+
+          default_sim = default_sim_for_mode(mode)
+          if options[:sim] && default_sim && options[:sim] != default_sim
             exec_args.push("--sim", options[:sim].to_s)
           end
 
@@ -152,6 +154,20 @@ module RHDL
           exec_args.push("-e", options[:entry]) if options[:entry]
           exec_args << "--init-hires" if options[:init_hires]
           exec_args << "--no-audio" if options[:no_audio]
+        end
+
+        def default_sim_for_mode(mode)
+          case mode
+          when :isa
+            native_available = defined?(RHDL::Examples::MOS6502::NATIVE_AVAILABLE) && RHDL::Examples::MOS6502::NATIVE_AVAILABLE
+            native_available ? :native : :ruby
+          when :ruby
+            :ruby
+          when :ir, :netlist
+            :compile
+          else
+            nil
+          end
         end
       end
     end

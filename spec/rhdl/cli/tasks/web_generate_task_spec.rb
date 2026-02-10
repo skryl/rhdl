@@ -10,11 +10,15 @@ RSpec.describe RHDL::CLI::Tasks::WebGenerateTask do
       task = described_class.new
       allow(task).to receive(:ensure_dir)
       allow(task).to receive(:generate_runner_assets)
+      allow(task).to receive(:generate_apple2_memory_assets)
+      allow(task).to receive(:build_wasm_backends)
 
       expect(task).to receive(:ensure_dir).with(described_class::SCRIPT_DIR)
       described_class::RUNNER_EXPORTS.each do |runner|
         expect(task).to receive(:generate_runner_assets).with(runner)
       end
+      expect(task).to receive(:generate_apple2_memory_assets)
+      expect(task).to receive(:build_wasm_backends)
 
       expect { task.run }.to output(/Web artifact generation complete/).to_stdout
     end

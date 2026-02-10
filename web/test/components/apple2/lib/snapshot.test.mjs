@@ -71,3 +71,14 @@ test('parseApple2SnapshotText returns null for invalid json', () => {
   assert.equal(parseApple2SnapshotText('{broken'), null);
   assert.equal(parseApple2SnapshotText(''), null);
 });
+
+test('parseApple2SnapshotPayload accepts generic memory snapshot kind', () => {
+  const bytes = Uint8Array.from([0x01, 0x02]);
+  const payload = buildApple2SnapshotPayload(bytes, 0x10, 'generic snapshot', null, null, {
+    kind: 'rhdl.memory.snapshot'
+  });
+  const parsed = parseApple2SnapshotPayload(payload);
+  assert.ok(parsed);
+  assert.equal(parsed.offset, 0x10);
+  assert.deepEqual(Array.from(parsed.bytes), [0x01, 0x02]);
+});

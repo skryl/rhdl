@@ -72,7 +72,7 @@ test('refreshStatus with simulator writes running metrics and queues sync', () =
     clock_mode: () => 'forced',
     trace_enabled: () => true,
     trace_change_count: () => 99,
-    apple2_mode: () => true,
+    runner_kind: () => 'apple2',
     features: {
       hasSignalIndex: false,
       hasLiveTrace: false

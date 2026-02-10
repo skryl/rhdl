@@ -8,7 +8,7 @@
 # FFI overhead.
 #
 # Usage:
-#   runner = RHDL::Examples::MOS6502::VerilatorRunner.new
+#   runner = RHDL::Examples::MOS6502::VerilogRunner.new
 #   runner.load_program([0xA9, 0x42, 0x00], 0x8000)  # LDA #$42; BRK
 #   runner.reset
 #   runner.run_cycles(100)
@@ -27,7 +27,7 @@ module RHDL
     module MOS6502
       # Verilator-based runner for MOS 6502 simulation
       # Compiles RHDL Verilog export to native code via Verilator
-      class VerilatorRunner
+      class VerilogRunner
     HIRES_PAGE1_START = 0x2000
     HIRES_PAGE1_END = 0x3FFF
     HIRES_PAGE2_START = 0x4000
@@ -320,25 +320,24 @@ module RHDL
 
     private
 
-    def check_verilator_available!
-      verilator_path = ENV['PATH'].split(File::PATH_SEPARATOR).find do |path|
-        File.executable?(File.join(path, 'verilator'))
-      end
+    def verilog_simulator
+      @verilog_simulator ||= RHDL::Codegen::Verilog::VerilogSimulator.new(
+        backend: :verilator,
+        build_dir: BUILD_DIR,
+        library_basename: 'mos6502_sim',
+        top_module: 'mos6502_cpu',
+        verilator_prefix: 'Vmos6502_cpu',
+        x_assign: '0',
+        x_initial: 'unique'
+      )
+    end
 
-      unless verilator_path
-        raise LoadError, <<~MSG
-          Verilator not found in PATH.
-          Install Verilator:
-            Ubuntu/Debian: sudo apt-get install verilator
-            macOS: brew install verilator
-            Fedora: sudo dnf install verilator
-        MSG
-      end
+    def check_verilator_available!
+      verilog_simulator.ensure_backend_available!
     end
 
     def build_verilator_simulation
-      FileUtils.mkdir_p(VERILOG_DIR)
-      FileUtils.mkdir_p(OBJ_DIR)
+      verilog_simulator.prepare_build_dirs!
 
       # Export MOS6502 CPU to Verilog
       verilog_file = File.join(VERILOG_DIR, 'mos6502.v')
@@ -725,117 +724,23 @@ module RHDL
     end
 
     def write_file_if_changed(path, content)
-      return if File.exist?(path) && File.read(path) == content
-      File.write(path, content)
+      verilog_simulator.write_file_if_changed(path, content)
     end
 
     def compile_verilator(verilog_file, wrapper_file)
-      # Determine library suffix
-      lib_suffix = case RbConfig::CONFIG['host_os']
-                   when /darwin/ then 'dylib'
-                   when /mswin|mingw/ then 'dll'
-                   else 'so'
-                   end
-
-      lib_name = "libmos6502_sim.#{lib_suffix}"
-      lib_path = File.join(OBJ_DIR, lib_name)
-
-      # Verilate the design - top module is mos6502_cpu
-      # NOTE: --threads tested but 44x SLOWER due to sync overhead on sequential CPU
-      verilate_cmd = [
-        'verilator',
-        '--cc',
-        '--top-module', 'mos6502_cpu',
-        # Optimization flags
-        '-O3',                  # Maximum Verilator optimization
-        '--x-assign', '0',      # Initialize X to 0 (required for proper simulation)
-        '--x-initial', 'unique', # Proper initial block handling (required for timing generator)
-        '--noassert',           # Disable assertions
-        # Warning suppressions
-        '-Wno-fatal',           # Continue despite warnings
-        '-Wno-WIDTHEXPAND',     # Suppress width expansion warnings
-        '-Wno-WIDTHTRUNC',      # Suppress width truncation warnings
-        '-Wno-UNOPTFLAT',       # Suppress unoptimized flattening warnings
-        '-Wno-PINMISSING',      # Suppress missing pin warnings
-        # C++ compiler flags for performance
-        '-CFLAGS', '-fPIC -O3 -march=native',
-        '-LDFLAGS', '-shared',
-        '--Mdir', OBJ_DIR,
-        '--prefix', 'Vmos6502_cpu',
-        '-o', lib_name,
-        wrapper_file,
-        verilog_file
-      ]
-
-      # Redirect build output to log file
-      log_file = File.join(BUILD_DIR, 'build.log')
-      File.open(log_file, 'w') do |log|
-        Dir.chdir(VERILOG_DIR) do
-          result = system(*verilate_cmd, out: log, err: log)
-          unless result
-            raise "Verilator compilation failed. See #{log_file} for details."
-          end
-        end
-
-        # Build with clang++ for better optimization
-        # Must pass CXX= on command line to override verilated.mk's hardcoded g++
-        Dir.chdir(OBJ_DIR) do
-          result = system('make', '-f', 'Vmos6502_cpu.mk', 'CXX=clang++', out: log, err: log)
-          unless result
-            raise "Verilator make failed. See #{log_file} for details."
-          end
-        end
-      end
-
-      # On some platforms (notably macOS), Verilator's make output may not update the
-      # requested shared library even if compilation succeeds. Ensure the dylib/so
-      # is freshly linked from the static archives when needed.
-      lib_vcpu = File.join(OBJ_DIR, 'libVmos6502_cpu.a')
-      lib_verilated = File.join(OBJ_DIR, 'libverilated.a')
-      newest_input = [lib_vcpu, lib_verilated].filter_map { |p| File.exist?(p) ? File.mtime(p) : nil }.max
-      lib_mtime = File.exist?(lib_path) ? File.mtime(lib_path) : nil
-
-      if lib_mtime.nil? || (!newest_input.nil? && lib_mtime < newest_input)
-        build_shared_library(wrapper_file)
-      end
+      verilog_simulator.compile_backend(verilog_file: verilog_file, wrapper_file: wrapper_file)
     end
 
-    def build_shared_library(wrapper_file)
-      # Link all object files and static libraries into shared library
-      lib_path = shared_lib_path
-      lib_vcpu = File.join(OBJ_DIR, 'libVmos6502_cpu.a')
-      lib_verilated = File.join(OBJ_DIR, 'libverilated.a')
-
-      # Use whole-archive to include all symbols from static libs
-      # -latomic needed for clang++ on Linux
-      link_cmd = if RbConfig::CONFIG['host_os'] =~ /darwin/
-                   "clang++ -shared -dynamiclib -o #{lib_path} " \
-                   "-Wl,-all_load #{lib_vcpu} #{lib_verilated}"
-                 else
-                   "clang++ -shared -o #{lib_path} " \
-                   "-Wl,--whole-archive #{lib_vcpu} #{lib_verilated} -Wl,--no-whole-archive -latomic"
-                 end
-
-      unless system(link_cmd)
-        raise "Failed to link Verilator shared library: #{lib_path}"
-      end
+    def build_shared_library(_wrapper_file = nil)
+      verilog_simulator.build_shared_library
     end
 
     def shared_lib_path
-      lib_suffix = case RbConfig::CONFIG['host_os']
-                   when /darwin/ then 'dylib'
-                   when /mswin|mingw/ then 'dll'
-                   else 'so'
-                   end
-      File.join(OBJ_DIR, "libmos6502_sim.#{lib_suffix}")
+      verilog_simulator.shared_library_path
     end
 
     def load_shared_library(lib_path)
-      unless File.exist?(lib_path)
-        raise LoadError, "Verilator shared library not found: #{lib_path}"
-      end
-
-      @lib = Fiddle.dlopen(lib_path)
+      @lib = verilog_simulator.load_library!(lib_path)
 
       # Bind FFI functions
       @sim_create = Fiddle::Function.new(

@@ -128,7 +128,7 @@ RSpec.describe 'MOS6502 Karateka Mode' do
       end
 
       begin
-        runner = IRSimulatorRunner.new(sim_type)
+        runner = IrRunner.new(sim_type)
         runner.load_rom(rom_bytes, base_addr: 0xD000)
         runner.load_ram(mem_bytes, base_addr: 0x0000)
       rescue RuntimeError => e

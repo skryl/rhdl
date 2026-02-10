@@ -35,7 +35,7 @@ function createHarness() {
 test('refreshApple2Screen renders disabled message when runner is unavailable', () => {
   const { controller, dom, ioCalls } = createHarness();
   controller.refreshApple2Screen();
-  assert.match(dom.apple2TextScreen.textContent, /Load the Apple II runner/);
+  assert.match(dom.apple2TextScreen.textContent, /Load a runner with memory \+ I\/O support/);
   assert.equal(ioCalls.length, 1);
 });
 

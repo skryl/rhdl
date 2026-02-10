@@ -459,14 +459,15 @@ end
 
 **Performance**: Fastest option for batch simulations.
 
-### Wrapper Classes with Fallback
+### Unified Netlist Simulator
 
-All native extensions have wrapper classes with automatic fallback:
+All native netlist backends are accessed through one class with automatic fallback:
 
 ```ruby
 # Automatically uses best available backend
-sim = RHDL::Codegen::Netlist::NetlistInterpreterWrapper.new(
+sim = RHDL::Codegen::Netlist::NetlistSimulator.new(
   ir,
+  backend: :interpreter,
   lanes: 64,
   allow_fallback: true  # Falls back to Ruby if native unavailable
 )
@@ -500,11 +501,12 @@ ir.add_operation(:add, dest: :result, src1: :a, src2: :b)
 Bytecode interpreter with MOS6502 and Apple II extensions:
 
 ```ruby
-require 'rhdl/codegen/ir/sim/ir_interpreter'
+require 'rhdl/codegen/ir/sim/ir_simulator'
 
-if RHDL::Codegen::IR::INTERPRETER_AVAILABLE
-  sim = RHDL::Codegen::IR::IrInterpreterWrapper.new(
+if RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
+  sim = RHDL::Codegen::IR::IrSimulator.new(
     ir_json,
+    backend: :interpreter,
     allow_fallback: true,
     sub_cycles: 14  # MOS6502 cycles per instruction
   )
@@ -527,7 +529,7 @@ Runtime JIT compilation of IR:
 
 ```ruby
 if RHDL::Codegen::IR::JIT_AVAILABLE
-  sim = RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
+  sim = RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit)
   sim.compile  # JIT compile
   sim.run_ticks(1_000_000)
 end
@@ -541,7 +543,7 @@ Ahead-of-time compilation with full optimization:
 
 ```ruby
 if RHDL::Codegen::IR::COMPILER_AVAILABLE
-  sim = RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json)
+  sim = RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :compiler)
   sim.compile  # AOT compile with rustc
   sim.run_ticks(5_000_000)
 end
@@ -828,7 +830,7 @@ ir = RHDL::Codegen::Netlist::Lower.from_components([alu])
 puts "Gates: #{ir.gates.length}, DFFs: #{ir.dffs.length}"
 
 # 4. Gate-level simulation (verification)
-sim = RHDL::Codegen::Netlist::NetlistInterpreterWrapper.new(ir, lanes: 64)
+sim = RHDL::Codegen::Netlist::NetlistSimulator.new(ir, backend: :interpreter, lanes: 64)
 sim.poke('alu.a', 10)
 sim.poke('alu.b', 5)
 sim.poke('alu.op', 0)

@@ -19,6 +19,31 @@ export function normalizeApple2KeyCode(value) {
   return ascii & 0xff;
 }
 
+export function normalizeMappedKeyCode(value, options = {}) {
+  const code = normalizeApple2KeyCode(value);
+  if (code == null) {
+    return null;
+  }
+
+  const enterCode = Number.parseInt(options.enterCode, 10);
+  const backspaceCode = Number.parseInt(options.backspaceCode, 10);
+  let mapped = code;
+  if (mapped === 0x0D && Number.isFinite(enterCode)) {
+    mapped = enterCode & 0xFF;
+  } else if (mapped === 0x08 && Number.isFinite(backspaceCode)) {
+    mapped = backspaceCode & 0xFF;
+  }
+
+  const upperCase = options.upperCase !== false;
+  if (upperCase && mapped >= 97 && mapped <= 122) {
+    mapped -= 32;
+  }
+  if (options.setHighBit) {
+    mapped |= 0x80;
+  }
+  return mapped & 0xFF;
+}
+
 function parsePositiveInt(raw, fallback) {
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isFinite(parsed)) {

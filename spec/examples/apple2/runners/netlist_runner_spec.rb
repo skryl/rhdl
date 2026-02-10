@@ -74,11 +74,11 @@ RSpec.describe RHDL::Examples::Apple2::NetlistRunner do
       end
     end
 
-    describe 'default backend' do
+    describe 'default backend', :slow do
       subject(:runner) { described_class.new }
 
-      it 'defaults to jit backend' do
-        expect(runner.simulator_type).to eq(:netlist_jit)
+      it 'defaults to compile backend' do
+        expect(runner.simulator_type).to eq(:netlist_compile)
       end
     end
 

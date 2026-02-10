@@ -10,7 +10,7 @@ test('apple2 dump workflow service saves memory dump and updates persisted state
   const state = { memory: {}, apple2: {} };
   const runtime = {
     sim: {
-      apple2_read_ram: () => new Uint8Array([1, 2, 3, 4])
+      memory_read: () => new Uint8Array([1, 2, 3, 4])
     }
   };
   const service = createApple2DumpWorkflowService({

@@ -21,7 +21,7 @@ test('apple2 ui state service updates toggles and status fields', () => {
       soundEnabled: false
     }
   };
-  const runtime = { sim: { apple2_mode: () => true } };
+  const runtime = { sim: { runner_kind: () => 'apple2' } };
   const service = createApple2UiStateService({
     dom,
     state,

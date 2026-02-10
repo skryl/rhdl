@@ -51,6 +51,7 @@ module RHDL
         input :is_jump                   # Unconditional jump (JMP)
         input :is_lda                    # LDA/LDI instruction
         input :is_reg_write              # Writes to accumulator
+        input :instruction, width: 8     # Current instruction opcode
         input :is_mem_write              # Writes to memory (STA)
         input :is_mem_read               # Reads from memory
         input :is_sta_indirect           # STA indirect addressing mode
@@ -199,8 +200,10 @@ module RHDL
           # acc_load_en: Load accumulator (in EXECUTE state with reg_write)
           acc_load_en <= mux(state == lit(S_EXECUTE, width: 8), is_reg_write, 0)
 
-          # zero_flag_load_en: Load zero flag (in EXECUTE state with reg_write)
-          zero_flag_load_en <= mux(state == lit(S_EXECUTE, width: 8), is_reg_write, 0)
+          # zero_flag_load_en: update zero flag on ACC writes and CMP.
+          # CMP (0xF3) updates flags without writing ACC.
+          cmp_updates_zero = (instruction == lit(0xF3, width: 8))
+          zero_flag_load_en <= mux(state == lit(S_EXECUTE, width: 8), is_reg_write | cmp_updates_zero, 0)
 
           # pc_inc_en: Increment PC after instruction fetch/decode
           # Don't increment for CALL (return addr calc), branches/jumps (pc_load handles),

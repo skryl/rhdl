@@ -13,8 +13,6 @@ RSpec.describe RHDL::Components::CPU::CPU do
     @memory = MemorySimulator::Memory.new
     @cpu = cpu_class.new(@memory)
     @cpu.reset
-
-    clear_display(@memory)
   end
 
   describe 'fractal program' do
@@ -111,6 +109,10 @@ RSpec.describe RHDL::Components::CPU::CPU do
 
       # Load program at 0x100 to avoid overlap with data at 0x0-0xF
       load_program(program, 0x100)
+
+      # load_program clears low memory including display range (0x0800-0x0FFF),
+      # so reinitialize display after loading.
+      clear_display(@memory)
 
       # Reset PC to start of program (load_program resets CPU which sets PC to 0)
       # We need to manually set it to the program start

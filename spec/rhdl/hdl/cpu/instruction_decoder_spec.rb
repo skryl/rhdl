@@ -129,8 +129,8 @@ RSpec.describe RHDL::HDL::CPU::InstructionDecoder do
     it 'generates valid IR' do
       ir = RHDL::HDL::CPU::InstructionDecoder.to_ir
       expect(ir).to be_a(RHDL::Export::IR::ModuleDef)
-      # 2 inputs (instruction, zero_flag) + 13 outputs (including is_lda)
-      expect(ir.ports.length).to eq(15)
+      # 2 inputs (instruction, zero_flag) + 15 outputs
+      expect(ir.ports.length).to eq(17)
     end
 
     it 'generates valid Verilog' do

@@ -70,8 +70,10 @@ export function createSimStatusRuntimeService({
       `Backend: ${backendDef.id}${notes.length > 0 ? ` (${notes.join(', ')})` : ''}`;
 
     const preset = currentRunnerPreset();
-    const apple2Flag = runtime.sim.apple2_mode() ? ' | apple2 mode' : '';
-    const runnerStatus = `${preset.label}${apple2Flag} | ${backendDef.label}`;
+    const apple2Flag = runtime.sim.runner_kind?.() === 'apple2' ? ' | apple2 mode' : '';
+    const memoryMode = typeof runtime.sim.memory_mode === 'function' ? runtime.sim.memory_mode() : null;
+    const memoryFlag = memoryMode && !apple2Flag ? ` | ${memoryMode} memory API` : '';
+    const runnerStatus = `${preset.label}${apple2Flag}${memoryFlag} | ${backendDef.label}`;
 
     return {
       simStatus,

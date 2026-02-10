@@ -525,27 +525,40 @@ module NetlistHelper
       output_map[short_name] = { full_name: full_name, width: nets.length }
     end
 
-    test_vectors.each_with_index do |vec, _idx|
-      # Apply inputs - convert values to lane masks per bit
-      vec[:inputs].each do |port, value|
-        port_str = port.to_s
-        full_name = input_map[port_str] || port_str
-        nets = ir.inputs[full_name]
+    clk_full_name = input_map['clk']
 
-        if nets && nets.length > 1
-          # Multi-bit input: set each bit's lane mask based on value
-          # All lanes get the same value, so use the value bits as the mask pattern
-          sim.poke(full_name, lanes_from_value(value, nets.length))
-        else
-          # Single-bit input: value 1 means all lanes high
-          lane_value = value != 0 ? 0xFFFFFFFFFFFFFFFF : 0
-          sim.poke(full_name, lane_value)
-        end
+    apply_input = lambda do |port, value|
+      port_str = port.to_s
+      full_name = input_map[port_str] || port_str
+      nets = ir.inputs[full_name]
+
+      if nets && nets.length > 1
+        # Multi-bit input: set each bit's lane mask based on value
+        # All lanes get the same value, so use the value bits as the mask pattern
+        sim.poke(full_name, lanes_from_value(value, nets.length))
+      else
+        # Single-bit input: value 1 means all lanes high
+        lane_value = value != 0 ? 0xFFFFFFFFFFFFFFFF : 0
+        sim.poke(full_name, lane_value)
       end
+    end
+
+    test_vectors.each_with_index do |vec, _idx|
+      input_keys = vec[:inputs].keys.map(&:to_s)
+      auto_drive_clk = has_clock && clk_full_name && !input_keys.include?('clk')
+
+      # Drive clock low before applying vector, then raise for tick.
+      apply_input.call('clk', 0) if auto_drive_clk
+      vec[:inputs].each { |port, value| apply_input.call(port, value) }
 
       # Execute simulation
       if has_clock
+        if auto_drive_clk
+          sim.evaluate
+          apply_input.call('clk', 1)
+        end
         sim.tick
+        apply_input.call('clk', 0) if auto_drive_clk
       else
         sim.evaluate
       end

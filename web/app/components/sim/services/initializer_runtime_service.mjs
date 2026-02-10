@@ -1,3 +1,5 @@
+import { resolveRunnerIoConfig } from '../../runner/lib/io_config.mjs';
+
 const DEFAULT_APPLE2_WATCHES = ['pc_debug', 'a_debug', 'x_debug', 'y_debug', 'opcode_debug', 'speaker'];
 
 export function resolveInitializationContext({
@@ -78,7 +80,9 @@ export function resetSimulatorSession({
   state.apple2.keyQueue = [];
   state.apple2.lastCpuResult = null;
   state.apple2.lastSpeakerToggles = 0;
+  state.apple2.lastMappedSoundValue = null;
   state.apple2.baseRomBytes = null;
+  state.apple2.ioConfig = null;
 
   updateApple2SpeakerAudio(0, 0);
   setMemoryDumpStatus('');
@@ -112,32 +116,50 @@ export async function initializeApple2Mode({
   fetchImpl = globalThis.fetch,
   log = () => {}
 } = {}) {
-  if (!runtime.sim.apple2_mode()) {
+  const ioConfig = resolveRunnerIoConfig(preset);
+  state.apple2.ioConfig = ioConfig;
+
+  if (!ioConfig.enabled) {
+    return;
+  }
+
+  const supportsRunnerApi = runtime.sim.runner_mode?.() === true;
+  const supportsGenericMemoryApi = typeof runtime.sim.memory_mode === 'function' && runtime.sim.memory_mode() != null;
+  if (!supportsRunnerApi && !supportsGenericMemoryApi) {
+    log(`Runner ${preset?.id || 'unknown'} requested IO UI but has no supported memory API.`);
     return;
   }
 
   state.apple2.enabled = true;
-  for (const name of DEFAULT_APPLE2_WATCHES) {
+  const watchSignals = Array.isArray(ioConfig.watchSignals) && ioConfig.watchSignals.length > 0
+    ? ioConfig.watchSignals
+    : DEFAULT_APPLE2_WATCHES;
+  for (const name of watchSignals) {
     if (runtime.sim.has_signal(name)) {
       addWatchSignal(name);
     }
   }
 
-  if (!(preset?.enableApple2Ui && preset.romPath)) {
+  if (!ioConfig.rom?.path) {
     return;
   }
 
   try {
-    const romResp = await fetchImpl(preset.romPath);
+    const romResp = await fetchImpl(ioConfig.rom.path);
     if (romResp.ok) {
       const romBytes = new Uint8Array(await romResp.arrayBuffer());
       state.apple2.baseRomBytes = new Uint8Array(romBytes);
-      runtime.sim.apple2_load_rom(romBytes);
-      log(`Loaded Apple II ROM: ${preset.romPath}`);
+      if (supportsRunnerApi && typeof runtime.sim.runner_load_rom === 'function') {
+        runtime.sim.runner_load_rom(romBytes, ioConfig.rom.offset || 0);
+        log(`Loaded runner ROM via runner_load_rom: ${ioConfig.rom.path}`);
+      } else if (supportsGenericMemoryApi && typeof runtime.sim.memory_load === 'function') {
+        runtime.sim.memory_load(romBytes, ioConfig.rom.offset || 0, { isRom: !!ioConfig.rom.isRom });
+        log(`Loaded runner ROM: ${ioConfig.rom.path}`);
+      }
     } else {
-      log(`Apple II ROM load skipped (${romResp.status})`);
+      log(`Runner ROM load skipped (${romResp.status})`);
     }
   } catch (err) {
-    log(`Failed to load Apple II ROM: ${err.message || err}`);
+    log(`Failed to load runner ROM: ${err.message || err}`);
   }
 }
