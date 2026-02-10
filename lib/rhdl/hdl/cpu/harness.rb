@@ -53,20 +53,12 @@ module RHDL
           ir = RHDL::HDL::CPU::CPU.to_flat_ir
           ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
 
-          # Create simulator based on backend
-          @sim = case sim
-          when :interpret
-            require 'rhdl/codegen/ir/sim/ir_interpreter'
-            RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json, allow_fallback: true)
-          when :jit
-            require 'rhdl/codegen/ir/sim/ir_jit'
-            RHDL::Codegen::IR::IrJitWrapper.new(ir_json, allow_fallback: true)
-          when :compile
-            require 'rhdl/codegen/ir/sim/ir_compiler'
-            RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json, allow_fallback: true)
-          else
-            raise "Unknown sim backend: #{sim}"
-          end
+          require 'rhdl/codegen/ir/sim/ir_simulator'
+          @sim = RHDL::Codegen::IR::IrSimulator.new(
+            ir_json,
+            backend: sim,
+            allow_fallback: true
+          )
 
           # Copy external memory if provided
           if external_memory && !external_memory.is_a?(String)

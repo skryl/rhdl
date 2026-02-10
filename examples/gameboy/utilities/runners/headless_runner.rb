@@ -6,7 +6,7 @@
 # This provides the same runner creation logic as GameBoyTerminal
 # but without any terminal/display dependencies.
 
-require_relative 'hdl_runner'
+require_relative 'ruby_runner'
 
 module RHDL
   module Examples
@@ -15,26 +15,24 @@ module RHDL
       attr_reader :runner, :mode, :sim_backend
 
       # Create a headless runner with the specified options
-      # @param mode [Symbol] Simulation mode: :hdl, :verilog
-      # @param sim [Symbol] Simulator backend: :ruby, :interpret, :jit, :compile
-      def initialize(mode: :hdl, sim: :ruby)
+      # @param mode [Symbol] Simulation mode: :ruby, :ir, :verilog
+      # @param sim [Symbol] Simulator backend for :ir mode: :interpret, :jit, :compile
+      def initialize(mode: :ruby, sim: nil)
         @mode = mode
-        @sim_backend = sim
+        @sim_backend = sim || default_backend(mode)
 
         # Create runner based on mode and sim backend
         @runner = case mode
+                  when :ruby
+                    RHDL::Examples::GameBoy::RubyRunner.new
+                  when :ir
+                    require_relative 'ir_runner'
+                    RHDL::Examples::GameBoy::IrRunner.new(backend: normalize_native_backend(@sim_backend))
                   when :verilog
                     require_relative 'verilator_runner'
-                    RHDL::Examples::GameBoy::VerilatorRunner.new
-                  else  # :hdl (default)
-                    if sim == :ruby
-                      # Pure Ruby HDL simulation
-                      RHDL::Examples::GameBoy::HdlRunner.new
-                    else
-                      # IR simulation with native backends (interpret, jit, compile)
-                      require_relative 'ir_runner'
-                      RHDL::Examples::GameBoy::IrRunner.new(backend: sim)
-                    end
+                    RHDL::Examples::GameBoy::VerilogRunner.new
+                  else
+                    raise ArgumentError, "Unknown mode: #{mode}. Valid modes: ruby, ir, verilog"
                   end
       end
 
@@ -91,7 +89,7 @@ module RHDL
       # Get backend
       def backend
         case @mode
-        when :hdl
+        when :ruby, :ir
           @sim_backend
         when :verilog
           nil
@@ -162,11 +160,32 @@ module RHDL
       end
 
       # Create a headless runner with test ROM loaded
-      def self.with_test_rom(mode: :hdl, sim: :ruby)
+      def self.with_test_rom(mode: :ruby, sim: nil)
         runner = new(mode: mode, sim: sim)
         test_rom = create_test_rom
         runner.load_rom(test_rom)
         runner
+      end
+
+      private
+
+      def normalize_native_backend(backend)
+        case backend
+        when :interpret, :jit, :compile
+          backend
+        else
+          raise ArgumentError, "Invalid backend #{backend.inspect} for #{mode} mode. Use :interpret, :jit, or :compile."
+        end
+      end
+
+      def default_backend(mode)
+        case mode
+        when :ruby then :ruby
+        when :ir then :compile
+        when :verilog then nil
+        else
+          raise ArgumentError, "Unknown mode: #{mode}. Valid modes: ruby, ir, verilog"
+        end
       end
       end
     end

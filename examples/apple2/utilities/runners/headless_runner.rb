@@ -6,7 +6,7 @@
 # This provides the same runner creation logic as Apple2HDLTerminal
 # but without any terminal/display dependencies.
 
-require_relative 'hdl_runner'
+require_relative 'ruby_runner'
 
 module RHDL
   module Examples
@@ -15,31 +15,29 @@ module RHDL
       attr_reader :runner, :mode, :sim_backend
 
       # Create a headless runner with the specified options
-      # @param mode [Symbol] Simulation mode: :hdl, :netlist, :verilog
-      # @param sim [Symbol] Simulator backend: :ruby, :interpret, :jit, :compile
+      # @param mode [Symbol] Simulation mode: :ruby, :ir, :netlist, :verilog
+      # @param sim [Symbol] Simulator backend for :ir/:netlist: :interpret, :jit, :compile
       # @param sub_cycles [Integer] Sub-cycles per CPU cycle (for IR backends)
-      def initialize(mode: :hdl, sim: :ruby, sub_cycles: 14)
+      def initialize(mode: :ruby, sim: nil, sub_cycles: 14)
         @mode = mode
-        @sim_backend = sim
+        @sim_backend = sim || default_backend(mode)
         @sub_cycles = sub_cycles
 
         # Create runner based on mode and sim backend
         @runner = case mode
+                  when :ruby
+                    RHDL::Examples::Apple2::RubyRunner.new
+                  when :ir
+                    require_relative 'ir_runner'
+                    RHDL::Examples::Apple2::IrRunner.new(backend: normalize_native_backend(@sim_backend), sub_cycles: sub_cycles)
                   when :netlist
                     require_relative 'netlist_runner'
-                    RHDL::Examples::Apple2::NetlistRunner.new(backend: sim)
+                    RHDL::Examples::Apple2::NetlistRunner.new(backend: normalize_native_backend(@sim_backend))
                   when :verilog
                     require_relative 'verilator_runner'
-                    RHDL::Examples::Apple2::VerilatorRunner.new(sub_cycles: sub_cycles)
-                  else  # :hdl (default)
-                    if sim == :ruby
-                      # Pure Ruby HDL simulation
-                      RHDL::Examples::Apple2::HdlRunner.new
-                    else
-                      # IR simulation with native backends (interpret, jit, compile)
-                      require_relative 'ir_runner'
-                      RHDL::Examples::Apple2::IrSimulatorRunner.new(backend: sim, sub_cycles: sub_cycles)
-                    end
+                    RHDL::Examples::Apple2::VerilogRunner.new(sub_cycles: sub_cycles)
+                  else
+                    raise ArgumentError, "Unknown mode: #{mode}. Valid modes: ruby, ir, netlist, verilog"
                   end
       end
 
@@ -186,7 +184,7 @@ module RHDL
       # Get backend
       def backend
         case @mode
-        when :hdl
+        when :ruby, :ir
           @sim_backend
         when :netlist
           @sim_backend
@@ -228,7 +226,7 @@ module RHDL
       end
 
       # Create a headless runner with demo program loaded
-      def self.with_demo(mode: :hdl, sim: :ruby, sub_cycles: 14)
+      def self.with_demo(mode: :ruby, sim: nil, sub_cycles: 14)
         runner = new(mode: mode, sim: sim, sub_cycles: sub_cycles)
         demo = create_demo_program
         runner.load_program_bytes(demo, base_addr: 0x0800)
@@ -254,7 +252,7 @@ module RHDL
 
       # Create a headless runner with Karateka loaded (from memory dump)
       # This loads the game state from a memory dump, bypassing disk I/O
-      def self.with_karateka(mode: :hdl, sim: :ruby, sub_cycles: 14)
+      def self.with_karateka(mode: :ruby, sim: nil, sub_cycles: 14)
         raise "Karateka ROM not found at #{KARATEKA_ROM_PATH}" unless File.exist?(KARATEKA_ROM_PATH)
         raise "Karateka memory dump not found at #{KARATEKA_MEM_PATH}" unless File.exist?(KARATEKA_MEM_PATH)
 
@@ -271,6 +269,27 @@ module RHDL
         runner.load_program_bytes(mem_data.first(48 * 1024), base_addr: 0x0000)
 
         runner
+      end
+
+      private
+
+      def normalize_native_backend(backend)
+        case backend
+        when :interpret, :jit, :compile
+          backend
+        else
+          raise ArgumentError, "Invalid backend #{backend.inspect} for #{mode} mode. Use :interpret, :jit, or :compile."
+        end
+      end
+
+      def default_backend(mode)
+        case mode
+        when :ruby then :ruby
+        when :ir, :netlist then :compile
+        when :verilog then nil
+        else
+          raise ArgumentError, "Unknown mode: #{mode}. Valid modes: ruby, ir, netlist, verilog"
+        end
       end
     end
   end

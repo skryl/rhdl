@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Game Boy HDL Runner
+# Game Boy Ruby Runner
 # Behavioral simulation of Game Boy hardware
 # Note: Full HDL component integration pending signal naming fixes
 
@@ -10,10 +10,10 @@ require_relative '../renderers/lcd_renderer'
 module RHDL
   module Examples
     module GameBoy
-      # HDL-based runner using behavioral Game Boy simulation
+      # Ruby-based runner using behavioral Game Boy simulation
     # This is a simplified runner that models Game Boy behavior
     # without requiring the full HDL component hierarchy
-    class HdlRunner
+    class RubyRunner
       attr_reader :ram
 
       # Screen dimensions
@@ -310,7 +310,7 @@ module RHDL
 
       def dry_run_info
         {
-          mode: :hdl,
+          mode: :ruby,
           simulator_type: :hdl_ruby,
           native: false
         }

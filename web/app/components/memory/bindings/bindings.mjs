@@ -22,7 +22,7 @@ export function bindMemoryBindings({
 
   listeners.on(dom.memoryDumpLoadBtn, 'click', async () => {
     if (!runtime.sim || !apple2.isUiEnabled()) {
-      apple2.setMemoryDumpStatus('Load the Apple II runner first.');
+      apple2.setMemoryDumpStatus('Load a runner with memory + I/O support first.');
       return;
     }
 
@@ -96,7 +96,12 @@ export function bindMemoryBindings({
       return;
     }
 
-    const ok = runtime.sim.apple2_write_ram(addr, new Uint8Array([value & 0xff]));
+    let ok = false;
+    if (typeof runtime.sim.memory_write_byte === 'function') {
+      ok = runtime.sim.memory_write_byte(addr, value & 0xff, { mapped: true });
+    } else if (typeof runtime.sim.memory_write === 'function') {
+      ok = runtime.sim.memory_write(addr, new Uint8Array([value & 0xff]), { mapped: true });
+    }
     if (dom.memoryStatus) {
       dom.memoryStatus.textContent = ok
         ? `Wrote $${util.hexByte(value & 0xff)} @ $${addr.toString(16).toUpperCase().padStart(4, '0')}`

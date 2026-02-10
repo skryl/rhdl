@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 require_relative '../../../../examples/gameboy/gameboy'
-require_relative '../../../../examples/gameboy/utilities/runners/hdl_runner'
+require_relative '../../../../examples/gameboy/utilities/runners/ruby_runner'
 require_relative '../../../../examples/gameboy/utilities/renderers/lcd_renderer'
 
 RSpec.describe 'Game Boy CLI' do
@@ -50,8 +50,8 @@ RSpec.describe 'Game Boy CLI' do
     rom.pack('C*')
   end
 
-  describe 'HdlRunner (Ruby backend)' do
-    let(:runner) { RHDL::Examples::GameBoy::HdlRunner.new }
+  describe 'RubyRunner (Ruby backend)' do
+    let(:runner) { RHDL::Examples::GameBoy::RubyRunner.new }
     let(:rom) { create_test_rom }
 
     before do
@@ -204,7 +204,7 @@ RSpec.describe 'Game Boy CLI' do
     end
   end
 
-  describe 'VerilatorRunner' do
+  describe 'VerilogRunner' do
     before(:all) do
       # Check if Verilator is available
       @verilator_available = system('which verilator > /dev/null 2>&1')
@@ -214,14 +214,14 @@ RSpec.describe 'Game Boy CLI' do
         require_relative '../../../../examples/gameboy/utilities/runners/verilator_runner'
       rescue LoadError => e
         @verilator_available = false
-        skip "VerilatorRunner not available: #{e.message}"
+        skip "VerilogRunner not available: #{e.message}"
       end
     end
 
     let(:rom) { create_test_rom }
     let(:runner) do
       skip "Verilator not available" unless @verilator_available
-      RHDL::Examples::GameBoy::VerilatorRunner.new
+      RHDL::Examples::GameBoy::VerilogRunner.new
     end
 
     before do
@@ -341,9 +341,9 @@ RSpec.describe 'Game Boy CLI' do
 
   describe 'CLI Option Defaults' do
     # These tests verify the expected defaults match the requirements
-    it 'defaults mode to :hdl' do
-      # The default mode should be :hdl
-      expect(:hdl).to eq(:hdl)
+    it 'defaults mode to :ruby' do
+      # The default mode should be :ruby
+      expect(:ruby).to eq(:ruby)
     end
 
     it 'defaults sim backend to :compile' do
@@ -371,12 +371,12 @@ RSpec.describe 'Game Boy CLI' do
       ]
     end
 
-    describe 'HdlRunner' do
-      let(:runner) { RHDL::Examples::GameBoy::HdlRunner.new }
+    describe 'RubyRunner' do
+      let(:runner) { RHDL::Examples::GameBoy::RubyRunner.new }
 
       it 'implements all required interface methods' do
         required_methods.each do |method|
-          expect(runner).to respond_to(method), "Expected HdlRunner to respond to #{method}"
+          expect(runner).to respond_to(method), "Expected RubyRunner to respond to #{method}"
         end
       end
     end
@@ -404,7 +404,7 @@ RSpec.describe 'Game Boy CLI' do
       end
     end
 
-    describe 'VerilatorRunner' do
+    describe 'VerilogRunner' do
       before do
         @verilator_available = system('which verilator > /dev/null 2>&1')
         if @verilator_available
@@ -418,16 +418,16 @@ RSpec.describe 'Game Boy CLI' do
 
       it 'implements all required interface methods' do
         skip "Verilator not available" unless @verilator_available
-        runner = RHDL::Examples::GameBoy::VerilatorRunner.new
+        runner = RHDL::Examples::GameBoy::VerilogRunner.new
         required_methods.each do |method|
-          expect(runner).to respond_to(method), "Expected VerilatorRunner to respond to #{method}"
+          expect(runner).to respond_to(method), "Expected VerilogRunner to respond to #{method}"
         end
       end
     end
   end
 
   describe 'Long-running simulation tests' do
-    let(:runner) { RHDL::Examples::GameBoy::HdlRunner.new }
+    let(:runner) { RHDL::Examples::GameBoy::RubyRunner.new }
     let(:rom) { create_test_rom }
 
     before do

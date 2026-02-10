@@ -75,7 +75,7 @@ module RHDL
       # @param backend [Symbol] :interpret, :jit, or :compile
       def initialize(backend: :interpret)
         require 'rhdl/codegen'
-        require 'rhdl/codegen/ir/sim/ir_interpreter'
+        require 'rhdl/codegen/ir/sim/ir_simulator'
 
         backend_names = { interpret: "Interpreter", jit: "JIT", compile: "Compiler" }
         puts "Initializing Game Boy IR simulation [#{backend_names[backend]}]..."
@@ -85,19 +85,11 @@ module RHDL
         @ir_json = GameBoyIr.ir_json
         @backend = backend
 
-        # Create the simulator based on backend choice
-        @sim = case backend
-               when :interpret
-                 RHDL::Codegen::IR::IrInterpreterWrapper.new(@ir_json, allow_fallback: false)
-               when :jit
-                 require 'rhdl/codegen/ir/sim/ir_jit'
-                 RHDL::Codegen::IR::IrJitWrapper.new(@ir_json, allow_fallback: false)
-               when :compile
-                 require 'rhdl/codegen/ir/sim/ir_compiler'
-                 RHDL::Codegen::IR::IrCompilerWrapper.new(@ir_json)
-               else
-                 raise ArgumentError, "Unknown backend: #{backend}. Use :interpret, :jit, or :compile"
-               end
+        @sim = RHDL::Codegen::IR::IrSimulator.new(
+          @ir_json,
+          backend: backend,
+          allow_fallback: false
+        )
 
         elapsed = Time.now - start_time
         puts "  IR loaded in #{elapsed.round(2)}s"
@@ -116,15 +108,14 @@ module RHDL
         @speaker = Speaker.new
         @prev_audio = 0
 
-        # Check for either Game Boy batched cycles or Apple II batched cycles
-        @use_batched = @sim.native? && (@sim.respond_to?(:run_gb_cycles) || @sim.respond_to?(:apple2_run_cpu_cycles))
+        @use_batched = @sim.native? && @sim.runner_mode?
 
         if @use_batched
           puts "  Batched execution: enabled"
         end
 
         # Check for Game Boy mode specifically
-        if @sim.respond_to?(:gameboy_mode?) && @sim.gameboy_mode?
+        if @sim.gameboy_mode?
           puts "  Game Boy mode: enabled"
         end
 
@@ -176,7 +167,7 @@ module RHDL
         bytes = bytes.bytes if bytes.is_a?(String)
 
         if @use_batched
-          @sim.load_ram(bytes, base_addr)
+          @sim.runner_load_memory(bytes, base_addr, false)
         else
           bytes.each_with_index do |byte, i|
             addr = base_addr + i
@@ -219,18 +210,17 @@ module RHDL
       end
 
       def reset
-        if @use_batched && @sim.respond_to?(:gameboy_mode?) && @sim.gameboy_mode?
-          # Use run_gb_cycles for Game Boy - run_cpu_cycles corrupts signals[0] (reset)
+        if @use_batched && @sim.gameboy_mode?
+          # Keep reset deterministic for tests: assert reset for one cycle, then release.
           poke_input('reset', 1)
-          @sim.run_gb_cycles(10)
+          @sim.run_gb_cycles(1)
           poke_input('reset', 0)
-          @sim.run_gb_cycles(100)
           @sim.reset_lcd_state if @sim.respond_to?(:reset_lcd_state)
         elsif @use_batched
           poke_input('reset', 1)
-          @sim.apple2_run_cpu_cycles(1, 0, false)
+          @sim.runner_run_cycles(1, 0, false)
           poke_input('reset', 0)
-          @sim.apple2_run_cpu_cycles(10, 0, false)
+          @sim.runner_run_cycles(10, 0, false)
         else
           poke_input('reset', 1)
           run_cycles(10)
@@ -257,12 +247,12 @@ module RHDL
       # Batched execution
       def run_steps_batched(steps)
         # Use Game Boy specific cycles if available (with framebuffer capture)
-        if @sim.respond_to?(:run_gb_cycles) && @sim.respond_to?(:gameboy_mode?) && @sim.gameboy_mode?
+        if @sim.respond_to?(:run_gb_cycles) && @sim.gameboy_mode?
           result = @sim.run_gb_cycles(steps)
           @cycles += result[:cycles_run]
           @screen_dirty = true if result[:frames_completed] > 0
         else
-          result = @sim.apple2_run_cpu_cycles(steps, 0, false)
+          result = @sim.runner_run_cycles(steps, 0, false)
           @cycles += result[:cycles_run]
           @screen_dirty = true if result[:screen_dirty]
         end
@@ -307,7 +297,7 @@ module RHDL
         if addr <= ROM_BANK_N_END
           @rom[addr] || 0
         elsif @use_batched
-          data = @sim.read_ram(addr, 1)
+          data = @sim.runner_read_memory(addr, 1)
           data[0] || 0
         else
           @ram[addr] || 0
@@ -318,7 +308,7 @@ module RHDL
         addr &= 0xFFFF
 
         if @use_batched
-          @sim.write_ram(addr, [value & 0xFF])
+          @sim.runner_write_memory(addr, [value & 0xFF])
         else
           @ram[addr] = value & 0xFF if addr < @ram.size
         end
@@ -336,7 +326,7 @@ module RHDL
 
       def read_framebuffer
         # Use native framebuffer capture if available
-        if @use_batched && @sim.respond_to?(:read_framebuffer) && @sim.respond_to?(:gameboy_mode?) && @sim.gameboy_mode?
+        if @use_batched && @sim.respond_to?(:read_framebuffer) && @sim.gameboy_mode?
           # Get flat 1D array from native code and reshape to 2D
           flat = @sim.read_framebuffer
           Array.new(SCREEN_HEIGHT) do |y|

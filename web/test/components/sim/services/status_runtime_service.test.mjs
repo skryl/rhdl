@@ -44,7 +44,7 @@ test('sim status runtime service describes runtime status and clock options', ()
       clock_mode: (name) => (name === 'clk_14m' ? 'forced' : 'auto'),
       trace_enabled: () => true,
       trace_change_count: () => 99,
-      apple2_mode: () => true,
+      runner_kind: () => 'apple2',
       features: {
         hasSignalIndex: false,
         hasLiveTrace: false

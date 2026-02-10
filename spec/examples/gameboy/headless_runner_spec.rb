@@ -7,10 +7,10 @@ $LOAD_PATH.unshift(File.expand_path('../../../../examples/gameboy/utilities/runn
 require 'headless_runner'
 
 RSpec.describe RHDL::Examples::GameBoy::HeadlessRunner, :slow do
-  describe 'HDL mode with Ruby backend (default)' do
-    it 'creates HDL mode runner with Ruby backend by default' do
+  describe 'Ruby mode (default)' do
+    it 'creates Ruby mode runner with Ruby backend by default' do
       runner = described_class.new
-      expect(runner.mode).to eq(:hdl)
+      expect(runner.mode).to eq(:ruby)
       expect(runner.backend).to eq(:ruby)
       expect(runner.simulator_type).to eq(:hdl_ruby)
     end
@@ -31,63 +31,63 @@ RSpec.describe RHDL::Examples::GameBoy::HeadlessRunner, :slow do
     end
   end
 
-  describe 'HDL mode with IR interpret backend' do
+  describe 'IR mode with interpret backend' do
     before(:each) do
       skip 'IR Interpreter requires native extension' unless ir_interpreter_available?
     end
 
-    it 'creates HDL mode runner with interpret backend' do
-      runner = described_class.new(sim: :interpret)
-      expect(runner.mode).to eq(:hdl)
+    it 'creates IR mode runner with interpret backend' do
+      runner = described_class.new(mode: :ir, sim: :interpret)
+      expect(runner.mode).to eq(:ir)
       expect(runner.backend).to eq(:interpret)
     end
 
     it 'loads test ROM into IR simulator' do
-      runner = described_class.with_test_rom(sim: :interpret)
+      runner = described_class.with_test_rom(mode: :ir, sim: :interpret)
       expect(runner.rom_size).to be > 0
     end
   end
 
-  describe 'HDL mode with IR jit backend' do
+  describe 'IR mode with jit backend' do
     before(:each) do
       skip 'IR JIT requires native extension' unless ir_jit_available?
     end
 
-    it 'creates HDL mode runner with jit backend' do
-      runner = described_class.new(sim: :jit)
-      expect(runner.mode).to eq(:hdl)
+    it 'creates IR mode runner with jit backend' do
+      runner = described_class.new(mode: :ir, sim: :jit)
+      expect(runner.mode).to eq(:ir)
       expect(runner.backend).to eq(:jit)
     end
 
     it 'sets native flag to true for jit' do
-      runner = described_class.new(sim: :jit)
+      runner = described_class.new(mode: :ir, sim: :jit)
       expect(runner.native?).to be true
     end
 
     it 'loads test ROM into IR simulator' do
-      runner = described_class.with_test_rom(sim: :jit)
+      runner = described_class.with_test_rom(mode: :ir, sim: :jit)
       expect(runner.rom_size).to be > 0
     end
   end
 
-  describe 'HDL mode with IR compile backend' do
+  describe 'IR mode with compile backend' do
     before(:each) do
       skip 'IR Compiler requires native extension' unless ir_compiler_available?
     end
 
-    it 'creates HDL mode runner with compile backend' do
-      runner = described_class.new(sim: :compile)
-      expect(runner.mode).to eq(:hdl)
+    it 'creates IR mode runner with compile backend' do
+      runner = described_class.new(mode: :ir, sim: :compile)
+      expect(runner.mode).to eq(:ir)
       expect(runner.backend).to eq(:compile)
     end
 
     it 'sets native flag to true for compile' do
-      runner = described_class.new(sim: :compile)
+      runner = described_class.new(mode: :ir, sim: :compile)
       expect(runner.native?).to be true
     end
 
     it 'loads test ROM into IR simulator' do
-      runner = described_class.with_test_rom(sim: :compile)
+      runner = described_class.with_test_rom(mode: :ir, sim: :compile)
       expect(runner.rom_size).to be > 0
     end
   end

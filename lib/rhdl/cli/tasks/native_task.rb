@@ -28,7 +28,7 @@ module RHDL
             ext_dir: File.expand_path('lib/rhdl/codegen/netlist/sim/netlist_interpreter', Config.project_root),
             crate_name: 'netlist_interpreter',
             load_path: 'lib',
-            require_path: 'rhdl/codegen/netlist/sim/netlist_interpreter',
+            require_path: 'rhdl/codegen/netlist/sim/netlist_simulator',
             artifact: :ruby_ext,
             check_const: 'RHDL::Codegen::Netlist::NETLIST_INTERPRETER_AVAILABLE'
           },
@@ -37,7 +37,7 @@ module RHDL
             ext_dir: File.expand_path('lib/rhdl/codegen/netlist/sim/netlist_jit', Config.project_root),
             crate_name: 'netlist_jit',
             load_path: 'lib',
-            require_path: 'rhdl/codegen/netlist/sim/netlist_jit',
+            require_path: 'rhdl/codegen/netlist/sim/netlist_simulator',
             artifact: :ruby_ext,
             check_const: 'RHDL::Codegen::Netlist::NETLIST_JIT_AVAILABLE'
           },
@@ -46,7 +46,7 @@ module RHDL
             ext_dir: File.expand_path('lib/rhdl/codegen/netlist/sim/netlist_compiler', Config.project_root),
             crate_name: 'netlist_compiler',
             load_path: 'lib',
-            require_path: 'rhdl/codegen/netlist/sim/netlist_compiler',
+            require_path: 'rhdl/codegen/netlist/sim/netlist_simulator',
             artifact: :ruby_ext,
             check_const: 'RHDL::Codegen::Netlist::NETLIST_COMPILER_AVAILABLE'
           },
@@ -57,7 +57,7 @@ module RHDL
             ext_dir: File.expand_path('lib/rhdl/codegen/ir/sim/ir_interpreter', Config.project_root),
             crate_name: 'ir_interpreter',
             load_path: 'lib',
-            require_path: 'rhdl/codegen/ir/sim/ir_interpreter',
+            require_path: 'rhdl/codegen/ir/sim/ir_simulator',
             artifact: :fiddle_lib,
             check_const: 'RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE'
           },
@@ -66,7 +66,7 @@ module RHDL
             ext_dir: File.expand_path('lib/rhdl/codegen/ir/sim/ir_jit', Config.project_root),
             crate_name: 'ir_jit',
             load_path: 'lib',
-            require_path: 'rhdl/codegen/ir/sim/ir_jit',
+            require_path: 'rhdl/codegen/ir/sim/ir_simulator',
             artifact: :fiddle_lib,
             check_const: 'RHDL::Codegen::IR::IR_JIT_AVAILABLE'
           },
@@ -75,7 +75,7 @@ module RHDL
             ext_dir: File.expand_path('lib/rhdl/codegen/ir/sim/ir_compiler', Config.project_root),
             crate_name: 'ir_compiler',
             load_path: 'lib',
-            require_path: 'rhdl/codegen/ir/sim/ir_compiler',
+            require_path: 'rhdl/codegen/ir/sim/ir_simulator',
             artifact: :fiddle_lib,
             check_const: 'RHDL::Codegen::IR::IR_COMPILER_AVAILABLE'
           }

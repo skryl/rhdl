@@ -1,5 +1,6 @@
 import {
   normalizeApple2KeyCode,
+  normalizeMappedKeyCode,
   parseStepTickCount,
   parseRunLoopConfig,
   executeGenericRunBatch,
@@ -57,14 +58,104 @@ export function createSimLoopRunnerService({
   requireFn('refreshActiveComponentTab', refreshActiveComponentTab);
   requireFn('requestFrame', requestFrame);
 
+  function currentIoConfig() {
+    return state.apple2?.ioConfig || {};
+  }
+
+  function readMappedSoundByte() {
+    const soundCfg = currentIoConfig().sound || {};
+    if (!soundCfg.enabled || soundCfg.mode !== 'memory_mapped') {
+      return null;
+    }
+    const addr = Number.parseInt(soundCfg.addr, 10);
+    if (!Number.isFinite(addr) || addr < 0) {
+      return null;
+    }
+    if (typeof runtime.sim.memory_read_byte !== 'function') {
+      return null;
+    }
+    return runtime.sim.memory_read_byte(addr & 0xFFFF, { mapped: true }) & 0xFF;
+  }
+
+  function pollMappedSound(cyclesRun) {
+    const soundCfg = currentIoConfig().sound || {};
+    if (!soundCfg.enabled || soundCfg.mode !== 'memory_mapped') {
+      state.apple2.lastMappedSoundValue = null;
+      return;
+    }
+    const current = readMappedSoundByte();
+    if (current == null) {
+      return;
+    }
+
+    const mask = Number.parseInt(soundCfg.mask, 10);
+    const bitMask = Number.isFinite(mask) ? (mask & 0xFF) : 0x01;
+    const previous = Number.parseInt(state.apple2.lastMappedSoundValue, 10);
+    state.apple2.lastMappedSoundValue = current;
+    if (!Number.isFinite(previous)) {
+      return;
+    }
+
+    const toggledBits = (previous ^ current) & bitMask;
+    if (!toggledBits) {
+      return;
+    }
+    const toggles = toggledBits.toString(2).split('1').length - 1;
+    state.apple2.lastSpeakerToggles = (state.apple2.lastSpeakerToggles || 0) + toggles;
+    updateApple2SpeakerAudio(toggles, Math.max(1, cyclesRun));
+  }
+
+  function runGenericCycles(cycles) {
+    const ticks = Math.max(0, Number.parseInt(cycles, 10) || 0);
+    const clk = selectedClock();
+    if (clk) {
+      runtime.sim.run_clock_ticks(clk, ticks);
+    } else {
+      runtime.sim.run_ticks(ticks);
+    }
+    state.cycle += ticks;
+    pollMappedSound(ticks);
+    if (runtime.sim.trace_enabled()) {
+      runtime.sim.trace_capture();
+    }
+  }
+
   function queueApple2Key(value) {
     if (!isApple2UiEnabled()) {
       return;
     }
-    const normalized = normalizeApple2KeyCode(value);
+
+    const ioConfig = currentIoConfig();
+    const keyboardCfg = ioConfig.keyboard || {};
+    if (keyboardCfg.enabled === false) {
+      return;
+    }
+    const normalized = keyboardCfg.mode === 'memory_mapped'
+      ? normalizeMappedKeyCode(value, keyboardCfg)
+      : normalizeApple2KeyCode(value);
     if (normalized == null) {
       return;
     }
+
+    if (keyboardCfg.mode === 'memory_mapped' && typeof runtime.sim?.memory_write_byte === 'function') {
+      const dataAddr = Number.parseInt(keyboardCfg.dataAddr, 10);
+      if (Number.isFinite(dataAddr) && dataAddr >= 0) {
+        runtime.sim.memory_write_byte(dataAddr & 0xFFFF, normalized, { mapped: true });
+      }
+
+      const strobeAddr = Number.parseInt(keyboardCfg.strobeAddr, 10);
+      if (Number.isFinite(strobeAddr) && strobeAddr >= 0) {
+        const strobeValue = Number.parseInt(keyboardCfg.strobeValue, 10);
+        runtime.sim.memory_write_byte(strobeAddr & 0xFFFF, Number.isFinite(strobeValue) ? (strobeValue & 0xFF) : 1, { mapped: true });
+        const clearValue = Number.parseInt(keyboardCfg.strobeClearValue, 10);
+        if (Number.isFinite(clearValue)) {
+          runtime.sim.memory_write_byte(strobeAddr & 0xFFFF, clearValue & 0xFF, { mapped: true });
+        }
+      }
+      refreshStatus();
+      return;
+    }
+
     state.apple2.keyQueue.push(normalized);
     refreshStatus();
   }
@@ -74,10 +165,16 @@ export function createSimLoopRunnerService({
       return;
     }
 
+    if (typeof runtime.sim.runner_run_cycles !== 'function') {
+      runGenericCycles(cycles);
+      return;
+    }
+
     const key = state.apple2.keyQueue[0];
     const keyReady = state.apple2.keyQueue.length > 0;
-    const result = runtime.sim.apple2_run_cpu_cycles(cycles, key || 0, keyReady);
+    const result = runtime.sim.runner_run_cycles(cycles, key || 0, keyReady);
     if (!result) {
+      runGenericCycles(cycles);
       return;
     }
 
@@ -85,11 +182,15 @@ export function createSimLoopRunnerService({
       state.apple2.keyQueue.shift();
     }
 
+    const cyclesRun = Math.max(0, Number.parseInt(result.cycles_run, 10) || 0);
+    const speakerToggles = Math.max(0, Number.parseInt(result.speaker_toggles, 10) || 0);
     state.apple2.lastCpuResult = result;
-    state.apple2.lastSpeakerToggles = result.speaker_toggles;
-    state.cycle += result.cycles_run;
-    updateApple2SpeakerAudio(result.speaker_toggles, result.cycles_run);
-
+    state.apple2.lastSpeakerToggles = speakerToggles;
+    state.cycle += cyclesRun;
+    if (speakerToggles > 0) {
+      updateApple2SpeakerAudio(speakerToggles, Math.max(1, cyclesRun));
+    }
+    pollMappedSound(cyclesRun);
     if (runtime.sim.trace_enabled()) {
       runtime.sim.trace_capture();
     }

@@ -22,9 +22,9 @@ export function createApple2SimRuntimeService({
   if (!state || !runtime) {
     throw new Error('createApple2SimRuntimeService requires state/runtime');
   }
-  if (!Number.isFinite(APPLE2_RAM_BYTES) || APPLE2_RAM_BYTES <= 0) {
-    throw new Error('createApple2SimRuntimeService requires APPLE2_RAM_BYTES');
-  }
+  const defaultRamBytes = Number.isFinite(APPLE2_RAM_BYTES) && APPLE2_RAM_BYTES > 0
+    ? APPLE2_RAM_BYTES
+    : 0x10000;
   requireFn('setRunningState', setRunningState);
   requireFn('setCycleState', setCycleState);
   requireFn('setUiCyclesPendingState', setUiCyclesPendingState);
@@ -34,15 +34,28 @@ export function createApple2SimRuntimeService({
   requireFn('refreshApple2UiState', refreshApple2UiState);
   requireFn('log', log);
 
+  function currentMemoryConfig() {
+    return state.apple2?.ioConfig?.memory || {};
+  }
+
+  function currentAddressSpace() {
+    const configured = Number.parseInt(currentMemoryConfig().addressSpace, 10);
+    if (Number.isFinite(configured) && configured > 0) {
+      return configured;
+    }
+    return defaultRamBytes;
+  }
+
   function fitApple2RamWindow(bytes, offset) {
     if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
       return { data: new Uint8Array(0), trimmed: false };
     }
     const off = Math.max(0, Math.trunc(offset));
-    if (off >= APPLE2_RAM_BYTES) {
+    const maxWindow = currentAddressSpace();
+    if (off >= maxWindow) {
       return { data: new Uint8Array(0), trimmed: true };
     }
-    const maxLen = APPLE2_RAM_BYTES - off;
+    const maxLen = maxWindow - off;
     if (bytes.length <= maxLen) {
       return { data: bytes, trimmed: false };
     }
@@ -59,14 +72,23 @@ export function createApple2SimRuntimeService({
     const releaseCycles = Number.isFinite(parsedReleaseCycles) ? Math.max(0, parsedReleaseCycles) : 10;
     const pcBefore = getApple2ProgramCounter();
     let usedResetSignal = false;
+    const runResetCycles = (cycles) => {
+      if (typeof runtime.sim.runner_run_cycles === 'function') {
+        runtime.sim.runner_run_cycles(cycles, 0, false);
+        return;
+      }
+      if (typeof runtime.sim.run_ticks === 'function') {
+        runtime.sim.run_ticks(cycles);
+      }
+    };
 
     if (runtime.sim.has_signal('reset')) {
       usedResetSignal = true;
       runtime.sim.poke('reset', 1);
-      runtime.sim.apple2_run_cpu_cycles(1, 0, false);
+      runResetCycles(1);
       runtime.sim.poke('reset', 0);
       if (releaseCycles > 0) {
-        runtime.sim.apple2_run_cpu_cycles(releaseCycles, 0, false);
+        runResetCycles(releaseCycles);
       }
     } else {
       runtime.sim.reset();
@@ -95,7 +117,11 @@ export function createApple2SimRuntimeService({
       return false;
     }
 
-    const ok = runtime.sim.apple2_load_ram(data, off);
+    const ok = typeof runtime.sim.memory_load === 'function'
+      ? runtime.sim.memory_load(data, off, { isRom: false })
+      : (typeof runtime.sim.runner_load_memory === 'function'
+          ? runtime.sim.runner_load_memory(data, off, { isRom: false })
+          : false);
     if (!ok) {
       setMemoryDumpStatus('Dump load failed (runner memory API unavailable).');
       return false;

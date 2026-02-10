@@ -8,7 +8,7 @@ test('apple2 rom reset service patches reset vector and applies start PC', async
   const loadedRoms = [];
   const runtime = {
     sim: {
-      apple2_load_rom(bytes) {
+      runner_load_rom(bytes) {
         loadedRoms.push(new Uint8Array(bytes));
         return true;
       }

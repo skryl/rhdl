@@ -61,6 +61,6 @@ test('refreshMemoryView shows apple2-required message when disabled', () => {
   runtime.sim = {};
   controller.refreshMemoryView();
   assert.equal(renderCalls.length, 1);
-  assert.match(renderCalls[0].dumpText, /Load the Apple II runner/);
-  assert.equal(statusMessages.includes('Memory dump loading requires the Apple II runner.'), true);
+  assert.match(renderCalls[0].dumpText, /Load a runner with memory \+ I\/O support/);
+  assert.equal(statusMessages.includes('Memory dump loading requires a runner with memory + I/O support.'), true);
 });

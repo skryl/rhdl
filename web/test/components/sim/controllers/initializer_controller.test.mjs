@@ -48,7 +48,7 @@ function createHarness(overrides = {}) {
     ensureBackendInstance: async () => {},
     createSimulator: () => ({
       output_names: () => ['out1', 'out2'],
-      apple2_mode: () => false
+      runner_mode: () => false
     }),
     setCycleState: (value) => calls.push(['setCycleState', value]),
     setUiCyclesPendingState: (value) => calls.push(['setUiCyclesPendingState', value]),
@@ -91,7 +91,7 @@ test('initializeSimulator configures runtime and resets state', async () => {
   const { controller, calls, runtime, state, dom } = createHarness({
     createSimulator: () => ({
       output_names: () => ['out_a', 'out_b'],
-      apple2_mode: () => false
+      runner_mode: () => false
     })
   });
   runtime.sim = {

@@ -488,6 +488,30 @@ module RHDL
           behavior_result = behavior_to_ir_assigns(parameters: resolved_params)
           assigns = behavior_result[:assigns]
 
+          # Build instance port metadata (direction/width) for connection lowering.
+          instance_port_info = {}
+          _instance_defs.each do |inst_def|
+            component_class = inst_def[:component_class]
+            next unless component_class.respond_to?(:_port_defs)
+
+            inst_params = inst_def[:parameters] || {}
+            parameter_defaults = component_class.respond_to?(:_parameter_defs) ? component_class._parameter_defs : {}
+
+            component_class._port_defs.each do |port_def|
+              raw_width = port_def[:width]
+              resolved_width = if raw_width.is_a?(Symbol)
+                                 inst_params[raw_width] || parameter_defaults[raw_width] || 1
+                               else
+                                 raw_width
+                               end
+
+              instance_port_info[[inst_def[:name], port_def[:name]]] = {
+                direction: port_def[:direction],
+                width: resolved_width
+              }
+            end
+          end
+
           # Identify signals driven by instance outputs (these must be wires, not regs)
           # A signal is instance-driven if it's the destination of a connection from [inst, port]
           instance_driven_signals = Set.new
@@ -498,6 +522,13 @@ module RHDL
             # If source is [inst_name, port_name], then dest is driven by an instance output
             if source.is_a?(Array) && source.length == 2 && dest.is_a?(Symbol)
               instance_driven_signals.add(dest)
+              src_inst, src_port = source
+              src_wire = "#{src_inst}__#{src_port}"
+              src_width = instance_port_info[[src_inst, src_port]]&.dig(:width) || find_signal_width(dest)
+              signal_assigns << RHDL::Export::IR::Assign.new(
+                target: dest.to_s,
+                expr: RHDL::Export::IR::Signal.new(name: src_wire, width: src_width)
+              )
             # If both are symbols, generate an assign statement (signal-to-signal connection)
             # port :source_signal => :dest_signal means dest = source
             elsif source.is_a?(Symbol) && dest.is_a?(Symbol)
@@ -510,6 +541,21 @@ module RHDL
             end
           end
           assigns = assigns + signal_assigns
+
+          # Declare intermediate nets for instance output ports (inst__port).
+          # These are used as safe fanout points to avoid mixed procedural/continuous drivers.
+          instance_output_nets = []
+          _instance_defs.each do |inst_def|
+            inst_def[:connections].each_key do |port_name|
+              info = instance_port_info[[inst_def[:name], port_name]]
+              next unless info && info[:direction] == :out
+
+              instance_output_nets << RHDL::Export::IR::Net.new(
+                name: "#{inst_def[:name]}__#{port_name}",
+                width: info[:width]
+              )
+            end
+          end
 
           # Identify signals driven by continuous assigns (these must be wires, not regs)
           # In Verilog, 'reg' cannot be driven by 'assign' statements
@@ -529,7 +575,7 @@ module RHDL
             end
           end
 
-          nets = behavior_result[:wires] + instance_nets
+          nets = (behavior_result[:wires] + instance_nets + instance_output_nets).uniq { |n| n.name.to_s }
 
           # Generate instances from structure definitions
           instances = structure_to_ir_instances
@@ -680,6 +726,9 @@ module RHDL
               # instance port and assign statement
               signal_name = if direction == :out
                               "#{inst_def[:name]}__#{port_name}"
+                            elsif signal.is_a?(Array) && signal.length == 2
+                              # Instance-to-instance connection: [:src_inst, :src_port]
+                              "#{signal[0]}__#{signal[1]}"
                             else
                               signal.to_s
                             end

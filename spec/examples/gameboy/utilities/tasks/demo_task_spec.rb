@@ -207,7 +207,7 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::DemoTask do
 
     context 'with :run action in headless mode' do
       it 'runs the demo' do
-        task = described_class.new(action: :run, headless: true, cycles: 10, mode: :hdl, sim: :ruby)
+        task = described_class.new(action: :run, headless: true, cycles: 10, mode: :ruby, sim: :ruby)
         result = task.run
         expect(result).to be_a(Hash)
         expect(result[:cycles]).to eq(10)
@@ -216,7 +216,7 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::DemoTask do
 
     context 'with no action (default)' do
       it 'runs the demo in headless mode' do
-        task = described_class.new(headless: true, cycles: 10, mode: :hdl, sim: :ruby)
+        task = described_class.new(headless: true, cycles: 10, mode: :ruby, sim: :ruby)
         result = task.run
         expect(result).to be_a(Hash)
       end
@@ -224,7 +224,7 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::DemoTask do
   end
 
   describe 'integration with HeadlessRunner' do
-    let(:task) { described_class.new(headless: true, cycles: 100, mode: :hdl, sim: :ruby) }
+    let(:task) { described_class.new(headless: true, cycles: 100, mode: :ruby, sim: :ruby) }
 
     it 'runs demo ROM through HeadlessRunner' do
       result = task.run

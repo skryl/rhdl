@@ -230,7 +230,7 @@ RSpec.describe 'Gate-level backend equivalence' do
   end
 end
 
-RSpec.describe 'Netlist Simulator Modes' do
+RSpec.describe 'Netlist Simulator Modes', :slow do
   # Tests to verify all 3 netlist simulator backends (interpreter, jit, compiler)
   # produce correct and consistent results
 
@@ -340,16 +340,14 @@ RSpec.describe 'Netlist Simulator Modes' do
   describe 'backend consistency' do
     it 'all backends produce identical results for full adder' do
       results = {}
+      vectors = lanes.times.map do
+        { a: rng.rand(2), b: rng.rand(2), cin: rng.rand(2) }
+      end
 
       NETLIST_BACKENDS.each do |backend|
         begin
           adder = RHDL::HDL::FullAdder.new('fa')
           sim = create_simulator(backend, [adder], "fa_consistency_#{backend}")
-
-          # Random test vectors
-          vectors = lanes.times.map do
-            { a: rng.rand(2), b: rng.rand(2), cin: rng.rand(2) }
-          end
 
           sim.poke('fa.a', pack_scalar_mask(vectors.map { |v| v[:a] }))
           sim.poke('fa.b', pack_scalar_mask(vectors.map { |v| v[:b] }))

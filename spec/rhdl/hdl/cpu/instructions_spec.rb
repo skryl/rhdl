@@ -92,7 +92,7 @@ RSpec.describe RHDL::Components::CPU::CPU do
       verify_cpu_state(acc: 0x00, pc: 3, halted: false, zero_flag: true, sp: 0xFF)
     end
 
-    it 'handles stack overflow correctly' do
+    it 'handles stack overflow correctly', :slow do
       program = []
       255.times do |i|
         # Use explicit two-byte encoding: 0xC0 is CALL opcode, next byte is operand.
@@ -227,7 +227,7 @@ RSpec.describe RHDL::Components::CPU::CPU do
       verify_cpu_state(acc: 0x2, pc: 3, halted: true, zero_flag: false, sp: 0xFF)
     end
 
-    it 'handles stack overflow correctly' do
+    it 'handles stack overflow correctly', :slow do
       program = []
       255.times do |i|
         # Use explicit two-byte encoding: 0xC0 is CALL opcode, next byte is operand.

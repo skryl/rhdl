@@ -9,7 +9,7 @@ test('apple2 sim runtime service performs reset sequence through reset signal', 
     sim: {
       has_signal: (name) => name === 'reset',
       poke: (name, value) => calls.push(['poke', name, value]),
-      apple2_run_cpu_cycles: (count) => calls.push(['cycles', count]),
+      runner_run_cycles: (count) => calls.push(['cycles', count]),
       reset: () => calls.push(['reset']),
       trace_enabled: () => true,
       trace_capture: () => calls.push(['trace_capture'])
@@ -48,7 +48,7 @@ test('apple2 sim runtime service trims RAM load to address window', async () => 
     state: { apple2: { keyQueue: [] } },
     runtime: {
       sim: {
-        apple2_load_ram: (bytes, offset) => {
+        memory_load: (bytes, offset) => {
           loaded.push({ bytes: new Uint8Array(bytes), offset });
           return true;
         },

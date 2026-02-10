@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-# Apple II HDL Run Task
-# Interactive terminal emulator for Apple II HDL simulation
+# Apple II Run Task
+# Interactive terminal emulator for Apple II simulation
 
 require 'io/console'
 require_relative '../runners/headless_runner'
@@ -10,8 +10,8 @@ module RHDL
   module Examples
     module Apple2
       module Tasks
-      # Apple II Run task for HDL simulation
-      # Supports HDL, netlist, and Verilog simulation modes
+      # Apple II Run task
+      # Supports Ruby, IR, netlist, and Verilog simulation modes
       class RunTask
         SCREEN_ROWS = 24
         SCREEN_COLS = 40
@@ -40,8 +40,11 @@ module RHDL
 
         def initialize(options = {})
           @options = options
-          @sim_mode = options[:mode] || :hdl
-          @sim_backend = options[:sim] || :ruby  # Default to :ruby for HDL mode
+          @sim_mode = options[:mode] || :ruby
+          @sim_backend = options[:sim] || case @sim_mode
+                                          when :ir, :netlist then :compile
+                                          else :ruby
+                                          end
 
           # Print status for netlist mode
           if @sim_mode == :netlist
@@ -217,15 +220,21 @@ module RHDL
           trap('TERM') { @running = false }
           trap('WINCH') { update_terminal_size; print CLEAR_SCREEN }
 
-          mode_name = @sim_type == :netlist ? "Netlist (gate-level)" : "HDL (cycle-accurate)"
+          mode_name = case @sim_mode
+                      when :ruby then "Ruby HDL (cycle-accurate)"
+                      when :ir then "IR (native backend)"
+                      when :netlist then "Netlist (gate-level)"
+                      when :verilog then "Verilog (Verilator RTL)"
+                      else @sim_mode.to_s
+                      end
           puts "Starting Apple II emulator in #{mode_name} mode..."
-          if @sim_type == :netlist
+          if @sim_mode == :netlist
             puts "Using native Rust backend: #{@runner.native?}"
           end
           if @audio_enabled
             puts "Audio output: #{Speaker.available? ? 'enabled' : 'not available (install sox or ffmpeg)'}"
           end
-          puts "WARNING: Both modes are slow (for verification/testing)"
+          puts "WARNING: Some modes are slow (for verification/testing)"
           puts "Press Ctrl+C to exit"
           sleep 1
 
@@ -669,7 +678,7 @@ module RHDL
           # Position exit message below the display area
           exit_row = @pad_top + DISPLAY_HEIGHT + (@debug ? 9 : 3)
           print move_cursor(exit_row, 1)
-          puts "Apple II HDL emulator terminated."
+          puts "Apple II emulator terminated."
         end
       end
     end

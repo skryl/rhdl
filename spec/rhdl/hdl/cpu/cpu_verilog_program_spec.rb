@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 
-RSpec.describe 'HDL CPU Verilog Program Execution' do
+RSpec.describe 'HDL CPU Verilog Program Execution', :slow do
   before do
     skip "Icarus Verilog not installed" unless HdlToolchain.iverilog_available?
   end
@@ -65,10 +65,13 @@ RSpec.describe 'HDL CPU Verilog Program Execution' do
     # Write all required modules
     modules = {
       'cpu_instruction_decoder.v' => RHDL::HDL::CPU::InstructionDecoder.to_verilog,
+      'cpu_control_unit.v' => RHDL::HDL::CPU::ControlUnit.to_verilog,
       'alu.v' => RHDL::HDL::ALU.to_verilog,
       'program_counter.v' => RHDL::HDL::ProgramCounter.to_verilog,
       'register.v' => RHDL::HDL::Register.to_verilog,
       'stack_pointer.v' => RHDL::HDL::StackPointer.to_verilog,
+      'd_flip_flop.v' => RHDL::HDL::DFlipFlop.to_verilog,
+      'mux2.v' => RHDL::HDL::Mux2.to_verilog,
       'cpu.v' => RHDL::HDL::CPU::CPU.to_verilog
     }
 
@@ -78,39 +81,24 @@ RSpec.describe 'HDL CPU Verilog Program Execution' do
   end
 
   def write_cpu_testbench(base_dir, program:, initial_memory:, check_addrs:, max_cycles:)
-    # Build program ROM initialization
     program_init = program.each_with_index.map do |byte, i|
-      "    rom[#{i}] = 8'h#{byte.to_s(16).rjust(2, '0')};"
+      "    mem[#{i}] = 8'h#{byte.to_s(16).rjust(2, '0')};"
     end.join("\n")
 
-    # Build initial memory setup
     mem_init = initial_memory.map do |addr, val|
-      "    ram[#{addr}] = 8'h#{val.to_s(16).rjust(2, '0')};"
+      "    mem[#{addr}] = 8'h#{val.to_s(16).rjust(2, '0')};"
     end.join("\n")
 
-    # Build memory check display statements
-    mem_checks = check_addrs.map.with_index do |addr, i|
-      "    $display(\"MEM #{addr} %d\", ram[#{addr}]);"
+    mem_checks = check_addrs.map do |addr|
+      "    $display(\"MEM #{addr} %d\", mem[#{addr}]);"
     end.join("\n")
 
     testbench = <<~VERILOG
       `timescale 1ns/1ps
 
       module tb;
-        // Clock and reset
         reg clk;
         reg rst;
-
-        // CPU interface
-        reg [7:0] instruction;
-        reg [15:0] operand;
-        reg zero_flag_in;
-        reg acc_load_en;
-        reg [7:0] acc_load_data;
-        reg pc_load_en;
-        reg [15:0] pc_load_data;
-        reg sp_push;
-        reg sp_pop;
         reg [7:0] mem_data_in;
 
         wire [7:0] mem_data_out;
@@ -120,34 +108,14 @@ RSpec.describe 'HDL CPU Verilog Program Execution' do
         wire [15:0] pc_out;
         wire [7:0] acc_out;
         wire [7:0] sp_out;
-        wire sp_empty;
-        wire halt_out;
-        wire [3:0] dec_alu_op;
-        wire dec_alu_src;
-        wire dec_reg_write;
-        wire dec_mem_read;
-        wire dec_mem_write;
-        wire dec_branch;
-        wire dec_jump;
-        wire [1:0] dec_pc_src;
-        wire dec_halt;
-        wire dec_call;
-        wire dec_ret;
-        wire [1:0] dec_instr_length;
-        wire [7:0] alu_result_out;
-        wire alu_zero_out;
+        wire halted;
+        wire [7:0] state_out;
+        wire zero_flag_out;
 
-        // Memory (ROM for program, RAM for data)
-        reg [7:0] rom [0:255];
-        reg [7:0] ram [0:255];
-
-        // State tracking
+        reg [7:0] mem [0:65535];
+        integer i;
         integer cycle_count;
-        integer i;  // Loop variable for memory init
-        reg halted;
-        reg [7:0] zero_flag_reg;
 
-        // CPU instance
         cpu_cpu cpu (
           .clk(clk),
           .rst(rst),
@@ -156,266 +124,64 @@ RSpec.describe 'HDL CPU Verilog Program Execution' do
           .mem_addr(mem_addr),
           .mem_write_en(mem_write_en),
           .mem_read_en(mem_read_en),
-          .instruction(instruction),
-          .operand(operand),
-          .zero_flag_in(zero_flag_in),
-          .acc_load_en(acc_load_en),
-          .acc_load_data(acc_load_data),
-          .pc_load_en(pc_load_en),
-          .pc_load_data(pc_load_data),
-          .sp_push(sp_push),
-          .sp_pop(sp_pop),
           .pc_out(pc_out),
           .acc_out(acc_out),
           .sp_out(sp_out),
-          .sp_empty(sp_empty),
-          .halt_out(halt_out),
-          .dec_alu_op(dec_alu_op),
-          .dec_alu_src(dec_alu_src),
-          .dec_reg_write(dec_reg_write),
-          .dec_mem_read(dec_mem_read),
-          .dec_mem_write(dec_mem_write),
-          .dec_branch(dec_branch),
-          .dec_jump(dec_jump),
-          .dec_pc_src(dec_pc_src),
-          .dec_halt(dec_halt),
-          .dec_call(dec_call),
-          .dec_ret(dec_ret),
-          .dec_instr_length(dec_instr_length),
-          .alu_result_out(alu_result_out),
-          .alu_zero_out(alu_zero_out)
+          .halted(halted),
+          .state_out(state_out),
+          .zero_flag_out(zero_flag_out)
         );
 
-        // Clock generation
         initial begin
           clk = 0;
         end
         always #5 clk = ~clk;
 
-        // Memory read helper
-        function [7:0] read_mem;
-          input [15:0] addr;
-          begin
-            if (addr < 256)
-              read_mem = rom[addr[7:0]];
-            else
-              read_mem = ram[addr[7:0]];
-          end
-        endfunction
-
-        // Initialize memory
         initial begin
-          for (i = 0; i < 256; i = i + 1) begin
-            rom[i] = 8'h00;
-            ram[i] = 8'h00;
+          for (i = 0; i < 65536; i = i + 1) begin
+            mem[i] = 8'h00;
           end
 
-          // Load program into ROM
       #{program_init}
 
-          // Initialize RAM data
       #{mem_init}
         end
 
-        // Main test
-        initial begin
-          // Initialize signals
-          rst = 1;
-          instruction = 0;
-          operand = 0;
-          zero_flag_in = 0;
-          acc_load_en = 0;
-          acc_load_data = 0;
-          pc_load_en = 0;
-          pc_load_data = 0;
-          sp_push = 0;
-          sp_pop = 0;
-          mem_data_in = 0;
-          cycle_count = 0;
-          halted = 0;
-          zero_flag_reg = 0;
-
-          // VCD dump for debugging
-          $dumpfile("dump.vcd");
-          $dumpvars(0, tb);
-
-          // Debug: show values BEFORE first clock edge
-          $display("BEFORE_CLK: rst=%d acc_load_en=%d acc_load_data=%d", rst, acc_load_en, acc_load_data);
-
-          // Reset sequence
-          @(posedge clk);
-          #1;
-          $display("AFTER_RST_CLK: rst=%d PC=%d ACC=%d", rst, pc_out, acc_out);
-          rst = 0;
-
-          // Initialize PC to 0
-          pc_load_data = 0;
-          pc_load_en = 1;
-          @(posedge clk);
-          pc_load_en = 0;
-
-          // Initialize ACC to 0
-          acc_load_data = 0;
-          acc_load_en = 1;
-          @(posedge clk);
-          acc_load_en = 0;
-
-          // Wait for registers to update after last clock
-          #1;
-
-          // Debug: show initial state
-          $display("INIT: PC=%d ACC=%d rst=%d", pc_out, acc_out, rst);
-
-          // Run program
-          while (!halted && cycle_count < #{max_cycles}) begin
-            execute_cycle();
-            cycle_count = cycle_count + 1;
-            if (cycle_count <= 5) begin
-              $display("CYCLE %d: PC=%d ACC=%d instr=%h halt=%d alu_src=%d reg_write=%d instr_len=%d",
-                       cycle_count, pc_out, acc_out, instruction, dec_halt, dec_alu_src, dec_reg_write, dec_instr_length);
-            end
-          end
-
-          // Output results
-          $display("HALTED %d", halted);
-          $display("ACC %d", acc_out);
-          $display("PC %d", pc_out);
-          $display("CYCLES %d", cycle_count);
-      #{mem_checks}
-
-          $finish;
+        always @(*) begin
+          mem_data_in = mem[mem_addr];
         end
 
-        // Execute one CPU cycle (mimics Harness behavior)
-        task execute_cycle;
-          reg [7:0] instr;
-          reg [3:0] operand_nibble;
-          reg [15:0] full_operand;
-          reg [1:0] instr_len;
-          reg [15:0] new_pc;
-          reg [7:0] mem_operand;
-          reg [7:0] result;
-          reg [15:0] store_addr;
+        always @(posedge clk) begin
+          if (mem_write_en) begin
+            mem[mem_addr] <= mem_data_out;
+          end
+        end
+
+        task print_results;
           begin
-            // Fetch instruction
-            instr = rom[pc_out[7:0]];
-            operand_nibble = instr[3:0];
-            instruction = instr;
-            zero_flag_in = zero_flag_reg;
-            #1; // Allow combinational logic to settle
-
-            // Get instruction length from decoder
-            instr_len = dec_instr_length;
-
-            // Fetch operand based on instruction length
-            case (instr_len)
-              2: full_operand = rom[(pc_out + 1) & 16'hFF];
-              3: full_operand = (rom[(pc_out + 1) & 16'hFF] << 8) | rom[(pc_out + 2) & 16'hFF];
-              default: full_operand = operand_nibble;
-            endcase
-
-            // Check for halt
-            if (dec_halt) begin
-              halted = 1;
-            end
-            else begin
-              // Calculate new PC
-              new_pc = pc_out + {14'b0, instr_len};
-
-              if (dec_jump || dec_branch) begin
-                case (dec_pc_src)
-                  1: new_pc = full_operand & 16'hFF;
-                  2: new_pc = full_operand;
-                endcase
-              end
-
-              // Handle CALL
-              if (dec_call) begin
-                ram[sp_out] = (pc_out + {14'b0, instr_len}) & 8'hFF;
-                sp_push = 1;
-                @(posedge clk);
-                #1;  // Allow register update to propagate
-                sp_push = 0;
-                new_pc = full_operand & 16'hFF;
-              end
-
-              // Handle RET
-              if (dec_ret) begin
-                if (sp_empty) begin
-                  halted = 1;
-                end
-                else begin
-                  sp_pop = 1;
-                  @(posedge clk);
-                  #1;  // Allow register update to propagate
-                  sp_pop = 0;
-                  new_pc = ram[sp_out];
-                end
-              end
-
-              // ALU operations
-              if (dec_reg_write && !halted) begin
-                if (dec_alu_src) begin
-                  // Immediate load (LDI - opcode 10)
-                  result = full_operand & 8'hFF;
-                end
-                else if (instr[7:4] == 4'd1) begin
-                  // LDA - load directly from memory (opcode 1)
-                  result = ram[full_operand & 8'hFF];
-                end
-                else begin
-                  // ALU operation (ADD, SUB, AND, OR, XOR, DIV, MUL)
-                  mem_operand = ram[full_operand & 8'hFF];
-                  mem_data_in = mem_operand;
-                  #1; // Allow ALU to compute
-                  result = alu_result_out;
-                end
-
-                // Load result into accumulator
-                acc_load_data = result;
-                acc_load_en = 1;
-                @(posedge clk);
-                #1;  // Allow register update to propagate
-                acc_load_en = 0;
-
-                // Update zero flag
-                zero_flag_reg = (result == 0) ? 1 : 0;
-              end
-
-              // CMP instruction (0xF3)
-              if (instr == 8'hF3) begin
-                mem_operand = ram[full_operand & 8'hFF];
-                result = (acc_out - mem_operand) & 8'hFF;
-                zero_flag_reg = (result == 0) ? 1 : 0;
-              end
-
-              // Memory write (STA)
-              if (dec_mem_write) begin
-                if (instr == 8'h20) begin
-                  // Indirect STA
-                  store_addr = (ram[(full_operand >> 8) & 8'hFF] << 8) | ram[full_operand & 8'hFF];
-                  ram[store_addr & 8'hFF] = acc_out;
-                end
-                else if (instr == 8'h21) begin
-                  // Direct 2-byte STA
-                  ram[full_operand & 8'hFF] = acc_out;
-                end
-                else begin
-                  // Nibble-encoded STA
-                  ram[instr & 4'hF] = acc_out;
-                end
-              end
-
-              // Update PC
-              pc_load_data = new_pc;
-              pc_load_en = 1;
-              @(posedge clk);
-              #1;  // Allow register update to propagate
-              pc_load_en = 0;
-            end
+            $display("HALTED %d", halted);
+            $display("ACC %d", acc_out);
+            $display("PC %d", pc_out);
+            $display("CYCLES %d", cycle_count);
+      #{mem_checks}
           end
         endtask
 
+        initial begin
+          rst = 1;
+          cycle_count = 0;
+
+          @(posedge clk);
+          rst = 0;
+
+          while (!halted && cycle_count < #{max_cycles}) begin
+            @(posedge clk);
+            cycle_count = cycle_count + 1;
+          end
+
+          print_results();
+          $finish;
+        end
       endmodule
     VERILOG
 
@@ -424,18 +190,30 @@ RSpec.describe 'HDL CPU Verilog Program Execution' do
 
   def compile_and_run_verilog(base_dir)
     verilog_files = %w[
-      cpu_instruction_decoder.v alu.v program_counter.v register.v
-      stack_pointer.v cpu.v tb.v
+      cpu_instruction_decoder.v cpu_control_unit.v alu.v program_counter.v register.v
+      stack_pointer.v d_flip_flop.v mux2.v cpu.v tb.v
     ]
 
     compile_cmd = ["iverilog", "-g2012", "-o", "sim.out"] + verilog_files
-    stdout, stderr, status = Open3.capture3(*compile_cmd, chdir: base_dir)
-    return { success: false, error: "Compilation failed: #{stderr}\n#{stdout}" } unless status.success?
+    compile_result = run_command(compile_cmd, base_dir)
+    return { success: false, error: "Compilation failed: #{compile_result[:stderr]}\n#{compile_result[:stdout]}" } unless compile_result[:success]
 
-    run_stdout, run_stderr, run_status = Open3.capture3("vvp", "sim.out", chdir: base_dir)
-    return { success: false, error: "Simulation failed: #{run_stderr}" } unless run_status.success?
+    run_result = run_command(["vvp", "sim.out"], base_dir)
+    return { success: false, error: "Simulation failed: #{run_result[:stderr]}" } unless run_result[:success]
 
-    { success: true, stdout: run_stdout }
+    { success: true, stdout: run_result[:stdout] }
+  end
+
+  def run_command(cmd, base_dir)
+    stdout_path = File.join(base_dir, ".cmd_stdout.log")
+    stderr_path = File.join(base_dir, ".cmd_stderr.log")
+
+    success = system(*cmd, chdir: base_dir, out: stdout_path, err: stderr_path)
+    {
+      success: success && $?.success?,
+      stdout: File.exist?(stdout_path) ? File.read(stdout_path) : '',
+      stderr: File.exist?(stderr_path) ? File.read(stderr_path) : ''
+    }
   end
 
   def parse_verilog_output(output, check_addrs)

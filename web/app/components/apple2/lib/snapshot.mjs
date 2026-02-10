@@ -1,5 +1,6 @@
 export const DEFAULT_APPLE2_SNAPSHOT_KIND = 'rhdl.apple2.ram_snapshot';
 export const DEFAULT_APPLE2_SNAPSHOT_VERSION = 1;
+export const DEFAULT_MEMORY_SNAPSHOT_KIND = 'rhdl.memory.snapshot';
 
 function encodeBase64Binary(binaryText) {
   if (typeof btoa === 'function') {
@@ -153,10 +154,18 @@ export function parseApple2SnapshotPayload(payload, options = {}) {
     return null;
   }
 
-  const expectedKind = String(options.kind || DEFAULT_APPLE2_SNAPSHOT_KIND);
+  const explicitKinds = Array.isArray(options.kinds)
+    ? options.kinds.map((kind) => String(kind || '').trim()).filter(Boolean)
+    : [];
+  if (explicitKinds.length === 0 && options.kind) {
+    explicitKinds.push(String(options.kind));
+  }
+  if (explicitKinds.length === 0) {
+    explicitKinds.push(DEFAULT_APPLE2_SNAPSHOT_KIND, DEFAULT_MEMORY_SNAPSHOT_KIND);
+  }
   const expectedVersion = Number.parseInt(options.version, 10) || DEFAULT_APPLE2_SNAPSHOT_VERSION;
 
-  if (payload.kind != null && payload.kind !== expectedKind) {
+  if (payload.kind != null && !explicitKinds.includes(String(payload.kind))) {
     return null;
   }
   if (payload.version != null) {

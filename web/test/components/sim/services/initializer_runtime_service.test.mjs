@@ -108,9 +108,9 @@ test('initializeApple2Mode loads rom when preset enables ui', async () => {
   await initializeApple2Mode({
     runtime: {
       sim: {
-        apple2_mode: () => true,
+        runner_mode: () => true,
         has_signal: (name) => name === 'pc_debug' || name === 'speaker',
-        apple2_load_rom: (bytes) => {
+        runner_load_rom: (bytes) => {
           loaded.push(bytes.length);
         }
       }
@@ -123,5 +123,5 @@ test('initializeApple2Mode loads rom when preset enables ui', async () => {
   });
   assert.equal(state.apple2.enabled, true);
   assert.deepEqual(loaded, [3]);
-  assert.equal(logs.some((line) => String(line).includes('Loaded Apple II ROM')), true);
+  assert.equal(logs.some((line) => String(line).includes('Loaded runner ROM via runner_load_rom')), true);
 });

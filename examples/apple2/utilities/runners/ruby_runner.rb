@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Apple II HDL Runner
+# Apple II Ruby Runner
 # Wraps the Apple2 HDL component for use in emulation
 
 require_relative '../../hdl/apple2'
@@ -13,8 +13,8 @@ require_relative '../input/ps2_encoder'
 module RHDL
   module Examples
     module Apple2
-      # HDL-based runner using cycle-accurate Apple2 simulation
-    class HdlRunner
+      # Ruby-based runner using cycle-accurate Apple2 simulation
+    class RubyRunner
       attr_reader :apple2, :ram
 
       # Text page constants

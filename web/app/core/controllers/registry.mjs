@@ -9,6 +9,7 @@ import { createComponentDomainController } from '../../components/explorer/contr
 import { createApple2DomainController } from '../../components/apple2/controllers/domain.mjs';
 import { createSimDomainController } from '../../components/sim/controllers/domain.mjs';
 import { createWatchDomainController } from '../../components/watch/controllers/domain.mjs';
+import { resolveRunnerIoConfig } from '../../components/runner/lib/io_config.mjs';
 
 export function createControllerRegistry(options = {}) {
   const {
@@ -219,10 +220,10 @@ export function createControllerRegistry(options = {}) {
   }
 
   async function applyRunnerDefaults(preset) {
-    const defaults = preset?.defaults;
-    if (!defaults || typeof defaults !== 'object') {
-      return;
-    }
+    const ioConfig = resolveRunnerIoConfig(preset);
+    const defaults = preset?.defaults && typeof preset.defaults === 'object'
+      ? preset.defaults
+      : {};
 
     if (Object.prototype.hasOwnProperty.call(defaults, 'displayHires')) {
       setApple2DisplayHiresState(!!defaults.displayHires);
@@ -234,7 +235,7 @@ export function createControllerRegistry(options = {}) {
       setMemoryFollowPcState(!!defaults.memoryFollowPc);
     }
 
-    if (!preset.enableApple2Ui) {
+    if (!ioConfig.enabled) {
       return;
     }
 
@@ -243,7 +244,7 @@ export function createControllerRegistry(options = {}) {
     refreshApple2Debug();
     refreshMemoryView();
 
-    if (defaults.loadKaratekaDumpOnLoad) {
+    if (defaults.loadKaratekaDumpOnLoad && ioConfig.api === 'apple2') {
       await loadKaratekaDump();
     }
   }

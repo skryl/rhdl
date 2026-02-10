@@ -85,8 +85,8 @@ module RHDL
         def add_common_args(exec_args)
           exec_args << "-d" if options[:debug]
 
-          # apple2 binary: --mode hdl|netlist|verilog (default: hdl), --sim ruby|interpret|jit|compile (default: ruby)
-          if options[:mode] && options[:mode] != :hdl
+          # apple2 binary: --mode ruby|ir|netlist|verilog (default: ruby), --sim ruby|interpret|jit|compile
+          if options[:mode] && options[:mode] != :ruby
             exec_args.push("-m", options[:mode].to_s)
           end
           if options[:sim] && options[:sim] != :ruby

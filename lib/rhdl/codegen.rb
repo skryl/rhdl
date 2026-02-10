@@ -1,12 +1,11 @@
 # Behavior IR (intermediate representation for RTL codegen)
 require_relative "codegen/ir/ir"
 require_relative "codegen/ir/lower"
-require_relative "codegen/ir/sim/ir_interpreter"
-require_relative "codegen/ir/sim/ir_jit"
-require_relative "codegen/ir/sim/ir_compiler"
+require_relative "codegen/ir/sim/ir_simulator"
 
 # Verilog codegen
 require_relative "codegen/verilog/verilog"
+require_relative "codegen/verilog/sim/verilog_simulator"
 require_relative "codegen/source/source"
 require_relative "codegen/schematic/schematic"
 
@@ -18,9 +17,7 @@ require_relative "codegen/netlist/ir"
 require_relative "codegen/netlist/primitives"
 require_relative "codegen/netlist/toposort"
 require_relative "codegen/netlist/lower"
-require_relative "codegen/netlist/sim/netlist_interpreter"
-require_relative "codegen/netlist/sim/netlist_jit"
-require_relative "codegen/netlist/sim/netlist_compiler"
+require_relative "codegen/netlist/sim/netlist_simulator"
 
 require 'fileutils'
 
@@ -55,16 +52,20 @@ module RHDL
       # Structure gate-level codegen
       def gate_level(components, backend: :interpreter, lanes: 64, name: 'design')
         ir = Netlist::Lower.from_components(components, name: name)
-        case backend
-        when :interpreter
-          Netlist::NetlistInterpreterWrapper.new(ir, lanes: lanes)
-        when :jit
-          Netlist::NetlistJitWrapper.new(ir, lanes: lanes)
-        when :compiler
-          Netlist::NetlistCompilerWrapper.new(ir, lanes: lanes)
-        else
-          raise ArgumentError, "Unknown backend: #{backend}. Valid: :interpreter, :jit, :compiler"
-        end
+        simulator_backend = case backend
+                            when :interpreter, :interpret then :interpreter
+                            when :jit then :jit
+                            when :compiler, :compile then :compiler
+                            else
+                              raise ArgumentError, "Unknown backend: #{backend}. Valid: :interpreter, :jit, :compiler"
+                            end
+        strict_native = simulator_backend != :interpreter
+        Netlist::NetlistSimulator.new(
+          ir,
+          backend: simulator_backend,
+          lanes: lanes,
+          allow_fallback: !strict_native
+        )
       end
 
       # Component discovery and batch codegen

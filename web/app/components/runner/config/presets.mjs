@@ -30,6 +30,30 @@ export const RUNNER_PRESETS = {
     enableApple2Ui: true,
     usesManualIr: false,
     autoLoadOnBoot: true,
+    io: {
+      enabled: true,
+      api: 'apple2',
+      memory: {
+        dumpStart: 0,
+        dumpLength: 48 * 1024,
+        addressSpace: 0x10000,
+        viewMapped: true,
+        dumpReadMapped: false,
+        directWriteMapped: false
+      },
+      display: {
+        enabled: true,
+        mode: 'apple2'
+      },
+      keyboard: {
+        enabled: true,
+        mode: 'apple2_special'
+      },
+      sound: {
+        enabled: true,
+        mode: 'apple2_special'
+      }
+    },
     defaults: {
       displayHires: true,
       displayColor: true,

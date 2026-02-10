@@ -60,15 +60,15 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
       require_relative '../../../examples/mos6502/hdl/cpu'
       ir = RHDL::Examples::MOS6502::CPU.to_flat_ir
       ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
-      sim = RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
-      sim.respond_to?(:mos6502_mode?) && sim.mos6502_mode?
+      sim = RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit)
+      sim.respond_to?(:runner_kind) && sim.runner_kind == :mos6502
     when :compile
       return false unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
       require_relative '../../../examples/mos6502/hdl/cpu'
       ir = RHDL::Examples::MOS6502::CPU.to_flat_ir
       ir_json = RHDL::Codegen::IR::IRToJson.convert(ir)
-      sim = RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json)
-      sim.respond_to?(:mos6502_mode?) && sim.mos6502_mode?
+      sim = RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :compiler)
+      sim.respond_to?(:runner_kind) && sim.runner_kind == :mos6502
     else
       false
     end
@@ -182,7 +182,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
       # Use Rust memory when available for native backends
       use_rust_memory = @runner.instance_variable_get(:@use_rust_memory)
       if use_rust_memory
-        @runner.sim.mos6502_read_memory(addr)
+        @runner.sim.runner_read_memory(addr, 1).first || 0
       else
         @runner.bus.read(addr)
       end
@@ -202,8 +202,8 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     def run_instructions_with_opcodes(n, trace_rts: false)
       # Use native method if available (works for JIT and Compiler backends)
       sim = @runner.sim
-      if sim.respond_to?(:mos6502_run_instructions_with_opcodes)
-        return sim.mos6502_run_instructions_with_opcodes(n)
+      if sim.respond_to?(:runner_run_instructions_with_opcodes)
+        return sim.runner_run_instructions_with_opcodes(n)
       end
 
       # Fallback to manual cycle stepping (for Ruby interpreter or testing)
@@ -235,7 +235,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
         if rw == 1
           # Read from memory
           if use_rust_memory
-            data = sim.mos6502_read_memory(addr)
+            data = sim.runner_read_memory(addr, 1).first || 0
           else
             data = @runner.bus.read(addr)
           end
@@ -244,7 +244,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
           # Write to memory
           data = sim.peek('data_out')
           if use_rust_memory
-            sim.mos6502_write_memory(addr, data)
+            sim.runner_write_memory(addr, [data])
           else
             @runner.bus.write(addr, data)
           end
@@ -322,7 +322,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
         # Memory operation
         if rw == 1
           if use_rust_memory
-            data = sim.mos6502_read_memory(addr)
+            data = sim.runner_read_memory(addr, 1).first || 0
           else
             data = @runner.bus.read(addr)
           end
@@ -331,7 +331,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
         else
           data = sim.peek('data_out')
           if use_rust_memory
-            sim.mos6502_write_memory(addr, data)
+            sim.runner_write_memory(addr, [data])
           else
             @runner.bus.write(addr, data)
           end
@@ -428,7 +428,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
         # Memory read/write
         if rw == 1
           if use_rust_memory
-            data = sim.mos6502_read_memory(addr)
+            data = sim.runner_read_memory(addr, 1).first || 0
           else
             data = @runner.bus.read(addr)
           end
@@ -437,7 +437,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
         else
           data = sim.peek('data_out')
           if use_rust_memory
-            sim.mos6502_write_memory(addr, data)
+            sim.runner_write_memory(addr, [data])
           else
             @runner.bus.write(addr, data)
           end
@@ -544,7 +544,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     require_relative '../../../examples/mos6502/utilities/runners/ir_runner'
     require_relative '../../../examples/mos6502/utilities/apple2/bus'
 
-    runner = IRSimulatorRunner.new(backend)
+    runner = IrRunner.new(backend)
 
     karateka_rom = create_karateka_rom
 
@@ -570,7 +570,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   def create_verilator_simulator
     require_relative '../../../examples/mos6502/utilities/runners/verilator_runner'
 
-    runner = RHDL::Examples::MOS6502::VerilatorRunner.new
+    runner = RHDL::Examples::MOS6502::VerilogRunner.new
 
     karateka_rom = create_karateka_rom
 
@@ -911,7 +911,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   def create_ir_simulator_simple(backend)
     require_relative '../../../examples/mos6502/utilities/runners/ir_runner'
 
-    runner = IRSimulatorRunner.new(backend)
+    runner = IrRunner.new(backend)
     karateka_rom = create_karateka_rom
 
     runner.load_rom(karateka_rom, base_addr: 0xD000)
@@ -1086,7 +1086,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
   def create_verilator_simulator_simple
     require_relative '../../../examples/mos6502/utilities/runners/verilator_runner'
 
-    runner = RHDL::Examples::MOS6502::VerilatorRunner.new
+    runner = RHDL::Examples::MOS6502::VerilogRunner.new
     karateka_rom = create_karateka_rom
 
     runner.load_memory(karateka_rom, 0xD000)

@@ -2,9 +2,6 @@
 //!
 //! Provides internalized RAM/ROM and batched cycle execution for Apple II.
 
-mod ffi;
-pub use ffi::*;
-
 use std::collections::HashMap;
 use crate::core::{CoreSimulator, FlatOp, OP_COPY_TO_SIG};
 

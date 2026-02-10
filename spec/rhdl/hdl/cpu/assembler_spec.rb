@@ -86,7 +86,7 @@ RSpec.describe Assembler do
         0x42,        # SUB 0x02
         0xF3, 0x04,  # CMP 0x04
         0x21, 0x10,  # STA 0x10 (2-byte)
-        0xC9,        # CALL 0x09 (call to test_label at offset 9)
+        0xC0, 0x0A,  # CALL 0x0A (2-byte call to test_label)
         0x00,        # NOP
         0xD0,        # RET
         0xF1, 0x0C   # MUL 0x0C
