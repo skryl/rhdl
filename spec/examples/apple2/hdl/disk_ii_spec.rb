@@ -57,10 +57,11 @@ RSpec.describe RHDL::Examples::Apple2::DiskII do
   end
 
   def clock_2m
+    # DiskII runs from clk_14m and samples clk_2m edges internally.
     disk.set_input(:clk_2m, 0)
-    disk.propagate
+    clock_14m
     disk.set_input(:clk_2m, 1)
-    disk.propagate
+    clock_14m
   end
 
   def access_io(addr_low)
