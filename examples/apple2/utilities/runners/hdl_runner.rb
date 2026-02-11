@@ -37,7 +37,7 @@ module RHDL
       BYTES_PER_SECTOR = 256
       TRACK_SIZE = SECTORS_PER_TRACK * BYTES_PER_SECTOR  # 4096 bytes
       DISK_SIZE = TRACKS * TRACK_SIZE                     # 143360 bytes
-      TRACK_BYTES = 6448  # Nibblized track size
+      TRACK_BYTES = 6656  # Nibblized track size (0x1A00)
 
       # DOS 3.3 sector interleaving table
       DOS33_INTERLEAVE = [
@@ -114,8 +114,8 @@ module RHDL
         @disk_loaded = true
         @current_track = 0
 
-        # Load initial track (track 0)
-        load_track_to_controller(0)
+        # Load all tracks into the controller (Disk II selects track internally)
+        TRACKS.times { |t| load_track_to_controller(t) }
       end
 
       def disk_loaded?(drive: 0)
@@ -126,6 +126,13 @@ module RHDL
         boot_rom_path = File.expand_path('../../software/roms/disk2_boot.bin', __dir__)
         if File.exist?(boot_rom_path)
           rom_data = File.binread(boot_rom_path).bytes
+
+          # The boot ROM uses X as a slot offset ($C080,X). Patch the initial
+          # `LDX #$20` to `LDX #$60` so it targets slot 6 ($C0E0-$C0EF).
+          if rom_data[0] == 0xA2 && rom_data[1] == 0x20
+            rom_data[1] = 0x60
+          end
+
           @apple2.load_disk_boot_rom(rom_data)
         else
           warn "Disk II boot ROM not found at #{boot_rom_path}"
@@ -421,6 +428,13 @@ module RHDL
             offset = (track_num * TRACK_SIZE) + (log_sector * BYTES_PER_SECTOR)
             sector_data = bytes[offset, BYTES_PER_SECTOR]
             track_data.concat(encode_sector(track_num, phys_sector, sector_data))
+          end
+
+          # Pad to fixed nibble track length expected by Disk II controller
+          if track_data.length < TRACK_BYTES
+            track_data.concat([0xFF] * (TRACK_BYTES - track_data.length))
+          elsif track_data.length > TRACK_BYTES
+            track_data = track_data.first(TRACK_BYTES)
           end
 
           tracks << track_data
