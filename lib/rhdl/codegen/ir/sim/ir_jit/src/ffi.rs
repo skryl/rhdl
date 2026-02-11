@@ -241,6 +241,58 @@ pub unsafe extern "C" fn jit_sim_get_signal_idx(
         .unwrap_or(-1)
 }
 
+/// Get memory index by name
+#[no_mangle]
+pub unsafe extern "C" fn jit_sim_get_memory_idx(
+    ctx: *const JitSimContext,
+    name: *const c_char,
+) -> c_int {
+    if ctx.is_null() || name.is_null() {
+        return -1;
+    }
+    let ctx = &*ctx;
+    let name = match CStr::from_ptr(name).to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    ctx.core.memory_name_to_idx.get(name).map(|&i| i as c_int).unwrap_or(-1)
+}
+
+/// Bulk write bytes into a memory array by index
+/// Values are stored as u64 (byte value in low 8 bits).
+#[no_mangle]
+pub unsafe extern "C" fn jit_sim_mem_write_bytes(
+    ctx: *mut JitSimContext,
+    mem_idx: c_uint,
+    offset: c_uint,
+    data: *const u8,
+    data_len: usize,
+) {
+    if ctx.is_null() || data.is_null() {
+        return;
+    }
+    let ctx = &mut *ctx;
+    let mem_idx = mem_idx as usize;
+    if mem_idx >= ctx.core.memory_arrays.len() {
+        return;
+    }
+
+    let mem = &mut ctx.core.memory_arrays[mem_idx];
+    if mem.is_empty() {
+        return;
+    }
+
+    let start = offset as usize;
+    let depth = mem.len();
+    let data = slice::from_raw_parts(data, data_len);
+
+    for (i, &b) in data.iter().enumerate() {
+        let addr = (start + i) % depth;
+        mem[addr] = b as u64;
+    }
+}
+
 /// Poke by index
 #[no_mangle]
 pub unsafe extern "C" fn jit_sim_poke_by_idx(ctx: *mut JitSimContext, idx: c_uint, value: c_ulong) {

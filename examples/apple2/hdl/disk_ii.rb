@@ -82,9 +82,13 @@ module RHDL
       input :ram_di, width: 8
       input :ram_we
 
-      # Track buffer (6656 bytes per track)
+      # Track buffer (pre-nibblized)
+      # NOTE: The reference design uses a single-track RAM and an external loader.
+      # We keep a flattened image here so native IR backends can bulk-load all
+      # tracks once and still follow the same controller semantics.
       TRACK_SIZE = 6656
-      memory :track_memory, depth: TRACK_SIZE, width: 8
+      TRACKS = 35
+      memory :track_memory, depth: TRACK_SIZE * TRACKS, width: 8
 
       # Disk II ROM sub-component
       instance :rom, DiskIIROM
@@ -103,116 +107,187 @@ module RHDL
       wire :q6
       wire :q7
       wire :phase, width: 8
+      wire :prev_clk_2m
+      wire :prev_pre_phase_zero
+      wire :prev_device_select
+      wire :prev_a, width: 16
       wire :track_byte_addr, width: 15
       wire :byte_delay, width: 6
 
-      sequential clock: :clk_2m, reset: :reset, reset_values: {
+      # Single clocked process (clk_14m) with explicit clk_2m edge detect.
+      # This keeps reference behavior while matching current DSL constraints.
+      sequential clock: :clk_14m, reset: :reset, reset_values: {
         motor_phase: 0,
         drive_on: 0,
         drive2_select: 0,
         q6: 0,
         q7: 0,
-        phase: 70,                       # Head position (0-139, 2 per track)
+        phase: 70,
+        prev_clk_2m: 0,
+        prev_pre_phase_zero: 0,
+        prev_device_select: 0,
+        prev_a: 0,
         track_byte_addr: 0,
         byte_delay: 0
       } do
-        # I/O register control
-        io_access = pre_phase_zero & device_select
+        clk2m_rise = ~prev_clk_2m & clk_2m
+        edge_pre_phase_zero = prev_pre_phase_zero
+        edge_device_select = prev_device_select
+        edge_a = prev_a
+
+        prev_clk_2m <= clk_2m
+        prev_pre_phase_zero <= pre_phase_zero
+        prev_device_select <= device_select
+        prev_a <= a
+
+        # I/O register control (reference: sampled on CLK_2M rising edge).
+        io_access = clk2m_rise & edge_pre_phase_zero & edge_device_select
 
         # Phase control (C080-C087)
-        phase_access = io_access & ~a[3]
-        phase_bit = a[2..1]
-        phase_value = a[0]
+        phase_access = io_access & ~edge_a[3]
+        phase_bit = edge_a[2..1]
+        phase_value = edge_a[0]
 
-        motor_phase <= mux(phase_access,
-          # Set or clear the appropriate phase bit
+        motor_phase_next =
           (motor_phase & ~(lit(1, width: 4) << phase_bit)) |
-          (mux(phase_value, lit(1, width: 4), lit(0, width: 4)) << phase_bit),
-          motor_phase
-        )
+          (mux(phase_value, lit(1, width: 4), lit(0, width: 4)) << phase_bit)
+
+        motor_phase <= mux(phase_access, motor_phase_next, motor_phase)
 
         # Control registers (C088-C08F)
-        ctrl_access = io_access & a[3]
-        ctrl_reg = a[2..1]
+        ctrl_access = io_access & edge_a[3]
+        ctrl_reg = edge_a[2..1]
 
         drive_on <= mux(ctrl_access & (ctrl_reg == lit(0, width: 2)),
-          a[0], drive_on
+          edge_a[0], drive_on
         )
 
         drive2_select <= mux(ctrl_access & (ctrl_reg == lit(1, width: 2)),
-          a[0], drive2_select
+          edge_a[0], drive2_select
         )
 
         q6 <= mux(ctrl_access & (ctrl_reg == lit(2, width: 2)),
-          a[0], q6
+          edge_a[0], q6
         )
 
         q7 <= mux(ctrl_access & (ctrl_reg == lit(3, width: 2)),
-          a[0], q7
+          edge_a[0], q7
         )
 
-        # Head stepper motor logic
-        # Phase changes move the head to different tracks
-        # There are 70 phases for 35 tracks (2 phases per track)
-
-        # Calculate relative phase based on current position
-        current_quadrant = phase[2..1]
-
-        # Phase change calculation (simplified)
-        # In the full implementation, this involves looking at which
-        # motor phases are active and calculating the direction
-
         # Track byte address counter
-        # Simulates disk spinning - one new byte every 32 CPU cycles
-        byte_delay <= byte_delay - lit(1, width: 6)
-
-        read_disk = device_select & (a[3..0] == lit(0xC, width: 4))
-
-        # Advance to next byte when read or when delay expires
-        advance = (read_disk & pre_phase_zero) | (byte_delay == lit(0, width: 6))
-
+        # Reference behavior:
+        # - update on CLK_2M rising edge
+        # - advance on C08C read during PRE_PHASE_ZERO OR when byte_delay wraps
+        read_disk_edge = edge_device_select & (edge_a[3..0] == lit(0xC, width: 4))
+        byte_delay_next = byte_delay - lit(1, width: 6)
+        byte_tick = clk2m_rise
+        advance = byte_tick & ((read_disk_edge & edge_pre_phase_zero) | (byte_delay_next == lit(0, width: 6)))
         track_byte_addr_next = mux(track_byte_addr == lit(0x33FE, width: 15),
           lit(0, width: 15),
           track_byte_addr + lit(1, width: 15)
         )
+        byte_delay_tick = mux(byte_tick, byte_delay_next, byte_delay)
 
         track_byte_addr <= mux(advance, track_byte_addr_next, track_byte_addr)
-        byte_delay <= mux(advance, lit(0, width: 6), byte_delay)
+        byte_delay <= mux(advance, lit(0, width: 6), byte_delay_tick)
+
+        # Head phase update logic (reference table-driven behavior).
+        quadrant = phase[2..1]
+        rel_phase =
+          mux(quadrant == lit(0, width: 2),
+            cat(motor_phase[1..0], motor_phase[3..2]),
+            mux(quadrant == lit(1, width: 2),
+              cat(motor_phase[2..0], motor_phase[3]),
+              mux(quadrant == lit(3, width: 2),
+                cat(motor_phase[0], motor_phase[3..1]),
+                motor_phase
+              )
+            )
+          )
+
+        phase_p1 = mux(phase == lit(139, width: 8), lit(139, width: 8), phase + lit(1, width: 8))
+        phase_p2 = mux(phase >= lit(138, width: 8), lit(139, width: 8), phase + lit(2, width: 8))
+        phase_p3 = mux(phase >= lit(137, width: 8), lit(139, width: 8), phase + lit(3, width: 8))
+        phase_m1 = mux(phase == lit(0, width: 8), lit(0, width: 8), phase - lit(1, width: 8))
+        phase_m2 = mux(phase < lit(2, width: 8), lit(0, width: 8), phase - lit(2, width: 8))
+        phase_m3 = mux(phase < lit(3, width: 8), lit(0, width: 8), phase - lit(3, width: 8))
+
+        odd_next =
+          mux(rel_phase == lit(0x1, width: 4), phase_m3,
+            mux(rel_phase == lit(0x2, width: 4), phase_m1,
+              mux(rel_phase == lit(0x3, width: 4), phase_m2,
+                mux(rel_phase == lit(0x4, width: 4), phase_p1,
+                  mux(rel_phase == lit(0x5, width: 4), phase_m1,
+                    mux(rel_phase == lit(0x7, width: 4), phase_m1,
+                      mux(rel_phase == lit(0x8, width: 4), phase_p3,
+                        mux(rel_phase == lit(0xA, width: 4), phase_p1,
+                          mux(rel_phase == lit(0xB, width: 4), phase_m3, phase)
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+
+        even_next =
+          mux(rel_phase == lit(0x1, width: 4), phase_m2,
+            mux(rel_phase == lit(0x3, width: 4), phase_m1,
+              mux(rel_phase == lit(0x4, width: 4), phase_p2,
+                mux(rel_phase == lit(0x6, width: 4), phase_p1,
+                  mux(rel_phase == lit(0x9, width: 4), phase_p1,
+                    mux(rel_phase == lit(0xA, width: 4), phase_p2,
+                      mux(rel_phase == lit(0xB, width: 4), phase_m2, phase)
+                    )
+                  )
+                )
+              )
+            )
+          )
+
+        phase <= mux(phase[0], odd_next, even_next)
       end
 
       # Track RAM operations (separate clock domain)
-      sync_write :track_memory,
-        clock: :clk_14m,
-        enable: :ram_we,
-        addr: :ram_write_addr,
-        data: :ram_di
-
-      # Combinational outputs
+      wire :track_mem_write_addr, width: 21
+      wire :track_mem_addr, width: 21
+      wire :ram_data, width: 8
       behavior do
+        track_num = phase[7..2]
+
         # Drive active signals
         d1_active <= drive_on & ~drive2_select
         d2_active <= drive_on & drive2_select
 
-        # Current track number
-        track <= phase[7..2]
+        # Current track number output
+        track <= track_num
 
-        # Track address output
+        # Track address output (byte position within current track)
         track_addr <= track_byte_addr[14..1]
 
         # ROM address from low byte of address bus
         rom_addr <= a[7..0]
 
+        # Compute base offset = track_num * 6656 (0x1A00 = 2^12 + 2^11 + 2^9)
+        base_12 = cat(track_num, lit(0, width: 12))                       # << 12
+        base_11 = cat(lit(0, width: 1), track_num, lit(0, width: 11))     # << 11
+        base_9  = cat(lit(0, width: 3), track_num, lit(0, width: 9))      # << 9
+        track_base = base_12 + base_11 + base_9
+
+        # Write address for external track loader (writes to current track)
+        track_mem_write_addr <= track_base + ram_write_addr
+
         # Read disk data when accessing C08C
         read_disk = device_select & (a[3..0] == lit(0xC, width: 4))
 
+        # Read from track memory with computed address (track_base + (track_byte_addr >> 1))
+        track_mem_addr <= track_base + track_byte_addr[14..1]
+
         # Data output mux
         # - ROM data when accessing $C6xx (io_select)
-        # - Track data when reading disk (valid when addr bit 0 is 0)
+        # - Track data when reading disk and data-valid bit is 0
         # - Otherwise 0
-
-        # Read from track memory with computed address (track_byte_addr >> 1)
-        ram_data = mem_read_expr(:track_memory, track_byte_addr[14..1], width: 8)
-
         d_out <= mux(io_select,
           rom_dout,
           mux(read_disk & ~track_byte_addr[0],
@@ -222,18 +297,28 @@ module RHDL
         )
       end
 
+      sync_write :track_memory,
+        clock: :clk_14m,
+        enable: :ram_we,
+        addr: :track_mem_write_addr,
+        data: :ram_di
+
+      async_read :ram_data,
+        from: :track_memory,
+        addr: :track_mem_addr
+
       # Simulation helpers for disk image loading
       def load_track(track_num, data)
         return if track_num >= 35 || data.nil?
 
         data.each_with_index do |byte, i|
           break if i >= TRACK_SIZE
-          mem_write(:track_memory, i, byte, 8)
+          mem_write(:track_memory, (track_num * TRACK_SIZE) + i, byte, 8)
         end
       end
 
-      def read_track_byte(addr)
-        mem_read(:track_memory, addr & (TRACK_SIZE - 1))
+      def read_track_byte(addr, track_num: 0)
+        mem_read(:track_memory, (track_num * TRACK_SIZE) + (addr % TRACK_SIZE))
       end
     end
   end
