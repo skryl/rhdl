@@ -670,6 +670,8 @@ pub struct CoreSimulator {
 
     /// Memory arrays (for mem_read operations)
     pub memory_arrays: Vec<Vec<u64>>,
+    /// Memory name to index mapping
+    pub memory_name_to_idx: HashMap<String, usize>,
 
     /// Reset values for registers (signal index -> reset value)
     reset_values: Vec<(usize, u64)>,
@@ -774,7 +776,7 @@ impl CoreSimulator {
 
         // Create JIT compiler and compile functions
         let mut compiler = JitCompiler::new()?;
-        compiler.set_mappings(name_to_idx.clone(), widths.clone(), mem_name_to_idx, mem_depths);
+        compiler.set_mappings(name_to_idx.clone(), widths.clone(), mem_name_to_idx.clone(), mem_depths);
 
         let evaluate_fn = compiler.compile_evaluate(&ir.assigns, num_memories)?;
         let seq_sample_fn = compiler.compile_seq_sample(&seq_assigns, num_memories)?;
@@ -795,6 +797,7 @@ impl CoreSimulator {
             evaluate_fn,
             seq_sample_fn,
             memory_arrays,
+            memory_name_to_idx: mem_name_to_idx,
             reset_values,
         })
     }

@@ -34,6 +34,8 @@ module RHDL
             _test_lib = Fiddle.dlopen(COMPILER_LIB_PATH)
             _test_lib['ir_sim_create']
             _test_lib['ir_sim_compile']
+            _test_lib['ir_sim_get_memory_idx']
+            _test_lib['ir_sim_mem_write_bytes']
             true
           else
             false
@@ -182,6 +184,26 @@ module RHDL
             mos6502_mode: mos6502_mode?,
             gameboy_mode: gameboy_mode?
           }
+        end
+
+        # ====================================================================
+        # Memory Extension Methods (Core memories in flattened IR)
+        # ====================================================================
+
+        def get_memory_idx(name)
+          return @sim.get_memory_idx(name) if @fallback && @sim.respond_to?(:get_memory_idx)
+          idx = @fn_get_memory_idx.call(@ctx, name)
+          idx >= 0 ? idx : nil
+        end
+
+        # Bulk write bytes into a memory array
+        # @param mem_idx [Integer]
+        # @param offset [Integer]
+        # @param data [Array<Integer>, String]
+        def mem_write_bytes(mem_idx, offset, data)
+          return @sim.mem_write_bytes(mem_idx, offset, data) if @fallback && @sim.respond_to?(:mem_write_bytes)
+          data = data.pack('C*') if data.is_a?(Array)
+          @fn_mem_write_bytes.call(@ctx, mem_idx, offset, data, data.bytesize)
         end
 
         # ====================================================================
@@ -606,6 +628,18 @@ module RHDL
             @lib['ir_sim_has_signal'],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_INT
+          )
+
+          @fn_get_memory_idx = Fiddle::Function.new(
+            @lib['ir_sim_get_memory_idx'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+
+          @fn_mem_write_bytes = Fiddle::Function.new(
+            @lib['ir_sim_mem_write_bytes'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
+            Fiddle::TYPE_VOID
           )
 
           @fn_evaluate = Fiddle::Function.new(

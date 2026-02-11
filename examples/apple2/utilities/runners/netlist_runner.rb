@@ -88,7 +88,7 @@ module RHDL
       BYTES_PER_SECTOR = 256
       TRACK_SIZE = SECTORS_PER_TRACK * BYTES_PER_SECTOR  # 4096 bytes
       DISK_SIZE = TRACKS * TRACK_SIZE                     # 143360 bytes
-      TRACK_BYTES = 6448  # Nibblized track size
+      TRACK_BYTES = 6656  # Nibblized track size (0x1A00)
 
       # DOS 3.3 sector interleaving table
       DOS33_INTERLEAVE = [
@@ -516,6 +516,13 @@ module RHDL
             offset = (track_num * TRACK_SIZE) + (log_sector * BYTES_PER_SECTOR)
             sector_data = bytes[offset, BYTES_PER_SECTOR]
             track_data.concat(encode_sector(track_num, phys_sector, sector_data))
+          end
+
+          # Pad to fixed nibble track length expected by Disk II controller
+          if track_data.length < TRACK_BYTES
+            track_data.concat([0xFF] * (TRACK_BYTES - track_data.length))
+          elsif track_data.length > TRACK_BYTES
+            track_data = track_data.first(TRACK_BYTES)
           end
 
           tracks << track_data
