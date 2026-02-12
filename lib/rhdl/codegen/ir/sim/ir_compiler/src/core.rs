@@ -94,6 +94,25 @@ pub struct MemoryDef {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct WritePortDef {
+    pub memory: String,
+    pub clock: String,
+    pub addr: ExprDef,
+    pub data: ExprDef,
+    pub enable: ExprDef,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SyncReadPortDef {
+    pub memory: String,
+    pub clock: String,
+    pub addr: ExprDef,
+    pub data: String,
+    #[serde(default)]
+    pub enable: Option<ExprDef>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct ModuleIR {
     #[allow(dead_code)]
     pub name: String,
@@ -104,6 +123,10 @@ pub struct ModuleIR {
     pub processes: Vec<ProcessDef>,
     #[serde(default)]
     pub memories: Vec<MemoryDef>,
+    #[serde(default)]
+    pub write_ports: Vec<WritePortDef>,
+    #[serde(default)]
+    pub sync_read_ports: Vec<SyncReadPortDef>,
 }
 
 // ============================================================================
@@ -1014,6 +1037,107 @@ impl CoreSimulator {
             seq_apply_code.push_str(&format!("    *s.add({}) = next_regs[{}];\n", target_idx, i));
         }
 
+        let mut write_port_code = String::new();
+        for (wp_idx, wp) in self.ir.write_ports.iter().enumerate() {
+            let Some(&memory_idx) = self.memory_name_to_idx.get(&wp.memory) else {
+                continue;
+            };
+            let Some(&clock_idx) = self.name_to_idx.get(&wp.clock) else {
+                continue;
+            };
+            let Some(memory) = self.ir.memories.get(memory_idx) else {
+                continue;
+            };
+            if memory.depth == 0 {
+                continue;
+            }
+
+            let enable_code = self.expr_to_rust_ptr(&wp.enable, "s");
+            let addr_code = self.expr_to_rust_ptr(&wp.addr, "s");
+            let data_code = self.expr_to_rust_ptr(&wp.data, "s");
+            write_port_code.push_str(&format!("    if *s.add({}) != 0 {{\n", clock_idx));
+            write_port_code.push_str(&format!("        if (({}) & 1) != 0 {{\n", enable_code));
+            write_port_code.push_str(&format!(
+                "            let wp_addr_{} = (({}) as usize) % {};\n",
+                wp_idx, addr_code, memory.depth
+            ));
+            write_port_code.push_str(&format!(
+                "            let wp_data_{} = ({}) & {};\n",
+                wp_idx,
+                data_code,
+                Self::mask_const(memory.width)
+            ));
+            write_port_code.push_str(&format!(
+                "            MEM_{}[wp_addr_{}] = wp_data_{};\n",
+                memory_idx, wp_idx, wp_idx
+            ));
+            write_port_code.push_str("        }\n");
+            write_port_code.push_str("    }\n");
+        }
+
+        let mut sync_read_port_code = String::new();
+        for (rp_idx, rp) in self.ir.sync_read_ports.iter().enumerate() {
+            let Some(&memory_idx) = self.memory_name_to_idx.get(&rp.memory) else {
+                continue;
+            };
+            let Some(&clock_idx) = self.name_to_idx.get(&rp.clock) else {
+                continue;
+            };
+            let Some(&data_idx) = self.name_to_idx.get(&rp.data) else {
+                continue;
+            };
+            let Some(memory) = self.ir.memories.get(memory_idx) else {
+                continue;
+            };
+            if memory.depth == 0 {
+                continue;
+            }
+            let data_width = self.widths.get(data_idx).copied().unwrap_or(64);
+            let addr_code = self.expr_to_rust_ptr(&rp.addr, "s");
+            sync_read_port_code.push_str(&format!("    if *s.add({}) != 0 {{\n", clock_idx));
+            if let Some(enable) = &rp.enable {
+                let enable_code = self.expr_to_rust_ptr(enable, "s");
+                sync_read_port_code.push_str(&format!("        if (({}) & 1) != 0 {{\n", enable_code));
+                sync_read_port_code.push_str(&format!(
+                    "            let rp_addr_{} = (({}) as usize) % {};\n",
+                    rp_idx, addr_code, memory.depth
+                ));
+                sync_read_port_code.push_str(&format!(
+                    "            let rp_data_{} = MEM_{}[rp_addr_{}] & {};\n",
+                    rp_idx,
+                    memory_idx,
+                    rp_idx,
+                    Self::mask_const(memory.width)
+                ));
+                sync_read_port_code.push_str(&format!(
+                    "            *s.add({}) = rp_data_{} & {};\n",
+                    data_idx,
+                    rp_idx,
+                    Self::mask_const(data_width)
+                ));
+                sync_read_port_code.push_str("        }\n");
+            } else {
+                sync_read_port_code.push_str(&format!(
+                    "        let rp_addr_{} = (({}) as usize) % {};\n",
+                    rp_idx, addr_code, memory.depth
+                ));
+                sync_read_port_code.push_str(&format!(
+                    "        let rp_data_{} = MEM_{}[rp_addr_{}] & {};\n",
+                    rp_idx,
+                    memory_idx,
+                    rp_idx,
+                    Self::mask_const(memory.width)
+                ));
+                sync_read_port_code.push_str(&format!(
+                    "        *s.add({}) = rp_data_{} & {};\n",
+                    data_idx,
+                    rp_idx,
+                    Self::mask_const(data_width)
+                ));
+            }
+            sync_read_port_code.push_str("    }\n");
+        }
+
         code.push_str("/// Sample next values for all sequential targets\n");
         code.push_str("#[inline(always)]\n");
         code.push_str(&format!(
@@ -1034,6 +1158,28 @@ impl CoreSimulator {
         code.push_str(&seq_apply_code);
         code.push_str("}\n\n");
 
+        code.push_str("/// Apply synchronous memory write ports for the current level\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("pub unsafe fn apply_write_ports_inline(signals: &mut [u64]) {\n");
+        code.push_str("    let s = signals.as_mut_ptr();\n");
+        if write_port_code.is_empty() {
+            code.push_str("    let _ = s;\n");
+        } else {
+            code.push_str(&write_port_code);
+        }
+        code.push_str("}\n\n");
+
+        code.push_str("/// Apply synchronous memory read ports for the current level\n");
+        code.push_str("#[inline(always)]\n");
+        code.push_str("pub unsafe fn apply_sync_read_ports_inline(signals: &mut [u64]) {\n");
+        code.push_str("    let s = signals.as_mut_ptr();\n");
+        if sync_read_port_code.is_empty() {
+            code.push_str("    let _ = s;\n");
+        } else {
+            code.push_str(&sync_read_port_code);
+        }
+        code.push_str("}\n\n");
+
         code.push_str("/// Forced-edge tick for specialized batched runners.\n");
         code.push_str("/// Evaluates combinational logic, samples sequential inputs, and applies all\n");
         code.push_str("/// sequential updates unconditionally (one edge per call).\n");
@@ -1042,9 +1188,12 @@ impl CoreSimulator {
             "pub unsafe fn tick_forced_inline(signals: &mut [u64], next_regs: &mut [u64; {}]) {{\n",
             num_regs.max(1)
         ));
-        code.push_str("    evaluate_inline(signals);\n\n");
+        code.push_str("    evaluate_inline(signals);\n");
+        code.push_str("    apply_write_ports_inline(signals);\n\n");
         code.push_str("    sample_next_regs_inline(signals, next_regs);\n");
         code.push_str("    apply_next_regs_inline(signals, next_regs);\n");
+        code.push_str("    apply_sync_read_ports_inline(signals);\n");
+        code.push_str("    evaluate_inline(signals);\n");
         code.push_str("}\n\n");
 
         code.push_str("/// Drive a specific clock low and evaluate combinational logic.\n");
@@ -1095,7 +1244,8 @@ impl CoreSimulator {
         code.push_str("    let s = signals.as_mut_ptr();\n");
 
         // Evaluate combinational logic (this propagates clock changes to derived clocks)
-        code.push_str("    evaluate_inline(signals);\n\n");
+        code.push_str("    evaluate_inline(signals);\n");
+        code.push_str("    apply_write_ports_inline(signals);\n\n");
 
         // Compute next values for all registers ONCE (like JIT's seq_sample)
         code.push_str("    sample_next_regs_inline(signals, next_regs);\n\n");
@@ -1140,9 +1290,10 @@ impl CoreSimulator {
                 code.push_str("        }\n");
             }
         code.push_str("\n");
-        code.push_str("        if !any_rising { return; }\n");
+        code.push_str("        if !any_rising { break; }\n");
         code.push_str("    }\n\n");
 
+        code.push_str("    apply_sync_read_ports_inline(signals);\n");
         // Final evaluate (like JIT)
         code.push_str("    evaluate_inline(signals);\n\n");
 

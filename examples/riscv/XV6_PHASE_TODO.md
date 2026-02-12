@@ -50,7 +50,7 @@ This checklist is intentionally scoped to a fully-completable milestone in this 
 - [x] Add translation invalidation behavior tied to `sfence.vma`.
 - [ ] Add xv6 boot integration test (kernel reaches scheduler/user init) on single-cycle `cpu`.
 - [x] Keep `pipelined_cpu` at architectural parity via differential tests for each Sv32 milestone.
-- [ ] Implement and validate block-device path required for xv6 filesystem/runtime (virtio-blk or project-equivalent hardware device).
+- [x] Implement and validate block-device path required for xv6 filesystem/runtime (virtio-blk or project-equivalent hardware device).
 - [ ] Add end-to-end xv6 smoke tests (boot, console IO, process spawn, simple FS ops).
 
 ### Phase 5 progress (current iteration)
@@ -71,3 +71,7 @@ This checklist is intentionally scoped to a fully-completable milestone in this 
 - [x] Wire `sfence.vma` / `satp` write invalidation into both TLBs in both cores.
 - [x] Add red/green tests for iTLB/dTLB cache persistence and `sfence.vma` invalidation.
 - [x] Add differential parity tests for the TLB + invalidation milestone.
+- [x] Add hardware `virtio-blk` MMIO peripheral with queue-state registers (`QUEUE_SEL/NUM/READY`, descriptor/driver/device addresses, status + interrupt ack).
+- [x] Implement queued block request execution (`IN`/`OUT`) against backing disk storage using descriptor chains and used-ring completion.
+- [x] Route `virtio-blk` interrupts through PLIC source 1 in both harness paths (`cpu` and `pipelined_cpu`).
+- [x] Add red/green peripheral specs + IR harness MMIO specs + differential parity test for virtio MMIO register behavior.

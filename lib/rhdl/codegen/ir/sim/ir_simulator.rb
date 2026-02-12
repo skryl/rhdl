@@ -67,6 +67,7 @@ module RHDL
         RUNNER_KIND_MOS6502 = 2
         RUNNER_KIND_GAMEBOY = 3
         RUNNER_KIND_CPU8BIT = 4
+        RUNNER_KIND_RISCV = 5
 
         RUNNER_MEM_OP_LOAD = 0
         RUNNER_MEM_OP_READ = 1
@@ -79,6 +80,8 @@ module RHDL
         RUNNER_MEM_SPACE_ZPRAM = 4
         RUNNER_MEM_SPACE_WRAM = 5
         RUNNER_MEM_SPACE_FRAMEBUFFER = 6
+        RUNNER_MEM_SPACE_DISK = 7
+        RUNNER_MEM_SPACE_UART_TX = 8
 
         RUNNER_MEM_FLAG_MAPPED = 1
 
@@ -88,6 +91,10 @@ module RHDL
         RUNNER_CONTROL_SET_RESET_VECTOR = 0
         RUNNER_CONTROL_RESET_SPEAKER_TOGGLES = 1
         RUNNER_CONTROL_RESET_LCD = 2
+        RUNNER_CONTROL_RISCV_SET_IRQS = 3
+        RUNNER_CONTROL_RISCV_SET_PLIC_SOURCES = 4
+        RUNNER_CONTROL_RISCV_UART_PUSH_RX = 5
+        RUNNER_CONTROL_RISCV_CLEAR_UART_TX = 6
 
         RUNNER_PROBE_KIND = 0
         RUNNER_PROBE_IS_MODE = 1
@@ -101,6 +108,7 @@ module RHDL
         RUNNER_PROBE_SIGNAL = 9
         RUNNER_PROBE_LCDC_ON = 10
         RUNNER_PROBE_H_DIV_CNT = 11
+        RUNNER_PROBE_RISCV_UART_TX_LEN = 17
 
         SIM_CAP_SIGNAL_INDEX = 1 << 0
         SIM_CAP_FORCED_CLOCK = 1 << 1
@@ -417,7 +425,8 @@ module RHDL
             apple2_mode: runner_kind == :apple2,
             gameboy_mode: gameboy_mode?,
             mos6502_mode: runner_kind == :mos6502,
-            cpu8bit_mode: runner_kind == :cpu8bit
+            cpu8bit_mode: runner_kind == :cpu8bit,
+            riscv_mode: runner_kind == :riscv
           }
         end
 
@@ -461,6 +470,7 @@ module RHDL
           when RUNNER_KIND_MOS6502 then :mos6502
           when RUNNER_KIND_GAMEBOY then :gameboy
           when RUNNER_KIND_CPU8BIT then :cpu8bit
+          when RUNNER_KIND_RISCV then :riscv
           else nil
           end
         end
@@ -547,6 +557,17 @@ module RHDL
           runner_mem(RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_ROM, offset, data, 0) > 0
         end
 
+        def runner_read_rom(offset, length)
+          length = [length.to_i, 0].max
+          if @fallback
+            return @sim.runner_read_rom(offset, length) if @sim.respond_to?(:runner_read_rom)
+            return Array.new(length, 0)
+          end
+          return [] if length.zero?
+
+          runner_mem_read(RUNNER_MEM_SPACE_ROM, offset, length, 0)
+        end
+
         def runner_set_reset_vector(addr)
           vector = addr.to_i & 0xFFFF
           if @fallback
@@ -573,6 +594,66 @@ module RHDL
           @fn_runner_control.call(@ctx, RUNNER_CONTROL_RESET_SPEAKER_TOGGLES, 0, 0)
           @sim_runner_speaker_toggles = 0
           nil
+        end
+
+        # ====================================================================
+        # RISC-V Extension Methods
+        # ====================================================================
+
+        def riscv_mode?
+          return @sim.riscv_mode? if @fallback && @sim.respond_to?(:riscv_mode?)
+          return false if @fallback
+          runner_kind == :riscv
+        end
+
+        def runner_riscv_set_interrupts(software: false, timer: false, external: false)
+          return false unless riscv_mode?
+          bits = 0
+          bits |= 0x1 if software
+          bits |= 0x2 if timer
+          bits |= 0x4 if external
+          @fn_runner_control.call(@ctx, RUNNER_CONTROL_RISCV_SET_IRQS, bits, 0) != 0
+        end
+
+        def runner_riscv_set_plic_sources(source1: false, source10: false)
+          return false unless riscv_mode?
+          bits = 0
+          bits |= 0x1 if source1
+          bits |= 0x2 if source10
+          @fn_runner_control.call(@ctx, RUNNER_CONTROL_RISCV_SET_PLIC_SOURCES, bits, 0) != 0
+        end
+
+        def runner_riscv_uart_receive_byte(byte)
+          return false unless riscv_mode?
+          value = byte.to_i & 0xFF
+          @fn_runner_control.call(@ctx, RUNNER_CONTROL_RISCV_UART_PUSH_RX, value, 0) != 0
+        end
+
+        def runner_riscv_uart_tx_bytes
+          return [] unless riscv_mode?
+          len = runner_probe(RUNNER_PROBE_RISCV_UART_TX_LEN).to_i
+          return [] if len <= 0
+          runner_mem_read(RUNNER_MEM_SPACE_UART_TX, 0, len, 0)
+        end
+
+        def runner_riscv_clear_uart_tx_bytes
+          return nil unless riscv_mode?
+          @fn_runner_control.call(@ctx, RUNNER_CONTROL_RISCV_CLEAR_UART_TX, 0, 0)
+          nil
+        end
+
+        def runner_riscv_load_disk(data, offset = 0)
+          return false unless riscv_mode?
+          data = data.pack('C*') if data.is_a?(Array)
+          return false if data.nil? || data.bytesize.zero?
+          runner_mem(RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_DISK, offset, data, 0) > 0
+        end
+
+        def runner_riscv_read_disk(offset, length)
+          return [] unless riscv_mode?
+          length = [length.to_i, 0].max
+          return [] if length.zero?
+          runner_mem_read(RUNNER_MEM_SPACE_DISK, offset, length, 0)
         end
 
         # ====================================================================

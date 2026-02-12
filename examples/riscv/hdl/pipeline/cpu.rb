@@ -1289,6 +1289,3 @@ module RHDL
     end
   end
 end
-
-# Load the harness after CPU is defined
-require_relative 'harness'

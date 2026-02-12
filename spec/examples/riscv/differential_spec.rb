@@ -4,6 +4,7 @@
 require 'spec_helper'
 require_relative '../../../examples/riscv/hdl/ir_harness'
 require_relative '../../../examples/riscv/hdl/pipeline/ir_harness'
+require_relative '../../../examples/riscv/hdl/virtio_blk'
 require_relative '../../../examples/riscv/utilities/assembler'
 
 RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
@@ -238,6 +239,28 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
     (0..31).each do |idx|
       expect(pipeline.read_reg(idx)).to eq(single.read_reg(idx)), "register x#{idx} mismatch"
     end
+  end
+
+  it 'matches on virtio-blk MMIO identification and queue setup registers' do
+    program = [
+      asm.lui(3, 0x10001),        # x3 = 0x1000_1000
+      asm.lw(10, 3, 0x000),       # magic
+      asm.lw(11, 3, 0x004),       # version
+      asm.lw(12, 3, 0x008),       # device id
+      asm.lw(13, 3, 0x00C),       # vendor id
+      asm.addi(14, 0, 0),
+      asm.sw(14, 3, 0x030),       # queue_sel = 0
+      asm.lw(15, 3, 0x034),       # queue_num_max
+      asm.addi(14, 0, 8),
+      asm.sw(14, 3, 0x038),       # queue_num = 8
+      asm.addi(14, 0, 1),
+      asm.sw(14, 3, 0x044),       # queue_ready = 1
+      asm.lw(16, 3, 0x038),       # queue_num
+      asm.lw(17, 3, 0x044),       # queue_ready
+      asm.nop
+    ]
+
+    compare_state(program, extra_cycles: 16)
   end
 
   it 'matches on Sv32 data translation for mapped load/store accesses' do

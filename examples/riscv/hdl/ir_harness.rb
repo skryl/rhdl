@@ -11,6 +11,7 @@ require_relative 'memory'
 require_relative 'clint'
 require_relative 'plic'
 require_relative 'uart'
+require_relative 'virtio_blk'
 
 module RHDL
   module Examples
@@ -33,6 +34,7 @@ module RHDL
           @clint_irq_software = 0
           @clint_irq_timer = 0
           @uart_irq = 0
+          @virtio_irq = 0
           @uart_rx_queue = []
           @uart_tx_bytes = []
           @debug_reg_addr = 0
@@ -46,12 +48,14 @@ module RHDL
             backend: backend,
             allow_fallback: allow_fallback
           )
+          @native_riscv = @sim.native? && @sim.runner_kind == :riscv
 
           @inst_mem = Memory.new('imem', size: mem_size)
           @data_mem = Memory.new('dmem', size: mem_size)
           @clint = Clint.new('clint')
           @plic = Plic.new('plic')
           @uart = Uart.new('uart')
+          @virtio = VirtioBlk.new('virtio_blk')
 
           reset!
         end
@@ -79,11 +83,19 @@ module RHDL
           @clint_irq_software = 0
           @clint_irq_timer = 0
           @uart_irq = 0
+          @virtio_irq = 0
           @uart_rx_queue = []
           @uart_tx_bytes = []
           @debug_reg_addr = 0
 
           @sim.reset
+
+          if native_riscv?
+            @sim.runner_riscv_set_interrupts(software: false, timer: false, external: false)
+            @sim.runner_riscv_set_plic_sources(source1: false, source10: false)
+            @sim.runner_riscv_clear_uart_tx_bytes
+            return
+          end
 
           set_clk_rst(0, 1)
           propagate_all(evaluate_cpu: true)
@@ -95,6 +107,12 @@ module RHDL
         end
 
         def clock_cycle
+          if native_riscv?
+            result = @sim.runner_run_cycles(1)
+            @clock_count += result ? result[:cycles_run].to_i : 1
+            return
+          end
+
           set_clk_rst(0, 0)
           propagate_all(evaluate_cpu: true)
 
@@ -109,7 +127,12 @@ module RHDL
         end
 
         def run_cycles(n)
-          n.times { clock_cycle }
+          if native_riscv?
+            result = @sim.runner_run_cycles(n.to_i)
+            @clock_count += result ? result[:cycles_run].to_i : n.to_i
+          else
+            n.times { clock_cycle }
+          end
         end
 
         def read_reg(index)
@@ -135,50 +158,113 @@ module RHDL
         end
 
         def write_pc(_value)
-          raise NotImplementedError, 'IRHarness does not support direct PC writes'
+          poke_internal_pc!(_value & 0xFFFF_FFFF)
         end
 
         def load_program(program, start_addr = 0)
-          @inst_mem.load_program(program, start_addr)
+          if native_riscv?
+            @sim.runner_load_rom(program.pack('V*'), start_addr.to_i)
+          else
+            @inst_mem.load_program(program, start_addr)
+          end
         end
 
         def load_data(data, start_addr = 0)
-          @data_mem.load_program(data, start_addr)
+          if native_riscv?
+            @sim.runner_write_memory(start_addr.to_i, data.pack('V*'), mapped: false)
+          else
+            @data_mem.load_program(data, start_addr)
+          end
         end
 
         def read_inst_word(addr)
-          @inst_mem.read_word(addr)
+          if native_riscv?
+            bytes = @sim.runner_read_rom(addr.to_i, 4)
+            bytes.pack('C*').ljust(4, "\x00").unpack1('V')
+          else
+            @inst_mem.read_word(addr)
+          end
         end
 
         def read_data_word(addr)
-          @data_mem.read_word(addr)
+          if native_riscv?
+            bytes = @sim.runner_read_memory(addr.to_i, 4, mapped: false)
+            bytes.pack('C*').ljust(4, "\x00").unpack1('V')
+          else
+            @data_mem.read_word(addr)
+          end
         end
 
         def write_data_word(addr, value)
-          @data_mem.write_word(addr, value)
+          if native_riscv?
+            @sim.runner_write_memory(addr.to_i, [value & 0xFFFF_FFFF].pack('V'), mapped: false)
+          else
+            @data_mem.write_word(addr, value)
+          end
         end
 
         def set_interrupts(software: nil, timer: nil, external: nil)
           @irq_software = software.nil? ? @irq_software : (software ? 1 : 0)
           @irq_timer = timer.nil? ? @irq_timer : (timer ? 1 : 0)
           @irq_external = external.nil? ? @irq_external : (external ? 1 : 0)
+          if native_riscv?
+            @sim.runner_riscv_set_interrupts(
+              software: @irq_software != 0,
+              timer: @irq_timer != 0,
+              external: @irq_external != 0
+            )
+          end
         end
 
         def set_plic_sources(source1: nil, source10: nil)
           @plic_source1 = source1.nil? ? @plic_source1 : (source1 ? 1 : 0)
           @plic_source10 = source10.nil? ? @plic_source10 : (source10 ? 1 : 0)
+          if native_riscv?
+            @sim.runner_riscv_set_plic_sources(
+              source1: @plic_source1 != 0,
+              source10: @plic_source10 != 0
+            )
+          end
         end
 
         def uart_receive_byte(byte)
-          @uart_rx_queue << (byte & 0xFF)
+          if native_riscv?
+            @sim.runner_riscv_uart_receive_byte(byte & 0xFF)
+          else
+            @uart_rx_queue << (byte & 0xFF)
+          end
         end
 
         def uart_tx_bytes
-          @uart_tx_bytes.dup
+          if native_riscv?
+            @sim.runner_riscv_uart_tx_bytes
+          else
+            @uart_tx_bytes.dup
+          end
         end
 
         def clear_uart_tx_bytes
-          @uart_tx_bytes.clear
+          if native_riscv?
+            @sim.runner_riscv_clear_uart_tx_bytes
+          else
+            @uart_tx_bytes.clear
+          end
+        end
+
+        def load_virtio_disk(bytes, offset: 0)
+          if native_riscv?
+            @sim.runner_riscv_load_disk(bytes, offset.to_i)
+          else
+            @virtio.load_disk_bytes(bytes, offset: offset)
+          end
+        end
+
+        def read_virtio_disk_byte(offset)
+          if native_riscv?
+            @sim.runner_riscv_read_disk(offset.to_i, 1).first.to_i & 0xFF
+          else
+            @virtio.read_disk_byte(offset)
+          end
         end
 
         def state
@@ -197,6 +283,10 @@ module RHDL
 
         def poke_cpu(name, value)
           @sim.poke(name.to_s, value)
+        end
+
+        def native_riscv?
+          @native_riscv
         end
 
         def peek_cpu(name)
@@ -228,6 +318,17 @@ module RHDL
           @plic.set_input(:rst, rst)
           @uart.set_input(:clk, clk)
           @uart.set_input(:rst, rst)
+          @virtio.set_input(:clk, clk)
+          @virtio.set_input(:rst, rst)
+        end
+
+        def poke_internal_pc!(value)
+          candidates = %w[pc_reg__pc pc current_pc]
+          signal = candidates.find { |name| @sim.has_signal?(name) }
+          raise NotImplementedError, 'Unable to locate internal PC signal in IR simulator' unless signal
+
+          @sim.poke(signal, value & 0xFFFF_FFFF)
+          @sim.evaluate
         end
 
         def propagate_all(evaluate_cpu: true)
@@ -274,6 +375,7 @@ module RHDL
           clint_selected = clint_access?(data_addr)
           plic_selected = plic_access?(data_addr)
           uart_selected = uart_access?(data_addr)
+          virtio_selected = virtio_access?(data_addr)
 
           @clint.set_input(:addr, data_addr)
           @clint.set_input(:write_data, data_wdata)
@@ -284,12 +386,21 @@ module RHDL
           @clint_irq_software = @clint.get_output(:irq_software)
           @clint_irq_timer = @clint.get_output(:irq_timer)
 
+          @virtio.set_input(:addr, data_addr)
+          @virtio.set_input(:write_data, data_wdata)
+          @virtio.set_input(:mem_write, virtio_selected ? data_we : 0)
+          @virtio.set_input(:mem_read, virtio_selected ? data_re : 0)
+          @virtio.set_input(:funct3, data_funct3)
+          @virtio.propagate
+          @virtio.service_queues!(@data_mem)
+          @virtio_irq = @virtio.get_output(:irq)
+
           @plic.set_input(:addr, data_addr)
           @plic.set_input(:write_data, data_wdata)
           @plic.set_input(:mem_write, plic_selected ? data_we : 0)
           @plic.set_input(:mem_read, plic_selected ? data_re : 0)
           @plic.set_input(:funct3, data_funct3)
-          @plic.set_input(:source1, @plic_source1)
+          @plic.set_input(:source1, (@plic_source1 | @virtio_irq) != 0 ? 1 : 0)
           @plic.set_input(:source10, (@plic_source10 | @uart_irq) != 0 ? 1 : 0)
           @plic.propagate
           @plic_irq_external = @plic.get_output(:irq_external)
@@ -310,8 +421,8 @@ module RHDL
 
           @data_mem.set_input(:addr, data_addr)
           @data_mem.set_input(:write_data, data_wdata)
-          @data_mem.set_input(:mem_write, (clint_selected || plic_selected || uart_selected) ? 0 : data_we)
-          @data_mem.set_input(:mem_read, (clint_selected || plic_selected || uart_selected) ? 0 : data_re)
+          @data_mem.set_input(:mem_write, (clint_selected || plic_selected || uart_selected || virtio_selected) ? 0 : data_we)
+          @data_mem.set_input(:mem_read, (clint_selected || plic_selected || uart_selected || virtio_selected) ? 0 : data_re)
           @data_mem.set_input(:funct3, data_funct3)
           @data_mem.propagate
 
@@ -321,6 +432,8 @@ module RHDL
                          @plic.get_output(:read_data)
                        elsif uart_selected
                          @uart.get_output(:read_data)
+                       elsif virtio_selected
+                         @virtio.get_output(:read_data)
                        else
                          @data_mem.get_output(:read_data)
                        end
@@ -365,6 +478,42 @@ module RHDL
                Uart::BASE_ADDR + Uart::REG_LSR,
                Uart::BASE_ADDR + Uart::REG_MSR,
                Uart::BASE_ADDR + Uart::REG_SCR
+            true
+          else
+            false
+          end
+        end
+
+        def virtio_access?(addr)
+          case addr & 0xFFFF_FFFF
+          when VirtioBlk::MAGIC_VALUE_ADDR,
+               VirtioBlk::VERSION_ADDR,
+               VirtioBlk::DEVICE_ID_ADDR,
+               VirtioBlk::VENDOR_ID_ADDR,
+               VirtioBlk::DEVICE_FEATURES_ADDR,
+               VirtioBlk::DEVICE_FEATURES_SEL_ADDR,
+               VirtioBlk::DRIVER_FEATURES_ADDR,
+               VirtioBlk::DRIVER_FEATURES_SEL_ADDR,
+               VirtioBlk::GUEST_PAGE_SIZE_ADDR,
+               VirtioBlk::QUEUE_SEL_ADDR,
+               VirtioBlk::QUEUE_NUM_MAX_ADDR,
+               VirtioBlk::QUEUE_NUM_ADDR,
+               VirtioBlk::QUEUE_ALIGN_ADDR,
+               VirtioBlk::QUEUE_PFN_ADDR,
+               VirtioBlk::QUEUE_READY_ADDR,
+               VirtioBlk::QUEUE_NOTIFY_ADDR,
+               VirtioBlk::INTERRUPT_STATUS_ADDR,
+               VirtioBlk::INTERRUPT_ACK_ADDR,
+               VirtioBlk::STATUS_ADDR,
+               VirtioBlk::QUEUE_DESC_LOW_ADDR,
+               VirtioBlk::QUEUE_DESC_HIGH_ADDR,
+               VirtioBlk::QUEUE_DRIVER_LOW_ADDR,
+               VirtioBlk::QUEUE_DRIVER_HIGH_ADDR,
+               VirtioBlk::QUEUE_DEVICE_LOW_ADDR,
+               VirtioBlk::QUEUE_DEVICE_HIGH_ADDR,
+               VirtioBlk::CONFIG_GENERATION_ADDR,
+               VirtioBlk::CONFIG_CAPACITY_LOW_ADDR,
+               VirtioBlk::CONFIG_CAPACITY_HIGH_ADDR
             true
           else
             false
