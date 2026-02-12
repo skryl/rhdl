@@ -249,7 +249,11 @@ module RHDL
             '',
             "  conf.gembox 'default'",
             '',
-            "  conf.linker.flags << '-sFORCE_FILESYSTEM=1'"
+            "  conf.linker.flags << '-sFORCE_FILESYSTEM=1'",
+            "  conf.linker.flags << '-sASYNCIFY=1'",
+            "  conf.linker.flags << %q{-sASYNCIFY_IMPORTS=['fd_read']}",
+            "  conf.linker.flags << '-sASYNCIFY_STACK_SIZE=131072'",
+            "  conf.linker.flags << %q{-sEXPORTED_RUNTIME_METHODS=['callMain']}"
           ]
 
           if File.file?(File.join(MRUBY_REQUIRE_SHIM_GEM_PATH, 'mrbgem.rake'))

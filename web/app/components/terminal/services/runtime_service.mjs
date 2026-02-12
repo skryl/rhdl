@@ -39,22 +39,6 @@ function createStatusText({ state, runtime, actions }) {
   ].join(' ');
 }
 
-function normalizedText(value) {
-  return String(value || '').replace(/\r/g, '').trim();
-}
-
-function subtractPreviousOutput(previous, current) {
-  const prev = normalizedText(previous);
-  const next = normalizedText(current);
-  if (!prev) {
-    return next;
-  }
-  if (next.startsWith(prev)) {
-    return next.slice(prev.length).replace(/^\s+/, '');
-  }
-  return next;
-}
-
 export function createTerminalRuntimeService({
   dom,
   state,
@@ -108,10 +92,7 @@ export function createTerminalRuntimeService({
     ? actions.syncIoTraceFromMirb
     : null;
   const mirbSession = {
-    active: false,
-    lines: [],
-    stdout: '',
-    stderr: ''
+    active: false
   };
 
   async function runMirbWithTraceSync(source) {
@@ -131,18 +112,12 @@ export function createTerminalRuntimeService({
       return false;
     }
     mirbSession.active = true;
-    mirbSession.lines = [];
-    mirbSession.stdout = '';
-    mirbSession.stderr = '';
     return true;
   }
 
   function stopMirbSession() {
     const wasActive = mirbSession.active;
     mirbSession.active = false;
-    mirbSession.lines = [];
-    mirbSession.stdout = '';
-    mirbSession.stderr = '';
     return wasActive;
   }
 
@@ -159,24 +134,17 @@ export function createTerminalRuntimeService({
       return 'mirb session closed';
     }
 
-    mirbSession.lines.push(code);
-    const source = mirbSession.lines.join('\n');
-    const result = await runMirbWithTraceSync(source);
-    const stdout = normalizedText(result?.stdout);
-    const stderr = normalizedText(result?.stderr);
+    const result = await runMirbWithTraceSync(code);
+    const stdout = String(result?.stdout || '').trim();
+    const stderr = String(result?.stderr || '').trim();
     const exitCode = Number(result?.exitCode || 0);
-    const outDelta = subtractPreviousOutput(mirbSession.stdout, stdout);
-    const errDelta = subtractPreviousOutput(mirbSession.stderr, stderr);
-
-    mirbSession.stdout = stdout;
-    mirbSession.stderr = stderr;
 
     const chunks = [];
-    if (outDelta) {
-      chunks.push(outDelta);
+    if (stdout) {
+      chunks.push(stdout);
     }
-    if (errDelta) {
-      chunks.push(errDelta);
+    if (stderr) {
+      chunks.push(stderr);
     }
     if (chunks.length === 0 && exitCode !== 0) {
       chunks.push(`(mirb exit ${exitCode})`);

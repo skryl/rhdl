@@ -1,31 +1,9 @@
 const DEFAULT_MIRB_JS_PATH = './assets/pkg/mirb.js';
 const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_MIRB_WORKER_SCRIPT_PATH = new URL('../workers/mirb_worker.js', import.meta.url).href;
 
-function joinUrl(base, suffix) {
-  const trimmedBase = String(base || '').replace(/[^/]*$/, '');
-  return `${trimmedBase}${suffix}`;
-}
-
-function encodeUtf8(text) {
-  if (typeof TextEncoder !== 'undefined') {
-    return new TextEncoder().encode(text);
-  }
-  const bytes = [];
-  for (let i = 0; i < text.length; i += 1) {
-    bytes.push(text.charCodeAt(i) & 0xff);
-  }
-  return Uint8Array.from(bytes);
-}
-
-function decodeUtf8(bytes) {
-  if (!bytes || bytes.length === 0) {
-    return '';
-  }
-  if (typeof TextDecoder !== 'undefined') {
-    return new TextDecoder().decode(Uint8Array.from(bytes));
-  }
-  return String.fromCharCode(...bytes);
-}
+let sharedWorkerClient = null;
+let sharedWorkerClientKey = '';
 
 function sanitizeMirbOutput(text) {
   const lines = String(text || '').replace(/\r/g, '').split('\n');
@@ -49,48 +27,11 @@ function sanitizeMirbOutput(text) {
   return cleaned.join('\n').trim();
 }
 
-function createOutputWriter(target) {
-  return (value) => {
-    if (typeof value === 'number') {
-      target.push(value & 0xff);
-      return;
-    }
-
-    const text = String(value ?? '');
-    const bytes = encodeUtf8(`${text}\n`);
-    for (let i = 0; i < bytes.length; i += 1) {
-      target.push(bytes[i]);
-    }
-  };
-}
-
-function createInputReader(source) {
-  const bytes = encodeUtf8(source);
-  let index = 0;
-  return () => {
-    if (index >= bytes.length) {
-      return null;
-    }
-    const next = bytes[index];
-    index += 1;
-    return next;
-  };
-}
-
 function asError(value) {
   if (value instanceof Error) {
     return value;
   }
   return new Error(String(value ?? 'Unknown error'));
-}
-
-function requireBrowserDocument(documentRef) {
-  if (!documentRef || typeof documentRef.createElement !== 'function') {
-    throw new Error('mirb is only available in the browser runtime.');
-  }
-  if (!documentRef.head && !documentRef.body && !documentRef.documentElement) {
-    throw new Error('mirb cannot load script host in this document.');
-  }
 }
 
 function resolveScriptUrl(scriptUrl, { documentRef, globalRef } = {}) {
@@ -104,124 +45,244 @@ function resolveScriptUrl(scriptUrl, { documentRef, globalRef } = {}) {
   }
 }
 
-function createIsolatedFrame(documentRef) {
-  const host = documentRef.body || documentRef.documentElement || documentRef.head;
-  if (!host || typeof host.appendChild !== 'function') {
-    throw new Error('mirb cannot attach iframe host document');
+function normalizeMirbResult(result = {}) {
+  return {
+    exitCode: Number.isFinite(result?.exitCode) ? result.exitCode : 0,
+    stdout: sanitizeMirbOutput(result?.stdout),
+    stderr: sanitizeMirbOutput(result?.stderr)
+  };
+}
+
+function createWorkerClient({
+  globalRef = globalThis,
+  absoluteScriptUrl,
+  absoluteWorkerScriptUrl,
+  timeoutMs = DEFAULT_TIMEOUT_MS
+} = {}) {
+  const WorkerCtor = globalRef?.Worker;
+  if (typeof WorkerCtor !== 'function') {
+    return null;
   }
 
-  const iframe = documentRef.createElement('iframe');
-  iframe.setAttribute('aria-hidden', 'true');
-  iframe.style.display = 'none';
-  iframe.src = 'about:blank';
-  host.appendChild(iframe);
+  let worker = null;
+  let initPromise = null;
+  let initResolve = null;
+  let initReject = null;
+  let nextRequestId = 1;
+  let runQueue = Promise.resolve();
+  const pendingRequests = new Map();
 
-  const frameWindow = iframe.contentWindow;
-  const frameDocument = frameWindow?.document;
-  if (!frameWindow || !frameDocument) {
-    iframe.remove();
-    throw new Error('mirb iframe initialization failed');
+  function teardownWorker() {
+    if (!worker) {
+      initPromise = null;
+      initResolve = null;
+      initReject = null;
+      return;
+    }
+    worker.onmessage = null;
+    worker.onerror = null;
+    worker.onmessageerror = null;
+    worker.terminate();
+    worker = null;
+    initPromise = null;
+    initResolve = null;
+    initReject = null;
   }
 
-  if (!frameDocument.documentElement) {
-    frameDocument.open();
-    frameDocument.write('<!doctype html><html><head></head><body></body></html>');
-    frameDocument.close();
+  function rejectPendingRequests(err) {
+    const error = asError(err);
+    for (const pending of pendingRequests.values()) {
+      if (pending.timeoutId) {
+        clearTimeout(pending.timeoutId);
+      }
+      pending.reject(error);
+    }
+    pendingRequests.clear();
+  }
+
+  function resetWorker(err = null) {
+    const resetErr = err ? asError(err) : null;
+    const pendingInitReject = initReject;
+    teardownWorker();
+    if (pendingInitReject) {
+      pendingInitReject(resetErr || new Error('mirb worker reset'));
+    }
+    rejectPendingRequests(resetErr || new Error('mirb worker unavailable'));
+  }
+
+  function resolvePendingResult(message) {
+    const id = Number(message?.id);
+    if (!Number.isFinite(id)) {
+      return;
+    }
+    const pending = pendingRequests.get(id);
+    if (!pending) {
+      return;
+    }
+    pendingRequests.delete(id);
+    if (pending.timeoutId) {
+      clearTimeout(pending.timeoutId);
+    }
+
+    if (message.type === 'result') {
+      pending.resolve({
+        exitCode: Number.isFinite(message.exitCode) ? message.exitCode : 0,
+        stdout: String(message.stdout || ''),
+        stderr: String(message.stderr || '')
+      });
+      return;
+    }
+
+    pending.reject(new Error(String(message.message || 'mirb worker execution failed')));
+  }
+
+  function handleWorkerMessage(event) {
+    const message = event?.data || {};
+    if (message.type === 'ready') {
+      if (initResolve) {
+        initResolve();
+      }
+      initPromise = Promise.resolve();
+      initResolve = null;
+      initReject = null;
+      return;
+    }
+    if (message.type === 'init_error') {
+      resetWorker(new Error(String(message.message || 'mirb worker failed to initialize')));
+      return;
+    }
+    if (message.type === 'result' || message.type === 'error') {
+      resolvePendingResult(message);
+    }
+  }
+
+  function startWorker() {
+    if (worker && initPromise) {
+      return initPromise;
+    }
+
+    worker = new WorkerCtor(absoluteWorkerScriptUrl);
+    worker.onmessage = handleWorkerMessage;
+    worker.onerror = (event) => {
+      const message = event?.message || event?.error?.message || 'mirb worker crashed';
+      resetWorker(new Error(String(message)));
+    };
+    worker.onmessageerror = () => {
+      resetWorker(new Error('mirb worker message parsing failed'));
+    };
+
+    initPromise = new Promise((resolve, reject) => {
+      initResolve = resolve;
+      initReject = reject;
+    });
+    worker.postMessage({
+      type: 'init',
+      scriptUrl: absoluteScriptUrl
+    });
+    return initPromise;
+  }
+
+  async function executeInWorker(source) {
+    await startWorker();
+    if (!worker) {
+      throw new Error('mirb worker is unavailable');
+    }
+
+    const requestId = nextRequestId;
+    nextRequestId += 1;
+
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        const pending = pendingRequests.get(requestId);
+        if (!pending) {
+          return;
+        }
+        pendingRequests.delete(requestId);
+        pending.reject(new Error('mirb execution timed out'));
+        resetWorker(new Error('mirb worker timed out and was restarted'));
+      }, timeoutMs);
+
+      pendingRequests.set(requestId, {
+        resolve,
+        reject,
+        timeoutId
+      });
+
+      worker.postMessage({
+        type: 'run',
+        id: requestId,
+        source: String(source ?? '')
+      });
+    });
+  }
+
+  function run(source) {
+    const sourceText = String(source ?? '');
+    const task = () => executeInWorker(sourceText);
+    runQueue = runQueue.then(task, task);
+    return runQueue;
   }
 
   return {
-    frameWindow,
-    frameDocument,
-    dispose: () => {
-      if (iframe.parentNode) {
-        iframe.parentNode.removeChild(iframe);
-      }
-    }
+    run
   };
+}
+
+function sharedWorkerKey({
+  absoluteScriptUrl,
+  absoluteWorkerScriptUrl,
+  timeoutMs
+} = {}) {
+  return `${absoluteScriptUrl}::${absoluteWorkerScriptUrl}::${timeoutMs}`;
+}
+
+function getSharedWorkerClient({
+  globalRef,
+  absoluteScriptUrl,
+  absoluteWorkerScriptUrl,
+  timeoutMs
+} = {}) {
+  const key = sharedWorkerKey({
+    absoluteScriptUrl,
+    absoluteWorkerScriptUrl,
+    timeoutMs
+  });
+  if (sharedWorkerClient && sharedWorkerClientKey === key) {
+    return sharedWorkerClient;
+  }
+  sharedWorkerClient = createWorkerClient({
+    globalRef,
+    absoluteScriptUrl,
+    absoluteWorkerScriptUrl,
+    timeoutMs
+  });
+  sharedWorkerClientKey = key;
+  return sharedWorkerClient;
 }
 
 export function createMirbCommandRunner({
   globalRef = globalThis,
   documentRef = globalThis.document,
   scriptUrl = DEFAULT_MIRB_JS_PATH,
-  timeoutMs = DEFAULT_TIMEOUT_MS
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  workerScriptUrl = DEFAULT_MIRB_WORKER_SCRIPT_PATH
 } = {}) {
+  const absoluteScriptUrl = resolveScriptUrl(scriptUrl, { documentRef, globalRef });
+  const absoluteWorkerScriptUrl = resolveScriptUrl(workerScriptUrl, { documentRef, globalRef });
+  const workerClient = getSharedWorkerClient({
+    globalRef,
+    absoluteScriptUrl,
+    absoluteWorkerScriptUrl,
+    timeoutMs
+  });
+
   return async function runMirb(source) {
-    requireBrowserDocument(documentRef);
-    const absoluteScriptUrl = resolveScriptUrl(scriptUrl, { documentRef, globalRef });
-    const { frameWindow, frameDocument, dispose } = createIsolatedFrame(documentRef);
-    const stdoutBytes = [];
-    const stderrBytes = [];
-    const stdin = createInputReader(`${String(source ?? '')}\n`);
-    const stdout = createOutputWriter(stdoutBytes);
-    const stderr = createOutputWriter(stderrBytes);
+    if (!workerClient) {
+      throw new Error('mirb worker is unavailable in this environment.');
+    }
 
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      let timeoutId = null;
-
-      const finish = (err, exitCode = 0) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-          timeoutId = null;
-        }
-        dispose();
-        if (err) {
-          reject(asError(err));
-          return;
-        }
-        resolve({
-          exitCode: Number.isFinite(exitCode) ? exitCode : 0,
-          stdout: sanitizeMirbOutput(decodeUtf8(stdoutBytes)),
-          stderr: sanitizeMirbOutput(decodeUtf8(stderrBytes))
-        });
-      };
-
-      timeoutId = setTimeout(() => {
-        finish(new Error('mirb execution timed out'));
-      }, timeoutMs);
-
-      frameWindow.Module = {
-        noInitialRun: true,
-        arguments: [],
-        stdin,
-        stdout,
-        stderr,
-        print: stdout,
-        printErr: stderr,
-        locateFile: (path) => {
-          if (String(path || '').endsWith('.wasm')) {
-            return joinUrl(absoluteScriptUrl, path);
-          }
-          return joinUrl(absoluteScriptUrl, path);
-        },
-        onAbort: (reason) => {
-          finish(new Error(`mirb aborted: ${String(reason || 'unknown reason')}`));
-        },
-        onRuntimeInitialized: () => {
-          try {
-            if (typeof frameWindow.callMain !== 'function') {
-              throw new Error('mirb runtime missing global callMain');
-            }
-            const code = frameWindow.callMain([]);
-            finish(null, code);
-          } catch (err) {
-            finish(err);
-          }
-        }
-      };
-
-      const scriptEl = frameDocument.createElement('script');
-      scriptEl.src = absoluteScriptUrl;
-      scriptEl.async = true;
-      scriptEl.onerror = () => {
-        finish(new Error(`Failed to load ${absoluteScriptUrl}`));
-      };
-      (frameDocument.head || frameDocument.body || frameDocument.documentElement).appendChild(scriptEl);
-    });
+    const sourceText = String(source ?? '');
+    const workerResult = await workerClient.run(sourceText);
+    return normalizeMirbResult(workerResult);
   };
 }

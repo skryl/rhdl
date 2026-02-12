@@ -31,18 +31,6 @@ function normalizedText(value) {
   return String(value || '').replace(/\r/g, '').trim();
 }
 
-function subtractPreviousOutput(previous, current) {
-  const prev = normalizedText(previous);
-  const next = normalizedText(current);
-  if (!prev) {
-    return next;
-  }
-  if (next.startsWith(prev)) {
-    return next.slice(prev.length).replace(/^\s+/, '');
-  }
-  return next;
-}
-
 function decodeUtf8(buffer) {
   if (!(buffer instanceof ArrayBuffer)) {
     return '';
@@ -137,10 +125,7 @@ export function bindEditorBindings({
     }
   };
   const mirbSession = {
-    ready: false,
-    lines: [],
-    stdout: '',
-    stderr: ''
+    ready: false
   };
   const vimState = {
     instance: null,
@@ -169,19 +154,14 @@ export function bindEditorBindings({
 
   function resetMirbSession() {
     mirbSession.ready = false;
-    mirbSession.lines = [];
-    mirbSession.stdout = '';
-    mirbSession.stderr = '';
   }
 
   async function ensureMirbSessionReady() {
     if (mirbSession.ready) {
       return;
     }
-    const result = await runMirb(MIRB_PRELUDE);
+    await runMirb(MIRB_PRELUDE);
     mirbSession.ready = true;
-    mirbSession.stdout = normalizedText(result?.stdout);
-    mirbSession.stderr = normalizedText(result?.stderr);
   }
 
   async function runMirbChunk(sourceChunk) {
@@ -195,24 +175,17 @@ export function bindEditorBindings({
     }
 
     await ensureMirbSessionReady();
-    mirbSession.lines.push(code);
-    const source = [MIRB_PRELUDE, ...mirbSession.lines].join('\n');
-    const result = await runMirb(source);
+    const result = await runMirb(code);
     const stdout = normalizedText(result?.stdout);
     const stderr = normalizedText(result?.stderr);
     const exitCode = Number(result?.exitCode || 0);
-    const outDelta = subtractPreviousOutput(mirbSession.stdout, stdout);
-    const errDelta = subtractPreviousOutput(mirbSession.stderr, stderr);
-
-    mirbSession.stdout = stdout;
-    mirbSession.stderr = stderr;
 
     const lines = [];
-    if (outDelta) {
-      lines.push(outDelta);
+    if (stdout) {
+      lines.push(stdout);
     }
-    if (errDelta) {
-      lines.push(errDelta);
+    if (stderr) {
+      lines.push(stderr);
     }
     if (lines.length === 0 && exitCode !== 0) {
       lines.push(`(mirb exit ${exitCode})`);

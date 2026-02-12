@@ -3,7 +3,10 @@ const DEFAULT_GHOSTTY_WASM_PATH = '../../../../assets/pkg/ghostty-vt.wasm';
 const DEFAULT_THEME = Object.freeze({
   background: '#071421',
   foreground: '#b5d3ef',
-  cursor: '#dff3ff'
+  cursor: '#dff3ff',
+  cursorAccent: '#071421',
+  selectionBackground: '#274261',
+  selectionForeground: '#b5d3ef'
 });
 
 let ghosttyRuntimePromise = null;
@@ -35,6 +38,106 @@ function isTerminalHostElement(hostElement) {
     return false;
   }
   return true;
+}
+
+function normalizeCssColor(value, { allowTransparent = false } = {}) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+  if (!allowTransparent && (trimmed === 'transparent' || trimmed === 'rgba(0, 0, 0, 0)' || trimmed === 'rgba(0,0,0,0)')) {
+    return '';
+  }
+  return trimmed;
+}
+
+function firstCssColor(values = [], fallback = '') {
+  for (const value of values) {
+    const next = normalizeCssColor(value);
+    if (next) {
+      return next;
+    }
+  }
+  return fallback;
+}
+
+function cssVar(style, key) {
+  if (!style || typeof style.getPropertyValue !== 'function') {
+    return '';
+  }
+  return String(style.getPropertyValue(key) || '').trim();
+}
+
+function resolveTerminalTheme({
+  hostElement,
+  documentRef = globalThis.document,
+  globalRef = globalThis,
+  overrides = {}
+} = {}) {
+  const view = documentRef?.defaultView || globalRef;
+  const getComputedStyleFn = typeof view?.getComputedStyle === 'function'
+    ? view.getComputedStyle.bind(view)
+    : null;
+  const hostStyle = getComputedStyleFn ? getComputedStyleFn(hostElement) : null;
+  const bodyStyle = getComputedStyleFn && documentRef?.body ? getComputedStyleFn(documentRef.body) : null;
+
+  const background = firstCssColor(
+    [
+      hostStyle?.backgroundColor,
+      cssVar(bodyStyle, '--bg-0')
+    ],
+    DEFAULT_THEME.background
+  );
+  const foreground = firstCssColor(
+    [
+      hostStyle?.color,
+      cssVar(bodyStyle, '--text')
+    ],
+    DEFAULT_THEME.foreground
+  );
+  const cursor = firstCssColor(
+    [
+      hostStyle?.caretColor,
+      cssVar(bodyStyle, '--accent')
+    ],
+    DEFAULT_THEME.cursor
+  );
+  const selectionBackground = firstCssColor(
+    [
+      cssVar(bodyStyle, '--line'),
+      hostStyle?.borderColor
+    ],
+    DEFAULT_THEME.selectionBackground
+  );
+  const selectionForeground = firstCssColor(
+    [
+      foreground
+    ],
+    DEFAULT_THEME.selectionForeground
+  );
+
+  return {
+    ...DEFAULT_THEME,
+    background,
+    foreground,
+    cursor,
+    cursorAccent: background,
+    selectionBackground,
+    selectionForeground,
+    ...(overrides || {})
+  };
+}
+
+function normalizeTerminalSnapshotText(text) {
+  const normalized = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  return normalized.replace(/\n/g, '\r\n');
+}
+
+function themeSignature(theme) {
+  return JSON.stringify(theme || {});
 }
 
 async function importGhosttyModule({
@@ -118,8 +221,88 @@ export function createGhosttyTerminalSurface({
   let fitAddon = null;
   let renderedText = '';
   let pendingText = '';
+  let themeObserver = null;
+  let renderedThemeSignature = '';
 
   hostElement.classList?.add('ghostty-terminal-host');
+
+  function writeRaw(raw) {
+    if (!terminal) {
+      return;
+    }
+    const text = String(raw ?? '');
+    if (!text) {
+      return;
+    }
+    terminal.write(text);
+  }
+
+  function writeTextChunk(text) {
+    if (!terminal) {
+      return;
+    }
+    const normalized = normalizeTerminalSnapshotText(text);
+    if (!normalized) {
+      return;
+    }
+    terminal.write(normalized);
+  }
+
+  function resetAndWriteSnapshot(snapshot) {
+    if (!terminal) {
+      return;
+    }
+    if (typeof terminal.reset === 'function') {
+      terminal.reset();
+    } else if (typeof terminal.clear === 'function') {
+      terminal.clear();
+    }
+    writeTextChunk(snapshot);
+    renderedText = snapshot;
+  }
+
+  function tryAppendSnapshot(snapshot) {
+    if (!snapshot.startsWith(renderedText)) {
+      return false;
+    }
+    const delta = snapshot.slice(renderedText.length);
+    writeTextChunk(delta);
+    renderedText = snapshot;
+    return true;
+  }
+
+  function tryBackspaceSnapshot(snapshot) {
+    if (!renderedText.startsWith(snapshot)) {
+      return false;
+    }
+    const removed = renderedText.slice(snapshot.length);
+    if (removed.includes('\n') || removed.includes('\r')) {
+      return false;
+    }
+    if (!removed) {
+      renderedText = snapshot;
+      return true;
+    }
+    writeRaw('\b \b'.repeat(removed.length));
+    renderedText = snapshot;
+    return true;
+  }
+
+  function tryReplacePromptLine(snapshot) {
+    const prevBreak = renderedText.lastIndexOf('\n');
+    const nextBreak = snapshot.lastIndexOf('\n');
+    const prevHead = prevBreak >= 0 ? renderedText.slice(0, prevBreak + 1) : '';
+    const nextHead = nextBreak >= 0 ? snapshot.slice(0, nextBreak + 1) : '';
+    if (prevHead !== nextHead) {
+      return false;
+    }
+    const nextPrompt = snapshot.slice(nextBreak + 1);
+    // Cursor is always at terminal end in this UI model; rewrite only the editable prompt row.
+    writeRaw('\r\x1b[2K\x1b[J');
+    writeTextChunk(nextPrompt);
+    renderedText = snapshot;
+    return true;
+  }
 
   function writeSnapshot(snapshot) {
     if (!terminal) {
@@ -128,15 +311,51 @@ export function createGhosttyTerminalSurface({
     if (snapshot === renderedText) {
       return;
     }
-    if (typeof terminal.reset === 'function') {
-      terminal.reset();
-    } else if (typeof terminal.clear === 'function') {
-      terminal.clear();
+
+    if (!renderedText) {
+      resetAndWriteSnapshot(snapshot);
+      return;
     }
-    if (snapshot) {
-      terminal.write(snapshot);
+
+    if (tryAppendSnapshot(snapshot)) {
+      return;
     }
-    renderedText = snapshot;
+
+    if (tryBackspaceSnapshot(snapshot)) {
+      return;
+    }
+
+    if (tryReplacePromptLine(snapshot)) {
+      return;
+    }
+
+    resetAndWriteSnapshot(snapshot);
+  }
+
+  function applyTheme(theme) {
+    if (!terminal || !terminal.renderer || typeof terminal.renderer.setTheme !== 'function') {
+      return;
+    }
+    const signature = themeSignature(theme);
+    if (signature === renderedThemeSignature) {
+      return;
+    }
+    terminal.renderer.setTheme(theme);
+    if (terminal.wasmTerm && typeof terminal.renderer.render === 'function') {
+      const viewportY = Number.isFinite(terminal.viewportY) ? terminal.viewportY : 0;
+      terminal.renderer.render(terminal.wasmTerm, true, viewportY, terminal);
+    }
+    renderedThemeSignature = signature;
+  }
+
+  function handleThemeMutation() {
+    const theme = resolveTerminalTheme({
+      hostElement,
+      documentRef,
+      globalRef,
+      overrides: options.theme || {}
+    });
+    applyTheme(theme);
   }
 
   const readyPromise = loadGhosttyRuntimeShared({
@@ -150,15 +369,18 @@ export function createGhosttyTerminalSurface({
       return;
     }
 
+    const initialTheme = resolveTerminalTheme({
+      hostElement,
+      documentRef,
+      globalRef,
+      overrides: options.theme || {}
+    });
     const nextTerminal = new mod.Terminal({
       cursorBlink: true,
       cursorStyle: 'block',
       fontSize: 12,
       fontFamily: 'IBM Plex Mono, monospace',
-      theme: {
-        ...DEFAULT_THEME,
-        ...(options.theme || {})
-      },
+      theme: initialTheme,
       disableStdin: true,
       scrollback: 1200,
       ...(ghostty ? { ghostty } : {})
@@ -179,6 +401,19 @@ export function createGhosttyTerminalSurface({
     }
 
     terminal = nextTerminal;
+    renderedThemeSignature = '';
+    applyTheme(initialTheme);
+
+    const MutationObserverCtor = globalRef?.MutationObserver;
+    if (typeof MutationObserverCtor === 'function' && documentRef?.body) {
+      themeObserver = new MutationObserverCtor(() => {
+        handleThemeMutation();
+      });
+      themeObserver.observe(documentRef.body, {
+        attributes: true,
+        attributeFilter: ['class', 'style']
+      });
+    }
     safeSetDataset(hostElement, 'terminalRenderer', 'ghostty-web');
     writeSnapshot(pendingText);
   }).catch((err) => {
@@ -210,6 +445,10 @@ export function createGhosttyTerminalSurface({
     },
     dispose() {
       disposed = true;
+      if (themeObserver && typeof themeObserver.disconnect === 'function') {
+        themeObserver.disconnect();
+      }
+      themeObserver = null;
       if (fitAddon && typeof fitAddon.dispose === 'function') {
         fitAddon.dispose();
       }
@@ -219,6 +458,7 @@ export function createGhosttyTerminalSurface({
       }
       terminal = null;
       renderedText = '';
+      renderedThemeSignature = '';
     },
     whenReady() {
       return readyPromise;

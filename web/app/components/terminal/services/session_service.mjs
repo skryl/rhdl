@@ -201,11 +201,11 @@ export function createTerminalSessionService({
     state.terminal.historyIndex = next;
     if (next >= history.length) {
       state.terminal.inputBuffer = '';
-      renderTerminal(dom, state, resolvedTerminalView, requestFrame, { focus: true });
+      renderTerminal(dom, state, resolvedTerminalView, requestFrame);
       return;
     }
     state.terminal.inputBuffer = String(history[next] || '');
-    renderTerminal(dom, state, resolvedTerminalView, requestFrame, { focus: true });
+    renderTerminal(dom, state, resolvedTerminalView, requestFrame);
   }
 
   function appendInput(text) {
@@ -214,21 +214,21 @@ export function createTerminalSessionService({
       return;
     }
     state.terminal.inputBuffer += chunk;
-    renderTerminal(dom, state, resolvedTerminalView, requestFrame, { focus: true });
+    renderTerminal(dom, state, resolvedTerminalView, requestFrame);
   }
 
   function backspaceInput() {
     if (!state.terminal.inputBuffer) {
-      renderTerminal(dom, state, resolvedTerminalView, requestFrame, { focus: true });
+      renderTerminal(dom, state, resolvedTerminalView, requestFrame);
       return;
     }
     state.terminal.inputBuffer = state.terminal.inputBuffer.slice(0, -1);
-    renderTerminal(dom, state, resolvedTerminalView, requestFrame, { focus: true });
+    renderTerminal(dom, state, resolvedTerminalView, requestFrame);
   }
 
   function setInput(text = '') {
     state.terminal.inputBuffer = String(text || '');
-    renderTerminal(dom, state, resolvedTerminalView, requestFrame, { focus: true });
+    renderTerminal(dom, state, resolvedTerminalView, requestFrame);
   }
 
   function focusInput() {

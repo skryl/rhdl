@@ -221,11 +221,11 @@ test('submitInput runs mirb alias command through mirb runner', async () => {
   assert.match(dom.terminalOutput.textContent, /=> "ok"/);
 });
 
-test('submitInput supports interactive mirb session with replayed state', async () => {
+test('submitInput supports interactive mirb session with persistent state', async () => {
   const receivedSources = [];
   const outputsBySource = new Map([
     ['a = 1', '=> 1'],
-    ['a = 1\na + 2', '=> 1\n=> 3']
+    ['a + 2', '=> 3']
   ]);
   const { controller, dom } = createControllerHarness({
     mirbRunner: async (source) => {
@@ -246,7 +246,7 @@ test('submitInput supports interactive mirb session with replayed state', async 
   dom.terminalInput.value = 'exit';
   await controller.submitInput();
 
-  assert.deepEqual(receivedSources, ['a = 1', 'a = 1\na + 2']);
+  assert.deepEqual(receivedSources, ['a = 1', 'a + 2']);
   assert.match(dom.terminalOutput.textContent, /mirb session started/);
   assert.match(dom.terminalOutput.textContent, /\$ a = 1/);
   assert.match(dom.terminalOutput.textContent, /\$ a \+ 2/);
