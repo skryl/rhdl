@@ -259,3 +259,91 @@ test('initializeApple2Mode loads snapshot default bin using snapshot offset and 
     ['reset']
   ]);
 });
+
+test('initializeApple2Mode bootstraps mos6502 runner after default bin reset', async () => {
+  const calls = [];
+  const logs = [];
+  await initializeApple2Mode({
+    runtime: {
+      sim: {
+        runner_mode: () => true,
+        runner_kind: () => 'mos6502',
+        runner_load_memory: (bytes, offset, options) => {
+          calls.push(['load', bytes.length, offset, options]);
+          return true;
+        },
+        runner_set_reset_vector: (pc) => {
+          calls.push(['setPc', pc]);
+          return true;
+        },
+        reset: () => calls.push(['reset']),
+        has_signal: () => true,
+        poke: (name, value) => calls.push(['poke', name, value]),
+        runner_run_cycles: (cycles) => {
+          calls.push(['run', cycles]);
+          return { cycles_run: cycles };
+        },
+        runner_read_memory: (addr) => {
+          if ((addr & 0xFFFF) === 0xFFFC) {
+            return new Uint8Array([0x34]);
+          }
+          if ((addr & 0xFFFF) === 0xFFFD) {
+            return new Uint8Array([0x12]);
+          }
+          if ((addr & 0xFFFF) === 0x1234) {
+            return new Uint8Array([0xEA]);
+          }
+          return new Uint8Array([0x00]);
+        },
+        evaluate: () => calls.push(['evaluate']),
+        tick: () => calls.push(['tick'])
+      }
+    },
+    state: { apple2: { enabled: false, baseRomBytes: null } },
+    preset: {
+      defaultBin: {
+        path: '/fixtures/mos6502/default.bin',
+        offset: 0,
+        space: 'main',
+        startPc: 0x1234,
+        resetAfterLoad: true
+      }
+    },
+    addWatchSignal: () => {},
+    fetchImpl: async () => ({
+      ok: true,
+      async arrayBuffer() {
+        return new Uint8Array([0x00]).buffer;
+      }
+    }),
+    log: (message) => logs.push(String(message))
+  });
+
+  assert.deepEqual(calls, [
+    ['load', 1, 0, { isRom: false }],
+    ['setPc', 0x1234],
+    ['reset'],
+    ['poke', 'rst', 1],
+    ['poke', 'rdy', 1],
+    ['poke', 'irq', 1],
+    ['poke', 'nmi', 1],
+    ['poke', 'data_in', 0],
+    ['poke', 'ext_pc_load_en', 0],
+    ['poke', 'ext_a_load_en', 0],
+    ['poke', 'ext_x_load_en', 0],
+    ['poke', 'ext_y_load_en', 0],
+    ['poke', 'ext_sp_load_en', 0],
+    ['run', 1],
+    ['poke', 'rst', 0],
+    ['run', 5],
+    ['poke', 'ext_pc_load_data', 0x1234],
+    ['poke', 'ext_pc_load_en', 1],
+    ['poke', 'data_in', 0xEA],
+    ['poke', 'clk', 0],
+    ['evaluate'],
+    ['poke', 'clk', 1],
+    ['tick'],
+    ['poke', 'ext_pc_load_en', 0]
+  ]);
+  assert.equal(logs.some((line) => line.includes('MOS6502 bootstrap complete')), true);
+});

@@ -239,6 +239,7 @@ impl Mos6502Extension {
         let rw_idx = *core.name_to_idx.get("rw").unwrap_or(&0);
         let clk_idx = *core.name_to_idx.get("clk").unwrap_or(&0);
 
+        let num_clocks = core.clock_indices.len();
         let num_regs = core.seq_targets.len();
 
         code.push_str("\n// ============================================================================\n");
@@ -262,12 +263,13 @@ impl Mos6502Extension {
         code.push_str("    let s = signals.as_mut_ptr();\n");
         code.push_str("    let mem = memory.as_mut_ptr();\n");
         code.push_str("    let rom = rom_mask.as_ptr();\n");
+        code.push_str(&format!("    let mut old_clocks = [0u64; {}];\n", num_clocks));
         code.push_str(&format!("    let mut next_regs = [0u64; {}];\n", num_regs.max(1)));
         code.push_str("    let mut speaker_toggles: u32 = 0;\n");
         code.push_str("\n");
-        code.push_str(&format!("    drive_clock_low_inline(signals, {});\n\n", clk_idx));
 
         code.push_str("    for _ in 0..n {\n");
+        code.push_str(&format!("        drive_clock_low_inline(signals, {});\n\n", clk_idx));
 
         // Memory bridge on low phase using pre-evaluated bus outputs.
         code.push_str(&format!("        let addr = ((*s.add({}) as usize) & 0xFFFF) as usize;\n", addr_idx));
@@ -289,8 +291,11 @@ impl Mos6502Extension {
         code.push_str("            }\n");
         code.push_str("        }\n\n");
 
-        // Rising edge: sample/commit sequential state once, then return to low phase.
-        code.push_str(&format!("        pulse_clock_forced_inline(signals, {}, &mut next_regs);\n", clk_idx));
+        // Rising edge: edge-aware tick so derived clock domains update correctly.
+        code.push_str(&format!(
+            "        drive_clock_high_tick_inline(signals, {}, &mut old_clocks, &mut next_regs);\n",
+            clk_idx
+        ));
         code.push_str("    }\n\n");
         code.push_str("    // Write speaker toggles to out parameter\n");
         code.push_str("    if !speaker_toggles_out.is_null() {\n");
@@ -316,6 +321,7 @@ impl Mos6502Extension {
         let pc_idx = *core.name_to_idx.get("reg_pc").unwrap_or(&0);
         let sp_idx = *core.name_to_idx.get("reg_sp").unwrap_or(&0);
 
+        let num_clocks = core.clock_indices.len();
         let num_regs = core.seq_targets.len();
 
         code.push_str("\n// ============================================================================\n");
@@ -343,17 +349,18 @@ impl Mos6502Extension {
         code.push_str("    let s = signals.as_mut_ptr();\n");
         code.push_str("    let mem = memory.as_mut_ptr();\n");
         code.push_str("    let rom = rom_mask.as_ptr();\n");
+        code.push_str(&format!("    let mut old_clocks = [0u64; {}];\n", num_clocks));
         code.push_str(&format!("    let mut next_regs = [0u64; {}];\n", num_regs.max(1)));
         code.push_str("    let mut speaker_toggles: u32 = 0;\n");
         code.push_str("    let mut instruction_count: usize = 0;\n");
         code.push_str("    let max_cycles = n * 10; // Safety limit\n");
         code.push_str("    let mut cycles: usize = 0;\n");
-        code.push_str(&format!("    drive_clock_low_inline(signals, {});\n", clk_idx));
         code.push_str(&format!("    let mut last_state = *s.add({});\n", state_idx));
         code.push_str("    const STATE_DECODE: u64 = 0x02;\n");
         code.push_str("\n");
 
         code.push_str("    while instruction_count < n && cycles < max_cycles {\n");
+        code.push_str(&format!("        drive_clock_low_inline(signals, {});\n\n", clk_idx));
 
         // Memory bridge on low phase using pre-evaluated bus outputs.
         code.push_str(&format!("        let addr = ((*s.add({}) as usize) & 0xFFFF) as usize;\n", addr_idx));
@@ -375,7 +382,10 @@ impl Mos6502Extension {
         code.push_str("            }\n");
         code.push_str("        }\n\n");
 
-        code.push_str(&format!("        pulse_clock_forced_inline(signals, {}, &mut next_regs);\n", clk_idx));
+        code.push_str(&format!(
+            "        drive_clock_high_tick_inline(signals, {}, &mut old_clocks, &mut next_regs);\n",
+            clk_idx
+        ));
         code.push_str("        cycles += 1;\n\n");
 
         // Check for state transition to DECODE

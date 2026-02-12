@@ -114,3 +114,17 @@ test('initializeSimulator configures runtime and resets state', async () => {
   assert.equal(calls.some(([k]) => k === 'refreshStatus'), true);
   assert.equal(calls.some(([k, v]) => k === 'log' && v === 'Simulator initialized'), true);
 });
+
+test('initializeSimulator always refreshes backend instance for current preset/backend', async () => {
+  const backendCalls = [];
+  const { controller, dom } = createHarness({
+    ensureBackendInstance: async (backend) => {
+      backendCalls.push(backend);
+    }
+  });
+  dom.irJson.value = '{"ports":[{"name":"clk","width":1}]}';
+
+  await controller.initializeSimulator({});
+
+  assert.deepEqual(backendCalls, ['compiler']);
+});

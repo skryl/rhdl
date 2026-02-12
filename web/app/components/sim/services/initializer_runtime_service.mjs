@@ -183,6 +183,7 @@ async function loadDefaultBinAsset({
 
     if (defaultBin.resetAfterLoad && typeof runtime.sim.reset === 'function') {
       runtime.sim.reset();
+      await bootstrapMos6502Runner(runtime, log);
     }
 
     log(`Loaded default bin (${defaultBin.space}) @ 0x${loadOffset.toString(16)}: ${defaultBin.path}`);
@@ -191,6 +192,103 @@ async function loadDefaultBinAsset({
     log(`Failed to load default bin: ${err.message || err}`);
     return false;
   }
+}
+
+function readMos6502ResetVector(runtime) {
+  if (!runtime?.sim || typeof runtime.sim.runner_read_memory !== 'function') {
+    return null;
+  }
+  const loBytes = runtime.sim.runner_read_memory(0xFFFC, 1);
+  const hiBytes = runtime.sim.runner_read_memory(0xFFFD, 1);
+  const lo = loBytes instanceof Uint8Array && loBytes.length > 0 ? (loBytes[0] & 0xFF) : 0;
+  const hi = hiBytes instanceof Uint8Array && hiBytes.length > 0 ? (hiBytes[0] & 0xFF) : 0;
+  return ((hi << 8) | lo) & U16_MASK;
+}
+
+function readMos6502Byte(runtime, addr) {
+  if (!runtime?.sim || typeof runtime.sim.runner_read_memory !== 'function') {
+    return 0;
+  }
+  const bytes = runtime.sim.runner_read_memory(addr & U16_MASK, 1);
+  return bytes instanceof Uint8Array && bytes.length > 0 ? (bytes[0] & 0xFF) : 0;
+}
+
+function pokeSignalIfPresent(runtime, name, value) {
+  if (!runtime?.sim || typeof runtime.sim.has_signal !== 'function' || typeof runtime.sim.poke !== 'function') {
+    return;
+  }
+  if (runtime.sim.has_signal(name)) {
+    runtime.sim.poke(name, value);
+  }
+}
+
+function runBootstrapCycles(runtime, count) {
+  const cycles = Math.max(0, Number.parseInt(count, 10) || 0);
+  if (cycles <= 0 || !runtime?.sim) {
+    return;
+  }
+  if (typeof runtime.sim.runner_run_cycles === 'function') {
+    runtime.sim.runner_run_cycles(cycles, 0, false);
+    return;
+  }
+  if (typeof runtime.sim.run_clock_ticks === 'function' && typeof runtime.sim.has_signal === 'function' && runtime.sim.has_signal('clk')) {
+    runtime.sim.run_clock_ticks('clk', cycles);
+    return;
+  }
+  if (typeof runtime.sim.run_ticks === 'function') {
+    runtime.sim.run_ticks(cycles);
+  }
+}
+
+async function bootstrapMos6502Runner(runtime, log = () => {}) {
+  if (!runtime?.sim || typeof runtime.sim.runner_kind !== 'function') {
+    return;
+  }
+  if (runtime.sim.runner_kind() !== 'mos6502') {
+    return;
+  }
+
+  // Match examples/mos6502 IR runner reset/bootstrap flow so CPU starts at reset vector target.
+  pokeSignalIfPresent(runtime, 'rst', 1);
+  pokeSignalIfPresent(runtime, 'rdy', 1);
+  pokeSignalIfPresent(runtime, 'irq', 1);
+  pokeSignalIfPresent(runtime, 'nmi', 1);
+  pokeSignalIfPresent(runtime, 'data_in', 0);
+  pokeSignalIfPresent(runtime, 'ext_pc_load_en', 0);
+  pokeSignalIfPresent(runtime, 'ext_a_load_en', 0);
+  pokeSignalIfPresent(runtime, 'ext_x_load_en', 0);
+  pokeSignalIfPresent(runtime, 'ext_y_load_en', 0);
+  pokeSignalIfPresent(runtime, 'ext_sp_load_en', 0);
+
+  runBootstrapCycles(runtime, 1); // one reset pulse cycle
+  pokeSignalIfPresent(runtime, 'rst', 0);
+  runBootstrapCycles(runtime, 5); // settle control reset sequence
+
+  const targetAddr = readMos6502ResetVector(runtime);
+  if (targetAddr == null) {
+    log('MOS6502 bootstrap skipped: reset vector unavailable');
+    return;
+  }
+  const opcode = readMos6502Byte(runtime, targetAddr);
+  pokeSignalIfPresent(runtime, 'ext_pc_load_data', targetAddr);
+  pokeSignalIfPresent(runtime, 'ext_pc_load_en', 1);
+  pokeSignalIfPresent(runtime, 'data_in', opcode);
+
+  if (typeof runtime.sim.has_signal === 'function'
+    && runtime.sim.has_signal('clk')
+    && typeof runtime.sim.evaluate === 'function'
+    && typeof runtime.sim.tick === 'function'
+    && typeof runtime.sim.poke === 'function') {
+    runtime.sim.poke('clk', 0);
+    runtime.sim.evaluate();
+    runtime.sim.poke('clk', 1);
+    runtime.sim.tick();
+  } else {
+    runBootstrapCycles(runtime, 1);
+  }
+
+  pokeSignalIfPresent(runtime, 'ext_pc_load_en', 0);
+  log(`MOS6502 bootstrap complete (PC target $${targetAddr.toString(16).toUpperCase().padStart(4, '0')})`);
 }
 
 export function resolveInitializationContext({

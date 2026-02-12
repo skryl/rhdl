@@ -38,8 +38,19 @@ class RhdlMemoryView extends LitElement {
       white-space: pre;
     }
     .changed-byte {
-      background: rgba(255, 196, 0, 0.32);
       border-radius: 3px;
+      font-weight: 600;
+      text-shadow: 0 0 6px rgba(255, 255, 255, 0.15);
+    }
+    .byte-read {
+      background: rgba(57, 255, 20, 0.82);
+      color: #001407;
+      box-shadow: 0 0 0 1px rgba(57, 255, 20, 0.95), 0 0 12px rgba(57, 255, 20, 0.75);
+    }
+    .byte-write {
+      background: rgba(255, 48, 48, 0.82);
+      color: #1a0303;
+      box-shadow: 0 0 0 1px rgba(255, 48, 48, 0.95), 0 0 12px rgba(255, 48, 48, 0.75);
     }
     @media (max-width: 980px) {
       .memory-split {
@@ -124,7 +135,19 @@ class RhdlMemoryView extends LitElement {
       return this.dumpText;
     }
 
-    return this.dumpRows.map((row, rowIndex) => html`${row.marker} ${row.addressHex}: ${row.bytes.map((byte, idx) => html`${byte.changed ? html`<span class="changed-byte">${byte.hex}</span>` : byte.hex}${idx < row.bytes.length - 1 ? ' ' : ''}`)}  ${row.ascii}${rowIndex < this.dumpRows.length - 1 ? '\n' : ''}`);
+    return this.dumpRows.map((row, rowIndex) => html`${row.marker} ${row.addressHex}: ${row.bytes.map((byte, idx) => {
+      const classes = [];
+      if (byte.changed) {
+        classes.push('changed-byte');
+      }
+      if (byte.accessType === 'read') {
+        classes.push('byte-read');
+      }
+      if (byte.accessType === 'write') {
+        classes.push('byte-write');
+      }
+      return html`${classes.length > 0 ? html`<span class=${classes.join(' ')}>${byte.hex}</span>` : byte.hex}${idx < row.bytes.length - 1 ? ' ' : ''}`;
+    })}  ${row.ascii}${rowIndex < this.dumpRows.length - 1 ? '\n' : ''}`);
   }
 
   render() {
