@@ -73,7 +73,15 @@ test('mos6502 runner loads with compiler backend using runner-specific AOT wasm'
   await page.waitForFunction(() => {
     const log = document.querySelector('#eventLog')?.textContent || '';
     return log.includes('Loaded default bin')
-      && log.includes('./assets/fixtures/mos6502/memory/karateka_mem.rhdlsnap');
+      && log.includes('./assets/fixtures/mos6502/memory/karateka_mem.rhdlsnap')
+      && log.includes('MOS6502 bootstrap complete');
+  }, null, { timeout: 120000 });
+
+  await page.click('#runBtn');
+  await page.waitForFunction(() => {
+    const text = document.querySelector('#simStatus')?.textContent || '';
+    const match = text.match(/Cycle\s+(\d+)/);
+    return !!match && Number.parseInt(match[1], 10) > 0;
   }, null, { timeout: 120000 });
 
   assert.deepEqual(pageErrors, [], `Unhandled page errors: ${pageErrors.join(' | ')}`);

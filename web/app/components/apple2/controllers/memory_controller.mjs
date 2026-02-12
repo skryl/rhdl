@@ -30,18 +30,26 @@ export function createApple2MemoryController({
   const MAX_MEMORY_VIEW_LENGTH = 0x10000;
   const BYTES_PER_MEMORY_ROW = 16;
   const CHANGE_HIGHLIGHT_MS = 750;
+  const ACCESS_HIGHLIGHT_MS = 750;
   const previousWindowBytes = new Map();
   const changedByteExpiryMs = new Map();
+  const accessedByteExpiry = new Map();
 
   function resetHighlightState() {
     previousWindowBytes.clear();
     changedByteExpiryMs.clear();
+    accessedByteExpiry.clear();
   }
 
   function pruneExpiredHighlights(nowMs) {
     for (const [addr, expiryMs] of changedByteExpiryMs.entries()) {
       if (expiryMs <= nowMs) {
         changedByteExpiryMs.delete(addr);
+      }
+    }
+    for (const [addr, info] of accessedByteExpiry.entries()) {
+      if (!info || info.expiryMs <= nowMs) {
+        accessedByteExpiry.delete(addr);
       }
     }
   }
@@ -163,6 +171,13 @@ export function createApple2MemoryController({
 
     const nowMs = Date.now();
     pruneExpiredHighlights(nowMs);
+    const access = detectCurrentMemoryAccess();
+    if (access) {
+      accessedByteExpiry.set(access.addr, {
+        type: access.type,
+        expiryMs: nowMs + ACCESS_HIGHLIGHT_MS
+      });
+    }
     const nextWindowBytes = new Map();
     const lines = [];
     const dumpRows = [];
@@ -178,9 +193,14 @@ export function createApple2MemoryController({
         }
         nextWindowBytes.set(byteAddr, value);
         const changed = (changedByteExpiryMs.get(byteAddr) || 0) > nowMs;
+        const accessInfo = accessedByteExpiry.get(byteAddr);
+        const accessType = accessInfo && accessInfo.expiryMs > nowMs
+          ? accessInfo.type
+          : (changed ? 'write' : null);
         rowBytes.push({
           hex: hexByte(value),
-          changed
+          changed,
+          accessType
         });
       }
       const hex = rowBytes.map((entry) => entry.hex).join(' ');
@@ -221,6 +241,43 @@ export function createApple2MemoryController({
       addressSpace: addrSpace,
       bytesPerRow: BYTES_PER_MEMORY_ROW
     });
+  }
+
+  function detectCurrentMemoryAccess() {
+    if (!runtime.sim || !isApple2UiEnabled()) {
+      return null;
+    }
+
+    // MOS6502 standalone runner bus signals.
+    if (runtime.sim.has_signal('addr') && runtime.sim.has_signal('rw')) {
+      const addr = runtime.sim.peek('addr') & 0xffff;
+      const rw = runtime.sim.peek('rw') & 0x1;
+      return {
+        addr,
+        type: rw === 0 ? 'write' : 'read'
+      };
+    }
+
+    // Apple2/system runners expose cpu address + ram write-enable.
+    if (runtime.sim.has_signal('cpu__addr_reg') && runtime.sim.has_signal('ram_we')) {
+      const addr = runtime.sim.peek('cpu__addr_reg') & 0xffff;
+      const ramWe = runtime.sim.peek('ram_we') & 0x1;
+      return {
+        addr,
+        type: ramWe === 1 ? 'write' : 'read'
+      };
+    }
+
+    if (runtime.sim.has_signal('ram_addr') && runtime.sim.has_signal('ram_we')) {
+      const addr = runtime.sim.peek('ram_addr') & 0xffff;
+      const ramWe = runtime.sim.peek('ram_we') & 0x1;
+      return {
+        addr,
+        type: ramWe === 1 ? 'write' : 'read'
+      };
+    }
+
+    return null;
   }
 
   return {

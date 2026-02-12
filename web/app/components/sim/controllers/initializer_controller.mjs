@@ -105,9 +105,9 @@ export function createSimInitializerController({
     setComponentSchematicBundle(options.componentSchematicBundle || null);
 
     try {
-      if (!runtime.instance) {
-        await ensureBackendInstance(state.backend);
-      }
+      // Always re-resolve backend instance so runner-specific compiler wasm paths
+      // (e.g. mos6502/gameboy/cpu8bit) are honored when switching presets.
+      await ensureBackendInstance(state.backend);
       resetSimulatorSession({
         runtime,
         state,

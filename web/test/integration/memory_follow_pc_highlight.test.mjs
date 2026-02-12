@@ -78,6 +78,12 @@ test('memory follow-pc auto-scrolls and changed bytes are temporarily highlighte
     return dumpPre.scrollTop > 0 && disasmPre.scrollTop > 0;
   }, null, { timeout: 60000 });
 
+  await page.waitForFunction(() => {
+    const view = document.querySelector('#memoryDump');
+    const accessHighlights = view?.shadowRoot?.querySelectorAll('.byte-read, .byte-write')?.length || 0;
+    return accessHighlights > 0;
+  }, null, { timeout: 30000 });
+
   await page.fill('#memoryWriteAddr', '0x0010');
   await page.fill('#memoryWriteValue', '0x41');
   await page.click('#memoryWriteBtn');
@@ -88,6 +94,12 @@ test('memory follow-pc auto-scrolls and changed bytes are temporarily highlighte
     const view = document.querySelector('#memoryDump');
     const changed = view?.shadowRoot?.querySelectorAll('.changed-byte')?.length || 0;
     return changed > 0;
+  }, null, { timeout: 30000 });
+
+  await page.waitForFunction(() => {
+    const view = document.querySelector('#memoryDump');
+    const writes = view?.shadowRoot?.querySelectorAll('.byte-write')?.length || 0;
+    return writes > 0;
   }, null, { timeout: 30000 });
 
   assert.deepEqual(pageErrors, [], `Unhandled page errors: ${pageErrors.join(' | ')}`);

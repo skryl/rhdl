@@ -215,6 +215,7 @@ export function createSimLoopRunnerService({
 
     const key = state.apple2.keyQueue[0];
     const keyReady = state.apple2.keyQueue.length > 0;
+    const requestedCycles = Math.max(0, Number.parseInt(cycles, 10) || 0);
     const result = runtime.sim.runner_run_cycles(cycles, key || 0, keyReady);
     if (!result) {
       runGenericCycles(cycles);
@@ -226,6 +227,20 @@ export function createSimLoopRunnerService({
     }
 
     const cyclesRun = Math.max(0, Number.parseInt(result.cycles_run, 10) || 0);
+    const runnerKind = typeof runtime.sim.runner_kind === 'function'
+      ? runtime.sim.runner_kind()
+      : null;
+    const isMos6502Runner = runnerKind === 'mos6502' || state.runnerPreset === 'mos6502';
+    if (isMos6502Runner && requestedCycles > 0 && cyclesRun === 0) {
+      // MOS6502 runner API can report 0 cycles in some compiler/AOT combinations.
+      // Fall back to generic clocked stepping so run/step still progresses.
+      if (keyReady && state.apple2.keyQueue.length > 0) {
+        state.apple2.keyQueue.shift();
+      }
+      runGenericCycles(cycles);
+      return;
+    }
+
     const speakerToggles = Math.max(0, Number.parseInt(result.speaker_toggles, 10) || 0);
     state.apple2.lastCpuResult = result;
     state.apple2.lastSpeakerToggles = speakerToggles;
