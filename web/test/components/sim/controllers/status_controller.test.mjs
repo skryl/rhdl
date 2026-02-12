@@ -22,14 +22,24 @@ function createHarness() {
   };
   const runtime = {
     sim: null,
-    irMeta: null
+    irMeta: null,
+    throughput: {
+      cyclesPerSecond: 14000
+    }
   };
   const controller = createSimStatusController({
     dom,
     state,
     runtime,
     getBackendDef: () => ({ id: 'compiler', label: 'Compiler (AOT)' }),
-    currentRunnerPreset: () => ({ id: 'generic', label: 'Generic' }),
+    currentRunnerPreset: () => ({
+      id: 'generic',
+      label: 'Generic',
+      timing: {
+        cyclesPerHertz: 14,
+        hertzLabel: 'CPU'
+      }
+    }),
     isApple2UiEnabled: () => true,
     updateIoToggleUi: () => ioCalls.push('io'),
     scheduleReduxUxSync: (reason) => scheduleCalls.push(reason),
@@ -80,6 +90,8 @@ test('refreshStatus with simulator writes running metrics and queues sync', () =
   };
   controller.refreshStatus();
   assert.match(dom.simStatus.textContent, /Cycle 123 \| 7 signals \| 3 regs/);
+  assert.match(dom.simStatus.textContent, /14,000 cyc\/s/);
+  assert.match(dom.simStatus.textContent, /1,000 CPU Hz/);
   assert.match(dom.traceStatus.textContent, /Trace enabled \| changes 99/);
   assert.match(dom.backendStatus.textContent, /name-mode/);
   assert.match(dom.backendStatus.textContent, /vcd-snapshot/);

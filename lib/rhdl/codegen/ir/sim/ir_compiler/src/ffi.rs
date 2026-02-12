@@ -11,7 +11,7 @@ use std::ptr;
 use std::slice;
 
 use crate::core::CoreSimulator;
-use crate::extensions::{Apple2Extension, GameBoyExtension, Mos6502Extension};
+use crate::extensions::{Apple2Extension, Cpu8BitExtension, GameBoyExtension, Mos6502Extension};
 use crate::vcd::{TraceMode, VcdTracer};
 
 // ============================================================================
@@ -22,6 +22,7 @@ use crate::vcd::{TraceMode, VcdTracer};
 pub struct IrSimContext {
     pub core: CoreSimulator,
     pub apple2: Option<Apple2Extension>,
+    pub cpu8bit: Option<Cpu8BitExtension>,
     pub gameboy: Option<GameBoyExtension>,
     pub mos6502: Option<Mos6502Extension>,
     pub tracer: VcdTracer,
@@ -40,6 +41,12 @@ impl IrSimContext {
 
         let gameboy = if GameBoyExtension::is_gameboy_ir(&core.name_to_idx) {
             Some(GameBoyExtension::new(&core))
+        } else {
+            None
+        };
+
+        let cpu8bit = if Cpu8BitExtension::is_cpu8bit_ir(&core.name_to_idx) {
+            Some(Cpu8BitExtension::new(&core))
         } else {
             None
         };
@@ -75,6 +82,7 @@ impl IrSimContext {
         Ok(Self {
             core,
             apple2,
+            cpu8bit,
             gameboy,
             mos6502,
             tracer,
@@ -130,6 +138,8 @@ pub const RUNNER_KIND_APPLE2: c_int = 1;
 pub const RUNNER_KIND_MOS6502: c_int = 2;
 /// Game Boy system extension
 pub const RUNNER_KIND_GAMEBOY: c_int = 3;
+/// examples/8bit CPU extension
+pub const RUNNER_KIND_CPU8BIT: c_int = 4;
 
 pub const RUNNER_MEM_OP_LOAD: c_uint = 0;
 pub const RUNNER_MEM_OP_READ: c_uint = 1;
@@ -227,6 +237,8 @@ unsafe fn runner_kind_impl(ctx: *const IrSimContext) -> c_int {
         RUNNER_KIND_MOS6502
     } else if ctx.gameboy.is_some() {
         RUNNER_KIND_GAMEBOY
+    } else if ctx.cpu8bit.is_some() {
+        RUNNER_KIND_CPU8BIT
     } else {
         RUNNER_KIND_NONE
     }
@@ -274,6 +286,11 @@ unsafe fn runner_load_main_impl(
     if let Some(ref mut mos6502) = ctx.mos6502 {
         mos6502.load_memory(bytes, offset, is_rom);
         return len;
+    }
+
+    if let Some(ref mut cpu8bit) = ctx.cpu8bit {
+        cpu8bit.load_memory(bytes, offset, is_rom);
+        return len.min(0x10000usize.saturating_sub(offset));
     }
 
     if let Some(ref mut gameboy) = ctx.gameboy {
@@ -352,6 +369,16 @@ unsafe fn runner_read_main_impl(
         return len;
     }
 
+    if let Some(ref cpu8bit) = ctx.cpu8bit {
+        let out = slice::from_raw_parts_mut(out_data, len);
+        let mut addr = start & 0xFFFF;
+        for byte in out.iter_mut() {
+            *byte = cpu8bit.read_memory(addr);
+            addr = (addr + 1) & 0xFFFF;
+        }
+        return len;
+    }
+
     0
 }
 
@@ -398,6 +425,15 @@ unsafe fn runner_write_main_impl(
         let mut addr = start & 0xFFFF;
         for &value in bytes.iter() {
             mos6502.write_memory(addr, value);
+            addr = (addr + 1) & 0xFFFF;
+        }
+        return len;
+    }
+
+    if let Some(ref mut cpu8bit) = ctx.cpu8bit {
+        let mut addr = start & 0xFFFF;
+        for &value in bytes.iter() {
+            cpu8bit.write_memory(addr, value);
             addr = (addr + 1) & 0xFFFF;
         }
         return len;
@@ -734,6 +770,12 @@ unsafe fn runner_run_impl(
         return 1;
     }
 
+    if let Some(ref mut cpu8bit) = ctx.cpu8bit {
+        let cycles_run = cpu8bit.run_cycles(&mut ctx.core, cycles);
+        write_runner_run_result(result_out, false, false, cycles_run, 0, 0);
+        return 1;
+    }
+
     if let Some(ref mut gameboy) = ctx.gameboy {
         let result = gameboy.run_gb_cycles(&mut ctx.core, cycles);
         write_runner_run_result(
@@ -765,7 +807,11 @@ pub unsafe extern "C" fn runner_get_caps(
 
     let kind = runner_kind_impl(ctx);
     let mut mem_spaces = 0u32;
-    if kind == RUNNER_KIND_APPLE2 || kind == RUNNER_KIND_MOS6502 || kind == RUNNER_KIND_GAMEBOY {
+    if kind == RUNNER_KIND_APPLE2
+        || kind == RUNNER_KIND_MOS6502
+        || kind == RUNNER_KIND_GAMEBOY
+        || kind == RUNNER_KIND_CPU8BIT
+    {
         mem_spaces |= bit(RUNNER_MEM_SPACE_MAIN) | bit(RUNNER_MEM_SPACE_ROM);
     }
     if kind == RUNNER_KIND_GAMEBOY {

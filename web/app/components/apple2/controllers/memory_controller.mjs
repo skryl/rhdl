@@ -27,6 +27,8 @@ export function createApple2MemoryController({
   requireFn('renderMemoryPanel', renderMemoryPanel);
   requireFn('disassemble6502LinesWithMemory', disassemble6502LinesWithMemory);
   requireFn('setMemoryDumpStatus', setMemoryDumpStatus);
+  const MAX_MEMORY_VIEW_LENGTH = 0x10000;
+  const BYTES_PER_MEMORY_ROW = 16;
 
   function currentIoConfig() {
     return state.apple2?.ioConfig || {};
@@ -111,8 +113,9 @@ export function createApple2MemoryController({
     }
 
     const addrSpace = currentAddressSpace();
+    const maxLength = Math.max(1, Math.min(addrSpace, MAX_MEMORY_VIEW_LENGTH));
     let start = Math.max(0, parseHexOrDec(dom.memoryStart?.value, 0)) % addrSpace;
-    const length = Math.max(1, Math.min(1024, parseHexOrDec(dom.memoryLength?.value, 256)));
+    const length = Math.max(1, Math.min(maxLength, parseHexOrDec(dom.memoryLength?.value, maxLength)));
     const pc = getApple2ProgramCounter();
 
     if (state.memory.followPc && pc != null) {
@@ -146,14 +149,15 @@ export function createApple2MemoryController({
       const marker = hasPc ? '>>' : '  ';
       lines.push(`${marker} ${hexWord(addr)}: ${hex.padEnd(16 * 3 - 1, ' ')}  ${ascii}`);
     }
-    const disasmStart = state.memory.followPc && pc != null ? (pc & 0xffff) : start;
+    const disasmLineCount = Math.max(1, Math.ceil(length / BYTES_PER_MEMORY_ROW));
+    const disasmStart = start;
     renderMemoryPanel(dom, {
       followDisabled: false,
       followChecked: !!state.memory.followPc,
       dumpText: lines.join('\n'),
       disasmText: disassemble6502LinesWithMemory(
         disasmStart,
-        state.memory.disasmLines,
+        disasmLineCount,
         readApple2MappedMemory,
         { highlightPc: pc, addressSpace: addrSpace }
       ).join('\n')

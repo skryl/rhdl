@@ -62,7 +62,7 @@ export function terminalHelpText() {
     '  config <show|hide|toggle>',
     '  terminal <show|hide|toggle|clear>',
     '  tab <io|vcd|memory|components|schematic>',
-    '  runner <generic|cpu|apple2> [load]',
+    '  runner <id> [load]',
     '  backend <interpreter|jit|compiler>',
     '  theme <shenzhen|original>',
     '  init | reset | step [n] | run | pause',
@@ -78,7 +78,7 @@ export function terminalHelpText() {
     '  memory write <addr> <value>',
     '  memory reset [vector]',
     '  memory <karateka|load_last|save_dump|save_snapshot|load_selected>',
-    '  sample [path]  (generic runner)',
+    '  sample [path]  (manual-IR runner)',
     '  set <elementId> <value>  (generic UI setter)',
     '  click <elementId>        (generic UI button click)'
   ].join('\n');

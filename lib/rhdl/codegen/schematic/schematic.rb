@@ -802,9 +802,9 @@ module RHDL
 
       def ir_to_hash(ir_obj)
         return ir_obj if ir_obj.is_a?(Hash)
-        return JSON.parse(ir_obj) if ir_obj.is_a?(String)
+        return JSON.parse(ir_obj, max_nesting: false) if ir_obj.is_a?(String)
 
-        JSON.parse(RHDL::Codegen::IR::IRToJson.convert(ir_obj))
+        JSON.parse(RHDL::Codegen::IR::IRToJson.convert(ir_obj), max_nesting: false)
       end
     end
   end

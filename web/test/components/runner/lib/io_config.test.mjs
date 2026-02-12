@@ -54,6 +54,7 @@ test('resolveRunnerIoConfig normalizes memory-mapped runner config', () => {
         addr: 0xFF10,
         mask: 1
       },
+      pcSignalCandidates: ['pc_out', 'cpu_pc'],
       watchSignals: ['pc_debug', 'speaker']
     }
   });
@@ -63,5 +64,6 @@ test('resolveRunnerIoConfig normalizes memory-mapped runner config', () => {
   assert.equal(config.display.mode, 'text');
   assert.equal(config.keyboard.dataAddr, 0xFF00);
   assert.equal(config.sound.addr, 0xFF10);
+  assert.deepEqual(config.pcSignalCandidates, ['pc_out', 'cpu_pc']);
   assert.deepEqual(config.watchSignals, ['pc_debug', 'speaker']);
 });

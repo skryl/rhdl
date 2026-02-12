@@ -18,7 +18,7 @@ require_relative 'hdl/combinational'
 require_relative 'hdl/memory'
 require_relative 'debug'
 require_relative 'tui'
-require_relative 'hdl/cpu/harness'
+require_relative '../../examples/8bit/hdl/cpu/harness'
 
 module RHDL
   module HDL

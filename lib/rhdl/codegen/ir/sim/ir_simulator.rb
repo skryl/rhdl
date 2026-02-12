@@ -66,6 +66,7 @@ module RHDL
         RUNNER_KIND_APPLE2 = 1
         RUNNER_KIND_MOS6502 = 2
         RUNNER_KIND_GAMEBOY = 3
+        RUNNER_KIND_CPU8BIT = 4
 
         RUNNER_MEM_OP_LOAD = 0
         RUNNER_MEM_OP_READ = 1
@@ -415,7 +416,8 @@ module RHDL
             runner_mode: runner_mode?,
             apple2_mode: runner_kind == :apple2,
             gameboy_mode: gameboy_mode?,
-            mos6502_mode: runner_kind == :mos6502
+            mos6502_mode: runner_kind == :mos6502,
+            cpu8bit_mode: runner_kind == :cpu8bit
           }
         end
 
@@ -458,6 +460,7 @@ module RHDL
           when RUNNER_KIND_APPLE2 then :apple2
           when RUNNER_KIND_MOS6502 then :mos6502
           when RUNNER_KIND_GAMEBOY then :gameboy
+          when RUNNER_KIND_CPU8BIT then :cpu8bit
           else nil
           end
         end

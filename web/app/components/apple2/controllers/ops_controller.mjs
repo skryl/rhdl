@@ -185,6 +185,7 @@ export function createApple2OpsController({
     saveApple2MemoryDump: dumpWorkflowService.saveApple2MemoryDump,
     saveApple2MemorySnapshot: dumpWorkflowService.saveApple2MemorySnapshot,
     loadApple2DumpOrSnapshotFile: dumpWorkflowService.loadApple2DumpOrSnapshotFile,
+    loadApple2DumpOrSnapshotAssetPath: dumpWorkflowService.loadApple2DumpOrSnapshotAssetPath,
     loadLastSavedApple2Dump: dumpWorkflowService.loadLastSavedApple2Dump,
     resetApple2WithMemoryVectorOverride: resetOverrideService.resetApple2WithMemoryVectorOverride,
     performApple2ResetSequence: simRuntimeService.performApple2ResetSequence,

@@ -125,3 +125,84 @@ test('initializeApple2Mode loads rom when preset enables ui', async () => {
   assert.deepEqual(loaded, [3]);
   assert.equal(logs.some((line) => String(line).includes('Loaded runner ROM via runner_load_rom')), true);
 });
+
+test('initializeApple2Mode loads default bin into main memory and resets', async () => {
+  const calls = [];
+  await initializeApple2Mode({
+    runtime: {
+      sim: {
+        runner_mode: () => true,
+        runner_load_memory: (bytes, offset, options) => {
+          calls.push(['load', bytes.length, offset, options]);
+          return true;
+        },
+        runner_set_reset_vector: (pc) => {
+          calls.push(['setPc', pc]);
+          return true;
+        },
+        reset: () => calls.push(['reset'])
+      }
+    },
+    state: { apple2: { enabled: false, baseRomBytes: null } },
+    preset: {
+      defaultBin: {
+        path: '/fixtures/cpu/default.bin',
+        offset: 0x200,
+        space: 'main',
+        startPc: '0x0200',
+        resetAfterLoad: true
+      }
+    },
+    addWatchSignal: () => {},
+    fetchImpl: async () => ({
+      ok: true,
+      async arrayBuffer() {
+        return new Uint8Array([0xA9, 0x23]).buffer;
+      }
+    }),
+    log: () => {}
+  });
+
+  assert.deepEqual(calls, [
+    ['load', 2, 0x200, { isRom: false }],
+    ['setPc', 0x0200],
+    ['reset']
+  ]);
+});
+
+test('initializeApple2Mode loads boot ROM default bin through runner API', async () => {
+  const calls = [];
+  await initializeApple2Mode({
+    runtime: {
+      sim: {
+        runner_mode: () => true,
+        runner_load_boot_rom: (bytes) => {
+          calls.push(['boot', bytes.length]);
+          return true;
+        },
+        reset: () => calls.push(['reset'])
+      }
+    },
+    state: { apple2: { enabled: false, baseRomBytes: null } },
+    preset: {
+      defaultBin: {
+        path: '/fixtures/gameboy/dmg_boot.bin',
+        space: 'boot_rom',
+        resetAfterLoad: true
+      }
+    },
+    addWatchSignal: () => {},
+    fetchImpl: async () => ({
+      ok: true,
+      async arrayBuffer() {
+        return new Uint8Array([0x31, 0xFE, 0xFF]).buffer;
+      }
+    }),
+    log: () => {}
+  });
+
+  assert.deepEqual(calls, [
+    ['boot', 3],
+    ['reset']
+  ]);
+});

@@ -34,7 +34,10 @@ export function createSimLoopRunnerService({
   refreshMemoryView,
   isComponentTabActive,
   refreshActiveComponentTab,
-  requestFrame = globalThis.requestAnimationFrame
+  requestFrame = globalThis.requestAnimationFrame,
+  nowMs = () => (globalThis.performance && typeof globalThis.performance.now === 'function'
+    ? globalThis.performance.now()
+    : Date.now())
 } = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('createSimLoopRunnerService requires dom/state/runtime');
@@ -57,6 +60,46 @@ export function createSimLoopRunnerService({
   requireFn('isComponentTabActive', isComponentTabActive);
   requireFn('refreshActiveComponentTab', refreshActiveComponentTab);
   requireFn('requestFrame', requestFrame);
+  requireFn('nowMs', nowMs);
+
+  function resetThroughputSampling() {
+    if (!runtime.throughput || typeof runtime.throughput !== 'object') {
+      runtime.throughput = {};
+    }
+    runtime.throughput.cyclesPerSecond = 0;
+    runtime.throughput.lastSampleTimeMs = nowMs();
+    runtime.throughput.lastSampleCycle = state.cycle;
+  }
+
+  function updateThroughputSampling() {
+    if (!runtime.throughput || typeof runtime.throughput !== 'object') {
+      runtime.throughput = {};
+    }
+    const sampleTime = nowMs();
+    const prevTime = Number(runtime.throughput.lastSampleTimeMs);
+    const prevCycle = Number(runtime.throughput.lastSampleCycle);
+    const cycleNow = Number(state.cycle) || 0;
+
+    if (!Number.isFinite(prevTime) || !Number.isFinite(prevCycle) || cycleNow < prevCycle) {
+      runtime.throughput.lastSampleTimeMs = sampleTime;
+      runtime.throughput.lastSampleCycle = cycleNow;
+      return;
+    }
+
+    const elapsedMs = sampleTime - prevTime;
+    if (!Number.isFinite(elapsedMs) || elapsedMs < 50) {
+      return;
+    }
+
+    const deltaCycles = Math.max(0, cycleNow - prevCycle);
+    const instantaneous = elapsedMs > 0 ? (deltaCycles * 1000) / elapsedMs : 0;
+    const previous = Number(runtime.throughput.cyclesPerSecond);
+    runtime.throughput.cyclesPerSecond = Number.isFinite(previous) && previous > 0
+      ? (previous * 0.7) + (instantaneous * 0.3)
+      : instantaneous;
+    runtime.throughput.lastSampleTimeMs = sampleTime;
+    runtime.throughput.lastSampleCycle = cycleNow;
+  }
 
   function currentIoConfig() {
     return state.apple2?.ioConfig || {};
@@ -294,6 +337,7 @@ export function createSimLoopRunnerService({
       setUiCyclesPendingState(0);
     }
 
+    updateThroughputSampling();
     refreshStatus();
     if (state.running) {
       requestFrame(runFrame);
@@ -304,6 +348,7 @@ export function createSimLoopRunnerService({
     queueApple2Key,
     runApple2Cycles,
     stepSimulation,
-    runFrame
+    runFrame,
+    resetThroughputSampling
   };
 }

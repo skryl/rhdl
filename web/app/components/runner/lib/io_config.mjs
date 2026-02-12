@@ -88,6 +88,7 @@ function baseRunnerIoConfig() {
       offset: 0,
       isRom: false
     },
+    pcSignalCandidates: [],
     watchSignals: []
   };
 }
@@ -141,6 +142,7 @@ function legacyApple2IoConfig(preset = {}) {
       offset: 0xD000,
       isRom: true
     },
+    pcSignalCandidates: ['pc_debug', 'cpu__debug_pc', 'reg_pc'],
     watchSignals: ['pc_debug', 'a_debug', 'x_debug', 'y_debug', 'opcode_debug', 'speaker']
   };
 }
@@ -227,8 +229,13 @@ export function resolveRunnerIoConfig(preset = {}) {
     keyboard: normalizeKeyboard(raw.keyboard || {}, fallback.keyboard),
     sound: normalizeSound(raw.sound || {}, fallback.sound),
     rom: normalizeRom(raw.rom || {}, fallback.rom),
+    pcSignalCandidates: asStringArray(raw.pcSignalCandidates),
     watchSignals: asStringArray(raw.watchSignals)
   };
+
+  if (normalized.pcSignalCandidates.length === 0) {
+    normalized.pcSignalCandidates = fallback.pcSignalCandidates.slice();
+  }
 
   if (normalized.watchSignals.length === 0) {
     normalized.watchSignals = fallback.watchSignals.slice();

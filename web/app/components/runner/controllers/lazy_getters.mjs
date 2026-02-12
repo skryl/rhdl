@@ -11,6 +11,8 @@ function requireFn(name, fn) {
 export function createRunnerLazyGetters({
   dom,
   state,
+  setBackendState,
+  ensureBackendInstance,
   setRunnerPresetState,
   fetchImpl,
   log,
@@ -33,6 +35,8 @@ export function createRunnerLazyGetters({
   if (!dom || !state) {
     throw new Error('createRunnerLazyGetters requires dom/state');
   }
+  requireFn('setBackendState', setBackendState);
+  requireFn('ensureBackendInstance', ensureBackendInstance);
   requireFn('setRunnerPresetState', setRunnerPresetState);
   requireFn('fetchImpl', fetchImpl);
   requireFn('log', log);
@@ -73,6 +77,8 @@ export function createRunnerLazyGetters({
       runnerActionsController = createRunnerActionsController({
         dom,
         getRunnerPreset,
+        setBackendState,
+        ensureBackendInstance,
         setRunnerPresetState,
         updateIrSourceVisibility,
         loadRunnerIrBundle,

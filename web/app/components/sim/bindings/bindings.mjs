@@ -54,6 +54,9 @@ export function bindSimBindings({
     if (!runtime.sim || state.running) {
       return;
     }
+    if (typeof sim.resetThroughputSampling === 'function') {
+      sim.resetThroughputSampling();
+    }
     store.setRunningState(true);
     sim.refreshStatus();
     scheduleFrame(sim.runFrame);

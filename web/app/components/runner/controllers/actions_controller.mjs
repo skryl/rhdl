@@ -1,4 +1,5 @@
 import { fetchTextAsset } from '../../../core/lib/fetch_asset.mjs';
+import { DEFAULT_SAMPLE_PATH } from '../config/presets.mjs';
 
 function requireFn(name, fn) {
   if (typeof fn !== 'function') {
@@ -9,6 +10,8 @@ function requireFn(name, fn) {
 export function createRunnerActionsController({
   dom,
   getRunnerPreset,
+  setBackendState,
+  ensureBackendInstance,
   setRunnerPresetState,
   updateIrSourceVisibility,
   loadRunnerIrBundle,
@@ -31,6 +34,8 @@ export function createRunnerActionsController({
     throw new Error('createRunnerActionsController requires dom');
   }
   requireFn('getRunnerPreset', getRunnerPreset);
+  requireFn('setBackendState', setBackendState);
+  requireFn('ensureBackendInstance', ensureBackendInstance);
   requireFn('setRunnerPresetState', setRunnerPresetState);
   requireFn('updateIrSourceVisibility', updateIrSourceVisibility);
   requireFn('loadRunnerIrBundle', loadRunnerIrBundle);
@@ -50,7 +55,7 @@ export function createRunnerActionsController({
   requireFn('fetchImpl', fetchImpl);
 
   async function loadSample(samplePathOverride = null) {
-    const samplePath = samplePathOverride || dom.sampleSelect?.value || './assets/fixtures/cpu/ir/cpu_lib_hdl.json';
+    const samplePath = samplePathOverride || dom.sampleSelect?.value || DEFAULT_SAMPLE_PATH;
     const sampleLabel = dom.sampleSelect?.selectedOptions?.[0]?.textContent?.trim() || samplePath;
     try {
       dom.irJson.value = await fetchTextAsset(samplePath, `sample ${samplePath}`, fetchImpl);
@@ -77,7 +82,16 @@ export function createRunnerActionsController({
     }
     setRunnerPresetState(preset.id);
     updateIrSourceVisibility();
+    const preferredBackend = String(preset.preferredBackend || '').trim();
     try {
+      if (preferredBackend) {
+        setBackendState(preferredBackend);
+        if (dom.backendSelect) {
+          dom.backendSelect.value = preferredBackend;
+        }
+        await ensureBackendInstance(preferredBackend);
+      }
+
       let bundle = null;
       if (preset.usesManualIr) {
         if (!String(dom.irJson?.value || '').trim()) {
