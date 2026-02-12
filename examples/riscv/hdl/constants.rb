@@ -1,4 +1,4 @@
-# RV32I RISC-V Constants and Encoding
+# RV32I/RV32M RISC-V Constants and Encoding
 # Based on RISC-V ISA specification
 
 module RHDL
@@ -51,6 +51,7 @@ module RHDL
   module Funct7
     NORMAL  = 0b0000000
     ALT     = 0b0100000  # SUB, SRA
+    M_EXT   = 0b0000001  # MUL/DIV/REM family
   end
 
   # ALU operation codes (internal)
@@ -67,6 +68,14 @@ module RHDL
     AND   = 9
     PASS_A = 10  # Pass through A (for LUI)
     PASS_B = 11  # Pass through B (for AUIPC)
+    MUL    = 12
+    MULH   = 13
+    MULHSU = 14
+    MULHU  = 15
+    DIV    = 16
+    DIVU   = 17
+    REM    = 18
+    REMU   = 19
   end
 
   # Instruction format types

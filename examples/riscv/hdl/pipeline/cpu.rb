@@ -16,6 +16,7 @@ require_relative '../decoder'
 require_relative '../imm_gen'
 require_relative '../program_counter'
 require_relative '../register_file'
+require_relative '../csr_file'
 require_relative '../memory'
 require_relative 'if_id_reg'
 require_relative 'id_ex_reg'
@@ -35,6 +36,9 @@ module RHDL
       # External interface
       input :clk
       input :rst
+      input :irq_software
+      input :irq_timer
+      input :irq_external
 
       # Instruction memory interface
       output :inst_addr, width: 32
@@ -76,9 +80,10 @@ module RHDL
       wire :id_rs1_addr, width: 5
       wire :id_rs2_addr, width: 5
       wire :id_rd_addr, width: 5
+      wire :id_opcode, width: 7
       wire :id_funct3, width: 3
       wire :id_funct7, width: 7
-      wire :id_alu_op, width: 4
+      wire :id_alu_op, width: 5
       wire :id_alu_src
       wire :id_reg_write
       wire :id_mem_read
@@ -110,9 +115,10 @@ module RHDL
       wire :id_ex_rs1_addr_in, width: 5
       wire :id_ex_rs2_addr_in, width: 5
       wire :id_ex_rd_addr_in, width: 5
+      wire :id_ex_opcode_in, width: 7
       wire :id_ex_funct3_in, width: 3
       wire :id_ex_funct7_in, width: 7
-      wire :id_ex_alu_op_in, width: 4
+      wire :id_ex_alu_op_in, width: 5
       wire :id_ex_alu_src_in
       wire :id_ex_reg_write_in
       wire :id_ex_mem_read_in
@@ -133,9 +139,10 @@ module RHDL
       wire :ex_rs1_addr, width: 5
       wire :ex_rs2_addr, width: 5
       wire :ex_rd_addr, width: 5
+      wire :ex_opcode, width: 7
       wire :ex_funct3, width: 3
       wire :ex_funct7, width: 7
-      wire :ex_alu_op, width: 4
+      wire :ex_alu_op, width: 5
       wire :ex_alu_src
       wire :ex_reg_write
       wire :ex_mem_read
@@ -150,16 +157,36 @@ module RHDL
       # ========================================
       wire :forward_a, width: 2
       wire :forward_b, width: 2
+      wire :forwarded_rs1, width: 32
       wire :alu_a, width: 32
       wire :alu_b, width: 32
       wire :forwarded_rs2, width: 32
       wire :alu_result, width: 32
+      wire :ex_result, width: 32
       wire :alu_zero
       wire :branch_cond_taken
       wire :branch_target, width: 32
       wire :jalr_target, width: 32
       wire :jump_target, width: 32
+      wire :trap_target, width: 32
+      wire :mret_target, width: 32
+      wire :control_target, width: 32
       wire :take_branch
+      wire :csr_read_addr, width: 12
+      wire :csr_read_addr2, width: 12
+      wire :csr_read_addr3, width: 12
+      wire :csr_write_addr, width: 12
+      wire :csr_read_data, width: 32
+      wire :csr_read_data2, width: 32
+      wire :csr_read_data3, width: 32
+      wire :csr_write_data, width: 32
+      wire :csr_write_we
+      wire :csr_write_addr2, width: 12
+      wire :csr_write_data2, width: 32
+      wire :csr_write_we2
+      wire :csr_write_addr3, width: 12
+      wire :csr_write_data3, width: 32
+      wire :csr_write_we3
 
       # ========================================
       # Internal signals - EX/MEM Register INPUTS (latch wires)
@@ -233,6 +260,7 @@ module RHDL
       instance :decoder, Decoder
       instance :imm_gen, ImmGen
       instance :regfile, RegisterFile, forwarding: true
+      instance :csrfile, CSRFile
       instance :alu, ALU
       # Note: branch_cond logic is computed inline in behavior block
       # to ensure it uses properly forwarded values
@@ -242,9 +270,9 @@ module RHDL
       # ========================================
       # Clock and reset connections
       # ========================================
-      port :clk => [[:pc_reg, :clk], [:regfile, :clk], [:if_id, :clk],
+      port :clk => [[:pc_reg, :clk], [:regfile, :clk], [:csrfile, :clk], [:if_id, :clk],
                     [:id_ex, :clk], [:ex_mem, :clk], [:mem_wb, :clk]]
-      port :rst => [[:pc_reg, :rst], [:regfile, :rst], [:if_id, :rst],
+      port :rst => [[:pc_reg, :rst], [:regfile, :rst], [:csrfile, :rst], [:if_id, :rst],
                     [:id_ex, :rst], [:ex_mem, :rst], [:mem_wb, :rst]]
 
       # ========================================
@@ -275,6 +303,7 @@ module RHDL
       port [:decoder, :rs1] => :id_rs1_addr
       port [:decoder, :rs2] => :id_rs2_addr
       port [:decoder, :rd] => :id_rd_addr
+      port [:decoder, :opcode] => :id_opcode
       port [:decoder, :funct3] => :id_funct3
       port [:decoder, :funct7] => :id_funct7
       port [:decoder, :alu_op] => :id_alu_op
@@ -309,6 +338,25 @@ module RHDL
       port [:regfile, :debug_x11] => :debug_x11
 
       # ========================================
+      # CSR file connections
+      # ========================================
+      port :csr_read_addr => [:csrfile, :read_addr]
+      port :csr_read_addr2 => [:csrfile, :read_addr2]
+      port :csr_read_addr3 => [:csrfile, :read_addr3]
+      port [:csrfile, :read_data] => :csr_read_data
+      port [:csrfile, :read_data2] => :csr_read_data2
+      port [:csrfile, :read_data3] => :csr_read_data3
+      port :csr_write_addr => [:csrfile, :write_addr]
+      port :csr_write_data => [:csrfile, :write_data]
+      port :csr_write_we => [:csrfile, :write_we]
+      port :csr_write_addr2 => [:csrfile, :write_addr2]
+      port :csr_write_data2 => [:csrfile, :write_data2]
+      port :csr_write_we2 => [:csrfile, :write_we2]
+      port :csr_write_addr3 => [:csrfile, :write_addr3]
+      port :csr_write_data3 => [:csrfile, :write_data3]
+      port :csr_write_we3 => [:csrfile, :write_we3]
+
+      # ========================================
       # Hazard unit connections
       # ========================================
       port :id_rs1_addr => [:hazard_unit, :id_rs1_addr]
@@ -336,6 +384,7 @@ module RHDL
       port :id_ex_rs1_addr_in => [:id_ex, :rs1_addr_in]
       port :id_ex_rs2_addr_in => [:id_ex, :rs2_addr_in]
       port :id_ex_rd_addr_in => [:id_ex, :rd_addr_in]
+      port :id_ex_opcode_in => [:id_ex, :opcode_in]
       port :id_ex_funct3_in => [:id_ex, :funct3_in]
       port :id_ex_funct7_in => [:id_ex, :funct7_in]
       port :id_ex_alu_op_in => [:id_ex, :alu_op_in]
@@ -356,6 +405,7 @@ module RHDL
       port [:id_ex, :rs1_addr_out] => :ex_rs1_addr
       port [:id_ex, :rs2_addr_out] => :ex_rs2_addr
       port [:id_ex, :rd_addr_out] => :ex_rd_addr
+      port [:id_ex, :opcode_out] => :ex_opcode
       port [:id_ex, :funct3_out] => :ex_funct3
       port [:id_ex, :funct7_out] => :ex_funct7
       port [:id_ex, :alu_op_out] => :ex_alu_op
@@ -454,8 +504,8 @@ module RHDL
         pc_plus4_if = local(:pc_plus4_if, current_pc + lit(4, width: 32), width: 32)
         if_id_pc_plus4_in <= pc_plus4_if
 
-        # Next PC: branch/jump target or sequential
-        next_pc <= mux(take_branch, jump_target,
+        # Next PC: control-transfer target or sequential
+        next_pc <= mux(take_branch, control_target,
                     mux(stall, current_pc, pc_plus4_if))
 
         # PC write enable: disabled on stall
@@ -473,6 +523,7 @@ module RHDL
         id_ex_rs1_addr_in <= id_rs1_addr
         id_ex_rs2_addr_in <= id_rs2_addr
         id_ex_rd_addr_in <= id_rd_addr
+        id_ex_opcode_in <= id_opcode
         id_ex_funct3_in <= id_funct3
         id_ex_funct7_in <= id_funct7
         id_ex_alu_op_in <= id_alu_op
@@ -489,9 +540,12 @@ module RHDL
         # EX Stage: Forwarding muxes
         # -----------------------------------------
         # Forward A (rs1) - priority: EX/MEM > MEM/WB > register file
-        alu_a <= mux(forward_a == lit(ForwardSel::EX_MEM, width: 2), mem_alu_result,
-                  mux(forward_a == lit(ForwardSel::MEM_WB, width: 2), wb_data,
-                    ex_rs1_data))
+        forwarded_rs1 <= mux(forward_a == lit(ForwardSel::EX_MEM, width: 2), mem_alu_result,
+                          mux(forward_a == lit(ForwardSel::MEM_WB, width: 2), wb_data,
+                            ex_rs1_data))
+
+        # AUIPC uses PC as ALU A operand (not rs1)
+        alu_a <= mux(ex_opcode == lit(Opcode::AUIPC, width: 7), ex_pc, forwarded_rs1)
 
         # Forward B (rs2) for store and branch comparison
         forwarded_rs2 <= mux(forward_b == lit(ForwardSel::EX_MEM, width: 2), mem_alu_result,
@@ -500,6 +554,112 @@ module RHDL
 
         # ALU B input: immediate or forwarded rs2
         alu_b <= mux(ex_alu_src, ex_imm, forwarded_rs2)
+
+        # -----------------------------------------
+        # EX Stage: CSR and SYSTEM (trap/return) path
+        # -----------------------------------------
+        ex_is_csr_instr = local(:ex_is_csr_instr,
+                                (ex_opcode == lit(Opcode::SYSTEM, width: 7)) & (ex_funct3 != lit(0, width: 3)),
+                                width: 1)
+        ex_is_system_plain = local(:ex_is_system_plain,
+                                   (ex_opcode == lit(Opcode::SYSTEM, width: 7)) & (ex_funct3 == lit(0, width: 3)),
+                                   width: 1)
+        ex_sys_imm = ex_imm[11..0]
+        ex_is_ecall = local(:ex_is_ecall, ex_is_system_plain & (ex_sys_imm == lit(0x000, width: 12)), width: 1)
+        ex_is_ebreak = local(:ex_is_ebreak, ex_is_system_plain & (ex_sys_imm == lit(0x001, width: 12)), width: 1)
+        ex_is_mret = local(:ex_is_mret, ex_is_system_plain & (ex_sys_imm == lit(0x302, width: 12)), width: 1)
+        ex_is_illegal_system = local(:ex_is_illegal_system,
+                                     ex_is_system_plain & ~(ex_is_ecall | ex_is_ebreak | ex_is_mret),
+                                     width: 1)
+        ex_irq_pending_bits = local(:ex_irq_pending_bits,
+                                    mux(irq_software, lit(0x8, width: 32), lit(0, width: 32)) |
+                                    mux(irq_timer, lit(0x80, width: 32), lit(0, width: 32)) |
+                                    mux(irq_external, lit(0x800, width: 32), lit(0, width: 32)),
+                                    width: 32)
+        ex_csr_src = local(:ex_csr_src,
+                           mux(ex_funct3[2], cat(lit(0, width: 27), ex_rs1_addr), forwarded_rs1),
+                           width: 32)
+        ex_csr_rs1_nonzero = local(:ex_csr_rs1_nonzero, ex_rs1_addr != lit(0, width: 5), width: 1)
+        ex_global_mie_enabled = local(:ex_global_mie_enabled,
+                                      (csr_read_data2 & lit(0x8, width: 32)) != lit(0, width: 32),
+                                      width: 1)
+        ex_enabled_interrupts = local(:ex_enabled_interrupts, ex_irq_pending_bits & csr_read_data3, width: 32)
+        ex_interrupt_pending = local(:ex_interrupt_pending,
+                                     ex_global_mie_enabled & (ex_enabled_interrupts != lit(0, width: 32)),
+                                     width: 1)
+        ex_sync_trap_taken = local(:ex_sync_trap_taken, ex_is_ecall | ex_is_ebreak | ex_is_illegal_system, width: 1)
+        ex_trap_taken = local(:ex_trap_taken, ex_sync_trap_taken | ex_interrupt_pending, width: 1)
+        ex_interrupt_cause = local(:ex_interrupt_cause,
+                                   mux((ex_enabled_interrupts & lit(0x800, width: 32)) != lit(0, width: 32),
+                                       lit(0x8000000B, width: 32), # MEI
+                                       mux((ex_enabled_interrupts & lit(0x80, width: 32)) != lit(0, width: 32),
+                                           lit(0x80000007, width: 32), # MTI
+                                           lit(0x80000003, width: 32)  # MSI
+                                       )),
+                                   width: 32)
+        ex_trap_cause = local(:ex_trap_cause,
+                              mux(ex_interrupt_pending,
+                                  ex_interrupt_cause,
+                                  mux(ex_is_illegal_system,
+                                      lit(2, width: 32),
+                                      mux(ex_is_ebreak, lit(3, width: 32), lit(11, width: 32)))),
+                              width: 32)
+        ex_old_mie_to_mpie = local(:ex_old_mie_to_mpie,
+                                   mux((csr_read_data2 & lit(0x8, width: 32)) == lit(0, width: 32),
+                                       lit(0, width: 32),
+                                       lit(0x80, width: 32)),
+                                   width: 32)
+        ex_old_mpie_to_mie = local(:ex_old_mpie_to_mie,
+                                   mux((csr_read_data2 & lit(0x80, width: 32)) == lit(0, width: 32),
+                                       lit(0, width: 32),
+                                       lit(0x8, width: 32)),
+                                   width: 32)
+        ex_trap_mstatus = local(:ex_trap_mstatus,
+                                (csr_read_data2 & lit(0xFFFFE777, width: 32)) |
+                                ex_old_mie_to_mpie |
+                                lit(0x1800, width: 32),
+                                width: 32)
+        ex_mret_mstatus = local(:ex_mret_mstatus,
+                                (csr_read_data2 & lit(0xFFFFE777, width: 32)) |
+                                ex_old_mpie_to_mie |
+                                lit(0x80, width: 32),
+                                width: 32)
+        ex_trap_or_mret = local(:ex_trap_or_mret, ex_trap_taken | ex_is_mret, width: 1)
+        ex_reg_write_effective = local(:ex_reg_write_effective, ex_reg_write & ~ex_interrupt_pending, width: 1)
+        ex_mem_read_effective = local(:ex_mem_read_effective, ex_mem_read & ~ex_interrupt_pending, width: 1)
+        ex_mem_write_effective = local(:ex_mem_write_effective, ex_mem_write & ~ex_interrupt_pending, width: 1)
+
+        csr_read_addr <= mux(ex_trap_taken, lit(0x305, width: 12),
+                             mux(ex_is_mret, lit(0x341, width: 12), ex_imm[11..0]))
+        csr_read_addr2 <= lit(0x300, width: 12)
+        csr_read_addr3 <= lit(0x304, width: 12)
+        ex_csr_write_data = local(:ex_csr_write_data, case_select(ex_funct3, {
+          0b001 => ex_csr_src,                  # CSRRW
+          0b010 => csr_read_data | ex_csr_src,  # CSRRS
+          0b011 => csr_read_data & ~ex_csr_src, # CSRRC
+          0b101 => ex_csr_src,                  # CSRRWI
+          0b110 => csr_read_data | ex_csr_src,  # CSRRSI
+          0b111 => csr_read_data & ~ex_csr_src  # CSRRCI
+        }, default: csr_read_data), width: 32)
+        ex_csr_write_we = local(:ex_csr_write_we, ex_is_csr_instr & case_select(ex_funct3, {
+          0b001 => lit(1, width: 1),   # CSRRW
+          0b010 => ex_csr_rs1_nonzero, # CSRRS
+          0b011 => ex_csr_rs1_nonzero, # CSRRC
+          0b101 => lit(1, width: 1),   # CSRRWI
+          0b110 => ex_csr_rs1_nonzero, # CSRRSI (zimm != 0)
+          0b111 => ex_csr_rs1_nonzero  # CSRRCI (zimm != 0)
+        }, default: lit(0, width: 1)), width: 1)
+        csr_write_addr <= mux(ex_trap_taken, lit(0x341, width: 12),
+                              mux(ex_is_mret, lit(0x300, width: 12), ex_imm[11..0]))
+        csr_write_data <= mux(ex_trap_taken, ex_pc, mux(ex_is_mret, ex_mret_mstatus, ex_csr_write_data))
+        csr_write_we <= mux(ex_trap_or_mret, lit(1, width: 1), ex_csr_write_we)
+        csr_write_addr2 <= lit(0x342, width: 12)
+        csr_write_data2 <= ex_trap_cause
+        csr_write_we2 <= ex_trap_taken
+        csr_write_addr3 <= lit(0x300, width: 12)
+        csr_write_data3 <= ex_trap_mstatus
+        csr_write_we3 <= ex_trap_taken
+        ex_result <= mux(ex_is_csr_instr, csr_read_data, alu_result)
 
         # -----------------------------------------
         # EX Stage: Branch condition evaluation (inline)
@@ -537,21 +697,25 @@ module RHDL
         branch_target <= ex_pc + ex_imm
         jalr_target <= (alu_a + ex_imm) & lit(0xFFFFFFFE, width: 32)
         jump_target <= mux(ex_jalr, jalr_target, branch_target)
+        trap_target <= csr_read_data & lit(0xFFFFFFFC, width: 32)
+        mret_target <= csr_read_data
+        control_target <= mux(ex_trap_taken, trap_target,
+                              mux(ex_is_mret, mret_target, jump_target))
 
         # Branch taken = branch instruction AND condition met
-        take_branch <= (branch_cond_taken & ex_branch) | ex_jump
+        take_branch <= (branch_cond_taken & ex_branch) | ex_jump | ex_trap_taken | ex_is_mret
 
         # -----------------------------------------
         # EX/MEM Register inputs (latch wires)
         # -----------------------------------------
-        ex_mem_alu_result_in <= alu_result
+        ex_mem_alu_result_in <= ex_result
         ex_mem_rs2_data_in <= forwarded_rs2
         ex_mem_rd_addr_in <= ex_rd_addr
         ex_mem_pc_plus4_in <= ex_pc_plus4
         ex_mem_funct3_in <= ex_funct3
-        ex_mem_reg_write_in <= ex_reg_write
-        ex_mem_mem_read_in <= ex_mem_read
-        ex_mem_mem_write_in <= ex_mem_write
+        ex_mem_reg_write_in <= ex_reg_write_effective
+        ex_mem_mem_read_in <= ex_mem_read_effective
+        ex_mem_mem_write_in <= ex_mem_write_effective
         ex_mem_mem_to_reg_in <= ex_mem_to_reg
         ex_mem_jump_in <= ex_jump
 
@@ -593,6 +757,10 @@ module RHDL
 
       def write_reg(index, value)
         @regfile.write_reg(index, value)
+      end
+
+      def read_csr(index)
+        @csrfile.read_csr(index)
       end
 
       def self.verilog_module_name

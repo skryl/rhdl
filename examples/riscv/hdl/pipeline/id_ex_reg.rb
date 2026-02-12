@@ -28,9 +28,10 @@ module RHDL
       input :rd_addr_in, width: 5
       input :funct3_in, width: 3
       input :funct7_in, width: 7
+      input :opcode_in, width: 7
 
       # Control signals from ID stage
-      input :alu_op_in, width: 4
+      input :alu_op_in, width: 5
       input :alu_src_in           # 0=rs2, 1=imm
       input :reg_write_in
       input :mem_read_in
@@ -51,9 +52,10 @@ module RHDL
       output :rd_addr_out, width: 5
       output :funct3_out, width: 3
       output :funct7_out, width: 7
+      output :opcode_out, width: 7
 
       # Control outputs
-      output :alu_op_out, width: 4
+      output :alu_op_out, width: 5
       output :alu_src_out
       output :reg_write_out
       output :mem_read_out
@@ -67,7 +69,7 @@ module RHDL
         pc_out: 0, pc_plus4_out: 4,
         rs1_data_out: 0, rs2_data_out: 0, imm_out: 0,
         rs1_addr_out: 0, rs2_addr_out: 0, rd_addr_out: 0,
-        funct3_out: 0, funct7_out: 0,
+        funct3_out: 0, funct7_out: 0, opcode_out: 0,
         alu_op_out: 0, alu_src_out: 0,
         reg_write_out: 0, mem_read_out: 0, mem_write_out: 0,
         mem_to_reg_out: 0, branch_out: 0, jump_out: 0, jalr_out: 0
@@ -83,9 +85,10 @@ module RHDL
         rd_addr_out <= mux(flush, lit(0, width: 5), rd_addr_in)
         funct3_out <= mux(flush, lit(0, width: 3), funct3_in)
         funct7_out <= mux(flush, lit(0, width: 7), funct7_in)
+        opcode_out <= mux(flush, lit(0, width: 7), opcode_in)
 
         # Control signals - all zero on flush (bubble)
-        alu_op_out <= mux(flush, lit(0, width: 4), alu_op_in)
+        alu_op_out <= mux(flush, lit(0, width: 5), alu_op_in)
         alu_src_out <= mux(flush, lit(0, width: 1), alu_src_in)
         reg_write_out <= mux(flush, lit(0, width: 1), reg_write_in)
         mem_read_out <= mux(flush, lit(0, width: 1), mem_read_in)
