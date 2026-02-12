@@ -49,8 +49,14 @@ module RHDL
       op = inst[6..0]
       f3 = inst[14..12]
       f7 = inst[31..25]
+      rs2_field = inst[24..20]
       # CSR instructions are SYSTEM opcode with non-zero funct3
       is_csr = (op == lit(Opcode::SYSTEM, width: 7)) & (f3 != lit(0, width: 3))
+      is_amo_word = (op == lit(Opcode::AMO, width: 7)) & (f3 == lit(Funct3::WORD, width: 3))
+      amo_funct5 = f7[6..2]
+      is_lr = is_amo_word & (amo_funct5 == lit(0b00010, width: 5)) & (rs2_field == lit(0, width: 5))
+      is_sc = is_amo_word & (amo_funct5 == lit(0b00011, width: 5))
+      is_amo_rmw = is_amo_word & ~is_lr & ~is_sc
 
       # Control signal generation based on opcode
 
@@ -63,29 +69,34 @@ module RHDL
         Opcode::LOAD   => lit(1, width: 1),
         Opcode::OP_IMM => lit(1, width: 1),
         Opcode::OP     => lit(1, width: 1),
+        Opcode::AMO    => is_amo_word,
         Opcode::SYSTEM => is_csr
       }, default: lit(0, width: 1))
 
       # mem_read: Only for LOAD instructions
       mem_read <= case_select(op, {
-        Opcode::LOAD => lit(1, width: 1)
+        Opcode::LOAD => lit(1, width: 1),
+        Opcode::AMO  => is_amo_word & ~is_sc
       }, default: lit(0, width: 1))
 
       # mem_write: Only for STORE instructions
       mem_write <= case_select(op, {
-        Opcode::STORE => lit(1, width: 1)
+        Opcode::STORE => lit(1, width: 1),
+        Opcode::AMO   => is_amo_rmw
       }, default: lit(0, width: 1))
 
       # mem_to_reg: Select memory data for register write
       mem_to_reg <= case_select(op, {
-        Opcode::LOAD => lit(1, width: 1)
+        Opcode::LOAD => lit(1, width: 1),
+        Opcode::AMO  => is_amo_word & ~is_sc
       }, default: lit(0, width: 1))
 
       # alu_src: 0 = rs2, 1 = immediate
       # R-type uses rs2, most others use immediate
       alu_src <= case_select(op, {
         Opcode::OP     => lit(0, width: 1),
-        Opcode::BRANCH => lit(0, width: 1)
+        Opcode::BRANCH => lit(0, width: 1),
+        Opcode::AMO    => lit(0, width: 1)
       }, default: lit(1, width: 1))
 
       # branch: Branch instruction - use case_select for reliable comparison

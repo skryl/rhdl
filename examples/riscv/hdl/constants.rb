@@ -15,6 +15,7 @@ module RHDL
     STORE   = 0b0100011  # Store instructions
     OP_IMM  = 0b0010011  # Immediate arithmetic
     OP      = 0b0110011  # Register-register arithmetic
+    AMO     = 0b0101111  # Atomic memory operations (RV32A)
     MISC_MEM = 0b0001111 # FENCE instructions
     SYSTEM  = 0b1110011  # ECALL, EBREAK
   end
@@ -102,6 +103,13 @@ module RHDL
     BRANCH = 1  # Branch target
     JAL    = 2  # JAL target
     JALR   = 3  # JALR target
+  end
+
+  # Privilege modes
+  module PrivMode
+    USER       = 0b00
+    SUPERVISOR = 0b01
+    MACHINE    = 0b11
   end
     end
   end

@@ -22,16 +22,19 @@ module RHDL
       input :pc_in, width: 32
       input :inst_in, width: 32
       input :pc_plus4_in, width: 32
+      input :inst_page_fault_in
 
       # Outputs to ID stage
       output :pc_out, width: 32
       output :inst_out, width: 32
       output :pc_plus4_out, width: 32
+      output :inst_page_fault_out
 
       sequential clock: :clk, reset: :rst, reset_values: {
         pc_out: 0,
         inst_out: 0x00000013,  # NOP (ADDI x0, x0, 0)
-        pc_plus4_out: 4
+        pc_plus4_out: 4,
+        inst_page_fault_out: 0
       } do
         # On flush, insert NOP
         # On stall, hold current values
@@ -42,6 +45,8 @@ module RHDL
                      mux(stall, inst_out, inst_in))
         pc_plus4_out <= mux(flush, lit(4, width: 32),
                          mux(stall, pc_plus4_out, pc_plus4_in))
+        inst_page_fault_out <= mux(flush, lit(0, width: 1),
+                                mux(stall, inst_page_fault_out, inst_page_fault_in))
       end
 
         end
