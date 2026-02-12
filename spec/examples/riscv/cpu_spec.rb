@@ -1,13 +1,17 @@
 # RV32I CPU Tests
-# Tests the RISC-V single-cycle CPU implementation using the Harness class
+# Tests the RISC-V single-cycle CPU implementation using the IR JIT harness
 
-require 'rspec'
+require 'spec_helper'
 require_relative '../../../examples/riscv/hdl/constants'
-require_relative '../../../examples/riscv/hdl/harness'
+require_relative '../../../examples/riscv/hdl/ir_harness'
 require_relative '../../../examples/riscv/utilities/assembler'
 
-RSpec.describe RHDL::Examples::RISCV::Harness do
-  let(:cpu) { RHDL::Examples::RISCV::Harness.new(mem_size: 4096) }
+RSpec.describe RHDL::Examples::RISCV::IRHarness do
+  let(:cpu) { described_class.new(mem_size: 4096, backend: :jit, allow_fallback: false) }
+
+  before(:each) do
+    skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
+  end
 
   describe 'Reset behavior' do
     it 'sets PC to reset vector after reset' do
@@ -734,6 +738,7 @@ RSpec.describe RHDL::Examples::RISCV::Harness do
       trap_handler = [
         RHDL::Examples::RISCV::Assembler.csrrs(4, 0x342, 0),      # x4 = mcause
         RHDL::Examples::RISCV::Assembler.csrrs(3, 0x341, 0),      # x3 = mepc
+        RHDL::Examples::RISCV::Assembler.csrrs(5, 0x343, 0),      # x5 = mtval
         RHDL::Examples::RISCV::Assembler.addi(3, 3, 4),           # resume at next instruction
         RHDL::Examples::RISCV::Assembler.csrrw(0, 0x341, 3),      # mepc = x3
         RHDL::Examples::RISCV::Assembler.mret
@@ -791,6 +796,7 @@ RSpec.describe RHDL::Examples::RISCV::Harness do
       trap_handler = [
         RHDL::Examples::RISCV::Assembler.csrrs(4, 0x342, 0),      # x4 = mcause
         RHDL::Examples::RISCV::Assembler.csrrs(3, 0x341, 0),      # x3 = mepc
+        RHDL::Examples::RISCV::Assembler.csrrs(5, 0x343, 0),      # x5 = mtval
         RHDL::Examples::RISCV::Assembler.addi(3, 3, 4),           # resume at next instruction
         RHDL::Examples::RISCV::Assembler.csrrw(0, 0x341, 3),      # mepc = x3
         RHDL::Examples::RISCV::Assembler.mret
@@ -810,7 +816,7 @@ RSpec.describe RHDL::Examples::RISCV::Harness do
       main_program = [
         RHDL::Examples::RISCV::Assembler.addi(1, 0, 0x200),       # x1 = trap handler base
         RHDL::Examples::RISCV::Assembler.csrrw(0, 0x305, 1),      # mtvec = x1
-        0x10500073,                                                # WFI (unsupported here) => illegal instruction
+        0x10600073,                                                # unknown SYSTEM funct12 => illegal instruction
         RHDL::Examples::RISCV::Assembler.addi(2, 0, 1),           # executes after mret
         RHDL::Examples::RISCV::Assembler.nop
       ]
@@ -818,6 +824,7 @@ RSpec.describe RHDL::Examples::RISCV::Harness do
       trap_handler = [
         RHDL::Examples::RISCV::Assembler.csrrs(4, 0x342, 0),      # x4 = mcause
         RHDL::Examples::RISCV::Assembler.csrrs(3, 0x341, 0),      # x3 = mepc
+        RHDL::Examples::RISCV::Assembler.csrrs(5, 0x343, 0),      # x5 = mtval
         RHDL::Examples::RISCV::Assembler.addi(3, 3, 4),           # resume at next instruction
         RHDL::Examples::RISCV::Assembler.csrrw(0, 0x341, 3),      # mepc = x3
         RHDL::Examples::RISCV::Assembler.mret
@@ -831,6 +838,7 @@ RSpec.describe RHDL::Examples::RISCV::Harness do
       expect(cpu.read_reg(2)).to eq(1)
       expect(cpu.read_reg(3)).to eq(12)
       expect(cpu.read_reg(4)).to eq(2)
+      expect(cpu.read_reg(5)).to eq(0x10600073)
     end
 
     it 'takes machine timer interrupt when enabled' do
@@ -922,6 +930,100 @@ RSpec.describe RHDL::Examples::RISCV::Harness do
       expect(cpu.read_reg(4)).to eq(0x1880)
     end
 
+    it 'delegates ECALL to stvec and returns with SRET' do
+      main_program = [
+        RHDL::Examples::RISCV::Assembler.addi(1, 0, 0x300),       # x1 = supervisor trap handler base
+        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x105, 1),      # stvec = x1
+        RHDL::Examples::RISCV::Assembler.lui(1, 0x1),             # x1 = 0x1000
+        RHDL::Examples::RISCV::Assembler.addi(1, 1, -2048),       # x1 = 0x800 (delegate exception code 11)
+        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x302, 1),      # medeleg = x1
+        RHDL::Examples::RISCV::Assembler.addi(2, 0, 5),           # x2 = 5
+        RHDL::Examples::RISCV::Assembler.ecall,                   # delegated trap
+        RHDL::Examples::RISCV::Assembler.addi(2, 2, 1),           # executes after sret
+        RHDL::Examples::RISCV::Assembler.nop
+      ]
+
+      trap_handler = [
+        RHDL::Examples::RISCV::Assembler.csrrs(4, 0x142, 0),      # x4 = scause
+        RHDL::Examples::RISCV::Assembler.csrrs(3, 0x141, 0),      # x3 = sepc
+        RHDL::Examples::RISCV::Assembler.addi(3, 3, 4),           # resume at next instruction
+        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x141, 3),      # sepc = x3
+        RHDL::Examples::RISCV::Assembler.sret
+      ]
+
+      cpu.load_program(main_program, 0)
+      cpu.load_program(trap_handler, 0x300)
+      cpu.reset!
+      cpu.run_cycles(20)
+
+      expect(cpu.read_reg(2)).to eq(6)
+      expect(cpu.read_reg(3)).to eq(28)
+      expect(cpu.read_reg(4)).to eq(11)
+    end
+
+    it 'delegates illegal SYSTEM trap to stvec and writes stval' do
+      illegal_inst = 0x10600073
+      main_program = [
+        RHDL::Examples::RISCV::Assembler.addi(1, 0, 0x300),       # x1 = supervisor trap handler base
+        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x105, 1),      # stvec = x1
+        RHDL::Examples::RISCV::Assembler.addi(1, 0, 0x4),         # x1 = delegate exception code 2 (illegal instruction)
+        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x302, 1),      # medeleg = x1
+        RHDL::Examples::RISCV::Assembler.addi(2, 0, 9),           # x2 = 9
+        illegal_inst,                                              # delegated illegal SYSTEM trap
+        RHDL::Examples::RISCV::Assembler.addi(2, 2, 1),           # executes after sret
+        RHDL::Examples::RISCV::Assembler.nop
+      ]
+
+      trap_handler = [
+        RHDL::Examples::RISCV::Assembler.csrrs(4, 0x142, 0),      # x4 = scause
+        RHDL::Examples::RISCV::Assembler.csrrs(3, 0x141, 0),      # x3 = sepc
+        RHDL::Examples::RISCV::Assembler.csrrs(5, 0x143, 0),      # x5 = stval
+        RHDL::Examples::RISCV::Assembler.addi(3, 3, 4),           # resume at next instruction
+        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x141, 3),      # sepc = x3
+        RHDL::Examples::RISCV::Assembler.sret
+      ]
+
+      cpu.load_program(main_program, 0)
+      cpu.load_program(trap_handler, 0x300)
+      cpu.reset!
+      cpu.run_cycles(24)
+
+      expect(cpu.read_reg(2)).to eq(10)
+      expect(cpu.read_reg(3)).to eq(24)
+      expect(cpu.read_reg(4)).to eq(2)
+      expect(cpu.read_reg(5)).to eq(illegal_inst)
+    end
+
+    it 'delegates machine timer interrupt to stvec when mideleg and sstatus/sie enable it' do
+      main_program = [
+        RHDL::Examples::RISCV::Assembler.addi(1, 0, 0x300),       # x1 = supervisor trap handler base
+        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x105, 1),      # stvec = x1
+        RHDL::Examples::RISCV::Assembler.addi(1, 0, 0x80),        # x1 = MTIP bit
+        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x303, 1),      # mideleg = MTIP
+        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x104, 1),      # sie = MTIE
+        RHDL::Examples::RISCV::Assembler.addi(1, 0, 0x2),         # x1 = sstatus.SIE
+        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x100, 1),      # sstatus = SIE
+        RHDL::Examples::RISCV::Assembler.nop,
+        RHDL::Examples::RISCV::Assembler.nop
+      ]
+
+      trap_handler = [
+        RHDL::Examples::RISCV::Assembler.csrrs(2, 0x142, 0),      # x2 = scause
+        RHDL::Examples::RISCV::Assembler.csrrs(4, 0x100, 0),      # x4 = sstatus in handler
+        RHDL::Examples::RISCV::Assembler.jal(0, 0)
+      ]
+
+      cpu.load_program(main_program, 0)
+      cpu.load_program(trap_handler, 0x300)
+      cpu.reset!
+      cpu.run_cycles(10)
+      cpu.set_interrupts(timer: 1)    # assert MTIP
+      cpu.run_cycles(8)
+
+      expect(cpu.read_reg(2)).to eq(0x80000007)
+      expect(cpu.read_reg(4)).to eq(0x120)
+    end
+
     it 'takes machine external interrupt from PLIC source when enabled' do
       main_program = [
         RHDL::Examples::RISCV::Assembler.addi(1, 0, 0x200),       # x1 = trap handler base
@@ -1008,6 +1110,25 @@ RSpec.describe RHDL::Examples::RISCV::Harness do
       cpu.run_cycles(14)
 
       expect(cpu.read_reg(2)).to eq(0x8000000B)
+    end
+  end
+
+  describe 'UART MMIO' do
+    it 'emits bytes when writing THR' do
+      program = [
+        RHDL::Examples::RISCV::Assembler.lui(1, 0x10000),         # x1 = 0x10000000
+        RHDL::Examples::RISCV::Assembler.addi(2, 0, 0x41),        # 'A'
+        RHDL::Examples::RISCV::Assembler.sb(2, 1, 0),             # THR = 'A'
+        RHDL::Examples::RISCV::Assembler.addi(2, 0, 0x42),        # 'B'
+        RHDL::Examples::RISCV::Assembler.sb(2, 1, 0)              # THR = 'B'
+      ]
+
+      cpu.load_program(program, 0)
+      cpu.reset!
+      cpu.clear_uart_tx_bytes
+      cpu.run_cycles(program.length + 2)
+
+      expect(cpu.uart_tx_bytes).to eq([0x41, 0x42])
     end
   end
 

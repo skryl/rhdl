@@ -99,6 +99,27 @@ pub struct MemoryDef {
     pub initial_data: Vec<u64>,
 }
 
+/// Memory write port definition (synchronous)
+#[derive(Debug, Clone, Deserialize)]
+pub struct WritePortDef {
+    pub memory: String,
+    pub clock: String,
+    pub addr: ExprDef,
+    pub data: ExprDef,
+    pub enable: ExprDef,
+}
+
+/// Memory synchronous read port definition
+#[derive(Debug, Clone, Deserialize)]
+pub struct SyncReadPortDef {
+    pub memory: String,
+    pub clock: String,
+    pub addr: ExprDef,
+    pub data: String,
+    #[serde(default)]
+    pub enable: Option<ExprDef>,
+}
+
 /// Complete module IR
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModuleIR {
@@ -111,6 +132,32 @@ pub struct ModuleIR {
     pub processes: Vec<ProcessDef>,
     #[serde(default)]
     pub memories: Vec<MemoryDef>,
+    #[serde(default)]
+    pub write_ports: Vec<WritePortDef>,
+    #[serde(default)]
+    pub sync_read_ports: Vec<SyncReadPortDef>,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedWritePort {
+    memory_idx: usize,
+    memory_depth: usize,
+    memory_width: usize,
+    clock_idx: usize,
+    addr: ExprDef,
+    data: ExprDef,
+    enable: ExprDef,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedSyncReadPort {
+    memory_idx: usize,
+    memory_width: usize,
+    clock_idx: usize,
+    addr: ExprDef,
+    data_idx: usize,
+    data_width: usize,
+    enable: Option<ExprDef>,
 }
 
 // ============================================================================
@@ -670,8 +717,14 @@ pub struct CoreSimulator {
 
     /// Memory arrays (for mem_read operations)
     pub memory_arrays: Vec<Vec<u64>>,
+    /// Memory reset snapshots
+    memory_reset_arrays: Vec<Vec<u64>>,
     /// Memory name to index mapping
     pub memory_name_to_idx: HashMap<String, usize>,
+    /// Memory write ports
+    write_ports: Vec<ResolvedWritePort>,
+    /// Memory synchronous read ports
+    sync_read_ports: Vec<ResolvedSyncReadPort>,
 
     /// Reset values for registers (signal index -> reset value)
     reset_values: Vec<(usize, u64)>,
@@ -759,6 +812,7 @@ impl CoreSimulator {
         let mut memory_arrays: Vec<Vec<u64>> = Vec::new();
         let mut mem_name_to_idx: HashMap<String, usize> = HashMap::new();
         let mut mem_depths: Vec<usize> = Vec::new();
+        let mut mem_widths: Vec<usize> = Vec::new();
 
         for (idx, mem) in ir.memories.iter().enumerate() {
             let mut data = vec![0u64; mem.depth];
@@ -770,9 +824,52 @@ impl CoreSimulator {
             memory_arrays.push(data);
             mem_name_to_idx.insert(mem.name.clone(), idx);
             mem_depths.push(mem.depth);
+            mem_widths.push(mem.width);
         }
 
+        let memory_reset_arrays = memory_arrays.clone();
         let num_memories = memory_arrays.len();
+
+        let mut write_ports: Vec<ResolvedWritePort> = Vec::new();
+        for wp in &ir.write_ports {
+            let Some(&memory_idx) = mem_name_to_idx.get(&wp.memory) else {
+                continue;
+            };
+            let Some(&clock_idx) = name_to_idx.get(&wp.clock) else {
+                continue;
+            };
+            write_ports.push(ResolvedWritePort {
+                memory_idx,
+                memory_depth: *mem_depths.get(memory_idx).unwrap_or(&0),
+                memory_width: *mem_widths.get(memory_idx).unwrap_or(&64),
+                clock_idx,
+                addr: wp.addr.clone(),
+                data: wp.data.clone(),
+                enable: wp.enable.clone(),
+            });
+        }
+
+        let mut sync_read_ports: Vec<ResolvedSyncReadPort> = Vec::new();
+        for rp in &ir.sync_read_ports {
+            let Some(&memory_idx) = mem_name_to_idx.get(&rp.memory) else {
+                continue;
+            };
+            let Some(&clock_idx) = name_to_idx.get(&rp.clock) else {
+                continue;
+            };
+            let Some(&data_idx) = name_to_idx.get(&rp.data) else {
+                continue;
+            };
+            sync_read_ports.push(ResolvedSyncReadPort {
+                memory_idx,
+                memory_width: *mem_widths.get(memory_idx).unwrap_or(&64),
+                clock_idx,
+                addr: rp.addr.clone(),
+                data_idx,
+                data_width: *widths.get(data_idx).unwrap_or(&64),
+                enable: rp.enable.clone(),
+            });
+        }
 
         // Create JIT compiler and compile functions
         let mut compiler = JitCompiler::new()?;
@@ -797,13 +894,189 @@ impl CoreSimulator {
             evaluate_fn,
             seq_sample_fn,
             memory_arrays,
+            memory_reset_arrays,
             memory_name_to_idx: mem_name_to_idx,
+            write_ports,
+            sync_read_ports,
             reset_values,
         })
     }
 
     fn compute_mask(width: usize) -> u64 {
         if width >= 64 { u64::MAX } else { (1u64 << width) - 1 }
+    }
+
+    fn runtime_expr_width(expr: &ExprDef, widths: &[usize], name_to_idx: &HashMap<String, usize>) -> usize {
+        match expr {
+            ExprDef::Signal { name, width } => {
+                name_to_idx.get(name).and_then(|&idx| widths.get(idx).copied()).unwrap_or(*width)
+            }
+            ExprDef::Literal { width, .. } => *width,
+            ExprDef::UnaryOp { width, .. } => *width,
+            ExprDef::BinaryOp { width, .. } => *width,
+            ExprDef::Mux { width, .. } => *width,
+            ExprDef::Slice { width, .. } => *width,
+            ExprDef::Concat { width, .. } => *width,
+            ExprDef::Resize { width, .. } => *width,
+            ExprDef::MemRead { width, .. } => *width,
+        }
+    }
+
+    fn eval_expr_runtime(&self, expr: &ExprDef) -> u64 {
+        match expr {
+            ExprDef::Signal { name, width } => {
+                let val = self.name_to_idx.get(name)
+                    .and_then(|&idx| self.signals.get(idx).copied())
+                    .unwrap_or(0);
+                val & Self::compute_mask(*width)
+            }
+            ExprDef::Literal { value, width } => (*value as u64) & Self::compute_mask(*width),
+            ExprDef::UnaryOp { op, operand, width } => {
+                let src = self.eval_expr_runtime(operand);
+                let mask = Self::compute_mask(*width);
+                match op.as_str() {
+                    "~" | "not" => (!src) & mask,
+                    "&" | "reduce_and" => {
+                        let op_width = Self::runtime_expr_width(operand, &self.widths, &self.name_to_idx);
+                        let op_mask = Self::compute_mask(op_width);
+                        if (src & op_mask) == op_mask { 1 } else { 0 }
+                    }
+                    "|" | "reduce_or" => if src != 0 { 1 } else { 0 },
+                    "^" | "reduce_xor" => (src.count_ones() as u64) & 1,
+                    _ => src & mask,
+                }
+            }
+            ExprDef::BinaryOp { op, left, right, width } => {
+                let l = self.eval_expr_runtime(left);
+                let r = self.eval_expr_runtime(right);
+                let mask = Self::compute_mask(*width);
+                let result = match op.as_str() {
+                    "&" => l & r,
+                    "|" => l | r,
+                    "^" => l ^ r,
+                    "+" => l.wrapping_add(r),
+                    "-" => l.wrapping_sub(r),
+                    "*" => l.wrapping_mul(r),
+                    "/" => if r == 0 { 0 } else { l / r },
+                    "%" => if r == 0 { 0 } else { l % r },
+                    "<<" => if r >= 64 { 0 } else { l << r },
+                    ">>" => if r >= 64 { 0 } else { l >> r },
+                    "==" => if l == r { 1 } else { 0 },
+                    "!=" => if l != r { 1 } else { 0 },
+                    "<" => if l < r { 1 } else { 0 },
+                    ">" => if l > r { 1 } else { 0 },
+                    "<=" | "le" => if l <= r { 1 } else { 0 },
+                    ">=" => if l >= r { 1 } else { 0 },
+                    _ => l,
+                };
+                result & mask
+            }
+            ExprDef::Mux { condition, when_true, when_false, width } => {
+                let cond = self.eval_expr_runtime(condition);
+                let selected = if cond != 0 {
+                    self.eval_expr_runtime(when_true)
+                } else {
+                    self.eval_expr_runtime(when_false)
+                };
+                selected & Self::compute_mask(*width)
+            }
+            ExprDef::Slice { base, low, width, .. } => {
+                let base_val = self.eval_expr_runtime(base);
+                let shifted = if *low >= 64 { 0 } else { base_val >> (*low as u64) };
+                shifted & Self::compute_mask(*width)
+            }
+            ExprDef::Concat { parts, width } => {
+                let mut result = 0u64;
+                for part in parts {
+                    let part_width = Self::runtime_expr_width(part, &self.widths, &self.name_to_idx);
+                    let part_val = self.eval_expr_runtime(part) & Self::compute_mask(part_width);
+                    result = if part_width >= 64 { 0 } else { result << part_width };
+                    result |= part_val;
+                    result &= Self::compute_mask(*width);
+                }
+                result & Self::compute_mask(*width)
+            }
+            ExprDef::Resize { expr, width } => self.eval_expr_runtime(expr) & Self::compute_mask(*width),
+            ExprDef::MemRead { memory, addr, width } => {
+                let Some(&memory_idx) = self.memory_name_to_idx.get(memory) else {
+                    return 0;
+                };
+                let Some(mem) = self.memory_arrays.get(memory_idx) else {
+                    return 0;
+                };
+                if mem.is_empty() {
+                    return 0;
+                }
+                let addr_val = self.eval_expr_runtime(addr) as usize % mem.len();
+                mem[addr_val] & Self::compute_mask(*width)
+            }
+        }
+    }
+
+    fn apply_write_ports_level(&mut self) {
+        if self.write_ports.is_empty() {
+            return;
+        }
+
+        let mut writes: Vec<(usize, usize, u64)> = Vec::new();
+        for wp in &self.write_ports {
+            if self.signals.get(wp.clock_idx).copied().unwrap_or(0) == 0 {
+                continue;
+            }
+            if (self.eval_expr_runtime(&wp.enable) & 1) == 0 {
+                continue;
+            }
+            if wp.memory_depth == 0 {
+                continue;
+            }
+
+            let addr = (self.eval_expr_runtime(&wp.addr) as usize) % wp.memory_depth;
+            let data = self.eval_expr_runtime(&wp.data) & Self::compute_mask(wp.memory_width);
+            writes.push((wp.memory_idx, addr, data));
+        }
+
+        for (memory_idx, addr, data) in writes {
+            if let Some(mem) = self.memory_arrays.get_mut(memory_idx) {
+                if addr < mem.len() {
+                    mem[addr] = data;
+                }
+            }
+        }
+    }
+
+    fn apply_sync_read_ports_level(&mut self) {
+        if self.sync_read_ports.is_empty() {
+            return;
+        }
+
+        let mut updates: Vec<(usize, u64)> = Vec::new();
+        for rp in &self.sync_read_ports {
+            if self.signals.get(rp.clock_idx).copied().unwrap_or(0) == 0 {
+                continue;
+            }
+            if let Some(enable) = &rp.enable {
+                if (self.eval_expr_runtime(enable) & 1) == 0 {
+                    continue;
+                }
+            }
+
+            let Some(mem) = self.memory_arrays.get(rp.memory_idx) else {
+                continue;
+            };
+            if mem.is_empty() {
+                continue;
+            }
+
+            let addr = (self.eval_expr_runtime(&rp.addr) as usize) % mem.len();
+            let data = mem[addr] & Self::compute_mask(rp.memory_width);
+            updates.push((rp.data_idx, data & Self::compute_mask(rp.data_width)));
+        }
+
+        for (idx, value) in updates {
+            if idx < self.signals.len() {
+                self.signals[idx] = value;
+            }
+        }
     }
 
     pub fn poke(&mut self, name: &str, value: u64) -> Result<(), String> {
@@ -865,6 +1138,7 @@ impl CoreSimulator {
 
         // Evaluate to propagate any external input changes (including clock)
         self.evaluate();
+        self.apply_write_ports_level();
 
         // Sample ALL register input expressions ONCE
         let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
@@ -936,6 +1210,7 @@ impl CoreSimulator {
         // prev_clock_values is saved at the start of tick(), not here
         // This ensures we capture the clock values BEFORE evaluate propagates them
 
+        self.apply_sync_read_ports_level();
         self.evaluate();
     }
 
@@ -949,6 +1224,7 @@ impl CoreSimulator {
 
         // Evaluate to propagate external input changes
         self.evaluate();
+        self.apply_write_ports_level();
 
         // Sample ALL register input expressions ONCE
         let mem_ptrs: Vec<*const u64> = self.memory_arrays.iter()
@@ -1022,6 +1298,7 @@ impl CoreSimulator {
             self.prev_clock_values[i] = self.signals[clk_idx];
         }
 
+        self.apply_sync_read_ports_level();
         self.evaluate();
     }
 
@@ -1034,6 +1311,9 @@ impl CoreSimulator {
         }
         for val in self.prev_clock_values.iter_mut() {
             *val = 0;
+        }
+        for (mem, initial) in self.memory_arrays.iter_mut().zip(self.memory_reset_arrays.iter()) {
+            mem.clone_from(initial);
         }
     }
 

@@ -941,6 +941,8 @@ module RHDL
           @widths = {}
           @inputs = []
           @outputs = []
+          @memories = {}
+          @memory_meta = {}
 
           # Initialize ports
           @ir[:ports]&.each do |port|
@@ -968,8 +970,23 @@ module RHDL
             @reset_values[reg[:name]] = reset_val
           end
 
+          # Initialize memories
+          @ir[:memories]&.each do |mem|
+            depth = mem[:depth].to_i
+            width = mem[:width].to_i
+            initial = Array.new(depth, 0)
+            (mem[:initial_data] || []).each_with_index do |value, idx|
+              break if idx >= depth
+              initial[idx] = value.to_i & mask(width)
+            end
+            @memories[mem[:name]] = initial
+            @memory_meta[mem[:name]] = { depth: depth, width: width, initial: initial.dup }
+          end
+
           @assigns = @ir[:assigns] || []
           @processes = @ir[:processes] || []
+          @write_ports = @ir[:write_ports] || []
+          @sync_read_ports = @ir[:sync_read_ports] || []
         end
 
         def native?
@@ -1038,19 +1055,29 @@ module RHDL
             (val >> expr[:low]) & mask(expr[:width])
           when 'concat'
             result = 0
-            shift = 0
             expr[:parts].each do |part|
-              part_val = eval_expr(part)
               part_width = part[:width]
-              result |= (part_val & mask(part_width)) << shift
-              shift += part_width
+              part_val = eval_expr(part) & mask(part_width)
+              result = ((result << part_width) | part_val) & mask(expr[:width])
             end
             result & mask(expr[:width])
           when 'resize'
             eval_expr(expr[:expr]) & mask(expr[:width])
+          when 'mem_read'
+            memory = @memories[expr[:memory]]
+            meta = @memory_meta[expr[:memory]]
+            return 0 unless memory && meta
+
+            addr = eval_expr(expr[:addr]) % meta[:depth]
+            width = expr[:width] || meta[:width]
+            memory[addr] & mask(width)
           else
             0
           end
+        end
+
+        def has_signal?(name)
+          @signals.key?(name.to_s) || @signals.key?(name.to_sym)
         end
 
         def poke(name, value)
@@ -1082,6 +1109,20 @@ module RHDL
         def tick
           evaluate
 
+          # Apply memory writes at the active clock edge.
+          @write_ports.each do |wp|
+            next unless (@signals[wp[:clock]] || 0) != 0
+            next unless (eval_expr(wp[:enable]) & 1) == 1
+
+            memory = @memories[wp[:memory]]
+            meta = @memory_meta[wp[:memory]]
+            next unless memory && meta
+
+            addr = eval_expr(wp[:addr]) % meta[:depth]
+            data = eval_expr(wp[:data]) & mask(meta[:width])
+            memory[addr] = data
+          end
+
           # Sample register inputs
           next_regs = {}
           @processes.each do |process|
@@ -1098,6 +1139,23 @@ module RHDL
             @signals[name] = val
           end
 
+          # Synchronous memory reads update their destination signals on edge.
+          @sync_read_ports.each do |rp|
+            next unless (@signals[rp[:clock]] || 0) != 0
+            if rp[:enable]
+              next unless (eval_expr(rp[:enable]) & 1) == 1
+            end
+
+            memory = @memories[rp[:memory]]
+            meta = @memory_meta[rp[:memory]]
+            next unless memory && meta
+
+            addr = eval_expr(rp[:addr]) % meta[:depth]
+            data = memory[addr] & mask(meta[:width])
+            width = @widths[rp[:data]] || meta[:width]
+            @signals[rp[:data]] = data & mask(width)
+          end
+
           evaluate
         end
 
@@ -1106,6 +1164,9 @@ module RHDL
           # Apply register reset values
           @reset_values.each do |name, val|
             @signals[name] = val
+          end
+          @memory_meta.each do |name, meta|
+            @memories[name] = meta[:initial].dup
           end
         end
 

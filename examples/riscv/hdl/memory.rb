@@ -54,8 +54,12 @@ module RHDL
         return
       end
 
+      read_before_write = mem_read == 1 ? read_value(addr, funct3) : 0
+      write_happened = false
+
       # Synchronous write on rising edge
       if @prev_clk == 0 && clk == 1 && mem_write == 1
+        write_happened = true
         case funct3
         when Funct3::BYTE, Funct3::BYTE_U
           @mem[addr] = write_data & 0xFF
@@ -73,32 +77,33 @@ module RHDL
 
       # Asynchronous read
       if mem_read == 1
-        read_val = case funct3
-        when Funct3::BYTE
-          # Sign-extend byte
-          val = @mem[addr] || 0
-          val >= 0x80 ? val | 0xFFFFFF00 : val
-        when Funct3::BYTE_U
-          # Zero-extend byte
-          @mem[addr] || 0
-        when Funct3::HALF
-          # Sign-extend halfword
-          val = (@mem[addr] || 0) | ((@mem[addr + 1] || 0) << 8)
-          val >= 0x8000 ? val | 0xFFFF0000 : val
-        when Funct3::HALF_U
-          # Zero-extend halfword
-          (@mem[addr] || 0) | ((@mem[addr + 1] || 0) << 8)
-        when Funct3::WORD
-          (@mem[addr] || 0) |
-          ((@mem[addr + 1] || 0) << 8) |
-          ((@mem[addr + 2] || 0) << 16) |
-          ((@mem[addr + 3] || 0) << 24)
-        else
-          0
-        end
+        # For AMO-style read+write in one cycle, expose pre-write value.
+        read_val = write_happened ? read_before_write : read_value(addr, funct3)
         out_set(:read_data, read_val & 0xFFFFFFFF)
       else
         out_set(:read_data, 0)
+      end
+    end
+
+    def read_value(addr, funct3)
+      case funct3
+      when Funct3::BYTE
+        val = @mem[addr] || 0
+        val >= 0x80 ? val | 0xFFFFFF00 : val
+      when Funct3::BYTE_U
+        @mem[addr] || 0
+      when Funct3::HALF
+        val = (@mem[addr] || 0) | ((@mem[addr + 1] || 0) << 8)
+        val >= 0x8000 ? val | 0xFFFF0000 : val
+      when Funct3::HALF_U
+        (@mem[addr] || 0) | ((@mem[addr + 1] || 0) << 8)
+      when Funct3::WORD
+        (@mem[addr] || 0) |
+          ((@mem[addr + 1] || 0) << 8) |
+          ((@mem[addr + 2] || 0) << 16) |
+          ((@mem[addr + 3] || 0) << 24)
+      else
+        0
       end
     end
 

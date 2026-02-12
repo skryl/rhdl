@@ -2,14 +2,15 @@
 # Tests cover pipeline behavior including forwarding and hazards
 
 require 'spec_helper'
-require_relative '../../../examples/riscv/hdl/pipeline/cpu'
+require_relative '../../../examples/riscv/hdl/pipeline/ir_harness'
 require_relative '../../../examples/riscv/utilities/assembler'
 
-RSpec.describe RHDL::Examples::RISCV::Pipeline::PipelinedCPU, timeout: 30 do
-  let(:cpu) { described_class.new('test_cpu') }
+RSpec.describe RHDL::Examples::RISCV::Pipeline::IRHarness, timeout: 30 do
+  let(:cpu) { described_class.new('test_cpu', backend: :jit, allow_fallback: false) }
   let(:asm) { RHDL::Examples::RISCV::Assembler }
 
   before(:each) do
+    skip 'IR JIT not available' unless RHDL::Codegen::IR::IR_JIT_AVAILABLE
     cpu.reset!
   end
 
@@ -714,6 +715,7 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::PipelinedCPU, timeout: 30 do
       trap_handler = [
         asm.csrrs(4, 0x342, 0),      # x4 = mcause
         asm.csrrs(3, 0x341, 0),      # x3 = mepc
+        asm.csrrs(5, 0x343, 0),      # x5 = mtval
         asm.addi(3, 3, 4),           # resume at next instruction
         asm.csrrw(0, 0x341, 3),      # mepc = x3
         asm.mret,
@@ -787,6 +789,7 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::PipelinedCPU, timeout: 30 do
       trap_handler = [
         asm.csrrs(4, 0x342, 0),      # x4 = mcause
         asm.csrrs(3, 0x341, 0),      # x3 = mepc
+        asm.csrrs(5, 0x343, 0),      # x5 = mtval
         asm.addi(3, 3, 4),           # resume at next instruction
         asm.csrrw(0, 0x341, 3),      # mepc = x3
         asm.mret,
@@ -810,7 +813,7 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::PipelinedCPU, timeout: 30 do
         asm.nop,
         asm.nop,
         asm.csrrw(0, 0x305, 1),      # mtvec = x1
-        0x10500073,                  # WFI (unsupported here) => illegal instruction
+        0x10600073,                  # unknown SYSTEM funct12 => illegal instruction
         asm.addi(2, 0, 1),           # executes after mret
         asm.nop,
         asm.nop,
@@ -820,6 +823,7 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::PipelinedCPU, timeout: 30 do
       trap_handler = [
         asm.csrrs(4, 0x342, 0),      # x4 = mcause
         asm.csrrs(3, 0x341, 0),      # x3 = mepc
+        asm.csrrs(5, 0x343, 0),      # x5 = mtval
         asm.addi(3, 3, 4),           # resume at next instruction
         asm.csrrw(0, 0x341, 3),      # mepc = x3
         asm.mret,
@@ -835,6 +839,7 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::PipelinedCPU, timeout: 30 do
       expect(cpu.read_reg(2)).to eq(1)
       expect(cpu.read_reg(3)).to eq(20)
       expect(cpu.read_reg(4)).to eq(2)
+      expect(cpu.read_reg(5)).to eq(0x10600073)
     end
 
     it 'takes machine timer interrupt when enabled' do
@@ -944,6 +949,116 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::PipelinedCPU, timeout: 30 do
       expect(cpu.read_reg(4)).to eq(0x1880)
     end
 
+    it 'delegates ECALL to stvec and returns with SRET' do
+      main_program = [
+        asm.addi(1, 0, 0x300),       # x1 = supervisor trap handler base
+        asm.nop,
+        asm.nop,
+        asm.csrrw(0, 0x105, 1),      # stvec = x1
+        asm.lui(1, 0x1),             # x1 = 0x1000
+        asm.addi(1, 1, -2048),       # x1 = 0x800 (delegate exception code 11)
+        asm.csrrw(0, 0x302, 1),      # medeleg = x1
+        asm.addi(2, 0, 5),           # x2 = 5
+        asm.ecall,                   # delegated trap
+        asm.addi(2, 2, 1),           # executes after sret
+        asm.nop,
+        asm.nop,
+        asm.nop
+      ]
+
+      trap_handler = [
+        asm.csrrs(4, 0x142, 0),      # x4 = scause
+        asm.csrrs(3, 0x141, 0),      # x3 = sepc
+        asm.addi(3, 3, 4),           # resume at next instruction
+        asm.csrrw(0, 0x141, 3),      # sepc = x3
+        asm.sret,
+        asm.nop,
+        asm.nop
+      ]
+
+      cpu.load_program(main_program, 0)
+      cpu.load_program(trap_handler, 0x300)
+      cpu.reset!
+      cpu.run_cycles(56)
+
+      expect(cpu.read_reg(2)).to eq(6)
+      expect(cpu.read_reg(3)).to eq(36)
+      expect(cpu.read_reg(4)).to eq(11)
+    end
+
+    it 'delegates illegal SYSTEM trap to stvec and writes stval' do
+      illegal_inst = 0x10600073
+      main_program = [
+        asm.addi(1, 0, 0x300),       # x1 = supervisor trap handler base
+        asm.nop,
+        asm.nop,
+        asm.csrrw(0, 0x105, 1),      # stvec = x1
+        asm.addi(1, 0, 0x4),         # x1 = delegate exception code 2
+        asm.csrrw(0, 0x302, 1),      # medeleg = x1
+        asm.addi(2, 0, 9),           # x2 = 9
+        illegal_inst,                # delegated illegal SYSTEM trap
+        asm.addi(2, 2, 1),           # executes after sret
+        asm.nop,
+        asm.nop
+      ]
+
+      trap_handler = [
+        asm.csrrs(4, 0x142, 0),      # x4 = scause
+        asm.csrrs(3, 0x141, 0),      # x3 = sepc
+        asm.csrrs(5, 0x143, 0),      # x5 = stval
+        asm.addi(3, 3, 4),           # resume at next instruction
+        asm.csrrw(0, 0x141, 3),      # sepc = x3
+        asm.sret,
+        asm.nop
+      ]
+
+      cpu.load_program(main_program, 0)
+      cpu.load_program(trap_handler, 0x300)
+      cpu.reset!
+      cpu.run_cycles(72)
+
+      expect(cpu.read_reg(2)).to eq(10)
+      expect(cpu.read_reg(3)).to eq(32)
+      expect(cpu.read_reg(4)).to eq(2)
+      expect(cpu.read_reg(5)).to eq(illegal_inst)
+    end
+
+    it 'delegates machine timer interrupt to stvec when mideleg and sstatus/sie enable it' do
+      main_program = [
+        asm.addi(1, 0, 0x300),       # x1 = supervisor trap handler base
+        asm.nop,
+        asm.nop,
+        asm.csrrw(0, 0x105, 1),      # stvec = x1
+        asm.addi(1, 0, 0x80),        # x1 = MTIP bit
+        asm.csrrw(0, 0x303, 1),      # mideleg = MTIP
+        asm.csrrw(0, 0x104, 1),      # sie = MTIE
+        asm.addi(1, 0, 0x2),         # x1 = sstatus.SIE
+        asm.csrrw(0, 0x100, 1),      # sstatus = SIE
+        asm.nop,
+        asm.nop,
+        asm.nop,
+        asm.nop
+      ]
+
+      trap_handler = [
+        asm.csrrs(2, 0x142, 0),      # x2 = scause
+        asm.csrrs(4, 0x100, 0),      # x4 = sstatus in handler
+        asm.jal(0, 0),
+        asm.nop,
+        asm.nop
+      ]
+
+      cpu.load_program(main_program, 0)
+      cpu.load_program(trap_handler, 0x300)
+      cpu.reset!
+      cpu.run_cycles(30)
+      cpu.set_interrupts(timer: 1)   # assert MTIP
+      cpu.run_cycles(24)
+
+      expect(cpu.read_reg(2)).to eq(0x80000007)
+      expect(cpu.read_reg(4)).to eq(0x120)
+    end
+
     it 'takes machine external interrupt from PLIC source when enabled' do
       main_program = [
         asm.addi(1, 0, 0x200),       # x1 = trap handler base
@@ -1038,6 +1153,26 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::PipelinedCPU, timeout: 30 do
       cpu.run_cycles(36)
 
       expect(cpu.read_reg(2)).to eq(0x8000000B)
+    end
+  end
+
+  describe 'UART MMIO' do
+    it 'emits bytes when writing THR' do
+      program = [
+        asm.lui(1, 0x10000),     # x1 = 0x10000000
+        asm.addi(2, 0, 0x41),    # 'A'
+        asm.nop,
+        asm.nop,
+        asm.sb(2, 1, 0),         # THR = 'A'
+        asm.addi(2, 0, 0x42),    # 'B'
+        asm.sb(2, 1, 0),         # THR = 'B'
+        asm.nop,
+        asm.nop,
+        asm.nop
+      ]
+
+      run_and_drain(program)
+      expect(cpu.uart_tx_bytes).to eq([0x41, 0x42])
     end
   end
 

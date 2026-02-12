@@ -61,9 +61,9 @@ module RHDL
       end
 
       def clock_cycle
-        # Low phase - fetch instruction for current PC
+        # Low phase - settle full combinational path
         @cpu.set_input(:clk, 0)
-        propagate_fetch_only  # Fetch instruction without clock edge
+        propagate_all
 
         # Rising edge - latch values including fetched instruction
         @cpu.set_input(:clk, 1)
@@ -142,6 +142,12 @@ module RHDL
 
         # Propagate CPU to get current instruction address
         @cpu.propagate
+        inst_ptw_addr1 = @cpu.get_output(:inst_ptw_addr1)
+        @cpu.set_input(:inst_ptw_pte1, @data_mem.read_word(inst_ptw_addr1))
+        @cpu.propagate
+        inst_ptw_addr0 = @cpu.get_output(:inst_ptw_addr0)
+        @cpu.set_input(:inst_ptw_pte0, @data_mem.read_word(inst_ptw_addr0))
+        @cpu.propagate
         inst_addr = @cpu.get_output(:inst_addr)
 
         # Fetch instruction from memory
@@ -167,6 +173,12 @@ module RHDL
 
         # First propagate CPU to get instruction address
         @cpu.propagate
+        inst_ptw_addr1 = @cpu.get_output(:inst_ptw_addr1)
+        @cpu.set_input(:inst_ptw_pte1, @data_mem.read_word(inst_ptw_addr1))
+        @cpu.propagate
+        inst_ptw_addr0 = @cpu.get_output(:inst_ptw_addr0)
+        @cpu.set_input(:inst_ptw_pte0, @data_mem.read_word(inst_ptw_addr0))
+        @cpu.propagate
         inst_addr = @cpu.get_output(:inst_addr)
 
         # Instruction memory fetch
@@ -182,6 +194,15 @@ module RHDL
 
         # Feed instruction to CPU
         @cpu.set_input(:inst_data, inst_data)
+        @cpu.propagate
+
+        # Feed Sv32 data walk PTE values from physical data memory.
+        # Level-0 address depends on level-1 PTE, so resolve in two steps.
+        data_ptw_addr1 = @cpu.get_output(:data_ptw_addr1)
+        @cpu.set_input(:data_ptw_pte1, @data_mem.read_word(data_ptw_addr1))
+        @cpu.propagate
+        data_ptw_addr0 = @cpu.get_output(:data_ptw_addr0)
+        @cpu.set_input(:data_ptw_pte0, @data_mem.read_word(data_ptw_addr0))
         @cpu.propagate
 
         # Data memory access
@@ -302,6 +323,7 @@ module RHDL
         @cpu.set_input(:irq_software, (@irq_software | @clint_irq_software) != 0 ? 1 : 0)
         @cpu.set_input(:irq_timer, (@irq_timer | @clint_irq_timer) != 0 ? 1 : 0)
         @cpu.set_input(:irq_external, (@irq_external | @plic_irq_external) != 0 ? 1 : 0)
+        @cpu.set_input(:debug_reg_addr, 0)
       end
         end
 
