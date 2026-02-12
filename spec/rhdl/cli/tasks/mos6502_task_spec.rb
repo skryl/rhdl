@@ -34,10 +34,13 @@ RSpec.describe RHDL::CLI::Tasks::MOS6502Task do
 
     it 'can be instantiated with mode option' do
       expect { described_class.new(mode: :isa) }.not_to raise_error
-      expect { described_class.new(mode: :hdl) }.not_to raise_error
+      expect { described_class.new(mode: :ruby) }.not_to raise_error
+      expect { described_class.new(mode: :ir) }.not_to raise_error
     end
 
     it 'can be instantiated with sim option' do
+      expect { described_class.new(sim: :native) }.not_to raise_error
+      expect { described_class.new(sim: :ruby) }.not_to raise_error
       expect { described_class.new(sim: :interpret) }.not_to raise_error
       expect { described_class.new(sim: :jit) }.not_to raise_error
       expect { described_class.new(sim: :compile) }.not_to raise_error
@@ -80,7 +83,7 @@ RSpec.describe RHDL::CLI::Tasks::MOS6502Task do
       options = {
         build: true,
         debug: true,
-        mode: :hdl,
+        mode: :ir,
         green: true,
         speed: 5000,
         rom: '/path/to/rom.bin'
@@ -89,7 +92,7 @@ RSpec.describe RHDL::CLI::Tasks::MOS6502Task do
 
       expect(task.options[:build]).to be true
       expect(task.options[:debug]).to be true
-      expect(task.options[:mode]).to eq(:hdl)
+      expect(task.options[:mode]).to eq(:ir)
       expect(task.options[:green]).to be true
       expect(task.options[:speed]).to eq(5000)
       expect(task.options[:rom]).to eq('/path/to/rom.bin')
@@ -153,8 +156,8 @@ RSpec.describe RHDL::CLI::Tasks::MOS6502Task do
     it 'adds all common args correctly' do
       task = described_class.new(
         debug: true,
-        mode: :hdl,
-        sim: :compile,
+        mode: :ir,
+        sim: :jit,
         speed: 5000,
         green: true,
         hires: true,
@@ -169,9 +172,9 @@ RSpec.describe RHDL::CLI::Tasks::MOS6502Task do
 
       expect(exec_args).to include('-d')
       expect(exec_args).to include('-m')
-      expect(exec_args).to include('hdl')
+      expect(exec_args).to include('ir')
       expect(exec_args).to include('--sim')
-      expect(exec_args).to include('compile')
+      expect(exec_args).to include('jit')
       expect(exec_args).to include('-s')
       expect(exec_args).to include('5000')
       expect(exec_args).to include('-g')
@@ -194,18 +197,23 @@ RSpec.describe RHDL::CLI::Tasks::MOS6502Task do
       expect(exec_args).not_to include('-m')
     end
 
-    it 'passes -m for hdl mode' do
-      task = described_class.new(mode: :hdl)
+    it 'passes -m for ir mode' do
+      task = described_class.new(mode: :ir)
       exec_args = []
 
       task.send(:add_common_args, exec_args)
 
       expect(exec_args).to include('-m')
-      expect(exec_args).to include('hdl')
+      expect(exec_args).to include('ir')
     end
 
-    it 'does not pass --sim for jit backend (default)' do
-      task = described_class.new(sim: :jit)
+    it 'does not pass --sim for default isa backend' do
+      default_isa_backend = if defined?(RHDL::Examples::MOS6502::NATIVE_AVAILABLE) && RHDL::Examples::MOS6502::NATIVE_AVAILABLE
+                              :native
+                            else
+                              :ruby
+                            end
+      task = described_class.new(mode: :isa, sim: default_isa_backend)
       exec_args = []
 
       task.send(:add_common_args, exec_args)
@@ -214,7 +222,7 @@ RSpec.describe RHDL::CLI::Tasks::MOS6502Task do
     end
 
     it 'passes --sim for interpret backend' do
-      task = described_class.new(sim: :interpret)
+      task = described_class.new(mode: :ir, sim: :interpret)
       exec_args = []
 
       task.send(:add_common_args, exec_args)
@@ -223,14 +231,30 @@ RSpec.describe RHDL::CLI::Tasks::MOS6502Task do
       expect(exec_args).to include('interpret')
     end
 
-    it 'passes --sim for compile backend' do
-      task = described_class.new(sim: :compile)
+    it 'passes --sim for jit backend' do
+      task = described_class.new(mode: :ir, sim: :jit)
       exec_args = []
 
       task.send(:add_common_args, exec_args)
 
       expect(exec_args).to include('--sim')
-      expect(exec_args).to include('compile')
+      expect(exec_args).to include('jit')
+    end
+
+    it 'passes --sim for non-default isa backend' do
+      default_isa_backend = if defined?(RHDL::Examples::MOS6502::NATIVE_AVAILABLE) && RHDL::Examples::MOS6502::NATIVE_AVAILABLE
+                              :native
+                            else
+                              :ruby
+                            end
+      non_default_backend = default_isa_backend == :native ? :ruby : :native
+      task = described_class.new(mode: :isa, sim: non_default_backend)
+      exec_args = []
+
+      task.send(:add_common_args, exec_args)
+
+      expect(exec_args).to include('--sim')
+      expect(exec_args).to include(non_default_backend.to_s)
     end
   end
 

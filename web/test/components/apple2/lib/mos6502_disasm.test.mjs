@@ -48,3 +48,11 @@ test('disassemble6502Lines emits ??? for unknown opcodes', () => {
   const lines = disassemble6502Lines(0x2000, 1, makeReadMemory(mem));
   assert.match(lines[0], /^\s{2} 2000: 02\s+\?\?\?$/);
 });
+
+test('disassemble6502Lines supports large mirrored windows up to 4096 lines', () => {
+  const mem = new Uint8Array(0x10000);
+  mem.fill(0xEA); // NOP
+  const lines = disassemble6502Lines(0x0000, 4096, makeReadMemory(mem));
+  assert.equal(lines.length, 4096);
+  assert.match(lines[0], /^\s{2} 0000: EA\s+NOP$/);
+});

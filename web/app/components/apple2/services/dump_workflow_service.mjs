@@ -32,9 +32,9 @@ export function createApple2DumpWorkflowService({
   if (!dom || !state || !runtime) {
     throw new Error('createApple2DumpWorkflowService requires dom/state/runtime');
   }
-  if (!Number.isFinite(APPLE2_RAM_BYTES) || APPLE2_RAM_BYTES <= 0) {
-    throw new Error('createApple2DumpWorkflowService requires APPLE2_RAM_BYTES');
-  }
+  const defaultRamBytes = Number.isFinite(APPLE2_RAM_BYTES) && APPLE2_RAM_BYTES > 0
+    ? APPLE2_RAM_BYTES
+    : 0x10000;
   if (!dumpStorageService || typeof dumpStorageService.save !== 'function' || typeof dumpStorageService.load !== 'function') {
     throw new Error('createApple2DumpWorkflowService requires dumpStorageService');
   }
@@ -52,12 +52,39 @@ export function createApple2DumpWorkflowService({
   requireFn('log', log);
   requireFn('fetchImpl', fetchImpl);
 
+  function currentRunnerId() {
+    return String(state.runnerPreset || 'apple2');
+  }
+
+  function currentMemoryConfig() {
+    return state.apple2?.ioConfig?.memory || {};
+  }
+
+  function dumpWindowConfig() {
+    const memoryCfg = currentMemoryConfig();
+    const dumpStart = Math.max(0, Number.parseInt(memoryCfg.dumpStart, 10) || 0);
+    const dumpLength = Math.max(1, Number.parseInt(memoryCfg.dumpLength, 10) || defaultRamBytes);
+    const dumpReadMapped = memoryCfg.dumpReadMapped !== false;
+    return { dumpStart, dumpLength, dumpReadMapped };
+  }
+
+  function readDumpWindowBytes() {
+    const { dumpStart, dumpLength, dumpReadMapped } = dumpWindowConfig();
+    if (typeof runtime.sim.memory_read === 'function') {
+      return {
+        bytes: runtime.sim.memory_read(dumpStart, dumpLength, { mapped: dumpReadMapped }),
+        dumpStart
+      };
+    }
+    return { bytes: new Uint8Array(0), dumpStart };
+  }
+
   async function saveApple2MemoryDump() {
     if (!ensureApple2Ready()) {
       return false;
     }
 
-    const bytes = runtime.sim.apple2_read_ram(0, APPLE2_RAM_BYTES);
+    const { bytes, dumpStart } = readDumpWindowBytes();
     if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
       setMemoryDumpStatus('Save failed: RAM read returned no data.');
       return false;
@@ -67,21 +94,23 @@ export function createApple2DumpWorkflowService({
     const nowIso = now.toISOString();
     const startPc = getApple2ProgramCounter();
     const stamp = nowIso.replace(/[:.]/g, '-');
-    const filename = `apple2_dump_${stamp}.bin`;
+    const runnerId = currentRunnerId();
+    const filename = `${runnerId}_dump_${stamp}.bin`;
     downloadService.downloadMemoryDump(bytes, filename);
 
+    const label = `${runnerId} ram snapshot ${nowIso}`;
     state.memory.lastSavedDump = {
       bytes: new Uint8Array(bytes),
-      offset: 0,
-      label: `apple2 ram snapshot ${nowIso}`,
+      offset: dumpStart,
+      label,
       savedAtIso: nowIso,
       startPc
     };
 
     const persisted = dumpStorageService.save(
       bytes,
-      0,
-      `apple2 ram snapshot ${nowIso}`,
+      dumpStart,
+      label,
       nowIso,
       startPc
     );
@@ -98,7 +127,7 @@ export function createApple2DumpWorkflowService({
       return false;
     }
 
-    const bytes = runtime.sim.apple2_read_ram(0, APPLE2_RAM_BYTES);
+    const { bytes, dumpStart } = readDumpWindowBytes();
     if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
       setMemoryDumpStatus('Snapshot failed: RAM read returned no data.');
       return false;
@@ -106,32 +135,80 @@ export function createApple2DumpWorkflowService({
 
     const nowIso = new Date().toISOString();
     const startPc = getApple2ProgramCounter();
-    const label = `apple2 ram snapshot ${nowIso}`;
-    const snapshot = buildApple2SnapshotPayload(bytes, 0, label, nowIso, startPc);
+    const runnerId = currentRunnerId();
+    const label = `${runnerId} ram snapshot ${nowIso}`;
+    const snapshot = buildApple2SnapshotPayload(bytes, dumpStart, label, nowIso, startPc, {
+      kind: 'rhdl.memory.snapshot'
+    });
     if (!snapshot) {
       setMemoryDumpStatus('Snapshot failed: could not encode payload.');
       return false;
     }
 
     const stamp = nowIso.replace(/[:.]/g, '-');
-    const filename = `apple2_snapshot_${stamp}.rhdlsnap`;
+    const filename = `${runnerId}_snapshot_${stamp}.rhdlsnap`;
     downloadService.downloadSnapshot(snapshot, filename);
 
     state.memory.lastSavedDump = {
       bytes: new Uint8Array(bytes),
-      offset: 0,
+      offset: dumpStart,
       label,
       savedAtIso: nowIso,
       startPc
     };
 
-    const persisted = dumpStorageService.save(bytes, 0, label, nowIso, startPc);
+    const persisted = dumpStorageService.save(bytes, dumpStart, label, nowIso, startPc);
     const msg = persisted
       ? `Downloaded snapshot ${filename} (${bytes.length} bytes). Last dump updated.`
       : `Downloaded snapshot ${filename} (${bytes.length} bytes). Could not update last saved dump.`;
     setMemoryDumpStatus(msg);
     log(msg);
     return true;
+  }
+
+  function basenameFromPath(pathValue) {
+    const token = String(pathValue || '').trim().replace(/\\/g, '/');
+    if (!token) {
+      return 'asset dump';
+    }
+    const parts = token.split('/').filter(Boolean);
+    return parts[parts.length - 1] || token;
+  }
+
+  async function loadApple2Snapshot(snapshot) {
+    if (!snapshot) {
+      return false;
+    }
+
+    if (dom.memoryDumpOffset) {
+      dom.memoryDumpOffset.value = `0x${hexWord(snapshot.offset)}`;
+    }
+
+    let pcStatus = null;
+    let resetAfterLoad = false;
+    if (snapshot.startPc != null) {
+      pcStatus = await romResetService.applySnapshotStartPc(snapshot.startPc);
+      resetAfterLoad = !!pcStatus.applied;
+      if (pcStatus?.pc != null) {
+        setMemoryResetVectorInput(pcStatus.pc);
+      }
+    }
+
+    const suffix = snapshot.savedAtIso ? ` @ ${snapshot.savedAtIso}` : '';
+    const pcSuffix = pcStatus?.pc != null ? ` (PC=$${hexWord(pcStatus.pc)})` : '';
+    const loaded = await loadApple2MemoryDumpBytes(snapshot.bytes, snapshot.offset, {
+      label: `${snapshot.label}${suffix}${pcSuffix}`,
+      resetAfterLoad
+    });
+
+    if (loaded && pcStatus && !pcStatus.applied) {
+      const warn = `Snapshot requested PC=$${hexWord(pcStatus.pc)} but could not apply it (${pcStatus.reason}).`;
+      log(warn);
+      if (dom.memoryDumpStatus) {
+        dom.memoryDumpStatus.textContent = `${dom.memoryDumpStatus.textContent} ${warn}`;
+      }
+    }
+    return loaded;
   }
 
   async function loadApple2DumpOrSnapshotFile(file, offsetRaw) {
@@ -146,39 +223,44 @@ export function createApple2DumpWorkflowService({
         setMemoryDumpStatus(`Invalid snapshot file: ${file.name}`);
         return false;
       }
-      if (dom.memoryDumpOffset) {
-        dom.memoryDumpOffset.value = `0x${hexWord(snapshot.offset)}`;
-      }
-
-      let pcStatus = null;
-      let resetAfterLoad = false;
-      if (snapshot.startPc != null) {
-        pcStatus = await romResetService.applySnapshotStartPc(snapshot.startPc);
-        resetAfterLoad = !!pcStatus.applied;
-        if (pcStatus?.pc != null) {
-          setMemoryResetVectorInput(pcStatus.pc);
-        }
-      }
-
-      const suffix = snapshot.savedAtIso ? ` @ ${snapshot.savedAtIso}` : '';
-      const pcSuffix = pcStatus?.pc != null ? ` (PC=$${hexWord(pcStatus.pc)})` : '';
-      const loaded = await loadApple2MemoryDumpBytes(snapshot.bytes, snapshot.offset, {
-        label: `${snapshot.label}${suffix}${pcSuffix}`,
-        resetAfterLoad
-      });
-
-      if (loaded && pcStatus && !pcStatus.applied) {
-        const warn = `Snapshot requested PC=$${hexWord(pcStatus.pc)} but could not apply it (${pcStatus.reason}).`;
-        log(warn);
-        if (dom.memoryDumpStatus) {
-          dom.memoryDumpStatus.textContent = `${dom.memoryDumpStatus.textContent} ${warn}`;
-        }
-      }
-      return loaded;
+      return loadApple2Snapshot(snapshot);
     }
 
     const bytes = new Uint8Array(await file.arrayBuffer());
     return loadApple2MemoryDumpBytes(bytes, offsetRaw, { label: file.name });
+  }
+
+  async function loadApple2DumpOrSnapshotAssetPath(assetPath, offsetRaw) {
+    const pathToken = String(assetPath || '').trim();
+    if (!pathToken) {
+      setMemoryDumpStatus('Select an asset path first.');
+      return false;
+    }
+
+    try {
+      const response = await fetchImpl(pathToken);
+      if (!response?.ok) {
+        const status = response ? response.status : 'n/a';
+        throw new Error(`asset fetch failed (${status})`);
+      }
+
+      if (isSnapshotFileName(pathToken)) {
+        const snapshot = parseApple2SnapshotText(await response.text());
+        if (!snapshot) {
+          setMemoryDumpStatus(`Invalid snapshot asset: ${pathToken}`);
+          return false;
+        }
+        return loadApple2Snapshot(snapshot);
+      }
+
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      return loadApple2MemoryDumpBytes(bytes, offsetRaw, { label: basenameFromPath(pathToken) });
+    } catch (err) {
+      const msg = `Asset load failed (${pathToken}): ${err.message || err}`;
+      setMemoryDumpStatus(msg);
+      log(msg);
+      return false;
+    }
   }
 
   async function loadLastSavedApple2Dump() {
@@ -228,6 +310,13 @@ export function createApple2DumpWorkflowService({
     if (!ensureApple2Ready()) {
       return;
     }
+    const runnerKind = typeof runtime.sim.runner_kind === 'function'
+      ? runtime.sim.runner_kind()
+      : runtime.sim.memory_mode?.();
+    if (runnerKind !== 'apple2') {
+      setMemoryDumpStatus('Karateka dump is only available for Apple II runner mode.');
+      return;
+    }
 
     try {
       const [romResp, dumpResp, metaResp] = await Promise.all([
@@ -255,9 +344,9 @@ export function createApple2DumpWorkflowService({
       const romBytes = new Uint8Array(await romResp.arrayBuffer());
       state.apple2.baseRomBytes = new Uint8Array(romBytes);
       const patchedRom = romResetService.patchApple2ResetVector(romBytes, startPc);
-      const romLoaded = runtime.sim.apple2_load_rom(patchedRom);
+      const romLoaded = runtime.sim.runner_load_rom(patchedRom);
       if (!romLoaded) {
-        throw new Error('apple2_load_rom returned false');
+        throw new Error('runner_load_rom returned false');
       }
       setMemoryResetVectorInput(startPc);
 
@@ -278,6 +367,7 @@ export function createApple2DumpWorkflowService({
     saveApple2MemoryDump,
     saveApple2MemorySnapshot,
     loadApple2DumpOrSnapshotFile,
+    loadApple2DumpOrSnapshotAssetPath,
     loadLastSavedApple2Dump,
     loadKaratekaDump
   };

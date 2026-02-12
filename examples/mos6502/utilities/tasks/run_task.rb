@@ -11,7 +11,7 @@ module RHDL
     module MOS6502
       module Tasks
         # Run task for MOS6502/Apple II simulation
-        # Supports ISA, HDL, and Verilog simulation modes
+        # Supports ISA, Ruby HDL, IR, and Verilog simulation modes
         class RunTask
       SCREEN_ROWS = 24
       SCREEN_COLS = 40
@@ -38,10 +38,10 @@ module RHDL
 
       attr_reader :runner, :running
 
-      def initialize(options = {})
-        @options = options
-        @mode = options[:mode] || :isa
-        @sim_backend = options[:sim] || :jit
+        def initialize(options = {})
+          @options = options
+          @mode = options[:mode] || :isa
+        @sim_backend = options[:sim] || default_sim_backend(@mode)
 
         # Create runner using HeadlessRunner factory
         @runner = HeadlessRunner.new(
@@ -52,7 +52,7 @@ module RHDL
 
         @running = false
         @last_screen = nil
-        # HDL/Netlist mode may be slower than ISA, adjust default speed accordingly
+        # IR/Netlist mode may be slower than ISA, adjust default speed accordingly
         default_speed = calculate_default_speed
         @cycles_per_frame = options[:speed] || default_speed
         @debug = options[:debug] || false
@@ -92,10 +92,11 @@ module RHDL
         @keyboard_mode = :normal
       end
 
-      def calculate_default_speed
-        case @mode
+        def calculate_default_speed
+          case @mode
         when :isa then 17_030
-        when :hdl
+        when :ruby then 100
+        when :ir
           case @sim_backend
           when :interpret then 100
           when :jit then 5_000
@@ -183,9 +184,10 @@ module RHDL
         mode_names = {
           native: "Native ISA",
           ruby: "Ruby ISA",
-          hdl_interpret: "HDL (IR Interpret)",
-          hdl_jit: "HDL (IR JIT)",
-          hdl_compile: "HDL (IR Compile)",
+          hdl_ruby: "Ruby HDL",
+          ir_interpret: "IR (Interpret)",
+          ir_jit: "IR (JIT)",
+          ir_compile: "IR (Compile)",
           hdl_verilator: "HDL (Verilator)",
           netlist_interpret: "Netlist (Interpret)",
           netlist_jit: "Netlist (JIT)",
@@ -194,8 +196,10 @@ module RHDL
         mode = mode_names[@sim_type] || @sim_type.to_s
         audio_status = @audio_enabled ? "Audio ON" : "Audio OFF"
         puts "Starting Apple ][ emulator... [#{mode} mode, #{audio_status}]"
-        if @mode == :hdl && @sim_backend == :interpret
-          puts "WARNING: HDL interpret mode is slow (for verification only)"
+        if @mode == :ruby
+          puts "WARNING: Ruby HDL mode is slow (for verification only)"
+        elsif @mode == :ir && @sim_backend == :interpret
+          puts "WARNING: IR interpret mode is slow (for verification only)"
         elsif @mode == :netlist
           puts "WARNING: Netlist mode is very slow (for verification only)"
         end
@@ -234,6 +238,19 @@ module RHDL
       end
 
       private
+
+      def default_sim_backend(mode)
+        case mode
+        when :isa
+          RHDL::Examples::MOS6502::NATIVE_AVAILABLE ? :native : :ruby
+        when :ruby
+          :ruby
+        when :ir, :netlist
+          :compile
+        else
+          nil
+        end
+      end
 
       def main_loop
         @frame_count = 0

@@ -406,7 +406,7 @@ RSpec.describe native_class, if: native_available do
   end
 end
 
-RSpec.describe RHDL::Codegen::Netlist::SimCPUNativeWrapper do
+RSpec.describe RHDL::Codegen::Netlist::NetlistSimulator do
   let(:ir) do
     ir = RHDL::Codegen::Netlist::IR.new(name: 'test')
     3.times { ir.new_net }
@@ -419,7 +419,7 @@ RSpec.describe RHDL::Codegen::Netlist::SimCPUNativeWrapper do
   end
 
   describe 'when native is available', if: RHDL::Codegen::Netlist::NATIVE_SIM_AVAILABLE do
-    let(:sim) { described_class.new(ir, lanes: 64) }
+    let(:sim) { described_class.new(ir, backend: :interpreter, lanes: 64, allow_fallback: false) }
 
     it 'uses native implementation' do
       expect(sim.native?).to be true
@@ -434,9 +434,8 @@ RSpec.describe RHDL::Codegen::Netlist::SimCPUNativeWrapper do
   end
 
   describe 'fallback behavior' do
-    # This tests the fallback path - we can't easily test this when native is available
-    # but we can at least test the wrapper interface
-    let(:sim) { described_class.new(ir, lanes: 64) }
+    # This tests the unified simulator interface.
+    let(:sim) { described_class.new(ir, backend: :interpreter, lanes: 64) }
 
     it 'provides stats' do
       stats = sim.stats

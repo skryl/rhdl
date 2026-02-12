@@ -1,0 +1,24 @@
+{
+  "programs": [
+    {
+      "id": "print_hash_top_left",
+      "binPath": "examples/8bit/software/bin/print_hash_top_left.bin",
+      "description": "Print '#' at row 0, col 0",
+      "expect": {
+        "row": 0,
+        "col": 0,
+        "char": "#"
+      }
+    },
+    {
+      "id": "print_x_row10_col10",
+      "binPath": "examples/8bit/software/bin/print_x_row10_col10.bin",
+      "description": "Print 'X' at row 10, col 10",
+      "expect": {
+        "row": 10,
+        "col": 10,
+        "char": "X"
+      }
+    }
+  ]
+}

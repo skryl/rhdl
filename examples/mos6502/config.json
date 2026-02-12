@@ -1,0 +1,69 @@
+{
+  "runner": {
+    "id": "mos6502",
+    "label": "MOS 6502 CPU Runner",
+    "order": 30,
+    "topClassName": "RHDL::Examples::MOS6502::CPU",
+    "requires": [
+      "examples/mos6502/hdl/cpu"
+    ],
+    "simIrPath": "./assets/fixtures/mos6502/ir/mos6502.json",
+    "explorerIrPath": "./assets/fixtures/mos6502/ir/mos6502_hier.json",
+    "sourceBundlePath": "./assets/fixtures/mos6502/ir/mos6502_sources.json",
+    "schematicPath": "./assets/fixtures/mos6502/ir/mos6502_schematic.json",
+    "compilerWasmPath": "./assets/pkg/ir_compiler_mos6502.wasm",
+    "preferredTab": "ioTab",
+    "enableApple2Ui": false,
+    "usesManualIr": false,
+    "defaultBin": {
+      "path": "./assets/fixtures/mos6502/memory/karateka_mem.rhdlsnap",
+      "offset": 0,
+      "space": "main",
+      "resetAfterLoad": true
+    },
+    "timing": {
+      "cyclesPerHertz": 1,
+      "hertzLabel": "6502"
+    },
+    "io": {
+      "enabled": true,
+      "api": "generic",
+      "memory": {
+        "dumpStart": 0,
+        "dumpLength": 65536,
+        "addressSpace": 65536,
+        "viewMapped": true,
+        "dumpReadMapped": true,
+        "directWriteMapped": true
+      },
+      "display": {
+        "enabled": true,
+        "mode": "apple2",
+        "text": {
+          "start": 1024,
+          "width": 40,
+          "height": 24,
+          "rowStride": 128,
+          "rowLayout": "apple2",
+          "charMask": 127,
+          "asciiMin": 32,
+          "asciiMax": 126
+        }
+      },
+      "keyboard": {
+        "enabled": true,
+        "mode": "apple2"
+      },
+      "watchSignals": [
+        "pc_debug",
+        "opcode_debug",
+        "a_debug",
+        "x_debug",
+        "y_debug",
+        "s_debug",
+        "p_debug",
+        "speaker"
+      ]
+    }
+  }
+}

@@ -50,28 +50,28 @@ RSpec.describe 'Headless Runners', :slow do
       end
     end
 
-    describe 'HDL mode' do
+    describe 'IR mode' do
       before(:each) do
-        skip 'HDL mode for mos6502 requires native IR extension' unless ir_interpreter_available?
+        skip 'IR mode for mos6502 requires native IR extension' unless ir_interpreter_available?
       end
 
-      it 'creates HDL mode runner with interpret backend' do
-        runner = MOS6502::HeadlessRunner.new(mode: :hdl, sim: :interpret)
-        expect(runner.mode).to eq(:hdl)
+      it 'creates IR mode runner with interpret backend' do
+        runner = MOS6502::HeadlessRunner.new(mode: :ir, sim: :interpret)
+        expect(runner.mode).to eq(:ir)
         expect(runner.backend).to eq(:interpret)
       end
 
-      it 'creates HDL mode runner with jit backend' do
+      it 'creates IR mode runner with jit backend' do
         skip 'IR JIT not available' unless ir_jit_available?
-        runner = MOS6502::HeadlessRunner.new(mode: :hdl, sim: :jit)
-        expect(runner.mode).to eq(:hdl)
+        runner = MOS6502::HeadlessRunner.new(mode: :ir, sim: :jit)
+        expect(runner.mode).to eq(:ir)
         expect(runner.backend).to eq(:jit)
       end
 
-      it 'creates HDL mode runner with compile backend' do
+      it 'creates IR mode runner with compile backend' do
         skip 'IR Compiler not available' unless ir_compiler_available?
-        runner = MOS6502::HeadlessRunner.new(mode: :hdl, sim: :compile)
-        expect(runner.mode).to eq(:hdl)
+        runner = MOS6502::HeadlessRunner.new(mode: :ir, sim: :compile)
+        expect(runner.mode).to eq(:ir)
         expect(runner.backend).to eq(:compile)
       end
     end
@@ -125,10 +125,10 @@ RSpec.describe 'Headless Runners', :slow do
   end
 
   describe 'RHDL::Examples::Apple2::HeadlessRunner' do
-    describe 'HDL mode with Ruby backend (default)' do
-      it 'creates HDL mode runner by default with demo' do
+    describe 'Ruby mode (default)' do
+      it 'creates Ruby mode runner by default with demo' do
         runner = RHDL::Examples::Apple2::HeadlessRunner.with_demo
-        expect(runner.mode).to eq(:hdl)
+        expect(runner.mode).to eq(:ruby)
         expect(runner.backend).to eq(:ruby)
         expect(runner.simulator_type).to eq(:hdl_ruby)
       end
@@ -157,44 +157,44 @@ RSpec.describe 'Headless Runners', :slow do
       end
     end
 
-    describe 'HDL mode with IR interpret backend' do
+    describe 'IR mode with interpret backend' do
       before(:each) do
         skip 'IR Interpreter requires native extension' unless ir_interpreter_available?
       end
 
-      it 'creates HDL mode runner with interpret backend' do
-        runner = RHDL::Examples::Apple2::HeadlessRunner.new(sim: :interpret)
-        expect(runner.mode).to eq(:hdl)
+      it 'creates IR mode runner with interpret backend' do
+        runner = RHDL::Examples::Apple2::HeadlessRunner.new(mode: :ir, sim: :interpret)
+        expect(runner.mode).to eq(:ir)
         expect(runner.backend).to eq(:interpret)
       end
     end
 
-    describe 'HDL mode with IR jit backend' do
+    describe 'IR mode with jit backend' do
       before(:each) do
         skip 'IR JIT requires native extension' unless ir_jit_available?
       end
 
-      it 'creates HDL mode runner with jit backend' do
-        runner = RHDL::Examples::Apple2::HeadlessRunner.new(sim: :jit)
-        expect(runner.mode).to eq(:hdl)
+      it 'creates IR mode runner with jit backend' do
+        runner = RHDL::Examples::Apple2::HeadlessRunner.new(mode: :ir, sim: :jit)
+        expect(runner.mode).to eq(:ir)
         expect(runner.backend).to eq(:jit)
       end
     end
 
-    describe 'HDL mode with IR compile backend' do
+    describe 'IR mode with compile backend' do
       before(:each) do
         skip 'IR Compiler requires native extension' unless ir_compiler_available?
       end
 
-      it 'creates HDL mode runner with compile backend' do
-        runner = RHDL::Examples::Apple2::HeadlessRunner.new(sim: :compile)
-        expect(runner.mode).to eq(:hdl)
+      it 'creates IR mode runner with compile backend' do
+        runner = RHDL::Examples::Apple2::HeadlessRunner.new(mode: :ir, sim: :compile)
+        expect(runner.mode).to eq(:ir)
         expect(runner.backend).to eq(:compile)
       end
 
       it 'respects sub-cycles option' do
-        runner = RHDL::Examples::Apple2::HeadlessRunner.new(sim: :compile, sub_cycles: 7)
-        expect(runner.mode).to eq(:hdl)
+        runner = RHDL::Examples::Apple2::HeadlessRunner.new(mode: :ir, sim: :compile, sub_cycles: 7)
+        expect(runner.mode).to eq(:ir)
         expect(runner.backend).to eq(:compile)
       end
     end
@@ -213,7 +213,7 @@ RSpec.describe 'Headless Runners', :slow do
     describe 'runner interface' do
       it 'returns all required fields' do
         runner = RHDL::Examples::Apple2::HeadlessRunner.with_demo
-        expect(runner.mode).to eq(:hdl)
+        expect(runner.mode).to eq(:ruby)
         expect(runner.simulator_type).to eq(:hdl_ruby)
         expect(runner.native?).to be false
         expect(runner.backend).to eq(:ruby)
@@ -255,10 +255,10 @@ RSpec.describe 'Headless Runners', :slow do
   end
 
   describe 'RHDL::Examples::GameBoy::HeadlessRunner' do
-    describe 'HDL mode with Ruby backend (default)' do
-      it 'creates HDL mode runner by default' do
+    describe 'Ruby mode (default)' do
+      it 'creates Ruby mode runner by default' do
         runner = RHDL::Examples::GameBoy::HeadlessRunner.new
-        expect(runner.mode).to eq(:hdl)
+        expect(runner.mode).to eq(:ruby)
         expect(runner.backend).to eq(:ruby)
         expect(runner.simulator_type).to eq(:hdl_ruby)
       end
@@ -274,38 +274,38 @@ RSpec.describe 'Headless Runners', :slow do
       end
     end
 
-    describe 'HDL mode with IR interpret backend' do
+    describe 'IR mode with interpret backend' do
       before(:each) do
         skip 'IR Interpreter requires native extension' unless ir_interpreter_available?
       end
 
-      it 'creates HDL mode runner with interpret backend' do
-        runner = RHDL::Examples::GameBoy::HeadlessRunner.new(sim: :interpret)
-        expect(runner.mode).to eq(:hdl)
+      it 'creates IR mode runner with interpret backend' do
+        runner = RHDL::Examples::GameBoy::HeadlessRunner.new(mode: :ir, sim: :interpret)
+        expect(runner.mode).to eq(:ir)
         expect(runner.backend).to eq(:interpret)
       end
     end
 
-    describe 'HDL mode with IR jit backend' do
+    describe 'IR mode with jit backend' do
       before(:each) do
         skip 'IR JIT requires native extension' unless ir_jit_available?
       end
 
-      it 'creates HDL mode runner with jit backend' do
-        runner = RHDL::Examples::GameBoy::HeadlessRunner.new(sim: :jit)
-        expect(runner.mode).to eq(:hdl)
+      it 'creates IR mode runner with jit backend' do
+        runner = RHDL::Examples::GameBoy::HeadlessRunner.new(mode: :ir, sim: :jit)
+        expect(runner.mode).to eq(:ir)
         expect(runner.backend).to eq(:jit)
       end
     end
 
-    describe 'HDL mode with IR compile backend' do
+    describe 'IR mode with compile backend' do
       before(:each) do
         skip 'IR Compiler requires native extension' unless ir_compiler_available?
       end
 
-      it 'creates HDL mode runner with compile backend' do
-        runner = RHDL::Examples::GameBoy::HeadlessRunner.new(sim: :compile)
-        expect(runner.mode).to eq(:hdl)
+      it 'creates IR mode runner with compile backend' do
+        runner = RHDL::Examples::GameBoy::HeadlessRunner.new(mode: :ir, sim: :compile)
+        expect(runner.mode).to eq(:ir)
         expect(runner.backend).to eq(:compile)
       end
     end
@@ -313,7 +313,7 @@ RSpec.describe 'Headless Runners', :slow do
     describe 'runner interface' do
       it 'returns all required fields' do
         runner = RHDL::Examples::GameBoy::HeadlessRunner.with_test_rom
-        expect(runner.mode).to eq(:hdl)
+        expect(runner.mode).to eq(:ruby)
         expect(runner.simulator_type).to eq(:hdl_ruby)
         expect(runner.native?).to be false
         expect(runner.backend).to eq(:ruby)

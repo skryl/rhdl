@@ -4,6 +4,11 @@ export function createRuntimeContext(createParser = null) {
     instance: null,
     backendInstances: new Map(),
     sim: null,
+    throughput: {
+      cyclesPerSecond: 0,
+      lastSampleTimeMs: null,
+      lastSampleCycle: 0
+    },
     waveformP5: null,
     parser,
     irMeta: null,

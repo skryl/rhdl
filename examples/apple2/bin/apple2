@@ -24,8 +24,8 @@ options = {
   color: false,  # NTSC artifact color rendering
   composite: false, # Optional horizontal low-pass filter for color mode
   audio: false,  # Audio output disabled by default
-  mode: :hdl,  # Simulation mode: :hdl (default), :netlist
-  sim: :ruby   # Simulator backend: :ruby (default), :interpret, :jit, :compile
+  mode: :ruby,  # Simulation mode: :ruby (default), :ir, :netlist
+  sim: nil   # Simulator backend: :ruby, :interpret, :jit, :compile
 }
 
 parser = OptionParser.new do |opts|
@@ -58,7 +58,7 @@ parser = OptionParser.new do |opts|
     options[:audio] = true
   end
 
-  opts.on("-m", "--mode TYPE", [:hdl, :netlist, :verilog], "Simulation mode: hdl (default), netlist (gate-level), verilog (Verilator)") do |v|
+  opts.on("-m", "--mode TYPE", [:ruby, :ir, :netlist, :verilog], "Simulation mode: ruby (default), ir, netlist (gate-level), verilog (Verilator)") do |v|
     options[:mode] = v
   end
 
@@ -121,18 +121,37 @@ end
 
 parser.parse!(ARGV)
 
+# Default backend by selected mode when --sim is not provided.
+if options[:sim].nil?
+  options[:sim] = case options[:mode]
+                  when :ruby then :ruby
+                  when :ir, :netlist then :compile
+                  when :verilog then :ruby
+                  else :ruby
+                  end
+end
+
 # Auto-adjust speed based on backend if user didn't explicitly set --speed
 # Apple II runs at ~1MHz. At 30fps, real-time needs ~33,333 cycles/frame.
 if options[:speed].nil?
-  options[:speed] = case options[:sim]
-                    when :compile, :jit
-                      # Compiler and JIT are fast enough for real-time
+  options[:speed] = case options[:mode]
+                    when :ruby
+                      100
+                    when :ir
+                      case options[:sim]
+                      when :compile, :jit then 33_333
+                      when :interpret then 10_000
+                      else 10_000
+                      end
+                    when :netlist
+                      case options[:sim]
+                      when :compile, :jit then 10_000
+                      when :interpret then 1_000
+                      else 1_000
+                      end
+                    when :verilog
                       33_333
-                    when :interpret
-                      # Interpreter is slower, but still faster than Ruby
-                      10_000
                     else
-                      # Ruby HDL is slow, use conservative default
                       100
                     end
 end

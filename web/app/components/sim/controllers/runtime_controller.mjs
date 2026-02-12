@@ -8,6 +8,7 @@ export function createSimRuntimeController({
   state,
   runtime,
   getBackendDef,
+  currentRunnerPreset = null,
   fetchImpl = globalThis.fetch,
   webAssemblyApi = globalThis.WebAssembly
 } = {}) {
@@ -20,8 +21,26 @@ export function createSimRuntimeController({
     throw new Error('createSimRuntimeController requires webAssemblyApi.instantiate');
   }
 
-  async function loadWasmInstance(backend = state.backend) {
+  function resolveBackendDef(backend = state.backend) {
     const def = getBackendDef(backend);
+    if (backend !== 'compiler' || typeof currentRunnerPreset !== 'function') {
+      return def;
+    }
+
+    const preset = currentRunnerPreset();
+    const runnerCompilerWasm = String(preset?.compilerWasmPath || '').trim();
+    if (!runnerCompilerWasm) {
+      return def;
+    }
+
+    return {
+      ...def,
+      wasmPath: runnerCompilerWasm
+    };
+  }
+
+  async function loadWasmInstance(backend = state.backend) {
+    const def = resolveBackendDef(backend);
     const url = def.wasmPath;
     const response = await fetchImpl(url);
 
@@ -48,12 +67,14 @@ export function createSimRuntimeController({
     if (!(runtime.backendInstances instanceof Map)) {
       runtime.backendInstances = new Map();
     }
-    if (runtime.backendInstances.has(backend)) {
-      runtime.instance = runtime.backendInstances.get(backend);
+    const def = resolveBackendDef(backend);
+    const instanceKey = `${backend}::${def.wasmPath}`;
+    if (runtime.backendInstances.has(instanceKey)) {
+      runtime.instance = runtime.backendInstances.get(instanceKey);
       return runtime.instance;
     }
     const instance = await loadWasmInstance(backend);
-    runtime.backendInstances.set(backend, instance);
+    runtime.backendInstances.set(instanceKey, instance);
     runtime.instance = instance;
     return instance;
   }

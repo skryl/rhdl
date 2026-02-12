@@ -33,7 +33,8 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
     end
 
     it 'can be instantiated with mode option' do
-      expect { described_class.new(mode: :hdl) }.not_to raise_error
+      expect { described_class.new(mode: :ruby) }.not_to raise_error
+      expect { described_class.new(mode: :ir) }.not_to raise_error
       expect { described_class.new(mode: :netlist) }.not_to raise_error
       expect { described_class.new(mode: :verilog) }.not_to raise_error
     end
@@ -45,10 +46,10 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
     end
 
     it 'can be instantiated with all mode/sim combinations' do
-      # hdl mode with all sim options
-      expect { described_class.new(mode: :hdl, sim: :interpret) }.not_to raise_error
-      expect { described_class.new(mode: :hdl, sim: :jit) }.not_to raise_error
-      expect { described_class.new(mode: :hdl, sim: :compile) }.not_to raise_error
+      # ir mode with all sim options
+      expect { described_class.new(mode: :ir, sim: :interpret) }.not_to raise_error
+      expect { described_class.new(mode: :ir, sim: :jit) }.not_to raise_error
+      expect { described_class.new(mode: :ir, sim: :compile) }.not_to raise_error
 
       # netlist mode with all sim options
       expect { described_class.new(mode: :netlist, sim: :interpret) }.not_to raise_error
@@ -162,11 +163,11 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       expect(File.exist?(script_path)).to be true
     end
 
-    it 'uses mos6502 script path for mos6502 subcommand' do
+    it 'uses apple2 script path for mos6502 subcommand' do
       task = described_class.new(subcommand: :mos6502)
       script_path = task.send(:apple2_script)
 
-      expect(script_path).to include('examples/mos6502/bin/mos6502')
+      expect(script_path).to include('examples/apple2/bin/apple2')
       expect(File.exist?(script_path)).to be true
     end
 
@@ -268,8 +269,7 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
         green: true,
         hires: true,
         hires_width: 100,
-        disk: '/path/to/disk.dsk',
-        disk2: '/path/to/disk2.dsk'
+        disk: '/path/to/disk.dsk'
       )
       exec_args = []
 
@@ -288,12 +288,10 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       expect(exec_args).to include('100')
       expect(exec_args).to include('--disk')
       expect(exec_args).to include('/path/to/disk.dsk')
-      expect(exec_args).to include('--disk2')
-      expect(exec_args).to include('/path/to/disk2.dsk')
     end
 
-    it 'does not pass -m for hdl mode (default)' do
-      task = described_class.new(mode: :hdl)
+    it 'does not pass -m for ruby mode (default)' do
+      task = described_class.new(mode: :ruby)
       exec_args = []
 
       task.send(:add_common_args, exec_args)
@@ -321,13 +319,23 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       expect(exec_args).to include('verilog')
     end
 
-    it 'does not pass --sim for jit backend (default)' do
-      task = described_class.new(sim: :jit)
+    it 'does not pass --sim for ruby backend (default)' do
+      task = described_class.new(sim: :ruby)
       exec_args = []
 
       task.send(:add_common_args, exec_args)
 
       expect(exec_args).not_to include('--sim')
+    end
+
+    it 'passes --sim for jit backend' do
+      task = described_class.new(sim: :jit)
+      exec_args = []
+
+      task.send(:add_common_args, exec_args)
+
+      expect(exec_args).to include('--sim')
+      expect(exec_args).to include('jit')
     end
 
     it 'passes --sim for interpret backend' do
@@ -374,14 +382,14 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       expect(exec_args).to include('compile')
     end
 
-    it 'adds bin flag when bin option is set' do
+    it 'does not add bin flag when bin option is set' do
       task = described_class.new(bin: '/path/to/file.bin')
       exec_args = []
 
       task.send(:add_common_args, exec_args)
 
-      expect(exec_args).to include('-b')
-      expect(exec_args).to include('/path/to/file.bin')
+      expect(exec_args).not_to include('-b')
+      expect(exec_args).not_to include('/path/to/file.bin')
     end
   end
 end

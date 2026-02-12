@@ -98,9 +98,9 @@ module RHDL
 
       # Backend options:
       #   :interpret - Pure Rust interpreter (slowest, fastest startup)
-      #   :jit       - Cranelift JIT (default, balanced)
+      #   :jit       - Cranelift JIT (balanced)
       #   :compile   - Rustc compiled (fastest, slow startup)
-      def initialize(backend: :jit, simd: :auto)
+      def initialize(backend: :compile, simd: :auto)
         @backend = backend
         @simd = simd
 
@@ -111,18 +111,14 @@ module RHDL
         # Generate gate-level IR
         @ir = Apple2Netlist.gate_ir
 
-        # Create the simulator wrapper based on backend selection
         # allow_fallback: false ensures we get an error if the native extension is missing
-        @sim = case backend
-               when :interpret
-                 RHDL::Codegen::Netlist::NetlistInterpreterWrapper.new(@ir, lanes: 1, allow_fallback: false)
-               when :jit
-                 RHDL::Codegen::Netlist::NetlistJitWrapper.new(@ir, lanes: 1, allow_fallback: false)
-               when :compile
-                 RHDL::Codegen::Netlist::NetlistCompilerWrapper.new(@ir, simd: simd, lanes: 1, allow_fallback: false)
-               else
-                 raise ArgumentError, "Unknown backend: #{backend}. Valid: :interpret, :jit, :compile"
-               end
+        @sim = RHDL::Codegen::Netlist::NetlistSimulator.new(
+          @ir,
+          backend: backend,
+          lanes: 1,
+          simd: simd,
+          allow_fallback: false
+        )
 
         elapsed = Time.now - start_time
         puts "  Netlist loaded in #{elapsed.round(2)}s"

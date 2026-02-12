@@ -14,6 +14,7 @@ require 'rhdl'
 require_relative '../utilities/apple2/harness'
 require_relative '../utilities/simulators/isa_simulator'
 require_relative '../utilities/runners/isa_runner'
+require_relative '../utilities/runners/ruby_runner'
 require_relative '../utilities/runners/ir_runner'
 require_relative '../utilities/renderers/color_renderer'
 
@@ -47,23 +48,22 @@ class Apple2Terminal
   def initialize(options = {})
     @options = options
     @mode = options[:mode] || :isa
-    @sim_backend = options[:sim] || :jit
+    @sim_backend = options[:sim] || default_sim_backend(@mode)
+    validate_backend_for_mode!(@mode, @sim_backend)
 
     # Create runner based on mode and sim backend
     @runner = case @mode
               when :isa
-                # ISA mode ignores --sim option
-                runner = RHDL::Examples::MOS6502::Apple2Harness::ISARunner.new
-                # Verify we got native, warn if fell back to ruby
-                unless runner.native?
-                  warn "Warning: Native simulator not available, using Ruby ISA simulator"
-                end
-                @sim_type = runner.native? ? :native : :ruby
+                runner = create_isa_runner(@sim_backend)
+                @sim_type = runner.simulator_type
                 runner
-              when :hdl
-                # HDL mode uses IR-based simulators
-                @sim_type = :"hdl_#{@sim_backend}"
-                RHDL::Examples::MOS6502::IRSimulatorRunner.new(@sim_backend)
+              when :ruby
+                @sim_type = :hdl_ruby
+                RHDL::Examples::MOS6502::RubyRunner.new
+              when :ir
+                # IR mode uses IR-based simulators
+                @sim_type = :"ir_#{@sim_backend}"
+                RHDL::Examples::MOS6502::IrRunner.new(@sim_backend)
               when :netlist
                 # Netlist mode uses gate-level simulators (not yet implemented)
                 raise "Netlist mode not yet implemented"
@@ -71,20 +71,21 @@ class Apple2Terminal
                 # Verilog mode uses Verilator-compiled simulation
                 require_relative '../../../examples/apple2/utilities/runners/verilator_runner'
                 @sim_type = :hdl_verilator
-                RHDL::Examples::Apple2::VerilatorRunner.new
+                RHDL::Examples::Apple2::VerilogRunner.new
               else
-                raise "Unknown mode: #{@mode}. Valid modes: isa, hdl, netlist, verilog"
+                raise "Unknown mode: #{@mode}. Valid modes: isa, ruby, ir, netlist, verilog"
               end
 
     @running = false
     @last_screen = nil
-    # HDL/Netlist mode may be slower than ISA, adjust default speed accordingly
+    # IR/Netlist mode may be slower than ISA, adjust default speed accordingly
     # ISA mode: ~1.022 MHz at 60fps
-    # HDL interpret: much slower, use smaller cycles
-    # HDL jit/compile: faster, but still slower than ISA
+    # IR interpret: much slower, use smaller cycles
+    # IR jit/compile: faster, but still slower than ISA
     default_speed = case @mode
                     when :isa then 17_030
-                    when :hdl
+                    when :ruby then 100
+                    when :ir
                       case @sim_backend
                       when :interpret then 100
                       when :jit then 5_000
@@ -207,8 +208,8 @@ class Apple2Terminal
     if @sim_type == :native && @runner.respond_to?(:native?) && @runner.native?
       @runner.cpu.poke(0xFFFC, addr & 0xFF)
       @runner.cpu.poke(0xFFFD, (addr >> 8) & 0xFF)
-    elsif @mode == :hdl && @runner.respond_to?(:set_reset_vector)
-      # HDL modes use Rust memory for JIT/Compile - must set in both places
+    elsif @mode == :ir && @runner.respond_to?(:set_reset_vector)
+      # IR modes use Rust memory for JIT/Compile - must set in both places
       @runner.set_reset_vector(addr)
     else
       @runner.bus.write(0xFFFC, addr & 0xFF)
@@ -236,9 +237,10 @@ class Apple2Terminal
     mode_names = {
       native: "Native ISA",
       ruby: "Ruby ISA",
-      hdl_interpret: "HDL (IR Interpret)",
-      hdl_jit: "HDL (IR JIT)",
-      hdl_compile: "HDL (IR Compile)",
+      hdl_ruby: "Ruby HDL",
+      ir_interpret: "IR (Interpret)",
+      ir_jit: "IR (JIT)",
+      ir_compile: "IR (Compile)",
       hdl_verilator: "HDL (Verilator)",
       netlist_interpret: "Netlist (Interpret)",
       netlist_jit: "Netlist (JIT)",
@@ -247,8 +249,10 @@ class Apple2Terminal
     mode = mode_names[@sim_type] || @sim_type.to_s
     audio_status = @audio_enabled ? "Audio ON" : "Audio OFF"
     puts "Starting Apple ][ emulator... [#{mode} mode, #{audio_status}]"
-    if @mode == :hdl && @sim_backend == :interpret
-      puts "WARNING: HDL interpret mode is slow (for verification only)"
+    if @mode == :ruby
+      puts "WARNING: Ruby HDL mode is slow (for verification only)"
+    elsif @mode == :ir && @sim_backend == :interpret
+      puts "WARNING: IR interpret mode is slow (for verification only)"
     elsif @mode == :netlist
       puts "WARNING: Netlist mode is very slow (for verification only)"
     end
@@ -290,6 +294,53 @@ class Apple2Terminal
   end
 
   private
+
+  def create_isa_runner(backend)
+    case backend
+    when :native
+      unless RHDL::Examples::MOS6502::NATIVE_AVAILABLE
+        raise "ISA backend :native requested but native extension is unavailable. Use --sim ruby."
+      end
+
+      runner = RHDL::Examples::MOS6502::Apple2Harness::ISARunner.new
+      unless runner.native?
+        raise "ISA backend :native requested but runner is not native. Fallback is disabled."
+      end
+      runner
+    when :ruby
+      bus = RHDL::Examples::MOS6502::Apple2Bus.new("apple2_bus")
+      cpu = RHDL::Examples::MOS6502::ISASimulator.new(bus)
+      RHDL::Examples::MOS6502::RubyISARunner.new(bus, cpu)
+    else
+      raise ArgumentError, "Invalid ISA backend #{backend.inspect}. Use :native or :ruby."
+    end
+  end
+
+  def default_sim_backend(mode)
+    case mode
+    when :isa
+      RHDL::Examples::MOS6502::NATIVE_AVAILABLE ? :native : :ruby
+    when :ruby
+      :ruby
+    when :ir, :netlist
+      :compile
+    else
+      nil
+    end
+  end
+
+  def validate_backend_for_mode!(mode, backend)
+    valid = case mode
+            when :isa then [:native, :ruby]
+            when :ruby then [:ruby]
+            when :ir, :netlist then [:interpret, :jit, :compile]
+            when :verilog then [nil]
+            else []
+            end
+    return if valid.include?(backend)
+
+    raise ArgumentError, "Invalid --sim #{backend.inspect} for mode #{mode.inspect}."
+  end
 
   def main_loop
     @frame_count = 0
@@ -917,12 +968,12 @@ end
 
 # Parse command line options
 options = {
-  speed: 17_030,  # ~1.022 MHz at 60fps (Apple II target: 1.023 MHz)
+  speed: nil,     # nil means auto-select based on mode/backend
   debug: false,
   green: false,
   demo: false,
-  mode: :isa,      # Simulator mode: isa, hdl, or netlist
-  sim: :jit,       # Sim backend: interpret, jit, or compile (ignored for ISA mode)
+  mode: :isa,      # Simulator mode: isa, ruby, ir, netlist, or verilog
+  sim: nil,        # Simulator backend selected per mode
   hires: false,
   hires_width: nil,  # Auto-calculated based on mode and terminal size
   color: false,  # NTSC artifact color rendering
@@ -949,7 +1000,7 @@ parser = OptionParser.new do |opts|
     options[:rom_addr] = v.to_i(16)
   end
 
-  opts.on("-s", "--speed CYCLES", Integer, "Cycles per frame (default: 17030)") do |v|
+  opts.on("-s", "--speed CYCLES", Integer, "Cycles per frame (default: auto by mode/backend)") do |v|
     options[:speed] = v
   end
 
@@ -961,11 +1012,11 @@ parser = OptionParser.new do |opts|
     options[:green] = true
   end
 
-  opts.on("-m", "--mode TYPE", [:isa, :hdl, :netlist, :verilog], "Simulator mode: isa (default), hdl, netlist, verilog") do |v|
+  opts.on("-m", "--mode TYPE", [:isa, :ruby, :ir, :netlist, :verilog], "Simulator mode: isa (default), ruby, ir, netlist, verilog") do |v|
     options[:mode] = v
   end
 
-  opts.on("--sim TYPE", [:interpret, :jit, :compile], "Sim backend: interpret, jit (default), compile (ignored for ISA mode)") do |v|
+  opts.on("--sim TYPE", [:native, :ruby, :interpret, :jit, :compile], "Sim backend (mode-specific): isa=>native|ruby, ruby=>ruby, ir=>interpret|jit|compile") do |v|
     options[:sim] = v
   end
 
@@ -1031,6 +1082,33 @@ parser = OptionParser.new do |opts|
 end
 
 parser.parse!(ARGV)
+
+# Apply per-mode default backend when --sim is omitted.
+if options[:sim].nil?
+  options[:sim] = case options[:mode]
+                  when :isa
+                    RHDL::Examples::MOS6502::NATIVE_AVAILABLE ? :native : :ruby
+                  when :ruby
+                    :ruby
+                  when :ir, :netlist
+                    :compile
+                  when :verilog
+                    nil
+                  end
+end
+
+# Validate mode/backend combinations before creating the runner.
+valid_sim = case options[:mode]
+            when :isa then [:native, :ruby]
+            when :ruby then [:ruby]
+            when :ir, :netlist then [:interpret, :jit, :compile]
+            when :verilog then [nil]
+            else []
+            end
+unless valid_sim.include?(options[:sim])
+  puts "Error: Invalid --sim #{options[:sim].inspect} for --mode #{options[:mode].inspect}"
+  exit 1
+end
 
 # Create terminal
 terminal = Apple2Terminal.new(options)

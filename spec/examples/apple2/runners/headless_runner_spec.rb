@@ -20,10 +20,10 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
     end
   end
 
-  describe 'HDL mode with Ruby backend (default)' do
-    it 'creates HDL mode runner with Ruby backend by default' do
+  describe 'Ruby mode (default)' do
+    it 'creates Ruby mode runner with Ruby backend by default' do
       runner = described_class.new
-      expect(runner.mode).to eq(:hdl)
+      expect(runner.mode).to eq(:ruby)
       expect(runner.backend).to eq(:ruby)
       expect(runner.simulator_type).to eq(:hdl_ruby)
     end
@@ -43,10 +43,10 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
     it 'sets reset vector for demo program' do
       runner = described_class.with_demo
       reset_vector = runner.memory_sample[:reset_vector]
-      # In HDL mode, reset vector is in ROM space which isn't writable
-      # The setup_reset_vector writes to RAM addresses but $FFFC-$FFFD are in ROM
-      # So reset vector will be 0 unless a ROM with proper reset vector is loaded
-      expect(reset_vector.size).to eq(2)
+        # In Ruby mode, reset vector is in ROM space which isn't writable
+        # The setup_reset_vector writes to RAM addresses but $FFFC-$FFFD are in ROM
+        # So reset vector will be 0 unless a ROM with proper reset vector is loaded
+        expect(reset_vector.size).to eq(2)
     end
 
     it 'loads binary file' do
@@ -67,86 +67,86 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
         runner = described_class.new
         runner.load_program(path, base_addr: 0x0900)
         runner.setup_reset_vector(0x0900)
-        # In HDL mode, reset vector is in ROM space which isn't writable
+        # In Ruby mode, reset vector is in ROM space which isn't writable
         # Just verify the mode and structure are correct
-        expect(runner.mode).to eq(:hdl)
+        expect(runner.mode).to eq(:ruby)
         expect(runner.memory_sample).to have_key(:reset_vector)
       end
     end
   end
 
-  describe 'HDL mode with IR interpret backend' do
+  describe 'IR mode with interpret backend' do
     before(:each) do
       skip 'IR Interpreter requires native extension' unless ir_interpreter_available?
     end
 
-    it 'creates HDL mode runner with interpret backend' do
-      runner = described_class.new(sim: :interpret)
-      expect(runner.mode).to eq(:hdl)
+    it 'creates IR mode runner with interpret backend' do
+      runner = described_class.new(mode: :ir, sim: :interpret)
+      expect(runner.mode).to eq(:ir)
       expect(runner.backend).to eq(:interpret)
     end
 
     it 'sets native flag correctly for interpret' do
-      runner = described_class.new(sim: :interpret)
+      runner = described_class.new(mode: :ir, sim: :interpret)
       # IR interpreter may or may not be native
       expect([true, false]).to include(runner.native?)
     end
 
     it 'loads demo program into IR simulator memory' do
-      runner = described_class.with_demo(sim: :interpret)
+      runner = described_class.with_demo(mode: :ir, sim: :interpret)
       program_area = runner.memory_sample[:program_area]
       expect(program_area.any? { |b| b != 0 }).to be true
     end
   end
 
-  describe 'HDL mode with IR jit backend' do
+  describe 'IR mode with jit backend' do
     before(:each) do
       skip 'IR JIT requires native extension' unless ir_jit_available?
     end
 
-    it 'creates HDL mode runner with jit backend' do
-      runner = described_class.new(sim: :jit)
-      expect(runner.mode).to eq(:hdl)
+    it 'creates IR mode runner with jit backend' do
+      runner = described_class.new(mode: :ir, sim: :jit)
+      expect(runner.mode).to eq(:ir)
       expect(runner.backend).to eq(:jit)
     end
 
     it 'sets native flag to true for jit' do
-      runner = described_class.new(sim: :jit)
+      runner = described_class.new(mode: :ir, sim: :jit)
       expect(runner.native?).to be true
     end
 
     it 'loads demo program into IR simulator memory' do
-      runner = described_class.with_demo(sim: :jit)
+      runner = described_class.with_demo(mode: :ir, sim: :jit)
       program_area = runner.memory_sample[:program_area]
       expect(program_area.any? { |b| b != 0 }).to be true
     end
   end
 
-  describe 'HDL mode with IR compile backend' do
+  describe 'IR mode with compile backend' do
     before(:each) do
       skip 'IR Compiler requires native extension' unless ir_compiler_available?
     end
 
-    it 'creates HDL mode runner with compile backend' do
-      runner = described_class.new(sim: :compile)
-      expect(runner.mode).to eq(:hdl)
+    it 'creates IR mode runner with compile backend' do
+      runner = described_class.new(mode: :ir, sim: :compile)
+      expect(runner.mode).to eq(:ir)
       expect(runner.backend).to eq(:compile)
     end
 
     it 'sets native flag to true for compile' do
-      runner = described_class.new(sim: :compile)
+      runner = described_class.new(mode: :ir, sim: :compile)
       expect(runner.native?).to be true
     end
 
     it 'loads demo program into IR simulator memory' do
-      runner = described_class.with_demo(sim: :compile)
+      runner = described_class.with_demo(mode: :ir, sim: :compile)
       program_area = runner.memory_sample[:program_area]
       expect(program_area.any? { |b| b != 0 }).to be true
     end
 
     it 'respects sub-cycles option' do
-      runner = described_class.new(sim: :compile, sub_cycles: 7)
-      expect(runner.mode).to eq(:hdl)
+      runner = described_class.new(mode: :ir, sim: :compile, sub_cycles: 7)
+      expect(runner.mode).to eq(:ir)
       expect(runner.backend).to eq(:compile)
     end
   end

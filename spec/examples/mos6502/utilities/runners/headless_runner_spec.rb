@@ -23,7 +23,7 @@ RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner, :slow do
     it 'creates ISA mode runner' do
       runner = described_class.new(mode: :isa)
       expect(runner.mode).to eq(:isa)
-      expect(runner.backend).to be_nil
+      expect([:native, :ruby]).to include(runner.backend)
     end
 
     it 'returns native or ruby simulator_type based on availability' do
@@ -91,6 +91,34 @@ RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner, :slow do
         expect(reset_vector[1]).to eq(0x08)  # High byte
       end
     end
+
+    it 'supports explicit ruby ISA backend' do
+      runner = described_class.new(mode: :isa, sim: :ruby)
+      expect(runner.backend).to eq(:ruby)
+      expect(runner.simulator_type).to eq(:ruby)
+      expect(runner.native?).to be false
+    end
+
+    it 'requires native extension for explicit native ISA backend' do
+      if RHDL::Examples::MOS6502::NATIVE_AVAILABLE
+        runner = described_class.new(mode: :isa, sim: :native)
+        expect(runner.backend).to eq(:native)
+        expect(runner.native?).to be true
+      else
+        expect { described_class.new(mode: :isa, sim: :native) }
+          .to raise_error(RuntimeError, /native extension is unavailable/i)
+      end
+    end
+  end
+
+  describe 'Ruby HDL mode' do
+    it 'creates Ruby HDL mode runner' do
+      runner = described_class.new(mode: :ruby, sim: :ruby)
+      expect(runner.mode).to eq(:ruby)
+      expect(runner.backend).to eq(:ruby)
+      expect(runner.simulator_type).to eq(:hdl_ruby)
+      expect(runner.native?).to be false
+    end
   end
 
   describe 'HDL mode with interpret backend' do
@@ -99,19 +127,19 @@ RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner, :slow do
     end
 
     it 'creates HDL mode runner with interpret backend' do
-      runner = described_class.new(mode: :hdl, sim: :interpret)
-      expect(runner.mode).to eq(:hdl)
+      runner = described_class.new(mode: :ir, sim: :interpret)
+      expect(runner.mode).to eq(:ir)
       expect(runner.backend).to eq(:interpret)
       expect(runner.simulator_type).to eq(:ir_interpret)
     end
 
     it 'sets native flag to false for interpret' do
-      runner = described_class.new(mode: :hdl, sim: :interpret)
+      runner = described_class.new(mode: :ir, sim: :interpret)
       expect(runner.native?).to be false
     end
 
     it 'loads demo program into IR simulator memory' do
-      runner = described_class.with_demo(mode: :hdl, sim: :interpret)
+      runner = described_class.with_demo(mode: :ir, sim: :interpret)
       program_area = runner.memory_sample[:program_area]
       expect(program_area.any? { |b| b != 0 }).to be true
     end
@@ -123,19 +151,19 @@ RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner, :slow do
     end
 
     it 'creates HDL mode runner with jit backend' do
-      runner = described_class.new(mode: :hdl, sim: :jit)
-      expect(runner.mode).to eq(:hdl)
+      runner = described_class.new(mode: :ir, sim: :jit)
+      expect(runner.mode).to eq(:ir)
       expect(runner.backend).to eq(:jit)
       expect(runner.simulator_type).to eq(:ir_jit)
     end
 
     it 'sets native flag to true for jit' do
-      runner = described_class.new(mode: :hdl, sim: :jit)
+      runner = described_class.new(mode: :ir, sim: :jit)
       expect(runner.native?).to be true
     end
 
     it 'loads demo program into IR simulator memory' do
-      runner = described_class.with_demo(mode: :hdl, sim: :jit)
+      runner = described_class.with_demo(mode: :ir, sim: :jit)
       program_area = runner.memory_sample[:program_area]
       expect(program_area.any? { |b| b != 0 }).to be true
     end
@@ -147,19 +175,19 @@ RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner, :slow do
     end
 
     it 'creates HDL mode runner with compile backend' do
-      runner = described_class.new(mode: :hdl, sim: :compile)
-      expect(runner.mode).to eq(:hdl)
+      runner = described_class.new(mode: :ir, sim: :compile)
+      expect(runner.mode).to eq(:ir)
       expect(runner.backend).to eq(:compile)
       expect(runner.simulator_type).to eq(:ir_compile)
     end
 
     it 'sets native flag to true for compile' do
-      runner = described_class.new(mode: :hdl, sim: :compile)
+      runner = described_class.new(mode: :ir, sim: :compile)
       expect(runner.native?).to be true
     end
 
     it 'loads demo program into IR simulator memory' do
-      runner = described_class.with_demo(mode: :hdl, sim: :compile)
+      runner = described_class.with_demo(mode: :ir, sim: :compile)
       program_area = runner.memory_sample[:program_area]
       expect(program_area.any? { |b| b != 0 }).to be true
     end

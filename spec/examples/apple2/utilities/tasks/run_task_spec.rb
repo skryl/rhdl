@@ -7,14 +7,14 @@ require_relative '../../../../../examples/apple2/utilities/tasks/run_task'
 RSpec.describe RHDL::Examples::Apple2::Tasks::RunTask do
   describe '#initialize' do
     it 'accepts options hash' do
-      task = described_class.new(mode: :hdl, sim: :ruby)
-      expect(task.instance_variable_get(:@sim_mode)).to eq(:hdl)
+      task = described_class.new(mode: :ruby, sim: :ruby)
+      expect(task.instance_variable_get(:@sim_mode)).to eq(:ruby)
       expect(task.instance_variable_get(:@sim_backend)).to eq(:ruby)
     end
 
-    it 'defaults to hdl mode' do
+    it 'defaults to ruby mode' do
       task = described_class.new
-      expect(task.instance_variable_get(:@sim_mode)).to eq(:hdl)
+      expect(task.instance_variable_get(:@sim_mode)).to eq(:ruby)
     end
 
     it 'defaults to ruby sim backend' do
@@ -23,17 +23,17 @@ RSpec.describe RHDL::Examples::Apple2::Tasks::RunTask do
     end
 
     it 'creates HeadlessRunner internally' do
-      task = described_class.new(mode: :hdl, sim: :ruby)
+      task = described_class.new(mode: :ruby, sim: :ruby)
       expect(task.runner).to be_a(RHDL::Examples::Apple2::HeadlessRunner)
     end
   end
 
   describe 'HeadlessRunner integration' do
-    context 'with hdl mode and ruby backend' do
-      let(:task) { described_class.new(mode: :hdl, sim: :ruby) }
+    context 'with ruby mode and ruby backend' do
+      let(:task) { described_class.new(mode: :ruby, sim: :ruby) }
 
-      it 'creates runner with hdl mode' do
-        expect(task.runner.mode).to eq(:hdl)
+      it 'creates runner with ruby mode' do
+        expect(task.runner.mode).to eq(:ruby)
       end
 
       it 'creates runner with ruby backend' do
@@ -95,7 +95,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
   end
 
   describe '.with_demo' do
-    let(:runner) { described_class.with_demo(mode: :hdl, sim: :ruby) }
+    let(:runner) { described_class.with_demo(mode: :ruby, sim: :ruby) }
 
     it 'creates a HeadlessRunner' do
       expect(runner).to be_a(described_class)
@@ -115,8 +115,8 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
     end
   end
 
-  describe 'PC progression' do
-    let(:runner) { described_class.with_demo(mode: :hdl, sim: :ruby) }
+  describe 'PC progression', :slow do
+    let(:runner) { described_class.with_demo(mode: :ruby, sim: :ruby) }
 
     before { runner.reset }
 
@@ -147,11 +147,11 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
   end
 
   describe 'configuration validation' do
-    context 'with hdl mode and ruby backend' do
-      let(:runner) { described_class.new(mode: :hdl, sim: :ruby) }
+    context 'with ruby mode and ruby backend' do
+      let(:runner) { described_class.new(mode: :ruby, sim: :ruby) }
 
-      it 'creates runner with hdl mode' do
-        expect(runner.mode).to eq(:hdl)
+      it 'creates runner with ruby mode' do
+        expect(runner.mode).to eq(:ruby)
       end
 
       it 'creates runner with ruby backend' do
@@ -162,15 +162,15 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
         expect(runner.simulator_type).to be_a(Symbol)
       end
 
-      it 'backend returns ruby for hdl mode' do
+      it 'backend returns ruby for ruby mode' do
         expect(runner.backend).to eq(:ruby)
       end
     end
 
-    context 'with hdl mode and different backends' do
+    context 'with ir mode and different backends' do
       it 'accepts interpret backend' do
         begin
-          runner = described_class.new(mode: :hdl, sim: :interpret)
+          runner = described_class.new(mode: :ir, sim: :interpret)
           expect(runner.sim_backend).to eq(:interpret)
         rescue LoadError, StandardError => e
           skip "Interpret backend not available: #{e.message}"
@@ -179,7 +179,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
 
       it 'accepts jit backend' do
         begin
-          runner = described_class.new(mode: :hdl, sim: :jit)
+          runner = described_class.new(mode: :ir, sim: :jit)
           expect(runner.sim_backend).to eq(:jit)
         rescue LoadError, StandardError => e
           skip "JIT backend not available: #{e.message}"
@@ -188,7 +188,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
 
       it 'accepts compile backend' do
         begin
-          runner = described_class.new(mode: :hdl, sim: :compile)
+          runner = described_class.new(mode: :ir, sim: :compile)
           expect(runner.sim_backend).to eq(:compile)
         rescue LoadError, StandardError => e
           skip "Compile backend not available: #{e.message}"
@@ -197,8 +197,8 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
     end
   end
 
-  describe 'CPU state access' do
-    let(:runner) { described_class.with_demo(mode: :hdl, sim: :ruby) }
+  describe 'CPU state access', :slow do
+    let(:runner) { described_class.with_demo(mode: :ruby, sim: :ruby) }
 
     before do
       runner.reset
@@ -248,7 +248,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
   end
 
   describe 'memory access' do
-    let(:runner) { described_class.new(mode: :hdl, sim: :ruby) }
+    let(:runner) { described_class.new(mode: :ruby, sim: :ruby) }
 
     it 'can write to memory' do
       runner.write(0x0800, 0xAB)
@@ -275,7 +275,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
     end
   end
 
-  describe 'Karateka PC progression' do
+  describe 'Karateka PC progression', :slow do
     # Helper to categorize PC into memory regions
     def pc_region(pc)
       case pc
@@ -344,15 +344,15 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
 
     context 'with interpret backend' do
       # Use fewer cycles - interpret is slower
-      include_examples 'karateka pc progression', :hdl, :interpret, 2_000
+      include_examples 'karateka pc progression', :ir, :interpret, 2_000
     end
 
     context 'with jit backend' do
-      include_examples 'karateka pc progression', :hdl, :jit, 10_000
+      include_examples 'karateka pc progression', :ir, :jit, 10_000
     end
 
     context 'with compile backend' do
-      include_examples 'karateka pc progression', :hdl, :compile, 10_000
+      include_examples 'karateka pc progression', :ir, :compile, 10_000
     end
 
     context 'with verilator backend' do
@@ -404,7 +404,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
       end
     end
 
-    context 'cross-backend comparison' do
+    context 'cross-backend comparison', :slow do
       MIN_TOTAL_CYCLES = 20_000_000
 
       def run_task_sample_interval
@@ -555,8 +555,8 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
         selected = requested_backends
 
         backends = []
-        backends << [:hdl, :jit] if selected[:jit]
-        backends << [:hdl, :compile] if selected[:compile]
+        backends << [:ir, :jit] if selected[:jit]
+        backends << [:ir, :compile] if selected[:compile]
 
         backends.each do |mode, sim|
           begin
@@ -638,7 +638,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
         skip 'Compile backend not selected' unless selected[:compile]
         skip 'Verilog backend not selected' unless selected[:verilog]
 
-        compile_runner = described_class.with_karateka(mode: :hdl, sim: :compile)
+        compile_runner = described_class.with_karateka(mode: :ir, sim: :compile)
         verilog_runner = described_class.with_karateka(mode: :verilog)
 
         compile_signatures = collect_hires_color_signatures(compile_runner)
@@ -657,7 +657,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
         skip 'Compile backend not selected' unless selected[:compile]
         skip 'Verilog backend not selected' unless selected[:verilog]
 
-        compile_runner = described_class.with_karateka(mode: :hdl, sim: :compile)
+        compile_runner = described_class.with_karateka(mode: :ir, sim: :compile)
         verilog_runner = described_class.with_karateka(mode: :verilog)
 
         compile_signatures = collect_video_memory_signatures(compile_runner)

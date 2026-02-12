@@ -6,9 +6,9 @@ require_relative '../../../../../examples/mos6502/utilities/tasks/run_task'
 RSpec.describe RHDL::Examples::MOS6502::Tasks::RunTask do
   describe '#initialize' do
     it 'accepts options hash' do
-      task = described_class.new(mode: :isa, sim: :jit)
+      task = described_class.new(mode: :isa, sim: :ruby)
       expect(task.instance_variable_get(:@mode)).to eq(:isa)
-      expect(task.instance_variable_get(:@sim_backend)).to eq(:jit)
+      expect(task.instance_variable_get(:@sim_backend)).to eq(:ruby)
     end
 
     it 'defaults to isa mode' do
@@ -16,9 +16,9 @@ RSpec.describe RHDL::Examples::MOS6502::Tasks::RunTask do
       expect(task.instance_variable_get(:@mode)).to eq(:isa)
     end
 
-    it 'defaults to jit sim backend' do
+    it 'defaults to an isa backend' do
       task = described_class.new
-      expect(task.instance_variable_get(:@sim_backend)).to eq(:jit)
+      expect([:native, :ruby]).to include(task.instance_variable_get(:@sim_backend))
     end
 
     it 'creates HeadlessRunner internally' do
@@ -71,20 +71,26 @@ RSpec.describe RHDL::Examples::MOS6502::Tasks::RunTask do
       expect(speed).to eq(17_030)
     end
 
-    it 'calculates default speed for hdl interpret mode' do
-      task = described_class.new(mode: :hdl, sim: :interpret)
+    it 'calculates default speed for ruby mode' do
+      task = described_class.new(mode: :ruby, sim: :ruby)
       speed = task.send(:calculate_default_speed)
       expect(speed).to eq(100)
     end
 
-    it 'calculates default speed for hdl jit mode' do
-      task = described_class.new(mode: :hdl, sim: :jit)
+    it 'calculates default speed for ir interpret mode' do
+      task = described_class.new(mode: :ir, sim: :interpret)
+      speed = task.send(:calculate_default_speed)
+      expect(speed).to eq(100)
+    end
+
+    it 'calculates default speed for ir jit mode' do
+      task = described_class.new(mode: :ir, sim: :jit)
       speed = task.send(:calculate_default_speed)
       expect(speed).to eq(5_000)
     end
 
-    it 'calculates default speed for hdl compile mode' do
-      task = described_class.new(mode: :hdl, sim: :compile)
+    it 'calculates default speed for ir compile mode' do
+      task = described_class.new(mode: :ir, sim: :compile)
       speed = task.send(:calculate_default_speed)
       expect(speed).to eq(10_000)
     end
@@ -192,23 +198,23 @@ RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner do
         expect(runner.simulator_type).to be_a(Symbol)
       end
 
-      it 'backend returns nil for isa mode' do
-        expect(runner.backend).to be_nil
+      it 'backend returns selected isa backend' do
+        expect([:native, :ruby]).to include(runner.backend)
       end
     end
 
-    context 'with hdl mode' do
-      # Skip if HDL runner not available
+    context 'with ir mode' do
+      # Skip if IR runner not available
       let(:runner) do
         begin
-          described_class.new(mode: :hdl, sim: :jit)
+          described_class.new(mode: :ir, sim: :jit)
         rescue LoadError, StandardError => e
-          skip "HDL mode not available: #{e.message}"
+          skip "IR mode not available: #{e.message}"
         end
       end
 
-      it 'creates runner with hdl mode' do
-        expect(runner.mode).to eq(:hdl)
+      it 'creates runner with ir mode' do
+        expect(runner.mode).to eq(:ir)
       end
 
       it 'reports jit backend' do
@@ -267,7 +273,7 @@ RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner do
     end
   end
 
-  describe 'Karateka PC progression' do
+  describe 'Karateka PC progression', :slow do
     # Helper to categorize PC into memory regions
     def pc_region(pc)
       case pc
@@ -311,9 +317,11 @@ RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner do
         pc_samples = []
         regions_visited = Set.new
 
-        # Run in batches, sampling PC
-        (cycles / 1000).times do
-          runner.run_steps(1000)
+        # Run in smaller batches to avoid aliasing on loop boundaries
+        # (Ruby ISA backend can land on the same PC every 1000-cycle sample).
+        sample_steps = 100
+        (cycles / sample_steps).times do
+          runner.run_steps(sample_steps)
           pc = runner.cpu_state[:pc]
           pc_samples << pc
           regions_visited << pc_region(pc)
@@ -332,15 +340,15 @@ RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner do
     end
 
     context 'with isa backend' do
-      include_examples 'karateka pc progression', :isa, :jit, 10_000
+      include_examples 'karateka pc progression', :isa, :ruby, 10_000
     end
 
-    context 'with hdl/jit backend' do
-      include_examples 'karateka pc progression', :hdl, :jit, 10_000
+    context 'with ir/jit backend' do
+      include_examples 'karateka pc progression', :ir, :jit, 10_000
     end
 
-    context 'with hdl/compile backend' do
-      include_examples 'karateka pc progression', :hdl, :compile, 10_000
+    context 'with ir/compile backend' do
+      include_examples 'karateka pc progression', :ir, :compile, 10_000
     end
 
     context 'with verilator backend' do
@@ -411,9 +419,9 @@ RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner do
         name.start_with?('isa')
       end
 
-      # Check if backend is HDL level (should be cycle-accurate)
-      def hdl_backend?(name)
-        name.start_with?('hdl') || name == 'verilog'
+      # Check if backend is IR/Verilog level (should be cycle-accurate)
+      def ir_backend?(name)
+        name.start_with?('ir') || name == 'verilog'
       end
 
       # Helper to run all backends and collect sequences
@@ -421,9 +429,9 @@ RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner do
         results = {}
 
         backends = [
-          [:isa, :jit],
-          [:hdl, :jit],
-          [:hdl, :compile]
+          [:isa, :ruby],
+          [:ir, :jit],
+          [:ir, :compile]
         ]
 
         backends.each do |mode, sim|
@@ -448,53 +456,53 @@ RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner do
         results
       end
 
-      it 'all HDL backends have identical PC sequences' do
+      it 'all IR backends have identical PC sequences' do
         skip 'Karateka resources not available' unless @karateka_available
 
         results = run_all_backends_with_sequences
-        hdl_results = results.select { |k, _| hdl_backend?(k) }
-        skip 'No HDL backends available for comparison' if hdl_results.length < 2
+        ir_results = results.select { |k, _| ir_backend?(k) }
+        skip 'No IR backends available for comparison' if ir_results.length < 2
 
-        backend_names = hdl_results.keys
+        backend_names = ir_results.keys
         reference = backend_names.first
-        ref_pcs = hdl_results[reference][:pcs]
+        ref_pcs = ir_results[reference][:pcs]
 
-        puts "\nPC sequence comparison (HDL backends):"
+        puts "\nPC sequence comparison (IR backends):"
         puts "  Reference: #{reference}"
         puts "    PCs: #{ref_pcs.map { |pc| '$' + pc.to_s(16).upcase }.join(', ')}"
 
         backend_names[1..].each do |backend|
-          pcs = hdl_results[backend][:pcs]
+          pcs = ir_results[backend][:pcs]
           puts "  #{backend}:"
           puts "    PCs: #{pcs.map { |pc| '$' + pc.to_s(16).upcase }.join(', ')}"
 
-          # HDL backends should have identical PC sequences
+          # IR backends should have identical PC sequences
           expect(pcs).to eq(ref_pcs),
             "#{backend} PC sequence differs from #{reference}"
         end
       end
 
-      it 'all HDL backends have identical opcode sequences' do
+      it 'all IR backends have identical opcode sequences' do
         skip 'Karateka resources not available' unless @karateka_available
 
         results = run_all_backends_with_sequences
-        hdl_results = results.select { |k, _| hdl_backend?(k) }
-        skip 'No HDL backends available for comparison' if hdl_results.length < 2
+        ir_results = results.select { |k, _| ir_backend?(k) }
+        skip 'No IR backends available for comparison' if ir_results.length < 2
 
-        backend_names = hdl_results.keys
+        backend_names = ir_results.keys
         reference = backend_names.first
-        ref_opcodes = hdl_results[reference][:opcodes]
+        ref_opcodes = ir_results[reference][:opcodes]
 
-        puts "\nOpcode sequence comparison (HDL backends):"
+        puts "\nOpcode sequence comparison (IR backends):"
         puts "  Reference: #{reference}"
         puts "    Opcodes: #{ref_opcodes.map { |op| '$' + op.to_s(16).upcase.rjust(2, '0') }.join(', ')}"
 
         backend_names[1..].each do |backend|
-          opcodes = hdl_results[backend][:opcodes]
+          opcodes = ir_results[backend][:opcodes]
           puts "  #{backend}:"
           puts "    Opcodes: #{opcodes.map { |op| '$' + op.to_s(16).upcase.rjust(2, '0') }.join(', ')}"
 
-          # HDL backends should have identical opcode sequences
+          # IR backends should have identical opcode sequences
           expect(opcodes).to eq(ref_opcodes),
             "#{backend} opcode sequence differs from #{reference}"
         end
@@ -521,7 +529,7 @@ RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner do
           # Find first opcode divergence
           first_op_diff = opcodes_a.zip(opcodes_b).find_index { |oa, ob| oa != ob }
 
-          # Determine if this is an ISA vs HDL comparison (warn only)
+          # Determine if this is an ISA vs IR comparison (warn only)
           is_isa_comparison = isa_backend?(a) || isa_backend?(b)
 
           divergences << {
@@ -550,9 +558,9 @@ RSpec.describe RHDL::Examples::MOS6502::HeadlessRunner do
           end
         end
 
-        # Only fail on HDL backend divergences (ISA divergence is a warning)
-        hdl_divergences = divergences.reject { |d| d[:is_isa_comparison] }
-        hdl_divergences.each do |d|
+        # Only fail on IR backend divergences (ISA divergence is a warning)
+        ir_divergences = divergences.reject { |d| d[:is_isa_comparison] }
+        ir_divergences.each do |d|
           expect(d[:first_pc_diff]).to be_nil,
             "#{d[:backends].join(' vs ')} PC sequences diverged at sample #{d[:first_pc_diff]}"
           expect(d[:first_op_diff]).to be_nil,

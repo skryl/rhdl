@@ -296,17 +296,17 @@ module RHDL
 
               if is_verilator
                 require_relative '../../../../examples/mos6502/utilities/runners/verilator_runner'
-                sim = RHDL::Examples::MOS6502::VerilatorRunner.new
+                sim = RHDL::Examples::MOS6502::VerilogRunner.new
               else
                 bus = RHDL::Examples::MOS6502::Apple2Bus.new("bench_bus")
 
                 sim = case runner[:backend]
                 when :interpreter
-                  RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json)
+                  RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :interpreter)
                 when :jit
-                  RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
+                  RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit)
                 when :compiler
-                  RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json)
+                  RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :compiler)
                 end
               end
 
@@ -323,7 +323,7 @@ module RHDL
                 sim.set_reset_vector(0xB82A)
               else
                 # Check if Rust MOS6502 mode is available
-                use_rust_memory = sim.respond_to?(:mos6502_mode?) && sim.mos6502_mode?
+                use_rust_memory = sim.respond_to?(:runner_kind) && sim.runner_kind == :mos6502
 
                 # Always load into Ruby bus (needed for reset sequence)
                 bus.load_rom(rom_data, base_addr: 0xD000)
@@ -334,9 +334,9 @@ module RHDL
 
                 if use_rust_memory
                   # Also load into Rust memory for batched execution
-                  sim.mos6502_load_memory(rom_data, 0xD000, true)   # ROM
-                  sim.mos6502_load_memory(karateka_mem, 0x0000, false)  # RAM
-                  sim.mos6502_set_reset_vector(0xB82A)
+                  sim.runner_load_memory(rom_data, 0xD000, true)   # ROM
+                  sim.runner_load_memory(karateka_mem, 0x0000, false)  # RAM
+                  sim.runner_set_reset_vector(0xB82A)
                 end
               end
 
@@ -386,7 +386,7 @@ module RHDL
                 sim.run_cycles(cycles)
               elsif use_rust_memory
                 # Use batched Rust execution - no FFI per cycle!
-                sim.mos6502_run_cycles(cycles)
+                sim.runner_run_cycles(cycles)
               else
                 # Ruby memory bridging (fallback)
                 cycles.times { clock_tick.call }
@@ -520,14 +520,14 @@ module RHDL
               is_verilator = runner[:backend] == :verilator
               sim = case runner[:backend]
               when :interpreter
-                RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json)
+                RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :interpreter)
               when :jit
-                RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
+                RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit)
               when :compiler
-                RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json, sub_cycles: compiler_sub_cycles)
+                RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :compiler, sub_cycles: compiler_sub_cycles)
               when :verilator
                 require_relative '../../../../examples/apple2/utilities/runners/verilator_runner'
-                RHDL::Examples::Apple2::VerilatorRunner.new(sub_cycles: 14)
+                RHDL::Examples::Apple2::VerilogRunner.new(sub_cycles: 14)
               end
 
               init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
@@ -539,8 +539,8 @@ module RHDL
                 sim.load_rom(karateka_rom, base_addr: 0xD000)
                 sim.load_ram(karateka_mem.first(48 * 1024), base_addr: 0)
               else
-                sim.apple2_load_rom(karateka_rom)
-                sim.apple2_load_ram(karateka_mem.first(48 * 1024), 0)
+                sim.runner_load_rom(karateka_rom)
+                sim.runner_load_memory(karateka_mem.first(48 * 1024), 0, false)
               end
 
               # Reset
@@ -556,7 +556,7 @@ module RHDL
               if is_verilator
                 sim.run_steps(3)
               else
-                sim.apple2_run_cpu_cycles(3, 0, false)
+                sim.runner_run_cycles(3, 0, false)
               end
 
               # Benchmark
@@ -566,7 +566,7 @@ module RHDL
               if is_verilator
                 sim.run_steps(cycles)
               else
-                sim.apple2_run_cpu_cycles(cycles, 0, false)
+                sim.runner_run_cycles(cycles, 0, false)
               end
               run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
 
@@ -662,7 +662,7 @@ module RHDL
 
               if is_verilator
                 require_relative '../../../../examples/gameboy/utilities/runners/verilator_runner'
-                runner = RHDL::Examples::GameBoy::VerilatorRunner.new
+                runner = RHDL::Examples::GameBoy::VerilogRunner.new
               else
                 runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
               end

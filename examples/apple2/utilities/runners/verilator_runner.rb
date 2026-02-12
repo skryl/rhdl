@@ -7,7 +7,7 @@
 # and provides a native simulation interface similar to the Rust IR runners.
 #
 # Usage:
-#   runner = RHDL::Examples::Apple2::VerilatorRunner.new(sub_cycles: 14)
+#   runner = RHDL::Examples::Apple2::VerilogRunner.new(sub_cycles: 14)
 #   runner.reset
 #   runner.run_steps(100)
 
@@ -25,7 +25,7 @@ module RHDL
     module Apple2
       # Verilator-based runner for Apple II simulation
     # Compiles RHDL Verilog export to native code via Verilator
-    class VerilatorRunner
+    class VerilogRunner
       # Text page constants
       TEXT_PAGE1_START = 0x0400
       TEXT_PAGE1_END = 0x07FF
@@ -411,25 +411,24 @@ module RHDL
 
       private
 
-      def check_verilator_available!
-        verilator_path = ENV['PATH'].split(File::PATH_SEPARATOR).find do |path|
-          File.executable?(File.join(path, 'verilator'))
-        end
+      def verilog_simulator
+        @verilog_simulator ||= RHDL::Codegen::Verilog::VerilogSimulator.new(
+          backend: :verilator,
+          build_dir: BUILD_DIR,
+          library_basename: 'apple2_sim',
+          top_module: 'apple2_apple2',
+          verilator_prefix: 'Vapple2',
+          x_assign: '0',
+          x_initial: 'unique'
+        )
+      end
 
-        unless verilator_path
-          raise LoadError, <<~MSG
-            Verilator not found in PATH.
-            Install Verilator:
-              Ubuntu/Debian: sudo apt-get install verilator
-              macOS: brew install verilator
-              Fedora: sudo dnf install verilator
-          MSG
-        end
+      def check_verilator_available!
+        verilog_simulator.ensure_backend_available!
       end
 
       def build_verilator_simulation
-        FileUtils.mkdir_p(VERILOG_DIR)
-        FileUtils.mkdir_p(OBJ_DIR)
+        verilog_simulator.prepare_build_dirs!
 
         # Export Apple2 to Verilog
         verilog_file = File.join(VERILOG_DIR, 'apple2.v')
@@ -566,7 +565,7 @@ module RHDL
           void sim_reset(void* sim) {
               SimContext* ctx = static_cast<SimContext*>(sim);
 
-              // Match examples/apple2/utilities/runners/hdl_runner.rb reset sequence:
+              // Match examples/apple2/utilities/runners/ruby_runner.rb reset sequence:
               //   1) reset=1 for 14x 14MHz cycles (1 CPU cycle)
               //   2) reset=0 for 140x 14MHz cycles (10 CPU cycles)
               //
@@ -770,118 +769,23 @@ module RHDL
       end
 
       def write_file_if_changed(path, content)
-        return if File.exist?(path) && File.read(path) == content
-        File.write(path, content)
+        verilog_simulator.write_file_if_changed(path, content)
       end
 
       def compile_verilator(verilog_file, wrapper_file)
-        # Determine library suffix
-        lib_suffix = case RbConfig::CONFIG['host_os']
-                     when /darwin/ then 'dylib'
-                     when /mswin|mingw/ then 'dll'
-                     else 'so'
-                     end
-
-        lib_name = "libapple2_sim.#{lib_suffix}"
-        lib_path = File.join(OBJ_DIR, lib_name)
-
-        # Verilate the design - top module is apple2_apple2
-        # Don't use --build so we can control the C++ compiler
-        # NOTE: --threads tested but 44x SLOWER due to sync overhead on sequential CPU
-        verilate_cmd = [
-          'verilator',
-          '--cc',
-          '--top-module', 'apple2_apple2',
-          # Optimization flags
-          '-O3',                  # Maximum Verilator optimization
-          '--x-assign', '0',      # Initialize X to 0 (required for proper simulation)
-          '--x-initial', 'unique', # Proper initial block handling (required for timing generator)
-          '--noassert',           # Disable assertions
-          # Warning suppressions
-          '-Wno-fatal',           # Continue despite warnings
-          '-Wno-WIDTHEXPAND',     # Suppress width expansion warnings
-          '-Wno-WIDTHTRUNC',      # Suppress width truncation warnings
-          '-Wno-UNOPTFLAT',       # Suppress unoptimized flattening warnings
-          '-Wno-PINMISSING',      # Suppress missing pin warnings
-          # C++ compiler flags for performance
-          '-CFLAGS', '-fPIC -O3 -march=native',
-          '-LDFLAGS', '-shared',
-          '--Mdir', OBJ_DIR,
-          '--prefix', 'Vapple2',
-          '-o', lib_name,
-          wrapper_file,
-          verilog_file
-        ]
-
-        # Redirect build output to log file
-        log_file = File.join(BUILD_DIR, 'build.log')
-        File.open(log_file, 'w') do |log|
-          Dir.chdir(VERILOG_DIR) do
-            result = system(*verilate_cmd, out: log, err: log)
-            unless result
-              raise "Verilator compilation failed. See #{log_file} for details."
-            end
-          end
-
-          # Build with clang++ for better optimization
-          # Must pass CXX= on command line to override verilated.mk's hardcoded g++
-          Dir.chdir(OBJ_DIR) do
-            result = system('make', '-f', 'Vapple2.mk', 'CXX=clang++', out: log, err: log)
-            unless result
-              raise "Verilator make failed. See #{log_file} for details."
-            end
-          end
-        end
-
-        # On some platforms (notably macOS), Verilator's make output may not update the
-        # requested shared library even if compilation succeeds. Ensure the dylib/so
-        # is freshly linked from the static archives when needed.
-        lib_vapple2 = File.join(OBJ_DIR, 'libVapple2.a')
-        lib_verilated = File.join(OBJ_DIR, 'libverilated.a')
-        newest_input = [lib_vapple2, lib_verilated].filter_map { |p| File.exist?(p) ? File.mtime(p) : nil }.max
-        lib_mtime = File.exist?(lib_path) ? File.mtime(lib_path) : nil
-
-        if lib_mtime.nil? || (!newest_input.nil? && lib_mtime < newest_input)
-          build_shared_library(wrapper_file)
-        end
+        verilog_simulator.compile_backend(verilog_file: verilog_file, wrapper_file: wrapper_file)
       end
 
-      def build_shared_library(wrapper_file)
-        # Link all object files and static libraries into shared library
-        lib_path = shared_lib_path
-        lib_vapple2 = File.join(OBJ_DIR, 'libVapple2.a')
-        lib_verilated = File.join(OBJ_DIR, 'libverilated.a')
-
-        # Use whole-archive to include all symbols from static libs
-        # -latomic needed for clang++ on Linux
-        link_cmd = if RbConfig::CONFIG['host_os'] =~ /darwin/
-                     "clang++ -shared -dynamiclib -o #{lib_path} " \
-                     "-Wl,-all_load #{lib_vapple2} #{lib_verilated}"
-                   else
-                     "clang++ -shared -o #{lib_path} " \
-                     "-Wl,--whole-archive #{lib_vapple2} #{lib_verilated} -Wl,--no-whole-archive -latomic"
-                   end
-
-        unless system(link_cmd)
-          raise "Failed to link Verilator shared library: #{lib_path}"
-        end
+      def build_shared_library(_wrapper_file = nil)
+        verilog_simulator.build_shared_library
       end
 
       def shared_lib_path
-        lib_suffix = case RbConfig::CONFIG['host_os']
-                     when /darwin/ then 'dylib'
-                     when /mswin|mingw/ then 'dll'
-                     else 'so'
-                     end
-        File.join(OBJ_DIR, "libapple2_sim.#{lib_suffix}")
+        verilog_simulator.shared_library_path
       end
 
       def load_shared_library(lib_path)
-        unless File.exist?(lib_path)
-          raise LoadError, "Verilator shared library not found: #{lib_path}"
-        end
-
-        @lib = Fiddle.dlopen(lib_path)
+        @lib = verilog_simulator.load_library!(lib_path)
 
         # Bind FFI functions
         @sim_create = Fiddle::Function.new(

@@ -76,6 +76,7 @@ export function startMainApp() {
     storeActions,
     scheduleReduxUxSync,
     log,
+    setBackendState,
     setRunnerPresetState,
     setActiveTabState,
     setSidebarCollapsedState,

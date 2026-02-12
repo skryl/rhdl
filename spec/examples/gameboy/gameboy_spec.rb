@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 require_relative '../../../examples/gameboy/gameboy'
-require_relative '../../../examples/gameboy/utilities/runners/hdl_runner'
+require_relative '../../../examples/gameboy/utilities/runners/ruby_runner'
 
 RSpec.describe 'GameBoy RHDL Implementation' do
   describe 'Module Loading' do
@@ -131,11 +131,11 @@ RSpec.describe 'GameBoy RHDL Implementation' do
 
   # Integration Tests
   describe 'HDL Runner' do
-    let(:runner) { RHDL::Examples::GameBoy::HdlRunner.new }
+    let(:runner) { RHDL::Examples::GameBoy::RubyRunner.new }
     let(:rom_path) { File.expand_path('../../../examples/gameboy/software/roms/cpu_instrs.gb', __dir__) }
 
     it 'can be instantiated' do
-      expect(runner).to be_a(RHDL::Examples::GameBoy::HdlRunner)
+      expect(runner).to be_a(RHDL::Examples::GameBoy::RubyRunner)
     end
 
     it 'starts with zero cycles' do
@@ -183,7 +183,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
 
       it 'provides dry run info' do
         info = runner.dry_run_info
-        expect(info[:mode]).to eq(:hdl)
+        expect(info[:mode]).to eq(:ruby)
         expect(info[:simulator_type]).to eq(:hdl_ruby)
         expect(info[:native]).to eq(false)
       end
@@ -226,7 +226,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
   end
 
   describe 'Memory Operations' do
-    let(:runner) { RHDL::Examples::GameBoy::HdlRunner.new }
+    let(:runner) { RHDL::Examples::GameBoy::RubyRunner.new }
 
     it 'reads and writes WRAM' do
       runner.write(0xC000, 0x42)
@@ -296,7 +296,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
     end
   end
 
-  describe 'IR Runner Long Run' do
+  describe 'IR Runner Long Run', :slow do
     let(:tobu_rom_path) { File.expand_path('../../../examples/gameboy/software/roms/tobu.gb', __dir__) }
 
     before do
@@ -411,15 +411,15 @@ RSpec.describe 'GameBoy RHDL Implementation' do
     end
 
     it 'can be instantiated', timeout: 300 do
-      runner = RHDL::Examples::GameBoy::VerilatorRunner.new
-      expect(runner).to be_a(RHDL::Examples::GameBoy::VerilatorRunner)
+      runner = RHDL::Examples::GameBoy::VerilogRunner.new
+      expect(runner).to be_a(RHDL::Examples::GameBoy::VerilogRunner)
       expect(runner.native?).to eq(true)
       expect(runner.simulator_type).to eq(:hdl_verilator)
     end
 
     context 'with demo ROM', timeout: 300 do
       let(:runner) do
-        r = RHDL::Examples::GameBoy::VerilatorRunner.new
+        r = RHDL::Examples::GameBoy::VerilogRunner.new
         r.load_rom(create_demo_rom)
         r
       end
@@ -465,7 +465,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       end
 
       it 'can run 1M cycles' do
-        runner = RHDL::Examples::GameBoy::VerilatorRunner.new
+        runner = RHDL::Examples::GameBoy::VerilogRunner.new
         runner.load_rom(File.binread(tobu_rom_path))
         runner.reset
 
@@ -483,7 +483,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       end
 
       it 'can render framebuffer' do
-        runner = RHDL::Examples::GameBoy::VerilatorRunner.new
+        runner = RHDL::Examples::GameBoy::VerilogRunner.new
         runner.load_rom(File.binread(tobu_rom_path))
         runner.reset
         runner.run_steps(100_000)
@@ -525,7 +525,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
     end
   end
 
-  describe 'Prince of Persia Long Run with VRAM/Framebuffer Tracing' do
+  describe 'Prince of Persia Long Run with VRAM/Framebuffer Tracing', :slow do
     let(:pop_rom_path) { File.expand_path('../../../examples/gameboy/software/roms/pop.gb', __dir__) }
 
     before do
@@ -744,7 +744,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
     end
   end
 
-  describe 'Backend Comparison (IR Compiler vs Verilator)' do
+  describe 'Backend Comparison (IR Compiler vs Verilator)', :slow do
     let(:test_rom_path) { File.expand_path('../../../examples/gameboy/software/roms/pop.gb', __dir__) }
 
     # Constants for boot ROM testing
@@ -782,7 +782,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
 
       # Initialize both runners
       ir_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
-      verilator_runner = RHDL::Examples::GameBoy::VerilatorRunner.new
+      verilator_runner = RHDL::Examples::GameBoy::VerilogRunner.new
 
       # Load ROM into both
       ir_runner.load_rom(rom_data)
@@ -900,7 +900,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
       # Initialize both runners
       puts "\n  Initializing runners..."
       ir_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
-      verilator_runner = RHDL::Examples::GameBoy::VerilatorRunner.new
+      verilator_runner = RHDL::Examples::GameBoy::VerilogRunner.new
 
       # Load ROM into both
       ir_runner.load_rom(rom_data)
@@ -1094,7 +1094,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
 
       # IR Compiler
       begin
-        require_relative '../../../lib/rhdl/codegen/ir/sim/ir_compiler'
+        require_relative '../../../lib/rhdl/codegen/ir/sim/ir_simulator'
         if RHDL::Codegen::IR::COMPILER_AVAILABLE
           runners[:compiler] = RHDL::Examples::GameBoy::IrRunner.new(backend: :compile)
           backends << :compiler
@@ -1105,7 +1105,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
 
       # IR JIT (may have issues, validate before including)
       begin
-        require_relative '../../../lib/rhdl/codegen/ir/sim/ir_jit'
+        require_relative '../../../lib/rhdl/codegen/ir/sim/ir_simulator'
         if RHDL::Codegen::IR::JIT_AVAILABLE
           jit_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :jit)
           # Quick validation: run a few cycles and check if PC changes
@@ -1125,9 +1125,9 @@ RSpec.describe 'GameBoy RHDL Implementation' do
 
       # IR Interpreter (native extension may not be available, uses Ruby fallback)
       begin
-        require_relative '../../../lib/rhdl/codegen/ir/sim/ir_interpreter'
+        require_relative '../../../lib/rhdl/codegen/ir/sim/ir_simulator'
         # Note: IR_INTERPRETER_AVAILABLE may be false if native extension failed to load,
-        # but IrInterpreterWrapper will fall back to Ruby implementation
+        # but IrSimulator will fall back to Ruby implementation
         interp_runner = RHDL::Examples::GameBoy::IrRunner.new(backend: :interpret)
         # Quick validation
         interp_runner.load_rom(rom_data)
@@ -1145,7 +1145,7 @@ RSpec.describe 'GameBoy RHDL Implementation' do
 
       # Verilator
       begin
-        runners[:verilator] = RHDL::Examples::GameBoy::VerilatorRunner.new
+        runners[:verilator] = RHDL::Examples::GameBoy::VerilogRunner.new
         backends << :verilator
       rescue LoadError, RuntimeError => e
         puts "  Skipping Verilator: #{e.message}"

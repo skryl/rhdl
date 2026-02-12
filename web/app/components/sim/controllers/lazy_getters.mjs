@@ -108,6 +108,7 @@ export function createSimLazyGetters({
         state,
         runtime,
         getBackendDef,
+        currentRunnerPreset,
         fetchImpl,
         webAssemblyApi
       });

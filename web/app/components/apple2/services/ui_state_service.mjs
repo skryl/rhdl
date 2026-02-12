@@ -28,28 +28,35 @@ export function createApple2UiStateService({
   requireFn('refreshStatus', refreshStatus);
 
   function isApple2UiEnabled() {
-    return state.apple2.enabled && runtime.sim?.apple2_mode?.();
+    return state.apple2.enabled && !!runtime.sim;
   }
 
   function updateIoToggleUi() {
     const active = isApple2UiEnabled();
+    const ioConfig = state.apple2?.ioConfig || {};
+    const displayMode = String(ioConfig.display?.mode || '');
+    const supportsHires = displayMode
+      ? displayMode === 'apple2'
+      : runtime.sim?.runner_kind?.() === 'apple2';
+    const supportsColor = supportsHires;
+    const supportsSound = ioConfig.sound ? ioConfig.sound.enabled !== false : true;
     if (dom.toggleHires) {
-      dom.toggleHires.checked = !!state.apple2.displayHires;
-      dom.toggleHires.disabled = !active;
+      dom.toggleHires.checked = !!state.apple2.displayHires && supportsHires;
+      dom.toggleHires.disabled = !active || !supportsHires;
     }
     if (dom.toggleColor) {
-      dom.toggleColor.checked = !!state.apple2.displayColor;
-      dom.toggleColor.disabled = !active || !state.apple2.displayHires;
+      dom.toggleColor.checked = !!state.apple2.displayColor && supportsColor;
+      dom.toggleColor.disabled = !active || !supportsColor || !state.apple2.displayHires;
     }
     if (dom.toggleSound) {
       dom.toggleSound.checked = !!state.apple2.soundEnabled;
-      dom.toggleSound.disabled = !active;
+      dom.toggleSound.disabled = !active || !supportsSound;
     }
     if (dom.apple2TextScreen) {
-      dom.apple2TextScreen.hidden = active && state.apple2.displayHires;
+      dom.apple2TextScreen.hidden = active && supportsHires && state.apple2.displayHires;
     }
     if (dom.apple2HiresCanvas) {
-      dom.apple2HiresCanvas.hidden = !(active && state.apple2.displayHires);
+      dom.apple2HiresCanvas.hidden = !(active && supportsHires && state.apple2.displayHires);
     }
   }
 

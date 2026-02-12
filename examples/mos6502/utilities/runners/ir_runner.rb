@@ -7,7 +7,7 @@
 module RHDL
   module Examples
     module MOS6502
-      class IRSimulatorRunner
+      class IrRunner
         attr_reader :bus, :sim
 
         def initialize(sim_backend = :interpret)
@@ -29,24 +29,14 @@ module RHDL
         end
 
         def create_simulator
-          sim = case @sim_backend
-          when :interpret
-            # Requires native Rust extension - will raise LoadError if unavailable
-            RHDL::Codegen::IR::IrInterpreterWrapper.new(@ir_json, allow_fallback: false)
-          when :jit
-            # Requires native Rust JIT extension - will raise LoadError if unavailable
-            require 'rhdl/codegen/ir/sim/ir_jit'
-            RHDL::Codegen::IR::IrJitWrapper.new(@ir_json, allow_fallback: false)
-          when :compile
-            # Requires native Rust compiler extension - will raise LoadError if unavailable
-            require 'rhdl/codegen/ir/sim/ir_compiler'
-            RHDL::Codegen::IR::IrCompilerWrapper.new(@ir_json, allow_fallback: false)
-          else
-            raise "Unknown IR backend: #{@sim_backend}"
-          end
+          sim = RHDL::Codegen::IR::IrSimulator.new(
+            @ir_json,
+            backend: @sim_backend,
+            allow_fallback: false
+          )
 
           # Check if Rust MOS6502 mode is available
-          @use_rust_memory = sim.respond_to?(:mos6502_mode?) && sim.mos6502_mode?
+          @use_rust_memory = sim.runner_kind == :mos6502
 
           # Cache clock signal and list indices for proper edge detection in clock_tick
           # Only needed when using Ruby memory bridging (not @use_rust_memory)
@@ -77,8 +67,7 @@ module RHDL
           bytes_array = bytes.is_a?(String) ? bytes.bytes : bytes
 
           if @use_rust_memory
-            # Load directly into Rust memory (rom = true for ROM protection)
-            @sim.mos6502_load_memory(bytes_array, base_addr, true)
+            @sim.runner_load_rom(bytes_array, base_addr)
           end
 
           # Also load into Ruby bus (for screen reading, etc.)
@@ -90,8 +79,7 @@ module RHDL
           bytes_array = bytes.is_a?(String) ? bytes.bytes : bytes
 
           if @use_rust_memory
-            # Load directly into Rust memory (rom = false for RAM)
-            @sim.mos6502_load_memory(bytes_array, base_addr, false)
+            @sim.runner_load_memory(bytes_array, base_addr, false)
           end
 
           # Also load into Ruby bus (for screen reading, etc.)
@@ -112,8 +100,7 @@ module RHDL
           @sim ||= create_simulator
 
           if @use_rust_memory
-            # Set in Rust memory
-            @sim.mos6502_set_reset_vector(addr)
+            @sim.runner_set_reset_vector(addr)
           end
 
           # Also set in Ruby bus memory (bypassing ROM protection)
@@ -144,8 +131,8 @@ module RHDL
 
           # Now CPU is in STATE_FETCH. Load PC with reset vector value.
           if @use_rust_memory
-            lo = @sim.mos6502_read_memory(0xFFFC)
-            hi = @sim.mos6502_read_memory(0xFFFD)
+            lo = @sim.runner_read_memory(0xFFFC, 1).first.to_i
+            hi = @sim.runner_read_memory(0xFFFD, 1).first.to_i
           else
             lo = @bus.read(0xFFFC)
             hi = @bus.read(0xFFFD)
@@ -154,7 +141,7 @@ module RHDL
 
           # Get the opcode at target address - we'll need this for IR loading
           if @use_rust_memory
-            opcode = @sim.mos6502_read_memory(target_addr)
+            opcode = @sim.runner_read_memory(target_addr, 1).first.to_i
           else
             opcode = @bus.read(target_addr)
           end
@@ -187,7 +174,8 @@ module RHDL
             # Use batched Rust execution - no Ruby FFI per cycle!
             return if @halted
 
-            cycles_run = @sim.mos6502_run_cycles(steps)
+            result = @sim.runner_run_cycles(steps)
+            cycles_run = result ? result[:cycles_run].to_i : 0
             @cycles += cycles_run
 
             # Sync screen memory from Rust memory to Ruby bus for screen reading
@@ -225,7 +213,8 @@ module RHDL
           loop do
             # Run one clock cycle
             if @use_rust_memory
-              @sim.mos6502_run_cycles(1)
+              result = @sim.runner_run_cycles(1)
+              break if result.nil?
             else
               clock_tick
             end
@@ -290,7 +279,7 @@ module RHDL
           if rw == 1
             # Read: get data and provide to CPU
             if @use_rust_memory
-              data = @sim.mos6502_read_memory(addr)
+              data = @sim.runner_read_memory(addr, 1).first.to_i
             else
               data = @bus.read(addr)
             end
@@ -299,7 +288,7 @@ module RHDL
             # Write: get data from CPU and write to memory
             data = @sim.peek('data_out')
             if @use_rust_memory
-              @sim.mos6502_write_memory(addr, data)
+              @sim.runner_write_memory(addr, [data & 0xFF])
             else
               @bus.write(addr, data)
             end
@@ -371,9 +360,7 @@ module RHDL
         # Called each frame by the emulator main loop
         def sync_speaker_state
           return unless @use_rust_memory
-          return unless @sim.respond_to?(:mos6502_speaker_toggles)
-
-          current_toggles = @sim.mos6502_speaker_toggles
+          current_toggles = @sim.runner_speaker_toggles
           return if current_toggles == 0
 
           # Calculate elapsed time since last sync for timing estimation
@@ -385,7 +372,7 @@ module RHDL
           @bus.speaker.sync_toggles(current_toggles, elapsed)
 
           # Reset the Rust toggle counter
-          @sim.mos6502_reset_speaker_toggles
+          @sim.runner_reset_speaker_toggles
         end
 
         private
@@ -401,17 +388,17 @@ module RHDL
 
           # Text page 1: $0400-$07FF (1024 bytes)
           (0...1024).each do |i|
-            memory[0x0400 + i] = @sim.mos6502_read_memory(0x0400 + i)
+            memory[0x0400 + i] = @sim.runner_read_memory(0x0400 + i, 1).first.to_i
           end
 
           # HiRes page 1: $2000-$3FFF (8192 bytes)
           (0...8192).each do |i|
-            memory[0x2000 + i] = @sim.mos6502_read_memory(0x2000 + i)
+            memory[0x2000 + i] = @sim.runner_read_memory(0x2000 + i, 1).first.to_i
           end
 
           # HiRes page 2: $4000-$5FFF (8192 bytes)
           (0...8192).each do |i|
-            memory[0x4000 + i] = @sim.mos6502_read_memory(0x4000 + i)
+            memory[0x4000 + i] = @sim.runner_read_memory(0x4000 + i, 1).first.to_i
           end
         end
       end

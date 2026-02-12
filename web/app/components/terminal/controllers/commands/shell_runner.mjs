@@ -54,7 +54,9 @@ export async function handleShellRunnerCommand({ cmd, tokens, context }) {
   if (cmd === 'runner') {
     const runnerId = helpers.parseRunnerToken(tokens[0], runnerPresets);
     if (!runnerId) {
-      throw new Error('Usage: runner <generic|cpu|apple2> [load]');
+      const runnerIds = Object.keys(runnerPresets || {}).sort();
+      const usageTarget = runnerIds.length ? `<${runnerIds.join('|')}>` : '<id>';
+      throw new Error(`Usage: runner ${usageTarget} [load]`);
     }
     actions.setRunnerPresetState(runnerId);
     if (dom.runnerSelect) {
@@ -93,7 +95,7 @@ export async function handleShellRunnerCommand({ cmd, tokens, context }) {
 
   if (cmd === 'sample') {
     if (!actions.currentRunnerPreset().usesManualIr) {
-      throw new Error('Sample command is only available on the generic runner.');
+      throw new Error('Sample command is only available on manual-IR runners.');
     }
     if (tokens[0]) {
       if (!dom.sampleSelect) {

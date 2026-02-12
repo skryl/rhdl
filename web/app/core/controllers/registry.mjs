@@ -9,6 +9,15 @@ import { createComponentDomainController } from '../../components/explorer/contr
 import { createApple2DomainController } from '../../components/apple2/controllers/domain.mjs';
 import { createSimDomainController } from '../../components/sim/controllers/domain.mjs';
 import { createWatchDomainController } from '../../components/watch/controllers/domain.mjs';
+import { resolveRunnerIoConfig } from '../../components/runner/lib/io_config.mjs';
+
+function normalizePositiveInt(value, fallback = null) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
+}
 
 export function createControllerRegistry(options = {}) {
   const {
@@ -19,6 +28,7 @@ export function createControllerRegistry(options = {}) {
     storeActions,
     scheduleReduxUxSync,
     log,
+    setBackendState,
     setRunnerPresetState,
     setActiveTabState,
     setSidebarCollapsedState,
@@ -50,6 +60,7 @@ export function createControllerRegistry(options = {}) {
     storeActions,
     scheduleReduxUxSync,
     log,
+    setBackendState,
     setRunnerPresetState,
     setActiveTabState,
     setSidebarCollapsedState,
@@ -219,10 +230,10 @@ export function createControllerRegistry(options = {}) {
   }
 
   async function applyRunnerDefaults(preset) {
-    const defaults = preset?.defaults;
-    if (!defaults || typeof defaults !== 'object') {
-      return;
-    }
+    const ioConfig = resolveRunnerIoConfig(preset);
+    const defaults = preset?.defaults && typeof preset.defaults === 'object'
+      ? preset.defaults
+      : {};
 
     if (Object.prototype.hasOwnProperty.call(defaults, 'displayHires')) {
       setApple2DisplayHiresState(!!defaults.displayHires);
@@ -233,8 +244,26 @@ export function createControllerRegistry(options = {}) {
     if (Object.prototype.hasOwnProperty.call(defaults, 'memoryFollowPc')) {
       setMemoryFollowPcState(!!defaults.memoryFollowPc);
     }
+    if (dom.stepTicks && Object.prototype.hasOwnProperty.call(defaults, 'stepTicks')) {
+      const value = normalizePositiveInt(defaults.stepTicks);
+      if (value != null) {
+        dom.stepTicks.value = String(value);
+      }
+    }
+    if (dom.runBatch && Object.prototype.hasOwnProperty.call(defaults, 'runBatch')) {
+      const value = normalizePositiveInt(defaults.runBatch);
+      if (value != null) {
+        dom.runBatch.value = String(value);
+      }
+    }
+    if (dom.uiUpdateCycles && Object.prototype.hasOwnProperty.call(defaults, 'uiUpdateCycles')) {
+      const value = normalizePositiveInt(defaults.uiUpdateCycles);
+      if (value != null) {
+        dom.uiUpdateCycles.value = String(value);
+      }
+    }
 
-    if (!preset.enableApple2Ui) {
+    if (!ioConfig.enabled) {
       return;
     }
 
@@ -243,7 +272,7 @@ export function createControllerRegistry(options = {}) {
     refreshApple2Debug();
     refreshMemoryView();
 
-    if (defaults.loadKaratekaDumpOnLoad) {
+    if (defaults.loadKaratekaDumpOnLoad && ioConfig.api === 'apple2') {
       await loadKaratekaDump();
     }
   }
@@ -372,6 +401,10 @@ export function createControllerRegistry(options = {}) {
     return lazy.getApple2OpsController().loadApple2DumpOrSnapshotFile(file, offsetRaw);
   }
 
+  async function loadApple2DumpOrSnapshotAssetPath(assetPath, offsetRaw) {
+    return lazy.getApple2OpsController().loadApple2DumpOrSnapshotAssetPath(assetPath, offsetRaw);
+  }
+
   async function loadLastSavedApple2Dump() {
     return lazy.getApple2OpsController().loadLastSavedApple2Dump();
   }
@@ -476,6 +509,12 @@ export function createControllerRegistry(options = {}) {
     lazy.getSimLoopController().runFrame();
   }
 
+  function resetThroughputSampling() {
+    if (typeof lazy.getSimLoopController().resetThroughputSampling === 'function') {
+      lazy.getSimLoopController().resetThroughputSampling();
+    }
+  }
+
   function setupP5() {
     setupWaveformP5({
       dom,
@@ -557,6 +596,7 @@ export function createControllerRegistry(options = {}) {
     performApple2ResetSequence,
     setMemoryDumpStatus,
     loadApple2DumpOrSnapshotFile,
+    loadApple2DumpOrSnapshotAssetPath,
     saveApple2MemoryDump,
     saveApple2MemorySnapshot,
     loadLastSavedApple2Dump,
@@ -571,6 +611,7 @@ export function createControllerRegistry(options = {}) {
     initializeTrace,
     stepSimulation,
     runFrame,
+    resetThroughputSampling,
     drainTrace,
     maskForWidth
   });

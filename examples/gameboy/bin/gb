@@ -20,8 +20,8 @@ options = {
   demo: false,
   pop: false,
   audio: false,
-  mode: :hdl,
-  sim: :compile,
+  mode: :ruby,
+  sim: nil,
   renderer: :color,
   headless: false
 }
@@ -32,11 +32,11 @@ parser = OptionParser.new do |opts|
   opts.separator "Game Boy HDL Terminal Emulator - Cycle-accurate simulation"
   opts.separator ""
 
-  opts.on("-m", "--mode TYPE", [:hdl, :verilog], "Simulation mode: hdl (default), verilog (Verilator RTL)") do |v|
+  opts.on("-m", "--mode TYPE", [:ruby, :ir, :verilog], "Simulation mode: ruby (default), ir, verilog (Verilator RTL)") do |v|
     options[:mode] = v
   end
 
-  opts.on("--sim TYPE", [:ruby, :interpret, :jit, :compile], "Simulator backend: ruby, interpret, jit, compile (default)") do |v|
+  opts.on("--sim TYPE", [:ruby, :interpret, :jit, :compile], "Simulator backend: ruby (default), interpret, jit, compile") do |v|
     options[:sim] = v
   end
 
@@ -91,6 +91,16 @@ parser = OptionParser.new do |opts|
 end
 
 parser.parse!(ARGV)
+
+# Default backend by selected mode when --sim is not provided.
+if options[:sim].nil?
+  options[:sim] = case options[:mode]
+                  when :ruby then :ruby
+                  when :ir then :compile
+                  when :verilog then :ruby
+                  else :ruby
+                  end
+end
 
 # Handle ROM file argument
 rom_file = ARGV.shift
