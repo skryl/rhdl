@@ -178,6 +178,22 @@ export function createControllerRegistry(options = {}) {
     return lazy.getTerminalController().historyNavigate(delta);
   }
 
+  function terminalAppendInput(text = '') {
+    return lazy.getTerminalController().appendInput(text);
+  }
+
+  function terminalBackspaceInput() {
+    return lazy.getTerminalController().backspaceInput();
+  }
+
+  function terminalSetInput(text = '') {
+    return lazy.getTerminalController().setInput(text);
+  }
+
+  function terminalFocusInput() {
+    return lazy.getTerminalController().focusInput();
+  }
+
   function getRunnerPreset(id) {
     if (id && RUNNER_PRESETS[id]) {
       return RUNNER_PRESETS[id];
@@ -555,6 +571,10 @@ export function createControllerRegistry(options = {}) {
     terminalWriteLine,
     submitTerminalInput,
     terminalHistoryNavigate,
+    terminalAppendInput,
+    terminalBackspaceInput,
+    terminalSetInput,
+    terminalFocusInput,
     disposeDashboardLayoutBuilder,
     refreshDashboardRowSizing,
     refreshAllDashboardRowSizing,

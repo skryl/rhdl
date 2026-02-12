@@ -11,6 +11,7 @@ function createHarness(overrides = {}) {
     component: null,
     io: null,
     sim: null,
+    editor: null,
     memory: null,
     collapsible: null
   };
@@ -140,6 +141,10 @@ function createHarness(overrides = {}) {
       bound.sim = args;
       return () => {};
     },
+    bindEditorBindings(args) {
+      bound.editor = args;
+      return () => {};
+    },
     bindCollapsiblePanels(args) {
       bound.collapsible = args;
       return () => {};
@@ -243,7 +248,7 @@ test('startApp wires grouped shell/runner/apple2/sim/watch contracts into bindin
   assert.equal(harness.bound.memory.apple2.refreshMemoryView, harness.ctx.app.apple2.refreshMemoryView);
   assert.equal(typeof harness.bound.collapsible.actions.refreshActiveComponentTab, 'function');
 
-  assert.equal(harness.registered.length, 7);
+  assert.equal(harness.registered.length, 8);
   assert.equal(harness.dom.simStatus.textContent, 'WASM ready (compiler)');
 });
 

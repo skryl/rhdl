@@ -1288,7 +1288,7 @@ module RHDL
         def propagate
           # Always call super to handle subcomponent propagation (two-phase for sequential)
           # The behavior block execution is integrated into propagate_subcomponents
-          super if defined?(super)
+          super
 
           # If no subcomponents and behavior is defined, execute behavior directly
           # (This handles the case of standalone behavior-only components)

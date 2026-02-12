@@ -9,6 +9,7 @@ import { bindMemoryBindings } from '../components/memory/bindings/bindings.mjs';
 import { bindComponentBindings } from '../components/explorer/bindings/bindings.mjs';
 import { bindIoBindings } from '../components/apple2/bindings/bindings.mjs';
 import { bindSimBindings } from '../components/sim/bindings/bindings.mjs';
+import { bindEditorBindings } from '../components/editor/bindings/bindings.mjs';
 import { bindCollapsiblePanels } from '../components/shell/bindings/collapsible_bindings.mjs';
 import { startApp } from './controllers/startup.mjs';
 import { createStoreDispatchers, createReduxSyncHelpers, installReduxGlobals } from './state/store_bridge.mjs';
@@ -141,6 +142,7 @@ export function startMainApp() {
       bindComponentBindings,
       bindIoBindings,
       bindSimBindings,
+      bindEditorBindings,
       bindCollapsiblePanels,
       COLLAPSIBLE_PANEL_SELECTOR,
       registerUiBinding,

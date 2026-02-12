@@ -72,6 +72,7 @@ export function createShellLazyGetters({
   addBreakpointSignal,
   clearAllBreakpoints,
   renderBreakpointList,
+  refreshWatchTable,
   refreshMemoryView,
   resetApple2WithMemoryVectorOverride,
   loadKaratekaDump,
@@ -79,6 +80,7 @@ export function createShellLazyGetters({
   saveApple2MemoryDump,
   saveApple2MemorySnapshot,
   queueApple2Key,
+  drainTrace,
   refreshAllDashboardRowSizing,
   refreshComponentExplorer,
   isComponentTabActive,
@@ -112,6 +114,7 @@ export function createShellLazyGetters({
   requireFn('addBreakpointSignal', addBreakpointSignal);
   requireFn('clearAllBreakpoints', clearAllBreakpoints);
   requireFn('renderBreakpointList', renderBreakpointList);
+  requireFn('refreshWatchTable', refreshWatchTable);
   requireFn('refreshMemoryView', refreshMemoryView);
   requireFn('resetApple2WithMemoryVectorOverride', resetApple2WithMemoryVectorOverride);
   requireFn('loadKaratekaDump', loadKaratekaDump);
@@ -119,6 +122,7 @@ export function createShellLazyGetters({
   requireFn('saveApple2MemoryDump', saveApple2MemoryDump);
   requireFn('saveApple2MemorySnapshot', saveApple2MemorySnapshot);
   requireFn('queueApple2Key', queueApple2Key);
+  requireFn('drainTrace', drainTrace);
   requireFn('refreshAllDashboardRowSizing', refreshAllDashboardRowSizing);
   requireFn('refreshComponentExplorer', refreshComponentExplorer);
   requireFn('isComponentTabActive', isComponentTabActive);
@@ -127,6 +131,46 @@ export function createShellLazyGetters({
   let terminalController = null;
   let shellStateController = null;
   let dashboardLayoutController = null;
+
+  function collectIoSignalNames() {
+    if (!runtime.sim) {
+      return [];
+    }
+    const inputs = Array.isArray(runtime.sim.input_names?.()) ? runtime.sim.input_names() : [];
+    const outputs = Array.isArray(runtime.sim.output_names?.()) ? runtime.sim.output_names() : [];
+    const names = [];
+    const seen = new Set();
+    for (const raw of [...inputs, ...outputs]) {
+      const name = String(raw || '').trim();
+      if (!name || seen.has(name)) {
+        continue;
+      }
+      seen.add(name);
+      names.push(name);
+    }
+    return names;
+  }
+
+  function syncIoTraceFromMirb() {
+    if (!runtime.sim) {
+      return;
+    }
+    const names = collectIoSignalNames();
+    if (names.length > 0) {
+      clearAllWatches();
+      for (const name of names) {
+        addWatchSignal(name);
+      }
+    }
+    if (runtime.sim.trace_enabled?.() && typeof runtime.sim.trace_capture === 'function') {
+      runtime.sim.trace_capture();
+    }
+    drainTrace();
+    refreshWatchTable();
+    if (windowRef && typeof windowRef.dispatchEvent === 'function' && typeof eventCtor === 'function') {
+      windowRef.dispatchEvent(new eventCtor('resize'));
+    }
+  }
 
   function getTerminalController() {
     if (!terminalController) {
@@ -165,7 +209,8 @@ export function createShellLazyGetters({
           saveApple2MemoryDump,
           saveApple2MemorySnapshot,
           queueApple2Key,
-          formatValue
+          formatValue,
+          syncIoTraceFromMirb
         },
         documentRef,
         eventCtor,

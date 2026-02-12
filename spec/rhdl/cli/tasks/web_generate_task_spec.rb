@@ -66,6 +66,59 @@ RSpec.describe RHDL::CLI::Tasks::WebGenerateTask do
     end
   end
 
+  describe '#mruby_artifacts_embed_rhdl?' do
+    it 'returns true when mruby metadata reports embedded rhdl files' do
+      task = described_class.new
+      metadata_path = File.join(described_class::PKG_DIR, 'mruby.version.json')
+      metadata_json = JSON.generate({ 'embedded' => { 'rhdl' => true } })
+
+      allow(File).to receive(:file?).and_call_original
+      allow(File).to receive(:read).and_call_original
+      allow(File).to receive(:file?).with(metadata_path).and_return(true)
+      allow(File).to receive(:read).with(metadata_path).and_return(metadata_json)
+
+      expect(task.send(:mruby_artifacts_embed_rhdl?)).to be(true)
+    end
+
+    it 'returns false when mruby metadata is missing embedded rhdl marker' do
+      task = described_class.new
+      metadata_path = File.join(described_class::PKG_DIR, 'mruby.version.json')
+      metadata_json = JSON.generate({ 'embedded' => {} })
+
+      allow(File).to receive(:file?).and_call_original
+      allow(File).to receive(:read).and_call_original
+      allow(File).to receive(:file?).with(metadata_path).and_return(true)
+      allow(File).to receive(:read).with(metadata_path).and_return(metadata_json)
+
+      expect(task.send(:mruby_artifacts_embed_rhdl?)).to be(false)
+    end
+  end
+
+  describe '#write_mruby_emscripten_config' do
+    it 'writes emscripten config that embeds rhdl sources into wasm fs' do
+      task = described_class.new
+      source_dir = '/tmp/mruby-src'
+      mruby_require_shim_path = described_class::MRUBY_REQUIRE_SHIM_GEM_PATH
+      config_path = File.join(source_dir, described_class::MRUBY_EMSCRIPTEN_CONFIG_RELATIVE_PATH)
+
+      allow(File).to receive(:file?).and_call_original
+      allow(File).to receive(:file?).with(File.join(mruby_require_shim_path, 'mrbgem.rake')).and_return(true)
+
+      expect(File).to receive(:write) do |path, content|
+        expect(path).to eq(config_path)
+        expect(content).to include("MRuby::CrossBuild.new('emscripten')")
+        expect(content).to include("conf.gembox 'default'")
+        expect(content).to include("conf.gem #{mruby_require_shim_path.inspect}")
+        expect(content).to include("conf.linker.flags << '--embed-file'")
+        expect(content).to include('@/rhdl.rb')
+        expect(content).to include('@/rhdl')
+      end
+
+      returned_path = task.send(:write_mruby_emscripten_config, source_dir)
+      expect(returned_path).to eq(config_path)
+    end
+  end
+
   describe '#build_source_bundle' do
     it 'builds a source bundle with rhdl and verilog content' do
       task = described_class.new
@@ -96,12 +149,16 @@ RSpec.describe RHDL::CLI::Tasks::WebGenerateTask do
       task = described_class.new
 
       allow(task).to receive(:ensure_dir)
+      allow(task).to receive(:copy_ghostty_web_assets)
+      allow(task).to receive(:copy_vim_wasm_assets)
       allow(task).to receive(:build_mruby_wasm)
       allow(task).to receive(:ensure_aot_ir_inputs)
       allow(task).to receive(:run_rustup_target_add!).and_return(true)
       allow(task).to receive(:build_wasm_backend)
       allow(File).to receive(:write)
 
+      expect(task).to receive(:copy_ghostty_web_assets)
+      expect(task).to receive(:copy_vim_wasm_assets)
       expect(task).to receive(:build_mruby_wasm)
       expect(task).to receive(:ensure_aot_ir_inputs)
       expect(task).to receive(:build_compiler_aot_wasm).with(

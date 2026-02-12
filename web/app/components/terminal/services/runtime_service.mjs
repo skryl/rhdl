@@ -104,12 +104,23 @@ export function createTerminalRuntimeService({
   const runMirb = typeof mirbRunner === 'function'
     ? mirbRunner
     : createMirbCommandRunner({ documentRef });
+  const syncMirbTrace = typeof actions.syncIoTraceFromMirb === 'function'
+    ? actions.syncIoTraceFromMirb
+    : null;
   const mirbSession = {
     active: false,
     lines: [],
     stdout: '',
     stderr: ''
   };
+
+  async function runMirbWithTraceSync(source) {
+    const result = await runMirb(source);
+    if (syncMirbTrace) {
+      await syncMirbTrace();
+    }
+    return result;
+  }
 
   function isMirbSessionActive() {
     return mirbSession.active;
@@ -150,7 +161,7 @@ export function createTerminalRuntimeService({
 
     mirbSession.lines.push(code);
     const source = mirbSession.lines.join('\n');
-    const result = await runMirb(source);
+    const result = await runMirbWithTraceSync(source);
     const stdout = normalizedText(result?.stdout);
     const stderr = normalizedText(result?.stderr);
     const exitCode = Number(result?.exitCode || 0);
@@ -214,7 +225,7 @@ export function createTerminalRuntimeService({
       parseTabToken,
       parseRunnerToken,
       parseBackendToken,
-      runMirb,
+      runMirb: runMirbWithTraceSync,
       startMirbSession,
       stopMirbSession,
       isMirbSessionActive,
@@ -262,6 +273,10 @@ export function createTerminalRuntimeService({
     executeCommand: executeTerminalCommand,
     runCommand: runTerminalCommand,
     submitInput: terminalSession.submitInput,
-    historyNavigate: terminalSession.historyNavigate
+    historyNavigate: terminalSession.historyNavigate,
+    appendInput: terminalSession.appendInput,
+    backspaceInput: terminalSession.backspaceInput,
+    setInput: terminalSession.setInput,
+    focusInput: terminalSession.focusInput
   };
 }

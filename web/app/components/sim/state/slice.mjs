@@ -14,7 +14,7 @@ export const simActions = {
 
 export function createSimStateSlice() {
   return {
-    backend: 'compiler',
+    backend: 'interpreter',
     running: false,
     cycle: 0,
     uiCyclesPending: 0

@@ -29,6 +29,7 @@ export function createStartupBindingRegistrationService({
     bindComponentBindings,
     bindIoBindings,
     bindSimBindings,
+    bindEditorBindings,
     bindCollapsiblePanels,
     COLLAPSIBLE_PANEL_SELECTOR,
     registerUiBinding,
@@ -59,6 +60,7 @@ export function createStartupBindingRegistrationService({
   requireFn('bindComponentBindings', bindComponentBindings);
   requireFn('bindIoBindings', bindIoBindings);
   requireFn('bindSimBindings', bindSimBindings);
+  requireFn('bindEditorBindings', bindEditorBindings);
   requireFn('bindCollapsiblePanels', bindCollapsiblePanels);
   requireFn('registerUiBinding', registerUiBinding);
   requireFn('disposeUiBindings', disposeUiBindings);
@@ -132,6 +134,9 @@ export function createStartupBindingRegistrationService({
           setTerminalOpen: shell.setTerminalOpen,
           submitTerminalInput: terminal.submitInput,
           terminalHistoryNavigate: terminal.historyNavigate,
+          terminalAppendInput: terminal.appendInput || (() => {}),
+          terminalBackspaceInput: terminal.backspaceInput || (() => {}),
+          terminalFocusInput: terminal.focusInput || (() => {}),
           applyTheme: shell.applyTheme,
           setActiveTab: shell.setActiveTab
         },
@@ -222,6 +227,17 @@ export function createStartupBindingRegistrationService({
           hexByte
         },
         scheduleReduxUxSync
+      })
+    );
+
+    registerUiBinding(
+      bindEditorBindings({
+        dom,
+        state,
+        runtime,
+        sim,
+        watch,
+        log
       })
     );
   }

@@ -126,36 +126,40 @@ export function createStartupInitializationService({
 
   async function resolveAvailableBackends(preferredBackend = '') {
     const options = [];
-    let preferredError = null;
     for (const backendId of BACKEND_IDS) {
       const backend = getBackendDef(backendId);
       if (!backend?.id) {
         continue;
       }
-      try {
-        await runner.ensureBackendInstance(backend.id);
-        options.push({
-          value: backend.id,
-          label: backend.label || backend.id
-        });
-      } catch (err) {
-        if (backend.id === preferredBackend) {
-          preferredError = err;
-        }
-      }
+      options.push({
+        value: backend.id,
+        label: backend.label || backend.id
+      });
     }
 
     if (options.length === 0) {
-      if (preferredError) {
-        throw preferredError;
-      }
       throw new Error('No WASM backends available');
     }
 
-    const selected = setSelectOptions(dom.backendSelect, options, preferredBackend || state.backend);
+    let selected = setSelectOptions(dom.backendSelect, options, preferredBackend || state.backend);
     setBackendState(selected);
-    if (dom.backendSelect) {
+    if (dom.backendSelect && dom.backendSelect.value !== selected) {
       dom.backendSelect.value = selected;
+    }
+
+    try {
+      await runner.ensureBackendInstance(selected);
+    } catch (err) {
+      const fallback = options.find((opt) => opt.value === 'interpreter')?.value || options[0]?.value || selected;
+      if (fallback === selected) {
+        throw err;
+      }
+      selected = setSelectOptions(dom.backendSelect, options, fallback);
+      setBackendState(selected);
+      if (dom.backendSelect && dom.backendSelect.value !== selected) {
+        dom.backendSelect.value = selected;
+      }
+      await runner.ensureBackendInstance(selected);
     }
   }
 
@@ -168,7 +172,6 @@ export function createStartupInitializationService({
     shell.setTerminalOpen(terminalOpen, { persist: false });
     shell.applyTheme(savedTheme, { persist: false });
 
-    await runner.ensureBackendInstance(state.backend);
     dom.simStatus.textContent = `WASM ready (${state.backend})`;
 
     const initialRunnerId = setSelectOptions(
@@ -206,7 +209,13 @@ export function createStartupInitializationService({
     apple2.refreshDebug();
     apple2.refreshMemoryView();
 
-    if (dom.terminalOutput && !dom.terminalOutput.textContent.trim()) {
+    const terminalText = String(
+      dom.terminalOutput?.dataset?.terminalText
+      ?? dom.terminalOutput?.value
+      ?? dom.terminalOutput?.textContent
+      ?? ''
+    ).trim();
+    if (dom.terminalOutput && (!terminalText || terminalText === '$')) {
       terminal.writeLine('Terminal ready. Type "help" for commands.');
     }
   }

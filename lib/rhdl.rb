@@ -4,7 +4,17 @@ require 'rhdl/support/inflections'
 
 module RHDL
   def self.minimal_runtime?
-    ENV['RHDL_MINIMAL_RUNTIME'] == '1' || (defined?(RUBY_ENGINE) && RUBY_ENGINE == 'mruby')
+    env_flag = begin
+      ENV['RHDL_MINIMAL_RUNTIME']
+    rescue StandardError
+      nil
+    end
+    ruby_engine = begin
+      RUBY_ENGINE
+    rescue NameError
+      nil
+    end
+    env_flag == '1' || ruby_engine == 'mruby'
   end
 end
 

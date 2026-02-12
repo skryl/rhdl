@@ -4,11 +4,18 @@ import { createShellStateRuntimeService } from '../../../../app/components/shell
 
 test('shell state runtime service updates terminal open state and persists toggle', () => {
   const stored = new Map();
+  const appShellClasses = new Map();
   const state = { terminalOpen: false, sidebarCollapsed: false, theme: 'shenzhen' };
   const dom = {
     tabButtons: [],
     tabPanels: [],
-    appShell: null,
+    appShell: {
+      classList: {
+        toggle(name, active) {
+          appShellClasses.set(String(name), !!active);
+        }
+      }
+    },
     sidebarToggleBtn: null,
     terminalPanel: { hidden: true },
     terminalToggleBtn: {
@@ -53,6 +60,7 @@ test('shell state runtime service updates terminal open state and persists toggl
 
   service.setTerminalOpen(true, { persist: true });
   assert.equal(state.terminalOpen, true);
+  assert.equal(appShellClasses.get('terminal-open'), true);
   assert.equal(dom.terminalPanel.hidden, false);
   assert.equal(stored.get('t'), '1');
 });

@@ -20,14 +20,21 @@ async function ensureTerminalOpen(page) {
   }, null, { timeout: 20000 });
 }
 
+async function readTerminalOutput(page) {
+  return page.$eval(
+    '#terminalOutput',
+    (el) => String(el.dataset?.terminalText ?? el.value ?? el.textContent ?? '')
+  );
+}
+
 async function runTerminalCommand(page, command, expectedMarker, timeoutMs = 60000) {
-  await page.fill('#terminalInput', command);
-  await page.click('#terminalRunBtn');
+  await page.click('#terminalOutput');
+  await page.keyboard.type(command);
+  await page.keyboard.press('Enter');
   const started = Date.now();
 
   while (Date.now() - started < timeoutMs) {
-    const output = await page.textContent('#terminalOutput');
-    const text = String(output || '');
+    const text = await readTerminalOutput(page);
     const commandPos = text.lastIndexOf(`$ ${command}`);
 
     if (commandPos >= 0) {
@@ -43,7 +50,7 @@ async function runTerminalCommand(page, command, expectedMarker, timeoutMs = 600
     await page.waitForTimeout(200);
   }
 
-  const tail = String(await page.textContent('#terminalOutput') || '').slice(-1200);
+  const tail = (await readTerminalOutput(page)).slice(-1200);
   throw new Error(`Timed out waiting for terminal marker "${expectedMarker}" after command "${command}".\nTail:\n${tail}`);
 }
 
@@ -95,13 +102,14 @@ test('terminal mirb supports one-shot and session flows', { timeout: 300000 }, a
   await ensureTerminalOpen(page);
 
   await runTerminalCommand(page, 'irb 6 * 7', '=> 42');
+  await runTerminalCommand(page, 'irb "require \'rhdl\'; RHDL.minimal_runtime?"', '=> true');
   await runTerminalCommand(page, 'mirb', 'mirb session started');
   await runTerminalCommand(page, 'n = 10', '=> 10');
   await runTerminalCommand(page, 'n + 5', '=> 15');
   await runTerminalCommand(page, 'exit', 'mirb session closed');
   await runTerminalCommand(page, 'irb 9 - 4', '=> 5');
 
-  const terminalOutput = await page.textContent('#terminalOutput');
+  const terminalOutput = await readTerminalOutput(page);
   assert.doesNotMatch(terminalOutput || '', /mirb execution timed out/);
   assert.deepEqual(pageErrors, [], `Unhandled page errors: ${pageErrors.join(' | ')}`);
   assert.deepEqual(consoleErrors, [], `Console errors: ${consoleErrors.join(' | ')}`);
