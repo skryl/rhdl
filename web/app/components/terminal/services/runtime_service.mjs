@@ -11,6 +11,8 @@ import { handleShellRunnerCommand } from '../controllers/commands/shell_runner.m
 import { handleSimWatchCommand } from '../controllers/commands/sim_watch.mjs';
 import { handleApple2MemoryCommand } from '../controllers/commands/apple2_memory.mjs';
 import { handleUiCommand } from '../controllers/commands/ui.mjs';
+import { handleIrbCommand } from '../controllers/commands/irb.mjs';
+import { createMirbCommandRunner } from './mirb_runner_service.mjs';
 
 function requireFn(name, fn) {
   if (typeof fn !== 'function') {
@@ -37,6 +39,22 @@ function createStatusText({ state, runtime, actions }) {
   ].join(' ');
 }
 
+function normalizedText(value) {
+  return String(value || '').replace(/\r/g, '').trim();
+}
+
+function subtractPreviousOutput(previous, current) {
+  const prev = normalizedText(previous);
+  const next = normalizedText(current);
+  if (!prev) {
+    return next;
+  }
+  if (next.startsWith(prev)) {
+    return next.slice(prev.length).replace(/^\s+/, '');
+  }
+  return next;
+}
+
 export function createTerminalRuntimeService({
   dom,
   state,
@@ -44,6 +62,7 @@ export function createTerminalRuntimeService({
   backendDefs,
   runnerPresets,
   actions = {},
+  mirbRunner,
   documentRef = globalThis.document,
   eventCtor = globalThis.Event,
   requestFrame = globalThis.requestAnimationFrame || ((cb) => setTimeout(cb, 0))
@@ -82,6 +101,78 @@ export function createTerminalRuntimeService({
   requireFn('actions.queueApple2Key', actions.queueApple2Key);
   requireFn('actions.formatValue', actions.formatValue);
 
+  const runMirb = typeof mirbRunner === 'function'
+    ? mirbRunner
+    : createMirbCommandRunner({ documentRef });
+  const mirbSession = {
+    active: false,
+    lines: [],
+    stdout: '',
+    stderr: ''
+  };
+
+  function isMirbSessionActive() {
+    return mirbSession.active;
+  }
+
+  function startMirbSession() {
+    if (mirbSession.active) {
+      return false;
+    }
+    mirbSession.active = true;
+    mirbSession.lines = [];
+    mirbSession.stdout = '';
+    mirbSession.stderr = '';
+    return true;
+  }
+
+  function stopMirbSession() {
+    const wasActive = mirbSession.active;
+    mirbSession.active = false;
+    mirbSession.lines = [];
+    mirbSession.stdout = '';
+    mirbSession.stderr = '';
+    return wasActive;
+  }
+
+  async function runMirbSessionLine(line) {
+    const code = String(line || '').trim();
+    if (!code) {
+      return null;
+    }
+    if (!mirbSession.active) {
+      throw new Error('mirb session is not active.');
+    }
+    if (code === 'exit' || code === 'quit') {
+      stopMirbSession();
+      return 'mirb session closed';
+    }
+
+    mirbSession.lines.push(code);
+    const source = mirbSession.lines.join('\n');
+    const result = await runMirb(source);
+    const stdout = normalizedText(result?.stdout);
+    const stderr = normalizedText(result?.stderr);
+    const exitCode = Number(result?.exitCode || 0);
+    const outDelta = subtractPreviousOutput(mirbSession.stdout, stdout);
+    const errDelta = subtractPreviousOutput(mirbSession.stderr, stderr);
+
+    mirbSession.stdout = stdout;
+    mirbSession.stderr = stderr;
+
+    const chunks = [];
+    if (outDelta) {
+      chunks.push(outDelta);
+    }
+    if (errDelta) {
+      chunks.push(errDelta);
+    }
+    if (chunks.length === 0 && exitCode !== 0) {
+      chunks.push(`(mirb exit ${exitCode})`);
+    }
+    return chunks.join('\n');
+  }
+
   function terminalStatusText() {
     return createStatusText({ state, runtime, actions });
   }
@@ -106,6 +197,7 @@ export function createTerminalRuntimeService({
       handleShellRunnerCommand,
       handleSimWatchCommand,
       handleApple2MemoryCommand,
+      handleIrbCommand,
       handleUiCommand
     ]
   });
@@ -122,6 +214,10 @@ export function createTerminalRuntimeService({
       parseTabToken,
       parseRunnerToken,
       parseBackendToken,
+      runMirb,
+      startMirbSession,
+      stopMirbSession,
+      isMirbSessionActive,
       terminalClear: () => terminalSession.clear(),
       terminalStatusText
     }
@@ -137,6 +233,13 @@ export function createTerminalRuntimeService({
       return;
     }
     terminalSession.writeLine(`$ ${line}`);
+    if (mirbSession.active) {
+      const sessionResult = await runMirbSessionLine(line);
+      if (sessionResult) {
+        terminalSession.writeLine(sessionResult);
+      }
+      return;
+    }
     const result = await executeTerminalCommand(line);
     if (result) {
       terminalSession.writeLine(result);

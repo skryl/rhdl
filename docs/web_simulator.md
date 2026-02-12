@@ -56,19 +56,31 @@ Architecture reference: `web_architecture.md`.
 
 ## Build WASM
 
-Build web artifacts (IR/source/schematic fixtures + memory fixtures + WASM backends):
+Build only WASM backends:
+
+```bash
+bundle exec rake web:build
+```
+
+Generate web artifacts (IR/source/schematic fixtures + memory fixtures). If WASM artifacts are missing, this task builds them first:
 
 ```bash
 bundle exec rake web:generate
 ```
 
 `ir_compiler` is built as AOT for web:
-- `web:generate` runs `ir_compiler`'s `aot_codegen` over `assets/fixtures/apple2/ir/apple2.json` by default.
+- `web:build` runs `ir_compiler`'s `aot_codegen` over `assets/fixtures/apple2/ir/apple2.json` by default.
 - Then it builds `ir_compiler.wasm` with `--features aot`.
 
 ## Run Web UI
 
 Serve the `web` directory with any static file server:
+
+```bash
+bundle exec rake web:start
+```
+
+Or manually:
 
 ```bash
 cd web
@@ -124,8 +136,10 @@ node --test web/test/state/store.test.mjs
   - `assets/fixtures/apple2/ir/apple2_schematic.json` (precomputed schematic connectivity for Apple II)
   - `assets/fixtures/cpu/ir/cpu_sources.json` (`RHDL` + `Verilog` sources for CPU components)
   - `assets/fixtures/cpu/ir/cpu_schematic.json` (precomputed schematic connectivity for CPU)
-  - `assets/fixtures/apple2/memory/appleiigo.rom` (12KB system ROM)
-  - `assets/fixtures/apple2/memory/karateka_mem.bin` + `assets/fixtures/apple2/memory/karateka_mem_meta.txt` for quick dump load
+- `assets/fixtures/apple2/memory/appleiigo.rom` (12KB system ROM)
+- `assets/fixtures/apple2/memory/karateka_mem.bin` + `assets/fixtures/apple2/memory/karateka_mem_meta.txt` for quick dump load
+- Build/update wasm backends only:
+  - `bundle exec rake web:build`
 - Regenerate web artifacts (IR + source + schematic):
   - `bundle exec rake web:generate`
 - Memory tab supports:

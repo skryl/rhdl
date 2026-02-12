@@ -42,13 +42,13 @@
 #
 # The same behavior block is used for both simulation and synthesis.
 
-require 'active_support/concern'
+require 'rhdl/support/concern'
 require 'set'
 
 module RHDL
   module DSL
     module Behavior
-      extend ActiveSupport::Concern
+      extend RHDL::Support::Concern
 
       # Execution modes
       SIM_MODE = :simulation

@@ -102,7 +102,7 @@ function makeBaseActions(state) {
   };
 }
 
-function createControllerHarness() {
+function createControllerHarness({ mirbRunner } = {}) {
   const state = makeBaseState();
   const dom = makeBaseDom();
   const runtime = {
@@ -126,6 +126,7 @@ function createControllerHarness() {
     backendDefs,
     runnerPresets,
     actions,
+    mirbRunner,
     requestFrame: (cb) => cb(),
     documentRef: {
       getElementById: () => null
@@ -144,6 +145,8 @@ test('terminal parser helpers resolve known aliases', () => {
 test('terminalHelpText includes command list', () => {
   const help = terminalHelpText();
   assert.match(help, /Commands:/);
+  assert.match(help, /irb\|mirb <ruby-code>/);
+  assert.match(help, /mirb\s+\(start interactive mirb session\)/);
   assert.match(help, /memory reset \[vector\]/);
 });
 
@@ -172,4 +175,82 @@ test('submitInput prints busy when another command is running', async () => {
   dom.terminalInput.value = 'status';
   await controller.submitInput();
   assert.match(dom.terminalOutput.textContent, /busy: previous command still running/);
+});
+
+test('submitInput runs irb command through mirb runner', async () => {
+  let receivedSource = null;
+  const { controller, dom } = createControllerHarness({
+    mirbRunner: async (source) => {
+      receivedSource = source;
+      return { exitCode: 0, stdout: '=> 2', stderr: '' };
+    }
+  });
+
+  dom.terminalInput.value = 'irb 1 + 1';
+  await controller.submitInput();
+
+  assert.equal(receivedSource, '1 + 1');
+  assert.match(dom.terminalOutput.textContent, /\$ irb 1 \+ 1/);
+  assert.match(dom.terminalOutput.textContent, /=> 2/);
+});
+
+test('submitInput reports irb usage when no expression is provided', async () => {
+  const { controller, dom } = createControllerHarness({
+    mirbRunner: async () => ({ exitCode: 0, stdout: '', stderr: '' })
+  });
+
+  dom.terminalInput.value = 'irb';
+  await controller.submitInput();
+  assert.match(dom.terminalOutput.textContent, /error: Usage: irb <ruby-code>/);
+});
+
+test('submitInput runs mirb alias command through mirb runner', async () => {
+  let receivedSource = null;
+  const { controller, dom } = createControllerHarness({
+    mirbRunner: async (source) => {
+      receivedSource = source;
+      return { exitCode: 0, stdout: '=> "ok"', stderr: '' };
+    }
+  });
+
+  dom.terminalInput.value = 'mirb "ok"';
+  await controller.submitInput();
+
+  assert.equal(receivedSource, 'ok');
+  assert.match(dom.terminalOutput.textContent, /\$ mirb "ok"/);
+  assert.match(dom.terminalOutput.textContent, /=> "ok"/);
+});
+
+test('submitInput supports interactive mirb session with replayed state', async () => {
+  const receivedSources = [];
+  const outputsBySource = new Map([
+    ['a = 1', '=> 1'],
+    ['a = 1\na + 2', '=> 1\n=> 3']
+  ]);
+  const { controller, dom } = createControllerHarness({
+    mirbRunner: async (source) => {
+      receivedSources.push(source);
+      return { exitCode: 0, stdout: outputsBySource.get(source) || '', stderr: '' };
+    }
+  });
+
+  dom.terminalInput.value = 'mirb';
+  await controller.submitInput();
+
+  dom.terminalInput.value = 'a = 1';
+  await controller.submitInput();
+
+  dom.terminalInput.value = 'a + 2';
+  await controller.submitInput();
+
+  dom.terminalInput.value = 'exit';
+  await controller.submitInput();
+
+  assert.deepEqual(receivedSources, ['a = 1', 'a = 1\na + 2']);
+  assert.match(dom.terminalOutput.textContent, /mirb session started/);
+  assert.match(dom.terminalOutput.textContent, /\$ a = 1/);
+  assert.match(dom.terminalOutput.textContent, /\$ a \+ 2/);
+  assert.match(dom.terminalOutput.textContent, /=> 3/);
+  assert.doesNotMatch(dom.terminalOutput.textContent, /\$ a \+ 2\n=> 1\n=> 3/);
+  assert.match(dom.terminalOutput.textContent, /mirb session closed/);
 });

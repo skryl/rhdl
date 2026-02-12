@@ -59,6 +59,8 @@ export function terminalHelpText() {
     'Commands:',
     '  help',
     '  status',
+    '  irb|mirb <ruby-code>  (run one-shot via mirb)',
+    '  mirb                  (start interactive mirb session)',
     '  config <show|hide|toggle>',
     '  terminal <show|hide|toggle|clear>',
     '  tab <io|vcd|memory|components|schematic>',

@@ -170,6 +170,25 @@ RSpec.describe 'Rakefile interface' do
   end
 
   describe 'web tasks' do
+    it 'web:start launches local static server in web directory' do
+      expect(Dir).to receive(:chdir).with(a_string_ending_with('/web')).and_yield
+      expect(Kernel).to receive(:exec).with(
+        RbConfig.ruby, '-run', '-e', 'httpd', '.', '-p', '8080', '-b', '127.0.0.1'
+      )
+
+      Rake::Task['web:start'].invoke
+    end
+
+    it 'web:build invokes WebGenerateTask#run_build' do
+      task_instance = instance_double(RHDL::CLI::Tasks::WebGenerateTask)
+      allow(task_instance).to receive(:run_build)
+
+      expect(RHDL::CLI::Tasks::WebGenerateTask).to receive(:new).and_return(task_instance)
+      expect(task_instance).to receive(:run_build)
+
+      Rake::Task['web:build'].invoke
+    end
+
     it 'web:generate invokes WebGenerateTask with no options' do
       expect_task_class(RHDL::CLI::Tasks::WebGenerateTask, {})
       Rake::Task['web:generate'].invoke
@@ -265,7 +284,7 @@ RSpec.describe 'Rakefile interface' do
       bench bench:gates bench:ir
       benchmark benchmark:timing benchmark:quick
       native native:build native:clean native:check
-      web:generate
+      web:start web:build web:generate
       setup setup:binstubs
     ].each do |task_name|
       it "defines #{task_name} task" do

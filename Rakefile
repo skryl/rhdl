@@ -6,6 +6,7 @@ begin
 rescue LoadError
   # Bundler not available, skip gem tasks
 end
+require 'rbconfig'
 
 # =============================================================================
 # CLI Task Loading
@@ -384,6 +385,24 @@ end
 # =============================================================================
 
 namespace :web do
+  desc "Start local web server for the web UI (default host 127.0.0.1, port 8080)"
+  task :start, [:port] do |_t, args|
+    host = (ENV['HOST'] || '127.0.0.1').to_s
+    port = (args[:port] || ENV['PORT'] || '8080').to_s
+    web_root = File.expand_path('web', __dir__)
+    puts "Starting web server at http://#{host}:#{port} (root: #{web_root})"
+
+    Dir.chdir(web_root) do
+      Kernel.exec(RbConfig.ruby, '-run', '-e', 'httpd', '.', '-p', port, '-b', host)
+    end
+  end
+
+  desc "Build web simulator WASM artifacts"
+  task :build do
+    load_cli_tasks
+    RHDL::CLI::Tasks::WebGenerateTask.new.run_build
+  end
+
   desc "Generate web simulator artifacts (IR, schematics, Ruby/Verilog source bundles)"
   task :generate do
     load_cli_tasks

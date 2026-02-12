@@ -6,11 +6,12 @@ require 'rhdl/codegen'
 
 RSpec.describe RHDL::CLI::Tasks::WebGenerateTask do
   describe '#run' do
-    it 'creates output dir, generates each configured runner, and reports completion' do
+    it 'builds missing wasm first, then generates configured runner assets, and reports completion' do
       task = described_class.new
       runner_exports = [{ id: 'cpu' }, { id: 'apple2' }]
       runner_configs = [{ id: 'cpu' }, { id: 'apple2' }]
 
+      allow(task).to receive(:wasm_backends_built?).and_return(false)
       allow(task).to receive(:ensure_dir)
       allow(task).to receive(:runner_exports).and_return(runner_exports)
       allow(task).to receive(:runner_configs).and_return(runner_configs)
@@ -19,19 +20,49 @@ RSpec.describe RHDL::CLI::Tasks::WebGenerateTask do
       allow(task).to receive(:generate_apple2_memory_assets)
       allow(task).to receive(:generate_runner_default_bin_assets)
       allow(task).to receive(:write_memory_dump_asset_module)
-      allow(task).to receive(:build_wasm_backends)
+      allow(task).to receive(:run_build)
 
       expect(task).to receive(:ensure_dir).with(described_class::SCRIPT_DIR)
+      expect(task).to receive(:run_build).ordered
       runner_exports.each do |runner|
-        expect(task).to receive(:generate_runner_assets).with(runner)
+        expect(task).to receive(:generate_runner_assets).with(runner).ordered
       end
       expect(task).to receive(:write_runner_preset_module).with(runner_configs)
       expect(task).to receive(:generate_apple2_memory_assets)
       expect(task).to receive(:generate_runner_default_bin_assets)
       expect(task).to receive(:write_memory_dump_asset_module)
-      expect(task).to receive(:build_wasm_backends)
 
       expect { task.run }.to output(/Web artifact generation complete/).to_stdout
+    end
+
+    it 'skips wasm build when artifacts are already present' do
+      task = described_class.new
+
+      allow(task).to receive(:wasm_backends_built?).and_return(true)
+      allow(task).to receive(:ensure_dir)
+      allow(task).to receive(:runner_exports).and_return([])
+      allow(task).to receive(:runner_configs).and_return([])
+      allow(task).to receive(:write_runner_preset_module)
+      allow(task).to receive(:generate_apple2_memory_assets)
+      allow(task).to receive(:generate_runner_default_bin_assets)
+      allow(task).to receive(:write_memory_dump_asset_module)
+
+      expect(task).not_to receive(:run_build)
+
+      task.run
+    end
+  end
+
+  describe '#run_build' do
+    it 'builds wasm artifacts and reports completion' do
+      task = described_class.new
+
+      allow(task).to receive(:build_wasm_backends)
+      allow(task).to receive(:mark_wasm_build_complete!)
+      expect(task).to receive(:build_wasm_backends)
+      expect(task).to receive(:mark_wasm_build_complete!)
+
+      expect { task.run_build }.to output(/Web WASM build complete/).to_stdout
     end
   end
 
@@ -65,10 +96,14 @@ RSpec.describe RHDL::CLI::Tasks::WebGenerateTask do
       task = described_class.new
 
       allow(task).to receive(:ensure_dir)
+      allow(task).to receive(:build_mruby_wasm)
+      allow(task).to receive(:ensure_aot_ir_inputs)
       allow(task).to receive(:run_rustup_target_add!).and_return(true)
       allow(task).to receive(:build_wasm_backend)
       allow(File).to receive(:write)
 
+      expect(task).to receive(:build_mruby_wasm)
+      expect(task).to receive(:ensure_aot_ir_inputs)
       expect(task).to receive(:build_compiler_aot_wasm).with(
         ir_path: described_class::APPLE2_AOT_IR_PATH,
         artifact: 'ir_compiler.wasm'

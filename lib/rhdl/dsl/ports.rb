@@ -25,12 +25,12 @@
 #     output :q, width: :width
 #   end
 
-require 'active_support/concern'
+require 'rhdl/support/concern'
 
 module RHDL
   module DSL
     module Ports
-      extend ActiveSupport::Concern
+      extend RHDL::Support::Concern
 
       # Simple structs for port/signal definitions
       PortDef = Struct.new(:name, :direction, :width, :default)

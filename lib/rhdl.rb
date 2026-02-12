@@ -1,12 +1,21 @@
 require_relative "rhdl/version"
 require_relative "rhdl/dsl"
-require_relative "rhdl/codegen"
+require 'rhdl/support/inflections'
 
-# Load codegen DSL modules after codegen.rb (they depend on Export::IR)
+module RHDL
+  def self.minimal_runtime?
+    ENV['RHDL_MINIMAL_RUNTIME'] == '1' || (defined?(RUBY_ENGINE) && RUBY_ENGINE == 'mruby')
+  end
+end
+
+unless RHDL.minimal_runtime?
+  require_relative "rhdl/codegen"
+end
+
+# Load DSL codegen mixins for Sim::Component / Sim::SequentialComponent. These
+# are safe to load in minimal runtime as long as codegen methods are not called.
 require_relative "rhdl/dsl/codegen"
 require_relative "rhdl/dsl/sequential_codegen"
-
-require 'active_support/core_ext/string/inflections'
 
 module RHDL
   class Component
@@ -18,8 +27,12 @@ module RHDL
 end
 
 # HDL simulation framework
-require_relative "rhdl/diagram"
-require_relative "rhdl/hdl"
+if RHDL.minimal_runtime?
+  require_relative "rhdl/sim"
+else
+  require_relative "rhdl/diagram"
+  require_relative "rhdl/hdl"
 
-# Examples namespace (autoloaded)
-require_relative "rhdl/examples"
+  # Examples namespace (autoloaded)
+  require_relative "rhdl/examples"
+end

@@ -1,8 +1,8 @@
 # HDL Simulation Engine
 # Provides the core simulation infrastructure for gate-level and behavior simulation
 
-require 'active_support/concern'
-require 'active_support/core_ext/string/inflections'
+require 'rhdl/support/concern'
+require 'rhdl/support/inflections'
 
 # Load simulation components in dependency order
 
