@@ -221,6 +221,11 @@ module RHDL
     # Data outputs from subsystems
     wire :joy_do, width: 8
     wire :sb_o, width: 8
+    wire :sc_o, width: 8
+    wire :sc_start_o
+    wire :sc_int_clock_o
+    wire :sc_start_in
+    wire :sc_int_clock_in
     wire :timer_do, width: 8
     wire :video_do, width: 8
     wire :audio_do, width: 8
@@ -410,9 +415,19 @@ module RHDL
 
     # Link port connections
     port [:link_unit, :sb] => :sb_o
+    port [:link_unit, :sc_start] => :sc_start_o
+    port [:link_unit, :sc_int_clock] => :sc_int_clock_o
     port [:link_unit, :serial_irq] => :serial_irq
     port [:link_unit, :serial_clk_out] => :serial_clk_out
     port [:link_unit, :serial_data_out] => :serial_data_out
+    port :ce => [:link_unit, :ce]
+    port :reset => [:link_unit, :rst]
+    port :sel_sb => [:link_unit, :sel_sb]
+    port :sel_sc => [:link_unit, :sel_sc]
+    port :cpu_wr_n => [:link_unit, :cpu_wr_n]
+    port :cpu_do => [:link_unit, :sb_in]
+    port :sc_start_in => [:link_unit, :sc_start_in]
+    port :sc_int_clock_in => [:link_unit, :sc_int_clock_in]
     port :serial_clk_in => [:link_unit, :serial_clk_in]
     port :serial_data_in => [:link_unit, :serial_data_in]
 
@@ -439,6 +454,9 @@ module RHDL
       sel_joy <= (cpu_addr == lit(0xFF00, width: 16))
       sel_sb <= (cpu_addr == lit(0xFF01, width: 16))
       sel_sc <= (cpu_addr == lit(0xFF02, width: 16))
+      sc_start_in <= cpu_do[7]
+      sc_int_clock_in <= cpu_do[0]
+      sc_o <= cat(sc_start_o, lit(0b111111, width: 6), sc_int_clock_o)
       sel_rom <= ~cpu_addr[15]
       sel_cram <= (cpu_addr[15..13] == lit(0b101, width: 3))
       sel_vram <= (cpu_addr[15..13] == lit(0b100, width: 3))
@@ -486,6 +504,9 @@ module RHDL
       # CPU data input mux (priority-encoded)
       cpu_di <= mux(irq_ack, irq_vec,
                 mux(sel_if, cat(lit(0b111, width: 3), if_r),
+                mux(sel_joy, joy_do,
+                mux(sel_sb, sb_o,
+                mux(sel_sc, sc_o,
                 mux(sel_timer, timer_do,
                 mux(sel_video_reg, video_do,
                 mux(sel_video_oam & oam_cpu_allow, video_do,
@@ -497,7 +518,8 @@ module RHDL
                 mux(sel_zpram, zpram_do,
                 mux(sel_ie, ie_r,
                 mux(sel_ff50, lit(0x00, width: 8),   # FF50 returns 0 (fast boot disabled)
-                    lit(0xFF, width: 8))))))))))))))
+                    lit(0xFF, width: 8)
+                ))))))))))))))))
 
       # Joypad output
       joy_do <= cat(lit(0b11, width: 2), joy_p54, joy_din)

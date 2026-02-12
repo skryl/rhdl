@@ -113,3 +113,21 @@ test('startup initialization service auto-loads preset when configured', async (
   assert.equal(calls.some(([name, id]) => name === 'runner.loadPreset' && id === 'apple2'), true);
   assert.equal(calls.some(([name]) => name === 'runner.preloadStartPreset'), false);
 });
+
+test('startup initialization service hides unavailable backends from selector', async () => {
+  const { service, calls, dom } = createHarness({
+    runner: {
+      ensureBackendInstance: async (value) => {
+        calls.push(['runner.ensureBackendInstance', value]);
+        if (value === 'jit') {
+          throw new Error('jit unavailable');
+        }
+      }
+    }
+  });
+  await service.initialize();
+
+  assert.match(String(dom.backendSelect.innerHTML || ''), /value="interpreter"/);
+  assert.match(String(dom.backendSelect.innerHTML || ''), /value="compiler"/);
+  assert.doesNotMatch(String(dom.backendSelect.innerHTML || ''), /value="jit"/);
+});

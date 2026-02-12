@@ -1,7 +1,63 @@
+import {
+  DEFAULT_RUNNER_PRESET_ID,
+  RUNNER_SELECT_OPTIONS,
+  SAMPLE_SELECT_OPTIONS
+} from '../../components/runner/config/presets.mjs';
+
+const BACKEND_IDS = Object.freeze(['interpreter', 'compiler']);
+
 function requireFn(name, fn) {
   if (typeof fn !== 'function') {
     throw new Error(`createStartupInitializationService requires function: ${name}`);
   }
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function setSelectOptions(selectEl, options = [], preferredValue = '') {
+  const normalizedOptions = Array.isArray(options)
+    ? options
+        .map((opt) => ({
+          value: String(opt?.value || '').trim(),
+          label: String(opt?.label || '').trim()
+        }))
+        .filter((opt) => opt.value.length > 0)
+    : [];
+
+  const values = normalizedOptions.map((opt) => opt.value);
+  const fallbackValue = values[0] || '';
+  const preferredToken = String(preferredValue || '').trim();
+  let nextValue = preferredToken;
+
+  if (!values.includes(nextValue)) {
+    nextValue = fallbackValue;
+  }
+
+  if (!selectEl) {
+    return nextValue;
+  }
+
+  const markup = normalizedOptions
+    .map((opt) => `<option value=\"${escapeHtml(opt.value)}\">${escapeHtml(opt.label || opt.value)}</option>`)
+    .join('');
+
+  try {
+    selectEl.innerHTML = markup;
+  } catch (_err) {
+    // Non-DOM test doubles may not support innerHTML assignment.
+  }
+
+  if (nextValue) {
+    selectEl.value = nextValue;
+  }
+  return nextValue;
 }
 
 export function createStartupInitializationService({
@@ -68,11 +124,44 @@ export function createStartupInitializationService({
     return { collapsed, terminalOpen, savedTheme };
   }
 
-  async function initialize() {
-    setBackendState(getBackendDef(dom.backendSelect?.value || state.backend).id);
-    if (dom.backendSelect) {
-      dom.backendSelect.value = state.backend;
+  async function resolveAvailableBackends(preferredBackend = '') {
+    const options = [];
+    let preferredError = null;
+    for (const backendId of BACKEND_IDS) {
+      const backend = getBackendDef(backendId);
+      if (!backend?.id) {
+        continue;
+      }
+      try {
+        await runner.ensureBackendInstance(backend.id);
+        options.push({
+          value: backend.id,
+          label: backend.label || backend.id
+        });
+      } catch (err) {
+        if (backend.id === preferredBackend) {
+          preferredError = err;
+        }
+      }
     }
+
+    if (options.length === 0) {
+      if (preferredError) {
+        throw preferredError;
+      }
+      throw new Error('No WASM backends available');
+    }
+
+    const selected = setSelectOptions(dom.backendSelect, options, preferredBackend || state.backend);
+    setBackendState(selected);
+    if (dom.backendSelect) {
+      dom.backendSelect.value = selected;
+    }
+  }
+
+  async function initialize() {
+    const preferredBackend = getBackendDef(dom.backendSelect?.value || state.backend).id;
+    await resolveAvailableBackends(preferredBackend);
 
     const { collapsed, terminalOpen, savedTheme } = readSavedShellState();
     shell.setSidebarCollapsed(collapsed);
@@ -82,10 +171,21 @@ export function createStartupInitializationService({
     await runner.ensureBackendInstance(state.backend);
     dom.simStatus.textContent = `WASM ready (${state.backend})`;
 
-    setRunnerPresetState(dom.runnerSelect?.value || state.runnerPreset || 'apple2');
+    const initialRunnerId = setSelectOptions(
+      dom.runnerSelect,
+      RUNNER_SELECT_OPTIONS,
+      dom.runnerSelect?.value || state.runnerPreset || DEFAULT_RUNNER_PRESET_ID
+    ) || state.runnerPreset || DEFAULT_RUNNER_PRESET_ID;
+    setRunnerPresetState(initialRunnerId);
     if (dom.runnerSelect) {
-      dom.runnerSelect.value = state.runnerPreset;
+      dom.runnerSelect.value = initialRunnerId;
     }
+
+    setSelectOptions(
+      dom.sampleSelect,
+      SAMPLE_SELECT_OPTIONS,
+      dom.sampleSelect?.value || ''
+    );
 
     runner.updateIrSourceVisibility();
     shell.setActiveTab('vcdTab');

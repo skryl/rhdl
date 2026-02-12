@@ -495,7 +495,7 @@ The compiler supports AVX2/AVX512 for 256-512 parallel test vectors.
 
 ```ruby
 ir = RHDL::Codegen::Netlist::Lower.from_components([alu])
-sim = RHDL::Codegen::Netlist::NetlistInterpreterWrapper.new(ir, lanes: 64)
+sim = RHDL::Codegen::Netlist::NetlistSimulator.new(ir, backend: :interpreter, lanes: 64)
 sim.poke('a', 0xFF)
 sim.evaluate
 result = sim.peek('y')
@@ -512,7 +512,7 @@ Word-level bytecode simulation for complex designs like CPUs:
 | AOT Compiler | 2.3M cycles/s (38x) | 0.5-2s | Long simulations, games |
 
 ```ruby
-sim = RHDL::Codegen::IR::IrJitWrapper.new(ir_json)
+sim = RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :jit)
 sim.compile
 sim.run_ticks(1_000_000)
 ```

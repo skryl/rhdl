@@ -4,7 +4,7 @@ This document provides comprehensive documentation for the 8-bit sample CPU impl
 
 ## Overview
 
-RHDL includes a complete 8-bit CPU with a gate-level HDL implementation in `lib/rhdl/hdl/cpu/`. The architecture features:
+RHDL includes a complete 8-bit CPU with a gate-level HDL implementation in `examples/8bit/hdl/cpu/`. The architecture features:
 
 - 8-bit data bus and 16-bit address space (64KB addressable memory)
 - Single accumulator (ACC) register

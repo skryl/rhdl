@@ -26,6 +26,10 @@ function createHarness(overrides = {}) {
   const controller = createRunnerActionsController({
     dom,
     getRunnerPreset: (id) => ({ id, label: 'Generic', usesManualIr: true, preferredTab: 'vcdTab' }),
+    setBackendState: (backend) => calls.push(['setBackendState', backend]),
+    ensureBackendInstance: async (backend) => {
+      calls.push(['ensureBackendInstance', backend]);
+    },
     setRunnerPresetState: (id) => calls.push(['setRunnerPresetState', id]),
     updateIrSourceVisibility: () => calls.push(['updateIrSourceVisibility']),
     loadRunnerIrBundle: async () => ({ simJson: '{}', explorerJson: '{}', explorerMeta: null, sourceBundle: null, schematicBundle: null }),

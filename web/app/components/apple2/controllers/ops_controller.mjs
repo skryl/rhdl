@@ -19,7 +19,7 @@ function requireFn(name, fn) {
   }
 }
 
-const APPLE2_READY_MESSAGE = 'Load the Apple II runner first.';
+const APPLE2_READY_MESSAGE = 'Load a runner with memory + I/O support first.';
 const APPLE2_FIXTURE_ROOT = './assets/fixtures/apple2';
 
 export function createApple2OpsController({
@@ -78,7 +78,9 @@ export function createApple2OpsController({
   });
 
   function ensureApple2Ready(message = APPLE2_READY_MESSAGE) {
-    if (runtime.sim && uiStateService.isApple2UiEnabled()) {
+    const hasMemoryApi = runtime.sim
+      && (typeof runtime.sim.memory_mode !== 'function' || runtime.sim.memory_mode() != null);
+    if (runtime.sim && uiStateService.isApple2UiEnabled() && hasMemoryApi) {
       return true;
     }
     uiStateService.setMemoryDumpStatus(message);
@@ -183,6 +185,7 @@ export function createApple2OpsController({
     saveApple2MemoryDump: dumpWorkflowService.saveApple2MemoryDump,
     saveApple2MemorySnapshot: dumpWorkflowService.saveApple2MemorySnapshot,
     loadApple2DumpOrSnapshotFile: dumpWorkflowService.loadApple2DumpOrSnapshotFile,
+    loadApple2DumpOrSnapshotAssetPath: dumpWorkflowService.loadApple2DumpOrSnapshotAssetPath,
     loadLastSavedApple2Dump: dumpWorkflowService.loadLastSavedApple2Dump,
     resetApple2WithMemoryVectorOverride: resetOverrideService.resetApple2WithMemoryVectorOverride,
     performApple2ResetSequence: simRuntimeService.performApple2ResetSequence,

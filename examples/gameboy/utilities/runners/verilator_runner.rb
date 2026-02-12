@@ -7,7 +7,7 @@
 # and provides a native simulation interface similar to the Rust IR runners.
 #
 # Usage:
-#   runner = RHDL::ExamplesRHDL::Examples::GameBoy::VerilatorRunner.new
+#   runner = RHDL::ExamplesRHDL::Examples::GameBoy::VerilogRunner.new
 #   runner.load_rom(File.binread('game.gb'))
 #   runner.reset
 #   runner.run_steps(100)
@@ -25,7 +25,7 @@ module RHDL
     module GameBoy
       # Verilator-based runner for Game Boy simulation
     # Compiles RHDL Verilog export to native code via Verilator
-    class VerilatorRunner
+    class VerilogRunner
       # Screen dimensions
       SCREEN_WIDTH = 160
       SCREEN_HEIGHT = 144
@@ -355,25 +355,24 @@ module RHDL
 
       private
 
-      def check_verilator_available!
-        verilator_path = ENV['PATH'].split(File::PATH_SEPARATOR).find do |path|
-          File.executable?(File.join(path, 'verilator'))
-        end
+      def verilog_simulator
+        @verilog_simulator ||= RHDL::Codegen::Verilog::VerilogSimulator.new(
+          backend: :verilator,
+          build_dir: BUILD_DIR,
+          library_basename: 'gameboy_sim',
+          top_module: 'game_boy_gameboy',
+          verilator_prefix: 'Vgame_boy_gameboy',
+          x_assign: 'fast',
+          x_initial: 'fast'
+        )
+      end
 
-        unless verilator_path
-          raise LoadError, <<~MSG
-            Verilator not found in PATH.
-            Install Verilator:
-              Ubuntu/Debian: sudo apt-get install verilator
-              macOS: brew install verilator
-              Fedora: sudo dnf install verilator
-          MSG
-        end
+      def check_verilator_available!
+        verilog_simulator.ensure_backend_available!
       end
 
       def build_verilator_simulation
-        FileUtils.mkdir_p(VERILOG_DIR)
-        FileUtils.mkdir_p(OBJ_DIR)
+        verilog_simulator.prepare_build_dirs!
 
         # Export Gameboy to Verilog
         verilog_file = File.join(VERILOG_DIR, 'gameboy.v')
@@ -811,112 +810,23 @@ module RHDL
       end
 
       def write_file_if_changed(path, content)
-        return if File.exist?(path) && File.read(path) == content
-        File.write(path, content)
+        verilog_simulator.write_file_if_changed(path, content)
       end
 
       def compile_verilator(verilog_file, wrapper_file)
-        # Determine library suffix
-        lib_suffix = case RbConfig::CONFIG['host_os']
-                     when /darwin/ then 'dylib'
-                     when /mswin|mingw/ then 'dll'
-                     else 'so'
-                     end
-
-        lib_name = "libgameboy_sim.#{lib_suffix}"
-        lib_path = File.join(OBJ_DIR, lib_name)
-
-        # Verilate the design - top module is game_boy_gameboy
-        verilate_cmd = [
-          'verilator',
-          '--cc',
-          '--top-module', 'game_boy_gameboy',
-          # Optimization flags
-          '-O3',
-          '--x-assign', 'fast',
-          '--x-initial', 'fast',
-          '--noassert',
-          # Warning suppressions
-          '-Wno-fatal',
-          '-Wno-WIDTHEXPAND',
-          '-Wno-WIDTHTRUNC',
-          '-Wno-UNOPTFLAT',
-          '-Wno-PINMISSING',
-          # C++ compiler flags
-          '-CFLAGS', '-fPIC -O3 -march=native',
-          '-LDFLAGS', '-shared',
-          '--Mdir', OBJ_DIR,
-          '--prefix', 'Vgame_boy_gameboy',
-          '-o', lib_name,
-          wrapper_file,
-          verilog_file
-        ]
-
-        # Redirect build output to log file
-        log_file = File.join(BUILD_DIR, 'build.log')
-        File.open(log_file, 'w') do |log|
-          Dir.chdir(VERILOG_DIR) do
-            result = system(*verilate_cmd, out: log, err: log)
-            unless result
-              raise "Verilator compilation failed. See #{log_file} for details."
-            end
-          end
-
-          # Build with clang++ for better optimization
-          Dir.chdir(OBJ_DIR) do
-            result = system('make', '-f', 'Vgame_boy_gameboy.mk', 'CXX=clang++', out: log, err: log)
-            unless result
-              raise "Verilator make failed. See #{log_file} for details."
-            end
-          end
-        end
-
-        # On some platforms (notably macOS), Verilator's make output may not update the
-        # requested shared library even if compilation succeeds. Ensure the dylib/so
-        # is freshly linked from the static archives when needed.
-        lib_vgameboy = File.join(OBJ_DIR, 'libVgame_boy_gameboy.a')
-        lib_verilated = File.join(OBJ_DIR, 'libverilated.a')
-        newest_input = [lib_vgameboy, lib_verilated].filter_map { |p| File.exist?(p) ? File.mtime(p) : nil }.max
-        lib_mtime = File.exist?(lib_path) ? File.mtime(lib_path) : nil
-
-        if lib_mtime.nil? || (!newest_input.nil? && lib_mtime < newest_input)
-          build_shared_library(wrapper_file)
-        end
+        verilog_simulator.compile_backend(verilog_file: verilog_file, wrapper_file: wrapper_file)
       end
 
-      def build_shared_library(wrapper_file)
-        lib_path = shared_lib_path
-        lib_vgameboy = File.join(OBJ_DIR, 'libVgame_boy_gameboy.a')
-        lib_verilated = File.join(OBJ_DIR, 'libverilated.a')
-
-        link_cmd = if RbConfig::CONFIG['host_os'] =~ /darwin/
-                     "clang++ -shared -dynamiclib -o #{lib_path} " \
-                     "-Wl,-all_load #{lib_vgameboy} #{lib_verilated}"
-                   else
-                     "clang++ -shared -o #{lib_path} " \
-                     "-Wl,--whole-archive #{lib_vgameboy} #{lib_verilated} -Wl,--no-whole-archive -latomic"
-                   end
-
-        unless system(link_cmd)
-          raise "Failed to link Verilator shared library: #{lib_path}"
-        end
+      def build_shared_library(_wrapper_file = nil)
+        verilog_simulator.build_shared_library
       end
 
       def shared_lib_path
-        lib_suffix = case RbConfig::CONFIG['host_os']
-                     when /darwin/ then 'dylib'
-                     when /mswin|mingw/ then 'dll'
-                     else 'so'
-                     end
-        File.join(OBJ_DIR, "libgameboy_sim.#{lib_suffix}")
+        verilog_simulator.shared_library_path
       end
 
       def load_shared_library(lib_path)
-        unless File.exist?(lib_path)
-          raise LoadError, "Verilator shared library not found: #{lib_path}"
-        end
-
-        @lib = Fiddle.dlopen(lib_path)
+        @lib = verilog_simulator.load_library!(lib_path)
 
         # Bind FFI functions
         @sim_create = Fiddle::Function.new(

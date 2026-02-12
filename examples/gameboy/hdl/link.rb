@@ -81,63 +81,53 @@ module RHDL
       serial_irq: 0,
       sc_int_clock: 0
     } do
-      # Clear IRQ each cycle (single pulse)
-      serial_irq <= lit(0, width: 1)
+      # Edge/phase detection for transfer timing.
+      internal_clock_tick = sc_int_clock & (clock_counter == lit(CLOCK_DIV - 1, width: 9))
+      external_clock_tick = ~sc_int_clock & prev_ext_clk & ~serial_clk_in
+      clock_tick = transfer_active & (internal_clock_tick | external_clock_tick)
 
-      # SB register write
-      sb_reg <= mux(ce & sel_sb & ~cpu_wr_n,
+      # Control terms used in multiple register updates.
+      write_sb = ce & sel_sb & ~cpu_wr_n
+      start_transfer = ce & sel_sc & ~cpu_wr_n & sc_start_in
+      transfer_done = ce & clock_tick & (shift_counter == lit(7, width: 3))
+      internal_counting = ce & transfer_active & sc_int_clock
+
+      # Keep previous external clock for edge detection.
+      prev_ext_clk <= serial_clk_in
+
+      # SB register: CPU writes take priority over shifter updates.
+      sb_reg <= mux(write_sb,
                     sb_in,
-                    sb_reg)
+                    mux(ce & clock_tick,
+                        cat(sb_reg[6..0], serial_data_in),
+                        sb_reg))
 
-      # SC register write - start transfer
-      transfer_active <= mux(ce & sel_sc & ~cpu_wr_n & sc_start_in,
-                             lit(1, width: 1),
-                             transfer_active)
+      # SC clock mode latch (bit 0 on SC writes).
       sc_int_clock <= mux(ce & sel_sc & ~cpu_wr_n,
                           sc_int_clock_in,
                           sc_int_clock)
 
-      # Reset shift counter on transfer start
-      shift_counter <= mux(ce & sel_sc & ~cpu_wr_n & sc_start_in,
+      # Transfer state machine.
+      transfer_active <= mux(start_transfer,
+                             lit(1, width: 1),
+                             mux(transfer_done,
+                                 lit(0, width: 1),
+                                 transfer_active))
+
+      shift_counter <= mux(start_transfer,
                            lit(0, width: 3),
-                           shift_counter)
+                           mux(ce & clock_tick,
+                               shift_counter + lit(1, width: 3),
+                               shift_counter))
 
-      # Internal clock counter
-      clock_counter <= mux(ce & transfer_active & sc_int_clock,
-                           clock_counter + lit(1, width: 9),
-                           clock_counter)
-
-      # External clock edge detection
-      prev_ext_clk <= serial_clk_in
-
-      # Shift on clock edge (internal or external)
-      internal_clock_tick = sc_int_clock & (clock_counter == lit(CLOCK_DIV - 1, width: 9))
-      external_clock_tick = ~sc_int_clock & prev_ext_clk & ~serial_clk_in
-
-      clock_tick = transfer_active & (internal_clock_tick | external_clock_tick)
-
-      # Shift register operation
-      sb_reg <= mux(ce & clock_tick,
-                    cat(sb_reg[6..0], serial_data_in),
-                    sb_reg)
-
-      shift_counter <= mux(ce & clock_tick,
-                           shift_counter + lit(1, width: 3),
-                           shift_counter)
-
-      # Reset clock counter after tick
       clock_counter <= mux(ce & internal_clock_tick,
                            lit(0, width: 9),
-                           clock_counter)
+                           mux(internal_counting,
+                               clock_counter + lit(1, width: 9),
+                               clock_counter))
 
-      # Transfer complete after 8 bits
-      transfer_active <= mux(ce & clock_tick & (shift_counter == lit(7, width: 3)),
-                             lit(0, width: 1),
-                             transfer_active)
-
-      serial_irq <= mux(ce & clock_tick & (shift_counter == lit(7, width: 3)),
-                        lit(1, width: 1),
-                        serial_irq)
+      # IRQ is a one-cycle pulse when the 8th bit shifts out.
+      serial_irq <= mux(transfer_done, lit(1, width: 1), lit(0, width: 1))
     end
       end
     end

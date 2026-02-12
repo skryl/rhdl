@@ -189,3 +189,58 @@ test('initializeTrace invokes trace setup and drains chunk into parser', () => {
     'trace_take_live_vcd'
   ]);
 });
+
+test('compiler backend resolves runner-specific wasm path and caches per path', async () => {
+  const fetchUrls = [];
+  const instances = [];
+  const state = { backend: 'compiler', runnerPreset: 'cpu' };
+  const runtime = { backendInstances: new Map(), instance: null, sim: null, parser: null };
+  const presets = {
+    cpu: { id: 'cpu', compilerWasmPath: '/compiler_cpu.wasm' },
+    mos6502: { id: 'mos6502', compilerWasmPath: '/compiler_mos6502.wasm' },
+    apple2: { id: 'apple2' }
+  };
+  const controller = createSimRuntimeController({
+    state,
+    runtime,
+    getBackendDef: () => ({ wasmPath: '/compiler.wasm' }),
+    currentRunnerPreset: () => presets[state.runnerPreset],
+    fetchImpl: async (url) => {
+      fetchUrls.push(url);
+      return makeOkResponse();
+    },
+    webAssemblyApi: {
+      async instantiate(bytes) {
+        void bytes;
+        const instance = { id: `instance-${instances.length + 1}` };
+        instances.push(instance);
+        return { instance };
+      }
+    }
+  });
+
+  const cpuCompiler = await controller.ensureBackendInstance('compiler');
+  assert.equal(fetchUrls[0], '/compiler_cpu.wasm');
+  assert.equal(cpuCompiler, instances[0]);
+
+  const cpuCompilerCached = await controller.ensureBackendInstance('compiler');
+  assert.equal(cpuCompilerCached, instances[0]);
+  assert.equal(fetchUrls.length, 1);
+
+  state.runnerPreset = 'apple2';
+  const apple2Compiler = await controller.ensureBackendInstance('compiler');
+  assert.equal(fetchUrls[1], '/compiler.wasm');
+  assert.equal(apple2Compiler, instances[1]);
+  assert.notEqual(apple2Compiler, cpuCompiler);
+
+  state.runnerPreset = 'mos6502';
+  const mosCompiler = await controller.ensureBackendInstance('compiler');
+  assert.equal(fetchUrls[2], '/compiler_mos6502.wasm');
+  assert.equal(mosCompiler, instances[2]);
+  assert.notEqual(mosCompiler, cpuCompiler);
+  assert.notEqual(mosCompiler, apple2Compiler);
+
+  const mosCompilerCached = await controller.ensureBackendInstance('compiler');
+  assert.equal(mosCompilerCached, instances[2]);
+  assert.equal(fetchUrls.length, 3);
+});

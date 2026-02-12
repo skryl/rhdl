@@ -18,6 +18,19 @@ function apple2DecodeChar(code) {
   return ' ';
 }
 
+function decodeTextChar(code, textConfig = {}) {
+  const charMask = Number.parseInt(textConfig.charMask, 10);
+  const asciiMin = Number.parseInt(textConfig.asciiMin, 10);
+  const asciiMax = Number.parseInt(textConfig.asciiMax, 10);
+  const masked = Number.isFinite(charMask) ? (code & charMask) : (code & 0x7F);
+  const min = Number.isFinite(asciiMin) ? asciiMin : 0x20;
+  const max = Number.isFinite(asciiMax) ? asciiMax : 0x7E;
+  if (masked >= min && masked <= max) {
+    return String.fromCharCode(masked);
+  }
+  return ' ';
+}
+
 export function createApple2VisualController({
   dom,
   state,
@@ -35,12 +48,26 @@ export function createApple2VisualController({
   requireFn('renderApple2DebugRows', renderApple2DebugRows);
   requireFn('apple2HiresLineAddress', apple2HiresLineAddress);
 
+  function currentIoConfig() {
+    return state.apple2?.ioConfig || {};
+  }
+
+  function readRunnerMemory(offset, length, options = {}) {
+    if (!runtime.sim) {
+      return new Uint8Array(0);
+    }
+    if (typeof runtime.sim.memory_read === 'function') {
+      return runtime.sim.memory_read(offset, length, options);
+    }
+    return new Uint8Array(0);
+  }
+
   function refreshApple2Screen() {
     if (!dom.apple2TextScreen) {
       return;
     }
     if (!isApple2UiEnabled()) {
-      dom.apple2TextScreen.textContent = 'Load the Apple II runner to use this tab.';
+      dom.apple2TextScreen.textContent = 'Load a runner with memory + I/O support to use this tab.';
       if (dom.apple2HiresCanvas) {
         const ctx = dom.apple2HiresCanvas.getContext('2d');
         if (ctx) {
@@ -52,9 +79,23 @@ export function createApple2VisualController({
     }
 
     updateIoToggleUi();
+    const ioConfig = currentIoConfig();
+    if (ioConfig.display && ioConfig.display.enabled === false) {
+      dom.apple2TextScreen.textContent = 'Display is disabled for this runner configuration.';
+      if (dom.apple2HiresCanvas) {
+        const ctx = dom.apple2HiresCanvas.getContext('2d');
+        if (ctx) {
+          ctx.clearRect(0, 0, dom.apple2HiresCanvas.width, dom.apple2HiresCanvas.height);
+        }
+      }
+      return;
+    }
+    const displayMode = String(
+      ioConfig.display?.mode || (runtime.sim.runner_kind?.() === 'apple2' ? 'apple2' : 'text')
+    );
 
-    if (state.apple2.displayHires && dom.apple2HiresCanvas) {
-      const mem = runtime.sim.apple2_read_ram(0x2000, 0x2000);
+    if (displayMode === 'apple2' && state.apple2.displayHires && dom.apple2HiresCanvas) {
+      const mem = readRunnerMemory(0x2000, 0x2000, { mapped: false });
       if (!mem || mem.length === 0) {
         dom.apple2TextScreen.textContent = 'Apple II hi-res page unavailable';
         return;
@@ -125,18 +166,32 @@ export function createApple2VisualController({
       return;
     }
 
-    const dump = runtime.sim.apple2_read_ram(0x0400, 0x0400);
+    const textConfig = ioConfig.display?.text || {};
+    const textStart = Number.parseInt(textConfig.start, 10);
+    const width = Math.max(1, Number.parseInt(textConfig.width, 10) || 40);
+    const height = Math.max(1, Number.parseInt(textConfig.height, 10) || 24);
+    const rowStride = Math.max(width, Number.parseInt(textConfig.rowStride, 10) || width);
+    const rowLayout = String(textConfig.rowLayout || (displayMode === 'apple2' ? 'apple2' : 'linear'));
+
+    const dumpStart = Number.isFinite(textStart) ? textStart : 0x0400;
+    const dumpLength = Math.max(width * height, rowStride * height);
+    const dump = readRunnerMemory(dumpStart, dumpLength, { mapped: true });
     if (!dump || dump.length === 0) {
-      dom.apple2TextScreen.textContent = 'Apple II text page unavailable';
+      dom.apple2TextScreen.textContent = 'Runner text page unavailable';
       return;
     }
 
     const lines = [];
-    for (let row = 0; row < 24; row += 1) {
-      const base = apple2TextLineAddress(row) - 0x0400;
+    for (let row = 0; row < height; row += 1) {
+      const base = rowLayout === 'apple2'
+        ? (apple2TextLineAddress(row) - dumpStart)
+        : (row * rowStride);
       let line = '';
-      for (let col = 0; col < 40; col += 1) {
-        line += apple2DecodeChar(dump[base + col] || 0);
+      for (let col = 0; col < width; col += 1) {
+        const byte = dump[base + col] || 0;
+        line += rowLayout === 'apple2'
+          ? apple2DecodeChar(byte)
+          : decodeTextChar(byte, textConfig);
       }
       lines.push(line);
     }
@@ -149,20 +204,25 @@ export function createApple2VisualController({
       return;
     }
 
-    const get = (name) => (runtime.sim.has_signal(name) ? runtime.sim.peek(name) : 0);
-    const rows = [
-      ['pc_debug', `0x${(get('pc_debug') & 0xffff).toString(16).toUpperCase().padStart(4, '0')}`],
-      ['opcode_debug', `0x${(get('opcode_debug') & 0xff).toString(16).toUpperCase().padStart(2, '0')}`],
-      ['a_debug', `0x${(get('a_debug') & 0xff).toString(16).toUpperCase().padStart(2, '0')}`],
-      ['x_debug', `0x${(get('x_debug') & 0xff).toString(16).toUpperCase().padStart(2, '0')}`],
-      ['y_debug', `0x${(get('y_debug') & 0xff).toString(16).toUpperCase().padStart(2, '0')}`],
-      ['s_debug', `0x${(get('s_debug') & 0xff).toString(16).toUpperCase().padStart(2, '0')}`],
-      ['p_debug', `0x${(get('p_debug') & 0xff).toString(16).toUpperCase().padStart(2, '0')}`],
-      ['q3', `${get('clk_2m') & 0x1}`],
-      ['speaker', `${get('speaker') & 0x1}`]
-    ];
+    const ioConfig = currentIoConfig();
+    const watchSignals = Array.isArray(ioConfig.watchSignals) && ioConfig.watchSignals.length > 0
+      ? ioConfig.watchSignals
+      : ['pc_debug', 'opcode_debug', 'a_debug', 'x_debug', 'y_debug', 's_debug', 'p_debug', 'speaker'];
+    const rows = [];
+    for (const name of watchSignals.slice(0, 12)) {
+      if (!runtime.sim.has_signal(name)) {
+        continue;
+      }
+      const value = runtime.sim.peek(name);
+      const width = name.includes('pc') || name.includes('addr') ? 4 : 2;
+      const rendered = `0x${(value & (width === 4 ? 0xFFFF : 0xFF)).toString(16).toUpperCase().padStart(width, '0')}`;
+      rows.push([name, rendered]);
+    }
+    if (rows.length === 0) {
+      rows.push(['-', 'No configured debug signals']);
+    }
 
-    const toggles = state.apple2.lastCpuResult?.speaker_toggles || 0;
+    const toggles = state.apple2.lastCpuResult?.speaker_toggles || state.apple2.lastSpeakerToggles || 0;
     renderApple2DebugRows(dom, rows, `Speaker toggles (last batch): ${toggles}`, true);
   }
 

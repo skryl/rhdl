@@ -27,13 +27,13 @@ RSpec.describe 'IrCompiler vs IrInterpreter PC Progression' do
   def create_interpreter
     skip 'IR Interpreter not available' unless RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
     ir_json = create_ir_json
-    RHDL::Codegen::IR::IrInterpreterWrapper.new(ir_json)
+    RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :interpreter)
   end
 
   def create_compiler
     skip 'IR Compiler not available' unless RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
     ir_json = create_ir_json
-    RHDL::Codegen::IR::IrCompilerWrapper.new(ir_json)
+    RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :compiler)
   end
 
   # Boot simulator through reset sequence
@@ -41,7 +41,7 @@ RSpec.describe 'IrCompiler vs IrInterpreter PC Progression' do
     sim.poke('reset', 1)
     sim.tick
     sim.poke('reset', 0)
-    10.times { sim.apple2_run_cpu_cycles(1, 0, false) }
+    10.times { sim.runner_run_cycles(1, 0, false) }
   end
 
   # Collect PC values for N cycles
@@ -50,7 +50,7 @@ RSpec.describe 'IrCompiler vs IrInterpreter PC Progression' do
     num_cycles.times do
       pc = sim.peek('cpu__pc_reg')
       pcs << pc
-      sim.apple2_run_cpu_cycles(1, 0, false)
+      sim.runner_run_cycles(1, 0, false)
     end
     pcs
   end
@@ -72,8 +72,8 @@ RSpec.describe 'IrCompiler vs IrInterpreter PC Progression' do
       interpreter = create_interpreter
       compiler = create_compiler
 
-      interpreter.apple2_load_rom(@rom_data)
-      compiler.apple2_load_rom(@rom_data)
+      interpreter.runner_load_rom(@rom_data)
+      compiler.runner_load_rom(@rom_data)
 
       expect(interpreter.signal_count).to be > 0
       expect(compiler.signal_count).to be > 0
@@ -88,8 +88,8 @@ RSpec.describe 'IrCompiler vs IrInterpreter PC Progression' do
       interpreter = create_interpreter
       compiler = create_compiler
 
-      interpreter.apple2_load_rom(@rom_data)
-      compiler.apple2_load_rom(@rom_data)
+      interpreter.runner_load_rom(@rom_data)
+      compiler.runner_load_rom(@rom_data)
 
       interpreter.reset
       compiler.reset
@@ -107,14 +107,14 @@ RSpec.describe 'IrCompiler vs IrInterpreter PC Progression' do
       stepped = create_compiler
       batched = create_compiler
 
-      stepped.apple2_load_rom(@rom_data)
-      batched.apple2_load_rom(@rom_data)
+      stepped.runner_load_rom(@rom_data)
+      batched.runner_load_rom(@rom_data)
 
       boot_simulator(stepped)
       boot_simulator(batched)
 
-      100.times { stepped.apple2_run_cpu_cycles(1, 0, false) }
-      batched.apple2_run_cpu_cycles(100, 0, false)
+      100.times { stepped.runner_run_cycles(1, 0, false) }
+      batched.runner_run_cycles(100, 0, false)
 
       expect(batched.peek('cpu__pc_reg')).to eq(stepped.peek('cpu__pc_reg'))
     end
@@ -127,15 +127,15 @@ RSpec.describe 'IrCompiler vs IrInterpreter PC Progression' do
       interpreter = create_interpreter
       compiler = create_compiler
 
-      interpreter.apple2_load_rom(@rom_data)
-      compiler.apple2_load_rom(@rom_data)
+      interpreter.runner_load_rom(@rom_data)
+      compiler.runner_load_rom(@rom_data)
 
       boot_simulator(interpreter)
       boot_simulator(compiler)
 
       # Run warmup cycles
-      50.times { interpreter.apple2_run_cpu_cycles(1, 0, false) }
-      50.times { compiler.apple2_run_cpu_cycles(1, 0, false) }
+      50.times { interpreter.runner_run_cycles(1, 0, false) }
+      50.times { compiler.runner_run_cycles(1, 0, false) }
 
       num_cycles = 100
       interp_pcs = collect_pcs(interpreter, num_cycles)
@@ -180,8 +180,8 @@ RSpec.describe 'IrCompiler vs IrInterpreter PC Progression' do
       interpreter = create_interpreter
       compiler = create_compiler
 
-      interpreter.apple2_load_rom(@rom_data)
-      compiler.apple2_load_rom(@rom_data)
+      interpreter.runner_load_rom(@rom_data)
+      compiler.runner_load_rom(@rom_data)
 
       boot_simulator(interpreter)
       boot_simulator(compiler)
@@ -237,8 +237,8 @@ RSpec.describe 'IrCompiler vs IrInterpreter PC Progression' do
       interpreter = create_interpreter
       compiler = create_compiler
 
-      interpreter.apple2_load_rom(@rom_data)
-      compiler.apple2_load_rom(@rom_data)
+      interpreter.runner_load_rom(@rom_data)
+      compiler.runner_load_rom(@rom_data)
 
       boot_simulator(interpreter)
       boot_simulator(compiler)
@@ -246,8 +246,8 @@ RSpec.describe 'IrCompiler vs IrInterpreter PC Progression' do
       # Run warmup cycles to allow both to stabilize past boot timing differences
       # The compiler may have a few extra boot cycles due to initial tick() behavior
       100.times do
-        interpreter.apple2_run_cpu_cycles(1, 0, false)
-        compiler.apple2_run_cpu_cycles(1, 0, false)
+        interpreter.runner_run_cycles(1, 0, false)
+        compiler.runner_run_cycles(1, 0, false)
       end
 
       # Compare CPU registers
@@ -292,7 +292,7 @@ RSpec.describe 'IrCompiler vs IrInterpreter PC Progression' do
       skip 'ROM not available' unless @rom_available
 
       compiler = create_compiler
-      compiler.apple2_load_rom(@rom_data)
+      compiler.runner_load_rom(@rom_data)
 
       # Try to compile
       result = compiler.compile rescue false
@@ -313,8 +313,8 @@ RSpec.describe 'IrCompiler vs IrInterpreter PC Progression' do
       interp_compiler = create_compiler
       compiled_compiler = create_compiler
 
-      interp_compiler.apple2_load_rom(@rom_data)
-      compiled_compiler.apple2_load_rom(@rom_data)
+      interp_compiler.runner_load_rom(@rom_data)
+      compiled_compiler.runner_load_rom(@rom_data)
 
       # Try to compile
       compile_success = compiled_compiler.compile rescue false
@@ -348,7 +348,7 @@ RSpec.describe 'IrCompiler vs IrInterpreter PC Progression' do
       skip 'ROM not available' unless @rom_available
 
       compiler = create_compiler
-      compiler.apple2_load_rom(@rom_data)
+      compiler.runner_load_rom(@rom_data)
 
       code = compiler.generated_code
 

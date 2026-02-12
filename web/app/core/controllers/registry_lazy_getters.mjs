@@ -20,6 +20,7 @@ export function createRegistryLazyGetters(options = {}) {
     storeActions,
     scheduleReduxUxSync,
     log,
+    setBackendState,
     setRunnerPresetState,
     setActiveTabState,
     setSidebarCollapsedState,
@@ -105,6 +106,7 @@ export function createRegistryLazyGetters(options = {}) {
 
   requireFn('scheduleReduxUxSync', scheduleReduxUxSync);
   requireFn('log', log);
+  requireFn('setBackendState', setBackendState);
   requireFn('setRunnerPresetState', setRunnerPresetState);
   requireFn('setActiveTabState', setActiveTabState);
   requireFn('setSidebarCollapsedState', setSidebarCollapsedState);
@@ -201,6 +203,8 @@ export function createRegistryLazyGetters(options = {}) {
   const runnerGetters = createRunnerLazyGetters({
     dom,
     state,
+    setBackendState,
+    ensureBackendInstance,
     setRunnerPresetState,
     fetchImpl,
     log,

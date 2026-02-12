@@ -337,8 +337,8 @@ def handle_examples_mos6502(args)
     karateka: false,
     clean: false,
     debug: false,
-    mode: :isa,       # Simulator mode: isa, hdl, netlist, or verilog
-    sim: :jit,        # Sim backend: interpret, jit, or compile (ignored for ISA mode)
+    mode: :isa,       # Simulator mode: isa, ruby, ir, netlist, or verilog
+    sim: nil,         # Sim backend selected per mode
     rom: nil,
     rom_address: nil,
     address: nil,
@@ -368,18 +368,22 @@ def handle_examples_mos6502(args)
 
       Simulation modes:
         --mode isa              ISA-level simulation (default, fastest)
-        --mode hdl              HDL behavioral simulation (cycle-accurate)
+        --mode ruby             Ruby HDL simulation (cycle-accurate, slow)
+        --mode ir               IR simulation
         --mode netlist          Gate-level netlist simulation (slowest)
         --mode verilog          Verilator RTL simulation
 
-      Simulator backends (for HDL/netlist modes):
+      Simulator backends (mode-specific):
+        --sim native            ISA native backend
+        --sim ruby              ISA Ruby backend / Ruby HDL mode
         --sim interpret         Pure interpreter (slow, fast startup)
-        --sim jit               Cranelift JIT (default, balanced)
+        --sim jit               Cranelift JIT (balanced)
         --sim compile           AOT compiled (fastest, slow startup)
 
       Examples:
         rhdl examples mos6502 --karateka
-        rhdl examples mos6502 --mode hdl --sim compile --karateka
+        rhdl examples mos6502 --mode ir --sim compile --karateka
+        rhdl examples mos6502 --mode isa --sim native --karateka
         rhdl examples mos6502 --mode verilog --karateka
         rhdl examples mos6502 --appleiigo --disk game.dsk --hires
 
@@ -393,8 +397,8 @@ def handle_examples_mos6502(args)
     opts.on('-k', '--karateka', 'Load Karateka memory dump (ready to play)') { options[:karateka] = true }
     opts.on('--clean', 'Clean ROM output files') { options[:clean] = true }
     opts.on('-d', '--debug', 'Enable debug mode') { options[:debug] = true }
-    opts.on('-m', '--mode TYPE', [:isa, :hdl, :netlist, :verilog], 'Simulator mode: isa (default), hdl, netlist, verilog') { |v| options[:mode] = v }
-    opts.on('--sim TYPE', [:interpret, :jit, :compile], 'Sim backend: interpret, jit (default), compile') { |v| options[:sim] = v }
+    opts.on('-m', '--mode TYPE', [:isa, :ruby, :ir, :netlist, :verilog], 'Simulator mode: isa (default), ruby, ir, netlist, verilog') { |v| options[:mode] = v }
+    opts.on('--sim TYPE', [:native, :ruby, :interpret, :jit, :compile], 'Sim backend (mode-specific)') { |v| options[:sim] = v }
     opts.on('-r', '--rom FILE', 'ROM file to load') { |v| options[:rom] = v }
     opts.on('-a', '--address ADDR', 'Program load address (hex, default: 0800)') { |v| options[:address] = v }
     opts.on('--rom-address ADDR', 'ROM load address (hex)') { |v| options[:rom_address] = v }

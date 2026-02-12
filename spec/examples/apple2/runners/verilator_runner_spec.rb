@@ -5,7 +5,7 @@ require 'rhdl'
 require_relative '../../../../examples/apple2/hdl/apple2'
 require_relative '../../../../examples/apple2/utilities/renderers/braille_renderer'
 
-RSpec.describe 'VerilatorRunner' do
+RSpec.describe 'VerilogRunner' do
   # Only run tests if Verilator is available
   def verilator_available?
     ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
@@ -39,7 +39,7 @@ RSpec.describe 'VerilatorRunner' do
   end
 
   def create_verilator_runner
-    runner = RHDL::Examples::Apple2::VerilatorRunner.new(sub_cycles: 14)
+    runner = RHDL::Examples::Apple2::VerilogRunner.new(sub_cycles: 14)
 
     karateka_rom = create_karateka_rom
     runner.load_rom(karateka_rom, base_addr: 0xD000)
@@ -67,9 +67,9 @@ RSpec.describe 'VerilatorRunner' do
   end
 
   describe 'class definition' do
-    it 'defines VerilatorRunner in RHDL::Apple2 namespace' do
+    it 'defines VerilogRunner in RHDL::Apple2 namespace' do
       skip 'Verilator not available' unless verilator_available?
-      expect(defined?(RHDL::Examples::Apple2::VerilatorRunner)).to eq('constant')
+      expect(defined?(RHDL::Examples::Apple2::VerilogRunner)).to eq('constant')
     end
 
     it 'has the required public interface methods' do
@@ -84,11 +84,11 @@ RSpec.describe 'VerilatorRunner' do
         read write native? simulator_type
       ]
 
-      runner_class = RHDL::Examples::Apple2::VerilatorRunner
+      runner_class = RHDL::Examples::Apple2::VerilogRunner
 
       required_methods.each do |method|
         expect(runner_class.instance_methods).to include(method),
-          "Expected VerilatorRunner to have method #{method}"
+          "Expected VerilogRunner to have method #{method}"
       end
     end
   end
@@ -98,7 +98,7 @@ RSpec.describe 'VerilatorRunner' do
       skip 'Verilator not available' unless verilator_available?
 
       # Mock the runner without actually initializing Verilator
-      runner_class = RHDL::Examples::Apple2::VerilatorRunner
+      runner_class = RHDL::Examples::Apple2::VerilogRunner
       # Check that the method is defined correctly by inspecting source
       expect(runner_class.instance_method(:simulator_type).source_location).not_to be_nil
     end
@@ -106,7 +106,7 @@ RSpec.describe 'VerilatorRunner' do
     it 'native? returns true' do
       skip 'Verilator not available' unless verilator_available?
 
-      runner_class = RHDL::Examples::Apple2::VerilatorRunner
+      runner_class = RHDL::Examples::Apple2::VerilogRunner
       expect(runner_class.instance_method(:native?).source_location).not_to be_nil
     end
   end
@@ -114,55 +114,55 @@ RSpec.describe 'VerilatorRunner' do
   describe 'constants' do
     it 'defines TEXT_PAGE1_START constant' do
       skip 'Verilator not available' unless verilator_available?
-      expect(RHDL::Examples::Apple2::VerilatorRunner::TEXT_PAGE1_START).to eq(0x0400)
+      expect(RHDL::Examples::Apple2::VerilogRunner::TEXT_PAGE1_START).to eq(0x0400)
     end
 
     it 'defines TEXT_PAGE1_END constant' do
       skip 'Verilator not available' unless verilator_available?
-      expect(RHDL::Examples::Apple2::VerilatorRunner::TEXT_PAGE1_END).to eq(0x07FF)
+      expect(RHDL::Examples::Apple2::VerilogRunner::TEXT_PAGE1_END).to eq(0x07FF)
     end
 
     it 'defines HIRES_PAGE1_START constant' do
       skip 'Verilator not available' unless verilator_available?
-      expect(RHDL::Examples::Apple2::VerilatorRunner::HIRES_PAGE1_START).to eq(0x2000)
+      expect(RHDL::Examples::Apple2::VerilogRunner::HIRES_PAGE1_START).to eq(0x2000)
     end
 
     it 'defines HIRES_PAGE1_END constant' do
       skip 'Verilator not available' unless verilator_available?
-      expect(RHDL::Examples::Apple2::VerilatorRunner::HIRES_PAGE1_END).to eq(0x3FFF)
+      expect(RHDL::Examples::Apple2::VerilogRunner::HIRES_PAGE1_END).to eq(0x3FFF)
     end
 
     it 'defines HIRES_WIDTH constant' do
       skip 'Verilator not available' unless verilator_available?
-      expect(RHDL::Examples::Apple2::VerilatorRunner::HIRES_WIDTH).to eq(280)
+      expect(RHDL::Examples::Apple2::VerilogRunner::HIRES_WIDTH).to eq(280)
     end
 
     it 'defines HIRES_HEIGHT constant' do
       skip 'Verilator not available' unless verilator_available?
-      expect(RHDL::Examples::Apple2::VerilatorRunner::HIRES_HEIGHT).to eq(192)
+      expect(RHDL::Examples::Apple2::VerilogRunner::HIRES_HEIGHT).to eq(192)
     end
 
     it 'defines BUILD_DIR constant' do
       skip 'Verilator not available' unless verilator_available?
-      expect(RHDL::Examples::Apple2::VerilatorRunner::BUILD_DIR).to include('.verilator_build')
+      expect(RHDL::Examples::Apple2::VerilogRunner::BUILD_DIR).to include('.verilator_build')
     end
   end
 
   describe 'DiskControllerStub' do
     it 'defines nested DiskControllerStub class' do
       skip 'Verilator not available' unless verilator_available?
-      expect(defined?(RHDL::Examples::Apple2::VerilatorRunner::DiskControllerStub)).to eq('constant')
+      expect(defined?(RHDL::Examples::Apple2::VerilogRunner::DiskControllerStub)).to eq('constant')
     end
 
     it 'DiskControllerStub has track method returning 0' do
       skip 'Verilator not available' unless verilator_available?
-      stub = RHDL::Examples::Apple2::VerilatorRunner::DiskControllerStub.new
+      stub = RHDL::Examples::Apple2::VerilogRunner::DiskControllerStub.new
       expect(stub.track).to eq(0)
     end
 
     it 'DiskControllerStub has motor_on method returning false' do
       skip 'Verilator not available' unless verilator_available?
-      stub = RHDL::Examples::Apple2::VerilatorRunner::DiskControllerStub.new
+      stub = RHDL::Examples::Apple2::VerilogRunner::DiskControllerStub.new
       expect(stub.motor_on).to eq(false)
     end
   end
@@ -176,7 +176,7 @@ RSpec.describe 'VerilatorRunner' do
       skip 'Verilator not available' unless verilator_available?
       skip 'Slow test - run with --tag slow' unless ENV['RUN_SLOW_TESTS']
 
-      expect { RHDL::Examples::Apple2::VerilatorRunner.new(sub_cycles: 14) }.not_to raise_error
+      expect { RHDL::Examples::Apple2::VerilogRunner.new(sub_cycles: 14) }.not_to raise_error
     end
   end
 
@@ -191,10 +191,10 @@ RSpec.describe 'VerilatorRunner' do
       puts "Verilator Runner Interface Verification"
       puts "=" * 70
 
-      # Verify VerilatorRunner class exists and has expected interface
-      expect(defined?(RHDL::Examples::Apple2::VerilatorRunner)).to eq('constant')
+      # Verify VerilogRunner class exists and has expected interface
+      expect(defined?(RHDL::Examples::Apple2::VerilogRunner)).to eq('constant')
 
-      runner_class = RHDL::Examples::Apple2::VerilatorRunner
+      runner_class = RHDL::Examples::Apple2::VerilogRunner
 
       # Check required interface methods
       required_methods = %i[
@@ -215,7 +215,7 @@ RSpec.describe 'VerilatorRunner' do
       end
 
       expect(missing_methods).to be_empty,
-        "VerilatorRunner should implement all interface methods, missing: #{missing_methods.join(', ')}"
+        "VerilogRunner should implement all interface methods, missing: #{missing_methods.join(', ')}"
 
       # Verify constants
       expect(runner_class::TEXT_PAGE1_START).to eq(0x0400)
@@ -247,7 +247,7 @@ RSpec.describe 'VerilatorRunner' do
       # Initialize Verilator runner
       puts "\nInitializing Verilator runner..."
       start_time = Time.now
-      runner = RHDL::Examples::Apple2::VerilatorRunner.new(sub_cycles: 14)
+      runner = RHDL::Examples::Apple2::VerilogRunner.new(sub_cycles: 14)
       init_time = Time.now - start_time
       puts "  Verilator initialized in #{init_time.round(2)}s"
 

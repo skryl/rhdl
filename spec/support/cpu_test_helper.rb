@@ -1,3 +1,5 @@
+require_relative '../../examples/8bit/utilities/isa_simulator'
+
 module CpuTestHelper
   # Set this to switch between behavior and HDL CPU implementations
   # Override in specific test files or use shared examples

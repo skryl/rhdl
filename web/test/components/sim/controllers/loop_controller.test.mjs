@@ -70,7 +70,7 @@ test('queueApple2Key normalizes lowercase chars and enter/backspace', () => {
 test('runApple2Cycles advances cycle and captures trace when enabled', () => {
   const { controller, state, runtime } = createHarness();
   runtime.sim = {
-    apple2_run_cpu_cycles: () => ({ key_cleared: false, speaker_toggles: 3, cycles_run: 5 }),
+    runner_run_cycles: () => ({ key_cleared: false, speaker_toggles: 3, cycles_run: 5 }),
     trace_enabled: () => true,
     trace_capture: () => {}
   };

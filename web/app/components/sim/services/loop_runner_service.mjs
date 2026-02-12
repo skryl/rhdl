@@ -1,5 +1,6 @@
 import {
   normalizeApple2KeyCode,
+  normalizeMappedKeyCode,
   parseStepTickCount,
   parseRunLoopConfig,
   executeGenericRunBatch,
@@ -33,7 +34,10 @@ export function createSimLoopRunnerService({
   refreshMemoryView,
   isComponentTabActive,
   refreshActiveComponentTab,
-  requestFrame = globalThis.requestAnimationFrame
+  requestFrame = globalThis.requestAnimationFrame,
+  nowMs = () => (globalThis.performance && typeof globalThis.performance.now === 'function'
+    ? globalThis.performance.now()
+    : Date.now())
 } = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('createSimLoopRunnerService requires dom/state/runtime');
@@ -56,15 +60,145 @@ export function createSimLoopRunnerService({
   requireFn('isComponentTabActive', isComponentTabActive);
   requireFn('refreshActiveComponentTab', refreshActiveComponentTab);
   requireFn('requestFrame', requestFrame);
+  requireFn('nowMs', nowMs);
+
+  function resetThroughputSampling() {
+    if (!runtime.throughput || typeof runtime.throughput !== 'object') {
+      runtime.throughput = {};
+    }
+    runtime.throughput.cyclesPerSecond = 0;
+    runtime.throughput.lastSampleTimeMs = nowMs();
+    runtime.throughput.lastSampleCycle = state.cycle;
+  }
+
+  function updateThroughputSampling() {
+    if (!runtime.throughput || typeof runtime.throughput !== 'object') {
+      runtime.throughput = {};
+    }
+    const sampleTime = nowMs();
+    const prevTime = Number(runtime.throughput.lastSampleTimeMs);
+    const prevCycle = Number(runtime.throughput.lastSampleCycle);
+    const cycleNow = Number(state.cycle) || 0;
+
+    if (!Number.isFinite(prevTime) || !Number.isFinite(prevCycle) || cycleNow < prevCycle) {
+      runtime.throughput.lastSampleTimeMs = sampleTime;
+      runtime.throughput.lastSampleCycle = cycleNow;
+      return;
+    }
+
+    const elapsedMs = sampleTime - prevTime;
+    if (!Number.isFinite(elapsedMs) || elapsedMs < 50) {
+      return;
+    }
+
+    const deltaCycles = Math.max(0, cycleNow - prevCycle);
+    const instantaneous = elapsedMs > 0 ? (deltaCycles * 1000) / elapsedMs : 0;
+    const previous = Number(runtime.throughput.cyclesPerSecond);
+    runtime.throughput.cyclesPerSecond = Number.isFinite(previous) && previous > 0
+      ? (previous * 0.7) + (instantaneous * 0.3)
+      : instantaneous;
+    runtime.throughput.lastSampleTimeMs = sampleTime;
+    runtime.throughput.lastSampleCycle = cycleNow;
+  }
+
+  function currentIoConfig() {
+    return state.apple2?.ioConfig || {};
+  }
+
+  function readMappedSoundByte() {
+    const soundCfg = currentIoConfig().sound || {};
+    if (!soundCfg.enabled || soundCfg.mode !== 'memory_mapped') {
+      return null;
+    }
+    const addr = Number.parseInt(soundCfg.addr, 10);
+    if (!Number.isFinite(addr) || addr < 0) {
+      return null;
+    }
+    if (typeof runtime.sim.memory_read_byte !== 'function') {
+      return null;
+    }
+    return runtime.sim.memory_read_byte(addr & 0xFFFF, { mapped: true }) & 0xFF;
+  }
+
+  function pollMappedSound(cyclesRun) {
+    const soundCfg = currentIoConfig().sound || {};
+    if (!soundCfg.enabled || soundCfg.mode !== 'memory_mapped') {
+      state.apple2.lastMappedSoundValue = null;
+      return;
+    }
+    const current = readMappedSoundByte();
+    if (current == null) {
+      return;
+    }
+
+    const mask = Number.parseInt(soundCfg.mask, 10);
+    const bitMask = Number.isFinite(mask) ? (mask & 0xFF) : 0x01;
+    const previous = Number.parseInt(state.apple2.lastMappedSoundValue, 10);
+    state.apple2.lastMappedSoundValue = current;
+    if (!Number.isFinite(previous)) {
+      return;
+    }
+
+    const toggledBits = (previous ^ current) & bitMask;
+    if (!toggledBits) {
+      return;
+    }
+    const toggles = toggledBits.toString(2).split('1').length - 1;
+    state.apple2.lastSpeakerToggles = (state.apple2.lastSpeakerToggles || 0) + toggles;
+    updateApple2SpeakerAudio(toggles, Math.max(1, cyclesRun));
+  }
+
+  function runGenericCycles(cycles) {
+    const ticks = Math.max(0, Number.parseInt(cycles, 10) || 0);
+    const clk = selectedClock();
+    if (clk) {
+      runtime.sim.run_clock_ticks(clk, ticks);
+    } else {
+      runtime.sim.run_ticks(ticks);
+    }
+    state.cycle += ticks;
+    pollMappedSound(ticks);
+    if (runtime.sim.trace_enabled()) {
+      runtime.sim.trace_capture();
+    }
+  }
 
   function queueApple2Key(value) {
     if (!isApple2UiEnabled()) {
       return;
     }
-    const normalized = normalizeApple2KeyCode(value);
+
+    const ioConfig = currentIoConfig();
+    const keyboardCfg = ioConfig.keyboard || {};
+    if (keyboardCfg.enabled === false) {
+      return;
+    }
+    const normalized = keyboardCfg.mode === 'memory_mapped'
+      ? normalizeMappedKeyCode(value, keyboardCfg)
+      : normalizeApple2KeyCode(value);
     if (normalized == null) {
       return;
     }
+
+    if (keyboardCfg.mode === 'memory_mapped' && typeof runtime.sim?.memory_write_byte === 'function') {
+      const dataAddr = Number.parseInt(keyboardCfg.dataAddr, 10);
+      if (Number.isFinite(dataAddr) && dataAddr >= 0) {
+        runtime.sim.memory_write_byte(dataAddr & 0xFFFF, normalized, { mapped: true });
+      }
+
+      const strobeAddr = Number.parseInt(keyboardCfg.strobeAddr, 10);
+      if (Number.isFinite(strobeAddr) && strobeAddr >= 0) {
+        const strobeValue = Number.parseInt(keyboardCfg.strobeValue, 10);
+        runtime.sim.memory_write_byte(strobeAddr & 0xFFFF, Number.isFinite(strobeValue) ? (strobeValue & 0xFF) : 1, { mapped: true });
+        const clearValue = Number.parseInt(keyboardCfg.strobeClearValue, 10);
+        if (Number.isFinite(clearValue)) {
+          runtime.sim.memory_write_byte(strobeAddr & 0xFFFF, clearValue & 0xFF, { mapped: true });
+        }
+      }
+      refreshStatus();
+      return;
+    }
+
     state.apple2.keyQueue.push(normalized);
     refreshStatus();
   }
@@ -74,10 +208,17 @@ export function createSimLoopRunnerService({
       return;
     }
 
+    if (typeof runtime.sim.runner_run_cycles !== 'function') {
+      runGenericCycles(cycles);
+      return;
+    }
+
     const key = state.apple2.keyQueue[0];
     const keyReady = state.apple2.keyQueue.length > 0;
-    const result = runtime.sim.apple2_run_cpu_cycles(cycles, key || 0, keyReady);
+    const requestedCycles = Math.max(0, Number.parseInt(cycles, 10) || 0);
+    const result = runtime.sim.runner_run_cycles(cycles, key || 0, keyReady);
     if (!result) {
+      runGenericCycles(cycles);
       return;
     }
 
@@ -85,11 +226,29 @@ export function createSimLoopRunnerService({
       state.apple2.keyQueue.shift();
     }
 
-    state.apple2.lastCpuResult = result;
-    state.apple2.lastSpeakerToggles = result.speaker_toggles;
-    state.cycle += result.cycles_run;
-    updateApple2SpeakerAudio(result.speaker_toggles, result.cycles_run);
+    const cyclesRun = Math.max(0, Number.parseInt(result.cycles_run, 10) || 0);
+    const runnerKind = typeof runtime.sim.runner_kind === 'function'
+      ? runtime.sim.runner_kind()
+      : null;
+    const isMos6502Runner = runnerKind === 'mos6502' || state.runnerPreset === 'mos6502';
+    if (isMos6502Runner && requestedCycles > 0 && cyclesRun === 0) {
+      // MOS6502 runner API can report 0 cycles in some compiler/AOT combinations.
+      // Fall back to generic clocked stepping so run/step still progresses.
+      if (keyReady && state.apple2.keyQueue.length > 0) {
+        state.apple2.keyQueue.shift();
+      }
+      runGenericCycles(cycles);
+      return;
+    }
 
+    const speakerToggles = Math.max(0, Number.parseInt(result.speaker_toggles, 10) || 0);
+    state.apple2.lastCpuResult = result;
+    state.apple2.lastSpeakerToggles = speakerToggles;
+    state.cycle += cyclesRun;
+    if (speakerToggles > 0) {
+      updateApple2SpeakerAudio(speakerToggles, Math.max(1, cyclesRun));
+    }
+    pollMappedSound(cyclesRun);
     if (runtime.sim.trace_enabled()) {
       runtime.sim.trace_capture();
     }
@@ -193,6 +352,7 @@ export function createSimLoopRunnerService({
       setUiCyclesPendingState(0);
     }
 
+    updateThroughputSampling();
     refreshStatus();
     if (state.running) {
       requestFrame(runFrame);
@@ -203,6 +363,7 @@ export function createSimLoopRunnerService({
     queueApple2Key,
     runApple2Cycles,
     stepSimulation,
-    runFrame
+    runFrame,
+    resetThroughputSampling
   };
 }

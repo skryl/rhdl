@@ -108,9 +108,9 @@ test('initializeApple2Mode loads rom when preset enables ui', async () => {
   await initializeApple2Mode({
     runtime: {
       sim: {
-        apple2_mode: () => true,
+        runner_mode: () => true,
         has_signal: (name) => name === 'pc_debug' || name === 'speaker',
-        apple2_load_rom: (bytes) => {
+        runner_load_rom: (bytes) => {
           loaded.push(bytes.length);
         }
       }
@@ -123,5 +123,227 @@ test('initializeApple2Mode loads rom when preset enables ui', async () => {
   });
   assert.equal(state.apple2.enabled, true);
   assert.deepEqual(loaded, [3]);
-  assert.equal(logs.some((line) => String(line).includes('Loaded Apple II ROM')), true);
+  assert.equal(logs.some((line) => String(line).includes('Loaded runner ROM via runner_load_rom')), true);
+});
+
+test('initializeApple2Mode loads default bin into main memory and resets', async () => {
+  const calls = [];
+  await initializeApple2Mode({
+    runtime: {
+      sim: {
+        runner_mode: () => true,
+        runner_load_memory: (bytes, offset, options) => {
+          calls.push(['load', bytes.length, offset, options]);
+          return true;
+        },
+        runner_set_reset_vector: (pc) => {
+          calls.push(['setPc', pc]);
+          return true;
+        },
+        reset: () => calls.push(['reset'])
+      }
+    },
+    state: { apple2: { enabled: false, baseRomBytes: null } },
+    preset: {
+      defaultBin: {
+        path: '/fixtures/cpu/default.bin',
+        offset: 0x200,
+        space: 'main',
+        startPc: '0x0200',
+        resetAfterLoad: true
+      }
+    },
+    addWatchSignal: () => {},
+    fetchImpl: async () => ({
+      ok: true,
+      async arrayBuffer() {
+        return new Uint8Array([0xA9, 0x23]).buffer;
+      }
+    }),
+    log: () => {}
+  });
+
+  assert.deepEqual(calls, [
+    ['load', 2, 0x200, { isRom: false }],
+    ['setPc', 0x0200],
+    ['reset']
+  ]);
+});
+
+test('initializeApple2Mode loads boot ROM default bin through runner API', async () => {
+  const calls = [];
+  await initializeApple2Mode({
+    runtime: {
+      sim: {
+        runner_mode: () => true,
+        runner_load_boot_rom: (bytes) => {
+          calls.push(['boot', bytes.length]);
+          return true;
+        },
+        reset: () => calls.push(['reset'])
+      }
+    },
+    state: { apple2: { enabled: false, baseRomBytes: null } },
+    preset: {
+      defaultBin: {
+        path: '/fixtures/gameboy/dmg_boot.bin',
+        space: 'boot_rom',
+        resetAfterLoad: true
+      }
+    },
+    addWatchSignal: () => {},
+    fetchImpl: async () => ({
+      ok: true,
+      async arrayBuffer() {
+        return new Uint8Array([0x31, 0xFE, 0xFF]).buffer;
+      }
+    }),
+    log: () => {}
+  });
+
+  assert.deepEqual(calls, [
+    ['boot', 3],
+    ['reset']
+  ]);
+});
+
+test('initializeApple2Mode loads snapshot default bin using snapshot offset and start PC', async () => {
+  const calls = [];
+  const snapshotPayload = {
+    kind: 'rhdl.apple2.ram_snapshot',
+    version: 1,
+    label: 'Karateka dump (PC=$B82A)',
+    offset: 0x1200,
+    length: 3,
+    startPc: 0xB82A,
+    dataB64: 'AQID'
+  };
+
+  await initializeApple2Mode({
+    runtime: {
+      sim: {
+        runner_mode: () => true,
+        runner_load_memory: (bytes, offset, options) => {
+          calls.push(['load', Array.from(bytes), offset, options]);
+          return true;
+        },
+        runner_set_reset_vector: (pc) => {
+          calls.push(['setPc', pc]);
+          return true;
+        },
+        reset: () => calls.push(['reset'])
+      }
+    },
+    state: { apple2: { enabled: false, baseRomBytes: null } },
+    preset: {
+      defaultBin: {
+        path: '/fixtures/mos6502/karateka_mem.rhdlsnap',
+        offset: 0,
+        space: 'main',
+        resetAfterLoad: true
+      }
+    },
+    addWatchSignal: () => {},
+    fetchImpl: async () => ({
+      ok: true,
+      async text() {
+        return JSON.stringify(snapshotPayload);
+      }
+    }),
+    log: () => {}
+  });
+
+  assert.deepEqual(calls, [
+    ['load', [1, 2, 3], 0x1200, { isRom: false }],
+    ['setPc', 0xB82A],
+    ['reset']
+  ]);
+});
+
+test('initializeApple2Mode bootstraps mos6502 runner after default bin reset', async () => {
+  const calls = [];
+  const logs = [];
+  await initializeApple2Mode({
+    runtime: {
+      sim: {
+        runner_mode: () => true,
+        runner_kind: () => 'mos6502',
+        runner_load_memory: (bytes, offset, options) => {
+          calls.push(['load', bytes.length, offset, options]);
+          return true;
+        },
+        runner_set_reset_vector: (pc) => {
+          calls.push(['setPc', pc]);
+          return true;
+        },
+        reset: () => calls.push(['reset']),
+        has_signal: () => true,
+        poke: (name, value) => calls.push(['poke', name, value]),
+        runner_run_cycles: (cycles) => {
+          calls.push(['run', cycles]);
+          return { cycles_run: cycles };
+        },
+        runner_read_memory: (addr) => {
+          if ((addr & 0xFFFF) === 0xFFFC) {
+            return new Uint8Array([0x34]);
+          }
+          if ((addr & 0xFFFF) === 0xFFFD) {
+            return new Uint8Array([0x12]);
+          }
+          if ((addr & 0xFFFF) === 0x1234) {
+            return new Uint8Array([0xEA]);
+          }
+          return new Uint8Array([0x00]);
+        },
+        evaluate: () => calls.push(['evaluate']),
+        tick: () => calls.push(['tick'])
+      }
+    },
+    state: { apple2: { enabled: false, baseRomBytes: null } },
+    preset: {
+      defaultBin: {
+        path: '/fixtures/mos6502/default.bin',
+        offset: 0,
+        space: 'main',
+        startPc: 0x1234,
+        resetAfterLoad: true
+      }
+    },
+    addWatchSignal: () => {},
+    fetchImpl: async () => ({
+      ok: true,
+      async arrayBuffer() {
+        return new Uint8Array([0x00]).buffer;
+      }
+    }),
+    log: (message) => logs.push(String(message))
+  });
+
+  assert.deepEqual(calls, [
+    ['load', 1, 0, { isRom: false }],
+    ['setPc', 0x1234],
+    ['reset'],
+    ['poke', 'rst', 1],
+    ['poke', 'rdy', 1],
+    ['poke', 'irq', 1],
+    ['poke', 'nmi', 1],
+    ['poke', 'data_in', 0],
+    ['poke', 'ext_pc_load_en', 0],
+    ['poke', 'ext_a_load_en', 0],
+    ['poke', 'ext_x_load_en', 0],
+    ['poke', 'ext_y_load_en', 0],
+    ['poke', 'ext_sp_load_en', 0],
+    ['run', 1],
+    ['poke', 'rst', 0],
+    ['run', 5],
+    ['poke', 'ext_pc_load_data', 0x1234],
+    ['poke', 'ext_pc_load_en', 1],
+    ['poke', 'data_in', 0xEA],
+    ['poke', 'clk', 0],
+    ['evaluate'],
+    ['poke', 'clk', 1],
+    ['tick'],
+    ['poke', 'ext_pc_load_en', 0]
+  ]);
+  assert.equal(logs.some((line) => line.includes('MOS6502 bootstrap complete')), true);
 });

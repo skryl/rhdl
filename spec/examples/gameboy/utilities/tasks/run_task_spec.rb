@@ -55,8 +55,8 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
 
   describe '#initialize' do
     it 'accepts options hash' do
-      task = described_class.new(mode: :hdl, sim: :ruby)
-      expect(task.options[:mode]).to eq(:hdl)
+      task = described_class.new(mode: :ruby, sim: :ruby)
+      expect(task.options[:mode]).to eq(:ruby)
       expect(task.options[:sim]).to eq(:ruby)
     end
 
@@ -71,7 +71,7 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
       described_class.new(
         headless: true,
         demo: true,
-        mode: :hdl,
+        mode: :ruby,
         sim: :ruby,
         cycles: 100
       )
@@ -96,7 +96,7 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
 
   describe 'option handling' do
     context 'with demo option' do
-      let(:task) { described_class.new(headless: true, demo: true, mode: :hdl, sim: :ruby, cycles: 10) }
+      let(:task) { described_class.new(headless: true, demo: true, mode: :ruby, sim: :ruby, cycles: 10) }
 
       it 'loads demo ROM' do
         result = task.run
@@ -106,7 +106,7 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
 
     context 'with rom_bytes option' do
       let(:rom) { described_class.create_demo_rom }
-      let(:task) { described_class.new(headless: true, rom_bytes: rom, mode: :hdl, sim: :ruby, cycles: 10) }
+      let(:task) { described_class.new(headless: true, rom_bytes: rom, mode: :ruby, sim: :ruby, cycles: 10) }
 
       it 'loads ROM from bytes' do
         result = task.run
@@ -115,7 +115,7 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
     end
 
     context 'with invalid options' do
-      let(:task) { described_class.new(headless: true, mode: :hdl, sim: :ruby, cycles: 10) }
+      let(:task) { described_class.new(headless: true, mode: :ruby, sim: :ruby, cycles: 10) }
 
       it 'raises error when no ROM specified' do
         expect { task.run }.to raise_error(ArgumentError, /No ROM specified/)
@@ -123,14 +123,14 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
     end
 
     context 'with mode options' do
-      it 'accepts :hdl mode' do
-        task = described_class.new(headless: true, demo: true, mode: :hdl, sim: :ruby, cycles: 10)
+      it 'accepts :ruby mode' do
+        task = described_class.new(headless: true, demo: true, mode: :ruby, sim: :ruby, cycles: 10)
         task.run
-        expect(task.runner.mode).to eq(:hdl)
+        expect(task.runner.mode).to eq(:ruby)
       end
 
       it 'accepts different sim backends' do
-        task = described_class.new(headless: true, demo: true, mode: :hdl, sim: :ruby, cycles: 10)
+        task = described_class.new(headless: true, demo: true, mode: :ruby, sim: :ruby, cycles: 10)
         task.run
         expect(task.runner.sim_backend).to eq(:ruby)
       end
@@ -138,12 +138,12 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
   end
 
   describe 'HeadlessRunner integration' do
-    let(:task) { described_class.new(headless: true, demo: true, mode: :hdl, sim: :ruby, cycles: 50) }
+    let(:task) { described_class.new(headless: true, demo: true, mode: :ruby, sim: :ruby, cycles: 50) }
 
     before { task.run }
 
     it 'creates runner with correct mode' do
-      expect(task.runner.mode).to eq(:hdl)
+      expect(task.runner.mode).to eq(:ruby)
     end
 
     it 'creates runner with correct sim backend' do
@@ -165,7 +165,7 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
   end
 
   describe 'PC progression' do
-    let(:task) { described_class.new(headless: true, demo: true, mode: :hdl, sim: :ruby, cycles: 10) }
+    let(:task) { described_class.new(headless: true, demo: true, mode: :ruby, sim: :ruby, cycles: 10) }
 
     it 'has valid PC after running' do
       result = task.run
@@ -180,8 +180,8 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
     end
 
     it 'cycle count increases with more cycles' do
-      task1 = described_class.new(headless: true, demo: true, mode: :hdl, sim: :ruby, cycles: 10)
-      task2 = described_class.new(headless: true, demo: true, mode: :hdl, sim: :ruby, cycles: 100)
+      task1 = described_class.new(headless: true, demo: true, mode: :ruby, sim: :ruby, cycles: 10)
+      task2 = described_class.new(headless: true, demo: true, mode: :ruby, sim: :ruby, cycles: 100)
 
       result1 = task1.run
       result2 = task2.run
@@ -199,12 +199,12 @@ RSpec.describe RHDL::Examples::GameBoy::Tasks::RunTask do
   end
 
   describe 'configuration validation' do
-    context 'with hdl mode and ruby backend' do
-      let(:task) { described_class.new(headless: true, demo: true, mode: :hdl, sim: :ruby, cycles: 10) }
+    context 'with ruby mode and ruby backend' do
+      let(:task) { described_class.new(headless: true, demo: true, mode: :ruby, sim: :ruby, cycles: 10) }
 
-      it 'creates runner with hdl mode' do
+      it 'creates runner with ruby mode' do
         task.run
-        expect(task.runner.mode).to eq(:hdl)
+        expect(task.runner.mode).to eq(:ruby)
       end
 
       it 'creates runner with ruby backend' do

@@ -62,6 +62,25 @@ export function createApple2RomResetService({
     if (!runtime.sim || !isApple2UiEnabled()) {
       return { applied: false, pc, reason: 'runner inactive' };
     }
+    const hasSetResetVector = typeof runtime.sim.runner_set_reset_vector === 'function';
+    const hasLoadRom = typeof runtime.sim.runner_load_rom === 'function';
+    if (!hasSetResetVector && !hasLoadRom) {
+      return { applied: false, pc, reason: 'not supported by this runner' };
+    }
+    if (typeof runtime.sim.runner_mode === 'function' && !runtime.sim.runner_mode()) {
+      return { applied: false, pc, reason: 'not supported by this runner' };
+    }
+
+    if (hasSetResetVector) {
+      const ok = runtime.sim.runner_set_reset_vector(pc);
+      if (ok) {
+        return { applied: true, pc, reason: 'ok' };
+      }
+    }
+
+    if (!hasLoadRom) {
+      return { applied: false, pc, reason: 'not supported by this runner' };
+    }
 
     const baseRom = await ensureBaseRomBytes();
     if (!(baseRom instanceof Uint8Array) || baseRom.length === 0) {
@@ -69,7 +88,7 @@ export function createApple2RomResetService({
     }
 
     const patchedRom = patchApple2ResetVector(baseRom, pc);
-    const ok = runtime.sim.apple2_load_rom(patchedRom);
+    const ok = runtime.sim.runner_load_rom(patchedRom);
     return { applied: !!ok, pc, reason: ok ? 'ok' : 'rom load failed' };
   }
 

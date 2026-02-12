@@ -148,8 +148,8 @@ module RHDL
         def initialize_runner
           require_relative '../runners/headless_runner'
 
-          mode = options[:mode] || :hdl
-          sim = options[:sim] || :compile
+          mode = options[:mode] || :ruby
+          sim = options[:sim] || (mode == :ir ? :compile : :ruby)
 
           @runner = HeadlessRunner.new(mode: mode, sim: sim)
         end
@@ -259,7 +259,12 @@ module RHDL
           trap('TERM') { @running = false }
           trap('WINCH') { update_terminal_size; print CLEAR_SCREEN }
 
-          mode_name = "HDL (cycle-accurate)"
+          mode_name = case options[:mode] || :ruby
+                      when :ruby then "Ruby HDL (behavioral)"
+                      when :ir then "IR (native backend)"
+                      when :verilog then "Verilog (Verilator RTL)"
+                      else (options[:mode] || :ruby).to_s
+                      end
           puts "Starting Game Boy emulator in #{mode_name} mode..."
           puts "Backend: #{@runner.simulator_type}"
           if @audio_enabled && defined?(Speaker)
