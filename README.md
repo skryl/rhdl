@@ -398,9 +398,9 @@ Modern 32-bit RISC-V processor with single-cycle and 5-stage pipelined implement
 
 **Usage:**
 ```ruby
-require_relative 'examples/riscv/hdl/harness'
+require_relative 'examples/riscv/hdl/ir_harness'
 
-harness = RISCV::Harness.new
+harness = RHDL::Examples::RISCV::IRHarness.new(backend: :jit, allow_fallback: false)
 harness.load_program([
   0x00500093,  # addi x1, x0, 5
   0x00A00113,  # addi x2, x0, 10
