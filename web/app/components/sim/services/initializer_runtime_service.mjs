@@ -1,4 +1,5 @@
 import { resolveRunnerIoConfig } from '../../runner/lib/io_config.mjs';
+import { isSnapshotFileName, parseApple2SnapshotText } from '../../apple2/lib/snapshot.mjs';
 
 const DEFAULT_APPLE2_WATCHES = ['pc_debug', 'a_debug', 'x_debug', 'y_debug', 'opcode_debug', 'speaker'];
 const U16_MASK = 0xFFFF;
@@ -125,7 +126,27 @@ async function loadDefaultBinAsset({
       return false;
     }
 
-    const bytes = new Uint8Array(await binResp.arrayBuffer());
+    let bytes = null;
+    let loadOffset = defaultBin.offset;
+    let startPc = defaultBin.startPc;
+
+    if (isSnapshotFileName(defaultBin.path)) {
+      const snapshot = parseApple2SnapshotText(await binResp.text());
+      if (!snapshot) {
+        log(`Default snapshot parse failed: ${defaultBin.path}`);
+        return false;
+      }
+      bytes = snapshot.bytes;
+      if (Number.isFinite(snapshot.offset)) {
+        loadOffset = Math.max(0, Number(snapshot.offset) || 0);
+      }
+      if (snapshot.startPc != null) {
+        startPc = snapshot.startPc & U16_MASK;
+      }
+    } else {
+      bytes = new Uint8Array(await binResp.arrayBuffer());
+    }
+
     let loaded = false;
 
     if (defaultBin.space === 'boot_rom') {
@@ -134,17 +155,17 @@ async function loadDefaultBinAsset({
       }
     } else if (defaultBin.space === 'rom') {
       if (supportsRunnerApi && typeof runtime.sim.runner_load_rom === 'function') {
-        loaded = didCallSucceed(runtime.sim.runner_load_rom(bytes, defaultBin.offset));
+        loaded = didCallSucceed(runtime.sim.runner_load_rom(bytes, loadOffset));
       } else if (supportsRunnerApi && typeof runtime.sim.runner_load_memory === 'function') {
-        loaded = didCallSucceed(runtime.sim.runner_load_memory(bytes, defaultBin.offset, { isRom: true }));
+        loaded = didCallSucceed(runtime.sim.runner_load_memory(bytes, loadOffset, { isRom: true }));
       } else if (supportsGenericMemoryApi && typeof runtime.sim.memory_load === 'function') {
-        loaded = didCallSucceed(runtime.sim.memory_load(bytes, defaultBin.offset, { isRom: true }));
+        loaded = didCallSucceed(runtime.sim.memory_load(bytes, loadOffset, { isRom: true }));
       }
     } else {
       if (supportsRunnerApi && typeof runtime.sim.runner_load_memory === 'function') {
-        loaded = didCallSucceed(runtime.sim.runner_load_memory(bytes, defaultBin.offset, { isRom: false }));
+        loaded = didCallSucceed(runtime.sim.runner_load_memory(bytes, loadOffset, { isRom: false }));
       } else if (supportsGenericMemoryApi && typeof runtime.sim.memory_load === 'function') {
-        loaded = didCallSucceed(runtime.sim.memory_load(bytes, defaultBin.offset, { isRom: false }));
+        loaded = didCallSucceed(runtime.sim.memory_load(bytes, loadOffset, { isRom: false }));
       }
     }
 
@@ -153,10 +174,10 @@ async function loadDefaultBinAsset({
       return false;
     }
 
-    if (defaultBin.startPc != null && typeof runtime.sim.runner_set_reset_vector === 'function') {
-      const pcApplied = didCallSucceed(runtime.sim.runner_set_reset_vector(defaultBin.startPc));
+    if (startPc != null && typeof runtime.sim.runner_set_reset_vector === 'function') {
+      const pcApplied = didCallSucceed(runtime.sim.runner_set_reset_vector(startPc));
       if (!pcApplied) {
-        log(`Default bin reset vector apply failed (PC=$${defaultBin.startPc.toString(16).padStart(4, '0')})`);
+        log(`Default bin reset vector apply failed (PC=$${startPc.toString(16).padStart(4, '0')})`);
       }
     }
 
@@ -164,7 +185,7 @@ async function loadDefaultBinAsset({
       runtime.sim.reset();
     }
 
-    log(`Loaded default bin (${defaultBin.space}) @ 0x${defaultBin.offset.toString(16)}: ${defaultBin.path}`);
+    log(`Loaded default bin (${defaultBin.space}) @ 0x${loadOffset.toString(16)}: ${defaultBin.path}`);
     return true;
   } catch (err) {
     log(`Failed to load default bin: ${err.message || err}`);

@@ -7,7 +7,7 @@ import {
   resolveWebRoot
 } from './browser_test_harness.mjs';
 
-test('mos6502 runner loads with compiler backend using runner-specific AOT wasm', { timeout: 180000 }, async (t) => {
+test('memory follow-pc auto-scrolls and changed bytes are temporarily highlighted', { timeout: 180000 }, async (t) => {
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
@@ -56,25 +56,39 @@ test('mos6502 runner loads with compiler backend using runner-specific AOT wasm'
     }
     return Array.from(select.options).some((opt) => opt.value === 'mos6502');
   }, null, { timeout: 120000 });
-
-  await page.selectOption('#backendSelect', 'compiler');
-  await page.dispatchEvent('#backendSelect', 'change');
   await page.selectOption('#runnerSelect', 'mos6502');
   await page.click('#loadRunnerBtn');
-
   await page.waitForFunction(() => {
     const text = document.querySelector('#runnerStatus')?.textContent || '';
-    return text.includes('MOS 6502 CPU Runner') && text.includes('Compiler');
+    return text.includes('MOS 6502 CPU Runner');
   }, null, { timeout: 120000 });
+
+  await page.click('[data-tab="memoryTab"]');
+  await page.fill('#memoryLength', '0x10000');
+  await page.check('#memoryFollowPc');
+  await page.click('#memoryRefreshBtn');
+
   await page.waitForFunction(() => {
-    const text = document.querySelector('#simStatus')?.textContent || '';
-    return text.includes('Cycle 0');
-  }, null, { timeout: 120000 });
+    const view = document.querySelector('#memoryDump');
+    const dumpPre = view?.shadowRoot?.querySelector('#memoryDumpPre');
+    const disasmPre = view?.shadowRoot?.querySelector('#memoryDisasmPre');
+    if (!(dumpPre instanceof HTMLElement) || !(disasmPre instanceof HTMLElement)) {
+      return false;
+    }
+    return dumpPre.scrollTop > 0 && disasmPre.scrollTop > 0;
+  }, null, { timeout: 60000 });
+
+  await page.fill('#memoryWriteAddr', '0x0010');
+  await page.fill('#memoryWriteValue', '0x41');
+  await page.click('#memoryWriteBtn');
+  await page.fill('#memoryWriteValue', '0x42');
+  await page.click('#memoryWriteBtn');
+
   await page.waitForFunction(() => {
-    const log = document.querySelector('#eventLog')?.textContent || '';
-    return log.includes('Loaded default bin')
-      && log.includes('./assets/fixtures/mos6502/memory/karateka_mem.rhdlsnap');
-  }, null, { timeout: 120000 });
+    const view = document.querySelector('#memoryDump');
+    const changed = view?.shadowRoot?.querySelectorAll('.changed-byte')?.length || 0;
+    return changed > 0;
+  }, null, { timeout: 30000 });
 
   assert.deepEqual(pageErrors, [], `Unhandled page errors: ${pageErrors.join(' | ')}`);
   assert.deepEqual(consoleErrors, [], `Console errors: ${consoleErrors.join(' | ')}`);

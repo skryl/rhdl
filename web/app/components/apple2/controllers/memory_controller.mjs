@@ -29,6 +29,22 @@ export function createApple2MemoryController({
   requireFn('setMemoryDumpStatus', setMemoryDumpStatus);
   const MAX_MEMORY_VIEW_LENGTH = 0x10000;
   const BYTES_PER_MEMORY_ROW = 16;
+  const CHANGE_HIGHLIGHT_MS = 750;
+  const previousWindowBytes = new Map();
+  const changedByteExpiryMs = new Map();
+
+  function resetHighlightState() {
+    previousWindowBytes.clear();
+    changedByteExpiryMs.clear();
+  }
+
+  function pruneExpiredHighlights(nowMs) {
+    for (const [addr, expiryMs] of changedByteExpiryMs.entries()) {
+      if (expiryMs <= nowMs) {
+        changedByteExpiryMs.delete(addr);
+      }
+    }
+  }
 
   function currentIoConfig() {
     return state.apple2?.ioConfig || {};
@@ -92,21 +108,25 @@ export function createApple2MemoryController({
 
   function refreshMemoryView() {
     if (!dom.memoryDump || !runtime.sim) {
+      resetHighlightState();
       renderMemoryPanel(dom, {
         followDisabled: !isApple2UiEnabled(),
         followChecked: !!state.memory.followPc,
         dumpText: '',
-        disasmText: ''
+        disasmText: '',
+        dumpRows: []
       });
       return;
     }
 
     if (!isApple2UiEnabled()) {
+      resetHighlightState();
       renderMemoryPanel(dom, {
         followDisabled: true,
         followChecked: !!state.memory.followPc,
         dumpText: 'Load a runner with memory + I/O support to browse memory.',
-        disasmText: 'Load a runner with memory + I/O support to view disassembly.'
+        disasmText: 'Load a runner with memory + I/O support to view disassembly.',
+        dumpRows: []
       });
       setMemoryDumpStatus('Memory dump loading requires a runner with memory + I/O support.');
       return;
@@ -130,37 +150,76 @@ export function createApple2MemoryController({
     const data = readApple2MappedMemory(start, length);
 
     if (!data || data.length === 0) {
+      resetHighlightState();
       renderMemoryPanel(dom, {
         followDisabled: false,
         followChecked: !!state.memory.followPc,
         dumpText: 'No memory data',
-        disasmText: 'No disassembly data'
+        disasmText: 'No disassembly data',
+        dumpRows: []
       });
       return;
     }
 
+    const nowMs = Date.now();
+    pruneExpiredHighlights(nowMs);
+    const nextWindowBytes = new Map();
     const lines = [];
+    const dumpRows = [];
     for (let i = 0; i < data.length; i += 16) {
       const row = data.slice(i, i + 16);
-      const hex = Array.from(row, (b) => hexByte(b)).join(' ');
+      const rowBytes = [];
+      for (let j = 0; j < row.length; j += 1) {
+        const value = row[j] & 0xff;
+        const byteAddr = (start + i + j) % addrSpace;
+        const previous = previousWindowBytes.get(byteAddr);
+        if (previous != null && previous !== value) {
+          changedByteExpiryMs.set(byteAddr, nowMs + CHANGE_HIGHLIGHT_MS);
+        }
+        nextWindowBytes.set(byteAddr, value);
+        const changed = (changedByteExpiryMs.get(byteAddr) || 0) > nowMs;
+        rowBytes.push({
+          hex: hexByte(value),
+          changed
+        });
+      }
+      const hex = rowBytes.map((entry) => entry.hex).join(' ');
       const ascii = Array.from(row, (b) => (b >= 32 && b <= 126 ? String.fromCharCode(b) : '.')).join('');
       const addr = (start + i) % addrSpace;
       const hasPc = pc != null && (((pc & 0xffff) - addr + addrSpace) % addrSpace) < row.length;
       const marker = hasPc ? '>>' : '  ';
       lines.push(`${marker} ${hexWord(addr)}: ${hex.padEnd(16 * 3 - 1, ' ')}  ${ascii}`);
+      dumpRows.push({
+        marker,
+        addressHex: hexWord(addr),
+        bytes: rowBytes,
+        ascii
+      });
     }
+
+    previousWindowBytes.clear();
+    for (const [addr, value] of nextWindowBytes.entries()) {
+      previousWindowBytes.set(addr, value);
+    }
+
     const disasmLineCount = Math.max(1, Math.ceil(length / BYTES_PER_MEMORY_ROW));
     const disasmStart = start;
     renderMemoryPanel(dom, {
       followDisabled: false,
       followChecked: !!state.memory.followPc,
       dumpText: lines.join('\n'),
+      dumpRows,
       disasmText: disassemble6502LinesWithMemory(
         disasmStart,
         disasmLineCount,
         readApple2MappedMemory,
         { highlightPc: pc, addressSpace: addrSpace }
-      ).join('\n')
+      ).join('\n'),
+      followPc: !!state.memory.followPc,
+      pcAddress: pc,
+      windowStart: start,
+      addressSpace: addrSpace,
+      bytesPerRow: BYTES_PER_MEMORY_ROW
     });
   }
 

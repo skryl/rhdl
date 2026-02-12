@@ -24,7 +24,9 @@ module RHDL
         KARATEKA_MEM_SOURCE = File.join(PROJECT_ROOT, 'examples/apple2/software/disks/karateka_mem.bin')
         KARATEKA_META_SOURCE = File.join(PROJECT_ROOT, 'examples/apple2/software/disks/karateka_mem_meta.txt')
         CPU8BIT_DEFAULT_BIN_SOURCE = File.join(PROJECT_ROOT, 'examples/8bit/software/bin/conway_glider_80x24.bin')
+        CPU8BIT_SOFTWARE_BIN_DIR = File.join(PROJECT_ROOT, 'examples/8bit/software/bin')
         MOS6502_DEFAULT_BIN_SOURCE = File.join(PROJECT_ROOT, 'examples/mos6502/software/disks/karateka_mem.bin')
+        MOS6502_DEFAULT_SNAPSHOT_SOURCE = File.join(SCRIPT_DIR, 'apple2', 'memory', 'karateka_mem.rhdlsnap')
         GAMEBOY_DEFAULT_BIN_SOURCE = File.join(PROJECT_ROOT, 'examples/gameboy/software/roms/dmg_boot.bin')
         SNAPSHOT_KIND = 'rhdl.apple2.ram_snapshot'
         SNAPSHOT_VERSION = 1
@@ -37,6 +39,10 @@ module RHDL
           {
             src: MOS6502_DEFAULT_BIN_SOURCE,
             dst: File.join(SCRIPT_DIR, 'mos6502', 'memory', 'karateka_mem.bin')
+          },
+          {
+            src: MOS6502_DEFAULT_SNAPSHOT_SOURCE,
+            dst: File.join(SCRIPT_DIR, 'mos6502', 'memory', 'karateka_mem.rhdlsnap')
           },
           {
             src: GAMEBOY_DEFAULT_BIN_SOURCE,
@@ -179,9 +185,20 @@ module RHDL
 
         def generate_runner_default_bin_assets
           puts 'Generating web default binary assets...'
-          DEFAULT_BIN_ASSETS.each do |asset|
+          assets = (DEFAULT_BIN_ASSETS + cpu8bit_software_bin_assets)
+            .uniq { |entry| entry[:dst] }
+          assets.each do |asset|
             ensure_dir(File.dirname(asset[:dst]))
             copy_required_file(asset[:src], asset[:dst])
+          end
+        end
+
+        def cpu8bit_software_bin_assets
+          Dir.glob(File.join(CPU8BIT_SOFTWARE_BIN_DIR, '*.bin')).sort.map do |src|
+            {
+              src: src,
+              dst: File.join(SCRIPT_DIR, 'cpu', 'software', File.basename(src))
+            }
           end
         end
 
