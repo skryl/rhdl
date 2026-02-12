@@ -1,3 +1,6 @@
+require_relative 'control_unit'
+require_relative 'cpu_alu'
+
 module RHDL
   module Components
     module CPU

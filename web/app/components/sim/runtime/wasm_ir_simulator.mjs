@@ -4,8 +4,10 @@ const SIM_CAP_SIGNAL_INDEX = 1 << 0;
 const SIM_CAP_FORCED_CLOCK = 1 << 1;
 const SIM_CAP_TRACE = 1 << 2;
 const SIM_CAP_TRACE_STREAMING = 1 << 3;
-const SIM_CAP_COMPILE = 1 << 4;
-const SIM_CAP_GENERATED_CODE = 1 << 5;
+const SIM_CAP_RUNNER_INTERP_JIT = 1 << 4;
+const SIM_CAP_COMPILE_COMPILER = 1 << 4;
+const SIM_CAP_GENERATED_CODE_COMPILER = 1 << 5;
+const SIM_CAP_RUNNER_COMPILER = 1 << 6;
 
 const SIM_SIGNAL_HAS = 0;
 const SIM_SIGNAL_GET_INDEX = 1;
@@ -51,6 +53,7 @@ const SIM_BLOB_GENERATED_CODE = 4;
 const RUNNER_KIND_APPLE2 = 1;
 const RUNNER_KIND_MOS6502 = 2;
 const RUNNER_KIND_GAMEBOY = 3;
+const RUNNER_KIND_CPU8BIT = 4;
 
 const RUNNER_MEM_OP_LOAD = 0;
 const RUNNER_MEM_OP_READ = 1;
@@ -286,13 +289,17 @@ export class WasmIrSimulator {
       this.u8().fill(0, capsPtr, capsPtr + 4);
       const ok = this.e.sim_get_caps(this.ctx, capsPtr);
       const flags = ok !== 0 ? new DataView(this.memoryBuffer(), capsPtr, 4).getUint32(0, true) : 0;
+      const isCompilerBackend = this.backend?.id === 'compiler';
+      const hasRunnerCap = isCompilerBackend
+        ? (flags & SIM_CAP_RUNNER_COMPILER) !== 0
+        : (flags & SIM_CAP_RUNNER_INTERP_JIT) !== 0;
       return {
         hasSignalIndex: (flags & SIM_CAP_SIGNAL_INDEX) !== 0,
         hasForcedClock: (flags & SIM_CAP_FORCED_CLOCK) !== 0,
         hasLiveTrace: (flags & SIM_CAP_TRACE) !== 0,
-        requiresCompile: (flags & SIM_CAP_COMPILE) !== 0,
-        hasGeneratedCode: (flags & SIM_CAP_GENERATED_CODE) !== 0,
-        hasRunnerApi: this.e.__features?.hasRunnerApi === true
+        requiresCompile: isCompilerBackend && (flags & SIM_CAP_COMPILE_COMPILER) !== 0,
+        hasGeneratedCode: isCompilerBackend && (flags & SIM_CAP_GENERATED_CODE_COMPILER) !== 0,
+        hasRunnerApi: hasRunnerCap || this.e.__features?.hasRunnerApi === true
       };
     } finally {
       this.dealloc(capsPtr, 4);
@@ -798,6 +805,9 @@ export class WasmIrSimulator {
     if (raw === RUNNER_KIND_GAMEBOY) {
       return 'gameboy';
     }
+    if (raw === RUNNER_KIND_CPU8BIT) {
+      return 'cpu8bit';
+    }
     return null;
   }
 
@@ -1020,7 +1030,7 @@ export class WasmIrSimulator {
 
   memory_mode() {
     const kind = this.runner_kind();
-    if (kind === 'apple2' || kind === 'mos6502') {
+    if (kind === 'apple2' || kind === 'mos6502' || kind === 'cpu8bit') {
       return kind;
     }
     return null;

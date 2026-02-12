@@ -103,3 +103,92 @@ test('apple2 dump workflow service loads snapshot and applies start PC when avai
   assert.equal(loaded[0].offset, 0x2000);
   assert.equal(loaded[0].opts.resetAfterLoad, true);
 });
+
+test('apple2 dump workflow service loads binary dump bytes from an asset path', async () => {
+  const loaded = [];
+  const statusMessages = [];
+  const service = createApple2DumpWorkflowService({
+    dom: {},
+    state: { memory: {}, apple2: {} },
+    runtime: { sim: {} },
+    APPLE2_RAM_BYTES: 64 * 1024,
+    KARATEKA_PC: 0xB82A,
+    dumpStorageService: { save: () => true, load: () => null },
+    downloadService: { downloadMemoryDump: () => {}, downloadSnapshot: () => {} },
+    romResetService: {
+      applySnapshotStartPc: async () => ({ applied: false, reason: 'noop' }),
+      patchApple2ResetVector: (bytes) => bytes
+    },
+    getApple2ProgramCounter: () => 0xB82A,
+    ensureApple2Ready: () => true,
+    setMemoryDumpStatus: (message) => {
+      statusMessages.push(String(message || ''));
+    },
+    setMemoryResetVectorInput: () => {},
+    loadApple2MemoryDumpBytes: async (bytes, offset, options) => {
+      loaded.push({ bytes, offset, options });
+      return true;
+    },
+    log: () => {},
+    fetchImpl: async () => ({
+      ok: true,
+      arrayBuffer: async () => Uint8Array.from([0x41, 0x42, 0x43]).buffer
+    })
+  });
+
+  const ok = await service.loadApple2DumpOrSnapshotAssetPath('./assets/fixtures/cpu/software/sample.bin', '0x1000');
+  assert.equal(ok, true);
+  assert.equal(loaded.length, 1);
+  assert.deepEqual(Array.from(loaded[0].bytes), [0x41, 0x42, 0x43]);
+  assert.equal(loaded[0].offset, '0x1000');
+  assert.equal(loaded[0].options.label, 'sample.bin');
+  assert.equal(statusMessages.length, 0);
+});
+
+test('apple2 dump workflow service loads snapshot payload from an asset path', async () => {
+  const loaded = [];
+  const dom = {
+    memoryDumpOffset: { value: '' },
+    memoryDumpStatus: { textContent: '' }
+  };
+  const snapshot = buildApple2SnapshotPayload(
+    new Uint8Array([0xAA, 0xBB, 0xCC]),
+    0x3000,
+    'asset snapshot',
+    '2026-02-12T00:00:00.000Z',
+    0xB82A
+  );
+  const service = createApple2DumpWorkflowService({
+    dom,
+    state: { memory: {}, apple2: {} },
+    runtime: { sim: {} },
+    APPLE2_RAM_BYTES: 64 * 1024,
+    KARATEKA_PC: 0xB82A,
+    dumpStorageService: { save: () => true, load: () => null },
+    downloadService: { downloadMemoryDump: () => {}, downloadSnapshot: () => {} },
+    romResetService: {
+      applySnapshotStartPc: async () => ({ applied: true, pc: 0xB82A, reason: 'ok' }),
+      patchApple2ResetVector: (bytes) => bytes
+    },
+    getApple2ProgramCounter: () => 0xB82A,
+    ensureApple2Ready: () => true,
+    setMemoryDumpStatus: () => {},
+    setMemoryResetVectorInput: () => {},
+    loadApple2MemoryDumpBytes: async (bytes, offset, options) => {
+      loaded.push({ bytes, offset, options });
+      return true;
+    },
+    log: () => {},
+    fetchImpl: async () => ({
+      ok: true,
+      text: async () => JSON.stringify(snapshot)
+    })
+  });
+
+  const ok = await service.loadApple2DumpOrSnapshotAssetPath('./assets/fixtures/apple2/memory/karateka_mem.rhdlsnap', 0);
+  assert.equal(ok, true);
+  assert.equal(dom.memoryDumpOffset.value, '0x3000');
+  assert.equal(loaded.length, 1);
+  assert.equal(loaded[0].offset, 0x3000);
+  assert.equal(loaded[0].options.resetAfterLoad, true);
+});

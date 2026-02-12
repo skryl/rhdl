@@ -1,0 +1,28 @@
+{
+  "runner": {
+    "id": "gameboy",
+    "label": "Game Boy System Runner",
+    "order": 50,
+    "topClassName": "RHDL::Examples::GameBoy::Gameboy",
+    "requires": [
+      "examples/gameboy/gameboy"
+    ],
+    "simIrPath": "./assets/fixtures/gameboy/ir/gameboy.json",
+    "explorerIrPath": "./assets/fixtures/gameboy/ir/gameboy_hier.json",
+    "sourceBundlePath": "./assets/fixtures/gameboy/ir/gameboy_sources.json",
+    "schematicPath": "./assets/fixtures/gameboy/ir/gameboy_schematic.json",
+    "preferredTab": "ioTab",
+    "enableApple2Ui": false,
+    "usesManualIr": false,
+    "defaultBin": {
+      "path": "./assets/fixtures/gameboy/roms/dmg_boot.bin",
+      "offset": 0,
+      "space": "boot_rom",
+      "resetAfterLoad": true
+    },
+    "timing": {
+      "cyclesPerHertz": 1,
+      "hertzLabel": "SM83"
+    }
+  }
+}

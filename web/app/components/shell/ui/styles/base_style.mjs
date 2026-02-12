@@ -496,6 +496,96 @@ export const SHELL_BASE_STYLE = String.raw`
     min-width: 0;
   }
 
+  .memory-dumps-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  .memory-dumps-assets,
+  .memory-dumps-controls {
+    min-width: 0;
+  }
+
+  .memory-dumps-assets {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
+  }
+
+  .memory-dumps-assets h3,
+  .memory-dumps-controls h3 {
+    margin: 0 0 8px;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #9cbfdf;
+  }
+
+  .memory-dump-tree {
+    min-height: 0;
+    height: 100%;
+    overflow: auto;
+    border: 1px solid #2a4a67;
+    border-radius: 8px;
+    padding: 8px;
+    background: rgba(4, 19, 32, 0.82);
+  }
+
+  .memory-dump-tree-root,
+  .memory-dump-tree-branch {
+    margin: 0;
+    padding-left: 14px;
+    list-style: none;
+  }
+
+  .memory-dump-tree-root {
+    padding-left: 0;
+  }
+
+  .memory-dump-tree details > summary {
+    cursor: pointer;
+    color: #b8d3f0;
+    font-size: 0.8rem;
+  }
+
+  .memory-dump-tree-file-item {
+    margin: 3px 0;
+  }
+
+  .memory-dump-tree-file {
+    width: 100%;
+    text-align: left;
+    border: 1px solid #24476b;
+    border-radius: 6px;
+    background: #0f2539;
+    color: #d0e8ff;
+    font-size: 0.75rem;
+    padding: 4px 8px;
+  }
+
+  .memory-dump-tree-file:hover {
+    border-color: #3e6e96;
+  }
+
+  .memory-dump-tree-file.selected {
+    border-color: #3dd7c2;
+    background: #153a46;
+    color: #d8fff6;
+  }
+
+  #memoryDumpAssetPath {
+    min-width: 260px;
+    flex: 1 1 320px;
+  }
+
+  @media (max-width: 1080px) {
+    .memory-dumps-layout {
+      grid-template-columns: 1fr;
+    }
+  }
+
   .component-layout {
     display: grid;
     grid-template-columns: minmax(300px, 0.8fr) minmax(0, 1.2fr);

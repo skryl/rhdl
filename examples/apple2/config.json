@@ -1,0 +1,61 @@
+{
+  "runner": {
+    "id": "apple2",
+    "label": "Apple II System Runner",
+    "order": 40,
+    "default": true,
+    "topClassName": "RHDL::Examples::Apple2::Apple2",
+    "requires": [
+      "examples/apple2/hdl/apple2"
+    ],
+    "simIrPath": "./assets/fixtures/apple2/ir/apple2.json",
+    "explorerIrPath": "./assets/fixtures/apple2/ir/apple2_hier.json",
+    "sourceBundlePath": "./assets/fixtures/apple2/ir/apple2_sources.json",
+    "schematicPath": "./assets/fixtures/apple2/ir/apple2_schematic.json",
+    "romPath": "./assets/fixtures/apple2/memory/appleiigo.rom",
+    "preferredTab": "ioTab",
+    "enableApple2Ui": true,
+    "usesManualIr": false,
+    "autoLoadOnBoot": true,
+    "defaultBin": {
+      "path": "./assets/fixtures/apple2/memory/karateka_mem.bin",
+      "offset": 0,
+      "space": "main",
+      "startPc": "0xB82A",
+      "resetAfterLoad": true
+    },
+    "timing": {
+      "cyclesPerHertz": 1,
+      "hertzLabel": "6502"
+    },
+    "io": {
+      "enabled": true,
+      "api": "apple2",
+      "memory": {
+        "dumpStart": 0,
+        "dumpLength": 49152,
+        "addressSpace": 65536,
+        "viewMapped": true,
+        "dumpReadMapped": false,
+        "directWriteMapped": false
+      },
+      "display": {
+        "enabled": true,
+        "mode": "apple2"
+      },
+      "keyboard": {
+        "enabled": true,
+        "mode": "apple2_special"
+      },
+      "sound": {
+        "enabled": true,
+        "mode": "apple2_special"
+      }
+    },
+    "defaults": {
+      "displayHires": true,
+      "displayColor": true,
+      "memoryFollowPc": true
+    }
+  }
+}

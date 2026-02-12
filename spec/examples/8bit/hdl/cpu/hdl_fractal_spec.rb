@@ -1,7 +1,6 @@
 require 'spec_helper'
 require 'support/cpu_assembler'
 require 'support/display_helper'
-require 'rhdl/hdl/cpu/harness'
 
 RSpec.describe RHDL::HDL::CPU::FastHarness, 'Mandelbrot' do
   include DisplayHelper

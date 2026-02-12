@@ -49,11 +49,7 @@ rhdl-app-shell {
         <section>
           <h2>Runners</h2>
           <div class="row">
-            <select id="runnerSelect">
-              <option value="generic">Generic IR Runner</option>
-              <option value="cpu">CPU (lib/rhdl/hdl/cpu)</option>
-              <option value="apple2" selected>Apple II System Runner</option>
-            </select>
+            <select id="runnerSelect"></select>
             <button id="loadRunnerBtn">Load</button>
           </div>
           <p id="runnerStatus" class="status">Runner not initialized</p>
@@ -84,10 +80,7 @@ rhdl-app-shell {
         <section id="irSourceSection">
           <h2>IR Source</h2>
           <div class="row">
-            <select id="sampleSelect">
-              <option value="./assets/fixtures/apple2/ir/apple2.json">Apple II (examples/apple2/hdl/apple2)</option>
-              <option value="./assets/fixtures/cpu/ir/cpu_lib_hdl.json">CPU (lib/rhdl/hdl/cpu)</option>
-            </select>
+            <select id="sampleSelect"></select>
             <button id="loadSampleBtn">Load Sample</button>
             <input id="irFileInput" type="file" accept=".json" />
           </div>
@@ -243,9 +236,9 @@ rhdl-app-shell {
             <h2>Memory Browser</h2>
             <div class="row wrap">
               <label for="memoryStart">Start</label>
-              <input id="memoryStart" type="text" value="0x0400" />
+              <input id="memoryStart" type="text" value="0x0000" />
               <label for="memoryLength">Length</label>
-              <input id="memoryLength" type="text" value="256" />
+              <input id="memoryLength" type="text" value="0x10000" />
               <button id="memoryRefreshBtn">Refresh</button>
               <label class="toggle-pill memory-follow">
                 <input id="memoryFollowPc" type="checkbox" />
@@ -259,20 +252,31 @@ rhdl-app-shell {
 
           <section class="subpanel">
             <h2>Memory Dumps</h2>
-            <div class="row wrap">
-              <input id="memoryDumpFile" type="file" accept=".bin,.mem,.dat,.rhdlsnap,.snapshot,application/octet-stream,application/json" />
-              <label for="memoryDumpOffset">Offset</label>
-              <input id="memoryDumpOffset" type="text" value="0x0000" />
-              <button id="memoryDumpLoadBtn">Load Dump/Snapshot</button>
-              <button id="memoryDumpSaveBtn">Save Dump</button>
-              <button id="memorySnapshotSaveBtn">Download Snapshot</button>
-              <button id="memoryDumpLoadLastBtn">Load Last Saved</button>
-              <button id="loadKaratekaBtn">Load Karateka Dump</button>
-            </div>
-            <div class="row wrap">
-              <label for="memoryResetVector">Reset Vector</label>
-              <input id="memoryResetVector" type="text" placeholder="0xB82A or $B82A (optional)" />
-              <button id="memoryResetBtn">Reset (Vector)</button>
+            <div class="memory-dumps-layout">
+              <div class="memory-dumps-assets">
+                <h3>Assets</h3>
+                <div id="memoryDumpAssetTree" class="memory-dump-tree" aria-label="Memory dump assets"></div>
+              </div>
+              <div class="memory-dumps-controls">
+                <h3>Load/Actions</h3>
+                <div class="row wrap">
+                  <input id="memoryDumpFile" type="file" accept=".bin,.mem,.dat,.rhdlsnap,.snapshot,application/octet-stream,application/json" />
+                  <label for="memoryDumpAssetPath">Asset Path</label>
+                  <input id="memoryDumpAssetPath" type="text" placeholder="./assets/fixtures/..." />
+                  <label for="memoryDumpOffset">Offset</label>
+                  <input id="memoryDumpOffset" type="text" value="0x0000" />
+                  <button id="memoryDumpLoadBtn">Load Dump/Snapshot</button>
+                  <button id="memoryDumpSaveBtn">Save Dump</button>
+                  <button id="memorySnapshotSaveBtn">Download Snapshot</button>
+                  <button id="memoryDumpLoadLastBtn">Load Last Saved</button>
+                  <button id="loadKaratekaBtn">Load Karateka Dump</button>
+                </div>
+                <div class="row wrap">
+                  <label for="memoryResetVector">Reset Vector</label>
+                  <input id="memoryResetVector" type="text" placeholder="0xB82A or $B82A (optional)" />
+                  <button id="memoryResetBtn">Reset (Vector)</button>
+                </div>
+              </div>
             </div>
             <p id="memoryDumpStatus" class="status"></p>
           </section>

@@ -64,3 +64,59 @@ test('refreshMemoryView shows apple2-required message when disabled', () => {
   assert.match(renderCalls[0].dumpText, /Load a runner with memory \+ I\/O support/);
   assert.equal(statusMessages.includes('Memory dump loading requires a runner with memory + I/O support.'), true);
 });
+
+test('refreshMemoryView allows full-memory length and caps at 64k max', () => {
+  const renderCalls = [];
+  const disasmCalls = [];
+  const dom = {
+    memoryDump: {},
+    memoryStart: { value: '0x0000' },
+    memoryLength: { value: '0x20000' }
+  };
+  const state = {
+    memory: {
+      followPc: false,
+      disasmLines: 4
+    },
+    apple2: {
+      ioConfig: {
+        memory: {
+          addressSpace: 0x20000,
+          viewMapped: true
+        }
+      }
+    }
+  };
+  const runtime = {
+    sim: {
+      memory_read: (start, length) => {
+        assert.equal(start, 0);
+        assert.equal(length, 0x10000);
+        return new Uint8Array(length);
+      },
+      has_signal: () => false
+    }
+  };
+
+  const controller = createApple2MemoryController({
+    dom,
+    state,
+    runtime,
+    isApple2UiEnabled: () => true,
+    parseHexOrDec,
+    hexWord,
+    hexByte,
+    renderMemoryPanel: (_dom, payload) => renderCalls.push(payload),
+    disassemble6502LinesWithMemory: (startAddress, lineCount) => {
+      disasmCalls.push([startAddress, lineCount]);
+      return ['NOP'];
+    },
+    setMemoryDumpStatus: () => {},
+    addressSpace: 0x10000
+  });
+
+  controller.refreshMemoryView();
+  assert.equal(renderCalls.length, 1);
+  assert.ok(String(renderCalls[0].dumpText || '').includes('0000:'));
+  assert.deepEqual(disasmCalls, [[0, 4096]]);
+});

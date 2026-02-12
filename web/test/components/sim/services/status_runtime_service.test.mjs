@@ -9,7 +9,7 @@ function createService(overrides = {}) {
     running: false,
     apple2: { keyQueue: [1, 2] }
   };
-  const runtime = { sim: null, irMeta: null };
+  const runtime = { sim: null, irMeta: null, throughput: { cyclesPerSecond: 0 } };
   return createSimStatusRuntimeService({
     state,
     runtime,
@@ -52,14 +52,26 @@ test('sim status runtime service describes runtime status and clock options', ()
     },
     irMeta: {
       clockCandidates: ['clk_14m', 'clk']
+    },
+    throughput: {
+      cyclesPerSecond: 14000
     }
   };
   const service = createService({
     runtime,
-    currentRunnerPreset: () => ({ id: 'apple2', label: 'Apple ][ Runner' })
+    currentRunnerPreset: () => ({
+      id: 'apple2',
+      label: 'Apple ][ Runner',
+      timing: {
+        cyclesPerHertz: 14,
+        hertzLabel: '6502'
+      }
+    })
   });
   const status = service.describeStatus('clk_14m');
   assert.match(status.simStatus, /Cycle 123 \| 7 signals \| 3 regs/);
+  assert.match(status.simStatus, /14,000 cyc\/s/);
+  assert.match(status.simStatus, /1,000 6502 Hz/);
   assert.match(status.traceStatus, /Trace enabled \| changes 99/);
   assert.match(status.backendStatus, /name-mode/);
   assert.match(status.runnerStatus, /apple2 mode/);

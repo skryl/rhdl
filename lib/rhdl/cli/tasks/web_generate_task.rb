@@ -16,14 +16,33 @@ module RHDL
         WEB_ROOT = File.join(PROJECT_ROOT, 'web')
         PKG_DIR = File.join(WEB_ROOT, 'assets/pkg')
         SIM_DIR = File.join(PROJECT_ROOT, 'lib/rhdl/codegen/ir/sim')
-        AOT_IR_PATH = File.join(SCRIPT_DIR, 'apple2', 'ir', 'apple2.json')
+        APPLE2_AOT_IR_PATH = File.join(SCRIPT_DIR, 'apple2', 'ir', 'apple2.json')
+        CPU8BIT_AOT_IR_PATH = File.join(SCRIPT_DIR, 'cpu', 'ir', 'cpu_lib_hdl.json')
+        MOS6502_AOT_IR_PATH = File.join(SCRIPT_DIR, 'mos6502', 'ir', 'mos6502.json')
         AOT_GEN_PATH = File.join(SIM_DIR, 'ir_compiler/src/aot_generated.rs')
         APPLE2_ROM_SOURCE = File.join(PROJECT_ROOT, 'examples/apple2/software/roms/appleiigo.rom')
         KARATEKA_MEM_SOURCE = File.join(PROJECT_ROOT, 'examples/apple2/software/disks/karateka_mem.bin')
         KARATEKA_META_SOURCE = File.join(PROJECT_ROOT, 'examples/apple2/software/disks/karateka_mem_meta.txt')
+        CPU8BIT_DEFAULT_BIN_SOURCE = File.join(PROJECT_ROOT, 'examples/8bit/software/bin/conway_glider_80x24.bin')
+        MOS6502_DEFAULT_BIN_SOURCE = File.join(PROJECT_ROOT, 'examples/mos6502/software/disks/karateka_mem.bin')
+        GAMEBOY_DEFAULT_BIN_SOURCE = File.join(PROJECT_ROOT, 'examples/gameboy/software/roms/dmg_boot.bin')
         SNAPSHOT_KIND = 'rhdl.apple2.ram_snapshot'
         SNAPSHOT_VERSION = 1
         DEFAULT_KARATEKA_PC = 0xB82A
+        DEFAULT_BIN_ASSETS = [
+          {
+            src: CPU8BIT_DEFAULT_BIN_SOURCE,
+            dst: File.join(SCRIPT_DIR, 'cpu', 'software', 'conway_glider_80x24.bin')
+          },
+          {
+            src: MOS6502_DEFAULT_BIN_SOURCE,
+            dst: File.join(SCRIPT_DIR, 'mos6502', 'memory', 'karateka_mem.bin')
+          },
+          {
+            src: GAMEBOY_DEFAULT_BIN_SOURCE,
+            dst: File.join(SCRIPT_DIR, 'gameboy', 'roms', 'dmg_boot.bin')
+          }
+        ].freeze
 
         $LOAD_PATH.unshift(File.join(PROJECT_ROOT, 'lib'))
         require 'rhdl'
@@ -31,11 +50,14 @@ module RHDL
         def run
           ensure_dir(SCRIPT_DIR)
 
-          RUNNER_EXPORTS.each do |runner|
+          runner_exports.each do |runner|
             generate_runner_assets(runner)
           end
 
+          write_runner_preset_module(runner_configs)
           generate_apple2_memory_assets
+          generate_runner_default_bin_assets
+          write_memory_dump_asset_module
           build_wasm_backends
 
           puts 'Web artifact generation complete.'
@@ -55,7 +77,10 @@ module RHDL
           puts 'Building web WASM artifacts...'
           ensure_dir(PKG_DIR)
           File.write(File.join(PKG_DIR, '.gitignore'), "*\n!.gitignore\n")
-          run_rustup_target_add!
+          unless run_rustup_target_add!
+            warn 'WARNING: failed to add rustup target wasm32-unknown-unknown; skipping WASM backend builds'
+            return
+          end
 
           restore_aot_placeholder = <<~RUST
             compile_error!(
@@ -66,15 +91,16 @@ module RHDL
           begin
             build_wasm_backend(crate_dir: File.join(SIM_DIR, 'ir_interpreter'), artifact: 'ir_interpreter.wasm')
             build_wasm_backend(crate_dir: File.join(SIM_DIR, 'ir_jit'), artifact: 'ir_jit.wasm')
-            build_compiler_aot_wasm
+            build_compiler_aot_wasm(ir_path: APPLE2_AOT_IR_PATH, artifact: 'ir_compiler.wasm')
+            build_compiler_aot_wasm(ir_path: CPU8BIT_AOT_IR_PATH, artifact: 'ir_compiler_cpu.wasm')
+            build_compiler_aot_wasm(ir_path: MOS6502_AOT_IR_PATH, artifact: 'ir_compiler_mos6502.wasm')
           ensure
             File.write(AOT_GEN_PATH, restore_aot_placeholder)
           end
         end
 
         def run_rustup_target_add!
-          ok = run_command('rustup', 'target', 'add', 'wasm32-unknown-unknown')
-          raise 'Failed to add rustup target wasm32-unknown-unknown' unless ok
+          run_command('rustup', 'target', 'add', 'wasm32-unknown-unknown')
         end
 
         def build_wasm_backend(crate_dir:, artifact:, extra_args: [])
@@ -103,20 +129,20 @@ module RHDL
           puts "Wrote #{out_file}"
         end
 
-        def build_compiler_aot_wasm
-          puts 'Building ir_compiler -> ir_compiler.wasm (AOT)'
-          unless File.file?(AOT_IR_PATH)
-            warn "WARNING: AOT IR source not found: #{AOT_IR_PATH}; ir_compiler.wasm not updated"
+        def build_compiler_aot_wasm(ir_path:, artifact:)
+          puts "Building ir_compiler -> #{artifact} (AOT from #{ir_path})"
+          unless File.file?(ir_path)
+            warn "WARNING: AOT IR source not found: #{ir_path}; #{artifact} not updated"
             return
           end
 
           compiler_dir = File.join(SIM_DIR, 'ir_compiler')
           generated = run_command(
-            'cargo', 'run', '--quiet', '--bin', 'aot_codegen', '--', AOT_IR_PATH, AOT_GEN_PATH,
+            'cargo', 'run', '--quiet', '--bin', 'aot_codegen', '--', ir_path, AOT_GEN_PATH,
             chdir: compiler_dir
           )
           unless generated
-            warn 'WARNING: ir_compiler AOT code generation failed; ir_compiler.wasm not updated'
+            warn "WARNING: ir_compiler AOT code generation failed; #{artifact} not updated"
             return
           end
 
@@ -125,19 +151,19 @@ module RHDL
             chdir: compiler_dir
           )
           unless built
-            warn 'WARNING: ir_compiler AOT build failed; ir_compiler.wasm not updated'
+            warn "WARNING: ir_compiler AOT build failed; #{artifact} not updated"
             return
           end
 
           src_wasm = File.join(compiler_dir, 'target', 'wasm32-unknown-unknown', 'release', 'ir_compiler.wasm')
           unless File.file?(src_wasm)
-            warn "WARNING: missing wasm output #{src_wasm}; ir_compiler.wasm not updated"
+            warn "WARNING: missing wasm output #{src_wasm}; #{artifact} not updated"
             return
           end
 
-          out_file = File.join(PKG_DIR, 'ir_compiler.wasm')
+          out_file = File.join(PKG_DIR, artifact)
           FileUtils.cp(src_wasm, out_file)
-          puts "Wrote #{out_file} (AOT from #{AOT_IR_PATH})"
+          puts "Wrote #{out_file}"
         end
 
         def generate_apple2_memory_assets
@@ -149,6 +175,14 @@ module RHDL
           copy_required_file(KARATEKA_MEM_SOURCE, File.join(memory_dir, 'karateka_mem.bin'))
           copy_required_file(KARATEKA_META_SOURCE, File.join(memory_dir, 'karateka_mem_meta.txt'))
           write_karateka_snapshot(memory_dir)
+        end
+
+        def generate_runner_default_bin_assets
+          puts 'Generating web default binary assets...'
+          DEFAULT_BIN_ASSETS.each do |asset|
+            ensure_dir(File.dirname(asset[:dst]))
+            copy_required_file(asset[:src], asset[:dst])
+          end
         end
 
         def copy_required_file(src, dst)
@@ -208,16 +242,16 @@ module RHDL
             parameters: {},
             stack: []
           )
-          File.write(runner[:hier_ir], JSON.generate(hier_ir_hash))
+          File.write(runner[:hier_ir], JSON.generate(hier_ir_hash, max_nesting: false))
           puts "Wrote #{runner[:hier_ir]}"
 
           source_bundle = build_source_bundle(top_class, runner[:id])
-          File.write(runner[:source_output], JSON.pretty_generate(source_bundle))
+          File.write(runner[:source_output], JSON.pretty_generate(source_bundle, { max_nesting: false }))
           puts "Wrote #{runner[:source_output]} (#{Array(source_bundle[:components]).length} components)"
           write_component_source_files(runner: runner, bundle: source_bundle)
 
           schematic_bundle = top_class.to_schematic(sim_ir: flat_ir, runner: runner[:id])
-          File.write(runner[:schematic_output], JSON.pretty_generate(schematic_bundle))
+          File.write(runner[:schematic_output], JSON.pretty_generate(schematic_bundle, { max_nesting: false }))
           puts "Wrote #{runner[:schematic_output]} (#{Array(schematic_bundle[:components]).length} component scopes)"
           puts
         end
@@ -284,8 +318,8 @@ module RHDL
 
         def write_ir_json(ir_obj, output_path)
           json = RHDL::Codegen::IR::IRToJson.convert(ir_obj)
-          parsed = JSON.parse(json)
-          File.write(output_path, JSON.generate(parsed))
+          parsed = JSON.parse(json, max_nesting: false)
+          File.write(output_path, JSON.generate(parsed, max_nesting: false))
           puts "Wrote #{output_path}"
         end
 
@@ -293,26 +327,158 @@ module RHDL
           name.split('::').reject(&:empty?).inject(Object) { |scope, const_name| scope.const_get(const_name) }
         end
 
-        RUNNER_EXPORTS = [
+        def runner_configs
+          @runner_configs ||= load_runner_configs
+        end
+
+        def runner_exports
+          @runner_exports ||= runner_configs.filter_map do |config|
+            preset = config[:preset]
+            next if preset['usesManualIr']
+
+            {
+              id: config[:id],
+              top_class_name: config[:top_class_name],
+              requires: config[:requires],
+              source_output: web_asset_path_to_disk(preset.fetch('sourceBundlePath'), config[:config_path], 'sourceBundlePath'),
+              sim_ir: web_asset_path_to_disk(preset.fetch('simIrPath'), config[:config_path], 'simIrPath'),
+              hier_ir: web_asset_path_to_disk(preset.fetch('explorerIrPath'), config[:config_path], 'explorerIrPath'),
+              schematic_output: web_asset_path_to_disk(preset.fetch('schematicPath'), config[:config_path], 'schematicPath')
+            }
+          end
+        end
+
+        def load_runner_configs
+          RUNNER_CONFIG_PATHS.map { |path| load_runner_config(path) }
+        end
+
+        def load_runner_config(config_path)
+          raise "Missing runner config: #{config_path}" unless File.file?(config_path)
+
+          raw = JSON.parse(File.read(config_path))
+          runner = raw.fetch('runner') do
+            raise "Runner config #{config_path} is missing top-level key: runner"
+          end
+
+          id = String(runner.fetch('id')).strip
+          raise "Runner config #{config_path} has empty runner.id" if id.empty?
+
+          label = String(runner.fetch('label')).strip
+          raise "Runner config #{config_path} has empty runner.label" if label.empty?
+
+          top_class_name = String(runner.fetch('topClassName')).strip
+          raise "Runner config #{config_path} has empty runner.topClassName" if top_class_name.empty?
+
+          requires = Array(runner.fetch('requires')).map do |raw_path|
+            resolved = File.expand_path(raw_path.to_s, PROJECT_ROOT)
+            raise "Runner config #{config_path} has missing require file: #{raw_path}" unless File.file?("#{resolved}.rb") || File.file?(resolved)
+
+            resolved
+          end
+
+          if requires.empty?
+            raise "Runner config #{config_path} must include at least one runner.requires path"
+          end
+
+          preset = runner.each_with_object({}) do |(key, value), acc|
+            next if %w[order default topClassName requires].include?(key)
+
+            acc[key] = value
+          end
+          preset['id'] = id
+          preset['label'] = label
+          preset['usesManualIr'] = !!preset['usesManualIr']
+          preset['preferredTab'] = String(preset['preferredTab'] || 'vcdTab')
+          preset['enableApple2Ui'] = !!preset['enableApple2Ui']
+
+          unless preset['usesManualIr']
+            %w[simIrPath explorerIrPath sourceBundlePath schematicPath].each do |required_key|
+              value = String(preset[required_key] || '').strip
+              raise "Runner config #{config_path} missing runner.#{required_key}" if value.empty?
+            end
+          end
+
           {
-            id: 'apple2',
-            top_class_name: 'RHDL::Examples::Apple2::Apple2',
-            requires: [File.join(PROJECT_ROOT, 'examples/apple2/hdl/apple2')],
-            source_output: File.join(SCRIPT_DIR, 'apple2', 'ir', 'apple2_sources.json'),
-            sim_ir: File.join(SCRIPT_DIR, 'apple2', 'ir', 'apple2.json'),
-            hier_ir: File.join(SCRIPT_DIR, 'apple2', 'ir', 'apple2_hier.json'),
-            schematic_output: File.join(SCRIPT_DIR, 'apple2', 'ir', 'apple2_schematic.json')
-          },
-          {
-            id: 'cpu',
-            top_class_name: 'RHDL::HDL::CPU::CPU',
-            requires: [File.join(PROJECT_ROOT, 'lib/rhdl/hdl/cpu/cpu')],
-            source_output: File.join(SCRIPT_DIR, 'cpu', 'ir', 'cpu_sources.json'),
-            sim_ir: File.join(SCRIPT_DIR, 'cpu', 'ir', 'cpu_lib_hdl.json'),
-            hier_ir: File.join(SCRIPT_DIR, 'cpu', 'ir', 'cpu_hier.json'),
-            schematic_output: File.join(SCRIPT_DIR, 'cpu', 'ir', 'cpu_schematic.json')
+            id: id,
+            order: normalize_runner_order(runner['order']),
+            default: runner['default'] == true,
+            top_class_name: top_class_name,
+            requires: requires,
+            preset: preset,
+            config_path: config_path
           }
-        ].freeze
+        end
+
+        def normalize_runner_order(value)
+          return 1000 if value.nil?
+
+          Integer(value)
+        rescue StandardError
+          raise "Runner config has non-integer runner.order: #{value.inspect}"
+        end
+
+        def web_asset_path_to_disk(web_path, config_path, key_name)
+          normalized = String(web_path || '').strip.sub(%r{\A\./}, '')
+          unless normalized.start_with?('assets/fixtures/')
+            raise "Runner config #{config_path} has invalid #{key_name}: #{web_path.inspect} (expected ./assets/fixtures/...)"
+          end
+
+          File.join(WEB_ROOT, normalized)
+        end
+
+        def write_runner_preset_module(configs)
+          ordered = configs.sort_by { |config| [config[:order], config[:id]] }
+          presets = {}
+          ordered.each do |config|
+            presets[config[:id]] = config[:preset]
+          end
+
+          runner_order = ordered.map { |config| config[:id] }
+          default_runner_id = ordered.find { |config| config[:default] }&.dig(:id) || runner_order.first
+
+          content = <<~MJS
+            // Auto-generated by `rake web:generate`. Do not edit manually.
+            export const GENERATED_RUNNER_PRESETS = Object.freeze(#{JSON.pretty_generate(presets)});
+            export const GENERATED_RUNNER_ORDER = Object.freeze(#{JSON.generate(runner_order)});
+            export const GENERATED_DEFAULT_RUNNER_ID = #{JSON.generate(default_runner_id)};
+          MJS
+
+          ensure_dir(File.dirname(RUNNER_PRESET_MODULE_PATH))
+          File.write(RUNNER_PRESET_MODULE_PATH, content)
+          puts "Wrote #{RUNNER_PRESET_MODULE_PATH}"
+        end
+
+        def collect_memory_dump_asset_paths
+          Dir.glob(File.join(ASSET_ROOT, '**', '*')).filter_map do |path|
+            next unless File.file?(path)
+
+            ext = File.extname(path).downcase
+            next unless DUMP_ASSET_EXTENSIONS.include?(ext)
+
+            relative = path.sub(%r{\A#{Regexp.escape(WEB_ROOT)}/}, '')
+            "./#{relative}"
+          end.sort
+        end
+
+        def write_memory_dump_asset_module
+          asset_paths = collect_memory_dump_asset_paths
+          content = <<~MJS
+            // Auto-generated by `rake web:generate`. Do not edit manually.
+            export const GENERATED_MEMORY_DUMP_ASSET_FILES = Object.freeze(#{JSON.pretty_generate(asset_paths)});
+          MJS
+
+          ensure_dir(File.dirname(MEMORY_DUMP_ASSET_MODULE_PATH))
+          File.write(MEMORY_DUMP_ASSET_MODULE_PATH, content)
+          puts "Wrote #{MEMORY_DUMP_ASSET_MODULE_PATH}"
+        end
+
+        RUNNER_CONFIG_PATHS = %w[8bit mos6502 apple2 gameboy].map do |name|
+          File.join(PROJECT_ROOT, 'examples', name, 'config.json')
+        end.freeze
+        ASSET_ROOT = File.join(WEB_ROOT, 'assets')
+        DUMP_ASSET_EXTENSIONS = %w[.bin .mem .dat .rhdlsnap .snapshot].freeze
+        RUNNER_PRESET_MODULE_PATH = File.join(PROJECT_ROOT, 'web', 'app', 'components', 'runner', 'config', 'generated_presets.mjs')
+        MEMORY_DUMP_ASSET_MODULE_PATH = File.join(PROJECT_ROOT, 'web', 'app', 'components', 'memory', 'config', 'generated_dump_assets.mjs')
       end
     end
   end

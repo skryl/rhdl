@@ -5,6 +5,7 @@ export function createSimDomainController({
   initializeTrace,
   stepSimulation,
   runFrame,
+  resetThroughputSampling,
   drainTrace,
   maskForWidth
 } = {}) {
@@ -15,6 +16,7 @@ export function createSimDomainController({
     initializeTrace,
     step: stepSimulation,
     runFrame,
+    resetThroughputSampling,
     drainTrace,
     maskForWidth
   };

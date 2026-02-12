@@ -103,7 +103,7 @@ export function disassemble6502Lines(
   readMemory,
   options = {}
 ) {
-  const count = Math.max(1, Math.min(128, Number.parseInt(lineCount, 10) || 1));
+  const count = Math.max(1, Math.min(4096, Number.parseInt(lineCount, 10) || 1));
   const start = Number(startAddress) & 0xffff;
   const addressSpace = Math.max(1, Number.parseInt(options.addressSpace, 10) || 0x10000);
   const highlightPc = options.highlightPc == null ? null : (Number(options.highlightPc) & 0xffff);

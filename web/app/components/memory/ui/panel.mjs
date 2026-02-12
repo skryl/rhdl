@@ -28,6 +28,7 @@ class RhdlMemoryView extends LitElement {
       line-height: 1.45;
       overflow: auto;
       min-height: 280px;
+      max-height: 62vh;
       white-space: pre;
     }
     @media (max-width: 980px) {
