@@ -3,7 +3,13 @@ import { LitElement, html, css } from 'https://cdn.jsdelivr.net/npm/lit@3.2.1/+e
 class RhdlMemoryView extends LitElement {
   static properties = {
     dumpText: { state: true },
-    disasmText: { state: true }
+    disasmText: { state: true },
+    dumpRows: { state: true },
+    followPc: { state: true },
+    pcAddress: { state: true },
+    windowStart: { state: true },
+    addressSpace: { state: true },
+    bytesPerRow: { state: true }
   };
 
   static styles = css`
@@ -31,6 +37,10 @@ class RhdlMemoryView extends LitElement {
       max-height: 62vh;
       white-space: pre;
     }
+    .changed-byte {
+      background: rgba(255, 196, 0, 0.32);
+      border-radius: 3px;
+    }
     @media (max-width: 980px) {
       .memory-split {
         grid-template-columns: 1fr;
@@ -45,18 +55,83 @@ class RhdlMemoryView extends LitElement {
     super();
     this.dumpText = '';
     this.disasmText = '';
+    this.dumpRows = [];
+    this.followPc = false;
+    this.pcAddress = null;
+    this.windowStart = 0;
+    this.addressSpace = 0x10000;
+    this.bytesPerRow = 16;
   }
 
   setViewModel(viewModel) {
     this.dumpText = String(viewModel?.dumpText || '');
     this.disasmText = String(viewModel?.disasmText || '');
+    this.dumpRows = Array.isArray(viewModel?.dumpRows) ? viewModel.dumpRows : [];
+    this.followPc = !!viewModel?.followPc;
+    this.pcAddress = Number.isFinite(viewModel?.pcAddress) ? Number(viewModel.pcAddress) : null;
+    this.windowStart = Number.isFinite(viewModel?.windowStart) ? Number(viewModel.windowStart) : 0;
+    this.addressSpace = Number.isFinite(viewModel?.addressSpace) && Number(viewModel.addressSpace) > 0
+      ? Number(viewModel.addressSpace)
+      : 0x10000;
+    this.bytesPerRow = Number.isFinite(viewModel?.bytesPerRow) && Number(viewModel.bytesPerRow) > 0
+      ? Number(viewModel.bytesPerRow)
+      : 16;
+  }
+
+  updated(changed) {
+    if (!this.followPc || this.pcAddress == null) {
+      return;
+    }
+    if (
+      changed.has('followPc')
+      || changed.has('pcAddress')
+      || changed.has('windowStart')
+      || changed.has('dumpRows')
+      || changed.has('disasmText')
+    ) {
+      this.scrollToPcRow();
+    }
+  }
+
+  scrollPreToLine(pre, lineIndex) {
+    if (!pre || !Number.isFinite(lineIndex) || lineIndex < 0) {
+      return;
+    }
+    const lineHeight = Number.parseFloat(globalThis.getComputedStyle(pre).lineHeight) || 16;
+    const target = Math.max(0, (lineIndex * lineHeight) - ((pre.clientHeight - lineHeight) / 2));
+    pre.scrollTop = target;
+  }
+
+  scrollToPcRow() {
+    const memoryPre = this.renderRoot?.querySelector('#memoryDumpPre');
+    const disasmPre = this.renderRoot?.querySelector('#memoryDisasmPre');
+    if (!memoryPre && !disasmPre) {
+      return;
+    }
+
+    const addrSpace = Math.max(1, Number(this.addressSpace) || 0x10000);
+    const start = ((Number(this.windowStart) % addrSpace) + addrSpace) % addrSpace;
+    const pc = ((Number(this.pcAddress) % addrSpace) + addrSpace) % addrSpace;
+    const rowSpan = Math.max(1, Number(this.bytesPerRow) || 16);
+    const rowIndex = Math.floor(((pc - start + addrSpace) % addrSpace) / rowSpan);
+
+    this.scrollPreToLine(memoryPre, rowIndex);
+    this.scrollPreToLine(disasmPre, rowIndex);
+  }
+
+  renderDumpRows() {
+    if (!Array.isArray(this.dumpRows) || this.dumpRows.length === 0) {
+      return this.dumpText;
+    }
+
+    return this.dumpRows.map((row, rowIndex) => html`${row.marker} ${row.addressHex}: ${row.bytes.map((byte, idx) => html`${byte.changed ? html`<span class="changed-byte">${byte.hex}</span>` : byte.hex}${idx < row.bytes.length - 1 ? ' ' : ''}`)}  ${row.ascii}${rowIndex < this.dumpRows.length - 1 ? '\n' : ''}`);
   }
 
   render() {
     return html`
       <div class="memory-split">
-        <pre>${this.dumpText}</pre>
-        <pre>${this.disasmText}</pre>
+        <pre id="memoryDumpPre">${this.renderDumpRows()}</pre>
+        <pre id="memoryDisasmPre">${this.disasmText}</pre>
       </div>
     `;
   }

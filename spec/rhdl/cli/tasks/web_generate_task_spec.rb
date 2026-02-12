@@ -85,4 +85,16 @@ RSpec.describe RHDL::CLI::Tasks::WebGenerateTask do
       task.send(:build_wasm_backends)
     end
   end
+
+  describe 'DEFAULT_BIN_ASSETS' do
+    it 'includes mos6502 snapshot asset copied from apple2 fixtures' do
+      assets = described_class::DEFAULT_BIN_ASSETS
+      snapshot_asset = assets.find do |entry|
+        entry[:dst].to_s.end_with?('/mos6502/memory/karateka_mem.rhdlsnap')
+      end
+
+      expect(snapshot_asset).not_to be_nil
+      expect(snapshot_asset[:src]).to eq(described_class::MOS6502_DEFAULT_SNAPSHOT_SOURCE)
+    end
+  end
 end

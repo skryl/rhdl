@@ -206,3 +206,56 @@ test('initializeApple2Mode loads boot ROM default bin through runner API', async
     ['reset']
   ]);
 });
+
+test('initializeApple2Mode loads snapshot default bin using snapshot offset and start PC', async () => {
+  const calls = [];
+  const snapshotPayload = {
+    kind: 'rhdl.apple2.ram_snapshot',
+    version: 1,
+    label: 'Karateka dump (PC=$B82A)',
+    offset: 0x1200,
+    length: 3,
+    startPc: 0xB82A,
+    dataB64: 'AQID'
+  };
+
+  await initializeApple2Mode({
+    runtime: {
+      sim: {
+        runner_mode: () => true,
+        runner_load_memory: (bytes, offset, options) => {
+          calls.push(['load', Array.from(bytes), offset, options]);
+          return true;
+        },
+        runner_set_reset_vector: (pc) => {
+          calls.push(['setPc', pc]);
+          return true;
+        },
+        reset: () => calls.push(['reset'])
+      }
+    },
+    state: { apple2: { enabled: false, baseRomBytes: null } },
+    preset: {
+      defaultBin: {
+        path: '/fixtures/mos6502/karateka_mem.rhdlsnap',
+        offset: 0,
+        space: 'main',
+        resetAfterLoad: true
+      }
+    },
+    addWatchSignal: () => {},
+    fetchImpl: async () => ({
+      ok: true,
+      async text() {
+        return JSON.stringify(snapshotPayload);
+      }
+    }),
+    log: () => {}
+  });
+
+  assert.deepEqual(calls, [
+    ['load', [1, 2, 3], 0x1200, { isRom: false }],
+    ['setPc', 0xB82A],
+    ['reset']
+  ]);
+});

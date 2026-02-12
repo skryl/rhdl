@@ -93,10 +93,9 @@ export const GENERATED_RUNNER_PRESETS = Object.freeze({
     "enableApple2Ui": false,
     "usesManualIr": false,
     "defaultBin": {
-      "path": "./assets/fixtures/mos6502/memory/karateka_mem.bin",
+      "path": "./assets/fixtures/mos6502/memory/karateka_mem.rhdlsnap",
       "offset": 0,
       "space": "main",
-      "startPc": "0xB82A",
       "resetAfterLoad": true
     },
     "timing": {
