@@ -234,9 +234,16 @@ export const GENERATED_RUNNER_PRESETS = Object.freeze({
       "startPc": "0x80000000",
       "resetAfterLoad": true
     },
+    "defaultDisk": {
+      "path": "./assets/fixtures/riscv/software/bin/fs.img",
+      "offset": 0
+    },
     "timing": {
       "cyclesPerHertz": 1,
       "hertzLabel": "RISC-V"
+    },
+    "defaults": {
+      "memoryFollowPc": false
     },
     "preferredBackend": "compiler",
     "compilerWasmPath": "./assets/pkg/ir_compiler_riscv.wasm",
@@ -246,7 +253,7 @@ export const GENERATED_RUNNER_PRESETS = Object.freeze({
       "memory": {
         "dumpStart": 2147483648,
         "dumpLength": 1024,
-        "addressSpace": 4294967295,
+        "addressSpace": 4294967296,
         "viewMapped": true,
         "dumpReadMapped": true,
         "directWriteMapped": true

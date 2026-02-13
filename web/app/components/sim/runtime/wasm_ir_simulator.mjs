@@ -54,6 +54,7 @@ const RUNNER_KIND_APPLE2 = 1;
 const RUNNER_KIND_MOS6502 = 2;
 const RUNNER_KIND_GAMEBOY = 3;
 const RUNNER_KIND_CPU8BIT = 4;
+const RUNNER_KIND_RISCV = 5;
 
 const RUNNER_MEM_OP_LOAD = 0;
 const RUNNER_MEM_OP_READ = 1;
@@ -66,6 +67,7 @@ const RUNNER_MEM_SPACE_VRAM = 3;
 const RUNNER_MEM_SPACE_ZPRAM = 4;
 const RUNNER_MEM_SPACE_WRAM = 5;
 const RUNNER_MEM_SPACE_FRAMEBUFFER = 6;
+const RUNNER_MEM_SPACE_DISK = 7;
 const RUNNER_MEM_SPACE_UART_TX = 8;
 const RUNNER_MEM_SPACE_UART_RX = 9;
 
@@ -813,6 +815,9 @@ export class WasmIrSimulator {
     if (raw === RUNNER_KIND_CPU8BIT) {
       return 'cpu8bit';
     }
+    if (raw === RUNNER_KIND_RISCV) {
+      return 'riscv';
+    }
     return null;
   }
 
@@ -861,7 +866,7 @@ export class WasmIrSimulator {
     return this.e.runner_control(
       this.ctx,
       RUNNER_CONTROL_SET_RESET_VECTOR,
-      vector & 0xFFFF,
+      vector >>> 0,
       0
     ) !== 0;
   }
@@ -1006,6 +1011,16 @@ export class WasmIrSimulator {
     return this.runnerProbe(RUNNER_PROBE_RISCV_UART_TX_LEN) >>> 0;
   }
 
+  runner_riscv_load_disk(bytes, offset = 0) {
+    if (this.runner_kind() !== 'riscv') {
+      return false;
+    }
+    if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
+      return false;
+    }
+    return this.runnerMemTransfer(RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_DISK, offset, bytes, 0) > 0;
+  }
+
   runner_riscv_uart_tx_bytes(offset = 0, length = null) {
     if (!this.hasExport('runner_mem')) {
       return new Uint8Array(0);
@@ -1068,7 +1083,7 @@ export class WasmIrSimulator {
 
   memory_mode() {
     const kind = this.runner_kind();
-    if (kind === 'apple2' || kind === 'mos6502' || kind === 'cpu8bit') {
+    if (kind === 'apple2' || kind === 'mos6502' || kind === 'cpu8bit' || kind === 'riscv') {
       return kind;
     }
     return null;

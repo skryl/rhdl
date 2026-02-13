@@ -249,14 +249,24 @@ export function createApple2VisualController({
     const watchSignals = Array.isArray(ioConfig.watchSignals) && ioConfig.watchSignals.length > 0
       ? ioConfig.watchSignals
       : ['pc_debug', 'opcode_debug', 'a_debug', 'x_debug', 'y_debug', 's_debug', 'p_debug', 'speaker'];
+    const addrSpace = Number.parseInt(ioConfig.memory?.addressSpace, 10);
+    const wideAddressSpace = Number.isFinite(addrSpace) && addrSpace > 0xFFFF;
     const rows = [];
     for (const name of watchSignals.slice(0, 12)) {
       if (!runtime.sim.has_signal(name)) {
         continue;
       }
-      const value = runtime.sim.peek(name);
-      const width = name.includes('pc') || name.includes('addr') ? 4 : 2;
-      const rendered = `0x${(value & (width === 4 ? 0xFFFF : 0xFF)).toString(16).toUpperCase().padStart(width, '0')}`;
+      const value = Number(runtime.sim.peek(name)) >>> 0;
+      const lowerName = String(name || '').toLowerCase();
+      const isAddressLike = lowerName.includes('pc') || lowerName.includes('addr');
+      let width = 2;
+      if ((isAddressLike && wideAddressSpace) || value > 0xFFFF) {
+        width = 8;
+      } else if (isAddressLike || value > 0xFF) {
+        width = 4;
+      }
+      const masked = width === 8 ? value : (width === 4 ? (value & 0xFFFF) : (value & 0xFF));
+      const rendered = `0x${masked.toString(16).toUpperCase().padStart(width, '0')}`;
       rows.push([name, rendered]);
     }
     if (rows.length === 0) {

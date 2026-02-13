@@ -136,7 +136,7 @@ test('refreshMemoryView formats 32-bit memory addresses when configured', () => 
     apple2: {
       ioConfig: {
         memory: {
-          addressSpace: 0xFFFFFFFF,
+          addressSpace: 0x100000000,
           viewMapped: true
         }
       }
@@ -170,4 +170,101 @@ test('refreshMemoryView formats 32-bit memory addresses when configured', () => 
   controller.refreshMemoryView();
   assert.equal(renderCalls.length, 1);
   assert.match(renderCalls[0].dumpRows[0].addressHex, /80000000/);
+});
+
+test('refreshMemoryView disables 6502 disassembly for riscv runner', () => {
+  const renderCalls = [];
+  const dom = {
+    memoryDump: {},
+    memoryStart: { value: '0x80000000' },
+    memoryLength: { value: '16' }
+  };
+  const state = {
+    memory: {
+      followPc: false,
+      disasmLines: 4
+    },
+    apple2: {
+      ioConfig: {
+        memory: {
+          addressSpace: 0x100000000,
+          viewMapped: true
+        }
+      }
+    }
+  };
+  const runtime = {
+    sim: {
+      memory_read: (_start, length) => new Uint8Array(length),
+      has_signal: () => false,
+      runner_kind: () => 'riscv'
+    }
+  };
+  const controller = createApple2MemoryController({
+    dom,
+    state,
+    runtime,
+    isApple2UiEnabled: () => true,
+    parseHexOrDec,
+    hexWord,
+    hexByte,
+    renderMemoryPanel: (_dom, payload) => renderCalls.push(payload),
+    disassemble6502LinesWithMemory: () => ['NOP'],
+    setMemoryDumpStatus: () => {},
+    addressSpace: 0x10000
+  });
+
+  controller.refreshMemoryView();
+  assert.equal(renderCalls.length, 1);
+  assert.match(renderCalls[0].disasmText, /Disassembly unavailable for riscv runner/);
+});
+
+test('refreshMemoryView aligns follow-pc start for riscv high addresses', () => {
+  const renderCalls = [];
+  const dom = {
+    memoryDump: {},
+    memoryStart: { value: '0x80000000' },
+    memoryLength: { value: '64' }
+  };
+  const state = {
+    memory: {
+      followPc: true,
+      disasmLines: 4
+    },
+    apple2: {
+      ioConfig: {
+        memory: {
+          addressSpace: 0x100000000,
+          viewMapped: true
+        },
+        pcSignalCandidates: ['debug_pc']
+      }
+    }
+  };
+  const runtime = {
+    sim: {
+      memory_read: (_start, length) => new Uint8Array(length),
+      has_signal: (name) => name === 'debug_pc',
+      peek: () => 0x800000A8,
+      runner_kind: () => 'riscv'
+    }
+  };
+  const controller = createApple2MemoryController({
+    dom,
+    state,
+    runtime,
+    isApple2UiEnabled: () => true,
+    parseHexOrDec,
+    hexWord,
+    hexByte,
+    renderMemoryPanel: (_dom, payload) => renderCalls.push(payload),
+    disassemble6502LinesWithMemory: () => ['NOP'],
+    setMemoryDumpStatus: () => {},
+    addressSpace: 0x10000
+  });
+
+  controller.refreshMemoryView();
+  assert.equal(renderCalls.length, 1);
+  assert.equal(dom.memoryStart.value, '0x80000080');
+  assert.equal(renderCalls[0].dumpRows[0].addressHex, '80000080');
 });

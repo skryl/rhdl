@@ -34,6 +34,8 @@ module RHDL
         SNAPSHOT_VERSION = 1
         RISCV_DEFAULT_BIN_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/kernel.bin')
         RISCV_DEFAULT_BIN_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'kernel.bin')
+        RISCV_DEFAULT_DISK_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/fs.img')
+        RISCV_DEFAULT_DISK_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'fs.img')
         DEFAULT_KARATEKA_PC = 0xB82A
         DEFAULT_BIN_ASSETS = [
           {
@@ -464,6 +466,10 @@ module RHDL
           copy_optional_file(
             RISCV_DEFAULT_BIN_SOURCE,
             RISCV_DEFAULT_BIN_ASSET
+          )
+          copy_optional_file(
+            RISCV_DEFAULT_DISK_SOURCE,
+            RISCV_DEFAULT_DISK_ASSET
           )
         end
 

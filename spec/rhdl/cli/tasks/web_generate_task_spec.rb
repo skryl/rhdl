@@ -154,7 +154,7 @@ RSpec.describe RHDL::CLI::Tasks::WebGenerateTask do
   end
 
   describe '#build_wasm_backends' do
-    it 'builds dedicated compiler AOT artifacts for apple2, cpu8bit, and mos6502' do
+    it 'builds dedicated compiler AOT artifacts for apple2, cpu8bit, mos6502, and riscv' do
       task = described_class.new
 
       allow(task).to receive(:ensure_dir)
@@ -181,6 +181,10 @@ RSpec.describe RHDL::CLI::Tasks::WebGenerateTask do
       expect(task).to receive(:build_compiler_aot_wasm).with(
         ir_path: described_class::MOS6502_AOT_IR_PATH,
         artifact: 'ir_compiler_mos6502.wasm'
+      )
+      expect(task).to receive(:build_compiler_aot_wasm).with(
+        ir_path: described_class::RISCV_AOT_IR_PATH,
+        artifact: 'ir_compiler_riscv.wasm'
       )
 
       task.send(:build_wasm_backends)
