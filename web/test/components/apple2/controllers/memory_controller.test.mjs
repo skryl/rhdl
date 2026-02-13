@@ -120,3 +120,54 @@ test('refreshMemoryView allows full-memory length and caps at 64k max', () => {
   assert.ok(String(renderCalls[0].dumpText || '').includes('0000:'));
   assert.deepEqual(disasmCalls, [[0, 4096]]);
 });
+
+test('refreshMemoryView formats 32-bit memory addresses when configured', () => {
+  const renderCalls = [];
+  const dom = {
+    memoryDump: {},
+    memoryStart: { value: '0x80000000' },
+    memoryLength: { value: '16' }
+  };
+  const state = {
+    memory: {
+      followPc: false,
+      disasmLines: 4
+    },
+    apple2: {
+      ioConfig: {
+        memory: {
+          addressSpace: 0xFFFFFFFF,
+          viewMapped: true
+        }
+      }
+    }
+  };
+  const runtime = {
+    sim: {
+      memory_read: (start, length) => {
+        assert.equal(start, 0x80000000);
+        assert.equal(length, 16);
+        return new Uint8Array(length);
+      },
+      has_signal: () => false,
+      memory_mode: () => true
+    }
+  };
+  const controller = createApple2MemoryController({
+    dom,
+    state,
+    runtime,
+    isApple2UiEnabled: () => true,
+    parseHexOrDec,
+    hexWord,
+    hexByte,
+    renderMemoryPanel: (_dom, payload) => renderCalls.push(payload),
+    disassemble6502LinesWithMemory: () => ['NOP'],
+    setMemoryDumpStatus: () => {},
+    addressSpace: 0x10000
+  });
+
+  controller.refreshMemoryView();
+  assert.equal(renderCalls.length, 1);
+  assert.match(renderCalls[0].dumpRows[0].addressHex, /80000000/);
+});

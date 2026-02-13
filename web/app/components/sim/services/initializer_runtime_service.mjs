@@ -24,7 +24,7 @@ function parseOptionalPc(value) {
   if (!Number.isFinite(parsed)) {
     return null;
   }
-  return parsed & U16_MASK;
+  return parsed >>> 0;
 }
 
 function normalizeDefaultBinSpace(value) {
@@ -177,7 +177,8 @@ async function loadDefaultBinAsset({
     if (startPc != null && typeof runtime.sim.runner_set_reset_vector === 'function') {
       const pcApplied = didCallSucceed(runtime.sim.runner_set_reset_vector(startPc));
       if (!pcApplied) {
-        log(`Default bin reset vector apply failed (PC=$${startPc.toString(16).padStart(4, '0')})`);
+        const width = startPc > 0xFFFF ? 8 : 4;
+        log(`Default bin reset vector apply failed (PC=$${startPc.toString(16).padStart(width, '0')})`);
       }
     }
 
@@ -414,8 +415,11 @@ export async function initializeApple2Mode({
   const defaultBin = resolveDefaultBinConfig(preset);
   state.apple2.ioConfig = ioConfig;
 
-  const supportsRunnerApi = runtime.sim.runner_mode?.() === true;
-  const supportsGenericMemoryApi = typeof runtime.sim.memory_mode === 'function' && runtime.sim.memory_mode() != null;
+  const supportsRunnerApi = runtime.sim.runner_mode?.() === true
+    || (typeof runtime.sim?.runner_read_memory === 'function'
+      && typeof runtime.sim?.runner_write_memory === 'function');
+  const supportsGenericMemoryApi = typeof runtime.sim?.memory_mode === 'function'
+    && runtime.sim.memory_mode() != null;
   const wantsMemoryApi = ioConfig.enabled || !!ioConfig.rom?.path || !!defaultBin;
 
   if (!wantsMemoryApi) {

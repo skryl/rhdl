@@ -66,6 +66,8 @@ const RUNNER_MEM_SPACE_VRAM = 3;
 const RUNNER_MEM_SPACE_ZPRAM = 4;
 const RUNNER_MEM_SPACE_WRAM = 5;
 const RUNNER_MEM_SPACE_FRAMEBUFFER = 6;
+const RUNNER_MEM_SPACE_UART_TX = 8;
+const RUNNER_MEM_SPACE_UART_RX = 9;
 
 const RUNNER_MEM_FLAG_MAPPED = 1;
 
@@ -88,6 +90,9 @@ const RUNNER_PROBE_IF_R = 8;
 const RUNNER_PROBE_SIGNAL = 9;
 const RUNNER_PROBE_LCDC_ON = 10;
 const RUNNER_PROBE_H_DIV_CNT = 11;
+const RUNNER_PROBE_RISCV_UART_TX_LEN = 17;
+
+const RUNNER_CONTROL_CLEAR_UART_TX = 6;
 
 export class WasmIrSimulator {
   constructor(instance, irJson, backend = 'interpreter', subCycles = 14) {
@@ -992,6 +997,39 @@ export class WasmIrSimulator {
 
   runner_frame_count() {
     return this.runnerProbe(RUNNER_PROBE_FRAME_COUNT) >>> 0;
+  }
+
+  runner_riscv_uart_tx_len() {
+    if (typeof this.runnerProbe !== 'function') {
+      return 0;
+    }
+    return this.runnerProbe(RUNNER_PROBE_RISCV_UART_TX_LEN) >>> 0;
+  }
+
+  runner_riscv_uart_tx_bytes(offset = 0, length = null) {
+    if (!this.hasExport('runner_mem')) {
+      return new Uint8Array(0);
+    }
+    const offsetValue = Number.parseInt(offset, 10);
+    const len = length == null
+      ? this.runner_riscv_uart_tx_len()
+      : Number.parseInt(length, 10);
+    if (!Number.isFinite(offsetValue) || !Number.isFinite(len) || len <= 0) {
+      return new Uint8Array(0);
+    }
+    return this.runnerMemRead(RUNNER_MEM_SPACE_UART_TX, Math.max(0, offsetValue), Math.max(0, len), 0);
+  }
+
+  runner_riscv_clear_uart_tx() {
+    if (!this.hasExport('runner_control')) {
+      return false;
+    }
+    return this.e.runner_control(
+      this.ctx,
+      RUNNER_CONTROL_CLEAR_UART_TX,
+      0,
+      0
+    ) !== 0;
   }
 
   runner_reset_lcd() {

@@ -20,6 +20,7 @@ module RHDL
         APPLE2_AOT_IR_PATH = File.join(SCRIPT_DIR, 'apple2', 'ir', 'apple2.json')
         CPU8BIT_AOT_IR_PATH = File.join(SCRIPT_DIR, 'cpu', 'ir', 'cpu_lib_hdl.json')
         MOS6502_AOT_IR_PATH = File.join(SCRIPT_DIR, 'mos6502', 'ir', 'mos6502.json')
+        RISCV_AOT_IR_PATH = File.join(SCRIPT_DIR, 'riscv', 'ir', 'riscv.json')
         AOT_GEN_PATH = File.join(SIM_DIR, 'ir_compiler/src/aot_generated.rs')
         APPLE2_ROM_SOURCE = File.join(PROJECT_ROOT, 'examples/apple2/software/roms/appleiigo.rom')
         KARATEKA_MEM_SOURCE = File.join(PROJECT_ROOT, 'examples/apple2/software/disks/karateka_mem.bin')
@@ -31,6 +32,8 @@ module RHDL
         GAMEBOY_DEFAULT_BIN_SOURCE = File.join(PROJECT_ROOT, 'examples/gameboy/software/roms/dmg_boot.bin')
         SNAPSHOT_KIND = 'rhdl.apple2.ram_snapshot'
         SNAPSHOT_VERSION = 1
+        RISCV_DEFAULT_BIN_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/kernel.bin')
+        RISCV_DEFAULT_BIN_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'kernel.bin')
         DEFAULT_KARATEKA_PC = 0xB82A
         DEFAULT_BIN_ASSETS = [
           {
@@ -138,6 +141,7 @@ module RHDL
             build_compiler_aot_wasm(ir_path: APPLE2_AOT_IR_PATH, artifact: 'ir_compiler.wasm')
             build_compiler_aot_wasm(ir_path: CPU8BIT_AOT_IR_PATH, artifact: 'ir_compiler_cpu.wasm')
             build_compiler_aot_wasm(ir_path: MOS6502_AOT_IR_PATH, artifact: 'ir_compiler_mos6502.wasm')
+            build_compiler_aot_wasm(ir_path: RISCV_AOT_IR_PATH, artifact: 'ir_compiler_riscv.wasm')
           ensure
             File.write(AOT_GEN_PATH, restore_aot_placeholder)
           end
@@ -341,7 +345,8 @@ module RHDL
           aot_inputs = {
             'apple2' => APPLE2_AOT_IR_PATH,
             'cpu' => CPU8BIT_AOT_IR_PATH,
-            'mos6502' => MOS6502_AOT_IR_PATH
+            'mos6502' => MOS6502_AOT_IR_PATH,
+            'riscv' => RISCV_AOT_IR_PATH
           }
           missing = aot_inputs.select { |_runner_id, path| !File.file?(path) }
           return if missing.empty?
@@ -455,6 +460,11 @@ module RHDL
             ensure_dir(File.dirname(asset[:dst]))
             copy_required_file(asset[:src], asset[:dst])
           end
+
+          copy_optional_file(
+            RISCV_DEFAULT_BIN_SOURCE,
+            RISCV_DEFAULT_BIN_ASSET
+          )
         end
 
         def cpu8bit_software_bin_assets
@@ -469,6 +479,14 @@ module RHDL
         def copy_required_file(src, dst)
           raise "Missing source asset: #{src}" unless File.file?(src)
 
+          FileUtils.cp(src, dst)
+          puts "Wrote #{dst}"
+        end
+
+        def copy_optional_file(src, dst)
+          return warn "WARNING: skipping optional asset (missing): #{src}" unless File.file?(src)
+
+          ensure_dir(File.dirname(dst))
           FileUtils.cp(src, dst)
           puts "Wrote #{dst}"
         end
@@ -753,7 +771,7 @@ module RHDL
           puts "Wrote #{MEMORY_DUMP_ASSET_MODULE_PATH}"
         end
 
-        RUNNER_CONFIG_PATHS = %w[8bit mos6502 apple2 gameboy].map do |name|
+        RUNNER_CONFIG_PATHS = %w[8bit mos6502 apple2 gameboy riscv].map do |name|
           File.join(PROJECT_ROOT, 'examples', name, 'config.json')
         end.freeze
         MRUBY_VERSION = '3.4.0'
@@ -772,6 +790,7 @@ module RHDL
           vim.wasm
           vim.data
           vimwasm.js
+          ir_compiler_riscv.wasm
         ].freeze
         ASSET_ROOT = File.join(WEB_ROOT, 'assets')
         WASM_BUILD_STAMP_PATH = File.join(PKG_DIR, '.web_build_stamp')

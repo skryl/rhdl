@@ -158,10 +158,10 @@ rhdl-app-shell {
           <nav class="tabs" aria-label="Runner views">
             <button class="tab-btn active" data-tab="ioTab" aria-selected="true">1. I/O</button>
             <button class="tab-btn" data-tab="vcdTab" aria-selected="false">2. VCD + Signals</button>
-            <button class="tab-btn" data-tab="editorTab" aria-selected="false">3. Editor</button>
-            <button class="tab-btn" data-tab="memoryTab" aria-selected="false">4. Memory</button>
-            <button class="tab-btn" data-tab="componentTab" aria-selected="false">5. Components</button>
-            <button class="tab-btn" data-tab="componentGraphTab" aria-selected="false">6. Schematic</button>
+            <button class="tab-btn" data-tab="memoryTab" aria-selected="false">3. Memory</button>
+            <button class="tab-btn" data-tab="componentTab" aria-selected="false">4. Components</button>
+            <button class="tab-btn" data-tab="componentGraphTab" aria-selected="false">5. Schematic</button>
+            <button class="tab-btn" data-tab="editorTab" aria-selected="false">6. Editor</button>
           </nav>
           <div class="viewer-toolbar">
             <button
@@ -254,59 +254,6 @@ rhdl-app-shell {
           <section class="subpanel">
             <h2>Watch Values</h2>
             <rhdl-watch-table id="watchTableBody"></rhdl-watch-table>
-          </section>
-        </section>
-
-        <section id="editorTab" class="tab-panel">
-          <div class="editor-top-layout">
-            <section class="subpanel editor-code-panel">
-              <div class="editor-panel-header">
-                <h2>Editor</h2>
-                <button id="editorExecuteBtn" type="button">Execute in mirb</button>
-              </div>
-              <p id="editorStatus" class="status">Initializing editor...</p>
-              <div id="editorVimWrap" class="editor-vim-wrap">
-                <canvas id="editorVimCanvas" class="editor-vim-canvas"></canvas>
-                <input
-                  id="editorVimInput"
-                  class="editor-vim-input"
-                  type="text"
-                  autocomplete="off"
-                  autocapitalize="off"
-                  autocorrect="off"
-                  spellcheck="false"
-                />
-                <textarea
-                  id="editorFallback"
-                  class="editor-fallback"
-                  spellcheck="false"
-                  autocomplete="off"
-                  autocapitalize="off"
-                  autocorrect="off"
-                ></textarea>
-              </div>
-            </section>
-
-            <section class="subpanel editor-terminal-panel">
-              <div class="editor-panel-header">
-                <h2>mirb Terminal</h2>
-              </div>
-              <div
-                id="editorTerminalOutput"
-                class="terminal-output editor-terminal-output"
-                tabindex="0"
-                role="textbox"
-                aria-label="Editor mirb terminal"
-              ></div>
-            </section>
-          </div>
-
-          <section class="subpanel editor-trace-panel">
-            <div class="editor-panel-header">
-              <h2>VCD Tracer</h2>
-              <p id="editorTraceMeta" class="status">Initialize simulator to trace IO signals</p>
-            </div>
-            <div id="editorCanvasWrap" class="editor-canvas-wrap"></div>
           </section>
         </section>
 
@@ -425,6 +372,59 @@ rhdl-app-shell {
             <div class="component-connection-scroll">
               <rhdl-component-connections id="componentConnectionBody"></rhdl-component-connections>
             </div>
+          </section>
+        </section>
+
+        <section id="editorTab" class="tab-panel">
+          <div class="editor-top-layout">
+            <section class="subpanel editor-code-panel">
+              <div class="editor-panel-header">
+                <h2>Editor</h2>
+                <button id="editorExecuteBtn" type="button">Execute in mirb</button>
+              </div>
+              <p id="editorStatus" class="status">Initializing editor...</p>
+              <div id="editorVimWrap" class="editor-vim-wrap">
+                <canvas id="editorVimCanvas" class="editor-vim-canvas"></canvas>
+                <input
+                  id="editorVimInput"
+                  class="editor-vim-input"
+                  type="text"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  autocorrect="off"
+                  spellcheck="false"
+                />
+                <textarea
+                  id="editorFallback"
+                  class="editor-fallback"
+                  spellcheck="false"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  autocorrect="off"
+                ></textarea>
+              </div>
+            </section>
+
+            <section class="subpanel editor-terminal-panel">
+              <div class="editor-panel-header">
+                <h2>mirb Terminal</h2>
+              </div>
+              <div
+                id="editorTerminalOutput"
+                class="terminal-output editor-terminal-output"
+                tabindex="0"
+                role="textbox"
+                aria-label="Editor mirb terminal"
+              ></div>
+            </section>
+          </div>
+
+          <section class="subpanel editor-trace-panel">
+            <div class="editor-panel-header">
+              <h2>VCD Tracer</h2>
+              <p id="editorTraceMeta" class="status">Initialize simulator to trace IO signals</p>
+            </div>
+            <div id="editorCanvasWrap" class="editor-canvas-wrap"></div>
           </section>
         </section>
 

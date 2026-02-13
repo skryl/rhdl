@@ -62,6 +62,22 @@ export function createApple2VisualController({
     return new Uint8Array(0);
   }
 
+  function readUartText(length) {
+    const sim = runtime?.sim;
+    if (!sim) {
+      return new Uint8Array(0);
+    }
+    if (typeof sim.runner_riscv_uart_tx_len !== 'function'
+      || typeof sim.runner_riscv_uart_tx_bytes !== 'function') {
+      return new Uint8Array(0);
+    }
+
+    const txLen = Number(sim.runner_riscv_uart_tx_len());
+    const txLimit = Number.isFinite(txLen) ? Math.max(0, txLen) : 0;
+    const readLen = Math.max(0, Number.isFinite(length) ? Math.min(length, txLimit) : txLimit);
+    return sim.runner_riscv_uart_tx_bytes(0, readLen);
+  }
+
   function refreshApple2Screen() {
     if (!dom.apple2TextScreen) {
       return;
@@ -163,6 +179,31 @@ export function createApple2VisualController({
       }
 
       ctx.putImageData(image, 0, 0);
+      return;
+    }
+
+    if (displayMode === 'uart') {
+      const textConfig = ioConfig.display?.text || {};
+      const width = Math.max(1, Number.parseInt(textConfig.width, 10) || 80);
+      const height = Math.max(1, Number.parseInt(textConfig.height, 10) || 24);
+      const maxBytes = width * height;
+      const uartBytes = readUartText(maxBytes);
+      if (!uartBytes || uartBytes.length === 0) {
+        dom.apple2TextScreen.textContent = 'No UART output yet.';
+        return;
+      }
+
+      const lines = [];
+      for (let row = 0; row < height; row += 1) {
+        let line = '';
+        const offset = row * width;
+        for (let col = 0; col < width; col += 1) {
+          const byte = uartBytes[offset + col] || 0;
+          line += decodeTextChar(byte, textConfig);
+        }
+        lines.push(line);
+      }
+      dom.apple2TextScreen.textContent = lines.join('\n');
       return;
     }
 

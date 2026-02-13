@@ -216,7 +216,72 @@ export const GENERATED_RUNNER_PRESETS = Object.freeze({
       "cyclesPerHertz": 1,
       "hertzLabel": "SM83"
     }
+  },
+  "riscv": {
+    "id": "riscv",
+    "label": "RISC-V xv6 Runner",
+    "simIrPath": "./assets/fixtures/riscv/ir/riscv.json",
+    "explorerIrPath": "./assets/fixtures/riscv/ir/riscv_hier.json",
+    "sourceBundlePath": "./assets/fixtures/riscv/ir/riscv_sources.json",
+    "schematicPath": "./assets/fixtures/riscv/ir/riscv_schematic.json",
+    "preferredTab": "ioTab",
+    "enableApple2Ui": false,
+    "usesManualIr": false,
+    "defaultBin": {
+      "path": "./assets/fixtures/riscv/software/bin/kernel.bin",
+      "offset": 2147483648,
+      "space": "main",
+      "startPc": "0x80000000",
+      "resetAfterLoad": true
+    },
+    "timing": {
+      "cyclesPerHertz": 1,
+      "hertzLabel": "RISC-V"
+    },
+    "preferredBackend": "compiler",
+    "compilerWasmPath": "./assets/pkg/ir_compiler_riscv.wasm",
+    "io": {
+      "enabled": true,
+      "api": "generic",
+      "memory": {
+        "dumpStart": 2147483648,
+        "dumpLength": 1024,
+        "addressSpace": 4294967295,
+        "viewMapped": true,
+        "dumpReadMapped": true,
+        "directWriteMapped": true
+      },
+      "display": {
+        "enabled": true,
+        "mode": "uart",
+        "text": {
+          "start": 0,
+          "width": 80,
+          "height": 24,
+          "rowStride": 80,
+          "rowLayout": "linear",
+          "charMask": 255,
+          "asciiMin": 32,
+          "asciiMax": 126
+        }
+      },
+      "keyboard": {
+        "enabled": true,
+        "mode": "uart"
+      },
+      "pcSignalCandidates": [
+        "debug_pc"
+      ],
+      "watchSignals": [
+        "debug_pc",
+        "debug_inst",
+        "debug_x1",
+        "debug_x2",
+        "debug_x10",
+        "debug_x11"
+      ]
+    }
   }
 });
-export const GENERATED_RUNNER_ORDER = Object.freeze(["cpu","mos6502","apple2","gameboy"]);
+export const GENERATED_RUNNER_ORDER = Object.freeze(["cpu","mos6502","apple2","gameboy","riscv"]);
 export const GENERATED_DEFAULT_RUNNER_ID = "apple2";

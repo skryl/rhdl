@@ -19,6 +19,16 @@ function normalizePositiveInt(value, fallback = null) {
   return parsed;
 }
 
+function formatMemoryAddress(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return '';
+  }
+  const masked = Math.max(0, parsed);
+  const width = masked > 0xFFFF ? 8 : 4;
+  return `0x${Math.floor(masked).toString(16).toUpperCase().padStart(width, '0')}`;
+}
+
 export function createControllerRegistry(options = {}) {
   const {
     dom,
@@ -276,6 +286,18 @@ export function createControllerRegistry(options = {}) {
       const value = normalizePositiveInt(defaults.uiUpdateCycles);
       if (value != null) {
         dom.uiUpdateCycles.value = String(value);
+      }
+    }
+    if (dom.memoryStart && ioConfig?.memory) {
+      const dumpStart = Number.parseInt(ioConfig.memory.dumpStart, 10);
+      if (Number.isFinite(dumpStart)) {
+        dom.memoryStart.value = formatMemoryAddress(dumpStart);
+      }
+    }
+    if (dom.memoryLength && ioConfig?.memory) {
+      const dumpLength = Number.parseInt(ioConfig.memory.dumpLength, 10);
+      if (Number.isFinite(dumpLength)) {
+        dom.memoryLength.value = String(dumpLength);
       }
     }
 

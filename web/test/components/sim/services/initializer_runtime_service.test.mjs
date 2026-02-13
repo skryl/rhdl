@@ -347,3 +347,62 @@ test('initializeApple2Mode bootstraps mos6502 runner after default bin reset', a
   ]);
   assert.equal(logs.some((line) => line.includes('MOS6502 bootstrap complete')), true);
 });
+
+test('initializeApple2Mode supports runner-mapped memory API fallback for uart runners', async () => {
+  const logs = [];
+  const state = { apple2: { enabled: false, baseRomBytes: null } };
+  const calls = [];
+
+  await initializeApple2Mode({
+    runtime: {
+      sim: {
+        has_signal: () => false,
+        runner_read_memory: (addr) => {
+          calls.push(['read', addr]);
+          return new Uint8Array([0]);
+        },
+        runner_write_memory: () => true,
+        runner_load_memory: (bytes, offset, options) => {
+          calls.push(['load', bytes.length, offset, options]);
+          return true;
+        },
+        runner_set_reset_vector: (pc) => {
+          calls.push(['setPc', pc]);
+          return true;
+        },
+        reset: () => calls.push(['reset'])
+      }
+    },
+    state,
+    preset: {
+      io: {
+        enabled: true,
+        api: 'generic',
+        memory: { addressSpace: 0xFFFFFFFF }
+      },
+      defaultBin: {
+        path: '/fixtures/kernel.bin',
+        offset: 0x80000000,
+        space: 'main',
+        startPc: '0x80000000',
+        resetAfterLoad: true
+      }
+    },
+    addWatchSignal: () => {},
+    fetchImpl: async () => ({
+      ok: true,
+      async arrayBuffer() {
+        return new Uint8Array([1, 2, 3]).buffer;
+      }
+    }),
+    log: (message) => logs.push(message)
+  });
+
+  assert.equal(state.apple2.enabled, true);
+  assert.deepEqual(calls, [
+    ['load', 3, 0x80000000, { isRom: false }],
+    ['setPc', 0x80000000],
+    ['reset']
+  ]);
+  assert.equal(logs.some((line) => String(line).includes('Default bin load failed')), false);
+});
