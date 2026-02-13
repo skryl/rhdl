@@ -916,8 +916,14 @@ module RHDL
 
         ex_machine_irq_masked = local(:ex_machine_irq_masked, ex_irq_pending_bits & ~csr_read_data7, width: 32)
         ex_super_irq_masked = local(:ex_super_irq_masked, ex_irq_pending_bits & csr_read_data7, width: 32)
+        ex_super_sie_machine_alias = local(:ex_super_sie_machine_alias,
+                                           mux((csr_read_data5 & lit(0x200, width: 32)) != lit(0, width: 32),
+                                               lit(0x800, width: 32),
+                                               lit(0, width: 32)),
+                                           width: 32)
+        ex_super_sie_effective = local(:ex_super_sie_effective, csr_read_data5 | ex_super_sie_machine_alias, width: 32)
         ex_machine_enabled_interrupts = local(:ex_machine_enabled_interrupts, ex_machine_irq_masked & csr_read_data3, width: 32)
-        ex_super_enabled_interrupts = local(:ex_super_enabled_interrupts, ex_super_irq_masked & csr_read_data5, width: 32)
+        ex_super_enabled_interrupts = local(:ex_super_enabled_interrupts, ex_super_irq_masked & ex_super_sie_effective, width: 32)
         ex_global_mie_enabled = local(:ex_global_mie_enabled,
                                       (csr_read_data2 & lit(0x8, width: 32)) != lit(0, width: 32),
                                       width: 1)
@@ -942,8 +948,16 @@ module RHDL
                                    ex_is_ecall | ex_is_ebreak | ex_is_illegal_system |
                                    ex_inst_page_fault | ex_data_page_fault,
                                    width: 1)
+        ex_ecall_cause = local(:ex_ecall_cause,
+                               mux(ex_priv_is_u, lit(8, width: 32),
+                                   mux(ex_priv_is_s, lit(9, width: 32), lit(11, width: 32))),
+                               width: 32)
+        ex_ecall_deleg_mask = local(:ex_ecall_deleg_mask,
+                                    mux(ex_priv_is_u, lit(0x100, width: 32),
+                                        mux(ex_priv_is_s, lit(0x200, width: 32), lit(0x800, width: 32))),
+                                    width: 32)
         ex_ecall_delegated = local(:ex_ecall_delegated,
-                                   (csr_read_data6 & lit(0x800, width: 32)) != lit(0, width: 32),
+                                   (csr_read_data6 & ex_ecall_deleg_mask) != lit(0, width: 32),
                                    width: 1)
         ex_ebreak_delegated = local(:ex_ebreak_delegated,
                                     (csr_read_data6 & lit(0x8, width: 32)) != lit(0, width: 32),
@@ -973,13 +987,22 @@ module RHDL
                                       (ex_sync_trap_taken & ex_sync_trap_delegated) | ex_interrupt_from_supervisor,
                                       width: 1)
         ex_trap_taken = local(:ex_trap_taken, ex_sync_trap_taken | ex_interrupt_pending, width: 1)
+        ex_machine_interrupt_cause = local(:ex_machine_interrupt_cause,
+                                           mux((ex_selected_interrupts & lit(0x800, width: 32)) != lit(0, width: 32),
+                                               lit(0x8000000B, width: 32), # machine external
+                                               mux((ex_selected_interrupts & lit(0x80, width: 32)) != lit(0, width: 32),
+                                                   lit(0x80000007, width: 32), # machine timer
+                                                   lit(0x80000003, width: 32))), # machine software
+                                           width: 32)
+        ex_super_interrupt_cause = local(:ex_super_interrupt_cause,
+                                         mux((ex_selected_interrupts & lit(0x800, width: 32)) != lit(0, width: 32),
+                                             lit(0x80000009, width: 32), # supervisor external
+                                             mux((ex_selected_interrupts & lit(0x80, width: 32)) != lit(0, width: 32),
+                                                 lit(0x80000005, width: 32), # supervisor timer
+                                                 lit(0x80000001, width: 32))), # supervisor software
+                                         width: 32)
         ex_interrupt_cause = local(:ex_interrupt_cause,
-                                   mux((ex_selected_interrupts & lit(0x800, width: 32)) != lit(0, width: 32),
-                                       lit(0x8000000B, width: 32), # MEI
-                                       mux((ex_selected_interrupts & lit(0x80, width: 32)) != lit(0, width: 32),
-                                           lit(0x80000007, width: 32), # MTI
-                                           lit(0x80000003, width: 32)  # MSI
-                                       )),
+                                   mux(ex_interrupt_from_supervisor, ex_super_interrupt_cause, ex_machine_interrupt_cause),
                                    width: 32)
         ex_trap_cause = local(:ex_trap_cause,
                               mux(ex_interrupt_pending,
@@ -990,7 +1013,7 @@ module RHDL
                                           ex_data_page_fault_cause,
                                           mux(ex_is_illegal_system,
                                               lit(2, width: 32),
-                                              mux(ex_is_ebreak, lit(3, width: 32), lit(11, width: 32)))))),
+                                              mux(ex_is_ebreak, lit(3, width: 32), ex_ecall_cause))))),
                               width: 32)
         ex_inst_word = local(:ex_inst_word,
                              cat(ex_funct7, ex_rs2_addr, ex_rs1_addr, ex_funct3, ex_rd_addr, ex_opcode),
@@ -1010,10 +1033,17 @@ module RHDL
                                        lit(0, width: 32),
                                        lit(0x8, width: 32)),
                                    width: 32)
+        ex_trap_mpp = local(:ex_trap_mpp,
+                            mux(priv_mode == lit(PrivMode::MACHINE, width: 2),
+                                lit(0x1800, width: 32),
+                                mux(priv_mode == lit(PrivMode::SUPERVISOR, width: 2),
+                                    lit(0x800, width: 32),
+                                    lit(0, width: 32))),
+                            width: 32)
         ex_trap_mstatus = local(:ex_trap_mstatus,
                                 (csr_read_data2 & lit(0xFFFFE777, width: 32)) |
                                 ex_old_mie_to_mpie |
-                                lit(0x1800, width: 32),
+                                ex_trap_mpp,
                                 width: 32)
         ex_mret_mstatus = local(:ex_mret_mstatus,
                                 (csr_read_data2 & lit(0xFFFFE777, width: 32)) |
@@ -1031,10 +1061,15 @@ module RHDL
                                        lit(0, width: 32),
                                        lit(0x2, width: 32)),
                                    width: 32)
+        ex_trap_spp = local(:ex_trap_spp,
+                            mux(priv_mode == lit(PrivMode::USER, width: 2),
+                                lit(0, width: 32),
+                                lit(0x100, width: 32)),
+                            width: 32)
         ex_trap_sstatus = local(:ex_trap_sstatus,
                                 (csr_read_data4 & lit(0xFFFFFEDD, width: 32)) |
                                 ex_old_sie_to_spie |
-                                lit(0x100, width: 32),
+                                ex_trap_spp,
                                 width: 32)
         ex_sret_sstatus = local(:ex_sret_sstatus,
                                 (csr_read_data4 & lit(0xFFFFFEDD, width: 32)) |

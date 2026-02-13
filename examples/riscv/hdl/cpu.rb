@@ -575,8 +575,14 @@ module RHDL
       # Interrupt enable filtering for M-mode (mstatus/mie) and S-mode (sstatus/sie).
       machine_irq_masked = local(:machine_irq_masked, irq_pending_bits & ~csr_read_data7, width: 32)
       super_irq_masked = local(:super_irq_masked, irq_pending_bits & csr_read_data7, width: 32)
+      super_sie_machine_alias = local(:super_sie_machine_alias,
+                                      mux((csr_read_data5 & lit(0x200, width: 32)) != lit(0, width: 32),
+                                          lit(0x800, width: 32),
+                                          lit(0, width: 32)),
+                                      width: 32)
+      super_sie_effective = local(:super_sie_effective, csr_read_data5 | super_sie_machine_alias, width: 32)
       machine_enabled_interrupts = local(:machine_enabled_interrupts, machine_irq_masked & csr_read_data3, width: 32)
-      super_enabled_interrupts = local(:super_enabled_interrupts, super_irq_masked & csr_read_data5, width: 32)
+      super_enabled_interrupts = local(:super_enabled_interrupts, super_irq_masked & super_sie_effective, width: 32)
       global_mie_enabled = local(:global_mie_enabled,
                                  (csr_read_data2 & lit(0x8, width: 32)) != lit(0, width: 32),
                                  width: 1)
@@ -600,8 +606,16 @@ module RHDL
       sync_trap_taken = local(:sync_trap_taken,
                               is_ecall | is_ebreak | is_illegal_system | inst_page_fault | data_page_fault,
                               width: 1)
+      ecall_cause = local(:ecall_cause,
+                          mux(priv_is_u, lit(8, width: 32),
+                              mux(priv_is_s, lit(9, width: 32), lit(11, width: 32))),
+                          width: 32)
+      ecall_deleg_mask = local(:ecall_deleg_mask,
+                               mux(priv_is_u, lit(0x100, width: 32),
+                                   mux(priv_is_s, lit(0x200, width: 32), lit(0x800, width: 32))),
+                               width: 32)
       ecall_delegated = local(:ecall_delegated,
-                              (csr_read_data6 & lit(0x800, width: 32)) != lit(0, width: 32),
+                              (csr_read_data6 & ecall_deleg_mask) != lit(0, width: 32),
                               width: 1)
       ebreak_delegated = local(:ebreak_delegated,
                                (csr_read_data6 & lit(0x8, width: 32)) != lit(0, width: 32),
@@ -631,13 +645,22 @@ module RHDL
                                  (sync_trap_taken & sync_trap_delegated) | interrupt_from_supervisor,
                                  width: 1)
       trap_taken = local(:trap_taken, sync_trap_taken | interrupt_pending, width: 1)
+      machine_interrupt_cause = local(:machine_interrupt_cause,
+                                      mux((selected_interrupts & lit(0x800, width: 32)) != lit(0, width: 32),
+                                          lit(0x8000000B, width: 32), # machine external
+                                          mux((selected_interrupts & lit(0x80, width: 32)) != lit(0, width: 32),
+                                              lit(0x80000007, width: 32), # machine timer
+                                              lit(0x80000003, width: 32))), # machine software
+                                      width: 32)
+      supervisor_interrupt_cause = local(:supervisor_interrupt_cause,
+                                         mux((selected_interrupts & lit(0x800, width: 32)) != lit(0, width: 32),
+                                             lit(0x80000009, width: 32), # supervisor external
+                                             mux((selected_interrupts & lit(0x80, width: 32)) != lit(0, width: 32),
+                                                 lit(0x80000005, width: 32), # supervisor timer
+                                                 lit(0x80000001, width: 32))), # supervisor software
+                                         width: 32)
       interrupt_cause = local(:interrupt_cause,
-                              mux((selected_interrupts & lit(0x800, width: 32)) != lit(0, width: 32),
-                                  lit(0x8000000B, width: 32), # MEI
-                                  mux((selected_interrupts & lit(0x80, width: 32)) != lit(0, width: 32),
-                                      lit(0x80000007, width: 32), # MTI
-                                      lit(0x80000003, width: 32)  # MSI
-                                  )),
+                              mux(interrupt_from_supervisor, supervisor_interrupt_cause, machine_interrupt_cause),
                               width: 32)
       trap_cause = local(:trap_cause,
                          mux(interrupt_pending,
@@ -648,7 +671,7 @@ module RHDL
                                      data_page_fault_cause,
                                      mux(is_illegal_system,
                                          lit(2, width: 32),
-                                         mux(is_ebreak, lit(3, width: 32), lit(11, width: 32)))))),
+                                         mux(is_ebreak, lit(3, width: 32), ecall_cause))))),
                          width: 32)
       trap_tval = local(:trap_tval,
                         mux(inst_page_fault, inst_vaddr,
@@ -707,10 +730,17 @@ module RHDL
                                   lit(0, width: 32),
                                   lit(0x8, width: 32)),
                               width: 32)
+      trap_mpp = local(:trap_mpp,
+                       mux(priv_mode == lit(PrivMode::MACHINE, width: 2),
+                           lit(0x1800, width: 32),
+                           mux(priv_mode == lit(PrivMode::SUPERVISOR, width: 2),
+                               lit(0x800, width: 32),
+                               lit(0, width: 32))),
+                       width: 32)
       trap_mstatus = local(:trap_mstatus,
                            (csr_read_data2 & lit(0xFFFFE777, width: 32)) |
                            old_mie_to_mpie |
-                           lit(0x1800, width: 32),
+                           trap_mpp,
                            width: 32)
       mret_mstatus = local(:mret_mstatus,
                            (csr_read_data2 & lit(0xFFFFE777, width: 32)) |
@@ -727,10 +757,15 @@ module RHDL
                                   lit(0, width: 32),
                                   lit(0x2, width: 32)),
                               width: 32)
+      trap_spp = local(:trap_spp,
+                       mux(priv_mode == lit(PrivMode::USER, width: 2),
+                           lit(0, width: 32),
+                           lit(0x100, width: 32)),
+                       width: 32)
       trap_sstatus = local(:trap_sstatus,
                            (csr_read_data4 & lit(0xFFFFFEDD, width: 32)) |
                            old_sie_to_spie |
-                           lit(0x100, width: 32),
+                           trap_spp,
                            width: 32)
       sret_sstatus = local(:sret_sstatus,
                            (csr_read_data4 & lit(0xFFFFFEDD, width: 32)) |

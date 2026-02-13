@@ -14,8 +14,9 @@ module RHDL
     module RISCV
       # Continuous verbose tracer for xv6 boot progress on native IR backends.
       class Xv6BootTracer
-        DEFAULT_KERNEL = File.expand_path('../fixtures/xv6-rv32/kernel.bin', __dir__)
-        DEFAULT_FS_IMG = File.expand_path('../fixtures/xv6-rv32/fs.img', __dir__)
+        DEFAULT_KERNEL = File.expand_path('../software/bin/kernel.bin', __dir__)
+        DEFAULT_FS_IMG = File.expand_path('../software/bin/fs.img', __dir__)
+        DEFAULT_SYMBOLS = File.expand_path('../software/bin/kernel.nm', __dir__)
 
         STAGE_TABLE = [
           [0x8000_0000..0x8000_0640, 'early_boot'],
@@ -29,6 +30,7 @@ module RHDL
           @options = options
           @cpu = build_harness
           @sim = @cpu.sim
+          @symbol_table = load_symbol_table(@options[:symbols])
           @last_uart_len = 0
           @last_stage = nil
           @last_mmio_key = nil
@@ -57,6 +59,14 @@ module RHDL
           )
           puts format('[trace] kernel=%<kernel>s', kernel: @options[:kernel])
           puts format('[trace] fs=%<fs>s', fs: @options[:fs])
+          if @options[:symbols]
+            if @symbol_table.empty?
+              puts format('[trace] symbols=%<symbols>s (missing/empty)', symbols: @options[:symbols])
+            else
+              puts format('[trace] symbols=%<symbols>s entries=%<count>d',
+                          symbols: @options[:symbols], count: @symbol_table.length)
+            end
+          end
 
           @cpu.reset!
           @sim.runner_load_rom(kernel_bytes.pack('C*'), 0x8000_0000)
@@ -75,6 +85,8 @@ module RHDL
             emit_uart_delta
             emit_stage
             emit_mmio_sample
+            emit_allocator_probe
+            emit_lock_probe
             emit_heartbeat if (@cycle_count % @heartbeat_period).zero?
 
             break if stop_condition_met?
@@ -146,11 +158,12 @@ module RHDL
           @last_stage = stage
           inst = read_inst
           puts format(
-            "\n[stage] cycles=%<cycles>d pc=0x%<pc>08x inst=0x%<inst>08x stage=%<stage>s",
+            "\n[stage] cycles=%<cycles>d pc=0x%<pc>08x inst=0x%<inst>08x stage=%<stage>s%<symbol>s",
             cycles: @cycle_count,
             pc: pc,
             inst: inst,
-            stage: stage
+            stage: stage,
+            symbol: symbol_suffix_for_pc(pc)
           )
         end
 
@@ -193,12 +206,62 @@ module RHDL
           pc = read_pc
           inst = read_inst
           puts format(
-            '[tick] cycles=%<cycles>d pc=0x%<pc>08x inst=0x%<inst>08x cps=%<cps>d stage=%<stage>s',
+            '[tick] cycles=%<cycles>d pc=0x%<pc>08x inst=0x%<inst>08x cps=%<cps>d stage=%<stage>s%<symbol>s',
             cycles: @cycle_count,
             pc: pc,
             inst: inst,
             cps: cps,
-            stage: stage_for_pc(pc)
+            stage: stage_for_pc(pc),
+            symbol: symbol_suffix_for_pc(pc)
+          )
+        end
+
+        def emit_allocator_probe
+          pc = read_pc
+          return unless (0x8000_0FEC..0x8000_0FF4).cover?(pc)
+
+          begin
+            a0 = @cpu.read_reg(10) & 0xFFFF_FFFF
+            a2 = @cpu.read_reg(12) & 0xFFFF_FFFF
+            a5 = @cpu.read_reg(15) & 0xFFFF_FFFF
+          rescue StandardError
+            return
+          end
+
+          total = (a2 - a0) & 0xFFFF_FFFF
+          remaining = (a2 - a5) & 0xFFFF_FFFF
+          puts format(
+            '[probe] cycles=%<cycles>d memset a0=0x%<a0>08x a5=0x%<a5>08x a2=0x%<a2>08x total=%<total>d rem=%<rem>d',
+            cycles: @cycle_count,
+            a0: a0,
+            a5: a5,
+            a2: a2,
+            total: total,
+            rem: remaining
+          )
+        end
+
+        def emit_lock_probe
+          pc = read_pc
+          return unless (0x8000_0E98..0x8000_0FAC).cover?(pc)
+
+          begin
+            ra = @cpu.read_reg(1) & 0xFFFF_FFFF
+            s1 = @cpu.read_reg(9) & 0xFFFF_FFFF
+            a0 = @cpu.read_reg(10) & 0xFFFF_FFFF
+          rescue StandardError
+            return
+          end
+
+          symbol = symbol_for_pc(ra)
+          puts format(
+            '[probe] cycles=%<cycles>d lock pc=0x%<pc>08x ra=0x%<ra>08x s1=0x%<s1>08x a0=0x%<a0>08x%<symbol>s',
+            cycles: @cycle_count,
+            pc: pc,
+            ra: ra,
+            s1: s1,
+            a0: a0,
+            symbol: symbol ? " ra_symbol=#{symbol}" : ''
           )
         end
 
@@ -280,6 +343,50 @@ module RHDL
 
           'mmio'
         end
+
+        def load_symbol_table(path)
+          return [] if path.nil? || path.empty?
+          return [] unless File.file?(path)
+
+          entries = File.readlines(path, chomp: true).filter_map do |line|
+            fields = line.split
+            next nil unless fields.length >= 3
+
+            begin
+              [Integer(fields[0], 16), fields[2]]
+            rescue StandardError
+              nil
+            end
+          end
+          entries.sort_by(&:first)
+        end
+
+        def symbol_suffix_for_pc(pc)
+          symbol = symbol_for_pc(pc)
+          symbol ? " symbol=#{symbol}" : ''
+        end
+
+        def symbol_for_pc(pc)
+          return nil if @symbol_table.empty?
+
+          lo = 0
+          hi = @symbol_table.length - 1
+          best = nil
+          while lo <= hi
+            mid = (lo + hi) / 2
+            if @symbol_table[mid][0] <= pc
+              best = @symbol_table[mid]
+              lo = mid + 1
+            else
+              hi = mid - 1
+            end
+          end
+          return nil unless best
+
+          base, name = best
+          offset = pc - base
+          offset.zero? ? name : format('%<name>s+0x%<offset>x', name: name, offset: offset)
+        end
       end
     end
   end
@@ -291,6 +398,7 @@ if __FILE__ == $PROGRAM_NAME
     backend: :compiler,
     kernel: RHDL::Examples::RISCV::Xv6BootTracer::DEFAULT_KERNEL,
     fs: RHDL::Examples::RISCV::Xv6BootTracer::DEFAULT_FS_IMG,
+    symbols: RHDL::Examples::RISCV::Xv6BootTracer::DEFAULT_SYMBOLS,
     max_cycles: 20_000_000,
     chunk: 100_000,
     heartbeat: 200_000,
@@ -313,6 +421,10 @@ if __FILE__ == $PROGRAM_NAME
     end
     o.on('--kernel PATH', 'Path to xv6 kernel.bin') { |v| opts[:kernel] = File.expand_path(v) }
     o.on('--fs PATH', 'Path to xv6 fs.img') { |v| opts[:fs] = File.expand_path(v) }
+    o.on('--symbols PATH', 'Path to kernel.nm symbol map (default: software/bin/kernel.nm)') do |v|
+      opts[:symbols] = File.expand_path(v)
+    end
+    o.on('--no-symbols', 'Disable symbolized PC labels') { opts[:symbols] = nil }
     o.on('--max-cycles N', Integer, 'Maximum cycles to run (default: 20000000)') { |v| opts[:max_cycles] = v }
     o.on('--chunk N', Integer, 'Cycles per run chunk (default: 100000)') { |v| opts[:chunk] = v }
     o.on('--heartbeat N', Integer, 'Progress print period in cycles (default: 200000)') { |v| opts[:heartbeat] = v }

@@ -1040,7 +1040,7 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
     pipeline.set_interrupts(timer: 1)
     pipeline.run_cycles(28)
 
-    expect(single.read_reg(2)).to eq(0x80000007)
+    expect(single.read_reg(2)).to eq(0x80000005)
     expect(single.read_reg(4)).to eq(0x120)
     expect(pipeline.read_reg(2)).to eq(single.read_reg(2))
     expect(pipeline.read_reg(4)).to eq(single.read_reg(4))
