@@ -354,6 +354,14 @@ impl RiscvExtension {
         self.uart_rx_queue.push_back(value);
     }
 
+    pub fn enqueue_uart_rx_bytes(&mut self, bytes: &[u8]) -> usize {
+        if bytes.is_empty() {
+            return 0;
+        }
+        self.uart_rx_queue.extend(bytes.iter().copied());
+        bytes.len()
+    }
+
     pub fn clear_uart_tx_bytes(&mut self) {
         self.uart_tx_bytes.clear();
     }

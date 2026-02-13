@@ -208,11 +208,19 @@ module RHDL
           end
 
           def uart_receive_byte(byte)
+            uart_receive_bytes([byte & 0xFF])
+          end
+
+          def uart_receive_bytes(bytes)
             if native_riscv?
-              @sim.runner_riscv_uart_receive_byte(byte & 0xFF)
+              @sim.runner_riscv_uart_receive_bytes(bytes)
             else
-              @uart_rx_queue << (byte & 0xFF)
+              bytes.each { |byte| @uart_rx_queue << (byte & 0xFF) }
             end
+          end
+
+          def uart_receive_text(text)
+            uart_receive_bytes(text.to_s.b.bytes)
           end
 
           def uart_tx_bytes

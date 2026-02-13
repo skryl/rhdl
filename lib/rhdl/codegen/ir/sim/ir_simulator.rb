@@ -82,6 +82,7 @@ module RHDL
         RUNNER_MEM_SPACE_FRAMEBUFFER = 6
         RUNNER_MEM_SPACE_DISK = 7
         RUNNER_MEM_SPACE_UART_TX = 8
+        RUNNER_MEM_SPACE_UART_RX = 9
 
         RUNNER_MEM_FLAG_MAPPED = 1
 
@@ -624,9 +625,26 @@ module RHDL
         end
 
         def runner_riscv_uart_receive_byte(byte)
+          runner_riscv_uart_receive_bytes([byte.to_i & 0xFF])
+        end
+
+        def runner_riscv_uart_receive_bytes(bytes)
           return false unless riscv_mode?
-          value = byte.to_i & 0xFF
-          @fn_runner_control.call(@ctx, RUNNER_CONTROL_RISCV_UART_PUSH_RX, value, 0) != 0
+
+          payload = if bytes.is_a?(String)
+            bytes.b
+          elsif bytes.respond_to?(:pack)
+            bytes.pack('C*')
+          else
+            Array(bytes).pack('C*')
+          end
+          return true if payload.empty?
+
+          runner_mem(RUNNER_MEM_OP_WRITE, RUNNER_MEM_SPACE_UART_RX, 0, payload, 0) > 0
+        end
+
+        def runner_riscv_uart_receive_text(text)
+          runner_riscv_uart_receive_bytes(text.to_s.b)
         end
 
         def runner_riscv_uart_tx_bytes
