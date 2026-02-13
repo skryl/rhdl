@@ -1,4 +1,4 @@
-# RV32I RISC-V Constants and Encoding
+# RV32I/RV32M RISC-V Constants and Encoding
 # Based on RISC-V ISA specification
 
 module RHDL
@@ -15,6 +15,7 @@ module RHDL
     STORE   = 0b0100011  # Store instructions
     OP_IMM  = 0b0010011  # Immediate arithmetic
     OP      = 0b0110011  # Register-register arithmetic
+    AMO     = 0b0101111  # Atomic memory operations (RV32A)
     MISC_MEM = 0b0001111 # FENCE instructions
     SYSTEM  = 0b1110011  # ECALL, EBREAK
   end
@@ -51,6 +52,7 @@ module RHDL
   module Funct7
     NORMAL  = 0b0000000
     ALT     = 0b0100000  # SUB, SRA
+    M_EXT   = 0b0000001  # MUL/DIV/REM family
   end
 
   # ALU operation codes (internal)
@@ -67,6 +69,14 @@ module RHDL
     AND   = 9
     PASS_A = 10  # Pass through A (for LUI)
     PASS_B = 11  # Pass through B (for AUIPC)
+    MUL    = 12
+    MULH   = 13
+    MULHSU = 14
+    MULHU  = 15
+    DIV    = 16
+    DIVU   = 17
+    REM    = 18
+    REMU   = 19
   end
 
   # Instruction format types
@@ -93,6 +103,13 @@ module RHDL
     BRANCH = 1  # Branch target
     JAL    = 2  # JAL target
     JALR   = 3  # JALR target
+  end
+
+  # Privilege modes
+  module PrivMode
+    USER       = 0b00
+    SUPERVISOR = 0b01
+    MACHINE    = 0b11
   end
     end
   end

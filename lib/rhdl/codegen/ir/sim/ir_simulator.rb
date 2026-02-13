@@ -67,6 +67,7 @@ module RHDL
         RUNNER_KIND_MOS6502 = 2
         RUNNER_KIND_GAMEBOY = 3
         RUNNER_KIND_CPU8BIT = 4
+        RUNNER_KIND_RISCV = 5
 
         RUNNER_MEM_OP_LOAD = 0
         RUNNER_MEM_OP_READ = 1
@@ -79,6 +80,9 @@ module RHDL
         RUNNER_MEM_SPACE_ZPRAM = 4
         RUNNER_MEM_SPACE_WRAM = 5
         RUNNER_MEM_SPACE_FRAMEBUFFER = 6
+        RUNNER_MEM_SPACE_DISK = 7
+        RUNNER_MEM_SPACE_UART_TX = 8
+        RUNNER_MEM_SPACE_UART_RX = 9
 
         RUNNER_MEM_FLAG_MAPPED = 1
 
@@ -88,6 +92,10 @@ module RHDL
         RUNNER_CONTROL_SET_RESET_VECTOR = 0
         RUNNER_CONTROL_RESET_SPEAKER_TOGGLES = 1
         RUNNER_CONTROL_RESET_LCD = 2
+        RUNNER_CONTROL_RISCV_SET_IRQS = 3
+        RUNNER_CONTROL_RISCV_SET_PLIC_SOURCES = 4
+        RUNNER_CONTROL_RISCV_UART_PUSH_RX = 5
+        RUNNER_CONTROL_RISCV_CLEAR_UART_TX = 6
 
         RUNNER_PROBE_KIND = 0
         RUNNER_PROBE_IS_MODE = 1
@@ -101,6 +109,7 @@ module RHDL
         RUNNER_PROBE_SIGNAL = 9
         RUNNER_PROBE_LCDC_ON = 10
         RUNNER_PROBE_H_DIV_CNT = 11
+        RUNNER_PROBE_RISCV_UART_TX_LEN = 17
 
         SIM_CAP_SIGNAL_INDEX = 1 << 0
         SIM_CAP_FORCED_CLOCK = 1 << 1
@@ -417,7 +426,8 @@ module RHDL
             apple2_mode: runner_kind == :apple2,
             gameboy_mode: gameboy_mode?,
             mos6502_mode: runner_kind == :mos6502,
-            cpu8bit_mode: runner_kind == :cpu8bit
+            cpu8bit_mode: runner_kind == :cpu8bit,
+            riscv_mode: runner_kind == :riscv
           }
         end
 
@@ -461,6 +471,7 @@ module RHDL
           when RUNNER_KIND_MOS6502 then :mos6502
           when RUNNER_KIND_GAMEBOY then :gameboy
           when RUNNER_KIND_CPU8BIT then :cpu8bit
+          when RUNNER_KIND_RISCV then :riscv
           else nil
           end
         end
@@ -547,6 +558,17 @@ module RHDL
           runner_mem(RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_ROM, offset, data, 0) > 0
         end
 
+        def runner_read_rom(offset, length)
+          length = [length.to_i, 0].max
+          if @fallback
+            return @sim.runner_read_rom(offset, length) if @sim.respond_to?(:runner_read_rom)
+            return Array.new(length, 0)
+          end
+          return [] if length.zero?
+
+          runner_mem_read(RUNNER_MEM_SPACE_ROM, offset, length, 0)
+        end
+
         def runner_set_reset_vector(addr)
           vector = addr.to_i & 0xFFFF
           if @fallback
@@ -573,6 +595,83 @@ module RHDL
           @fn_runner_control.call(@ctx, RUNNER_CONTROL_RESET_SPEAKER_TOGGLES, 0, 0)
           @sim_runner_speaker_toggles = 0
           nil
+        end
+
+        # ====================================================================
+        # RISC-V Extension Methods
+        # ====================================================================
+
+        def riscv_mode?
+          return @sim.riscv_mode? if @fallback && @sim.respond_to?(:riscv_mode?)
+          return false if @fallback
+          runner_kind == :riscv
+        end
+
+        def runner_riscv_set_interrupts(software: false, timer: false, external: false)
+          return false unless riscv_mode?
+          bits = 0
+          bits |= 0x1 if software
+          bits |= 0x2 if timer
+          bits |= 0x4 if external
+          @fn_runner_control.call(@ctx, RUNNER_CONTROL_RISCV_SET_IRQS, bits, 0) != 0
+        end
+
+        def runner_riscv_set_plic_sources(source1: false, source10: false)
+          return false unless riscv_mode?
+          bits = 0
+          bits |= 0x1 if source1
+          bits |= 0x2 if source10
+          @fn_runner_control.call(@ctx, RUNNER_CONTROL_RISCV_SET_PLIC_SOURCES, bits, 0) != 0
+        end
+
+        def runner_riscv_uart_receive_byte(byte)
+          runner_riscv_uart_receive_bytes([byte.to_i & 0xFF])
+        end
+
+        def runner_riscv_uart_receive_bytes(bytes)
+          return false unless riscv_mode?
+
+          payload = if bytes.is_a?(String)
+            bytes.b
+          elsif bytes.respond_to?(:pack)
+            bytes.pack('C*')
+          else
+            Array(bytes).pack('C*')
+          end
+          return true if payload.empty?
+
+          runner_mem(RUNNER_MEM_OP_WRITE, RUNNER_MEM_SPACE_UART_RX, 0, payload, 0) > 0
+        end
+
+        def runner_riscv_uart_receive_text(text)
+          runner_riscv_uart_receive_bytes(text.to_s.b)
+        end
+
+        def runner_riscv_uart_tx_bytes
+          return [] unless riscv_mode?
+          len = runner_probe(RUNNER_PROBE_RISCV_UART_TX_LEN).to_i
+          return [] if len <= 0
+          runner_mem_read(RUNNER_MEM_SPACE_UART_TX, 0, len, 0)
+        end
+
+        def runner_riscv_clear_uart_tx_bytes
+          return nil unless riscv_mode?
+          @fn_runner_control.call(@ctx, RUNNER_CONTROL_RISCV_CLEAR_UART_TX, 0, 0)
+          nil
+        end
+
+        def runner_riscv_load_disk(data, offset = 0)
+          return false unless riscv_mode?
+          data = data.pack('C*') if data.is_a?(Array)
+          return false if data.nil? || data.bytesize.zero?
+          runner_mem(RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_DISK, offset, data, 0) > 0
+        end
+
+        def runner_riscv_read_disk(offset, length)
+          return [] unless riscv_mode?
+          length = [length.to_i, 0].max
+          return [] if length.zero?
+          runner_mem_read(RUNNER_MEM_SPACE_DISK, offset, length, 0)
         end
 
         # ====================================================================
@@ -941,6 +1040,8 @@ module RHDL
           @widths = {}
           @inputs = []
           @outputs = []
+          @memories = {}
+          @memory_meta = {}
 
           # Initialize ports
           @ir[:ports]&.each do |port|
@@ -968,8 +1069,23 @@ module RHDL
             @reset_values[reg[:name]] = reset_val
           end
 
+          # Initialize memories
+          @ir[:memories]&.each do |mem|
+            depth = mem[:depth].to_i
+            width = mem[:width].to_i
+            initial = Array.new(depth, 0)
+            (mem[:initial_data] || []).each_with_index do |value, idx|
+              break if idx >= depth
+              initial[idx] = value.to_i & mask(width)
+            end
+            @memories[mem[:name]] = initial
+            @memory_meta[mem[:name]] = { depth: depth, width: width, initial: initial.dup }
+          end
+
           @assigns = @ir[:assigns] || []
           @processes = @ir[:processes] || []
+          @write_ports = @ir[:write_ports] || []
+          @sync_read_ports = @ir[:sync_read_ports] || []
         end
 
         def native?
@@ -1038,19 +1154,29 @@ module RHDL
             (val >> expr[:low]) & mask(expr[:width])
           when 'concat'
             result = 0
-            shift = 0
             expr[:parts].each do |part|
-              part_val = eval_expr(part)
               part_width = part[:width]
-              result |= (part_val & mask(part_width)) << shift
-              shift += part_width
+              part_val = eval_expr(part) & mask(part_width)
+              result = ((result << part_width) | part_val) & mask(expr[:width])
             end
             result & mask(expr[:width])
           when 'resize'
             eval_expr(expr[:expr]) & mask(expr[:width])
+          when 'mem_read'
+            memory = @memories[expr[:memory]]
+            meta = @memory_meta[expr[:memory]]
+            return 0 unless memory && meta
+
+            addr = eval_expr(expr[:addr]) % meta[:depth]
+            width = expr[:width] || meta[:width]
+            memory[addr] & mask(width)
           else
             0
           end
+        end
+
+        def has_signal?(name)
+          @signals.key?(name.to_s) || @signals.key?(name.to_sym)
         end
 
         def poke(name, value)
@@ -1082,6 +1208,20 @@ module RHDL
         def tick
           evaluate
 
+          # Apply memory writes at the active clock edge.
+          @write_ports.each do |wp|
+            next unless (@signals[wp[:clock]] || 0) != 0
+            next unless (eval_expr(wp[:enable]) & 1) == 1
+
+            memory = @memories[wp[:memory]]
+            meta = @memory_meta[wp[:memory]]
+            next unless memory && meta
+
+            addr = eval_expr(wp[:addr]) % meta[:depth]
+            data = eval_expr(wp[:data]) & mask(meta[:width])
+            memory[addr] = data
+          end
+
           # Sample register inputs
           next_regs = {}
           @processes.each do |process|
@@ -1098,6 +1238,23 @@ module RHDL
             @signals[name] = val
           end
 
+          # Synchronous memory reads update their destination signals on edge.
+          @sync_read_ports.each do |rp|
+            next unless (@signals[rp[:clock]] || 0) != 0
+            if rp[:enable]
+              next unless (eval_expr(rp[:enable]) & 1) == 1
+            end
+
+            memory = @memories[rp[:memory]]
+            meta = @memory_meta[rp[:memory]]
+            next unless memory && meta
+
+            addr = eval_expr(rp[:addr]) % meta[:depth]
+            data = memory[addr] & mask(meta[:width])
+            width = @widths[rp[:data]] || meta[:width]
+            @signals[rp[:data]] = data & mask(width)
+          end
+
           evaluate
         end
 
@@ -1106,6 +1263,9 @@ module RHDL
           # Apply register reset values
           @reset_values.each do |name, val|
             @signals[name] = val
+          end
+          @memory_meta.each do |name, meta|
+            @memories[name] = meta[:initial].dup
           end
         end
 

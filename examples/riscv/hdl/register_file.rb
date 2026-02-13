@@ -6,6 +6,7 @@
 require_relative '../../../lib/rhdl'
 require_relative '../../../lib/rhdl/dsl/behavior'
 require_relative '../../../lib/rhdl/dsl/sequential'
+require_relative '../../../lib/rhdl/dsl/memory'
 
 module RHDL
   module Examples
@@ -13,6 +14,7 @@ module RHDL
       class RegisterFile < RHDL::HDL::SequentialComponent
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
+    include RHDL::DSL::Memory
 
     input :clk
     input :rst
@@ -27,12 +29,49 @@ module RHDL
     input :rd_addr, width: 5     # Destination register address
     input :rd_data, width: 32    # Write data
     input :rd_we                 # Write enable
+    input :forwarding_en         # Enable write->read forwarding in same cycle (pipeline use)
 
     # Debug outputs for testing
     output :debug_x1, width: 32
     output :debug_x2, width: 32
     output :debug_x10, width: 32
     output :debug_x11, width: 32
+    input :debug_raddr, width: 5
+    output :debug_rdata, width: 32
+
+    # IR/codegen memory model for architectural register state.
+    # Custom propagate below remains the simulation source of truth for Ruby harnesses.
+    memory :regs, depth: 32, width: 32
+    wire :rd_nonzero
+    wire :rf_write_en
+    sync_write :regs, clock: :clk, enable: :rf_write_en, addr: :rd_addr, data: :rd_data
+
+    behavior do
+      rd_nonzero <= (rd_addr != lit(0, width: 5))
+      rf_write_en <= rd_we & rd_nonzero & ~rst
+
+      rs1_raw = local(:rs1_raw, mem_read_expr(:regs, rs1_addr, width: 32), width: 32)
+      rs2_raw = local(:rs2_raw, mem_read_expr(:regs, rs2_addr, width: 32), width: 32)
+      debug_raw = local(:debug_raw, mem_read_expr(:regs, debug_raddr, width: 32), width: 32)
+
+      fwd_rs1 = local(:fwd_rs1,
+                      forwarding_en & rd_we & rd_nonzero & (rs1_addr == rd_addr),
+                      width: 1)
+      fwd_rs2 = local(:fwd_rs2,
+                      forwarding_en & rd_we & rd_nonzero & (rs2_addr == rd_addr),
+                      width: 1)
+
+      rs1_data <= mux(rs1_addr == lit(0, width: 5), lit(0, width: 32),
+                      mux(fwd_rs1, rd_data, rs1_raw))
+      rs2_data <= mux(rs2_addr == lit(0, width: 5), lit(0, width: 32),
+                      mux(fwd_rs2, rd_data, rs2_raw))
+      debug_rdata <= mux(debug_raddr == lit(0, width: 5), lit(0, width: 32), debug_raw)
+
+      debug_x1 <= mem_read_expr(:regs, lit(1, width: 5), width: 32)
+      debug_x2 <= mem_read_expr(:regs, lit(2, width: 5), width: 32)
+      debug_x10 <= mem_read_expr(:regs, lit(10, width: 5), width: 32)
+      debug_x11 <= mem_read_expr(:regs, lit(11, width: 5), width: 32)
+    end
 
     def initialize(name = nil, forwarding: false)
       super(name)
@@ -108,6 +147,8 @@ module RHDL
       out_set(:debug_x2, @regs[2])
       out_set(:debug_x10, @regs[10])
       out_set(:debug_x11, @regs[11])
+      debug_raddr = in_val(:debug_raddr)
+      out_set(:debug_rdata, debug_raddr == 0 ? 0 : @regs[debug_raddr])
     end
 
     # Direct register access for testing

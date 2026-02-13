@@ -11,7 +11,9 @@ use std::ptr;
 use std::slice;
 
 use crate::core::CoreSimulator;
-use crate::extensions::{Apple2Extension, Cpu8BitExtension, GameBoyExtension, Mos6502Extension};
+use crate::extensions::{
+    Apple2Extension, Cpu8BitExtension, GameBoyExtension, Mos6502Extension, RiscvExtension,
+};
 use crate::vcd::{TraceMode, VcdTracer};
 
 // ============================================================================
@@ -25,6 +27,7 @@ pub struct IrSimContext {
     pub cpu8bit: Option<Cpu8BitExtension>,
     pub gameboy: Option<GameBoyExtension>,
     pub mos6502: Option<Mos6502Extension>,
+    pub riscv: Option<RiscvExtension>,
     pub tracer: VcdTracer,
 }
 
@@ -57,6 +60,12 @@ impl IrSimContext {
             None
         };
 
+        let riscv = if RiscvExtension::is_riscv_ir(&core.name_to_idx) {
+            Some(RiscvExtension::new(&core))
+        } else {
+            None
+        };
+
         // Initialize VCD tracer with a stable signal table indexed by slot.
         // `name_to_idx` can be smaller than signal_count when the IR contains
         // duplicate names in different declaration groups.
@@ -85,6 +94,7 @@ impl IrSimContext {
             cpu8bit,
             gameboy,
             mos6502,
+            riscv,
             tracer,
         })
     }
@@ -140,6 +150,8 @@ pub const RUNNER_KIND_MOS6502: c_int = 2;
 pub const RUNNER_KIND_GAMEBOY: c_int = 3;
 /// examples/8bit CPU extension
 pub const RUNNER_KIND_CPU8BIT: c_int = 4;
+/// RISC-V CPU extension
+pub const RUNNER_KIND_RISCV: c_int = 5;
 
 pub const RUNNER_MEM_OP_LOAD: c_uint = 0;
 pub const RUNNER_MEM_OP_READ: c_uint = 1;
@@ -152,6 +164,9 @@ pub const RUNNER_MEM_SPACE_VRAM: c_uint = 3;
 pub const RUNNER_MEM_SPACE_ZPRAM: c_uint = 4;
 pub const RUNNER_MEM_SPACE_WRAM: c_uint = 5;
 pub const RUNNER_MEM_SPACE_FRAMEBUFFER: c_uint = 6;
+pub const RUNNER_MEM_SPACE_DISK: c_uint = 7;
+pub const RUNNER_MEM_SPACE_UART_TX: c_uint = 8;
+pub const RUNNER_MEM_SPACE_UART_RX: c_uint = 9;
 
 pub const RUNNER_MEM_FLAG_MAPPED: c_uint = 1;
 
@@ -161,6 +176,10 @@ pub const RUNNER_RUN_MODE_FULL: c_uint = 1;
 pub const RUNNER_CONTROL_SET_RESET_VECTOR: c_uint = 0;
 pub const RUNNER_CONTROL_RESET_SPEAKER_TOGGLES: c_uint = 1;
 pub const RUNNER_CONTROL_RESET_LCD: c_uint = 2;
+pub const RUNNER_CONTROL_RISCV_SET_IRQS: c_uint = 3;
+pub const RUNNER_CONTROL_RISCV_SET_PLIC_SOURCES: c_uint = 4;
+pub const RUNNER_CONTROL_RISCV_UART_PUSH_RX: c_uint = 5;
+pub const RUNNER_CONTROL_RISCV_CLEAR_UART_TX: c_uint = 6;
 
 pub const RUNNER_PROBE_KIND: c_uint = 0;
 pub const RUNNER_PROBE_IS_MODE: c_uint = 1;
@@ -179,6 +198,7 @@ pub const RUNNER_PROBE_LCD_Y: c_uint = 13;
 pub const RUNNER_PROBE_LCD_PREV_CLKENA: c_uint = 14;
 pub const RUNNER_PROBE_LCD_PREV_VSYNC: c_uint = 15;
 pub const RUNNER_PROBE_LCD_FRAME_COUNT: c_uint = 16;
+pub const RUNNER_PROBE_RISCV_UART_TX_LEN: c_uint = 17;
 
 #[repr(C)]
 pub struct RunnerCaps {
@@ -239,6 +259,8 @@ unsafe fn runner_kind_impl(ctx: *const IrSimContext) -> c_int {
         RUNNER_KIND_GAMEBOY
     } else if ctx.cpu8bit.is_some() {
         RUNNER_KIND_CPU8BIT
+    } else if ctx.riscv.is_some() {
+        RUNNER_KIND_RISCV
     } else {
         RUNNER_KIND_NONE
     }
@@ -304,6 +326,10 @@ unsafe fn runner_load_main_impl(
         }
         gameboy.rom[offset..end].copy_from_slice(&bytes[..copy_len]);
         return copy_len;
+    }
+
+    if let Some(ref mut riscv) = ctx.riscv {
+        return riscv.load_main(bytes, offset, is_rom);
     }
 
     0
@@ -379,6 +405,11 @@ unsafe fn runner_read_main_impl(
         return len;
     }
 
+    if let Some(ref riscv) = ctx.riscv {
+        let out = slice::from_raw_parts_mut(out_data, len);
+        return riscv.read_main(start, out, mapped);
+    }
+
     0
 }
 
@@ -439,6 +470,10 @@ unsafe fn runner_write_main_impl(
         return len;
     }
 
+    if let Some(ref mut riscv) = ctx.riscv {
+        return riscv.write_main(start, bytes, mapped);
+    }
+
     0
 }
 
@@ -477,6 +512,11 @@ unsafe fn runner_read_rom_impl(
         }
         ptr::copy_nonoverlapping(gameboy.rom[start..].as_ptr(), out_data, copy_len);
         return copy_len;
+    }
+
+    if let Some(ref riscv) = ctx.riscv {
+        let out = slice::from_raw_parts_mut(out_data, len);
+        return riscv.read_rom(start, out);
     }
 
     0
@@ -688,6 +728,69 @@ unsafe fn runner_read_framebuffer_impl(
     0
 }
 
+unsafe fn runner_read_disk_impl(
+    ctx: *const IrSimContext,
+    start: usize,
+    out_data: *mut u8,
+    len: usize,
+) -> usize {
+    if ctx.is_null() || out_data.is_null() || len == 0 {
+        return 0;
+    }
+    let ctx = &*ctx;
+    if let Some(ref riscv) = ctx.riscv {
+        let out = slice::from_raw_parts_mut(out_data, len);
+        return riscv.read_disk(start, out);
+    }
+    0
+}
+
+unsafe fn runner_write_disk_impl(
+    ctx: *mut IrSimContext,
+    start: usize,
+    data: *const u8,
+    len: usize,
+) -> usize {
+    if ctx.is_null() || data.is_null() || len == 0 {
+        return 0;
+    }
+    let ctx = &mut *ctx;
+    if let Some(ref mut riscv) = ctx.riscv {
+        let bytes = slice::from_raw_parts(data, len);
+        return riscv.write_disk(start, bytes);
+    }
+    0
+}
+
+unsafe fn runner_read_uart_tx_impl(
+    ctx: *const IrSimContext,
+    start: usize,
+    out_data: *mut u8,
+    len: usize,
+) -> usize {
+    if ctx.is_null() || out_data.is_null() || len == 0 {
+        return 0;
+    }
+    let ctx = &*ctx;
+    if let Some(ref riscv) = ctx.riscv {
+        let out = slice::from_raw_parts_mut(out_data, len);
+        return riscv.read_uart_tx(start, out);
+    }
+    0
+}
+
+unsafe fn runner_write_uart_rx_impl(ctx: *mut IrSimContext, data: *const u8, len: usize) -> usize {
+    if ctx.is_null() || data.is_null() || len == 0 {
+        return 0;
+    }
+    let ctx = &mut *ctx;
+    if let Some(ref mut riscv) = ctx.riscv {
+        let bytes = slice::from_raw_parts(data, len);
+        return riscv.enqueue_uart_rx_bytes(bytes);
+    }
+    0
+}
+
 unsafe fn runner_set_reset_vector_impl(ctx: *mut IrSimContext, addr: c_uint) {
     if ctx.is_null() {
         return;
@@ -789,6 +892,12 @@ unsafe fn runner_run_impl(
         return 1;
     }
 
+    if let Some(ref mut riscv) = ctx.riscv {
+        let cycles_run = riscv.run_cycles(&mut ctx.core, cycles);
+        write_runner_run_result(result_out, false, false, cycles_run, 0, 0);
+        return 1;
+    }
+
     for _ in 0..cycles {
         ctx.core.tick();
     }
@@ -811,6 +920,7 @@ pub unsafe extern "C" fn runner_get_caps(
         || kind == RUNNER_KIND_MOS6502
         || kind == RUNNER_KIND_GAMEBOY
         || kind == RUNNER_KIND_CPU8BIT
+        || kind == RUNNER_KIND_RISCV
     {
         mem_spaces |= bit(RUNNER_MEM_SPACE_MAIN) | bit(RUNNER_MEM_SPACE_ROM);
     }
@@ -821,10 +931,19 @@ pub unsafe extern "C" fn runner_get_caps(
             | bit(RUNNER_MEM_SPACE_WRAM)
             | bit(RUNNER_MEM_SPACE_FRAMEBUFFER);
     }
+    if kind == RUNNER_KIND_RISCV {
+        mem_spaces |= bit(RUNNER_MEM_SPACE_DISK)
+            | bit(RUNNER_MEM_SPACE_UART_TX)
+            | bit(RUNNER_MEM_SPACE_UART_RX);
+    }
 
     let control_ops = bit(RUNNER_CONTROL_SET_RESET_VECTOR)
         | bit(RUNNER_CONTROL_RESET_SPEAKER_TOGGLES)
-        | bit(RUNNER_CONTROL_RESET_LCD);
+        | bit(RUNNER_CONTROL_RESET_LCD)
+        | bit(RUNNER_CONTROL_RISCV_SET_IRQS)
+        | bit(RUNNER_CONTROL_RISCV_SET_PLIC_SOURCES)
+        | bit(RUNNER_CONTROL_RISCV_UART_PUSH_RX)
+        | bit(RUNNER_CONTROL_RISCV_CLEAR_UART_TX);
 
     let probe_ops = bit(RUNNER_PROBE_KIND)
         | bit(RUNNER_PROBE_IS_MODE)
@@ -842,7 +961,8 @@ pub unsafe extern "C" fn runner_get_caps(
         | bit(RUNNER_PROBE_LCD_Y)
         | bit(RUNNER_PROBE_LCD_PREV_CLKENA)
         | bit(RUNNER_PROBE_LCD_PREV_VSYNC)
-        | bit(RUNNER_PROBE_LCD_FRAME_COUNT);
+        | bit(RUNNER_PROBE_LCD_FRAME_COUNT)
+        | bit(RUNNER_PROBE_RISCV_UART_TX_LEN);
 
     *caps_out = RunnerCaps {
         kind,
@@ -887,6 +1007,13 @@ pub unsafe extern "C" fn runner_mem(
         (RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_WRAM) | (RUNNER_MEM_OP_WRITE, RUNNER_MEM_SPACE_WRAM) => {
             runner_write_wram_impl(ctx, offset, data as *const u8, len)
         }
+        (RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_DISK) | (RUNNER_MEM_OP_WRITE, RUNNER_MEM_SPACE_DISK) => {
+            runner_write_disk_impl(ctx, offset, data as *const u8, len)
+        }
+        (RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_UART_RX)
+        | (RUNNER_MEM_OP_WRITE, RUNNER_MEM_SPACE_UART_RX) => {
+            runner_write_uart_rx_impl(ctx, data as *const u8, len)
+        }
         (RUNNER_MEM_OP_READ, RUNNER_MEM_SPACE_MAIN) => {
             runner_read_main_impl(ctx as *const IrSimContext, offset, data, len, (flags & RUNNER_MEM_FLAG_MAPPED) != 0)
         }
@@ -913,6 +1040,12 @@ pub unsafe extern "C" fn runner_mem(
         }
         (RUNNER_MEM_OP_READ, RUNNER_MEM_SPACE_FRAMEBUFFER) => {
             runner_read_framebuffer_impl(ctx as *const IrSimContext, offset, data, len)
+        }
+        (RUNNER_MEM_OP_READ, RUNNER_MEM_SPACE_DISK) => {
+            runner_read_disk_impl(ctx as *const IrSimContext, offset, data, len)
+        }
+        (RUNNER_MEM_OP_READ, RUNNER_MEM_SPACE_UART_TX) => {
+            runner_read_uart_tx_impl(ctx as *const IrSimContext, offset, data, len)
         }
         _ => 0,
     }
@@ -963,6 +1096,42 @@ pub unsafe extern "C" fn runner_control(
                 ext.reset_lcd_state();
             }
             1
+        }
+        RUNNER_CONTROL_RISCV_SET_IRQS => {
+            let ctx = &mut *ctx;
+            if let Some(ref mut ext) = ctx.riscv {
+                ext.set_irq_bits((arg0 & 0x1) != 0, (arg0 & 0x2) != 0, (arg0 & 0x4) != 0);
+                1
+            } else {
+                0
+            }
+        }
+        RUNNER_CONTROL_RISCV_SET_PLIC_SOURCES => {
+            let ctx = &mut *ctx;
+            if let Some(ref mut ext) = ctx.riscv {
+                ext.set_plic_sources((arg0 & 0x1) != 0, (arg0 & 0x2) != 0);
+                1
+            } else {
+                0
+            }
+        }
+        RUNNER_CONTROL_RISCV_UART_PUSH_RX => {
+            let ctx = &mut *ctx;
+            if let Some(ref mut ext) = ctx.riscv {
+                ext.enqueue_uart_rx((arg0 & 0xFF) as u8);
+                1
+            } else {
+                0
+            }
+        }
+        RUNNER_CONTROL_RISCV_CLEAR_UART_TX => {
+            let ctx = &mut *ctx;
+            if let Some(ref mut ext) = ctx.riscv {
+                ext.clear_uart_tx_bytes();
+                1
+            } else {
+                0
+            }
         }
         _ => 0,
     }
@@ -1093,6 +1262,11 @@ pub unsafe extern "C" fn runner_probe(ctx: *const IrSimContext, op: c_uint, arg0
             .gameboy
             .as_ref()
             .map(|ext| ext.lcd_state.frame_count)
+            .unwrap_or(0),
+        RUNNER_PROBE_RISCV_UART_TX_LEN => ctx_ref
+            .riscv
+            .as_ref()
+            .map(|ext| ext.uart_tx_len() as u64)
             .unwrap_or(0),
         _ => 0,
     }
@@ -1468,7 +1642,11 @@ unsafe fn ir_sim_run_ticks(ctx: *mut IrSimContext, n: c_uint) {
 /// Reset all signals to initial values
 unsafe fn ir_sim_reset(ctx: *mut IrSimContext) {
     if !ctx.is_null() {
-        (*ctx).core.reset();
+        let ctx = &mut *ctx;
+        ctx.core.reset();
+        if let Some(ref mut riscv) = ctx.riscv {
+            riscv.reset_core(&mut ctx.core);
+        }
     }
 }
 
