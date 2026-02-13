@@ -4,3 +4,6 @@
 [submodule "examples/gameboy/reference"]
 	path = examples/gameboy/reference
 	url = https://github.com/MiSTer-devel/Gameboy_MiSTer.git
+[submodule "examples/riscv/software/xv6-rv32"]
+	path = examples/riscv/software/xv6-rv32
+	url = https://github.com/michaelengel/xv6-rv32.git

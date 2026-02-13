@@ -1,6 +1,8 @@
-# RV32I Assembler
+# RV32I/RV32M Assembler
 # Simple assembler for generating test programs
-# Supports all RV32I instructions
+# Supports RV32I instructions and the M extension
+
+require_relative '../hdl/constants'
 
 module RHDL
   module Examples
@@ -91,6 +93,75 @@ module RHDL
 
     def self.jalr(rd, rs1, offset)
       encode_i_type(rd, rs1, offset, 0, Opcode::JALR)
+    end
+
+    # Memory ordering / system instructions
+    def self.fence(pred = 0b1111, succ = 0b1111, fm = 0)
+      # I-type with rd=x0, rs1=x0, funct3=000, opcode=MISC_MEM
+      # imm[11:8]=fm, imm[7:4]=pred, imm[3:0]=succ
+      imm = ((fm & 0xF) << 8) | ((pred & 0xF) << 4) | (succ & 0xF)
+      encode_i_type(0, 0, imm, 0b000, Opcode::MISC_MEM)
+    end
+
+    def self.fence_i
+      # Zifencei: funct3=001, imm/rs1/rd are zero for canonical encoding
+      encode_i_type(0, 0, 0, 0b001, Opcode::MISC_MEM)
+    end
+
+    def self.ecall
+      # SYSTEM with imm=0, rd=x0, rs1=x0, funct3=000
+      encode_i_type(0, 0, 0, 0b000, Opcode::SYSTEM)
+    end
+
+    def self.ebreak
+      # SYSTEM with imm=1, rd=x0, rs1=x0, funct3=000
+      encode_i_type(0, 0, 1, 0b000, Opcode::SYSTEM)
+    end
+
+    def self.mret
+      # SYSTEM with imm=0x302, rd=x0, rs1=x0, funct3=000
+      encode_i_type(0, 0, 0x302, 0b000, Opcode::SYSTEM)
+    end
+
+    def self.sret
+      # SYSTEM with imm=0x102, rd=x0, rs1=x0, funct3=000
+      encode_i_type(0, 0, 0x102, 0b000, Opcode::SYSTEM)
+    end
+
+    def self.wfi
+      # SYSTEM with imm=0x105, rd=x0, rs1=x0, funct3=000
+      encode_i_type(0, 0, 0x105, 0b000, Opcode::SYSTEM)
+    end
+
+    def self.sfence_vma(rs1 = 0, rs2 = 0)
+      # SYSTEM R-type form:
+      # funct7=0001001, rs2, rs1, funct3=000, rd=x0, opcode=SYSTEM
+      encode_r_type(0, rs1 & 0x1F, rs2 & 0x1F, 0b000, 0b0001001, Opcode::SYSTEM)
+    end
+
+    # Zicsr instructions
+    def self.csrrw(rd, csr, rs1)
+      encode_i_type(rd, rs1, csr & 0xFFF, 0b001, Opcode::SYSTEM)
+    end
+
+    def self.csrrs(rd, csr, rs1)
+      encode_i_type(rd, rs1, csr & 0xFFF, 0b010, Opcode::SYSTEM)
+    end
+
+    def self.csrrc(rd, csr, rs1)
+      encode_i_type(rd, rs1, csr & 0xFFF, 0b011, Opcode::SYSTEM)
+    end
+
+    def self.csrrwi(rd, csr, zimm)
+      encode_i_type(rd, zimm & 0x1F, csr & 0xFFF, 0b101, Opcode::SYSTEM)
+    end
+
+    def self.csrrsi(rd, csr, zimm)
+      encode_i_type(rd, zimm & 0x1F, csr & 0xFFF, 0b110, Opcode::SYSTEM)
+    end
+
+    def self.csrrci(rd, csr, zimm)
+      encode_i_type(rd, zimm & 0x1F, csr & 0xFFF, 0b111, Opcode::SYSTEM)
     end
 
     # Branch instructions
@@ -230,6 +301,84 @@ module RHDL
       encode_r_type(rd, rs1, rs2, Funct3::AND, Funct7::NORMAL, Opcode::OP)
     end
 
+    # RV32M extension
+    def self.mul(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::ADD_SUB, Funct7::M_EXT, Opcode::OP)
+    end
+
+    def self.mulh(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::SLL, Funct7::M_EXT, Opcode::OP)
+    end
+
+    def self.mulhsu(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::SLT, Funct7::M_EXT, Opcode::OP)
+    end
+
+    def self.mulhu(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::SLTU, Funct7::M_EXT, Opcode::OP)
+    end
+
+    def self.div(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::XOR, Funct7::M_EXT, Opcode::OP)
+    end
+
+    def self.divu(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::SRL_SRA, Funct7::M_EXT, Opcode::OP)
+    end
+
+    def self.rem(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::OR, Funct7::M_EXT, Opcode::OP)
+    end
+
+    def self.remu(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::AND, Funct7::M_EXT, Opcode::OP)
+    end
+
+    # RV32A extension (word forms)
+    def self.lr_w(rd, rs1, aq: 0, rl: 0)
+      encode_amo_type(rd, rs1, 0, 0b00010, aq: aq, rl: rl)
+    end
+
+    def self.sc_w(rd, rs2, rs1, aq: 0, rl: 0)
+      encode_amo_type(rd, rs1, rs2, 0b00011, aq: aq, rl: rl)
+    end
+
+    def self.amoswap_w(rd, rs2, rs1, aq: 0, rl: 0)
+      encode_amo_type(rd, rs1, rs2, 0b00001, aq: aq, rl: rl)
+    end
+
+    def self.amoadd_w(rd, rs2, rs1, aq: 0, rl: 0)
+      encode_amo_type(rd, rs1, rs2, 0b00000, aq: aq, rl: rl)
+    end
+
+    def self.amoxor_w(rd, rs2, rs1, aq: 0, rl: 0)
+      encode_amo_type(rd, rs1, rs2, 0b00100, aq: aq, rl: rl)
+    end
+
+    def self.amoand_w(rd, rs2, rs1, aq: 0, rl: 0)
+      encode_amo_type(rd, rs1, rs2, 0b01100, aq: aq, rl: rl)
+    end
+
+    def self.amoor_w(rd, rs2, rs1, aq: 0, rl: 0)
+      encode_amo_type(rd, rs1, rs2, 0b01000, aq: aq, rl: rl)
+    end
+
+    def self.amomin_w(rd, rs2, rs1, aq: 0, rl: 0)
+      encode_amo_type(rd, rs1, rs2, 0b10000, aq: aq, rl: rl)
+    end
+
+    def self.amomax_w(rd, rs2, rs1, aq: 0, rl: 0)
+      encode_amo_type(rd, rs1, rs2, 0b10100, aq: aq, rl: rl)
+    end
+
+    def self.amominu_w(rd, rs2, rs1, aq: 0, rl: 0)
+      encode_amo_type(rd, rs1, rs2, 0b11000, aq: aq, rl: rl)
+    end
+
+    def self.amomaxu_w(rd, rs2, rs1, aq: 0, rl: 0)
+      encode_amo_type(rd, rs1, rs2, 0b11100, aq: aq, rl: rl)
+    end
+
     # Aliases for Ruby reserved words
     class << self
       alias_method :and_inst, :and
@@ -305,6 +454,25 @@ module RHDL
       when 'sra' then self.class.sra(reg(args[0]), reg(args[1]), reg(args[2]))
       when 'or' then self.class.or(reg(args[0]), reg(args[1]), reg(args[2]))
       when 'and' then self.class.and(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'mul' then self.class.mul(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'mulh' then self.class.mulh(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'mulhsu' then self.class.mulhsu(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'mulhu' then self.class.mulhu(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'div' then self.class.div(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'divu' then self.class.divu(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'rem' then self.class.rem(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'remu' then self.class.remu(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'lr.w' then self.class.lr_w(reg(args[0]), reg(args[1]))
+      when 'sc.w' then self.class.sc_w(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'amoswap.w' then self.class.amoswap_w(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'amoadd.w' then self.class.amoadd_w(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'amoxor.w' then self.class.amoxor_w(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'amoand.w' then self.class.amoand_w(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'amoor.w' then self.class.amoor_w(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'amomin.w' then self.class.amomin_w(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'amomax.w' then self.class.amomax_w(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'amominu.w' then self.class.amominu_w(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'amomaxu.w' then self.class.amomaxu_w(reg(args[0]), reg(args[1]), reg(args[2]))
 
       # I-type arithmetic
       when 'addi' then self.class.addi(reg(args[0]), reg(args[1]), imm(args[2]))
@@ -340,6 +508,22 @@ module RHDL
       # Jump
       when 'jal' then self.class.jal(reg(args[0]), label_offset(args[1]))
       when 'jalr' then self.class.jalr(reg(args[0]), reg(args[1]), imm(args[2]))
+
+      # System / memory-ordering
+      when 'fence' then self.class.fence
+      when 'fence.i' then self.class.fence_i
+      when 'ecall' then self.class.ecall
+      when 'ebreak' then self.class.ebreak
+      when 'mret' then self.class.mret
+      when 'sret' then self.class.sret
+      when 'wfi' then self.class.wfi
+      when 'sfence.vma' then self.class.sfence_vma(reg(args[0] || 'x0'), reg(args[1] || 'x0'))
+      when 'csrrw' then self.class.csrrw(reg(args[0]), imm(args[1]), reg(args[2]))
+      when 'csrrs' then self.class.csrrs(reg(args[0]), imm(args[1]), reg(args[2]))
+      when 'csrrc' then self.class.csrrc(reg(args[0]), imm(args[1]), reg(args[2]))
+      when 'csrrwi' then self.class.csrrwi(reg(args[0]), imm(args[1]), imm(args[2]))
+      when 'csrrsi' then self.class.csrrsi(reg(args[0]), imm(args[1]), imm(args[2]))
+      when 'csrrci' then self.class.csrrci(reg(args[0]), imm(args[1]), imm(args[2]))
 
       # U-type
       when 'lui' then self.class.lui(reg(args[0]), imm(args[1]))
@@ -429,6 +613,11 @@ module RHDL
       imm_11 = (imm >> 11) & 0x1
       imm_19_12 = (imm >> 12) & 0xFF
       (imm_20 << 31) | (imm_10_1 << 21) | (imm_11 << 20) | (imm_19_12 << 12) | (rd << 7) | opcode
+    end
+
+    def self.encode_amo_type(rd, rs1, rs2, funct5, aq: 0, rl: 0)
+      funct7 = ((funct5 & 0x1F) << 2) | ((aq & 0x1) << 1) | (rl & 0x1)
+      encode_r_type(rd, rs1, rs2, Funct3::WORD, funct7, Opcode::AMO)
     end
       end
     end
