@@ -166,6 +166,7 @@ pub const RUNNER_MEM_SPACE_WRAM: c_uint = 5;
 pub const RUNNER_MEM_SPACE_FRAMEBUFFER: c_uint = 6;
 pub const RUNNER_MEM_SPACE_DISK: c_uint = 7;
 pub const RUNNER_MEM_SPACE_UART_TX: c_uint = 8;
+pub const RUNNER_MEM_SPACE_UART_RX: c_uint = 9;
 
 pub const RUNNER_MEM_FLAG_MAPPED: c_uint = 1;
 
@@ -778,6 +779,18 @@ unsafe fn runner_read_uart_tx_impl(
     0
 }
 
+unsafe fn runner_write_uart_rx_impl(ctx: *mut IrSimContext, data: *const u8, len: usize) -> usize {
+    if ctx.is_null() || data.is_null() || len == 0 {
+        return 0;
+    }
+    let ctx = &mut *ctx;
+    if let Some(ref mut riscv) = ctx.riscv {
+        let bytes = slice::from_raw_parts(data, len);
+        return riscv.enqueue_uart_rx_bytes(bytes);
+    }
+    0
+}
+
 unsafe fn runner_set_reset_vector_impl(ctx: *mut IrSimContext, addr: c_uint) {
     if ctx.is_null() {
         return;
@@ -919,7 +932,9 @@ pub unsafe extern "C" fn runner_get_caps(
             | bit(RUNNER_MEM_SPACE_FRAMEBUFFER);
     }
     if kind == RUNNER_KIND_RISCV {
-        mem_spaces |= bit(RUNNER_MEM_SPACE_DISK) | bit(RUNNER_MEM_SPACE_UART_TX);
+        mem_spaces |= bit(RUNNER_MEM_SPACE_DISK)
+            | bit(RUNNER_MEM_SPACE_UART_TX)
+            | bit(RUNNER_MEM_SPACE_UART_RX);
     }
 
     let control_ops = bit(RUNNER_CONTROL_SET_RESET_VECTOR)
@@ -994,6 +1009,10 @@ pub unsafe extern "C" fn runner_mem(
         }
         (RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_DISK) | (RUNNER_MEM_OP_WRITE, RUNNER_MEM_SPACE_DISK) => {
             runner_write_disk_impl(ctx, offset, data as *const u8, len)
+        }
+        (RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_UART_RX)
+        | (RUNNER_MEM_OP_WRITE, RUNNER_MEM_SPACE_UART_RX) => {
+            runner_write_uart_rx_impl(ctx, data as *const u8, len)
         }
         (RUNNER_MEM_OP_READ, RUNNER_MEM_SPACE_MAIN) => {
             runner_read_main_impl(ctx as *const IrSimContext, offset, data, len, (flags & RUNNER_MEM_FLAG_MAPPED) != 0)
