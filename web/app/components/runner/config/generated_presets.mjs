@@ -232,6 +232,7 @@ export const GENERATED_RUNNER_PRESETS = Object.freeze({
       "offset": 2147483648,
       "space": "main",
       "startPc": "0x80000000",
+      "fastBoot": "moderate",
       "resetAfterLoad": true
     },
     "defaultDisk": {
