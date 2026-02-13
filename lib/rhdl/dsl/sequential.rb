@@ -52,12 +52,12 @@
 #     end
 #   end
 
-require 'active_support/concern'
+require 'rhdl/support/concern'
 
 module RHDL
   module DSL
     module Sequential
-      extend ActiveSupport::Concern
+      extend RHDL::Support::Concern
 
       # Case expression for synthesis - maps to Verilog case
       class BehaviorCase < Behavior::BehaviorExpr

@@ -36,12 +36,12 @@
 #     end
 #   end
 
-require 'active_support/concern'
+require 'rhdl/support/concern'
 
 module RHDL
   module DSL
     module StateMachine
-      extend ActiveSupport::Concern
+      extend RHDL::Support::Concern
 
       # State definition
       class StateDef

@@ -570,7 +570,7 @@ module RHDL
         end
 
         def runner_set_reset_vector(addr)
-          vector = addr.to_i & 0xFFFF
+          vector = addr.to_i & 0xFFFF_FFFF
           if @fallback
             return @sim.runner_set_reset_vector(vector) if @sim.respond_to?(:runner_set_reset_vector)
           end

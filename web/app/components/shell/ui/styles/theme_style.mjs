@@ -136,6 +136,7 @@ export const SHELL_THEME_STYLE = String.raw`  body.theme-shenzhen {
     border-color: #3b5f52;
     background: #0b1917;
     color: #cee4d7;
+    caret-color: #8ef2b8;
   }
 
   body.theme-shenzhen .terminal-prompt {

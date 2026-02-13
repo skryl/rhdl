@@ -24,6 +24,21 @@ export const SHELL_RESPONSIVE_STYLE = String.raw`  @media (max-width: 980px) {
       grid-template-columns: 1fr;
     }
 
+    .editor-top-layout {
+      grid-template-columns: 1fr;
+    }
+
+    #editorTab {
+      grid-template-rows: auto auto;
+    }
+
+    .editor-vim-wrap,
+    .editor-vim-canvas,
+    .editor-terminal-output,
+    .editor-canvas-wrap {
+      min-height: 300px;
+    }
+
     .io-layout {
       grid-template-columns: 1fr;
     }

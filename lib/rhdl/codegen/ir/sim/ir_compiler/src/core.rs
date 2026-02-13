@@ -1407,6 +1407,7 @@ impl CoreSimulator {
         }
     }
 
+    #[cfg(not(feature = "aot"))]
     fn init_compiled_memories(&mut self) -> Result<(), String> {
         if !self.compiled {
             return Ok(());
@@ -1417,6 +1418,11 @@ impl CoreSimulator {
             let func: libloading::Symbol<InitFn> = lib.get(b"init_memories").map_err(|e| e.to_string())?;
             func();
         }
+        Ok(())
+    }
+
+    #[cfg(feature = "aot")]
+    fn init_compiled_memories(&mut self) -> Result<(), String> {
         Ok(())
     }
 }

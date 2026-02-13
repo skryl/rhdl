@@ -42,13 +42,13 @@
 #
 # The same behavior block is used for both simulation and synthesis.
 
-require 'active_support/concern'
+require 'rhdl/support/concern'
 require 'set'
 
 module RHDL
   module DSL
     module Behavior
-      extend ActiveSupport::Concern
+      extend RHDL::Support::Concern
 
       # Execution modes
       SIM_MODE = :simulation
@@ -1288,7 +1288,7 @@ module RHDL
         def propagate
           # Always call super to handle subcomponent propagation (two-phase for sequential)
           # The behavior block execution is integrated into propagate_subcomponents
-          super if defined?(super)
+          super
 
           # If no subcomponents and behavior is defined, execute behavior directly
           # (This handles the case of standalone behavior-only components)

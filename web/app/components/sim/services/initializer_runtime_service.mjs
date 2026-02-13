@@ -3,6 +3,9 @@ import { isSnapshotFileName, parseApple2SnapshotText } from '../../apple2/lib/sn
 
 const DEFAULT_APPLE2_WATCHES = ['pc_debug', 'a_debug', 'x_debug', 'y_debug', 'opcode_debug', 'speaker'];
 const U16_MASK = 0xFFFF;
+const RISCV_PHYSTOP_IMM20_ORIGINAL = 0x88000;
+const RISCV_PHYSTOP_IMM20_MODERATE = 0x84000;
+const RISCV_PHYSTOP_IMM20_AGGRESSIVE = 0x80200;
 
 function didCallSucceed(result) {
   return result !== false;
@@ -24,7 +27,7 @@ function parseOptionalPc(value) {
   if (!Number.isFinite(parsed)) {
     return null;
   }
-  return parsed & U16_MASK;
+  return parsed >>> 0;
 }
 
 function normalizeDefaultBinSpace(value) {
@@ -36,6 +39,34 @@ function normalizeDefaultBinSpace(value) {
     return 'rom';
   }
   return 'main';
+}
+
+function normalizeRiscvFastBootMode(value) {
+  if (value === false || value == null) {
+    return null;
+  }
+  if (value === true) {
+    return 'moderate';
+  }
+
+  const token = String(value).trim().toLowerCase();
+  if (token === 'moderate' || token === 'safe') {
+    return 'moderate';
+  }
+  if (token === 'aggressive') {
+    return 'aggressive';
+  }
+  return null;
+}
+
+function riscvFastBootPhystopImm20(mode) {
+  if (mode === 'aggressive') {
+    return RISCV_PHYSTOP_IMM20_AGGRESSIVE;
+  }
+  if (mode === 'moderate') {
+    return RISCV_PHYSTOP_IMM20_MODERATE;
+  }
+  return null;
 }
 
 function resolveDefaultBinConfig(preset = {}) {
@@ -54,8 +85,62 @@ function resolveDefaultBinConfig(preset = {}) {
     offset: parseNonNegativeInt(raw.offset, 0),
     space: normalizeDefaultBinSpace(raw.space),
     startPc: parseOptionalPc(raw.startPc),
-    resetAfterLoad: raw.resetAfterLoad !== false
+    resetAfterLoad: raw.resetAfterLoad !== false,
+    fastBootMode: normalizeRiscvFastBootMode(raw.fastBoot)
   };
+}
+
+function resolveDefaultDiskConfig(preset = {}) {
+  const raw = preset?.defaultDisk;
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+
+  const path = String(raw.path || '').trim();
+  if (!path) {
+    return null;
+  }
+
+  return {
+    path,
+    offset: parseNonNegativeInt(raw.offset, 0),
+    resetAfterLoad: raw.resetAfterLoad === true
+  };
+}
+
+function applyRiscvFastBootPhystopPatch(bytes, targetImm20) {
+  if (!(bytes instanceof Uint8Array) || bytes.length < 4) {
+    return 0;
+  }
+  const imm20Target = Number(targetImm20) >>> 0;
+  if (imm20Target === 0) {
+    return 0;
+  }
+  let patches = 0;
+  for (let offset = 0; offset + 4 <= bytes.length; offset += 4) {
+    const word = (
+      (bytes[offset] & 0xFF)
+      | ((bytes[offset + 1] & 0xFF) << 8)
+      | ((bytes[offset + 2] & 0xFF) << 16)
+      | ((bytes[offset + 3] & 0xFF) << 24)
+    ) >>> 0;
+    const opcode = word & 0x7F;
+    if (opcode !== 0x37) {
+      continue; // LUI only
+    }
+    const imm20 = (word >>> 12) & 0xFFFFF;
+    if (imm20 !== RISCV_PHYSTOP_IMM20_ORIGINAL) {
+      continue; // original PHYSTOP upper immediate (0x8800_0000)
+    }
+    const rd = (word >>> 7) & 0x1F;
+    const patchedWord = (((imm20Target << 12) >>> 0) | (rd << 7) | 0x37) >>> 0;
+    bytes[offset] = patchedWord & 0xFF;
+    bytes[offset + 1] = (patchedWord >>> 8) & 0xFF;
+    bytes[offset + 2] = (patchedWord >>> 16) & 0xFF;
+    bytes[offset + 3] = (patchedWord >>> 24) & 0xFF;
+    patches += 1;
+  }
+  return patches;
 }
 
 async function loadRunnerRomAsset({
@@ -141,10 +226,30 @@ async function loadDefaultBinAsset({
         loadOffset = Math.max(0, Number(snapshot.offset) || 0);
       }
       if (snapshot.startPc != null) {
-        startPc = snapshot.startPc & U16_MASK;
+        const parsedStart = Number(snapshot.startPc) >>> 0;
+        const runnerKind = typeof runtime?.sim?.runner_kind === 'function'
+          ? runtime.sim.runner_kind()
+          : null;
+        startPc = (runnerKind === 'mos6502' || runnerKind === 'apple2')
+          ? (parsedStart & U16_MASK)
+          : parsedStart;
       }
     } else {
       bytes = new Uint8Array(await binResp.arrayBuffer());
+    }
+
+    if (defaultBin.fastBootMode && defaultBin.space === 'main') {
+      const runnerKind = typeof runtime?.sim?.runner_kind === 'function'
+        ? runtime.sim.runner_kind()
+        : null;
+      if (runnerKind === 'riscv') {
+        const phystopImm20 = riscvFastBootPhystopImm20(defaultBin.fastBootMode);
+        const patches = applyRiscvFastBootPhystopPatch(bytes, phystopImm20);
+        if (patches > 0) {
+          const phystop = ((phystopImm20 << 12) >>> 0).toString(16).toUpperCase();
+          log(`Applied RISC-V ${defaultBin.fastBootMode} fast-boot PHYSTOP patch (${patches} instruction${patches === 1 ? '' : 's'}, PHYSTOP=0x${phystop})`);
+        }
+      }
     }
 
     let loaded = false;
@@ -174,22 +279,72 @@ async function loadDefaultBinAsset({
       return false;
     }
 
+    let pcApplied = startPc == null;
     if (startPc != null && typeof runtime.sim.runner_set_reset_vector === 'function') {
-      const pcApplied = didCallSucceed(runtime.sim.runner_set_reset_vector(startPc));
+      pcApplied = didCallSucceed(runtime.sim.runner_set_reset_vector(startPc));
       if (!pcApplied) {
-        log(`Default bin reset vector apply failed (PC=$${startPc.toString(16).padStart(4, '0')})`);
+        const width = startPc > 0xFFFF ? 8 : 4;
+        log(`Default bin reset vector apply failed (PC=$${startPc.toString(16).padStart(width, '0')})`);
       }
+    } else if (startPc != null) {
+      pcApplied = false;
     }
 
     if (defaultBin.resetAfterLoad && typeof runtime.sim.reset === 'function') {
       runtime.sim.reset();
       await bootstrapMos6502Runner(runtime, log);
     }
+    if (startPc != null) {
+      const shouldApplyFallback = !pcApplied || riscvStartPcNeedsRepair(runtime, startPc);
+      if (shouldApplyFallback) {
+        applyRiscvStartPcFallback(runtime, startPc, log);
+      }
+    }
 
     log(`Loaded default bin (${defaultBin.space}) @ 0x${loadOffset.toString(16)}: ${defaultBin.path}`);
     return true;
   } catch (err) {
     log(`Failed to load default bin: ${err.message || err}`);
+    return false;
+  }
+}
+
+async function loadDefaultDiskAsset({
+  runtime,
+  defaultDisk,
+  supportsRunnerApi,
+  fetchImpl,
+  log
+} = {}) {
+  if (!defaultDisk?.path) {
+    return false;
+  }
+
+  try {
+    const diskResp = await fetchImpl(defaultDisk.path);
+    if (!diskResp.ok) {
+      log(`Default disk load skipped (${diskResp.status}): ${defaultDisk.path}`);
+      return false;
+    }
+
+    const bytes = new Uint8Array(await diskResp.arrayBuffer());
+    let loaded = false;
+    if (supportsRunnerApi && typeof runtime.sim.runner_riscv_load_disk === 'function') {
+      loaded = didCallSucceed(runtime.sim.runner_riscv_load_disk(bytes, defaultDisk.offset));
+    }
+    if (!loaded) {
+      log(`Default disk load failed or unsupported: ${defaultDisk.path}`);
+      return false;
+    }
+
+    if (defaultDisk.resetAfterLoad && typeof runtime.sim.reset === 'function') {
+      runtime.sim.reset();
+    }
+
+    log(`Loaded default disk @ 0x${defaultDisk.offset.toString(16)}: ${defaultDisk.path}`);
+    return true;
+  } catch (err) {
+    log(`Failed to load default disk: ${err.message || err}`);
     return false;
   }
 }
@@ -220,6 +375,77 @@ function pokeSignalIfPresent(runtime, name, value) {
   if (runtime.sim.has_signal(name)) {
     runtime.sim.poke(name, value);
   }
+}
+
+function applyRiscvStartPcFallback(runtime, startPc, log = () => {}) {
+  if (!runtime?.sim) {
+    return false;
+  }
+  const kind = typeof runtime.sim.runner_kind === 'function'
+    ? runtime.sim.runner_kind()
+    : null;
+  if (kind !== 'riscv') {
+    return false;
+  }
+  if (typeof runtime.sim.has_signal !== 'function' || typeof runtime.sim.poke !== 'function') {
+    return false;
+  }
+
+  const vector = Number(startPc) >>> 0;
+  let wroteAny = false;
+  for (const signalName of ['pc_reg__pc', 'pc', 'debug_pc']) {
+    if (runtime.sim.has_signal(signalName)) {
+      runtime.sim.poke(signalName, vector);
+      wroteAny = true;
+    }
+  }
+  if (!wroteAny) {
+    return false;
+  }
+  if (typeof runtime.sim.evaluate === 'function') {
+    runtime.sim.evaluate();
+  }
+
+  log(`Applied RISC-V start PC fallback (PC=$${vector.toString(16).toUpperCase().padStart(8, '0')})`);
+  return true;
+}
+
+function readRiscvProgramCounter(runtime) {
+  if (!runtime?.sim || typeof runtime.sim.has_signal !== 'function' || typeof runtime.sim.peek !== 'function') {
+    return null;
+  }
+  for (const name of ['debug_pc', 'pc_reg__pc', 'pc']) {
+    if (!runtime.sim.has_signal(name)) {
+      continue;
+    }
+    const value = Number(runtime.sim.peek(name));
+    if (!Number.isFinite(value)) {
+      continue;
+    }
+    return value >>> 0;
+  }
+  return null;
+}
+
+function riscvStartPcNeedsRepair(runtime, startPc) {
+  if (!runtime?.sim || typeof runtime.sim.runner_kind !== 'function') {
+    return false;
+  }
+  if (runtime.sim.runner_kind() !== 'riscv') {
+    return false;
+  }
+  const expected = Number(startPc) >>> 0;
+  const observed = readRiscvProgramCounter(runtime);
+  if (observed == null) {
+    return true;
+  }
+  if (observed === expected) {
+    return false;
+  }
+  if (expected >= 0x80000000 && observed < 0x01000000) {
+    return true;
+  }
+  return (expected >>> 24) !== (observed >>> 24);
 }
 
 function runBootstrapCycles(runtime, count) {
@@ -411,12 +637,16 @@ export async function initializeApple2Mode({
   log = () => {}
 } = {}) {
   const ioConfig = resolveRunnerIoConfig(preset);
+  const defaultDisk = resolveDefaultDiskConfig(preset);
   const defaultBin = resolveDefaultBinConfig(preset);
   state.apple2.ioConfig = ioConfig;
 
-  const supportsRunnerApi = runtime.sim.runner_mode?.() === true;
-  const supportsGenericMemoryApi = typeof runtime.sim.memory_mode === 'function' && runtime.sim.memory_mode() != null;
-  const wantsMemoryApi = ioConfig.enabled || !!ioConfig.rom?.path || !!defaultBin;
+  const supportsRunnerApi = runtime.sim.runner_mode?.() === true
+    || (typeof runtime.sim?.runner_read_memory === 'function'
+      && typeof runtime.sim?.runner_write_memory === 'function');
+  const supportsGenericMemoryApi = typeof runtime.sim?.memory_mode === 'function'
+    && runtime.sim.memory_mode() != null;
+  const wantsMemoryApi = ioConfig.enabled || !!ioConfig.rom?.path || !!defaultDisk || !!defaultBin;
 
   if (!wantsMemoryApi) {
     return;
@@ -445,6 +675,14 @@ export async function initializeApple2Mode({
     ioConfig,
     supportsRunnerApi,
     supportsGenericMemoryApi,
+    fetchImpl,
+    log
+  });
+
+  await loadDefaultDiskAsset({
+    runtime,
+    defaultDisk,
+    supportsRunnerApi,
     fetchImpl,
     log
   });

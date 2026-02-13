@@ -6,6 +6,10 @@ export function createShellDomainController({
   terminalWriteLine,
   submitTerminalInput,
   terminalHistoryNavigate,
+  terminalAppendInput,
+  terminalBackspaceInput,
+  terminalSetInput,
+  terminalFocusInput,
   disposeDashboardLayoutBuilder,
   refreshDashboardRowSizing,
   refreshAllDashboardRowSizing,
@@ -19,7 +23,11 @@ export function createShellDomainController({
     terminal: {
       writeLine: terminalWriteLine,
       submitInput: submitTerminalInput,
-      historyNavigate: terminalHistoryNavigate
+      historyNavigate: terminalHistoryNavigate,
+      appendInput: terminalAppendInput,
+      backspaceInput: terminalBackspaceInput,
+      setInput: terminalSetInput,
+      focusInput: terminalFocusInput
     },
     dashboard: {
       disposeLayoutBuilder: disposeDashboardLayoutBuilder,

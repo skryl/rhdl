@@ -55,4 +55,8 @@ web/node_modules/
 web/assets/pkg/*
 
 # RISC-V software build artifacts
-examples/riscv/software/bin/
+examples/riscv/software/bin/*.img
+examples/riscv/software/bin/*.asm
+examples/riscv/software/bin/*.elf
+examples/riscv/software/bin/*.nm
+examples/riscv/software/bin/*.sym

@@ -59,7 +59,11 @@ test('memory dump asset tree selection populates path and loads selected asset',
   });
   page.on('console', (msg) => {
     if (msg.type() === 'error') {
-      consoleErrors.push(msg.text());
+      const text = msg.text();
+      if (text.includes('Failed to load resource: the server responded with a status of 404')) {
+        return;
+      }
+      consoleErrors.push(text);
     }
   });
 

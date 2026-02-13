@@ -136,6 +136,10 @@ pub struct RiscvExtension {
     data_ptw_addr0_idx: usize,
     data_ptw_pte1_idx: usize,
     data_ptw_pte0_idx: usize,
+    pc_idx: usize,
+    pc_reg_pc_idx: usize,
+    debug_pc_idx: usize,
+    reset_vector: u32,
 
     ext_irq_software: bool,
     ext_irq_timer: bool,
@@ -231,6 +235,10 @@ impl RiscvExtension {
             data_ptw_addr0_idx: idx(n, "data_ptw_addr0"),
             data_ptw_pte1_idx: idx(n, "data_ptw_pte1"),
             data_ptw_pte0_idx: idx(n, "data_ptw_pte0"),
+            pc_idx: idx_opt(n, "pc"),
+            pc_reg_pc_idx: idx_opt(n, "pc_reg__pc"),
+            debug_pc_idx: idx_opt(n, "debug_pc"),
+            reset_vector: 0,
 
             ext_irq_software: false,
             ext_irq_timer: false,
@@ -337,6 +345,8 @@ impl RiscvExtension {
 
         self.set_clk_rst(core, 0, 0);
         self.propagate_all(core, true);
+        self.apply_reset_vector(core);
+        self.propagate_all(core, true);
     }
 
     pub fn set_irq_bits(&mut self, software: bool, timer: bool, external: bool) {
@@ -348,6 +358,10 @@ impl RiscvExtension {
     pub fn set_plic_sources(&mut self, source1: bool, source10: bool) {
         self.ext_plic_source1 = source1;
         self.ext_plic_source10 = source10;
+    }
+
+    pub fn set_reset_vector(&mut self, addr: u32) {
+        self.reset_vector = addr;
     }
 
     pub fn enqueue_uart_rx(&mut self, value: u8) {
@@ -1598,10 +1612,21 @@ impl RiscvExtension {
             core.signals[idx] = value;
         }
     }
+
+    fn apply_reset_vector(&self, core: &mut CoreSimulator) {
+        let value = self.reset_vector as u64;
+        self.set_signal(core, self.pc_idx, value);
+        self.set_signal(core, self.pc_reg_pc_idx, value);
+        self.set_signal(core, self.debug_pc_idx, value);
+    }
 }
 
 fn idx(name_to_idx: &HashMap<String, usize>, name: &str) -> usize {
     *name_to_idx.get(name).unwrap_or(&0)
+}
+
+fn idx_opt(name_to_idx: &HashMap<String, usize>, name: &str) -> usize {
+    name_to_idx.get(name).copied().unwrap_or(usize::MAX)
 }
 
 fn wrap_index(len: usize, addr: usize) -> usize {

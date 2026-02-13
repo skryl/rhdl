@@ -112,12 +112,12 @@
 #     end
 #   end
 
-require 'active_support/concern'
+require 'rhdl/support/concern'
 
 module RHDL
   module DSL
     module Memory
-      extend ActiveSupport::Concern
+      extend RHDL::Support::Concern
 
       # Memory definition for RAM/ROM
       class MemoryDef

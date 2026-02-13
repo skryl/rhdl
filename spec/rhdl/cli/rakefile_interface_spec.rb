@@ -170,6 +170,45 @@ RSpec.describe 'Rakefile interface' do
   end
 
   describe 'web tasks' do
+    it 'web:start launches WEBrick static server with COOP/COEP headers' do
+      require 'webrick'
+      server = instance_double(WEBrick::HTTPServer)
+
+      expect(WEBrick::HTTPServer).to receive(:new) do |opts|
+        expect(opts[:BindAddress]).to eq('127.0.0.1')
+        expect(opts[:Port]).to eq(8080)
+        expect(opts[:DocumentRoot]).to end_with('/web')
+        expect(opts[:RequestCallback]).to be_a(Proc)
+
+        response = {}
+        opts[:RequestCallback].call(nil, response)
+        expect(response['Cross-Origin-Opener-Policy']).to eq('same-origin')
+        expect(response['Cross-Origin-Embedder-Policy']).to eq('require-corp')
+        expect(response['Cross-Origin-Resource-Policy']).to eq('same-origin')
+        server
+      end
+      expect(server).to receive(:mount).with(
+        '/',
+        WEBrick::HTTPServlet::FileHandler,
+        a_string_ending_with('/web')
+      )
+      expect(Kernel).to receive(:trap).with('INT')
+      expect(Kernel).to receive(:trap).with('TERM')
+      expect(server).to receive(:start)
+
+      Rake::Task['web:start'].invoke
+    end
+
+    it 'web:build invokes WebGenerateTask#run_build' do
+      task_instance = instance_double(RHDL::CLI::Tasks::WebGenerateTask)
+      allow(task_instance).to receive(:run_build)
+
+      expect(RHDL::CLI::Tasks::WebGenerateTask).to receive(:new).and_return(task_instance)
+      expect(task_instance).to receive(:run_build)
+
+      Rake::Task['web:build'].invoke
+    end
+
     it 'web:generate invokes WebGenerateTask with no options' do
       expect_task_class(RHDL::CLI::Tasks::WebGenerateTask, {})
       Rake::Task['web:generate'].invoke
@@ -265,7 +304,7 @@ RSpec.describe 'Rakefile interface' do
       bench bench:gates bench:ir
       benchmark benchmark:timing benchmark:quick
       native native:build native:clean native:check
-      web:generate
+      web:start web:build web:generate
       setup setup:binstubs
     ].each do |task_name|
       it "defines #{task_name} task" do

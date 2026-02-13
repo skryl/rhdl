@@ -10,14 +10,14 @@
 # These methods work with the behavior, structure, and sequential DSLs to produce
 # synthesizable HDL output.
 
-require 'active_support/concern'
-require 'active_support/core_ext/string/inflections'
+require 'rhdl/support/concern'
+require 'rhdl/support/inflections'
 require 'set'
 
 module RHDL
   module DSL
     module Codegen
-      extend ActiveSupport::Concern
+      extend RHDL::Support::Concern
 
       class_methods do
         # Generate Verilog from the component

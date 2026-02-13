@@ -53,7 +53,7 @@ export function createShellStateRuntimeService({
       refreshAllDashboardRowSizing();
     });
 
-    if (tabId === 'vcdTab') {
+    if (tabId === 'vcdTab' || tabId === 'editorTab') {
       requestAnimationFrameImpl(() => {
         windowRef.dispatchEvent(new eventCtor('resize'));
       });
@@ -88,6 +88,9 @@ export function createShellStateRuntimeService({
 
   function setTerminalOpen(open, { persist = true, focus = false } = {}) {
     setTerminalOpenState(!!open);
+    if (dom.appShell) {
+      dom.appShell.classList.toggle('terminal-open', state.terminalOpen);
+    }
     if (dom.terminalPanel) {
       dom.terminalPanel.hidden = !state.terminalOpen;
     }
@@ -107,10 +110,20 @@ export function createShellStateRuntimeService({
     requestAnimationFrameImpl(() => {
       refreshAllDashboardRowSizing();
     });
-    if (state.terminalOpen && focus && dom.terminalInput) {
+    if (state.terminalOpen && focus) {
       requestAnimationFrameImpl(() => {
-        dom.terminalInput.focus();
-        dom.terminalInput.select();
+        const terminalTarget = dom.terminalOutput || dom.terminalInput;
+        if (!terminalTarget || typeof terminalTarget.focus !== 'function') {
+          return;
+        }
+        terminalTarget.focus();
+        const value = String(terminalTarget.value ?? terminalTarget.textContent ?? '');
+        const end = value.length;
+        if (typeof terminalTarget.setSelectionRange === 'function') {
+          terminalTarget.setSelectionRange(end, end);
+        } else if (typeof terminalTarget.select === 'function') {
+          terminalTarget.select();
+        }
       });
     }
     scheduleReduxUxSync('setTerminalOpen');

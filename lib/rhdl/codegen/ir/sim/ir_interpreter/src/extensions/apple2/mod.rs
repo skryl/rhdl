@@ -68,7 +68,9 @@ impl Apple2Extension {
 
     /// Check if the simulator has Apple II specific signals
     pub fn is_apple2_ir(name_to_idx: &HashMap<String, usize>) -> bool {
-        name_to_idx.contains_key("ram_addr")
+        name_to_idx.contains_key("clk_14m")
+            && name_to_idx.contains_key("cpu__addr_reg")
+            && name_to_idx.contains_key("ram_addr")
             && name_to_idx.contains_key("ram_do")
             && name_to_idx.contains_key("ram_we")
     }

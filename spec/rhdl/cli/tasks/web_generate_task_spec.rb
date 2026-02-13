@@ -6,11 +6,12 @@ require 'rhdl/codegen'
 
 RSpec.describe RHDL::CLI::Tasks::WebGenerateTask do
   describe '#run' do
-    it 'creates output dir, generates each configured runner, and reports completion' do
+    it 'builds missing wasm first, then generates configured runner assets, and reports completion' do
       task = described_class.new
       runner_exports = [{ id: 'cpu' }, { id: 'apple2' }]
       runner_configs = [{ id: 'cpu' }, { id: 'apple2' }]
 
+      allow(task).to receive(:wasm_backends_built?).and_return(false)
       allow(task).to receive(:ensure_dir)
       allow(task).to receive(:runner_exports).and_return(runner_exports)
       allow(task).to receive(:runner_configs).and_return(runner_configs)
@@ -19,19 +20,111 @@ RSpec.describe RHDL::CLI::Tasks::WebGenerateTask do
       allow(task).to receive(:generate_apple2_memory_assets)
       allow(task).to receive(:generate_runner_default_bin_assets)
       allow(task).to receive(:write_memory_dump_asset_module)
-      allow(task).to receive(:build_wasm_backends)
+      allow(task).to receive(:run_build)
 
       expect(task).to receive(:ensure_dir).with(described_class::SCRIPT_DIR)
+      expect(task).to receive(:run_build).ordered
       runner_exports.each do |runner|
-        expect(task).to receive(:generate_runner_assets).with(runner)
+        expect(task).to receive(:generate_runner_assets).with(runner).ordered
       end
       expect(task).to receive(:write_runner_preset_module).with(runner_configs)
       expect(task).to receive(:generate_apple2_memory_assets)
       expect(task).to receive(:generate_runner_default_bin_assets)
       expect(task).to receive(:write_memory_dump_asset_module)
-      expect(task).to receive(:build_wasm_backends)
 
       expect { task.run }.to output(/Web artifact generation complete/).to_stdout
+    end
+
+    it 'skips wasm build when artifacts are already present' do
+      task = described_class.new
+
+      allow(task).to receive(:wasm_backends_built?).and_return(true)
+      allow(task).to receive(:ensure_dir)
+      allow(task).to receive(:runner_exports).and_return([])
+      allow(task).to receive(:runner_configs).and_return([])
+      allow(task).to receive(:write_runner_preset_module)
+      allow(task).to receive(:generate_apple2_memory_assets)
+      allow(task).to receive(:generate_runner_default_bin_assets)
+      allow(task).to receive(:write_memory_dump_asset_module)
+
+      expect(task).not_to receive(:run_build)
+
+      task.run
+    end
+  end
+
+  describe '#run_build' do
+    it 'builds wasm artifacts and reports completion' do
+      task = described_class.new
+
+      allow(task).to receive(:build_wasm_backends)
+      allow(task).to receive(:mark_wasm_build_complete!)
+      expect(task).to receive(:build_wasm_backends)
+      expect(task).to receive(:mark_wasm_build_complete!)
+
+      expect { task.run_build }.to output(/Web WASM build complete/).to_stdout
+    end
+  end
+
+  describe '#mruby_artifacts_embed_rhdl?' do
+    it 'returns true when mruby metadata reports embedded rhdl files' do
+      task = described_class.new
+      metadata_path = File.join(described_class::PKG_DIR, 'mruby.version.json')
+      metadata_json = JSON.generate({ 'embedded' => { 'rhdl' => true } })
+
+      allow(File).to receive(:file?).and_call_original
+      allow(File).to receive(:read).and_call_original
+      allow(File).to receive(:file?).with(metadata_path).and_return(true)
+      allow(File).to receive(:read).with(metadata_path).and_return(metadata_json)
+
+      expect(task.send(:mruby_artifacts_embed_rhdl?)).to be(true)
+    end
+
+    it 'returns false when mruby metadata is missing embedded rhdl marker' do
+      task = described_class.new
+      metadata_path = File.join(described_class::PKG_DIR, 'mruby.version.json')
+      metadata_json = JSON.generate({ 'embedded' => {} })
+
+      allow(File).to receive(:file?).and_call_original
+      allow(File).to receive(:read).and_call_original
+      allow(File).to receive(:file?).with(metadata_path).and_return(true)
+      allow(File).to receive(:read).with(metadata_path).and_return(metadata_json)
+
+      expect(task.send(:mruby_artifacts_embed_rhdl?)).to be(false)
+    end
+  end
+
+  describe '#write_mruby_emscripten_config' do
+    it 'writes emscripten config that embeds rhdl sources into wasm fs' do
+      task = described_class.new
+      source_dir = '/tmp/mruby-src'
+      mruby_require_shim_path = described_class::MRUBY_REQUIRE_SHIM_GEM_PATH
+      config_path = File.join(source_dir, described_class::MRUBY_EMSCRIPTEN_CONFIG_RELATIVE_PATH)
+
+      allow(File).to receive(:file?).and_call_original
+      allow(File).to receive(:file?).with(File.join(mruby_require_shim_path, 'mrbgem.rake')).and_return(true)
+
+      expect(File).to receive(:write) do |path, content|
+        expect(path).to eq(config_path)
+        expect(content).to include("MRuby::CrossBuild.new('emscripten')")
+        expect(content).to include("conf.gembox 'stdlib'")
+        expect(content).to include("conf.gembox 'stdlib-ext'")
+        expect(content).to include("conf.gembox 'stdlib-io'")
+        expect(content).to include("conf.gembox 'math'")
+        expect(content).to include("conf.gembox 'metaprog'")
+        expect(content).to include("conf.gem :core => 'mruby-bin-mirb'")
+        expect(content).to include("conf.gem :core => 'mruby-bin-mruby'")
+        expect(content).to include("conf.gem #{mruby_require_shim_path.inspect}")
+        expect(content).to include("conf.linker.flags << '-sFORCE_FILESYSTEM=1'")
+        expect(content).not_to include('ASYNCIFY')
+        expect(content).to include("conf.linker.flags << %q{-sEXPORTED_RUNTIME_METHODS=['callMain']}")
+        expect(content).to include("conf.linker.flags << '--embed-file'")
+        expect(content).to include('@/rhdl.rb')
+        expect(content).to include('@/rhdl')
+      end
+
+      returned_path = task.send(:write_mruby_emscripten_config, source_dir)
+      expect(returned_path).to eq(config_path)
     end
   end
 
@@ -61,14 +154,22 @@ RSpec.describe RHDL::CLI::Tasks::WebGenerateTask do
   end
 
   describe '#build_wasm_backends' do
-    it 'builds dedicated compiler AOT artifacts for apple2, cpu8bit, and mos6502' do
+    it 'builds dedicated compiler AOT artifacts for apple2, cpu8bit, mos6502, and riscv' do
       task = described_class.new
 
       allow(task).to receive(:ensure_dir)
+      allow(task).to receive(:copy_ghostty_web_assets)
+      allow(task).to receive(:copy_vim_wasm_assets)
+      allow(task).to receive(:build_mruby_wasm)
+      allow(task).to receive(:ensure_aot_ir_inputs)
       allow(task).to receive(:run_rustup_target_add!).and_return(true)
       allow(task).to receive(:build_wasm_backend)
       allow(File).to receive(:write)
 
+      expect(task).to receive(:copy_ghostty_web_assets)
+      expect(task).to receive(:copy_vim_wasm_assets)
+      expect(task).to receive(:build_mruby_wasm)
+      expect(task).to receive(:ensure_aot_ir_inputs)
       expect(task).to receive(:build_compiler_aot_wasm).with(
         ir_path: described_class::APPLE2_AOT_IR_PATH,
         artifact: 'ir_compiler.wasm'
@@ -80,6 +181,10 @@ RSpec.describe RHDL::CLI::Tasks::WebGenerateTask do
       expect(task).to receive(:build_compiler_aot_wasm).with(
         ir_path: described_class::MOS6502_AOT_IR_PATH,
         artifact: 'ir_compiler_mos6502.wasm'
+      )
+      expect(task).to receive(:build_compiler_aot_wasm).with(
+        ir_path: described_class::RISCV_AOT_IR_PATH,
+        artifact: 'ir_compiler_riscv.wasm'
       )
 
       task.send(:build_wasm_backends)

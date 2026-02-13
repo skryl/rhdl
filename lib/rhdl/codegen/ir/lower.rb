@@ -1,6 +1,6 @@
 # Lower RHDL DSL component definitions into export IR
 
-require "active_support/core_ext/string/inflections"
+require 'rhdl/support/inflections'
 require_relative "ir"
 
 module RHDL
