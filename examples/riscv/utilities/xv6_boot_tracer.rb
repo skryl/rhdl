@@ -37,6 +37,8 @@ module RHDL
           @heartbeat_period = [@options[:heartbeat].to_i, 1].max
           @cycle_count = 0
           @start_time = Time.now
+          @last_trap_key = nil
+          @last_user_pc_key = nil
         end
 
         def run
@@ -76,17 +78,22 @@ module RHDL
 
           max_cycles = @options[:max_cycles].to_i
           chunk = [@options[:chunk].to_i, 1].max
+          fine_chunk = [(@options[:fine_chunk] || chunk).to_i, 1].max
+          fine_start = @options[:fine_start].to_i
 
           while @cycle_count < max_cycles
-            step = [chunk, max_cycles - @cycle_count].min
+            active_chunk = @cycle_count >= fine_start ? fine_chunk : chunk
+            step = [active_chunk, max_cycles - @cycle_count].min
             @cpu.run_cycles(step)
             @cycle_count += step
 
             emit_uart_delta
-            emit_stage
-            emit_mmio_sample
-            emit_allocator_probe
-            emit_lock_probe
+            emit_stage if @options[:stage]
+            emit_mmio_sample if @options[:mmio]
+            emit_trap_probe
+            emit_user_pc_probe if @options[:user_probe]
+            emit_allocator_probe if @options[:allocator_probe]
+            emit_lock_probe if @options[:lock_probe]
             emit_heartbeat if (@cycle_count % @heartbeat_period).zero?
 
             break if stop_condition_met?
@@ -216,6 +223,60 @@ module RHDL
           )
         end
 
+        def emit_trap_probe
+          trap_taken = (peek_optional('trap_taken') || 0).to_i & 0x1
+          return if trap_taken.zero?
+
+          pc = read_pc
+          inst = read_inst
+          cause = (peek_optional('trap_cause') || 0).to_i & 0xFFFF_FFFF
+          return if cause == 0x00000009 && !@options[:trap_external]
+
+          tval = (peek_optional('trap_tval') || 0).to_i & 0xFFFF_FFFF
+          a7 = safe_reg_read(17)
+          a0 = safe_reg_read(10)
+          a1 = safe_reg_read(11)
+          key = [pc, inst, cause, tval, a7, a0, a1]
+          return if key == @last_trap_key
+
+          @last_trap_key = key
+          puts format(
+            '[trap] cycles=%<cycles>d pc=0x%<pc>08x inst=0x%<inst>08x cause=0x%<cause>08x tval=0x%<tval>08x a7=0x%<a7>08x a0=0x%<a0>08x a1=0x%<a1>08x%<symbol>s',
+            cycles: @cycle_count,
+            pc: pc,
+            inst: inst,
+            cause: cause,
+            tval: tval,
+            a7: a7,
+            a0: a0,
+            a1: a1,
+            symbol: symbol_suffix_for_pc(pc)
+          )
+        end
+
+        def emit_user_pc_probe
+          pc = read_pc
+          return unless pc < 0x0000_2000
+
+          inst = read_inst
+          a0 = safe_reg_read(10)
+          a1 = safe_reg_read(11)
+          a7 = safe_reg_read(17)
+          key = [pc, inst, a0, a1, a7]
+          return if key == @last_user_pc_key
+
+          @last_user_pc_key = key
+          puts format(
+            '[user] cycles=%<cycles>d pc=0x%<pc>08x inst=0x%<inst>08x a0=0x%<a0>08x a1=0x%<a1>08x a7=0x%<a7>08x',
+            cycles: @cycle_count,
+            pc: pc,
+            inst: inst,
+            a0: a0,
+            a1: a1,
+            a7: a7
+          )
+        end
+
         def emit_allocator_probe
           pc = read_pc
           return unless (0x8000_0FEC..0x8000_0FF4).cover?(pc)
@@ -263,6 +324,12 @@ module RHDL
             a0: a0,
             symbol: symbol ? " ra_symbol=#{symbol}" : ''
           )
+        end
+
+        def safe_reg_read(index)
+          @cpu.read_reg(index) & 0xFFFF_FFFF
+        rescue StandardError
+          0
         end
 
         def stop_condition_met?
@@ -401,8 +468,16 @@ if __FILE__ == $PROGRAM_NAME
     symbols: RHDL::Examples::RISCV::Xv6BootTracer::DEFAULT_SYMBOLS,
     max_cycles: 20_000_000,
     chunk: 100_000,
+    fine_start: 0,
+    fine_chunk: nil,
     heartbeat: 200_000,
-    fast_boot: true
+    fast_boot: true,
+    stage: true,
+    mmio: true,
+    allocator_probe: true,
+    lock_probe: true,
+    trap_external: false,
+    user_probe: false
   }
 
   parser = OptionParser.new do |o|
@@ -427,8 +502,20 @@ if __FILE__ == $PROGRAM_NAME
     o.on('--no-symbols', 'Disable symbolized PC labels') { opts[:symbols] = nil }
     o.on('--max-cycles N', Integer, 'Maximum cycles to run (default: 20000000)') { |v| opts[:max_cycles] = v }
     o.on('--chunk N', Integer, 'Cycles per run chunk (default: 100000)') { |v| opts[:chunk] = v }
+    o.on('--fine-start N', Integer, 'Switch to fine chunking at cycle N (default: 0)') { |v| opts[:fine_start] = v }
+    o.on('--fine-chunk N', Integer, 'Cycles per run chunk at/after fine-start (default: chunk)') do |v|
+      opts[:fine_chunk] = v
+    end
     o.on('--heartbeat N', Integer, 'Progress print period in cycles (default: 200000)') { |v| opts[:heartbeat] = v }
     o.on('--[no-]fast-boot', 'Patch PHYSTOP LUI for faster tracing (default: true)') { |v| opts[:fast_boot] = v }
+    o.on('--[no-]stage', 'Enable stage transition logs (default: true)') { |v| opts[:stage] = v }
+    o.on('--[no-]mmio', 'Enable MMIO access logs (default: true)') { |v| opts[:mmio] = v }
+    o.on('--[no-]allocator-probe', 'Enable allocator memset probes (default: true)') { |v| opts[:allocator_probe] = v }
+    o.on('--[no-]lock-probe', 'Enable lock/callsite probes (default: true)') { |v| opts[:lock_probe] = v }
+    o.on('--[no-]trap-external', 'Include supervisor external interrupts in trap log (default: false)') do |v|
+      opts[:trap_external] = v
+    end
+    o.on('--[no-]user-probe', 'Log low-address user PC/reg transitions (default: false)') { |v| opts[:user_probe] = v }
     o.on('-h', '--help', 'Show this help') do
       puts o
       exit 0
