@@ -247,12 +247,15 @@ module RHDL
             "MRuby::CrossBuild.new('emscripten') do |conf|",
             '  conf.toolchain :emscripten',
             '',
-            "  conf.gembox 'default'",
+            "  conf.gembox 'stdlib'",
+            "  conf.gembox 'stdlib-ext'",
+            "  conf.gembox 'stdlib-io'",
+            "  conf.gembox 'math'",
+            "  conf.gembox 'metaprog'",
+            "  conf.gem :core => 'mruby-bin-mirb'",
+            "  conf.gem :core => 'mruby-bin-mruby'",
             '',
             "  conf.linker.flags << '-sFORCE_FILESYSTEM=1'",
-            "  conf.linker.flags << '-sASYNCIFY=1'",
-            "  conf.linker.flags << %q{-sASYNCIFY_IMPORTS=['fd_read']}",
-            "  conf.linker.flags << '-sASYNCIFY_STACK_SIZE=131072'",
             "  conf.linker.flags << %q{-sEXPORTED_RUNTIME_METHODS=['callMain']}"
           ]
 

@@ -31,6 +31,31 @@ rhdl-app-shell {
 }
 
     </style>
+    <script>
+      (function registerCoiServiceWorker() {
+        if (!window.isSecureContext || window.crossOriginIsolated || !('serviceWorker' in navigator)) {
+          return;
+        }
+
+        const host = String(window.location.hostname || '');
+        const isGithubPages = host.endsWith('.github.io');
+        const isLocalhost = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+        if (!isGithubPages && !isLocalhost) {
+          return;
+        }
+
+        navigator.serviceWorker.register('./coi-serviceworker.js').then((registration) => {
+          if (registration.waiting) {
+            registration.waiting.postMessage({ type: 'activate' });
+          }
+          if (!navigator.serviceWorker.controller) {
+            window.location.reload();
+          }
+        }).catch((error) => {
+          console.warn('Failed to register COI service worker:', error);
+        });
+      })();
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/p5@1.11.1/lib/p5.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/redux@4.2.1/dist/redux.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>

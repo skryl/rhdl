@@ -31,6 +31,22 @@ function normalizedText(value) {
   return String(value || '').replace(/\r/g, '').trim();
 }
 
+function buildMirbSessionReplaySource(lines = []) {
+  const encodedLines = lines.map((line) => JSON.stringify(String(line ?? ''))).join(',');
+  return [
+    '__rhdl_session_binding__ = binding',
+    '__rhdl_session_value__ = nil',
+    'begin',
+    `  [${encodedLines}].each do |__rhdl_session_line__|`,
+    "    __rhdl_session_value__ = eval(__rhdl_session_line__, __rhdl_session_binding__, '(rhdl-session)', 1)",
+    '  end',
+    '  puts "__RHDL_SESSION_RESULT__:" + __rhdl_session_value__.inspect',
+    'rescue => __rhdl_session_error__',
+    '  puts "__RHDL_SESSION_ERROR__:" + __rhdl_session_error__.message + " (" + __rhdl_session_error__.class.to_s + ")"',
+    'end'
+  ].join('\n');
+}
+
 function decodeUtf8(buffer) {
   if (!(buffer instanceof ArrayBuffer)) {
     return '';
@@ -125,7 +141,8 @@ export function bindEditorBindings({
     }
   };
   const mirbSession = {
-    ready: false
+    ready: false,
+    lines: []
   };
   const vimState = {
     instance: null,
@@ -154,13 +171,15 @@ export function bindEditorBindings({
 
   function resetMirbSession() {
     mirbSession.ready = false;
+    mirbSession.lines = [];
   }
 
   async function ensureMirbSessionReady() {
     if (mirbSession.ready) {
       return;
     }
-    await runMirb(MIRB_PRELUDE);
+    mirbSession.lines = [MIRB_PRELUDE];
+    await runMirb(buildMirbSessionReplaySource(mirbSession.lines));
     mirbSession.ready = true;
   }
 
@@ -175,10 +194,22 @@ export function bindEditorBindings({
     }
 
     await ensureMirbSessionReady();
-    const result = await runMirb(code);
+    mirbSession.lines.push(code);
+    const result = await runMirb(buildMirbSessionReplaySource(mirbSession.lines));
     const stdout = normalizedText(result?.stdout);
     const stderr = normalizedText(result?.stderr);
     const exitCode = Number(result?.exitCode || 0);
+    const combined = [stdout, stderr].filter(Boolean).join('\n');
+
+    const errorMatch = combined.match(/__RHDL_SESSION_ERROR__:(.+)/);
+    if (errorMatch) {
+      mirbSession.lines.pop();
+      return errorMatch[1].trim();
+    }
+    const resultMatch = combined.match(/__RHDL_SESSION_RESULT__:(.+)/);
+    if (resultMatch) {
+      return `=> ${resultMatch[1].trim()}`;
+    }
 
     const lines = [];
     if (stdout) {

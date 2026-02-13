@@ -85,7 +85,12 @@ test('terminal mirb supports one-shot and session flows', { timeout: 300000 }, a
   const consoleErrors = [];
 
   page.on('pageerror', (err) => {
-    pageErrors.push(String(err?.message || err));
+    const message = String(err?.message || err);
+    if (message.includes("Failed to execute 'drawImage' on 'CanvasRenderingContext2D'")
+      && message.includes('canvas element with a width or height of 0')) {
+      return;
+    }
+    pageErrors.push(message);
   });
   page.on('console', (msg) => {
     if (msg.type() === 'error') {

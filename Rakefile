@@ -387,14 +387,35 @@ end
 namespace :web do
   desc "Start local web server for the web UI (default host 127.0.0.1, port 8080)"
   task :start, [:port] do |_t, args|
+    require 'webrick'
+
     host = (ENV['HOST'] || '127.0.0.1').to_s
-    port = (args[:port] || ENV['PORT'] || '8080').to_s
+    port = Integer(args[:port] || ENV['PORT'] || '8080')
     web_root = File.expand_path('web', __dir__)
     puts "Starting web server at http://#{host}:#{port} (root: #{web_root})"
 
-    Dir.chdir(web_root) do
-      Kernel.exec(RbConfig.ruby, '-run', '-e', 'httpd', '.', '-p', port, '-b', host)
+    headers_callback = proc do |_req, res|
+      res['Cross-Origin-Opener-Policy'] = 'same-origin'
+      res['Cross-Origin-Embedder-Policy'] = 'require-corp'
+      res['Cross-Origin-Resource-Policy'] = 'same-origin'
     end
+
+    server = WEBrick::HTTPServer.new(
+      BindAddress: host,
+      Port: port,
+      DocumentRoot: web_root,
+      AccessLog: [],
+      Logger: WEBrick::Log.new($stderr, WEBrick::Log::WARN),
+      RequestCallback: headers_callback
+    )
+    server.mount('/', WEBrick::HTTPServlet::FileHandler, web_root)
+
+    trap_signals = %w[INT TERM]
+    trap_signals.each do |signal|
+      Kernel.trap(signal) { server.shutdown }
+    end
+
+    server.start
   end
 
   desc "Build web simulator WASM artifacts"

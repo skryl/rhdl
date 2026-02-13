@@ -61,6 +61,7 @@ jobs:
           rm -rf web-dist
           mkdir -p web-dist
           rsync -a web/index.html web-dist/
+          rsync -a web/coi-serviceworker.js web-dist/
           rsync -a web/app web-dist/
           rsync -a web/assets web-dist/
           touch web-dist/.nojekyll

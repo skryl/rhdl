@@ -74,13 +74,23 @@ bundle exec rake web:generate
 
 ## Run Web UI
 
-Serve the `web` directory with any static file server:
+Serve the `web` directory:
 
 ```bash
 bundle exec rake web:start
 ```
 
-Or manually:
+`web:start` serves with cross-origin isolation headers required for `SharedArrayBuffer`:
+
+- `Cross-Origin-Opener-Policy: same-origin`
+- `Cross-Origin-Embedder-Policy: require-corp`
+- `Cross-Origin-Resource-Policy: same-origin`
+
+If you use a custom server, you must set equivalent headers.
+
+Without those headers, the mirb worker will not be able to use `SharedArrayBuffer`.
+
+Manual example (must be configured to emit COOP/COEP):
 
 ```bash
 cd web
@@ -95,8 +105,11 @@ Open [http://localhost:8080](http://localhost:8080).
 - It builds all web artifacts via `bundle exec rake web:generate`.
 - It publishes a static artifact containing:
   - `web/index.html`
+  - `web/coi-serviceworker.js`
   - `web/app/`
   - `web/assets/`
+- GitHub Pages does not let this repo configure COOP/COEP response headers directly.
+- `index.html` registers `coi-serviceworker.js` to inject COOP/COEP/CORP on same-origin responses as a fallback.
 - Enable Pages in repository settings:
   - `Settings -> Pages -> Source: GitHub Actions`
 - Deploy URL will be exposed in the workflow run after the `deploy` job completes.

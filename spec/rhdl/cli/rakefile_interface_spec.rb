@@ -170,11 +170,31 @@ RSpec.describe 'Rakefile interface' do
   end
 
   describe 'web tasks' do
-    it 'web:start launches local static server in web directory' do
-      expect(Dir).to receive(:chdir).with(a_string_ending_with('/web')).and_yield
-      expect(Kernel).to receive(:exec).with(
-        RbConfig.ruby, '-run', '-e', 'httpd', '.', '-p', '8080', '-b', '127.0.0.1'
+    it 'web:start launches WEBrick static server with COOP/COEP headers' do
+      require 'webrick'
+      server = instance_double(WEBrick::HTTPServer)
+
+      expect(WEBrick::HTTPServer).to receive(:new) do |opts|
+        expect(opts[:BindAddress]).to eq('127.0.0.1')
+        expect(opts[:Port]).to eq(8080)
+        expect(opts[:DocumentRoot]).to end_with('/web')
+        expect(opts[:RequestCallback]).to be_a(Proc)
+
+        response = {}
+        opts[:RequestCallback].call(nil, response)
+        expect(response['Cross-Origin-Opener-Policy']).to eq('same-origin')
+        expect(response['Cross-Origin-Embedder-Policy']).to eq('require-corp')
+        expect(response['Cross-Origin-Resource-Policy']).to eq('same-origin')
+        server
+      end
+      expect(server).to receive(:mount).with(
+        '/',
+        WEBrick::HTTPServlet::FileHandler,
+        a_string_ending_with('/web')
       )
+      expect(Kernel).to receive(:trap).with('INT')
+      expect(Kernel).to receive(:trap).with('TERM')
+      expect(server).to receive(:start)
 
       Rake::Task['web:start'].invoke
     end

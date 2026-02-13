@@ -1,6 +1,14 @@
 (function mirbWorkerBootstrap(globalRef) {
   const globalObject = globalRef || self;
 
+  const STDIN_CTRL_WRITE_IDX = 0;
+  const STDIN_CTRL_READ_IDX = 1;
+  const STDIN_CTRL_SIGNAL_IDX = 2;
+  const STDIN_CTRL_CLOSED_IDX = 3;
+  const STDIN_CTRL_CAPACITY_IDX = 4;
+  const STDIN_CTRL_SLOTS = 5;
+  const DEFAULT_STDIN_BUFFER_BYTES = 1 << 20;
+
   let runtimeScriptUrl = '';
   let runtimeInitPromise = null;
   let runtimeReady = false;
@@ -10,60 +18,52 @@
   let processExited = false;
   let processExitCode = null;
   let processStartPromise = null;
+  let processStartedAtMs = 0;
 
-  const stdinQueue = [];
-  let stdinWakeUp = null;
-  let stdinSleeping = false;
+  let stdinControlBuffer = null;
+  let stdinDataBuffer = null;
+  let stdinControl = null;
+  let stdinData = null;
+  let stdinReadCount = 0;
 
-  let activeCommand = null;
-  let runQueue = Promise.resolve();
-  let commandNonce = 0;
+  let debugIo = false;
+  let debugEventSeq = 0;
+  let ttyStdinPatched = false;
+  let originalTtyRead = null;
+  let originalTtyGetChar = null;
 
   function asMessage(err) {
     if (err instanceof Error && err.message) {
+      if (err.stack) {
+        return `${err.message}\n${err.stack}`;
+      }
       return err.message;
     }
     return String(err ?? 'unknown error');
   }
 
-  function asError(err) {
-    if (err instanceof Error) {
-      return err;
+  function asByteHex(value) {
+    if (!Number.isFinite(value)) {
+      return null;
     }
-    return new Error(asMessage(err));
+    return `0x${(value & 0xff).toString(16).padStart(2, '0')}`;
   }
 
-  function encodeUtf8(text) {
-    if (typeof TextEncoder !== 'undefined') {
-      return new TextEncoder().encode(String(text ?? ''));
-    }
-    const bytes = [];
-    const source = String(text ?? '');
-    for (let i = 0; i < source.length; i += 1) {
-      bytes.push(source.charCodeAt(i) & 0xff);
-    }
-    return Uint8Array.from(bytes);
-  }
-
-  function decodeUtf8(bytes) {
-    if (!bytes || bytes.length === 0) {
-      return '';
-    }
-    if (typeof TextDecoder !== 'undefined') {
-      return new TextDecoder().decode(Uint8Array.from(bytes));
-    }
-    return String.fromCharCode(...bytes);
-  }
-
-  function appendBytes(target, value) {
-    if (typeof value === 'number') {
-      target.push(value & 0xff);
+  function emitDebug(event, details = {}) {
+    if (!debugIo) {
       return;
     }
-
-    const bytes = encodeUtf8(`${String(value ?? '')}\n`);
-    for (let i = 0; i < bytes.length; i += 1) {
-      target.push(bytes[i]);
+    const payload = {
+      type: 'debug',
+      event: String(event || 'unknown'),
+      ts: Date.now(),
+      seq: (debugEventSeq += 1),
+      ...details
+    };
+    try {
+      globalObject.postMessage(payload);
+    } catch (_err) {
+      // Ignore debug transport failures.
     }
   }
 
@@ -72,114 +72,267 @@
     return `${trimmedBase}${suffix}`;
   }
 
-  function getAsyncify() {
-    const candidate = globalObject.Asyncify || globalObject.Module?.Asyncify;
-    if (candidate && typeof candidate.handleSleep === 'function') {
-      return candidate;
+  function queueLength() {
+    if (!stdinControl || !stdinData) {
+      return 0;
     }
-    return null;
+    const capacity = Atomics.load(stdinControl, STDIN_CTRL_CAPACITY_IDX) || stdinData.length;
+    const write = Atomics.load(stdinControl, STDIN_CTRL_WRITE_IDX);
+    const read = Atomics.load(stdinControl, STDIN_CTRL_READ_IDX);
+    return write >= read ? write - read : capacity - (read - write);
   }
 
-  function wakeStdinIfWaiting() {
-    if (typeof stdinWakeUp !== 'function') {
-      return;
-    }
-    const wakeUp = stdinWakeUp;
-    stdinWakeUp = null;
+  function hasSharedArrayBufferSupport() {
+    return typeof globalObject.SharedArrayBuffer === 'function'
+      && typeof globalObject.Atomics?.wait === 'function';
+  }
 
-    if (stdinQueue.length > 0) {
-      stdinSleeping = false;
-      wakeUp(stdinQueue.shift());
+  function initializeStdinChannel(bufferBytes = DEFAULT_STDIN_BUFFER_BYTES) {
+    const capacity = Number.isFinite(bufferBytes) && bufferBytes > 1024
+      ? Math.floor(bufferBytes)
+      : DEFAULT_STDIN_BUFFER_BYTES;
+
+    stdinControlBuffer = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * STDIN_CTRL_SLOTS);
+    stdinDataBuffer = new SharedArrayBuffer(capacity);
+    stdinControl = new Int32Array(stdinControlBuffer);
+    stdinData = new Uint8Array(stdinDataBuffer);
+
+    Atomics.store(stdinControl, STDIN_CTRL_WRITE_IDX, 0);
+    Atomics.store(stdinControl, STDIN_CTRL_READ_IDX, 0);
+    Atomics.store(stdinControl, STDIN_CTRL_SIGNAL_IDX, 0);
+    Atomics.store(stdinControl, STDIN_CTRL_CLOSED_IDX, 0);
+    Atomics.store(stdinControl, STDIN_CTRL_CAPACITY_IDX, capacity);
+
+    emitDebug('stdin.channel.ready', {
+      capacity
+    });
+  }
+
+  function closeStdinChannel() {
+    if (!stdinControl) {
       return;
     }
-    if (processExited) {
-      stdinSleeping = false;
-      wakeUp(null);
+    Atomics.store(stdinControl, STDIN_CTRL_CLOSED_IDX, 1);
+    Atomics.add(stdinControl, STDIN_CTRL_SIGNAL_IDX, 1);
+    Atomics.notify(stdinControl, STDIN_CTRL_SIGNAL_IDX, 1);
+    emitDebug('stdin.channel.closed', {
+      queueLength: queueLength(),
+      processExitCode
+    });
+  }
+
+  function readFromStdinChannel() {
+    if (!stdinControl || !stdinData) {
+      return null;
+    }
+
+    const capacity = Atomics.load(stdinControl, STDIN_CTRL_CAPACITY_IDX) || stdinData.length;
+    while (true) {
+      if (processExited || Atomics.load(stdinControl, STDIN_CTRL_CLOSED_IDX) === 1) {
+        return null;
+      }
+
+      const read = Atomics.load(stdinControl, STDIN_CTRL_READ_IDX);
+      const write = Atomics.load(stdinControl, STDIN_CTRL_WRITE_IDX);
+      if (read !== write) {
+        const value = stdinData[read];
+        const nextRead = read + 1 >= capacity ? 0 : read + 1;
+        Atomics.store(stdinControl, STDIN_CTRL_READ_IDX, nextRead);
+        Atomics.add(stdinControl, STDIN_CTRL_SIGNAL_IDX, 1);
+        Atomics.notify(stdinControl, STDIN_CTRL_SIGNAL_IDX, 1);
+        return value;
+      }
+
+      const observed = Atomics.load(stdinControl, STDIN_CTRL_SIGNAL_IDX);
+      emitDebug('stdin.wait', {
+        signal: observed,
+        queueLength: 0
+      });
+      Atomics.wait(stdinControl, STDIN_CTRL_SIGNAL_IDX, observed);
     }
   }
 
-  function enqueueInput(text) {
-    const bytes = encodeUtf8(String(text ?? ''));
-    for (let i = 0; i < bytes.length; i += 1) {
-      stdinQueue.push(bytes[i]);
+  function readFromStdinChannelNonBlocking() {
+    if (!stdinControl || !stdinData) {
+      return null;
     }
-    wakeStdinIfWaiting();
+    if (processExited || Atomics.load(stdinControl, STDIN_CTRL_CLOSED_IDX) === 1) {
+      return null;
+    }
+
+    const capacity = Atomics.load(stdinControl, STDIN_CTRL_CAPACITY_IDX) || stdinData.length;
+    const read = Atomics.load(stdinControl, STDIN_CTRL_READ_IDX);
+    const write = Atomics.load(stdinControl, STDIN_CTRL_WRITE_IDX);
+    if (read === write) {
+      return undefined;
+    }
+
+    const value = stdinData[read];
+    const nextRead = read + 1 >= capacity ? 0 : read + 1;
+    Atomics.store(stdinControl, STDIN_CTRL_READ_IDX, nextRead);
+    Atomics.add(stdinControl, STDIN_CTRL_SIGNAL_IDX, 1);
+    Atomics.notify(stdinControl, STDIN_CTRL_SIGNAL_IDX, 1);
+    return value;
   }
 
   function readStdin() {
-    if (stdinQueue.length > 0) {
-      return stdinQueue.shift();
+    stdinReadCount += 1;
+    const value = readFromStdinChannel();
+    if (value === null) {
+      emitDebug('stdin.read.eof', {
+        readCount: stdinReadCount,
+        processExitCode
+      });
+      return null;
     }
-    if (processExited) {
+    emitDebug('stdin.read.byte', {
+      readCount: stdinReadCount,
+      queueLengthAfter: queueLength(),
+      byte: value,
+      byteHex: asByteHex(value)
+    });
+    return value;
+  }
+
+  function readStdinNonBlocking() {
+    const value = readFromStdinChannelNonBlocking();
+    if (value === undefined) {
+      return undefined;
+    }
+
+    stdinReadCount += 1;
+    if (value === null) {
+      emitDebug('stdin.read.eof', {
+        readCount: stdinReadCount,
+        processExitCode
+      });
       return null;
     }
 
-    const asyncify = getAsyncify();
-    if (!asyncify) {
-      return null;
-    }
-
-    if (stdinSleeping) {
-      return 0;
-    }
-
-    stdinSleeping = true;
-    return asyncify.handleSleep((wakeUp) => {
-      stdinWakeUp = (value) => {
-        stdinSleeping = false;
-        wakeUp(value);
-      };
+    emitDebug('stdin.read.byte', {
+      readCount: stdinReadCount,
+      queueLengthAfter: queueLength(),
+      byte: value,
+      byteHex: asByteHex(value)
     });
+    return value;
   }
 
-  function stripToken(text, token) {
-    return String(text || '').split(token).join('');
-  }
-
-  function rejectActiveCommand(err) {
-    if (!activeCommand) {
-      return;
-    }
-    const command = activeCommand;
-    activeCommand = null;
-    command.reject(asError(err));
-  }
-
-  function maybeResolveActiveCommand() {
-    if (!activeCommand) {
+  function installSabTtyStdinHooks() {
+    if (ttyStdinPatched) {
       return;
     }
 
-    const stdoutText = decodeUtf8(activeCommand.stdoutBytes);
-    const stderrText = decodeUtf8(activeCommand.stderrBytes);
-    const hasToken = stdoutText.includes(activeCommand.token) || stderrText.includes(activeCommand.token);
-    if (!hasToken) {
+    const fs = globalObject.FS || globalObject.Module?.FS;
+    const tty = globalObject.TTY;
+    if (!fs || !tty || !tty.stream_ops || !tty.default_tty_ops) {
+      emitDebug('stdin.tty_patch.skipped', {
+        hasFs: !!fs,
+        hasTty: !!tty
+      });
       return;
     }
 
-    const command = activeCommand;
-    activeCommand = null;
-    command.resolve({
-      exitCode: 0,
-      stdout: stripToken(stdoutText, command.token),
-      stderr: stripToken(stderrText, command.token)
+    originalTtyRead = tty.stream_ops.read;
+    originalTtyGetChar = tty.default_tty_ops.get_char;
+    if (typeof originalTtyRead !== 'function' || typeof originalTtyGetChar !== 'function') {
+      emitDebug('stdin.tty_patch.skipped', {
+        hasRead: typeof originalTtyRead === 'function',
+        hasGetChar: typeof originalTtyGetChar === 'function'
+      });
+      return;
+    }
+
+    tty.default_tty_ops.get_char = () => readStdinNonBlocking();
+    tty.stream_ops.read = function patchedTtyRead(stream, buffer, offset, length, pos) {
+      const path = String(stream?.path || '');
+      const isStdinStream = stream?.fd === 0 || path === '/dev/stdin' || path === '/dev/tty';
+      if (!isStdinStream) {
+        return originalTtyRead.call(this, stream, buffer, offset, length, pos);
+      }
+      if (!stream?.tty || !stream.tty.ops?.get_char) {
+        throw new fs.ErrnoError(60);
+      }
+
+      let bytesRead = 0;
+      for (let i = 0; i < length; i += 1) {
+        let result;
+        try {
+          result = stream.tty.ops.get_char(stream.tty);
+        } catch (_err) {
+          throw new fs.ErrnoError(29);
+        }
+
+        if (result === undefined) {
+          if (bytesRead > 0) {
+            break;
+          }
+          result = readStdin();
+        }
+
+        if (result === null || result === undefined) {
+          break;
+        }
+
+        bytesRead += 1;
+        buffer[offset + i] = result;
+      }
+
+      if (bytesRead > 0) {
+        stream.node.atime = Date.now();
+      }
+      return bytesRead;
+    };
+
+    ttyStdinPatched = true;
+    emitDebug('stdin.tty_patch.ready', {});
+  }
+
+  function emitStreamChunk(type, value) {
+    let chunk = '';
+    if (typeof value === 'number') {
+      chunk = String.fromCharCode(value & 0xff);
+    } else {
+      chunk = `${String(value ?? '')}\n`;
+    }
+    if (!chunk) {
+      return;
+    }
+
+    emitDebug(`${type}.chunk`, {
+      length: chunk.length,
+      preview: chunk.slice(0, 80)
     });
+
+    try {
+      globalObject.postMessage({
+        type,
+        data: chunk
+      });
+    } catch (_err) {
+      // Ignore stream transport failures.
+    }
   }
 
   function writeStdout(value) {
-    if (!activeCommand) {
-      return;
-    }
-    appendBytes(activeCommand.stdoutBytes, value);
-    maybeResolveActiveCommand();
+    emitStreamChunk('stdout', value);
   }
 
   function writeStderr(value) {
-    if (!activeCommand) {
-      return;
+    emitStreamChunk('stderr', value);
+  }
+
+  function notifyProcessFailure(kind, message, exitCode = processExitCode) {
+    const type = kind === 'exit' ? 'process_exit' : 'process_error';
+    try {
+      globalObject.postMessage({
+        type,
+        exitCode,
+        message
+      });
+    } catch (_err) {
+      // Ignore process state transport failures.
     }
-    appendBytes(activeCommand.stderrBytes, value);
-    maybeResolveActiveCommand();
   }
 
   function startMirbProcess() {
@@ -195,15 +348,14 @@
       throw new Error('mirb runtime missing callMain');
     }
 
-    const asyncify = getAsyncify();
-    if (!asyncify) {
-      throw new Error('mirb runtime missing Asyncify.handleSleep support');
-    }
-
     processRunning = true;
     processExited = false;
     processExitCode = null;
     runtimeAbortReason = '';
+    processStartedAtMs = Date.now();
+    emitDebug('process.start', {
+      queueLength: queueLength()
+    });
 
     processStartPromise = Promise.resolve()
       .then(() => callMain([]))
@@ -212,11 +364,16 @@
         processExited = true;
         processRunning = false;
         processStartPromise = null;
-        wakeStdinIfWaiting();
+        closeStdinChannel();
 
         const message = runtimeAbortReason
           || `mirb process exited (code ${processExitCode})`;
-        rejectActiveCommand(new Error(message));
+        emitDebug('process.exit', {
+          exitCode: processExitCode,
+          elapsedMs: Date.now() - processStartedAtMs,
+          reason: message
+        });
+        notifyProcessFailure('exit', message, processExitCode);
       })
       .catch((err) => {
         if (err && Number.isFinite(err.status)) {
@@ -225,12 +382,41 @@
         processExited = true;
         processRunning = false;
         processStartPromise = null;
-        wakeStdinIfWaiting();
+        closeStdinChannel();
 
         const message = runtimeAbortReason
           || `mirb process failed: ${asMessage(err)}`;
-        rejectActiveCommand(new Error(message));
+        emitDebug('process.error', {
+          exitCode: processExitCode,
+          elapsedMs: Date.now() - processStartedAtMs,
+          reason: message
+        });
+        notifyProcessFailure('error', message, processExitCode);
       });
+  }
+
+  function emitFsDiagnostics() {
+    const fs = globalObject.FS || globalObject.Module?.FS;
+    if (!fs) {
+      emitDebug('fs.diag', { available: false });
+      return;
+    }
+
+    const stdinStream = fs.streams?.[0];
+    const stdoutStream = fs.streams?.[1];
+    const stderrStream = fs.streams?.[2];
+    emitDebug('fs.diag', {
+      available: true,
+      stdinPath: stdinStream?.path || null,
+      stdoutPath: stdoutStream?.path || null,
+      stderrPath: stderrStream?.path || null,
+      stdinHasTty: !!stdinStream?.tty,
+      stdoutHasTty: !!stdoutStream?.tty,
+      stderrHasTty: !!stderrStream?.tty,
+      stdinRdev: stdinStream?.node?.rdev ?? null,
+      stdoutRdev: stdoutStream?.node?.rdev ?? null,
+      stderrRdev: stderrStream?.node?.rdev ?? null
+    });
   }
 
   async function ensureRuntime(scriptUrl) {
@@ -240,9 +426,6 @@
     }
 
     if (runtimeReady) {
-      if (!processRunning && !processExited) {
-        startMirbProcess();
-      }
       return;
     }
 
@@ -252,17 +435,19 @@
           noInitialRun: true,
           noExitRuntime: true,
           arguments: [],
-          stdin: readStdin,
-          stdout: writeStdout,
-          stderr: writeStderr,
+          // Keep default /dev/tty streams so mirb stays in interactive mode.
           print: writeStdout,
           printErr: writeStderr,
           locateFile: (path) => joinUrl(runtimeScriptUrl, path),
           onAbort: (reason) => {
             runtimeAbortReason = `mirb aborted: ${String(reason || 'unknown reason')}`;
+            emitDebug('runtime.abort', {
+              reason: runtimeAbortReason
+            });
           },
           onRuntimeInitialized: () => {
             runtimeReady = true;
+            emitDebug('runtime.ready', {});
             resolve();
           }
         };
@@ -281,62 +466,46 @@
       runtimeInitPromise = null;
       throw err;
     }
+  }
 
-    if (!processRunning && !processExited) {
-      startMirbProcess();
+  async function initializeWorker(payload) {
+    runtimeScriptUrl = String(payload?.scriptUrl || runtimeScriptUrl || '');
+    debugIo = payload?.debugIo === true;
+    const stdinBufferBytes = Number(payload?.stdinBufferBytes || DEFAULT_STDIN_BUFFER_BYTES);
+
+    if (!runtimeScriptUrl) {
+      throw new Error('mirb worker missing script URL');
     }
-  }
-
-  function createCommandToken(requestId) {
-    commandNonce += 1;
-    return `__RHDL_MIRB_DONE_${requestId}_${Date.now()}_${commandNonce}__`;
-  }
-
-  function buildCommandSource(source, token) {
-    const code = String(source ?? '').replace(/\r/g, '');
-    return `${code}\nputs '${token}'\n`;
-  }
-
-  async function runMirb(source, requestId) {
-    const sourceText = String(source ?? '');
-    const trimmed = sourceText.trim();
-    if (!trimmed) {
-      return {
-        exitCode: 0,
-        stdout: '',
-        stderr: ''
-      };
+    if (!hasSharedArrayBufferSupport()) {
+      throw new Error('SharedArrayBuffer/Atomics.wait unavailable; cross-origin isolation is required');
     }
+
+    emitDebug('worker.init', {
+      scriptUrl: runtimeScriptUrl,
+      stdinBufferBytes
+    });
 
     await ensureRuntime(runtimeScriptUrl);
-    if (!processRunning && !processExited) {
-      startMirbProcess();
-    }
+    emitFsDiagnostics();
+    initializeStdinChannel(stdinBufferBytes);
+    installSabTtyStdinHooks();
 
-    if (processExited) {
-      const suffix = Number.isFinite(processExitCode)
-        ? ` (code ${processExitCode})`
-        : '';
-      throw new Error(`mirb process is not running${suffix}`);
-    }
-
-    if (activeCommand) {
-      throw new Error('mirb worker command overlap detected');
-    }
-
-    const token = createCommandToken(requestId);
-    const commandSource = buildCommandSource(sourceText, token);
-
-    return new Promise((resolve, reject) => {
-      activeCommand = {
-        token,
-        stdoutBytes: [],
-        stderrBytes: [],
-        resolve,
-        reject
-      };
-      enqueueInput(commandSource);
+    globalObject.postMessage({
+      type: 'ready',
+      stdinControlBuffer,
+      stdinDataBuffer,
+      stdinCapacity: stdinData.length
     });
+
+    // Start the long-lived mirb process after announcing readiness.
+    globalObject.setTimeout(() => {
+      try {
+        startMirbProcess();
+      } catch (err) {
+        const message = `mirb process failed to start: ${asMessage(err)}`;
+        notifyProcessFailure('error', message, null);
+      }
+    }, 0);
   }
 
   function handleMessage(event) {
@@ -344,44 +513,19 @@
     const type = String(payload.type || '').trim();
 
     if (type === 'init') {
-      runtimeScriptUrl = String(payload.scriptUrl || runtimeScriptUrl || '');
-      if (!runtimeScriptUrl) {
-        globalObject.postMessage({
-          type: 'init_error',
-          message: 'mirb worker missing script URL'
+      initializeWorker(payload)
+        .catch((err) => {
+          globalObject.postMessage({
+            type: 'init_error',
+            message: asMessage(err)
+          });
         });
-        return;
-      }
-      globalObject.postMessage({ type: 'ready' });
       return;
     }
 
-    if (type !== 'run') {
-      return;
+    if (type === 'close') {
+      closeStdinChannel();
     }
-
-    const requestId = Number(payload.id);
-    const source = String(payload.source ?? '');
-    const task = async () => {
-      try {
-        const result = await runMirb(source, requestId);
-        globalObject.postMessage({
-          type: 'result',
-          id: requestId,
-          exitCode: result.exitCode,
-          stdout: result.stdout,
-          stderr: result.stderr
-        });
-      } catch (err) {
-        globalObject.postMessage({
-          type: 'error',
-          id: requestId,
-          message: asMessage(err)
-        });
-      }
-    };
-
-    runQueue = runQueue.then(task, task);
   }
 
   globalObject.onmessage = handleMessage;

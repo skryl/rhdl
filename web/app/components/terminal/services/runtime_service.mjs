@@ -39,6 +39,22 @@ function createStatusText({ state, runtime, actions }) {
   ].join(' ');
 }
 
+function buildMirbSessionReplaySource(lines = []) {
+  const encodedLines = lines.map((line) => JSON.stringify(String(line ?? ''))).join(',');
+  return [
+    '__rhdl_session_binding__ = binding',
+    '__rhdl_session_value__ = nil',
+    'begin',
+    `  [${encodedLines}].each do |__rhdl_session_line__|`,
+    "    __rhdl_session_value__ = eval(__rhdl_session_line__, __rhdl_session_binding__, '(rhdl-session)', 1)",
+    '  end',
+    '  puts "__RHDL_SESSION_RESULT__:" + __rhdl_session_value__.inspect',
+    'rescue => __rhdl_session_error__',
+    '  puts "__RHDL_SESSION_ERROR__:" + __rhdl_session_error__.message + " (" + __rhdl_session_error__.class.to_s + ")"',
+    'end'
+  ].join('\n');
+}
+
 export function createTerminalRuntimeService({
   dom,
   state,
@@ -92,7 +108,8 @@ export function createTerminalRuntimeService({
     ? actions.syncIoTraceFromMirb
     : null;
   const mirbSession = {
-    active: false
+    active: false,
+    lines: []
   };
 
   async function runMirbWithTraceSync(source) {
@@ -112,12 +129,14 @@ export function createTerminalRuntimeService({
       return false;
     }
     mirbSession.active = true;
+    mirbSession.lines = [];
     return true;
   }
 
   function stopMirbSession() {
     const wasActive = mirbSession.active;
     mirbSession.active = false;
+    mirbSession.lines = [];
     return wasActive;
   }
 
@@ -134,10 +153,23 @@ export function createTerminalRuntimeService({
       return 'mirb session closed';
     }
 
-    const result = await runMirbWithTraceSync(code);
+    mirbSession.lines.push(code);
+    const source = buildMirbSessionReplaySource(mirbSession.lines);
+    const result = await runMirbWithTraceSync(source);
     const stdout = String(result?.stdout || '').trim();
     const stderr = String(result?.stderr || '').trim();
     const exitCode = Number(result?.exitCode || 0);
+    const combined = [stdout, stderr].filter(Boolean).join('\n');
+
+    const errorMatch = combined.match(/__RHDL_SESSION_ERROR__:(.+)/);
+    if (errorMatch) {
+      mirbSession.lines.pop();
+      return errorMatch[1].trim();
+    }
+    const resultMatch = combined.match(/__RHDL_SESSION_RESULT__:(.+)/);
+    if (resultMatch) {
+      return `=> ${resultMatch[1].trim()}`;
+    }
 
     const chunks = [];
     if (stdout) {
