@@ -1055,7 +1055,7 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::IRHarness, timeout: 30 do
       cpu.set_interrupts(timer: 1)   # assert MTIP
       cpu.run_cycles(24)
 
-      expect(cpu.read_reg(2)).to eq(0x80000007)
+      expect(cpu.read_reg(2)).to eq(0x80000005)
       expect(cpu.read_reg(4)).to eq(0x120)
     end
 

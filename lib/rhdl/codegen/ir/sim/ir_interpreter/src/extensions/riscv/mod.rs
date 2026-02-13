@@ -28,8 +28,11 @@ const PLIC_PRIORITY_1_ADDR: u32 = PLIC_BASE + 0x0004;
 const PLIC_PRIORITY_10_ADDR: u32 = PLIC_BASE + 0x0028;
 const PLIC_PENDING_ADDR: u32 = PLIC_BASE + 0x1000;
 const PLIC_ENABLE_ADDR: u32 = PLIC_BASE + 0x2000;
+const PLIC_SENABLE_ADDR: u32 = PLIC_BASE + 0x2080;
 const PLIC_THRESHOLD_ADDR: u32 = PLIC_BASE + 0x200000;
+const PLIC_STHRESHOLD_ADDR: u32 = PLIC_BASE + 0x201000;
 const PLIC_CLAIM_COMPLETE_ADDR: u32 = PLIC_BASE + 0x200004;
+const PLIC_SCLAIM_COMPLETE_ADDR: u32 = PLIC_BASE + 0x201004;
 
 const UART_BASE: u32 = 0x1000_0000;
 const UART_REG_THR_RBR_DLL: u32 = 0x0;
@@ -730,7 +733,9 @@ impl RiscvExtension {
         source10: bool,
     ) -> u32 {
         let claim_id = self.plic_select_claim_id();
-        let claim_grant = mem_read && addr == PLIC_CLAIM_COMPLETE_ADDR && claim_id != 0;
+        let claim_grant = mem_read
+            && matches!(addr, PLIC_CLAIM_COMPLETE_ADDR | PLIC_SCLAIM_COMPLETE_ADDR)
+            && claim_id != 0;
 
         if rst == 1 {
             self.plic_priority1 = 0;
@@ -762,14 +767,14 @@ impl RiscvExtension {
                     PLIC_PRIORITY_10_ADDR => {
                         self.plic_priority10 = write_data & 0x7;
                     }
-                    PLIC_ENABLE_ADDR => {
+                    PLIC_ENABLE_ADDR | PLIC_SENABLE_ADDR => {
                         self.plic_enable1 = (write_data >> 1) & 0x1;
                         self.plic_enable10 = (write_data >> 10) & 0x1;
                     }
-                    PLIC_THRESHOLD_ADDR => {
+                    PLIC_THRESHOLD_ADDR | PLIC_STHRESHOLD_ADDR => {
                         self.plic_threshold = write_data & 0x7;
                     }
-                    PLIC_CLAIM_COMPLETE_ADDR => {
+                    PLIC_CLAIM_COMPLETE_ADDR | PLIC_SCLAIM_COMPLETE_ADDR => {
                         let complete_id = write_data & 0x3FF;
                         if complete_id == self.plic_in_service_id {
                             self.plic_in_service_id = 0;
@@ -780,9 +785,16 @@ impl RiscvExtension {
             }
 
             let claim_id_rise = self.plic_select_claim_id();
-            if mem_read && addr == PLIC_CLAIM_COMPLETE_ADDR && claim_id_rise != 0 {
+            if mem_read
+                && matches!(addr, PLIC_CLAIM_COMPLETE_ADDR | PLIC_SCLAIM_COMPLETE_ADDR)
+                && claim_id_rise != 0
+            {
                 self.plic_clear_pending(claim_id_rise);
                 self.plic_in_service_id = claim_id_rise;
+                if claim_id_rise == 1 {
+                    self.virtio_interrupt_status &= !VIRTIO_INTERRUPT_USED_BUFFER;
+                    self.virtio_irq = self.virtio_irq_asserted();
+                }
             }
         }
 
@@ -797,9 +809,9 @@ impl RiscvExtension {
             PLIC_PRIORITY_1_ADDR => self.plic_priority1,
             PLIC_PRIORITY_10_ADDR => self.plic_priority10,
             PLIC_PENDING_ADDR => (self.plic_pending1 << 1) | (self.plic_pending10 << 10),
-            PLIC_ENABLE_ADDR => (self.plic_enable1 << 1) | (self.plic_enable10 << 10),
-            PLIC_THRESHOLD_ADDR => self.plic_threshold,
-            PLIC_CLAIM_COMPLETE_ADDR => {
+            PLIC_ENABLE_ADDR | PLIC_SENABLE_ADDR => (self.plic_enable1 << 1) | (self.plic_enable10 << 10),
+            PLIC_THRESHOLD_ADDR | PLIC_STHRESHOLD_ADDR => self.plic_threshold,
+            PLIC_CLAIM_COMPLETE_ADDR | PLIC_SCLAIM_COMPLETE_ADDR => {
                 if claim_grant {
                     claim_id
                 } else {
@@ -1637,8 +1649,11 @@ fn plic_access(addr: u32) -> bool {
             | PLIC_PRIORITY_10_ADDR
             | PLIC_PENDING_ADDR
             | PLIC_ENABLE_ADDR
+            | PLIC_SENABLE_ADDR
             | PLIC_THRESHOLD_ADDR
+            | PLIC_STHRESHOLD_ADDR
             | PLIC_CLAIM_COMPLETE_ADDR
+            | PLIC_SCLAIM_COMPLETE_ADDR
     )
 }
 
