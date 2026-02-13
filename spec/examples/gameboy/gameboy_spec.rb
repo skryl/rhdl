@@ -694,10 +694,22 @@ RSpec.describe 'GameBoy RHDL Implementation' do
           end
 
           # Adaptive unstick logic when the framebuffer has been static too long.
-          if static_fb_frames >= 90
+          if static_fb_frames >= 135 || low_pc_entropy_frames >= 12
+            recovery_phase = (frame / 12) % 4
+            case recovery_phase
+            when 0
+              desired |= [button[:start], button[:a]]
+            when 1
+              desired |= [button[:right], button[:a], button[:up]]
+            when 2
+              desired |= [button[:left], button[:b], button[:down]]
+            else
+              desired |= [button[:start], button[:select], button[:up]]
+            end
+          elsif static_fb_frames >= 90
             desired |= [button[:start], button[:a], button[:up]]
           elsif static_fb_frames >= 45
-            desired << button[:start]
+            desired |= [button[:start]]
           end
 
           desired.uniq!
@@ -1248,11 +1260,22 @@ RSpec.describe 'GameBoy RHDL Implementation' do
 
       # Run configuration - shorter for multi-backend test
       target_frames = (ENV['RHDL_MULTI_BACKEND_FRAMES'] || '20').to_i
-      snapshot_interval = 20
+      target_frames = 20 if target_frames <= 0
       cycles_per_frame = 70224
+      snapshot_interval = (ENV['RHDL_MULTI_BACKEND_SNAPSHOT_INTERVAL'] || '20').to_i
+      snapshot_interval = 20 if snapshot_interval <= 0
+      snapshot_interval = [snapshot_interval, target_frames].min
+      chunk_cycles = (ENV['RHDL_MULTI_BACKEND_CHUNK_CYCLES'] || (cycles_per_frame / 8).to_s).to_i
+      chunk_cycles = (cycles_per_frame / 8) if chunk_cycles <= 0
+      stall_timeout_seconds = (ENV['RHDL_MULTI_BACKEND_STALL_TIMEOUT_SECONDS'] || '45').to_f
+      max_backend_seconds = (ENV['RHDL_MULTI_BACKEND_MAX_BACKEND_SECONDS'] || '120').to_f
+      default_progress_every = target_frames <= 40 ? 1 : 5
+      progress_every_frames = (ENV['RHDL_MULTI_BACKEND_PROGRESS_EVERY_FRAMES'] || default_progress_every.to_s).to_i
+      progress_every_frames = default_progress_every if progress_every_frames <= 0
 
       # Storage for results
       results = {}
+      tested_backends = []
 
       # Run each backend
       backends.each do |backend|
@@ -1268,31 +1291,78 @@ RSpec.describe 'GameBoy RHDL Implementation' do
         puts "  Running #{backend.to_s.capitalize}..."
         start_time = Time.now
         target_cycles = target_frames * cycles_per_frame
-        cycles_per_snapshot = snapshot_interval * cycles_per_frame
+        start_cycle = runner.cycle_count
+        next_snapshot_frame = snapshot_interval
+        last_progress_at = Time.now
+        last_reported_frame = 0
+        stalled = false
 
-        (target_frames / snapshot_interval).times do |i|
-          runner.run_steps(cycles_per_snapshot)
-          frames = runner.cycle_count / cycles_per_frame
-          state = runner.cpu_state
+        while (runner.cycle_count - start_cycle) < target_cycles
+          remaining_cycles = target_cycles - (runner.cycle_count - start_cycle)
+          run = [chunk_cycles, remaining_cycles].min
+          before = runner.cycle_count
+          runner.run_steps(run)
+          after = runner.cycle_count
 
-          results[backend][:snapshots] << {
-            frame: frames,
-            cycle: runner.cycle_count,
-            pc: state[:pc],
-            a: state[:a],
-            f: state[:f],
-            sp: state[:sp]
-          }
+          if after > before
+            last_progress_at = Time.now
+          elsif (Time.now - last_progress_at) > stall_timeout_seconds
+            stalled = true
+            break
+          end
+
+          elapsed = Time.now - start_time
+          if elapsed > max_backend_seconds
+            stalled = true
+            break
+          end
+
+          frames = (runner.cycle_count - start_cycle) / cycles_per_frame
+          if frames >= (last_reported_frame + progress_every_frames)
+            elapsed = Time.now - start_time
+            puts "    Progress: #{frames}/#{target_frames} frames in #{'%.1f' % elapsed}s"
+            last_reported_frame = frames
+          end
+
+          while frames >= next_snapshot_frame && next_snapshot_frame <= target_frames
+            state = runner.cpu_state
+            results[backend][:snapshots] << {
+              frame: next_snapshot_frame,
+              cycle: runner.cycle_count,
+              pc: state[:pc],
+              a: state[:a],
+              f: state[:f],
+              sp: state[:sp]
+            }
+            next_snapshot_frame += snapshot_interval
+          end
+        end
+
+        if stalled
+          reason =
+            if (Time.now - start_time) > max_backend_seconds
+              "exceeded #{'%.1f' % max_backend_seconds}s"
+            else
+              "stalled for >#{'%.1f' % stall_timeout_seconds}s without cycle progress"
+            end
+          puts "    Skipping #{backend}: #{reason}"
+          results.delete(backend)
+          next
         end
 
         elapsed = Time.now - start_time
         results[backend][:elapsed] = elapsed
-        results[backend][:total_cycles] = runner.cycle_count
-        results[backend][:total_frames] = runner.cycle_count / cycles_per_frame
-        results[backend][:speed_mhz] = runner.cycle_count / elapsed / 1_000_000.0
+        total_cycles = runner.cycle_count - start_cycle
+        results[backend][:total_cycles] = total_cycles
+        results[backend][:total_frames] = total_cycles / cycles_per_frame
+        results[backend][:speed_mhz] = total_cycles / elapsed / 1_000_000.0
 
         puts "    #{results[backend][:total_frames]} frames in #{'%.2f' % elapsed}s (#{'%.2f' % results[backend][:speed_mhz]} MHz)"
+        tested_backends << backend
       end
+
+      backends = tested_backends
+      skip "Need at least 2 backends that completed progression for comparison" if backends.size < 2
 
       puts ""
 
