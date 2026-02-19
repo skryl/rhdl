@@ -3,7 +3,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOFTWARE_DIR="${SCRIPT_DIR}"
-XV6_DIR="${SOFTWARE_DIR}/xv6-rv32"
+XV6_PRIMARY_DIR="${SOFTWARE_DIR}/xv6"
+XV6_LEGACY_DIR="${SOFTWARE_DIR}/xv6-rv32"
+if [[ -d "${XV6_PRIMARY_DIR}" ]]; then
+  XV6_DIR="${XV6_PRIMARY_DIR}"
+else
+  XV6_DIR="${XV6_LEGACY_DIR}"
+fi
 BIN_DIR="${SOFTWARE_DIR}/bin"
 
 DEFAULT_JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
@@ -19,7 +25,8 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [options]
 
-Builds xv6-rv32 and writes artifacts to:
+Builds xv6 (RV32) and writes artifacts to:
+  source: ${XV6_DIR}
   ${BIN_DIR}
 
 Options:
@@ -91,7 +98,7 @@ done
 
 if [[ ! -d "${XV6_DIR}" ]]; then
   echo "error: xv6 source tree not found: ${XV6_DIR}" >&2
-  echo "hint: initialize submodules: git submodule update --init --recursive" >&2
+  echo "hint: expected one of: ${XV6_PRIMARY_DIR} or ${XV6_LEGACY_DIR}" >&2
   exit 1
 fi
 
