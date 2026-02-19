@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `docs/riscv_xv6.md` with a dedicated xv6 workflow for RISC-V:
+- Added a dedicated xv6 workflow section to `docs/riscv.md` for RISC-V:
   - source tree layout
   - local artifact generation via `examples/riscv/software/build_xv6.sh`
   - xv6 readiness/shell spec commands

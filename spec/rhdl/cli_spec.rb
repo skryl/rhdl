@@ -4,6 +4,7 @@
 # Each component has its own spec file
 
 require_relative 'cli/config_spec'
+require_relative 'cli/examples_spec'
 require_relative 'cli/task_spec'
 require_relative 'cli/tasks/diagram_task_spec'
 require_relative 'cli/tasks/export_task_spec'

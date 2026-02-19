@@ -446,7 +446,7 @@ puts renderer.render_braille(framebuffer)
 ```
 examples/gameboy/
 +-- bin/
-|   +-- gb                      # Main emulator executable
+|   +-- gameboy                 # Main emulator executable
 +-- hdl/                        # HDL components
 |   +-- cpu/
 |   |   +-- sm83.rb             # SM83 CPU core

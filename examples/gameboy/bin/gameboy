@@ -27,7 +27,7 @@ options = {
 }
 
 parser = OptionParser.new do |opts|
-  opts.banner = "Usage: bin/gb [options] [rom.gb]"
+  opts.banner = "Usage: bin/gameboy [options] [rom.gb]"
   opts.separator ""
   opts.separator "Game Boy HDL Terminal Emulator - Cycle-accurate simulation"
   opts.separator ""
