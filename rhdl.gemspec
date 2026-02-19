@@ -40,6 +40,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency "fiddle"
 
   # Development dependencies (for those developing the gem itself)
+  spec.add_development_dependency "benchmark"
   spec.add_development_dependency "benchmark-ips", "~> 2.12"
   spec.add_development_dependency "irb"
   spec.add_development_dependency "parallel_tests", "~> 4.0"

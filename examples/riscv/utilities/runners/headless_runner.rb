@@ -64,12 +64,20 @@ module RHDL
           pc = value.to_i & 0xFFFF_FFFF
           @cpu.write_pc(pc)
         rescue StandardError => primary_error
-          if @cpu.respond_to?(:sim) &&
-             @cpu.sim.respond_to?(:runner_set_reset_vector) &&
-             @cpu.sim.runner_set_reset_vector(pc)
-            reset
-            return
+          return if current_pc == pc
+
+          if supports_runner_reset_vector?
+            begin
+              if @cpu.sim.runner_set_reset_vector(pc)
+                reset
+                return
+              end
+            rescue StandardError
+              # Fall through to preserve the original write_pc error below.
+            end
           end
+
+          return if current_pc == pc
           raise primary_error
         end
 
@@ -101,6 +109,20 @@ module RHDL
           else
             raise ArgumentError, "Unsupported mode #{mode.inspect}. Use ruby, ir, netlist, or verilog."
           end
+        end
+
+        def current_pc
+          @cpu.read_pc
+        rescue StandardError
+          nil
+        end
+
+        def supports_runner_reset_vector?
+          return false unless @cpu.respond_to?(:sim) && @cpu.respond_to?(:native?)
+          return false unless @cpu.native?
+          return false unless @cpu.sim.respond_to?(:runner_kind) && @cpu.sim.runner_kind == :riscv
+
+          @cpu.sim.respond_to?(:runner_set_reset_vector)
         end
 
         def map_backend(mode, sim_backend)
