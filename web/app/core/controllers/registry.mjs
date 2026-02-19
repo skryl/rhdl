@@ -473,6 +473,12 @@ export function createControllerRegistry(options = {}) {
 
   function refreshStatus() {
     lazy.getSimStatusController().refreshStatus();
+    if (state?.terminal?.uartPassthrough) {
+      const terminalController = lazy.getTerminalController();
+      if (terminalController && typeof terminalController.syncUartPassthroughDisplay === 'function') {
+        terminalController.syncUartPassthroughDisplay();
+      }
+    }
   }
 
   function drainTrace() {

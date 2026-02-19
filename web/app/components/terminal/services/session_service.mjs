@@ -23,6 +23,9 @@ function normalizeTerminalState(state) {
   if (typeof state.terminal.busy !== 'boolean') {
     state.terminal.busy = false;
   }
+  if (!Object.prototype.hasOwnProperty.call(state.terminal, 'snapshotOverride')) {
+    state.terminal.snapshotOverride = null;
+  }
 }
 
 function terminalOutputTarget(dom) {
@@ -37,6 +40,9 @@ function setTerminalDebugText(target, text) {
 }
 
 function terminalDisplayText(state) {
+  if (typeof state?.terminal?.snapshotOverride === 'string') {
+    return state.terminal.snapshotOverride;
+  }
   const lines = Array.isArray(state?.terminal?.lines) ? state.terminal.lines : [];
   const inputBuffer = String(state?.terminal?.inputBuffer || '');
   const body = lines.join('\n');
@@ -242,6 +248,10 @@ export function createTerminalSessionService({
     },
     clear: () => {
       clearTerminalOutput(state);
+      renderTerminal(dom, state, resolvedTerminalView, requestFrame);
+    },
+    setSnapshotOverride: (text = null) => {
+      state.terminal.snapshotOverride = text == null ? null : String(text);
       renderTerminal(dom, state, resolvedTerminalView, requestFrame);
     },
     submitInput,

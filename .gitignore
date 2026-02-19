@@ -54,9 +54,24 @@ web/node_modules/
 # Web wasm build artifacts
 web/assets/pkg/*
 
-# RISC-V software build artifacts
-examples/riscv/software/bin/*.img
-examples/riscv/software/bin/*.asm
-examples/riscv/software/bin/*.elf
-examples/riscv/software/bin/*.nm
-examples/riscv/software/bin/*.sym
+# RISC-V software artifacts: keep canonical fixtures only
+/examples/riscv/software/bin/*
+!/examples/riscv/software/bin/kernel.bin
+!/examples/riscv/software/bin/fs.img
+
+# xv6 local build artifacts
+/examples/riscv/software/xv6/fs.img
+/examples/riscv/software/xv6/kernel/kernel
+/examples/riscv/software/xv6/kernel/kernel.asm
+/examples/riscv/software/xv6/kernel/kernel.sym
+/examples/riscv/software/xv6/kernel/*.o
+/examples/riscv/software/xv6/kernel/*.d
+/examples/riscv/software/xv6/mkfs/mkfs
+/examples/riscv/software/xv6/user/_*
+/examples/riscv/software/xv6/user/*.o
+/examples/riscv/software/xv6/user/*.d
+/examples/riscv/software/xv6/user/*.asm
+/examples/riscv/software/xv6/user/*.sym
+/examples/riscv/software/xv6/user/initcode
+/examples/riscv/software/xv6/user/initcode.out
+/examples/riscv/software/xv6/user/usys.S

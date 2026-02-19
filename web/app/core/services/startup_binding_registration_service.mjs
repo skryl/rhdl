@@ -154,7 +154,8 @@ export function createStartupBindingRegistrationService({
           initializeSimulator: sim.initializeSimulator
         },
         apple2: {
-          refreshMemoryView: apple2.refreshMemoryView
+          refreshMemoryView: apple2.refreshMemoryView,
+          queueKey: apple2.queueKey || (() => {})
         },
         components: {
           refreshExplorer: components.refreshExplorer

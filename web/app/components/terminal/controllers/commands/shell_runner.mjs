@@ -1,5 +1,10 @@
 import { parseBooleanToken } from '../../lib/tokens.mjs';
 
+function terminalSupportsUartPassthrough(state) {
+  const keyboard = state?.apple2?.ioConfig?.keyboard || {};
+  return keyboard.enabled !== false && keyboard.mode === 'uart';
+}
+
 export async function handleShellRunnerCommand({ cmd, tokens, context }) {
   const {
     dom,
@@ -26,6 +31,35 @@ export async function handleShellRunnerCommand({ cmd, tokens, context }) {
 
   if (cmd === 'terminal') {
     const mode = String(tokens[0] || 'toggle').toLowerCase();
+    if (mode === 'uart') {
+      const action = String(tokens[1] || 'toggle').toLowerCase();
+      if (action === 'status') {
+        const enabled = !!state?.terminal?.uartPassthrough;
+        return `terminal uart input ${enabled ? 'enabled' : 'disabled'}`;
+      }
+
+      let nextEnabled = false;
+      if (action === 'toggle') {
+        nextEnabled = !state?.terminal?.uartPassthrough;
+      } else {
+        const desired = parseBooleanToken(action);
+        if (desired == null) {
+          throw new Error('Usage: terminal uart <on|off|toggle|status>');
+        }
+        nextEnabled = desired;
+      }
+
+      if (nextEnabled && !terminalSupportsUartPassthrough(state)) {
+        throw new Error('UART keyboard passthrough is unavailable for the current runner.');
+      }
+
+      if (!state.terminal || typeof state.terminal !== 'object') {
+        state.terminal = {};
+      }
+      state.terminal.uartPassthrough = nextEnabled;
+      actions.refreshStatus();
+      return `terminal uart input ${nextEnabled ? 'enabled' : 'disabled'}`;
+    }
     if (mode === 'clear') {
       helpers.terminalClear();
       return null;
@@ -35,7 +69,7 @@ export async function handleShellRunnerCommand({ cmd, tokens, context }) {
     } else {
       const desired = parseBooleanToken(mode);
       if (desired == null) {
-        throw new Error('Usage: terminal <show|hide|toggle|clear>');
+        throw new Error('Usage: terminal <show|hide|toggle|clear|uart>');
       }
       actions.setTerminalOpen(desired, { focus: desired });
     }

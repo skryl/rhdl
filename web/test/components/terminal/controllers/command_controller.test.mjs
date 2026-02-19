@@ -18,10 +18,19 @@ function makeBaseState() {
     watches: new Map([['sig_a', 1n]]),
     breakpoints: [{ name: 'bp_a', width: 1, value: 1n }],
     memory: { followPc: false },
+    apple2: {
+      ioConfig: {
+        keyboard: {
+          enabled: true,
+          mode: 'uart'
+        }
+      }
+    },
     terminal: {
       history: [],
       historyIndex: 0,
-      busy: false
+      busy: false,
+      uartPassthrough: false
     }
   };
 }
@@ -160,6 +169,21 @@ test('submitInput executes status and appends output', async () => {
   assert.match(dom.terminalOutput.textContent, /\$ status/);
   assert.match(dom.terminalOutput.textContent, /runner=apple2/);
   assert.match(dom.terminalOutput.textContent, /backend=compiler/);
+  assert.match(dom.terminalOutput.textContent, /terminal_uart=off/);
+});
+
+test('submitInput toggles terminal uart passthrough mode', async () => {
+  const { controller, dom, state } = createControllerHarness();
+
+  dom.terminalInput.value = 'terminal uart on';
+  await controller.submitInput();
+  assert.equal(state.terminal.uartPassthrough, true);
+  assert.match(dom.terminalOutput.textContent, /terminal uart input enabled/);
+
+  dom.terminalInput.value = 'terminal uart off';
+  await controller.submitInput();
+  assert.equal(state.terminal.uartPassthrough, false);
+  assert.match(dom.terminalOutput.textContent, /terminal uart input disabled/);
 });
 
 test('submitInput reports unknown commands as errors', async () => {

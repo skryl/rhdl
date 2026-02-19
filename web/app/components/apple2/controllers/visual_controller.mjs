@@ -1,3 +1,5 @@
+import { renderUartTextGrid } from '../lib/uart_text.mjs';
+
 function requireFn(name, fn) {
   if (typeof fn !== 'function') {
     throw new Error(`createApple2VisualController requires function: ${name}`);
@@ -75,7 +77,8 @@ export function createApple2VisualController({
     const txLen = Number(sim.runner_riscv_uart_tx_len());
     const txLimit = Number.isFinite(txLen) ? Math.max(0, txLen) : 0;
     const readLen = Math.max(0, Number.isFinite(length) ? Math.min(length, txLimit) : txLimit);
-    return sim.runner_riscv_uart_tx_bytes(0, readLen);
+    const offset = Math.max(0, txLimit - readLen);
+    return sim.runner_riscv_uart_tx_bytes(offset, readLen);
   }
 
   function refreshApple2Screen() {
@@ -192,18 +195,7 @@ export function createApple2VisualController({
         dom.apple2TextScreen.textContent = 'No UART output yet.';
         return;
       }
-
-      const lines = [];
-      for (let row = 0; row < height; row += 1) {
-        let line = '';
-        const offset = row * width;
-        for (let col = 0; col < width; col += 1) {
-          const byte = uartBytes[offset + col] || 0;
-          line += decodeTextChar(byte, textConfig);
-        }
-        lines.push(line);
-      }
-      dom.apple2TextScreen.textContent = lines.join('\n');
+      dom.apple2TextScreen.textContent = renderUartTextGrid(uartBytes, { width, height, textConfig });
       return;
     }
 

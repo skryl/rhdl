@@ -13,6 +13,30 @@ function isTerminalTextEntryKey(event) {
   return event.key.length === 1;
 }
 
+function terminalUartPassthroughEnabled(state) {
+  return !!state?.terminal?.uartPassthrough;
+}
+
+function queueTerminalUartText(text, apple2) {
+  if (!text || typeof apple2?.queueKey !== 'function') {
+    return false;
+  }
+
+  const normalized = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  if (!normalized) {
+    return false;
+  }
+
+  for (const char of normalized) {
+    if (char === '\n') {
+      apple2.queueKey('\r');
+    } else {
+      apple2.queueKey(char);
+    }
+  }
+  return true;
+}
+
 export function bindCoreBindings({
   dom,
   state,
@@ -119,6 +143,36 @@ export function bindCoreBindings({
   });
 
   listeners.on(dom.terminalOutput, 'keydown', async (event) => {
+    if (terminalUartPassthroughEnabled(state) && typeof apple2?.queueKey === 'function') {
+      if (event.ctrlKey && !event.metaKey && !event.altKey && String(event.key || '').toLowerCase() === 'u') {
+        state.terminal.uartPassthrough = false;
+        sim.refreshStatus();
+        event.preventDefault();
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        apple2.queueKey('\r');
+        return;
+      }
+      if (event.key === 'Backspace') {
+        event.preventDefault();
+        apple2.queueKey(String.fromCharCode(0x08));
+        return;
+      }
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        apple2.queueKey('\t');
+        return;
+      }
+      if (isTerminalTextEntryKey(event)) {
+        event.preventDefault();
+        apple2.queueKey(event.key);
+        return;
+      }
+    }
+
     if (event.key === 'Enter') {
       event.preventDefault();
       await shell.submitTerminalInput();
@@ -160,6 +214,10 @@ export function bindCoreBindings({
   listeners.on(dom.terminalOutput, 'paste', (event) => {
     const pasted = String(event.clipboardData?.getData('text') || '');
     if (!pasted) {
+      return;
+    }
+    if (terminalUartPassthroughEnabled(state) && queueTerminalUartText(pasted, apple2)) {
+      event.preventDefault();
       return;
     }
     event.preventDefault();

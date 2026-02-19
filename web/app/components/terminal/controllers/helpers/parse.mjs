@@ -63,6 +63,7 @@ export function terminalHelpText() {
     '  mirb                  (start interactive mirb session)',
     '  config <show|hide|toggle>',
     '  terminal <show|hide|toggle|clear>',
+    '  terminal uart <on|off|toggle|status>  (Ctrl+U exits passthrough)',
     '  tab <io|vcd|memory|components|schematic>',
     '  runner <id> [load]',
     '  backend <interpreter|jit|compiler>',

@@ -1011,6 +1011,28 @@ export class WasmIrSimulator {
     return this.runnerProbe(RUNNER_PROBE_RISCV_UART_TX_LEN) >>> 0;
   }
 
+  runner_riscv_uart_receive_bytes(bytes) {
+    if (this.runner_kind() !== 'riscv') {
+      return false;
+    }
+    if (bytes == null) {
+      return false;
+    }
+    let payload = bytes;
+    if (!(payload instanceof Uint8Array)) {
+      payload = new Uint8Array(Array.from(payload));
+    }
+    if (payload.length === 0) {
+      return true;
+    }
+    return this.runnerMemTransfer(RUNNER_MEM_OP_WRITE, RUNNER_MEM_SPACE_UART_RX, 0, payload, 0) > 0;
+  }
+
+  runner_riscv_uart_receive_text(text) {
+    const encoded = new TextEncoder().encode(String(text ?? ''));
+    return this.runner_riscv_uart_receive_bytes(encoded);
+  }
+
   runner_riscv_load_disk(bytes, offset = 0) {
     if (this.runner_kind() !== 'riscv') {
       return false;

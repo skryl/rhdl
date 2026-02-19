@@ -37,6 +37,7 @@ Gem::Specification.new do |spec|
 
   # Runtime dependencies
   spec.add_dependency "base64"
+  spec.add_dependency "fiddle"
 
   # Development dependencies (for those developing the gem itself)
   spec.add_development_dependency "benchmark-ips", "~> 2.12"

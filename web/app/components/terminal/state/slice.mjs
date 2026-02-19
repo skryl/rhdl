@@ -5,7 +5,8 @@ export function createTerminalStateSlice() {
       historyIndex: -1,
       busy: false,
       lines: [],
-      inputBuffer: ''
+      inputBuffer: '',
+      uartPassthrough: false
     }
   };
 }

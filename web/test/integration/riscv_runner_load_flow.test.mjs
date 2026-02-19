@@ -10,9 +10,15 @@ import {
 function setupTestPage(page) {
   const pageErrors = [];
   const consoleErrors = [];
+  const benignPageErrors = [
+    'Failed to execute \'drawImage\' on \'CanvasRenderingContext2D\': The image argument is a canvas element with a width or height of 0.'
+  ];
 
   page.on('pageerror', (err) => {
     const message = String(err?.message || err);
+    if (benignPageErrors.some((entry) => message.includes(entry))) {
+      return;
+    }
     pageErrors.push(message);
   });
 

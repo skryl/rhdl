@@ -13,6 +13,7 @@ import { handleApple2MemoryCommand } from '../controllers/commands/apple2_memory
 import { handleUiCommand } from '../controllers/commands/ui.mjs';
 import { handleIrbCommand } from '../controllers/commands/irb.mjs';
 import { createMirbCommandRunner } from './mirb_runner_service.mjs';
+import { renderUartTextGrid } from '../../apple2/lib/uart_text.mjs';
 
 function requireFn(name, fn) {
   if (typeof fn !== 'function') {
@@ -29,6 +30,7 @@ function createStatusText({ state, runtime, actions }) {
   return [
     `runner=${runner.id}`,
     `backend=${backend.id}`,
+    `terminal_uart=${state?.terminal?.uartPassthrough ? 'on' : 'off'}`,
     `tab=${tab}`,
     `sim=${sim}`,
     `running=${state.running ? 'yes' : 'no'}`,
@@ -53,6 +55,36 @@ function buildMirbSessionReplaySource(lines = []) {
     '  puts "__RHDL_SESSION_ERROR__:" + __rhdl_session_error__.message + " (" + __rhdl_session_error__.class.to_s + ")"',
     'end'
   ].join('\n');
+}
+
+function readUartSnapshotText({ state, runtime }) {
+  const sim = runtime?.sim;
+  if (!sim) {
+    return 'No UART output yet.';
+  }
+  if (typeof sim.runner_riscv_uart_tx_len !== 'function' || typeof sim.runner_riscv_uart_tx_bytes !== 'function') {
+    return 'No UART output yet.';
+  }
+
+  const textConfig = state?.apple2?.ioConfig?.display?.text || {};
+  const width = Math.max(1, Number.parseInt(textConfig.width, 10) || 80);
+  const height = Math.max(1, Number.parseInt(textConfig.height, 10) || 24);
+  const maxBytes = width * height;
+
+  const txLen = Number(sim.runner_riscv_uart_tx_len());
+  const txLimit = Number.isFinite(txLen) ? Math.max(0, txLen) : 0;
+  const readLen = Math.max(0, Math.min(maxBytes, txLimit));
+  if (readLen <= 0) {
+    return 'No UART output yet.';
+  }
+
+  const offset = Math.max(0, txLimit - readLen);
+  const bytes = sim.runner_riscv_uart_tx_bytes(offset, readLen);
+  if (!bytes || bytes.length === 0) {
+    return 'No UART output yet.';
+  }
+
+  return renderUartTextGrid(bytes, { width, height, textConfig });
 }
 
 export function createTerminalRuntimeService({
@@ -265,6 +297,14 @@ export function createTerminalRuntimeService({
     refreshStatus: actions.refreshStatus
   });
 
+  function syncUartPassthroughDisplay() {
+    if (!state?.terminal?.uartPassthrough) {
+      terminalSession.setSnapshotOverride(null);
+      return;
+    }
+    terminalSession.setSnapshotOverride(readUartSnapshotText({ state, runtime }));
+  }
+
   return {
     writeLine: terminalSession.writeLine,
     clear: terminalSession.clear,
@@ -277,6 +317,7 @@ export function createTerminalRuntimeService({
     appendInput: terminalSession.appendInput,
     backspaceInput: terminalSession.backspaceInput,
     setInput: terminalSession.setInput,
-    focusInput: terminalSession.focusInput
+    focusInput: terminalSession.focusInput,
+    syncUartPassthroughDisplay
   };
 }

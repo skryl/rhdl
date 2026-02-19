@@ -19,6 +19,23 @@ export function normalizeApple2KeyCode(value) {
   return ascii & 0xff;
 }
 
+export function normalizeUartKeyCode(value) {
+  if (value == null) {
+    return null;
+  }
+  let ascii = typeof value === 'number' ? value : String(value).charCodeAt(0);
+  if (!Number.isFinite(ascii)) {
+    return null;
+  }
+  if (ascii === 10) {
+    ascii = 0x0d;
+  }
+  if (ascii === 127) {
+    ascii = 0x08;
+  }
+  return ascii & 0xff;
+}
+
 export function normalizeMappedKeyCode(value, options = {}) {
   const code = normalizeApple2KeyCode(value);
   if (code == null) {

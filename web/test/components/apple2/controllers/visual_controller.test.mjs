@@ -50,6 +50,8 @@ test('refreshApple2Debug renders disabled placeholder when runner is unavailable
 });
 
 test('refreshApple2Screen renders UART mode output when configured', () => {
+  let uartReadArgs = null;
+  const uartBytes = new Uint8Array([65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76]);
   const controllerConfig = {
     dom: {
       apple2TextScreen: { textContent: '' },
@@ -77,8 +79,11 @@ test('refreshApple2Screen renders UART mode output when configured', () => {
     },
     runtime: {
       sim: {
-        runner_riscv_uart_tx_len: () => 8,
-        runner_riscv_uart_tx_bytes: () => new Uint8Array([65, 66, 67, 68, 69, 70, 71, 72])
+        runner_riscv_uart_tx_len: () => uartBytes.length,
+        runner_riscv_uart_tx_bytes: (offset = 0, length = uartBytes.length) => {
+          uartReadArgs = [offset, length];
+          return uartBytes.slice(offset, offset + length);
+        }
       }
     },
     isApple2UiEnabled: () => true,
@@ -95,5 +100,52 @@ test('refreshApple2Screen renders UART mode output when configured', () => {
   });
 
   controller.refreshApple2Screen();
-  assert.equal(controllerConfig.dom.apple2TextScreen.textContent, 'ABCD\nEFGH');
+  assert.deepEqual(uartReadArgs, [4, 8]);
+  assert.equal(controllerConfig.dom.apple2TextScreen.textContent, 'EFGH\nIJKL');
+});
+
+test('refreshApple2Screen renders UART CR/LF as line breaks', () => {
+  const uartBytes = new Uint8Array([97, 98, 99, 13, 10, 100, 101, 102]);
+  const dom = {
+    apple2TextScreen: { textContent: '' },
+    apple2HiresCanvas: null
+  };
+  const state = {
+    apple2: {
+      displayHires: false,
+      displayColor: false,
+      lastCpuResult: { speaker_toggles: 0 },
+      ioConfig: {
+        display: {
+          mode: 'uart',
+          text: {
+            width: 8,
+            height: 2,
+            charMask: 255,
+            asciiMin: 32,
+            asciiMax: 126
+          }
+        }
+      }
+    }
+  };
+  const runtime = {
+    sim: {
+      runner_riscv_uart_tx_len: () => uartBytes.length,
+      runner_riscv_uart_tx_bytes: () => uartBytes
+    }
+  };
+
+  const controller = createApple2VisualController({
+    dom,
+    state,
+    runtime,
+    isApple2UiEnabled: () => true,
+    updateIoToggleUi: () => {},
+    renderApple2DebugRows: () => {},
+    apple2HiresLineAddress: (row) => row
+  });
+
+  controller.refreshApple2Screen();
+  assert.equal(dom.apple2TextScreen.textContent, 'abc     \ndef     ');
 });
