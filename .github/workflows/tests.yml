@@ -32,5 +32,21 @@ jobs:
           ruby-version: "3.3"
           bundler-cache: true
 
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            lib/rhdl/codegen/netlist/sim/netlist_interpreter -> target
+            lib/rhdl/codegen/netlist/sim/netlist_jit -> target
+
+      - name: Build required native netlist backends
+        run: |
+          set -euo pipefail
+          bundle exec rake "native:build[netlist_interpreter]"
+          bundle exec rake "native:build[netlist_jit]"
+
       - name: Run test suite
         run: bundle exec rake spec
