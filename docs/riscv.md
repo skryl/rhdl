@@ -11,6 +11,7 @@ The RISC-V implementation includes:
 - **Full RV32I Base Set**: All 47 base integer instructions
 - **Assembler**: Two-pass assembler for RV32I programs
 - **Test Harnesses**: Clean testing interfaces
+- **xv6 Compatibility Coverage**: Privileged readiness checks plus UART shell boot/echo flow
 
 ## Quick Start
 
@@ -20,9 +21,21 @@ The RISC-V implementation includes:
 # Run all RISC-V tests
 bundle exec rspec spec/examples/riscv/
 
-# Run specific test
+# Run specific CPU pipeline tests
 bundle exec rspec spec/examples/riscv/cpu_spec.rb
-bundle exec rspec spec/examples/riscv/pipeline_spec.rb
+bundle exec rspec spec/examples/riscv/pipelined_cpu_spec.rb
+
+# Run xv6-focused compatibility tests
+bundle exec rspec spec/examples/riscv/xv6_readiness_spec.rb
+bundle exec rspec spec/examples/riscv/xv6_shell_io_spec.rb
+```
+
+### Building xv6 Artifacts
+
+The xv6 shell tests expect local artifacts under `examples/riscv/software/bin/`.
+
+```bash
+./examples/riscv/software/build_xv6.sh
 ```
 
 ### Using the CPU
@@ -43,6 +56,19 @@ puts "x1 = #{harness.read_reg(1)}"  # => 5
 puts "x2 = #{harness.read_reg(2)}"  # => 10
 puts "x3 = #{harness.read_reg(3)}"  # => 15
 ```
+
+## xv6 OS Support
+
+RHDL includes a tracked xv6 source tree plus validation specs for boot/readiness behavior.
+
+- Source tree: `examples/riscv/software/xv6`
+- Local build script: `examples/riscv/software/build_xv6.sh`
+- Generated local artifacts: `examples/riscv/software/bin/kernel.bin`, `examples/riscv/software/bin/fs.img`
+- Privileged compatibility spec: `spec/examples/riscv/xv6_readiness_spec.rb`
+- UART shell boot/echo spec: `spec/examples/riscv/xv6_shell_io_spec.rb`
+- Boot tracing utility: `examples/riscv/utilities/xv6_boot_tracer.rb`
+
+For the full xv6 workflow, see `docs/riscv_xv6.md`.
 
 ## Architecture: Single-Cycle CPU
 
@@ -477,6 +503,10 @@ examples/riscv/
 |       +-- harness.rb          # Pipeline test harness
 +-- utilities/
 |   +-- assembler.rb            # RV32I assembler
+|   +-- xv6_boot_tracer.rb      # xv6 boot tracer (UART/stage/MMIO)
++-- software/
+|   +-- xv6/                    # Tracked xv6 source tree
+|   +-- build_xv6.sh            # Local xv6 artifact builder
 ```
 
 ## Performance Comparison
@@ -543,3 +573,4 @@ done:
 - [Game Boy Emulation](gameboy.md) - SM83 CPU implementation
 - [DSL Reference](dsl.md) - RHDL DSL documentation
 - [Export](export.md) - Verilog export guide
+- [RISC-V + xv6](riscv_xv6.md) - xv6 build/boot/readiness workflow

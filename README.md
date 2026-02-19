@@ -22,6 +22,7 @@ Demo: [Web Simulator](https://skryl.github.io/rhdl)
 - **Component Library**: Gates, flip-flops, registers, ALU, memory, and more
 - **Gate-Level Synthesis**: Lower components to primitive gate netlists (AND, OR, XOR, NOT, MUX, DFF)
 - **Diagram Generation**: Multi-level circuit diagrams with SVG, PNG, and DOT output
+- **RISC-V + xv6 Validation**: RV32I harnesses with xv6 boot/readiness specs and UART shell workflows
 
 ## Documentation
 
@@ -41,6 +42,7 @@ Demo: [Web Simulator](https://skryl.github.io/rhdl)
 | [Apple II](docs/apple2.md) | Apple II emulation |
 | [Game Boy](docs/gameboy.md) | Game Boy (DMG/GBC/SGB) emulation |
 | [RISC-V](docs/riscv.md) | RISC-V RV32I CPU implementation |
+| [RISC-V + xv6](docs/riscv_xv6.md) | xv6 OS build, boot, and validation workflow |
 | [Web Simulator](docs/web_simulator.md) | Browser simulator (WASM + VCD + Apple II runner) |
 | [Web Architecture](docs/web_architecture.md) | Web app runtime architecture and module layout |
 
@@ -241,7 +243,7 @@ RHDL includes four comprehensive example implementations demonstrating the frame
 | [MOS 6502](docs/mos6502_cpu.md) | Processor | 8-bit | Classic 1970s microprocessor |
 | [Apple II](docs/apple2.md) | Computer | 6502 | Complete 1977 personal computer |
 | [Game Boy](docs/gameboy.md) | Console | SM83 | Nintendo handheld (DMG/GBC/SGB) |
-| [RISC-V](docs/riscv.md) | Processor | 32-bit | Modern RISC instruction set |
+| [RISC-V](docs/riscv.md) | Processor | 32-bit | RV32I cores with xv6 readiness and UART/virtio validation |
 
 ### MOS 6502 CPU
 
