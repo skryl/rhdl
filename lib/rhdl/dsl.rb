@@ -1,13 +1,13 @@
 # Enhanced RHDL DSL
 # Ruby-esque block-style syntax for hardware description
 
-require 'active_support/concern'
-require 'active_support/core_ext/class/attribute'
-require 'active_support/core_ext/string/inflections'
+require 'rhdl/support/concern'
+require 'rhdl/support/class_attribute'
+require 'rhdl/support/inflections'
 
 module RHDL
   module DSL
-    extend ActiveSupport::Concern
+    extend RHDL::Support::Concern
 
     # Module/entity mixin for classes
     included do

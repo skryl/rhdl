@@ -158,8 +158,7 @@ rhdl/
 ### Dependencies
 
 The project uses these gems:
-- `parslet ~> 2.0` - Parser generator
-- `activesupport ~> 7.0` - Rails utility library
+- `base64` - Base64 encoding/decoding used by web artifact tasks
 - `rspec ~> 3.12` - Testing framework (dev/test)
 - `rake ~> 13.0` - Build tool (dev/test)
 - `parallel_tests ~> 4.0` - Parallel test execution (dev/test)

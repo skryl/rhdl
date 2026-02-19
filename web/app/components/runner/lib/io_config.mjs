@@ -1,5 +1,6 @@
 const U16_MAX = 0xFFFF;
 const U32_MAX = 0xFFFFFFFF;
+const U32_ADDRESS_SPACE = 0x100000000;
 
 function asBoolean(value, fallback = false) {
   if (value == null) {
@@ -13,7 +14,7 @@ function asUint(value, fallback = 0, max = U32_MAX) {
   if (!Number.isFinite(parsed)) {
     return fallback;
   }
-  return Math.max(0, Math.min(max, parsed >>> 0));
+  return Math.max(0, Math.min(max, Math.trunc(parsed)));
 }
 
 function asOptionalUint(value, fallback = null, max = U32_MAX) {
@@ -151,7 +152,7 @@ function normalizeMemory(memory = {}, fallback) {
   return {
     dumpStart: asUint(memory.dumpStart, fallback.dumpStart, U32_MAX),
     dumpLength: asUint(memory.dumpLength, fallback.dumpLength, U32_MAX),
-    addressSpace: Math.max(1, asUint(memory.addressSpace, fallback.addressSpace, U32_MAX)),
+    addressSpace: Math.max(1, asUint(memory.addressSpace, fallback.addressSpace, U32_ADDRESS_SPACE)),
     viewMapped: asBoolean(memory.viewMapped, fallback.viewMapped),
     dumpReadMapped: asBoolean(memory.dumpReadMapped, fallback.dumpReadMapped),
     directWriteMapped: asBoolean(memory.directWriteMapped, fallback.directWriteMapped)

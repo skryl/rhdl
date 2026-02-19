@@ -3,7 +3,10 @@ export function createTerminalStateSlice() {
     terminal: {
       history: [],
       historyIndex: -1,
-      busy: false
+      busy: false,
+      lines: [],
+      inputBuffer: '',
+      uartPassthrough: false
     }
   };
 }

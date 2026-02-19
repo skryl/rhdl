@@ -347,3 +347,287 @@ test('initializeApple2Mode bootstraps mos6502 runner after default bin reset', a
   ]);
   assert.equal(logs.some((line) => line.includes('MOS6502 bootstrap complete')), true);
 });
+
+test('initializeApple2Mode supports runner-mapped memory API fallback for uart runners', async () => {
+  const logs = [];
+  const state = { apple2: { enabled: false, baseRomBytes: null } };
+  const calls = [];
+
+  await initializeApple2Mode({
+    runtime: {
+      sim: {
+        has_signal: () => false,
+        runner_read_memory: (addr) => {
+          calls.push(['read', addr]);
+          return new Uint8Array([0]);
+        },
+        runner_write_memory: () => true,
+        runner_load_memory: (bytes, offset, options) => {
+          calls.push(['load', bytes.length, offset, options]);
+          return true;
+        },
+        runner_set_reset_vector: (pc) => {
+          calls.push(['setPc', pc]);
+          return true;
+        },
+        reset: () => calls.push(['reset'])
+      }
+    },
+    state,
+    preset: {
+      io: {
+        enabled: true,
+        api: 'generic',
+        memory: { addressSpace: 0xFFFFFFFF }
+      },
+      defaultBin: {
+        path: '/fixtures/kernel.bin',
+        offset: 0x80000000,
+        space: 'main',
+        startPc: '0x80000000',
+        resetAfterLoad: true
+      }
+    },
+    addWatchSignal: () => {},
+    fetchImpl: async () => ({
+      ok: true,
+      async arrayBuffer() {
+        return new Uint8Array([1, 2, 3]).buffer;
+      }
+    }),
+    log: (message) => logs.push(message)
+  });
+
+  assert.equal(state.apple2.enabled, true);
+  assert.deepEqual(calls, [
+    ['load', 3, 0x80000000, { isRom: false }],
+    ['setPc', 0x80000000],
+    ['reset']
+  ]);
+  assert.equal(logs.some((line) => String(line).includes('Default bin load failed')), false);
+});
+
+test('initializeApple2Mode loads riscv default disk image before default kernel bin', async () => {
+  const calls = [];
+  const logs = [];
+  await initializeApple2Mode({
+    runtime: {
+      sim: {
+        runner_mode: () => true,
+        runner_kind: () => 'riscv',
+        runner_riscv_load_disk: (bytes, offset) => {
+          calls.push(['disk', bytes.length, offset]);
+          return true;
+        },
+        runner_load_memory: (bytes, offset, options) => {
+          calls.push(['load', bytes.length, offset, options]);
+          return true;
+        },
+        runner_set_reset_vector: (pc) => {
+          calls.push(['setPc', pc]);
+          return true;
+        },
+        reset: () => calls.push(['reset'])
+      }
+    },
+    state: { apple2: { enabled: false, baseRomBytes: null } },
+    preset: {
+      defaultDisk: {
+        path: '/fixtures/riscv/fs.img',
+        offset: 0
+      },
+      defaultBin: {
+        path: '/fixtures/riscv/kernel.bin',
+        offset: 0x80000000,
+        space: 'main',
+        startPc: '0x80000000',
+        resetAfterLoad: true
+      }
+    },
+    addWatchSignal: () => {},
+    fetchImpl: async (path) => {
+      if (String(path).includes('fs.img')) {
+        return {
+          ok: true,
+          async arrayBuffer() {
+            return new Uint8Array([1, 2, 3, 4]).buffer;
+          }
+        };
+      }
+      return {
+        ok: true,
+        async arrayBuffer() {
+          return new Uint8Array([5, 6, 7]).buffer;
+        }
+      };
+    },
+    log: (message) => logs.push(String(message))
+  });
+
+  assert.deepEqual(calls, [
+    ['disk', 4, 0],
+    ['load', 3, 0x80000000, { isRom: false }],
+    ['setPc', 0x80000000],
+    ['reset']
+  ]);
+  assert.equal(logs.some((line) => line.includes('Loaded default disk')), true);
+});
+
+test('initializeApple2Mode repairs riscv start PC when reset-vector apply reports success but PC is low', async () => {
+  const calls = [];
+  await initializeApple2Mode({
+    runtime: {
+      sim: {
+        runner_mode: () => true,
+        runner_kind: () => 'riscv',
+        has_signal: (name) => name === 'debug_pc' || name === 'pc_reg__pc',
+        peek: (name) => {
+          if (name === 'debug_pc') {
+            return 0x00000FF0;
+          }
+          return 0;
+        },
+        poke: (name, value) => calls.push(['poke', name, value]),
+        evaluate: () => calls.push(['evaluate']),
+        runner_load_memory: (bytes, offset, options) => {
+          calls.push(['load', bytes.length, offset, options]);
+          return true;
+        },
+        runner_set_reset_vector: (pc) => {
+          calls.push(['setPc', pc]);
+          return true;
+        },
+        reset: () => calls.push(['reset'])
+      }
+    },
+    state: { apple2: { enabled: false, baseRomBytes: null } },
+    preset: {
+      defaultBin: {
+        path: '/fixtures/kernel.bin',
+        offset: 0x80000000,
+        space: 'main',
+        startPc: '0x80000000',
+        resetAfterLoad: true
+      }
+    },
+    addWatchSignal: () => {},
+    fetchImpl: async () => ({
+      ok: true,
+      async arrayBuffer() {
+        return new Uint8Array([1, 2, 3]).buffer;
+      }
+    }),
+    log: () => {}
+  });
+
+  assert.deepEqual(calls, [
+    ['load', 3, 0x80000000, { isRom: false }],
+    ['setPc', 0x80000000],
+    ['reset'],
+    ['poke', 'pc_reg__pc', 0x80000000],
+    ['poke', 'debug_pc', 0x80000000],
+    ['evaluate']
+  ]);
+});
+
+test('initializeApple2Mode applies riscv moderate fast-boot PHYSTOP patch to default kernel bin', async () => {
+  const calls = [];
+  const logs = [];
+  const rawKernel = new Uint8Array([
+    0xB7, 0x05, 0x00, 0x88, // lui a1,0x88000 (patched to 0x84000 in moderate mode)
+    0x13, 0x00, 0x00, 0x00
+  ]);
+
+  await initializeApple2Mode({
+    runtime: {
+      sim: {
+        runner_mode: () => true,
+        runner_kind: () => 'riscv',
+        runner_load_memory: (bytes, offset, options) => {
+          calls.push(['load', Array.from(bytes), offset, options]);
+          return true;
+        },
+        runner_set_reset_vector: (pc) => {
+          calls.push(['setPc', pc]);
+          return true;
+        }
+      }
+    },
+    state: { apple2: { enabled: false, baseRomBytes: null } },
+    preset: {
+      defaultBin: {
+        path: '/fixtures/riscv/kernel.bin',
+        offset: 0x80000000,
+        space: 'main',
+        startPc: '0x80000000',
+        fastBoot: true,
+        resetAfterLoad: false
+      }
+    },
+    addWatchSignal: () => {},
+    fetchImpl: async () => ({
+      ok: true,
+      async arrayBuffer() {
+        return rawKernel.buffer;
+      }
+    }),
+    log: (message) => logs.push(String(message))
+  });
+
+  assert.deepEqual(calls, [
+    ['load', [0xB7, 0x05, 0x00, 0x84, 0x13, 0x00, 0x00, 0x00], 0x80000000, { isRom: false }],
+    ['setPc', 0x80000000]
+  ]);
+  assert.equal(logs.some((line) => line.includes('moderate fast-boot PHYSTOP patch')), true);
+});
+
+test('initializeApple2Mode applies riscv aggressive fast-boot PHYSTOP patch when requested', async () => {
+  const calls = [];
+  const logs = [];
+  const rawKernel = new Uint8Array([
+    0xB7, 0x05, 0x00, 0x88, // lui a1,0x88000 (patched to 0x80200 in aggressive mode)
+    0x13, 0x00, 0x00, 0x00
+  ]);
+
+  await initializeApple2Mode({
+    runtime: {
+      sim: {
+        runner_mode: () => true,
+        runner_kind: () => 'riscv',
+        runner_load_memory: (bytes, offset, options) => {
+          calls.push(['load', Array.from(bytes), offset, options]);
+          return true;
+        },
+        runner_set_reset_vector: (pc) => {
+          calls.push(['setPc', pc]);
+          return true;
+        }
+      }
+    },
+    state: { apple2: { enabled: false, baseRomBytes: null } },
+    preset: {
+      defaultBin: {
+        path: '/fixtures/riscv/kernel.bin',
+        offset: 0x80000000,
+        space: 'main',
+        startPc: '0x80000000',
+        fastBoot: 'aggressive',
+        resetAfterLoad: false
+      }
+    },
+    addWatchSignal: () => {},
+    fetchImpl: async () => ({
+      ok: true,
+      async arrayBuffer() {
+        return rawKernel.buffer;
+      }
+    }),
+    log: (message) => logs.push(String(message))
+  });
+
+  assert.deepEqual(calls, [
+    ['load', [0xB7, 0x05, 0x20, 0x80, 0x13, 0x00, 0x00, 0x00], 0x80000000, { isRom: false }],
+    ['setPc', 0x80000000]
+  ]);
+  assert.equal(logs.some((line) => line.includes('aggressive fast-boot PHYSTOP patch')), true);
+});

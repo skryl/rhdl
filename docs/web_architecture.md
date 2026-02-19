@@ -74,4 +74,5 @@ This keeps startup deterministic and testable without browser globals.
 
 - `assets/pkg`: wasm artifacts.
 - `assets/fixtures`: generated IR/source/schematic fixtures and sample binary assets.
-- `bundle exec rake web:generate`: web artifact + wasm build pipeline entrypoint.
+- `bundle exec rake web:build`: wasm build pipeline entrypoint.
+- `bundle exec rake web:generate`: web asset generation entrypoint (builds wasm first when missing).

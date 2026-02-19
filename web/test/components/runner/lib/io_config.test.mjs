@@ -67,3 +67,20 @@ test('resolveRunnerIoConfig normalizes memory-mapped runner config', () => {
   assert.deepEqual(config.pcSignalCandidates, ['pc_out', 'cpu_pc']);
   assert.deepEqual(config.watchSignals, ['pc_debug', 'speaker']);
 });
+
+test('resolveRunnerIoConfig preserves 32-bit full address space for riscv-style memory maps', () => {
+  const config = resolveRunnerIoConfig({
+    io: {
+      enabled: true,
+      api: 'generic',
+      memory: {
+        dumpStart: 0x80000000,
+        dumpLength: 1024,
+        addressSpace: 0x100000000
+      }
+    }
+  });
+
+  assert.equal(config.memory.dumpStart, 0x80000000);
+  assert.equal(config.memory.addressSpace, 0x100000000);
+});

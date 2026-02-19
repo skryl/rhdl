@@ -19,12 +19,12 @@
 # @example Use as output (consumer interface - flipped)
 #   output_bundle :axi, AxiLite  # equivalent to flipped: true
 
-require 'active_support/concern'
+require 'rhdl/support/concern'
 
 module RHDL
   module DSL
     module Bundle
-      extend ActiveSupport::Concern
+      extend RHDL::Support::Concern
 
       class_methods do
         def inherited(subclass)

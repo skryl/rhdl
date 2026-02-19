@@ -1,5 +1,42 @@
 import { createListenerGroup } from '../../../core/bindings/listener_group.mjs';
 
+const TERMINAL_MIN_HEIGHT_PX = 260;
+const TERMINAL_VIEWPORT_MARGIN_PX = 140;
+
+function isTerminalTextEntryKey(event) {
+  if (!event || typeof event.key !== 'string') {
+    return false;
+  }
+  if (event.ctrlKey || event.metaKey || event.altKey) {
+    return false;
+  }
+  return event.key.length === 1;
+}
+
+function terminalUartPassthroughEnabled(state) {
+  return !!state?.terminal?.uartPassthrough;
+}
+
+function queueTerminalUartText(text, apple2) {
+  if (!text || typeof apple2?.queueKey !== 'function') {
+    return false;
+  }
+
+  const normalized = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  if (!normalized) {
+    return false;
+  }
+
+  for (const char of normalized) {
+    if (char === '\n') {
+      apple2.queueKey('\r');
+    } else {
+      apple2.queueKey(char);
+    }
+  }
+  return true;
+}
+
 export function bindCoreBindings({
   dom,
   state,
@@ -13,6 +50,43 @@ export function bindCoreBindings({
   log
 }) {
   const listeners = createListenerGroup();
+  const globalWindow = globalThis.window;
+  const globalDocument = globalThis.document;
+  const resizeState = {
+    active: false,
+    startY: 0,
+    startHeight: 0
+  };
+
+  function terminalMaxHeightPx() {
+    const viewportHeight = Number(globalWindow?.innerHeight || 0);
+    if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) {
+      return TERMINAL_MIN_HEIGHT_PX;
+    }
+    return Math.max(
+      TERMINAL_MIN_HEIGHT_PX,
+      viewportHeight - TERMINAL_VIEWPORT_MARGIN_PX
+    );
+  }
+
+  function clampTerminalHeight(px) {
+    const maxPx = terminalMaxHeightPx();
+    return Math.max(TERMINAL_MIN_HEIGHT_PX, Math.min(maxPx, Math.round(px)));
+  }
+
+  function stopTerminalResize() {
+    if (!resizeState.active) {
+      return;
+    }
+    resizeState.active = false;
+    globalDocument?.body?.classList?.remove('terminal-resizing');
+    if (globalWindow && typeof globalWindow.dispatchEvent === 'function') {
+      const ResizeEventCtor = globalWindow.Event || globalThis.Event;
+      if (typeof ResizeEventCtor === 'function') {
+        globalWindow.dispatchEvent(new ResizeEventCtor('resize'));
+      }
+    }
+  }
 
   listeners.on(dom.loadRunnerBtn, 'click', () => {
     runner.loadPreset();
@@ -26,11 +100,79 @@ export function bindCoreBindings({
     shell.setTerminalOpen(!state.terminalOpen, { focus: true });
   });
 
-  listeners.on(dom.terminalRunBtn, 'click', () => {
-    shell.submitTerminalInput();
+  listeners.on(dom.terminalResizeHandle, 'mousedown', (event) => {
+    if (!dom.terminalPanel || event.button !== 0) {
+      return;
+    }
+    const rect = dom.terminalPanel.getBoundingClientRect();
+    resizeState.active = true;
+    resizeState.startY = event.clientY;
+    resizeState.startHeight = rect.height;
+    globalDocument?.body?.classList?.add('terminal-resizing');
+    event.preventDefault();
   });
 
-  listeners.on(dom.terminalInput, 'keydown', async (event) => {
+  listeners.on(globalWindow, 'mousemove', (event) => {
+    if (!resizeState.active || !dom.terminalPanel) {
+      return;
+    }
+    const delta = resizeState.startY - event.clientY;
+    const nextHeight = clampTerminalHeight(resizeState.startHeight + delta);
+    dom.terminalPanel.style.height = `${nextHeight}px`;
+    dom.terminalPanel.style.maxHeight = `${terminalMaxHeightPx()}px`;
+  });
+
+  listeners.on(globalWindow, 'mouseup', () => {
+    stopTerminalResize();
+  });
+
+  listeners.on(globalWindow, 'blur', () => {
+    stopTerminalResize();
+  });
+
+  listeners.on(globalWindow, 'resize', () => {
+    if (!dom.terminalPanel?.style?.height) {
+      return;
+    }
+    const currentHeight = Number.parseFloat(dom.terminalPanel.style.height);
+    if (!Number.isFinite(currentHeight)) {
+      return;
+    }
+    dom.terminalPanel.style.height = `${clampTerminalHeight(currentHeight)}px`;
+    dom.terminalPanel.style.maxHeight = `${terminalMaxHeightPx()}px`;
+  });
+
+  listeners.on(dom.terminalOutput, 'keydown', async (event) => {
+    if (terminalUartPassthroughEnabled(state) && typeof apple2?.queueKey === 'function') {
+      if (event.ctrlKey && !event.metaKey && !event.altKey && String(event.key || '').toLowerCase() === 'u') {
+        state.terminal.uartPassthrough = false;
+        sim.refreshStatus();
+        event.preventDefault();
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        apple2.queueKey('\r');
+        return;
+      }
+      if (event.key === 'Backspace') {
+        event.preventDefault();
+        apple2.queueKey(String.fromCharCode(0x08));
+        return;
+      }
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        apple2.queueKey('\t');
+        return;
+      }
+      if (isTerminalTextEntryKey(event)) {
+        event.preventDefault();
+        apple2.queueKey(event.key);
+        return;
+      }
+    }
+
     if (event.key === 'Enter') {
       event.preventDefault();
       await shell.submitTerminalInput();
@@ -44,7 +186,52 @@ export function bindCoreBindings({
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       shell.terminalHistoryNavigate(1);
+      return;
     }
+    if (event.key === 'Backspace') {
+      event.preventDefault();
+      shell.terminalBackspaceInput();
+      return;
+    }
+    if (
+      event.key === 'ArrowLeft'
+      || event.key === 'ArrowRight'
+      || event.key === 'Home'
+      || event.key === 'End'
+      || event.key === 'PageUp'
+      || event.key === 'PageDown'
+    ) {
+      event.preventDefault();
+      shell.terminalFocusInput();
+      return;
+    }
+    if (isTerminalTextEntryKey(event)) {
+      event.preventDefault();
+      shell.terminalAppendInput(event.key);
+    }
+  });
+
+  listeners.on(dom.terminalOutput, 'paste', (event) => {
+    const pasted = String(event.clipboardData?.getData('text') || '');
+    if (!pasted) {
+      return;
+    }
+    if (terminalUartPassthroughEnabled(state) && queueTerminalUartText(pasted, apple2)) {
+      event.preventDefault();
+      return;
+    }
+    event.preventDefault();
+    shell.terminalAppendInput(pasted);
+  });
+
+  listeners.on(dom.terminalOutput, 'focus', () => {
+    shell.terminalFocusInput();
+  });
+
+  listeners.on(dom.terminalOutput, 'mousedown', () => {
+    setTimeout(() => {
+      shell.terminalFocusInput();
+    }, 0);
   });
 
   listeners.on(dom.themeSelect, 'change', () => {
@@ -127,6 +314,7 @@ export function bindCoreBindings({
   }
 
   return () => {
+    stopTerminalResize();
     listeners.dispose();
   };
 }

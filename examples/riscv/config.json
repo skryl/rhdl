@@ -1,0 +1,80 @@
+{
+  "runner": {
+    "id": "riscv",
+    "label": "RISC-V xv6 Runner",
+    "order": 60,
+    "topClassName": "RHDL::Examples::RISCV::CPU",
+    "requires": [
+      "examples/riscv/hdl/cpu"
+    ],
+    "simIrPath": "./assets/fixtures/riscv/ir/riscv.json",
+    "explorerIrPath": "./assets/fixtures/riscv/ir/riscv_hier.json",
+    "sourceBundlePath": "./assets/fixtures/riscv/ir/riscv_sources.json",
+    "schematicPath": "./assets/fixtures/riscv/ir/riscv_schematic.json",
+    "preferredTab": "ioTab",
+    "enableApple2Ui": false,
+    "usesManualIr": false,
+    "defaultBin": {
+      "path": "./assets/fixtures/riscv/software/bin/kernel.bin",
+      "offset": 2147483648,
+      "space": "main",
+      "startPc": "0x80000000",
+      "fastBoot": "moderate",
+      "resetAfterLoad": true
+    },
+    "defaultDisk": {
+      "path": "./assets/fixtures/riscv/software/bin/fs.img",
+      "offset": 0
+    },
+    "timing": {
+      "cyclesPerHertz": 1,
+      "hertzLabel": "RISC-V"
+    },
+    "defaults": {
+      "memoryFollowPc": false
+    },
+    "preferredBackend": "compiler",
+    "compilerWasmPath": "./assets/pkg/ir_compiler_riscv.wasm",
+    "io": {
+      "enabled": true,
+      "api": "generic",
+      "memory": {
+        "dumpStart": 2147483648,
+        "dumpLength": 1024,
+        "addressSpace": 4294967296,
+        "viewMapped": true,
+        "dumpReadMapped": true,
+        "directWriteMapped": true
+      },
+      "display": {
+        "enabled": true,
+        "mode": "uart",
+        "text": {
+          "start": 0,
+          "width": 80,
+          "height": 24,
+          "rowStride": 80,
+          "rowLayout": "linear",
+          "charMask": 255,
+          "asciiMin": 32,
+          "asciiMax": 126
+        }
+      },
+      "keyboard": {
+        "enabled": true,
+        "mode": "uart"
+      },
+      "pcSignalCandidates": [
+        "debug_pc"
+      ],
+      "watchSignals": [
+        "debug_pc",
+        "debug_inst",
+        "debug_x1",
+        "debug_x2",
+        "debug_x10",
+        "debug_x11"
+      ]
+    }
+  }
+}

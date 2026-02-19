@@ -3,6 +3,7 @@
 require 'json'
 require 'time'
 require 'base64'
+require 'etc'
 require_relative '../task'
 require_relative '../config'
 
@@ -19,6 +20,7 @@ module RHDL
         APPLE2_AOT_IR_PATH = File.join(SCRIPT_DIR, 'apple2', 'ir', 'apple2.json')
         CPU8BIT_AOT_IR_PATH = File.join(SCRIPT_DIR, 'cpu', 'ir', 'cpu_lib_hdl.json')
         MOS6502_AOT_IR_PATH = File.join(SCRIPT_DIR, 'mos6502', 'ir', 'mos6502.json')
+        RISCV_AOT_IR_PATH = File.join(SCRIPT_DIR, 'riscv', 'ir', 'riscv.json')
         AOT_GEN_PATH = File.join(SIM_DIR, 'ir_compiler/src/aot_generated.rs')
         APPLE2_ROM_SOURCE = File.join(PROJECT_ROOT, 'examples/apple2/software/roms/appleiigo.rom')
         KARATEKA_MEM_SOURCE = File.join(PROJECT_ROOT, 'examples/apple2/software/disks/karateka_mem.bin')
@@ -30,6 +32,10 @@ module RHDL
         GAMEBOY_DEFAULT_BIN_SOURCE = File.join(PROJECT_ROOT, 'examples/gameboy/software/roms/dmg_boot.bin')
         SNAPSHOT_KIND = 'rhdl.apple2.ram_snapshot'
         SNAPSHOT_VERSION = 1
+        RISCV_DEFAULT_BIN_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/kernel.bin')
+        RISCV_DEFAULT_BIN_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'kernel.bin')
+        RISCV_DEFAULT_DISK_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/fs.img')
+        RISCV_DEFAULT_DISK_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'fs.img')
         DEFAULT_KARATEKA_PC = 0xB82A
         DEFAULT_BIN_ASSETS = [
           {
@@ -54,6 +60,7 @@ module RHDL
         require 'rhdl'
 
         def run
+          ensure_wasm_backends_built
           ensure_dir(SCRIPT_DIR)
 
           runner_exports.each do |runner|
@@ -64,9 +71,14 @@ module RHDL
           generate_apple2_memory_assets
           generate_runner_default_bin_assets
           write_memory_dump_asset_module
-          build_wasm_backends
 
           puts 'Web artifact generation complete.'
+        end
+
+        def run_build
+          build_wasm_backends
+          mark_wasm_build_complete!
+          puts 'Web WASM build complete.'
         end
 
         private
@@ -79,10 +91,41 @@ module RHDL
           end
         end
 
+        def ensure_wasm_backends_built
+          if wasm_backends_built?
+            puts 'Web WASM build already completed; skipping build.'
+          else
+            puts 'Web WASM build not found; building first...'
+            run_build
+          end
+        end
+
+        def wasm_backends_built?
+          return false unless File.file?(WASM_BUILD_STAMP_PATH)
+
+          outputs_present = REQUIRED_WASM_OUTPUTS.all? do |artifact|
+            File.file?(File.join(PKG_DIR, artifact))
+          end
+          return false unless outputs_present
+
+          mruby_artifacts_embed_rhdl?
+        end
+
+        def mark_wasm_build_complete!
+          ensure_dir(PKG_DIR)
+          File.write(WASM_BUILD_STAMP_PATH, "#{Time.now.utc.iso8601}\n")
+        end
+
         def build_wasm_backends
           puts 'Building web WASM artifacts...'
           ensure_dir(PKG_DIR)
           File.write(File.join(PKG_DIR, '.gitignore'), "*\n!.gitignore\n")
+
+          copy_ghostty_web_assets
+          copy_vim_wasm_assets
+          build_mruby_wasm
+          ensure_aot_ir_inputs
+
           unless run_rustup_target_add!
             warn 'WARNING: failed to add rustup target wasm32-unknown-unknown; skipping WASM backend builds'
             return
@@ -100,8 +143,236 @@ module RHDL
             build_compiler_aot_wasm(ir_path: APPLE2_AOT_IR_PATH, artifact: 'ir_compiler.wasm')
             build_compiler_aot_wasm(ir_path: CPU8BIT_AOT_IR_PATH, artifact: 'ir_compiler_cpu.wasm')
             build_compiler_aot_wasm(ir_path: MOS6502_AOT_IR_PATH, artifact: 'ir_compiler_mos6502.wasm')
+            build_compiler_aot_wasm(ir_path: RISCV_AOT_IR_PATH, artifact: 'ir_compiler_riscv.wasm')
           ensure
             File.write(AOT_GEN_PATH, restore_aot_placeholder)
+          end
+        end
+
+        def build_mruby_wasm
+          unless command_available?('emcc')
+            warn 'WARNING: emcc not found; install emscripten to build mruby wasm artifacts'
+            return
+          end
+
+          ensure_dir(File.join(PROJECT_ROOT, 'tmp'))
+          source_dir = File.join(PROJECT_ROOT, 'tmp', "mruby-#{MRUBY_VERSION}")
+          source_git_dir = File.join(source_dir, '.git')
+
+          unless File.directory?(source_git_dir)
+            FileUtils.rm_rf(source_dir)
+            puts "Cloning mruby #{MRUBY_VERSION} into #{source_dir}"
+            cloned = run_command(
+              'git', 'clone', '--depth', '1', '--branch', MRUBY_VERSION, MRUBY_REPO, source_dir,
+              chdir: PROJECT_ROOT
+            )
+            unless cloned
+              warn "WARNING: failed to clone mruby #{MRUBY_VERSION}; mruby artifacts not updated"
+              return
+            end
+          end
+
+          config_path = write_mruby_emscripten_config(source_dir)
+          config_relative_path = config_path.sub(%r{\A#{Regexp.escape(source_dir)}/?}, '')
+
+          puts 'Building mruby -> mruby.js/mruby.wasm + mirb.js/mirb.wasm'
+          jobs = Etc.respond_to?(:nprocessors) ? Etc.nprocessors : 4
+          ok = run_command(
+            'rake', "MRUBY_CONFIG=#{config_relative_path}", "-j#{jobs}",
+            chdir: source_dir
+          )
+          unless ok
+            warn 'WARNING: mruby wasm build failed; mruby artifacts not updated'
+            return
+          end
+
+          js_src = File.join(source_dir, 'build', 'emscripten', 'bin', 'mruby')
+          wasm_src = File.join(source_dir, 'build', 'emscripten', 'bin', 'mruby.wasm')
+          mirb_js_src = File.join(source_dir, 'build', 'emscripten', 'bin', 'mirb')
+          mirb_wasm_src = File.join(source_dir, 'build', 'emscripten', 'bin', 'mirb.wasm')
+          unless File.file?(js_src) && File.file?(wasm_src) && File.file?(mirb_js_src) && File.file?(mirb_wasm_src)
+            warn "WARNING: expected mruby wasm outputs not found in #{File.join(source_dir, 'build', 'emscripten', 'bin')}"
+            return
+          end
+
+          js_out = File.join(PKG_DIR, 'mruby.js')
+          wasm_out = File.join(PKG_DIR, 'mruby.wasm')
+          mirb_js_out = File.join(PKG_DIR, 'mirb.js')
+          mirb_wasm_out = File.join(PKG_DIR, 'mirb.wasm')
+          version_out = File.join(PKG_DIR, 'mruby.version.json')
+
+          FileUtils.cp(js_src, js_out)
+          FileUtils.cp(wasm_src, wasm_out)
+          FileUtils.cp(mirb_js_src, mirb_js_out)
+          FileUtils.cp(mirb_wasm_src, mirb_wasm_out)
+          File.chmod(0o644, js_out) if File.file?(js_out)
+          File.chmod(0o644, wasm_out) if File.file?(wasm_out)
+          File.chmod(0o644, mirb_js_out) if File.file?(mirb_js_out)
+          File.chmod(0o644, mirb_wasm_out) if File.file?(mirb_wasm_out)
+
+          metadata = {
+            name: 'mruby',
+            version: MRUBY_VERSION,
+            source: MRUBY_REPO,
+            builtAtUtc: Time.now.utc.iso8601,
+            binaries: %w[mruby mirb],
+            embedded: {
+              rhdl: true,
+              files: %w[/rhdl.rb /rhdl]
+            }
+          }
+          File.write(version_out, JSON.pretty_generate(metadata) + "\n")
+
+          puts "Wrote #{js_out}"
+          puts "Wrote #{wasm_out}"
+          puts "Wrote #{mirb_js_out}"
+          puts "Wrote #{mirb_wasm_out}"
+          puts "Wrote #{version_out}"
+        end
+
+        def mruby_artifacts_embed_rhdl?
+          metadata_path = File.join(PKG_DIR, 'mruby.version.json')
+          return false unless File.file?(metadata_path)
+
+          metadata = JSON.parse(File.read(metadata_path))
+          embedded = metadata['embedded']
+          embedded.is_a?(Hash) && embedded['rhdl'] == true
+        rescue StandardError
+          false
+        end
+
+        def write_mruby_emscripten_config(source_dir)
+          config_path = File.join(source_dir, MRUBY_EMSCRIPTEN_CONFIG_RELATIVE_PATH)
+          embed_file_specs = [
+            "#{File.join(PROJECT_ROOT, 'lib', 'rhdl.rb')}@/rhdl.rb",
+            "#{File.join(PROJECT_ROOT, 'lib', 'rhdl')}@/rhdl"
+          ]
+
+          content_lines = [
+            '# Auto-generated by RHDL web build. Do not edit manually.',
+            "MRuby::CrossBuild.new('emscripten') do |conf|",
+            '  conf.toolchain :emscripten',
+            '',
+            "  conf.gembox 'stdlib'",
+            "  conf.gembox 'stdlib-ext'",
+            "  conf.gembox 'stdlib-io'",
+            "  conf.gembox 'math'",
+            "  conf.gembox 'metaprog'",
+            "  conf.gem :core => 'mruby-bin-mirb'",
+            "  conf.gem :core => 'mruby-bin-mruby'",
+            '',
+            "  conf.linker.flags << '-sFORCE_FILESYSTEM=1'",
+            "  conf.linker.flags << %q{-sEXPORTED_RUNTIME_METHODS=['callMain']}"
+          ]
+
+          if File.file?(File.join(MRUBY_REQUIRE_SHIM_GEM_PATH, 'mrbgem.rake'))
+            content_lines << "  conf.gem #{MRUBY_REQUIRE_SHIM_GEM_PATH.inspect}"
+          else
+            warn "WARNING: missing mruby require shim gem at #{MRUBY_REQUIRE_SHIM_GEM_PATH}; require will be unavailable in mirb"
+          end
+
+          embed_file_specs.each do |spec|
+            content_lines << "  conf.linker.flags << '--embed-file'"
+            content_lines << "  conf.linker.flags << #{spec.inspect}"
+          end
+
+          content_lines << 'end'
+          File.write(config_path, content_lines.join("\n") + "\n")
+          config_path
+        end
+
+        def copy_vim_wasm_assets
+          package_dir = File.join(WEB_ROOT, 'node_modules', 'vim-wasm')
+          unless File.directory?(package_dir)
+            warn "WARNING: vim-wasm npm package not found at #{package_dir}; run `cd web && npm install`"
+            return
+          end
+
+          assets = {
+            'vim.js' => 'vim.js',
+            'vim.wasm' => 'vim.wasm',
+            'vim.data' => 'vim.data',
+            'vimwasm.js' => 'vimwasm.js',
+            'vimwasm.js.map' => 'vimwasm.js.map'
+          }
+
+          missing = assets.keys.reject { |name| File.file?(File.join(package_dir, name)) }
+          unless missing.empty?
+            warn "WARNING: vim-wasm assets missing: #{missing.join(', ')}"
+            return
+          end
+
+          assets.each do |src_name, dst_name|
+            src = File.join(package_dir, src_name)
+            dst = File.join(PKG_DIR, dst_name)
+            FileUtils.cp(src, dst)
+            File.chmod(0o644, dst) if File.file?(dst)
+            puts "Wrote #{dst}"
+          end
+        end
+
+        def copy_ghostty_web_assets
+          package_dir = File.join(WEB_ROOT, 'node_modules', 'ghostty-web', 'dist')
+          unless File.directory?(package_dir)
+            warn "WARNING: ghostty-web npm package not found at #{package_dir}; run `cd web && npm install`"
+            return
+          end
+
+          assets = {
+            'ghostty-web.js' => 'ghostty-web.js',
+            'ghostty-vt.wasm' => 'ghostty-vt.wasm'
+          }
+          vite_external_assets = Dir.glob(File.join(package_dir, '__vite-browser-external-*.js')).sort
+          vite_external_assets.each do |path|
+            name = File.basename(path)
+            assets[name] = name
+          end
+
+          missing = assets.keys.reject { |name| File.file?(File.join(package_dir, name)) }
+          unless missing.empty?
+            warn "WARNING: ghostty-web assets missing: #{missing.join(', ')}"
+            return
+          end
+
+          assets.each do |src_name, dst_name|
+            src = File.join(package_dir, src_name)
+            dst = File.join(PKG_DIR, dst_name)
+            FileUtils.cp(src, dst)
+            File.chmod(0o644, dst) if File.file?(dst)
+            puts "Wrote #{dst}"
+          end
+        end
+
+        def ensure_aot_ir_inputs
+          aot_inputs = {
+            'apple2' => APPLE2_AOT_IR_PATH,
+            'cpu' => CPU8BIT_AOT_IR_PATH,
+            'mos6502' => MOS6502_AOT_IR_PATH,
+            'riscv' => RISCV_AOT_IR_PATH
+          }
+          missing = aot_inputs.select { |_runner_id, path| !File.file?(path) }
+          return if missing.empty?
+
+          puts 'Generating missing AOT IR inputs for WASM build...'
+          ensure_dir(SCRIPT_DIR)
+
+          exports_by_id = runner_exports.each_with_object({}) { |runner, acc| acc[runner[:id]] = runner }
+          missing.each do |runner_id, path|
+            runner = exports_by_id[runner_id]
+            unless runner
+              warn "WARNING: no runner export found for #{runner_id}; cannot generate #{path}"
+              next
+            end
+
+            generate_runner_assets(runner)
+            warn "WARNING: failed to generate AOT IR source #{path}" unless File.file?(path)
+          end
+        end
+
+        def command_available?(command)
+          ENV.fetch('PATH', '').split(File::PATH_SEPARATOR).any? do |path|
+            candidate = File.join(path, command.to_s)
+            File.file?(candidate) && File.executable?(candidate)
           end
         end
 
@@ -191,6 +462,15 @@ module RHDL
             ensure_dir(File.dirname(asset[:dst]))
             copy_required_file(asset[:src], asset[:dst])
           end
+
+          copy_optional_file(
+            RISCV_DEFAULT_BIN_SOURCE,
+            RISCV_DEFAULT_BIN_ASSET
+          )
+          copy_optional_file(
+            RISCV_DEFAULT_DISK_SOURCE,
+            RISCV_DEFAULT_DISK_ASSET
+          )
         end
 
         def cpu8bit_software_bin_assets
@@ -205,6 +485,14 @@ module RHDL
         def copy_required_file(src, dst)
           raise "Missing source asset: #{src}" unless File.file?(src)
 
+          FileUtils.cp(src, dst)
+          puts "Wrote #{dst}"
+        end
+
+        def copy_optional_file(src, dst)
+          return warn "WARNING: skipping optional asset (missing): #{src}" unless File.file?(src)
+
+          ensure_dir(File.dirname(dst))
           FileUtils.cp(src, dst)
           puts "Wrote #{dst}"
         end
@@ -489,10 +777,29 @@ module RHDL
           puts "Wrote #{MEMORY_DUMP_ASSET_MODULE_PATH}"
         end
 
-        RUNNER_CONFIG_PATHS = %w[8bit mos6502 apple2 gameboy].map do |name|
+        RUNNER_CONFIG_PATHS = %w[8bit mos6502 apple2 gameboy riscv].map do |name|
           File.join(PROJECT_ROOT, 'examples', name, 'config.json')
         end.freeze
+        MRUBY_VERSION = '3.4.0'
+        MRUBY_REPO = 'https://github.com/mruby/mruby.git'
+        MRUBY_REQUIRE_SHIM_GEM_PATH = File.join(PROJECT_ROOT, 'web', 'mruby', 'mruby-require-shim')
+        MRUBY_EMSCRIPTEN_CONFIG_RELATIVE_PATH = File.join('build_config', 'emscripten_rhdl.rb')
+        REQUIRED_WASM_OUTPUTS = %w[
+          mruby.js
+          mruby.wasm
+          mirb.js
+          mirb.wasm
+          mruby.version.json
+          ghostty-web.js
+          ghostty-vt.wasm
+          vim.js
+          vim.wasm
+          vim.data
+          vimwasm.js
+          ir_compiler_riscv.wasm
+        ].freeze
         ASSET_ROOT = File.join(WEB_ROOT, 'assets')
+        WASM_BUILD_STAMP_PATH = File.join(PKG_DIR, '.web_build_stamp')
         DUMP_ASSET_EXTENSIONS = %w[.bin .mem .dat .rhdlsnap .snapshot].freeze
         RUNNER_PRESET_MODULE_PATH = File.join(PROJECT_ROOT, 'web', 'app', 'components', 'runner', 'config', 'generated_presets.mjs')
         MEMORY_DUMP_ASSET_MODULE_PATH = File.join(PROJECT_ROOT, 'web', 'app', 'components', 'memory', 'config', 'generated_dump_assets.mjs')

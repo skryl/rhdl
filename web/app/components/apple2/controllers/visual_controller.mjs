@@ -1,3 +1,5 @@
+import { renderUartTextGrid } from '../lib/uart_text.mjs';
+
 function requireFn(name, fn) {
   if (typeof fn !== 'function') {
     throw new Error(`createApple2VisualController requires function: ${name}`);
@@ -60,6 +62,23 @@ export function createApple2VisualController({
       return runtime.sim.memory_read(offset, length, options);
     }
     return new Uint8Array(0);
+  }
+
+  function readUartText(length) {
+    const sim = runtime?.sim;
+    if (!sim) {
+      return new Uint8Array(0);
+    }
+    if (typeof sim.runner_riscv_uart_tx_len !== 'function'
+      || typeof sim.runner_riscv_uart_tx_bytes !== 'function') {
+      return new Uint8Array(0);
+    }
+
+    const txLen = Number(sim.runner_riscv_uart_tx_len());
+    const txLimit = Number.isFinite(txLen) ? Math.max(0, txLen) : 0;
+    const readLen = Math.max(0, Number.isFinite(length) ? Math.min(length, txLimit) : txLimit);
+    const offset = Math.max(0, txLimit - readLen);
+    return sim.runner_riscv_uart_tx_bytes(offset, readLen);
   }
 
   function refreshApple2Screen() {
@@ -166,6 +185,20 @@ export function createApple2VisualController({
       return;
     }
 
+    if (displayMode === 'uart') {
+      const textConfig = ioConfig.display?.text || {};
+      const width = Math.max(1, Number.parseInt(textConfig.width, 10) || 80);
+      const height = Math.max(1, Number.parseInt(textConfig.height, 10) || 24);
+      const maxBytes = width * height;
+      const uartBytes = readUartText(maxBytes);
+      if (!uartBytes || uartBytes.length === 0) {
+        dom.apple2TextScreen.textContent = 'No UART output yet.';
+        return;
+      }
+      dom.apple2TextScreen.textContent = renderUartTextGrid(uartBytes, { width, height, textConfig });
+      return;
+    }
+
     const textConfig = ioConfig.display?.text || {};
     const textStart = Number.parseInt(textConfig.start, 10);
     const width = Math.max(1, Number.parseInt(textConfig.width, 10) || 40);
@@ -208,14 +241,24 @@ export function createApple2VisualController({
     const watchSignals = Array.isArray(ioConfig.watchSignals) && ioConfig.watchSignals.length > 0
       ? ioConfig.watchSignals
       : ['pc_debug', 'opcode_debug', 'a_debug', 'x_debug', 'y_debug', 's_debug', 'p_debug', 'speaker'];
+    const addrSpace = Number.parseInt(ioConfig.memory?.addressSpace, 10);
+    const wideAddressSpace = Number.isFinite(addrSpace) && addrSpace > 0xFFFF;
     const rows = [];
     for (const name of watchSignals.slice(0, 12)) {
       if (!runtime.sim.has_signal(name)) {
         continue;
       }
-      const value = runtime.sim.peek(name);
-      const width = name.includes('pc') || name.includes('addr') ? 4 : 2;
-      const rendered = `0x${(value & (width === 4 ? 0xFFFF : 0xFF)).toString(16).toUpperCase().padStart(width, '0')}`;
+      const value = Number(runtime.sim.peek(name)) >>> 0;
+      const lowerName = String(name || '').toLowerCase();
+      const isAddressLike = lowerName.includes('pc') || lowerName.includes('addr');
+      let width = 2;
+      if ((isAddressLike && wideAddressSpace) || value > 0xFFFF) {
+        width = 8;
+      } else if (isAddressLike || value > 0xFF) {
+        width = 4;
+      }
+      const masked = width === 8 ? value : (width === 4 ? (value & 0xFFFF) : (value & 0xFF));
+      const rendered = `0x${masked.toString(16).toUpperCase().padStart(width, '0')}`;
       rows.push([name, rendered]);
     }
     if (rows.length === 0) {

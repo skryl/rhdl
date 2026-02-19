@@ -1,0 +1,16 @@
+import path from 'node:path';
+import { chromium } from 'playwright';
+import { createStaticServer, serverBaseUrl } from './test/integration/browser_test_harness.mjs';
+const server = await createStaticServer(path.resolve('.'));
+const base = serverBaseUrl(server);
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage();
+await page.goto(`${base}/index.html`, { waitUntil: 'domcontentloaded' });
+await page.selectOption('#backendSelect', 'interpreter');
+await page.dispatchEvent('#backendSelect', 'change');
+await page.selectOption('#runnerSelect','riscv');
+await page.click('#loadRunnerBtn');
+await page.waitForTimeout(2000);
+const keys = await page.evaluate(()=>Object.keys(window).filter((k)=>k.toLowerCase().includes('rhdl')||k.toLowerCase().includes('runtime')||k.toLowerCase().includes('app')||k.toLowerCase().includes('sim')));
+console.log(keys);
+await browser.close();await server.close();
