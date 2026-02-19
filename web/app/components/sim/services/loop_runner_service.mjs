@@ -1,5 +1,6 @@
 import {
   normalizeApple2KeyCode,
+  normalizeUartKeyCode,
   normalizeMappedKeyCode,
   parseStepTickCount,
   parseRunLoopConfig,
@@ -175,8 +176,16 @@ export function createSimLoopRunnerService({
     }
     const normalized = keyboardCfg.mode === 'memory_mapped'
       ? normalizeMappedKeyCode(value, keyboardCfg)
-      : normalizeApple2KeyCode(value);
+      : (keyboardCfg.mode === 'uart'
+          ? normalizeUartKeyCode(value)
+          : normalizeApple2KeyCode(value));
     if (normalized == null) {
+      return;
+    }
+
+    if (keyboardCfg.mode === 'uart' && typeof runtime.sim?.runner_riscv_uart_receive_bytes === 'function') {
+      runtime.sim.runner_riscv_uart_receive_bytes(new Uint8Array([normalized & 0xFF]));
+      refreshStatus();
       return;
     }
 

@@ -31,6 +31,31 @@ rhdl-app-shell {
 }
 
     </style>
+    <script>
+      (function registerCoiServiceWorker() {
+        if (!window.isSecureContext || window.crossOriginIsolated || !('serviceWorker' in navigator)) {
+          return;
+        }
+
+        const host = String(window.location.hostname || '');
+        const isGithubPages = host.endsWith('.github.io');
+        const isLocalhost = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+        if (!isGithubPages && !isLocalhost) {
+          return;
+        }
+
+        navigator.serviceWorker.register('./coi-serviceworker.js').then((registration) => {
+          if (registration.waiting) {
+            registration.waiting.postMessage({ type: 'activate' });
+          }
+          if (!navigator.serviceWorker.controller) {
+            window.location.reload();
+          }
+        }).catch((error) => {
+          console.warn('Failed to register COI service worker:', error);
+        });
+      })();
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/p5@1.11.1/lib/p5.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/redux@4.2.1/dist/redux.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
@@ -59,9 +84,9 @@ rhdl-app-shell {
           <h2>Backend</h2>
           <div class="row">
             <select id="backendSelect">
-              <option value="interpreter">Interpreter (WASM)</option>
+              <option value="interpreter" selected>Interpreter (WASM)</option>
               <option value="jit">JIT (WASM)</option>
-              <option value="compiler" selected>Compiler AOT (WASM)</option>
+              <option value="compiler">Compiler AOT (WASM)</option>
             </select>
           </div>
           <p id="backendStatus" class="status">Backend: compiler</p>
@@ -136,6 +161,7 @@ rhdl-app-shell {
             <button class="tab-btn" data-tab="memoryTab" aria-selected="false">3. Memory</button>
             <button class="tab-btn" data-tab="componentTab" aria-selected="false">4. Components</button>
             <button class="tab-btn" data-tab="componentGraphTab" aria-selected="false">5. Schematic</button>
+            <button class="tab-btn" data-tab="editorTab" aria-selected="false">6. Editor</button>
           </nav>
           <div class="viewer-toolbar">
             <button
@@ -349,17 +375,78 @@ rhdl-app-shell {
           </section>
         </section>
 
+        <section id="editorTab" class="tab-panel">
+          <div class="editor-top-layout">
+            <section class="subpanel editor-code-panel">
+              <div class="editor-panel-header">
+                <h2>Editor</h2>
+                <button id="editorExecuteBtn" type="button">Execute in mirb</button>
+              </div>
+              <p id="editorStatus" class="status">Initializing editor...</p>
+              <div id="editorVimWrap" class="editor-vim-wrap">
+                <canvas id="editorVimCanvas" class="editor-vim-canvas"></canvas>
+                <input
+                  id="editorVimInput"
+                  class="editor-vim-input"
+                  type="text"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  autocorrect="off"
+                  spellcheck="false"
+                />
+                <textarea
+                  id="editorFallback"
+                  class="editor-fallback"
+                  spellcheck="false"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  autocorrect="off"
+                ></textarea>
+              </div>
+            </section>
+
+            <section class="subpanel editor-terminal-panel">
+              <div class="editor-panel-header">
+                <h2>mirb Terminal</h2>
+              </div>
+              <div
+                id="editorTerminalOutput"
+                class="terminal-output editor-terminal-output"
+                tabindex="0"
+                role="textbox"
+                aria-label="Editor mirb terminal"
+              ></div>
+            </section>
+          </div>
+
+          <section class="subpanel editor-trace-panel">
+            <div class="editor-panel-header">
+              <h2>VCD Tracer</h2>
+              <p id="editorTraceMeta" class="status">Initialize simulator to trace IO signals</p>
+            </div>
+            <div id="editorCanvasWrap" class="editor-canvas-wrap"></div>
+          </section>
+        </section>
+
         <section id="terminalPanel" class="terminal-panel" hidden>
+          <div
+            id="terminalResizeHandle"
+            class="terminal-resize-handle"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize terminal"
+          ></div>
           <div class="terminal-panel-header">
             <h2>Terminal</h2>
             <p class="status">Use `help` to list available commands.</p>
           </div>
-          <pre id="terminalOutput" class="terminal-output" aria-live="polite"></pre>
-          <div class="terminal-input-row">
-            <span class="terminal-prompt">$</span>
-            <input id="terminalInput" type="text" placeholder="Type a command..." spellcheck="false" autocomplete="off" />
-            <button id="terminalRunBtn" type="button">Run</button>
-          </div>
+          <div
+            id="terminalOutput"
+            class="terminal-output"
+            tabindex="0"
+            role="textbox"
+            aria-label="Terminal"
+          ></div>
         </section>
       </main>
     </rhdl-app-shell>

@@ -5,13 +5,13 @@
 # This module extends the base Codegen module with sequential-specific IR generation.
 # It overrides to_ir to include sequential processes (always @(posedge clk) blocks).
 
-require 'active_support/concern'
+require 'rhdl/support/concern'
 require 'set'
 
 module RHDL
   module DSL
     module SequentialCodegen
-      extend ActiveSupport::Concern
+      extend RHDL::Support::Concern
 
       class_methods do
         # Override to_ir to include sequential processes

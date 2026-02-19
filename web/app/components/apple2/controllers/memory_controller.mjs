@@ -61,9 +61,16 @@ export function createApple2MemoryController({
   function currentAddressSpace() {
     const configured = Number.parseInt(currentIoConfig().memory?.addressSpace, 10);
     if (Number.isFinite(configured) && configured > 0) {
-      return configured;
+      return configured >= 0xFFFFFFFF ? 0x100000000 : configured;
     }
     return addressSpace;
+  }
+
+  function currentRunnerKind() {
+    if (!runtime.sim || typeof runtime.sim.runner_kind !== 'function') {
+      return null;
+    }
+    return runtime.sim.runner_kind();
   }
 
   function getApple2ProgramCounter() {
@@ -77,10 +84,24 @@ export function createApple2MemoryController({
       : ['pc_debug', 'cpu__debug_pc', 'reg_pc'];
     for (const name of candidates) {
       if (runtime.sim.has_signal(name)) {
-        return runtime.sim.peek(name) & 0xffff;
+        const pc = Number(runtime.sim.peek(name));
+        if (!Number.isFinite(pc)) {
+          return null;
+        }
+        return pc >>> 0;
       }
     }
     return null;
+  }
+
+  function formatAddress(value, addrSpace = currentAddressSpace()) {
+    const parsed = Number(value);
+    const width = addrSpace > 0xFFFF ? 8 : 4;
+    if (!Number.isFinite(parsed)) {
+      return '0'.repeat(width);
+    }
+    const bounded = ((Math.floor(parsed) % addrSpace) + addrSpace) % addrSpace;
+    return (bounded >>> 0).toString(16).toUpperCase().padStart(width, '0');
   }
 
   function readApple2MappedMemory(start, length) {
@@ -148,10 +169,11 @@ export function createApple2MemoryController({
 
     if (state.memory.followPc && pc != null) {
       const maxStart = Math.max(0, addrSpace - length);
-      const centered = Math.max(0, (pc & 0xffff) - Math.floor(length / 2));
-      start = Math.min(maxStart, centered) & ~0x0f;
+      const centered = Math.max(0, (pc >>> 0) - Math.floor(length / 2));
+      const bounded = Math.min(maxStart, centered);
+      start = Math.floor(bounded / BYTES_PER_MEMORY_ROW) * BYTES_PER_MEMORY_ROW;
       if (dom.memoryStart) {
-        dom.memoryStart.value = `0x${hexWord(start)}`;
+        dom.memoryStart.value = `0x${formatAddress(start, addrSpace)}`;
       }
     }
 
@@ -206,12 +228,13 @@ export function createApple2MemoryController({
       const hex = rowBytes.map((entry) => entry.hex).join(' ');
       const ascii = Array.from(row, (b) => (b >= 32 && b <= 126 ? String.fromCharCode(b) : '.')).join('');
       const addr = (start + i) % addrSpace;
-      const hasPc = pc != null && (((pc & 0xffff) - addr + addrSpace) % addrSpace) < row.length;
+      const hasPc = pc != null && (((pc >>> 0) - addr + addrSpace) % addrSpace) < row.length;
       const marker = hasPc ? '>>' : '  ';
-      lines.push(`${marker} ${hexWord(addr)}: ${hex.padEnd(16 * 3 - 1, ' ')}  ${ascii}`);
+      const formattedAddress = formatAddress(addr, addrSpace);
+      lines.push(`${marker} ${formattedAddress}: ${hex.padEnd(16 * 3 - 1, ' ')}  ${ascii}`);
       dumpRows.push({
         marker,
-        addressHex: hexWord(addr),
+        addressHex: formattedAddress,
         bytes: rowBytes,
         ascii
       });
@@ -224,17 +247,22 @@ export function createApple2MemoryController({
 
     const disasmLineCount = Math.max(1, Math.ceil(length / BYTES_PER_MEMORY_ROW));
     const disasmStart = start;
+    const runnerKind = currentRunnerKind();
+    const show6502Disasm = runnerKind == null || runnerKind === 'apple2' || runnerKind === 'mos6502';
+    const disasmText = show6502Disasm
+      ? disassemble6502LinesWithMemory(
+        disasmStart,
+        disasmLineCount,
+        readApple2MappedMemory,
+        { highlightPc: pc, addressSpace: addrSpace }
+      ).join('\n')
+      : `Disassembly unavailable for ${runnerKind} runner.`;
     renderMemoryPanel(dom, {
       followDisabled: false,
       followChecked: !!state.memory.followPc,
       dumpText: lines.join('\n'),
       dumpRows,
-      disasmText: disassemble6502LinesWithMemory(
-        disasmStart,
-        disasmLineCount,
-        readApple2MappedMemory,
-        { highlightPc: pc, addressSpace: addrSpace }
-      ).join('\n'),
+      disasmText,
       followPc: !!state.memory.followPc,
       pcAddress: pc,
       windowStart: start,
@@ -250,7 +278,7 @@ export function createApple2MemoryController({
 
     // MOS6502 standalone runner bus signals.
     if (runtime.sim.has_signal('addr') && runtime.sim.has_signal('rw')) {
-      const addr = runtime.sim.peek('addr') & 0xffff;
+      const addr = Number(runtime.sim.peek('addr')) >>> 0;
       const rw = runtime.sim.peek('rw') & 0x1;
       return {
         addr,
@@ -260,7 +288,7 @@ export function createApple2MemoryController({
 
     // Apple2/system runners expose cpu address + ram write-enable.
     if (runtime.sim.has_signal('cpu__addr_reg') && runtime.sim.has_signal('ram_we')) {
-      const addr = runtime.sim.peek('cpu__addr_reg') & 0xffff;
+      const addr = Number(runtime.sim.peek('cpu__addr_reg')) >>> 0;
       const ramWe = runtime.sim.peek('ram_we') & 0x1;
       return {
         addr,
@@ -269,7 +297,7 @@ export function createApple2MemoryController({
     }
 
     if (runtime.sim.has_signal('ram_addr') && runtime.sim.has_signal('ram_we')) {
-      const addr = runtime.sim.peek('ram_addr') & 0xffff;
+      const addr = Number(runtime.sim.peek('ram_addr')) >>> 0;
       const ramWe = runtime.sim.peek('ram_we') & 0x1;
       return {
         addr,

@@ -20,12 +20,12 @@
 #   parameter :depth, default: 32
 #   vec :registers, count: :depth, width: 64
 
-require 'active_support/concern'
+require 'rhdl/support/concern'
 
 module RHDL
   module DSL
     module Vec
-      extend ActiveSupport::Concern
+      extend RHDL::Support::Concern
 
       class_methods do
         def inherited(subclass)

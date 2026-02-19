@@ -16,6 +16,7 @@ test('startup binding registration service resets lifecycle and registers all bi
       bindComponentBindings: () => 'component-disposer',
       bindIoBindings: () => 'io-disposer',
       bindSimBindings: () => 'sim-disposer',
+      bindEditorBindings: () => 'editor-disposer',
       bindCollapsiblePanels: () => 'collapsible-disposer',
       registerUiBinding: (fn) => registered.push(fn),
       disposeUiBindings: () => calls.push('disposeUiBindings')
@@ -89,5 +90,5 @@ test('startup binding registration service resets lifecycle and registers all bi
   assert.equal(calls.includes('disposeUiBindings'), true);
   assert.equal(calls.includes('dashboard.disposeLayoutBuilder'), true);
   assert.equal(calls.includes('dashboard.initializeLayoutBuilder'), true);
-  assert.equal(registered.length, 7);
+  assert.equal(registered.length, 8);
 });

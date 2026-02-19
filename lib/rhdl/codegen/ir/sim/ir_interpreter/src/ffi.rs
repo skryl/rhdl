@@ -35,8 +35,15 @@ impl IrSimContext {
     pub fn new(json: &str, sub_cycles: usize) -> Result<Self, String> {
         let core = CoreSimulator::new(json)?;
 
-        // Detect and create extensions based on signal names
-        let apple2 = if Apple2Extension::is_apple2_ir(&core.name_to_idx) {
+        // Detect and create extensions based on signal names.
+        // Prefer RISC-V when signatures overlap to avoid Apple II false-positives.
+        let riscv = if RiscvExtension::is_riscv_ir(&core.name_to_idx) {
+            Some(RiscvExtension::new(&core))
+        } else {
+            None
+        };
+
+        let apple2 = if riscv.is_none() && Apple2Extension::is_apple2_ir(&core.name_to_idx) {
             Some(Apple2Extension::new(&core, sub_cycles))
         } else {
             None
@@ -56,12 +63,6 @@ impl IrSimContext {
 
         let mos6502 = if Mos6502Extension::is_mos6502_ir(&core.name_to_idx) {
             Some(Mos6502Extension::new(&core))
-        } else {
-            None
-        };
-
-        let riscv = if RiscvExtension::is_riscv_ir(&core.name_to_idx) {
-            Some(RiscvExtension::new(&core))
         } else {
             None
         };
@@ -704,9 +705,15 @@ unsafe fn runner_set_reset_vector_impl(ctx: *mut IrSimContext, addr: c_uint) {
         return;
     }
     let ctx = &mut *ctx;
+    let vector32 = addr as u32;
     let vector = (addr as usize) & 0xFFFF;
     let lo = (vector & 0xFF) as u8;
     let hi = ((vector >> 8) & 0xFF) as u8;
+
+    if let Some(ref mut riscv) = ctx.riscv {
+        riscv.set_reset_vector(vector32);
+        return;
+    }
 
     if let Some(ref mut mos6502) = ctx.mos6502 {
         mos6502.load_memory(&[lo, hi], 0xFFFC, true);

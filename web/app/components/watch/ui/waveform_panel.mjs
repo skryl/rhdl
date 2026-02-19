@@ -8,6 +8,8 @@ export function setupWaveformP5({
   dom,
   state,
   runtime,
+  mountElement = null,
+  runtimeKey = 'waveformP5',
   waveformFontFamily,
   waveformPalette,
   formatValue,
@@ -24,18 +26,25 @@ export function setupWaveformP5({
     throw new Error('setupWaveformP5 requires p5Ctor');
   }
 
+  const hostElement = mountElement || dom.canvasWrap;
+  if (!hostElement) {
+    throw new Error('setupWaveformP5 requires a mount element');
+  }
+
   const sketch = (p) => {
     const leftPad = 170;
 
     const resize = () => {
-      const w = Math.max(300, dom.canvasWrap.clientWidth);
-      const h = Math.max(220, dom.canvasWrap.clientHeight);
+      const w = Math.max(300, hostElement.clientWidth);
+      const h = Math.max(220, hostElement.clientHeight);
       p.resizeCanvas(w, h);
     };
 
     p.setup = () => {
-      p.createCanvas(dom.canvasWrap.clientWidth, dom.canvasWrap.clientHeight).parent('canvasWrap');
-      runtime.waveformP5 = p;
+      const width = Math.max(300, hostElement.clientWidth);
+      const height = Math.max(220, hostElement.clientHeight);
+      p.createCanvas(width, height).parent(hostElement);
+      runtime[runtimeKey] = p;
       p.textFont(waveformFontFamily(state.theme));
       p.textSize(11);
     };

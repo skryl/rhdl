@@ -36,8 +36,8 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   # Runtime dependencies
-  spec.add_dependency "activesupport", "~> 7.0"
-  spec.add_dependency "parslet", "~> 2.0"
+  spec.add_dependency "base64"
+  spec.add_dependency "fiddle"
 
   # Development dependencies (for those developing the gem itself)
   spec.add_development_dependency "benchmark-ips", "~> 2.12"
@@ -46,4 +46,5 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency "pry"
   spec.add_development_dependency "rake", "~> 13.0"
   spec.add_development_dependency "rspec", "~> 3.12"
+  spec.add_development_dependency "webrick"
 end

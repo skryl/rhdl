@@ -23,6 +23,9 @@ function isPathInside(parent, target) {
 
 export async function createStaticServer(rootDir) {
   const server = createServer(async (req, res) => {
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     try {
       const rawUrl = req.url || '/';
       const urlPath = decodeURIComponent(rawUrl.split('?')[0]);

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   normalizeApple2KeyCode,
+  normalizeUartKeyCode,
   parseStepTickCount,
   parseRunLoopConfig,
   executeGenericRunBatch,
@@ -14,6 +15,14 @@ test('normalizeApple2KeyCode normalizes lowercase and control keys', () => {
   assert.equal(normalizeApple2KeyCode('\n'), 13);
   assert.equal(normalizeApple2KeyCode(String.fromCharCode(127)), 8);
   assert.equal(normalizeApple2KeyCode(null), null);
+});
+
+test('normalizeUartKeyCode preserves character case while normalizing controls', () => {
+  assert.equal(normalizeUartKeyCode('a'), 97);
+  assert.equal(normalizeUartKeyCode('A'), 65);
+  assert.equal(normalizeUartKeyCode('\n'), 13);
+  assert.equal(normalizeUartKeyCode(String.fromCharCode(127)), 8);
+  assert.equal(normalizeUartKeyCode(null), null);
 });
 
 test('parseStepTickCount and parseRunLoopConfig clamp values', () => {

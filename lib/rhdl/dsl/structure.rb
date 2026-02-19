@@ -21,13 +21,13 @@
 #     port [:reg, :q] => :result
 #   end
 
-require 'active_support/concern'
-require 'active_support/core_ext/string/inflections'
+require 'rhdl/support/concern'
+require 'rhdl/support/inflections'
 
 module RHDL
   module DSL
     module Structure
-      extend ActiveSupport::Concern
+      extend RHDL::Support::Concern
 
       class_methods do
         def inherited(subclass)

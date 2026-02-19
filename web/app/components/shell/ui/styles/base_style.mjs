@@ -207,6 +207,22 @@ export const SHELL_BASE_STYLE = String.raw`
     padding: 14px;
   }
 
+  .app-shell.terminal-open {
+    height: 100vh;
+    height: 100dvh;
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  .app-shell.terminal-open .controls,
+  .app-shell.terminal-open .viewer {
+    min-height: 0;
+  }
+
+  .app-shell.terminal-open .viewer {
+    overflow: hidden;
+  }
+
   .app-shell.controls-collapsed {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -320,16 +336,46 @@ export const SHELL_BASE_STYLE = String.raw`
     min-height: 0;
   }
 
+  .app-shell.terminal-open .tab-panel.active {
+    overflow: auto;
+  }
+
   .terminal-panel {
     border: 1px solid #1f3651;
     border-radius: 10px;
     background: rgba(7, 15, 25, 0.96);
     display: grid;
-    grid-template-rows: auto minmax(130px, 1fr) auto;
+    grid-template-rows: auto auto minmax(220px, 1fr);
     gap: 8px;
     padding: 10px;
-    min-height: 210px;
-    max-height: 42vh;
+    min-height: 320px;
+    max-height: 60vh;
+  }
+
+  .terminal-resize-handle {
+    position: relative;
+    height: 8px;
+    cursor: ns-resize;
+    touch-action: none;
+    border-radius: 999px;
+  }
+
+  .terminal-resize-handle::before {
+    content: '';
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    top: 3px;
+    border-top: 1px solid #2f4f6e;
+  }
+
+  .terminal-resize-handle:hover::before {
+    border-top-color: #3dd7c2;
+  }
+
+  body.terminal-resizing {
+    user-select: none;
+    cursor: ns-resize;
   }
 
   .terminal-panel-header {
@@ -353,36 +399,156 @@ export const SHELL_BASE_STYLE = String.raw`
     font-size: 0.76rem;
     line-height: 1.35;
     padding: 8px;
+    width: 100%;
+    height: 100%;
     overflow: auto;
-    white-space: pre-wrap;
+    position: relative;
+    display: block;
+    white-space: pre;
     word-break: break-word;
+    caret-color: #dff3ff;
   }
 
-  .terminal-input-row {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .terminal-prompt {
-    font-family: 'IBM Plex Mono', monospace;
-    color: #8fb8df;
-    font-size: 0.9rem;
-    line-height: 1;
-  }
-
-  .terminal-input-row input {
-    font-family: 'IBM Plex Mono', monospace;
+  .terminal-output:focus {
+    outline: 1px solid #3dd7c2;
+    outline-offset: 0;
   }
 
   #vcdTab {
     grid-template-rows: minmax(320px, 1fr) auto auto;
   }
 
+  #editorTab {
+    grid-template-rows: minmax(420px, 1fr) minmax(260px, 0.8fr);
+    min-height: 0;
+  }
+
+  #editorTab.active {
+    min-height: 0;
+    height: 100%;
+  }
+
   #vcdTab.dashboard-layout-root {
     grid-template-rows: none;
     grid-auto-rows: auto;
+  }
+
+  #editorTab.dashboard-layout-root {
+    grid-template-rows: none;
+    grid-auto-rows: auto;
+  }
+
+  .editor-top-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+    min-height: 0;
+  }
+
+  .editor-code-panel,
+  .editor-terminal-panel,
+  .editor-trace-panel {
+    min-height: 0;
+  }
+
+  .editor-code-panel,
+  .editor-terminal-panel {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+
+  .editor-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .editor-panel-header .status {
+    margin: 0;
+    margin-left: auto;
+    text-align: right;
+  }
+
+  .editor-vim-wrap {
+    position: relative;
+    min-height: 360px;
+    height: 100%;
+    border: 1px solid #29465f;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #061321;
+  }
+
+  .editor-vim-wrap.is-unavailable {
+    background: #0a192c;
+  }
+
+  .editor-vim-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    min-height: 360px;
+  }
+
+  .editor-vim-input {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .editor-fallback {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    min-height: 360px;
+    border: 0;
+    border-radius: 0;
+    resize: none;
+    background: #0a192c;
+    color: #d9ecff;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.8rem;
+    line-height: 1.35;
+  }
+
+  .editor-fallback[hidden] {
+    display: none;
+  }
+
+  .editor-terminal-output {
+    min-height: 360px;
+    height: 100%;
+  }
+
+  .ghostty-terminal-host {
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .ghostty-terminal-host canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  .editor-trace-panel {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .editor-canvas-wrap {
+    width: 100%;
+    min-height: 260px;
+    border: 1px solid #1e374f;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #061321;
   }
 
   .vcd-control-grid {

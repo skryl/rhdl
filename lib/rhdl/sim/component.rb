@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require 'active_support/concern'
+require 'rhdl/support/concern'
 
 module RHDL
   module Sim
