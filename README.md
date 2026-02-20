@@ -41,8 +41,7 @@ Demo: [Web Simulator](https://skryl.github.io/rhdl)
 | [MOS 6502](docs/mos6502_cpu.md) | MOS 6502 CPU implementation |
 | [Apple II](docs/apple2.md) | Apple II emulation |
 | [Game Boy](docs/gameboy.md) | Game Boy (DMG/GBC/SGB) emulation |
-| [RISC-V](docs/riscv.md) | RISC-V RV32I CPU implementation |
-| [RISC-V + xv6](docs/riscv.md#xv6-workflow) | xv6 OS build, boot, and validation workflow |
+| [RISC-V + XV6](docs/riscv.md) | RISC-V RV32I CPU implementation, xv6 OS build + boot |
 | [Web Simulator](docs/web_simulator.md) | Browser simulator (WASM + VCD + Apple II runner) |
 
 ## Web Simulator
@@ -51,7 +50,6 @@ RHDL includes a browser-based simulator with WASM backends, live VCD tracing, Ap
 
 - Demo: [https://skryl.github.io/rhdl](https://skryl.github.io/rhdl)
 - Docs: [Web Simulator Guide](docs/web_simulator.md)
-- Architecture: [Web App Architecture](docs/web_simulator.md#web-app-architecture)
 
 ![Web simulator](docs/screenshots/2026-02-09-14.52.47.gif)
 
