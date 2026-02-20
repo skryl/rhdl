@@ -18,11 +18,11 @@ Demo: [Web Simulator](https://skryl.github.io/rhdl)
 
 - **Component DSLs**: Ruby-based DSLs for combinational, sequential, memory, and state machine components
 - **Verilog Export**: Generate synthesizable Verilog from Ruby definitions
-- **HDL Simulation**: Gate-level simulation with signal propagation
-- **Component Library**: Gates, flip-flops, registers, ALU, memory, and more
+- **HDL Simulation**: RTL-level and Gate-level simulation using a fast Rust backend
+- **Component Library**: Gates, flip-flops, registers, ALU, memory, CPU examples, and more
 - **Gate-Level Synthesis**: Lower components to primitive gate netlists (AND, OR, XOR, NOT, MUX, DFF)
 - **Diagram Generation**: Multi-level circuit diagrams with SVG, PNG, and DOT output
-- **RISC-V + xv6 Validation**: RV32I harnesses with xv6 boot/readiness specs and UART shell workflows
+- **Web Simulator**: WASM based simulator for running your designs in the browser
 
 ## Documentation
 
@@ -42,17 +42,16 @@ Demo: [Web Simulator](https://skryl.github.io/rhdl)
 | [Apple II](docs/apple2.md) | Apple II emulation |
 | [Game Boy](docs/gameboy.md) | Game Boy (DMG/GBC/SGB) emulation |
 | [RISC-V](docs/riscv.md) | RISC-V RV32I CPU implementation |
-| [RISC-V + xv6](docs/riscv_xv6.md) | xv6 OS build, boot, and validation workflow |
+| [RISC-V + xv6](docs/riscv.md#xv6-workflow) | xv6 OS build, boot, and validation workflow |
 | [Web Simulator](docs/web_simulator.md) | Browser simulator (WASM + VCD + Apple II runner) |
-| [Web Architecture](docs/web_architecture.md) | Web app runtime architecture and module layout |
 
 ## Web Simulator
 
 RHDL includes a browser-based simulator with WASM backends, live VCD tracing, Apple II runner tooling, memory dump workflows, and component/source exploration.
 
-- Demo: [https://skryl.github.com/rhdl](https://skryl.github.com/rhdl)
+- Demo: [https://skryl.github.io/rhdl](https://skryl.github.io/rhdl)
 - Docs: [Web Simulator Guide](docs/web_simulator.md)
-- Architecture: [Web App Architecture](docs/web_architecture.md)
+- Architecture: [Web App Architecture](docs/web_simulator.md#web-app-architecture)
 
 ![Web simulator](docs/screenshots/2026-02-09-14.52.47.gif)
 
@@ -198,9 +197,9 @@ verilog_code = RHDL::Export.verilog(component)
 # Or use the class method
 verilog_code = MyComponent.to_verilog
 
-# Batch export with rake
-# rake hdl:export       - Export all DSL components
-# rake hdl:verilog      - Export Verilog files
+# Batch export with CLI
+# rhdl export --all
+# rhdl export --all --scope lib
 ```
 
 **Generated Verilog example:**
@@ -355,10 +354,10 @@ Nintendo Game Boy emulation based on MiSTer reference, supporting DMG, GBC, and 
 
 **CLI Options:**
 ```bash
-rhdl examples gameboy --rom cpu_instrs.gb     # Run test ROM
-rhdl examples gameboy --demo                  # Run demo display
-rhdl examples gameboy --rom game.gb --gbc     # Force GBC mode
-rhdl examples gameboy --rom game.gb --audio   # Enable audio
+rhdl examples gameboy cpu_instrs.gb            # Run test ROM
+rhdl examples gameboy --demo                   # Run demo display
+rhdl examples gameboy --pop                    # Load Prince of Persia ROM
+rhdl examples gameboy game.gb --audio          # Enable audio
 ```
 
 ### RISC-V RV32I
@@ -413,6 +412,26 @@ harness.run_cycles(10)
 puts "x3 = #{harness.read_reg(3)}"  # => 15
 ```
 
+**CLI Options:**
+```bash
+# Run a RISC-V binary in the terminal runner
+# Defaults: --mode ir --sim compile
+rhdl examples riscv path/to/program.bin
+
+# Choose mode/backend and display mode
+rhdl examples riscv --mode ir --sim compile --io mmap path/to/program.bin
+
+# Show live debug panel (ESC toggles command mode)
+rhdl examples riscv -d --io uart path/to/program.bin
+
+# Launch xv6 (forces UART mode automatically)
+./examples/riscv/software/build_xv6.sh
+rhdl examples riscv --xv6 -d
+
+# Headless run for CI/smoke tests
+rhdl examples riscv --headless --cycles 200000 path/to/program.bin
+```
+
 See each example's documentation for complete details on architecture, instruction sets, and CLI options.
 
 ## Project Structure
@@ -462,9 +481,10 @@ rhdl export --lang verilog --out ./out RHDL::HDL::Counter
 rhdl gates --export                      # Export to JSON netlists
 rhdl gates --stats                       # Show synthesis statistics
 
-# Apple II emulator
-rhdl apple2 --demo                       # Run demo mode
-rhdl apple2 --build                      # Build mini monitor ROM
+# Example emulators
+rhdl examples apple2 --demo              # Run Apple II demo mode
+rhdl examples gameboy --demo             # Run Game Boy demo mode
+rhdl examples riscv --xv6 -d             # Run RISC-V xv6 with debug panel
 ```
 
 ## Execution Backends
@@ -588,26 +608,24 @@ See [Performance Guide](docs/performance.md) for detailed benchmarks and optimiz
 
 ```bash
 # Testing
-rake spec                # Run all tests
-rake pspec               # Run tests in parallel
+bundle exec rake spec                  # Run all tests
+bundle exec rake spec:riscv            # Run RISC-V specs
+bundle exec rake pspec                 # Run tests in parallel
+bundle exec rake pspec:riscv           # Run RISC-V specs in parallel
 
-# Verilog export
-rake hdl:export          # Export DSL components to Verilog
-rake hdl:verilog         # Export Verilog files
-rake hdl:clean           # Clean generated HDL files
+# Test and simulation benchmarks
+bundle exec rake spec:bench:riscv[20]  # Benchmark 20 RISC-V spec files
+bundle exec rake bench:ir[5000000]     # Benchmark IR runners
+bundle exec rake bench:gates           # Benchmark gate-level simulation
 
-# Gate-level synthesis
-rake gates:export        # Export all 53 components to JSON netlists
-rake gates:stats         # Show gate-level synthesis statistics
-rake gates:clean         # Clean gate-level output
+# Native backends
+bundle exec rake native:build          # Build native extensions
+bundle exec rake native:check          # Check extension availability
 
-# Diagrams
-rake diagrams:generate   # Generate component diagrams (SVG, DOT, TXT)
-rake diagrams:clean      # Clean generated diagrams
-
-# All outputs
-rake generate_all        # Generate all outputs
-rake clean_all           # Clean all generated files
+# Web simulator
+bundle exec rake web:build             # Build WASM artifacts
+bundle exec rake web:generate          # Generate web fixtures/artifacts
+bundle exec rake web:start             # Start local web server
 ```
 
 ## Component Library

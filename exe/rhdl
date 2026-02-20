@@ -314,15 +314,19 @@ def show_examples_help
 
     Run example emulators.
 
-    Subcommands:
-      mos6502       MOS 6502 ISA emulator (fast, behavioral simulation)
-      apple2        Apple II HDL emulator (cycle-accurate, supports netlist mode)
+      Subcommands:
+        mos6502       MOS 6502 ISA emulator (fast, behavioral simulation)
+        apple2        Apple II HDL emulator (cycle-accurate, supports netlist mode)
+        gameboy       Game Boy HDL emulator (cycle-accurate with terminal renderers)
+        riscv         RISC-V ISA emulator (with xv6 and interactive debugger support)
 
-    Examples:
-      rhdl examples mos6502 --demo
-      rhdl examples mos6502 --appleiigo --disk game.dsk
-      rhdl examples apple2 --demo
-      rhdl examples apple2 --mode netlist --sim jit --demo
+      Examples:
+        rhdl examples mos6502 --demo
+        rhdl examples mos6502 --appleiigo --disk game.dsk
+        rhdl examples apple2 --demo
+        rhdl examples apple2 --mode netlist --sim jit --demo
+        rhdl examples gameboy --demo
+        rhdl examples riscv --xv6
 
     Run 'rhdl examples <subcommand> --help' for more information.
   HELP
@@ -509,6 +513,16 @@ def handle_examples_apple2(args)
   RHDL::CLI::Tasks::Apple2Task.new(options).run
 end
 
+def handle_examples_riscv(args)
+  script = File.expand_path('../examples/riscv/bin/riscv', __dir__)
+  exec(script, *args)
+end
+
+def handle_examples_gameboy(args)
+  script = File.expand_path('../examples/gameboy/bin/gameboy', __dir__)
+  exec(script, *args)
+end
+
 def handle_examples(args)
   subcommand = args.shift
 
@@ -517,6 +531,10 @@ def handle_examples(args)
     handle_examples_mos6502(args)
   when 'apple2'
     handle_examples_apple2(args)
+  when 'gameboy'
+    handle_examples_gameboy(args)
+  when 'riscv'
+    handle_examples_riscv(args)
   when '-h', '--help', 'help', nil
     show_examples_help
     exit 0

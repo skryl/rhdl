@@ -53,7 +53,8 @@ SPEC_PATHS = {
   lib: 'spec/rhdl/',
   hdl: 'spec/rhdl/hdl/',
   mos6502: 'spec/examples/mos6502/',
-  apple2: 'spec/examples/apple2/'
+  apple2: 'spec/examples/apple2/',
+  riscv: 'spec/examples/riscv/'
 }.freeze
 
 # RSpec tasks
@@ -61,31 +62,50 @@ begin
   require "rspec/core/rake_task"
 
   RSpec::Core::RakeTask.new(:spec) do |t|
+    t.rspec_path = 'bin/rspec'
+    t.pattern = "#{SPEC_PATHS[:all]}**/*_spec.rb"
+    t.ruby_opts = '-W0'
     t.rspec_opts = "--format progress"
   end
 
   namespace :spec do
     desc "Run lib/rhdl specs"
     RSpec::Core::RakeTask.new(:lib) do |t|
+      t.rspec_path = 'bin/rspec'
       t.pattern = "#{SPEC_PATHS[:lib]}**/*_spec.rb"
+      t.ruby_opts = '-W0'
       t.rspec_opts = "--format progress"
     end
 
     desc "Run HDL component specs"
     RSpec::Core::RakeTask.new(:hdl) do |t|
+      t.rspec_path = 'bin/rspec'
       t.pattern = "#{SPEC_PATHS[:hdl]}**/*_spec.rb"
+      t.ruby_opts = '-W0'
       t.rspec_opts = "--format progress"
     end
 
     desc "Run MOS 6502 specs"
     RSpec::Core::RakeTask.new(:mos6502) do |t|
+      t.rspec_path = 'bin/rspec'
       t.pattern = "#{SPEC_PATHS[:mos6502]}**/*_spec.rb"
+      t.ruby_opts = '-W0'
       t.rspec_opts = "--format progress"
     end
 
     desc "Run Apple II specs"
     RSpec::Core::RakeTask.new(:apple2) do |t|
+      t.rspec_path = 'bin/rspec'
       t.pattern = "#{SPEC_PATHS[:apple2]}**/*_spec.rb"
+      t.ruby_opts = '-W0'
+      t.rspec_opts = "--format progress"
+    end
+
+    desc "Run RISC-V specs"
+    RSpec::Core::RakeTask.new(:riscv) do |t|
+      t.rspec_path = 'bin/rspec'
+      t.pattern = "#{SPEC_PATHS[:riscv]}**/*_spec.rb"
+      t.ruby_opts = '-W0'
       t.rspec_opts = "--format progress"
     end
 
@@ -140,6 +160,16 @@ begin
           pattern: SPEC_PATHS[:apple2]
         ).run
       end
+
+      desc "Benchmark RISC-V specs"
+      task :riscv, [:count] => 'setup:binstubs' do |_, args|
+        load_cli_tasks
+        RHDL::CLI::Tasks::BenchmarkTask.new(
+          type: :tests,
+          count: args[:count]&.to_i || 20,
+          pattern: SPEC_PATHS[:riscv]
+        ).run
+      end
     end
 
     desc "Benchmark all specs (alias for spec:bench:all)"
@@ -171,6 +201,11 @@ rescue LoadError
     desc "Run Apple II specs"
     task :apple2 do
       sh "ruby -Ilib -S rspec #{SPEC_PATHS[:apple2]} --format progress"
+    end
+
+    desc "Run RISC-V specs"
+    task :riscv do
+      sh "ruby -Ilib -S rspec #{SPEC_PATHS[:riscv]} --format progress"
     end
   end
 end
@@ -220,6 +255,11 @@ begin
     desc "Run Apple II specs in parallel"
     task :apple2 do
       sh "#{parallel_rspec_cmd} #{SPEC_PATHS[:apple2]}"
+    end
+
+    desc "Run RISC-V specs in parallel"
+    task :riscv do
+      sh "#{parallel_rspec_cmd} #{SPEC_PATHS[:riscv]}"
     end
 
     desc "Run tests with specific number of processes"

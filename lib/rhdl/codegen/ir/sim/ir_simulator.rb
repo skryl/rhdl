@@ -574,6 +574,7 @@ module RHDL
           if @fallback
             return @sim.runner_set_reset_vector(vector) if @sim.respond_to?(:runner_set_reset_vector)
           end
+          return false unless @fn_runner_control
 
           @fn_runner_control.call(@ctx, RUNNER_CONTROL_SET_RESET_VECTOR, vector, 0) != 0
         end
