@@ -62,8 +62,8 @@ module RHDL
 
       # Handle an error during task execution
       def handle_error(error)
-        warn "ERROR: #{error.message}"
-        warn error.backtrace.first(5).join("\n") if options[:debug]
+        $stderr.puts("ERROR: #{error.message}")
+        $stderr.puts(error.backtrace.first(5).join("\n")) if options[:debug]
       end
 
       # Check if a system command is available

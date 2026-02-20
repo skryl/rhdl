@@ -1,0 +1,42 @@
+# frozen_string_literal: true
+
+require 'spec_helper'
+require 'open3'
+require 'rbconfig'
+
+RSpec.describe 'rhdl examples command' do
+  let(:project_root) { File.expand_path('../../..', __dir__) }
+  let(:cli_path) { File.join(project_root, 'exe/rhdl') }
+
+  def run_cli(*args)
+    Open3.capture3(RbConfig.ruby, '-Ilib', cli_path, *args, chdir: project_root)
+  end
+
+  it 'shows riscv in examples help' do
+    stdout, stderr, status = run_cli('examples', '--help')
+
+    expect(status.success?).to be true
+    expect(stderr).not_to include('Unknown examples subcommand')
+    expect(stdout).to include('Subcommands:')
+    expect(stdout).to include('gameboy')
+    expect(stdout).to include('riscv')
+  end
+
+  it 'dispatches examples gameboy to the gameboy runner' do
+    stdout, stderr, status = run_cli('examples', 'gameboy', '--help')
+
+    expect(status.success?).to be true
+    expect(stderr).not_to include('Unknown examples subcommand')
+    expect(stdout).to include('Game Boy HDL Terminal Emulator')
+    expect(stdout).not_to include('Unknown examples subcommand')
+  end
+
+  it 'dispatches examples riscv to the riscv runner' do
+    stdout, stderr, status = run_cli('examples', 'riscv', '--help')
+
+    expect(status.success?).to be true
+    expect(stderr).not_to include('Unknown examples subcommand')
+    expect(stdout).to include('RISC-V Core Runner')
+    expect(stdout).not_to include('Unknown examples subcommand')
+  end
+end
