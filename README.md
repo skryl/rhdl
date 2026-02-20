@@ -1,3 +1,5 @@
+[![Build and Test](https://github.com/skryl/rhdl/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/skryl/rhdl/actions/workflows/tests.yml)
+
 ```
     ____  __  ______  __
    / __ \/ / / / __ \/ /
