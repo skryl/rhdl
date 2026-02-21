@@ -9,191 +9,297 @@ $LOAD_PATH.unshift File.expand_path('../utilities', __dir__)
 require 'rhdl'
 require_relative '../utilities/tasks/run_task'
 
-def parse_u32(value)
-  Integer(value, 0) & 0xFFFF_FFFF
-rescue ArgumentError
-  raise OptionParser::InvalidArgument, value
-end
+module RHDL
+  module Examples
+    module RISCV
+      module CLI
+        module_function
 
-options = {
-  speed: nil, # nil means auto-detect based on mode/backend
-  mode: :ir, # Default to IR mode for RISC-V
-  sim: nil, # ruby, interpret, jit, compile
-  io: :mmap, # mmap (text buffer) or uart
-  xv6: false,
-  debug: false,
-  headless: false
-}
+        def parse_u32(value)
+          Integer(value, 0) & 0xFFFF_FFFF
+        rescue ArgumentError
+          raise OptionParser::InvalidArgument, value
+        end
 
-parser = OptionParser.new do |opts|
-  opts.banner = "Usage: bin/riscv [options] [program.bin]"
-  opts.separator ""
-  opts.separator "RISC-V Core Runner"
-  opts.separator ""
+        def default_options
+          {
+            speed: nil, # nil means auto-detect based on mode/backend
+            mode: :ir, # default mode for RISC-V
+            sim: nil, # ruby, interpret, jit, compile
+            io: :mmap, # mmap (text buffer) or uart
+            xv6: false,
+            linux: false,
+            debug: false,
+            headless: false,
+            help: false
+          }
+        end
 
-  opts.on("-m", "--mode TYPE", [:ruby, :ir, :netlist, :verilog], "Simulation mode: ir (default), ruby, netlist, verilog") do |v|
-    options[:mode] = v
-  end
+        def build_parser(options, out:)
+          OptionParser.new do |opts|
+            opts.banner = "Usage: bin/riscv [options] [program.bin]"
+            opts.separator ""
+            opts.separator "RISC-V Core Runner"
+            opts.separator ""
 
-  opts.on("--sim TYPE", [:ruby, :interpret, :jit, :compile], "Simulator backend: compile (default for ir), ruby, interpret, jit") do |v|
-    options[:sim] = v
-  end
+            opts.on("-m", "--mode TYPE", %i[ruby ir netlist verilog], "Simulation mode: ir (default), ruby, netlist, verilog") do |v|
+              options[:mode] = v
+            end
 
-  opts.on("-s", "--speed CYCLES", Integer, "Cycles per frame/chunk (auto when omitted)") do |v|
-    options[:speed] = v
-  end
+            opts.on("--sim TYPE", %i[ruby interpret jit compile], "Simulator backend: compile (default for ir), ruby, interpret, jit") do |v|
+              options[:sim] = v
+            end
 
-  opts.on("-d", "--debug", "Show live CPU debug info while running") do
-    options[:debug] = true
-  end
+            opts.on("-s", "--speed CYCLES", Integer, "Cycles per frame/chunk (auto when omitted)") do |v|
+              options[:speed] = v
+            end
 
-  opts.on("--io TYPE", [:mmap, :uart], "I/O mode: mmap (default), uart") do |v|
-    options[:io] = v
-  end
+            opts.on("-d", "--debug", "Show live CPU debug info while running") do
+              options[:debug] = true
+            end
 
-  opts.on("--xv6", "Load xv6 kernel + fs image (forces --io uart)") do
-    options[:xv6] = true
-  end
+            opts.on("--io TYPE", %i[mmap uart], "I/O mode: mmap (default), uart") do |v|
+              options[:io] = v
+            end
 
-  opts.on("--kernel FILE", "xv6 kernel binary path (default: software/bin/kernel.bin)") do |v|
-    options[:kernel] = v
-  end
+            opts.on("--xv6", "Load xv6 kernel + fs image (forces --io uart)") do
+              options[:xv6] = true
+            end
 
-  opts.on("--fs FILE", "xv6 filesystem image path (default: software/bin/fs.img)") do |v|
-    options[:fs] = v
-  end
+            opts.on("--linux", "Load Linux kernel image (forces --io uart)") do
+              options[:linux] = true
+            end
 
-  opts.on("-a", "--address ADDR", "Program load address (hex/dec, default: 0)") do |v|
-    options[:load_addr] = parse_u32(v)
-  end
+            opts.on("--kernel FILE", "Kernel binary path (xv6 default: software/bin/kernel.bin, linux default: software/bin/linux_kernel.bin)") do |v|
+              options[:kernel] = v
+            end
 
-  opts.on("--pc ADDR", "Initial PC (hex/dec)") do |v|
-    options[:pc] = parse_u32(v)
-  end
+            opts.on("--fs FILE", "xv6 filesystem image path (default: software/bin/fs.img)") do |v|
+              options[:fs] = v
+            end
 
-  opts.on("--mmap-start ADDR", "MMAP text start address (hex/dec, default: 0)") do |v|
-    options[:mmap_start] = parse_u32(v)
-  end
+            opts.on("--initramfs FILE", "Linux initramfs path (default: software/bin/linux_initramfs.cpio)") do |v|
+              options[:initramfs] = v
+            end
 
-  opts.on("--mmap-width N", Integer, "MMAP text width (default: 80)") do |v|
-    options[:mmap_width] = v
-  end
+            opts.on("--dtb FILE", "Linux device tree blob path (default: software/bin/rhdl_riscv_virt.dtb)") do |v|
+              options[:dtb] = v
+            end
 
-  opts.on("--mmap-height N", Integer, "MMAP text height (default: 24)") do |v|
-    options[:mmap_height] = v
-  end
+            opts.on("--kernel-addr ADDR", "Linux kernel load address (hex/dec, default: 0x80200000)") do |v|
+              options[:kernel_addr] = parse_u32(v)
+            end
 
-  opts.on("--mmap-stride N", Integer, "MMAP text row stride (default: 80)") do |v|
-    options[:mmap_stride] = v
-  end
+            opts.on("--initramfs-addr ADDR", "Linux initramfs load address (hex/dec, default: 0x84000000)") do |v|
+              options[:initramfs_addr] = parse_u32(v)
+            end
 
-  opts.on("--headless", "Run once without interactive terminal loop") do
-    options[:headless] = true
-  end
+            opts.on("--dtb-addr ADDR", "Linux DTB load address (hex/dec, default: 0x87f00000)") do |v|
+              options[:dtb_addr] = parse_u32(v)
+            end
 
-  opts.on("--cycles N", Integer, "Headless cycle count (defaults to --speed)") do |v|
-    options[:cycles] = v
-  end
+            opts.on("-a", "--address ADDR", "Program load address (hex/dec, default: 0)") do |v|
+              options[:load_addr] = parse_u32(v)
+            end
 
-  opts.on("-h", "--help", "Show help") do
-    puts opts
-    exit
-  end
-end
+            opts.on("--pc ADDR", "Initial PC (hex/dec)") do |v|
+              options[:pc] = parse_u32(v)
+            end
 
-begin
-  parser.parse!(ARGV)
-rescue OptionParser::ParseError => e
-  puts "Error: #{e.message}"
-  puts parser
-  exit 1
-end
+            opts.on("--mmap-start ADDR", "MMAP text start address (hex/dec, default: 0)") do |v|
+              options[:mmap_start] = parse_u32(v)
+            end
 
-if options[:xv6]
-  if options[:io] != :uart
-    puts "Info: forcing --io uart for xv6 mode."
-  end
-  options[:io] = :uart
-end
+            opts.on("--mmap-width N", Integer, "MMAP text width (default: 80)") do |v|
+              options[:mmap_width] = v
+            end
 
-# Default backend by selected mode when --sim is not provided.
-if options[:sim].nil?
-  options[:sim] = case options[:mode]
-                  when :ruby then :ruby
-                  when :ir, :netlist then :compile
-                  when :verilog then :ruby
-                  else :ruby
-                  end
-end
+            opts.on("--mmap-height N", Integer, "MMAP text height (default: 24)") do |v|
+              options[:mmap_height] = v
+            end
 
-# Auto-adjust speed based on mode/backend if user didn't set --speed.
-if options[:speed].nil?
-  options[:speed] = case options[:mode]
-                    when :ruby
-                      1_000
-                    when :ir
-                      case options[:sim]
-                      when :compile, :jit then 100_000
-                      when :interpret then 10_000
-                      else 10_000
-                      end
-                    when :netlist
-                      case options[:sim]
-                      when :compile, :jit then 10_000
-                      when :interpret then 1_000
-                      else 1_000
-                      end
-                    when :verilog
-                      100_000
-                    else
-                      1_000
-                    end
-end
+            opts.on("--mmap-stride N", Integer, "MMAP text row stride (default: 80)") do |v|
+              options[:mmap_stride] = v
+            end
 
-begin
-  runner = RHDL::Examples::RISCV::Tasks::RunTask.new(options)
+            opts.on("--headless", "Run once without interactive terminal loop") do
+              options[:headless] = true
+            end
 
-  if options[:xv6]
-    kernel = options[:kernel] || runner.software_path('bin/kernel.bin')
-    fs = options[:fs] || runner.software_path('bin/fs.img')
+            opts.on("--cycles N", Integer, "Headless cycle count (defaults to --speed)") do |v|
+              options[:cycles] = v
+            end
 
-    unless File.file?(kernel)
-      puts "Error: xv6 kernel not found: #{kernel}"
-      puts "Hint: run ./examples/riscv/software/build_xv6.sh"
-      exit 1
+            opts.on("-h", "--help", "Show help") do
+              out.puts opts
+              options[:help] = true
+            end
+          end
+        end
+
+        def ensure_file(path, label, out:, hint: nil)
+          return true if File.file?(path)
+
+          out.puts "Error: #{label} not found: #{path}"
+          out.puts "Hint: #{hint}" if hint
+          false
+        end
+
+        def apply_mode_defaults(options, out:)
+          if options[:xv6] && options[:linux]
+            out.puts 'Error: --xv6 and --linux cannot be used together.'
+            return false
+          end
+
+          if options[:xv6]
+            if options[:io] != :uart
+              out.puts 'Info: forcing --io uart for xv6 mode.'
+            end
+            options[:io] = :uart
+          elsif options[:linux]
+            if options[:io] != :uart
+              out.puts 'Info: forcing --io uart for linux mode.'
+            end
+            options[:io] = :uart
+          end
+
+          true
+        end
+
+        def apply_backend_defaults(options)
+          return unless options[:sim].nil?
+
+          options[:sim] = case options[:mode]
+                          when :ruby then :ruby
+                          when :ir, :netlist then :compile
+                          when :verilog then :ruby
+                          else :ruby
+                          end
+        end
+
+        def apply_speed_defaults(options)
+          return unless options[:speed].nil?
+
+          options[:speed] = case options[:mode]
+                            when :ruby
+                              1_000
+                            when :ir
+                              case options[:sim]
+                              when :compile, :jit then 100_000
+                              when :interpret then 10_000
+                              else 10_000
+                              end
+                            when :netlist
+                              case options[:sim]
+                              when :compile, :jit then 10_000
+                              when :interpret then 1_000
+                              else 1_000
+                              end
+                            when :verilog
+                              100_000
+                            else
+                              1_000
+                            end
+        end
+
+        def run(argv = ARGV, out: $stdout, task_class: RHDL::Examples::RISCV::Tasks::RunTask)
+          args = argv.dup
+          options = default_options
+          parser = build_parser(options, out: out)
+
+          begin
+            parser.parse!(args)
+          rescue OptionParser::ParseError => e
+            out.puts "Error: #{e.message}"
+            out.puts parser
+            return 1
+          end
+
+          return 0 if options[:help]
+          return 1 unless apply_mode_defaults(options, out: out)
+
+          apply_backend_defaults(options)
+          apply_speed_defaults(options)
+
+          begin
+            runner = task_class.new(options)
+
+            if options[:xv6]
+              kernel = options[:kernel] || runner.software_path('bin/kernel.bin')
+              fs = options[:fs] || runner.software_path('bin/fs.img')
+
+              return 1 unless ensure_file(kernel, 'xv6 kernel', out: out, hint: 'run ./examples/riscv/software/build_xv6.sh')
+              return 1 unless ensure_file(fs, 'xv6 fs image', out: out, hint: 'run ./examples/riscv/software/build_xv6.sh')
+
+              runner.load_xv6(kernel: kernel, fs: fs, pc: options[:pc] || 0x8000_0000)
+            elsif options[:linux]
+              kernel = options[:kernel] || runner.software_path('bin/linux_kernel.bin')
+              initramfs = options[:initramfs] || runner.software_path('bin/linux_initramfs.cpio')
+              dtb = options[:dtb] || runner.software_path('bin/rhdl_riscv_virt.dtb')
+
+              return 1 unless ensure_file(
+                kernel,
+                'Linux kernel',
+                out: out,
+                hint: 'run ./examples/riscv/build_linux.sh to generate default artifacts, or pass --kernel with a Linux kernel image path.'
+              )
+
+              return 1 unless ensure_file(
+                initramfs,
+                'Linux initramfs',
+                out: out,
+                hint: 'pass --initramfs with a cpio archive path, or place the default at examples/riscv/software/bin/linux_initramfs.cpio.'
+              )
+
+              return 1 unless ensure_file(
+                dtb,
+                'Linux DTB',
+                out: out,
+                hint: 'run ./examples/riscv/build_linux.sh to generate the default DTB, or pass --dtb with a flattened device tree blob path.'
+              )
+
+              linux_options = {
+                kernel: kernel,
+                initramfs: initramfs,
+                dtb: dtb
+              }
+              linux_options[:kernel_addr] = options[:kernel_addr] unless options[:kernel_addr].nil?
+              linux_options[:initramfs_addr] = options[:initramfs_addr] unless options[:initramfs_addr].nil?
+              linux_options[:dtb_addr] = options[:dtb_addr] unless options[:dtb_addr].nil?
+              linux_options[:pc] = options[:pc] unless options[:pc].nil?
+              runner.load_linux(**linux_options)
+            else
+              program_file = args.shift
+              unless program_file
+                out.puts parser
+                out.puts ''
+                out.puts 'Error: No program specified. Pass a binary file, --xv6, or --linux.'
+                return 1
+              end
+
+              unless File.file?(program_file)
+                out.puts "Error: Program file not found: #{program_file}"
+                return 1
+              end
+
+              load_addr = options[:load_addr] || 0x0
+              runner.load_program(program_file, base_addr: load_addr)
+              runner.set_pc(options[:pc]) if options[:pc]
+            end
+
+            runner.run
+            0
+          rescue Interrupt
+            out.puts "\nInterrupted."
+            0
+          rescue StandardError => e
+            out.puts "Error: #{e.message}"
+            1
+          end
+        end
+      end
     end
-
-    unless File.file?(fs)
-      puts "Error: xv6 fs image not found: #{fs}"
-      puts "Hint: run ./examples/riscv/software/build_xv6.sh"
-      exit 1
-    end
-
-    runner.load_xv6(kernel: kernel, fs: fs, pc: options[:pc] || 0x8000_0000)
-  else
-    program_file = ARGV.shift
-    unless program_file
-      puts parser
-      puts ""
-      puts "Error: No program specified. Pass a binary file or use --xv6."
-      exit 1
-    end
-
-    unless File.file?(program_file)
-      puts "Error: Program file not found: #{program_file}"
-      exit 1
-    end
-
-    load_addr = options[:load_addr] || 0x0
-    runner.load_program(program_file, base_addr: load_addr)
-    runner.set_pc(options[:pc]) if options[:pc]
   end
-
-  runner.run
-rescue Interrupt
-  puts "\nInterrupted."
-  exit 0
-rescue StandardError => e
-  puts "Error: #{e.message}"
-  exit 1
 end
+
+exit(RHDL::Examples::RISCV::CLI.run(ARGV)) if __FILE__ == $PROGRAM_NAME

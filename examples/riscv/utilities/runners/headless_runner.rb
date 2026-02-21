@@ -9,6 +9,11 @@ module RHDL
       # Provides the same core lifecycle APIs as interactive tasks but without terminal UI.
       class HeadlessRunner
         XV6_RESET_PC = 0x8000_0000
+        LINUX_KERNEL_LOAD_ADDR = 0x8020_0000
+        LINUX_INITRAMFS_LOAD_ADDR = 0x8400_0000
+        LINUX_DTB_LOAD_ADDR = 0x87F0_0000
+        LINUX_BOOTSTRAP_OFFSET = 0x1000
+        LINUX_BOOT_HART_ID = 0
 
         attr_reader :cpu, :mode, :sim_backend, :effective_mode
 
@@ -97,6 +102,57 @@ module RHDL
           set_pc(pc)
         end
 
+        def load_linux(
+          kernel:,
+          initramfs: nil,
+          dtb: nil,
+          kernel_addr: LINUX_KERNEL_LOAD_ADDR,
+          initramfs_addr: LINUX_INITRAMFS_LOAD_ADDR,
+          dtb_addr: LINUX_DTB_LOAD_ADDR,
+          pc: nil
+        )
+          unless native? && @cpu.sim.runner_kind == :riscv
+            raise 'Linux mode requires native RISC-V IR runner support (build native backends first).'
+          end
+
+          if kernel.nil? || kernel.empty?
+            raise 'Linux kernel path is required.'
+          end
+
+          unless File.file?(kernel)
+            raise "Linux kernel not found: #{kernel}"
+          end
+
+          if initramfs && !File.file?(initramfs)
+            raise "Linux initramfs not found: #{initramfs}"
+          end
+
+          if dtb && !File.file?(dtb)
+            raise "Linux DTB not found: #{dtb}"
+          end
+
+          kernel_bytes = File.binread(kernel)
+          initramfs_bytes = initramfs ? File.binread(initramfs) : nil
+          dtb_bytes = dtb ? File.binread(dtb) : nil
+          kernel_base = kernel_addr.to_i & 0xFFFF_FFFF
+          entry_pc = (pc.nil? ? kernel_base : pc.to_i) & 0xFFFF_FFFF
+          dtb_pointer = dtb_bytes ? (dtb_addr.to_i & 0xFFFF_FFFF) : 0
+          bootstrap_addr = linux_bootstrap_addr(kernel_base)
+          bootstrap_bytes = build_linux_bootstrap_program(
+            hart_id: LINUX_BOOT_HART_ID,
+            dtb_pointer: dtb_pointer,
+            entry_pc: entry_pc
+          )
+
+          reset
+          @cpu.clear_uart_tx_bytes
+          load_instruction_bytes(kernel_bytes, kernel_base)
+          load_data_bytes(initramfs_bytes, initramfs_addr.to_i) if initramfs_bytes
+          load_data_bytes(dtb_bytes, dtb_addr.to_i) if dtb_bytes
+          load_instruction_bytes(bootstrap_bytes, bootstrap_addr)
+          set_pc(bootstrap_addr)
+        end
+
         private
 
         def normalize_mode(mode)
@@ -162,6 +218,16 @@ module RHDL
           end
         end
 
+        def load_data_bytes(bytes, base_addr)
+          payload = bytes.is_a?(String) ? bytes : bytes.pack('C*')
+          if native? && @cpu.sim.respond_to?(:runner_write_memory)
+            @cpu.sim.runner_write_memory(base_addr.to_i, payload, mapped: false)
+          else
+            words = bytes_to_words(payload)
+            @cpu.load_data(words, base_addr)
+          end
+        end
+
         def patch_phystop_for_fast_boot!(bytes)
           return 0 if bytes.nil? || bytes.bytesize < 4
 
@@ -195,6 +261,58 @@ module RHDL
               ((b2 & 0xFF) << 16) |
               ((b3 & 0xFF) << 24)
           end
+        end
+
+        def linux_bootstrap_addr(kernel_addr)
+          value = kernel_addr.to_i
+          if value < LINUX_BOOTSTRAP_OFFSET
+            raise ArgumentError, format(
+              'Linux kernel address 0x%08x is too low for bootstrap trampoline placement.',
+              value & 0xFFFF_FFFF
+            )
+          end
+
+          (value - LINUX_BOOTSTRAP_OFFSET) & 0xFFFF_FFFF
+        end
+
+        def build_linux_bootstrap_program(hart_id:, dtb_pointer:, entry_pc:)
+          words = []
+          words.concat(load_immediate_words(rd: 10, value: hart_id))
+          words.concat(load_immediate_words(rd: 11, value: dtb_pointer))
+          words.concat(load_immediate_words(rd: 5, value: entry_pc))
+          words << jalr_word(rd: 0, rs1: 5, imm: 0)
+          words.pack('V*')
+        end
+
+        def load_immediate_words(rd:, value:)
+          value_u32 = value.to_i & 0xFFFF_FFFF
+          hi20 = ((value_u32 + 0x800) >> 12) & 0xFFFFF
+          base = (hi20 << 12) & 0xFFFF_FFFF
+          lo12 = (value_u32 - base) & 0xFFF
+          lo12 -= 0x1000 if lo12 >= 0x800
+
+          [
+            lui_word(rd: rd, imm20: hi20),
+            addi_word(rd: rd, rs1: rd, imm: lo12)
+          ]
+        end
+
+        def lui_word(rd:, imm20:)
+          (((imm20 & 0xFFFFF) << 12) | ((rd & 0x1F) << 7) | 0x37) & 0xFFFF_FFFF
+        end
+
+        def addi_word(rd:, rs1:, imm:)
+          (((imm.to_i & 0xFFF) << 20) |
+            ((rs1 & 0x1F) << 15) |
+            ((rd & 0x1F) << 7) |
+            0x13) & 0xFFFF_FFFF
+        end
+
+        def jalr_word(rd:, rs1:, imm:)
+          (((imm.to_i & 0xFFF) << 20) |
+            ((rs1 & 0x1F) << 15) |
+            ((rd & 0x1F) << 7) |
+            0x67) & 0xFFFF_FFFF
         end
       end
     end

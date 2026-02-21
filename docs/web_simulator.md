@@ -113,6 +113,7 @@ Current generated runner order:
 - `mos6502`
 - `apple2`
 - `gameboy`
+- `riscv`
 
 Current defaults:
 
@@ -129,10 +130,18 @@ Current generated list includes:
 - `examples/mos6502/config.json`
 - `examples/apple2/config.json`
 - `examples/gameboy/config.json`
+- `examples/riscv/config.json`
 
 RISC-V web preset status:
 
-- RISC-V is not currently included in `RUNNER_CONFIG_PATHS`, so `web:generate` does not emit a RISC-V preset into `generated_presets.mjs` in this checkout.
+- Included by default in `RUNNER_CONFIG_PATHS` and exported as `riscv`.
+- Mapped to UART I/O (`mode: uart`) with:
+  - `./assets/fixtures/riscv/software/bin/kernel.bin`
+  - `./assets/fixtures/riscv/software/bin/fs.img`
+  - `./assets/pkg/ir_compiler_riscv.wasm`
+  - custom xv6 kernel/disk binaries can be swapped in through runner controls, but the defaults above are the shipped preloads
+- Note: the checked-in generated preset in this checkout currently uses `fastBoot: aggressive`; regenerate assets from `examples/riscv/config.json` if you need alignment with source config defaults.
+- If `riscv` assets are not generated, preset selection still appears but default boot will skip/fail the required loads.
 
 ## Deploy To GitHub Pages
 

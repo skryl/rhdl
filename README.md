@@ -43,7 +43,7 @@ Demo: [Web Simulator](https://skryl.github.io/rhdl)
 | [MOS 6502](docs/mos6502_cpu.md) | MOS 6502 CPU implementation |
 | [Apple II](docs/apple2.md) | Apple II emulation |
 | [Game Boy](docs/gameboy.md) | Game Boy (DMG/GBC/SGB) emulation |
-| [RISC-V + XV6](docs/riscv.md) | RISC-V RV32I CPU implementation, xv6 OS build + boot |
+| [RISC-V + Linux/xv6](docs/riscv.md) | RISC-V RV32I CPU implementation with Linux and xv6 build/boot workflows |
 | [Web Simulator](docs/web_simulator.md) | Browser simulator (WASM + VCD + Apple II runner) |
 
 ## Web Simulator
@@ -425,12 +425,36 @@ rhdl examples riscv --mode ir --sim compile --io mmap path/to/program.bin
 rhdl examples riscv -d --io uart path/to/program.bin
 
 # Launch xv6 (forces UART mode automatically)
-./examples/riscv/software/build_xv6.sh
+./examples/riscv/build_xv6.sh
 rhdl examples riscv --xv6 -d
+
+# Build Linux kernel artifacts (Phase 0 source workflow)
+git submodule update --init --recursive examples/riscv/software/linux
+./examples/riscv/build_linux.sh
+
+# Run Linux via the top-level CLI (forces UART mode automatically)
+rhdl examples riscv --linux
+
+# Optional Linux artifact overrides (initramfs + custom DTB)
+rhdl examples riscv --linux \
+  --initramfs path/to/initramfs.cpio \
+  --dtb path/to/riscv.dtb
 
 # Headless run for CI/smoke tests
 rhdl examples riscv --headless --cycles 200000 path/to/program.bin
 ```
+
+Linux milestones are covered in `spec/examples/riscv/linux_boot_milestones_spec.rb`.
+Additional Linux compatibility specs live under `spec/examples/riscv/linux_*_spec.rb`.
+
+`examples/riscv/build_linux.sh` defaults to `rv32_nommu_virt_defconfig` and applies an aggressive
+RV32 minimum-size profile for this core. Use `--no-min-profile` if you want raw defconfig behavior.
+It also generates `examples/riscv/software/bin/linux_initramfs.cpio` and embeds it in the kernel.
+The generated default initramfs is a minimal boot shim, not a full interactive userspace.
+`rhdl examples riscv --linux` defaults to loading:
+- `examples/riscv/software/bin/linux_kernel.bin`
+- `examples/riscv/software/bin/linux_initramfs.cpio`
+- `examples/riscv/software/bin/rhdl_riscv_virt.dtb`
 
 See each example's documentation for complete details on architecture, instruction sets, and CLI options.
 

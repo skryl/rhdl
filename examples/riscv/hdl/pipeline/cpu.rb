@@ -14,8 +14,12 @@ require_relative '../constants'
 require_relative '../alu'
 require_relative '../decoder'
 require_relative '../imm_gen'
+require_relative '../compressed_decoder'
 require_relative '../program_counter'
 require_relative '../register_file'
+require_relative '../fp_register_file'
+require_relative '../vector_register_file'
+require_relative '../vector_csr_file'
 require_relative '../csr_file'
 require_relative '../atomic_reservation'
 require_relative '../priv_mode_reg'
@@ -79,6 +83,9 @@ module RHDL
       wire :current_pc, width: 32
       wire :next_pc, width: 32
       wire :pc_we
+      wire :if_inst_decoded, width: 32
+      wire :if_inst_pc_step, width: 32
+      wire :if_id_inst_in, width: 32
 
       # ========================================
       # Internal signals - IF/ID Register outputs
@@ -109,6 +116,8 @@ module RHDL
       wire :id_imm, width: 32
       wire :id_rs1_data, width: 32
       wire :id_rs2_data, width: 32
+      wire :id_fp_rs1_data, width: 32
+      wire :id_fp_rs2_data, width: 32
       wire :regfile_forwarding_en
 
       # ========================================
@@ -168,6 +177,29 @@ module RHDL
       wire :ex_jump
       wire :ex_jalr
       wire :ex_inst_page_fault
+      wire :ex_v_rs1_lane0, width: 32
+      wire :ex_v_rs1_lane1, width: 32
+      wire :ex_v_rs1_lane2, width: 32
+      wire :ex_v_rs1_lane3, width: 32
+      wire :ex_v_rs2_lane0, width: 32
+      wire :ex_v_rs2_lane1, width: 32
+      wire :ex_v_rs2_lane2, width: 32
+      wire :ex_v_rs2_lane3, width: 32
+      wire :ex_v_rd_lane0, width: 32
+      wire :ex_v_rd_lane1, width: 32
+      wire :ex_v_rd_lane2, width: 32
+      wire :ex_v_rd_lane3, width: 32
+      wire :ex_v_rd_lane0_in, width: 32
+      wire :ex_v_rd_lane1_in, width: 32
+      wire :ex_v_rd_lane2_in, width: 32
+      wire :ex_v_rd_lane3_in, width: 32
+      wire :ex_v_rd_we
+      wire :vec_vl, width: 32
+      wire :vec_vtype, width: 32
+      wire :vec_vl_write_data, width: 32
+      wire :vec_vtype_write_data, width: 32
+      wire :vec_vl_write_we
+      wire :vec_vtype_write_we
 
       # ========================================
       # Internal signals - EX Stage (Execute)
@@ -321,6 +353,8 @@ module RHDL
       # Internal signals - WB Stage
       # ========================================
       wire :wb_data, width: 32
+      wire :fp_rd_data, width: 32
+      wire :fp_reg_write
 
       # ========================================
       # Sub-component instances
@@ -336,9 +370,13 @@ module RHDL
       instance :mem_wb, MEM_WB_Reg
 
       # Combinational components (depend on pipeline register outputs)
+      instance :c_decoder, CompressedDecoder
       instance :decoder, Decoder
       instance :imm_gen, ImmGen
       instance :regfile, RegisterFile, forwarding: true
+      instance :fp_regfile, FPRegisterFile
+      instance :vregfile, VectorRegisterFile
+      instance :vec_csrfile, VectorCSRFile
       instance :csrfile, CSRFile
       instance :reservation, AtomicReservation
       instance :priv_mode_reg, PrivModeReg
@@ -353,10 +391,12 @@ module RHDL
       # ========================================
       # Clock and reset connections
       # ========================================
-      port :clk => [[:pc_reg, :clk], [:regfile, :clk], [:csrfile, :clk], [:if_id, :clk],
+      port :clk => [[:pc_reg, :clk], [:regfile, :clk], [:fp_regfile, :clk], [:vregfile, :clk], [:vec_csrfile, :clk],
+                    [:csrfile, :clk], [:if_id, :clk],
                     [:id_ex, :clk], [:ex_mem, :clk], [:mem_wb, :clk], [:reservation, :clk], [:priv_mode_reg, :clk],
                     [:itlb, :clk], [:dtlb, :clk]]
-      port :rst => [[:pc_reg, :rst], [:regfile, :rst], [:csrfile, :rst], [:if_id, :rst],
+      port :rst => [[:pc_reg, :rst], [:regfile, :rst], [:fp_regfile, :rst], [:vregfile, :rst], [:vec_csrfile, :rst],
+                    [:csrfile, :rst], [:if_id, :rst],
                     [:id_ex, :rst], [:ex_mem, :rst], [:mem_wb, :rst], [:reservation, :rst], [:priv_mode_reg, :rst],
                     [:itlb, :rst], [:dtlb, :rst]]
 
@@ -373,7 +413,7 @@ module RHDL
       port :stall => [:if_id, :stall]
       port :flush_if_id => [:if_id, :flush]
       port :current_pc => [:if_id, :pc_in]
-      port :inst_data => [:if_id, :inst_in]
+      port :if_id_inst_in => [:if_id, :inst_in]
       # pc_plus4_in is set via behavior block through if_id_pc_plus4_in wire
       wire :if_id_pc_plus4_in, width: 32
       wire :if_id_inst_page_fault_in
@@ -383,6 +423,13 @@ module RHDL
       port [:if_id, :inst_out] => :id_inst
       port [:if_id, :pc_plus4_out] => :id_pc_plus4
       port [:if_id, :inst_page_fault_out] => :id_inst_page_fault
+
+      # ========================================
+      # Compressed decoder connections (IF-stage predecode)
+      # ========================================
+      port :inst_data => [:c_decoder, :inst_word]
+      port [:c_decoder, :inst_out] => :if_inst_decoded
+      port [:c_decoder, :pc_step] => :if_inst_pc_step
 
       # ========================================
       # Decoder connections
@@ -427,6 +474,52 @@ module RHDL
       port [:regfile, :debug_x10] => :debug_x10
       port [:regfile, :debug_x11] => :debug_x11
       port [:regfile, :debug_rdata] => :debug_reg_data
+
+      # ========================================
+      # FP register file connections
+      # ========================================
+      port :id_rs1_addr => [:fp_regfile, :rs1_addr]
+      port :id_rs2_addr => [:fp_regfile, :rs2_addr]
+      port :mem_rd_addr => [:fp_regfile, :rd_addr]
+      port :fp_rd_data => [:fp_regfile, :rd_data]
+      port :fp_reg_write => [:fp_regfile, :rd_we]
+      port [:fp_regfile, :rs1_data] => :id_fp_rs1_data
+      port [:fp_regfile, :rs2_data] => :id_fp_rs2_data
+
+      # ========================================
+      # Vector register file connections
+      # ========================================
+      port :ex_rs1_addr => [:vregfile, :rs1_addr]
+      port :ex_rs2_addr => [:vregfile, :rs2_addr]
+      port :ex_rd_addr => [:vregfile, :rd_addr_read]
+      port :ex_rd_addr => [:vregfile, :rd_addr]
+      port :ex_v_rd_lane0_in => [:vregfile, :rd_lane0_in]
+      port :ex_v_rd_lane1_in => [:vregfile, :rd_lane1_in]
+      port :ex_v_rd_lane2_in => [:vregfile, :rd_lane2_in]
+      port :ex_v_rd_lane3_in => [:vregfile, :rd_lane3_in]
+      port :ex_v_rd_we => [:vregfile, :rd_we]
+      port [:vregfile, :rs1_lane0] => :ex_v_rs1_lane0
+      port [:vregfile, :rs1_lane1] => :ex_v_rs1_lane1
+      port [:vregfile, :rs1_lane2] => :ex_v_rs1_lane2
+      port [:vregfile, :rs1_lane3] => :ex_v_rs1_lane3
+      port [:vregfile, :rs2_lane0] => :ex_v_rs2_lane0
+      port [:vregfile, :rs2_lane1] => :ex_v_rs2_lane1
+      port [:vregfile, :rs2_lane2] => :ex_v_rs2_lane2
+      port [:vregfile, :rs2_lane3] => :ex_v_rs2_lane3
+      port [:vregfile, :rd_lane0] => :ex_v_rd_lane0
+      port [:vregfile, :rd_lane1] => :ex_v_rd_lane1
+      port [:vregfile, :rd_lane2] => :ex_v_rd_lane2
+      port [:vregfile, :rd_lane3] => :ex_v_rd_lane3
+
+      # ========================================
+      # Vector control CSR state
+      # ========================================
+      port :vec_vl_write_data => [:vec_csrfile, :vl_write_data]
+      port :vec_vl_write_we => [:vec_csrfile, :vl_write_we]
+      port :vec_vtype_write_data => [:vec_csrfile, :vtype_write_data]
+      port :vec_vtype_write_we => [:vec_csrfile, :vtype_write_we]
+      port [:vec_csrfile, :vl] => :vec_vl
+      port [:vec_csrfile, :vtype] => :vec_vtype
 
       # ========================================
       # CSR file connections
@@ -663,7 +756,8 @@ module RHDL
         # IF Stage: PC calculation and IF/ID inputs
         # -----------------------------------------
         regfile_forwarding_en <= lit(1, width: 1)
-        pc_plus4_if = local(:pc_plus4_if, current_pc + lit(4, width: 32), width: 32)
+        pc_plus4_if = local(:pc_plus4_if, current_pc + if_inst_pc_step, width: 32)
+        if_id_inst_in <= if_inst_decoded
         if_id_pc_plus4_in <= pc_plus4_if
 
         # Sv32 instruction translation for IF fetch address.
@@ -738,10 +832,19 @@ module RHDL
         # ID/EX Register inputs (latch wires)
         # These values are captured BEFORE sequential propagation
         # -----------------------------------------
+        id_is_fp_store = local(:id_is_fp_store,
+                               (id_opcode == lit(Opcode::STORE_FP, width: 7)) & (id_funct3 == lit(Funct3::WORD, width: 3)),
+                               width: 1)
+        id_is_fmv_x_w = local(:id_is_fmv_x_w,
+                              (id_opcode == lit(Opcode::OP_FP, width: 7)) &
+                              (id_funct7 == lit(0b1110000, width: 7)) &
+                              (id_funct3 == lit(0, width: 3)) &
+                              (id_rs2_addr == lit(0, width: 5)),
+                              width: 1)
         id_ex_pc_in <= id_pc
         id_ex_pc_plus4_in <= id_pc_plus4
-        id_ex_rs1_data_in <= id_rs1_data
-        id_ex_rs2_data_in <= id_rs2_data
+        id_ex_rs1_data_in <= mux(id_is_fmv_x_w, id_fp_rs1_data, id_rs1_data)
+        id_ex_rs2_data_in <= mux(id_is_fp_store, id_fp_rs2_data, id_rs2_data)
         id_ex_imm_in <= id_imm
         id_ex_rs1_addr_in <= id_rs1_addr
         id_ex_rs2_addr_in <= id_rs2_addr
@@ -763,21 +866,125 @@ module RHDL
         # -----------------------------------------
         # EX Stage: Forwarding muxes
         # -----------------------------------------
+        ex_is_fp_store = local(:ex_is_fp_store,
+                               (ex_opcode == lit(Opcode::STORE_FP, width: 7)) & (ex_funct3 == lit(Funct3::WORD, width: 3)),
+                               width: 1)
+        ex_is_fmv_x_w = local(:ex_is_fmv_x_w,
+                              (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                              (ex_funct7 == lit(0b1110000, width: 7)) &
+                              (ex_funct3 == lit(0, width: 3)) &
+                              (ex_rs2_addr == lit(0, width: 5)),
+                              width: 1)
+        ex_is_fmv_w_x = local(:ex_is_fmv_w_x,
+                              (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                              (ex_funct7 == lit(0b1111000, width: 7)) &
+                              (ex_funct3 == lit(0, width: 3)) &
+                              (ex_rs2_addr == lit(0, width: 5)),
+                              width: 1)
+        ex_v_funct6 = ex_funct7[6..1]
+        ex_v_vm = ex_funct7[0]
+        ex_is_vsetvli = local(:ex_is_vsetvli,
+                              (ex_opcode == lit(Opcode::OP_V, width: 7)) &
+                              (ex_funct3 == lit(0b111, width: 3)) &
+                              (ex_funct7[6] == lit(0, width: 1)),
+                              width: 1)
+        ex_is_vadd_vv = local(:ex_is_vadd_vv,
+                              (ex_opcode == lit(Opcode::OP_V, width: 7)) &
+                              (ex_funct3 == lit(0b000, width: 3)) &
+                              (ex_v_funct6 == lit(0b000000, width: 6)) &
+                              ex_v_vm,
+                              width: 1)
+        ex_is_vadd_vx = local(:ex_is_vadd_vx,
+                              (ex_opcode == lit(Opcode::OP_V, width: 7)) &
+                              (ex_funct3 == lit(0b100, width: 3)) &
+                              (ex_v_funct6 == lit(0b000000, width: 6)) &
+                              ex_v_vm,
+                              width: 1)
+        ex_is_vmv_v_x = local(:ex_is_vmv_v_x,
+                              (ex_opcode == lit(Opcode::OP_V, width: 7)) &
+                              (ex_funct3 == lit(0b100, width: 3)) &
+                              (ex_v_funct6 == lit(0b010111, width: 6)) &
+                              ex_v_vm &
+                              (ex_rs2_addr == lit(0, width: 5)),
+                              width: 1)
+        ex_is_vmv_x_s = local(:ex_is_vmv_x_s,
+                              (ex_opcode == lit(Opcode::OP_V, width: 7)) &
+                              (ex_funct3 == lit(0b010, width: 3)) &
+                              (ex_v_funct6 == lit(0b010000, width: 6)) &
+                              ex_v_vm &
+                              (ex_rs1_addr == lit(0, width: 5)),
+                              width: 1)
+        ex_is_vmv_s_x = local(:ex_is_vmv_s_x,
+                              (ex_opcode == lit(Opcode::OP_V, width: 7)) &
+                              (ex_funct3 == lit(0b110, width: 3)) &
+                              (ex_v_funct6 == lit(0b010000, width: 6)) &
+                              ex_v_vm &
+                              (ex_rs2_addr == lit(0, width: 5)),
+                              width: 1)
+        ex_vsetvli_avl = local(:ex_vsetvli_avl,
+                               mux(ex_rs1_addr == lit(0, width: 5), lit(4, width: 32), forwarded_rs1),
+                               width: 32)
+        ex_vsetvli_new_vl = local(:ex_vsetvli_new_vl,
+                                  mux(ex_vsetvli_avl > lit(4, width: 32), lit(4, width: 32), ex_vsetvli_avl),
+                                  width: 32)
+        ex_vsetvli_new_vtype = local(:ex_vsetvli_new_vtype,
+                                     cat(lit(0, width: 21), ex_funct7[5..0], ex_rs2_addr),
+                                     width: 32)
+
         # Forward A (rs1) - priority: EX/MEM > MEM/WB > register file
-        forwarded_rs1 <= mux(forward_a == lit(ForwardSel::EX_MEM, width: 2), mem_alu_result,
-                          mux(forward_a == lit(ForwardSel::MEM_WB, width: 2), wb_data,
-                            ex_rs1_data))
+        forwarded_rs1 <= mux(ex_is_fmv_x_w, ex_rs1_data,
+                             mux(forward_a == lit(ForwardSel::EX_MEM, width: 2), mem_alu_result,
+                                 mux(forward_a == lit(ForwardSel::MEM_WB, width: 2), wb_data,
+                                     ex_rs1_data)))
 
         # AUIPC uses PC as ALU A operand (not rs1)
         alu_a <= mux(ex_opcode == lit(Opcode::AUIPC, width: 7), ex_pc, forwarded_rs1)
 
         # Forward B (rs2) for store and branch comparison
-        forwarded_rs2 <= mux(forward_b == lit(ForwardSel::EX_MEM, width: 2), mem_alu_result,
-                          mux(forward_b == lit(ForwardSel::MEM_WB, width: 2), wb_data,
-                            ex_rs2_data))
+        forwarded_rs2 <= mux(ex_is_fp_store, ex_rs2_data,
+                             mux(forward_b == lit(ForwardSel::EX_MEM, width: 2), mem_alu_result,
+                                 mux(forward_b == lit(ForwardSel::MEM_WB, width: 2), wb_data,
+                                     ex_rs2_data)))
 
         # ALU B input: immediate or forwarded rs2
         alu_b <= mux(ex_alu_src, ex_imm, forwarded_rs2)
+
+        ex_v_lane0_active = local(:ex_v_lane0_active, vec_vl > lit(0, width: 32), width: 1)
+        ex_v_lane1_active = local(:ex_v_lane1_active, vec_vl > lit(1, width: 32), width: 1)
+        ex_v_lane2_active = local(:ex_v_lane2_active, vec_vl > lit(2, width: 32), width: 1)
+        ex_v_lane3_active = local(:ex_v_lane3_active, vec_vl > lit(3, width: 32), width: 1)
+        ex_v_lane0_vadd_vv = local(:ex_v_lane0_vadd_vv, ex_v_rs2_lane0 + ex_v_rs1_lane0, width: 32)
+        ex_v_lane1_vadd_vv = local(:ex_v_lane1_vadd_vv, ex_v_rs2_lane1 + ex_v_rs1_lane1, width: 32)
+        ex_v_lane2_vadd_vv = local(:ex_v_lane2_vadd_vv, ex_v_rs2_lane2 + ex_v_rs1_lane2, width: 32)
+        ex_v_lane3_vadd_vv = local(:ex_v_lane3_vadd_vv, ex_v_rs2_lane3 + ex_v_rs1_lane3, width: 32)
+        ex_v_lane0_vadd_vx = local(:ex_v_lane0_vadd_vx, ex_v_rs2_lane0 + forwarded_rs1, width: 32)
+        ex_v_lane1_vadd_vx = local(:ex_v_lane1_vadd_vx, ex_v_rs2_lane1 + forwarded_rs1, width: 32)
+        ex_v_lane2_vadd_vx = local(:ex_v_lane2_vadd_vx, ex_v_rs2_lane2 + forwarded_rs1, width: 32)
+        ex_v_lane3_vadd_vx = local(:ex_v_lane3_vadd_vx, ex_v_rs2_lane3 + forwarded_rs1, width: 32)
+        ex_v_all_lane_write = local(:ex_v_all_lane_write, ex_is_vmv_v_x | ex_is_vadd_vv | ex_is_vadd_vx, width: 1)
+        ex_v_lane0_all_next = local(:ex_v_lane0_all_next,
+                                    mux(ex_is_vmv_v_x, forwarded_rs1,
+                                        mux(ex_is_vadd_vv, ex_v_lane0_vadd_vv,
+                                            mux(ex_is_vadd_vx, ex_v_lane0_vadd_vx, ex_v_rd_lane0))),
+                                    width: 32)
+        ex_v_lane1_all_next = local(:ex_v_lane1_all_next,
+                                    mux(ex_is_vmv_v_x, forwarded_rs1,
+                                        mux(ex_is_vadd_vv, ex_v_lane1_vadd_vv,
+                                            mux(ex_is_vadd_vx, ex_v_lane1_vadd_vx, ex_v_rd_lane1))),
+                                    width: 32)
+        ex_v_lane2_all_next = local(:ex_v_lane2_all_next,
+                                    mux(ex_is_vmv_v_x, forwarded_rs1,
+                                        mux(ex_is_vadd_vv, ex_v_lane2_vadd_vv,
+                                            mux(ex_is_vadd_vx, ex_v_lane2_vadd_vx, ex_v_rd_lane2))),
+                                    width: 32)
+        ex_v_lane3_all_next = local(:ex_v_lane3_all_next,
+                                    mux(ex_is_vmv_v_x, forwarded_rs1,
+                                        mux(ex_is_vadd_vv, ex_v_lane3_vadd_vv,
+                                            mux(ex_is_vadd_vx, ex_v_lane3_vadd_vx, ex_v_rd_lane3))),
+                                    width: 32)
+        ex_v_scalar_result = local(:ex_v_scalar_result,
+                                   mux(ex_is_vsetvli, ex_vsetvli_new_vl, ex_v_rs2_lane0),
+                                   width: 32)
 
         # -----------------------------------------
         # EX Stage: CSR and SYSTEM (trap/return) path
@@ -1090,7 +1297,9 @@ module RHDL
                                    mux(ex_is_mret, ex_mret_target_mode, ex_sret_target_mode),
                                    width: 2)
         ex_trap_or_ret = local(:ex_trap_or_ret, ex_trap_taken | ex_is_mret | ex_is_sret, width: 1)
-        ex_reg_write_effective = local(:ex_reg_write_effective, (ex_reg_write | ex_is_amo) & ~ex_trap_taken, width: 1)
+        ex_reg_write_effective = local(:ex_reg_write_effective,
+                                       (ex_reg_write | ex_is_amo | ex_is_vsetvli | ex_is_vmv_x_s) & ~ex_trap_taken,
+                                       width: 1)
         ex_mem_read_effective = local(:ex_mem_read_effective, (ex_mem_read | ex_is_lr | ex_is_amo_rmw) & ~ex_trap_taken, width: 1)
         ex_mem_write_effective = local(:ex_mem_write_effective, ex_mem_write & ~ex_trap_taken, width: 1)
 
@@ -1105,8 +1314,10 @@ module RHDL
         csr_read_addr7 <= lit(0x303, width: 12) # mideleg
         csr_read_addr8 <= lit(0x180, width: 12) # satp
         ex_csr_read_selected = local(:ex_csr_read_selected,
-                                     mux(csr_read_addr == lit(0x344, width: 12), ex_irq_pending_bits,
-                                         mux(csr_read_addr == lit(0x144, width: 12), ex_irq_pending_bits & csr_read_data7, csr_read_data)),
+                                     mux(csr_read_addr == lit(0xC20, width: 12), vec_vl,
+                                         mux(csr_read_addr == lit(0xC21, width: 12), vec_vtype,
+                                             mux(csr_read_addr == lit(0x344, width: 12), ex_irq_pending_bits,
+                                                 mux(csr_read_addr == lit(0x144, width: 12), ex_irq_pending_bits & csr_read_data7, csr_read_data)))),
                                      width: 32)
         ex_csr_write_data = local(:ex_csr_write_data, case_select(ex_funct3, {
           0b001 => ex_csr_src,                  # CSRRW
@@ -1124,6 +1335,15 @@ module RHDL
           0b110 => ex_csr_rs1_nonzero, # CSRRSI (zimm != 0)
           0b111 => ex_csr_rs1_nonzero  # CSRRCI (zimm != 0)
         }, default: lit(0, width: 1)), width: 1)
+        ex_is_vl_csr_instr = local(:ex_is_vl_csr_instr,
+                                   ex_is_csr_instr & (ex_imm[11..0] == lit(0xC20, width: 12)),
+                                   width: 1)
+        ex_is_vtype_csr_instr = local(:ex_is_vtype_csr_instr,
+                                      ex_is_csr_instr & (ex_imm[11..0] == lit(0xC21, width: 12)),
+                                      width: 1)
+        ex_is_vector_csr_instr = local(:ex_is_vector_csr_instr,
+                                       ex_is_vl_csr_instr | ex_is_vtype_csr_instr,
+                                       width: 1)
         ex_satp_write = local(:ex_satp_write,
                               ex_is_csr_instr & ex_csr_write_we & (ex_imm[11..0] == lit(0x180, width: 12)),
                               width: 1)
@@ -1134,7 +1354,7 @@ module RHDL
         csr_write_data <= mux(ex_trap_taken, ex_pc,
                               mux(ex_is_mret, ex_mret_mstatus,
                                   mux(ex_is_sret, ex_sret_sstatus, ex_csr_write_data)))
-        csr_write_we <= mux(ex_trap_or_ret, lit(1, width: 1), ex_csr_write_we)
+        csr_write_we <= mux(ex_trap_or_ret, lit(1, width: 1), ex_csr_write_we & ~ex_is_vector_csr_instr)
         csr_write_addr2 <= mux(ex_trap_to_supervisor, lit(0x142, width: 12), lit(0x342, width: 12))
         csr_write_data2 <= ex_trap_cause
         csr_write_we2 <= ex_trap_taken
@@ -1144,13 +1364,25 @@ module RHDL
         csr_write_addr4 <= mux(ex_trap_to_supervisor, lit(0x143, width: 12), lit(0x343, width: 12))
         csr_write_data4 <= ex_trap_tval
         csr_write_we4 <= ex_trap_taken
+        vec_vl_write_data <= mux(ex_is_vsetvli, ex_vsetvli_new_vl, ex_csr_write_data)
+        vec_vtype_write_data <= mux(ex_is_vsetvli, ex_vsetvli_new_vtype, ex_csr_write_data)
+        vec_vl_write_we <= (ex_is_vsetvli | (ex_is_vl_csr_instr & ex_csr_write_we)) & ~ex_trap_taken
+        vec_vtype_write_we <= (ex_is_vsetvli | (ex_is_vtype_csr_instr & ex_csr_write_we)) & ~ex_trap_taken
         priv_mode_we <= ex_trap_taken | ex_is_mret | ex_is_sret
         priv_mode_next <= mux(ex_trap_taken, ex_trap_target_mode, ex_ret_target_mode)
         data_ptw_addr1 <= ex_data_ptw_addr1_calc
         data_ptw_addr0 <= ex_data_ptw_addr0_calc
+        ex_v_rd_lane0_in <= mux(ex_is_vmv_s_x, forwarded_rs1,
+                                mux(ex_v_all_lane_write & ex_v_lane0_active, ex_v_lane0_all_next, ex_v_rd_lane0))
+        ex_v_rd_lane1_in <= mux(ex_v_all_lane_write & ex_v_lane1_active, ex_v_lane1_all_next, ex_v_rd_lane1)
+        ex_v_rd_lane2_in <= mux(ex_v_all_lane_write & ex_v_lane2_active, ex_v_lane2_all_next, ex_v_rd_lane2)
+        ex_v_rd_lane3_in <= mux(ex_v_all_lane_write & ex_v_lane3_active, ex_v_lane3_all_next, ex_v_rd_lane3)
+        ex_v_rd_we <= (ex_v_all_lane_write | ex_is_vmv_s_x) & ~ex_trap_taken
         ex_result <= mux(ex_is_amo, forwarded_rs1,
+                         mux(ex_is_vsetvli | ex_is_vmv_x_s, ex_v_scalar_result,
                          mux(ex_is_csr_instr, ex_csr_read_selected,
-                             mux(ex_satp_mode_sv32 & ex_data_access_req, ex_data_paddr, alu_result)))
+                             mux(ex_is_fmv_x_w | ex_is_fmv_w_x, forwarded_rs1,
+                                 mux(ex_satp_mode_sv32 & ex_data_access_req, ex_data_paddr, alu_result)))))
 
         # -----------------------------------------
         # EX Stage: Branch condition evaluation (inline)
@@ -1238,6 +1470,15 @@ module RHDL
                                ),
                                width: 1)
         mem_is_amo = local(:mem_is_amo, mem_is_lr | mem_is_sc | mem_is_amo_rmw, width: 1)
+        mem_is_fp_load = local(:mem_is_fp_load,
+                               (mem_opcode == lit(Opcode::LOAD_FP, width: 7)) & (mem_funct3 == lit(Funct3::WORD, width: 3)),
+                               width: 1)
+        mem_is_fmv_w_x = local(:mem_is_fmv_w_x,
+                               (mem_opcode == lit(Opcode::OP_FP, width: 7)) &
+                               (mem_funct7 == lit(0b1111000, width: 7)) &
+                               (mem_funct3 == lit(0, width: 3)) &
+                               (mem_rs2_addr == lit(0, width: 5)),
+                               width: 1)
         mem_amo_active = local(:mem_amo_active, mem_is_amo & (mem_reg_write | mem_mem_read | mem_mem_write), width: 1)
         mem_amo_old = local(:mem_amo_old, data_rdata, width: 32)
         mem_amo_old_sign = mem_amo_old[31]
@@ -1275,6 +1516,8 @@ module RHDL
         reservation_set <= mem_amo_active & mem_is_lr
         reservation_clear <= (mem_amo_active & (mem_is_sc | mem_is_amo_rmw)) | mem_mem_write
         reservation_set_addr <= mem_alu_result
+        fp_rd_data <= mux(mem_is_fp_load, data_rdata, mem_alu_result)
+        fp_reg_write <= (mem_is_fp_load & mem_mem_read) | mem_is_fmv_w_x
 
         # -----------------------------------------
         # MEM/WB Register inputs (latch wires)

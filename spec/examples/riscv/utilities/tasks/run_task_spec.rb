@@ -54,6 +54,34 @@ RSpec.describe RHDL::Examples::RISCV::Tasks::RunTask do
     end
   end
 
+  describe '#load_linux' do
+    it 'delegates linux artifact loading to headless runner' do
+      task = described_class.allocate
+      runner = instance_double(RHDL::Examples::RISCV::HeadlessRunner)
+      task.instance_variable_set(:@runner, runner)
+
+      expect(runner).to receive(:load_linux).with(
+        kernel: 'kernel.bin',
+        initramfs: 'initramfs.cpio',
+        dtb: 'virt.dtb',
+        kernel_addr: 0x8020_0000,
+        initramfs_addr: 0x8400_0000,
+        dtb_addr: 0x87F0_0000,
+        pc: 0x8020_1234
+      )
+
+      task.load_linux(
+        kernel: 'kernel.bin',
+        initramfs: 'initramfs.cpio',
+        dtb: 'virt.dtb',
+        kernel_addr: 0x8020_0000,
+        initramfs_addr: 0x8400_0000,
+        dtb_addr: 0x87F0_0000,
+        pc: 0x8020_1234
+      )
+    end
+  end
+
   describe 'run options integration' do
     run_cases = [
       { mode: :ruby, sim: :ruby, io: :mmap, debug: false },
@@ -172,6 +200,20 @@ end
 RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
   let(:program_bytes) { [0x93, 0x00, 0x10, 0x00].pack('C*') } # addi x1, x0, 1
 
+  def sign_extend(value, bits)
+    masked = value & ((1 << bits) - 1)
+    sign_bit = 1 << (bits - 1)
+    (masked ^ sign_bit) - sign_bit
+  end
+
+  def decode_li_value(words, start_index)
+    lui = words.fetch(start_index)
+    addi = words.fetch(start_index + 1)
+    upper = lui & 0xFFFF_F000
+    imm = sign_extend((addi >> 20) & 0xFFF, 12)
+    (upper + imm) & 0xFFFF_FFFF
+  end
+
   describe '#initialize' do
     it 'defaults to ir mode and compile backend' do
       runner = described_class.new
@@ -269,6 +311,137 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
       expect((words[0] >> 12) & 0xFFFFF).to eq(0x80200)
       expect((words[0] >> 7) & 0x1F).to eq(rd)
       expect(words[1]).to eq(other_word)
+    end
+  end
+
+  describe '#load_linux' do
+    def with_temp_binary(bytes)
+      file = Tempfile.new(['linux_artifact', '.bin'])
+      file.binmode
+      file.write(bytes)
+      file.flush
+      yield file.path, bytes
+    ensure
+      file.close!
+    end
+
+    it 'requires native riscv runner support' do
+      with_temp_binary("KERN") do |kernel_path, _|
+        runner = described_class.allocate
+        sim = double('sim', runner_kind: :riscv)
+        cpu = double('cpu', native?: false, sim: sim)
+        runner.instance_variable_set(:@cpu, cpu)
+
+        expect do
+          runner.load_linux(kernel: kernel_path)
+        end.to raise_error(RuntimeError, /Linux mode requires native RISC-V IR runner support/)
+      end
+    end
+
+    it 'requires riscv native runner kind' do
+      with_temp_binary("KERN") do |kernel_path, _|
+        runner = described_class.allocate
+        sim = double('sim', runner_kind: :generic)
+        cpu = double('cpu', native?: true, sim: sim)
+        runner.instance_variable_set(:@cpu, cpu)
+
+        expect do
+          runner.load_linux(kernel: kernel_path)
+        end.to raise_error(RuntimeError, /Linux mode requires native RISC-V IR runner support/)
+      end
+    end
+
+    it 'loads linux artifacts to expected addresses and boots through a deterministic entry trampoline' do
+      with_temp_binary("KERN") do |kernel_path, kernel_bytes|
+        with_temp_binary("INIT") do |initramfs_path, initramfs_bytes|
+          with_temp_binary("DTB!") do |dtb_path, dtb_bytes|
+            runner = described_class.allocate
+            sim = double('sim', runner_kind: :riscv)
+            cpu = double('cpu', native?: true, sim: sim)
+            allow(cpu).to receive(:clear_uart_tx_bytes)
+            runner.instance_variable_set(:@cpu, cpu)
+            expected_bootstrap = runner.send(
+              :build_linux_bootstrap_program,
+              hart_id: 0,
+              dtb_pointer: 0x87F0_0000,
+              entry_pc: 0x8020_1234
+            )
+
+            expect(runner).to receive(:reset).ordered
+            expect(cpu).to receive(:clear_uart_tx_bytes).ordered
+            expect(runner).to receive(:load_instruction_bytes).with(kernel_bytes, 0x8020_0000).ordered
+            expect(runner).to receive(:load_data_bytes).with(initramfs_bytes, 0x8400_0000).ordered
+            expect(runner).to receive(:load_data_bytes).with(dtb_bytes, 0x87F0_0000).ordered
+            expect(runner).to receive(:load_instruction_bytes).with(expected_bootstrap, 0x801F_F000).ordered
+            expect(runner).to receive(:set_pc).with(0x801F_F000).ordered
+
+            runner.load_linux(
+              kernel: kernel_path,
+              initramfs: initramfs_path,
+              dtb: dtb_path,
+              kernel_addr: 0x8020_0000,
+              initramfs_addr: 0x8400_0000,
+              dtb_addr: 0x87F0_0000,
+              pc: 0x8020_1234
+            )
+          end
+        end
+      end
+    end
+
+    it 'uses kernel load address as trampoline jump target when pc override is omitted' do
+      with_temp_binary("KERN") do |kernel_path, kernel_bytes|
+        runner = described_class.allocate
+        sim = double('sim', runner_kind: :riscv)
+        cpu = double('cpu', native?: true, sim: sim)
+        allow(cpu).to receive(:clear_uart_tx_bytes)
+        runner.instance_variable_set(:@cpu, cpu)
+        expected_bootstrap = runner.send(
+          :build_linux_bootstrap_program,
+          hart_id: 0,
+          dtb_pointer: 0,
+          entry_pc: 0x8030_0000
+        )
+
+        expect(runner).to receive(:reset).ordered
+        expect(cpu).to receive(:clear_uart_tx_bytes).ordered
+        expect(runner).to receive(:load_instruction_bytes).with(kernel_bytes, 0x8030_0000).ordered
+        expect(runner).to receive(:load_instruction_bytes).with(expected_bootstrap, 0x802F_F000).ordered
+        expect(runner).to receive(:set_pc).with(0x802F_F000).ordered
+
+        runner.load_linux(kernel: kernel_path, kernel_addr: 0x8030_0000)
+      end
+    end
+
+    it 'encodes Linux entry contract with a0=hart id, a1=dtb pointer, then jumps to entry pc' do
+      runner = described_class.allocate
+      words = runner.send(
+        :build_linux_bootstrap_program,
+        hart_id: 0,
+        dtb_pointer: 0x87F0_0000,
+        entry_pc: 0x8020_1234
+      ).unpack('V*')
+
+      expect(words.length).to eq(7)
+      expect(decode_li_value(words, 0)).to eq(0)
+      expect(decode_li_value(words, 2)).to eq(0x87F0_0000)
+      expect(decode_li_value(words, 4)).to eq(0x8020_1234)
+      expect(words[6] & 0x7F).to eq(0x67)
+      expect((words[6] >> 7) & 0x1F).to eq(0)
+      expect((words[6] >> 15) & 0x1F).to eq(5)
+      expect(sign_extend((words[6] >> 20) & 0xFFF, 12)).to eq(0)
+    end
+
+    it 'encodes a1 as zero when dtb pointer is not provided' do
+      runner = described_class.allocate
+      words = runner.send(
+        :build_linux_bootstrap_program,
+        hart_id: 0,
+        dtb_pointer: 0,
+        entry_pc: 0x8020_0000
+      ).unpack('V*')
+
+      expect(decode_li_value(words, 2)).to eq(0)
     end
   end
 end

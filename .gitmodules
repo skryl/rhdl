@@ -7,3 +7,6 @@
 [submodule "examples/riscv/software/xv6-rv32"]
 	path = examples/riscv/software/xv6-rv32
 	url = https://github.com/michaelengel/xv6-rv32.git
+[submodule "examples/riscv/software/linux"]
+	path = examples/riscv/software/linux
+	url = https://github.com/torvalds/linux.git

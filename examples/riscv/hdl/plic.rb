@@ -18,8 +18,11 @@ module RHDL
     PRIORITY_10_ADDR = BASE_ADDR + 0x0028
     PENDING_ADDR = BASE_ADDR + 0x1000
     ENABLE_ADDR = BASE_ADDR + 0x2000
+    SENABLE_ADDR = BASE_ADDR + 0x2080
     THRESHOLD_ADDR = BASE_ADDR + 0x200000
+    STHRESHOLD_ADDR = BASE_ADDR + 0x201000
     CLAIM_COMPLETE_ADDR = BASE_ADDR + 0x200004
+    SCLAIM_COMPLETE_ADDR = BASE_ADDR + 0x201004
 
     input :clk
     input :rst
@@ -63,7 +66,9 @@ module RHDL
       source1 = in_val(:source1)
       source10 = in_val(:source10)
       claim_id = select_claim_id
-      claim_grant = mem_read == 1 && addr == CLAIM_COMPLETE_ADDR && claim_id != 0
+      claim_grant = mem_read == 1 &&
+                    (addr == CLAIM_COMPLETE_ADDR || addr == SCLAIM_COMPLETE_ADDR) &&
+                    claim_id != 0
 
       if rst == 1
         @priority1 = 0
@@ -91,19 +96,21 @@ module RHDL
             @priority1 = write_data & 0x7
           when PRIORITY_10_ADDR
             @priority10 = write_data & 0x7
-          when ENABLE_ADDR
+          when ENABLE_ADDR, SENABLE_ADDR
             @enable1 = (write_data >> 1) & 0x1
             @enable10 = (write_data >> 10) & 0x1
-          when THRESHOLD_ADDR
+          when THRESHOLD_ADDR, STHRESHOLD_ADDR
             @threshold = write_data & 0x7
-          when CLAIM_COMPLETE_ADDR
+          when CLAIM_COMPLETE_ADDR, SCLAIM_COMPLETE_ADDR
             complete_id = write_data & 0x3FF
             @in_service_id = 0 if complete_id == @in_service_id
           end
         end
 
         claim_id_rise = select_claim_id
-        if mem_read == 1 && addr == CLAIM_COMPLETE_ADDR && claim_id_rise != 0
+        if mem_read == 1 &&
+           (addr == CLAIM_COMPLETE_ADDR || addr == SCLAIM_COMPLETE_ADDR) &&
+           claim_id_rise != 0
           clear_pending!(claim_id_rise)
           @in_service_id = claim_id_rise
         end
@@ -115,9 +122,9 @@ module RHDL
         when PRIORITY_1_ADDR then @priority1
         when PRIORITY_10_ADDR then @priority10
         when PENDING_ADDR then (@pending1 << 1) | (@pending10 << 10)
-        when ENABLE_ADDR then (@enable1 << 1) | (@enable10 << 10)
-        when THRESHOLD_ADDR then @threshold
-        when CLAIM_COMPLETE_ADDR then claim_grant ? claim_id : select_claim_id
+        when ENABLE_ADDR, SENABLE_ADDR then (@enable1 << 1) | (@enable10 << 10)
+        when THRESHOLD_ADDR, STHRESHOLD_ADDR then @threshold
+        when CLAIM_COMPLETE_ADDR, SCLAIM_COMPLETE_ADDR then claim_grant ? claim_id : select_claim_id
         else 0
         end
         out_set(:read_data, read_val & 0xFFFF_FFFF)

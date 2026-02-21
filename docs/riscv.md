@@ -12,6 +12,7 @@ The RISC-V implementation includes:
 - **Assembler**: Two-pass assembler for RV32I programs
 - **Test Harnesses**: Clean testing interfaces
 - **xv6 Compatibility Coverage**: Privileged readiness checks plus UART shell boot/echo flow
+- **xv6 Execution Paths**: Terminal runner (`--xv6`), native-only readiness/shell specs, and web preset loading support
 
 ## Quick Start
 
@@ -35,31 +36,39 @@ bundle exec rspec spec/examples/riscv/xv6_shell_io_spec.rb
 The xv6 shell tests expect local artifacts under `examples/riscv/software/bin/`.
 
 ```bash
-./examples/riscv/software/build_xv6.sh
+./examples/riscv/build_xv6.sh
 ```
 
-### Terminal CLI (RISC-V and xv6)
+### Terminal CLI (RISC-V, xv6, and Linux)
 
-Use the RISC-V runner from the repo root:
+Use the RISC-V runner from the repo root. `rhdl examples riscv` and `examples/riscv/bin/riscv` expose the same flags:
 
 ```bash
 # Run a regular RISC-V binary
-examples/riscv/bin/riscv path/to/program.bin
+rhdl examples riscv path/to/program.bin
 
 # Explicit mode/backend and MMAP terminal output
-examples/riscv/bin/riscv --mode ir --sim compile --io mmap path/to/program.bin
+rhdl examples riscv --mode ir --sim compile --io mmap path/to/program.bin
 
 # UART mode with live debug panel (ESC toggles command mode)
-examples/riscv/bin/riscv --io uart -d path/to/program.bin
+rhdl examples riscv --io uart -d path/to/program.bin
 
 # Run xv6 (forces --io uart automatically)
-examples/riscv/bin/riscv --xv6 -d
+rhdl examples riscv --xv6 -d
 
 # Override xv6 artifact locations
-examples/riscv/bin/riscv --xv6 --kernel examples/riscv/software/bin/kernel.bin --fs examples/riscv/software/bin/fs.img
+rhdl examples riscv --xv6 --kernel examples/riscv/software/bin/kernel.bin --fs examples/riscv/software/bin/fs.img
+
+# Run Linux (forces --io uart automatically)
+rhdl examples riscv --linux
+
+# Optional Linux artifact overrides (initramfs + custom DTB)
+rhdl examples riscv --linux \
+  --initramfs path/to/initramfs.cpio \
+  --dtb path/to/riscv.dtb
 
 # Headless run (single execution chunk)
-examples/riscv/bin/riscv --xv6 --headless --cycles 1000000
+rhdl examples riscv --xv6 --headless --cycles 1000000
 ```
 
 ### Using the CPU
@@ -89,7 +98,7 @@ This section covers how xv6 is wired into the RHDL RISC-V flow: source layout, l
 
 - Active xv6 source tree: `examples/riscv/software/xv6`
 - Legacy compatibility tree: `examples/riscv/software/xv6-rv32`
-- Build helper: `examples/riscv/software/build_xv6.sh`
+- Build helper: `examples/riscv/build_xv6.sh`
 - Local generated artifacts: `examples/riscv/software/bin/`
 
 `build_xv6.sh` prefers `examples/riscv/software/xv6` and falls back to `examples/riscv/software/xv6-rv32` if needed.
@@ -97,7 +106,7 @@ This section covers how xv6 is wired into the RHDL RISC-V flow: source layout, l
 ### Build xv6 Artifacts
 
 ```bash
-./examples/riscv/software/build_xv6.sh
+./examples/riscv/build_xv6.sh
 ```
 
 This generates local (ignored) artifacts in `examples/riscv/software/bin/`, including:
@@ -163,8 +172,35 @@ Current auto-generated web runner presets are derived from:
 - `examples/mos6502/config.json`
 - `examples/apple2/config.json`
 - `examples/gameboy/config.json`
+- `examples/riscv/config.json`
 
-RISC-V is not yet included in the generated web runner preset list by default (`lib/rhdl/cli/tasks/web_generate_task.rb`, `RUNNER_CONFIG_PATHS`), so there is currently no shipped RISC-V web preset in `web/app/components/runner/config/generated_presets.mjs`.
+RISC-V is included in the generated preset list by default (`lib/rhdl/cli/tasks/web_generate_task.rb`, `RUNNER_CONFIG_PATHS`) and appears as `riscv` in `web/app/components/runner/config/generated_presets.mjs`.
+
+Notes:
+
+- The RISC-V web preset expects:
+  - `./assets/fixtures/riscv/software/bin/kernel.bin`
+  - `./assets/fixtures/riscv/software/bin/fs.img`
+  - `./assets/pkg/ir_compiler_riscv.wasm`
+  and will run in UART display/keyboard mode with reset-at-PC `0x80000000`.
+- `web:generate` copies these xv6 assets only when present locally, so first-time runs can skip binary load without error but without the xv6 image available in browser.
+- If `xv6` preset settings change in `examples/riscv/config.json`, rerun `bundle exec rake web:generate` to refresh `generated_presets.mjs`.
+- The checked-in generated preset in this checkout currently sets `fastBoot: aggressive`, while `examples/riscv/config.json` uses `fastBoot: "moderate"`; regenerate fixtures to keep presets consistent with source config intent.
+
+### xv6 Functionality Review (Current)
+
+- `examples/riscv/bin/riscv --xv6`:
+  - always forces `--io uart`
+  - validates artifact presence (`kernel.bin`, `fs.img`) and then calls `RunTask#load_xv6`
+  - delegates runtime behavior to `HeadlessRunner#load_xv6`
+- `HeadlessRunner#load_xv6` (shared terminal runner path) requires native RV32 runner (`native? && runner_kind == :riscv`) and patches `PHYSTOP` by replacing `LUI` imm20 `0x88000` → `0x80200`.
+- `xv6_boot_tracer` mirrors the same constraints and fast-boot patching strategy, then runs continuous tracing with optional stage/MMIO/call-trace probes.
+- `spec/examples/riscv/xv6_readiness_spec.rb` currently validates privileged behavior only via IR harness + JIT backend (`allow_fallback: false`), while `xv6_shell_io_spec.rb` validates terminal boot+echo across JIT and compiler.
+- Web path currently supports a RISC-V preset, but xv6-specific web acceptance coverage is still limited; no dedicated xv6 browser regression exists yet.
+- Improvement opportunities:
+  - add focused xv6 CLI/runner tests for `--xv6` missing-native and bad-path error behavior
+  - add a web integration test for the generated RISC-V preset booting through default UART path when artifacts are present
+  - consider making fast-boot patching mode explicit in terminal xv6 runner for parity with web `fastBoot` options
 
 ### Artifact Hygiene
 
@@ -173,8 +209,79 @@ RISC-V is not yet included in the generated web runner preset list by default (`
 If specs skip because artifacts are missing, regenerate with:
 
 ```bash
-./examples/riscv/software/build_xv6.sh
+./examples/riscv/build_xv6.sh
 ```
+
+## Linux Source + Patch Workflow (Phase 0)
+
+Linux source is tracked as a submodule at `examples/riscv/software/linux`.
+Local Linux source changes should be captured as ordered patch files in `examples/riscv/software/linux_patches/`.
+
+### Initialize Linux Source
+
+```bash
+git submodule update --init --recursive examples/riscv/software/linux
+```
+
+### Build Linux Kernel Artifacts
+
+```bash
+./examples/riscv/build_linux.sh
+```
+
+Optional flags:
+
+- `--no-clean` skips source/build cleanup.
+- `--defconfig <target>` overrides the default `rv32_nommu_virt_defconfig`.
+- `--no-min-profile` skips the aggressive RV32 minimum-size boot profile.
+- `--toolprefix <prefix>` overrides toolchain auto-detection.
+
+`build_linux.sh` applies patches from `linux_patches` in deterministic filename order and writes:
+
+- `examples/riscv/software/bin/linux_kernel.bin`
+- `examples/riscv/software/bin/linux_kernel.elf`
+- `examples/riscv/software/bin/linux_kernel.map`
+- `examples/riscv/software/bin/linux_kernel.config`
+- `examples/riscv/software/bin/linux_initramfs.cpio`
+
+By default, `build_linux.sh` also applies an aggressive RV32 minimum-size profile tuned for this core
+(RV32IMA-focused ISA + stripped subsystems) to keep `linux_kernel.bin` small while preserving UART
+boot milestones.
+It also generates a default NOMMU-compatible initramfs artifact and embeds it into the kernel via
+`CONFIG_INITRAMFS_SOURCE`.
+The default initramfs contains a minimal `/init` boot shim (for boot continuity), not a full shell userspace.
+
+### Linux Runner Artifact Expectations
+
+`rhdl examples riscv --linux` defaults to:
+
+- `--kernel examples/riscv/software/bin/linux_kernel.bin`
+- `--initramfs examples/riscv/software/bin/linux_initramfs.cpio`
+- `--dtb examples/riscv/software/bin/rhdl_riscv_virt.dtb`
+
+`examples/riscv/build_linux.sh` writes the default kernel artifact, so after building you can run:
+
+```bash
+rhdl examples riscv --linux
+```
+
+Optional Linux artifacts:
+
+- `--kernel <path>`: override kernel image path.
+- `--initramfs <path>`: override initramfs cpio archive path.
+- `--dtb <path>`: override flattened device tree blob path.
+
+### Linux Milestone Specs
+
+Linux milestone and compatibility specs live under `spec/examples/riscv/`:
+
+- `linux_boot_milestones_spec.rb` (Linux banner and early-boot UART milestones)
+- `linux_privilege_boot_spec.rb` (privileged boot compatibility)
+- `linux_csr_mmio_compat_spec.rb` (CSR/MMIO compatibility)
+- `linux_mmio_interrupt_spec.rb` (MMIO + interrupt integration)
+- `utilities/tasks/riscv_cli_linux_spec.rb` and `utilities/tasks/run_task_spec.rb` (CLI/loader contract)
+
+By default, Linux compatibility specs exercise JIT and interpreter backends. Set `RHDL_LINUX_INCLUDE_COMPILER=1` to include compiler backend coverage.
 
 ## Architecture: Single-Cycle CPU
 
@@ -610,9 +717,12 @@ examples/riscv/
 +-- utilities/
 |   +-- assembler.rb            # RV32I assembler
 |   +-- xv6_boot_tracer.rb      # xv6 boot tracer (UART/stage/MMIO)
++-- build_xv6.sh                # Local xv6 artifact builder
++-- build_linux.sh              # Local Linux kernel artifact builder
 +-- software/
 |   +-- xv6/                    # Tracked xv6 source tree
-|   +-- build_xv6.sh            # Local xv6 artifact builder
+|   +-- linux/                  # Linux kernel upstream submodule
+|   +-- linux_patches/          # Ordered local Linux patch series
 ```
 
 ## Performance Comparison

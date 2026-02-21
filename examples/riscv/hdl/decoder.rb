@@ -52,6 +52,11 @@ module RHDL
       rs2_field = inst[24..20]
       # CSR instructions are SYSTEM opcode with non-zero funct3
       is_csr = (op == lit(Opcode::SYSTEM, width: 7)) & (f3 != lit(0, width: 3))
+      is_fp_mem_word = f3 == lit(Funct3::WORD, width: 3)
+      is_fmv_x_w = (op == lit(Opcode::OP_FP, width: 7)) &
+                   (f7 == lit(0b1110000, width: 7)) &
+                   (rs2_field == lit(0, width: 5)) &
+                   (f3 == lit(0, width: 3))
       is_amo_word = (op == lit(Opcode::AMO, width: 7)) & (f3 == lit(Funct3::WORD, width: 3))
       amo_funct5 = f7[6..2]
       is_lr = is_amo_word & (amo_funct5 == lit(0b00010, width: 5)) & (rs2_field == lit(0, width: 5))
@@ -69,19 +74,22 @@ module RHDL
         Opcode::LOAD   => lit(1, width: 1),
         Opcode::OP_IMM => lit(1, width: 1),
         Opcode::OP     => lit(1, width: 1),
+        Opcode::OP_FP  => is_fmv_x_w,
         Opcode::AMO    => is_amo_word,
         Opcode::SYSTEM => is_csr
       }, default: lit(0, width: 1))
 
       # mem_read: Only for LOAD instructions
       mem_read <= case_select(op, {
-        Opcode::LOAD => lit(1, width: 1),
+        Opcode::LOAD    => lit(1, width: 1),
+        Opcode::LOAD_FP => is_fp_mem_word,
         Opcode::AMO  => is_amo_word & ~is_sc
       }, default: lit(0, width: 1))
 
       # mem_write: Only for STORE instructions
       mem_write <= case_select(op, {
-        Opcode::STORE => lit(1, width: 1),
+        Opcode::STORE    => lit(1, width: 1),
+        Opcode::STORE_FP => is_fp_mem_word,
         Opcode::AMO   => is_amo_rmw
       }, default: lit(0, width: 1))
 
@@ -163,7 +171,9 @@ module RHDL
         Opcode::JALR   => lit(AluOp::ADD, width: 5),     # rs1 + immediate
         Opcode::BRANCH => lit(AluOp::SUB, width: 5),     # Compare via subtraction
         Opcode::LOAD   => lit(AluOp::ADD, width: 5),     # rs1 + offset
-        Opcode::STORE  => lit(AluOp::ADD, width: 5)      # rs1 + offset
+        Opcode::STORE  => lit(AluOp::ADD, width: 5),     # rs1 + offset
+        Opcode::LOAD_FP  => lit(AluOp::ADD, width: 5),   # rs1 + offset
+        Opcode::STORE_FP => lit(AluOp::ADD, width: 5)    # rs1 + offset
       }, default: lit(AluOp::ADD, width: 5))
 
       # Instruction type for debugging
@@ -171,8 +181,11 @@ module RHDL
         Opcode::OP     => lit(InstType::R_TYPE, width: 3),
         Opcode::OP_IMM => lit(InstType::I_TYPE, width: 3),
         Opcode::LOAD   => lit(InstType::I_TYPE, width: 3),
+        Opcode::LOAD_FP => lit(InstType::I_TYPE, width: 3),
         Opcode::JALR   => lit(InstType::I_TYPE, width: 3),
         Opcode::STORE  => lit(InstType::S_TYPE, width: 3),
+        Opcode::STORE_FP => lit(InstType::S_TYPE, width: 3),
+        Opcode::OP_FP  => lit(InstType::R_TYPE, width: 3),
         Opcode::BRANCH => lit(InstType::B_TYPE, width: 3),
         Opcode::LUI    => lit(InstType::U_TYPE, width: 3),
         Opcode::AUIPC  => lit(InstType::U_TYPE, width: 3),

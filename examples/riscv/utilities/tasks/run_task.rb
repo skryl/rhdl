@@ -99,6 +99,26 @@ module RHDL
             @runner.load_xv6(kernel: kernel, fs: fs, pc: pc)
           end
 
+          def load_linux(
+            kernel:,
+            initramfs: nil,
+            dtb: nil,
+            kernel_addr: HeadlessRunner::LINUX_KERNEL_LOAD_ADDR,
+            initramfs_addr: HeadlessRunner::LINUX_INITRAMFS_LOAD_ADDR,
+            dtb_addr: HeadlessRunner::LINUX_DTB_LOAD_ADDR,
+            pc: nil
+          )
+            @runner.load_linux(
+              kernel: kernel,
+              initramfs: initramfs,
+              dtb: dtb,
+              kernel_addr: kernel_addr,
+              initramfs_addr: initramfs_addr,
+              dtb_addr: dtb_addr,
+              pc: pc
+            )
+          end
+
           def set_pc(value)
             @runner.set_pc(value)
           end
