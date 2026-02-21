@@ -11,6 +11,16 @@ module RHDL
   module Examples
     module RISCV
       class CSRFile < RHDL::HDL::SequentialComponent
+    MISA_VALUE = 0x4034_1121 # RV32 + A + F + I + M + S + U + V
+
+    READ_ONLY_COMPAT_CSRS = {
+      0x301 => MISA_VALUE, # misa
+      0xF11 => 0,          # mvendorid
+      0xF12 => 0,          # marchid
+      0xF13 => 0,          # mimpid
+      0xF14 => 0           # mhartid
+    }.freeze
+
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
     include RHDL::DSL::Memory
@@ -63,19 +73,96 @@ module RHDL
     sync_write :csrs, clock: :clk, enable: :csr_write_en4, addr: :write_addr4, data: :write_data4
 
     behavior do
-      csr_write_en1 <= write_we & ~rst
-      csr_write_en2 <= write_we2 & ~rst
-      csr_write_en3 <= write_we3 & ~rst
-      csr_write_en4 <= write_we4 & ~rst
+      writable1 = local(:writable1,
+                        (write_addr != lit(0x301, width: 12)) &
+                        (write_addr != lit(0xF11, width: 12)) &
+                        (write_addr != lit(0xF12, width: 12)) &
+                        (write_addr != lit(0xF13, width: 12)) &
+                        (write_addr != lit(0xF14, width: 12)),
+                        width: 1)
+      writable2 = local(:writable2,
+                        (write_addr2 != lit(0x301, width: 12)) &
+                        (write_addr2 != lit(0xF11, width: 12)) &
+                        (write_addr2 != lit(0xF12, width: 12)) &
+                        (write_addr2 != lit(0xF13, width: 12)) &
+                        (write_addr2 != lit(0xF14, width: 12)),
+                        width: 1)
+      writable3 = local(:writable3,
+                        (write_addr3 != lit(0x301, width: 12)) &
+                        (write_addr3 != lit(0xF11, width: 12)) &
+                        (write_addr3 != lit(0xF12, width: 12)) &
+                        (write_addr3 != lit(0xF13, width: 12)) &
+                        (write_addr3 != lit(0xF14, width: 12)),
+                        width: 1)
+      writable4 = local(:writable4,
+                        (write_addr4 != lit(0x301, width: 12)) &
+                        (write_addr4 != lit(0xF11, width: 12)) &
+                        (write_addr4 != lit(0xF12, width: 12)) &
+                        (write_addr4 != lit(0xF13, width: 12)) &
+                        (write_addr4 != lit(0xF14, width: 12)),
+                        width: 1)
 
-      read_data <= mem_read_expr(:csrs, read_addr, width: 32)
-      read_data2 <= mem_read_expr(:csrs, read_addr2, width: 32)
-      read_data3 <= mem_read_expr(:csrs, read_addr3, width: 32)
-      read_data4 <= mem_read_expr(:csrs, read_addr4, width: 32)
-      read_data5 <= mem_read_expr(:csrs, read_addr5, width: 32)
-      read_data6 <= mem_read_expr(:csrs, read_addr6, width: 32)
-      read_data7 <= mem_read_expr(:csrs, read_addr7, width: 32)
-      read_data8 <= mem_read_expr(:csrs, read_addr8, width: 32)
+      csr_write_en1 <= write_we & ~rst & writable1
+      csr_write_en2 <= write_we2 & ~rst & writable2
+      csr_write_en3 <= write_we3 & ~rst & writable3
+      csr_write_en4 <= write_we4 & ~rst & writable4
+
+      read_data <= case_select(read_addr, {
+        0x301 => lit(MISA_VALUE, width: 32),
+        0xF11 => lit(0, width: 32),
+        0xF12 => lit(0, width: 32),
+        0xF13 => lit(0, width: 32),
+        0xF14 => lit(0, width: 32)
+      }, default: mem_read_expr(:csrs, read_addr, width: 32))
+      read_data2 <= case_select(read_addr2, {
+        0x301 => lit(MISA_VALUE, width: 32),
+        0xF11 => lit(0, width: 32),
+        0xF12 => lit(0, width: 32),
+        0xF13 => lit(0, width: 32),
+        0xF14 => lit(0, width: 32)
+      }, default: mem_read_expr(:csrs, read_addr2, width: 32))
+      read_data3 <= case_select(read_addr3, {
+        0x301 => lit(MISA_VALUE, width: 32),
+        0xF11 => lit(0, width: 32),
+        0xF12 => lit(0, width: 32),
+        0xF13 => lit(0, width: 32),
+        0xF14 => lit(0, width: 32)
+      }, default: mem_read_expr(:csrs, read_addr3, width: 32))
+      read_data4 <= case_select(read_addr4, {
+        0x301 => lit(MISA_VALUE, width: 32),
+        0xF11 => lit(0, width: 32),
+        0xF12 => lit(0, width: 32),
+        0xF13 => lit(0, width: 32),
+        0xF14 => lit(0, width: 32)
+      }, default: mem_read_expr(:csrs, read_addr4, width: 32))
+      read_data5 <= case_select(read_addr5, {
+        0x301 => lit(MISA_VALUE, width: 32),
+        0xF11 => lit(0, width: 32),
+        0xF12 => lit(0, width: 32),
+        0xF13 => lit(0, width: 32),
+        0xF14 => lit(0, width: 32)
+      }, default: mem_read_expr(:csrs, read_addr5, width: 32))
+      read_data6 <= case_select(read_addr6, {
+        0x301 => lit(MISA_VALUE, width: 32),
+        0xF11 => lit(0, width: 32),
+        0xF12 => lit(0, width: 32),
+        0xF13 => lit(0, width: 32),
+        0xF14 => lit(0, width: 32)
+      }, default: mem_read_expr(:csrs, read_addr6, width: 32))
+      read_data7 <= case_select(read_addr7, {
+        0x301 => lit(MISA_VALUE, width: 32),
+        0xF11 => lit(0, width: 32),
+        0xF12 => lit(0, width: 32),
+        0xF13 => lit(0, width: 32),
+        0xF14 => lit(0, width: 32)
+      }, default: mem_read_expr(:csrs, read_addr7, width: 32))
+      read_data8 <= case_select(read_addr8, {
+        0x301 => lit(MISA_VALUE, width: 32),
+        0xF11 => lit(0, width: 32),
+        0xF12 => lit(0, width: 32),
+        0xF13 => lit(0, width: 32),
+        0xF14 => lit(0, width: 32)
+      }, default: mem_read_expr(:csrs, read_addr8, width: 32))
     end
 
     def initialize(name = nil)
@@ -95,14 +182,14 @@ module RHDL
       read_addr6 = in_val(:read_addr6) & 0xFFF
       read_addr7 = in_val(:read_addr7) & 0xFFF
       read_addr8 = in_val(:read_addr8) & 0xFFF
-      read_value = @csrs[read_addr]
-      read_value2 = @csrs[read_addr2]
-      read_value3 = @csrs[read_addr3]
-      read_value4 = @csrs[read_addr4]
-      read_value5 = @csrs[read_addr5]
-      read_value6 = @csrs[read_addr6]
-      read_value7 = @csrs[read_addr7]
-      read_value8 = @csrs[read_addr8]
+      read_value = csr_read_value(read_addr, @csrs[read_addr])
+      read_value2 = csr_read_value(read_addr2, @csrs[read_addr2])
+      read_value3 = csr_read_value(read_addr3, @csrs[read_addr3])
+      read_value4 = csr_read_value(read_addr4, @csrs[read_addr4])
+      read_value5 = csr_read_value(read_addr5, @csrs[read_addr5])
+      read_value6 = csr_read_value(read_addr6, @csrs[read_addr6])
+      read_value7 = csr_read_value(read_addr7, @csrs[read_addr7])
+      read_value8 = csr_read_value(read_addr8, @csrs[read_addr8])
 
       if rst == 1
         @csrs = Array.new(4096, 0)
@@ -124,28 +211,28 @@ module RHDL
         if write_we == 1
           write_addr = in_val(:write_addr) & 0xFFF
           write_data = in_val(:write_data) & 0xFFFFFFFF
-          @csrs[write_addr] = write_data
+          @csrs[write_addr] = write_data unless read_only_compat_csr?(write_addr)
         end
 
         write_we2 = in_val(:write_we2)
         if write_we2 == 1
           write_addr2 = in_val(:write_addr2) & 0xFFF
           write_data2 = in_val(:write_data2) & 0xFFFFFFFF
-          @csrs[write_addr2] = write_data2
+          @csrs[write_addr2] = write_data2 unless read_only_compat_csr?(write_addr2)
         end
 
         write_we3 = in_val(:write_we3)
         if write_we3 == 1
           write_addr3 = in_val(:write_addr3) & 0xFFF
           write_data3 = in_val(:write_data3) & 0xFFFFFFFF
-          @csrs[write_addr3] = write_data3
+          @csrs[write_addr3] = write_data3 unless read_only_compat_csr?(write_addr3)
         end
 
         write_we4 = in_val(:write_we4)
         if write_we4 == 1
           write_addr4 = in_val(:write_addr4) & 0xFFF
           write_data4 = in_val(:write_data4) & 0xFFFFFFFF
-          @csrs[write_addr4] = write_data4
+          @csrs[write_addr4] = write_data4 unless read_only_compat_csr?(write_addr4)
         end
       end
       @prev_clk = clk
@@ -171,22 +258,36 @@ module RHDL
       read_addr6 = in_val(:read_addr6) & 0xFFF
       read_addr7 = in_val(:read_addr7) & 0xFFF
       read_addr8 = in_val(:read_addr8) & 0xFFF
-      out_set(:read_data, @csrs[read_addr])
-      out_set(:read_data2, @csrs[read_addr2])
-      out_set(:read_data3, @csrs[read_addr3])
-      out_set(:read_data4, @csrs[read_addr4])
-      out_set(:read_data5, @csrs[read_addr5])
-      out_set(:read_data6, @csrs[read_addr6])
-      out_set(:read_data7, @csrs[read_addr7])
-      out_set(:read_data8, @csrs[read_addr8])
+      out_set(:read_data, csr_read_value(read_addr, @csrs[read_addr]))
+      out_set(:read_data2, csr_read_value(read_addr2, @csrs[read_addr2]))
+      out_set(:read_data3, csr_read_value(read_addr3, @csrs[read_addr3]))
+      out_set(:read_data4, csr_read_value(read_addr4, @csrs[read_addr4]))
+      out_set(:read_data5, csr_read_value(read_addr5, @csrs[read_addr5]))
+      out_set(:read_data6, csr_read_value(read_addr6, @csrs[read_addr6]))
+      out_set(:read_data7, csr_read_value(read_addr7, @csrs[read_addr7]))
+      out_set(:read_data8, csr_read_value(read_addr8, @csrs[read_addr8]))
     end
 
     def read_csr(addr)
-      @csrs[addr & 0xFFF]
+      index = addr & 0xFFF
+      csr_read_value(index, @csrs[index])
     end
 
     def write_csr(addr, value)
-      @csrs[addr & 0xFFF] = value & 0xFFFFFFFF
+      index = addr & 0xFFF
+      return if read_only_compat_csr?(index)
+
+      @csrs[index] = value & 0xFFFFFFFF
+    end
+
+    private
+
+    def read_only_compat_csr?(addr)
+      READ_ONLY_COMPAT_CSRS.key?(addr & 0xFFF)
+    end
+
+    def csr_read_value(addr, stored_value)
+      READ_ONLY_COMPAT_CSRS.fetch(addr & 0xFFF, stored_value & 0xFFFF_FFFF)
     end
 
       end

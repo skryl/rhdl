@@ -1,0 +1,4 @@
+interface:
+  display_name: "Phased PRD + Red Green"
+  short_description: "Build phased PRDs and execute red/green delivery"
+  default_prompt: "Create a phased PRD with clear exit criteria, then execute each phase via red/green testing until complete."

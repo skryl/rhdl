@@ -12,9 +12,13 @@ module RHDL
     JALR    = 0b1100111  # Jump and Link Register
     BRANCH  = 0b1100011  # Branch instructions
     LOAD    = 0b0000011  # Load instructions
+    LOAD_FP = 0b0000111  # Floating-point loads (RV32F)
     STORE   = 0b0100011  # Store instructions
+    STORE_FP = 0b0100111 # Floating-point stores (RV32F)
     OP_IMM  = 0b0010011  # Immediate arithmetic
     OP      = 0b0110011  # Register-register arithmetic
+    OP_FP   = 0b1010011  # Floating-point ops/moves (RV32F)
+    OP_V    = 0b1010111  # Vector ops/config (RVV baseline subset)
     AMO     = 0b0101111  # Atomic memory operations (RV32A)
     MISC_MEM = 0b0001111 # FENCE instructions
     SYSTEM  = 0b1110011  # ECALL, EBREAK

@@ -11,8 +11,12 @@ require_relative '../../../lib/rhdl/dsl/sequential'
 require_relative 'constants'
 require_relative 'alu'
 require_relative 'register_file'
+require_relative 'fp_register_file'
+require_relative 'vector_register_file'
+require_relative 'vector_csr_file'
 require_relative 'csr_file'
 require_relative 'imm_gen'
+require_relative 'compressed_decoder'
 require_relative 'decoder'
 require_relative 'branch_cond'
 require_relative 'program_counter'
@@ -67,9 +71,25 @@ module RHDL
     # Internal signals - from sub-components
     wire :pc, width: 32
     wire :pc_next, width: 32
+    wire :inst_exec, width: 32
+    wire :inst_pc_step, width: 32
     wire :imm, width: 32
     wire :rs1_data, width: 32
     wire :rs2_data, width: 32
+    wire :fp_rs1_data, width: 32
+    wire :fp_rs2_data, width: 32
+    wire :v_rs1_lane0, width: 32
+    wire :v_rs1_lane1, width: 32
+    wire :v_rs1_lane2, width: 32
+    wire :v_rs1_lane3, width: 32
+    wire :v_rs2_lane0, width: 32
+    wire :v_rs2_lane1, width: 32
+    wire :v_rs2_lane2, width: 32
+    wire :v_rs2_lane3, width: 32
+    wire :v_rd_lane0, width: 32
+    wire :v_rd_lane1, width: 32
+    wire :v_rd_lane2, width: 32
+    wire :v_rd_lane3, width: 32
     wire :alu_result, width: 32
     wire :alu_zero
     wire :branch_taken
@@ -98,7 +118,20 @@ module RHDL
     wire :alu_a, width: 32
     wire :alu_b, width: 32
     wire :rd_data, width: 32
+    wire :fp_rd_data, width: 32
     wire :regfile_forwarding_en
+    wire :fp_reg_write
+    wire :v_rd_lane0_in, width: 32
+    wire :v_rd_lane1_in, width: 32
+    wire :v_rd_lane2_in, width: 32
+    wire :v_rd_lane3_in, width: 32
+    wire :v_rd_we
+    wire :vec_vl, width: 32
+    wire :vec_vtype, width: 32
+    wire :vec_vl_write_data, width: 32
+    wire :vec_vtype_write_data, width: 32
+    wire :vec_vl_write_we
+    wire :vec_vtype_write_we
     wire :pc_plus4, width: 32
     wire :branch_target, width: 32
     wire :jalr_target, width: 32
@@ -178,20 +211,26 @@ module RHDL
     # Component instances
     instance :pc_reg, ProgramCounter
     instance :regfile, RegisterFile
+    instance :fp_regfile, FPRegisterFile
+    instance :vregfile, VectorRegisterFile
+    instance :vec_csrfile, VectorCSRFile
     instance :csrfile, CSRFile
     instance :reservation, AtomicReservation
     instance :priv_mode_reg, PrivModeReg
     instance :itlb, Sv32Tlb
     instance :dtlb, Sv32Tlb
+    instance :c_decoder, CompressedDecoder
     instance :decoder, Decoder
     instance :imm_gen, ImmGen
     instance :alu, ALU
     instance :branch_cond, BranchCond
 
     # Clock and reset to sequential components
-    port :clk => [[:pc_reg, :clk], [:regfile, :clk], [:csrfile, :clk], [:reservation, :clk], [:priv_mode_reg, :clk],
+    port :clk => [[:pc_reg, :clk], [:regfile, :clk], [:fp_regfile, :clk], [:vregfile, :clk], [:vec_csrfile, :clk],
+                  [:csrfile, :clk], [:reservation, :clk], [:priv_mode_reg, :clk],
                   [:itlb, :clk], [:dtlb, :clk]]
-    port :rst => [[:pc_reg, :rst], [:regfile, :rst], [:csrfile, :rst], [:reservation, :rst], [:priv_mode_reg, :rst],
+    port :rst => [[:pc_reg, :rst], [:regfile, :rst], [:fp_regfile, :rst], [:vregfile, :rst], [:vec_csrfile, :rst],
+                  [:csrfile, :rst], [:reservation, :rst], [:priv_mode_reg, :rst],
                   [:itlb, :rst], [:dtlb, :rst]]
 
     # PC connections
@@ -199,8 +238,11 @@ module RHDL
     port [:pc_reg, :pc] => :pc
 
     # Instruction to decoder and immediate generator
-    port :inst_data => [:decoder, :inst]
-    port :inst_data => [:imm_gen, :inst]
+    port :inst_data => [:c_decoder, :inst_word]
+    port [:c_decoder, :inst_out] => :inst_exec
+    port [:c_decoder, :pc_step] => :inst_pc_step
+    port :inst_exec => [:decoder, :inst]
+    port :inst_exec => [:imm_gen, :inst]
 
     # Decoder outputs to internal wires
     port [:decoder, :opcode] => :opcode
@@ -233,6 +275,46 @@ module RHDL
     port [:regfile, :rs1_data] => :rs1_data
     port [:regfile, :rs2_data] => :rs2_data
     port [:regfile, :debug_rdata] => :debug_reg_data
+
+    # FP register file connections
+    port :rs1 => [:fp_regfile, :rs1_addr]
+    port :rs2 => [:fp_regfile, :rs2_addr]
+    port :rd => [:fp_regfile, :rd_addr]
+    port :fp_rd_data => [:fp_regfile, :rd_data]
+    port :fp_reg_write => [:fp_regfile, :rd_we]
+    port [:fp_regfile, :rs1_data] => :fp_rs1_data
+    port [:fp_regfile, :rs2_data] => :fp_rs2_data
+
+    # Vector register file connections
+    port :rs1 => [:vregfile, :rs1_addr]
+    port :rs2 => [:vregfile, :rs2_addr]
+    port :rd => [:vregfile, :rd_addr_read]
+    port :rd => [:vregfile, :rd_addr]
+    port :v_rd_lane0_in => [:vregfile, :rd_lane0_in]
+    port :v_rd_lane1_in => [:vregfile, :rd_lane1_in]
+    port :v_rd_lane2_in => [:vregfile, :rd_lane2_in]
+    port :v_rd_lane3_in => [:vregfile, :rd_lane3_in]
+    port :v_rd_we => [:vregfile, :rd_we]
+    port [:vregfile, :rs1_lane0] => :v_rs1_lane0
+    port [:vregfile, :rs1_lane1] => :v_rs1_lane1
+    port [:vregfile, :rs1_lane2] => :v_rs1_lane2
+    port [:vregfile, :rs1_lane3] => :v_rs1_lane3
+    port [:vregfile, :rs2_lane0] => :v_rs2_lane0
+    port [:vregfile, :rs2_lane1] => :v_rs2_lane1
+    port [:vregfile, :rs2_lane2] => :v_rs2_lane2
+    port [:vregfile, :rs2_lane3] => :v_rs2_lane3
+    port [:vregfile, :rd_lane0] => :v_rd_lane0
+    port [:vregfile, :rd_lane1] => :v_rd_lane1
+    port [:vregfile, :rd_lane2] => :v_rd_lane2
+    port [:vregfile, :rd_lane3] => :v_rd_lane3
+
+    # Vector control CSR state
+    port :vec_vl_write_data => [:vec_csrfile, :vl_write_data]
+    port :vec_vl_write_we => [:vec_csrfile, :vl_write_we]
+    port :vec_vtype_write_data => [:vec_csrfile, :vtype_write_data]
+    port :vec_vtype_write_we => [:vec_csrfile, :vtype_write_we]
+    port [:vec_csrfile, :vl] => :vec_vl
+    port [:vec_csrfile, :vtype] => :vec_vtype
 
     # CSR file connections
     port :csr_addr => [:csrfile, :read_addr]
@@ -342,7 +424,7 @@ module RHDL
       regfile_forwarding_en <= lit(0, width: 1)
 
       # PC + 4 for sequential execution and return address
-      pc_plus4 <= pc + lit(4, width: 32)
+      pc_plus4 <= pc + inst_pc_step
 
       # Branch target = PC + immediate
       branch_target <= pc + imm
@@ -356,11 +438,124 @@ module RHDL
       # ALU B input mux: alu_src=1 uses immediate, alu_src=0 uses rs2_data
       alu_b <= mux(alu_src, imm, rs2_data)
 
+      # RV32F subset decode
+      is_fp_load = local(:is_fp_load,
+                         (opcode == lit(Opcode::LOAD_FP, width: 7)) & (funct3 == lit(Funct3::WORD, width: 3)),
+                         width: 1)
+      is_fp_store = local(:is_fp_store,
+                          (opcode == lit(Opcode::STORE_FP, width: 7)) & (funct3 == lit(Funct3::WORD, width: 3)),
+                          width: 1)
+      is_fmv_x_w = local(:is_fmv_x_w,
+                         (opcode == lit(Opcode::OP_FP, width: 7)) &
+                         (funct7 == lit(0b1110000, width: 7)) &
+                         (funct3 == lit(0, width: 3)) &
+                         (rs2 == lit(0, width: 5)),
+                         width: 1)
+      is_fmv_w_x = local(:is_fmv_w_x,
+                         (opcode == lit(Opcode::OP_FP, width: 7)) &
+                         (funct7 == lit(0b1111000, width: 7)) &
+                         (funct3 == lit(0, width: 3)) &
+                         (rs2 == lit(0, width: 5)),
+                         width: 1)
+
+      # RVV scoped baseline decode/data path
+      # Supported:
+      # - vsetvli (rd, rs1, zimm)
+      # - vmv.v.x, vmv.s.x, vmv.x.s
+      # - vadd.vv, vadd.vx
+      # Baseline profile:
+      # - VLEN=128, SEW=32, LMUL=1, VLMAX=4
+      # - unmasked execution only (vm=1)
+      is_op_v = local(:is_op_v, opcode == lit(Opcode::OP_V, width: 7), width: 1)
+      v_funct6 = inst_exec[31..26]
+      v_vm = inst_exec[25]
+      is_vsetvli = local(:is_vsetvli,
+                         is_op_v &
+                         (funct3 == lit(0b111, width: 3)) &
+                         (inst_exec[31] == lit(0, width: 1)),
+                         width: 1)
+      is_vadd_vv = local(:is_vadd_vv,
+                         is_op_v &
+                         (funct3 == lit(0b000, width: 3)) &
+                         (v_funct6 == lit(0b000000, width: 6)) &
+                         v_vm,
+                         width: 1)
+      is_vadd_vx = local(:is_vadd_vx,
+                         is_op_v &
+                         (funct3 == lit(0b100, width: 3)) &
+                         (v_funct6 == lit(0b000000, width: 6)) &
+                         v_vm,
+                         width: 1)
+      is_vmv_v_x = local(:is_vmv_v_x,
+                         is_op_v &
+                         (funct3 == lit(0b100, width: 3)) &
+                         (v_funct6 == lit(0b010111, width: 6)) &
+                         v_vm &
+                         (rs2 == lit(0, width: 5)),
+                         width: 1)
+      is_vmv_x_s = local(:is_vmv_x_s,
+                         is_op_v &
+                         (funct3 == lit(0b010, width: 3)) &
+                         (v_funct6 == lit(0b010000, width: 6)) &
+                         v_vm &
+                         (rs1 == lit(0, width: 5)),
+                         width: 1)
+      is_vmv_s_x = local(:is_vmv_s_x,
+                         is_op_v &
+                         (funct3 == lit(0b110, width: 3)) &
+                         (v_funct6 == lit(0b010000, width: 6)) &
+                         v_vm &
+                         (rs2 == lit(0, width: 5)),
+                         width: 1)
+      vsetvli_avl = local(:vsetvli_avl,
+                          mux(rs1 == lit(0, width: 5), lit(4, width: 32), rs1_data),
+                          width: 32)
+      vsetvli_new_vl = local(:vsetvli_new_vl,
+                             mux(vsetvli_avl > lit(4, width: 32), lit(4, width: 32), vsetvli_avl),
+                             width: 32)
+      vsetvli_new_vtype = local(:vsetvli_new_vtype,
+                                cat(lit(0, width: 21), inst_exec[30..20]),
+                                width: 32)
+      v_lane0_active = local(:v_lane0_active, vec_vl > lit(0, width: 32), width: 1)
+      v_lane1_active = local(:v_lane1_active, vec_vl > lit(1, width: 32), width: 1)
+      v_lane2_active = local(:v_lane2_active, vec_vl > lit(2, width: 32), width: 1)
+      v_lane3_active = local(:v_lane3_active, vec_vl > lit(3, width: 32), width: 1)
+      v_lane0_vadd_vv = local(:v_lane0_vadd_vv, v_rs2_lane0 + v_rs1_lane0, width: 32)
+      v_lane1_vadd_vv = local(:v_lane1_vadd_vv, v_rs2_lane1 + v_rs1_lane1, width: 32)
+      v_lane2_vadd_vv = local(:v_lane2_vadd_vv, v_rs2_lane2 + v_rs1_lane2, width: 32)
+      v_lane3_vadd_vv = local(:v_lane3_vadd_vv, v_rs2_lane3 + v_rs1_lane3, width: 32)
+      v_lane0_vadd_vx = local(:v_lane0_vadd_vx, v_rs2_lane0 + rs1_data, width: 32)
+      v_lane1_vadd_vx = local(:v_lane1_vadd_vx, v_rs2_lane1 + rs1_data, width: 32)
+      v_lane2_vadd_vx = local(:v_lane2_vadd_vx, v_rs2_lane2 + rs1_data, width: 32)
+      v_lane3_vadd_vx = local(:v_lane3_vadd_vx, v_rs2_lane3 + rs1_data, width: 32)
+      v_all_lane_write = local(:v_all_lane_write, is_vmv_v_x | is_vadd_vv | is_vadd_vx, width: 1)
+      v_lane0_all_next = local(:v_lane0_all_next,
+                               mux(is_vmv_v_x, rs1_data,
+                                   mux(is_vadd_vv, v_lane0_vadd_vv,
+                                       mux(is_vadd_vx, v_lane0_vadd_vx, v_rd_lane0))),
+                               width: 32)
+      v_lane1_all_next = local(:v_lane1_all_next,
+                               mux(is_vmv_v_x, rs1_data,
+                                   mux(is_vadd_vv, v_lane1_vadd_vv,
+                                       mux(is_vadd_vx, v_lane1_vadd_vx, v_rd_lane1))),
+                               width: 32)
+      v_lane2_all_next = local(:v_lane2_all_next,
+                               mux(is_vmv_v_x, rs1_data,
+                                   mux(is_vadd_vv, v_lane2_vadd_vv,
+                                       mux(is_vadd_vx, v_lane2_vadd_vx, v_rd_lane2))),
+                               width: 32)
+      v_lane3_all_next = local(:v_lane3_all_next,
+                               mux(is_vmv_v_x, rs1_data,
+                                   mux(is_vadd_vv, v_lane3_vadd_vv,
+                                       mux(is_vadd_vx, v_lane3_vadd_vx, v_rd_lane3))),
+                               width: 32)
+      v_scalar_result = local(:v_scalar_result, mux(is_vsetvli, vsetvli_new_vl, v_rs2_lane0), width: 32)
+
       # Atomic (RV32A) decode/data path
       is_amo_word = local(:is_amo_word,
                           (opcode == lit(Opcode::AMO, width: 7)) & (funct3 == lit(Funct3::WORD, width: 3)),
                           width: 1)
-      amo_funct5 = inst_data[31..27]
+      amo_funct5 = inst_exec[31..27]
       is_lr = local(:is_lr,
                     is_amo_word & (amo_funct5 == lit(0b00010, width: 5)) & (rs2 == lit(0, width: 5)),
                     width: 1)
@@ -551,14 +746,14 @@ module RHDL
       is_system_plain = local(:is_system_plain,
                               (opcode == lit(Opcode::SYSTEM, width: 7)) & (funct3 == lit(0, width: 3)),
                               width: 1)
-      sys_imm = inst_data[31..20]
+      sys_imm = inst_exec[31..20]
       is_ecall = local(:is_ecall, is_system_plain & (sys_imm == lit(0x000, width: 12)), width: 1)
       is_ebreak = local(:is_ebreak, is_system_plain & (sys_imm == lit(0x001, width: 12)), width: 1)
       is_sret = local(:is_sret, is_system_plain & (sys_imm == lit(0x102, width: 12)), width: 1)
       is_mret = local(:is_mret, is_system_plain & (sys_imm == lit(0x302, width: 12)), width: 1)
       is_wfi = local(:is_wfi, is_system_plain & (sys_imm == lit(0x105, width: 12)), width: 1)
       is_sfence_vma = local(:is_sfence_vma,
-                            is_system_plain & (inst_data[31..25] == lit(0b0001001, width: 7)) & (rd == lit(0, width: 5)),
+                            is_system_plain & (inst_exec[31..25] == lit(0b0001001, width: 7)) & (rd == lit(0, width: 5)),
                             width: 1)
       is_illegal_system = local(:is_illegal_system,
                                 is_system_plain & ~(is_ecall | is_ebreak | is_mret | is_sret | is_wfi | is_sfence_vma),
@@ -676,7 +871,7 @@ module RHDL
       trap_tval = local(:trap_tval,
                         mux(inst_page_fault, inst_vaddr,
                             mux(data_page_fault, data_vaddr,
-                                mux(is_illegal_system, inst_data, lit(0, width: 32)))),
+                                mux(is_illegal_system, inst_exec, lit(0, width: 32)))),
                         width: 32)
 
       # CSR read address:
@@ -686,7 +881,7 @@ module RHDL
       # - CSR instructions read csr from instruction imm field
       csr_addr <= mux(trap_taken, mux(trap_to_supervisor, lit(0x105, width: 12), lit(0x305, width: 12)),
                       mux(is_mret, lit(0x341, width: 12),
-                          mux(is_sret, lit(0x141, width: 12), inst_data[31..20])))
+                          mux(is_sret, lit(0x141, width: 12), inst_exec[31..20])))
       csr_addr2 <= lit(0x300, width: 12) # mstatus
       csr_addr3 <= lit(0x304, width: 12) # mie
       csr_addr4 <= lit(0x100, width: 12) # sstatus
@@ -695,8 +890,10 @@ module RHDL
       csr_addr7 <= lit(0x303, width: 12) # mideleg
       csr_addr8 <= lit(0x180, width: 12) # satp
       csr_read_selected = local(:csr_read_selected,
-                                mux(csr_addr == lit(0x344, width: 12), irq_pending_bits,
-                                    mux(csr_addr == lit(0x144, width: 12), irq_pending_bits & csr_read_data7, csr_read_data)),
+                                mux(csr_addr == lit(0xC20, width: 12), vec_vl,
+                                    mux(csr_addr == lit(0xC21, width: 12), vec_vtype,
+                                        mux(csr_addr == lit(0x344, width: 12), irq_pending_bits,
+                                            mux(csr_addr == lit(0x144, width: 12), irq_pending_bits & csr_read_data7, csr_read_data)))),
                                 width: 32)
 
       csr_instr_write_data = local(:csr_instr_write_data, case_select(funct3, {
@@ -715,8 +912,15 @@ module RHDL
         0b110 => csr_rs1_nonzero,  # CSRRSI (zimm != 0)
         0b111 => csr_rs1_nonzero   # CSRRCI (zimm != 0)
       }, default: lit(0, width: 1)), width: 1)
+      is_vl_csr_instr = local(:is_vl_csr_instr,
+                              is_csr_instr & (inst_exec[31..20] == lit(0xC20, width: 12)),
+                              width: 1)
+      is_vtype_csr_instr = local(:is_vtype_csr_instr,
+                                 is_csr_instr & (inst_exec[31..20] == lit(0xC21, width: 12)),
+                                 width: 1)
+      is_vector_csr_instr = local(:is_vector_csr_instr, is_vl_csr_instr | is_vtype_csr_instr, width: 1)
       satp_write = local(:satp_write,
-                         is_csr_instr & csr_instr_write_we & (inst_data[31..20] == lit(0x180, width: 12)),
+                         is_csr_instr & csr_instr_write_we & (inst_exec[31..20] == lit(0x180, width: 12)),
                          width: 1)
       tlb_flush_all <= is_sfence_vma | satp_write
 
@@ -791,11 +995,11 @@ module RHDL
       # - CSR instructions: normal CSR RMW
       csr_write_addr <= mux(trap_taken, mux(trap_to_supervisor, lit(0x141, width: 12), lit(0x341, width: 12)),
                             mux(is_mret, lit(0x300, width: 12),
-                                mux(is_sret, lit(0x100, width: 12), inst_data[31..20])))
+                                mux(is_sret, lit(0x100, width: 12), inst_exec[31..20])))
       csr_write_data <= mux(trap_taken, pc,
                             mux(is_mret, mret_mstatus,
                                 mux(is_sret, sret_sstatus, csr_instr_write_data)))
-      csr_write_we <= mux(trap_or_ret, lit(1, width: 1), csr_instr_write_we)
+      csr_write_we <= mux(trap_or_ret, lit(1, width: 1), csr_instr_write_we & ~is_vector_csr_instr)
       csr_write_addr2 <= mux(trap_to_supervisor, lit(0x142, width: 12), lit(0x342, width: 12))
       csr_write_data2 <= trap_cause
       csr_write_we2 <= trap_taken
@@ -805,6 +1009,10 @@ module RHDL
       csr_write_addr4 <= mux(trap_to_supervisor, lit(0x143, width: 12), lit(0x343, width: 12))
       csr_write_data4 <= trap_tval
       csr_write_we4 <= trap_taken
+      vec_vl_write_data <= mux(is_vsetvli, vsetvli_new_vl, csr_instr_write_data)
+      vec_vtype_write_data <= mux(is_vsetvli, vsetvli_new_vtype, csr_instr_write_data)
+      vec_vl_write_we <= (is_vsetvli | (is_vl_csr_instr & csr_instr_write_we)) & ~trap_taken
+      vec_vtype_write_we <= (is_vsetvli | (is_vtype_csr_instr & csr_instr_write_we)) & ~trap_taken
       priv_mode_we <= trap_taken | is_mret | is_sret
       priv_mode_next <= mux(trap_taken, trap_target_mode, ret_target_mode)
 
@@ -828,13 +1036,24 @@ module RHDL
       # - mem_to_reg: data from memory
       # - jump: return address (pc + 4)
       # - csr: old CSR value
+      # - fmv.x.w: raw bits from fp register
       # - else: ALU result
       rd_data <= mux(is_amo, amo_rd_data,
+                     mux(is_vsetvli | is_vmv_x_s, v_scalar_result,
                      mux(is_csr_instr, csr_read_selected,
+                     mux(is_fmv_x_w, fp_rs1_data,
                      mux(mem_to_reg, data_rdata,
                      mux(jump, pc_plus4, alu_result))
-                     ))
-      reg_write_final <= (reg_write | is_amo) & ~trap_taken
+                     ))))
+      fp_rd_data <= mux(is_fp_load, data_rdata, rs1_data)
+      v_rd_lane0_in <= mux(is_vmv_s_x, rs1_data,
+                           mux(v_all_lane_write & v_lane0_active, v_lane0_all_next, v_rd_lane0))
+      v_rd_lane1_in <= mux(v_all_lane_write & v_lane1_active, v_lane1_all_next, v_rd_lane1)
+      v_rd_lane2_in <= mux(v_all_lane_write & v_lane2_active, v_lane2_all_next, v_rd_lane2)
+      v_rd_lane3_in <= mux(v_all_lane_write & v_lane3_active, v_lane3_all_next, v_rd_lane3)
+      v_rd_we <= (v_all_lane_write | is_vmv_s_x) & ~trap_taken
+      fp_reg_write <= (is_fp_load | is_fmv_w_x) & ~trap_taken
+      reg_write_final <= (reg_write | is_amo | is_vsetvli | is_vmv_x_s) & ~trap_taken
       mem_read_final <= mem_read & ~trap_taken
       mem_write_final <= mem_write & ~trap_taken
       reservation_set <= is_lr & ~trap_taken
@@ -848,14 +1067,14 @@ module RHDL
       data_addr <= mux(satp_mode_sv32 & data_access_req, data_paddr, data_vaddr)
       data_ptw_addr1 <= data_ptw_addr1_calc
       data_ptw_addr0 <= data_ptw_addr0_calc
-      data_wdata <= mux(is_amo_rmw, amo_new_data, rs2_data)
+      data_wdata <= mux(is_amo_rmw, amo_new_data, mux(is_fp_store, fp_rs2_data, rs2_data))
       data_we <= mux(is_amo, amo_mem_write & ~trap_taken & ~data_page_fault,
                      mem_write_final & ~data_page_fault)
       data_re <= mux(is_amo, amo_mem_read & ~trap_taken & ~data_page_fault,
                      mem_read_final & ~data_page_fault)
       data_funct3 <= mux(is_amo, lit(Funct3::WORD, width: 3), funct3)
       debug_pc <= pc
-      debug_inst <= inst_data
+      debug_inst <= inst_exec
     end
 
     # Helper methods for testing - these access sub-component state directly
@@ -877,6 +1096,26 @@ module RHDL
       @regfile.write_reg(index, value)
     end
 
+    def read_freg(index)
+      @fp_regfile.read_reg(index)
+    end
+
+    def write_freg(index, value)
+      @fp_regfile.write_reg(index, value)
+    end
+
+    def read_vreg(index)
+      @vregfile.read_vreg(index)
+    end
+
+    def read_vl
+      @vec_csrfile.read_vl
+    end
+
+    def read_vtype
+      @vec_csrfile.read_vtype
+    end
+
     def read_csr(index)
       @csrfile.read_csr(index)
     end
@@ -888,8 +1127,12 @@ module RHDL
       # Generate sub-modules first
       parts << ALU.to_verilog
       parts << RegisterFile.to_verilog
+      parts << FPRegisterFile.to_verilog
+      parts << VectorRegisterFile.to_verilog
+      parts << VectorCSRFile.to_verilog
       parts << CSRFile.to_verilog
       parts << ImmGen.to_verilog
+      parts << CompressedDecoder.to_verilog
       parts << Decoder.to_verilog
       parts << BranchCond.to_verilog
       parts << ProgramCounter.to_verilog
