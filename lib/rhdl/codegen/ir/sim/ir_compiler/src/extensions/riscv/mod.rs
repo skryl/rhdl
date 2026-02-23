@@ -83,7 +83,7 @@ const VIRTIO_REQ_T_IN: u32 = 0;
 const VIRTIO_REQ_T_OUT: u32 = 1;
 const VIRTIO_SECTOR_BYTES: u64 = 512;
 
-const DEFAULT_INST_MEM_BYTES: usize = 8 * 1024 * 1024;
+const DEFAULT_INST_MEM_BYTES: usize = 128 * 1024 * 1024;
 const DEFAULT_DATA_MEM_BYTES: usize = 128 * 1024 * 1024;
 const DEFAULT_DISK_BYTES: usize = 8 * 1024 * 1024;
 const VIRTIO_QUEUE_NUM_MAX: u16 = 8;

@@ -611,6 +611,8 @@ module RHDL
       satp_root_base = local(:satp_root_base, cat(satp_root_ppn, lit(0, width: 12)), width: 32)
       priv_is_u = local(:priv_is_u, priv_mode == lit(PrivMode::USER, width: 2), width: 1)
       priv_is_s = local(:priv_is_s, priv_mode == lit(PrivMode::SUPERVISOR, width: 2), width: 1)
+      priv_is_m = local(:priv_is_m, priv_mode == lit(PrivMode::MACHINE, width: 2), width: 1)
+      satp_translate = local(:satp_translate, satp_mode_sv32 & ~priv_is_m, width: 1)
       sum_enabled = local(:sum_enabled,
                           (((csr_read_data2 | csr_read_data4) & lit(0x40000, width: 32)) != lit(0, width: 32)),
                           width: 1)
@@ -624,7 +626,7 @@ module RHDL
       inst_vpn1 = inst_vaddr[31..22]
       inst_vpn0 = inst_vaddr[21..12]
       inst_page_off = inst_vaddr[11..0]
-      inst_tlb_lookup_en <= satp_mode_sv32
+      inst_tlb_lookup_en <= satp_translate
       inst_tlb_lookup_vpn <= inst_vpn
       inst_tlb_lookup_root <= satp_root_ppn
       inst_ptw_addr1_calc = local(:inst_ptw_addr1_calc,
@@ -652,7 +654,7 @@ module RHDL
       inst_walk_perm_w = inst_walk_pte[2]
       inst_walk_perm_x = inst_walk_pte[3]
       inst_walk_perm_u = inst_walk_pte[4]
-      inst_tlb_fill_en <= satp_mode_sv32 & ~inst_tlb_hit & inst_walk_ok
+      inst_tlb_fill_en <= satp_translate & ~inst_tlb_hit & inst_walk_ok
       inst_tlb_fill_vpn <= inst_vpn
       inst_tlb_fill_root <= satp_root_ppn
       inst_tlb_fill_ppn <= inst_walk_ppn
@@ -670,14 +672,14 @@ module RHDL
                         width: 1)
       inst_perm_ok = local(:inst_perm_ok, inst_translated & inst_eff_perm_x & inst_u_ok, width: 1)
       inst_paddr = local(:inst_paddr, cat(inst_eff_ppn, inst_page_off), width: 32)
-      inst_page_fault = local(:inst_page_fault, satp_mode_sv32 & ~inst_perm_ok, width: 1)
+      inst_page_fault = local(:inst_page_fault, satp_translate & ~inst_perm_ok, width: 1)
 
       # Sv32 data translation (address walk inputs are provided via external ports).
       data_vpn = data_vaddr[31..12]
       data_vpn1 = data_vaddr[31..22]
       data_vpn0 = data_vaddr[21..12]
       data_page_off = data_vaddr[11..0]
-      data_tlb_lookup_en <= satp_mode_sv32 & data_access_req
+      data_tlb_lookup_en <= satp_translate & data_access_req
       data_tlb_lookup_vpn <= data_vpn
       data_tlb_lookup_root <= satp_root_ppn
       data_ptw_addr1_calc = local(:data_ptw_addr1_calc,
@@ -705,7 +707,7 @@ module RHDL
       data_walk_perm_w = data_walk_pte[2]
       data_walk_perm_x = data_walk_pte[3]
       data_walk_perm_u = data_walk_pte[4]
-      data_tlb_fill_en <= satp_mode_sv32 & data_access_req & ~data_tlb_hit & data_walk_ok
+      data_tlb_fill_en <= satp_translate & data_access_req & ~data_tlb_hit & data_walk_ok
       data_tlb_fill_vpn <= data_vpn
       data_tlb_fill_root <= satp_root_ppn
       data_tlb_fill_ppn <= data_walk_ppn
@@ -733,7 +735,7 @@ module RHDL
       data_perm_ok = local(:data_perm_ok, data_translated & data_rw_ok & data_u_ok, width: 1)
       data_paddr = local(:data_paddr, cat(data_eff_ppn, data_page_off), width: 32)
       data_page_fault = local(:data_page_fault,
-                              satp_mode_sv32 & data_access_req & ~data_perm_ok,
+                              satp_translate & data_access_req & ~data_perm_ok,
                               width: 1)
       data_page_fault_cause = local(:data_page_fault_cause,
                                     mux(data_store_access, lit(15, width: 32), lit(13, width: 32)),
@@ -770,11 +772,13 @@ module RHDL
       # Interrupt enable filtering for M-mode (mstatus/mie) and S-mode (sstatus/sie).
       machine_irq_masked = local(:machine_irq_masked, irq_pending_bits & ~csr_read_data7, width: 32)
       super_irq_masked = local(:super_irq_masked, irq_pending_bits & csr_read_data7, width: 32)
-      super_sie_machine_alias = local(:super_sie_machine_alias,
-                                      mux((csr_read_data5 & lit(0x200, width: 32)) != lit(0, width: 32),
-                                          lit(0x800, width: 32),
-                                          lit(0, width: 32)),
-                                      width: 32)
+      super_sie_machine_alias = local(
+        :super_sie_machine_alias,
+        mux((csr_read_data5 & lit(0x002, width: 32)) != lit(0, width: 32), lit(0x008, width: 32), lit(0, width: 32)) |
+        mux((csr_read_data5 & lit(0x020, width: 32)) != lit(0, width: 32), lit(0x080, width: 32), lit(0, width: 32)) |
+        mux((csr_read_data5 & lit(0x200, width: 32)) != lit(0, width: 32), lit(0x800, width: 32), lit(0, width: 32)),
+        width: 32
+      )
       super_sie_effective = local(:super_sie_effective, csr_read_data5 | super_sie_machine_alias, width: 32)
       machine_enabled_interrupts = local(:machine_enabled_interrupts, machine_irq_masked & csr_read_data3, width: 32)
       super_enabled_interrupts = local(:super_enabled_interrupts, super_irq_masked & super_sie_effective, width: 32)
@@ -1061,10 +1065,10 @@ module RHDL
       reservation_set_addr <= rs1_data
 
       # Output connections
-      inst_addr <= mux(satp_mode_sv32, inst_paddr, pc)
+      inst_addr <= mux(satp_translate, inst_paddr, pc)
       inst_ptw_addr1 <= inst_ptw_addr1_calc
       inst_ptw_addr0 <= inst_ptw_addr0_calc
-      data_addr <= mux(satp_mode_sv32 & data_access_req, data_paddr, data_vaddr)
+      data_addr <= mux(satp_translate & data_access_req, data_paddr, data_vaddr)
       data_ptw_addr1 <= data_ptw_addr1_calc
       data_ptw_addr0 <= data_ptw_addr0_calc
       data_wdata <= mux(is_amo_rmw, amo_new_data, mux(is_fp_store, fp_rs2_data, rs2_data))

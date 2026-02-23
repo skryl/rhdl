@@ -86,7 +86,7 @@ module RHDL
               options[:dtb] = v
             end
 
-            opts.on("--kernel-addr ADDR", "Linux kernel load address (hex/dec, default: 0x80200000)") do |v|
+            opts.on("--kernel-addr ADDR", "Linux kernel load address (hex/dec, default: 0x80400000)") do |v|
               options[:kernel_addr] = parse_u32(v)
             end
 
@@ -233,9 +233,13 @@ module RHDL
 
               runner.load_xv6(kernel: kernel, fs: fs, pc: options[:pc] || 0x8000_0000)
             elsif options[:linux]
-              kernel = options[:kernel] || runner.software_path('bin/linux_kernel.bin')
-              initramfs = options[:initramfs] || runner.software_path('bin/linux_initramfs.cpio')
-              dtb = options[:dtb] || runner.software_path('bin/rhdl_riscv_virt.dtb')
+              options[:kernel] ||= runner.software_path('bin/linux_kernel.bin')
+              options[:initramfs] ||= runner.software_path('bin/linux_initramfs.cpio')
+              options[:dtb] ||= runner.software_path('bin/rhdl_riscv_virt.dtb')
+
+              kernel = options[:kernel]
+              initramfs = options[:initramfs]
+              dtb = options[:dtb]
 
               return 1 unless ensure_file(
                 kernel,

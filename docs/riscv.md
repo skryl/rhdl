@@ -235,6 +235,7 @@ Optional flags:
 - `--defconfig <target>` overrides the default `rv32_nommu_virt_defconfig`.
 - `--no-min-profile` skips the aggressive RV32 minimum-size boot profile.
 - `--toolprefix <prefix>` overrides toolchain auto-detection.
+- `--buildroot-jobs <n>` controls Buildroot parallelism (default: `1`).
 
 `build_linux.sh` applies patches from `linux_patches` in deterministic filename order and writes:
 
@@ -243,13 +244,14 @@ Optional flags:
 - `examples/riscv/software/bin/linux_kernel.map`
 - `examples/riscv/software/bin/linux_kernel.config`
 - `examples/riscv/software/bin/linux_initramfs.cpio`
+- `examples/riscv/software/bin/linux_fs.img`
+- `examples/riscv/software/bin/linux_busybox`
 
 By default, `build_linux.sh` also applies an aggressive RV32 minimum-size profile tuned for this core
 (RV32IMA-focused ISA + stripped subsystems) to keep `linux_kernel.bin` small while preserving UART
 boot milestones.
-It also generates a default NOMMU-compatible initramfs artifact and embeds it into the kernel via
-`CONFIG_INITRAMFS_SOURCE`.
-The default initramfs contains a minimal `/init` boot shim (for boot continuity), not a full shell userspace.
+Rootfs artifacts are built via Buildroot using a NOMMU RV32 BusyBox profile (no local init shim).
+The default kernel cmdline launches `/bin/sh` from BusyBox for an immediate interactive shell.
 
 ### Linux Runner Artifact Expectations
 

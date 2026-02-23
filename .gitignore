@@ -75,3 +75,9 @@ web/assets/pkg/*
 /examples/riscv/software/xv6/user/initcode
 /examples/riscv/software/xv6/user/initcode.out
 /examples/riscv/software/xv6/user/usys.S
+
+# RISC-V Linux local build/cache artifacts
+/examples/riscv/software/.cache/
+/examples/riscv/software/.buildroot-*/
+/examples/riscv/software/.buildroot.defconfig
+/examples/riscv/software/.tmp_*/
