@@ -16,7 +16,7 @@ LINUX_DTS_PATH="${BIN_DIR}/rhdl_riscv_virt.dts"
 LINUX_DTB_PATH="${BIN_DIR}/rhdl_riscv_virt.dtb"
 LINUX_INITRAMFS_LOAD_ADDR="${LINUX_INITRAMFS_LOAD_ADDR:-0x84000000}"
 LINUX_BOOT_CMDLINE="${LINUX_BOOT_CMDLINE:-console=ttyS0 earlycon=uart8250,mmio,0x10000000 rdinit=/sbin/init}"
-LINUX_RISCV_ISA="${LINUX_RISCV_ISA:-rv32imasu_zicsr_zifencei}"
+LINUX_RISCV_ISA="${LINUX_RISCV_ISA:-rv32imafdcvsu_zba_zbb_zbkb_zbc_zawrs_zacas_zicbom_zicboz_zicbop_zicsr_zifencei}"
 
 BUILDROOT_VERSION="${BUILDROOT_VERSION:-2025.02.1}"
 BUILDROOT_CACHE_DIR="${SOFTWARE_DIR}/.cache"
@@ -457,9 +457,48 @@ apply_minimal_rv32_profile() {
   fi
 
   "${scripts_config}" --file "${config_file}" \
+    --disable ARCH_ANDES \
+    --disable ARCH_ANLOGIC \
+    --disable ARCH_ESWIN \
+    --disable ARCH_MICROCHIP_POLARFIRE \
+    --disable ARCH_MICROCHIP \
+    --disable ARCH_RENESAS \
+    --disable ARCH_SIFIVE \
+    --disable ARCH_SOPHGO \
+    --disable ARCH_SPACEMIT \
+    --disable ARCH_STARFIVE \
+    --disable SOC_STARFIVE \
+    --disable ARCH_SUNXI \
+    --disable ARCH_TENSTORRENT \
+    --disable ARCH_THEAD \
+    --disable ARCH_CANAAN \
+    --disable SOC_CANAAN_K210 \
+    --disable ERRATA_ANDES \
+    --disable ERRATA_ANDES_CMO \
+    --disable ERRATA_MIPS \
+    --disable ERRATA_MIPS_P8700_PAUSE_OPCODE \
+    --disable ERRATA_SIFIVE \
+    --disable ERRATA_SIFIVE_CIP_453 \
+    --disable ERRATA_SIFIVE_CIP_1200 \
+    --disable ERRATA_STARFIVE_JH7100 \
+    --disable ERRATA_THEAD \
+    --disable ERRATA_THEAD_MAE \
+    --disable ERRATA_THEAD_CMO \
+    --disable ERRATA_THEAD_PMU \
+    --disable ERRATA_THEAD_GHOSTWRITE \
     --disable EFI \
     --disable EFI_STUB \
     --disable DMI \
+    --disable RISCV_ISA_VENDOR_EXT \
+    --disable RISCV_ISA_VENDOR_EXT_ANDES \
+    --disable RISCV_ISA_VENDOR_EXT_MIPS \
+    --disable RISCV_ISA_VENDOR_EXT_SIFIVE \
+    --disable RISCV_ISA_VENDOR_EXT_THEAD \
+    --disable RISCV_ISA_XTHEADVECTOR \
+    --disable RISCV_ISA_ZABHA \
+    --enable RISCV_ISA_C \
+    --enable RISCV_ISA_V \
+    --enable RISCV_ISA_V_DEFAULT_ENABLE
 
   "${scripts_config}" --file "${config_file}" \
     --enable BLK_DEV_INITRD \
@@ -490,6 +529,9 @@ apply_minimal_rv32_profile() {
     --disable CRYPTO_DEV_VIRTIO \
     --disable CRYPTO_JITTERENTROPY \
     --disable SMP \
+    --disable RISCV_ALTERNATIVE \
+    --disable RISCV_ALTERNATIVE_EARLY \
+    --disable RISCV_ISA_FALLBACK \
     --disable JUMP_LABEL \
     --disable MODULES \
     --disable PREEMPT_LAZY \
@@ -713,6 +755,71 @@ apply_linux_boot_cmdline
 
 echo "finalizing kernel configuration..."
 run_make "${MAKE_ARGS[@]}" olddefconfig
+
+if [[ "${MIN_PROFILE}" -eq 1 ]]; then
+  if ! grep -Eq '^CONFIG_FPU=y' "${BUILD_DIR}/.config"; then
+    echo "error: MIN_PROFILE requires CONFIG_FPU=y for this Linux profile." >&2
+    echo "hint: verify FPU is not disabled by profile overrides or defconfig." >&2
+    exit 1
+  fi
+  if ! grep -Eq '^CONFIG_RISCV_ISA_ZBA=y' "${BUILD_DIR}/.config"; then
+    echo "error: MIN_PROFILE requires CONFIG_RISCV_ISA_ZBA=y for this phase profile." >&2
+    echo "hint: verify Zba is enabled in final kernel configuration." >&2
+    exit 1
+  fi
+  if ! grep -Eq '^CONFIG_RISCV_ISA_ZBB=y' "${BUILD_DIR}/.config"; then
+    echo "error: MIN_PROFILE requires CONFIG_RISCV_ISA_ZBB=y for this phase profile." >&2
+    echo "hint: verify Zbb is enabled in final kernel configuration." >&2
+    exit 1
+  fi
+  if ! grep -Eq '^CONFIG_RISCV_ISA_ZBKB=y' "${BUILD_DIR}/.config"; then
+    echo "error: MIN_PROFILE requires CONFIG_RISCV_ISA_ZBKB=y for this phase profile." >&2
+    echo "hint: verify Zbkb is enabled in final kernel configuration." >&2
+    exit 1
+  fi
+  if ! grep -Eq '^CONFIG_RISCV_ISA_ZBC=y' "${BUILD_DIR}/.config"; then
+    echo "error: MIN_PROFILE requires CONFIG_RISCV_ISA_ZBC=y for this phase profile." >&2
+    echo "hint: verify Zbc is enabled in final kernel configuration." >&2
+    exit 1
+  fi
+  if ! grep -Eq '^CONFIG_RISCV_ISA_ZAWRS=y' "${BUILD_DIR}/.config"; then
+    echo "error: MIN_PROFILE requires CONFIG_RISCV_ISA_ZAWRS=y for this phase profile." >&2
+    echo "hint: verify Zawrs is enabled in final kernel configuration." >&2
+    exit 1
+  fi
+  if grep -Eq '^CONFIG_TOOLCHAIN_HAS_ZACAS=y' "${BUILD_DIR}/.config"; then
+    if ! grep -Eq '^CONFIG_RISCV_ISA_ZACAS=y' "${BUILD_DIR}/.config"; then
+      echo "error: MIN_PROFILE requires CONFIG_RISCV_ISA_ZACAS=y when toolchain supports Zacas." >&2
+      echo "hint: verify Zacas is enabled in final kernel configuration." >&2
+      exit 1
+    fi
+  fi
+  if ! grep -Eq '^CONFIG_RISCV_ISA_ZICBOM=y' "${BUILD_DIR}/.config"; then
+    echo "error: MIN_PROFILE requires CONFIG_RISCV_ISA_ZICBOM=y for this phase profile." >&2
+    echo "hint: verify Zicbom is enabled in final kernel configuration." >&2
+    exit 1
+  fi
+  if ! grep -Eq '^CONFIG_RISCV_ISA_ZICBOZ=y' "${BUILD_DIR}/.config"; then
+    echo "error: MIN_PROFILE requires CONFIG_RISCV_ISA_ZICBOZ=y for this phase profile." >&2
+    echo "hint: verify Zicboz is enabled in final kernel configuration." >&2
+    exit 1
+  fi
+  if ! grep -Eq '^CONFIG_RISCV_ISA_ZICBOP=y' "${BUILD_DIR}/.config"; then
+    echo "error: MIN_PROFILE requires CONFIG_RISCV_ISA_ZICBOP=y for this phase profile." >&2
+    echo "hint: verify Zicbop is enabled in final kernel configuration." >&2
+    exit 1
+  fi
+  if ! grep -Eq '^CONFIG_RISCV_ISA_C=y' "${BUILD_DIR}/.config"; then
+    echo "error: MIN_PROFILE requires CONFIG_RISCV_ISA_C=y for this phase profile." >&2
+    echo "hint: verify C extension is enabled in final kernel configuration." >&2
+    exit 1
+  fi
+  if ! grep -Eq '^CONFIG_RISCV_ISA_V=y' "${BUILD_DIR}/.config"; then
+    echo "error: MIN_PROFILE requires CONFIG_RISCV_ISA_V=y for this phase profile." >&2
+    echo "hint: verify V extension is enabled in final kernel configuration." >&2
+    exit 1
+  fi
+fi
 
 echo "building kernel artifacts..."
 run_make -j"${JOBS}" "${MAKE_ARGS[@]}" Image vmlinux

@@ -81,6 +81,21 @@ module RHDL
     DIVU   = 17
     REM    = 18
     REMU   = 19
+    SH1ADD = 20
+    SH2ADD = 21
+    SH3ADD = 22
+    ANDN   = 23
+    ORN    = 24
+    XNOR   = 25
+    MIN    = 26
+    MAX    = 27
+    MINU   = 28
+    MAXU   = 29
+    PACK   = 30
+    PACKH  = 31
+    CLMUL  = 32
+    CLMULH = 33
+    CLMULR = 34
   end
 
   # Instruction format types

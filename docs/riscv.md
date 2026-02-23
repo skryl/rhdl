@@ -248,7 +248,7 @@ Optional flags:
 - `examples/riscv/software/bin/linux_busybox`
 
 By default, `build_linux.sh` also applies an aggressive RV32 minimum-size profile tuned for this core
-(RV32IMA-focused ISA + stripped subsystems) to keep `linux_kernel.bin` small while preserving UART
+(RV32IMAF-focused ISA + stripped subsystems) to keep `linux_kernel.bin` small while preserving UART
 boot milestones.
 Rootfs artifacts are built via Buildroot using a NOMMU RV32 BusyBox profile (no local init shim).
 The default kernel cmdline launches `/bin/sh` from BusyBox for an immediate interactive shell.
