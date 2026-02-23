@@ -104,7 +104,7 @@ module RHDL
       wire :id_opcode, width: 7
       wire :id_funct3, width: 3
       wire :id_funct7, width: 7
-      wire :id_alu_op, width: 5
+      wire :id_alu_op, width: 6
       wire :id_alu_src
       wire :id_reg_write
       wire :id_mem_read
@@ -116,6 +116,7 @@ module RHDL
       wire :id_imm, width: 32
       wire :id_rs1_data, width: 32
       wire :id_rs2_data, width: 32
+      wire :id_rs3_data, width: 32
       wire :id_fp_rs1_data, width: 32
       wire :id_fp_rs2_data, width: 32
       wire :regfile_forwarding_en
@@ -135,6 +136,7 @@ module RHDL
       wire :id_ex_pc_plus4_in, width: 32
       wire :id_ex_rs1_data_in, width: 32
       wire :id_ex_rs2_data_in, width: 32
+      wire :id_ex_rd_src_data_in, width: 32
       wire :id_ex_imm_in, width: 32
       wire :id_ex_rs1_addr_in, width: 5
       wire :id_ex_rs2_addr_in, width: 5
@@ -142,7 +144,7 @@ module RHDL
       wire :id_ex_opcode_in, width: 7
       wire :id_ex_funct3_in, width: 3
       wire :id_ex_funct7_in, width: 7
-      wire :id_ex_alu_op_in, width: 5
+      wire :id_ex_alu_op_in, width: 6
       wire :id_ex_alu_src_in
       wire :id_ex_reg_write_in
       wire :id_ex_mem_read_in
@@ -160,6 +162,7 @@ module RHDL
       wire :ex_pc_plus4, width: 32
       wire :ex_rs1_data, width: 32
       wire :ex_rs2_data, width: 32
+      wire :ex_rd_src_data, width: 32
       wire :ex_imm, width: 32
       wire :ex_rs1_addr, width: 5
       wire :ex_rs2_addr, width: 5
@@ -167,7 +170,7 @@ module RHDL
       wire :ex_opcode, width: 7
       wire :ex_funct3, width: 3
       wire :ex_funct7, width: 7
-      wire :ex_alu_op, width: 5
+      wire :ex_alu_op, width: 6
       wire :ex_alu_src
       wire :ex_reg_write
       wire :ex_mem_read
@@ -210,6 +213,7 @@ module RHDL
       wire :alu_a, width: 32
       wire :alu_b, width: 32
       wire :forwarded_rs2, width: 32
+      wire :forwarded_rd_src, width: 32
       wire :alu_result, width: 32
       wire :ex_result, width: 32
       wire :alu_zero
@@ -255,6 +259,7 @@ module RHDL
       # ========================================
       wire :ex_mem_alu_result_in, width: 32
       wire :ex_mem_rs2_data_in, width: 32
+      wire :ex_mem_rd_src_data_in, width: 32
       wire :ex_mem_rd_addr_in, width: 5
       wire :ex_mem_pc_plus4_in, width: 32
       wire :ex_mem_funct3_in, width: 3
@@ -272,6 +277,7 @@ module RHDL
       # ========================================
       wire :mem_alu_result, width: 32
       wire :mem_rs2_data, width: 32
+      wire :mem_rd_src_data, width: 32
       wire :mem_rd_addr, width: 5
       wire :mem_funct3, width: 3
       wire :mem_funct7, width: 7
@@ -462,6 +468,7 @@ module RHDL
       # ========================================
       port :id_rs1_addr => [:regfile, :rs1_addr]
       port :id_rs2_addr => [:regfile, :rs2_addr]
+      port :id_rd_addr => [:regfile, :rs3_addr]
       port :wb_rd_addr => [:regfile, :rd_addr]
       port :wb_data => [:regfile, :rd_data]
       port :wb_reg_write => [:regfile, :rd_we]
@@ -469,6 +476,7 @@ module RHDL
       port :debug_reg_addr => [:regfile, :debug_raddr]
       port [:regfile, :rs1_data] => :id_rs1_data
       port [:regfile, :rs2_data] => :id_rs2_data
+      port [:regfile, :rs3_data] => :id_rs3_data
       port [:regfile, :debug_x1] => :debug_x1
       port [:regfile, :debug_x2] => :debug_x2
       port [:regfile, :debug_x10] => :debug_x10
@@ -626,6 +634,7 @@ module RHDL
       port :id_ex_pc_plus4_in => [:id_ex, :pc_plus4_in]
       port :id_ex_rs1_data_in => [:id_ex, :rs1_data_in]
       port :id_ex_rs2_data_in => [:id_ex, :rs2_data_in]
+      port :id_ex_rd_src_data_in => [:id_ex, :rd_src_data_in]
       port :id_ex_imm_in => [:id_ex, :imm_in]
       port :id_ex_rs1_addr_in => [:id_ex, :rs1_addr_in]
       port :id_ex_rs2_addr_in => [:id_ex, :rs2_addr_in]
@@ -648,6 +657,7 @@ module RHDL
       port [:id_ex, :pc_plus4_out] => :ex_pc_plus4
       port [:id_ex, :rs1_data_out] => :ex_rs1_data
       port [:id_ex, :rs2_data_out] => :ex_rs2_data
+      port [:id_ex, :rd_src_data_out] => :ex_rd_src_data
       port [:id_ex, :imm_out] => :ex_imm
       port [:id_ex, :rs1_addr_out] => :ex_rs1_addr
       port [:id_ex, :rs2_addr_out] => :ex_rs2_addr
@@ -698,6 +708,7 @@ module RHDL
       # ========================================
       port :ex_mem_alu_result_in => [:ex_mem, :alu_result_in]
       port :ex_mem_rs2_data_in => [:ex_mem, :rs2_data_in]
+      port :ex_mem_rd_src_data_in => [:ex_mem, :rd_src_data_in]
       port :ex_mem_rd_addr_in => [:ex_mem, :rd_addr_in]
       port :ex_mem_pc_plus4_in => [:ex_mem, :pc_plus4_in]
       port :ex_mem_funct3_in => [:ex_mem, :funct3_in]
@@ -712,6 +723,7 @@ module RHDL
       # Outputs
       port [:ex_mem, :alu_result_out] => :mem_alu_result
       port [:ex_mem, :rs2_data_out] => :mem_rs2_data
+      port [:ex_mem, :rd_src_data_out] => :mem_rd_src_data
       port [:ex_mem, :rd_addr_out] => :mem_rd_addr
       port [:ex_mem, :funct3_out] => :mem_funct3
       port [:ex_mem, :funct7_out] => :mem_funct7
@@ -847,6 +859,7 @@ module RHDL
         id_ex_pc_plus4_in <= id_pc_plus4
         id_ex_rs1_data_in <= mux(id_is_fmv_x_w, id_fp_rs1_data, id_rs1_data)
         id_ex_rs2_data_in <= mux(id_is_fp_store, id_fp_rs2_data, id_rs2_data)
+        id_ex_rd_src_data_in <= id_rs3_data
         id_ex_imm_in <= id_imm
         id_ex_rs1_addr_in <= id_rs1_addr
         id_ex_rs2_addr_in <= id_rs2_addr
@@ -951,6 +964,13 @@ module RHDL
         # ALU B input: immediate or forwarded rs2
         alu_b <= mux(ex_alu_src, ex_imm, forwarded_rs2)
 
+        # Forward rd source (used by AMOCAS expected-value semantics)
+        forwarded_rd_src <= mux((mem_reg_write & (mem_rd_addr != lit(0, width: 5)) & (mem_rd_addr == ex_rd_addr)),
+                                mem_alu_result,
+                                mux((wb_reg_write & (wb_rd_addr != lit(0, width: 5)) & (wb_rd_addr == ex_rd_addr)),
+                                    wb_data,
+                                    ex_rd_src_data))
+
         ex_v_lane0_active = local(:ex_v_lane0_active, vec_vl > lit(0, width: 32), width: 1)
         ex_v_lane1_active = local(:ex_v_lane1_active, vec_vl > lit(1, width: 32), width: 1)
         ex_v_lane2_active = local(:ex_v_lane2_active, vec_vl > lit(2, width: 32), width: 1)
@@ -1010,10 +1030,12 @@ module RHDL
                          ex_is_amo_word & (ex_amo_funct5 == lit(0b00010, width: 5)) & (ex_rs2_addr == lit(0, width: 5)),
                          width: 1)
         ex_is_sc = local(:ex_is_sc, ex_is_amo_word & (ex_amo_funct5 == lit(0b00011, width: 5)), width: 1)
+        ex_is_amocas = local(:ex_is_amocas, ex_is_amo_word & (ex_amo_funct5 == lit(0b00101, width: 5)), width: 1)
         ex_is_amo_rmw = local(:ex_is_amo_rmw,
                               ex_is_amo_word & (
                                 (ex_amo_funct5 == lit(0b00000, width: 5)) |
                                 (ex_amo_funct5 == lit(0b00001, width: 5)) |
+                                (ex_amo_funct5 == lit(0b00101, width: 5)) |
                                 (ex_amo_funct5 == lit(0b00100, width: 5)) |
                                 (ex_amo_funct5 == lit(0b01000, width: 5)) |
                                 (ex_amo_funct5 == lit(0b01100, width: 5)) |
@@ -1025,12 +1047,14 @@ module RHDL
                               width: 1)
         ex_is_amo = local(:ex_is_amo, ex_is_lr | ex_is_sc | ex_is_amo_rmw, width: 1)
         ex_is_wfi = local(:ex_is_wfi, ex_is_system_plain & (ex_sys_imm == lit(0x105, width: 12)), width: 1)
+        ex_is_wrs_nto = local(:ex_is_wrs_nto, ex_is_system_plain & (ex_sys_imm == lit(0x00D, width: 12)), width: 1)
+        ex_is_wrs_sto = local(:ex_is_wrs_sto, ex_is_system_plain & (ex_sys_imm == lit(0x01D, width: 12)), width: 1)
         ex_is_sfence_vma = local(:ex_is_sfence_vma,
                                  ex_is_system_plain & (ex_funct7 == lit(0b0001001, width: 7)) & (ex_rd_addr == lit(0, width: 5)),
                                  width: 1)
         ex_is_illegal_system = local(:ex_is_illegal_system,
                                      ex_is_system_plain & ~(ex_is_ecall | ex_is_ebreak | ex_is_mret | ex_is_sret |
-                                                            ex_is_wfi | ex_is_sfence_vma),
+                                                            ex_is_wfi | ex_is_wrs_nto | ex_is_wrs_sto | ex_is_sfence_vma),
                                      width: 1)
         ex_irq_pending_bits = local(:ex_irq_pending_bits,
                                     mux(irq_software, lit(0x8, width: 32), lit(0, width: 32)) |
@@ -1439,6 +1463,7 @@ module RHDL
         # -----------------------------------------
         ex_mem_alu_result_in <= ex_result
         ex_mem_rs2_data_in <= forwarded_rs2
+        ex_mem_rd_src_data_in <= forwarded_rd_src
         ex_mem_rd_addr_in <= ex_rd_addr
         ex_mem_pc_plus4_in <= ex_pc_plus4
         ex_mem_funct3_in <= ex_funct3
@@ -1462,10 +1487,12 @@ module RHDL
                           mem_is_amo_word & (mem_amo_funct5 == lit(0b00010, width: 5)) & (mem_rs2_addr == lit(0, width: 5)),
                           width: 1)
         mem_is_sc = local(:mem_is_sc, mem_is_amo_word & (mem_amo_funct5 == lit(0b00011, width: 5)), width: 1)
+        mem_is_amocas = local(:mem_is_amocas, mem_is_amo_word & (mem_amo_funct5 == lit(0b00101, width: 5)), width: 1)
         mem_is_amo_rmw = local(:mem_is_amo_rmw,
                                mem_is_amo_word & (
                                  (mem_amo_funct5 == lit(0b00000, width: 5)) |
                                  (mem_amo_funct5 == lit(0b00001, width: 5)) |
+                                 (mem_amo_funct5 == lit(0b00101, width: 5)) |
                                  (mem_amo_funct5 == lit(0b00100, width: 5)) |
                                  (mem_amo_funct5 == lit(0b01000, width: 5)) |
                                  (mem_amo_funct5 == lit(0b01100, width: 5)) |
@@ -1496,9 +1523,12 @@ module RHDL
         mem_amo_max_signed = local(:mem_amo_max_signed, mux(mem_amo_old_lt_signed, mem_rs2_data, mem_amo_old), width: 32)
         mem_amo_min_unsigned = local(:mem_amo_min_unsigned, mux(mem_amo_old < mem_rs2_data, mem_amo_old, mem_rs2_data), width: 32)
         mem_amo_max_unsigned = local(:mem_amo_max_unsigned, mux(mem_amo_old < mem_rs2_data, mem_rs2_data, mem_amo_old), width: 32)
+        mem_amo_expected = local(:mem_amo_expected, mem_rd_src_data, width: 32)
+        mem_amo_cas_success = local(:mem_amo_cas_success, mem_amo_old == mem_amo_expected, width: 1)
         mem_amo_new_data = local(:mem_amo_new_data, case_select(mem_amo_funct5, {
           0b00000 => mem_amo_old + mem_rs2_data,
           0b00001 => mem_rs2_data,
+          0b00101 => mem_rs2_data,
           0b00100 => mem_amo_old ^ mem_rs2_data,
           0b01000 => mem_amo_old | mem_rs2_data,
           0b01100 => mem_amo_old & mem_rs2_data,
@@ -1509,7 +1539,10 @@ module RHDL
         }, default: mem_rs2_data), width: 32)
         mem_sc_success = local(:mem_sc_success, reservation_valid & (reservation_addr == mem_alu_result), width: 1)
         mem_amo_read = local(:mem_amo_read, mem_is_lr | mem_is_amo_rmw, width: 1)
-        mem_amo_write = local(:mem_amo_write, (mem_is_sc & mem_sc_success) | mem_is_amo_rmw, width: 1)
+        mem_amo_write = local(:mem_amo_write,
+                              (mem_is_sc & mem_sc_success) |
+                              (mem_is_amo_rmw & (~mem_is_amocas | mem_amo_cas_success)),
+                              width: 1)
         mem_sc_result = local(:mem_sc_result,
                               mux(mem_sc_success, lit(0, width: 32), lit(1, width: 32)),
                               width: 32)

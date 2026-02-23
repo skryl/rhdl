@@ -141,6 +141,15 @@ module RHDL
       encode_i_type(0, 0, 0x105, 0b000, Opcode::SYSTEM)
     end
 
+    # Zawrs instructions (SYSTEM plain forms)
+    def self.wrs_nto
+      encode_i_type(0, 0, 0x00D, 0b000, Opcode::SYSTEM)
+    end
+
+    def self.wrs_sto
+      encode_i_type(0, 0, 0x01D, 0b000, Opcode::SYSTEM)
+    end
+
     def self.sfence_vma(rs1 = 0, rs2 = 0)
       # SYSTEM R-type form:
       # funct7=0001001, rs2, rs1, funct3=000, rd=x0, opcode=SYSTEM
@@ -319,6 +328,70 @@ module RHDL
       encode_r_type(rd, rs1, rs2, Funct3::AND, Funct7::NORMAL, Opcode::OP)
     end
 
+    # Zba extension
+    def self.sh1add(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::SLT, 0b0010000, Opcode::OP)
+    end
+
+    def self.sh2add(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::XOR, 0b0010000, Opcode::OP)
+    end
+
+    def self.sh3add(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::OR, 0b0010000, Opcode::OP)
+    end
+
+    # Zbb extension (phase-scoped subset)
+    def self.andn(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::AND, 0b0100000, Opcode::OP)
+    end
+
+    def self.orn(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::OR, 0b0100000, Opcode::OP)
+    end
+
+    def self.xnor(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::XOR, 0b0100000, Opcode::OP)
+    end
+
+    def self.min(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::XOR, 0b0000101, Opcode::OP)
+    end
+
+    def self.max(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::OR, 0b0000101, Opcode::OP)
+    end
+
+    def self.minu(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::SRL_SRA, 0b0000101, Opcode::OP)
+    end
+
+    def self.maxu(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::AND, 0b0000101, Opcode::OP)
+    end
+
+    # Zbkb subset
+    def self.pack(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::XOR, 0b0000100, Opcode::OP)
+    end
+
+    def self.packh(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::AND, 0b0000100, Opcode::OP)
+    end
+
+    # Zbc subset
+    def self.clmul(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::SLL, 0b0000101, Opcode::OP)
+    end
+
+    def self.clmulh(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::SLTU, 0b0000101, Opcode::OP)
+    end
+
+    def self.clmulr(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::SLT, 0b0000101, Opcode::OP)
+    end
+
     # RV32M extension
     def self.mul(rd, rs1, rs2)
       encode_r_type(rd, rs1, rs2, Funct3::ADD_SUB, Funct7::M_EXT, Opcode::OP)
@@ -406,6 +479,41 @@ module RHDL
       encode_amo_type(rd, rs1, rs2, 0b11100, aq: aq, rl: rl)
     end
 
+    # Zacas extension (word form)
+    def self.amocas_w(rd, rs2, rs1, aq: 0, rl: 0)
+      encode_amo_type(rd, rs1, rs2, 0b00101, aq: aq, rl: rl)
+    end
+
+    # Zicbop prefetch hints (safe no-op in current memory model)
+    def self.prefetch_i(rs1, offset = 0)
+      encode_i_type(0, rs1, offset & 0xFFF, Funct3::OR, Opcode::OP_IMM)
+    end
+
+    def self.prefetch_r(rs1, offset = 0)
+      encode_i_type(0, rs1, (offset & 0xFFE) | 0x001, Funct3::OR, Opcode::OP_IMM)
+    end
+
+    def self.prefetch_w(rs1, offset = 0)
+      encode_i_type(0, rs1, (offset & 0xFFC) | 0x003, Funct3::OR, Opcode::OP_IMM)
+    end
+
+    # Zicbom / Zicboz cache-block ops (safe no-op in current memory model)
+    def self.cbo_inval(rs1, offset = 0)
+      encode_i_type(0, rs1, (offset & 0xFF8) | 0x000, 0b010, Opcode::MISC_MEM)
+    end
+
+    def self.cbo_clean(rs1, offset = 0)
+      encode_i_type(0, rs1, (offset & 0xFF8) | 0x001, 0b010, Opcode::MISC_MEM)
+    end
+
+    def self.cbo_flush(rs1, offset = 0)
+      encode_i_type(0, rs1, (offset & 0xFF8) | 0x002, 0b010, Opcode::MISC_MEM)
+    end
+
+    def self.cbo_zero(rs1, offset = 0)
+      encode_i_type(0, rs1, (offset & 0xFF8) | 0x004, 0b010, Opcode::MISC_MEM)
+    end
+
     # RVV baseline subset
     # Scoped assumptions:
     # - OP-V opcode form
@@ -457,6 +565,58 @@ module RHDL
       raise ArgumentError, 'c.li rd must be non-zero' if (rd & 0x1F).zero?
 
       c_raw(encode_c_ci(0b010, rd, imm))
+    end
+
+    def self.c_addi4spn(rd, imm)
+      c_raw(encode_c_addi4spn(rd, imm))
+    end
+
+    def self.c_lui(rd, imm)
+      c_raw(encode_c_lui(rd, imm))
+    end
+
+    def self.c_addi16sp(imm)
+      c_raw(encode_c_addi16sp(imm))
+    end
+
+    def self.c_slli(rd, shamt)
+      c_raw(encode_c_slli(rd, shamt))
+    end
+
+    def self.c_srli(rd, shamt)
+      c_raw(encode_c_srli(rd, shamt))
+    end
+
+    def self.c_srai(rd, shamt)
+      c_raw(encode_c_srai(rd, shamt))
+    end
+
+    def self.c_andi(rd, imm)
+      c_raw(encode_c_andi(rd, imm))
+    end
+
+    def self.c_sub(rd, rs2)
+      c_raw(encode_c_ca(0b00, rd, rs2))
+    end
+
+    def self.c_xor(rd, rs2)
+      c_raw(encode_c_ca(0b01, rd, rs2))
+    end
+
+    def self.c_or(rd, rs2)
+      c_raw(encode_c_ca(0b10, rd, rs2))
+    end
+
+    def self.c_and(rd, rs2)
+      c_raw(encode_c_ca(0b11, rd, rs2))
+    end
+
+    def self.c_lwsp(rd, offset)
+      c_raw(encode_c_lwsp(rd, offset))
+    end
+
+    def self.c_swsp(rs2, offset)
+      c_raw(encode_c_swsp(rs2, offset))
     end
 
     def self.c_lw(rd, rs1, offset)
@@ -620,6 +780,21 @@ module RHDL
       when 'sra' then self.class.sra(reg(args[0]), reg(args[1]), reg(args[2]))
       when 'or' then self.class.or(reg(args[0]), reg(args[1]), reg(args[2]))
       when 'and' then self.class.and(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'sh1add' then self.class.sh1add(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'sh2add' then self.class.sh2add(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'sh3add' then self.class.sh3add(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'andn' then self.class.andn(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'orn' then self.class.orn(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'xnor' then self.class.xnor(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'min' then self.class.min(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'max' then self.class.max(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'minu' then self.class.minu(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'maxu' then self.class.maxu(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'pack' then self.class.pack(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'packh' then self.class.packh(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'clmul' then self.class.clmul(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'clmulh' then self.class.clmulh(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'clmulr' then self.class.clmulr(reg(args[0]), reg(args[1]), reg(args[2]))
       when 'mul' then self.class.mul(reg(args[0]), reg(args[1]), reg(args[2]))
       when 'mulh' then self.class.mulh(reg(args[0]), reg(args[1]), reg(args[2]))
       when 'mulhsu' then self.class.mulhsu(reg(args[0]), reg(args[1]), reg(args[2]))
@@ -644,6 +819,14 @@ module RHDL
       when 'amomax.w' then self.class.amomax_w(reg(args[0]), reg(args[1]), reg(args[2]))
       when 'amominu.w' then self.class.amominu_w(reg(args[0]), reg(args[1]), reg(args[2]))
       when 'amomaxu.w' then self.class.amomaxu_w(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'amocas.w' then self.class.amocas_w(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'prefetch.i' then self.class.prefetch_i(reg(args[1]), imm(args[0]))
+      when 'prefetch.r' then self.class.prefetch_r(reg(args[1]), imm(args[0]))
+      when 'prefetch.w' then self.class.prefetch_w(reg(args[1]), imm(args[0]))
+      when 'cbo.inval' then self.class.cbo_inval(reg(args[1]), imm(args[0]))
+      when 'cbo.clean' then self.class.cbo_clean(reg(args[1]), imm(args[0]))
+      when 'cbo.flush' then self.class.cbo_flush(reg(args[1]), imm(args[0]))
+      when 'cbo.zero' then self.class.cbo_zero(reg(args[1]), imm(args[0]))
 
       # I-type arithmetic
       when 'addi' then self.class.addi(reg(args[0]), reg(args[1]), imm(args[2]))
@@ -693,6 +876,8 @@ module RHDL
       when 'mret' then self.class.mret
       when 'sret' then self.class.sret
       when 'wfi' then self.class.wfi
+      when 'wrs.nto' then self.class.wrs_nto
+      when 'wrs.sto' then self.class.wrs_sto
       when 'sfence.vma' then self.class.sfence_vma(reg(args[0] || 'x0'), reg(args[1] || 'x0'))
       when 'csrrw' then self.class.csrrw(reg(args[0]), imm(args[1]), reg(args[2]))
       when 'csrrs' then self.class.csrrs(reg(args[0]), imm(args[1]), reg(args[2]))
@@ -841,6 +1026,137 @@ module RHDL
       raise ArgumentError, 'RV32C prime register must be x8..x15' unless reg >= 8 && reg <= 15
 
       reg - 8
+    end
+
+    def self.encode_c_addi4spn(rd, imm)
+      raise ArgumentError, "c.addi4spn immediate must be in 4..1020 and 4-byte aligned: #{imm}" unless imm >= 4 && imm <= 1020 && (imm & 0x3).zero?
+
+      rdp = encode_c_prime_reg(rd)
+      uimm = imm & 0x3FF
+
+      (0b000 << 13) |
+        (((uimm >> 5) & 0x1) << 12) |
+        (((uimm >> 4) & 0x1) << 11) |
+        (((uimm >> 9) & 0x1) << 10) |
+        (((uimm >> 8) & 0x1) << 9) |
+        (((uimm >> 7) & 0x1) << 8) |
+        (((uimm >> 6) & 0x1) << 7) |
+        (((uimm >> 2) & 0x1) << 6) |
+        (((uimm >> 3) & 0x1) << 5) |
+        (rdp << 2) |
+        0b00
+    end
+
+    def self.encode_c_lui(rd, imm)
+      rd &= 0x1F
+      raise ArgumentError, 'c.lui rd must be non-zero and not x2' if rd.zero? || rd == 2
+      raise ArgumentError, "c.lui immediate must be in [-32, -1] or [1, 31]: #{imm}" if imm < -32 || imm > 31 || imm.zero?
+
+      imm6 = imm & 0x3F
+      (0b011 << 13) |
+        (((imm6 >> 5) & 0x1) << 12) |
+        (rd << 7) |
+        ((imm6 & 0x1F) << 2) |
+        0b01
+    end
+
+    def self.encode_c_addi16sp(imm)
+      raise ArgumentError, "c.addi16sp immediate must be in [-512, 496], non-zero, and 16-byte aligned: #{imm}" unless imm >= -512 && imm <= 496 && !imm.zero? && (imm & 0xF).zero?
+
+      uimm = imm & 0x3FF
+      (0b011 << 13) |
+        (((uimm >> 9) & 0x1) << 12) |
+        (2 << 7) |
+        (((uimm >> 4) & 0x1) << 6) |
+        (((uimm >> 6) & 0x1) << 5) |
+        (((uimm >> 8) & 0x1) << 4) |
+        (((uimm >> 7) & 0x1) << 3) |
+        (((uimm >> 5) & 0x1) << 2) |
+        0b01
+    end
+
+    def self.encode_c_slli(rd, shamt)
+      rd &= 0x1F
+      raise ArgumentError, 'c.slli rd must be non-zero' if rd.zero?
+      raise ArgumentError, "c.slli shamt must be in 1..31: #{shamt}" unless shamt >= 1 && shamt <= 31
+
+      (0b000 << 13) |
+        (rd << 7) |
+        ((shamt & 0x1F) << 2) |
+        0b10
+    end
+
+    def self.encode_c_srli(rd, shamt)
+      rdp = encode_c_prime_reg(rd)
+      raise ArgumentError, "c.srli shamt must be in 1..31: #{shamt}" unless shamt >= 1 && shamt <= 31
+
+      (0b100 << 13) |
+        (0b00 << 10) |
+        (rdp << 7) |
+        ((shamt & 0x1F) << 2) |
+        0b01
+    end
+
+    def self.encode_c_srai(rd, shamt)
+      rdp = encode_c_prime_reg(rd)
+      raise ArgumentError, "c.srai shamt must be in 1..31: #{shamt}" unless shamt >= 1 && shamt <= 31
+
+      (0b100 << 13) |
+        (0b01 << 10) |
+        (rdp << 7) |
+        ((shamt & 0x1F) << 2) |
+        0b01
+    end
+
+    def self.encode_c_andi(rd, imm)
+      rdp = encode_c_prime_reg(rd)
+      raise ArgumentError, "c.andi immediate must be in [-32, 31]: #{imm}" unless imm >= -32 && imm <= 31
+
+      imm6 = imm & 0x3F
+      (0b100 << 13) |
+        (((imm6 >> 5) & 0x1) << 12) |
+        (0b10 << 10) |
+        (rdp << 7) |
+        ((imm6 & 0x1F) << 2) |
+        0b01
+    end
+
+    def self.encode_c_ca(funct2, rd, rs2)
+      rdp = encode_c_prime_reg(rd)
+      rs2p = encode_c_prime_reg(rs2)
+
+      (0b100 << 13) |
+        (0b11 << 10) |
+        (rdp << 7) |
+        ((funct2 & 0x3) << 5) |
+        (rs2p << 2) |
+        0b01
+    end
+
+    def self.encode_c_lwsp(rd, offset)
+      rd &= 0x1F
+      raise ArgumentError, 'c.lwsp rd must be non-zero' if rd.zero?
+      raise ArgumentError, "c.lwsp offset must be 0..252 and 4-byte aligned: #{offset}" unless offset >= 0 && offset <= 252 && (offset & 0x3).zero?
+
+      uimm = offset & 0xFF
+      (0b010 << 13) |
+        (((uimm >> 5) & 0x1) << 12) |
+        (rd << 7) |
+        (((uimm >> 2) & 0x7) << 4) |
+        (((uimm >> 6) & 0x3) << 2) |
+        0b10
+    end
+
+    def self.encode_c_swsp(rs2, offset)
+      rs2 &= 0x1F
+      raise ArgumentError, "c.swsp offset must be 0..252 and 4-byte aligned: #{offset}" unless offset >= 0 && offset <= 252 && (offset & 0x3).zero?
+
+      uimm = offset & 0xFF
+      (0b110 << 13) |
+        (((uimm >> 2) & 0xF) << 9) |
+        (((uimm >> 6) & 0x3) << 7) |
+        (rs2 << 2) |
+        0b10
     end
 
     def self.encode_c_lw(rs1, rd, offset)

@@ -1,6 +1,6 @@
 # RV32I Register File - 32 x 32-bit registers
 # Register x0 is hardwired to zero
-# Two read ports, one write port
+# Three read ports, one write port
 # Uses sequential DSL for synthesizable Verilog
 
 require_relative '../../../lib/rhdl'
@@ -22,8 +22,10 @@ module RHDL
     # Read ports (asynchronous)
     input :rs1_addr, width: 5    # Source register 1 address
     input :rs2_addr, width: 5    # Source register 2 address
+    input :rs3_addr, width: 5    # Source register 3 address
     output :rs1_data, width: 32  # Source register 1 data
     output :rs2_data, width: 32  # Source register 2 data
+    output :rs3_data, width: 32  # Source register 3 data
 
     # Write port (synchronous)
     input :rd_addr, width: 5     # Destination register address
@@ -52,6 +54,7 @@ module RHDL
 
       rs1_raw = local(:rs1_raw, mem_read_expr(:regs, rs1_addr, width: 32), width: 32)
       rs2_raw = local(:rs2_raw, mem_read_expr(:regs, rs2_addr, width: 32), width: 32)
+      rs3_raw = local(:rs3_raw, mem_read_expr(:regs, rs3_addr, width: 32), width: 32)
       debug_raw = local(:debug_raw, mem_read_expr(:regs, debug_raddr, width: 32), width: 32)
 
       fwd_rs1 = local(:fwd_rs1,
@@ -60,11 +63,16 @@ module RHDL
       fwd_rs2 = local(:fwd_rs2,
                       forwarding_en & rd_we & rd_nonzero & (rs2_addr == rd_addr),
                       width: 1)
+      fwd_rs3 = local(:fwd_rs3,
+                      forwarding_en & rd_we & rd_nonzero & (rs3_addr == rd_addr),
+                      width: 1)
 
       rs1_data <= mux(rs1_addr == lit(0, width: 5), lit(0, width: 32),
                       mux(fwd_rs1, rd_data, rs1_raw))
       rs2_data <= mux(rs2_addr == lit(0, width: 5), lit(0, width: 32),
                       mux(fwd_rs2, rd_data, rs2_raw))
+      rs3_data <= mux(rs3_addr == lit(0, width: 5), lit(0, width: 32),
+                      mux(fwd_rs3, rd_data, rs3_raw))
       debug_rdata <= mux(debug_raddr == lit(0, width: 5), lit(0, width: 32), debug_raw)
 
       debug_x1 <= mem_read_expr(:regs, lit(1, width: 5), width: 32)
@@ -116,6 +124,7 @@ module RHDL
     def update_outputs
       rs1_addr = in_val(:rs1_addr)
       rs2_addr = in_val(:rs2_addr)
+      rs3_addr = in_val(:rs3_addr)
 
       if @forwarding
         # Internal forwarding: if reading the register being written, return write data
@@ -128,19 +137,23 @@ module RHDL
         if rd_we == 1 && rd_addr != 0
           rs1_val = (rs1_addr == rd_addr) ? rd_data : (rs1_addr == 0 ? 0 : @regs[rs1_addr])
           rs2_val = (rs2_addr == rd_addr) ? rd_data : (rs2_addr == 0 ? 0 : @regs[rs2_addr])
+          rs3_val = (rs3_addr == rd_addr) ? rd_data : (rs3_addr == 0 ? 0 : @regs[rs3_addr])
         else
           rs1_val = rs1_addr == 0 ? 0 : @regs[rs1_addr]
           rs2_val = rs2_addr == 0 ? 0 : @regs[rs2_addr]
+          rs3_val = rs3_addr == 0 ? 0 : @regs[rs3_addr]
         end
       else
         # Simple reads from register array
         # In single-cycle design, writes happen at clock edge after all reads complete
         rs1_val = rs1_addr == 0 ? 0 : @regs[rs1_addr]
         rs2_val = rs2_addr == 0 ? 0 : @regs[rs2_addr]
+        rs3_val = rs3_addr == 0 ? 0 : @regs[rs3_addr]
       end
 
       out_set(:rs1_data, rs1_val)
       out_set(:rs2_data, rs2_val)
+      out_set(:rs3_data, rs3_val)
 
       # Debug outputs
       out_set(:debug_x1, @regs[1])

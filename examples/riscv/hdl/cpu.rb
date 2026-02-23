@@ -76,6 +76,7 @@ module RHDL
     wire :imm, width: 32
     wire :rs1_data, width: 32
     wire :rs2_data, width: 32
+    wire :rd_lookup_data, width: 32
     wire :fp_rs1_data, width: 32
     wire :fp_rs2_data, width: 32
     wire :v_rs1_lane0, width: 32
@@ -112,7 +113,7 @@ module RHDL
     wire :reg_write_final
     wire :mem_read_final
     wire :mem_write_final
-    wire :alu_op, width: 5
+    wire :alu_op, width: 6
 
     # Internal signals - computed by behavior block
     wire :alu_a, width: 32
@@ -267,6 +268,7 @@ module RHDL
     # Register file connections
     port :rs1 => [:regfile, :rs1_addr]
     port :rs2 => [:regfile, :rs2_addr]
+    port :rd => [:regfile, :rs3_addr]
     port :rd => [:regfile, :rd_addr]
     port :rd_data => [:regfile, :rd_data]
     port :reg_write_final => [:regfile, :rd_we]
@@ -274,6 +276,7 @@ module RHDL
     port :debug_reg_addr => [:regfile, :debug_raddr]
     port [:regfile, :rs1_data] => :rs1_data
     port [:regfile, :rs2_data] => :rs2_data
+    port [:regfile, :rs3_data] => :rd_lookup_data
     port [:regfile, :debug_rdata] => :debug_reg_data
 
     # FP register file connections
@@ -560,10 +563,12 @@ module RHDL
                     is_amo_word & (amo_funct5 == lit(0b00010, width: 5)) & (rs2 == lit(0, width: 5)),
                     width: 1)
       is_sc = local(:is_sc, is_amo_word & (amo_funct5 == lit(0b00011, width: 5)), width: 1)
+      is_amocas = local(:is_amocas, is_amo_word & (amo_funct5 == lit(0b00101, width: 5)), width: 1)
       is_amo_rmw = local(:is_amo_rmw,
                          is_amo_word & (
                            (amo_funct5 == lit(0b00000, width: 5)) | # AMOADD.W
                            (amo_funct5 == lit(0b00001, width: 5)) | # AMOSWAP.W
+                           (amo_funct5 == lit(0b00101, width: 5)) | # AMOCAS.W
                            (amo_funct5 == lit(0b00100, width: 5)) | # AMOXOR.W
                            (amo_funct5 == lit(0b01000, width: 5)) | # AMOOR.W
                            (amo_funct5 == lit(0b01100, width: 5)) | # AMOAND.W
@@ -587,6 +592,7 @@ module RHDL
       amo_new_data = local(:amo_new_data, case_select(amo_funct5, {
         0b00000 => amo_old + rs2_data,  # AMOADD.W
         0b00001 => rs2_data,            # AMOSWAP.W
+        0b00101 => rs2_data,            # AMOCAS.W (store candidate)
         0b00100 => amo_old ^ rs2_data,  # AMOXOR.W
         0b01000 => amo_old | rs2_data,  # AMOOR.W
         0b01100 => amo_old & rs2_data,  # AMOAND.W
@@ -595,9 +601,14 @@ module RHDL
         0b11000 => amo_min_unsigned,    # AMOMINU.W
         0b11100 => amo_max_unsigned     # AMOMAXU.W
       }, default: rs2_data), width: 32)
+      amo_expected = local(:amo_expected, rd_lookup_data, width: 32)
+      amo_cas_success = local(:amo_cas_success, amo_old == amo_expected, width: 1)
       amo_sc_success = local(:amo_sc_success, reservation_valid & (reservation_addr == rs1_data), width: 1)
       amo_mem_read = local(:amo_mem_read, is_lr | is_amo_rmw, width: 1)
-      amo_mem_write = local(:amo_mem_write, (is_sc & amo_sc_success) | is_amo_rmw, width: 1)
+      amo_mem_write = local(:amo_mem_write,
+                            (is_sc & amo_sc_success) |
+                            (is_amo_rmw & (~is_amocas | amo_cas_success)),
+                            width: 1)
       amo_rd_data = local(:amo_rd_data,
                           mux(is_sc, mux(amo_sc_success, lit(0, width: 32), lit(1, width: 32)), amo_old),
                           width: 32)
@@ -754,11 +765,14 @@ module RHDL
       is_sret = local(:is_sret, is_system_plain & (sys_imm == lit(0x102, width: 12)), width: 1)
       is_mret = local(:is_mret, is_system_plain & (sys_imm == lit(0x302, width: 12)), width: 1)
       is_wfi = local(:is_wfi, is_system_plain & (sys_imm == lit(0x105, width: 12)), width: 1)
+      is_wrs_nto = local(:is_wrs_nto, is_system_plain & (sys_imm == lit(0x00D, width: 12)), width: 1)
+      is_wrs_sto = local(:is_wrs_sto, is_system_plain & (sys_imm == lit(0x01D, width: 12)), width: 1)
       is_sfence_vma = local(:is_sfence_vma,
                             is_system_plain & (inst_exec[31..25] == lit(0b0001001, width: 7)) & (rd == lit(0, width: 5)),
                             width: 1)
       is_illegal_system = local(:is_illegal_system,
-                                is_system_plain & ~(is_ecall | is_ebreak | is_mret | is_sret | is_wfi | is_sfence_vma),
+                                is_system_plain & ~(is_ecall | is_ebreak | is_mret | is_sret | is_wfi |
+                                                     is_wrs_nto | is_wrs_sto | is_sfence_vma),
                                 width: 1)
       irq_pending_bits = local(:irq_pending_bits,
                                mux(irq_software, lit(0x8, width: 32), lit(0, width: 32)) |
