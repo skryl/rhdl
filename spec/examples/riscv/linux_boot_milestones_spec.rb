@@ -17,49 +17,101 @@ LINUX_DTB_PATH = ENV.fetch(
   'RHDL_LINUX_DTB_PATH',
   File.expand_path('../../../examples/riscv/software/bin/rhdl_riscv_virt.dtb', __dir__)
 )
-LINUX_LOAD_ADDR = int_env('RHDL_LINUX_LOAD_ADDR', 0x8020_0000)
+LINUX_INITRAMFS_PATH = ENV.fetch(
+  'RHDL_LINUX_INITRAMFS_PATH',
+  File.expand_path('../../../examples/riscv/software/bin/linux_initramfs.cpio', __dir__)
+)
+LINUX_LOAD_ADDR = int_env('RHDL_LINUX_LOAD_ADDR', 0x8040_0000)
 LINUX_BOOT_CYCLES = int_env('RHDL_LINUX_BOOT_CYCLES', 80_000_000)
-LINUX_MILESTONE_CYCLES = int_env('RHDL_LINUX_MILESTONE_CYCLES', 120_000_000)
+LINUX_MILESTONE_CYCLES = int_env('RHDL_LINUX_MILESTONE_CYCLES', 400_000_000)
 LINUX_STEP_CYCLES = int_env('RHDL_LINUX_STEP_CYCLES', 200_000)
-
-LINUX_PROMPT_MARKERS = begin
+LINUX_NO_UART_PROGRESS_CYCLES = int_env('RHDL_LINUX_NO_UART_PROGRESS_CYCLES', 80_000_000)
+LINUX_LIVE_UART = ENV.fetch('RHDL_LINUX_LIVE_UART', '1') != '0'
+LINUX_FAIL_FAST_MARKERS = begin
   raw = ENV.fetch(
-    'RHDL_LINUX_PROMPT_MARKERS',
-    'Machine model:,earlycon:,printk:,Kernel panic - not syncing:,Run /sbin/init,login:,Please press Enter to activate this console.,/ #,# '
+    'RHDL_LINUX_FAIL_FAST_MARKERS',
+    'Kernel panic - not syncing:,VFS: Unable to mount root fs,Unable to mount root fs,No working init found'
   )
-  markers = raw.split(',').map(&:strip).reject(&:empty?)
-  markers.empty? ? ['Machine model:'] : markers
+  raw.split(',').map(&:strip).reject(&:empty?)
 end.freeze
 
-LINUX_BOOT_BACKEND = if RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
-                       :compile
-                     elsif RHDL::Codegen::IR::IR_JIT_AVAILABLE
-                       :jit
-                     elsif RHDL::Codegen::IR::IR_INTERPRETER_AVAILABLE
-                       :interpret
-                     end
+LINUX_INIT_MARKERS = begin
+  raw = ENV.fetch(
+    'RHDL_LINUX_INIT_MARKERS',
+    'Run /sbin/init as init process,Run /init as init process,Please press Enter to activate this console.'
+  )
+  markers = raw.split(',').map(&:strip).reject(&:empty?)
+  markers.empty? ? ['Run /sbin/init as init process'] : markers
+end.freeze
+
+LINUX_SHELL_MARKERS = begin
+  raw = ENV.fetch(
+    'RHDL_LINUX_SHELL_MARKERS',
+    'rhdl-sh$,/ #,# '
+  )
+  markers = raw.split(',').map(&:strip).reject(&:empty?)
+  markers.empty? ? ['# '] : markers
+end.freeze
+
+LINUX_BOOT_BACKEND = RHDL::Codegen::IR::IR_COMPILER_AVAILABLE ? :compile : nil
 
 RSpec.describe 'RISC-V Linux boot milestones over UART', :slow, timeout: 600 do
   let(:runner) { RHDL::Examples::RISCV::HeadlessRunner.new(mode: :ir, sim: LINUX_BOOT_BACKEND) }
   let(:cpu) { runner.cpu }
 
-  def wait_for_uart_text(cpu, text, max_cycles:, chunk:)
+  def pump_uart(cpu, stream_state)
+    bytes = cpu.uart_tx_bytes
+    total = bytes.length
+    advanced = false
+
+    if total > stream_state[:cursor]
+      delta = bytes[stream_state[:cursor]...total].pack('C*')
+      stream_state[:cursor] = total
+      stream_state[:output] << delta
+      advanced = true
+      if LINUX_LIVE_UART
+        $stderr.print(delta)
+        $stderr.flush
+      end
+    end
+
+    [stream_state[:output], advanced]
+  end
+
+  def assert_no_fail_fast_marker!(output)
+    marker = LINUX_FAIL_FAST_MARKERS.find { |m| output.include?(m) }
+    return if marker.nil?
+
+    raise "Linux boot hit fail-fast marker #{marker.inspect}"
+  end
+
+  def wait_for_uart_text(cpu, text, max_cycles:, chunk:, stream_state:)
     ran = 0
+    no_progress = 0
     loop do
-      output = cpu.uart_tx_bytes.pack('C*')
+      output, advanced = pump_uart(cpu, stream_state)
+      assert_no_fail_fast_marker!(output)
+      no_progress = 0 if advanced
       return output if output.include?(text)
       raise "Timed out waiting for UART text #{text.inspect} after #{ran} cycles" if ran >= max_cycles
 
       step = [chunk, max_cycles - ran].min
       cpu.run_cycles(step)
       ran += step
+      no_progress += step unless advanced
+      if no_progress >= LINUX_NO_UART_PROGRESS_CYCLES
+        raise "No UART progress for #{no_progress} cycles while waiting for #{text.inspect}"
+      end
     end
   end
 
-  def wait_for_uart_any(cpu, markers, max_cycles:, chunk:)
+  def wait_for_uart_any(cpu, markers, max_cycles:, chunk:, stream_state:)
     ran = 0
+    no_progress = 0
     loop do
-      output = cpu.uart_tx_bytes.pack('C*')
+      output, advanced = pump_uart(cpu, stream_state)
+      assert_no_fail_fast_marker!(output)
+      no_progress = 0 if advanced
       marker = markers.find { |m| output.include?(m) }
       return [output, marker] if marker
       raise "Timed out waiting for UART milestones #{markers.inspect} after #{ran} cycles" if ran >= max_cycles
@@ -67,26 +119,55 @@ RSpec.describe 'RISC-V Linux boot milestones over UART', :slow, timeout: 600 do
       step = [chunk, max_cycles - ran].min
       cpu.run_cycles(step)
       ran += step
+      no_progress += step unless advanced
+      if no_progress >= LINUX_NO_UART_PROGRESS_CYCLES
+        raise "No UART progress for #{no_progress} cycles while waiting for milestones #{markers.inspect}"
+      end
     end
   end
 
   it 'reaches Linux version and a follow-on UART milestone when Linux artifacts are available' do
-    skip 'No native IR backend available for Linux boot spec' if LINUX_BOOT_BACKEND.nil?
+    skip 'Compiler backend unavailable for Linux boot spec' if LINUX_BOOT_BACKEND.nil?
     skip "Missing Linux kernel artifact at #{LINUX_KERNEL_PATH}" unless File.file?(LINUX_KERNEL_PATH)
+    skip "Missing Linux initramfs artifact at #{LINUX_INITRAMFS_PATH}" unless File.file?(LINUX_INITRAMFS_PATH)
     skip "Missing Linux DTB artifact at #{LINUX_DTB_PATH}" unless File.file?(LINUX_DTB_PATH)
     skip 'Native RISC-V runner unavailable' unless runner.native? && cpu.sim.runner_kind == :riscv
 
-    runner.load_linux(kernel: LINUX_KERNEL_PATH, dtb: LINUX_DTB_PATH, kernel_addr: LINUX_LOAD_ADDR)
+    runner.load_linux(
+      kernel: LINUX_KERNEL_PATH,
+      initramfs: LINUX_INITRAMFS_PATH,
+      dtb: LINUX_DTB_PATH,
+      kernel_addr: LINUX_LOAD_ADDR
+    )
 
-    boot_output = wait_for_uart_text(cpu, 'Linux version', max_cycles: LINUX_BOOT_CYCLES, chunk: LINUX_STEP_CYCLES)
-    milestone_output, milestone = wait_for_uart_any(
+    stream_state = { cursor: 0, output: +'' }
+    boot_output = wait_for_uart_text(
       cpu,
-      LINUX_PROMPT_MARKERS,
+      'Linux version',
+      max_cycles: LINUX_BOOT_CYCLES,
+      chunk: LINUX_STEP_CYCLES,
+      stream_state: stream_state
+    )
+    init_output, init_marker = wait_for_uart_any(
+      cpu,
+      LINUX_INIT_MARKERS,
       max_cycles: LINUX_MILESTONE_CYCLES,
-      chunk: LINUX_STEP_CYCLES
+      chunk: LINUX_STEP_CYCLES,
+      stream_state: stream_state
+    )
+    cpu.uart_receive_bytes([0x0A]) if init_marker.include?('Please press Enter')
+    shell_output, shell_marker = wait_for_uart_any(
+      cpu,
+      LINUX_SHELL_MARKERS,
+      max_cycles: LINUX_MILESTONE_CYCLES,
+      chunk: LINUX_STEP_CYCLES,
+      stream_state: stream_state
     )
 
     expect(boot_output).to include('Linux version')
-    expect(milestone_output).to include(milestone)
+    expect(init_output).to include(init_marker)
+    expect(shell_output).to include(shell_marker)
+  ensure
+    $stderr.puts if LINUX_LIVE_UART
   end
 end

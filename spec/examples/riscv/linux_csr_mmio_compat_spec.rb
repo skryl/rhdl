@@ -96,6 +96,28 @@ RSpec.shared_examples 'linux csr/mmio native compatibility' do |pipeline:|
     expect(cpu.read_reg(13)).to eq(0)
   end
 
+  it 'advances the time CSR used by rdtime loops' do
+    program = [
+      asm.csrrs(10, 0xC01, 0),  # x10 = time
+      asm.nop,
+      asm.nop,
+      asm.nop,
+      asm.nop,
+      asm.nop,
+      asm.nop,
+      asm.nop,
+      asm.nop,
+      asm.csrrs(11, 0xC01, 0),  # x11 = time later
+      asm.sub(12, 11, 10),      # x12 = delta
+      asm.nop
+    ]
+
+    run_program(cpu, program, pipeline: pipeline, extra_cycles: 32)
+
+    expect(cpu.read_reg(11)).to be > cpu.read_reg(10)
+    expect(cpu.read_reg(12)).to be > 0
+  end
+
   it 'handles delegated external interrupts through supervisor PLIC MMIO addresses' do
     main_program = [
       asm.addi(1, 0, 0x300),  # stvec = 0x300

@@ -449,8 +449,11 @@ Additional Linux compatibility specs live under `spec/examples/riscv/linux_*_spe
 
 `examples/riscv/build_linux.sh` defaults to `rv32_nommu_virt_defconfig` and applies an aggressive
 RV32 minimum-size profile for this core. Use `--no-min-profile` if you want raw defconfig behavior.
-It also generates `examples/riscv/software/bin/linux_initramfs.cpio` and embeds it in the kernel.
-The generated default initramfs is a minimal boot shim, not a full interactive userspace.
+It also builds a real BusyBox userspace with Buildroot and writes:
+- `examples/riscv/software/bin/linux_initramfs.cpio`
+- `examples/riscv/software/bin/linux_fs.img`
+- `examples/riscv/software/bin/linux_busybox`
+The default Linux cmdline launches `/bin/sh` from BusyBox (no local shim).
 `rhdl examples riscv --linux` defaults to loading:
 - `examples/riscv/software/bin/linux_kernel.bin`
 - `examples/riscv/software/bin/linux_initramfs.cpio`

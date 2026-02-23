@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'tempfile'
 require_relative '../../../../../examples/riscv/utilities/tasks/run_task'
+require_relative '../../../../../examples/riscv/utilities/assembler'
 
 RSpec.describe RHDL::Examples::RISCV::Tasks::RunTask do
   let(:program_file) do
@@ -64,7 +65,7 @@ RSpec.describe RHDL::Examples::RISCV::Tasks::RunTask do
         kernel: 'kernel.bin',
         initramfs: 'initramfs.cpio',
         dtb: 'virt.dtb',
-        kernel_addr: 0x8020_0000,
+        kernel_addr: 0x8040_0000,
         initramfs_addr: 0x8400_0000,
         dtb_addr: 0x87F0_0000,
         pc: 0x8020_1234
@@ -74,7 +75,7 @@ RSpec.describe RHDL::Examples::RISCV::Tasks::RunTask do
         kernel: 'kernel.bin',
         initramfs: 'initramfs.cpio',
         dtb: 'virt.dtb',
-        kernel_addr: 0x8020_0000,
+        kernel_addr: 0x8040_0000,
         initramfs_addr: 0x8400_0000,
         dtb_addr: 0x87F0_0000,
         pc: 0x8020_1234
@@ -214,6 +215,22 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
     (upper + imm) & 0xFFFF_FFFF
   end
 
+  def find_li_values(words, rd)
+    values = []
+    words.each_cons(2) do |lui, addi|
+      next unless (lui & 0x7F) == 0x37
+      next unless ((lui >> 7) & 0x1F) == rd
+      next unless (addi & 0x7F) == 0x13
+      next unless ((addi >> 7) & 0x1F) == rd
+      next unless ((addi >> 15) & 0x1F) == rd
+
+      upper = lui & 0xFFFF_F000
+      imm = sign_extend((addi >> 20) & 0xFFF, 12)
+      values << ((upper + imm) & 0xFFFF_FFFF)
+    end
+    values
+  end
+
   describe '#initialize' do
     it 'defaults to ir mode and compile backend' do
       runner = described_class.new
@@ -325,6 +342,52 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
       file.close!
     end
 
+    def build_minimal_dtb_with_initrd_props
+      strings = +"linux,initrd-start\0linux,initrd-end\0"
+      start_nameoff = 0
+      end_nameoff = "linux,initrd-start\0".bytesize
+
+      struct = +''
+      struct << [0x0000_0001].pack('N') # FDT_BEGIN_NODE /
+      struct << "\0".ljust(4, "\0")
+      struct << [0x0000_0001].pack('N') # FDT_BEGIN_NODE chosen
+      struct << "chosen\0".ljust(8, "\0")
+      struct << [0x0000_0003, 8, start_nameoff].pack('N3') # FDT_PROP linux,initrd-start
+      start_value_offset_in_struct = struct.bytesize
+      struct << [0, 0].pack('N2')
+      struct << [0x0000_0003, 8, end_nameoff].pack('N3') # FDT_PROP linux,initrd-end
+      end_value_offset_in_struct = struct.bytesize
+      struct << [0, 0].pack('N2')
+      struct << [0x0000_0002, 0x0000_0002, 0x0000_0009].pack('N3') # END_NODE chosen, END_NODE /, END
+
+      header_size = 40
+      mem_rsv_size = 16
+      off_mem_rsvmap = header_size
+      off_dt_struct = off_mem_rsvmap + mem_rsv_size
+      size_dt_struct = struct.bytesize
+      off_dt_strings = off_dt_struct + size_dt_struct
+      size_dt_strings = strings.bytesize
+      totalsize = off_dt_strings + size_dt_strings
+
+      header = [
+        0xD00D_FEED,
+        totalsize,
+        off_dt_struct,
+        off_dt_strings,
+        off_mem_rsvmap,
+        17,
+        16,
+        0,
+        size_dt_strings,
+        size_dt_struct
+      ].pack('N10')
+
+      start_value_offset = off_dt_struct + start_value_offset_in_struct
+      end_value_offset = off_dt_struct + end_value_offset_in_struct
+      dtb = +"#{header}#{("\0" * mem_rsv_size)}#{struct}#{strings}"
+      [dtb, start_value_offset, end_value_offset]
+    end
+
     it 'requires native riscv runner support' do
       with_temp_binary("KERN") do |kernel_path, _|
         runner = described_class.allocate
@@ -351,6 +414,15 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
       end
     end
 
+    it 'patches linux,initrd bounds in DTB chosen node when initramfs is provided' do
+      runner = described_class.allocate
+      dtb_bytes, start_offset, end_offset = build_minimal_dtb_with_initrd_props
+      patched = runner.send(:patch_dtb_initrd_bounds, dtb_bytes, 0x8400_2000, 0x1234)
+
+      expect(patched.byteslice(start_offset, 8)).to eq([0x0000_0000, 0x8400_2000].pack('N2'))
+      expect(patched.byteslice(end_offset, 8)).to eq([0x0000_0000, 0x8400_3234].pack('N2'))
+    end
+
     it 'loads linux artifacts to expected addresses and boots through a deterministic entry trampoline' do
       with_temp_binary("KERN") do |kernel_path, kernel_bytes|
         with_temp_binary("INIT") do |initramfs_path, initramfs_bytes|
@@ -369,7 +441,7 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
 
             expect(runner).to receive(:reset).ordered
             expect(cpu).to receive(:clear_uart_tx_bytes).ordered
-            expect(runner).to receive(:load_instruction_bytes).with(kernel_bytes, 0x8020_0000).ordered
+            expect(runner).to receive(:load_instruction_bytes).with(kernel_bytes, 0x8040_0000).ordered
             expect(runner).to receive(:load_data_bytes).with(initramfs_bytes, 0x8400_0000).ordered
             expect(runner).to receive(:load_data_bytes).with(dtb_bytes, 0x87F0_0000).ordered
             expect(runner).to receive(:load_instruction_bytes).with(expected_bootstrap, 0x801F_F000).ordered
@@ -379,7 +451,7 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
               kernel: kernel_path,
               initramfs: initramfs_path,
               dtb: dtb_path,
-              kernel_addr: 0x8020_0000,
+              kernel_addr: 0x8040_0000,
               initramfs_addr: 0x8400_0000,
               dtb_addr: 0x87F0_0000,
               pc: 0x8020_1234
@@ -413,7 +485,7 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
       end
     end
 
-    it 'encodes Linux entry contract with a0=hart id, a1=dtb pointer, then jumps to entry pc' do
+    it 'encodes M-mode SBI handoff firmware with Linux entry register contract' do
       runner = described_class.allocate
       words = runner.send(
         :build_linux_bootstrap_program,
@@ -422,14 +494,11 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
         entry_pc: 0x8020_1234
       ).unpack('V*')
 
-      expect(words.length).to eq(7)
-      expect(decode_li_value(words, 0)).to eq(0)
-      expect(decode_li_value(words, 2)).to eq(0x87F0_0000)
-      expect(decode_li_value(words, 4)).to eq(0x8020_1234)
-      expect(words[6] & 0x7F).to eq(0x67)
-      expect((words[6] >> 7) & 0x1F).to eq(0)
-      expect((words[6] >> 15) & 0x1F).to eq(5)
-      expect(sign_extend((words[6] >> 20) & 0xFFF, 12)).to eq(0)
+      expect(words.length).to be > 40
+      expect(words).to include(0x3020_0073) # mret
+      expect(find_li_values(words, 10)).to include(0)
+      expect(find_li_values(words, 11)).to include(0x87F0_0000)
+      expect(find_li_values(words, 5)).to include(0x8020_1234)
     end
 
     it 'encodes a1 as zero when dtb pointer is not provided' do
@@ -438,10 +507,40 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
         :build_linux_bootstrap_program,
         hart_id: 0,
         dtb_pointer: 0,
-        entry_pc: 0x8020_0000
+        entry_pc: 0x8040_0000
       ).unpack('V*')
 
-      expect(decode_li_value(words, 2)).to eq(0)
+      expect(find_li_values(words, 11)).to include(0)
+    end
+
+    it 'hands off to supervisor mode and services SBI base get_spec_version ecall' do
+      runner = described_class.new(mode: :ruby, sim: :ruby)
+      bootstrap_addr = 0x100
+      entry_pc = 0x1000
+
+      bootstrap = runner.send(
+        :build_linux_bootstrap_program,
+        hart_id: 0,
+        dtb_pointer: 0,
+        entry_pc: entry_pc
+      )
+      payload_words = [
+        RHDL::Examples::RISCV::Assembler.addi(17, 0, 0x10), # a7 = SBI_EXT_BASE
+        RHDL::Examples::RISCV::Assembler.addi(16, 0, 0x0),  # a6 = get_spec_version
+        RHDL::Examples::RISCV::Assembler.ecall,
+        RHDL::Examples::RISCV::Assembler.addi(12, 10, 0),   # x12 <- a0 (error)
+        RHDL::Examples::RISCV::Assembler.addi(13, 11, 0),   # x13 <- a1 (value)
+        RHDL::Examples::RISCV::Assembler.jal(0, 0)
+      ]
+
+      runner.reset
+      runner.send(:load_instruction_bytes, payload_words.pack('V*'), entry_pc)
+      runner.send(:load_instruction_bytes, bootstrap, bootstrap_addr)
+      runner.set_pc(bootstrap_addr)
+      runner.run_steps(320)
+
+      expect(runner.cpu.read_reg(12)).to eq(0)
+      expect(runner.cpu.read_reg(13)).to eq(0x0000_0002)
     end
   end
 end

@@ -764,13 +764,15 @@ module RHDL
         if_satp_mode_sv32 = local(:if_satp_mode_sv32, csr_read_data8[31], width: 1)
         if_priv_is_u = local(:if_priv_is_u, priv_mode == lit(PrivMode::USER, width: 2), width: 1)
         if_priv_is_s = local(:if_priv_is_s, priv_mode == lit(PrivMode::SUPERVISOR, width: 2), width: 1)
+        if_priv_is_m = local(:if_priv_is_m, priv_mode == lit(PrivMode::MACHINE, width: 2), width: 1)
+        if_satp_translate = local(:if_satp_translate, if_satp_mode_sv32 & ~if_priv_is_m, width: 1)
         if_satp_root_ppn = csr_read_data8[19..0]
         if_satp_root_base = local(:if_satp_root_base, cat(if_satp_root_ppn, lit(0, width: 12)), width: 32)
         if_vpn = current_pc[31..12]
         if_vpn1 = current_pc[31..22]
         if_vpn0 = current_pc[21..12]
         if_page_off = current_pc[11..0]
-        inst_tlb_lookup_en <= if_satp_mode_sv32
+        inst_tlb_lookup_en <= if_satp_translate
         inst_tlb_lookup_vpn <= if_vpn
         inst_tlb_lookup_root <= if_satp_root_ppn
         if_ptw_addr1_calc = local(:if_ptw_addr1_calc,
@@ -798,7 +800,7 @@ module RHDL
         if_walk_perm_w = if_walk_pte[2]
         if_walk_perm_x = if_walk_pte[3]
         if_walk_perm_u = if_walk_pte[4]
-        inst_tlb_fill_en <= if_satp_mode_sv32 & ~inst_tlb_hit & if_walk_ok
+        inst_tlb_fill_en <= if_satp_translate & ~inst_tlb_hit & if_walk_ok
         inst_tlb_fill_vpn <= if_vpn
         inst_tlb_fill_root <= if_satp_root_ppn
         inst_tlb_fill_ppn <= if_walk_ppn
@@ -816,7 +818,7 @@ module RHDL
                         width: 1)
         if_perm_ok = local(:if_perm_ok, if_translated & if_eff_perm_x & if_u_ok, width: 1)
         if_paddr = local(:if_paddr, cat(if_eff_ppn, if_page_off), width: 32)
-        if_inst_page_fault = local(:if_inst_page_fault, if_satp_mode_sv32 & ~if_perm_ok, width: 1)
+        if_inst_page_fault = local(:if_inst_page_fault, if_satp_translate & ~if_perm_ok, width: 1)
         inst_ptw_addr1 <= if_ptw_addr1_calc
         inst_ptw_addr0 <= if_ptw_addr0_calc
         if_id_inst_page_fault_in <= if_inst_page_fault
@@ -1047,6 +1049,8 @@ module RHDL
         ex_satp_mode_sv32 = local(:ex_satp_mode_sv32, csr_read_data8[31], width: 1)
         ex_priv_is_u = local(:ex_priv_is_u, priv_mode == lit(PrivMode::USER, width: 2), width: 1)
         ex_priv_is_s = local(:ex_priv_is_s, priv_mode == lit(PrivMode::SUPERVISOR, width: 2), width: 1)
+        ex_priv_is_m = local(:ex_priv_is_m, priv_mode == lit(PrivMode::MACHINE, width: 2), width: 1)
+        ex_satp_translate = local(:ex_satp_translate, ex_satp_mode_sv32 & ~ex_priv_is_m, width: 1)
         ex_sum_enabled = local(:ex_sum_enabled,
                                (((csr_read_data2 | csr_read_data4) & lit(0x40000, width: 32)) != lit(0, width: 32)),
                                width: 1)
@@ -1059,7 +1063,7 @@ module RHDL
         ex_data_vpn1 = ex_data_vaddr[31..22]
         ex_data_vpn0 = ex_data_vaddr[21..12]
         ex_data_page_off = ex_data_vaddr[11..0]
-        data_tlb_lookup_en <= ex_satp_mode_sv32 & ex_data_access_req
+        data_tlb_lookup_en <= ex_satp_translate & ex_data_access_req
         data_tlb_lookup_vpn <= ex_data_vpn
         data_tlb_lookup_root <= ex_satp_root_ppn
         ex_data_ptw_addr1_calc = local(:ex_data_ptw_addr1_calc,
@@ -1087,7 +1091,7 @@ module RHDL
         ex_data_walk_perm_w = ex_data_walk_pte[2]
         ex_data_walk_perm_x = ex_data_walk_pte[3]
         ex_data_walk_perm_u = ex_data_walk_pte[4]
-        data_tlb_fill_en <= ex_satp_mode_sv32 & ex_data_access_req & ~data_tlb_hit & ex_data_walk_ok
+        data_tlb_fill_en <= ex_satp_translate & ex_data_access_req & ~data_tlb_hit & ex_data_walk_ok
         data_tlb_fill_vpn <= ex_data_vpn
         data_tlb_fill_root <= ex_satp_root_ppn
         data_tlb_fill_ppn <= ex_data_walk_ppn
@@ -1115,7 +1119,7 @@ module RHDL
         ex_data_perm_ok = local(:ex_data_perm_ok, ex_data_translated & ex_data_rw_ok & ex_data_u_ok, width: 1)
         ex_data_paddr = local(:ex_data_paddr, cat(ex_data_eff_ppn, ex_data_page_off), width: 32)
         ex_data_page_fault = local(:ex_data_page_fault,
-                                   ex_satp_mode_sv32 & ex_data_access_req & ~ex_data_perm_ok,
+                                   ex_satp_translate & ex_data_access_req & ~ex_data_perm_ok,
                                    width: 1)
         ex_data_page_fault_cause = local(:ex_data_page_fault_cause,
                                          mux(ex_data_store_access, lit(15, width: 32), lit(13, width: 32)),
@@ -1123,11 +1127,13 @@ module RHDL
 
         ex_machine_irq_masked = local(:ex_machine_irq_masked, ex_irq_pending_bits & ~csr_read_data7, width: 32)
         ex_super_irq_masked = local(:ex_super_irq_masked, ex_irq_pending_bits & csr_read_data7, width: 32)
-        ex_super_sie_machine_alias = local(:ex_super_sie_machine_alias,
-                                           mux((csr_read_data5 & lit(0x200, width: 32)) != lit(0, width: 32),
-                                               lit(0x800, width: 32),
-                                               lit(0, width: 32)),
-                                           width: 32)
+        ex_super_sie_machine_alias = local(
+          :ex_super_sie_machine_alias,
+          mux((csr_read_data5 & lit(0x002, width: 32)) != lit(0, width: 32), lit(0x008, width: 32), lit(0, width: 32)) |
+          mux((csr_read_data5 & lit(0x020, width: 32)) != lit(0, width: 32), lit(0x080, width: 32), lit(0, width: 32)) |
+          mux((csr_read_data5 & lit(0x200, width: 32)) != lit(0, width: 32), lit(0x800, width: 32), lit(0, width: 32)),
+          width: 32
+        )
         ex_super_sie_effective = local(:ex_super_sie_effective, csr_read_data5 | ex_super_sie_machine_alias, width: 32)
         ex_machine_enabled_interrupts = local(:ex_machine_enabled_interrupts, ex_machine_irq_masked & csr_read_data3, width: 32)
         ex_super_enabled_interrupts = local(:ex_super_enabled_interrupts, ex_super_irq_masked & ex_super_sie_effective, width: 32)
@@ -1382,7 +1388,7 @@ module RHDL
                          mux(ex_is_vsetvli | ex_is_vmv_x_s, ex_v_scalar_result,
                          mux(ex_is_csr_instr, ex_csr_read_selected,
                              mux(ex_is_fmv_x_w | ex_is_fmv_w_x, forwarded_rs1,
-                                 mux(ex_satp_mode_sv32 & ex_data_access_req, ex_data_paddr, alu_result)))))
+                                 mux(ex_satp_translate & ex_data_access_req, ex_data_paddr, alu_result)))))
 
         # -----------------------------------------
         # EX Stage: Branch condition evaluation (inline)
@@ -1533,7 +1539,7 @@ module RHDL
         # -----------------------------------------
         # Output connections
         # -----------------------------------------
-        inst_addr <= mux(if_satp_mode_sv32, if_paddr, current_pc)
+        inst_addr <= mux(if_satp_translate, if_paddr, current_pc)
         debug_pc <= current_pc
         debug_inst <= id_inst
       end

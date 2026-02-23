@@ -12,6 +12,12 @@ module RHDL
     module RISCV
       class CSRFile < RHDL::HDL::SequentialComponent
     MISA_VALUE = 0x4034_1121 # RV32 + A + F + I + M + S + U + V
+    CYCLE_CSR_ADDR = 0xC00
+    TIME_CSR_ADDR = 0xC01
+    CYCLEH_CSR_ADDR = 0xC80
+    TIMEH_CSR_ADDR = 0xC81
+    CYCLE_CSR_INCREMENT = 1
+    TIME_CSR_INCREMENT = 1
 
     READ_ONLY_COMPAT_CSRS = {
       0x301 => MISA_VALUE, # misa
@@ -20,6 +26,13 @@ module RHDL
       0xF13 => 0,          # mimpid
       0xF14 => 0           # mhartid
     }.freeze
+
+    READ_ONLY_COUNTER_CSRS = [
+      CYCLE_CSR_ADDR,
+      TIME_CSR_ADDR,
+      CYCLEH_CSR_ADDR,
+      TIMEH_CSR_ADDR
+    ].freeze
 
     include RHDL::DSL::Behavior
     include RHDL::DSL::Sequential
@@ -67,39 +80,120 @@ module RHDL
     wire :csr_write_en2
     wire :csr_write_en3
     wire :csr_write_en4
+    wire :counter_write_en_cycle
+    wire :counter_write_en_cycleh
+    wire :counter_write_en_time
+    wire :counter_write_en_timeh
+    wire :counter_write_addr_cycle, width: 12
+    wire :counter_write_addr_cycleh, width: 12
+    wire :counter_write_addr_time, width: 12
+    wire :counter_write_addr_timeh, width: 12
+    wire :counter_write_data_cycle, width: 32
+    wire :counter_write_data_cycleh, width: 32
+    wire :counter_write_data_time, width: 32
+    wire :counter_write_data_timeh, width: 32
     sync_write :csrs, clock: :clk, enable: :csr_write_en1, addr: :write_addr, data: :write_data
     sync_write :csrs, clock: :clk, enable: :csr_write_en2, addr: :write_addr2, data: :write_data2
     sync_write :csrs, clock: :clk, enable: :csr_write_en3, addr: :write_addr3, data: :write_data3
     sync_write :csrs, clock: :clk, enable: :csr_write_en4, addr: :write_addr4, data: :write_data4
+    sync_write :csrs, clock: :clk, enable: :counter_write_en_cycle, addr: :counter_write_addr_cycle, data: :counter_write_data_cycle
+    sync_write :csrs, clock: :clk, enable: :counter_write_en_cycleh, addr: :counter_write_addr_cycleh, data: :counter_write_data_cycleh
+    sync_write :csrs, clock: :clk, enable: :counter_write_en_time, addr: :counter_write_addr_time, data: :counter_write_data_time
+    sync_write :csrs, clock: :clk, enable: :counter_write_en_timeh, addr: :counter_write_addr_timeh, data: :counter_write_data_timeh
 
     behavior do
+      cycle_low = local(
+        :cycle_low,
+        mem_read_expr(:csrs, lit(CYCLE_CSR_ADDR, width: 12), width: 32),
+        width: 32
+      )
+      cycle_high = local(
+        :cycle_high,
+        mem_read_expr(:csrs, lit(CYCLEH_CSR_ADDR, width: 12), width: 32),
+        width: 32
+      )
+      cycle_low_next = local(:cycle_low_next, cycle_low + lit(CYCLE_CSR_INCREMENT, width: 32), width: 32)
+      cycle_carry = local(:cycle_carry, cycle_low_next < cycle_low, width: 1)
+      cycle_high_next = local(
+        :cycle_high_next,
+        cycle_high + mux(cycle_carry, lit(1, width: 32), lit(0, width: 32)),
+        width: 32
+      )
+
+      time_low = local(
+        :time_low,
+        mem_read_expr(:csrs, lit(TIME_CSR_ADDR, width: 12), width: 32),
+        width: 32
+      )
+      time_high = local(
+        :time_high,
+        mem_read_expr(:csrs, lit(TIMEH_CSR_ADDR, width: 12), width: 32),
+        width: 32
+      )
+      time_low_next = local(:time_low_next, time_low + lit(TIME_CSR_INCREMENT, width: 32), width: 32)
+      time_carry = local(:time_carry, time_low_next < time_low, width: 1)
+      time_high_next = local(
+        :time_high_next,
+        time_high + mux(time_carry, lit(1, width: 32), lit(0, width: 32)),
+        width: 32
+      )
+
+      counter_write_en_cycle <= ~rst
+      counter_write_en_cycleh <= ~rst
+      counter_write_en_time <= ~rst
+      counter_write_en_timeh <= ~rst
+      counter_write_addr_cycle <= lit(CYCLE_CSR_ADDR, width: 12)
+      counter_write_addr_cycleh <= lit(CYCLEH_CSR_ADDR, width: 12)
+      counter_write_addr_time <= lit(TIME_CSR_ADDR, width: 12)
+      counter_write_addr_timeh <= lit(TIMEH_CSR_ADDR, width: 12)
+      counter_write_data_cycle <= cycle_low_next
+      counter_write_data_cycleh <= cycle_high_next
+      counter_write_data_time <= time_low_next
+      counter_write_data_timeh <= time_high_next
+
       writable1 = local(:writable1,
                         (write_addr != lit(0x301, width: 12)) &
                         (write_addr != lit(0xF11, width: 12)) &
                         (write_addr != lit(0xF12, width: 12)) &
                         (write_addr != lit(0xF13, width: 12)) &
-                        (write_addr != lit(0xF14, width: 12)),
+                        (write_addr != lit(0xF14, width: 12)) &
+                        (write_addr != lit(CYCLE_CSR_ADDR, width: 12)) &
+                        (write_addr != lit(TIME_CSR_ADDR, width: 12)) &
+                        (write_addr != lit(CYCLEH_CSR_ADDR, width: 12)) &
+                        (write_addr != lit(TIMEH_CSR_ADDR, width: 12)),
                         width: 1)
       writable2 = local(:writable2,
                         (write_addr2 != lit(0x301, width: 12)) &
                         (write_addr2 != lit(0xF11, width: 12)) &
                         (write_addr2 != lit(0xF12, width: 12)) &
                         (write_addr2 != lit(0xF13, width: 12)) &
-                        (write_addr2 != lit(0xF14, width: 12)),
+                        (write_addr2 != lit(0xF14, width: 12)) &
+                        (write_addr2 != lit(CYCLE_CSR_ADDR, width: 12)) &
+                        (write_addr2 != lit(TIME_CSR_ADDR, width: 12)) &
+                        (write_addr2 != lit(CYCLEH_CSR_ADDR, width: 12)) &
+                        (write_addr2 != lit(TIMEH_CSR_ADDR, width: 12)),
                         width: 1)
       writable3 = local(:writable3,
                         (write_addr3 != lit(0x301, width: 12)) &
                         (write_addr3 != lit(0xF11, width: 12)) &
                         (write_addr3 != lit(0xF12, width: 12)) &
                         (write_addr3 != lit(0xF13, width: 12)) &
-                        (write_addr3 != lit(0xF14, width: 12)),
+                        (write_addr3 != lit(0xF14, width: 12)) &
+                        (write_addr3 != lit(CYCLE_CSR_ADDR, width: 12)) &
+                        (write_addr3 != lit(TIME_CSR_ADDR, width: 12)) &
+                        (write_addr3 != lit(CYCLEH_CSR_ADDR, width: 12)) &
+                        (write_addr3 != lit(TIMEH_CSR_ADDR, width: 12)),
                         width: 1)
       writable4 = local(:writable4,
                         (write_addr4 != lit(0x301, width: 12)) &
                         (write_addr4 != lit(0xF11, width: 12)) &
                         (write_addr4 != lit(0xF12, width: 12)) &
                         (write_addr4 != lit(0xF13, width: 12)) &
-                        (write_addr4 != lit(0xF14, width: 12)),
+                        (write_addr4 != lit(0xF14, width: 12)) &
+                        (write_addr4 != lit(CYCLE_CSR_ADDR, width: 12)) &
+                        (write_addr4 != lit(TIME_CSR_ADDR, width: 12)) &
+                        (write_addr4 != lit(CYCLEH_CSR_ADDR, width: 12)) &
+                        (write_addr4 != lit(TIMEH_CSR_ADDR, width: 12)),
                         width: 1)
 
       csr_write_en1 <= write_we & ~rst & writable1
@@ -207,6 +301,9 @@ module RHDL
 
       # Rising edge write
       if @prev_clk == 0 && clk == 1
+        increment_counter_pair(CYCLE_CSR_ADDR, CYCLEH_CSR_ADDR, CYCLE_CSR_INCREMENT)
+        increment_counter_pair(TIME_CSR_ADDR, TIMEH_CSR_ADDR, TIME_CSR_INCREMENT)
+
         write_we = in_val(:write_we)
         if write_we == 1
           write_addr = in_val(:write_addr) & 0xFFF
@@ -283,11 +380,21 @@ module RHDL
     private
 
     def read_only_compat_csr?(addr)
-      READ_ONLY_COMPAT_CSRS.key?(addr & 0xFFF)
+      index = addr & 0xFFF
+      READ_ONLY_COMPAT_CSRS.key?(index) || READ_ONLY_COUNTER_CSRS.include?(index)
     end
 
     def csr_read_value(addr, stored_value)
       READ_ONLY_COMPAT_CSRS.fetch(addr & 0xFFF, stored_value & 0xFFFF_FFFF)
+    end
+
+    def increment_counter_pair(low_addr, high_addr, increment = 1)
+      full = (@csrs[low_addr] + increment.to_i) & 0x1_FFFF_FFFF
+      next_low = full & 0xFFFF_FFFF
+      carry = (full >> 32) & 0xFFFF_FFFF
+      next_high = (@csrs[high_addr] + carry) & 0xFFFF_FFFF
+      @csrs[low_addr] = next_low
+      @csrs[high_addr] = next_high
     end
 
       end
