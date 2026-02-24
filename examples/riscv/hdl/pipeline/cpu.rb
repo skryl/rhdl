@@ -794,7 +794,7 @@ module RHDL
         if_priv_is_u = local(:if_priv_is_u, priv_mode == lit(PrivMode::USER, width: 2), width: 1)
         if_priv_is_s = local(:if_priv_is_s, priv_mode == lit(PrivMode::SUPERVISOR, width: 2), width: 1)
         if_priv_is_m = local(:if_priv_is_m, priv_mode == lit(PrivMode::MACHINE, width: 2), width: 1)
-        if_satp_translate = local(:if_satp_translate, if_satp_mode_sv32 & ~if_priv_is_m, width: 1)
+        if_satp_translate = local(:if_satp_translate, if_satp_mode_sv32, width: 1)
         if_satp_root_ppn = csr_read_data8[19..0]
         if_satp_root_base = local(:if_satp_root_base, cat(if_satp_root_ppn, lit(0, width: 12)), width: 32)
         if_vpn = current_pc[31..12]
@@ -1091,8 +1091,8 @@ module RHDL
         ex_priv_is_u = local(:ex_priv_is_u, priv_mode == lit(PrivMode::USER, width: 2), width: 1)
         ex_priv_is_s = local(:ex_priv_is_s, priv_mode == lit(PrivMode::SUPERVISOR, width: 2), width: 1)
         ex_priv_is_m = local(:ex_priv_is_m, priv_mode == lit(PrivMode::MACHINE, width: 2), width: 1)
-        ex_delegate_allowed = local(:ex_delegate_allowed, ~ex_priv_is_m, width: 1)
-        ex_satp_translate = local(:ex_satp_translate, ex_satp_mode_sv32 & ~ex_priv_is_m, width: 1)
+        ex_delegate_allowed = local(:ex_delegate_allowed, lit(1, width: 1), width: 1)
+        ex_satp_translate = local(:ex_satp_translate, ex_satp_mode_sv32, width: 1)
         ex_sum_enabled = local(:ex_sum_enabled,
                                (((csr_read_data2 | csr_read_data4) & lit(0x40000, width: 32)) != lit(0, width: 32)),
                                width: 1)

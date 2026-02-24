@@ -473,6 +473,58 @@ test('initializeApple2Mode loads riscv default disk image before default kernel 
   assert.equal(logs.some((line) => line.includes('Loaded default disk')), true);
 });
 
+test('initializeApple2Mode loads ordered defaultAssets for riscv linux preset', async () => {
+  const calls = [];
+  const logs = [];
+  await initializeApple2Mode({
+    runtime: {
+      sim: {
+        runner_mode: () => true,
+        runner_kind: () => 'riscv',
+        runner_load_memory: (bytes, offset, options) => {
+          calls.push(['load', bytes.length, offset, options]);
+          return true;
+        },
+        runner_set_reset_vector: (pc) => {
+          calls.push(['setPc', pc]);
+          return true;
+        },
+        reset: () => calls.push(['reset'])
+      }
+    },
+    state: { apple2: { enabled: false, baseRomBytes: null } },
+    preset: {
+      defaultAssets: [
+        { kind: 'main', path: '/fixtures/riscv/linux_kernel.bin', offset: '0x80400000' },
+        { kind: 'main', path: '/fixtures/riscv/linux_initramfs.cpio', offset: '0x84000000' },
+        { kind: 'main', path: '/fixtures/riscv/rhdl_riscv_virt.dtb', offset: '0x87f00000' },
+        { kind: 'main', path: '/fixtures/riscv/linux_bootstrap.bin', offset: '0x803ff000', startPc: '0x803ff000', resetAfterLoad: true }
+      ]
+    },
+    addWatchSignal: () => {},
+    fetchImpl: async (path) => ({
+      ok: true,
+      async arrayBuffer() {
+        if (String(path).includes('linux_kernel')) return new Uint8Array([1, 2, 3, 4]).buffer;
+        if (String(path).includes('linux_initramfs')) return new Uint8Array([5, 6, 7]).buffer;
+        if (String(path).includes('virt')) return new Uint8Array([8, 9]).buffer;
+        return new Uint8Array([10, 11, 12, 13, 14]).buffer;
+      }
+    }),
+    log: (message) => logs.push(String(message))
+  });
+
+  assert.deepEqual(calls, [
+    ['load', 4, 0x80400000, { isRom: false }],
+    ['load', 3, 0x84000000, { isRom: false }],
+    ['load', 2, 0x87f00000, { isRom: false }],
+    ['load', 5, 0x803ff000, { isRom: false }],
+    ['setPc', 0x803ff000],
+    ['reset']
+  ]);
+  assert.equal(logs.some((line) => line.includes('Loaded default asset (main)')), true);
+});
+
 test('initializeApple2Mode repairs riscv start PC when reset-vector apply reports success but PC is low', async () => {
   const calls = [];
   await initializeApple2Mode({

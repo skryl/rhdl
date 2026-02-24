@@ -1,0 +1,92 @@
+{
+  "runner": {
+    "id": "riscv_linux",
+    "label": "RISC-V Linux Runner",
+    "order": 61,
+    "topClassName": "RHDL::Examples::RISCV::CPU",
+    "requires": [
+      "examples/riscv/hdl/cpu"
+    ],
+    "simIrPath": "./assets/fixtures/riscv_linux/ir/riscv_linux.json",
+    "explorerIrPath": "./assets/fixtures/riscv_linux/ir/riscv_linux_hier.json",
+    "sourceBundlePath": "./assets/fixtures/riscv_linux/ir/riscv_linux_sources.json",
+    "schematicPath": "./assets/fixtures/riscv_linux/ir/riscv_linux_schematic.json",
+    "preferredTab": "ioTab",
+    "enableApple2Ui": false,
+    "usesManualIr": false,
+    "defaultAssets": [
+      {
+        "kind": "main",
+        "path": "./assets/fixtures/riscv/software/bin/linux_kernel.bin",
+        "offset": "0x80400000"
+      },
+      {
+        "kind": "main",
+        "path": "./assets/fixtures/riscv/software/bin/linux_initramfs.cpio",
+        "offset": "0x84000000"
+      },
+      {
+        "kind": "main",
+        "path": "./assets/fixtures/riscv/software/bin/rhdl_riscv_virt.dtb",
+        "offset": "0x87f00000"
+      },
+      {
+        "kind": "main",
+        "path": "./assets/fixtures/riscv/software/bin/linux_bootstrap.bin",
+        "offset": "0x803ff000",
+        "startPc": "0x803ff000",
+        "resetAfterLoad": true
+      }
+    ],
+    "timing": {
+      "cyclesPerHertz": 1,
+      "hertzLabel": "RISC-V Linux"
+    },
+    "defaults": {
+      "memoryFollowPc": false
+    },
+    "preferredBackend": "compiler",
+    "compilerWasmPath": "./assets/pkg/ir_compiler_riscv.wasm",
+    "io": {
+      "enabled": true,
+      "api": "generic",
+      "memory": {
+        "dumpStart": 2147483648,
+        "dumpLength": 1024,
+        "addressSpace": 4294967296,
+        "viewMapped": true,
+        "dumpReadMapped": true,
+        "directWriteMapped": true
+      },
+      "display": {
+        "enabled": true,
+        "mode": "uart",
+        "text": {
+          "start": 0,
+          "width": 80,
+          "height": 24,
+          "rowStride": 80,
+          "rowLayout": "linear",
+          "charMask": 255,
+          "asciiMin": 32,
+          "asciiMax": 126
+        }
+      },
+      "keyboard": {
+        "enabled": true,
+        "mode": "uart"
+      },
+      "pcSignalCandidates": [
+        "debug_pc"
+      ],
+      "watchSignals": [
+        "debug_pc",
+        "debug_inst",
+        "debug_x1",
+        "debug_x2",
+        "debug_x10",
+        "debug_x11"
+      ]
+    }
+  }
+}

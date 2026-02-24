@@ -639,7 +639,7 @@ module RHDL
       priv_is_u = local(:priv_is_u, priv_mode == lit(PrivMode::USER, width: 2), width: 1)
       priv_is_s = local(:priv_is_s, priv_mode == lit(PrivMode::SUPERVISOR, width: 2), width: 1)
       priv_is_m = local(:priv_is_m, priv_mode == lit(PrivMode::MACHINE, width: 2), width: 1)
-      satp_translate = local(:satp_translate, satp_mode_sv32 & ~priv_is_m, width: 1)
+      satp_translate = local(:satp_translate, satp_mode_sv32, width: 1)
       sum_enabled = local(:sum_enabled,
                           (((csr_read_data2 | csr_read_data4) & lit(0x40000, width: 32)) != lit(0, width: 32)),
                           width: 1)

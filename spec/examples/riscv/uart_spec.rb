@@ -79,4 +79,16 @@ RSpec.describe RHDL::Examples::RISCV::Uart do
     expect(uart.get_output(:irq)).to eq(0)
     expect(read_byte(described_class::BASE_ADDR + described_class::REG_IIR_FCR)).to eq(0x01)
   end
+
+  it 'raises TX-empty interrupt when IER enables THRE' do
+    write_byte(described_class::BASE_ADDR + described_class::REG_IER_DLM, 0x02)
+    drive(clk: 0, rst: 0)
+
+    expect(uart.get_output(:irq)).to eq(1)
+    expect(read_byte(described_class::BASE_ADDR + described_class::REG_IIR_FCR)).to eq(0x02)
+    expect(read_byte(described_class::BASE_ADDR + described_class::REG_IIR_FCR)).to eq(0x01)
+    expect(read_byte(described_class::BASE_ADDR + described_class::REG_LSR)).to eq(0x60)
+    drive(clk: 0, rst: 0)
+    expect(uart.get_output(:irq)).to eq(0)
+  end
 end

@@ -453,14 +453,15 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
               dtb_pointer: 0x87F0_0000,
               entry_pc: 0x8020_1234
             )
+            bootstrap_addr = runner.send(:linux_bootstrap_addr, 0x8040_0000)
 
             expect(runner).to receive(:reset).ordered
             expect(cpu).to receive(:clear_uart_tx_bytes).ordered
             expect(runner).to receive(:load_instruction_bytes).with(kernel_bytes, 0x8040_0000).ordered
             expect(runner).to receive(:load_data_bytes).with(initramfs_bytes, 0x8400_0000).ordered
             expect(runner).to receive(:load_data_bytes).with(dtb_bytes, 0x87F0_0000).ordered
-            expect(runner).to receive(:load_instruction_bytes).with(expected_bootstrap, 0x801F_F000).ordered
-            expect(runner).to receive(:set_pc).with(0x801F_F000).ordered
+            expect(runner).to receive(:load_instruction_bytes).with(expected_bootstrap, bootstrap_addr).ordered
+            expect(runner).to receive(:set_pc).with(bootstrap_addr).ordered
 
             runner.load_linux(
               kernel: kernel_path,
@@ -489,12 +490,13 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
           dtb_pointer: 0,
           entry_pc: 0x8030_0000
         )
+        bootstrap_addr = runner.send(:linux_bootstrap_addr, 0x8030_0000)
 
         expect(runner).to receive(:reset).ordered
         expect(cpu).to receive(:clear_uart_tx_bytes).ordered
         expect(runner).to receive(:load_instruction_bytes).with(kernel_bytes, 0x8030_0000).ordered
-        expect(runner).to receive(:load_instruction_bytes).with(expected_bootstrap, 0x802F_F000).ordered
-        expect(runner).to receive(:set_pc).with(0x802F_F000).ordered
+        expect(runner).to receive(:load_instruction_bytes).with(expected_bootstrap, bootstrap_addr).ordered
+        expect(runner).to receive(:set_pc).with(bootstrap_addr).ordered
 
         runner.load_linux(kernel: kernel_path, kernel_addr: 0x8030_0000)
       end

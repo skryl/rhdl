@@ -68,10 +68,11 @@ async function loadRiscvRunnerOnCompiler(page) {
 
   await page.waitForFunction(() => {
     const log = document.querySelector('#eventLog')?.textContent || '';
+    const hasFastBootPatch = /Applied RISC-V (aggressive|moderate) fast-boot PHYSTOP patch/.test(log);
     return log.includes('Loaded default bin (main)')
       && log.includes('./assets/fixtures/riscv/software/bin/kernel.bin')
       && log.includes('./assets/fixtures/riscv/software/bin/fs.img')
-      && log.includes('Applied RISC-V aggressive fast-boot PHYSTOP patch');
+      && hasFastBootPatch;
   }, null, { timeout: 120000 });
 }
 

@@ -202,4 +202,12 @@ RSpec.describe RHDL::CLI::Tasks::WebGenerateTask do
       expect(snapshot_asset[:src]).to eq(described_class::MOS6502_DEFAULT_SNAPSHOT_SOURCE)
     end
   end
+
+  describe 'RUNNER_CONFIG_PATHS' do
+    it 'includes the dedicated riscv linux web config' do
+      expect(described_class::RUNNER_CONFIG_PATHS).to include(
+        File.join(described_class::PROJECT_ROOT, 'examples', 'riscv', 'config_linux.json')
+      )
+    end
+  end
 end

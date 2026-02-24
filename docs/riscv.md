@@ -36,7 +36,7 @@ bundle exec rspec spec/examples/riscv/xv6_shell_io_spec.rb
 The xv6 shell tests expect local artifacts under `examples/riscv/software/bin/`.
 
 ```bash
-./examples/riscv/build_xv6.sh
+./examples/riscv/software/build_xv6.sh
 ```
 
 ### Terminal CLI (RISC-V, xv6, and Linux)
@@ -102,7 +102,7 @@ This section covers how xv6 is wired into the RHDL RISC-V flow: source layout, l
 
 - Active xv6 source tree: `examples/riscv/software/xv6`
 - Legacy compatibility tree: `examples/riscv/software/xv6-rv32`
-- Build helper: `examples/riscv/build_xv6.sh`
+- Build helper: `examples/riscv/software/build_xv6.sh`
 - Local generated artifacts: `examples/riscv/software/bin/`
 
 `build_xv6.sh` prefers `examples/riscv/software/xv6` and falls back to `examples/riscv/software/xv6-rv32` if needed.
@@ -110,7 +110,7 @@ This section covers how xv6 is wired into the RHDL RISC-V flow: source layout, l
 ### Build xv6 Artifacts
 
 ```bash
-./examples/riscv/build_xv6.sh
+./examples/riscv/software/build_xv6.sh
 ```
 
 This generates local (ignored) artifacts in `examples/riscv/software/bin/`, including:
@@ -177,19 +177,28 @@ Current auto-generated web runner presets are derived from:
 - `examples/apple2/config.json`
 - `examples/gameboy/config.json`
 - `examples/riscv/config.json`
+- `examples/riscv/config_linux.json`
 
-RISC-V is included in the generated preset list by default (`lib/rhdl/cli/tasks/web_generate_task.rb`, `RUNNER_CONFIG_PATHS`) and appears as `riscv` in `web/app/components/runner/config/generated_presets.mjs`.
+RISC-V is included in the generated preset list by default (`lib/rhdl/cli/tasks/web_generate_task.rb`, `RUNNER_CONFIG_PATHS`) and appears as:
+
+- `riscv` (xv6)
+- `riscv_linux` (Linux)
 
 Notes:
 
-- The RISC-V web preset expects:
+- The `riscv` xv6 preset expects:
   - `./assets/fixtures/riscv/software/bin/kernel.bin`
   - `./assets/fixtures/riscv/software/bin/fs.img`
   - `./assets/pkg/ir_compiler_riscv.wasm`
   and will run in UART display/keyboard mode with reset-at-PC `0x80000000`.
-- `web:generate` copies these xv6 assets only when present locally, so first-time runs can skip binary load without error but without the xv6 image available in browser.
-- If `xv6` preset settings change in `examples/riscv/config.json`, rerun `bundle exec rake web:generate` to refresh `generated_presets.mjs`.
-- The checked-in generated preset in this checkout currently sets `fastBoot: aggressive`, while `examples/riscv/config.json` uses `fastBoot: "moderate"`; regenerate fixtures to keep presets consistent with source config intent.
+- The `riscv_linux` preset expects:
+  - `./assets/fixtures/riscv/software/bin/linux_kernel.bin`
+  - `./assets/fixtures/riscv/software/bin/linux_initramfs.cpio`
+  - `./assets/fixtures/riscv/software/bin/rhdl_riscv_virt.dtb`
+  - `./assets/fixtures/riscv/software/bin/linux_bootstrap.bin`
+- `web:generate` copies optional RISC-V xv6/Linux artifacts only when present locally, so first-time runs can skip binary loads without hard failure.
+- If RISC-V preset settings change in `examples/riscv/config.json` or `examples/riscv/config_linux.json`, rerun `bundle exec rake web:generate` to refresh `generated_presets.mjs`.
+- Regenerate fixtures after preset-default changes to keep checked-in generated presets consistent with source config intent.
 
 ### xv6 Functionality Review (Current)
 
@@ -213,7 +222,7 @@ Notes:
 If specs skip because artifacts are missing, regenerate with:
 
 ```bash
-./examples/riscv/build_xv6.sh
+./examples/riscv/software/build_xv6.sh
 ```
 
 ## Linux Source + Patch Workflow (Phase 0)
@@ -230,7 +239,7 @@ git submodule update --init --recursive examples/riscv/software/linux
 ### Build Linux Kernel Artifacts
 
 ```bash
-./examples/riscv/build_linux.sh
+./examples/riscv/software/build_linux.sh
 ```
 
 Optional flags:
@@ -265,7 +274,7 @@ The default kernel cmdline launches `/bin/sh` from BusyBox for an immediate inte
 - `--initramfs examples/riscv/software/bin/linux_initramfs.cpio`
 - `--dtb examples/riscv/software/bin/rhdl_riscv_virt.dtb`
 
-`examples/riscv/build_linux.sh` writes the default kernel artifact, so after building you can run:
+`examples/riscv/software/build_linux.sh` writes the default kernel artifact, so after building you can run:
 
 ```bash
 rhdl examples riscv --linux
@@ -723,9 +732,9 @@ examples/riscv/
 +-- utilities/
 |   +-- assembler.rb            # RV32I assembler
 |   +-- xv6_boot_tracer.rb      # xv6 boot tracer (UART/stage/MMIO)
-+-- build_xv6.sh                # Local xv6 artifact builder
-+-- build_linux.sh              # Local Linux kernel artifact builder
 +-- software/
+|   +-- build_xv6.sh            # Local xv6 artifact builder
+|   +-- build_linux.sh          # Local Linux kernel artifact builder
 |   +-- xv6/                    # Tracked xv6 source tree
 |   +-- linux/                  # Linux kernel upstream submodule
 |   +-- linux_patches/          # Ordered local Linux patch series

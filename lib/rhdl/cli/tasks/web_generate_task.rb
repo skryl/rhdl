@@ -36,6 +36,13 @@ module RHDL
         RISCV_DEFAULT_BIN_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'kernel.bin')
         RISCV_DEFAULT_DISK_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/fs.img')
         RISCV_DEFAULT_DISK_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'fs.img')
+        RISCV_LINUX_KERNEL_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/linux_kernel.bin')
+        RISCV_LINUX_KERNEL_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'linux_kernel.bin')
+        RISCV_LINUX_INITRAMFS_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/linux_initramfs.cpio')
+        RISCV_LINUX_INITRAMFS_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'linux_initramfs.cpio')
+        RISCV_LINUX_DTB_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/rhdl_riscv_virt.dtb')
+        RISCV_LINUX_DTB_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'rhdl_riscv_virt.dtb')
+        RISCV_LINUX_BOOTSTRAP_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'linux_bootstrap.bin')
         DEFAULT_KARATEKA_PC = 0xB82A
         DEFAULT_BIN_ASSETS = [
           {
@@ -471,6 +478,41 @@ module RHDL
             RISCV_DEFAULT_DISK_SOURCE,
             RISCV_DEFAULT_DISK_ASSET
           )
+          copy_optional_file(
+            RISCV_LINUX_KERNEL_SOURCE,
+            RISCV_LINUX_KERNEL_ASSET
+          )
+          copy_optional_file(
+            RISCV_LINUX_INITRAMFS_SOURCE,
+            RISCV_LINUX_INITRAMFS_ASSET
+          )
+          copy_optional_file(
+            RISCV_LINUX_DTB_SOURCE,
+            RISCV_LINUX_DTB_ASSET
+          )
+          generate_riscv_linux_bootstrap_asset
+        end
+
+        def generate_riscv_linux_bootstrap_asset
+          require File.join(PROJECT_ROOT, 'examples/riscv/utilities/runners/headless_runner')
+
+          runner_class = RHDL::Examples::RISCV::HeadlessRunner
+          builder = runner_class.allocate
+          kernel_addr = runner_class::LINUX_KERNEL_LOAD_ADDR
+          dtb_addr = runner_class::LINUX_DTB_LOAD_ADDR
+          bootstrap_addr = builder.send(:linux_bootstrap_addr, kernel_addr)
+          payload = builder.send(
+            :build_linux_bootstrap_program,
+            hart_id: runner_class::LINUX_BOOT_HART_ID,
+            dtb_pointer: dtb_addr,
+            entry_pc: kernel_addr
+          )
+
+          ensure_dir(File.dirname(RISCV_LINUX_BOOTSTRAP_ASSET))
+          File.binwrite(RISCV_LINUX_BOOTSTRAP_ASSET, payload)
+          puts "Wrote #{RISCV_LINUX_BOOTSTRAP_ASSET} (entry=0x#{format('%08x', bootstrap_addr)})"
+        rescue StandardError => e
+          warn "WARNING: failed to generate optional Linux bootstrap asset: #{e.message}"
         end
 
         def cpu8bit_software_bin_assets
@@ -777,9 +819,14 @@ module RHDL
           puts "Wrote #{MEMORY_DUMP_ASSET_MODULE_PATH}"
         end
 
-        RUNNER_CONFIG_PATHS = %w[8bit mos6502 apple2 gameboy riscv].map do |name|
-          File.join(PROJECT_ROOT, 'examples', name, 'config.json')
-        end.freeze
+        RUNNER_CONFIG_PATHS = [
+          File.join(PROJECT_ROOT, 'examples', '8bit', 'config.json'),
+          File.join(PROJECT_ROOT, 'examples', 'mos6502', 'config.json'),
+          File.join(PROJECT_ROOT, 'examples', 'apple2', 'config.json'),
+          File.join(PROJECT_ROOT, 'examples', 'gameboy', 'config.json'),
+          File.join(PROJECT_ROOT, 'examples', 'riscv', 'config.json'),
+          File.join(PROJECT_ROOT, 'examples', 'riscv', 'config_linux.json')
+        ].freeze
         MRUBY_VERSION = '3.4.0'
         MRUBY_REPO = 'https://github.com/mruby/mruby.git'
         MRUBY_REQUIRE_SHIM_GEM_PATH = File.join(PROJECT_ROOT, 'web', 'mruby', 'mruby-require-shim')

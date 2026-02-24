@@ -41,6 +41,14 @@ function normalizeDefaultBinSpace(value) {
   return 'main';
 }
 
+function normalizeDefaultAssetKind(value) {
+  const token = String(value || 'main').trim().toLowerCase();
+  if (token === 'disk') {
+    return 'disk';
+  }
+  return 'main';
+}
+
 function normalizeRiscvFastBootMode(value) {
   if (value === false || value == null) {
     return null;
@@ -106,6 +114,36 @@ function resolveDefaultDiskConfig(preset = {}) {
     offset: parseNonNegativeInt(raw.offset, 0),
     resetAfterLoad: raw.resetAfterLoad === true
   };
+}
+
+function resolveDefaultAssetsConfig(preset = {}) {
+  const raw = preset?.defaultAssets;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return [];
+  }
+
+  const out = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+
+    const path = String(entry.path || '').trim();
+    if (!path) {
+      continue;
+    }
+
+    out.push({
+      kind: normalizeDefaultAssetKind(entry.kind),
+      path,
+      offset: parseNonNegativeInt(entry.offset, 0),
+      space: normalizeDefaultBinSpace(entry.space),
+      startPc: parseOptionalPc(entry.startPc),
+      resetAfterLoad: entry.resetAfterLoad === true
+    });
+  }
+
+  return out;
 }
 
 function applyRiscvFastBootPhystopPatch(bytes, targetImm20) {
@@ -347,6 +385,91 @@ async function loadDefaultDiskAsset({
     log(`Failed to load default disk: ${err.message || err}`);
     return false;
   }
+}
+
+async function loadDefaultAssets({
+  runtime,
+  defaultAssets,
+  supportsRunnerApi,
+  supportsGenericMemoryApi,
+  fetchImpl,
+  log
+} = {}) {
+  if (!Array.isArray(defaultAssets) || defaultAssets.length === 0) {
+    return false;
+  }
+
+  let anyLoaded = false;
+  for (const asset of defaultAssets) {
+    try {
+      const resp = await fetchImpl(asset.path);
+      if (!resp.ok) {
+        log(`Default asset load skipped (${resp.status}): ${asset.path}`);
+        continue;
+      }
+
+      const bytes = new Uint8Array(await resp.arrayBuffer());
+      let loaded = false;
+      if (asset.kind === 'disk') {
+        if (supportsRunnerApi && typeof runtime.sim.runner_riscv_load_disk === 'function') {
+          loaded = didCallSucceed(runtime.sim.runner_riscv_load_disk(bytes, asset.offset));
+        }
+      } else if (asset.space === 'boot_rom') {
+        if (supportsRunnerApi && typeof runtime.sim.runner_load_boot_rom === 'function') {
+          loaded = didCallSucceed(runtime.sim.runner_load_boot_rom(bytes));
+        }
+      } else if (asset.space === 'rom') {
+        if (supportsRunnerApi && typeof runtime.sim.runner_load_rom === 'function') {
+          loaded = didCallSucceed(runtime.sim.runner_load_rom(bytes, asset.offset));
+        } else if (supportsRunnerApi && typeof runtime.sim.runner_load_memory === 'function') {
+          loaded = didCallSucceed(runtime.sim.runner_load_memory(bytes, asset.offset, { isRom: true }));
+        } else if (supportsGenericMemoryApi && typeof runtime.sim.memory_load === 'function') {
+          loaded = didCallSucceed(runtime.sim.memory_load(bytes, asset.offset, { isRom: true }));
+        }
+      } else {
+        if (supportsRunnerApi && typeof runtime.sim.runner_load_memory === 'function') {
+          loaded = didCallSucceed(runtime.sim.runner_load_memory(bytes, asset.offset, { isRom: false }));
+        } else if (supportsGenericMemoryApi && typeof runtime.sim.memory_load === 'function') {
+          loaded = didCallSucceed(runtime.sim.memory_load(bytes, asset.offset, { isRom: false }));
+        }
+      }
+
+      if (!loaded) {
+        log(`Default asset load failed or unsupported (${asset.kind}): ${asset.path}`);
+        continue;
+      }
+
+      let pcApplied = asset.startPc == null;
+      if (asset.startPc != null && typeof runtime.sim.runner_set_reset_vector === 'function') {
+        pcApplied = didCallSucceed(runtime.sim.runner_set_reset_vector(asset.startPc));
+        if (!pcApplied) {
+          const width = asset.startPc > 0xFFFF ? 8 : 4;
+          log(`Default asset reset vector apply failed (PC=$${asset.startPc.toString(16).padStart(width, '0')})`);
+        }
+      } else if (asset.startPc != null) {
+        pcApplied = false;
+      }
+
+      if (asset.resetAfterLoad && typeof runtime.sim.reset === 'function') {
+        runtime.sim.reset();
+        await bootstrapMos6502Runner(runtime, log);
+      }
+
+      if (asset.startPc != null) {
+        const shouldApplyFallback = !pcApplied || riscvStartPcNeedsRepair(runtime, asset.startPc);
+        if (shouldApplyFallback) {
+          applyRiscvStartPcFallback(runtime, asset.startPc, log);
+        }
+      }
+
+      log(`Loaded default asset (${asset.kind}) @ 0x${asset.offset.toString(16)}: ${asset.path}`);
+      anyLoaded = true;
+    } catch (err) {
+      log(`Failed to load default asset: ${err.message || err}`);
+    }
+  }
+
+  return anyLoaded;
 }
 
 function readMos6502ResetVector(runtime) {
@@ -637,6 +760,7 @@ export async function initializeApple2Mode({
   log = () => {}
 } = {}) {
   const ioConfig = resolveRunnerIoConfig(preset);
+  const defaultAssets = resolveDefaultAssetsConfig(preset);
   const defaultDisk = resolveDefaultDiskConfig(preset);
   const defaultBin = resolveDefaultBinConfig(preset);
   state.apple2.ioConfig = ioConfig;
@@ -646,7 +770,7 @@ export async function initializeApple2Mode({
       && typeof runtime.sim?.runner_write_memory === 'function');
   const supportsGenericMemoryApi = typeof runtime.sim?.memory_mode === 'function'
     && runtime.sim.memory_mode() != null;
-  const wantsMemoryApi = ioConfig.enabled || !!ioConfig.rom?.path || !!defaultDisk || !!defaultBin;
+  const wantsMemoryApi = ioConfig.enabled || !!ioConfig.rom?.path || defaultAssets.length > 0 || !!defaultDisk || !!defaultBin;
 
   if (!wantsMemoryApi) {
     return;
@@ -679,20 +803,31 @@ export async function initializeApple2Mode({
     log
   });
 
-  await loadDefaultDiskAsset({
-    runtime,
-    defaultDisk,
-    supportsRunnerApi,
-    fetchImpl,
-    log
-  });
+  if (defaultAssets.length > 0) {
+    await loadDefaultAssets({
+      runtime,
+      defaultAssets,
+      supportsRunnerApi,
+      supportsGenericMemoryApi,
+      fetchImpl,
+      log
+    });
+  } else {
+    await loadDefaultDiskAsset({
+      runtime,
+      defaultDisk,
+      supportsRunnerApi,
+      fetchImpl,
+      log
+    });
 
-  await loadDefaultBinAsset({
-    runtime,
-    defaultBin,
-    supportsRunnerApi,
-    supportsGenericMemoryApi,
-    fetchImpl,
-    log
-  });
+    await loadDefaultBinAsset({
+      runtime,
+      defaultBin,
+      supportsRunnerApi,
+      supportsGenericMemoryApi,
+      fetchImpl,
+      log
+    });
+  }
 }

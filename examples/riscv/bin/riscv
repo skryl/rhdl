@@ -26,7 +26,7 @@ module RHDL
             speed: nil, # nil means auto-detect based on mode/backend
             mode: :ir, # default mode for RISC-V
             sim: nil, # ruby, interpret, jit, compile
-            core: :pipeline, # single or pipeline
+            core: :single, # single or pipeline
             io: :mmap, # mmap (text buffer) or uart
             xv6: false,
             linux: false,
@@ -51,7 +51,7 @@ module RHDL
               options[:sim] = v
             end
 
-            opts.on("--core TYPE", %i[single pipeline], "CPU core: pipeline (default), single") do |v|
+            opts.on("--core TYPE", %i[single pipeline], "CPU core: single (default), pipeline") do |v|
               options[:core] = v
             end
 
@@ -250,7 +250,7 @@ module RHDL
                 kernel,
                 'Linux kernel',
                 out: out,
-                hint: 'run ./examples/riscv/build_linux.sh to generate default artifacts, or pass --kernel with a Linux kernel image path.'
+                hint: 'run ./examples/riscv/software/build_linux.sh to generate default artifacts, or pass --kernel with a Linux kernel image path.'
               )
 
               return 1 unless ensure_file(
@@ -264,7 +264,7 @@ module RHDL
                 dtb,
                 'Linux DTB',
                 out: out,
-                hint: 'run ./examples/riscv/build_linux.sh to generate the default DTB, or pass --dtb with a flattened device tree blob path.'
+                hint: 'run ./examples/riscv/software/build_linux.sh to generate the default DTB, or pass --dtb with a flattened device tree blob path.'
               )
 
               linux_options = {
