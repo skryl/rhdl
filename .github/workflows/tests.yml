@@ -6,9 +6,15 @@ on:
       - opened
       - synchronize
       - reopened
+    paths-ignore:
+      - README.md
+      - docs/**
   push:
     branches:
       - main
+    paths-ignore:
+      - README.md
+      - docs/**
 
 permissions:
   contents: read

@@ -451,18 +451,6 @@ rhdl examples riscv --headless --cycles 200000 path/to/program.bin
 Linux milestones are covered in `spec/examples/riscv/linux_boot_milestones_spec.rb`.
 Additional Linux compatibility specs live under `spec/examples/riscv/linux_*_spec.rb`.
 
-`examples/riscv/software/build_linux.sh` defaults to `rv32_nommu_virt_defconfig` and applies an aggressive
-RV32 minimum-size profile for this core. Use `--no-min-profile` if you want raw defconfig behavior.
-It also builds a real BusyBox userspace with Buildroot and writes:
-- `examples/riscv/software/bin/linux_initramfs.cpio`
-- `examples/riscv/software/bin/linux_fs.img`
-- `examples/riscv/software/bin/linux_busybox`
-The default Linux cmdline launches `/bin/sh` from BusyBox (no local shim).
-`rhdl examples riscv --linux` defaults to loading:
-- `examples/riscv/software/bin/linux_kernel.bin`
-- `examples/riscv/software/bin/linux_initramfs.cpio`
-- `examples/riscv/software/bin/rhdl_riscv_virt.dtb`
-
 See each example's documentation for complete details on architecture, instruction sets, and CLI options.
 
 ## Project Structure
