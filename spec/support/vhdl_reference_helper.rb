@@ -360,6 +360,21 @@ module VhdlReferenceHelper
   def run_verilog_comparison_test(rhdl_component, verilog_files:, ports:, test_vectors:, base_dir:, clock_name: 'clk')
     # Run RHDL simulation
     rhdl_results = []
+
+    # Mirror generated Verilog testbench initialization:
+    # inputs start at 0 and clock runs during initial settle (#100),
+    # which includes one posedge before vector 0 is applied.
+    ports.each do |name, info|
+      direction = info[:direction] || 'in'
+      next unless direction == 'in'
+
+      rhdl_component.set_input(name, 0)
+    end
+    rhdl_component.set_input(clock_name.to_sym, 0)
+    rhdl_component.propagate
+    rhdl_component.set_input(clock_name.to_sym, 1)
+    rhdl_component.propagate
+
     test_vectors.each_with_index do |vec, idx|
       # Apply inputs
       vec[:inputs].each do |port, value|
