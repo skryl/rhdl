@@ -14,6 +14,7 @@ export function createApple2MemoryController({
   hexByte,
   renderMemoryPanel,
   disassemble6502LinesWithMemory,
+  disassembleRiscvLinesWithMemory,
   setMemoryDumpStatus,
   addressSpace = 0x10000
 } = {}) {
@@ -248,15 +249,19 @@ export function createApple2MemoryController({
     const disasmLineCount = Math.max(1, Math.ceil(length / BYTES_PER_MEMORY_ROW));
     const disasmStart = start;
     const runnerKind = currentRunnerKind();
-    const show6502Disasm = runnerKind == null || runnerKind === 'apple2' || runnerKind === 'mos6502';
-    const disasmText = show6502Disasm
-      ? disassemble6502LinesWithMemory(
-        disasmStart,
-        disasmLineCount,
-        readApple2MappedMemory,
-        { highlightPc: pc, addressSpace: addrSpace }
-      ).join('\n')
-      : `Disassembly unavailable for ${runnerKind} runner.`;
+    const disasmOpts = { highlightPc: pc, addressSpace: addrSpace };
+    let disasmText;
+    if (runnerKind === 'riscv' && typeof disassembleRiscvLinesWithMemory === 'function') {
+      disasmText = disassembleRiscvLinesWithMemory(
+        disasmStart, disasmLineCount, readApple2MappedMemory, disasmOpts
+      ).join('\n');
+    } else if (runnerKind == null || runnerKind === 'apple2' || runnerKind === 'mos6502') {
+      disasmText = disassemble6502LinesWithMemory(
+        disasmStart, disasmLineCount, readApple2MappedMemory, disasmOpts
+      ).join('\n');
+    } else {
+      disasmText = `Disassembly unavailable for ${runnerKind} runner.`;
+    }
     renderMemoryPanel(dom, {
       followDisabled: false,
       followChecked: !!state.memory.followPc,

@@ -4,6 +4,7 @@ import {
   hexByte
 } from '../../../core/lib/numeric_utils.mjs';
 import { disassemble6502Lines as disassemble6502LinesWithMemory } from '../lib/mos6502_disasm.mjs';
+import { disassembleRiscvLines as disassembleRiscvLinesWithMemory } from '../../riscv/lib/riscv_disasm.mjs';
 import { renderApple2DebugRows } from '../ui/panel.mjs';
 import { renderMemoryPanel } from '../../memory/ui/panel.mjs';
 import {
@@ -85,6 +86,7 @@ export function createApple2LazyGetters({
         hexByte,
         renderMemoryPanel,
         disassemble6502LinesWithMemory,
+        disassembleRiscvLinesWithMemory,
         setMemoryDumpStatus,
         addressSpace: APPLE2_ADDR_SPACE
       });

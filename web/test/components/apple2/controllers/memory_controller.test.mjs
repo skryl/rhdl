@@ -172,8 +172,9 @@ test('refreshMemoryView formats 32-bit memory addresses when configured', () => 
   assert.match(renderCalls[0].dumpRows[0].addressHex, /80000000/);
 });
 
-test('refreshMemoryView disables 6502 disassembly for riscv runner', () => {
+test('refreshMemoryView uses riscv disassembly for riscv runner', () => {
   const renderCalls = [];
+  const riscvDisasmCalls = [];
   const dom = {
     memoryDump: {},
     memoryStart: { value: '0x80000000' },
@@ -210,13 +211,19 @@ test('refreshMemoryView disables 6502 disassembly for riscv runner', () => {
     hexByte,
     renderMemoryPanel: (_dom, payload) => renderCalls.push(payload),
     disassemble6502LinesWithMemory: () => ['NOP'],
+    disassembleRiscvLinesWithMemory: (start, count, readMem, opts) => {
+      riscvDisasmCalls.push({ start, count, opts });
+      return ['unimp'];
+    },
     setMemoryDumpStatus: () => {},
     addressSpace: 0x10000
   });
 
   controller.refreshMemoryView();
   assert.equal(renderCalls.length, 1);
-  assert.match(renderCalls[0].disasmText, /Disassembly unavailable for riscv runner/);
+  assert.equal(renderCalls[0].disasmText, 'unimp');
+  assert.equal(riscvDisasmCalls.length, 1);
+  assert.equal(riscvDisasmCalls[0].start, 0x80000000);
 });
 
 test('refreshMemoryView aligns follow-pc start for riscv high addresses', () => {
@@ -259,6 +266,7 @@ test('refreshMemoryView aligns follow-pc start for riscv high addresses', () => 
     hexByte,
     renderMemoryPanel: (_dom, payload) => renderCalls.push(payload),
     disassemble6502LinesWithMemory: () => ['NOP'],
+    disassembleRiscvLinesWithMemory: () => ['nop'],
     setMemoryDumpStatus: () => {},
     addressSpace: 0x10000
   });
