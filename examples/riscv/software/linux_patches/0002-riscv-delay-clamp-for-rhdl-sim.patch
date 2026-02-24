@@ -1,0 +1,60 @@
+diff --git a/arch/riscv/lib/delay.c b/arch/riscv/lib/delay.c
+index 49d510ba7..b8d4be1dc 100644
+--- a/arch/riscv/lib/delay.c
++++ b/arch/riscv/lib/delay.c
+@@ -75,8 +75,19 @@
+ 
+ void __delay(unsigned long cycles)
+ {
++	/*
++	 * Local RHDL simulation optimization:
++	 * Cap long busy-wait loops to keep Linux boot practical under
++	 * cycle-accurate simulation.
++	 */
++	if (cycles > 64)
++		cycles = 64;
++
+ 	u64 t0 = get_cycles();
+ 
++	if (!cycles)
++		return;
++
+ 	while ((unsigned long)(get_cycles() - t0) < cycles)
+ 		cpu_relax();
+ }
+@@ -84,6 +95,17 @@ EXPORT_SYMBOL(__delay);
+ 
+ void udelay(unsigned long usecs)
+ {
++	/*
++	 * Local RHDL simulation optimization:
++	 * Keep microsecond delays nearly no-op to avoid spending most
++	 * simulation time in busy-wait loops.
++	 */
++	if (!usecs)
++		return;
++
++	__delay(1);
++	return;
++
+ 	u64 ucycles = (u64)usecs * lpj_fine * UDELAY_MULT;
+ 	u64 n;
+ 
+@@ -101,6 +123,17 @@ EXPORT_SYMBOL(udelay);
+ 
+ void ndelay(unsigned long nsecs)
+ {
++	/*
++	 * Local RHDL simulation optimization:
++	 * Keep nanosecond delays nearly no-op to avoid spending most
++	 * simulation time in busy-wait loops.
++	 */
++	if (!nsecs)
++		return;
++
++	__delay(1);
++	return;
++
+ 	/*
+ 	 * This doesn't bother checking for overflow, as it won't happen (it's
+ 	 * an hour) of delay.

@@ -38,6 +38,7 @@ RSpec.describe RHDL::Examples::RISCV::Tasks::RunTask do
       task = build_task
       expect(task.instance_variable_get(:@mode)).to eq(:ir)
       expect(task.instance_variable_get(:@sim_backend)).to eq(:compile)
+      expect(task.instance_variable_get(:@core)).to eq(:pipeline)
     end
 
     it 'creates HeadlessRunner internally' do
@@ -52,6 +53,11 @@ RSpec.describe RHDL::Examples::RISCV::Tasks::RunTask do
       expect(task.instance_variable_get(:@mmap_height)).to eq(12)
       expect(task.instance_variable_get(:@mmap_row_stride)).to eq(96)
       expect(task.instance_variable_get(:@mmap_start)).to eq(0x1000)
+    end
+
+    it 'accepts core selection' do
+      task = build_task(core: :single)
+      expect(task.instance_variable_get(:@core)).to eq(:single)
     end
   end
 
@@ -236,9 +242,18 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
       runner = described_class.new
       expect(runner.mode).to eq(:ir)
       expect(runner.sim_backend).to eq(:compile)
+      expect(runner.core).to eq(:single)
       expect(runner.cpu).to be_a(RHDL::Examples::RISCV::IRHarness)
     rescue LoadError, RuntimeError => e
       skip "Default backend unavailable: #{e.message}"
+    end
+
+    it 'builds pipeline harness when core is pipeline' do
+      runner = described_class.new(core: :pipeline)
+      expect(runner.core).to eq(:pipeline)
+      expect(runner.cpu).to be_a(RHDL::Examples::RISCV::Pipeline::IRHarness)
+    rescue LoadError, RuntimeError => e
+      skip "Pipeline backend unavailable: #{e.message}"
     end
 
     it 'accepts ruby-mode sim backend options' do

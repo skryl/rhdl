@@ -145,6 +145,10 @@ module RHDL
     wire :csr_addr6, width: 12
     wire :csr_addr7, width: 12
     wire :csr_addr8, width: 12
+    wire :csr_addr9, width: 12
+    wire :csr_addr10, width: 12
+    wire :csr_addr11, width: 12
+    wire :csr_addr12, width: 12
     wire :csr_write_addr, width: 12
     wire :csr_read_data, width: 32
     wire :csr_read_data2, width: 32
@@ -154,6 +158,10 @@ module RHDL
     wire :csr_read_data6, width: 32
     wire :csr_read_data7, width: 32
     wire :csr_read_data8, width: 32
+    wire :csr_read_data9, width: 32
+    wire :csr_read_data10, width: 32
+    wire :csr_read_data11, width: 32
+    wire :csr_read_data12, width: 32
     wire :csr_write_data, width: 32
     wire :csr_write_we
     wire :csr_write_addr2, width: 12
@@ -328,6 +336,10 @@ module RHDL
     port :csr_addr6 => [:csrfile, :read_addr6]
     port :csr_addr7 => [:csrfile, :read_addr7]
     port :csr_addr8 => [:csrfile, :read_addr8]
+    port :csr_addr9 => [:csrfile, :read_addr9]
+    port :csr_addr10 => [:csrfile, :read_addr10]
+    port :csr_addr11 => [:csrfile, :read_addr11]
+    port :csr_addr12 => [:csrfile, :read_addr12]
     port [:csrfile, :read_data] => :csr_read_data
     port [:csrfile, :read_data2] => :csr_read_data2
     port [:csrfile, :read_data3] => :csr_read_data3
@@ -336,6 +348,10 @@ module RHDL
     port [:csrfile, :read_data6] => :csr_read_data6
     port [:csrfile, :read_data7] => :csr_read_data7
     port [:csrfile, :read_data8] => :csr_read_data8
+    port [:csrfile, :read_data9] => :csr_read_data9
+    port [:csrfile, :read_data10] => :csr_read_data10
+    port [:csrfile, :read_data11] => :csr_read_data11
+    port [:csrfile, :read_data12] => :csr_read_data12
     port :csr_write_addr => [:csrfile, :write_addr]
     port :csr_write_data => [:csrfile, :write_data]
     port :csr_write_we => [:csrfile, :write_we]
@@ -907,6 +923,10 @@ module RHDL
       csr_addr6 <= lit(0x302, width: 12) # medeleg
       csr_addr7 <= lit(0x303, width: 12) # mideleg
       csr_addr8 <= lit(0x180, width: 12) # satp
+      csr_addr9 <= lit(0x305, width: 12) # mtvec
+      csr_addr10 <= lit(0x105, width: 12) # stvec
+      csr_addr11 <= lit(0x341, width: 12) # mepc
+      csr_addr12 <= lit(0x141, width: 12) # sepc
       csr_read_selected = local(:csr_read_selected,
                                 mux(csr_addr == lit(0xC20, width: 12), vec_vl,
                                     mux(csr_addr == lit(0xC21, width: 12), vec_vtype,

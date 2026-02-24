@@ -8,7 +8,7 @@ module RHDL
   module Examples
     module RISCV
       module Tasks
-        # Interactive/headless runner for the RISC-V single-cycle IR harness.
+        # Interactive/headless runner for the RISC-V harness.
         class RunTask
           ESC = "\e"
           CLEAR_SCREEN = "#{ESC}[2J"
@@ -33,6 +33,7 @@ module RHDL
             @options = options
             @mode = (options[:mode] || :ir).to_sym
             @sim_backend = (options[:sim] || default_sim_backend(@mode)).to_sym
+            @core = (options[:core] || :pipeline).to_sym
             @io_mode = (options[:io] || :mmap).to_sym
             @debug = !!options[:debug]
             @cycles_per_frame = [options[:speed].to_i, 1].max
@@ -73,7 +74,7 @@ module RHDL
             @cycle_budget = 0
             @stty_state = nil
 
-            @runner = HeadlessRunner.new(mode: @mode, sim: @sim_backend)
+            @runner = HeadlessRunner.new(mode: @mode, sim: @sim_backend, core: @core)
             @cpu = @runner.cpu
             @cycle_chunk = default_cycle_chunk
             update_terminal_size
@@ -188,6 +189,7 @@ module RHDL
               else
                 render_mmap_frame
               end
+              $stdout.flush
 
               frame_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - frame_start
               sleep_time = FRAME_INTERVAL_SECONDS - frame_elapsed
@@ -559,8 +561,8 @@ module RHDL
             [
               format("PC:%08X INST:%08X X1:%08X X2:%08X",
                      state[:pc], state[:inst], state[:x1], state[:x2]),
-              format("X10:%08X X11:%08X Cycles:%s",
-                     state[:x10], state[:x11], format_number(state[:cycles])),
+              format("X10:%08X X11:%08X Cycles:%s Core: %s",
+                     state[:x10], state[:x11], format_number(state[:cycles]), core_display_name),
               format("Sim:%-10s Mode:%s IO:%s Speed:%s %s %.1ffps",
                      sim_label,
                      @mode.to_s.upcase,
@@ -688,7 +690,15 @@ module RHDL
           def startup_banner
             backend = @runner.respond_to?(:backend) ? @runner.backend : @sim_backend
             mode_label = @runner.respond_to?(:effective_mode) ? @runner.effective_mode : @mode
-            "Starting RISC-V core [mode=#{mode_label}, sim=#{@sim_backend}, backend=#{backend}, io=#{@io_mode}, debug=#{@debug}]"
+            core_label = @runner.respond_to?(:core) ? @runner.core : @core
+            "Starting RISC-V core [core=#{core_label}, mode=#{mode_label}, sim=#{@sim_backend}, backend=#{backend}, io=#{@io_mode}, debug=#{@debug}]"
+          end
+
+          def core_display_name
+            core_value = (@runner.respond_to?(:core) ? @runner.core : @core).to_sym
+            core_value == :pipeline ? 'Pipelined' : 'Single'
+          rescue StandardError
+            'Single'
           end
         end
       end

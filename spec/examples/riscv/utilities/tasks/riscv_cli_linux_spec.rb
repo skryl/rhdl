@@ -85,6 +85,7 @@ RSpec.describe RHDL::Examples::RISCV::CLI do
           expect(exit_code).to eq(0)
           expect(out.string).to include('Info: forcing --io uart for linux mode.')
           expect(instance.options[:linux]).to eq(true)
+          expect(instance.options[:core]).to eq(:pipeline)
           expect(instance.options[:io]).to eq(:uart)
           expect(instance.load_linux_args).to eq(
             kernel: kernel_path,
@@ -95,6 +96,28 @@ RSpec.describe RHDL::Examples::RISCV::CLI do
             dtb_addr: 0x87F0_3000,
             pc: 0x8020_4000
           )
+          expect(instance.ran).to eq(true)
+        end
+      end
+    end
+  end
+
+  it 'accepts --core single and forwards it to task options' do
+    with_temp_binary("KERN") do |kernel_path|
+      with_temp_binary("INIT") do |initramfs_path|
+        with_temp_binary("DTB!") do |dtb_path|
+          out = StringIO.new
+          task_class = build_fake_task_class
+
+          exit_code = described_class.run(
+            ['--linux', '--core', 'single', '--kernel', kernel_path, '--initramfs', initramfs_path, '--dtb', dtb_path],
+            out: out,
+            task_class: task_class
+          )
+
+          instance = task_class.last_instance
+          expect(exit_code).to eq(0)
+          expect(instance.options[:core]).to eq(:single)
           expect(instance.ran).to eq(true)
         end
       end

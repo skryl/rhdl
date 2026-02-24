@@ -26,6 +26,7 @@ module RHDL
             speed: nil, # nil means auto-detect based on mode/backend
             mode: :ir, # default mode for RISC-V
             sim: nil, # ruby, interpret, jit, compile
+            core: :pipeline, # single or pipeline
             io: :mmap, # mmap (text buffer) or uart
             xv6: false,
             linux: false,
@@ -48,6 +49,10 @@ module RHDL
 
             opts.on("--sim TYPE", %i[ruby interpret jit compile], "Simulator backend: compile (default for ir), ruby, interpret, jit") do |v|
               options[:sim] = v
+            end
+
+            opts.on("--core TYPE", %i[single pipeline], "CPU core: pipeline (default), single") do |v|
+              options[:core] = v
             end
 
             opts.on("-s", "--speed CYCLES", Integer, "Cycles per frame/chunk (auto when omitted)") do |v|

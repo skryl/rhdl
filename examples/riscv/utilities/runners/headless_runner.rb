@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../../hdl/ir_harness'
+require_relative '../../hdl/pipeline/ir_harness'
 require_relative '../assembler'
 
 module RHDL
@@ -16,6 +17,8 @@ module RHDL
         DEFAULT_MEM_SIZE = 128 * 1024 * 1024
         LINUX_BOOTSTRAP_OFFSET = 0x1000
         LINUX_BOOT_HART_ID = 0
+        LINUX_PIPELINE_COMPAT_ISA = 'rv32imafdcsu_zicsr_zifencei'
+        LINUX_PIPELINE_BOOTARGS = 'console=ttyS0 rdinit=/sbin/init quiet'
         FDT_MAGIC = 0xD00D_FEED
         FDT_BEGIN_NODE = 0x0000_0001
         FDT_END_NODE = 0x0000_0002
@@ -23,16 +26,17 @@ module RHDL
         FDT_NOP = 0x0000_0004
         FDT_END = 0x0000_0009
 
-        attr_reader :cpu, :mode, :sim_backend, :effective_mode
+        attr_reader :cpu, :mode, :sim_backend, :effective_mode, :core
 
-        def initialize(mode: :ir, sim: nil, mem_size: nil)
+        def initialize(mode: :ir, sim: nil, core: :single, mem_size: nil)
           @mode = (mode || :ir).to_sym
           @effective_mode = normalize_mode(@mode)
           @sim_backend = (sim || default_backend(@mode)).to_sym
+          @core = normalize_core(core)
 
           backend, allow_fallback = map_backend(@effective_mode, @sim_backend)
           resolved_mem_size = mem_size || DEFAULT_MEM_SIZE
-          @cpu = IRHarness.new(mem_size: resolved_mem_size, backend: backend, allow_fallback: allow_fallback)
+          @cpu = build_cpu(core: @core, mem_size: resolved_mem_size, backend: backend, allow_fallback: allow_fallback)
         end
 
         def native?
@@ -60,7 +64,17 @@ module RHDL
         end
 
         def cpu_state
-          @cpu.state
+          return @cpu.state if @cpu.respond_to?(:state)
+
+          {
+            pc: safe_cpu_pc,
+            x1: safe_cpu_reg(1),
+            x2: safe_cpu_reg(2),
+            x10: safe_cpu_reg(10),
+            x11: safe_cpu_reg(11),
+            inst: safe_cpu_inst,
+            cycles: cycle_count
+          }
         end
 
         def load_program(path_or_bytes, base_addr: 0)
@@ -76,10 +90,6 @@ module RHDL
 
         def set_pc(value)
           pc = value.to_i & 0xFFFF_FFFF
-          @cpu.write_pc(pc)
-        rescue StandardError => primary_error
-          return if current_pc == pc
-
           if supports_runner_reset_vector?
             begin
               if @cpu.sim.runner_set_reset_vector(pc)
@@ -87,10 +97,13 @@ module RHDL
                 return
               end
             rescue StandardError
-              # Fall through to preserve the original write_pc error below.
+              # Fall through to direct PC write.
             end
           end
 
+          @cpu.write_pc(pc)
+          return if current_pc == pc
+        rescue StandardError => primary_error
           return if current_pc == pc
           raise primary_error
         end
@@ -150,6 +163,10 @@ module RHDL
               initramfs_bytes.bytesize
             )
           end
+          if dtb_bytes && @core == :pipeline
+            dtb_bytes = patch_dtb_cpu_isa(dtb_bytes, LINUX_PIPELINE_COMPAT_ISA)
+            dtb_bytes = patch_dtb_bootargs(dtb_bytes, LINUX_PIPELINE_BOOTARGS)
+          end
           kernel_base = kernel_addr.to_i & 0xFFFF_FFFF
           entry_pc = (pc.nil? ? kernel_base : pc.to_i) & 0xFFFF_FFFF
           dtb_pointer = dtb_bytes ? (dtb_addr.to_i & 0xFFFF_FFFF) : 0
@@ -175,6 +192,30 @@ module RHDL
 
         private
 
+        def safe_cpu_pc
+          return 0 unless @cpu.respond_to?(:read_pc)
+
+          @cpu.read_pc & 0xFFFF_FFFF
+        rescue StandardError
+          0
+        end
+
+        def safe_cpu_reg(index)
+          return 0 unless @cpu.respond_to?(:read_reg)
+
+          @cpu.read_reg(index) & 0xFFFF_FFFF
+        rescue StandardError
+          0
+        end
+
+        def safe_cpu_inst
+          return 0 unless @cpu.respond_to?(:current_inst)
+
+          @cpu.current_inst & 0xFFFF_FFFF
+        rescue StandardError
+          0
+        end
+
         def normalize_mode(mode)
           case mode
           when :ruby, :ir
@@ -184,6 +225,24 @@ module RHDL
             :ir
           else
             raise ArgumentError, "Unsupported mode #{mode.inspect}. Use ruby, ir, netlist, or verilog."
+          end
+        end
+
+        def normalize_core(core)
+          value = (core || :single).to_sym
+          return value if %i[single pipeline].include?(value)
+
+          raise ArgumentError, "Unsupported core #{core.inspect}. Use single or pipeline."
+        end
+
+        def build_cpu(core:, mem_size:, backend:, allow_fallback:)
+          case core
+          when :single
+            IRHarness.new(mem_size: mem_size, backend: backend, allow_fallback: allow_fallback)
+          when :pipeline
+            Pipeline::IRHarness.new('riscv_pipeline_ir', mem_size: mem_size, backend: backend, allow_fallback: allow_fallback)
+          else
+            raise ArgumentError, "Unsupported core #{core.inspect}. Use single or pipeline."
           end
         end
 
@@ -325,6 +384,178 @@ module RHDL
           end
 
           blob
+        rescue StandardError
+          dtb_bytes
+        end
+
+        def patch_dtb_cpu_isa(dtb_bytes, isa_string)
+          return dtb_bytes if dtb_bytes.nil? || dtb_bytes.bytesize < 40
+          return dtb_bytes if isa_string.nil? || isa_string.empty?
+
+          blob = dtb_bytes.dup
+          return dtb_bytes unless read_fdt_be32(blob, 0) == FDT_MAGIC
+
+          totalsize = read_fdt_be32(blob, 4)
+          off_dt_struct = read_fdt_be32(blob, 8)
+          off_dt_strings = read_fdt_be32(blob, 12)
+          size_dt_strings = read_fdt_be32(blob, 32)
+          size_dt_struct = read_fdt_be32(blob, 36)
+
+          return dtb_bytes if totalsize <= 0 || totalsize > blob.bytesize
+
+          struct_limit = off_dt_struct + size_dt_struct
+          strings_limit = off_dt_strings + size_dt_strings
+          return dtb_bytes if off_dt_struct.negative? || off_dt_strings.negative?
+          return dtb_bytes if struct_limit > totalsize || strings_limit > totalsize
+
+          strings = blob.byteslice(off_dt_strings, size_dt_strings)
+          return dtb_bytes if strings.nil?
+
+          cursor = off_dt_struct
+          depth = 0
+          path = []
+          patched = false
+
+          while (cursor + 4) <= struct_limit
+            token = read_fdt_be32(blob, cursor)
+            cursor += 4
+
+            case token
+            when FDT_BEGIN_NODE
+              name, consumed = read_fdt_struct_name(blob, cursor, struct_limit)
+              return dtb_bytes if name.nil? || consumed.nil?
+
+              cursor += consumed
+              depth += 1
+              path << name
+            when FDT_END_NODE
+              depth -= 1
+              return dtb_bytes if depth.negative?
+
+              path.pop
+            when FDT_PROP
+              return dtb_bytes if (cursor + 8) > struct_limit
+
+              value_len = read_fdt_be32(blob, cursor)
+              cursor += 4
+              nameoff = read_fdt_be32(blob, cursor)
+              cursor += 4
+
+              value_offset = cursor
+              value_padded_len = (value_len + 3) & ~0x3
+              return dtb_bytes if (cursor + value_padded_len) > struct_limit
+
+              if !patched && path == ['', 'cpus', 'cpu@0']
+                prop_name = read_fdt_strings_name(strings, nameoff)
+                if prop_name == 'riscv,isa'
+                  replacement = "#{isa_string}\x00".b
+                  if replacement.bytesize <= value_len
+                    replacement.bytes.each_with_index do |byte, idx|
+                      blob.setbyte(value_offset + idx, byte)
+                    end
+                    replacement.bytesize.upto(value_len - 1) do |idx|
+                      blob.setbyte(value_offset + idx, 0)
+                    end
+                    patched = true
+                  end
+                end
+              end
+
+              cursor += value_padded_len
+            when FDT_NOP
+              next
+            when FDT_END
+              break
+            else
+              return dtb_bytes
+            end
+          end
+
+          patched ? blob : dtb_bytes
+        rescue StandardError
+          dtb_bytes
+        end
+
+        def patch_dtb_bootargs(dtb_bytes, bootargs)
+          return dtb_bytes if dtb_bytes.nil? || dtb_bytes.bytesize < 40
+          return dtb_bytes if bootargs.nil? || bootargs.empty?
+
+          blob = dtb_bytes.dup
+          return dtb_bytes unless read_fdt_be32(blob, 0) == FDT_MAGIC
+
+          totalsize = read_fdt_be32(blob, 4)
+          off_dt_struct = read_fdt_be32(blob, 8)
+          off_dt_strings = read_fdt_be32(blob, 12)
+          size_dt_strings = read_fdt_be32(blob, 32)
+          size_dt_struct = read_fdt_be32(blob, 36)
+
+          return dtb_bytes if totalsize <= 0 || totalsize > blob.bytesize
+
+          struct_limit = off_dt_struct + size_dt_struct
+          strings_limit = off_dt_strings + size_dt_strings
+          return dtb_bytes if off_dt_struct.negative? || off_dt_strings.negative?
+          return dtb_bytes if struct_limit > totalsize || strings_limit > totalsize
+
+          strings = blob.byteslice(off_dt_strings, size_dt_strings)
+          return dtb_bytes if strings.nil?
+
+          replacement = "#{bootargs}\x00".b
+          cursor = off_dt_struct
+          depth = 0
+          in_chosen = false
+
+          while (cursor + 4) <= struct_limit
+            token = read_fdt_be32(blob, cursor)
+            cursor += 4
+
+            case token
+            when FDT_BEGIN_NODE
+              name, consumed = read_fdt_struct_name(blob, cursor, struct_limit)
+              return dtb_bytes if name.nil? || consumed.nil?
+
+              cursor += consumed
+              depth += 1
+              in_chosen = (depth == 2 && name == 'chosen')
+            when FDT_END_NODE
+              in_chosen = false if in_chosen && depth == 2
+              depth -= 1
+              return dtb_bytes if depth.negative?
+            when FDT_PROP
+              return dtb_bytes if (cursor + 8) > struct_limit
+
+              value_len = read_fdt_be32(blob, cursor)
+              cursor += 4
+              nameoff = read_fdt_be32(blob, cursor)
+              cursor += 4
+
+              value_offset = cursor
+              value_padded_len = (value_len + 3) & ~0x3
+              return dtb_bytes if (cursor + value_padded_len) > struct_limit
+
+              if in_chosen
+                prop_name = read_fdt_strings_name(strings, nameoff)
+                if prop_name == 'bootargs' && replacement.bytesize <= value_len
+                  replacement.bytes.each_with_index do |byte, idx|
+                    blob.setbyte(value_offset + idx, byte)
+                  end
+                  replacement.bytesize.upto(value_len - 1) do |idx|
+                    blob.setbyte(value_offset + idx, 0)
+                  end
+                  return blob
+                end
+              end
+
+              cursor += value_padded_len
+            when FDT_NOP
+              next
+            when FDT_END
+              break
+            else
+              return dtb_bytes
+            end
+          end
+
+          dtb_bytes
         rescue StandardError
           dtb_bytes
         end
@@ -566,6 +797,7 @@ module RHDL
           emit.call(Assembler.csrrw(0, 0x106, 5))
           emit_words.call(load_immediate_words(rd: 5, value: 0x0000_B1FF))
           emit.call(Assembler.csrrw(0, 0x302, 5))
+          # Delegate software/timer/external interrupts to S-mode for Linux.
           emit_words.call(load_immediate_words(rd: 5, value: 0x0000_0888))
           emit.call(Assembler.csrrw(0, 0x303, 5))
           emit_words.call(load_immediate_words(rd: 5, value: 0x0000_0800))
