@@ -1,6 +1,6 @@
 # RHDL Linux Patch Series
 
-`examples/riscv/build_linux.sh` applies local Linux patches from this directory before each build.
+`examples/riscv/software/build_linux.sh` applies local Linux patches from this directory before each build.
 
 ## Supported Patch Format
 
@@ -22,4 +22,4 @@ Use zero-padded numeric prefixes to define an explicit series:
 
 1. Keep `examples/riscv/software/linux` as upstream source (submodule checkout).
 2. Store all local Linux source changes as patch files in this directory.
-3. Run `./examples/riscv/build_linux.sh` to clean, apply patches, and build artifacts in `examples/riscv/software/bin`.
+3. Run `./examples/riscv/software/build_linux.sh` to clean, apply patches, and build artifacts in `examples/riscv/software/bin`.

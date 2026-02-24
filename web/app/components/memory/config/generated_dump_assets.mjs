@@ -9,5 +9,7 @@ export const GENERATED_MEMORY_DUMP_ASSET_FILES = Object.freeze([
   "./assets/fixtures/gameboy/roms/dmg_boot.bin",
   "./assets/fixtures/mos6502/memory/karateka_mem.bin",
   "./assets/fixtures/mos6502/memory/karateka_mem.rhdlsnap",
-  "./assets/fixtures/riscv/software/bin/kernel.bin"
+  "./assets/fixtures/riscv/software/bin/kernel.bin",
+  "./assets/fixtures/riscv/software/bin/linux_bootstrap.bin",
+  "./assets/fixtures/riscv/software/bin/linux_kernel.bin"
 ]);

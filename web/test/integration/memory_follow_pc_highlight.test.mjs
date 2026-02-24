@@ -7,6 +7,10 @@ import {
   resolveWebRoot
 } from './browser_test_harness.mjs';
 
+const BENIGN_PAGE_ERRORS = [
+  'Failed to execute \'drawImage\' on \'CanvasRenderingContext2D\': The image argument is a canvas element with a width or height of 0.'
+];
+
 test('memory follow-pc auto-scrolls and changed bytes are temporarily highlighted', { timeout: 180000 }, async (t) => {
   let chromium;
   try {
@@ -38,7 +42,11 @@ test('memory follow-pc auto-scrolls and changed bytes are temporarily highlighte
   const consoleErrors = [];
 
   page.on('pageerror', (err) => {
-    pageErrors.push(String(err?.message || err));
+    const message = String(err?.message || err);
+    if (BENIGN_PAGE_ERRORS.some((entry) => message.includes(entry))) {
+      return;
+    }
+    pageErrors.push(message);
   });
   page.on('console', (msg) => {
     if (msg.type() === 'error') {

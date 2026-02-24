@@ -429,12 +429,12 @@ rhdl examples riscv --core single path/to/program.bin
 rhdl examples riscv -d --io uart path/to/program.bin
 
 # Launch xv6 (forces UART mode automatically)
-./examples/riscv/build_xv6.sh
+./examples/riscv/software/build_xv6.sh
 rhdl examples riscv --xv6 -d
 
 # Build Linux kernel artifacts (Phase 0 source workflow)
 git submodule update --init --recursive examples/riscv/software/linux
-./examples/riscv/build_linux.sh
+./examples/riscv/software/build_linux.sh
 
 # Run Linux via the top-level CLI (forces UART mode automatically)
 rhdl examples riscv --linux
@@ -451,7 +451,7 @@ rhdl examples riscv --headless --cycles 200000 path/to/program.bin
 Linux milestones are covered in `spec/examples/riscv/linux_boot_milestones_spec.rb`.
 Additional Linux compatibility specs live under `spec/examples/riscv/linux_*_spec.rb`.
 
-`examples/riscv/build_linux.sh` defaults to `rv32_nommu_virt_defconfig` and applies an aggressive
+`examples/riscv/software/build_linux.sh` defaults to `rv32_nommu_virt_defconfig` and applies an aggressive
 RV32 minimum-size profile for this core. Use `--no-min-profile` if you want raw defconfig behavior.
 It also builds a real BusyBox userspace with Buildroot and writes:
 - `examples/riscv/software/bin/linux_initramfs.cpio`

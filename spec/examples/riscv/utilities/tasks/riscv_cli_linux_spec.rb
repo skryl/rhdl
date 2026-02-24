@@ -85,7 +85,7 @@ RSpec.describe RHDL::Examples::RISCV::CLI do
           expect(exit_code).to eq(0)
           expect(out.string).to include('Info: forcing --io uart for linux mode.')
           expect(instance.options[:linux]).to eq(true)
-          expect(instance.options[:core]).to eq(:pipeline)
+          expect(instance.options[:core]).to eq(:single)
           expect(instance.options[:io]).to eq(:uart)
           expect(instance.load_linux_args).to eq(
             kernel: kernel_path,

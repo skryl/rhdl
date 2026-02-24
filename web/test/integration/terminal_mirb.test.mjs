@@ -1,11 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { access } from 'node:fs/promises';
+import path from 'node:path';
 
 import {
   createStaticServer,
   serverBaseUrl,
   resolveWebRoot
 } from './browser_test_harness.mjs';
+
+async function hasMirbAsset(webRoot) {
+  const mirbScriptPath = path.join(webRoot, 'assets', 'pkg', 'mirb.js');
+  try {
+    await access(mirbScriptPath);
+    return true;
+  } catch (_err) {
+    return false;
+  }
+}
 
 async function ensureTerminalOpen(page) {
   await page.waitForSelector('#terminalPanel', { state: 'attached', timeout: 20000 });
@@ -64,6 +76,11 @@ test('terminal mirb supports one-shot and session flows', { timeout: 300000 }, a
   }
 
   const webRoot = resolveWebRoot(import.meta.url);
+  if (!(await hasMirbAsset(webRoot))) {
+    t.skip('mirb assets are missing (install emscripten and run: `PATH="$HOME/.cargo/bin:$PATH" bundle exec rake web:build`)');
+    return;
+  }
+
   const server = await createStaticServer(webRoot);
   t.after(() => {
     server.close();
