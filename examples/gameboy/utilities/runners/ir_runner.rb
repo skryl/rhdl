@@ -71,6 +71,18 @@ module RHDL
       # Boot ROM paths (relative to the gameboy directory)
       DMG_BOOT_ROM_PATH = File.expand_path('../../software/roms/dmg_boot.bin', __dir__)
 
+      def runner_verbose?
+        return true if ENV['RHDL_RUNNER_VERBOSE'] == '1'
+        return false if ENV['RSPEC_QUIET_OUTPUT'] == '1'
+        return false if defined?(RSpec)
+
+        true
+      end
+
+      def log(message)
+        puts(message) if runner_verbose?
+      end
+
       # Initialize the Game Boy IR runner
       # @param backend [Symbol] :interpret, :jit, or :compile
       def initialize(backend: :interpret)
@@ -78,7 +90,7 @@ module RHDL
         require 'rhdl/codegen/ir/sim/ir_simulator'
 
         backend_names = { interpret: "Interpreter", jit: "JIT", compile: "Compiler" }
-        puts "Initializing Game Boy IR simulation [#{backend_names[backend]}]..."
+        log "Initializing Game Boy IR simulation [#{backend_names[backend]}]..."
         start_time = Time.now
 
         # Generate IR JSON
@@ -92,9 +104,9 @@ module RHDL
         )
 
         elapsed = Time.now - start_time
-        puts "  IR loaded in #{elapsed.round(2)}s"
-        puts "  Native backend: #{@sim.native? ? 'Rust (optimized)' : 'Ruby (fallback)'}"
-        puts "  Signals: #{@sim.signal_count}, Registers: #{@sim.reg_count}"
+        log "  IR loaded in #{elapsed.round(2)}s"
+        log "  Native backend: #{@sim.native? ? 'Rust (optimized)' : 'Ruby (fallback)'}"
+        log "  Signals: #{@sim.signal_count}, Registers: #{@sim.reg_count}"
 
         @cycles = 0
         @halted = false
@@ -111,12 +123,12 @@ module RHDL
         @use_batched = @sim.native? && @sim.runner_mode?
 
         if @use_batched
-          puts "  Batched execution: enabled"
+          log "  Batched execution: enabled"
         end
 
         # Check for Game Boy mode specifically
         if @sim.gameboy_mode?
-          puts "  Game Boy mode: enabled"
+          log "  Game Boy mode: enabled"
         end
 
         @sim.reset
@@ -160,7 +172,7 @@ module RHDL
           @sim.load_rom(bytes)
         end
 
-        puts "Loaded #{@rom.length} bytes ROM"
+        log "Loaded #{@rom.length} bytes ROM"
       end
 
       def load_ram(bytes, base_addr:)
@@ -183,9 +195,9 @@ module RHDL
         if bytes.nil?
           if File.exist?(DMG_BOOT_ROM_PATH)
             bytes = File.binread(DMG_BOOT_ROM_PATH)
-            puts "Loading default DMG boot ROM from #{DMG_BOOT_ROM_PATH}"
+            log "Loading default DMG boot ROM from #{DMG_BOOT_ROM_PATH}"
           else
-            puts "Warning: DMG boot ROM not found at #{DMG_BOOT_ROM_PATH}"
+            log "Warning: DMG boot ROM not found at #{DMG_BOOT_ROM_PATH}"
             return
           end
         elsif bytes.is_a?(String) && File.exist?(bytes)
@@ -197,10 +209,10 @@ module RHDL
 
         if @use_batched && @sim.respond_to?(:load_boot_rom)
           @sim.load_boot_rom(bytes)
-          puts "Loaded #{bytes.length} bytes boot ROM"
+          log "Loaded #{bytes.length} bytes boot ROM"
           @boot_rom_loaded = true
         else
-          puts "Warning: Boot ROM not supported in non-batched mode"
+          log "Warning: Boot ROM not supported in non-batched mode"
           @boot_rom_loaded = false
         end
       end
