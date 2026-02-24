@@ -1,807 +1,441 @@
-# RISC-V RV32I CPU Implementation
+# RISC-V RV32 in RHDL (Linux + xv6)
 
-The `examples/riscv/` directory contains RISC-V RV32I processor implementations demonstrating both single-cycle and pipelined CPU architectures. These examples showcase RHDL's capabilities for building modern 32-bit processors with full Verilog export support.
+## CPU overview
 
-## Overview
+- `single`: single-cycle core focused on bring-up/debug determinism.
+- `pipeline`: 5-stage core for higher-throughput execution.
+- Both cores share a common ISA decode/control surface.
+- Both cores share a common CSR/privilege model.
+- Both cores share a common MMIO device shape (CLINT, PLIC, UART, virtio-blk).
+- Linux and xv6 flows use the same runner stack and software artifact layout.
+- Core selection is runtime-configurable via `--core single|pipeline`.
 
-The RISC-V implementation includes:
+## What this page covers
 
-- **Single-Cycle CPU**: Simple datapath executing one instruction per clock
-- **5-Stage Pipelined CPU**: IF-ID-EX-MEM-WB pipeline with hazard handling
-- **Full RV32I Base Set**: All 47 base integer instructions
-- **Assembler**: Two-pass assembler for RV32I programs
-- **Test Harnesses**: Clean testing interfaces
-- **xv6 Compatibility Coverage**: Privileged readiness checks plus UART shell boot/echo flow
-- **xv6 Execution Paths**: Terminal runner (`--xv6`), native-only readiness/shell specs, and web preset loading support
+- How to build and run RISC-V programs, xv6, and Linux
+- Current CLI defaults and artifact expectations
+- Linux source + patch workflow
+- Current core/ISA support surface
+- Test entry points and web preset integration
 
-## Quick Start
+## Quick start
 
-### Running Tests
+### 1. Build native backends
 
 ```bash
-# Run all RISC-V tests
-bundle exec rspec spec/examples/riscv/
-
-# Run specific CPU pipeline tests
-bundle exec rspec spec/examples/riscv/cpu_spec.rb
-bundle exec rspec spec/examples/riscv/pipelined_cpu_spec.rb
-
-# Run xv6-focused compatibility tests
-bundle exec rspec spec/examples/riscv/xv6_readiness_spec.rb
-bundle exec rspec spec/examples/riscv/xv6_shell_io_spec.rb
+bundle exec rake native:build
 ```
 
-### Building xv6 Artifacts
-
-The xv6 shell tests expect local artifacts under `examples/riscv/software/bin/`.
+### 2. Build software artifacts
 
 ```bash
+# xv6 artifacts (kernel.bin + fs.img)
 ./examples/riscv/software/build_xv6.sh
+
+# Linux kernel + DTB + BusyBox rootfs artifacts
+./examples/riscv/software/build_linux.sh
 ```
 
-### Terminal CLI (RISC-V, xv6, and Linux)
-
-Use the RISC-V runner from the repo root. `rhdl examples riscv` and `examples/riscv/bin/riscv` expose the same flags:
+### 3. Run
 
 ```bash
-# Run a regular RISC-V binary
+# Run a raw RISC-V binary
 rhdl examples riscv path/to/program.bin
 
-# Explicit mode/backend and MMAP terminal output
-rhdl examples riscv --mode ir --sim compile --io mmap path/to/program.bin
+# Run xv6 (forces UART mode)
+rhdl examples riscv --xv6
 
-# Core selection (default is pipeline)
-rhdl examples riscv --core pipeline path/to/program.bin
-rhdl examples riscv --core single path/to/program.bin
-
-# UART mode with live debug panel (ESC toggles command mode)
-rhdl examples riscv --io uart -d path/to/program.bin
-
-# Run xv6 (forces --io uart automatically)
-rhdl examples riscv --xv6 -d
-
-# Override xv6 artifact locations
-rhdl examples riscv --xv6 --kernel examples/riscv/software/bin/kernel.bin --fs examples/riscv/software/bin/fs.img
-
-# Run Linux (forces --io uart automatically)
+# Run Linux (forces UART mode; defaults kernel/initramfs/dtb if omitted)
 rhdl examples riscv --linux
-
-# Optional Linux artifact overrides (initramfs + custom DTB)
-rhdl examples riscv --linux \
-  --initramfs path/to/initramfs.cpio \
-  --dtb path/to/riscv.dtb
-
-# Headless run (single execution chunk)
-rhdl examples riscv --xv6 --headless --cycles 1000000
 ```
 
-### Using the CPU
+## CLI behavior (`rhdl examples riscv`)
 
-```ruby
-require_relative 'examples/riscv/hdl/harness'
+`rhdl examples riscv` delegates to `examples/riscv/bin/riscv`.
 
-harness = RISCV::Harness.new
-harness.load_program([
-  0x00500093,  # addi x1, x0, 5
-  0x00A00113,  # addi x2, x0, 10
-  0x002081B3,  # add x3, x1, x2
-])
-harness.reset!
-harness.run_cycles(10)
+### Core defaults
 
-puts "x1 = #{harness.read_reg(1)}"  # => 5
-puts "x2 = #{harness.read_reg(2)}"  # => 10
-puts "x3 = #{harness.read_reg(3)}"  # => 15
-```
+- CLI default core: `single`
+- Core override: `--core single|pipeline`
 
-## xv6 Workflow
+### Mode defaults
 
-This section covers how xv6 is wired into the RHDL RISC-V flow: source layout, local artifact build, boot/readiness specs, and tracer tooling.
+- Default mode: `--mode ir`
+- Default simulator backend in IR mode: `--sim compile`
 
-### Source Layout
+### xv6 mode
 
-- Active xv6 source tree: `examples/riscv/software/xv6`
-- Legacy compatibility tree: `examples/riscv/software/xv6-rv32`
-- Build helper: `examples/riscv/software/build_xv6.sh`
-- Local generated artifacts: `examples/riscv/software/bin/`
+- Enable with `--xv6`
+- Forces `--io uart`
+- Default artifacts:
+  - `examples/riscv/software/bin/kernel.bin`
+  - `examples/riscv/software/bin/fs.img`
+- Optional overrides:
+  - `--kernel <path>`
+  - `--fs <path>`
 
-`build_xv6.sh` prefers `examples/riscv/software/xv6` and falls back to `examples/riscv/software/xv6-rv32` if needed.
+### Linux mode
 
-### Build xv6 Artifacts
+- Enable with `--linux`
+- Forces `--io uart`
+- Default artifacts (auto-filled if omitted):
+  - `--kernel examples/riscv/software/bin/linux_kernel.bin`
+  - `--initramfs examples/riscv/software/bin/linux_initramfs.cpio`
+  - `--dtb examples/riscv/software/bin/rhdl_riscv_virt.dtb`
+- Optional address overrides:
+  - `--kernel-addr` (default `0x80400000`)
+  - `--initramfs-addr` (default `0x84000000`)
+  - `--dtb-addr` (default `0x87f00000`)
 
-```bash
-./examples/riscv/software/build_xv6.sh
-```
+## Software tree layout
 
-This generates local (ignored) artifacts in `examples/riscv/software/bin/`, including:
+- `examples/riscv/software/linux`:
+  Linux source submodule (upstream tree)
+- `examples/riscv/software/linux_patches`:
+  local patch series applied by the Linux build script
+- `examples/riscv/software/xv6`:
+  preferred xv6 source tree (if present)
+- `examples/riscv/software/xv6-rv32`:
+  fallback xv6 source tree
+- `examples/riscv/software/bin`:
+  generated local artifacts
 
-- `kernel.bin`
-- `fs.img`
-- `kernel.elf`
-- `kernel.asm`
-- `kernel.sym`
-- `kernel.nm`
+## Linux workflow
 
-### Test Matrix
+### Source + patches
 
-Run all RISC-V specs:
+Linux source is tracked as a submodule at:
 
-```bash
-bundle exec rspec spec/examples/riscv/
-```
+- `examples/riscv/software/linux`
 
-xv6-focused specs:
-
-- Privileged/readiness compatibility: `spec/examples/riscv/xv6_readiness_spec.rb`
-- UART shell boot + echo flow: `spec/examples/riscv/xv6_shell_io_spec.rb`
-
-Run only xv6-focused specs:
-
-```bash
-bundle exec rspec spec/examples/riscv/xv6_readiness_spec.rb spec/examples/riscv/xv6_shell_io_spec.rb
-```
-
-### Expected xv6 Boot Milestones
-
-The shell I/O spec waits for UART output milestones:
-
-- `init: starting sh`
-- shell prompt `$ `
-- interactive command echo/output (for example `echo rhdl_io_ok`)
-
-### Boot Tracing Utility
-
-Use the tracer for long or detailed boot debugging:
-
-```bash
-bundle exec ruby examples/riscv/utilities/xv6_boot_tracer.rb --core single --backend compiler
-```
-
-Useful options:
-
-- `--core single|pipeline`
-- `--backend interpreter|jit|compiler`
-- `--kernel PATH`
-- `--fs PATH`
-- `--symbols PATH` / `--no-symbols`
-- `--[no-]fast-boot`
-- `--[no-]stage`
-- `--[no-]mmio`
-
-### Web Simulator Status
-
-Current auto-generated web runner presets are derived from:
-
-- `examples/8bit/config.json`
-- `examples/mos6502/config.json`
-- `examples/apple2/config.json`
-- `examples/gameboy/config.json`
-- `examples/riscv/config.json`
-- `examples/riscv/config_linux.json`
-
-RISC-V is included in the generated preset list by default (`lib/rhdl/cli/tasks/web_generate_task.rb`, `RUNNER_CONFIG_PATHS`) and appears as:
-
-- `riscv` (xv6)
-- `riscv_linux` (Linux)
-
-Notes:
-
-- The `riscv` xv6 preset expects:
-  - `./assets/fixtures/riscv/software/bin/kernel.bin`
-  - `./assets/fixtures/riscv/software/bin/fs.img`
-  - `./assets/pkg/ir_compiler_riscv.wasm`
-  and will run in UART display/keyboard mode with reset-at-PC `0x80000000`.
-- The `riscv_linux` preset expects:
-  - `./assets/fixtures/riscv/software/bin/linux_kernel.bin`
-  - `./assets/fixtures/riscv/software/bin/linux_initramfs.cpio`
-  - `./assets/fixtures/riscv/software/bin/rhdl_riscv_virt.dtb`
-  - `./assets/fixtures/riscv/software/bin/linux_bootstrap.bin`
-- `web:generate` copies optional RISC-V xv6/Linux artifacts only when present locally, so first-time runs can skip binary loads without hard failure.
-- If RISC-V preset settings change in `examples/riscv/config.json` or `examples/riscv/config_linux.json`, rerun `bundle exec rake web:generate` to refresh `generated_presets.mjs`.
-- Regenerate fixtures after preset-default changes to keep checked-in generated presets consistent with source config intent.
-
-### xv6 Functionality Review (Current)
-
-- `examples/riscv/bin/riscv --xv6`:
-  - always forces `--io uart`
-  - validates artifact presence (`kernel.bin`, `fs.img`) and then calls `RunTask#load_xv6`
-  - delegates runtime behavior to `HeadlessRunner#load_xv6`
-- `HeadlessRunner#load_xv6` (shared terminal runner path) requires native RV32 runner (`native? && runner_kind == :riscv`) and patches `PHYSTOP` by replacing `LUI` imm20 `0x88000` → `0x80200`.
-- `xv6_boot_tracer` mirrors the same constraints and fast-boot patching strategy, then runs continuous tracing with optional stage/MMIO/call-trace probes.
-- `spec/examples/riscv/xv6_readiness_spec.rb` currently validates privileged behavior only via IR harness + JIT backend (`allow_fallback: false`), while `xv6_shell_io_spec.rb` validates terminal boot+echo across JIT and compiler.
-- Web path currently supports a RISC-V preset, but xv6-specific web acceptance coverage is still limited; no dedicated xv6 browser regression exists yet.
-- Improvement opportunities:
-  - add focused xv6 CLI/runner tests for `--xv6` missing-native and bad-path error behavior
-  - add a web integration test for the generated RISC-V preset booting through default UART path when artifacts are present
-  - consider making fast-boot patching mode explicit in terminal xv6 runner for parity with web `fastBoot` options
-
-### Artifact Hygiene
-
-`examples/riscv/software/bin/` is intentionally ignored in `.gitignore` and treated as local build output.
-
-If specs skip because artifacts are missing, regenerate with:
-
-```bash
-./examples/riscv/software/build_xv6.sh
-```
-
-## Linux Source + Patch Workflow (Phase 0)
-
-Linux source is tracked as a submodule at `examples/riscv/software/linux`.
-Local Linux source changes should be captured as ordered patch files in `examples/riscv/software/linux_patches/`.
-
-### Initialize Linux Source
+Initialize/update:
 
 ```bash
 git submodule update --init --recursive examples/riscv/software/linux
 ```
 
-### Build Linux Kernel Artifacts
+Local Linux changes should be stored as patch files in:
+
+- `examples/riscv/software/linux_patches`
+
+Patch files are applied in deterministic lexicographic order during build.
+
+### Build command
 
 ```bash
 ./examples/riscv/software/build_linux.sh
 ```
 
-Optional flags:
+Default behavior:
 
-- `--no-clean` skips source/build cleanup.
-- `--defconfig <target>` overrides the default `rv32_nommu_virt_defconfig`.
-- `--no-min-profile` skips the aggressive RV32 minimum-size boot profile.
-- `--toolprefix <prefix>` overrides toolchain auto-detection.
-- `--buildroot-jobs <n>` controls Buildroot parallelism (default: `1`).
+- cleans Linux source/build outputs (unless `--no-clean`)
+- applies local patches from `linux_patches`
+- configures kernel from `rv32_defconfig`
+- applies the RV32 minimum-size profile (unless `--no-min-profile`)
+- builds BusyBox initramfs + ext image via Buildroot (unless `--no-rootfs`)
+- emits kernel, DTB, initramfs, and fs image artifacts into `software/bin`
 
-`build_linux.sh` applies patches from `linux_patches` in deterministic filename order and writes:
+Notable outputs:
 
-- `examples/riscv/software/bin/linux_kernel.bin`
-- `examples/riscv/software/bin/linux_kernel.elf`
-- `examples/riscv/software/bin/linux_kernel.map`
-- `examples/riscv/software/bin/linux_kernel.config`
-- `examples/riscv/software/bin/linux_initramfs.cpio`
-- `examples/riscv/software/bin/linux_fs.img`
-- `examples/riscv/software/bin/linux_busybox`
+- `linux_kernel.bin`
+- `linux_kernel.elf`
+- `linux_kernel.map`
+- `linux_kernel.config`
+- `rhdl_riscv_virt.dtb`
+- `linux_initramfs.cpio`
+- `linux_fs.img`
+- `linux_busybox`
+- `linux_rootfs.config`
 
-By default, `build_linux.sh` also applies an aggressive RV32 minimum-size profile tuned for this core
-(RV32IMAF-focused ISA + stripped subsystems) to keep `linux_kernel.bin` small while preserving UART
-boot milestones.
-Rootfs artifacts are built via Buildroot using a NOMMU RV32 BusyBox profile (no local init shim).
-The default kernel cmdline launches `/bin/sh` from BusyBox for an immediate interactive shell.
+### Runtime handoff details
 
-### Linux Runner Artifact Expectations
+Linux loading uses a bootstrap handoff that:
 
-`rhdl examples riscv --linux` defaults to:
+- loads kernel/initramfs/DTB into memory
+- patches DTB initrd bounds to match loaded initramfs
+- sets entry/boot context and jumps to kernel entry
 
-- `--kernel examples/riscv/software/bin/linux_kernel.bin`
-- `--initramfs examples/riscv/software/bin/linux_initramfs.cpio`
-- `--dtb examples/riscv/software/bin/rhdl_riscv_virt.dtb`
+## xv6 workflow
 
-`examples/riscv/software/build_linux.sh` writes the default kernel artifact, so after building you can run:
+Build xv6 artifacts:
 
 ```bash
-rhdl examples riscv --linux
+./examples/riscv/software/build_xv6.sh
 ```
 
-Optional Linux artifacts:
+Outputs:
 
-- `--kernel <path>`: override kernel image path.
-- `--initramfs <path>`: override initramfs cpio archive path.
-- `--dtb <path>`: override flattened device tree blob path.
+- `examples/riscv/software/bin/kernel.bin`
+- `examples/riscv/software/bin/kernel.elf`
+- `examples/riscv/software/bin/kernel.sym`
+- `examples/riscv/software/bin/kernel.asm`
+- `examples/riscv/software/bin/kernel.nm`
+- `examples/riscv/software/bin/fs.img`
 
-### Linux Milestone Specs
+Run:
 
-Linux milestone and compatibility specs live under `spec/examples/riscv/`:
-
-- `linux_boot_milestones_spec.rb` (Linux banner and early-boot UART milestones)
-- `linux_privilege_boot_spec.rb` (privileged boot compatibility)
-- `linux_csr_mmio_compat_spec.rb` (CSR/MMIO compatibility)
-- `linux_mmio_interrupt_spec.rb` (MMIO + interrupt integration)
-- `utilities/tasks/riscv_cli_linux_spec.rb` and `utilities/tasks/run_task_spec.rb` (CLI/loader contract)
-
-By default, Linux compatibility specs exercise JIT and interpreter backends. Set `RHDL_LINUX_INCLUDE_COMPILER=1` to include compiler backend coverage.
-
-## Architecture: Single-Cycle CPU
-
-### Block Diagram
-
+```bash
+rhdl examples riscv --xv6
 ```
+
+## Current core and ISA surface
+
+### Core options
+
+- `single`: single-cycle implementation
+- `pipeline`: 5-stage pipeline implementation
+
+Both share decode/MMIO infrastructure and can run through the native RISC-V runner.
+
+### Supported ISA/extensions (current project surface)
+
+- Base: `RV32I`
+- Integer: `M`
+- Atomics: `A` + `Zacas` subset (`amocas.w`)
+- Compressed: `C` subset
+- Float: `F` subset (`flw`, `fsw`, `fmv.x.w`, `fmv.w.x`, `fcsr` interaction)
+- Vector: `V` subset (`vsetvli`, `vmv*`, `vadd` subset)
+- System/support: `Zicsr`, `Zifencei`, `sfence.vma`
+- Additional subsets:
+  - `Zawrs` (`wrs.nto`, `wrs.sto`)
+  - `Zba` subset (`sh1add`, `sh2add`, `sh3add`)
+  - `Zbb` subset (`andn`, `orn`, `xnor`, `min/max`, `minu/maxu`)
+  - `Zbkb` subset (`pack`, `packh`)
+  - `Zbc` subset (`clmul`, `clmulh`, `clmulr`)
+  - `Zicbop`, `Zicbom`, `Zicboz` encodings currently modeled as safe no-ops
+
+## Test entry points
+
+Targeted RISC-V task/CLI tests:
+
+```bash
+bundle exec rspec spec/examples/riscv/utilities/tasks/run_task_spec.rb
+bundle exec rspec spec/examples/riscv/utilities/tasks/riscv_cli_linux_spec.rb
+```
+
+Linux compatibility + boot milestones:
+
+```bash
+bundle exec rspec spec/examples/riscv/linux_privilege_boot_spec.rb
+bundle exec rspec spec/examples/riscv/linux_csr_mmio_compat_spec.rb
+bundle exec rspec spec/examples/riscv/linux_mmio_interrupt_spec.rb
+bundle exec rspec spec/examples/riscv/linux_boot_milestones_spec.rb
+```
+
+Extension-focused coverage:
+
+```bash
+bundle exec rspec spec/examples/riscv/rv32c_extension_spec.rb
+bundle exec rspec spec/examples/riscv/rv32f_extension_spec.rb
+bundle exec rspec spec/examples/riscv/rvv_extension_spec.rb
+bundle exec rspec spec/examples/riscv/zba_extension_spec.rb
+bundle exec rspec spec/examples/riscv/zbb_extension_spec.rb
+bundle exec rspec spec/examples/riscv/zbkb_extension_spec.rb
+bundle exec rspec spec/examples/riscv/zbc_extension_spec.rb
+bundle exec rspec spec/examples/riscv/zawrs_extension_spec.rb
+bundle exec rspec spec/examples/riscv/zacas_extension_spec.rb
+bundle exec rspec spec/examples/riscv/zicbo_extension_spec.rb
+```
+
+Broader:
+
+```bash
+bundle exec rake spec:riscv
+```
+
+## Web simulator integration
+
+RISC-V web presets are generated from:
+
+- `examples/riscv/config.json` (xv6 preset)
+- `examples/riscv/config_linux.json` (Linux preset)
+
+Generated preset IDs include:
+
+- `riscv`
+- `riscv_linux`
+
+If preset defaults or software artifacts change, regenerate web assets:
+
+```bash
+bundle exec rake web:generate
+```
+
+## Troubleshooting
+
+- `Error: Linux kernel/initramfs/dtb not found`:
+  run `./examples/riscv/software/build_linux.sh` or pass explicit paths.
+- `Error: xv6 kernel/fs image not found`:
+  run `./examples/riscv/software/build_xv6.sh`.
+- Linux mode and xv6 mode are mutually exclusive:
+  use either `--linux` or `--xv6`, not both.
+- For reproducible Linux changes:
+  keep source edits as patch files in `examples/riscv/software/linux_patches`, not ad-hoc dirty submodule changes.
+
+---
+
+## Full architecture reference
+
+This section keeps the detailed architecture at the end of the page for design/debug use.
+
+## Architecture overview
+
+The RISC-V example includes two core implementations:
+
+- single-cycle core (`examples/riscv/hdl/cpu.rb`)
+- pipelined core (`examples/riscv/hdl/pipeline/cpu.rb`)
+
+Both cores share the same ISA decode/control surface, CSR model, and MMIO platform shape.
+
+## Single-cycle architecture
+
+### Datapath sketch
+
+```text
 +-----------------------------------------------------------------------------+
-|                      RV32I Single-Cycle Datapath                             |
+|                         RV32 single-cycle datapath                          |
 +-----------------------------------------------------------------------------+
 |                                                                             |
-|  +--------+     +--------+     +----------+     +--------+                  |
-|  |   PC   |---->| Inst   |---->| Decoder  |---->|Control |                  |
-|  |Register|     | Memory |     |          |     |Signals |                  |
-|  +---+----+     +--------+     +----------+     +---+----+                  |
-|      |              |                               |                        |
-|      |              v                               |                        |
-|      |         +--------+                           |                        |
-|      |         | ImmGen |                           |                        |
-|      |         +---+----+                           |                        |
-|      |             |                                |                        |
-|  +---+-------------+--------------------------------+----+                   |
-|  |                     Datapath Muxes                    |                   |
-|  +---+-----------+-------------------+-------------------+                   |
-|      |           |                   |                                       |
-|      v           v                   v                                       |
-|  +-------+   +-------+           +-------+     +--------+                   |
-|  |  PC   |   | Reg   |  rs1/rs2  |  ALU  |---->|  Data  |                   |
-|  | +4/Br |   | File  |---------->|       |     | Memory |                   |
-|  +-------+   | 32x32 |           +-------+     +--------+                   |
-|              +-------+               |              |                        |
-|                  ^                   v              v                        |
-|                  |           +------+------+       |                        |
-|                  +-----------| Write Back |<------+                        |
-|                              +-------------+                                 |
+|  PC -> IFetch -> Decode -> RegFile -> ALU -> Mem/MMIO -> Writeback         |
+|   |       |          |         |        |         |               |         |
+|   |       |          |         |        |         |               |         |
+|   +-> PC select <----+         +--------+---------+---------------+         |
+|        (pc+4/branch/jump/jalr)                                                  |
 |                                                                             |
 +-----------------------------------------------------------------------------+
 ```
 
-### Components
+### Main blocks
 
-| Component | File | Description |
-|-----------|------|-------------|
-| CPU | `hdl/cpu.rb` | Top-level single-cycle CPU |
-| ALU | `hdl/alu.rb` | 32-bit ALU with 12 operations |
-| Decoder | `hdl/decoder.rb` | Instruction decoder |
-| RegisterFile | `hdl/register_file.rb` | 32x32-bit register file |
-| ImmGen | `hdl/imm_gen.rb` | Immediate value generator |
-| BranchCond | `hdl/branch_cond.rb` | Branch condition evaluator |
-| ProgramCounter | `hdl/program_counter.rb` | PC register |
-| Memory | `hdl/memory.rb` | Unified memory model |
-| Harness | `hdl/harness.rb` | Test wrapper |
+| Block | File | Role |
+|---|---|---|
+| CPU top | `examples/riscv/hdl/cpu.rb` | Integrates decode, execute, CSR, MMIO, control |
+| Decoder | `examples/riscv/hdl/decoder.rb` | Instruction decode + control generation |
+| ALU | `examples/riscv/hdl/alu.rb` | Integer ALU (+ extension ops) |
+| Immediate generator | `examples/riscv/hdl/imm_gen.rb` | I/S/B/U/J immediate construction |
+| Integer reg file | `examples/riscv/hdl/register_file.rb` | x0..x31 architectural regs |
+| CSR file | `examples/riscv/hdl/csr_file.rb` | privilege/exception/interrupt CSR state |
+| Memory model | `examples/riscv/hdl/memory.rb` | instruction/data backing store |
+| MMIO devices | `examples/riscv/hdl/{clint,plic,uart,virtio_blk}.rb` | platform devices |
 
-### CPU (`hdl/cpu.rb`)
+### Debug/state visibility
 
-The main CPU integrates all components using RHDL's declarative DSL.
+Core debug signals exposed to runners include:
 
-**Ports:**
-```ruby
-input :clk
-input :rst
+- `debug_pc`
+- `debug_inst`
+- `debug_x1`, `debug_x2`, `debug_x10`, `debug_x11`
 
-# Instruction memory interface
-output :inst_addr, width: 32
-input :inst_data, width: 32
+These are used by CLI debug panels and boot milestone tests.
 
-# Data memory interface
-output :data_addr, width: 32
-output :data_wdata, width: 32
-input :data_rdata, width: 32
-output :data_we
-output :data_re
-output :data_funct3, width: 3
+## 5-stage pipeline architecture
 
-# Debug outputs
-output :debug_pc, width: 32
-output :debug_inst, width: 32
-output :debug_x1, width: 32
-output :debug_x2, width: 32
-output :debug_x10, width: 32
-output :debug_x11, width: 32
+### Pipeline stages
+
+- IF: instruction fetch + next-PC path
+- ID: decode + register read + immediate generation
+- EX: ALU/branch target/compare
+- MEM: load/store + MMIO access
+- WB: register writeback
+
+### Pipeline state and glue blocks
+
+| Block | File |
+|---|---|
+| Pipeline top | `examples/riscv/hdl/pipeline/cpu.rb` |
+| IF/ID register | `examples/riscv/hdl/pipeline/if_id_reg.rb` |
+| ID/EX register | `examples/riscv/hdl/pipeline/id_ex_reg.rb` |
+| EX/MEM register | `examples/riscv/hdl/pipeline/ex_mem_reg.rb` |
+| MEM/WB register | `examples/riscv/hdl/pipeline/mem_wb_reg.rb` |
+| Pipeline harness | `examples/riscv/hdl/pipeline/ir_harness.rb` |
+
+### Hazard behavior
+
+- forwarding for common RAW dependencies
+- stalls for unresolved load-use dependencies
+- control redirection/flush for taken branch/jump paths
+
+## Platform and memory/MMIO model
+
+The cores run with a `virt`-style MMIO layout compatible with current Linux/xv6 flows.
+
+Major devices:
+
+- CLINT: timer/software interrupt source
+- PLIC: external interrupt routing/claim/complete
+- UART 16550-compatible interface for console I/O
+- virtio-blk MMIO disk path used by filesystem-based boot flows
+
+The Linux DTB generated by `build_linux.sh` models this platform, including chosen bootargs and initrd bounds.
+
+## Privilege, traps, and virtual memory
+
+Current boot flows rely on:
+
+- machine and supervisor privilege transitions (`mret`, `sret`)
+- delegated trap behavior through CSR configuration
+- Sv32 path including `satp` programming and `sfence.vma`
+- timer/external interrupt handling through CLINT + PLIC
+
+These behaviors are covered by Linux compatibility specs under `spec/examples/riscv/linux_*`.
+
+## Linux boot loading model
+
+`HeadlessRunner#load_linux` (`examples/riscv/utilities/runners/headless_runner.rb`) performs:
+
+- kernel load to configured physical address
+- optional initramfs load
+- optional DTB load
+- DTB patching for initrd bounds
+- bootstrap program load and PC handoff into Linux entry path
+
+For pipeline core, compatibility patching adjusts DTB ISA/bootargs for the configured pipeline profile.
+
+## Instruction encoding reference
+
+### Base instruction formats
+
+```text
+R-type:  funct7 | rs2 | rs1 | funct3 | rd | opcode
+I-type:  imm[11:0] | rs1 | funct3 | rd | opcode
+S-type:  imm[11:5] | rs2 | rs1 | funct3 | imm[4:0] | opcode
+B-type:  imm[12|10:5] | rs2 | rs1 | funct3 | imm[4:1|11] | opcode
+U-type:  imm[31:12] | rd | opcode
+J-type:  imm[20|10:1|11|19:12] | rd | opcode
 ```
 
-### ALU (`hdl/alu.rb`)
-
-32-bit ALU supporting all RV32I operations.
-
-**Operations:**
-
-| Code | Operation | Description |
-|------|-----------|-------------|
-| 0 | ADD | Addition |
-| 1 | SUB | Subtraction |
-| 2 | SLL | Shift left logical |
-| 3 | SLT | Set less than (signed) |
-| 4 | SLTU | Set less than (unsigned) |
-| 5 | XOR | Bitwise XOR |
-| 6 | SRL | Shift right logical |
-| 7 | SRA | Shift right arithmetic |
-| 8 | OR | Bitwise OR |
-| 9 | AND | Bitwise AND |
-| 10 | PASS_A | Pass through A |
-| 11 | PASS_B | Pass through B |
-
-### Decoder (`hdl/decoder.rb`)
-
-Decodes instructions into control signals.
-
-**Control Signals:**
-
-| Signal | Width | Description |
-|--------|-------|-------------|
-| opcode | 7 | Instruction opcode |
-| rd | 5 | Destination register |
-| funct3 | 3 | Function code 3 |
-| rs1 | 5 | Source register 1 |
-| rs2 | 5 | Source register 2 |
-| funct7 | 7 | Function code 7 |
-| reg_write | 1 | Register write enable |
-| mem_read | 1 | Memory read enable |
-| mem_write | 1 | Memory write enable |
-| mem_to_reg | 1 | Write memory data to register |
-| alu_src | 1 | ALU source select |
-| branch | 1 | Branch instruction |
-| jump | 1 | Jump instruction |
-| jalr | 1 | JALR instruction |
-| alu_op | 4 | ALU operation code |
-
-### Immediate Generator (`hdl/imm_gen.rb`)
-
-Generates sign-extended immediate values for all instruction formats.
-
-**Formats:**
-
-| Type | Bits | Used By |
-|------|------|---------|
-| I | imm[11:0] | Load, ALU immediate, JALR |
-| S | imm[11:5], imm[4:0] | Store |
-| B | imm[12], imm[10:5], imm[4:1], imm[11] | Branch |
-| U | imm[31:12] | LUI, AUIPC |
-| J | imm[20], imm[10:1], imm[11], imm[19:12] | JAL |
-
-### Register File (`hdl/register_file.rb`)
-
-32 general-purpose 32-bit registers.
-
-**Features:**
-- x0 is hardwired to zero
-- Two read ports (rs1, rs2)
-- One write port (rd)
-- Synchronous write, asynchronous read
-
-## Architecture: Pipelined CPU
-
-### 5-Stage Pipeline
-
-```
-+------+    +------+    +------+    +------+    +------+
-|  IF  |--->|  ID  |--->|  EX  |--->| MEM  |--->|  WB  |
-+------+    +------+    +------+    +------+    +------+
-   |           |           |           |           |
-   v           v           v           v           v
- Fetch      Decode      Execute     Memory     Write
- Inst       Regs/Imm    ALU/Br      Access     Back
-```
-
-### Pipeline Stages
-
-| Stage | Description | Operations |
-|-------|-------------|------------|
-| IF | Instruction Fetch | PC -> Memory, fetch instruction |
-| ID | Instruction Decode | Decode, read registers, generate immediate |
-| EX | Execute | ALU operation, branch/jump calculation |
-| MEM | Memory Access | Load/store operations |
-| WB | Write Back | Write result to register file |
-
-### Pipeline Registers
-
-| Register | File | Contents |
-|----------|------|----------|
-| IF/ID | `if_id_reg.rb` | PC, instruction |
-| ID/EX | `id_ex_reg.rb` | Control signals, rs1/rs2 data, immediate |
-| EX/MEM | `ex_mem_reg.rb` | ALU result, memory data, control |
-| MEM/WB | `mem_wb_reg.rb` | Memory/ALU result, write enable |
-
-### Hazard Handling
-
-**Data Hazards:**
-- **Forwarding Unit** (`forwarding_unit.rb`): Forwards ALU results from EX/MEM and MEM/WB stages
-- **Stall Detection**: Detects load-use hazards requiring pipeline stall
-
-**Control Hazards:**
-- **Branch Prediction**: Predict not-taken
-- **Pipeline Flush**: Flush IF/ID on taken branch
-
-### Pipelined Components
-
-| Component | File | Description |
-|-----------|------|-------------|
-| PipelinedCPU | `pipeline/pipelined_cpu.rb` | Top-level pipelined CPU |
-| PipelinedDatapath | `pipeline/pipelined_datapath.rb` | Datapath with pipeline registers |
-| HazardUnit | `pipeline/hazard_unit.rb` | Stall and flush control |
-| ForwardingUnit | `pipeline/forwarding_unit.rb` | Data forwarding logic |
-| IF/ID Reg | `pipeline/if_id_reg.rb` | IF/ID pipeline register |
-| ID/EX Reg | `pipeline/id_ex_reg.rb` | ID/EX pipeline register |
-| EX/MEM Reg | `pipeline/ex_mem_reg.rb` | EX/MEM pipeline register |
-| MEM/WB Reg | `pipeline/mem_wb_reg.rb` | MEM/WB pipeline register |
-
-## RV32I Instruction Set
-
-### Instruction Formats
-
-```
-R-type:  |  funct7  |  rs2  |  rs1  | funct3 |   rd   | opcode |
-         |  31-25   | 24-20 | 19-15 | 14-12  |  11-7  |  6-0   |
-
-I-type:  |     imm[11:0]    |  rs1  | funct3 |   rd   | opcode |
-         |      31-20       | 19-15 | 14-12  |  11-7  |  6-0   |
-
-S-type:  |imm[11:5] |  rs2  |  rs1  | funct3 |imm[4:0]| opcode |
-         |  31-25   | 24-20 | 19-15 | 14-12  |  11-7  |  6-0   |
-
-B-type:  |imm[12|10:5]| rs2 |  rs1  | funct3 |imm[4:1|11]| opcode |
-         |   31-25    |24-20| 19-15 | 14-12  |   11-7    |  6-0   |
-
-U-type:  |          imm[31:12]          |   rd   | opcode |
-         |            31-12             |  11-7  |  6-0   |
-
-J-type:  |imm[20|10:1|11|19:12]|   rd   | opcode |
-         |        31-12        |  11-7  |  6-0   |
-```
-
-### Supported Instructions
-
-**R-Type (Register-Register):**
-
-| Instruction | funct7 | funct3 | Description |
-|-------------|--------|--------|-------------|
-| ADD | 0000000 | 000 | rd = rs1 + rs2 |
-| SUB | 0100000 | 000 | rd = rs1 - rs2 |
-| SLL | 0000000 | 001 | rd = rs1 << rs2[4:0] |
-| SLT | 0000000 | 010 | rd = (rs1 < rs2) ? 1 : 0 (signed) |
-| SLTU | 0000000 | 011 | rd = (rs1 < rs2) ? 1 : 0 (unsigned) |
-| XOR | 0000000 | 100 | rd = rs1 ^ rs2 |
-| SRL | 0000000 | 101 | rd = rs1 >> rs2[4:0] (logical) |
-| SRA | 0100000 | 101 | rd = rs1 >> rs2[4:0] (arithmetic) |
-| OR | 0000000 | 110 | rd = rs1 | rs2 |
-| AND | 0000000 | 111 | rd = rs1 & rs2 |
-
-**I-Type (Immediate):**
-
-| Instruction | funct3 | Description |
-|-------------|--------|-------------|
-| ADDI | 000 | rd = rs1 + imm |
-| SLTI | 010 | rd = (rs1 < imm) ? 1 : 0 (signed) |
-| SLTIU | 011 | rd = (rs1 < imm) ? 1 : 0 (unsigned) |
-| XORI | 100 | rd = rs1 ^ imm |
-| ORI | 110 | rd = rs1 | imm |
-| ANDI | 111 | rd = rs1 & imm |
-| SLLI | 001 | rd = rs1 << shamt |
-| SRLI | 101 | rd = rs1 >> shamt (logical) |
-| SRAI | 101 | rd = rs1 >> shamt (arithmetic) |
-
-**Load (I-Type):**
-
-| Instruction | funct3 | Description |
-|-------------|--------|-------------|
-| LB | 000 | Load byte (sign-extend) |
-| LH | 001 | Load halfword (sign-extend) |
-| LW | 010 | Load word |
-| LBU | 100 | Load byte (zero-extend) |
-| LHU | 101 | Load halfword (zero-extend) |
-
-**Store (S-Type):**
-
-| Instruction | funct3 | Description |
-|-------------|--------|-------------|
-| SB | 000 | Store byte |
-| SH | 001 | Store halfword |
-| SW | 010 | Store word |
-
-**Branch (B-Type):**
-
-| Instruction | funct3 | Description |
-|-------------|--------|-------------|
-| BEQ | 000 | Branch if rs1 == rs2 |
-| BNE | 001 | Branch if rs1 != rs2 |
-| BLT | 100 | Branch if rs1 < rs2 (signed) |
-| BGE | 101 | Branch if rs1 >= rs2 (signed) |
-| BLTU | 110 | Branch if rs1 < rs2 (unsigned) |
-| BGEU | 111 | Branch if rs1 >= rs2 (unsigned) |
-
-**Upper Immediate (U-Type):**
-
-| Instruction | Description |
-|-------------|-------------|
-| LUI | rd = imm << 12 |
-| AUIPC | rd = PC + (imm << 12) |
-
-**Jump:**
-
-| Instruction | Type | Description |
-|-------------|------|-------------|
-| JAL | J | rd = PC+4; PC = PC + imm |
-| JALR | I | rd = PC+4; PC = (rs1 + imm) & ~1 |
-
-## Assembler
-
-The assembler (`utilities/assembler.rb`) supports the full RV32I instruction set.
-
-### Usage
-
-```ruby
-require_relative 'examples/riscv/utilities/assembler'
-
-source = <<~ASM
-  .text
-  .globl _start
-
-  _start:
-      addi x1, x0, 5      # x1 = 5
-      addi x2, x0, 10     # x2 = 10
-      add  x3, x1, x2     # x3 = x1 + x2
-
-  loop:
-      beq  x3, x0, done   # if x3 == 0, jump to done
-      addi x3, x3, -1     # x3 = x3 - 1
-      j    loop           # jump to loop
-
-  done:
-      nop
-ASM
-
-program = RISCV::Assembler.assemble(source)
-# => Array of 32-bit instruction words
-```
-
-### Supported Directives
-
-| Directive | Description |
-|-----------|-------------|
-| `.text` | Code section |
-| `.data` | Data section |
-| `.globl` | Export symbol |
-| `.word` | 32-bit data |
-| `.half` | 16-bit data |
-| `.byte` | 8-bit data |
-| `.space` | Reserve bytes |
-
-### Pseudo-Instructions
-
-| Pseudo | Expansion |
-|--------|-----------|
-| `nop` | `addi x0, x0, 0` |
-| `li rd, imm` | `lui rd, imm[31:12]; addi rd, rd, imm[11:0]` |
-| `mv rd, rs` | `addi rd, rs, 0` |
-| `j offset` | `jal x0, offset` |
-| `jr rs` | `jalr x0, rs, 0` |
-| `ret` | `jalr x0, x1, 0` |
-| `call offset` | `auipc x1, offset[31:12]; jalr x1, x1, offset[11:0]` |
-
-## Verilog Export
-
-Both CPU implementations support Verilog export.
-
-### Single-Cycle CPU
-
-```ruby
-require_relative 'examples/riscv/hdl/cpu'
-
-# Generate full hierarchy
-verilog = RISCV::CPU.to_verilog_hierarchy(top_name: 'rv32i_cpu')
-File.write('rv32i_cpu.v', verilog)
-```
-
-### Pipelined CPU
-
-```ruby
-require_relative 'examples/riscv/hdl/pipeline/pipelined_cpu'
-
-verilog = RISCV::Pipeline::PipelinedDatapath.to_verilog
-File.write('rv32i_pipeline.v', verilog)
-```
-
-### Generated Module Example
-
-```verilog
-module riscv_alu(
-  input [31:0] a,
-  input [31:0] b,
-  input [3:0] op,
-  output [31:0] result,
-  output zero
-);
-  wire [31:0] add_result = a + b;
-  wire [31:0] sub_result = a - b;
-  wire [31:0] xor_result = a ^ b;
-  // ... (full implementation)
-
-  assign result = (op == 4'd0) ? add_result :
-                  (op == 4'd1) ? sub_result :
-                  // ... case select
-                  add_result;
-
-  assign zero = (result == 32'd0);
-endmodule
-```
-
-## File Structure
-
-```
-examples/riscv/
-+-- hdl/                        # Single-cycle CPU
-|   +-- cpu.rb                  # Top-level CPU
-|   +-- alu.rb                  # 32-bit ALU
-|   +-- decoder.rb              # Instruction decoder
-|   +-- register_file.rb        # 32x32 register file
-|   +-- imm_gen.rb              # Immediate generator
-|   +-- branch_cond.rb          # Branch condition
-|   +-- program_counter.rb      # PC register
-|   +-- memory.rb               # Memory model
-|   +-- harness.rb              # Test harness
-|   +-- constants.rb            # ISA constants
-|   +-- pipeline/               # Pipelined CPU
-|       +-- pipelined_cpu.rb    # Top-level pipelined
-|       +-- pipelined_datapath.rb # Pipeline datapath
-|       +-- hazard_unit.rb      # Hazard detection
-|       +-- forwarding_unit.rb  # Data forwarding
-|       +-- if_id_reg.rb        # IF/ID register
-|       +-- id_ex_reg.rb        # ID/EX register
-|       +-- ex_mem_reg.rb       # EX/MEM register
-|       +-- mem_wb_reg.rb       # MEM/WB register
-|       +-- harness.rb          # Pipeline test harness
-+-- utilities/
-|   +-- assembler.rb            # RV32I assembler
-|   +-- xv6_boot_tracer.rb      # xv6 boot tracer (UART/stage/MMIO)
-+-- software/
-|   +-- build_xv6.sh            # Local xv6 artifact builder
-|   +-- build_linux.sh          # Local Linux kernel artifact builder
-|   +-- xv6/                    # Tracked xv6 source tree
-|   +-- linux/                  # Linux kernel upstream submodule
-|   +-- linux_patches/          # Ordered local Linux patch series
-```
-
-## Performance Comparison
-
-| CPU Type | CPI | Complexity | Use Case |
-|----------|-----|------------|----------|
-| Single-Cycle | 1 | Low | Education, small designs |
-| Pipelined | ~1.2* | Medium | Production, performance |
-
-*Includes stalls for hazards
-
-## Example Programs
-
-### Fibonacci
-
-```asm
-    # Compute Fibonacci sequence
-    addi x1, x0, 0      # fib(0) = 0
-    addi x2, x0, 1      # fib(1) = 1
-    addi x3, x0, 10     # n = 10
-
-loop:
-    beq  x3, x0, done
-    add  x4, x1, x2     # fib(n) = fib(n-1) + fib(n-2)
-    mv   x1, x2
-    mv   x2, x4
-    addi x3, x3, -1
-    j    loop
-
-done:
-    # x2 contains fib(10) = 55
-```
-
-### Memory Copy
-
-```asm
-    # Copy 16 bytes from src to dst
-    li   x1, 0x1000     # src
-    li   x2, 0x2000     # dst
-    addi x3, x0, 16     # count
-
-loop:
-    beq  x3, x0, done
-    lb   x4, 0(x1)      # Load byte
-    sb   x4, 0(x2)      # Store byte
-    addi x1, x1, 1
-    addi x2, x2, 1
-    addi x3, x3, -1
-    j    loop
-
-done:
-    nop
-```
-
-## References
-
-- [RISC-V Specification](https://riscv.org/technical/specifications/)
-- [Patterson & Hennessy: Computer Organization and Design, RISC-V Edition](https://www.elsevier.com/books/computer-organization-and-design-risc-v-edition/patterson/978-0-12-820331-6)
-- [RISC-V Reader](http://www.riscvbook.com/)
-
-## See Also
-
-- [MOS 6502 CPU](mos6502_cpu.md) - 8-bit 6502 implementation
-- [Game Boy Emulation](gameboy.md) - SM83 CPU implementation
-- [DSL Reference](dsl.md) - RHDL DSL documentation
-- [Export](export.md) - Verilog export guide
-- [RISC-V xv6 Workflow](riscv.md#xv6-workflow) - xv6 build/boot/readiness workflow
+### Core base classes
+
+| Class | Examples |
+|---|---|
+| Integer arithmetic | `add`, `sub`, `addi`, `sll`, `srl`, `sra`, `and`, `or`, `xor` |
+| Comparisons | `slt`, `sltu`, `slti`, `sltiu` |
+| Loads/stores | `lb/lh/lw/lbu/lhu`, `sb/sh/sw` |
+| Control flow | `beq/bne/blt/bge/bltu/bgeu`, `jal`, `jalr` |
+| Upper immediates | `lui`, `auipc` |
+| System | `ecall`, CSR ops, fence path |
+
+## Extension subsets currently exercised
+
+| Extension | Representative instructions |
+|---|---|
+| `M` | `mul`, `div`, `rem` families |
+| `A` + `Zacas` subset | `lr.w`, `sc.w`, AMO word ops, `amocas.w` |
+| `C` subset | mixed-width compressed integer/control-flow set |
+| `F` subset | `flw`, `fsw`, `fmv.x.w`, `fmv.w.x` |
+| `V` subset | `vsetvli`, `vmv.v.x`, `vmv.s.x`, `vmv.x.s`, `vadd.vv`, `vadd.vx` |
+| `Zawrs` | `wrs.nto`, `wrs.sto` |
+| `Zba` subset | `sh1add`, `sh2add`, `sh3add` |
+| `Zbb` subset | `andn`, `orn`, `xnor`, `min/max`, `minu/maxu` |
+| `Zbkb` subset | `pack`, `packh` |
+| `Zbc` subset | `clmul`, `clmulh`, `clmulr` |
+| `Zicsr` / `Zifencei` | CSR read/write ops, `fence.i` |
+| `Zicbop` / `Zicbom` / `Zicboz` | encodings accepted; modeled as safe no-ops in current memory model |
+
+## Runner architecture notes
+
+- CLI runner task: `examples/riscv/utilities/tasks/run_task.rb`
+- Headless runner: `examples/riscv/utilities/runners/headless_runner.rb`
+- Native backends are expected for Linux/xv6 boot workflows
+- Debug pane displays core type and architectural debug registers
+- UART interactive mode supports shell interaction used by Linux and xv6 flows
