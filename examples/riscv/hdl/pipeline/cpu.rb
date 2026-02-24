@@ -233,6 +233,10 @@ module RHDL
       wire :csr_read_addr6, width: 12
       wire :csr_read_addr7, width: 12
       wire :csr_read_addr8, width: 12
+      wire :csr_read_addr9, width: 12
+      wire :csr_read_addr10, width: 12
+      wire :csr_read_addr11, width: 12
+      wire :csr_read_addr12, width: 12
       wire :csr_write_addr, width: 12
       wire :csr_read_data, width: 32
       wire :csr_read_data2, width: 32
@@ -242,6 +246,10 @@ module RHDL
       wire :csr_read_data6, width: 32
       wire :csr_read_data7, width: 32
       wire :csr_read_data8, width: 32
+      wire :csr_read_data9, width: 32
+      wire :csr_read_data10, width: 32
+      wire :csr_read_data11, width: 32
+      wire :csr_read_data12, width: 32
       wire :csr_write_data, width: 32
       wire :csr_write_we
       wire :csr_write_addr2, width: 12
@@ -289,6 +297,7 @@ module RHDL
       wire :mem_mem_to_reg
       wire :mem_jump
       wire :mem_pc_plus4, width: 32
+      wire :mem_forward_data, width: 32
       wire :reservation_set
       wire :reservation_clear
       wire :reservation_set_addr, width: 32
@@ -540,6 +549,10 @@ module RHDL
       port :csr_read_addr6 => [:csrfile, :read_addr6]
       port :csr_read_addr7 => [:csrfile, :read_addr7]
       port :csr_read_addr8 => [:csrfile, :read_addr8]
+      port :csr_read_addr9 => [:csrfile, :read_addr9]
+      port :csr_read_addr10 => [:csrfile, :read_addr10]
+      port :csr_read_addr11 => [:csrfile, :read_addr11]
+      port :csr_read_addr12 => [:csrfile, :read_addr12]
       port [:csrfile, :read_data] => :csr_read_data
       port [:csrfile, :read_data2] => :csr_read_data2
       port [:csrfile, :read_data3] => :csr_read_data3
@@ -548,6 +561,10 @@ module RHDL
       port [:csrfile, :read_data6] => :csr_read_data6
       port [:csrfile, :read_data7] => :csr_read_data7
       port [:csrfile, :read_data8] => :csr_read_data8
+      port [:csrfile, :read_data9] => :csr_read_data9
+      port [:csrfile, :read_data10] => :csr_read_data10
+      port [:csrfile, :read_data11] => :csr_read_data11
+      port [:csrfile, :read_data12] => :csr_read_data12
       port :csr_write_addr => [:csrfile, :write_addr]
       port :csr_write_data => [:csrfile, :write_data]
       port :csr_write_we => [:csrfile, :write_we]
@@ -948,7 +965,7 @@ module RHDL
 
         # Forward A (rs1) - priority: EX/MEM > MEM/WB > register file
         forwarded_rs1 <= mux(ex_is_fmv_x_w, ex_rs1_data,
-                             mux(forward_a == lit(ForwardSel::EX_MEM, width: 2), mem_alu_result,
+                             mux(forward_a == lit(ForwardSel::EX_MEM, width: 2), mem_forward_data,
                                  mux(forward_a == lit(ForwardSel::MEM_WB, width: 2), wb_data,
                                      ex_rs1_data)))
 
@@ -957,7 +974,7 @@ module RHDL
 
         # Forward B (rs2) for store and branch comparison
         forwarded_rs2 <= mux(ex_is_fp_store, ex_rs2_data,
-                             mux(forward_b == lit(ForwardSel::EX_MEM, width: 2), mem_alu_result,
+                             mux(forward_b == lit(ForwardSel::EX_MEM, width: 2), mem_forward_data,
                                  mux(forward_b == lit(ForwardSel::MEM_WB, width: 2), wb_data,
                                      ex_rs2_data)))
 
@@ -966,7 +983,7 @@ module RHDL
 
         # Forward rd source (used by AMOCAS expected-value semantics)
         forwarded_rd_src <= mux((mem_reg_write & (mem_rd_addr != lit(0, width: 5)) & (mem_rd_addr == ex_rd_addr)),
-                                mem_alu_result,
+                                mem_forward_data,
                                 mux((wb_reg_write & (wb_rd_addr != lit(0, width: 5)) & (wb_rd_addr == ex_rd_addr)),
                                     wb_data,
                                     ex_rd_src_data))
@@ -1074,6 +1091,7 @@ module RHDL
         ex_priv_is_u = local(:ex_priv_is_u, priv_mode == lit(PrivMode::USER, width: 2), width: 1)
         ex_priv_is_s = local(:ex_priv_is_s, priv_mode == lit(PrivMode::SUPERVISOR, width: 2), width: 1)
         ex_priv_is_m = local(:ex_priv_is_m, priv_mode == lit(PrivMode::MACHINE, width: 2), width: 1)
+        ex_delegate_allowed = local(:ex_delegate_allowed, ~ex_priv_is_m, width: 1)
         ex_satp_translate = local(:ex_satp_translate, ex_satp_mode_sv32 & ~ex_priv_is_m, width: 1)
         ex_sum_enabled = local(:ex_sum_enabled,
                                (((csr_read_data2 | csr_read_data4) & lit(0x40000, width: 32)) != lit(0, width: 32)),
@@ -1171,11 +1189,13 @@ module RHDL
                                              ex_global_mie_enabled & (ex_machine_enabled_interrupts != lit(0, width: 32)),
                                              width: 1)
         ex_super_interrupt_pending = local(:ex_super_interrupt_pending,
-                                           ex_global_sie_enabled & (ex_super_enabled_interrupts != lit(0, width: 32)),
+                                           ex_delegate_allowed & ex_global_sie_enabled &
+                                           (ex_super_enabled_interrupts != lit(0, width: 32)),
                                            width: 1)
         ex_interrupt_pending = local(:ex_interrupt_pending, ex_machine_interrupt_pending | ex_super_interrupt_pending, width: 1)
         ex_interrupt_from_supervisor = local(:ex_interrupt_from_supervisor,
-                                             ex_super_interrupt_pending & ~ex_machine_interrupt_pending,
+                                             ex_delegate_allowed & ex_super_interrupt_pending &
+                                             ~ex_machine_interrupt_pending,
                                              width: 1)
         ex_selected_interrupts = local(:ex_selected_interrupts,
                                        mux(ex_machine_interrupt_pending, ex_machine_enabled_interrupts, ex_super_enabled_interrupts),
@@ -1215,6 +1235,7 @@ module RHDL
                                              mux(ex_data_store_access, ex_store_page_fault_delegated, ex_load_page_fault_delegated),
                                              width: 1)
         ex_sync_trap_delegated = local(:ex_sync_trap_delegated,
+                                       ex_delegate_allowed &
                                        mux(ex_inst_page_fault, ex_inst_page_fault_delegated,
                                            mux(ex_data_page_fault, ex_data_page_fault_delegated,
                                                mux(ex_is_ecall, ex_ecall_delegated,
@@ -1252,6 +1273,9 @@ module RHDL
                                               lit(2, width: 32),
                                               mux(ex_is_ebreak, lit(3, width: 32), ex_ecall_cause))))),
                               width: 32)
+        ex_trap_epc = local(:ex_trap_epc,
+                            mux(ex_interrupt_pending, current_pc, ex_pc),
+                            width: 32)
         ex_inst_word = local(:ex_inst_word,
                              cat(ex_funct7, ex_rs2_addr, ex_rs1_addr, ex_funct3, ex_rd_addr, ex_opcode),
                              width: 32)
@@ -1343,6 +1367,10 @@ module RHDL
         csr_read_addr6 <= lit(0x302, width: 12) # medeleg
         csr_read_addr7 <= lit(0x303, width: 12) # mideleg
         csr_read_addr8 <= lit(0x180, width: 12) # satp
+        csr_read_addr9 <= lit(0x305, width: 12) # mtvec
+        csr_read_addr10 <= lit(0x105, width: 12) # stvec
+        csr_read_addr11 <= lit(0x341, width: 12) # mepc
+        csr_read_addr12 <= lit(0x141, width: 12) # sepc
         ex_csr_read_selected = local(:ex_csr_read_selected,
                                      mux(csr_read_addr == lit(0xC20, width: 12), vec_vl,
                                          mux(csr_read_addr == lit(0xC21, width: 12), vec_vtype,
@@ -1381,7 +1409,7 @@ module RHDL
         csr_write_addr <= mux(ex_trap_taken, mux(ex_trap_to_supervisor, lit(0x141, width: 12), lit(0x341, width: 12)),
                               mux(ex_is_mret, lit(0x300, width: 12),
                                   mux(ex_is_sret, lit(0x100, width: 12), ex_imm[11..0])))
-        csr_write_data <= mux(ex_trap_taken, ex_pc,
+        csr_write_data <= mux(ex_trap_taken, ex_trap_epc,
                               mux(ex_is_mret, ex_mret_mstatus,
                                   mux(ex_is_sret, ex_sret_sstatus, ex_csr_write_data)))
         csr_write_we <= mux(ex_trap_or_ret, lit(1, width: 1), ex_csr_write_we & ~ex_is_vector_csr_instr)
@@ -1408,11 +1436,16 @@ module RHDL
         ex_v_rd_lane2_in <= mux(ex_v_all_lane_write & ex_v_lane2_active, ex_v_lane2_all_next, ex_v_rd_lane2)
         ex_v_rd_lane3_in <= mux(ex_v_all_lane_write & ex_v_lane3_active, ex_v_lane3_all_next, ex_v_rd_lane3)
         ex_v_rd_we <= (ex_v_all_lane_write | ex_is_vmv_s_x) & ~ex_trap_taken
-        ex_result <= mux(ex_is_amo, forwarded_rs1,
+        ex_mem_addr = local(:ex_mem_addr,
+                            mux(ex_satp_translate & ex_data_access_req, ex_data_paddr, alu_result),
+                            width: 32)
+        ex_amo_addr = local(:ex_amo_addr,
+                            mux(ex_satp_translate & ex_data_access_req, ex_data_paddr, forwarded_rs1),
+                            width: 32)
+        ex_result <= mux(ex_is_amo, ex_amo_addr,
                          mux(ex_is_vsetvli | ex_is_vmv_x_s, ex_v_scalar_result,
                          mux(ex_is_csr_instr, ex_csr_read_selected,
-                             mux(ex_is_fmv_x_w | ex_is_fmv_w_x, forwarded_rs1,
-                                 mux(ex_satp_translate & ex_data_access_req, ex_data_paddr, alu_result)))))
+                             mux(ex_is_fmv_x_w | ex_is_fmv_w_x, forwarded_rs1, ex_mem_addr))))
 
         # -----------------------------------------
         # EX Stage: Branch condition evaluation (inline)
@@ -1450,8 +1483,14 @@ module RHDL
         branch_target <= ex_pc + ex_imm
         jalr_target <= (alu_a + ex_imm) & lit(0xFFFFFFFE, width: 32)
         jump_target <= mux(ex_jalr, jalr_target, branch_target)
-        trap_target <= ex_csr_read_selected & lit(0xFFFFFFFC, width: 32)
-        mret_target <= ex_csr_read_selected
+        ex_trap_vector = local(:ex_trap_vector,
+                               mux(ex_trap_to_supervisor, csr_read_data10, csr_read_data9),
+                               width: 32)
+        ex_ret_vector = local(:ex_ret_vector,
+                              mux(ex_is_mret, csr_read_data11, csr_read_data12),
+                              width: 32)
+        trap_target <= ex_trap_vector & lit(0xFFFFFFFC, width: 32)
+        mret_target <= ex_ret_vector
         control_target <= mux(ex_trap_taken, trap_target,
                               mux(ex_is_mret | ex_is_sret, mret_target, jump_target))
 
@@ -1546,6 +1585,9 @@ module RHDL
         mem_sc_result = local(:mem_sc_result,
                               mux(mem_sc_success, lit(0, width: 32), lit(1, width: 32)),
                               width: 32)
+        mem_forward_data <= mux(mem_jump, mem_pc_plus4,
+                                mux(mem_amo_active & mem_is_sc, mem_sc_result,
+                                    mux(mem_mem_to_reg, data_rdata, mem_alu_result)))
 
         data_addr <= mem_alu_result
         data_wdata <= mux(mem_amo_active & mem_is_amo_rmw, mem_amo_new_data, mem_rs2_data)

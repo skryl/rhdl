@@ -399,6 +399,31 @@ impl CoreSimulator {
         for &(idx, reset_val) in &self.reset_values {
             self.signals[idx] = reset_val;
         }
+        for val in self.next_regs.iter_mut() {
+            *val = 0;
+        }
+        for val in self.old_clocks.iter_mut() {
+            *val = 0;
+        }
+
+        // Reset IR memory arrays to their declared initial contents.
+        // This mirrors interpreter/JIT reset behavior so compiled runs
+        // do not leak register/memory state across resets.
+        for (mem_idx, mem_def) in self.ir.memories.iter().enumerate() {
+            let Some(mem) = self.memory_arrays.get_mut(mem_idx) else {
+                continue;
+            };
+            mem.fill(0);
+            for (i, &val) in mem_def.initial_data.iter().enumerate() {
+                if i < mem.len() {
+                    mem[i] = val;
+                }
+            }
+        }
+
+        // For compiled cores, memory state lives in generated `static mut`
+        // arrays, so we must also run the compiled memory initializer.
+        let _ = self.init_compiled_memories();
     }
 
     pub fn signal_count(&self) -> usize {
@@ -611,6 +636,12 @@ impl CoreSimulator {
         // Initialize memories with non-zero initial data (ROMs).
         code.push_str("#[no_mangle]\n");
         code.push_str("pub unsafe extern \"C\" fn init_memories() {\n");
+        for (idx, _mem) in self.ir.memories.iter().enumerate() {
+            code.push_str(&format!(
+                "    for i in 0..MEM_{}_DEPTH {{ MEM_{}[i] = 0u64; }}\n",
+                idx, idx
+            ));
+        }
         for (idx, mem) in self.ir.memories.iter().enumerate() {
             for (i, &val) in mem.initial_data.iter().enumerate() {
                 if val != 0 {

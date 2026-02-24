@@ -421,6 +421,10 @@ rhdl examples riscv path/to/program.bin
 # Choose mode/backend and display mode
 rhdl examples riscv --mode ir --sim compile --io mmap path/to/program.bin
 
+# Core selection (default is pipeline)
+rhdl examples riscv --core pipeline path/to/program.bin
+rhdl examples riscv --core single path/to/program.bin
+
 # Show live debug panel (ESC toggles command mode)
 rhdl examples riscv -d --io uart path/to/program.bin
 
