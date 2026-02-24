@@ -10,6 +10,7 @@ require "rhdl"
 Dir[File.expand_path("support/**/*.rb", __dir__)].each { |f| require f }
 
 require 'timeout'
+require 'stringio'
 
 # Test timeouts (can be overridden with env vars)
 # - RSPEC_TIMEOUT: Default timeout for regular tests (default: 10 seconds)
@@ -20,6 +21,7 @@ require 'timeout'
 # To run only slow tests: rspec --tag slow
 RSPEC_TEST_TIMEOUT = ENV.fetch('RSPEC_TIMEOUT', 10).to_i
 RSPEC_SLOW_TIMEOUT = ENV.fetch('RSPEC_SLOW_TIMEOUT', 60).to_i
+RSPEC_QUIET_OUTPUT = ENV.fetch('RSPEC_QUIET_OUTPUT', '1') != '0'
 
 RSpec.configure do |config|
   # Enable flags like --only-failures and --next-failure
@@ -58,12 +60,29 @@ RSpec.configure do |config|
       RSPEC_TEST_TIMEOUT
     end
 
-    if timeout > 0
-      Timeout.timeout(timeout, Timeout::Error, "Test exceeded #{timeout} second timeout") do
+    run_example = proc do
+      if RSPEC_QUIET_OUTPUT && !example.metadata[:noisy_output]
+        original_stdout = $stdout
+        original_stderr = $stderr
+        $stdout = StringIO.new
+        $stderr = StringIO.new
+        begin
+          example.run
+        ensure
+          $stdout = original_stdout
+          $stderr = original_stderr
+        end
+      else
         example.run
       end
+    end
+
+    if timeout > 0
+      Timeout.timeout(timeout, Timeout::Error, "Test exceeded #{timeout} second timeout") do
+        run_example.call
+      end
     else
-      example.run
+      run_example.call
     end
   end
 end

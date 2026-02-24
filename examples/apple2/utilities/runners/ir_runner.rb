@@ -50,6 +50,18 @@ module RHDL
         0x0B, 0x03, 0x0A, 0x02, 0x09, 0x01, 0x08, 0x0F
       ].freeze
 
+      def runner_verbose?
+        return true if ENV['RHDL_RUNNER_VERBOSE'] == '1'
+        return false if ENV['RSPEC_QUIET_OUTPUT'] == '1'
+        return false if defined?(RSpec)
+
+        true
+      end
+
+      def log(message)
+        puts(message) if runner_verbose?
+      end
+
       # Initialize the Apple II IR runner
       # @param backend [Symbol] :interpret, :jit, or :compile
       # @param sub_cycles [Integer] Sub-cycles per CPU cycle (1-14, default: 14)
@@ -58,7 +70,7 @@ module RHDL
       #   - 2: Minimal accuracy, ~7x faster (~3M cycles/sec)
       def initialize(backend: :interpret, sub_cycles: 14)
         backend_names = { interpret: "Interpreter", jit: "JIT", compile: "Compiler" }
-        puts "Initializing Apple2 IR simulation [#{backend_names[backend]}]..."
+        log "Initializing Apple2 IR simulation [#{backend_names[backend]}]..."
         start_time = Time.now
 
         # Generate IR JSON from Apple2 component
@@ -75,10 +87,10 @@ module RHDL
         )
 
         elapsed = Time.now - start_time
-        puts "  IR loaded in #{elapsed.round(2)}s"
-        puts "  Native backend: #{@sim.native? ? 'Rust (optimized)' : 'Ruby (fallback)'}"
-        puts "  Signals: #{@sim.signal_count}, Registers: #{@sim.reg_count}"
-        puts "  Sub-cycles: #{@sub_cycles} (#{@sub_cycles == 14 ? 'full accuracy' : 'fast mode'})"
+        log "  IR loaded in #{elapsed.round(2)}s"
+        log "  Native backend: #{@sim.native? ? 'Rust (optimized)' : 'Ruby (fallback)'}"
+        log "  Signals: #{@sim.signal_count}, Registers: #{@sim.reg_count}"
+        log "  Sub-cycles: #{@sub_cycles} (#{@sub_cycles == 14 ? 'full accuracy' : 'fast mode'})"
 
         @cycles = 0
         @halted = false
@@ -95,7 +107,7 @@ module RHDL
         @last_speaker_sync_time = nil
 
         if @use_batched
-          puts "  Batched execution: enabled (minimal FFI overhead)"
+          log "  Batched execution: enabled (minimal FFI overhead)"
         end
 
         @sim.reset
