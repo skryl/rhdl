@@ -22,6 +22,7 @@ module RHDL
       input :pc_plus4_in, width: 32
       input :rs1_data_in, width: 32
       input :rs2_data_in, width: 32
+      input :rd_src_data_in, width: 32
       input :imm_in, width: 32
       input :rs1_addr_in, width: 5
       input :rs2_addr_in, width: 5
@@ -32,7 +33,7 @@ module RHDL
       input :inst_page_fault_in
 
       # Control signals from ID stage
-      input :alu_op_in, width: 5
+      input :alu_op_in, width: 6
       input :alu_src_in           # 0=rs2, 1=imm
       input :reg_write_in
       input :mem_read_in
@@ -47,6 +48,7 @@ module RHDL
       output :pc_plus4_out, width: 32
       output :rs1_data_out, width: 32
       output :rs2_data_out, width: 32
+      output :rd_src_data_out, width: 32
       output :imm_out, width: 32
       output :rs1_addr_out, width: 5
       output :rs2_addr_out, width: 5
@@ -57,7 +59,7 @@ module RHDL
       output :inst_page_fault_out
 
       # Control outputs
-      output :alu_op_out, width: 5
+      output :alu_op_out, width: 6
       output :alu_src_out
       output :reg_write_out
       output :mem_read_out
@@ -69,7 +71,7 @@ module RHDL
 
       sequential clock: :clk, reset: :rst, reset_values: {
         pc_out: 0, pc_plus4_out: 4,
-        rs1_data_out: 0, rs2_data_out: 0, imm_out: 0,
+        rs1_data_out: 0, rs2_data_out: 0, rd_src_data_out: 0, imm_out: 0,
         rs1_addr_out: 0, rs2_addr_out: 0, rd_addr_out: 0,
         funct3_out: 0, funct7_out: 0, opcode_out: 0, inst_page_fault_out: 0,
         alu_op_out: 0, alu_src_out: 0,
@@ -81,6 +83,7 @@ module RHDL
         pc_plus4_out <= mux(flush, lit(4, width: 32), pc_plus4_in)
         rs1_data_out <= mux(flush, lit(0, width: 32), rs1_data_in)
         rs2_data_out <= mux(flush, lit(0, width: 32), rs2_data_in)
+        rd_src_data_out <= mux(flush, lit(0, width: 32), rd_src_data_in)
         imm_out <= mux(flush, lit(0, width: 32), imm_in)
         rs1_addr_out <= mux(flush, lit(0, width: 5), rs1_addr_in)
         rs2_addr_out <= mux(flush, lit(0, width: 5), rs2_addr_in)
@@ -91,7 +94,7 @@ module RHDL
         inst_page_fault_out <= mux(flush, lit(0, width: 1), inst_page_fault_in)
 
         # Control signals - all zero on flush (bubble)
-        alu_op_out <= mux(flush, lit(0, width: 5), alu_op_in)
+        alu_op_out <= mux(flush, lit(0, width: 6), alu_op_in)
         alu_src_out <= mux(flush, lit(0, width: 1), alu_src_in)
         reg_write_out <= mux(flush, lit(0, width: 1), reg_write_in)
         mem_read_out <= mux(flush, lit(0, width: 1), mem_read_in)

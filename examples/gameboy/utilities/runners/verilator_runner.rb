@@ -48,18 +48,30 @@ module RHDL
       # Boot ROM path
       DMG_BOOT_ROM_PATH = File.expand_path('../../software/roms/dmg_boot.bin', __dir__)
 
+      def runner_verbose?
+        return true if ENV['RHDL_RUNNER_VERBOSE'] == '1'
+        return false if ENV['RSPEC_QUIET_OUTPUT'] == '1'
+        return false if defined?(RSpec)
+
+        true
+      end
+
+      def log(message)
+        puts(message) if runner_verbose?
+      end
+
       # Initialize the Game Boy Verilator runner
       def initialize
         check_verilator_available!
 
-        puts "Initializing Game Boy Verilator simulation..."
+        log "Initializing Game Boy Verilator simulation..."
         start_time = Time.now
 
         # Build and load the Verilator simulation
         build_verilator_simulation
 
         elapsed = Time.now - start_time
-        puts "  Verilator simulation built in #{elapsed.round(2)}s"
+        log "  Verilator simulation built in #{elapsed.round(2)}s"
 
         @cycles = 0
         @halted = false
@@ -117,7 +129,7 @@ module RHDL
           @sim_load_rom_fn.call(@sim_ctx, data_ptr, bytes.size)
         end
 
-        puts "Loaded #{bytes.size} bytes ROM"
+        log "Loaded #{bytes.size} bytes ROM"
       end
 
       # Load boot ROM data
@@ -125,9 +137,9 @@ module RHDL
         if bytes.nil?
           if File.exist?(DMG_BOOT_ROM_PATH)
             bytes = File.binread(DMG_BOOT_ROM_PATH)
-            puts "Loading default DMG boot ROM from #{DMG_BOOT_ROM_PATH}"
+            log "Loading default DMG boot ROM from #{DMG_BOOT_ROM_PATH}"
           else
-            puts "Warning: DMG boot ROM not found at #{DMG_BOOT_ROM_PATH}"
+            log "Warning: DMG boot ROM not found at #{DMG_BOOT_ROM_PATH}"
             return
           end
         elsif bytes.is_a?(String) && File.exist?(bytes)
@@ -144,7 +156,7 @@ module RHDL
           @sim_load_boot_rom_fn.call(@sim_ctx, data_ptr, bytes.size)
         end
 
-        puts "Loaded #{bytes.size} bytes boot ROM"
+        log "Loaded #{bytes.size} bytes boot ROM"
         @boot_rom_loaded = true
       end
 
@@ -382,7 +394,7 @@ module RHDL
                        export_deps.any? { |p| File.mtime(p) > File.mtime(verilog_file) }
 
         if needs_export
-          puts "  Exporting Gameboy to Verilog..."
+          log "  Exporting Gameboy to Verilog..."
           export_verilog(verilog_file)
         end
 
@@ -398,12 +410,12 @@ module RHDL
                       File.mtime(wrapper_file) > File.mtime(lib_file)
 
         if needs_build
-          puts "  Compiling with Verilator..."
+          log "  Compiling with Verilator..."
           compile_verilator(verilog_file, wrapper_file)
         end
 
         # Load the shared library
-        puts "  Loading Verilator simulation..."
+        log "  Loading Verilator simulation..."
         load_shared_library(lib_file)
       end
 
@@ -436,7 +448,7 @@ module RHDL
           begin
             subcomponent_verilog << component_class.to_verilog
           rescue StandardError => e
-            puts "    Warning: Could not export #{component_class}: #{e.message}"
+            log "    Warning: Could not export #{component_class}: #{e.message}"
           end
         end
 

@@ -55,6 +55,7 @@ module RHDL
       @scr = 0
       @rx_ready = 0
       @tx_data_reg = 0
+      @tx_irq_pending = 0
     end
 
     def propagate
@@ -83,6 +84,7 @@ module RHDL
         @scr = 0
         @rx_ready = 0
         @tx_data_reg = 0
+        @tx_irq_pending = 0
         out_set(:read_data, 0)
         out_set(:irq, 0)
         out_set(:tx_valid, 0)
@@ -116,12 +118,20 @@ module RHDL
             else
               @tx_data_reg = write_byte
               tx_valid_now = 1
+              @tx_irq_pending = 1
             end
           when REG_IER_DLM
             if dlab
               @dlm = write_byte
             else
+              previous_ier = @ier
               @ier = write_byte & 0x0F
+              tx_int_enabled = (@ier & 0x2) != 0
+              if !tx_int_enabled
+                @tx_irq_pending = 0
+              elsif (previous_ier & 0x2) == 0
+                @tx_irq_pending = 1
+              end
             end
           when REG_IIR_FCR
             # FCR clear RX FIFO bit
@@ -140,7 +150,14 @@ module RHDL
       @prev_clk = clk
 
       rx_irq_pending = ((@ier & 0x1) != 0) && @rx_ready == 1
-      iir = rx_irq_pending ? 0x04 : 0x01
+      tx_irq_pending = @tx_irq_pending == 1
+      iir = if rx_irq_pending
+              0x04
+            elsif tx_irq_pending
+              0x02
+            else
+              0x01
+            end
       lsr = 0x60 | (@rx_ready == 1 ? 0x01 : 0x00)
 
       if mem_read == 1 && access_ok
@@ -154,6 +171,7 @@ module RHDL
                     when REG_IER_DLM
                       dlab ? @dlm : @ier
                     when REG_IIR_FCR
+                      @tx_irq_pending = 0 if iir == 0x02
                       iir
                     when REG_LCR
                       @lcr
@@ -179,7 +197,7 @@ module RHDL
         out_set(:read_data, 0)
       end
 
-      out_set(:irq, rx_irq_pending ? 1 : 0)
+      out_set(:irq, (rx_irq_pending || tx_irq_pending) ? 1 : 0)
       out_set(:tx_valid, tx_valid_now)
       out_set(:tx_data, @tx_data_reg)
       out_set(:rx_accept, rx_accept_now)

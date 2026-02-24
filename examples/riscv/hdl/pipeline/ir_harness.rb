@@ -259,8 +259,24 @@ module RHDL
             peek_cpu(:debug_pc) & 0xFFFF_FFFF
           end
 
+          def read_pc
+            pc
+          end
+
           def current_inst
             peek_cpu(:debug_inst)
+          end
+
+          def state
+            {
+              pc: read_pc,
+              x1: read_reg(1),
+              x2: read_reg(2),
+              x10: read_reg(10),
+              x11: read_reg(11),
+              inst: current_inst,
+              cycles: @clock_count
+            }
           end
 
           private

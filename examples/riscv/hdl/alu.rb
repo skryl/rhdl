@@ -33,10 +33,25 @@ module RHDL
     OP_DIVU  = AluOp::DIVU
     OP_REM   = AluOp::REM
     OP_REMU  = AluOp::REMU
+    OP_SH1ADD = AluOp::SH1ADD
+    OP_SH2ADD = AluOp::SH2ADD
+    OP_SH3ADD = AluOp::SH3ADD
+    OP_ANDN  = AluOp::ANDN
+    OP_ORN   = AluOp::ORN
+    OP_XNOR  = AluOp::XNOR
+    OP_MIN   = AluOp::MIN
+    OP_MAX   = AluOp::MAX
+    OP_MINU  = AluOp::MINU
+    OP_MAXU  = AluOp::MAXU
+    OP_PACK  = AluOp::PACK
+    OP_PACKH = AluOp::PACKH
+    OP_CLMUL = AluOp::CLMUL
+    OP_CLMULH = AluOp::CLMULH
+    OP_CLMULR = AluOp::CLMULR
 
     input :a, width: 32       # First operand
     input :b, width: 32       # Second operand
-    input :op, width: 5       # ALU operation
+    input :op, width: 6       # ALU operation
 
     output :result, width: 32 # ALU result
     output :zero              # Result is zero
@@ -70,6 +85,16 @@ module RHDL
           a >> shamt
         ), width: 32)
 
+      # Zba shifted-add address generation
+      sh1add_result = local(:sh1add_result, a + (b << lit(1, width: 5)), width: 32)
+      sh2add_result = local(:sh2add_result, a + (b << lit(2, width: 5)), width: 32)
+      sh3add_result = local(:sh3add_result, a + (b << lit(3, width: 5)), width: 32)
+
+      # Zbb subset operations
+      andn_result = local(:andn_result, a & ~b, width: 32)
+      orn_result = local(:orn_result, a | ~b, width: 32)
+      xnor_result = local(:xnor_result, ~(a ^ b), width: 32)
+
       # Set less than (signed comparison)
       # Compare as signed: if signs differ, negative is less
       # If signs same, use unsigned subtraction
@@ -86,6 +111,34 @@ module RHDL
       # Set less than unsigned
       sltu_result = local(:sltu_result,
         cat(lit(0, width: 31), a < b), width: 32)
+      min_result = local(:min_result, mux(slt_result[0], a, b), width: 32)
+      max_result = local(:max_result, mux(slt_result[0], b, a), width: 32)
+      minu_result = local(:minu_result, mux(sltu_result[0], a, b), width: 32)
+      maxu_result = local(:maxu_result, mux(sltu_result[0], b, a), width: 32)
+      pack_result = local(
+        :pack_result,
+        (a & lit(0x0000FFFF, width: 32)) | ((b & lit(0x0000FFFF, width: 32)) << lit(16, width: 5)),
+        width: 32
+      )
+      packh_result = local(
+        :packh_result,
+        (a & lit(0x000000FF, width: 32)) | ((b & lit(0x000000FF, width: 32)) << lit(8, width: 5)),
+        width: 32
+      )
+
+      clmul_a64 = local(:clmul_a64, cat(lit(0, width: 32), a), width: 64)
+      clmul_full_expr = lit(0, width: 64)
+      32.times do |i|
+        clmul_full_expr = clmul_full_expr ^ mux(
+          b[i],
+          clmul_a64 << lit(i, width: 6),
+          lit(0, width: 64)
+        )
+      end
+      clmul_full = local(:clmul_full, clmul_full_expr, width: 64)
+      clmul_result = local(:clmul_result, clmul_full[31..0], width: 32)
+      clmulh_result = local(:clmulh_result, clmul_full[63..32], width: 32)
+      clmulr_result = local(:clmulr_result, clmul_full[62..31], width: 32)
 
       # ------------------------------------------------------------------
       # RV32M: Multiply variants
@@ -165,7 +218,22 @@ module RHDL
         OP_DIV   => div_result,
         OP_DIVU  => divu_result,
         OP_REM   => rem_result,
-        OP_REMU  => remu_result
+        OP_REMU  => remu_result,
+        OP_SH1ADD => sh1add_result,
+        OP_SH2ADD => sh2add_result,
+        OP_SH3ADD => sh3add_result,
+        OP_ANDN => andn_result,
+        OP_ORN => orn_result,
+        OP_XNOR => xnor_result,
+        OP_MIN => min_result,
+        OP_MAX => max_result,
+        OP_MINU => minu_result,
+        OP_MAXU => maxu_result,
+        OP_PACK => pack_result,
+        OP_PACKH => packh_result,
+        OP_CLMUL => clmul_result,
+        OP_CLMULH => clmulh_result,
+        OP_CLMULR => clmulr_result
       }, default: add_result)
 
       # Zero flag - check if all bits are zero
@@ -189,7 +257,22 @@ module RHDL
         OP_DIV   => div_result,
         OP_DIVU  => divu_result,
         OP_REM   => rem_result,
-        OP_REMU  => remu_result
+        OP_REMU  => remu_result,
+        OP_SH1ADD => sh1add_result,
+        OP_SH2ADD => sh2add_result,
+        OP_SH3ADD => sh3add_result,
+        OP_ANDN => andn_result,
+        OP_ORN => orn_result,
+        OP_XNOR => xnor_result,
+        OP_MIN => min_result,
+        OP_MAX => max_result,
+        OP_MINU => minu_result,
+        OP_MAXU => maxu_result,
+        OP_PACK => pack_result,
+        OP_PACKH => packh_result,
+        OP_CLMUL => clmul_result,
+        OP_CLMULH => clmulh_result,
+        OP_CLMULR => clmulr_result
       }, default: add_result)
       zero <= alu_result == lit(0, width: 32)
     end

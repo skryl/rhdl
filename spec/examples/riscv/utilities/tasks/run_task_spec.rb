@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'tempfile'
 require_relative '../../../../../examples/riscv/utilities/tasks/run_task'
+require_relative '../../../../../examples/riscv/utilities/assembler'
 
 RSpec.describe RHDL::Examples::RISCV::Tasks::RunTask do
   let(:program_file) do
@@ -37,6 +38,7 @@ RSpec.describe RHDL::Examples::RISCV::Tasks::RunTask do
       task = build_task
       expect(task.instance_variable_get(:@mode)).to eq(:ir)
       expect(task.instance_variable_get(:@sim_backend)).to eq(:compile)
+      expect(task.instance_variable_get(:@core)).to eq(:pipeline)
     end
 
     it 'creates HeadlessRunner internally' do
@@ -51,6 +53,39 @@ RSpec.describe RHDL::Examples::RISCV::Tasks::RunTask do
       expect(task.instance_variable_get(:@mmap_height)).to eq(12)
       expect(task.instance_variable_get(:@mmap_row_stride)).to eq(96)
       expect(task.instance_variable_get(:@mmap_start)).to eq(0x1000)
+    end
+
+    it 'accepts core selection' do
+      task = build_task(core: :single)
+      expect(task.instance_variable_get(:@core)).to eq(:single)
+    end
+  end
+
+  describe '#load_linux' do
+    it 'delegates linux artifact loading to headless runner' do
+      task = described_class.allocate
+      runner = instance_double(RHDL::Examples::RISCV::HeadlessRunner)
+      task.instance_variable_set(:@runner, runner)
+
+      expect(runner).to receive(:load_linux).with(
+        kernel: 'kernel.bin',
+        initramfs: 'initramfs.cpio',
+        dtb: 'virt.dtb',
+        kernel_addr: 0x8040_0000,
+        initramfs_addr: 0x8400_0000,
+        dtb_addr: 0x87F0_0000,
+        pc: 0x8020_1234
+      )
+
+      task.load_linux(
+        kernel: 'kernel.bin',
+        initramfs: 'initramfs.cpio',
+        dtb: 'virt.dtb',
+        kernel_addr: 0x8040_0000,
+        initramfs_addr: 0x8400_0000,
+        dtb_addr: 0x87F0_0000,
+        pc: 0x8020_1234
+      )
     end
   end
 
@@ -172,14 +207,53 @@ end
 RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
   let(:program_bytes) { [0x93, 0x00, 0x10, 0x00].pack('C*') } # addi x1, x0, 1
 
+  def sign_extend(value, bits)
+    masked = value & ((1 << bits) - 1)
+    sign_bit = 1 << (bits - 1)
+    (masked ^ sign_bit) - sign_bit
+  end
+
+  def decode_li_value(words, start_index)
+    lui = words.fetch(start_index)
+    addi = words.fetch(start_index + 1)
+    upper = lui & 0xFFFF_F000
+    imm = sign_extend((addi >> 20) & 0xFFF, 12)
+    (upper + imm) & 0xFFFF_FFFF
+  end
+
+  def find_li_values(words, rd)
+    values = []
+    words.each_cons(2) do |lui, addi|
+      next unless (lui & 0x7F) == 0x37
+      next unless ((lui >> 7) & 0x1F) == rd
+      next unless (addi & 0x7F) == 0x13
+      next unless ((addi >> 7) & 0x1F) == rd
+      next unless ((addi >> 15) & 0x1F) == rd
+
+      upper = lui & 0xFFFF_F000
+      imm = sign_extend((addi >> 20) & 0xFFF, 12)
+      values << ((upper + imm) & 0xFFFF_FFFF)
+    end
+    values
+  end
+
   describe '#initialize' do
     it 'defaults to ir mode and compile backend' do
       runner = described_class.new
       expect(runner.mode).to eq(:ir)
       expect(runner.sim_backend).to eq(:compile)
+      expect(runner.core).to eq(:single)
       expect(runner.cpu).to be_a(RHDL::Examples::RISCV::IRHarness)
     rescue LoadError, RuntimeError => e
       skip "Default backend unavailable: #{e.message}"
+    end
+
+    it 'builds pipeline harness when core is pipeline' do
+      runner = described_class.new(core: :pipeline)
+      expect(runner.core).to eq(:pipeline)
+      expect(runner.cpu).to be_a(RHDL::Examples::RISCV::Pipeline::IRHarness)
+    rescue LoadError, RuntimeError => e
+      skip "Pipeline backend unavailable: #{e.message}"
     end
 
     it 'accepts ruby-mode sim backend options' do
@@ -269,6 +343,221 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
       expect((words[0] >> 12) & 0xFFFFF).to eq(0x80200)
       expect((words[0] >> 7) & 0x1F).to eq(rd)
       expect(words[1]).to eq(other_word)
+    end
+  end
+
+  describe '#load_linux' do
+    def with_temp_binary(bytes)
+      file = Tempfile.new(['linux_artifact', '.bin'])
+      file.binmode
+      file.write(bytes)
+      file.flush
+      yield file.path, bytes
+    ensure
+      file.close!
+    end
+
+    def build_minimal_dtb_with_initrd_props
+      strings = +"linux,initrd-start\0linux,initrd-end\0"
+      start_nameoff = 0
+      end_nameoff = "linux,initrd-start\0".bytesize
+
+      struct = +''
+      struct << [0x0000_0001].pack('N') # FDT_BEGIN_NODE /
+      struct << "\0".ljust(4, "\0")
+      struct << [0x0000_0001].pack('N') # FDT_BEGIN_NODE chosen
+      struct << "chosen\0".ljust(8, "\0")
+      struct << [0x0000_0003, 8, start_nameoff].pack('N3') # FDT_PROP linux,initrd-start
+      start_value_offset_in_struct = struct.bytesize
+      struct << [0, 0].pack('N2')
+      struct << [0x0000_0003, 8, end_nameoff].pack('N3') # FDT_PROP linux,initrd-end
+      end_value_offset_in_struct = struct.bytesize
+      struct << [0, 0].pack('N2')
+      struct << [0x0000_0002, 0x0000_0002, 0x0000_0009].pack('N3') # END_NODE chosen, END_NODE /, END
+
+      header_size = 40
+      mem_rsv_size = 16
+      off_mem_rsvmap = header_size
+      off_dt_struct = off_mem_rsvmap + mem_rsv_size
+      size_dt_struct = struct.bytesize
+      off_dt_strings = off_dt_struct + size_dt_struct
+      size_dt_strings = strings.bytesize
+      totalsize = off_dt_strings + size_dt_strings
+
+      header = [
+        0xD00D_FEED,
+        totalsize,
+        off_dt_struct,
+        off_dt_strings,
+        off_mem_rsvmap,
+        17,
+        16,
+        0,
+        size_dt_strings,
+        size_dt_struct
+      ].pack('N10')
+
+      start_value_offset = off_dt_struct + start_value_offset_in_struct
+      end_value_offset = off_dt_struct + end_value_offset_in_struct
+      dtb = +"#{header}#{("\0" * mem_rsv_size)}#{struct}#{strings}"
+      [dtb, start_value_offset, end_value_offset]
+    end
+
+    it 'requires native riscv runner support' do
+      with_temp_binary("KERN") do |kernel_path, _|
+        runner = described_class.allocate
+        sim = double('sim', runner_kind: :riscv)
+        cpu = double('cpu', native?: false, sim: sim)
+        runner.instance_variable_set(:@cpu, cpu)
+
+        expect do
+          runner.load_linux(kernel: kernel_path)
+        end.to raise_error(RuntimeError, /Linux mode requires native RISC-V IR runner support/)
+      end
+    end
+
+    it 'requires riscv native runner kind' do
+      with_temp_binary("KERN") do |kernel_path, _|
+        runner = described_class.allocate
+        sim = double('sim', runner_kind: :generic)
+        cpu = double('cpu', native?: true, sim: sim)
+        runner.instance_variable_set(:@cpu, cpu)
+
+        expect do
+          runner.load_linux(kernel: kernel_path)
+        end.to raise_error(RuntimeError, /Linux mode requires native RISC-V IR runner support/)
+      end
+    end
+
+    it 'patches linux,initrd bounds in DTB chosen node when initramfs is provided' do
+      runner = described_class.allocate
+      dtb_bytes, start_offset, end_offset = build_minimal_dtb_with_initrd_props
+      patched = runner.send(:patch_dtb_initrd_bounds, dtb_bytes, 0x8400_2000, 0x1234)
+
+      expect(patched.byteslice(start_offset, 8)).to eq([0x0000_0000, 0x8400_2000].pack('N2'))
+      expect(patched.byteslice(end_offset, 8)).to eq([0x0000_0000, 0x8400_3234].pack('N2'))
+    end
+
+    it 'loads linux artifacts to expected addresses and boots through a deterministic entry trampoline' do
+      with_temp_binary("KERN") do |kernel_path, kernel_bytes|
+        with_temp_binary("INIT") do |initramfs_path, initramfs_bytes|
+          with_temp_binary("DTB!") do |dtb_path, dtb_bytes|
+            runner = described_class.allocate
+            sim = double('sim', runner_kind: :riscv)
+            cpu = double('cpu', native?: true, sim: sim)
+            allow(cpu).to receive(:clear_uart_tx_bytes)
+            runner.instance_variable_set(:@cpu, cpu)
+            expected_bootstrap = runner.send(
+              :build_linux_bootstrap_program,
+              hart_id: 0,
+              dtb_pointer: 0x87F0_0000,
+              entry_pc: 0x8020_1234
+            )
+            bootstrap_addr = runner.send(:linux_bootstrap_addr, 0x8040_0000)
+
+            expect(runner).to receive(:reset).ordered
+            expect(cpu).to receive(:clear_uart_tx_bytes).ordered
+            expect(runner).to receive(:load_instruction_bytes).with(kernel_bytes, 0x8040_0000).ordered
+            expect(runner).to receive(:load_data_bytes).with(initramfs_bytes, 0x8400_0000).ordered
+            expect(runner).to receive(:load_data_bytes).with(dtb_bytes, 0x87F0_0000).ordered
+            expect(runner).to receive(:load_instruction_bytes).with(expected_bootstrap, bootstrap_addr).ordered
+            expect(runner).to receive(:set_pc).with(bootstrap_addr).ordered
+
+            runner.load_linux(
+              kernel: kernel_path,
+              initramfs: initramfs_path,
+              dtb: dtb_path,
+              kernel_addr: 0x8040_0000,
+              initramfs_addr: 0x8400_0000,
+              dtb_addr: 0x87F0_0000,
+              pc: 0x8020_1234
+            )
+          end
+        end
+      end
+    end
+
+    it 'uses kernel load address as trampoline jump target when pc override is omitted' do
+      with_temp_binary("KERN") do |kernel_path, kernel_bytes|
+        runner = described_class.allocate
+        sim = double('sim', runner_kind: :riscv)
+        cpu = double('cpu', native?: true, sim: sim)
+        allow(cpu).to receive(:clear_uart_tx_bytes)
+        runner.instance_variable_set(:@cpu, cpu)
+        expected_bootstrap = runner.send(
+          :build_linux_bootstrap_program,
+          hart_id: 0,
+          dtb_pointer: 0,
+          entry_pc: 0x8030_0000
+        )
+        bootstrap_addr = runner.send(:linux_bootstrap_addr, 0x8030_0000)
+
+        expect(runner).to receive(:reset).ordered
+        expect(cpu).to receive(:clear_uart_tx_bytes).ordered
+        expect(runner).to receive(:load_instruction_bytes).with(kernel_bytes, 0x8030_0000).ordered
+        expect(runner).to receive(:load_instruction_bytes).with(expected_bootstrap, bootstrap_addr).ordered
+        expect(runner).to receive(:set_pc).with(bootstrap_addr).ordered
+
+        runner.load_linux(kernel: kernel_path, kernel_addr: 0x8030_0000)
+      end
+    end
+
+    it 'encodes M-mode SBI handoff firmware with Linux entry register contract' do
+      runner = described_class.allocate
+      words = runner.send(
+        :build_linux_bootstrap_program,
+        hart_id: 0,
+        dtb_pointer: 0x87F0_0000,
+        entry_pc: 0x8020_1234
+      ).unpack('V*')
+
+      expect(words.length).to be > 40
+      expect(words).to include(0x3020_0073) # mret
+      expect(find_li_values(words, 10)).to include(0)
+      expect(find_li_values(words, 11)).to include(0x87F0_0000)
+      expect(find_li_values(words, 5)).to include(0x8020_1234)
+    end
+
+    it 'encodes a1 as zero when dtb pointer is not provided' do
+      runner = described_class.allocate
+      words = runner.send(
+        :build_linux_bootstrap_program,
+        hart_id: 0,
+        dtb_pointer: 0,
+        entry_pc: 0x8040_0000
+      ).unpack('V*')
+
+      expect(find_li_values(words, 11)).to include(0)
+    end
+
+    it 'hands off to supervisor mode and services SBI base get_spec_version ecall' do
+      runner = described_class.new(mode: :ruby, sim: :ruby)
+      bootstrap_addr = 0x100
+      entry_pc = 0x1000
+
+      bootstrap = runner.send(
+        :build_linux_bootstrap_program,
+        hart_id: 0,
+        dtb_pointer: 0,
+        entry_pc: entry_pc
+      )
+      payload_words = [
+        RHDL::Examples::RISCV::Assembler.addi(17, 0, 0x10), # a7 = SBI_EXT_BASE
+        RHDL::Examples::RISCV::Assembler.addi(16, 0, 0x0),  # a6 = get_spec_version
+        RHDL::Examples::RISCV::Assembler.ecall,
+        RHDL::Examples::RISCV::Assembler.addi(12, 10, 0),   # x12 <- a0 (error)
+        RHDL::Examples::RISCV::Assembler.addi(13, 11, 0),   # x13 <- a1 (value)
+        RHDL::Examples::RISCV::Assembler.jal(0, 0)
+      ]
+
+      runner.reset
+      runner.send(:load_instruction_bytes, payload_words.pack('V*'), entry_pc)
+      runner.send(:load_instruction_bytes, bootstrap, bootstrap_addr)
+      runner.set_pc(bootstrap_addr)
+      runner.run_steps(320)
+
+      expect(runner.cpu.read_reg(12)).to eq(0)
+      expect(runner.cpu.read_reg(13)).to eq(0x0000_0002)
     end
   end
 end

@@ -20,6 +20,7 @@ module RHDL
     MTIME_LOW_ADDR = BASE_ADDR + 0xBFF8
     MTIME_HIGH_ADDR = BASE_ADDR + 0xBFFC
     MASK64 = 0xFFFF_FFFF_FFFF_FFFF
+    MTIME_INCREMENT = 1
 
     input :clk
     input :rst
@@ -66,7 +67,7 @@ module RHDL
 
       # mtime increments every cycle
       if @prev_clk == 0 && clk == 1
-        @mtime = (@mtime + 1) & MASK64
+        @mtime = (@mtime + MTIME_INCREMENT) & MASK64
 
         if mem_write == 1 && funct3 == Funct3::WORD
           case addr

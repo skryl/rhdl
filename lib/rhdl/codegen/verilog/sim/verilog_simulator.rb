@@ -187,8 +187,9 @@ module RHDL
           end
 
           link_args = if RbConfig::CONFIG['host_os'] =~ /darwin/
+                        hash_shim_obj = ensure_darwin_hash_memory_shim
                         [cxx, '-shared', '-dynamiclib', '-o', lib_path,
-                         '-Wl,-all_load', component_lib, verilated_lib]
+                         '-Wl,-all_load', component_lib, verilated_lib, hash_shim_obj]
                       else
                         [cxx, '-shared', '-o', lib_path,
                          '-Wl,--whole-archive', component_lib, verilated_lib,
@@ -196,6 +197,39 @@ module RHDL
                       end
 
           raise "Failed to link Verilator shared library: #{lib_path}" unless system(*link_args)
+        end
+
+        def ensure_darwin_hash_memory_shim
+          src_path = File.join(obj_dir, 'rhdl_hash_memory_shim.cpp')
+          obj_path = File.join(obj_dir, 'rhdl_hash_memory_shim.o')
+          source = <<~CPP
+            #include <cstddef>
+            #include <cstdint>
+
+            #if defined(__APPLE__) && defined(__aarch64__)
+            namespace std {
+            inline namespace __1 {
+            size_t __hash_memory(const void* ptr, size_t len) {
+              const auto* bytes = static_cast<const std::uint8_t*>(ptr);
+              std::size_t hash = 1469598103934665603ull;
+              for (std::size_t i = 0; i < len; ++i) {
+                hash ^= static_cast<std::size_t>(bytes[i]);
+                hash *= 1099511628211ull;
+              }
+              return hash;
+            }
+            } // namespace __1
+            } // namespace std
+            #endif
+          CPP
+
+          write_file_if_changed(src_path, source)
+          if !File.exist?(obj_path) || File.mtime(obj_path) < File.mtime(src_path)
+            result = system(cxx, '-std=c++17', '-fPIC', '-c', src_path, '-o', obj_path)
+            raise "Failed to build Darwin hash shim object: #{obj_path}" unless result
+          end
+
+          obj_path
         end
 
         def library_suffix

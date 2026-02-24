@@ -83,10 +83,11 @@ const VIRTIO_REQ_T_IN: u32 = 0;
 const VIRTIO_REQ_T_OUT: u32 = 1;
 const VIRTIO_SECTOR_BYTES: u64 = 512;
 
-const DEFAULT_INST_MEM_BYTES: usize = 8 * 1024 * 1024;
+const DEFAULT_INST_MEM_BYTES: usize = 128 * 1024 * 1024;
 const DEFAULT_DATA_MEM_BYTES: usize = 128 * 1024 * 1024;
 const DEFAULT_DISK_BYTES: usize = 8 * 1024 * 1024;
 const VIRTIO_QUEUE_NUM_MAX: u16 = 8;
+const RV32_NOP_LE: [u8; 4] = [0x13, 0x00, 0x00, 0x00];
 
 #[derive(Clone, Copy)]
 struct UartStepResult {
@@ -176,6 +177,7 @@ pub struct RiscvExtension {
     uart_scr: u8,
     uart_rx_ready: bool,
     uart_tx_data_reg: u8,
+    uart_tx_irq_pending: bool,
     uart_irq: bool,
 
     virtio_prev_clk: u64,
@@ -206,7 +208,7 @@ impl RiscvExtension {
         let n = &core.name_to_idx;
 
         Self {
-            inst_mem: vec![0u8; DEFAULT_INST_MEM_BYTES],
+            inst_mem: init_inst_mem_with_nops(DEFAULT_INST_MEM_BYTES),
             data_mem: vec![0u8; DEFAULT_DATA_MEM_BYTES],
             disk: vec![0u8; DEFAULT_DISK_BYTES],
             uart_tx_bytes: Vec::new(),
@@ -274,6 +276,7 @@ impl RiscvExtension {
             uart_scr: 0,
             uart_rx_ready: false,
             uart_tx_data_reg: 0,
+            uart_tx_irq_pending: false,
             uart_irq: false,
 
             virtio_prev_clk: 0,
@@ -490,6 +493,7 @@ impl RiscvExtension {
         self.uart_scr = 0;
         self.uart_rx_ready = false;
         self.uart_tx_data_reg = 0;
+        self.uart_tx_irq_pending = false;
         self.uart_irq = false;
 
         self.virtio_prev_clk = 0;
@@ -902,6 +906,7 @@ impl RiscvExtension {
             self.uart_scr = 0;
             self.uart_rx_ready = false;
             self.uart_tx_data_reg = 0;
+            self.uart_tx_irq_pending = false;
             self.uart_irq = false;
             self.uart_prev_clk = clk;
             return UartStepResult {
@@ -918,11 +923,12 @@ impl RiscvExtension {
         let word_access = funct3 == FUNCT3_WORD;
         let access_ok = byte_access || word_access;
         let dlab = (self.uart_lcr & 0x80) != 0;
+        let rising_edge = self.uart_prev_clk == 0 && clk == 1;
 
         let rbr_pop = mem_read && access_ok && reg_offset == UART_REG_THR_RBR_DLL && !dlab && self.uart_rx_ready;
         let rbr_pop_value = self.uart_rbr;
 
-        if self.uart_prev_clk == 0 && clk == 1 {
+        if rising_edge {
             if rx_valid && !self.uart_rx_ready {
                 self.uart_rbr = rx_data;
                 self.uart_rx_ready = true;
@@ -938,13 +944,21 @@ impl RiscvExtension {
                         } else {
                             self.uart_tx_data_reg = write_byte;
                             tx_valid_now = true;
+                            self.uart_tx_irq_pending = true;
                         }
                     }
                     UART_REG_IER_DLM => {
                         if dlab {
                             self.uart_dlm = write_byte;
                         } else {
+                            let prev_ier = self.uart_ier;
                             self.uart_ier = write_byte & 0x0F;
+                            let tx_int_enabled = (self.uart_ier & 0x2) != 0;
+                            if !tx_int_enabled {
+                                self.uart_tx_irq_pending = false;
+                            } else if (prev_ier & 0x2) == 0 {
+                                self.uart_tx_irq_pending = true;
+                            }
                         }
                     }
                     UART_REG_IIR_FCR => {
@@ -964,10 +978,15 @@ impl RiscvExtension {
             }
         }
 
-        self.uart_prev_clk = clk;
-
         let rx_irq_pending = (self.uart_ier & 0x1) != 0 && self.uart_rx_ready;
-        let iir: u8 = if rx_irq_pending { 0x04 } else { 0x01 };
+        let tx_irq_pending = self.uart_tx_irq_pending;
+        let iir: u8 = if rx_irq_pending {
+            0x04
+        } else if tx_irq_pending {
+            0x02
+        } else {
+            0x01
+        };
         let lsr: u8 = 0x60 | if self.uart_rx_ready { 0x01 } else { 0x00 };
 
         let read_data = if mem_read && access_ok {
@@ -1006,7 +1025,12 @@ impl RiscvExtension {
             0
         };
 
-        self.uart_irq = rx_irq_pending;
+        if rising_edge && mem_read && access_ok && reg_offset == UART_REG_IIR_FCR && iir == 0x02 {
+            self.uart_tx_irq_pending = false;
+        }
+
+        self.uart_prev_clk = clk;
+        self.uart_irq = rx_irq_pending || tx_irq_pending;
 
         UartStepResult {
             read_data,
@@ -1620,6 +1644,25 @@ impl RiscvExtension {
         self.set_signal(core, self.pc_reg_pc_idx, value);
         self.set_signal(core, self.debug_pc_idx, value);
     }
+}
+
+fn init_inst_mem_with_nops(len: usize) -> Vec<u8> {
+    let mut mem = vec![0u8; len];
+    let mut i = 0usize;
+    while i < len {
+        mem[i] = RV32_NOP_LE[0];
+        if i + 1 < len {
+            mem[i + 1] = RV32_NOP_LE[1];
+        }
+        if i + 2 < len {
+            mem[i + 2] = RV32_NOP_LE[2];
+        }
+        if i + 3 < len {
+            mem[i + 3] = RV32_NOP_LE[3];
+        }
+        i += 4;
+    }
+    mem
 }
 
 fn idx(name_to_idx: &HashMap<String, usize>, name: &str) -> usize {

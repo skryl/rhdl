@@ -62,10 +62,12 @@ module RHDL
         # I-type: JALR, LOAD, OP_IMM
         Opcode::JALR   => i_imm,
         Opcode::LOAD   => i_imm,
+        Opcode::LOAD_FP => i_imm,
         Opcode::OP_IMM => i_imm,
 
         # S-type: STORE
         Opcode::STORE  => s_imm,
+        Opcode::STORE_FP => s_imm,
 
         # B-type: BRANCH
         Opcode::BRANCH => b_imm,

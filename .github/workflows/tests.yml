@@ -7,6 +7,8 @@ on:
       - synchronize
       - reopened
   push:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -35,18 +37,33 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install system dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            verilator \
+            iverilog \
+            graphviz
+
       - name: Cache Rust build outputs
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             lib/rhdl/codegen/netlist/sim/netlist_interpreter -> target
             lib/rhdl/codegen/netlist/sim/netlist_jit -> target
+            lib/rhdl/codegen/netlist/sim/netlist_compiler -> target
+            lib/rhdl/codegen/ir/sim/ir_interpreter -> target
+            lib/rhdl/codegen/ir/sim/ir_jit -> target
+            lib/rhdl/codegen/ir/sim/ir_compiler -> target
+            examples/mos6502/utilities/simulators/isa_simulator_native -> target
 
-      - name: Build required native netlist backends
+      - name: Build native extensions
         run: |
           set -euo pipefail
-          bundle exec rake "native:build[netlist_interpreter]"
-          bundle exec rake "native:build[netlist_jit]"
+          bundle exec rake native:build
 
       - name: Run test suite
+        env:
+          RSPEC_QUIET_OUTPUT: "1"
         run: bundle exec rake spec

@@ -53,6 +53,27 @@ RSpec.describe 'RISC-V IR runner backend parity', timeout: 30 do
         expect(cpu.uart_tx_bytes).to eq([])
       end
 
+      it 'surfaces UART THRE interrupts through native MMIO state' do
+        program = [
+          asm.lui(1, 0x10000),
+          asm.addi(2, 0, 0x02),
+          asm.sb(2, 1, 1),   # IER: enable THRE interrupt
+          asm.addi(2, 0, 0x41),
+          asm.sb(2, 1, 0),   # THR write
+          asm.lb(3, 1, 2),   # IIR
+          asm.lb(4, 1, 5),   # LSR
+          asm.lb(5, 1, 2)    # IIR after THRE acknowledge
+        ]
+
+        cpu.load_program(program)
+        cpu.reset!
+        cpu.run_cycles(program.length + 6)
+
+        expect(cpu.read_reg(3)).to eq(0x02)
+        expect(cpu.read_reg(4)).to eq(0x60)
+        expect(cpu.read_reg(5)).to eq(0x01)
+      end
+
       it 'loads and reads virtio disk bytes through runner memory spaces' do
         cpu.reset!
         cpu.load_virtio_disk([0x10, 0x20, 0x30, 0x40], offset: 512)
@@ -104,6 +125,31 @@ RSpec.describe 'RISC-V IR runner backend parity', timeout: 30 do
         expect(cpu.uart_tx_bytes).to eq([0x41, 0x42])
         cpu.clear_uart_tx_bytes
         expect(cpu.uart_tx_bytes).to eq([])
+      end
+
+      it 'surfaces UART THRE interrupts through native MMIO state' do
+        program = [
+          asm.lui(1, 0x10000),
+          asm.addi(2, 0, 0x02),
+          asm.sb(2, 1, 1),   # IER: enable THRE interrupt
+          asm.addi(2, 0, 0x41),
+          asm.sb(2, 1, 0),   # THR write
+          asm.lb(3, 1, 2),   # IIR
+          asm.lb(4, 1, 5),   # LSR
+          asm.lb(5, 1, 2),   # IIR after THRE acknowledge
+          asm.nop,
+          asm.nop,
+          asm.nop,
+          asm.nop
+        ]
+
+        cpu.load_program(program)
+        cpu.reset!
+        cpu.run_cycles(program.length + 10)
+
+        expect(cpu.read_reg(3)).to eq(0x02)
+        expect(cpu.read_reg(4)).to eq(0x60)
+        expect(cpu.read_reg(5)).to eq(0x01)
       end
 
       it 'loads and reads virtio disk bytes through runner memory spaces' do

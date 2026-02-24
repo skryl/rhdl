@@ -1,6 +1,6 @@
-# RV32I/RV32M Assembler
+# RV32I/RV32M/RV32C Assembler
 # Simple assembler for generating test programs
-# Supports RV32I instructions and the M extension
+# Supports RV32I instructions, M extension, and a focused RV32C subset
 
 require_relative '../hdl/constants'
 
@@ -43,6 +43,14 @@ module RHDL
       'x30' => 30, 't5' => 30,
       'x31' => 31, 't6' => 31
     }.freeze
+
+    FREGISTERS = (0..31).each_with_object({}) do |index, regs|
+      regs["f#{index}"] = index
+    end.freeze
+
+    VREGISTERS = (0..31).each_with_object({}) do |index, regs|
+      regs["v#{index}"] = index
+    end.freeze
 
     def initialize
       @labels = {}
@@ -133,6 +141,15 @@ module RHDL
       encode_i_type(0, 0, 0x105, 0b000, Opcode::SYSTEM)
     end
 
+    # Zawrs instructions (SYSTEM plain forms)
+    def self.wrs_nto
+      encode_i_type(0, 0, 0x00D, 0b000, Opcode::SYSTEM)
+    end
+
+    def self.wrs_sto
+      encode_i_type(0, 0, 0x01D, 0b000, Opcode::SYSTEM)
+    end
+
     def self.sfence_vma(rs1 = 0, rs2 = 0)
       # SYSTEM R-type form:
       # funct7=0001001, rs2, rs1, funct3=000, rd=x0, opcode=SYSTEM
@@ -210,6 +227,11 @@ module RHDL
       encode_i_type(rd, rs1, offset, Funct3::HALF_U, Opcode::LOAD)
     end
 
+    # Floating-point loads
+    def self.flw(fd, rs1, offset)
+      encode_i_type(fd, rs1, offset, Funct3::WORD, Opcode::LOAD_FP)
+    end
+
     # Store instructions
     def self.sb(rs2, rs1, offset)
       encode_s_type(rs1, rs2, offset, Funct3::BYTE, Opcode::STORE)
@@ -221,6 +243,11 @@ module RHDL
 
     def self.sw(rs2, rs1, offset)
       encode_s_type(rs1, rs2, offset, Funct3::WORD, Opcode::STORE)
+    end
+
+    # Floating-point stores
+    def self.fsw(fs2, rs1, offset)
+      encode_s_type(rs1, fs2, offset, Funct3::WORD, Opcode::STORE_FP)
     end
 
     # Immediate arithmetic
@@ -301,6 +328,70 @@ module RHDL
       encode_r_type(rd, rs1, rs2, Funct3::AND, Funct7::NORMAL, Opcode::OP)
     end
 
+    # Zba extension
+    def self.sh1add(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::SLT, 0b0010000, Opcode::OP)
+    end
+
+    def self.sh2add(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::XOR, 0b0010000, Opcode::OP)
+    end
+
+    def self.sh3add(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::OR, 0b0010000, Opcode::OP)
+    end
+
+    # Zbb extension (phase-scoped subset)
+    def self.andn(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::AND, 0b0100000, Opcode::OP)
+    end
+
+    def self.orn(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::OR, 0b0100000, Opcode::OP)
+    end
+
+    def self.xnor(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::XOR, 0b0100000, Opcode::OP)
+    end
+
+    def self.min(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::XOR, 0b0000101, Opcode::OP)
+    end
+
+    def self.max(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::OR, 0b0000101, Opcode::OP)
+    end
+
+    def self.minu(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::SRL_SRA, 0b0000101, Opcode::OP)
+    end
+
+    def self.maxu(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::AND, 0b0000101, Opcode::OP)
+    end
+
+    # Zbkb subset
+    def self.pack(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::XOR, 0b0000100, Opcode::OP)
+    end
+
+    def self.packh(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::AND, 0b0000100, Opcode::OP)
+    end
+
+    # Zbc subset
+    def self.clmul(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::SLL, 0b0000101, Opcode::OP)
+    end
+
+    def self.clmulh(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::SLTU, 0b0000101, Opcode::OP)
+    end
+
+    def self.clmulr(rd, rs1, rs2)
+      encode_r_type(rd, rs1, rs2, Funct3::SLT, 0b0000101, Opcode::OP)
+    end
+
     # RV32M extension
     def self.mul(rd, rs1, rs2)
       encode_r_type(rd, rs1, rs2, Funct3::ADD_SUB, Funct7::M_EXT, Opcode::OP)
@@ -332,6 +423,15 @@ module RHDL
 
     def self.remu(rd, rs1, rs2)
       encode_r_type(rd, rs1, rs2, Funct3::AND, Funct7::M_EXT, Opcode::OP)
+    end
+
+    # RV32F data-movement subset
+    def self.fmv_x_w(rd, fs1)
+      encode_r_type(rd, fs1, 0, 0b000, 0b1110000, Opcode::OP_FP)
+    end
+
+    def self.fmv_w_x(fd, rs1)
+      encode_r_type(fd, rs1, 0, 0b000, 0b1111000, Opcode::OP_FP)
     end
 
     # RV32A extension (word forms)
@@ -377,6 +477,232 @@ module RHDL
 
     def self.amomaxu_w(rd, rs2, rs1, aq: 0, rl: 0)
       encode_amo_type(rd, rs1, rs2, 0b11100, aq: aq, rl: rl)
+    end
+
+    # Zacas extension (word form)
+    def self.amocas_w(rd, rs2, rs1, aq: 0, rl: 0)
+      encode_amo_type(rd, rs1, rs2, 0b00101, aq: aq, rl: rl)
+    end
+
+    # Zicbop prefetch hints (safe no-op in current memory model)
+    def self.prefetch_i(rs1, offset = 0)
+      encode_i_type(0, rs1, offset & 0xFFF, Funct3::OR, Opcode::OP_IMM)
+    end
+
+    def self.prefetch_r(rs1, offset = 0)
+      encode_i_type(0, rs1, (offset & 0xFFE) | 0x001, Funct3::OR, Opcode::OP_IMM)
+    end
+
+    def self.prefetch_w(rs1, offset = 0)
+      encode_i_type(0, rs1, (offset & 0xFFC) | 0x003, Funct3::OR, Opcode::OP_IMM)
+    end
+
+    # Zicbom / Zicboz cache-block ops (safe no-op in current memory model)
+    def self.cbo_inval(rs1, offset = 0)
+      encode_i_type(0, rs1, (offset & 0xFF8) | 0x000, 0b010, Opcode::MISC_MEM)
+    end
+
+    def self.cbo_clean(rs1, offset = 0)
+      encode_i_type(0, rs1, (offset & 0xFF8) | 0x001, 0b010, Opcode::MISC_MEM)
+    end
+
+    def self.cbo_flush(rs1, offset = 0)
+      encode_i_type(0, rs1, (offset & 0xFF8) | 0x002, 0b010, Opcode::MISC_MEM)
+    end
+
+    def self.cbo_zero(rs1, offset = 0)
+      encode_i_type(0, rs1, (offset & 0xFF8) | 0x004, 0b010, Opcode::MISC_MEM)
+    end
+
+    # RVV baseline subset
+    # Scoped assumptions:
+    # - OP-V opcode form
+    # - SEW=32 baseline, LMUL=1 baseline
+    # - unmasked forms only (vm=1)
+    def self.vsetvli(rd, rs1, vtypei)
+      imm = vtypei & 0x7FF # zimm[10:0], bit 11 must remain zero for vsetvli
+      encode_i_type(rd, rs1, imm, 0b111, Opcode::OP_V)
+    end
+
+    def self.vadd_vv(vd, vs2, vs1)
+      encode_v_type(vd, vs1, vs2, 0b000, 0b000000, vm: 1)
+    end
+
+    def self.vadd_vx(vd, vs2, rs1)
+      encode_v_type(vd, rs1, vs2, 0b100, 0b000000, vm: 1)
+    end
+
+    def self.vmv_v_x(vd, rs1)
+      # vmv.v.x is encoded in the vmerge/vmv space with vs2=0, vm=1.
+      encode_v_type(vd, rs1, 0, 0b100, 0b010111, vm: 1)
+    end
+
+    def self.vmv_x_s(rd, vs2)
+      # VWXUNARY0 with vs1=0 => vmv.x.s
+      encode_v_type(rd, 0, vs2, 0b010, 0b010000, vm: 1)
+    end
+
+    def self.vmv_s_x(vd, rs1)
+      # VRXUNARY0 with vs2=0 => vmv.s.x
+      encode_v_type(vd, rs1, 0, 0b110, 0b010000, vm: 1)
+    end
+
+    # RV32C subset encoders
+    # Returns [encoded_value, bit_width] tuples for use with pack_mixed.
+    def self.c_raw(bits)
+      [bits & 0xFFFF, 16]
+    end
+
+    def self.c_nop
+      c_addi(0, 0)
+    end
+
+    def self.c_addi(rd, imm)
+      c_raw(encode_c_ci(0b000, rd, imm))
+    end
+
+    def self.c_li(rd, imm)
+      raise ArgumentError, 'c.li rd must be non-zero' if (rd & 0x1F).zero?
+
+      c_raw(encode_c_ci(0b010, rd, imm))
+    end
+
+    def self.c_addi4spn(rd, imm)
+      c_raw(encode_c_addi4spn(rd, imm))
+    end
+
+    def self.c_lui(rd, imm)
+      c_raw(encode_c_lui(rd, imm))
+    end
+
+    def self.c_addi16sp(imm)
+      c_raw(encode_c_addi16sp(imm))
+    end
+
+    def self.c_slli(rd, shamt)
+      c_raw(encode_c_slli(rd, shamt))
+    end
+
+    def self.c_srli(rd, shamt)
+      c_raw(encode_c_srli(rd, shamt))
+    end
+
+    def self.c_srai(rd, shamt)
+      c_raw(encode_c_srai(rd, shamt))
+    end
+
+    def self.c_andi(rd, imm)
+      c_raw(encode_c_andi(rd, imm))
+    end
+
+    def self.c_sub(rd, rs2)
+      c_raw(encode_c_ca(0b00, rd, rs2))
+    end
+
+    def self.c_xor(rd, rs2)
+      c_raw(encode_c_ca(0b01, rd, rs2))
+    end
+
+    def self.c_or(rd, rs2)
+      c_raw(encode_c_ca(0b10, rd, rs2))
+    end
+
+    def self.c_and(rd, rs2)
+      c_raw(encode_c_ca(0b11, rd, rs2))
+    end
+
+    def self.c_lwsp(rd, offset)
+      c_raw(encode_c_lwsp(rd, offset))
+    end
+
+    def self.c_swsp(rs2, offset)
+      c_raw(encode_c_swsp(rs2, offset))
+    end
+
+    def self.c_lw(rd, rs1, offset)
+      c_raw(encode_c_lw(rs1, rd, offset))
+    end
+
+    def self.c_sw(rs2, rs1, offset)
+      c_raw(encode_c_sw(rs1, rs2, offset))
+    end
+
+    def self.c_j(offset)
+      c_raw(encode_c_j(0b101, offset))
+    end
+
+    def self.c_jal(offset)
+      c_raw(encode_c_j(0b001, offset))
+    end
+
+    def self.c_beqz(rs1, offset)
+      c_raw(encode_c_b(0b110, rs1, offset))
+    end
+
+    def self.c_bnez(rs1, offset)
+      c_raw(encode_c_b(0b111, rs1, offset))
+    end
+
+    def self.c_jr(rs1)
+      rs1 &= 0x1F
+      raise ArgumentError, 'c.jr rs1 must be non-zero' if rs1.zero?
+
+      c_raw((0b1000 << 12) | (rs1 << 7) | 0b10)
+    end
+
+    def self.c_jalr(rs1)
+      rs1 &= 0x1F
+      raise ArgumentError, 'c.jalr rs1 must be non-zero' if rs1.zero?
+
+      c_raw((0b1001 << 12) | (rs1 << 7) | 0b10)
+    end
+
+    def self.c_mv(rd, rs2)
+      rd &= 0x1F
+      rs2 &= 0x1F
+      raise ArgumentError, 'c.mv rd must be non-zero' if rd.zero?
+      raise ArgumentError, 'c.mv rs2 must be non-zero' if rs2.zero?
+
+      c_raw((0b1000 << 12) | (rd << 7) | (rs2 << 2) | 0b10)
+    end
+
+    def self.c_add(rd, rs2)
+      rd &= 0x1F
+      rs2 &= 0x1F
+      raise ArgumentError, 'c.add rd must be non-zero' if rd.zero?
+      raise ArgumentError, 'c.add rs2 must be non-zero' if rs2.zero?
+
+      c_raw((0b1001 << 12) | (rd << 7) | (rs2 << 2) | 0b10)
+    end
+
+    # Packs a mixed-width instruction list into 32-bit little-endian ROM words.
+    # - Integer entries are treated as 32-bit instructions
+    # - [value, 16] and [value, 32] tuples are treated as explicit-width entries
+    def self.pack_mixed(instructions)
+      bytes = []
+
+      instructions.each do |inst|
+        value, width = normalize_mixed_entry(inst)
+        case width
+        when 16
+          bytes << (value & 0xFF)
+          bytes << ((value >> 8) & 0xFF)
+        when 32
+          bytes << (value & 0xFF)
+          bytes << ((value >> 8) & 0xFF)
+          bytes << ((value >> 16) & 0xFF)
+          bytes << ((value >> 24) & 0xFF)
+        else
+          raise ArgumentError, "Unsupported instruction width: #{width}"
+        end
+      end
+
+      words = []
+      bytes.each_slice(4) do |chunk|
+        padded = chunk + [0] * (4 - chunk.length)
+        words << (padded[0] | (padded[1] << 8) | (padded[2] << 16) | (padded[3] << 24))
+      end
+      words
     end
 
     # Aliases for Ruby reserved words
@@ -454,6 +780,21 @@ module RHDL
       when 'sra' then self.class.sra(reg(args[0]), reg(args[1]), reg(args[2]))
       when 'or' then self.class.or(reg(args[0]), reg(args[1]), reg(args[2]))
       when 'and' then self.class.and(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'sh1add' then self.class.sh1add(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'sh2add' then self.class.sh2add(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'sh3add' then self.class.sh3add(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'andn' then self.class.andn(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'orn' then self.class.orn(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'xnor' then self.class.xnor(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'min' then self.class.min(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'max' then self.class.max(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'minu' then self.class.minu(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'maxu' then self.class.maxu(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'pack' then self.class.pack(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'packh' then self.class.packh(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'clmul' then self.class.clmul(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'clmulh' then self.class.clmulh(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'clmulr' then self.class.clmulr(reg(args[0]), reg(args[1]), reg(args[2]))
       when 'mul' then self.class.mul(reg(args[0]), reg(args[1]), reg(args[2]))
       when 'mulh' then self.class.mulh(reg(args[0]), reg(args[1]), reg(args[2]))
       when 'mulhsu' then self.class.mulhsu(reg(args[0]), reg(args[1]), reg(args[2]))
@@ -462,6 +803,11 @@ module RHDL
       when 'divu' then self.class.divu(reg(args[0]), reg(args[1]), reg(args[2]))
       when 'rem' then self.class.rem(reg(args[0]), reg(args[1]), reg(args[2]))
       when 'remu' then self.class.remu(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'vadd.vv' then self.class.vadd_vv(vreg(args[0]), vreg(args[1]), vreg(args[2]))
+      when 'vadd.vx' then self.class.vadd_vx(vreg(args[0]), vreg(args[1]), reg(args[2]))
+      when 'vmv.v.x' then self.class.vmv_v_x(vreg(args[0]), reg(args[1]))
+      when 'vmv.x.s' then self.class.vmv_x_s(reg(args[0]), vreg(args[1]))
+      when 'vmv.s.x' then self.class.vmv_s_x(vreg(args[0]), reg(args[1]))
       when 'lr.w' then self.class.lr_w(reg(args[0]), reg(args[1]))
       when 'sc.w' then self.class.sc_w(reg(args[0]), reg(args[1]), reg(args[2]))
       when 'amoswap.w' then self.class.amoswap_w(reg(args[0]), reg(args[1]), reg(args[2]))
@@ -473,6 +819,14 @@ module RHDL
       when 'amomax.w' then self.class.amomax_w(reg(args[0]), reg(args[1]), reg(args[2]))
       when 'amominu.w' then self.class.amominu_w(reg(args[0]), reg(args[1]), reg(args[2]))
       when 'amomaxu.w' then self.class.amomaxu_w(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'amocas.w' then self.class.amocas_w(reg(args[0]), reg(args[1]), reg(args[2]))
+      when 'prefetch.i' then self.class.prefetch_i(reg(args[1]), imm(args[0]))
+      when 'prefetch.r' then self.class.prefetch_r(reg(args[1]), imm(args[0]))
+      when 'prefetch.w' then self.class.prefetch_w(reg(args[1]), imm(args[0]))
+      when 'cbo.inval' then self.class.cbo_inval(reg(args[1]), imm(args[0]))
+      when 'cbo.clean' then self.class.cbo_clean(reg(args[1]), imm(args[0]))
+      when 'cbo.flush' then self.class.cbo_flush(reg(args[1]), imm(args[0]))
+      when 'cbo.zero' then self.class.cbo_zero(reg(args[1]), imm(args[0]))
 
       # I-type arithmetic
       when 'addi' then self.class.addi(reg(args[0]), reg(args[1]), imm(args[2]))
@@ -491,11 +845,15 @@ module RHDL
       when 'lw' then self.class.lw(reg(args[0]), reg(args[2]), imm(args[1]))
       when 'lbu' then self.class.lbu(reg(args[0]), reg(args[2]), imm(args[1]))
       when 'lhu' then self.class.lhu(reg(args[0]), reg(args[2]), imm(args[1]))
+      when 'flw' then self.class.flw(freg(args[0]), reg(args[2]), imm(args[1]))
 
       # Store
       when 'sb' then self.class.sb(reg(args[0]), reg(args[2]), imm(args[1]))
       when 'sh' then self.class.sh(reg(args[0]), reg(args[2]), imm(args[1]))
       when 'sw' then self.class.sw(reg(args[0]), reg(args[2]), imm(args[1]))
+      when 'fsw' then self.class.fsw(freg(args[0]), reg(args[2]), imm(args[1]))
+      when 'fmv.x.w' then self.class.fmv_x_w(reg(args[0]), freg(args[1]))
+      when 'fmv.w.x' then self.class.fmv_w_x(freg(args[0]), reg(args[1]))
 
       # Branch
       when 'beq' then self.class.beq(reg(args[0]), reg(args[1]), label_offset(args[2]))
@@ -512,11 +870,14 @@ module RHDL
       # System / memory-ordering
       when 'fence' then self.class.fence
       when 'fence.i' then self.class.fence_i
+      when 'vsetvli' then self.class.vsetvli(reg(args[0]), reg(args[1]), imm(args[2]))
       when 'ecall' then self.class.ecall
       when 'ebreak' then self.class.ebreak
       when 'mret' then self.class.mret
       when 'sret' then self.class.sret
       when 'wfi' then self.class.wfi
+      when 'wrs.nto' then self.class.wrs_nto
+      when 'wrs.sto' then self.class.wrs_sto
       when 'sfence.vma' then self.class.sfence_vma(reg(args[0] || 'x0'), reg(args[1] || 'x0'))
       when 'csrrw' then self.class.csrrw(reg(args[0]), imm(args[1]), reg(args[2]))
       when 'csrrs' then self.class.csrrs(reg(args[0]), imm(args[1]), reg(args[2]))
@@ -555,6 +916,14 @@ module RHDL
 
     def reg(name)
       REGISTERS[name.downcase] || raise("Unknown register: #{name}")
+    end
+
+    def freg(name)
+      FREGISTERS[name.downcase] || raise("Unknown fp register: #{name}")
+    end
+
+    def vreg(name)
+      VREGISTERS[name.downcase] || raise("Unknown vector register: #{name}")
     end
 
     def imm(value)
@@ -618,6 +987,272 @@ module RHDL
     def self.encode_amo_type(rd, rs1, rs2, funct5, aq: 0, rl: 0)
       funct7 = ((funct5 & 0x1F) << 2) | ((aq & 0x1) << 1) | (rl & 0x1)
       encode_r_type(rd, rs1, rs2, Funct3::WORD, funct7, Opcode::AMO)
+    end
+
+    def self.encode_v_type(vd, rs1_or_vs1, vs2, funct3, funct6, vm: 1)
+      (((funct6 & 0x3F) << 26) |
+        ((vm & 0x1) << 25) |
+        ((vs2 & 0x1F) << 20) |
+        ((rs1_or_vs1 & 0x1F) << 15) |
+        ((funct3 & 0x7) << 12) |
+        ((vd & 0x1F) << 7) |
+        Opcode::OP_V)
+    end
+
+    def self.normalize_mixed_entry(inst)
+      if inst.is_a?(Array)
+        raise ArgumentError, "Mixed-width entry must be [value, width], got: #{inst.inspect}" unless inst.length == 2
+
+        [inst[0].to_i, inst[1].to_i]
+      else
+        [inst.to_i, 32]
+      end
+    end
+
+    def self.encode_c_ci(funct3, rd, imm)
+      rd &= 0x1F
+      raise ArgumentError, "c immediate out of range: #{imm}" unless imm >= -32 && imm <= 31
+
+      imm6 = imm & 0x3F
+      ((funct3 & 0x7) << 13) |
+        (((imm6 >> 5) & 0x1) << 12) |
+        (rd << 7) |
+        ((imm6 & 0x1F) << 2) |
+        0b01
+    end
+
+    def self.encode_c_prime_reg(reg)
+      reg &= 0x1F
+      raise ArgumentError, 'RV32C prime register must be x8..x15' unless reg >= 8 && reg <= 15
+
+      reg - 8
+    end
+
+    def self.encode_c_addi4spn(rd, imm)
+      raise ArgumentError, "c.addi4spn immediate must be in 4..1020 and 4-byte aligned: #{imm}" unless imm >= 4 && imm <= 1020 && (imm & 0x3).zero?
+
+      rdp = encode_c_prime_reg(rd)
+      uimm = imm & 0x3FF
+
+      (0b000 << 13) |
+        (((uimm >> 5) & 0x1) << 12) |
+        (((uimm >> 4) & 0x1) << 11) |
+        (((uimm >> 9) & 0x1) << 10) |
+        (((uimm >> 8) & 0x1) << 9) |
+        (((uimm >> 7) & 0x1) << 8) |
+        (((uimm >> 6) & 0x1) << 7) |
+        (((uimm >> 2) & 0x1) << 6) |
+        (((uimm >> 3) & 0x1) << 5) |
+        (rdp << 2) |
+        0b00
+    end
+
+    def self.encode_c_lui(rd, imm)
+      rd &= 0x1F
+      raise ArgumentError, 'c.lui rd must be non-zero and not x2' if rd.zero? || rd == 2
+      raise ArgumentError, "c.lui immediate must be in [-32, -1] or [1, 31]: #{imm}" if imm < -32 || imm > 31 || imm.zero?
+
+      imm6 = imm & 0x3F
+      (0b011 << 13) |
+        (((imm6 >> 5) & 0x1) << 12) |
+        (rd << 7) |
+        ((imm6 & 0x1F) << 2) |
+        0b01
+    end
+
+    def self.encode_c_addi16sp(imm)
+      raise ArgumentError, "c.addi16sp immediate must be in [-512, 496], non-zero, and 16-byte aligned: #{imm}" unless imm >= -512 && imm <= 496 && !imm.zero? && (imm & 0xF).zero?
+
+      uimm = imm & 0x3FF
+      (0b011 << 13) |
+        (((uimm >> 9) & 0x1) << 12) |
+        (2 << 7) |
+        (((uimm >> 4) & 0x1) << 6) |
+        (((uimm >> 6) & 0x1) << 5) |
+        (((uimm >> 8) & 0x1) << 4) |
+        (((uimm >> 7) & 0x1) << 3) |
+        (((uimm >> 5) & 0x1) << 2) |
+        0b01
+    end
+
+    def self.encode_c_slli(rd, shamt)
+      rd &= 0x1F
+      raise ArgumentError, 'c.slli rd must be non-zero' if rd.zero?
+      raise ArgumentError, "c.slli shamt must be in 1..31: #{shamt}" unless shamt >= 1 && shamt <= 31
+
+      (0b000 << 13) |
+        (rd << 7) |
+        ((shamt & 0x1F) << 2) |
+        0b10
+    end
+
+    def self.encode_c_srli(rd, shamt)
+      rdp = encode_c_prime_reg(rd)
+      raise ArgumentError, "c.srli shamt must be in 1..31: #{shamt}" unless shamt >= 1 && shamt <= 31
+
+      (0b100 << 13) |
+        (0b00 << 10) |
+        (rdp << 7) |
+        ((shamt & 0x1F) << 2) |
+        0b01
+    end
+
+    def self.encode_c_srai(rd, shamt)
+      rdp = encode_c_prime_reg(rd)
+      raise ArgumentError, "c.srai shamt must be in 1..31: #{shamt}" unless shamt >= 1 && shamt <= 31
+
+      (0b100 << 13) |
+        (0b01 << 10) |
+        (rdp << 7) |
+        ((shamt & 0x1F) << 2) |
+        0b01
+    end
+
+    def self.encode_c_andi(rd, imm)
+      rdp = encode_c_prime_reg(rd)
+      raise ArgumentError, "c.andi immediate must be in [-32, 31]: #{imm}" unless imm >= -32 && imm <= 31
+
+      imm6 = imm & 0x3F
+      (0b100 << 13) |
+        (((imm6 >> 5) & 0x1) << 12) |
+        (0b10 << 10) |
+        (rdp << 7) |
+        ((imm6 & 0x1F) << 2) |
+        0b01
+    end
+
+    def self.encode_c_ca(funct2, rd, rs2)
+      rdp = encode_c_prime_reg(rd)
+      rs2p = encode_c_prime_reg(rs2)
+
+      (0b100 << 13) |
+        (0b11 << 10) |
+        (rdp << 7) |
+        ((funct2 & 0x3) << 5) |
+        (rs2p << 2) |
+        0b01
+    end
+
+    def self.encode_c_lwsp(rd, offset)
+      rd &= 0x1F
+      raise ArgumentError, 'c.lwsp rd must be non-zero' if rd.zero?
+      raise ArgumentError, "c.lwsp offset must be 0..252 and 4-byte aligned: #{offset}" unless offset >= 0 && offset <= 252 && (offset & 0x3).zero?
+
+      uimm = offset & 0xFF
+      (0b010 << 13) |
+        (((uimm >> 5) & 0x1) << 12) |
+        (rd << 7) |
+        (((uimm >> 2) & 0x7) << 4) |
+        (((uimm >> 6) & 0x3) << 2) |
+        0b10
+    end
+
+    def self.encode_c_swsp(rs2, offset)
+      rs2 &= 0x1F
+      raise ArgumentError, "c.swsp offset must be 0..252 and 4-byte aligned: #{offset}" unless offset >= 0 && offset <= 252 && (offset & 0x3).zero?
+
+      uimm = offset & 0xFF
+      (0b110 << 13) |
+        (((uimm >> 2) & 0xF) << 9) |
+        (((uimm >> 6) & 0x3) << 7) |
+        (rs2 << 2) |
+        0b10
+    end
+
+    def self.encode_c_lw(rs1, rd, offset)
+      raise ArgumentError, "c.lw offset must be 0..252 and 4-byte aligned: #{offset}" unless offset >= 0 && offset <= 252 && (offset & 0x3).zero?
+
+      rs1p = encode_c_prime_reg(rs1)
+      rdp = encode_c_prime_reg(rd)
+      uimm = offset & 0xFF
+      bit5 = (uimm >> 5) & 0x1
+      bits4_2 = (uimm >> 2) & 0x7
+      bit6 = (uimm >> 6) & 0x1
+
+      (0b010 << 13) |
+        (bit5 << 5) |
+        (bits4_2 << 10) |
+        (bit6 << 6) |
+        (rs1p << 7) |
+        (rdp << 2) |
+        0b00
+    end
+
+    def self.encode_c_sw(rs1, rs2, offset)
+      raise ArgumentError, "c.sw offset must be 0..252 and 4-byte aligned: #{offset}" unless offset >= 0 && offset <= 252 && (offset & 0x3).zero?
+
+      rs1p = encode_c_prime_reg(rs1)
+      rs2p = encode_c_prime_reg(rs2)
+      uimm = offset & 0xFF
+      bit5 = (uimm >> 5) & 0x1
+      bits4_2 = (uimm >> 2) & 0x7
+      bit6 = (uimm >> 6) & 0x1
+
+      (0b110 << 13) |
+        (bit5 << 5) |
+        (bits4_2 << 10) |
+        (bit6 << 6) |
+        (rs1p << 7) |
+        (rs2p << 2) |
+        0b00
+    end
+
+    def self.encode_c_j(funct3, offset)
+      raise ArgumentError, "c.j offset must be even and within [-2048, 2046]: #{offset}" unless offset.even? && offset >= -2048 && offset <= 2046
+
+      imm = offset & 0xFFF
+      b11 = (imm >> 11) & 0x1
+      b10 = (imm >> 10) & 0x1
+      b9 = (imm >> 9) & 0x1
+      b8 = (imm >> 8) & 0x1
+      b7 = (imm >> 7) & 0x1
+      b6 = (imm >> 6) & 0x1
+      b5 = (imm >> 5) & 0x1
+      b4 = (imm >> 4) & 0x1
+      b3 = (imm >> 3) & 0x1
+      b2 = (imm >> 2) & 0x1
+      b1 = (imm >> 1) & 0x1
+
+      (funct3 << 13) |
+        (b11 << 12) |
+        (b4 << 11) |
+        (b9 << 10) |
+        (b8 << 9) |
+        (b10 << 8) |
+        (b6 << 7) |
+        (b7 << 6) |
+        (b3 << 5) |
+        (b2 << 4) |
+        (b1 << 3) |
+        (b5 << 2) |
+        0b01
+    end
+
+    def self.encode_c_b(funct3, rs1, offset)
+      raise ArgumentError, "c branch offset must be even and within [-256, 254]: #{offset}" unless offset.even? && offset >= -256 && offset <= 254
+
+      rs1p = encode_c_prime_reg(rs1)
+      imm = offset & 0x1FF
+      b8 = (imm >> 8) & 0x1
+      b7 = (imm >> 7) & 0x1
+      b6 = (imm >> 6) & 0x1
+      b5 = (imm >> 5) & 0x1
+      b4 = (imm >> 4) & 0x1
+      b3 = (imm >> 3) & 0x1
+      b2 = (imm >> 2) & 0x1
+      b1 = (imm >> 1) & 0x1
+
+      (funct3 << 13) |
+        (b8 << 12) |
+        (b4 << 11) |
+        (b3 << 10) |
+        (rs1p << 7) |
+        (b7 << 6) |
+        (b6 << 5) |
+        (b2 << 4) |
+        (b1 << 3) |
+        (b5 << 2) |
+        0b01
     end
       end
     end

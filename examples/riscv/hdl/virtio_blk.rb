@@ -170,10 +170,15 @@ module RHDL
     end
 
     def queue_operational?
+      modern_queue_ready = @queue_ready == 1 &&
+                           @queue_desc != 0 &&
+                           @queue_driver != 0 &&
+                           @queue_device != 0
+      legacy_queue_ready = @queue_pfn != 0
       @queue_sel == 0 &&
-        @queue_ready == 1 &&
         @queue_num > 0 &&
-        (@status & STATUS_DRIVER_OK) != 0
+        (@status & STATUS_DRIVER_OK) != 0 &&
+        (modern_queue_ready || legacy_queue_ready)
     end
 
     def irq_asserted?
@@ -182,6 +187,31 @@ module RHDL
 
     def capacity_sectors
       @disk.length / SECTOR_BYTES
+    end
+
+    def legacy_page_size
+      @guest_page_size == 0 ? 4096 : @guest_page_size
+    end
+
+    def queue_desc_addr
+      return @queue_desc if @queue_desc != 0
+      return (@queue_pfn * legacy_page_size) & 0xFFFF_FFFF_FFFF_FFFF if @queue_pfn != 0
+
+      0
+    end
+
+    def queue_driver_addr
+      return @queue_driver if @queue_driver != 0
+      return (queue_desc_addr + (@queue_num * 16)) & 0xFFFF_FFFF_FFFF_FFFF if @queue_pfn != 0
+
+      0
+    end
+
+    def queue_device_addr
+      return @queue_device if @queue_device != 0
+      return legacy_queue_device_addr if @queue_pfn != 0
+
+      0
     end
 
     def read_register(addr)
@@ -284,15 +314,18 @@ module RHDL
       guard = 0
       max_guard = [@queue_num * 4, 16].max
 
-      avail_idx = mem_read_u16(mem, @queue_driver + 2)
+      queue_driver = queue_driver_addr
+      return false if queue_driver == 0
+
+      avail_idx = mem_read_u16(mem, queue_driver + 2)
       while @last_avail_idx != avail_idx && guard < max_guard
         ring_slot = @last_avail_idx % @queue_num
-        head_idx = mem_read_u16(mem, @queue_driver + 4 + (ring_slot * 2))
+        head_idx = mem_read_u16(mem, queue_driver + 4 + (ring_slot * 2))
         process_one_request!(mem, head_idx)
         @last_avail_idx = (@last_avail_idx + 1) & 0xFFFF
         processed_any = true
         guard += 1
-        avail_idx = mem_read_u16(mem, @queue_driver + 2)
+        avail_idx = mem_read_u16(mem, queue_driver + 2)
       end
 
       processed_any
@@ -348,19 +381,25 @@ module RHDL
     end
 
     def push_used!(mem, head_idx, used_len)
-      used_idx = mem_read_u16(mem, @queue_device + 2)
+      queue_device = queue_device_addr
+      return if queue_device == 0
+
+      used_idx = mem_read_u16(mem, queue_device + 2)
       slot = used_idx % @queue_num
-      elem_addr = @queue_device + 4 + (slot * 8)
+      elem_addr = queue_device + 4 + (slot * 8)
       mem_write_u32(mem, elem_addr + 0, head_idx & 0xFFFF_FFFF)
       mem_write_u32(mem, elem_addr + 4, used_len & 0xFFFF_FFFF)
-      mem_write_u16(mem, @queue_device + 2, (used_idx + 1) & 0xFFFF)
+      mem_write_u16(mem, queue_device + 2, (used_idx + 1) & 0xFFFF)
     end
 
     def read_desc(mem, desc_idx)
       idx = desc_idx & 0xFFFF
       return nil if @queue_num <= 0 || idx >= @queue_num
 
-      base = @queue_desc + (idx * 16)
+      queue_desc = queue_desc_addr
+      return nil if queue_desc == 0
+
+      base = queue_desc + (idx * 16)
       {
         addr: mem_read_u64(mem, base + 0),
         len: mem_read_u32(mem, base + 8),
@@ -400,6 +439,25 @@ module RHDL
       lo = mem_read_u32(mem, addr)
       hi = mem_read_u32(mem, addr + 4)
       ((hi << 32) | lo) & 0xFFFF_FFFF_FFFF_FFFF
+    end
+
+    def legacy_queue_device_addr
+      avail_base = queue_driver_addr
+      avail_bytes = 6 + (@queue_num * 2)
+      align = @queue_align == 0 ? 4096 : @queue_align
+      align_up(avail_base + avail_bytes, align)
+    end
+
+    def align_up(value, align)
+      return value if align <= 1
+
+      if (align & (align - 1)).zero?
+        mask = align - 1
+        (value + mask) & ~mask
+      else
+        rem = value % align
+        rem == 0 ? value : (value + align - rem)
+      end
     end
 
       end
