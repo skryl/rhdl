@@ -395,14 +395,8 @@ RSpec.describe 'GameBoy RHDL Implementation' do
   end
 
   describe 'Verilator Runner' do
-    def verilator_available?
-      ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
-        File.executable?(File.join(path, 'verilator'))
-      end
-    end
-
     before do
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
       begin
         require_relative '../../../examples/gameboy/utilities/runners/verilator_runner'
       rescue LoadError => e
@@ -752,15 +746,9 @@ RSpec.describe 'GameBoy RHDL Implementation' do
     BOOT_ROM_COMPLETE_PC = 0x0100
     MAX_BOOT_CYCLES = 500_000  # Safety limit for boot ROM
 
-    def verilator_available?
-      ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
-        File.executable?(File.join(path, 'verilator'))
-      end
-    end
-
     before do
       skip 'pop.gb ROM not found' unless File.exist?(test_rom_path)
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
 
       begin
         require_relative '../../../examples/gameboy/utilities/runners/ir_runner'

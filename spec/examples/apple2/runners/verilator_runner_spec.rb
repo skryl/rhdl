@@ -6,19 +6,12 @@ require_relative '../../../../examples/apple2/hdl/apple2'
 require_relative '../../../../examples/apple2/utilities/renderers/braille_renderer'
 
 RSpec.describe 'VerilogRunner' do
-  # Only run tests if Verilator is available
-  def verilator_available?
-    ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
-      File.executable?(File.join(path, 'verilator'))
-    end
-  end
-
   # ROM and memory paths for Karateka tests
   ROM_PATH = File.expand_path('../../../../../examples/apple2/software/roms/appleiigo.rom', __FILE__)
   KARATEKA_MEM_PATH = File.expand_path('../../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__)
 
   before(:all) do
-    if verilator_available?
+    if HdlToolchain.verilator_available?
       require_relative '../../../../examples/apple2/utilities/runners/verilator_runner'
     end
     @rom_available = File.exist?(ROM_PATH)
@@ -68,12 +61,12 @@ RSpec.describe 'VerilogRunner' do
 
   describe 'class definition' do
     it 'defines VerilogRunner in RHDL::Apple2 namespace' do
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
       expect(defined?(RHDL::Examples::Apple2::VerilogRunner)).to eq('constant')
     end
 
     it 'has the required public interface methods' do
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
 
       required_methods = %i[
         load_rom load_ram load_disk reset run_steps run_cpu_cycle
@@ -95,7 +88,7 @@ RSpec.describe 'VerilogRunner' do
 
   describe 'interface compatibility' do
     it 'simulator_type returns :hdl_verilator' do
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
 
       # Mock the runner without actually initializing Verilator
       runner_class = RHDL::Examples::Apple2::VerilogRunner
@@ -104,7 +97,7 @@ RSpec.describe 'VerilogRunner' do
     end
 
     it 'native? returns true' do
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
 
       runner_class = RHDL::Examples::Apple2::VerilogRunner
       expect(runner_class.instance_method(:native?).source_location).not_to be_nil
@@ -113,55 +106,55 @@ RSpec.describe 'VerilogRunner' do
 
   describe 'constants' do
     it 'defines TEXT_PAGE1_START constant' do
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
       expect(RHDL::Examples::Apple2::VerilogRunner::TEXT_PAGE1_START).to eq(0x0400)
     end
 
     it 'defines TEXT_PAGE1_END constant' do
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
       expect(RHDL::Examples::Apple2::VerilogRunner::TEXT_PAGE1_END).to eq(0x07FF)
     end
 
     it 'defines HIRES_PAGE1_START constant' do
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
       expect(RHDL::Examples::Apple2::VerilogRunner::HIRES_PAGE1_START).to eq(0x2000)
     end
 
     it 'defines HIRES_PAGE1_END constant' do
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
       expect(RHDL::Examples::Apple2::VerilogRunner::HIRES_PAGE1_END).to eq(0x3FFF)
     end
 
     it 'defines HIRES_WIDTH constant' do
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
       expect(RHDL::Examples::Apple2::VerilogRunner::HIRES_WIDTH).to eq(280)
     end
 
     it 'defines HIRES_HEIGHT constant' do
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
       expect(RHDL::Examples::Apple2::VerilogRunner::HIRES_HEIGHT).to eq(192)
     end
 
     it 'defines BUILD_DIR constant' do
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
       expect(RHDL::Examples::Apple2::VerilogRunner::BUILD_DIR).to include('.verilator_build')
     end
   end
 
   describe 'DiskControllerStub' do
     it 'defines nested DiskControllerStub class' do
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
       expect(defined?(RHDL::Examples::Apple2::VerilogRunner::DiskControllerStub)).to eq('constant')
     end
 
     it 'DiskControllerStub has track method returning 0' do
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
       stub = RHDL::Examples::Apple2::VerilogRunner::DiskControllerStub.new
       expect(stub.track).to eq(0)
     end
 
     it 'DiskControllerStub has motor_on method returning false' do
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
       stub = RHDL::Examples::Apple2::VerilogRunner::DiskControllerStub.new
       expect(stub.motor_on).to eq(false)
     end
@@ -173,7 +166,7 @@ RSpec.describe 'VerilogRunner' do
     # Run with: rspec --tag slow
 
     it 'can be instantiated when Verilator is available' do
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
       skip 'Slow test - run with --tag slow' unless ENV['RUN_SLOW_TESTS']
 
       expect { RHDL::Examples::Apple2::VerilogRunner.new(sub_cycles: 14) }.not_to raise_error
@@ -183,7 +176,7 @@ RSpec.describe 'VerilogRunner' do
   # Karateka-based Verilator tests (moved from karateka_divergence_spec.rb)
   describe 'Karateka simulation' do
     it 'verifies Verilator runner can be initialized and has correct interface', timeout: 120 do
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
       skip 'AppleIIgo ROM not found' unless @rom_available
       skip 'Karateka memory dump not found' unless @karateka_available
 
@@ -236,7 +229,7 @@ RSpec.describe 'VerilogRunner' do
     end
 
     it 'verifies Verilator simulation produces expected PC patterns', timeout: 300 do
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
       skip 'AppleIIgo ROM not found' unless @rom_available
       skip 'Karateka memory dump not found' unless @karateka_available
 

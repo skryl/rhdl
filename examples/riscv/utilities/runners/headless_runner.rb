@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require_relative '../../hdl/ir_harness'
-require_relative '../../hdl/pipeline/ir_harness'
+require_relative 'ruby_runner'
+require_relative 'ir_runner'
 require_relative '../assembler'
 
 module RHDL
@@ -33,10 +33,31 @@ module RHDL
           @effective_mode = normalize_mode(@mode)
           @sim_backend = (sim || default_backend(@mode)).to_sym
           @core = normalize_core(core)
-
-          backend, allow_fallback = map_backend(@effective_mode, @sim_backend)
           resolved_mem_size = mem_size || DEFAULT_MEM_SIZE
-          @cpu = build_cpu(core: @core, mem_size: resolved_mem_size, backend: backend, allow_fallback: allow_fallback)
+
+          @cpu = case @effective_mode
+                 when :ruby
+                   RubyRunner.new(core: @core, mem_size: resolved_mem_size)
+                 when :ir
+                   backend, allow_fallback = map_backend(@effective_mode, @sim_backend)
+                   IrRunner.new(core: @core, mem_size: resolved_mem_size, backend: backend, allow_fallback: allow_fallback)
+                 when :verilog
+                   if @core != :single
+                     warn "Verilog mode only supports single-cycle core; overriding core=#{@core} to single."
+                     @core = :single
+                   end
+                   require_relative 'verilator_runner'
+                   VerilogRunner.new(mem_size: resolved_mem_size)
+                 when :circt
+                   if @core != :single
+                     warn "CIRCT mode only supports single-cycle core; overriding core=#{@core} to single."
+                     @core = :single
+                   end
+                   require_relative 'arcilator_runner'
+                   ArcilatorRunner.new(mem_size: resolved_mem_size)
+                 else
+                   raise ArgumentError, "Unsupported mode #{@effective_mode.inspect}"
+                 end
         end
 
         def native?
@@ -109,8 +130,8 @@ module RHDL
         end
 
         def load_xv6(kernel:, fs:, pc: XV6_RESET_PC)
-          unless native? && @cpu.sim.runner_kind == :riscv
-            raise 'xv6 mode requires native RISC-V IR runner support (build native backends first).'
+          unless xv6_capable?
+            raise 'xv6 mode requires native RISC-V IR runner or HDL backend (build native backends first).'
           end
 
           kernel_bytes = File.binread(kernel)
@@ -218,13 +239,13 @@ module RHDL
 
         def normalize_mode(mode)
           case mode
-          when :ruby, :ir
+          when :ruby, :ir, :verilog, :circt
             mode
-          when :netlist, :verilog
+          when :netlist
             warn "Mode #{mode.inspect} is not implemented for RISC-V yet; falling back to :ir."
             :ir
           else
-            raise ArgumentError, "Unsupported mode #{mode.inspect}. Use ruby, ir, netlist, or verilog."
+            raise ArgumentError, "Unsupported mode #{mode.inspect}. Use ruby, ir, netlist, verilog, or circt."
           end
         end
 
@@ -235,21 +256,17 @@ module RHDL
           raise ArgumentError, "Unsupported core #{core.inspect}. Use single or pipeline."
         end
 
-        def build_cpu(core:, mem_size:, backend:, allow_fallback:)
-          case core
-          when :single
-            IRHarness.new(mem_size: mem_size, backend: backend, allow_fallback: allow_fallback)
-          when :pipeline
-            Pipeline::IRHarness.new('riscv_pipeline_ir', mem_size: mem_size, backend: backend, allow_fallback: allow_fallback)
-          else
-            raise ArgumentError, "Unsupported core #{core.inspect}. Use single or pipeline."
-          end
-        end
-
         def current_pc
           @cpu.read_pc
         rescue StandardError
           nil
+        end
+
+        def xv6_capable?
+          return true if %i[verilog circt].include?(@effective_mode)
+          return true if native? && @cpu.respond_to?(:sim) && @cpu.sim.respond_to?(:runner_kind) && @cpu.sim.runner_kind == :riscv
+
+          false
         end
 
         def supports_runner_reset_vector?
@@ -281,15 +298,15 @@ module RHDL
             :ruby
           when :ir, :netlist
             :compile
-          when :verilog
+          when :verilog, :circt
             :ruby
           else
-            raise "Unknown mode: #{mode}. Valid modes: ruby, ir, netlist, verilog"
+            raise "Unknown mode: #{mode}. Valid modes: ruby, ir, netlist, verilog, circt"
           end
         end
 
         def load_instruction_bytes(bytes, base_addr)
-          if native? && @cpu.sim.respond_to?(:runner_load_rom) && !@force_word_instruction_load
+          if native? && @cpu.respond_to?(:sim) && @cpu.sim.respond_to?(:runner_load_rom) && !@force_word_instruction_load
             @cpu.sim.runner_load_rom(bytes, base_addr)
           else
             words = bytes_to_words(bytes)
@@ -299,7 +316,7 @@ module RHDL
 
         def load_data_bytes(bytes, base_addr)
           payload = bytes.is_a?(String) ? bytes : bytes.pack('C*')
-          if native? && @cpu.sim.respond_to?(:runner_write_memory)
+          if native? && @cpu.respond_to?(:sim) && @cpu.sim.respond_to?(:runner_write_memory)
             @cpu.sim.runner_write_memory(base_addr.to_i, payload, mapped: false)
           else
             words = bytes_to_words(payload)

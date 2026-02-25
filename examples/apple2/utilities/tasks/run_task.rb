@@ -11,7 +11,7 @@ module RHDL
     module Apple2
       module Tasks
       # Apple II Run task
-      # Supports Ruby, IR, netlist, and Verilog simulation modes
+      # Supports Ruby, IR, netlist, Verilog, and Arcilator simulation modes
       class RunTask
         SCREEN_ROWS = 24
         SCREEN_COLS = 40
@@ -225,6 +225,7 @@ module RHDL
                       when :ir then "IR (native backend)"
                       when :netlist then "Netlist (gate-level)"
                       when :verilog then "Verilog (Verilator RTL)"
+                      when :circt then "CIRCT (Arcilator RTL)"
                       else @sim_mode.to_s
                       end
           puts "Starting Apple II emulator in #{mode_name} mode..."

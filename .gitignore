@@ -45,6 +45,12 @@ lib/rhdl/codegen/ir/sim/ir_compiler/*.json
 .verilator_build/
 .verilator_build_*/
 
+# Arcilator build artifacts
+.arcilator_build/
+
+# HDL build artifacts (Verilator/Arcilator for example systems)
+.hdl_build/
+
 # Web simulator generated artifacts
 web/assets/fixtures/*
 

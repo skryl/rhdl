@@ -24,6 +24,8 @@ module RHDL
             benchmark_mos6502
           when :gameboy
             benchmark_gameboy
+          when :riscv
+            benchmark_riscv
           else
             benchmark_gates
           end
@@ -479,7 +481,8 @@ module RHDL
             { name: 'Interpreter', backend: :interpreter, available_const: :IR_INTERPRETER_AVAILABLE },
             { name: 'JIT', backend: :jit, available_const: :IR_JIT_AVAILABLE },
             { name: 'Compiler', backend: :compiler, available_const: :IR_COMPILER_AVAILABLE },
-            { name: 'Verilator', backend: :verilator }
+            { name: 'Verilator', backend: :verilator },
+            { name: 'Arcilator', backend: :arcilator }
           ]
           runners.select! { |runner| runner_filter.include?(runner[:backend]) } unless runner_filter.empty?
 
@@ -498,6 +501,8 @@ module RHDL
               available = RHDL::Codegen::IR.const_get(runner[:available_const]) rescue false
             elsif runner[:backend] == :verilator
               available = verilator_available?
+            elsif runner[:backend] == :arcilator
+              available = arcilator_available?
             else
               available = false
             end
@@ -511,13 +516,14 @@ module RHDL
             print "\n#{runner[:name]}: "
             $stdout.flush
 
+            is_hdl_runner = runner[:backend] == :verilator || runner[:backend] == :arcilator
+
             begin
               # Create simulator
               print "initializing... "
               $stdout.flush
               init_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
-              is_verilator = runner[:backend] == :verilator
               sim = case runner[:backend]
               when :interpreter
                 RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :interpreter)
@@ -528,6 +534,9 @@ module RHDL
               when :verilator
                 require_relative '../../../../examples/apple2/utilities/runners/verilator_runner'
                 RHDL::Examples::Apple2::VerilogRunner.new(sub_cycles: 14)
+              when :arcilator
+                require_relative '../../../../examples/apple2/utilities/runners/arcilator_runner'
+                RHDL::Examples::Apple2::ArcilatorRunner.new(sub_cycles: 14)
               end
 
               init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
@@ -535,7 +544,7 @@ module RHDL
               # Load ROM and RAM
               print "loading... "
               $stdout.flush
-              if is_verilator
+              if is_hdl_runner
                 sim.load_rom(karateka_rom, base_addr: 0xD000)
                 sim.load_ram(karateka_mem.first(48 * 1024), base_addr: 0)
               else
@@ -544,7 +553,7 @@ module RHDL
               end
 
               # Reset
-              if is_verilator
+              if is_hdl_runner
                 sim.reset
               else
                 sim.poke('reset', 1)
@@ -553,7 +562,7 @@ module RHDL
               end
 
               # Warmup - run a few cycles to get past reset
-              if is_verilator
+              if is_hdl_runner
                 sim.run_steps(3)
               else
                 sim.runner_run_cycles(3, 0, false)
@@ -563,7 +572,7 @@ module RHDL
               print "running #{cycles} cycles... "
               $stdout.flush
               run_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-              if is_verilator
+              if is_hdl_runner
                 sim.run_steps(cycles)
               else
                 sim.runner_run_cycles(cycles, 0, false)
@@ -571,7 +580,7 @@ module RHDL
               run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
 
               cycles_per_sec = cycles / run_elapsed
-              pc = is_verilator ? sim.pc : sim.peek('cpu__pc_reg')
+              pc = is_hdl_runner ? sim.pc : sim.peek('cpu__pc_reg')
 
               puts "done"
               puts "  Init time: #{format('%.3f', init_elapsed)}s"
@@ -754,6 +763,124 @@ module RHDL
           end
         end
 
+        # Benchmark RISC-V single-cycle CPU running xv6 boot across IR/Verilator/Arcilator
+        def benchmark_riscv
+          kernel_path = File.expand_path('../../../../examples/riscv/software/bin/kernel.bin', __dir__)
+          fs_path = File.expand_path('../../../../examples/riscv/software/bin/fs.img', __dir__)
+
+          unless File.exist?(kernel_path)
+            puts "Error: xv6 kernel not found at #{kernel_path}"
+            return
+          end
+
+          unless File.exist?(fs_path)
+            puts "Error: xv6 fs.img not found at #{fs_path}"
+            return
+          end
+
+          cycles = options[:cycles] || 100_000
+          runner_filter = (ENV['RHDL_BENCH_BACKENDS'] || '')
+            .split(',')
+            .map { |name| name.strip.downcase.to_sym }
+            .reject(&:empty?)
+
+          puts_header("RISC-V Single-Cycle CPU Benchmark - xv6 Boot")
+          puts "Cycles per run: #{cycles}"
+          puts "Kernel: #{kernel_path}"
+          puts "Filesystem: #{fs_path}"
+          puts
+
+          require_relative '../../../../examples/riscv/utilities/runners/headless_runner'
+
+          runners = [
+            { name: 'IR Compiler', mode: :ir, sim: :compile, filter_key: :compiler },
+            { name: 'Verilator', mode: :verilog, sim: nil, filter_key: :verilator },
+            { name: 'CIRCT', mode: :circt, sim: nil, filter_key: :circt }
+          ]
+          runners.select! { |r| runner_filter.include?(r[:filter_key]) } unless runner_filter.empty?
+
+          results = []
+
+          runners.each do |runner_config|
+            # Check availability
+            available = case runner_config[:mode]
+                        when :ir
+                          begin
+                            require 'rhdl/codegen'
+                            RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+                          rescue LoadError, NameError
+                            false
+                          end
+                        when :verilog
+                          verilator_available?
+                        when :circt
+                          arcilator_available?
+                        end
+
+            unless available
+              puts "\n#{runner_config[:name]}: SKIPPED (not available)"
+              results << { name: runner_config[:name], status: :skipped }
+              next
+            end
+
+            print "\n#{runner_config[:name]}: "
+            $stdout.flush
+
+            begin
+              # Create HeadlessRunner
+              print "initializing... "
+              $stdout.flush
+              init_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+              runner_opts = { mode: runner_config[:mode], core: :single }
+              runner_opts[:sim] = runner_config[:sim] if runner_config[:sim]
+              runner = RHDL::Examples::RISCV::HeadlessRunner.new(**runner_opts)
+
+              init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
+
+              # Load xv6
+              print "loading xv6... "
+              $stdout.flush
+              runner.load_xv6(kernel: kernel_path, fs: fs_path)
+
+              # Warmup - run 100 cycles past reset
+              runner.run_steps(100)
+
+              # Benchmark
+              print "running #{cycles} cycles... "
+              $stdout.flush
+              run_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+              runner.run_steps(cycles)
+              run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
+
+              cycles_per_sec = cycles / run_elapsed
+              state = runner.cpu_state
+              pc = state[:pc]
+
+              puts "done"
+              puts "  Init time: #{format('%.3f', init_elapsed)}s"
+              puts "  Run time:  #{format('%.3f', run_elapsed)}s"
+              puts "  Final PC:  0x#{pc.to_s(16).upcase}"
+
+              results << {
+                name: runner_config[:name],
+                status: :success,
+                init_time: init_elapsed,
+                run_time: run_elapsed,
+                cycles_per_sec: cycles_per_sec,
+                final_pc: pc
+              }
+            rescue => e
+              puts "FAILED"
+              puts "  Error: #{e.message}"
+              puts "  #{e.backtrace.first(3).join("\n  ")}" if options[:verbose]
+              results << { name: runner_config[:name], status: :failed, error: e.message }
+            end
+          end
+
+          print_benchmark_summary(results, cycles)
+        end
+
         private
 
         def print_benchmark_summary(results, cycles)
@@ -799,6 +926,14 @@ module RHDL
         def verilator_available?
           ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
             File.executable?(File.join(path, 'verilator'))
+          end
+        end
+
+        def arcilator_available?
+          %w[firtool arcilator llc].all? do |cmd|
+            ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
+              File.executable?(File.join(path, cmd))
+            end
           end
         end
       end

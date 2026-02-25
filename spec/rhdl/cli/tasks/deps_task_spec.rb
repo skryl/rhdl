@@ -45,6 +45,18 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
 
         expect { task.run }.to output(/verilator/).to_stdout
       end
+
+      it 'shows arcilator tools in dependency check' do
+        task = described_class.new(check: true)
+
+        expect { task.run }.to output(/firtool/).to_stdout
+      end
+
+      it 'shows arcilator in dependency check' do
+        task = described_class.new(check: true)
+
+        expect { task.run }.to output(/arcilator/).to_stdout
+      end
     end
 
     context 'without check option (install)' do
@@ -56,11 +68,15 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
         allow(task).to receive(:command_available?).and_call_original
         allow(task).to receive(:command_available?).with('iverilog').and_return(true)
         allow(task).to receive(:command_available?).with('verilator').and_return(true)
+        allow(task).to receive(:command_available?).with('firtool').and_return(true)
+        allow(task).to receive(:command_available?).with('arcilator').and_return(true)
+        allow(task).to receive(:command_available?).with('llc').and_return(true)
 
         # Mock backtick operator for version queries
         allow(task).to receive(:`).and_call_original
         allow(task).to receive(:`).with('iverilog -V 2>&1').and_return("Icarus Verilog version 11.0 (stable)\n")
         allow(task).to receive(:`).with('verilator --version 2>&1').and_return("Verilator 4.038 2020-07-11\n")
+        allow(task).to receive(:`).with('firtool --version 2>&1').and_return("firtool-1.62.0\n")
       end
 
       it 'displays platform information' do
@@ -106,6 +122,18 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
       expect(output).to match(/verilator/)
       expect(output).to match(/\[(OK|OPTIONAL)\]/)
     end
+
+    it 'shows firtool status' do
+      output = capture_stdout { task.check_status }
+      expect(output).to match(/firtool/)
+      expect(output).to match(/\[(OK|OPTIONAL)\]/)
+    end
+
+    it 'shows arcilator status' do
+      output = capture_stdout { task.check_status }
+      expect(output).to match(/arcilator/)
+      expect(output).to match(/\[(OK|OPTIONAL)\]/)
+    end
   end
 
   describe '#install' do
@@ -117,11 +145,15 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
       allow(task).to receive(:command_available?).and_call_original
       allow(task).to receive(:command_available?).with('iverilog').and_return(true)
       allow(task).to receive(:command_available?).with('verilator').and_return(true)
+      allow(task).to receive(:command_available?).with('firtool').and_return(true)
+      allow(task).to receive(:command_available?).with('arcilator').and_return(true)
+      allow(task).to receive(:command_available?).with('llc').and_return(true)
 
       # Mock backtick operator for version queries
       allow(task).to receive(:`).and_call_original
       allow(task).to receive(:`).with('iverilog -V 2>&1').and_return("Icarus Verilog version 11.0 (stable)\n")
       allow(task).to receive(:`).with('verilator --version 2>&1').and_return("Verilator 4.038 2020-07-11\n")
+      allow(task).to receive(:`).with('firtool --version 2>&1').and_return("firtool-1.62.0\n")
     end
 
     it 'displays installer header' do

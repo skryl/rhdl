@@ -355,6 +355,13 @@ namespace :bench do
     cycles = args[:cycles]&.to_i || 5_000_000
     RHDL::CLI::Tasks::BenchmarkTask.new(type: :ir, cycles: cycles).run
   end
+
+  desc "Benchmark RISC-V single-cycle CPU (IR Compiler, Verilator, Arcilator) with xv6"
+  task :riscv, [:cycles] do |_, args|
+    load_cli_tasks
+    cycles = args[:cycles]&.to_i || 100_000
+    RHDL::CLI::Tasks::BenchmarkTask.new(type: :riscv, cycles: cycles).run
+  end
 end
 
 desc "Run gate benchmark (alias for bench:gates)"

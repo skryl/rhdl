@@ -99,7 +99,8 @@ RSpec.describe RHDL::Examples::RISCV::Tasks::RunTask do
       { mode: :ir, sim: :jit, io: :mmap, debug: false },
       { mode: :ir, sim: :compile, io: :uart, debug: true },
       { mode: :netlist, sim: :compile, io: :mmap, debug: false },
-      { mode: :verilog, sim: :ruby, io: :mmap, debug: false }
+      { mode: :verilog, sim: :ruby, io: :mmap, debug: false },
+      { mode: :circt, sim: :ruby, io: :mmap, debug: false }
     ].freeze
 
     run_cases.each do |test_case|
@@ -243,7 +244,7 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
       expect(runner.mode).to eq(:ir)
       expect(runner.sim_backend).to eq(:compile)
       expect(runner.core).to eq(:single)
-      expect(runner.cpu).to be_a(RHDL::Examples::RISCV::IRHarness)
+      expect(runner.cpu).to be_a(RHDL::Examples::RISCV::IrRunner)
     rescue LoadError, RuntimeError => e
       skip "Default backend unavailable: #{e.message}"
     end
@@ -251,7 +252,7 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
     it 'builds pipeline harness when core is pipeline' do
       runner = described_class.new(core: :pipeline)
       expect(runner.core).to eq(:pipeline)
-      expect(runner.cpu).to be_a(RHDL::Examples::RISCV::Pipeline::IRHarness)
+      expect(runner.cpu).to be_a(RHDL::Examples::RISCV::IrRunner)
     rescue LoadError, RuntimeError => e
       skip "Pipeline backend unavailable: #{e.message}"
     end
@@ -273,12 +274,20 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
       skip "Backend unavailable for netlist fallback: #{e.message}"
     end
 
-    it 'falls back verilog mode to ir effective mode' do
-      runner = described_class.new(mode: :verilog, sim: :ruby)
+    it 'accepts verilog mode without fallback' do
+      runner = described_class.new(mode: :verilog)
       expect(runner.mode).to eq(:verilog)
-      expect(runner.effective_mode).to eq(:ir)
+      expect(runner.effective_mode).to eq(:verilog)
     rescue LoadError, RuntimeError => e
-      skip "Backend unavailable for verilog fallback: #{e.message}"
+      skip "Verilator backend unavailable: #{e.message}"
+    end
+
+    it 'accepts circt mode without fallback' do
+      runner = described_class.new(mode: :circt)
+      expect(runner.mode).to eq(:circt)
+      expect(runner.effective_mode).to eq(:circt)
+    rescue LoadError, RuntimeError => e
+      skip "Arcilator backend unavailable: #{e.message}"
     end
   end
 

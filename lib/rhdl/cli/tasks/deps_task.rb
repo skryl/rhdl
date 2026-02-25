@@ -67,6 +67,20 @@ module RHDL
             end
           end
 
+          # Check for arcilator (CIRCT tools)
+          puts
+          arcilator_tools = %w[firtool arcilator llc]
+          arcilator_available = arcilator_tools.all? { |cmd| command_available?(cmd) }
+
+          if arcilator_available
+            version = `firtool --version 2>&1`.lines.first&.strip
+            puts "[OK] arcilator is installed (firtool: #{version})"
+          else
+            missing = arcilator_tools.reject { |cmd| command_available?(cmd) }
+            puts "[MISSING] arcilator tools not fully installed (missing: #{missing.join(', ')})"
+            puts "  Install CIRCT tools (firtool, arcilator, llc) from https://github.com/llvm/circt"
+          end
+
           puts
           puts '=' * 50
           puts "Dependency check complete."
@@ -79,6 +93,8 @@ module RHDL
           deps = {
             'iverilog' => { cmd: 'iverilog -V', optional: true, desc: 'Icarus Verilog (for gate-level simulation tests)' },
             'verilator' => { cmd: 'verilator --version', optional: true, desc: 'Verilator (for high-performance Verilog simulation)' },
+            'firtool' => { cmd: 'firtool --version', optional: true, desc: 'CIRCT firtool (for Arcilator HDL simulation)' },
+            'arcilator' => { cmd: 'arcilator --version', optional: true, desc: 'CIRCT Arcilator (cycle-based HDL simulator)' },
             'dot' => { cmd: 'dot -V', optional: true, desc: 'Graphviz (for diagram rendering)' },
             'ruby' => { cmd: 'ruby --version', optional: false, desc: 'Ruby interpreter' },
             'bundler' => { cmd: 'bundle --version', optional: false, desc: 'Ruby Bundler' }

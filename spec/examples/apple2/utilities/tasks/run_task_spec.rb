@@ -304,6 +304,9 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
     before(:all) do
       @karateka_available = described_class.karateka_available?
       @verilator_available = described_class.verilator_available?
+      @arcilator_available = %w[firtool arcilator llc].all? { |cmd|
+        ENV['PATH'].split(File::PATH_SEPARATOR).any? { |path| File.executable?(File.join(path, cmd)) }
+      }
     end
 
     shared_examples 'karateka pc progression' do |mode, sim, cycles = KARATEKA_TEST_CYCLES|
@@ -404,6 +407,55 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
       end
     end
 
+    context 'with arcilator backend' do
+      it 'advances PC through game regions with arcilator' do
+        skip 'Karateka resources not available' unless @karateka_available
+        skip 'Arcilator not available' unless @arcilator_available
+
+        begin
+          runner = described_class.with_karateka(mode: :circt)
+        rescue LoadError, StandardError => e
+          skip "Arcilator backend not available: #{e.message}"
+        end
+
+        runner.reset
+
+        # Collect PC samples (fewer cycles for arcilator)
+        pc_samples = []
+        regions_visited = Set.new
+
+        # Run in batches
+        10.times do
+          runner.run_steps(1000)
+          pc = runner.cpu_state[:pc]
+          pc_samples << pc
+          regions_visited << pc_region(pc)
+        end
+
+        # Verify PC changed
+        unique_pcs = pc_samples.uniq
+        expect(unique_pcs.length).to be > 1,
+          "PC should change during execution, but stayed at #{pc_samples.first.to_s(16)}"
+
+        # Verify visited game regions
+        game_regions_visited = regions_visited & GAME_REGIONS.to_set
+        expect(game_regions_visited).not_to be_empty,
+          "Should visit game regions #{GAME_REGIONS}, but only visited #{regions_visited.to_a}"
+      end
+
+      it 'marks screen dirty on HIRES writes with arcilator' do
+        skip 'Arcilator not available' unless @arcilator_available
+
+        runner = described_class.new(mode: :circt)
+        runner.reset
+        runner.clear_screen_dirty
+
+        runner.write(0x2000, 0xAA)
+
+        expect(runner.screen_dirty?).to be(true)
+      end
+    end
+
     context 'cross-backend comparison', :slow do
       MIN_TOTAL_CYCLES = 20_000_000
 
@@ -439,13 +491,14 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
 
       def requested_backends
         raw = ENV['RUN_TASK_BACKENDS']
-        return { jit: true, compile: true, verilog: true } if raw.nil? || raw.strip.empty?
+        return { jit: true, compile: true, verilog: true, circt: true } if raw.nil? || raw.strip.empty?
 
         selected = raw.split(',').map { |token| token.strip.downcase }
         {
           jit: selected.include?('jit'),
           compile: selected.include?('compile'),
-          verilog: selected.include?('verilog')
+          verilog: selected.include?('verilog'),
+          circt: selected.include?('circt')
         }
       end
 
@@ -577,6 +630,16 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
           end
         end
 
+        # Add arcilator if available
+        if @arcilator_available && selected[:circt]
+          begin
+            runner = described_class.with_karateka(mode: :circt)
+            results['circt'] = collect_sequences(runner, samples: samples, interval: interval)
+          rescue LoadError, StandardError
+            # Skip if arcilator fails
+          end
+        end
+
         results
       end
 
@@ -649,6 +712,25 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
           "HIRES color output buffer diverged at sample #{first_diff}"
       end
 
+      it 'compile and arcilator have identical HIRES color output buffers' do
+        skip 'Karateka resources not available' unless @karateka_available
+        skip 'Arcilator not available' unless @arcilator_available
+
+        selected = requested_backends
+        skip 'Compile backend not selected' unless selected[:compile]
+        skip 'Arcilator backend not selected' unless selected[:circt]
+
+        compile_runner = described_class.with_karateka(mode: :ir, sim: :compile)
+        arcilator_runner = described_class.with_karateka(mode: :circt)
+
+        compile_signatures = collect_hires_color_signatures(compile_runner)
+        arcilator_signatures = collect_hires_color_signatures(arcilator_runner)
+
+        first_diff = compile_signatures.zip(arcilator_signatures).find_index { |a, b| a != b }
+        expect(first_diff).to be_nil,
+          "HIRES color output buffer diverged at sample #{first_diff}"
+      end
+
       it 'compile and verilog have identical text and HIRES memory signatures' do
         skip 'Karateka resources not available' unless @karateka_available
         skip 'Verilator not available' unless @verilator_available
@@ -666,6 +748,30 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
         first_diff = compile_signatures.zip(verilog_signatures).find_index { |a, b| a != b }
         diff_message = if first_diff
                          "text/HIRES memory diverged at sample #{first_diff}: compile=#{compile_signatures[first_diff]} verilog=#{verilog_signatures[first_diff]}"
+                       else
+                         'text/HIRES memory should match at every sample'
+                       end
+        expect(first_diff).to be_nil,
+          diff_message
+      end
+
+      it 'compile and arcilator have identical text and HIRES memory signatures' do
+        skip 'Karateka resources not available' unless @karateka_available
+        skip 'Arcilator not available' unless @arcilator_available
+
+        selected = requested_backends
+        skip 'Compile backend not selected' unless selected[:compile]
+        skip 'Arcilator backend not selected' unless selected[:circt]
+
+        compile_runner = described_class.with_karateka(mode: :ir, sim: :compile)
+        arcilator_runner = described_class.with_karateka(mode: :circt)
+
+        compile_signatures = collect_video_memory_signatures(compile_runner)
+        arcilator_signatures = collect_video_memory_signatures(arcilator_runner)
+
+        first_diff = compile_signatures.zip(arcilator_signatures).find_index { |a, b| a != b }
+        diff_message = if first_diff
+                         "text/HIRES memory diverged at sample #{first_diff}: compile=#{compile_signatures[first_diff]} arcilator=#{arcilator_signatures[first_diff]}"
                        else
                          'text/HIRES memory should match at every sample'
                        end

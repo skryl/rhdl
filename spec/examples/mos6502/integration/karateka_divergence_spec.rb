@@ -76,11 +76,6 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     false
   end
 
-  def verilator_available?
-    ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
-      File.executable?(File.join(path, 'verilator'))
-    end
-  end
 
   # Simulator wrapper to provide uniform interface
   class SimulatorWrapper
@@ -664,7 +659,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     end
 
     # Verilator backend
-    if verilator_available?
+    if HdlToolchain.verilator_available?
       begin
         simulators[:verilator] = create_verilator_simulator
         puts "  [x] Verilator: Native Verilator RTL simulation"
@@ -1132,7 +1127,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     end
 
     # Test Verilator
-    if verilator_available?
+    if HdlToolchain.verilator_available?
       puts "\n--- Verilator vs ISA ---"
       results[:verilator] = run_verilator_test(cycles)
     else
@@ -1178,7 +1173,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     end
 
     # Test Verilator
-    if verilator_available?
+    if HdlToolchain.verilator_available?
       puts "\n--- Verilator vs ISA ---"
       results[:verilator] = run_verilator_test(cycles)
     else
@@ -1282,7 +1277,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     puts " done (#{'%.2f' % results.last[:elapsed]}s)"
 
     # Verilator (if available)
-    if verilator_available?
+    if HdlToolchain.verilator_available?
       print "  Running Verilator..."
       $stdout.flush
       begin
@@ -1355,7 +1350,7 @@ RSpec.describe 'Karateka MOS6502 4-Way Divergence Analysis' do
     backends = []
     backends << [:jit, 'JIT'] if ir_backend_available?(:jit)
     backends << [:compile, 'Compile'] if ir_backend_available?(:compile)
-    backends << [:verilator, 'Verilator'] if verilator_available?
+    backends << [:verilator, 'Verilator'] if HdlToolchain.verilator_available?
 
     backends.each do |backend_sym, backend_name|
       puts "\n--- Comparing ISA vs #{backend_name} (#{max_instructions / 1000}K instructions) ---"
