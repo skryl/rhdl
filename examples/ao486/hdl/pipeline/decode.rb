@@ -614,6 +614,45 @@ module RHDL
             return [Constants::CMD_IMUL, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
           end
 
+          # BOUND (0x62)
+          if opcode == 0x62
+            mlen = modregrm_len(bytes, mrm_off, valid, addr32)
+            needed = 1 + mlen
+            return [Constants::CMD_BOUND, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
+          end
+
+          # AAA (0x37), AAS (0x3F), DAA (0x27), DAS (0x2F)
+          case opcode
+          when 0x37
+            return [Constants::CMD_AAA, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
+          when 0x3F
+            return [Constants::CMD_AAS, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
+          when 0x27
+            return [Constants::CMD_DAA, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
+          when 0x2F
+            return [Constants::CMD_DAS, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
+          end
+
+          # AAD (0xD5 imm8), AAM (0xD4 imm8)
+          if opcode == 0xD5
+            return [Constants::CMD_AAD, 0, 2, false, has_bytes?(pfx_cnt, 2, valid)]
+          end
+          if opcode == 0xD4
+            return [Constants::CMD_AAM, 0, 2, false, has_bytes?(pfx_cnt, 2, valid)]
+          end
+
+          # SALC (0xD6) — undocumented but widely supported
+          if opcode == 0xD6
+            return [Constants::CMD_SALC, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
+          end
+
+          # FPU escape opcodes (0xD8-0xDF) → trigger #NM if EM=1
+          if opcode >= 0xD8 && opcode <= 0xDF
+            mlen = modregrm_len(bytes, mrm_off, valid, addr32)
+            needed = 1 + mlen
+            return [Constants::CMD_fpu, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
+          end
+
           # Fallthrough: unknown opcode
           [Constants::CMD_NULL, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
         end
@@ -704,6 +743,23 @@ module RHDL
             mlen = modregrm_len(bytes, mrm_off, valid, addr32)
             needed = 1 + mlen
             return [Constants::CMD_BSF, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
+          end
+
+          # CPUID (0x0F 0xA2)
+          if opcode == 0xA2
+            return [Constants::CMD_CPUID, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
+          end
+
+          # BSWAP (0x0F 0xC8-0xCF)
+          if opcode >= 0xC8 && opcode <= 0xCF
+            return [Constants::CMD_BSWAP, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
+          end
+
+          # BT/BTS/BTR/BTC imm8 (0x0F 0xBA)
+          if opcode == 0xBA
+            mlen = modregrm_len(bytes, mrm_off, valid, addr32)
+            needed = 1 + mlen + 1  # +1 for imm8
+            return [Constants::CMD_BT, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
           end
 
           # Unknown 2-byte opcode

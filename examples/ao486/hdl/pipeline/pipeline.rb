@@ -113,6 +113,11 @@ module RHDL
           write_regfile(write_cr0_wp: 1, cr0_wp_to_reg: value)
         end
 
+        # Set CR0.EM directly (for testing)
+        def set_cr0_em(value)
+          write_regfile(write_cr0_em: 1, cr0_em_to_reg: value)
+        end
+
         # Set CR3 directly (for testing)
         def set_cr3(value)
           write_regfile(write_cr3: 1, cr3_to_reg: value)
@@ -783,6 +788,67 @@ module RHDL
           when C::CMD_INVLPG
             exec_invlpg(prefix_count, addr32, modregrm_mod, modregrm_rm,
                         bytes, ds_base, ss_base, eip, next_eip)
+
+          when C::CMD_CPUID
+            exec_cpuid(eip, next_eip)
+
+          when C::CMD_BOUND
+            exec_bound(opcode, prefix_count, op32, addr32, sz,
+                       modregrm_mod, modregrm_reg, modregrm_rm,
+                       bytes, memory, ds_base, ss_base, eip, next_eip)
+
+          when C::CMD_BSF
+            exec_bsf_bsr(opcode, prefix_count, has_0f, is_8bit, op32, addr32, sz, mask,
+                         modregrm_mod, modregrm_reg, modregrm_rm,
+                         bytes, memory, ds_base, ss_base, eip, next_eip)
+
+          when C::CMD_BT
+            exec_bt(opcode, prefix_count, has_0f, op32, addr32, sz, mask,
+                    modregrm_mod, modregrm_reg, modregrm_rm,
+                    bytes, memory, ds_base, ss_base, eip, next_eip)
+
+          when C::CMD_SETcc
+            exec_setcc(opcode, prefix_count, has_0f, addr32,
+                       modregrm_mod, modregrm_reg, modregrm_rm,
+                       bytes, memory, ds_base, ss_base, eip, next_eip)
+
+          when C::CMD_BSWAP
+            exec_bswap(opcode, prefix_count, has_0f, bytes, eip, next_eip)
+
+          when C::CMD_LOOP
+            exec_loop(opcode, prefix_count, op32, bytes, eip, next_eip)
+
+          when C::CMD_JCXZ
+            exec_jcxz(prefix_count, op32, bytes, eip, next_eip)
+
+          when C::CMD_SHLD, C::CMD_SHRD
+            exec_shxd(opcode, prefix_count, has_0f, op32, addr32, sz, mask,
+                      modregrm_mod, modregrm_reg, modregrm_rm,
+                      bytes, memory, ds_base, ss_base, eip, next_eip)
+
+          when C::CMD_AAA
+            exec_aaa(eip, next_eip)
+
+          when C::CMD_AAS
+            exec_aas(eip, next_eip)
+
+          when C::CMD_DAA
+            exec_daa(eip, next_eip)
+
+          when C::CMD_DAS
+            exec_das(eip, next_eip)
+
+          when C::CMD_AAD
+            exec_aad(prefix_count, bytes, eip, next_eip)
+
+          when C::CMD_AAM
+            exec_aam(prefix_count, bytes, memory, eip, next_eip)
+
+          when C::CMD_SALC
+            exec_salc(eip, next_eip)
+
+          when C::CMD_fpu
+            exec_fpu(memory, eip, next_eip)
 
           when C::CMD_NULL
             # Unknown opcode: raise #UD exception
@@ -2454,6 +2520,406 @@ module RHDL
                         write_seg_cache: 1, seg_cache_to_reg: desc,
                         write_seg_valid: 1, seg_valid_to_reg: 1)
           false
+        end
+
+        # ---------- Phase 10: Extended instruction set ----------
+
+        def exec_cpuid(eip, next_eip)
+          leaf = gpr(0)  # EAX = leaf
+          case leaf
+          when 0
+            # Max leaf + vendor string "GenuineIntel"
+            write_gpr(0, 1, false, true)      # EAX = max supported leaf
+            write_gpr(3, 0x756E6547, false, true)  # EBX = "Genu"
+            write_gpr(2, 0x49656E69, false, true)  # EDX = "ineI"
+            write_gpr(1, 0x6C65746E, false, true)  # ECX = "ntel"
+          when 1
+            write_gpr(0, C::CPUID_MODEL_FAMILY_STEPPING, false, true)
+            write_gpr(3, 0, false, true)  # EBX
+            write_gpr(1, 0, false, true)  # ECX
+            write_gpr(2, 0x00000001, false, true)  # EDX = FPU present (bit 0)
+          else
+            write_gpr(0, 0, false, true)
+            write_gpr(3, 0, false, true)
+            write_gpr(1, 0, false, true)
+            write_gpr(2, 0, false, true)
+          end
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_bound(opcode, prefix_count, op32, addr32, sz,
+                       modregrm_mod, modregrm_reg, modregrm_rm,
+                       bytes, memory, ds_base, ss_base, eip, next_eip)
+          mrm_offset = prefix_count + 1
+          # Read index from register
+          index = read_gpr(modregrm_reg, false, sz)
+          index = op32 ? sign_extend_32(index) : sign_extend_16(index)
+
+          # Read bounds from memory
+          addr = compute_ea(modregrm_mod, modregrm_rm, addr32, bytes, mrm_offset, ds_base, ss_base)
+          lower = mem_read(memory, addr, sz)
+          upper = mem_read(memory, addr + sz, sz)
+          lower = op32 ? sign_extend_32(lower) : sign_extend_16(lower)
+          upper = op32 ? sign_extend_32(upper) : sign_extend_16(upper)
+
+          if index < lower || index > upper
+            dispatch_interrupt(memory, C::EXCEPTION_BR, eip, :fault)
+          else
+            advance_eip(next_eip)
+            :ok
+          end
+        end
+
+        def sign_extend_32(val)
+          val = val & 0xFFFF_FFFF
+          (val & 0x8000_0000) != 0 ? val - 0x1_0000_0000 : val
+        end
+
+        def exec_bsf_bsr(opcode, prefix_count, has_0f, is_8bit, op32, addr32, sz, mask,
+                         modregrm_mod, modregrm_reg, modregrm_rm,
+                         bytes, memory, ds_base, ss_base, eip, next_eip)
+          mrm_offset = prefix_count + 1
+          src = read_rm(modregrm_mod, modregrm_rm, addr32, false, sz, bytes, mrm_offset, memory, ds_base, ss_base) & mask
+
+          if src == 0
+            set_flag(:zf, 1)
+          else
+            set_flag(:zf, 0)
+            if opcode == 0xBC  # BSF
+              bit = 0
+              bit += 1 while (src & (1 << bit)) == 0
+            else  # BSR (0xBD)
+              bit = (sz * 8) - 1
+              bit -= 1 while (src & (1 << bit)) == 0
+            end
+            write_gpr(modregrm_reg, bit, false, op32)
+          end
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_bt(opcode, prefix_count, has_0f, op32, addr32, sz, mask,
+                    modregrm_mod, modregrm_reg, modregrm_rm,
+                    bytes, memory, ds_base, ss_base, eip, next_eip)
+          mrm_offset = prefix_count + 1
+
+          # Determine the bit operation variant and bit offset source
+          if opcode == 0xBA
+            # Immediate form: 0F BA /4-7 imm8
+            src = read_rm(modregrm_mod, modregrm_rm, addr32, false, sz, bytes, mrm_offset, memory, ds_base, ss_base) & mask
+            bit_offset = bytes[mrm_offset + modregrm_len_value(modregrm_mod, modregrm_rm, addr32)] & ((sz * 8) - 1)
+            reg_field = modregrm_reg
+          else
+            # Register form: 0F A3/AB/B3/BB
+            src = read_rm(modregrm_mod, modregrm_rm, addr32, false, sz, bytes, mrm_offset, memory, ds_base, ss_base) & mask
+            bit_offset = read_gpr(modregrm_reg, false, sz) & ((sz * 8) - 1)
+            reg_field = case opcode
+                        when 0xA3 then 4  # BT
+                        when 0xAB then 5  # BTS
+                        when 0xB3 then 6  # BTR
+                        when 0xBB then 7  # BTC
+                        end
+          end
+
+          # Test the bit
+          old_bit = (src >> bit_offset) & 1
+          set_flag(:cf, old_bit)
+
+          # Modify the bit based on operation
+          case reg_field
+          when 4  # BT — test only
+            # no modification
+          when 5  # BTS — set
+            src |= (1 << bit_offset)
+          when 6  # BTR — reset
+            src &= ~(1 << bit_offset)
+          when 7  # BTC — complement
+            src ^= (1 << bit_offset)
+          end
+
+          # Write back if modified (BTS/BTR/BTC)
+          if reg_field != 4
+            write_rm(modregrm_mod, modregrm_rm, addr32, false, op32, sz, src & mask,
+                     bytes, mrm_offset, memory, ds_base, ss_base)
+          end
+
+          advance_eip(next_eip)
+          :ok
+        end
+
+        # Helper: get ModR/M length value for imm8 offset calculation
+        def modregrm_len_value(mod_val, rm_val, addr32)
+          if addr32
+            if mod_val == 3
+              1
+            elsif mod_val == 0 && rm_val == 5
+              5
+            elsif rm_val == 4  # SIB
+              if mod_val == 0 then 2
+              elsif mod_val == 1 then 3
+              else 6
+              end
+            elsif mod_val == 1 then 2
+            elsif mod_val == 2 then 5
+            else 1
+            end
+          else
+            if mod_val == 3 then 1
+            elsif mod_val == 0 && rm_val == 6 then 3
+            elsif mod_val == 1 then 2
+            elsif mod_val == 2 then 3
+            else 1
+            end
+          end
+        end
+
+        def exec_setcc(opcode, prefix_count, has_0f, addr32,
+                       modregrm_mod, modregrm_reg, modregrm_rm,
+                       bytes, memory, ds_base, ss_base, eip, next_eip)
+          # Evaluate condition (opcode & 0x0F gives condition code, like Jcc)
+          cc = opcode & 0x0F
+          @cond_eval.set_input(:condition_index, cc)
+          @cond_eval.set_input(:cflag, reg(:cflag))
+          @cond_eval.set_input(:zflag, reg(:zflag))
+          @cond_eval.set_input(:sflag, reg(:sflag))
+          @cond_eval.set_input(:oflag, reg(:oflag))
+          @cond_eval.set_input(:pflag, reg(:pflag))
+          @cond_eval.propagate
+          result = @cond_eval.get_output(:condition_met)
+
+          mrm_offset = prefix_count + 1
+          write_rm(modregrm_mod, modregrm_rm, addr32, true, false, 1, result,
+                   bytes, mrm_offset, memory, ds_base, ss_base)
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_bswap(opcode, prefix_count, has_0f, bytes, eip, next_eip)
+          # Register encoded in low 3 bits of opcode (0xC8-0xCF → reg 0-7)
+          reg_index = opcode & 7
+          val = gpr(reg_index)
+          swapped = ((val >> 24) & 0xFF) |
+                    (((val >> 16) & 0xFF) << 8) |
+                    (((val >> 8) & 0xFF) << 16) |
+                    ((val & 0xFF) << 24)
+          write_gpr(reg_index, swapped & 0xFFFF_FFFF, false, true)
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_loop(opcode, prefix_count, op32, bytes, eip, next_eip)
+          # Decrement CX (or ECX)
+          cx = gpr(1)  # ECX
+          cx = op32 ? (cx - 1) & 0xFFFF_FFFF : (cx - 1) & 0xFFFF
+          if op32
+            write_gpr(1, cx, false, true)
+          else
+            write_gpr(1, (gpr(1) & 0xFFFF0000) | cx, false, true)
+          end
+
+          rel = sign_extend_8(bytes[prefix_count + 1])
+          take = case opcode
+                 when 0xE2  # LOOP
+                   cx != 0
+                 when 0xE1  # LOOPE/LOOPZ
+                   cx != 0 && reg(:zflag) == 1
+                 when 0xE0  # LOOPNE/LOOPNZ
+                   cx != 0 && reg(:zflag) == 0
+                 end
+
+          if take
+            target = (next_eip + rel) & (op32 ? 0xFFFF_FFFF : 0xFFFF)
+            advance_eip(target)
+          else
+            advance_eip(next_eip)
+          end
+          :ok
+        end
+
+        def exec_jcxz(prefix_count, op32, bytes, eip, next_eip)
+          cx = op32 ? gpr(1) : gpr(1) & 0xFFFF
+          rel = sign_extend_8(bytes[prefix_count + 1])
+
+          if cx == 0
+            target = (next_eip + rel) & (op32 ? 0xFFFF_FFFF : 0xFFFF)
+            advance_eip(target)
+          else
+            advance_eip(next_eip)
+          end
+          :ok
+        end
+
+        def exec_shxd(opcode, prefix_count, has_0f, op32, addr32, sz, mask,
+                      modregrm_mod, modregrm_reg, modregrm_rm,
+                      bytes, memory, ds_base, ss_base, eip, next_eip)
+          mrm_offset = prefix_count + 1
+          dst = read_rm(modregrm_mod, modregrm_rm, addr32, false, sz, bytes, mrm_offset, memory, ds_base, ss_base) & mask
+          src = read_gpr(modregrm_reg, false, sz) & mask
+          bits = sz * 8
+
+          # Shift count: imm8 or CL
+          if opcode == 0xA4 || opcode == 0xAC  # imm8
+            count = bytes[mrm_offset + modregrm_len_value(modregrm_mod, modregrm_rm, addr32)] & 0x1F
+          else  # CL
+            count = gpr(1) & 0x1F  # CL
+          end
+
+          if count > 0 && count <= bits
+            if opcode == 0xA4 || opcode == 0xA5  # SHLD
+              result = ((dst << count) | (src >> (bits - count))) & mask
+            else  # SHRD (0xAC, 0xAD)
+              result = ((dst >> count) | (src << (bits - count))) & mask
+            end
+            write_rm(modregrm_mod, modregrm_rm, addr32, false, op32, sz, result,
+                     bytes, mrm_offset, memory, ds_base, ss_base)
+            update_flags_szp(result, sz)
+          end
+
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_aaa(eip, next_eip)
+          al = gpr(0) & 0xFF
+          ah = (gpr(0) >> 8) & 0xFF
+          if (al & 0x0F) > 9 || reg(:aflag) == 1
+            al = (al + 6) & 0xFF
+            ah = (ah + 1) & 0xFF
+            set_flag(:af, 1)
+            set_flag(:cf, 1)
+          else
+            set_flag(:af, 0)
+            set_flag(:cf, 0)
+          end
+          al = al & 0x0F
+          write_gpr(0, (gpr(0) & 0xFFFF0000) | (ah << 8) | al, false, true)
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_aas(eip, next_eip)
+          al = gpr(0) & 0xFF
+          ah = (gpr(0) >> 8) & 0xFF
+          if (al & 0x0F) > 9 || reg(:aflag) == 1
+            al = (al - 6) & 0xFF
+            ah = (ah - 1) & 0xFF
+            set_flag(:af, 1)
+            set_flag(:cf, 1)
+          else
+            set_flag(:af, 0)
+            set_flag(:cf, 0)
+          end
+          al = al & 0x0F
+          write_gpr(0, (gpr(0) & 0xFFFF0000) | (ah << 8) | al, false, true)
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_daa(eip, next_eip)
+          al = gpr(0) & 0xFF
+          old_cf = reg(:cflag)
+          set_flag(:cf, 0)
+
+          if (al & 0x0F) > 9 || reg(:aflag) == 1
+            al = (al + 6) & 0xFF
+            set_flag(:cf, old_cf == 1 || al < 6 ? 1 : 0)
+            set_flag(:af, 1)
+          else
+            set_flag(:af, 0)
+          end
+
+          if (gpr(0) & 0xFF) > 0x99 || old_cf == 1
+            al = (al + 0x60) & 0xFF
+            set_flag(:cf, 1)
+          end
+
+          write_gpr(0, (gpr(0) & 0xFFFF_FF00) | al, false, true)
+          update_flags_szp(al, 1)
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_das(eip, next_eip)
+          al = gpr(0) & 0xFF
+          old_cf = reg(:cflag)
+          set_flag(:cf, 0)
+
+          if (al & 0x0F) > 9 || reg(:aflag) == 1
+            al = (al - 6) & 0xFF
+            set_flag(:cf, old_cf == 1 || (gpr(0) & 0xFF) < 6 ? 1 : 0)
+            set_flag(:af, 1)
+          else
+            set_flag(:af, 0)
+          end
+
+          if (gpr(0) & 0xFF) > 0x99 || old_cf == 1
+            al = (al - 0x60) & 0xFF
+            set_flag(:cf, 1)
+          end
+
+          write_gpr(0, (gpr(0) & 0xFFFF_FF00) | al, false, true)
+          update_flags_szp(al, 1)
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_aad(prefix_count, bytes, eip, next_eip)
+          base = bytes[prefix_count + 1]  # usually 0x0A
+          al = gpr(0) & 0xFF
+          ah = (gpr(0) >> 8) & 0xFF
+          al = (al + ah * base) & 0xFF
+          write_gpr(0, (gpr(0) & 0xFFFF0000) | al, false, true)
+          update_flags_szp(al, 1)
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_aam(prefix_count, bytes, memory, eip, next_eip)
+          base = bytes[prefix_count + 1]  # usually 0x0A
+          if base == 0
+            dispatch_interrupt(memory, C::EXCEPTION_DE, eip, :fault)
+            return :ok
+          end
+          al = gpr(0) & 0xFF
+          ah = al / base
+          al = al % base
+          write_gpr(0, (gpr(0) & 0xFFFF0000) | ((ah & 0xFF) << 8) | (al & 0xFF), false, true)
+          update_flags_szp(al, 1)
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_salc(eip, next_eip)
+          val = reg(:cflag) == 1 ? 0xFF : 0x00
+          write_gpr(0, (gpr(0) & 0xFFFF_FF00) | val, false, true)
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_fpu(memory, eip, next_eip)
+          # If CR0.EM=1, raise #NM (no math coprocessor)
+          if reg(:cr0_em) != 0
+            dispatch_interrupt(memory, C::EXCEPTION_NM, eip, :fault)
+          else
+            # FPU not implemented — just advance past the instruction
+            advance_eip(next_eip)
+            :ok
+          end
+        end
+
+        # Helper: update SZP flags only (no CF/OF/AF)
+        def update_flags_szp(result, sz)
+          mask = size_mask(sz)
+          result = result & mask
+          set_flag(:zf, result == 0 ? 1 : 0)
+          set_flag(:sf, (result >> (sz * 8 - 1)) & 1)
+          # Parity of low byte
+          pb = result & 0xFF
+          pb ^= (pb >> 4)
+          pb ^= (pb >> 2)
+          pb ^= (pb >> 1)
+          set_flag(:pf, (pb & 1) == 0 ? 1 : 0)
         end
 
         # Check if a memory access is within segment limit
