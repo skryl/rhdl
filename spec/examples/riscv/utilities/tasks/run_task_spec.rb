@@ -99,7 +99,8 @@ RSpec.describe RHDL::Examples::RISCV::Tasks::RunTask do
       { mode: :ir, sim: :jit, io: :mmap, debug: false },
       { mode: :ir, sim: :compile, io: :uart, debug: true },
       { mode: :netlist, sim: :compile, io: :mmap, debug: false },
-      { mode: :verilog, sim: :ruby, io: :mmap, debug: false }
+      { mode: :verilog, sim: :ruby, io: :mmap, debug: false },
+      { mode: :arcilator, sim: :ruby, io: :mmap, debug: false }
     ].freeze
 
     run_cases.each do |test_case|
@@ -273,12 +274,20 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
       skip "Backend unavailable for netlist fallback: #{e.message}"
     end
 
-    it 'falls back verilog mode to ir effective mode' do
-      runner = described_class.new(mode: :verilog, sim: :ruby)
+    it 'accepts verilog mode without fallback' do
+      runner = described_class.new(mode: :verilog)
       expect(runner.mode).to eq(:verilog)
-      expect(runner.effective_mode).to eq(:ir)
+      expect(runner.effective_mode).to eq(:verilog)
     rescue LoadError, RuntimeError => e
-      skip "Backend unavailable for verilog fallback: #{e.message}"
+      skip "Verilator backend unavailable: #{e.message}"
+    end
+
+    it 'accepts arcilator mode without fallback' do
+      runner = described_class.new(mode: :arcilator)
+      expect(runner.mode).to eq(:arcilator)
+      expect(runner.effective_mode).to eq(:arcilator)
+    rescue LoadError, RuntimeError => e
+      skip "Arcilator backend unavailable: #{e.message}"
     end
   end
 

@@ -455,7 +455,11 @@ module RHDL
           when IR::BinaryOp
             left = expr_with_mem_reads(expr_node.left, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
             right = expr_with_mem_reads(expr_node.right, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
-            binary_op_str(expr_node.op, left, right)
+            right_stripped = nil
+            if %i[<< >>].include?(expr_node.op) && expr_node.right.is_a?(IR::Resize) && expr_node.right.width > expr_node.right.expr.width
+              right_stripped = expr_with_mem_reads(expr_node.right.expr, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
+            end
+            binary_op_str(expr_node.op, left, right, right_stripped: right_stripped)
           when IR::Mux
             cond = expr_with_mem_reads(expr_node.condition, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
             when_true = expr_with_mem_reads(expr_node.when_true, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
@@ -496,7 +500,7 @@ module RHDL
           end
         end
 
-        def binary_op_str(op, left, right)
+        def binary_op_str(op, left, right, right_stripped: nil)
           case op
           when :& then "and(#{left}, #{right})"
           when :| then "or(#{left}, #{right})"
@@ -506,8 +510,8 @@ module RHDL
           when :* then "mul(#{left}, #{right})"
           when :/ then "div(#{left}, #{right})"
           when :% then "rem(#{left}, #{right})"
-          when :<< then "dshl(#{left}, #{right})"
-          when :>> then "dshr(#{left}, #{right})"
+          when :<< then "dshl(#{left}, #{right_stripped || right})"
+          when :>> then "dshr(#{left}, #{right_stripped || right})"
           when :== then "eq(#{left}, #{right})"
           when :!= then "neq(#{left}, #{right})"
           when :< then "lt(#{left}, #{right})"
@@ -715,9 +719,11 @@ module RHDL
           when :%
             "rem(#{left}, #{right})"
           when :<<
-            "dshl(#{left}, #{right})"
+            shift_amt = strip_shift_resize(right, node.right, output_regs: output_regs)
+            "dshl(#{left}, #{shift_amt})"
           when :>>
-            "dshr(#{left}, #{right})"
+            shift_amt = strip_shift_resize(right, node.right, output_regs: output_regs)
+            "dshr(#{left}, #{shift_amt})"
           when :==
             "eq(#{left}, #{right})"
           when :!=
@@ -732,6 +738,18 @@ module RHDL
             "geq(#{left}, #{right})"
           else
             raise ArgumentError, "Unsupported binary op: #{node.op}"
+          end
+        end
+
+        # FIRRTL dshl/dshr: the shift amount width determines the max result width
+        # (result_width = left_width + 2^shift_width - 1). If the shift amount was
+        # padded (Resize) to match the left operand, strip the Resize and use the
+        # original narrower width to avoid exceeding firtool's width limits.
+        def strip_shift_resize(firrtl_expr, ir_node, output_regs: Set.new)
+          if ir_node.is_a?(IR::Resize) && ir_node.width > ir_node.expr.width
+            expr(ir_node.expr, output_regs: output_regs)
+          else
+            firrtl_expr
           end
         end
 

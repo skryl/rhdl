@@ -43,7 +43,7 @@ module RHDL
             opts.separator "RISC-V Core Runner"
             opts.separator ""
 
-            opts.on("-m", "--mode TYPE", %i[ruby ir netlist verilog], "Simulation mode: ir (default), ruby, netlist, verilog") do |v|
+            opts.on("-m", "--mode TYPE", %i[ruby ir netlist verilog arcilator], "Simulation mode: ir (default), ruby, netlist, verilog, arcilator") do |v|
               options[:mode] = v
             end
 
@@ -177,7 +177,7 @@ module RHDL
           options[:sim] = case options[:mode]
                           when :ruby then :ruby
                           when :ir, :netlist then :compile
-                          when :verilog then :ruby
+                          when :verilog, :arcilator then :ruby
                           else :ruby
                           end
         end
@@ -200,7 +200,7 @@ module RHDL
                               when :interpret then 1_000
                               else 1_000
                               end
-                            when :verilog
+                            when :verilog, :arcilator
                               100_000
                             else
                               1_000

@@ -4,6 +4,12 @@ require_relative '../../hdl/ir_harness'
 require_relative '../../hdl/pipeline/ir_harness'
 require_relative '../assembler'
 
+begin
+  require_relative '../../hdl/hdl_harness'
+rescue LoadError
+  # HdlHarness may not be available if codegen dependencies are missing
+end
+
 module RHDL
   module Examples
     module RISCV
@@ -33,10 +39,19 @@ module RHDL
           @effective_mode = normalize_mode(@mode)
           @sim_backend = (sim || default_backend(@mode)).to_sym
           @core = normalize_core(core)
-
-          backend, allow_fallback = map_backend(@effective_mode, @sim_backend)
           resolved_mem_size = mem_size || DEFAULT_MEM_SIZE
-          @cpu = build_cpu(core: @core, mem_size: resolved_mem_size, backend: backend, allow_fallback: allow_fallback)
+
+          if hdl_mode?(@effective_mode)
+            hdl_backend = @effective_mode == :verilog ? :verilator : :arcilator
+            if @core != :single
+              warn "HDL mode (#{@effective_mode}) only supports single-cycle core; overriding core=#{@core} to single."
+              @core = :single
+            end
+            @cpu = HdlHarness.new(backend: hdl_backend, mem_size: resolved_mem_size, core: @core)
+          else
+            backend, allow_fallback = map_backend(@effective_mode, @sim_backend)
+            @cpu = build_cpu(core: @core, mem_size: resolved_mem_size, backend: backend, allow_fallback: allow_fallback)
+          end
         end
 
         def native?
@@ -218,14 +233,18 @@ module RHDL
 
         def normalize_mode(mode)
           case mode
-          when :ruby, :ir
+          when :ruby, :ir, :verilog, :arcilator
             mode
-          when :netlist, :verilog
+          when :netlist
             warn "Mode #{mode.inspect} is not implemented for RISC-V yet; falling back to :ir."
             :ir
           else
-            raise ArgumentError, "Unsupported mode #{mode.inspect}. Use ruby, ir, netlist, or verilog."
+            raise ArgumentError, "Unsupported mode #{mode.inspect}. Use ruby, ir, netlist, verilog, or arcilator."
           end
+        end
+
+        def hdl_mode?(mode)
+          %i[verilog arcilator].include?(mode)
         end
 
         def normalize_core(core)
@@ -281,15 +300,15 @@ module RHDL
             :ruby
           when :ir, :netlist
             :compile
-          when :verilog
+          when :verilog, :arcilator
             :ruby
           else
-            raise "Unknown mode: #{mode}. Valid modes: ruby, ir, netlist, verilog"
+            raise "Unknown mode: #{mode}. Valid modes: ruby, ir, netlist, verilog, arcilator"
           end
         end
 
         def load_instruction_bytes(bytes, base_addr)
-          if native? && @cpu.sim.respond_to?(:runner_load_rom) && !@force_word_instruction_load
+          if native? && @cpu.respond_to?(:sim) && @cpu.sim.respond_to?(:runner_load_rom) && !@force_word_instruction_load
             @cpu.sim.runner_load_rom(bytes, base_addr)
           else
             words = bytes_to_words(bytes)
@@ -299,7 +318,7 @@ module RHDL
 
         def load_data_bytes(bytes, base_addr)
           payload = bytes.is_a?(String) ? bytes : bytes.pack('C*')
-          if native? && @cpu.sim.respond_to?(:runner_write_memory)
+          if native? && @cpu.respond_to?(:sim) && @cpu.sim.respond_to?(:runner_write_memory)
             @cpu.sim.runner_write_memory(base_addr.to_i, payload, mapped: false)
           else
             words = bytes_to_words(payload)
