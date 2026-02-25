@@ -33,28 +33,6 @@ Architecture details are included at the bottom of this page.
   - `Load Last Saved` restores the most recently saved dump from browser storage
   - `Reset (Vector)` resets the Apple II runner from the Memory tab, with optional manual reset-vector override (`$B82A` / `0xB82A`)
 
-## Screenshots
-
-### I/O
-
-![I/O tab](screenshots/io.png)
-
-### VCD + Signals
-
-![VCD and signals tab](screenshots/signals.png)
-
-### Memory
-
-![Memory tab](screenshots/memory.png)
-
-### Components
-
-![Component explorer tab](screenshots/explorer.png)
-
-### Schematic
-
-![Schematic tab](screenshots/schematic.png)
-
 ## Build WASM
 
 Build only WASM backends:
@@ -295,20 +273,32 @@ This keeps startup deterministic and testable without browser globals.
 
 ### Schematic Renderer
 
-The component schematic tab (`5. Schematic`) renders RTL schematics using a custom
-WebGL/Canvas 2D pipeline with ELK.js for hierarchical port-based layout:
+The component schematic tab (`5. Schematic`) renders interactive RTL schematics
+with hierarchical drill-down into sub-components.
 
-- `renderers/schematic_data_model.mjs`: converts schematic elements into a flat `RenderList` of typed primitives (symbols, pins, nets, wires)
-- `renderers/webgl_renderer.mjs`: WebGL 2.0 instanced renderer with SDF rounded-rect shaders (primary)
-- `renderers/canvas_renderer.mjs`: Canvas 2D fallback when WebGL is unavailable
-- `renderers/symbols.mjs`: shape library with per-type draw functions
-- `renderers/spatial_index.mjs`: R-tree hit testing for click dispatch
-- `renderers/interactions.mjs`: canvas click/double-click handling for component selection and drill-down
-- `renderers/elk_layout_adapter.mjs`: builds ELK graph from RenderList, applies layout positions back
-- `renderers/render_activity.mjs`: live signal value updates on RenderList elements
-- `renderers/themes.mjs`: palette and element color resolution
-- `renderers/animation.mjs`: wire pulse animation state
-- `renderers/webgl_shaders.mjs`: GLSL vertex/fragment shader sources
+**Layout** is handled by [ELK.js](https://github.com/kieler/elkjs) (Eclipse Layout
+Kernel), a port-aware hierarchical layout engine loaded from CDN. An adapter
+converts the internal render list into an ELK graph, runs the layout, and maps
+computed positions back onto the schematic primitives (symbols, pins, nets, wires).
+
+**Rendering** uses a WebGL 2.0 instanced pipeline as the primary backend, with a
+Canvas 2D fallback for environments where WebGL is unavailable (e.g. headless
+browsers). Both renderers consume the same flat `RenderList` of typed primitives
+and resolve colors from a shared theme palette. The WebGL path uses SDF
+rounded-rect fragment shaders for crisp edges at any zoom level.
+
+**Interaction** is built on a spatial R-tree index over rendered elements.
+Single-click selects a component or highlights a signal; double-click drills down
+into a child component's internal schematic. Pan and zoom are handled via D3-style
+pointer/wheel events on the canvas.
+
+**Live activity** updates wire and net colors each frame based on current signal
+values from the running simulation — non-zero signals highlight in green, toggled
+signals flash amber.
+
+Each element type has a distinct color: cyan for components, purple for IO ports,
+amber for ops/assigns, copper for memory, green for nets, and neutral gray for
+pins. A color legend is drawn in screen space in the bottom-right corner.
 
 ### Testing Strategy
 

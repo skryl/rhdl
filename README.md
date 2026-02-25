@@ -53,8 +53,6 @@ RHDL includes a browser-based simulator with WASM backends, live VCD tracing, Ap
 - Demo: [https://skryl.github.io/rhdl](https://skryl.github.io/rhdl)
 - Docs: [Web Simulator Guide](docs/web_simulator.md)
 
-![Web simulator](docs/screenshots/2026-02-09-14.52.47.gif)
-
 ## Quick Start
 
 ### Installation
