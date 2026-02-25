@@ -259,6 +259,13 @@ module RHDL
             return [Constants::CMD_POP, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
           end
 
+          # POP r/m (0x8F /0)
+          if opcode == 0x8F
+            mlen = modregrm_len(bytes, mrm_off, valid, addr32)
+            needed = 1 + mlen
+            return [Constants::CMD_POP, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
+          end
+
           # PUSH imm (0x68 imm16/32, 0x6A imm8)
           if opcode == 0x68
             needed = op32 ? 5 : 3
@@ -266,6 +273,14 @@ module RHDL
           end
           if opcode == 0x6A
             return [Constants::CMD_PUSH, 0, 2, false, has_bytes?(pfx_cnt, 2, valid)]
+          end
+
+          # INS (0x6C/0x6D), OUTS (0x6E/0x6F)
+          if opcode == 0x6C || opcode == 0x6D
+            return [Constants::CMD_INS, 0, 1, opcode == 0x6C, has_bytes?(pfx_cnt, 1, valid)]
+          end
+          if opcode == 0x6E || opcode == 0x6F
+            return [Constants::CMD_OUTS, 0, 1, opcode == 0x6E, has_bytes?(pfx_cnt, 1, valid)]
           end
 
           # Jcc short (0x70-0x7F)
@@ -321,6 +336,14 @@ module RHDL
           # NOP/XCHG reg, EAX (0x90-0x97)
           if (opcode & 0xF8) == 0x90
             return [Constants::CMD_XCHG, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
+          end
+
+          # CBW/CWDE (0x98), CWD/CDQ (0x99)
+          if opcode == 0x98
+            return [Constants::CMD_CBW, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
+          end
+          if opcode == 0x99
+            return [Constants::CMD_CWD, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
           end
 
           # PUSHF (0x9C), POPF (0x9D)
@@ -514,6 +537,23 @@ module RHDL
             return [Constants::CMD_CALL, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
           end
 
+          # PUSH segment registers (0x06 ES, 0x0E CS, 0x16 SS, 0x1E DS)
+          if [0x06, 0x0E, 0x16, 0x1E].include?(opcode)
+            return [Constants::CMD_PUSH_MOV_SEG, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
+          end
+
+          # POP segment registers (0x07 ES, 0x17 SS, 0x1F DS)
+          if [0x07, 0x17, 0x1F].include?(opcode)
+            return [Constants::CMD_POP_seg, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
+          end
+
+          # LES (0xC4), LDS (0xC5)
+          if opcode == 0xC4 || opcode == 0xC5
+            mlen = modregrm_len(bytes, mrm_off, valid, addr32)
+            needed = 1 + mlen
+            return [Constants::CMD_LxS, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
+          end
+
           # PUSHA (0x60), POPA (0x61)
           if opcode == 0x60
             return [Constants::CMD_PUSHA, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
@@ -580,7 +620,11 @@ module RHDL
               return [Constants::CMD_INC_DEC, 0, needed, is_8bit, has_bytes?(pfx_cnt, needed, valid)]
             when 2     # CALL near indirect
               return [Constants::CMD_CALL, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
+            when 3     # CALL far indirect
+              return [Constants::CMD_CALL, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
             when 4     # JMP near indirect
+              return [Constants::CMD_JMP, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
+            when 5     # JMP far indirect
               return [Constants::CMD_JMP, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
             when 6     # PUSH r/m
               return [Constants::CMD_PUSH, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]

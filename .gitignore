@@ -76,6 +76,9 @@ web/assets/pkg/*
 /examples/riscv/software/xv6/user/initcode.out
 /examples/riscv/software/xv6/user/usys.S
 
+# ao486 MS-DOS source clone (reference only, not committed)
+/examples/ao486/software/msdos4_src/
+
 # RISC-V Linux local build/cache artifacts
 /examples/riscv/software/.cache/
 /examples/riscv/software/.buildroot-*/

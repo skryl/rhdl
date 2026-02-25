@@ -147,6 +147,38 @@ module RHDL
                         write_seg_valid: 1, seg_valid_to_reg: 1)
         end
 
+        # Set DS base directly (for testing segment overrides)
+        def set_ds_base(base)
+          set_seg_base(:ds, C::SEGMENT_DS, base)
+        end
+
+        # Set ES base directly (for testing segment overrides)
+        def set_es_base(base)
+          set_seg_base(:es, C::SEGMENT_ES, base)
+        end
+
+        # Set EFLAGS directly (for testing)
+        def set_flags(value)
+          write_regfile(
+            write_flags: 1,
+            cflag_to_reg: (value >> 0) & 1,
+            pflag_to_reg: (value >> 2) & 1,
+            aflag_to_reg: (value >> 4) & 1,
+            zflag_to_reg: (value >> 6) & 1,
+            sflag_to_reg: (value >> 7) & 1,
+            tflag_to_reg: (value >> 8) & 1,
+            iflag_to_reg: (value >> 9) & 1,
+            dflag_to_reg: (value >> 10) & 1,
+            oflag_to_reg: (value >> 11) & 1,
+            iopl_to_reg: (value >> 12) & 3,
+            ntflag_to_reg: (value >> 14) & 1,
+            rflag_to_reg: (value >> 16) & 1,
+            vmflag_to_reg: (value >> 17) & 1,
+            acflag_to_reg: (value >> 18) & 1,
+            idflag_to_reg: (value >> 21) & 1
+          )
+        end
+
         # Check if TLB has an entry for the given linear address
         def tlb_hit?(linear_addr)
           vpn = (linear_addr >> 12) & 0xFFFFF
@@ -163,7 +195,9 @@ module RHDL
                         wr_modregrm_rm: 4, wr_operand_32bit: 0, wr_is_8bit: 0,
                         result: esp)
 
-          # Set CS descriptor cache with desired base
+          # Set CS selector and descriptor cache with desired base
+          # In real mode, selector = base >> 4
+          cs_selector = (cs_base >> 4) & 0xFFFF
           # Build a 64-bit descriptor with the given base
           # Format: base[31:24] at bits 63:56, base[23:0] at bits 39:16
           base_hi = (cs_base >> 24) & 0xFF
@@ -174,8 +208,9 @@ module RHDL
           cache = cache & ~(0xFF << 56) & ~(0xFF_FFFF << 16)
           cache = cache | (base_hi << 56) | (base_lo << 16)
 
-          write_regfile(write_seg_cache: 1, wr_seg_index: C::SEGMENT_CS,
-                        seg_cache_to_reg: cache)
+          write_regfile(write_seg: 1, wr_seg_index: C::SEGMENT_CS, seg_to_reg: cs_selector,
+                        write_seg_cache: 1, seg_cache_to_reg: cache,
+                        write_seg_valid: 1, seg_valid_to_reg: 1)
         end
 
         # Execute one instruction. Returns :ok or :halt
@@ -219,6 +254,7 @@ module RHDL
           end
 
           rep_prefix = @decode.get_output(:dec_prefix_group_1_rep)
+          seg_override = @decode.get_output(:dec_prefix_group_2_seg)
 
           # Get raw instruction bytes for operand resolution
           bytes = Array.new(15) { |i| (fetch_data >> (i * 8)) & 0xFF }
@@ -227,13 +263,13 @@ module RHDL
           if rep_prefix != 0 && string_op?(cmd)
             return exec_string_rep(cmd, cmdex, consumed, is_8bit, op32, addr32,
                                    modregrm_mod, modregrm_reg, modregrm_rm,
-                                   bytes, memory, cs_base, eip, rep_prefix)
+                                   bytes, memory, cs_base, eip, rep_prefix, seg_override)
           end
 
           # 3-5: Read, Execute, Write — dispatch by command
           execute_instruction(cmd, cmdex, consumed, is_8bit, op32, addr32,
                               modregrm_mod, modregrm_reg, modregrm_rm,
-                              bytes, memory, cs_base, eip)
+                              bytes, memory, cs_base, eip, seg_override)
         end
 
         # Register accessors
@@ -247,6 +283,16 @@ module RHDL
             write_regfile(write_eax: 0, write_regrm: 1, wr_dst_is_rm: 1,
                           wr_modregrm_rm: idx, wr_operand_32bit: 1, wr_is_8bit: 0,
                           result: value)
+          else
+            # Handle segment registers
+            seg_map = { es: C::SEGMENT_ES, cs: C::SEGMENT_CS, ss: C::SEGMENT_SS,
+                        ds: C::SEGMENT_DS, fs: C::SEGMENT_FS, gs: C::SEGMENT_GS }
+            seg_index = seg_map[name]
+            if seg_index
+              write_regfile(write_seg: 1, wr_seg_index: seg_index, seg_to_reg: value & 0xFFFF,
+                            write_seg_cache: 1, seg_cache_to_reg: seg_cache(name),
+                            write_seg_valid: 1, seg_valid_to_reg: 1)
+            end
           end
         end
 
@@ -277,6 +323,32 @@ module RHDL
         end
 
         private
+
+        def set_seg_base(name, index, base)
+          cache = seg_cache(name)
+          # Clear existing base fields and set new ones
+          cache = cache & ~(0xFF << 56) & ~(0xFF_FFFF << 16)
+          base_hi = (base >> 24) & 0xFF
+          base_lo = base & 0xFF_FFFF
+          cache = cache | (base_hi << 56) | (base_lo << 16)
+          write_regfile(write_seg: 1, wr_seg_index: index,
+                        seg_to_reg: reg(name),
+                        write_seg_cache: 1, seg_cache_to_reg: cache,
+                        write_seg_valid: 1, seg_valid_to_reg: 1)
+        end
+
+        # Resolve the data segment base from the segment override index
+        def resolve_segment_base(seg_index)
+          case seg_index
+          when C::SEGMENT_ES then desc_base(seg_cache(:es))
+          when C::SEGMENT_CS then desc_base(seg_cache(:cs))
+          when C::SEGMENT_SS then desc_base(seg_cache(:ss))
+          when C::SEGMENT_DS then desc_base(seg_cache(:ds))
+          when C::SEGMENT_FS then desc_base(seg_cache(:fs))
+          when C::SEGMENT_GS then desc_base(seg_cache(:gs))
+          else desc_base(seg_cache(:ds))
+          end
+        end
 
         # ---------- Memory helpers ----------
 
@@ -564,7 +636,7 @@ module RHDL
 
         def execute_instruction(cmd, cmdex, consumed, is_8bit, op32, addr32,
                                 modregrm_mod, modregrm_reg, modregrm_rm,
-                                bytes, memory, cs_base, eip)
+                                bytes, memory, cs_base, eip, seg_override = C::SEGMENT_DS)
           sz = operand_size(is_8bit, op32)
           mask = size_mask(sz)
           next_eip = (eip + consumed) & 0xFFFF
@@ -573,9 +645,10 @@ module RHDL
           # We need the raw opcode to determine operand routing
           opcode, prefix_count, has_0f = find_opcode(bytes, consumed)
 
-          # Default segment for data access
+          # Default segment for data access — apply segment override prefix
           ss_base = desc_base(seg_cache(:ss))
-          ds_base = desc_base(seg_cache(:ds))
+          ds_base = resolve_segment_base(seg_override)
+          es_base = desc_base(seg_cache(:es))
 
           begin
           case cmd
@@ -602,7 +675,7 @@ module RHDL
 
           when C::CMD_POP
             exec_pop(opcode, prefix_count, is_8bit, op32, addr32, sz, mask,
-                     modregrm_mod, modregrm_reg, modregrm_rm, bytes, memory, ss_base,
+                     modregrm_mod, modregrm_reg, modregrm_rm, bytes, memory, ds_base, ss_base,
                      eip, next_eip)
 
           when C::CMD_JMP
@@ -736,19 +809,19 @@ module RHDL
             exec_popa(op32, memory, ss_base, eip, next_eip)
 
           when C::CMD_MOVS
-            exec_movs(is_8bit, op32, memory, ds_base, ss_base, eip, next_eip)
+            exec_movs(is_8bit, op32, memory, ds_base, es_base, eip, next_eip)
 
           when C::CMD_STOS
-            exec_stos(is_8bit, op32, memory, ss_base, eip, next_eip)
+            exec_stos(is_8bit, op32, memory, es_base, eip, next_eip)
 
           when C::CMD_LODS
             exec_lods(is_8bit, op32, memory, ds_base, eip, next_eip)
 
           when C::CMD_CMPS
-            exec_cmps(is_8bit, op32, memory, ds_base, ss_base, eip, next_eip)
+            exec_cmps(is_8bit, op32, memory, ds_base, es_base, eip, next_eip)
 
           when C::CMD_SCAS
-            exec_scas(is_8bit, op32, memory, ss_base, eip, next_eip)
+            exec_scas(is_8bit, op32, memory, es_base, eip, next_eip)
 
           when C::CMD_ENTER
             exec_enter(op32, bytes, prefix_count, memory, ss_base, eip, next_eip)
@@ -759,8 +832,14 @@ module RHDL
           when C::CMD_IN
             exec_in(opcode, prefix_count, is_8bit, op32, bytes, eip, next_eip)
 
+          when C::CMD_INS
+            exec_ins(is_8bit, op32, addr32, memory, ds_base, ss_base, eip, next_eip)
+
           when C::CMD_OUT
             exec_out(opcode, prefix_count, is_8bit, op32, bytes, eip, next_eip)
+
+          when C::CMD_OUTS
+            exec_outs(is_8bit, op32, addr32, memory, ds_base, ss_base, eip, next_eip)
 
           when C::CMD_XLAT
             exec_xlat(memory, ds_base, eip, next_eip)
@@ -849,6 +928,22 @@ module RHDL
 
           when C::CMD_fpu
             exec_fpu(memory, eip, next_eip)
+
+          when C::CMD_PUSH_MOV_SEG
+            exec_push_mov_seg(opcode, prefix_count, op32, addr32, sz,
+                              modregrm_mod, modregrm_reg, modregrm_rm,
+                              bytes, memory, ds_base, ss_base, eip, next_eip)
+
+          when C::CMD_POP_seg
+            exec_pop_seg(opcode, prefix_count, op32, memory, ss_base, eip, next_eip)
+
+          when C::CMD_RET_far
+            exec_ret_far(opcode, prefix_count, op32, bytes, memory, ss_base, eip, next_eip)
+
+          when C::CMD_LxS
+            exec_lxs(opcode, prefix_count, op32, addr32, sz,
+                     modregrm_mod, modregrm_reg, modregrm_rm,
+                     bytes, memory, ds_base, ss_base, eip, next_eip)
 
           when C::CMD_NULL
             # Unknown opcode: raise #UD exception
@@ -1362,7 +1457,7 @@ module RHDL
         end
 
         def exec_pop(opcode, prefix_count, is_8bit, op32, addr32, sz, mask,
-                     modregrm_mod, modregrm_reg, modregrm_rm, bytes, memory, ss_base,
+                     modregrm_mod, modregrm_reg, modregrm_rm, bytes, memory, ds_base, ss_base,
                      eip, next_eip)
           pop_sz = op32 ? 4 : 2
 
@@ -1371,6 +1466,15 @@ module RHDL
             reg_idx = opcode - 0x58
             value = pop_value(memory, pop_sz, ss_base, op32)
             write_gpr(reg_idx, value, false, op32)
+          when 0x8F  # POP r/m16/32
+            value = pop_value(memory, pop_sz, ss_base, op32)
+            mrm_offset = prefix_count + 1
+            if modregrm_mod == 3
+              write_gpr(modregrm_rm, value, false, op32)
+            else
+              addr = compute_ea(modregrm_mod, modregrm_rm, addr32, bytes, mrm_offset, ds_base, ss_base)
+              mem_write(memory, addr, value, pop_sz)
+            end
           end
 
           advance_eip(next_eip)
@@ -1402,6 +1506,30 @@ module RHDL
             target_offset = extract_imm(bytes, prefix_count + 1, off_sz)
             target_selector = extract_imm(bytes, prefix_count + 1 + off_sz, 2)
             exec_far_jmp(target_selector, target_offset, op32, memory)
+
+          when 0xFF  # JMP indirect near (/4) or JMP far indirect (/5)
+            mrm_offset = prefix_count + 1
+            mrm = bytes[mrm_offset]
+            reg_field = (mrm >> 3) & 7
+            modregrm_mod = (mrm >> 6) & 3
+            modregrm_rm = mrm & 7
+
+            if reg_field == 4  # JMP near indirect
+              if modregrm_mod == 3
+                target = read_gpr(modregrm_rm, false, op32 ? 4 : 2) & (op32 ? 0xFFFF_FFFF : 0xFFFF)
+              else
+                addr = compute_ea(modregrm_mod, modregrm_rm, false, bytes, mrm_offset, ds_base, ss_base)
+                target = mem_read(memory, addr, op32 ? 4 : 2) & (op32 ? 0xFFFF_FFFF : 0xFFFF)
+              end
+              advance_eip(target)
+
+            elsif reg_field == 5  # JMP far indirect (m16:16 or m16:32)
+              addr = compute_ea(modregrm_mod, modregrm_rm, false, bytes, mrm_offset, ds_base, ss_base)
+              off_sz = op32 ? 4 : 2
+              target_offset = mem_read(memory, addr, off_sz)
+              target_selector = mem_read(memory, addr + off_sz, 2)
+              exec_far_jmp(target_selector, target_offset, op32, memory)
+            end
           end
 
           :ok
@@ -1446,6 +1574,7 @@ module RHDL
 
         def exec_call(opcode, prefix_count, has_0f, op32, bytes, memory, ss_base, eip, next_eip)
           push_sz = op32 ? 4 : 2
+          mrm_offset = prefix_count + 1
 
           case opcode
           when 0xE8  # CALL near relative
@@ -1460,6 +1589,44 @@ module RHDL
               target = (next_eip + offset) & 0xFFFF
             end
             advance_eip(target)
+
+          when 0xFF  # CALL indirect near (FF /2) or CALL indirect far (FF /3)
+            mrm = bytes[mrm_offset]
+            reg_field = (mrm >> 3) & 7
+            modregrm_mod = (mrm >> 6) & 3
+            modregrm_rm = mrm & 7
+            ds_base = desc_base(seg_cache(:ds))
+            ss_b = desc_base(seg_cache(:ss))
+
+            if reg_field == 2  # CALL near indirect
+              if modregrm_mod == 3
+                target = read_gpr(modregrm_rm, false, op32 ? 4 : 2) & (op32 ? 0xFFFF_FFFF : 0xFFFF)
+              else
+                addr = compute_ea(modregrm_mod, modregrm_rm, false, bytes, mrm_offset, ds_base, ss_b)
+                target = mem_read(memory, addr, op32 ? 4 : 2) & (op32 ? 0xFFFF_FFFF : 0xFFFF)
+              end
+              push_value(memory, next_eip, push_sz, ss_base, op32)
+              advance_eip(target)
+
+            elsif reg_field == 3  # CALL far indirect (m16:16 or m16:32)
+              addr = compute_ea(modregrm_mod, modregrm_rm, false, bytes, mrm_offset, ds_base, ss_b)
+              off_sz = op32 ? 4 : 2
+              target_offset = mem_read(memory, addr, off_sz)
+              target_selector = mem_read(memory, addr + off_sz, 2)
+              # Push CS:IP (far return address)
+              push_value(memory, reg(:cs) & 0xFFFF, push_sz, ss_base, op32)
+              push_value(memory, next_eip, push_sz, ss_base, op32)
+              exec_far_jmp(target_selector, target_offset, op32, memory)
+            end
+
+          when 0x9A  # CALL far direct (ptr16:16 or ptr16:32)
+            off_sz = op32 ? 4 : 2
+            target_offset = extract_imm(bytes, prefix_count + 1, off_sz)
+            target_selector = extract_imm(bytes, prefix_count + 1 + off_sz, 2)
+            # Push CS:IP (far return address)
+            push_value(memory, reg(:cs) & 0xFFFF, push_sz, ss_base, op32)
+            push_value(memory, next_eip, push_sz, ss_base, op32)
+            exec_far_jmp(target_selector, target_offset, op32, memory)
           end
 
           :ok
@@ -1469,6 +1636,148 @@ module RHDL
           pop_sz = op32 ? 4 : 2
           return_addr = pop_value(memory, pop_sz, ss_base, op32)
           advance_eip(return_addr & (op32 ? 0xFFFF_FFFF : 0xFFFF))
+
+          # RET imm16 (0xC2): adjust ESP by imm16 after popping return address
+          if opcode == 0xC2
+            imm16 = extract_imm(bytes, prefix_count + 1, 2)
+            sp = reg(:esp)
+            if op32
+              write_gpr(4, (sp + imm16) & 0xFFFF_FFFF, false, true)
+            else
+              write_gpr(4, (sp + imm16) & 0xFFFF, false, false)
+            end
+          end
+
+          :ok
+        end
+
+        def exec_ret_far(opcode, prefix_count, op32, bytes, memory, ss_base, eip, next_eip)
+          pop_sz = op32 ? 4 : 2
+          return_ip = pop_value(memory, pop_sz, ss_base, op32)
+          return_cs = pop_value(memory, pop_sz, ss_base, op32) & 0xFFFF
+
+          # Restore CS (real mode: base = selector << 4)
+          new_cs_base = (return_cs & 0xFFFF) << 4
+          cache = C::DEFAULT_CS_CACHE
+          base_hi = (new_cs_base >> 24) & 0xFF
+          base_lo = new_cs_base & 0xFF_FFFF
+          cache = cache & ~(0xFF << 56) & ~(0xFF_FFFF << 16)
+          cache = cache | (base_hi << 56) | (base_lo << 16)
+          write_regfile(write_seg: 1, wr_seg_index: C::SEGMENT_CS, seg_to_reg: return_cs,
+                        write_seg_cache: 1, seg_cache_to_reg: cache,
+                        write_seg_valid: 1, seg_valid_to_reg: 1)
+          advance_eip(return_ip & (op32 ? 0xFFFF_FFFF : 0xFFFF))
+
+          # RETF imm16 (0xCA)
+          if opcode == 0xCA
+            imm16 = extract_imm(bytes, prefix_count + 1, 2)
+            sp = reg(:esp)
+            if op32
+              write_gpr(4, (sp + imm16) & 0xFFFF_FFFF, false, true)
+            else
+              write_gpr(4, (sp + imm16) & 0xFFFF, false, false)
+            end
+          end
+
+          :ok
+        end
+
+        def exec_push_mov_seg(opcode, prefix_count, op32, addr32, sz,
+                              modregrm_mod, modregrm_reg, modregrm_rm,
+                              bytes, memory, ds_base, ss_base, eip, next_eip)
+          push_sz = op32 ? 4 : 2
+
+          case opcode
+          when 0x06  # PUSH ES
+            push_value(memory, reg(:es) & 0xFFFF, push_sz, ss_base, op32)
+          when 0x0E  # PUSH CS
+            push_value(memory, reg(:cs) & 0xFFFF, push_sz, ss_base, op32)
+          when 0x16  # PUSH SS
+            push_value(memory, reg(:ss) & 0xFFFF, push_sz, ss_base, op32)
+          when 0x1E  # PUSH DS
+            push_value(memory, reg(:ds) & 0xFFFF, push_sz, ss_base, op32)
+          when 0x8C  # MOV r/m16, Sreg
+            # reg field selects segment: 0=ES, 1=CS, 2=SS, 3=DS, 4=FS, 5=GS
+            seg_names = [:es, :cs, :ss, :ds, :fs, :gs]
+            seg_val = modregrm_reg < seg_names.length ? reg(seg_names[modregrm_reg]) & 0xFFFF : 0
+            mrm_offset = prefix_count + 1
+            if modregrm_mod == 3
+              write_gpr(modregrm_rm, seg_val, false, false)
+            else
+              addr = compute_ea(modregrm_mod, modregrm_rm, addr32, bytes, mrm_offset, ds_base, ss_base)
+              mem_write(memory, addr, seg_val, 2)
+            end
+          end
+
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_pop_seg(opcode, prefix_count, op32, memory, ss_base, eip, next_eip)
+          pop_sz = op32 ? 4 : 2
+          selector = pop_value(memory, pop_sz, ss_base, op32) & 0xFFFF
+
+          # Determine which segment to load
+          seg_index, seg_name = case opcode
+                                when 0x07 then [C::SEGMENT_ES, :es]
+                                when 0x17 then [C::SEGMENT_SS, :ss]
+                                when 0x1F then [C::SEGMENT_DS, :ds]
+                                end
+
+          if reg(:cr0_pe) == 1
+            load_segment_protected(seg_index, selector, memory, eip)
+          else
+            # Real mode: base = selector << 4
+            new_base = (selector & 0xFFFF) << 4
+            cache = seg_cache(seg_name)
+            cache = cache & ~(0xFF << 56) & ~(0xFF_FFFF << 16)
+            base_hi = (new_base >> 24) & 0xFF
+            base_lo = new_base & 0xFF_FFFF
+            cache = cache | (base_hi << 56) | (base_lo << 16)
+            write_regfile(write_seg: 1, wr_seg_index: seg_index, seg_to_reg: selector,
+                          write_seg_cache: 1, seg_cache_to_reg: cache,
+                          write_seg_valid: 1, seg_valid_to_reg: 1)
+          end
+
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_lxs(opcode, prefix_count, op32, addr32, sz,
+                     modregrm_mod, modregrm_reg, modregrm_rm,
+                     bytes, memory, ds_base, ss_base, eip, next_eip)
+          mrm_offset = prefix_count + 1
+          # LES/LDS load a far pointer (offset:segment) from memory into reg:seg
+          addr = compute_ea(modregrm_mod, modregrm_rm, addr32, bytes, mrm_offset, ds_base, ss_base)
+          off_sz = op32 ? 4 : 2
+          offset_val = mem_read(memory, addr, off_sz)
+          selector = mem_read(memory, addr + off_sz, 2) & 0xFFFF
+
+          # Write offset to destination register
+          write_gpr_by_reg_field(modregrm_reg, offset_val, false, op32)
+
+          # Determine segment
+          seg_index, seg_name = case opcode
+                                when 0xC4 then [C::SEGMENT_ES, :es]  # LES
+                                when 0xC5 then [C::SEGMENT_DS, :ds]  # LDS
+                                end
+
+          if reg(:cr0_pe) == 1
+            load_segment_protected(seg_index, selector, memory, eip)
+          else
+            # Real mode: base = selector << 4
+            new_base = (selector & 0xFFFF) << 4
+            cache = seg_cache(seg_name)
+            cache = cache & ~(0xFF << 56) & ~(0xFF_FFFF << 16)
+            base_hi = (new_base >> 24) & 0xFF
+            base_lo = new_base & 0xFF_FFFF
+            cache = cache | (base_hi << 56) | (base_lo << 16)
+            write_regfile(write_seg: 1, wr_seg_index: seg_index, seg_to_reg: selector,
+                          write_seg_cache: 1, seg_cache_to_reg: cache,
+                          write_seg_valid: 1, seg_valid_to_reg: 1)
+          end
+
+          advance_eip(next_eip)
           :ok
         end
 
@@ -1513,6 +1822,13 @@ module RHDL
           when 0xA9  # TEST AX/EAX, imm
             val1 = read_gpr(0, false, sz)
             val2 = extract_imm(bytes, prefix_count + 1, sz)
+            result = run_alu(C::ARITH_AND, val1, val2, sz)
+            write_flags_from_alu(result)
+
+          when 0xF6, 0xF7  # TEST r/m, imm (F6/F7 /0)
+            val1 = read_rm(modregrm_mod, modregrm_rm, addr32, is_8bit, sz, bytes, mrm_offset, memory, ds_base, ss_base)
+            imm_offset = mrm_offset + modregrm_byte_len(modregrm_mod, modregrm_rm, addr32, bytes, mrm_offset)
+            val2 = extract_imm(bytes, imm_offset, sz) & mask
             result = run_alu(C::ARITH_AND, val1, val2, sz)
             write_flags_from_alu(result)
           end
@@ -1819,21 +2135,68 @@ module RHDL
               write_gpr(2, hi, false, true)
             end
 
-            write_regfile(
-              write_flags: 1,
-              cflag_to_reg: of, oflag_to_reg: of,
-              pflag_to_reg: reg(:pflag), aflag_to_reg: reg(:aflag),
-              zflag_to_reg: reg(:zflag), sflag_to_reg: reg(:sflag),
-              tflag_to_reg: reg(:tflag), iflag_to_reg: reg(:iflag),
-              dflag_to_reg: reg(:dflag), iopl_to_reg: reg(:iopl),
-              ntflag_to_reg: reg(:ntflag), vmflag_to_reg: reg(:vmflag),
-              acflag_to_reg: reg(:acflag), idflag_to_reg: reg(:idflag),
-              rflag_to_reg: reg(:rflag)
-            )
+            write_imul_flags(of)
+
+          elsif has_0f && opcode == 0xAF
+            # Two-operand IMUL r, r/m (0x0F AF)
+            src = read_rm(modregrm_mod, modregrm_rm, addr32, false, sz, bytes, mrm_offset, memory, ds_base, ss_base) & mask
+            dst = read_gpr(modregrm_reg, false, sz) & mask
+
+            @multiply.set_input(:src, src)
+            @multiply.set_input(:dst, dst)
+            @multiply.set_input(:operand_size, sz * 8)
+            @multiply.set_input(:is_signed, 1)
+            @multiply.propagate
+
+            lo = @multiply.get_output(:result_lo) & mask
+            of = @multiply.get_output(:overflow)
+
+            write_gpr_by_reg_field(modregrm_reg, lo, false, op32)
+            write_imul_flags(of)
+
+          elsif opcode == 0x69 || opcode == 0x6B
+            # Three-operand IMUL r, r/m, imm
+            src = read_rm(modregrm_mod, modregrm_rm, addr32, false, sz, bytes, mrm_offset, memory, ds_base, ss_base) & mask
+            mlen = modregrm_byte_len(modregrm_mod, modregrm_rm, addr32, bytes, mrm_offset)
+            imm_offset = mrm_offset + mlen
+
+            if opcode == 0x6B
+              # imm8 sign-extended to operand size
+              imm = sign_extend_8(bytes[imm_offset] || 0) & mask
+            else
+              # imm16/32
+              imm = extract_imm(bytes, imm_offset, sz) & mask
+            end
+
+            @multiply.set_input(:src, src)
+            @multiply.set_input(:dst, imm)
+            @multiply.set_input(:operand_size, sz * 8)
+            @multiply.set_input(:is_signed, 1)
+            @multiply.propagate
+
+            lo = @multiply.get_output(:result_lo) & mask
+            of = @multiply.get_output(:overflow)
+
+            write_gpr_by_reg_field(modregrm_reg, lo, false, op32)
+            write_imul_flags(of)
           end
 
           advance_eip(next_eip)
           :ok
+        end
+
+        def write_imul_flags(of)
+          write_regfile(
+            write_flags: 1,
+            cflag_to_reg: of, oflag_to_reg: of,
+            pflag_to_reg: reg(:pflag), aflag_to_reg: reg(:aflag),
+            zflag_to_reg: reg(:zflag), sflag_to_reg: reg(:sflag),
+            tflag_to_reg: reg(:tflag), iflag_to_reg: reg(:iflag),
+            dflag_to_reg: reg(:dflag), iopl_to_reg: reg(:iopl),
+            ntflag_to_reg: reg(:ntflag), vmflag_to_reg: reg(:vmflag),
+            acflag_to_reg: reg(:acflag), idflag_to_reg: reg(:idflag),
+            rflag_to_reg: reg(:rflag)
+          )
         end
 
         def exec_div(is_signed, is_8bit, op32, addr32, sz, mask, modregrm_mod, modregrm_reg, modregrm_rm,
@@ -1914,10 +2277,10 @@ module RHDL
 
         def exec_string_rep(cmd, cmdex, consumed, is_8bit, op32, addr32,
                             modregrm_mod, modregrm_reg, modregrm_rm,
-                            bytes, memory, cs_base, eip, rep_prefix)
+                            bytes, memory, cs_base, eip, rep_prefix, seg_override = C::SEGMENT_DS)
           sz = is_8bit ? 1 : (op32 ? 4 : 2)
-          ds_base = desc_base(seg_cache(:ds))
-          ss_base = desc_base(seg_cache(:ss))
+          ds_base = resolve_segment_base(seg_override)
+          es_base = desc_base(seg_cache(:es))
           next_eip = (eip + consumed) & 0xFFFF
 
           cx_mask = op32 ? 0xFFFF_FFFF : 0xFFFF
@@ -1936,11 +2299,11 @@ module RHDL
             break if cx == 0
 
             case cmd
-            when C::CMD_MOVS then exec_movs(is_8bit, op32, memory, ds_base, ss_base, eip, next_eip, advance: false)
-            when C::CMD_STOS then exec_stos(is_8bit, op32, memory, ss_base, eip, next_eip, advance: false)
+            when C::CMD_MOVS then exec_movs(is_8bit, op32, memory, ds_base, es_base, eip, next_eip, advance: false)
+            when C::CMD_STOS then exec_stos(is_8bit, op32, memory, es_base, eip, next_eip, advance: false)
             when C::CMD_LODS then exec_lods(is_8bit, op32, memory, ds_base, eip, next_eip, advance: false)
-            when C::CMD_CMPS then exec_cmps(is_8bit, op32, memory, ds_base, ss_base, eip, next_eip, advance: false)
-            when C::CMD_SCAS then exec_scas(is_8bit, op32, memory, ss_base, eip, next_eip, advance: false)
+            when C::CMD_CMPS then exec_cmps(is_8bit, op32, memory, ds_base, es_base, eip, next_eip, advance: false)
+            when C::CMD_SCAS then exec_scas(is_8bit, op32, memory, es_base, eip, next_eip, advance: false)
             end
 
             # Decrement CX
@@ -2014,7 +2377,7 @@ module RHDL
           :ok
         end
 
-        def exec_movs(is_8bit, op32, memory, ds_base, ss_base, eip, next_eip, advance: true)
+        def exec_movs(is_8bit, op32, memory, ds_base, es_base, eip, next_eip, advance: true)
           sz = is_8bit ? 1 : (op32 ? 4 : 2)
           addr_mask = op32 ? 0xFFFF_FFFF : 0xFFFF
           df = reg(:dflag)
@@ -2023,9 +2386,9 @@ module RHDL
           si = reg(:esi) & addr_mask
           di = reg(:edi) & addr_mask
 
-          # Read from DS:SI, write to ES:DI (ES=DS in our simplified model)
+          # Read from DS:SI, write to ES:DI
           val = mem_read(memory, (ds_base + si) & 0xFFFF_FFFF, sz)
-          mem_write(memory, (ds_base + di) & 0xFFFF_FFFF, val, sz)
+          mem_write(memory, (es_base + di) & 0xFFFF_FFFF, val, sz)
 
           write_gpr(6, (si + delta) & addr_mask, false, op32)  # ESI
           write_gpr(7, (di + delta) & addr_mask, false, op32)  # EDI
@@ -2034,7 +2397,7 @@ module RHDL
           :ok
         end
 
-        def exec_stos(is_8bit, op32, memory, ss_base, eip, next_eip, advance: true)
+        def exec_stos(is_8bit, op32, memory, es_base, eip, next_eip, advance: true)
           sz = is_8bit ? 1 : (op32 ? 4 : 2)
           addr_mask = op32 ? 0xFFFF_FFFF : 0xFFFF
           df = reg(:dflag)
@@ -2043,8 +2406,7 @@ module RHDL
           di = reg(:edi) & addr_mask
           val = is_8bit ? (reg(:eax) & 0xFF) : (reg(:eax) & size_mask(sz))
 
-          ds_base = desc_base(seg_cache(:ds))
-          mem_write(memory, (ds_base + di) & 0xFFFF_FFFF, val, sz)
+          mem_write(memory, (es_base + di) & 0xFFFF_FFFF, val, sz)
 
           write_gpr(7, (di + delta) & addr_mask, false, op32)  # EDI
 
@@ -2076,7 +2438,7 @@ module RHDL
           :ok
         end
 
-        def exec_cmps(is_8bit, op32, memory, ds_base, ss_base, eip, next_eip, advance: true)
+        def exec_cmps(is_8bit, op32, memory, ds_base, es_base, eip, next_eip, advance: true)
           sz = is_8bit ? 1 : (op32 ? 4 : 2)
           addr_mask = op32 ? 0xFFFF_FFFF : 0xFFFF
           df = reg(:dflag)
@@ -2086,7 +2448,7 @@ module RHDL
           di = reg(:edi) & addr_mask
 
           val_src = mem_read(memory, (ds_base + si) & 0xFFFF_FFFF, sz)
-          val_dst = mem_read(memory, (ds_base + di) & 0xFFFF_FFFF, sz)
+          val_dst = mem_read(memory, (es_base + di) & 0xFFFF_FFFF, sz)
 
           # CMP: dst - src (SI data - DI data)
           result = run_alu(C::ARITH_SUB, val_dst, val_src, sz)
@@ -2099,7 +2461,7 @@ module RHDL
           :ok
         end
 
-        def exec_scas(is_8bit, op32, memory, ss_base, eip, next_eip, advance: true)
+        def exec_scas(is_8bit, op32, memory, es_base, eip, next_eip, advance: true)
           sz = is_8bit ? 1 : (op32 ? 4 : 2)
           addr_mask = op32 ? 0xFFFF_FFFF : 0xFFFF
           df = reg(:dflag)
@@ -2108,8 +2470,7 @@ module RHDL
           di = reg(:edi) & addr_mask
           al_val = is_8bit ? (reg(:eax) & 0xFF) : (reg(:eax) & size_mask(sz))
 
-          ds_base = desc_base(seg_cache(:ds))
-          val_mem = mem_read(memory, (ds_base + di) & 0xFFFF_FFFF, sz)
+          val_mem = mem_read(memory, (es_base + di) & 0xFFFF_FFFF, sz)
 
           # CMP AL/AX/EAX with ES:DI
           result = run_alu(C::ARITH_SUB, val_mem, al_val, sz)
@@ -2222,6 +2583,41 @@ module RHDL
           :ok
         end
 
+        def exec_ins(is_8bit, op32, addr32, memory, ds_base, ss_base, eip, next_eip)
+          sz = is_8bit ? 1 : (op32 ? 4 : 2)
+          addr_mask = addr32 ? 0xFFFF_FFFF : 0xFFFF
+          port = reg(:edx) & 0xFFFF
+          value = @io_read_callback ? @io_read_callback.call(port, sz) : 0
+
+          es_base = desc_base_public(seg_cache_public(:es))
+          di = reg(:edi) & addr_mask
+          mem_write(memory, (es_base + di) & 0xFFFF_FFFF, value, sz)
+
+          df = reg(:dflag)
+          delta = df == 0 ? sz : -sz
+          write_gpr(7, (di + delta) & addr_mask, false, addr32)
+
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_outs(is_8bit, op32, addr32, memory, ds_base, ss_base, eip, next_eip)
+          sz = is_8bit ? 1 : (op32 ? 4 : 2)
+          addr_mask = addr32 ? 0xFFFF_FFFF : 0xFFFF
+          port = reg(:edx) & 0xFFFF
+
+          si = reg(:esi) & addr_mask
+          value = mem_read(memory, (ds_base + si) & 0xFFFF_FFFF, sz)
+          @io_write_callback&.call(port, value, sz)
+
+          df = reg(:dflag)
+          delta = df == 0 ? sz : -sz
+          write_gpr(6, (si + delta) & addr_mask, false, addr32)
+
+          advance_eip(next_eip)
+          :ok
+        end
+
         def exec_xlat(memory, ds_base, eip, next_eip)
           bx = reg(:ebx) & 0xFFFF
           al = reg(:eax) & 0xFF
@@ -2247,7 +2643,7 @@ module RHDL
 
           # Push FLAGS, CS, IP (each 16-bit, total 6 bytes)
           flags = build_eflags & 0xFFFF
-          cs_val = 0  # In our simplified model, CS selector is 0
+          cs_val = reg(:cs) & 0xFFFF
           push_value(memory, flags, 2, ss_base, op32)
           push_value(memory, cs_val, 2, ss_base, op32)
           push_value(memory, return_eip & 0xFFFF, 2, ss_base, op32)
@@ -2261,15 +2657,16 @@ module RHDL
           new_ip = mem_read(memory, ivt_addr, 2)
           new_cs = mem_read(memory, ivt_addr + 2, 2)
 
-          # Update CS descriptor cache with new base (new_cs << 4 for real mode)
+          # Update CS selector and descriptor cache with new base (new_cs << 4 for real mode)
           new_cs_base = (new_cs & 0xFFFF) << 4
           cache = C::DEFAULT_CS_CACHE
           base_hi = (new_cs_base >> 24) & 0xFF
           base_lo = new_cs_base & 0xFF_FFFF
           cache = cache & ~(0xFF << 56) & ~(0xFF_FFFF << 16)
           cache = cache | (base_hi << 56) | (base_lo << 16)
-          write_regfile(write_seg_cache: 1, wr_seg_index: C::SEGMENT_CS,
-                        seg_cache_to_reg: cache)
+          write_regfile(write_seg: 1, wr_seg_index: C::SEGMENT_CS, seg_to_reg: new_cs,
+                        write_seg_cache: 1, seg_cache_to_reg: cache,
+                        write_seg_valid: 1, seg_valid_to_reg: 1)
 
           # Set new EIP
           advance_eip(new_ip & 0xFFFF)
@@ -2304,15 +2701,16 @@ module RHDL
           new_cs = pop_value(memory, pop_sz, ss_base, op32)
           new_flags = pop_value(memory, pop_sz, ss_base, op32)
 
-          # Update CS descriptor cache
+          # Update CS selector and descriptor cache
           new_cs_base = (new_cs & 0xFFFF) << 4
           cache = C::DEFAULT_CS_CACHE
           base_hi = (new_cs_base >> 24) & 0xFF
           base_lo = new_cs_base & 0xFF_FFFF
           cache = cache & ~(0xFF << 56) & ~(0xFF_FFFF << 16)
           cache = cache | (base_hi << 56) | (base_lo << 16)
-          write_regfile(write_seg_cache: 1, wr_seg_index: C::SEGMENT_CS,
-                        seg_cache_to_reg: cache)
+          write_regfile(write_seg: 1, wr_seg_index: C::SEGMENT_CS, seg_to_reg: new_cs,
+                        write_seg_cache: 1, seg_cache_to_reg: cache,
+                        write_seg_valid: 1, seg_valid_to_reg: 1)
 
           # Restore flags
           load_eflags(new_flags, op32)
