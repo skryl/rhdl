@@ -244,7 +244,7 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
       expect(runner.mode).to eq(:ir)
       expect(runner.sim_backend).to eq(:compile)
       expect(runner.core).to eq(:single)
-      expect(runner.cpu).to be_a(RHDL::Examples::RISCV::IRHarness)
+      expect(runner.cpu).to be_a(RHDL::Examples::RISCV::IrRunner)
     rescue LoadError, RuntimeError => e
       skip "Default backend unavailable: #{e.message}"
     end
@@ -252,7 +252,7 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
     it 'builds pipeline harness when core is pipeline' do
       runner = described_class.new(core: :pipeline)
       expect(runner.core).to eq(:pipeline)
-      expect(runner.cpu).to be_a(RHDL::Examples::RISCV::Pipeline::IRHarness)
+      expect(runner.cpu).to be_a(RHDL::Examples::RISCV::IrRunner)
     rescue LoadError, RuntimeError => e
       skip "Pipeline backend unavailable: #{e.message}"
     end

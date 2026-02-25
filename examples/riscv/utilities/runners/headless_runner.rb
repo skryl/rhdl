@@ -1,14 +1,8 @@
 # frozen_string_literal: true
 
-require_relative '../../hdl/ir_harness'
-require_relative '../../hdl/pipeline/ir_harness'
+require_relative 'ruby_runner'
+require_relative 'ir_runner'
 require_relative '../assembler'
-
-begin
-  require_relative '../../hdl/hdl_harness'
-rescue LoadError
-  # HdlHarness may not be available if codegen dependencies are missing
-end
 
 module RHDL
   module Examples
@@ -41,17 +35,29 @@ module RHDL
           @core = normalize_core(core)
           resolved_mem_size = mem_size || DEFAULT_MEM_SIZE
 
-          if hdl_mode?(@effective_mode)
-            hdl_backend = @effective_mode == :verilog ? :verilator : :arcilator # :circt mode → :arcilator backend
-            if @core != :single
-              warn "HDL mode (#{@effective_mode}) only supports single-cycle core; overriding core=#{@core} to single."
-              @core = :single
-            end
-            @cpu = HdlHarness.new(backend: hdl_backend, mem_size: resolved_mem_size, core: @core)
-          else
-            backend, allow_fallback = map_backend(@effective_mode, @sim_backend)
-            @cpu = build_cpu(core: @core, mem_size: resolved_mem_size, backend: backend, allow_fallback: allow_fallback)
-          end
+          @cpu = case @effective_mode
+                 when :ruby
+                   RubyRunner.new(core: @core, mem_size: resolved_mem_size)
+                 when :ir
+                   backend, allow_fallback = map_backend(@effective_mode, @sim_backend)
+                   IrRunner.new(core: @core, mem_size: resolved_mem_size, backend: backend, allow_fallback: allow_fallback)
+                 when :verilog
+                   if @core != :single
+                     warn "Verilog mode only supports single-cycle core; overriding core=#{@core} to single."
+                     @core = :single
+                   end
+                   require_relative 'verilator_runner'
+                   VerilogRunner.new(mem_size: resolved_mem_size)
+                 when :circt
+                   if @core != :single
+                     warn "CIRCT mode only supports single-cycle core; overriding core=#{@core} to single."
+                     @core = :single
+                   end
+                   require_relative 'arcilator_runner'
+                   ArcilatorRunner.new(mem_size: resolved_mem_size)
+                 else
+                   raise ArgumentError, "Unsupported mode #{@effective_mode.inspect}"
+                 end
         end
 
         def native?
@@ -243,26 +249,11 @@ module RHDL
           end
         end
 
-        def hdl_mode?(mode)
-          %i[verilog circt].include?(mode)
-        end
-
         def normalize_core(core)
           value = (core || :single).to_sym
           return value if %i[single pipeline].include?(value)
 
           raise ArgumentError, "Unsupported core #{core.inspect}. Use single or pipeline."
-        end
-
-        def build_cpu(core:, mem_size:, backend:, allow_fallback:)
-          case core
-          when :single
-            IRHarness.new(mem_size: mem_size, backend: backend, allow_fallback: allow_fallback)
-          when :pipeline
-            Pipeline::IRHarness.new('riscv_pipeline_ir', mem_size: mem_size, backend: backend, allow_fallback: allow_fallback)
-          else
-            raise ArgumentError, "Unsupported core #{core.inspect}. Use single or pipeline."
-          end
         end
 
         def current_pc
@@ -272,7 +263,7 @@ module RHDL
         end
 
         def xv6_capable?
-          return true if hdl_mode?(@effective_mode)
+          return true if %i[verilog circt].include?(@effective_mode)
           return true if native? && @cpu.respond_to?(:sim) && @cpu.sim.respond_to?(:runner_kind) && @cpu.sim.runner_kind == :riscv
 
           false

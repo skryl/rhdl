@@ -843,11 +843,6 @@ module RHDL
               $stdout.flush
               runner.load_xv6(kernel: kernel_path, fs: fs_path)
 
-              # Enable batched C++ execution for HDL backends
-              if runner.cpu.respond_to?(:enable_batched_mode!)
-                runner.cpu.enable_batched_mode!
-              end
-
               # Warmup - run 100 cycles past reset
               runner.run_steps(100)
 
