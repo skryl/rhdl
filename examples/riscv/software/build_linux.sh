@@ -864,6 +864,41 @@ cp -f "${VMLINUX_SRC}" "${BIN_DIR}/linux_kernel.elf"
 cp -f "${MAP_SRC}" "${BIN_DIR}/linux_kernel.map"
 cp -f "${CONFIG_SRC}" "${BIN_DIR}/linux_kernel.config"
 
+# Generate source-interleaved disassembly and source map for web simulator.
+echo "generating source map artifacts..."
+if [[ "${MAKE_IN_DOCKER}" -eq 1 ]]; then
+  docker run --rm \
+    -u "$(id -u):$(id -g)" \
+    -v "${REPO_ROOT}:${REPO_ROOT}" \
+    -w "${REPO_ROOT}" \
+    "${BUILDROOT_IMAGE}" \
+    bash -lc '"$@"' _ "${TOOLPREFIX}objdump" -S "${VMLINUX_SRC}" > "${BIN_DIR}/linux_kernel.asm" || true
+  docker run --rm \
+    -u "$(id -u):$(id -g)" \
+    -v "${REPO_ROOT}:${REPO_ROOT}" \
+    -w "${REPO_ROOT}" \
+    "${BUILDROOT_IMAGE}" \
+    bash -lc '"$@"' _ "${TOOLPREFIX}nm" -n "${VMLINUX_SRC}" > "${BIN_DIR}/linux_kernel.nm" || true
+elif command -v "${TOOLPREFIX}objdump" >/dev/null 2>&1; then
+  "${TOOLPREFIX}objdump" -S "${VMLINUX_SRC}" > "${BIN_DIR}/linux_kernel.asm" || true
+  "${TOOLPREFIX}nm" -n "${VMLINUX_SRC}" > "${BIN_DIR}/linux_kernel.nm" || true
+else
+  echo "warning: ${TOOLPREFIX}objdump not found; skipping source map generation"
+fi
+
+EXTRACT_SCRIPT="${SOFTWARE_DIR}/extract_srcmap.rb"
+if command -v ruby >/dev/null 2>&1 && [[ -f "${EXTRACT_SCRIPT}" ]] && [[ -f "${BIN_DIR}/linux_kernel.asm" ]]; then
+  ruby "${EXTRACT_SCRIPT}" \
+    --asm "${BIN_DIR}/linux_kernel.asm" \
+    --nm "${BIN_DIR}/linux_kernel.nm" \
+    --source-dir "${LINUX_DIR}" \
+    --strip-prefix "${LINUX_DIR}" \
+    --strip-prefix "${BUILD_DIR}" \
+    -o "${BIN_DIR}/linux_kernel_srcmap.json"
+else
+  echo "warning: ruby not found or source map inputs missing; skipping source map extraction"
+fi
+
 declare -a artifacts=(
   "${BIN_DIR}/linux_kernel.bin"
   "${BIN_DIR}/linux_kernel.elf"

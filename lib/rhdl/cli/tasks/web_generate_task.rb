@@ -38,6 +38,8 @@ module RHDL
         RISCV_DEFAULT_SRCMAP_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'kernel_srcmap.json')
         RISCV_DEFAULT_DISK_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/fs.img')
         RISCV_DEFAULT_DISK_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'fs.img')
+        RISCV_LINUX_SRCMAP_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/linux_kernel_srcmap.json')
+        RISCV_LINUX_SRCMAP_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'linux_kernel_srcmap.json')
         RISCV_LINUX_KERNEL_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/linux_kernel.bin')
         RISCV_LINUX_KERNEL_ASSET = File.join(SCRIPT_DIR, 'riscv', 'software', 'bin', 'linux_kernel.bin')
         RISCV_LINUX_INITRAMFS_SOURCE = File.join(PROJECT_ROOT, 'examples/riscv/software/bin/linux_initramfs.cpio')
@@ -483,6 +485,10 @@ module RHDL
           copy_optional_file(
             RISCV_DEFAULT_DISK_SOURCE,
             RISCV_DEFAULT_DISK_ASSET
+          )
+          copy_optional_file(
+            RISCV_LINUX_SRCMAP_SOURCE,
+            RISCV_LINUX_SRCMAP_ASSET
           )
           copy_optional_file(
             RISCV_LINUX_KERNEL_SOURCE,

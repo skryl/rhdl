@@ -100,8 +100,33 @@ def parse_asm(asm_path)
   { functions: functions }
 end
 
+# Normalize a source file path by stripping known prefixes.
+def normalize_source_path(raw_file, strip_prefixes = [])
+  path = raw_file
+
+  # Strip any known prefix (e.g., /home/user/.../linux/).
+  strip_prefixes.each do |prefix|
+    pfx = prefix.end_with?('/') ? prefix : "#{prefix}/"
+    if path.start_with?(pfx)
+      path = path[pfx.length..]
+      break
+    end
+  end
+
+  # Legacy xv6 normalization: keep from "kernel/" onward for xv6-style paths.
+  if strip_prefixes.empty?
+    if (rel = path.match(%r{(kernel/\S+)}))
+      return rel[1]
+    elsif path.match?(/\A[\w]+\.[cSshH]\z/)
+      return "kernel/#{path}"
+    end
+  end
+
+  path
+end
+
 # More robust parser: reads objdump -S output line by line, tracking state.
-def parse_objdump_s(asm_path)
+def parse_objdump_s(asm_path, strip_prefixes: [])
   return { lines: [], functions: [] } unless asm_path && File.exist?(asm_path)
 
   result_lines = []
@@ -129,14 +154,7 @@ def parse_objdump_s(asm_path)
     if (match = line.match(%r{(\S*[\w./]+\.[cSshH]):(\d+)(?:\s.*)?$}))
       raw_file = match[1]
       current_line_no = match[2].to_i
-      # Normalize: keep from "kernel/" onward, or prefix "kernel/" for bare names.
-      if (rel = raw_file.match(%r{(kernel/\S+)}))
-        current_file = rel[1]
-      elsif raw_file.match?(/\A[\w]+\.[cSshH]\z/)
-        current_file = "kernel/#{raw_file}"
-      else
-        current_file = raw_file
-      end
+      current_file = normalize_source_path(raw_file, strip_prefixes)
       i += 1
       next
     end
@@ -178,12 +196,13 @@ def collect_sources(source_dir, files)
 end
 
 def main
-  options = {}
+  options = { strip_prefixes: [] }
   OptionParser.new do |opts|
     opts.banner = 'Usage: extract_srcmap.rb [options]'
     opts.on('--asm PATH', 'Path to kernel.asm (objdump -S output)') { |v| options[:asm] = v }
-    opts.on('--nm PATH', 'Path to kernel.nm (nm -n output)') { |v| options[:nm] = v }
+    opts.on('--nm PATH', 'Path to kernel.nm (nm -n output or System.map)') { |v| options[:nm] = v }
     opts.on('--source-dir DIR', 'Path to kernel source directory') { |v| options[:source_dir] = v }
+    opts.on('--strip-prefix DIR', 'Strip this prefix from source paths (repeatable)') { |v| options[:strip_prefixes] << v }
     opts.on('-o', '--output PATH', 'Output JSON path') { |v| options[:output] = v }
     opts.on('--no-sources', 'Omit inline source text (reference files only)') { options[:no_sources] = true }
   end.parse!
@@ -199,7 +218,7 @@ def main
   nm_symbols = parse_nm(options[:nm])
 
   # Parse objdump -S for source line mappings.
-  parsed = parse_objdump_s(options[:asm])
+  parsed = parse_objdump_s(options[:asm], strip_prefixes: options[:strip_prefixes])
 
   # Build file index.
   all_files = Set.new

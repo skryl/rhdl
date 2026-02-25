@@ -303,6 +303,9 @@ export const GENERATED_RUNNER_PRESETS = Object.freeze({
     "preferredTab": "ioTab",
     "enableApple2Ui": false,
     "usesManualIr": false,
+    "defaultSrcmap": {
+      "path": "./assets/fixtures/riscv/software/bin/linux_kernel_srcmap.json"
+    },
     "defaultAssets": [
       {
         "kind": "main",
