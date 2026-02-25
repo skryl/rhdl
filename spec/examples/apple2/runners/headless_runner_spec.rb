@@ -205,7 +205,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
 
   describe 'Verilog mode' do
     before(:each) do
-      skip 'Verilator not available' unless verilator_available?
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
     end
 
     it 'creates verilog mode runner' do
@@ -380,10 +380,6 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
     false
   end
 
-  # Check if Verilator is available
-  def verilator_available?
-    system('which verilator > /dev/null 2>&1')
-  end
 
   # Check if Arcilator is available
   def arcilator_available?

@@ -207,7 +207,7 @@ RSpec.describe 'Game Boy CLI' do
   describe 'VerilogRunner', :slow do
     before(:all) do
       # Check if Verilator is available
-      @verilator_available = system('which verilator > /dev/null 2>&1')
+      @verilator_available = HdlToolchain.verilator_available?
       skip "Verilator not available" unless @verilator_available
 
       begin
@@ -406,7 +406,7 @@ RSpec.describe 'Game Boy CLI' do
 
     describe 'VerilogRunner' do
       before do
-        @verilator_available = system('which verilator > /dev/null 2>&1')
+        @verilator_available = HdlToolchain.verilator_available?
         if @verilator_available
           begin
             require_relative '../../../../examples/gameboy/utilities/runners/verilator_runner'

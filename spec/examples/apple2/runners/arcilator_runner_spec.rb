@@ -316,7 +316,7 @@ RSpec.describe 'ArcilatorRunner' do
 
     it 'matches Verilator PC and register state after short execution', timeout: 600 do
       skip 'Arcilator not available' unless arcilator_available?
-      skip 'Verilator not available' unless ENV['PATH'].split(File::PATH_SEPARATOR).any? { |p| File.executable?(File.join(p, 'verilator')) }
+      skip 'Verilator not available' unless HdlToolchain.verilator_available?
       skip 'AppleIIgo ROM not found' unless @rom_available
       skip 'Karateka memory dump not found' unless @karateka_available
 

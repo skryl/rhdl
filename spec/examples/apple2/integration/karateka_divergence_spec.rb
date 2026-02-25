@@ -5,22 +5,6 @@ require 'rhdl'
 require_relative '../../../../examples/apple2/hdl/apple2'
 require_relative '../../../../examples/apple2/utilities/renderers/braille_renderer'
 
-# Verilator availability check
-def verilator_available?
-  ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
-    File.executable?(File.join(path, 'verilator'))
-  end
-end
-
-# Arcilator availability check
-def arcilator_available?
-  %w[firtool arcilator llc].all? do |cmd|
-    ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
-      File.executable?(File.join(path, cmd))
-    end
-  end
-end
-
 RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   # Test verifies that ISA and IR simulators execute the same code paths
   # by checking that PC and opcode sequences match as subsequences (allowing timing drift)
@@ -114,7 +98,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   end
 
   def verilator_runner_available?
-    return false unless verilator_available?
+    return false unless HdlToolchain.verilator_available?
     begin
       require_relative '../../../../examples/apple2/utilities/runners/verilator_runner'
       true
@@ -138,7 +122,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
   end
 
   def arcilator_runner_available?
-    return false unless arcilator_available?
+    return false unless HdlToolchain.arcilator_available?
     begin
       require_relative '../../../../examples/apple2/utilities/runners/arcilator_runner'
       true
@@ -446,12 +430,12 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     # Check if HDL runners are available (optional for this test)
     verilator_sim = nil
     arcilator_sim = nil
-    if verilator_available?
+    if HdlToolchain.verilator_available?
       puts "\nVerilator available - will include in comparison"
     else
       puts "\nVerilator not available - comparing ISA and IR only"
     end
-    if arcilator_available?
+    if HdlToolchain.arcilator_available?
       puts "Arcilator available - will include in comparison"
     end
 
@@ -469,13 +453,13 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     ir_sim = create_ir_compiler
     puts "  IR:  Rust IR Compiler (#{(Time.now - ir_start).round(2)}s)"
 
-    if verilator_available?
+    if HdlToolchain.verilator_available?
       verilator_start = Time.now
       verilator_sim = create_verilator_runner
       puts "  Verilator: HDL simulation (#{(Time.now - verilator_start).round(2)}s)"
     end
 
-    if arcilator_available?
+    if HdlToolchain.arcilator_available?
       arcilator_start = Time.now
       arcilator_sim = create_arcilator_runner
       puts "  Arcilator: CIRCT HDL simulation (#{(Time.now - arcilator_start).round(2)}s)"
@@ -698,7 +682,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     skip 'AppleIIgo ROM not found' unless @rom_available
     skip 'Karateka memory dump not found' unless @karateka_available
     skip 'Native ISA simulator not available' unless native_isa_available?
-    skip 'Verilator not available' unless verilator_available?
+    skip 'Verilator not available' unless HdlToolchain.verilator_available?
 
     begin
       require 'rhdl/codegen'
@@ -728,7 +712,7 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     verilator_runner = create_verilator_runner
     puts "  Verilator: HDL simulation (#{(Time.now - verilator_start).round(2)}s)"
 
-    if arcilator_available?
+    if HdlToolchain.arcilator_available?
       arcilator_start = Time.now
       arcilator_sim = create_arcilator_runner
       puts "  Arcilator: CIRCT HDL simulation (#{(Time.now - arcilator_start).round(2)}s)"
@@ -919,12 +903,12 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     # Check if HDL runners are available (optional for this test)
     verilator_sim = nil
     arcilator_sim = nil
-    if verilator_available?
+    if HdlToolchain.verilator_available?
       puts "\nVerilator available - will include in comparison"
     else
       puts "\nVerilator not available - comparing ISA and IR only"
     end
-    if arcilator_available?
+    if HdlToolchain.arcilator_available?
       puts "Arcilator available - will include in comparison"
     end
 
@@ -949,13 +933,13 @@ RSpec.describe 'Karateka ISA vs IR Compiler Divergence' do
     ir_sim = create_ir_compiler
     puts "  IR:  Rust IR Compiler (sub_cycles=14) (#{(Time.now - ir_start).round(2)}s)"
 
-    if verilator_available?
+    if HdlToolchain.verilator_available?
       verilator_start = Time.now
       verilator_sim = create_verilator_runner
       puts "  Verilator: HDL simulation (#{(Time.now - verilator_start).round(2)}s)"
     end
 
-    if arcilator_available?
+    if HdlToolchain.arcilator_available?
       arcilator_start = Time.now
       arcilator_sim = create_arcilator_runner
       puts "  Arcilator: CIRCT HDL simulation (#{(Time.now - arcilator_start).round(2)}s)"

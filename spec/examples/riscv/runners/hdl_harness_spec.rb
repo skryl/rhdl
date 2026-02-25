@@ -4,23 +4,9 @@ require 'spec_helper'
 require 'rhdl'
 
 RSpec.describe 'RISC-V HdlHarness' do
-  def verilator_available?
-    ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
-      File.executable?(File.join(path, 'verilator'))
-    end
-  end
-
-  def arcilator_available?
-    %w[firtool arcilator].all? do |tool|
-      ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
-        File.executable?(File.join(path, tool))
-      end
-    end
-  end
-
   before(:all) do
-    @verilator_available = verilator_available?
-    @arcilator_available = arcilator_available?
+    @verilator_available = HdlToolchain.verilator_available?
+    @arcilator_available = HdlToolchain.arcilator_available?
 
     if @verilator_available || @arcilator_available
       require_relative '../../../../examples/riscv/hdl/hdl_harness'
