@@ -13,16 +13,16 @@ RSpec.shared_examples 'PLIC supervisor MMIO compatibility' do |pipeline:|
   end
 
   it 'handles delegated external interrupts with supervisor PLIC enable/claim addresses' do
+    s_mode_entry = 0x200
     main_program = [
       asm.addi(1, 0, 0x300),       # x1 = supervisor trap handler base
       asm.csrrw(0, 0x105, 1),      # stvec = x1
 
-      asm.lui(2, 0x1),             # x2 = 0x1000
-      asm.addi(2, 2, -2048),       # x2 = 0x800 (MEIP delegation/enable bit)
-      asm.csrrw(0, 0x303, 2),      # mideleg = MEIP
-      asm.csrrw(0, 0x104, 2),      # sie = MEIP bit (delegated external)
-      asm.addi(2, 0, 0x2),         # x2 = sstatus.SIE
-      asm.csrrw(0, 0x100, 2),      # sstatus = SIE
+      asm.addi(2, 0, 0x200),        # x2 = 0x200 (SEIP delegation/enable bit)
+      asm.csrrw(0, 0x303, 2),      # mideleg = SEIP
+      asm.csrrw(0, 0x104, 2),      # sie = SEIE (delegated external)
+      asm.addi(2, 0, 0x2),
+      asm.csrrw(0, 0x100, 2),      # sstatus.SIE = 1
 
       asm.lui(5, 0xC000),          # x5 = 0x0C000000 (PLIC base)
       asm.addi(6, 0, 1),
@@ -35,9 +35,17 @@ RSpec.shared_examples 'PLIC supervisor MMIO compatibility' do |pipeline:|
 
       asm.lui(8, 0xC201),          # x8 = 0x0C201000 (SPRORITY/SCALIM region)
       asm.sw(0, 8, 0),             # spriority threshold = 0
-      asm.nop,
-      asm.nop
+
+      # Drop to S-mode: mstatus MPP=S
+      asm.lui(2, 0x1),
+      asm.addi(2, 2, -2048),       # x2 = 0x800 (MPP=S)
+      asm.csrrs(0, 0x300, 2),      # mstatus |= MPP_S
+      asm.addi(2, 0, s_mode_entry),
+      asm.csrrw(0, 0x341, 2),      # mepc = s_mode_entry
+      asm.mret
     ]
+
+    s_mode_code = [asm.jal(0, 0)]
 
     trap_handler = [
       asm.csrrs(10, 0x142, 0),     # x10 = scause
@@ -48,9 +56,10 @@ RSpec.shared_examples 'PLIC supervisor MMIO compatibility' do |pipeline:|
     ]
 
     cpu.load_program(main_program, 0)
+    cpu.load_program(s_mode_code, s_mode_entry)
     cpu.load_program(trap_handler, 0x300)
     cpu.reset!
-    cpu.run_cycles(main_program.length + (pipeline ? 20 : 8))
+    cpu.run_cycles(main_program.length + (pipeline ? 24 : 10))
     cpu.set_plic_sources(source1: 1)
     cpu.run_cycles(pipeline ? 40 : 20)
 

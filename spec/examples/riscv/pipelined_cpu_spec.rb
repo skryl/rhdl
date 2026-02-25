@@ -1023,22 +1023,31 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::IRHarness, timeout: 30 do
       expect(cpu.read_reg(5)).to eq(illegal_inst)
     end
 
-    it 'delegates machine timer interrupt to stvec when mideleg and sstatus/sie enable it' do
+    it 'delegates supervisor software interrupt to stvec when mideleg and sstatus/sie enable it' do
+      s_mode_entry = 0x200
       main_program = [
         asm.addi(1, 0, 0x300),       # x1 = supervisor trap handler base
         asm.nop,
         asm.nop,
         asm.csrrw(0, 0x105, 1),      # stvec = x1
-        asm.addi(1, 0, 0x80),        # x1 = MTIP bit
-        asm.csrrw(0, 0x303, 1),      # mideleg = MTIP
-        asm.csrrw(0, 0x104, 1),      # sie = MTIE
-        asm.addi(1, 0, 0x2),         # x1 = sstatus.SIE
-        asm.csrrw(0, 0x100, 1),      # sstatus = SIE
-        asm.nop,
-        asm.nop,
+        asm.addi(1, 0, 0x2),         # x1 = SSIP bit (bit 1)
+        asm.csrrw(0, 0x303, 1),      # mideleg = SSIP
+        asm.csrrw(0, 0x104, 1),      # sie = SSIE
+        asm.addi(1, 0, 0x2),         # x1 = SSIP / SIE
+        asm.csrrw(0, 0x100, 1),      # sstatus.SIE = 1
+        asm.csrrw(0, 0x144, 1),      # sip = SSIP (set software interrupt)
+        # Drop to S-mode: mstatus MPP=S
+        asm.lui(1, 0x1),             # x1 = 0x1000
+        asm.addi(1, 1, -2048),       # x1 = 0x800 (MPP=S)
+        asm.csrrs(0, 0x300, 1),      # mstatus |= MPP_S
+        asm.addi(1, 0, s_mode_entry),
+        asm.csrrw(0, 0x341, 1),      # mepc = s_mode_entry
+        asm.mret,                    # -> S-mode, SSIP fires immediately
         asm.nop,
         asm.nop
       ]
+
+      s_mode_code = [asm.jal(0, 0), asm.nop, asm.nop]
 
       trap_handler = [
         asm.csrrs(2, 0x142, 0),      # x2 = scause
@@ -1049,13 +1058,12 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::IRHarness, timeout: 30 do
       ]
 
       cpu.load_program(main_program, 0)
+      cpu.load_program(s_mode_code, s_mode_entry)
       cpu.load_program(trap_handler, 0x300)
       cpu.reset!
-      cpu.run_cycles(30)
-      cpu.set_interrupts(timer: 1)   # assert MTIP
-      cpu.run_cycles(24)
+      cpu.run_cycles(70)
 
-      expect(cpu.read_reg(2)).to eq(0x80000005)
+      expect(cpu.read_reg(2)).to eq(0x80000001)
       expect(cpu.read_reg(4)).to eq(0x120)
     end
 
@@ -1077,9 +1085,8 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::IRHarness, timeout: 30 do
         asm.lui(8, 0xC200),          # x8 = 0x0C200000 (threshold/claim)
         asm.sw(0, 8, 0),             # threshold = 0
 
-        asm.lui(9, 0x1),             # x9 = 0x1000
-        asm.addi(9, 9, -2048),       # x9 = 0x800 (MEIE)
-        asm.csrrw(0, 0x304, 9),      # mie = MEIE
+        asm.addi(9, 0, 0x200),       # x9 = 0x200 (SEIE - supervisor external interrupt enable)
+        asm.csrrw(0, 0x304, 9),      # mie = SEIE
 
         asm.addi(1, 0, 0x8),         # x1 = MIE
         asm.csrrw(0, 0x300, 1),      # mstatus = MIE
@@ -1104,7 +1111,7 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::IRHarness, timeout: 30 do
       cpu.set_plic_sources(source1: 1)
       cpu.run_cycles(30)
 
-      expect(cpu.read_reg(2)).to eq(0x8000000B)
+      expect(cpu.read_reg(2)).to eq(0x80000009)
     end
 
     it 'takes machine external interrupt from UART RX via PLIC source 10 when enabled' do
@@ -1129,9 +1136,8 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::IRHarness, timeout: 30 do
         asm.addi(13, 0, 1),
         asm.sb(13, 12, 1),           # UART IER = RX interrupt enable
 
-        asm.lui(9, 0x1),             # x9 = 0x1000
-        asm.addi(9, 9, -2048),       # x9 = 0x800 (MEIE)
-        asm.csrrw(0, 0x304, 9),      # mie = MEIE
+        asm.addi(9, 0, 0x200),       # x9 = 0x200 (SEIE - supervisor external interrupt enable)
+        asm.csrrw(0, 0x304, 9),      # mie = SEIE
 
         asm.addi(1, 0, 0x8),         # x1 = MIE
         asm.csrrw(0, 0x300, 1),      # mstatus = MIE
@@ -1152,7 +1158,7 @@ RSpec.describe RHDL::Examples::RISCV::Pipeline::IRHarness, timeout: 30 do
       cpu.uart_receive_byte(0x41)
       cpu.run_cycles(36)
 
-      expect(cpu.read_reg(2)).to eq(0x8000000B)
+      expect(cpu.read_reg(2)).to eq(0x80000009)
     end
 
     it 'resumes at the correct PC after timer interrupt via MRET' do

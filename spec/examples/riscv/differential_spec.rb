@@ -1002,21 +1002,30 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
     expect(pipeline.read_reg(5)).to eq(single.read_reg(5))
   end
 
-  it 'matches on delegated machine timer interrupt trap behavior' do
+  it 'matches on delegated software interrupt trap behavior' do
+    s_mode_entry = 0x200
     main_program = [
       asm.addi(1, 0, 0x300),
       asm.nop,
       asm.nop,
       asm.csrrw(0, 0x105, 1),    # stvec = x1
-      asm.addi(1, 0, 0x80),      # MTIP bit
-      asm.csrrw(0, 0x303, 1),    # mideleg = MTIP
-      asm.csrrw(0, 0x104, 1),    # sie = MTIE
-      asm.addi(1, 0, 0x2),       # sstatus.SIE = 1
-      asm.csrrw(0, 0x100, 1),
-      asm.nop,
-      asm.nop,
+      asm.addi(1, 0, 0x2),       # SSIP bit
+      asm.csrrw(0, 0x303, 1),    # mideleg = SSIP
+      asm.csrrw(0, 0x104, 1),    # sie = SSIE
+      asm.addi(1, 0, 0x2),       # SSIP / SIE
+      asm.csrrw(0, 0x100, 1),    # sstatus.SIE = 1
+      asm.csrrw(0, 0x144, 1),    # sip = SSIP (set pending)
+      # Drop to S-mode: mstatus MPP=S
+      asm.lui(1, 0x1),
+      asm.addi(1, 1, -2048),     # x1 = 0x800 (MPP=S)
+      asm.csrrs(0, 0x300, 1),    # mstatus |= MPP_S
+      asm.addi(1, 0, s_mode_entry),
+      asm.csrrw(0, 0x341, 1),    # mepc = s_mode_entry
+      asm.mret,
       asm.nop
     ]
+
+    s_mode_code = [asm.jal(0, 0), asm.nop, asm.nop]
 
     trap_handler = [
       asm.csrrs(2, 0x142, 0),    # scause
@@ -1026,21 +1035,19 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
 
     single = build_single
     single.load_program(main_program, 0)
+    single.load_program(s_mode_code, s_mode_entry)
     single.load_program(trap_handler, 0x300)
     single.reset!
-    single.run_cycles(12)
-    single.set_interrupts(timer: 1)
-    single.run_cycles(10)
+    single.run_cycles(26)
 
     pipeline = build_pipeline
     pipeline.load_program(main_program, 0)
+    pipeline.load_program(s_mode_code, s_mode_entry)
     pipeline.load_program(trap_handler, 0x300)
     pipeline.reset!
-    pipeline.run_cycles(34)
-    pipeline.set_interrupts(timer: 1)
-    pipeline.run_cycles(28)
+    pipeline.run_cycles(70)
 
-    expect(single.read_reg(2)).to eq(0x80000005)
+    expect(single.read_reg(2)).to eq(0x80000001)
     expect(single.read_reg(4)).to eq(0x120)
     expect(pipeline.read_reg(2)).to eq(single.read_reg(2))
     expect(pipeline.read_reg(4)).to eq(single.read_reg(4))
@@ -1194,9 +1201,8 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
       asm.lui(8, 0xC200),        # x8 = 0x0C200000 (threshold/claim)
       asm.sw(0, 8, 0),           # threshold = 0
 
-      asm.lui(9, 0x1),           # x9 = 0x1000
-      asm.addi(9, 9, -2048),     # x9 = 0x800 (MEIE)
-      asm.csrrw(0, 0x304, 9),    # mie = MEIE
+      asm.addi(9, 0, 0x200),     # x9 = 0x200 (SEIE)
+      asm.csrrw(0, 0x304, 9),    # mie = SEIE
 
       asm.addi(1, 0, 0x8),       # mstatus.MIE = 1
       asm.csrrw(0, 0x300, 1),
@@ -1228,7 +1234,7 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
     pipeline.set_plic_sources(source1: 1)
     pipeline.run_cycles(36)
 
-    expect(single.read_reg(2)).to eq(0x8000000B)
+    expect(single.read_reg(2)).to eq(0x80000009)
     expect(pipeline.read_reg(2)).to eq(single.read_reg(2))
   end
 
@@ -1254,9 +1260,8 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
       asm.addi(13, 0, 1),
       asm.sb(13, 12, 1),         # UART IER = RX interrupt enable
 
-      asm.lui(9, 0x1),           # x9 = 0x1000
-      asm.addi(9, 9, -2048),     # x9 = 0x800 (MEIE)
-      asm.csrrw(0, 0x304, 9),    # mie = MEIE
+      asm.addi(9, 0, 0x200),     # x9 = 0x200 (SEIE)
+      asm.csrrw(0, 0x304, 9),    # mie = SEIE
 
       asm.addi(1, 0, 0x8),       # mstatus.MIE = 1
       asm.csrrw(0, 0x300, 1),
@@ -1284,7 +1289,7 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
     pipeline.uart_receive_byte(0x41)
     pipeline.run_cycles(44)
 
-    expect(single.read_reg(2)).to eq(0x8000000B)
+    expect(single.read_reg(2)).to eq(0x80000009)
     expect(pipeline.read_reg(2)).to eq(single.read_reg(2))
   end
 

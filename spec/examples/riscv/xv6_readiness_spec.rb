@@ -49,9 +49,8 @@ RSpec.shared_examples 'xv6 privileged compatibility' do |pipeline:|
 
   it 'exposes pending interrupt bits through mip and delegated bits through sip' do
     program = [
-      asm.lui(3, 1),              # x3 = 0x1000
-      asm.addi(3, 3, -1912),      # x3 = 0x888 (MSIP|MTIP|MEIP delegation bits)
-      asm.csrrw(0, 0x303, 3),     # mideleg = 0x888
+      asm.addi(3, 0, 0x222),      # x3 = 0x222 (SSIP|STIP|SEIP delegation bits)
+      asm.csrrw(0, 0x303, 3),     # mideleg = 0x222
       asm.nop,
       asm.nop,
       asm.csrrs(1, 0x344, 0),     # x1 = mip
@@ -59,10 +58,12 @@ RSpec.shared_examples 'xv6 privileged compatibility' do |pipeline:|
     ]
     cpu.load_program(program)
     cpu.reset!
-    cpu.set_interrupts(software: 1, timer: 1, external: 1)
+    cpu.set_interrupts(software: true, timer: true, external: true)
     cpu.run_cycles(program.length + (pipeline ? 8 : 0))
-    expect(cpu.read_reg(1)).to eq(0x888)
-    expect(cpu.read_reg(2)).to eq(0x888)
+    # MIP: MSIP(bit 3)=0x8, MTIP(bit 7)=0x80, SEIP(bit 9)=0x200 => 0x288
+    expect(cpu.read_reg(1)).to eq(0x288)
+    # SIP: MIP & effective_mideleg(0x222). Only SEIP(bit 9, 0x200) matches => 0x200
+    expect(cpu.read_reg(2)).to eq(0x200)
   end
 end
 

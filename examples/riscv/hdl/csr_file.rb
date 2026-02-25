@@ -66,6 +66,8 @@ module RHDL
     output :read_data11, width: 32
     input :read_addr12, width: 12
     output :read_data12, width: 32
+    input :read_addr13, width: 12
+    output :read_data13, width: 32
 
     # Synchronous write ports
     input :write_addr, width: 12
@@ -293,6 +295,13 @@ module RHDL
         0xF13 => lit(0, width: 32),
         0xF14 => lit(0, width: 32)
       }, default: mem_read_expr(:csrs, read_addr12, width: 32))
+      read_data13 <= case_select(read_addr13, {
+        0x301 => lit(MISA_VALUE, width: 32),
+        0xF11 => lit(0, width: 32),
+        0xF12 => lit(0, width: 32),
+        0xF13 => lit(0, width: 32),
+        0xF14 => lit(0, width: 32)
+      }, default: mem_read_expr(:csrs, read_addr13, width: 32))
     end
 
     def initialize(name = nil)
@@ -316,6 +325,7 @@ module RHDL
       read_addr10 = in_val(:read_addr10) & 0xFFF
       read_addr11 = in_val(:read_addr11) & 0xFFF
       read_addr12 = in_val(:read_addr12) & 0xFFF
+      read_addr13 = in_val(:read_addr13) & 0xFFF
       read_value = csr_read_value(read_addr, @csrs[read_addr])
       read_value2 = csr_read_value(read_addr2, @csrs[read_addr2])
       read_value3 = csr_read_value(read_addr3, @csrs[read_addr3])
@@ -328,6 +338,7 @@ module RHDL
       read_value10 = csr_read_value(read_addr10, @csrs[read_addr10])
       read_value11 = csr_read_value(read_addr11, @csrs[read_addr11])
       read_value12 = csr_read_value(read_addr12, @csrs[read_addr12])
+      read_value13 = csr_read_value(read_addr13, @csrs[read_addr13])
 
       if rst == 1
         @csrs = Array.new(4096, 0)
@@ -343,6 +354,7 @@ module RHDL
         out_set(:read_data10, 0)
         out_set(:read_data11, 0)
         out_set(:read_data12, 0)
+        out_set(:read_data13, 0)
         @prev_clk = clk
         return
       end
@@ -396,6 +408,7 @@ module RHDL
       out_set(:read_data10, read_value10)
       out_set(:read_data11, read_value11)
       out_set(:read_data12, read_value12)
+      out_set(:read_data13, read_value13)
     end
 
     def update_outputs
@@ -411,6 +424,7 @@ module RHDL
       read_addr10 = in_val(:read_addr10) & 0xFFF
       read_addr11 = in_val(:read_addr11) & 0xFFF
       read_addr12 = in_val(:read_addr12) & 0xFFF
+      read_addr13 = in_val(:read_addr13) & 0xFFF
       out_set(:read_data, csr_read_value(read_addr, @csrs[read_addr]))
       out_set(:read_data2, csr_read_value(read_addr2, @csrs[read_addr2]))
       out_set(:read_data3, csr_read_value(read_addr3, @csrs[read_addr3]))
@@ -423,6 +437,7 @@ module RHDL
       out_set(:read_data10, csr_read_value(read_addr10, @csrs[read_addr10]))
       out_set(:read_data11, csr_read_value(read_addr11, @csrs[read_addr11]))
       out_set(:read_data12, csr_read_value(read_addr12, @csrs[read_addr12]))
+      out_set(:read_data13, csr_read_value(read_addr13, @csrs[read_addr13]))
     end
 
     def read_csr(addr)

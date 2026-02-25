@@ -994,18 +994,27 @@ RSpec.describe RHDL::Examples::RISCV::IRHarness do
       expect(cpu.read_reg(5)).to eq(illegal_inst)
     end
 
-    it 'delegates machine timer interrupt to stvec when mideleg and sstatus/sie enable it' do
+    it 'delegates supervisor software interrupt to stvec when mideleg and sstatus/sie enable it' do
+      s_mode_entry = 0x200
       main_program = [
         RHDL::Examples::RISCV::Assembler.addi(1, 0, 0x300),       # x1 = supervisor trap handler base
         RHDL::Examples::RISCV::Assembler.csrrw(0, 0x105, 1),      # stvec = x1
-        RHDL::Examples::RISCV::Assembler.addi(1, 0, 0x80),        # x1 = MTIP bit
-        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x303, 1),      # mideleg = MTIP
-        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x104, 1),      # sie = MTIE
-        RHDL::Examples::RISCV::Assembler.addi(1, 0, 0x2),         # x1 = sstatus.SIE
-        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x100, 1),      # sstatus = SIE
-        RHDL::Examples::RISCV::Assembler.nop,
-        RHDL::Examples::RISCV::Assembler.nop
+        RHDL::Examples::RISCV::Assembler.addi(1, 0, 0x2),         # x1 = SSIP bit (bit 1)
+        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x303, 1),      # mideleg = SSIP
+        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x104, 1),      # sie = SSIE
+        RHDL::Examples::RISCV::Assembler.addi(1, 0, 0x2),         # x1 = SSIP / SIE
+        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x100, 1),      # sstatus.SIE = 1
+        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x144, 1),      # sip = SSIP (set software interrupt)
+        # Drop to S-mode: mstatus MPP=S
+        RHDL::Examples::RISCV::Assembler.lui(1, 0x1),             # x1 = 0x1000
+        RHDL::Examples::RISCV::Assembler.addi(1, 1, -2048),       # x1 = 0x800 (MPP=S)
+        RHDL::Examples::RISCV::Assembler.csrrs(0, 0x300, 1),      # mstatus |= MPP_S
+        RHDL::Examples::RISCV::Assembler.addi(1, 0, s_mode_entry),
+        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x341, 1),      # mepc = s_mode_entry
+        RHDL::Examples::RISCV::Assembler.mret                     # -> S-mode, SSIP fires immediately
       ]
+
+      s_mode_code = [RHDL::Examples::RISCV::Assembler.jal(0, 0)]
 
       trap_handler = [
         RHDL::Examples::RISCV::Assembler.csrrs(2, 0x142, 0),      # x2 = scause
@@ -1014,17 +1023,16 @@ RSpec.describe RHDL::Examples::RISCV::IRHarness do
       ]
 
       cpu.load_program(main_program, 0)
+      cpu.load_program(s_mode_code, s_mode_entry)
       cpu.load_program(trap_handler, 0x300)
       cpu.reset!
-      cpu.run_cycles(10)
-      cpu.set_interrupts(timer: 1)    # assert MTIP
-      cpu.run_cycles(8)
+      cpu.run_cycles(22)
 
-      expect(cpu.read_reg(2)).to eq(0x80000005)
+      expect(cpu.read_reg(2)).to eq(0x80000001)
       expect(cpu.read_reg(4)).to eq(0x120)
     end
 
-    it 'takes machine external interrupt from PLIC source when enabled' do
+    it 'takes external interrupt from PLIC source when enabled' do
       main_program = [
         RHDL::Examples::RISCV::Assembler.addi(1, 0, 0x200),       # x1 = trap handler base
         RHDL::Examples::RISCV::Assembler.csrrw(0, 0x305, 1),      # mtvec = x1
@@ -1040,9 +1048,8 @@ RSpec.describe RHDL::Examples::RISCV::IRHarness do
         RHDL::Examples::RISCV::Assembler.lui(8, 0xC200),          # x8 = 0x0C200000 (threshold/claim)
         RHDL::Examples::RISCV::Assembler.sw(0, 8, 0),             # threshold = 0
 
-        RHDL::Examples::RISCV::Assembler.lui(9, 0x1),             # x9 = 0x1000
-        RHDL::Examples::RISCV::Assembler.addi(9, 9, -2048),       # x9 = 0x800 (MEIE)
-        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x304, 9),      # mie = MEIE
+        RHDL::Examples::RISCV::Assembler.addi(9, 0, 0x200),       # x9 = 0x200 (SEIE - supervisor external interrupt enable)
+        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x304, 9),      # mie = SEIE
 
         RHDL::Examples::RISCV::Assembler.addi(1, 0, 0x8),         # x1 = MIE
         RHDL::Examples::RISCV::Assembler.csrrw(0, 0x300, 1),      # mstatus = MIE
@@ -1061,14 +1068,14 @@ RSpec.describe RHDL::Examples::RISCV::IRHarness do
       cpu.load_program(main_program, 0)
       cpu.load_program(trap_handler, 0x200)
       cpu.reset!
-      cpu.run_cycles(20)
+      cpu.run_cycles(18)
       cpu.set_plic_sources(source1: 1)
       cpu.run_cycles(12)
 
-      expect(cpu.read_reg(2)).to eq(0x8000000B)
+      expect(cpu.read_reg(2)).to eq(0x80000009)
     end
 
-    it 'takes machine external interrupt from UART RX via PLIC source 10 when enabled' do
+    it 'takes external interrupt from UART RX via PLIC source 10 when enabled' do
       main_program = [
         RHDL::Examples::RISCV::Assembler.addi(1, 0, 0x200),       # x1 = trap handler base
         RHDL::Examples::RISCV::Assembler.csrrw(0, 0x305, 1),      # mtvec = x1
@@ -1088,9 +1095,8 @@ RSpec.describe RHDL::Examples::RISCV::IRHarness do
         RHDL::Examples::RISCV::Assembler.addi(13, 0, 1),
         RHDL::Examples::RISCV::Assembler.sb(13, 12, 1),           # UART IER = RX interrupt enable
 
-        RHDL::Examples::RISCV::Assembler.lui(9, 0x1),             # x9 = 0x1000
-        RHDL::Examples::RISCV::Assembler.addi(9, 9, -2048),       # x9 = 0x800 (MEIE)
-        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x304, 9),      # mie = MEIE
+        RHDL::Examples::RISCV::Assembler.addi(9, 0, 0x200),       # x9 = 0x200 (SEIE - supervisor external interrupt enable)
+        RHDL::Examples::RISCV::Assembler.csrrw(0, 0x304, 9),      # mie = SEIE
 
         RHDL::Examples::RISCV::Assembler.addi(1, 0, 0x8),         # x1 = MIE
         RHDL::Examples::RISCV::Assembler.csrrw(0, 0x300, 1),      # mstatus = MIE
@@ -1105,11 +1111,11 @@ RSpec.describe RHDL::Examples::RISCV::IRHarness do
       cpu.load_program(main_program, 0)
       cpu.load_program(trap_handler, 0x200)
       cpu.reset!
-      cpu.run_cycles(26)
+      cpu.run_cycles(24)
       cpu.uart_receive_byte(0x41)
       cpu.run_cycles(14)
 
-      expect(cpu.read_reg(2)).to eq(0x8000000B)
+      expect(cpu.read_reg(2)).to eq(0x80000009)
     end
   end
 

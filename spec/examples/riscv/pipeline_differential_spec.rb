@@ -112,11 +112,12 @@ RSpec.describe 'RISC-V pipeline differential: OS-boot critical scenarios', timeo
       trap_handler = [
         asm.csrrs(28, 0x341, 0),     # x28 = mepc (save for verification)
         asm.csrrs(29, 0x342, 0),     # x29 = mcause
-        # Disable MIE to prevent re-entry
+        # Disable MIE and MTIE to prevent re-entry (MRET may drop to User mode
+        # where M-mode interrupts are unconditionally enabled per RISC-V spec)
         asm.csrrw(30, 0x300, 0),     # x30 = old mstatus; mstatus = 0
+        asm.csrrw(0, 0x304, 0),      # mie = 0 (clear MTIE)
         # Do not advance mepc -- the interrupted instruction re-executes
         asm.mret,
-        asm.nop,
         asm.nop,
       ]
 

@@ -149,6 +149,7 @@ module RHDL
     wire :csr_addr10, width: 12
     wire :csr_addr11, width: 12
     wire :csr_addr12, width: 12
+    wire :csr_addr13, width: 12
     wire :csr_write_addr, width: 12
     wire :csr_read_data, width: 32
     wire :csr_read_data2, width: 32
@@ -162,6 +163,7 @@ module RHDL
     wire :csr_read_data10, width: 32
     wire :csr_read_data11, width: 32
     wire :csr_read_data12, width: 32
+    wire :csr_read_data13, width: 32
     wire :csr_write_data, width: 32
     wire :csr_write_we
     wire :csr_write_addr2, width: 12
@@ -340,6 +342,7 @@ module RHDL
     port :csr_addr10 => [:csrfile, :read_addr10]
     port :csr_addr11 => [:csrfile, :read_addr11]
     port :csr_addr12 => [:csrfile, :read_addr12]
+    port :csr_addr13 => [:csrfile, :read_addr13]
     port [:csrfile, :read_data] => :csr_read_data
     port [:csrfile, :read_data2] => :csr_read_data2
     port [:csrfile, :read_data3] => :csr_read_data3
@@ -352,6 +355,7 @@ module RHDL
     port [:csrfile, :read_data10] => :csr_read_data10
     port [:csrfile, :read_data11] => :csr_read_data11
     port [:csrfile, :read_data12] => :csr_read_data12
+    port [:csrfile, :read_data13] => :csr_read_data13
     port :csr_write_addr => [:csrfile, :write_addr]
     port :csr_write_data => [:csrfile, :write_data]
     port :csr_write_we => [:csrfile, :write_we]
@@ -790,18 +794,26 @@ module RHDL
                                 is_system_plain & ~(is_ecall | is_ebreak | is_mret | is_sret | is_wfi |
                                                      is_wrs_nto | is_wrs_sto | is_sfence_vma),
                                 width: 1)
+      # Hardware interrupt pending bits at RISC-V standard positions:
+      #   MSIP=3, MTIP=7 (machine level, not delegable)
+      #   SEIP=9 (supervisor external, delegable)
+      # Software-writable SSIP (bit 1) is merged from CSR store (SIP register).
       irq_pending_bits = local(:irq_pending_bits,
+                               (csr_read_data13 & lit(0x2, width: 32)) |
                                mux(irq_software, lit(0x8, width: 32), lit(0, width: 32)) |
                                mux(irq_timer, lit(0x80, width: 32), lit(0, width: 32)) |
-                               mux(irq_external, lit(0x800, width: 32), lit(0, width: 32)),
+                               mux(irq_external, lit(0x200, width: 32), lit(0, width: 32)),
                                width: 32)
       csr_use_imm = funct3[2]
       csr_src = local(:csr_src, mux(csr_use_imm, cat(lit(0, width: 27), rs1), rs1_data), width: 32)
       csr_rs1_nonzero = local(:csr_rs1_nonzero, rs1 != lit(0, width: 5), width: 1)
 
       # Interrupt enable filtering for M-mode (mstatus/mie) and S-mode (sstatus/sie).
-      machine_irq_masked = local(:machine_irq_masked, irq_pending_bits & ~csr_read_data7, width: 32)
-      super_irq_masked = local(:super_irq_masked, irq_pending_bits & csr_read_data7, width: 32)
+      # Per RISC-V spec, machine-level interrupt bits (MSIP=3, MTIP=7, MEIP=11) are
+      # not delegable to S-mode. Mask them out of mideleg (csr_read_data7).
+      effective_mideleg = local(:effective_mideleg, csr_read_data7 & lit(0xFFFFF777, width: 32), width: 32)
+      machine_irq_masked = local(:machine_irq_masked, irq_pending_bits & ~effective_mideleg, width: 32)
+      super_irq_masked = local(:super_irq_masked, irq_pending_bits & effective_mideleg, width: 32)
       super_sie_machine_alias = local(
         :super_sie_machine_alias,
         mux((csr_read_data5 & lit(0x002, width: 32)) != lit(0, width: 32), lit(0x008, width: 32), lit(0, width: 32)) |
@@ -818,11 +830,19 @@ module RHDL
       global_sie_enabled = local(:global_sie_enabled,
                                  (csr_read_data4 & lit(0x2, width: 32)) != lit(0, width: 32),
                                  width: 1)
+      # RISC-V spec: M-mode interrupts globally enabled when priv < M or (priv == M and MIE)
+      machine_globally_enabled = local(:machine_globally_enabled,
+                                       ~priv_is_m | global_mie_enabled,
+                                       width: 1)
+      # RISC-V spec: S-mode interrupts globally enabled when priv < S or (priv == S and SIE)
+      super_globally_enabled = local(:super_globally_enabled,
+                                     priv_is_u | (priv_is_s & global_sie_enabled),
+                                     width: 1)
       machine_interrupt_pending = local(:machine_interrupt_pending,
-                                        global_mie_enabled & (machine_enabled_interrupts != lit(0, width: 32)),
+                                        machine_globally_enabled & (machine_enabled_interrupts != lit(0, width: 32)),
                                         width: 1)
       super_interrupt_pending = local(:super_interrupt_pending,
-                                      global_sie_enabled & (super_enabled_interrupts != lit(0, width: 32)),
+                                      super_globally_enabled & (super_enabled_interrupts != lit(0, width: 32)),
                                       width: 1)
       interrupt_pending = local(:interrupt_pending, machine_interrupt_pending | super_interrupt_pending, width: 1)
       interrupt_from_supervisor = local(:interrupt_from_supervisor,
@@ -874,22 +894,20 @@ module RHDL
                                  (sync_trap_taken & sync_trap_delegated) | interrupt_from_supervisor,
                                  width: 1)
       trap_taken = local(:trap_taken, sync_trap_taken | interrupt_pending, width: 1)
-      machine_interrupt_cause = local(:machine_interrupt_cause,
-                                      mux((selected_interrupts & lit(0x800, width: 32)) != lit(0, width: 32),
-                                          lit(0x8000000B, width: 32), # machine external
-                                          mux((selected_interrupts & lit(0x80, width: 32)) != lit(0, width: 32),
-                                              lit(0x80000007, width: 32), # machine timer
-                                              lit(0x80000003, width: 32))), # machine software
-                                      width: 32)
-      supervisor_interrupt_cause = local(:supervisor_interrupt_cause,
-                                         mux((selected_interrupts & lit(0x800, width: 32)) != lit(0, width: 32),
-                                             lit(0x80000009, width: 32), # supervisor external
-                                             mux((selected_interrupts & lit(0x80, width: 32)) != lit(0, width: 32),
-                                                 lit(0x80000005, width: 32), # supervisor timer
-                                                 lit(0x80000001, width: 32))), # supervisor software
-                                         width: 32)
+      # Unified interrupt cause: the cause code encodes the interrupt type (bit position),
+      # not which privilege mode handles it. Priority: highest bit first.
       interrupt_cause = local(:interrupt_cause,
-                              mux(interrupt_from_supervisor, supervisor_interrupt_cause, machine_interrupt_cause),
+                              mux((selected_interrupts & lit(0x800, width: 32)) != lit(0, width: 32),
+                                  lit(0x8000000B, width: 32), # cause 11: machine external (MEIP, bit 11)
+                                  mux((selected_interrupts & lit(0x200, width: 32)) != lit(0, width: 32),
+                                      lit(0x80000009, width: 32), # cause 9: supervisor external (SEIP, bit 9)
+                                      mux((selected_interrupts & lit(0x080, width: 32)) != lit(0, width: 32),
+                                          lit(0x80000007, width: 32), # cause 7: machine timer (MTIP, bit 7)
+                                          mux((selected_interrupts & lit(0x020, width: 32)) != lit(0, width: 32),
+                                              lit(0x80000005, width: 32), # cause 5: supervisor timer (STIP, bit 5)
+                                              mux((selected_interrupts & lit(0x008, width: 32)) != lit(0, width: 32),
+                                                  lit(0x80000003, width: 32), # cause 3: machine software (MSIP, bit 3)
+                                                  lit(0x80000001, width: 32)))))), # cause 1: supervisor software (SSIP, bit 1)
                               width: 32)
       trap_cause = local(:trap_cause,
                          mux(interrupt_pending,
@@ -927,11 +945,12 @@ module RHDL
       csr_addr10 <= lit(0x105, width: 12) # stvec
       csr_addr11 <= lit(0x341, width: 12) # mepc
       csr_addr12 <= lit(0x141, width: 12) # sepc
+      csr_addr13 <= lit(0x144, width: 12) # sip (for software SSIP readback)
       csr_read_selected = local(:csr_read_selected,
                                 mux(csr_addr == lit(0xC20, width: 12), vec_vl,
                                     mux(csr_addr == lit(0xC21, width: 12), vec_vtype,
                                         mux(csr_addr == lit(0x344, width: 12), irq_pending_bits,
-                                            mux(csr_addr == lit(0x144, width: 12), irq_pending_bits & csr_read_data7, csr_read_data)))),
+                                            mux(csr_addr == lit(0x144, width: 12), irq_pending_bits & effective_mideleg, csr_read_data)))),
                                 width: 32)
 
       csr_instr_write_data = local(:csr_instr_write_data, case_select(funct3, {
