@@ -134,3 +134,125 @@ test('applyElkResult handles null gracefully', () => {
   applyElkResult(rl, { children: null });
   // should not throw
 });
+
+test('applyElkResult extracts edge bend points onto wires', () => {
+  const rl = makeRenderList();
+  for (const s of rl.symbols) rl.byId.set(s.id, s);
+  for (const p of rl.pins) rl.byId.set(p.id, p);
+  for (const n of rl.nets) rl.byId.set(n.id, n);
+  for (const w of rl.wires) rl.byId.set(w.id, w);
+
+  const elkResult = {
+    children: [
+      {
+        id: 'sym:cpu', x: 100, y: 50, width: 228, height: 94,
+        ports: [
+          { id: 'pin:cpu:clk', x: 0, y: 20, width: 14, height: 10 },
+          { id: 'pin:cpu:data', x: 214, y: 40, width: 14, height: 10 }
+        ]
+      },
+      {
+        id: 'sym:alu', x: 400, y: 50, width: 178, height: 72,
+        ports: [
+          { id: 'pin:alu:a', x: 0, y: 16, width: 14, height: 10 }
+        ]
+      },
+      { id: 'net:clk', x: 300, y: 80, width: 52, height: 18 }
+    ],
+    edges: [
+      {
+        id: 'w1',
+        sections: [
+          {
+            startPoint: { x: 114, y: 75 },
+            endPoint: { x: 300, y: 89 },
+            bendPoints: [
+              { x: 200, y: 75 },
+              { x: 200, y: 89 }
+            ]
+          }
+        ]
+      },
+      {
+        id: 'w2',
+        sections: [
+          {
+            startPoint: { x: 352, y: 89 },
+            endPoint: { x: 400, y: 71 },
+            bendPoints: [
+              { x: 370, y: 89 },
+              { x: 370, y: 71 }
+            ]
+          }
+        ]
+      }
+    ]
+  };
+
+  applyElkResult(rl, elkResult);
+
+  const w1 = rl.wires.find(w => w.id === 'w1');
+  assert.ok(Array.isArray(w1.bendPoints), 'wire should have bendPoints array');
+  assert.equal(w1.bendPoints.length, 4, 'should have startPoint + 2 bends + endPoint');
+  assert.deepEqual(w1.bendPoints[0], { x: 114, y: 75 });
+  assert.deepEqual(w1.bendPoints[1], { x: 200, y: 75 });
+  assert.deepEqual(w1.bendPoints[2], { x: 200, y: 89 });
+  assert.deepEqual(w1.bendPoints[3], { x: 300, y: 89 });
+
+  const w2 = rl.wires.find(w => w.id === 'w2');
+  assert.ok(Array.isArray(w2.bendPoints));
+  assert.equal(w2.bendPoints.length, 4);
+});
+
+test('applyElkResult handles edges with no bend points', () => {
+  const rl = makeRenderList();
+  for (const s of rl.symbols) rl.byId.set(s.id, s);
+  for (const p of rl.pins) rl.byId.set(p.id, p);
+  for (const n of rl.nets) rl.byId.set(n.id, n);
+  for (const w of rl.wires) rl.byId.set(w.id, w);
+
+  const elkResult = {
+    children: [
+      { id: 'sym:cpu', x: 100, y: 50, width: 228, height: 94, ports: [] },
+      { id: 'sym:alu', x: 400, y: 50, width: 178, height: 72, ports: [] },
+      { id: 'net:clk', x: 300, y: 80, width: 52, height: 18 }
+    ],
+    edges: [
+      {
+        id: 'w1',
+        sections: [
+          {
+            startPoint: { x: 114, y: 75 },
+            endPoint: { x: 300, y: 89 }
+          }
+        ]
+      }
+    ]
+  };
+
+  applyElkResult(rl, elkResult);
+
+  const w1 = rl.wires.find(w => w.id === 'w1');
+  assert.ok(Array.isArray(w1.bendPoints));
+  assert.equal(w1.bendPoints.length, 2, 'should have startPoint + endPoint only');
+  assert.deepEqual(w1.bendPoints[0], { x: 114, y: 75 });
+  assert.deepEqual(w1.bendPoints[1], { x: 300, y: 89 });
+});
+
+test('applyElkResult ignores edges with missing sections', () => {
+  const rl = makeRenderList();
+  for (const w of rl.wires) rl.byId.set(w.id, w);
+
+  const elkResult = {
+    children: [],
+    edges: [
+      { id: 'w1' },
+      { id: 'w2', sections: [] }
+    ]
+  };
+
+  applyElkResult(rl, elkResult);
+
+  const w1 = rl.wires.find(w => w.id === 'w1');
+  assert.equal(w1.bendPoints, undefined, 'no sections means no bendPoints set');
+});

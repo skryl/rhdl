@@ -132,6 +132,45 @@ test('render draws wires as line segments', () => {
   assert.ok(calls.some(c => c.method === 'lineTo'), 'should draw wire with lineTo');
 });
 
+test('render draws wires as polylines when bendPoints are present', () => {
+  const { canvas, calls } = createMockCanvas();
+  const renderer = createCanvasRenderer(canvas);
+  const rl = {
+    symbols: [],
+    pins: [
+      { id: 'pin:a', x: 100, y: 50, width: 14, height: 10, bus: false, classes: '' },
+      { id: 'pin:b', x: 400, y: 200, width: 14, height: 10, bus: false, classes: '' }
+    ],
+    nets: [],
+    wires: [
+      {
+        id: 'w1', sourceId: 'pin:a', targetId: 'pin:b',
+        bus: false, bidir: false, classes: '',
+        active: false, toggled: false, selected: false,
+        bendPoints: [
+          { x: 100, y: 50 },
+          { x: 250, y: 50 },
+          { x: 250, y: 200 },
+          { x: 400, y: 200 }
+        ]
+      }
+    ],
+    byId: new Map()
+  };
+  for (const p of rl.pins) rl.byId.set(p.id, p);
+  for (const w of rl.wires) rl.byId.set(w.id, w);
+  const viewport = { x: 0, y: 0, scale: 1 };
+
+  renderer.render(rl, viewport, createMockPalette());
+
+  // Should have moveTo for start and multiple lineTo for each bend
+  const moveToIdx = calls.findIndex(c => c.method === 'moveTo');
+  assert.ok(moveToIdx >= 0, 'should call moveTo');
+  // Count lineTo calls after the first moveTo for this wire
+  const lineToCount = calls.filter((c, i) => i > moveToIdx && c.method === 'lineTo').length;
+  assert.ok(lineToCount >= 3, `should have at least 3 lineTo calls for 4-point polyline, got ${lineToCount}`);
+});
+
 test('destroy does not throw', () => {
   const { canvas } = createMockCanvas();
   const renderer = createCanvasRenderer(canvas);

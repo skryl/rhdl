@@ -126,6 +126,35 @@ export function applyElkResult(renderList, elkResult) {
     net.x = (Number(node.x) || 0) + w * 0.5;
     net.y = (Number(node.y) || 0) + h * 0.5;
   }
+
+  // Extract edge bend points from ELK edge sections onto wire objects
+  if (Array.isArray(elkResult.edges)) {
+    for (const edge of elkResult.edges) {
+      const wire = renderList.byId.get(String(edge.id || ''));
+      if (!wire) continue;
+      const sections = edge.sections;
+      if (!Array.isArray(sections) || sections.length === 0) continue;
+
+      const points = [];
+      for (const section of sections) {
+        if (section.startPoint) {
+          points.push({ x: section.startPoint.x, y: section.startPoint.y });
+        }
+        if (Array.isArray(section.bendPoints)) {
+          for (const bp of section.bendPoints) {
+            points.push({ x: bp.x, y: bp.y });
+          }
+        }
+        if (section.endPoint) {
+          points.push({ x: section.endPoint.x, y: section.endPoint.y });
+        }
+      }
+
+      if (points.length >= 2) {
+        wire.bendPoints = points;
+      }
+    }
+  }
 }
 
 export async function runElkLayout(renderList, ELK) {

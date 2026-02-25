@@ -87,21 +87,33 @@ export function createCanvasRenderer(canvas) {
 
     // 1. Draw wires (back layer)
     for (const wire of renderList.wires) {
-      const src = renderList.byId.get(wire.sourceId);
-      const tgt = renderList.byId.get(wire.targetId);
-      if (!src || !tgt) continue;
-
       const wc = resolveWireColor(wire, palette);
       ctx.strokeStyle = wc.color;
       ctx.lineWidth = wc.width;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
 
       if (wire.bidir) {
         ctx.setLineDash([4, 3]);
       }
 
       ctx.beginPath();
-      ctx.moveTo(src.x, src.y);
-      ctx.lineTo(tgt.x, tgt.y);
+
+      if (Array.isArray(wire.bendPoints) && wire.bendPoints.length >= 2) {
+        // Draw polyline through ELK-computed bend points
+        ctx.moveTo(wire.bendPoints[0].x, wire.bendPoints[0].y);
+        for (let i = 1; i < wire.bendPoints.length; i++) {
+          ctx.lineTo(wire.bendPoints[i].x, wire.bendPoints[i].y);
+        }
+      } else {
+        // Fallback: straight line between source and target centers
+        const src = renderList.byId.get(wire.sourceId);
+        const tgt = renderList.byId.get(wire.targetId);
+        if (!src || !tgt) { ctx.setLineDash([]); continue; }
+        ctx.moveTo(src.x, src.y);
+        ctx.lineTo(tgt.x, tgt.y);
+      }
+
       ctx.stroke();
 
       if (wire.bidir) {

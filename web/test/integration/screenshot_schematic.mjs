@@ -176,17 +176,28 @@ async function main() {
           selected: '#ffffff', text: '#d4e7c5'
         };
 
-        // Draw wires
+        // Draw wires (polyline through ELK bend points when available)
         for (const wire of renderList.wires) {
-          const src = renderList.byId.get(wire.sourceId);
-          const tgt = renderList.byId.get(wire.targetId);
-          if (!src || !tgt) continue;
           ctx.strokeStyle = wire.active ? palette.wireActive : palette.wire;
           ctx.lineWidth = wire.bus ? 2.4 : 1.4;
+          ctx.lineJoin = 'round';
+          ctx.lineCap = 'round';
           if (wire.bidir) ctx.setLineDash([4, 3]);
           ctx.beginPath();
-          ctx.moveTo(src.x, src.y);
-          ctx.lineTo(tgt.x, tgt.y);
+
+          if (Array.isArray(wire.bendPoints) && wire.bendPoints.length >= 2) {
+            ctx.moveTo(wire.bendPoints[0].x, wire.bendPoints[0].y);
+            for (let i = 1; i < wire.bendPoints.length; i++) {
+              ctx.lineTo(wire.bendPoints[i].x, wire.bendPoints[i].y);
+            }
+          } else {
+            const src = renderList.byId.get(wire.sourceId);
+            const tgt = renderList.byId.get(wire.targetId);
+            if (!src || !tgt) { ctx.setLineDash([]); continue; }
+            ctx.moveTo(src.x, src.y);
+            ctx.lineTo(tgt.x, tgt.y);
+          }
+
           ctx.stroke();
           if (wire.bidir) ctx.setLineDash([]);
         }

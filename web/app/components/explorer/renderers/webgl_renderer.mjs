@@ -91,28 +91,53 @@ export function createWebGLRenderer(canvas) {
   }
 
   function buildLineData(wires, renderList, palette) {
-    // 4 vertices per wire (thick line quad), 6 indices per quad
-    const vertexData = new Float32Array(wires.length * 4 * LINE_VERTEX_FLOATS);
+    // Count total line segments (each bend point pair = 1 segment, 4 vertices each)
+    let totalSegments = 0;
+    for (const wire of wires) {
+      if (Array.isArray(wire.bendPoints) && wire.bendPoints.length >= 2) {
+        totalSegments += wire.bendPoints.length - 1;
+      } else {
+        totalSegments += 1;
+      }
+    }
+
+    const vertexData = new Float32Array(totalSegments * 4 * LINE_VERTEX_FLOATS);
     let vOffset = 0;
 
     for (const wire of wires) {
-      const src = renderList.byId.get(wire.sourceId);
-      const tgt = renderList.byId.get(wire.targetId);
-      if (!src || !tgt) continue;
-
       const colors = resolveElementColors({ type: 'wire', ...wire }, palette);
       const col = parseHexColor(colors.stroke || '#4f7d6d');
       const w = colors.strokeWidth || 1.4;
 
-      // 4 vertices for the line quad
-      for (let vi = 0; vi < 4; vi++) {
-        vertexData[vOffset++] = src.x;
-        vertexData[vOffset++] = src.y;
-        vertexData[vOffset++] = tgt.x;
-        vertexData[vOffset++] = tgt.y;
-        vertexData[vOffset++] = col[0]; vertexData[vOffset++] = col[1]; vertexData[vOffset++] = col[2]; vertexData[vOffset++] = col[3];
-        vertexData[vOffset++] = w;
-        vertexData[vOffset++] = vi;
+      if (Array.isArray(wire.bendPoints) && wire.bendPoints.length >= 2) {
+        // Draw each segment of the polyline
+        for (let s = 0; s < wire.bendPoints.length - 1; s++) {
+          const p0 = wire.bendPoints[s];
+          const p1 = wire.bendPoints[s + 1];
+          for (let vi = 0; vi < 4; vi++) {
+            vertexData[vOffset++] = p0.x;
+            vertexData[vOffset++] = p0.y;
+            vertexData[vOffset++] = p1.x;
+            vertexData[vOffset++] = p1.y;
+            vertexData[vOffset++] = col[0]; vertexData[vOffset++] = col[1]; vertexData[vOffset++] = col[2]; vertexData[vOffset++] = col[3];
+            vertexData[vOffset++] = w;
+            vertexData[vOffset++] = vi;
+          }
+        }
+      } else {
+        // Fallback: straight line between source and target
+        const src = renderList.byId.get(wire.sourceId);
+        const tgt = renderList.byId.get(wire.targetId);
+        if (!src || !tgt) continue;
+        for (let vi = 0; vi < 4; vi++) {
+          vertexData[vOffset++] = src.x;
+          vertexData[vOffset++] = src.y;
+          vertexData[vOffset++] = tgt.x;
+          vertexData[vOffset++] = tgt.y;
+          vertexData[vOffset++] = col[0]; vertexData[vOffset++] = col[1]; vertexData[vOffset++] = col[2]; vertexData[vOffset++] = col[3];
+          vertexData[vOffset++] = w;
+          vertexData[vOffset++] = vi;
+        }
       }
     }
 
