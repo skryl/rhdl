@@ -166,6 +166,8 @@ pub struct RiscvExtension {
     plic_threshold: u32,
     plic_in_service_id: u32,
     plic_irq_external: bool,
+    plic_prev_source1: bool,
+    plic_prev_source10: bool,
 
     uart_prev_clk: u64,
     uart_rbr: u8,
@@ -265,6 +267,8 @@ impl RiscvExtension {
             plic_threshold: 0,
             plic_in_service_id: 0,
             plic_irq_external: false,
+            plic_prev_source1: false,
+            plic_prev_source10: false,
 
             uart_prev_clk: 0,
             uart_rbr: 0,
@@ -482,6 +486,8 @@ impl RiscvExtension {
         self.plic_threshold = 0;
         self.plic_in_service_id = 0;
         self.plic_irq_external = false;
+        self.plic_prev_source1 = false;
+        self.plic_prev_source10 = false;
 
         self.uart_prev_clk = 0;
         self.uart_rbr = 0;
@@ -779,12 +785,25 @@ impl RiscvExtension {
         }
 
         if self.plic_prev_clk == 0 && clk == 1 {
-            if source1 {
+            // PLIC gateway: level-triggered edge detection.
+            // A pending is generated only on a low-to-high transition of
+            // the source AND only when no notification is outstanding
+            // (pending already set or interrupt in service).  This matches
+            // the RISC-V PLIC spec gateway behaviour for level sources.
+            if source1 && !self.plic_prev_source1
+                && self.plic_pending1 == 0
+                && self.plic_in_service_id != 1
+            {
                 self.plic_pending1 = 1;
             }
-            if source10 {
+            if source10 && !self.plic_prev_source10
+                && self.plic_pending10 == 0
+                && self.plic_in_service_id != 10
+            {
                 self.plic_pending10 = 1;
             }
+            self.plic_prev_source1 = source1;
+            self.plic_prev_source10 = source10;
 
             if mem_write && funct3 == FUNCT3_WORD {
                 match addr {
@@ -805,6 +824,14 @@ impl RiscvExtension {
                         let complete_id = write_data & 0x3FF;
                         if complete_id == self.plic_in_service_id {
                             self.plic_in_service_id = 0;
+                            // Reset edge tracking so a still-asserted source
+                            // will trigger a new pending on the next cycle.
+                            if complete_id == 1 {
+                                self.plic_prev_source1 = false;
+                            }
+                            if complete_id == 10 {
+                                self.plic_prev_source10 = false;
+                            }
                         }
                     }
                     _ => {}
@@ -944,21 +971,32 @@ impl RiscvExtension {
                         } else {
                             self.uart_tx_data_reg = write_byte;
                             tx_valid_now = true;
-                            self.uart_tx_irq_pending = true;
+                            // Per 16550 spec: writing THR fills it, clearing the
+                            // THRE condition.  The simulation transmits instantly so
+                            // the THR is logically empty again and THRE fires.
+                            // The PLIC edge-gating prevents an interrupt storm:
+                            // uart_irq stays high but the PLIC only fires once per
+                            // low-to-high transition.
+                            let tx_int_enabled = (self.uart_ier & 0x2) != 0;
+                            self.uart_tx_irq_pending = tx_int_enabled;
                         }
                     }
                     UART_REG_IER_DLM => {
                         if dlab {
                             self.uart_dlm = write_byte;
                         } else {
-                            let prev_ier = self.uart_ier;
                             self.uart_ier = write_byte & 0x0F;
                             let tx_int_enabled = (self.uart_ier & 0x2) != 0;
                             if !tx_int_enabled {
                                 self.uart_tx_irq_pending = false;
-                            } else if (prev_ier & 0x2) == 0 {
-                                self.uart_tx_irq_pending = true;
                             }
+                            // NOTE: We intentionally do NOT set
+                            // uart_tx_irq_pending on IER TX-enable transition.
+                            // The simulation transmits instantly so uartstart()
+                            // always drains the full buffer; TX-interrupt-driven
+                            // drain is unnecessary and enabling it here would
+                            // trigger the same THRE interrupt storm described in
+                            // the THR-write path.
                         }
                     }
                     UART_REG_IIR_FCR => {

@@ -42,46 +42,82 @@ RSpec.shared_examples 'linux mmio/interrupt integration' do |pipeline:|
     write_u32(cpu, addr + 4, (value >> 32) & 0xFFFF_FFFF)
   end
 
-  it 'routes CLINT mtimecmp timer interrupts into delegated supervisor trap flow' do
+  it 'routes CLINT mtimecmp timer interrupts via M-mode relay into supervisor SSIP trap' do
+    # MTIP is not delegable to S-mode.  The xv6 flow is:
+    #   drop to S-mode -> hardware MTIP -> M-mode trap -> M-mode handler
+    #   sets SSIP in sip -> mret to S-mode -> SSIP fires -> scause 0x80000001
+    s_mode_entry = 0x200   # S-mode code runs here
+
     main_program = [
-      asm.addi(1, 0, 0x300),      # stvec
+      asm.addi(1, 0, 0x400),       # mtvec = M-mode handler at 0x400
+      asm.csrrw(0, 0x305, 1),
+      asm.addi(1, 0, 0x300),       # stvec = S-mode handler at 0x300
       asm.csrrw(0, 0x105, 1),
-      asm.addi(2, 0, 0x80),       # MTIP bit
-      asm.csrrw(0, 0x303, 2),     # mideleg = MTIP
-      asm.csrrw(0, 0x104, 2),     # sie = MTIE
-      asm.addi(2, 0, 0x2),        # sstatus.SIE
-      asm.csrrw(0, 0x100, 2),
-      asm.lui(5, 0x2004),         # CLINT mtimecmp
-      asm.addi(6, 0, 64),
-      asm.sw(6, 5, 0),
-      asm.sw(0, 5, 4),
+      asm.addi(2, 0, 0x2),         # SSIP bit (bit 1)
+      asm.csrrw(0, 0x303, 2),      # mideleg = SSIP (delegable)
+      asm.csrrw(0, 0x104, 2),      # sie = SSIE
+      asm.csrrw(0, 0x100, 2),      # sstatus.SIE = 1
+      asm.addi(2, 0, 0x80),        # MTIP bit (bit 7)
+      asm.csrrw(0, 0x304, 2),      # mie = MTIP
+      # Set mstatus: MPP=S
+      asm.lui(2, 0x1),             # x2 = 0x1000
+      asm.addi(2, 2, -2048),       # x2 = 0x800 (MPP=S)
+      asm.csrrs(0, 0x300, 2),      # mstatus |= MPP_S
+      asm.addi(2, 0, s_mode_entry),# mepc = S-mode entry
+      asm.csrrw(0, 0x341, 2),      # mepc = s_mode_entry
+      asm.mret                     # drop to S-mode at s_mode_entry
+    ]
+
+    # S-mode code: set mtimecmp then wait
+    s_mode_code = [
+      asm.lui(5, 0x2004),          # CLINT mtimecmp low = 0x02004000
+      asm.addi(6, 0, 100),         # low threshold
+      asm.sw(6, 5, 0),             # mtimecmp_lo = 100
+      asm.sw(0, 5, 4),             # mtimecmp_hi = 0
+      asm.nop,
+      asm.nop,
       asm.nop,
       asm.nop
     ]
 
-    trap_handler = [
-      asm.csrrs(10, 0x142, 0),    # scause
+    # M-mode trap handler: set SSIP in sip, clear MTIP enable, then mret
+    m_trap_handler = [
+      asm.addi(3, 0, 0x2),         # SSIP bit
+      asm.csrrs(0, 0x144, 3),      # sip |= SSIP
+      asm.addi(3, 0, 0x80),        # MTIP bit
+      asm.csrrc(0, 0x304, 3),      # mie &= ~MTIP (prevent re-entry)
+      asm.csrrs(4, 0x341, 0),      # x4 = mepc
+      asm.addi(4, 4, 4),           # mepc += 4
+      asm.csrrw(0, 0x341, 4),      # mepc = mepc + 4
+      asm.mret                     # return to S-mode (MPP=S from original trap)
+    ]
+
+    # S-mode trap handler: read scause
+    s_trap_handler = [
+      asm.csrrs(10, 0x142, 0),     # x10 = scause
       asm.jal(0, 0)
     ]
 
     cpu.load_program(main_program, 0)
-    cpu.load_program(trap_handler, 0x300)
+    cpu.load_program(s_mode_code, s_mode_entry)
+    cpu.load_program(s_trap_handler, 0x300)
+    cpu.load_program(m_trap_handler, 0x400)
     cpu.reset!
-    cpu.run_cycles(pipeline ? 180 : 90)
+    cpu.run_cycles(pipeline ? 260 : 130)
 
-    expect(cpu.read_reg(10)).to eq(0x80000005)
+    expect(cpu.read_reg(10)).to eq(0x80000001)
   end
 
   it 'routes UART RX through PLIC source10 supervisor enable and claim/complete path' do
+    s_mode_entry = 0x200
     main_program = [
       asm.addi(1, 0, 0x300),      # stvec
       asm.csrrw(0, 0x105, 1),
-      asm.lui(2, 0x1),
-      asm.addi(2, 2, -2048),      # x2 = 0x800 (MEIP)
-      asm.csrrw(0, 0x303, 2),     # mideleg = MEIP
-      asm.csrrw(0, 0x104, 2),     # sie = MEIP
-      asm.addi(2, 0, 0x2),        # sstatus.SIE
-      asm.csrrw(0, 0x100, 2),
+      asm.addi(2, 0, 0x200),      # x2 = 0x200 (SEIP)
+      asm.csrrw(0, 0x303, 2),     # mideleg = SEIP
+      asm.csrrw(0, 0x104, 2),     # sie = SEIE
+      asm.addi(2, 0, 0x2),
+      asm.csrrw(0, 0x100, 2),     # sstatus.SIE = 1
 
       asm.lui(5, 0xC000),         # PLIC priority
       asm.addi(6, 0, 1),
@@ -98,9 +134,17 @@ RSpec.shared_examples 'linux mmio/interrupt integration' do |pipeline:|
       asm.lui(12, 0x10000),       # UART base
       asm.addi(13, 0, 1),
       asm.sb(13, 12, 1),          # UART IER = RX interrupt enable
-      asm.nop,
-      asm.nop
+
+      # Drop to S-mode: mstatus MPP=S
+      asm.lui(2, 0x1),
+      asm.addi(2, 2, -2048),      # x2 = 0x800 (MPP=S)
+      asm.csrrs(0, 0x300, 2),     # mstatus |= MPP_S
+      asm.addi(2, 0, s_mode_entry),
+      asm.csrrw(0, 0x341, 2),     # mepc = s_mode_entry
+      asm.mret
     ]
+
+    s_mode_code = [asm.jal(0, 0)]
 
     trap_handler = [
       asm.csrrs(10, 0x142, 0),    # scause
@@ -111,9 +155,10 @@ RSpec.shared_examples 'linux mmio/interrupt integration' do |pipeline:|
     ]
 
     cpu.load_program(main_program, 0)
+    cpu.load_program(s_mode_code, s_mode_entry)
     cpu.load_program(trap_handler, 0x300)
     cpu.reset!
-    cpu.run_cycles(pipeline ? 90 : 42)
+    cpu.run_cycles(pipeline ? 100 : 48)
     cpu.uart_receive_byte(0x41)
     cpu.run_cycles(pipeline ? 80 : 40)
 
@@ -128,16 +173,16 @@ RSpec.shared_examples 'linux mmio/interrupt integration' do |pipeline:|
     req_addr = 0x5000
     data_addr = 0x6000
     status_addr = 0x7000
+    s_mode_entry = 0x400
 
     main_program = [
       asm.addi(1, 0, 0x300),      # stvec
       asm.csrrw(0, 0x105, 1),
-      asm.lui(2, 0x1),
-      asm.addi(2, 2, -2048),      # x2 = 0x800 (MEIP)
-      asm.csrrw(0, 0x303, 2),     # mideleg = MEIP
-      asm.csrrw(0, 0x104, 2),     # sie = MEIP
-      asm.addi(2, 0, 0x2),        # sstatus.SIE
-      asm.csrrw(0, 0x100, 2),
+      asm.addi(2, 0, 0x200),      # x2 = 0x200 (SEIP)
+      asm.csrrw(0, 0x303, 2),     # mideleg = SEIP
+      asm.csrrw(0, 0x104, 2),     # sie = SEIE
+      asm.addi(2, 0, 0x2),
+      asm.csrrw(0, 0x100, 2),     # sstatus.SIE = 1
 
       asm.lui(5, 0xC000),         # PLIC priority[1]
       asm.addi(6, 0, 1),
@@ -162,9 +207,17 @@ RSpec.shared_examples 'linux mmio/interrupt integration' do |pipeline:|
       asm.sw(14, 3, 0x070),       # STATUS = ACK|DRIVER|DRIVER_OK
       asm.addi(14, 0, 0),
       asm.sw(14, 3, 0x050),       # QUEUE_NOTIFY = 0
-      asm.nop,
-      asm.nop
+
+      # Drop to S-mode: mstatus MPP=S
+      asm.lui(2, 0x1),
+      asm.addi(2, 2, -2048),      # x2 = 0x800 (MPP=S)
+      asm.csrrs(0, 0x300, 2),     # mstatus |= MPP_S
+      asm.addi(2, 0, s_mode_entry),
+      asm.csrrw(0, 0x341, 2),     # mepc = s_mode_entry
+      asm.mret
     ]
+
+    s_mode_code = [asm.jal(0, 0)]
 
     trap_handler = [
       asm.csrrs(10, 0x142, 0),    # scause
@@ -178,6 +231,7 @@ RSpec.shared_examples 'linux mmio/interrupt integration' do |pipeline:|
     ]
 
     cpu.load_program(main_program, 0)
+    cpu.load_program(s_mode_code, s_mode_entry)
     cpu.load_program(trap_handler, 0x300)
     cpu.reset!
     cpu.load_virtio_disk((0...64).to_a, offset: 512)
@@ -215,7 +269,7 @@ RSpec.shared_examples 'linux mmio/interrupt integration' do |pipeline:|
     write_u16(cpu, avail_base + 4, 0)
     write_u16(cpu, used_base + 2, 0)
 
-    cpu.run_cycles(pipeline ? 260 : 140)
+    cpu.run_cycles(pipeline ? 280 : 150)
 
     expect(cpu.read_reg(10)).to eq(0x80000009)
     expect(cpu.read_reg(12)).to eq(1)

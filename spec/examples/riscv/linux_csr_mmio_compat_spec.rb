@@ -119,16 +119,16 @@ RSpec.shared_examples 'linux csr/mmio native compatibility' do |pipeline:|
   end
 
   it 'handles delegated external interrupts through supervisor PLIC MMIO addresses' do
+    s_mode_entry = 0x200
     main_program = [
       asm.addi(1, 0, 0x300),  # stvec = 0x300
       asm.csrrw(0, 0x105, 1),
 
-      asm.lui(2, 0x1),
-      asm.addi(2, 2, -2048),  # x2 = 0x800 (MEIP)
-      asm.csrrw(0, 0x303, 2), # mideleg = MEIP
-      asm.csrrw(0, 0x104, 2), # sie = MEIP
-      asm.addi(2, 0, 0x2),    # sstatus.SIE
-      asm.csrrw(0, 0x100, 2),
+      asm.addi(2, 0, 0x200),   # x2 = 0x200 (SEIP)
+      asm.csrrw(0, 0x303, 2), # mideleg = SEIP
+      asm.csrrw(0, 0x104, 2), # sie = SEIE
+      asm.addi(2, 0, 0x2),
+      asm.csrrw(0, 0x100, 2), # sstatus.SIE = 1
 
       asm.lui(5, 0xC000),     # 0x0C000000
       asm.addi(6, 0, 1),
@@ -141,9 +141,17 @@ RSpec.shared_examples 'linux csr/mmio native compatibility' do |pipeline:|
 
       asm.lui(8, 0xC201),     # 0x0C201000
       asm.sw(0, 8, 0),        # threshold = 0
-      asm.nop,
-      asm.nop
+
+      # Drop to S-mode: mstatus MPP=S
+      asm.lui(2, 0x1),
+      asm.addi(2, 2, -2048),   # x2 = 0x800 (MPP=S)
+      asm.csrrs(0, 0x300, 2), # mstatus |= MPP_S
+      asm.addi(2, 0, s_mode_entry),
+      asm.csrrw(0, 0x341, 2), # mepc = s_mode_entry
+      asm.mret
     ]
+
+    s_mode_code = [asm.jal(0, 0)]
 
     trap_handler = [
       asm.csrrs(10, 0x142, 0), # scause
@@ -154,9 +162,10 @@ RSpec.shared_examples 'linux csr/mmio native compatibility' do |pipeline:|
     ]
 
     cpu.load_program(main_program, 0)
+    cpu.load_program(s_mode_code, s_mode_entry)
     cpu.load_program(trap_handler, 0x300)
     cpu.reset!
-    cpu.run_cycles(main_program.length + (pipeline ? 20 : 8))
+    cpu.run_cycles(main_program.length + (pipeline ? 24 : 10))
     cpu.set_plic_sources(source1: 1)
     cpu.run_cycles(pipeline ? 40 : 20)
 

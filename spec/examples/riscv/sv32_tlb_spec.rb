@@ -76,6 +76,14 @@ RSpec.shared_examples 'sv32 tlb behavior' do |pipeline:|
     write_data_word(cpu, data_b_pa, 0x2222_2222)
 
     program = [
+      # M-mode: switch to S-mode (translation only applies in S/U-mode)
+      asm.lui(1, 0x1),             # x1 = 0x1000
+      asm.addi(1, 1, -2048),       # x1 = 0x800 (MPP=S)
+      asm.csrrw(0, 0x300, 1),      # mstatus.MPP = S
+      asm.addi(1, 0, 0x18),        # x1 = S-mode entry point
+      asm.csrrw(0, 0x341, 1),      # mepc = 0x18
+      asm.mret,                    # switch to S-mode
+      # S-mode code at 0x18:
       asm.lui(1, 0x80000),         # satp mode
       asm.addi(1, 1, root_ppn),    # satp root ppn
       asm.csrrw(0, 0x180, 1),      # satp
@@ -99,10 +107,10 @@ RSpec.shared_examples 'sv32 tlb behavior' do |pipeline:|
     cpu.load_program(program, 0)
     cpu.reset!
 
-    run_until(max_cycles: max_cycles(180), message: 'first load to x10') { cpu.read_reg(10) == 0x1111_1111 }
+    run_until(max_cycles: max_cycles(220), message: 'first load to x10') { cpu.read_reg(10) == 0x1111_1111 }
     write_data_word(cpu, l0_pa + 4, pte_leaf(data_b_ppn, r: true, w: true, x: false, u: false))
-    run_until(max_cycles: max_cycles(220), message: 'second load to x11') { cpu.read_reg(11) != 0 }
-    run_until(max_cycles: max_cycles(280), message: 'third load to x12') { cpu.read_reg(12) != 0 }
+    run_until(max_cycles: max_cycles(260), message: 'second load to x11') { cpu.read_reg(11) != 0 }
+    run_until(max_cycles: max_cycles(320), message: 'third load to x12') { cpu.read_reg(12) != 0 }
 
     expect(cpu.read_reg(11)).to eq(0x1111_1111)
     expect(cpu.read_reg(12)).to eq(0x2222_2222)
@@ -123,6 +131,14 @@ RSpec.shared_examples 'sv32 tlb behavior' do |pipeline:|
     write_data_word(cpu, l0_pa + 4, pte_leaf(text_a_ppn, r: true, w: false, x: true, u: false))
 
     main = [
+      # M-mode: switch to S-mode (translation only applies in S/U-mode)
+      asm.lui(1, 0x1),             # x1 = 0x1000
+      asm.addi(1, 1, -2048),       # x1 = 0x800 (MPP=S)
+      asm.csrrw(0, 0x300, 1),      # mstatus.MPP = S
+      asm.addi(1, 0, 0x18),        # x1 = S-mode entry point
+      asm.csrrw(0, 0x341, 1),      # mepc = 0x18
+      asm.mret,                    # switch to S-mode
+      # S-mode code at 0x18:
       asm.lui(1, 0x80000),         # satp mode
       asm.addi(1, 1, root_ppn),    # satp root ppn
       asm.csrrw(0, 0x180, 1),      # satp
@@ -164,10 +180,10 @@ RSpec.shared_examples 'sv32 tlb behavior' do |pipeline:|
     cpu.load_program(text_b, text_b_pa)
     cpu.reset!
 
-    run_until(max_cycles: max_cycles(240), message: 'first call to increment x10') { cpu.read_reg(10) == 1 }
+    run_until(max_cycles: max_cycles(280), message: 'first call to increment x10') { cpu.read_reg(10) == 1 }
     write_data_word(cpu, l0_pa + 4, pte_leaf(text_b_ppn, r: true, w: false, x: true, u: false))
-    run_until(max_cycles: max_cycles(320), message: 'second call to increment x10') { cpu.read_reg(10) >= 2 }
-    run_until(max_cycles: max_cycles(420), message: 'third call after sfence to increment x10') { cpu.read_reg(10) >= 4 }
+    run_until(max_cycles: max_cycles(360), message: 'second call to increment x10') { cpu.read_reg(10) >= 2 }
+    run_until(max_cycles: max_cycles(460), message: 'third call after sfence to increment x10') { cpu.read_reg(10) >= 4 }
 
     expect(cpu.read_reg(10)).to eq(4)
   end
