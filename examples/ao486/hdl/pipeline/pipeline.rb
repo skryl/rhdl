@@ -685,7 +685,7 @@ module RHDL
             exec_jcc(opcode, prefix_count, has_0f, op32, addr32, bytes, eip, next_eip)
 
           when C::CMD_CALL
-            exec_call(opcode, prefix_count, has_0f, op32, bytes, memory, ss_base, eip, next_eip)
+            exec_call(opcode, prefix_count, has_0f, op32, bytes, memory, ds_base, ss_base, eip, next_eip)
 
           when C::CMD_RET_near
             exec_ret_near(opcode, prefix_count, op32, bytes, memory, ss_base, eip, next_eip)
@@ -1572,7 +1572,7 @@ module RHDL
           :ok
         end
 
-        def exec_call(opcode, prefix_count, has_0f, op32, bytes, memory, ss_base, eip, next_eip)
+        def exec_call(opcode, prefix_count, has_0f, op32, bytes, memory, ds_base, ss_base, eip, next_eip)
           push_sz = op32 ? 4 : 2
           mrm_offset = prefix_count + 1
 
@@ -1595,21 +1595,19 @@ module RHDL
             reg_field = (mrm >> 3) & 7
             modregrm_mod = (mrm >> 6) & 3
             modregrm_rm = mrm & 7
-            ds_base = desc_base(seg_cache(:ds))
-            ss_b = desc_base(seg_cache(:ss))
 
             if reg_field == 2  # CALL near indirect
               if modregrm_mod == 3
                 target = read_gpr(modregrm_rm, false, op32 ? 4 : 2) & (op32 ? 0xFFFF_FFFF : 0xFFFF)
               else
-                addr = compute_ea(modregrm_mod, modregrm_rm, false, bytes, mrm_offset, ds_base, ss_b)
+                addr = compute_ea(modregrm_mod, modregrm_rm, false, bytes, mrm_offset, ds_base, ss_base)
                 target = mem_read(memory, addr, op32 ? 4 : 2) & (op32 ? 0xFFFF_FFFF : 0xFFFF)
               end
               push_value(memory, next_eip, push_sz, ss_base, op32)
               advance_eip(target)
 
             elsif reg_field == 3  # CALL far indirect (m16:16 or m16:32)
-              addr = compute_ea(modregrm_mod, modregrm_rm, false, bytes, mrm_offset, ds_base, ss_b)
+              addr = compute_ea(modregrm_mod, modregrm_rm, false, bytes, mrm_offset, ds_base, ss_base)
               off_sz = op32 ? 4 : 2
               target_offset = mem_read(memory, addr, off_sz)
               target_selector = mem_read(memory, addr + off_sz, 2)
