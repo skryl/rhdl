@@ -154,7 +154,7 @@ export function createSchematicElementBuilder({
             : symbolType === 'op'
               ? 102
               : symbolType === 'io'
-                ? 34
+                ? 52
                 : 112;
       const baseHeight = symbolType === 'focus'
         ? 94
@@ -165,7 +165,7 @@ export function createSchematicElementBuilder({
             : symbolType === 'op'
               ? 42
               : symbolType === 'io'
-                ? 16
+                ? 18
                 : 46;
       const scalable = symbolType === 'focus' || symbolType === 'component' || symbolType === 'memory';
       const symbolWidth = scalable
