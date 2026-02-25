@@ -1,5 +1,5 @@
 // Renderer-agnostic data model.
-// Converts Cytoscape-format elements into a flat RenderList of typed primitives.
+// Converts schematic elements into a flat RenderList of typed primitives.
 
 const SYMBOL_TYPES = ['focus', 'memory', 'op', 'io', 'component'];
 

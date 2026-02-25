@@ -1,6 +1,5 @@
 // Live signal activity updater for RenderList.
-// Direct port of graph_activity.mjs logic — operates on RenderList element properties
-// instead of Cytoscape toggleClass().
+// Operates on RenderList element properties directly.
 
 export function updateRenderActivity({
   renderList,

@@ -293,6 +293,23 @@ This keeps startup deterministic and testable without browser globals.
 - Bindings attach listeners and call domain methods.
 - Redux sync snapshots app state for toolability and test instrumentation.
 
+### Schematic Renderer
+
+The component schematic tab (`5. Schematic`) renders RTL schematics using a custom
+WebGL/Canvas 2D pipeline with ELK.js for hierarchical port-based layout:
+
+- `renderers/schematic_data_model.mjs`: converts schematic elements into a flat `RenderList` of typed primitives (symbols, pins, nets, wires)
+- `renderers/webgl_renderer.mjs`: WebGL 2.0 instanced renderer with SDF rounded-rect shaders (primary)
+- `renderers/canvas_renderer.mjs`: Canvas 2D fallback when WebGL is unavailable
+- `renderers/symbols.mjs`: shape library with per-type draw functions
+- `renderers/spatial_index.mjs`: R-tree hit testing for click dispatch
+- `renderers/interactions.mjs`: canvas click/double-click handling for component selection and drill-down
+- `renderers/elk_layout_adapter.mjs`: builds ELK graph from RenderList, applies layout positions back
+- `renderers/render_activity.mjs`: live signal value updates on RenderList elements
+- `renderers/themes.mjs`: palette and element color resolution
+- `renderers/animation.mjs`: wire pulse animation state
+- `renderers/webgl_shaders.mjs`: GLSL vertex/fragment shader sources
+
 ### Testing Strategy
 
 - Unit tests:

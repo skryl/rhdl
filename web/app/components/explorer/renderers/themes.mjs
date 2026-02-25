@@ -1,5 +1,4 @@
 // Renderer-agnostic theme system.
-// Port of controllers/graph/theme.mjs palette + style rules.
 
 export function getThemePalette(theme = 'shenzhen') {
   if (theme === 'shenzhen') {

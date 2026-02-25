@@ -100,9 +100,9 @@ test('explorer graph runtime service validates required callbacks', () => {
   );
 });
 
-// --- d3 renderer feature flag tests ---
+// --- d3 renderer tests ---
 
-test('d3 renderer: destroyComponentGraph cleans up d3 renderer handle', () => {
+test('destroyComponentGraph cleans up d3 renderer handle', () => {
   let rendererDestroyed = false;
   let interactionsDestroyed = false;
   const state = {
@@ -124,7 +124,6 @@ test('d3 renderer: destroyComponentGraph cleans up d3 renderer handle', () => {
       graphLayoutEngine: 'elk',
       graphElkAvailable: true,
       graphShowChildren: true,
-      graphRenderer: 'd3',
       graphLiveValues: new Map(),
       parseError: '',
       sourceKey: 'k',
@@ -140,7 +139,7 @@ test('d3 renderer: destroyComponentGraph cleans up d3 renderer handle', () => {
   assert.equal(interactionsDestroyed, true);
 });
 
-test('d3 renderer: describeComponentGraphPanel shows d3 renderer info', () => {
+test('describeComponentGraphPanel shows renderer info', () => {
   const state = {
     theme: 'shenzhen',
     activeTab: 'componentGraphTab',
@@ -152,7 +151,6 @@ test('d3 renderer: describeComponentGraphPanel shows d3 renderer info', () => {
       graphLayoutEngine: 'elk',
       graphElkAvailable: true,
       graphShowChildren: true,
-      graphRenderer: 'd3',
       graphRenderBackend: 'canvas2d',
       graphLiveValues: new Map(),
       parseError: '',

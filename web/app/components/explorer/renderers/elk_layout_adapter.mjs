@@ -1,6 +1,5 @@
 // ELK layout adapter for the RenderList.
 // Builds an ELK graph from the RenderList, runs layout, and applies positions back.
-// No Cytoscape dependency.
 
 export function elkPortLayoutOptions() {
   return {
