@@ -10,3 +10,6 @@
 [submodule "examples/riscv/software/linux"]
 	path = examples/riscv/software/linux
 	url = https://github.com/torvalds/linux.git
+[submodule "examples/ao486/ao486_MiSTer"]
+	path = examples/ao486/ao486_MiSTer
+	url = https://github.com/MiSTer-devel/ao486_MiSTer.git
