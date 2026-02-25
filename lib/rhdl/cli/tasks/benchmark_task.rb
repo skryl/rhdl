@@ -795,7 +795,7 @@ module RHDL
           runners = [
             { name: 'IR Compiler', mode: :ir, sim: :compile, filter_key: :compiler },
             { name: 'Verilator', mode: :verilog, sim: nil, filter_key: :verilator },
-            { name: 'Arcilator', mode: :arcilator, sim: nil, filter_key: :arcilator }
+            { name: 'CIRCT', mode: :circt, sim: nil, filter_key: :circt }
           ]
           runners.select! { |r| runner_filter.include?(r[:filter_key]) } unless runner_filter.empty?
 
@@ -813,7 +813,7 @@ module RHDL
                           end
                         when :verilog
                           verilator_available?
-                        when :arcilator
+                        when :circt
                           arcilator_available?
                         end
 

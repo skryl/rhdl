@@ -262,30 +262,30 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
     end
   end
 
-  describe 'Arcilator mode' do
+  describe 'CIRCT mode' do
     before(:each) do
       skip 'Arcilator not available' unless arcilator_available?
     end
 
-    it 'creates arcilator mode runner' do
-      runner = described_class.new(mode: :arcilator)
-      expect(runner.mode).to eq(:arcilator)
+    it 'creates circt mode runner' do
+      runner = described_class.new(mode: :circt)
+      expect(runner.mode).to eq(:circt)
       expect(runner.simulator_type).to eq(:hdl_arcilator)
     end
 
-    it 'sets native flag to true for arcilator' do
-      runner = described_class.new(mode: :arcilator)
+    it 'sets native flag to true for circt' do
+      runner = described_class.new(mode: :circt)
       expect(runner.native?).to be true
     end
 
     it 'loads demo program into Arcilator memory' do
-      runner = described_class.with_demo(mode: :arcilator)
+      runner = described_class.with_demo(mode: :circt)
       program_area = runner.memory_sample[:program_area]
       expect(program_area.any? { |b| b != 0 }).to be true
     end
 
     it 'sets PC near $0800 for demo program' do
-      runner = described_class.with_demo(mode: :arcilator)
+      runner = described_class.with_demo(mode: :circt)
       runner.reset
       pc = runner.cpu_state[:pc]
       # PC should be near $0800 (2048) - allowing a few bytes for instruction fetch
@@ -301,7 +301,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
       end
 
       it 'sets PC near $B82A for karateka' do
-        runner = described_class.new(mode: :arcilator)
+        runner = described_class.new(mode: :circt)
         runner.load_memdump(karateka_memdump, pc: 0xB82A, use_appleiigo: true)
         runner.reset
         pc = runner.cpu_state[:pc]
@@ -311,7 +311,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
       end
 
       it 'sets reset vector to $B82A for karateka' do
-        runner = described_class.new(mode: :arcilator)
+        runner = described_class.new(mode: :circt)
         runner.load_memdump(karateka_memdump, pc: 0xB82A, use_appleiigo: true)
         reset_vector = runner.memory_sample[:reset_vector]
         # Reset vector should point to $B82A

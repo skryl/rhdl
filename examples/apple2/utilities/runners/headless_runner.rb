@@ -15,7 +15,7 @@ module RHDL
       attr_reader :runner, :mode, :sim_backend
 
       # Create a headless runner with the specified options
-      # @param mode [Symbol] Simulation mode: :ruby, :ir, :netlist, :verilog, :arcilator
+      # @param mode [Symbol] Simulation mode: :ruby, :ir, :netlist, :verilog, :circt
       # @param sim [Symbol] Simulator backend for :ir/:netlist: :interpret, :jit, :compile
       # @param sub_cycles [Integer] Sub-cycles per CPU cycle (for IR backends)
       def initialize(mode: :ruby, sim: nil, sub_cycles: 14)
@@ -36,11 +36,11 @@ module RHDL
                   when :verilog
                     require_relative 'verilator_runner'
                     RHDL::Examples::Apple2::VerilogRunner.new(sub_cycles: sub_cycles)
-                  when :arcilator
+                  when :circt
                     require_relative 'arcilator_runner'
                     RHDL::Examples::Apple2::ArcilatorRunner.new(sub_cycles: sub_cycles)
                   else
-                    raise ArgumentError, "Unknown mode: #{mode}. Valid modes: ruby, ir, netlist, verilog, arcilator"
+                    raise ArgumentError, "Unknown mode: #{mode}. Valid modes: ruby, ir, netlist, verilog, circt"
                   end
       end
 
@@ -191,7 +191,7 @@ module RHDL
           @sim_backend
         when :netlist
           @sim_backend
-        when :verilog, :arcilator
+        when :verilog, :circt
           nil
         else
           @sim_backend
@@ -289,7 +289,7 @@ module RHDL
         case mode
         when :ruby then :ruby
         when :ir, :netlist then :compile
-        when :verilog, :arcilator then nil
+        when :verilog, :circt then nil
         else
           raise ArgumentError, "Unknown mode: #{mode}. Valid modes: ruby, ir, netlist, verilog, arcilator"
         end

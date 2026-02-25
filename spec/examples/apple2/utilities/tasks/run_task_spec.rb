@@ -413,7 +413,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
         skip 'Arcilator not available' unless @arcilator_available
 
         begin
-          runner = described_class.with_karateka(mode: :arcilator)
+          runner = described_class.with_karateka(mode: :circt)
         rescue LoadError, StandardError => e
           skip "Arcilator backend not available: #{e.message}"
         end
@@ -446,7 +446,7 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
       it 'marks screen dirty on HIRES writes with arcilator' do
         skip 'Arcilator not available' unless @arcilator_available
 
-        runner = described_class.new(mode: :arcilator)
+        runner = described_class.new(mode: :circt)
         runner.reset
         runner.clear_screen_dirty
 
@@ -491,14 +491,14 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
 
       def requested_backends
         raw = ENV['RUN_TASK_BACKENDS']
-        return { jit: true, compile: true, verilog: true, arcilator: true } if raw.nil? || raw.strip.empty?
+        return { jit: true, compile: true, verilog: true, circt: true } if raw.nil? || raw.strip.empty?
 
         selected = raw.split(',').map { |token| token.strip.downcase }
         {
           jit: selected.include?('jit'),
           compile: selected.include?('compile'),
           verilog: selected.include?('verilog'),
-          arcilator: selected.include?('arcilator')
+          circt: selected.include?('circt')
         }
       end
 
@@ -631,10 +631,10 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
         end
 
         # Add arcilator if available
-        if @arcilator_available && selected[:arcilator]
+        if @arcilator_available && selected[:circt]
           begin
-            runner = described_class.with_karateka(mode: :arcilator)
-            results['arcilator'] = collect_sequences(runner, samples: samples, interval: interval)
+            runner = described_class.with_karateka(mode: :circt)
+            results['circt'] = collect_sequences(runner, samples: samples, interval: interval)
           rescue LoadError, StandardError
             # Skip if arcilator fails
           end
@@ -718,10 +718,10 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
 
         selected = requested_backends
         skip 'Compile backend not selected' unless selected[:compile]
-        skip 'Arcilator backend not selected' unless selected[:arcilator]
+        skip 'Arcilator backend not selected' unless selected[:circt]
 
         compile_runner = described_class.with_karateka(mode: :ir, sim: :compile)
-        arcilator_runner = described_class.with_karateka(mode: :arcilator)
+        arcilator_runner = described_class.with_karateka(mode: :circt)
 
         compile_signatures = collect_hires_color_signatures(compile_runner)
         arcilator_signatures = collect_hires_color_signatures(arcilator_runner)
@@ -761,10 +761,10 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner do
 
         selected = requested_backends
         skip 'Compile backend not selected' unless selected[:compile]
-        skip 'Arcilator backend not selected' unless selected[:arcilator]
+        skip 'Arcilator backend not selected' unless selected[:circt]
 
         compile_runner = described_class.with_karateka(mode: :ir, sim: :compile)
-        arcilator_runner = described_class.with_karateka(mode: :arcilator)
+        arcilator_runner = described_class.with_karateka(mode: :circt)
 
         compile_signatures = collect_video_memory_signatures(compile_runner)
         arcilator_signatures = collect_video_memory_signatures(arcilator_runner)

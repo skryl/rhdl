@@ -60,9 +60,9 @@ RSpec.describe 'RISC-V HdlHarness' do
       skip 'Arcilator not available' unless @arcilator_available
       require_relative '../../../../examples/riscv/utilities/runners/headless_runner'
 
-      runner = RHDL::Examples::RISCV::HeadlessRunner.new(mode: :arcilator)
-      expect(runner.mode).to eq(:arcilator)
-      expect(runner.effective_mode).to eq(:arcilator)
+      runner = RHDL::Examples::RISCV::HeadlessRunner.new(mode: :circt)
+      expect(runner.mode).to eq(:circt)
+      expect(runner.effective_mode).to eq(:circt)
       expect(runner.cpu).to be_a(RHDL::Examples::RISCV::HdlHarness)
       expect(runner.cpu.simulator_type).to eq(:hdl_arcilator)
     rescue LoadError, RuntimeError => e

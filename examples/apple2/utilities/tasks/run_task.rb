@@ -225,7 +225,7 @@ module RHDL
                       when :ir then "IR (native backend)"
                       when :netlist then "Netlist (gate-level)"
                       when :verilog then "Verilog (Verilator RTL)"
-                      when :arcilator then "Arcilator (CIRCT RTL)"
+                      when :circt then "CIRCT (Arcilator RTL)"
                       else @sim_mode.to_s
                       end
           puts "Starting Apple II emulator in #{mode_name} mode..."

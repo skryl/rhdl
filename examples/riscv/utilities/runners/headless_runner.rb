@@ -42,7 +42,7 @@ module RHDL
           resolved_mem_size = mem_size || DEFAULT_MEM_SIZE
 
           if hdl_mode?(@effective_mode)
-            hdl_backend = @effective_mode == :verilog ? :verilator : :arcilator
+            hdl_backend = @effective_mode == :verilog ? :verilator : :arcilator # :circt mode → :arcilator backend
             if @core != :single
               warn "HDL mode (#{@effective_mode}) only supports single-cycle core; overriding core=#{@core} to single."
               @core = :single
@@ -233,18 +233,18 @@ module RHDL
 
         def normalize_mode(mode)
           case mode
-          when :ruby, :ir, :verilog, :arcilator
+          when :ruby, :ir, :verilog, :circt
             mode
           when :netlist
             warn "Mode #{mode.inspect} is not implemented for RISC-V yet; falling back to :ir."
             :ir
           else
-            raise ArgumentError, "Unsupported mode #{mode.inspect}. Use ruby, ir, netlist, verilog, or arcilator."
+            raise ArgumentError, "Unsupported mode #{mode.inspect}. Use ruby, ir, netlist, verilog, or circt."
           end
         end
 
         def hdl_mode?(mode)
-          %i[verilog arcilator].include?(mode)
+          %i[verilog circt].include?(mode)
         end
 
         def normalize_core(core)
@@ -307,10 +307,10 @@ module RHDL
             :ruby
           when :ir, :netlist
             :compile
-          when :verilog, :arcilator
+          when :verilog, :circt
             :ruby
           else
-            raise "Unknown mode: #{mode}. Valid modes: ruby, ir, netlist, verilog, arcilator"
+            raise "Unknown mode: #{mode}. Valid modes: ruby, ir, netlist, verilog, circt"
           end
         end
 
