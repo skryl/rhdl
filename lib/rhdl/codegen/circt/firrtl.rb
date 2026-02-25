@@ -143,9 +143,35 @@ module RHDL
           reads_per_mem = Hash.new(0)
           memory_reads.each { |mr| reads_per_mem[mr.memory.to_s] += 1 }
 
-          # Memory arrays - determine read/write ports needed
+          # Identify ROM memories (have initial_data and no write ports)
+          # These will be converted to combinational lookup tables instead of mem blocks
+          rom_memory_names = Set.new
+          rom_memory_map = {} # mem_key => Memory
+          module_def.memories.each do |mem|
+            next unless mem.initial_data
+            mem_key = mem.name.to_s
+            write_count = module_def.write_ports.count { |wp| wp.memory.to_s == mem_key }
+            if write_count == 0
+              rom_memory_names.add(mem_key)
+              rom_memory_map[mem_key] = mem
+            end
+          end
+
+          # Pre-compute wire names for ROM lookup results (only for ROMs with actual reads)
+          rom_read_wires = {} # [mem_key, idx] => wire_name
+          rom_memory_names.each do |mem_key|
+            total_reads = reads_per_mem[mem_key]
+            next if total_reads == 0  # No actual reads; skip wire declaration
+            total_reads.times do |i|
+              wire_name = total_reads > 1 ? "_rom_#{sanitize(mem_key)}_#{i}" : "_rom_#{sanitize(mem_key)}"
+              rom_read_wires[[mem_key, i]] = wire_name
+            end
+          end
+
+          # Memory arrays - determine read/write ports needed (skip ROMs)
           module_def.memories.each do |mem|
             mem_key = mem.name.to_s
+            next if rom_memory_names.include?(mem_key)
             # Count how many read ports this memory needs
             read_count = reads_per_mem[mem_key]
             read_count = 1 if read_count == 0 # At least one reader if memory exists
@@ -174,6 +200,16 @@ module RHDL
             # No writer declaration for read-only memories (write_count == 0)
           end
 
+          # Declare wires for ROM lookup results (only for ROMs with actual reads)
+          rom_memory_names.each do |mem_key|
+            next if reads_per_mem[mem_key] == 0
+            mem = rom_memory_map[mem_key]
+            reads_per_mem[mem_key].times do |i|
+              wire_name = rom_read_wires[[mem_key, i]]
+              lines << "    wire #{wire_name}: #{type_decl(mem.width)}"
+            end
+          end
+
           # For memories without a clock input, generate a fake clock
           needs_fake_clock = !module_def.memories.empty? && !clock
           if needs_fake_clock
@@ -185,11 +221,26 @@ module RHDL
                       !module_def.memories.empty? || !seq_output_targets.empty? || needs_fake_clock
           lines << "" if has_decls
 
+          # ROM combinational lookup logic
+          rom_read_idx = Hash.new(0)
+          memory_reads.each do |mr|
+            mem_key = mr.memory.to_s
+            next unless rom_memory_names.include?(mem_key)
+            mem = rom_memory_map[mem_key]
+            idx = rom_read_idx[mem_key]
+            wire_name = rom_read_wires[[mem_key, idx]]
+            addr_str = expr(mr.addr)
+            lookup_str = rom_lookup_expr(mem.initial_data, mem.width, mem.depth, addr_str)
+            lines << "    connect #{wire_name}, #{lookup_str}"
+            rom_read_idx[mem_key] += 1
+          end
+
           # Memory read port connections - must come before assigns that use them
           # Track which memory read we're on for multi-port memories
           mem_read_index = Hash.new(0)
           memory_reads.each do |mr|
             mem_key = mr.memory.to_s
+            next if rom_memory_names.include?(mem_key)
             mem_name = sanitize(mr.memory)
             idx = mem_read_index[mem_key]
             # Use numbered ports only if multiple readers
@@ -211,6 +262,7 @@ module RHDL
           # Connect unread memory ports to defaults
           read_mem_names = memory_reads.map { |mr| mr.memory.to_s }.to_set
           module_def.memories.each do |mem|
+            next if rom_memory_names.include?(mem.name.to_s)
             next if read_mem_names.include?(mem.name.to_s)
             mem_name = sanitize(mem.name)
             clk_signal = clock ? clock_expr(clock) : "asClock(UInt<1>(0))"
@@ -222,7 +274,7 @@ module RHDL
           # Continuous assignments - use memory read port data
           mem_read_index = Hash.new(0)
           module_def.assigns.each do |assign|
-            lines << "    connect #{sanitize(assign.target)}, #{expr_with_mem_reads(assign.expr, memory_reads, mem_read_index)}"
+            lines << "    connect #{sanitize(assign.target)}, #{expr_with_mem_reads(assign.expr, memory_reads, mem_read_index, rom_read_wires: rom_read_wires)}"
           end
 
           # Connect output ports to their internal registers
@@ -236,13 +288,15 @@ module RHDL
             if process.clocked
               process.statements.each do |stmt|
                 lines.concat(statement(stmt, indent: 4, output_regs: seq_output_targets,
-                                       memory_reads: memory_reads, mem_read_index: mem_read_index))
+                                       memory_reads: memory_reads, mem_read_index: mem_read_index,
+                                       rom_read_wires: rom_read_wires))
               end
             else
               # Combinational process - convert to assignments
               process.statements.each do |stmt|
                 lines.concat(statement(stmt, indent: 4, output_regs: Set.new,
-                                       memory_reads: memory_reads, mem_read_index: mem_read_index))
+                                       memory_reads: memory_reads, mem_read_index: mem_read_index,
+                                       rom_read_wires: rom_read_wires))
               end
             end
           end
@@ -371,18 +425,21 @@ module RHDL
           end
         end
 
-        def expr_with_mem_reads(expr_node, memory_reads, mem_read_index, output_regs: Set.new)
+        def expr_with_mem_reads(expr_node, memory_reads, mem_read_index, output_regs: Set.new, rom_read_wires: {})
           case expr_node
           when IR::MemoryRead
-            # Find which read port this corresponds to
             mem_key = expr_node.memory.to_s
-            mem_name = sanitize(expr_node.memory)
-            read_count = memory_reads.count { |mr| mr.memory.to_s == mem_key }
             idx = mem_read_index[mem_key]
-            # Use numbered ports only if multiple readers
-            read_port = read_count > 1 ? "read#{idx}" : "read"
             mem_read_index[mem_key] += 1
-            "#{mem_name}.#{read_port}.data"
+            # ROM memories use pre-computed lookup wires
+            if rom_read_wires.key?([mem_key, idx])
+              rom_read_wires[[mem_key, idx]]
+            else
+              mem_name = sanitize(expr_node.memory)
+              read_count = memory_reads.count { |mr| mr.memory.to_s == mem_key }
+              read_port = read_count > 1 ? "read#{idx}" : "read"
+              "#{mem_name}.#{read_port}.data"
+            end
           when IR::Signal
             name = output_regs.include?(expr_node.name) ? "#{expr_node.name}_reg" : expr_node.name
             sanitize(name)
@@ -391,29 +448,29 @@ module RHDL
           when IR::UnaryOp
             case expr_node.op
             when :~, :!
-              "not(#{expr_with_mem_reads(expr_node.operand, memory_reads, mem_read_index, output_regs: output_regs)})"
+              "not(#{expr_with_mem_reads(expr_node.operand, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)})"
             else
               raise ArgumentError, "Unsupported unary op: #{expr_node.op}"
             end
           when IR::BinaryOp
-            left = expr_with_mem_reads(expr_node.left, memory_reads, mem_read_index, output_regs: output_regs)
-            right = expr_with_mem_reads(expr_node.right, memory_reads, mem_read_index, output_regs: output_regs)
+            left = expr_with_mem_reads(expr_node.left, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
+            right = expr_with_mem_reads(expr_node.right, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
             binary_op_str(expr_node.op, left, right)
           when IR::Mux
-            cond = expr_with_mem_reads(expr_node.condition, memory_reads, mem_read_index, output_regs: output_regs)
-            when_true = expr_with_mem_reads(expr_node.when_true, memory_reads, mem_read_index, output_regs: output_regs)
-            when_false = expr_with_mem_reads(expr_node.when_false, memory_reads, mem_read_index, output_regs: output_regs)
+            cond = expr_with_mem_reads(expr_node.condition, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
+            when_true = expr_with_mem_reads(expr_node.when_true, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
+            when_false = expr_with_mem_reads(expr_node.when_false, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
             "mux(#{cond}, #{when_true}, #{when_false})"
           when IR::Concat
-            parts = expr_node.parts.map { |p| expr_with_mem_reads(p, memory_reads, mem_read_index, output_regs: output_regs) }
+            parts = expr_node.parts.map { |p| expr_with_mem_reads(p, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires) }
             "cat(#{parts.join(', ')})"
           when IR::Slice
-            base = expr_with_mem_reads(expr_node.base, memory_reads, mem_read_index, output_regs: output_regs)
+            base = expr_with_mem_reads(expr_node.base, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
             high = [expr_node.range.begin, expr_node.range.end].max
             low = [expr_node.range.begin, expr_node.range.end].min
             "bits(#{base}, #{high}, #{low})"
           when IR::Resize
-            inner = expr_with_mem_reads(expr_node.expr, memory_reads, mem_read_index, output_regs: output_regs)
+            inner = expr_with_mem_reads(expr_node.expr, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
             target_width = expr_node.width
             source_width = expr_node.expr.width
             if target_width == source_width
@@ -424,13 +481,13 @@ module RHDL
               "bits(#{inner}, #{target_width - 1}, 0)"
             end
           when IR::Case
-            selector = expr_with_mem_reads(expr_node.selector, memory_reads, mem_read_index, output_regs: output_regs)
-            default_expr = expr_node.default ? expr_with_mem_reads(expr_node.default, memory_reads, mem_read_index, output_regs: output_regs) : literal(0, expr_node.width)
+            selector = expr_with_mem_reads(expr_node.selector, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)
+            default_expr = expr_node.default ? expr_with_mem_reads(expr_node.default, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires) : literal(0, expr_node.width)
             result = default_expr
             expr_node.cases.reverse_each do |values, branch|
               values.each do |v|
                 cond = "eq(#{selector}, #{literal(v, expr_node.selector.width)})"
-                result = "mux(#{cond}, #{expr_with_mem_reads(branch, memory_reads, mem_read_index, output_regs: output_regs)}, #{result})"
+                result = "mux(#{cond}, #{expr_with_mem_reads(branch, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)}, #{result})"
               end
             end
             result
@@ -553,26 +610,42 @@ module RHDL
           "asClock(#{sanitize(name)})"
         end
 
+        # Generate a combinational lookup expression for a ROM memory
+        # Returns a nested mux chain: mux(eq(addr, N), data[N], mux(eq(addr, N-1), ...))
+        def rom_lookup_expr(initial_data, width, depth, addr_expr)
+          mask = (1 << width) - 1
+          addr_bits = [1, (Math.log2([depth, 2].max).ceil)].max
+
+          result = "UInt<#{width}>(0)"
+          initial_data.each_with_index.reverse_each do |raw, idx|
+            break if idx >= depth
+            value = (raw || 0).to_i & mask
+            next if value == 0
+            result = "mux(eq(#{addr_expr}, UInt<#{addr_bits}>(#{idx})), UInt<#{width}>(#{value}), #{result})"
+          end
+          result
+        end
+
         def type_decl(width)
           "UInt<#{width}>"
         end
 
-        def statement(stmt, indent:, output_regs: Set.new, memory_reads: [], mem_read_index: Hash.new(0))
+        def statement(stmt, indent:, output_regs: Set.new, memory_reads: [], mem_read_index: Hash.new(0), rom_read_wires: {})
           pad = " " * indent
           case stmt
           when IR::SeqAssign
             # Rewrite target to use internal register if it's an output
             target = output_regs.include?(stmt.target) ? "#{stmt.target}_reg" : stmt.target
-            ["#{pad}connect #{sanitize(target)}, #{expr_with_mem_reads(stmt.expr, memory_reads, mem_read_index, output_regs: output_regs)}"]
+            ["#{pad}connect #{sanitize(target)}, #{expr_with_mem_reads(stmt.expr, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)}"]
           when IR::MemoryWrite
             ["#{pad}connect #{sanitize(stmt.memory)}[#{expr(stmt.addr)}], #{expr(stmt.data)}"]
           when IR::If
             lines = []
-            lines << "#{pad}when #{expr_with_mem_reads(stmt.condition, memory_reads, mem_read_index, output_regs: output_regs)}:"
-            stmt.then_statements.each { |s| lines.concat(statement(s, indent: indent + 2, output_regs: output_regs, memory_reads: memory_reads, mem_read_index: mem_read_index)) }
+            lines << "#{pad}when #{expr_with_mem_reads(stmt.condition, memory_reads, mem_read_index, output_regs: output_regs, rom_read_wires: rom_read_wires)}:"
+            stmt.then_statements.each { |s| lines.concat(statement(s, indent: indent + 2, output_regs: output_regs, memory_reads: memory_reads, mem_read_index: mem_read_index, rom_read_wires: rom_read_wires)) }
             unless stmt.else_statements.empty?
               lines << "#{pad}else:"
-              stmt.else_statements.each { |s| lines.concat(statement(s, indent: indent + 2, output_regs: output_regs, memory_reads: memory_reads, mem_read_index: mem_read_index)) }
+              stmt.else_statements.each { |s| lines.concat(statement(s, indent: indent + 2, output_regs: output_regs, memory_reads: memory_reads, mem_read_index: mem_read_index, rom_read_wires: rom_read_wires)) }
             end
             lines
           else

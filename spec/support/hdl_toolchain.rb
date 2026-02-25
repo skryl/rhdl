@@ -24,4 +24,8 @@ module HdlToolchain
   def verilator_available?
     which("verilator")
   end
+
+  def arcilator_available?
+    which("firtool") && which("arcilator") && which("llc")
+  end
 end

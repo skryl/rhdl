@@ -72,6 +72,18 @@ module RHDL
           :hdl_arcilator
         end
 
+        def dry_run_info
+          {
+            mode: :arcilator,
+            simulator_type: :hdl_arcilator,
+            native: true
+          }
+        end
+
+        def display_mode
+          :text
+        end
+
         def load_rom(bytes, base_addr:)
           bytes = bytes.bytes if bytes.is_a?(String)
           bytes.each_with_index { |byte, i| @rom[i] = byte if i < @rom.size }
@@ -299,6 +311,20 @@ module RHDL
           write_memory(addr, value & 0xFF)
         end
 
+        def read_hires_bitmap(base_addr: HIRES_PAGE1_START)
+          bitmap = []
+          HIRES_HEIGHT.times do |row|
+            line = []
+            line_addr = hires_line_address(row, base_addr)
+            HIRES_BYTES_PER_LINE.times do |col|
+              byte = read_ram_byte(line_addr + col)
+              7.times { |bit| line << ((byte >> bit) & 1) }
+            end
+            bitmap << line
+          end
+          bitmap
+        end
+
         private
 
         def check_arcilator_available!
@@ -352,7 +378,7 @@ module RHDL
           # MLIR -> LLVM IR
           system("arcilator #{mlir_file} --state-file=#{state_file} -o #{ll_file}") or raise "arcilator failed"
           # LLVM IR -> object file
-          system("llc -filetype=obj -O2 #{ll_file} -o #{File.join(BUILD_DIR, 'apple2_arc.o')}") or raise "llc failed"
+          system("llc -filetype=obj -O2 -relocation-model=pic #{ll_file} -o #{File.join(BUILD_DIR, 'apple2_arc.o')}") or raise "llc failed"
         end
 
         def build_shared_library
@@ -567,20 +593,6 @@ module RHDL
             return @sim_read_ram_fn.call(@sim_ctx, addr) & 0xFF
           end
           @ram[addr] || 0
-        end
-
-        def read_hires_bitmap(base_addr: HIRES_PAGE1_START)
-          bitmap = []
-          HIRES_HEIGHT.times do |row|
-            line = []
-            line_addr = hires_line_address(row, base_addr)
-            HIRES_BYTES_PER_LINE.times do |col|
-              byte = read_ram_byte(line_addr + col)
-              7.times { |bit| line << ((byte >> bit) & 1) }
-            end
-            bitmap << line
-          end
-          bitmap
         end
 
         def display_memory_addr?(addr)

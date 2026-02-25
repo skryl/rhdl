@@ -479,7 +479,8 @@ module RHDL
             { name: 'Interpreter', backend: :interpreter, available_const: :IR_INTERPRETER_AVAILABLE },
             { name: 'JIT', backend: :jit, available_const: :IR_JIT_AVAILABLE },
             { name: 'Compiler', backend: :compiler, available_const: :IR_COMPILER_AVAILABLE },
-            { name: 'Verilator', backend: :verilator }
+            { name: 'Verilator', backend: :verilator },
+            { name: 'Arcilator', backend: :arcilator }
           ]
           runners.select! { |runner| runner_filter.include?(runner[:backend]) } unless runner_filter.empty?
 
@@ -498,6 +499,8 @@ module RHDL
               available = RHDL::Codegen::IR.const_get(runner[:available_const]) rescue false
             elsif runner[:backend] == :verilator
               available = verilator_available?
+            elsif runner[:backend] == :arcilator
+              available = arcilator_available?
             else
               available = false
             end
@@ -511,13 +514,14 @@ module RHDL
             print "\n#{runner[:name]}: "
             $stdout.flush
 
+            is_hdl_runner = runner[:backend] == :verilator || runner[:backend] == :arcilator
+
             begin
               # Create simulator
               print "initializing... "
               $stdout.flush
               init_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
-              is_verilator = runner[:backend] == :verilator
               sim = case runner[:backend]
               when :interpreter
                 RHDL::Codegen::IR::IrSimulator.new(ir_json, backend: :interpreter)
@@ -528,6 +532,9 @@ module RHDL
               when :verilator
                 require_relative '../../../../examples/apple2/utilities/runners/verilator_runner'
                 RHDL::Examples::Apple2::VerilogRunner.new(sub_cycles: 14)
+              when :arcilator
+                require_relative '../../../../examples/apple2/utilities/runners/arcilator_runner'
+                RHDL::Examples::Apple2::ArcilatorRunner.new(sub_cycles: 14)
               end
 
               init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
@@ -535,7 +542,7 @@ module RHDL
               # Load ROM and RAM
               print "loading... "
               $stdout.flush
-              if is_verilator
+              if is_hdl_runner
                 sim.load_rom(karateka_rom, base_addr: 0xD000)
                 sim.load_ram(karateka_mem.first(48 * 1024), base_addr: 0)
               else
@@ -544,7 +551,7 @@ module RHDL
               end
 
               # Reset
-              if is_verilator
+              if is_hdl_runner
                 sim.reset
               else
                 sim.poke('reset', 1)
@@ -553,7 +560,7 @@ module RHDL
               end
 
               # Warmup - run a few cycles to get past reset
-              if is_verilator
+              if is_hdl_runner
                 sim.run_steps(3)
               else
                 sim.runner_run_cycles(3, 0, false)
@@ -563,7 +570,7 @@ module RHDL
               print "running #{cycles} cycles... "
               $stdout.flush
               run_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-              if is_verilator
+              if is_hdl_runner
                 sim.run_steps(cycles)
               else
                 sim.runner_run_cycles(cycles, 0, false)
@@ -571,7 +578,7 @@ module RHDL
               run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
 
               cycles_per_sec = cycles / run_elapsed
-              pc = is_verilator ? sim.pc : sim.peek('cpu__pc_reg')
+              pc = is_hdl_runner ? sim.pc : sim.peek('cpu__pc_reg')
 
               puts "done"
               puts "  Init time: #{format('%.3f', init_elapsed)}s"
@@ -799,6 +806,14 @@ module RHDL
         def verilator_available?
           ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
             File.executable?(File.join(path, 'verilator'))
+          end
+        end
+
+        def arcilator_available?
+          %w[firtool arcilator llc].all? do |cmd|
+            ENV['PATH'].split(File::PATH_SEPARATOR).any? do |path|
+              File.executable?(File.join(path, cmd))
+            end
           end
         end
       end
