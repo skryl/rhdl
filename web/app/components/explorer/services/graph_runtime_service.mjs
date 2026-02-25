@@ -1,9 +1,14 @@
 import { toBigInt } from '../../../core/lib/numeric_utils.mjs';
 import { nodeDisplayPath } from '../lib/model_utils.mjs';
-import { updateGraphActivity } from '../lib/graph_activity.mjs';
-import { createSchematicPalette, createSchematicStyle } from '../controllers/graph/theme.mjs';
-import { runElkPortLayout } from '../controllers/graph/layout_elk.mjs';
-import { bindGraphInteractions } from '../controllers/graph/interactions.mjs';
+
+import { buildRenderList } from '../renderers/schematic_data_model.mjs';
+import { createCanvasRenderer } from '../renderers/canvas_renderer.mjs';
+import { createWebGLRenderer } from '../renderers/webgl_renderer.mjs';
+import { buildSpatialIndex } from '../renderers/spatial_index.mjs';
+import { bindD3Interactions } from '../renderers/interactions.mjs';
+import { buildElkGraph, applyElkResult } from '../renderers/elk_layout_adapter.mjs';
+import { updateRenderActivity } from '../renderers/render_activity.mjs';
+import { getThemePalette, drawLegend } from '../renderers/themes.mjs';
 
 function requireFn(name, fn) {
   if (typeof fn !== 'function') {
@@ -29,6 +34,10 @@ export function createExplorerGraphRuntimeService({
   requireFn('createSchematicElements', createSchematicElements);
   requireFn('signalLiveValueByName', signalLiveValueByName);
 
+  // renderer state (kept outside components state to avoid serialization)
+  let renderListRef = null;
+  let viewport = { x: 0, y: 0, scale: 1 };
+
   function destroyComponentGraph() {
     if (state.components.graph && typeof state.components.graph.destroy === 'function') {
       state.components.graph.destroy();
@@ -39,13 +48,11 @@ export function createExplorerGraphRuntimeService({
     state.components.graphLastTap = null;
     state.components.graphLayoutEngine = 'none';
     state.components.graphElkAvailable = false;
+    renderListRef = null;
   }
 
   function ensureComponentGraph(model) {
     if (!dom.componentVisual || !model) {
-      return null;
-    }
-    if (typeof window.cytoscape !== 'function') {
       return null;
     }
 
@@ -60,9 +67,10 @@ export function createExplorerGraphRuntimeService({
     const elkAvailable = typeof window.ELK === 'function';
     state.components.graphElkAvailable = elkAvailable;
     const graphKey =
-      `${state.components.sourceKey}:schematic:${state.theme}:` +
+      `${state.components.sourceKey}:d3:${state.theme}:` +
       `${schematicKey}:${focusNode.id}:${showChildren ? 1 : 0}:` +
       `${focusNode.children.length}:${focusNode.signals.length}:${elkAvailable ? 1 : 0}`;
+
     if (!elkAvailable) {
       state.components.graphLayoutEngine = 'missing';
       return null;
@@ -74,38 +82,113 @@ export function createExplorerGraphRuntimeService({
     destroyComponentGraph();
     dom.componentVisual.innerHTML = '';
 
-    const palette = createSchematicPalette(state.theme);
+    // Build render list from schematic elements
     const schematicElements = createSchematicElements(model, focusNode, showChildren);
-    const cy = window.cytoscape({
-      container: dom.componentVisual,
-      elements: schematicElements,
-      style: createSchematicStyle(palette),
-      layout: {
-        name: 'preset',
-        fit: false
-      },
-      wheelSensitivity: 0.2,
-      autoungrabify: true,
-      boxSelectionEnabled: false
-    });
+    const renderList = buildRenderList(schematicElements);
+    renderListRef = renderList;
 
+    // Create canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = dom.componentVisual.clientWidth || 800;
+    canvas.height = dom.componentVisual.clientHeight || 600;
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    dom.componentVisual.appendChild(canvas);
+
+    // Create renderer — try WebGL first, fall back to Canvas 2D
+    const webglRenderer = createWebGLRenderer(canvas);
+    const renderer = webglRenderer || createCanvasRenderer(canvas);
+    state.components.graphRenderBackend = webglRenderer ? 'webgl' : 'canvas2d';
+
+    // For WebGL, create a 2D overlay canvas for the legend (Canvas 2D draws legend inline)
+    let legendCanvas = null;
+    let legendCtx = null;
+    if (webglRenderer) {
+      legendCanvas = document.createElement('canvas');
+      legendCanvas.width = canvas.width;
+      legendCanvas.height = canvas.height;
+      legendCanvas.style.width = '100%';
+      legendCanvas.style.height = '100%';
+      legendCanvas.style.position = 'absolute';
+      legendCanvas.style.top = '0';
+      legendCanvas.style.left = '0';
+      legendCanvas.style.pointerEvents = 'none';
+      dom.componentVisual.style.position = 'relative';
+      dom.componentVisual.appendChild(legendCanvas);
+      legendCtx = legendCanvas.getContext('2d');
+    }
+
+    function renderLegendOverlay(pal) {
+      if (!legendCtx) return;
+      legendCtx.clearRect(0, 0, legendCanvas.width, legendCanvas.height);
+      drawLegend(legendCtx, legendCanvas.width, legendCanvas.height, pal);
+    }
+
+    // Run ELK layout
+    const elkGraph = buildElkGraph(renderList);
+    const elk = new window.ELK();
     state.components.graphLayoutEngine = 'elk';
-    runElkPortLayout({ cy, state }).catch((_err) => {
+    elk.layout(elkGraph).then((result) => {
+      if (result && Array.isArray(result.children)) {
+        applyElkResult(renderList, result);
+        // Rebuild spatial index after layout
+        const newIndex = buildSpatialIndex(renderList);
+        if (graphHandle.interactions) {
+          graphHandle.spatialIndex = newIndex;
+        }
+        // Render with new positions
+        const palette = getThemePalette(state.theme);
+        renderer.render(renderList, viewport, palette);
+        renderLegendOverlay(palette);
+      }
+    }).catch((_err) => {
       state.components.graphLayoutEngine = 'error';
     });
 
-    bindGraphInteractions({
-      cy,
+    // Build spatial index
+    const spatialIndex = buildSpatialIndex(renderList);
+
+    // Bind interactions
+    const interactions = bindD3Interactions({
+      canvas,
       state,
       model,
+      spatialIndex,
       renderComponentTree,
-      renderComponentViews
+      renderComponentViews,
+      requestRender: () => {
+        const palette = getThemePalette(state.theme);
+        renderer.render(renderListRef || renderList, viewport, palette);
+        renderLegendOverlay(palette);
+      }
     });
 
-    state.components.graph = cy;
+    // Initial render
+    const palette = getThemePalette(state.theme);
+    renderer.render(renderList, viewport, palette);
+    renderLegendOverlay(palette);
+
+    const graphHandle = {
+      type: 'd3',
+      renderer,
+      interactions,
+      canvas,
+      spatialIndex,
+      renderList,
+      renderLegendOverlay,
+      destroy() {
+        renderer.destroy();
+        interactions.destroy();
+      }
+    };
+
+    state.components.graph = graphHandle;
     state.components.graphKey = graphKey;
     state.components.graphSelectedId = null;
-    return cy;
+    if (!state.components.graphLiveValues) {
+      state.components.graphLiveValues = new Map();
+    }
+    return graphHandle;
   }
 
   function renderComponentVisual({ node, model, rerender }) {
@@ -117,14 +200,9 @@ export function createExplorerGraphRuntimeService({
       dom.componentVisual.textContent = 'Select a component to visualize.';
       return { ok: false, reason: 'missing-node' };
     }
-    if (typeof window.cytoscape !== 'function') {
-      destroyComponentGraph();
-      dom.componentVisual.textContent = 'Cytoscape not available.';
-      return { ok: false, reason: 'missing-cytoscape' };
-    }
 
-    const cy = ensureComponentGraph(model);
-    if (!cy) {
+    const graph = ensureComponentGraph(model);
+    if (!graph) {
       if (state.components.graphLayoutEngine === 'missing') {
         dom.componentVisual.textContent = 'ELK layout engine unavailable.';
       } else {
@@ -142,63 +220,24 @@ export function createExplorerGraphRuntimeService({
       return { ok: false, reason: 'small-container' };
     }
 
-    const focusNode = currentComponentGraphFocusNode();
-    const findGraphNodeByComponentId = (componentId) => {
-      if (!componentId) {
-        return null;
-      }
-      const matches = cy
-        .nodes('.schem-component')
-        .filter((entry) => String(entry.data('componentId') || '') === String(componentId));
-      return matches && matches.length > 0 ? matches[0] : null;
-    };
+    const renderList = renderListRef || graph.renderList;
 
-    const selectedComponentId = (() => {
-      if (!node) {
-        return focusNode?.id || null;
-      }
-      const selected = findGraphNodeByComponentId(node.id);
-      if (selected) {
-        return node.id;
-      }
-      return focusNode?.id || node.id;
-    })();
-    const selectedNode = selectedComponentId ? findGraphNodeByComponentId(selectedComponentId) : null;
-    const selectedCyId = selectedNode ? selectedNode.id() : null;
-
-    cy.batch(() => {
-      cy.nodes('.schem-component').removeClass('selected');
-      if (selectedNode) {
-        selectedNode.addClass('selected');
-      }
-    });
-
-    if (state.components.graphSelectedId !== selectedCyId) {
-      state.components.graphSelectedId = selectedCyId;
-      if (selectedNode) {
-        cy.animate(
-          {
-            center: {
-              eles: selectedNode
-            }
-          },
-          {
-            duration: 180
-          }
-        );
-      }
-    } else {
-      cy.resize();
-    }
-
-    updateGraphActivity({
-      cy,
-      state,
+    // Update live signal activity
+    const nextValues = updateRenderActivity({
+      renderList,
       signalLiveValueByName,
-      toBigInt
+      toBigInt,
+      highlightedSignal: state.components.graphHighlightedSignal,
+      previousValues: state.components.graphLiveValues || new Map()
     });
+    state.components.graphLiveValues = nextValues;
 
-    return { ok: true, cy };
+    // Re-render canvas
+    const palette = getThemePalette(state.theme);
+    graph.renderer.render(renderList, viewport, palette);
+    if (graph.renderLegendOverlay) graph.renderLegendOverlay(palette);
+
+    return { ok: true };
   }
 
   function describeComponentGraphPanel({ selectedNode, focusNode }) {
