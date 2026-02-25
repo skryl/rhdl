@@ -57,6 +57,17 @@ export function bindCoreBindings({
     startY: 0,
     startHeight: 0
   };
+  let runnerLoadInProgress = false;
+
+  async function yieldToUi() {
+    if (globalWindow && typeof globalWindow.requestAnimationFrame === 'function') {
+      await new Promise((resolve) => {
+        globalWindow.requestAnimationFrame(() => resolve());
+      });
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
 
   function terminalMaxHeightPx() {
     const viewportHeight = Number(globalWindow?.innerHeight || 0);
@@ -88,8 +99,26 @@ export function bindCoreBindings({
     }
   }
 
-  listeners.on(dom.loadRunnerBtn, 'click', () => {
-    runner.loadPreset();
+  listeners.on(dom.loadRunnerBtn, 'click', async () => {
+    if (runnerLoadInProgress) {
+      return;
+    }
+    runnerLoadInProgress = true;
+    if (dom.loadRunnerBtn) {
+      dom.loadRunnerBtn.disabled = true;
+    }
+    if (dom.runnerStatus) {
+      dom.runnerStatus.textContent = 'Loading...';
+    }
+    try {
+      await yieldToUi();
+      await runner.loadPreset();
+    } finally {
+      runnerLoadInProgress = false;
+      if (dom.loadRunnerBtn) {
+        dom.loadRunnerBtn.disabled = false;
+      }
+    }
   });
 
   listeners.on(dom.sidebarToggleBtn, 'click', () => {
@@ -278,7 +307,13 @@ export function bindCoreBindings({
   });
 
   listeners.on(dom.runnerSelect, 'change', () => {
-    store.setRunnerPresetState(runner.getPreset(dom.runnerSelect.value).id);
+    const preset = runner.getPreset(dom.runnerSelect.value);
+    store.setRunnerPresetState(preset.id);
+    const preferredBackend = String(preset?.preferredBackend || '').trim();
+    if (preferredBackend && dom.backendSelect) {
+      dom.backendSelect.value = preferredBackend;
+      store.setBackendState(preferredBackend);
+    }
     runner.updateIrSourceVisibility();
     sim.refreshStatus();
   });
