@@ -34,8 +34,20 @@ module RHDL
           @ea_calc = ReadEffectiveAddress.new(:ea_calc)
           @regfile = WriteRegister.new(:regfile)
 
+          # I/O callbacks
+          @io_read_callback = nil
+          @io_write_callback = nil
+
           # Initialize register file
           clock_regfile_reset
+        end
+
+        def on_io_read(&block)
+          @io_read_callback = block
+        end
+
+        def on_io_write(&block)
+          @io_write_callback = block
         end
 
         # Set up a convenient real-mode state for testing
@@ -96,8 +108,17 @@ module RHDL
             return :not_ready
           end
 
+          rep_prefix = @decode.get_output(:dec_prefix_group_1_rep)
+
           # Get raw instruction bytes for operand resolution
           bytes = Array.new(15) { |i| (fetch_data >> (i * 8)) & 0xFF }
+
+          # Handle REP/REPE/REPNE for string operations
+          if rep_prefix != 0 && string_op?(cmd)
+            return exec_string_rep(cmd, cmdex, consumed, is_8bit, op32, addr32,
+                                   modregrm_mod, modregrm_reg, modregrm_rm,
+                                   bytes, memory, cs_base, eip, rep_prefix)
+          end
 
           # 3-5: Read, Execute, Write — dispatch by command
           execute_instruction(cmd, cmdex, consumed, is_8bit, op32, addr32,
@@ -352,7 +373,8 @@ module RHDL
 
           when C::CMD_XCHG
             exec_xchg(opcode, prefix_count, is_8bit, op32, addr32, sz, mask,
-                      modregrm_mod, modregrm_reg, modregrm_rm, eip, next_eip)
+                      modregrm_mod, modregrm_reg, modregrm_rm, bytes, memory, ds_base, ss_base,
+                      eip, next_eip)
 
           when C::CMD_Shift
             exec_shift(opcode, prefix_count, is_8bit, op32, addr32, sz, mask,
@@ -450,6 +472,42 @@ module RHDL
           when C::CMD_MOVSX
             exec_movsx(opcode, prefix_count, is_8bit, op32, addr32, modregrm_mod, modregrm_reg, modregrm_rm,
                        bytes, memory, ds_base, ss_base, eip, next_eip)
+
+          when C::CMD_PUSHA
+            exec_pusha(op32, memory, ss_base, eip, next_eip)
+
+          when C::CMD_POPA
+            exec_popa(op32, memory, ss_base, eip, next_eip)
+
+          when C::CMD_MOVS
+            exec_movs(is_8bit, op32, memory, ds_base, ss_base, eip, next_eip)
+
+          when C::CMD_STOS
+            exec_stos(is_8bit, op32, memory, ss_base, eip, next_eip)
+
+          when C::CMD_LODS
+            exec_lods(is_8bit, op32, memory, ds_base, eip, next_eip)
+
+          when C::CMD_CMPS
+            exec_cmps(is_8bit, op32, memory, ds_base, ss_base, eip, next_eip)
+
+          when C::CMD_SCAS
+            exec_scas(is_8bit, op32, memory, ss_base, eip, next_eip)
+
+          when C::CMD_ENTER
+            exec_enter(op32, bytes, prefix_count, memory, ss_base, eip, next_eip)
+
+          when C::CMD_LEAVE
+            exec_leave(op32, memory, ss_base, eip, next_eip)
+
+          when C::CMD_IN
+            exec_in(opcode, prefix_count, is_8bit, op32, bytes, eip, next_eip)
+
+          when C::CMD_OUT
+            exec_out(opcode, prefix_count, is_8bit, op32, bytes, eip, next_eip)
+
+          when C::CMD_XLAT
+            exec_xlat(memory, ds_base, eip, next_eip)
 
           else
             # NOP or unimplemented: just advance EIP
@@ -1088,7 +1146,8 @@ module RHDL
         end
 
         def exec_xchg(opcode, prefix_count, is_8bit, op32, addr32, sz, mask,
-                      modregrm_mod, modregrm_reg, modregrm_rm, eip, next_eip)
+                      modregrm_mod, modregrm_reg, modregrm_rm, bytes, memory, ds_base, ss_base,
+                      eip, next_eip)
           if opcode >= 0x90 && opcode <= 0x97
             reg_idx = opcode - 0x90
             if reg_idx == 0
@@ -1099,6 +1158,15 @@ module RHDL
               write_gpr(0, val_reg, false, op32)
               write_gpr(reg_idx, val_eax, false, op32)
             end
+          elsif opcode == 0x86 || opcode == 0x87
+            # XCHG r, r/m (ModR/M form)
+            mrm_offset = prefix_count + 1
+            val_reg = read_gpr(modregrm_reg, is_8bit, sz)
+            val_rm = read_rm(modregrm_mod, modregrm_rm, addr32, is_8bit, sz,
+                             bytes, mrm_offset, memory, ds_base, ss_base)
+            write_gpr_by_reg_field(modregrm_reg, val_rm, is_8bit, op32)
+            write_rm(modregrm_mod, modregrm_rm, addr32, is_8bit, op32, sz, val_reg,
+                     bytes, mrm_offset, memory, ds_base, ss_base)
           end
           advance_eip(next_eip)
           :ok
@@ -1459,6 +1527,335 @@ module RHDL
           end
           dst_mask = op32 ? 0xFFFF_FFFF : 0xFFFF
           write_gpr_by_reg_field(modregrm_reg, src & dst_mask, false, op32)
+          advance_eip(next_eip)
+          :ok
+        end
+
+        # ---------- Phase 6: Microcode & Complex Instructions ----------
+
+        def string_op?(cmd)
+          [C::CMD_MOVS, C::CMD_STOS, C::CMD_LODS, C::CMD_CMPS, C::CMD_SCAS].include?(cmd)
+        end
+
+        def exec_string_rep(cmd, cmdex, consumed, is_8bit, op32, addr32,
+                            modregrm_mod, modregrm_reg, modregrm_rm,
+                            bytes, memory, cs_base, eip, rep_prefix)
+          sz = is_8bit ? 1 : (op32 ? 4 : 2)
+          ds_base = desc_base(seg_cache(:ds))
+          ss_base = desc_base(seg_cache(:ss))
+          next_eip = (eip + consumed) & 0xFFFF
+
+          cx_mask = op32 ? 0xFFFF_FFFF : 0xFFFF
+          cx = reg(:ecx) & cx_mask
+
+          # If CX == 0, skip the instruction entirely
+          if cx == 0
+            advance_eip(next_eip)
+            return :ok
+          end
+
+          # Execute one iteration at a time for step-at-a-time execution
+          # The caller (run_until_halt) will keep calling step()
+          loop do
+            cx = reg(:ecx) & cx_mask
+            break if cx == 0
+
+            case cmd
+            when C::CMD_MOVS then exec_movs(is_8bit, op32, memory, ds_base, ss_base, eip, next_eip, advance: false)
+            when C::CMD_STOS then exec_stos(is_8bit, op32, memory, ss_base, eip, next_eip, advance: false)
+            when C::CMD_LODS then exec_lods(is_8bit, op32, memory, ds_base, eip, next_eip, advance: false)
+            when C::CMD_CMPS then exec_cmps(is_8bit, op32, memory, ds_base, ss_base, eip, next_eip, advance: false)
+            when C::CMD_SCAS then exec_scas(is_8bit, op32, memory, ss_base, eip, next_eip, advance: false)
+            end
+
+            # Decrement CX
+            new_cx = (cx - 1) & cx_mask
+            write_gpr(1, new_cx, false, op32)
+
+            # Check termination conditions
+            if new_cx == 0
+              break
+            end
+
+            # For REPE (rep_prefix=2) with CMPS/SCAS: stop if ZF=0
+            if rep_prefix == 2 && (cmd == C::CMD_CMPS || cmd == C::CMD_SCAS)
+              break if reg(:zflag) == 0
+            end
+
+            # For REPNE (rep_prefix=1) with CMPS/SCAS: stop if ZF=1
+            if rep_prefix == 1 && (cmd == C::CMD_CMPS || cmd == C::CMD_SCAS)
+              break if reg(:zflag) == 1
+            end
+          end
+
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_pusha(op32, memory, ss_base, eip, next_eip)
+          push_sz = op32 ? 4 : 2
+          mask = op32 ? 0xFFFF_FFFF : 0xFFFF
+
+          # Save original SP/ESP before any pushes
+          orig_sp = reg(:esp) & mask
+
+          # Push order: AX, CX, DX, BX, SP(original), BP, SI, DI
+          push_value(memory, reg(:eax) & mask, push_sz, ss_base, op32)
+          push_value(memory, reg(:ecx) & mask, push_sz, ss_base, op32)
+          push_value(memory, reg(:edx) & mask, push_sz, ss_base, op32)
+          push_value(memory, reg(:ebx) & mask, push_sz, ss_base, op32)
+          push_value(memory, orig_sp, push_sz, ss_base, op32)
+          push_value(memory, reg(:ebp) & mask, push_sz, ss_base, op32)
+          push_value(memory, reg(:esi) & mask, push_sz, ss_base, op32)
+          push_value(memory, reg(:edi) & mask, push_sz, ss_base, op32)
+
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_popa(op32, memory, ss_base, eip, next_eip)
+          pop_sz = op32 ? 4 : 2
+
+          # Pop order: DI, SI, BP, (skip SP), BX, DX, CX, AX
+          di = pop_value(memory, pop_sz, ss_base, op32)
+          si = pop_value(memory, pop_sz, ss_base, op32)
+          bp = pop_value(memory, pop_sz, ss_base, op32)
+          _sp = pop_value(memory, pop_sz, ss_base, op32)  # popped but discarded
+          bx = pop_value(memory, pop_sz, ss_base, op32)
+          dx = pop_value(memory, pop_sz, ss_base, op32)
+          cx = pop_value(memory, pop_sz, ss_base, op32)
+          ax = pop_value(memory, pop_sz, ss_base, op32)
+
+          write_gpr(7, di, false, op32)   # EDI
+          write_gpr(6, si, false, op32)   # ESI
+          write_gpr(5, bp, false, op32)   # EBP
+          # ESP is NOT restored (already updated by pop_value calls)
+          write_gpr(3, bx, false, op32)   # EBX
+          write_gpr(2, dx, false, op32)   # EDX
+          write_gpr(1, cx, false, op32)   # ECX
+          write_gpr(0, ax, false, op32)   # EAX
+
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_movs(is_8bit, op32, memory, ds_base, ss_base, eip, next_eip, advance: true)
+          sz = is_8bit ? 1 : (op32 ? 4 : 2)
+          addr_mask = op32 ? 0xFFFF_FFFF : 0xFFFF
+          df = reg(:dflag)
+          delta = df == 0 ? sz : -sz
+
+          si = reg(:esi) & addr_mask
+          di = reg(:edi) & addr_mask
+
+          # Read from DS:SI, write to ES:DI (ES=DS in our simplified model)
+          val = mem_read(memory, (ds_base + si) & 0xFFFF_FFFF, sz)
+          mem_write(memory, (ds_base + di) & 0xFFFF_FFFF, val, sz)
+
+          write_gpr(6, (si + delta) & addr_mask, false, op32)  # ESI
+          write_gpr(7, (di + delta) & addr_mask, false, op32)  # EDI
+
+          advance_eip(next_eip) if advance
+          :ok
+        end
+
+        def exec_stos(is_8bit, op32, memory, ss_base, eip, next_eip, advance: true)
+          sz = is_8bit ? 1 : (op32 ? 4 : 2)
+          addr_mask = op32 ? 0xFFFF_FFFF : 0xFFFF
+          df = reg(:dflag)
+          delta = df == 0 ? sz : -sz
+
+          di = reg(:edi) & addr_mask
+          val = is_8bit ? (reg(:eax) & 0xFF) : (reg(:eax) & size_mask(sz))
+
+          ds_base = desc_base(seg_cache(:ds))
+          mem_write(memory, (ds_base + di) & 0xFFFF_FFFF, val, sz)
+
+          write_gpr(7, (di + delta) & addr_mask, false, op32)  # EDI
+
+          advance_eip(next_eip) if advance
+          :ok
+        end
+
+        def exec_lods(is_8bit, op32, memory, ds_base, eip, next_eip, advance: true)
+          sz = is_8bit ? 1 : (op32 ? 4 : 2)
+          addr_mask = op32 ? 0xFFFF_FFFF : 0xFFFF
+          df = reg(:dflag)
+          delta = df == 0 ? sz : -sz
+
+          si = reg(:esi) & addr_mask
+          val = mem_read(memory, (ds_base + si) & 0xFFFF_FFFF, sz)
+
+          if is_8bit
+            # Only write AL
+            old_eax = gpr(0)
+            new_eax = (old_eax & 0xFFFF_FF00) | (val & 0xFF)
+            write_gpr(0, new_eax, false, true)
+          else
+            write_gpr(0, val, false, op32)
+          end
+
+          write_gpr(6, (si + delta) & addr_mask, false, op32)  # ESI
+
+          advance_eip(next_eip) if advance
+          :ok
+        end
+
+        def exec_cmps(is_8bit, op32, memory, ds_base, ss_base, eip, next_eip, advance: true)
+          sz = is_8bit ? 1 : (op32 ? 4 : 2)
+          addr_mask = op32 ? 0xFFFF_FFFF : 0xFFFF
+          df = reg(:dflag)
+          delta = df == 0 ? sz : -sz
+
+          si = reg(:esi) & addr_mask
+          di = reg(:edi) & addr_mask
+
+          val_src = mem_read(memory, (ds_base + si) & 0xFFFF_FFFF, sz)
+          val_dst = mem_read(memory, (ds_base + di) & 0xFFFF_FFFF, sz)
+
+          # CMP: dst - src (SI data - DI data)
+          result = run_alu(C::ARITH_SUB, val_dst, val_src, sz)
+          write_flags_from_alu(result)
+
+          write_gpr(6, (si + delta) & addr_mask, false, op32)  # ESI
+          write_gpr(7, (di + delta) & addr_mask, false, op32)  # EDI
+
+          advance_eip(next_eip) if advance
+          :ok
+        end
+
+        def exec_scas(is_8bit, op32, memory, ss_base, eip, next_eip, advance: true)
+          sz = is_8bit ? 1 : (op32 ? 4 : 2)
+          addr_mask = op32 ? 0xFFFF_FFFF : 0xFFFF
+          df = reg(:dflag)
+          delta = df == 0 ? sz : -sz
+
+          di = reg(:edi) & addr_mask
+          al_val = is_8bit ? (reg(:eax) & 0xFF) : (reg(:eax) & size_mask(sz))
+
+          ds_base = desc_base(seg_cache(:ds))
+          val_mem = mem_read(memory, (ds_base + di) & 0xFFFF_FFFF, sz)
+
+          # CMP AL/AX/EAX with ES:DI
+          result = run_alu(C::ARITH_SUB, val_mem, al_val, sz)
+          write_flags_from_alu(result)
+
+          write_gpr(7, (di + delta) & addr_mask, false, op32)  # EDI
+
+          advance_eip(next_eip) if advance
+          :ok
+        end
+
+        def exec_enter(op32, bytes, prefix_count, memory, ss_base, eip, next_eip)
+          push_sz = op32 ? 4 : 2
+          # ENTER imm16, imm8 — opcode C8
+          # imm16 is the frame size, imm8 is the nesting level
+          imm_offset = prefix_count + 1
+          frame_size = (bytes[imm_offset] || 0) | ((bytes[imm_offset + 1] || 0) << 8)
+          _nesting = bytes[imm_offset + 2] || 0
+
+          # For level 0: PUSH BP, BP = SP, SP -= frame_size
+          bp = reg(:ebp) & (op32 ? 0xFFFF_FFFF : 0xFFFF)
+          push_value(memory, bp, push_sz, ss_base, op32)
+
+          new_bp = reg(:esp) & (op32 ? 0xFFFF_FFFF : 0xFFFF)
+          write_gpr(5, new_bp, false, op32)  # EBP = ESP (frame pointer)
+
+          # Allocate local space
+          new_sp = if op32
+                     (new_bp - frame_size) & 0xFFFF_FFFF
+                   else
+                     (new_bp - frame_size) & 0xFFFF
+                   end
+          write_gpr(4, new_sp, false, op32)  # ESP -= frame_size
+
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_leave(op32, memory, ss_base, eip, next_eip)
+          pop_sz = op32 ? 4 : 2
+
+          # LEAVE: SP = BP, POP BP
+          bp = reg(:ebp) & (op32 ? 0xFFFF_FFFF : 0xFFFF)
+          write_gpr(4, bp, false, op32)  # ESP = EBP
+
+          new_bp = pop_value(memory, pop_sz, ss_base, op32)
+          write_gpr(5, new_bp, false, op32)  # EBP = popped value
+
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_in(opcode, prefix_count, is_8bit, op32, bytes, eip, next_eip)
+          case opcode
+          when 0xE4  # IN AL, imm8
+            port = bytes[prefix_count + 1] || 0
+            value = @io_read_callback ? @io_read_callback.call(port, 1) : 0
+            old_eax = gpr(0)
+            write_gpr(0, (old_eax & 0xFFFF_FF00) | (value & 0xFF), false, true)
+
+          when 0xE5  # IN AX/EAX, imm8
+            port = bytes[prefix_count + 1] || 0
+            sz = op32 ? 4 : 2
+            value = @io_read_callback ? @io_read_callback.call(port, sz) : 0
+            write_gpr(0, value, false, op32)
+
+          when 0xEC  # IN AL, DX
+            port = reg(:edx) & 0xFFFF
+            value = @io_read_callback ? @io_read_callback.call(port, 1) : 0
+            old_eax = gpr(0)
+            write_gpr(0, (old_eax & 0xFFFF_FF00) | (value & 0xFF), false, true)
+
+          when 0xED  # IN AX/EAX, DX
+            port = reg(:edx) & 0xFFFF
+            sz = op32 ? 4 : 2
+            value = @io_read_callback ? @io_read_callback.call(port, sz) : 0
+            write_gpr(0, value, false, op32)
+          end
+
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_out(opcode, prefix_count, is_8bit, op32, bytes, eip, next_eip)
+          case opcode
+          when 0xE6  # OUT imm8, AL
+            port = bytes[prefix_count + 1] || 0
+            value = reg(:eax) & 0xFF
+            @io_write_callback&.call(port, value, 1)
+
+          when 0xE7  # OUT imm8, AX/EAX
+            port = bytes[prefix_count + 1] || 0
+            sz = op32 ? 4 : 2
+            value = reg(:eax) & size_mask(sz)
+            @io_write_callback&.call(port, value, sz)
+
+          when 0xEE  # OUT DX, AL
+            port = reg(:edx) & 0xFFFF
+            value = reg(:eax) & 0xFF
+            @io_write_callback&.call(port, value, 1)
+
+          when 0xEF  # OUT DX, AX/EAX
+            port = reg(:edx) & 0xFFFF
+            sz = op32 ? 4 : 2
+            value = reg(:eax) & size_mask(sz)
+            @io_write_callback&.call(port, value, sz)
+          end
+
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_xlat(memory, ds_base, eip, next_eip)
+          bx = reg(:ebx) & 0xFFFF
+          al = reg(:eax) & 0xFF
+          addr = (ds_base + bx + al) & 0xFFFF_FFFF
+          value = mem_read(memory, addr, 1)
+
+          old_eax = gpr(0)
+          write_gpr(0, (old_eax & 0xFFFF_FF00) | (value & 0xFF), false, true)
+
           advance_eip(next_eip)
           :ok
         end

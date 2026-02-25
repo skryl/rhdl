@@ -406,12 +406,43 @@ module RHDL
             return [Constants::CMD_IRET, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
           end
 
+          # ENTER (0xC8): imm16 + imm8 = 4 bytes total
+          if opcode == 0xC8
+            return [Constants::CMD_ENTER, 0, 4, false, has_bytes?(pfx_cnt, 4, valid)]
+          end
+
+          # LEAVE (0xC9)
+          if opcode == 0xC9
+            return [Constants::CMD_LEAVE, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
+          end
+
           # Shift group (0xD0-0xD3)
           if opcode >= 0xD0 && opcode <= 0xD3
             is_8bit = (opcode & 1) == 0
             mlen = modregrm_len(bytes, mrm_off, valid, addr32)
             needed = 1 + mlen
             return [Constants::CMD_Shift, 0, needed, is_8bit, has_bytes?(pfx_cnt, needed, valid)]
+          end
+
+          # XLAT (0xD7)
+          if opcode == 0xD7
+            return [Constants::CMD_XLAT, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
+          end
+
+          # IN AL, imm8 (0xE4), IN AX/EAX, imm8 (0xE5)
+          if opcode == 0xE4
+            return [Constants::CMD_IN, 0, 2, true, has_bytes?(pfx_cnt, 2, valid)]
+          end
+          if opcode == 0xE5
+            return [Constants::CMD_IN, 0, 2, false, has_bytes?(pfx_cnt, 2, valid)]
+          end
+
+          # OUT imm8, AL (0xE6), OUT imm8, AX/EAX (0xE7)
+          if opcode == 0xE6
+            return [Constants::CMD_OUT, 0, 2, true, has_bytes?(pfx_cnt, 2, valid)]
+          end
+          if opcode == 0xE7
+            return [Constants::CMD_OUT, 0, 2, false, has_bytes?(pfx_cnt, 2, valid)]
           end
 
           # CALL near (0xE8)
@@ -435,6 +466,22 @@ module RHDL
           # JMP short (0xEB)
           if opcode == 0xEB
             return [Constants::CMD_JMP, 0, 2, false, has_bytes?(pfx_cnt, 2, valid)]
+          end
+
+          # IN AL, DX (0xEC), IN AX/EAX, DX (0xED)
+          if opcode == 0xEC
+            return [Constants::CMD_IN, 0, 1, true, has_bytes?(pfx_cnt, 1, valid)]
+          end
+          if opcode == 0xED
+            return [Constants::CMD_IN, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
+          end
+
+          # OUT DX, AL (0xEE), OUT DX, AX/EAX (0xEF)
+          if opcode == 0xEE
+            return [Constants::CMD_OUT, 0, 1, true, has_bytes?(pfx_cnt, 1, valid)]
+          end
+          if opcode == 0xEF
+            return [Constants::CMD_OUT, 0, 1, false, has_bytes?(pfx_cnt, 1, valid)]
           end
 
           # JCXZ (0xE3)
