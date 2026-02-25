@@ -99,3 +99,71 @@ test('explorer graph runtime service validates required callbacks', () => {
     /requires function: renderComponentTree/
   );
 });
+
+// --- d3 renderer feature flag tests ---
+
+test('d3 renderer: destroyComponentGraph cleans up d3 renderer handle', () => {
+  let rendererDestroyed = false;
+  let interactionsDestroyed = false;
+  const state = {
+    theme: 'shenzhen',
+    activeTab: 'componentGraphTab',
+    components: {
+      graph: {
+        type: 'd3',
+        renderer: { destroy() { rendererDestroyed = true; }, render() {} },
+        interactions: { destroy() { interactionsDestroyed = true; } },
+        destroy() {
+          this.renderer.destroy();
+          this.interactions.destroy();
+        }
+      },
+      graphKey: 'k',
+      graphSelectedId: 'id',
+      graphLastTap: { nodeId: 'n', timeMs: 0 },
+      graphLayoutEngine: 'elk',
+      graphElkAvailable: true,
+      graphShowChildren: true,
+      graphRenderer: 'd3',
+      graphLiveValues: new Map(),
+      parseError: '',
+      sourceKey: 'k',
+      model: null
+    }
+  };
+  const service = createService({ state });
+  service.destroyComponentGraph();
+
+  assert.equal(state.components.graph, null);
+  assert.equal(state.components.graphKey, '');
+  assert.equal(rendererDestroyed, true);
+  assert.equal(interactionsDestroyed, true);
+});
+
+test('d3 renderer: describeComponentGraphPanel shows d3 renderer info', () => {
+  const state = {
+    theme: 'shenzhen',
+    activeTab: 'componentGraphTab',
+    components: {
+      graph: null,
+      graphKey: '',
+      graphSelectedId: null,
+      graphLastTap: null,
+      graphLayoutEngine: 'elk',
+      graphElkAvailable: true,
+      graphShowChildren: true,
+      graphRenderer: 'd3',
+      graphRenderBackend: 'canvas2d',
+      graphLiveValues: new Map(),
+      parseError: '',
+      sourceKey: 'k',
+      model: { rootId: 'top' }
+    }
+  };
+  const service = createService({ state });
+  const panel = service.describeComponentGraphPanel({
+    selectedNode: { id: 'cpu', path: 'top.cpu' },
+    focusNode: { id: 'cpu', path: 'top.cpu', parentId: 'top' }
+  });
+  assert.match(panel.meta, /layout=elk/);
+});
