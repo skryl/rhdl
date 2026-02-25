@@ -10,7 +10,13 @@
     "playwright": "^1.52.0"
   },
   "dependencies": {
+    "cytoscape": "^3.30.2",
+    "elkjs": "^0.9.3",
     "ghostty-web": "^0.4.0",
+    "lit": "^3.2.1",
+    "lit-html": "^3.2.1",
+    "p5": "^1.11.1",
+    "redux": "^4.2.1",
     "vim-wasm": "^0.0.13"
   }
 }
