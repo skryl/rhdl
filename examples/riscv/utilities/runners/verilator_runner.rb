@@ -6,13 +6,13 @@
 # via Fiddle FFI with batched C++ cycle execution.
 
 require 'rhdl/codegen'
-require_relative 'hdl_runner_base'
+require_relative 'runner'
 require_relative '../../hdl/cpu'
 
 module RHDL
   module Examples
     module RISCV
-      class VerilogRunner < HdlRunnerBase
+      class VerilogRunner < Runner
         BUILD_BASE = File.expand_path('../../.hdl_build', __dir__)
 
         def initialize(mem_size: Memory::DEFAULT_SIZE)

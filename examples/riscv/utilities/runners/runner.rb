@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# RV32I HDL Runner Base - Shared infrastructure for Verilator and Arcilator runners
+# RV32I Runner - Shared infrastructure for Verilator and Arcilator runners
 #
 # Provides the common API, Fiddle FFI bindings, C++ MMIO code generation, and
 # memory management. Subclasses implement the build pipeline for their specific
@@ -14,7 +14,7 @@ require_relative '../../hdl/memory'
 module RHDL
   module Examples
     module RISCV
-      class HdlRunnerBase
+      class Runner
         # Minimal stub for code that probes @cpu.sim for native runner capabilities.
         # HDL runners do not use the Rust native runner.
         class HdlSimStub
