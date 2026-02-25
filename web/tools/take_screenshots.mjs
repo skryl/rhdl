@@ -3,7 +3,7 @@
  * Take documentation screenshots for the web simulator.
  *
  * Usage:
- *   cd web && node test/integration/take_screenshots.mjs
+ *   cd web && node tools/take_screenshots.mjs
  *
  * Produces PNGs under docs/screenshots/.
  */
@@ -16,10 +16,10 @@ import {
   createStaticServer,
   serverBaseUrl,
   resolveWebRoot
-} from './browser_test_harness.mjs';
+} from '../test/integration/browser_test_harness.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DOCS_DIR = path.resolve(__dirname, '..', '..', '..', 'docs', 'screenshots');
+const DOCS_DIR = path.resolve(__dirname, '..', '..', 'docs', 'screenshots');
 
 const MAIN_VIEWPORT  = { width: 1660, height: 970 };
 const RISCV_VIEWPORT = { width: 1280, height: 800 };
