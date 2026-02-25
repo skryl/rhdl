@@ -25,6 +25,16 @@ module RHDL
         # Raised when a memory access violates segment limits in protected mode
         class SegmentFault < StandardError; end
 
+        # Raised when paging detects a page fault (#PF)
+        class PageFault < StandardError
+          attr_reader :linear_addr, :error_code
+          def initialize(linear_addr, error_code)
+            @linear_addr = linear_addr
+            @error_code = error_code
+            super("Page fault at 0x#{linear_addr.to_s(16)}")
+          end
+        end
+
         GPR_NAMES = [:eax, :ecx, :edx, :ebx, :esp, :ebp, :esi, :edi].freeze
 
         def initialize
@@ -43,6 +53,9 @@ module RHDL
 
           # Interrupt state
           @pending_interrupt = nil  # { vector: N } or nil
+
+          # TLB: hash from virtual page number (linear[31:12]) to { phys_page:, rw:, us: }
+          @tlb = {}
 
           # Initialize register file
           clock_regfile_reset
@@ -88,6 +101,51 @@ module RHDL
         # Set CR0.PE directly (for testing)
         def set_cr0_pe(value)
           write_regfile(write_cr0_pe: 1, cr0_pe_to_reg: value)
+        end
+
+        # Set CR0.PG directly (for testing)
+        def set_cr0_pg(value)
+          write_regfile(write_cr0_pg: 1, cr0_pg_to_reg: value)
+        end
+
+        # Set CR0.WP directly (for testing)
+        def set_cr0_wp(value)
+          write_regfile(write_cr0_wp: 1, cr0_wp_to_reg: value)
+        end
+
+        # Set CR3 directly (for testing)
+        def set_cr3(value)
+          write_regfile(write_cr3: 1, cr3_to_reg: value)
+          @tlb.clear  # CR3 write flushes TLB
+        end
+
+        # Set CS.D/B bit directly (for testing — controls 16/32-bit default)
+        def set_cs_db(value)
+          cs_cache = seg_cache(:cs)
+          if value != 0
+            cs_cache |= (1 << C::DESC_BIT_D_B)
+          else
+            cs_cache &= ~(1 << C::DESC_BIT_D_B)
+          end
+          write_regfile(write_seg: 1, wr_seg_index: C::SEGMENT_CS,
+                        seg_to_reg: reg(:cs),
+                        write_seg_cache: 1, seg_cache_to_reg: cs_cache,
+                        write_seg_valid: 1, seg_valid_to_reg: 1)
+        end
+
+        # Set CPL directly (for testing) — CPL is derived from CS selector RPL
+        def set_cpl(value)
+          cs_sel = reg(:cs)
+          new_sel = (cs_sel & ~3) | (value & 3)
+          write_regfile(write_seg: 1, wr_seg_index: C::SEGMENT_CS, seg_to_reg: new_sel,
+                        write_seg_cache: 1, seg_cache_to_reg: seg_cache(:cs),
+                        write_seg_valid: 1, seg_valid_to_reg: 1)
+        end
+
+        # Check if TLB has an entry for the given linear address
+        def tlb_hit?(linear_addr)
+          vpn = (linear_addr >> 12) & 0xFFFFF
+          @tlb.key?(vpn)
         end
 
         # Set up a convenient real-mode state for testing
@@ -219,7 +277,16 @@ module RHDL
 
         def fetch_bytes(memory, addr, count)
           val = 0
-          count.times { |i| val |= ((memory[(addr + i) & 0xFFFF_FFFF] || 0) & 0xFF) << (i * 8) }
+          if reg(:cr0_pg) != 0
+            # With paging, translate each byte (simplification: translate per-page)
+            count.times do |i|
+              la = (addr + i) & 0xFFFF_FFFF
+              pa = translate_linear(memory, la, :read, false)  # code fetch = supervisor read
+              val |= ((memory[pa] || 0) & 0xFF) << (i * 8)
+            end
+          else
+            count.times { |i| val |= ((memory[(addr + i) & 0xFFFF_FFFF] || 0) & 0xFF) << (i * 8) }
+          end
           val
         end
 
@@ -229,6 +296,21 @@ module RHDL
 
         def mem_read(memory, addr, size)
           addr = addr & 0xFFFF_FFFF
+          if reg(:cr0_pg) != 0
+            return mem_read_paged(memory, addr, size)
+          end
+          mem_read_phys(memory, addr, size)
+        end
+
+        def mem_write(memory, addr, value, size)
+          addr = addr & 0xFFFF_FFFF
+          if reg(:cr0_pg) != 0
+            return mem_write_paged(memory, addr, value, size)
+          end
+          mem_write_phys(memory, addr, value, size)
+        end
+
+        def mem_read_phys(memory, addr, size)
           case size
           when 1 then (memory[addr] || 0) & 0xFF
           when 2 then ((memory[addr] || 0) & 0xFF) |
@@ -241,8 +323,7 @@ module RHDL
           end
         end
 
-        def mem_write(memory, addr, value, size)
-          addr = addr & 0xFFFF_FFFF
+        def mem_write_phys(memory, addr, value, size)
           case size
           when 1
             memory[addr] = value & 0xFF
@@ -255,6 +336,128 @@ module RHDL
             memory[(addr + 2) & 0xFFFF_FFFF] = (value >> 16) & 0xFF
             memory[(addr + 3) & 0xFFFF_FFFF] = (value >> 24) & 0xFF
           end
+        end
+
+        def mem_read_paged(memory, linear, size)
+          # Translate each byte through paging (handles page boundary crossings)
+          is_user = reg(:cpl) == 3
+          val = 0
+          size.times do |i|
+            la = (linear + i) & 0xFFFF_FFFF
+            pa = translate_linear(memory, la, :read, is_user)
+            val |= ((memory[pa] || 0) & 0xFF) << (i * 8)
+          end
+          val
+        end
+
+        def mem_write_paged(memory, linear, value, size)
+          is_user = reg(:cpl) == 3
+          size.times do |i|
+            la = (linear + i) & 0xFFFF_FFFF
+            pa = translate_linear(memory, la, :write, is_user)
+            memory[pa] = (value >> (i * 8)) & 0xFF
+          end
+        end
+
+        # Translate a linear address to a physical address using page tables.
+        # access_type: :read or :write
+        # is_user: true if CPL=3 (user mode)
+        # Returns physical address. Raises PageFault on failure.
+        def translate_linear(memory, linear, access_type, is_user)
+          vpn = (linear >> 12) & 0xFFFFF
+          offset = linear & 0xFFF
+
+          # TLB lookup
+          if (entry = @tlb[vpn])
+            # Permission check on TLB hit
+            check_page_permissions(linear, entry, access_type, is_user)
+            return ((entry[:phys_page] << 12) | offset) & 0xFFFF_FFFF
+          end
+
+          # TLB miss — page walk
+          cr3_val = reg(:cr3)
+          pd_base = cr3_val & 0xFFFFF000
+
+          # Read PDE
+          pde_index = (linear >> 22) & 0x3FF
+          pde_addr = (pd_base + pde_index * 4) & 0xFFFF_FFFF
+          pde = mem_read_phys(memory, pde_addr, 4)
+
+          # Check PDE present
+          unless (pde & 1) != 0
+            error_code = build_pf_error_code(false, access_type == :write, is_user)
+            raise PageFault.new(linear, error_code)
+          end
+
+          # Check for 4MB page (PS bit)
+          if (pde & 0x80) != 0
+            # 4MB page: physical = PDE[31:22] + linear[21:0]
+            phys_page = (pde >> 22) & 0x3FF  # upper 10 bits of PDE become upper 10 bits
+            phys_base = (phys_page << 22) | (linear & 0x3FFFFF)
+            pa = phys_base & 0xFFFF_FFFF
+
+            # Build TLB entry for 4MB page (store as multiple 4KB entries for simplicity)
+            # For TLB, store the specific 4KB page
+            rw = (pde >> 1) & 1
+            us = (pde >> 2) & 1
+            tlb_entry = { phys_page: (pa >> 12) & 0xFFFFF, rw: rw, us: us, large: true }
+            check_page_permissions(linear, tlb_entry, access_type, is_user)
+            @tlb[vpn] = tlb_entry
+            return pa
+          end
+
+          # Read PTE
+          pt_base = pde & 0xFFFFF000
+          pte_index = (linear >> 12) & 0x3FF
+          pte_addr = (pt_base + pte_index * 4) & 0xFFFF_FFFF
+          pte = mem_read_phys(memory, pte_addr, 4)
+
+          # Check PTE present
+          unless (pte & 1) != 0
+            error_code = build_pf_error_code(false, access_type == :write, is_user)
+            raise PageFault.new(linear, error_code)
+          end
+
+          # Combined permissions (PDE AND PTE)
+          rw = ((pde >> 1) & 1) & ((pte >> 1) & 1)
+          us = ((pde >> 2) & 1) & ((pte >> 2) & 1)
+
+          phys_page = (pte >> 12) & 0xFFFFF
+          tlb_entry = { phys_page: phys_page, rw: rw, us: us, large: false }
+          check_page_permissions(linear, tlb_entry, access_type, is_user)
+          @tlb[vpn] = tlb_entry
+
+          ((phys_page << 12) | offset) & 0xFFFF_FFFF
+        end
+
+        def check_page_permissions(linear, entry, access_type, is_user)
+          # User accessing supervisor page
+          if is_user && entry[:us] == 0
+            error_code = build_pf_error_code(true, access_type == :write, true)
+            raise PageFault.new(linear, error_code)
+          end
+
+          # Write to read-only page
+          if access_type == :write && entry[:rw] == 0
+            if is_user
+              error_code = build_pf_error_code(true, true, true)
+              raise PageFault.new(linear, error_code)
+            elsif reg(:cr0_wp) != 0
+              # Supervisor with WP=1 can't write read-only pages
+              error_code = build_pf_error_code(true, true, false)
+              raise PageFault.new(linear, error_code)
+            end
+            # Supervisor with WP=0 can write read-only pages — no fault
+          end
+        end
+
+        # Build #PF error code: bit 0=P (present), bit 1=W/R, bit 2=U/S
+        def build_pf_error_code(present, is_write, is_user)
+          code = 0
+          code |= 1 if present
+          code |= 2 if is_write
+          code |= 4 if is_user
+          code
         end
 
         # ---------- Register file helpers ----------
@@ -577,6 +780,10 @@ module RHDL
             exec_mov_to_seg(opcode, prefix_count, addr32, bytes, memory, ds_base, ss_base,
                             modregrm_mod, modregrm_reg, modregrm_rm, eip, next_eip)
 
+          when C::CMD_INVLPG
+            exec_invlpg(prefix_count, addr32, modregrm_mod, modregrm_rm,
+                        bytes, ds_base, ss_base, eip, next_eip)
+
           when C::CMD_NULL
             # Unknown opcode: raise #UD exception
             dispatch_interrupt(memory, C::EXCEPTION_UD, eip, :fault)
@@ -588,6 +795,9 @@ module RHDL
           end
           rescue SegmentFault
             dispatch_interrupt(memory, C::EXCEPTION_GP, eip, :fault)
+          rescue PageFault => pf
+            write_regfile(write_cr2: 1, cr2_to_reg: pf.linear_addr)
+            dispatch_interrupt(memory, C::EXCEPTION_PF, eip, :fault)
           end
         end
 
@@ -2077,6 +2287,17 @@ module RHDL
           :ok
         end
 
+        def exec_invlpg(prefix_count, addr32, modregrm_mod, modregrm_rm,
+                        bytes, ds_base, ss_base, eip, next_eip)
+          mrm_offset = prefix_count + 1
+          # INVLPG takes a memory operand — compute the effective address
+          addr = compute_ea(modregrm_mod, modregrm_rm, addr32, bytes, mrm_offset, ds_base, ss_base)
+          vpn = (addr >> 12) & 0xFFFFF
+          @tlb.delete(vpn)
+          advance_eip(next_eip)
+          :ok
+        end
+
         def exec_control_reg(opcode, prefix_count, has_0f, bytes, modregrm_mod, modregrm_reg, modregrm_rm,
                              eip, next_eip)
           cr_index = modregrm_reg  # CR number (0-4)
@@ -2124,6 +2345,7 @@ module RHDL
               write_regfile(write_cr2: 1, cr2_to_reg: value)
             when 3
               write_regfile(write_cr3: 1, cr3_to_reg: value)
+              @tlb.clear  # CR3 write flushes TLB
             end
           end
 

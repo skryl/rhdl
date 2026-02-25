@@ -634,6 +634,8 @@ module RHDL
               return [Constants::CMD_LGDT, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
             when 3  # LIDT
               return [Constants::CMD_LIDT, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
+            when 7  # INVLPG
+              return [Constants::CMD_INVLPG, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
             end
           end
 
