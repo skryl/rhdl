@@ -4,6 +4,7 @@ class RhdlMemoryView extends LitElement {
   static properties = {
     dumpText: { state: true },
     disasmText: { state: true },
+    disasmLines: { state: true },
     dumpRows: { state: true },
     followPc: { state: true },
     pcAddress: { state: true },
@@ -52,6 +53,19 @@ class RhdlMemoryView extends LitElement {
       color: #1a0303;
       box-shadow: 0 0 0 1px rgba(255, 48, 48, 0.95), 0 0 12px rgba(255, 48, 48, 0.75);
     }
+    /* Disassembly syntax coloring */
+    .asm-prefix { opacity: 0.5; }
+    .asm-marker { color: var(--accent, #3dd7c2); }
+    .asm-arith { color: #61afef; }
+    .asm-load { color: #98c379; }
+    .asm-store { color: #e06c75; }
+    .asm-branch { color: #c678dd; }
+    .asm-jump { color: #d19a66; }
+    .asm-imm { color: #56b6c2; }
+    .asm-sys { color: #e5c07b; }
+    .asm-amo { color: #be5046; }
+    .src-fn { color: #e5c07b; font-weight: 600; }
+    .src-line { color: #7f848e; font-style: italic; }
     @media (max-width: 980px) {
       .memory-split {
         grid-template-columns: 1fr;
@@ -66,6 +80,7 @@ class RhdlMemoryView extends LitElement {
     super();
     this.dumpText = '';
     this.disasmText = '';
+    this.disasmLines = null;
     this.dumpRows = [];
     this.followPc = false;
     this.pcAddress = null;
@@ -77,6 +92,7 @@ class RhdlMemoryView extends LitElement {
   setViewModel(viewModel) {
     this.dumpText = String(viewModel?.dumpText || '');
     this.disasmText = String(viewModel?.disasmText || '');
+    this.disasmLines = Array.isArray(viewModel?.disasmLines) ? viewModel.disasmLines : null;
     this.dumpRows = Array.isArray(viewModel?.dumpRows) ? viewModel.dumpRows : [];
     this.followPc = !!viewModel?.followPc;
     this.pcAddress = Number.isFinite(viewModel?.pcAddress) ? Number(viewModel.pcAddress) : null;
@@ -99,6 +115,7 @@ class RhdlMemoryView extends LitElement {
       || changed.has('windowStart')
       || changed.has('dumpRows')
       || changed.has('disasmText')
+      || changed.has('disasmLines')
     ) {
       this.scrollToPcRow();
     }
@@ -150,11 +167,40 @@ class RhdlMemoryView extends LitElement {
     })}  ${row.ascii}${rowIndex < this.dumpRows.length - 1 ? '\n' : ''}`);
   }
 
+  renderDisasmLines() {
+    if (!Array.isArray(this.disasmLines) || this.disasmLines.length === 0
+        || typeof this.disasmLines[0] === 'string') {
+      return this.disasmText;
+    }
+    const last = this.disasmLines.length - 1;
+    // Regex splits assembly lines into address prefix and instruction.
+    // Format: "XX ADDR: HEXFIELD  mnemonic operands"
+    // The hex field is always 8 chars (padEnd). We match up through the
+    // double-space separator, then capture the mnemonic + operands.
+    const asmRe = /^((?:>>| {2}) [0-9A-F]+: .{8}  )(.+)$/;
+    return this.disasmLines.map((line, i) => {
+      const nl = i < last ? '\n' : '';
+      if (line.type === 'fn') {
+        return html`<span class="src-fn">${line.text}</span>${nl}`;
+      }
+      if (line.type === 'src') {
+        return html`<span class="src-line">${line.text}</span>${nl}`;
+      }
+      const m = asmRe.exec(line.text);
+      if (m) {
+        const prefixCls = line.text.startsWith('>>') ? 'asm-marker' : 'asm-prefix';
+        const instrCls = line.category ? `asm-${line.category}` : '';
+        return html`<span class="${prefixCls}">${m[1]}</span><span class="${instrCls}">${m[2]}</span>${nl}`;
+      }
+      return html`${line.text}${nl}`;
+    });
+  }
+
   render() {
     return html`
       <div class="memory-split">
         <pre id="memoryDumpPre">${this.renderDumpRows()}</pre>
-        <pre id="memoryDisasmPre">${this.disasmText}</pre>
+        <pre id="memoryDisasmPre">${this.renderDisasmLines()}</pre>
       </div>
     `;
   }
@@ -172,6 +218,11 @@ export function renderMemoryPanel(dom, viewModel) {
   if (dom.memoryFollowPc) {
     dom.memoryFollowPc.disabled = !!viewModel.followDisabled;
     dom.memoryFollowPc.checked = !!viewModel.followChecked;
+  }
+
+  if (dom.memoryShowSource) {
+    dom.memoryShowSource.disabled = !!viewModel.showSourceDisabled;
+    dom.memoryShowSource.checked = !!viewModel.showSourceChecked;
   }
 
   const element = dom.memoryDump;

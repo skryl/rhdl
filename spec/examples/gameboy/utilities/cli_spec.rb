@@ -204,7 +204,7 @@ RSpec.describe 'Game Boy CLI' do
     end
   end
 
-  describe 'VerilogRunner' do
+  describe 'VerilogRunner', :slow do
     before(:all) do
       # Check if Verilator is available
       @verilator_available = system('which verilator > /dev/null 2>&1')

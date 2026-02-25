@@ -154,5 +154,17 @@ cp -f kernel/kernel.asm "${BIN_DIR}/kernel.asm"
 cp -f fs.img "${BIN_DIR}/fs.img"
 popd >/dev/null
 
+# Extract source map for web simulator (address → source file/line + function mapping).
+EXTRACT_SCRIPT="${SOFTWARE_DIR}/extract_srcmap.rb"
+if command -v ruby >/dev/null 2>&1 && [[ -f "${EXTRACT_SCRIPT}" ]]; then
+  ruby "${EXTRACT_SCRIPT}" \
+    --asm "${BIN_DIR}/kernel.asm" \
+    --nm "${BIN_DIR}/kernel.nm" \
+    --source-dir "${XV6_DIR}" \
+    -o "${BIN_DIR}/kernel_srcmap.json"
+else
+  echo "warning: ruby not found or extract_srcmap.rb missing; skipping source map generation"
+fi
+
 echo "xv6 artifacts generated in ${BIN_DIR}:"
-ls -lh "${BIN_DIR}/kernel.bin" "${BIN_DIR}/kernel.elf" "${BIN_DIR}/kernel.sym" "${BIN_DIR}/kernel.asm" "${BIN_DIR}/kernel.nm" "${BIN_DIR}/fs.img"
+ls -lh "${BIN_DIR}/kernel.bin" "${BIN_DIR}/kernel.elf" "${BIN_DIR}/kernel.sym" "${BIN_DIR}/kernel.asm" "${BIN_DIR}/kernel.nm" "${BIN_DIR}/kernel_srcmap.json" "${BIN_DIR}/fs.img" 2>/dev/null || true

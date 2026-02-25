@@ -70,6 +70,7 @@ test('startup binding registration service resets lifecycle and registers all bi
       setCycleState: () => {},
       setUiCyclesPendingState: () => {},
       setMemoryFollowPcState: () => {},
+      setMemoryShowSourceState: () => {},
       scheduleReduxUxSync: () => {}
     },
     util: {

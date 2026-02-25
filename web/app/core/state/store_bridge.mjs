@@ -34,6 +34,9 @@ export function createStoreDispatchers({ appStore, storeActions } = {}) {
     setMemoryFollowPcState(value) {
       appStore.dispatch(storeActions.setMemoryFollowPc(value));
     },
+    setMemoryShowSourceState(value) {
+      appStore.dispatch(storeActions.setMemoryShowSource(value));
+    },
     setApple2DisplayHiresState(value) {
       appStore.dispatch(storeActions.setApple2DisplayHires(value));
     },

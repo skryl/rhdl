@@ -168,6 +168,7 @@ function createHarness(overrides = {}) {
     setCycleState: () => {},
     setUiCyclesPendingState: () => {},
     setMemoryFollowPcState: () => {},
+    setMemoryShowSourceState: () => {},
     syncReduxUxState: (reason) => storeCalls.push(['syncReduxUxState', reason]),
     scheduleReduxUxSync: () => {}
   };

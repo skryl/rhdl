@@ -3,6 +3,7 @@ export function createMemoryDomRefs(documentRef = globalThis.document) {
     memoryStart: documentRef.getElementById('memoryStart'),
     memoryLength: documentRef.getElementById('memoryLength'),
     memoryFollowPc: documentRef.getElementById('memoryFollowPc'),
+    memoryShowSource: documentRef.getElementById('memoryShowSource'),
     memoryRefreshBtn: documentRef.getElementById('memoryRefreshBtn'),
     memoryDump: documentRef.getElementById('memoryDump'),
     memoryDumpAssetTree: documentRef.getElementById('memoryDumpAssetTree'),
