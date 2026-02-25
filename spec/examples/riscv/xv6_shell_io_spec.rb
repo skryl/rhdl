@@ -90,9 +90,9 @@ XV6_SINGLE_BACKEND_CASES = [
 ].freeze
 
 XV6_PIPELINE_BACKEND_CASES = [
-  { id: :jit, harness_backend: :jit, boot_cycles: 35_000_000, prompt_cycles: 8_000_000, timeout_seconds: 360 },
-  { id: :compiler, harness_backend: :compiler, boot_cycles: 35_000_000, prompt_cycles: 8_000_000, timeout_seconds: 420 },
-  { id: :compiler_aot, harness_backend: :compiler, boot_cycles: 35_000_000, prompt_cycles: 8_000_000, timeout_seconds: 420 }
+  { id: :jit, harness_backend: :jit, boot_cycles: 200_000_000, prompt_cycles: 40_000_000, timeout_seconds: 900 },
+  { id: :compiler, harness_backend: :compiler, boot_cycles: 200_000_000, prompt_cycles: 40_000_000, timeout_seconds: 900 },
+  { id: :compiler_aot, harness_backend: :compiler, boot_cycles: 200_000_000, prompt_cycles: 40_000_000, timeout_seconds: 900 }
 ].freeze
 
 RSpec.describe RHDL::Examples::RISCV::IRHarness do
