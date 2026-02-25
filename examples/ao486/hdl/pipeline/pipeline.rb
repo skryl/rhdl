@@ -22,6 +22,9 @@ module RHDL
       class Pipeline
         C = Constants
 
+        # Raised when a memory access violates segment limits in protected mode
+        class SegmentFault < StandardError; end
+
         GPR_NAMES = [:eax, :ecx, :edx, :ebx, :esp, :ebp, :esi, :edi].freeze
 
         def initialize
@@ -61,6 +64,30 @@ module RHDL
         # Public accessor for EFLAGS
         def build_eflags_public
           build_eflags
+        end
+
+        # Public accessors for segment caches and descriptor base
+        def seg_cache_public(name)
+          seg_cache(name)
+        end
+
+        def desc_base_public(cache)
+          desc_base(cache)
+        end
+
+        # Load GDTR directly (for testing)
+        def load_gdtr(base, limit)
+          write_regfile(write_gdtr: 1, gdtr_base_to_reg: base, gdtr_limit_to_reg: limit)
+        end
+
+        # Load IDTR directly (for testing)
+        def load_idtr(base, limit)
+          write_regfile(write_idtr: 1, idtr_base_to_reg: base, idtr_limit_to_reg: limit)
+        end
+
+        # Set CR0.PE directly (for testing)
+        def set_cr0_pe(value)
+          write_regfile(write_cr0_pe: 1, cr0_pe_to_reg: value)
         end
 
         # Set up a convenient real-mode state for testing
@@ -342,6 +369,7 @@ module RHDL
           ss_base = desc_base(seg_cache(:ss))
           ds_base = desc_base(seg_cache(:ds))
 
+          begin
           case cmd
           when C::CMD_Arith, C::CMD_ADD, C::CMD_OR, C::CMD_ADC, C::CMD_SBB,
                C::CMD_AND, C::CMD_SUB, C::CMD_XOR, C::CMD_CMP
@@ -370,7 +398,7 @@ module RHDL
                      eip, next_eip)
 
           when C::CMD_JMP
-            exec_jmp(opcode, prefix_count, has_0f, op32, bytes, eip, next_eip)
+            exec_jmp(opcode, prefix_count, has_0f, op32, bytes, memory, ds_base, ss_base, eip, next_eip)
 
           when C::CMD_Jcc
             exec_jcc(opcode, prefix_count, has_0f, op32, addr32, bytes, eip, next_eip)
@@ -535,6 +563,20 @@ module RHDL
           when C::CMD_IRET
             exec_iret(op32, memory, ss_base, eip, next_eip)
 
+          when C::CMD_LGDT
+            exec_lgdt(opcode, prefix_count, addr32, bytes, memory, ds_base, ss_base, eip, next_eip)
+
+          when C::CMD_LIDT
+            exec_lidt(opcode, prefix_count, addr32, bytes, memory, ds_base, ss_base, eip, next_eip)
+
+          when C::CMD_control_reg
+            exec_control_reg(opcode, prefix_count, has_0f, bytes, modregrm_mod, modregrm_reg, modregrm_rm,
+                             eip, next_eip)
+
+          when C::CMD_MOV_to_seg
+            exec_mov_to_seg(opcode, prefix_count, addr32, bytes, memory, ds_base, ss_base,
+                            modregrm_mod, modregrm_reg, modregrm_rm, eip, next_eip)
+
           when C::CMD_NULL
             # Unknown opcode: raise #UD exception
             dispatch_interrupt(memory, C::EXCEPTION_UD, eip, :fault)
@@ -543,6 +585,9 @@ module RHDL
             # NOP or unimplemented: just advance EIP
             advance_eip(next_eip)
             :ok
+          end
+          rescue SegmentFault
+            dispatch_interrupt(memory, C::EXCEPTION_GP, eip, :fault)
           end
         end
 
@@ -644,6 +689,15 @@ module RHDL
             read_gpr(modregrm_rm, is_8bit, sz)
           else
             addr = compute_ea(modregrm_mod, modregrm_rm, addr32, bytes, mrm_offset, ds_base, ss_base)
+            # Check segment limit in protected mode
+            if reg(:cr0_pe) == 1
+              use_ss = @ea_calc.get_output(:use_ss) != 0
+              seg_name = use_ss ? :ss : :ds
+              seg_base = use_ss ? ss_base : ds_base
+              offset = (addr - seg_base) & 0xFFFF_FFFF
+              cache = seg_cache(seg_name)
+              raise SegmentFault unless check_segment_limit(cache, offset, sz)
+            end
             mem_read(memory, addr, sz)
           end
         end
@@ -654,9 +708,19 @@ module RHDL
             write_gpr(modregrm_rm, value, is_8bit, op32)
           else
             addr = compute_ea(modregrm_mod, modregrm_rm, addr32, bytes, mrm_offset, ds_base, ss_base)
+            if reg(:cr0_pe) == 1
+              use_ss = @ea_calc.get_output(:use_ss) != 0
+              seg_name = use_ss ? :ss : :ds
+              seg_base = use_ss ? ss_base : ds_base
+              offset = (addr - seg_base) & 0xFFFF_FFFF
+              cache = seg_cache(seg_name)
+              raise SegmentFault unless check_segment_limit(cache, offset, sz)
+            end
             mem_write(memory, addr, value, sz)
           end
         end
+
+
 
         def read_gpr(index, is_8bit, sz)
           val = gpr(index & 7)
@@ -1037,7 +1101,7 @@ module RHDL
           :ok
         end
 
-        def exec_jmp(opcode, prefix_count, has_0f, op32, bytes, eip, next_eip)
+        def exec_jmp(opcode, prefix_count, has_0f, op32, bytes, memory, ds_base, ss_base, eip, next_eip)
           case opcode
           when 0xEB  # JMP short
             offset = sign_extend_8(bytes[prefix_count + 1] || 0)
@@ -1056,6 +1120,12 @@ module RHDL
               target = (next_eip + offset) & 0xFFFF
             end
             advance_eip(target)
+
+          when 0xEA  # JMP far (ptr16:16 or ptr16:32)
+            off_sz = op32 ? 4 : 2
+            target_offset = extract_imm(bytes, prefix_count + 1, off_sz)
+            target_selector = extract_imm(bytes, prefix_count + 1 + off_sz, 2)
+            exec_far_jmp(target_selector, target_offset, op32, memory)
           end
 
           :ok
@@ -1975,6 +2045,206 @@ module RHDL
           advance_eip(new_ip & (op32 ? 0xFFFF_FFFF : 0xFFFF))
 
           :ok
+        end
+
+        # ---------- Phase 8: Protected Mode & Segmentation ----------
+
+        def exec_lgdt(opcode, prefix_count, addr32, bytes, memory, ds_base, ss_base, eip, next_eip)
+          mrm_offset = prefix_count + 1
+          addr = compute_ea(
+            (bytes[mrm_offset] >> 6) & 3,
+            bytes[mrm_offset] & 7,
+            addr32, bytes, mrm_offset, ds_base, ss_base
+          )
+          limit = mem_read(memory, addr, 2)
+          base = mem_read(memory, addr + 2, 4)
+          write_regfile(write_gdtr: 1, gdtr_base_to_reg: base, gdtr_limit_to_reg: limit)
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_lidt(opcode, prefix_count, addr32, bytes, memory, ds_base, ss_base, eip, next_eip)
+          mrm_offset = prefix_count + 1
+          addr = compute_ea(
+            (bytes[mrm_offset] >> 6) & 3,
+            bytes[mrm_offset] & 7,
+            addr32, bytes, mrm_offset, ds_base, ss_base
+          )
+          limit = mem_read(memory, addr, 2)
+          base = mem_read(memory, addr + 2, 4)
+          write_regfile(write_idtr: 1, idtr_base_to_reg: base, idtr_limit_to_reg: limit)
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_control_reg(opcode, prefix_count, has_0f, bytes, modregrm_mod, modregrm_reg, modregrm_rm,
+                             eip, next_eip)
+          cr_index = modregrm_reg  # CR number (0-4)
+          gpr_index = modregrm_rm  # GPR index
+
+          if opcode == 0x20
+            # MOV r32, CRx — read from control register
+            value = case cr_index
+                    when 0
+                      cr0_val = 0
+                      cr0_val |= 1 if reg(:cr0_pe) != 0
+                      cr0_val |= (1 << 1) if reg(:cr0_mp) != 0
+                      cr0_val |= (1 << 2) if reg(:cr0_em) != 0
+                      cr0_val |= (1 << 3) if reg(:cr0_ts) != 0
+                      cr0_val |= (1 << 5) if reg(:cr0_ne) != 0
+                      cr0_val |= (1 << 16) if reg(:cr0_wp) != 0
+                      cr0_val |= (1 << 18) if reg(:cr0_am) != 0
+                      cr0_val |= (1 << 29) if reg(:cr0_nw) != 0
+                      cr0_val |= (1 << 30) if reg(:cr0_cd) != 0
+                      cr0_val |= (1 << 31) if reg(:cr0_pg) != 0
+                      cr0_val
+                    when 2 then reg(:cr2)
+                    when 3 then reg(:cr3)
+                    else 0
+                    end
+            write_gpr(gpr_index, value, false, true)  # always 32-bit
+          elsif opcode == 0x22
+            # MOV CRx, r32 — write to control register
+            value = gpr(gpr_index)
+            case cr_index
+            when 0
+              write_regfile(
+                write_cr0_pe: 1, cr0_pe_to_reg: value & 1,
+                write_cr0_mp: 1, cr0_mp_to_reg: (value >> 1) & 1,
+                write_cr0_em: 1, cr0_em_to_reg: (value >> 2) & 1,
+                write_cr0_ts: 1, cr0_ts_to_reg: (value >> 3) & 1,
+                write_cr0_ne: 1, cr0_ne_to_reg: (value >> 5) & 1,
+                write_cr0_wp: 1, cr0_wp_to_reg: (value >> 16) & 1,
+                write_cr0_am: 1, cr0_am_to_reg: (value >> 18) & 1,
+                write_cr0_nw: 1, cr0_nw_to_reg: (value >> 29) & 1,
+                write_cr0_cd: 1, cr0_cd_to_reg: (value >> 30) & 1,
+                write_cr0_pg: 1, cr0_pg_to_reg: (value >> 31) & 1
+              )
+            when 2
+              write_regfile(write_cr2: 1, cr2_to_reg: value)
+            when 3
+              write_regfile(write_cr3: 1, cr3_to_reg: value)
+            end
+          end
+
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_mov_to_seg(opcode, prefix_count, addr32, bytes, memory, ds_base, ss_base,
+                            modregrm_mod, modregrm_reg, modregrm_rm, eip, next_eip)
+          mrm_offset = prefix_count + 1
+          seg_index = modregrm_reg  # 0=ES, 1=CS, 2=SS, 3=DS, 4=FS, 5=GS
+
+          # Read selector from r/m
+          selector = read_rm(modregrm_mod, modregrm_rm, addr32, false, 2, bytes, mrm_offset, memory, ds_base, ss_base) & 0xFFFF
+
+          if reg(:cr0_pe) == 1
+            # Protected mode: load descriptor from GDT/LDT
+            exception = load_segment_protected(seg_index, selector, memory, eip)
+            return :ok if exception  # Exception dispatched, don't advance EIP
+          else
+            # Real mode: base = selector << 4
+            new_base = (selector & 0xFFFF) << 4
+            cache = C::DEFAULT_SEG_CACHE
+            base_hi = (new_base >> 24) & 0xFF
+            base_lo = new_base & 0xFF_FFFF
+            cache = cache & ~(0xFF << 56) & ~(0xFF_FFFF << 16)
+            cache = cache | (base_hi << 56) | (base_lo << 16)
+            write_regfile(write_seg: 1, wr_seg_index: seg_index, seg_to_reg: selector,
+                          write_seg_cache: 1, seg_cache_to_reg: cache,
+                          write_seg_valid: 1, seg_valid_to_reg: 1)
+          end
+
+          advance_eip(next_eip)
+          :ok
+        end
+
+        def exec_far_jmp(selector, offset, op32, memory)
+          if reg(:cr0_pe) == 1
+            # Protected mode: load CS descriptor from GDT
+            load_segment_protected(C::SEGMENT_CS, selector, memory, reg(:eip))
+          else
+            # Real mode: CS base = selector << 4
+            new_base = (selector & 0xFFFF) << 4
+            cache = C::DEFAULT_CS_CACHE
+            base_hi = (new_base >> 24) & 0xFF
+            base_lo = new_base & 0xFF_FFFF
+            cache = cache & ~(0xFF << 56) & ~(0xFF_FFFF << 16)
+            cache = cache | (base_hi << 56) | (base_lo << 16)
+            write_regfile(write_seg: 1, wr_seg_index: C::SEGMENT_CS, seg_to_reg: selector,
+                          write_seg_cache: 1, seg_cache_to_reg: cache,
+                          write_seg_valid: 1, seg_valid_to_reg: 1)
+          end
+          advance_eip(offset & (op32 ? 0xFFFF_FFFF : 0xFFFF))
+        end
+
+        # Load a segment in protected mode from GDT/LDT.
+        # Returns true if an exception was raised, false otherwise.
+        def load_segment_protected(seg_index, selector, memory, fault_eip)
+          # Null selector check
+          if (selector >> 3) == 0 && (selector & 4) == 0
+            # Null selector — allowed for DS/ES/FS/GS, not for CS/SS
+            if seg_index == C::SEGMENT_CS || seg_index == C::SEGMENT_SS
+              dispatch_interrupt(memory, C::EXCEPTION_GP, fault_eip, :fault)
+              return true
+            end
+            # Load null descriptor
+            write_regfile(write_seg: 1, wr_seg_index: seg_index, seg_to_reg: selector,
+                          write_seg_cache: 1, seg_cache_to_reg: 0,
+                          write_seg_valid: 1, seg_valid_to_reg: 0)
+            return false
+          end
+
+          # Determine table base (TI bit: 0=GDT, 1=LDT)
+          ti = (selector >> 2) & 1
+          index = (selector >> 3) & 0x1FFF
+          if ti == 0
+            table_base = reg(:gdtr_base)
+            table_limit = reg(:gdtr_limit)
+          else
+            # LDT — not yet implemented, use 0
+            table_base = 0
+            table_limit = 0
+          end
+
+          # Check bounds
+          desc_addr = table_base + index * 8
+          if (index * 8 + 7) > table_limit
+            dispatch_interrupt(memory, C::EXCEPTION_GP, fault_eip, :fault)
+            return true
+          end
+
+          # Fetch 8-byte descriptor from memory
+          desc_lo = mem_read(memory, desc_addr, 4)
+          desc_hi = mem_read(memory, desc_addr + 4, 4)
+          desc = (desc_hi << 32) | desc_lo
+
+          # Check present bit
+          present = (desc >> C::DESC_BIT_P) & 1
+          if present == 0
+            dispatch_interrupt(memory, C::EXCEPTION_NP, fault_eip, :fault)
+            return true
+          end
+
+          # Store descriptor cache and selector
+          write_regfile(write_seg: 1, wr_seg_index: seg_index, seg_to_reg: selector,
+                        write_seg_cache: 1, seg_cache_to_reg: desc,
+                        write_seg_valid: 1, seg_valid_to_reg: 1)
+          false
+        end
+
+        # Check if a memory access is within segment limit
+        def check_segment_limit(seg_cache, offset, size)
+          return true if reg(:cr0_pe) == 0  # No limit checking in real mode
+
+          limit_lo = seg_cache & 0xFFFF
+          limit_hi = (seg_cache >> 48) & 0xF
+          g = (seg_cache >> C::DESC_BIT_G) & 1
+          limit = (limit_hi << 16) | limit_lo
+          limit = g == 1 ? (limit << 12) | 0xFFF : limit
+
+          (offset + size - 1) <= limit
         end
       end
     end

@@ -297,6 +297,20 @@ module RHDL
             return [Constants::CMD_MOV, 0, needed, is_8bit, has_bytes?(pfx_cnt, needed, valid)]
           end
 
+          # MOV to seg (0x8E): MOV Sreg, r/m16
+          if opcode == 0x8E
+            mlen = modregrm_len(bytes, mrm_off, valid, addr32)
+            needed = 1 + mlen
+            return [Constants::CMD_MOV_to_seg, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
+          end
+
+          # MOV from seg (0x8C): MOV r/m16, Sreg
+          if opcode == 0x8C
+            mlen = modregrm_len(bytes, mrm_off, valid, addr32)
+            needed = 1 + mlen
+            return [Constants::CMD_PUSH_MOV_SEG, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
+          end
+
           # LEA (0x8D)
           if opcode == 0x8D
             mlen = modregrm_len(bytes, mrm_off, valid, addr32)
@@ -606,6 +620,28 @@ module RHDL
 
         # Decode 2-byte opcodes (0x0F xx)
         def decode_2byte(opcode, bytes, mrm_off, pfx_cnt, valid, op32, addr32)
+          # LGDT/LIDT/SGDT/SIDT (0x0F 0x01)
+          if opcode == 0x01
+            mlen = modregrm_len(bytes, mrm_off, valid, addr32)
+            needed = 1 + mlen
+            reg_field = mrm_off < valid ? (bytes[mrm_off] >> 3) & 7 : 0
+            case reg_field
+            when 0  # SGDT
+              return [Constants::CMD_SGDT, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
+            when 1  # SIDT
+              return [Constants::CMD_SIDT, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
+            when 2  # LGDT
+              return [Constants::CMD_LGDT, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
+            when 3  # LIDT
+              return [Constants::CMD_LIDT, 0, needed, false, has_bytes?(pfx_cnt, needed, valid)]
+            end
+          end
+
+          # MOV from CRx (0x0F 0x20) / MOV to CRx (0x0F 0x22)
+          if opcode == 0x20 || opcode == 0x22
+            return [Constants::CMD_control_reg, 0, 2, false, has_bytes?(pfx_cnt, 2, valid)]
+          end
+
           # Jcc near (0x0F 0x80-0x8F)
           if opcode >= 0x80 && opcode <= 0x8F
             needed = op32 ? 5 : 3  # opcode (already consumed 0F) + disp16/32
