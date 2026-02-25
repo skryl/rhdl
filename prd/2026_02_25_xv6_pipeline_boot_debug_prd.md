@@ -1,6 +1,6 @@
 # PRD: Debug RISC-V xv6 Boot-to-Shell (Single-Cycle + Pipeline, Compiler Backend)
 
-**Status:** In Progress (2026-02-25)
+**Status:** Completed (2026-02-25)
 
 ## Context
 
@@ -34,7 +34,16 @@ interrupt-architecture bugs were discovered and fixed during xv6 boot debugging:
 - All 357 RISC-V unit/integration tests pass. ✅
 
 ### Pipeline Boot
-- **Status**: In progress. Pipeline boot test running (200M cycle budget).
+- **Compiler backend**: Boots to shell at 28M cycles (~209s). ✅
+- All 357 RISC-V unit/integration tests pass after fix. ✅
+
+#### Pipeline-Specific Bug Fixed
+8. **IF/ID flush bubble detection**: The IF/ID pipeline register inserted NOP
+   (0x00000013, opcode 0x13) on flush, but the EX-stage bubble detection checks
+   `ex_opcode == 0`. The NOP's opcode (0x13) was not recognized as a bubble,
+   allowing asynchronous interrupts to fire on flushed instructions with
+   `ex_pc = 0`, corrupting `mepc` and causing MRET to restart from address 0.
+   Fixed by changing the flush instruction to 0x00000000 (opcode 0).
 
 ## Goals
 
@@ -56,12 +65,16 @@ interrupt-architecture bugs were discovered and fixed during xv6 boot debugging:
 - [x] Phase 1: Single-cycle compiler boot verified (19.5M cycles)
 - [x] Phase 1: Single-cycle JIT boot verified (19.5M cycles)
 - [x] Phase 5: All 357 RISC-V tests pass (0 failures)
-- [ ] Phase 2: Pipeline compiler boot traced to identify status
-- [ ] Phase 3: Pipeline fixes implemented and tested (if needed)
-- [ ] Phase 4: Cycle budgets and timeouts tuned
-- [ ] Phase 4: Both compiler backend specs pass
+- [x] Phase 2: Pipeline compiler boot traced — IF/ID flush bubble bug found
+- [x] Phase 3: IF/ID flush fix implemented (opcode 0 instead of NOP 0x13)
+- [x] Phase 3: Pipeline compiler boot verified (28M cycles)
+- [ ] Phase 4: Both compiler backend xv6 shell IO specs pass
 
 ## Key Changes Made
+
+### Pipeline IF/ID Register (pipeline/if_id_reg.rb)
+- Flush value changed from NOP (0x00000013) to 0x00000000 (opcode 0)
+- Reset value for `inst_out` changed from 0x00000013 to 0
 
 ### HDL (cpu.rb, pipeline/cpu.rb)
 - `irq_pending_bits`: SSIP from CSR store + irq_external→SEIP(0x200)

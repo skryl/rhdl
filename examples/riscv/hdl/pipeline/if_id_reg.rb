@@ -32,16 +32,18 @@ module RHDL
 
       sequential clock: :clk, reset: :rst, reset_values: {
         pc_out: 0,
-        inst_out: 0x00000013,  # NOP (ADDI x0, x0, 0)
+        inst_out: 0,  # All-zero (opcode 0) so EX-stage bubble detection works
         pc_plus4_out: 4,
         inst_page_fault_out: 0
       } do
-        # On flush, insert NOP
-        # On stall, hold current values
-        # Otherwise, latch new values
+        # On flush, insert bubble with opcode 0 (not NOP 0x13) so the
+        # EX-stage ex_is_bubble check (opcode == 0) correctly identifies it
+        # as a bubble and suppresses asynchronous interrupts.  Using NOP
+        # (opcode 0x13) caused interrupts to fire with ex_pc = 0, corrupting
+        # mepc and restarting the kernel from address 0.
         pc_out <= mux(flush, lit(0, width: 32),
                    mux(stall, pc_out, pc_in))
-        inst_out <= mux(flush, lit(0x00000013, width: 32),
+        inst_out <= mux(flush, lit(0, width: 32),
                      mux(stall, inst_out, inst_in))
         pc_plus4_out <= mux(flush, lit(4, width: 32),
                          mux(stall, pc_plus4_out, pc_plus4_in))
