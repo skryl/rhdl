@@ -136,12 +136,18 @@ export function createApple2MemoryController({
     return out;
   }
 
+  function hasSourceMap() {
+    return !!state.apple2?.sourceMap;
+  }
+
   function refreshMemoryView() {
     if (!dom.memoryDump || !runtime.sim) {
       resetHighlightState();
       renderMemoryPanel(dom, {
         followDisabled: !isApple2UiEnabled(),
         followChecked: !!state.memory.followPc,
+        showSourceDisabled: !hasSourceMap(),
+        showSourceChecked: !!state.memory.showSource,
         dumpText: '',
         disasmText: '',
         dumpRows: []
@@ -154,6 +160,8 @@ export function createApple2MemoryController({
       renderMemoryPanel(dom, {
         followDisabled: true,
         followChecked: !!state.memory.followPc,
+        showSourceDisabled: true,
+        showSourceChecked: !!state.memory.showSource,
         dumpText: 'Load a runner with memory + I/O support to browse memory.',
         disasmText: 'Load a runner with memory + I/O support to view disassembly.',
         dumpRows: []
@@ -185,6 +193,8 @@ export function createApple2MemoryController({
       renderMemoryPanel(dom, {
         followDisabled: false,
         followChecked: !!state.memory.followPc,
+        showSourceDisabled: !hasSourceMap(),
+        showSourceChecked: !!state.memory.showSource,
         dumpText: 'No memory data',
         disasmText: 'No disassembly data',
         dumpRows: []
@@ -250,6 +260,9 @@ export function createApple2MemoryController({
     const disasmStart = start;
     const runnerKind = currentRunnerKind();
     const disasmOpts = { highlightPc: pc, addressSpace: addrSpace };
+    if (state.memory.showSource && state.apple2?.sourceMap) {
+      disasmOpts.sourceMap = state.apple2.sourceMap;
+    }
     let disasmText;
     if (runnerKind === 'riscv' && typeof disassembleRiscvLinesWithMemory === 'function') {
       disasmText = disassembleRiscvLinesWithMemory(
@@ -265,6 +278,8 @@ export function createApple2MemoryController({
     renderMemoryPanel(dom, {
       followDisabled: false,
       followChecked: !!state.memory.followPc,
+      showSourceDisabled: !hasSourceMap(),
+      showSourceChecked: !!state.memory.showSource,
       dumpText: lines.join('\n'),
       dumpRows,
       disasmText,

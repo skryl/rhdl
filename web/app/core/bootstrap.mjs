@@ -50,6 +50,7 @@ export function startMainApp() {
     setCycleState,
     setUiCyclesPendingState,
     setMemoryFollowPcState,
+    setMemoryShowSourceState,
     setApple2DisplayHiresState,
     setApple2DisplayColorState,
     setApple2SoundEnabledState,
@@ -120,6 +121,7 @@ export function startMainApp() {
       setCycleState,
       setUiCyclesPendingState,
       setMemoryFollowPcState,
+      setMemoryShowSourceState,
       syncReduxUxState,
       scheduleReduxUxSync
     },

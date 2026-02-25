@@ -235,6 +235,9 @@ export const GENERATED_RUNNER_PRESETS = Object.freeze({
       "fastBoot": "moderate",
       "resetAfterLoad": true
     },
+    "defaultSrcmap": {
+      "path": "./assets/fixtures/riscv/software/bin/kernel_srcmap.json"
+    },
     "defaultDisk": {
       "path": "./assets/fixtures/riscv/software/bin/fs.img",
       "offset": 0

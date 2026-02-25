@@ -57,6 +57,7 @@ web/assets/pkg/*
 # RISC-V software artifacts: keep canonical fixtures only
 /examples/riscv/software/bin/*
 !/examples/riscv/software/bin/kernel.bin
+!/examples/riscv/software/bin/kernel_srcmap.json
 !/examples/riscv/software/bin/fs.img
 
 # xv6 local build artifacts

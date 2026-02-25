@@ -543,6 +543,7 @@ export function disassembleRiscvLines(
   const highlightPc = options.highlightPc == null
     ? null
     : (Number(options.highlightPc) >>> 0) % addressSpace;
+  const sourceMap = options.sourceMap || null;
 
   // Fetch enough bytes for count instructions (max 4 bytes each) plus a small buffer.
   const fetchLen = (count * 4) + 4;
@@ -568,8 +569,32 @@ export function disassembleRiscvLines(
 
   let addr = start;
   const lines = [];
+  let lastFn = null;
+  let lastFile = null;
+  let lastLine = null;
 
   for (let i = 0; i < count; i += 1) {
+    // Insert source annotations when source map is available.
+    if (sourceMap) {
+      const info = sourceMap.lookup(addr);
+      if (info) {
+        // Emit function header when entering a new function.
+        if (info.function && info.function !== lastFn) {
+          const fileSuffix = info.file ? ` -- ${info.file}` : '';
+          lines.push(`-- ${info.function}()${fileSuffix} --`);
+          lastFn = info.function;
+        }
+        // Emit source line when the line number changes.
+        if (info.line != null && (info.file !== lastFile || info.line !== lastLine)) {
+          if (info.source != null) {
+            lines.push(`  ${info.line}: ${info.source}`);
+          }
+          lastFile = info.file;
+          lastLine = info.line;
+        }
+      }
+    }
+
     const half = readHalf(addr) & 0xffff;
     const isCompressed = (half & 0x3) !== 0x3;
     let mnemonic;

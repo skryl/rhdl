@@ -226,6 +226,163 @@ test('refreshMemoryView uses riscv disassembly for riscv runner', () => {
   assert.equal(riscvDisasmCalls[0].start, 0x80000000);
 });
 
+test('refreshMemoryView passes sourceMap to riscv disassembler when showSource is enabled', () => {
+  const riscvDisasmCalls = [];
+  const fakeSourceMap = { lookup: () => null };
+  const dom = {
+    memoryDump: {},
+    memoryStart: { value: '0x80000000' },
+    memoryLength: { value: '16' }
+  };
+  const state = {
+    memory: {
+      followPc: false,
+      showSource: true,
+      disasmLines: 4
+    },
+    apple2: {
+      ioConfig: {
+        memory: {
+          addressSpace: 0x100000000,
+          viewMapped: true
+        }
+      },
+      sourceMap: fakeSourceMap
+    }
+  };
+  const runtime = {
+    sim: {
+      memory_read: (_start, length) => new Uint8Array(length),
+      has_signal: () => false,
+      runner_kind: () => 'riscv'
+    }
+  };
+  const controller = createApple2MemoryController({
+    dom,
+    state,
+    runtime,
+    isApple2UiEnabled: () => true,
+    parseHexOrDec,
+    hexWord,
+    hexByte,
+    renderMemoryPanel: () => {},
+    disassemble6502LinesWithMemory: () => ['NOP'],
+    disassembleRiscvLinesWithMemory: (start, count, readMem, opts) => {
+      riscvDisasmCalls.push({ start, count, opts });
+      return ['nop'];
+    },
+    setMemoryDumpStatus: () => {},
+    addressSpace: 0x10000
+  });
+
+  controller.refreshMemoryView();
+  assert.equal(riscvDisasmCalls.length, 1);
+  assert.equal(riscvDisasmCalls[0].opts.sourceMap, fakeSourceMap);
+});
+
+test('refreshMemoryView does not pass sourceMap when showSource is false', () => {
+  const riscvDisasmCalls = [];
+  const dom = {
+    memoryDump: {},
+    memoryStart: { value: '0x80000000' },
+    memoryLength: { value: '16' }
+  };
+  const state = {
+    memory: {
+      followPc: false,
+      showSource: false,
+      disasmLines: 4
+    },
+    apple2: {
+      ioConfig: {
+        memory: {
+          addressSpace: 0x100000000,
+          viewMapped: true
+        }
+      },
+      sourceMap: { lookup: () => null }
+    }
+  };
+  const runtime = {
+    sim: {
+      memory_read: (_start, length) => new Uint8Array(length),
+      has_signal: () => false,
+      runner_kind: () => 'riscv'
+    }
+  };
+  const controller = createApple2MemoryController({
+    dom,
+    state,
+    runtime,
+    isApple2UiEnabled: () => true,
+    parseHexOrDec,
+    hexWord,
+    hexByte,
+    renderMemoryPanel: () => {},
+    disassemble6502LinesWithMemory: () => ['NOP'],
+    disassembleRiscvLinesWithMemory: (start, count, readMem, opts) => {
+      riscvDisasmCalls.push({ start, count, opts });
+      return ['nop'];
+    },
+    setMemoryDumpStatus: () => {},
+    addressSpace: 0x10000
+  });
+
+  controller.refreshMemoryView();
+  assert.equal(riscvDisasmCalls.length, 1);
+  assert.equal(riscvDisasmCalls[0].opts.sourceMap, undefined);
+});
+
+test('refreshMemoryView sets showSourceDisabled when no sourceMap', () => {
+  const renderCalls = [];
+  const dom = {
+    memoryDump: {},
+    memoryStart: { value: '0x80000000' },
+    memoryLength: { value: '16' }
+  };
+  const state = {
+    memory: {
+      followPc: false,
+      showSource: false,
+      disasmLines: 4
+    },
+    apple2: {
+      ioConfig: {
+        memory: {
+          addressSpace: 0x100000000,
+          viewMapped: true
+        }
+      }
+    }
+  };
+  const runtime = {
+    sim: {
+      memory_read: (_start, length) => new Uint8Array(length),
+      has_signal: () => false,
+      runner_kind: () => 'riscv'
+    }
+  };
+  const controller = createApple2MemoryController({
+    dom,
+    state,
+    runtime,
+    isApple2UiEnabled: () => true,
+    parseHexOrDec,
+    hexWord,
+    hexByte,
+    renderMemoryPanel: (_dom, payload) => renderCalls.push(payload),
+    disassemble6502LinesWithMemory: () => ['NOP'],
+    disassembleRiscvLinesWithMemory: () => ['nop'],
+    setMemoryDumpStatus: () => {},
+    addressSpace: 0x10000
+  });
+
+  controller.refreshMemoryView();
+  assert.equal(renderCalls.length, 1);
+  assert.equal(renderCalls[0].showSourceDisabled, true);
+  assert.equal(renderCalls[0].showSourceChecked, false);
+});
+
 test('refreshMemoryView aligns follow-pc start for riscv high addresses', () => {
   const renderCalls = [];
   const dom = {

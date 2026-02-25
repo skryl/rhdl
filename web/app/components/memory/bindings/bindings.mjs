@@ -92,6 +92,12 @@ export function bindMemoryBindings({
     scheduleReduxUxSync('memoryFollowPc');
   });
 
+  listeners.on(dom.memoryShowSource, 'change', () => {
+    store.setMemoryShowSourceState(!!dom.memoryShowSource?.checked);
+    apple2.refreshMemoryView();
+    scheduleReduxUxSync('memoryShowSource');
+  });
+
   listeners.on(dom.memoryRefreshBtn, 'click', () => {
     apple2.refreshMemoryView();
   });

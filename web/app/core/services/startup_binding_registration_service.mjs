@@ -47,6 +47,7 @@ export function createStartupBindingRegistrationService({
     setCycleState,
     setUiCyclesPendingState,
     setMemoryFollowPcState,
+    setMemoryShowSourceState,
     scheduleReduxUxSync
   } = store;
 
@@ -72,6 +73,7 @@ export function createStartupBindingRegistrationService({
   requireFn('setCycleState', setCycleState);
   requireFn('setUiCyclesPendingState', setUiCyclesPendingState);
   requireFn('setMemoryFollowPcState', setMemoryFollowPcState);
+  requireFn('setMemoryShowSourceState', setMemoryShowSourceState);
   requireFn('scheduleReduxUxSync', scheduleReduxUxSync);
   requireFn('getBackendDef', getBackendDef);
   requireFn('parseHexOrDec', parseHexOrDec);
@@ -220,7 +222,8 @@ export function createStartupBindingRegistrationService({
         runtime,
         apple2,
         store: {
-          setMemoryFollowPcState
+          setMemoryFollowPcState,
+          setMemoryShowSourceState
         },
         util: {
           isSnapshotFileName,

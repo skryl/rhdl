@@ -1,5 +1,6 @@
 import { resolveRunnerIoConfig } from '../../runner/lib/io_config.mjs';
 import { isSnapshotFileName, parseApple2SnapshotText } from '../../apple2/lib/snapshot.mjs';
+import { createRiscvSourceMap } from '../../riscv/lib/riscv_srcmap.mjs';
 
 const DEFAULT_APPLE2_WATCHES = ['pc_debug', 'a_debug', 'x_debug', 'y_debug', 'opcode_debug', 'speaker'];
 const U16_MASK = 0xFFFF;
@@ -721,6 +722,7 @@ export function resetSimulatorSession({
   state.apple2.lastMappedSoundValue = null;
   state.apple2.baseRomBytes = null;
   state.apple2.ioConfig = null;
+  state.apple2.sourceMap = null;
   if (runtime.throughput && typeof runtime.throughput === 'object') {
     runtime.throughput.cyclesPerSecond = 0;
     runtime.throughput.lastSampleTimeMs = null;
@@ -748,6 +750,40 @@ export function seedDefaultWatchSignals({
     addWatchSignal(clk);
   } else if (simMeta.clocks.length > 0) {
     addWatchSignal(simMeta.clocks[0]);
+  }
+}
+
+async function loadDefaultSrcmapAsset({
+  state,
+  preset,
+  fetchImpl,
+  log
+} = {}) {
+  const raw = preset?.defaultSrcmap;
+  if (!raw || typeof raw !== 'object') {
+    return;
+  }
+  const path = String(raw.path || '').trim();
+  if (!path) {
+    return;
+  }
+
+  try {
+    const resp = await fetchImpl(path);
+    if (!resp.ok) {
+      log(`Source map load skipped (${resp.status}): ${path}`);
+      return;
+    }
+    const json = await resp.json();
+    const srcmap = createRiscvSourceMap(json);
+    if (srcmap) {
+      state.apple2.sourceMap = srcmap;
+      log(`Loaded source map: ${path} (${srcmap.functionCount} functions, ${srcmap.lineCount} lines)`);
+    } else {
+      log(`Source map format not recognized: ${path}`);
+    }
+  } catch (err) {
+    log(`Failed to load source map: ${err.message || err}`);
   }
 }
 
@@ -830,4 +866,6 @@ export async function initializeApple2Mode({
       log
     });
   }
+
+  await loadDefaultSrcmapAsset({ state, preset, fetchImpl, log });
 }

@@ -174,6 +174,11 @@ export function renderMemoryPanel(dom, viewModel) {
     dom.memoryFollowPc.checked = !!viewModel.followChecked;
   }
 
+  if (dom.memoryShowSource) {
+    dom.memoryShowSource.disabled = !!viewModel.showSourceDisabled;
+    dom.memoryShowSource.checked = !!viewModel.showSourceChecked;
+  }
+
   const element = dom.memoryDump;
   if (element && typeof element.setViewModel === 'function') {
     element.setViewModel(viewModel);
