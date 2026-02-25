@@ -416,7 +416,7 @@ RSpec.describe 'Game Boy CLI' do
         end
       end
 
-      it 'implements all required interface methods' do
+      it 'implements all required interface methods', :slow do
         skip "Verilator not available" unless @verilator_available
         runner = RHDL::Examples::GameBoy::VerilogRunner.new
         required_methods.each do |method|
