@@ -22,8 +22,6 @@ LINUX_INITRAMFS_PATH = ENV.fetch(
   File.expand_path('../../../examples/riscv/software/bin/linux_initramfs.cpio', __dir__)
 )
 LINUX_LOAD_ADDR = int_env('RHDL_LINUX_LOAD_ADDR', 0x8040_0000)
-LINUX_BOOT_CYCLES = int_env('RHDL_LINUX_BOOT_CYCLES', 80_000_000)
-LINUX_MILESTONE_CYCLES = int_env('RHDL_LINUX_MILESTONE_CYCLES', 400_000_000)
 LINUX_STEP_CYCLES = int_env('RHDL_LINUX_STEP_CYCLES', 200_000)
 LINUX_NO_UART_PROGRESS_CYCLES = int_env('RHDL_LINUX_NO_UART_PROGRESS_CYCLES', 80_000_000)
 LINUX_LIVE_UART = ENV.fetch('RHDL_LINUX_LIVE_UART', '1') != '0'
@@ -55,8 +53,8 @@ end.freeze
 
 LINUX_BOOT_BACKEND = RHDL::Codegen::IR::IR_COMPILER_AVAILABLE ? :compile : nil
 
-RSpec.describe 'RISC-V Linux boot milestones over UART', :slow, timeout: 600 do
-  let(:runner) { RHDL::Examples::RISCV::HeadlessRunner.new(mode: :ir, sim: LINUX_BOOT_BACKEND) }
+RSpec.shared_examples 'linux boot milestones' do |core:, boot_cycles:, milestone_cycles:, timeout_seconds:|
+  let(:runner) { RHDL::Examples::RISCV::HeadlessRunner.new(mode: :ir, sim: LINUX_BOOT_BACKEND, core: core) }
   let(:cpu) { runner.cpu }
 
   def pump_uart(cpu, stream_state)
@@ -126,7 +124,8 @@ RSpec.describe 'RISC-V Linux boot milestones over UART', :slow, timeout: 600 do
     end
   end
 
-  it 'reaches Linux version and a follow-on UART milestone when Linux artifacts are available' do
+  it 'reaches Linux version, init, and shell milestones when Linux artifacts are available',
+     :slow, timeout: timeout_seconds do
     skip 'Compiler backend unavailable for Linux boot spec' if LINUX_BOOT_BACKEND.nil?
     skip "Missing Linux kernel artifact at #{LINUX_KERNEL_PATH}" unless File.file?(LINUX_KERNEL_PATH)
     skip "Missing Linux initramfs artifact at #{LINUX_INITRAMFS_PATH}" unless File.file?(LINUX_INITRAMFS_PATH)
@@ -144,14 +143,14 @@ RSpec.describe 'RISC-V Linux boot milestones over UART', :slow, timeout: 600 do
     boot_output = wait_for_uart_text(
       cpu,
       'Linux version',
-      max_cycles: LINUX_BOOT_CYCLES,
+      max_cycles: boot_cycles,
       chunk: LINUX_STEP_CYCLES,
       stream_state: stream_state
     )
     init_output, init_marker = wait_for_uart_any(
       cpu,
       LINUX_INIT_MARKERS,
-      max_cycles: LINUX_MILESTONE_CYCLES,
+      max_cycles: milestone_cycles,
       chunk: LINUX_STEP_CYCLES,
       stream_state: stream_state
     )
@@ -159,7 +158,7 @@ RSpec.describe 'RISC-V Linux boot milestones over UART', :slow, timeout: 600 do
     shell_output, shell_marker = wait_for_uart_any(
       cpu,
       LINUX_SHELL_MARKERS,
-      max_cycles: LINUX_MILESTONE_CYCLES,
+      max_cycles: milestone_cycles,
       chunk: LINUX_STEP_CYCLES,
       stream_state: stream_state
     )
@@ -170,4 +169,20 @@ RSpec.describe 'RISC-V Linux boot milestones over UART', :slow, timeout: 600 do
   ensure
     $stderr.puts if LINUX_LIVE_UART
   end
+end
+
+RSpec.describe 'RISC-V Linux boot milestones over UART (single-cycle)' do
+  include_examples 'linux boot milestones',
+                   core: :single,
+                   boot_cycles: int_env('RHDL_LINUX_BOOT_CYCLES', 80_000_000),
+                   milestone_cycles: int_env('RHDL_LINUX_MILESTONE_CYCLES', 400_000_000),
+                   timeout_seconds: 600
+end
+
+RSpec.describe 'RISC-V Linux boot milestones over UART (pipeline)' do
+  include_examples 'linux boot milestones',
+                   core: :pipeline,
+                   boot_cycles: int_env('RHDL_LINUX_BOOT_CYCLES_PIPELINE', 400_000_000),
+                   milestone_cycles: int_env('RHDL_LINUX_MILESTONE_CYCLES_PIPELINE', 2_000_000_000),
+                   timeout_seconds: 1800
 end
