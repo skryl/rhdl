@@ -1192,7 +1192,13 @@ module RHDL
                                            ex_delegate_allowed & ex_global_sie_enabled &
                                            (ex_super_enabled_interrupts != lit(0, width: 32)),
                                            width: 1)
-        ex_interrupt_pending = local(:ex_interrupt_pending, ex_machine_interrupt_pending | ex_super_interrupt_pending, width: 1)
+        # Detect pipeline bubble in EX (flushed ID/EX sets opcode to 0, which is not a valid RISC-V opcode).
+        # Async interrupts must only be taken when EX holds a valid instruction so that ex_pc
+        # correctly represents the interrupted instruction for mepc/sepc.
+        ex_is_bubble = local(:ex_is_bubble, ex_opcode == lit(0, width: 7), width: 1)
+        ex_interrupt_pending = local(:ex_interrupt_pending,
+                                     (ex_machine_interrupt_pending | ex_super_interrupt_pending) & ~ex_is_bubble,
+                                     width: 1)
         ex_interrupt_from_supervisor = local(:ex_interrupt_from_supervisor,
                                              ex_delegate_allowed & ex_super_interrupt_pending &
                                              ~ex_machine_interrupt_pending,
@@ -1273,9 +1279,7 @@ module RHDL
                                               lit(2, width: 32),
                                               mux(ex_is_ebreak, lit(3, width: 32), ex_ecall_cause))))),
                               width: 32)
-        ex_trap_epc = local(:ex_trap_epc,
-                            mux(ex_interrupt_pending, current_pc, ex_pc),
-                            width: 32)
+        ex_trap_epc = local(:ex_trap_epc, ex_pc, width: 32)
         ex_inst_word = local(:ex_inst_word,
                              cat(ex_funct7, ex_rs2_addr, ex_rs1_addr, ex_funct3, ex_rd_addr, ex_opcode),
                              width: 32)
