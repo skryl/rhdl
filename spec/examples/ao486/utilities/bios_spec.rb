@@ -286,7 +286,8 @@ RSpec.describe RHDL::Examples::AO486::Bios, 'Phase 4: BIOS stub & boot sector' d
 
         iosys = floppy.read_file('IO.SYS')
         msdos = floppy.read_file('MSDOS.SYS')
-        msdos_base = (0x700 + iosys.length + 15) & ~15
+        iosys_sectors = (iosys.length + 511) / 512
+        msdos_base = 0x700 + iosys_sectors * 512
 
         # First bytes of MSDOS.SYS should be present
         expect(memory[msdos_base]).to eq(msdos[0])

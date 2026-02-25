@@ -52,6 +52,7 @@ module RHDL
           @tick_count = 0
           @unhandled_ints = []
           @handler_linear_addrs = {}
+          @msdos_range = nil
         end
 
         # Install IVT, BDA, and BIOS stubs into memory.
@@ -109,14 +110,15 @@ module RHDL
           sysinit.each_with_index { |b, i| memory[0x700 + i] = b & 0xFF }
 
           # 3. Load MSDOS.SYS where MSLOAD would have placed it:
-          #    right after the full IO.SYS, paragraph-aligned.
-          #    (MSLOAD loaded the full IO.SYS at 0x700, then MSDOS.SYS after it;
-          #    Keep_Loaded_BIO overwrites MSLOAD in-place but MSDOS.SYS stays put.)
+          #    right after the full IO.SYS, sector-aligned.
+          #    MSLOAD reads IO.SYS by sectors, so the in-memory size is
+          #    ceil(IO.SYS / 512) * 512.  MSDOS.SYS follows immediately.
           msdos = @floppy.read_file('MSDOS.SYS')
           if msdos
-            msdos_base = 0x700 + iosys.length
-            msdos_base = (msdos_base + 15) & ~15  # paragraph align
+            iosys_sectors = (iosys.length + 511) / 512
+            msdos_base = 0x700 + iosys_sectors * 512
             msdos.each_with_index { |b, i| memory[msdos_base + i] = b & 0xFF }
+            @msdos_range = msdos_base..(msdos_base + msdos.length - 1)
           end
 
           # 4. Compute first data sector from BPB (GO_IBMBIO passes this in BX:AX)
@@ -352,12 +354,19 @@ module RHDL
           head     = dh
 
           if @floppy && dl == 0
-            data = @floppy.read_sectors_chs(cylinder, head, sector, al)
-            # Write data to ES:BX
+            # Compute destination address
             es_base = @pipeline.desc_base_public(@pipeline.seg_cache_public(:es))
             bx = @pipeline.reg(:ebx) & 0xFFFF
             dest = (es_base + bx) & 0xFFFF_FFFF
-            data.each_with_index { |b, i| memory[dest + i] = b & 0xFF }
+            nbytes = al * 512
+
+            # If destination overlaps pre-loaded MSDOS.SYS, skip the write —
+            # the correct data is already in memory from load_dos_ram_image.
+            unless @msdos_range && dest < (@msdos_range.end + 1) && (dest + nbytes) > @msdos_range.begin
+              data = @floppy.read_sectors_chs(cylinder, head, sector, al)
+              data.each_with_index { |b, i| memory[dest + i] = b & 0xFF }
+            end
+
             # Success: AH=0, AL=sectors read
             @pipeline.set_reg(:eax, al & 0xFF)
             set_return_cf(memory, 0)
