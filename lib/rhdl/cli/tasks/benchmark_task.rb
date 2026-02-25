@@ -24,6 +24,8 @@ module RHDL
             benchmark_mos6502
           when :gameboy
             benchmark_gameboy
+          when :riscv
+            benchmark_riscv
           else
             benchmark_gates
           end
@@ -759,6 +761,129 @@ module RHDL
               puts "  #{r[:name]} vs #{base[:name]}: #{format('%.1f', ratio)}x"
             end
           end
+        end
+
+        # Benchmark RISC-V single-cycle CPU running xv6 boot across IR/Verilator/Arcilator
+        def benchmark_riscv
+          kernel_path = File.expand_path('../../../../examples/riscv/software/bin/kernel.bin', __dir__)
+          fs_path = File.expand_path('../../../../examples/riscv/software/bin/fs.img', __dir__)
+
+          unless File.exist?(kernel_path)
+            puts "Error: xv6 kernel not found at #{kernel_path}"
+            return
+          end
+
+          unless File.exist?(fs_path)
+            puts "Error: xv6 fs.img not found at #{fs_path}"
+            return
+          end
+
+          cycles = options[:cycles] || 100_000
+          runner_filter = (ENV['RHDL_BENCH_BACKENDS'] || '')
+            .split(',')
+            .map { |name| name.strip.downcase.to_sym }
+            .reject(&:empty?)
+
+          puts_header("RISC-V Single-Cycle CPU Benchmark - xv6 Boot")
+          puts "Cycles per run: #{cycles}"
+          puts "Kernel: #{kernel_path}"
+          puts "Filesystem: #{fs_path}"
+          puts
+
+          require_relative '../../../../examples/riscv/utilities/runners/headless_runner'
+
+          runners = [
+            { name: 'IR Compiler', mode: :ir, sim: :compile, filter_key: :compiler },
+            { name: 'Verilator', mode: :verilog, sim: nil, filter_key: :verilator },
+            { name: 'Arcilator', mode: :arcilator, sim: nil, filter_key: :arcilator }
+          ]
+          runners.select! { |r| runner_filter.include?(r[:filter_key]) } unless runner_filter.empty?
+
+          results = []
+
+          runners.each do |runner_config|
+            # Check availability
+            available = case runner_config[:mode]
+                        when :ir
+                          begin
+                            require 'rhdl/codegen'
+                            RHDL::Codegen::IR::IR_COMPILER_AVAILABLE
+                          rescue LoadError, NameError
+                            false
+                          end
+                        when :verilog
+                          verilator_available?
+                        when :arcilator
+                          arcilator_available?
+                        end
+
+            unless available
+              puts "\n#{runner_config[:name]}: SKIPPED (not available)"
+              results << { name: runner_config[:name], status: :skipped }
+              next
+            end
+
+            print "\n#{runner_config[:name]}: "
+            $stdout.flush
+
+            begin
+              # Create HeadlessRunner
+              print "initializing... "
+              $stdout.flush
+              init_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+              runner_opts = { mode: runner_config[:mode], core: :single }
+              runner_opts[:sim] = runner_config[:sim] if runner_config[:sim]
+              runner = RHDL::Examples::RISCV::HeadlessRunner.new(**runner_opts)
+
+              init_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - init_start
+
+              # Load xv6
+              print "loading xv6... "
+              $stdout.flush
+              runner.load_xv6(kernel: kernel_path, fs: fs_path)
+
+              # Enable batched C++ execution for HDL backends
+              if runner.cpu.respond_to?(:enable_batched_mode!)
+                runner.cpu.enable_batched_mode!
+              end
+
+              # Warmup - run 100 cycles past reset
+              runner.run_steps(100)
+
+              # Benchmark
+              print "running #{cycles} cycles... "
+              $stdout.flush
+              run_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+              runner.run_steps(cycles)
+              run_elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - run_start
+
+              cycles_per_sec = cycles / run_elapsed
+              state = runner.cpu_state
+              pc = state[:pc]
+
+              puts "done"
+              puts "  Init time: #{format('%.3f', init_elapsed)}s"
+              puts "  Run time:  #{format('%.3f', run_elapsed)}s"
+              puts "  Final PC:  0x#{pc.to_s(16).upcase}"
+
+              results << {
+                name: runner_config[:name],
+                status: :success,
+                init_time: init_elapsed,
+                run_time: run_elapsed,
+                cycles_per_sec: cycles_per_sec,
+                final_pc: pc
+              }
+            rescue => e
+              puts "FAILED"
+              puts "  Error: #{e.message}"
+              puts "  #{e.backtrace.first(3).join("\n  ")}" if options[:verbose]
+              results << { name: runner_config[:name], status: :failed, error: e.message }
+            end
+          end
+
+          print_benchmark_summary(results, cycles)
         end
 
         private

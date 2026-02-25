@@ -124,8 +124,8 @@ module RHDL
         end
 
         def load_xv6(kernel:, fs:, pc: XV6_RESET_PC)
-          unless native? && @cpu.sim.runner_kind == :riscv
-            raise 'xv6 mode requires native RISC-V IR runner support (build native backends first).'
+          unless xv6_capable?
+            raise 'xv6 mode requires native RISC-V IR runner or HDL backend (build native backends first).'
           end
 
           kernel_bytes = File.binread(kernel)
@@ -269,6 +269,13 @@ module RHDL
           @cpu.read_pc
         rescue StandardError
           nil
+        end
+
+        def xv6_capable?
+          return true if hdl_mode?(@effective_mode)
+          return true if native? && @cpu.respond_to?(:sim) && @cpu.sim.respond_to?(:runner_kind) && @cpu.sim.runner_kind == :riscv
+
+          false
         end
 
         def supports_runner_reset_vector?

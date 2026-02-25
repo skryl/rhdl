@@ -145,7 +145,20 @@ module RHDL
         end
 
         def run_cycles(n)
-          n.times { clock_cycle }
+          if @batched_mode
+            @sim_run_cycles_fn.call(@sim_ctx, n)
+            @clock_count += n
+          else
+            n.times { clock_cycle }
+          end
+        end
+
+        # Copy Ruby-side memory to C++ and enable batched cycle execution.
+        # After this call, run_cycles uses the C++ loop with embedded MMIO.
+        def enable_batched_mode!
+          sync_mem_to_native(@inst_mem, 0) # MEM_TYPE_INST
+          sync_mem_to_native(@data_mem, 1) # MEM_TYPE_DATA
+          @batched_mode = true
         end
 
         def read_reg(index)
@@ -171,9 +184,11 @@ module RHDL
         end
 
         def write_pc(value)
-          # HDL harness cannot directly write internal PC register.
-          # The HeadlessRunner set_pc handles this via reset vector or fallback.
-          raise RuntimeError, 'HdlHarness does not support direct PC writes'
+          v = value.to_i & 0xFFFF_FFFF
+          # Convert to signed 32-bit for Fiddle TYPE_INT compatibility
+          v -= 0x1_0000_0000 if v > 0x7FFF_FFFF
+          @sim_write_pc_fn.call(@sim_ctx, v)
+          eval_cpu
         end
 
         def load_program(program, start_addr = 0)
@@ -392,8 +407,8 @@ module RHDL
           run_or_raise("firtool --format=mlir #{lowered_mlir} --ir-hw -o #{mlir_file} 2>>#{log}",
                        "firtool HW lowering", log)
 
-          # Step 4: arcilator → LLVM IR
-          run_or_raise("arcilator #{mlir_file} --state-file=#{state_file} -o #{ll_file} 2>>#{log}",
+          # Step 4: arcilator → LLVM IR (observe registers so internal PC is accessible)
+          run_or_raise("arcilator #{mlir_file} --observe-registers --state-file=#{state_file} -o #{ll_file} 2>>#{log}",
                        "arcilator", log)
 
           # Step 5: LLVM IR → object
@@ -450,6 +465,275 @@ module RHDL
 
         # ---------- C++ wrapper generation ----------
 
+        # Common C types and helpers used by both Verilator and Arcilator wrappers.
+        # This must appear BEFORE the DUT_* macros and run_cycles_impl.
+        def riscv_sim_common_types
+          <<~'CODE'
+            // ---- Memory & MMIO state ----
+            #define MEM_TYPE_INST 0
+            #define MEM_TYPE_DATA 1
+
+            // CLINT addresses
+            #define CLINT_BASE        0x02000000u
+            #define CLINT_MSIP        (CLINT_BASE + 0x0000u)
+            #define CLINT_MTIMECMP_LO (CLINT_BASE + 0x4000u)
+            #define CLINT_MTIMECMP_HI (CLINT_BASE + 0x4004u)
+            #define CLINT_MTIME_LO    (CLINT_BASE + 0xBFF8u)
+            #define CLINT_MTIME_HI    (CLINT_BASE + 0xBFFCu)
+
+            // UART 16550 addresses
+            #define UART_BASE         0x10000000u
+            #define UART_THR          (UART_BASE + 0)
+            #define UART_IER          (UART_BASE + 1)
+            #define UART_IIR          (UART_BASE + 2)
+            #define UART_LCR          (UART_BASE + 3)
+            #define UART_MCR          (UART_BASE + 4)
+            #define UART_LSR          (UART_BASE + 5)
+            #define UART_MSR          (UART_BASE + 6)
+            #define UART_SCR          (UART_BASE + 7)
+
+            // PLIC addresses (simplified)
+            #define PLIC_BASE         0x0C000000u
+
+            // VirtIO address range (read-only stubs for benchmark)
+            #define VIRTIO_BASE       0x10001000u
+            #define VIRTIO_END        0x10002000u
+
+            struct MemState {
+                uint8_t* inst_mem;
+                uint8_t* data_mem;
+                uint32_t mem_size;
+                uint32_t mem_mask;
+                // CLINT
+                uint64_t mtime;
+                uint64_t mtimecmp;
+                uint32_t msip;
+                // IRQ outputs
+                uint8_t irq_timer;
+                uint8_t irq_software;
+                uint8_t irq_external;
+                // UART (simple model for benchmark)
+                uint8_t uart_lsr;  // Line Status: always TX empty + data ready when RX available
+            };
+
+            static void mem_init(MemState* m, uint32_t size) {
+                m->inst_mem = (uint8_t*)calloc(size, 1);
+                m->data_mem = (uint8_t*)calloc(size, 1);
+                m->mem_size = size;
+                m->mem_mask = size - 1;
+                m->mtime = 0;
+                m->mtimecmp = 0xFFFFFFFFFFFFFFFFull;
+                m->msip = 0;
+                m->irq_timer = 0;
+                m->irq_software = 0;
+                m->irq_external = 0;
+                m->uart_lsr = 0x60; // THR empty + THRE
+            }
+
+            static void mem_free(MemState* m) {
+                free(m->inst_mem);
+                free(m->data_mem);
+            }
+
+            static void load_mem(MemState* m, int mem_type, const uint8_t* data, uint32_t size, uint32_t base) {
+                uint8_t* target = (mem_type == MEM_TYPE_INST) ? m->inst_mem : m->data_mem;
+                for (uint32_t i = 0; i < size; i++) {
+                    target[(base + i) & m->mem_mask] = data[i];
+                }
+            }
+
+            static inline uint32_t read_word_le(const uint8_t* mem, uint32_t mask, uint32_t addr) {
+                uint32_t a = addr & mask;
+                return (uint32_t)mem[a] | ((uint32_t)mem[(a+1)&mask] << 8) |
+                       ((uint32_t)mem[(a+2)&mask] << 16) | ((uint32_t)mem[(a+3)&mask] << 24);
+            }
+
+            static inline uint32_t read_mem_funct3(const uint8_t* mem, uint32_t mask, uint32_t addr, uint32_t funct3) {
+                uint32_t a = addr & mask;
+                switch (funct3) {
+                case 0: { uint8_t v = mem[a]; return (v & 0x80) ? (v | 0xFFFFFF00u) : v; }
+                case 1: { uint16_t v = (uint16_t)mem[a] | ((uint16_t)mem[(a+1)&mask] << 8);
+                          return (v & 0x8000) ? (v | 0xFFFF0000u) : v; }
+                case 2: return read_word_le(mem, mask, addr);
+                case 4: return mem[a];
+                case 5: return (uint32_t)mem[a] | ((uint32_t)mem[(a+1)&mask] << 8);
+                default: return 0;
+                }
+            }
+
+            static inline void write_mem_funct3(uint8_t* mem, uint32_t mask, uint32_t addr, uint32_t val, uint32_t funct3) {
+                uint32_t a = addr & mask;
+                switch (funct3) {
+                case 0: case 4: mem[a] = (uint8_t)val; break;
+                case 1: case 5: mem[a] = (uint8_t)val; mem[(a+1)&mask] = (uint8_t)(val >> 8); break;
+                case 2: mem[a]=(uint8_t)val; mem[(a+1)&mask]=(uint8_t)(val>>8);
+                        mem[(a+2)&mask]=(uint8_t)(val>>16); mem[(a+3)&mask]=(uint8_t)(val>>24); break;
+                }
+            }
+
+            static inline int is_clint(uint32_t a) {
+                return a == CLINT_MSIP || a == CLINT_MTIMECMP_LO || a == CLINT_MTIMECMP_HI ||
+                       a == CLINT_MTIME_LO || a == CLINT_MTIME_HI;
+            }
+
+            static inline int is_uart(uint32_t a) {
+                return a >= UART_BASE && a <= UART_SCR;
+            }
+
+            static inline int is_plic(uint32_t a) {
+                return (a >= PLIC_BASE && a < PLIC_BASE + 0x400000u);
+            }
+
+            static inline int is_virtio(uint32_t a) {
+                return (a >= VIRTIO_BASE && a < VIRTIO_END);
+            }
+
+            static inline int is_mmio(uint32_t a) {
+                return is_clint(a) || is_uart(a) || is_plic(a) || is_virtio(a);
+            }
+
+            static uint32_t handle_clint_read(MemState* m, uint32_t addr) {
+                switch (addr) {
+                case CLINT_MSIP:        return m->msip;
+                case CLINT_MTIMECMP_LO: return (uint32_t)(m->mtimecmp);
+                case CLINT_MTIMECMP_HI: return (uint32_t)(m->mtimecmp >> 32);
+                case CLINT_MTIME_LO:    return (uint32_t)(m->mtime);
+                case CLINT_MTIME_HI:    return (uint32_t)(m->mtime >> 32);
+                default: return 0;
+                }
+            }
+
+            static void handle_clint_write(MemState* m, uint32_t addr, uint32_t val) {
+                switch (addr) {
+                case CLINT_MSIP:        m->msip = val & 1; break;
+                case CLINT_MTIMECMP_LO: m->mtimecmp = (m->mtimecmp & 0xFFFFFFFF00000000ull) | val; break;
+                case CLINT_MTIMECMP_HI: m->mtimecmp = (m->mtimecmp & 0x00000000FFFFFFFFull) | ((uint64_t)val << 32); break;
+                case CLINT_MTIME_LO:    m->mtime = (m->mtime & 0xFFFFFFFF00000000ull) | val; break;
+                case CLINT_MTIME_HI:    m->mtime = (m->mtime & 0x00000000FFFFFFFFull) | ((uint64_t)val << 32); break;
+                }
+            }
+
+            static uint32_t handle_uart_read(MemState* m, uint32_t addr) {
+                switch (addr) {
+                case UART_LSR: return m->uart_lsr;
+                default: return 0;
+                }
+            }
+
+            static uint32_t handle_mmio_read(MemState* m, uint32_t addr) {
+                if (is_clint(addr)) return handle_clint_read(m, addr);
+                if (is_uart(addr))  return handle_uart_read(m, addr);
+                return 0;  // PLIC/VirtIO return 0 for benchmark
+            }
+
+            static void handle_mmio_write(MemState* m, uint32_t addr, uint32_t val) {
+                if (is_clint(addr)) handle_clint_write(m, addr, val);
+                // UART/PLIC/VirtIO writes are no-ops for benchmark
+            }
+          CODE
+        end
+
+        # Batched cycle execution loop. Must appear AFTER DUT_* macros are defined.
+        def riscv_sim_run_cycles_impl
+          <<~'CODE'
+            static void run_cycles_impl(void* raw_ctx, MemState* m, uint32_t n_cycles) {
+                for (uint32_t i = 0; i < n_cycles; i++) {
+                    // --- Phase 1: CLK low, evaluate combinational ---
+                    DUT_CLK(raw_ctx) = 0;
+                    DUT_RST(raw_ctx) = 0;
+                    DUT_IRQ_SOFTWARE(raw_ctx) = m->irq_software;
+                    DUT_IRQ_TIMER(raw_ctx) = m->irq_timer;
+                    DUT_IRQ_EXTERNAL(raw_ctx) = m->irq_external;
+                    DUT_EVAL(raw_ctx);
+
+                    // Instruction page table walk
+                    DUT_INST_PTW_PTE1(raw_ctx) = read_word_le(m->data_mem, m->mem_mask, DUT_INST_PTW_ADDR1(raw_ctx));
+                    DUT_EVAL(raw_ctx);
+                    DUT_INST_PTW_PTE0(raw_ctx) = read_word_le(m->data_mem, m->mem_mask, DUT_INST_PTW_ADDR0(raw_ctx));
+                    DUT_EVAL(raw_ctx);
+
+                    // Instruction fetch
+                    DUT_INST_DATA(raw_ctx) = read_word_le(m->inst_mem, m->mem_mask, DUT_INST_ADDR(raw_ctx));
+                    DUT_EVAL(raw_ctx);
+
+                    // Data page table walk
+                    DUT_DATA_PTW_PTE1(raw_ctx) = read_word_le(m->data_mem, m->mem_mask, DUT_DATA_PTW_ADDR1(raw_ctx));
+                    DUT_EVAL(raw_ctx);
+                    DUT_DATA_PTW_PTE0(raw_ctx) = read_word_le(m->data_mem, m->mem_mask, DUT_DATA_PTW_ADDR0(raw_ctx));
+                    DUT_EVAL(raw_ctx);
+
+                    // Data memory / MMIO access
+                    uint32_t data_addr = DUT_DATA_ADDR(raw_ctx);
+                    uint32_t data_wdata = DUT_DATA_WDATA(raw_ctx);
+                    uint32_t data_we = DUT_DATA_WE(raw_ctx);
+                    uint32_t data_re = DUT_DATA_RE(raw_ctx);
+                    uint32_t data_funct3 = DUT_DATA_FUNCT3(raw_ctx);
+
+                    uint32_t rdata = 0;
+                    if (is_mmio(data_addr)) {
+                        if (data_re) rdata = handle_mmio_read(m, data_addr);
+                        if (data_we) handle_mmio_write(m, data_addr, data_wdata);
+                    } else {
+                        if (data_re) rdata = read_mem_funct3(m->data_mem, m->mem_mask, data_addr, data_funct3);
+                        if (data_we) write_mem_funct3(m->data_mem, m->mem_mask, data_addr, data_wdata, data_funct3);
+                    }
+
+                    DUT_DATA_RDATA(raw_ctx) = rdata;
+                    DUT_IRQ_SOFTWARE(raw_ctx) = m->irq_software;
+                    DUT_IRQ_TIMER(raw_ctx) = m->irq_timer;
+                    DUT_IRQ_EXTERNAL(raw_ctx) = m->irq_external;
+                    DUT_EVAL(raw_ctx);
+
+                    // --- Phase 2: CLK high (rising edge) ---
+                    DUT_CLK(raw_ctx) = 1;
+                    DUT_EVAL(raw_ctx);
+
+                    // --- Phase 3: CLK low, post-edge settle ---
+                    DUT_CLK(raw_ctx) = 0;
+                    DUT_IRQ_SOFTWARE(raw_ctx) = m->irq_software;
+                    DUT_IRQ_TIMER(raw_ctx) = m->irq_timer;
+                    DUT_IRQ_EXTERNAL(raw_ctx) = m->irq_external;
+                    DUT_EVAL(raw_ctx);
+
+                    // Post-edge instruction page table walk
+                    DUT_INST_PTW_PTE1(raw_ctx) = read_word_le(m->data_mem, m->mem_mask, DUT_INST_PTW_ADDR1(raw_ctx));
+                    DUT_EVAL(raw_ctx);
+                    DUT_INST_PTW_PTE0(raw_ctx) = read_word_le(m->data_mem, m->mem_mask, DUT_INST_PTW_ADDR0(raw_ctx));
+                    DUT_EVAL(raw_ctx);
+
+                    // Post-edge instruction fetch
+                    DUT_INST_DATA(raw_ctx) = read_word_le(m->inst_mem, m->mem_mask, DUT_INST_ADDR(raw_ctx));
+                    DUT_EVAL(raw_ctx);
+
+                    // Post-edge data page table walk
+                    DUT_DATA_PTW_PTE1(raw_ctx) = read_word_le(m->data_mem, m->mem_mask, DUT_DATA_PTW_ADDR1(raw_ctx));
+                    DUT_EVAL(raw_ctx);
+                    DUT_DATA_PTW_PTE0(raw_ctx) = read_word_le(m->data_mem, m->mem_mask, DUT_DATA_PTW_ADDR0(raw_ctx));
+                    DUT_EVAL(raw_ctx);
+
+                    // Post-edge data read
+                    data_addr = DUT_DATA_ADDR(raw_ctx);
+                    data_re = DUT_DATA_RE(raw_ctx);
+                    if (is_mmio(data_addr)) {
+                        rdata = data_re ? handle_mmio_read(m, data_addr) : 0;
+                    } else {
+                        rdata = data_re ? read_mem_funct3(m->data_mem, m->mem_mask, data_addr, DUT_DATA_FUNCT3(raw_ctx)) : 0;
+                    }
+                    DUT_DATA_RDATA(raw_ctx) = rdata;
+                    DUT_IRQ_SOFTWARE(raw_ctx) = m->irq_software;
+                    DUT_IRQ_TIMER(raw_ctx) = m->irq_timer;
+                    DUT_IRQ_EXTERNAL(raw_ctx) = m->irq_external;
+                    DUT_EVAL(raw_ctx);
+
+                    // CLINT tick
+                    m->mtime++;
+                    m->irq_timer = (m->mtime >= m->mtimecmp) ? 1 : 0;
+                    m->irq_software = (m->msip & 1) ? 1 : 0;
+                }
+            }
+          CODE
+        end
+
         def write_verilator_wrapper(cpp_file, header_file)
           header = <<~H
             #ifndef SIM_WRAPPER_H
@@ -457,12 +741,15 @@ module RHDL
             #ifdef __cplusplus
             extern "C" {
             #endif
-            void* sim_create(void);
+            void* sim_create(unsigned int mem_size);
             void sim_destroy(void* sim);
             void sim_reset(void* sim);
             void sim_eval(void* sim);
             void sim_poke(void* sim, const char* name, unsigned int value);
             unsigned int sim_peek(void* sim, const char* name);
+            void sim_write_pc(void* sim, unsigned int value);
+            void sim_load_mem(void* sim, int mem_type, const unsigned char* data, unsigned int size, unsigned int base_addr);
+            void sim_run_cycles(void* sim, unsigned int n_cycles);
             #ifdef __cplusplus
             }
             #endif
@@ -475,20 +762,54 @@ module RHDL
             #include "verilated.h"
             #include "sim_wrapper.h"
             #include <cstring>
+            #include <cstdlib>
 
             double sc_time_stamp() { return 0; }
 
+            #{riscv_sim_common_types}
+
             struct SimContext {
                 Vriscv* dut;
+                MemState mem;
             };
+
+            // Verilator DUT port access macros (lvalue-capable via struct members)
+            #define CTX(c) (static_cast<SimContext*>(c))
+            #define DUT_CLK(c)                (CTX(c)->dut->clk)
+            #define DUT_RST(c)                (CTX(c)->dut->rst)
+            #define DUT_IRQ_SOFTWARE(c)       (CTX(c)->dut->irq_software)
+            #define DUT_IRQ_TIMER(c)          (CTX(c)->dut->irq_timer)
+            #define DUT_IRQ_EXTERNAL(c)       (CTX(c)->dut->irq_external)
+            #define DUT_INST_DATA(c)          (CTX(c)->dut->inst_data)
+            #define DUT_DATA_RDATA(c)         (CTX(c)->dut->data_rdata)
+            #define DUT_DEBUG_REG_ADDR(c)     (CTX(c)->dut->debug_reg_addr)
+            #define DUT_INST_PTW_PTE0(c)      (CTX(c)->dut->inst_ptw_pte0)
+            #define DUT_INST_PTW_PTE1(c)      (CTX(c)->dut->inst_ptw_pte1)
+            #define DUT_DATA_PTW_PTE0(c)      (CTX(c)->dut->data_ptw_pte0)
+            #define DUT_DATA_PTW_PTE1(c)      (CTX(c)->dut->data_ptw_pte1)
+            #define DUT_INST_ADDR(c)          (CTX(c)->dut->inst_addr)
+            #define DUT_INST_PTW_ADDR0(c)     (CTX(c)->dut->inst_ptw_addr0)
+            #define DUT_INST_PTW_ADDR1(c)     (CTX(c)->dut->inst_ptw_addr1)
+            #define DUT_DATA_ADDR(c)          (CTX(c)->dut->data_addr)
+            #define DUT_DATA_WDATA(c)         (CTX(c)->dut->data_wdata)
+            #define DUT_DATA_WE(c)            (CTX(c)->dut->data_we)
+            #define DUT_DATA_RE(c)            (CTX(c)->dut->data_re)
+            #define DUT_DATA_FUNCT3(c)        (CTX(c)->dut->data_funct3)
+            #define DUT_DATA_PTW_ADDR0(c)     (CTX(c)->dut->data_ptw_addr0)
+            #define DUT_DATA_PTW_ADDR1(c)     (CTX(c)->dut->data_ptw_addr1)
+            #define DUT_DEBUG_PC(c)           (CTX(c)->dut->debug_pc)
+            #define DUT_EVAL(c)               (CTX(c)->dut->eval())
+
+            #{riscv_sim_run_cycles_impl}
 
             extern "C" {
 
-            void* sim_create(void) {
+            void* sim_create(unsigned int mem_size) {
                 const char* empty_args[] = {""};
                 Verilated::commandArgs(1, empty_args);
                 SimContext* ctx = new SimContext();
                 ctx->dut = new Vriscv();
+                mem_init(&ctx->mem, mem_size);
                 ctx->dut->clk = 0;
                 ctx->dut->rst = 1;
                 ctx->dut->irq_software = 0;
@@ -507,13 +828,13 @@ module RHDL
 
             void sim_destroy(void* sim) {
                 SimContext* ctx = static_cast<SimContext*>(sim);
+                mem_free(&ctx->mem);
                 delete ctx->dut;
                 delete ctx;
             }
 
             void sim_reset(void* sim) {
                 SimContext* ctx = static_cast<SimContext*>(sim);
-                // Reset sequence: clk=0,rst=1 → eval → clk=1,rst=1 → eval → clk=0,rst=0 → eval
                 ctx->dut->rst = 1;
                 ctx->dut->clk = 0;
                 ctx->dut->eval();
@@ -566,6 +887,22 @@ module RHDL
                 return 0;
             }
 
+            void sim_write_pc(void* sim, unsigned int value) {
+                SimContext* ctx = static_cast<SimContext*>(sim);
+                ctx->dut->rootp->riscv_cpu__DOT__pc_reg___05Fpc = value;
+                ctx->dut->eval();
+            }
+
+            void sim_load_mem(void* sim, int mem_type, const unsigned char* data, unsigned int size, unsigned int base_addr) {
+                SimContext* ctx = static_cast<SimContext*>(sim);
+                load_mem(&ctx->mem, mem_type, data, size, base_addr);
+            }
+
+            void sim_run_cycles(void* sim, unsigned int n_cycles) {
+                SimContext* ctx = static_cast<SimContext*>(sim);
+                run_cycles_impl(ctx, &ctx->mem, n_cycles);
+            }
+
             } // extern "C"
           CPP
 
@@ -580,8 +917,6 @@ module RHDL
           offsets = {}
           mod['states'].each { |s| offsets[s['name']] = s['offset'] }
 
-          # Determine accessor type for each signal based on width
-          # Build offset map - generate defines for known signals
           signal_defines = []
           signal_defines << "#define STATE_SIZE #{mod['numStateBytes']}"
           offsets.each { |name, offset| signal_defines << "#define OFF_#{name.upcase} #{offset}" }
@@ -595,8 +930,11 @@ module RHDL
 
             #{signal_defines.join("\n")}
 
+            #{riscv_sim_common_types}
+
             struct SimContext {
                 uint8_t state[STATE_SIZE];
+                MemState mem;
             };
 
             static inline void set_u8(uint8_t* s, int o, uint8_t v) { s[o] = v; }
@@ -610,11 +948,41 @@ module RHDL
             static inline void set_u5(uint8_t* s, int o, uint8_t v) { s[o] = v & 0x1F; }
             static inline uint8_t get_u5(uint8_t* s, int o) { return s[o] & 0x1F; }
 
+            // Arcilator DUT port access macros (lvalue-capable via state buffer casts)
+            #define CTX(c)                    (static_cast<SimContext*>(c))
+            #define DUT_CLK(c)                (CTX(c)->state[OFF_CLK])
+            #define DUT_RST(c)                (CTX(c)->state[OFF_RST])
+            #define DUT_IRQ_SOFTWARE(c)       (CTX(c)->state[OFF_IRQ_SOFTWARE])
+            #define DUT_IRQ_TIMER(c)          (CTX(c)->state[OFF_IRQ_TIMER])
+            #define DUT_IRQ_EXTERNAL(c)       (CTX(c)->state[OFF_IRQ_EXTERNAL])
+            #define DUT_INST_DATA(c)          (*(uint32_t*)(&CTX(c)->state[OFF_INST_DATA]))
+            #define DUT_DATA_RDATA(c)         (*(uint32_t*)(&CTX(c)->state[OFF_DATA_RDATA]))
+            #define DUT_DEBUG_REG_ADDR(c)     (CTX(c)->state[OFF_DEBUG_REG_ADDR])
+            #define DUT_INST_PTW_PTE0(c)      (*(uint32_t*)(&CTX(c)->state[OFF_INST_PTW_PTE0]))
+            #define DUT_INST_PTW_PTE1(c)      (*(uint32_t*)(&CTX(c)->state[OFF_INST_PTW_PTE1]))
+            #define DUT_DATA_PTW_PTE0(c)      (*(uint32_t*)(&CTX(c)->state[OFF_DATA_PTW_PTE0]))
+            #define DUT_DATA_PTW_PTE1(c)      (*(uint32_t*)(&CTX(c)->state[OFF_DATA_PTW_PTE1]))
+            #define DUT_INST_ADDR(c)          (*(uint32_t*)(&CTX(c)->state[OFF_INST_ADDR]))
+            #define DUT_INST_PTW_ADDR0(c)     (*(uint32_t*)(&CTX(c)->state[OFF_INST_PTW_ADDR0]))
+            #define DUT_INST_PTW_ADDR1(c)     (*(uint32_t*)(&CTX(c)->state[OFF_INST_PTW_ADDR1]))
+            #define DUT_DATA_ADDR(c)          (*(uint32_t*)(&CTX(c)->state[OFF_DATA_ADDR]))
+            #define DUT_DATA_WDATA(c)         (*(uint32_t*)(&CTX(c)->state[OFF_DATA_WDATA]))
+            #define DUT_DATA_WE(c)            (CTX(c)->state[OFF_DATA_WE])
+            #define DUT_DATA_RE(c)            (CTX(c)->state[OFF_DATA_RE])
+            #define DUT_DATA_FUNCT3(c)        (CTX(c)->state[OFF_DATA_FUNCT3])
+            #define DUT_DATA_PTW_ADDR0(c)     (*(uint32_t*)(&CTX(c)->state[OFF_DATA_PTW_ADDR0]))
+            #define DUT_DATA_PTW_ADDR1(c)     (*(uint32_t*)(&CTX(c)->state[OFF_DATA_PTW_ADDR1]))
+            #define DUT_DEBUG_PC(c)           (*(uint32_t*)(&CTX(c)->state[OFF_DEBUG_PC]))
+            #define DUT_EVAL(c)               riscv_cpu_eval(CTX(c)->state)
+
+            #{riscv_sim_run_cycles_impl}
+
             extern "C" {
 
-            void* sim_create(void) {
+            void* sim_create(unsigned int mem_size) {
                 SimContext* ctx = new SimContext();
                 memset(ctx->state, 0, sizeof(ctx->state));
+                mem_init(&ctx->mem, mem_size);
                 set_bit(ctx->state, OFF_CLK, 0);
                 set_bit(ctx->state, OFF_RST, 1);
                 set_bit(ctx->state, OFF_IRQ_SOFTWARE, 0);
@@ -631,7 +999,11 @@ module RHDL
                 return ctx;
             }
 
-            void sim_destroy(void* sim) { delete static_cast<SimContext*>(sim); }
+            void sim_destroy(void* sim) {
+                SimContext* ctx = static_cast<SimContext*>(sim);
+                mem_free(&ctx->mem);
+                delete ctx;
+            }
 
             void sim_reset(void* sim) {
                 SimContext* ctx = static_cast<SimContext*>(sim);
@@ -687,6 +1059,24 @@ module RHDL
                 return 0;
             }
 
+            void sim_write_pc(void* sim, unsigned int value) {
+                SimContext* ctx = static_cast<SimContext*>(sim);
+                #ifdef OFF_PC_REG__PC
+                set_u32(ctx->state, OFF_PC_REG__PC, value);
+                #endif
+                riscv_cpu_eval(ctx->state);
+            }
+
+            void sim_load_mem(void* sim, int mem_type, const unsigned char* data, unsigned int size, unsigned int base_addr) {
+                SimContext* ctx = static_cast<SimContext*>(sim);
+                load_mem(&ctx->mem, mem_type, data, size, base_addr);
+            }
+
+            void sim_run_cycles(void* sim, unsigned int n_cycles) {
+                SimContext* ctx = static_cast<SimContext*>(sim);
+                run_cycles_impl(ctx, &ctx->mem, n_cycles);
+            }
+
             } // extern "C"
           CPP
 
@@ -698,7 +1088,9 @@ module RHDL
         def load_shared_library
           @lib = Fiddle.dlopen(@lib_path)
 
-          @sim_create_fn = Fiddle::Function.new(@lib['sim_create'], [], Fiddle::TYPE_VOIDP)
+          @sim_create_fn = Fiddle::Function.new(
+            @lib['sim_create'], [Fiddle::TYPE_INT], Fiddle::TYPE_VOIDP
+          )
           @sim_destroy_fn = Fiddle::Function.new(@lib['sim_destroy'], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
           @sim_reset_fn = Fiddle::Function.new(@lib['sim_reset'], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
           @sim_eval_fn = Fiddle::Function.new(@lib['sim_eval'], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
@@ -712,18 +1104,36 @@ module RHDL
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_INT
           )
+          @sim_write_pc_fn = Fiddle::Function.new(
+            @lib['sim_write_pc'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
+            Fiddle::TYPE_VOID
+          )
+          @sim_load_mem_fn = Fiddle::Function.new(
+            @lib['sim_load_mem'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_INT],
+            Fiddle::TYPE_VOID
+          )
+          @sim_run_cycles_fn = Fiddle::Function.new(
+            @lib['sim_run_cycles'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
+            Fiddle::TYPE_VOID
+          )
 
-          @sim_ctx = @sim_create_fn.call
+          @sim_ctx = @sim_create_fn.call(@mem_size)
+          @batched_mode = false
         end
 
         # ---------- CPU interface ----------
 
         def poke_cpu(name, value)
-          @sim_poke_fn.call(@sim_ctx, name.to_s, value.to_i)
+          v = value.to_i & 0xFFFF_FFFF
+          v -= 0x1_0000_0000 if v > 0x7FFF_FFFF
+          @sim_poke_fn.call(@sim_ctx, name.to_s, v)
         end
 
         def peek_cpu(name)
-          @sim_peek_fn.call(@sim_ctx, name.to_s)
+          @sim_peek_fn.call(@sim_ctx, name.to_s) & 0xFFFF_FFFF
         end
 
         def eval_cpu
@@ -948,6 +1358,27 @@ module RHDL
           poke_cpu(:irq_software, (@irq_software | @clint_irq_software) != 0 ? 1 : 0)
           poke_cpu(:irq_timer, (@irq_timer | @clint_irq_timer) != 0 ? 1 : 0)
           poke_cpu(:irq_external, (@irq_external | @plic_irq_external) != 0 ? 1 : 0)
+        end
+
+        # ---------- Memory sync ----------
+
+        def sync_mem_to_native(mem, mem_type)
+          backing = mem.instance_variable_get(:@mem)
+          if backing.is_a?(Hash)
+            return if backing.empty?
+
+            min_addr = backing.keys.min
+            max_addr = backing.keys.max
+            length = max_addr - min_addr + 1
+            buf = "\0".b * length
+            backing.each { |addr, byte| buf.setbyte(addr - min_addr, byte) }
+            ptr = Fiddle::Pointer.to_ptr(buf)
+            @sim_load_mem_fn.call(@sim_ctx, mem_type, ptr, length, min_addr)
+          else
+            buf = backing.pack('C*')
+            ptr = Fiddle::Pointer.to_ptr(buf)
+            @sim_load_mem_fn.call(@sim_ctx, mem_type, ptr, buf.size, 0)
+          end
         end
 
         # ---------- Utilities ----------
