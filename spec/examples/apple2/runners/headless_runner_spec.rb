@@ -262,6 +262,65 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
     end
   end
 
+  describe 'Arcilator mode' do
+    before(:each) do
+      skip 'Arcilator not available' unless arcilator_available?
+    end
+
+    it 'creates arcilator mode runner' do
+      runner = described_class.new(mode: :arcilator)
+      expect(runner.mode).to eq(:arcilator)
+      expect(runner.simulator_type).to eq(:hdl_arcilator)
+    end
+
+    it 'sets native flag to true for arcilator' do
+      runner = described_class.new(mode: :arcilator)
+      expect(runner.native?).to be true
+    end
+
+    it 'loads demo program into Arcilator memory' do
+      runner = described_class.with_demo(mode: :arcilator)
+      program_area = runner.memory_sample[:program_area]
+      expect(program_area.any? { |b| b != 0 }).to be true
+    end
+
+    it 'sets PC near $0800 for demo program' do
+      runner = described_class.with_demo(mode: :arcilator)
+      runner.reset
+      pc = runner.cpu_state[:pc]
+      # PC should be near $0800 (2048) - allowing a few bytes for instruction fetch
+      expect(pc).to be >= 0x0800
+      expect(pc).to be <= 0x0820
+    end
+
+    context 'with karateka' do
+      let(:karateka_memdump) { File.expand_path('../../../../../examples/apple2/software/disks/karateka_mem.bin', __FILE__) }
+
+      before(:each) do
+        skip 'Karateka memdump not available' unless File.exist?(karateka_memdump)
+      end
+
+      it 'sets PC near $B82A for karateka' do
+        runner = described_class.new(mode: :arcilator)
+        runner.load_memdump(karateka_memdump, pc: 0xB82A, use_appleiigo: true)
+        runner.reset
+        pc = runner.cpu_state[:pc]
+        # PC should be near $B82A - allowing a few bytes for instruction fetch
+        expect(pc).to be >= 0xB82A
+        expect(pc).to be <= 0xB840
+      end
+
+      it 'sets reset vector to $B82A for karateka' do
+        runner = described_class.new(mode: :arcilator)
+        runner.load_memdump(karateka_memdump, pc: 0xB82A, use_appleiigo: true)
+        reset_vector = runner.memory_sample[:reset_vector]
+        # Reset vector should point to $B82A
+        expect(reset_vector[0]).to eq(0x2A)  # Low byte
+        expect(reset_vector[1]).to eq(0xB8)  # High byte
+      end
+    end
+  end
+
   describe 'runner interface' do
     it 'returns all cpu_state fields' do
       runner = described_class.with_demo
@@ -324,5 +383,10 @@ RSpec.describe RHDL::Examples::Apple2::HeadlessRunner, :slow do
   # Check if Verilator is available
   def verilator_available?
     system('which verilator > /dev/null 2>&1')
+  end
+
+  # Check if Arcilator is available
+  def arcilator_available?
+    %w[firtool arcilator llc].all? { |cmd| system("which #{cmd} > /dev/null 2>&1") }
   end
 end

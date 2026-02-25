@@ -37,6 +37,7 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
       expect { described_class.new(mode: :ir) }.not_to raise_error
       expect { described_class.new(mode: :netlist) }.not_to raise_error
       expect { described_class.new(mode: :verilog) }.not_to raise_error
+      expect { described_class.new(mode: :arcilator) }.not_to raise_error
     end
 
     it 'can be instantiated with sim option' do
@@ -58,6 +59,9 @@ RSpec.describe RHDL::CLI::Tasks::Apple2Task do
 
       # verilog mode (uses Verilator, sim option not applicable)
       expect { described_class.new(mode: :verilog) }.not_to raise_error
+
+      # arcilator mode (uses CIRCT Arcilator, sim option not applicable)
+      expect { described_class.new(mode: :arcilator) }.not_to raise_error
     end
 
     it 'can be instantiated with program option' do
