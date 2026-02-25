@@ -58,7 +58,8 @@ module RHDL
           module_keyword = is_public ? "public module" : "module"
           lines << "  #{module_keyword} #{sanitize(module_def.name)}:"
 
-          # Build set of output port names
+          # Build set of all port names (for collision detection)
+          all_port_names = module_def.ports.map { |p| sanitize(p.name) }.to_set
           output_ports = module_def.ports.select { |p| p.direction == :out }.map(&:name).to_set
           output_widths = module_def.ports.select { |p| p.direction == :out }.map { |p| [p.name, p.width] }.to_h
 
@@ -69,32 +70,63 @@ module RHDL
           seq_targets = collect_seq_targets(module_def)
           seq_output_targets = seq_targets.select { |t| output_ports.include?(t) }
 
+          # Track port-colliding registers (handled by seq_output_targets instead)
+          port_colliding_regs = Set.new
+          module_def.regs.each do |reg|
+            sname = sanitize(reg.name)
+            port_colliding_regs.add(reg.name) if all_port_names.include?(sname)
+          end
+
           # Collect memory reads to set up read ports
           memory_reads = collect_memory_reads(module_def)
 
           # Ports
           module_def.ports.each do |port|
             dir = port.direction == :in ? "input" : "output"
-            # Use Clock type for clock signals
-            type = clock_port?(port.name) ? "Clock" : type_decl(port.width)
-            lines << "    #{dir} #{sanitize(port.name)}: #{type}"
+            lines << "    #{dir} #{sanitize(port.name)}: #{type_decl(port.width)}"
           end
 
           lines << "" unless module_def.ports.empty?
 
-          # Internal wires (nets)
+          # Build set of register names for deduplication
+          reg_names_set = module_def.regs.map { |r| sanitize(r.name) }.to_set
+
+          # Internal wires (nets) - skip duplicates and names that are registers
+          emitted_names = all_port_names.dup
           module_def.nets.each do |net|
-            lines << "    wire #{sanitize(net.name)}: #{type_decl(net.width)}"
+            sname = sanitize(net.name)
+            next if emitted_names.include?(sname)
+            next if reg_names_set.include?(sname)  # register declaration takes precedence
+            emitted_names.add(sname)
+            lines << "    wire #{sname}: #{type_decl(net.width)}"
           end
 
-          # Explicit registers from IR
+          # Explicit registers from IR (skip those that collide with port names;
+          # seq_output_targets creates _reg suffixed registers for those)
           module_def.regs.each do |reg|
+            sname = sanitize(reg.name)
+            next if port_colliding_regs.include?(reg.name)
+            next if emitted_names.include?(sname)
+            emitted_names.add(sname)
             reg_clock = find_clock_for_reg(module_def, reg.name) || clock
             if reg_clock
-              lines << "    reg #{sanitize(reg.name)}: #{type_decl(reg.width)}, #{sanitize(reg_clock)}"
+              lines << "    reg #{sname}: #{type_decl(reg.width)}, #{clock_expr(reg_clock)}"
             else
-              lines << "    wire #{sanitize(reg.name)}: #{type_decl(reg.width)}"
+              lines << "    wire #{sname}: #{type_decl(reg.width)}"
             end
+          end
+
+          # Auto-declare any signals referenced in expressions but not yet declared
+          all_refs = collect_all_signal_refs(module_def)
+          mem_names = module_def.memories.map { |m| sanitize(m.name) }.to_set
+          auto_wires = []
+          all_refs.each do |ref_name|
+            sname = sanitize(ref_name)
+            next if emitted_names.include?(sname)
+            next if mem_names.include?(sname)
+            emitted_names.add(sname)
+            auto_wires << sname
+            lines << "    wire #{sname}: UInt<16>"
           end
 
           # Create internal registers for output ports that have sequential assignments
@@ -102,7 +134,7 @@ module RHDL
             width = output_widths[target] || 1
             reg_name = "#{target}_reg"
             if clock
-              lines << "    reg #{sanitize(reg_name)}: #{type_decl(width)}, #{sanitize(clock)}"
+              lines << "    reg #{sanitize(reg_name)}: #{type_decl(width)}, #{clock_expr(clock)}"
             end
           end
 
@@ -164,11 +196,27 @@ module RHDL
             read_port = reads_per_mem[mem_key] > 1 ? "read#{idx}" : "read"
 
             # Use real clock if available, otherwise fake clock
-            clk_signal = clock ? sanitize(clock) : "_fake_clk"
+            clk_signal = clock ? clock_expr(clock) : "_fake_clk"
             lines << "    connect #{mem_name}.#{read_port}.clk, #{clk_signal}"
             lines << "    connect #{mem_name}.#{read_port}.en, UInt<1>(1)"
             lines << "    connect #{mem_name}.#{read_port}.addr, #{expr(mr.addr)}"
             mem_read_index[mem_key] += 1
+          end
+
+          # Initialize auto-declared wires to zero (prevent uninitialized sink errors)
+          auto_wires.each do |sname|
+            lines << "    connect #{sname}, UInt<16>(0)"
+          end
+
+          # Connect unread memory ports to defaults
+          read_mem_names = memory_reads.map { |mr| mr.memory.to_s }.to_set
+          module_def.memories.each do |mem|
+            next if read_mem_names.include?(mem.name.to_s)
+            mem_name = sanitize(mem.name)
+            clk_signal = clock ? clock_expr(clock) : "asClock(UInt<1>(0))"
+            lines << "    connect #{mem_name}.read.clk, #{clk_signal}"
+            lines << "    connect #{mem_name}.read.en, UInt<1>(0)"
+            lines << "    connect #{mem_name}.read.addr, UInt<1>(0)"
           end
 
           # Continuous assignments - use memory read port data
@@ -187,12 +235,14 @@ module RHDL
           module_def.processes.each do |process|
             if process.clocked
               process.statements.each do |stmt|
-                lines.concat(statement(stmt, indent: 4, output_regs: seq_output_targets))
+                lines.concat(statement(stmt, indent: 4, output_regs: seq_output_targets,
+                                       memory_reads: memory_reads, mem_read_index: mem_read_index))
               end
             else
               # Combinational process - convert to assignments
               process.statements.each do |stmt|
-                lines.concat(statement(stmt, indent: 4, output_regs: Set.new))
+                lines.concat(statement(stmt, indent: 4, output_regs: Set.new,
+                                       memory_reads: memory_reads, mem_read_index: mem_read_index))
               end
             end
           end
@@ -210,7 +260,7 @@ module RHDL
             mem = module_def.memories.find { |m| m.name == wp.memory }
             mem_width = mem&.width || 8
 
-            lines << "    connect #{mem_name}.#{write_port}.clk, #{sanitize(wp.clock)}"
+            lines << "    connect #{mem_name}.#{write_port}.clk, #{clock_expr(wp.clock)}"
             lines << "    connect #{mem_name}.#{write_port}.en, #{expr(wp.enable)}"
             lines << "    connect #{mem_name}.#{write_port}.addr, #{expr(wp.addr)}"
             lines << "    connect #{mem_name}.#{write_port}.mask, UInt<#{mem_width}>(#{(1 << mem_width) - 1})"
@@ -399,8 +449,8 @@ module RHDL
           when :* then "mul(#{left}, #{right})"
           when :/ then "div(#{left}, #{right})"
           when :% then "rem(#{left}, #{right})"
-          when :<< then "shl(#{left}, #{right})"
-          when :>> then "shr(#{left}, #{right})"
+          when :<< then "dshl(#{left}, #{right})"
+          when :>> then "dshr(#{left}, #{right})"
           when :== then "eq(#{left}, #{right})"
           when :!= then "neq(#{left}, #{right})"
           when :< then "lt(#{left}, #{right})"
@@ -433,6 +483,58 @@ module RHDL
           end
         end
 
+        # Collect all signal names referenced in expressions throughout the module
+        def collect_all_signal_refs(module_def)
+          refs = Set.new
+          module_def.assigns.each do |a|
+            refs.add(a.target.to_s)
+            collect_expr_signal_refs(a.expr, refs)
+          end
+          module_def.processes.each do |p|
+            p.statements.each { |s| collect_stmt_signal_refs(s, refs) }
+          end
+          module_def.write_ports.each do |wp|
+            collect_expr_signal_refs(wp.enable, refs)
+            collect_expr_signal_refs(wp.addr, refs)
+            collect_expr_signal_refs(wp.data, refs)
+          end
+          refs
+        end
+
+        def collect_expr_signal_refs(expr_node, refs)
+          case expr_node
+          when IR::Signal then refs.add(expr_node.name.to_s)
+          when IR::UnaryOp then collect_expr_signal_refs(expr_node.operand, refs)
+          when IR::BinaryOp
+            collect_expr_signal_refs(expr_node.left, refs)
+            collect_expr_signal_refs(expr_node.right, refs)
+          when IR::Mux
+            collect_expr_signal_refs(expr_node.condition, refs)
+            collect_expr_signal_refs(expr_node.when_true, refs)
+            collect_expr_signal_refs(expr_node.when_false, refs)
+          when IR::MemoryRead then collect_expr_signal_refs(expr_node.addr, refs)
+          when IR::Slice then collect_expr_signal_refs(expr_node.base, refs)
+          when IR::Resize then collect_expr_signal_refs(expr_node.expr, refs)
+          when IR::Concat then expr_node.parts.each { |p| collect_expr_signal_refs(p, refs) }
+          when IR::Case
+            collect_expr_signal_refs(expr_node.selector, refs)
+            expr_node.cases.each { |_v, b| collect_expr_signal_refs(b, refs) }
+            collect_expr_signal_refs(expr_node.default, refs) if expr_node.default
+          end
+        end
+
+        def collect_stmt_signal_refs(stmt, refs)
+          case stmt
+          when IR::SeqAssign
+            refs.add(stmt.target.to_s)
+            collect_expr_signal_refs(stmt.expr, refs)
+          when IR::If
+            collect_expr_signal_refs(stmt.condition, refs)
+            stmt.then_statements.each { |s| collect_stmt_signal_refs(s, refs) }
+            stmt.else_statements.each { |s| collect_stmt_signal_refs(s, refs) }
+          end
+        end
+
         def find_clock_for_reg(module_def, reg_name)
           module_def.processes.each do |process|
             return process.clock if process.clocked && process.clock
@@ -441,29 +543,36 @@ module RHDL
         end
 
         def clock_port?(name)
-          name.to_s == "clk" || name.to_s == "clock"
+          name.to_s == "clk" || name.to_s == "clock" ||
+            name.to_s == "clk_14m"
+        end
+
+        # Returns a FIRRTL clock expression, always wrapping with asClock()
+        # since all signals are declared as UInt<1>, not Clock type
+        def clock_expr(name)
+          "asClock(#{sanitize(name)})"
         end
 
         def type_decl(width)
           "UInt<#{width}>"
         end
 
-        def statement(stmt, indent:, output_regs: Set.new)
+        def statement(stmt, indent:, output_regs: Set.new, memory_reads: [], mem_read_index: Hash.new(0))
           pad = " " * indent
           case stmt
           when IR::SeqAssign
             # Rewrite target to use internal register if it's an output
             target = output_regs.include?(stmt.target) ? "#{stmt.target}_reg" : stmt.target
-            ["#{pad}connect #{sanitize(target)}, #{expr(stmt.expr, output_regs: output_regs)}"]
+            ["#{pad}connect #{sanitize(target)}, #{expr_with_mem_reads(stmt.expr, memory_reads, mem_read_index, output_regs: output_regs)}"]
           when IR::MemoryWrite
             ["#{pad}connect #{sanitize(stmt.memory)}[#{expr(stmt.addr)}], #{expr(stmt.data)}"]
           when IR::If
             lines = []
-            lines << "#{pad}when #{expr(stmt.condition)}:"
-            stmt.then_statements.each { |s| lines.concat(statement(s, indent: indent + 2, output_regs: output_regs)) }
+            lines << "#{pad}when #{expr_with_mem_reads(stmt.condition, memory_reads, mem_read_index, output_regs: output_regs)}:"
+            stmt.then_statements.each { |s| lines.concat(statement(s, indent: indent + 2, output_regs: output_regs, memory_reads: memory_reads, mem_read_index: mem_read_index)) }
             unless stmt.else_statements.empty?
               lines << "#{pad}else:"
-              stmt.else_statements.each { |s| lines.concat(statement(s, indent: indent + 2, output_regs: output_regs)) }
+              stmt.else_statements.each { |s| lines.concat(statement(s, indent: indent + 2, output_regs: output_regs, memory_reads: memory_reads, mem_read_index: mem_read_index)) }
             end
             lines
           else
@@ -533,9 +642,9 @@ module RHDL
           when :%
             "rem(#{left}, #{right})"
           when :<<
-            "shl(#{left}, #{right})"
+            "dshl(#{left}, #{right})"
           when :>>
-            "shr(#{left}, #{right})"
+            "dshr(#{left}, #{right})"
           when :==
             "eq(#{left}, #{right})"
           when :!=
