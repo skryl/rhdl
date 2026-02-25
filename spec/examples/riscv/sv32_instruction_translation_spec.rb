@@ -58,6 +58,14 @@ RSpec.shared_examples 'sv32 instruction translation and faults' do |pipeline:|
     write_data_word(cpu, l0_pa + (1 * 4), pte_leaf(text_ppn, r: true, w: false, x: true))
 
     main_program = [
+      # M-mode: switch to S-mode (translation only applies in S/U-mode)
+      asm.lui(1, 0x1),             # x1 = 0x1000
+      asm.addi(1, 1, -2048),       # x1 = 0x800 (MPP=S)
+      asm.csrrw(0, 0x300, 1),      # mstatus.MPP = S
+      asm.addi(1, 0, 0x18),        # x1 = S-mode entry point
+      asm.csrrw(0, 0x341, 1),      # mepc = 0x18
+      asm.mret,                    # switch to S-mode
+      # S-mode code at 0x18:
       asm.lui(1, 0x80000),         # x1 = satp mode bit
       asm.addi(1, 1, root_ppn),    # x1 = satp(mode=1, ppn=root)
       asm.csrrw(0, 0x180, 1),      # satp = x1
@@ -75,7 +83,7 @@ RSpec.shared_examples 'sv32 instruction translation and faults' do |pipeline:|
     cpu.load_program(main_program, 0)
     cpu.load_program(translated_page_program, text_pa)
     cpu.reset!
-    cpu.run_cycles(is_pipeline ? 96 : 40)
+    cpu.run_cycles(is_pipeline ? 128 : 56)
 
     expect(cpu.read_reg(10)).to eq(42)
   end
@@ -93,6 +101,14 @@ RSpec.shared_examples 'sv32 instruction translation and faults' do |pipeline:|
     main_program = [
       asm.addi(1, 0, 0x200),       # x1 = mtvec handler
       asm.csrrw(0, 0x305, 1),      # mtvec = x1
+      # Switch to S-mode (translation only applies in S/U-mode)
+      asm.lui(1, 0x1),             # x1 = 0x1000
+      asm.addi(1, 1, -2048),       # x1 = 0x800 (MPP=S)
+      asm.csrrw(0, 0x300, 1),      # mstatus.MPP = S
+      asm.addi(1, 0, 0x20),        # x1 = S-mode entry point
+      asm.csrrw(0, 0x341, 1),      # mepc = 0x20
+      asm.mret,                    # switch to S-mode
+      # S-mode code at 0x20:
       asm.lui(1, 0x80000),         # x1 = satp mode bit
       asm.addi(1, 1, root_ppn),    # x1 = satp(mode=1, ppn=root)
       asm.csrrw(0, 0x180, 1),      # satp = x1
@@ -111,7 +127,7 @@ RSpec.shared_examples 'sv32 instruction translation and faults' do |pipeline:|
     cpu.load_program(main_program, 0)
     cpu.load_program(trap_handler, 0x200)
     cpu.reset!
-    cpu.run_cycles(is_pipeline ? 112 : 48)
+    cpu.run_cycles(is_pipeline ? 160 : 64)
 
     expect(cpu.read_reg(10)).to eq(12)
     expect(cpu.read_reg(11)).to eq(0x1000)

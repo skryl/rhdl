@@ -275,6 +275,14 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
     pte_leaf_rw = ((data_ppn & 0xFFFFF) << 10) | 0x7
 
     program = [
+      # M-mode: switch to S-mode (translation only applies in S/U-mode)
+      asm.lui(1, 0x1),
+      asm.addi(1, 1, -2048),
+      asm.csrrw(0, 0x300, 1),
+      asm.addi(1, 0, 0x18),
+      asm.csrrw(0, 0x341, 1),
+      asm.mret,
+      # S-mode at 0x18:
       asm.lui(1, 0x80000),
       asm.addi(1, 1, root_ppn),
       asm.csrrw(0, 0x180, 1),  # satp
@@ -294,7 +302,7 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
     write_data_word(single, data_pa, 0xA5A55A5A)
     single.load_program(program, 0)
     single.reset!
-    single.run_cycles(28)
+    single.run_cycles(44)
 
     pipeline = build_pipeline
     write_data_word(pipeline, root_pa, pte_pointer)
@@ -303,7 +311,7 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
     write_data_word(pipeline, data_pa, 0xA5A55A5A)
     pipeline.load_program(program, 0)
     pipeline.reset!
-    pipeline.run_cycles(72)
+    pipeline.run_cycles(108)
 
     (0..31).each do |idx|
       expect(pipeline.read_reg(idx)).to eq(single.read_reg(idx)), "register x#{idx} mismatch"
@@ -322,6 +330,14 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
     main_program = [
       asm.addi(1, 0, 0x200),   # mtvec
       asm.csrrw(0, 0x305, 1),
+      # Switch to S-mode (translation only applies in S/U-mode)
+      asm.lui(1, 0x1),
+      asm.addi(1, 1, -2048),
+      asm.csrrw(0, 0x300, 1),
+      asm.addi(1, 0, 0x20),
+      asm.csrrw(0, 0x341, 1),
+      asm.mret,
+      # S-mode at 0x20:
       asm.lui(1, 0x80000),
       asm.addi(1, 1, root_ppn),
       asm.csrrw(0, 0x180, 1),  # satp
@@ -345,7 +361,7 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
     single.load_program(main_program, 0)
     single.load_program(trap_handler, 0x200)
     single.reset!
-    single.run_cycles(44)
+    single.run_cycles(64)
 
     pipeline = build_pipeline
     write_data_word(pipeline, root_pa, pte_pointer)
@@ -353,7 +369,7 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
     pipeline.load_program(main_program, 0)
     pipeline.load_program(trap_handler, 0x200)
     pipeline.reset!
-    pipeline.run_cycles(96)
+    pipeline.run_cycles(136)
 
     expect(single.read_reg(10)).to eq(13)
     expect(single.read_reg(11)).to eq(0x1000)
@@ -373,6 +389,14 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
     pte_leaf_text_x = ((text_ppn & 0xFFFFF) << 10) | 0xB
 
     main_program = [
+      # M-mode: switch to S-mode (translation only applies in S/U-mode)
+      asm.lui(1, 0x1),
+      asm.addi(1, 1, -2048),
+      asm.csrrw(0, 0x300, 1),
+      asm.addi(1, 0, 0x18),
+      asm.csrrw(0, 0x341, 1),
+      asm.mret,
+      # S-mode at 0x18:
       asm.lui(1, 0x80000),
       asm.addi(1, 1, root_ppn),
       asm.csrrw(0, 0x180, 1),   # satp
@@ -395,7 +419,7 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
     single.load_program(main_program, 0)
     single.load_program(translated_page_program, text_pa)
     single.reset!
-    single.run_cycles(40)
+    single.run_cycles(56)
 
     pipeline = build_pipeline
     write_data_word(pipeline, root_pa, pte_pointer)
@@ -404,7 +428,7 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
     pipeline.load_program(main_program, 0)
     pipeline.load_program(translated_page_program, text_pa)
     pipeline.reset!
-    pipeline.run_cycles(104)
+    pipeline.run_cycles(140)
 
     (0..31).each do |idx|
       expect(pipeline.read_reg(idx)).to eq(single.read_reg(idx)), "register x#{idx} mismatch"
@@ -422,6 +446,14 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
     main_program = [
       asm.addi(1, 0, 0x200),    # mtvec
       asm.csrrw(0, 0x305, 1),
+      # Switch to S-mode (translation only applies in S/U-mode)
+      asm.lui(1, 0x1),
+      asm.addi(1, 1, -2048),
+      asm.csrrw(0, 0x300, 1),
+      asm.addi(1, 0, 0x20),
+      asm.csrrw(0, 0x341, 1),
+      asm.mret,
+      # S-mode at 0x20:
       asm.lui(1, 0x80000),
       asm.addi(1, 1, root_ppn),
       asm.csrrw(0, 0x180, 1),   # satp
@@ -444,7 +476,7 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
     single.load_program(main_program, 0)
     single.load_program(trap_handler, 0x200)
     single.reset!
-    single.run_cycles(52)
+    single.run_cycles(72)
 
     pipeline = build_pipeline
     write_data_word(pipeline, root_pa, pte_pointer)
@@ -452,7 +484,7 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
     pipeline.load_program(main_program, 0)
     pipeline.load_program(trap_handler, 0x200)
     pipeline.reset!
-    pipeline.run_cycles(120)
+    pipeline.run_cycles(160)
 
     expect(single.read_reg(10)).to eq(12)
     expect(single.read_reg(11)).to eq(0x1000)
@@ -596,6 +628,14 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
     pte_data_a = ((data_a_ppn & 0xFFFFF) << 10) | 0x7
     pte_data_b = ((data_b_ppn & 0xFFFFF) << 10) | 0x7
     program = [
+      # M-mode: switch to S-mode (translation only applies in S/U-mode)
+      asm.lui(1, 0x1),
+      asm.addi(1, 1, -2048),
+      asm.csrrw(0, 0x300, 1),
+      asm.addi(1, 0, 0x18),
+      asm.csrrw(0, 0x341, 1),
+      asm.mret,
+      # S-mode at 0x18:
       asm.lui(1, 0x80000),
       asm.addi(1, 1, root_ppn),
       asm.csrrw(0, 0x180, 1),
@@ -629,7 +669,7 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
 
       cycles = 0
       until cpu.read_reg(10) == 0x1111_1111
-        raise 'timeout waiting for x10 first load' if cycles >= 180 * max_scale
+        raise 'timeout waiting for x10 first load' if cycles >= 220 * max_scale
         cpu.clock_cycle
         cycles += 1
       end
@@ -637,14 +677,14 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
 
       cycles = 0
       until cpu.read_reg(11) != 0
-        raise 'timeout waiting for x11 second load' if cycles >= 220 * max_scale
+        raise 'timeout waiting for x11 second load' if cycles >= 260 * max_scale
         cpu.clock_cycle
         cycles += 1
       end
 
       cycles = 0
       until cpu.read_reg(12) != 0
-        raise 'timeout waiting for x12 third load' if cycles >= 280 * max_scale
+        raise 'timeout waiting for x12 third load' if cycles >= 320 * max_scale
         cpu.clock_cycle
         cycles += 1
       end
@@ -675,6 +715,14 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
     pte_text_a = ((text_a_ppn & 0xFFFFF) << 10) | 0xB
     pte_text_b = ((text_b_ppn & 0xFFFFF) << 10) | 0xB
     main = [
+      # M-mode: switch to S-mode (translation only applies in S/U-mode)
+      asm.lui(1, 0x1),
+      asm.addi(1, 1, -2048),
+      asm.csrrw(0, 0x300, 1),
+      asm.addi(1, 0, 0x18),
+      asm.csrrw(0, 0x341, 1),
+      asm.mret,
+      # S-mode at 0x18:
       asm.lui(1, 0x80000),
       asm.addi(1, 1, root_ppn),
       asm.csrrw(0, 0x180, 1),
@@ -722,7 +770,7 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
 
       cycles = 0
       until cpu.read_reg(10) == 1
-        raise 'timeout waiting for first call' if cycles >= 240 * max_scale
+        raise 'timeout waiting for first call' if cycles >= 280 * max_scale
         cpu.clock_cycle
         cycles += 1
       end
@@ -730,14 +778,14 @@ RSpec.describe 'RISC-V single-cycle vs pipelined equivalence', timeout: 30 do
 
       cycles = 0
       until cpu.read_reg(10) >= 2
-        raise 'timeout waiting for second call' if cycles >= 320 * max_scale
+        raise 'timeout waiting for second call' if cycles >= 360 * max_scale
         cpu.clock_cycle
         cycles += 1
       end
 
       cycles = 0
       until cpu.read_reg(10) >= 4
-        raise 'timeout waiting for third call' if cycles >= 420 * max_scale
+        raise 'timeout waiting for third call' if cycles >= 460 * max_scale
         cpu.clock_cycle
         cycles += 1
       end
