@@ -1,13 +1,11 @@
 # ao486 Harness - Simulation Test Harness
-# Wraps the ao486 CPU for behavior simulation and testing.
-# Provides a high-level interface: reset, step, memory read/write,
-# register inspection.
-#
-# Initially a skeleton for Phase 0 — will grow as pipeline stages
-# are added in later phases.
+# Wraps the ao486 Pipeline for behavior simulation and testing.
+# Provides a high-level interface: load binary, run, step, memory,
+# register inspection, I/O callbacks.
 
 require_relative '../../../lib/rhdl/hdl'
 require_relative 'constants'
+require_relative 'pipeline/pipeline'
 
 module RHDL
   module Examples
@@ -18,32 +16,42 @@ module RHDL
         attr_reader :clock_count
 
         def initialize
+          @pipeline = Pipeline.new
           @memory = {}  # Sparse 32-bit address space (byte-addressable)
           @clock_count = 0
-
-          # Architectural state (will be replaced by actual CPU component in Phase 5+)
-          @eip = Constants::STARTUP_EIP
-          @eax = Constants::STARTUP_EAX
-          @ebx = Constants::STARTUP_EBX
-          @ecx = Constants::STARTUP_ECX
-          @edx = Constants::STARTUP_EDX
-          @esp = Constants::STARTUP_ESP
-          @ebp = Constants::STARTUP_EBP
-          @esi = Constants::STARTUP_ESI
-          @edi = Constants::STARTUP_EDI
         end
 
         def reset
+          @pipeline = Pipeline.new
+          @memory = {}
           @clock_count = 0
-          @eip = Constants::STARTUP_EIP
-          @eax = Constants::STARTUP_EAX
-          @ebx = Constants::STARTUP_EBX
-          @ecx = Constants::STARTUP_ECX
-          @edx = Constants::STARTUP_EDX
-          @esp = Constants::STARTUP_ESP
-          @ebp = Constants::STARTUP_EBP
-          @esi = Constants::STARTUP_ESI
-          @edi = Constants::STARTUP_EDI
+        end
+
+        # Load a .COM binary at CS:0100h (standard DOS load point)
+        def load_com(bytes)
+          @pipeline.setup_real_mode(cs_base: 0, eip: 0x0100, esp: 0xFFFE)
+          bytes.each_with_index { |b, i| @memory[0x0100 + i] = b & 0xFF }
+        end
+
+        # Load raw bytes at a specific address
+        def load_at(addr, bytes)
+          bytes.each_with_index { |b, i| @memory[(addr + i) & 0xFFFF_FFFF] = b & 0xFF }
+        end
+
+        # Run until halt or max_steps exceeded
+        def run(max_steps: 1000)
+          max_steps.times do
+            result = step
+            return result if result == :halt
+          end
+          :timeout
+        end
+
+        # Execute one instruction
+        def step
+          result = @pipeline.step(@memory)
+          @clock_count += 1
+          result
         end
 
         # Memory interface
@@ -55,25 +63,46 @@ module RHDL
           @memory[addr & 0xFFFF_FFFF] = value & 0xFF
         end
 
-        # Register accessors
-        def eip; @eip; end
-        def eax; @eax; end
-        def ebx; @ebx; end
-        def ecx; @ecx; end
-        def edx; @edx; end
-        def esp; @esp; end
-        def ebp; @ebp; end
-        def esi; @esi; end
-        def edi; @edi; end
+        # Register access (delegates to Pipeline)
+        def reg(name)
+          @pipeline.reg(name)
+        end
+
+        def set_reg(name, value)
+          @pipeline.set_reg(name, value)
+        end
+
+        # Legacy register accessors for backwards compatibility
+        def eip; @pipeline.reg(:eip); end
+        def eax; @pipeline.reg(:eax); end
+        def ebx; @pipeline.reg(:ebx); end
+        def ecx; @pipeline.reg(:ecx); end
+        def edx; @pipeline.reg(:edx); end
+        def esp; @pipeline.reg(:esp); end
+        def ebp; @pipeline.reg(:ebp); end
+        def esi; @pipeline.reg(:esi); end
+        def edi; @pipeline.reg(:edi); end
+
+        # I/O callbacks
+        def on_io_write(&block)
+          @pipeline.on_io_write(&block)
+        end
+
+        def on_io_read(&block)
+          @pipeline.on_io_read(&block)
+        end
 
         # State inspection
         def state
           {
-            eip: @eip, eax: @eax, ebx: @ebx, ecx: @ecx,
-            edx: @edx, esp: @esp, ebp: @ebp, esi: @esi, edi: @edi,
+            eip: eip, eax: eax, ebx: ebx, ecx: ecx,
+            edx: edx, esp: esp, ebp: ebp, esi: esi, edi: edi,
             cycles: @clock_count
           }
         end
+
+        # Access to underlying pipeline for advanced use
+        attr_reader :pipeline
       end
     end
   end
