@@ -528,6 +528,34 @@ function decodeCBOffset(inst) {
   return signExtend(raw, 9);
 }
 
+// --- Instruction category classifier ---
+
+// Classify a mnemonic into a rendering category for syntax coloring.
+// Returns one of: 'arith', 'load', 'store', 'branch', 'jump', 'imm', 'sys', 'amo', or null.
+export function classifyMnemonic(mn) {
+  if (!mn || mn === '???' || mn === 'unimp') return null;
+
+  // Handle compressed special forms before stripping prefix.
+  if (mn === 'c.addi4spn' || mn === 'c.addi16sp') return 'imm';
+  if (mn === 'c.lwsp') return 'load';
+  if (mn === 'c.swsp') return 'store';
+  if (mn === 'c.ebreak') return 'sys';
+
+  const base = mn.startsWith('c.') ? mn.slice(2) : mn;
+
+  if (/^(j|jal|jalr|jr|ret)$/.test(base)) return 'jump';
+  if (/^(beqz?|bnez?|bltu?|bgeu?)$/.test(base)) return 'branch';
+  if (/^(lb|lh|lw|lbu|lhu|flw)$/.test(base)) return 'load';
+  if (/^(sb|sh|sw|fsw)$/.test(base)) return 'store';
+  if (/^(ecall|ebreak|mret|sret|wfi)$/.test(base)) return 'sys';
+  if (/^[sf]?fence/.test(base)) return 'sys';
+  if (/^csr/.test(mn)) return 'sys';
+  if (/^(lr\.|sc\.|amo)/.test(base)) return 'amo';
+  if (/^(li|lui|auipc|nop|mv)$/.test(base)) return 'imm';
+
+  return 'arith';
+}
+
 // --- Main disassembly entry point ---
 
 export function disassembleRiscvLines(
@@ -544,6 +572,7 @@ export function disassembleRiscvLines(
     ? null
     : (Number(options.highlightPc) >>> 0) % addressSpace;
   const sourceMap = options.sourceMap || null;
+  const structured = !!options.structured;
 
   // Fetch enough bytes for count instructions (max 4 bytes each) plus a small buffer.
   const fetchLen = (count * 4) + 4;
@@ -581,13 +610,15 @@ export function disassembleRiscvLines(
         // Emit function header when entering a new function.
         if (info.function && info.function !== lastFn) {
           const fileSuffix = info.file ? ` -- ${info.file}` : '';
-          lines.push(`-- ${info.function}()${fileSuffix} --`);
+          const headerText = `-- ${info.function}()${fileSuffix} --`;
+          lines.push(structured ? { text: headerText, type: 'fn' } : headerText);
           lastFn = info.function;
         }
         // Emit source line when the line number changes.
         if (info.line != null && (info.file !== lastFile || info.line !== lastLine)) {
           if (info.source != null) {
-            lines.push(`  ${info.line}: ${info.source}`);
+            const srcText = `  ${info.line}: ${info.source}`;
+            lines.push(structured ? { text: srcText, type: 'src' } : srcText);
           }
           lastFile = info.file;
           lastLine = info.line;
@@ -614,7 +645,13 @@ export function disassembleRiscvLines(
 
     const marker = highlightPc != null && (highlightPc >>> 0) === (addr >>> 0) ? '>>' : '  ';
     const addrStr = formatAddr(addr, wide);
-    lines.push(`${marker} ${addrStr}: ${instHex.padEnd(8, ' ')}  ${mnemonic}`);
+    const lineText = `${marker} ${addrStr}: ${instHex.padEnd(8, ' ')}  ${mnemonic}`;
+    if (structured) {
+      const mnName = mnemonic.split(/\s/)[0];
+      lines.push({ text: lineText, type: 'asm', category: classifyMnemonic(mnName) });
+    } else {
+      lines.push(lineText);
+    }
     addr = ((addr + instBytes) >>> 0) % addressSpace;
   }
 

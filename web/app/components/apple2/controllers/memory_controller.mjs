@@ -264,10 +264,16 @@ export function createApple2MemoryController({
       disasmOpts.sourceMap = state.apple2.sourceMap;
     }
     let disasmText;
+    let disasmLines = null;
     if (runnerKind === 'riscv' && typeof disassembleRiscvLinesWithMemory === 'function') {
-      disasmText = disassembleRiscvLinesWithMemory(
-        disasmStart, disasmLineCount, readApple2MappedMemory, disasmOpts
-      ).join('\n');
+      const rawLines = disassembleRiscvLinesWithMemory(
+        disasmStart, disasmLineCount, readApple2MappedMemory,
+        { ...disasmOpts, structured: true }
+      );
+      disasmText = rawLines.map(l => l.text ?? l).join('\n');
+      if (rawLines.length > 0 && typeof rawLines[0] === 'object') {
+        disasmLines = rawLines;
+      }
     } else if (runnerKind == null || runnerKind === 'apple2' || runnerKind === 'mos6502') {
       disasmText = disassemble6502LinesWithMemory(
         disasmStart, disasmLineCount, readApple2MappedMemory, disasmOpts
@@ -283,6 +289,7 @@ export function createApple2MemoryController({
       dumpText: lines.join('\n'),
       dumpRows,
       disasmText,
+      disasmLines,
       followPc: !!state.memory.followPc,
       pcAddress: pc,
       windowStart: start,

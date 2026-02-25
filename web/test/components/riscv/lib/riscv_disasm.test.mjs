@@ -5,6 +5,7 @@ import {
   decode32,
   decode16,
   disassembleRiscvLines,
+  classifyMnemonic,
   CSR_NAMES
 } from '../../../../app/components/riscv/lib/riscv_disasm.mjs';
 
@@ -419,4 +420,128 @@ test('CSR_NAMES includes common xv6 registers', () => {
   assert.equal(CSR_NAMES[0x180], 'satp');
   assert.equal(CSR_NAMES[0xF14], 'mhartid');
   assert.equal(CSR_NAMES[0x141], 'sepc');
+});
+
+// --- classifyMnemonic tests ---
+
+test('classifyMnemonic categorizes arithmetic instructions', () => {
+  assert.equal(classifyMnemonic('add'), 'arith');
+  assert.equal(classifyMnemonic('sub'), 'arith');
+  assert.equal(classifyMnemonic('addi'), 'arith');
+  assert.equal(classifyMnemonic('xor'), 'arith');
+  assert.equal(classifyMnemonic('slli'), 'arith');
+  assert.equal(classifyMnemonic('mul'), 'arith');
+  assert.equal(classifyMnemonic('div'), 'arith');
+  assert.equal(classifyMnemonic('c.add'), 'arith');
+  assert.equal(classifyMnemonic('c.sub'), 'arith');
+  assert.equal(classifyMnemonic('c.andi'), 'arith');
+});
+
+test('classifyMnemonic categorizes load instructions', () => {
+  assert.equal(classifyMnemonic('lw'), 'load');
+  assert.equal(classifyMnemonic('lb'), 'load');
+  assert.equal(classifyMnemonic('lhu'), 'load');
+  assert.equal(classifyMnemonic('c.lw'), 'load');
+  assert.equal(classifyMnemonic('c.lwsp'), 'load');
+});
+
+test('classifyMnemonic categorizes store instructions', () => {
+  assert.equal(classifyMnemonic('sw'), 'store');
+  assert.equal(classifyMnemonic('sb'), 'store');
+  assert.equal(classifyMnemonic('c.sw'), 'store');
+  assert.equal(classifyMnemonic('c.swsp'), 'store');
+});
+
+test('classifyMnemonic categorizes branch instructions', () => {
+  assert.equal(classifyMnemonic('beq'), 'branch');
+  assert.equal(classifyMnemonic('bne'), 'branch');
+  assert.equal(classifyMnemonic('beqz'), 'branch');
+  assert.equal(classifyMnemonic('bnez'), 'branch');
+  assert.equal(classifyMnemonic('blt'), 'branch');
+  assert.equal(classifyMnemonic('bgeu'), 'branch');
+  assert.equal(classifyMnemonic('c.beqz'), 'branch');
+  assert.equal(classifyMnemonic('c.bnez'), 'branch');
+});
+
+test('classifyMnemonic categorizes jump instructions', () => {
+  assert.equal(classifyMnemonic('jal'), 'jump');
+  assert.equal(classifyMnemonic('jalr'), 'jump');
+  assert.equal(classifyMnemonic('j'), 'jump');
+  assert.equal(classifyMnemonic('jr'), 'jump');
+  assert.equal(classifyMnemonic('ret'), 'jump');
+  assert.equal(classifyMnemonic('c.j'), 'jump');
+  assert.equal(classifyMnemonic('c.jal'), 'jump');
+  assert.equal(classifyMnemonic('c.jr'), 'jump');
+  assert.equal(classifyMnemonic('c.jalr'), 'jump');
+});
+
+test('classifyMnemonic categorizes immediate/data instructions', () => {
+  assert.equal(classifyMnemonic('li'), 'imm');
+  assert.equal(classifyMnemonic('lui'), 'imm');
+  assert.equal(classifyMnemonic('auipc'), 'imm');
+  assert.equal(classifyMnemonic('mv'), 'imm');
+  assert.equal(classifyMnemonic('nop'), 'imm');
+  assert.equal(classifyMnemonic('c.li'), 'imm');
+  assert.equal(classifyMnemonic('c.lui'), 'imm');
+  assert.equal(classifyMnemonic('c.mv'), 'imm');
+  assert.equal(classifyMnemonic('c.nop'), 'imm');
+  assert.equal(classifyMnemonic('c.addi4spn'), 'imm');
+  assert.equal(classifyMnemonic('c.addi16sp'), 'imm');
+});
+
+test('classifyMnemonic categorizes system instructions', () => {
+  assert.equal(classifyMnemonic('ecall'), 'sys');
+  assert.equal(classifyMnemonic('ebreak'), 'sys');
+  assert.equal(classifyMnemonic('mret'), 'sys');
+  assert.equal(classifyMnemonic('sret'), 'sys');
+  assert.equal(classifyMnemonic('wfi'), 'sys');
+  assert.equal(classifyMnemonic('fence'), 'sys');
+  assert.equal(classifyMnemonic('fence.i'), 'sys');
+  assert.equal(classifyMnemonic('sfence.vma'), 'sys');
+  assert.equal(classifyMnemonic('csrr'), 'sys');
+  assert.equal(classifyMnemonic('csrw'), 'sys');
+  assert.equal(classifyMnemonic('csrrw'), 'sys');
+  assert.equal(classifyMnemonic('c.ebreak'), 'sys');
+});
+
+test('classifyMnemonic categorizes atomic instructions', () => {
+  assert.equal(classifyMnemonic('lr.w'), 'amo');
+  assert.equal(classifyMnemonic('sc.w'), 'amo');
+  assert.equal(classifyMnemonic('amoadd.w'), 'amo');
+  assert.equal(classifyMnemonic('amoswap.w.aq'), 'amo');
+});
+
+test('classifyMnemonic returns null for unknown/invalid', () => {
+  assert.equal(classifyMnemonic('???'), null);
+  assert.equal(classifyMnemonic('unimp'), null);
+  assert.equal(classifyMnemonic(null), null);
+  assert.equal(classifyMnemonic(''), null);
+});
+
+// --- structured output tests ---
+
+test('disassembleRiscvLines with structured option returns objects', () => {
+  const mem = {};
+  const base = 0x80000000;
+  placeInst32(mem, base, encodeI(0, 0, 0, 0b000, OP_IMM)); // nop
+  placeInst32(mem, base + 4, encodeI(10, 0, 42, 0b000, OP_IMM)); // li a0, 42
+  placeInst32(mem, base + 8, encodeI(0, 1, 0, 0b000, JALR)); // ret
+
+  const lines = disassembleRiscvLines(
+    base, 3, makeReadMemory(mem),
+    { highlightPc: base + 4, addressSpace: 0x100000000, structured: true }
+  );
+
+  assert.equal(lines.length, 3);
+  assert.equal(lines[0].type, 'asm');
+  assert.equal(lines[0].category, 'imm'); // nop
+  assert.match(lines[0].text, /nop$/);
+
+  assert.equal(lines[1].type, 'asm');
+  assert.equal(lines[1].category, 'imm'); // li
+  assert.match(lines[1].text, /^>>/);
+
+  assert.equal(lines[2].type, 'asm');
+  assert.equal(lines[2].category, 'jump'); // ret
+  assert.match(lines[2].text, /ret$/);
 });
