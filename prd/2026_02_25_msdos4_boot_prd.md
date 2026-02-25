@@ -1,6 +1,6 @@
 # MS-DOS 4.0 Boot Integration for ao486
 
-**Status:** In Progress (Phase 5 partial — SYSINIT runs, DOS kernel init incomplete)
+**Status:** In Progress (Phase 6 — diagnosing kernel init bugs, targeting DOS shell prompt)
 **Date:** 2026-02-25
 **Branch:** `claude/plan-ao486-rhdl-port-bnKtw`
 
@@ -183,6 +183,40 @@ reference emulator (BOCHS/DOSBOX), which is beyond current scope.
 **Exit criteria (original)**: Integration test passes — video output contains DOS prompt. Full test suite green.
 **Exit criteria (achieved)**: 18/18 BIOS tests pass (6 Phase 5 tests). SYSINIT entry and initial execution verified. 361/361 full suite green.
 
+### Phase 6: DOS Shell Prompt
+
+**Objective**: Diagnose and fix the CPU emulation bugs that prevent the DOS kernel from fully initializing, and boot MS-DOS 4.0 to the COMMAND.COM prompt.
+
+**Background**: Phase 5 demonstrated that SYSINIT enters the MSDOS.SYS kernel (segment E3CF) but the kernel fails to initialize its internal data structures. Specifically, the DOS data pointer at address 0:0530 is never written, which causes a downstream crash at ~31K steps when a device driver FAR CALL returns to a corrupted address. The root cause is one or more subtle CPU emulation bugs in the first 30K steps that cause the kernel's initialization to silently compute wrong values or skip writes.
+
+**Diagnosis approach**:
+1. Set up a reference emulator trace (BOCHS or DOSBOX with step logging)
+2. Run the same RAM image in the reference emulator to get a golden trace
+3. Compare register state step-by-step against ao486 pipeline output
+4. Identify the first divergence point — that reveals the bug
+
+**Red**:
+- Test: after full boot, video output buffer contains `>` or `A:\>` (COMMAND.COM prompt)
+- Test: DOS data pointer at 0:0530 is non-zero after kernel init
+- Test: COMMAND.COM is loaded into memory (INT 21h/AH=4Bh EXEC or direct load)
+
+**Green** (iterative — repeat until boot completes):
+1. Generate reference trace from BOCHS/DOSBOX for the first N thousand steps
+2. Build a trace-comparison harness that highlights first register divergence
+3. Fix each identified CPU emulation bug:
+   - Likely candidates: flags computation (CF/OF/AF on arithmetic), segment register
+     loading side effects, BCD instructions (AAA/AAS/DAA/DAS), REP prefix
+     interaction with segment overrides, stack pointer wrapping in 16-bit mode
+4. After each fix, re-run boot and check if 0:0530 gets written
+5. Extend BIOS/DOS stubs as needed for later boot stages:
+   - INT 21h/AH=4Bh (EXEC — load and execute program) for COMMAND.COM
+   - INT 21h/AH=0Ah (buffered input) for command prompt
+   - INT 21h/AH=09h (display string) for prompt output
+   - INT 21h/AH=3Dh/3Fh/42h (open/read/seek) for loading COMMAND.COM from disk
+6. Once COMMAND.COM loads and displays prompt, capture in video output buffer
+
+**Exit criteria**: Integration test passes — video output contains DOS prompt string. Full test suite green including new Phase 6 tests.
+
 ---
 
 ## Exit Criteria (Full Completion)
@@ -192,13 +226,16 @@ reference emulator (BOCHS/DOSBOX), which is beyond current scope.
 3. ✅ All pipeline bugs fixed with regression tests.
 4. ✅ All missing instructions implemented with unit tests.
 5. ✅ BIOS stub handles boot-critical INT services.
-6. ⬜ Integration test boots MS-DOS 4.0 to COMMAND.COM prompt. (Partially achieved: SYSINIT runs 30K+ steps, DOS kernel init stalls)
-7. ✅ Full test suite passes with zero regressions (361/361).
+6. ⬜ CPU emulation bugs diagnosed and fixed via reference trace comparison.
+7. ⬜ Integration test boots MS-DOS 4.0 to COMMAND.COM prompt.
+8. ⬜ Full test suite passes with zero regressions (including Phase 6 tests).
 
 ## Acceptance Criteria
 
 - ✅ `bundle exec ruby -Ilib -Ispec -e "require 'rspec/autorun'; ARGV.replace(['spec/examples/ao486/'])"` passes (361/361).
-- ⬜ Boot integration test shows DOS prompt in captured video output.
+- ⬜ Reference trace comparison identifies and fixes all CPU emulation bugs blocking boot.
+- ⬜ Boot integration test shows DOS prompt (`A:\>` or `>`) in captured video output.
+- ⬜ Full test suite passes including Phase 6 tests.
 - ⬜ PRD status updated to `Completed`.
 
 ---
@@ -214,6 +251,9 @@ reference emulator (BOCHS/DOSBOX), which is beyond current scope.
 | **Step count**: full boot may require millions of steps | Low | RAM image approach bypasses ~50K-step MSLOAD disk loading loop |
 | **CONFIG.SYS/AUTOEXEC.BAT**: may try to load drivers or run commands | Low | Floppy image should have minimal or no CONFIG.SYS |
 | **CPU emulation fidelity**: subtle instruction differences cascade in 30K+ step init | High | Compare against BOCHS/DOSBOX step traces for diagnosis |
+| **Reference trace setup**: BOCHS/DOSBOX must be available and configurable for step logging | Medium | Use BOCHS with its built-in debugger (log every step), or DOSBOX debugger build |
+| **Multiple cascading bugs**: first fix may reveal further divergences deeper in boot | Medium | Iterative fix-and-compare loop; each fix reduces divergence window |
+| **COMMAND.COM loading**: DOS may use file I/O services not yet stubbed | Medium | Extend INT 21h stubs incrementally as COMMAND.COM load path is reached |
 
 ---
 
@@ -265,9 +305,24 @@ reference emulator (BOCHS/DOSBOX), which is beyond current scope.
 - [ ] COMMAND.COM loads and displays prompt
 - [x] Integration test green (18/18 bios tests, 361/361 total)
 
+### Phase 6: DOS Shell Prompt
+- [ ] Set up reference emulator (BOCHS/DOSBOX) with step-level trace logging
+- [ ] Generate golden trace for RAM image boot (first 35K+ steps)
+- [ ] Build trace-comparison harness (register diff at each step)
+- [ ] Identify first CPU emulation divergence point
+- [ ] Fix identified bug(s) — flags, segments, BCD, REP, or other
+- [ ] Verify 0:0530 (DOS data pointer) gets written after fix
+- [ ] Re-run boot past kernel init without crash
+- [ ] Extend INT 21h stubs for COMMAND.COM loading (EXEC, file I/O)
+- [ ] COMMAND.COM loads and executes
+- [ ] DOS prompt appears in video output buffer
+- [ ] Integration test green (video output contains prompt string)
+- [ ] Full test suite passes with zero regressions
+
 ### Test counts
 - Phase 0-11 (original ao486 port): 316 tests
 - Phase 12 (instruction extensions): 27 tests
 - Phase 4 (BIOS + boot sector): 10 tests
 - Phase 5 (RAM image + SYSINIT): 8 tests
-- **Total: 361 tests, 0 failures**
+- Phase 6 (DOS shell prompt): TBD
+- **Total: 361 tests, 0 failures** (Phase 6 tests pending)
