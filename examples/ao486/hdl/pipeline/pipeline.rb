@@ -38,6 +38,9 @@ module RHDL
           @io_read_callback = nil
           @io_write_callback = nil
 
+          # Interrupt state
+          @pending_interrupt = nil  # { vector: N } or nil
+
           # Initialize register file
           clock_regfile_reset
         end
@@ -48,6 +51,16 @@ module RHDL
 
         def on_io_write(&block)
           @io_write_callback = block
+        end
+
+        # Raise a hardware interrupt (will be serviced on next step if IF=1)
+        def raise_hw_interrupt(vector)
+          @pending_interrupt = { vector: vector }
+        end
+
+        # Public accessor for EFLAGS
+        def build_eflags_public
+          build_eflags
         end
 
         # Set up a convenient real-mode state for testing
@@ -77,6 +90,13 @@ module RHDL
 
         # Execute one instruction. Returns :ok or :halt
         def step(memory)
+          # 0. Check for pending hardware interrupt (IF=1 required)
+          if @pending_interrupt && reg(:iflag) == 1
+            int_info = @pending_interrupt
+            @pending_interrupt = nil
+            return dispatch_interrupt(memory, int_info[:vector], reg(:eip), :hardware)
+          end
+
           # 1. Fetch: read up to 15 bytes at CS:EIP
           eip = reg(:eip)
           cs_cache = seg_cache(:cs)
@@ -508,6 +528,16 @@ module RHDL
 
           when C::CMD_XLAT
             exec_xlat(memory, ds_base, eip, next_eip)
+
+          when C::CMD_INT_INTO
+            exec_int_into(opcode, prefix_count, bytes, memory, ss_base, eip, next_eip)
+
+          when C::CMD_IRET
+            exec_iret(op32, memory, ss_base, eip, next_eip)
+
+          when C::CMD_NULL
+            # Unknown opcode: raise #UD exception
+            dispatch_interrupt(memory, C::EXCEPTION_UD, eip, :fault)
 
           else
             # NOP or unimplemented: just advance EIP
@@ -1478,9 +1508,8 @@ module RHDL
           @divide.propagate
 
           if @divide.get_output(:exception) != 0
-            # #DE exception — for now, just advance EIP (Phase 7 will handle exceptions)
-            advance_eip(next_eip)
-            return :exception
+            # #DE exception — dispatch through IVT (fault: save faulting EIP)
+            return dispatch_interrupt(memory, C::EXCEPTION_DE, eip, :fault)
           end
 
           quot = @divide.get_output(:quotient)
@@ -1857,6 +1886,94 @@ module RHDL
           write_gpr(0, (old_eax & 0xFFFF_FF00) | (value & 0xFF), false, true)
 
           advance_eip(next_eip)
+          :ok
+        end
+
+        # ---------- Phase 7: Exception & Interrupt Handling ----------
+
+        # Dispatch an interrupt/exception through the real-mode IVT.
+        # type: :software (INT), :hardware (IRQ), :fault (#DE, #UD, etc.)
+        # For :fault, return_eip points to the faulting instruction.
+        # For :software, return_eip points to the instruction AFTER INT.
+        def dispatch_interrupt(memory, vector, return_eip, type)
+          ss_base = desc_base(seg_cache(:ss))
+          op32 = false  # Real mode uses 16-bit frames
+
+          # Push FLAGS, CS, IP (each 16-bit, total 6 bytes)
+          flags = build_eflags & 0xFFFF
+          cs_val = 0  # In our simplified model, CS selector is 0
+          push_value(memory, flags, 2, ss_base, op32)
+          push_value(memory, cs_val, 2, ss_base, op32)
+          push_value(memory, return_eip & 0xFFFF, 2, ss_base, op32)
+
+          # Clear IF and TF
+          set_flag(:if, 0)
+          set_flag(:tf, 0)
+
+          # Load new CS:IP from IVT (at linear address vector * 4)
+          ivt_addr = (vector & 0xFF) * 4
+          new_ip = mem_read(memory, ivt_addr, 2)
+          new_cs = mem_read(memory, ivt_addr + 2, 2)
+
+          # Update CS descriptor cache with new base (new_cs << 4 for real mode)
+          new_cs_base = (new_cs & 0xFFFF) << 4
+          cache = C::DEFAULT_CS_CACHE
+          base_hi = (new_cs_base >> 24) & 0xFF
+          base_lo = new_cs_base & 0xFF_FFFF
+          cache = cache & ~(0xFF << 56) & ~(0xFF_FFFF << 16)
+          cache = cache | (base_hi << 56) | (base_lo << 16)
+          write_regfile(write_seg_cache: 1, wr_seg_index: C::SEGMENT_CS,
+                        seg_cache_to_reg: cache)
+
+          # Set new EIP
+          advance_eip(new_ip & 0xFFFF)
+
+          :ok
+        end
+
+        def exec_int_into(opcode, prefix_count, bytes, memory, ss_base, eip, next_eip)
+          case opcode
+          when 0xCD  # INT imm8
+            vector = bytes[prefix_count + 1] || 0
+            dispatch_interrupt(memory, vector, next_eip, :software)
+
+          when 0xCC  # INT3
+            dispatch_interrupt(memory, C::EXCEPTION_BP, next_eip, :software)
+
+          when 0xCE  # INTO
+            if reg(:oflag) == 1
+              dispatch_interrupt(memory, C::EXCEPTION_OF, next_eip, :software)
+            else
+              advance_eip(next_eip)
+              :ok
+            end
+          end
+        end
+
+        def exec_iret(op32, memory, ss_base, eip, next_eip)
+          pop_sz = op32 ? 4 : 2
+
+          # Pop IP, CS, FLAGS (in this order)
+          new_ip = pop_value(memory, pop_sz, ss_base, op32)
+          new_cs = pop_value(memory, pop_sz, ss_base, op32)
+          new_flags = pop_value(memory, pop_sz, ss_base, op32)
+
+          # Update CS descriptor cache
+          new_cs_base = (new_cs & 0xFFFF) << 4
+          cache = C::DEFAULT_CS_CACHE
+          base_hi = (new_cs_base >> 24) & 0xFF
+          base_lo = new_cs_base & 0xFF_FFFF
+          cache = cache & ~(0xFF << 56) & ~(0xFF_FFFF << 16)
+          cache = cache | (base_hi << 56) | (base_lo << 16)
+          write_regfile(write_seg_cache: 1, wr_seg_index: C::SEGMENT_CS,
+                        seg_cache_to_reg: cache)
+
+          # Restore flags
+          load_eflags(new_flags, op32)
+
+          # Set new EIP
+          advance_eip(new_ip & (op32 ? 0xFFFF_FFFF : 0xFFFF))
+
           :ok
         end
       end
