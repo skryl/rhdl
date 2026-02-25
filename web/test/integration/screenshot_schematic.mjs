@@ -165,15 +165,18 @@ async function main() {
         // Apply viewport transform
         ctx.setTransform(vp.scale, 0, 0, vp.scale, vp.x, vp.y);
 
-        // Get palette
+        // Get palette — distinct colors per element type
         const palette = {
-          bg: '#001513', componentBg: '#0d2b28', componentBorder: '#4f7d6d',
-          componentText: '#d4e7c5', focusBg: '#0a3530', focusBorder: '#6aaf8d',
-          memoryBg: '#1a2f3a', opBg: '#1a3025', ioBg: '#0d2520', ioBorder: '#4f9d7d',
-          netBg: '#0d2b28', netBorder: '#4f7d6d', netText: '#d4e7c5',
-          pinBg: '#1a3a30', pinBorder: '#4f7d6d',
-          wire: '#4f7d6d', wireActive: '#6aaf8d', wireToggle: '#ffa726',
-          selected: '#ffffff', text: '#d4e7c5'
+          bg: '#001513',
+          componentBg: '#143848', componentBorder: '#4ec8d8', componentText: '#d4eef5',
+          focusBg: '#143848', focusBorder: '#4ec8d8',
+          ioBg: '#2e2850', ioBorder: '#9088e0', ioText: '#d8d8f0',
+          opBg: '#453820', opBorder: '#d4a850', opText: '#f0e4c8',
+          memoryBg: '#4a3020', memoryBorder: '#d08848',
+          netBg: '#1e3828', netBorder: '#58a068', netText: '#b0d4b8',
+          pinBg: '#2d4040', pinBorder: '#78a898',
+          wire: '#4a7868', wireActive: '#7be9ad', wireToggle: '#f4bf66',
+          selected: '#9cffe3', text: '#d4eef5'
         };
 
         // Draw wires (polyline through ELK bend points when available)
@@ -208,7 +211,7 @@ async function main() {
           const hh = (sym.height || 50) / 2;
           const type = sym.type || 'component';
           ctx.fillStyle = type === 'memory' ? palette.memoryBg : type === 'op' ? palette.opBg : type === 'io' ? palette.ioBg : type === 'focus' ? palette.focusBg : palette.componentBg;
-          ctx.strokeStyle = type === 'focus' ? palette.focusBorder : type === 'io' ? palette.ioBorder : palette.componentBorder;
+          ctx.strokeStyle = type === 'memory' ? palette.memoryBorder : type === 'op' ? palette.opBorder : type === 'focus' ? palette.focusBorder : type === 'io' ? palette.ioBorder : palette.componentBorder;
           ctx.lineWidth = type === 'focus' ? 2.2 : 1.7;
           const r = 6;
           ctx.beginPath();
@@ -225,7 +228,7 @@ async function main() {
           ctx.fill();
           ctx.stroke();
           // Label
-          ctx.fillStyle = palette.componentText;
+          ctx.fillStyle = type === 'op' ? palette.opText : type === 'io' ? (palette.ioText || palette.componentText) : palette.componentText;
           ctx.font = `${Math.max(8, Math.min(12, hw / 4))}px monospace`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
@@ -264,6 +267,78 @@ async function main() {
         }
 
         ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+        // Draw legend in screen space (bottom-right corner)
+        const legendEntries = [
+          { label: 'Component', fill: palette.componentBg, stroke: palette.componentBorder },
+          { label: 'IO Port', fill: palette.ioBg, stroke: palette.ioBorder },
+          { label: 'Op / Assign', fill: palette.opBg, stroke: palette.opBorder },
+          { label: 'Memory', fill: palette.memoryBg, stroke: palette.memoryBorder },
+          { label: 'Net / Signal', fill: palette.netBg, stroke: palette.netBorder },
+          { label: 'Pin', fill: palette.pinBg, stroke: palette.pinBorder },
+          { label: 'Wire', fill: null, stroke: palette.wire, isLine: true }
+        ];
+        const lfontSize = 11;
+        const lswatchW = 18;
+        const lswatchH = 12;
+        const lrowH = 20;
+        const lpad = 12;
+        const lgap = 6;
+        const ltextX = lswatchW + lgap;
+        ctx.font = `${lfontSize}px monospace`;
+        let lmaxW = 0;
+        for (const e of legendEntries) {
+          const tw = ctx.measureText(e.label).width;
+          if (tw > lmaxW) lmaxW = tw;
+        }
+        const lboxW = lpad * 2 + ltextX + lmaxW;
+        const lboxH = lpad * 2 + legendEntries.length * lrowH - (lrowH - lswatchH);
+        const lboxX = width - lboxW - 14;
+        const lboxY = height - lboxH - 14;
+        ctx.fillStyle = 'rgba(0, 12, 10, 0.82)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+        ctx.lineWidth = 1;
+        const lr = 4;
+        ctx.beginPath();
+        ctx.moveTo(lboxX + lr, lboxY);
+        ctx.lineTo(lboxX + lboxW - lr, lboxY);
+        ctx.arcTo(lboxX + lboxW, lboxY, lboxX + lboxW, lboxY + lr, lr);
+        ctx.lineTo(lboxX + lboxW, lboxY + lboxH - lr);
+        ctx.arcTo(lboxX + lboxW, lboxY + lboxH, lboxX + lboxW - lr, lboxY + lboxH, lr);
+        ctx.lineTo(lboxX + lr, lboxY + lboxH);
+        ctx.arcTo(lboxX, lboxY + lboxH, lboxX, lboxY + lboxH - lr, lr);
+        ctx.lineTo(lboxX, lboxY + lr);
+        ctx.arcTo(lboxX, lboxY, lboxX + lr, lboxY, lr);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        for (let li = 0; li < legendEntries.length; li++) {
+          const le = legendEntries[li];
+          const lsx = lboxX + lpad;
+          const lsy = lboxY + lpad + li * lrowH;
+          if (le.isLine) {
+            ctx.strokeStyle = le.stroke;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(lsx, lsy + lswatchH / 2);
+            ctx.lineTo(lsx + lswatchW, lsy + lswatchH / 2);
+            ctx.stroke();
+          } else {
+            ctx.fillStyle = le.fill;
+            ctx.strokeStyle = le.stroke;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.rect(lsx, lsy, lswatchW, lswatchH);
+            ctx.fill();
+            ctx.stroke();
+          }
+          ctx.fillStyle = 'rgba(220, 230, 225, 0.9)';
+          ctx.font = `${lfontSize}px monospace`;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(le.label, lsx + ltextX, lsy + lswatchH / 2);
+        }
+
         return offscreen.toDataURL('image/png');
       }, { focusId, showChildren, width, height, viewport });
 

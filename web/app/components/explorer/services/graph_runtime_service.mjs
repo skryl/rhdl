@@ -8,7 +8,7 @@ import { buildSpatialIndex } from '../renderers/spatial_index.mjs';
 import { bindD3Interactions } from '../renderers/interactions.mjs';
 import { buildElkGraph, applyElkResult } from '../renderers/elk_layout_adapter.mjs';
 import { updateRenderActivity } from '../renderers/render_activity.mjs';
-import { getThemePalette } from '../renderers/themes.mjs';
+import { getThemePalette, drawLegend } from '../renderers/themes.mjs';
 
 function requireFn(name, fn) {
   if (typeof fn !== 'function') {
@@ -100,6 +100,30 @@ export function createExplorerGraphRuntimeService({
     const renderer = webglRenderer || createCanvasRenderer(canvas);
     state.components.graphRenderBackend = webglRenderer ? 'webgl' : 'canvas2d';
 
+    // For WebGL, create a 2D overlay canvas for the legend (Canvas 2D draws legend inline)
+    let legendCanvas = null;
+    let legendCtx = null;
+    if (webglRenderer) {
+      legendCanvas = document.createElement('canvas');
+      legendCanvas.width = canvas.width;
+      legendCanvas.height = canvas.height;
+      legendCanvas.style.width = '100%';
+      legendCanvas.style.height = '100%';
+      legendCanvas.style.position = 'absolute';
+      legendCanvas.style.top = '0';
+      legendCanvas.style.left = '0';
+      legendCanvas.style.pointerEvents = 'none';
+      dom.componentVisual.style.position = 'relative';
+      dom.componentVisual.appendChild(legendCanvas);
+      legendCtx = legendCanvas.getContext('2d');
+    }
+
+    function renderLegendOverlay(pal) {
+      if (!legendCtx) return;
+      legendCtx.clearRect(0, 0, legendCanvas.width, legendCanvas.height);
+      drawLegend(legendCtx, legendCanvas.width, legendCanvas.height, pal);
+    }
+
     // Run ELK layout
     const elkGraph = buildElkGraph(renderList);
     const elk = new window.ELK();
@@ -115,6 +139,7 @@ export function createExplorerGraphRuntimeService({
         // Render with new positions
         const palette = getThemePalette(state.theme);
         renderer.render(renderList, viewport, palette);
+        renderLegendOverlay(palette);
       }
     }).catch((_err) => {
       state.components.graphLayoutEngine = 'error';
@@ -134,12 +159,14 @@ export function createExplorerGraphRuntimeService({
       requestRender: () => {
         const palette = getThemePalette(state.theme);
         renderer.render(renderListRef || renderList, viewport, palette);
+        renderLegendOverlay(palette);
       }
     });
 
     // Initial render
     const palette = getThemePalette(state.theme);
     renderer.render(renderList, viewport, palette);
+    renderLegendOverlay(palette);
 
     const graphHandle = {
       type: 'd3',
@@ -148,6 +175,7 @@ export function createExplorerGraphRuntimeService({
       canvas,
       spatialIndex,
       renderList,
+      renderLegendOverlay,
       destroy() {
         renderer.destroy();
         interactions.destroy();
@@ -207,6 +235,7 @@ export function createExplorerGraphRuntimeService({
     // Re-render canvas
     const palette = getThemePalette(state.theme);
     graph.renderer.render(renderList, viewport, palette);
+    if (graph.renderLegendOverlay) graph.renderLegendOverlay(palette);
 
     return { ok: true };
   }

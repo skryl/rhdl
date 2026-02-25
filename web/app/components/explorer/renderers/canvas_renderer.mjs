@@ -1,6 +1,7 @@
 // Canvas 2D renderer for RTL schematic RenderList.
 
 import { symbolShapes } from './symbols.mjs';
+import { drawLegend } from './themes.mjs';
 
 function resolveColors(element, palette) {
   const type = element.type || '';
@@ -15,13 +16,15 @@ function resolveColors(element, palette) {
     lineWidth = type === 'focus' ? 2.2 : 1.7;
   } else if (type === 'memory') {
     fill = palette.memoryBg;
-    stroke = palette.wire;
+    stroke = palette.memoryBorder || palette.wire;
   } else if (type === 'op') {
     fill = palette.opBg;
-    stroke = palette.wire;
+    stroke = palette.opBorder || palette.wire;
+    text = palette.opText || text;
   } else if (type === 'io') {
     fill = palette.ioBg;
     stroke = palette.ioBorder;
+    text = palette.ioText || text;
   }
 
   return { fill, stroke, text, lineWidth };
@@ -164,8 +167,9 @@ export function createCanvasRenderer(canvas) {
       shape.draw(ctx, pin.x, pin.y, pin.width, pin.height, pin);
     }
 
-    // reset transform
+    // reset transform and draw legend in screen space
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    drawLegend(ctx, canvas.width, canvas.height, palette);
   }
 
   function destroy() {
