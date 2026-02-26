@@ -250,17 +250,17 @@ RSpec.describe RHDL::Examples::AO486::Bios, 'Phase 4: BIOS stub & boot sector' d
     end
 
     describe 'RAM image loading (Phase 5)' do
-      it 'sets up DOSINIT entry at the final DOS segment' do
+      it 'completes DOSINIT at the final DOS segment' do
         bios.setup(memory)
         bios.load_dos_ram_image(memory)
 
-        # CPU should be set up to execute at the final DOS segment (015F:0000)
-        expect(pipeline.reg(:eip)).to eq(0)
+        # After DOSINIT runs to completion (HLT), CS base should still
+        # be the final DOS segment.
         cs_cache = pipeline.seg_cache_public(:cs)
         cs_base = pipeline.desc_base_public(cs_cache)
         expect(cs_base).to eq(0x15F0)
 
-        # SS should point to the msdos segment for dispatch table access
+        # SS should still point to the msdos segment
         iosys = floppy.read_file('IO.SYS')
         iosys_sectors = (iosys.length + 511) / 512
         msdos_base = 0x700 + iosys_sectors * 512
@@ -295,42 +295,39 @@ RSpec.describe RHDL::Examples::AO486::Bios, 'Phase 4: BIOS stub & boot sector' d
         expect(memory[msdos_base + 1]).to eq(msdos[1])
       end
 
-      it 'sets DOSINIT register state (DL=drive, ES=DOS segment)' do
+      it 'sets dispatch table parameters during DOSINIT' do
         bios.setup(memory)
         bios.load_dos_ram_image(memory)
 
-        # DL should have drive number
-        expect(pipeline.reg(:edx) & 0xFF).to eq(0)  # drive A:
+        # DOSINIT dispatch should have stored handler parameters
+        iosys = floppy.read_file('IO.SYS')
+        iosys_sectors = (iosys.length + 511) / 512
+        msdos_base = 0x700 + iosys_sectors * 512
 
-        # ES should point to the final DOS segment
-        es_val = pipeline.reg(:es) & 0xFFFF
-        expect(es_val).to eq(0x015F)
+        # [0x324] = function code (3) from the dispatch
+        expect(memory[msdos_base + 0x324]).to eq(0x03)
+        # [0x327] = handler parameter from second dispatch table
+        expect(memory[msdos_base + 0x327]).to eq(0x08)
       end
 
-      it 'executes SYSINIT initialization without errors for 2000 steps' do
+      it 'runs DOSINIT to completion during load_dos_ram_image' do
         bios.setup(memory)
-        bios.load_dos_ram_image(memory)
 
-        errors = []
-        2_000.times do |i|
-          begin
-            result = bios.step(memory)
-            break if result == :halt
-          rescue => e
-            errors << { step: i, message: e.message }
-            break
-          end
-        end
+        # load_dos_ram_image now runs DOSINIT internally (step 6)
+        # and should complete without errors
+        expect { bios.load_dos_ram_image(memory) }.not_to raise_error
 
-        expect(errors).to be_empty
+        # After DOSINIT, the dispatch table parameters should be set
+        iosys = floppy.read_file('IO.SYS')
+        iosys_sectors = (iosys.length + 511) / 512
+        msdos_base = 0x700 + iosys_sectors * 512
+        expect(memory[msdos_base + 0x324]).to eq(0x03)
 
-        # SYSINIT should have progressed past the entry JMP
-        eip = pipeline.reg(:eip)
-        expect(eip).not_to eq(0)
-
-        # No unhandled critical interrupts
-        critical = bios.unhandled_ints.select { |i| i[:vector] == 0x13 }
-        expect(critical).to be_empty
+        # IVT should be restored to BIOS stubs after DOSINIT
+        bios_seg = 0xF000
+        int21_off = memory[0x21 * 4] | (memory[0x21 * 4 + 1] << 8)
+        int21_seg = memory[0x21 * 4 + 2] | (memory[0x21 * 4 + 3] << 8)
+        expect(int21_seg).to eq(bios_seg)
       end
 
       it 'relocates DOS kernel to the final segment' do

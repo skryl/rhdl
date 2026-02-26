@@ -274,15 +274,62 @@ module RHDL
           #         dispatch table at msdos_base + 0x0D28.
           #    DL = drive number (FCE0 checks it).
           #    ES = DOS segment (some init paths reference ES).
+          #
+          #    DOSINIT body (CS:0003+) expects SYSINIT to have set up:
+          #      Stack: two PUSHed DS values (POP DS at CS:0003 and CS:0014)
+          #      BX  = offset of CONFIG.SYS buffer within DS
+          #      CX  = byte count of CONFIG.SYS data
+          #    We place a single 0x1A (EOF) byte as an empty CONFIG.SYS and
+          #    pre-push the DS values the body expects.
           msdos_seg = msdos_base >> 4
-          @pipeline.setup_real_mode(cs_base: dos_base, eip: 0, esp: 0x7C00)
+          init_sp = 0x7C00
+
+          # Place a CONFIG.SYS EOF marker at a known location in the MSBIO
+          # segment (0x0070).  Use offset 0x200 (linear 0x900).
+          config_seg = 0x0070
+          config_off = 0x0200
+          memory[0x700 + config_off] = 0x1A  # EOF marker
+
+          # Pre-push two DS values on the stack.  The DOSINIT body:
+          #   CS:0003  POP DS   → first word  (DS for CONFIG.SYS access)
+          #   CS:0014  POP DS   → second word (DS restore)
+          ss_base = msdos_base
+          memory[ss_base + init_sp + 0] = config_seg & 0xFF
+          memory[ss_base + init_sp + 1] = (config_seg >> 8) & 0xFF
+          memory[ss_base + init_sp + 2] = config_seg & 0xFF
+          memory[ss_base + init_sp + 3] = (config_seg >> 8) & 0xFF
+
+          @pipeline.setup_real_mode(cs_base: dos_base, eip: 0, esp: init_sp)
           @pipeline.set_reg(:edx, (drive & 0xFF) | 0xA000)
-          @pipeline.set_reg(:ds, 0x0070)
-          @pipeline.set_ds_base(0x700)
+          @pipeline.set_reg(:ebx, config_off)
+          @pipeline.set_reg(:ecx, 1)
+          @pipeline.set_reg(:ds, config_seg)
+          @pipeline.set_ds_base(config_seg << 4)
           @pipeline.set_reg(:es, dos_seg)
           @pipeline.set_es_base(dos_base)
           @pipeline.set_reg(:ss, msdos_seg)
           @pipeline.send(:set_seg_base, :ss, C::SEGMENT_SS, msdos_base)
+
+          # 6. Run DOSINIT to completion.
+          #
+          #    DOSINIT runs two dispatch cycles (function 3 from the second
+          #    dispatch table at DS:0DDB), processes the CONFIG.SYS data
+          #    (which is just an EOF marker), and then jumps to CS:FF4B
+          #    which reaches HLT.  We step until HLT, then restore IVT
+          #    entries to our BIOS stubs (the dispatch writes to IVT as a
+          #    side-effect of the null device chain pointer at CS:[0584]).
+          2_000.times do
+            result = step(memory)
+            break if result == :halt
+          end
+
+          HANDLER_OFFSETS.each_key do |vec|
+            write_ivt_entry(memory, vec, BIOS_SEG, HANDLER_OFFSETS[vec])
+          end
+
+          # Save the DOS segment base for later reference.
+          @dos_base = dos_base
+          @dos_seg = dos_seg
         end
 
         # Execute one step with BIOS interception.
