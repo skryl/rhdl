@@ -121,24 +121,168 @@ module RHDL
             @msdos_range = msdos_base..(msdos_base + msdos.length - 1)
           end
 
-          # 4. Compute first data sector from BPB (GO_IBMBIO passes this in BX:AX)
-          bpb = @floppy.bpb
-          root_dir_sectors = ((bpb[:root_entries] * 32) + bpb[:bytes_per_sector] - 1) / bpb[:bytes_per_sector]
-          first_data_sector = bpb[:reserved_sectors] + (bpb[:num_fats] * bpb[:sectors_per_fat]) + root_dir_sectors
+          # 3a. Run MSDOS.SYS first-phase init.
+          #
+          #     In the real boot, MSLOAD CALL FARs to the MSDOS.SYS entry point
+          #     (file offset 0x8D31).  The first-phase init sets up the NUL device
+          #     header, SysVars, MSBIO flags, the shadow code region for the REP
+          #     MOVSW relocation, and device driver dispatch tables, then RETFs
+          #     back to MSLOAD.
+          #
+          #     We run this init natively instead of emulating its side-effects.
+          #     A far return address on the initial stack points to a BIOS sentinel
+          #     (HLT at BIOS_BASE + INIT_DONE_OFFSET).  When the init RETFs, we
+          #     detect the HLT and proceed to step 4.
+          #
+          #     The init uses SS=CS=msdos_base and writes data at msdos_base+offset,
+          #     but the DOS relocation reads from msdos_base+0x4900+offset.  We
+          #     snapshot before init and relay only the changed bytes afterward.
+          data_seg_offset = 0x4900
+          pre_init_snapshot = nil
+          if msdos
+            # Snapshot the data area range before init so we can detect changes.
+            pre_init_snapshot = Array.new(data_seg_offset) { |i| memory[msdos_base + i] || 0 }
 
-          # 5. Set CPU state matching GO_IBMBIO register setup:
-          #    CH = media byte, DL = drive number,
-          #    BX = first data sector (low), AX = first data sector (high)
-          @pipeline.setup_real_mode(cs_base: 0x700, eip: 0, esp: 0x7C00)
-          @pipeline.set_reg(:eax, (first_data_sector >> 16) & 0xFFFF)
-          @pipeline.set_reg(:ebx, first_data_sector & 0xFFFF)
-          @pipeline.set_reg(:ecx, (bpb[:media_descriptor] & 0xFF) << 8)
-          @pipeline.set_reg(:edx, drive & 0xFF)
-          @pipeline.set_ds_base(0x700)
-          @pipeline.set_es_base(0x700)
+            msdos_seg = msdos_base >> 4
+            init_entry = 0x8D31
+            init_sp = 0x7C00
+
+            # Place a far return address on the stack: BIOS_SEG:INIT_DONE_OFFSET.
+            # The init saves this SS:SP and restores it before RETF.
+            init_done_offset = 0x02B0
+            init_done_linear = BIOS_BASE + init_done_offset
+            memory[init_done_linear] = 0xF4  # HLT sentinel
+            ss_linear = msdos_base + init_sp
+            memory[ss_linear + 0] = init_done_offset & 0xFF        # return IP low
+            memory[ss_linear + 1] = (init_done_offset >> 8) & 0xFF # return IP high
+            memory[ss_linear + 2] = BIOS_SEG & 0xFF                # return CS low
+            memory[ss_linear + 3] = (BIOS_SEG >> 8) & 0xFF         # return CS high
+
+            # CPU state for the entry point (mirrors MSLOAD's CALL FAR context):
+            #   CS  = MSDOS.SYS segment
+            #   EIP = 0x8D31 (file offset of entry point)
+            #   DS  = 0x0070 (MSBIO/SYSINIT segment)
+            #   SI  = 0x016E (offset of CONHEADER in MSBIO segment)
+            #   DX  = drive number
+            #   SS  = MSDOS.SYS segment, SP = 0x7C00
+            @pipeline.setup_real_mode(cs_base: msdos_base, eip: init_entry,
+                                      esp: init_sp)
+            @pipeline.set_reg(:edx, drive & 0xFF)
+            @pipeline.set_reg(:esi, 0x016E)
+            @pipeline.set_reg(:ds, 0x0070)
+            @pipeline.set_ds_base(0x700)
+            @pipeline.set_reg(:es, 0x0070)
+            @pipeline.set_es_base(0x700)
+            @pipeline.set_reg(:ss, msdos_seg)
+            @pipeline.send(:set_seg_base, :ss, C::SEGMENT_SS, msdos_base)
+
+            # Run the first-phase init until it RETFs to the sentinel.
+            10_000.times do
+              result = step(memory)
+              eip_now = @pipeline.reg(:eip)
+              cs_now = @pipeline.desc_base_public(
+                @pipeline.seg_cache_public(:cs))
+              break if (cs_now + eip_now) & 0xFFFF_FFFF == init_done_linear
+              break if result == :halt
+            end
+
+            # The first-phase init rewrites IVT entries to point at the
+            # pre-relocation DOS kernel.  SYSINIT later uses INT 21h for
+            # file operations (opening CONFIG.SYS).  Restore IVT to our
+            # BIOS stubs so our Ruby handlers return clean errors.
+            HANDLER_OFFSETS.each_key do |vec|
+              write_ivt_entry(memory, vec, BIOS_SEG, HANDLER_OFFSETS[vec])
+            end
+          end
+
+          # 3b. Pre-populate the relocation source for the REP MOVSW.
+          #
+          #     The DOS relocation copies 0xA000 bytes from DS:0 to ES:0 (the
+          #     final DOS segment at ~0x15F0).  DS is set to msdos_base + 0x4900.
+          #
+          #     The relocation source low offsets (0x0000-0x48FF) keep the
+          #     original DOSDATA code — the DOSINIT entry stub plus the full
+          #     DOSINIT code body.  FCE0 (in the code shadow) calls into these
+          #     offsets expecting DOSDATA functions (e.g. 1E32, 1A15), NOT the
+          #     resident kernel DOSCODE code.  The DOSINIT dispatches themselves
+          #     populate the SysVars/config data area; replacing it prematurely
+          #     with DOSCODE templates would overwrite DOSINIT code and break
+          #     the init call chain.
+          #
+          #     However, init-modified bytes at msdos_base (the DOSCODE area)
+          #     must be relayed to the relocation source so that the DOSINIT
+          #     entry stub (offsets 0x00-0x18) and other init-patched fields
+          #     are present.
+          if msdos
+            # Relay first-phase init changes to the relocation source.
+            # The init writes to msdos_base+offset (the DOSCODE area); the
+            # relocation reads from msdos_base+0x4900+offset (DOSDATA area).
+            if pre_init_snapshot
+              data_seg_offset.times do |i|
+                current = memory[msdos_base + i] || 0
+                if current != pre_init_snapshot[i]
+                  memory[msdos_base + data_seg_offset + i] = current
+                end
+              end
+            end
+
+            # Patch specific DOSCODE data fields that the code shadow reads
+            # via CS: override.  The code shadow dispatch handler at CS:8DE5
+            # executes `LDS SI, CS:[0584]` to load a device-driver chain
+            # pointer.  In the DOSCODE template this is 00 00 00 00 (null),
+            # but the DOSDATA area has init code bytes there.  Zero it so
+            # the LDS loads a null pointer instead of garbage.
+            4.times { |j| memory[msdos_base + data_seg_offset + 0x584 + j] = 0 }
+
+            # Code area shadow: fill high DOS offsets from current memory.
+            # The code shadow occupies relocation source offsets 0x7510+
+            # (= msdos_base - 0x15F0).  After the REP MOVSW relocation,
+            # CS:7510+ holds the resident kernel code from the DOSCODE area.
+            ds_linear = msdos_base + data_seg_offset
+            code_ip_start = msdos_base - 0x15F0
+            shadow_base = ds_linear + code_ip_start
+            code_len = [0xA000 - code_ip_start, msdos.length].min
+            code_len.times do |i|
+              memory[shadow_base + i] = memory[msdos_base + i] || 0
+            end
+          end
+
+          # 4. Manual relocation (replaces SYSINIT's REP MOVSW).
+          #
+          #    In the real boot, SYSINIT relocates itself to high memory, then
+          #    executes REP MOVSW to copy 0xA000 bytes from the relocation
+          #    source (DS = msdos_base + 0x4900) to the final DOS segment
+          #    (ES = 0x015F, linear 0x15F0).  SYSINIT sets SS to its own high
+          #    segment before calling DOSINIT, but the DOSCODE dispatch code
+          #    (in the code shadow at CS:8F25) does PUSH SS / POP DS to access
+          #    data structures at SS:0D28+.  This fails when SS != msdos_seg
+          #    because the dispatch table is at msdos_base + 0x0D28.
+          #
+          #    By performing the relocation ourselves we can set SS = msdos_seg,
+          #    ensuring the dispatch table lookup reads from the right location.
+          dos_seg = 0x015F
+          dos_base = dos_seg << 4          # 0x15F0
+          reloc_src = msdos_base + data_seg_offset  # relocation source base
+          0xA000.times { |i| memory[dos_base + i] = memory[reloc_src + i] || 0 }
+
+          # 5. Set CPU state for direct DOSINIT entry.
+          #
+          #    CS = final DOS segment (015F, linear 0x15F0).
+          #    EIP = 0 (entry stub: CALL FCE0, which jumps to the DOSINIT
+          #           dispatcher via the code shadow).
+          #    SS = msdos_seg (0x8B0) so PUSH SS / POP DS gives access to the
+          #         dispatch table at msdos_base + 0x0D28.
+          #    DL = drive number (FCE0 checks it).
+          #    ES = DOS segment (some init paths reference ES).
+          msdos_seg = msdos_base >> 4
+          @pipeline.setup_real_mode(cs_base: dos_base, eip: 0, esp: 0x7C00)
+          @pipeline.set_reg(:edx, (drive & 0xFF) | 0xA000)
           @pipeline.set_reg(:ds, 0x0070)
-          @pipeline.set_reg(:es, 0x0070)
-          @pipeline.set_reg(:ss, 0)
+          @pipeline.set_ds_base(0x700)
+          @pipeline.set_reg(:es, dos_seg)
+          @pipeline.set_es_base(dos_base)
+          @pipeline.set_reg(:ss, msdos_seg)
+          @pipeline.send(:set_seg_base, :ss, C::SEGMENT_SS, msdos_base)
         end
 
         # Execute one step with BIOS interception.
@@ -560,6 +704,44 @@ module RHDL
               @pipeline.set_reg(:eax, cx)  # pretend success
             end
             set_return_cf(memory, 0)
+          when 0x3C  # Create file
+            # No file creation support — return "access denied"
+            @pipeline.set_reg(:eax, 0x0005)
+            set_return_cf(memory, 1)
+          when 0x3D  # Open file
+            # No files available — return "file not found"
+            @pipeline.set_reg(:eax, 0x0002)
+            set_return_cf(memory, 1)
+          when 0x3E  # Close file handle
+            set_return_cf(memory, 0)
+          when 0x3F  # Read from file handle
+            bx = @pipeline.reg(:ebx) & 0xFFFF
+            if bx <= 2  # stdin/stdout/stderr
+              @pipeline.set_reg(:eax, 0)  # 0 bytes read (EOF)
+              set_return_cf(memory, 0)
+            else
+              @pipeline.set_reg(:eax, 0x0006)  # invalid handle
+              set_return_cf(memory, 1)
+            end
+          when 0x42  # Seek (LSEEK)
+            set_return_cf(memory, 0)
+            @pipeline.set_reg(:eax, 0)
+            @pipeline.set_reg(:edx, 0)
+          when 0x44  # IOCTL
+            al = @pipeline.reg(:eax) & 0xFF
+            if al == 0x00  # Get device information
+              bx = @pipeline.reg(:ebx) & 0xFFFF
+              if bx <= 2  # stdin/stdout/stderr → character device
+                @pipeline.set_reg(:edx, 0x80D3)  # ISDEV | ISCIN | ISCOT | ISNUL | BINARY
+                set_return_cf(memory, 0)
+              else
+                @pipeline.set_reg(:eax, 0x0006)  # invalid handle
+                set_return_cf(memory, 1)
+              end
+            else
+              @pipeline.set_reg(:eax, 0x0001)  # invalid function
+              set_return_cf(memory, 1)
+            end
           when 0x48  # Allocate memory
             # Return error: not enough memory
             @pipeline.set_reg(:eax, (@pipeline.reg(:eax) & 0x00FF) | (0x08 << 8))

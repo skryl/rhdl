@@ -250,22 +250,23 @@ RSpec.describe RHDL::Examples::AO486::Bios, 'Phase 4: BIOS stub & boot sector' d
     end
 
     describe 'RAM image loading (Phase 5)' do
-      it 'loads SYSINIT code at 0x70:0 with correct entry point' do
+      it 'sets up DOSINIT entry at the final DOS segment' do
         bios.setup(memory)
         bios.load_dos_ram_image(memory)
 
-        # SYSINIT starts with JMP (0xE9) — the relocated IO.SYS entry point
-        expect(memory[0x700]).to eq(0xE9)
-
-        # CPU should be set up to execute at 0x70:0
+        # CPU should be set up to execute at the final DOS segment (015F:0000)
         expect(pipeline.reg(:eip)).to eq(0)
         cs_cache = pipeline.seg_cache_public(:cs)
         cs_base = pipeline.desc_base_public(cs_cache)
-        expect(cs_base).to eq(0x700)
+        expect(cs_base).to eq(0x15F0)
 
-        # DS and ES should point to segment 0x70
-        expect(pipeline.reg(:ds) & 0xFFFF).to eq(0x0070)
-        expect(pipeline.reg(:es) & 0xFFFF).to eq(0x0070)
+        # SS should point to the msdos segment for dispatch table access
+        iosys = floppy.read_file('IO.SYS')
+        iosys_sectors = (iosys.length + 511) / 512
+        msdos_base = 0x700 + iosys_sectors * 512
+        ss_base = pipeline.desc_base_public(
+          pipeline.seg_cache_public(:ss))
+        expect(ss_base).to eq(msdos_base)
       end
 
       it 'loads boot sector at 0x7C00 (overwritten by SYSINIT overlap)' do
@@ -294,17 +295,16 @@ RSpec.describe RHDL::Examples::AO486::Bios, 'Phase 4: BIOS stub & boot sector' d
         expect(memory[msdos_base + 1]).to eq(msdos[1])
       end
 
-      it 'sets GO_IBMBIO register state (BX=first_data_sector, CH=media)' do
+      it 'sets DOSINIT register state (DL=drive, ES=DOS segment)' do
         bios.setup(memory)
         bios.load_dos_ram_image(memory)
 
-        bpb = floppy.bpb
-        root_dir_sects = ((bpb[:root_entries] * 32) + bpb[:bytes_per_sector] - 1) / bpb[:bytes_per_sector]
-        first_data = bpb[:reserved_sectors] + (bpb[:num_fats] * bpb[:sectors_per_fat]) + root_dir_sects
-
-        expect(pipeline.reg(:ebx) & 0xFFFF).to eq(first_data & 0xFFFF)
-        expect((pipeline.reg(:ecx) >> 8) & 0xFF).to eq(bpb[:media_descriptor])
+        # DL should have drive number
         expect(pipeline.reg(:edx) & 0xFF).to eq(0)  # drive A:
+
+        # ES should point to the final DOS segment
+        es_val = pipeline.reg(:es) & 0xFFFF
+        expect(es_val).to eq(0x015F)
       end
 
       it 'executes SYSINIT initialization without errors for 2000 steps' do
@@ -333,38 +333,21 @@ RSpec.describe RHDL::Examples::AO486::Bios, 'Phase 4: BIOS stub & boot sector' d
         expect(critical).to be_empty
       end
 
-      it 'SYSINIT makes BIOS calls during initialization' do
+      it 'relocates DOS kernel to the final segment' do
         bios.setup(memory)
         bios.load_dos_ram_image(memory)
 
-        # Track which BIOS vectors are called
-        vectors_called = []
-        original_step = bios.method(:step)
+        # The DOSINIT entry stub at the final DOS segment should start with
+        # E8 xx xx (CALL FCE0) — the DOSDATA DOSINIT entry from the file.
+        dos_base = 0x15F0
+        expect(memory[dos_base]).to eq(0xE8)
 
-        # Run enough steps for SYSINIT init (interrupt detection, equipment check, etc.)
-        1_000.times do |_i|
-          eip = pipeline.reg(:eip)
-          cs_cache = pipeline.seg_cache_public(:cs)
-          cs_base = pipeline.desc_base_public(cs_cache)
-          linear = (cs_base + eip) & 0xFFFF_FFFF
-
-          # Detect BIOS calls (execution at F000:xxxx)
-          if cs_base == 0xF_0000
-            vectors_called << (linear - 0xF_0000)
-          end
-
-          begin
-            bios.step(memory)
-          rescue
-            break
-          end
-        end
-
-        # SYSINIT should call INT 11h (equipment) and/or INT 15h (system services)
-        # within its first ~100 instructions. It also calls INT 14h/17h for device detection.
-        bios_handler_range = (0x0100..0x0600)
-        bios_calls = vectors_called.select { |v| bios_handler_range.include?(v) }
-        expect(bios_calls).not_to be_empty
+        # The dispatch table should be accessible at SS:0D28
+        ss_base = pipeline.desc_base_public(
+          pipeline.seg_cache_public(:ss))
+        table_addr = ss_base + 0x0D28
+        # First byte of the dispatch table is non-zero (function code)
+        expect(memory[table_addr]).not_to eq(0)
       end
     end
   end
