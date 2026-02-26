@@ -17,7 +17,7 @@ module RHDL
         DEFAULT_MEM_SIZE = 128 * 1024 * 1024
         LINUX_BOOTSTRAP_OFFSET = 0x1000
         LINUX_BOOT_HART_ID = 0
-        LINUX_PIPELINE_COMPAT_ISA = 'rv32imafdcsu_zicsr_zifencei'
+        LINUX_PIPELINE_COMPAT_ISA = 'rv32imafsu_zicsr_zifencei'
         LINUX_PIPELINE_BOOTARGS = 'console=ttyS0 rdinit=/sbin/init quiet'
         FDT_MAGIC = 0xD00D_FEED
         FDT_BEGIN_NODE = 0x0000_0001
