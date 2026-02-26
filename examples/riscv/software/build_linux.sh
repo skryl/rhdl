@@ -16,7 +16,7 @@ LINUX_DTS_PATH="${BIN_DIR}/rhdl_riscv_virt.dts"
 LINUX_DTB_PATH="${BIN_DIR}/rhdl_riscv_virt.dtb"
 LINUX_INITRAMFS_LOAD_ADDR="${LINUX_INITRAMFS_LOAD_ADDR:-0x84000000}"
 LINUX_BOOT_CMDLINE="${LINUX_BOOT_CMDLINE:-console=ttyS0 earlycon=uart8250,mmio,0x10000000 rdinit=/sbin/init}"
-LINUX_RISCV_ISA="${LINUX_RISCV_ISA:-rv32imafdcvsu_zba_zbb_zbkb_zbc_zawrs_zacas_zicbom_zicboz_zicbop_zicsr_zifencei}"
+LINUX_RISCV_ISA="${LINUX_RISCV_ISA:-rv32imafsu_zicsr_zifencei}"
 
 BUILDROOT_VERSION="${BUILDROOT_VERSION:-2025.02.1}"
 BUILDROOT_CACHE_DIR="${SOFTWARE_DIR}/.cache"
