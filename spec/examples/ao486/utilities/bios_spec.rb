@@ -347,5 +347,58 @@ RSpec.describe RHDL::Examples::AO486::Bios, 'Phase 4: BIOS stub & boot sector' d
         expect(memory[table_addr]).not_to eq(0)
       end
     end
+
+    describe 'COMMAND.COM loading (Phase 6)' do
+      it 'loads COMMAND.COM from floppy and sets CPU state' do
+        bios.setup(memory)
+        bios.load_dos_ram_image(memory)
+        bios.load_command_com(memory)
+
+        # Entry point should be at PSP:0100
+        expect(pipeline.reg(:eip)).to eq(0x0100)
+        cs_base = pipeline.desc_base_public(pipeline.seg_cache_public(:cs))
+        expect(cs_base).to eq(0xC200)  # psp_base
+
+        # First bytes of COMMAND.COM should be present at PSP:0100
+        command_com = floppy.read_file('COMMAND.COM')
+        expect(memory[0xC300]).to eq(command_com[0])
+        expect(memory[0xC301]).to eq(command_com[1])
+      end
+
+      it 'displays the MS-DOS banner and prompt', :slow, timeout: 300 do
+        bios.setup(memory)
+        bios.load_dos_ram_image(memory)
+        bios.load_command_com(memory)
+
+        # Run COMMAND.COM until we see the prompt.  Stop early once
+        # the "A>" prompt appears to keep test runtime manageable.
+        200_000.times do
+          bios.step(memory)
+          break if bios.video_output.include?('A>')
+        end
+
+        output = bios.video_output
+        expect(output).to include('Microsoft')
+        expect(output).to include('MS-DOS')
+        expect(output).to include('Version 4.01')
+        expect(output).to include('A>')
+      end
+
+      it 'has no unhandled INT 21h errors during startup', :slow, timeout: 300 do
+        bios.setup(memory)
+        bios.load_dos_ram_image(memory)
+        bios.load_command_com(memory)
+
+        200_000.times do
+          bios.step(memory)
+          break if bios.video_output.include?('A>')
+        end
+
+        # No unhandled INT 21h calls should remain (except terminate)
+        unhandled_21 = bios.unhandled_ints.select { |i| i[:vector] == 0x21 }
+        real_errors = unhandled_21.reject { |i| i[:ah] == 0x4C }
+        expect(real_errors).to be_empty
+      end
+    end
   end
 end

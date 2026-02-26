@@ -53,6 +53,8 @@ module RHDL
           @unhandled_ints = []
           @handler_linear_addrs = {}
           @msdos_range = nil
+          @file_handles = {}     # handle_num => { data:, pos:, name: }
+          @next_handle = 5       # 0-4 reserved for std handles
         end
 
         # Install IVT, BDA, and BIOS stubs into memory.
@@ -332,6 +334,119 @@ module RHDL
           @dos_seg = dos_seg
         end
 
+        # Load COMMAND.COM from the floppy and set up a minimal DOS
+        # execution environment (PSP, environment block, file handles).
+        # After this method returns, the CPU is set up to begin executing
+        # COMMAND.COM from its entry point.
+        def load_command_com(memory)
+          raise 'No floppy image loaded' unless @floppy
+          raise 'Call load_dos_ram_image first' unless @dos_base
+
+          command_com = @floppy.read_file('COMMAND.COM')
+          raise 'COMMAND.COM not found on floppy' unless command_com
+
+          # Allocate memory above the DOS kernel.
+          # The DOS kernel occupies dos_base (0x15F0) + 0xA000 = 0xB5F0.
+          # Leave a gap and place the environment, then PSP + program.
+          env_seg  = 0x0C00               # environment segment
+          env_base = env_seg << 4         # 0xC000
+          psp_seg  = 0x0C20               # PSP segment (after env)
+          psp_base = psp_seg << 4         # 0xC200
+          prog_base = psp_base + 0x100    # COM programs load at PSP + 0x100
+
+          # ---- Environment block ----
+          env_str = "COMSPEC=A:\\COMMAND.COM\x00PATH=A:\\\x00\x00"
+          env_str.bytes.each_with_index { |b, i| memory[env_base + i] = b }
+          # After the double-null, DOS 3.1+ stores a 16-bit count (1) and
+          # the program pathname.
+          pos = env_str.length
+          memory[env_base + pos] = 1         # count (low)
+          memory[env_base + pos + 1] = 0     # count (high)
+          prog_name = "A:\\COMMAND.COM\x00"
+          prog_name.bytes.each_with_index { |b, i| memory[env_base + pos + 2 + i] = b }
+
+          # ---- PSP (Program Segment Prefix) ----
+          # 0x00: INT 20h (CD 20)
+          memory[psp_base + 0x00] = 0xCD
+          memory[psp_base + 0x01] = 0x20
+
+          # 0x02: Top of memory in paragraphs
+          top_mem = 0xA000  # 640K = 0xA000 paragraphs
+          memory[psp_base + 0x02] = top_mem & 0xFF
+          memory[psp_base + 0x03] = (top_mem >> 8) & 0xFF
+
+          # 0x05: FAR CALL to DOS dispatcher (5 bytes: INT 21h / RETF)
+          memory[psp_base + 0x05] = 0xCD
+          memory[psp_base + 0x06] = 0x21
+          memory[psp_base + 0x07] = 0xCB  # RETF
+
+          # 0x0A: Previous INT 22h (terminate address) → our handler
+          vec22_off = HANDLER_OFFSETS[0x20] || (DEFAULT_HANDLER_BASE + 0x20)
+          write_dword(memory, psp_base + 0x0A, vec22_off, BIOS_SEG)
+          # 0x0E: Previous INT 23h (Ctrl+C)
+          write_dword(memory, psp_base + 0x0E, HANDLER_OFFSETS[0x09] || 0, BIOS_SEG)
+          # 0x12: Previous INT 24h (critical error)
+          write_dword(memory, psp_base + 0x12, DEFAULT_HANDLER_BASE + 0x24, BIOS_SEG)
+
+          # 0x16: Parent PSP segment (self = no parent)
+          memory[psp_base + 0x16] = psp_seg & 0xFF
+          memory[psp_base + 0x17] = (psp_seg >> 8) & 0xFF
+
+          # 0x18: File handle table (20 bytes: 0xFF = closed)
+          20.times { |i| memory[psp_base + 0x18 + i] = 0xFF }
+          # Open stdin (0), stdout (1), stderr (2), stdaux (3), stdprn (4)
+          memory[psp_base + 0x18] = 0x01   # stdin  → SFT entry 1
+          memory[psp_base + 0x19] = 0x01   # stdout → SFT entry 1
+          memory[psp_base + 0x1A] = 0x01   # stderr → SFT entry 1
+          memory[psp_base + 0x1B] = 0x00   # stdaux → SFT entry 0
+          memory[psp_base + 0x1C] = 0x02   # stdprn → SFT entry 2
+
+          # 0x2C: Environment segment
+          memory[psp_base + 0x2C] = env_seg & 0xFF
+          memory[psp_base + 0x2D] = (env_seg >> 8) & 0xFF
+
+          # 0x32: File handle table size
+          memory[psp_base + 0x32] = 20
+          memory[psp_base + 0x33] = 0
+
+          # 0x34: Far pointer to file handle table (self at PSP:0x18)
+          write_dword(memory, psp_base + 0x34, 0x18, psp_seg)
+
+          # 0x50: DOS INT 21h far call stub (INT 21h / RETF)
+          memory[psp_base + 0x50] = 0xCD
+          memory[psp_base + 0x51] = 0x21
+          memory[psp_base + 0x52] = 0xCB
+
+          # 0x80: Command tail (empty: just CR)
+          memory[psp_base + 0x80] = 0x00   # length = 0
+          memory[psp_base + 0x81] = 0x0D   # CR terminator
+
+          # ---- Load COMMAND.COM at PSP:0100 ----
+          command_com.each_with_index { |b, i| memory[prog_base + i] = b & 0xFF }
+
+          # ---- Set default DTA to PSP:0080 ----
+          @dta_seg = psp_seg
+          @dta_off = 0x0080
+
+          # ---- CPU state for COMMAND.COM entry ----
+          @pipeline.setup_real_mode(cs_base: psp_base, eip: 0x0100, esp: 0xFFFE)
+          @pipeline.set_reg(:ds, psp_seg)
+          @pipeline.set_ds_base(psp_base)
+          @pipeline.set_reg(:es, psp_seg)
+          @pipeline.set_es_base(psp_base)
+          @pipeline.set_reg(:ss, psp_seg)
+          @pipeline.send(:set_seg_base, :ss, C::SEGMENT_SS, psp_base)
+
+          # Push a return address on the stack that points to PSP:0000
+          # (INT 20h).  If COMMAND.COM does a near RET, it terminates.
+          sp = 0xFFFE
+          memory[psp_base + sp] = 0x00
+          memory[psp_base + sp + 1] = 0x00
+
+          @psp_seg = psp_seg
+          @psp_base = psp_base
+        end
+
         # Execute one step with BIOS interception.
         # Checks if EIP is at a BIOS handler address before executing.
         def step(memory)
@@ -386,10 +501,14 @@ module RHDL
 
         def write_ivt_entry(memory, vector, segment, offset)
           addr = vector * 4
-          memory[addr]     = offset & 0xFF
-          memory[addr + 1] = (offset >> 8) & 0xFF
-          memory[addr + 2] = segment & 0xFF
-          memory[addr + 3] = (segment >> 8) & 0xFF
+          write_dword(memory, addr, offset, segment)
+        end
+
+        def write_dword(memory, addr, low_word, high_word)
+          memory[addr]     = low_word & 0xFF
+          memory[addr + 1] = (low_word >> 8) & 0xFF
+          memory[addr + 2] = high_word & 0xFF
+          memory[addr + 3] = (high_word >> 8) & 0xFF
         end
 
         # ========== BIOS Data Area ==========
@@ -686,6 +805,9 @@ module RHDL
         def handle_int21h(memory)
           ah = (@pipeline.reg(:eax) >> 8) & 0xFF
           case ah
+          when 0x01  # Read character with echo
+            # Return a newline to satisfy any read-with-echo call.
+            @pipeline.set_reg(:eax, (@pipeline.reg(:eax) & 0xFF00) | 0x0D)
           when 0x02  # Display character
             dl = @pipeline.reg(:edx) & 0xFF
             @video_buffer << dl.chr
@@ -719,11 +841,44 @@ module RHDL
             if new_linear >= BIOS_BASE && new_linear < BIOS_BASE + 0x10000
               @handler_linear_addrs[new_linear] = al
             end
+          when 0x0A  # Buffered keyboard input
+            ds_base = @pipeline.desc_base_public(@pipeline.seg_cache_public(:ds))
+            dx = @pipeline.reg(:edx) & 0xFFFF
+            buf_addr = (ds_base + dx) & 0xFFFF_FFFF
+            # Buffer format: [max_chars] [actual_count] [chars...]
+            # Return empty line (just CR).
+            memory[buf_addr + 1] = 0      # 0 characters read
+            memory[buf_addr + 2] = 0x0D   # CR terminator
+          when 0x0B  # Get stdin status
+            @pipeline.set_reg(:eax, (@pipeline.reg(:eax) & 0xFF00))  # AL=0 (no char)
+          when 0x19  # Get current default drive
+            @pipeline.set_reg(:eax, (@pipeline.reg(:eax) & 0xFF00))  # AL=0 (A:)
+          when 0x1A  # Set DTA address
+            @dta_seg = @pipeline.reg(:ds) & 0xFFFF
+            @dta_off = @pipeline.reg(:edx) & 0xFFFF
+          when 0x26  # Create new PSP
+            # Minimal stub — just acknowledge.
+            set_return_cf(memory, 0)
+          when 0x29  # Parse filename into FCB
+            # Set AL=0xFF (no valid filename parsed)
+            @pipeline.set_reg(:eax, (@pipeline.reg(:eax) & 0xFF00) | 0xFF)
+          when 0x2A  # Get date
+            @pipeline.set_reg(:ecx, 1990)  # CX = year
+            @pipeline.set_reg(:edx, 0x0101) # DH=month(1), DL=day(1)
+            @pipeline.set_reg(:eax, (@pipeline.reg(:eax) & 0xFF00))  # AL=day of week (0=Sun)
+          when 0x2C  # Get time
+            @pipeline.set_reg(:ecx, 0x0C00) # CH=hours(12), CL=minutes(0)
+            @pipeline.set_reg(:edx, 0x0000) # DH=seconds(0), DL=hundredths(0)
+          when 0x2F  # Get DTA address
+            dta_s = @dta_seg || 0
+            dta_o = @dta_off || 0x0080
+            set_es_with_base(dta_s)
+            @pipeline.set_reg(:ebx, dta_o)
           when 0x30  # Get DOS version
             @pipeline.set_reg(:eax, 0x0004)  # AL=major 4, AH=minor 0
             @pipeline.set_reg(:ebx, 0x0000)  # BH=DOS OEM, BL=0
             @pipeline.set_reg(:ecx, 0x0000)
-          when 0x33  # Get/Set break flag
+          when 0x33  # Get/Set Ctrl+Break check flag
             al = @pipeline.reg(:eax) & 0xFF
             if al == 0  # Get break flag
               @pipeline.set_reg(:edx, (@pipeline.reg(:edx) & 0xFF00))  # DL=0 (off)
@@ -735,6 +890,14 @@ module RHDL
             segment = mem_read16(memory, ivt_addr + 2)
             @pipeline.set_reg(:ebx, offset)
             set_es_with_base(segment)
+          when 0x37  # Get/set switch character
+            al = @pipeline.reg(:eax) & 0xFF
+            if al == 0  # Get switch character
+              @pipeline.set_reg(:edx, (@pipeline.reg(:edx) & 0xFF00) | 0x2F)  # DL='/'
+            end
+          when 0x38  # Get/set country info
+            # Return US country info (minimal)
+            set_return_cf(memory, 0)
           when 0x40  # Write to file handle
             bx = @pipeline.reg(:ebx) & 0xFFFF
             cx = @pipeline.reg(:ecx) & 0xFFFF
@@ -756,48 +919,102 @@ module RHDL
             @pipeline.set_reg(:eax, 0x0005)
             set_return_cf(memory, 1)
           when 0x3D  # Open file
-            # No files available — return "file not found"
-            @pipeline.set_reg(:eax, 0x0002)
-            set_return_cf(memory, 1)
+            handle_dos_open_file(memory)
           when 0x3E  # Close file handle
+            bx = @pipeline.reg(:ebx) & 0xFFFF
+            @file_handles.delete(bx)
             set_return_cf(memory, 0)
           when 0x3F  # Read from file handle
-            bx = @pipeline.reg(:ebx) & 0xFFFF
-            if bx <= 2  # stdin/stdout/stderr
-              @pipeline.set_reg(:eax, 0)  # 0 bytes read (EOF)
+            handle_dos_read_file(memory)
+          when 0x42  # Seek (LSEEK)
+            handle_dos_seek(memory)
+          when 0x44  # IOCTL
+            handle_dos_ioctl(memory)
+          when 0x47  # Get current directory
+            # Return root directory ("\0" = root)
+            ds_base = @pipeline.desc_base_public(@pipeline.seg_cache_public(:ds))
+            si = @pipeline.reg(:esi) & 0xFFFF
+            memory[(ds_base + si) & 0xFFFF_FFFF] = 0x00  # null = root
+            set_return_cf(memory, 0)
+          when 0x48  # Allocate memory
+            # Return the segment right after our loaded program.
+            bx = @pipeline.reg(:ebx) & 0xFFFF  # requested paragraphs
+            if bx <= 0x1000
+              alloc_seg = (@alloc_top ||= ((@psp_seg || 0x0C20) + 0x1000))
+              @pipeline.set_reg(:eax, alloc_seg)
+              @alloc_top = alloc_seg + bx
               set_return_cf(memory, 0)
             else
-              @pipeline.set_reg(:eax, 0x0006)  # invalid handle
+              @pipeline.set_reg(:eax, 0x0008)
+              @pipeline.set_reg(:ebx, 0x1000)  # largest available
               set_return_cf(memory, 1)
             end
-          when 0x42  # Seek (LSEEK)
+          when 0x49  # Free memory block
             set_return_cf(memory, 0)
-            @pipeline.set_reg(:eax, 0)
-            @pipeline.set_reg(:edx, 0)
-          when 0x44  # IOCTL
-            al = @pipeline.reg(:eax) & 0xFF
-            if al == 0x00  # Get device information
-              bx = @pipeline.reg(:ebx) & 0xFFFF
-              if bx <= 2  # stdin/stdout/stderr → character device
-                @pipeline.set_reg(:edx, 0x80D3)  # ISDEV | ISCIN | ISCOT | ISNUL | BINARY
-                set_return_cf(memory, 0)
-              else
-                @pipeline.set_reg(:eax, 0x0006)  # invalid handle
-                set_return_cf(memory, 1)
-              end
-            else
-              @pipeline.set_reg(:eax, 0x0001)  # invalid function
-              set_return_cf(memory, 1)
-            end
-          when 0x48  # Allocate memory
-            # Return error: not enough memory
-            @pipeline.set_reg(:eax, (@pipeline.reg(:eax) & 0x00FF) | (0x08 << 8))
-            @pipeline.set_reg(:ebx, 0x0000)  # BX = largest block available
-            set_return_cf(memory, 1)
           when 0x4A  # Resize memory block
             set_return_cf(memory, 0)  # pretend success
+          when 0x4B  # EXEC (load and execute program)
+            # Not supported — return error
+            @pipeline.set_reg(:eax, 0x0002)  # file not found
+            set_return_cf(memory, 1)
           when 0x4C  # Terminate program with return code
             @unhandled_ints << { vector: 0x21, ah: 0x4C, info: :terminate }
+          when 0x50  # Set current PSP
+            @current_psp = @pipeline.reg(:ebx) & 0xFFFF
+          when 0x51, 0x62  # Get current PSP
+            @pipeline.set_reg(:ebx, @current_psp || @psp_seg || 0)
+          when 0x52  # Get DOS List of Lists (SysVars)
+            # Return a pointer to the SysVars area in the DOS segment.
+            set_es_with_base(@dos_seg || 0x015F)
+            @pipeline.set_reg(:ebx, 0x0026)  # offset of SysVars in DOS segment
+          when 0x54  # Get verify flag
+            @pipeline.set_reg(:eax, (@pipeline.reg(:eax) & 0xFF00))  # AL=0 (off)
+          when 0x59  # Get extended error info
+            @pipeline.set_reg(:eax, 0)      # AX = no error
+            @pipeline.set_reg(:ebx, 0)
+            @pipeline.set_reg(:ecx, 0)
+          when 0x63  # Get DBCS lead byte table
+            # Return "no DBCS" by setting DS:SI to an empty table (just 0x0000).
+            # Use a spot in the BIOS area for the empty table.
+            empty_table_off = 0x0300
+            memory[BIOS_BASE + empty_table_off] = 0x00
+            memory[BIOS_BASE + empty_table_off + 1] = 0x00
+            @pipeline.set_reg(:ds, BIOS_SEG)
+            @pipeline.set_ds_base(BIOS_BASE)
+            @pipeline.set_reg(:esi, empty_table_off)
+            set_return_cf(memory, 0)
+          when 0x65  # Get extended country info
+            al = @pipeline.reg(:eax) & 0xFF
+            if al == 0x01  # Get general internationalization info
+              cx = @pipeline.reg(:ecx) & 0xFFFF
+              es_base = @pipeline.desc_base_public(@pipeline.seg_cache_public(:es))
+              di = @pipeline.reg(:edi) & 0xFFFF
+              buf = (es_base + di) & 0xFFFF_FFFF
+              # Return minimal US country info
+              memory[buf + 0] = 0x01  # info ID = 1
+              memory[buf + 1] = 38    # size (low)
+              memory[buf + 2] = 0     # size (high)
+              memory[buf + 3] = 1     # country code (low) = US
+              memory[buf + 4] = 0     # country code (high)
+              memory[buf + 5] = 437 & 0xFF   # code page (low)
+              memory[buf + 6] = (437 >> 8) & 0xFF  # code page (high)
+              # Date format: 0=MDY
+              memory[buf + 7] = 0
+              memory[buf + 8] = 0
+              # Currency symbol: "$\0\0\0\0"
+              memory[buf + 9] = 0x24
+              4.times { |j| memory[buf + 10 + j] = 0 }
+              # Thousands separator: ","
+              memory[buf + 14] = 0x2C
+              memory[buf + 15] = 0
+              # Decimal separator: "."
+              memory[buf + 16] = 0x2E
+              memory[buf + 17] = 0
+              @pipeline.set_reg(:ecx, 41)  # bytes returned
+              set_return_cf(memory, 0)
+            else
+              set_return_cf(memory, 0)
+            end
           else
             # Unhandled DOS function — log but don't fail
             @unhandled_ints << { vector: 0x21, ah: ah, eip: @pipeline.reg(:eip) }
@@ -808,6 +1025,157 @@ module RHDL
           @pipeline.set_reg(:es, segment)
           base = (segment & 0xFFFF) << 4
           @pipeline.set_es_base(base)
+        end
+
+        # ========== DOS File I/O ==========
+
+        # Read a NUL-terminated string from memory.
+        def read_asciiz(memory, addr, max: 128)
+          str = +""
+          max.times do |j|
+            b = memory[(addr + j) & 0xFFFF_FFFF] || 0
+            break if b == 0
+            str << b.chr
+          end
+          str
+        end
+
+        # Normalize a DOS filename: strip drive prefix, upcase, convert / to \.
+        def normalize_dos_filename(name)
+          name = name.tr('/', '\\')
+          # Strip drive letter prefix (e.g. "A:\")
+          name = name.sub(/\A[A-Za-z]:\\/, '')
+          # Strip leading backslash
+          name = name.sub(/\A\\/, '')
+          name.upcase
+        end
+
+        def handle_dos_open_file(memory)
+          ds_base = @pipeline.desc_base_public(@pipeline.seg_cache_public(:ds))
+          dx = @pipeline.reg(:edx) & 0xFFFF
+          fname_addr = (ds_base + dx) & 0xFFFF_FFFF
+          fname = read_asciiz(memory, fname_addr)
+          normalized = normalize_dos_filename(fname)
+
+          # Try to read the file from the floppy
+          data = @floppy&.read_file(normalized)
+          if data
+            handle = @next_handle
+            @next_handle += 1
+            @file_handles[handle] = { data: data, pos: 0, name: normalized }
+            @pipeline.set_reg(:eax, handle)
+            set_return_cf(memory, 0)
+          else
+            @pipeline.set_reg(:eax, 0x0002)  # file not found
+            set_return_cf(memory, 1)
+          end
+        end
+
+        def handle_dos_read_file(memory)
+          bx = @pipeline.reg(:ebx) & 0xFFFF
+          cx = @pipeline.reg(:ecx) & 0xFFFF
+
+          # Standard handles
+          if bx <= 2
+            if bx == 0  # stdin
+              # Return CR (Enter) as a single byte read (simulates empty input)
+              ds_base = @pipeline.desc_base_public(@pipeline.seg_cache_public(:ds))
+              dx = @pipeline.reg(:edx) & 0xFFFF
+              dest = (ds_base + dx) & 0xFFFF_FFFF
+              memory[dest] = 0x0D  # CR
+              @pipeline.set_reg(:eax, 0)  # 0 bytes (EOF)
+            else
+              @pipeline.set_reg(:eax, 0)  # 0 bytes read
+            end
+            set_return_cf(memory, 0)
+            return
+          end
+
+          # File handle
+          fh = @file_handles[bx]
+          unless fh
+            @pipeline.set_reg(:eax, 0x0006)  # invalid handle
+            set_return_cf(memory, 1)
+            return
+          end
+
+          data = fh[:data]
+          pos = fh[:pos]
+          to_read = [cx, data.length - pos].min
+          to_read = [to_read, 0].max
+
+          if to_read > 0
+            ds_base = @pipeline.desc_base_public(@pipeline.seg_cache_public(:ds))
+            dx = @pipeline.reg(:edx) & 0xFFFF
+            dest = (ds_base + dx) & 0xFFFF_FFFF
+            to_read.times do |i|
+              memory[(dest + i) & 0xFFFF_FFFF] = data[pos + i] & 0xFF
+            end
+            fh[:pos] = pos + to_read
+          end
+
+          @pipeline.set_reg(:eax, to_read)
+          set_return_cf(memory, 0)
+        end
+
+        def handle_dos_seek(memory)
+          bx = @pipeline.reg(:ebx) & 0xFFFF
+          al = @pipeline.reg(:eax) & 0xFF
+          cx = @pipeline.reg(:ecx) & 0xFFFF
+          dx = @pipeline.reg(:edx) & 0xFFFF
+          offset = (cx << 16) | dx
+
+          fh = @file_handles[bx]
+          unless fh
+            # For non-file handles, just return 0
+            @pipeline.set_reg(:eax, 0)
+            @pipeline.set_reg(:edx, 0)
+            set_return_cf(memory, 0)
+            return
+          end
+
+          case al
+          when 0  # SEEK_SET
+            fh[:pos] = offset
+          when 1  # SEEK_CUR
+            fh[:pos] += offset
+          when 2  # SEEK_END
+            fh[:pos] = fh[:data].length + offset
+          end
+          fh[:pos] = [[fh[:pos], 0].max, fh[:data].length].min
+
+          new_pos = fh[:pos]
+          @pipeline.set_reg(:eax, new_pos & 0xFFFF)
+          @pipeline.set_reg(:edx, (new_pos >> 16) & 0xFFFF)
+          set_return_cf(memory, 0)
+        end
+
+        def handle_dos_ioctl(memory)
+          al = @pipeline.reg(:eax) & 0xFF
+          bx = @pipeline.reg(:ebx) & 0xFFFF
+
+          case al
+          when 0x00  # Get device information
+            if bx <= 2  # stdin/stdout/stderr → character device
+              @pipeline.set_reg(:edx, 0x80D3)  # ISDEV | ISCIN | ISCOT | ISNUL | BINARY
+              set_return_cf(memory, 0)
+            elsif @file_handles[bx]
+              # File handle → block device (not a character device)
+              @pipeline.set_reg(:edx, 0x0000)  # not a device, drive A:
+              set_return_cf(memory, 0)
+            else
+              @pipeline.set_reg(:eax, 0x0006)  # invalid handle
+              set_return_cf(memory, 1)
+            end
+          when 0x01  # Set device information
+            set_return_cf(memory, 0)
+          when 0x08  # Is device remote?
+            @pipeline.set_reg(:edx, 0x0000)  # not remote
+            set_return_cf(memory, 0)
+          else
+            @pipeline.set_reg(:eax, 0x0001)  # invalid function
+            set_return_cf(memory, 1)
+          end
         end
 
         # ========== Flag Helpers ==========
