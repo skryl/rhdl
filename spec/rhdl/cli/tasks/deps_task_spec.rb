@@ -71,6 +71,12 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
         allow(task).to receive(:command_available?).with('firtool').and_return(true)
         allow(task).to receive(:command_available?).with('arcilator').and_return(true)
         allow(task).to receive(:command_available?).with('llc').and_return(true)
+        allow(task).to receive(:command_healthy?).and_call_original
+        allow(task).to receive(:command_healthy?).with('firtool', 'firtool --version').and_return(true)
+        allow(task).to receive(:command_healthy?).with('arcilator', 'arcilator --version').and_return(true)
+        allow(task).to receive(:command_healthy?).with('llc', 'llc --version').and_return(true)
+        allow(task).to receive(:command_output_first_line).and_call_original
+        allow(task).to receive(:command_output_first_line).with('firtool --version').and_return('firtool-1.62.0')
 
         # Mock backtick operator for version queries
         allow(task).to receive(:`).and_call_original
@@ -99,6 +105,12 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
           allow(task).to receive(:command_available?).with('firtool').and_return(false, true)
           allow(task).to receive(:command_available?).with('arcilator').and_return(false, true)
           allow(task).to receive(:command_available?).with('llc').and_return(false, true)
+          allow(task).to receive(:command_healthy?).and_call_original
+          allow(task).to receive(:command_healthy?).with('firtool', 'firtool --version').and_return(false, true)
+          allow(task).to receive(:command_healthy?).with('arcilator', 'arcilator --version').and_return(false, true)
+          allow(task).to receive(:command_healthy?).with('llc', 'llc --version').and_return(false, true)
+          allow(task).to receive(:command_output_first_line).and_call_original
+          allow(task).to receive(:command_output_first_line).with('firtool --version').and_return('firtool-1.62.0')
           allow(task).to receive(:install_arcilator)
           allow(task).to receive(:`).and_call_original
           allow(task).to receive(:`).with('iverilog -V 2>&1').and_return("Icarus Verilog version 11.0 (stable)\n")
@@ -178,6 +190,12 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
       allow(task).to receive(:command_available?).with('firtool').and_return(true)
       allow(task).to receive(:command_available?).with('arcilator').and_return(true)
       allow(task).to receive(:command_available?).with('llc').and_return(true)
+      allow(task).to receive(:command_healthy?).and_call_original
+      allow(task).to receive(:command_healthy?).with('firtool', 'firtool --version').and_return(true)
+      allow(task).to receive(:command_healthy?).with('arcilator', 'arcilator --version').and_return(true)
+      allow(task).to receive(:command_healthy?).with('llc', 'llc --version').and_return(true)
+      allow(task).to receive(:command_output_first_line).and_call_original
+      allow(task).to receive(:command_output_first_line).with('firtool --version').and_return('firtool-1.62.0')
 
       # Mock backtick operator for version queries
       allow(task).to receive(:`).and_call_original
