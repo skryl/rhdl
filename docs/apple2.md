@@ -10,7 +10,7 @@ The Apple II emulation consists of:
 - **ISA Simulator** (`examples/mos6502/utilities/`): Fast instruction-level execution
 - **Terminal Emulator** (`examples/apple2/bin/apple2`): Interactive display and keyboard
 - **Disk II Controller**: Full .dsk disk image support
-- **Multiple Backends**: HDL, netlist, Verilog, and compiled simulation
+- **Multiple Backends**: HDL, netlist, Verilog (Verilator), CIRCT/MLIR (Arcilator), and compiled simulation
 
 ## Quick Start
 
@@ -57,7 +57,7 @@ Options:
   --disk FILE           Load .dsk disk image
   --memdump FILE        Load memory dump file
   --pc ADDR             Set initial PC (hex)
-  -m, --mode MODE       Simulation mode: ruby, ir, netlist, verilog
+  -m, --mode MODE       Simulation mode: ruby, ir, netlist, verilog, circt
   --sim BACKEND         Simulation backend: ruby, interpret, jit, compile
   --sub-cycles N        Sub-cycles per step (14=full, 7=2x, 2=7x speed)
   --dry-run             Initialize but don't run
@@ -289,7 +289,7 @@ rhdl apple2 --mode netlist --appleiigo
 - Good for verification
 - Moderate performance
 
-### Verilog Mode
+### Verilog Mode (Verilator)
 
 Simulation using Verilator-compiled Verilog.
 
@@ -301,6 +301,19 @@ rhdl apple2 --mode verilog --appleiigo
 - Requires Verilator installation
 - Very fast performance
 - Good for long-running programs
+
+### CIRCT Mode (Arcilator)
+
+Simulation using CIRCT/MLIR lowering (`firtool`) and Arcilator.
+
+```bash
+rhdl apple2 --mode circt --appleiigo
+```
+
+**Characteristics:**
+- Requires CIRCT tools (`firtool`, `arcilator`)
+- Requires native toolchain for final object/shared library build (`clang`/`clang++` on macOS, or `llc`/`g++` on other hosts)
+- Native RTL simulation path useful for parity checks against Verilator
 
 ### Simulation Backends
 
@@ -633,6 +646,9 @@ rhdl apple2 --karateka --sim compile --sub-cycles 2
 # Fast with full accuracy
 rhdl apple2 --karateka --sim jit
 
+# Native RTL through CIRCT/MLIR
+rhdl apple2 --karateka --mode circt --debug
+
 # Debugging: Ruby mode with full visibility
 rhdl apple2 --karateka --mode ruby --debug
 ```
@@ -660,8 +676,9 @@ examples/apple2/
 │   ├── braille_renderer.rb # Hi-res display
 │   ├── color_renderer.rb   # Color terminal
 │   ├── ps2_encoder.rb      # Keyboard encoding
-│   ├── ir_simulator_runner.rb
-│   └── apple2_verilator.rb # Verilator integration
+│   ├── runners/ir_runner.rb
+│   ├── runners/verilator_runner.rb # Verilator integration
+│   └── runners/arcilator_runner.rb # CIRCT/MLIR (Arcilator) integration
 └── hdl.rb                  # HDL loader
 
 examples/mos6502/utilities/

@@ -419,7 +419,7 @@ rhdl examples riscv path/to/program.bin
 # Choose mode/backend and display mode
 rhdl examples riscv --mode ir --sim compile --io mmap path/to/program.bin
 
-# Core selection (default is pipeline)
+# Core selection (default is single)
 rhdl examples riscv --core pipeline path/to/program.bin
 rhdl examples riscv --core single path/to/program.bin
 
@@ -429,13 +429,18 @@ rhdl examples riscv -d --io uart path/to/program.bin
 # Launch xv6 (forces UART mode automatically)
 ./examples/riscv/software/build_xv6.sh
 rhdl examples riscv --xv6 -d
+rhdl examples riscv --xv6 --mode verilog
+rhdl examples riscv --xv6 --mode circt
 
 # Build Linux kernel artifacts (Phase 0 source workflow)
 git submodule update --init --recursive examples/riscv/software/linux
 ./examples/riscv/software/build_linux.sh
+# Buildroot for prebuilt toolchain defaults to linux/amd64 Buildroot host images.
 
 # Run Linux via the top-level CLI (forces UART mode automatically)
 rhdl examples riscv --linux
+rhdl examples riscv --linux --mode verilog
+rhdl examples riscv --linux --mode circt
 
 # Optional Linux artifact overrides (initramfs + custom DTB)
 rhdl examples riscv --linux \
@@ -448,6 +453,7 @@ rhdl examples riscv --headless --cycles 200000 path/to/program.bin
 
 Linux milestones are covered in `spec/examples/riscv/linux_boot_milestones_spec.rb`.
 Additional Linux compatibility specs live under `spec/examples/riscv/linux_*_spec.rb`.
+xv6 shell I/O coverage across IR/Verilator/Arcilator lives in `spec/examples/riscv/xv6_shell_io_spec.rb`.
 
 See each example's documentation for complete details on architecture, instruction sets, and CLI options.
 
@@ -571,7 +577,8 @@ File.write('alu.v', verilog_code)
 | Tool | Speed | Use Case |
 |------|-------|----------|
 | iverilog | ~100K cycles/s | Functional verification, golden reference |
-| Verilator | ~5.7M cycles/s | High-performance simulation, benchmarking |
+| Verilator | ~5.7M cycles/s | High-performance RTL simulation, benchmarking |
+| CIRCT/MLIR (Arcilator) | Workload-dependent | Native RTL simulation from FIRRTL/MLIR flows |
 
 ```bash
 # Compile and run with iverilog
@@ -579,6 +586,10 @@ iverilog -o sim alu.v testbench.v && vvp sim
 
 # Compile with Verilator for maximum performance
 verilator --cc alu.v --exe testbench.cpp
+
+# Compile FIRRTL/MLIR with CIRCT + Arcilator
+firtool design.fir --ir-hw -o design.mlir
+arcilator design.mlir --state-file=state.json -o design.ll
 ```
 
 When iverilog is installed, RHDL automatically runs gate-level verification tests comparing synthesized Verilog against behavioral simulation.
@@ -616,8 +627,8 @@ rake bench:gates              # Benchmark gate-level simulation
 **Backend Selection Guide:**
 - **< 100K cycles**: Use JIT (fast startup)
 - **100K - 1M cycles**: Use JIT or Compiler
-- **> 1M cycles**: Use Compiler or Verilator
-- **Maximum speed**: Use Verilator (requires installation)
+- **> 1M cycles**: Use Compiler, Verilator, or CIRCT/MLIR (Arcilator)
+- **Maximum RTL speed**: Use Verilator or CIRCT/MLIR (requires external tools)
 
 See [Performance Guide](docs/performance.md) for detailed benchmarks and optimization tips.
 

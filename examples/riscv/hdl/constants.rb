@@ -18,6 +18,10 @@ module RHDL
     OP_IMM  = 0b0010011  # Immediate arithmetic
     OP      = 0b0110011  # Register-register arithmetic
     OP_FP   = 0b1010011  # Floating-point ops/moves (RV32F)
+    MADD    = 0b1000011  # Floating-point fused multiply-add
+    MSUB    = 0b1000111  # Floating-point fused multiply-sub
+    NMSUB   = 0b1001011  # Floating-point fused negated multiply-sub
+    NMADD   = 0b1001111  # Floating-point fused negated multiply-add
     OP_V    = 0b1010111  # Vector ops/config (RVV baseline subset)
     AMO     = 0b0101111  # Atomic memory operations (RV32A)
     MISC_MEM = 0b0001111 # FENCE instructions
@@ -48,6 +52,7 @@ module RHDL
     BYTE    = 0b000
     HALF    = 0b001
     WORD    = 0b010
+    DOUBLE  = 0b011
     BYTE_U  = 0b100
     HALF_U  = 0b101
   end

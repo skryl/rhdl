@@ -152,7 +152,8 @@ export function createSimLazyGetters({
         rebuildComponentExplorer,
         refreshStatus,
         log,
-        fetchImpl
+        fetchImpl,
+        requestFrame
       });
     }
     return simInitializerController;

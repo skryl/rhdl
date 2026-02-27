@@ -100,6 +100,7 @@ module RHDL
       # ========================================
       wire :id_rs1_addr, width: 5
       wire :id_rs2_addr, width: 5
+      wire :id_rs3_addr, width: 5
       wire :id_rd_addr, width: 5
       wire :id_opcode, width: 7
       wire :id_funct3, width: 3
@@ -119,6 +120,10 @@ module RHDL
       wire :id_rs3_data, width: 32
       wire :id_fp_rs1_data, width: 32
       wire :id_fp_rs2_data, width: 32
+      wire :id_fp_rs3_data, width: 32
+      wire :id_fp_rs1_data64, width: 64
+      wire :id_fp_rs2_data64, width: 64
+      wire :id_fp_rs3_data64, width: 64
       wire :regfile_forwarding_en
 
       # ========================================
@@ -136,6 +141,9 @@ module RHDL
       wire :id_ex_pc_plus4_in, width: 32
       wire :id_ex_rs1_data_in, width: 32
       wire :id_ex_rs2_data_in, width: 32
+      wire :id_ex_rs2_hi_data_in, width: 32
+      wire :id_ex_rs3_data_in, width: 32
+      wire :id_ex_rs3_hi_data_in, width: 32
       wire :id_ex_rd_src_data_in, width: 32
       wire :id_ex_imm_in, width: 32
       wire :id_ex_rs1_addr_in, width: 5
@@ -162,6 +170,9 @@ module RHDL
       wire :ex_pc_plus4, width: 32
       wire :ex_rs1_data, width: 32
       wire :ex_rs2_data, width: 32
+      wire :ex_rs2_hi_data, width: 32
+      wire :ex_rs3_data, width: 32
+      wire :ex_rs3_hi_data, width: 32
       wire :ex_rd_src_data, width: 32
       wire :ex_imm, width: 32
       wire :ex_rs1_addr, width: 5
@@ -371,7 +382,9 @@ module RHDL
       # ========================================
       wire :wb_data, width: 32
       wire :fp_rd_data, width: 32
+      wire :fp_rd_data64, width: 64
       wire :fp_reg_write
+      wire :fp_reg_write64
 
       # ========================================
       # Sub-component instances
@@ -499,11 +512,18 @@ module RHDL
       # ========================================
       port :id_rs1_addr => [:fp_regfile, :rs1_addr]
       port :id_rs2_addr => [:fp_regfile, :rs2_addr]
+      port :id_rs3_addr => [:fp_regfile, :rs3_addr]
       port :mem_rd_addr => [:fp_regfile, :rd_addr]
       port :fp_rd_data => [:fp_regfile, :rd_data]
       port :fp_reg_write => [:fp_regfile, :rd_we]
+      port :fp_rd_data64 => [:fp_regfile, :rd_data64]
+      port :fp_reg_write64 => [:fp_regfile, :rd_we64]
       port [:fp_regfile, :rs1_data] => :id_fp_rs1_data
       port [:fp_regfile, :rs2_data] => :id_fp_rs2_data
+      port [:fp_regfile, :rs3_data] => :id_fp_rs3_data
+      port [:fp_regfile, :rs1_data64] => :id_fp_rs1_data64
+      port [:fp_regfile, :rs2_data64] => :id_fp_rs2_data64
+      port [:fp_regfile, :rs3_data64] => :id_fp_rs3_data64
 
       # ========================================
       # Vector register file connections
@@ -655,6 +675,9 @@ module RHDL
       port :id_ex_pc_plus4_in => [:id_ex, :pc_plus4_in]
       port :id_ex_rs1_data_in => [:id_ex, :rs1_data_in]
       port :id_ex_rs2_data_in => [:id_ex, :rs2_data_in]
+      port :id_ex_rs2_hi_data_in => [:id_ex, :rs2_hi_data_in]
+      port :id_ex_rs3_data_in => [:id_ex, :rs3_data_in]
+      port :id_ex_rs3_hi_data_in => [:id_ex, :rs3_hi_data_in]
       port :id_ex_rd_src_data_in => [:id_ex, :rd_src_data_in]
       port :id_ex_imm_in => [:id_ex, :imm_in]
       port :id_ex_rs1_addr_in => [:id_ex, :rs1_addr_in]
@@ -678,6 +701,9 @@ module RHDL
       port [:id_ex, :pc_plus4_out] => :ex_pc_plus4
       port [:id_ex, :rs1_data_out] => :ex_rs1_data
       port [:id_ex, :rs2_data_out] => :ex_rs2_data
+      port [:id_ex, :rs2_hi_data_out] => :ex_rs2_hi_data
+      port [:id_ex, :rs3_data_out] => :ex_rs3_data
+      port [:id_ex, :rs3_hi_data_out] => :ex_rs3_hi_data
       port [:id_ex, :rd_src_data_out] => :ex_rd_src_data
       port [:id_ex, :imm_out] => :ex_imm
       port [:id_ex, :rs1_addr_out] => :ex_rs1_addr
@@ -868,19 +894,134 @@ module RHDL
         # These values are captured BEFORE sequential propagation
         # -----------------------------------------
         id_is_fp_store = local(:id_is_fp_store,
-                               (id_opcode == lit(Opcode::STORE_FP, width: 7)) & (id_funct3 == lit(Funct3::WORD, width: 3)),
+                               (id_opcode == lit(Opcode::STORE_FP, width: 7)) &
+                               ((id_funct3 == lit(Funct3::WORD, width: 3)) | (id_funct3 == lit(Funct3::DOUBLE, width: 3))),
                                width: 1)
+        id_is_fmv_w_x = local(:id_is_fmv_w_x,
+                              (id_opcode == lit(Opcode::OP_FP, width: 7)) &
+                              (id_funct7 == lit(0b1111000, width: 7)) &
+                              (id_funct3 == lit(0, width: 3)) &
+                              (id_rs2_addr == lit(0, width: 5)),
+                              width: 1)
+        id_is_fsgnj_d = local(:id_is_fsgnj_d,
+                              (id_opcode == lit(Opcode::OP_FP, width: 7)) &
+                              (id_funct7 == lit(0b0010001, width: 7)),
+                              width: 1)
+        id_is_fminmax_d = local(:id_is_fminmax_d,
+                                (id_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                (id_funct7 == lit(0b0010101, width: 7)),
+                                width: 1)
+        id_is_fcmp_d = local(:id_is_fcmp_d,
+                             (id_opcode == lit(Opcode::OP_FP, width: 7)) &
+                             (id_funct7 == lit(0b1010001, width: 7)),
+                             width: 1)
+        id_is_fadd_d = local(:id_is_fadd_d,
+                             (id_opcode == lit(Opcode::OP_FP, width: 7)) &
+                             (id_funct7 == lit(0b0000001, width: 7)),
+                             width: 1)
+        id_is_fsub_d = local(:id_is_fsub_d,
+                             (id_opcode == lit(Opcode::OP_FP, width: 7)) &
+                             (id_funct7 == lit(0b0000101, width: 7)),
+                             width: 1)
+        id_is_fmul_d = local(:id_is_fmul_d,
+                             (id_opcode == lit(Opcode::OP_FP, width: 7)) &
+                             (id_funct7 == lit(0b0001001, width: 7)),
+                             width: 1)
+        id_is_fdiv_d = local(:id_is_fdiv_d,
+                             (id_opcode == lit(Opcode::OP_FP, width: 7)) &
+                             (id_funct7 == lit(0b0001101, width: 7)),
+                             width: 1)
+        id_is_fsqrt_d = local(:id_is_fsqrt_d,
+                              (id_opcode == lit(Opcode::OP_FP, width: 7)) &
+                              (id_funct7 == lit(0b0101101, width: 7)) &
+                              (id_rs2_addr == lit(0, width: 5)),
+                              width: 1)
+        id_is_fmadd_d = local(:id_is_fmadd_d,
+                              (id_opcode == lit(Opcode::MADD, width: 7)) &
+                              (id_inst[26..25] == lit(0b01, width: 2)),
+                              width: 1)
+        id_is_fmsub_d = local(:id_is_fmsub_d,
+                              (id_opcode == lit(Opcode::MSUB, width: 7)) &
+                              (id_inst[26..25] == lit(0b01, width: 2)),
+                              width: 1)
+        id_is_fnmsub_d = local(:id_is_fnmsub_d,
+                               (id_opcode == lit(Opcode::NMSUB, width: 7)) &
+                               (id_inst[26..25] == lit(0b01, width: 2)),
+                               width: 1)
+        id_is_fnmadd_d = local(:id_is_fnmadd_d,
+                               (id_opcode == lit(Opcode::NMADD, width: 7)) &
+                               (id_inst[26..25] == lit(0b01, width: 2)),
+                               width: 1)
+        id_is_d_arith = local(:id_is_d_arith,
+                              id_is_fadd_d | id_is_fsub_d | id_is_fmul_d | id_is_fdiv_d | id_is_fsqrt_d |
+                              id_is_fmadd_d | id_is_fmsub_d | id_is_fnmsub_d | id_is_fnmadd_d,
+                              width: 1)
+        id_is_fcvt_s_w = local(:id_is_fcvt_s_w,
+                               (id_opcode == lit(Opcode::OP_FP, width: 7)) &
+                               (id_funct7 == lit(0b1101000, width: 7)) &
+                               (id_rs2_addr == lit(0b00000, width: 5)),
+                               width: 1)
+        id_is_fcvt_s_wu = local(:id_is_fcvt_s_wu,
+                                (id_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                (id_funct7 == lit(0b1101000, width: 7)) &
+                                (id_rs2_addr == lit(0b00001, width: 5)),
+                                width: 1)
+        id_is_fcvt_w_d = local(:id_is_fcvt_w_d,
+                               (id_opcode == lit(Opcode::OP_FP, width: 7)) &
+                               (id_funct7 == lit(0b1100001, width: 7)) &
+                               (id_rs2_addr == lit(0b00000, width: 5)),
+                               width: 1)
+        id_is_fcvt_wu_d = local(:id_is_fcvt_wu_d,
+                                (id_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                (id_funct7 == lit(0b1100001, width: 7)) &
+                                (id_rs2_addr == lit(0b00001, width: 5)),
+                                width: 1)
+        id_is_fcvt_s_d = local(:id_is_fcvt_s_d,
+                               (id_opcode == lit(Opcode::OP_FP, width: 7)) &
+                               (id_funct7 == lit(0b0100000, width: 7)) &
+                               (id_rs2_addr == lit(0b00001, width: 5)),
+                               width: 1)
+        id_is_fcvt_d_w = local(:id_is_fcvt_d_w,
+                               (id_opcode == lit(Opcode::OP_FP, width: 7)) &
+                               (id_funct7 == lit(0b1101001, width: 7)) &
+                               (id_rs2_addr == lit(0b00000, width: 5)),
+                               width: 1)
+        id_is_fcvt_d_wu = local(:id_is_fcvt_d_wu,
+                                (id_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                (id_funct7 == lit(0b1101001, width: 7)) &
+                                (id_rs2_addr == lit(0b00001, width: 5)),
+                                width: 1)
+        id_is_fp_op_from_fpreg = local(:id_is_fp_op_from_fpreg,
+                                       ((id_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                       ~(id_is_fmv_w_x | id_is_fcvt_s_w | id_is_fcvt_s_wu | id_is_fcvt_d_w | id_is_fcvt_d_wu)) |
+                                       id_is_fmadd_d | id_is_fmsub_d | id_is_fnmsub_d | id_is_fnmadd_d,
+                                       width: 1)
         id_is_fmv_x_w = local(:id_is_fmv_x_w,
                               (id_opcode == lit(Opcode::OP_FP, width: 7)) &
                               (id_funct7 == lit(0b1110000, width: 7)) &
                               (id_funct3 == lit(0, width: 3)) &
                               (id_rs2_addr == lit(0, width: 5)),
                               width: 1)
+        id_is_fclass_d = local(:id_is_fclass_d,
+                               (id_opcode == lit(Opcode::OP_FP, width: 7)) &
+                               (id_funct7 == lit(0b1110001, width: 7)) &
+                               (id_funct3 == lit(0b001, width: 3)) &
+                               (id_rs2_addr == lit(0, width: 5)),
+                               width: 1)
         id_ex_pc_in <= id_pc
         id_ex_pc_plus4_in <= id_pc_plus4
-        id_ex_rs1_data_in <= mux(id_is_fmv_x_w, id_fp_rs1_data, id_rs1_data)
-        id_ex_rs2_data_in <= mux(id_is_fp_store, id_fp_rs2_data, id_rs2_data)
-        id_ex_rd_src_data_in <= id_rs3_data
+        id_rs3_addr <= id_inst[31..27]
+        id_ex_rs1_data_in <= mux(id_is_fp_op_from_fpreg, id_fp_rs1_data, id_rs1_data)
+        id_ex_rs2_data_in <= mux(id_is_fp_store | id_is_fp_op_from_fpreg, id_fp_rs2_data, id_rs2_data)
+        id_ex_rs2_hi_data_in <= mux(id_is_fp_store | id_is_fp_op_from_fpreg, id_fp_rs2_data64[63..32], lit(0, width: 32))
+        id_ex_rs3_data_in <= mux(id_is_fmadd_d | id_is_fmsub_d | id_is_fnmsub_d | id_is_fnmadd_d, id_fp_rs3_data, lit(0, width: 32))
+        id_ex_rs3_hi_data_in <= mux(id_is_fmadd_d | id_is_fmsub_d | id_is_fnmsub_d | id_is_fnmadd_d, id_fp_rs3_data64[63..32], lit(0, width: 32))
+        id_ex_rd_src_data_in <= mux(id_is_fcvt_s_d | id_is_fcvt_w_d | id_is_fcvt_wu_d | id_is_fclass_d |
+                                    id_is_fsgnj_d | id_is_fminmax_d | id_is_fcmp_d,
+                                    id_fp_rs1_data64[63..32],
+                                    mux(id_is_d_arith,
+                                    id_fp_rs1_data64[63..32],
+                                    id_rs3_data))
         id_ex_imm_in <= id_imm
         id_ex_rs1_addr_in <= id_rs1_addr
         id_ex_rs2_addr_in <= id_rs2_addr
@@ -903,7 +1044,8 @@ module RHDL
         # EX Stage: Forwarding muxes
         # -----------------------------------------
         ex_is_fp_store = local(:ex_is_fp_store,
-                               (ex_opcode == lit(Opcode::STORE_FP, width: 7)) & (ex_funct3 == lit(Funct3::WORD, width: 3)),
+                               (ex_opcode == lit(Opcode::STORE_FP, width: 7)) &
+                               ((ex_funct3 == lit(Funct3::WORD, width: 3)) | (ex_funct3 == lit(Funct3::DOUBLE, width: 3))),
                                width: 1)
         ex_is_fmv_x_w = local(:ex_is_fmv_x_w,
                               (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
@@ -917,6 +1059,138 @@ module RHDL
                               (ex_funct3 == lit(0, width: 3)) &
                               (ex_rs2_addr == lit(0, width: 5)),
                               width: 1)
+        ex_is_fsgnj_s = local(:ex_is_fsgnj_s,
+                              (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                              (ex_funct7 == lit(0b0010000, width: 7)),
+                              width: 1)
+        ex_is_fsgnj_d = local(:ex_is_fsgnj_d,
+                              (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                              (ex_funct7 == lit(0b0010001, width: 7)),
+                              width: 1)
+        ex_is_fminmax_s = local(:ex_is_fminmax_s,
+                                (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                (ex_funct7 == lit(0b0010100, width: 7)),
+                                width: 1)
+        ex_is_fminmax_d = local(:ex_is_fminmax_d,
+                                (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                (ex_funct7 == lit(0b0010101, width: 7)),
+                                width: 1)
+        ex_is_fcmp_s = local(:ex_is_fcmp_s,
+                             (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                             (ex_funct7 == lit(0b1010000, width: 7)),
+                             width: 1)
+        ex_is_fcmp_d = local(:ex_is_fcmp_d,
+                             (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                             (ex_funct7 == lit(0b1010001, width: 7)),
+                             width: 1)
+        ex_is_fadd_d = local(:ex_is_fadd_d,
+                             (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                             (ex_funct7 == lit(0b0000001, width: 7)),
+                             width: 1)
+        ex_is_fsub_d = local(:ex_is_fsub_d,
+                             (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                             (ex_funct7 == lit(0b0000101, width: 7)),
+                             width: 1)
+        ex_is_fmul_d = local(:ex_is_fmul_d,
+                             (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                             (ex_funct7 == lit(0b0001001, width: 7)),
+                             width: 1)
+        ex_is_fdiv_d = local(:ex_is_fdiv_d,
+                             (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                             (ex_funct7 == lit(0b0001101, width: 7)),
+                             width: 1)
+        ex_is_fsqrt_d = local(:ex_is_fsqrt_d,
+                              (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                              (ex_funct7 == lit(0b0101101, width: 7)) &
+                              (ex_rs2_addr == lit(0, width: 5)),
+                              width: 1)
+        ex_is_fmadd_d = local(:ex_is_fmadd_d,
+                              (ex_opcode == lit(Opcode::MADD, width: 7)) &
+                              (ex_funct7[1..0] == lit(0b01, width: 2)),
+                              width: 1)
+        ex_is_fmsub_d = local(:ex_is_fmsub_d,
+                              (ex_opcode == lit(Opcode::MSUB, width: 7)) &
+                              (ex_funct7[1..0] == lit(0b01, width: 2)),
+                              width: 1)
+        ex_is_fnmsub_d = local(:ex_is_fnmsub_d,
+                               (ex_opcode == lit(Opcode::NMSUB, width: 7)) &
+                               (ex_funct7[1..0] == lit(0b01, width: 2)),
+                               width: 1)
+        ex_is_fnmadd_d = local(:ex_is_fnmadd_d,
+                               (ex_opcode == lit(Opcode::NMADD, width: 7)) &
+                               (ex_funct7[1..0] == lit(0b01, width: 2)),
+                               width: 1)
+        ex_is_d_arith = local(:ex_is_d_arith,
+                              ex_is_fadd_d | ex_is_fsub_d | ex_is_fmul_d | ex_is_fdiv_d | ex_is_fsqrt_d |
+                              ex_is_fmadd_d | ex_is_fmsub_d | ex_is_fnmsub_d | ex_is_fnmadd_d,
+                              width: 1)
+        ex_is_fclass_s = local(:ex_is_fclass_s,
+                               (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                               (ex_funct7 == lit(0b1110000, width: 7)) &
+                               (ex_funct3 == lit(0b001, width: 3)) &
+                               (ex_rs2_addr == lit(0, width: 5)),
+                               width: 1)
+        ex_is_fclass_d = local(:ex_is_fclass_d,
+                               (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                               (ex_funct7 == lit(0b1110001, width: 7)) &
+                               (ex_funct3 == lit(0b001, width: 3)) &
+                               (ex_rs2_addr == lit(0, width: 5)),
+                               width: 1)
+        ex_is_fcvt_w_s = local(:ex_is_fcvt_w_s,
+                               (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                               (ex_funct7 == lit(0b1100000, width: 7)) &
+                               (ex_rs2_addr == lit(0b00000, width: 5)),
+                               width: 1)
+        ex_is_fcvt_wu_s = local(:ex_is_fcvt_wu_s,
+                                (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                (ex_funct7 == lit(0b1100000, width: 7)) &
+                                (ex_rs2_addr == lit(0b00001, width: 5)),
+                                width: 1)
+        ex_is_fcvt_w_d = local(:ex_is_fcvt_w_d,
+                               (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                               (ex_funct7 == lit(0b1100001, width: 7)) &
+                               (ex_rs2_addr == lit(0b00000, width: 5)),
+                               width: 1)
+        ex_is_fcvt_wu_d = local(:ex_is_fcvt_wu_d,
+                                (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                (ex_funct7 == lit(0b1100001, width: 7)) &
+                                (ex_rs2_addr == lit(0b00001, width: 5)),
+                                width: 1)
+        ex_is_fcvt_s_w = local(:ex_is_fcvt_s_w,
+                               (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                               (ex_funct7 == lit(0b1101000, width: 7)) &
+                               (ex_rs2_addr == lit(0b00000, width: 5)),
+                               width: 1)
+        ex_is_fcvt_s_wu = local(:ex_is_fcvt_s_wu,
+                                (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                (ex_funct7 == lit(0b1101000, width: 7)) &
+                                (ex_rs2_addr == lit(0b00001, width: 5)),
+                                width: 1)
+        ex_is_fcvt_s_d = local(:ex_is_fcvt_s_d,
+                               (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                               (ex_funct7 == lit(0b0100000, width: 7)) &
+                               (ex_rs2_addr == lit(0b00001, width: 5)),
+                               width: 1)
+        ex_is_fcvt_d_s = local(:ex_is_fcvt_d_s,
+                               (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                               (ex_funct7 == lit(0b0100001, width: 7)) &
+                               (ex_rs2_addr == lit(0b00000, width: 5)),
+                               width: 1)
+        ex_is_fcvt_d_w = local(:ex_is_fcvt_d_w,
+                               (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                               (ex_funct7 == lit(0b1101001, width: 7)) &
+                               (ex_rs2_addr == lit(0b00000, width: 5)),
+                               width: 1)
+        ex_is_fcvt_d_wu = local(:ex_is_fcvt_d_wu,
+                                (ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                (ex_funct7 == lit(0b1101001, width: 7)) &
+                                (ex_rs2_addr == lit(0b00001, width: 5)),
+                                width: 1)
+        ex_is_fp_op_from_fpreg = local(:ex_is_fp_op_from_fpreg,
+                                       ((ex_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                       ~(ex_is_fmv_w_x | ex_is_fcvt_s_w | ex_is_fcvt_s_wu | ex_is_fcvt_d_w | ex_is_fcvt_d_wu)) |
+                                       ex_is_fmadd_d | ex_is_fmsub_d | ex_is_fnmsub_d | ex_is_fnmadd_d,
+                                       width: 1)
         ex_v_funct6 = ex_funct7[6..1]
         ex_v_vm = ex_funct7[0]
         ex_is_vsetvli = local(:ex_is_vsetvli,
@@ -968,7 +1242,7 @@ module RHDL
                                      width: 32)
 
         # Forward A (rs1) - priority: EX/MEM > MEM/WB > register file
-        forwarded_rs1 <= mux(ex_is_fmv_x_w, ex_rs1_data,
+        forwarded_rs1 <= mux(ex_is_fp_op_from_fpreg, ex_rs1_data,
                              mux(forward_a == lit(ForwardSel::EX_MEM, width: 2), mem_forward_data,
                                  mux(forward_a == lit(ForwardSel::MEM_WB, width: 2), wb_data,
                                      ex_rs1_data)))
@@ -977,7 +1251,7 @@ module RHDL
         alu_a <= mux(ex_opcode == lit(Opcode::AUIPC, width: 7), ex_pc, forwarded_rs1)
 
         # Forward B (rs2) for store and branch comparison
-        forwarded_rs2 <= mux(ex_is_fp_store, ex_rs2_data,
+        forwarded_rs2 <= mux(ex_is_fp_store | ex_is_fp_op_from_fpreg, ex_rs2_data,
                              mux(forward_b == lit(ForwardSel::EX_MEM, width: 2), mem_forward_data,
                                  mux(forward_b == lit(ForwardSel::MEM_WB, width: 2), wb_data,
                                      ex_rs2_data)))
@@ -991,6 +1265,502 @@ module RHDL
                                 mux((wb_reg_write & (wb_rd_addr != lit(0, width: 5)) & (wb_rd_addr == ex_rd_addr)),
                                     wb_data,
                                     ex_rd_src_data))
+
+        ex_fp_rs1_sign = forwarded_rs1[31]
+        ex_fp_rs2_sign = forwarded_rs2[31]
+        ex_fp_rs1_exp = forwarded_rs1[30..23]
+        ex_fp_rs2_exp = forwarded_rs2[30..23]
+        ex_fp_rs1_frac = forwarded_rs1[22..0]
+        ex_fp_rs2_frac = forwarded_rs2[22..0]
+        ex_fp_rs1_is_zero = local(:ex_fp_rs1_is_zero,
+                                  (ex_fp_rs1_exp == lit(0, width: 8)) & (ex_fp_rs1_frac == lit(0, width: 23)),
+                                  width: 1)
+        ex_fp_rs2_is_zero = local(:ex_fp_rs2_is_zero,
+                                  (ex_fp_rs2_exp == lit(0, width: 8)) & (ex_fp_rs2_frac == lit(0, width: 23)),
+                                  width: 1)
+        ex_fp_both_zero = local(:ex_fp_both_zero, ex_fp_rs1_is_zero & ex_fp_rs2_is_zero, width: 1)
+        ex_fp_rs1_is_nan = local(:ex_fp_rs1_is_nan,
+                                 (ex_fp_rs1_exp == lit(0xFF, width: 8)) & (ex_fp_rs1_frac != lit(0, width: 23)),
+                                 width: 1)
+        ex_fp_rs2_is_nan = local(:ex_fp_rs2_is_nan,
+                                 (ex_fp_rs2_exp == lit(0xFF, width: 8)) & (ex_fp_rs2_frac != lit(0, width: 23)),
+                                 width: 1)
+        ex_fp_any_nan = local(:ex_fp_any_nan, ex_fp_rs1_is_nan | ex_fp_rs2_is_nan, width: 1)
+        ex_fp_both_nan = local(:ex_fp_both_nan, ex_fp_rs1_is_nan & ex_fp_rs2_is_nan, width: 1)
+        ex_fp_ordered_lt = local(:ex_fp_ordered_lt,
+                                 mux(ex_fp_both_zero,
+                                     lit(0, width: 1),
+                                     mux(ex_fp_rs1_sign != ex_fp_rs2_sign,
+                                         ex_fp_rs1_sign,
+                                         mux(ex_fp_rs1_sign == lit(0, width: 1),
+                                             forwarded_rs1 < forwarded_rs2,
+                                             forwarded_rs1 > forwarded_rs2))),
+                                 width: 1)
+        ex_fp_ordered_eq = local(:ex_fp_ordered_eq,
+                                 (forwarded_rs1 == forwarded_rs2) | ex_fp_both_zero,
+                                 width: 1)
+        ex_fp_lt = local(:ex_fp_lt, mux(ex_fp_any_nan, lit(0, width: 1), ex_fp_ordered_lt), width: 1)
+        ex_fp_eq = local(:ex_fp_eq, mux(ex_fp_any_nan, lit(0, width: 1), ex_fp_ordered_eq), width: 1)
+        ex_fp_le = local(:ex_fp_le, ex_fp_lt | ex_fp_eq, width: 1)
+
+        ex_fsgnj_sign = local(:ex_fsgnj_sign,
+                              case_select(ex_funct3, {
+                                0b000 => ex_fp_rs2_sign,
+                                0b001 => ~ex_fp_rs2_sign,
+                                0b010 => ex_fp_rs1_sign ^ ex_fp_rs2_sign
+                              }, default: ex_fp_rs2_sign),
+                              width: 1)
+        ex_fsgnj_result = local(:ex_fsgnj_result, cat(ex_fsgnj_sign, forwarded_rs1[30..0]), width: 32)
+
+        ex_fp_canonical_nan = local(:ex_fp_canonical_nan, lit(0x7FC00000, width: 32), width: 32)
+        ex_fp_min_zero = local(:ex_fp_min_zero,
+                               mux(ex_fp_rs1_sign | ex_fp_rs2_sign, lit(0x80000000, width: 32), lit(0, width: 32)),
+                               width: 32)
+        ex_fp_max_zero = local(:ex_fp_max_zero,
+                               mux(ex_fp_rs1_sign & ex_fp_rs2_sign, lit(0x80000000, width: 32), lit(0, width: 32)),
+                               width: 32)
+        ex_fp_min_result = local(:ex_fp_min_result,
+                                 mux(ex_fp_both_nan,
+                                     ex_fp_canonical_nan,
+                                     mux(ex_fp_rs1_is_nan,
+                                         forwarded_rs2,
+                                         mux(ex_fp_rs2_is_nan,
+                                             forwarded_rs1,
+                                             mux(ex_fp_both_zero,
+                                                 ex_fp_min_zero,
+                                                 mux(ex_fp_lt, forwarded_rs1, forwarded_rs2))))),
+                                 width: 32)
+        ex_fp_max_result = local(:ex_fp_max_result,
+                                 mux(ex_fp_both_nan,
+                                     ex_fp_canonical_nan,
+                                     mux(ex_fp_rs1_is_nan,
+                                         forwarded_rs2,
+                                         mux(ex_fp_rs2_is_nan,
+                                             forwarded_rs1,
+                                             mux(ex_fp_both_zero,
+                                                 ex_fp_max_zero,
+                                                 mux(ex_fp_lt, forwarded_rs2, forwarded_rs1))))),
+                                 width: 32)
+        ex_fp_minmax_result = local(:ex_fp_minmax_result,
+                                    mux(ex_funct3 == lit(0b000, width: 3), ex_fp_min_result, ex_fp_max_result),
+                                    width: 32)
+        ex_fp_is_inf = local(:ex_fp_is_inf,
+                             (ex_fp_rs1_exp == lit(0xFF, width: 8)) & (ex_fp_rs1_frac == lit(0, width: 23)),
+                             width: 1)
+        ex_fp_is_subnormal = local(:ex_fp_is_subnormal,
+                                   (ex_fp_rs1_exp == lit(0, width: 8)) & (ex_fp_rs1_frac != lit(0, width: 23)),
+                                   width: 1)
+        ex_fp_is_normal = local(:ex_fp_is_normal,
+                                (ex_fp_rs1_exp != lit(0, width: 8)) & (ex_fp_rs1_exp != lit(0xFF, width: 8)),
+                                width: 1)
+        ex_fp_is_snan = local(:ex_fp_is_snan, ex_fp_rs1_is_nan & (ex_fp_rs1_frac[22] == lit(0, width: 1)), width: 1)
+        ex_fp_is_qnan = local(:ex_fp_is_qnan, ex_fp_rs1_is_nan & (ex_fp_rs1_frac[22] == lit(1, width: 1)), width: 1)
+        ex_fp_class_result = local(:ex_fp_class_result,
+                                   mux(ex_fp_is_inf & ex_fp_rs1_sign, lit(1 << 0, width: 32),
+                                       mux(ex_fp_is_normal & ex_fp_rs1_sign, lit(1 << 1, width: 32),
+                                           mux(ex_fp_is_subnormal & ex_fp_rs1_sign, lit(1 << 2, width: 32),
+                                               mux(ex_fp_rs1_is_zero & ex_fp_rs1_sign, lit(1 << 3, width: 32),
+                                                   mux(ex_fp_rs1_is_zero & ~ex_fp_rs1_sign, lit(1 << 4, width: 32),
+                                                       mux(ex_fp_is_subnormal & ~ex_fp_rs1_sign, lit(1 << 5, width: 32),
+                                                           mux(ex_fp_is_normal & ~ex_fp_rs1_sign, lit(1 << 6, width: 32),
+                                                               mux(ex_fp_is_inf & ~ex_fp_rs1_sign, lit(1 << 7, width: 32),
+                                                                   mux(ex_fp_is_snan, lit(1 << 8, width: 32),
+                                                                       mux(ex_fp_is_qnan, lit(1 << 9, width: 32),
+                                                                           lit(0, width: 32))))))))))),
+                                   width: 32)
+        ex_fp_cmp_result = local(:ex_fp_cmp_result,
+                                 case_select(ex_funct3, {
+                                   0b010 => cat(lit(0, width: 31), ex_fp_eq),
+                                   0b001 => cat(lit(0, width: 31), ex_fp_lt),
+                                   0b000 => cat(lit(0, width: 31), ex_fp_le)
+                                 }, default: lit(0, width: 32)),
+                                 width: 32)
+        ex_fp_exp_ge_127 = local(:ex_fp_exp_ge_127, ex_fp_rs1_exp >= lit(127, width: 8), width: 1)
+        ex_fp_exp_gt_157 = local(:ex_fp_exp_gt_157, ex_fp_rs1_exp > lit(157, width: 8), width: 1)
+        ex_fp_exp_ge_150 = local(:ex_fp_exp_ge_150, ex_fp_rs1_exp >= lit(150, width: 8), width: 1)
+        ex_fp_shift_left_amt = local(:ex_fp_shift_left_amt, ex_fp_rs1_exp - lit(150, width: 8), width: 8)
+        ex_fp_shift_right_amt = local(:ex_fp_shift_right_amt, lit(150, width: 8) - ex_fp_rs1_exp, width: 8)
+        ex_fp_mantissa = local(:ex_fp_mantissa, cat(lit(1, width: 1), ex_fp_rs1_frac), width: 24)
+        ex_fp_abs_int_from_float = local(:ex_fp_abs_int_from_float,
+                                         mux(ex_fp_exp_ge_150,
+                                             cat(lit(0, width: 8), ex_fp_mantissa) << ex_fp_shift_left_amt,
+                                             cat(lit(0, width: 8), ex_fp_mantissa) >> ex_fp_shift_right_amt),
+                                         width: 32)
+        ex_fp_signed_int_from_float = local(:ex_fp_signed_int_from_float,
+                                            mux(ex_fp_rs1_sign, ~ex_fp_abs_int_from_float + lit(1, width: 32), ex_fp_abs_int_from_float),
+                                            width: 32)
+        ex_fcvt_w_s_result = local(:ex_fcvt_w_s_result,
+                                   mux(ex_fp_rs1_is_nan | ex_fp_exp_gt_157,
+                                       lit(0x80000000, width: 32),
+                                       mux(~ex_fp_exp_ge_127,
+                                           lit(0, width: 32),
+                                           ex_fp_signed_int_from_float)),
+                                   width: 32)
+        ex_fcvt_wu_s_result = local(:ex_fcvt_wu_s_result,
+                                    mux(ex_fp_rs1_is_nan | ex_fp_exp_gt_157 | ex_fp_rs1_sign,
+                                        lit(0xFFFFFFFF, width: 32),
+                                        mux(~ex_fp_exp_ge_127,
+                                            lit(0, width: 32),
+                                            ex_fp_abs_int_from_float)),
+                                    width: 32)
+
+        ex_fcvt_sw_sign = local(:ex_fcvt_sw_sign,
+                                mux(ex_is_fcvt_s_w, forwarded_rs1[31], lit(0, width: 1)),
+                                width: 1)
+        ex_fcvt_sw_abs = local(:ex_fcvt_sw_abs,
+                               mux(ex_is_fcvt_s_w & forwarded_rs1[31], ~forwarded_rs1 + lit(1, width: 32), forwarded_rs1),
+                               width: 32)
+        ex_fcvt_sw_msb_expr = local(:ex_fcvt_sw_msb_seed, lit(0, width: 6), width: 6)
+        32.times do |i|
+          ex_fcvt_sw_msb_expr = local(:"ex_fcvt_sw_msb_stage_#{i}",
+                                      mux(ex_fcvt_sw_abs[i], lit(i, width: 6), ex_fcvt_sw_msb_expr),
+                                      width: 6)
+        end
+        ex_fcvt_sw_msb = local(:ex_fcvt_sw_msb, ex_fcvt_sw_msb_expr, width: 6)
+        ex_fcvt_sw_nonzero = local(:ex_fcvt_sw_nonzero, ex_fcvt_sw_abs != lit(0, width: 32), width: 1)
+        ex_fcvt_sw_shift_left_amt = local(:ex_fcvt_sw_shift_left_amt, lit(23, width: 6) - ex_fcvt_sw_msb, width: 6)
+        ex_fcvt_sw_shift_right_amt = local(:ex_fcvt_sw_shift_right_amt, ex_fcvt_sw_msb - lit(23, width: 6), width: 6)
+        ex_fcvt_sw_norm = local(:ex_fcvt_sw_norm,
+                                mux(ex_fcvt_sw_msb > lit(23, width: 6),
+                                    ex_fcvt_sw_abs >> ex_fcvt_sw_shift_right_amt,
+                                    ex_fcvt_sw_abs << ex_fcvt_sw_shift_left_amt),
+                                width: 32)
+        ex_fcvt_sw_frac = ex_fcvt_sw_norm[22..0]
+        ex_fcvt_sw_exp = local(:ex_fcvt_sw_exp, cat(lit(0, width: 2), ex_fcvt_sw_msb) + lit(127, width: 8), width: 8)
+        ex_fcvt_s_w_result = local(:ex_fcvt_s_w_result,
+                                   mux(ex_fcvt_sw_nonzero,
+                                       cat(ex_fcvt_sw_sign, ex_fcvt_sw_exp, ex_fcvt_sw_frac),
+                                       lit(0, width: 32)),
+                                   width: 32)
+        ex_fp_rs1_data64 = local(:ex_fp_rs1_data64, cat(ex_rd_src_data, forwarded_rs1), width: 64)
+        ex_fp_rs2_data64 = local(:ex_fp_rs2_data64, cat(ex_rs2_hi_data, forwarded_rs2), width: 64)
+        ex_fp_rs3_data64 = local(:ex_fp_rs3_data64, cat(ex_rs3_hi_data, ex_rs3_data), width: 64)
+        ex_fp64_rs1_sign = ex_fp_rs1_data64[63]
+        ex_fp64_rs1_exp = ex_fp_rs1_data64[62..52]
+        ex_fp64_rs1_frac = ex_fp_rs1_data64[51..0]
+        ex_fp64_rs2_sign = ex_fp_rs2_data64[63]
+        ex_fp64_rs2_exp = ex_fp_rs2_data64[62..52]
+        ex_fp64_rs2_frac = ex_fp_rs2_data64[51..0]
+        ex_fp64_rs3_sign = ex_fp_rs3_data64[63]
+        ex_fp64_rs3_exp = ex_fp_rs3_data64[62..52]
+        ex_fp64_rs3_frac = ex_fp_rs3_data64[51..0]
+        ex_fp64_rs1_is_zero = local(:ex_fp64_rs1_is_zero,
+                                    (ex_fp64_rs1_exp == lit(0, width: 11)) & (ex_fp64_rs1_frac == lit(0, width: 52)),
+                                    width: 1)
+        ex_fp64_rs2_is_zero = local(:ex_fp64_rs2_is_zero,
+                                    (ex_fp64_rs2_exp == lit(0, width: 11)) & (ex_fp64_rs2_frac == lit(0, width: 52)),
+                                    width: 1)
+        ex_fp64_rs1_is_inf = local(:ex_fp64_rs1_is_inf,
+                                   (ex_fp64_rs1_exp == lit(0x7FF, width: 11)) & (ex_fp64_rs1_frac == lit(0, width: 52)),
+                                   width: 1)
+        ex_fp64_rs1_is_nan = local(:ex_fp64_rs1_is_nan,
+                                   (ex_fp64_rs1_exp == lit(0x7FF, width: 11)) & (ex_fp64_rs1_frac != lit(0, width: 52)),
+                                   width: 1)
+        ex_fp64_rs2_is_nan = local(:ex_fp64_rs2_is_nan,
+                                   (ex_fp64_rs2_exp == lit(0x7FF, width: 11)) & (ex_fp64_rs2_frac != lit(0, width: 52)),
+                                   width: 1)
+        ex_fp64_rs3_is_nan = local(:ex_fp64_rs3_is_nan,
+                                   (ex_fp64_rs3_exp == lit(0x7FF, width: 11)) & (ex_fp64_rs3_frac != lit(0, width: 52)),
+                                   width: 1)
+        ex_fp64_both_zero = local(:ex_fp64_both_zero, ex_fp64_rs1_is_zero & ex_fp64_rs2_is_zero, width: 1)
+        ex_fp64_any_nan = local(:ex_fp64_any_nan, ex_fp64_rs1_is_nan | ex_fp64_rs2_is_nan, width: 1)
+        ex_fp64_both_nan = local(:ex_fp64_both_nan, ex_fp64_rs1_is_nan & ex_fp64_rs2_is_nan, width: 1)
+        ex_fp64_ordered_lt = local(:ex_fp64_ordered_lt,
+                                   mux(ex_fp64_both_zero,
+                                       lit(0, width: 1),
+                                       mux(ex_fp64_rs1_sign != ex_fp64_rs2_sign,
+                                           ex_fp64_rs1_sign,
+                                           mux(ex_fp64_rs1_sign == lit(0, width: 1),
+                                               ex_fp_rs1_data64 < ex_fp_rs2_data64,
+                                               ex_fp_rs1_data64 > ex_fp_rs2_data64))),
+                                   width: 1)
+        ex_fp64_ordered_eq = local(:ex_fp64_ordered_eq,
+                                   (ex_fp_rs1_data64 == ex_fp_rs2_data64) | ex_fp64_both_zero,
+                                   width: 1)
+        ex_fp64_lt = local(:ex_fp64_lt, mux(ex_fp64_any_nan, lit(0, width: 1), ex_fp64_ordered_lt), width: 1)
+        ex_fp64_eq = local(:ex_fp64_eq, mux(ex_fp64_any_nan, lit(0, width: 1), ex_fp64_ordered_eq), width: 1)
+        ex_fp64_le = local(:ex_fp64_le, ex_fp64_lt | ex_fp64_eq, width: 1)
+        ex_fsgnj_d_sign = local(:ex_fsgnj_d_sign,
+                                case_select(ex_funct3, {
+                                  0b000 => ex_fp64_rs2_sign,
+                                  0b001 => ~ex_fp64_rs2_sign,
+                                  0b010 => ex_fp64_rs1_sign ^ ex_fp64_rs2_sign
+                                }, default: ex_fp64_rs2_sign),
+                                width: 1)
+        ex_fsgnj_d_result64 = local(:ex_fsgnj_d_result64, cat(ex_fsgnj_d_sign, ex_fp_rs1_data64[62..0]), width: 64)
+        ex_fp64_canonical_nan = local(:ex_fp64_canonical_nan, lit(0x7FF8_0000_0000_0000, width: 64), width: 64)
+        ex_fp64_min_zero = local(:ex_fp64_min_zero,
+                                 mux(ex_fp64_rs1_sign | ex_fp64_rs2_sign, cat(lit(1, width: 1), lit(0, width: 63)), lit(0, width: 64)),
+                                 width: 64)
+        ex_fp64_max_zero = local(:ex_fp64_max_zero,
+                                 mux(ex_fp64_rs1_sign & ex_fp64_rs2_sign, cat(lit(1, width: 1), lit(0, width: 63)), lit(0, width: 64)),
+                                 width: 64)
+        ex_fp64_min_result = local(:ex_fp64_min_result,
+                                   mux(ex_fp64_both_nan,
+                                       ex_fp64_canonical_nan,
+                                       mux(ex_fp64_rs1_is_nan,
+                                           ex_fp_rs2_data64,
+                                           mux(ex_fp64_rs2_is_nan,
+                                               ex_fp_rs1_data64,
+                                               mux(ex_fp64_both_zero,
+                                                   ex_fp64_min_zero,
+                                                   mux(ex_fp64_lt, ex_fp_rs1_data64, ex_fp_rs2_data64))))),
+                                   width: 64)
+        ex_fp64_max_result = local(:ex_fp64_max_result,
+                                   mux(ex_fp64_both_nan,
+                                       ex_fp64_canonical_nan,
+                                       mux(ex_fp64_rs1_is_nan,
+                                           ex_fp_rs2_data64,
+                                           mux(ex_fp64_rs2_is_nan,
+                                               ex_fp_rs1_data64,
+                                               mux(ex_fp64_both_zero,
+                                                   ex_fp64_max_zero,
+                                                   mux(ex_fp64_lt, ex_fp_rs2_data64, ex_fp_rs1_data64))))),
+                                   width: 64)
+        ex_fp64_minmax_result = local(:ex_fp64_minmax_result,
+                                      mux(ex_funct3 == lit(0b000, width: 3), ex_fp64_min_result, ex_fp64_max_result),
+                                      width: 64)
+        ex_fp_cmp_d_result = local(:ex_fp_cmp_d_result,
+                                   case_select(ex_funct3, {
+                                     0b010 => cat(lit(0, width: 31), ex_fp64_eq),
+                                     0b001 => cat(lit(0, width: 31), ex_fp64_lt),
+                                     0b000 => cat(lit(0, width: 31), ex_fp64_le)
+                                   }, default: lit(0, width: 32)),
+                                   width: 32)
+        ex_fp64_rs1_is_subnormal = local(:ex_fp64_rs1_is_subnormal,
+                                         (ex_fp64_rs1_exp == lit(0, width: 11)) & (ex_fp64_rs1_frac != lit(0, width: 52)),
+                                         width: 1)
+        ex_fp64_rs1_is_normal = local(:ex_fp64_rs1_is_normal,
+                                      (ex_fp64_rs1_exp != lit(0, width: 11)) & (ex_fp64_rs1_exp != lit(0x7FF, width: 11)),
+                                      width: 1)
+        ex_fp64_rs1_is_snan = local(:ex_fp64_rs1_is_snan, ex_fp64_rs1_is_nan & (ex_fp64_rs1_frac[51] == lit(0, width: 1)), width: 1)
+        ex_fp64_rs1_is_qnan = local(:ex_fp64_rs1_is_qnan, ex_fp64_rs1_is_nan & (ex_fp64_rs1_frac[51] == lit(1, width: 1)), width: 1)
+        ex_fp64_class_result = local(:ex_fp64_class_result,
+                                     mux(ex_fp64_rs1_is_inf & ex_fp64_rs1_sign, lit(1 << 0, width: 32),
+                                         mux(ex_fp64_rs1_is_normal & ex_fp64_rs1_sign, lit(1 << 1, width: 32),
+                                             mux(ex_fp64_rs1_is_subnormal & ex_fp64_rs1_sign, lit(1 << 2, width: 32),
+                                                 mux(ex_fp64_rs1_is_zero & ex_fp64_rs1_sign, lit(1 << 3, width: 32),
+                                                     mux(ex_fp64_rs1_is_zero & ~ex_fp64_rs1_sign, lit(1 << 4, width: 32),
+                                                         mux(ex_fp64_rs1_is_subnormal & ~ex_fp64_rs1_sign, lit(1 << 5, width: 32),
+                                                             mux(ex_fp64_rs1_is_normal & ~ex_fp64_rs1_sign, lit(1 << 6, width: 32),
+                                                                 mux(ex_fp64_rs1_is_inf & ~ex_fp64_rs1_sign, lit(1 << 7, width: 32),
+                                                                     mux(ex_fp64_rs1_is_snan, lit(1 << 8, width: 32),
+                                                                         mux(ex_fp64_rs1_is_qnan, lit(1 << 9, width: 32),
+                                                                             lit(0, width: 32))))))))))),
+                                     width: 32)
+        ex_fp64_rs1_exp_le_896 = local(:ex_fp64_rs1_exp_le_896, ex_fp64_rs1_exp <= lit(896, width: 11), width: 1)
+        ex_fp64_rs1_exp_gt_1150 = local(:ex_fp64_rs1_exp_gt_1150, ex_fp64_rs1_exp > lit(1150, width: 11), width: 1)
+        ex_fcvt_sd_exp11 = local(:ex_fcvt_sd_exp11, ex_fp64_rs1_exp - lit(896, width: 11), width: 11)
+        ex_fcvt_sd_frac = ex_fp64_rs1_frac[51..29]
+        ex_fcvt_s_d_zero = local(:ex_fcvt_s_d_zero, cat(ex_fp64_rs1_sign, lit(0, width: 31)), width: 32)
+        ex_fcvt_s_d_inf = local(:ex_fcvt_s_d_inf, cat(ex_fp64_rs1_sign, lit(0xFF, width: 8), lit(0, width: 23)), width: 32)
+        ex_fcvt_s_d_norm = local(:ex_fcvt_s_d_norm, cat(ex_fp64_rs1_sign, ex_fcvt_sd_exp11[7..0], ex_fcvt_sd_frac), width: 32)
+        ex_fcvt_s_d_result = local(:ex_fcvt_s_d_result,
+                                   mux(ex_fp64_rs1_is_zero,
+                                       ex_fcvt_s_d_zero,
+                                       mux(ex_fp64_rs1_is_nan,
+                                           lit(0x7FC0_0000, width: 32),
+                                           mux(ex_fp64_rs1_is_inf,
+                                               ex_fcvt_s_d_inf,
+                                               mux(ex_fp64_rs1_exp_le_896,
+                                                   ex_fcvt_s_d_zero,
+                                                   mux(ex_fp64_rs1_exp_gt_1150,
+                                                       ex_fcvt_s_d_inf,
+                                                       ex_fcvt_s_d_norm))))),
+                                   width: 32)
+        ex_fp64_exp_ge_1023 = local(:ex_fp64_exp_ge_1023, ex_fp64_rs1_exp >= lit(1023, width: 11), width: 1)
+        ex_fp64_exp_gt_1053 = local(:ex_fp64_exp_gt_1053, ex_fp64_rs1_exp > lit(1053, width: 11), width: 1)
+        ex_fp64_exp_ge_1075 = local(:ex_fp64_exp_ge_1075, ex_fp64_rs1_exp >= lit(1075, width: 11), width: 1)
+        ex_fp64_shift_left_amt = local(:ex_fp64_shift_left_amt, ex_fp64_rs1_exp - lit(1075, width: 11), width: 11)
+        ex_fp64_shift_right_amt = local(:ex_fp64_shift_right_amt, lit(1075, width: 11) - ex_fp64_rs1_exp, width: 11)
+        ex_fp64_mantissa = local(:ex_fp64_mantissa, cat(lit(1, width: 1), ex_fp64_rs1_frac), width: 53)
+        ex_fp64_abs_int_from_double = local(:ex_fp64_abs_int_from_double,
+                                            mux(ex_fp64_exp_ge_1075,
+                                                cat(lit(0, width: 11), ex_fp64_mantissa) << ex_fp64_shift_left_amt,
+                                                cat(lit(0, width: 11), ex_fp64_mantissa) >> ex_fp64_shift_right_amt),
+                                            width: 64)
+        ex_fp64_signed_int_from_double = local(:ex_fp64_signed_int_from_double,
+                                               mux(ex_fp64_rs1_sign,
+                                                   ~ex_fp64_abs_int_from_double + lit(1, width: 64),
+                                                   ex_fp64_abs_int_from_double),
+                                               width: 64)
+        ex_fcvt_w_d_result = local(:ex_fcvt_w_d_result,
+                                   mux(ex_fp64_rs1_is_nan | ex_fp64_exp_gt_1053,
+                                       lit(0x80000000, width: 32),
+                                       mux(~ex_fp64_exp_ge_1023,
+                                           lit(0, width: 32),
+                                           ex_fp64_signed_int_from_double[31..0])),
+                                   width: 32)
+        ex_fcvt_wu_d_result = local(:ex_fcvt_wu_d_result,
+                                    mux(ex_fp64_rs1_is_nan | ex_fp64_exp_gt_1053 | ex_fp64_rs1_sign,
+                                        lit(0xFFFFFFFF, width: 32),
+                                        mux(~ex_fp64_exp_ge_1023,
+                                            lit(0, width: 32),
+                                            ex_fp64_abs_int_from_double[31..0])),
+                                    width: 32)
+        ex_fp64_rs2_exp_ge_1023 = local(:ex_fp64_rs2_exp_ge_1023, ex_fp64_rs2_exp >= lit(1023, width: 11), width: 1)
+        ex_fp64_rs2_exp_gt_1053 = local(:ex_fp64_rs2_exp_gt_1053, ex_fp64_rs2_exp > lit(1053, width: 11), width: 1)
+        ex_fp64_rs2_exp_ge_1075 = local(:ex_fp64_rs2_exp_ge_1075, ex_fp64_rs2_exp >= lit(1075, width: 11), width: 1)
+        ex_fp64_rs2_shift_left_amt = local(:ex_fp64_rs2_shift_left_amt, ex_fp64_rs2_exp - lit(1075, width: 11), width: 11)
+        ex_fp64_rs2_shift_right_amt = local(:ex_fp64_rs2_shift_right_amt, lit(1075, width: 11) - ex_fp64_rs2_exp, width: 11)
+        ex_fp64_rs2_mantissa = local(:ex_fp64_rs2_mantissa, cat(lit(1, width: 1), ex_fp64_rs2_frac), width: 53)
+        ex_fp64_rs2_abs_int_from_double = local(:ex_fp64_rs2_abs_int_from_double,
+                                                mux(ex_fp64_rs2_exp_ge_1075,
+                                                    cat(lit(0, width: 11), ex_fp64_rs2_mantissa) << ex_fp64_rs2_shift_left_amt,
+                                                    cat(lit(0, width: 11), ex_fp64_rs2_mantissa) >> ex_fp64_rs2_shift_right_amt),
+                                                width: 64)
+        ex_fp64_rs2_signed_int_from_double = local(:ex_fp64_rs2_signed_int_from_double,
+                                                   mux(ex_fp64_rs2_sign,
+                                                       ~ex_fp64_rs2_abs_int_from_double + lit(1, width: 64),
+                                                       ex_fp64_rs2_abs_int_from_double),
+                                                   width: 64)
+        ex_fcvt_w_d_rs2_result = local(:ex_fcvt_w_d_rs2_result,
+                                       mux(ex_fp64_rs2_is_nan | ex_fp64_rs2_exp_gt_1053,
+                                           lit(0x80000000, width: 32),
+                                           mux(~ex_fp64_rs2_exp_ge_1023,
+                                               lit(0, width: 32),
+                                               ex_fp64_rs2_signed_int_from_double[31..0])),
+                                       width: 32)
+        ex_fp64_rs3_exp_ge_1023 = local(:ex_fp64_rs3_exp_ge_1023, ex_fp64_rs3_exp >= lit(1023, width: 11), width: 1)
+        ex_fp64_rs3_exp_gt_1053 = local(:ex_fp64_rs3_exp_gt_1053, ex_fp64_rs3_exp > lit(1053, width: 11), width: 1)
+        ex_fp64_rs3_exp_ge_1075 = local(:ex_fp64_rs3_exp_ge_1075, ex_fp64_rs3_exp >= lit(1075, width: 11), width: 1)
+        ex_fp64_rs3_shift_left_amt = local(:ex_fp64_rs3_shift_left_amt, ex_fp64_rs3_exp - lit(1075, width: 11), width: 11)
+        ex_fp64_rs3_shift_right_amt = local(:ex_fp64_rs3_shift_right_amt, lit(1075, width: 11) - ex_fp64_rs3_exp, width: 11)
+        ex_fp64_rs3_mantissa = local(:ex_fp64_rs3_mantissa, cat(lit(1, width: 1), ex_fp64_rs3_frac), width: 53)
+        ex_fp64_rs3_abs_int_from_double = local(:ex_fp64_rs3_abs_int_from_double,
+                                                mux(ex_fp64_rs3_exp_ge_1075,
+                                                    cat(lit(0, width: 11), ex_fp64_rs3_mantissa) << ex_fp64_rs3_shift_left_amt,
+                                                    cat(lit(0, width: 11), ex_fp64_rs3_mantissa) >> ex_fp64_rs3_shift_right_amt),
+                                                width: 64)
+        ex_fp64_rs3_signed_int_from_double = local(:ex_fp64_rs3_signed_int_from_double,
+                                                   mux(ex_fp64_rs3_sign,
+                                                       ~ex_fp64_rs3_abs_int_from_double + lit(1, width: 64),
+                                                       ex_fp64_rs3_abs_int_from_double),
+                                                   width: 64)
+        ex_fcvt_w_d_rs3_result = local(:ex_fcvt_w_d_rs3_result,
+                                       mux(ex_fp64_rs3_is_nan | ex_fp64_rs3_exp_gt_1053,
+                                           lit(0x80000000, width: 32),
+                                           mux(~ex_fp64_rs3_exp_ge_1023,
+                                               lit(0, width: 32),
+                                               ex_fp64_rs3_signed_int_from_double[31..0])),
+                                       width: 32)
+        ex_d_add_i32 = local(:ex_d_add_i32, ex_fcvt_w_d_result + ex_fcvt_w_d_rs2_result, width: 32)
+        ex_d_sub_i32 = local(:ex_d_sub_i32, ex_fcvt_w_d_result - ex_fcvt_w_d_rs2_result, width: 32)
+        ex_d_mul_a_sign = ex_fcvt_w_d_result[31]
+        ex_d_mul_b_sign = ex_fcvt_w_d_rs2_result[31]
+        ex_d_mul_a_abs = local(:ex_d_mul_a_abs,
+                               mux(ex_d_mul_a_sign, ~ex_fcvt_w_d_result + lit(1, width: 32), ex_fcvt_w_d_result),
+                               width: 32)
+        ex_d_mul_b_abs = local(:ex_d_mul_b_abs,
+                               mux(ex_d_mul_b_sign, ~ex_fcvt_w_d_rs2_result + lit(1, width: 32), ex_fcvt_w_d_rs2_result),
+                               width: 32)
+        ex_d_mul_abs64 = local(:ex_d_mul_abs64, cat(lit(0, width: 32), ex_d_mul_a_abs) * cat(lit(0, width: 32), ex_d_mul_b_abs), width: 64)
+        ex_d_mul_neg = local(:ex_d_mul_neg, ex_d_mul_a_sign ^ ex_d_mul_b_sign, width: 1)
+        ex_d_mul_i64 = local(:ex_d_mul_i64,
+                             mux(ex_d_mul_neg, ~ex_d_mul_abs64 + lit(1, width: 64), ex_d_mul_abs64),
+                             width: 64)
+        ex_d_mul_i32 = ex_d_mul_i64[31..0]
+        ex_d_fmadd_i32 = local(:ex_d_fmadd_i32, ex_d_mul_i32 + ex_fcvt_w_d_rs3_result, width: 32)
+        ex_d_fmsub_i32 = local(:ex_d_fmsub_i32, ex_d_mul_i32 - ex_fcvt_w_d_rs3_result, width: 32)
+        ex_d_fnmsub_i32 = local(:ex_d_fnmsub_i32, (~ex_d_mul_i32 + lit(1, width: 32)) + ex_fcvt_w_d_rs3_result, width: 32)
+        ex_d_fnmadd_i32 = local(:ex_d_fnmadd_i32, (~ex_d_mul_i32 + lit(1, width: 32)) - ex_fcvt_w_d_rs3_result, width: 32)
+        ex_d_div_a_sign = ex_fcvt_w_d_result[31]
+        ex_d_div_b_sign = ex_fcvt_w_d_rs2_result[31]
+        ex_d_div_a_abs = local(:ex_d_div_a_abs,
+                               mux(ex_d_div_a_sign, ~ex_fcvt_w_d_result + lit(1, width: 32), ex_fcvt_w_d_result),
+                               width: 32)
+        ex_d_div_b_abs = local(:ex_d_div_b_abs,
+                               mux(ex_d_div_b_sign, ~ex_fcvt_w_d_rs2_result + lit(1, width: 32), ex_fcvt_w_d_rs2_result),
+                               width: 32)
+        ex_d_div_abs = local(:ex_d_div_abs,
+                             mux(ex_d_div_b_abs == lit(0, width: 32), lit(0, width: 32), ex_d_div_a_abs / ex_d_div_b_abs),
+                             width: 32)
+        ex_d_div_neg = local(:ex_d_div_neg, ex_d_div_a_sign ^ ex_d_div_b_sign, width: 1)
+        ex_d_div_i32 = local(:ex_d_div_i32,
+                             mux(ex_d_div_neg, ~ex_d_div_abs + lit(1, width: 32), ex_d_div_abs),
+                             width: 32)
+        ex_d_sqrt_input_abs = local(:ex_d_sqrt_input_abs,
+                                    mux(ex_fcvt_w_d_result[31], ~ex_fcvt_w_d_result + lit(1, width: 32), ex_fcvt_w_d_result),
+                                    width: 32)
+        ex_d_sqrt_result_expr = local(:ex_d_sqrt_result_seed, lit(0, width: 32), width: 32)
+        16.times do |k|
+          bit = 15 - k
+          trial = local(:"ex_d_sqrt_trial_#{bit}", ex_d_sqrt_result_expr | lit(1 << bit, width: 32), width: 32)
+          trial_sq = local(:"ex_d_sqrt_trial_sq_#{bit}", cat(lit(0, width: 32), trial) * cat(lit(0, width: 32), trial), width: 64)
+          ex_d_sqrt_result_expr = local(:"ex_d_sqrt_result_stage_#{bit}",
+                                        mux(trial_sq <= cat(lit(0, width: 32), ex_d_sqrt_input_abs), trial, ex_d_sqrt_result_expr),
+                                        width: 32)
+        end
+        ex_d_sqrt_i32 = local(:ex_d_sqrt_i32,
+                              mux(ex_fcvt_w_d_result[31], lit(0, width: 32), ex_d_sqrt_result_expr),
+                              width: 32)
+        ex_d_alu_i32 = local(:ex_d_alu_i32,
+                             mux(ex_is_fadd_d, ex_d_add_i32,
+                                 mux(ex_is_fsub_d, ex_d_sub_i32,
+                                     mux(ex_is_fmul_d, ex_d_mul_i32,
+                                         mux(ex_is_fmadd_d, ex_d_fmadd_i32,
+                                             mux(ex_is_fmsub_d, ex_d_fmsub_i32,
+                                                 mux(ex_is_fnmsub_d, ex_d_fnmsub_i32,
+                                                     mux(ex_is_fnmadd_d, ex_d_fnmadd_i32,
+                                                         mux(ex_is_fdiv_d, ex_d_div_i32,
+                                                             mux(ex_is_fsqrt_d, ex_d_sqrt_i32, lit(0, width: 32)))))))))),
+                             width: 32)
+        ex_d_alu_sign = ex_d_alu_i32[31]
+        ex_d_alu_abs = local(:ex_d_alu_abs,
+                             mux(ex_d_alu_i32[31], ~ex_d_alu_i32 + lit(1, width: 32), ex_d_alu_i32),
+                             width: 32)
+        ex_d_alu_msb_expr = local(:ex_d_alu_msb_seed, lit(0, width: 6), width: 6)
+        32.times do |i|
+          ex_d_alu_msb_expr = local(:"ex_d_alu_msb_stage_#{i}",
+                                    mux(ex_d_alu_abs[i], lit(i, width: 6), ex_d_alu_msb_expr),
+                                    width: 6)
+        end
+        ex_d_alu_msb = local(:ex_d_alu_msb, ex_d_alu_msb_expr, width: 6)
+        ex_d_alu_nonzero = local(:ex_d_alu_nonzero, ex_d_alu_abs != lit(0, width: 32), width: 1)
+        ex_d_alu_shift_left_amt = local(:ex_d_alu_shift_left_amt, lit(52, width: 6) - ex_d_alu_msb, width: 6)
+        ex_d_alu_norm = local(:ex_d_alu_norm, cat(lit(0, width: 32), ex_d_alu_abs) << ex_d_alu_shift_left_amt, width: 64)
+        ex_d_alu_frac52 = ex_d_alu_norm[51..0]
+        ex_d_alu_exp11 = local(:ex_d_alu_exp11, cat(lit(0, width: 5), ex_d_alu_msb) + lit(1023, width: 11), width: 11)
+        ex_d_alu_result64 = local(:ex_d_alu_result64,
+                                  mux(ex_d_alu_nonzero,
+                                      cat(ex_d_alu_sign, ex_d_alu_exp11, ex_d_alu_frac52),
+                                      lit(0, width: 64)),
+                                  width: 64)
+        ex_fp_int_result = local(:ex_fp_int_result,
+                                 mux(ex_is_fcmp_s, ex_fp_cmp_result,
+                                     mux(ex_is_fclass_s, ex_fp_class_result,
+                                         mux(ex_is_fclass_d, ex_fp64_class_result,
+                                             mux(ex_is_fcmp_d, ex_fp_cmp_d_result,
+                                         mux(ex_is_fcvt_w_s, ex_fcvt_w_s_result,
+                                             mux(ex_is_fcvt_wu_s, ex_fcvt_wu_s_result,
+                                                 mux(ex_is_fcvt_w_d, ex_fcvt_w_d_result,
+                                                     mux(ex_is_fcvt_wu_d, ex_fcvt_wu_d_result, forwarded_rs1)))))))),
+                                 width: 32)
+        ex_fp_result = local(:ex_fp_result,
+                             mux(ex_is_fsgnj_s, ex_fsgnj_result,
+                                 mux(ex_is_fminmax_s, ex_fp_minmax_result,
+                                     mux(ex_is_fsgnj_d, ex_fsgnj_d_result64[31..0],
+                                         mux(ex_is_fminmax_d, ex_fp64_minmax_result[31..0],
+                                             mux(ex_is_d_arith, ex_d_alu_result64[31..0],
+                                     mux(ex_is_fcvt_s_d, ex_fcvt_s_d_result,
+                                         mux(ex_is_fcvt_d_w | ex_is_fcvt_d_wu, forwarded_rs1,
+                                             mux(ex_is_fcvt_s_w | ex_is_fcvt_s_wu, ex_fcvt_s_w_result, forwarded_rs1)))))))),
+                             width: 32)
+        ex_fp_result_hi = local(:ex_fp_result_hi,
+                                mux(ex_is_fsgnj_d, ex_fsgnj_d_result64[63..32],
+                                    mux(ex_is_fminmax_d, ex_fp64_minmax_result[63..32],
+                                        mux(ex_is_d_arith, ex_d_alu_result64[63..32], ex_rd_src_data))),
+                                width: 32)
+        ex_is_fp_int_write = local(:ex_is_fp_int_write,
+                                   ex_is_fmv_x_w | ex_is_fcmp_s | ex_is_fcmp_d | ex_is_fclass_s | ex_is_fclass_d |
+                                   ex_is_fcvt_w_s | ex_is_fcvt_wu_s | ex_is_fcvt_w_d | ex_is_fcvt_wu_d,
+                                   width: 1)
+        ex_is_fp_reg_write_op = local(:ex_is_fp_reg_write_op,
+                                      ex_is_fmv_w_x | ex_is_fsgnj_s | ex_is_fminmax_s |
+                                      ex_is_fsgnj_d | ex_is_fminmax_d |
+                                      ex_is_fcvt_s_w | ex_is_fcvt_s_wu | ex_is_fcvt_s_d |
+                                      ex_is_fcvt_d_s | ex_is_fcvt_d_w | ex_is_fcvt_d_wu | ex_is_d_arith,
+                                      width: 1)
 
         ex_v_lane0_active = local(:ex_v_lane0_active, vec_vl > lit(0, width: 32), width: 1)
         ex_v_lane1_active = local(:ex_v_lane1_active, vec_vl > lit(1, width: 32), width: 1)
@@ -1077,14 +1847,15 @@ module RHDL
                                      ex_is_system_plain & ~(ex_is_ecall | ex_is_ebreak | ex_is_mret | ex_is_sret |
                                                             ex_is_wfi | ex_is_wrs_nto | ex_is_wrs_sto | ex_is_sfence_vma),
                                      width: 1)
-        # Hardware interrupt pending bits at RISC-V standard positions:
-        #   MSIP=3, MTIP=7 (machine level, not delegable)
-        #   SEIP=9 (supervisor external, delegable)
+        # Hardware interrupt pending bits at RISC-V standard positions.
+        # External timer input is mirrored to both MTIP (bit 7) and STIP (bit 5):
+        # - MTIP keeps M-mode timer semantics for xv6/machine-mode paths.
+        # - STIP allows S-mode Linux timer delivery through mideleg/sie.
         # Software-writable SSIP (bit 1) is merged from CSR store (SIP register).
         ex_irq_pending_bits = local(:ex_irq_pending_bits,
                                     (csr_read_data13 & lit(0x2, width: 32)) |
                                     mux(irq_software, lit(0x8, width: 32), lit(0, width: 32)) |
-                                    mux(irq_timer, lit(0x80, width: 32), lit(0, width: 32)) |
+                                    mux(irq_timer, lit(0xA0, width: 32), lit(0, width: 32)) |
                                     mux(irq_external, lit(0x200, width: 32), lit(0, width: 32)),
                                     width: 32)
         ex_csr_src = local(:ex_csr_src,
@@ -1374,7 +2145,7 @@ module RHDL
                                    width: 2)
         ex_trap_or_ret = local(:ex_trap_or_ret, ex_trap_taken | ex_is_mret | ex_is_sret, width: 1)
         ex_reg_write_effective = local(:ex_reg_write_effective,
-                                       (ex_reg_write | ex_is_amo | ex_is_vsetvli | ex_is_vmv_x_s) & ~ex_trap_taken,
+                                       (ex_reg_write | ex_is_amo | ex_is_vsetvli | ex_is_vmv_x_s | ex_is_fp_int_write) & ~ex_trap_taken,
                                        width: 1)
         ex_mem_read_effective = local(:ex_mem_read_effective, (ex_mem_read | ex_is_lr | ex_is_amo_rmw) & ~ex_trap_taken, width: 1)
         ex_mem_write_effective = local(:ex_mem_write_effective, ex_mem_write & ~ex_trap_taken, width: 1)
@@ -1468,7 +2239,8 @@ module RHDL
         ex_result <= mux(ex_is_amo, ex_amo_addr,
                          mux(ex_is_vsetvli | ex_is_vmv_x_s, ex_v_scalar_result,
                          mux(ex_is_csr_instr, ex_csr_read_selected,
-                             mux(ex_is_fmv_x_w | ex_is_fmv_w_x, forwarded_rs1, ex_mem_addr))))
+                            mux(ex_is_fp_int_write, ex_fp_int_result,
+                                mux(ex_is_fp_reg_write_op, ex_fp_result, ex_mem_addr)))))
 
         # -----------------------------------------
         # EX Stage: Branch condition evaluation (inline)
@@ -1525,7 +2297,7 @@ module RHDL
         # -----------------------------------------
         ex_mem_alu_result_in <= ex_result
         ex_mem_rs2_data_in <= forwarded_rs2
-        ex_mem_rd_src_data_in <= forwarded_rd_src
+        ex_mem_rd_src_data_in <= mux(ex_is_fsgnj_d | ex_is_fminmax_d | ex_is_d_arith, ex_fp_result_hi, forwarded_rd_src)
         ex_mem_rd_addr_in <= ex_rd_addr
         ex_mem_pc_plus4_in <= ex_pc_plus4
         ex_mem_funct3_in <= ex_funct3
@@ -1566,7 +2338,8 @@ module RHDL
                                width: 1)
         mem_is_amo = local(:mem_is_amo, mem_is_lr | mem_is_sc | mem_is_amo_rmw, width: 1)
         mem_is_fp_load = local(:mem_is_fp_load,
-                               (mem_opcode == lit(Opcode::LOAD_FP, width: 7)) & (mem_funct3 == lit(Funct3::WORD, width: 3)),
+                               (mem_opcode == lit(Opcode::LOAD_FP, width: 7)) &
+                               ((mem_funct3 == lit(Funct3::WORD, width: 3)) | (mem_funct3 == lit(Funct3::DOUBLE, width: 3))),
                                width: 1)
         mem_is_fmv_w_x = local(:mem_is_fmv_w_x,
                                (mem_opcode == lit(Opcode::OP_FP, width: 7)) &
@@ -1574,6 +2347,98 @@ module RHDL
                                (mem_funct3 == lit(0, width: 3)) &
                                (mem_rs2_addr == lit(0, width: 5)),
                                width: 1)
+        mem_is_fsgnj_s = local(:mem_is_fsgnj_s,
+                               (mem_opcode == lit(Opcode::OP_FP, width: 7)) &
+                               (mem_funct7 == lit(0b0010000, width: 7)),
+                               width: 1)
+        mem_is_fsgnj_d = local(:mem_is_fsgnj_d,
+                               (mem_opcode == lit(Opcode::OP_FP, width: 7)) &
+                               (mem_funct7 == lit(0b0010001, width: 7)),
+                               width: 1)
+        mem_is_fminmax_s = local(:mem_is_fminmax_s,
+                                 (mem_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                 (mem_funct7 == lit(0b0010100, width: 7)),
+                                 width: 1)
+        mem_is_fminmax_d = local(:mem_is_fminmax_d,
+                                 (mem_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                 (mem_funct7 == lit(0b0010101, width: 7)),
+                                 width: 1)
+        mem_is_fadd_d = local(:mem_is_fadd_d,
+                              (mem_opcode == lit(Opcode::OP_FP, width: 7)) &
+                              (mem_funct7 == lit(0b0000001, width: 7)),
+                              width: 1)
+        mem_is_fsub_d = local(:mem_is_fsub_d,
+                              (mem_opcode == lit(Opcode::OP_FP, width: 7)) &
+                              (mem_funct7 == lit(0b0000101, width: 7)),
+                              width: 1)
+        mem_is_fmul_d = local(:mem_is_fmul_d,
+                              (mem_opcode == lit(Opcode::OP_FP, width: 7)) &
+                              (mem_funct7 == lit(0b0001001, width: 7)),
+                              width: 1)
+        mem_is_fdiv_d = local(:mem_is_fdiv_d,
+                              (mem_opcode == lit(Opcode::OP_FP, width: 7)) &
+                              (mem_funct7 == lit(0b0001101, width: 7)),
+                              width: 1)
+        mem_is_fsqrt_d = local(:mem_is_fsqrt_d,
+                               (mem_opcode == lit(Opcode::OP_FP, width: 7)) &
+                               (mem_funct7 == lit(0b0101101, width: 7)) &
+                               (mem_rs2_addr == lit(0, width: 5)),
+                               width: 1)
+        mem_is_fmadd_d = local(:mem_is_fmadd_d,
+                               (mem_opcode == lit(Opcode::MADD, width: 7)) &
+                               (mem_funct7[1..0] == lit(0b01, width: 2)),
+                               width: 1)
+        mem_is_fmsub_d = local(:mem_is_fmsub_d,
+                               (mem_opcode == lit(Opcode::MSUB, width: 7)) &
+                               (mem_funct7[1..0] == lit(0b01, width: 2)),
+                               width: 1)
+        mem_is_fnmsub_d = local(:mem_is_fnmsub_d,
+                                (mem_opcode == lit(Opcode::NMSUB, width: 7)) &
+                                (mem_funct7[1..0] == lit(0b01, width: 2)),
+                                width: 1)
+        mem_is_fnmadd_d = local(:mem_is_fnmadd_d,
+                                (mem_opcode == lit(Opcode::NMADD, width: 7)) &
+                                (mem_funct7[1..0] == lit(0b01, width: 2)),
+                                width: 1)
+        mem_is_d_arith = local(:mem_is_d_arith,
+                               mem_is_fadd_d | mem_is_fsub_d | mem_is_fmul_d | mem_is_fdiv_d | mem_is_fsqrt_d |
+                               mem_is_fmadd_d | mem_is_fmsub_d | mem_is_fnmsub_d | mem_is_fnmadd_d,
+                               width: 1)
+        mem_is_fcvt_s_d = local(:mem_is_fcvt_s_d,
+                                (mem_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                (mem_funct7 == lit(0b0100000, width: 7)) &
+                                (mem_rs2_addr == lit(0b00001, width: 5)),
+                                width: 1)
+        mem_is_fcvt_s_w = local(:mem_is_fcvt_s_w,
+                                (mem_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                (mem_funct7 == lit(0b1101000, width: 7)) &
+                                (mem_rs2_addr == lit(0b00000, width: 5)),
+                                width: 1)
+        mem_is_fcvt_s_wu = local(:mem_is_fcvt_s_wu,
+                                 (mem_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                 (mem_funct7 == lit(0b1101000, width: 7)) &
+                                 (mem_rs2_addr == lit(0b00001, width: 5)),
+                                 width: 1)
+        mem_is_fcvt_d_s = local(:mem_is_fcvt_d_s,
+                                (mem_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                (mem_funct7 == lit(0b0100001, width: 7)) &
+                                (mem_rs2_addr == lit(0b00000, width: 5)),
+                                width: 1)
+        mem_is_fcvt_d_w = local(:mem_is_fcvt_d_w,
+                                (mem_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                (mem_funct7 == lit(0b1101001, width: 7)) &
+                                (mem_rs2_addr == lit(0b00000, width: 5)),
+                                width: 1)
+        mem_is_fcvt_d_wu = local(:mem_is_fcvt_d_wu,
+                                 (mem_opcode == lit(Opcode::OP_FP, width: 7)) &
+                                 (mem_funct7 == lit(0b1101001, width: 7)) &
+                                 (mem_rs2_addr == lit(0b00001, width: 5)),
+                                 width: 1)
+        mem_is_fp_reg_write_op = local(:mem_is_fp_reg_write_op,
+                                       mem_is_fmv_w_x | mem_is_fsgnj_s | mem_is_fminmax_s |
+                                       mem_is_fsgnj_d | mem_is_fminmax_d |
+                                       mem_is_fcvt_s_d | mem_is_fcvt_s_w | mem_is_fcvt_s_wu | mem_is_d_arith,
+                                       width: 1)
         mem_amo_active = local(:mem_amo_active, mem_is_amo & (mem_reg_write | mem_mem_read | mem_mem_write), width: 1)
         mem_amo_old = local(:mem_amo_old, data_rdata, width: 32)
         mem_amo_old_sign = mem_amo_old[31]
@@ -1620,8 +2485,66 @@ module RHDL
         reservation_set <= mem_amo_active & mem_is_lr
         reservation_clear <= (mem_amo_active & (mem_is_sc | mem_is_amo_rmw)) | mem_mem_write
         reservation_set_addr <= mem_alu_result
+        mem_fp_src_sign = mem_alu_result[31]
+        mem_fp_src_exp = mem_alu_result[30..23]
+        mem_fp_src_frac = mem_alu_result[22..0]
+        mem_fp_src_is_zero = local(:mem_fp_src_is_zero,
+                                   (mem_fp_src_exp == lit(0, width: 8)) & (mem_fp_src_frac == lit(0, width: 23)),
+                                   width: 1)
+        mem_fp_src_is_subnormal = local(:mem_fp_src_is_subnormal,
+                                        (mem_fp_src_exp == lit(0, width: 8)) & (mem_fp_src_frac != lit(0, width: 23)),
+                                        width: 1)
+        mem_fp_src_is_inf = local(:mem_fp_src_is_inf,
+                                  (mem_fp_src_exp == lit(0xFF, width: 8)) & (mem_fp_src_frac == lit(0, width: 23)),
+                                  width: 1)
+        mem_fp_src_is_nan = local(:mem_fp_src_is_nan,
+                                  (mem_fp_src_exp == lit(0xFF, width: 8)) & (mem_fp_src_frac != lit(0, width: 23)),
+                                  width: 1)
+        mem_fcvt_ds_exp11 = local(:mem_fcvt_ds_exp11, cat(lit(0, width: 3), mem_fp_src_exp) + lit(896, width: 11), width: 11)
+        mem_fcvt_ds_frac52 = local(:mem_fcvt_ds_frac52, cat(mem_fp_src_frac, lit(0, width: 29)), width: 52)
+        mem_fcvt_d_s_zero = local(:mem_fcvt_d_s_zero, cat(mem_fp_src_sign, lit(0, width: 11), lit(0, width: 52)), width: 64)
+        mem_fcvt_d_s_inf = local(:mem_fcvt_d_s_inf, cat(mem_fp_src_sign, lit(0x7FF, width: 11), lit(0, width: 52)), width: 64)
+        mem_fcvt_d_s_nan = local(:mem_fcvt_d_s_nan, cat(mem_fp_src_sign, lit(0x7FF, width: 11), cat(mem_fp_src_frac, lit(0, width: 29))), width: 64)
+        mem_fcvt_d_s_norm = local(:mem_fcvt_d_s_norm, cat(mem_fp_src_sign, mem_fcvt_ds_exp11, mem_fcvt_ds_frac52), width: 64)
+        mem_fcvt_d_s_result64 = local(:mem_fcvt_d_s_result64,
+                                      mux(mem_fp_src_is_zero | mem_fp_src_is_subnormal,
+                                          mem_fcvt_d_s_zero,
+                                          mux(mem_fp_src_is_nan,
+                                              mem_fcvt_d_s_nan,
+                                              mux(mem_fp_src_is_inf,
+                                                  mem_fcvt_d_s_inf,
+                                                  mem_fcvt_d_s_norm))),
+                                      width: 64)
+        mem_fcvt_dw_sign = local(:mem_fcvt_dw_sign,
+                                 mux(mem_is_fcvt_d_w, mem_alu_result[31], lit(0, width: 1)),
+                                 width: 1)
+        mem_fcvt_dw_abs = local(:mem_fcvt_dw_abs,
+                                mux(mem_is_fcvt_d_w & mem_alu_result[31], ~mem_alu_result + lit(1, width: 32), mem_alu_result),
+                                width: 32)
+        mem_fcvt_dw_msb_expr = local(:mem_fcvt_dw_msb_seed, lit(0, width: 6), width: 6)
+        32.times do |i|
+          mem_fcvt_dw_msb_expr = local(:"mem_fcvt_dw_msb_stage_#{i}",
+                                       mux(mem_fcvt_dw_abs[i], lit(i, width: 6), mem_fcvt_dw_msb_expr),
+                                       width: 6)
+        end
+        mem_fcvt_dw_msb = local(:mem_fcvt_dw_msb, mem_fcvt_dw_msb_expr, width: 6)
+        mem_fcvt_dw_nonzero = local(:mem_fcvt_dw_nonzero, mem_fcvt_dw_abs != lit(0, width: 32), width: 1)
+        mem_fcvt_dw_shift_left_amt = local(:mem_fcvt_dw_shift_left_amt, lit(52, width: 6) - mem_fcvt_dw_msb, width: 6)
+        mem_fcvt_dw_norm = local(:mem_fcvt_dw_norm, cat(lit(0, width: 32), mem_fcvt_dw_abs) << mem_fcvt_dw_shift_left_amt, width: 64)
+        mem_fcvt_dw_frac52 = mem_fcvt_dw_norm[51..0]
+        mem_fcvt_dw_exp11 = local(:mem_fcvt_dw_exp11, cat(lit(0, width: 5), mem_fcvt_dw_msb) + lit(1023, width: 11), width: 11)
+        mem_fcvt_d_w_result64 = local(:mem_fcvt_d_w_result64,
+                                      mux(mem_fcvt_dw_nonzero,
+                                          cat(mem_fcvt_dw_sign, mem_fcvt_dw_exp11, mem_fcvt_dw_frac52),
+                                          lit(0, width: 64)),
+                                      width: 64)
         fp_rd_data <= mux(mem_is_fp_load, data_rdata, mem_alu_result)
-        fp_reg_write <= (mem_is_fp_load & mem_mem_read) | mem_is_fmv_w_x
+        mem_is_ex_d_result64 = local(:mem_is_ex_d_result64, mem_is_fsgnj_d | mem_is_fminmax_d | mem_is_d_arith, width: 1)
+        fp_rd_data64 <= mux(mem_is_fcvt_d_s, mem_fcvt_d_s_result64,
+                            mux(mem_is_fcvt_d_w | mem_is_fcvt_d_wu, mem_fcvt_d_w_result64,
+                                mux(mem_is_ex_d_result64, cat(mem_rd_src_data, mem_alu_result), cat(lit(0xFFFF_FFFF, width: 32), fp_rd_data))))
+        fp_reg_write <= (mem_is_fp_load & mem_mem_read) | mem_is_fp_reg_write_op
+        fp_reg_write64 <= mem_is_fcvt_d_s | mem_is_fcvt_d_w | mem_is_fcvt_d_wu | mem_is_ex_d_result64
 
         # -----------------------------------------
         # MEM/WB Register inputs (latch wires)

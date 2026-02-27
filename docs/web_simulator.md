@@ -98,6 +98,8 @@ Current defaults:
 
 - Default runner preset: `apple2`
 - Default backend state: `compiler` (`Compiler (AOT)`)
+- Trace capture starts disabled on load for all presets (`traceEnabledOnLoad: false`)
+- To auto-enable trace at runner load, set `runner.traceEnabledOnLoad: true` (or legacy `runner.defaults.traceEnabled: true`) in the runner config JSON before `bundle exec rake web:generate`
 
 Preset generation source list is controlled by:
 
@@ -289,12 +291,14 @@ rounded-rect fragment shaders for crisp edges at any zoom level.
 
 **Interaction** is built on a spatial R-tree index over rendered elements.
 Single-click selects a component or highlights a signal; double-click drills down
-into a child component's internal schematic. Pan and zoom are handled via D3-style
-pointer/wheel events on the canvas.
+into a child component's internal schematic. Left-button drag pans the viewport,
+mouse wheel/trackpad scroll zooms around the cursor, and `Zoom +` / `Zoom -` /
+`Reset View` buttons provide explicit viewport controls.
 
 **Live activity** updates wire and net colors each frame based on current signal
 values from the running simulation — non-zero signals highlight in green, toggled
-signals flash amber.
+signals flash amber. This animation is gated by trace state: when trace is off,
+schematic activity is static; when trace is on, live activity animates.
 
 Each element type has a distinct color: cyan for components, purple for IO ports,
 amber for ops/assigns, copper for memory, green for nets, and neutral gray for

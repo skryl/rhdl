@@ -111,8 +111,12 @@ export function shouldRefreshUiAfterRun({
   state,
   hit,
   uiEvery,
-  isComponentTabActive
+  isComponentTabActive,
+  traceFollowEnabled = true
 } = {}) {
+  if (!traceFollowEnabled && state.running && !hit) {
+    return false;
+  }
   return !state.running
     || !!hit
     || state.uiCyclesPending >= uiEvery

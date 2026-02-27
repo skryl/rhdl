@@ -17,6 +17,7 @@ require 'fileutils'
 require 'fiddle'
 require 'fiddle/import'
 require 'json'
+require 'rbconfig'
 
 module RHDL
   module Examples
@@ -253,6 +254,16 @@ module RHDL
 
         def render_hires_color(chars_wide: 140, composite: false, base_addr: HIRES_PAGE1_START)
           renderer = ColorRenderer.new(chars_wide: chars_wide, composite: composite)
+
+          if @sim_read_ram_fn && @sim_ctx
+            page_end = base_addr + 0x2000 - 1
+            hires_ram = Array.new(page_end + 1, 0)
+            (base_addr..page_end).each do |addr|
+              hires_ram[addr] = read_ram_byte(addr)
+            end
+            return renderer.render(hires_ram, base_addr: base_addr)
+          end
+
           renderer.render(@ram, base_addr: base_addr)
         end
 
@@ -333,6 +344,9 @@ module RHDL
               raise "#{tool} not found in PATH. Install CIRCT: https://github.com/llvm/circt/releases"
             end
           end
+          unless command_available?('llc') || command_available?('clang')
+            raise "Neither llc nor clang found in PATH. Install CIRCT tools (llc) or Xcode Command Line Tools (clang)."
+          end
         end
 
         def build_arcilator_simulation
@@ -372,13 +386,21 @@ module RHDL
           mlir_file = File.join(BUILD_DIR, 'apple2_hw.mlir')
           ll_file = File.join(BUILD_DIR, 'apple2_arc.ll')
           state_file = File.join(BUILD_DIR, 'apple2_state.json')
+          obj_file = File.join(BUILD_DIR, 'apple2_arc.o')
 
           # FIRRTL -> MLIR core
           system("firtool #{fir_file} --ir-hw -o #{mlir_file}") or raise "firtool failed"
           # MLIR -> LLVM IR
           system("arcilator #{mlir_file} --state-file=#{state_file} -o #{ll_file}") or raise "arcilator failed"
           # LLVM IR -> object file
-          system("llc -filetype=obj -O2 -relocation-model=pic #{ll_file} -o #{File.join(BUILD_DIR, 'apple2_arc.o')}") or raise "llc failed"
+          if darwin_host? && command_available?('clang')
+            compile_object_with_clang(ll_file: ll_file, obj_file: obj_file) or raise "clang failed"
+            return
+          end
+
+          return if compile_object_with_llc(ll_file: ll_file, obj_file: obj_file)
+
+          raise "llc failed"
         end
 
         def build_shared_library
@@ -389,7 +411,17 @@ module RHDL
           # Write wrapper from template
           write_cpp_wrapper(wrapper) unless File.exist?(wrapper)
 
-          system("g++ -shared -fPIC -O2 -o #{lib} #{wrapper} #{obj}") or raise "g++ link failed"
+          cxx = if darwin_host? && command_available?('clang++')
+                  'clang++'
+                else
+                  'g++'
+                end
+          link_cmd = String.new("#{cxx} -shared -fPIC -O2")
+          if (arch = build_target_arch)
+            link_cmd << " -arch #{arch}"
+          end
+          link_cmd << " -o #{lib} #{wrapper} #{obj}"
+          system(link_cmd) or raise "g++ link failed"
         end
 
         def write_cpp_wrapper(path)
@@ -546,6 +578,51 @@ module RHDL
 
         def shared_lib_path
           File.join(BUILD_DIR, 'libapple2_arc_sim.so')
+        end
+
+        def command_available?(tool)
+          system("which #{tool} > /dev/null 2>&1")
+        end
+
+        def darwin_host?(host_os: RbConfig::CONFIG['host_os'])
+          host_os.to_s.downcase.include?('darwin')
+        end
+
+        def build_target_arch(host_os: RbConfig::CONFIG['host_os'], host_cpu: RbConfig::CONFIG['host_cpu'])
+          return nil unless darwin_host?(host_os: host_os)
+
+          cpu = host_cpu.to_s.downcase
+          return 'arm64' if cpu.include?('arm64') || cpu.include?('aarch64')
+          return 'x86_64' if cpu.include?('x86_64') || cpu.include?('amd64')
+
+          nil
+        end
+
+        def llc_target_triple(host_os: RbConfig::CONFIG['host_os'], host_cpu: RbConfig::CONFIG['host_cpu'])
+          arch = build_target_arch(host_os: host_os, host_cpu: host_cpu)
+          return nil unless arch
+
+          "#{arch}-apple-macosx"
+        end
+
+        def compile_object_with_llc(ll_file:, obj_file:)
+          return false unless command_available?('llc')
+
+          llc_cmd = String.new("llc -filetype=obj -O2 -relocation-model=pic")
+          if (target_triple = llc_target_triple)
+            llc_cmd << " -mtriple=#{target_triple}"
+          end
+          llc_cmd << " #{ll_file} -o #{obj_file}"
+          system(llc_cmd)
+        end
+
+        def compile_object_with_clang(ll_file:, obj_file:)
+          clang_cmd = String.new("clang -c -O2 -fPIC")
+          if (target_triple = llc_target_triple)
+            clang_cmd << " -target #{target_triple}"
+          end
+          clang_cmd << " #{ll_file} -o #{obj_file}"
+          system(clang_cmd)
         end
 
         def load_shared_library(lib_path)

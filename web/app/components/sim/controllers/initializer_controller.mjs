@@ -11,6 +11,20 @@ function requireFn(name, fn) {
   }
 }
 
+function resolveTraceEnabledOnLoad(preset = null) {
+  if (!preset || typeof preset !== 'object') {
+    return false;
+  }
+  if (Object.prototype.hasOwnProperty.call(preset, 'traceEnabledOnLoad')) {
+    return preset.traceEnabledOnLoad === true;
+  }
+  const defaults = preset.defaults;
+  if (defaults && typeof defaults === 'object' && Object.prototype.hasOwnProperty.call(defaults, 'traceEnabled')) {
+    return defaults.traceEnabled === true;
+  }
+  return false;
+}
+
 export function createSimInitializerController({
   dom,
   state,
@@ -45,7 +59,9 @@ export function createSimInitializerController({
   rebuildComponentExplorer,
   refreshStatus,
   log,
-  fetchImpl = globalThis.fetch
+  fetchImpl = globalThis.fetch,
+  requestFrame = globalThis.requestAnimationFrame,
+  setTimeoutImpl = globalThis.setTimeout
 } = {}) {
   if (!dom || !state || !runtime || !appStore || !storeActions) {
     throw new Error('createSimInitializerController requires dom/state/runtime/appStore/storeActions');
@@ -80,7 +96,53 @@ export function createSimInitializerController({
   requireFn('log', log);
   requireFn('fetchImpl', fetchImpl);
 
+  async function waitForUiPaint() {
+    await new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        resolve();
+      };
+      const fallbackTimer = (typeof globalThis.setTimeout === 'function')
+        ? globalThis.setTimeout(finish, 120)
+        : null;
+      const finishWithFallbackClear = () => {
+        if (fallbackTimer != null && typeof globalThis.clearTimeout === 'function') {
+          globalThis.clearTimeout(fallbackTimer);
+        }
+        finish();
+      };
+      if (typeof requestFrame === 'function') {
+        requestFrame(() => {
+          if (typeof setTimeoutImpl === 'function') {
+            setTimeoutImpl(finishWithFallbackClear, 0);
+          } else {
+            finishWithFallbackClear();
+          }
+        });
+        return;
+      }
+      if (typeof setTimeoutImpl === 'function') {
+        setTimeoutImpl(finishWithFallbackClear, 0);
+        return;
+      }
+      finishWithFallbackClear();
+    });
+  }
+
   async function initializeSimulator(options = {}) {
+    const shouldYieldToUi = options.yieldToUi === true;
+    const deferComponentExplorerRebuild = options.deferComponentExplorerRebuild === true;
+    const transferChunkBytes = Number.parseInt(options.transferChunkBytes, 10);
+    const parsedChunkBytes = Number.isFinite(transferChunkBytes) && transferChunkBytes > 0
+      ? transferChunkBytes
+      : undefined;
+    if (shouldYieldToUi) {
+      await waitForUiPaint();
+    }
     const initContext = resolveInitializationContext({
       options,
       dom,
@@ -92,6 +154,9 @@ export function createSimInitializerController({
     if (!initContext) {
       log('No IR JSON provided');
       return;
+    }
+    if (shouldYieldToUi) {
+      await waitForUiPaint();
     }
     const {
       simJson,
@@ -105,9 +170,15 @@ export function createSimInitializerController({
     setComponentSchematicBundle(options.componentSchematicBundle || null);
 
     try {
+      if (shouldYieldToUi) {
+        await waitForUiPaint();
+      }
       // Always re-resolve backend instance so runner-specific compiler wasm paths
       // (e.g. mos6502/gameboy/cpu8bit) are honored when switching presets.
       await ensureBackendInstance(state.backend);
+      if (shouldYieldToUi) {
+        await waitForUiPaint();
+      }
       resetSimulatorSession({
         runtime,
         state,
@@ -124,11 +195,23 @@ export function createSimInitializerController({
         setMemoryDumpStatus,
         setMemoryResetVectorInput
       });
+      if (shouldYieldToUi) {
+        await waitForUiPaint();
+      }
 
-      initializeTrace();
+      initializeTrace({ enabled: resolveTraceEnabledOnLoad(preset) });
       populateClockSelect();
       seedDefaultWatchSignals({ runtime, simMeta, addWatchSignal, selectedClock });
-      await initializeApple2Mode({ runtime, state, preset, addWatchSignal, fetchImpl, log });
+      await initializeApple2Mode({
+        runtime,
+        state,
+        preset,
+        addWatchSignal,
+        transferChunkBytes: parsedChunkBytes,
+        yieldControl: shouldYieldToUi ? waitForUiPaint : null,
+        fetchImpl,
+        log
+      });
 
       renderWatchList();
       renderBreakpointList();
@@ -141,7 +224,9 @@ export function createSimInitializerController({
       } else {
         clearComponentSourceOverride();
       }
-      rebuildComponentExplorer(explorerMeta, explorerSource);
+      if (!deferComponentExplorerRebuild) {
+        rebuildComponentExplorer(explorerMeta, explorerSource);
+      }
       refreshStatus();
       log('Simulator initialized');
     } catch (err) {

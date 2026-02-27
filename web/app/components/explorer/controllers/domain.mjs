@@ -6,6 +6,9 @@ export function createComponentDomainController({
   setComponentGraphFocus,
   currentComponentGraphFocusNode,
   renderComponentViews,
+  zoomComponentGraphIn,
+  zoomComponentGraphOut,
+  resetComponentGraphViewport,
   clearComponentSourceOverride,
   resetComponentExplorerState
 } = {}) {
@@ -17,6 +20,9 @@ export function createComponentDomainController({
     setGraphFocus: setComponentGraphFocus,
     currentGraphFocusNode: currentComponentGraphFocusNode,
     renderViews: renderComponentViews,
+    zoomGraphIn: zoomComponentGraphIn,
+    zoomGraphOut: zoomComponentGraphOut,
+    resetGraphView: resetComponentGraphViewport,
     clearSourceOverride: clearComponentSourceOverride,
     resetExplorerState: resetComponentExplorerState
   };

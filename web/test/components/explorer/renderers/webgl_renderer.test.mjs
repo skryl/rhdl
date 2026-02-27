@@ -110,6 +110,18 @@ function makeRenderList(count = 2) {
   return { symbols, pins, nets, wires, byId };
 }
 
+function readFirstLineWidth(glCalls) {
+  const lineBufferUpload = glCalls.find((call) => (
+    call.method === 'bufferData'
+    && call.args?.[1] instanceof Float32Array
+    && call.args[1].length >= 10
+  ));
+  if (!lineBufferUpload) {
+    return 0;
+  }
+  return Number(lineBufferUpload.args[1][8] || 0);
+}
+
 test('createWebGLRenderer returns object with render and destroy when WebGL2 available', () => {
   const { canvas } = createMockCanvas(true);
   const renderer = createWebGLRenderer(canvas);
@@ -134,6 +146,46 @@ test('render calls GL functions (clear, bindBuffer, drawArrays/drawElements)', (
 
   assert.ok(glCalls.some(c => c.method === 'clear'), 'should call gl.clear');
   assert.ok(glCalls.some(c => c.method === 'useProgram'), 'should call gl.useProgram');
+});
+
+test('render resets line attribute divisors before drawing wires', () => {
+  const { canvas, glCalls } = createMockCanvas(true);
+  const renderer = createWebGLRenderer(canvas);
+  const rl = makeRenderList(3);
+  const viewport = { x: 0, y: 0, scale: 1 };
+
+  renderer.render(rl, viewport, makePalette());
+
+  const firstLineDraw = glCalls.findIndex((call) => call.method === 'drawArrays' && call.args[0] === 5);
+  assert.ok(firstLineDraw >= 0, 'wire pass should issue TRIANGLE_STRIP draws');
+
+  for (const location of [0, 1, 2, 3, 4]) {
+    const divisorCall = glCalls.findIndex((call) => (
+      call.method === 'vertexAttribDivisor' &&
+      call.args[0] === location &&
+      call.args[1] === 0
+    ));
+    assert.ok(divisorCall >= 0, `line attribute ${location} should reset divisor to 0`);
+    assert.ok(divisorCall < firstLineDraw, `line attribute ${location} divisor reset must happen before drawing wires`);
+  }
+});
+
+test('render attenuates wire widths while zoomed out', () => {
+  const { canvas, glCalls } = createMockCanvas(true);
+  const renderer = createWebGLRenderer(canvas);
+  const rl = makeRenderList(2);
+
+  glCalls.length = 0;
+  renderer.render(rl, { x: 0, y: 0, scale: 1 }, makePalette());
+  const fullScaleWidth = readFirstLineWidth(glCalls);
+
+  glCalls.length = 0;
+  renderer.render(rl, { x: 0, y: 0, scale: 0.1 }, makePalette());
+  const zoomedOutWidth = readFirstLineWidth(glCalls);
+
+  assert.ok(fullScaleWidth > 0, 'wire width should be populated at full scale');
+  assert.ok(zoomedOutWidth > 0, 'wire width should be populated while zoomed out');
+  assert.ok(zoomedOutWidth < fullScaleWidth, 'wire width should shrink while zoomed out');
 });
 
 test('destroy does not throw', () => {

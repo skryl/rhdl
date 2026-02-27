@@ -12,6 +12,7 @@
     "sourceBundlePath": "./assets/fixtures/riscv/ir/riscv_sources.json",
     "schematicPath": "./assets/fixtures/riscv/ir/riscv_schematic.json",
     "preferredTab": "ioTab",
+    "traceEnabledOnLoad": false,
     "enableApple2Ui": false,
     "usesManualIr": false,
     "defaultBin": {
@@ -43,7 +44,7 @@
       "api": "generic",
       "memory": {
         "dumpStart": 2147483648,
-        "dumpLength": 1024,
+        "dumpLength": 768,
         "addressSpace": 4294967296,
         "viewMapped": true,
         "dumpReadMapped": true,

@@ -14,6 +14,8 @@
     "schematicPath": "./assets/fixtures/apple2/ir/apple2_schematic.json",
     "romPath": "./assets/fixtures/apple2/memory/appleiigo.rom",
     "preferredTab": "ioTab",
+    "traceEnabledOnLoad": false,
+    "preferredBackend": "compiler",
     "enableApple2Ui": true,
     "usesManualIr": false,
     "autoLoadOnBoot": true,
@@ -33,7 +35,7 @@
       "api": "apple2",
       "memory": {
         "dumpStart": 0,
-        "dumpLength": 49152,
+        "dumpLength": 768,
         "addressSpace": 65536,
         "viewMapped": true,
         "dumpReadMapped": false,

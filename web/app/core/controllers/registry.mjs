@@ -391,6 +391,18 @@ export function createControllerRegistry(options = {}) {
     lazy.getComponentExplorerController().destroyComponentGraph();
   }
 
+  function zoomComponentGraphIn() {
+    return lazy.getComponentExplorerController().zoomComponentGraphIn();
+  }
+
+  function zoomComponentGraphOut() {
+    return lazy.getComponentExplorerController().zoomComponentGraphOut();
+  }
+
+  function resetComponentGraphViewport() {
+    return lazy.getComponentExplorerController().resetComponentGraphViewport();
+  }
+
   function rebuildComponentExplorer(meta = runtime.irMeta, source = currentComponentSourceText()) {
     lazy.getComponentExplorerController().rebuildComponentExplorer(meta, source);
   }
@@ -501,8 +513,8 @@ export function createControllerRegistry(options = {}) {
     lazy.getSimStatusController().populateClockSelect();
   }
 
-  function initializeTrace() {
-    lazy.getSimRuntimeController().initializeTrace();
+  function initializeTrace(options = {}) {
+    lazy.getSimRuntimeController().initializeTrace(options);
   }
 
   function addWatchSignal(name) {
@@ -628,6 +640,9 @@ export function createControllerRegistry(options = {}) {
     setComponentGraphFocus,
     currentComponentGraphFocusNode,
     renderComponentViews,
+    zoomComponentGraphIn,
+    zoomComponentGraphOut,
+    resetComponentGraphViewport,
     clearComponentSourceOverride,
     resetComponentExplorerState
   });

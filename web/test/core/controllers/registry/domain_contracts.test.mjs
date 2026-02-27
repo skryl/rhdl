@@ -42,6 +42,7 @@ test('registry domains expose the grouped controller contracts used by startup +
     setComponentGraphFocus: fn,
     currentComponentGraphFocusNode: fn,
     renderComponentViews: fn,
+    resetComponentGraphViewport: fn,
     clearComponentSourceOverride: fn,
     resetComponentExplorerState: fn
   });
@@ -88,6 +89,7 @@ test('registry domains expose the grouped controller contracts used by startup +
   assert.equal(runner.getActionsController, fn);
   assert.equal(components.refreshExplorer, fn);
   assert.equal(components.currentGraphFocusNode, fn);
+  assert.equal(components.resetGraphView, fn);
   assert.equal(apple2.resetWithMemoryVectorOverride, fn);
   assert.equal(apple2.loadDumpOrSnapshotFile, fn);
   assert.equal(sim.initializeSimulator, fn);

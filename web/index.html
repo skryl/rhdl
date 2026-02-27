@@ -158,8 +158,8 @@ rhdl-app-shell {
             <button class="tab-btn active" data-tab="ioTab" aria-selected="true">1. I/O</button>
             <button class="tab-btn" data-tab="vcdTab" aria-selected="false">2. VCD + Signals</button>
             <button class="tab-btn" data-tab="memoryTab" aria-selected="false">3. Memory</button>
-            <button class="tab-btn" data-tab="componentTab" aria-selected="false">4. Components</button>
-            <button class="tab-btn" data-tab="componentGraphTab" aria-selected="false">5. Schematic</button>
+            <button class="tab-btn" data-tab="componentGraphTab" aria-selected="false">4. Schematic</button>
+            <button class="tab-btn" data-tab="componentTab" aria-selected="false">5. Components</button>
             <button class="tab-btn" data-tab="editorTab" aria-selected="false">6. Editor</button>
           </nav>
           <div class="viewer-toolbar">
@@ -358,6 +358,9 @@ rhdl-app-shell {
               <div class="row wrap component-graph-controls">
                 <button id="componentGraphTopBtn" type="button">Top</button>
                 <button id="componentGraphUpBtn" type="button">Up</button>
+                <button id="componentGraphZoomInBtn" type="button">Zoom +</button>
+                <button id="componentGraphZoomOutBtn" type="button">Zoom -</button>
+                <button id="componentGraphResetViewBtn" type="button">Reset View</button>
                 <span id="componentGraphFocusPath" class="status">Focus: top</span>
               </div>
               <div id="componentVisual" class="component-visual">Select a component to visualize.</div>

@@ -16,6 +16,7 @@ function makeResponse(body, status = 200) {
 function createHarness(overrides = {}) {
   const calls = [];
   const dom = {
+    backendSelect: { value: 'interpreter' },
     irJson: { value: '' },
     sampleSelect: {
       value: '/sample.json',
@@ -83,6 +84,48 @@ test('loadRunnerPreset runs manual preset initialization path', async () => {
   assert.equal(calls.some(([k]) => k === 'refreshStatus'), true);
 });
 
+test('loadRunnerPreset applies preset preferred backend before simulator initialization', async () => {
+  const { controller, dom, calls } = createHarness({
+    getRunnerPreset: () => ({
+      id: 'apple2',
+      label: 'Apple II System Runner',
+      usesManualIr: true,
+      preferredTab: 'ioTab',
+      preferredBackend: 'compiler'
+    })
+  });
+  dom.irJson.value = '{"ports":[{"name":"clk","width":1}]}';
+
+  await controller.loadRunnerPreset();
+
+  const setBackendIndex = calls.findIndex(([k, value]) => k === 'setBackendState' && value === 'compiler');
+  const ensureBackendIndex = calls.findIndex(([k, value]) => k === 'ensureBackendInstance' && value === 'compiler');
+  const initializeIndex = calls.findIndex(([k]) => k === 'initializeSimulator');
+
+  assert.notEqual(setBackendIndex, -1);
+  assert.notEqual(ensureBackendIndex, -1);
+  assert.notEqual(initializeIndex, -1);
+  assert.equal(setBackendIndex < initializeIndex, true);
+  assert.equal(ensureBackendIndex < initializeIndex, true);
+  assert.equal(dom.backendSelect.value, 'compiler');
+});
+
+test('loadRunnerPreset schedules component explorer warmup after runner load', async () => {
+  const { controller, dom, calls } = createHarness({
+    requestFrame: (cb) => cb(),
+    setTimeoutImpl: (cb) => cb()
+  });
+  dom.irJson.value = '{"ports":[{"name":"clk","width":1}]}';
+
+  await controller.loadRunnerPreset();
+
+  const refreshStatusIndex = calls.findIndex(([k]) => k === 'refreshStatus');
+  const refreshExplorerIndex = calls.findIndex(([k]) => k === 'refreshComponentExplorer');
+  assert.notEqual(refreshStatusIndex, -1);
+  assert.notEqual(refreshExplorerIndex, -1);
+  assert.equal(refreshStatusIndex < refreshExplorerIndex, true);
+});
+
 test('preloadStartPreset loads non-manual bundle into component stores', async () => {
   const { controller, calls } = createHarness({
     loadRunnerIrBundle: async () => ({
@@ -103,4 +146,50 @@ test('preloadStartPreset loads non-manual bundle into component stores', async (
     calls.some(([k, value]) => k === 'setComponentSchematicBundle' && value && value.schematic === 1),
     true
   );
+});
+
+test('loadRunnerPreset with loading UI yields to browser and restores loading placeholders', async () => {
+  const { controller, dom, calls } = createHarness({
+    requestFrame: (cb) => {
+      calls.push(['requestFrame']);
+      cb();
+    },
+    setTimeoutImpl: (cb) => {
+      calls.push(['setTimeout']);
+      cb();
+    },
+    initializeSimulator: async (options) => {
+      calls.push(['initializeSimulator', options, dom.apple2TextScreen.textContent, dom.loadRunnerBtn.disabled]);
+    },
+    refreshStatus: () => {
+      calls.push(['refreshStatus']);
+    }
+  });
+  dom.irJson.value = '{"ports":[{"name":"clk","width":1}]}';
+  dom.loadRunnerBtn = { disabled: false };
+  dom.apple2TextScreen = { textContent: 'Initial display text' };
+  dom.apple2HiresCanvas = { hidden: false };
+  dom.runnerStatus = { textContent: 'Runner not initialized' };
+
+  await controller.loadRunnerPreset({ showLoadingUi: true });
+
+  const requestFrameIndex = calls.findIndex(([k]) => k === 'requestFrame');
+  const initializeIndex = calls.findIndex(([k]) => k === 'initializeSimulator');
+  assert.notEqual(requestFrameIndex, -1);
+  assert.notEqual(initializeIndex, -1);
+  assert.equal(requestFrameIndex < initializeIndex, true);
+  assert.equal(
+    calls.some(([k, options, text, disabled]) => (
+      k === 'initializeSimulator'
+      && options?.yieldToUi === true
+      && options?.deferComponentExplorerRebuild === true
+      && text === 'Loading...'
+      && disabled === true
+    )),
+    true
+  );
+  assert.equal(dom.loadRunnerBtn.disabled, false);
+  assert.equal(dom.apple2TextScreen.textContent, 'Initial display text');
+  assert.equal(dom.apple2HiresCanvas.hidden, false);
+  assert.equal(dom.runnerStatus.textContent, 'Runner not initialized');
 });

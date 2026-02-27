@@ -86,6 +86,10 @@ web/assets/pkg/*
 
 # RISC-V Linux local build/cache artifacts
 /examples/riscv/software/.cache/
+/examples/riscv/software/.linux-build/
+/examples/riscv/software/linux/.rhdl-build/
+/examples/riscv/software/buildroot/.rhdl-build/
 /examples/riscv/software/.buildroot-*/
 /examples/riscv/software/.buildroot.defconfig
+/examples/riscv/software/.docker-config*/
 /examples/riscv/software/.tmp_*/

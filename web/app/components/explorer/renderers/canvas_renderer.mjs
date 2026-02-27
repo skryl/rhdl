@@ -1,7 +1,7 @@
 // Canvas 2D renderer for RTL schematic RenderList.
 
 import { symbolShapes } from './symbols.mjs';
-import { drawLegend } from './themes.mjs';
+import { drawLegend, resolveWireStrokeWidth } from './themes.mjs';
 
 function resolveColors(element, palette) {
   const type = element.type || '';
@@ -92,7 +92,7 @@ export function createCanvasRenderer(canvas) {
     for (const wire of renderList.wires) {
       const wc = resolveWireColor(wire, palette);
       ctx.strokeStyle = wc.color;
-      ctx.lineWidth = wc.width;
+      ctx.lineWidth = resolveWireStrokeWidth(wc.width, scale);
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
 

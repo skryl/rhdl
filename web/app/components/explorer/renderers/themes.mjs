@@ -51,15 +51,36 @@ export function getThemePalette(theme = 'shenzhen') {
   };
 }
 
-export function resolveElementColors(element, palette) {
+const WIRE_ZOOM_WIDTH_EXPONENT = 0.65;
+const MIN_WIRE_ZOOM_FACTOR = 0.18;
+
+export function resolveWireStrokeWidth(strokeWidth, viewportScale = 1) {
+  const base = Number(strokeWidth);
+  if (!Number.isFinite(base) || base <= 0) {
+    return 0;
+  }
+  const scale = Number(viewportScale);
+  if (!Number.isFinite(scale) || scale >= 1) {
+    return base;
+  }
+  if (scale <= 0) {
+    return base * MIN_WIRE_ZOOM_FACTOR;
+  }
+  const zoomFactor = Math.max(MIN_WIRE_ZOOM_FACTOR, Math.pow(scale, WIRE_ZOOM_WIDTH_EXPONENT));
+  return base * zoomFactor;
+}
+
+export function resolveElementColors(element, palette, options = {}) {
   const type = element.type || '';
+  const viewportScale = Number(options.viewportScale);
+  const wireStrokeWidth = (rawWidth) => resolveWireStrokeWidth(rawWidth, viewportScale);
 
   // Wire
   if (type === 'wire') {
-    if (element.selected) return { stroke: '#ffffff', strokeWidth: 3.2 };
-    if (element.toggled) return { stroke: palette.wireToggle, strokeWidth: 2.7 };
-    if (element.active) return { stroke: palette.wireActive, strokeWidth: 2.0 };
-    return { stroke: palette.wire, strokeWidth: element.bus ? 2.4 : 1.4 };
+    if (element.selected) return { stroke: '#ffffff', strokeWidth: wireStrokeWidth(3.2) };
+    if (element.toggled) return { stroke: palette.wireToggle, strokeWidth: wireStrokeWidth(2.7) };
+    if (element.active) return { stroke: palette.wireActive, strokeWidth: wireStrokeWidth(2.0) };
+    return { stroke: palette.wire, strokeWidth: wireStrokeWidth(element.bus ? 2.4 : 1.4) };
   }
 
   // Net

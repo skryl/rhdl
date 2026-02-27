@@ -90,7 +90,7 @@ export function createWebGLRenderer(canvas) {
     return data;
   }
 
-  function buildLineData(wires, renderList, palette) {
+  function buildLineData(wires, renderList, palette, viewportScale = 1) {
     // Count total line segments (each bend point pair = 1 segment, 4 vertices each)
     let totalSegments = 0;
     for (const wire of wires) {
@@ -105,7 +105,7 @@ export function createWebGLRenderer(canvas) {
     let vOffset = 0;
 
     for (const wire of wires) {
-      const colors = resolveElementColors({ type: 'wire', ...wire }, palette);
+      const colors = resolveElementColors({ type: 'wire', ...wire }, palette, { viewportScale });
       const col = parseHexColor(colors.stroke || '#4f7d6d');
       const w = colors.strokeWidth || 1.4;
 
@@ -173,7 +173,7 @@ export function createWebGLRenderer(canvas) {
       gl.uniformMatrix3fv(uView, false, viewMatrix);
       gl.uniform2f(uRes, width, height);
 
-      const lineData = buildLineData(renderList.wires, renderList, palette);
+      const lineData = buildLineData(renderList.wires, renderList, palette, scale);
       gl.bindBuffer(gl.ARRAY_BUFFER, lineVertexBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, lineData, gl.DYNAMIC_DRAW);
 
@@ -181,18 +181,23 @@ export function createWebGLRenderer(canvas) {
       // a_start
       gl.enableVertexAttribArray(0);
       gl.vertexAttribPointer(0, 2, gl.FLOAT, false, stride, 0);
+      gl.vertexAttribDivisor(0, 0);
       // a_end
       gl.enableVertexAttribArray(1);
       gl.vertexAttribPointer(1, 2, gl.FLOAT, false, stride, 8);
+      gl.vertexAttribDivisor(1, 0);
       // a_color
       gl.enableVertexAttribArray(2);
       gl.vertexAttribPointer(2, 4, gl.FLOAT, false, stride, 16);
+      gl.vertexAttribDivisor(2, 0);
       // a_width
       gl.enableVertexAttribArray(3);
       gl.vertexAttribPointer(3, 1, gl.FLOAT, false, stride, 32);
+      gl.vertexAttribDivisor(3, 0);
       // a_vertexIndex
       gl.enableVertexAttribArray(4);
       gl.vertexAttribPointer(4, 1, gl.FLOAT, false, stride, 36);
+      gl.vertexAttribDivisor(4, 0);
 
       const lineQuadCount = lineData.length / (4 * LINE_VERTEX_FLOATS);
       for (let i = 0; i < lineQuadCount; i++) {

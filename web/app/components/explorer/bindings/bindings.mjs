@@ -30,6 +30,24 @@ export function bindComponentBindings({
     components.setGraphFocus(focusNode.parentId, true);
   });
 
+  listeners.on(dom.componentGraphZoomInBtn, 'click', () => {
+    if (typeof components.zoomGraphIn === 'function') {
+      components.zoomGraphIn();
+    }
+  });
+
+  listeners.on(dom.componentGraphZoomOutBtn, 'click', () => {
+    if (typeof components.zoomGraphOut === 'function') {
+      components.zoomGraphOut();
+    }
+  });
+
+  listeners.on(dom.componentGraphResetViewBtn, 'click', () => {
+    if (typeof components.resetGraphView === 'function') {
+      components.resetGraphView();
+    }
+  });
+
   listeners.on(dom.componentTree, 'component-select', (event) => {
     const nodeId = event?.detail?.nodeId;
     if (!nodeId) {

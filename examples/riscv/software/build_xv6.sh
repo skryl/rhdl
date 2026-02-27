@@ -3,13 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOFTWARE_DIR="${SCRIPT_DIR}"
-XV6_PRIMARY_DIR="${SOFTWARE_DIR}/xv6"
-XV6_LEGACY_DIR="${SOFTWARE_DIR}/xv6-rv32"
-if [[ -d "${XV6_PRIMARY_DIR}" ]]; then
-  XV6_DIR="${XV6_PRIMARY_DIR}"
-else
-  XV6_DIR="${XV6_LEGACY_DIR}"
-fi
+XV6_DIR="${SOFTWARE_DIR}/xv6"
+PATCH_DIR="${SOFTWARE_DIR}/xv6_patches"
 BIN_DIR="${SOFTWARE_DIR}/bin"
 
 DEFAULT_JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
@@ -24,6 +19,10 @@ CLEAN=1
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [options]
+
+Inputs:
+  xv6 source: ${XV6_DIR}
+  local patches: ${PATCH_DIR}
 
 Builds xv6 (RV32) and writes artifacts to:
   source: ${XV6_DIR}
@@ -98,7 +97,8 @@ done
 
 if [[ ! -d "${XV6_DIR}" ]]; then
   echo "error: xv6 source tree not found: ${XV6_DIR}" >&2
-  echo "hint: expected one of: ${XV6_PRIMARY_DIR} or ${XV6_LEGACY_DIR}" >&2
+  echo "hint: initialize submodule with:" >&2
+  echo "  git submodule update --init --recursive ${XV6_DIR}" >&2
   exit 1
 fi
 
@@ -117,6 +117,7 @@ require_cmd "${TOOLPREFIX}ld"
 require_cmd "${TOOLPREFIX}objcopy"
 require_cmd "${TOOLPREFIX}objdump"
 require_cmd "${TOOLPREFIX}nm"
+require_cmd git
 
 COMMON_CFLAGS="-Wall -Werror -Wno-error=infinite-recursion -O -fno-omit-frame-pointer -ggdb -MD -mcmodel=medany -ffreestanding -fno-common -nostdlib -mno-relax -I. -fno-stack-protector -fno-pie -no-pie"
 
@@ -140,6 +141,37 @@ else
 fi
 
 mkdir -p "${BIN_DIR}"
+
+apply_xv6_patches() {
+  local -a patches=()
+  local patch
+
+  if [[ -d "${PATCH_DIR}" ]]; then
+    while IFS= read -r patch; do
+      patches+=("${patch}")
+    done < <(find "${PATCH_DIR}" -maxdepth 1 -type f \( -name '*.patch' -o -name '*.diff' \) -print | LC_ALL=C sort)
+  fi
+
+  if [[ "${#patches[@]}" -eq 0 ]]; then
+    echo "no xv6 patches found in ${PATCH_DIR}; continuing without local patches."
+    return 0
+  fi
+
+  echo "applying xv6 patch series from ${PATCH_DIR}:"
+  for patch in "${patches[@]}"; do
+    echo "  - $(basename "${patch}")"
+    if git -C "${XV6_DIR}" apply --check "${patch}"; then
+      git -C "${XV6_DIR}" apply "${patch}"
+    elif git -C "${XV6_DIR}" apply --reverse --check "${patch}"; then
+      echo "    already applied; skipping."
+    else
+      echo "error: patch failed pre-check: ${patch}" >&2
+      exit 1
+    fi
+  done
+}
+
+apply_xv6_patches
 
 pushd "${XV6_DIR}" >/dev/null
 if [[ "${CLEAN}" -eq 1 ]]; then

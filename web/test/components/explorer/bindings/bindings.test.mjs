@@ -13,6 +13,9 @@ test('bindComponentBindings handles component-select and teardown', () => {
     componentTree: makeTarget(),
     componentGraphTopBtn: makeTarget(),
     componentGraphUpBtn: makeTarget(),
+    componentGraphZoomInBtn: makeTarget(),
+    componentGraphZoomOutBtn: makeTarget(),
+    componentGraphResetViewBtn: makeTarget(),
     irFileInput: makeTarget(),
     irJson: makeTarget({ value: '' })
   };
@@ -27,6 +30,9 @@ test('bindComponentBindings handles component-select and teardown', () => {
   const components = {
     renderTree: () => calls.push('renderTree'),
     setGraphFocus: () => calls.push('focus'),
+    zoomGraphIn: () => calls.push('zoomIn'),
+    zoomGraphOut: () => calls.push('zoomOut'),
+    resetGraphView: () => calls.push('resetView'),
     currentGraphFocusNode: () => null,
     renderViews: () => calls.push('renderViews'),
     clearSourceOverride: () => calls.push('clearOverride'),
@@ -46,9 +52,12 @@ test('bindComponentBindings handles component-select and teardown', () => {
   const event = new Event('component-select');
   event.detail = { nodeId: 'cpu.core' };
   dom.componentTree.dispatchEvent(event);
+  dom.componentGraphZoomInBtn.dispatchEvent(new Event('click'));
+  dom.componentGraphZoomOutBtn.dispatchEvent(new Event('click'));
+  dom.componentGraphResetViewBtn.dispatchEvent(new Event('click'));
 
   assert.equal(state.components.selectedNodeId, 'cpu.core');
-  assert.deepEqual(calls, ['renderTree', 'renderViews', 'sync:componentSelect']);
+  assert.deepEqual(calls, ['renderTree', 'renderViews', 'sync:componentSelect', 'zoomIn', 'zoomOut', 'resetView']);
 
   teardown();
   const event2 = new Event('component-select');
