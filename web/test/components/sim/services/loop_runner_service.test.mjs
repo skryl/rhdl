@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 
 import { createSimLoopRunnerService } from '../../../../app/components/sim/services/loop_runner_service.mjs';
 
-function createHarness({ runBatch = '10', uiUpdateCycles = '10', nowSequence = null } = {}) {
+function createHarness({
+  runBatch = '10',
+  uiUpdateCycles = '10',
+  nowSequence = null,
+  traceEnabled = false
+} = {}) {
   const calls = [];
   const runCalls = [];
   const dom = {
@@ -33,7 +38,8 @@ function createHarness({ runBatch = '10', uiUpdateCycles = '10', nowSequence = n
           cycles_run: cycles
         };
       },
-      trace_enabled: () => false
+      trace_enabled: () => traceEnabled,
+      trace_capture: () => {}
     },
     throughput: {
       cyclesPerSecond: 0,
@@ -90,7 +96,7 @@ function createHarness({ runBatch = '10', uiUpdateCycles = '10', nowSequence = n
   return { controller, dom, state, runtime, calls, runCalls };
 }
 
-test('runFrame uses cycles/frame and ui every values for runner batching', () => {
+test('runFrame skips follower refresh work while trace is disabled', () => {
   const { controller, state, calls, runCalls } = createHarness({
     runBatch: '7',
     uiUpdateCycles: '14'
@@ -106,7 +112,27 @@ test('runFrame uses cycles/frame and ui every values for runner batching', () =>
   controller.runFrame();
   assert.deepEqual(runCalls, [7, 7]);
   assert.equal(state.cycle, 14);
+  assert.equal(state.uiCyclesPending, 14);
+  assert.equal(calls.includes('drainTrace'), false);
+  assert.equal(calls.includes('refreshWatchTable'), false);
+  assert.equal(calls.includes('refreshApple2Screen'), false);
+  assert.equal(calls.includes('refreshApple2Debug'), false);
+});
+
+test('runFrame refreshes follower views when trace is enabled', () => {
+  const { controller, state, calls, runCalls } = createHarness({
+    runBatch: '7',
+    uiUpdateCycles: '14',
+    traceEnabled: true
+  });
+
+  controller.runFrame();
+  controller.runFrame();
+
+  assert.deepEqual(runCalls, [7, 7]);
+  assert.equal(state.cycle, 14);
   assert.equal(state.uiCyclesPending, 0);
+  assert.equal(calls.includes('drainTrace'), true);
   assert.equal(calls.includes('refreshWatchTable'), true);
   assert.equal(calls.includes('refreshApple2Screen'), true);
   assert.equal(calls.includes('refreshApple2Debug'), true);

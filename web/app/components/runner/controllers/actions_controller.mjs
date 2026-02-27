@@ -28,7 +28,9 @@ export function createRunnerActionsController({
   setComponentSchematicBundle,
   setActiveTab,
   refreshStatus,
-  fetchImpl = globalThis.fetch
+  fetchImpl = globalThis.fetch,
+  requestFrame = globalThis.requestAnimationFrame,
+  setTimeoutImpl = globalThis.setTimeout
 } = {}) {
   if (!dom) {
     throw new Error('createRunnerActionsController requires dom');
@@ -53,6 +55,89 @@ export function createRunnerActionsController({
   requireFn('setActiveTab', setActiveTab);
   requireFn('refreshStatus', refreshStatus);
   requireFn('fetchImpl', fetchImpl);
+  let runnerLoadInFlight = false;
+  let explorerWarmupScheduled = false;
+
+  async function applyPreferredBackend(preset) {
+    const preferredBackend = String(preset?.preferredBackend || '').trim();
+    if (!preferredBackend) {
+      return;
+    }
+
+    if (dom.backendSelect && dom.backendSelect.value !== preferredBackend) {
+      dom.backendSelect.value = preferredBackend;
+    }
+
+    setBackendState(preferredBackend);
+    await ensureBackendInstance(preferredBackend);
+  }
+
+  async function waitForUiPaint() {
+    await new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        resolve();
+      };
+      const fallbackTimer = (typeof globalThis.setTimeout === 'function')
+        ? globalThis.setTimeout(finish, 120)
+        : null;
+      const finishWithFallbackClear = () => {
+        if (fallbackTimer != null && typeof globalThis.clearTimeout === 'function') {
+          globalThis.clearTimeout(fallbackTimer);
+        }
+        finish();
+      };
+      if (typeof requestFrame === 'function') {
+        requestFrame(() => {
+          if (typeof setTimeoutImpl === 'function') {
+            setTimeoutImpl(finishWithFallbackClear, 0);
+          } else {
+            finishWithFallbackClear();
+          }
+        });
+        return;
+      }
+      if (typeof setTimeoutImpl === 'function') {
+        setTimeoutImpl(finishWithFallbackClear, 0);
+        return;
+      }
+      finishWithFallbackClear();
+    });
+  }
+
+  function scheduleComponentExplorerWarmup() {
+    if (explorerWarmupScheduled) {
+      return;
+    }
+    explorerWarmupScheduled = true;
+    const run = () => {
+      explorerWarmupScheduled = false;
+      try {
+        refreshComponentExplorer();
+      } catch (_err) {
+        // Ignore warmup failures; explicit tab refresh paths will still rebuild explorer state.
+      }
+    };
+    if (typeof requestFrame === 'function') {
+      requestFrame(() => {
+        if (typeof setTimeoutImpl === 'function') {
+          setTimeoutImpl(run, 0);
+          return;
+        }
+        run();
+      });
+      return;
+    }
+    if (typeof setTimeoutImpl === 'function') {
+      setTimeoutImpl(run, 0);
+      return;
+    }
+    run();
+  }
 
   async function loadSample(samplePathOverride = null) {
     const samplePath = samplePathOverride || dom.sampleSelect?.value || DEFAULT_SAMPLE_PATH;
@@ -74,23 +159,43 @@ export function createRunnerActionsController({
     const {
       presetOverride = null,
       logLoad = true,
-      setPreferredTab = true
+      setPreferredTab = true,
+      showLoadingUi = false
     } = options;
     const preset = presetOverride || getRunnerPreset(dom.runnerSelect?.value);
+    const loadingText = 'Loading...';
+    const loadingRunnerStatus = `Loading ${preset.label}...`;
+    const previousDisplayText = String(dom.apple2TextScreen?.textContent || '');
+    const previousRunnerStatus = String(dom.runnerStatus?.textContent || '');
+    const previousCanvasHidden = dom.apple2HiresCanvas ? !!dom.apple2HiresCanvas.hidden : null;
+
+    if (showLoadingUi) {
+      if (runnerLoadInFlight) {
+        return;
+      }
+      runnerLoadInFlight = true;
+      if (dom.loadRunnerBtn) {
+        dom.loadRunnerBtn.disabled = true;
+      }
+      if (dom.apple2TextScreen) {
+        dom.apple2TextScreen.textContent = loadingText;
+      }
+      if (dom.apple2HiresCanvas) {
+        dom.apple2HiresCanvas.hidden = true;
+      }
+      if (dom.runnerStatus) {
+        dom.runnerStatus.textContent = loadingRunnerStatus;
+      }
+      await waitForUiPaint();
+    }
+
     if (dom.runnerSelect) {
       dom.runnerSelect.value = preset.id;
     }
     setRunnerPresetState(preset.id);
     updateIrSourceVisibility();
-    const preferredBackend = String(preset.preferredBackend || '').trim();
     try {
-      if (preferredBackend) {
-        setBackendState(preferredBackend);
-        if (dom.backendSelect) {
-          dom.backendSelect.value = preferredBackend;
-        }
-        await ensureBackendInstance(preferredBackend);
-      }
+      await applyPreferredBackend(preset);
 
       let bundle = null;
       if (preset.usesManualIr) {
@@ -115,7 +220,9 @@ export function createRunnerActionsController({
         explorerSource: bundle.explorerJson,
         explorerMeta: bundle.explorerMeta,
         componentSourceBundle: bundle.sourceBundle || null,
-        componentSchematicBundle: bundle.schematicBundle || null
+        componentSchematicBundle: bundle.schematicBundle || null,
+        yieldToUi: showLoadingUi,
+        deferComponentExplorerRebuild: showLoadingUi
       });
       if (setPreferredTab) {
         setActiveTab(preset.preferredTab || 'vcdTab');
@@ -124,8 +231,26 @@ export function createRunnerActionsController({
     } catch (err) {
       log(`Failed to load runner ${preset.label}: ${err.message || err}`);
       return;
+    } finally {
+      if (showLoadingUi) {
+        runnerLoadInFlight = false;
+        if (dom.loadRunnerBtn) {
+          dom.loadRunnerBtn.disabled = false;
+        }
+        if (dom.apple2TextScreen && String(dom.apple2TextScreen.textContent || '').trim() === loadingText) {
+          dom.apple2TextScreen.textContent =
+            previousDisplayText || 'Load a runner with memory + I/O support to use this tab.';
+        }
+        if (dom.runnerStatus && String(dom.runnerStatus.textContent || '').trim() === loadingRunnerStatus) {
+          dom.runnerStatus.textContent = previousRunnerStatus;
+        }
+        if (dom.apple2HiresCanvas && previousCanvasHidden != null) {
+          dom.apple2HiresCanvas.hidden = previousCanvasHidden;
+        }
+      }
     }
     refreshStatus();
+    scheduleComponentExplorerWarmup();
   }
 
   async function preloadStartPreset(startPreset) {

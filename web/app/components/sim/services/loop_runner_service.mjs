@@ -263,6 +263,13 @@ export function createSimLoopRunnerService({
     }
   }
 
+  function isTraceFollowEnabled() {
+    if (!runtime.sim || typeof runtime.sim.trace_enabled !== 'function') {
+      return false;
+    }
+    return runtime.sim.trace_enabled() === true;
+  }
+
   function stepSimulation() {
     if (!runtime.sim) {
       return;
@@ -340,11 +347,13 @@ export function createSimLoopRunnerService({
     }
 
     setUiCyclesPendingState(Math.max(0, state.uiCyclesPending + cyclesRan));
+    const traceFollowEnabled = isTraceFollowEnabled();
     const shouldRefreshUi = shouldRefreshUiAfterRun({
       state,
       hit,
       uiEvery,
-      isComponentTabActive
+      isComponentTabActive,
+      traceFollowEnabled
     });
 
     if (shouldRefreshUi) {

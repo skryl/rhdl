@@ -38,7 +38,12 @@ export function createExplorerGraphController({
     renderComponentTree,
     renderComponentViews,
     createSchematicElements,
-    signalLiveValueByName
+    signalLiveValueByName,
+    isTraceEnabled: () => (
+      !!runtime?.sim
+      && typeof runtime.sim.trace_enabled === 'function'
+      && runtime.sim.trace_enabled() === true
+    )
   });
 
   function renderComponentGraphPanel() {
@@ -83,6 +88,9 @@ export function createExplorerGraphController({
 
   return {
     destroyComponentGraph: runtimeService.destroyComponentGraph,
+    zoomInComponentGraph: runtimeService.zoomInComponentGraph,
+    zoomOutComponentGraph: runtimeService.zoomOutComponentGraph,
+    resetComponentGraphViewport: runtimeService.resetComponentGraphViewport,
     renderComponentGraphPanel
   };
 }

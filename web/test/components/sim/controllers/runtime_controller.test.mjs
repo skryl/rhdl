@@ -120,7 +120,7 @@ test('loadWasmInstance throws on non-ok response', async () => {
   await assert.rejects(() => controller.loadWasmInstance('compiler'), /Failed to fetch \/compiler\.wasm: 404/);
 });
 
-test('initializeTrace invokes trace setup and drains chunk into parser', () => {
+test('initializeTrace keeps tracing disabled by default and drains chunk into parser', () => {
   const calls = [];
   const ingested = [];
   const runtime = {
@@ -141,6 +141,9 @@ test('initializeTrace invokes trace setup and drains chunk into parser', () => {
       },
       trace_set_module_name(value) {
         calls.push(`trace_set_module_name:${value}`);
+      },
+      trace_stop() {
+        calls.push('trace_stop');
       },
       trace_start() {
         calls.push('trace_start');
@@ -177,6 +180,74 @@ test('initializeTrace invokes trace setup and drains chunk into parser', () => {
 
   controller.initializeTrace();
   assert.deepEqual(ingested, ['chunk-data']);
+  assert.deepEqual(calls, [
+    'trace_clear',
+    'trace_clear_signals',
+    'trace_all_signals',
+    'trace_set_timescale:1ns',
+    'trace_set_module_name:rhdl_top',
+    'trace_stop',
+    'parser_reset',
+    'trace_take_live_vcd'
+  ]);
+});
+
+test('initializeTrace starts tracing when explicitly enabled', () => {
+  const calls = [];
+  const runtime = {
+    backendInstances: new Map(),
+    instance: null,
+    sim: {
+      trace_clear() {
+        calls.push('trace_clear');
+      },
+      trace_clear_signals() {
+        calls.push('trace_clear_signals');
+      },
+      trace_all_signals() {
+        calls.push('trace_all_signals');
+      },
+      trace_set_timescale(value) {
+        calls.push(`trace_set_timescale:${value}`);
+      },
+      trace_set_module_name(value) {
+        calls.push(`trace_set_module_name:${value}`);
+      },
+      trace_stop() {
+        calls.push('trace_stop');
+      },
+      trace_start() {
+        calls.push('trace_start');
+      },
+      trace_capture() {
+        calls.push('trace_capture');
+      },
+      trace_take_live_vcd() {
+        calls.push('trace_take_live_vcd');
+        return '';
+      }
+    },
+    parser: {
+      reset() {
+        calls.push('parser_reset');
+      },
+      ingest() {}
+    }
+  };
+  const controller = createSimRuntimeController({
+    state: { backend: 'compiler' },
+    runtime,
+    getBackendDef: () => ({ wasmPath: '/compiler.wasm' }),
+    fetchImpl: async () => makeOkResponse(),
+    webAssemblyApi: {
+      async instantiate(bytes) {
+        void bytes;
+        return { instance: { id: 1 } };
+      }
+    }
+  });
+
+  controller.initializeTrace({ enabled: true });
   assert.deepEqual(calls, [
     'trace_clear',
     'trace_clear_signals',

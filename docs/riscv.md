@@ -20,6 +20,14 @@
 
 ## Quick start
 
+### 0. Install dependencies (recommended)
+
+```bash
+bundle exec rake deps
+```
+
+This checks/installs tool dependencies used by the RISC-V flows (`iverilog`, `verilator`, `firtool`, `arcilator`, and related tools).
+
 ### 1. Build native backends
 
 ```bash
@@ -47,6 +55,16 @@ rhdl examples riscv --xv6
 
 # Run Linux (forces UART mode; defaults kernel/initramfs/dtb if omitted)
 rhdl examples riscv --linux
+
+# Run native RTL via Verilator
+rhdl examples riscv --mode verilog --xv6
+
+# Run native RTL via CIRCT/MLIR (Arcilator)
+rhdl examples riscv --mode circt --xv6
+
+# Linux also supports HDL modes
+rhdl examples riscv --mode verilog --linux
+rhdl examples riscv --mode circt --linux
 ```
 
 ## CLI behavior (`rhdl examples riscv`)
@@ -62,6 +80,13 @@ rhdl examples riscv --linux
 
 - Default mode: `--mode ir`
 - Default simulator backend in IR mode: `--sim compile`
+- Supported modes:
+  - `ruby`
+  - `ir`
+  - `netlist` (currently falls back to `ir` for RISC-V)
+  - `verilog` (Verilator RTL runner)
+  - `circt` (CIRCT/MLIR Arcilator RTL runner)
+- For `--mode verilog` and `--mode circt`, the `--sim` backend option is not used (runner is native RTL).
 
 ### xv6 mode
 
@@ -86,6 +111,15 @@ rhdl examples riscv --linux
   - `--kernel-addr` (default `0x80400000`)
   - `--initramfs-addr` (default `0x84000000`)
   - `--dtb-addr` (default `0x87f00000`)
+
+### RTL modes (`--mode verilog` / `--mode circt`)
+
+- Both RTL modes currently run the single-cycle core only.
+  - Passing `--core pipeline` is automatically overridden to `single` with a warning.
+- `--mode verilog` requires Verilator.
+- `--mode circt` requires CIRCT tools (`firtool`, `arcilator`) plus native compile/link tools for final shared library generation.
+  - On macOS, the Arcilator runner uses `clang`/`clang++` for object compile and linking.
+- xv6 and Linux workflows are supported in both RTL modes.
 
 ## Software tree layout
 
@@ -132,8 +166,22 @@ Default behavior:
 - applies local patches from `linux_patches`
 - configures kernel from `rv32_defconfig`
 - applies the RV32 minimum-size profile (unless `--no-min-profile`)
-- builds BusyBox initramfs + ext image via Buildroot (unless `--no-rootfs`)
-- emits kernel, DTB, initramfs, and fs image artifacts into `software/bin`
+- builds BusyBox initramfs via Buildroot (unless `--no-rootfs`)
+  - default Buildroot profile now uses a prebuilt external rv32g/ilp32d/uClibc toolchain
+- auto-detects kernel/Buildroot parallel jobs from available CPU count
+- emits kernel, DTB, and initramfs artifacts into `software/bin`
+
+Performance notes (macOS + Lima/Docker):
+
+- `build_linux.sh` now auto-sizes `--jobs` and `--buildroot-jobs` to Docker-visible CPUs.
+- if Docker reports fewer CPUs than your host, Linux builds will be slower; increase Lima VM CPUs and restart the instance.
+- for iterative kernel work, use `--no-clean` to avoid wiping the tree each run.
+- for kernel-only iterations, use `--no-rootfs` to skip Buildroot.
+- Buildroot prebuilt toolchain profile uses an `x86_64` Buildroot host by default:
+  - default: `BUILDROOT_PLATFORM=linux/amd64`
+  - override for native ARM64 hosts if needed with `--buildroot-platform linux/arm64`
+- Buildroot now uses a persistent Docker volume (`rhdl-buildroot-<version>`) for incremental rootfs rebuilds.
+- to reset Buildroot state, remove that volume: `docker volume rm rhdl-buildroot-<version>`.
 
 Notable outputs:
 
@@ -143,7 +191,7 @@ Notable outputs:
 - `linux_kernel.config`
 - `rhdl_riscv_virt.dtb`
 - `linux_initramfs.cpio`
-- `linux_fs.img`
+- `linux_fs.img` (only when enabled by a custom Buildroot defconfig)
 - `linux_busybox`
 - `linux_rootfs.config`
 
@@ -176,7 +224,14 @@ Run:
 
 ```bash
 rhdl examples riscv --xv6
+rhdl examples riscv --mode verilog --xv6
+rhdl examples riscv --mode circt --xv6
 ```
+
+Current single-core HDL xv6 milestone timings (local baseline, may vary by machine/toolchain):
+
+- `init: starting sh` around `19.3M` cycles
+- shell prompt (`$ `) around `22.5M` cycles
 
 ## Current core and ISA surface
 
@@ -211,6 +266,13 @@ Targeted RISC-V task/CLI tests:
 ```bash
 bundle exec rspec spec/examples/riscv/utilities/tasks/run_task_spec.rb
 bundle exec rspec spec/examples/riscv/utilities/tasks/riscv_cli_linux_spec.rb
+```
+
+xv6 boot/readiness + shell I/O coverage:
+
+```bash
+bundle exec rspec spec/examples/riscv/xv6_readiness_spec.rb
+INCLUDE_SLOW_TESTS=1 bundle exec rspec spec/examples/riscv/xv6_shell_io_spec.rb
 ```
 
 Linux compatibility + boot milestones:
@@ -267,6 +329,12 @@ bundle exec rake web:generate
   run `./examples/riscv/software/build_linux.sh` or pass explicit paths.
 - `Error: xv6 kernel/fs image not found`:
   run `./examples/riscv/software/build_xv6.sh`.
+- `Verilator not available` / missing Verilator build tools:
+  use `--mode ir` or install Verilator.
+- `firtool/arcilator not found`:
+  use `--mode ir`/`--mode verilog` or install CIRCT tools.
+- `g++ link failed` in `--mode circt` on macOS:
+  update to the current runner (uses `clang`/`clang++`) and rerun `bundle exec rake deps`.
 - Linux mode and xv6 mode are mutually exclusive:
   use either `--linux` or `--xv6`, not both.
 - For reproducible Linux changes:

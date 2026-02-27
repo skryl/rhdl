@@ -1,6 +1,6 @@
-# RV32I/RV32M/RV32C Assembler
+# RV32I/RV32M/RV32F/RV32D/RV32C Assembler
 # Simple assembler for generating test programs
-# Supports RV32I instructions, M extension, and a focused RV32C subset
+# Supports RV32I instructions plus extension subsets used in this repository.
 
 require_relative '../hdl/constants'
 
@@ -232,6 +232,10 @@ module RHDL
       encode_i_type(fd, rs1, offset, Funct3::WORD, Opcode::LOAD_FP)
     end
 
+    def self.fld(fd, rs1, offset)
+      encode_i_type(fd, rs1, offset, Funct3::DOUBLE, Opcode::LOAD_FP)
+    end
+
     # Store instructions
     def self.sb(rs2, rs1, offset)
       encode_s_type(rs1, rs2, offset, Funct3::BYTE, Opcode::STORE)
@@ -248,6 +252,10 @@ module RHDL
     # Floating-point stores
     def self.fsw(fs2, rs1, offset)
       encode_s_type(rs1, fs2, offset, Funct3::WORD, Opcode::STORE_FP)
+    end
+
+    def self.fsd(fs2, rs1, offset)
+      encode_s_type(rs1, fs2, offset, Funct3::DOUBLE, Opcode::STORE_FP)
     end
 
     # Immediate arithmetic
@@ -432,6 +440,198 @@ module RHDL
 
     def self.fmv_w_x(fd, rs1)
       encode_r_type(fd, rs1, 0, 0b000, 0b1111000, Opcode::OP_FP)
+    end
+
+    # RV32F/RV32D OP-FP helper
+    def self.encode_op_fp(rd, rs1, rs2, funct3, funct7)
+      encode_r_type(rd, rs1, rs2, funct3 & 0x7, funct7 & 0x7F, Opcode::OP_FP)
+    end
+
+    # RV32F arithmetic
+    def self.fadd_s(fd, fs1, fs2, rm: 0b000)
+      encode_op_fp(fd, fs1, fs2, rm, 0b0000000)
+    end
+
+    def self.fsub_s(fd, fs1, fs2, rm: 0b000)
+      encode_op_fp(fd, fs1, fs2, rm, 0b0000100)
+    end
+
+    def self.fmul_s(fd, fs1, fs2, rm: 0b000)
+      encode_op_fp(fd, fs1, fs2, rm, 0b0001000)
+    end
+
+    def self.fdiv_s(fd, fs1, fs2, rm: 0b000)
+      encode_op_fp(fd, fs1, fs2, rm, 0b0001100)
+    end
+
+    def self.fsqrt_s(fd, fs1, rm: 0b000)
+      encode_op_fp(fd, fs1, 0, rm, 0b0101100)
+    end
+
+    def self.fsgnj_s(fd, fs1, fs2)
+      encode_op_fp(fd, fs1, fs2, 0b000, 0b0010000)
+    end
+
+    def self.fsgnjn_s(fd, fs1, fs2)
+      encode_op_fp(fd, fs1, fs2, 0b001, 0b0010000)
+    end
+
+    def self.fsgnjx_s(fd, fs1, fs2)
+      encode_op_fp(fd, fs1, fs2, 0b010, 0b0010000)
+    end
+
+    def self.fmin_s(fd, fs1, fs2)
+      encode_op_fp(fd, fs1, fs2, 0b000, 0b0010100)
+    end
+
+    def self.fmax_s(fd, fs1, fs2)
+      encode_op_fp(fd, fs1, fs2, 0b001, 0b0010100)
+    end
+
+    def self.feq_s(rd, fs1, fs2)
+      encode_op_fp(rd, fs1, fs2, 0b010, 0b1010000)
+    end
+
+    def self.flt_s(rd, fs1, fs2)
+      encode_op_fp(rd, fs1, fs2, 0b001, 0b1010000)
+    end
+
+    def self.fle_s(rd, fs1, fs2)
+      encode_op_fp(rd, fs1, fs2, 0b000, 0b1010000)
+    end
+
+    def self.fclass_s(rd, fs1)
+      encode_op_fp(rd, fs1, 0, 0b001, 0b1110000)
+    end
+
+    def self.fcvt_w_s(rd, fs1, rm: 0b000)
+      encode_op_fp(rd, fs1, 0b00000, rm, 0b1100000)
+    end
+
+    def self.fcvt_wu_s(rd, fs1, rm: 0b000)
+      encode_op_fp(rd, fs1, 0b00001, rm, 0b1100000)
+    end
+
+    def self.fcvt_s_w(fd, rs1, rm: 0b000)
+      encode_op_fp(fd, rs1, 0b00000, rm, 0b1101000)
+    end
+
+    def self.fcvt_s_wu(fd, rs1, rm: 0b000)
+      encode_op_fp(fd, rs1, 0b00001, rm, 0b1101000)
+    end
+
+    # RV32D arithmetic
+    def self.fadd_d(fd, fs1, fs2, rm: 0b000)
+      encode_op_fp(fd, fs1, fs2, rm, 0b0000001)
+    end
+
+    def self.fsub_d(fd, fs1, fs2, rm: 0b000)
+      encode_op_fp(fd, fs1, fs2, rm, 0b0000101)
+    end
+
+    def self.fmul_d(fd, fs1, fs2, rm: 0b000)
+      encode_op_fp(fd, fs1, fs2, rm, 0b0001001)
+    end
+
+    def self.fdiv_d(fd, fs1, fs2, rm: 0b000)
+      encode_op_fp(fd, fs1, fs2, rm, 0b0001101)
+    end
+
+    def self.fsqrt_d(fd, fs1, rm: 0b000)
+      encode_op_fp(fd, fs1, 0, rm, 0b0101101)
+    end
+
+    def self.fsgnj_d(fd, fs1, fs2)
+      encode_op_fp(fd, fs1, fs2, 0b000, 0b0010001)
+    end
+
+    def self.fsgnjn_d(fd, fs1, fs2)
+      encode_op_fp(fd, fs1, fs2, 0b001, 0b0010001)
+    end
+
+    def self.fsgnjx_d(fd, fs1, fs2)
+      encode_op_fp(fd, fs1, fs2, 0b010, 0b0010001)
+    end
+
+    def self.fmin_d(fd, fs1, fs2)
+      encode_op_fp(fd, fs1, fs2, 0b000, 0b0010101)
+    end
+
+    def self.fmax_d(fd, fs1, fs2)
+      encode_op_fp(fd, fs1, fs2, 0b001, 0b0010101)
+    end
+
+    def self.feq_d(rd, fs1, fs2)
+      encode_op_fp(rd, fs1, fs2, 0b010, 0b1010001)
+    end
+
+    def self.flt_d(rd, fs1, fs2)
+      encode_op_fp(rd, fs1, fs2, 0b001, 0b1010001)
+    end
+
+    def self.fle_d(rd, fs1, fs2)
+      encode_op_fp(rd, fs1, fs2, 0b000, 0b1010001)
+    end
+
+    def self.fclass_d(rd, fs1)
+      encode_op_fp(rd, fs1, 0, 0b001, 0b1110001)
+    end
+
+    def self.fcvt_w_d(rd, fs1, rm: 0b000)
+      encode_op_fp(rd, fs1, 0b00000, rm, 0b1100001)
+    end
+
+    def self.fcvt_wu_d(rd, fs1, rm: 0b000)
+      encode_op_fp(rd, fs1, 0b00001, rm, 0b1100001)
+    end
+
+    def self.fcvt_d_w(fd, rs1, rm: 0b000)
+      encode_op_fp(fd, rs1, 0b00000, rm, 0b1101001)
+    end
+
+    def self.fcvt_d_wu(fd, rs1, rm: 0b000)
+      encode_op_fp(fd, rs1, 0b00001, rm, 0b1101001)
+    end
+
+    def self.fcvt_s_d(fd, fs1, rm: 0b000)
+      encode_op_fp(fd, fs1, 0b00001, rm, 0b0100000)
+    end
+
+    def self.fcvt_d_s(fd, fs1, rm: 0b000)
+      encode_op_fp(fd, fs1, 0b00000, rm, 0b0100001)
+    end
+
+    # Fused multiply-add/subtract families
+    def self.fmadd_s(fd, fs1, fs2, fs3, rm: 0b000)
+      encode_r4_type(fd, fs1, fs2, fs3, rm, 0b00, Opcode::MADD)
+    end
+
+    def self.fmsub_s(fd, fs1, fs2, fs3, rm: 0b000)
+      encode_r4_type(fd, fs1, fs2, fs3, rm, 0b00, Opcode::MSUB)
+    end
+
+    def self.fnmsub_s(fd, fs1, fs2, fs3, rm: 0b000)
+      encode_r4_type(fd, fs1, fs2, fs3, rm, 0b00, Opcode::NMSUB)
+    end
+
+    def self.fnmadd_s(fd, fs1, fs2, fs3, rm: 0b000)
+      encode_r4_type(fd, fs1, fs2, fs3, rm, 0b00, Opcode::NMADD)
+    end
+
+    def self.fmadd_d(fd, fs1, fs2, fs3, rm: 0b000)
+      encode_r4_type(fd, fs1, fs2, fs3, rm, 0b01, Opcode::MADD)
+    end
+
+    def self.fmsub_d(fd, fs1, fs2, fs3, rm: 0b000)
+      encode_r4_type(fd, fs1, fs2, fs3, rm, 0b01, Opcode::MSUB)
+    end
+
+    def self.fnmsub_d(fd, fs1, fs2, fs3, rm: 0b000)
+      encode_r4_type(fd, fs1, fs2, fs3, rm, 0b01, Opcode::NMSUB)
+    end
+
+    def self.fnmadd_d(fd, fs1, fs2, fs3, rm: 0b000)
+      encode_r4_type(fd, fs1, fs2, fs3, rm, 0b01, Opcode::NMADD)
     end
 
     # RV32A extension (word forms)
@@ -846,14 +1046,62 @@ module RHDL
       when 'lbu' then self.class.lbu(reg(args[0]), reg(args[2]), imm(args[1]))
       when 'lhu' then self.class.lhu(reg(args[0]), reg(args[2]), imm(args[1]))
       when 'flw' then self.class.flw(freg(args[0]), reg(args[2]), imm(args[1]))
+      when 'fld' then self.class.fld(freg(args[0]), reg(args[2]), imm(args[1]))
 
       # Store
       when 'sb' then self.class.sb(reg(args[0]), reg(args[2]), imm(args[1]))
       when 'sh' then self.class.sh(reg(args[0]), reg(args[2]), imm(args[1]))
       when 'sw' then self.class.sw(reg(args[0]), reg(args[2]), imm(args[1]))
       when 'fsw' then self.class.fsw(freg(args[0]), reg(args[2]), imm(args[1]))
+      when 'fsd' then self.class.fsd(freg(args[0]), reg(args[2]), imm(args[1]))
       when 'fmv.x.w' then self.class.fmv_x_w(reg(args[0]), freg(args[1]))
       when 'fmv.w.x' then self.class.fmv_w_x(freg(args[0]), reg(args[1]))
+      when 'fadd.s' then self.class.fadd_s(freg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fsub.s' then self.class.fsub_s(freg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fmul.s' then self.class.fmul_s(freg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fdiv.s' then self.class.fdiv_s(freg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fsqrt.s' then self.class.fsqrt_s(freg(args[0]), freg(args[1]))
+      when 'fsgnj.s' then self.class.fsgnj_s(freg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fsgnjn.s' then self.class.fsgnjn_s(freg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fsgnjx.s' then self.class.fsgnjx_s(freg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fmin.s' then self.class.fmin_s(freg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fmax.s' then self.class.fmax_s(freg(args[0]), freg(args[1]), freg(args[2]))
+      when 'feq.s' then self.class.feq_s(reg(args[0]), freg(args[1]), freg(args[2]))
+      when 'flt.s' then self.class.flt_s(reg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fle.s' then self.class.fle_s(reg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fclass.s' then self.class.fclass_s(reg(args[0]), freg(args[1]))
+      when 'fcvt.w.s' then self.class.fcvt_w_s(reg(args[0]), freg(args[1]))
+      when 'fcvt.wu.s' then self.class.fcvt_wu_s(reg(args[0]), freg(args[1]))
+      when 'fcvt.s.w' then self.class.fcvt_s_w(freg(args[0]), reg(args[1]))
+      when 'fcvt.s.wu' then self.class.fcvt_s_wu(freg(args[0]), reg(args[1]))
+      when 'fadd.d' then self.class.fadd_d(freg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fsub.d' then self.class.fsub_d(freg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fmul.d' then self.class.fmul_d(freg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fdiv.d' then self.class.fdiv_d(freg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fsqrt.d' then self.class.fsqrt_d(freg(args[0]), freg(args[1]))
+      when 'fsgnj.d' then self.class.fsgnj_d(freg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fsgnjn.d' then self.class.fsgnjn_d(freg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fsgnjx.d' then self.class.fsgnjx_d(freg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fmin.d' then self.class.fmin_d(freg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fmax.d' then self.class.fmax_d(freg(args[0]), freg(args[1]), freg(args[2]))
+      when 'feq.d' then self.class.feq_d(reg(args[0]), freg(args[1]), freg(args[2]))
+      when 'flt.d' then self.class.flt_d(reg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fle.d' then self.class.fle_d(reg(args[0]), freg(args[1]), freg(args[2]))
+      when 'fclass.d' then self.class.fclass_d(reg(args[0]), freg(args[1]))
+      when 'fcvt.w.d' then self.class.fcvt_w_d(reg(args[0]), freg(args[1]))
+      when 'fcvt.wu.d' then self.class.fcvt_wu_d(reg(args[0]), freg(args[1]))
+      when 'fcvt.d.w' then self.class.fcvt_d_w(freg(args[0]), reg(args[1]))
+      when 'fcvt.d.wu' then self.class.fcvt_d_wu(freg(args[0]), reg(args[1]))
+      when 'fcvt.s.d' then self.class.fcvt_s_d(freg(args[0]), freg(args[1]))
+      when 'fcvt.d.s' then self.class.fcvt_d_s(freg(args[0]), freg(args[1]))
+      when 'fmadd.s' then self.class.fmadd_s(freg(args[0]), freg(args[1]), freg(args[2]), freg(args[3]))
+      when 'fmsub.s' then self.class.fmsub_s(freg(args[0]), freg(args[1]), freg(args[2]), freg(args[3]))
+      when 'fnmsub.s' then self.class.fnmsub_s(freg(args[0]), freg(args[1]), freg(args[2]), freg(args[3]))
+      when 'fnmadd.s' then self.class.fnmadd_s(freg(args[0]), freg(args[1]), freg(args[2]), freg(args[3]))
+      when 'fmadd.d' then self.class.fmadd_d(freg(args[0]), freg(args[1]), freg(args[2]), freg(args[3]))
+      when 'fmsub.d' then self.class.fmsub_d(freg(args[0]), freg(args[1]), freg(args[2]), freg(args[3]))
+      when 'fnmsub.d' then self.class.fnmsub_d(freg(args[0]), freg(args[1]), freg(args[2]), freg(args[3]))
+      when 'fnmadd.d' then self.class.fnmadd_d(freg(args[0]), freg(args[1]), freg(args[2]), freg(args[3]))
 
       # Branch
       when 'beq' then self.class.beq(reg(args[0]), reg(args[1]), label_offset(args[2]))
@@ -949,6 +1197,16 @@ module RHDL
     # Encoding helpers (class methods)
     def self.encode_r_type(rd, rs1, rs2, funct3, funct7, opcode)
       (funct7 << 25) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | opcode
+    end
+
+    def self.encode_r4_type(rd, rs1, rs2, rs3, rm, fmt, opcode)
+      ((rs3 & 0x1F) << 27) |
+        ((fmt & 0x3) << 25) |
+        ((rs2 & 0x1F) << 20) |
+        ((rs1 & 0x1F) << 15) |
+        ((rm & 0x7) << 12) |
+        ((rd & 0x1F) << 7) |
+        (opcode & 0x7F)
     end
 
     def self.encode_i_type(rd, rs1, imm, funct3, opcode)

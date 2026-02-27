@@ -22,6 +22,9 @@ module RHDL
       input :pc_plus4_in, width: 32
       input :rs1_data_in, width: 32
       input :rs2_data_in, width: 32
+      input :rs2_hi_data_in, width: 32
+      input :rs3_data_in, width: 32
+      input :rs3_hi_data_in, width: 32
       input :rd_src_data_in, width: 32
       input :imm_in, width: 32
       input :rs1_addr_in, width: 5
@@ -48,6 +51,9 @@ module RHDL
       output :pc_plus4_out, width: 32
       output :rs1_data_out, width: 32
       output :rs2_data_out, width: 32
+      output :rs2_hi_data_out, width: 32
+      output :rs3_data_out, width: 32
+      output :rs3_hi_data_out, width: 32
       output :rd_src_data_out, width: 32
       output :imm_out, width: 32
       output :rs1_addr_out, width: 5
@@ -71,7 +77,7 @@ module RHDL
 
       sequential clock: :clk, reset: :rst, reset_values: {
         pc_out: 0, pc_plus4_out: 4,
-        rs1_data_out: 0, rs2_data_out: 0, rd_src_data_out: 0, imm_out: 0,
+        rs1_data_out: 0, rs2_data_out: 0, rs2_hi_data_out: 0, rs3_data_out: 0, rs3_hi_data_out: 0, rd_src_data_out: 0, imm_out: 0,
         rs1_addr_out: 0, rs2_addr_out: 0, rd_addr_out: 0,
         funct3_out: 0, funct7_out: 0, opcode_out: 0, inst_page_fault_out: 0,
         alu_op_out: 0, alu_src_out: 0,
@@ -83,6 +89,9 @@ module RHDL
         pc_plus4_out <= mux(flush, lit(4, width: 32), pc_plus4_in)
         rs1_data_out <= mux(flush, lit(0, width: 32), rs1_data_in)
         rs2_data_out <= mux(flush, lit(0, width: 32), rs2_data_in)
+        rs2_hi_data_out <= mux(flush, lit(0, width: 32), rs2_hi_data_in)
+        rs3_data_out <= mux(flush, lit(0, width: 32), rs3_data_in)
+        rs3_hi_data_out <= mux(flush, lit(0, width: 32), rs3_hi_data_in)
         rd_src_data_out <= mux(flush, lit(0, width: 32), rd_src_data_in)
         imm_out <= mux(flush, lit(0, width: 32), imm_in)
         rs1_addr_out <= mux(flush, lit(0, width: 5), rs1_addr_in)

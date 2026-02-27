@@ -43,7 +43,7 @@ async function loadRunner(page, runnerId) {
       return false;
     }
     return Array.from(select.options).some((opt) => opt.value === id);
-  }, runnerId, { timeout: 120000 });
+  }, runnerId, { timeout: 120000, polling: 100 });
 
   await page.selectOption('#runnerSelect', runnerId);
   await page.click('#loadRunnerBtn');
@@ -53,12 +53,12 @@ async function loadRunner(page, runnerId) {
     const normalized = String(text).toLowerCase();
     const normalizedId = String(id).toLowerCase();
     return normalized.includes(normalizedId) || normalized.includes('risc-v');
-  }, runnerId, { timeout: 120000 });
+  }, runnerId, { timeout: 120000, polling: 100 });
 
   await page.waitForFunction(() => {
     const text = document.querySelector('#simStatus')?.textContent || '';
     return text.includes('Cycle 0');
-  }, null, { timeout: 120000 });
+  }, null, { timeout: 120000, polling: 100 });
 }
 
 function getEventLog(page) {
@@ -124,7 +124,7 @@ test('riscv runner loads default kernel, memory, uart and simulation', { timeout
   await page.waitForFunction(() => {
     const log = document.querySelector('#eventLog')?.textContent || '';
     return log.includes('Loaded default bin (main)') && log.includes('./assets/fixtures/riscv/software/bin/kernel.bin');
-  }, null, { timeout: 30000 });
+  }, null, { timeout: 30000, polling: 100 });
 
   const eventLog = await getEventLog(page);
   assert.match(eventLog, /Loaded default bin \(main\).*kernel\.bin/);
@@ -143,7 +143,7 @@ test('riscv runner loads default kernel, memory, uart and simulation', { timeout
     const pre = document.querySelector('#memoryDump')?.shadowRoot?.querySelector('#memoryDumpPre');
     const text = pre?.textContent || '';
     return text.includes('17 B1 00 00 13 01 01 40');
-  }, null, { timeout: 30000 });
+  }, null, { timeout: 30000, polling: 100 });
 
   const memoryDumpText = await getMemoryDumpPreText(page);
   assert.match(memoryDumpText, /17 B1 00 00 13 01 01 40/);
@@ -153,7 +153,7 @@ test('riscv runner loads default kernel, memory, uart and simulation', { timeout
   await page.waitForFunction(() => {
     const text = document.querySelector('#apple2TextScreen')?.textContent || '';
     return text.includes('UART') || text.includes('No UART output yet.');
-  }, null, { timeout: 12000 });
+  }, null, { timeout: 12000, polling: 100 });
 
   const ioText = await getDisplayText(page);
   assert.match(ioText, /No UART output yet\.|UART/i);
@@ -169,7 +169,7 @@ test('riscv runner loads default kernel, memory, uart and simulation', { timeout
       return false;
     }
     return Number.parseInt(match[1], 10) > startCycle;
-  }, before, { timeout: 120000 });
+  }, before, { timeout: 120000, polling: 100 });
 
   assert.deepEqual(pageErrors, [], `Unhandled page errors: ${pageErrors.join(' | ')}`);
   assert.deepEqual(consoleErrors, [], `Console errors: ${consoleErrors.join(' | ')}`);

@@ -89,18 +89,23 @@ export function createSimRuntimeController({
     }
   }
 
-  function initializeTrace() {
+  function initializeTrace(options = {}) {
     if (!runtime.sim) {
       return;
     }
+    const enabled = options?.enabled === true;
 
     runtime.sim.trace_clear();
     runtime.sim.trace_clear_signals();
     runtime.sim.trace_all_signals();
     runtime.sim.trace_set_timescale('1ns');
     runtime.sim.trace_set_module_name('rhdl_top');
-    runtime.sim.trace_start();
-    runtime.sim.trace_capture();
+    if (enabled) {
+      runtime.sim.trace_start();
+      runtime.sim.trace_capture();
+    } else {
+      runtime.sim.trace_stop();
+    }
     if (runtime.parser && typeof runtime.parser.reset === 'function') {
       runtime.parser.reset();
     }

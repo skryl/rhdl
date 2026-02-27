@@ -12,11 +12,17 @@ test('createComponentDomainController groups component explorer actions', () => 
     setComponentGraphFocus: fn,
     currentComponentGraphFocusNode: fn,
     renderComponentViews: fn,
+    zoomComponentGraphIn: fn,
+    zoomComponentGraphOut: fn,
+    resetComponentGraphViewport: fn,
     clearComponentSourceOverride: fn,
     resetComponentExplorerState: fn
   });
 
   assert.equal(domain.isTabActive, fn);
   assert.equal(domain.setGraphFocus, fn);
+  assert.equal(domain.zoomGraphIn, fn);
+  assert.equal(domain.zoomGraphOut, fn);
+  assert.equal(domain.resetGraphView, fn);
   assert.equal(domain.resetExplorerState, fn);
 });

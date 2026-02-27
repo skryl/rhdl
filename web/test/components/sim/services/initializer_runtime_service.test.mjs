@@ -473,6 +473,49 @@ test('initializeApple2Mode loads riscv default disk image before default kernel 
   assert.equal(logs.some((line) => line.includes('Loaded default disk')), true);
 });
 
+test('initializeApple2Mode loads large default disk image in chunks', async () => {
+  const calls = [];
+  const yields = [];
+  await initializeApple2Mode({
+    runtime: {
+      sim: {
+        runner_mode: () => true,
+        runner_kind: () => 'riscv',
+        runner_riscv_load_disk: (bytes, offset) => {
+          calls.push(['disk', Array.from(bytes), offset]);
+          return true;
+        }
+      }
+    },
+    state: { apple2: { enabled: false, baseRomBytes: null } },
+    preset: {
+      defaultDisk: {
+        path: '/fixtures/riscv/fs.img',
+        offset: 0x1000
+      }
+    },
+    transferChunkBytes: 4,
+    yieldControl: async () => {
+      yields.push('yield');
+    },
+    addWatchSignal: () => {},
+    fetchImpl: async () => ({
+      ok: true,
+      async arrayBuffer() {
+        return new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9]).buffer;
+      }
+    }),
+    log: () => {}
+  });
+
+  assert.deepEqual(calls, [
+    ['disk', [1, 2, 3, 4], 0x1000],
+    ['disk', [5, 6, 7, 8], 0x1004],
+    ['disk', [9], 0x1008]
+  ]);
+  assert.equal(yields.length >= 2, true);
+});
+
 test('initializeApple2Mode loads ordered defaultAssets for riscv linux preset', async () => {
   const calls = [];
   const logs = [];

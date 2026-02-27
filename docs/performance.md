@@ -13,6 +13,7 @@ RHDL provides multiple simulation backends with different performance/flexibilit
 | IR JIT | Native (Cranelift) | ~200-600K cycles/s | 0.05-0.5s | Moderate simulations |
 | IR Compiler | Native (AOT) | ~1-2M cycles/s | 5-8s | Long simulations |
 | Verilator | External (C++) | ~5-6M cycles/s | 10-30s | Maximum performance |
+| CIRCT/MLIR (Arcilator) | External (LLVM/CIRCT) | Workload-dependent | Toolchain-dependent | Native RTL parity and benchmarking |
 
 ## Benchmarking Rake Tasks
 
@@ -112,6 +113,12 @@ rake bench:gates                # Gate-level toggle benchmark
 - Running complex games at real-time or faster
 - When you need cycle-accurate RTL simulation
 
+**CIRCT/MLIR (Arcilator)**
+- Native RTL simulation using FIRRTL/MLIR lowering
+- Cross-validating behavior against Verilator and IR compiler backends
+- Useful when your flow is already based on CIRCT tools (`firtool`, `arcilator`)
+- Similar startup/runtime tradeoffs to other external RTL backends
+
 ### Performance vs. Startup Tradeoff
 
 The backends have an inverse relationship between startup time and runtime performance:
@@ -120,7 +127,7 @@ The backends have an inverse relationship between startup time and runtime perfo
                   Startup Time
 Fast ←───────────────────────────────────→ Slow
  │                                           │
- │  Interpreter   JIT    Compiler  Verilator │
+ │  Interpreter   JIT    Compiler  Verilator/CIRCT │
  │      ↓          ↓         ↓         ↓     │
  │    Slow      Medium    Fast     Fastest   │
  │                                           │
@@ -132,7 +139,7 @@ Slow ←────────────────────────
 - For <100K cycles: Use Interpreter or JIT
 - For 100K-1M cycles: Use JIT
 - For 1M-10M cycles: Use Compiler
-- For >10M cycles: Use Verilator (if available)
+- For >10M cycles: Use Verilator or CIRCT/MLIR (if available)
 
 ## Building Native Extensions
 
@@ -169,6 +176,18 @@ verilator --version
 ```
 
 When Verilator is available, it's automatically included in benchmark comparisons.
+
+## Installing CIRCT/MLIR Tools
+
+CIRCT/MLIR flows use `firtool` and `arcilator`:
+
+```bash
+# Verify installation
+firtool --version
+arcilator --version
+```
+
+Availability and packaging vary by platform; see CIRCT release/install docs for your environment.
 
 ## Interpreting Benchmark Results
 

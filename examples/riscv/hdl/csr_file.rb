@@ -11,7 +11,7 @@ module RHDL
   module Examples
     module RISCV
       class CSRFile < RHDL::HDL::SequentialComponent
-    MISA_VALUE = 0x4034_1121 # RV32 + A + F + I + M + S + U + V
+    MISA_VALUE = 0x4034_1125 # RV32 + A + C + F + I + M + S + U + V
     CYCLE_CSR_ADDR = 0xC00
     TIME_CSR_ADDR = 0xC01
     CYCLEH_CSR_ADDR = 0xC80

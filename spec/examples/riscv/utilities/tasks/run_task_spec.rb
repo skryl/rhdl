@@ -421,7 +421,7 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
 
         expect do
           runner.load_linux(kernel: kernel_path)
-        end.to raise_error(RuntimeError, /Linux mode requires native RISC-V IR runner support/)
+        end.to raise_error(RuntimeError, /Linux mode requires native RISC-V IR runner or HDL backend/)
       end
     end
 
@@ -434,7 +434,32 @@ RSpec.describe RHDL::Examples::RISCV::HeadlessRunner do
 
         expect do
           runner.load_linux(kernel: kernel_path)
-        end.to raise_error(RuntimeError, /Linux mode requires native RISC-V IR runner support/)
+        end.to raise_error(RuntimeError, /Linux mode requires native RISC-V IR runner or HDL backend/)
+      end
+    end
+
+    it 'supports linux loading when using hdl backend runners' do
+      with_temp_binary("KERN") do |kernel_path, kernel_bytes|
+        runner = described_class.allocate
+        sim = double('sim', runner_kind: :hdl)
+        cpu = double('cpu', native?: true, sim: sim)
+        allow(cpu).to receive(:clear_uart_tx_bytes)
+        runner.instance_variable_set(:@cpu, cpu)
+        expected_bootstrap = runner.send(
+          :build_linux_bootstrap_program,
+          hart_id: 0,
+          dtb_pointer: 0,
+          entry_pc: 0x8040_0000
+        )
+        bootstrap_addr = runner.send(:linux_bootstrap_addr, 0x8040_0000)
+
+        expect(runner).to receive(:reset).ordered
+        expect(cpu).to receive(:clear_uart_tx_bytes).ordered
+        expect(runner).to receive(:load_instruction_bytes).with(kernel_bytes, 0x8040_0000).ordered
+        expect(runner).to receive(:load_instruction_bytes).with(expected_bootstrap, bootstrap_addr).ordered
+        expect(runner).to receive(:set_pc).with(bootstrap_addr).ordered
+
+        runner.load_linux(kernel: kernel_path)
       end
     end
 

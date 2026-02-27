@@ -56,7 +56,7 @@ function createHarness(overrides = {}) {
     updateApple2SpeakerAudio: (...args) => calls.push(['updateApple2SpeakerAudio', ...args]),
     setMemoryDumpStatus: (value) => calls.push(['setMemoryDumpStatus', value]),
     setMemoryResetVectorInput: (value) => calls.push(['setMemoryResetVectorInput', value]),
-    initializeTrace: () => calls.push(['initializeTrace']),
+    initializeTrace: (options) => calls.push(['initializeTrace', options]),
     populateClockSelect: () => calls.push(['populateClockSelect']),
     addWatchSignal: (name) => calls.push(['addWatchSignal', name]),
     selectedClock: () => null,
@@ -108,11 +108,43 @@ test('initializeSimulator configures runtime and resets state', async () => {
   assert.deepEqual(state.apple2.keyQueue, []);
   assert.equal(calls.some(([k, v]) => k === 'setCycleState' && v === 0), true);
   assert.equal(calls.some(([k, v]) => k === 'setRunningState' && v === false), true);
-  assert.equal(calls.some(([k]) => k === 'initializeTrace'), true);
+  assert.equal(calls.some(([k, options]) => k === 'initializeTrace' && options?.enabled === false), true);
   assert.equal(calls.some(([k]) => k === 'populateClockSelect'), true);
   assert.equal(calls.some(([k]) => k === 'renderWatchList'), true);
   assert.equal(calls.some(([k]) => k === 'refreshStatus'), true);
   assert.equal(calls.some(([k, v]) => k === 'log' && v === 'Simulator initialized'), true);
+});
+
+test('initializeSimulator enables tracing on load when preset requests it', async () => {
+  const { controller, calls, dom } = createHarness({
+    getRunnerPreset: () => ({
+      id: 'generic',
+      usesManualIr: true,
+      enableApple2Ui: false,
+      traceEnabledOnLoad: true
+    })
+  });
+  dom.irJson.value = '{"ports":[{"name":"clk","width":1}]}';
+
+  await controller.initializeSimulator({});
+
+  assert.equal(calls.some(([k, options]) => k === 'initializeTrace' && options?.enabled === true), true);
+});
+
+test('initializeSimulator honors defaults.traceEnabled when present', async () => {
+  const { controller, calls, dom } = createHarness({
+    getRunnerPreset: () => ({
+      id: 'generic',
+      usesManualIr: true,
+      enableApple2Ui: false,
+      defaults: { traceEnabled: true }
+    })
+  });
+  dom.irJson.value = '{"ports":[{"name":"clk","width":1}]}';
+
+  await controller.initializeSimulator({});
+
+  assert.equal(calls.some(([k, options]) => k === 'initializeTrace' && options?.enabled === true), true);
 });
 
 test('initializeSimulator always refreshes backend instance for current preset/backend', async () => {
@@ -127,4 +159,40 @@ test('initializeSimulator always refreshes backend instance for current preset/b
   await controller.initializeSimulator({});
 
   assert.deepEqual(backendCalls, ['compiler']);
+});
+
+test('initializeSimulator yields to UI before backend/session initialization when requested', async () => {
+  const { controller, calls, dom } = createHarness({
+    requestFrame: (cb) => {
+      calls.push(['requestFrame']);
+      cb();
+    },
+    setTimeoutImpl: (cb) => {
+      calls.push(['setTimeout']);
+      cb();
+    },
+    ensureBackendInstance: async () => {
+      calls.push(['ensureBackendInstance']);
+    }
+  });
+  dom.irJson.value = '{"ports":[{"name":"clk","width":1}]}';
+
+  await controller.initializeSimulator({ yieldToUi: true });
+
+  const firstFrameIdx = calls.findIndex(([k]) => k === 'requestFrame');
+  const backendIdx = calls.findIndex(([k]) => k === 'ensureBackendInstance');
+  assert.notEqual(firstFrameIdx, -1);
+  assert.notEqual(backendIdx, -1);
+  assert.equal(firstFrameIdx < backendIdx, true);
+});
+
+test('initializeSimulator defers component explorer rebuild when requested', async () => {
+  const { controller, calls, dom } = createHarness({
+    setTimeoutImpl: () => 1
+  });
+  dom.irJson.value = '{"ports":[{"name":"clk","width":1}]}';
+
+  await controller.initializeSimulator({ deferComponentExplorerRebuild: true });
+
+  assert.equal(calls.some(([k]) => k === 'rebuildComponentExplorer'), false);
 });

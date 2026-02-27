@@ -2,6 +2,10 @@
 
 require_relative '../task'
 require_relative '../config'
+require 'json'
+require 'open3'
+require 'timeout'
+require 'tmpdir'
 
 module RHDL
   module CLI
@@ -69,16 +73,35 @@ module RHDL
 
           # Check for arcilator (CIRCT tools)
           puts
-          arcilator_tools = %w[firtool arcilator llc]
-          arcilator_available = arcilator_tools.all? { |cmd| command_available?(cmd) }
+          arcilator_health_checks = arcilator_tool_health_checks
+          missing_arcilator_tools = arcilator_health_checks.keys.reject do |tool|
+            command_healthy?(tool, arcilator_health_checks.fetch(tool))
+          end
 
-          if arcilator_available
-            version = `firtool --version 2>&1`.lines.first&.strip
-            puts "[OK] arcilator is installed (firtool: #{version})"
+          if missing_arcilator_tools.empty?
+            version = command_output_first_line(arcilator_health_checks.fetch('firtool'))
+            puts "[OK] arcilator tools are installed (firtool: #{version})"
           else
-            missing = arcilator_tools.reject { |cmd| command_available?(cmd) }
-            puts "[MISSING] arcilator tools not fully installed (missing: #{missing.join(', ')})"
-            puts "  Install CIRCT tools (firtool, arcilator, llc) from https://github.com/llvm/circt"
+            puts "[MISSING] arcilator tools not fully installed (missing or broken: #{missing_arcilator_tools.join(', ')})"
+            puts
+
+            install_arcilator(platform, missing_tools: missing_arcilator_tools)
+
+            puts
+            remaining = arcilator_health_checks.keys.reject do |tool|
+              command_healthy?(tool, arcilator_health_checks.fetch(tool))
+            end
+            if remaining.empty?
+              version = command_output_first_line(arcilator_health_checks.fetch('firtool'))
+              puts "[OK] arcilator tools installed successfully (firtool: #{version})"
+            else
+              puts "[WARN] arcilator tool installation may have failed (still missing or broken: #{remaining.join(', ')})"
+              remaining.each do |tool|
+                diagnostic = command_output_first_line(arcilator_health_checks.fetch(tool))
+                puts "  #{tool}: #{diagnostic}" if diagnostic && !diagnostic.empty?
+              end
+              puts "  Install CIRCT tools (firtool, arcilator, llc) from https://github.com/llvm/circt"
+            end
           end
 
           puts
@@ -103,17 +126,76 @@ module RHDL
           deps.each do |name, info|
             available = command_available?(name)
             status = available ? "[OK]" : (info[:optional] ? "[OPTIONAL]" : "[MISSING]")
-            version = available ? `#{info[:cmd]} 2>&1`.lines.first&.strip : "not installed"
+            version = available ? command_output_first_line(info[:cmd]) : "not installed"
 
             puts "#{status.ljust(12)} #{name.ljust(12)} - #{info[:desc]}"
             puts "             #{version}" if available
           end
 
           puts
-          puts "Run 'rake dev:deps:install' to install missing dependencies."
+          puts "Run 'bundle exec rake deps' to install missing dependencies."
         end
 
         private
+
+        def arcilator_tool_health_checks
+          {
+            'firtool' => 'firtool --version',
+            'arcilator' => 'arcilator --version',
+            'llc' => 'llc --version'
+          }
+        end
+
+        def command_healthy?(tool, version_cmd)
+          return false unless command_available?(tool)
+
+          _, status = run_command_with_timeout(version_cmd)
+          status&.success? || false
+        end
+
+        def command_output_first_line(command)
+          output, _status = run_command_with_timeout(command)
+          output.lines.first&.strip
+        end
+
+        def run_command_with_timeout(command, timeout_seconds: 2)
+          output = +""
+          status = nil
+
+          Open3.popen2e(command) do |_stdin, stdout_stderr, wait_thr|
+            begin
+              Timeout.timeout(timeout_seconds) do
+                output = stdout_stderr.read
+                status = wait_thr.value
+              end
+            rescue Timeout::Error
+              begin
+                Process.kill('TERM', wait_thr.pid)
+              rescue Errno::ESRCH
+                # already exited
+              end
+
+              sleep(0.05)
+
+              begin
+                Process.kill('KILL', wait_thr.pid)
+              rescue Errno::ESRCH
+                # already exited
+              end
+
+              output = "command timed out after #{timeout_seconds}s"
+              status = nil
+            end
+          end
+
+          [output, status]
+        rescue StandardError => e
+          ["command failed: #{e.message}", nil]
+        end
+
+        def missing_commands(commands)
+          commands.reject { |cmd| command_available?(cmd) }
+        end
 
         def detect_platform
           case RUBY_PLATFORM
@@ -225,6 +307,183 @@ module RHDL
             puts "Homebrew not found. Please install Homebrew first:"
             puts "  /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
             puts "Then run: brew install verilator"
+          end
+        end
+
+        def install_arcilator(platform, missing_tools:)
+          case platform
+          when :linux
+            install_arcilator_linux(missing_tools: missing_tools)
+          when :macos
+            install_arcilator_macos(missing_tools: missing_tools)
+          when :windows
+            puts "On Windows, please install CIRCT tools manually:"
+            puts "  1. Download prebuilt CIRCT release from: https://github.com/llvm/circt/releases"
+            puts "  2. Add firtool/arcilator/llc to PATH"
+          else
+            puts "Unknown platform. Attempting GitHub prebuilt CIRCT install..."
+            install_arcilator_from_release(platform: platform, missing_tools: missing_tools)
+          end
+        end
+
+        def install_arcilator_linux(missing_tools:)
+          if File.exist?('/etc/debian_version') || command_available?('apt-get')
+            puts "Installing CIRCT tools via apt-get..."
+            if ENV['USER'] == 'root'
+              system('apt-get update && apt-get install -y circt llvm')
+            else
+              system('sudo apt-get update && sudo apt-get install -y circt llvm')
+            end
+          elsif command_available?('dnf')
+            puts "Installing CIRCT tools via dnf..."
+            system('sudo dnf install -y circt llvm')
+          elsif command_available?('yum')
+            puts "Installing CIRCT tools via yum..."
+            system('sudo yum install -y circt llvm')
+          elsif command_available?('pacman')
+            puts "Installing CIRCT tools via pacman..."
+            system('sudo pacman -S --noconfirm circt llvm')
+          else
+            puts "Could not detect Linux package manager for CIRCT."
+          end
+
+          # Fallback for distros/repositories where circt package is unavailable.
+          remaining = missing_commands(missing_tools)
+          install_arcilator_from_release(platform: :linux, missing_tools: remaining) unless remaining.empty?
+        end
+
+        def install_arcilator_macos(missing_tools:)
+          # CIRCT formula is not consistently available on Homebrew; use GitHub release fallback.
+          install_arcilator_from_release(platform: :macos, missing_tools: missing_tools)
+        end
+
+        def install_arcilator_from_release(platform:, missing_tools:)
+          tools_to_install = missing_tools.dup
+          tools_to_install << 'circt-opt' unless tools_to_install.include?('circt-opt')
+          release_api = 'https://api.github.com/repos/llvm/circt/releases/latest'
+          install_dir = File.expand_path('~/.local/bin')
+          lib_install_dir = File.expand_path('~/.local/lib')
+          ensure_dir(install_dir)
+
+          puts "Installing CIRCT tools from GitHub prebuilt release..."
+          puts "  Target tools: #{tools_to_install.join(', ')}"
+
+          asset_name, fallback_note = circt_release_asset_name_for(platform)
+          unless asset_name
+            puts "Could not determine a supported CIRCT prebuilt asset for this platform."
+            return
+          end
+
+          puts "  Using asset: #{asset_name}"
+          puts "  Note: #{fallback_note}" if fallback_note
+
+          begin
+            metadata_json = `curl -fsSL #{release_api} 2>/dev/null`
+            if metadata_json.nil? || metadata_json.strip.empty?
+              puts "Failed to download CIRCT release metadata."
+              return
+            end
+
+            metadata = JSON.parse(metadata_json)
+            asset = metadata.fetch('assets', []).find { |item| item['name'] == asset_name }
+            unless asset
+              puts "CIRCT release asset not found: #{asset_name}"
+              return
+            end
+
+            Dir.mktmpdir('rhdl-circt-') do |tmp|
+              archive_path = File.join(tmp, asset_name)
+              extract_dir = File.join(tmp, 'extract')
+              ensure_dir(extract_dir)
+
+              puts "  Downloading CIRCT archive..."
+              unless system("curl -fL '#{asset['browser_download_url']}' -o '#{archive_path}'")
+                puts "Failed to download CIRCT archive."
+                return
+              end
+
+              puts "  Extracting CIRCT archive..."
+              unless system("tar -xzf '#{archive_path}' -C '#{extract_dir}'")
+                puts "Failed to extract CIRCT archive."
+                return
+              end
+
+              source_root = Dir.children(extract_dir)
+                               .map { |entry| File.join(extract_dir, entry) }
+                               .find { |path| File.directory?(path) }
+              unless source_root
+                puts "Failed to locate extracted CIRCT directory."
+                return
+              end
+
+              source_bin_dir = File.join(source_root, 'bin')
+              source_lib_dir = File.join(source_root, 'lib')
+
+              tools_to_install.each do |tool|
+                source = File.join(source_bin_dir, tool)
+                unless File.exist?(source)
+                  puts "  Missing tool in archive: #{tool}"
+                  next
+                end
+
+                target = File.join(install_dir, tool)
+                FileUtils.cp(source, target)
+                FileUtils.chmod(0o755, target)
+              end
+
+              if File.directory?(source_lib_dir)
+                ensure_dir(lib_install_dir)
+                FileUtils.cp_r(File.join(source_lib_dir, '.'), lib_install_dir)
+                puts "  Installed CIRCT shared libraries into #{lib_install_dir}"
+              else
+                puts "  Could not find CIRCT library directory in archive."
+              end
+            end
+          rescue JSON::ParserError
+            puts "Failed to parse CIRCT release metadata."
+            return
+          end
+
+          puts "Installed CIRCT tools into #{install_dir}"
+
+          path_entries = ENV.fetch('PATH', '').split(File::PATH_SEPARATOR)
+          return if path_entries.include?(install_dir)
+
+          puts
+          puts "Add the install directory to PATH:"
+          puts "  export PATH=\"#{install_dir}:$PATH\""
+        end
+
+        def circt_release_asset_name_for(platform)
+          arch = host_arch
+
+          case platform
+          when :linux
+            return ['circt-full-shared-linux-x64.tar.gz', nil] if %i[x64 amd64].include?(arch)
+            [nil, nil]
+          when :macos
+            if %i[x64 amd64].include?(arch)
+              ['circt-full-shared-macos-x64.tar.gz', nil]
+            elsif %i[arm64 aarch64].include?(arch)
+              [
+                'circt-full-shared-macos-x64.tar.gz',
+                'No native arm64 CIRCT prebuilt found; using x64 build (requires Rosetta on Apple Silicon).'
+              ]
+            else
+              [nil, nil]
+            end
+          else
+            [nil, nil]
+          end
+        end
+
+        def host_arch
+          arch = `uname -m 2>/dev/null`.strip.downcase
+          case arch
+          when 'x86_64', 'amd64' then :x64
+          when 'arm64', 'aarch64' then :arm64
+          else
+            arch.to_sym
           end
         end
       end

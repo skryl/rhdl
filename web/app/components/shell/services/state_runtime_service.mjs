@@ -22,6 +22,7 @@ export function createShellStateRuntimeService({
   THEME_KEY,
   localStorageRef = globalThis.localStorage,
   requestAnimationFrameImpl = globalThis.requestAnimationFrame,
+  setTimeoutImpl = globalThis.setTimeout,
   documentRef = globalThis.document,
   windowRef = globalThis.window,
   eventCtor = globalThis.Event
@@ -38,6 +39,30 @@ export function createShellStateRuntimeService({
   requireFn('scheduleReduxUxSync', scheduleReduxUxSync);
   requireFn('waveformFontFamily', waveformFontFamily);
   requireFn('normalizeTheme', normalizeTheme);
+
+  let componentRefreshScheduled = false;
+
+  function scheduleComponentExplorerRefresh() {
+    if (componentRefreshScheduled) {
+      return;
+    }
+    componentRefreshScheduled = true;
+    const run = () => {
+      componentRefreshScheduled = false;
+      if (state.activeTab === 'componentTab' || state.activeTab === 'componentGraphTab') {
+        refreshComponentExplorer();
+      }
+    };
+    if (typeof setTimeoutImpl === 'function') {
+      setTimeoutImpl(run, 0);
+      return;
+    }
+    if (typeof requestAnimationFrameImpl === 'function') {
+      requestAnimationFrameImpl(run);
+      return;
+    }
+    run();
+  }
 
   function setActiveTab(tabId) {
     setActiveTabState(tabId);
@@ -59,7 +84,7 @@ export function createShellStateRuntimeService({
       });
     }
     if (tabId === 'componentTab' || tabId === 'componentGraphTab') {
-      refreshComponentExplorer();
+      scheduleComponentExplorerRefresh();
     }
     scheduleReduxUxSync('setActiveTab');
   }

@@ -8,6 +8,7 @@ export const GENERATED_RUNNER_PRESETS = Object.freeze({
     "sourceBundlePath": "./assets/fixtures/cpu/ir/cpu_sources.json",
     "schematicPath": "./assets/fixtures/cpu/ir/cpu_schematic.json",
     "preferredTab": "ioTab",
+    "traceEnabledOnLoad": false,
     "preferredBackend": "compiler",
     "compilerWasmPath": "./assets/pkg/ir_compiler_cpu.wasm",
     "enableApple2Ui": false,
@@ -28,7 +29,7 @@ export const GENERATED_RUNNER_PRESETS = Object.freeze({
       "api": "generic",
       "memory": {
         "dumpStart": 0,
-        "dumpLength": 65536,
+        "dumpLength": 768,
         "addressSpace": 65536,
         "viewMapped": true,
         "dumpReadMapped": true,
@@ -88,6 +89,8 @@ export const GENERATED_RUNNER_PRESETS = Object.freeze({
     "explorerIrPath": "./assets/fixtures/mos6502/ir/mos6502_hier.json",
     "sourceBundlePath": "./assets/fixtures/mos6502/ir/mos6502_sources.json",
     "schematicPath": "./assets/fixtures/mos6502/ir/mos6502_schematic.json",
+    "traceEnabledOnLoad": false,
+    "preferredBackend": "compiler",
     "compilerWasmPath": "./assets/pkg/ir_compiler_mos6502.wasm",
     "preferredTab": "ioTab",
     "enableApple2Ui": false,
@@ -107,7 +110,7 @@ export const GENERATED_RUNNER_PRESETS = Object.freeze({
       "api": "generic",
       "memory": {
         "dumpStart": 0,
-        "dumpLength": 65536,
+        "dumpLength": 768,
         "addressSpace": 65536,
         "viewMapped": true,
         "dumpReadMapped": true,
@@ -152,6 +155,8 @@ export const GENERATED_RUNNER_PRESETS = Object.freeze({
     "schematicPath": "./assets/fixtures/apple2/ir/apple2_schematic.json",
     "romPath": "./assets/fixtures/apple2/memory/appleiigo.rom",
     "preferredTab": "ioTab",
+    "traceEnabledOnLoad": false,
+    "preferredBackend": "compiler",
     "enableApple2Ui": true,
     "usesManualIr": false,
     "autoLoadOnBoot": true,
@@ -171,7 +176,7 @@ export const GENERATED_RUNNER_PRESETS = Object.freeze({
       "api": "apple2",
       "memory": {
         "dumpStart": 0,
-        "dumpLength": 49152,
+        "dumpLength": 768,
         "addressSpace": 65536,
         "viewMapped": true,
         "dumpReadMapped": false,
@@ -204,6 +209,9 @@ export const GENERATED_RUNNER_PRESETS = Object.freeze({
     "sourceBundlePath": "./assets/fixtures/gameboy/ir/gameboy_sources.json",
     "schematicPath": "./assets/fixtures/gameboy/ir/gameboy_schematic.json",
     "preferredTab": "ioTab",
+    "traceEnabledOnLoad": false,
+    "preferredBackend": "compiler",
+    "compilerWasmPath": "./assets/pkg/ir_compiler_gameboy.wasm",
     "enableApple2Ui": false,
     "usesManualIr": false,
     "defaultBin": {
@@ -215,6 +223,18 @@ export const GENERATED_RUNNER_PRESETS = Object.freeze({
     "timing": {
       "cyclesPerHertz": 1,
       "hertzLabel": "SM83"
+    },
+    "io": {
+      "enabled": false,
+      "api": "generic",
+      "memory": {
+        "dumpStart": 0,
+        "dumpLength": 768,
+        "addressSpace": 65536,
+        "viewMapped": true,
+        "dumpReadMapped": true,
+        "directWriteMapped": true
+      }
     }
   },
   "riscv": {
@@ -225,6 +245,7 @@ export const GENERATED_RUNNER_PRESETS = Object.freeze({
     "sourceBundlePath": "./assets/fixtures/riscv/ir/riscv_sources.json",
     "schematicPath": "./assets/fixtures/riscv/ir/riscv_schematic.json",
     "preferredTab": "ioTab",
+    "traceEnabledOnLoad": false,
     "enableApple2Ui": false,
     "usesManualIr": false,
     "defaultBin": {
@@ -256,7 +277,7 @@ export const GENERATED_RUNNER_PRESETS = Object.freeze({
       "api": "generic",
       "memory": {
         "dumpStart": 2147483648,
-        "dumpLength": 1024,
+        "dumpLength": 768,
         "addressSpace": 4294967296,
         "viewMapped": true,
         "dumpReadMapped": true,
@@ -301,6 +322,7 @@ export const GENERATED_RUNNER_PRESETS = Object.freeze({
     "sourceBundlePath": "./assets/fixtures/riscv_linux/ir/riscv_linux_sources.json",
     "schematicPath": "./assets/fixtures/riscv_linux/ir/riscv_linux_schematic.json",
     "preferredTab": "ioTab",
+    "traceEnabledOnLoad": false,
     "enableApple2Ui": false,
     "usesManualIr": false,
     "defaultSrcmap": {
@@ -344,7 +366,7 @@ export const GENERATED_RUNNER_PRESETS = Object.freeze({
       "api": "generic",
       "memory": {
         "dumpStart": 2147483648,
-        "dumpLength": 1024,
+        "dumpLength": 768,
         "addressSpace": 4294967296,
         "viewMapped": true,
         "dumpReadMapped": true,

@@ -304,7 +304,7 @@ end
 
 # Dependency Management
 namespace :deps do
-  desc "Check and install test dependencies (iverilog)"
+  desc "Check and install test dependencies (iverilog, verilator, CIRCT tools)"
   task :install do
     load_cli_tasks
     RHDL::CLI::Tasks::DepsTask.new.run

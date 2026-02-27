@@ -68,7 +68,7 @@ module RHDL
         when Funct3::HALF, Funct3::HALF_U
           write_byte_at(addr, write_data & 0xFF)
           write_byte_at(addr + 1, (write_data >> 8) & 0xFF)
-        when Funct3::WORD
+        when Funct3::WORD, Funct3::DOUBLE
           write_byte_at(addr, write_data & 0xFF)
           write_byte_at(addr + 1, (write_data >> 8) & 0xFF)
           write_byte_at(addr + 2, (write_data >> 16) & 0xFF)
@@ -99,7 +99,7 @@ module RHDL
         val >= 0x8000 ? val | 0xFFFF0000 : val
       when Funct3::HALF_U
         read_byte_at(addr) | (read_byte_at(addr + 1) << 8)
-      when Funct3::WORD
+      when Funct3::WORD, Funct3::DOUBLE
         read_byte_at(addr) |
           (read_byte_at(addr + 1) << 8) |
           (read_byte_at(addr + 2) << 16) |

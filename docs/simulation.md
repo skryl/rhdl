@@ -29,6 +29,9 @@ RHDL supports multiple simulation backends:
 | **IR-Level** | Rust JIT | ~600K cycles/sec | Interactive debugging |
 | **IR-Level** | Rust Compiler | ~2.3M cycles/sec | Full system simulation |
 | **Native** | Verilator | ~5.7M cycles/sec | Reference validation |
+| **Native** | CIRCT/MLIR (Arcilator) | Workload-dependent | Reference validation, RTL parity checks |
+
+Native RTL backends are available in example runners (for example Apple II `--mode verilog` and `--mode circt`).
 
 ---
 
@@ -788,7 +791,7 @@ sim.resume
 2. **Functional Testing**: Use Ruby SimCPU or Rust Interpreter
 3. **Regression Testing**: Use Rust JIT for faster turnaround
 4. **Long Simulations**: Use Rust Compiler with SIMD
-5. **Reference Validation**: Use Verilator for golden comparison
+5. **Reference Validation**: Use Verilator or CIRCT/MLIR (Arcilator) for golden comparison
 
 ### Performance Optimization
 

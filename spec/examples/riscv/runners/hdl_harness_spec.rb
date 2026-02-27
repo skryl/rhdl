@@ -201,6 +201,36 @@ RSpec.describe 'RISC-V HDL Runners' do
       expect(runner.read_reg(3)).to eq(42)
     end
 
+    it 'captures UART TX bytes and supports buffer clear' do
+      runner = create_runner
+      program = [
+        asm.lui(1, 0x10000), # x1 = 0x1000_0000 (UART base)
+        asm.addi(2, 0, 65),  # 'A'
+        asm.sb(2, 1, 0)
+      ]
+      runner.load_program(program)
+      runner.reset!
+      runner.run_cycles(3)
+
+      expect(runner.uart_tx_bytes).to include(65)
+      runner.clear_uart_tx_bytes
+      expect(runner.uart_tx_bytes).to eq([])
+    end
+
+    it 'supports UART RX injection through MMIO read path' do
+      runner = create_runner
+      program = [
+        asm.lui(1, 0x10000), # x1 = 0x1000_0000 (UART base)
+        asm.lb(3, 1, 0)
+      ]
+      runner.load_program(program)
+      runner.reset!
+      runner.uart_receive_byte(0x41)
+      runner.run_cycles(2)
+
+      expect(runner.read_reg(3) & 0xFF).to eq(0x41)
+    end
+
     it 'returns state hash' do
       runner = create_runner
       runner.load_program([asm.addi(1, 0, 1)])

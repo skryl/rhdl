@@ -8,7 +8,15 @@ function createMockCanvas() {
     get(target, prop) {
       if (prop in target) return target[prop];
       if (prop === 'canvas') return target._canvas;
+      if (prop === 'measureText') {
+        return (text = '') => ({ width: String(text).length * 6 });
+      }
       return (...args) => { calls.push({ method: prop, args }); };
+    },
+    set(target, prop, value) {
+      calls.push({ method: `set:${String(prop)}`, args: [value] });
+      target[prop] = value;
+      return true;
     }
   };
   const ctx = new Proxy({ calls, _canvas: null }, ctxHandler);
@@ -130,6 +138,27 @@ test('render draws wires as line segments', () => {
 
   assert.ok(calls.some(c => c.method === 'moveTo'), 'should draw wire with moveTo');
   assert.ok(calls.some(c => c.method === 'lineTo'), 'should draw wire with lineTo');
+});
+
+test('render thins wire widths as viewport scale decreases', () => {
+  const { canvas, calls } = createMockCanvas();
+  const renderer = createCanvasRenderer(canvas);
+  const rl = minimalRenderList();
+  for (const s of rl.symbols) rl.byId.set(s.id, s);
+  for (const p of rl.pins) rl.byId.set(p.id, p);
+  for (const n of rl.nets) rl.byId.set(n.id, n);
+
+  calls.length = 0;
+  renderer.render(rl, { x: 0, y: 0, scale: 1 }, createMockPalette());
+  const fullScaleWidth = calls.find((c) => c.method === 'set:lineWidth')?.args?.[0] || 0;
+
+  calls.length = 0;
+  renderer.render(rl, { x: 0, y: 0, scale: 0.1 }, createMockPalette());
+  const zoomedOutWidth = calls.find((c) => c.method === 'set:lineWidth')?.args?.[0] || 0;
+
+  assert.ok(fullScaleWidth > 0, 'wire width should be set at full scale');
+  assert.ok(zoomedOutWidth > 0, 'wire width should be set while zoomed out');
+  assert.ok(zoomedOutWidth < fullScaleWidth, 'wire width should shrink while zoomed out');
 });
 
 test('render draws wires as polylines when bendPoints are present', () => {

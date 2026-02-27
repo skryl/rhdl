@@ -2,6 +2,14 @@
 // Handles click dispatch via spatial index, double-tap detection for drill-down.
 
 const DOUBLE_TAP_MS = 320;
+const ZOOM_SENSITIVITY = 0.0015;
+const MIN_ZOOM_SCALE = 0.05;
+const MAX_ZOOM_SCALE = 8;
+const PAN_DRAG_THRESHOLD = 3;
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
 
 function isComponent(element) {
   return element.type === 'component' || element.type === 'focus';
@@ -37,10 +45,28 @@ export function bindD3Interactions({
     throw new Error('bindD3Interactions requires render callbacks');
   }
 
-  function toWorldCoords(clientX, clientY) {
+  const renderNow = typeof requestRender === 'function' ? requestRender : () => {};
+  const globalTarget =
+    typeof window !== 'undefined' && typeof window.addEventListener === 'function'
+      ? window
+      : canvas;
+
+  let panState = null;
+  let suppressClick = false;
+  const wheelListenerOptions = { passive: false };
+
+  function toScreenCoords(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
-    const sx = clientX - rect.left;
-    const sy = clientY - rect.top;
+    return {
+      x: clientX - rect.left,
+      y: clientY - rect.top
+    };
+  }
+
+  function toWorldCoords(clientX, clientY) {
+    const screen = toScreenCoords(clientX, clientY);
+    const sx = screen.x;
+    const sy = screen.y;
 
     if (viewport) {
       return {
@@ -52,6 +78,11 @@ export function bindD3Interactions({
   }
 
   function handleClick(evt) {
+    if (suppressClick) {
+      suppressClick = false;
+      return;
+    }
+
     const { x, y } = toWorldCoords(evt.clientX, evt.clientY);
     const hit = spatialIndex.queryPoint(x, y);
 
@@ -96,10 +127,86 @@ export function bindD3Interactions({
     }
   }
 
+  function handleWheel(evt) {
+    if (!viewport) return;
+    const prevScale = Number.isFinite(viewport.scale) ? viewport.scale : 1;
+    const zoom = Math.exp(-Number(evt.deltaY || 0) * ZOOM_SENSITIVITY);
+    const nextScale = clamp(prevScale * zoom, MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
+    if (!Number.isFinite(nextScale) || Math.abs(nextScale - prevScale) < 1e-6) {
+      return;
+    }
+
+    const { x: sx, y: sy } = toScreenCoords(evt.clientX, evt.clientY);
+    const tx = Number.isFinite(viewport.x) ? viewport.x : 0;
+    const ty = Number.isFinite(viewport.y) ? viewport.y : 0;
+    const worldX = (sx - tx) / prevScale;
+    const worldY = (sy - ty) / prevScale;
+
+    viewport.scale = nextScale;
+    viewport.x = sx - (worldX * nextScale);
+    viewport.y = sy - (worldY * nextScale);
+
+    if (typeof evt.preventDefault === 'function') {
+      evt.preventDefault();
+    }
+    renderNow();
+  }
+
+  function handleMouseDown(evt) {
+    if (!viewport) return;
+    if (evt.button !== 0) return;
+    const tx = Number.isFinite(viewport.x) ? viewport.x : 0;
+    const ty = Number.isFinite(viewport.y) ? viewport.y : 0;
+    panState = {
+      startX: Number(evt.clientX) || 0,
+      startY: Number(evt.clientY) || 0,
+      baseX: tx,
+      baseY: ty,
+      dragged: false
+    };
+  }
+
+  function handleMouseMove(evt) {
+    if (!panState || !viewport) return;
+    const dx = (Number(evt.clientX) || 0) - panState.startX;
+    const dy = (Number(evt.clientY) || 0) - panState.startY;
+    if (!panState.dragged) {
+      const moved = Math.abs(dx) >= PAN_DRAG_THRESHOLD || Math.abs(dy) >= PAN_DRAG_THRESHOLD;
+      if (!moved) return;
+      panState.dragged = true;
+    }
+
+    viewport.x = panState.baseX + dx;
+    viewport.y = panState.baseY + dy;
+    if (typeof evt.preventDefault === 'function') {
+      evt.preventDefault();
+    }
+    renderNow();
+  }
+
+  function handleMouseUp(evt) {
+    if (!panState) return;
+    if (panState.dragged) {
+      suppressClick = true;
+      if (typeof evt.preventDefault === 'function') {
+        evt.preventDefault();
+      }
+    }
+    panState = null;
+  }
+
   canvas.addEventListener('click', handleClick);
+  canvas.addEventListener('wheel', handleWheel, wheelListenerOptions);
+  canvas.addEventListener('mousedown', handleMouseDown);
+  globalTarget.addEventListener('mousemove', handleMouseMove);
+  globalTarget.addEventListener('mouseup', handleMouseUp);
 
   function destroy() {
     canvas.removeEventListener('click', handleClick);
+    canvas.removeEventListener('wheel', handleWheel, wheelListenerOptions);
+    canvas.removeEventListener('mousedown', handleMouseDown);
+    globalTarget.removeEventListener('mousemove', handleMouseMove);
+    globalTarget.removeEventListener('mouseup', handleMouseUp);
   }
 
   return { destroy };

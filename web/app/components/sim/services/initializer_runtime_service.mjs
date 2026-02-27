@@ -7,9 +7,128 @@ const U16_MASK = 0xFFFF;
 const RISCV_PHYSTOP_IMM20_ORIGINAL = 0x88000;
 const RISCV_PHYSTOP_IMM20_MODERATE = 0x84000;
 const RISCV_PHYSTOP_IMM20_AGGRESSIVE = 0x80200;
+const DEFAULT_TRANSFER_CHUNK_BYTES = 128 * 1024;
 
 function didCallSucceed(result) {
   return result !== false;
+}
+
+async function transferBytesChunked({
+  bytes,
+  offset = 0,
+  chunkBytes = DEFAULT_TRANSFER_CHUNK_BYTES,
+  writeChunk,
+  yieldControl = null
+} = {}) {
+  if (!(bytes instanceof Uint8Array) || bytes.length === 0 || typeof writeChunk !== 'function') {
+    return false;
+  }
+  const chunkSize = Math.max(1, Number.parseInt(chunkBytes, 10) || DEFAULT_TRANSFER_CHUNK_BYTES);
+  const baseOffset = Number(offset) >>> 0;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const end = Math.min(bytes.length, index + chunkSize);
+    const chunk = bytes.subarray(index, end);
+    const ok = didCallSucceed(writeChunk(chunk, (baseOffset + index) >>> 0));
+    if (!ok) {
+      return false;
+    }
+    if (end < bytes.length && typeof yieldControl === 'function') {
+      await yieldControl();
+    }
+  }
+  return true;
+}
+
+async function loadBytesIntoMainMemory({
+  runtime,
+  bytes,
+  offset = 0,
+  isRom = false,
+  supportsRunnerApi = false,
+  supportsGenericMemoryApi = false,
+  transferChunkBytes = DEFAULT_TRANSFER_CHUNK_BYTES,
+  yieldControl = null
+} = {}) {
+  if (supportsRunnerApi && typeof runtime?.sim?.runner_load_memory === 'function') {
+    return transferBytesChunked({
+      bytes,
+      offset,
+      chunkBytes: transferChunkBytes,
+      yieldControl,
+      writeChunk: (chunk, chunkOffset) => runtime.sim.runner_load_memory(chunk, chunkOffset, { isRom })
+    });
+  }
+  if (supportsGenericMemoryApi && typeof runtime?.sim?.memory_load === 'function') {
+    return transferBytesChunked({
+      bytes,
+      offset,
+      chunkBytes: transferChunkBytes,
+      yieldControl,
+      writeChunk: (chunk, chunkOffset) => runtime.sim.memory_load(chunk, chunkOffset, { isRom })
+    });
+  }
+  return false;
+}
+
+async function loadBytesIntoRom({
+  runtime,
+  bytes,
+  offset = 0,
+  supportsRunnerApi = false,
+  supportsGenericMemoryApi = false,
+  transferChunkBytes = DEFAULT_TRANSFER_CHUNK_BYTES,
+  yieldControl = null
+} = {}) {
+  if (supportsRunnerApi && typeof runtime?.sim?.runner_load_rom === 'function') {
+    return transferBytesChunked({
+      bytes,
+      offset,
+      chunkBytes: transferChunkBytes,
+      yieldControl,
+      writeChunk: (chunk, chunkOffset) => runtime.sim.runner_load_rom(chunk, chunkOffset)
+    });
+  }
+  return loadBytesIntoMainMemory({
+    runtime,
+    bytes,
+    offset,
+    isRom: true,
+    supportsRunnerApi,
+    supportsGenericMemoryApi,
+    transferChunkBytes,
+    yieldControl
+  });
+}
+
+async function loadBytesIntoBootRom({
+  runtime,
+  bytes,
+  supportsRunnerApi = false
+} = {}) {
+  if (supportsRunnerApi && typeof runtime?.sim?.runner_load_boot_rom === 'function') {
+    return didCallSucceed(runtime.sim.runner_load_boot_rom(bytes));
+  }
+  return false;
+}
+
+async function loadBytesIntoDisk({
+  runtime,
+  bytes,
+  offset = 0,
+  supportsRunnerApi = false,
+  transferChunkBytes = DEFAULT_TRANSFER_CHUNK_BYTES,
+  yieldControl = null
+} = {}) {
+  if (supportsRunnerApi && typeof runtime?.sim?.runner_riscv_load_disk === 'function') {
+    return transferBytesChunked({
+      bytes,
+      offset,
+      chunkBytes: transferChunkBytes,
+      yieldControl,
+      writeChunk: (chunk, chunkOffset) => runtime.sim.runner_riscv_load_disk(chunk, chunkOffset)
+    });
+  }
+  return false;
 }
 
 function parseNonNegativeInt(value, fallback = 0) {
@@ -188,6 +307,8 @@ async function loadRunnerRomAsset({
   ioConfig,
   supportsRunnerApi,
   supportsGenericMemoryApi,
+  transferChunkBytes = DEFAULT_TRANSFER_CHUNK_BYTES,
+  yieldControl = null,
   fetchImpl,
   log
 } = {}) {
@@ -204,26 +325,21 @@ async function loadRunnerRomAsset({
 
     const romBytes = new Uint8Array(await romResp.arrayBuffer());
     state.apple2.baseRomBytes = new Uint8Array(romBytes);
-
-    if (supportsRunnerApi && typeof runtime.sim.runner_load_rom === 'function') {
-      const ok = didCallSucceed(runtime.sim.runner_load_rom(romBytes, ioConfig.rom.offset || 0));
-      if (ok) {
-        log(`Loaded runner ROM via runner_load_rom: ${ioConfig.rom.path}`);
-      } else {
-        log(`Runner ROM load failed via runner API: ${ioConfig.rom.path}`);
-      }
-      return ok;
+    const ok = await loadBytesIntoRom({
+      runtime,
+      bytes: romBytes,
+      offset: ioConfig.rom.offset || 0,
+      supportsRunnerApi,
+      supportsGenericMemoryApi,
+      transferChunkBytes,
+      yieldControl
+    });
+    if (ok) {
+      log(`Loaded runner ROM via runner_load_rom: ${ioConfig.rom.path}`);
+    } else {
+      log(`Runner ROM load failed: ${ioConfig.rom.path}`);
     }
-
-    if (supportsGenericMemoryApi && typeof runtime.sim.memory_load === 'function') {
-      const ok = didCallSucceed(runtime.sim.memory_load(romBytes, ioConfig.rom.offset || 0, { isRom: !!ioConfig.rom.isRom }));
-      if (ok) {
-        log(`Loaded runner ROM: ${ioConfig.rom.path}`);
-      } else {
-        log(`Runner ROM load failed: ${ioConfig.rom.path}`);
-      }
-      return ok;
-    }
+    return ok;
   } catch (err) {
     log(`Failed to load runner ROM: ${err.message || err}`);
   }
@@ -236,6 +352,8 @@ async function loadDefaultBinAsset({
   defaultBin,
   supportsRunnerApi,
   supportsGenericMemoryApi,
+  transferChunkBytes = DEFAULT_TRANSFER_CHUNK_BYTES,
+  yieldControl = null,
   fetchImpl,
   log
 } = {}) {
@@ -294,23 +412,32 @@ async function loadDefaultBinAsset({
     let loaded = false;
 
     if (defaultBin.space === 'boot_rom') {
-      if (supportsRunnerApi && typeof runtime.sim.runner_load_boot_rom === 'function') {
-        loaded = didCallSucceed(runtime.sim.runner_load_boot_rom(bytes));
-      }
+      loaded = await loadBytesIntoBootRom({
+        runtime,
+        bytes,
+        supportsRunnerApi
+      });
     } else if (defaultBin.space === 'rom') {
-      if (supportsRunnerApi && typeof runtime.sim.runner_load_rom === 'function') {
-        loaded = didCallSucceed(runtime.sim.runner_load_rom(bytes, loadOffset));
-      } else if (supportsRunnerApi && typeof runtime.sim.runner_load_memory === 'function') {
-        loaded = didCallSucceed(runtime.sim.runner_load_memory(bytes, loadOffset, { isRom: true }));
-      } else if (supportsGenericMemoryApi && typeof runtime.sim.memory_load === 'function') {
-        loaded = didCallSucceed(runtime.sim.memory_load(bytes, loadOffset, { isRom: true }));
-      }
+      loaded = await loadBytesIntoRom({
+        runtime,
+        bytes,
+        offset: loadOffset,
+        supportsRunnerApi,
+        supportsGenericMemoryApi,
+        transferChunkBytes,
+        yieldControl
+      });
     } else {
-      if (supportsRunnerApi && typeof runtime.sim.runner_load_memory === 'function') {
-        loaded = didCallSucceed(runtime.sim.runner_load_memory(bytes, loadOffset, { isRom: false }));
-      } else if (supportsGenericMemoryApi && typeof runtime.sim.memory_load === 'function') {
-        loaded = didCallSucceed(runtime.sim.memory_load(bytes, loadOffset, { isRom: false }));
-      }
+      loaded = await loadBytesIntoMainMemory({
+        runtime,
+        bytes,
+        offset: loadOffset,
+        isRom: false,
+        supportsRunnerApi,
+        supportsGenericMemoryApi,
+        transferChunkBytes,
+        yieldControl
+      });
     }
 
     if (!loaded) {
@@ -352,6 +479,8 @@ async function loadDefaultDiskAsset({
   runtime,
   defaultDisk,
   supportsRunnerApi,
+  transferChunkBytes = DEFAULT_TRANSFER_CHUNK_BYTES,
+  yieldControl = null,
   fetchImpl,
   log
 } = {}) {
@@ -367,10 +496,14 @@ async function loadDefaultDiskAsset({
     }
 
     const bytes = new Uint8Array(await diskResp.arrayBuffer());
-    let loaded = false;
-    if (supportsRunnerApi && typeof runtime.sim.runner_riscv_load_disk === 'function') {
-      loaded = didCallSucceed(runtime.sim.runner_riscv_load_disk(bytes, defaultDisk.offset));
-    }
+    const loaded = await loadBytesIntoDisk({
+      runtime,
+      bytes,
+      offset: defaultDisk.offset,
+      supportsRunnerApi,
+      transferChunkBytes,
+      yieldControl
+    });
     if (!loaded) {
       log(`Default disk load failed or unsupported: ${defaultDisk.path}`);
       return false;
@@ -393,6 +526,8 @@ async function loadDefaultAssets({
   defaultAssets,
   supportsRunnerApi,
   supportsGenericMemoryApi,
+  transferChunkBytes = DEFAULT_TRANSFER_CHUNK_BYTES,
+  yieldControl = null,
   fetchImpl,
   log
 } = {}) {
@@ -412,27 +547,41 @@ async function loadDefaultAssets({
       const bytes = new Uint8Array(await resp.arrayBuffer());
       let loaded = false;
       if (asset.kind === 'disk') {
-        if (supportsRunnerApi && typeof runtime.sim.runner_riscv_load_disk === 'function') {
-          loaded = didCallSucceed(runtime.sim.runner_riscv_load_disk(bytes, asset.offset));
-        }
+        loaded = await loadBytesIntoDisk({
+          runtime,
+          bytes,
+          offset: asset.offset,
+          supportsRunnerApi,
+          transferChunkBytes,
+          yieldControl
+        });
       } else if (asset.space === 'boot_rom') {
-        if (supportsRunnerApi && typeof runtime.sim.runner_load_boot_rom === 'function') {
-          loaded = didCallSucceed(runtime.sim.runner_load_boot_rom(bytes));
-        }
+        loaded = await loadBytesIntoBootRom({
+          runtime,
+          bytes,
+          supportsRunnerApi
+        });
       } else if (asset.space === 'rom') {
-        if (supportsRunnerApi && typeof runtime.sim.runner_load_rom === 'function') {
-          loaded = didCallSucceed(runtime.sim.runner_load_rom(bytes, asset.offset));
-        } else if (supportsRunnerApi && typeof runtime.sim.runner_load_memory === 'function') {
-          loaded = didCallSucceed(runtime.sim.runner_load_memory(bytes, asset.offset, { isRom: true }));
-        } else if (supportsGenericMemoryApi && typeof runtime.sim.memory_load === 'function') {
-          loaded = didCallSucceed(runtime.sim.memory_load(bytes, asset.offset, { isRom: true }));
-        }
+        loaded = await loadBytesIntoRom({
+          runtime,
+          bytes,
+          offset: asset.offset,
+          supportsRunnerApi,
+          supportsGenericMemoryApi,
+          transferChunkBytes,
+          yieldControl
+        });
       } else {
-        if (supportsRunnerApi && typeof runtime.sim.runner_load_memory === 'function') {
-          loaded = didCallSucceed(runtime.sim.runner_load_memory(bytes, asset.offset, { isRom: false }));
-        } else if (supportsGenericMemoryApi && typeof runtime.sim.memory_load === 'function') {
-          loaded = didCallSucceed(runtime.sim.memory_load(bytes, asset.offset, { isRom: false }));
-        }
+        loaded = await loadBytesIntoMainMemory({
+          runtime,
+          bytes,
+          offset: asset.offset,
+          isRom: false,
+          supportsRunnerApi,
+          supportsGenericMemoryApi,
+          transferChunkBytes,
+          yieldControl
+        });
       }
 
       if (!loaded) {
@@ -467,6 +616,9 @@ async function loadDefaultAssets({
       anyLoaded = true;
     } catch (err) {
       log(`Failed to load default asset: ${err.message || err}`);
+    }
+    if (typeof yieldControl === 'function') {
+      await yieldControl();
     }
   }
 
@@ -792,6 +944,8 @@ export async function initializeApple2Mode({
   state,
   preset,
   addWatchSignal,
+  transferChunkBytes = DEFAULT_TRANSFER_CHUNK_BYTES,
+  yieldControl = null,
   fetchImpl = globalThis.fetch,
   log = () => {}
 } = {}) {
@@ -835,9 +989,14 @@ export async function initializeApple2Mode({
     ioConfig,
     supportsRunnerApi,
     supportsGenericMemoryApi,
+    transferChunkBytes,
+    yieldControl,
     fetchImpl,
     log
   });
+  if (typeof yieldControl === 'function') {
+    await yieldControl();
+  }
 
   if (defaultAssets.length > 0) {
     await loadDefaultAssets({
@@ -845,6 +1004,8 @@ export async function initializeApple2Mode({
       defaultAssets,
       supportsRunnerApi,
       supportsGenericMemoryApi,
+      transferChunkBytes,
+      yieldControl,
       fetchImpl,
       log
     });
@@ -853,15 +1014,22 @@ export async function initializeApple2Mode({
       runtime,
       defaultDisk,
       supportsRunnerApi,
+      transferChunkBytes,
+      yieldControl,
       fetchImpl,
       log
     });
+    if (typeof yieldControl === 'function') {
+      await yieldControl();
+    }
 
     await loadDefaultBinAsset({
       runtime,
       defaultBin,
       supportsRunnerApi,
       supportsGenericMemoryApi,
+      transferChunkBytes,
+      yieldControl,
       fetchImpl,
       log
     });

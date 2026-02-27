@@ -25,6 +25,9 @@ export function bindSimBindings({
     if (!runtime.sim) {
       return;
     }
+    const traceEnabled = typeof runtime.sim.trace_enabled === 'function'
+      ? runtime.sim.trace_enabled() === true
+      : false;
     if (apple2.isUiEnabled()) {
       apple2.performResetSequence();
     } else {
@@ -33,7 +36,7 @@ export function bindSimBindings({
       store.setUiCyclesPendingState(0);
       runtime.sim.reset();
     }
-    sim.initializeTrace();
+    sim.initializeTrace({ enabled: traceEnabled });
     watch.refreshTable();
     apple2.refreshScreen();
     apple2.refreshDebug();

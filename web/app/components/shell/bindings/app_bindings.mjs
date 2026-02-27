@@ -44,7 +44,6 @@ export function bindCoreBindings({
   runner,
   sim,
   apple2,
-  components,
   store,
   util,
   log
@@ -112,7 +111,7 @@ export function bindCoreBindings({
     }
     try {
       await yieldToUi();
-      await runner.loadPreset();
+      await runner.loadPreset({ showLoadingUi: true });
     } finally {
       runnerLoadInProgress = false;
       if (dom.loadRunnerBtn) {
@@ -342,8 +341,6 @@ export function bindCoreBindings({
       shell.setActiveTab(tabId);
       if (tabId === 'memoryTab') {
         apple2.refreshMemoryView();
-      } else if (tabId === 'componentTab' || tabId === 'componentGraphTab') {
-        components.refreshExplorer();
       }
     });
   }

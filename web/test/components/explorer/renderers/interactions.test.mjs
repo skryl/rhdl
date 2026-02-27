@@ -45,10 +45,18 @@ function createMockCanvas() {
     getBoundingClientRect() {
       return { left: 0, top: 0, width: 800, height: 600 };
     },
-    emit(event, x, y) {
+    emit(event, x, y, extra = {}) {
       const handlers = listeners.get(event) || [];
       for (const h of handlers) {
-        h({ clientX: x, clientY: y, preventDefault() {}, stopPropagation() {} });
+        h({
+          clientX: x,
+          clientY: y,
+          button: 0,
+          deltaY: 0,
+          preventDefault() {},
+          stopPropagation() {},
+          ...extra
+        });
       }
     }
   };
@@ -201,6 +209,109 @@ test('clicking empty canvas clears graphHighlightedSignal', () => {
   canvas.emit('click', 999, 999);
   assert.equal(state.components.graphHighlightedSignal, null);
   assert.equal(viewRenders, 1);
+});
+
+test('click hit-testing respects viewport transform', () => {
+  const canvas = createMockCanvas();
+  const state = createState();
+  const model = { nodes: new Map() };
+  const viewport = { x: 50, y: 20, scale: 2 };
+  const net = { id: 'net:clk', signalName: 'clk', liveName: 'top__clk' };
+
+  bindD3Interactions({
+    canvas,
+    state,
+    model,
+    viewport,
+    spatialIndex: createMockIndex(new Map([['20,20', net]])),
+    renderComponentTree: () => {},
+    renderComponentViews: () => {},
+    requestRender: () => {}
+  });
+
+  // screen (90,60) -> world ((90-50)/2, (60-20)/2) = (20,20)
+  canvas.emit('click', 90, 60);
+  assert.deepEqual(state.components.graphHighlightedSignal, { signalName: 'clk', liveName: 'top__clk' });
+});
+
+test('wheel zoom updates viewport scale and requests render', () => {
+  const canvas = createMockCanvas();
+  const state = createState();
+  const model = { nodes: new Map() };
+  const viewport = { x: 0, y: 0, scale: 1 };
+  let renders = 0;
+
+  bindD3Interactions({
+    canvas,
+    state,
+    model,
+    viewport,
+    spatialIndex: createMockIndex(new Map()),
+    renderComponentTree: () => {},
+    renderComponentViews: () => {},
+    requestRender: () => { renders++; }
+  });
+
+  canvas.emit('wheel', 400, 300, { deltaY: -120 });
+  assert.ok(viewport.scale > 1, 'zoom-in should increase scale');
+  assert.ok(viewport.x < 0, 'zoom-in should update x translation');
+  assert.ok(viewport.y < 0, 'zoom-in should update y translation');
+  assert.equal(renders, 1);
+});
+
+test('wheel zoom clamps to extended minimum scale when zooming far out', () => {
+  const canvas = createMockCanvas();
+  const state = createState();
+  const model = { nodes: new Map() };
+  const viewport = { x: 0, y: 0, scale: 1 };
+
+  bindD3Interactions({
+    canvas,
+    state,
+    model,
+    viewport,
+    spatialIndex: createMockIndex(new Map()),
+    renderComponentTree: () => {},
+    renderComponentViews: () => {},
+    requestRender: () => {}
+  });
+
+  canvas.emit('wheel', 400, 300, { deltaY: 100000 });
+  assert.ok(viewport.scale <= 0.051, 'zoom-out should clamp at extended minimum scale');
+  assert.ok(viewport.scale >= 0.05, 'zoom-out should not go below minimum scale');
+});
+
+test('drag pan updates viewport translation and suppresses click selection', () => {
+  const canvas = createMockCanvas();
+  const state = createState();
+  const model = { nodes: new Map([['cpu', {}]]) };
+  const viewport = { x: 0, y: 0, scale: 1 };
+  let renders = 0;
+  let viewRenders = 0;
+  const component = { id: 'sym:cpu', type: 'component', componentId: 'cpu' };
+
+  bindD3Interactions({
+    canvas,
+    state,
+    model,
+    viewport,
+    spatialIndex: createMockIndex(new Map([['110,110', component]])),
+    renderComponentTree: () => {},
+    renderComponentViews: () => { viewRenders++; },
+    requestRender: () => { renders++; }
+  });
+
+  canvas.emit('mousedown', 100, 100);
+  canvas.emit('mousemove', 140, 130);
+  canvas.emit('mouseup', 140, 130);
+  assert.equal(viewport.x, 40);
+  assert.equal(viewport.y, 30);
+  assert.ok(renders > 0, 'panning should render');
+
+  // Click from the drag-release should be ignored.
+  canvas.emit('click', 110, 110);
+  assert.equal(state.components.selectedNodeId, null);
+  assert.equal(viewRenders, 0);
 });
 
 test('destroy removes click listener', () => {

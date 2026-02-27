@@ -78,3 +78,21 @@ test('shouldRefreshUiAfterRun respects run state and tabs', () => {
     isComponentTabActive: () => false
   }), false);
 });
+
+test('shouldRefreshUiAfterRun suppresses follower refresh while running when trace is disabled', () => {
+  assert.equal(shouldRefreshUiAfterRun({
+    state: { running: true, uiCyclesPending: 200, activeTab: 'memoryTab' },
+    hit: null,
+    uiEvery: 10,
+    isComponentTabActive: () => true,
+    traceFollowEnabled: false
+  }), false);
+
+  assert.equal(shouldRefreshUiAfterRun({
+    state: { running: false, uiCyclesPending: 200, activeTab: 'memoryTab' },
+    hit: null,
+    uiEvery: 10,
+    isComponentTabActive: () => true,
+    traceFollowEnabled: false
+  }), true);
+});

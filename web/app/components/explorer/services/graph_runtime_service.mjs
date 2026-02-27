@@ -10,10 +10,28 @@ import { buildElkGraph, applyElkResult } from '../renderers/elk_layout_adapter.m
 import { updateRenderActivity } from '../renderers/render_activity.mjs';
 import { getThemePalette, drawLegend } from '../renderers/themes.mjs';
 
+const MIN_GRAPH_SCALE = 0.05;
+const MAX_GRAPH_SCALE = 8;
+const BUTTON_ZOOM_FACTOR = 1.2;
+const DEFAULT_GRAPH_VIEWPORT = Object.freeze({ x: 0, y: 0, scale: 1 });
+const SCHEMATIC_LOADING_TEXT = 'Loading schematic...';
+
 function requireFn(name, fn) {
   if (typeof fn !== 'function') {
     throw new Error(`createExplorerGraphRuntimeService requires function: ${name}`);
   }
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function toCanvasPixelSize(value, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return Math.max(1, Math.floor(Number(fallback) || 1));
+  }
+  return Math.max(1, Math.floor(parsed));
 }
 
 export function createExplorerGraphRuntimeService({
@@ -23,7 +41,8 @@ export function createExplorerGraphRuntimeService({
   renderComponentTree,
   renderComponentViews,
   createSchematicElements,
-  signalLiveValueByName
+  signalLiveValueByName,
+  isTraceEnabled = () => true
 } = {}) {
   if (!dom || !state) {
     throw new Error('createExplorerGraphRuntimeService requires dom/state');
@@ -36,9 +55,139 @@ export function createExplorerGraphRuntimeService({
 
   // renderer state (kept outside components state to avoid serialization)
   let renderListRef = null;
-  let viewport = { x: 0, y: 0, scale: 1 };
+  let viewport = { ...DEFAULT_GRAPH_VIEWPORT };
+  let graphBuildVersion = 0;
+  let graphBuildInFlight = null;
+
+  function syncGraphCanvasSize(graph) {
+    if (!graph?.canvas) {
+      return false;
+    }
+
+    const targetWidth = toCanvasPixelSize(dom.componentVisual?.clientWidth, graph.canvas.width || 800);
+    const targetHeight = toCanvasPixelSize(dom.componentVisual?.clientHeight, graph.canvas.height || 600);
+    let resized = false;
+
+    if (graph.canvas.width !== targetWidth || graph.canvas.height !== targetHeight) {
+      graph.canvas.width = targetWidth;
+      graph.canvas.height = targetHeight;
+      resized = true;
+    }
+
+    if (graph.legendCanvas) {
+      if (graph.legendCanvas.width !== targetWidth || graph.legendCanvas.height !== targetHeight) {
+        graph.legendCanvas.width = targetWidth;
+        graph.legendCanvas.height = targetHeight;
+        resized = true;
+      }
+    }
+
+    return resized;
+  }
+
+  function yieldToBrowser() {
+    return new Promise((resolve) => {
+      const scheduleTimeout = () => {
+        if (typeof globalThis.setTimeout === 'function') {
+          globalThis.setTimeout(resolve, 0);
+          return;
+        }
+        resolve();
+      };
+      if (typeof globalThis.requestAnimationFrame === 'function') {
+        globalThis.requestAnimationFrame(() => {
+          scheduleTimeout();
+        });
+        return;
+      }
+      scheduleTimeout();
+    });
+  }
+
+  function isBuildCurrent(token, key) {
+    return (
+      graphBuildVersion === token
+      && !!graphBuildInFlight
+      && graphBuildInFlight.token === token
+      && graphBuildInFlight.key === key
+    );
+  }
+
+  function clearBuildInFlightIfCurrent(token, key) {
+    if (isBuildCurrent(token, key)) {
+      graphBuildInFlight = null;
+    }
+  }
+
+  function renderGraphWithViewport(graph) {
+    if (!graph || !graph.renderer || typeof graph.renderer.render !== 'function') {
+      return false;
+    }
+    syncGraphCanvasSize(graph);
+    const renderList = renderListRef || graph.renderList || [];
+    const palette = getThemePalette(state.theme);
+    graph.renderer.render(renderList, viewport, palette);
+    if (typeof graph.renderLegendOverlay === 'function') {
+      graph.renderLegendOverlay(palette);
+    }
+    return true;
+  }
+
+  function zoomComponentGraphByFactor(factor = 1) {
+    const graph = state.components.graph;
+    if (!graph || !graph.canvas || !viewport) {
+      return false;
+    }
+    if (graph.viewport && graph.viewport !== viewport) {
+      viewport = graph.viewport;
+    }
+    const prevScale = Number.isFinite(viewport.scale) ? viewport.scale : 1;
+    const nextScale = clamp(prevScale * Number(factor || 1), MIN_GRAPH_SCALE, MAX_GRAPH_SCALE);
+    if (!Number.isFinite(nextScale) || Math.abs(nextScale - prevScale) < 1e-6) {
+      return false;
+    }
+
+    const rect = typeof graph.canvas.getBoundingClientRect === 'function'
+      ? graph.canvas.getBoundingClientRect()
+      : null;
+    const centerX = (Number(rect?.width) > 0 ? Number(rect.width) : Number(graph.canvas.width) || 800) * 0.5;
+    const centerY = (Number(rect?.height) > 0 ? Number(rect.height) : Number(graph.canvas.height) || 600) * 0.5;
+    const tx = Number.isFinite(viewport.x) ? viewport.x : 0;
+    const ty = Number.isFinite(viewport.y) ? viewport.y : 0;
+    const worldX = (centerX - tx) / prevScale;
+    const worldY = (centerY - ty) / prevScale;
+
+    viewport.scale = nextScale;
+    viewport.x = centerX - (worldX * nextScale);
+    viewport.y = centerY - (worldY * nextScale);
+    return renderGraphWithViewport(graph);
+  }
+
+  function zoomInComponentGraph() {
+    return zoomComponentGraphByFactor(BUTTON_ZOOM_FACTOR);
+  }
+
+  function zoomOutComponentGraph() {
+    return zoomComponentGraphByFactor(1 / BUTTON_ZOOM_FACTOR);
+  }
+
+  function resetComponentGraphViewport() {
+    const graph = state.components.graph;
+    if (!graph || !viewport) {
+      return false;
+    }
+    if (graph.viewport && graph.viewport !== viewport) {
+      viewport = graph.viewport;
+    }
+    viewport.x = DEFAULT_GRAPH_VIEWPORT.x;
+    viewport.y = DEFAULT_GRAPH_VIEWPORT.y;
+    viewport.scale = DEFAULT_GRAPH_VIEWPORT.scale;
+    return renderGraphWithViewport(graph);
+  }
 
   function destroyComponentGraph() {
+    graphBuildVersion += 1;
+    graphBuildInFlight = null;
     if (state.components.graph && typeof state.components.graph.destroy === 'function') {
       state.components.graph.destroy();
     }
@@ -51,7 +200,169 @@ export function createExplorerGraphRuntimeService({
     renderListRef = null;
   }
 
-  function ensureComponentGraph(model) {
+  async function buildComponentGraphAsync({
+    model,
+    focusNode,
+    showChildren,
+    graphKey,
+    rerender,
+    token
+  }) {
+    try {
+      await yieldToBrowser();
+      if (!isBuildCurrent(token, graphKey)) {
+        return;
+      }
+
+      const schematicElements = createSchematicElements(model, focusNode, showChildren);
+      await yieldToBrowser();
+      if (!isBuildCurrent(token, graphKey)) {
+        return;
+      }
+
+      const renderList = buildRenderList(schematicElements);
+      renderListRef = renderList;
+
+      if (!dom.componentVisual || !isBuildCurrent(token, graphKey)) {
+        clearBuildInFlightIfCurrent(token, graphKey);
+        return;
+      }
+      dom.componentVisual.innerHTML = '';
+
+      const canvas = document.createElement('canvas');
+      canvas.width = toCanvasPixelSize(dom.componentVisual.clientWidth, 800);
+      canvas.height = toCanvasPixelSize(dom.componentVisual.clientHeight, 600);
+      canvas.style.width = '100%';
+      canvas.style.height = '100%';
+      dom.componentVisual.appendChild(canvas);
+
+      const webglRenderer = createWebGLRenderer(canvas);
+      const renderer = webglRenderer || createCanvasRenderer(canvas);
+      if (!renderer) {
+        clearBuildInFlightIfCurrent(token, graphKey);
+        state.components.graphLayoutEngine = 'error';
+        dom.componentVisual.textContent = 'Unable to render component schematic.';
+        return;
+      }
+      state.components.graphRenderBackend = webglRenderer ? 'webgl' : 'canvas2d';
+
+      let legendCanvas = null;
+      let legendCtx = null;
+      if (webglRenderer) {
+        legendCanvas = document.createElement('canvas');
+        legendCanvas.width = canvas.width;
+        legendCanvas.height = canvas.height;
+        legendCanvas.style.width = '100%';
+        legendCanvas.style.height = '100%';
+        legendCanvas.style.position = 'absolute';
+        legendCanvas.style.top = '0';
+        legendCanvas.style.left = '0';
+        legendCanvas.style.pointerEvents = 'none';
+        dom.componentVisual.style.position = 'relative';
+        dom.componentVisual.appendChild(legendCanvas);
+        legendCtx = legendCanvas.getContext('2d');
+      }
+
+      function renderLegendOverlay(pal) {
+        if (!legendCtx) return;
+        legendCtx.clearRect(0, 0, legendCanvas.width, legendCanvas.height);
+        drawLegend(legendCtx, legendCanvas.width, legendCanvas.height, pal);
+      }
+
+      await yieldToBrowser();
+      if (!isBuildCurrent(token, graphKey)) {
+        clearBuildInFlightIfCurrent(token, graphKey);
+        return;
+      }
+      const spatialIndex = buildSpatialIndex(renderList);
+
+      const interactions = bindD3Interactions({
+        canvas,
+        state,
+        model,
+        spatialIndex,
+        viewport,
+        renderComponentTree,
+        renderComponentViews,
+        requestRender: () => {
+          renderGraphWithViewport(graphHandle);
+        }
+      });
+
+      const graphHandle = {
+        type: 'd3',
+        renderer,
+        interactions,
+        canvas,
+        legendCanvas,
+        viewport,
+        spatialIndex,
+        renderList,
+        renderLegendOverlay,
+        destroy() {
+          renderer.destroy();
+          interactions.destroy();
+        }
+      };
+
+      if (!isBuildCurrent(token, graphKey)) {
+        graphHandle.destroy();
+        return;
+      }
+
+      state.components.graph = graphHandle;
+      state.components.graphKey = graphKey;
+      state.components.graphSelectedId = null;
+      if (!state.components.graphLiveValues) {
+        state.components.graphLiveValues = new Map();
+      }
+      renderGraphWithViewport(graphHandle);
+
+      if (isBuildCurrent(token, graphKey)) {
+        graphBuildInFlight = null;
+      }
+
+      if (typeof rerender === 'function' && state.activeTab === 'componentGraphTab') {
+        rerender();
+      }
+
+      await yieldToBrowser();
+      if (state.components.graph !== graphHandle || state.components.graphKey !== graphKey) {
+        return;
+      }
+
+      const elkGraph = buildElkGraph(renderList);
+      const elk = new window.ELK();
+      state.components.graphLayoutEngine = 'elk';
+      elk.layout(elkGraph).then((result) => {
+        if (state.components.graph !== graphHandle || state.components.graphKey !== graphKey) {
+          return;
+        }
+        if (result && Array.isArray(result.children)) {
+          applyElkResult(renderList, result);
+          const newIndex = buildSpatialIndex(renderList);
+          if (graphHandle.interactions) {
+            graphHandle.spatialIndex = newIndex;
+          }
+          renderGraphWithViewport(graphHandle);
+        }
+      }).catch((_err) => {
+        if (state.components.graph === graphHandle && state.components.graphKey === graphKey) {
+          state.components.graphLayoutEngine = 'error';
+        }
+      });
+    } catch (_err) {
+      if (isBuildCurrent(token, graphKey)) {
+        graphBuildInFlight = null;
+        state.components.graphLayoutEngine = 'error';
+        if (dom.componentVisual) {
+          dom.componentVisual.textContent = 'Unable to render component schematic.';
+        }
+      }
+    }
+  }
+
+  function ensureComponentGraph(model, rerender) {
     if (!dom.componentVisual || !model) {
       return null;
     }
@@ -78,117 +389,27 @@ export function createExplorerGraphRuntimeService({
     if (state.components.graph && state.components.graphKey === graphKey) {
       return state.components.graph;
     }
+    if (graphBuildInFlight && graphBuildInFlight.key === graphKey) {
+      return null;
+    }
 
     destroyComponentGraph();
     dom.componentVisual.innerHTML = '';
+    dom.componentVisual.textContent = SCHEMATIC_LOADING_TEXT;
+    state.components.graphLayoutEngine = 'loading';
 
-    // Build render list from schematic elements
-    const schematicElements = createSchematicElements(model, focusNode, showChildren);
-    const renderList = buildRenderList(schematicElements);
-    renderListRef = renderList;
-
-    // Create canvas
-    const canvas = document.createElement('canvas');
-    canvas.width = dom.componentVisual.clientWidth || 800;
-    canvas.height = dom.componentVisual.clientHeight || 600;
-    canvas.style.width = '100%';
-    canvas.style.height = '100%';
-    dom.componentVisual.appendChild(canvas);
-
-    // Create renderer — try WebGL first, fall back to Canvas 2D
-    const webglRenderer = createWebGLRenderer(canvas);
-    const renderer = webglRenderer || createCanvasRenderer(canvas);
-    state.components.graphRenderBackend = webglRenderer ? 'webgl' : 'canvas2d';
-
-    // For WebGL, create a 2D overlay canvas for the legend (Canvas 2D draws legend inline)
-    let legendCanvas = null;
-    let legendCtx = null;
-    if (webglRenderer) {
-      legendCanvas = document.createElement('canvas');
-      legendCanvas.width = canvas.width;
-      legendCanvas.height = canvas.height;
-      legendCanvas.style.width = '100%';
-      legendCanvas.style.height = '100%';
-      legendCanvas.style.position = 'absolute';
-      legendCanvas.style.top = '0';
-      legendCanvas.style.left = '0';
-      legendCanvas.style.pointerEvents = 'none';
-      dom.componentVisual.style.position = 'relative';
-      dom.componentVisual.appendChild(legendCanvas);
-      legendCtx = legendCanvas.getContext('2d');
-    }
-
-    function renderLegendOverlay(pal) {
-      if (!legendCtx) return;
-      legendCtx.clearRect(0, 0, legendCanvas.width, legendCanvas.height);
-      drawLegend(legendCtx, legendCanvas.width, legendCanvas.height, pal);
-    }
-
-    // Run ELK layout
-    const elkGraph = buildElkGraph(renderList);
-    const elk = new window.ELK();
-    state.components.graphLayoutEngine = 'elk';
-    elk.layout(elkGraph).then((result) => {
-      if (result && Array.isArray(result.children)) {
-        applyElkResult(renderList, result);
-        // Rebuild spatial index after layout
-        const newIndex = buildSpatialIndex(renderList);
-        if (graphHandle.interactions) {
-          graphHandle.spatialIndex = newIndex;
-        }
-        // Render with new positions
-        const palette = getThemePalette(state.theme);
-        renderer.render(renderList, viewport, palette);
-        renderLegendOverlay(palette);
-      }
-    }).catch((_err) => {
-      state.components.graphLayoutEngine = 'error';
-    });
-
-    // Build spatial index
-    const spatialIndex = buildSpatialIndex(renderList);
-
-    // Bind interactions
-    const interactions = bindD3Interactions({
-      canvas,
-      state,
+    const token = graphBuildVersion + 1;
+    graphBuildVersion = token;
+    graphBuildInFlight = { token, key: graphKey };
+    void buildComponentGraphAsync({
       model,
-      spatialIndex,
-      renderComponentTree,
-      renderComponentViews,
-      requestRender: () => {
-        const palette = getThemePalette(state.theme);
-        renderer.render(renderListRef || renderList, viewport, palette);
-        renderLegendOverlay(palette);
-      }
+      focusNode,
+      showChildren,
+      graphKey,
+      rerender,
+      token
     });
-
-    // Initial render
-    const palette = getThemePalette(state.theme);
-    renderer.render(renderList, viewport, palette);
-    renderLegendOverlay(palette);
-
-    const graphHandle = {
-      type: 'd3',
-      renderer,
-      interactions,
-      canvas,
-      spatialIndex,
-      renderList,
-      renderLegendOverlay,
-      destroy() {
-        renderer.destroy();
-        interactions.destroy();
-      }
-    };
-
-    state.components.graph = graphHandle;
-    state.components.graphKey = graphKey;
-    state.components.graphSelectedId = null;
-    if (!state.components.graphLiveValues) {
-      state.components.graphLiveValues = new Map();
-    }
-    return graphHandle;
+    return null;
   }
 
   function renderComponentVisual({ node, model, rerender }) {
@@ -201,8 +422,14 @@ export function createExplorerGraphRuntimeService({
       return { ok: false, reason: 'missing-node' };
     }
 
-    const graph = ensureComponentGraph(model);
+    const graph = ensureComponentGraph(model, rerender);
     if (!graph) {
+      if (state.components.graphLayoutEngine === 'loading') {
+        if (!String(dom.componentVisual.textContent || '').trim()) {
+          dom.componentVisual.textContent = SCHEMATIC_LOADING_TEXT;
+        }
+        return { ok: false, reason: 'graph-loading' };
+      }
       if (state.components.graphLayoutEngine === 'missing') {
         dom.componentVisual.textContent = 'ELK layout engine unavailable.';
       } else {
@@ -223,19 +450,22 @@ export function createExplorerGraphRuntimeService({
     const renderList = renderListRef || graph.renderList;
 
     // Update live signal activity
+    const traceEnabled = (
+      typeof isTraceEnabled === 'function'
+      ? isTraceEnabled() === true
+      : true
+    );
     const nextValues = updateRenderActivity({
       renderList,
-      signalLiveValueByName,
+      signalLiveValueByName: traceEnabled ? signalLiveValueByName : (() => null),
       toBigInt,
       highlightedSignal: state.components.graphHighlightedSignal,
-      previousValues: state.components.graphLiveValues || new Map()
+      previousValues: traceEnabled ? (state.components.graphLiveValues || new Map()) : new Map()
     });
     state.components.graphLiveValues = nextValues;
 
     // Re-render canvas
-    const palette = getThemePalette(state.theme);
-    graph.renderer.render(renderList, viewport, palette);
-    if (graph.renderLegendOverlay) graph.renderLegendOverlay(palette);
+    renderGraphWithViewport(graph);
 
     return { ok: true };
   }
@@ -259,7 +489,7 @@ export function createExplorerGraphRuntimeService({
       title: nodeDisplayPath(focusNode),
       meta:
         `selected=${nodeDisplayPath(selectedNode)} | focus=${nodeDisplayPath(focusNode)}` +
-        ` | ${mode} | layout=${layout} | elk=${elk} | dbl-click component to dive`,
+        ` | ${mode} | layout=${layout} | elk=${elk} | dbl-click dive, drag pan, wheel zoom, reset view`,
       focusPath: `Focus: ${nodeDisplayPath(focusNode)}`,
       topDisabled: !model || focusNode.id === model.rootId,
       upDisabled: !focusNode.parentId
@@ -268,6 +498,9 @@ export function createExplorerGraphRuntimeService({
 
   return {
     destroyComponentGraph,
+    zoomInComponentGraph,
+    zoomOutComponentGraph,
+    resetComponentGraphViewport,
     renderComponentVisual,
     describeComponentGraphPanel
   };

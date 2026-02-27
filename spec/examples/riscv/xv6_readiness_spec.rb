@@ -60,10 +60,10 @@ RSpec.shared_examples 'xv6 privileged compatibility' do |pipeline:|
     cpu.reset!
     cpu.set_interrupts(software: true, timer: true, external: true)
     cpu.run_cycles(program.length + (pipeline ? 8 : 0))
-    # MIP: MSIP(bit 3)=0x8, MTIP(bit 7)=0x80, SEIP(bit 9)=0x200 => 0x288
-    expect(cpu.read_reg(1)).to eq(0x288)
-    # SIP: MIP & effective_mideleg(0x222). Only SEIP(bit 9, 0x200) matches => 0x200
-    expect(cpu.read_reg(2)).to eq(0x200)
+    # MIP: MSIP(bit 3)=0x8, STIP(bit 5)=0x20, MTIP(bit 7)=0x80, SEIP(bit 9)=0x200 => 0x2A8
+    expect(cpu.read_reg(1)).to eq(0x2A8)
+    # SIP: MIP & effective_mideleg(0x222) => STIP(bit 5, 0x20) + SEIP(bit 9, 0x200) => 0x220
+    expect(cpu.read_reg(2)).to eq(0x220)
   end
 end
 

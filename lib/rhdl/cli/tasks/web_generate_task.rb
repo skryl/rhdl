@@ -20,6 +20,7 @@ module RHDL
         APPLE2_AOT_IR_PATH = File.join(SCRIPT_DIR, 'apple2', 'ir', 'apple2.json')
         CPU8BIT_AOT_IR_PATH = File.join(SCRIPT_DIR, 'cpu', 'ir', 'cpu_lib_hdl.json')
         MOS6502_AOT_IR_PATH = File.join(SCRIPT_DIR, 'mos6502', 'ir', 'mos6502.json')
+        GAMEBOY_AOT_IR_PATH = File.join(SCRIPT_DIR, 'gameboy', 'ir', 'gameboy.json')
         RISCV_AOT_IR_PATH = File.join(SCRIPT_DIR, 'riscv', 'ir', 'riscv.json')
         AOT_GEN_PATH = File.join(SIM_DIR, 'ir_compiler/src/aot_generated.rs')
         APPLE2_ROM_SOURCE = File.join(PROJECT_ROOT, 'examples/apple2/software/roms/appleiigo.rom')
@@ -154,6 +155,7 @@ module RHDL
             build_compiler_aot_wasm(ir_path: APPLE2_AOT_IR_PATH, artifact: 'ir_compiler.wasm')
             build_compiler_aot_wasm(ir_path: CPU8BIT_AOT_IR_PATH, artifact: 'ir_compiler_cpu.wasm')
             build_compiler_aot_wasm(ir_path: MOS6502_AOT_IR_PATH, artifact: 'ir_compiler_mos6502.wasm')
+            build_compiler_aot_wasm(ir_path: GAMEBOY_AOT_IR_PATH, artifact: 'ir_compiler_gameboy.wasm')
             build_compiler_aot_wasm(ir_path: RISCV_AOT_IR_PATH, artifact: 'ir_compiler_riscv.wasm')
           ensure
             File.write(AOT_GEN_PATH, restore_aot_placeholder)
@@ -359,6 +361,7 @@ module RHDL
             'apple2' => APPLE2_AOT_IR_PATH,
             'cpu' => CPU8BIT_AOT_IR_PATH,
             'mos6502' => MOS6502_AOT_IR_PATH,
+            'gameboy' => GAMEBOY_AOT_IR_PATH,
             'riscv' => RISCV_AOT_IR_PATH
           }
           missing = aot_inputs.select { |_runner_id, path| !File.file?(path) }
@@ -855,6 +858,7 @@ module RHDL
           vim.wasm
           vim.data
           vimwasm.js
+          ir_compiler_gameboy.wasm
           ir_compiler_riscv.wasm
         ].freeze
         ASSET_ROOT = File.join(WEB_ROOT, 'assets')

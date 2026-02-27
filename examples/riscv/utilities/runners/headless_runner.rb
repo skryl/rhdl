@@ -154,8 +154,8 @@ module RHDL
           dtb_addr: LINUX_DTB_LOAD_ADDR,
           pc: nil
         )
-          unless native? && @cpu.sim.runner_kind == :riscv
-            raise 'Linux mode requires native RISC-V IR runner support (build native backends first).'
+          unless linux_capable?
+            raise 'Linux mode requires native RISC-V IR runner or HDL backend (build native backends first).'
           end
 
           if kernel.nil? || kernel.empty?
@@ -267,6 +267,13 @@ module RHDL
           return true if native? && @cpu.respond_to?(:sim) && @cpu.sim.respond_to?(:runner_kind) && @cpu.sim.runner_kind == :riscv
 
           false
+        end
+
+        def linux_capable?
+          return true if %i[verilog circt].include?(@effective_mode)
+          return false unless native? && @cpu.respond_to?(:sim) && @cpu.sim.respond_to?(:runner_kind)
+
+          %i[riscv hdl].include?(@cpu.sim.runner_kind)
         end
 
         def supports_runner_reset_vector?
@@ -814,8 +821,9 @@ module RHDL
           emit.call(Assembler.csrrw(0, 0x106, 5))
           emit_words.call(load_immediate_words(rd: 5, value: 0x0000_B1FF))
           emit.call(Assembler.csrrw(0, 0x302, 5))
-          # Delegate software/timer/external interrupts to S-mode for Linux.
-          emit_words.call(load_immediate_words(rd: 5, value: 0x0000_0888))
+          # Delegate supervisor interrupt classes (SSIP/STIP/SEIP: bits 1/5/9)
+          # to S-mode for Linux.
+          emit_words.call(load_immediate_words(rd: 5, value: 0x0000_0222))
           emit.call(Assembler.csrrw(0, 0x303, 5))
           emit_words.call(load_immediate_words(rd: 5, value: 0x0000_0800))
           emit.call(Assembler.csrrw(0, 0x300, 5))

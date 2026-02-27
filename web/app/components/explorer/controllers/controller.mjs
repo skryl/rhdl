@@ -1,6 +1,7 @@
 import { createExplorerModelController } from './model_controller.mjs';
 import { createExplorerInspectorController } from './inspector_controller.mjs';
 import { createExplorerGraphController } from './graph/controller.mjs';
+import { resolveComponentRefreshPlan } from './refresh_plan.mjs';
 import {
   renderComponentTreeRows,
   renderComponentInspectorView
@@ -50,10 +51,25 @@ export function createComponentExplorerController({
     clearComponentConnectionsView
   });
 
-  function renderComponentViews() {
+  function renderComponentInspectorOnly() {
     const node = modelController.currentSelectedComponentNode();
     inspectorController.renderComponentInspector(node);
+  }
+
+  function renderComponentGraphOnly() {
     graphController.renderComponentGraphPanel();
+  }
+
+  function renderComponentViews() {
+    const plan = resolveComponentRefreshPlan(state.activeTab);
+    if (plan.renderInspector) {
+      renderComponentInspectorOnly();
+      return;
+    }
+    if (plan.renderGraph) {
+      renderComponentGraphOnly();
+      return;
+    }
   }
 
   const graphController = createExplorerGraphController({
@@ -75,7 +91,10 @@ export function createComponentExplorerController({
     if (!changed) {
       return;
     }
-    modelController.renderComponentTree();
+    const plan = resolveComponentRefreshPlan(state.activeTab);
+    if (plan.renderTree) {
+      modelController.renderComponentTree();
+    }
     renderComponentViews();
     scheduleReduxUxSync('setComponentGraphFocus');
   }
@@ -85,23 +104,52 @@ export function createComponentExplorerController({
   }
 
   function refreshActiveComponentTab() {
-    if (state.activeTab === 'componentTab') {
-      inspectorController.renderComponentInspector(modelController.currentSelectedComponentNode());
-    } else if (state.activeTab === 'componentGraphTab') {
-      graphController.renderComponentGraphPanel();
+    const plan = resolveComponentRefreshPlan(state.activeTab);
+    if (plan.renderInspector) {
+      renderComponentInspectorOnly();
+    } else if (plan.renderGraph) {
+      renderComponentGraphOnly();
     }
   }
 
   function rebuildComponentExplorer(meta = runtime.irMeta, source = currentComponentSourceText()) {
     modelController.rebuildComponentExplorer(meta, source);
-    modelController.renderComponentTree();
-    renderComponentViews();
+    const plan = resolveComponentRefreshPlan(state.activeTab);
+    if (plan.renderTree) {
+      modelController.renderComponentTree();
+    }
+    if (plan.renderInspector) {
+      renderComponentInspectorOnly();
+    }
+    if (plan.renderGraph) {
+      renderComponentGraphOnly();
+    }
   }
 
   function refreshComponentExplorer() {
     modelController.refreshComponentExplorer();
-    modelController.renderComponentTree();
-    renderComponentViews();
+    const plan = resolveComponentRefreshPlan(state.activeTab);
+    if (plan.renderTree) {
+      modelController.renderComponentTree();
+    }
+    if (plan.renderInspector) {
+      renderComponentInspectorOnly();
+    }
+    if (plan.renderGraph) {
+      renderComponentGraphOnly();
+    }
+  }
+
+  function zoomComponentGraphIn() {
+    return graphController.zoomInComponentGraph();
+  }
+
+  function zoomComponentGraphOut() {
+    return graphController.zoomOutComponentGraph();
+  }
+
+  function resetComponentGraphViewport() {
+    return graphController.resetComponentGraphViewport();
   }
 
   return {
@@ -114,6 +162,9 @@ export function createComponentExplorerController({
     isComponentTabActive,
     renderComponentViews,
     refreshActiveComponentTab,
+    zoomComponentGraphIn,
+    zoomComponentGraphOut,
+    resetComponentGraphViewport,
     destroyComponentGraph: graphController.destroyComponentGraph,
     signalLiveValue: inspectorController.signalLiveValue,
     rebuildComponentExplorer,

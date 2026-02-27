@@ -227,6 +227,11 @@ module RHDL
           apply_speed_defaults(options)
 
           begin
+            if options[:mode] == :ir && options[:sim] == :compile
+              out.puts 'note: using --sim compile (default for IR); first run can take a few minutes while building native cache.'
+              out.puts 'note: use --sim jit for immediate startup while debugging.'
+              out.flush
+            end
             runner = task_class.new(options)
 
             if options[:xv6]

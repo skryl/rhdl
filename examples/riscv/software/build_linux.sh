@@ -5,9 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 SOFTWARE_DIR="${SCRIPT_DIR}"
 LINUX_DIR="${SOFTWARE_DIR}/linux"
+LINUX_DEFCONFIG_DIR="${SOFTWARE_DIR}/linux_configs"
 PATCH_DIR="${SOFTWARE_DIR}/linux_patches"
 BIN_DIR="${SOFTWARE_DIR}/bin"
-DEFAULT_BUILD_DIR="${LINUX_DIR}/.rhdl-build"
+DEFAULT_BUILD_DIR="${SOFTWARE_DIR}/.linux-build/linux"
 BUILD_DIR="${BUILD_DIR:-${DEFAULT_BUILD_DIR}}"
 INITRAMFS_PATH="${BIN_DIR}/linux_initramfs.cpio"
 BUILDROOT_INITRAMFS_PATH="${BIN_DIR}/linux_initramfs_buildroot.cpio"
@@ -21,21 +22,43 @@ LINUX_RISCV_ISA="${LINUX_RISCV_ISA:-rv32imafsu_zicsr_zifencei}"
 BUILDROOT_VERSION="${BUILDROOT_VERSION:-2025.02.1}"
 BUILDROOT_CACHE_DIR="${SOFTWARE_DIR}/.cache"
 BUILDROOT_DOCKER_CONTEXT="${SOFTWARE_DIR}/.docker-build"
-BUILDROOT_DEFCONFIG="${BUILDROOT_DEFCONFIG:-${SOFTWARE_DIR}/buildroot/rhdl_riscv32_mmu_busybox_defconfig}"
+BUILDROOT_DEFCONFIG="${BUILDROOT_DEFCONFIG:-${SOFTWARE_DIR}/linux_configs/tiny_busybox_buildroot_defconfig}"
 BUILDROOT_IMAGE="${BUILDROOT_IMAGE:-linux-riscv-builder-busybox:latest}"
-BUILDROOT_JOBS="${BUILDROOT_JOBS:-1}"
+BUILDROOT_JOBS="${BUILDROOT_JOBS:-}"
+RETRIES="${RETRIES:-${BUILDROOT_RETRIES:-1}}"
+BUILDROOT_WORKDIR="${BUILDROOT_WORKDIR:-}"
+BUILDROOT_VOLUME="${BUILDROOT_VOLUME:-}"
+BUILDROOT_PLATFORM="${BUILDROOT_PLATFORM:-linux/amd64}"
 BUILDROOT_DL_DIR="${SOFTWARE_DIR}/.cache/buildroot-dl"
 BUILDROOT_HOST_CFLAGS="${BUILDROOT_HOST_CFLAGS:--O0}"
 BUILDROOT_HOST_CXXFLAGS="${BUILDROOT_HOST_CXXFLAGS:--O0}"
+BUILDROOT_HOST_CC="${BUILDROOT_HOST_CC:-}"
+BUILDROOT_HOST_CXX="${BUILDROOT_HOST_CXX:-}"
+BUILDROOT_FORCE_GCC_HOST_TOOLS="${BUILDROOT_FORCE_GCC_HOST_TOOLS:-1}"
+BUILDROOT_RETRY_MODE="${BUILDROOT_RETRY_MODE:-clean}"
+BUILDROOT_RUNTIME_IMAGE="${BUILDROOT_IMAGE}"
+BUILDROOT_DOCKER_PLATFORM_ARG=()
+DOCKER_CONFIG_FALLBACK_DIR=""
 
-DEFAULT_JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
-if [[ -z "${DEFAULT_JOBS}" ]]; then
-  DEFAULT_JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+cleanup_docker_config_fallback() {
+  if [[ -n "${DOCKER_CONFIG_FALLBACK_DIR}" ]] && [[ -d "${DOCKER_CONFIG_FALLBACK_DIR}" ]]; then
+    rm -rf "${DOCKER_CONFIG_FALLBACK_DIR}"
+  fi
+}
+
+trap cleanup_docker_config_fallback EXIT
+
+HOST_DEFAULT_JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+if [[ -z "${HOST_DEFAULT_JOBS}" ]]; then
+  HOST_DEFAULT_JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 fi
+DEFAULT_JOBS="${HOST_DEFAULT_JOBS}"
+DEFAULT_BUILDROOT_JOBS="${HOST_DEFAULT_JOBS}"
+DOCKER_DEFAULT_JOBS=""
 
-JOBS="${JOBS:-${DEFAULT_JOBS}}"
+JOBS="${JOBS:-}"
 TOOLPREFIX="${TOOLPREFIX:-}"
-DEFCONFIG="${DEFCONFIG:-rv32_defconfig}"
+DEFCONFIG="${DEFCONFIG:-tiny_kernel_defconfig}"
 MIN_PROFILE="${MIN_PROFILE:-1}"
 ROOTFS_BUILD=1
 CLEAN=1
@@ -69,19 +92,23 @@ Outputs (deterministic names):
   ${BIN_DIR}/rhdl_riscv_virt.dts
   ${BIN_DIR}/rhdl_riscv_virt.dtb
   ${BIN_DIR}/linux_initramfs.cpio
-  ${BIN_DIR}/linux_fs.img
+  ${BIN_DIR}/linux_fs.img (only when enabled by Buildroot defconfig)
   ${BIN_DIR}/linux_busybox
   ${BIN_DIR}/linux_rootfs.config
 
 Options:
   --toolprefix PREFIX      Cross-tool prefix (for example: riscv64-linux-gnu-)
-  --jobs N                 Parallel make jobs for Linux kernel build (default: ${DEFAULT_JOBS})
+  --jobs N                 Parallel make jobs for Linux kernel build (default: auto)
   --defconfig TARGET       Linux defconfig target (default: ${DEFCONFIG})
   --no-min-profile         Skip optional aggressive RV32 minimum-size boot profile
   --no-rootfs              Skip BusyBox rootfs generation
   --buildroot-version VER  Buildroot version to use (default: ${BUILDROOT_VERSION})
   --buildroot-defconfig F  Buildroot defconfig path (default: ${BUILDROOT_DEFCONFIG})
-  --buildroot-jobs N       Parallel jobs for Buildroot build (default: 1)
+  --buildroot-jobs N       Parallel jobs for Buildroot build (default: auto)
+  --retries N              Retry count for both Buildroot and kernel build steps (default: ${RETRIES})
+  --buildroot-workdir DIR  Host directory bind-mounted for persistent Buildroot workspace (default: ${BUILDROOT_WORKDIR:-${SOFTWARE_DIR}/.linux-build/buildroot})
+  --buildroot-volume NAME  Deprecated alias for --buildroot-workdir
+  --buildroot-platform P   Docker platform for Buildroot rootfs stage (default: ${BUILDROOT_PLATFORM}, for example: linux/amd64)
   --buildroot-image IMAGE  Docker image for Buildroot (default: ${BUILDROOT_IMAGE})
   --no-clean               Skip source/build clean before applying patches
   -h, --help               Show this help
@@ -95,9 +122,19 @@ Environment:
   BUILDROOT_VERSION        Same as --buildroot-version
   BUILDROOT_DEFCONFIG      Same as --buildroot-defconfig
   BUILDROOT_JOBS           Same as --buildroot-jobs
+  RETRIES                  Number of retries for Buildroot + kernel build steps (default: 1)
+  BUILDROOT_RETRIES        Deprecated alias for RETRIES
+  BUILDROOT_WORKDIR        Same as --buildroot-workdir
+  BUILDROOT_VOLUME         Deprecated alias for BUILDROOT_WORKDIR
+  BUILDROOT_PLATFORM       Same as --buildroot-platform (default: linux/amd64)
   BUILDROOT_IMAGE          Same as --buildroot-image
   BUILDROOT_HOST_CFLAGS    Host C flags used by Buildroot (default: -O0)
   BUILDROOT_HOST_CXXFLAGS  Host C++ flags used by Buildroot (default: -O0)
+  BUILDROOT_HOST_CC        Host C compiler for Buildroot host tools (default: gcc)
+  BUILDROOT_HOST_CXX       Host C++ compiler for Buildroot host tools (default: g++)
+  BUILDROOT_FORCE_GCC_HOST_TOOLS
+                           Force Buildroot host tools to gcc/g++ (default: 1)
+  BUILDROOT_RETRY_MODE     Retry strategy: resume or clean (default: clean)
   MAKE / MAKE_BIN          GNU make command (for example: gmake)
 EOF
 }
@@ -146,6 +183,7 @@ EOF
 run_make() {
   if [[ "${MAKE_IN_DOCKER}" -eq 1 ]]; then
     docker run --rm \
+      "${BUILDROOT_DOCKER_PLATFORM_ARG[@]}" \
       -u "$(id -u):$(id -g)" \
       -v "${REPO_ROOT}:${REPO_ROOT}" \
       -w "${REPO_ROOT}" \
@@ -159,15 +197,37 @@ else
 fi
 "${MAKE_BIN}" "$@"
 ' _ "$@"
-    return 0
+    return $?
   fi
 
   if [[ -n "${MAKE_PATH_PREFIX}" ]]; then
     PATH="${MAKE_PATH_PREFIX}:${PATH}" "${MAKE_BIN}" "$@"
-    return 0
+    return $?
   fi
 
   "${MAKE_BIN}" "$@"
+}
+
+run_make_with_retries() {
+  local label="$1"
+  shift
+  local attempt=1
+  local max_attempts=$((RETRIES + 1))
+
+  while true; do
+    if run_make "$@"; then
+      return 0
+    fi
+
+    if [[ "${attempt}" -ge "${max_attempts}" ]]; then
+      echo "error: ${label} failed after ${max_attempts} attempt(s)." >&2
+      return 1
+    fi
+
+    echo "warning: ${label} failed (attempt ${attempt}/${max_attempts}). Retrying..."
+    attempt=$((attempt + 1))
+    sleep 2
+  done
 }
 
 detect_toolprefix() {
@@ -193,6 +253,7 @@ detect_toolprefix() {
 
 detect_toolprefix_in_docker() {
   docker run --rm \
+    "${BUILDROOT_DOCKER_PLATFORM_ARG[@]}" \
     "${BUILDROOT_IMAGE}" \
     bash -lc '
 set -euo pipefail
@@ -215,6 +276,24 @@ exit 1
 '
 }
 
+detect_docker_jobs() {
+  docker run --rm \
+    "${BUILDROOT_DOCKER_PLATFORM_ARG[@]}" \
+    "${BUILDROOT_IMAGE}" \
+    bash -lc '
+set -euo pipefail
+jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+if [[ -z "${jobs}" ]] && command -v nproc >/dev/null 2>&1; then
+  jobs="$(nproc 2>/dev/null || true)"
+fi
+if [[ "${jobs}" =~ ^[0-9]+$ ]] && [[ "${jobs}" -ge 1 ]]; then
+  echo "${jobs}"
+  exit 0
+fi
+exit 1
+'
+}
+
 buildroot_tarball_path() {
   echo "${BUILDROOT_CACHE_DIR}/buildroot-${BUILDROOT_VERSION}.tar.gz"
 }
@@ -233,10 +312,158 @@ ensure_buildroot_tarball() {
   fi
 }
 
+setup_docker_config_fallback() {
+  local docker_config_path creds_store helper
+
+  if [[ -n "${DOCKER_CONFIG:-}" ]]; then
+    return 0
+  fi
+
+  docker_config_path="${HOME}/.docker/config.json"
+  if [[ ! -f "${docker_config_path}" ]]; then
+    return 0
+  fi
+
+  creds_store="$(sed -n 's/.*"credsStore"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${docker_config_path}" | head -n 1)"
+  if [[ -z "${creds_store}" ]]; then
+    return 0
+  fi
+
+  helper="docker-credential-${creds_store}"
+  if command -v "${helper}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  DOCKER_CONFIG_FALLBACK_DIR="$(mktemp -d "${SOFTWARE_DIR}/.docker-config.XXXXXX")"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "${docker_config_path}" "${DOCKER_CONFIG_FALLBACK_DIR}/config.json" <<'PY'
+import json
+import sys
+
+src_path, dst_path = sys.argv[1], sys.argv[2]
+with open(src_path, "r", encoding="utf-8") as src:
+    data = json.load(src)
+data.pop("credsStore", None)
+data.pop("credHelpers", None)
+with open(dst_path, "w", encoding="utf-8") as dst:
+    json.dump(data, dst, indent=2)
+    dst.write("\n")
+PY
+  elif command -v ruby >/dev/null 2>&1; then
+    ruby -rjson -e '
+src_path, dst_path = ARGV
+data = JSON.parse(File.read(src_path))
+data.delete("credsStore")
+data.delete("credHelpers")
+File.write(dst_path, JSON.pretty_generate(data) + "\n")
+' "${docker_config_path}" "${DOCKER_CONFIG_FALLBACK_DIR}/config.json"
+  else
+    local current_context
+    current_context="$(sed -n 's/.*"currentContext"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${docker_config_path}" | head -n 1)"
+    cat > "${DOCKER_CONFIG_FALLBACK_DIR}/config.json" <<EOF
+{
+  "auths": {},
+  "currentContext": "${current_context}"
+}
+EOF
+  fi
+  if [[ -d "${HOME}/.docker/contexts" ]]; then
+    cp -a "${HOME}/.docker/contexts" "${DOCKER_CONFIG_FALLBACK_DIR}/contexts"
+  fi
+  export DOCKER_CONFIG="${DOCKER_CONFIG_FALLBACK_DIR}"
+  echo "note: docker credential helper ${helper} is missing; using temporary anonymous docker config."
+}
+
+docker_platform_arch() {
+  echo "${1##*/}"
+}
+
+build_buildroot_image_fallback() {
+  local target_image="$1"
+  local base_image container_name
+
+  base_image="$(awk 'toupper($1) == "FROM" { print $2; exit }' "${BUILDROOT_DOCKER_CONTEXT}/Dockerfile")"
+  if [[ -z "${base_image}" ]]; then
+    echo "error: unable to determine base image from ${BUILDROOT_DOCKER_CONTEXT}/Dockerfile" >&2
+    exit 1
+  fi
+
+  container_name="rhdl-buildroot-image-${RANDOM}-$$"
+  docker rm -f "${container_name}" >/dev/null 2>&1 || true
+  docker run --name "${container_name}" --platform "${BUILDROOT_PLATFORM}" "${base_image}" bash -lc '
+set -euo pipefail
+apt-get update
+apt-get install -y --no-install-recommends \
+  bash \
+  bc \
+  binutils-riscv64-linux-gnu \
+  bison \
+  build-essential \
+  ca-certificates \
+  clang \
+  cpio \
+  file \
+  flex \
+  gawk \
+  gcc-riscv64-linux-gnu \
+  git \
+  make \
+  patch \
+  perl \
+  python3 \
+  rsync \
+  sed \
+  tar \
+  unzip \
+  wget \
+  xz-utils
+rm -rf /var/lib/apt/lists/*
+'
+  docker commit "${container_name}" "${target_image}" >/dev/null
+  docker rm -f "${container_name}" >/dev/null 2>&1 || true
+}
+
+build_buildroot_image() {
+  local target_image="$1"
+  local expected_arch actual_arch
+
+  docker build "${BUILDROOT_DOCKER_PLATFORM_ARG[@]}" -t "${target_image}" "${BUILDROOT_DOCKER_CONTEXT}"
+
+  expected_arch="$(docker_platform_arch "${BUILDROOT_PLATFORM}")"
+  actual_arch="$(docker image inspect "${target_image}" --format '{{.Architecture}}' 2>/dev/null || true)"
+  if [[ -n "${expected_arch}" ]] && [[ -n "${actual_arch}" ]] && [[ "${actual_arch}" != "${expected_arch}" ]]; then
+    echo "warning: docker build produced architecture ${actual_arch} for ${target_image}, expected ${expected_arch}."
+    echo "warning: rebuilding ${target_image} via docker run/commit fallback for ${BUILDROOT_PLATFORM}."
+    build_buildroot_image_fallback "${target_image}"
+  fi
+}
+
+docker_image_has_tool() {
+  local image="$1"
+  local tool="$2"
+  docker run --rm \
+    "${BUILDROOT_DOCKER_PLATFORM_ARG[@]}" \
+    "${image}" \
+    bash -lc 'command -v "$1" >/dev/null 2>&1' _ "${tool}"
+}
+
 ensure_buildroot_image() {
   require_cmd docker
+  local needs_build=0
 
-  if docker image inspect "${BUILDROOT_IMAGE}" >/dev/null 2>&1; then
+  if ! docker image inspect "${BUILDROOT_IMAGE}" >/dev/null 2>&1; then
+    needs_build=1
+  else
+    if ! docker_image_has_tool "${BUILDROOT_IMAGE}" "${BUILDROOT_HOST_CC}"; then
+      echo "note: docker image ${BUILDROOT_IMAGE} does not contain ${BUILDROOT_HOST_CC}; rebuilding image."
+      needs_build=1
+    elif ! docker_image_has_tool "${BUILDROOT_IMAGE}" "${BUILDROOT_HOST_CXX}"; then
+      echo "note: docker image ${BUILDROOT_IMAGE} does not contain ${BUILDROOT_HOST_CXX}; rebuilding image."
+      needs_build=1
+    fi
+  fi
+
+  if [[ "${needs_build}" -eq 0 ]]; then
     return 0
   fi
 
@@ -246,7 +473,31 @@ ensure_buildroot_image() {
   fi
 
   echo "building docker image ${BUILDROOT_IMAGE} for Buildroot tooling..."
-  docker build -t "${BUILDROOT_IMAGE}" "${BUILDROOT_DOCKER_CONTEXT}"
+  build_buildroot_image "${BUILDROOT_IMAGE}"
+}
+
+ensure_buildroot_runtime_image() {
+  ensure_buildroot_image
+
+  if [[ "${BUILDROOT_RUNTIME_IMAGE}" == "${BUILDROOT_IMAGE}" ]]; then
+    return 0
+  fi
+
+  if docker image inspect "${BUILDROOT_RUNTIME_IMAGE}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ ! -f "${BUILDROOT_DOCKER_CONTEXT}/Dockerfile" ]]; then
+    echo "error: docker image ${BUILDROOT_RUNTIME_IMAGE} is missing and no Dockerfile was found at ${BUILDROOT_DOCKER_CONTEXT}/Dockerfile" >&2
+    exit 1
+  fi
+
+  echo "building docker image ${BUILDROOT_RUNTIME_IMAGE} for Buildroot tooling..."
+  build_buildroot_image "${BUILDROOT_RUNTIME_IMAGE}"
+}
+
+prepare_buildroot_workspace_dir() {
+  mkdir -p "${BUILDROOT_WORKDIR}"
 }
 
 apply_linux_patches() {
@@ -278,9 +529,40 @@ apply_linux_patches() {
   done
 }
 
+sync_custom_linux_defconfig() {
+  local src dst
+  src="${LINUX_DEFCONFIG_DIR}/${DEFCONFIG}"
+  dst="${LINUX_DIR}/arch/riscv/configs/${DEFCONFIG}"
+
+  if [[ -f "${src}" ]]; then
+    mkdir -p "$(dirname "${dst}")"
+    cp -f "${src}" "${dst}"
+    return 0
+  fi
+
+  if [[ "${DEFCONFIG}" == "rhdl_rv32_virt_min_defconfig" || "${DEFCONFIG}" == "tiny_kernel_defconfig" ]]; then
+    echo "error: missing default custom defconfig: ${src}" >&2
+    exit 1
+  fi
+}
+
 build_busybox_userspace() {
-  local tarball
+  local tarball buildroot_defconfig_copy buildroot_attempt_log failed_pkg
+  local attempt=1
+  local max_attempts=$((RETRIES + 1))
+  local -a buildroot_docker_user_args
+  local -a buildroot_docker_env_args
   tarball="$(buildroot_tarball_path)"
+
+  buildroot_docker_user_args=(-u "$(id -u):$(id -g)")
+  buildroot_docker_env_args=()
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    # Docker Desktop bind mounts can reject chmod/chown from non-root UIDs during
+    # incremental Buildroot package rebuilds (for example host-tar tests files).
+    buildroot_docker_user_args=()
+    # Buildroot host-tar configure refuses root unless this is explicitly set.
+    buildroot_docker_env_args=(-e "FORCE_UNSAFE_CONFIGURE=1")
+  fi
 
   if [[ ! -f "${BUILDROOT_DEFCONFIG}" ]]; then
     echo "error: Buildroot defconfig not found: ${BUILDROOT_DEFCONFIG}" >&2
@@ -288,41 +570,182 @@ build_busybox_userspace() {
   fi
 
   ensure_buildroot_tarball
-  ensure_buildroot_image
+  ensure_buildroot_runtime_image
 
   mkdir -p "${BIN_DIR}" "${BUILDROOT_DL_DIR}"
-  cp -f "${BUILDROOT_DEFCONFIG}" "${SOFTWARE_DIR}/.buildroot.defconfig"
+  buildroot_defconfig_copy="${SOFTWARE_DIR}/.buildroot.defconfig"
+  buildroot_attempt_log="${SOFTWARE_DIR}/.buildroot.retry.log"
+  cp -f "${BUILDROOT_DEFCONFIG}" "${buildroot_defconfig_copy}"
+  prepare_buildroot_workspace_dir
+  trap 'rm -f "${buildroot_defconfig_copy}" "${buildroot_attempt_log}"' RETURN
 
-  echo "building BusyBox rootfs via Buildroot (this can take a while on the first run)..."
-  docker run --rm \
-    -u "$(id -u):$(id -g)" \
-    -e "BUILDROOT_JOBS=${BUILDROOT_JOBS}" \
-    -e "BUILDROOT_VERSION=${BUILDROOT_VERSION}" \
-    -e "BR2_DL_DIR=/workspace/software/.cache/buildroot-dl" \
-    -e "BR2_DEFCONFIG=/workspace/software/.buildroot.defconfig" \
-    -e "BR2_HOST_CFLAGS=${BUILDROOT_HOST_CFLAGS}" \
-    -e "BR2_HOST_CXXFLAGS=${BUILDROOT_HOST_CXXFLAGS}" \
-    -v "${tarball}:/workspace/software/.cache/buildroot.tar.gz:ro" \
-    -v "${SOFTWARE_DIR}:/workspace/software" \
-    "${BUILDROOT_IMAGE}" \
-    bash -lc '
+  echo "building BusyBox rootfs via Buildroot (workspace bind: ${BUILDROOT_WORKDIR})..."
+  while true; do
+    if docker run --rm \
+      "${BUILDROOT_DOCKER_PLATFORM_ARG[@]}" \
+      "${buildroot_docker_user_args[@]}" \
+      "${buildroot_docker_env_args[@]}" \
+      -e "BUILDROOT_JOBS=${BUILDROOT_JOBS}" \
+      -e "BUILDROOT_VERSION=${BUILDROOT_VERSION}" \
+      -e "BR2_DL_DIR=/workspace/software/.cache/buildroot-dl" \
+      -e "BR2_DEFCONFIG=/workspace/software/.buildroot.defconfig" \
+      -e "BR2_HOST_CFLAGS=${BUILDROOT_HOST_CFLAGS}" \
+      -e "BR2_HOST_CXXFLAGS=${BUILDROOT_HOST_CXXFLAGS}" \
+      -e "BUILDROOT_HOST_CC=${BUILDROOT_HOST_CC}" \
+      -e "BUILDROOT_HOST_CXX=${BUILDROOT_HOST_CXX}" \
+      -e "BUILDROOT_WORK_DIR=/workspace/buildroot-work" \
+      -v "${tarball}:/workspace/software/.cache/buildroot.tar.gz:ro" \
+      -v "${SOFTWARE_DIR}:/workspace/software" \
+      -v "${BUILDROOT_WORKDIR}:/workspace/buildroot-work" \
+      "${BUILDROOT_RUNTIME_IMAGE}" \
+      bash -lc '
 set -euo pipefail
-rm -rf /tmp/rhdl-buildroot
-mkdir -p /tmp/rhdl-buildroot/out "${BR2_DL_DIR}"
-tar -xf /workspace/software/.cache/buildroot.tar.gz -C /tmp/rhdl-buildroot
-BUILDROOT_SRC="/tmp/rhdl-buildroot/buildroot-${BUILDROOT_VERSION}"
+mkdir -p "${BUILDROOT_WORK_DIR}" "${BR2_DL_DIR}"
+BUILDROOT_SRC="${BUILDROOT_WORK_DIR}/buildroot-${BUILDROOT_VERSION}"
+BUILDROOT_OUT="${BUILDROOT_WORK_DIR}/out"
+BUILDROOT_HOST_SIGNATURE="${BUILDROOT_HOST_CC}|${BUILDROOT_HOST_CXX}|${BR2_HOST_CFLAGS}|${BR2_HOST_CXXFLAGS}"
+BUILDROOT_HOST_MARKER="${BUILDROOT_OUT}/.rhdl-host-toolchain"
+BUILDROOT_EXTRACT_DIR="$(mktemp -d /tmp/rhdl-buildroot-extract-${BUILDROOT_VERSION}.XXXXXX)"
+BUILDROOT_STAGE_DIR="${BUILDROOT_WORK_DIR}/.stage-${BUILDROOT_VERSION}.$$"
+if [[ ! -f "${BUILDROOT_SRC}/Makefile" ]] || \
+   [[ ! -f "${BUILDROOT_SRC}/Config.in" ]] || \
+   [[ ! -f "${BUILDROOT_SRC}/docs/manual/manual.mk" ]] || \
+   [[ ! -f "${BUILDROOT_SRC}/support/scripts/setlocalversion" ]] || \
+   [[ ! -f "${BUILDROOT_SRC}/support/scripts/br2-external" ]] || \
+   [[ ! -d "${BUILDROOT_SRC}/package" ]]; then
+  rm -rf "${BUILDROOT_SRC}" "${BUILDROOT_STAGE_DIR}"
+  tar -xf /workspace/software/.cache/buildroot.tar.gz -C "${BUILDROOT_EXTRACT_DIR}"
+  if [[ ! -d "${BUILDROOT_EXTRACT_DIR}/buildroot-${BUILDROOT_VERSION}" ]]; then
+    echo "error: Buildroot tarball did not contain expected directory buildroot-${BUILDROOT_VERSION}" >&2
+    exit 1
+  fi
+  mkdir -p "${BUILDROOT_STAGE_DIR}"
+  cp -a "${BUILDROOT_EXTRACT_DIR}/buildroot-${BUILDROOT_VERSION}/." "${BUILDROOT_STAGE_DIR}/"
+  mv "${BUILDROOT_STAGE_DIR}" "${BUILDROOT_SRC}"
+fi
+rm -rf "${BUILDROOT_EXTRACT_DIR}"
 
-make -C "${BUILDROOT_SRC}" O=/tmp/rhdl-buildroot/out BR2_DL_DIR="${BR2_DL_DIR}" BR2_DEFCONFIG="${BR2_DEFCONFIG}" HOSTCFLAGS="${BR2_HOST_CFLAGS}" HOSTCXXFLAGS="${BR2_HOST_CXXFLAGS}" defconfig
-make -C "${BUILDROOT_SRC}" O=/tmp/rhdl-buildroot/out BR2_DL_DIR="${BR2_DL_DIR}" HOSTCFLAGS="${BR2_HOST_CFLAGS}" HOSTCXXFLAGS="${BR2_HOST_CXXFLAGS}" olddefconfig
-make -j"${BUILDROOT_JOBS}" -C "${BUILDROOT_SRC}" O=/tmp/rhdl-buildroot/out BR2_DL_DIR="${BR2_DL_DIR}" HOSTCFLAGS="${BR2_HOST_CFLAGS}" HOSTCXXFLAGS="${BR2_HOST_CXXFLAGS}"
-cp -f /tmp/rhdl-buildroot/out/images/rootfs.cpio /workspace/software/bin/linux_initramfs_buildroot.cpio
-cp -f /tmp/rhdl-buildroot/out/images/rootfs.cpio /workspace/software/bin/linux_initramfs.cpio
-cp -f /tmp/rhdl-buildroot/out/images/rootfs.ext2 /workspace/software/bin/linux_fs.img
-cp -f /tmp/rhdl-buildroot/out/target/bin/busybox /workspace/software/bin/linux_busybox
-cp -f /tmp/rhdl-buildroot/out/.config /workspace/software/bin/linux_rootfs.config
+mkdir -p "${BUILDROOT_OUT}"
+if [[ -f "${BUILDROOT_HOST_MARKER}" ]]; then
+  PREV_BUILDROOT_HOST_SIGNATURE="$(cat "${BUILDROOT_HOST_MARKER}" 2>/dev/null || true)"
+  if [[ "${PREV_BUILDROOT_HOST_SIGNATURE}" != "${BUILDROOT_HOST_SIGNATURE}" ]]; then
+    echo "note: Buildroot host compiler settings changed; pruning host package outputs."
+    rm -rf "${BUILDROOT_OUT}/host" "${BUILDROOT_OUT}/staging"
+    if [[ -d "${BUILDROOT_OUT}/build" ]]; then
+      find "${BUILDROOT_OUT}/build" -mindepth 1 -maxdepth 1 -name 'host-*' -exec rm -rf {} +
+      rm -rf "${BUILDROOT_OUT}/build/buildroot-config"
+    fi
+  fi
+fi
+printf "%s\n" "${BUILDROOT_HOST_SIGNATURE}" > "${BUILDROOT_HOST_MARKER}"
+
+if [[ "${BUILDROOT_HOST_CC}" == "gcc" ]] && [[ -d "${BUILDROOT_OUT}/build" ]]; then
+  if grep -Rqs "CC=.*clang" "${BUILDROOT_OUT}/build"/host-*/config.log 2>/dev/null || \
+     grep -Rqs "CXX=.*clang" "${BUILDROOT_OUT}/build"/host-*/config.log 2>/dev/null; then
+    echo "note: detected stale clang-configured Buildroot host package state; pruning host package outputs."
+    rm -rf "${BUILDROOT_OUT}/host" "${BUILDROOT_OUT}/staging"
+    find "${BUILDROOT_OUT}/build" -mindepth 1 -maxdepth 1 -name 'host-*' -exec rm -rf {} +
+    rm -rf "${BUILDROOT_OUT}/build/buildroot-config"
+  fi
+fi
+
+if [[ "${BUILDROOT_HOST_CC}" == clang* ]] || [[ "${BUILDROOT_HOST_CXX}" == clang* ]]; then
+  python3 - "${BUILDROOT_SRC}/support/dependencies/dependencies.sh" <<\PY
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text()
+sq = chr(39)
+probe_candidates = [
+    "sed -n " + sq + "/^gcc version/p" + sq,
+    "sed -n " + sq + "/^\\(gcc\\|clang\\) version/p" + sq,
+]
+parse_candidates = [
+    "s/^gcc version \\([0-9\\.]\\)/\\1/g",
+    "s/^\\(gcc\\|clang\\) version \\([0-9\\.]\\)/\\2/g",
+]
+new_probe = "sed -n " + sq + "/gcc version/p;/clang version/p" + sq
+new_parse = "s/^.*\\(gcc\\|clang\\) version \\([0-9\\.]\\)/\\2/g"
+for candidate in probe_candidates:
+    text = text.replace(candidate, new_probe)
+for candidate in parse_candidates:
+    text = text.replace(candidate, new_parse)
+path.write_text(text)
+PY
+fi
+
+make -C "${BUILDROOT_SRC}" O="${BUILDROOT_OUT}" BR2_DL_DIR="${BR2_DL_DIR}" BR2_DEFCONFIG="${BR2_DEFCONFIG}" HOSTCC="${BUILDROOT_HOST_CC}" HOSTCXX="${BUILDROOT_HOST_CXX}" HOSTCFLAGS="${BR2_HOST_CFLAGS}" HOSTCXXFLAGS="${BR2_HOST_CXXFLAGS}" HOST_CFLAGS="${BR2_HOST_CFLAGS}" HOST_CXXFLAGS="${BR2_HOST_CXXFLAGS}" defconfig
+make -C "${BUILDROOT_SRC}" O="${BUILDROOT_OUT}" BR2_DL_DIR="${BR2_DL_DIR}" HOSTCC="${BUILDROOT_HOST_CC}" HOSTCXX="${BUILDROOT_HOST_CXX}" HOSTCFLAGS="${BR2_HOST_CFLAGS}" HOSTCXXFLAGS="${BR2_HOST_CXXFLAGS}" HOST_CFLAGS="${BR2_HOST_CFLAGS}" HOST_CXXFLAGS="${BR2_HOST_CXXFLAGS}" olddefconfig
+make -j"${BUILDROOT_JOBS}" -C "${BUILDROOT_SRC}" O="${BUILDROOT_OUT}" BR2_DL_DIR="${BR2_DL_DIR}" HOSTCC="${BUILDROOT_HOST_CC}" HOSTCXX="${BUILDROOT_HOST_CXX}" HOSTCFLAGS="${BR2_HOST_CFLAGS}" HOSTCXXFLAGS="${BR2_HOST_CXXFLAGS}" HOST_CFLAGS="${BR2_HOST_CFLAGS}" HOST_CXXFLAGS="${BR2_HOST_CXXFLAGS}"
+ROOTFS_CPIO_SOURCE="${BUILDROOT_OUT}/images/rootfs.cpio"
+if [[ ! -f "${ROOTFS_CPIO_SOURCE}" ]]; then
+  if [[ -f "${BUILDROOT_OUT}/images/rootfs.cpio.gz" ]]; then
+    ROOTFS_CPIO_SOURCE="${BUILDROOT_OUT}/images/rootfs.cpio.gz"
+  else
+    echo "error: Buildroot did not produce a rootfs.cpio artifact." >&2
+    echo "hint: inspect ${BUILDROOT_OUT}/images for generated artifacts." >&2
+    ls -1 "${BUILDROOT_OUT}/images" >&2 || true
+    exit 1
+  fi
+fi
+cp -f "${ROOTFS_CPIO_SOURCE}" /workspace/software/bin/linux_initramfs_buildroot.cpio
+cp -f "${ROOTFS_CPIO_SOURCE}" /workspace/software/bin/linux_initramfs.cpio
+if [[ -f "${BUILDROOT_OUT}/images/rootfs.ext2" ]]; then
+  cp -f "${BUILDROOT_OUT}/images/rootfs.ext2" /workspace/software/bin/linux_fs.img
+else
+  rm -f /workspace/software/bin/linux_fs.img
+fi
+      cp -f "${BUILDROOT_OUT}/target/bin/busybox" /workspace/software/bin/linux_busybox
+      cp -f "${BUILDROOT_OUT}/.config" /workspace/software/bin/linux_rootfs.config
+' 2>&1 | tee "${buildroot_attempt_log}"
+    then
+      break
+    fi
+
+    if [[ "${attempt}" -ge "${max_attempts}" ]]; then
+      echo "error: Buildroot rootfs build failed after ${max_attempts} attempt(s)." >&2
+      exit 1
+    fi
+
+    failed_pkg="$(sed -n 's/^>>>[[:space:]]\+\([^[:space:]]\+\).*/\1/p' "${buildroot_attempt_log}" | tail -n 1 || true)"
+    if [[ -z "${failed_pkg}" ]]; then
+      # Fallback: derive package from Buildroot out/build path in compiler errors
+      # (for example: .../out/build/host-tar-1.35/... -> host-tar).
+      failed_pkg="$(sed -n 's#.*\/out\/build\/\([^/]*\)-[0-9][0-9A-Za-z._-]*\/.*#\1#p' "${buildroot_attempt_log}" | tail -n 1 || true)"
+    fi
+    if [[ "${BUILDROOT_RETRY_MODE}" == "clean" ]] && [[ -n "${failed_pkg}" ]]; then
+      echo "warning: targeted clean for failed Buildroot package '${failed_pkg}' before retry..."
+      docker run --rm \
+        "${BUILDROOT_DOCKER_PLATFORM_ARG[@]}" \
+        "${buildroot_docker_user_args[@]}" \
+        "${buildroot_docker_env_args[@]}" \
+        -e "BUILDROOT_VERSION=${BUILDROOT_VERSION}" \
+        -e "BUILDROOT_WORK_DIR=/workspace/buildroot-work" \
+        -e "FAILED_PKG=${failed_pkg}" \
+        -v "${BUILDROOT_WORKDIR}:/workspace/buildroot-work" \
+        "${BUILDROOT_RUNTIME_IMAGE}" \
+        bash -lc '
+set -euo pipefail
+BUILDROOT_SRC="${BUILDROOT_WORK_DIR}/buildroot-${BUILDROOT_VERSION}"
+BUILDROOT_OUT="${BUILDROOT_WORK_DIR}/out"
+if [[ -f "${BUILDROOT_SRC}/Makefile" ]] && [[ -d "${BUILDROOT_OUT}" ]] && [[ -n "${FAILED_PKG}" ]]; then
+  make -C "${BUILDROOT_SRC}" O="${BUILDROOT_OUT}" "${FAILED_PKG}-dirclean" || true
+  find "${BUILDROOT_OUT}/build" -mindepth 1 -maxdepth 1 -name "${FAILED_PKG}-*" -exec rm -rf {} +
+  rm -f "${BUILDROOT_OUT}/build/.stamp_${FAILED_PKG}_*" 2>/dev/null || true
+fi
 '
+    elif [[ "${BUILDROOT_RETRY_MODE}" == "clean" ]]; then
+      echo "warning: retry requested with BUILDROOT_RETRY_MODE=clean but failed package could not be identified; retrying without cleanup."
+    fi
 
-  rm -f "${SOFTWARE_DIR}/.buildroot.defconfig"
+    echo "warning: Buildroot rootfs build failed (attempt ${attempt}/${max_attempts}). Retrying..."
+    attempt=$((attempt + 1))
+    sleep 2
+  done
+
+  trap - RETURN
+  rm -f "${buildroot_defconfig_copy}" "${buildroot_attempt_log}"
 }
 
 build_linux_dtb() {
@@ -437,6 +860,7 @@ EOF
 
   if [[ "${MAKE_IN_DOCKER}" -eq 1 ]]; then
     docker run --rm \
+      "${BUILDROOT_DOCKER_PLATFORM_ARG[@]}" \
       -u "$(id -u):$(id -g)" \
       -v "${REPO_ROOT}:${REPO_ROOT}" \
       -w "${REPO_ROOT}" \
@@ -457,6 +881,11 @@ apply_minimal_rv32_profile() {
   fi
 
   "${scripts_config}" --file "${config_file}" \
+    --enable ARCH_VIRT \
+    --enable ARCH_RV32I \
+    --enable 32BIT \
+    --enable MMU \
+    --enable NONPORTABLE \
     --disable ARCH_ANDES \
     --disable ARCH_ANLOGIC \
     --disable ARCH_ESWIN \
@@ -496,14 +925,48 @@ apply_minimal_rv32_profile() {
     --disable RISCV_ISA_VENDOR_EXT_THEAD \
     --disable RISCV_ISA_XTHEADVECTOR \
     --disable RISCV_ISA_ZABHA \
+    --enable FPU \
     --enable RISCV_ISA_C \
     --enable RISCV_ISA_V \
+    --enable RISCV_ISA_ZBA \
+    --enable RISCV_ISA_ZBB \
+    --enable RISCV_ISA_ZBKB \
+    --enable RISCV_ISA_ZBC \
+    --enable RISCV_ISA_ZAWRS \
+    --enable RISCV_ISA_ZICBOM \
+    --enable RISCV_ISA_ZICBOZ \
+    --enable RISCV_ISA_ZICBOP \
+    --enable RISCV_ISA_ZACAS \
     --enable RISCV_ISA_V_DEFAULT_ENABLE
 
   "${scripts_config}" --file "${config_file}" \
+    --enable RISCV_EMULATED_UNALIGNED_ACCESS \
+    --disable RISCV_PROBE_UNALIGNED_ACCESS \
+    --disable RISCV_SLOW_UNALIGNED_ACCESS \
+    --disable RISCV_EFFICIENT_UNALIGNED_ACCESS \
+    --enable RISCV_SLOW_VECTOR_UNALIGNED_ACCESS \
+    --disable RISCV_PROBE_VECTOR_UNALIGNED_ACCESS \
+    --disable RISCV_EFFICIENT_VECTOR_UNALIGNED_ACCESS
+
+  "${scripts_config}" --file "${config_file}" \
     --enable BLK_DEV_INITRD \
+    --enable OF \
     --enable DEVTMPFS \
     --enable DEVTMPFS_MOUNT \
+    --enable BINFMT_ELF \
+    --enable BINFMT_SCRIPT \
+    --enable PRINTK \
+    --enable TTY \
+    --enable SERIAL_8250 \
+    --enable SERIAL_8250_CONSOLE \
+    --set-val SERIAL_8250_NR_UARTS 1 \
+    --set-val SERIAL_8250_RUNTIME_UARTS 1 \
+    --enable SERIAL_OF_PLATFORM \
+    --enable SERIAL_EARLYCON_RISCV_SBI \
+    --enable PROC_FS \
+    --enable SYSFS \
+    --enable SHMEM \
+    --enable TMPFS \
     --disable RD_GZIP \
     --disable RD_BZIP2 \
     --disable RD_LZMA \
@@ -533,7 +996,10 @@ apply_minimal_rv32_profile() {
     --disable RISCV_ALTERNATIVE_EARLY \
     --disable RISCV_ISA_FALLBACK \
     --disable JUMP_LABEL \
+    --disable SUSPEND \
     --disable MODULES \
+    --disable BLOCK \
+    --disable SWAP \
     --disable PREEMPT_LAZY \
     --disable BPF \
     --disable BPF_SYSCALL \
@@ -564,7 +1030,7 @@ apply_minimal_rv32_profile() {
     --disable MTD \
     --disable MD \
     --enable VIRTIO \
-    --enable VIRTIO_BLK \
+    --disable VIRTIO_BLK \
     --enable VIRTIO_MMIO \
     --disable VIRTIO_CONSOLE \
     --disable VIRTIO_BALLOON \
@@ -595,6 +1061,8 @@ apply_minimal_rv32_profile() {
     --disable TRACEPOINTS \
     --disable EVENT_TRACING \
     --disable FTRACE \
+    --disable DEBUG_KERNEL \
+    --disable LOCK_DEBUGGING_SUPPORT \
     --set-str INITRAMFS_SOURCE "" \
     --set-val LOG_BUF_SHIFT 12
 }
@@ -647,6 +1115,26 @@ while [[ $# -gt 0 ]]; do
       BUILDROOT_JOBS="${2:-}"
       shift 2
       ;;
+    --retries)
+      RETRIES="${2:-}"
+      shift 2
+      ;;
+    --buildroot-retries)
+      RETRIES="${2:-}"
+      shift 2
+      ;;
+    --buildroot-workdir)
+      BUILDROOT_WORKDIR="${2:-}"
+      shift 2
+      ;;
+    --buildroot-volume)
+      BUILDROOT_WORKDIR="${2:-}"
+      shift 2
+      ;;
+    --buildroot-platform)
+      BUILDROOT_PLATFORM="${2:-}"
+      shift 2
+      ;;
     --buildroot-image)
       BUILDROOT_IMAGE="${2:-}"
       shift 2
@@ -667,6 +1155,55 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ -z "${BUILDROOT_WORKDIR}" ]] && [[ -n "${BUILDROOT_VOLUME}" ]]; then
+  BUILDROOT_WORKDIR="${BUILDROOT_VOLUME}"
+fi
+
+if [[ -z "${BUILDROOT_WORKDIR}" ]]; then
+  BUILDROOT_WORKDIR="${SOFTWARE_DIR}/.linux-build/buildroot"
+fi
+
+if [[ "${BUILDROOT_WORKDIR}" != /* ]]; then
+  BUILDROOT_WORKDIR="${PWD}/${BUILDROOT_WORKDIR}"
+fi
+
+if [[ -z "${BUILDROOT_PLATFORM}" ]]; then
+  BUILDROOT_PLATFORM="linux/amd64"
+fi
+
+if [[ -n "${BUILDROOT_PLATFORM}" ]]; then
+  platform_suffix="${BUILDROOT_PLATFORM//\//-}"
+  image_repo="${BUILDROOT_IMAGE}"
+  image_tag="latest"
+  if [[ "${BUILDROOT_IMAGE}" == *:* && "${BUILDROOT_IMAGE##*/}" == *:* ]]; then
+    image_repo="${BUILDROOT_IMAGE%:*}"
+    image_tag="${BUILDROOT_IMAGE##*:}"
+  fi
+
+  if [[ "${image_repo}" != *"-${platform_suffix}" ]]; then
+    image_repo="${image_repo}-${platform_suffix}"
+  fi
+
+  BUILDROOT_IMAGE="${image_repo}:${image_tag}"
+  BUILDROOT_DOCKER_PLATFORM_ARG=(--platform "${BUILDROOT_PLATFORM}")
+  BUILDROOT_RUNTIME_IMAGE="${BUILDROOT_IMAGE}"
+fi
+
+if [[ -z "${BUILDROOT_HOST_CC}" ]]; then
+  BUILDROOT_HOST_CC="gcc"
+fi
+if [[ -z "${BUILDROOT_HOST_CXX}" ]]; then
+  BUILDROOT_HOST_CXX="g++"
+fi
+
+if [[ "${BUILDROOT_FORCE_GCC_HOST_TOOLS}" == "1" ]]; then
+  if [[ "${BUILDROOT_HOST_CC}" != "gcc" || "${BUILDROOT_HOST_CXX}" != "g++" ]]; then
+    echo "note: forcing Buildroot host compilers to gcc/g++ (set BUILDROOT_FORCE_GCC_HOST_TOOLS=0 to opt out)."
+  fi
+  BUILDROOT_HOST_CC="gcc"
+  BUILDROOT_HOST_CXX="g++"
+fi
+
 if [[ ! -d "${LINUX_DIR}" ]]; then
   echo "error: linux source tree not found: ${LINUX_DIR}" >&2
   echo "hint: initialize submodule with:" >&2
@@ -686,8 +1223,54 @@ fi
 
 if [[ "${MAKE_IN_DOCKER}" -eq 1 || "${ROOTFS_BUILD}" -eq 1 ]]; then
   require_cmd docker
+  setup_docker_config_fallback
   ensure_buildroot_image
+  DOCKER_DEFAULT_JOBS="$(detect_docker_jobs || true)"
 fi
+
+if [[ "${MAKE_IN_DOCKER}" -eq 1 && -n "${DOCKER_DEFAULT_JOBS}" ]]; then
+  DEFAULT_JOBS="${DOCKER_DEFAULT_JOBS}"
+fi
+if [[ -n "${DOCKER_DEFAULT_JOBS}" ]]; then
+  DEFAULT_BUILDROOT_JOBS="${DOCKER_DEFAULT_JOBS}"
+fi
+
+if [[ -z "${JOBS}" ]]; then
+  JOBS="${DEFAULT_JOBS}"
+fi
+if [[ -z "${BUILDROOT_JOBS}" ]]; then
+  BUILDROOT_JOBS="${DEFAULT_BUILDROOT_JOBS}"
+fi
+
+if [[ "$(uname -s)" == "Darwin" ]] && [[ "${BUILDROOT_PLATFORM}" == "linux/amd64" ]] && [[ "${BUILDROOT_JOBS}" =~ ^[0-9]+$ ]] && [[ "${BUILDROOT_JOBS}" -gt 1 ]]; then
+  echo "note: forcing buildroot_jobs=1 on macOS for linux/amd64 emulation stability."
+  BUILDROOT_JOBS=1
+fi
+
+if ! [[ "${JOBS}" =~ ^[0-9]+$ ]] || [[ "${JOBS}" -lt 1 ]]; then
+  echo "error: --jobs must be a positive integer (got: ${JOBS})" >&2
+  exit 1
+fi
+if ! [[ "${BUILDROOT_JOBS}" =~ ^[0-9]+$ ]] || [[ "${BUILDROOT_JOBS}" -lt 1 ]]; then
+  echo "error: --buildroot-jobs must be a positive integer (got: ${BUILDROOT_JOBS})" >&2
+  exit 1
+fi
+if ! [[ "${RETRIES}" =~ ^[0-9]+$ ]]; then
+  echo "error: --retries must be a non-negative integer (got: ${RETRIES})" >&2
+  exit 1
+fi
+if [[ "${BUILDROOT_RETRY_MODE}" != "resume" && "${BUILDROOT_RETRY_MODE}" != "clean" ]]; then
+  echo "error: BUILDROOT_RETRY_MODE must be one of 'resume' or 'clean' (got: ${BUILDROOT_RETRY_MODE})" >&2
+  exit 1
+fi
+
+if [[ "${MAKE_IN_DOCKER}" -eq 1 && -n "${DOCKER_DEFAULT_JOBS}" && "${DOCKER_DEFAULT_JOBS}" -lt "${HOST_DEFAULT_JOBS}" ]]; then
+  echo "note: docker runtime exposes ${DOCKER_DEFAULT_JOBS} CPU(s) (host has ${HOST_DEFAULT_JOBS})."
+  echo "note: for faster Linux builds with Lima, increase VM CPUs (for example: limactl edit <instance>; then restart)."
+fi
+
+echo "build parallelism: kernel_jobs=${JOBS} buildroot_jobs=${BUILDROOT_JOBS}"
+echo "buildroot host toolchain: cc=${BUILDROOT_HOST_CC} cxx=${BUILDROOT_HOST_CXX}"
 
 if [[ -z "${TOOLPREFIX}" ]]; then
   if [[ "${MAKE_IN_DOCKER}" -eq 1 ]]; then
@@ -724,6 +1307,7 @@ mkdir -p "${BIN_DIR}" "${BUILD_DIR}"
 setup_make_compat
 
 apply_linux_patches
+sync_custom_linux_defconfig
 
 if [[ "${ROOTFS_BUILD}" -eq 1 ]]; then
   build_busybox_userspace
@@ -743,7 +1327,7 @@ MAKE_ARGS=(
 )
 
 echo "configuring kernel with ${DEFCONFIG}..."
-run_make "${MAKE_ARGS[@]}" "${DEFCONFIG}"
+run_make_with_retries "kernel defconfig (${DEFCONFIG})" "${MAKE_ARGS[@]}" "${DEFCONFIG}"
 
 if [[ "${MIN_PROFILE}" -eq 1 ]]; then
   echo "applying aggressive rv32 minimum-size boot profile..."
@@ -754,9 +1338,44 @@ echo "configuring linux boot cmdline..."
 apply_linux_boot_cmdline
 
 echo "finalizing kernel configuration..."
-run_make "${MAKE_ARGS[@]}" olddefconfig
+run_make_with_retries "kernel olddefconfig" "${MAKE_ARGS[@]}" olddefconfig
 
 if [[ "${MIN_PROFILE}" -eq 1 ]]; then
+  if ! grep -Eq '^CONFIG_PRINTK=y' "${BUILD_DIR}/.config"; then
+    echo "error: MIN_PROFILE requires CONFIG_PRINTK=y for Linux UART boot visibility." >&2
+    echo "hint: verify printk support is enabled in final kernel configuration." >&2
+    exit 1
+  fi
+  if ! grep -Eq '^CONFIG_TTY=y' "${BUILD_DIR}/.config"; then
+    echo "error: MIN_PROFILE requires CONFIG_TTY=y for Linux UART console support." >&2
+    echo "hint: verify TTY support is enabled in final kernel configuration." >&2
+    exit 1
+  fi
+  if ! grep -Eq '^CONFIG_SERIAL_8250_CONSOLE=y' "${BUILD_DIR}/.config"; then
+    echo "error: MIN_PROFILE requires CONFIG_SERIAL_8250_CONSOLE=y for Linux UART console support." >&2
+    echo "hint: verify 8250 console support is enabled in final kernel configuration." >&2
+    exit 1
+  fi
+  if ! grep -Eq '^CONFIG_BINFMT_ELF=y' "${BUILD_DIR}/.config"; then
+    echo "error: MIN_PROFILE requires CONFIG_BINFMT_ELF=y to execute /sbin/init from initramfs." >&2
+    echo "hint: verify ELF binary format support is enabled in final kernel configuration." >&2
+    exit 1
+  fi
+  if ! grep -Eq '^CONFIG_BINFMT_SCRIPT=(y|m)' "${BUILD_DIR}/.config"; then
+    echo "error: MIN_PROFILE requires CONFIG_BINFMT_SCRIPT for BusyBox init scripts." >&2
+    echo "hint: verify script binary format support is enabled in final kernel configuration." >&2
+    exit 1
+  fi
+  if grep -Eq '^CONFIG_RISCV_PROBE_UNALIGNED_ACCESS=y' "${BUILD_DIR}/.config"; then
+    echo "error: MIN_PROFILE must disable CONFIG_RISCV_PROBE_UNALIGNED_ACCESS on this simulator path." >&2
+    echo "hint: keep emulated or fixed unaligned access mode to avoid boot-time probe stalls." >&2
+    exit 1
+  fi
+  if grep -Eq '^CONFIG_RISCV_PROBE_VECTOR_UNALIGNED_ACCESS=y' "${BUILD_DIR}/.config"; then
+    echo "error: MIN_PROFILE must disable CONFIG_RISCV_PROBE_VECTOR_UNALIGNED_ACCESS on this simulator path." >&2
+    echo "hint: keep fixed vector unaligned mode to avoid boot-time probe stalls." >&2
+    exit 1
+  fi
   if ! grep -Eq '^CONFIG_FPU=y' "${BUILD_DIR}/.config"; then
     echo "error: MIN_PROFILE requires CONFIG_FPU=y for this Linux profile." >&2
     echo "hint: verify FPU is not disabled by profile overrides or defconfig." >&2
@@ -822,7 +1441,7 @@ if [[ "${MIN_PROFILE}" -eq 1 ]]; then
 fi
 
 echo "building kernel artifacts..."
-run_make -j"${JOBS}" "${MAKE_ARGS[@]}" Image vmlinux
+run_make_with_retries "kernel Image/vmlinux build" -j"${JOBS}" "${MAKE_ARGS[@]}" Image vmlinux
 
 if [[ "${ROOTFS_BUILD}" -eq 1 && ! -f "${INITRAMFS_PATH}" ]]; then
   echo "error: missing Buildroot initramfs artifact: ${INITRAMFS_PATH}" >&2
@@ -851,7 +1470,7 @@ if [[ ! -f "${LINUX_DTB_PATH}" ]]; then
 fi
 
 if [[ "${ROOTFS_BUILD}" -eq 1 ]]; then
-  for artifact in "${INITRAMFS_PATH}" "${FS_IMG_PATH}" "${BIN_DIR}/linux_busybox"; do
+  for artifact in "${INITRAMFS_PATH}" "${BIN_DIR}/linux_busybox" "${BIN_DIR}/linux_rootfs.config"; do
     if [[ ! -f "${artifact}" ]]; then
       echo "error: expected rootfs artifact not found: ${artifact}" >&2
       exit 1
@@ -868,12 +1487,14 @@ cp -f "${CONFIG_SRC}" "${BIN_DIR}/linux_kernel.config"
 echo "generating source map artifacts..."
 if [[ "${MAKE_IN_DOCKER}" -eq 1 ]]; then
   docker run --rm \
+    "${BUILDROOT_DOCKER_PLATFORM_ARG[@]}" \
     -u "$(id -u):$(id -g)" \
     -v "${REPO_ROOT}:${REPO_ROOT}" \
     -w "${REPO_ROOT}" \
     "${BUILDROOT_IMAGE}" \
     bash -lc '"$@"' _ "${TOOLPREFIX}objdump" -S "${VMLINUX_SRC}" > "${BIN_DIR}/linux_kernel.asm" || true
   docker run --rm \
+    "${BUILDROOT_DOCKER_PLATFORM_ARG[@]}" \
     -u "$(id -u):$(id -g)" \
     -v "${REPO_ROOT}:${REPO_ROOT}" \
     -w "${REPO_ROOT}" \
@@ -911,10 +1532,12 @@ declare -a artifacts=(
 if [[ "${ROOTFS_BUILD}" -eq 1 ]]; then
   artifacts+=(
     "${BIN_DIR}/linux_initramfs.cpio"
-    "${BIN_DIR}/linux_fs.img"
     "${BIN_DIR}/linux_busybox"
     "${BIN_DIR}/linux_rootfs.config"
   )
+  if [[ -f "${BIN_DIR}/linux_fs.img" ]]; then
+    artifacts+=("${BIN_DIR}/linux_fs.img")
+  fi
 fi
 
 echo "linux artifacts generated in ${BIN_DIR}:"

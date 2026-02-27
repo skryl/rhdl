@@ -82,3 +82,9 @@ test('explorer graph controller validates required callbacks', () => {
     /requires function: renderComponentTree/
   );
 });
+
+test('explorer graph controller exposes viewport reset action', () => {
+  const controller = createNoopGraphController();
+  assert.equal(typeof controller.resetComponentGraphViewport, 'function');
+  assert.equal(controller.resetComponentGraphViewport(), false);
+});
