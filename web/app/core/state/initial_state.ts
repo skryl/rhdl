@@ -1,11 +1,11 @@
-import { createSimStateSlice } from '../../components/sim/state/slice.mjs';
-import { createShellStateSlice } from '../../components/shell/state/slice.mjs';
-import { createRunnerStateSlice } from '../../components/runner/state/slice.mjs';
-import { createMemoryStateSlice } from '../../components/memory/state/slice.mjs';
-import { createApple2StateSlice } from '../../components/apple2/state/slice.mjs';
-import { createWatchStateSlice } from '../../components/watch/state/slice.mjs';
-import { createTerminalStateSlice } from '../../components/terminal/state/slice.mjs';
-import { createExplorerStateSlice } from '../../components/explorer/state/slice.mjs';
+import { createSimStateSlice } from '../../components/sim/state/slice';
+import { createShellStateSlice } from '../../components/shell/state/slice';
+import { createRunnerStateSlice } from '../../components/runner/state/slice';
+import { createMemoryStateSlice } from '../../components/memory/state/slice';
+import { createApple2StateSlice } from '../../components/apple2/state/slice';
+import { createWatchStateSlice } from '../../components/watch/state/slice';
+import { createTerminalStateSlice } from '../../components/terminal/state/slice';
+import { createExplorerStateSlice } from '../../components/explorer/state/slice';
 
 export function createInitialState() {
   return {

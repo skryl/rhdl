@@ -2,7 +2,7 @@ import {
   DEFAULT_RUNNER_PRESET_ID,
   RUNNER_SELECT_OPTIONS,
   SAMPLE_SELECT_OPTIONS
-} from '../../components/runner/config/presets.mjs';
+} from '../../components/runner/config/presets';
 
 const BACKEND_IDS = Object.freeze(['interpreter', 'compiler', 'arcilator']);
 

@@ -38,7 +38,7 @@ const cdnRewritePlugin: import("bun").BunPlugin = {
 // Main app bundle
 // ---------------------------------------------------------------------------
 const result = await Bun.build({
-  entrypoints: [resolve(webRoot, "app/main.mjs")],
+  entrypoints: [resolve(webRoot, "app/main.ts")],
   outdir: distDir,
   target: "browser",
   format: "esm",

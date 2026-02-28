@@ -1,9 +1,9 @@
-import { createWatchLazyGetters } from '../../components/watch/controllers/lazy_getters.mjs';
-import { createComponentLazyGetters } from '../../components/explorer/controllers/lazy_getters.mjs';
-import { createRunnerLazyGetters } from '../../components/runner/controllers/lazy_getters.mjs';
-import { createApple2LazyGetters } from '../../components/apple2/controllers/lazy_getters.mjs';
-import { createSimLazyGetters } from '../../components/sim/controllers/lazy_getters.mjs';
-import { createShellLazyGetters } from '../../components/shell/controllers/lazy_getters.mjs';
+import { createWatchLazyGetters } from '../../components/watch/controllers/lazy_getters';
+import { createComponentLazyGetters } from '../../components/explorer/controllers/lazy_getters';
+import { createRunnerLazyGetters } from '../../components/runner/controllers/lazy_getters';
+import { createApple2LazyGetters } from '../../components/apple2/controllers/lazy_getters';
+import { createSimLazyGetters } from '../../components/sim/controllers/lazy_getters';
+import { createShellLazyGetters } from '../../components/shell/controllers/lazy_getters';
 
 function requireFn(name, fn) {
   if (typeof fn !== 'function') {

@@ -1,10 +1,10 @@
 import { actionTypes } from './action_types';
-import { simActions } from '../../components/sim/state/slice.mjs';
-import { shellActions } from '../../components/shell/state/slice.mjs';
-import { runnerActions } from '../../components/runner/state/slice.mjs';
-import { memoryActions } from '../../components/memory/state/slice.mjs';
-import { apple2Actions } from '../../components/apple2/state/slice.mjs';
-import { watchActions } from '../../components/watch/state/slice.mjs';
+import { simActions } from '../../components/sim/state/slice';
+import { shellActions } from '../../components/shell/state/slice';
+import { runnerActions } from '../../components/runner/state/slice';
+import { memoryActions } from '../../components/memory/state/slice';
+import { apple2Actions } from '../../components/apple2/state/slice';
+import { watchActions } from '../../components/watch/state/slice';
 
 export const actions = {
   ...simActions,

@@ -1,10 +1,10 @@
 import { actionTypes } from './action_types';
-import { reduceSimState } from '../../components/sim/state/slice.mjs';
-import { reduceShellState } from '../../components/shell/state/slice.mjs';
-import { reduceRunnerState } from '../../components/runner/state/slice.mjs';
-import { reduceMemoryState } from '../../components/memory/state/slice.mjs';
-import { reduceApple2State } from '../../components/apple2/state/slice.mjs';
-import { reduceWatchState } from '../../components/watch/state/slice.mjs';
+import { reduceSimState } from '../../components/sim/state/slice';
+import { reduceShellState } from '../../components/shell/state/slice';
+import { reduceRunnerState } from '../../components/runner/state/slice';
+import { reduceMemoryState } from '../../components/memory/state/slice';
+import { reduceApple2State } from '../../components/apple2/state/slice';
+import { reduceWatchState } from '../../components/watch/state/slice';
 
 export function reduceState(state, action = {}) {
   switch (action.type) {

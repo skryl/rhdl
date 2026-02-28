@@ -1,9 +1,9 @@
-import { simActionTypes } from '../../components/sim/state/slice.mjs';
-import { shellActionTypes } from '../../components/shell/state/slice.mjs';
-import { runnerActionTypes } from '../../components/runner/state/slice.mjs';
-import { memoryActionTypes } from '../../components/memory/state/slice.mjs';
-import { apple2ActionTypes } from '../../components/apple2/state/slice.mjs';
-import { watchActionTypes } from '../../components/watch/state/slice.mjs';
+import { simActionTypes } from '../../components/sim/state/slice';
+import { shellActionTypes } from '../../components/shell/state/slice';
+import { runnerActionTypes } from '../../components/runner/state/slice';
+import { memoryActionTypes } from '../../components/memory/state/slice';
+import { apple2ActionTypes } from '../../components/apple2/state/slice';
+import { watchActionTypes } from '../../components/watch/state/slice';
 
 export const actionTypes = {
   ...simActionTypes,

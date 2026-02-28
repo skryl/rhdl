@@ -1,15 +1,15 @@
-import { RUNNER_PRESETS } from '../../components/runner/config/presets.mjs';
+import { RUNNER_PRESETS } from '../../components/runner/config/presets';
 import { formatValue } from '../lib/numeric_utils';
 import { waveformFontFamily, waveformPalette } from '../lib/theme_utils';
-import { setupWaveformP5 } from '../../components/watch/ui/waveform_panel.mjs';
+import { setupWaveformP5 } from '../../components/watch/ui/waveform_panel';
 import { createRegistryLazyGetters } from './registry_lazy_getters';
-import { createShellDomainController } from '../../components/shell/controllers/domain.mjs';
-import { createRunnerDomainController } from '../../components/runner/controllers/domain.mjs';
-import { createComponentDomainController } from '../../components/explorer/controllers/domain.mjs';
-import { createApple2DomainController } from '../../components/apple2/controllers/domain.mjs';
-import { createSimDomainController } from '../../components/sim/controllers/domain.mjs';
-import { createWatchDomainController } from '../../components/watch/controllers/domain.mjs';
-import { resolveRunnerIoConfig } from '../../components/runner/lib/io_config.mjs';
+import { createShellDomainController } from '../../components/shell/controllers/domain';
+import { createRunnerDomainController } from '../../components/runner/controllers/domain';
+import { createComponentDomainController } from '../../components/explorer/controllers/domain';
+import { createApple2DomainController } from '../../components/apple2/controllers/domain';
+import { createSimDomainController } from '../../components/sim/controllers/domain';
+import { createWatchDomainController } from '../../components/watch/controllers/domain';
+import { resolveRunnerIoConfig } from '../../components/runner/lib/io_config';
 
 function normalizePositiveInt(value, fallback = null) {
   const parsed = Number.parseInt(value, 10);
