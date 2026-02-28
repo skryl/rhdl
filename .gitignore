@@ -57,6 +57,9 @@ web/assets/fixtures/*
 # Web test dependencies
 web/node_modules/
 
+# Web bundler output
+web/dist/
+
 # Web wasm build artifacts
 web/assets/pkg/*
 

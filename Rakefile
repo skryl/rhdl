@@ -497,6 +497,28 @@ namespace :web do
     load_cli_tasks
     RHDL::CLI::Tasks::WebGenerateTask.new.run
   end
+
+  desc "Bundle web simulator with Bun (output in web/dist/)"
+  task :bundle do
+    web_dir = File.expand_path('web', __dir__)
+    unless system('which bun > /dev/null 2>&1')
+      abort "[web:bundle] Bun is required. Install from https://bun.sh"
+    end
+    Dir.chdir(web_dir) do
+      sh 'bun run build'
+    end
+  end
+
+  desc "Bundle web simulator for production"
+  task 'bundle:prod' do
+    web_dir = File.expand_path('web', __dir__)
+    unless system('which bun > /dev/null 2>&1')
+      abort "[web:bundle:prod] Bun is required. Install from https://bun.sh"
+    end
+    Dir.chdir(web_dir) do
+      sh 'bun run build:prod'
+    end
+  end
 end
 
 # =============================================================================

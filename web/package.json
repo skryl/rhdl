@@ -3,11 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:unit": "node --test $(find test -type f -name '*.test.mjs' | sort)",
+    "build": "bun run build.ts",
+    "build:prod": "NODE_ENV=production bun run build.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "test:unit": "node --test $(find test -type f -name '*.test.mjs' -o -name '*.test.ts' | sort)",
     "test:integration": "node --test test/integration/*.test.mjs"
   },
   "devDependencies": {
-    "playwright": "^1.52.0"
+    "playwright": "^1.52.0",
+    "typescript": "^5.7.0"
   },
   "dependencies": {
     "cytoscape": "^3.30.2",
