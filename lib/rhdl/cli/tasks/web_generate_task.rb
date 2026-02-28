@@ -160,6 +160,15 @@ module RHDL
           ensure
             File.write(AOT_GEN_PATH, restore_aot_placeholder)
           end
+
+          build_arcilator_wasm
+        end
+
+        def build_arcilator_wasm
+          require_relative 'web_arcilator_build'
+          WebArcilatorBuild.build(dest_dir: PKG_DIR)
+        rescue StandardError => e
+          warn "WARNING: arcilator WASM build failed: #{e.message}"
         end
 
         def build_mruby_wasm

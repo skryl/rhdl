@@ -28,6 +28,16 @@ export const BACKEND_DEFS = {
     createFn: 'sim_create',
     destroyFn: 'sim_destroy',
     freeErrorFn: 'sim_free_error'
+  },
+  arcilator: {
+    id: 'arcilator',
+    label: 'Arcilator (CIRCT)',
+    wasmPath: './assets/pkg/apple2_arcilator.wasm',
+    corePrefix: 'sim',
+    allocPrefix: 'sim',
+    createFn: 'sim_create',
+    destroyFn: 'sim_destroy',
+    freeErrorFn: 'sim_free_error'
   }
 };
 
