@@ -29,7 +29,7 @@ function makeDom() {
   };
 }
 
-async function dispatchAndDrain(target, type) {
+async function dispatchAndDrain(target: any, type: any) {
   target.dispatchEvent(new Event(type));
   await Promise.resolve();
   await Promise.resolve();
@@ -37,7 +37,7 @@ async function dispatchAndDrain(target, type) {
 
 test('bindMemoryBindings wires follow-pc change and supports cleanup', () => {
   const dom = makeDom();
-  const calls = [];
+  const calls: any[] = [];
   const runtime = { sim: null };
   const teardown = bindMemoryBindings({
     dom,
@@ -55,14 +55,14 @@ test('bindMemoryBindings wires follow-pc change and supports cleanup', () => {
       isUiEnabled: () => false
     },
     store: {
-      setMemoryFollowPcState: (value) => calls.push(['setFollowPc', value])
+      setMemoryFollowPcState: (value: any) => calls.push(['setFollowPc', value])
     },
     util: {
       isSnapshotFileName: () => false,
       parseHexOrDec: () => -1,
       hexByte: () => '00'
     },
-    scheduleReduxUxSync: (reason) => calls.push(['sync', reason])
+    scheduleReduxUxSync: (reason: any) => calls.push(['sync', reason])
   });
 
   dom.memoryFollowPc.checked = true;
@@ -83,18 +83,18 @@ test('bindMemoryBindings wires follow-pc change and supports cleanup', () => {
 test('bindMemoryBindings loads selected local dump file when clicking load', async () => {
   const dom = makeDom();
   const selectedFile = { name: 'sample.bin', size: 3 };
-  dom.memoryDumpFile.files = [selectedFile];
+  (dom.memoryDumpFile as any).files = [selectedFile];
   dom.memoryDumpOffset.value = '0x1000';
 
-  const calls = [];
+  const calls: any[] = [];
   bindMemoryBindings({
     dom,
     runtime: { sim: {} },
     apple2: {
       refreshMemoryView: () => {},
-      setMemoryDumpStatus: (msg) => calls.push(['status', msg]),
-      loadDumpOrSnapshotFile: async (file, offsetRaw) => calls.push(['file', file, offsetRaw]),
-      loadDumpOrSnapshotAssetPath: async (assetPath, offsetRaw) => calls.push(['asset', assetPath, offsetRaw]),
+      setMemoryDumpStatus: (msg: any) => calls.push(['status', msg]),
+      loadDumpOrSnapshotFile: async (file: any, offsetRaw: any) => calls.push(['file', file, offsetRaw]),
+      loadDumpOrSnapshotAssetPath: async (assetPath: any, offsetRaw: any) => calls.push(['asset', assetPath, offsetRaw]),
       saveMemoryDump: async () => {},
       saveMemorySnapshot: async () => {},
       loadLastSavedDump: async () => {},
@@ -120,19 +120,19 @@ test('bindMemoryBindings loads selected local dump file when clicking load', asy
 
 test('bindMemoryBindings loads selected dump asset path when no local file is selected', async () => {
   const dom = makeDom();
-  dom.memoryDumpFile.files = [];
+  (dom.memoryDumpFile as any).files = [];
   dom.memoryDumpAssetPath.value = './assets/fixtures/cpu/software/conway_glider_80x24.bin';
   dom.memoryDumpOffset.value = '0x0000';
 
-  const calls = [];
+  const calls: any[] = [];
   bindMemoryBindings({
     dom,
     runtime: { sim: {} },
     apple2: {
       refreshMemoryView: () => {},
-      setMemoryDumpStatus: (msg) => calls.push(['status', msg]),
-      loadDumpOrSnapshotFile: async (file, offsetRaw) => calls.push(['file', file, offsetRaw]),
-      loadDumpOrSnapshotAssetPath: async (assetPath, offsetRaw) => calls.push(['asset', assetPath, offsetRaw]),
+      setMemoryDumpStatus: (msg: any) => calls.push(['status', msg]),
+      loadDumpOrSnapshotFile: async (file: any, offsetRaw: any) => calls.push(['file', file, offsetRaw]),
+      loadDumpOrSnapshotAssetPath: async (assetPath: any, offsetRaw: any) => calls.push(['asset', assetPath, offsetRaw]),
       saveMemoryDump: async () => {},
       saveMemorySnapshot: async () => {},
       loadLastSavedDump: async () => {},
@@ -158,16 +158,16 @@ test('bindMemoryBindings loads selected dump asset path when no local file is se
 
 test('bindMemoryBindings reports missing selection when neither local file nor asset path is set', async () => {
   const dom = makeDom();
-  dom.memoryDumpFile.files = [];
+  (dom.memoryDumpFile as any).files = [];
   dom.memoryDumpAssetPath.value = '';
 
-  const calls = [];
+  const calls: any[] = [];
   bindMemoryBindings({
     dom,
     runtime: { sim: {} },
     apple2: {
       refreshMemoryView: () => {},
-      setMemoryDumpStatus: (msg) => calls.push(msg),
+      setMemoryDumpStatus: (msg: any) => calls.push(msg),
       loadDumpOrSnapshotFile: async () => {},
       loadDumpOrSnapshotAssetPath: async () => {},
       saveMemoryDump: async () => {},

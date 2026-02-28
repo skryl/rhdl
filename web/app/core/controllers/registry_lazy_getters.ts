@@ -5,13 +5,13 @@ import { createApple2LazyGetters } from '../../components/apple2/controllers/laz
 import { createSimLazyGetters } from '../../components/sim/controllers/lazy_getters';
 import { createShellLazyGetters } from '../../components/shell/controllers/lazy_getters';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createRegistryLazyGetters requires function: ${name}`);
   }
 }
 
-export function createRegistryLazyGetters(options = {}) {
+export function createRegistryLazyGetters(options: any = {}) {
   const {
     dom,
     state,

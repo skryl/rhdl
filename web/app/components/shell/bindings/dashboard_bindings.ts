@@ -1,6 +1,6 @@
 import { createListenerGroup } from '../../../core/bindings/listener_group';
 
-export function bindDashboardResizeEvents({ onMouseDown, onMouseMove, onMouseUp, onWindowResize }) {
+export function bindDashboardResizeEvents({ onMouseDown, onMouseMove, onMouseUp, onWindowResize }: any) {
   const listeners = createListenerGroup();
 
   listeners.on(document, 'mousedown', onMouseDown);
@@ -13,7 +13,7 @@ export function bindDashboardResizeEvents({ onMouseDown, onMouseMove, onMouseUp,
   };
 }
 
-export function bindDashboardPanelEvents({ header, panel, onDragStart, onDragEnd, onDragOver, onDrop }) {
+export function bindDashboardPanelEvents({ header, panel, onDragStart, onDragEnd, onDragOver, onDrop }: any) {
   const listeners = createListenerGroup();
 
   listeners.on(header, 'dragstart', onDragStart);

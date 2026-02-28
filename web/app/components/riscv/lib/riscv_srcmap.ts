@@ -11,7 +11,7 @@
 //   }
 
 // Binary search: find the last entry whose [0] (address) is <= target.
-function bsearchFloor(arr, target) {
+function bsearchFloor(arr: any, target: any) {
   let lo = 0;
   let hi = arr.length - 1;
   let result = -1;
@@ -27,7 +27,7 @@ function bsearchFloor(arr, target) {
   return result;
 }
 
-export function createRiscvSourceMap(json) {
+export function createRiscvSourceMap(json: any) {
   if (!json || json.format !== 'rhdl.riscv.srcmap.v1') {
     return null;
   }
@@ -38,12 +38,12 @@ export function createRiscvSourceMap(json) {
   const sources = json.sources || {};
 
   // Pre-split source files into line arrays for efficient line lookup.
-  const sourceLines = {};
+  const sourceLines: Record<string, string[]> = {};
   for (const [path, text] of Object.entries(sources)) {
     sourceLines[path] = String(text).split('\n');
   }
 
-  function lookupFunction(addr) {
+  function lookupFunction(addr: any) {
     const idx = bsearchFloor(functions, addr >>> 0);
     if (idx < 0) return null;
     const entry = functions[idx];
@@ -61,7 +61,7 @@ export function createRiscvSourceMap(json) {
     };
   }
 
-  function lookupLine(addr) {
+  function lookupLine(addr: any) {
     const idx = bsearchFloor(lines, addr >>> 0);
     if (idx < 0) return null;
     const entry = lines[idx];
@@ -71,13 +71,13 @@ export function createRiscvSourceMap(json) {
     return { file, line: lineNo };
   }
 
-  function getSourceLine(file, lineNo) {
-    const fileLines = sourceLines[file];
+  function getSourceLine(file: any, lineNo: any) {
+    const fileLines = (sourceLines as Record<string, any>)[file];
     if (!fileLines || lineNo < 1 || lineNo > fileLines.length) return null;
     return fileLines[lineNo - 1];
   }
 
-  function lookup(addr) {
+  function lookup(addr: any) {
     const fn = lookupFunction(addr);
     const line = lookupLine(addr);
     if (!fn && !line) return null;

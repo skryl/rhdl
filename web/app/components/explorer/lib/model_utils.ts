@@ -1,4 +1,4 @@
-export function resolveLiveSignalName(signalName, pathTokens, signalSet) {
+export function resolveLiveSignalName(signalName: any, pathTokens: any, signalSet: any) {
   const raw = String(signalName || '').trim();
   if (!raw) {
     return null;
@@ -21,14 +21,14 @@ export function resolveLiveSignalName(signalName, pathTokens, signalSet) {
   return null;
 }
 
-export function nodeDisplayPath(node) {
+export function nodeDisplayPath(node: any) {
   if (!node) {
     return 'top';
   }
   return node.path || node.name || 'top';
 }
 
-function makeComponentNode(model, parentId, name, kind, pathTokens = [], rawRef = null) {
+function makeComponentNode(model: any, parentId: any, name: any, kind: any, pathTokens: any[] = [], rawRef: any = null) {
   const id = `node_${model.nextId++}`;
   const path = pathTokens.length > 0 ? pathTokens.join('.') : 'top';
   const node = {
@@ -47,7 +47,7 @@ function makeComponentNode(model, parentId, name, kind, pathTokens = [], rawRef 
   return node;
 }
 
-function addSignalToNode(node, signal) {
+function addSignalToNode(node: any, signal: any) {
   if (!node || !signal) {
     return;
   }
@@ -59,8 +59,8 @@ function addSignalToNode(node, signal) {
   node.signals.push(signal);
 }
 
-function readSignalEntriesFromObject(obj) {
-  const out = [];
+function readSignalEntriesFromObject(obj: any) {
+  const out: any[] = [];
   if (!obj || typeof obj !== 'object') {
     return out;
   }
@@ -76,7 +76,7 @@ function readSignalEntriesFromObject(obj) {
   return out;
 }
 
-export function deriveComponentName(obj, fallback) {
+export function deriveComponentName(obj: any, fallback: any) {
   if (obj && typeof obj === 'object') {
     for (const key of ['instance_name', 'inst_name', 'instance', 'name', 'id', 'module', 'component', 'label']) {
       if (typeof obj[key] === 'string' && obj[key].trim()) {
@@ -87,11 +87,11 @@ export function deriveComponentName(obj, fallback) {
   return fallback;
 }
 
-export function summarizeIrEntry(entry) {
+export function summarizeIrEntry(entry: any) {
   if (!entry || typeof entry !== 'object') {
     return entry;
   }
-  const summary = {};
+  const summary: Record<string, any> = {};
   for (const key of ['name', 'kind', 'type', 'direction', 'width', 'clock', 'reset', 'path', 'file', 'line']) {
     if (entry[key] !== undefined) {
       summary[key] = entry[key];
@@ -104,7 +104,7 @@ export function summarizeIrEntry(entry) {
   return { keys: keys.slice(0, 12), fieldCount: keys.length };
 }
 
-export function ellipsizeText(value, maxLen = 88) {
+export function ellipsizeText(value: any, maxLen = 88) {
   const text = String(value ?? '');
   if (text.length <= maxLen) {
     return text;
@@ -112,11 +112,11 @@ export function ellipsizeText(value, maxLen = 88) {
   return `${text.slice(0, Math.max(0, maxLen - 3))}...`;
 }
 
-export function summarizeIrNode(rawRef) {
+export function summarizeIrNode(rawRef: any) {
   if (!rawRef || typeof rawRef !== 'object') {
     return null;
   }
-  const summary = {};
+  const summary: Record<string, any> = {};
   for (const key of ['name', 'kind', 'type', 'instance', 'instance_name', 'module', 'component', 'path']) {
     if (rawRef[key] !== undefined) {
       summary[key] = rawRef[key];
@@ -136,7 +136,7 @@ export function summarizeIrNode(rawRef) {
   return summary;
 }
 
-function signalGroupToken(name) {
+function signalGroupToken(name: any) {
   const raw = String(name || '').trim();
   if (!raw) {
     return null;
@@ -152,7 +152,7 @@ function signalGroupToken(name) {
   return token;
 }
 
-function addSyntheticSignalGroupChildren(model, node, pathTokens) {
+function addSyntheticSignalGroupChildren(model: any, node: any, pathTokens: any) {
   if (!model || !node || !Array.isArray(node.signals) || node.signals.length < 16) {
     return 0;
   }
@@ -186,7 +186,7 @@ function addSyntheticSignalGroupChildren(model, node, pathTokens) {
 
   const siblingNames = new Set(
     node.children
-      .map((childId) => model.nodes.get(childId)?.name?.toLowerCase())
+      .map((childId: any) => model.nodes.get(childId)?.name?.toLowerCase())
       .filter(Boolean)
   );
 
@@ -216,7 +216,7 @@ function addSyntheticSignalGroupChildren(model, node, pathTokens) {
   return added;
 }
 
-function buildHierarchicalComponentModel(meta) {
+function buildHierarchicalComponentModel(meta: any) {
   const ir = meta?.ir;
   if (!ir || typeof ir !== 'object') {
     return null;
@@ -229,7 +229,7 @@ function buildHierarchicalComponentModel(meta) {
   }
 
   const signalSet = new Set(meta?.liveSignalNames || meta?.names || []);
-  const model = {
+  const model: any = {
     nextId: 1,
     mode: 'hierarchical',
     nodes: new Map(),
@@ -241,7 +241,7 @@ function buildHierarchicalComponentModel(meta) {
 
   const seen = new WeakSet();
 
-  function walk(node, source, pathTokens) {
+  function walk(node: any, source: any, pathTokens: any) {
     if (!source || typeof source !== 'object') {
       return;
     }
@@ -266,9 +266,9 @@ function buildHierarchicalComponentModel(meta) {
 
     let explicitChildCount = 0;
     for (const key of childKeys) {
-      const children = Array.isArray(source[key]) ? source[key] : [];
+      const children: any[] = Array.isArray(source[key]) ? source[key] : [];
       const siblingNames = new Set();
-      children.forEach((child, index) => {
+      children.forEach((child: any, index: any) => {
         if (!child || typeof child !== 'object') {
           return;
         }
@@ -300,8 +300,8 @@ function buildHierarchicalComponentModel(meta) {
   return model;
 }
 
-function buildDerivedFlatComponentModel(meta) {
-  const model = {
+function buildDerivedFlatComponentModel(meta: any) {
+  const model: any = {
     nextId: 1,
     mode: 'flat-derived',
     nodes: new Map(),
@@ -313,7 +313,7 @@ function buildDerivedFlatComponentModel(meta) {
   model.rootId = root.id;
   model.pathMap.set('', root.id);
 
-  function ensurePath(pathTokens) {
+  function ensurePath(pathTokens: any) {
     const pathKey = pathTokens.join('__');
     if (model.pathMap.has(pathKey)) {
       return model.nodes.get(model.pathMap.get(pathKey));
@@ -361,22 +361,22 @@ function buildDerivedFlatComponentModel(meta) {
   return model;
 }
 
-function finalizeComponentModel(model) {
+function finalizeComponentModel(model: any) {
   if (!model || !model.nodes) {
     return model;
   }
   for (const node of model.nodes.values()) {
-    node.children.sort((a, b) => {
+    node.children.sort((a: any, b: any) => {
       const left = model.nodes.get(a);
       const right = model.nodes.get(b);
       return (left?.name || '').localeCompare(right?.name || '');
     });
-    node.signals.sort((a, b) => (a.fullName || a.name || '').localeCompare(b.fullName || b.name || ''));
+    node.signals.sort((a: any, b: any) => (a.fullName || a.name || '').localeCompare(b.fullName || b.name || ''));
   }
   return model;
 }
 
-export function buildComponentModel(meta) {
+export function buildComponentModel(meta: any) {
   const hierarchical = buildHierarchicalComponentModel(meta);
   if (hierarchical) {
     return finalizeComponentModel(hierarchical);
@@ -384,7 +384,7 @@ export function buildComponentModel(meta) {
   return finalizeComponentModel(buildDerivedFlatComponentModel(meta));
 }
 
-export function nodeMatchesFilter(node, filter) {
+export function nodeMatchesFilter(node: any, filter: any) {
   if (!filter) {
     return true;
   }

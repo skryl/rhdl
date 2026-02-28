@@ -1,4 +1,4 @@
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createShellStateRuntimeService requires function: ${name}`);
   }
@@ -26,7 +26,7 @@ export function createShellStateRuntimeService({
   documentRef = globalThis.document,
   windowRef = globalThis.window,
   eventCtor = globalThis.Event
-} = {}) {
+}: any = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('createShellStateRuntimeService requires dom/state/runtime');
   }
@@ -64,7 +64,7 @@ export function createShellStateRuntimeService({
     run();
   }
 
-  function setActiveTab(tabId) {
+  function setActiveTab(tabId: any) {
     setActiveTabState(tabId);
     for (const btn of dom.tabButtons) {
       const selected = btn.dataset.tab === tabId;
@@ -89,7 +89,7 @@ export function createShellStateRuntimeService({
     scheduleReduxUxSync('setActiveTab');
   }
 
-  function setSidebarCollapsed(collapsed) {
+  function setSidebarCollapsed(collapsed: any) {
     setSidebarCollapsedState(!!collapsed);
     if (dom.appShell) {
       dom.appShell.classList.toggle('controls-collapsed', state.sidebarCollapsed);
@@ -102,7 +102,7 @@ export function createShellStateRuntimeService({
     }
     try {
       localStorageRef.setItem(SIDEBAR_COLLAPSED_KEY, state.sidebarCollapsed ? '1' : '0');
-    } catch (_err) {
+    } catch (_err: any) {
       // Ignore storage failures (private mode, policy, etc).
     }
     requestAnimationFrameImpl(() => {
@@ -111,7 +111,7 @@ export function createShellStateRuntimeService({
     scheduleReduxUxSync('setSidebarCollapsed');
   }
 
-  function setTerminalOpen(open, { persist = true, focus = false } = {}) {
+  function setTerminalOpen(open: any, { persist = true, focus = false }: any = {}) {
     setTerminalOpenState(!!open);
     if (dom.appShell) {
       dom.appShell.classList.toggle('terminal-open', state.terminalOpen);
@@ -128,7 +128,7 @@ export function createShellStateRuntimeService({
     if (persist) {
       try {
         localStorageRef.setItem(TERMINAL_OPEN_KEY, state.terminalOpen ? '1' : '0');
-      } catch (_err) {
+      } catch (_err: any) {
         // Ignore storage failures.
       }
     }
@@ -154,7 +154,7 @@ export function createShellStateRuntimeService({
     scheduleReduxUxSync('setTerminalOpen');
   }
 
-  function applyTheme(theme, { persist = true } = {}) {
+  function applyTheme(theme: any, { persist = true }: any = {}) {
     const nextTheme = normalizeTheme(theme);
     setThemeState(nextTheme);
     if (documentRef.body) {
@@ -169,7 +169,7 @@ export function createShellStateRuntimeService({
     if (persist) {
       try {
         localStorageRef.setItem(THEME_KEY, nextTheme);
-      } catch (_err) {
+      } catch (_err: any) {
         // Ignore storage failures.
       }
     }

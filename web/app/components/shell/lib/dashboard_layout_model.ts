@@ -1,8 +1,8 @@
-function normalizeSpan(normalizeDashboardSpan, value, fallback = 'full') {
+function normalizeSpan(normalizeDashboardSpan: any, value: any, fallback = 'full') {
   return normalizeDashboardSpan(value, fallback);
 }
 
-export function normalizeDashboardPanelSpans(panels, normalizeDashboardSpan, fallback = 'full') {
+export function normalizeDashboardPanelSpans(panels: any, normalizeDashboardSpan: any, fallback = 'full') {
   let pendingHalf = null;
   for (const panel of panels) {
     const span = normalizeSpan(normalizeDashboardSpan, panel?.dataset?.layoutSpan, fallback);
@@ -25,7 +25,7 @@ export function normalizeDashboardPanelSpans(panels, normalizeDashboardSpan, fal
   }
 }
 
-export function dashboardRowsFromPanels(panels, normalizeDashboardSpan, fallback = 'full') {
+export function dashboardRowsFromPanels(panels: any, normalizeDashboardSpan: any, fallback = 'full') {
   const rows = [];
   let idx = 0;
   while (idx < panels.length) {
@@ -49,21 +49,21 @@ export function dashboardRowsFromPanels(panels, normalizeDashboardSpan, fallback
   return rows;
 }
 
-export function snapshotDashboardPanelLayout(panels, normalizeDashboardSpan, defaultSpan = () => 'full') {
+export function snapshotDashboardPanelLayout(panels: any, normalizeDashboardSpan: any, defaultSpan = () => 'full') {
   const order = [];
-  const spans = {};
+  const spans: Record<string, any> = {};
   for (const panel of panels) {
     const itemId = String(panel?.dataset?.layoutItemId || '').trim();
     if (!itemId) {
       continue;
     }
     order.push(itemId);
-    spans[itemId] = normalizeSpan(normalizeDashboardSpan, panel?.dataset?.layoutSpan, defaultSpan(panel));
+    spans[itemId] = normalizeSpan(normalizeDashboardSpan, panel?.dataset?.layoutSpan, (defaultSpan as any)(panel));
   }
   return { order, spans };
 }
 
-export function applyDashboardDropSpanPolicy(position, draggedPanel, targetPanel) {
+export function applyDashboardDropSpanPolicy(position: any, draggedPanel: any, targetPanel: any) {
   if (!draggedPanel || !targetPanel) {
     return;
   }

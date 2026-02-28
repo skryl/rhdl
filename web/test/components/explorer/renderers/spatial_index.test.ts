@@ -13,7 +13,7 @@ function makeRenderList() {
     pins: [pin1],
     nets: [net1],
     wires: [],
-    byId: new Map([['s1', sym1], ['s2', sym2], ['s3', sym3], ['p1', pin1], ['n1', net1]])
+    byId: new Map<string, any>([['s1', sym1], ['s2', sym2], ['s3', sym3], ['p1', pin1], ['n1', net1]])
   };
 }
 

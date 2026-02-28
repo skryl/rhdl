@@ -24,13 +24,13 @@ test('createDumpAssetTree builds nested sorted directories with file leaves', ()
     './assets/fixtures/mos6502/memory/karateka_mem.bin',
     './assets/fixtures/cpu/software/conway_glider_80x24.bin',
     './assets/fixtures/apple2/memory/karateka_mem.rhdlsnap'
-  ]);
+  ] as any);
 
-  assert.deepEqual(tree.dirs.map((dir) => dir.name), ['assets']);
+  assert.deepEqual(tree.dirs.map((dir: any) => dir.name), ['assets']);
   const assetsNode = tree.dirs[0];
   assert.equal(assetsNode.path, './assets');
-  assert.deepEqual(assetsNode.dirs.map((dir) => dir.name), ['fixtures']);
+  assert.deepEqual(assetsNode.dirs.map((dir: any) => dir.name), ['fixtures']);
 
   const fixturesNode = assetsNode.dirs[0];
-  assert.deepEqual(fixturesNode.dirs.map((dir) => dir.name), ['apple2', 'cpu', 'mos6502']);
+  assert.deepEqual(fixturesNode.dirs.map((dir: any) => dir.name), ['apple2', 'cpu', 'mos6502']);
 });

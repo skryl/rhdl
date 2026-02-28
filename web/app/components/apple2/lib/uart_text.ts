@@ -1,4 +1,4 @@
-function decodeTextChar(code, textConfig = {}) {
+function decodeTextChar(code: any, textConfig: any = {}) {
   const charMask = Number.parseInt(textConfig.charMask, 10);
   const asciiMin = Number.parseInt(textConfig.asciiMin, 10);
   const asciiMax = Number.parseInt(textConfig.asciiMax, 10);
@@ -11,15 +11,15 @@ function decodeTextChar(code, textConfig = {}) {
   return ' ';
 }
 
-function makeRow(width) {
+function makeRow(width: any) {
   return new Array(width).fill(' ');
 }
 
-export function renderUartTextGrid(bytes, {
+export function renderUartTextGrid(bytes: any, {
   width = 80,
   height = 24,
-  textConfig = {}
-} = {}) {
+  textConfig = {} as any
+}: any = {}) {
   const cols = Math.max(1, Number.parseInt(width, 10) || 80);
   const rowsCount = Math.max(1, Number.parseInt(height, 10) || 24);
 

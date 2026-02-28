@@ -15,13 +15,13 @@ import { handleIrbCommand } from '../controllers/commands/irb';
 import { createMirbCommandRunner } from './mirb_runner_service';
 import { renderUartTextGrid } from '../../apple2/lib/uart_text';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createTerminalRuntimeService requires function: ${name}`);
   }
 }
 
-function createStatusText({ state, runtime, actions }) {
+function createStatusText({ state, runtime, actions }: any) {
   const runner = actions.currentRunnerPreset();
   const backend = actions.getBackendDef(state.backend);
   const tab = state.activeTab || '-';
@@ -41,8 +41,8 @@ function createStatusText({ state, runtime, actions }) {
   ].join(' ');
 }
 
-function buildMirbSessionReplaySource(lines = []) {
-  const encodedLines = lines.map((line) => JSON.stringify(String(line ?? ''))).join(',');
+function buildMirbSessionReplaySource(lines: any[] = []) {
+  const encodedLines = lines.map((line: any) => JSON.stringify(String(line ?? ''))).join(',');
   return [
     '__rhdl_session_binding__ = binding',
     '__rhdl_session_value__ = nil',
@@ -57,7 +57,7 @@ function buildMirbSessionReplaySource(lines = []) {
   ].join('\n');
 }
 
-function readUartSnapshotText({ state, runtime }) {
+function readUartSnapshotText({ state, runtime }: any) {
   const sim = runtime?.sim;
   if (!sim) {
     return 'No UART output yet.';
@@ -93,12 +93,12 @@ export function createTerminalRuntimeService({
   runtime,
   backendDefs,
   runnerPresets,
-  actions = {},
+  actions = {} as any,
   mirbRunner,
   documentRef = globalThis.document,
   eventCtor = globalThis.Event,
-  requestFrame = globalThis.requestAnimationFrame || ((cb) => setTimeout(cb, 0))
-} = {}) {
+  requestFrame = globalThis.requestAnimationFrame || ((cb: any) => setTimeout(cb, 0))
+}: any = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('createTerminalRuntimeService requires dom, state, and runtime');
   }
@@ -139,12 +139,12 @@ export function createTerminalRuntimeService({
   const syncMirbTrace = typeof actions.syncIoTraceFromMirb === 'function'
     ? actions.syncIoTraceFromMirb
     : null;
-  const mirbSession = {
+  const mirbSession: { active: boolean; lines: any[] } = {
     active: false,
     lines: []
   };
 
-  async function runMirbWithTraceSync(source) {
+  async function runMirbWithTraceSync(source: any) {
     const result = await runMirb(source);
     if (syncMirbTrace) {
       await syncMirbTrace();
@@ -172,7 +172,7 @@ export function createTerminalRuntimeService({
     return wasActive;
   }
 
-  async function runMirbSessionLine(line) {
+  async function runMirbSessionLine(line: any) {
     const code = String(line || '').trim();
     if (!code) {
       return null;
@@ -224,7 +224,7 @@ export function createTerminalRuntimeService({
 
   const dispatcher = createTerminalCommandDispatcher({
     handlers: [
-      ({ cmd }) => {
+      ({ cmd }: any) => {
         if (cmd === 'help' || cmd === '?') {
           return terminalHelpText();
         }
@@ -266,11 +266,11 @@ export function createTerminalRuntimeService({
     }
   };
 
-  async function executeTerminalCommand(rawLine) {
+  async function executeTerminalCommand(rawLine: any) {
     return dispatcher.execute(rawLine, commandContext);
   }
 
-  async function runTerminalCommand(rawLine) {
+  async function runTerminalCommand(rawLine: any) {
     const line = String(rawLine || '').trim();
     if (!line) {
       return;
@@ -302,7 +302,7 @@ export function createTerminalRuntimeService({
       terminalSession.setSnapshotOverride(null);
       return;
     }
-    terminalSession.setSnapshotOverride(readUartSnapshotText({ state, runtime }));
+    terminalSession.setSnapshotOverride(readUartSnapshotText({ state, runtime }) as any);
   }
 
   return {

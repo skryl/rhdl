@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { bindCoreBindings } from '../../../../app/components/shell/bindings/app_bindings';
 
-function makeTarget(extra = {}) {
+function makeTarget(extra: any = {}) {
   return Object.assign(new EventTarget(), extra);
 }
 
@@ -31,7 +31,7 @@ function makeDom() {
   };
 }
 
-function makeBindings(dom, overrides = {}) {
+function makeBindings(dom: any, overrides = {}) {
   const state = {
     sidebarCollapsed: false,
     terminalOpen: true,
@@ -39,13 +39,13 @@ function makeBindings(dom, overrides = {}) {
     terminal: { uartPassthrough: false }
   };
 
-  const calls = [];
-  let resolveLoad;
+  const calls: any[] = [];
+  let resolveLoad: any;
   let loadPromise = Promise.resolve();
 
   const runner = {
     loadPreset: () => loadPromise,
-    getPreset: (id) => ({ id, preferredBackend: '' }),
+    getPreset: (id: any) => ({ id, preferredBackend: '' }),
     updateIrSourceVisibility: () => calls.push(['updateIrSourceVisibility']),
     currentPreset: () => ({ usesManualIr: false }),
     ensureBackendInstance: async () => {},
@@ -60,8 +60,8 @@ function makeBindings(dom, overrides = {}) {
   };
 
   const store = {
-    setRunnerPresetState: (value) => calls.push(['setRunnerPresetState', value]),
-    setBackendState: (value) => {
+    setRunnerPresetState: (value: any) => calls.push(['setRunnerPresetState', value]),
+    setBackendState: (value: any) => {
       state.backend = value;
       calls.push(['setBackendState', value]);
     }
@@ -80,7 +80,7 @@ function makeBindings(dom, overrides = {}) {
   };
 
   const util = {
-    getBackendDef: (id) => ({ id, label: id })
+    getBackendDef: (id: any) => ({ id, label: id })
   };
 
   const base = {
@@ -104,7 +104,7 @@ function makeBindings(dom, overrides = {}) {
     log: () => {}
   };
 
-  if (overrides.loadPresetDeferred) {
+  if ((overrides as any).loadPresetDeferred) {
     loadPromise = new Promise((resolve) => {
       resolveLoad = resolve;
     });
@@ -126,7 +126,7 @@ test('load button shows loading state and disables while runner preset loads', a
   assert.equal(dom.loadRunnerBtn.disabled, true);
   assert.equal(dom.runnerStatus.textContent, 'Loading...');
 
-  resolveLoad();
+  resolveLoad!();
   await new Promise((resolve) => setTimeout(resolve, 0));
   await Promise.resolve();
 
@@ -135,11 +135,11 @@ test('load button shows loading state and disables while runner preset loads', a
 
 test('runner selection applies preferred backend to backend selector and store state', () => {
   const dom = makeDom();
-  const calls = [];
+  const calls: any[] = [];
   const { teardown } = makeBindings(dom, {
     runner: {
       loadPreset: async () => {},
-      getPreset: (id) => ({ id, preferredBackend: 'compiler' }),
+      getPreset: (id: any) => ({ id, preferredBackend: 'compiler' }),
       updateIrSourceVisibility: () => calls.push(['updateIrSourceVisibility']),
       currentPreset: () => ({ usesManualIr: false }),
       ensureBackendInstance: async () => {},
@@ -153,8 +153,8 @@ test('runner selection applies preferred backend to backend selector and store s
       loadSample: () => {}
     },
     store: {
-      setRunnerPresetState: (value) => calls.push(['setRunnerPresetState', value]),
-      setBackendState: (value) => calls.push(['setBackendState', value])
+      setRunnerPresetState: (value: any) => calls.push(['setRunnerPresetState', value]),
+      setBackendState: (value: any) => calls.push(['setBackendState', value])
     },
     sim: {
       refreshStatus: () => calls.push(['refreshStatus']),

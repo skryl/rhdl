@@ -11,9 +11,9 @@ const BENIGN_PAGE_ERRORS = [
   'Failed to execute \'drawImage\' on \'CanvasRenderingContext2D\': The image argument is a canvas element with a width or height of 0.'
 ];
 
-function readGraphViewport(page) {
+function readGraphViewport(page: any) {
   return page.evaluate(() => {
-    const viewport = window.__RHDL_UX_STATE__?.components?.graph?.viewport;
+    const viewport = (window as any).__RHDL_UX_STATE__?.components?.graph?.viewport;
     if (!viewport) {
       return null;
     }
@@ -29,7 +29,7 @@ test('schematic viewer supports wheel zoom and drag pan in browser', { timeout: 
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
@@ -43,7 +43,7 @@ test('schematic viewer supports wheel zoom and drag pan in browser', { timeout: 
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }
@@ -52,8 +52,8 @@ test('schematic viewer supports wheel zoom and drag pan in browser', { timeout: 
   });
 
   const page = await browser.newPage({ viewport: { width: 1920, height: 1600 } });
-  const pageErrors = [];
-  const consoleErrors = [];
+  const pageErrors: any[] = [];
+  const consoleErrors: any[] = [];
 
   page.on('pageerror', (err) => {
     const message = String(err?.message || err);
@@ -82,7 +82,7 @@ test('schematic viewer supports wheel zoom and drag pan in browser', { timeout: 
     return text.includes('Apple II System Runner');
   }, null, { timeout: 120000 });
 
-  let point = null;
+  let point: any = null;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     await page.click('[data-tab="componentGraphTab"]');
     await page.waitForFunction(() => {
@@ -91,7 +91,7 @@ test('schematic viewer supports wheel zoom and drag pan in browser', { timeout: 
     }, null, { timeout: 120000 });
     await page.waitForSelector('#componentVisual canvas', { state: 'attached', timeout: 120000 });
     await page.waitForFunction(() => {
-      const graph = window.__RHDL_UX_STATE__?.components?.graph;
+      const graph = (window as any).__RHDL_UX_STATE__?.components?.graph;
       const viewport = graph?.viewport;
       return !!graph?.canvas && !!viewport && Number.isFinite(Number(viewport.scale));
     }, null, { timeout: 120000 });
@@ -129,7 +129,7 @@ test('schematic viewer supports wheel zoom and drag pan in browser', { timeout: 
 
   await page.click('#componentGraphZoomInBtn');
   await page.waitForFunction((initialScale) => {
-    const viewport = window.__RHDL_UX_STATE__?.components?.graph?.viewport;
+    const viewport = (window as any).__RHDL_UX_STATE__?.components?.graph?.viewport;
     return Number(viewport?.scale || 1) > (Number(initialScale) + 0.01);
   }, initialViewport.scale, { timeout: 120000 });
   const afterZoomInBtn = await readGraphViewport(page);
@@ -137,7 +137,7 @@ test('schematic viewer supports wheel zoom and drag pan in browser', { timeout: 
 
   await page.click('#componentGraphZoomOutBtn');
   await page.waitForFunction((zoomedScale) => {
-    const viewport = window.__RHDL_UX_STATE__?.components?.graph?.viewport;
+    const viewport = (window as any).__RHDL_UX_STATE__?.components?.graph?.viewport;
     return Number(viewport?.scale || 1) < (Number(zoomedScale) - 0.01);
   }, afterZoomInBtn.scale, { timeout: 120000 });
   const afterZoomOutBtn = await readGraphViewport(page);
@@ -146,7 +146,7 @@ test('schematic viewer supports wheel zoom and drag pan in browser', { timeout: 
   await page.mouse.move(point.x, point.y);
   await page.mouse.wheel(0, -800);
   await page.waitForFunction((initialScale) => {
-    const viewport = window.__RHDL_UX_STATE__?.components?.graph?.viewport;
+    const viewport = (window as any).__RHDL_UX_STATE__?.components?.graph?.viewport;
     return Number(viewport?.scale || 1) > (Number(initialScale) + 0.01);
   }, afterZoomOutBtn.scale, { timeout: 120000 });
 
@@ -159,7 +159,7 @@ test('schematic viewer supports wheel zoom and drag pan in browser', { timeout: 
   await page.mouse.move(point.x + 140, point.y + 90, { steps: 12 });
   await page.mouse.up();
   await page.waitForFunction((prev) => {
-    const viewport = window.__RHDL_UX_STATE__?.components?.graph?.viewport;
+    const viewport = (window as any).__RHDL_UX_STATE__?.components?.graph?.viewport;
     if (!viewport) return false;
     return (
       Math.abs(Number(viewport.x || 0) - Number(prev.x || 0)) > 5 ||
@@ -176,7 +176,7 @@ test('schematic viewer supports wheel zoom and drag pan in browser', { timeout: 
 
   await page.click('#componentGraphResetViewBtn');
   await page.waitForFunction((initial) => {
-    const viewport = window.__RHDL_UX_STATE__?.components?.graph?.viewport;
+    const viewport = (window as any).__RHDL_UX_STATE__?.components?.graph?.viewport;
     if (!viewport) return false;
     return (
       Math.abs(Number(viewport.scale || 1) - Number(initial.scale || 1)) < 0.01 &&
@@ -195,7 +195,7 @@ test('schematic viewer supports wheel zoom and drag pan in browser', { timeout: 
     await page.click('#componentGraphZoomOutBtn');
   }
   await page.waitForFunction(() => {
-    const viewport = window.__RHDL_UX_STATE__?.components?.graph?.viewport;
+    const viewport = (window as any).__RHDL_UX_STATE__?.components?.graph?.viewport;
     return Number(viewport?.scale || 1) < 0.2;
   }, null, { timeout: 120000 });
   const deepZoomOutViewport = await readGraphViewport(page);

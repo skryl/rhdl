@@ -11,7 +11,7 @@ import { createSimDomainController } from '../../components/sim/controllers/doma
 import { createWatchDomainController } from '../../components/watch/controllers/domain';
 import { resolveRunnerIoConfig } from '../../components/runner/lib/io_config';
 
-function normalizePositiveInt(value, fallback = null) {
+function normalizePositiveInt(value: any, fallback = null) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return fallback;
@@ -19,7 +19,7 @@ function normalizePositiveInt(value, fallback = null) {
   return parsed;
 }
 
-function formatMemoryAddress(value) {
+function formatMemoryAddress(value: any) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
     return '';
@@ -29,7 +29,7 @@ function formatMemoryAddress(value) {
   return `0x${Math.floor(masked).toString(16).toUpperCase().padStart(width, '0')}`;
 }
 
-export function createControllerRegistry(options = {}) {
+export function createControllerRegistry(options: any = {}) {
   const {
     dom,
     state,
@@ -59,7 +59,7 @@ export function createControllerRegistry(options = {}) {
     documentRef = globalThis.document,
     localStorageRef = globalThis.localStorage,
     eventCtor = globalThis.Event,
-    p5Ctor = globalThis.p5
+    p5Ctor = (globalThis as any).p5
   } = options;
 
   const lazy = createRegistryLazyGetters({
@@ -158,7 +158,7 @@ export function createControllerRegistry(options = {}) {
     lazy.getWatchManager().clearAllWatches();
   }
 
-  function addBreakpointSignal(signal, valueRaw) {
+  function addBreakpointSignal(signal: any, valueRaw: any) {
     return lazy.getWatchManager().addBreakpointSignal(signal, valueRaw);
   }
 
@@ -166,12 +166,12 @@ export function createControllerRegistry(options = {}) {
     lazy.getWatchManager().clearAllBreakpoints();
   }
 
-  function removeBreakpointSignal(name) {
+  function removeBreakpointSignal(name: any) {
     const key = String(name || '').trim();
     if (!key) {
       return false;
     }
-    const nextBreakpoints = state.breakpoints.filter((bp) => String(bp?.name || '') !== key);
+    const nextBreakpoints = state.breakpoints.filter((bp: any) => String(bp?.name || '') !== key);
     if (nextBreakpoints.length === state.breakpoints.length) {
       return false;
     }
@@ -184,7 +184,7 @@ export function createControllerRegistry(options = {}) {
     return lazy.getTerminalController().submitInput();
   }
 
-  function terminalHistoryNavigate(delta) {
+  function terminalHistoryNavigate(delta: any) {
     return lazy.getTerminalController().historyNavigate(delta);
   }
 
@@ -204,7 +204,7 @@ export function createControllerRegistry(options = {}) {
     return lazy.getTerminalController().focusInput();
   }
 
-  function getRunnerPreset(id) {
+  function getRunnerPreset(id: any) {
     if (id && RUNNER_PRESETS[id]) {
       return RUNNER_PRESETS[id];
     }
@@ -239,7 +239,7 @@ export function createControllerRegistry(options = {}) {
     lazy.getComponentSourceController().clearComponentSourceBundle();
   }
 
-  function setComponentSourceBundle(bundle) {
+  function setComponentSourceBundle(bundle: any) {
     lazy.getComponentSourceController().setComponentSourceBundle(bundle);
   }
 
@@ -247,15 +247,15 @@ export function createControllerRegistry(options = {}) {
     lazy.getComponentSourceController().clearComponentSchematicBundle();
   }
 
-  function setComponentSchematicBundle(bundle) {
+  function setComponentSchematicBundle(bundle: any) {
     lazy.getComponentSourceController().setComponentSchematicBundle(bundle);
   }
 
-  async function loadRunnerIrBundle(preset, options = {}) {
+  async function loadRunnerIrBundle(preset: any, options = {}) {
     return lazy.getRunnerBundleLoader().loadRunnerIrBundle(preset, options);
   }
 
-  async function applyRunnerDefaults(preset) {
+  async function applyRunnerDefaults(preset: any) {
     const ioConfig = resolveRunnerIoConfig(preset);
     const defaults = preset?.defaults && typeof preset.defaults === 'object'
       ? preset.defaults
@@ -289,13 +289,13 @@ export function createControllerRegistry(options = {}) {
       }
     }
     if (dom.memoryStart && ioConfig?.memory) {
-      const dumpStart = Number.parseInt(ioConfig.memory.dumpStart, 10);
+      const dumpStart = Number.parseInt(ioConfig.memory.dumpStart as any, 10);
       if (Number.isFinite(dumpStart)) {
         dom.memoryStart.value = formatMemoryAddress(dumpStart);
       }
     }
     if (dom.memoryLength && ioConfig?.memory) {
-      const dumpLength = Number.parseInt(ioConfig.memory.dumpLength, 10);
+      const dumpLength = Number.parseInt(ioConfig.memory.dumpLength as any, 10);
       if (Number.isFinite(dumpLength)) {
         dom.memoryLength.value = String(dumpLength);
       }
@@ -315,15 +315,15 @@ export function createControllerRegistry(options = {}) {
     }
   }
 
-  function setActiveTab(tabId) {
+  function setActiveTab(tabId: any) {
     lazy.getShellStateController().setActiveTab(tabId);
   }
 
-  function setSidebarCollapsed(collapsed) {
+  function setSidebarCollapsed(collapsed: any) {
     lazy.getShellStateController().setSidebarCollapsed(collapsed);
   }
 
-  function setTerminalOpen(open, { persist = true, focus = false } = {}) {
+  function setTerminalOpen(open: any, { persist = true, focus = false }: any = {}) {
     lazy.getShellStateController().setTerminalOpen(open, { persist, focus });
   }
 
@@ -335,7 +335,7 @@ export function createControllerRegistry(options = {}) {
     lazy.getDashboardLayoutController().disposeDashboardLayoutBuilder();
   }
 
-  function refreshDashboardRowSizing(rootKey) {
+  function refreshDashboardRowSizing(rootKey: any) {
     lazy.getDashboardLayoutController().refreshDashboardRowSizing(rootKey);
   }
 
@@ -347,7 +347,7 @@ export function createControllerRegistry(options = {}) {
     lazy.getDashboardLayoutController().initializeDashboardLayoutBuilder();
   }
 
-  function applyTheme(theme, { persist = true } = {}) {
+  function applyTheme(theme: any, { persist = true }: any = {}) {
     lazy.getShellStateController().applyTheme(theme, { persist });
   }
 
@@ -363,7 +363,7 @@ export function createControllerRegistry(options = {}) {
     return lazy.getComponentExplorerController().currentComponentGraphFocusNode();
   }
 
-  function setComponentGraphFocus(nodeId, showChildren = true) {
+  function setComponentGraphFocus(nodeId: any, showChildren = true) {
     lazy.getComponentExplorerController().setComponentGraphFocus(nodeId, showChildren);
   }
 
@@ -419,23 +419,23 @@ export function createControllerRegistry(options = {}) {
     lazy.getApple2OpsController().updateIoToggleUi();
   }
 
-  function apple2HiresLineAddress(row) {
+  function apple2HiresLineAddress(row: any) {
     return lazy.getApple2OpsController().apple2HiresLineAddress(row);
   }
 
-  async function setApple2SoundEnabled(enabled) {
+  async function setApple2SoundEnabled(enabled: any) {
     return lazy.getApple2OpsController().setApple2SoundEnabled(enabled);
   }
 
-  function updateApple2SpeakerAudio(toggles, cyclesRun) {
+  function updateApple2SpeakerAudio(toggles: any, cyclesRun: any) {
     lazy.getApple2OpsController().updateApple2SpeakerAudio(toggles, cyclesRun);
   }
 
-  function setMemoryDumpStatus(message) {
+  function setMemoryDumpStatus(message: any) {
     lazy.getApple2OpsController().setMemoryDumpStatus(message);
   }
 
-  function setMemoryResetVectorInput(value) {
+  function setMemoryResetVectorInput(value: any) {
     lazy.getApple2OpsController().setMemoryResetVectorInput(value);
   }
 
@@ -447,11 +447,11 @@ export function createControllerRegistry(options = {}) {
     return lazy.getApple2OpsController().saveApple2MemorySnapshot();
   }
 
-  async function loadApple2DumpOrSnapshotFile(file, offsetRaw) {
+  async function loadApple2DumpOrSnapshotFile(file: any, offsetRaw: any) {
     return lazy.getApple2OpsController().loadApple2DumpOrSnapshotFile(file, offsetRaw);
   }
 
-  async function loadApple2DumpOrSnapshotAssetPath(assetPath, offsetRaw) {
+  async function loadApple2DumpOrSnapshotAssetPath(assetPath: any, offsetRaw: any) {
     return lazy.getApple2OpsController().loadApple2DumpOrSnapshotAssetPath(assetPath, offsetRaw);
   }
 
@@ -463,11 +463,11 @@ export function createControllerRegistry(options = {}) {
     return lazy.getApple2OpsController().resetApple2WithMemoryVectorOverride();
   }
 
-  function performApple2ResetSequence(options = {}) {
+  function performApple2ResetSequence(options: any = {}) {
     return lazy.getApple2OpsController().performApple2ResetSequence(options);
   }
 
-  async function loadApple2MemoryDumpBytes(bytes, offset, options = {}) {
+  async function loadApple2MemoryDumpBytes(bytes: any, offset: any, options = {}) {
     return lazy.getApple2OpsController().loadApple2MemoryDumpBytes(bytes, offset, options);
   }
 
@@ -479,7 +479,7 @@ export function createControllerRegistry(options = {}) {
     return lazy.getSimStatusController().selectedClock();
   }
 
-  function maskForWidth(width) {
+  function maskForWidth(width: any) {
     return lazy.getSimStatusController().maskForWidth(width);
   }
 
@@ -513,15 +513,15 @@ export function createControllerRegistry(options = {}) {
     lazy.getSimStatusController().populateClockSelect();
   }
 
-  function initializeTrace(options = {}) {
+  function initializeTrace(options: any = {}) {
     lazy.getSimRuntimeController().initializeTrace(options);
   }
 
-  function addWatchSignal(name) {
+  function addWatchSignal(name: any) {
     return lazy.getWatchManager().addWatchSignal(name);
   }
 
-  function removeWatchSignal(name) {
+  function removeWatchSignal(name: any) {
     return lazy.getWatchManager().removeWatchSignal(name);
   }
 
@@ -541,7 +541,7 @@ export function createControllerRegistry(options = {}) {
     return lazy.getApple2MemoryController().getApple2ProgramCounter();
   }
 
-  function readApple2MappedMemory(start, length) {
+  function readApple2MappedMemory(start: any, length: any) {
     return lazy.getApple2MemoryController().readApple2MappedMemory(start, length);
   }
 
@@ -549,11 +549,11 @@ export function createControllerRegistry(options = {}) {
     lazy.getApple2MemoryController().refreshMemoryView();
   }
 
-  function queueApple2Key(value) {
+  function queueApple2Key(value: any) {
     lazy.getSimLoopController().queueApple2Key(value);
   }
 
-  function runApple2Cycles(cycles) {
+  function runApple2Cycles(cycles: any) {
     lazy.getSimLoopController().runApple2Cycles(cycles);
   }
 
@@ -591,7 +591,7 @@ export function createControllerRegistry(options = {}) {
     return lazy.getSimRuntimeController().ensureBackendInstance(backend);
   }
 
-  async function initializeSimulator(options = {}) {
+  async function initializeSimulator(options: any = {}) {
     return lazy.getSimInitializerController().initializeSimulator(options);
   }
 
@@ -599,7 +599,7 @@ export function createControllerRegistry(options = {}) {
     return lazy.getRunnerActionsController().loadSample(samplePathOverride);
   }
 
-  async function loadRunnerPreset(options = {}) {
+  async function loadRunnerPreset(options: any = {}) {
     return lazy.getRunnerActionsController().loadRunnerPreset(options);
   }
 

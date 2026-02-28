@@ -16,7 +16,7 @@ export function createApple2DomainController({
   loadLastSavedApple2Dump,
   loadKaratekaDump,
   resetApple2WithMemoryVectorOverride
-} = {}) {
+}: any = {}) {
   return {
     isUiEnabled: isApple2UiEnabled,
     updateIoToggleUi,

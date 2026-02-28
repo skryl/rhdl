@@ -6,10 +6,10 @@ export const shellActionTypes = {
 };
 
 export const shellActions = {
-  setTheme: (theme) => ({ type: shellActionTypes.SET_THEME, payload: theme }),
-  setActiveTab: (tabId) => ({ type: shellActionTypes.SET_ACTIVE_TAB, payload: tabId }),
-  setSidebarCollapsed: (collapsed) => ({ type: shellActionTypes.SET_SIDEBAR_COLLAPSED, payload: !!collapsed }),
-  setTerminalOpen: (open) => ({ type: shellActionTypes.SET_TERMINAL_OPEN, payload: !!open })
+  setTheme: (theme: any) => ({ type: shellActionTypes.SET_THEME, payload: theme }),
+  setActiveTab: (tabId: any) => ({ type: shellActionTypes.SET_ACTIVE_TAB, payload: tabId }),
+  setSidebarCollapsed: (collapsed: any) => ({ type: shellActionTypes.SET_SIDEBAR_COLLAPSED, payload: !!collapsed }),
+  setTerminalOpen: (open: any) => ({ type: shellActionTypes.SET_TERMINAL_OPEN, payload: !!open })
 };
 
 export function createShellStateSlice() {
@@ -39,7 +39,7 @@ export function createShellStateSlice() {
   };
 }
 
-export function reduceShellState(state, action = {}) {
+export function reduceShellState(state: any, action: any = {}) {
   switch (action.type) {
     case shellActionTypes.SET_THEME:
       state.theme = String(action.payload || state.theme || '');

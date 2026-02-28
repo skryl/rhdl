@@ -1,11 +1,11 @@
 import { parseBooleanToken } from '../../lib/tokens';
 
-function terminalSupportsUartPassthrough(state) {
+function terminalSupportsUartPassthrough(state: any) {
   const keyboard = state?.apple2?.ioConfig?.keyboard || {};
   return keyboard.enabled !== false && keyboard.mode === 'uart';
 }
 
-export async function handleShellRunnerCommand({ cmd, tokens, context }) {
+export async function handleShellRunnerCommand({ cmd, tokens, context }: any) {
   const {
     dom,
     state,
@@ -136,7 +136,7 @@ export async function handleShellRunnerCommand({ cmd, tokens, context }) {
         throw new Error('Sample selector unavailable.');
       }
       const samplePath = tokens[0];
-      const exists = Array.from(dom.sampleSelect.options).some((opt) => opt.value === samplePath);
+      const exists = Array.from(dom.sampleSelect.options).some((opt: any) => (opt as any).value === samplePath);
       if (!exists) {
         throw new Error(`Unknown sample: ${samplePath}`);
       }

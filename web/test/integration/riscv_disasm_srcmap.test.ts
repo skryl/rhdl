@@ -34,11 +34,11 @@ const MOCK_SRCMAP = {
   }
 };
 
-function setupTestPage(page) {
-  const pageErrors = [];
-  const consoleErrors = [];
+function setupTestPage(page: any) {
+  const pageErrors: any[] = [];
+  const consoleErrors: any[] = [];
 
-  page.on('pageerror', (err) => {
+  page.on('pageerror', (err: any) => {
     const message = String(err?.message || err);
     if (BENIGN_PAGE_ERRORS.some((entry) => message.includes(entry))) {
       return;
@@ -46,7 +46,7 @@ function setupTestPage(page) {
     pageErrors.push(message);
   });
 
-  page.on('console', (msg) => {
+  page.on('console', (msg: any) => {
     if (msg.type() !== 'error') {
       return;
     }
@@ -64,77 +64,77 @@ function setupTestPage(page) {
 }
 
 // Route CDN requests to locally bundled copies.
-async function routeCdnToLocal(page) {
+async function routeCdnToLocal(page: any) {
   const webRoot = resolveWebRoot(import.meta.url);
   const nodeModules = path.resolve(webRoot, 'node_modules');
   const cacheDir = path.join(nodeModules, '.cache');
 
-  await page.route('**/cdn.jsdelivr.net/npm/lit@*/+esm', async (route) => {
+  await page.route('**/cdn.jsdelivr.net/npm/lit@*/+esm', async (route: any) => {
     try {
       const body = await readFile(path.join(cacheDir, 'lit-bundle.mjs'), 'utf-8');
       await route.fulfill({ body, contentType: 'text/javascript; charset=utf-8' });
-    } catch (_err) {
+    } catch (_err: any) {
       await route.abort();
     }
   });
 
-  await page.route('**/cdn.jsdelivr.net/npm/lit-html@*/+esm', async (route) => {
+  await page.route('**/cdn.jsdelivr.net/npm/lit-html@*/+esm', async (route: any) => {
     try {
       const body = await readFile(path.join(cacheDir, 'lit-html-bundle.mjs'), 'utf-8');
       await route.fulfill({ body, contentType: 'text/javascript; charset=utf-8' });
-    } catch (_err) {
+    } catch (_err: any) {
       await route.abort();
     }
   });
 
-  await page.route('**/cdn.jsdelivr.net/npm/redux@*/dist/redux.min.js', async (route) => {
+  await page.route('**/cdn.jsdelivr.net/npm/redux@*/dist/redux.min.js', async (route: any) => {
     try {
       const body = await readFile(path.join(nodeModules, 'redux', 'dist', 'redux.min.js'), 'utf-8');
       await route.fulfill({ body, contentType: 'text/javascript; charset=utf-8' });
-    } catch (_err) {
+    } catch (_err: any) {
       await route.abort();
     }
   });
 
-  await page.route('**/cdn.jsdelivr.net/npm/p5@*/lib/p5.min.js', async (route) => {
+  await page.route('**/cdn.jsdelivr.net/npm/p5@*/lib/p5.min.js', async (route: any) => {
     await route.fulfill({
       body: 'window.p5 = class p5 { constructor() {} };',
       contentType: 'text/javascript; charset=utf-8'
     });
   });
 
-  await page.route('**/cdn.jsdelivr.net/npm/cytoscape@*/dist/cytoscape.min.js', async (route) => {
+  await page.route('**/cdn.jsdelivr.net/npm/cytoscape@*/dist/cytoscape.min.js', async (route: any) => {
     await route.fulfill({
       body: 'window.cytoscape = function() { return { on() {}, destroy() {} }; };',
       contentType: 'text/javascript; charset=utf-8'
     });
   });
 
-  await page.route('**/cdn.jsdelivr.net/npm/elkjs@*/lib/elk.bundled.js', async (route) => {
+  await page.route('**/cdn.jsdelivr.net/npm/elkjs@*/lib/elk.bundled.js', async (route: any) => {
     await route.fulfill({
       body: 'window.ELK = class ELK { layout() { return Promise.resolve({}); } };',
       contentType: 'text/javascript; charset=utf-8'
     });
   });
 
-  await page.route('**/coi-serviceworker.js', async (route) => {
+  await page.route('**/coi-serviceworker.js', async (route: any) => {
     await route.fulfill({
       body: '/* stub */',
       contentType: 'text/javascript; charset=utf-8'
     });
   });
 
-  await page.route('**/fonts.googleapis.com/**', (route) => route.fulfill({
+  await page.route('**/fonts.googleapis.com/**', (route: any) => route.fulfill({
     body: '',
     contentType: 'text/css'
   }));
-  await page.route('**/fonts.gstatic.com/**', (route) => route.fulfill({
+  await page.route('**/fonts.gstatic.com/**', (route: any) => route.fulfill({
     body: '',
     contentType: 'font/woff2'
   }));
 }
 
-async function loadRiscvRunner(page) {
+async function loadRiscvRunner(page: any) {
   await page.waitForFunction(() => {
     const select = document.querySelector('#runnerSelect');
     if (!(select instanceof HTMLSelectElement)) {
@@ -160,22 +160,22 @@ async function loadRiscvRunner(page) {
   }, null, { timeout: 120000 });
 }
 
-function getDisasmPreText(page) {
-  return page.$eval('#memoryDump', (el) => {
+function getDisasmPreText(page: any) {
+  return page.$eval('#memoryDump', (el: any) => {
     const pre = el?.shadowRoot?.querySelector('#memoryDisasmPre');
     return pre?.textContent || '';
   });
 }
 
-function getShowSourceChecked(page) {
-  return page.$eval('#memoryShowSource', (el) => !!el?.checked);
+function getShowSourceChecked(page: any) {
+  return page.$eval('#memoryShowSource', (el: any) => !!el?.checked);
 }
 
-function getShowSourceDisabled(page) {
-  return page.$eval('#memoryShowSource', (el) => !!el?.disabled);
+function getShowSourceDisabled(page: any) {
+  return page.$eval('#memoryShowSource', (el: any) => !!el?.disabled);
 }
 
-async function navigateToMemoryAndRefresh(page) {
+async function navigateToMemoryAndRefresh(page: any) {
   await page.click('[data-tab="memoryTab"]');
   await page.fill('#memoryStart', '0x80000000');
   await page.fill('#memoryLength', '256');
@@ -197,7 +197,7 @@ test('riscv disassembly and source map integration', { timeout: 300000, concurre
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
@@ -211,7 +211,7 @@ test('riscv disassembly and source map integration', { timeout: 300000, concurre
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }

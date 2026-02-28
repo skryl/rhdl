@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { toBigInt, parseNumeric } from '../../../../app/core/lib/numeric_utils';
 import { createWatchManager } from '../../../../app/components/watch/managers/manager';
 
-function maskForWidth(width) {
+function maskForWidth(width: any) {
   const w = Number(width) || 1;
   if (w >= 64) {
     return (1n << 64n) - 1n;
@@ -16,46 +16,46 @@ function setupHarness({
   hasSim = true,
   signalMap = new Map([['sig_a', 1]]),
   widths = new Map([['sig_a', 3]])
-} = {}) {
-  const state = {
+}: any = {}) {
+  const state: any = {
     watches: new Map(),
     watchRows: [],
     breakpoints: []
   };
 
-  const traceAdded = [];
+  const traceAdded: any[] = [];
   const runtime = {
     irMeta: { widths },
     sim: hasSim
       ? {
           features: { hasSignalIndex: true },
-          get_signal_idx: (name) => (signalMap.has(name) ? signalMap.get(name) : -1),
-          has_signal: (name) => signalMap.has(name),
-          trace_add_signal: (name) => traceAdded.push(name),
-          peek_by_idx: (idx) => BigInt(idx),
+          get_signal_idx: (name: any) => (signalMap.has(name) ? signalMap.get(name) : -1),
+          has_signal: (name: any) => signalMap.has(name),
+          trace_add_signal: (name: any) => traceAdded.push(name),
+          peek_by_idx: (idx: any) => BigInt(idx),
           peek: () => 0n
         }
       : null
   };
 
-  const scheduleCalls = [];
-  const logs = [];
-  const renderCalls = {
+  const scheduleCalls: any[] = [];
+  const logs: any[] = [];
+  const renderCalls: any = {
     table: [],
     list: [],
     bps: []
   };
 
   const storeActions = {
-    watchSet: (name, info) => ({ type: 'watchSet', name, info }),
-    watchRemove: (name) => ({ type: 'watchRemove', name }),
+    watchSet: (name: any, info: any) => ({ type: 'watchSet', name, info }),
+    watchRemove: (name: any) => ({ type: 'watchRemove', name }),
     watchClear: () => ({ type: 'watchClear' }),
-    breakpointAddOrReplace: (bp) => ({ type: 'breakpointAddOrReplace', bp }),
+    breakpointAddOrReplace: (bp: any) => ({ type: 'breakpointAddOrReplace', bp }),
     breakpointClear: () => ({ type: 'breakpointClear' })
   };
 
   const appStore = {
-    dispatch(action) {
+    dispatch(action: any) {
       switch (action.type) {
         case 'watchSet':
           state.watches.set(action.name, action.info);
@@ -67,7 +67,7 @@ function setupHarness({
           state.watches.clear();
           break;
         case 'breakpointAddOrReplace': {
-          const next = state.breakpoints.filter((bp) => bp.name !== action.bp.name);
+          const next = state.breakpoints.filter((bp: any) => bp.name !== action.bp.name);
           next.push(action.bp);
           state.breakpoints = next;
           break;
@@ -87,15 +87,15 @@ function setupHarness({
     runtime,
     appStore,
     storeActions,
-    formatValue: (value) => String(value),
+    formatValue: (value: any) => String(value),
     parseNumeric,
     maskForWidth,
     toBigInt,
-    log: (message) => logs.push(message),
-    scheduleReduxUxSync: (reason) => scheduleCalls.push(reason),
-    renderWatchTableRows: (_dom, rows) => renderCalls.table.push(rows),
-    renderWatchListItems: (_dom, names) => renderCalls.list.push(names),
-    renderBreakpointListItems: (_dom, bps) => renderCalls.bps.push(bps)
+    log: (message: any) => logs.push(message),
+    scheduleReduxUxSync: (reason: any) => scheduleCalls.push(reason),
+    renderWatchTableRows: (_dom: any, rows: any) => renderCalls.table.push(rows),
+    renderWatchListItems: (_dom: any, names: any) => renderCalls.list.push(names),
+    renderBreakpointListItems: (_dom: any, bps: any) => renderCalls.bps.push(bps)
   });
 
   return { manager, state, runtime, logs, scheduleCalls, renderCalls, traceAdded };
@@ -139,7 +139,7 @@ test('addBreakpointSignal masks values and stores breakpoint entry', () => {
 test('checkBreakpoints returns matching signal and value', () => {
   const { manager, state, runtime } = setupHarness();
   state.breakpoints = [{ name: 'sig_a', idx: 1, width: 1, value: 1n }];
-  runtime.sim.peek_by_idx = () => 1n;
+  runtime.sim!.peek_by_idx = () => 1n;
   const hit = manager.checkBreakpoints();
   assert.deepEqual(hit, { signal: 'sig_a', value: 1n });
 });

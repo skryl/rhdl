@@ -1,4 +1,4 @@
-export function safeSlugToken(value) {
+export function safeSlugToken(value: any) {
   return String(value || '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '_')
@@ -6,7 +6,7 @@ export function safeSlugToken(value) {
     || 'panel';
 }
 
-export function normalizeDashboardSpan(value, fallback = 'full') {
+export function normalizeDashboardSpan(value: any, fallback = 'full') {
   if (value === 'half') {
     return 'half';
   }
@@ -16,14 +16,14 @@ export function normalizeDashboardSpan(value, fallback = 'full') {
   return fallback === 'half' ? 'half' : 'full';
 }
 
-export function dashboardRowSignature(rowPanels) {
+export function dashboardRowSignature(rowPanels: any) {
   return rowPanels
-    .map((panel) => String(panel?.dataset?.layoutItemId || '').trim())
+    .map((panel: any) => String(panel?.dataset?.layoutItemId || '').trim())
     .filter(Boolean)
     .join('|');
 }
 
-export function dashboardDropPosition(panel, event) {
+export function dashboardDropPosition(panel: any, event: any) {
   const rect = panel.getBoundingClientRect();
   const x = event.clientX - rect.left;
   const y = event.clientY - rect.top;

@@ -1,4 +1,4 @@
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createApple2AudioRuntimeService requires function: ${name}`);
   }
@@ -10,7 +10,7 @@ export function createApple2AudioRuntimeService({
   updateIoToggleUi,
   log = () => {},
   windowRef = globalThis.window
-} = {}) {
+}: any = {}) {
   if (!state) {
     throw new Error('createApple2AudioRuntimeService requires state');
   }
@@ -46,7 +46,7 @@ export function createApple2AudioRuntimeService({
     return true;
   }
 
-  async function setApple2SoundEnabled(enabled) {
+  async function setApple2SoundEnabled(enabled: any) {
     setApple2SoundEnabledState(!!enabled);
     updateIoToggleUi();
 
@@ -66,14 +66,14 @@ export function createApple2AudioRuntimeService({
 
     try {
       await state.apple2.audioCtx.resume();
-    } catch (err) {
+    } catch (err: any) {
       setApple2SoundEnabledState(false);
       updateIoToggleUi();
       log(`Failed to enable audio: ${err.message || err}`);
     }
   }
 
-  function updateApple2SpeakerAudio(toggles, cyclesRun) {
+  function updateApple2SpeakerAudio(toggles: any, cyclesRun: any) {
     if (!state.apple2.soundEnabled) {
       return;
     }

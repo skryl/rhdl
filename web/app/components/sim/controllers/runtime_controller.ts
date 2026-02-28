@@ -1,4 +1,4 @@
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createSimRuntimeController requires function: ${name}`);
   }
@@ -11,7 +11,7 @@ export function createSimRuntimeController({
   currentRunnerPreset = null,
   fetchImpl = globalThis.fetch,
   webAssemblyApi = globalThis.WebAssembly
-} = {}) {
+}: any = {}) {
   if (!state || !runtime) {
     throw new Error('createSimRuntimeController requires state and runtime');
   }
@@ -60,7 +60,7 @@ export function createSimRuntimeController({
         const streamResponse = typeof response.clone === 'function' ? response.clone() : response;
         const result = await webAssemblyApi.instantiateStreaming(streamResponse, {});
         return result.instance;
-      } catch (_err) {
+      } catch (_err: any) {
         // Fall back to instantiate(bytes).
       }
     }
@@ -96,7 +96,7 @@ export function createSimRuntimeController({
     }
   }
 
-  function initializeTrace(options = {}) {
+  function initializeTrace(options: any = {}) {
     if (!runtime.sim) {
       return;
     }

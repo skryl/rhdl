@@ -8,7 +8,7 @@ function makeTarget() {
 }
 
 test('bindDashboardPanelEvents wires and tears down drag/drop handlers', () => {
-  const calls = [];
+  const calls: any[] = [];
   const header = makeTarget();
   const panel = makeTarget();
 

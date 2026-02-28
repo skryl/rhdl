@@ -1,7 +1,7 @@
 export function createListenerGroup() {
-  const removers = [];
+  const removers: any[] = [];
 
-  function on(target, type, handler, options = undefined) {
+  function on(target: any, type: any, handler: any, options = undefined) {
     if (!target || typeof target.addEventListener !== 'function' || typeof handler !== 'function') {
       return () => {};
     }
@@ -19,7 +19,7 @@ export function createListenerGroup() {
       const off = removers.pop();
       try {
         off();
-      } catch (_err) {
+      } catch (_err: any) {
         // Ignore listener cleanup errors; this is best-effort teardown.
       }
     }

@@ -11,7 +11,7 @@ const BENIGN_PAGE_ERRORS = [
   'Failed to execute \'drawImage\' on \'CanvasRenderingContext2D\': The image argument is a canvas element with a width or height of 0.'
 ];
 
-async function loadCpuRunner(page) {
+async function loadCpuRunner(page: any) {
   await page.waitForFunction(() => {
     const select = document.querySelector('#runnerSelect');
     if (!(select instanceof HTMLSelectElement)) {
@@ -38,7 +38,7 @@ test('8bit cpu runner auto-loads default bin and logs it', { timeout: 180000 }, 
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
@@ -52,7 +52,7 @@ test('8bit cpu runner auto-loads default bin and logs it', { timeout: 180000 }, 
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }
@@ -61,8 +61,8 @@ test('8bit cpu runner auto-loads default bin and logs it', { timeout: 180000 }, 
   });
 
   const page = await browser.newPage();
-  const pageErrors = [];
-  const consoleErrors = [];
+  const pageErrors: any[] = [];
+  const consoleErrors: any[] = [];
 
   page.on('pageerror', (err) => {
     const message = String(err?.message || err);
@@ -81,20 +81,20 @@ test('8bit cpu runner auto-loads default bin and logs it', { timeout: 180000 }, 
   await page.waitForSelector('#simStatus', { timeout: 20000 });
   await loadCpuRunner(page);
 
-  const selectedBackend = await page.$eval('#backendSelect', (el) => el.value);
+  const selectedBackend = await page.$eval('#backendSelect', (el: any) => el.value);
   assert.equal(selectedBackend, 'compiler');
 
   await page.waitForFunction(() => {
-    const stepTicks = document.querySelector('#stepTicks')?.value || '';
-    const runBatch = document.querySelector('#runBatch')?.value || '';
-    const uiUpdateCycles = document.querySelector('#uiUpdateCycles')?.value || '';
+    const stepTicks = (document.querySelector('#stepTicks') as any)?.value || '';
+    const runBatch = (document.querySelector('#runBatch') as any)?.value || '';
+    const uiUpdateCycles = (document.querySelector('#uiUpdateCycles') as any)?.value || '';
     return stepTicks === '100' && runBatch === '2000' && uiUpdateCycles === '2000';
   }, null, { timeout: 30000 });
 
   const perfDefaults = await page.evaluate(() => ({
-    stepTicks: document.querySelector('#stepTicks')?.value || '',
-    runBatch: document.querySelector('#runBatch')?.value || '',
-    uiUpdateCycles: document.querySelector('#uiUpdateCycles')?.value || ''
+    stepTicks: (document.querySelector('#stepTicks') as any)?.value || '',
+    runBatch: (document.querySelector('#runBatch') as any)?.value || '',
+    uiUpdateCycles: (document.querySelector('#uiUpdateCycles') as any)?.value || ''
   }));
   assert.equal(perfDefaults.stepTicks, '100');
   assert.equal(perfDefaults.runBatch, '2000');

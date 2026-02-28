@@ -8,7 +8,7 @@ import {
   shouldRefreshUiAfterRun
 } from './loop_runtime_service';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createSimLoopRunnerService requires function: ${name}`);
   }
@@ -39,7 +39,7 @@ export function createSimLoopRunnerService({
   nowMs = () => (globalThis.performance && typeof globalThis.performance.now === 'function'
     ? globalThis.performance.now()
     : Date.now())
-} = {}) {
+}: any = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('createSimLoopRunnerService requires dom/state/runtime');
   }
@@ -121,7 +121,7 @@ export function createSimLoopRunnerService({
     return runtime.sim.memory_read_byte(addr & 0xFFFF, { mapped: true }) & 0xFF;
   }
 
-  function pollMappedSound(cyclesRun) {
+  function pollMappedSound(cyclesRun: any) {
     const soundCfg = currentIoConfig().sound || {};
     if (!soundCfg.enabled || soundCfg.mode !== 'memory_mapped') {
       state.apple2.lastMappedSoundValue = null;
@@ -149,7 +149,7 @@ export function createSimLoopRunnerService({
     updateApple2SpeakerAudio(toggles, Math.max(1, cyclesRun));
   }
 
-  function runGenericCycles(cycles) {
+  function runGenericCycles(cycles: any) {
     const ticks = Math.max(0, Number.parseInt(cycles, 10) || 0);
     const clk = selectedClock();
     if (clk) {
@@ -164,7 +164,7 @@ export function createSimLoopRunnerService({
     }
   }
 
-  function queueApple2Key(value) {
+  function queueApple2Key(value: any) {
     if (!isApple2UiEnabled()) {
       return;
     }
@@ -212,7 +212,7 @@ export function createSimLoopRunnerService({
     refreshStatus();
   }
 
-  function runApple2Cycles(cycles) {
+  function runApple2Cycles(cycles: any) {
     if (!runtime.sim || !isApple2UiEnabled()) {
       return;
     }
@@ -289,7 +289,7 @@ export function createSimLoopRunnerService({
         }
         setCycleState(state.cycle + ticks);
       }
-    } catch (err) {
+    } catch (err: any) {
       log(`Step error: ${err.message || err}`);
       setRunningState(false);
     }
@@ -341,7 +341,7 @@ export function createSimLoopRunnerService({
         setRunningState(false);
         log(`Breakpoint hit at cycle ${state.cycle}: ${hit.signal}=${formatValue(hit.value, 64)}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       setRunningState(false);
       log(`Run error: ${err.message || err}`);
     }

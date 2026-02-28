@@ -1,11 +1,11 @@
 export const DUMP_ASSET_EXTENSIONS = Object.freeze(['.bin', '.mem', '.dat', '.rhdlsnap', '.snapshot']);
 
-function extensionAllowed(pathValue) {
+function extensionAllowed(pathValue: any) {
   const lower = String(pathValue || '').toLowerCase();
   return DUMP_ASSET_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
-function normalizeAssetPathPrefix(pathValue) {
+function normalizeAssetPathPrefix(pathValue: any) {
   if (pathValue.startsWith('./')) {
     return pathValue;
   }
@@ -15,12 +15,12 @@ function normalizeAssetPathPrefix(pathValue) {
   return pathValue;
 }
 
-export function normalizeDumpAssetPath(rawPath) {
+export function normalizeDumpAssetPath(rawPath: any) {
   const normalized = normalizeAssetPathPrefix(String(rawPath || '').trim().replace(/\\/g, '/'));
   return normalized.replace(/\/{2,}/g, '/');
 }
 
-export function isDumpAssetPath(pathValue) {
+export function isDumpAssetPath(pathValue: any) {
   const normalized = normalizeDumpAssetPath(pathValue);
   if (!normalized || !normalized.startsWith('./assets/')) {
     return false;
@@ -37,11 +37,11 @@ function createTreeNode(name = '', path = '') {
   };
 }
 
-function sortByName(a, b) {
+function sortByName(a: any, b: any) {
   return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
 }
 
-function materializeTree(node) {
+function materializeTree(node: any): any {
   return {
     name: node.name,
     path: node.path,
@@ -75,7 +75,7 @@ export function createDumpAssetTree(paths = []) {
       }
       node = node.dirs.get(dirName);
     }
-    node.files.push({
+    (node.files as any[]).push({
       name: fileName,
       path: normalizedPath
     });

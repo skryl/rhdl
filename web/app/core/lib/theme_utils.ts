@@ -1,12 +1,12 @@
-export function normalizeTheme(theme) {
+export function normalizeTheme(theme: any) {
   return theme === 'original' ? 'original' : 'shenzhen';
 }
 
-export function waveformFontFamily(theme) {
+export function waveformFontFamily(theme: any) {
   return normalizeTheme(theme) === 'shenzhen' ? 'Share Tech Mono' : 'IBM Plex Mono';
 }
 
-export function waveformPalette(theme) {
+export function waveformPalette(theme: any) {
   if (normalizeTheme(theme) === 'shenzhen') {
     return {
       bg: [8, 20, 18],

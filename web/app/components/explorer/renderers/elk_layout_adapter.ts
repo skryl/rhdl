@@ -19,7 +19,7 @@ export function elkPortLayoutOptions() {
   };
 }
 
-export function toElkPortSide(side) {
+export function toElkPortSide(side: any) {
   const raw = String(side || '').toLowerCase();
   if (raw === 'left') return 'WEST';
   if (raw === 'right') return 'EAST';
@@ -28,7 +28,7 @@ export function toElkPortSide(side) {
   return 'WEST';
 }
 
-export function buildElkGraph(renderList) {
+export function buildElkGraph(renderList: any) {
   const children = [];
 
   // Group pins by symbolId
@@ -42,7 +42,7 @@ export function buildElkGraph(renderList) {
 
   // Symbols as children with ports
   for (const sym of renderList.symbols) {
-    const ports = (pinsBySymbol.get(sym.id) || []).map(pin => ({
+    const ports = (pinsBySymbol.get(sym.id) || []).map((pin: any) => ({
       id: pin.id,
       width: Math.max(8, pin.width || 12),
       height: Math.max(6, pin.height || 8),
@@ -91,7 +91,7 @@ export function buildElkGraph(renderList) {
   };
 }
 
-export function applyElkResult(renderList, elkResult) {
+export function applyElkResult(renderList: any, elkResult: any) {
   if (!renderList || !elkResult || !Array.isArray(elkResult.children)) return;
 
   const childById = new Map();
@@ -157,7 +157,7 @@ export function applyElkResult(renderList, elkResult) {
   }
 }
 
-export async function runElkLayout(renderList, ELK) {
+export async function runElkLayout(renderList: any, ELK: any) {
   if (!renderList || typeof ELK !== 'function') {
     return { engine: 'missing' };
   }
@@ -171,7 +171,7 @@ export async function runElkLayout(renderList, ELK) {
     }
     applyElkResult(renderList, result);
     return { engine: 'elk' };
-  } catch (_err) {
+  } catch (_err: any) {
     return { engine: 'error' };
   }
 }

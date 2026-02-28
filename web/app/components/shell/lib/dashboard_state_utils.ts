@@ -1,4 +1,4 @@
-export function parseDashboardLayouts(raw) {
+export function parseDashboardLayouts(raw: any) {
   if (typeof raw !== 'string' || !raw.trim()) {
     return {};
   }
@@ -8,17 +8,17 @@ export function parseDashboardLayouts(raw) {
       return {};
     }
     return parsed;
-  } catch (_err) {
+  } catch (_err: any) {
     return {};
   }
 }
 
-export function serializeDashboardLayouts(layouts) {
+export function serializeDashboardLayouts(layouts: any) {
   const value = layouts && typeof layouts === 'object' ? layouts : {};
   return JSON.stringify(value);
 }
 
-export function withDashboardRowHeight(layout, signature, heightPx, minHeight) {
+export function withDashboardRowHeight(layout: any, signature: any, heightPx: any, minHeight: any) {
   if (!signature) {
     return layout && typeof layout === 'object' ? layout : {};
   }

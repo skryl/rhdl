@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 
 import { disassemble6502Lines, format6502Operand } from '../../../../app/components/apple2/lib/mos6502_disasm';
 
-function makeReadMemory(memory) {
-  return (start, length) => {
+function makeReadMemory(memory: any) {
+  return (start: any, length: any) => {
     const out = new Uint8Array(length);
     for (let i = 0; i < length; i += 1) {
       out[i] = memory[(start + i) & 0xffff] || 0;
@@ -17,7 +17,7 @@ test('format6502Operand decodes representative addressing modes', () => {
   const mem = new Uint8Array(0x10000);
   mem[0x1001] = 0x34;
   mem[0x1002] = 0x12;
-  const readByte = (addr) => mem[addr & 0xffff];
+  const readByte = (addr: any) => mem[addr & 0xffff];
 
   assert.deepEqual(format6502Operand('imm', 0x1000, readByte), { bytes: 2, operand: '#$34' });
   assert.deepEqual(format6502Operand('abs', 0x1000, readByte), { bytes: 3, operand: '$1234' });

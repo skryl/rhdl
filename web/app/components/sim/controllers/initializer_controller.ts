@@ -5,13 +5,13 @@ import {
   initializeApple2Mode
 } from '../services/initializer_runtime_service';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createSimInitializerController requires function: ${name}`);
   }
 }
 
-function resolveTraceEnabledOnLoad(preset = null) {
+function resolveTraceEnabledOnLoad(preset: any = null) {
   if (!preset || typeof preset !== 'object') {
     return false;
   }
@@ -62,7 +62,7 @@ export function createSimInitializerController({
   fetchImpl = globalThis.fetch,
   requestFrame = globalThis.requestAnimationFrame,
   setTimeoutImpl = globalThis.setTimeout
-} = {}) {
+}: any = {}) {
   if (!dom || !state || !runtime || !appStore || !storeActions) {
     throw new Error('createSimInitializerController requires dom/state/runtime/appStore/storeActions');
   }
@@ -97,7 +97,7 @@ export function createSimInitializerController({
   requireFn('fetchImpl', fetchImpl);
 
   async function waitForUiPaint() {
-    await new Promise((resolve) => {
+    await new Promise<void>((resolve) => {
       let settled = false;
       const finish = () => {
         if (settled) {
@@ -133,7 +133,7 @@ export function createSimInitializerController({
     });
   }
 
-  async function initializeSimulator(options = {}) {
+  async function initializeSimulator(options: any = {}) {
     const shouldYieldToUi = options.yieldToUi === true;
     const deferComponentExplorerRebuild = options.deferComponentExplorerRebuild === true;
     const transferChunkBytes = Number.parseInt(options.transferChunkBytes, 10);
@@ -229,7 +229,7 @@ export function createSimInitializerController({
       }
       refreshStatus();
       log('Simulator initialized');
-    } catch (err) {
+    } catch (err: any) {
       log(`Initialization failed: ${err.message || err}`);
     }
   }

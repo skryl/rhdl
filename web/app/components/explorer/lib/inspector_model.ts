@@ -5,7 +5,7 @@ import {
   summarizeIrNode
 } from './model_utils';
 
-export function findComponentSourceEntry(state, node, model = null) {
+export function findComponentSourceEntry(state: any, node: any, model: any = null) {
   if (!node) {
     return null;
   }
@@ -55,11 +55,11 @@ export function findComponentSourceEntry(state, node, model = null) {
   return null;
 }
 
-export function normalizeComponentCodeView(view) {
+export function normalizeComponentCodeView(view: any) {
   return view === 'verilog' ? 'verilog' : 'rhdl';
 }
 
-export function formatSourceBackedComponentCode(state, node, view = 'rhdl', model = null) {
+export function formatSourceBackedComponentCode(state: any, node: any, view = 'rhdl', model = null) {
   const entry = findComponentSourceEntry(state, node, model);
   if (!entry) {
     return null;
@@ -118,7 +118,7 @@ export function formatSourceBackedComponentCode(state, node, view = 'rhdl', mode
   return null;
 }
 
-export function formatComponentCode(node) {
+export function formatComponentCode(node: any) {
   if (!node) {
     return 'Select a component to view details.';
   }
@@ -135,7 +135,7 @@ export function formatComponentCode(node) {
   if (node.signals.length > 0) {
     const maxRows = 240;
     sections.push('// Signals');
-    const rows = node.signals.slice(0, maxRows).map((signal) => {
+    const rows = node.signals.slice(0, maxRows).map((signal: any) => {
       const direction = signal.direction ? ` (${signal.direction})` : '';
       return `${signal.kind.padEnd(6)} ${signal.fullName.padEnd(48)} width=${String(signal.width).padStart(2)}${direction}`;
     });
@@ -151,7 +151,7 @@ export function formatComponentCode(node) {
   return sections.join('\n\n');
 }
 
-export function componentSignalLookup(node) {
+export function componentSignalLookup(node: any) {
   const lookup = new Map();
   if (!node) {
     return lookup;
@@ -178,7 +178,7 @@ export function resolveNodeSignalRef({
   signalName,
   width = 1,
   signalSet = null
-} = {}) {
+}: any = {}) {
   const localName = String(signalName || '').trim();
   if (!localName) {
     return null;
@@ -210,7 +210,7 @@ export function resolveNodeSignalRef({
   };
 }
 
-export function collectExprSignalNames(expr, out = new Set(), maxSignals = 20) {
+export function collectExprSignalNames(expr: any, out = new Set(), maxSignals = 20) {
   if (out.size >= maxSignals || expr == null) {
     return out;
   }
@@ -243,7 +243,7 @@ export function collectExprSignalNames(expr, out = new Set(), maxSignals = 20) {
   return out;
 }
 
-export function findComponentSchematicEntry(state, node) {
+export function findComponentSchematicEntry(state: any, node: any) {
   if (!node) {
     return null;
   }
@@ -255,7 +255,7 @@ export function findComponentSchematicEntry(state, node) {
   return byPath.get(path) || null;
 }
 
-export function summarizeExpr(expr) {
+export function summarizeExpr(expr: any): any {
   if (expr == null) {
     return '-';
   }
@@ -263,7 +263,7 @@ export function summarizeExpr(expr) {
     return String(expr);
   }
   if (Array.isArray(expr)) {
-    const preview = expr.slice(0, 3).map((entry) => summarizeExpr(entry)).join(', ');
+    const preview: any = expr.slice(0, 3).map((entry: any) => summarizeExpr(entry)).join(', ');
     return `[${preview}${expr.length > 3 ? ', ...' : ''}]`;
   }
   if (typeof expr !== 'object') {
@@ -291,8 +291,8 @@ export function summarizeExpr(expr) {
   return JSON.stringify(summarizeIrEntry(expr));
 }
 
-export function collectConnectionRows(state, node) {
-  const rows = [];
+export function collectConnectionRows(state: any, node: any) {
+  const rows: any[] = [];
   const schematicEntry = findComponentSchematicEntry(state, node);
   const schematic = schematicEntry?.schematic;
   if (schematic && typeof schematic === 'object') {
@@ -301,16 +301,16 @@ export function collectConnectionRows(state, node) {
     const nets = Array.isArray(schematic.nets) ? schematic.nets : [];
     const wires = Array.isArray(schematic.wires) ? schematic.wires : [];
     if (wires.length > 0) {
-      const symbolById = new Map(symbols.map((entry) => [String(entry?.id || ''), entry]).filter(([id]) => !!id));
-      const pinById = new Map(pins.map((entry) => [String(entry?.id || ''), entry]).filter(([id]) => !!id));
-      const netById = new Map(nets.map((entry) => [String(entry?.id || ''), entry]).filter(([id]) => !!id));
+      const symbolById = new Map(symbols.map((entry: any) => [String(entry?.id || ''), entry]).filter(([id]: any) => !!id));
+      const pinById = new Map(pins.map((entry: any) => [String(entry?.id || ''), entry]).filter(([id]: any) => !!id));
+      const netById = new Map(nets.map((entry: any) => [String(entry?.id || ''), entry]).filter(([id]: any) => !!id));
 
-      const pinLabel = (pinId) => {
-        const pin = pinById.get(String(pinId || ''));
+      const pinLabel = (pinId: any) => {
+        const pin: any = pinById.get(String(pinId || ''));
         if (!pin) {
           return String(pinId || '?');
         }
-        const symbol = symbolById.get(String(pin.symbol_id || ''));
+        const symbol: any = symbolById.get(String(pin.symbol_id || ''));
         const symbolName = String(symbol?.label || symbol?.id || pin.symbol_id || '?');
         const pinName = String(pin.name || pin.signal || pin.id || '?');
         return `${symbolName}.${pinName}`;
@@ -325,7 +325,7 @@ export function collectConnectionRows(state, node) {
         if (!fromPinId || !toPinId) {
           continue;
         }
-        const net = netById.get(String(wire.net_id || '').trim());
+        const net: any = netById.get(String(wire.net_id || '').trim());
         const netName = String(net?.name || wire.signal || '?');
         const width = Number.parseInt(wire.width || net?.width, 10) || 1;
         const direction = String(wire.direction || '?').toLowerCase();

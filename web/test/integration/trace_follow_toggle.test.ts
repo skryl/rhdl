@@ -11,7 +11,7 @@ const BENIGN_PAGE_ERRORS = [
   'Failed to execute \'drawImage\' on \'CanvasRenderingContext2D\': The image argument is a canvas element with a width or height of 0.'
 ];
 
-async function loadApple2Runner(page) {
+async function loadApple2Runner(page: any) {
   await page.click('#loadRunnerBtn');
 
   await page.waitForFunction(() => {
@@ -25,7 +25,7 @@ test('run-loop follower updates stay disabled until tracing is enabled', { timeo
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
@@ -39,7 +39,7 @@ test('run-loop follower updates stay disabled until tracing is enabled', { timeo
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }
@@ -48,8 +48,8 @@ test('run-loop follower updates stay disabled until tracing is enabled', { timeo
   });
 
   const page = await browser.newPage();
-  const pageErrors = [];
-  const consoleErrors = [];
+  const pageErrors: any[] = [];
+  const consoleErrors: any[] = [];
 
   page.on('pageerror', (err) => {
     const message = String(err?.message || err);
@@ -73,11 +73,11 @@ test('run-loop follower updates stay disabled until tracing is enabled', { timeo
 
   await page.click('#runBtn');
   await page.waitForFunction(() => {
-    const ux = window.__RHDL_UX_STATE__;
+    const ux = (window as any).__RHDL_UX_STATE__;
     return !!ux && ux.running === true && Number(ux.cycle) >= 40;
   }, null, { timeout: 120000 });
 
-  const pendingWhileTraceDisabled = await page.evaluate(() => Number(window.__RHDL_UX_STATE__?.uiCyclesPending || 0));
+  const pendingWhileTraceDisabled = await page.evaluate(() => Number((window as any).__RHDL_UX_STATE__?.uiCyclesPending || 0));
   assert.ok(
     pendingWhileTraceDisabled >= 20,
     `expected pending cycles to accumulate with trace disabled, got ${pendingWhileTraceDisabled}`
@@ -85,7 +85,7 @@ test('run-loop follower updates stay disabled until tracing is enabled', { timeo
 
   await page.click('#pauseBtn');
   await page.waitForFunction(() => {
-    const ux = window.__RHDL_UX_STATE__;
+    const ux = (window as any).__RHDL_UX_STATE__;
     return !!ux && ux.running === false;
   }, null, { timeout: 120000 });
 
@@ -95,17 +95,17 @@ test('run-loop follower updates stay disabled until tracing is enabled', { timeo
     return text.includes('Trace enabled');
   }, null, { timeout: 120000 });
 
-  const baselineCycle = await page.evaluate(() => Number(window.__RHDL_UX_STATE__?.cycle || 0));
+  const baselineCycle = await page.evaluate(() => Number((window as any).__RHDL_UX_STATE__?.cycle || 0));
   await page.click('#runBtn');
   await page.waitForFunction((baseline) => {
-    const ux = window.__RHDL_UX_STATE__;
+    const ux = (window as any).__RHDL_UX_STATE__;
     return !!ux
       && ux.running === true
       && Number(ux.cycle) >= (Number(baseline) + 40)
       && Number(ux.uiCyclesPending) === 0;
   }, baselineCycle, { timeout: 120000 });
 
-  const pendingWhileTraceEnabled = await page.evaluate(() => Number(window.__RHDL_UX_STATE__?.uiCyclesPending || 0));
+  const pendingWhileTraceEnabled = await page.evaluate(() => Number((window as any).__RHDL_UX_STATE__?.uiCyclesPending || 0));
   assert.ok(
     pendingWhileTraceEnabled >= 0 && pendingWhileTraceEnabled < 10,
     `expected pending cycles to stay bounded with trace enabled, got ${pendingWhileTraceEnabled}`
@@ -113,7 +113,7 @@ test('run-loop follower updates stay disabled until tracing is enabled', { timeo
 
   await page.click('#pauseBtn');
   await page.waitForFunction(() => {
-    const ux = window.__RHDL_UX_STATE__;
+    const ux = (window as any).__RHDL_UX_STATE__;
     return !!ux && ux.running === false;
   }, null, { timeout: 120000 });
 

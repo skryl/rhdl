@@ -43,7 +43,7 @@ test('snapshot filename detection supports accepted extensions', () => {
 
 test('buildApple2SnapshotPayload + parseApple2SnapshotPayload preserve fields', () => {
   const bytes = Uint8Array.from([0x11, 0x22, 0x33]);
-  const payload = buildApple2SnapshotPayload(bytes, 0x200, 'test dump', '2026-02-07T00:00:00.000Z', '$B82A');
+  const payload = buildApple2SnapshotPayload(bytes, 0x200, 'test dump', '2026-02-07T00:00:00.000Z' as any, '$B82A' as any);
 
   assert.equal(payload.kind, DEFAULT_APPLE2_SNAPSHOT_KIND);
   assert.equal(payload.version, DEFAULT_APPLE2_SNAPSHOT_VERSION);

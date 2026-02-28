@@ -9,25 +9,25 @@ const DEFAULT_THEME = Object.freeze({
   selectionForeground: '#b5d3ef'
 });
 
-let ghosttyRuntimePromise = null;
+let ghosttyRuntimePromise: any = null;
 
-function resolveAssetUrl(path, { documentRef, globalRef } = {}) {
+function resolveAssetUrl(path: any, { documentRef, globalRef }: any = {}) {
   const base = documentRef?.baseURI || globalRef?.location?.href || 'http://localhost/';
   try {
     return new URL(path, base).href;
-  } catch (_err) {
+  } catch (_err: any) {
     return String(path || '');
   }
 }
 
-function formatErrorMessage(err) {
+function formatErrorMessage(err: any) {
   if (err instanceof Error && err.message) {
     return err.message;
   }
   return String(err ?? 'unknown error');
 }
 
-function isTerminalHostElement(hostElement) {
+function isTerminalHostElement(hostElement: any) {
   if (!hostElement) {
     return false;
   }
@@ -40,7 +40,7 @@ function isTerminalHostElement(hostElement) {
   return true;
 }
 
-function normalizeCssColor(value, { allowTransparent = false } = {}) {
+function normalizeCssColor(value: any, { allowTransparent = false }: any = {}) {
   if (typeof value !== 'string') {
     return '';
   }
@@ -54,7 +54,7 @@ function normalizeCssColor(value, { allowTransparent = false } = {}) {
   return trimmed;
 }
 
-function firstCssColor(values = [], fallback = '') {
+function firstCssColor(values: any[] = [], fallback = '') {
   for (const value of values) {
     const next = normalizeCssColor(value);
     if (next) {
@@ -64,7 +64,7 @@ function firstCssColor(values = [], fallback = '') {
   return fallback;
 }
 
-function cssVar(style, key) {
+function cssVar(style: any, key: any) {
   if (!style || typeof style.getPropertyValue !== 'function') {
     return '';
   }
@@ -75,8 +75,8 @@ function resolveTerminalTheme({
   hostElement,
   documentRef = globalThis.document,
   globalRef = globalThis,
-  overrides = {}
-} = {}) {
+  overrides = {} as any
+}: any = {}) {
   const view = documentRef?.defaultView || globalRef;
   const getComputedStyleFn = typeof view?.getComputedStyle === 'function'
     ? view.getComputedStyle.bind(view)
@@ -131,12 +131,12 @@ function resolveTerminalTheme({
   };
 }
 
-function normalizeTerminalSnapshotText(text) {
+function normalizeTerminalSnapshotText(text: any) {
   const normalized = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   return normalized.replace(/\n/g, '\r\n');
 }
 
-function themeSignature(theme) {
+function themeSignature(theme: any) {
   return JSON.stringify(theme || {});
 }
 
@@ -145,7 +145,7 @@ async function importGhosttyModule({
   fetchImpl = globalThis.fetch,
   documentRef = globalThis.document,
   globalRef = globalThis
-} = {}) {
+}: any = {}) {
   const moduleUrl = resolveAssetUrl(scriptPath, { documentRef, globalRef });
   if (typeof fetchImpl === 'function') {
     const response = await fetchImpl.call(globalRef, moduleUrl);
@@ -156,7 +156,7 @@ async function importGhosttyModule({
   return import(moduleUrl);
 }
 
-async function loadGhosttyRuntimeShared(options = {}) {
+async function loadGhosttyRuntimeShared(options: any = {}) {
   if (!ghosttyRuntimePromise) {
     ghosttyRuntimePromise = (async () => {
       const mod = await importGhosttyModule(options);
@@ -196,7 +196,7 @@ async function loadGhosttyRuntimeShared(options = {}) {
   return ghosttyRuntimePromise;
 }
 
-function safeSetDataset(hostElement, key, value) {
+function safeSetDataset(hostElement: any, key: any, value: any) {
   if (!hostElement || !hostElement.dataset) {
     return;
   }
@@ -210,23 +210,23 @@ export function createGhosttyTerminalSurface({
   fetchImpl = globalThis.fetch,
   documentRef = globalThis.document,
   globalRef = globalThis,
-  options = {}
-} = {}) {
+  options = {} as any
+}: any = {}) {
   if (!isTerminalHostElement(hostElement)) {
     return null;
   }
 
   let disposed = false;
-  let terminal = null;
-  let fitAddon = null;
+  let terminal: any = null;
+  let fitAddon: any = null;
   let renderedText = '';
   let pendingText = '';
-  let themeObserver = null;
+  let themeObserver: any = null;
   let renderedThemeSignature = '';
 
   hostElement.classList?.add('ghostty-terminal-host');
 
-  function writeRaw(raw) {
+  function writeRaw(raw: any) {
     if (!terminal) {
       return;
     }
@@ -237,7 +237,7 @@ export function createGhosttyTerminalSurface({
     terminal.write(text);
   }
 
-  function writeTextChunk(text) {
+  function writeTextChunk(text: any) {
     if (!terminal) {
       return;
     }
@@ -248,7 +248,7 @@ export function createGhosttyTerminalSurface({
     terminal.write(normalized);
   }
 
-  function resetAndWriteSnapshot(snapshot) {
+  function resetAndWriteSnapshot(snapshot: any) {
     if (!terminal) {
       return;
     }
@@ -261,7 +261,7 @@ export function createGhosttyTerminalSurface({
     renderedText = snapshot;
   }
 
-  function tryAppendSnapshot(snapshot) {
+  function tryAppendSnapshot(snapshot: any) {
     if (!snapshot.startsWith(renderedText)) {
       return false;
     }
@@ -271,7 +271,7 @@ export function createGhosttyTerminalSurface({
     return true;
   }
 
-  function tryBackspaceSnapshot(snapshot) {
+  function tryBackspaceSnapshot(snapshot: any) {
     if (!renderedText.startsWith(snapshot)) {
       return false;
     }
@@ -288,7 +288,7 @@ export function createGhosttyTerminalSurface({
     return true;
   }
 
-  function tryReplacePromptLine(snapshot) {
+  function tryReplacePromptLine(snapshot: any) {
     const prevBreak = renderedText.lastIndexOf('\n');
     const nextBreak = snapshot.lastIndexOf('\n');
     const prevHead = prevBreak >= 0 ? renderedText.slice(0, prevBreak + 1) : '';
@@ -304,7 +304,7 @@ export function createGhosttyTerminalSurface({
     return true;
   }
 
-  function writeSnapshot(snapshot) {
+  function writeSnapshot(snapshot: any) {
     if (!terminal) {
       return;
     }
@@ -332,7 +332,7 @@ export function createGhosttyTerminalSurface({
     resetAndWriteSnapshot(snapshot);
   }
 
-  function applyTheme(theme) {
+  function applyTheme(theme: any) {
     if (!terminal || !terminal.renderer || typeof terminal.renderer.setTheme !== 'function') {
       return;
     }
@@ -426,7 +426,7 @@ export function createGhosttyTerminalSurface({
   });
 
   return {
-    setText(text) {
+    setText(text: any) {
       pendingText = String(text ?? '');
       safeSetDataset(hostElement, 'terminalText', pendingText);
       writeSnapshot(pendingText);

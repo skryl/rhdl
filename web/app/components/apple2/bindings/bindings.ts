@@ -7,7 +7,7 @@ export function bindIoBindings({
   sim,
   store,
   scheduleReduxUxSync
-}) {
+}: any) {
   const listeners = createListenerGroup();
 
   listeners.on(dom.toggleHires, 'change', () => {
@@ -51,7 +51,7 @@ export function bindIoBindings({
     dom.apple2KeyInput.value = '';
   });
 
-  listeners.on(dom.apple2KeyInput, 'keydown', (event) => {
+  listeners.on(dom.apple2KeyInput, 'keydown', (event: any) => {
     if (event.key === 'Enter') {
       event.preventDefault();
       const raw = dom.apple2KeyInput?.value || '';
@@ -65,7 +65,7 @@ export function bindIoBindings({
     sim.refreshStatus();
   });
 
-  listeners.on(dom.apple2TextScreen, 'keydown', (event) => {
+  listeners.on(dom.apple2TextScreen, 'keydown', (event: any) => {
     if (!apple2.isUiEnabled()) {
       return;
     }

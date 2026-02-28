@@ -1,4 +1,4 @@
-export function tokenizeCommandLine(line) {
+export function tokenizeCommandLine(line: any) {
   const out = [];
   let current = '';
   let quote = '';
@@ -49,7 +49,7 @@ export function tokenizeCommandLine(line) {
   return out;
 }
 
-export function parseBooleanToken(token) {
+export function parseBooleanToken(token: any) {
   const raw = String(token || '').trim().toLowerCase();
   if (!raw) {
     return null;

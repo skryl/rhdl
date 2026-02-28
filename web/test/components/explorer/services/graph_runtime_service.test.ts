@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createExplorerGraphRuntimeService } from '../../../../app/components/explorer/services/graph_runtime_service';
 
-function createService(overrides = {}) {
+function createService(overrides: any = {}) {
   return createExplorerGraphRuntimeService({
     dom: { componentVisual: null },
     state: {
@@ -30,7 +30,7 @@ function createService(overrides = {}) {
   });
 }
 
-function buildGraphKey({ sourceKey = 'k', theme = 'default', focusNode, showChildren = true, elkAvailable = true } = {}) {
+function buildGraphKey({ sourceKey = 'k', theme = 'default', focusNode, showChildren = true, elkAvailable = true }: any = {}) {
   return `${sourceKey}:d3:${theme}:none:${focusNode.id}:${showChildren ? 1 : 0}:${focusNode.children.length}:${focusNode.signals.length}:${elkAvailable ? 1 : 0}`;
 }
 
@@ -114,16 +114,16 @@ test('renderComponentVisual builds schematic graph asynchronously and reports lo
       width: 0,
       height: 0,
       style: {},
-      getContext(kind) {
+      getContext(kind: any) {
         if (kind === '2d') {
           return null;
         }
         return null;
       },
-      addEventListener(type, handler) {
+      addEventListener(type: any, handler: any) {
         listeners.set(type, handler);
       },
-      removeEventListener(type, handler) {
+      removeEventListener(type: any, handler: any) {
         const current = listeners.get(type);
         if (current === handler) {
           listeners.delete(type);
@@ -144,15 +144,15 @@ test('renderComponentVisual builds schematic graph asynchronously and reports lo
     },
     addEventListener() {},
     removeEventListener() {}
-  };
+  } as any;
   globalThis.document = {
-    createElement(tag) {
+    createElement(tag: any) {
       if (tag === 'canvas') {
         return createCanvas();
       }
       return { style: {}, appendChild() {} };
     }
-  };
+  } as any;
   t.after(() => {
     globalThis.window = previousWindow;
     globalThis.document = previousDocument;
@@ -438,7 +438,7 @@ test('renderComponentVisual keeps schematic activity static when trace is disabl
   globalThis.window = {
     ...(previousWindow || {}),
     ELK: class ELK {}
-  };
+  } as any;
   t.after(() => {
     globalThis.window = previousWindow;
   });
@@ -500,10 +500,10 @@ test('renderComponentVisual keeps schematic activity static when trace is disabl
   assert.equal(liveValueReads, 0);
   assert.equal(net.active, false);
   assert.equal(net.toggled, false);
-  assert.equal(net.selected, true);
+  assert.equal((net as any).selected, true);
   assert.equal(wire.active, false);
   assert.equal(wire.toggled, false);
-  assert.equal(wire.selected, true);
+  assert.equal((wire as any).selected, true);
   assert.equal(state.components.graphLiveValues.get('sig_key'), '');
 });
 
@@ -512,7 +512,7 @@ test('renderComponentVisual animates schematic activity when trace is enabled', 
   globalThis.window = {
     ...(previousWindow || {}),
     ELK: class ELK {}
-  };
+  } as any;
   t.after(() => {
     globalThis.window = previousWindow;
   });
@@ -567,10 +567,10 @@ test('renderComponentVisual animates schematic activity when trace is enabled', 
     rerender: () => {}
   });
   assert.equal(first.ok, true);
-  assert.equal(net.active, true);
-  assert.equal(net.toggled, false);
-  assert.equal(wire.active, true);
-  assert.equal(wire.toggled, false);
+  assert.equal((net as any).active, true);
+  assert.equal((net as any).toggled, false);
+  assert.equal((wire as any).active, true);
+  assert.equal((wire as any).toggled, false);
 
   liveValue = 2;
   const second = service.renderComponentVisual({
@@ -579,8 +579,8 @@ test('renderComponentVisual animates schematic activity when trace is enabled', 
     rerender: () => {}
   });
   assert.equal(second.ok, true);
-  assert.equal(net.toggled, true);
-  assert.equal(wire.toggled, true);
+  assert.equal((net as any).toggled, true);
+  assert.equal((wire as any).toggled, true);
 });
 
 test('renderComponentVisual resizes schematic canvas backing store to match viewport size', (t) => {
@@ -588,7 +588,7 @@ test('renderComponentVisual resizes schematic canvas backing store to match view
   globalThis.window = {
     ...(previousWindow || {}),
     ELK: class ELK {}
-  };
+  } as any;
   t.after(() => {
     globalThis.window = previousWindow;
   });

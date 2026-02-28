@@ -27,7 +27,7 @@ const OP_STORE_FP = 0b0100111;
 const OP_OP_FP    = 0b1010011;
 
 // Common CSR names used in xv6/Linux.
-export const CSR_NAMES = {
+export const CSR_NAMES: Record<number, string> = {
   0x100: 'sstatus', 0x104: 'sie', 0x105: 'stvec',
   0x106: 'scounteren',
   0x140: 'sscratch', 0x141: 'sepc', 0x142: 'scause',
@@ -48,20 +48,20 @@ export const CSR_NAMES = {
   0xF13: 'mimpid', 0xF14: 'mhartid'
 };
 
-function reg(n) {
+function reg(n: any) {
   return REGS[n & 0x1f];
 }
 
-function signExtend(value, bits) {
+function signExtend(value: any, bits: any) {
   const shift = 32 - bits;
   return (value << shift) >> shift;
 }
 
-function csrName(csr) {
+function csrName(csr: any) {
   return CSR_NAMES[csr & 0xfff] || `0x${(csr & 0xfff).toString(16)}`;
 }
 
-function fenceFlags(val) {
+function fenceFlags(val: any) {
   let s = '';
   if (val & 8) s += 'i';
   if (val & 4) s += 'o';
@@ -70,7 +70,7 @@ function fenceFlags(val) {
   return s || '0';
 }
 
-function amoSuffix(funct7) {
+function amoSuffix(funct7: any) {
   const aq = (funct7 >> 1) & 1;
   const rl = funct7 & 1;
   if (aq && rl) return '.aqrl';
@@ -79,7 +79,7 @@ function amoSuffix(funct7) {
   return '';
 }
 
-function formatAddr(addr, wide) {
+function formatAddr(addr: any, wide: any) {
   return wide
     ? (addr >>> 0).toString(16).toUpperCase().padStart(8, '0')
     : (addr & 0xffff).toString(16).toUpperCase().padStart(4, '0');
@@ -87,7 +87,7 @@ function formatAddr(addr, wide) {
 
 // --- 32-bit instruction decoder ---
 
-function decodeOpImm(inst) {
+function decodeOpImm(inst: any) {
   const rd = (inst >> 7) & 0x1f;
   const funct3 = (inst >> 12) & 0x7;
   const rs1 = (inst >> 15) & 0x1f;
@@ -118,7 +118,7 @@ function decodeOpImm(inst) {
   }
 }
 
-function decodeOp(inst) {
+function decodeOp(inst: any) {
   const rd = (inst >> 7) & 0x1f;
   const funct3 = (inst >> 12) & 0x7;
   const rs1 = (inst >> 15) & 0x1f;
@@ -132,7 +132,7 @@ function decodeOp(inst) {
   }
 
   if (funct7 === 0b0010000) {
-    const zba = { 0b010: 'sh1add', 0b100: 'sh2add', 0b110: 'sh3add' };
+    const zba: Record<number, string> = { 0b010: 'sh1add', 0b100: 'sh2add', 0b110: 'sh3add' };
     if (zba[funct3]) return `${zba[funct3]} ${r}`;
   }
 
@@ -148,7 +148,7 @@ function decodeOp(inst) {
   }
 
   if (funct7 === 0b0000101) {
-    const ops = {
+    const ops: Record<number, string> = {
       0b001: 'clmul', 0b010: 'clmulr', 0b011: 'clmulh',
       0b100: 'min', 0b101: 'minu', 0b110: 'max', 0b111: 'maxu'
     };
@@ -169,7 +169,7 @@ function decodeOp(inst) {
   return '???';
 }
 
-function decodeBranch(inst, addr) {
+function decodeBranch(inst: any, addr: any) {
   const funct3 = (inst >> 12) & 0x7;
   const rs1 = (inst >> 15) & 0x1f;
   const rs2 = (inst >> 20) & 0x1f;
@@ -183,17 +183,17 @@ function decodeBranch(inst, addr) {
   );
   const target = (addr + offset) >>> 0;
   const wide = true;
-  const ops = { 0: 'beq', 1: 'bne', 4: 'blt', 5: 'bge', 6: 'bltu', 7: 'bgeu' };
+  const ops: Record<number, string> = { 0: 'beq', 1: 'bne', 4: 'blt', 5: 'bge', 6: 'bltu', 7: 'bgeu' };
   const mn = ops[funct3];
   if (!mn) return '???';
   if (rs2 === 0) {
-    const pseudo = { beq: 'beqz', bne: 'bnez' };
+    const pseudo: Record<string, string> = { beq: 'beqz', bne: 'bnez' };
     if (pseudo[mn]) return `${pseudo[mn]} ${reg(rs1)}, ${formatAddr(target, wide)}`;
   }
   return `${mn} ${reg(rs1)}, ${reg(rs2)}, ${formatAddr(target, wide)}`;
 }
 
-function decodeSystem(inst) {
+function decodeSystem(inst: any) {
   const rd = (inst >> 7) & 0x1f;
   const funct3 = (inst >> 12) & 0x7;
   const rs1 = (inst >> 15) & 0x1f;
@@ -237,7 +237,7 @@ function decodeSystem(inst) {
   }
 }
 
-function decodeAmo(inst) {
+function decodeAmo(inst: any) {
   const rd = (inst >> 7) & 0x1f;
   const funct3 = (inst >> 12) & 0x7;
   const rs1 = (inst >> 15) & 0x1f;
@@ -265,7 +265,7 @@ function decodeAmo(inst) {
   }
 }
 
-export function decode32(inst, addr) {
+export function decode32(inst: any, addr: any) {
   const opcode = inst & 0x7f;
   const rd = (inst >> 7) & 0x1f;
   const funct3 = (inst >> 12) & 0x7;
@@ -304,7 +304,7 @@ export function decode32(inst, addr) {
     case OP_BRANCH: return decodeBranch(inst, addr);
     case OP_LOAD: {
       const imm = signExtend((inst >> 20) & 0xfff, 12);
-      const ops = { 0: 'lb', 1: 'lh', 2: 'lw', 4: 'lbu', 5: 'lhu' };
+      const ops: Record<number, string> = { 0: 'lb', 1: 'lh', 2: 'lw', 4: 'lbu', 5: 'lhu' };
       const mn = ops[funct3] || '???';
       return `${mn} ${reg(rd)}, ${imm}(${reg(rs1)})`;
     }
@@ -316,7 +316,7 @@ export function decode32(inst, addr) {
     case OP_STORE: {
       const rs2 = (inst >> 20) & 0x1f;
       const imm = signExtend(((inst >> 25) << 5) | ((inst >> 7) & 0x1f), 12);
-      const ops = { 0: 'sb', 1: 'sh', 2: 'sw' };
+      const ops: Record<number, string> = { 0: 'sb', 1: 'sh', 2: 'sw' };
       const mn = ops[funct3] || '???';
       return `${mn} ${reg(rs2)}, ${imm}(${reg(rs1)})`;
     }
@@ -354,7 +354,7 @@ export function decode32(inst, addr) {
 
 // --- 16-bit compressed instruction decoder ---
 
-export function decode16(inst, addr) {
+export function decode16(inst: any, addr: any) {
   const quadrant = inst & 0x3;
   const funct3 = (inst >> 13) & 0x7;
   const rdRs1 = (inst >> 7) & 0x1f;
@@ -368,7 +368,7 @@ export function decode16(inst, addr) {
   return '???';
 }
 
-function decodeQ0(inst, funct3) {
+function decodeQ0(inst: any, funct3: any) {
   const rdp = reg(((inst >> 2) & 0x7) + 8);
   const rs1p = reg(((inst >> 7) & 0x7) + 8);
 
@@ -402,7 +402,7 @@ function decodeQ0(inst, funct3) {
   return '???';
 }
 
-function decodeQ1(inst, funct3, addr) {
+function decodeQ1(inst: any, funct3: any, addr: any) {
   const rdRs1 = (inst >> 7) & 0x1f;
   const rdp = ((inst >> 7) & 0x7) + 8;
   const rs2p = ((inst >> 2) & 0x7) + 8;
@@ -476,7 +476,7 @@ function decodeQ1(inst, funct3, addr) {
   return '???';
 }
 
-function decodeQ2(inst, funct3, rdRs1, rs2) {
+function decodeQ2(inst: any, funct3: any, rdRs1: any, rs2: any) {
   if (funct3 === 0b000) {
     // C.SLLI
     const shamt = (inst >> 2) & 0x1f;
@@ -510,8 +510,8 @@ function decodeQ2(inst, funct3, rdRs1, rs2) {
   return '???';
 }
 
-function decodeCJOffset(inst) {
-  const b = (bit) => (inst >> bit) & 1;
+function decodeCJOffset(inst: any) {
+  const b = (bit: any) => (inst >> bit) & 1;
   const raw =
     (b(12) << 11) | (b(11) << 4) | (b(10) << 9) | (b(9) << 8) |
     (b(8) << 10) | (b(7) << 6) | (b(6) << 7) | (b(5) << 3) |
@@ -519,8 +519,8 @@ function decodeCJOffset(inst) {
   return signExtend(raw, 12);
 }
 
-function decodeCBOffset(inst) {
-  const b = (bit) => (inst >> bit) & 1;
+function decodeCBOffset(inst: any) {
+  const b = (bit: any) => (inst >> bit) & 1;
   const raw =
     (b(12) << 8) | (b(11) << 4) | (b(10) << 3) |
     (b(6) << 7) | (b(5) << 6) | (b(4) << 2) |
@@ -532,7 +532,7 @@ function decodeCBOffset(inst) {
 
 // Classify a mnemonic into a rendering category for syntax coloring.
 // Returns one of: 'arith', 'load', 'store', 'branch', 'jump', 'imm', 'sys', 'amo', or null.
-export function classifyMnemonic(mn) {
+export function classifyMnemonic(mn: any) {
   if (!mn || mn === '???' || mn === 'unimp') return null;
 
   // Handle compressed special forms before stripping prefix.
@@ -559,10 +559,10 @@ export function classifyMnemonic(mn) {
 // --- Main disassembly entry point ---
 
 export function disassembleRiscvLines(
-  startAddress,
-  lineCount,
-  readMemory,
-  options = {}
+  startAddress: any,
+  lineCount: any,
+  readMemory: any,
+  options: any = {}
 ) {
   const count = Math.max(1, Math.min(4096, Number.parseInt(lineCount, 10) || 1));
   const addressSpace = Math.max(1, Number.parseInt(options.addressSpace, 10) || 0x100000000);
@@ -580,7 +580,7 @@ export function disassembleRiscvLines(
     ? readMemory(start, fetchLen)
     : new Uint8Array(0);
 
-  const readByte = (addr) => {
+  const readByte = (addr: any) => {
     const normalized = (addr >>> 0) % addressSpace;
     const offset = (normalized - start + addressSpace) % addressSpace;
     if (memory instanceof Uint8Array && offset < memory.length) {
@@ -589,10 +589,10 @@ export function disassembleRiscvLines(
     return 0;
   };
 
-  const readHalf = (addr) =>
+  const readHalf = (addr: any) =>
     readByte(addr) | (readByte(addr + 1) << 8);
 
-  const readWord = (addr) =>
+  const readWord = (addr: any) =>
     readByte(addr) | (readByte(addr + 1) << 8) |
     (readByte(addr + 2) << 16) | (readByte(addr + 3) << 24);
 

@@ -7,14 +7,14 @@ import {
   resolveWebRoot
 } from './browser_test_harness';
 
-function setupTestPage(page) {
-  const pageErrors = [];
-  const consoleErrors = [];
+function setupTestPage(page: any) {
+  const pageErrors: any[] = [];
+  const consoleErrors: any[] = [];
   const benignPageErrors = [
     'Failed to execute \'drawImage\' on \'CanvasRenderingContext2D\': The image argument is a canvas element with a width or height of 0.'
   ];
 
-  page.on('pageerror', (err) => {
+  page.on('pageerror', (err: any) => {
     const message = String(err?.message || err);
     if (benignPageErrors.some((entry) => message.includes(entry))) {
       return;
@@ -22,7 +22,7 @@ function setupTestPage(page) {
     pageErrors.push(message);
   });
 
-  page.on('console', (msg) => {
+  page.on('console', (msg: any) => {
     if (msg.type() !== 'error') {
       return;
     }
@@ -36,8 +36,8 @@ function setupTestPage(page) {
   return { pageErrors, consoleErrors };
 }
 
-async function loadRunner(page, runnerId) {
-  await page.waitForFunction((id) => {
+async function loadRunner(page: any, runnerId: any) {
+  await page.waitForFunction((id: any) => {
     const select = document.querySelector('#runnerSelect');
     if (!(select instanceof HTMLSelectElement)) {
       return false;
@@ -48,7 +48,7 @@ async function loadRunner(page, runnerId) {
   await page.selectOption('#runnerSelect', runnerId);
   await page.click('#loadRunnerBtn');
 
-  await page.waitForFunction((id) => {
+  await page.waitForFunction((id: any) => {
     const text = document.querySelector('#runnerStatus')?.textContent || '';
     const normalized = String(text).toLowerCase();
     const normalizedId = String(id).toLowerCase();
@@ -61,23 +61,23 @@ async function loadRunner(page, runnerId) {
   }, null, { timeout: 120000, polling: 100 });
 }
 
-function getEventLog(page) {
-  return page.$eval('#eventLog', (el) => el?.textContent || '');
+function getEventLog(page: any) {
+  return page.$eval('#eventLog', (el: any) => el?.textContent || '');
 }
 
-function getMemoryDumpPreText(page) {
-  return page.$eval('#memoryDump', (el) => {
+function getMemoryDumpPreText(page: any) {
+  return page.$eval('#memoryDump', (el: any) => {
     const pre = el?.shadowRoot?.querySelector('#memoryDumpPre');
     return pre?.textContent || '';
   });
 }
 
-function getDisplayText(page) {
-  return page.$eval('#apple2TextScreen', (el) => el?.textContent || '');
+function getDisplayText(page: any) {
+  return page.$eval('#apple2TextScreen', (el: any) => el?.textContent || '');
 }
 
-function getSimCycle(page) {
-  return page.$eval('#simStatus', (el) => {
+function getSimCycle(page: any) {
+  return page.$eval('#simStatus', (el: any) => {
     const text = String(el?.textContent || '');
     const match = text.match(/Cycle\s+(\d+)/);
     return match ? Number.parseInt(match[1], 10) : -1;
@@ -88,7 +88,7 @@ test('riscv runner loads default kernel, memory, uart and simulation', { timeout
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
@@ -102,7 +102,7 @@ test('riscv runner loads default kernel, memory, uart and simulation', { timeout
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }

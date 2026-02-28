@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { createRunnerBundleLoader } from '../../../../app/components/runner/controllers/bundle_controller';
 
-function makeResponse(body, status = 200) {
+function makeResponse(body: any, status = 200) {
   return {
     ok: status >= 200 && status < 300,
     status,
@@ -15,12 +15,12 @@ function makeResponse(body, status = 200) {
 
 test('loadRunnerIrBundle returns manual bundle when preset is generic/manual', async () => {
   const dom = { irJson: { value: '{"foo":1}' } };
-  const logs = [];
+  const logs: any[] = [];
   const loader = createRunnerBundleLoader({
     dom,
     parseIrMeta: () => ({ parsed: true }),
     resetComponentExplorerState: () => {},
-    log: (msg) => logs.push(msg),
+    log: (msg: any) => logs.push(msg),
     fetchImpl: async () => makeResponse('')
   });
 
@@ -35,7 +35,7 @@ test('loadRunnerIrBundle returns manual bundle when preset is generic/manual', a
 
 test('loadRunnerIrBundle loads sim/explorer/source/schematic bundles', async () => {
   const dom = { irJson: { value: '' } };
-  const logs = [];
+  const logs: any[] = [];
   let resets = 0;
   let parseCalls = 0;
   const fetchMap = {
@@ -46,15 +46,15 @@ test('loadRunnerIrBundle loads sim/explorer/source/schematic bundles', async () 
   };
   const loader = createRunnerBundleLoader({
     dom,
-    parseIrMeta: (json) => {
+    parseIrMeta: (json: any) => {
       parseCalls += 1;
       return { parsedFrom: json };
     },
     resetComponentExplorerState: () => {
       resets += 1;
     },
-    log: (msg) => logs.push(msg),
-    fetchImpl: async (path) => fetchMap[path] || makeResponse('', 404)
+    log: (msg: any) => logs.push(msg),
+    fetchImpl: async (path: any) => (fetchMap as Record<string, any>)[path] || makeResponse('', 404)
   });
 
   const bundle = await loader.loadRunnerIrBundle({

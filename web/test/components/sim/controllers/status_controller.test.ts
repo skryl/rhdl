@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import { createSimStatusController } from '../../../../app/components/sim/controllers/status_controller';
 
 function createHarness() {
-  const scheduleCalls = [];
-  const ioCalls = [];
+  const scheduleCalls: any[] = [];
+  const ioCalls: any[] = [];
   const dom = {
     clockSignal: { value: '__none__' },
     simStatus: { textContent: '' },
@@ -42,9 +42,9 @@ function createHarness() {
     }),
     isApple2UiEnabled: () => true,
     updateIoToggleUi: () => ioCalls.push('io'),
-    scheduleReduxUxSync: (reason) => scheduleCalls.push(reason),
+    scheduleReduxUxSync: (reason: any) => scheduleCalls.push(reason),
     litRender: () => {},
-    html: (strings, ...values) => ({ strings, values })
+    html: (strings: any, ...values: any[]) => ({ strings, values })
   });
   return { controller, dom, state, runtime, scheduleCalls, ioCalls };
 }
@@ -87,7 +87,7 @@ test('refreshStatus with simulator writes running metrics and queues sync', () =
       hasSignalIndex: false,
       hasLiveTrace: false
     }
-  };
+  } as any;
   controller.refreshStatus();
   assert.match(dom.simStatus.textContent, /Cycle 123 \| 7 signals \| 3 regs/);
   assert.match(dom.simStatus.textContent, /14,000 cyc\/s/);

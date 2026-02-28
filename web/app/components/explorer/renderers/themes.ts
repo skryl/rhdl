@@ -54,7 +54,7 @@ export function getThemePalette(theme = 'shenzhen') {
 const WIRE_ZOOM_WIDTH_EXPONENT = 0.65;
 const MIN_WIRE_ZOOM_FACTOR = 0.18;
 
-export function resolveWireStrokeWidth(strokeWidth, viewportScale = 1) {
+export function resolveWireStrokeWidth(strokeWidth: any, viewportScale = 1) {
   const base = Number(strokeWidth);
   if (!Number.isFinite(base) || base <= 0) {
     return 0;
@@ -70,10 +70,10 @@ export function resolveWireStrokeWidth(strokeWidth, viewportScale = 1) {
   return base * zoomFactor;
 }
 
-export function resolveElementColors(element, palette, options = {}) {
+export function resolveElementColors(element: any, palette: any, options: any = {}) {
   const type = element.type || '';
   const viewportScale = Number(options.viewportScale);
-  const wireStrokeWidth = (rawWidth) => resolveWireStrokeWidth(rawWidth, viewportScale);
+  const wireStrokeWidth = (rawWidth: any) => resolveWireStrokeWidth(rawWidth, viewportScale);
 
   // Wire
   if (type === 'wire') {
@@ -148,7 +148,7 @@ export function resolveElementColors(element, palette, options = {}) {
   return { fill, stroke, text, strokeWidth };
 }
 
-export function getLegendEntries(palette) {
+export function getLegendEntries(palette: any) {
   return [
     { label: 'Component', fill: palette.componentBg, stroke: palette.componentBorder },
     { label: 'IO Port', fill: palette.ioBg, stroke: palette.ioBorder },
@@ -160,7 +160,7 @@ export function getLegendEntries(palette) {
   ];
 }
 
-export function drawLegend(ctx, canvasWidth, canvasHeight, palette) {
+export function drawLegend(ctx: any, canvasWidth: any, canvasHeight: any, palette: any) {
   const entries = getLegendEntries(palette);
   const fontSize = 11;
   const swatchW = 18;

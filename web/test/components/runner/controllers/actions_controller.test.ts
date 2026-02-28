@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { createRunnerActionsController } from '../../../../app/components/runner/controllers/actions_controller';
 
-function makeResponse(body, status = 200) {
+function makeResponse(body: any, status = 200) {
   return {
     ok: status >= 200 && status < 300,
     status,
@@ -13,9 +13,9 @@ function makeResponse(body, status = 200) {
   };
 }
 
-function createHarness(overrides = {}) {
-  const calls = [];
-  const dom = {
+function createHarness(overrides: any = {}) {
+  const calls: any[] = [];
+  const dom: any = {
     backendSelect: { value: 'interpreter' },
     irJson: { value: '' },
     sampleSelect: {
@@ -26,26 +26,26 @@ function createHarness(overrides = {}) {
   };
   const controller = createRunnerActionsController({
     dom,
-    getRunnerPreset: (id) => ({ id, label: 'Generic', usesManualIr: true, preferredTab: 'vcdTab' }),
-    setBackendState: (backend) => calls.push(['setBackendState', backend]),
-    ensureBackendInstance: async (backend) => {
+    getRunnerPreset: (id: any) => ({ id, label: 'Generic', usesManualIr: true, preferredTab: 'vcdTab' }),
+    setBackendState: (backend: any) => calls.push(['setBackendState', backend]),
+    ensureBackendInstance: async (backend: any) => {
       calls.push(['ensureBackendInstance', backend]);
     },
-    setRunnerPresetState: (id) => calls.push(['setRunnerPresetState', id]),
+    setRunnerPresetState: (id: any) => calls.push(['setRunnerPresetState', id]),
     updateIrSourceVisibility: () => calls.push(['updateIrSourceVisibility']),
     loadRunnerIrBundle: async () => ({ simJson: '{}', explorerJson: '{}', explorerMeta: null, sourceBundle: null, schematicBundle: null }),
-    initializeSimulator: async (options) => calls.push(['initializeSimulator', options]),
-    applyRunnerDefaults: async (preset) => calls.push(['applyRunnerDefaults', preset.id]),
+    initializeSimulator: async (options: any) => calls.push(['initializeSimulator', options]),
+    applyRunnerDefaults: async (preset: any) => calls.push(['applyRunnerDefaults', preset.id]),
     clearComponentSourceOverride: () => calls.push(['clearComponentSourceOverride']),
     resetComponentExplorerState: () => calls.push(['resetComponentExplorerState']),
-    log: (msg) => calls.push(['log', msg]),
+    log: (msg: any) => calls.push(['log', msg]),
     isComponentTabActive: () => false,
     refreshComponentExplorer: () => calls.push(['refreshComponentExplorer']),
     clearComponentSourceBundle: () => calls.push(['clearComponentSourceBundle']),
     clearComponentSchematicBundle: () => calls.push(['clearComponentSchematicBundle']),
-    setComponentSourceBundle: (value) => calls.push(['setComponentSourceBundle', value]),
-    setComponentSchematicBundle: (value) => calls.push(['setComponentSchematicBundle', value]),
-    setActiveTab: (tab) => calls.push(['setActiveTab', tab]),
+    setComponentSourceBundle: (value: any) => calls.push(['setComponentSourceBundle', value]),
+    setComponentSchematicBundle: (value: any) => calls.push(['setComponentSchematicBundle', value]),
+    setActiveTab: (tab: any) => calls.push(['setActiveTab', tab]),
     refreshStatus: () => calls.push(['refreshStatus']),
     fetchImpl: async () => makeResponse('{"ports":[]}'),
     ...overrides
@@ -56,7 +56,7 @@ function createHarness(overrides = {}) {
 test('loadSample loads text and resets component explorer', async () => {
   const { controller, dom, calls } = createHarness({
     isComponentTabActive: () => true,
-    fetchImpl: async (path) => {
+    fetchImpl: async (path: any) => {
       if (path === '/sample.json') {
         return makeResponse('{"ports":[{"name":"clk","width":1}]}');
       }
@@ -112,8 +112,8 @@ test('loadRunnerPreset applies preset preferred backend before simulator initial
 
 test('loadRunnerPreset schedules component explorer warmup after runner load', async () => {
   const { controller, dom, calls } = createHarness({
-    requestFrame: (cb) => cb(),
-    setTimeoutImpl: (cb) => cb()
+    requestFrame: (cb: any) => cb(),
+    setTimeoutImpl: (cb: any) => cb()
   });
   dom.irJson.value = '{"ports":[{"name":"clk","width":1}]}';
 
@@ -150,15 +150,15 @@ test('preloadStartPreset loads non-manual bundle into component stores', async (
 
 test('loadRunnerPreset with loading UI yields to browser and restores loading placeholders', async () => {
   const { controller, dom, calls } = createHarness({
-    requestFrame: (cb) => {
+    requestFrame: (cb: any) => {
       calls.push(['requestFrame']);
       cb();
     },
-    setTimeoutImpl: (cb) => {
+    setTimeoutImpl: (cb: any) => {
       calls.push(['setTimeout']);
       cb();
     },
-    initializeSimulator: async (options) => {
+    initializeSimulator: async (options: any) => {
       calls.push(['initializeSimulator', options, dom.apple2TextScreen.textContent, dom.loadRunnerBtn.disabled]);
     },
     refreshStatus: () => {

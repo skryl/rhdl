@@ -1,6 +1,6 @@
 import { parseBooleanToken } from '../../lib/tokens';
 
-export async function handleApple2MemoryCommand({ cmd, tokens, context }) {
+export async function handleApple2MemoryCommand({ cmd, tokens, context }: any) {
   const { dom, state, actions, helpers } = context;
 
   if (cmd === 'io') {
@@ -10,7 +10,7 @@ export async function handleApple2MemoryCommand({ cmd, tokens, context }) {
       hires: dom.toggleHires,
       color: dom.toggleColor,
       sound: dom.toggleSound
-    };
+    } as Record<string, any>;
     const target = targetMap[field];
     if (!(target instanceof HTMLInputElement)) {
       throw new Error('Usage: io <hires|color|sound> <on|off|toggle>');

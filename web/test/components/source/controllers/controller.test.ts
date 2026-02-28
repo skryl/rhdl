@@ -18,8 +18,8 @@ test('source controller delegates to source runtime service', () => {
     dom: { irJson: { value: '' } },
     state,
     currentRunnerPreset: () => ({ id: 'generic', usesManualIr: true }),
-    normalizeComponentSourceBundle: (bundle) => bundle,
-    normalizeComponentSchematicBundle: (bundle) => bundle,
+    normalizeComponentSourceBundle: (bundle: any) => bundle,
+    normalizeComponentSchematicBundle: (bundle: any) => bundle,
     destroyComponentGraph: () => {}
   });
 

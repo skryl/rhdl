@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import { createApple2VisualController } from '../../../../app/components/apple2/controllers/visual_controller';
 
 function createHarness() {
-  const debugCalls = [];
-  const ioCalls = [];
+  const debugCalls: any[] = [];
+  const ioCalls: any[] = [];
   const dom = {
     apple2TextScreen: { textContent: '' },
     apple2HiresCanvas: null
@@ -26,8 +26,8 @@ function createHarness() {
     runtime,
     isApple2UiEnabled: () => false,
     updateIoToggleUi: () => ioCalls.push('io'),
-    renderApple2DebugRows: (...args) => debugCalls.push(args),
-    apple2HiresLineAddress: (row) => row
+    renderApple2DebugRows: (...args: any[]) => debugCalls.push(args),
+    apple2HiresLineAddress: (row: any) => row
   });
   return { controller, dom, debugCalls, ioCalls };
 }
@@ -50,7 +50,7 @@ test('refreshApple2Debug renders disabled placeholder when runner is unavailable
 });
 
 test('refreshApple2Screen renders UART mode output when configured', () => {
-  let uartReadArgs = null;
+  let uartReadArgs: any = null;
   const uartBytes = new Uint8Array([65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76]);
   const controllerConfig = {
     dom: {
@@ -87,7 +87,7 @@ test('refreshApple2Screen renders UART mode output when configured', () => {
       }
     },
     isApple2UiEnabled: () => true,
-    ioCalls: []
+    ioCalls: [] as any[]
   };
   const controller = createApple2VisualController({
     dom: controllerConfig.dom,
@@ -96,7 +96,7 @@ test('refreshApple2Screen renders UART mode output when configured', () => {
     isApple2UiEnabled: controllerConfig.isApple2UiEnabled,
     updateIoToggleUi: () => controllerConfig.ioCalls.push('io'),
     renderApple2DebugRows: () => {},
-    apple2HiresLineAddress: (row) => row
+    apple2HiresLineAddress: (row: any) => row
   });
 
   controller.refreshApple2Screen();
@@ -143,7 +143,7 @@ test('refreshApple2Screen renders UART CR/LF as line breaks', () => {
     isApple2UiEnabled: () => true,
     updateIoToggleUi: () => {},
     renderApple2DebugRows: () => {},
-    apple2HiresLineAddress: (row) => row
+    apple2HiresLineAddress: (row: any) => row
   });
 
   controller.refreshApple2Screen();

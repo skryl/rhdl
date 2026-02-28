@@ -23,11 +23,11 @@ test('each shape has draw and boundingBox functions', () => {
 });
 
 function createMockCtx() {
-  const calls = [];
+  const calls: any[] = [];
   const handler = {
-    get(target, prop) {
+    get(target: any, prop: any) {
       if (prop in target) return target[prop];
-      return (...args) => { calls.push({ method: prop, args }); };
+      return (...args: any[]) => { calls.push({ method: prop, args }); };
     }
   };
   return { calls, ctx: new Proxy({ calls }, handler) };

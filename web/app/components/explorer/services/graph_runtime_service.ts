@@ -17,17 +17,17 @@ const BUTTON_ZOOM_FACTOR = 1.2;
 const DEFAULT_GRAPH_VIEWPORT = Object.freeze({ x: 0, y: 0, scale: 1 });
 const SCHEMATIC_LOADING_TEXT = 'Loading schematic...';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createExplorerGraphRuntimeService requires function: ${name}`);
   }
 }
 
-function clamp(value, min, max) {
+function clamp(value: any, min: any, max: any) {
   return Math.min(max, Math.max(min, value));
 }
 
-function toCanvasPixelSize(value, fallback) {
+function toCanvasPixelSize(value: any, fallback: any) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return Math.max(1, Math.floor(Number(fallback) || 1));
@@ -44,7 +44,7 @@ export function createExplorerGraphRuntimeService({
   createSchematicElements,
   signalLiveValueByName,
   isTraceEnabled = () => true
-} = {}) {
+}: any = {}) {
   if (!dom || !state) {
     throw new Error('createExplorerGraphRuntimeService requires dom/state');
   }
@@ -55,12 +55,12 @@ export function createExplorerGraphRuntimeService({
   requireFn('signalLiveValueByName', signalLiveValueByName);
 
   // renderer state (kept outside components state to avoid serialization)
-  let renderListRef = null;
+  let renderListRef: any = null;
   let viewport = { ...DEFAULT_GRAPH_VIEWPORT };
   let graphBuildVersion = 0;
-  let graphBuildInFlight = null;
+  let graphBuildInFlight: any = null;
 
-  function syncGraphCanvasSize(graph) {
+  function syncGraphCanvasSize(graph: any) {
     if (!graph?.canvas) {
       return false;
     }
@@ -87,7 +87,7 @@ export function createExplorerGraphRuntimeService({
   }
 
   function yieldToBrowser() {
-    return new Promise((resolve) => {
+    return new Promise<void>((resolve) => {
       const scheduleTimeout = () => {
         if (typeof globalThis.setTimeout === 'function') {
           globalThis.setTimeout(resolve, 0);
@@ -105,7 +105,7 @@ export function createExplorerGraphRuntimeService({
     });
   }
 
-  function isBuildCurrent(token, key) {
+  function isBuildCurrent(token: any, key: any) {
     return (
       graphBuildVersion === token
       && !!graphBuildInFlight
@@ -114,13 +114,13 @@ export function createExplorerGraphRuntimeService({
     );
   }
 
-  function clearBuildInFlightIfCurrent(token, key) {
+  function clearBuildInFlightIfCurrent(token: any, key: any) {
     if (isBuildCurrent(token, key)) {
       graphBuildInFlight = null;
     }
   }
 
-  function renderGraphWithViewport(graph) {
+  function renderGraphWithViewport(graph: any) {
     if (!graph || !graph.renderer || typeof graph.renderer.render !== 'function') {
       return false;
     }
@@ -158,9 +158,9 @@ export function createExplorerGraphRuntimeService({
     const worldX = (centerX - tx) / prevScale;
     const worldY = (centerY - ty) / prevScale;
 
-    viewport.scale = nextScale;
-    viewport.x = centerX - (worldX * nextScale);
-    viewport.y = centerY - (worldY * nextScale);
+    viewport.scale = nextScale as any;
+    viewport.x = (centerX - (worldX * nextScale)) as any;
+    viewport.y = (centerY - (worldY * nextScale)) as any;
     return renderGraphWithViewport(graph);
   }
 
@@ -208,7 +208,7 @@ export function createExplorerGraphRuntimeService({
     graphKey,
     rerender,
     token
-  }) {
+  }: any) {
     try {
       await yieldToBrowser();
       if (!isBuildCurrent(token, graphKey)) {
@@ -247,8 +247,8 @@ export function createExplorerGraphRuntimeService({
       }
       state.components.graphRenderBackend = webglRenderer ? 'webgl' : 'canvas2d';
 
-      let legendCanvas = null;
-      let legendCtx = null;
+      let legendCanvas: any = null;
+      let legendCtx: any = null;
       if (webglRenderer) {
         legendCanvas = document.createElement('canvas');
         legendCanvas.width = canvas.width;
@@ -264,7 +264,7 @@ export function createExplorerGraphRuntimeService({
         legendCtx = legendCanvas.getContext('2d');
       }
 
-      function renderLegendOverlay(pal) {
+      function renderLegendOverlay(pal: any) {
         if (!legendCtx) return;
         legendCtx.clearRect(0, 0, legendCanvas.width, legendCanvas.height);
         drawLegend(legendCtx, legendCanvas.width, legendCanvas.height, pal);
@@ -335,7 +335,7 @@ export function createExplorerGraphRuntimeService({
       const elkGraph = buildElkGraph(renderList);
       const elk = new ELK();
       state.components.graphLayoutEngine = 'elk';
-      elk.layout(elkGraph).then((result) => {
+      elk.layout(elkGraph as any).then((result) => {
         if (state.components.graph !== graphHandle || state.components.graphKey !== graphKey) {
           return;
         }
@@ -352,7 +352,7 @@ export function createExplorerGraphRuntimeService({
           state.components.graphLayoutEngine = 'error';
         }
       });
-    } catch (_err) {
+    } catch (_err: any) {
       if (isBuildCurrent(token, graphKey)) {
         graphBuildInFlight = null;
         state.components.graphLayoutEngine = 'error';
@@ -363,7 +363,7 @@ export function createExplorerGraphRuntimeService({
     }
   }
 
-  function ensureComponentGraph(model, rerender) {
+  function ensureComponentGraph(model: any, rerender: any) {
     if (!dom.componentVisual || !model) {
       return null;
     }
@@ -413,7 +413,7 @@ export function createExplorerGraphRuntimeService({
     return null;
   }
 
-  function renderComponentVisual({ node, model, rerender }) {
+  function renderComponentVisual({ node, model, rerender }: any) {
     if (!dom.componentVisual) {
       return { ok: false, reason: 'missing-container' };
     }
@@ -471,7 +471,7 @@ export function createExplorerGraphRuntimeService({
     return { ok: true };
   }
 
-  function describeComponentGraphPanel({ selectedNode, focusNode }) {
+  function describeComponentGraphPanel({ selectedNode, focusNode }: any) {
     if (!selectedNode || !focusNode) {
       return {
         title: 'Component Schematic',

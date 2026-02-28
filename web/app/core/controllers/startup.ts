@@ -1,17 +1,17 @@
 import { createStartupInitializationService } from '../services/startup_initialization_service';
 import { createStartupBindingRegistrationService } from '../services/startup_binding_registration_service';
 
-export async function startApp(ctx = {}) {
+export async function startApp(ctx: any = {}) {
   const {
     dom,
     state,
     runtime,
     log,
-    env = {},
-    store = {},
-    util = {},
-    keys = {},
-    bindings = {},
+    env = {} as any,
+    store = {} as any,
+    util = {} as any,
+    keys = {} as any,
+    bindings = {} as any,
     app = {}
   } = ctx;
 
@@ -47,7 +47,7 @@ export async function startApp(ctx = {}) {
 
   try {
     await startupInitService.initialize();
-  } catch (err) {
+  } catch (err: any) {
     dom.simStatus.textContent = `WASM init failed: ${err.message || err}`;
     log(`WASM init failed: ${err.message || err}`);
     return;

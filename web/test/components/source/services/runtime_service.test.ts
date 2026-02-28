@@ -18,8 +18,8 @@ test('source runtime service manages source and schematic bundles', () => {
     dom: {},
     state,
     currentRunnerPreset: () => ({ id: 'generic', usesManualIr: true }),
-    normalizeComponentSourceBundle: (bundle) => bundle,
-    normalizeComponentSchematicBundle: (bundle) => bundle,
+    normalizeComponentSourceBundle: (bundle: any) => bundle,
+    normalizeComponentSchematicBundle: (bundle: any) => bundle,
     destroyComponentGraph: () => {}
   });
 
@@ -45,8 +45,8 @@ test('source runtime service resets explorer and updates source visibility', () 
     irJson: { value: '{"ir":1}' },
     irSourceSection: { hidden: false },
     componentTree: {
-      setFilterCalls: [],
-      setFilter(value, emit) {
+      setFilterCalls: [] as any[],
+      setFilter(value: any, emit: any) {
         this.setFilterCalls.push([value, emit]);
       }
     }
@@ -84,7 +84,7 @@ test('source runtime service resets explorer and updates source visibility', () 
     }
   });
 
-  service.setComponentSourceOverride('hello', { x: 1 });
+  service.setComponentSourceOverride('hello', { x: 1 } as any);
   assert.equal(service.currentComponentSourceText(), 'hello');
   service.clearComponentSourceOverride();
   assert.equal(service.currentComponentSourceText(), '{"ir":1}');

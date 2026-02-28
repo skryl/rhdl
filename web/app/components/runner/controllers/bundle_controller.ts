@@ -7,7 +7,7 @@ import {
   normalizeComponentSchematicBundle
 } from '../../source/lib/bundle_normalizers';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createRunnerBundleLoader requires function: ${name}`);
   }
@@ -19,7 +19,7 @@ export function createRunnerBundleLoader({
   resetComponentExplorerState,
   log,
   fetchImpl = globalThis.fetch
-} = {}) {
+}: any = {}) {
   if (!dom) {
     throw new Error('createRunnerBundleLoader requires dom');
   }
@@ -28,7 +28,7 @@ export function createRunnerBundleLoader({
   requireFn('log', log);
   requireFn('fetchImpl', fetchImpl);
 
-  async function loadRunnerIrBundle(preset, options = {}) {
+  async function loadRunnerIrBundle(preset: any, options: any = {}) {
     const { logLoad = false } = options;
     if (!preset || preset.usesManualIr) {
       return {
@@ -61,7 +61,7 @@ export function createRunnerBundleLoader({
       try {
         const rawBundle = await fetchJsonAsset(preset.sourceBundlePath, `${preset.label} source bundle`, fetchImpl);
         sourceBundle = normalizeComponentSourceBundle(rawBundle);
-      } catch (err) {
+      } catch (err: any) {
         log(`Source bundle load failed for ${preset.label}: ${err.message || err}`);
       }
     }
@@ -71,7 +71,7 @@ export function createRunnerBundleLoader({
       try {
         const rawSchematic = await fetchJsonAsset(preset.schematicPath, `${preset.label} schematic`, fetchImpl);
         schematicBundle = normalizeComponentSchematicBundle(rawSchematic);
-      } catch (err) {
+      } catch (err: any) {
         log(`Schematic load failed for ${preset.label}: ${err.message || err}`);
       }
     }

@@ -1,6 +1,6 @@
-import { LitElement, html, css } from 'https://cdn.jsdelivr.net/npm/lit@3.2.1/+esm';
+import { LitElement, html, css } from 'lit';
 
-function ellipsizeText(value, maxLen = 88) {
+function ellipsizeText(value: any, maxLen = 88) {
   const text = String(value ?? '');
   if (text.length <= maxLen) {
     return text;
@@ -9,6 +9,7 @@ function ellipsizeText(value, maxLen = 88) {
 }
 
 class RhdlComponentLiveSignals extends LitElement {
+  [key: string]: any;
   static properties = {
     rows: { state: true },
     highlightLabel: { state: true },
@@ -75,10 +76,10 @@ class RhdlComponentLiveSignals extends LitElement {
     this.extraSignals = 0;
   }
 
-  setData(data, formatValue) {
-    const formatter = typeof formatValue === 'function' ? formatValue : (value) => String(value ?? '');
+  setData(data: any, formatValue: any) {
+    const formatter = typeof formatValue === 'function' ? formatValue : (value: any) => String(value ?? '');
     const signals = Array.isArray(data?.signals) ? data.signals : [];
-    this.rows = signals.map((signal) => ({
+    this.rows = signals.map((signal: any) => ({
       name: signal.fullName || signal.name,
       value: signal.value == null ? '-' : formatter(signal.value, signal.width || 1),
       matchesHighlight: !!signal.matchesHighlight
@@ -93,7 +94,7 @@ class RhdlComponentLiveSignals extends LitElement {
       return html`<div class="empty">No live signals to display.</div>`;
     }
     return html`
-      ${this.rows.map((row) => html`
+      ${this.rows.map((row: any) => html`
         <div class=${`row${row.matchesHighlight ? ' highlight' : ''}`}>
           <span class="name">${row.name}</span>
           <span class="value">${row.value}</span>
@@ -116,6 +117,7 @@ class RhdlComponentLiveSignals extends LitElement {
 }
 
 class RhdlComponentConnections extends LitElement {
+  [key: string]: any;
   static properties = {
     rows: { state: true },
     hiddenCount: { state: true }
@@ -182,7 +184,7 @@ class RhdlComponentConnections extends LitElement {
     this.hiddenCount = 0;
   }
 
-  setConnections(rows, hiddenCount = 0) {
+  setConnections(rows: any, hiddenCount = 0) {
     this.rows = Array.isArray(rows) ? rows.slice() : [];
     this.hiddenCount = Math.max(0, Number(hiddenCount) || 0);
   }
@@ -208,7 +210,7 @@ class RhdlComponentConnections extends LitElement {
           </tr>
         </thead>
         <tbody>
-          ${this.rows.map((row) => html`
+          ${this.rows.map((row: any) => html`
             <tr>
               <td>${row.type}</td>
               <td title=${row.source}>${ellipsizeText(row.source)}</td>
@@ -234,7 +236,7 @@ if (!customElements.get('rhdl-component-connections')) {
   customElements.define('rhdl-component-connections', RhdlComponentConnections);
 }
 
-export function renderComponentLiveSignalsView(dom, data, formatValue) {
+export function renderComponentLiveSignalsView(dom: any, data: any, formatValue: any) {
   const element = dom?.componentLiveSignals;
   if (!element || typeof element.setData !== 'function') {
     return;
@@ -242,7 +244,7 @@ export function renderComponentLiveSignalsView(dom, data, formatValue) {
   element.setData(data, formatValue);
 }
 
-export function renderComponentConnectionsView(dom, metaText, rows, hiddenCount = 0) {
+export function renderComponentConnectionsView(dom: any, metaText: any, rows: any, hiddenCount = 0) {
   if (!dom?.componentConnectionMeta || !dom?.componentConnectionBody) {
     return;
   }
@@ -253,7 +255,7 @@ export function renderComponentConnectionsView(dom, metaText, rows, hiddenCount 
   }
 }
 
-export function clearComponentConnectionsView(dom, metaText) {
+export function clearComponentConnectionsView(dom: any, metaText: any) {
   if (!dom?.componentConnectionMeta || !dom?.componentConnectionBody) {
     return;
   }

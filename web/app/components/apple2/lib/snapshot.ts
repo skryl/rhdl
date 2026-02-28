@@ -2,7 +2,7 @@ export const DEFAULT_APPLE2_SNAPSHOT_KIND = 'rhdl.apple2.ram_snapshot';
 export const DEFAULT_APPLE2_SNAPSHOT_VERSION = 1;
 export const DEFAULT_MEMORY_SNAPSHOT_KIND = 'rhdl.memory.snapshot';
 
-function encodeBase64Binary(binaryText) {
+function encodeBase64Binary(binaryText: any) {
   if (typeof btoa === 'function') {
     return btoa(binaryText);
   }
@@ -12,7 +12,7 @@ function encodeBase64Binary(binaryText) {
   throw new Error('No base64 encoder available.');
 }
 
-function decodeBase64Binary(base64) {
+function decodeBase64Binary(base64: any) {
   if (typeof atob === 'function') {
     return atob(base64 || '');
   }
@@ -22,7 +22,7 @@ function decodeBase64Binary(base64) {
   throw new Error('No base64 decoder available.');
 }
 
-export function bytesToBase64(bytes) {
+export function bytesToBase64(bytes: any) {
   if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
     return '';
   }
@@ -35,7 +35,7 @@ export function bytesToBase64(bytes) {
   return encodeBase64Binary(binary);
 }
 
-export function base64ToBytes(base64) {
+export function base64ToBytes(base64: any) {
   const binary = decodeBase64Binary(base64 || '');
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) {
@@ -44,7 +44,7 @@ export function base64ToBytes(base64) {
   return out;
 }
 
-export function parsePcLiteral(value) {
+export function parsePcLiteral(value: any) {
   if (value == null) {
     return null;
   }
@@ -75,7 +75,7 @@ export function parsePcLiteral(value) {
   return null;
 }
 
-export function extractPcFromText(text) {
+export function extractPcFromText(text: any) {
   if (typeof text !== 'string' || !text.trim()) {
     return null;
   }
@@ -99,7 +99,7 @@ export function extractPcFromText(text) {
   return null;
 }
 
-export function isSnapshotFileName(fileName) {
+export function isSnapshotFileName(fileName: any) {
   const lower = String(fileName || '').trim().toLowerCase();
   return (
     lower.endsWith('.rhdlsnap')
@@ -110,12 +110,12 @@ export function isSnapshotFileName(fileName) {
 }
 
 export function buildApple2SnapshotPayload(
-  bytes,
+  bytes: any,
   offset = 0,
   label = 'saved dump',
   savedAtIso = null,
   startPc = null,
-  options = {}
+  options: any = {}
 ) {
   if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
     return null;
@@ -130,11 +130,11 @@ export function buildApple2SnapshotPayload(
   const version = Number.parseInt(options.version, 10) || DEFAULT_APPLE2_SNAPSHOT_VERSION;
   const iso = typeof savedAtIso === 'string' && savedAtIso ? savedAtIso : new Date().toISOString();
 
-  const payload = {
+  const payload: any = {
     kind,
     version,
     label: String(label || 'saved dump'),
-    offset: Math.max(0, Number.parseInt(offset, 10) || 0),
+    offset: Math.max(0, Number.parseInt(offset as any, 10) || 0),
     length: bytes.length,
     savedAtMs: Date.now(),
     savedAtIso: iso,
@@ -149,13 +149,13 @@ export function buildApple2SnapshotPayload(
   return payload;
 }
 
-export function parseApple2SnapshotPayload(payload, options = {}) {
+export function parseApple2SnapshotPayload(payload: any, options: any = {}) {
   if (!payload || typeof payload !== 'object') {
     return null;
   }
 
   const explicitKinds = Array.isArray(options.kinds)
-    ? options.kinds.map((kind) => String(kind || '').trim()).filter(Boolean)
+    ? options.kinds.map((kind: any) => String(kind || '').trim()).filter(Boolean)
     : [];
   if (explicitKinds.length === 0 && options.kind) {
     explicitKinds.push(String(options.kind));
@@ -181,7 +181,7 @@ export function parseApple2SnapshotPayload(payload, options = {}) {
   let bytes;
   try {
     bytes = base64ToBytes(payload.dataB64);
-  } catch (_err) {
+  } catch (_err: any) {
     return null;
   }
   if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
@@ -218,14 +218,14 @@ export function parseApple2SnapshotPayload(payload, options = {}) {
   };
 }
 
-export function parseApple2SnapshotText(text, options = {}) {
+export function parseApple2SnapshotText(text: any, options: any = {}) {
   if (typeof text !== 'string' || !text.trim()) {
     return null;
   }
   try {
     const payload = JSON.parse(text);
     return parseApple2SnapshotPayload(payload, options);
-  } catch (_err) {
+  } catch (_err: any) {
     return null;
   }
 }

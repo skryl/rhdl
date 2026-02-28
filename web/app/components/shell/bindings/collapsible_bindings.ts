@@ -9,7 +9,7 @@ const COMPONENT_PANEL_CLASSES = new Set([
   'component-connection-panel'
 ]);
 
-export function isComponentPanel(panel) {
+export function isComponentPanel(panel: any) {
   if (!panel || !panel.classList || typeof panel.classList.contains !== 'function') {
     return false;
   }
@@ -21,7 +21,7 @@ export function isComponentPanel(panel) {
   return false;
 }
 
-function setPanelCollapsed(panel, button, collapsed) {
+function setPanelCollapsed(panel: any, button: any, collapsed: any) {
   const next = !!collapsed;
   panel.classList.toggle('is-collapsed', next);
   button.textContent = '';
@@ -32,7 +32,7 @@ function setPanelCollapsed(panel, button, collapsed) {
   button.setAttribute('aria-label', `${next ? 'Expand' : 'Collapse'} ${title}`);
 }
 
-function handlePanelCollapseChanged(panel, collapsed, actions) {
+function handlePanelCollapseChanged(panel: any, collapsed: any, actions: any) {
   const rootKey = String(panel?.dataset?.layoutRootKey || '').trim();
   requestAnimationFrame(() => {
     if (rootKey) {
@@ -70,7 +70,7 @@ function handlePanelCollapseChanged(panel, collapsed, actions) {
   }
 }
 
-export function bindCollapsiblePanels({ selector, actions }) {
+export function bindCollapsiblePanels({ selector, actions }: any) {
   const listeners = createListenerGroup();
   const panels = Array.from(document.querySelectorAll(selector));
 

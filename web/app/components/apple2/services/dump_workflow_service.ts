@@ -5,7 +5,7 @@ import {
 } from '../lib/snapshot';
 import { hexWord } from '../../../core/lib/numeric_utils';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createApple2DumpWorkflowService requires function: ${name}`);
   }
@@ -28,7 +28,7 @@ export function createApple2DumpWorkflowService({
   log,
   fetchImpl = globalThis.fetch,
   fixtureRoot = './assets/fixtures/apple2'
-} = {}) {
+}: any = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('createApple2DumpWorkflowService requires dom/state/runtime');
   }
@@ -137,7 +137,7 @@ export function createApple2DumpWorkflowService({
     const startPc = getApple2ProgramCounter();
     const runnerId = currentRunnerId();
     const label = `${runnerId} ram snapshot ${nowIso}`;
-    const snapshot = buildApple2SnapshotPayload(bytes, dumpStart, label, nowIso, startPc, {
+    const snapshot = buildApple2SnapshotPayload(bytes, dumpStart, label, nowIso as any, startPc as any, {
       kind: 'rhdl.memory.snapshot'
     });
     if (!snapshot) {
@@ -166,7 +166,7 @@ export function createApple2DumpWorkflowService({
     return true;
   }
 
-  function basenameFromPath(pathValue) {
+  function basenameFromPath(pathValue: any) {
     const token = String(pathValue || '').trim().replace(/\\/g, '/');
     if (!token) {
       return 'asset dump';
@@ -175,7 +175,7 @@ export function createApple2DumpWorkflowService({
     return parts[parts.length - 1] || token;
   }
 
-  async function loadApple2Snapshot(snapshot) {
+  async function loadApple2Snapshot(snapshot: any) {
     if (!snapshot) {
       return false;
     }
@@ -211,7 +211,7 @@ export function createApple2DumpWorkflowService({
     return loaded;
   }
 
-  async function loadApple2DumpOrSnapshotFile(file, offsetRaw) {
+  async function loadApple2DumpOrSnapshotFile(file: any, offsetRaw: any) {
     if (!file) {
       setMemoryDumpStatus('Select a dump/snapshot file first.');
       return false;
@@ -230,7 +230,7 @@ export function createApple2DumpWorkflowService({
     return loadApple2MemoryDumpBytes(bytes, offsetRaw, { label: file.name });
   }
 
-  async function loadApple2DumpOrSnapshotAssetPath(assetPath, offsetRaw) {
+  async function loadApple2DumpOrSnapshotAssetPath(assetPath: any, offsetRaw: any) {
     const pathToken = String(assetPath || '').trim();
     if (!pathToken) {
       setMemoryDumpStatus('Select an asset path first.');
@@ -255,7 +255,7 @@ export function createApple2DumpWorkflowService({
 
       const bytes = new Uint8Array(await response.arrayBuffer());
       return loadApple2MemoryDumpBytes(bytes, offsetRaw, { label: basenameFromPath(pathToken) });
-    } catch (err) {
+    } catch (err: any) {
       const msg = `Asset load failed (${pathToken}): ${err.message || err}`;
       setMemoryDumpStatus(msg);
       log(msg);
@@ -356,7 +356,7 @@ export function createApple2DumpWorkflowService({
         resetReleaseCycles: 0,
         label: `Karateka dump (PC=$${hexWord(startPc)})`
       });
-    } catch (err) {
+    } catch (err: any) {
       const msg = `Karateka load failed: ${err.message || err}`;
       setMemoryDumpStatus(msg);
       log(msg);

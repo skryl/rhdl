@@ -1,60 +1,60 @@
-export function createStoreDispatchers({ appStore, storeActions } = {}) {
+export function createStoreDispatchers({ appStore, storeActions }: any = {}) {
   if (!appStore || !storeActions) {
     throw new Error('createStoreDispatchers requires appStore and storeActions');
   }
 
   return {
-    setBackendState(value) {
+    setBackendState(value: any) {
       appStore.dispatch(storeActions.setBackend(value));
     },
-    setThemeState(value) {
+    setThemeState(value: any) {
       appStore.dispatch(storeActions.setTheme(value));
     },
-    setRunnerPresetState(value) {
+    setRunnerPresetState(value: any) {
       appStore.dispatch(storeActions.setRunnerPreset(value));
     },
-    setActiveTabState(value) {
+    setActiveTabState(value: any) {
       appStore.dispatch(storeActions.setActiveTab(value));
     },
-    setSidebarCollapsedState(value) {
+    setSidebarCollapsedState(value: any) {
       appStore.dispatch(storeActions.setSidebarCollapsed(value));
     },
-    setTerminalOpenState(value) {
+    setTerminalOpenState(value: any) {
       appStore.dispatch(storeActions.setTerminalOpen(value));
     },
-    setRunningState(value) {
+    setRunningState(value: any) {
       appStore.dispatch(storeActions.setRunning(value));
     },
-    setCycleState(value) {
+    setCycleState(value: any) {
       appStore.dispatch(storeActions.setCycle(value));
     },
-    setUiCyclesPendingState(value) {
+    setUiCyclesPendingState(value: any) {
       appStore.dispatch(storeActions.setUiCyclesPending(value));
     },
-    setMemoryFollowPcState(value) {
+    setMemoryFollowPcState(value: any) {
       appStore.dispatch(storeActions.setMemoryFollowPc(value));
     },
-    setMemoryShowSourceState(value) {
+    setMemoryShowSourceState(value: any) {
       appStore.dispatch(storeActions.setMemoryShowSource(value));
     },
-    setApple2DisplayHiresState(value) {
+    setApple2DisplayHiresState(value: any) {
       appStore.dispatch(storeActions.setApple2DisplayHires(value));
     },
-    setApple2DisplayColorState(value) {
+    setApple2DisplayColorState(value: any) {
       appStore.dispatch(storeActions.setApple2DisplayColor(value));
     },
-    setApple2SoundEnabledState(value) {
+    setApple2SoundEnabledState(value: any) {
       appStore.dispatch(storeActions.setApple2SoundEnabled(value));
     },
-    replaceBreakpointsState(nextBreakpoints) {
-      appStore.dispatch(storeActions.mutate((draft) => {
+    replaceBreakpointsState(nextBreakpoints: any) {
+      appStore.dispatch(storeActions.mutate((draft: any) => {
         draft.breakpoints = Array.isArray(nextBreakpoints) ? nextBreakpoints : [];
       }));
     }
   };
 }
 
-export function createReduxSyncHelpers({ appStore, storeActions } = {}) {
+export function createReduxSyncHelpers({ appStore, storeActions }: any = {}) {
   if (!appStore || !storeActions) {
     throw new Error('createReduxSyncHelpers requires appStore and storeActions');
   }
@@ -89,7 +89,7 @@ export function installReduxGlobals({
   storeKey,
   stateKey,
   syncKey
-} = {}) {
+}: any = {}) {
   if (!windowRef || !appStore || typeof syncReduxUxState !== 'function') {
     return;
   }
@@ -101,7 +101,7 @@ export function installReduxGlobals({
       windowRef[stateKey] = appStore.getState();
     });
     windowRef[syncKey] = (reason = 'manual') => syncReduxUxState(reason);
-  } catch (_err) {
+  } catch (_err: any) {
     // Ignore global assignment failures in constrained environments.
   }
 }

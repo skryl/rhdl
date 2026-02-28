@@ -17,7 +17,7 @@ import { createApple2MemoryController } from './memory_controller';
 import { createApple2VisualController } from './visual_controller';
 import { createApple2OpsController } from './ops_controller';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createApple2LazyGetters requires function: ${name}`);
   }
@@ -47,7 +47,7 @@ export function createApple2LazyGetters({
   refreshStatus,
   getApple2ProgramCounter,
   currentRunnerPreset
-} = {}) {
+}: any = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('createApple2LazyGetters requires dom/state/runtime');
   }
@@ -70,9 +70,9 @@ export function createApple2LazyGetters({
   requireFn('getApple2ProgramCounter', getApple2ProgramCounter);
   requireFn('currentRunnerPreset', currentRunnerPreset);
 
-  let apple2MemoryController = null;
-  let apple2VisualController = null;
-  let apple2OpsController = null;
+  let apple2MemoryController: any = null;
+  let apple2VisualController: any = null;
+  let apple2OpsController: any = null;
 
   function getApple2MemoryController() {
     if (!apple2MemoryController) {

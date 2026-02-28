@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { bindD3Interactions } from '../../../../app/components/explorer/renderers/interactions';
 
 // Minimal mock spatial index
-function createMockIndex(hitMap) {
+function createMockIndex(hitMap: any) {
   return {
-    queryPoint(x, y) {
+    queryPoint(x: any, y: any) {
       const key = `${x},${y}`;
       return hitMap.get(key) || null;
     }
@@ -31,11 +31,11 @@ function createMockCanvas() {
     width: 800,
     height: 600,
     listeners,
-    addEventListener(event, handler) {
+    addEventListener(event: any, handler: any) {
       if (!listeners.has(event)) listeners.set(event, []);
       listeners.get(event).push(handler);
     },
-    removeEventListener(event, handler) {
+    removeEventListener(event: any, handler: any) {
       const list = listeners.get(event);
       if (list) {
         const idx = list.indexOf(handler);
@@ -45,7 +45,7 @@ function createMockCanvas() {
     getBoundingClientRect() {
       return { left: 0, top: 0, width: 800, height: 600 };
     },
-    emit(event, x, y, extra = {}) {
+    emit(event: any, x: any, y: any, extra = {}) {
       const handlers = listeners.get(event) || [];
       for (const h of handlers) {
         h({
@@ -192,7 +192,7 @@ test('clicking a pin sets graphHighlightedSignal', () => {
 test('clicking empty canvas clears graphHighlightedSignal', () => {
   const canvas = createMockCanvas();
   const state = createState();
-  state.components.graphHighlightedSignal = { signalName: 'clk', liveName: 'top__clk' };
+  state.components.graphHighlightedSignal = { signalName: 'clk', liveName: 'top__clk' } as any;
   const model = { nodes: new Map() };
   let viewRenders = 0;
 

@@ -1,4 +1,4 @@
-import { html, render as litRender } from 'https://cdn.jsdelivr.net/npm/lit-html@3.2.1/+esm';
+import { html, render as litRender } from 'lit-html';
 import { formatValue } from '../../../core/lib/numeric_utils';
 import { parseIrMeta } from '../../../core/lib/ir_meta_utils';
 import { getBackendDef } from '../runtime/backend_defs';
@@ -8,7 +8,7 @@ import { createSimInitializerController } from './initializer_controller';
 import { createSimStatusController } from './status_controller';
 import { createSimLoopController } from './loop_controller';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createSimLazyGetters requires function: ${name}`);
   }
@@ -57,7 +57,7 @@ export function createSimLazyGetters({
   isComponentTabActive,
   refreshActiveComponentTab,
   drainTrace
-} = {}) {
+}: any = {}) {
   if (!dom || !state || !runtime || !appStore || !storeActions) {
     throw new Error('createSimLazyGetters requires dom/state/runtime/appStore/storeActions');
   }
@@ -97,10 +97,10 @@ export function createSimLazyGetters({
   requireFn('refreshActiveComponentTab', refreshActiveComponentTab);
   requireFn('drainTrace', drainTrace);
 
-  let simRuntimeController = null;
-  let simInitializerController = null;
-  let simStatusController = null;
-  let simLoopController = null;
+  let simRuntimeController: any = null;
+  let simInitializerController: any = null;
+  let simStatusController: any = null;
+  let simLoopController: any = null;
 
   function getSimRuntimeController() {
     if (!simRuntimeController) {
@@ -130,7 +130,7 @@ export function createSimLazyGetters({
         setComponentSourceBundle,
         setComponentSchematicBundle,
         ensureBackendInstance,
-        createSimulator: (instance, json, backend) => new WasmIrSimulator(instance, json, backend),
+        createSimulator: (instance: any, json: any, backend: any) => new WasmIrSimulator(instance, json, backend),
         setCycleState,
         setUiCyclesPendingState,
         setRunningState,

@@ -62,17 +62,17 @@ export const DASHBOARD_ROOT_CONFIGS = [
 
 function noOp() {}
 
-function resetResizingState(state) {
+function resetResizingState(state: any) {
   state.dashboard.resizing.active = false;
   state.dashboard.resizing.rootKey = '';
   state.dashboard.resizing.rowSignature = '';
 }
 
-function isHtmlElement(value) {
+function isHtmlElement(value: any) {
   return typeof HTMLElement !== 'undefined' && value instanceof HTMLElement;
 }
 
-export function createDashboardLayoutManager(options) {
+export function createDashboardLayoutManager(options: any) {
   const {
     state,
     documentRef = globalThis.document,
@@ -129,7 +129,7 @@ export function createDashboardLayoutManager(options) {
 
   const requestFrame = (typeof windowRef?.requestAnimationFrame === 'function')
     ? windowRef.requestAnimationFrame.bind(windowRef)
-    : ((cb) => setTimeout(cb, 0));
+    : ((cb: any) => setTimeout(cb, 0));
 
   const dashboard = state.dashboard;
 
@@ -137,7 +137,7 @@ export function createDashboardLayoutManager(options) {
     try {
       const raw = storage?.getItem?.(layoutStorageKey) ?? null;
       return parseDashboardLayouts(raw);
-    } catch (_err) {
+    } catch (_err: any) {
       return {};
     }
   }
@@ -145,16 +145,16 @@ export function createDashboardLayoutManager(options) {
   function writeDashboardLayouts() {
     try {
       storage?.setItem?.(layoutStorageKey, serializeDashboardLayouts(dashboard.layouts || {}));
-    } catch (_err) {
+    } catch (_err: any) {
       // Ignore storage failures.
     }
   }
 
-  function dashboardRootPanels(root) {
-    return Array.from(root.children).filter((child) => isHtmlElement(child) && child.classList.contains('dashboard-panel'));
+  function dashboardRootPanels(root: any) {
+    return Array.from(root.children).filter((child: any) => isHtmlElement(child) && child.classList.contains('dashboard-panel'));
   }
 
-  function panelHeaderTitle(panel) {
+  function panelHeaderTitle(panel: any) {
     const raw = String(panel.dataset.collapseTitle || '').trim();
     if (raw) {
       return raw;
@@ -163,24 +163,24 @@ export function createDashboardLayoutManager(options) {
     return String(heading?.textContent || '').trim() || 'Panel';
   }
 
-  function defaultDashboardSpan(rootKey, panel) {
+  function defaultDashboardSpan(rootKey: any, panel: any) {
     void rootKey;
     void panel;
     return 'full';
   }
 
-  function normalizeDashboardSpansForRoot(root) {
+  function normalizeDashboardSpansForRoot(root: any) {
     if (!isHtmlElement(root)) {
       return;
     }
     normalizeDashboardPanelSpans(dashboardRootPanels(root), normalizeDashboardSpan, 'full');
   }
 
-  function dashboardRowsForRoot(root) {
+  function dashboardRowsForRoot(root: any) {
     return dashboardRowsFromPanels(dashboardRootPanels(root), normalizeDashboardSpan, 'full');
   }
 
-  function dashboardLayoutRowHeights(rootKey) {
+  function dashboardLayoutRowHeights(rootKey: any) {
     const layout = dashboard.layouts?.[rootKey];
     if (!layout || typeof layout !== 'object') {
       return {};
@@ -191,21 +191,21 @@ export function createDashboardLayoutManager(options) {
     return layout.rowHeights;
   }
 
-  function clearDashboardRowSizing(root) {
+  function clearDashboardRowSizing(root: any) {
     if (!isHtmlElement(root)) {
       return;
     }
-    const handles = Array.from(root.querySelectorAll(':scope > .dashboard-row-resize-handle'));
+    const handles: any[] = Array.from(root.querySelectorAll(':scope > .dashboard-row-resize-handle'));
     for (const handle of handles) {
       handle.remove();
     }
-    for (const panel of dashboardRootPanels(root)) {
+    for (const panel of dashboardRootPanels(root) as any[]) {
       panel.classList.remove('dashboard-row-sized');
       panel.style.removeProperty('--dashboard-row-height');
     }
   }
 
-  function isDashboardRootVisible(rootKey, root) {
+  function isDashboardRootVisible(rootKey: any, root: any) {
     if (!isHtmlElement(root)) {
       return false;
     }
@@ -219,7 +219,7 @@ export function createDashboardLayoutManager(options) {
     return tabPanel.classList.contains('active');
   }
 
-  function refreshRowSizing(rootKey) {
+  function refreshRowSizing(rootKey: any) {
     const root = dashboard.rootElements.get(rootKey);
     if (!isHtmlElement(root)) {
       return;
@@ -293,7 +293,7 @@ export function createDashboardLayoutManager(options) {
     }
   }
 
-  function notifyDashboardLayoutChanged(rootKey) {
+  function notifyDashboardLayoutChanged(rootKey: any) {
     if (rootKey === 'vcdTab' && getActiveTab() === 'vcdTab') {
       requestFrame(() => {
         windowRef.dispatchEvent(new Event('resize'));
@@ -313,7 +313,7 @@ export function createDashboardLayoutManager(options) {
     }
   }
 
-  function setDashboardRowHeight(rootKey, signature, heightPx) {
+  function setDashboardRowHeight(rootKey: any, signature: any, heightPx: any) {
     if (!rootKey || !signature) {
       return;
     }
@@ -326,7 +326,7 @@ export function createDashboardLayoutManager(options) {
     notifyDashboardLayoutChanged(rootKey);
   }
 
-  function handleDashboardResizeMouseMove(event) {
+  function handleDashboardResizeMouseMove(event: any) {
     if (!dashboard.resizing.active) {
       return;
     }
@@ -368,7 +368,7 @@ export function createDashboardLayoutManager(options) {
     resetResizingState(state);
   }
 
-  function handleDashboardRowResizeMouseDown(event) {
+  function handleDashboardRowResizeMouseDown(event: any) {
     const handle = isHtmlElement(event.target)
       ? event.target.closest('.dashboard-row-resize-handle')
       : null;
@@ -416,7 +416,7 @@ export function createDashboardLayoutManager(options) {
     dashboard.resizeBound = true;
   }
 
-  function ensureControlsDashboardRoot(controlsPanel) {
+  function ensureControlsDashboardRoot(controlsPanel: any) {
     if (!isHtmlElement(controlsPanel)) {
       return null;
     }
@@ -440,19 +440,19 @@ export function createDashboardLayoutManager(options) {
     return root;
   }
 
-  function flattenDashboardPanelsIntoRoot(root, panelSelector) {
-    const panels = Array.from(root.querySelectorAll(panelSelector)).filter((panel) => isHtmlElement(panel));
-    for (const panel of panels) {
+  function flattenDashboardPanelsIntoRoot(root: any, panelSelector: any) {
+    const panels = Array.from(root.querySelectorAll(panelSelector)).filter((panel: any) => isHtmlElement(panel));
+    for (const panel of panels as any[]) {
       if (panel.parentElement !== root) {
         root.appendChild(panel);
       }
     }
   }
 
-  function cleanupDashboardRoots(root, selectors) {
+  function cleanupDashboardRoots(root: any, selectors: any) {
     for (const selector of selectors) {
-      const nodes = Array.from(root.querySelectorAll(selector)).filter((entry) => isHtmlElement(entry));
-      for (const node of nodes) {
+      const nodes = Array.from(root.querySelectorAll(selector)).filter((entry: any) => isHtmlElement(entry));
+      for (const node of nodes as any[]) {
         if (node === root) {
           continue;
         }
@@ -463,7 +463,7 @@ export function createDashboardLayoutManager(options) {
     }
   }
 
-  function assignDashboardPanelIds(rootKey, panels) {
+  function assignDashboardPanelIds(rootKey: any, panels: any) {
     const seen = new Set();
     const counts = new Map();
     for (const panel of panels) {
@@ -484,9 +484,9 @@ export function createDashboardLayoutManager(options) {
     }
   }
 
-  function applySavedDashboardLayout(rootKey, root) {
+  function applySavedDashboardLayout(rootKey: any, root: any) {
     const layout = dashboard.layouts?.[rootKey];
-    const panels = dashboardRootPanels(root);
+    const panels = dashboardRootPanels(root) as any[];
     const panelById = new Map();
     for (const panel of panels) {
       const itemId = String(panel.dataset.layoutItemId || '').trim();
@@ -511,7 +511,7 @@ export function createDashboardLayoutManager(options) {
     }
 
     const savedSpans = layout && layout.spans && typeof layout.spans === 'object' ? layout.spans : {};
-    for (const panel of dashboardRootPanels(root)) {
+    for (const panel of dashboardRootPanels(root) as any[]) {
       const itemId = String(panel.dataset.layoutItemId || '').trim();
       const fallback = defaultDashboardSpan(rootKey, panel);
       panel.dataset.layoutSpan = normalizeDashboardSpan(savedSpans[itemId], fallback);
@@ -519,7 +519,7 @@ export function createDashboardLayoutManager(options) {
     normalizeDashboardSpansForRoot(root);
   }
 
-  function saveDashboardLayout(rootKey) {
+  function saveDashboardLayout(rootKey: any) {
     const root = dashboard.rootElements.get(rootKey);
     if (!isHtmlElement(root)) {
       return;
@@ -528,7 +528,7 @@ export function createDashboardLayoutManager(options) {
     const { order, spans } = snapshotDashboardPanelLayout(
       dashboardRootPanels(root),
       normalizeDashboardSpan,
-      (panel) => defaultDashboardSpan(rootKey, panel)
+      ((panel: any) => defaultDashboardSpan(rootKey, panel)) as any
     );
     const prior = dashboard.layouts[rootKey] && typeof dashboard.layouts[rootKey] === 'object'
       ? dashboard.layouts[rootKey]
@@ -543,14 +543,14 @@ export function createDashboardLayoutManager(options) {
 
   function clearDashboardDropState() {
     const highlighted = Array.from(documentRef.querySelectorAll('.dashboard-panel.dashboard-drop-target'));
-    for (const panel of highlighted) {
+    for (const panel of highlighted as any[]) {
       panel.classList.remove('dashboard-drop-target', 'drop-left', 'drop-right', 'drop-above', 'drop-below');
     }
     dashboard.dropTargetItemId = '';
     dashboard.dropPosition = '';
   }
 
-  function setDashboardDropState(panel, position) {
+  function setDashboardDropState(panel: any, position: any) {
     if (!isHtmlElement(panel) || !DASHBOARD_DROP_POSITIONS.has(position)) {
       return;
     }
@@ -565,8 +565,8 @@ export function createDashboardLayoutManager(options) {
     dashboard.dropPosition = position;
   }
 
-  function findDashboardPanelById(root, itemId) {
-    for (const panel of dashboardRootPanels(root)) {
+  function findDashboardPanelById(root: any, itemId: any) {
+    for (const panel of dashboardRootPanels(root) as any[]) {
       if (String(panel.dataset.layoutItemId || '').trim() === itemId) {
         return panel;
       }
@@ -574,7 +574,7 @@ export function createDashboardLayoutManager(options) {
     return null;
   }
 
-  function applyDashboardDrop(targetPanel, position) {
+  function applyDashboardDrop(targetPanel: any, position: any) {
     if (!isHtmlElement(targetPanel) || !DASHBOARD_DROP_POSITIONS.has(position)) {
       return;
     }
@@ -607,7 +607,7 @@ export function createDashboardLayoutManager(options) {
 
   function resetDashboardDragState() {
     const draggingPanels = Array.from(documentRef.querySelectorAll('.dashboard-panel.is-dragging'));
-    for (const panel of draggingPanels) {
+    for (const panel of draggingPanels as any[]) {
       panel.classList.remove('is-dragging');
     }
     clearDashboardDropState();
@@ -615,7 +615,7 @@ export function createDashboardLayoutManager(options) {
     dashboard.draggingRootKey = '';
   }
 
-  function handleDashboardDragStart(event) {
+  function handleDashboardDragStart(event: any) {
     const handle = event.currentTarget;
     const panel = isHtmlElement(handle) ? handle.closest('.dashboard-panel') : null;
     if (!isHtmlElement(panel)) {
@@ -643,7 +643,7 @@ export function createDashboardLayoutManager(options) {
     resetDashboardDragState();
   }
 
-  function handleDashboardDragOver(event) {
+  function handleDashboardDragOver(event: any) {
     const targetPanel = event.currentTarget;
     if (!isHtmlElement(targetPanel)) {
       return;
@@ -664,7 +664,7 @@ export function createDashboardLayoutManager(options) {
     }
   }
 
-  function handleDashboardDrop(event) {
+  function handleDashboardDrop(event: any) {
     const targetPanel = event.currentTarget;
     if (!isHtmlElement(targetPanel)) {
       return;
@@ -686,7 +686,7 @@ export function createDashboardLayoutManager(options) {
     resetDashboardDragState();
   }
 
-  function setupDashboardPanelInteractions(panel) {
+  function setupDashboardPanelInteractions(panel: any) {
     if (!isHtmlElement(panel) || panel.dataset.dashboardReady === '1') {
       return;
     }
@@ -721,7 +721,7 @@ export function createDashboardLayoutManager(options) {
     for (const teardown of dashboard.panelTeardowns.values()) {
       try {
         teardown?.();
-      } catch (_err) {
+      } catch (_err: any) {
         // Best-effort cleanup.
       }
     }
@@ -757,10 +757,10 @@ export function createDashboardLayoutManager(options) {
       cleanupDashboardRoots(root, Array.isArray(config.cleanupSelectors) ? config.cleanupSelectors : []);
 
       const panels = Array.from(root.querySelectorAll(config.panelSelector))
-        .filter((panel) => isHtmlElement(panel) && panel.parentElement === root);
+        .filter((panel: any) => isHtmlElement(panel) && panel.parentElement === root);
       assignDashboardPanelIds(config.key, panels);
 
-      for (const panel of panels) {
+      for (const panel of panels as any[]) {
         panel.classList.add('dashboard-panel');
         panel.dataset.layoutSpan = normalizeDashboardSpan(
           panel.dataset.layoutSpan,
@@ -769,13 +769,13 @@ export function createDashboardLayoutManager(options) {
         setupDashboardPanelInteractions(panel);
       }
 
-      const staticNodes = Array.from(root.children).filter((entry) => isHtmlElement(entry) && !entry.classList.contains('dashboard-panel'));
-      for (const node of staticNodes) {
+      const staticNodes = Array.from(root.children).filter((entry: any) => isHtmlElement(entry) && !entry.classList.contains('dashboard-panel'));
+      for (const node of staticNodes as any[]) {
         node.classList.add('dashboard-static');
       }
       for (const selector of config.staticSelectors || []) {
-        const nodes = Array.from(root.querySelectorAll(selector)).filter((entry) => isHtmlElement(entry));
-        for (const node of nodes) {
+        const nodes = Array.from(root.querySelectorAll(selector)).filter((entry: any) => isHtmlElement(entry));
+        for (const node of nodes as any[]) {
           if (node.parentElement === root) {
             node.classList.add('dashboard-static');
           }
@@ -793,7 +793,7 @@ export function createDashboardLayoutManager(options) {
     if (dashboard.resizeBound) {
       try {
         dashboard.resizeTeardown?.();
-      } catch (_err) {
+      } catch (_err: any) {
         // Best-effort cleanup.
       }
     }

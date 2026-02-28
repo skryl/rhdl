@@ -1,4 +1,4 @@
-import { LitElement } from 'https://cdn.jsdelivr.net/npm/lit@3.2.1/+esm';
+import { LitElement } from 'lit';
 import { SHELL_BASE_STYLE } from './styles/base_style';
 import { SHELL_RESPONSIVE_STYLE } from './styles/responsive_style';
 import { SHELL_THEME_STYLE } from './styles/theme_style';
@@ -10,6 +10,7 @@ const SHELL_STYLE_TEXT = [
 ].join('\n\n');
 
 class RhdlAppShell extends LitElement {
+  [key: string]: any;
   createRenderRoot() {
     return this;
   }

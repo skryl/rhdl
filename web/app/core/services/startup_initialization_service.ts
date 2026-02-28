@@ -6,13 +6,13 @@ import {
 
 const BACKEND_IDS = Object.freeze(['interpreter', 'compiler', 'arcilator']);
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createStartupInitializationService requires function: ${name}`);
   }
 }
 
-function escapeHtml(value) {
+function escapeHtml(value: any) {
   return String(value || '')
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
@@ -21,7 +21,7 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
-function setSelectOptions(selectEl, options = [], preferredValue = '') {
+function setSelectOptions(selectEl: any, options: readonly any[] = [], preferredValue = '') {
   const normalizedOptions = Array.isArray(options)
     ? options
         .map((opt) => ({
@@ -50,7 +50,7 @@ function setSelectOptions(selectEl, options = [], preferredValue = '') {
 
   try {
     selectEl.innerHTML = markup;
-  } catch (_err) {
+  } catch (_err: any) {
     // Non-DOM test doubles may not support innerHTML assignment.
   }
 
@@ -72,7 +72,7 @@ export function createStartupInitializationService({
   sim,
   apple2,
   terminal
-} = {}) {
+}: any = {}) {
   if (!dom || !state) {
     throw new Error('createStartupInitializationService requires dom/state');
   }
@@ -116,7 +116,7 @@ export function createStartupInitializationService({
       collapsed = localStorageRef.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
       terminalOpen = localStorageRef.getItem(TERMINAL_OPEN_KEY) === '1';
       savedTheme = normalizeTheme(localStorageRef.getItem(THEME_KEY) || 'shenzhen');
-    } catch (_err) {
+    } catch (_err: any) {
       collapsed = false;
       terminalOpen = false;
       savedTheme = 'shenzhen';
@@ -125,7 +125,7 @@ export function createStartupInitializationService({
   }
 
   async function resolveAvailableBackends(preferredBackend = '') {
-    const options = [];
+    const options: any[] = [];
     for (const backendId of BACKEND_IDS) {
       const backend = getBackendDef(backendId);
       if (!backend?.id) {
@@ -149,7 +149,7 @@ export function createStartupInitializationService({
 
     try {
       await runner.ensureBackendInstance(selected);
-    } catch (err) {
+    } catch (err: any) {
       const fallback = options.find((opt) => opt.value === 'interpreter')?.value || options[0]?.value || selected;
       if (fallback === selected) {
         throw err;

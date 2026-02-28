@@ -8,7 +8,7 @@ export function createSimDomainController({
   resetThroughputSampling,
   drainTrace,
   maskForWidth
-} = {}) {
+}: any = {}) {
   return {
     setupP5,
     refreshStatus,

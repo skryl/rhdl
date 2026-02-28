@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 
 import { startApp } from '../../../../app/core/controllers/startup';
 
-function createHarness(overrides = {}) {
-  const calls = [];
-  const registered = [];
-  const bound = {
+function createHarness(overrides: any = {}) {
+  const calls: any[] = [];
+  const registered: any[] = [];
+  const bound: Record<string, any> = {
     core: null,
     component: null,
     io: null,
@@ -30,7 +30,7 @@ function createHarness(overrides = {}) {
   };
 
   const terminal = {
-    writeLine: (message) => calls.push(['terminal.writeLine', message]),
+    writeLine: (message: any) => calls.push(['terminal.writeLine', message]),
     submitInput: async () => {},
     historyNavigate: () => {}
   };
@@ -43,20 +43,20 @@ function createHarness(overrides = {}) {
   };
 
   const shell = {
-    setSidebarCollapsed: (value) => calls.push(['shell.setSidebarCollapsed', value]),
-    setTerminalOpen: (value, opts) => calls.push(['shell.setTerminalOpen', value, opts?.persist, opts?.focus]),
-    applyTheme: (value, opts) => calls.push(['shell.applyTheme', value, opts?.persist]),
-    setActiveTab: (tab) => calls.push(['shell.setActiveTab', tab]),
+    setSidebarCollapsed: (value: any) => calls.push(['shell.setSidebarCollapsed', value]),
+    setTerminalOpen: (value: any, opts: any) => calls.push(['shell.setTerminalOpen', value, opts?.persist, opts?.focus]),
+    applyTheme: (value: any, opts: any) => calls.push(['shell.applyTheme', value, opts?.persist]),
+    setActiveTab: (tab: any) => calls.push(['shell.setActiveTab', tab]),
     terminal,
     dashboard
   };
 
   const runnerActionsController = {
-    preloadStartPreset: async (preset) => calls.push(['runner.preloadStartPreset', preset?.id || null])
+    preloadStartPreset: async (preset: any) => calls.push(['runner.preloadStartPreset', preset?.id || null])
   };
 
   const runner = {
-    ensureBackendInstance: async (backend) => {
+    ensureBackendInstance: async (backend: any) => {
       calls.push(['runner.ensureBackendInstance', backend]);
       if (overrides.ensureBackendError) {
         throw overrides.ensureBackendError;
@@ -65,9 +65,9 @@ function createHarness(overrides = {}) {
     updateIrSourceVisibility: () => calls.push(['runner.updateIrSourceVisibility']),
     currentPreset: () => ({ id: 'apple2', usesManualIr: false, autoLoadOnBoot: true }),
     getActionsController: () => runnerActionsController,
-    loadPreset: async (options) => calls.push(['runner.loadPreset', options?.presetOverride?.id || null]),
+    loadPreset: async (options: any) => calls.push(['runner.loadPreset', options?.presetOverride?.id || null]),
     loadBundle: async () => ({ simJson: '{}', explorerJson: '{}', explorerMeta: null }),
-    getPreset: (id) => ({ id, usesManualIr: id === 'generic' }),
+    getPreset: (id: any) => ({ id, usesManualIr: id === 'generic' }),
     loadSample: async () => {}
   };
 
@@ -111,45 +111,45 @@ function createHarness(overrides = {}) {
   };
 
   const localStorageRef = {
-    getItem(key) {
+    getItem(key: any) {
       if (overrides.localStorageThrows) {
         throw new Error('storage unavailable');
       }
-      return localStorageValues[key] ?? null;
+      return (localStorageValues as Record<string, any>)[key] ?? null;
     }
   };
 
   const bindings = {
     COLLAPSIBLE_PANEL_SELECTOR: '.panel',
-    bindCoreBindings(args) {
+    bindCoreBindings(args: any) {
       bound.core = args;
       return () => {};
     },
-    bindMemoryBindings(args) {
+    bindMemoryBindings(args: any) {
       bound.memory = args;
       return () => {};
     },
-    bindComponentBindings(args) {
+    bindComponentBindings(args: any) {
       bound.component = args;
       return () => {};
     },
-    bindIoBindings(args) {
+    bindIoBindings(args: any) {
       bound.io = args;
       return () => {};
     },
-    bindSimBindings(args) {
+    bindSimBindings(args: any) {
       bound.sim = args;
       return () => {};
     },
-    bindEditorBindings(args) {
+    bindEditorBindings(args: any) {
       bound.editor = args;
       return () => {};
     },
-    bindCollapsiblePanels(args) {
+    bindCollapsiblePanels(args: any) {
       bound.collapsible = args;
       return () => {};
     },
-    registerUiBinding(fn) {
+    registerUiBinding(fn: any) {
       registered.push(fn);
       calls.push(['registerUiBinding']);
     },
@@ -158,10 +158,10 @@ function createHarness(overrides = {}) {
     }
   };
 
-  const storeCalls = [];
+  const storeCalls: any[] = [];
   const store = {
-    setBackendState: (value) => storeCalls.push(['setBackendState', value]),
-    setRunnerPresetState: (value) => storeCalls.push(['setRunnerPresetState', value]),
+    setBackendState: (value: any) => storeCalls.push(['setBackendState', value]),
+    setRunnerPresetState: (value: any) => storeCalls.push(['setRunnerPresetState', value]),
     setApple2DisplayHiresState: () => {},
     setApple2DisplayColorState: () => {},
     setRunningState: () => {},
@@ -169,12 +169,12 @@ function createHarness(overrides = {}) {
     setUiCyclesPendingState: () => {},
     setMemoryFollowPcState: () => {},
     setMemoryShowSourceState: () => {},
-    syncReduxUxState: (reason) => storeCalls.push(['syncReduxUxState', reason]),
+    syncReduxUxState: (reason: any) => storeCalls.push(['syncReduxUxState', reason]),
     scheduleReduxUxSync: () => {}
   };
 
-  const logs = [];
-  const log = (message) => {
+  const logs: any[] = [];
+  const log = (message: any) => {
     logs.push(String(message));
   };
 
@@ -186,15 +186,15 @@ function createHarness(overrides = {}) {
     storeActions: {},
     env: {
       localStorageRef,
-      requestAnimationFrameImpl: (cb) => cb()
+      requestAnimationFrameImpl: (cb: any) => cb()
     },
     store,
     util: {
-      getBackendDef: (id) => ({ id }),
+      getBackendDef: (id: any) => ({ id }),
       parseNumeric: () => null,
       parseHexOrDec: () => 0,
-      hexByte: (value) => value.toString(16),
-      normalizeTheme: (value) => (value === 'original' ? 'original' : 'shenzhen'),
+      hexByte: (value: any) => value.toString(16),
+      normalizeTheme: (value: any) => (value === 'original' ? 'original' : 'shenzhen'),
       isSnapshotFileName: () => false
     },
     keys: {

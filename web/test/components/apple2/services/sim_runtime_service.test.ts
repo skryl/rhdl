@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import { createApple2SimRuntimeService } from '../../../../app/components/apple2/services/sim_runtime_service';
 
 test('apple2 sim runtime service performs reset sequence through reset signal', () => {
-  const calls = [];
+  const calls: any[] = [];
   const state = { apple2: { keyQueue: [1, 2, 3] } };
   const runtime = {
     sim: {
-      has_signal: (name) => name === 'reset',
-      poke: (name, value) => calls.push(['poke', name, value]),
-      runner_run_cycles: (count) => calls.push(['cycles', count]),
+      has_signal: (name: any) => name === 'reset',
+      poke: (name: any, value: any) => calls.push(['poke', name, value]),
+      runner_run_cycles: (count: any) => calls.push(['cycles', count]),
       reset: () => calls.push(['reset']),
       trace_enabled: () => true,
       trace_capture: () => calls.push(['trace_capture'])
@@ -19,9 +19,9 @@ test('apple2 sim runtime service performs reset sequence through reset signal', 
     state,
     runtime,
     APPLE2_RAM_BYTES: 64 * 1024,
-    setRunningState: (value) => calls.push(['running', value]),
-    setCycleState: (value) => calls.push(['cycle', value]),
-    setUiCyclesPendingState: (value) => calls.push(['ui', value]),
+    setRunningState: (value: any) => calls.push(['running', value]),
+    setCycleState: (value: any) => calls.push(['cycle', value]),
+    setUiCyclesPendingState: (value: any) => calls.push(['ui', value]),
     getApple2ProgramCounter: () => 0xB82A,
     ensureApple2Ready: () => true,
     setMemoryDumpStatus: () => {},
@@ -43,12 +43,12 @@ test('apple2 sim runtime service performs reset sequence through reset signal', 
 
 test('apple2 sim runtime service trims RAM load to address window', async () => {
   let status = '';
-  const loaded = [];
+  const loaded: any[] = [];
   const service = createApple2SimRuntimeService({
     state: { apple2: { keyQueue: [] } },
     runtime: {
       sim: {
-        memory_load: (bytes, offset) => {
+        memory_load: (bytes: any, offset: any) => {
           loaded.push({ bytes: new Uint8Array(bytes), offset });
           return true;
         },
@@ -63,7 +63,7 @@ test('apple2 sim runtime service trims RAM load to address window', async () => 
     setUiCyclesPendingState: () => {},
     getApple2ProgramCounter: () => 0,
     ensureApple2Ready: () => true,
-    setMemoryDumpStatus: (message) => {
+    setMemoryDumpStatus: (message: any) => {
       status = message;
     },
     refreshApple2UiState: () => {},

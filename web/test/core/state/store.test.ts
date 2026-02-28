@@ -87,7 +87,7 @@ test('breakpoint actions replace by signal name and clear cleanly', () => {
   let state = store.getState();
   assert.equal(state.breakpoints.length, 2);
   assert.equal(
-    state.breakpoints.find((entry) => entry.name === 'pc_debug')?.value,
+    state.breakpoints.find((entry: any) => entry.name === 'pc_debug')?.value,
     0xB849
   );
 
@@ -108,8 +108,8 @@ test('touch + mutate actions keep store dispatch-friendly for app-level sync', (
     notifyCount += 1;
   });
 
-  store.dispatch(actions.touch({ reason: 'test' }));
-  store.dispatch(actions.mutate((draft) => {
+  store.dispatch(actions.touch({ reason: 'test' } as any));
+  store.dispatch(actions.mutate((draft: any) => {
     draft.cycle = 99;
     draft.running = true;
   }));

@@ -1,4 +1,4 @@
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createApple2UiStateService requires function: ${name}`);
   }
@@ -15,7 +15,7 @@ export function createApple2UiStateService({
   refreshMemoryView,
   refreshWatchTable,
   refreshStatus
-} = {}) {
+}: any = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('createApple2UiStateService requires dom/state/runtime');
   }
@@ -60,13 +60,13 @@ export function createApple2UiStateService({
     }
   }
 
-  function setMemoryDumpStatus(message) {
+  function setMemoryDumpStatus(message: any) {
     if (dom.memoryDumpStatus) {
       dom.memoryDumpStatus.textContent = message || '';
     }
   }
 
-  function setMemoryResetVectorInput(value) {
+  function setMemoryResetVectorInput(value: any) {
     if (!dom.memoryResetVector) {
       return;
     }
@@ -82,7 +82,7 @@ export function createApple2UiStateService({
     refreshStatus();
   }
 
-  function formatHex16(value) {
+  function formatHex16(value: any) {
     return hexWord(value);
   }
 

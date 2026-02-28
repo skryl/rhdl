@@ -5,10 +5,10 @@ import { createApple2RomResetService } from '../../../../app/components/apple2/s
 
 test('apple2 rom reset service patches reset vector and applies start PC', async () => {
   const state = { apple2: { baseRomBytes: null } };
-  const loadedRoms = [];
+  const loadedRoms: any[] = [];
   const runtime = {
     sim: {
-      runner_load_rom(bytes) {
+      runner_load_rom(bytes: any) {
         loadedRoms.push(new Uint8Array(bytes));
         return true;
       }
@@ -26,7 +26,7 @@ test('apple2 rom reset service patches reset vector and applies start PC', async
         return baseRom.buffer.slice(0);
       }
     }),
-    parsePcLiteral: (value) => Number(value) & 0xffff,
+    parsePcLiteral: (value: any) => Number(value) & 0xffff,
     isApple2UiEnabled: () => true
   });
 

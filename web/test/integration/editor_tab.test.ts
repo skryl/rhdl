@@ -13,17 +13,17 @@ const BENIGN_PAGE_ERRORS = [
   'Failed to execute \'drawImage\' on \'CanvasRenderingContext2D\': The image argument is a canvas element with a width or height of 0.'
 ];
 
-async function hasMirbAsset(webRoot) {
+async function hasMirbAsset(webRoot: any) {
   const mirbScriptPath = path.join(webRoot, 'assets', 'pkg', 'mirb.js');
   try {
     await access(mirbScriptPath);
     return true;
-  } catch (_err) {
+  } catch (_err: any) {
     return false;
   }
 }
 
-async function runEditorTerminalCommand(page, command, expectedMarker, timeoutMs = 60000) {
+async function runEditorTerminalCommand(page: any, command: any, expectedMarker: any, timeoutMs = 60000) {
   await page.click('#editorTerminalOutput');
   await page.keyboard.type(command);
   await page.keyboard.press('Enter');
@@ -32,7 +32,7 @@ async function runEditorTerminalCommand(page, command, expectedMarker, timeoutMs
   while (Date.now() - started < timeoutMs) {
     const text = await page.$eval(
       '#editorTerminalOutput',
-      (el) => String(el.dataset?.terminalText ?? el.value ?? el.textContent ?? '')
+      (el: any) => String(el.dataset?.terminalText ?? el.value ?? el.textContent ?? '')
     );
     if (text.includes(expectedMarker)) {
       return;
@@ -45,7 +45,7 @@ async function runEditorTerminalCommand(page, command, expectedMarker, timeoutMs
 
   const tail = await page.$eval(
     '#editorTerminalOutput',
-    (el) => String(el.dataset?.terminalText ?? el.value ?? el.textContent ?? '').slice(-1200)
+    (el: any) => String(el.dataset?.terminalText ?? el.value ?? el.textContent ?? '').slice(-1200)
   );
   throw new Error(`Timed out waiting for marker "${expectedMarker}" after "${command}".\nTail:\n${tail}`);
 }
@@ -54,7 +54,7 @@ test('editor tab executes code in mirb and refreshes IO trace view', { timeout: 
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
@@ -73,7 +73,7 @@ test('editor tab executes code in mirb and refreshes IO trace view', { timeout: 
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }
@@ -82,8 +82,8 @@ test('editor tab executes code in mirb and refreshes IO trace view', { timeout: 
   });
 
   const page = await browser.newPage();
-  const pageErrors = [];
-  const consoleErrors = [];
+  const pageErrors: any[] = [];
+  const consoleErrors: any[] = [];
 
   page.on('pageerror', (err) => {
     const message = String(err?.message || err);
@@ -125,7 +125,7 @@ test('editor tab executes code in mirb and refreshes IO trace view', { timeout: 
   await page.click('#editorExecuteBtn');
   await page.waitForFunction(() => {
     const terminalEl = document.querySelector('#editorTerminalOutput');
-    const text = String(terminalEl?.dataset?.terminalText ?? terminalEl?.value ?? terminalEl?.textContent ?? '');
+    const text = String((terminalEl as any)?.dataset?.terminalText ?? (terminalEl as any)?.value ?? terminalEl?.textContent ?? '');
     return text.includes('$ irb <editor-buffer>') && text.includes('=> 5');
   }, null, { timeout: 60000 });
 

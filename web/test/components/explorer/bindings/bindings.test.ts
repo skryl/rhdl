@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 
 import { bindComponentBindings } from '../../../../app/components/explorer/bindings/bindings';
 
-function makeTarget(extra = {}) {
+function makeTarget(extra: any = {}) {
   return Object.assign(new EventTarget(), extra);
 }
 
 test('bindComponentBindings handles component-select and teardown', () => {
-  const calls = [];
+  const calls: any[] = [];
   const dom = {
     componentTree: makeTarget(),
     componentGraphTopBtn: makeTarget(),
@@ -45,12 +45,12 @@ test('bindComponentBindings handles component-select and teardown', () => {
     dom,
     state,
     components,
-    scheduleReduxUxSync: (reason) => calls.push(`sync:${reason}`),
-    log: (msg) => calls.push(`log:${msg}`)
+    scheduleReduxUxSync: (reason: any) => calls.push(`sync:${reason}`),
+    log: (msg: any) => calls.push(`log:${msg}`)
   });
 
   const event = new Event('component-select');
-  event.detail = { nodeId: 'cpu.core' };
+  (event as any).detail = { nodeId: 'cpu.core' };
   dom.componentTree.dispatchEvent(event);
   dom.componentGraphZoomInBtn.dispatchEvent(new Event('click'));
   dom.componentGraphZoomOutBtn.dispatchEvent(new Event('click'));
@@ -61,7 +61,7 @@ test('bindComponentBindings handles component-select and teardown', () => {
 
   teardown();
   const event2 = new Event('component-select');
-  event2.detail = { nodeId: 'cpu.next' };
+  (event2 as any).detail = { nodeId: 'cpu.next' };
   dom.componentTree.dispatchEvent(event2);
   assert.equal(state.components.selectedNodeId, 'cpu.core');
 });

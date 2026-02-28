@@ -47,10 +47,10 @@ test('tick with partial increments accumulates correctly', () => {
   anim.markToggled('w1');
 
   anim.tick(50);
-  assert.equal(anim.getWireAnimation('w1').pulseT, 0.25);
+  assert.equal(anim.getWireAnimation('w1')!.pulseT, 0.25);
 
   anim.tick(50);
-  assert.equal(anim.getWireAnimation('w1').pulseT, 0.5);
+  assert.equal(anim.getWireAnimation('w1')!.pulseT, 0.5);
 
   anim.tick(100);
   assert.equal(anim.getWireAnimation('w1'), null); // completed
@@ -63,25 +63,25 @@ test('multiple wire animations are independent', () => {
   anim.markToggled('w2');
 
   anim.tick(50);
-  assert.equal(anim.getWireAnimation('w1').pulseT, 0.5);
-  assert.equal(anim.getWireAnimation('w2').pulseT, 0.25);
+  assert.equal(anim.getWireAnimation('w1')!.pulseT, 0.5);
+  assert.equal(anim.getWireAnimation('w2')!.pulseT, 0.25);
 });
 
 test('markToggled on already-animating wire restarts animation', () => {
   const anim = createAnimationState();
   anim.markToggled('w1');
   anim.tick(100);
-  assert.equal(anim.getWireAnimation('w1').pulseT, 0.5);
+  assert.equal(anim.getWireAnimation('w1')!.pulseT, 0.5);
 
   anim.markToggled('w1'); // restart
-  assert.equal(anim.getWireAnimation('w1').pulseT, 0.0);
+  assert.equal(anim.getWireAnimation('w1')!.pulseT, 0.0);
 });
 
 test('custom duration via constructor option', () => {
   const anim = createAnimationState({ pulseDurationMs: 400 });
   anim.markToggled('w1');
   anim.tick(200);
-  assert.equal(anim.getWireAnimation('w1').pulseT, 0.5); // 200/400
+  assert.equal(anim.getWireAnimation('w1')!.pulseT, 0.5); // 200/400
   anim.tick(200);
   assert.equal(anim.getWireAnimation('w1'), null);
 });

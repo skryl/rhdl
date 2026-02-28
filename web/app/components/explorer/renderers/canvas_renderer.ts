@@ -3,7 +3,7 @@
 import { symbolShapes } from './symbols';
 import { drawLegend, resolveWireStrokeWidth } from './themes';
 
-function resolveColors(element, palette) {
+function resolveColors(element: any, palette: any) {
   const type = element.type || '';
   let fill = palette.componentBg;
   let stroke = palette.componentBorder;
@@ -30,14 +30,14 @@ function resolveColors(element, palette) {
   return { fill, stroke, text, lineWidth };
 }
 
-function resolveWireColor(wire, palette) {
+function resolveWireColor(wire: any, palette: any) {
   if (wire.selected) return { color: '#ffffff', width: 3.2 };
   if (wire.toggled) return { color: palette.wireToggle, width: 2.7 };
   if (wire.active) return { color: palette.wireActive, width: 2.0 };
   return { color: palette.wire, width: wire.bus ? 2.4 : 1.4 };
 }
 
-function resolveNetColors(net, palette) {
+function resolveNetColors(net: any, palette: any) {
   let fill = palette.netBg;
   let stroke = palette.netBorder;
   let text = palette.netText;
@@ -58,7 +58,7 @@ function resolveNetColors(net, palette) {
   return { fill, stroke, text, lineWidth };
 }
 
-function resolvePinColors(pin, palette) {
+function resolvePinColors(pin: any, palette: any) {
   let fill = palette.pinBg;
   let stroke = palette.pinBorder;
   let lineWidth = pin.bus ? 2.1 : 1.2;
@@ -76,11 +76,11 @@ function resolvePinColors(pin, palette) {
   return { fill, stroke, lineWidth };
 }
 
-export function createCanvasRenderer(canvas) {
+export function createCanvasRenderer(canvas: any) {
   const ctx = canvas.getContext('2d');
   let destroyed = false;
 
-  function render(renderList, viewport, palette) {
+  function render(renderList: any, viewport: any, palette: any) {
     if (destroyed || !ctx) return;
 
     const { scale = 1, x: tx = 0, y: ty = 0 } = viewport || {};

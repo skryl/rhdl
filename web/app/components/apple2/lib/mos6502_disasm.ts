@@ -57,7 +57,7 @@ export const MOS6502_MNEMONICS = {
   0xFE: ['INC', 'absx']
 };
 
-export function format6502Operand(mode, addr, readByte) {
+export function format6502Operand(mode: any, addr: any, readByte: any) {
   const b1 = readByte((addr + 1) & 0xffff);
   const b2 = readByte((addr + 2) & 0xffff);
   const word = (b2 << 8) | b1;
@@ -98,10 +98,10 @@ export function format6502Operand(mode, addr, readByte) {
 }
 
 export function disassemble6502Lines(
-  startAddress,
-  lineCount,
-  readMemory,
-  options = {}
+  startAddress: any,
+  lineCount: any,
+  readMemory: any,
+  options: any = {}
 ) {
   const count = Math.max(1, Math.min(4096, Number.parseInt(lineCount, 10) || 1));
   const start = Number(startAddress) & 0xffff;
@@ -113,7 +113,7 @@ export function disassemble6502Lines(
     ? readMemory(start, fetchLen)
     : new Uint8Array(0);
 
-  const readByte = (addr) => {
+  const readByte = (addr: any) => {
     const normalized = addr & 0xffff;
     const offset = (normalized - start + addressSpace) % addressSpace;
     if (memory instanceof Uint8Array && offset < memory.length) {
@@ -126,7 +126,7 @@ export function disassemble6502Lines(
   const lines = [];
   for (let i = 0; i < count; i += 1) {
     const opcode = readByte(addr);
-    const info = MOS6502_MNEMONICS[opcode];
+    const info = (MOS6502_MNEMONICS as Record<number, string[]>)[opcode];
     let mnemonic = '???';
     let bytes = 1;
     let operand = '';

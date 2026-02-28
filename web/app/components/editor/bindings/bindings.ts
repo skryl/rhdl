@@ -17,7 +17,7 @@ const MIRB_PRELUDE = "require 'rhdl'";
 
 const EXPORT_TIMEOUT_MS = 3500;
 
-function isTerminalTextEntryKey(event) {
+function isTerminalTextEntryKey(event: any) {
   if (!event || typeof event.key !== 'string') {
     return false;
   }
@@ -27,12 +27,12 @@ function isTerminalTextEntryKey(event) {
   return event.key.length === 1;
 }
 
-function normalizedText(value) {
+function normalizedText(value: any) {
   return String(value || '').replace(/\r/g, '').trim();
 }
 
-function buildMirbSessionReplaySource(lines = []) {
-  const encodedLines = lines.map((line) => JSON.stringify(String(line ?? ''))).join(',');
+function buildMirbSessionReplaySource(lines: any[] = []) {
+  const encodedLines = lines.map((line: any) => JSON.stringify(String(line ?? ''))).join(',');
   return [
     '__rhdl_session_binding__ = binding',
     '__rhdl_session_value__ = nil',
@@ -47,7 +47,7 @@ function buildMirbSessionReplaySource(lines = []) {
   ].join('\n');
 }
 
-function decodeUtf8(buffer) {
+function decodeUtf8(buffer: any) {
   if (!(buffer instanceof ArrayBuffer)) {
     return '';
   }
@@ -57,7 +57,7 @@ function decodeUtf8(buffer) {
   return new TextDecoder().decode(new Uint8Array(buffer));
 }
 
-function collectUniqueSignalNames(runtime) {
+function collectUniqueSignalNames(runtime: any) {
   if (!runtime?.sim) {
     return [];
   }
@@ -87,7 +87,7 @@ async function loadVimWasmModule(fetchImpl = globalThis.fetch) {
   return import(moduleUrl.href);
 }
 
-function setEditorStatus(dom, message, level = 'info') {
+function setEditorStatus(dom: any, message: any, level = 'info') {
   if (!dom?.editorStatus) {
     return;
   }
@@ -95,14 +95,14 @@ function setEditorStatus(dom, message, level = 'info') {
   dom.editorStatus.dataset.level = String(level || 'info');
 }
 
-function setEditorTraceMeta(dom, message) {
+function setEditorTraceMeta(dom: any, message: any) {
   if (!dom?.editorTraceMeta) {
     return;
   }
   dom.editorTraceMeta.textContent = String(message || '');
 }
 
-function toggleEditorFallback(dom, showFallback) {
+function toggleEditorFallback(dom: any, showFallback: any) {
   if (!dom?.editorFallback || !dom?.editorVimWrap) {
     return;
   }
@@ -119,8 +119,8 @@ export function bindEditorBindings({
   log,
   documentRef = globalThis.document,
   windowRef = globalThis.window,
-  requestFrame = globalThis.requestAnimationFrame || ((cb) => setTimeout(cb, 0))
-} = {}) {
+  requestFrame = globalThis.requestAnimationFrame || ((cb: any) => setTimeout(cb, 0))
+}: any = {}) {
   if (!dom || !state || !runtime) {
     return () => {};
   }
@@ -140,11 +140,11 @@ export function bindEditorBindings({
       inputBuffer: ''
     }
   };
-  const mirbSession = {
+  const mirbSession: { ready: boolean; lines: any[] } = {
     ready: false,
     lines: []
   };
-  const vimState = {
+  const vimState: { instance: any; sourceCache: string; pendingExport: any } = {
     instance: null,
     sourceCache: '',
     pendingExport: null
@@ -156,7 +156,7 @@ export function bindEditorBindings({
   vimState.sourceCache = String(dom.editorFallback?.value || DEFAULT_EDITOR_SOURCE);
 
   let waveformInstance = null;
-  let terminalSession = null;
+  let terminalSession: any = null;
   let disposed = false;
 
   function emitResize() {
@@ -183,7 +183,7 @@ export function bindEditorBindings({
     mirbSession.ready = true;
   }
 
-  async function runMirbChunk(sourceChunk) {
+  async function runMirbChunk(sourceChunk: any) {
     const code = String(sourceChunk || '').replace(/\r/g, '').trim();
     if (!code) {
       return null;
@@ -230,7 +230,7 @@ export function bindEditorBindings({
     }
     const names = collectUniqueSignalNames(runtime);
     const target = new Set(names);
-    const existing = state.watches instanceof Map ? Array.from(state.watches.keys()) : [];
+    const existing: any[] = state.watches instanceof Map ? Array.from(state.watches.keys()) : [];
     for (const name of existing) {
       if (!target.has(name)) {
         watch.removeSignal?.(name);
@@ -250,7 +250,7 @@ export function bindEditorBindings({
       if (runtime.sim.trace_enabled?.() && typeof runtime.sim.trace_capture === 'function') {
         runtime.sim.trace_capture();
       }
-    } catch (_err) {
+    } catch (_err: any) {
       // Ignore trace capture failures in unsupported runtimes.
     }
     sim?.drainTrace?.();
@@ -268,7 +268,7 @@ export function bindEditorBindings({
     }
   }
 
-  async function runEditorTerminalCommand(rawLine) {
+  async function runEditorTerminalCommand(rawLine: any) {
     const line = String(rawLine || '').trim();
     if (!line) {
       return;
@@ -299,7 +299,7 @@ export function bindEditorBindings({
     terminalSession.focusInput();
   }
 
-  listeners.on(dom.editorTerminalOutput, 'keydown', async (event) => {
+  listeners.on(dom.editorTerminalOutput, 'keydown', async (event: any) => {
     if (event.key === 'Enter') {
       event.preventDefault();
       await terminalSession.submitInput();
@@ -338,7 +338,7 @@ export function bindEditorBindings({
     }
   });
 
-  listeners.on(dom.editorTerminalOutput, 'paste', (event) => {
+  listeners.on(dom.editorTerminalOutput, 'paste', (event: any) => {
     const pasted = String(event.clipboardData?.getData('text') || '');
     if (!pasted) {
       return;
@@ -357,7 +357,7 @@ export function bindEditorBindings({
     }, 0);
   });
 
-  if (dom.editorTraceWrap && typeof globalThis.p5 === 'function') {
+  if (dom.editorTraceWrap && typeof (globalThis as any).p5 === 'function') {
     try {
       waveformInstance = setupWaveformP5({
         dom,
@@ -368,14 +368,14 @@ export function bindEditorBindings({
         waveformFontFamily,
         waveformPalette,
         formatValue,
-        p5Ctor: globalThis.p5
+        p5Ctor: (globalThis as any).p5
       });
-    } catch (err) {
+    } catch (err: any) {
       log(`Editor trace view unavailable: ${err?.message || err}`);
     }
   }
 
-  function resolveVimExport(fullpath, contents) {
+  function resolveVimExport(fullpath: any, contents: any) {
     const source = decodeUtf8(contents);
     if (source) {
       vimState.sourceCache = source;
@@ -448,7 +448,7 @@ export function bindEditorBindings({
       if (result) {
         terminalSession.writeLine(result);
       }
-    } catch (err) {
+    } catch (err: any) {
       terminalSession.writeLine(`error: ${err?.message || err}`);
     } finally {
       editorTerminalState.terminal.busy = false;
@@ -493,10 +493,10 @@ export function bindEditorBindings({
         input: dom.editorVimInput,
         workerScriptPath: workerScriptUrl.href
       });
-      vim.onError = (err) => {
+      vim.onError = (err: any) => {
         setEditorStatus(dom, `vim.wasm error: ${err?.message || err}`, 'warn');
       };
-      vim.onFileExport = (fullpath, contents) => {
+      vim.onFileExport = (fullpath: any, contents: any) => {
         resolveVimExport(fullpath, contents);
       };
       vim.onVimInit = () => {
@@ -519,7 +519,7 @@ export function bindEditorBindings({
       listeners.on(dom.editorVimInput, 'focus', () => {
         vim.focus();
       });
-    } catch (err) {
+    } catch (err: any) {
       toggleEditorFallback(dom, true);
       setEditorStatus(dom, `vim.wasm unavailable: ${err?.message || err}`, 'warn');
       log(`Editor vim.wasm init failed: ${err?.message || err}`);

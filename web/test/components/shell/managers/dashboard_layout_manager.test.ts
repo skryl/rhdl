@@ -27,7 +27,7 @@ function makeState() {
   };
 }
 
-function commonOptions(overrides = {}) {
+function commonOptions(overrides: any = {}) {
   const storage = {
     getItem() {
       return '{"controls":{"order":[],"spans":{},"rowHeights":{"a":200}}}';
@@ -49,7 +49,7 @@ function commonOptions(overrides = {}) {
       }
     },
     windowRef: {
-      requestAnimationFrame(cb) {
+      requestAnimationFrame(cb: any) {
         cb();
         return 1;
       },
@@ -57,22 +57,22 @@ function commonOptions(overrides = {}) {
     },
     storage,
     rootConfigs: [],
-    parseDashboardLayouts: (raw) => {
+    parseDashboardLayouts: (raw: any) => {
       if (!raw) {
         return {};
       }
       return JSON.parse(raw);
     },
-    serializeDashboardLayouts: (value) => JSON.stringify(value || {}),
-    withDashboardRowHeight: (layout, signature, height, min) => ({
+    serializeDashboardLayouts: (value: any) => JSON.stringify(value || {}),
+    withDashboardRowHeight: (layout: any, signature: any, height: any, min: any) => ({
       ...(layout || {}),
       rowHeights: {
         ...((layout && layout.rowHeights) || {}),
         [signature]: Math.max(min, Number(height) || 0)
       }
     }),
-    normalizeDashboardSpan: (value, fallback = 'full') => (value === 'half' ? 'half' : fallback),
-    safeSlugToken: (value) => String(value || '').toLowerCase(),
+    normalizeDashboardSpan: (value: any, fallback = 'full') => (value === 'half' ? 'half' : fallback),
+    safeSlugToken: (value: any) => String(value || '').toLowerCase(),
     dashboardRowSignature: () => 'sig',
     dashboardDropPosition: () => 'left',
     bindDashboardResizeEvents: () => () => {},

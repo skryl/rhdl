@@ -11,7 +11,7 @@ test('shell state runtime service updates terminal open state and persists toggl
     tabPanels: [],
     appShell: {
       classList: {
-        toggle(name, active) {
+        toggle(name: any, active: any) {
           appShellClasses.set(String(name), !!active);
         }
       }
@@ -31,7 +31,7 @@ test('shell state runtime service updates terminal open state and persists toggl
     runtime: {},
     setActiveTabState: () => {},
     setSidebarCollapsedState: () => {},
-    setTerminalOpenState: (value) => {
+    setTerminalOpenState: (value: any) => {
       state.terminalOpen = !!value;
     },
     setThemeState: () => {},
@@ -44,15 +44,16 @@ test('shell state runtime service updates terminal open state and persists toggl
     TERMINAL_OPEN_KEY: 't',
     THEME_KEY: 'th',
     localStorageRef: {
-      setItem(key, value) {
+      setItem(key: any, value: any) {
         stored.set(key, value);
       }
     },
-    requestAnimationFrameImpl: (cb) => cb(),
+    requestAnimationFrameImpl: (cb: any) => cb(),
     documentRef: { body: { classList: { toggle() {} } } },
     windowRef: { dispatchEvent() {} },
     eventCtor: class {
-      constructor(type) {
+      type: any;
+      constructor(type: any) {
         this.type = type;
       }
     }
@@ -66,7 +67,7 @@ test('shell state runtime service updates terminal open state and persists toggl
 });
 
 test('shell state runtime service defers and deduplicates component explorer refresh on tab switch', () => {
-  const pendingTimers = [];
+  const pendingTimers: any[] = [];
   let refreshCalls = 0;
   const state = { activeTab: 'ioTab', terminalOpen: false, sidebarCollapsed: false, theme: 'shenzhen' };
   const dom = {
@@ -83,7 +84,7 @@ test('shell state runtime service defers and deduplicates component explorer ref
     dom,
     state,
     runtime: {},
-    setActiveTabState: (value) => {
+    setActiveTabState: (value: any) => {
       state.activeTab = value;
     },
     setSidebarCollapsedState: () => {},
@@ -100,14 +101,15 @@ test('shell state runtime service defers and deduplicates component explorer ref
     TERMINAL_OPEN_KEY: 't',
     THEME_KEY: 'th',
     localStorageRef: { setItem() {} },
-    requestAnimationFrameImpl: (cb) => cb(),
-    setTimeoutImpl: (cb) => {
+    requestAnimationFrameImpl: (cb: any) => cb(),
+    setTimeoutImpl: (cb: any) => {
       pendingTimers.push(cb);
     },
     documentRef: { body: { classList: { toggle() {} } } },
     windowRef: { dispatchEvent() {} },
     eventCtor: class {
-      constructor(type) {
+      type: any;
+      constructor(type: any) {
         this.type = type;
       }
     }

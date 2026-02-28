@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 
 import { createSimInitializerController } from '../../../../app/components/sim/controllers/initializer_controller';
 
-function createHarness(overrides = {}) {
-  const calls = [];
+function createHarness(overrides: any = {}) {
+  const calls: any[] = [];
   const state = {
     backend: 'compiler',
     runnerPreset: 'generic',
@@ -30,7 +30,7 @@ function createHarness(overrides = {}) {
     breakpointClear: () => ({ type: 'breakpointClear' })
   };
   const appStore = {
-    dispatch(action) {
+    dispatch(action: any) {
       calls.push(['dispatch', action.type]);
     }
   };
@@ -40,25 +40,25 @@ function createHarness(overrides = {}) {
     runtime,
     appStore,
     storeActions,
-    parseIrMeta: (text) => ({ names: ['clk'], clocks: ['clk'], parsedFrom: text }),
+    parseIrMeta: (text: any) => ({ names: ['clk'], clocks: ['clk'], parsedFrom: text }),
     getRunnerPreset: () => ({ id: 'generic', usesManualIr: true, enableApple2Ui: false }),
-    setRunnerPresetState: (value) => calls.push(['setRunnerPresetState', value]),
-    setComponentSourceBundle: (value) => calls.push(['setComponentSourceBundle', value]),
-    setComponentSchematicBundle: (value) => calls.push(['setComponentSchematicBundle', value]),
+    setRunnerPresetState: (value: any) => calls.push(['setRunnerPresetState', value]),
+    setComponentSourceBundle: (value: any) => calls.push(['setComponentSourceBundle', value]),
+    setComponentSchematicBundle: (value: any) => calls.push(['setComponentSchematicBundle', value]),
     ensureBackendInstance: async () => {},
     createSimulator: () => ({
       output_names: () => ['out1', 'out2'],
       runner_mode: () => false
     }),
-    setCycleState: (value) => calls.push(['setCycleState', value]),
-    setUiCyclesPendingState: (value) => calls.push(['setUiCyclesPendingState', value]),
-    setRunningState: (value) => calls.push(['setRunningState', value]),
-    updateApple2SpeakerAudio: (...args) => calls.push(['updateApple2SpeakerAudio', ...args]),
-    setMemoryDumpStatus: (value) => calls.push(['setMemoryDumpStatus', value]),
-    setMemoryResetVectorInput: (value) => calls.push(['setMemoryResetVectorInput', value]),
-    initializeTrace: (options) => calls.push(['initializeTrace', options]),
+    setCycleState: (value: any) => calls.push(['setCycleState', value]),
+    setUiCyclesPendingState: (value: any) => calls.push(['setUiCyclesPendingState', value]),
+    setRunningState: (value: any) => calls.push(['setRunningState', value]),
+    updateApple2SpeakerAudio: (...args: any[]) => calls.push(['updateApple2SpeakerAudio', ...args]),
+    setMemoryDumpStatus: (value: any) => calls.push(['setMemoryDumpStatus', value]),
+    setMemoryResetVectorInput: (value: any) => calls.push(['setMemoryResetVectorInput', value]),
+    initializeTrace: (options: any) => calls.push(['initializeTrace', options]),
     populateClockSelect: () => calls.push(['populateClockSelect']),
-    addWatchSignal: (name) => calls.push(['addWatchSignal', name]),
+    addWatchSignal: (name: any) => calls.push(['addWatchSignal', name]),
     selectedClock: () => null,
     renderWatchList: () => calls.push(['renderWatchList']),
     renderBreakpointList: () => calls.push(['renderBreakpointList']),
@@ -66,11 +66,11 @@ function createHarness(overrides = {}) {
     refreshApple2Screen: () => calls.push(['refreshApple2Screen']),
     refreshApple2Debug: () => calls.push(['refreshApple2Debug']),
     refreshMemoryView: () => calls.push(['refreshMemoryView']),
-    setComponentSourceOverride: (...args) => calls.push(['setComponentSourceOverride', ...args]),
+    setComponentSourceOverride: (...args: any[]) => calls.push(['setComponentSourceOverride', ...args]),
     clearComponentSourceOverride: () => calls.push(['clearComponentSourceOverride']),
-    rebuildComponentExplorer: (...args) => calls.push(['rebuildComponentExplorer', ...args]),
+    rebuildComponentExplorer: (...args: any[]) => calls.push(['rebuildComponentExplorer', ...args]),
     refreshStatus: () => calls.push(['refreshStatus']),
-    log: (msg) => calls.push(['log', msg]),
+    log: (msg: any) => calls.push(['log', msg]),
     fetchImpl: async () => ({ ok: true, status: 200, async arrayBuffer() { return new ArrayBuffer(0); } })
   };
   const controller = createSimInitializerController({
@@ -87,7 +87,7 @@ test('initializeSimulator logs when IR is missing', async () => {
 });
 
 test('initializeSimulator configures runtime and resets state', async () => {
-  const existingDestroyCalls = [];
+  const existingDestroyCalls: any[] = [];
   const { controller, calls, runtime, state, dom } = createHarness({
     createSimulator: () => ({
       output_names: () => ['out_a', 'out_b'],
@@ -96,7 +96,7 @@ test('initializeSimulator configures runtime and resets state', async () => {
   });
   runtime.sim = {
     destroy: () => existingDestroyCalls.push('destroyed')
-  };
+  } as any;
   dom.irJson.value = '{"ports":[{"name":"clk","width":1}]}';
 
   await controller.initializeSimulator({});
@@ -148,9 +148,9 @@ test('initializeSimulator honors defaults.traceEnabled when present', async () =
 });
 
 test('initializeSimulator always refreshes backend instance for current preset/backend', async () => {
-  const backendCalls = [];
+  const backendCalls: any[] = [];
   const { controller, dom } = createHarness({
-    ensureBackendInstance: async (backend) => {
+    ensureBackendInstance: async (backend: any) => {
       backendCalls.push(backend);
     }
   });
@@ -163,11 +163,11 @@ test('initializeSimulator always refreshes backend instance for current preset/b
 
 test('initializeSimulator yields to UI before backend/session initialization when requested', async () => {
   const { controller, calls, dom } = createHarness({
-    requestFrame: (cb) => {
+    requestFrame: (cb: any) => {
       calls.push(['requestFrame']);
       cb();
     },
-    setTimeoutImpl: (cb) => {
+    setTimeoutImpl: (cb: any) => {
       calls.push(['setTimeout']);
       cb();
     },

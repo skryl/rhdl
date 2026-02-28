@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 
 import { createSimRuntimeController } from '../../../../app/components/sim/controllers/runtime_controller';
 
-function makeOkResponse({ clone = true } = {}) {
-  const base = {
+function makeOkResponse({ clone = true }: any = {}) {
+  const base: any = {
     ok: true,
     status: 200,
     async arrayBuffer() {
@@ -30,7 +30,7 @@ test('ensureBackendInstance caches loaded instance', async () => {
       return makeOkResponse();
     },
     webAssemblyApi: {
-      async instantiate(bytes) {
+      async instantiate(bytes: any) {
         void bytes;
         instantiateCalls += 1;
         return { instance };
@@ -57,12 +57,12 @@ test('loadWasmInstance prefers instantiateStreaming when available', async () =>
     getBackendDef: () => ({ wasmPath: '/compiler.wasm' }),
     fetchImpl: async () => makeOkResponse(),
     webAssemblyApi: {
-      async instantiateStreaming(response) {
+      async instantiateStreaming(response: any) {
         void response;
         streamCalls += 1;
         return { instance: streamInstance };
       },
-      async instantiate(bytes) {
+      async instantiate(bytes: any) {
         void bytes;
         instantiateCalls += 1;
         return { instance: { id: 'fallback' } };
@@ -90,7 +90,7 @@ test('loadWasmInstance falls back when instantiateStreaming fails', async () => 
         streamCalls += 1;
         throw new Error('stream fail');
       },
-      async instantiate(bytes) {
+      async instantiate(bytes: any) {
         void bytes;
         instantiateCalls += 1;
         return { instance: fallbackInstance };
@@ -121,8 +121,8 @@ test('loadWasmInstance throws on non-ok response', async () => {
 });
 
 test('initializeTrace keeps tracing disabled by default and drains chunk into parser', () => {
-  const calls = [];
-  const ingested = [];
+  const calls: any[] = [];
+  const ingested: any[] = [];
   const runtime = {
     backendInstances: new Map(),
     instance: null,
@@ -136,10 +136,10 @@ test('initializeTrace keeps tracing disabled by default and drains chunk into pa
       trace_all_signals() {
         calls.push('trace_all_signals');
       },
-      trace_set_timescale(value) {
+      trace_set_timescale(value: any) {
         calls.push(`trace_set_timescale:${value}`);
       },
-      trace_set_module_name(value) {
+      trace_set_module_name(value: any) {
         calls.push(`trace_set_module_name:${value}`);
       },
       trace_stop() {
@@ -160,7 +160,7 @@ test('initializeTrace keeps tracing disabled by default and drains chunk into pa
       reset() {
         calls.push('parser_reset');
       },
-      ingest(chunk) {
+      ingest(chunk: any) {
         ingested.push(chunk);
       }
     }
@@ -171,7 +171,7 @@ test('initializeTrace keeps tracing disabled by default and drains chunk into pa
     getBackendDef: () => ({ wasmPath: '/compiler.wasm' }),
     fetchImpl: async () => makeOkResponse(),
     webAssemblyApi: {
-      async instantiate(bytes) {
+      async instantiate(bytes: any) {
         void bytes;
         return { instance: { id: 1 } };
       }
@@ -193,7 +193,7 @@ test('initializeTrace keeps tracing disabled by default and drains chunk into pa
 });
 
 test('initializeTrace starts tracing when explicitly enabled', () => {
-  const calls = [];
+  const calls: any[] = [];
   const runtime = {
     backendInstances: new Map(),
     instance: null,
@@ -207,10 +207,10 @@ test('initializeTrace starts tracing when explicitly enabled', () => {
       trace_all_signals() {
         calls.push('trace_all_signals');
       },
-      trace_set_timescale(value) {
+      trace_set_timescale(value: any) {
         calls.push(`trace_set_timescale:${value}`);
       },
-      trace_set_module_name(value) {
+      trace_set_module_name(value: any) {
         calls.push(`trace_set_module_name:${value}`);
       },
       trace_stop() {
@@ -240,7 +240,7 @@ test('initializeTrace starts tracing when explicitly enabled', () => {
     getBackendDef: () => ({ wasmPath: '/compiler.wasm' }),
     fetchImpl: async () => makeOkResponse(),
     webAssemblyApi: {
-      async instantiate(bytes) {
+      async instantiate(bytes: any) {
         void bytes;
         return { instance: { id: 1 } };
       }
@@ -297,8 +297,8 @@ test('arcilator backend resolves runner-specific wasm path override', async () =
 });
 
 test('compiler backend resolves runner-specific wasm path and caches per path', async () => {
-  const fetchUrls = [];
-  const instances = [];
+  const fetchUrls: any[] = [];
+  const instances: any[] = [];
   const state = { backend: 'compiler', runnerPreset: 'cpu' };
   const runtime = { backendInstances: new Map(), instance: null, sim: null, parser: null };
   const presets = {
@@ -310,13 +310,13 @@ test('compiler backend resolves runner-specific wasm path and caches per path', 
     state,
     runtime,
     getBackendDef: () => ({ wasmPath: '/compiler.wasm' }),
-    currentRunnerPreset: () => presets[state.runnerPreset],
-    fetchImpl: async (url) => {
+    currentRunnerPreset: () => (presets as any)[state.runnerPreset],
+    fetchImpl: async (url: any) => {
       fetchUrls.push(url);
       return makeOkResponse();
     },
     webAssemblyApi: {
-      async instantiate(bytes) {
+      async instantiate(bytes: any) {
         void bytes;
         const instance = { id: `instance-${instances.length + 1}` };
         instances.push(instance);

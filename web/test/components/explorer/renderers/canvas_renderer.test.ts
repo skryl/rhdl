@@ -3,17 +3,17 @@ import assert from 'node:assert/strict';
 import { createCanvasRenderer } from '../../../../app/components/explorer/renderers/canvas_renderer';
 
 function createMockCanvas() {
-  const calls = [];
+  const calls: any[] = [];
   const ctxHandler = {
-    get(target, prop) {
+    get(target: any, prop: any) {
       if (prop in target) return target[prop];
       if (prop === 'canvas') return target._canvas;
       if (prop === 'measureText') {
         return (text = '') => ({ width: String(text).length * 6 });
       }
-      return (...args) => { calls.push({ method: prop, args }); };
+      return (...args: any[]) => { calls.push({ method: prop, args }); };
     },
-    set(target, prop, value) {
+    set(target: any, prop: any, value: any) {
       calls.push({ method: `set:${String(prop)}`, args: [value] });
       target[prop] = value;
       return true;
@@ -23,7 +23,7 @@ function createMockCanvas() {
   const canvas = {
     width: 800,
     height: 600,
-    getContext(type) {
+    getContext(type: any) {
       if (type === '2d') {
         ctx._canvas = canvas;
         return ctx;

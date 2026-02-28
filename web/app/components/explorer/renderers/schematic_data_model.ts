@@ -3,7 +3,7 @@
 
 const SYMBOL_TYPES = ['focus', 'memory', 'op', 'io', 'component'];
 
-function deriveSymbolType(classes) {
+function deriveSymbolType(classes: any) {
   const cls = String(classes || '');
   if (cls.includes('schem-focus')) return 'focus';
   if (cls.includes('schem-memory')) return 'memory';
@@ -13,15 +13,15 @@ function deriveSymbolType(classes) {
   return 'symbol';
 }
 
-function hasCls(classes, token) {
+function hasCls(classes: any, token: any) {
   return String(classes || '').includes(token);
 }
 
-export function buildRenderList(elements) {
-  const symbols = [];
-  const pins = [];
-  const nets = [];
-  const wires = [];
+export function buildRenderList(elements: any) {
+  const symbols: any[] = [];
+  const pins: any[] = [];
+  const nets: any[] = [];
+  const wires: any[] = [];
   const byId = new Map();
 
   if (!Array.isArray(elements)) {
@@ -142,7 +142,7 @@ export function buildRenderList(elements) {
   return { symbols, pins, nets, wires, byId };
 }
 
-export function applyLayoutPositions(renderList, elkOutput) {
+export function applyLayoutPositions(renderList: any, elkOutput: any) {
   if (!renderList || !elkOutput || !Array.isArray(elkOutput.children)) {
     return;
   }

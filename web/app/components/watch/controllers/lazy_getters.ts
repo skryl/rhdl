@@ -10,7 +10,7 @@ import {
 } from '../ui/vcd_panel';
 import { createWatchManager } from '../managers/manager';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createWatchLazyGetters requires function: ${name}`);
   }
@@ -25,7 +25,7 @@ export function createWatchLazyGetters({
   scheduleReduxUxSync,
   log,
   maskForWidth
-} = {}) {
+}: any = {}) {
   if (!dom || !state || !runtime || !appStore || !storeActions) {
     throw new Error('createWatchLazyGetters requires dom/state/runtime/appStore/storeActions');
   }
@@ -33,7 +33,7 @@ export function createWatchLazyGetters({
   requireFn('log', log);
   requireFn('maskForWidth', maskForWidth);
 
-  let watchManager = null;
+  let watchManager: any = null;
 
   function getWatchManager() {
     if (!watchManager) {

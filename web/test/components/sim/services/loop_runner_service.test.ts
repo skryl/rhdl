@@ -8,9 +8,9 @@ function createHarness({
   uiUpdateCycles = '10',
   nowSequence = null,
   traceEnabled = false
-} = {}) {
-  const calls = [];
-  const runCalls = [];
+}: any = {}) {
+  const calls: any[] = [];
+  const runCalls: any[] = [];
   const dom = {
     stepTicks: { value: '1' },
     runBatch: { value: String(runBatch) },
@@ -30,7 +30,7 @@ function createHarness({
   };
   const runtime = {
     sim: {
-      runner_run_cycles: (cycles) => {
+      runner_run_cycles: (cycles: any) => {
         runCalls.push(cycles);
         return {
           key_cleared: false,
@@ -66,22 +66,22 @@ function createHarness({
     isApple2UiEnabled: () => true,
     refreshStatus: () => calls.push('refreshStatus'),
     updateApple2SpeakerAudio: () => calls.push('updateApple2SpeakerAudio'),
-    setCycleState: (v) => {
+    setCycleState: (v: any) => {
       state.cycle = v;
       calls.push(`setCycle:${v}`);
     },
-    setUiCyclesPendingState: (v) => {
+    setUiCyclesPendingState: (v: any) => {
       state.uiCyclesPending = v;
       calls.push(`setPending:${v}`);
     },
-    setRunningState: (v) => {
+    setRunningState: (v: any) => {
       state.running = v;
       calls.push(`setRunning:${v}`);
     },
     selectedClock: () => null,
     checkBreakpoints: () => null,
-    formatValue: (value) => String(value),
-    log: (message) => calls.push(`log:${message}`),
+    formatValue: (value: any) => String(value),
+    log: (message: any) => calls.push(`log:${message}`),
     drainTrace: () => calls.push('drainTrace'),
     refreshWatchTable: () => calls.push('refreshWatchTable'),
     refreshApple2Screen: () => calls.push('refreshApple2Screen'),

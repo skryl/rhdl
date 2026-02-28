@@ -14,7 +14,7 @@ export function createShellDomainController({
   refreshDashboardRowSizing,
   refreshAllDashboardRowSizing,
   initializeDashboardLayoutBuilder
-} = {}) {
+}: any = {}) {
   return {
     setActiveTab,
     setSidebarCollapsed,

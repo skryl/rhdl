@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createExplorerGraphController } from '../../../../../app/components/explorer/controllers/graph/controller';
 
-function createNoopGraphController(overrides = {}) {
+function createNoopGraphController(overrides: any = {}) {
   return createExplorerGraphController({
     dom: {},
     state: {

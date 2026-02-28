@@ -1,13 +1,13 @@
-export function normalizeUiId(value) {
+export function normalizeUiId(value: any) {
   return String(value || '').trim().replace(/^#/, '');
 }
 
-export function parseTabToken(token, tabPanels = []) {
+export function parseTabToken(token: any, tabPanels: any[] = []) {
   const raw = String(token || '').trim().toLowerCase();
   if (!raw) {
     return null;
   }
-  const map = {
+  const map: Record<string, any> = {
     io: 'ioTab',
     'i/o': 'ioTab',
     vcd: 'vcdTab',
@@ -29,7 +29,7 @@ export function parseTabToken(token, tabPanels = []) {
   return null;
 }
 
-export function parseRunnerToken(token, runnerPresets) {
+export function parseRunnerToken(token: any, runnerPresets: any) {
   const raw = String(token || '').trim().toLowerCase();
   if (!raw) {
     return null;
@@ -43,7 +43,7 @@ export function parseRunnerToken(token, runnerPresets) {
   return null;
 }
 
-export function parseBackendToken(token, backendDefs) {
+export function parseBackendToken(token: any, backendDefs: any) {
   const raw = String(token || '').trim().toLowerCase();
   if (!raw) {
     return null;

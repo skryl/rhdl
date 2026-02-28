@@ -7,7 +7,7 @@ export function createRunnerDomainController({
   updateIrSourceVisibility,
   getRunnerActionsController,
   ensureBackendInstance
-} = {}) {
+}: any = {}) {
   return {
     getPreset: getRunnerPreset,
     currentPreset: currentRunnerPreset,

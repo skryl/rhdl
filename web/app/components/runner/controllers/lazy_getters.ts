@@ -2,7 +2,7 @@ import { parseIrMeta } from '../../../core/lib/ir_meta_utils';
 import { createRunnerBundleLoader } from './bundle_controller';
 import { createRunnerActionsController } from './actions_controller';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createRunnerLazyGetters requires function: ${name}`);
   }
@@ -31,7 +31,7 @@ export function createRunnerLazyGetters({
   setComponentSchematicBundle,
   setActiveTab,
   refreshStatus
-} = {}) {
+}: any = {}) {
   if (!dom || !state) {
     throw new Error('createRunnerLazyGetters requires dom/state');
   }
@@ -56,8 +56,8 @@ export function createRunnerLazyGetters({
   requireFn('setActiveTab', setActiveTab);
   requireFn('refreshStatus', refreshStatus);
 
-  let runnerBundleLoader = null;
-  let runnerActionsController = null;
+  let runnerBundleLoader: any = null;
+  let runnerActionsController: any = null;
 
   function getRunnerBundleLoader() {
     if (!runnerBundleLoader) {

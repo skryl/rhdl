@@ -4,7 +4,7 @@
 import { RECT_VERTEX, RECT_FRAGMENT, LINE_VERTEX, LINE_FRAGMENT } from './webgl_shaders';
 import { resolveElementColors } from './themes';
 
-function parseHexColor(hex) {
+function parseHexColor(hex: any) {
   const h = String(hex || '#000000').replace('#', '');
   const r = parseInt(h.substring(0, 2), 16) / 255;
   const g = parseInt(h.substring(2, 4), 16) / 255;
@@ -12,7 +12,7 @@ function parseHexColor(hex) {
   return [r, g, b, 1.0];
 }
 
-function compileShader(gl, type, source) {
+function compileShader(gl: any, type: any, source: any) {
   const shader = gl.createShader(type);
   gl.shaderSource(shader, source);
   gl.compileShader(shader);
@@ -24,7 +24,7 @@ function compileShader(gl, type, source) {
   return shader;
 }
 
-function createProgram(gl, vsSource, fsSource) {
+function createProgram(gl: any, vsSource: any, fsSource: any) {
   const vs = compileShader(gl, gl.VERTEX_SHADER, vsSource);
   const fs = compileShader(gl, gl.FRAGMENT_SHADER, fsSource);
   if (!vs || !fs) return null;
@@ -42,7 +42,7 @@ function createProgram(gl, vsSource, fsSource) {
   return program;
 }
 
-export function createWebGLRenderer(canvas) {
+export function createWebGLRenderer(canvas: any) {
   const gl = canvas.getContext('webgl2');
   if (!gl) return null;
 
@@ -70,7 +70,7 @@ export function createWebGLRenderer(canvas) {
   // Line vertex data: start(2) + end(2) + color(4) + width(1) + vertexIndex(1) = 10 floats per vertex, 4 vertices per line
   const LINE_VERTEX_FLOATS = 10;
 
-  function buildRectInstanceData(elements, palette, typeResolver) {
+  function buildRectInstanceData(elements: any, palette: any, typeResolver: any) {
     const data = new Float32Array(elements.length * RECT_FLOATS);
     let offset = 0;
     for (const el of elements) {
@@ -90,7 +90,7 @@ export function createWebGLRenderer(canvas) {
     return data;
   }
 
-  function buildLineData(wires, renderList, palette, viewportScale = 1) {
+  function buildLineData(wires: any, renderList: any, palette: any, viewportScale = 1) {
     // Count total line segments (each bend point pair = 1 segment, 4 vertices each)
     let totalSegments = 0;
     for (const wire of wires) {
@@ -144,7 +144,7 @@ export function createWebGLRenderer(canvas) {
     return vertexData.subarray(0, vOffset);
   }
 
-  function render(renderList, viewport, palette) {
+  function render(renderList: any, viewport: any, palette: any) {
     if (destroyed || !gl) return;
 
     const { scale = 1, x: tx = 0, y: ty = 0 } = viewport || {};
@@ -216,9 +216,9 @@ export function createWebGLRenderer(canvas) {
 
       // All rect-like elements combined
       const allRects = [
-        ...renderList.symbols.map(el => ({ ...el, type: el.type || 'component' })),
-        ...renderList.nets.map(el => ({ ...el, type: 'net' })),
-        ...renderList.pins.map(el => ({ ...el, type: 'pin' }))
+        ...renderList.symbols.map((el: any) => ({ ...el, type: el.type || 'component' })),
+        ...renderList.nets.map((el: any) => ({ ...el, type: 'net' })),
+        ...renderList.pins.map((el: any) => ({ ...el, type: 'pin' }))
       ];
 
       if (allRects.length > 0) {

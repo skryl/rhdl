@@ -1,10 +1,10 @@
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createApple2RomResetService requires function: ${name}`);
   }
 }
 
-function patchApple2ResetVector(romBytes, pc) {
+function patchApple2ResetVector(romBytes: any, pc: any) {
   const rom = new Uint8Array(romBytes);
   if (rom.length > 0x2FFD) {
     rom[0x2FFC] = pc & 0xff;
@@ -21,7 +21,7 @@ export function createApple2RomResetService({
   parsePcLiteral,
   isApple2UiEnabled,
   fixtureRoot = './assets/fixtures/apple2'
-} = {}) {
+}: any = {}) {
   if (!state || !runtime) {
     throw new Error('createApple2RomResetService requires state/runtime');
   }
@@ -49,12 +49,12 @@ export function createApple2RomResetService({
       }
       state.apple2.baseRomBytes = new Uint8Array(romBytes);
       return state.apple2.baseRomBytes;
-    } catch (_err) {
+    } catch (_err: any) {
       return null;
     }
   }
 
-  async function applySnapshotStartPc(startPc) {
+  async function applySnapshotStartPc(startPc: any) {
     const pc = parsePcLiteral(startPc);
     if (pc == null) {
       return { applied: false, pc: null, reason: 'missing' };

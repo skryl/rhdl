@@ -5,9 +5,9 @@ export const apple2ActionTypes = {
 };
 
 export const apple2Actions = {
-  setApple2DisplayHires: (value) => ({ type: apple2ActionTypes.SET_APPLE2_DISPLAY_HIRES, payload: !!value }),
-  setApple2DisplayColor: (value) => ({ type: apple2ActionTypes.SET_APPLE2_DISPLAY_COLOR, payload: !!value }),
-  setApple2SoundEnabled: (value) => ({ type: apple2ActionTypes.SET_APPLE2_SOUND_ENABLED, payload: !!value })
+  setApple2DisplayHires: (value: any) => ({ type: apple2ActionTypes.SET_APPLE2_DISPLAY_HIRES, payload: !!value }),
+  setApple2DisplayColor: (value: any) => ({ type: apple2ActionTypes.SET_APPLE2_DISPLAY_COLOR, payload: !!value }),
+  setApple2SoundEnabled: (value: any) => ({ type: apple2ActionTypes.SET_APPLE2_SOUND_ENABLED, payload: !!value })
 };
 
 export function createApple2StateSlice() {
@@ -30,7 +30,7 @@ export function createApple2StateSlice() {
   };
 }
 
-export function reduceApple2State(state, action = {}) {
+export function reduceApple2State(state: any, action: any = {}) {
   switch (action.type) {
     case apple2ActionTypes.SET_APPLE2_DISPLAY_HIRES:
       if (!state.apple2 || typeof state.apple2 !== 'object') {

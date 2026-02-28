@@ -59,11 +59,11 @@ test('buildElkGraph includes ports on symbol children', () => {
   const rl = makeRenderList();
   const graph = buildElkGraph(rl);
 
-  const cpuChild = graph.children.find(c => c.id === 'sym:cpu');
+  const cpuChild = graph.children.find(c => c.id === 'sym:cpu')!;
   assert.ok(Array.isArray(cpuChild.ports));
   assert.equal(cpuChild.ports.length, 2); // clk + data
 
-  const clkPort = cpuChild.ports.find(p => p.id === 'pin:cpu:clk');
+  const clkPort = cpuChild.ports.find(p => p.id === 'pin:cpu:clk')!;
   assert.ok(clkPort);
   assert.equal(clkPort.layoutOptions['elk.port.side'], 'WEST');
 });
@@ -114,15 +114,15 @@ test('applyElkResult positions symbols, pins, and nets', () => {
 
   applyElkResult(rl, elkResult);
 
-  const cpu = rl.symbols.find(s => s.id === 'sym:cpu');
+  const cpu = rl.symbols.find(s => s.id === 'sym:cpu')!;
   assert.equal(cpu.x, 100 + 228 * 0.5);
   assert.equal(cpu.y, 50 + 94 * 0.5);
 
-  const clkPin = rl.pins.find(p => p.id === 'pin:cpu:clk');
+  const clkPin = rl.pins.find(p => p.id === 'pin:cpu:clk')!;
   assert.equal(clkPin.x, 100 + 0 + 14 * 0.5);
   assert.equal(clkPin.y, 50 + 20 + 10 * 0.5);
 
-  const net = rl.nets.find(n => n.id === 'net:clk');
+  const net = rl.nets.find(n => n.id === 'net:clk')!;
   assert.equal(net.x, 300 + 52 * 0.5);
   assert.equal(net.y, 80 + 18 * 0.5);
 });
@@ -191,7 +191,7 @@ test('applyElkResult extracts edge bend points onto wires', () => {
 
   applyElkResult(rl, elkResult);
 
-  const w1 = rl.wires.find(w => w.id === 'w1');
+  const w1 = rl.wires.find(w => w.id === 'w1') as any;
   assert.ok(Array.isArray(w1.bendPoints), 'wire should have bendPoints array');
   assert.equal(w1.bendPoints.length, 4, 'should have startPoint + 2 bends + endPoint');
   assert.deepEqual(w1.bendPoints[0], { x: 114, y: 75 });
@@ -199,7 +199,7 @@ test('applyElkResult extracts edge bend points onto wires', () => {
   assert.deepEqual(w1.bendPoints[2], { x: 200, y: 89 });
   assert.deepEqual(w1.bendPoints[3], { x: 300, y: 89 });
 
-  const w2 = rl.wires.find(w => w.id === 'w2');
+  const w2 = rl.wires.find(w => w.id === 'w2') as any;
   assert.ok(Array.isArray(w2.bendPoints));
   assert.equal(w2.bendPoints.length, 4);
 });
@@ -232,7 +232,7 @@ test('applyElkResult handles edges with no bend points', () => {
 
   applyElkResult(rl, elkResult);
 
-  const w1 = rl.wires.find(w => w.id === 'w1');
+  const w1 = rl.wires.find(w => w.id === 'w1') as any;
   assert.ok(Array.isArray(w1.bendPoints));
   assert.equal(w1.bendPoints.length, 2, 'should have startPoint + endPoint only');
   assert.deepEqual(w1.bendPoints[0], { x: 114, y: 75 });
@@ -253,6 +253,6 @@ test('applyElkResult ignores edges with missing sections', () => {
 
   applyElkResult(rl, elkResult);
 
-  const w1 = rl.wires.find(w => w.id === 'w1');
+  const w1 = rl.wires.find(w => w.id === 'w1') as any;
   assert.equal(w1.bendPoints, undefined, 'no sections means no bendPoints set');
 });

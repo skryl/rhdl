@@ -20,7 +20,7 @@ test('all runner presets default to compiler backend, 768 memory length, and tra
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
@@ -34,7 +34,7 @@ test('all runner presets default to compiler backend, 768 memory length, and tra
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }
@@ -43,8 +43,8 @@ test('all runner presets default to compiler backend, 768 memory length, and tra
   });
 
   const page = await browser.newPage();
-  const pageErrors = [];
-  const consoleErrors = [];
+  const pageErrors: any[] = [];
+  const consoleErrors: any[] = [];
 
   page.on('pageerror', (err) => {
     const message = String(err?.message || err);
@@ -76,11 +76,12 @@ test('all runner presets default to compiler backend, 768 memory length, and tra
     return expected.every((id) => available.has(id));
   }, EXPECTED_RUNNERS, { timeout: 120000 });
 
-  const defaults = await page.evaluate(async () => {
-    const module = await import('./app/components/runner/config/generated_presets.mjs');
+  const defaults: any = await page.evaluate(async () => {
+    // @ts-expect-error browser-context dynamic import; not resolvable by Node TS
+    const module: any = await import('./app/components/runner/config/generated_presets');
     const presets = module.GENERATED_RUNNER_PRESETS || {};
-    const summary = {};
-    for (const [id, preset] of Object.entries(presets)) {
+    const summary: any = {};
+    for (const [id, preset] of Object.entries(presets) as any) {
       const traceEnabledOnLoad = Object.prototype.hasOwnProperty.call(preset || {}, 'traceEnabledOnLoad')
         ? preset?.traceEnabledOnLoad === true
         : (preset?.defaults?.traceEnabled === true);

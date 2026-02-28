@@ -13,11 +13,11 @@ const BENIGN_PAGE_ERRORS = [
   'Failed to execute \'drawImage\' on \'CanvasRenderingContext2D\': The image argument is a canvas element with a width or height of 0.'
 ];
 
-async function switchInterpreterBackend(page) {
+async function switchInterpreterBackend(page: any) {
   await page.selectOption('#backendSelect', 'interpreter');
   await page.dispatchEvent('#backendSelect', 'change');
   await page.waitForFunction(() => {
-    const backend = document.querySelector('#backendSelect')?.value || '';
+    const backend = (document.querySelector('#backendSelect') as HTMLSelectElement)?.value || '';
     const runner = document.querySelector('#runnerStatus')?.textContent || '';
     const sim = document.querySelector('#simStatus')?.textContent || '';
     return backend === 'interpreter'
@@ -27,7 +27,7 @@ async function switchInterpreterBackend(page) {
   }, null, { timeout: 120000 });
 }
 
-async function loadCpuRunner(page) {
+async function loadCpuRunner(page: any) {
   await page.waitForFunction(() => {
     const select = document.querySelector('#runnerSelect');
     if (!(select instanceof HTMLSelectElement)) {
@@ -51,7 +51,7 @@ test('8bit cpu runner loads software binaries and renders expected screen output
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
@@ -71,7 +71,7 @@ test('8bit cpu runner loads software binaries and renders expected screen output
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }
@@ -80,8 +80,8 @@ test('8bit cpu runner loads software binaries and renders expected screen output
   });
 
   const page = await browser.newPage();
-  const pageErrors = [];
-  const consoleErrors = [];
+  const pageErrors: any[] = [];
+  const consoleErrors: any[] = [];
 
   page.on('pageerror', (err) => {
     const message = String(err?.message || err);

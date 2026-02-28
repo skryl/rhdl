@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createSimLoopController } from '../../../../app/components/sim/controllers/loop_controller';
 
 function createHarness() {
-  const calls = [];
+  const calls: any[] = [];
   const dom = {
     stepTicks: { value: '1' },
     runBatch: { value: '10' },
@@ -31,22 +31,22 @@ function createHarness() {
     isApple2UiEnabled: () => true,
     refreshStatus: () => calls.push('refreshStatus'),
     updateApple2SpeakerAudio: () => calls.push('updateApple2SpeakerAudio'),
-    setCycleState: (v) => {
+    setCycleState: (v: any) => {
       state.cycle = v;
       calls.push(`setCycle:${v}`);
     },
-    setUiCyclesPendingState: (v) => {
+    setUiCyclesPendingState: (v: any) => {
       state.uiCyclesPending = v;
       calls.push(`setPending:${v}`);
     },
-    setRunningState: (v) => {
+    setRunningState: (v: any) => {
       state.running = v;
       calls.push(`setRunning:${v}`);
     },
     selectedClock: () => null,
     checkBreakpoints: () => null,
-    formatValue: (value) => String(value),
-    log: (message) => calls.push(`log:${message}`),
+    formatValue: (value: any) => String(value),
+    log: (message: any) => calls.push(`log:${message}`),
     drainTrace: () => calls.push('drainTrace'),
     refreshWatchTable: () => calls.push('refreshWatchTable'),
     refreshApple2Screen: () => calls.push('refreshApple2Screen'),
@@ -73,7 +73,7 @@ test('runApple2Cycles advances cycle and captures trace when enabled', () => {
     runner_run_cycles: () => ({ key_cleared: false, speaker_toggles: 3, cycles_run: 5 }),
     trace_enabled: () => true,
     trace_capture: () => {}
-  };
+  } as any;
   controller.runApple2Cycles(5);
   assert.equal(state.cycle, 5);
   assert.equal(state.apple2.lastSpeakerToggles, 3);

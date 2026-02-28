@@ -8,10 +8,10 @@ const STDIN_CTRL_READ_IDX = 1;
 const STDIN_CTRL_SIGNAL_IDX = 2;
 const STDIN_CTRL_CLOSED_IDX = 3;
 
-let sharedWorkerClient = null;
+let sharedWorkerClient: any = null;
 let sharedWorkerClientKey = '';
 
-function sanitizeMirbOutput(text) {
+function sanitizeMirbOutput(text: any) {
   const lines = String(text || '').replace(/\r/g, '').split('\n');
   const cleaned = [];
 
@@ -33,25 +33,25 @@ function sanitizeMirbOutput(text) {
   return cleaned.join('\n').trim();
 }
 
-function asError(value) {
+function asError(value: any) {
   if (value instanceof Error) {
     return value;
   }
   return new Error(String(value ?? 'Unknown error'));
 }
 
-function resolveScriptUrl(scriptUrl, { documentRef, globalRef } = {}) {
+function resolveScriptUrl(scriptUrl: any, { documentRef, globalRef }: any = {}) {
   const base = documentRef?.baseURI
     || globalRef?.location?.href
     || 'http://localhost/';
   try {
     return new URL(scriptUrl, base).href;
-  } catch (_err) {
+  } catch (_err: any) {
     return String(scriptUrl || DEFAULT_MIRB_JS_PATH);
   }
 }
 
-function encodeUtf8(text) {
+function encodeUtf8(text: any) {
   if (typeof TextEncoder !== 'undefined') {
     return new TextEncoder().encode(String(text ?? ''));
   }
@@ -63,15 +63,15 @@ function encodeUtf8(text) {
   return Uint8Array.from(bytes);
 }
 
-function stripToken(text, token) {
+function stripToken(text: any, token: any) {
   return String(text || '').split(String(token || '')).join('');
 }
 
-function createCommandToken(requestId, nonce) {
+function createCommandToken(requestId: any, nonce: any) {
   return `__RHDL_MIRB_DONE_${requestId}_${Date.now()}_${nonce}__`;
 }
 
-function buildCommandSource(source, token) {
+function buildCommandSource(source: any, token: any) {
   const code = String(source ?? '').replace(/\r/g, '');
   const encoded = JSON.stringify(code);
   return [
@@ -90,7 +90,7 @@ function buildCommandSource(source, token) {
   ].join('; ') + '\n';
 }
 
-function normalizeMirbResult(result = {}) {
+function normalizeMirbResult(result: any = {}) {
   return {
     exitCode: Number.isFinite(result?.exitCode) ? result.exitCode : 0,
     stdout: sanitizeMirbOutput(result?.stdout),
@@ -104,24 +104,24 @@ function createWorkerClient({
   absoluteWorkerScriptUrl,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   stdinBufferBytes = DEFAULT_STDIN_BUFFER_BYTES
-} = {}) {
+}: any = {}) {
   const WorkerCtor = globalRef?.Worker;
   if (typeof WorkerCtor !== 'function') {
     return null;
   }
 
-  let worker = null;
-  let initPromise = null;
-  let initResolve = null;
-  let initReject = null;
+  let worker: any = null;
+  let initPromise: any = null;
+  let initResolve: any = null;
+  let initReject: any = null;
 
-  let stdinControl = null;
-  let stdinData = null;
+  let stdinControl: any = null;
+  let stdinData: any = null;
 
   let nextRequestId = 1;
   let commandNonce = 0;
-  let runQueue = Promise.resolve();
-  let activeCommand = null;
+  let runQueue: Promise<any> = Promise.resolve();
+  let activeCommand: any = null;
 
   const debugIo = globalRef?.__RHDL_MIRB_DEBUG_IO__ === true;
 
@@ -130,7 +130,7 @@ function createWorkerClient({
       && typeof globalRef?.Atomics?.notify === 'function';
   }
 
-  function recordDebugEvent(message) {
+  function recordDebugEvent(message: any) {
     if (!debugIo) {
       return;
     }
@@ -166,12 +166,12 @@ function createWorkerClient({
       Atomics.store(stdinControl, STDIN_CTRL_CLOSED_IDX, 1);
       Atomics.add(stdinControl, STDIN_CTRL_SIGNAL_IDX, 1);
       Atomics.notify(stdinControl, STDIN_CTRL_SIGNAL_IDX, 1);
-    } catch (_err) {
+    } catch (_err: any) {
       // Ignore shared channel close failures.
     }
   }
 
-  function rejectActiveCommand(err) {
+  function rejectActiveCommand(err: any) {
     if (!activeCommand) {
       return;
     }
@@ -183,7 +183,7 @@ function createWorkerClient({
     command.reject(asError(err));
   }
 
-  function resolveActiveCommand(result) {
+  function resolveActiveCommand(result: any) {
     if (!activeCommand) {
       return;
     }
@@ -217,7 +217,7 @@ function createWorkerClient({
     initReject = null;
   }
 
-  function resetWorker(err = null) {
+  function resetWorker(err: any = null) {
     const resetErr = err ? asError(err) : new Error('mirb worker unavailable');
     const pendingInitReject = initReject;
     teardownWorker();
@@ -227,7 +227,7 @@ function createWorkerClient({
     rejectActiveCommand(resetErr);
   }
 
-  function configureStdinBuffers(message) {
+  function configureStdinBuffers(message: any) {
     const controlBuffer = message?.stdinControlBuffer;
     const dataBuffer = message?.stdinDataBuffer;
 
@@ -259,7 +259,7 @@ function createWorkerClient({
     });
   }
 
-  function appendStreamChunk(stream, chunk) {
+  function appendStreamChunk(stream: any, chunk: any) {
     if (!activeCommand) {
       return;
     }
@@ -275,7 +275,7 @@ function createWorkerClient({
     maybeResolveFromToken();
   }
 
-  function handleProcessFailure(message) {
+  function handleProcessFailure(message: any) {
     const reason = String(
       message?.message
       || (message?.type === 'process_exit'
@@ -285,7 +285,7 @@ function createWorkerClient({
     resetWorker(new Error(reason));
   }
 
-  function handleWorkerMessage(event) {
+  function handleWorkerMessage(event: any) {
     const message = event?.data || {};
 
     if (message.type === 'debug') {
@@ -296,7 +296,7 @@ function createWorkerClient({
     if (message.type === 'ready') {
       try {
         configureStdinBuffers(message);
-      } catch (err) {
+      } catch (err: any) {
         resetWorker(err);
         return;
       }
@@ -339,7 +339,7 @@ function createWorkerClient({
 
     worker = new WorkerCtor(absoluteWorkerScriptUrl);
     worker.onmessage = handleWorkerMessage;
-    worker.onerror = (event) => {
+    worker.onerror = (event: any) => {
       const message = event?.message || event?.error?.message || 'mirb worker crashed';
       resetWorker(new Error(String(message)));
     };
@@ -362,20 +362,20 @@ function createWorkerClient({
     return initPromise;
   }
 
-  function delay(ms) {
+  function delay(ms: any) {
     return new Promise((resolve) => {
       setTimeout(resolve, ms);
     });
   }
 
-  function freeQueueSpace(write, read, capacity) {
+  function freeQueueSpace(write: any, read: any, capacity: any) {
     if (read > write) {
       return read - write - 1;
     }
     return capacity - (write - read) - 1;
   }
 
-  async function enqueueInput(text) {
+  async function enqueueInput(text: any) {
     if (!stdinControl || !stdinData) {
       throw new Error('mirb stdin channel is not ready');
     }
@@ -389,12 +389,12 @@ function createWorkerClient({
     let offset = 0;
 
     while (offset < bytes.length) {
-      if (Atomics.load(stdinControl, STDIN_CTRL_CLOSED_IDX) === 1) {
+      if ((Atomics.load(stdinControl, STDIN_CTRL_CLOSED_IDX) as unknown as number) === 1) {
         throw new Error('mirb stdin channel was closed');
       }
 
-      const write = Atomics.load(stdinControl, STDIN_CTRL_WRITE_IDX);
-      const read = Atomics.load(stdinControl, STDIN_CTRL_READ_IDX);
+      const write = Atomics.load(stdinControl, STDIN_CTRL_WRITE_IDX) as unknown as number;
+      const read = Atomics.load(stdinControl, STDIN_CTRL_READ_IDX) as unknown as number;
       const space = freeQueueSpace(write, read, capacity);
       if (space <= 0) {
         await delay(1);
@@ -406,7 +406,7 @@ function createWorkerClient({
       stdinData.set(bytes.subarray(offset, offset + first), write);
       offset += first;
 
-      let nextWrite = write + first;
+      let nextWrite: number = write + first;
       if (nextWrite >= capacity) {
         nextWrite = 0;
       }
@@ -424,7 +424,7 @@ function createWorkerClient({
     }
   }
 
-  async function executeInWorker(source) {
+  async function executeInWorker(source: any) {
     const sourceText = String(source ?? '');
     if (!sourceText.trim()) {
       return {
@@ -475,7 +475,7 @@ function createWorkerClient({
     });
   }
 
-  function run(source) {
+  function run(source: any) {
     const sourceText = String(source ?? '');
     const task = () => executeInWorker(sourceText);
     runQueue = runQueue.then(task, task);
@@ -492,7 +492,7 @@ function sharedWorkerKey({
   absoluteWorkerScriptUrl,
   timeoutMs,
   stdinBufferBytes
-} = {}) {
+}: any = {}) {
   return `${absoluteScriptUrl}::${absoluteWorkerScriptUrl}::${timeoutMs}::${stdinBufferBytes}`;
 }
 
@@ -502,7 +502,7 @@ function getSharedWorkerClient({
   absoluteWorkerScriptUrl,
   timeoutMs,
   stdinBufferBytes
-} = {}) {
+}: any = {}) {
   const key = sharedWorkerKey({
     absoluteScriptUrl,
     absoluteWorkerScriptUrl,
@@ -530,7 +530,7 @@ export function createMirbCommandRunner({
   timeoutMs = DEFAULT_TIMEOUT_MS,
   stdinBufferBytes = DEFAULT_STDIN_BUFFER_BYTES,
   workerScriptUrl = DEFAULT_MIRB_WORKER_SCRIPT_PATH
-} = {}) {
+}: any = {}) {
   const absoluteScriptUrl = resolveScriptUrl(scriptUrl, { documentRef, globalRef });
   const absoluteWorkerScriptUrl = resolveScriptUrl(workerScriptUrl, { documentRef, globalRef });
   const workerClient = getSharedWorkerClient({
@@ -541,7 +541,7 @@ export function createMirbCommandRunner({
     stdinBufferBytes
   });
 
-  return async function runMirb(source) {
+  return async function runMirb(source: any) {
     if (!workerClient) {
       throw new Error('mirb worker is unavailable in this environment. SharedArrayBuffer support is required.');
     }

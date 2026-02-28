@@ -15,6 +15,6 @@ export {
   terminalHelpText
 };
 
-export function createTerminalCommandController(options = {}) {
+export function createTerminalCommandController(options: any = {}) {
   return createTerminalRuntimeService(options);
 }

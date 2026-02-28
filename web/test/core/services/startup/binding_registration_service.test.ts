@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { createStartupBindingRegistrationService } from '../../../../app/core/services/startup_binding_registration_service';
 
 test('startup binding registration service resets lifecycle and registers all bindings', () => {
-  const calls = [];
-  const registered = [];
+  const calls: any[] = [];
+  const registered: any[] = [];
   const service = createStartupBindingRegistrationService({
     dom: {},
     state: { activeTab: 'ioTab' },
@@ -18,7 +18,7 @@ test('startup binding registration service resets lifecycle and registers all bi
       bindSimBindings: () => 'sim-disposer',
       bindEditorBindings: () => 'editor-disposer',
       bindCollapsiblePanels: () => 'collapsible-disposer',
-      registerUiBinding: (fn) => registered.push(fn),
+      registerUiBinding: (fn: any) => registered.push(fn),
       disposeUiBindings: () => calls.push('disposeUiBindings')
     },
     app: {
@@ -43,7 +43,7 @@ test('startup binding registration service resets lifecycle and registers all bi
         ensureBackendInstance: async () => {},
         currentPreset: () => ({ id: 'apple2' }),
         loadBundle: async () => ({}),
-        getPreset: (id) => ({ id }),
+        getPreset: (id: any) => ({ id }),
         updateIrSourceVisibility: () => {},
         loadSample: async () => {}
       },
@@ -74,13 +74,13 @@ test('startup binding registration service resets lifecycle and registers all bi
       scheduleReduxUxSync: () => {}
     },
     util: {
-      getBackendDef: (id) => ({ id }),
+      getBackendDef: (id: any) => ({ id }),
       parseHexOrDec: () => 0,
       hexByte: () => '00',
       isSnapshotFileName: () => false
     },
     env: {
-      requestAnimationFrameImpl: (cb) => cb()
+      requestAnimationFrameImpl: (cb: any) => cb()
     },
     log: () => {}
   });

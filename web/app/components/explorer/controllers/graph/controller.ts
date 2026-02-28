@@ -1,6 +1,6 @@
 import { createExplorerGraphRuntimeService } from '../../services/graph_runtime_service';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createExplorerGraphController requires function: ${name}`);
   }
@@ -18,7 +18,7 @@ export function createExplorerGraphController({
   signalLiveValueByName,
   renderComponentLiveSignals,
   renderComponentConnections
-} = {}) {
+}: any = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('createExplorerGraphController requires dom/state/runtime');
   }

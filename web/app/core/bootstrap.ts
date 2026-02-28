@@ -34,7 +34,7 @@ import { createEventLogger } from '../components/watch/lib/event_logger';
 
 export function startMainApp() {
   const dom = createDomRefs(document);
-  const runtime = createRuntimeContext(() => new LiveVcdParser());
+  const runtime = createRuntimeContext((() => new LiveVcdParser()) as any);
   const state = createInitialState();
   const appStore = createAppStore(state);
   const { registerUiBinding, disposeUiBindings } = createUiBindingRegistry(runtime);
@@ -99,7 +99,7 @@ export function startMainApp() {
     documentRef: document,
     localStorageRef: localStorage,
     eventCtor: Event,
-    p5Ctor: p5
+    p5Ctor: (globalThis as any).p5
   });
 
   return startApp({

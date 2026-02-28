@@ -4,15 +4,15 @@ import { normalizeUiId } from './parse';
 export function createTerminalUiHelpers({
   documentRef = globalThis.document,
   eventCtor = globalThis.Event
-} = {}) {
-  function dispatchBubbledEvent(target, type) {
+}: any = {}) {
+  function dispatchBubbledEvent(target: any, type: any) {
     if (!target || typeof target.dispatchEvent !== 'function' || typeof eventCtor !== 'function') {
       return;
     }
     target.dispatchEvent(new eventCtor(type, { bubbles: true }));
   }
 
-  function setUiInputValueById(id, value) {
+  function setUiInputValueById(id: any, value: any) {
     const elementId = normalizeUiId(id);
     if (!elementId) {
       throw new Error('Missing element id.');
@@ -56,7 +56,7 @@ export function createTerminalUiHelpers({
     throw new Error(`Element does not support value assignment: ${elementId}`);
   }
 
-  function clickUiElementById(id) {
+  function clickUiElementById(id: any) {
     const elementId = normalizeUiId(id);
     if (!elementId) {
       throw new Error('Missing element id.');

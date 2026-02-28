@@ -48,7 +48,7 @@ test('executeGenericRunBatch advances cycles and stops on breakpoint', () => {
     state,
     batch: 5,
     selectedClock: () => null,
-    setCycleState: (value) => {
+    setCycleState: (value: any) => {
       state.cycle = value;
     },
     checkBreakpoints: () => {

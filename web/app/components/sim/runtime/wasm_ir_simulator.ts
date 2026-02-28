@@ -97,7 +97,9 @@ const RUNNER_PROBE_RISCV_UART_TX_LEN = 17;
 const RUNNER_CONTROL_CLEAR_UART_TX = 6;
 
 export class WasmIrSimulator {
-  constructor(instance, irJson, backend = 'interpreter', subCycles = 14) {
+  [key: string]: any;
+
+  constructor(instance: any, irJson: any, backend = 'interpreter', subCycles = 14) {
     this.instance = instance;
     this.backend = getBackendDef(backend);
     this.e = WasmIrSimulator.normalizeExports(instance.exports, this.backend);
@@ -165,8 +167,8 @@ export class WasmIrSimulator {
     }
   }
 
-  static normalizeExports(raw, backendDef) {
-    const pick = (...names) => {
+  static normalizeExports(raw: any, backendDef: any) {
+    const pick = (...names: any[]) => {
       for (const name of names) {
         if (name && typeof raw[name] === 'function') {
           return raw[name].bind(raw);
@@ -174,7 +176,7 @@ export class WasmIrSimulator {
       }
       return null;
     };
-    const must = (...names) => {
+    const must = (...names: any[]) => {
       const fn = pick(...names);
       if (!fn) {
         throw new Error(`Missing WASM export (backend ${backendDef.id}): ${names[0]}`);
@@ -185,7 +187,7 @@ export class WasmIrSimulator {
     const core = backendDef.corePrefix;
     const alloc = backendDef.allocPrefix || core;
 
-    const out = {
+    const out: any = {
       memory: raw.memory
     };
 
@@ -220,13 +222,13 @@ export class WasmIrSimulator {
     return out;
   }
 
-  requireExport(name) {
+  requireExport(name: any) {
     if (!this.e[name]) {
       throw new Error(`Missing WASM export: ${name}`);
     }
   }
 
-  hasExport(name) {
+  hasExport(name: any) {
     return typeof this.e[name] === 'function';
   }
 
@@ -242,17 +244,17 @@ export class WasmIrSimulator {
     return new Uint32Array(this.memoryBuffer());
   }
 
-  alloc(size) {
+  alloc(size: any) {
     return this.e.sim_wasm_alloc(Math.max(1, size));
   }
 
-  dealloc(ptr, size) {
+  dealloc(ptr: any, size: any) {
     if (ptr) {
       this.e.sim_wasm_dealloc(ptr, Math.max(1, size));
     }
   }
 
-  withCString(text, fn) {
+  withCString(text: any, fn: any) {
     const bytes = this.encoder.encode(String(text));
     const ptr = this.alloc(bytes.length + 1);
     try {
@@ -265,7 +267,7 @@ export class WasmIrSimulator {
     }
   }
 
-  readCString(ptr) {
+  readCString(ptr: any) {
     if (!ptr) {
       return '';
     }
@@ -278,7 +280,7 @@ export class WasmIrSimulator {
     return this.decoder.decode(mem.subarray(ptr, end));
   }
 
-  takeOwnedCString(ptr, freeFn = null) {
+  takeOwnedCString(ptr: any, freeFn: any = null) {
     if (!ptr) {
       return '';
     }
@@ -313,8 +315,8 @@ export class WasmIrSimulator {
     }
   }
 
-  simSignal(op, { name = null, idx = 0, value = 0 } = {}) {
-    const invoke = (namePtr) => {
+  simSignal(op: any, { name = null, idx = 0, value = 0 }: any = {}) {
+    const invoke = (namePtr: any) => {
       const outPtr = this.alloc(8);
       try {
         this.u8().fill(0, outPtr, outPtr + 8);
@@ -334,12 +336,12 @@ export class WasmIrSimulator {
     };
 
     if (typeof name === 'string') {
-      return this.withCString(name, (ptr) => invoke(ptr));
+      return this.withCString(name, (ptr: any) => invoke(ptr));
     }
     return invoke(0);
   }
 
-  simExec(op, arg0 = 0, arg1 = 0, errorOutPtr = 0) {
+  simExec(op: any, arg0 = 0, arg1 = 0, errorOutPtr = 0) {
     const outPtr = this.alloc(8);
     try {
       this.u8().fill(0, outPtr, outPtr + 8);
@@ -358,8 +360,8 @@ export class WasmIrSimulator {
     }
   }
 
-  simTrace(op, strArg = null) {
-    const invoke = (argPtr) => {
+  simTrace(op: any, strArg = null) {
+    const invoke = (argPtr: any) => {
       const outPtr = this.alloc(8);
       try {
         this.u8().fill(0, outPtr, outPtr + 8);
@@ -377,12 +379,12 @@ export class WasmIrSimulator {
     };
 
     if (typeof strArg === 'string') {
-      return this.withCString(strArg, (ptr) => invoke(ptr));
+      return this.withCString(strArg, (ptr: any) => invoke(ptr));
     }
     return invoke(0);
   }
 
-  simBlob(op) {
+  simBlob(op: any) {
     const required = this.e.sim_blob(this.ctx, Number(op) >>> 0, 0, 0) >>> 0;
     if (required === 0) {
       return '';
@@ -430,28 +432,28 @@ export class WasmIrSimulator {
     return csv.split(',').filter(Boolean);
   }
 
-  get_signal_idx(name) {
+  get_signal_idx(name: any) {
     const result = this.simSignal(SIM_SIGNAL_GET_INDEX, { name });
     return result.ok ? (result.value | 0) : -1;
   }
 
-  has_signal(name) {
+  has_signal(name: any) {
     return this.simSignal(SIM_SIGNAL_HAS, { name }).value !== 0;
   }
 
-  poke(name, value) {
+  poke(name: any, value: any) {
     return this.simSignal(SIM_SIGNAL_POKE, { name, value }).ok;
   }
 
-  peek(name) {
+  peek(name: any) {
     return this.simSignal(SIM_SIGNAL_PEEK, { name }).value;
   }
 
-  poke_by_idx(idx, value) {
+  poke_by_idx(idx: any, value: any) {
     this.simSignal(SIM_SIGNAL_POKE_INDEX, { idx, value });
   }
 
-  peek_by_idx(idx) {
+  peek_by_idx(idx: any) {
     return this.simSignal(SIM_SIGNAL_PEEK_INDEX, { idx }).value;
   }
 
@@ -460,11 +462,11 @@ export class WasmIrSimulator {
     this.captureTraceIfEnabled();
   }
 
-  set_prev_clock(clockListIdx, value) {
+  set_prev_clock(clockListIdx: any, value: any) {
     this.simExec(SIM_EXEC_SET_PREV_CLOCK, clockListIdx, value);
   }
 
-  get_clock_list_idx(signalIdx) {
+  get_clock_list_idx(signalIdx: any) {
     const result = this.simExec(SIM_EXEC_GET_CLOCK_LIST_IDX, signalIdx, 0);
     return result.ok ? (result.value | 0) : -1;
   }
@@ -493,14 +495,14 @@ export class WasmIrSimulator {
     this.captureTraceIfEnabled();
   }
 
-  run_ticks(n) {
+  run_ticks(n: any) {
     const ticks = Math.max(0, Number.parseInt(n, 10) || 0);
     for (let i = 0; i < ticks; i += 1) {
       this.tick();
     }
   }
 
-  run_clock_ticks(clockSignal, cycles) {
+  run_clock_ticks(clockSignal: any, cycles: any) {
     if (!this.features.hasSignalIndex) {
       this.run_ticks(cycles);
       return;
@@ -556,7 +558,7 @@ export class WasmIrSimulator {
     }
   }
 
-  clock_mode(name) {
+  clock_mode(name: any) {
     if (!name) {
       return 'none';
     }
@@ -577,7 +579,7 @@ export class WasmIrSimulator {
     return mode;
   }
 
-  clock_signals_by_name(names) {
+  clock_signals_by_name(names: any) {
     const result = [];
     for (const name of names) {
       if (!name || !this.has_signal(name)) {
@@ -597,7 +599,7 @@ export class WasmIrSimulator {
       return [];
     }
     const names = csv.split(',').filter(Boolean);
-    return this.clock_signals_by_name(names.filter((n) => /(^|_)clk(_|$)/i.test(n)));
+    return this.clock_signals_by_name(names.filter((n: any) => /(^|_)clk(_|$)/i.test(n)));
   }
 
   reset() {
@@ -609,7 +611,7 @@ export class WasmIrSimulator {
     return this.simTrace(SIM_TRACE_START).ok;
   }
 
-  trace_start_streaming(path) {
+  trace_start_streaming(path: any) {
     return this.simTrace(SIM_TRACE_START_STREAMING, path).ok;
   }
 
@@ -617,11 +619,11 @@ export class WasmIrSimulator {
     this.simTrace(SIM_TRACE_STOP);
   }
 
-  trace_add_signal(name) {
+  trace_add_signal(name: any) {
     return this.simTrace(SIM_TRACE_ADD_SIGNAL, name).ok;
   }
 
-  trace_add_signals_matching(pattern) {
+  trace_add_signals_matching(pattern: any) {
     return this.simTrace(SIM_TRACE_ADD_SIGNALS_MATCHING, pattern).value | 0;
   }
 
@@ -669,15 +671,15 @@ export class WasmIrSimulator {
     return this.simTrace(SIM_TRACE_SIGNAL_COUNT).value >>> 0;
   }
 
-  trace_set_timescale(timescale) {
+  trace_set_timescale(timescale: any) {
     return this.simTrace(SIM_TRACE_SET_TIMESCALE, timescale).ok;
   }
 
-  trace_set_module_name(name) {
+  trace_set_module_name(name: any) {
     return this.simTrace(SIM_TRACE_SET_MODULE_NAME, name).ok;
   }
 
-  withAllocatedBytes(bytes, fn) {
+  withAllocatedBytes(bytes: any, fn: any) {
     if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
       return fn(0, 0);
     }
@@ -690,7 +692,7 @@ export class WasmIrSimulator {
     }
   }
 
-  readBytesViaExport(readFn, offset, length) {
+  readBytesViaExport(readFn: any, offset: any, length: any) {
     const len = Math.max(0, Number.parseInt(length, 10) || 0);
     if (len === 0) {
       return new Uint8Array(0);
@@ -705,7 +707,7 @@ export class WasmIrSimulator {
     }
   }
 
-  readRunnerCaps(capsPtr) {
+  readRunnerCaps(capsPtr: any) {
     const view = new DataView(this.memoryBuffer(), capsPtr, 16);
     return {
       kind: view.getInt32(0, true),
@@ -736,7 +738,7 @@ export class WasmIrSimulator {
     }
   }
 
-  runnerProbe(op, arg0 = 0) {
+  runnerProbe(op: any, arg0 = 0) {
     if (!this.hasExport('runner_probe')) {
       return 0;
     }
@@ -745,7 +747,7 @@ export class WasmIrSimulator {
     return Number.isFinite(value) ? value : 0;
   }
 
-  readRunnerRunResult(resultPtr) {
+  readRunnerRunResult(resultPtr: any) {
     const view = new DataView(this.memoryBuffer(), resultPtr, 20);
     return {
       text_dirty: view.getInt32(0, true) !== 0,
@@ -756,14 +758,14 @@ export class WasmIrSimulator {
     };
   }
 
-  runnerMemTransfer(op, space, offset, bytes, flags = 0) {
+  runnerMemTransfer(op: any, space: any, offset: any, bytes: any, flags = 0) {
     if (!this.hasExport('runner_mem')) {
       return 0;
     }
     if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
       return 0;
     }
-    return this.withAllocatedBytes(bytes, (ptr, len) => (
+    return this.withAllocatedBytes(bytes, (ptr: any, len: any) => (
       this.e.runner_mem(
         this.ctx,
         Number(op) >>> 0,
@@ -776,7 +778,7 @@ export class WasmIrSimulator {
     ));
   }
 
-  runnerMemRead(space, offset, length, flags = 0) {
+  runnerMemRead(space: any, offset: any, length: any, flags = 0) {
     if (!this.hasExport('runner_mem')) {
       return new Uint8Array(0);
     }
@@ -825,29 +827,29 @@ export class WasmIrSimulator {
     return this.runnerProbe(RUNNER_PROBE_IS_MODE) !== 0;
   }
 
-  runner_load_memory(bytes, offset = 0, options = {}) {
+  runner_load_memory(bytes: any, offset = 0, options: any = {}) {
     const space = options.isRom ? RUNNER_MEM_SPACE_ROM : RUNNER_MEM_SPACE_MAIN;
     return this.runnerMemTransfer(RUNNER_MEM_OP_LOAD, space, offset, bytes, 0) > 0;
   }
 
-  runner_read_memory(offset, length, options = {}) {
+  runner_read_memory(offset: any, length: any, options: any = {}) {
     const flags = options.mapped === false ? 0 : RUNNER_MEM_FLAG_MAPPED;
     return this.runnerMemRead(RUNNER_MEM_SPACE_MAIN, offset, length, flags);
   }
 
-  runner_write_memory(offset, bytes, options = {}) {
+  runner_write_memory(offset: any, bytes: any, options: any = {}) {
     const flags = options.mapped === false ? 0 : RUNNER_MEM_FLAG_MAPPED;
     return this.runnerMemTransfer(RUNNER_MEM_OP_WRITE, RUNNER_MEM_SPACE_MAIN, offset, bytes, flags) > 0;
   }
 
-  runner_load_rom(bytes, offset = 0) {
+  runner_load_rom(bytes: any, offset = 0) {
     if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
       return false;
     }
     return this.runnerMemTransfer(RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_ROM, offset, bytes, 0) > 0;
   }
 
-  runner_load_boot_rom(bytes) {
+  runner_load_boot_rom(bytes: any) {
     if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
       return false;
     }
@@ -855,7 +857,7 @@ export class WasmIrSimulator {
     return written > 0 || this.runner_kind() !== 'gameboy';
   }
 
-  runner_set_reset_vector(address) {
+  runner_set_reset_vector(address: any) {
     if (!this.hasExport('runner_control')) {
       return false;
     }
@@ -871,7 +873,7 @@ export class WasmIrSimulator {
     ) !== 0;
   }
 
-  runner_run_cycles(cycles, keyData = 0, keyReady = false) {
+  runner_run_cycles(cycles: any, keyData = 0, keyReady = false) {
     if (!this.hasExport('runner_run')) {
       return null;
     }
@@ -903,7 +905,7 @@ export class WasmIrSimulator {
     }
   }
 
-  runner_run_cycles_full(cycles) {
+  runner_run_cycles_full(cycles: any) {
     if (!this.hasExport('runner_run')) {
       return { cycles_run: 0, frames_completed: 0 };
     }
@@ -947,12 +949,12 @@ export class WasmIrSimulator {
     this.simRunnerSpeakerToggles = 0;
   }
 
-  runner_read_vram(addr) {
+  runner_read_vram(addr: any) {
     const bytes = this.runnerMemRead(RUNNER_MEM_SPACE_VRAM, addr, 1, 0);
     return bytes.length > 0 ? (bytes[0] & 0xFF) : 0;
   }
 
-  runner_write_vram(addr, value) {
+  runner_write_vram(addr: any, value: any) {
     this.runnerMemTransfer(
       RUNNER_MEM_OP_WRITE,
       RUNNER_MEM_SPACE_VRAM,
@@ -962,12 +964,12 @@ export class WasmIrSimulator {
     );
   }
 
-  runner_read_zpram(addr) {
+  runner_read_zpram(addr: any) {
     const bytes = this.runnerMemRead(RUNNER_MEM_SPACE_ZPRAM, addr, 1, 0);
     return bytes.length > 0 ? (bytes[0] & 0xFF) : 0;
   }
 
-  runner_write_zpram(addr, value) {
+  runner_write_zpram(addr: any, value: any) {
     this.runnerMemTransfer(
       RUNNER_MEM_OP_WRITE,
       RUNNER_MEM_SPACE_ZPRAM,
@@ -977,12 +979,12 @@ export class WasmIrSimulator {
     );
   }
 
-  runner_read_wram(addr) {
+  runner_read_wram(addr: any) {
     const bytes = this.runnerMemRead(RUNNER_MEM_SPACE_WRAM, addr, 1, 0);
     return bytes.length > 0 ? (bytes[0] & 0xFF) : 0;
   }
 
-  runner_write_wram(addr, value) {
+  runner_write_wram(addr: any, value: any) {
     this.runnerMemTransfer(
       RUNNER_MEM_OP_WRITE,
       RUNNER_MEM_SPACE_WRAM,
@@ -1011,7 +1013,7 @@ export class WasmIrSimulator {
     return this.runnerProbe(RUNNER_PROBE_RISCV_UART_TX_LEN) >>> 0;
   }
 
-  runner_riscv_uart_receive_bytes(bytes) {
+  runner_riscv_uart_receive_bytes(bytes: any) {
     if (this.runner_kind() !== 'riscv') {
       return false;
     }
@@ -1028,12 +1030,12 @@ export class WasmIrSimulator {
     return this.runnerMemTransfer(RUNNER_MEM_OP_WRITE, RUNNER_MEM_SPACE_UART_RX, 0, payload, 0) > 0;
   }
 
-  runner_riscv_uart_receive_text(text) {
+  runner_riscv_uart_receive_text(text: any) {
     const encoded = new TextEncoder().encode(String(text ?? ''));
     return this.runner_riscv_uart_receive_bytes(encoded);
   }
 
-  runner_riscv_load_disk(bytes, offset = 0) {
+  runner_riscv_load_disk(bytes: any, offset = 0) {
     if (this.runner_kind() !== 'riscv') {
       return false;
     }
@@ -1043,7 +1045,7 @@ export class WasmIrSimulator {
     return this.runnerMemTransfer(RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_DISK, offset, bytes, 0) > 0;
   }
 
-  runner_riscv_uart_tx_bytes(offset = 0, length = null) {
+  runner_riscv_uart_tx_bytes(offset: any = 0, length: any = null) {
     if (!this.hasExport('runner_mem')) {
       return new Uint8Array(0);
     }
@@ -1091,7 +1093,7 @@ export class WasmIrSimulator {
     return this.runnerProbe(RUNNER_PROBE_IF_R) >>> 0;
   }
 
-  runner_get_signal(idx) {
+  runner_get_signal(idx: any) {
     return this.runnerProbe(RUNNER_PROBE_SIGNAL, idx);
   }
 
@@ -1111,24 +1113,24 @@ export class WasmIrSimulator {
     return null;
   }
 
-  memory_load(bytes, offset = 0, options = {}) {
+  memory_load(bytes: any, offset = 0, options: any = {}) {
     return this.runner_load_memory(bytes, offset, options);
   }
 
-  memory_read(offset, length, options = {}) {
+  memory_read(offset: any, length: any, options: any = {}) {
     return this.runner_read_memory(offset, length, options);
   }
 
-  memory_write(offset, bytes, options = {}) {
+  memory_write(offset: any, bytes: any, options: any = {}) {
     return this.runner_write_memory(offset, bytes, options);
   }
 
-  memory_read_byte(address, options = {}) {
+  memory_read_byte(address: any, options: any = {}) {
     const bytes = this.runner_read_memory(address, 1, options);
     return bytes.length > 0 ? (bytes[0] & 0xFF) : 0;
   }
 
-  memory_write_byte(address, value, options = {}) {
+  memory_write_byte(address: any, value: any, options: any = {}) {
     return this.runner_write_memory(address, new Uint8Array([Number(value) & 0xFF]), options);
   }
 }

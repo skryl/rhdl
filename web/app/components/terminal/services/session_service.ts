@@ -4,7 +4,7 @@ const MAX_TERMINAL_LINES = 900;
 const TERMINAL_PROMPT = '$ ';
 const TERMINAL_DEBUG_TEXT_DATA_KEY = 'terminalText';
 
-function normalizeTerminalState(state) {
+function normalizeTerminalState(state: any) {
   if (!state.terminal || typeof state.terminal !== 'object') {
     state.terminal = {};
   }
@@ -28,18 +28,18 @@ function normalizeTerminalState(state) {
   }
 }
 
-function terminalOutputTarget(dom) {
+function terminalOutputTarget(dom: any) {
   return dom?.terminalOutput || null;
 }
 
-function setTerminalDebugText(target, text) {
+function setTerminalDebugText(target: any, text: any) {
   if (!target || !target.dataset) {
     return;
   }
   target.dataset[TERMINAL_DEBUG_TEXT_DATA_KEY] = String(text ?? '');
 }
 
-function terminalDisplayText(state) {
+function terminalDisplayText(state: any) {
   if (typeof state?.terminal?.snapshotOverride === 'string') {
     return state.terminal.snapshotOverride;
   }
@@ -50,7 +50,7 @@ function terminalDisplayText(state) {
   return body ? `${body}\n${promptLine}` : promptLine;
 }
 
-function setTerminalOutputText(target, text) {
+function setTerminalOutputText(target: any, text: any) {
   if (!target) {
     return;
   }
@@ -64,7 +64,7 @@ function setTerminalOutputText(target, text) {
   }
 }
 
-function focusTerminalOutputEnd(target, terminalView = null) {
+function focusTerminalOutputEnd(target: any, terminalView: any = null) {
   if (terminalView && typeof terminalView.focus === 'function') {
     terminalView.focus();
     return;
@@ -83,13 +83,13 @@ function focusTerminalOutputEnd(target, terminalView = null) {
     try {
       target.selectionStart = end;
       target.selectionEnd = end;
-    } catch (_err) {
+    } catch (_err: any) {
       // Ignore cursor placement failures for non-text input mocks.
     }
   }
 }
 
-function syncLegacyInput(dom, state) {
+function syncLegacyInput(dom: any, state: any) {
   if (!dom?.terminalInput || dom.terminalInput === dom.terminalOutput) {
     return;
   }
@@ -98,7 +98,7 @@ function syncLegacyInput(dom, state) {
   }
 }
 
-function renderTerminal(dom, state, terminalView, requestFrame, { focus = false } = {}) {
+function renderTerminal(dom: any, state: any, terminalView: any, requestFrame: any, { focus = false }: any = {}) {
   const target = terminalOutputTarget(dom);
   if (!target && !terminalView) {
     return;
@@ -119,7 +119,7 @@ function renderTerminal(dom, state, terminalView, requestFrame, { focus = false 
   }
 }
 
-function appendTerminalLine(state, message, maxLines = MAX_TERMINAL_LINES) {
+function appendTerminalLine(state: any, message: any, maxLines = MAX_TERMINAL_LINES) {
   const text = String(message ?? '');
   const nextLines = text.split('\n');
   state.terminal.lines.push(...nextLines);
@@ -128,11 +128,11 @@ function appendTerminalLine(state, message, maxLines = MAX_TERMINAL_LINES) {
   }
 }
 
-function clearTerminalOutput(state) {
+function clearTerminalOutput(state: any) {
   state.terminal.lines = [];
 }
 
-function updateTerminalHistory(state, line) {
+function updateTerminalHistory(state: any, line: any) {
   if (!line) {
     return;
   }
@@ -146,10 +146,10 @@ export function createTerminalSessionService({
   dom,
   state,
   terminalView = null,
-  requestFrame = globalThis.requestAnimationFrame || ((cb) => setTimeout(cb, 0)),
+  requestFrame = globalThis.requestAnimationFrame || ((cb: any) => setTimeout(cb, 0)),
   runCommand,
   refreshStatus
-} = {}) {
+}: any = {}) {
   if (!dom || !state) {
     throw new Error('createTerminalSessionService requires dom/state');
   }
@@ -187,8 +187,8 @@ export function createTerminalSessionService({
     state.terminal.busy = true;
     try {
       await runCommand(line);
-    } catch (err) {
-      appendTerminalLine(state, `error: ${err.message || err}`);
+    } catch (err: any) {
+      appendTerminalLine(state, `error: ${(err as any).message || err}`);
     } finally {
       state.terminal.busy = false;
       refreshStatus();
@@ -196,7 +196,7 @@ export function createTerminalSessionService({
     }
   }
 
-  function historyNavigate(delta) {
+  function historyNavigate(delta: any) {
     const history = state.terminal.history;
     if (history.length === 0) {
       return;
@@ -214,7 +214,7 @@ export function createTerminalSessionService({
     renderTerminal(dom, state, resolvedTerminalView, requestFrame);
   }
 
-  function appendInput(text) {
+  function appendInput(text: any) {
     const chunk = String(text || '').replace(/\r/g, '').replace(/\n/g, ' ');
     if (!chunk) {
       return;

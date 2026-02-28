@@ -3,15 +3,15 @@
 
 const DEFAULT_PULSE_DURATION_MS = 200;
 
-export function createAnimationState({ pulseDurationMs = DEFAULT_PULSE_DURATION_MS } = {}) {
+export function createAnimationState({ pulseDurationMs = DEFAULT_PULSE_DURATION_MS }: any = {}) {
   // Map<wireId, { elapsedMs: number }>
   const activeAnimations = new Map();
 
-  function markToggled(wireId) {
+  function markToggled(wireId: any) {
     activeAnimations.set(wireId, { elapsedMs: 0 });
   }
 
-  function tick(dtMs) {
+  function tick(dtMs: any) {
     for (const [wireId, anim] of activeAnimations) {
       anim.elapsedMs += dtMs;
       if (anim.elapsedMs >= pulseDurationMs) {
@@ -20,7 +20,7 @@ export function createAnimationState({ pulseDurationMs = DEFAULT_PULSE_DURATION_
     }
   }
 
-  function getWireAnimation(wireId) {
+  function getWireAnimation(wireId: any) {
     const anim = activeAnimations.get(wireId);
     if (!anim) return null;
     return { pulseT: Math.min(anim.elapsedMs / pulseDurationMs, 1.0) };

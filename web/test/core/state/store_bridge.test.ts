@@ -8,27 +8,27 @@ import {
 } from '../../../app/core/state/store_bridge';
 
 test('createStoreDispatchers forwards action dispatchers', () => {
-  const dispatched = [];
+  const dispatched: any[] = [];
   const appStore = {
-    dispatch(action) {
+    dispatch(action: any) {
       dispatched.push(action);
     }
   };
   const storeActions = {
-    setBackend: (value) => ({ type: 'setBackend', value }),
-    setTheme: (value) => ({ type: 'setTheme', value }),
-    setRunnerPreset: (value) => ({ type: 'setRunnerPreset', value }),
-    setActiveTab: (value) => ({ type: 'setActiveTab', value }),
-    setSidebarCollapsed: (value) => ({ type: 'setSidebarCollapsed', value }),
-    setTerminalOpen: (value) => ({ type: 'setTerminalOpen', value }),
-    setRunning: (value) => ({ type: 'setRunning', value }),
-    setCycle: (value) => ({ type: 'setCycle', value }),
-    setUiCyclesPending: (value) => ({ type: 'setUiCyclesPending', value }),
-    setMemoryFollowPc: (value) => ({ type: 'setMemoryFollowPc', value }),
-    setApple2DisplayHires: (value) => ({ type: 'setApple2DisplayHires', value }),
-    setApple2DisplayColor: (value) => ({ type: 'setApple2DisplayColor', value }),
-    setApple2SoundEnabled: (value) => ({ type: 'setApple2SoundEnabled', value }),
-    mutate: (fn) => ({ type: 'mutate', fn })
+    setBackend: (value: any) => ({ type: 'setBackend', value }),
+    setTheme: (value: any) => ({ type: 'setTheme', value }),
+    setRunnerPreset: (value: any) => ({ type: 'setRunnerPreset', value }),
+    setActiveTab: (value: any) => ({ type: 'setActiveTab', value }),
+    setSidebarCollapsed: (value: any) => ({ type: 'setSidebarCollapsed', value }),
+    setTerminalOpen: (value: any) => ({ type: 'setTerminalOpen', value }),
+    setRunning: (value: any) => ({ type: 'setRunning', value }),
+    setCycle: (value: any) => ({ type: 'setCycle', value }),
+    setUiCyclesPending: (value: any) => ({ type: 'setUiCyclesPending', value }),
+    setMemoryFollowPc: (value: any) => ({ type: 'setMemoryFollowPc', value }),
+    setApple2DisplayHires: (value: any) => ({ type: 'setApple2DisplayHires', value }),
+    setApple2DisplayColor: (value: any) => ({ type: 'setApple2DisplayColor', value }),
+    setApple2SoundEnabled: (value: any) => ({ type: 'setApple2SoundEnabled', value }),
+    mutate: (fn: any) => ({ type: 'mutate', fn })
   };
 
   const dispatchers = createStoreDispatchers({ appStore, storeActions });
@@ -44,11 +44,11 @@ test('createStoreDispatchers forwards action dispatchers', () => {
 });
 
 test('createReduxSyncHelpers debounces async sync and installReduxGlobals publishes state', async () => {
-  const dispatched = [];
-  const listeners = [];
+  const dispatched: any[] = [];
+  const listeners: any[] = [];
   let currentState = { count: 0 };
   const appStore = {
-    dispatch(action) {
+    dispatch(action: any) {
       dispatched.push(action);
       if (action?.type === 'touch') {
         currentState = { count: currentState.count + 1 };
@@ -58,12 +58,12 @@ test('createReduxSyncHelpers debounces async sync and installReduxGlobals publis
     getState() {
       return currentState;
     },
-    subscribe(listener) {
+    subscribe(listener: any) {
       listeners.push(listener);
     }
   };
   const storeActions = {
-    touch: (payload) => ({ type: 'touch', payload })
+    touch: (payload: any) => ({ type: 'touch', payload })
   };
 
   const { syncReduxUxState, scheduleReduxUxSync } = createReduxSyncHelpers({ appStore, storeActions });
@@ -85,9 +85,9 @@ test('createReduxSyncHelpers debounces async sync and installReduxGlobals publis
     syncKey: 'syncKey'
   });
 
-  assert.equal(windowRef.storeKey, appStore);
-  assert.deepEqual(windowRef.stateKey, currentState);
-  windowRef.syncKey('manual');
+  assert.equal((windowRef as any).storeKey, appStore);
+  assert.deepEqual((windowRef as any).stateKey, currentState);
+  (windowRef as any).syncKey('manual');
   assert.equal(dispatched.length, 2);
   assert.equal(dispatched[1].payload.reason, 'manual');
 });

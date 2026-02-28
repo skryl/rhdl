@@ -6,7 +6,7 @@ import { COMPONENT_SIGNAL_PREVIEW_LIMIT } from '../config/constants';
 import { createComponentExplorerController } from './controller';
 import { createComponentSourceController } from '../../source/controllers/controller';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createComponentLazyGetters requires function: ${name}`);
   }
@@ -20,7 +20,7 @@ export function createComponentLazyGetters({
   currentComponentSourceText,
   currentRunnerPreset,
   destroyComponentGraph
-} = {}) {
+}: any = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('createComponentLazyGetters requires dom/state/runtime');
   }
@@ -29,8 +29,8 @@ export function createComponentLazyGetters({
   requireFn('currentRunnerPreset', currentRunnerPreset);
   requireFn('destroyComponentGraph', destroyComponentGraph);
 
-  let componentExplorerController = null;
-  let componentSourceController = null;
+  let componentExplorerController: any = null;
+  let componentSourceController: any = null;
 
   function getComponentExplorerController() {
     if (!componentExplorerController) {

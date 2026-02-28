@@ -1,4 +1,4 @@
-export async function handleSimWatchCommand({ cmd, tokens, context }) {
+export async function handleSimWatchCommand({ cmd, tokens, context }: any) {
   const { dom, state, runtime, actions, helpers } = context;
 
   if (cmd === 'init') {
@@ -33,7 +33,7 @@ export async function handleSimWatchCommand({ cmd, tokens, context }) {
     if (!dom.clockSignal) {
       throw new Error('Clock selector unavailable.');
     }
-    const hasOption = Array.from(dom.clockSignal.options).some((opt) => opt.value === next);
+    const hasOption = Array.from(dom.clockSignal.options).some((opt: any) => (opt as any).value === next);
     if (!hasOption) {
       throw new Error(`Unknown clock signal: ${next}`);
     }
@@ -126,7 +126,7 @@ export async function handleSimWatchCommand({ cmd, tokens, context }) {
       if (!signal) {
         throw new Error('Usage: bp remove <signal>');
       }
-      actions.replaceBreakpointsState(state.breakpoints.filter((bp) => bp.name !== signal));
+      actions.replaceBreakpointsState(state.breakpoints.filter((bp: any) => bp.name !== signal));
       actions.renderBreakpointList();
       return `breakpoint removed: ${signal}`;
     }
@@ -136,7 +136,7 @@ export async function handleSimWatchCommand({ cmd, tokens, context }) {
     }
     if (sub === 'list') {
       return state.breakpoints.length > 0
-        ? state.breakpoints.map((bp) => `${bp.name}=${actions.formatValue(bp.value, bp.width)}`).join('\n')
+        ? state.breakpoints.map((bp: any) => `${bp.name}=${actions.formatValue(bp.value, bp.width)}`).join('\n')
         : '(no breakpoints)';
     }
     throw new Error('Usage: bp <add|remove|clear|list> ...');

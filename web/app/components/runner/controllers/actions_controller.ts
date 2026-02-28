@@ -1,7 +1,7 @@
 import { fetchTextAsset } from '../../../core/lib/fetch_asset';
 import { DEFAULT_SAMPLE_PATH } from '../config/presets';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createRunnerActionsController requires function: ${name}`);
   }
@@ -31,7 +31,7 @@ export function createRunnerActionsController({
   fetchImpl = globalThis.fetch,
   requestFrame = globalThis.requestAnimationFrame,
   setTimeoutImpl = globalThis.setTimeout
-} = {}) {
+}: any = {}) {
   if (!dom) {
     throw new Error('createRunnerActionsController requires dom');
   }
@@ -58,7 +58,7 @@ export function createRunnerActionsController({
   let runnerLoadInFlight = false;
   let explorerWarmupScheduled = false;
 
-  async function applyPreferredBackend(preset) {
+  async function applyPreferredBackend(preset: any) {
     const preferredBackend = String(preset?.preferredBackend || '').trim();
     if (!preferredBackend) {
       return;
@@ -73,7 +73,7 @@ export function createRunnerActionsController({
   }
 
   async function waitForUiPaint() {
-    await new Promise((resolve) => {
+    await new Promise<void>((resolve) => {
       let settled = false;
       const finish = () => {
         if (settled) {
@@ -118,7 +118,7 @@ export function createRunnerActionsController({
       explorerWarmupScheduled = false;
       try {
         refreshComponentExplorer();
-      } catch (_err) {
+      } catch (_err: any) {
         // Ignore warmup failures; explicit tab refresh paths will still rebuild explorer state.
       }
     };
@@ -150,12 +150,12 @@ export function createRunnerActionsController({
       if (isComponentTabActive()) {
         refreshComponentExplorer();
       }
-    } catch (err) {
+    } catch (err: any) {
       log(`Failed to load sample (${samplePath}): ${err.message || err}`);
     }
   }
 
-  async function loadRunnerPreset(options = {}) {
+  async function loadRunnerPreset(options: any = {}) {
     const {
       presetOverride = null,
       logLoad = true,
@@ -228,7 +228,7 @@ export function createRunnerActionsController({
         setActiveTab(preset.preferredTab || 'vcdTab');
       }
       await applyRunnerDefaults(preset);
-    } catch (err) {
+    } catch (err: any) {
       log(`Failed to load runner ${preset.label}: ${err.message || err}`);
       return;
     } finally {
@@ -253,7 +253,7 @@ export function createRunnerActionsController({
     scheduleComponentExplorerWarmup();
   }
 
-  async function preloadStartPreset(startPreset) {
+  async function preloadStartPreset(startPreset: any) {
     if (!startPreset || startPreset.usesManualIr) {
       clearComponentSourceBundle();
       clearComponentSchematicBundle();

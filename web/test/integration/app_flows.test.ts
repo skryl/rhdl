@@ -15,7 +15,7 @@ test('web app core flows run in a real browser session', { timeout: 180000 }, as
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
@@ -29,7 +29,7 @@ test('web app core flows run in a real browser session', { timeout: 180000 }, as
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }
@@ -38,8 +38,8 @@ test('web app core flows run in a real browser session', { timeout: 180000 }, as
   });
 
   const page = await browser.newPage();
-  const pageErrors = [];
-  const consoleErrors = [];
+  const pageErrors: any[] = [];
+  const consoleErrors: any[] = [];
 
   page.on('pageerror', (err) => {
     const message = String(err?.message || err);
@@ -89,7 +89,7 @@ test('web app core flows run in a real browser session', { timeout: 180000 }, as
   assert.match(memoryStatusText || '', /Reset complete/);
 
   await page.evaluate(() => {
-    document.querySelector('#runBtn')?.click();
+    (document.querySelector('#runBtn') as HTMLElement)?.click();
   });
   await page.waitForFunction(() => {
     const text = document.querySelector('#simStatus')?.textContent || '';
@@ -97,7 +97,7 @@ test('web app core flows run in a real browser session', { timeout: 180000 }, as
   }, null, { timeout: 120000 });
 
   await page.evaluate(() => {
-    document.querySelector('#pauseBtn')?.click();
+    (document.querySelector('#pauseBtn') as HTMLElement)?.click();
   });
   await page.waitForFunction(() => {
     const text = document.querySelector('#simStatus')?.textContent || '';
@@ -110,7 +110,7 @@ test('web app core flows run in a real browser session', { timeout: 180000 }, as
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => {
     const el = document.querySelector('#terminalOutput');
-    const text = String(el?.dataset?.terminalText ?? el?.value ?? el?.textContent ?? '');
+    const text = String((el as any)?.dataset?.terminalText ?? (el as any)?.value ?? el?.textContent ?? '');
     return text.includes('runner=apple2') && /backend=\S+/.test(text);
   }, null, { timeout: 120000 });
 

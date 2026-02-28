@@ -5,8 +5,8 @@ import { createApple2DumpWorkflowService } from '../../../../app/components/appl
 
 test('apple2 dump workflow service saves memory dump and updates persisted state', async () => {
   let status = '';
-  let download = null;
-  const savedCalls = [];
+  let download: any = null;
+  const savedCalls: any[] = [];
   const state = { memory: {}, apple2: {} };
   const runtime = {
     sim: {
@@ -20,25 +20,25 @@ test('apple2 dump workflow service saves memory dump and updates persisted state
     APPLE2_RAM_BYTES: 64 * 1024,
     KARATEKA_PC: 0xB82A,
     dumpStorageService: {
-      save: (...args) => {
+      save: (...args: any[]) => {
         savedCalls.push(args);
         return true;
       },
       load: () => null
     },
     downloadService: {
-      downloadMemoryDump: (_bytes, filename) => {
+      downloadMemoryDump: (_bytes: any, filename: any) => {
         download = filename;
       },
       downloadSnapshot: () => {}
     },
     romResetService: {
       applySnapshotStartPc: async () => ({ applied: false, reason: 'noop' }),
-      patchApple2ResetVector: (bytes) => bytes
+      patchApple2ResetVector: (bytes: any) => bytes
     },
     getApple2ProgramCounter: () => 0xB82A,
     ensureApple2Ready: () => true,
-    setMemoryDumpStatus: (message) => {
+    setMemoryDumpStatus: (message: any) => {
       status = message;
     },
     setMemoryResetVectorInput: () => {},
@@ -50,12 +50,12 @@ test('apple2 dump workflow service saves memory dump and updates persisted state
   assert.equal(ok, true);
   assert.match(download || '', /^apple2_dump_/);
   assert.equal(savedCalls.length, 1);
-  assert.equal(state.memory.lastSavedDump.startPc, 0xB82A);
+  assert.equal((state.memory as any).lastSavedDump.startPc, 0xB82A);
   assert.match(status, /Last dump updated/);
 });
 
 test('apple2 dump workflow service loads snapshot and applies start PC when available', async () => {
-  const loaded = [];
+  const loaded: any[] = [];
   const dom = {
     memoryDumpOffset: { value: '' },
     memoryDumpStatus: { textContent: '' }
@@ -64,8 +64,8 @@ test('apple2 dump workflow service loads snapshot and applies start PC when avai
     new Uint8Array([7, 8, 9]),
     0x2000,
     'snapshot',
-    '2026-02-08T00:00:00.000Z',
-    0xB82A
+    '2026-02-08T00:00:00.000Z' as any,
+    0xB82A as any
   );
   const service = createApple2DumpWorkflowService({
     dom,
@@ -77,13 +77,13 @@ test('apple2 dump workflow service loads snapshot and applies start PC when avai
     downloadService: { downloadMemoryDump: () => {}, downloadSnapshot: () => {} },
     romResetService: {
       applySnapshotStartPc: async () => ({ applied: true, pc: 0xB82A, reason: 'ok' }),
-      patchApple2ResetVector: (bytes) => bytes
+      patchApple2ResetVector: (bytes: any) => bytes
     },
     getApple2ProgramCounter: () => 0xB82A,
     ensureApple2Ready: () => true,
     setMemoryDumpStatus: () => {},
     setMemoryResetVectorInput: () => {},
-    loadApple2MemoryDumpBytes: async (bytes, offset, opts) => {
+    loadApple2MemoryDumpBytes: async (bytes: any, offset: any, opts: any) => {
       loaded.push({ bytes, offset, opts });
       return true;
     },
@@ -105,8 +105,8 @@ test('apple2 dump workflow service loads snapshot and applies start PC when avai
 });
 
 test('apple2 dump workflow service loads binary dump bytes from an asset path', async () => {
-  const loaded = [];
-  const statusMessages = [];
+  const loaded: any[] = [];
+  const statusMessages: any[] = [];
   const service = createApple2DumpWorkflowService({
     dom: {},
     state: { memory: {}, apple2: {} },
@@ -117,15 +117,15 @@ test('apple2 dump workflow service loads binary dump bytes from an asset path', 
     downloadService: { downloadMemoryDump: () => {}, downloadSnapshot: () => {} },
     romResetService: {
       applySnapshotStartPc: async () => ({ applied: false, reason: 'noop' }),
-      patchApple2ResetVector: (bytes) => bytes
+      patchApple2ResetVector: (bytes: any) => bytes
     },
     getApple2ProgramCounter: () => 0xB82A,
     ensureApple2Ready: () => true,
-    setMemoryDumpStatus: (message) => {
+    setMemoryDumpStatus: (message: any) => {
       statusMessages.push(String(message || ''));
     },
     setMemoryResetVectorInput: () => {},
-    loadApple2MemoryDumpBytes: async (bytes, offset, options) => {
+    loadApple2MemoryDumpBytes: async (bytes: any, offset: any, options: any) => {
       loaded.push({ bytes, offset, options });
       return true;
     },
@@ -146,7 +146,7 @@ test('apple2 dump workflow service loads binary dump bytes from an asset path', 
 });
 
 test('apple2 dump workflow service loads snapshot payload from an asset path', async () => {
-  const loaded = [];
+  const loaded: any[] = [];
   const dom = {
     memoryDumpOffset: { value: '' },
     memoryDumpStatus: { textContent: '' }
@@ -155,8 +155,8 @@ test('apple2 dump workflow service loads snapshot payload from an asset path', a
     new Uint8Array([0xAA, 0xBB, 0xCC]),
     0x3000,
     'asset snapshot',
-    '2026-02-12T00:00:00.000Z',
-    0xB82A
+    '2026-02-12T00:00:00.000Z' as any,
+    0xB82A as any
   );
   const service = createApple2DumpWorkflowService({
     dom,
@@ -168,13 +168,13 @@ test('apple2 dump workflow service loads snapshot payload from an asset path', a
     downloadService: { downloadMemoryDump: () => {}, downloadSnapshot: () => {} },
     romResetService: {
       applySnapshotStartPc: async () => ({ applied: true, pc: 0xB82A, reason: 'ok' }),
-      patchApple2ResetVector: (bytes) => bytes
+      patchApple2ResetVector: (bytes: any) => bytes
     },
     getApple2ProgramCounter: () => 0xB82A,
     ensureApple2Ready: () => true,
     setMemoryDumpStatus: () => {},
     setMemoryResetVectorInput: () => {},
-    loadApple2MemoryDumpBytes: async (bytes, offset, options) => {
+    loadApple2MemoryDumpBytes: async (bytes: any, offset: any, options: any) => {
       loaded.push({ bytes, offset, options });
       return true;
     },

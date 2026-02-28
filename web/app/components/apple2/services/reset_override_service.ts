@@ -1,4 +1,4 @@
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createApple2ResetOverrideService requires function: ${name}`);
   }
@@ -17,7 +17,7 @@ export function createApple2ResetOverrideService({
   setMemoryDumpStatus,
   setMemoryResetVectorInput,
   log
-} = {}) {
+}: any = {}) {
   if (!dom) {
     throw new Error('createApple2ResetOverrideService requires dom');
   }

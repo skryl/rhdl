@@ -1,4 +1,4 @@
-export async function fetchTextAsset(path, label = 'asset', fetchImpl = globalThis.fetch) {
+export async function fetchTextAsset(path: any, label = 'asset', fetchImpl = globalThis.fetch) {
   const response = await fetchImpl(path);
   if (!response.ok) {
     throw new Error(`${label} load failed (${response.status})`);
@@ -6,11 +6,11 @@ export async function fetchTextAsset(path, label = 'asset', fetchImpl = globalTh
   return response.text();
 }
 
-export async function fetchJsonAsset(path, label = 'asset', fetchImpl = globalThis.fetch) {
+export async function fetchJsonAsset(path: any, label = 'asset', fetchImpl = globalThis.fetch) {
   const text = await fetchTextAsset(path, label, fetchImpl);
   try {
     return JSON.parse(text);
-  } catch (err) {
+  } catch (err: any) {
     throw new Error(`${label} parse failed: ${err.message || err}`);
   }
 }

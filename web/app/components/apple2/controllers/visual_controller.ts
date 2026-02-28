@@ -1,18 +1,18 @@
 import { renderUartTextGrid } from '../lib/uart_text';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createApple2VisualController requires function: ${name}`);
   }
 }
 
-function apple2TextLineAddress(row) {
+function apple2TextLineAddress(row: any) {
   const group = Math.floor(row / 8);
   const lineInGroup = row % 8;
   return 0x0400 + (lineInGroup * 0x80) + (group * 0x28);
 }
 
-function apple2DecodeChar(code) {
+function apple2DecodeChar(code: any) {
   const c = code & 0x7f;
   if (c >= 0x20 && c <= 0x7e) {
     return String.fromCharCode(c);
@@ -20,7 +20,7 @@ function apple2DecodeChar(code) {
   return ' ';
 }
 
-function decodeTextChar(code, textConfig = {}) {
+function decodeTextChar(code: any, textConfig: any = {}) {
   const charMask = Number.parseInt(textConfig.charMask, 10);
   const asciiMin = Number.parseInt(textConfig.asciiMin, 10);
   const asciiMax = Number.parseInt(textConfig.asciiMax, 10);
@@ -41,7 +41,7 @@ export function createApple2VisualController({
   updateIoToggleUi,
   renderApple2DebugRows,
   apple2HiresLineAddress
-} = {}) {
+}: any = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('createApple2VisualController requires dom/state/runtime');
   }
@@ -54,7 +54,7 @@ export function createApple2VisualController({
     return state.apple2?.ioConfig || {};
   }
 
-  function readRunnerMemory(offset, length, options = {}) {
+  function readRunnerMemory(offset: any, length: any, options = {}) {
     if (!runtime.sim) {
       return new Uint8Array(0);
     }
@@ -64,7 +64,7 @@ export function createApple2VisualController({
     return new Uint8Array(0);
   }
 
-  function readUartText(length) {
+  function readUartText(length: any) {
     const sim = runtime?.sim;
     if (!sim) {
       return new Uint8Array(0);

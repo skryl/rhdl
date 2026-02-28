@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 
 import { bindIoBindings } from '../../../../app/components/apple2/bindings/bindings';
 
-function makeTarget(extra = {}) {
+function makeTarget(extra: any = {}) {
   return Object.assign(new EventTarget(), extra);
 }
 
 test('bindIoBindings wires hires toggle and cleanup', () => {
-  const calls = [];
+  const calls: any[] = [];
   const dom = {
     toggleHires: makeTarget({ checked: false }),
     toggleColor: makeTarget({ checked: false }),
@@ -46,10 +46,10 @@ test('bindIoBindings wires hires toggle and cleanup', () => {
       refreshStatus: () => {}
     },
     store: {
-      setApple2DisplayHiresState: (value) => calls.push(['setHires', value]),
-      setApple2DisplayColorState: (value) => calls.push(['setColor', value])
+      setApple2DisplayHiresState: (value: any) => calls.push(['setHires', value]),
+      setApple2DisplayColorState: (value: any) => calls.push(['setColor', value])
     },
-    scheduleReduxUxSync: (reason) => calls.push(['sync', reason])
+    scheduleReduxUxSync: (reason: any) => calls.push(['sync', reason])
   });
 
   dom.toggleHires.dispatchEvent(new Event('change'));

@@ -9,37 +9,37 @@ import {
   resolveWebRoot
 } from './browser_test_harness';
 
-async function hasMirbAsset(webRoot) {
+async function hasMirbAsset(webRoot: any) {
   const mirbScriptPath = path.join(webRoot, 'assets', 'pkg', 'mirb.js');
   try {
     await access(mirbScriptPath);
     return true;
-  } catch (_err) {
+  } catch (_err: any) {
     return false;
   }
 }
 
-async function ensureTerminalOpen(page) {
+async function ensureTerminalOpen(page: any) {
   await page.waitForSelector('#terminalPanel', { state: 'attached', timeout: 20000 });
   await page.waitForSelector('#terminalToggleBtn', { state: 'attached', timeout: 20000 });
-  const hidden = await page.$eval('#terminalPanel', (panel) => !!panel.hidden);
+  const hidden = await page.$eval('#terminalPanel', (panel: any) => !!panel.hidden);
   if (hidden) {
     await page.click('#terminalToggleBtn');
   }
   await page.waitForFunction(() => {
     const panel = document.querySelector('#terminalPanel');
-    return !!panel && panel.hidden === false;
+    return !!panel && (panel as any).hidden === false;
   }, null, { timeout: 20000 });
 }
 
-async function readTerminalOutput(page) {
+async function readTerminalOutput(page: any) {
   return page.$eval(
     '#terminalOutput',
-    (el) => String(el.dataset?.terminalText ?? el.value ?? el.textContent ?? '')
+    (el: any) => String(el.dataset?.terminalText ?? el.value ?? el.textContent ?? '')
   );
 }
 
-async function runTerminalCommand(page, command, expectedMarker, timeoutMs = 60000) {
+async function runTerminalCommand(page: any, command: any, expectedMarker: any, timeoutMs = 60000) {
   await page.click('#terminalOutput');
   await page.keyboard.type(command);
   await page.keyboard.press('Enter');
@@ -70,7 +70,7 @@ test('terminal mirb supports one-shot and session flows', { timeout: 300000 }, a
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
@@ -89,7 +89,7 @@ test('terminal mirb supports one-shot and session flows', { timeout: 300000 }, a
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }
@@ -98,8 +98,8 @@ test('terminal mirb supports one-shot and session flows', { timeout: 300000 }, a
   });
 
   const page = await browser.newPage();
-  const pageErrors = [];
-  const consoleErrors = [];
+  const pageErrors: any[] = [];
+  const consoleErrors: any[] = [];
 
   page.on('pageerror', (err) => {
     const message = String(err?.message || err);

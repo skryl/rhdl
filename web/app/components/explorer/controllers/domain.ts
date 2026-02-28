@@ -11,7 +11,7 @@ export function createComponentDomainController({
   resetComponentGraphViewport,
   clearComponentSourceOverride,
   resetComponentExplorerState
-} = {}) {
+}: any = {}) {
   return {
     isTabActive: isComponentTabActive,
     refreshActiveTab: refreshActiveComponentTab,

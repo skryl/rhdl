@@ -12,7 +12,7 @@ import {
   clearComponentConnectionsView
 } from '../ui/schematic_panel';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createComponentExplorerController requires function: ${name}`);
   }
@@ -25,7 +25,7 @@ export function createComponentExplorerController({
   scheduleReduxUxSync,
   currentComponentSourceText,
   componentSignalPreviewLimit = 180
-} = {}) {
+}: any = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('createComponentExplorerController requires dom/state/runtime');
   }
@@ -86,7 +86,7 @@ export function createComponentExplorerController({
     renderComponentConnections: inspectorController.renderComponentConnections
   });
 
-  function setComponentGraphFocus(nodeId, showChildren = true) {
+  function setComponentGraphFocus(nodeId: any, showChildren = true) {
     const changed = modelController.setComponentGraphFocus(nodeId, showChildren);
     if (!changed) {
       return;

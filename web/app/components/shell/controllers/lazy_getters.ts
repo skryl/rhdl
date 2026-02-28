@@ -32,7 +32,7 @@ import { createTerminalCommandController } from '../../terminal/controllers/comm
 import { createShellStateController } from './state_controller';
 import { createDashboardLayoutController } from './layout_controller';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createShellLazyGetters requires function: ${name}`);
   }
@@ -85,7 +85,7 @@ export function createShellLazyGetters({
   refreshComponentExplorer,
   isComponentTabActive,
   refreshActiveComponentTab
-} = {}) {
+}: any = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('createShellLazyGetters requires dom/state/runtime');
   }
@@ -128,9 +128,9 @@ export function createShellLazyGetters({
   requireFn('isComponentTabActive', isComponentTabActive);
   requireFn('refreshActiveComponentTab', refreshActiveComponentTab);
 
-  let terminalController = null;
-  let shellStateController = null;
-  let dashboardLayoutController = null;
+  let terminalController: any = null;
+  let shellStateController: any = null;
+  let dashboardLayoutController: any = null;
 
   function collectIoSignalNames() {
     if (!runtime.sim) {

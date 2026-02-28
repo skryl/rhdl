@@ -11,11 +11,11 @@ export function bindSimBindings({
   store,
   log,
   scheduleAnimationFrame
-}) {
+}: any) {
   const listeners = createListenerGroup();
   const scheduleFrame = typeof scheduleAnimationFrame === 'function'
     ? scheduleAnimationFrame
-    : ((cb) => requestAnimationFrame(cb));
+    : ((cb: any) => requestAnimationFrame(cb));
 
   listeners.on(dom.initBtn, 'click', () => {
     sim.initializeSimulator();
@@ -134,7 +134,7 @@ export function bindSimBindings({
     dom.watchSignal.value = '';
   });
 
-  listeners.on(dom.watchList, 'watch-remove', (event) => {
+  listeners.on(dom.watchList, 'watch-remove', (event: any) => {
     const name = event?.detail?.name;
     if (!name) {
       return;
@@ -158,7 +158,7 @@ export function bindSimBindings({
       log(`Breakpoint added: ${signal}=${valueRaw}`);
       dom.bpSignal.value = '';
       dom.bpValue.value = '';
-    } catch (err) {
+    } catch (err: any) {
       log(err?.message || String(err));
     }
   });
@@ -168,7 +168,7 @@ export function bindSimBindings({
     log('Breakpoints cleared');
   });
 
-  listeners.on(dom.bpList, 'breakpoint-remove', (event) => {
+  listeners.on(dom.bpList, 'breakpoint-remove', (event: any) => {
     const name = event?.detail?.name;
     if (!name) {
       return;

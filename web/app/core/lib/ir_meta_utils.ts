@@ -1,4 +1,4 @@
-export function parseIrMeta(irJson) {
+export function parseIrMeta(irJson: any) {
   const ir = JSON.parse(irJson);
   const widths = new Map();
   const signalInfo = new Map();
@@ -25,7 +25,7 @@ export function parseIrMeta(irJson) {
     }
   }
 
-  const clocks = [];
+  const clocks: any[] = [];
   const processes = Array.isArray(ir.processes) ? ir.processes : [];
   for (const process of processes) {
     if (process?.clocked && typeof process.clock === 'string' && !clocks.includes(process.clock)) {
@@ -46,7 +46,7 @@ export function parseIrMeta(irJson) {
     }
   }
 
-  const rankClock = (name) => {
+  const rankClock = (name: any) => {
     if (/^(clk|clock)$/i.test(name)) {
       return 0;
     }
@@ -70,7 +70,7 @@ export function parseIrMeta(irJson) {
   return { ir, widths, signalInfo, names, clocks, clockCandidates };
 }
 
-export function currentIrSourceKey(irText) {
+export function currentIrSourceKey(irText: any) {
   const source = String(irText || '');
   if (!source) {
     return '';

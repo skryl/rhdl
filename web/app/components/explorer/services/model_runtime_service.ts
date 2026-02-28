@@ -1,13 +1,13 @@
 import { parseIrMeta, currentIrSourceKey } from '../../../core/lib/ir_meta_utils';
 import { buildComponentModel, nodeMatchesFilter } from '../lib/model_utils';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createExplorerModelRuntimeService requires function: ${name}`);
   }
 }
 
-function clearGraphState(components) {
+function clearGraphState(components: any) {
   components.graphFocusId = null;
   components.graphShowChildren = false;
   components.graphLastTap = null;
@@ -15,7 +15,7 @@ function clearGraphState(components) {
   components.graphLiveValues = new Map();
 }
 
-function clearModelState(components, sourceKey, parseError) {
+function clearModelState(components: any, sourceKey: any, parseError: any) {
   components.model = null;
   components.sourceKey = sourceKey;
   components.parseError = parseError;
@@ -23,7 +23,7 @@ function clearModelState(components, sourceKey, parseError) {
   clearGraphState(components);
 }
 
-function resetGraphActivity(components) {
+function resetGraphActivity(components: any) {
   components.graphLastTap = null;
   components.graphHighlightedSignal = null;
   components.graphLiveValues = new Map();
@@ -33,7 +33,7 @@ export function createExplorerModelRuntimeService({
   state,
   runtime,
   currentComponentSourceText
-} = {}) {
+}: any = {}) {
   if (!state || !runtime) {
     throw new Error('createExplorerModelRuntimeService requires state/runtime');
   }
@@ -75,7 +75,7 @@ export function createExplorerModelRuntimeService({
     return model.nodes.get(id) || model.nodes.get(model.rootId) || null;
   }
 
-  function setComponentGraphFocus(nodeId, showChildren = true) {
+  function setComponentGraphFocus(nodeId: any, showChildren = true) {
     const model = state.components.model;
     if (!model || !nodeId || !model.nodes.has(nodeId)) {
       return false;
@@ -114,7 +114,7 @@ export function createExplorerModelRuntimeService({
       resetGraphActivity(state.components);
       ensureComponentSelection();
       ensureComponentGraphFocus();
-    } catch (err) {
+    } catch (err: any) {
       clearModelState(
         state.components,
         sourceKey,
@@ -162,7 +162,7 @@ export function createExplorerModelRuntimeService({
     const filter = String(filterText).trim().toLowerCase();
     const visibilityCache = new Map();
 
-    function isVisible(nodeId) {
+    function isVisible(nodeId: any) {
       if (!filter) {
         return true;
       }
@@ -174,13 +174,13 @@ export function createExplorerModelRuntimeService({
         visibilityCache.set(nodeId, false);
         return false;
       }
-      const visible = nodeMatchesFilter(node, filter) || node.children.some((childId) => isVisible(childId));
+      const visible = nodeMatchesFilter(node, filter) || node.children.some((childId: any) => isVisible(childId));
       visibilityCache.set(nodeId, visible);
       return visible;
     }
 
-    const treeRows = [];
-    function appendNode(nodeId, depth) {
+    const treeRows: any[] = [];
+    function appendNode(nodeId: any, depth: any) {
       if (!isVisible(nodeId)) {
         return;
       }

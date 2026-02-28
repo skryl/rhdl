@@ -13,7 +13,7 @@ test('getBackendDef resolves known backends and falls back to interpreter', () =
 });
 
 test('backend defs expose wasm paths for each backend', () => {
-  for (const id of ['interpreter', 'jit', 'compiler', 'arcilator']) {
+  for (const id of ['interpreter', 'jit', 'compiler', 'arcilator'] as const) {
     const def = BACKEND_DEFS[id];
     assert.ok(def);
     assert.equal(typeof def.wasmPath, 'string');

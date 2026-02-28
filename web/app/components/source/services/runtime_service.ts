@@ -1,4 +1,4 @@
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createSourceRuntimeService requires function: ${name}`);
   }
@@ -11,7 +11,7 @@ export function createSourceRuntimeService({
   normalizeComponentSourceBundle,
   normalizeComponentSchematicBundle,
   destroyComponentGraph
-} = {}) {
+}: any = {}) {
   if (!dom || !state) {
     throw new Error('createSourceRuntimeService requires dom/state');
   }
@@ -35,7 +35,7 @@ export function createSourceRuntimeService({
     state.components.sourceBundleByModule = new Map();
   }
 
-  function setComponentSourceBundle(bundle) {
+  function setComponentSourceBundle(bundle: any) {
     const normalized = normalizeComponentSourceBundle(bundle);
     if (!normalized) {
       clearComponentSourceBundle();
@@ -51,7 +51,7 @@ export function createSourceRuntimeService({
     state.components.schematicBundleByPath = new Map();
   }
 
-  function setComponentSchematicBundle(bundle) {
+  function setComponentSchematicBundle(bundle: any) {
     const normalized = normalizeComponentSchematicBundle(bundle);
     if (!normalized) {
       clearComponentSchematicBundle();

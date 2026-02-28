@@ -7,19 +7,19 @@ const MIN_ZOOM_SCALE = 0.05;
 const MAX_ZOOM_SCALE = 8;
 const PAN_DRAG_THRESHOLD = 3;
 
-function clamp(value, min, max) {
+function clamp(value: any, min: any, max: any) {
   return Math.min(max, Math.max(min, value));
 }
 
-function isComponent(element) {
+function isComponent(element: any) {
   return element.type === 'component' || element.type === 'focus';
 }
 
-function isNetOrPin(element) {
+function isNetOrPin(element: any) {
   return !!(element.signalName || element.liveName) && !isComponent(element);
 }
 
-function readSignalHighlight(element) {
+function readSignalHighlight(element: any) {
   const signalName = String(element.signalName || '').trim();
   const liveName = String(element.liveName || '').trim();
   if (!signalName && !liveName) return null;
@@ -37,7 +37,7 @@ export function bindD3Interactions({
   now = () => Date.now(),
   doubleTapMs = DOUBLE_TAP_MS,
   viewport = null
-} = {}) {
+}: any = {}) {
   if (!canvas || !state || !model) {
     throw new Error('bindD3Interactions requires canvas, state, and model');
   }
@@ -51,11 +51,11 @@ export function bindD3Interactions({
       ? window
       : canvas;
 
-  let panState = null;
+  let panState: any = null;
   let suppressClick = false;
   const wheelListenerOptions = { passive: false };
 
-  function toScreenCoords(clientX, clientY) {
+  function toScreenCoords(clientX: any, clientY: any) {
     const rect = canvas.getBoundingClientRect();
     return {
       x: clientX - rect.left,
@@ -63,7 +63,7 @@ export function bindD3Interactions({
     };
   }
 
-  function toWorldCoords(clientX, clientY) {
+  function toWorldCoords(clientX: any, clientY: any) {
     const screen = toScreenCoords(clientX, clientY);
     const sx = screen.x;
     const sy = screen.y;
@@ -77,7 +77,7 @@ export function bindD3Interactions({
     return { x: sx, y: sy };
   }
 
-  function handleClick(evt) {
+  function handleClick(evt: any) {
     if (suppressClick) {
       suppressClick = false;
       return;
@@ -127,7 +127,7 @@ export function bindD3Interactions({
     }
   }
 
-  function handleWheel(evt) {
+  function handleWheel(evt: any) {
     if (!viewport) return;
     const prevScale = Number.isFinite(viewport.scale) ? viewport.scale : 1;
     const zoom = Math.exp(-Number(evt.deltaY || 0) * ZOOM_SENSITIVITY);
@@ -152,7 +152,7 @@ export function bindD3Interactions({
     renderNow();
   }
 
-  function handleMouseDown(evt) {
+  function handleMouseDown(evt: any) {
     if (!viewport) return;
     if (evt.button !== 0) return;
     const tx = Number.isFinite(viewport.x) ? viewport.x : 0;
@@ -166,7 +166,7 @@ export function bindD3Interactions({
     };
   }
 
-  function handleMouseMove(evt) {
+  function handleMouseMove(evt: any) {
     if (!panState || !viewport) return;
     const dx = (Number(evt.clientX) || 0) - panState.startX;
     const dy = (Number(evt.clientY) || 0) - panState.startY;
@@ -184,7 +184,7 @@ export function bindD3Interactions({
     renderNow();
   }
 
-  function handleMouseUp(evt) {
+  function handleMouseUp(evt: any) {
     if (!panState) return;
     if (panState.dragged) {
       suppressClick = true;

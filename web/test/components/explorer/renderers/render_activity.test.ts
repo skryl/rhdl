@@ -16,7 +16,7 @@ function makeRenderList() {
   };
 }
 
-const toBigInt = (v) => {
+const toBigInt = (v: any) => {
   if (v == null) return 0n;
   try { return BigInt(v); } catch { return 0n; }
 };
@@ -28,15 +28,15 @@ test('updateRenderActivity sets active when value is non-zero', () => {
 
   updateRenderActivity({
     renderList: rl,
-    signalLiveValueByName: (name) => values[name] ?? null,
+    signalLiveValueByName: (name: any) => (values as any)[name] ?? null,
     toBigInt,
     highlightedSignal: null,
     previousValues: prev
   });
 
-  assert.equal(rl.nets.find(n => n.id === 'n1').active, true, 'clk=1 -> active');
-  assert.equal(rl.nets.find(n => n.id === 'n2').active, false, 'data=0 -> not active');
-  assert.equal(rl.pins.find(p => p.id === 'p1').active, true, 'pin for clk -> active');
+  assert.equal(rl.nets.find(n => n.id === 'n1')!.active, true, 'clk=1 -> active');
+  assert.equal(rl.nets.find(n => n.id === 'n2')!.active, false, 'data=0 -> not active');
+  assert.equal(rl.pins.find(p => p.id === 'p1')!.active, true, 'pin for clk -> active');
 });
 
 test('updateRenderActivity sets toggled when value changes', () => {
@@ -46,14 +46,14 @@ test('updateRenderActivity sets toggled when value changes', () => {
 
   updateRenderActivity({
     renderList: rl,
-    signalLiveValueByName: (name) => values[name] ?? null,
+    signalLiveValueByName: (name: any) => (values as any)[name] ?? null,
     toBigInt,
     highlightedSignal: null,
     previousValues: prev
   });
 
-  assert.equal(rl.nets.find(n => n.id === 'n1').toggled, true, 'clk changed 0->1 -> toggled');
-  assert.equal(rl.nets.find(n => n.id === 'n2').toggled, false, 'data unchanged -> not toggled');
+  assert.equal(rl.nets.find(n => n.id === 'n1')!.toggled, true, 'clk changed 0->1 -> toggled');
+  assert.equal(rl.nets.find(n => n.id === 'n2')!.toggled, false, 'data unchanged -> not toggled');
 });
 
 test('updateRenderActivity sets selected when signal matches highlight', () => {
@@ -63,14 +63,14 @@ test('updateRenderActivity sets selected when signal matches highlight', () => {
 
   updateRenderActivity({
     renderList: rl,
-    signalLiveValueByName: (name) => values[name] ?? null,
+    signalLiveValueByName: (name: any) => (values as any)[name] ?? null,
     toBigInt,
     highlightedSignal: { signalName: null, liveName: 'top__clk' },
     previousValues: prev
   });
 
-  assert.equal(rl.nets.find(n => n.id === 'n1').selected, true, 'clk matches highlight');
-  assert.equal(rl.nets.find(n => n.id === 'n2').selected, false, 'data does not match');
+  assert.equal(rl.nets.find(n => n.id === 'n1')!.selected, true, 'clk matches highlight');
+  assert.equal(rl.nets.find(n => n.id === 'n2')!.selected, false, 'data does not match');
 });
 
 test('updateRenderActivity selected matches by signalName', () => {
@@ -85,8 +85,8 @@ test('updateRenderActivity selected matches by signalName', () => {
     previousValues: prev
   });
 
-  assert.equal(rl.nets.find(n => n.id === 'n2').selected, true);
-  assert.equal(rl.nets.find(n => n.id === 'n1').selected, false);
+  assert.equal(rl.nets.find(n => n.id === 'n2')!.selected, true);
+  assert.equal(rl.nets.find(n => n.id === 'n1')!.selected, false);
 });
 
 test('updateRenderActivity propagates state to wires via valueKey', () => {
@@ -96,13 +96,13 @@ test('updateRenderActivity propagates state to wires via valueKey', () => {
 
   updateRenderActivity({
     renderList: rl,
-    signalLiveValueByName: (name) => values[name] ?? null,
+    signalLiveValueByName: (name: any) => (values as any)[name] ?? null,
     toBigInt,
     highlightedSignal: { signalName: null, liveName: 'top__clk' },
     previousValues: prev
   });
 
-  const wire = rl.wires.find(w => w.id === 'w1');
+  const wire = rl.wires.find(w => w.id === 'w1')!;
   assert.equal(wire.active, true);
   assert.equal(wire.toggled, true);
   assert.equal(wire.selected, true);
@@ -115,7 +115,7 @@ test('updateRenderActivity returns nextValues map', () => {
 
   const next = updateRenderActivity({
     renderList: rl,
-    signalLiveValueByName: (name) => values[name] ?? null,
+    signalLiveValueByName: (name: any) => (values as any)[name] ?? null,
     toBigInt,
     highlightedSignal: null,
     previousValues: prev

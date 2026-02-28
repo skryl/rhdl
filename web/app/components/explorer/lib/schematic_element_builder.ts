@@ -1,4 +1,4 @@
-function componentCyIdForNode(nodeId) {
+function componentCyIdForNode(nodeId: any) {
   return `cmp:${String(nodeId || '')}`;
 }
 
@@ -11,13 +11,13 @@ export function createSchematicElementBuilder({
   findComponentSchematicEntry,
   summarizeExpr,
   ellipsizeText
-} = {}) {
+}: any = {}) {
   if (!state || !runtime) {
     throw new Error('createSchematicElementBuilder requires state/runtime');
   }
 
-  function createComponentSchematicElementsFromExport(model, focusNode, showChildren, schematicEntry) {
-    const elements = [];
+  function createComponentSchematicElementsFromExport(model: any, focusNode: any, showChildren: any, schematicEntry: any) {
+    const elements: any[] = [];
     if (!model || !focusNode || !schematicEntry || typeof schematicEntry !== 'object') {
       return elements;
     }
@@ -36,7 +36,7 @@ export function createSchematicElementBuilder({
       pathToNodeId.set(String(node.path || ''), node.id);
     }
 
-    const normalizeSignal = (name, width = 1, liveName = null) => {
+    const normalizeSignal = (name: any, width = 1, liveName = null) => {
       const signalName = String(name || '').trim();
       if (!signalName) {
         return null;
@@ -50,7 +50,7 @@ export function createSchematicElementBuilder({
       return ref;
     };
 
-    const pushNode = (id, data, classes = '') => {
+    const pushNode = (id: any, data: any, classes = '') => {
       if (!id || seenNodes.has(id)) {
         return;
       }
@@ -64,7 +64,7 @@ export function createSchematicElementBuilder({
       });
     };
 
-    const pushEdge = (source, target, data = {}, classes = '') => {
+    const pushEdge = (source: any, target: any, data: any = {}, classes = '') => {
       if (!source || !target || !seenNodes.has(source) || !seenNodes.has(target)) {
         return;
       }
@@ -350,8 +350,8 @@ export function createSchematicElementBuilder({
     return elements;
   }
 
-  function createComponentSchematicElements(model, focusNode, showChildren) {
-    const elements = [];
+  function createComponentSchematicElements(model: any, focusNode: any, showChildren: any) {
+    const elements: any[] = [];
     if (!model || !focusNode) {
       return elements;
     }
@@ -374,7 +374,7 @@ export function createSchematicElementBuilder({
     const netNodes = new Map();
     let edgeSeq = 0;
 
-    const pushNode = (id, data, classes = '') => {
+    const pushNode = (id: any, data: any, classes = '') => {
       if (!id || seenNodes.has(id)) {
         return;
       }
@@ -388,7 +388,7 @@ export function createSchematicElementBuilder({
       });
     };
 
-    const pushEdge = (source, target, data = {}, classes = '') => {
+    const pushEdge = (source: any, target: any, data: any = {}, classes = '') => {
       if (!source || !target) {
         return;
       }
@@ -411,7 +411,7 @@ export function createSchematicElementBuilder({
       });
     };
 
-    const ensureNet = (name, width = 1) => {
+    const ensureNet = (name: any, width = 1) => {
       const signalName = String(name || '').trim();
       if (!signalName) {
         return null;
@@ -433,7 +433,7 @@ export function createSchematicElementBuilder({
       return id;
     };
 
-    const addPortEdge = (fromId, toId, signalRef, direction, kind = 'port') => {
+    const addPortEdge = (fromId: any, toId: any, signalRef: any, direction: any, kind = 'port') => {
       if (!fromId || !toId || !signalRef) {
         return;
       }
@@ -533,7 +533,7 @@ export function createSchematicElementBuilder({
     }
 
     const memoryNodes = new Set();
-    const ensureMemoryNode = (name) => {
+    const ensureMemoryNode = (name: any) => {
       const memoryName = String(name || '').trim();
       if (!memoryName) {
         return null;

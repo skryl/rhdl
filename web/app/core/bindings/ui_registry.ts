@@ -1,5 +1,5 @@
-export function createUiBindingRegistry(runtime) {
-  function registerUiBinding(teardown) {
+export function createUiBindingRegistry(runtime: any) {
+  function registerUiBinding(teardown: any) {
     if (typeof teardown !== 'function') {
       return;
     }
@@ -18,7 +18,7 @@ export function createUiBindingRegistry(runtime) {
       const teardown = runtime.uiTeardowns.pop();
       try {
         teardown();
-      } catch (_err) {
+      } catch (_err: any) {
         // Ignore teardown errors; this is best-effort cleanup.
       }
     }

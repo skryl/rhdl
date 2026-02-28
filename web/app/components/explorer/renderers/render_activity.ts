@@ -7,7 +7,7 @@ export function updateRenderActivity({
   toBigInt,
   highlightedSignal,
   previousValues
-} = {}) {
+}: any = {}) {
   if (!renderList || typeof signalLiveValueByName !== 'function' || typeof toBigInt !== 'function') {
     return previousValues || new Map();
   }

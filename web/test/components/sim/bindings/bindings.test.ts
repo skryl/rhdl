@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 
 import { bindSimBindings } from '../../../../app/components/sim/bindings/bindings';
 
-function makeTarget(extra = {}) {
+function makeTarget(extra: any = {}) {
   return Object.assign(new EventTarget(), extra);
 }
 
 test('bindSimBindings starts run loop and supports teardown', () => {
-  const calls = [];
+  const calls: any[] = [];
   const dom = {
     initBtn: makeTarget(),
     resetBtn: makeTarget(),
@@ -44,7 +44,7 @@ test('bindSimBindings starts run loop and supports teardown', () => {
     dom,
     state,
     runtime,
-    scheduleAnimationFrame: (cb) => calls.push(['raf', cb]),
+    scheduleAnimationFrame: (cb: any) => calls.push(['raf', cb]),
     sim: {
       initializeSimulator: () => {},
       initializeTrace: () => {},
@@ -74,7 +74,7 @@ test('bindSimBindings starts run loop and supports teardown', () => {
       removeBreakpoint: () => {}
     },
     store: {
-      setRunningState: (value) => {
+      setRunningState: (value: any) => {
       state.running = value;
       calls.push(['setRunningState', value]);
     },
@@ -99,7 +99,7 @@ test('bindSimBindings starts run loop and supports teardown', () => {
 });
 
 test('bindSimBindings preserves current trace enabled state across reset', () => {
-  const calls = [];
+  const calls: any[] = [];
   const dom = {
     initBtn: makeTarget(),
     resetBtn: makeTarget(),
@@ -133,7 +133,7 @@ test('bindSimBindings preserves current trace enabled state across reset', () =>
     runtime,
     sim: {
       initializeSimulator: () => {},
-      initializeTrace: (options) => calls.push(['initializeTrace', options]),
+      initializeTrace: (options: any) => calls.push(['initializeTrace', options]),
       refreshStatus: () => {},
       step: () => {},
       runFrame: () => {},

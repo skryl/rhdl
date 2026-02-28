@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { createApple2AudioRuntimeService } from '../../../../app/components/apple2/services/audio_runtime_service';
 
 test('apple2 audio runtime service updates oscillator when speaker toggles are present', () => {
-  const freqCalls = [];
-  const gainCalls = [];
+  const freqCalls: any[] = [];
+  const gainCalls: any[] = [];
   const state = {
     apple2: {
       soundEnabled: true,
       audioCtx: { currentTime: 1.25 },
-      audioOsc: { frequency: { setTargetAtTime: (...args) => freqCalls.push(args) } },
-      audioGain: { gain: { setTargetAtTime: (...args) => gainCalls.push(args) } }
+      audioOsc: { frequency: { setTargetAtTime: (...args: any[]) => freqCalls.push(args) } },
+      audioGain: { gain: { setTargetAtTime: (...args: any[]) => gainCalls.push(args) } }
     }
   };
   const service = createApple2AudioRuntimeService({
@@ -26,7 +26,7 @@ test('apple2 audio runtime service updates oscillator when speaker toggles are p
 });
 
 test('apple2 audio runtime service disables sound when web audio is unavailable', async () => {
-  const toggles = [];
+  const toggles: any[] = [];
   const state = {
     apple2: {
       soundEnabled: false,
@@ -37,7 +37,7 @@ test('apple2 audio runtime service disables sound when web audio is unavailable'
   };
   const service = createApple2AudioRuntimeService({
     state,
-    setApple2SoundEnabledState: (enabled) => {
+    setApple2SoundEnabledState: (enabled: any) => {
       state.apple2.soundEnabled = !!enabled;
       toggles.push(!!enabled);
     },

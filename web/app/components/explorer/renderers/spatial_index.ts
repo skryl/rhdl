@@ -2,15 +2,15 @@
 // Uses simple array scan with priority ordering.
 // Priority: pins > nets > symbols (topmost visual layer wins).
 
-function contains(cx, cy, w, h, px, py) {
+function contains(cx: any, cy: any, w: any, h: any, px: any, py: any) {
   const halfW = w / 2;
   const halfH = h / 2;
   return px >= cx - halfW && px <= cx + halfW && py >= cy - halfH && py <= cy + halfH;
 }
 
-export function buildSpatialIndex(renderList) {
+export function buildSpatialIndex(renderList: any) {
   // Build entries sorted by priority: pins first, then nets, then symbols.
-  const entries = [];
+  const entries: any[] = [];
 
   for (const pin of renderList.pins) {
     entries.push({ priority: 0, element: pin });
@@ -22,7 +22,7 @@ export function buildSpatialIndex(renderList) {
     entries.push({ priority: 2, element: sym });
   }
 
-  function queryPoint(px, py) {
+  function queryPoint(px: any, py: any) {
     let bestHit = null;
     let bestPriority = Infinity;
 

@@ -1,4 +1,4 @@
-export function handleUiCommand({ cmd, tokens, context }) {
+export function handleUiCommand({ cmd, tokens, context }: any) {
   const { helpers } = context;
 
   if (cmd === 'set') {

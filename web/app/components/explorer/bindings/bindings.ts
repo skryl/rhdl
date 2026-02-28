@@ -6,7 +6,7 @@ export function bindComponentBindings({
   components,
   scheduleReduxUxSync,
   log
-}) {
+}: any) {
   const listeners = createListenerGroup();
 
   listeners.on(dom.componentTree, 'component-filter-change', () => {
@@ -48,7 +48,7 @@ export function bindComponentBindings({
     }
   });
 
-  listeners.on(dom.componentTree, 'component-select', (event) => {
+  listeners.on(dom.componentTree, 'component-select', (event: any) => {
     const nodeId = event?.detail?.nodeId;
     if (!nodeId) {
       return;
@@ -61,7 +61,7 @@ export function bindComponentBindings({
     }
   });
 
-  listeners.on(dom.irFileInput, 'change', async (event) => {
+  listeners.on(dom.irFileInput, 'change', async (event: any) => {
     const file = event?.target?.files?.[0];
     if (!file) {
       return;

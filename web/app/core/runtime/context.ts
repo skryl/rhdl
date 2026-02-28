@@ -1,4 +1,4 @@
-export function createRuntimeContext(createParser = null) {
+export function createRuntimeContext(createParser: any = null) {
   const parser = typeof createParser === 'function' ? createParser() : null;
   return {
     instance: null,

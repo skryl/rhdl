@@ -1,4 +1,4 @@
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createApple2MemoryController requires function: ${name}`);
   }
@@ -17,7 +17,7 @@ export function createApple2MemoryController({
   disassembleRiscvLinesWithMemory,
   setMemoryDumpStatus,
   addressSpace = 0x10000
-} = {}) {
+}: any = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('createApple2MemoryController requires dom/state/runtime');
   }
@@ -42,7 +42,7 @@ export function createApple2MemoryController({
     accessedByteExpiry.clear();
   }
 
-  function pruneExpiredHighlights(nowMs) {
+  function pruneExpiredHighlights(nowMs: any) {
     for (const [addr, expiryMs] of changedByteExpiryMs.entries()) {
       if (expiryMs <= nowMs) {
         changedByteExpiryMs.delete(addr);
@@ -95,7 +95,7 @@ export function createApple2MemoryController({
     return null;
   }
 
-  function formatAddress(value, addrSpace = currentAddressSpace()) {
+  function formatAddress(value: any, addrSpace = currentAddressSpace()) {
     const parsed = Number(value);
     const width = addrSpace > 0xFFFF ? 8 : 4;
     if (!Number.isFinite(parsed)) {
@@ -105,7 +105,7 @@ export function createApple2MemoryController({
     return (bounded >>> 0).toString(16).toUpperCase().padStart(width, '0');
   }
 
-  function readApple2MappedMemory(start, length) {
+  function readApple2MappedMemory(start: any, length: any) {
     if (!runtime.sim || !isApple2UiEnabled()) {
       return new Uint8Array(0);
     }
@@ -259,7 +259,7 @@ export function createApple2MemoryController({
     const disasmLineCount = Math.max(1, Math.ceil(length / BYTES_PER_MEMORY_ROW));
     const disasmStart = start;
     const runnerKind = currentRunnerKind();
-    const disasmOpts = { highlightPc: pc, addressSpace: addrSpace };
+    const disasmOpts = { highlightPc: pc, addressSpace: addrSpace } as any;
     if (state.memory.showSource && state.apple2?.sourceMap) {
       disasmOpts.sourceMap = state.apple2.sourceMap;
     }
@@ -270,7 +270,7 @@ export function createApple2MemoryController({
         disasmStart, disasmLineCount, readApple2MappedMemory,
         { ...disasmOpts, structured: true }
       );
-      disasmText = rawLines.map(l => l.text ?? l).join('\n');
+      disasmText = rawLines.map((l: any) => l.text ?? l).join('\n');
       if (rawLines.length > 0 && typeof rawLines[0] === 'object') {
         disasmLines = rawLines;
       }

@@ -17,7 +17,7 @@ test('schematic webgl renderer emits wire draws with line divisor resets', { tim
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
@@ -31,7 +31,7 @@ test('schematic webgl renderer emits wire draws with line divisor resets', { tim
   let browser;
   try {
     browser = await chromium.launch({ headless: true, args: WEBGL_LAUNCH_ARGS });
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }
@@ -40,8 +40,8 @@ test('schematic webgl renderer emits wire draws with line divisor resets', { tim
   });
 
   const page = await browser.newPage({ viewport: { width: 1920, height: 1600 } });
-  const pageErrors = [];
-  const consoleErrors = [];
+  const pageErrors: any[] = [];
+  const consoleErrors: any[] = [];
 
   await page.addInitScript(() => {
     const probe = {
@@ -49,15 +49,15 @@ test('schematic webgl renderer emits wire draws with line divisor resets', { tim
       lineDrawCalls: 0,
       lineDivisorZeroCalls: 0
     };
-    window.__RHDL_WEBGL_WIRE_PROBE__ = probe;
+    (window as any).__RHDL_WEBGL_WIRE_PROBE__ = probe;
 
     const proto = globalThis.HTMLCanvasElement?.prototype;
     if (!proto || typeof proto.getContext !== 'function') {
       return;
     }
     const originalGetContext = proto.getContext;
-    proto.getContext = function patchedGetContext(type, ...args) {
-      const ctx = originalGetContext.call(this, type, ...args);
+    (proto as any).getContext = function patchedGetContext(type: any, ...args: any[]) {
+      const ctx: any = originalGetContext.call(this, type, ...args);
       if (type !== 'webgl2' || !ctx || ctx.__rhdlWireProbeWrapped) {
         return ctx;
       }
@@ -68,7 +68,7 @@ test('schematic webgl renderer emits wire draws with line divisor resets', { tim
         ? ctx.vertexAttribDivisor.bind(ctx)
         : null;
       if (originalDivisor) {
-        ctx.vertexAttribDivisor = function patchedDivisor(index, divisor) {
+        ctx.vertexAttribDivisor = function patchedDivisor(index: any, divisor: any) {
           if (index >= 0 && index <= 4 && divisor === 0) {
             probe.lineDivisorZeroCalls += 1;
           }
@@ -80,7 +80,7 @@ test('schematic webgl renderer emits wire draws with line divisor resets', { tim
         ? ctx.drawArrays.bind(ctx)
         : null;
       if (originalDrawArrays) {
-        ctx.drawArrays = function patchedDrawArrays(mode, first, count) {
+        ctx.drawArrays = function patchedDrawArrays(mode: any, first: any, count: any) {
           if (mode === ctx.TRIANGLE_STRIP && count === 4) {
             probe.lineDrawCalls += 1;
           }
@@ -126,7 +126,7 @@ test('schematic webgl renderer emits wire draws with line divisor resets', { tim
   }, null, { timeout: 120000 });
   await page.waitForSelector('#componentVisual canvas', { state: 'attached', timeout: 120000 });
   await page.waitForFunction(() => {
-    const state = window.__RHDL_UX_STATE__;
+    const state = (window as any).__RHDL_UX_STATE__;
     const graph = state?.components?.graph;
     const renderList = graph?.renderList;
     if (!renderList || !Array.isArray(renderList.wires) || renderList.wires.length === 0) {
@@ -139,10 +139,10 @@ test('schematic webgl renderer emits wire draws with line divisor resets', { tim
   await page.click('#componentGraphZoomOutBtn');
 
   const probeState = await page.evaluate(() => {
-    const state = window.__RHDL_UX_STATE__;
+    const state = (window as any).__RHDL_UX_STATE__;
     const graph = state?.components?.graph;
     const wireCount = Array.isArray(graph?.renderList?.wires) ? graph.renderList.wires.length : 0;
-    const probe = window.__RHDL_WEBGL_WIRE_PROBE__ || {};
+    const probe = (window as any).__RHDL_WEBGL_WIRE_PROBE__ || {};
     return {
       backend: state?.components?.graphRenderBackend || null,
       wireCount,

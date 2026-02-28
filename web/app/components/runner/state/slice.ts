@@ -3,7 +3,7 @@ export const runnerActionTypes = {
 };
 
 export const runnerActions = {
-  setRunnerPreset: (runnerPreset) => ({ type: runnerActionTypes.SET_RUNNER_PRESET, payload: runnerPreset })
+  setRunnerPreset: (runnerPreset: any) => ({ type: runnerActionTypes.SET_RUNNER_PRESET, payload: runnerPreset })
 };
 
 export function createRunnerStateSlice() {
@@ -12,7 +12,7 @@ export function createRunnerStateSlice() {
   };
 }
 
-export function reduceRunnerState(state, action = {}) {
+export function reduceRunnerState(state: any, action: any = {}) {
   switch (action.type) {
     case runnerActionTypes.SET_RUNNER_PRESET:
       state.runnerPreset = String(action.payload || state.runnerPreset || '');

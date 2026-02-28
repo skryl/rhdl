@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 
 import { isComponentPanel } from '../../../../app/components/shell/bindings/collapsible_bindings';
 
-function fakePanel(classes) {
+function fakePanel(classes: any) {
   const set = new Set(classes || []);
   return {
     classList: {
-      contains(name) {
+      contains(name: any) {
         return set.has(name);
       }
     }

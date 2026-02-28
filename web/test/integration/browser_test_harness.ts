@@ -16,12 +16,12 @@ const MIME = {
   '.map': 'application/json; charset=utf-8'
 };
 
-function isPathInside(parent, target) {
+function isPathInside(parent: any, target: any) {
   const rel = path.relative(parent, target);
   return rel && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
-export async function createStaticServer(rootDir) {
+export async function createStaticServer(rootDir: any) {
   const server = createServer(async (req, res) => {
     res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
     res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
@@ -39,20 +39,20 @@ export async function createStaticServer(rootDir) {
 
       const body = await readFile(absPath);
       const ext = path.extname(absPath).toLowerCase();
-      res.setHeader('Content-Type', MIME[ext] || 'application/octet-stream');
+      res.setHeader('Content-Type', (MIME as Record<string, string>)[ext] || 'application/octet-stream');
       res.writeHead(200);
       res.end(body);
-    } catch (_err) {
+    } catch (_err: any) {
       res.writeHead(404);
       res.end('Not found');
     }
   });
 
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
   return server;
 }
 
-export function serverBaseUrl(server) {
+export function serverBaseUrl(server: any) {
   const addr = server.address();
   if (!addr || typeof addr === 'string') {
     throw new Error('Unable to determine static server address');
@@ -60,6 +60,6 @@ export function serverBaseUrl(server) {
   return `http://127.0.0.1:${addr.port}`;
 }
 
-export function resolveWebRoot(metaUrl) {
+export function resolveWebRoot(metaUrl: any) {
   return path.resolve(path.dirname(fileURLToPath(metaUrl)), '..', '..');
 }

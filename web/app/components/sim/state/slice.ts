@@ -6,10 +6,10 @@ export const simActionTypes = {
 };
 
 export const simActions = {
-  setBackend: (backend) => ({ type: simActionTypes.SET_BACKEND, payload: backend }),
-  setRunning: (running) => ({ type: simActionTypes.SET_RUNNING, payload: !!running }),
-  setCycle: (cycle) => ({ type: simActionTypes.SET_CYCLE, payload: Number(cycle) || 0 }),
-  setUiCyclesPending: (value) => ({ type: simActionTypes.SET_UI_CYCLES_PENDING, payload: Number(value) || 0 })
+  setBackend: (backend: any) => ({ type: simActionTypes.SET_BACKEND, payload: backend }),
+  setRunning: (running: any) => ({ type: simActionTypes.SET_RUNNING, payload: !!running }),
+  setCycle: (cycle: any) => ({ type: simActionTypes.SET_CYCLE, payload: Number(cycle) || 0 }),
+  setUiCyclesPending: (value: any) => ({ type: simActionTypes.SET_UI_CYCLES_PENDING, payload: Number(value) || 0 })
 };
 
 export function createSimStateSlice() {
@@ -21,7 +21,7 @@ export function createSimStateSlice() {
   };
 }
 
-export function reduceSimState(state, action = {}) {
+export function reduceSimState(state: any, action: any = {}) {
   switch (action.type) {
     case simActionTypes.SET_BACKEND:
       state.backend = String(action.payload || state.backend || '');

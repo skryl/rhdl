@@ -1,4 +1,4 @@
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createStartupBindingRegistrationService requires function: ${name}`);
   }
@@ -14,7 +14,7 @@ export function createStartupBindingRegistrationService({
   util,
   env,
   log
-} = {}) {
+}: any = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('createStartupBindingRegistrationService requires dom/state/runtime');
   }
@@ -202,7 +202,7 @@ export function createStartupBindingRegistrationService({
         dom,
         state,
         runtime,
-        scheduleAnimationFrame: (cb) => requestAnimationFrameImpl(cb),
+        scheduleAnimationFrame: (cb: any) => requestAnimationFrameImpl(cb),
         sim,
         apple2,
         components,

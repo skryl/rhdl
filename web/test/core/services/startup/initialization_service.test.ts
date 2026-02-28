@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStartupInitializationService } from '../../../../app/core/services/startup_initialization_service';
 
-function createHarness(overrides = {}) {
-  const calls = [];
+function createHarness(overrides: any = {}) {
+  const calls: any[] = [];
   const state = { backend: 'compiler', runnerPreset: 'apple2' };
   const dom = {
     backendSelect: { value: 'compiler' },
@@ -12,18 +12,18 @@ function createHarness(overrides = {}) {
     terminalOutput: { textContent: '' }
   };
   const shell = {
-    setSidebarCollapsed: (value) => calls.push(['shell.setSidebarCollapsed', value]),
-    setTerminalOpen: (value, opts) => calls.push(['shell.setTerminalOpen', value, opts?.persist]),
-    applyTheme: (value, opts) => calls.push(['shell.applyTheme', value, opts?.persist]),
-    setActiveTab: (value) => calls.push(['shell.setActiveTab', value])
+    setSidebarCollapsed: (value: any) => calls.push(['shell.setSidebarCollapsed', value]),
+    setTerminalOpen: (value: any, opts: any) => calls.push(['shell.setTerminalOpen', value, opts?.persist]),
+    applyTheme: (value: any, opts: any) => calls.push(['shell.applyTheme', value, opts?.persist]),
+    setActiveTab: (value: any) => calls.push(['shell.setActiveTab', value])
   };
   const runner = {
-    ensureBackendInstance: async (value) => calls.push(['runner.ensureBackendInstance', value]),
+    ensureBackendInstance: async (value: any) => calls.push(['runner.ensureBackendInstance', value]),
     updateIrSourceVisibility: () => calls.push(['runner.updateIrSourceVisibility']),
     currentPreset: () => ({ id: 'apple2' }),
-    loadPreset: async (options) => calls.push(['runner.loadPreset', options?.presetOverride?.id || null]),
+    loadPreset: async (options: any) => calls.push(['runner.loadPreset', options?.presetOverride?.id || null]),
     getActionsController: () => ({
-      preloadStartPreset: async (preset) => calls.push(['runner.preloadStartPreset', preset.id])
+      preloadStartPreset: async (preset: any) => calls.push(['runner.preloadStartPreset', preset.id])
     })
   };
   const sim = {
@@ -36,12 +36,12 @@ function createHarness(overrides = {}) {
     refreshMemoryView: () => calls.push(['apple2.refreshMemoryView'])
   };
   const terminal = {
-    writeLine: (message) => calls.push(['terminal.writeLine', message])
+    writeLine: (message: any) => calls.push(['terminal.writeLine', message])
   };
-  const storeCalls = [];
+  const storeCalls: any[] = [];
   const store = {
-    setBackendState: (value) => storeCalls.push(['setBackendState', value]),
-    setRunnerPresetState: (value) => storeCalls.push(['setRunnerPresetState', value])
+    setBackendState: (value: any) => storeCalls.push(['setBackendState', value]),
+    setRunnerPresetState: (value: any) => storeCalls.push(['setRunnerPresetState', value])
   };
 
   const service = createStartupInitializationService({
@@ -49,8 +49,8 @@ function createHarness(overrides = {}) {
     state,
     store,
     util: {
-      getBackendDef: (id) => ({ id }),
-      normalizeTheme: (value) => value
+      getBackendDef: (id: any) => ({ id }),
+      normalizeTheme: (value: any) => value
     },
     keys: {
       SIDEBAR_COLLAPSED_KEY: 'sidebar',
@@ -59,7 +59,7 @@ function createHarness(overrides = {}) {
     },
     env: {
       localStorageRef: {
-        getItem(key) {
+        getItem(key: any) {
           if (key === 'sidebar') return '1';
           if (key === 'terminal') return '1';
           if (key === 'theme') return 'original';
@@ -117,7 +117,7 @@ test('startup initialization service auto-loads preset when configured', async (
 test('startup initialization service hides unavailable backends from selector', async () => {
   const { service, calls, dom } = createHarness({
     runner: {
-      ensureBackendInstance: async (value) => {
+      ensureBackendInstance: async (value: any) => {
         calls.push(['runner.ensureBackendInstance', value]);
         if (value === 'jit') {
           throw new Error('jit unavailable');
@@ -127,7 +127,7 @@ test('startup initialization service hides unavailable backends from selector', 
   });
   await service.initialize();
 
-  assert.match(String(dom.backendSelect.innerHTML || ''), /value="interpreter"/);
-  assert.match(String(dom.backendSelect.innerHTML || ''), /value="compiler"/);
-  assert.doesNotMatch(String(dom.backendSelect.innerHTML || ''), /value="jit"/);
+  assert.match(String((dom.backendSelect as any).innerHTML || ''), /value="interpreter"/);
+  assert.match(String((dom.backendSelect as any).innerHTML || ''), /value="compiler"/);
+  assert.doesNotMatch(String((dom.backendSelect as any).innerHTML || ''), /value="jit"/);
 });

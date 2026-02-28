@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createApple2UiStateService } from '../../../../app/components/apple2/services/ui_state_service';
 
 test('apple2 ui state service updates toggles and status fields', () => {
-  const calls = [];
+  const calls: any[] = [];
   const dom = {
     toggleHires: { checked: false, disabled: true },
     toggleColor: { checked: false, disabled: true },
@@ -26,8 +26,8 @@ test('apple2 ui state service updates toggles and status fields', () => {
     dom,
     state,
     runtime,
-    parsePcLiteral: (value) => Number.parseInt(String(value).replace(/^0x/i, ''), 16),
-    hexWord: (value) => Number(value).toString(16).toUpperCase().padStart(4, '0'),
+    parsePcLiteral: (value: any) => Number.parseInt(String(value).replace(/^0x/i, ''), 16),
+    hexWord: (value: any) => Number(value).toString(16).toUpperCase().padStart(4, '0'),
     refreshApple2Screen: () => calls.push('screen'),
     refreshApple2Debug: () => calls.push('debug'),
     refreshMemoryView: () => calls.push('memory'),

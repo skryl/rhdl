@@ -6,7 +6,7 @@ import { reduceMemoryState } from '../../components/memory/state/slice';
 import { reduceApple2State } from '../../components/apple2/state/slice';
 import { reduceWatchState } from '../../components/watch/state/slice';
 
-export function reduceState(state, action = {}) {
+export function reduceState(state: any, action: any = {}) {
   switch (action.type) {
     case actionTypes.TOUCH:
       state.__lastReduxMeta = action.payload || null;

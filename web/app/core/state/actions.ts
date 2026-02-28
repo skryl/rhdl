@@ -14,5 +14,5 @@ export const actions = {
   ...apple2Actions,
   ...watchActions,
   touch: (meta = null) => ({ type: actionTypes.TOUCH, payload: meta }),
-  mutate: (mutator) => ({ type: actionTypes.MUTATE, payload: mutator })
+  mutate: (mutator: any) => ({ type: actionTypes.MUTATE, payload: mutator })
 };

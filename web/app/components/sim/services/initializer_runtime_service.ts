@@ -9,7 +9,7 @@ const RISCV_PHYSTOP_IMM20_MODERATE = 0x84000;
 const RISCV_PHYSTOP_IMM20_AGGRESSIVE = 0x80200;
 const DEFAULT_TRANSFER_CHUNK_BYTES = 128 * 1024;
 
-function didCallSucceed(result) {
+function didCallSucceed(result: any) {
   return result !== false;
 }
 
@@ -19,7 +19,7 @@ async function transferBytesChunked({
   chunkBytes = DEFAULT_TRANSFER_CHUNK_BYTES,
   writeChunk,
   yieldControl = null
-} = {}) {
+}: any = {}) {
   if (!(bytes instanceof Uint8Array) || bytes.length === 0 || typeof writeChunk !== 'function') {
     return false;
   }
@@ -48,14 +48,14 @@ async function loadBytesIntoMainMemory({
   supportsGenericMemoryApi = false,
   transferChunkBytes = DEFAULT_TRANSFER_CHUNK_BYTES,
   yieldControl = null
-} = {}) {
+}: any = {}) {
   if (supportsRunnerApi && typeof runtime?.sim?.runner_load_memory === 'function') {
     return transferBytesChunked({
       bytes,
       offset,
       chunkBytes: transferChunkBytes,
       yieldControl,
-      writeChunk: (chunk, chunkOffset) => runtime.sim.runner_load_memory(chunk, chunkOffset, { isRom })
+      writeChunk: (chunk: any, chunkOffset: any) => runtime.sim.runner_load_memory(chunk, chunkOffset, { isRom })
     });
   }
   if (supportsGenericMemoryApi && typeof runtime?.sim?.memory_load === 'function') {
@@ -64,7 +64,7 @@ async function loadBytesIntoMainMemory({
       offset,
       chunkBytes: transferChunkBytes,
       yieldControl,
-      writeChunk: (chunk, chunkOffset) => runtime.sim.memory_load(chunk, chunkOffset, { isRom })
+      writeChunk: (chunk: any, chunkOffset: any) => runtime.sim.memory_load(chunk, chunkOffset, { isRom })
     });
   }
   return false;
@@ -78,14 +78,14 @@ async function loadBytesIntoRom({
   supportsGenericMemoryApi = false,
   transferChunkBytes = DEFAULT_TRANSFER_CHUNK_BYTES,
   yieldControl = null
-} = {}) {
+}: any = {}) {
   if (supportsRunnerApi && typeof runtime?.sim?.runner_load_rom === 'function') {
     return transferBytesChunked({
       bytes,
       offset,
       chunkBytes: transferChunkBytes,
       yieldControl,
-      writeChunk: (chunk, chunkOffset) => runtime.sim.runner_load_rom(chunk, chunkOffset)
+      writeChunk: (chunk: any, chunkOffset: any) => runtime.sim.runner_load_rom(chunk, chunkOffset)
     });
   }
   return loadBytesIntoMainMemory({
@@ -104,7 +104,7 @@ async function loadBytesIntoBootRom({
   runtime,
   bytes,
   supportsRunnerApi = false
-} = {}) {
+}: any = {}) {
   if (supportsRunnerApi && typeof runtime?.sim?.runner_load_boot_rom === 'function') {
     return didCallSucceed(runtime.sim.runner_load_boot_rom(bytes));
   }
@@ -118,20 +118,20 @@ async function loadBytesIntoDisk({
   supportsRunnerApi = false,
   transferChunkBytes = DEFAULT_TRANSFER_CHUNK_BYTES,
   yieldControl = null
-} = {}) {
+}: any = {}) {
   if (supportsRunnerApi && typeof runtime?.sim?.runner_riscv_load_disk === 'function') {
     return transferBytesChunked({
       bytes,
       offset,
       chunkBytes: transferChunkBytes,
       yieldControl,
-      writeChunk: (chunk, chunkOffset) => runtime.sim.runner_riscv_load_disk(chunk, chunkOffset)
+      writeChunk: (chunk: any, chunkOffset: any) => runtime.sim.runner_riscv_load_disk(chunk, chunkOffset)
     });
   }
   return false;
 }
 
-function parseNonNegativeInt(value, fallback = 0) {
+function parseNonNegativeInt(value: any, fallback = 0) {
   const parsed = Number.parseInt(String(value ?? ''), 0);
   if (!Number.isFinite(parsed) || parsed < 0) {
     return fallback;
@@ -139,7 +139,7 @@ function parseNonNegativeInt(value, fallback = 0) {
   return parsed >>> 0;
 }
 
-function parseOptionalPc(value) {
+function parseOptionalPc(value: any) {
   if (value == null || value === '') {
     return null;
   }
@@ -150,7 +150,7 @@ function parseOptionalPc(value) {
   return parsed >>> 0;
 }
 
-function normalizeDefaultBinSpace(value) {
+function normalizeDefaultBinSpace(value: any) {
   const token = String(value || 'main').trim().toLowerCase();
   if (token === 'boot' || token === 'bootrom' || token === 'boot_rom') {
     return 'boot_rom';
@@ -161,7 +161,7 @@ function normalizeDefaultBinSpace(value) {
   return 'main';
 }
 
-function normalizeDefaultAssetKind(value) {
+function normalizeDefaultAssetKind(value: any) {
   const token = String(value || 'main').trim().toLowerCase();
   if (token === 'disk') {
     return 'disk';
@@ -169,7 +169,7 @@ function normalizeDefaultAssetKind(value) {
   return 'main';
 }
 
-function normalizeRiscvFastBootMode(value) {
+function normalizeRiscvFastBootMode(value: any) {
   if (value === false || value == null) {
     return null;
   }
@@ -187,7 +187,7 @@ function normalizeRiscvFastBootMode(value) {
   return null;
 }
 
-function riscvFastBootPhystopImm20(mode) {
+function riscvFastBootPhystopImm20(mode: any) {
   if (mode === 'aggressive') {
     return RISCV_PHYSTOP_IMM20_AGGRESSIVE;
   }
@@ -197,7 +197,7 @@ function riscvFastBootPhystopImm20(mode) {
   return null;
 }
 
-function resolveDefaultBinConfig(preset = {}) {
+function resolveDefaultBinConfig(preset: any = {}) {
   const raw = preset?.defaultBin;
   if (!raw || typeof raw !== 'object') {
     return null;
@@ -218,7 +218,7 @@ function resolveDefaultBinConfig(preset = {}) {
   };
 }
 
-function resolveDefaultDiskConfig(preset = {}) {
+function resolveDefaultDiskConfig(preset: any = {}) {
   const raw = preset?.defaultDisk;
   if (!raw || typeof raw !== 'object') {
     return null;
@@ -236,7 +236,7 @@ function resolveDefaultDiskConfig(preset = {}) {
   };
 }
 
-function resolveDefaultAssetsConfig(preset = {}) {
+function resolveDefaultAssetsConfig(preset: any = {}) {
   const raw = preset?.defaultAssets;
   if (!Array.isArray(raw) || raw.length === 0) {
     return [];
@@ -266,7 +266,7 @@ function resolveDefaultAssetsConfig(preset = {}) {
   return out;
 }
 
-function applyRiscvFastBootPhystopPatch(bytes, targetImm20) {
+function applyRiscvFastBootPhystopPatch(bytes: any, targetImm20: any) {
   if (!(bytes instanceof Uint8Array) || bytes.length < 4) {
     return 0;
   }
@@ -311,7 +311,7 @@ async function loadRunnerRomAsset({
   yieldControl = null,
   fetchImpl,
   log
-} = {}) {
+}: any = {}) {
   if (!ioConfig?.rom?.path) {
     return false;
   }
@@ -340,7 +340,7 @@ async function loadRunnerRomAsset({
       log(`Runner ROM load failed: ${ioConfig.rom.path}`);
     }
     return ok;
-  } catch (err) {
+  } catch (err: any) {
     log(`Failed to load runner ROM: ${err.message || err}`);
   }
 
@@ -356,7 +356,7 @@ async function loadDefaultBinAsset({
   yieldControl = null,
   fetchImpl,
   log
-} = {}) {
+}: any = {}) {
   if (!defaultBin?.path) {
     return false;
   }
@@ -403,7 +403,7 @@ async function loadDefaultBinAsset({
         const phystopImm20 = riscvFastBootPhystopImm20(defaultBin.fastBootMode);
         const patches = applyRiscvFastBootPhystopPatch(bytes, phystopImm20);
         if (patches > 0) {
-          const phystop = ((phystopImm20 << 12) >>> 0).toString(16).toUpperCase();
+          const phystop = ((phystopImm20! << 12) >>> 0).toString(16).toUpperCase();
           log(`Applied RISC-V ${defaultBin.fastBootMode} fast-boot PHYSTOP patch (${patches} instruction${patches === 1 ? '' : 's'}, PHYSTOP=0x${phystop})`);
         }
       }
@@ -469,7 +469,7 @@ async function loadDefaultBinAsset({
 
     log(`Loaded default bin (${defaultBin.space}) @ 0x${loadOffset.toString(16)}: ${defaultBin.path}`);
     return true;
-  } catch (err) {
+  } catch (err: any) {
     log(`Failed to load default bin: ${err.message || err}`);
     return false;
   }
@@ -483,7 +483,7 @@ async function loadDefaultDiskAsset({
   yieldControl = null,
   fetchImpl,
   log
-} = {}) {
+}: any = {}) {
   if (!defaultDisk?.path) {
     return false;
   }
@@ -515,7 +515,7 @@ async function loadDefaultDiskAsset({
 
     log(`Loaded default disk @ 0x${defaultDisk.offset.toString(16)}: ${defaultDisk.path}`);
     return true;
-  } catch (err) {
+  } catch (err: any) {
     log(`Failed to load default disk: ${err.message || err}`);
     return false;
   }
@@ -530,7 +530,7 @@ async function loadDefaultAssets({
   yieldControl = null,
   fetchImpl,
   log
-} = {}) {
+}: any = {}) {
   if (!Array.isArray(defaultAssets) || defaultAssets.length === 0) {
     return false;
   }
@@ -614,7 +614,7 @@ async function loadDefaultAssets({
 
       log(`Loaded default asset (${asset.kind}) @ 0x${asset.offset.toString(16)}: ${asset.path}`);
       anyLoaded = true;
-    } catch (err) {
+    } catch (err: any) {
       log(`Failed to load default asset: ${err.message || err}`);
     }
     if (typeof yieldControl === 'function') {
@@ -625,7 +625,7 @@ async function loadDefaultAssets({
   return anyLoaded;
 }
 
-function readMos6502ResetVector(runtime) {
+function readMos6502ResetVector(runtime: any) {
   if (!runtime?.sim || typeof runtime.sim.runner_read_memory !== 'function') {
     return null;
   }
@@ -636,7 +636,7 @@ function readMos6502ResetVector(runtime) {
   return ((hi << 8) | lo) & U16_MASK;
 }
 
-function readMos6502Byte(runtime, addr) {
+function readMos6502Byte(runtime: any, addr: any) {
   if (!runtime?.sim || typeof runtime.sim.runner_read_memory !== 'function') {
     return 0;
   }
@@ -644,7 +644,7 @@ function readMos6502Byte(runtime, addr) {
   return bytes instanceof Uint8Array && bytes.length > 0 ? (bytes[0] & 0xFF) : 0;
 }
 
-function pokeSignalIfPresent(runtime, name, value) {
+function pokeSignalIfPresent(runtime: any, name: any, value: any) {
   if (!runtime?.sim || typeof runtime.sim.has_signal !== 'function' || typeof runtime.sim.poke !== 'function') {
     return;
   }
@@ -653,7 +653,7 @@ function pokeSignalIfPresent(runtime, name, value) {
   }
 }
 
-function applyRiscvStartPcFallback(runtime, startPc, log = () => {}) {
+function applyRiscvStartPcFallback(runtime: any, startPc: any, log: any = () => {}) {
   if (!runtime?.sim) {
     return false;
   }
@@ -686,7 +686,7 @@ function applyRiscvStartPcFallback(runtime, startPc, log = () => {}) {
   return true;
 }
 
-function readRiscvProgramCounter(runtime) {
+function readRiscvProgramCounter(runtime: any) {
   if (!runtime?.sim || typeof runtime.sim.has_signal !== 'function' || typeof runtime.sim.peek !== 'function') {
     return null;
   }
@@ -703,7 +703,7 @@ function readRiscvProgramCounter(runtime) {
   return null;
 }
 
-function riscvStartPcNeedsRepair(runtime, startPc) {
+function riscvStartPcNeedsRepair(runtime: any, startPc: any) {
   if (!runtime?.sim || typeof runtime.sim.runner_kind !== 'function') {
     return false;
   }
@@ -724,7 +724,7 @@ function riscvStartPcNeedsRepair(runtime, startPc) {
   return (expected >>> 24) !== (observed >>> 24);
 }
 
-function runBootstrapCycles(runtime, count) {
+function runBootstrapCycles(runtime: any, count: any) {
   const cycles = Math.max(0, Number.parseInt(count, 10) || 0);
   if (cycles <= 0 || !runtime?.sim) {
     return;
@@ -742,7 +742,7 @@ function runBootstrapCycles(runtime, count) {
   }
 }
 
-async function bootstrapMos6502Runner(runtime, log = () => {}) {
+async function bootstrapMos6502Runner(runtime: any, log: any = () => {}) {
   if (!runtime?.sim || typeof runtime.sim.runner_kind !== 'function') {
     return;
   }
@@ -794,13 +794,13 @@ async function bootstrapMos6502Runner(runtime, log = () => {}) {
 }
 
 export function resolveInitializationContext({
-  options = {},
+  options = {} as any,
   dom,
   state,
   getRunnerPreset,
   parseIrMeta,
-  log = () => {}
-} = {}) {
+  log = (() => {}) as any
+}: any = {}) {
   const simJson = String(options.simJson ?? dom.irJson?.value ?? '').trim();
   if (!simJson) {
     return null;
@@ -818,7 +818,7 @@ export function resolveInitializationContext({
   if (!explorerMeta && explorerSource && explorerSource !== simJson) {
     try {
       explorerMeta = parseIrMeta(explorerSource);
-    } catch (err) {
+    } catch (err: any) {
       log(`Explorer IR parse failed, using simulation IR: ${err.message || err}`);
     }
   }
@@ -854,7 +854,7 @@ export function resetSimulatorSession({
   updateApple2SpeakerAudio,
   setMemoryDumpStatus,
   setMemoryResetVectorInput
-} = {}) {
+}: any = {}) {
   if (runtime.sim) {
     runtime.sim.destroy();
   }
@@ -891,7 +891,7 @@ export function seedDefaultWatchSignals({
   simMeta,
   addWatchSignal,
   selectedClock
-} = {}) {
+}: any = {}) {
   const outputs = runtime.sim.output_names();
   for (const name of outputs.slice(0, 4)) {
     addWatchSignal(name);
@@ -910,7 +910,7 @@ async function loadDefaultSrcmapAsset({
   preset,
   fetchImpl,
   log
-} = {}) {
+}: any = {}) {
   const raw = preset?.defaultSrcmap;
   if (!raw || typeof raw !== 'object') {
     return;
@@ -934,7 +934,7 @@ async function loadDefaultSrcmapAsset({
     } else {
       log(`Source map format not recognized: ${path}`);
     }
-  } catch (err) {
+  } catch (err: any) {
     log(`Failed to load source map: ${err.message || err}`);
   }
 }
@@ -948,7 +948,7 @@ export async function initializeApple2Mode({
   yieldControl = null,
   fetchImpl = globalThis.fetch,
   log = () => {}
-} = {}) {
+}: any = {}) {
   const ioConfig = resolveRunnerIoConfig(preset);
   const defaultAssets = resolveDefaultAssetsConfig(preset);
   const defaultDisk = resolveDefaultDiskConfig(preset);

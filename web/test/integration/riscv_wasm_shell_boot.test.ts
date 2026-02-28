@@ -11,11 +11,11 @@ const BENIGN_PAGE_ERRORS = [
   'Failed to execute \'drawImage\' on \'CanvasRenderingContext2D\': The image argument is a canvas element with a width or height of 0.'
 ];
 
-function setupTestPage(page) {
-  const pageErrors = [];
-  const consoleErrors = [];
+function setupTestPage(page: any) {
+  const pageErrors: any[] = [];
+  const consoleErrors: any[] = [];
 
-  page.on('pageerror', (err) => {
+  page.on('pageerror', (err: any) => {
     const message = String(err?.message || err);
     if (BENIGN_PAGE_ERRORS.some((entry) => message.includes(entry))) {
       return;
@@ -23,7 +23,7 @@ function setupTestPage(page) {
     pageErrors.push(message);
   });
 
-  page.on('console', (msg) => {
+  page.on('console', (msg: any) => {
     if (msg.type() !== 'error') {
       return;
     }
@@ -37,8 +37,8 @@ function setupTestPage(page) {
   return { pageErrors, consoleErrors };
 }
 
-async function waitForRunnerOption(page, runnerId) {
-  await page.waitForFunction((id) => {
+async function waitForRunnerOption(page: any, runnerId: any) {
+  await page.waitForFunction((id: any) => {
     const select = document.querySelector('#runnerSelect');
     if (!(select instanceof HTMLSelectElement)) {
       return false;
@@ -47,7 +47,7 @@ async function waitForRunnerOption(page, runnerId) {
   }, runnerId, { timeout: 120000 });
 }
 
-async function loadRiscvRunnerOnCompiler(page) {
+async function loadRiscvRunnerOnCompiler(page: any) {
   await waitForRunnerOption(page, 'riscv');
 
   await page.selectOption('#backendSelect', 'compiler');
@@ -76,23 +76,23 @@ async function loadRiscvRunnerOnCompiler(page) {
   }, null, { timeout: 120000 });
 }
 
-function getDisplayText(page) {
-  return page.$eval('#apple2TextScreen', (el) => el?.textContent || '');
+function getDisplayText(page: any) {
+  return page.$eval('#apple2TextScreen', (el: any) => el?.textContent || '');
 }
 
-function getSimCycle(page) {
-  return page.$eval('#simStatus', (el) => {
+function getSimCycle(page: any) {
+  return page.$eval('#simStatus', (el: any) => {
     const text = String(el?.textContent || '');
     const match = text.match(/Cycle\s+([\d,]+)/);
     return match ? Number.parseInt(match[1].replace(/,/g, ''), 10) : -1;
   });
 }
 
-function hasShellPrompt(text) {
+function hasShellPrompt(text: any) {
   return /\$\s/.test(String(text || ''));
 }
 
-async function stepUntilShellPrompt(page, { stepTicks = 3_000_000, maxSteps = 20 } = {}) {
+async function stepUntilShellPrompt(page: any, { stepTicks = 3_000_000, maxSteps = 20 }: any = {}) {
   await page.click('[data-tab="ioTab"]');
 
   let lastDisplay = '';
@@ -102,7 +102,7 @@ async function stepUntilShellPrompt(page, { stepTicks = 3_000_000, maxSteps = 20
     const before = await getSimCycle(page);
     await page.click('#stepBtn');
 
-    await page.waitForFunction((startCycle) => {
+    await page.waitForFunction((startCycle: any) => {
       const text = document.querySelector('#simStatus')?.textContent || '';
       const match = text.match(/Cycle\s+([\d,]+)/);
       if (!match) {
@@ -127,7 +127,7 @@ test('riscv wasm compiler boots xv6 to init and shell prompt', { timeout: 260000
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
@@ -141,7 +141,7 @@ test('riscv wasm compiler boots xv6 to init and shell prompt', { timeout: 260000
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }

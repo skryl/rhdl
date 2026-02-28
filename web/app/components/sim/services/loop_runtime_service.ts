@@ -1,4 +1,4 @@
-export function normalizeApple2KeyCode(value) {
+export function normalizeApple2KeyCode(value: any) {
   if (value == null) {
     return null;
   }
@@ -19,7 +19,7 @@ export function normalizeApple2KeyCode(value) {
   return ascii & 0xff;
 }
 
-export function normalizeUartKeyCode(value) {
+export function normalizeUartKeyCode(value: any) {
   if (value == null) {
     return null;
   }
@@ -36,7 +36,7 @@ export function normalizeUartKeyCode(value) {
   return ascii & 0xff;
 }
 
-export function normalizeMappedKeyCode(value, options = {}) {
+export function normalizeMappedKeyCode(value: any, options: any = {}) {
   const code = normalizeApple2KeyCode(value);
   if (code == null) {
     return null;
@@ -61,7 +61,7 @@ export function normalizeMappedKeyCode(value, options = {}) {
   return mapped & 0xFF;
 }
 
-function parsePositiveInt(raw, fallback) {
+function parsePositiveInt(raw: any, fallback: any) {
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isFinite(parsed)) {
     return fallback;
@@ -69,11 +69,11 @@ function parsePositiveInt(raw, fallback) {
   return Math.max(1, parsed);
 }
 
-export function parseStepTickCount(rawValue) {
+export function parseStepTickCount(rawValue: any) {
   return parsePositiveInt(rawValue, 1);
 }
 
-export function parseRunLoopConfig({ runBatchRaw, uiUpdateCyclesRaw } = {}) {
+export function parseRunLoopConfig({ runBatchRaw, uiUpdateCyclesRaw }: any = {}) {
   const batch = parsePositiveInt(runBatchRaw, 20000);
   const uiEvery = parsePositiveInt(uiUpdateCyclesRaw, batch);
   return { batch, uiEvery };
@@ -86,7 +86,7 @@ export function executeGenericRunBatch({
   selectedClock,
   setCycleState,
   checkBreakpoints
-} = {}) {
+}: any = {}) {
   let hit = null;
   let cyclesRan = 0;
   const clk = selectedClock();
@@ -113,7 +113,7 @@ export function shouldRefreshUiAfterRun({
   uiEvery,
   isComponentTabActive,
   traceFollowEnabled = true
-} = {}) {
+}: any = {}) {
   if (!traceFollowEnabled && state.running && !hit) {
     return false;
   }

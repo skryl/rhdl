@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { createWebGLRenderer } from '../../../../app/components/explorer/renderers/webgl_renderer';
 
 function createMockCanvas(hasWebGL = true) {
-  const glCalls = [];
+  const glCalls: any[] = [];
   const gl = hasWebGL ? new Proxy({}, {
-    get(target, prop) {
+    get(target: any, prop) {
       if (prop in target) return target[prop];
       if (prop === 'canvas') return { width: 800, height: 600 };
       if (prop === 'drawingBufferWidth') return 800;
@@ -26,7 +26,7 @@ function createMockCanvas(hasWebGL = true) {
       if (prop === 'BLEND') return 3042;
       if (prop === 'SRC_ALPHA') return 770;
       if (prop === 'ONE_MINUS_SRC_ALPHA') return 771;
-      return (...args) => {
+      return (...args: any[]) => {
         glCalls.push({ method: prop, args });
         // Return sensible defaults for GL queries
         if (prop === 'createShader') return {};
@@ -46,7 +46,7 @@ function createMockCanvas(hasWebGL = true) {
       width: 800,
       height: 600,
       style: {},
-      getContext(type) {
+      getContext(type: any) {
         if (type === 'webgl2') return gl;
         return null;
       },
@@ -70,10 +70,10 @@ function makePalette() {
 }
 
 function makeRenderList(count = 2) {
-  const symbols = [];
-  const pins = [];
-  const nets = [];
-  const wires = [];
+  const symbols: any[] = [];
+  const pins: any[] = [];
+  const nets: any[] = [];
+  const wires: any[] = [];
   const byId = new Map();
   for (let i = 0; i < count; i++) {
     const sym = {
@@ -110,8 +110,8 @@ function makeRenderList(count = 2) {
   return { symbols, pins, nets, wires, byId };
 }
 
-function readFirstLineWidth(glCalls) {
-  const lineBufferUpload = glCalls.find((call) => (
+function readFirstLineWidth(glCalls: any) {
+  const lineBufferUpload = glCalls.find((call: any) => (
     call.method === 'bufferData'
     && call.args?.[1] instanceof Float32Array
     && call.args[1].length >= 10
@@ -138,7 +138,7 @@ test('createWebGLRenderer returns null when WebGL2 unavailable', () => {
 
 test('render calls GL functions (clear, bindBuffer, drawArrays/drawElements)', () => {
   const { canvas, glCalls } = createMockCanvas(true);
-  const renderer = createWebGLRenderer(canvas);
+  const renderer = createWebGLRenderer(canvas)!;
   const rl = makeRenderList(2);
   const viewport = { x: 0, y: 0, scale: 1 };
 
@@ -150,7 +150,7 @@ test('render calls GL functions (clear, bindBuffer, drawArrays/drawElements)', (
 
 test('render resets line attribute divisors before drawing wires', () => {
   const { canvas, glCalls } = createMockCanvas(true);
-  const renderer = createWebGLRenderer(canvas);
+  const renderer = createWebGLRenderer(canvas)!;
   const rl = makeRenderList(3);
   const viewport = { x: 0, y: 0, scale: 1 };
 
@@ -172,7 +172,7 @@ test('render resets line attribute divisors before drawing wires', () => {
 
 test('render attenuates wire widths while zoomed out', () => {
   const { canvas, glCalls } = createMockCanvas(true);
-  const renderer = createWebGLRenderer(canvas);
+  const renderer = createWebGLRenderer(canvas)!;
   const rl = makeRenderList(2);
 
   glCalls.length = 0;
@@ -190,20 +190,20 @@ test('render attenuates wire widths while zoomed out', () => {
 
 test('destroy does not throw', () => {
   const { canvas } = createMockCanvas(true);
-  const renderer = createWebGLRenderer(canvas);
+  const renderer = createWebGLRenderer(canvas)!;
   renderer.destroy();
 });
 
 test('render with empty renderList does not throw', () => {
   const { canvas } = createMockCanvas(true);
-  const renderer = createWebGLRenderer(canvas);
+  const renderer = createWebGLRenderer(canvas)!;
   const rl = { symbols: [], pins: [], nets: [], wires: [], byId: new Map() };
   renderer.render(rl, { x: 0, y: 0, scale: 1 }, makePalette());
 });
 
 test('render with large renderList completes without error', () => {
   const { canvas } = createMockCanvas(true);
-  const renderer = createWebGLRenderer(canvas);
+  const renderer = createWebGLRenderer(canvas)!;
   const rl = makeRenderList(500);
   const viewport = { x: 0, y: 0, scale: 1 };
 

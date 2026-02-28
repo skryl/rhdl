@@ -3,7 +3,7 @@ import { createListenerGroup } from '../../../core/bindings/listener_group';
 const TERMINAL_MIN_HEIGHT_PX = 260;
 const TERMINAL_VIEWPORT_MARGIN_PX = 140;
 
-function isTerminalTextEntryKey(event) {
+function isTerminalTextEntryKey(event: any) {
   if (!event || typeof event.key !== 'string') {
     return false;
   }
@@ -13,11 +13,11 @@ function isTerminalTextEntryKey(event) {
   return event.key.length === 1;
 }
 
-function terminalUartPassthroughEnabled(state) {
+function terminalUartPassthroughEnabled(state: any) {
   return !!state?.terminal?.uartPassthrough;
 }
 
-function queueTerminalUartText(text, apple2) {
+function queueTerminalUartText(text: any, apple2: any) {
   if (!text || typeof apple2?.queueKey !== 'function') {
     return false;
   }
@@ -47,7 +47,7 @@ export function bindCoreBindings({
   store,
   util,
   log
-}) {
+}: any) {
   const listeners = createListenerGroup();
   const globalWindow = globalThis.window;
   const globalDocument = globalThis.document;
@@ -60,7 +60,7 @@ export function bindCoreBindings({
 
   async function yieldToUi() {
     if (globalWindow && typeof globalWindow.requestAnimationFrame === 'function') {
-      await new Promise((resolve) => {
+      await new Promise<void>((resolve) => {
         globalWindow.requestAnimationFrame(() => resolve());
       });
       return;
@@ -79,7 +79,7 @@ export function bindCoreBindings({
     );
   }
 
-  function clampTerminalHeight(px) {
+  function clampTerminalHeight(px: any) {
     const maxPx = terminalMaxHeightPx();
     return Math.max(TERMINAL_MIN_HEIGHT_PX, Math.min(maxPx, Math.round(px)));
   }
@@ -128,7 +128,7 @@ export function bindCoreBindings({
     shell.setTerminalOpen(!state.terminalOpen, { focus: true });
   });
 
-  listeners.on(dom.terminalResizeHandle, 'mousedown', (event) => {
+  listeners.on(dom.terminalResizeHandle, 'mousedown', (event: any) => {
     if (!dom.terminalPanel || event.button !== 0) {
       return;
     }
@@ -140,7 +140,7 @@ export function bindCoreBindings({
     event.preventDefault();
   });
 
-  listeners.on(globalWindow, 'mousemove', (event) => {
+  listeners.on(globalWindow, 'mousemove', (event: any) => {
     if (!resizeState.active || !dom.terminalPanel) {
       return;
     }
@@ -170,7 +170,7 @@ export function bindCoreBindings({
     dom.terminalPanel.style.maxHeight = `${terminalMaxHeightPx()}px`;
   });
 
-  listeners.on(dom.terminalOutput, 'keydown', async (event) => {
+  listeners.on(dom.terminalOutput, 'keydown', async (event: any) => {
     if (terminalUartPassthroughEnabled(state) && typeof apple2?.queueKey === 'function') {
       if (event.ctrlKey && !event.metaKey && !event.altKey && String(event.key || '').toLowerCase() === 'u') {
         state.terminal.uartPassthrough = false;
@@ -239,7 +239,7 @@ export function bindCoreBindings({
     }
   });
 
-  listeners.on(dom.terminalOutput, 'paste', (event) => {
+  listeners.on(dom.terminalOutput, 'paste', (event: any) => {
     const pasted = String(event.clipboardData?.getData('text') || '');
     if (!pasted) {
       return;
@@ -296,7 +296,7 @@ export function bindCoreBindings({
         sim.refreshStatus();
       }
       log(`Switched backend to ${state.backend}`);
-    } catch (err) {
+    } catch (err: any) {
       dom.simStatus.textContent = `Backend ${state.backend} unavailable: ${err.message || err}`;
       log(`Backend load failed (${state.backend}): ${err.message || err}`);
       if (dom.backendStatus) {

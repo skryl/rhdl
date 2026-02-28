@@ -1,4 +1,4 @@
-export async function handleIrbCommand({ cmd, tokens, context }) {
+export async function handleIrbCommand({ cmd, tokens, context }: any) {
   if (cmd !== 'irb' && cmd !== 'mirb') {
     return undefined;
   }

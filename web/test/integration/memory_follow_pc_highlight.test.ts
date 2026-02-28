@@ -15,7 +15,7 @@ test('memory follow-pc auto-scrolls and changed bytes are temporarily highlighte
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
@@ -29,7 +29,7 @@ test('memory follow-pc auto-scrolls and changed bytes are temporarily highlighte
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-  } catch (_err) {
+  } catch (_err: any) {
     t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }
@@ -38,8 +38,8 @@ test('memory follow-pc auto-scrolls and changed bytes are temporarily highlighte
   });
 
   const page = await browser.newPage();
-  const pageErrors = [];
-  const consoleErrors = [];
+  const pageErrors: any[] = [];
+  const consoleErrors: any[] = [];
 
   page.on('pageerror', (err) => {
     const message = String(err?.message || err);

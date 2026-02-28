@@ -1,6 +1,6 @@
 import { parseHexOrDec } from '../../../core/lib/numeric_utils';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createApple2SimRuntimeService requires function: ${name}`);
   }
@@ -18,7 +18,7 @@ export function createApple2SimRuntimeService({
   setMemoryDumpStatus,
   refreshApple2UiState,
   log
-} = {}) {
+}: any = {}) {
   if (!state || !runtime) {
     throw new Error('createApple2SimRuntimeService requires state/runtime');
   }
@@ -46,7 +46,7 @@ export function createApple2SimRuntimeService({
     return defaultRamBytes;
   }
 
-  function fitApple2RamWindow(bytes, offset) {
+  function fitApple2RamWindow(bytes: any, offset: any) {
     if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
       return { data: new Uint8Array(0), trimmed: false };
     }
@@ -62,7 +62,7 @@ export function createApple2SimRuntimeService({
     return { data: bytes.subarray(0, maxLen), trimmed: true };
   }
 
-  function performApple2ResetSequence(options = {}) {
+  function performApple2ResetSequence(options: any = {}) {
     if (!runtime.sim) {
       return { pcBefore: null, pcAfter: null, releaseCycles: 0, usedResetSignal: false };
     }
@@ -72,7 +72,7 @@ export function createApple2SimRuntimeService({
     const releaseCycles = Number.isFinite(parsedReleaseCycles) ? Math.max(0, parsedReleaseCycles) : 10;
     const pcBefore = getApple2ProgramCounter();
     let usedResetSignal = false;
-    const runResetCycles = (cycles) => {
+    const runResetCycles = (cycles: any) => {
       if (typeof runtime.sim.runner_run_cycles === 'function') {
         runtime.sim.runner_run_cycles(cycles, 0, false);
         return;
@@ -103,7 +103,7 @@ export function createApple2SimRuntimeService({
     return { pcBefore, pcAfter, releaseCycles, usedResetSignal };
   }
 
-  async function loadApple2MemoryDumpBytes(bytes, offset, options = {}) {
+  async function loadApple2MemoryDumpBytes(bytes: any, offset: any, options: any = {}) {
     if (!ensureApple2Ready()) {
       return false;
     }

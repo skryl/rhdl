@@ -1,6 +1,6 @@
 import { createExplorerModelRuntimeService } from '../services/model_runtime_service';
 
-function requireFn(name, fn) {
+function requireFn(name: any, fn: any) {
   if (typeof fn !== 'function') {
     throw new Error(`createExplorerModelController requires function: ${name}`);
   }
@@ -12,7 +12,7 @@ export function createExplorerModelController({
   runtime,
   currentComponentSourceText,
   renderComponentTreeRows
-} = {}) {
+}: any = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('createExplorerModelController requires dom/state/runtime');
   }

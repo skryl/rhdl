@@ -8,11 +8,11 @@ export const watchActionTypes = {
 };
 
 export const watchActions = {
-  watchSet: (name, info = {}) => ({ type: watchActionTypes.WATCH_SET, payload: { name, info } }),
-  watchRemove: (name) => ({ type: watchActionTypes.WATCH_REMOVE, payload: { name } }),
+  watchSet: (name: any, info = {}) => ({ type: watchActionTypes.WATCH_SET, payload: { name, info } }),
+  watchRemove: (name: any) => ({ type: watchActionTypes.WATCH_REMOVE, payload: { name } }),
   watchClear: () => ({ type: watchActionTypes.WATCH_CLEAR }),
-  breakpointAddOrReplace: (breakpoint) => ({ type: watchActionTypes.BREAKPOINT_ADD_OR_REPLACE, payload: breakpoint }),
-  breakpointRemove: (name) => ({ type: watchActionTypes.BREAKPOINT_REMOVE, payload: { name } }),
+  breakpointAddOrReplace: (breakpoint: any) => ({ type: watchActionTypes.BREAKPOINT_ADD_OR_REPLACE, payload: breakpoint }),
+  breakpointRemove: (name: any) => ({ type: watchActionTypes.BREAKPOINT_REMOVE, payload: { name } }),
   breakpointClear: () => ({ type: watchActionTypes.BREAKPOINT_CLEAR })
 };
 
@@ -24,7 +24,7 @@ export function createWatchStateSlice() {
   };
 }
 
-export function reduceWatchState(state, action = {}) {
+export function reduceWatchState(state: any, action: any = {}) {
   switch (action.type) {
     case watchActionTypes.WATCH_SET: {
       const name = String(action.payload?.name || '').trim();
@@ -65,7 +65,7 @@ export function reduceWatchState(state, action = {}) {
         state.breakpoints = [];
       }
       const next = { ...bp, name };
-      const idx = state.breakpoints.findIndex((entry) => entry?.name === name);
+      const idx = state.breakpoints.findIndex((entry: any) => entry?.name === name);
       if (idx >= 0) {
         state.breakpoints[idx] = next;
       } else {
@@ -78,7 +78,7 @@ export function reduceWatchState(state, action = {}) {
       if (!name || !Array.isArray(state.breakpoints)) {
         return true;
       }
-      state.breakpoints = state.breakpoints.filter((entry) => entry?.name !== name);
+      state.breakpoints = state.breakpoints.filter((entry: any) => entry?.name !== name);
       return true;
     }
     case watchActionTypes.BREAKPOINT_CLEAR:

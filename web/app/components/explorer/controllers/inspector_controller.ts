@@ -21,7 +21,7 @@ export function createExplorerInspectorController({
   renderComponentLiveSignalsView,
   renderComponentConnectionsView,
   clearComponentConnectionsView
-} = {}) {
+}: any = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('createExplorerInspectorController requires dom/state/runtime');
   }
@@ -38,11 +38,11 @@ export function createExplorerInspectorController({
     throw new Error('createExplorerInspectorController requires function: clearComponentConnectionsView');
   }
 
-  function componentSignalLookup(node) {
+  function componentSignalLookup(node: any) {
     return buildComponentSignalLookup(node);
   }
 
-  function resolveNodeSignalRef(node, lookup, signalName, width = 1, signalSet = null) {
+  function resolveNodeSignalRef(node: any, lookup: any, signalName: any, width = 1, signalSet = null) {
     return resolveNodeSignalRefModel({
       state,
       runtime,
@@ -54,15 +54,15 @@ export function createExplorerInspectorController({
     });
   }
 
-  function collectExprSignalNames(expr, out = new Set(), maxSignals = 20) {
+  function collectExprSignalNames(expr: any, out = new Set(), maxSignals = 20) {
     return collectExprSignalNamesModel(expr, out, maxSignals);
   }
 
-  function findComponentSchematicEntry(node) {
+  function findComponentSchematicEntry(node: any) {
     return findComponentSchematicEntryModel(state, node);
   }
 
-  function summarizeExpr(expr) {
+  function summarizeExpr(expr: any) {
     return summarizeExprModel(expr);
   }
 
@@ -77,7 +77,7 @@ export function createExplorerInspectorController({
     ellipsizeText
   });
 
-  function signalLiveValue(signal) {
+  function signalLiveValue(signal: any) {
     if (!runtime.sim || !signal?.liveName) {
       return null;
     }
@@ -86,23 +86,23 @@ export function createExplorerInspectorController({
     }
     try {
       return runtime.sim.peek(signal.liveName);
-    } catch (_err) {
+    } catch (_err: any) {
       return null;
     }
   }
 
-  function signalLiveValueByName(liveName) {
+  function signalLiveValueByName(liveName: any) {
     if (!runtime.sim || !liveName) {
       return null;
     }
     try {
       return runtime.sim.peek(liveName);
-    } catch (_err) {
+    } catch (_err: any) {
       return null;
     }
   }
 
-  function renderComponentConnections(node) {
+  function renderComponentConnections(node: any) {
     if (!node) {
       clearComponentConnectionsView(dom, state.components.parseError || 'Select a component to inspect connections.');
       return;
@@ -118,8 +118,8 @@ export function createExplorerInspectorController({
     );
   }
 
-  function renderComponentInspector(node) {
-    const signalRows = node ? node.signals.slice(0, componentSignalPreviewLimit).map((signal) => ({
+  function renderComponentInspector(node: any) {
+    const signalRows = node ? node.signals.slice(0, componentSignalPreviewLimit).map((signal: any) => ({
       ...signal,
       value: signalLiveValue(signal)
     })) : [];
@@ -146,7 +146,7 @@ export function createExplorerInspectorController({
     });
   }
 
-  function renderComponentLiveSignals(node) {
+  function renderComponentLiveSignals(node: any) {
     const highlight = state.components.graphHighlightedSignal;
     const limitedSignals = Array.isArray(node?.signals) ? node.signals.slice(0, 120) : [];
     const rows = [];
@@ -177,7 +177,7 @@ export function createExplorerInspectorController({
     }, formatValue);
   }
 
-  function createSchematicElements(model, focusNode, showChildren) {
+  function createSchematicElements(model: any, focusNode: any, showChildren: any) {
     return schematicElementBuilder.createComponentSchematicElements(model, focusNode, showChildren);
   }
 

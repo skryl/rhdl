@@ -9,7 +9,7 @@ test('explorer model controller manages selection and graph focus', () => {
     components: {
       model: {
         rootId: 'root',
-        nodes: new Map([
+        nodes: new Map<string, any>([
           ['root', rootNode],
           ['child', childNode]
         ])
