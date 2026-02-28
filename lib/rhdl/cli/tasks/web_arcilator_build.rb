@@ -809,6 +809,7 @@ module RHDL
           ram_addr ram_we d speaker video color_line hbl vbl
           pc_debug a_debug x_debug y_debug s_debug p_debug opcode_debug
           io_select device_select pdl_strobe stb read_key
+          an clk_2m pre_phase_zero
         ].freeze
 
         # Build the signal table entries from offsets map.
