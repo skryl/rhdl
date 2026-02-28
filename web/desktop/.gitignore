@@ -1,0 +1,10 @@
+node_modules/
+build/
+artifacts/
+bun.lock
+
+# Synced from parent web/ by prebuild script - do not edit directly
+src/simulator/index.html
+src/simulator/coi-serviceworker.js
+src/simulator/app/
+src/simulator/assets/
