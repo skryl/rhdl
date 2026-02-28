@@ -153,6 +153,8 @@ Other:
 - `bundle exec rake native:build`
 - `bundle exec rake native:check`
 - `bundle exec rake web:build`
+- `bundle exec rake web:bundle`
+- `bundle exec rake web:bundle:prod`
 - `bundle exec rake web:generate`
 - `bundle exec rake web:start`
 
@@ -175,7 +177,11 @@ Do not document or introduce non-existent tasks like `rake hdl:*`, `rake diagram
   - `examples/riscv/`
 - `spec/`: tests, generally mirroring implementation paths
 - `docs/`: user docs
-- `web/`: browser simulator app
+- `web/`: browser simulator app (TypeScript, bundled with Bun)
+  - `web/app/`: application source (`.ts` files)
+  - `web/test/`: tests (`bun test`)
+  - `web/build.ts`: Bun build script
+  - `web/dist/`: bundled output (gitignored)
   - `web/desktop/`: Electrobun desktop app wrapper
 
 ## Documentation Source of Truth

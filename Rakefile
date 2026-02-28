@@ -586,12 +586,7 @@ namespace :desktop do
   task :clean do
     rm_rf File.join(desktop_dir, 'build')
     rm_rf File.join(desktop_dir, 'artifacts')
-    rm_rf File.join(desktop_dir, 'src', 'simulator', 'app')
-    rm_rf File.join(desktop_dir, 'src', 'simulator', 'assets')
-    %w[index.html coi-serviceworker.js].each do |f|
-      path = File.join(desktop_dir, 'src', 'simulator', f)
-      rm_f path if File.exist?(path)
-    end
+    rm_rf File.join(desktop_dir, 'src', 'simulator')
     puts "[desktop] Cleaned build artifacts."
   end
 end

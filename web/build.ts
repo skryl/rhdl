@@ -47,9 +47,6 @@ const result = await Bun.build({
   minify: isProduction,
   naming: "[name].[hash].js",
   plugins: [cdnRewritePlugin],
-  // p5, redux, elkjs are loaded as globals via <script> tags for now.
-  // They will be bundled in later phases. Mark them external so the bundler
-  // doesn't try to resolve window.* references.
   external: [],
   define: {
     "process.env.NODE_ENV": JSON.stringify(isProduction ? "production" : "development"),
@@ -79,15 +76,11 @@ const appBundleName = basename(appBundle.path);
 // HTML: read index.html, rewrite the module script src to the hashed bundle
 let html = readFileSync(resolve(webRoot, "index.html"), "utf-8");
 
-// Replace the module script tag pointing at app/main.mjs with the bundle
+// Replace the module script tag with the hashed bundle
 html = html.replace(
-  /<script type="module" src="\.\/app\/main\.mjs[^"]*"><\/script>/,
+  /<script type="module" src="\.\/app\/main\.[^"]*"><\/script>/,
   `<script type="module" src="./${appBundleName}"></script>`,
 );
-
-// Remove CDN script tags (p5, redux, elkjs) - they'll be bundled
-// For Phase 0 we keep them since the globals are still used
-// html = html.replace(/<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/[^"]+"><\/script>\n?\s*/g, '');
 
 mkdirSync(distDir, { recursive: true });
 writeFileSync(resolve(distDir, "index.html"), html);

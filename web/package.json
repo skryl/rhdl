@@ -6,9 +6,9 @@
     "build": "bun run build.ts",
     "build:prod": "NODE_ENV=production bun run build.ts",
     "typecheck": "tsc --noEmit",
-    "test": "bun test",
-    "test:unit": "node --test $(find test -type f -name '*.test.mjs' -o -name '*.test.ts' | sort)",
-    "test:integration": "node --test test/integration/*.test.mjs"
+    "test": "bun test test/core/ test/components/",
+    "test:all": "bun test test/",
+    "test:integration": "bun test test/integration/"
   },
   "devDependencies": {
     "playwright": "^1.52.0",

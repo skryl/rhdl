@@ -1,5 +1,6 @@
 import { toBigInt } from '../../../core/lib/numeric_utils';
 import { nodeDisplayPath } from '../lib/model_utils';
+import ELK from 'elkjs/lib/elk.bundled';
 
 import { buildRenderList } from '../renderers/schematic_data_model';
 import { createCanvasRenderer } from '../renderers/canvas_renderer';
@@ -332,7 +333,7 @@ export function createExplorerGraphRuntimeService({
       }
 
       const elkGraph = buildElkGraph(renderList);
-      const elk = new window.ELK();
+      const elk = new ELK();
       state.components.graphLayoutEngine = 'elk';
       elk.layout(elkGraph).then((result) => {
         if (state.components.graph !== graphHandle || state.components.graphKey !== graphKey) {
@@ -375,7 +376,7 @@ export function createExplorerGraphRuntimeService({
     const schematicKey = state.components.schematicBundle
       ? (state.components.schematicBundle.generated_at || state.components.schematicBundle.runner || 'schem')
       : 'none';
-    const elkAvailable = typeof window.ELK === 'function';
+    const elkAvailable = typeof ELK === 'function';
     state.components.graphElkAvailable = elkAvailable;
     const graphKey =
       `${state.components.sourceKey}:d3:${state.theme}:` +

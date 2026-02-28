@@ -15,13 +15,10 @@ export default {
     },
     views: {},
     copy: {
-      // The web simulator is a static site served from the parent web/
-      // directory. The prebuild script (scripts/prebuild.ts) syncs the
-      // necessary files into src/simulator/ before Electrobun's copy step.
-      "src/simulator/index.html": "views/simulator/index.html",
-      "src/simulator/coi-serviceworker.js": "views/simulator/coi-serviceworker.js",
-      "src/simulator/app": "views/simulator/app",
-      "src/simulator/assets": "views/simulator/assets",
+      // The prebuild script syncs the bundled output from web/dist/
+      // into src/simulator/. The bundle contains index.html, the
+      // hashed JS bundle, service worker, and assets/.
+      "src/simulator": "views/simulator",
     },
   },
   mac: {

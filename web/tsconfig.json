@@ -10,11 +10,11 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "allowJs": true,
+    "allowJs": false,
     "outDir": "dist",
     "rootDir": ".",
     "baseUrl": "."
   },
-  "include": ["app/**/*.ts", "app/**/*.mjs", "test/**/*.ts", "test/**/*.mjs", "build.ts"],
+  "include": ["app/**/*.ts", "test/**/*.ts", "build.ts"],
   "exclude": ["node_modules", "dist", "assets"]
 }

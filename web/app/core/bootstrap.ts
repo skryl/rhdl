@@ -36,7 +36,7 @@ export function startMainApp() {
   const dom = createDomRefs(document);
   const runtime = createRuntimeContext(() => new LiveVcdParser());
   const state = createInitialState();
-  const appStore = createAppStore(state, window.Redux);
+  const appStore = createAppStore(state);
   const { registerUiBinding, disposeUiBindings } = createUiBindingRegistry(runtime);
 
   const {

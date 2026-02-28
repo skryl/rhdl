@@ -1,3 +1,5 @@
+import p5 from 'p5';
+
 function requireFn(name, fn) {
   if (typeof fn !== 'function') {
     throw new Error(`setupWaveformP5 requires function: ${name}`);
@@ -13,7 +15,7 @@ export function setupWaveformP5({
   waveformFontFamily,
   waveformPalette,
   formatValue,
-  p5Ctor = globalThis.p5
+  p5Ctor = p5
 } = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('setupWaveformP5 requires dom/state/runtime');
