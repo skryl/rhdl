@@ -1,4 +1,4 @@
-import { createListenerGroup } from '../../../core/bindings/listener_group.mjs';
+import { createListenerGroup } from '../../../core/bindings/listener_group';
 
 export function bindSimBindings({
   dom,

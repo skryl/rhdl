@@ -8,7 +8,7 @@ import {
   parseHexOrDec,
   hexWord,
   hexByte
-} from '../../../app/core/lib/numeric_utils.mjs';
+} from '../../../app/core/lib/numeric_utils';
 
 test('toBigInt normalizes numeric and bigint inputs', () => {
   assert.equal(toBigInt(42), 42n);

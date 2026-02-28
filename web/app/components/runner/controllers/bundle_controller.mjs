@@ -1,7 +1,7 @@
 import {
   fetchTextAsset,
   fetchJsonAsset
-} from '../../../core/lib/fetch_asset.mjs';
+} from '../../../core/lib/fetch_asset';
 import {
   normalizeComponentSourceBundle,
   normalizeComponentSchematicBundle

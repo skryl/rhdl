@@ -5,7 +5,7 @@ import {
   normalizeTheme,
   waveformFontFamily,
   waveformPalette
-} from '../../../app/core/lib/theme_utils.mjs';
+} from '../../../app/core/lib/theme_utils';
 
 test('normalizeTheme constrains to supported values', () => {
   assert.equal(normalizeTheme('original'), 'original');

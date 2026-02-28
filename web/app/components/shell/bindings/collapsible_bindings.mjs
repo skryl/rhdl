@@ -1,4 +1,4 @@
-import { createListenerGroup } from '../../../core/bindings/listener_group.mjs';
+import { createListenerGroup } from '../../../core/bindings/listener_group';
 
 const COMPONENT_PANEL_CLASSES = new Set([
   'component-tree-panel',

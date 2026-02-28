@@ -1,4 +1,4 @@
-import { createListenerGroup } from '../../../core/bindings/listener_group.mjs';
+import { createListenerGroup } from '../../../core/bindings/listener_group';
 import { GENERATED_MEMORY_DUMP_ASSET_FILES } from '../config/generated_dump_assets.mjs';
 import { createDumpAssetTree, isDumpAssetPath, normalizeDumpAssetPath } from '../lib/dump_assets.mjs';
 

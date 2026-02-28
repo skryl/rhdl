@@ -3,7 +3,7 @@ import {
   parseApple2SnapshotText,
   isSnapshotFileName
 } from '../lib/snapshot.mjs';
-import { hexWord } from '../../../core/lib/numeric_utils.mjs';
+import { hexWord } from '../../../core/lib/numeric_utils';
 
 function requireFn(name, fn) {
   if (typeof fn !== 'function') {

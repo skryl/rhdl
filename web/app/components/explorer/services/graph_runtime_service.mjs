@@ -1,4 +1,4 @@
-import { toBigInt } from '../../../core/lib/numeric_utils.mjs';
+import { toBigInt } from '../../../core/lib/numeric_utils';
 import { nodeDisplayPath } from '../lib/model_utils.mjs';
 
 import { buildRenderList } from '../renderers/schematic_data_model.mjs';

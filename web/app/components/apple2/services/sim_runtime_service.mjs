@@ -1,4 +1,4 @@
-import { parseHexOrDec } from '../../../core/lib/numeric_utils.mjs';
+import { parseHexOrDec } from '../../../core/lib/numeric_utils';
 
 function requireFn(name, fn) {
   if (typeof fn !== 'function') {

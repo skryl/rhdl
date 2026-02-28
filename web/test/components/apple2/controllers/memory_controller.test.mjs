@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseHexOrDec, hexWord, hexByte } from '../../../../app/core/lib/numeric_utils.mjs';
+import { parseHexOrDec, hexWord, hexByte } from '../../../../app/core/lib/numeric_utils';
 import { createApple2MemoryController } from '../../../../app/components/apple2/controllers/memory_controller.mjs';
 
 function createHarness() {

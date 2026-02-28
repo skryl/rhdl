@@ -2,7 +2,7 @@ import {
   parseHexOrDec,
   hexWord,
   hexByte
-} from '../../../core/lib/numeric_utils.mjs';
+} from '../../../core/lib/numeric_utils';
 import { disassemble6502Lines as disassemble6502LinesWithMemory } from '../lib/mos6502_disasm.mjs';
 import { disassembleRiscvLines as disassembleRiscvLinesWithMemory } from '../../riscv/lib/riscv_disasm.mjs';
 import { renderApple2DebugRows } from '../ui/panel.mjs';

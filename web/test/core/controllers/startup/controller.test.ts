@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { startApp } from '../../../../app/core/controllers/startup.mjs';
+import { startApp } from '../../../../app/core/controllers/startup';
 
 function createHarness(overrides = {}) {
   const calls = [];

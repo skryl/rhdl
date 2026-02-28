@@ -1,6 +1,6 @@
 import { html, render as litRender } from 'https://cdn.jsdelivr.net/npm/lit-html@3.2.1/+esm';
-import { formatValue } from '../../../core/lib/numeric_utils.mjs';
-import { parseIrMeta } from '../../../core/lib/ir_meta_utils.mjs';
+import { formatValue } from '../../../core/lib/numeric_utils';
+import { parseIrMeta } from '../../../core/lib/ir_meta_utils';
 import { getBackendDef } from '../runtime/backend_defs.mjs';
 import { WasmIrSimulator } from '../runtime/wasm_ir_simulator.mjs';
 import { createSimRuntimeController } from './runtime_controller.mjs';

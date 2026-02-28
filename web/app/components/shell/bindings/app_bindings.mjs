@@ -1,4 +1,4 @@
-import { createListenerGroup } from '../../../core/bindings/listener_group.mjs';
+import { createListenerGroup } from '../../../core/bindings/listener_group';
 
 const TERMINAL_MIN_HEIGHT_PX = 260;
 const TERMINAL_VIEWPORT_MARGIN_PX = 140;

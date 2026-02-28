@@ -3,7 +3,7 @@ import {
   parseApple2SnapshotPayload,
   parsePcLiteral
 } from '../lib/snapshot.mjs';
-import { hexWord } from '../../../core/lib/numeric_utils.mjs';
+import { hexWord } from '../../../core/lib/numeric_utils';
 import { createApple2DumpStorageService } from '../services/dump_storage_service.mjs';
 import { createApple2DownloadService } from '../services/download_service.mjs';
 import { createApple2RomResetService } from '../services/rom_reset_service.mjs';

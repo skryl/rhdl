@@ -1,6 +1,6 @@
-import { createListenerGroup } from '../../../core/bindings/listener_group.mjs';
-import { formatValue } from '../../../core/lib/numeric_utils.mjs';
-import { waveformFontFamily, waveformPalette } from '../../../core/lib/theme_utils.mjs';
+import { createListenerGroup } from '../../../core/bindings/listener_group';
+import { formatValue } from '../../../core/lib/numeric_utils';
+import { waveformFontFamily, waveformPalette } from '../../../core/lib/theme_utils';
 import { setupWaveformP5 } from '../../watch/ui/waveform_panel.mjs';
 import { createTerminalSessionService } from '../../terminal/services/session_service.mjs';
 import { createMirbCommandRunner } from '../../terminal/services/mirb_runner_service.mjs';

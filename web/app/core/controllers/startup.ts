@@ -1,5 +1,5 @@
-import { createStartupInitializationService } from '../services/startup_initialization_service.mjs';
-import { createStartupBindingRegistrationService } from '../services/startup_binding_registration_service.mjs';
+import { createStartupInitializationService } from '../services/startup_initialization_service';
+import { createStartupBindingRegistrationService } from '../services/startup_binding_registration_service';
 
 export async function startApp(ctx = {}) {
   const {

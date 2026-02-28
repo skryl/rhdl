@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createListenerGroup } from '../../../app/core/bindings/listener_group.mjs';
+import { createListenerGroup } from '../../../app/core/bindings/listener_group';
 
 test('listener group registers listeners and disposes them', () => {
   const group = createListenerGroup();

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createStartupInitializationService } from '../../../../app/core/services/startup_initialization_service.mjs';
+import { createStartupInitializationService } from '../../../../app/core/services/startup_initialization_service';
 
 function createHarness(overrides = {}) {
   const calls = [];

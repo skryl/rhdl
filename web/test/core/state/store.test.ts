@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { actions } from '../../../app/core/state/actions.mjs';
-import { createAppStore } from '../../../app/core/state/store.mjs';
+import { actions } from '../../../app/core/state/actions';
+import { createAppStore } from '../../../app/core/state/store';
 
 function createInitialState() {
   return {

@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createShellDomainController } from '../../../../app/components/shell/controllers/domain.mjs';
-import { createRunnerDomainController } from '../../../../app/components/runner/controllers/domain.mjs';
-import { createComponentDomainController } from '../../../../app/components/explorer/controllers/domain.mjs';
-import { createApple2DomainController } from '../../../../app/components/apple2/controllers/domain.mjs';
-import { createSimDomainController } from '../../../../app/components/sim/controllers/domain.mjs';
-import { createWatchDomainController } from '../../../../app/components/watch/controllers/domain.mjs';
+import { createShellDomainController } from '../../../../app/components/shell/controllers/domain';
+import { createRunnerDomainController } from '../../../../app/components/runner/controllers/domain';
+import { createComponentDomainController } from '../../../../app/components/explorer/controllers/domain';
+import { createApple2DomainController } from '../../../../app/components/apple2/controllers/domain';
+import { createSimDomainController } from '../../../../app/components/sim/controllers/domain';
+import { createWatchDomainController } from '../../../../app/components/watch/controllers/domain';
 
 test('registry domains expose the grouped controller contracts used by startup + bindings', () => {
   const fn = () => {};

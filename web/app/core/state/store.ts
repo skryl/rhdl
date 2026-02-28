@@ -1,5 +1,5 @@
-import { resolveRedux } from './fallback_redux.mjs';
-import { reduceState } from './reducer.mjs';
+import { resolveRedux } from './fallback_redux';
+import { reduceState } from './reducer';
 
 export function createAppStore(initialState, reduxCandidate = null) {
   if (!initialState || typeof initialState !== 'object') {

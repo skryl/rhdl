@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { currentIrSourceKey, parseIrMeta } from '../../../app/core/lib/ir_meta_utils.mjs';
+import { currentIrSourceKey, parseIrMeta } from '../../../app/core/lib/ir_meta_utils';
 
 test('parseIrMeta collects signal widths and clock candidates', () => {
   const ir = {

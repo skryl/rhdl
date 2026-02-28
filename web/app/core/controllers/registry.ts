@@ -1,8 +1,8 @@
 import { RUNNER_PRESETS } from '../../components/runner/config/presets.mjs';
-import { formatValue } from '../lib/numeric_utils.mjs';
-import { waveformFontFamily, waveformPalette } from '../lib/theme_utils.mjs';
+import { formatValue } from '../lib/numeric_utils';
+import { waveformFontFamily, waveformPalette } from '../lib/theme_utils';
 import { setupWaveformP5 } from '../../components/watch/ui/waveform_panel.mjs';
-import { createRegistryLazyGetters } from './registry_lazy_getters.mjs';
+import { createRegistryLazyGetters } from './registry_lazy_getters';
 import { createShellDomainController } from '../../components/shell/controllers/domain.mjs';
 import { createRunnerDomainController } from '../../components/runner/controllers/domain.mjs';
 import { createComponentDomainController } from '../../components/explorer/controllers/domain.mjs';

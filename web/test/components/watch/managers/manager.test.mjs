@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { toBigInt, parseNumeric } from '../../../../app/core/lib/numeric_utils.mjs';
+import { toBigInt, parseNumeric } from '../../../../app/core/lib/numeric_utils';
 import { createWatchManager } from '../../../../app/components/watch/managers/manager.mjs';
 
 function maskForWidth(width) {

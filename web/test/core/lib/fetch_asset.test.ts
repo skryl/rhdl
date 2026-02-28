@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   fetchTextAsset,
   fetchJsonAsset
-} from '../../../app/core/lib/fetch_asset.mjs';
+} from '../../../app/core/lib/fetch_asset';
 
 test('fetchTextAsset reads text and reports HTTP errors', async () => {
   const text = await fetchTextAsset('/ok', 'fixture', async () => ({

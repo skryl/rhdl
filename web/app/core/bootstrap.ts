@@ -1,9 +1,9 @@
-import { actions as storeActions } from './state/actions.mjs';
-import { createAppStore } from './state/store.mjs';
-import { parseNumeric, parseHexOrDec, hexByte } from './lib/numeric_utils.mjs';
+import { actions as storeActions } from './state/actions';
+import { createAppStore } from './state/store';
+import { parseNumeric, parseHexOrDec, hexByte } from './lib/numeric_utils';
 import { isSnapshotFileName } from '../components/apple2/lib/snapshot.mjs';
-import { normalizeTheme } from './lib/theme_utils.mjs';
-import { createRuntimeContext } from './runtime/context.mjs';
+import { normalizeTheme } from './lib/theme_utils';
+import { createRuntimeContext } from './runtime/context';
 import { bindCoreBindings } from '../components/shell/bindings/app_bindings.mjs';
 import { bindMemoryBindings } from '../components/memory/bindings/bindings.mjs';
 import { bindComponentBindings } from '../components/explorer/bindings/bindings.mjs';
@@ -11,16 +11,16 @@ import { bindIoBindings } from '../components/apple2/bindings/bindings.mjs';
 import { bindSimBindings } from '../components/sim/bindings/bindings.mjs';
 import { bindEditorBindings } from '../components/editor/bindings/bindings.mjs';
 import { bindCollapsiblePanels } from '../components/shell/bindings/collapsible_bindings.mjs';
-import { startApp } from './controllers/startup.mjs';
-import { createStoreDispatchers, createReduxSyncHelpers, installReduxGlobals } from './state/store_bridge.mjs';
-import { createDomRefs } from './bindings/dom.mjs';
-import { createInitialState } from './state/initial_state.mjs';
-import { createUiBindingRegistry } from './bindings/ui_registry.mjs';
+import { startApp } from './controllers/startup';
+import { createStoreDispatchers, createReduxSyncHelpers, installReduxGlobals } from './state/store_bridge';
+import { createDomRefs } from './bindings/dom';
+import { createInitialState } from './state/initial_state';
+import { createUiBindingRegistry } from './bindings/ui_registry';
 import {
   REDUX_STORE_GLOBAL_KEY,
   REDUX_SYNC_GLOBAL_KEY,
   REDUX_STATE_GLOBAL_KEY
-} from './app_constants.mjs';
+} from './app_constants';
 import {
   COLLAPSIBLE_PANEL_SELECTOR,
   SIDEBAR_COLLAPSED_KEY,
@@ -29,7 +29,7 @@ import {
 } from '../components/shell/config/constants.mjs';
 import { getBackendDef } from '../components/sim/runtime/backend_defs.mjs';
 import { LiveVcdParser } from '../components/sim/runtime/live_vcd_parser.mjs';
-import { createControllerRegistry } from './controllers/registry.mjs';
+import { createControllerRegistry } from './controllers/registry';
 import { createEventLogger } from '../components/watch/lib/event_logger.mjs';
 
 export function startMainApp() {

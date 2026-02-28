@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createRuntimeContext } from '../../../app/core/runtime/context.mjs';
+import { createRuntimeContext } from '../../../app/core/runtime/context';
 
 test('createRuntimeContext creates isolated runtime holders', () => {
   const a = createRuntimeContext(() => ({ kind: 'parser-a' }));

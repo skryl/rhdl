@@ -1,4 +1,4 @@
-import { toBigInt, formatValue } from '../../../core/lib/numeric_utils.mjs';
+import { toBigInt, formatValue } from '../../../core/lib/numeric_utils';
 import { createSchematicElementBuilder } from '../lib/schematic_element_builder.mjs';
 import { nodeDisplayPath, ellipsizeText } from '../lib/model_utils.mjs';
 import {

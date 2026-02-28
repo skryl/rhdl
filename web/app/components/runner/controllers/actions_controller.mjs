@@ -1,4 +1,4 @@
-import { fetchTextAsset } from '../../../core/lib/fetch_asset.mjs';
+import { fetchTextAsset } from '../../../core/lib/fetch_asset';
 import { DEFAULT_SAMPLE_PATH } from '../config/presets.mjs';
 
 function requireFn(name, fn) {

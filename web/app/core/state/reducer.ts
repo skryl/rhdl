@@ -1,4 +1,4 @@
-import { actionTypes } from './action_types.mjs';
+import { actionTypes } from './action_types';
 import { reduceSimState } from '../../components/sim/state/slice.mjs';
 import { reduceShellState } from '../../components/shell/state/slice.mjs';
 import { reduceRunnerState } from '../../components/runner/state/slice.mjs';

@@ -5,7 +5,7 @@ import {
   createStoreDispatchers,
   createReduxSyncHelpers,
   installReduxGlobals
-} from '../../../app/core/state/store_bridge.mjs';
+} from '../../../app/core/state/store_bridge';
 
 test('createStoreDispatchers forwards action dispatchers', () => {
   const dispatched = [];

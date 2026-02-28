@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createStartupBindingRegistrationService } from '../../../../app/core/services/startup_binding_registration_service.mjs';
+import { createStartupBindingRegistrationService } from '../../../../app/core/services/startup_binding_registration_service';
 
 test('startup binding registration service resets lifecycle and registers all bindings', () => {
   const calls = [];

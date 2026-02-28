@@ -2,7 +2,7 @@ import {
   toBigInt,
   parseNumeric,
   formatValue
-} from '../../../core/lib/numeric_utils.mjs';
+} from '../../../core/lib/numeric_utils';
 import {
   renderWatchTableRows,
   renderWatchListItems,

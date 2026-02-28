@@ -1,4 +1,4 @@
-import { parseIrMeta, currentIrSourceKey } from '../../../core/lib/ir_meta_utils.mjs';
+import { parseIrMeta, currentIrSourceKey } from '../../../core/lib/ir_meta_utils';
 import { buildComponentModel, nodeMatchesFilter } from '../lib/model_utils.mjs';
 
 function requireFn(name, fn) {

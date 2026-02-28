@@ -1,4 +1,4 @@
-import { parseIrMeta } from '../../../core/lib/ir_meta_utils.mjs';
+import { parseIrMeta } from '../../../core/lib/ir_meta_utils';
 import { createRunnerBundleLoader } from './bundle_controller.mjs';
 import { createRunnerActionsController } from './actions_controller.mjs';
 

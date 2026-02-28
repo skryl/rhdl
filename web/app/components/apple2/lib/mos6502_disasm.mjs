@@ -1,4 +1,4 @@
-import { hexByte, hexWord } from '../../../core/lib/numeric_utils.mjs';
+import { hexByte, hexWord } from '../../../core/lib/numeric_utils';
 
 // Shared 6502 mnemonic table (matches examples/mos6502/hdl/harness.rb)
 export const MOS6502_MNEMONICS = {

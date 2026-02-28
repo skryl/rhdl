@@ -1,5 +1,5 @@
-import { formatValue } from '../../../core/lib/numeric_utils.mjs';
-import { normalizeTheme, waveformFontFamily } from '../../../core/lib/theme_utils.mjs';
+import { formatValue } from '../../../core/lib/numeric_utils';
+import { normalizeTheme, waveformFontFamily } from '../../../core/lib/theme_utils';
 import {
   safeSlugToken,
   normalizeDashboardSpan,
