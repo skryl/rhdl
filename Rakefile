@@ -362,6 +362,15 @@ namespace :bench do
     cycles = args[:cycles]&.to_i || 100_000
     RHDL::CLI::Tasks::BenchmarkTask.new(type: :riscv, cycles: cycles).run
   end
+
+  namespace :web do
+    desc "Benchmark Apple II web WASM backends (Rust AOT compiler, Arcilator) via Node.js"
+    task :apple2, [:cycles] do |_, args|
+      load_cli_tasks
+      cycles = args[:cycles]&.to_i || 5_000_000
+      RHDL::CLI::Tasks::BenchmarkTask.new(type: :web_apple2, cycles: cycles).run
+    end
+  end
 end
 
 desc "Run gate benchmark (alias for bench:gates)"
