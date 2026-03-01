@@ -8,6 +8,8 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 #[cfg(not(feature = "aot"))]
 use std::process::Command;
+#[cfg(not(feature = "aot"))]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
@@ -1390,7 +1392,19 @@ impl CoreSimulator {
         };
         let lib_name = format!("rhdl_ir_{:016x}.{}", code_hash, lib_ext);
         let lib_path = cache_dir.join(&lib_name);
-        let src_path = cache_dir.join(format!("rhdl_ir_{:016x}.rs", code_hash));
+
+        // Use process-unique temp filenames to avoid cross-process clobbering
+        // when multiple test workers compile the same hash concurrently.
+        let unique = {
+            let pid = std::process::id();
+            let ts = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            format!("{}.{}", pid, ts)
+        };
+        let tmp_lib_path = cache_dir.join(format!("rhdl_ir_{:016x}.{}.{}", code_hash, unique, lib_ext));
+        let tmp_src_path = cache_dir.join(format!("rhdl_ir_{:016x}.{}.rs", code_hash, unique));
 
         // Check cache
         if lib_path.exists() {
@@ -1403,8 +1417,8 @@ impl CoreSimulator {
             return Ok(true);
         }
 
-        // Write source and compile
-        fs::write(&src_path, code).map_err(|e| e.to_string())?;
+        // Write source and compile into a unique temporary output file.
+        fs::write(&tmp_src_path, code).map_err(|e| e.to_string())?;
 
         let output = Command::new("rustc")
             .args(&[
@@ -1416,15 +1430,29 @@ impl CoreSimulator {
                 "-C", "codegen-units=1",
                 "-A", "warnings",
                 "-o",
-                lib_path.to_str().unwrap(),
-                src_path.to_str().unwrap(),
+                tmp_lib_path.to_str().unwrap(),
+                tmp_src_path.to_str().unwrap(),
             ])
             .output()
             .map_err(|e| e.to_string())?;
 
+        let _ = fs::remove_file(&tmp_src_path);
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!("Compilation failed: {}", stderr));
+        }
+
+        // Promote compiled artifact into the shared cache path.
+        // If another process already populated the cache, keep the cached file.
+        if lib_path.exists() {
+            let _ = fs::remove_file(&tmp_lib_path);
+        } else if let Err(e) = fs::rename(&tmp_lib_path, &lib_path) {
+            if lib_path.exists() {
+                let _ = fs::remove_file(&tmp_lib_path);
+            } else {
+                return Err(format!("Failed to move compiled library into cache: {}", e));
+            }
         }
 
         // Load compiled library
