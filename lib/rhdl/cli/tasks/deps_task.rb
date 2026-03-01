@@ -222,29 +222,14 @@ module RHDL
         end
 
         def install_iverilog_linux
-          if File.exist?('/etc/debian_version') || command_available?('apt-get')
-            puts "Installing iverilog via apt-get..."
-            if ENV['USER'] == 'root'
-              system('apt-get update && apt-get install -y iverilog')
-            else
-              system('sudo apt-get update && sudo apt-get install -y iverilog')
-            end
-          elsif command_available?('dnf')
-            puts "Installing iverilog via dnf..."
-            system('sudo dnf install -y iverilog')
-          elsif command_available?('yum')
-            puts "Installing iverilog via yum..."
-            system('sudo yum install -y iverilog')
-          elsif command_available?('pacman')
-            puts "Installing iverilog via pacman..."
-            system('sudo pacman -S --noconfirm iverilog')
-          else
-            puts "Could not detect package manager."
-            puts "Please install iverilog manually:"
-            puts "  Ubuntu/Debian: sudo apt-get install iverilog"
-            puts "  Fedora: sudo dnf install iverilog"
-            puts "  Arch: sudo pacman -S iverilog"
+          unless ensure_homebrew_linux
+            puts "Homebrew is required for Linux dependency installs."
+            puts "Install Homebrew, then run: bundle exec rake deps"
+            return
           end
+
+          puts "Installing iverilog via Homebrew..."
+          system('brew install icarus-verilog')
         end
 
         def install_iverilog_macos
@@ -274,29 +259,14 @@ module RHDL
         end
 
         def install_verilator_linux
-          if File.exist?('/etc/debian_version') || command_available?('apt-get')
-            puts "Installing verilator via apt-get..."
-            if ENV['USER'] == 'root'
-              system('apt-get update && apt-get install -y verilator')
-            else
-              system('sudo apt-get update && sudo apt-get install -y verilator')
-            end
-          elsif command_available?('dnf')
-            puts "Installing verilator via dnf..."
-            system('sudo dnf install -y verilator')
-          elsif command_available?('yum')
-            puts "Installing verilator via yum..."
-            system('sudo yum install -y verilator')
-          elsif command_available?('pacman')
-            puts "Installing verilator via pacman..."
-            system('sudo pacman -S --noconfirm verilator')
-          else
-            puts "Could not detect package manager."
-            puts "Please install verilator manually:"
-            puts "  Ubuntu/Debian: sudo apt-get install verilator"
-            puts "  Fedora: sudo dnf install verilator"
-            puts "  Arch: sudo pacman -S verilator"
+          unless ensure_homebrew_linux
+            puts "Homebrew is required for Linux dependency installs."
+            puts "Install Homebrew, then run: bundle exec rake deps"
+            return
           end
+
+          puts "Installing verilator via Homebrew..."
+          system('brew install verilator')
         end
 
         def install_verilator_macos
@@ -327,27 +297,14 @@ module RHDL
         end
 
         def install_arcilator_linux(missing_tools:)
-          if File.exist?('/etc/debian_version') || command_available?('apt-get')
-            puts "Installing CIRCT tools via apt-get..."
-            if ENV['USER'] == 'root'
-              system('apt-get update && apt-get install -y circt llvm')
-            else
-              system('sudo apt-get update && sudo apt-get install -y circt llvm')
-            end
-          elsif command_available?('dnf')
-            puts "Installing CIRCT tools via dnf..."
-            system('sudo dnf install -y circt llvm')
-          elsif command_available?('yum')
-            puts "Installing CIRCT tools via yum..."
-            system('sudo yum install -y circt llvm')
-          elsif command_available?('pacman')
-            puts "Installing CIRCT tools via pacman..."
-            system('sudo pacman -S --noconfirm circt llvm')
+          if ensure_homebrew_linux
+            puts "Installing CIRCT tools via Homebrew..."
+            system('brew install circt llvm')
           else
-            puts "Could not detect Linux package manager for CIRCT."
+            puts "Homebrew is required for Linux dependency installs."
           end
 
-          # Fallback for distros/repositories where circt package is unavailable.
+          # Fallback for environments where formulae are unavailable or incomplete.
           remaining = missing_commands(missing_tools)
           install_arcilator_from_release(platform: :linux, missing_tools: remaining) unless remaining.empty?
         end
@@ -447,11 +404,55 @@ module RHDL
           puts "Installed CIRCT tools into #{install_dir}"
 
           path_entries = ENV.fetch('PATH', '').split(File::PATH_SEPARATOR)
-          return if path_entries.include?(install_dir)
+          unless path_entries.include?(install_dir)
+            ENV['PATH'] = "#{install_dir}#{File::PATH_SEPARATOR}#{ENV.fetch('PATH', '')}"
+            puts
+            puts "Updated PATH for current process: #{install_dir}"
+            puts "Add it permanently with:"
+            puts "  export PATH=\"#{install_dir}:$PATH\""
+          end
 
-          puts
-          puts "Add the install directory to PATH:"
-          puts "  export PATH=\"#{install_dir}:$PATH\""
+          if File.directory?(lib_install_dir)
+            ld_path = ENV.fetch('LD_LIBRARY_PATH', '')
+            ld_entries = ld_path.split(File::PATH_SEPARATOR).reject(&:empty?)
+            unless ld_entries.include?(lib_install_dir)
+              ENV['LD_LIBRARY_PATH'] = ([lib_install_dir] + ld_entries).join(File::PATH_SEPARATOR)
+              puts "Updated LD_LIBRARY_PATH for current process: #{lib_install_dir}"
+            end
+          end
+        end
+
+        def ensure_homebrew_linux
+          return true if command_available?('brew')
+
+          if command_available?('apt-get')
+            puts "Installing Homebrew via apt-get..."
+            install_cmd = if ENV['USER'] == 'root'
+              'apt-get update && apt-get install -y linuxbrew-wrapper'
+            else
+              'sudo apt-get update && sudo apt-get install -y linuxbrew-wrapper'
+            end
+            system(install_cmd)
+          else
+            puts "apt-get not available; cannot auto-install Homebrew."
+          end
+
+          activate_homebrew_env
+          command_available?('brew')
+        end
+
+        def activate_homebrew_env
+          candidates = [
+            '/home/linuxbrew/.linuxbrew/bin',
+            '/home/linuxbrew/.linuxbrew/sbin',
+            '/home/linuxbrew/.linuxbrew/Homebrew/bin'
+          ]
+
+          path_entries = ENV.fetch('PATH', '').split(File::PATH_SEPARATOR)
+          updated = candidates.select { |dir| File.directory?(dir) && !path_entries.include?(dir) }
+          return if updated.empty?
+
+          ENV['PATH'] = (updated + path_entries).join(File::PATH_SEPARATOR)
         end
 
         def circt_release_asset_name_for(platform)
