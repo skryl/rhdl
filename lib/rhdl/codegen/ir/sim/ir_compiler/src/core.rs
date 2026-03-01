@@ -1395,14 +1395,16 @@ impl CoreSimulator {
 
         // Use process-unique temp filenames to avoid cross-process clobbering
         // when multiple test workers compile the same hash concurrently.
-        let unique = {
+        let (pid, ts) = {
             let pid = std::process::id();
             let ts = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_nanos())
                 .unwrap_or(0);
-            format!("{}.{}", pid, ts)
+            (pid, ts)
         };
+        let unique = format!("{}_{}", pid, ts);
+        let crate_name = format!("rhdl_ir_{:016x}_{}", code_hash, unique);
         let tmp_lib_path = cache_dir.join(format!("rhdl_ir_{:016x}.{}.{}", code_hash, unique, lib_ext));
         let tmp_src_path = cache_dir.join(format!("rhdl_ir_{:016x}.{}.rs", code_hash, unique));
 
@@ -1423,6 +1425,8 @@ impl CoreSimulator {
         let output = Command::new("rustc")
             .args(&[
                 "--crate-type=cdylib",
+                "--crate-name",
+                crate_name.as_str(),
                 "-C", "opt-level=3",
                 "-C", "target-cpu=native",
                 "-C", "panic=abort",

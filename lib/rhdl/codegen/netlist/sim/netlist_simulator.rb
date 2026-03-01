@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'fiddle'
+require 'fiddle/import'
 require 'rbconfig'
 require_relative '../primitives'
 
@@ -10,21 +12,25 @@ module RHDL
       class << self
         def native_lib_name(base)
           case RbConfig::CONFIG['host_os']
-          when /darwin/ then "#{base}.bundle"
+          when /darwin/ then "#{base}.dylib"
           when /mswin|mingw/ then "#{base}.dll"
           else "#{base}.so"
           end
         end
 
-        def try_load_native_extension(ext_dir:, require_name:)
-          lib_path = File.join(ext_dir, native_lib_name(require_name))
+        def sim_backend_available?(lib_path)
           return false unless File.exist?(lib_path)
 
-          $LOAD_PATH.unshift(ext_dir) unless $LOAD_PATH.include?(ext_dir)
-          require require_name
+          lib = Fiddle.dlopen(lib_path)
+          lib['sim_create']
+          lib['sim_destroy']
+          lib['sim_poke_bus']
+          lib['sim_peek_bus']
+          lib['sim_exec']
+          lib['sim_query']
+          lib['sim_blob']
           true
-        rescue LoadError => e
-          warn "#{require_name} extension not available: #{e.message}" if ENV['RHDL_DEBUG']
+        rescue Fiddle::DLError
           false
         end
       end
@@ -33,33 +39,316 @@ module RHDL
         NETLIST_INTERPRETER_EXT_DIR = File.expand_path('netlist_interpreter/lib', __dir__)
         NETLIST_INTERPRETER_LIB_NAME = native_lib_name('netlist_interpreter')
         NETLIST_INTERPRETER_LIB_PATH = File.join(NETLIST_INTERPRETER_EXT_DIR, NETLIST_INTERPRETER_LIB_NAME)
-        _interpreter_loaded = try_load_native_extension(
-          ext_dir: NETLIST_INTERPRETER_EXT_DIR,
-          require_name: 'netlist_interpreter'
-        )
-        NETLIST_INTERPRETER_AVAILABLE = _interpreter_loaded unless const_defined?(:NETLIST_INTERPRETER_AVAILABLE)
+        NETLIST_INTERPRETER_AVAILABLE = sim_backend_available?(NETLIST_INTERPRETER_LIB_PATH)
       end
 
       unless const_defined?(:NETLIST_JIT_AVAILABLE)
         NETLIST_JIT_EXT_DIR = File.expand_path('netlist_jit/lib', __dir__)
         NETLIST_JIT_LIB_NAME = native_lib_name('netlist_jit')
         NETLIST_JIT_LIB_PATH = File.join(NETLIST_JIT_EXT_DIR, NETLIST_JIT_LIB_NAME)
-        _jit_loaded = try_load_native_extension(
-          ext_dir: NETLIST_JIT_EXT_DIR,
-          require_name: 'netlist_jit'
-        )
-        NETLIST_JIT_AVAILABLE = _jit_loaded unless const_defined?(:NETLIST_JIT_AVAILABLE)
+        NETLIST_JIT_AVAILABLE = sim_backend_available?(NETLIST_JIT_LIB_PATH)
       end
 
       unless const_defined?(:NETLIST_COMPILER_AVAILABLE)
         NETLIST_COMPILER_EXT_DIR = File.expand_path('netlist_compiler/lib', __dir__)
         NETLIST_COMPILER_LIB_NAME = native_lib_name('netlist_compiler')
         NETLIST_COMPILER_LIB_PATH = File.join(NETLIST_COMPILER_EXT_DIR, NETLIST_COMPILER_LIB_NAME)
-        _compiler_loaded = try_load_native_extension(
-          ext_dir: NETLIST_COMPILER_EXT_DIR,
-          require_name: 'netlist_compiler'
-        )
-        NETLIST_COMPILER_AVAILABLE = _compiler_loaded unless const_defined?(:NETLIST_COMPILER_AVAILABLE)
+        NETLIST_COMPILER_AVAILABLE = sim_backend_available?(NETLIST_COMPILER_LIB_PATH)
+      end
+
+      # Common Fiddle wrapper shared by netlist native backends.
+      class NetlistNativeBackend
+        SIM_EXEC_EVALUATE = 0
+        SIM_EXEC_TICK = 1
+        SIM_EXEC_RUN_TICKS = 2
+        SIM_EXEC_RESET = 3
+        SIM_EXEC_COMPILE = 4
+        SIM_EXEC_IS_COMPILED = 5
+
+        SIM_QUERY_NET_COUNT = 0
+        SIM_QUERY_GATE_COUNT = 1
+        SIM_QUERY_DFF_COUNT = 2
+        SIM_QUERY_LANES = 3
+
+        SIM_BLOB_INPUT_NAMES = 0
+        SIM_BLOB_OUTPUT_NAMES = 1
+        SIM_BLOB_GENERATED_CODE = 2
+        SIM_BLOB_SIMD_MODE = 3
+
+        U64_PACK = 'Q'
+        SIZE_T_PACK = Fiddle::SIZEOF_VOIDP == 8 ? 'Q' : 'L'
+
+        def initialize(lib_path, json, config)
+          @lib = Fiddle.dlopen(lib_path)
+          bind_functions
+
+          error_ptr = alloc_error_ptr
+          @ctx = @fn_create.call(json.to_s, config&.to_s, error_ptr)
+          if @ctx.to_i.zero?
+            raise LoadError, error_from_ptr(error_ptr)
+          end
+        end
+
+        def close
+          return if @ctx.nil? || @ctx.to_i.zero?
+
+          @fn_destroy.call(@ctx)
+          @ctx = 0
+        rescue StandardError
+          @ctx = 0
+        end
+
+        def native?
+          true
+        end
+
+        def poke(name, value)
+          if value.is_a?(Array)
+            values = value.map { |v| v.to_i & 0xFFFFFFFFFFFFFFFF }
+            buf = Fiddle::Pointer[values.pack("#{U64_PACK}*")]
+            exec_with_error do |error_ptr|
+              @fn_poke_bus.call(@ctx, name.to_s, buf, values.length, error_ptr)
+            end
+          else
+            raw = value.to_i & 0xFFFFFFFFFFFFFFFF
+            signed = raw >= 0x8000000000000000 ? raw - 0x1_0000_0000_0000_0000 : raw
+            exec_with_error do |error_ptr|
+              @fn_poke_scalar.call(@ctx, name.to_s, signed, error_ptr)
+            end
+          end
+          true
+        end
+
+        def peek(name)
+          values = peek_bus(name)
+          values.length <= 1 ? (values[0] || 0) : values
+        end
+
+        def evaluate
+          exec_with_error do |error_ptr|
+            @fn_exec.call(@ctx, SIM_EXEC_EVALUATE, 0, error_ptr)
+          end
+          true
+        end
+
+        def tick
+          exec_with_error do |error_ptr|
+            @fn_exec.call(@ctx, SIM_EXEC_TICK, 0, error_ptr)
+          end
+          true
+        end
+
+        def run_ticks(n)
+          exec_with_error do |error_ptr|
+            @fn_exec.call(@ctx, SIM_EXEC_RUN_TICKS, n.to_i, error_ptr)
+          end
+          true
+        end
+
+        def reset
+          exec_with_error do |error_ptr|
+            @fn_exec.call(@ctx, SIM_EXEC_RESET, 0, error_ptr)
+          end
+          true
+        end
+
+        def compile
+          exec_with_error do |error_ptr|
+            @fn_exec.call(@ctx, SIM_EXEC_COMPILE, 0, error_ptr)
+          end
+          true
+        end
+
+        def compiled?
+          @fn_exec.call(@ctx, SIM_EXEC_IS_COMPILED, 0, 0).to_i != 0
+        end
+
+        def generated_code
+          blob(SIM_BLOB_GENERATED_CODE)
+        end
+
+        def simd_mode
+          blob(SIM_BLOB_SIMD_MODE)
+        end
+
+        def net_count
+          @fn_query.call(@ctx, SIM_QUERY_NET_COUNT).to_i
+        end
+
+        def gate_count
+          @fn_query.call(@ctx, SIM_QUERY_GATE_COUNT).to_i
+        end
+
+        def dff_count
+          @fn_query.call(@ctx, SIM_QUERY_DFF_COUNT).to_i
+        end
+
+        def lanes
+          @fn_query.call(@ctx, SIM_QUERY_LANES).to_i
+        end
+
+        def input_names
+          csv = blob(SIM_BLOB_INPUT_NAMES)
+          csv.empty? ? [] : csv.split(',')
+        end
+
+        def output_names
+          csv = blob(SIM_BLOB_OUTPUT_NAMES)
+          csv.empty? ? [] : csv.split(',')
+        end
+
+        def stats
+          {
+            net_count: net_count,
+            gate_count: gate_count,
+            dff_count: dff_count,
+            lanes: lanes,
+            input_count: input_names.length,
+            output_count: output_names.length
+          }
+        end
+
+        private
+
+        def bind_functions
+          @fn_create = Fiddle::Function.new(
+            @lib['sim_create'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOIDP
+          )
+          @fn_destroy = Fiddle::Function.new(
+            @lib['sim_destroy'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOID
+          )
+          @fn_free_error = Fiddle::Function.new(
+            @lib['sim_free_error'],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOID
+          )
+          @fn_poke_bus = Fiddle::Function.new(
+            @lib['sim_poke_bus'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+          @fn_poke_scalar = Fiddle::Function.new(
+            @lib['sim_poke_scalar'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG_LONG, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+          @fn_peek_bus = Fiddle::Function.new(
+            @lib['sim_peek_bus'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+          @fn_exec = Fiddle::Function.new(
+            @lib['sim_exec'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_SIZE_T, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          )
+          @fn_query = Fiddle::Function.new(
+            @lib['sim_query'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT],
+            Fiddle::TYPE_SIZE_T
+          )
+          @fn_blob = Fiddle::Function.new(
+            @lib['sim_blob'],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_SIZE_T],
+            Fiddle::TYPE_SIZE_T
+          )
+        end
+
+        def peek_bus(name)
+          out_len_ptr = Fiddle::Pointer.malloc(Fiddle::SIZEOF_VOIDP)
+          out_len_ptr[0, Fiddle::SIZEOF_VOIDP] = [0].pack(SIZE_T_PACK)
+
+          exec_with_error do |error_ptr|
+            @fn_peek_bus.call(@ctx, name.to_s, 0, 0, out_len_ptr, error_ptr)
+          end
+
+          len = out_len_ptr[0, Fiddle::SIZEOF_VOIDP].unpack1(SIZE_T_PACK)
+          return [] if len.zero?
+
+          out_buf = Fiddle::Pointer.malloc(len * 8)
+          out_len_ptr[0, Fiddle::SIZEOF_VOIDP] = [0].pack(SIZE_T_PACK)
+
+          exec_with_error do |error_ptr|
+            @fn_peek_bus.call(@ctx, name.to_s, out_buf, len, out_len_ptr, error_ptr)
+          end
+
+          out_buf[0, len * 8].unpack("#{U64_PACK}*")
+        end
+
+        def blob(op)
+          size = @fn_blob.call(@ctx, op, 0, 0).to_i
+          return '' if size <= 0
+
+          buf = Fiddle::Pointer.malloc(size)
+          written = @fn_blob.call(@ctx, op, buf, size).to_i
+          return '' if written <= 0
+
+          buf.to_s(written)
+        end
+
+        def exec_with_error
+          error_ptr = alloc_error_ptr
+          result = yield(error_ptr)
+          return result if result.to_i != 0
+
+          raise RuntimeError, error_from_ptr(error_ptr)
+        end
+
+        def alloc_error_ptr
+          ptr = Fiddle::Pointer.malloc(Fiddle::SIZEOF_VOIDP)
+          ptr[0, Fiddle::SIZEOF_VOIDP] = [0].pack(SIZE_T_PACK)
+          ptr
+        end
+
+        def error_from_ptr(error_ptr)
+          error_str_ptr = error_ptr[0, Fiddle::SIZEOF_VOIDP].unpack1(SIZE_T_PACK)
+          return 'native netlist backend operation failed' if error_str_ptr.zero?
+
+          error_msg = Fiddle::Pointer.new(error_str_ptr).to_s
+          @fn_free_error.call(error_str_ptr)
+          error_msg
+        rescue StandardError
+          'native netlist backend operation failed'
+        end
+      end
+
+      class NetlistInterpreter < NetlistNativeBackend
+        def initialize(json, lanes = 64)
+          super(NETLIST_INTERPRETER_LIB_PATH, json, lanes)
+        end
+      end
+
+      class NetlistJit < NetlistNativeBackend
+        def initialize(json, lanes = 64)
+          super(NETLIST_JIT_LIB_PATH, json, lanes)
+        end
+      end
+
+      class NetlistCompiler < NetlistNativeBackend
+        def initialize(json, simd_mode = 'auto')
+          super(NETLIST_COMPILER_LIB_PATH, json, simd_mode)
+        end
+
+        def compile
+          super
+        end
+
+        def simd_mode
+          mode = super
+          mode.empty? ? 'scalar' : mode
+        end
+
+        def stats
+          super.merge(
+            simd_mode: simd_mode,
+            compiled: compiled?,
+            backend: 'rustc_compiler_simd'
+          )
+        end
       end
 
       # Pure Ruby fallback implementation.

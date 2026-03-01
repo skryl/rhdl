@@ -22,7 +22,7 @@ end
 def target_name
   case RbConfig::CONFIG['host_os']
   when /darwin/
-    'isa_simulator_native.bundle'
+    'isa_simulator_native.dylib'
   when /linux/
     'isa_simulator_native.so'
   when /mswin|mingw/

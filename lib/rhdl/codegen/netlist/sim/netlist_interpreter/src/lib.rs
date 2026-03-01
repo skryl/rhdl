@@ -1,18 +1,14 @@
-//! Gate-level netlist simulator with Ruby bindings
+//! Gate-level netlist interpreter with C ABI exports
 //!
 //! This simulator evaluates gate-level netlists exported from RHDL's
-//! Structure::Lower. It supports the following gate primitives:
-//! - AND, OR, XOR, NOT, MUX, BUF, CONST
-//! - DFF (D flip-flop with optional enable and reset)
-//!
-//! The simulator uses a SIMD-style "lanes" approach where each signal
-//! is represented as a u64 bitmask, allowing parallel simulation of
-//! up to 64 test vectors simultaneously.
+//! Structure::Lower. It is consumed from Ruby via Fiddle.
 
-use magnus::{method, prelude::*, Error, RArray, RHash, Ruby, TryConvert, Value};
 use serde::Deserialize;
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ffi::{CStr, CString};
+use std::os::raw::{c_char, c_int};
+use std::ptr;
+use std::slice;
 
 /// Gate types matching RHDL::Codegen::Structure::Primitives
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -120,11 +116,10 @@ struct NetlistSimulator {
     lane_mask: u64,
 }
 
-#[allow(dead_code)]
 impl NetlistSimulator {
     fn new(json: &str, lanes: usize) -> Result<Self, String> {
-        let ir: NetlistIR = serde_json::from_str(json)
-            .map_err(|e| format!("Failed to parse netlist JSON: {}", e))?;
+        let ir: NetlistIR =
+            serde_json::from_str(json).map_err(|e| format!("Failed to parse netlist JSON: {}", e))?;
 
         let lane_mask = if lanes >= 64 {
             u64::MAX
@@ -132,7 +127,6 @@ impl NetlistSimulator {
             (1u64 << lanes) - 1
         };
 
-        // Convert gates to internal representation
         let gates: Vec<Gate> = ir
             .gates
             .iter()
@@ -173,7 +167,6 @@ impl NetlistSimulator {
             })
             .collect();
 
-        // Convert DFFs
         let dffs: Vec<Dff> = ir
             .dffs
             .iter()
@@ -186,7 +179,6 @@ impl NetlistSimulator {
             })
             .collect();
 
-        // Convert SR latches
         let sr_latches: Vec<SrLatch> = ir
             .sr_latches
             .iter()
@@ -221,7 +213,6 @@ impl NetlistSimulator {
         if nets.len() == 1 {
             self.nets[nets[0]] = value & self.lane_mask;
         } else {
-            // For multi-bit inputs, broadcast the same mask to all bits
             for &net in nets {
                 self.nets[net] = value & self.lane_mask;
             }
@@ -235,7 +226,6 @@ impl NetlistSimulator {
             .get(name)
             .ok_or_else(|| format!("Unknown input: {}", name))?;
 
-        // Convert lane values to bit masks
         let width = nets.len();
         let mut masks = vec![0u64; width];
 
@@ -256,27 +246,11 @@ impl NetlistSimulator {
         Ok(())
     }
 
-    fn peek(&self, name: &str) -> Result<u64, String> {
-        let nets = self
-            .outputs
-            .get(name)
-            .ok_or_else(|| format!("Unknown output: {}", name))?;
-
-        if nets.len() == 1 {
-            Ok(self.nets[nets[0]])
-        } else {
-            // For multi-bit outputs, return the first bit's mask
-            // Use peek_bus for full bus values
-            Ok(self.nets[nets[0]])
-        }
-    }
-
     fn peek_bus(&self, name: &str) -> Result<Vec<u64>, String> {
         let nets = self
             .outputs
             .get(name)
             .ok_or_else(|| format!("Unknown output: {}", name))?;
-
         Ok(nets.iter().map(|&net| self.nets[net]).collect())
     }
 
@@ -310,7 +284,7 @@ impl NetlistSimulator {
             }
         }
 
-        // Update SR latches (level-sensitive, may need iteration for stability)
+        // Update SR latches (level-sensitive, iterate for stability).
         for _ in 0..10 {
             let mut changed = false;
             for latch in &self.sr_latches {
@@ -318,14 +292,6 @@ impl NetlistSimulator {
                 let r = self.nets[latch.r];
                 let en = self.nets[latch.en];
                 let q_old = self.nets[latch.q];
-
-                // SR latch truth table (when en=1):
-                //   S=1, R=0: Q=1 (set)
-                //   S=0, R=1: Q=0 (reset)
-                //   S=0, R=0: Q=hold
-                //   S=1, R=1: invalid (R wins, Q=0)
-                // When en=0: Q=hold
-                // q_next = (~en & q) | (en & ~r & (s | q))
                 let q_next = ((!en) & q_old) | (en & (!r) & (s | q_old)) & self.lane_mask;
 
                 if q_next != q_old {
@@ -341,10 +307,8 @@ impl NetlistSimulator {
     }
 
     fn tick(&mut self) {
-        // First pass: evaluate combinational logic with current DFF state
         self.evaluate();
 
-        // Sample all DFF inputs (before any updates)
         let next_q: Vec<u64> = self
             .dffs
             .iter()
@@ -353,16 +317,13 @@ impl NetlistSimulator {
                 let d = self.nets[dff.d];
                 let mut q_next = d;
 
-                // Enable: q_next = (q & ~en) | (d & en)
                 if let Some(en) = dff.en {
                     let en_val = self.nets[en];
                     q_next = (q & !en_val) | (d & en_val);
                 }
 
-                // Reset: apply reset_value when rst is asserted
                 if let Some(rst) = dff.rst {
                     let rst_val = self.nets[rst];
-                    // When rst is asserted, use reset_value instead of 0
                     let reset_target = if dff.reset_value == 0 { 0 } else { self.lane_mask };
                     q_next = (q_next & !rst_val) | (rst_val & reset_target);
                 }
@@ -371,19 +332,21 @@ impl NetlistSimulator {
             })
             .collect();
 
-        // Update all DFF outputs
         for (i, dff) in self.dffs.iter().enumerate() {
             self.nets[dff.q] = next_q[i];
         }
 
-        // Second pass: re-evaluate combinational logic with new DFF state
-        // This ensures outputs depending on DFF state are updated in the same cycle
         self.evaluate();
+    }
+
+    fn run_ticks(&mut self, n: usize) {
+        for _ in 0..n {
+            self.tick();
+        }
     }
 
     fn reset(&mut self) {
         self.nets.fill(0);
-        // Apply DFF reset values (for non-zero reset)
         for dff in &self.dffs {
             if dff.reset_value != 0 {
                 self.nets[dff.q] = self.lane_mask;
@@ -391,201 +354,319 @@ impl NetlistSimulator {
         }
     }
 
-    fn net_count(&self) -> usize {
-        self.nets.len()
+    fn input_names_csv(&self) -> String {
+        let mut names: Vec<&str> = self.inputs.keys().map(|k| k.as_str()).collect();
+        names.sort_unstable();
+        names.join(",")
     }
 
-    fn gate_count(&self) -> usize {
-        self.gates.len()
-    }
-
-    fn dff_count(&self) -> usize {
-        self.dffs.len()
+    fn output_names_csv(&self) -> String {
+        let mut names: Vec<&str> = self.outputs.keys().map(|k| k.as_str()).collect();
+        names.sort_unstable();
+        names.join(",")
     }
 }
 
-// ============================================================================
-// Ruby bindings
-// ============================================================================
-
-/// Convert a Ruby integer to u64, handling both positive and negative values.
-/// Ruby's Bignum for 0xFFFFFFFFFFFFFFFF will be handled correctly.
-fn ruby_to_u64(value: Value) -> Result<u64, Error> {
-    // First try to convert as i64 (handles most cases including negative numbers)
-    if let Ok(i) = <i64 as TryConvert>::try_convert(value) {
-        // Negative values become their two's complement representation
-        return Ok(i as u64);
-    }
-
-    // If i64 failed, try to get the value via Ruby string conversion
-    // This handles Bignums that exceed i64::MAX
-    let ruby = unsafe { Ruby::get_unchecked() };
-    let str_val: String = value.funcall("to_s", (16i32,))?;
-    u64::from_str_radix(&str_val, 16)
-        .map_err(|e| Error::new(ruby.exception_runtime_error(), format!("Invalid integer: {}", e)))
+pub struct NetlistSimContext {
+    sim: NetlistSimulator,
 }
 
-/// Convert a u64 to a Ruby integer, preserving the full 64-bit unsigned value.
-fn u64_to_ruby(ruby: &Ruby, value: u64) -> Value {
-    // If value fits in i64's positive range, return as i64
-    if value <= i64::MAX as u64 {
-        ruby.into_value(value as i64)
+const SIM_EXEC_EVALUATE: c_int = 0;
+const SIM_EXEC_TICK: c_int = 1;
+const SIM_EXEC_RUN_TICKS: c_int = 2;
+const SIM_EXEC_RESET: c_int = 3;
+const SIM_EXEC_COMPILE: c_int = 4;
+const SIM_EXEC_IS_COMPILED: c_int = 5;
+
+const SIM_QUERY_NET_COUNT: c_int = 0;
+const SIM_QUERY_GATE_COUNT: c_int = 1;
+const SIM_QUERY_DFF_COUNT: c_int = 2;
+const SIM_QUERY_LANES: c_int = 3;
+
+const SIM_BLOB_INPUT_NAMES: c_int = 0;
+const SIM_BLOB_OUTPUT_NAMES: c_int = 1;
+const SIM_BLOB_GENERATED_CODE: c_int = 2;
+const SIM_BLOB_SIMD_MODE: c_int = 3;
+
+fn set_error(error_out: *mut *mut c_char, msg: String) {
+    if error_out.is_null() {
+        return;
+    }
+    let cstr = CString::new(msg).unwrap_or_else(|_| CString::new("error").unwrap());
+    unsafe {
+        *error_out = cstr.into_raw();
+    }
+}
+
+fn clear_error(error_out: *mut *mut c_char) {
+    if error_out.is_null() {
+        return;
+    }
+    unsafe {
+        *error_out = ptr::null_mut();
+    }
+}
+
+unsafe fn read_cstr(ptr: *const c_char) -> Result<String, String> {
+    if ptr.is_null() {
+        return Err("null pointer".to_string());
+    }
+    let s = CStr::from_ptr(ptr)
+        .to_str()
+        .map_err(|e| format!("invalid UTF-8: {}", e))?;
+    Ok(s.to_string())
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_create(
+    json: *const c_char,
+    config: *const c_char,
+    error_out: *mut *mut c_char,
+) -> *mut NetlistSimContext {
+    clear_error(error_out);
+
+    let json = match read_cstr(json) {
+        Ok(v) => v,
+        Err(e) => {
+            set_error(error_out, format!("invalid JSON input: {}", e));
+            return ptr::null_mut();
+        }
+    };
+
+    let lanes = if config.is_null() {
+        64
     } else {
-        // For values > i64::MAX, create via string parsing to get a Bignum
-        // Format as hex and parse in Ruby
-        let hex_str = format!("{:x}", value);
-        let result: Result<Value, Error> = ruby
-            .eval(&format!("0x{}", hex_str));
-        result.unwrap_or_else(|_| ruby.into_value(0i64))
-    }
-}
+        match read_cstr(config)
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|v| *v > 0)
+        {
+            Some(v) => v,
+            None => 64,
+        }
+    };
 
-#[magnus::wrap(class = "RHDL::Codegen::Structure::NetlistInterpreter")]
-struct RubyNetlistSim {
-    sim: RefCell<NetlistSimulator>,
-}
-
-impl RubyNetlistSim {
-    fn new(json: String, lanes: Option<usize>) -> Result<Self, Error> {
-        let ruby = unsafe { Ruby::get_unchecked() };
-        let lanes = lanes.unwrap_or(64);
-        let sim = NetlistSimulator::new(&json, lanes)
-            .map_err(|e| Error::new(ruby.exception_runtime_error(), e))?;
-        Ok(Self {
-            sim: RefCell::new(sim),
-        })
-    }
-
-    fn poke(&self, name: String, value: Value) -> Result<(), Error> {
-        let ruby = unsafe { Ruby::get_unchecked() };
-        let mut sim = self.sim.borrow_mut();
-
-        // Check if value is an array (bus values) or single value
-        if let Ok(arr) = RArray::try_convert(value) {
-            let values: Vec<u64> = arr
-                .into_iter()
-                .map(|v| ruby_to_u64(v))
-                .collect::<Result<Vec<_>, Error>>()?;
-            sim.poke_bus(&name, &values)
-                .map_err(|e| Error::new(ruby.exception_runtime_error(), e))
-        } else {
-            let v = ruby_to_u64(value)?;
-            sim.poke(&name, v)
-                .map_err(|e| Error::new(ruby.exception_runtime_error(), e))
+    match NetlistSimulator::new(&json, lanes) {
+        Ok(sim) => Box::into_raw(Box::new(NetlistSimContext { sim })),
+        Err(e) => {
+            set_error(error_out, e);
+            ptr::null_mut()
         }
     }
+}
 
-    fn peek(&self, name: String) -> Result<Value, Error> {
-        let ruby = unsafe { Ruby::get_unchecked() };
-        let sim = self.sim.borrow();
-        let nets = sim
-            .outputs
-            .get(&name)
-            .ok_or_else(|| Error::new(ruby.exception_runtime_error(), format!("Unknown output: {}", name)))?;
+#[no_mangle]
+pub unsafe extern "C" fn sim_destroy(ctx: *mut NetlistSimContext) {
+    if !ctx.is_null() {
+        drop(Box::from_raw(ctx));
+    }
+}
 
-        if nets.len() == 1 {
-            Ok(u64_to_ruby(&ruby, sim.nets[nets[0]]))
-        } else {
-            let arr = ruby.ary_new_capa(nets.len());
-            for &net in nets {
-                let _ = arr.push(u64_to_ruby(&ruby, sim.nets[net]));
+#[no_mangle]
+pub unsafe extern "C" fn sim_free_error(ptr: *mut c_char) {
+    if !ptr.is_null() {
+        drop(CString::from_raw(ptr));
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_poke_scalar(
+    ctx: *mut NetlistSimContext,
+    name: *const c_char,
+    value: u64,
+    error_out: *mut *mut c_char,
+) -> c_int {
+    clear_error(error_out);
+    if ctx.is_null() {
+        set_error(error_out, "simulator context is null".to_string());
+        return 0;
+    }
+
+    let name = match read_cstr(name) {
+        Ok(v) => v,
+        Err(e) => {
+            set_error(error_out, format!("invalid signal name: {}", e));
+            return 0;
+        }
+    };
+
+    match (*ctx).sim.poke(&name, value) {
+        Ok(()) => 1,
+        Err(e) => {
+            set_error(error_out, e);
+            0
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_poke_bus(
+    ctx: *mut NetlistSimContext,
+    name: *const c_char,
+    values: *const u64,
+    len: usize,
+    error_out: *mut *mut c_char,
+) -> c_int {
+    clear_error(error_out);
+    if ctx.is_null() {
+        set_error(error_out, "simulator context is null".to_string());
+        return 0;
+    }
+    if values.is_null() && len > 0 {
+        set_error(error_out, "values pointer is null".to_string());
+        return 0;
+    }
+
+    let name = match read_cstr(name) {
+        Ok(v) => v,
+        Err(e) => {
+            set_error(error_out, format!("invalid signal name: {}", e));
+            return 0;
+        }
+    };
+
+    let vals = slice::from_raw_parts(values, len);
+    match (*ctx).sim.poke_bus(&name, vals) {
+        Ok(()) => 1,
+        Err(e) => {
+            set_error(error_out, e);
+            0
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_peek_bus(
+    ctx: *mut NetlistSimContext,
+    name: *const c_char,
+    out_values: *mut u64,
+    out_capacity: usize,
+    out_len: *mut usize,
+    error_out: *mut *mut c_char,
+) -> c_int {
+    clear_error(error_out);
+
+    if ctx.is_null() {
+        set_error(error_out, "simulator context is null".to_string());
+        return 0;
+    }
+    if out_len.is_null() {
+        set_error(error_out, "out_len pointer is null".to_string());
+        return 0;
+    }
+
+    let name = match read_cstr(name) {
+        Ok(v) => v,
+        Err(e) => {
+            set_error(error_out, format!("invalid signal name: {}", e));
+            return 0;
+        }
+    };
+
+    match (*ctx).sim.peek_bus(&name) {
+        Ok(values) => {
+            *out_len = values.len();
+            if out_values.is_null() || out_capacity == 0 {
+                return 1;
             }
-            Ok(arr.as_value())
+            if out_capacity < values.len() {
+                set_error(
+                    error_out,
+                    format!("output buffer too small: need {}, got {}", values.len(), out_capacity),
+                );
+                return 0;
+            }
+            if !values.is_empty() {
+                ptr::copy_nonoverlapping(values.as_ptr(), out_values, values.len());
+            }
+            1
         }
-    }
-
-    fn evaluate(&self) {
-        self.sim.borrow_mut().evaluate();
-    }
-
-    fn tick(&self) {
-        self.sim.borrow_mut().tick();
-    }
-
-    fn reset(&self) {
-        self.sim.borrow_mut().reset();
-    }
-
-    fn net_count(&self) -> usize {
-        self.sim.borrow().net_count()
-    }
-
-    fn gate_count(&self) -> usize {
-        self.sim.borrow().gate_count()
-    }
-
-    fn dff_count(&self) -> usize {
-        self.sim.borrow().dff_count()
-    }
-
-    fn lanes(&self) -> usize {
-        self.sim.borrow().lanes
-    }
-
-    fn input_names(&self) -> Vec<String> {
-        self.sim.borrow().inputs.keys().cloned().collect()
-    }
-
-    fn output_names(&self) -> Vec<String> {
-        self.sim.borrow().outputs.keys().cloned().collect()
-    }
-
-    fn stats(&self) -> Result<RHash, Error> {
-        let ruby = unsafe { Ruby::get_unchecked() };
-        let hash = ruby.hash_new();
-        let sim = self.sim.borrow();
-
-        hash.aset(ruby.sym_new("net_count"), sim.net_count() as i64)?;
-        hash.aset(ruby.sym_new("gate_count"), sim.gate_count() as i64)?;
-        hash.aset(ruby.sym_new("dff_count"), sim.dff_count() as i64)?;
-        hash.aset(ruby.sym_new("lanes"), sim.lanes as i64)?;
-        hash.aset(ruby.sym_new("input_count"), sim.inputs.len() as i64)?;
-        hash.aset(ruby.sym_new("output_count"), sim.outputs.len() as i64)?;
-
-        Ok(hash)
-    }
-
-    fn native(&self) -> bool {
-        true
-    }
-
-    /// Run N ticks with a single FFI call
-    fn run_ticks(&self, n: usize) {
-        let mut sim = self.sim.borrow_mut();
-        for _ in 0..n {
-            sim.tick();
+        Err(e) => {
+            set_error(error_out, e);
+            0
         }
     }
 }
 
-#[magnus::init]
-fn init(ruby: &Ruby) -> Result<(), Error> {
-    // Define module path: RHDL::Codegen::Netlist
-    let rhdl = ruby.define_module("RHDL")?;
-    let codegen = rhdl.define_module("Codegen")?;
-    let netlist = codegen.define_module("Netlist")?;
+#[no_mangle]
+pub unsafe extern "C" fn sim_exec(
+    ctx: *mut NetlistSimContext,
+    op: c_int,
+    arg: usize,
+    error_out: *mut *mut c_char,
+) -> c_int {
+    clear_error(error_out);
 
-    // Define class RHDL::Codegen::Netlist::NetlistInterpreter
-    let class = netlist.define_class("NetlistInterpreter", ruby.class_object())?;
+    if ctx.is_null() {
+        set_error(error_out, "simulator context is null".to_string());
+        return 0;
+    }
 
-    class.define_singleton_method("new", magnus::function!(RubyNetlistSim::new, 2))?;
-    class.define_method("poke", method!(RubyNetlistSim::poke, 2))?;
-    class.define_method("peek", method!(RubyNetlistSim::peek, 1))?;
-    class.define_method("evaluate", method!(RubyNetlistSim::evaluate, 0))?;
-    class.define_method("tick", method!(RubyNetlistSim::tick, 0))?;
-    class.define_method("reset", method!(RubyNetlistSim::reset, 0))?;
-    class.define_method("run_ticks", method!(RubyNetlistSim::run_ticks, 1))?;
-    class.define_method("net_count", method!(RubyNetlistSim::net_count, 0))?;
-    class.define_method("gate_count", method!(RubyNetlistSim::gate_count, 0))?;
-    class.define_method("dff_count", method!(RubyNetlistSim::dff_count, 0))?;
-    class.define_method("lanes", method!(RubyNetlistSim::lanes, 0))?;
-    class.define_method("input_names", method!(RubyNetlistSim::input_names, 0))?;
-    class.define_method("output_names", method!(RubyNetlistSim::output_names, 0))?;
-    class.define_method("stats", method!(RubyNetlistSim::stats, 0))?;
-    class.define_method("native?", method!(RubyNetlistSim::native, 0))?;
+    match op {
+        SIM_EXEC_EVALUATE => {
+            (*ctx).sim.evaluate();
+            1
+        }
+        SIM_EXEC_TICK => {
+            (*ctx).sim.tick();
+            1
+        }
+        SIM_EXEC_RUN_TICKS => {
+            (*ctx).sim.run_ticks(arg);
+            1
+        }
+        SIM_EXEC_RESET => {
+            (*ctx).sim.reset();
+            1
+        }
+        SIM_EXEC_COMPILE => 1,
+        SIM_EXEC_IS_COMPILED => 1,
+        _ => {
+            set_error(error_out, format!("unknown exec op: {}", op));
+            0
+        }
+    }
+}
 
-    // Set constant to indicate native extension is available
-    netlist.const_set("NETLIST_INTERPRETER_AVAILABLE", true)?;
+#[no_mangle]
+pub unsafe extern "C" fn sim_query(ctx: *const NetlistSimContext, op: c_int) -> usize {
+    if ctx.is_null() {
+        return 0;
+    }
+    match op {
+        SIM_QUERY_NET_COUNT => (*ctx).sim.nets.len(),
+        SIM_QUERY_GATE_COUNT => (*ctx).sim.gates.len(),
+        SIM_QUERY_DFF_COUNT => (*ctx).sim.dffs.len(),
+        SIM_QUERY_LANES => (*ctx).sim.lanes,
+        _ => 0,
+    }
+}
 
-    Ok(())
+#[no_mangle]
+pub unsafe extern "C" fn sim_blob(
+    ctx: *const NetlistSimContext,
+    op: c_int,
+    out_buf: *mut u8,
+    out_len: usize,
+) -> usize {
+    if ctx.is_null() {
+        return 0;
+    }
+
+    let data = match op {
+        SIM_BLOB_INPUT_NAMES => (*ctx).sim.input_names_csv(),
+        SIM_BLOB_OUTPUT_NAMES => (*ctx).sim.output_names_csv(),
+        SIM_BLOB_GENERATED_CODE => String::new(),
+        SIM_BLOB_SIMD_MODE => "scalar".to_string(),
+        _ => String::new(),
+    };
+
+    let bytes = data.as_bytes();
+    if out_buf.is_null() || out_len == 0 {
+        return bytes.len();
+    }
+
+    let n = bytes.len().min(out_len);
+    ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, n);
+    n
 }

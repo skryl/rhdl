@@ -18,7 +18,7 @@ module RHDL
             crate_name: 'isa_simulator_native',
             load_path: 'examples/mos6502/utilities/simulators',
             require_path: 'isa_simulator_native',
-            artifact: :ruby_ext,
+            artifact: :fiddle_lib,
             check_const: 'RHDL::Examples::MOS6502::NATIVE_AVAILABLE'
           },
 
@@ -29,7 +29,7 @@ module RHDL
             crate_name: 'netlist_interpreter',
             load_path: 'lib',
             require_path: 'rhdl/codegen/netlist/sim/netlist_simulator',
-            artifact: :ruby_ext,
+            artifact: :fiddle_lib,
             check_const: 'RHDL::Codegen::Netlist::NETLIST_INTERPRETER_AVAILABLE'
           },
           netlist_jit: {
@@ -38,7 +38,7 @@ module RHDL
             crate_name: 'netlist_jit',
             load_path: 'lib',
             require_path: 'rhdl/codegen/netlist/sim/netlist_simulator',
-            artifact: :ruby_ext,
+            artifact: :fiddle_lib,
             check_const: 'RHDL::Codegen::Netlist::NETLIST_JIT_AVAILABLE'
           },
           netlist_compiler: {
@@ -47,7 +47,7 @@ module RHDL
             crate_name: 'netlist_compiler',
             load_path: 'lib',
             require_path: 'rhdl/codegen/netlist/sim/netlist_simulator',
-            artifact: :ruby_ext,
+            artifact: :fiddle_lib,
             check_const: 'RHDL::Codegen::Netlist::NETLIST_COMPILER_AVAILABLE'
           },
 

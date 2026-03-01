@@ -196,6 +196,7 @@ When changing user-facing behavior:
 ## Testing Expectations
 
 Before finishing a change, run the smallest relevant test set first, then broaden as needed.
+If test dependencies are missing, install or build them before running the affected tests.
 
 Examples:
 - RISC-V runner/task changes:
@@ -226,5 +227,4 @@ For runner changes:
 1. Headless mode still works.
 2. Interactive controls still work (`Ctrl+C`, escape/command mode).
 3. Debug output path is visible when debug mode is enabled.
-
 

@@ -17,6 +17,13 @@ RSpec.describe RHDL::CLI::Tasks::NativeTask do
         :ir_compiler
       )
     end
+
+    it 'uses fiddle libs for native backends' do
+      expect(described_class::EXTENSIONS[:isa_simulator][:artifact]).to eq(:fiddle_lib)
+      expect(described_class::EXTENSIONS[:netlist_interpreter][:artifact]).to eq(:fiddle_lib)
+      expect(described_class::EXTENSIONS[:netlist_jit][:artifact]).to eq(:fiddle_lib)
+      expect(described_class::EXTENSIONS[:netlist_compiler][:artifact]).to eq(:fiddle_lib)
+    end
   end
 
   describe 'initialization' do
@@ -114,7 +121,7 @@ RSpec.describe RHDL::CLI::Tasks::NativeTask do
     describe '#dst_lib_name' do
       it 'returns target library name based on platform' do
         result = task.send(:dst_lib_name, ext)
-        expect(result).to match(/isa_simulator_native\.(so|bundle|dll)/)
+        expect(result).to match(/isa_simulator_native\.(so|dylib|dll)/)
       end
     end
 
