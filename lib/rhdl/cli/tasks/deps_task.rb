@@ -104,6 +104,28 @@ module RHDL
             end
           end
 
+          # Check for graphviz (dot)
+          puts
+          dot_available = command_available?('dot')
+
+          if dot_available
+            version = `dot -V 2>&1`.lines.first&.strip
+            puts "[OK] graphviz is installed: #{version}"
+          else
+            puts "[MISSING] graphviz is not installed"
+            puts
+
+            install_graphviz(platform)
+
+            puts
+            if command_available?('dot')
+              version = `dot -V 2>&1`.lines.first&.strip
+              puts "[OK] graphviz installed successfully: #{version}"
+            else
+              puts "[WARN] graphviz installation may have failed. Check above for errors."
+            end
+          end
+
           puts
           puts '=' * 50
           puts "Dependency check complete."
@@ -304,15 +326,66 @@ module RHDL
 
         def install_arcilator_linux(missing_tools:)
           if command_available?('apt-get')
+            puts "Installing LLVM tools via apt-get..."
+            if ENV['USER'] == 'root'
+              system('apt-get update && apt-get install -y llvm')
+            else
+              system('sudo apt-get update && sudo apt-get install -y llvm')
+            end
+
             puts "Installing CIRCT tools via apt-get..."
             if ENV['USER'] == 'root'
-              system('apt-get update && apt-get install -y circt llvm')
+              system('apt-get update && apt-get install -y circt')
             else
-              system('sudo apt-get update && sudo apt-get install -y circt llvm')
+              system('sudo apt-get update && sudo apt-get install -y circt')
             end
           else
             puts "apt-get not found. Please install CIRCT tools manually:"
             puts "  sudo apt-get update && sudo apt-get install -y circt llvm"
+          end
+
+          # Ubuntu repos may not provide circt on all releases (e.g. noble);
+          # fall back to prebuilt CIRCT release for missing tools.
+          remaining = missing_commands(missing_tools)
+          install_arcilator_from_release(platform: :linux, missing_tools: remaining) unless remaining.empty?
+        end
+
+        def install_graphviz(platform)
+          case platform
+          when :linux
+            install_graphviz_linux
+          when :macos
+            install_graphviz_macos
+          when :windows
+            puts "On Windows, please install Graphviz manually:"
+            puts "  https://graphviz.org/download/"
+          else
+            puts "Unknown platform. Please install graphviz manually."
+          end
+        end
+
+        def install_graphviz_linux
+          if command_available?('apt-get')
+            puts "Installing graphviz via apt-get..."
+            if ENV['USER'] == 'root'
+              system('apt-get update && apt-get install -y graphviz')
+            else
+              system('sudo apt-get update && sudo apt-get install -y graphviz')
+            end
+          else
+            puts "apt-get not found. Please install graphviz manually:"
+            puts "  sudo apt-get update && sudo apt-get install -y graphviz"
+          end
+        end
+
+        def install_graphviz_macos
+          if command_available?('brew')
+            puts "Installing graphviz via Homebrew..."
+            system('brew install graphviz')
+          else
+            puts "Homebrew not found. Please install Homebrew first:"
+            puts "  /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+            puts "Then run: brew install graphviz"
           end
         end
 

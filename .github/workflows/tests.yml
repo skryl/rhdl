@@ -37,16 +37,12 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install system dependencies
+      - name: Install all simulator dependencies via rake deps
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            verilator \
-            iverilog \
-            graphviz \
-            circt \
-            llvm
+          bundle exec rake deps:install
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=$HOME/.local/lib:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
 
       - name: Cache Rust build outputs
         uses: Swatinem/rust-cache@v2
