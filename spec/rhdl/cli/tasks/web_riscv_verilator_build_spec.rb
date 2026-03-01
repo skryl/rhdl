@@ -52,7 +52,8 @@ RSpec.describe RHDL::CLI::Tasks::WebRiscvVerilatorBuild do
   describe '.build' do
     it 'returns false with warning when required tools are missing' do
       allow(mod).to receive(:missing_tools).and_return(['verilator'])
-      expect { expect(mod.build).to be(false) }.to output(/RISC-V verilator WASM build skipped/).to_stderr
+      expect(mod).to receive(:warn).with(/RISC-V verilator WASM build skipped/)
+      expect(mod.build).to be(false)
     end
   end
 end

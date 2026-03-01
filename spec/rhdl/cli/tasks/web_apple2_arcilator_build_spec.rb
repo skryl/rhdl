@@ -235,7 +235,8 @@ RSpec.describe RHDL::CLI::Tasks::WebApple2ArcilatorBuild do
       end
 
       it 'returns false and prints a warning' do
-        expect { expect(mod.build).to be false }.to output(/arcilator WASM build skipped/).to_stderr
+        expect(mod).to receive(:warn).with(/arcilator WASM build skipped/)
+        expect(mod.build).to be(false)
       end
     end
   end
