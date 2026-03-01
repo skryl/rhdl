@@ -119,8 +119,7 @@ RSpec.describe RHDL::HDL::ALU do
     end
 
     context 'CIRCT firtool validation', if: HdlToolchain.firtool_available? && HdlToolchain.iverilog_available? do
-      # Pending: ALU FIRRTL export generates invalid syntax (nested mux expression parsing error)
-      it 'CIRCT-generated Verilog matches RHDL Verilog behavior', pending: 'ALU FIRRTL export has syntax error' do
+      it 'CIRCT-generated Verilog matches RHDL Verilog behavior' do
         behavior = RHDL::HDL::ALU.new(nil, width: 8)
 
         test_vectors = []
