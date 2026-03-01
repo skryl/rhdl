@@ -261,6 +261,41 @@ test('initializeTrace starts tracing when explicitly enabled', () => {
   ]);
 });
 
+test('arcilator backend resolves runner-specific wasm path override', async () => {
+  const fetchUrls = [];
+  const state = { backend: 'arcilator', runnerPreset: 'apple2' };
+  const runtime = { backendInstances: new Map(), instance: null, sim: null, parser: null };
+  const presets = {
+    apple2: { id: 'apple2', arcilatorWasmPath: '/apple2_arcilator.wasm' },
+    riscv: { id: 'riscv' }
+  };
+  const controller = createSimRuntimeController({
+    state,
+    runtime,
+    getBackendDef: () => ({ wasmPath: '/default_arcilator.wasm' }),
+    currentRunnerPreset: () => presets[state.runnerPreset],
+    fetchImpl: async (url) => {
+      fetchUrls.push(url);
+      return makeOkResponse();
+    },
+    webAssemblyApi: {
+      async instantiate(bytes) {
+        void bytes;
+        return { instance: { id: 'arc' } };
+      }
+    }
+  });
+
+  await controller.ensureBackendInstance('arcilator');
+  assert.equal(fetchUrls[0], '/apple2_arcilator.wasm');
+
+  fetchUrls.length = 0;
+  runtime.backendInstances.clear();
+  state.runnerPreset = 'riscv';
+  await controller.ensureBackendInstance('arcilator');
+  assert.equal(fetchUrls[0], '/default_arcilator.wasm');
+});
+
 test('compiler backend resolves runner-specific wasm path and caches per path', async () => {
   const fetchUrls = [];
   const instances = [];

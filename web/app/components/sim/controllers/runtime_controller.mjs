@@ -23,19 +23,26 @@ export function createSimRuntimeController({
 
   function resolveBackendDef(backend = state.backend) {
     const def = getBackendDef(backend);
-    if (backend !== 'compiler' || typeof currentRunnerPreset !== 'function') {
+    if (typeof currentRunnerPreset !== 'function') {
       return def;
     }
 
     const preset = currentRunnerPreset();
-    const runnerCompilerWasm = String(preset?.compilerWasmPath || '').trim();
-    if (!runnerCompilerWasm) {
+    let overridePath = '';
+
+    if (backend === 'compiler') {
+      overridePath = String(preset?.compilerWasmPath || '').trim();
+    } else if (backend === 'arcilator') {
+      overridePath = String(preset?.arcilatorWasmPath || '').trim();
+    }
+
+    if (!overridePath) {
       return def;
     }
 
     return {
       ...def,
-      wasmPath: runnerCompilerWasm
+      wasmPath: overridePath
     };
   }
 

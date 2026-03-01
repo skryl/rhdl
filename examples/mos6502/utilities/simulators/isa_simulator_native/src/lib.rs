@@ -1,39 +1,34 @@
-//! MOS 6502 ISA-Level Simulator with Ruby bindings
+//! MOS 6502 ISA-Level Simulator with C ABI exports
 //! High-performance instruction-level simulator for the MOS 6502 CPU
 //!
 //! Memory Model:
 //! - Internal 64KB memory for fast CPU access
-//! - Optional I/O handler for memory-mapped I/O ($C000-$CFFF on Apple II)
+//! - Optional host callbacks for memory-mapped I/O ($C000-$CFFF on Apple II)
 //! - External devices can read/write internal memory via peek/poke methods
 //!
 //! Performance optimizations:
 //! - Keyboard and speaker state cached in Rust to avoid FFI calls
 //! - CPU state copied to local variables in tight loop
 //! - I/O region $C100-$CFFF served from internal memory (ROM)
-//! - Only disk controller ($C0E0-$C0EF) requires FFI callbacks
+//! - Only disk controller ($C0E0-$C0EF) requires host callbacks
 
-use magnus::{
-    method, prelude::*, value::Opaque, Error, RArray, RHash, Ruby, TryConvert, Value,
-};
 use std::cell::RefCell;
+use std::ffi::CString;
+use std::os::raw::{c_char, c_int, c_uint, c_ulonglong, c_void};
+use std::ptr;
+use std::slice;
 
 // Status flag bit positions
 const FLAG_C: u8 = 0; // Carry
 const FLAG_Z: u8 = 1; // Zero
 const FLAG_I: u8 = 2; // Interrupt Disable
 const FLAG_D: u8 = 3; // Decimal Mode
-const FLAG_B: u8 = 4; // Break
 const FLAG_V: u8 = 6; // Overflow
 const FLAG_N: u8 = 7; // Negative
 
 // Interrupt vectors
-const NMI_VECTOR: u16 = 0xFFFA;
 const RESET_VECTOR: u16 = 0xFFFC;
 const IRQ_VECTOR: u16 = 0xFFFE;
-
-// Apple II I/O region
-const IO_START: u16 = 0xC000;
-const IO_END: u16 = 0xCFFF;
 
 // Apple II I/O page (actual soft switches)
 const IO_PAGE_START: u16 = 0xC000;
@@ -42,6 +37,26 @@ const IO_PAGE_END: u16 = 0xC0FF;
 // Disk II controller range (slot 6)
 const DISK_IO_START: u16 = 0xC0E0;
 const DISK_IO_END: u16 = 0xC0EF;
+
+type IoReadCallback = extern "C" fn(addr: c_uint, user_data: *mut c_void) -> c_uint;
+type IoWriteCallback = extern "C" fn(addr: c_uint, value: c_uint, user_data: *mut c_void);
+
+#[derive(Clone, Copy)]
+struct IoCallbacks {
+    read: Option<IoReadCallback>,
+    write: Option<IoWriteCallback>,
+    user_data: *mut c_void,
+}
+
+impl Default for IoCallbacks {
+    fn default() -> Self {
+        Self {
+            read: None,
+            write: None,
+            user_data: ptr::null_mut(),
+        }
+    }
+}
 
 /// MOS 6502 CPU state (core without memory)
 pub struct Cpu6502Core {
@@ -227,20 +242,19 @@ impl Default for AppleIIState {
     }
 }
 
-/// Ruby-wrapped CPU simulator with internal memory and optional I/O handler
+/// Native CPU simulator with internal memory and optional host I/O callbacks
 ///
 /// Memory access:
 /// - RAM/ROM ($0000-$BFFF, $D000-$FFFF): Fast internal memory
 /// - I/O page ($C000-$C0FF): Handled in Rust except disk controller
 /// - Expansion ROM ($C100-$CFFF): Fast internal memory
-/// - Disk controller ($C0E0-$C0EF): Calls Ruby I/O handler
+/// - Disk controller ($C0E0-$C0EF): Calls host I/O callbacks
 ///
 /// External devices can access internal memory via peek/poke methods.
-#[magnus::wrap(class = "RHDL::Examples::MOS6502::ISASimulatorNative")]
-struct RubyCpu {
+pub struct RubyCpu {
     cpu: RefCell<Cpu6502Core>,
     memory: RefCell<Vec<u8>>,           // Internal 64KB memory
-    io_handler: RefCell<Option<Opaque<Value>>>,  // Optional I/O handler for disk controller
+    io_callbacks: RefCell<IoCallbacks>, // Optional host callbacks for disk controller
     io_state: RefCell<AppleIIState>,    // Cached Apple II I/O state
 }
 
@@ -249,7 +263,7 @@ impl Default for RubyCpu {
         Self {
             cpu: RefCell::new(Cpu6502Core::new()),
             memory: RefCell::new(vec![0; 0x10000]),
-            io_handler: RefCell::new(None),
+            io_callbacks: RefCell::new(IoCallbacks::default()),
             io_state: RefCell::new(AppleIIState::default()),
         }
     }
@@ -363,30 +377,23 @@ impl RubyCpu {
         }
     }
 
-    // Call Ruby I/O handler for disk access
+    // Call host I/O handler for disk access
     #[inline]
     fn call_ruby_io_read(&self, addr: u16) -> u8 {
-        let handler = self.io_handler.borrow();
-        if let Some(ref opaque) = *handler {
-            let ruby = unsafe { Ruby::get_unchecked() };
-            let io: Value = ruby.get_inner(*opaque);
-            match io.funcall::<_, _, i64>("io_read", (addr as i64,)) {
-                Ok(v) => return v as u8,
-                Err(_) => {}
-            }
+        let callbacks = *self.io_callbacks.borrow();
+        if let Some(read_cb) = callbacks.read {
+            return (read_cb(addr as c_uint, callbacks.user_data) & 0xFF) as u8;
         }
         // Fall through to internal memory for expansion ROM
         self.memory.borrow()[addr as usize]
     }
 
-    // Call Ruby I/O handler for disk access
+    // Call host I/O handler for disk access
     #[inline]
     fn call_ruby_io_write(&self, addr: u16, value: u8) {
-        let handler = self.io_handler.borrow();
-        if let Some(ref opaque) = *handler {
-            let ruby = unsafe { Ruby::get_unchecked() };
-            let io: Value = ruby.get_inner(*opaque);
-            let _ = io.funcall::<_, _, Value>("io_write", (addr as i64, value as i64));
+        let callbacks = *self.io_callbacks.borrow();
+        if let Some(write_cb) = callbacks.write {
+            write_cb(addr as c_uint, value as c_uint, callbacks.user_data);
         }
     }
 
@@ -824,30 +831,34 @@ impl RubyCpu {
     }
 }
 
-// Ruby method implementations
+
+// Native method implementations
 impl RubyCpu {
-    fn rb_initialize(&self, io_handler: Option<Value>) {
-        // If an I/O handler is provided and is not nil, store it
-        if let Some(handler) = io_handler {
-            if !handler.is_nil() {
-                let opaque = Opaque::from(handler);
-                *self.io_handler.borrow_mut() = Some(opaque);
-            }
-        }
+    fn set_io_callbacks(
+        &self,
+        read_cb: Option<IoReadCallback>,
+        write_cb: Option<IoWriteCallback>,
+        user_data: *mut c_void,
+    ) {
+        *self.io_callbacks.borrow_mut() = IoCallbacks {
+            read: read_cb,
+            write: write_cb,
+            user_data,
+        };
     }
 
-    fn rb_reset(&self) {
+    fn reset(&self) {
         self.cpu.borrow_mut().reset();
         // Read reset vector from internal memory
         let pc = self.read_word(RESET_VECTOR);
         self.cpu.borrow_mut().pc = pc;
     }
 
-    fn rb_step(&self) -> u64 {
+    fn step(&self) -> u64 {
         self.step_internal()
     }
 
-    fn rb_run(&self, max_instructions: u32) -> u32 {
+    fn run(&self, max_instructions: u32) -> u32 {
         let mut count = 0;
         while count < max_instructions && !self.cpu.borrow().halted {
             self.step_internal();
@@ -856,7 +867,7 @@ impl RubyCpu {
         count
     }
 
-    fn rb_run_cycles(&self, target_cycles: u64) -> u64 {
+    fn run_cycles(&self, target_cycles: u64) -> u64 {
         let start_cycles = self.cpu.borrow().cycles;
         while (self.cpu.borrow().cycles - start_cycles) < target_cycles && !self.cpu.borrow().halted {
             self.step_internal();
@@ -864,166 +875,125 @@ impl RubyCpu {
         self.cpu.borrow().cycles - start_cycles
     }
 
-    // Register getters
-    fn rb_a(&self) -> u8 { self.cpu.borrow().a }
-    fn rb_x(&self) -> u8 { self.cpu.borrow().x }
-    fn rb_y(&self) -> u8 { self.cpu.borrow().y }
-    fn rb_sp(&self) -> u8 { self.cpu.borrow().sp }
-    fn rb_pc(&self) -> u16 { self.cpu.borrow().pc }
-    fn rb_p(&self) -> u8 { self.cpu.borrow().p }
-    fn rb_cycles(&self) -> u64 { self.cpu.borrow().cycles }
-    fn rb_halted(&self) -> bool { self.cpu.borrow().halted }
-
-    // Register setters
-    fn rb_set_a(&self, v: u8) { self.cpu.borrow_mut().a = v; }
-    fn rb_set_x(&self, v: u8) { self.cpu.borrow_mut().x = v; }
-    fn rb_set_y(&self, v: u8) { self.cpu.borrow_mut().y = v; }
-    fn rb_set_sp(&self, v: u8) { self.cpu.borrow_mut().sp = v; }
-    fn rb_set_pc(&self, v: u16) { self.cpu.borrow_mut().pc = v; }
-    fn rb_set_p(&self, v: u8) { self.cpu.borrow_mut().p = (v & 0xFF) | 0x20; }
-    fn rb_set_cycles(&self, v: u64) { self.cpu.borrow_mut().cycles = v; }
-    fn rb_set_halted(&self, v: bool) { self.cpu.borrow_mut().halted = v; }
-
-    // Flag accessors
-    fn rb_flag_c(&self) -> u8 { self.cpu.borrow().flag(FLAG_C) }
-    fn rb_flag_z(&self) -> u8 { self.cpu.borrow().flag(FLAG_Z) }
-    fn rb_flag_i(&self) -> u8 { self.cpu.borrow().flag(FLAG_I) }
-    fn rb_flag_d(&self) -> u8 { self.cpu.borrow().flag(FLAG_D) }
-    fn rb_flag_b(&self) -> u8 { self.cpu.borrow().flag(FLAG_B) }
-    fn rb_flag_v(&self) -> u8 { self.cpu.borrow().flag(FLAG_V) }
-    fn rb_flag_n(&self) -> u8 { self.cpu.borrow().flag(FLAG_N) }
-
-    fn rb_halted_q(&self) -> bool { self.cpu.borrow().halted }
-
-    // CPU memory access (uses I/O handler for $C000-$CFFF)
-    fn rb_read(&self, addr: u16) -> u8 {
-        self.read(addr)
+    fn a(&self) -> u8 {
+        self.cpu.borrow().a
     }
 
-    fn rb_write(&self, addr: u16, value: u8) {
-        self.write(addr, value);
+    fn x(&self) -> u8 {
+        self.cpu.borrow().x
     }
 
-    // Direct memory access (bypasses I/O handler - for external devices)
-    fn rb_peek(&self, addr: u16) -> u8 {
-        self.memory.borrow()[addr as usize]
+    fn y(&self) -> u8 {
+        self.cpu.borrow().y
     }
 
-    fn rb_poke(&self, addr: u16, value: u8) {
-        self.memory.borrow_mut()[addr as usize] = value;
+    fn sp(&self) -> u8 {
+        self.cpu.borrow().sp
     }
 
-    // Bulk memory operations for loading ROM/RAM
-    fn rb_load_bytes(&self, bytes: RArray, addr: u16) -> Result<(), Error> {
-        let mut mem = self.memory.borrow_mut();
-        for (i, item) in bytes.into_iter().enumerate() {
-            let v: i64 = TryConvert::try_convert(item)?;
-            mem[addr.wrapping_add(i as u16) as usize] = v as u8;
-        }
-        Ok(())
+    fn pc(&self) -> u16 {
+        self.cpu.borrow().pc
     }
 
-    fn rb_read_word(&self, addr: u16) -> u16 {
-        self.read_word(addr)
+    fn p(&self) -> u8 {
+        self.cpu.borrow().p
     }
 
-    fn rb_load_program(&self, bytes: RArray, addr: u16) -> Result<(), Error> {
-        let mut bytes_vec: Vec<u8> = Vec::new();
-        for item in bytes.into_iter() {
-            let v: i64 = TryConvert::try_convert(item)?;
-            bytes_vec.push(v as u8);
-        }
-
-        self.load_program_internal(&bytes_vec, addr);
-        Ok(())
+    fn cycles(&self) -> u64 {
+        self.cpu.borrow().cycles
     }
 
-    fn rb_state(&self) -> Result<RHash, Error> {
-        let ruby = unsafe { Ruby::get_unchecked() };
-        let hash = ruby.hash_new();
-        let cpu = self.cpu.borrow();
-
-        hash.aset(ruby.sym_new("a"), cpu.a as i64)?;
-        hash.aset(ruby.sym_new("x"), cpu.x as i64)?;
-        hash.aset(ruby.sym_new("y"), cpu.y as i64)?;
-        hash.aset(ruby.sym_new("sp"), cpu.sp as i64)?;
-        hash.aset(ruby.sym_new("pc"), cpu.pc as i64)?;
-        hash.aset(ruby.sym_new("p"), cpu.p as i64)?;
-        hash.aset(ruby.sym_new("n"), cpu.flag(FLAG_N) as i64)?;
-        hash.aset(ruby.sym_new("v"), cpu.flag(FLAG_V) as i64)?;
-        hash.aset(ruby.sym_new("b"), cpu.flag(FLAG_B) as i64)?;
-        hash.aset(ruby.sym_new("d"), cpu.flag(FLAG_D) as i64)?;
-        hash.aset(ruby.sym_new("i"), cpu.flag(FLAG_I) as i64)?;
-        hash.aset(ruby.sym_new("z"), cpu.flag(FLAG_Z) as i64)?;
-        hash.aset(ruby.sym_new("c"), cpu.flag(FLAG_C) as i64)?;
-        hash.aset(ruby.sym_new("cycles"), cpu.cycles as i64)?;
-        hash.aset(ruby.sym_new("halted"), cpu.halted)?;
-
-        Ok(hash)
+    fn halted(&self) -> bool {
+        self.cpu.borrow().halted
     }
 
-    fn rb_native(&self) -> bool {
-        true
+    fn set_a(&self, v: u8) {
+        self.cpu.borrow_mut().a = v;
     }
 
-    fn rb_has_io_handler(&self) -> bool {
-        self.io_handler.borrow().is_some()
+    fn set_x(&self, v: u8) {
+        self.cpu.borrow_mut().x = v;
     }
 
-    // Apple II I/O state accessors (for integration with Ruby bus)
+    fn set_y(&self, v: u8) {
+        self.cpu.borrow_mut().y = v;
+    }
 
-    // Inject a key press (called from Ruby when key is pressed)
-    fn rb_inject_key(&self, ascii: u8) {
+    fn set_sp(&self, v: u8) {
+        self.cpu.borrow_mut().sp = v;
+    }
+
+    fn set_pc(&self, v: u16) {
+        self.cpu.borrow_mut().pc = v;
+    }
+
+    fn set_p(&self, v: u8) {
+        self.cpu.borrow_mut().p = v | 0x20;
+    }
+
+    fn set_cycles(&self, v: u64) {
+        self.cpu.borrow_mut().cycles = v;
+    }
+
+    fn set_halted(&self, v: bool) {
+        self.cpu.borrow_mut().halted = v;
+    }
+
+    fn has_io_handler(&self) -> bool {
+        let callbacks = *self.io_callbacks.borrow();
+        callbacks.read.is_some() || callbacks.write.is_some()
+    }
+
+    fn inject_key(&self, ascii: u8) {
         let mut io = self.io_state.borrow_mut();
         io.key_value = ascii & 0x7F;
         io.key_ready = true;
     }
 
-    // Check if key is ready
-    fn rb_key_ready(&self) -> bool {
+    fn key_ready(&self) -> bool {
         self.io_state.borrow().key_ready
     }
 
-    // Get speaker toggle count and reset
-    fn rb_speaker_toggles(&self) -> u64 {
+    fn speaker_toggles(&self) -> u64 {
         self.io_state.borrow().speaker_toggles
     }
 
-    // Reset speaker toggle count
-    fn rb_reset_speaker_toggles(&self) {
+    fn reset_speaker_toggles(&self) {
         self.io_state.borrow_mut().speaker_toggles = 0;
     }
 
-    // Get video state as hash
-    fn rb_video_state(&self) -> Result<RHash, Error> {
-        let ruby = unsafe { Ruby::get_unchecked() };
-        let hash = ruby.hash_new();
+    fn video_state_bits(&self) -> u32 {
         let io = self.io_state.borrow();
-
-        hash.aset(ruby.sym_new("text"), io.video_text)?;
-        hash.aset(ruby.sym_new("mixed"), io.video_mixed)?;
-        hash.aset(ruby.sym_new("page2"), io.video_page2)?;
-        hash.aset(ruby.sym_new("hires"), io.video_hires)?;
-
-        Ok(hash)
+        let mut bits = 0u32;
+        if io.video_text {
+            bits |= VIDEO_STATE_TEXT;
+        }
+        if io.video_mixed {
+            bits |= VIDEO_STATE_MIXED;
+        }
+        if io.video_page2 {
+            bits |= VIDEO_STATE_PAGE2;
+        }
+        if io.video_hires {
+            bits |= VIDEO_STATE_HIRES;
+        }
+        bits
     }
 
-    // Set video state (for synchronization from Ruby)
-    fn rb_set_video_state(&self, text: bool, mixed: bool, page2: bool, hires: bool) {
+    fn set_video_state_bits(&self, bits: u32) {
         let mut io = self.io_state.borrow_mut();
-        io.video_text = text;
-        io.video_mixed = mixed;
-        io.video_page2 = page2;
-        io.video_hires = hires;
+        io.video_text = (bits & VIDEO_STATE_TEXT) != 0;
+        io.video_mixed = (bits & VIDEO_STATE_MIXED) != 0;
+        io.video_page2 = (bits & VIDEO_STATE_PAGE2) != 0;
+        io.video_hires = (bits & VIDEO_STATE_HIRES) != 0;
     }
 
     // Fast hires rendering to braille characters
     // chars_wide: target width in braille chars (default 140 for 80-column terminal)
     // invert: if true, invert pixels (white on black)
-    fn rb_render_hires_braille(&self, chars_wide: u32, invert: bool) -> String {
+    fn render_hires_braille(&self, chars_wide: u32, invert: bool) -> String {
         const HIRES_WIDTH: u32 = 280;
         const HIRES_HEIGHT: u32 = 192;
-        const HIRES_BYTES_PER_LINE: u32 = 40;
 
         let mem = self.memory.borrow();
         let io = self.io_state.borrow();
@@ -1032,6 +1002,7 @@ impl RubyCpu {
         let base: u16 = if io.video_page2 { 0x4000 } else { 0x2000 };
 
         // Braille characters are 2 dots wide × 4 dots tall
+        let chars_wide = chars_wide.max(1);
         let chars_tall = (HIRES_HEIGHT + 3) / 4; // ceil division
 
         // Scale factors (fixed point for speed: multiply by 65536)
@@ -1057,7 +1028,8 @@ impl RubyCpu {
             let row_in_section = row % 64;
             let group = row_in_section / 8;
             let line_in_group = row_in_section % 8;
-            line_addrs[row] = base + (line_in_group as u16 * 0x400)
+            line_addrs[row] = base
+                + (line_in_group as u16 * 0x400)
                 + (group as u16 * 0x80)
                 + (section as u16 * 0x28);
         }
@@ -1121,84 +1093,300 @@ impl RubyCpu {
 
         result
     }
+
+    fn load_bytes(&self, bytes: &[u8], addr: u16) {
+        let mut mem = self.memory.borrow_mut();
+        for (i, &byte) in bytes.iter().enumerate() {
+            mem[addr.wrapping_add(i as u16) as usize] = byte;
+        }
+    }
 }
 
-#[magnus::init]
-fn init(ruby: &Ruby) -> Result<(), Error> {
-    // Define module hierarchy RHDL::Examples::MOS6502
-    let rhdl = ruby.define_module("RHDL")?;
-    let examples = rhdl.define_module("Examples")?;
-    let module = examples.define_module("MOS6502")?;
+const VIDEO_STATE_TEXT: u32 = 1 << 0;
+const VIDEO_STATE_MIXED: u32 = 1 << 1;
+const VIDEO_STATE_PAGE2: u32 = 1 << 2;
+const VIDEO_STATE_HIRES: u32 = 1 << 3;
 
-    // Define class RHDL::Examples::MOS6502::ISASimulatorNative
-    let class = module.define_class("ISASimulatorNative", ruby.class_object())?;
+const REG_A: c_int = 0;
+const REG_X: c_int = 1;
+const REG_Y: c_int = 2;
+const REG_SP: c_int = 3;
+const REG_PC: c_int = 4;
+const REG_P: c_int = 5;
+const REG_CYCLES: c_int = 6;
+const REG_HALTED: c_int = 7;
 
-    class.define_alloc_func::<RubyCpu>();
-    class.define_method("initialize", method!(RubyCpu::rb_initialize, 1))?;
-    class.define_method("reset", method!(RubyCpu::rb_reset, 0))?;
-    class.define_method("step", method!(RubyCpu::rb_step, 0))?;
-    class.define_method("run", method!(RubyCpu::rb_run, 1))?;
-    class.define_method("run_cycles", method!(RubyCpu::rb_run_cycles, 1))?;
+#[no_mangle]
+pub extern "C" fn sim_create() -> *mut RubyCpu {
+    Box::into_raw(Box::new(RubyCpu::default()))
+}
 
-    // Register getters
-    class.define_method("a", method!(RubyCpu::rb_a, 0))?;
-    class.define_method("x", method!(RubyCpu::rb_x, 0))?;
-    class.define_method("y", method!(RubyCpu::rb_y, 0))?;
-    class.define_method("sp", method!(RubyCpu::rb_sp, 0))?;
-    class.define_method("pc", method!(RubyCpu::rb_pc, 0))?;
-    class.define_method("p", method!(RubyCpu::rb_p, 0))?;
-    class.define_method("cycles", method!(RubyCpu::rb_cycles, 0))?;
-    class.define_method("halted", method!(RubyCpu::rb_halted, 0))?;
-    class.define_method("halted?", method!(RubyCpu::rb_halted_q, 0))?;
+#[no_mangle]
+pub unsafe extern "C" fn sim_destroy(ctx: *mut RubyCpu) {
+    if !ctx.is_null() {
+        drop(Box::from_raw(ctx));
+    }
+}
 
-    // Register setters
-    class.define_method("a=", method!(RubyCpu::rb_set_a, 1))?;
-    class.define_method("x=", method!(RubyCpu::rb_set_x, 1))?;
-    class.define_method("y=", method!(RubyCpu::rb_set_y, 1))?;
-    class.define_method("sp=", method!(RubyCpu::rb_set_sp, 1))?;
-    class.define_method("pc=", method!(RubyCpu::rb_set_pc, 1))?;
-    class.define_method("p=", method!(RubyCpu::rb_set_p, 1))?;
-    class.define_method("cycles=", method!(RubyCpu::rb_set_cycles, 1))?;
-    class.define_method("halted=", method!(RubyCpu::rb_set_halted, 1))?;
+#[no_mangle]
+pub unsafe extern "C" fn sim_set_io_callbacks(
+    ctx: *mut RubyCpu,
+    read_cb: Option<IoReadCallback>,
+    write_cb: Option<IoWriteCallback>,
+    user_data: *mut c_void,
+) -> c_int {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+    sim.set_io_callbacks(read_cb, write_cb, user_data);
+    1
+}
 
-    // Flag accessors
-    class.define_method("flag_c", method!(RubyCpu::rb_flag_c, 0))?;
-    class.define_method("flag_z", method!(RubyCpu::rb_flag_z, 0))?;
-    class.define_method("flag_i", method!(RubyCpu::rb_flag_i, 0))?;
-    class.define_method("flag_d", method!(RubyCpu::rb_flag_d, 0))?;
-    class.define_method("flag_b", method!(RubyCpu::rb_flag_b, 0))?;
-    class.define_method("flag_v", method!(RubyCpu::rb_flag_v, 0))?;
-    class.define_method("flag_n", method!(RubyCpu::rb_flag_n, 0))?;
+#[no_mangle]
+pub unsafe extern "C" fn sim_reset(ctx: *mut RubyCpu) -> c_int {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+    sim.reset();
+    1
+}
 
-    // Memory operations
-    class.define_method("read", method!(RubyCpu::rb_read, 1))?;       // CPU access (I/O aware)
-    class.define_method("write", method!(RubyCpu::rb_write, 2))?;     // CPU access (I/O aware)
-    class.define_method("peek", method!(RubyCpu::rb_peek, 1))?;       // Direct memory access
-    class.define_method("poke", method!(RubyCpu::rb_poke, 2))?;       // Direct memory access
-    class.define_method("load_bytes", method!(RubyCpu::rb_load_bytes, 2))?;  // Bulk load
-    class.define_method("read_word", method!(RubyCpu::rb_read_word, 1))?;
-    class.define_method("load_program", method!(RubyCpu::rb_load_program, 2))?;
+#[no_mangle]
+pub unsafe extern "C" fn sim_step(ctx: *mut RubyCpu) -> c_ulonglong {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+    sim.step() as c_ulonglong
+}
 
-    // State
-    class.define_method("state", method!(RubyCpu::rb_state, 0))?;
-    class.define_method("native?", method!(RubyCpu::rb_native, 0))?;
-    class.define_method("has_io_handler?", method!(RubyCpu::rb_has_io_handler, 0))?;
+#[no_mangle]
+pub unsafe extern "C" fn sim_run(ctx: *mut RubyCpu, max_instructions: c_uint) -> c_uint {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+    sim.run(max_instructions) as c_uint
+}
 
-    // Apple II I/O state (for fast keyboard/video/speaker handling)
-    class.define_method("inject_key", method!(RubyCpu::rb_inject_key, 1))?;
-    class.define_method("key_ready?", method!(RubyCpu::rb_key_ready, 0))?;
-    class.define_method("speaker_toggles", method!(RubyCpu::rb_speaker_toggles, 0))?;
-    class.define_method("reset_speaker_toggles", method!(RubyCpu::rb_reset_speaker_toggles, 0))?;
-    class.define_method("video_state", method!(RubyCpu::rb_video_state, 0))?;
-    class.define_method("set_video_state", method!(RubyCpu::rb_set_video_state, 4))?;
-    class.define_method("render_hires_braille", method!(RubyCpu::rb_render_hires_braille, 2))?;
+#[no_mangle]
+pub unsafe extern "C" fn sim_run_cycles(
+    ctx: *mut RubyCpu,
+    target_cycles: c_ulonglong,
+) -> c_ulonglong {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+    sim.run_cycles(target_cycles as u64) as c_ulonglong
+}
 
-    // Constants
-    module.const_set("NMI_VECTOR", NMI_VECTOR as i64)?;
-    module.const_set("RESET_VECTOR", RESET_VECTOR as i64)?;
-    module.const_set("IRQ_VECTOR", IRQ_VECTOR as i64)?;
-    module.const_set("IO_START", IO_START as i64)?;
-    module.const_set("IO_END", IO_END as i64)?;
+#[no_mangle]
+pub unsafe extern "C" fn sim_get_reg(ctx: *mut RubyCpu, reg: c_int) -> c_ulonglong {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
 
-    Ok(())
+    match reg {
+        REG_A => sim.a() as c_ulonglong,
+        REG_X => sim.x() as c_ulonglong,
+        REG_Y => sim.y() as c_ulonglong,
+        REG_SP => sim.sp() as c_ulonglong,
+        REG_PC => sim.pc() as c_ulonglong,
+        REG_P => sim.p() as c_ulonglong,
+        REG_CYCLES => sim.cycles() as c_ulonglong,
+        REG_HALTED => (sim.halted() as c_int) as c_ulonglong,
+        _ => 0,
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_set_reg(ctx: *mut RubyCpu, reg: c_int, value: c_ulonglong) -> c_int {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+
+    match reg {
+        REG_A => sim.set_a((value & 0xFF) as u8),
+        REG_X => sim.set_x((value & 0xFF) as u8),
+        REG_Y => sim.set_y((value & 0xFF) as u8),
+        REG_SP => sim.set_sp((value & 0xFF) as u8),
+        REG_PC => sim.set_pc((value & 0xFFFF) as u16),
+        REG_P => sim.set_p((value & 0xFF) as u8),
+        REG_CYCLES => sim.set_cycles(value as u64),
+        REG_HALTED => sim.set_halted(value != 0),
+        _ => return 0,
+    }
+
+    1
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_read(ctx: *mut RubyCpu, addr: c_uint) -> c_uint {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+    sim.read((addr & 0xFFFF) as u16) as c_uint
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_write(ctx: *mut RubyCpu, addr: c_uint, value: c_uint) -> c_int {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+    sim.write((addr & 0xFFFF) as u16, (value & 0xFF) as u8);
+    1
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_peek(ctx: *mut RubyCpu, addr: c_uint) -> c_uint {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+    sim.memory.borrow()[(addr & 0xFFFF) as usize] as c_uint
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_poke(ctx: *mut RubyCpu, addr: c_uint, value: c_uint) -> c_int {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+    sim.memory.borrow_mut()[(addr & 0xFFFF) as usize] = (value & 0xFF) as u8;
+    1
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_load_bytes(
+    ctx: *mut RubyCpu,
+    data: *const u8,
+    len: usize,
+    addr: c_uint,
+) -> usize {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+
+    let bytes: &[u8] = if len == 0 {
+        &[]
+    } else {
+        if data.is_null() {
+            return 0;
+        }
+        slice::from_raw_parts(data, len)
+    };
+
+    sim.load_bytes(bytes, (addr & 0xFFFF) as u16);
+    len
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_read_word(ctx: *mut RubyCpu, addr: c_uint) -> c_uint {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+    sim.read_word((addr & 0xFFFF) as u16) as c_uint
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_load_program(
+    ctx: *mut RubyCpu,
+    data: *const u8,
+    len: usize,
+    addr: c_uint,
+) -> usize {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+
+    let bytes: &[u8] = if len == 0 {
+        &[]
+    } else {
+        if data.is_null() {
+            return 0;
+        }
+        slice::from_raw_parts(data, len)
+    };
+
+    sim.load_program_internal(bytes, (addr & 0xFFFF) as u16);
+    len
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_has_io_handler(ctx: *mut RubyCpu) -> c_int {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+    sim.has_io_handler() as c_int
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_inject_key(ctx: *mut RubyCpu, ascii: c_uint) -> c_int {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+    sim.inject_key((ascii & 0xFF) as u8);
+    1
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_key_ready(ctx: *mut RubyCpu) -> c_int {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+    sim.key_ready() as c_int
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_speaker_toggles(ctx: *mut RubyCpu) -> c_ulonglong {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+    sim.speaker_toggles() as c_ulonglong
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_reset_speaker_toggles(ctx: *mut RubyCpu) -> c_int {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+    sim.reset_speaker_toggles();
+    1
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_get_video_state(ctx: *mut RubyCpu) -> c_uint {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+    sim.video_state_bits() as c_uint
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_set_video_state(ctx: *mut RubyCpu, bits: c_uint) -> c_int {
+    let Some(sim) = ctx.as_ref() else {
+        return 0;
+    };
+    sim.set_video_state_bits(bits);
+    1
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_render_hires_braille(
+    ctx: *mut RubyCpu,
+    chars_wide: c_uint,
+    invert: c_int,
+) -> *mut c_char {
+    let Some(sim) = ctx.as_ref() else {
+        return ptr::null_mut();
+    };
+
+    let rendered = sim.render_hires_braille(chars_wide.max(1), invert != 0);
+    match CString::new(rendered) {
+        Ok(cstr) => cstr.into_raw(),
+        Err(_) => ptr::null_mut(),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_free_string(ptr_str: *mut c_char) {
+    if !ptr_str.is_null() {
+        let _ = CString::from_raw(ptr_str);
+    }
 }

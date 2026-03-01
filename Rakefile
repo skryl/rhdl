@@ -231,54 +231,59 @@ begin
     end
   end
 
+  # Force compact dot output for parallel runs, independent of .rspec defaults.
+  def run_parallel_rspec(args)
+    sh "RUBYOPT=-W0 #{parallel_rspec_cmd} --quiet --test-options '--format progress' #{args}"
+  end
+
   desc "Run all tests in parallel"
   task :pspec do
-    sh "#{parallel_rspec_cmd} #{SPEC_PATHS[:all]}"
+    run_parallel_rspec(SPEC_PATHS[:all])
   end
 
   namespace :pspec do
     desc "Run lib/rhdl specs in parallel"
     task :lib do
-      sh "#{parallel_rspec_cmd} #{SPEC_PATHS[:lib]}"
+      run_parallel_rspec(SPEC_PATHS[:lib])
     end
 
     desc "Run HDL specs in parallel"
     task :hdl do
-      sh "#{parallel_rspec_cmd} #{SPEC_PATHS[:hdl]}"
+      run_parallel_rspec(SPEC_PATHS[:hdl])
     end
 
     desc "Run MOS 6502 specs in parallel"
     task :mos6502 do
-      sh "#{parallel_rspec_cmd} #{SPEC_PATHS[:mos6502]}"
+      run_parallel_rspec(SPEC_PATHS[:mos6502])
     end
 
     desc "Run Apple II specs in parallel"
     task :apple2 do
-      sh "#{parallel_rspec_cmd} #{SPEC_PATHS[:apple2]}"
+      run_parallel_rspec(SPEC_PATHS[:apple2])
     end
 
     desc "Run RISC-V specs in parallel"
     task :riscv do
-      sh "#{parallel_rspec_cmd} #{SPEC_PATHS[:riscv]}"
+      run_parallel_rspec(SPEC_PATHS[:riscv])
     end
 
     desc "Run tests with specific number of processes"
     task :n, [:count] do |_, args|
       count = args[:count] || ENV['PARALLEL_TEST_PROCESSORS'] || Parallel.processor_count
-      sh "#{parallel_rspec_cmd} -n #{count} #{SPEC_PATHS[:all]}"
+      run_parallel_rspec("-n #{count} #{SPEC_PATHS[:all]}")
     end
 
     desc "Prepare parallel test database (record test file runtimes)"
     task :prepare do
       FileUtils.mkdir_p('tmp')
-      sh "#{parallel_rspec_cmd} --record-runtime #{SPEC_PATHS[:all]}"
+      run_parallel_rspec("--record-runtime #{SPEC_PATHS[:all]}")
     end
 
     desc "Run tests with runtime-based grouping for better balance"
     task :balanced do
       runtime_log = 'tmp/parallel_runtime_rspec.log'
       if File.exist?(runtime_log)
-        sh "#{parallel_rspec_cmd} --group-by runtime --runtime-log #{runtime_log} #{SPEC_PATHS[:all]}"
+        run_parallel_rspec("--group-by runtime --runtime-log #{runtime_log} #{SPEC_PATHS[:all]}")
       else
         puts "No runtime log found. Run 'rake pspec:prepare' first for optimal balancing."
         puts "Falling back to file-count based grouping..."
@@ -361,6 +366,22 @@ namespace :bench do
     load_cli_tasks
     cycles = args[:cycles]&.to_i || 100_000
     RHDL::CLI::Tasks::BenchmarkTask.new(type: :riscv, cycles: cycles).run
+  end
+
+  namespace :web do
+    desc "Benchmark Apple II web WASM backends (Rust AOT compiler, Arcilator, Verilator) via Node.js"
+    task :apple2, [:cycles] do |_, args|
+      load_cli_tasks
+      cycles = args[:cycles]&.to_i || 5_000_000
+      RHDL::CLI::Tasks::BenchmarkTask.new(type: :web_apple2, cycles: cycles).run
+    end
+
+    desc "Benchmark RISC-V web WASM backends (Rust AOT compiler, Arcilator, Verilator) via Node.js"
+    task :riscv, [:cycles] do |_, args|
+      load_cli_tasks
+      cycles = args[:cycles]&.to_i || 100_000
+      RHDL::CLI::Tasks::BenchmarkTask.new(type: :web_riscv, cycles: cycles).run
+    end
   end
 end
 

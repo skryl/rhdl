@@ -4,7 +4,7 @@ import {
   SAMPLE_SELECT_OPTIONS
 } from '../../components/runner/config/presets.mjs';
 
-const BACKEND_IDS = Object.freeze(['interpreter', 'compiler']);
+const BACKEND_IDS = Object.freeze(['interpreter', 'compiler', 'arcilator']);
 
 function requireFn(name, fn) {
   if (typeof fn !== 'function') {

@@ -54,6 +54,22 @@ RSpec.describe RHDL::CLI::Tasks::BenchmarkTask do
         expect { task.run }.to output(/Lanes: 4/).to_stdout
       end
     end
+
+    context 'with type: :web_apple2' do
+      it 'dispatches to benchmark_web_apple2' do
+        task = described_class.new(type: :web_apple2)
+        expect(task).to receive(:benchmark_web_apple2)
+        task.run
+      end
+    end
+
+    context 'with type: :web_riscv' do
+      it 'dispatches to benchmark_web_riscv' do
+        task = described_class.new(type: :web_riscv)
+        expect(task).to receive(:benchmark_web_riscv)
+        task.run
+      end
+    end
   end
 
   describe '#benchmark_gates' do
@@ -92,6 +108,26 @@ RSpec.describe RHDL::CLI::Tasks::BenchmarkTask do
       it 'returns a command string' do
         cmd = task.send(:rspec_cmd)
         expect(cmd).to be_a(String)
+      end
+    end
+
+    describe '#prepare_web_riscv_wasm_backends' do
+      it 'includes verilator backend when riscv_verilator.wasm exists' do
+        benchmark_task_path = described_class.instance_method(:prepare_web_riscv_wasm_backends).source_location.first
+        project_root = File.expand_path('../../../..', File.dirname(benchmark_task_path))
+        verilator_wasm = File.join(project_root, 'web', 'assets', 'pkg', 'riscv_verilator.wasm')
+
+        allow(File).to receive(:exist?).and_call_original
+        allow(File).to receive(:exist?).with(verilator_wasm).and_return(true)
+
+        backends = task.send(:prepare_web_riscv_wasm_backends, [:verilator])
+        expect(backends).to contain_exactly(
+          include(
+            name: 'Verilator',
+            wasm_path: verilator_wasm,
+            ir_json_path: nil
+          )
+        )
       end
     end
   end

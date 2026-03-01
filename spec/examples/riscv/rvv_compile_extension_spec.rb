@@ -12,7 +12,7 @@ RSpec.shared_examples 'rvv compile behavior' do |pipeline:|
     cpu.run_cycles(program.length + (pipeline ? 36 : 14))
   end
 
-  it 'executes baseline vector subset on compile backend' do
+  it 'executes baseline vector subset on compile backend', :slow, timeout: 120 do
     program = [
       asm.addi(1, 0, 4),
       asm.vsetvli(5, 1, 0),

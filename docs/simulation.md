@@ -386,10 +386,10 @@ RHDL provides high-performance Rust implementations for simulation backends.
 
 | Extension | Path | Binding | Purpose |
 |-----------|------|---------|---------|
-| ISA Simulator | `examples/mos6502/utilities/isa_simulator_native/` | Magnus | 6502 CPU emulation |
-| Netlist Interpreter | `lib/rhdl/codegen/netlist/sim/netlist_interpreter/` | Magnus | Gate interpretation |
-| Netlist JIT | `lib/rhdl/codegen/netlist/sim/netlist_jit/` | Cranelift + Magnus | Gate JIT compilation |
-| Netlist Compiler | `lib/rhdl/codegen/netlist/sim/netlist_compiler/` | rustc + Magnus | Gate AOT compilation |
+| ISA Simulator | `examples/mos6502/utilities/isa_simulator_native/` | Fiddle | 6502 CPU emulation |
+| Netlist Interpreter | `lib/rhdl/codegen/netlist/sim/netlist_interpreter/` | Fiddle | Gate interpretation |
+| Netlist JIT | `lib/rhdl/codegen/netlist/sim/netlist_jit/` | Cranelift + Fiddle | Gate JIT compilation |
+| Netlist Compiler | `lib/rhdl/codegen/netlist/sim/netlist_compiler/` | rustc + Fiddle | Gate AOT compilation |
 | IR Interpreter | `lib/rhdl/codegen/ir/sim/ir_interpreter/` | Fiddle | Bytecode interpreter |
 | IR JIT | `lib/rhdl/codegen/ir/sim/ir_jit/` | Cranelift + Fiddle | Bytecode JIT |
 | IR Compiler | `lib/rhdl/codegen/ir/sim/ir_compiler/` | rustc + Fiddle | Bytecode AOT |

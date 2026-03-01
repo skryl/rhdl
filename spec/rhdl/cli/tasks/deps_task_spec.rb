@@ -68,6 +68,7 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
         allow(task).to receive(:command_available?).and_call_original
         allow(task).to receive(:command_available?).with('iverilog').and_return(true)
         allow(task).to receive(:command_available?).with('verilator').and_return(true)
+        allow(task).to receive(:command_available?).with('dot').and_return(true)
         allow(task).to receive(:command_available?).with('firtool').and_return(true)
         allow(task).to receive(:command_available?).with('arcilator').and_return(true)
         allow(task).to receive(:command_available?).with('llc').and_return(true)
@@ -83,6 +84,7 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
         allow(task).to receive(:`).with('iverilog -V 2>&1').and_return("Icarus Verilog version 11.0 (stable)\n")
         allow(task).to receive(:`).with('verilator --version 2>&1').and_return("Verilator 4.038 2020-07-11\n")
         allow(task).to receive(:`).with('firtool --version 2>&1').and_return("firtool-1.62.0\n")
+        allow(task).to receive(:`).with('dot -V 2>&1').and_return("dot - graphviz version 2.43.0\n")
       end
 
       it 'displays platform information' do
@@ -102,6 +104,7 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
           allow(task).to receive(:command_available?).and_call_original
           allow(task).to receive(:command_available?).with('iverilog').and_return(true)
           allow(task).to receive(:command_available?).with('verilator').and_return(true)
+          allow(task).to receive(:command_available?).with('dot').and_return(true)
           allow(task).to receive(:command_available?).with('firtool').and_return(false, true)
           allow(task).to receive(:command_available?).with('arcilator').and_return(false, true)
           allow(task).to receive(:command_available?).with('llc').and_return(false, true)
@@ -116,6 +119,7 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
           allow(task).to receive(:`).with('iverilog -V 2>&1').and_return("Icarus Verilog version 11.0 (stable)\n")
           allow(task).to receive(:`).with('verilator --version 2>&1').and_return("Verilator 4.038 2020-07-11\n")
           allow(task).to receive(:`).with('firtool --version 2>&1').and_return("firtool-1.62.0\n")
+          allow(task).to receive(:`).with('dot -V 2>&1').and_return("dot - graphviz version 2.43.0\n")
         end
 
         it 'attempts to install missing arcilator tools' do
@@ -187,6 +191,7 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
       allow(task).to receive(:command_available?).and_call_original
       allow(task).to receive(:command_available?).with('iverilog').and_return(true)
       allow(task).to receive(:command_available?).with('verilator').and_return(true)
+      allow(task).to receive(:command_available?).with('dot').and_return(true)
       allow(task).to receive(:command_available?).with('firtool').and_return(true)
       allow(task).to receive(:command_available?).with('arcilator').and_return(true)
       allow(task).to receive(:command_available?).with('llc').and_return(true)
@@ -202,6 +207,7 @@ RSpec.describe RHDL::CLI::Tasks::DepsTask do
       allow(task).to receive(:`).with('iverilog -V 2>&1').and_return("Icarus Verilog version 11.0 (stable)\n")
       allow(task).to receive(:`).with('verilator --version 2>&1').and_return("Verilator 4.038 2020-07-11\n")
       allow(task).to receive(:`).with('firtool --version 2>&1').and_return("firtool-1.62.0\n")
+      allow(task).to receive(:`).with('dot -V 2>&1').and_return("dot - graphviz version 2.43.0\n")
     end
 
     it 'displays installer header' do

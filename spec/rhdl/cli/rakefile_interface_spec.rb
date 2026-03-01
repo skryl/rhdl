@@ -70,6 +70,19 @@ RSpec.describe 'Rakefile interface' do
 
       Rake::Task['bench:ir'].invoke
     end
+
+    it 'bench:web:riscv invokes BenchmarkTask with type: :web_riscv and cycles' do
+      task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
+      allow(task_instance).to receive(:run)
+
+      expect(RHDL::CLI::Tasks::BenchmarkTask).to receive(:new) do |opts|
+        expect(opts[:type]).to eq(:web_riscv)
+        expect(opts[:cycles]).to be_a(Integer)
+        task_instance
+      end
+
+      Rake::Task['bench:web:riscv'].invoke
+    end
   end
 
   describe 'benchmark tasks' do
@@ -301,7 +314,7 @@ RSpec.describe 'Rakefile interface' do
       spec:bench spec:bench:all spec:bench:lib spec:bench:hdl spec:bench:mos6502 spec:bench:apple2
       pspec pspec:lib pspec:hdl pspec:mos6502 pspec:apple2 pspec:n pspec:prepare pspec:balanced
       deps deps:install deps:check
-      bench bench:gates bench:ir
+      bench bench:gates bench:ir bench:web:apple2 bench:web:riscv
       benchmark benchmark:timing benchmark:quick
       native native:build native:clean native:check
       web:start web:build web:generate

@@ -10,13 +10,15 @@
 //! - AVX2:   256 lanes (4 × u64)
 //! - AVX-512: 512 lanes (8 × u64)
 
-use magnus::{method, prelude::*, Error, RHash, Ruby, TryConvert, Value};
 use serde::Deserialize;
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ffi::{CStr, CString};
 use std::fs;
 use std::io::Write;
+use std::os::raw::{c_char, c_int};
+use std::ptr;
 use std::process::Command;
+use std::slice;
 
 /// SIMD width configuration
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -241,7 +243,6 @@ impl NetlistCompiledSimulator {
     fn generate_avx2_code(ir: &NetlistIR) -> String {
         let mut code = String::new();
         let width = 4usize;
-        let net_count = ir.net_count;
 
         // Header with SIMD imports
         code.push_str("#![feature(portable_simd)]\n");
@@ -327,7 +328,6 @@ impl NetlistCompiledSimulator {
     fn generate_avx512_code(ir: &NetlistIR) -> String {
         let mut code = String::new();
         let width = 8usize;
-        let net_count = ir.net_count;
 
         // Header with SIMD imports
         code.push_str("#![feature(portable_simd)]\n");
@@ -446,7 +446,7 @@ impl NetlistCompiledSimulator {
         }
     }
 
-    fn generate_dff_update_simd(code: &mut String, ir: &NetlistIR, width: usize, simd_type: &str) {
+    fn generate_dff_update_simd(code: &mut String, ir: &NetlistIR, _width: usize, simd_type: &str) {
         if ir.dffs.is_empty() {
             return;
         }
@@ -690,196 +690,352 @@ impl NetlistCompiledSimulator {
             }
         }
     }
-}
 
-// ============================================================================
-// Ruby bindings
-// ============================================================================
-
-fn ruby_to_u64(value: Value) -> Result<u64, Error> {
-    if let Ok(i) = <i64 as TryConvert>::try_convert(value) {
-        return Ok(i as u64);
-    }
-    let ruby = unsafe { Ruby::get_unchecked() };
-    let str_val: String = value.funcall("to_s", (16i32,))?;
-    u64::from_str_radix(&str_val, 16)
-        .map_err(|e| Error::new(ruby.exception_runtime_error(), format!("Invalid integer: {}", e)))
-}
-
-fn u64_to_ruby(ruby: &Ruby, value: u64) -> Value {
-    if value <= i64::MAX as u64 {
-        ruby.into_value(value as i64)
-    } else {
-        let hex_str = format!("{:x}", value);
-        ruby.eval(&format!("0x{}", hex_str)).unwrap_or_else(|_| ruby.into_value(0i64))
-    }
-}
-
-#[magnus::wrap(class = "RHDL::Codegen::Structure::NetlistCompiler")]
-struct RubyNetlistCompiler {
-    sim: RefCell<NetlistCompiledSimulator>,
-}
-
-impl RubyNetlistCompiler {
-    fn new(json: String, simd_mode: Option<String>) -> Result<Self, Error> {
-        let ruby = unsafe { Ruby::get_unchecked() };
-
-        // Parse SIMD mode or auto-detect
-        let simd_width = match simd_mode.as_deref() {
-            Some("scalar") | Some("64") => SimdWidth::Scalar,
-            Some("avx2") | Some("256") => SimdWidth::Avx2,
-            Some("avx512") | Some("512") => SimdWidth::Avx512,
-            Some("auto") | None => SimdWidth::detect(),
-            Some(other) => return Err(Error::new(
-                ruby.exception_arg_error(),
-                format!("Unknown SIMD mode: {}. Valid: scalar, avx2, avx512, auto", other)
-            )),
-        };
-
-        let sim = NetlistCompiledSimulator::new(&json, simd_width)
-            .map_err(|e| Error::new(ruby.exception_runtime_error(), e))?;
-        Ok(Self { sim: RefCell::new(sim) })
+    fn poke_bus(&mut self, name: &str, values: &[u64]) -> Result<(), String> {
+        let value = values.first().copied().unwrap_or(0);
+        self.poke(name, value)
     }
 
-    fn compile(&self) -> Result<(), Error> {
-        let ruby = unsafe { Ruby::get_unchecked() };
-        self.sim.borrow_mut().compile()
-            .map_err(|e| Error::new(ruby.exception_runtime_error(), e))
+    fn peek_bus(&self, name: &str) -> Result<Vec<u64>, String> {
+        Ok(vec![self.peek(name)?])
     }
 
-    fn compiled(&self) -> bool {
-        self.sim.borrow().compiled
+    fn input_names_csv(&self) -> String {
+        let mut names: Vec<&str> = self.inputs.keys().map(|k| k.as_str()).collect();
+        names.sort_unstable();
+        names.join(",")
     }
 
-    fn generated_code(&self) -> String {
-        self.sim.borrow().generated_code.clone()
+    fn output_names_csv(&self) -> String {
+        let mut names: Vec<&str> = self.outputs.keys().map(|k| k.as_str()).collect();
+        names.sort_unstable();
+        names.join(",")
     }
 
-    fn simd_mode(&self) -> String {
-        match self.sim.borrow().simd_width {
-            SimdWidth::Scalar => "scalar".to_string(),
-            SimdWidth::Avx2 => "avx2".to_string(),
-            SimdWidth::Avx512 => "avx512".to_string(),
-        }
-    }
-
-    fn lanes(&self) -> usize {
-        self.sim.borrow().simd_width.lanes()
-    }
-
-    fn poke(&self, name: String, value: Value) -> Result<(), Error> {
-        let ruby = unsafe { Ruby::get_unchecked() };
-        let v = ruby_to_u64(value)?;
-        self.sim.borrow_mut().poke(&name, v)
-            .map_err(|e| Error::new(ruby.exception_runtime_error(), e))
-    }
-
-    fn peek(&self, name: String) -> Result<Value, Error> {
-        let ruby = unsafe { Ruby::get_unchecked() };
-        let val = self.sim.borrow().peek(&name)
-            .map_err(|e| Error::new(ruby.exception_runtime_error(), e))?;
-        Ok(u64_to_ruby(&ruby, val))
-    }
-
-    fn evaluate(&self) {
-        self.sim.borrow_mut().evaluate();
-    }
-
-    fn tick(&self) {
-        self.sim.borrow_mut().tick();
-    }
-
-    fn run_ticks(&self, n: usize) {
-        self.sim.borrow_mut().run_ticks(n);
-    }
-
-    fn reset(&self) {
-        self.sim.borrow_mut().reset();
-    }
-
-    fn net_count(&self) -> usize {
-        self.sim.borrow().net_count
-    }
-
-    fn dff_count(&self) -> usize {
-        self.sim.borrow().dffs.len()
-    }
-
-    fn input_names(&self) -> Vec<String> {
-        self.sim.borrow().inputs.keys().cloned().collect()
-    }
-
-    fn output_names(&self) -> Vec<String> {
-        self.sim.borrow().outputs.keys().cloned().collect()
-    }
-
-    fn stats(&self) -> Result<RHash, Error> {
-        let ruby = unsafe { Ruby::get_unchecked() };
-        let hash = ruby.hash_new();
-        let sim = self.sim.borrow();
-
-        hash.aset(ruby.sym_new("net_count"), sim.net_count as i64)?;
-        hash.aset(ruby.sym_new("dff_count"), sim.dffs.len() as i64)?;
-        hash.aset(ruby.sym_new("lanes"), sim.simd_width.lanes() as i64)?;
-        hash.aset(ruby.sym_new("simd_width"), sim.simd_width.width() as i64)?;
-        hash.aset(ruby.sym_new("simd_mode"), match sim.simd_width {
+    fn simd_mode_str(&self) -> &'static str {
+        match self.simd_width {
             SimdWidth::Scalar => "scalar",
             SimdWidth::Avx2 => "avx2",
             SimdWidth::Avx512 => "avx512",
-        })?;
-        hash.aset(ruby.sym_new("input_count"), sim.inputs.len() as i64)?;
-        hash.aset(ruby.sym_new("output_count"), sim.outputs.len() as i64)?;
-        hash.aset(ruby.sym_new("compiled"), sim.compiled)?;
-        hash.aset(ruby.sym_new("backend"), "rustc_compiler_simd")?;
-
-        Ok(hash)
-    }
-
-    fn native(&self) -> bool {
-        true
-    }
-
-    fn debug_nets(&self) -> Vec<u64> {
-        self.sim.borrow().nets.clone()
+        }
     }
 }
 
-#[magnus::init]
-fn init(ruby: &Ruby) -> Result<(), Error> {
-    let rhdl = ruby.define_module("RHDL")?;
-    let codegen = rhdl.define_module("Codegen")?;
-    let netlist = codegen.define_module("Netlist")?;
+// ============================================================================
+// C ABI exports (Fiddle)
+// ============================================================================
 
-    let class = netlist.define_class("NetlistCompiler", ruby.class_object())?;
+pub struct NetlistSimContext {
+    sim: NetlistCompiledSimulator,
+}
 
-    class.define_singleton_method("new", magnus::function!(RubyNetlistCompiler::new, 2))?;
-    class.define_method("compile", method!(RubyNetlistCompiler::compile, 0))?;
-    class.define_method("compiled?", method!(RubyNetlistCompiler::compiled, 0))?;
-    class.define_method("generated_code", method!(RubyNetlistCompiler::generated_code, 0))?;
-    class.define_method("simd_mode", method!(RubyNetlistCompiler::simd_mode, 0))?;
-    class.define_method("poke", method!(RubyNetlistCompiler::poke, 2))?;
-    class.define_method("peek", method!(RubyNetlistCompiler::peek, 1))?;
-    class.define_method("evaluate", method!(RubyNetlistCompiler::evaluate, 0))?;
-    class.define_method("tick", method!(RubyNetlistCompiler::tick, 0))?;
-    class.define_method("run_ticks", method!(RubyNetlistCompiler::run_ticks, 1))?;
-    class.define_method("reset", method!(RubyNetlistCompiler::reset, 0))?;
-    class.define_method("net_count", method!(RubyNetlistCompiler::net_count, 0))?;
-    class.define_method("dff_count", method!(RubyNetlistCompiler::dff_count, 0))?;
-    class.define_method("lanes", method!(RubyNetlistCompiler::lanes, 0))?;
-    class.define_method("input_names", method!(RubyNetlistCompiler::input_names, 0))?;
-    class.define_method("output_names", method!(RubyNetlistCompiler::output_names, 0))?;
-    class.define_method("stats", method!(RubyNetlistCompiler::stats, 0))?;
-    class.define_method("native?", method!(RubyNetlistCompiler::native, 0))?;
-    class.define_method("debug_nets", method!(RubyNetlistCompiler::debug_nets, 0))?;
+const SIM_EXEC_EVALUATE: c_int = 0;
+const SIM_EXEC_TICK: c_int = 1;
+const SIM_EXEC_RUN_TICKS: c_int = 2;
+const SIM_EXEC_RESET: c_int = 3;
+const SIM_EXEC_COMPILE: c_int = 4;
+const SIM_EXEC_IS_COMPILED: c_int = 5;
 
-    // Export detected SIMD capability
-    let detected = SimdWidth::detect();
-    netlist.const_set("NETLIST_COMPILER_AVAILABLE", true)?;
-    netlist.const_set("NETLIST_COMPILER_SIMD", match detected {
-        SimdWidth::Scalar => "scalar",
-        SimdWidth::Avx2 => "avx2",
-        SimdWidth::Avx512 => "avx512",
-    })?;
+const SIM_QUERY_NET_COUNT: c_int = 0;
+const SIM_QUERY_GATE_COUNT: c_int = 1;
+const SIM_QUERY_DFF_COUNT: c_int = 2;
+const SIM_QUERY_LANES: c_int = 3;
 
-    Ok(())
+const SIM_BLOB_INPUT_NAMES: c_int = 0;
+const SIM_BLOB_OUTPUT_NAMES: c_int = 1;
+const SIM_BLOB_GENERATED_CODE: c_int = 2;
+const SIM_BLOB_SIMD_MODE: c_int = 3;
+
+fn set_error(error_out: *mut *mut c_char, msg: String) {
+    if error_out.is_null() {
+        return;
+    }
+    let cstr = CString::new(msg).unwrap_or_else(|_| CString::new("error").unwrap());
+    unsafe {
+        *error_out = cstr.into_raw();
+    }
+}
+
+fn clear_error(error_out: *mut *mut c_char) {
+    if error_out.is_null() {
+        return;
+    }
+    unsafe {
+        *error_out = ptr::null_mut();
+    }
+}
+
+unsafe fn read_cstr(ptr: *const c_char) -> Result<String, String> {
+    if ptr.is_null() {
+        return Err("null pointer".to_string());
+    }
+    let s = CStr::from_ptr(ptr)
+        .to_str()
+        .map_err(|e| format!("invalid UTF-8: {}", e))?;
+    Ok(s.to_string())
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_create(
+    json: *const c_char,
+    config: *const c_char,
+    error_out: *mut *mut c_char,
+) -> *mut NetlistSimContext {
+    clear_error(error_out);
+
+    let json = match read_cstr(json) {
+        Ok(v) => v,
+        Err(e) => {
+            set_error(error_out, format!("invalid JSON input: {}", e));
+            return ptr::null_mut();
+        }
+    };
+
+    let simd_width = if config.is_null() {
+        SimdWidth::detect()
+    } else {
+        match read_cstr(config).unwrap_or_else(|_| "auto".to_string()).as_str() {
+            "scalar" | "64" => SimdWidth::Scalar,
+            "avx2" | "256" => SimdWidth::Avx2,
+            "avx512" | "512" => SimdWidth::Avx512,
+            "auto" => SimdWidth::detect(),
+            _ => SimdWidth::detect(),
+        }
+    };
+
+    match NetlistCompiledSimulator::new(&json, simd_width) {
+        Ok(sim) => Box::into_raw(Box::new(NetlistSimContext { sim })),
+        Err(e) => {
+            set_error(error_out, e);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_destroy(ctx: *mut NetlistSimContext) {
+    if !ctx.is_null() {
+        drop(Box::from_raw(ctx));
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_free_error(ptr: *mut c_char) {
+    if !ptr.is_null() {
+        drop(CString::from_raw(ptr));
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_poke_scalar(
+    ctx: *mut NetlistSimContext,
+    name: *const c_char,
+    value: u64,
+    error_out: *mut *mut c_char,
+) -> c_int {
+    clear_error(error_out);
+    if ctx.is_null() {
+        set_error(error_out, "simulator context is null".to_string());
+        return 0;
+    }
+
+    let name = match read_cstr(name) {
+        Ok(v) => v,
+        Err(e) => {
+            set_error(error_out, format!("invalid signal name: {}", e));
+            return 0;
+        }
+    };
+
+    match (*ctx).sim.poke(&name, value) {
+        Ok(()) => 1,
+        Err(e) => {
+            set_error(error_out, e);
+            0
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_poke_bus(
+    ctx: *mut NetlistSimContext,
+    name: *const c_char,
+    values: *const u64,
+    len: usize,
+    error_out: *mut *mut c_char,
+) -> c_int {
+    clear_error(error_out);
+    if ctx.is_null() {
+        set_error(error_out, "simulator context is null".to_string());
+        return 0;
+    }
+    if values.is_null() && len > 0 {
+        set_error(error_out, "values pointer is null".to_string());
+        return 0;
+    }
+
+    let name = match read_cstr(name) {
+        Ok(v) => v,
+        Err(e) => {
+            set_error(error_out, format!("invalid signal name: {}", e));
+            return 0;
+        }
+    };
+
+    let vals = slice::from_raw_parts(values, len);
+    match (*ctx).sim.poke_bus(&name, vals) {
+        Ok(()) => 1,
+        Err(e) => {
+            set_error(error_out, e);
+            0
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_peek_bus(
+    ctx: *mut NetlistSimContext,
+    name: *const c_char,
+    out_values: *mut u64,
+    out_capacity: usize,
+    out_len: *mut usize,
+    error_out: *mut *mut c_char,
+) -> c_int {
+    clear_error(error_out);
+
+    if ctx.is_null() {
+        set_error(error_out, "simulator context is null".to_string());
+        return 0;
+    }
+    if out_len.is_null() {
+        set_error(error_out, "out_len pointer is null".to_string());
+        return 0;
+    }
+
+    let name = match read_cstr(name) {
+        Ok(v) => v,
+        Err(e) => {
+            set_error(error_out, format!("invalid signal name: {}", e));
+            return 0;
+        }
+    };
+
+    match (*ctx).sim.peek_bus(&name) {
+        Ok(values) => {
+            *out_len = values.len();
+            if out_values.is_null() || out_capacity == 0 {
+                return 1;
+            }
+            if out_capacity < values.len() {
+                set_error(
+                    error_out,
+                    format!("output buffer too small: need {}, got {}", values.len(), out_capacity),
+                );
+                return 0;
+            }
+            if !values.is_empty() {
+                ptr::copy_nonoverlapping(values.as_ptr(), out_values, values.len());
+            }
+            1
+        }
+        Err(e) => {
+            set_error(error_out, e);
+            0
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_exec(
+    ctx: *mut NetlistSimContext,
+    op: c_int,
+    arg: usize,
+    error_out: *mut *mut c_char,
+) -> c_int {
+    clear_error(error_out);
+
+    if ctx.is_null() {
+        set_error(error_out, "simulator context is null".to_string());
+        return 0;
+    }
+
+    match op {
+        SIM_EXEC_EVALUATE => {
+            (*ctx).sim.evaluate();
+            1
+        }
+        SIM_EXEC_TICK => {
+            (*ctx).sim.tick();
+            1
+        }
+        SIM_EXEC_RUN_TICKS => {
+            (*ctx).sim.run_ticks(arg);
+            1
+        }
+        SIM_EXEC_RESET => {
+            (*ctx).sim.reset();
+            1
+        }
+        SIM_EXEC_COMPILE => match (*ctx).sim.compile() {
+            Ok(()) => 1,
+            Err(e) => {
+                set_error(error_out, e);
+                0
+            }
+        },
+        SIM_EXEC_IS_COMPILED => {
+            if (*ctx).sim.compiled {
+                1
+            } else {
+                0
+            }
+        }
+        _ => {
+            set_error(error_out, format!("unknown exec op: {}", op));
+            0
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_query(ctx: *const NetlistSimContext, op: c_int) -> usize {
+    if ctx.is_null() {
+        return 0;
+    }
+    match op {
+        SIM_QUERY_NET_COUNT => (*ctx).sim.net_count,
+        SIM_QUERY_GATE_COUNT => 0, // Compiler backend runs codegen instead of gate dispatch.
+        SIM_QUERY_DFF_COUNT => (*ctx).sim.dffs.len(),
+        SIM_QUERY_LANES => (*ctx).sim.simd_width.lanes(),
+        _ => 0,
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sim_blob(
+    ctx: *const NetlistSimContext,
+    op: c_int,
+    out_buf: *mut u8,
+    out_len: usize,
+) -> usize {
+    if ctx.is_null() {
+        return 0;
+    }
+
+    let data = match op {
+        SIM_BLOB_INPUT_NAMES => (*ctx).sim.input_names_csv(),
+        SIM_BLOB_OUTPUT_NAMES => (*ctx).sim.output_names_csv(),
+        SIM_BLOB_GENERATED_CODE => (*ctx).sim.generated_code.clone(),
+        SIM_BLOB_SIMD_MODE => (*ctx).sim.simd_mode_str().to_string(),
+        _ => String::new(),
+    };
+
+    let bytes = data.as_bytes();
+    if out_buf.is_null() || out_len == 0 {
+        return bytes.len();
+    }
+
+    let n = bytes.len().min(out_len);
+    ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, n);
+    n
 }

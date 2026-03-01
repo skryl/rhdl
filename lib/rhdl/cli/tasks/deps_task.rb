@@ -104,6 +104,28 @@ module RHDL
             end
           end
 
+          # Check for graphviz (dot)
+          puts
+          dot_available = command_available?('dot')
+
+          if dot_available
+            version = `dot -V 2>&1`.lines.first&.strip
+            puts "[OK] graphviz is installed: #{version}"
+          else
+            puts "[MISSING] graphviz is not installed"
+            puts
+
+            install_graphviz(platform)
+
+            puts
+            if command_available?('dot')
+              version = `dot -V 2>&1`.lines.first&.strip
+              puts "[OK] graphviz installed successfully: #{version}"
+            else
+              puts "[WARN] graphviz installation may have failed. Check above for errors."
+            end
+          end
+
           puts
           puts '=' * 50
           puts "Dependency check complete."
@@ -222,28 +244,16 @@ module RHDL
         end
 
         def install_iverilog_linux
-          if File.exist?('/etc/debian_version') || command_available?('apt-get')
+          if command_available?('apt-get')
             puts "Installing iverilog via apt-get..."
             if ENV['USER'] == 'root'
               system('apt-get update && apt-get install -y iverilog')
             else
               system('sudo apt-get update && sudo apt-get install -y iverilog')
             end
-          elsif command_available?('dnf')
-            puts "Installing iverilog via dnf..."
-            system('sudo dnf install -y iverilog')
-          elsif command_available?('yum')
-            puts "Installing iverilog via yum..."
-            system('sudo yum install -y iverilog')
-          elsif command_available?('pacman')
-            puts "Installing iverilog via pacman..."
-            system('sudo pacman -S --noconfirm iverilog')
           else
-            puts "Could not detect package manager."
-            puts "Please install iverilog manually:"
-            puts "  Ubuntu/Debian: sudo apt-get install iverilog"
-            puts "  Fedora: sudo dnf install iverilog"
-            puts "  Arch: sudo pacman -S iverilog"
+            puts "apt-get not found. Please install iverilog manually:"
+            puts "  sudo apt-get update && sudo apt-get install -y iverilog"
           end
         end
 
@@ -274,28 +284,16 @@ module RHDL
         end
 
         def install_verilator_linux
-          if File.exist?('/etc/debian_version') || command_available?('apt-get')
+          if command_available?('apt-get')
             puts "Installing verilator via apt-get..."
             if ENV['USER'] == 'root'
               system('apt-get update && apt-get install -y verilator')
             else
               system('sudo apt-get update && sudo apt-get install -y verilator')
             end
-          elsif command_available?('dnf')
-            puts "Installing verilator via dnf..."
-            system('sudo dnf install -y verilator')
-          elsif command_available?('yum')
-            puts "Installing verilator via yum..."
-            system('sudo yum install -y verilator')
-          elsif command_available?('pacman')
-            puts "Installing verilator via pacman..."
-            system('sudo pacman -S --noconfirm verilator')
           else
-            puts "Could not detect package manager."
-            puts "Please install verilator manually:"
-            puts "  Ubuntu/Debian: sudo apt-get install verilator"
-            puts "  Fedora: sudo dnf install verilator"
-            puts "  Arch: sudo pacman -S verilator"
+            puts "apt-get not found. Please install verilator manually:"
+            puts "  sudo apt-get update && sudo apt-get install -y verilator"
           end
         end
 
@@ -327,29 +325,68 @@ module RHDL
         end
 
         def install_arcilator_linux(missing_tools:)
-          if File.exist?('/etc/debian_version') || command_available?('apt-get')
+          if command_available?('apt-get')
+            puts "Installing LLVM tools via apt-get..."
+            if ENV['USER'] == 'root'
+              system('apt-get update && apt-get install -y llvm')
+            else
+              system('sudo apt-get update && sudo apt-get install -y llvm')
+            end
+
             puts "Installing CIRCT tools via apt-get..."
             if ENV['USER'] == 'root'
-              system('apt-get update && apt-get install -y circt llvm')
+              system('apt-get update && apt-get install -y circt')
             else
-              system('sudo apt-get update && sudo apt-get install -y circt llvm')
+              system('sudo apt-get update && sudo apt-get install -y circt')
             end
-          elsif command_available?('dnf')
-            puts "Installing CIRCT tools via dnf..."
-            system('sudo dnf install -y circt llvm')
-          elsif command_available?('yum')
-            puts "Installing CIRCT tools via yum..."
-            system('sudo yum install -y circt llvm')
-          elsif command_available?('pacman')
-            puts "Installing CIRCT tools via pacman..."
-            system('sudo pacman -S --noconfirm circt llvm')
           else
-            puts "Could not detect Linux package manager for CIRCT."
+            puts "apt-get not found. Please install CIRCT tools manually:"
+            puts "  sudo apt-get update && sudo apt-get install -y circt llvm"
           end
 
-          # Fallback for distros/repositories where circt package is unavailable.
+          # Ubuntu repos may not provide circt on all releases (e.g. noble);
+          # fall back to prebuilt CIRCT release for missing tools.
           remaining = missing_commands(missing_tools)
           install_arcilator_from_release(platform: :linux, missing_tools: remaining) unless remaining.empty?
+        end
+
+        def install_graphviz(platform)
+          case platform
+          when :linux
+            install_graphviz_linux
+          when :macos
+            install_graphviz_macos
+          when :windows
+            puts "On Windows, please install Graphviz manually:"
+            puts "  https://graphviz.org/download/"
+          else
+            puts "Unknown platform. Please install graphviz manually."
+          end
+        end
+
+        def install_graphviz_linux
+          if command_available?('apt-get')
+            puts "Installing graphviz via apt-get..."
+            if ENV['USER'] == 'root'
+              system('apt-get update && apt-get install -y graphviz')
+            else
+              system('sudo apt-get update && sudo apt-get install -y graphviz')
+            end
+          else
+            puts "apt-get not found. Please install graphviz manually:"
+            puts "  sudo apt-get update && sudo apt-get install -y graphviz"
+          end
+        end
+
+        def install_graphviz_macos
+          if command_available?('brew')
+            puts "Installing graphviz via Homebrew..."
+            system('brew install graphviz')
+          else
+            puts "Homebrew not found. Please install Homebrew first:"
+            puts "  /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+            puts "Then run: brew install graphviz"
+          end
         end
 
         def install_arcilator_macos(missing_tools:)
@@ -447,11 +484,22 @@ module RHDL
           puts "Installed CIRCT tools into #{install_dir}"
 
           path_entries = ENV.fetch('PATH', '').split(File::PATH_SEPARATOR)
-          return if path_entries.include?(install_dir)
+          unless path_entries.include?(install_dir)
+            ENV['PATH'] = "#{install_dir}#{File::PATH_SEPARATOR}#{ENV.fetch('PATH', '')}"
+            puts
+            puts "Updated PATH for current process: #{install_dir}"
+            puts "Add it permanently with:"
+            puts "  export PATH=\"#{install_dir}:$PATH\""
+          end
 
-          puts
-          puts "Add the install directory to PATH:"
-          puts "  export PATH=\"#{install_dir}:$PATH\""
+          if File.directory?(lib_install_dir)
+            ld_path = ENV.fetch('LD_LIBRARY_PATH', '')
+            ld_entries = ld_path.split(File::PATH_SEPARATOR).reject(&:empty?)
+            unless ld_entries.include?(lib_install_dir)
+              ENV['LD_LIBRARY_PATH'] = ([lib_install_dir] + ld_entries).join(File::PATH_SEPARATOR)
+              puts "Updated LD_LIBRARY_PATH for current process: #{lib_install_dir}"
+            end
+          end
         end
 
         def circt_release_asset_name_for(platform)

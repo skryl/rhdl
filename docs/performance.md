@@ -81,6 +81,17 @@ Benchmarks low-level gate simulation:
 rake bench:gates                # Gate-level toggle benchmark
 ```
 
+### Web WASM Backend Benchmarks
+
+Benchmarks browser-style WASM execution paths for compiler vs arcilator vs verilator backends:
+
+```bash
+rake bench:web:apple2           # Apple II web WASM benchmark
+rake bench:web:apple2[5000000]  # Apple II custom cycle count
+rake bench:web:riscv            # RISC-V xv6 web WASM benchmark
+rake bench:web:riscv[100000]    # RISC-V custom cycle count
+```
+
 ## Backend Selection Guide
 
 ### When to Use Each Backend
