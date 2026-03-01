@@ -30,7 +30,7 @@ This PRD adds an arcilator-to-WASM compilation path so the Apple II can be simul
 **Green:** Build task generates C wrapper from arcilator state JSON, compiles to WASM, copies to `web/assets/pkg/`.
 
 Steps:
-1. Create `lib/rhdl/cli/tasks/web_arcilator_build.rb` with build logic.
+1. Create `lib/rhdl/cli/tasks/utilities/web_apple2_arcilator_build.rb` with build logic.
 2. Generate FIRRTL, run firtool + arcilator, parse state JSON.
 3. Generate C wrapper with correct state offsets and WasmIrSimulator API.
 4. Compile with `clang --target=wasm32` + `wasm-ld` to standalone WASM.
@@ -75,7 +75,7 @@ Exit criteria: Tests pass for build logic; tests skip gracefully when CIRCT tool
 
 ## Implementation Checklist
 
-- [ ] Create `lib/rhdl/cli/tasks/web_arcilator_build.rb`
+- [ ] Create `lib/rhdl/cli/tasks/utilities/web_apple2_arcilator_build.rb`
 - [ ] Create C wrapper template generator
 - [ ] Integrate into `web_generate_task.rb`
 - [ ] Add `arcilator` backend to `backend_defs.mjs`

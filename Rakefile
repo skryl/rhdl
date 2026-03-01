@@ -364,11 +364,18 @@ namespace :bench do
   end
 
   namespace :web do
-    desc "Benchmark Apple II web WASM backends (Rust AOT compiler, Arcilator) via Node.js"
+    desc "Benchmark Apple II web WASM backends (Rust AOT compiler, Arcilator, Verilator) via Node.js"
     task :apple2, [:cycles] do |_, args|
       load_cli_tasks
       cycles = args[:cycles]&.to_i || 5_000_000
       RHDL::CLI::Tasks::BenchmarkTask.new(type: :web_apple2, cycles: cycles).run
+    end
+
+    desc "Benchmark RISC-V web WASM backends (Rust AOT compiler, Arcilator, Verilator) via Node.js"
+    task :riscv, [:cycles] do |_, args|
+      load_cli_tasks
+      cycles = args[:cycles]&.to_i || 100_000
+      RHDL::CLI::Tasks::BenchmarkTask.new(type: :web_riscv, cycles: cycles).run
     end
   end
 end

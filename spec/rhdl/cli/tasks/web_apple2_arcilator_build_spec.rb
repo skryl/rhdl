@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require_relative '../../../../lib/rhdl/cli/tasks/web_arcilator_build'
+require_relative '../../../../lib/rhdl/cli/tasks/utilities/web_apple2_arcilator_build'
 
-RSpec.describe RHDL::CLI::Tasks::WebArcilatorBuild do
+RSpec.describe RHDL::CLI::Tasks::WebApple2ArcilatorBuild do
   let(:mod) { described_class }
 
   describe '.missing_tools' do

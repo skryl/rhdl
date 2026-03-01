@@ -28,6 +28,8 @@ module RHDL
             benchmark_riscv
           when :web_apple2
             benchmark_web_apple2
+          when :web_riscv
+            benchmark_web_riscv
           else
             benchmark_gates
           end
@@ -883,7 +885,7 @@ module RHDL
           print_benchmark_summary(results, cycles)
         end
 
-        # Benchmark Apple II web WASM backends (Rust AOT compiler + Arcilator) via Node.js
+        # Benchmark Apple II web WASM backends (Rust AOT compiler + Arcilator + Verilator) via Node.js
         def benchmark_web_apple2
           rom_path = File.expand_path('../../../../examples/apple2/software/roms/appleiigo.rom', __dir__)
           karateka_path = File.expand_path('../../../../examples/apple2/software/disks/karateka_mem.bin', __dir__)
@@ -970,6 +972,91 @@ module RHDL
           print_benchmark_summary(results, cycles)
         end
 
+        # Benchmark RISC-V web WASM backends (Rust AOT compiler + Arcilator + Verilator) via Node.js
+        def benchmark_web_riscv
+          kernel_path = File.expand_path('../../../../examples/riscv/software/bin/kernel.bin', __dir__)
+          fs_path = File.expand_path('../../../../examples/riscv/software/bin/fs.img', __dir__)
+          bench_script = File.expand_path('../../../../web/bench/riscv_wasm_bench.mjs', __dir__)
+
+          unless File.exist?(kernel_path) && File.exist?(fs_path)
+            puts "Error: xv6 kernel or fs.img not found"
+            puts "  Kernel: #{kernel_path}"
+            puts "  Filesystem: #{fs_path}"
+            return
+          end
+
+          unless command_available?('node')
+            puts "Error: Node.js not found in PATH (required for WASM benchmarks)"
+            return
+          end
+
+          cycles = options[:cycles] || 100_000
+          runner_filter = (ENV['RHDL_BENCH_BACKENDS'] || '')
+            .split(',')
+            .map { |name| name.strip.downcase.to_sym }
+            .reject(&:empty?)
+
+          puts_header("RISC-V Web WASM Benchmark - xv6")
+          puts "Cycles per run: #{cycles}"
+          puts "Kernel: #{kernel_path}"
+          puts "Filesystem: #{fs_path}"
+          puts
+
+          wasm_backends = prepare_web_riscv_wasm_backends(runner_filter)
+          if wasm_backends.empty?
+            puts "No WASM backends available. Ensure CIRCT tools or Rust wasm32 target are installed."
+            return
+          end
+
+          results = []
+
+          wasm_backends.each do |backend|
+            print "\n#{backend[:name]}: "
+            $stdout.flush
+
+            begin
+              print "running #{cycles} cycles... "
+              $stdout.flush
+
+              cmd = ['node', bench_script, backend[:wasm_path], kernel_path, fs_path, cycles.to_s]
+              cmd << backend[:ir_json_path] if backend[:ir_json_path]
+
+              output = `#{cmd.shelljoin} 2>&1`
+              unless $?.success?
+                puts "FAILED"
+                puts "  Error: #{output.lines.first(3).join('  ')}"
+                results << { name: backend[:name], status: :failed, error: output.lines.first&.strip }
+                next
+              end
+
+              data = JSON.parse(output.lines.last)
+
+              puts "done"
+              puts "  WASM size: #{format('%.1f', data['wasm_size'] / 1024.0)} KB"
+              puts "  Init time: #{format('%.3f', data['init_ms'] / 1000.0)}s"
+              puts "  Run time:  #{format('%.3f', data['run_ms'] / 1000.0)}s"
+              puts "  Final PC:  0x#{data['final_pc'].to_s(16).upcase}"
+              puts "  Signals:   #{data['signal_count'] || '-'}"
+
+              results << {
+                name: backend[:name],
+                status: :success,
+                init_time: data['init_ms'] / 1000.0,
+                run_time: data['run_ms'] / 1000.0,
+                cycles_per_sec: data['cycles_per_sec'],
+                final_pc: data['final_pc'],
+                wasm_size: data['wasm_size']
+              }
+            rescue => e
+              puts "FAILED"
+              puts "  Error: #{e.message}"
+              results << { name: backend[:name], status: :failed, error: e.message }
+            end
+          end
+
+          print_benchmark_summary(results, cycles)
+        end
+
         private
 
         def print_benchmark_summary(results, cycles)
@@ -991,16 +1078,13 @@ module RHDL
           # Performance comparison (ratio-centric; do not report absolute speed)
           successful = results.select { |r| r[:status] == :success }
           compiler = successful.find { |r| r[:name] == 'Compiler' }
-          verilator = successful.find { |r| r[:name] == 'Verilator' }
-          if compiler && verilator
-            puts
-            ratio = compiler[:cycles_per_sec] / verilator[:cycles_per_sec]
-            puts "Compiler/Verilator speed ratio: #{format('%.3f', ratio)}x"
-          elsif successful.length >= 2
+          if successful.length >= 2
             puts
             puts "Performance Ratios:"
-            base = successful.first
-            successful[1..].each do |r|
+            base = compiler || successful.first
+            successful.each do |r|
+              next if r[:name] == base[:name]
+
               ratio = r[:cycles_per_sec] / base[:cycles_per_sec]
               puts "  #{r[:name]} vs #{base[:name]}: #{format('%.3f', ratio)}x"
             end
@@ -1073,8 +1157,8 @@ module RHDL
               print "Building arcilator WASM... "
               $stdout.flush
               begin
-                require_relative 'web_arcilator_build'
-                WebArcilatorBuild.build(dest_dir: pkg_dir)
+                require_relative 'utilities/web_apple2_arcilator_build'
+                WebApple2ArcilatorBuild.build(dest_dir: pkg_dir)
                 puts "done"
               rescue => e
                 puts "FAILED (#{e.message})"
@@ -1085,6 +1169,110 @@ module RHDL
               backends << { name: 'Arcilator', wasm_path: arc_wasm, ir_json_path: nil }
             else
               puts "Arcilator WASM: SKIPPED (not available)"
+            end
+          end
+
+          # 3) Verilator WASM
+          if runner_filter.empty? || runner_filter.include?(:verilator)
+            ver_wasm = File.join(pkg_dir, 'apple2_verilator.wasm')
+
+            unless File.exist?(ver_wasm)
+              print "Building verilator WASM... "
+              $stdout.flush
+              begin
+                require_relative 'utilities/web_apple2_verilator_build'
+                WebApple2VerilatorBuild.build(dest_dir: pkg_dir)
+                puts "done"
+              rescue => e
+                puts "FAILED (#{e.message})"
+              end
+            end
+
+            if File.exist?(ver_wasm)
+              backends << { name: 'Verilator', wasm_path: ver_wasm, ir_json_path: nil }
+            else
+              puts "Verilator WASM: SKIPPED (not available)"
+            end
+          end
+
+          backends
+        end
+
+        # Build/locate WASM backends for the web RISC-V benchmark.
+        # Returns an array of { name:, wasm_path:, ir_json_path: } hashes.
+        def prepare_web_riscv_wasm_backends(runner_filter)
+          require 'shellwords'
+
+          project_root = File.expand_path('../../../..', __dir__)
+          pkg_dir = File.join(project_root, 'web', 'assets', 'pkg')
+          backends = []
+
+          # 1) Rust AOT Compiler WASM (RISC-V IR)
+          if runner_filter.empty? || runner_filter.include?(:compiler)
+            compiler_wasm = File.join(pkg_dir, 'ir_compiler_riscv.wasm')
+            ir_json = File.join(project_root, 'web', 'assets', 'fixtures', 'riscv', 'ir', 'riscv.json')
+
+            unless File.exist?(compiler_wasm) && File.exist?(ir_json)
+              print "Building Rust AOT compiler WASM... "
+              $stdout.flush
+              begin
+                build_riscv_compiler_wasm_for_bench(project_root, pkg_dir, ir_json)
+                puts "done"
+              rescue => e
+                puts "FAILED (#{e.message})"
+              end
+            end
+
+            if File.exist?(compiler_wasm) && File.exist?(ir_json)
+              backends << { name: 'Compiler', wasm_path: compiler_wasm, ir_json_path: ir_json }
+            else
+              puts "Compiler WASM: SKIPPED (not available)"
+            end
+          end
+
+          # 2) Arcilator WASM (RISC-V)
+          if runner_filter.empty? || runner_filter.include?(:arcilator)
+            arc_wasm = File.join(pkg_dir, 'riscv_arcilator.wasm')
+
+            unless File.exist?(arc_wasm)
+              print "Building arcilator WASM... "
+              $stdout.flush
+              begin
+                require_relative 'utilities/web_riscv_arcilator_build'
+                WebRiscvArcilatorBuild.build(dest_dir: pkg_dir)
+                puts "done"
+              rescue => e
+                puts "FAILED (#{e.message})"
+              end
+            end
+
+            if File.exist?(arc_wasm)
+              backends << { name: 'Arcilator', wasm_path: arc_wasm, ir_json_path: nil }
+            else
+              puts "Arcilator WASM: SKIPPED (not available)"
+            end
+          end
+
+          # 3) Verilator WASM (RISC-V)
+          if runner_filter.empty? || runner_filter.include?(:verilator)
+            ver_wasm = File.join(pkg_dir, 'riscv_verilator.wasm')
+
+            unless File.exist?(ver_wasm)
+              print "Building verilator WASM... "
+              $stdout.flush
+              begin
+                require_relative 'utilities/web_riscv_verilator_build'
+                WebRiscvVerilatorBuild.build(dest_dir: pkg_dir)
+                puts "done"
+              rescue => e
+                puts "FAILED (#{e.message})"
+              end
+            end
+
+            if File.exist?(ver_wasm)
+              backends << { name: 'Verilator', wasm_path: ver_wasm, ir_json_path: nil }
+            else
+              puts "Verilator WASM: SKIPPED (not available)"
             end
           end
 
@@ -1126,6 +1314,41 @@ module RHDL
 
           FileUtils.mkdir_p(pkg_dir)
           FileUtils.cp(src_wasm, File.join(pkg_dir, 'ir_compiler.wasm'))
+        end
+
+        # Build the Rust AOT compiler WASM and generate the RISC-V IR JSON.
+        def build_riscv_compiler_wasm_for_bench(project_root, pkg_dir, ir_json_path)
+          unless File.exist?(ir_json_path)
+            require 'rhdl'
+            require 'rhdl/codegen'
+            require File.join(project_root, 'examples/riscv/hdl/cpu')
+
+            ir = RHDL::Examples::RISCV::CPU.to_flat_ir(top_name: 'riscv_cpu')
+            ir_data = RHDL::Codegen::IR::IRToJson.convert(ir)
+
+            FileUtils.mkdir_p(File.dirname(ir_json_path))
+            File.write(ir_json_path, ir_data)
+          end
+
+          sim_dir = File.join(project_root, 'lib/rhdl/codegen/ir/sim')
+          compiler_dir = File.join(sim_dir, 'ir_compiler')
+          aot_gen_path = File.join(compiler_dir, 'src/aot_generated.rs')
+
+          unless system('cargo', 'run', '--quiet', '--bin', 'aot_codegen', '--',
+                        ir_json_path, aot_gen_path, chdir: compiler_dir)
+            raise 'AOT code generation failed'
+          end
+
+          unless system('cargo', 'build', '--release', '--target', 'wasm32-unknown-unknown',
+                        '--features', 'aot', chdir: compiler_dir)
+            raise 'Compiler WASM build failed'
+          end
+
+          src_wasm = File.join(compiler_dir, 'target', 'wasm32-unknown-unknown', 'release', 'ir_compiler.wasm')
+          raise "Compiler WASM not found at #{src_wasm}" unless File.exist?(src_wasm)
+
+          FileUtils.mkdir_p(pkg_dir)
+          FileUtils.cp(src_wasm, File.join(pkg_dir, 'ir_compiler_riscv.wasm'))
         end
       end
     end

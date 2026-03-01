@@ -164,6 +164,8 @@ RSpec.describe RHDL::CLI::Tasks::WebGenerateTask do
       allow(task).to receive(:ensure_aot_ir_inputs)
       allow(task).to receive(:run_rustup_target_add!).and_return(true)
       allow(task).to receive(:build_wasm_backend)
+      allow(task).to receive(:build_arcilator_wasm)
+      allow(task).to receive(:build_verilator_wasm)
       allow(File).to receive(:write)
 
       expect(task).to receive(:copy_ghostty_web_assets)
@@ -190,8 +192,21 @@ RSpec.describe RHDL::CLI::Tasks::WebGenerateTask do
         ir_path: described_class::RISCV_AOT_IR_PATH,
         artifact: 'ir_compiler_riscv.wasm'
       )
+      expect(task).to receive(:build_arcilator_wasm)
+      expect(task).to receive(:build_verilator_wasm)
 
       task.send(:build_wasm_backends)
+    end
+  end
+
+  describe '#build_verilator_wasm' do
+    it 'builds both apple2 and riscv verilator artifacts' do
+      task = described_class.new
+
+      expect(task).to receive(:build_apple2_verilator_wasm).ordered
+      expect(task).to receive(:build_riscv_verilator_wasm).ordered
+
+      task.send(:build_verilator_wasm)
     end
   end
 

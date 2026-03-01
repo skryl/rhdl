@@ -2,14 +2,14 @@
 
 require 'spec_helper'
 require 'tmpdir'
-require_relative '../../../../lib/rhdl/cli/tasks/web_arcilator_build'
+require_relative '../../../../lib/rhdl/cli/tasks/utilities/web_apple2_arcilator_build'
 
 # Integration tests for the arcilator WASM build pipeline.
 # These test that the generated C wrapper source actually compiles and links
 # to a valid WASM binary. They require clang and wasm-ld with wasm32 target
 # support but do NOT require firtool or arcilator.
-RSpec.describe 'WebArcilatorBuild WASM compilation integration', :slow do
-  let(:mod) { RHDL::CLI::Tasks::WebArcilatorBuild }
+RSpec.describe 'WebApple2ArcilatorBuild WASM compilation integration', :slow do
+  let(:mod) { RHDL::CLI::Tasks::WebApple2ArcilatorBuild }
 
   let(:offsets) do
     {

@@ -43,6 +43,69 @@ function writeBytes(e, data, ptr) {
   new Uint8Array(e.memory.buffer).set(data, ptr);
 }
 
+function createWasiImports(getMemory) {
+  function writeU32(ptr, value) {
+    const memory = getMemory();
+    if (!memory || !ptr) return;
+    new DataView(memory.buffer).setUint32(n(ptr), value >>> 0, true);
+  }
+
+  function writeU64(ptr, value) {
+    const memory = getMemory();
+    if (!memory || !ptr) return;
+    new DataView(memory.buffer).setBigUint64(n(ptr), BigInt(value), true);
+  }
+
+  return {
+    proc_exit(code) {
+      throw new Error(`WASI proc_exit(${n(code)}) called`);
+    },
+    clock_time_get(_clockId, _precision, outPtr) {
+      // Return realtime in nanoseconds (best effort).
+      writeU64(outPtr, BigInt(Date.now()) * 1_000_000n);
+      return 0;
+    },
+    fd_write(_fd, _iovs, _iovsLen, nwrittenPtr) {
+      writeU32(nwrittenPtr, 0);
+      return 0;
+    },
+    fd_read(_fd, _iovs, _iovsLen, nreadPtr) {
+      writeU32(nreadPtr, 0);
+      return 0;
+    },
+    fd_close(_fd) {
+      return 0;
+    },
+    fd_seek(_fd, _offset, _whence, newOffsetPtr) {
+      writeU64(newOffsetPtr, 0n);
+      return 0;
+    }
+  };
+}
+
+async function instantiateWasm(wasmBytes) {
+  const module = await WebAssembly.compile(wasmBytes);
+  const imports = WebAssembly.Module.imports(module);
+  const hasWasi = imports.some((entry) => entry.module === 'wasi_snapshot_preview1');
+  const hasEnv = imports.some((entry) => entry.module === 'env');
+
+  let instance = null;
+  const importObject = {};
+  if (hasWasi) {
+    importObject.wasi_snapshot_preview1 = createWasiImports(() => instance?.exports?.memory || null);
+  }
+  if (hasEnv) {
+    importObject.env = {
+      emscripten_notify_memory_growth(_index) {
+        return;
+      }
+    };
+  }
+
+  instance = await WebAssembly.instantiate(module, importObject);
+  return instance;
+}
+
 // --------------- main ---------------
 
 const [wasmPath, romPath, ramPath, cyclesStr, irJsonPath] = process.argv.slice(2);
@@ -61,7 +124,7 @@ const ramData    = readFileSync(ramPath);
 const irJson     = irJsonPath ? readFileSync(irJsonPath, 'utf-8') : '';
 
 const t0 = performance.now();
-const { instance } = await WebAssembly.instantiate(wasmBytes, {});
+const instance = await instantiateWasm(wasmBytes);
 const e = instance.exports;
 const loadMs = performance.now() - t0;
 

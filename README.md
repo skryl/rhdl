@@ -614,6 +614,8 @@ rake bench:mos6502[cycles]    # Benchmark MOS 6502 CPU
 rake bench:apple2[cycles]     # Benchmark Apple II full system
 rake bench:gameboy[frames]    # Benchmark GameBoy with Prince of Persia
 rake bench:gates              # Benchmark gate-level simulation
+rake bench:web:apple2[cycles] # Benchmark Apple II web WASM backends
+rake bench:web:riscv[cycles]  # Benchmark RISC-V web WASM backends
 ```
 
 **Sample Results (1M cycles):**
@@ -645,6 +647,8 @@ bundle exec rake pspec:riscv           # Run RISC-V specs in parallel
 bundle exec rake spec:bench:riscv[20]  # Benchmark 20 RISC-V spec files
 bundle exec rake bench:ir[5000000]     # Benchmark IR runners
 bundle exec rake bench:gates           # Benchmark gate-level simulation
+bundle exec rake bench:web:apple2      # Benchmark Apple II web compiler vs arcilator vs verilator
+bundle exec rake bench:web:riscv       # Benchmark RISC-V web compiler vs arcilator vs verilator
 
 # Native backends
 bundle exec rake native:build          # Build native extensions

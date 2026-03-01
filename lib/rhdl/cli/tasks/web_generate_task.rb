@@ -162,13 +162,33 @@ module RHDL
           end
 
           build_arcilator_wasm
+          build_verilator_wasm
         end
 
         def build_arcilator_wasm
-          require_relative 'web_arcilator_build'
-          WebArcilatorBuild.build(dest_dir: PKG_DIR)
+          require_relative 'utilities/web_apple2_arcilator_build'
+          WebApple2ArcilatorBuild.build(dest_dir: PKG_DIR)
         rescue StandardError => e
           warn "WARNING: arcilator WASM build failed: #{e.message}"
+        end
+
+        def build_verilator_wasm
+          build_apple2_verilator_wasm
+          build_riscv_verilator_wasm
+        end
+
+        def build_apple2_verilator_wasm
+          require_relative 'utilities/web_apple2_verilator_build'
+          WebApple2VerilatorBuild.build(dest_dir: PKG_DIR)
+        rescue StandardError => e
+          warn "WARNING: Apple II verilator WASM build failed: #{e.message}"
+        end
+
+        def build_riscv_verilator_wasm
+          require_relative 'utilities/web_riscv_verilator_build'
+          WebRiscvVerilatorBuild.build(dest_dir: PKG_DIR)
+        rescue StandardError => e
+          warn "WARNING: RISC-V verilator WASM build failed: #{e.message}"
         end
 
         def build_mruby_wasm
