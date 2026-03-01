@@ -1,7 +1,7 @@
 import { LitElement, html, css } from 'lit';
 
 class RhdlMemoryView extends LitElement {
-  [key: string]: any;
+  [key: string]: Unsafe;
   static properties = {
     dumpText: { state: true },
     disasmText: { state: true },
@@ -90,7 +90,7 @@ class RhdlMemoryView extends LitElement {
     this.bytesPerRow = 16;
   }
 
-  setViewModel(viewModel: any) {
+  setViewModel(viewModel: Unsafe) {
     this.dumpText = String(viewModel?.dumpText || '');
     this.disasmText = String(viewModel?.disasmText || '');
     this.disasmLines = Array.isArray(viewModel?.disasmLines) ? viewModel.disasmLines : null;
@@ -106,7 +106,7 @@ class RhdlMemoryView extends LitElement {
       : 16;
   }
 
-  updated(changed: any) {
+  updated(changed: Unsafe) {
     if (!this.followPc || this.pcAddress == null) {
       return;
     }
@@ -122,7 +122,7 @@ class RhdlMemoryView extends LitElement {
     }
   }
 
-  scrollPreToLine(pre: any, lineIndex: any) {
+  scrollPreToLine(pre: Unsafe, lineIndex: Unsafe) {
     if (!pre || !Number.isFinite(lineIndex) || lineIndex < 0) {
       return;
     }
@@ -153,7 +153,7 @@ class RhdlMemoryView extends LitElement {
       return this.dumpText;
     }
 
-    return this.dumpRows.map((row: any, rowIndex: any) => html`${row.marker} ${row.addressHex}: ${row.bytes.map((byte: any, idx: any) => {
+    return this.dumpRows.map((row: Unsafe, rowIndex: Unsafe) => html`${row.marker} ${row.addressHex}: ${row.bytes.map((byte: Unsafe, idx: Unsafe) => {
       const classes = [];
       if (byte.changed) {
         classes.push('changed-byte');
@@ -179,7 +179,7 @@ class RhdlMemoryView extends LitElement {
     // The hex field is always 8 chars (padEnd). We match up through the
     // double-space separator, then capture the mnemonic + operands.
     const asmRe = /^((?:>>| {2}) [0-9A-F]+: .{8}  )(.+)$/;
-    return this.disasmLines.map((line: any, i: any) => {
+    return this.disasmLines.map((line: Unsafe, i: Unsafe) => {
       const nl = i < last ? '\n' : '';
       if (line.type === 'fn') {
         return html`<span class="src-fn">${line.text}</span>${nl}`;
@@ -211,7 +211,7 @@ if (!customElements.get('rhdl-memory-view')) {
   customElements.define('rhdl-memory-view', RhdlMemoryView);
 }
 
-export function renderMemoryPanel(dom: any, viewModel: any) {
+export function renderMemoryPanel(dom: Unsafe, viewModel: Unsafe) {
   if (!dom) {
     return;
   }

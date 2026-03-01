@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createSimStatusRuntimeService } from '../../../../app/components/sim/services/status_runtime_service';
 
-function createService(overrides: any = {}) {
+type StatusRuntimeDeps = Parameters<typeof createSimStatusRuntimeService>[0];
+
+function createService(overrides: Partial<StatusRuntimeDeps> = {}) {
   const state = {
     backend: 'compiler',
     cycle: 123,
@@ -41,7 +43,7 @@ test('sim status runtime service describes runtime status and clock options', ()
     sim: {
       signal_count: () => 7,
       reg_count: () => 3,
-      clock_mode: (name: any) => (name === 'clk_14m' ? 'forced' : 'auto'),
+      clock_mode: (name: string) => (name === 'clk_14m' ? 'forced' : 'auto'),
       trace_enabled: () => true,
       trace_change_count: () => 99,
       runner_kind: () => 'apple2',

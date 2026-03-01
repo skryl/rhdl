@@ -43,7 +43,8 @@ test('snapshot filename detection supports accepted extensions', () => {
 
 test('buildApple2SnapshotPayload + parseApple2SnapshotPayload preserve fields', () => {
   const bytes = Uint8Array.from([0x11, 0x22, 0x33]);
-  const payload = buildApple2SnapshotPayload(bytes, 0x200, 'test dump', '2026-02-07T00:00:00.000Z' as any, '$B82A' as any);
+  const payload = buildApple2SnapshotPayload(bytes, 0x200, 'test dump', '2026-02-07T00:00:00.000Z', '$B82A');
+  assert.ok(payload);
 
   assert.equal(payload.kind, DEFAULT_APPLE2_SNAPSHOT_KIND);
   assert.equal(payload.version, DEFAULT_APPLE2_SNAPSHOT_VERSION);
@@ -60,6 +61,7 @@ test('buildApple2SnapshotPayload + parseApple2SnapshotPayload preserve fields', 
 test('parseApple2SnapshotPayload can infer startPc from label text', () => {
   const bytes = Uint8Array.from([0xaa]);
   const payload = buildApple2SnapshotPayload(bytes, 0, 'Karateka dump (PC=$B849)');
+  assert.ok(payload);
   delete payload.startPc;
 
   const parsed = parseApple2SnapshotPayload(payload);

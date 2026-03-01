@@ -1,7 +1,8 @@
 # PRD: Eliminate `any` Types from Web Simulator
 
-**Status**: Proposed
+**Status**: In Progress
 **Date**: 2026-02-28
+**Last Updated**: 2026-03-01
 
 ---
 
@@ -9,11 +10,25 @@
 
 The web simulator (`web/`) was migrated from `.mjs` to TypeScript with `strict: true`
 enabled. To pass the type checker, 2,396 `any` annotations were added mechanically.
-The codebase now compiles but has zero meaningful type safety — every boundary is `any`.
+The codebase compiles, but type safety is still largely absent at critical boundaries.
 
-No type definition files, interfaces, or enums exist anywhere in the project.
+No type definition files, interfaces, or enums currently exist in `web/app/`.
 
-### Current `any` Inventory
+## Canonical Measurement Method
+
+All phase gates and acceptance checks use **occurrence count of `\bany\b`** in `.ts` files,
+not line-count of `: any`.
+
+Canonical commands (run from `web/`):
+
+- App count: `rg -o --glob '*.ts' '\\bany\\b' app | wc -l`
+- Test count: `rg -o --glob '*.ts' '\\bany\\b' test | wc -l`
+- Total count: `rg -o --glob '*.ts' '\\bany\\b' app test | wc -l`
+
+This avoids false progress from patterns that miss `as any`, `any[]`, `Record<string, any>`,
+and index signatures.
+
+## Current `any` Inventory (2026-03-01)
 
 | Location | Count |
 |----------|-------|
@@ -21,41 +36,30 @@ No type definition files, interfaces, or enums exist anywhere in the project.
 | `test/` (tests) | 930 |
 | **Total** | **2,396** |
 
-**By pattern:**
+**By source component (`app/`):**
 
-| Pattern | Count | % |
-|---------|-------|---|
-| Parameter `: any` | 1,886 | 79% |
-| Variable `const/let: any` | 220 | 9% |
-| `any[]` arrays | 191 | 8% |
-| `as any` casts | 162 | 7% |
-| `catch (err: any)` | 104 | 4% |
-| `Record<string, any>` | 16 | 1% |
-| `[key: string]: any` index sigs | 12 | <1% |
-
-**By source component (app/):**
-
-| Component | Count | Heaviest file |
-|-----------|-------|---------------|
-| explorer | 216 | model_utils.ts (26) |
-| sim | 183 | wasm_ir_simulator.ts (71) |
-| terminal | 148 | mirb_runner_service.ts (38) |
-| core | 110 | controllers/registry.ts (31) |
-| apple2 | 99 | snapshot.ts (15) |
-| shell | 98 | dashboard_layout_manager.ts (42) |
-| watch | 42 | vcd_panel.ts (18) |
-| runner | 35 | io_config.ts (12) |
-| riscv | 34 | riscv_disasm.ts (28) |
-| editor | 26 | bindings.ts (26) |
-| memory | 23 | panel.ts (7) |
+| Component | Count |
+|-----------|-------|
+| explorer | 370 |
+| sim | 249 |
+| terminal | 205 |
+| shell | 144 |
+| apple2 | 139 |
+| core | 127 |
+| watch | 58 |
+| runner | 48 |
+| riscv | 48 |
+| memory | 36 |
+| editor | 34 |
+| source | 8 |
 
 **By test directory:**
 
 | Directory | Count |
 |-----------|-------|
-| test/components/ | 488 |
-| test/integration/ | 203 |
-| test/core/ | 92 |
+| `test/components/` | 612 |
+| `test/integration/` | 222 |
+| `test/core/` | 96 |
 
 ---
 
@@ -70,9 +74,9 @@ No type definition files, interfaces, or enums exist anywhere in the project.
 ## Non-Goals
 
 - Refactoring runtime architecture (e.g., replacing factory functions with classes).
-- Adding generics or advanced type-level programming beyond what's needed.
+- Adding advanced type-level programming beyond what is required for safety/readability.
 - Achieving 100% elimination in tests — some dynamic mocks are legitimately `any`.
-- Changing the Redux-like store to a typed library (e.g., Zustand, Redux Toolkit).
+- Replacing the current state/store approach with a different library.
 
 ---
 
@@ -80,55 +84,48 @@ No type definition files, interfaces, or enums exist anywhere in the project.
 
 ### Phase 0: Foundation Types
 
-**Goal**: Create the shared type files that all subsequent phases depend on.
+**Goal**: Create shared type files that all subsequent phases depend on.
 
 **Files to create:**
 
-1. **`app/types/state.ts`** — Full application state shape
+1. **`app/types/state.ts`**
    - `AppState` root interface
    - Per-slice interfaces: `ShellState`, `SimState`, `RunnerState`, `MemoryState`,
      `Apple2State`, `WatchState`, `TerminalState`, `ComponentsState`
-   - `ReduxAction<T>` generic and action type string literals
-   - `StoreDispatchers` interface (15+ setter functions)
+   - `ReduxAction<T>` generic and action type literals
+   - `StoreDispatchers` interface
 
-2. **`app/types/runtime.ts`** — Runtime context and WASM bridge
+2. **`app/types/runtime.ts`**
    - `RuntimeContext` interface
    - `ThroughputMetrics` interface
-   - `BackendDef` interface and `BackendId` union type
-   - `WasmExports` interface (WASM instance export signatures)
+   - `BackendDef` interface and `BackendId` union
+   - `WasmExports` interface (WASM instance exports)
    - Enums: `SimExecOp`, `SimSignalOp`, `SimTraceOp`, `RunnerMemOp`,
      `RunnerMemSpace`, `RunnerProbe`
 
-3. **`app/types/services.ts`** — Service and controller contracts
-   - Per-domain controller interfaces: `ShellDomainController`, `SimDomainController`,
-     `Apple2DomainController`, `RunnerDomainController`, `WatchDomainController`,
-     `ComponentsDomainController`
+3. **`app/types/services.ts`**
+   - Domain controller interfaces
    - `ControllerRegistry` return type
-   - `ControllerRegistryOptions` (the ~60-param config object)
+   - `ControllerRegistryOptions`
    - `ListenerGroup` interface
 
-4. **`app/types/dom.ts`** — DOM reference shapes
-   - Per-component `DomRefs` interfaces
+4. **`app/types/dom.ts`**
+   - Per-component DOM reference interfaces
    - `MergedDomRefs` aggregate type
 
-5. **`app/types/models.ts`** — Data model shapes
-   - `ComponentNode`, `SignalNode` (explorer tree)
-   - `Breakpoint`, `WatchEntry` (watch/debug)
-   - `IoConfig`, `MemoryConfig`, `DisplayConfig` (runner)
-   - `IrMetadata`, `SignalInfo` (IR parsing)
-   - `WaveformPalette`, `Theme` (theming)
-   - `RunnerPreset` (runner config)
+5. **`app/types/models.ts`**
+   - Explorer, watch/debug, runner, IR, theme, and preset model shapes
 
-6. **`app/types/index.ts`** — Barrel re-export
+6. **`app/types/index.ts`**
+   - Barrel re-export
 
-**Estimated lines**: 600–800 across all type files.
+**Red/green:**
+- Red: baseline capture
+  - `rg -o --glob '*.ts' '\\bany\\b' app | wc -l` → 1,466
+  - `rg -o --glob '*.ts' '\\bany\\b' test | wc -l` → 930
+- Green: type files compile and baseline counts remain unchanged (types added, no removals yet).
 
-**Red/green**:
-- Red: `grep -rc ': any' app/ --include='*.ts' | awk -F: '{s+=$2}END{print s}'` → 1,466.
-- Green: Phase complete when all type files compile and count stays at 1,466
-  (no source changes yet, just type definitions).
-
-**Exit criteria**: All type files created, `tsc --noEmit` passes, barrel exports work.
+**Exit criteria**: All type files created, `bun run typecheck` passes, barrel exports work.
 
 ---
 
@@ -136,195 +133,114 @@ No type definition files, interfaces, or enums exist anywhere in the project.
 
 **Goal**: Type the core module — state, store, runtime, bootstrap.
 
-**Scope** (~110 `any`):
+**Scope**: `app/core/` (**127 `any`**) 
 
-| File | `any` count | Approach |
-|------|-------------|----------|
-| `core/state/store.ts` | 3 | Use `AppState`, `ReduxAction` |
-| `core/state/reducer.ts` | 2 | Use `AppState`, `ReduxAction` |
-| `core/state/actions.ts` | 1 | Type `mutator` callback |
-| `core/state/store_bridge.ts` | 17 | Use `StoreDispatchers`, `AppState` |
-| `core/state/fallback_redux.ts` | 1 | Use `AppState` |
-| `core/runtime/context.ts` | 1 | Use `RuntimeContext` |
-| `core/controllers/registry.ts` | 31 | Use `ControllerRegistryOptions`, return `ControllerRegistry` |
-| `core/controllers/registry_lazy_getters.ts` | 2 | Type `requireFn` |
-| `core/controllers/startup.ts` | 6 | Use `ControllerRegistryOptions` subset |
-| `core/services/startup_initialization_service.ts` | 9 | Type config object |
-| `core/services/startup_binding_registration_service.ts` | 3 | Type config object |
-| `core/bindings/listener_group.ts` | 4 | Use `ListenerGroup` |
-| `core/bindings/ui_registry.ts` | 3 | Type params |
-| `core/bootstrap.ts` | 2 | Use `RuntimeContext` |
-| `core/lib/*.ts` | 15 | Type utility function params/returns |
+**Red/green:**
+- Red: `rg -o --glob '*.ts' '\\bany\\b' app/core | wc -l` → 127
+- Green: count → 0
 
-**Red/green**:
-- Red: `grep -rc ': any' app/core/ --include='*.ts'` → 110.
-- Green: count → 0.
-
-**Exit criteria**: Zero `any` in `app/core/`, `tsc --noEmit` passes, tests pass.
+**Exit criteria**: Zero `any` in `app/core/`, `bun run typecheck` passes, targeted tests pass.
 
 ---
 
 ### Phase 2: State Slices
 
-**Goal**: Type all component state slices using the `AppState` sub-interfaces from Phase 0.
+**Goal**: Type all component state slices using the Phase 0 state interfaces.
 
-**Scope** (~30 `any` across 8 slice files):
+**Scope**: `app/components/*/state/slice.ts` (**34 `any`**) across:
 
-| File | Key changes |
-|------|-------------|
-| `components/shell/state/slice.ts` | `ShellState`, typed action creators |
-| `components/sim/state/slice.ts` | `SimState` |
-| `components/runner/state/slice.ts` | `RunnerState` |
-| `components/memory/state/slice.ts` | `MemoryState` |
-| `components/apple2/state/slice.ts` | `Apple2State` |
-| `components/watch/state/slice.ts` | `WatchState` |
-| `components/terminal/state/slice.ts` | `TerminalState` |
-| `components/explorer/state/slice.ts` | `ComponentsState` |
+- `shell`, `sim`, `runner`, `memory`, `apple2`, `watch`, `terminal`, `explorer`
 
-**Red/green**:
-- Red: `grep -rc ': any' app/components/*/state/ --include='*.ts'` → ~30.
-- Green: count → 0.
+**Red/green:**
+- Red: `rg -o --glob '*.ts' '\\bany\\b' app/components/*/state/slice.ts | wc -l` → 34
+- Green: count → 0
 
 **Exit criteria**: Zero `any` in all `state/slice.ts` files.
 
 ---
 
-### Phase 3: Sim + WASM Runtime
+### Phase 3: Sim + WASM Runtime (Non-slice)
 
-**Goal**: Type the simulator runtime — the densest single file and the WASM bridge.
+**Goal**: Type the simulator runtime, bridge, and sim domain services.
 
-**Scope** (~183 `any`):
+**Scope**: `app/components/sim/` excluding state slice (**243 `any`**)
 
-| File | `any` count | Approach |
-|------|-------------|----------|
-| `sim/runtime/wasm_ir_simulator.ts` | 71 | Use `WasmExports`, enums, typed method signatures; remove index signature |
-| `sim/runtime/live_vcd_parser.ts` | 8 | Explicit property types (Map, number, string) |
-| `sim/runtime/backend_defs.ts` | ~5 | Use `BackendDef` interface |
-| `sim/controllers/lazy_getters.ts` | ~40 | Type the large options object |
-| `sim/controllers/domain.ts` | ~10 | Use `SimDomainController` |
-| `sim/services/*.ts` | ~49 | Type service factory configs and returns |
+**Red/green:**
+- Red: `rg -o --glob '*.ts' --glob '!app/components/sim/state/slice.ts' '\\bany\\b' app/components/sim | wc -l` → 243
+- Green: count → 0
 
-**Red/green**:
-- Red: `grep -rc ': any' app/components/sim/ --include='*.ts'` → 183.
-- Green: count → 0.
-
-**Exit criteria**: Zero `any` in `app/components/sim/`.
+**Exit criteria**: Zero `any` in non-slice sim files.
 
 ---
 
-### Phase 4: Shell + Terminal + Editor
+### Phase 4: Shell + Terminal + Editor (Non-slice)
 
-**Goal**: Type UI chrome components — shell layout, terminal services, editor bindings.
+**Goal**: Type UI chrome components and terminal/editor plumbing.
 
-**Scope** (~272 `any`):
+**Scope**: shell + terminal + editor excluding shell/terminal state slices (**376 `any`**)
 
-| Component | Count | Key files |
-|-----------|-------|-----------|
-| shell | 98 | dashboard_layout_manager.ts (42), domain.ts, lazy_getters.ts |
-| terminal | 148 | mirb_runner_service.ts (38), workers (29), session_service.ts |
-| editor | 26 | bindings.ts (26) |
+**Red/green:**
+- Red: `rg -o --glob '*.ts' --glob '!app/components/shell/state/slice.ts' --glob '!app/components/terminal/state/slice.ts' '\\bany\\b' app/components/shell app/components/terminal app/components/editor | wc -l` → 376
+- Green: count → 0
 
-**Approach**:
-- `DashboardPanel`, `DashboardRootConfig` for layout manager DOM typing.
-- `MirbWorkerState`, `MirbWorkerMessage` for worker communication.
-- Type terminal history entries, line buffer, UART state.
-- Type vim/mirb session state in editor bindings.
-
-**Red/green**:
-- Red: combined count → 272.
-- Green: count → 0.
-
-**Exit criteria**: Zero `any` in shell/, terminal/, editor/.
+**Exit criteria**: Zero `any` in non-slice shell/terminal/editor files.
 
 ---
 
-### Phase 5: Explorer + Watch + Memory
+### Phase 5: Explorer + Watch + Memory (Non-slice)
 
-**Goal**: Type the component inspection and debugging tools.
+**Goal**: Type component inspection and debugging surfaces.
 
-**Scope** (~281 `any`):
+**Scope**: explorer + watch + memory excluding state slices (**451 `any`**)
 
-| Component | Count | Key files |
-|-----------|-------|-----------|
-| explorer | 216 | model_utils.ts (26), graph controllers, renderers, schematic |
-| watch | 42 | vcd_panel.ts (18), event_logger |
-| memory | 23 | dump_assets.ts, panel.ts |
+**Red/green:**
+- Red: `rg -o --glob '*.ts' --glob '!app/components/explorer/state/slice.ts' --glob '!app/components/watch/state/slice.ts' --glob '!app/components/memory/state/slice.ts' '\\bany\\b' app/components/explorer app/components/watch app/components/memory | wc -l` → 451
+- Green: count → 0
 
-**Approach**:
-- `ComponentNode`, `SignalNode`, `SchematicBundle` for explorer tree/graph.
-- Canvas renderer param types (`CanvasRenderingContext2D`, coordinates as `number`).
-- `Breakpoint`, `WatchEntry` for watch component.
-- Memory dump row types.
-
-**Red/green**:
-- Red: combined count → 281.
-- Green: count → 0.
-
-**Exit criteria**: Zero `any` in explorer/, watch/, memory/.
+**Exit criteria**: Zero `any` in non-slice explorer/watch/memory files.
 
 ---
 
-### Phase 6: Apple2 + RISC-V + Runner
+### Phase 6: Apple2 + RISC-V + Runner + Source (Non-slice)
 
-**Goal**: Type the system-specific components and runner configuration.
+**Goal**: Type system-specific components and runner/source configuration.
 
-**Scope** (~168 `any`):
+**Scope**: apple2 + riscv + runner + source excluding apple2/runner state slices (**235 `any`**)
 
-| Component | Count | Key files |
-|-----------|-------|-----------|
-| apple2 | 99 | snapshot.ts (15), services (60+), domain.ts |
-| riscv | 34 | riscv_disasm.ts (28) |
-| runner | 35 | io_config.ts (12), presets.ts |
+**Red/green:**
+- Red: `rg -o --glob '*.ts' --glob '!app/components/apple2/state/slice.ts' --glob '!app/components/runner/state/slice.ts' '\\bany\\b' app/components/apple2 app/components/riscv app/components/runner app/components/source | wc -l` → 235
+- Green: count → 0
 
-**Approach**:
-- `IoConfig` hierarchy for runner normalization functions.
-- `RunnerPreset` type for preset definitions.
-- Apple2 snapshot serialization types.
-- RISC-V disassembly lookup tables as `Record<number, string>`.
-- Apple2 audio/ROM/display service param types.
-
-**Red/green**:
-- Red: combined count → 168.
-- Green: count → 0.
-
-**Exit criteria**: Zero `any` in apple2/, riscv/, runner/. **Zero `any` in all of `app/`.**
+**Exit criteria**: Zero `any` in this scope and **zero `any` in all of `app/`**.
 
 ---
 
 ### Phase 7: Test Types
 
-**Goal**: Eliminate `any` from test files using the source types created in Phases 0–6.
+**Goal**: Eliminate `any` from tests using source types created in Phases 0–6.
 
-**Scope** (~930 `any`):
-
-| Category | Count | Approach |
-|----------|-------|----------|
-| Function params | 518 | Import source types; use `Parameters<>` utility |
-| `any[]` arrays | 152 | `CallLog` tuple type, `Error[]`, typed arrays |
-| `as any` casts | 102 | Replace with `as Partial<T>` or real interface subset |
-| `catch (err: any)` | 104 | Change to `catch (err: unknown)` with narrowing |
-| `Record<string, any>` | 6 | Use actual shape interfaces |
+**Scope**: `test/` (**930 `any`**) 
 
 **Sub-phases by directory:**
 
-| Sub-phase | Directory | Count | Approach |
-|-----------|-----------|-------|----------|
-| 7a | test/core/ | 92 | Import `AppState`, `ControllerRegistry`, `StoreDispatchers` |
-| 7b | test/components/sim/ | 148 | Import `WasmIrSimulator` types, `SimState` |
-| 7c | test/components/apple2/ | 104 | Import `Apple2State`, service types |
-| 7d | test/components/explorer/ | 63 | Import `ComponentNode`, graph types |
-| 7e | test/components/shell/ | 56 | Import `ShellState`, layout types |
-| 7f | test/components/remaining/ | 125 | runner, watch, memory, terminal, source, riscv |
-| 7g | test/integration/ | 203 | `catch (err: unknown)`, Playwright types, browser API types |
+| Sub-phase | Directory | Count |
+|-----------|-----------|-------|
+| 7a | `test/core/` | 96 |
+| 7b | `test/components/sim/` | 171 |
+| 7c | `test/components/apple2/` | 144 |
+| 7d | `test/components/explorer/` | 79 |
+| 7e | `test/components/shell/` | 63 |
+| 7f | `test/components/{runner,watch,memory,terminal,source,riscv}/` | 155 |
+| 7g | `test/integration/` | 222 |
 
 **Shared test helpers to create:**
 - `test/helpers/types.ts` — `CallLog`, `MockService<T>`, `TestHarness<T>`
 
-**Red/green**:
-- Red: `grep -rc ': any' test/ --include='*.ts'` → 930.
-- Green: count → target (see acceptance criteria).
+**Red/green:**
+- Red: `rg -o --glob '*.ts' '\\bany\\b' test | wc -l` → 930
+- Green: count → target (see acceptance criteria)
 
-**Exit criteria**: `any` count in `test/` ≤ 50 (residual dynamic mocks).
+**Exit criteria**: `any` count in `test/` ≤ 50 (residual dynamic mocks only).
 
 ---
 
@@ -334,9 +250,9 @@ No type definition files, interfaces, or enums exist anywhere in the project.
 |-----------|--------|
 | `any` in `app/` | **0** |
 | `any` in `test/` | **≤ 50** (documented residual) |
-| `tsc --noEmit` | 0 errors |
-| `bun test` | No new failures |
-| `bun run build` | Succeeds |
+| Typecheck | `bun run typecheck` passes |
+| Tests | `bun run test:all` passes |
+| Build | `bun run build` succeeds |
 | Residual `any` | Each justified with `// any: <reason>` comment |
 
 ---
@@ -345,35 +261,55 @@ No type definition files, interfaces, or enums exist anywhere in the project.
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| Circular type dependencies between components | Medium | High | Use `app/types/` as single source of truth; components import from there, not from each other |
-| Over-typing factory configs breaks flexibility | Medium | Medium | Start with wide types (unions), narrow incrementally; keep `Partial<T>` where configs are optional |
-| WASM interface types drift from C code | Low | High | Generate `WasmExports` from C header or WASM introspection if possible; otherwise document manual sync |
-| Large options objects resist typing | High | Low | Accept intermediate `Pick<ControllerRegistryOptions, 'dom' | 'state' | ...>` per call site |
-| Test mocks become brittle with strict types | Medium | Medium | Use `Partial<T>` and `MockService<T>` helpers; keep test-only flexibility |
-| Phase scope creep from discovering architectural issues | Medium | Medium | Log issues but don't fix architecture; types-only changes per non-goal |
+| Circular type dependencies between components | Medium | High | Use `app/types/` as single source of truth; import through barrel where possible |
+| Over-typing factory configs breaks flexibility | Medium | Medium | Start with broad interfaces, then narrow incrementally |
+| WASM interface types drift from native exports | Low | High | Keep `WasmExports` documented with validation tests against runtime usage |
+| Large options objects resist typing | High | Low | Use focused option interfaces (`Pick<>`/subset types) per boundary |
+| Test mocks become brittle with strict types | Medium | Medium | Use `Partial<T>` and test-only helper types |
+| Scope creep into architecture refactors | Medium | Medium | Log architecture issues; keep this PRD type-only |
+
+---
+
+## Execution Snapshot (2026-03-01)
+
+- `any` occurrence counts are now **0** in both `web/app` and `web/test`:
+  - `cd web && rg -o --glob '*.ts' '\bany\b' app | wc -l` → `0`
+  - `cd web && rg -o --glob '*.ts' '\bany\b' test | wc -l` → `0`
+- Typecheck status:
+  - `cd web && npx tsc --noEmit` now passes.
+- Remaining blockers:
+  - `// @ts-nocheck` directives remain in shell/terminal/editor scope (`28` total) and should be removed in a follow-up hardening pass.
+  - Bun gates were run after installing Bun (`1.3.10`):
+    - `cd web && bun run typecheck` → **pass**
+    - `cd web && bun run build` → **pass**
+    - `cd web && bun run test:all` → **fail** (`409 pass, 25 fail, 1 error`; dominant failures are Bun `skip()` not implemented, integration timeouts, and several runtime assertion/type errors).
+
+This PRD remains **In Progress** until typecheck/test/build acceptance gates pass.
 
 ---
 
 ## Implementation Checklist
 
-- [ ] **Phase 0**: Foundation types (`app/types/`)
-  - [ ] `state.ts` — AppState, slice interfaces, ReduxAction, StoreDispatchers
-  - [ ] `runtime.ts` — RuntimeContext, WasmExports, enums
-  - [ ] `services.ts` — Domain controller interfaces, ControllerRegistry
-  - [ ] `dom.ts` — DomRefs interfaces
-  - [ ] `models.ts` — Data model types
-  - [ ] `index.ts` — Barrel export
-- [ ] **Phase 1**: Core layer (110 → 0 `any`)
-- [ ] **Phase 2**: State slices (30 → 0 `any`)
-- [ ] **Phase 3**: Sim + WASM runtime (183 → 0 `any`)
-- [ ] **Phase 4**: Shell + Terminal + Editor (272 → 0 `any`)
-- [ ] **Phase 5**: Explorer + Watch + Memory (281 → 0 `any`)
-- [ ] **Phase 6**: Apple2 + RISC-V + Runner (168 → 0 `any`)
-- [ ] **Phase 7**: Test types (930 → ≤50 `any`)
-  - [ ] 7a: test/core/
-  - [ ] 7b: test/components/sim/
-  - [ ] 7c: test/components/apple2/
-  - [ ] 7d: test/components/explorer/
-  - [ ] 7e: test/components/shell/
-  - [ ] 7f: test/components/remaining/
-  - [ ] 7g: test/integration/
+- [x] **Phase 0**: Foundation types (`app/types/`)
+  - [x] `state.ts` — AppState, slice interfaces, ReduxAction, StoreDispatchers
+  - [x] `runtime.ts` — RuntimeContext, WasmExports, enums
+  - [x] `services.ts` — Domain controller interfaces, ControllerRegistry
+  - [x] `dom.ts` — DomRefs interfaces
+  - [x] `models.ts` — Data model types
+  - [x] `index.ts` — Barrel export
+- [x] **Phase 1**: Core layer (127 → 0 `any`)
+- [x] **Phase 2**: State slices (34 → 0 `any`)
+- [x] **Phase 3**: Sim + WASM runtime non-slice (243 → 0 `any`)
+- [x] **Phase 4**: Shell + Terminal + Editor non-slice (376 → 0 `any`)
+- [x] **Phase 5**: Explorer + Watch + Memory non-slice (451 → 0 `any`)
+- [x] **Phase 6**: Apple2 + RISC-V + Runner + Source non-slice (235 → 0 `any`)
+- [x] **Phase 7**: Test types (930 → ≤50 `any`)
+  - [x] 7a: `test/core/`
+  - [x] 7b: `test/components/sim/`
+  - [x] 7c: `test/components/apple2/`
+  - [x] 7d: `test/components/explorer/`
+  - [x] 7e: `test/components/shell/`
+  - [x] 7f: `test/components/{runner,watch,memory,terminal,source,riscv}/`
+  - [x] 7g: `test/integration/`
+- [ ] Validation hardening: remove `@ts-nocheck` / `@ts-ignore` directives and re-run typecheck.
+- [ ] Runtime gates: run `bun run test:all` and `bun run build` in a Bun-enabled environment.

@@ -4,14 +4,14 @@ import {
   GENERATED_DEFAULT_RUNNER_ID
 } from './generated_presets';
 
-function asString(value: any, fallback = '') {
+function asString(value: Unsafe, fallback = '') {
   if (typeof value === 'string' && value.trim().length > 0) {
     return value.trim();
   }
   return fallback;
 }
 
-function uniqueTokens(values: any[] = []) {
+function uniqueTokens(values: Unsafe[] = []) {
   const seen = new Set();
   const out = [];
   for (const value of values) {
@@ -25,7 +25,7 @@ function uniqueTokens(values: any[] = []) {
   return out;
 }
 
-function samplePathForPreset(preset: any = null) {
+function samplePathForPreset(preset: Unsafe = null) {
   if (!preset || typeof preset !== 'object') {
     return '';
   }
@@ -45,7 +45,7 @@ const GENERIC_PRESET = Object.freeze({
   usesManualIr: true
 });
 
-const mergedPresets: Record<string, any> = {
+const mergedPresets: Record<string, Unsafe> = {
   generic: GENERIC_PRESET,
   ...(GENERATED_RUNNER_PRESETS && typeof GENERATED_RUNNER_PRESETS === 'object' ? GENERATED_RUNNER_PRESETS : {})
 };
@@ -58,7 +58,7 @@ export const RUNNER_ORDER = Object.freeze(
   uniqueTokens(['generic', ...generatedOrder]).filter((id) => mergedPresets[id])
 );
 
-const normalizedPresets: Record<string, any> = {};
+const normalizedPresets: Record<string, Unsafe> = {};
 for (const id of RUNNER_ORDER) {
   const preset = mergedPresets[id] || {};
   normalizedPresets[id] = {

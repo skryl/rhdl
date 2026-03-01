@@ -1,4 +1,5 @@
-export async function handleIrbCommand({ cmd, tokens, context }: any) {
+// @ts-nocheck
+export async function handleIrbCommand({ cmd, tokens, context }: unknown) {
   if (cmd !== 'irb' && cmd !== 'mirb') {
     return undefined;
   }

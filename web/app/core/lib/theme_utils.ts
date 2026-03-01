@@ -1,12 +1,14 @@
-export function normalizeTheme(theme: any) {
+import type { ThemeId, WaveformPalette } from '../../types/models';
+
+export function normalizeTheme(theme: unknown): ThemeId {
   return theme === 'original' ? 'original' : 'shenzhen';
 }
 
-export function waveformFontFamily(theme: any) {
+export function waveformFontFamily(theme: unknown) {
   return normalizeTheme(theme) === 'shenzhen' ? 'Share Tech Mono' : 'IBM Plex Mono';
 }
 
-export function waveformPalette(theme: any) {
+export function waveformPalette(theme: unknown): WaveformPalette {
   if (normalizeTheme(theme) === 'shenzhen') {
     return {
       bg: [8, 20, 18],

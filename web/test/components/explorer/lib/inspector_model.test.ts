@@ -15,11 +15,30 @@ test('explorer inspector model summarizeExpr handles core shapes', () => {
 });
 
 test('explorer inspector model resolveNodeSignalRef prefers lookup entries', () => {
-  const signal = { name: 'clk', fullName: 'top.clk', liveName: 'top.clk', width: 1 };
+  const signal = {
+    name: 'clk',
+    fullName: 'top.clk',
+    liveName: 'top.clk',
+    width: 1,
+    kind: 'wire',
+    direction: null,
+    declaration: null
+  };
   const ref = resolveNodeSignalRef({
-    state: { components: {} },
+    state: { components: {} } as unknown as Parameters<typeof resolveNodeSignalRef>[0]['state'],
     runtime: {},
-    node: { path: 'top', pathTokens: ['top'] },
+    node: {
+      id: 'top',
+      parentId: null,
+      name: 'top',
+      kind: 'module',
+      path: 'top',
+      pathTokens: ['top'],
+      children: [],
+      signals: [],
+      rawRef: null,
+      _signalKeys: new Set<string>()
+    },
     lookup: new Map([['clk', signal]]),
     signalName: 'clk',
     width: 1
@@ -43,8 +62,16 @@ test('explorer inspector model collects unique expression signal names', () => {
 
 test('explorer inspector model builds lookup across signal aliases', () => {
   const lookup = componentSignalLookup({
-    signals: [{ name: 'clk', fullName: 'top.clk', liveName: 'top.clk' }]
-  });
+    signals: [{
+      name: 'clk',
+      fullName: 'top.clk',
+      liveName: 'top.clk',
+      width: 1,
+      kind: 'wire',
+      direction: null,
+      declaration: null
+    }]
+  } as unknown as Parameters<typeof componentSignalLookup>[0]);
   assert.equal(lookup.has('clk'), true);
   assert.equal(lookup.has('top.clk'), true);
 });

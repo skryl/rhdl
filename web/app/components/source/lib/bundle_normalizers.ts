@@ -1,4 +1,4 @@
-export function normalizeComponentSourceBundle(raw: any) {
+export function normalizeComponentSourceBundle(raw: Unsafe) {
   if (!raw || typeof raw !== 'object') {
     return null;
   }
@@ -40,7 +40,7 @@ export function normalizeComponentSourceBundle(raw: any) {
   };
 }
 
-export function normalizeComponentSchematicBundle(raw: any) {
+export function normalizeComponentSchematicBundle(raw: Unsafe) {
   if (!raw || typeof raw !== 'object') {
     return null;
   }

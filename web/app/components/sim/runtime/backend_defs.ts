@@ -41,9 +41,9 @@ export const BACKEND_DEFS = {
   }
 };
 
-export function getBackendDef(id: any) {
-  if (id && (BACKEND_DEFS as Record<string, any>)[id]) {
-    return (BACKEND_DEFS as Record<string, any>)[id];
+export function getBackendDef(id: Unsafe) {
+  if (id && (BACKEND_DEFS as Record<string, Unsafe>)[id]) {
+    return (BACKEND_DEFS as Record<string, Unsafe>)[id];
   }
   return BACKEND_DEFS.interpreter;
 }

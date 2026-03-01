@@ -11,9 +11,16 @@ import {
 
 // --- helpers ---
 
-function makeReadMemory(bytes: any) {
+type ByteMap = Record<number, number>;
+type StructuredDisasmLine = {
+  text: string;
+  type: 'asm' | 'fn' | 'src';
+  category?: string | null;
+};
+
+function makeReadMemory(bytes: Uint8Array | ByteMap) {
   // bytes: Uint8Array or object { addr: byte, ... }
-  return (start: any, length: any) => {
+  return (start: number, length: number) => {
     const out = new Uint8Array(length);
     for (let i = 0; i < length; i += 1) {
       const addr = (start + i) >>> 0;
@@ -28,34 +35,34 @@ function makeReadMemory(bytes: any) {
 }
 
 // Encode a 32-bit instruction into little-endian bytes at address in a map.
-function placeInst32(map: any, addr: any, inst: any) {
+function placeInst32(map: ByteMap, addr: number, inst: number) {
   map[addr] = inst & 0xff;
   map[addr + 1] = (inst >> 8) & 0xff;
   map[addr + 2] = (inst >> 16) & 0xff;
   map[addr + 3] = (inst >> 24) & 0xff;
 }
 
-function placeInst16(map: any, addr: any, inst: any) {
+function placeInst16(map: ByteMap, addr: number, inst: number) {
   map[addr] = inst & 0xff;
   map[addr + 1] = (inst >> 8) & 0xff;
 }
 
 // RV32I encoding helpers (matching assembler.rb)
-function encodeR(rd: any, rs1: any, rs2: any, funct3: any, funct7: any, opcode: any) {
+function encodeR(rd: number, rs1: number, rs2: number, funct3: number, funct7: number, opcode: number) {
   return ((funct7 << 25) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | opcode) >>> 0;
 }
 
-function encodeI(rd: any, rs1: any, imm: any, funct3: any, opcode: any) {
+function encodeI(rd: number, rs1: number, imm: number, funct3: number, opcode: number) {
   return (((imm & 0xfff) << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | opcode) >>> 0;
 }
 
-function encodeS(rs1: any, rs2: any, imm: any, funct3: any, opcode: any) {
+function encodeS(rs1: number, rs2: number, imm: number, funct3: number, opcode: number) {
   const imm11_5 = (imm >> 5) & 0x7f;
   const imm4_0 = imm & 0x1f;
   return ((imm11_5 << 25) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | (imm4_0 << 7) | opcode) >>> 0;
 }
 
-function encodeB(rs1: any, rs2: any, imm: any, funct3: any, opcode: any) {
+function encodeB(rs1: number, rs2: number, imm: number, funct3: number, opcode: number) {
   const imm12 = (imm >> 12) & 0x1;
   const imm10_5 = (imm >> 5) & 0x3f;
   const imm4_1 = (imm >> 1) & 0xf;
@@ -64,11 +71,11 @@ function encodeB(rs1: any, rs2: any, imm: any, funct3: any, opcode: any) {
     (funct3 << 12) | (imm4_1 << 8) | (imm11 << 7) | opcode) >>> 0;
 }
 
-function encodeU(rd: any, imm: any, opcode: any) {
+function encodeU(rd: number, imm: number, opcode: number) {
   return (((imm & 0xfffff) << 12) | (rd << 7) | opcode) >>> 0;
 }
 
-function encodeJ(rd: any, imm: any, opcode: any) {
+function encodeJ(rd: number, imm: number, opcode: number) {
   const imm20 = (imm >> 20) & 0x1;
   const imm10_1 = (imm >> 1) & 0x3ff;
   const imm11 = (imm >> 11) & 0x1;
@@ -343,7 +350,7 @@ test('decode16: c.ebreak', () => {
 // --- disassembleRiscvLines integration tests ---
 
 test('disassembleRiscvLines produces formatted output with PC highlight', () => {
-  const mem = {};
+  const mem: ByteMap = {};
   const base = 0x80000000;
   placeInst32(mem, base, encodeI(0, 0, 0, 0b000, OP_IMM)); // nop
   placeInst32(mem, base + 4, encodeI(10, 0, 42, 0b000, OP_IMM)); // li a0, 42
@@ -364,7 +371,7 @@ test('disassembleRiscvLines produces formatted output with PC highlight', () => 
 });
 
 test('disassembleRiscvLines handles mixed 32-bit and 16-bit instructions', () => {
-  const mem = {};
+  const mem: ByteMap = {};
   const base = 0x80000000;
   placeInst32(mem, base, encodeI(0, 0, 0, 0b000, OP_IMM)); // nop (32-bit)
   // c.nop = 0x0001 (16-bit)
@@ -386,7 +393,7 @@ test('disassembleRiscvLines handles mixed 32-bit and 16-bit instructions', () =>
 });
 
 test('disassembleRiscvLines shows ??? for unknown encodings', () => {
-  const mem = {};
+  const mem: ByteMap = {};
   const base = 0;
   // 0x0000007f has opcode 0b1111111 which is unknown
   placeInst32(mem, base, 0x0000007f);
@@ -521,7 +528,7 @@ test('classifyMnemonic returns null for unknown/invalid', () => {
 // --- structured output tests ---
 
 test('disassembleRiscvLines with structured option returns objects', () => {
-  const mem = {};
+  const mem: ByteMap = {};
   const base = 0x80000000;
   placeInst32(mem, base, encodeI(0, 0, 0, 0b000, OP_IMM)); // nop
   placeInst32(mem, base + 4, encodeI(10, 0, 42, 0b000, OP_IMM)); // li a0, 42
@@ -531,17 +538,18 @@ test('disassembleRiscvLines with structured option returns objects', () => {
     base, 3, makeReadMemory(mem),
     { highlightPc: base + 4, addressSpace: 0x100000000, structured: true }
   );
+  const structuredLines = lines as StructuredDisasmLine[];
 
-  assert.equal(lines.length, 3);
-  assert.equal((lines[0] as any).type, 'asm');
-  assert.equal((lines[0] as any).category, 'imm'); // nop
-  assert.match((lines[0] as any).text, /nop$/);
+  assert.equal(structuredLines.length, 3);
+  assert.equal(structuredLines[0].type, 'asm');
+  assert.equal(structuredLines[0].category, 'imm'); // nop
+  assert.match(structuredLines[0].text, /nop$/);
 
-  assert.equal((lines[1] as any).type, 'asm');
-  assert.equal((lines[1] as any).category, 'imm'); // li
-  assert.match((lines[1] as any).text, /^>>/);
+  assert.equal(structuredLines[1].type, 'asm');
+  assert.equal(structuredLines[1].category, 'imm'); // li
+  assert.match(structuredLines[1].text, /^>>/);
 
-  assert.equal((lines[2] as any).type, 'asm');
-  assert.equal((lines[2] as any).category, 'jump'); // ret
-  assert.match((lines[2] as any).text, /ret$/);
+  assert.equal(structuredLines[2].type, 'asm');
+  assert.equal(structuredLines[2].category, 'jump'); // ret
+  assert.match(structuredLines[2].text, /ret$/);
 });

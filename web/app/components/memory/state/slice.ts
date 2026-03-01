@@ -3,9 +3,23 @@ export const memoryActionTypes = {
   SET_MEMORY_SHOW_SOURCE: 'memory/setShowSource'
 };
 
+type MemoryAction = {
+  type?: string;
+  payload?: unknown;
+};
+
+type MemoryState = {
+  memory?: {
+    followPc?: boolean;
+    showSource?: boolean;
+    [key: string]: unknown;
+  } | null;
+  [key: string]: unknown;
+};
+
 export const memoryActions = {
-  setMemoryFollowPc: (follow: any) => ({ type: memoryActionTypes.SET_MEMORY_FOLLOW_PC, payload: !!follow }),
-  setMemoryShowSource: (show: any) => ({ type: memoryActionTypes.SET_MEMORY_SHOW_SOURCE, payload: !!show })
+  setMemoryFollowPc: (follow: unknown) => ({ type: memoryActionTypes.SET_MEMORY_FOLLOW_PC, payload: !!follow }),
+  setMemoryShowSource: (show: unknown) => ({ type: memoryActionTypes.SET_MEMORY_SHOW_SOURCE, payload: !!show })
 };
 
 export function createMemoryStateSlice() {
@@ -19,7 +33,7 @@ export function createMemoryStateSlice() {
   };
 }
 
-export function reduceMemoryState(state: any, action: any = {}) {
+export function reduceMemoryState(state: MemoryState, action: MemoryAction = {}) {
   switch (action.type) {
     case memoryActionTypes.SET_MEMORY_FOLLOW_PC:
       if (!state.memory || typeof state.memory !== 'object') {

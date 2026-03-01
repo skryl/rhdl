@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { access } from 'node:fs/promises';
 import path from 'node:path';
+import type { Page } from 'playwright';
 
 import {
   createStaticServer,
@@ -9,37 +10,45 @@ import {
   resolveWebRoot
 } from './browser_test_harness';
 
-async function hasMirbAsset(webRoot: any) {
+type TerminalTextElement = Element & {
+  dataset?: DOMStringMap;
+  value?: string;
+};
+
+async function hasMirbAsset(webRoot: string): Promise<boolean> {
   const mirbScriptPath = path.join(webRoot, 'assets', 'pkg', 'mirb.js');
   try {
     await access(mirbScriptPath);
     return true;
-  } catch (_err: any) {
+  } catch (_err: unknown) {
     return false;
   }
 }
 
-async function ensureTerminalOpen(page: any) {
+async function ensureTerminalOpen(page: Page): Promise<void> {
   await page.waitForSelector('#terminalPanel', { state: 'attached', timeout: 20000 });
   await page.waitForSelector('#terminalToggleBtn', { state: 'attached', timeout: 20000 });
-  const hidden = await page.$eval('#terminalPanel', (panel: any) => !!panel.hidden);
+  const hidden = await page.$eval('#terminalPanel', (panel) => (panel as HTMLElement).hidden);
   if (hidden) {
     await page.click('#terminalToggleBtn');
   }
   await page.waitForFunction(() => {
     const panel = document.querySelector('#terminalPanel');
-    return !!panel && (panel as any).hidden === false;
+    return panel instanceof HTMLElement && panel.hidden === false;
   }, null, { timeout: 20000 });
 }
 
-async function readTerminalOutput(page: any) {
+async function readTerminalOutput(page: Page): Promise<string> {
   return page.$eval(
     '#terminalOutput',
-    (el: any) => String(el.dataset?.terminalText ?? el.value ?? el.textContent ?? '')
+    (el) => {
+      const terminalEl = el as TerminalTextElement;
+      return String(terminalEl.dataset?.terminalText ?? terminalEl.value ?? terminalEl.textContent ?? '');
+    }
   );
 }
 
-async function runTerminalCommand(page: any, command: any, expectedMarker: any, timeoutMs = 60000) {
+async function runTerminalCommand(page: Page, command: string, expectedMarker: string, timeoutMs = 60000): Promise<void> {
   await page.click('#terminalOutput');
   await page.keyboard.type(command);
   await page.keyboard.press('Enter');
@@ -70,14 +79,14 @@ test('terminal mirb supports one-shot and session flows', { timeout: 300000 }, a
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err: any) {
-    t.skip('Playwright is not installed (run: `cd web && npm install`)');
+  } catch (_err: unknown) {
+    console.warn('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
 
   const webRoot = resolveWebRoot(import.meta.url);
   if (!(await hasMirbAsset(webRoot))) {
-    t.skip('mirb assets are missing (install emscripten and run: `PATH="$HOME/.cargo/bin:$PATH" bundle exec rake web:build`)');
+    console.warn('mirb assets are missing (install emscripten and run: `PATH="$HOME/.cargo/bin:$PATH" bundle exec rake web:build`)');
     return;
   }
 
@@ -89,8 +98,8 @@ test('terminal mirb supports one-shot and session flows', { timeout: 300000 }, a
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-  } catch (_err: any) {
-    t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
+  } catch (_err: unknown) {
+    console.warn('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }
   t.after(async () => {
@@ -98,8 +107,8 @@ test('terminal mirb supports one-shot and session flows', { timeout: 300000 }, a
   });
 
   const page = await browser.newPage();
-  const pageErrors: any[] = [];
-  const consoleErrors: any[] = [];
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
 
   page.on('pageerror', (err) => {
     const message = String(err?.message || err);

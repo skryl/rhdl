@@ -5,11 +5,24 @@ export const shellActionTypes = {
   SET_TERMINAL_OPEN: 'app/setTerminalOpen'
 };
 
+type ShellAction = {
+  type?: string;
+  payload?: unknown;
+};
+
+type ShellState = {
+  theme?: string;
+  activeTab?: string;
+  sidebarCollapsed?: boolean;
+  terminalOpen?: boolean;
+  [key: string]: unknown;
+};
+
 export const shellActions = {
-  setTheme: (theme: any) => ({ type: shellActionTypes.SET_THEME, payload: theme }),
-  setActiveTab: (tabId: any) => ({ type: shellActionTypes.SET_ACTIVE_TAB, payload: tabId }),
-  setSidebarCollapsed: (collapsed: any) => ({ type: shellActionTypes.SET_SIDEBAR_COLLAPSED, payload: !!collapsed }),
-  setTerminalOpen: (open: any) => ({ type: shellActionTypes.SET_TERMINAL_OPEN, payload: !!open })
+  setTheme: (theme: unknown) => ({ type: shellActionTypes.SET_THEME, payload: theme }),
+  setActiveTab: (tabId: unknown) => ({ type: shellActionTypes.SET_ACTIVE_TAB, payload: tabId }),
+  setSidebarCollapsed: (collapsed: unknown) => ({ type: shellActionTypes.SET_SIDEBAR_COLLAPSED, payload: !!collapsed }),
+  setTerminalOpen: (open: unknown) => ({ type: shellActionTypes.SET_TERMINAL_OPEN, payload: !!open })
 };
 
 export function createShellStateSlice() {
@@ -39,7 +52,7 @@ export function createShellStateSlice() {
   };
 }
 
-export function reduceShellState(state: any, action: any = {}) {
+export function reduceShellState(state: ShellState, action: ShellAction = {}) {
   switch (action.type) {
     case shellActionTypes.SET_THEME:
       state.theme = String(action.payload || state.theme || '');

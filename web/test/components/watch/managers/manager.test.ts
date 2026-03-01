@@ -4,7 +4,44 @@ import assert from 'node:assert/strict';
 import { toBigInt, parseNumeric } from '../../../../app/core/lib/numeric_utils';
 import { createWatchManager } from '../../../../app/components/watch/managers/manager';
 
-function maskForWidth(width: any) {
+type WatchInfo = { idx: number | null; width: number };
+type WatchRow = { name: string; width: number; idx: number | null; value: bigint };
+type Breakpoint = { name: string; idx: number | null; width: number; value: bigint };
+
+type HarnessState = {
+  watches: Map<string, WatchInfo>;
+  watchRows: WatchRow[];
+  breakpoints: Breakpoint[];
+};
+
+type HarnessSim = {
+  features: { hasSignalIndex: boolean };
+  get_signal_idx: (name: string) => number;
+  has_signal: (name: string) => boolean;
+  trace_add_signal: (name: string) => void;
+  peek_by_idx: (idx: number) => bigint;
+  peek: (name: string) => bigint;
+};
+
+type HarnessRuntime = {
+  irMeta: { widths: Map<string, number> };
+  sim: HarnessSim | null;
+};
+
+type StoreAction =
+  | { type: 'watchSet'; name: string; info: WatchInfo }
+  | { type: 'watchRemove'; name: string }
+  | { type: 'watchClear' }
+  | { type: 'breakpointAddOrReplace'; bp: Breakpoint }
+  | { type: 'breakpointClear' };
+
+type SetupOptions = {
+  hasSim?: boolean;
+  signalMap?: Map<string, number>;
+  widths?: Map<string, number>;
+};
+
+function maskForWidth(width: unknown) {
   const w = Number(width) || 1;
   if (w >= 64) {
     return (1n << 64n) - 1n;
@@ -16,46 +53,50 @@ function setupHarness({
   hasSim = true,
   signalMap = new Map([['sig_a', 1]]),
   widths = new Map([['sig_a', 3]])
-}: any = {}) {
-  const state: any = {
+}: SetupOptions = {}) {
+  const state: HarnessState = {
     watches: new Map(),
     watchRows: [],
     breakpoints: []
   };
 
-  const traceAdded: any[] = [];
-  const runtime = {
+  const traceAdded: string[] = [];
+  const runtime: HarnessRuntime = {
     irMeta: { widths },
     sim: hasSim
       ? {
           features: { hasSignalIndex: true },
-          get_signal_idx: (name: any) => (signalMap.has(name) ? signalMap.get(name) : -1),
-          has_signal: (name: any) => signalMap.has(name),
-          trace_add_signal: (name: any) => traceAdded.push(name),
-          peek_by_idx: (idx: any) => BigInt(idx),
+          get_signal_idx: (name: string) => (signalMap.has(name) ? signalMap.get(name) ?? -1 : -1),
+          has_signal: (name: string) => signalMap.has(name),
+          trace_add_signal: (name: string) => traceAdded.push(name),
+          peek_by_idx: (idx: number) => BigInt(idx),
           peek: () => 0n
         }
       : null
   };
 
-  const scheduleCalls: any[] = [];
-  const logs: any[] = [];
-  const renderCalls: any = {
+  const scheduleCalls: string[] = [];
+  const logs: string[] = [];
+  const renderCalls: {
+    table: WatchRow[][];
+    list: string[][];
+    bps: Breakpoint[][];
+  } = {
     table: [],
     list: [],
     bps: []
   };
 
   const storeActions = {
-    watchSet: (name: any, info: any) => ({ type: 'watchSet', name, info }),
-    watchRemove: (name: any) => ({ type: 'watchRemove', name }),
-    watchClear: () => ({ type: 'watchClear' }),
-    breakpointAddOrReplace: (bp: any) => ({ type: 'breakpointAddOrReplace', bp }),
-    breakpointClear: () => ({ type: 'breakpointClear' })
+    watchSet: (name: string, info: WatchInfo): StoreAction => ({ type: 'watchSet', name, info }),
+    watchRemove: (name: string): StoreAction => ({ type: 'watchRemove', name }),
+    watchClear: (): StoreAction => ({ type: 'watchClear' }),
+    breakpointAddOrReplace: (bp: Breakpoint): StoreAction => ({ type: 'breakpointAddOrReplace', bp }),
+    breakpointClear: (): StoreAction => ({ type: 'breakpointClear' })
   };
 
   const appStore = {
-    dispatch(action: any) {
+    dispatch(action: StoreAction) {
       switch (action.type) {
         case 'watchSet':
           state.watches.set(action.name, action.info);
@@ -67,7 +108,7 @@ function setupHarness({
           state.watches.clear();
           break;
         case 'breakpointAddOrReplace': {
-          const next = state.breakpoints.filter((bp: any) => bp.name !== action.bp.name);
+          const next = state.breakpoints.filter((bp) => bp.name !== action.bp.name);
           next.push(action.bp);
           state.breakpoints = next;
           break;
@@ -87,15 +128,15 @@ function setupHarness({
     runtime,
     appStore,
     storeActions,
-    formatValue: (value: any) => String(value),
+    formatValue: (value: unknown) => String(value),
     parseNumeric,
     maskForWidth,
     toBigInt,
-    log: (message: any) => logs.push(message),
-    scheduleReduxUxSync: (reason: any) => scheduleCalls.push(reason),
-    renderWatchTableRows: (_dom: any, rows: any) => renderCalls.table.push(rows),
-    renderWatchListItems: (_dom: any, names: any) => renderCalls.list.push(names),
-    renderBreakpointListItems: (_dom: any, bps: any) => renderCalls.bps.push(bps)
+    log: (message: unknown) => logs.push(String(message)),
+    scheduleReduxUxSync: (reason: string) => scheduleCalls.push(reason),
+    renderWatchTableRows: (_dom: unknown, rows: WatchRow[]) => renderCalls.table.push(rows),
+    renderWatchListItems: (_dom: unknown, names: string[]) => renderCalls.list.push(names),
+    renderBreakpointListItems: (_dom: unknown, bps: Breakpoint[]) => renderCalls.bps.push(bps)
   });
 
   return { manager, state, runtime, logs, scheduleCalls, renderCalls, traceAdded };

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
+import type { Page } from 'playwright';
 
 import {
   createStaticServer,
@@ -13,7 +14,7 @@ const BENIGN_PAGE_ERRORS = [
   'Failed to execute \'drawImage\' on \'CanvasRenderingContext2D\': The image argument is a canvas element with a width or height of 0.'
 ];
 
-async function switchInterpreterBackend(page: any) {
+async function switchInterpreterBackend(page: Page) {
   await page.selectOption('#backendSelect', 'interpreter');
   await page.dispatchEvent('#backendSelect', 'change');
   await page.waitForFunction(() => {
@@ -27,7 +28,7 @@ async function switchInterpreterBackend(page: any) {
   }, null, { timeout: 120000 });
 }
 
-async function loadCpuRunner(page: any) {
+async function loadCpuRunner(page: Page) {
   await page.waitForFunction(() => {
     const select = document.querySelector('#runnerSelect');
     if (!(select instanceof HTMLSelectElement)) {
@@ -51,8 +52,8 @@ test('8bit cpu runner loads software binaries and renders expected screen output
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err: any) {
-    t.skip('Playwright is not installed (run: `cd web && npm install`)');
+  } catch (_err: unknown) {
+    console.warn('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
 
@@ -71,8 +72,8 @@ test('8bit cpu runner loads software binaries and renders expected screen output
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-  } catch (_err: any) {
-    t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
+  } catch (_err: unknown) {
+    console.warn('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }
   t.after(async () => {
@@ -80,8 +81,8 @@ test('8bit cpu runner loads software binaries and renders expected screen output
   });
 
   const page = await browser.newPage();
-  const pageErrors: any[] = [];
-  const consoleErrors: any[] = [];
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
 
   page.on('pageerror', (err) => {
     const message = String(err?.message || err);

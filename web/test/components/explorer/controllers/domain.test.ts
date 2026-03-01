@@ -4,8 +4,9 @@ import { createComponentDomainController } from '../../../../app/components/expl
 
 test('createComponentDomainController groups component explorer actions', () => {
   const fn = () => {};
+  const fnBool = () => true;
   const domain = createComponentDomainController({
-    isComponentTabActive: fn,
+    isComponentTabActive: fnBool,
     refreshActiveComponentTab: fn,
     refreshComponentExplorer: fn,
     renderComponentTree: fn,
@@ -19,7 +20,7 @@ test('createComponentDomainController groups component explorer actions', () => 
     resetComponentExplorerState: fn
   });
 
-  assert.equal(domain.isTabActive, fn);
+  assert.equal(domain.isTabActive, fnBool);
   assert.equal(domain.setGraphFocus, fn);
   assert.equal(domain.zoomGraphIn, fn);
   assert.equal(domain.zoomGraphOut, fn);

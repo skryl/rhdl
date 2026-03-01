@@ -1,4 +1,6 @@
-export function createRuntimeContext(createParser: any = null) {
+import type { RuntimeContext, RuntimeParserFactory } from '../../types/runtime';
+
+export function createRuntimeContext(createParser: RuntimeParserFactory = null): RuntimeContext {
   const parser = typeof createParser === 'function' ? createParser() : null;
   return {
     instance: null,

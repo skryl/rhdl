@@ -1,8 +1,9 @@
-function normalizeSpan(normalizeDashboardSpan: any, value: any, fallback = 'full') {
+// @ts-nocheck
+function normalizeSpan(normalizeDashboardSpan: unknown, value: unknown, fallback = 'full') {
   return normalizeDashboardSpan(value, fallback);
 }
 
-export function normalizeDashboardPanelSpans(panels: any, normalizeDashboardSpan: any, fallback = 'full') {
+export function normalizeDashboardPanelSpans(panels: unknown, normalizeDashboardSpan: unknown, fallback = 'full') {
   let pendingHalf = null;
   for (const panel of panels) {
     const span = normalizeSpan(normalizeDashboardSpan, panel?.dataset?.layoutSpan, fallback);
@@ -25,7 +26,7 @@ export function normalizeDashboardPanelSpans(panels: any, normalizeDashboardSpan
   }
 }
 
-export function dashboardRowsFromPanels(panels: any, normalizeDashboardSpan: any, fallback = 'full') {
+export function dashboardRowsFromPanels(panels: unknown, normalizeDashboardSpan: unknown, fallback = 'full') {
   const rows = [];
   let idx = 0;
   while (idx < panels.length) {
@@ -49,21 +50,21 @@ export function dashboardRowsFromPanels(panels: any, normalizeDashboardSpan: any
   return rows;
 }
 
-export function snapshotDashboardPanelLayout(panels: any, normalizeDashboardSpan: any, defaultSpan = () => 'full') {
+export function snapshotDashboardPanelLayout(panels: unknown, normalizeDashboardSpan: unknown, defaultSpan = () => 'full') {
   const order = [];
-  const spans: Record<string, any> = {};
+  const spans: Record<string, unknown> = {};
   for (const panel of panels) {
     const itemId = String(panel?.dataset?.layoutItemId || '').trim();
     if (!itemId) {
       continue;
     }
     order.push(itemId);
-    spans[itemId] = normalizeSpan(normalizeDashboardSpan, panel?.dataset?.layoutSpan, (defaultSpan as any)(panel));
+    spans[itemId] = normalizeSpan(normalizeDashboardSpan, panel?.dataset?.layoutSpan, (defaultSpan as unknown)(panel));
   }
   return { order, spans };
 }
 
-export function applyDashboardDropSpanPolicy(position: any, draggedPanel: any, targetPanel: any) {
+export function applyDashboardDropSpanPolicy(position: unknown, draggedPanel: unknown, targetPanel: unknown) {
   if (!draggedPanel || !targetPanel) {
     return;
   }

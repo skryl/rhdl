@@ -1,8 +1,13 @@
+interface BlobDownloaderDeps {
+  windowRef?: Unsafe;
+  documentRef?: Unsafe;
+}
+
 function createBlobDownloader({
   windowRef = globalThis.window,
   documentRef = globalThis.document
-}: any = {}) {
-  return function downloadBlob(blob: any, filename: any) {
+}: BlobDownloaderDeps = {}) {
+  return function downloadBlob(blob: Blob, filename: string) {
     if (!blob || !filename) {
       return;
     }
@@ -18,17 +23,18 @@ function createBlobDownloader({
 export function createApple2DownloadService({
   windowRef = globalThis.window,
   documentRef = globalThis.document
-}: any = {}) {
+}: BlobDownloaderDeps = {}) {
   const downloadBlob = createBlobDownloader({ windowRef, documentRef });
 
-  function downloadMemoryDump(bytes: any, filename: any) {
+  function downloadMemoryDump(bytes: Uint8Array, filename: string) {
     if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
       return;
     }
-    downloadBlob(new Blob([bytes as any], { type: 'application/octet-stream' }), filename);
+    const blobBytes = new Uint8Array(bytes);
+    downloadBlob(new Blob([blobBytes], { type: 'application/octet-stream' }), filename);
   }
 
-  function downloadSnapshot(snapshot: any, filename: any) {
+  function downloadSnapshot(snapshot: Unsafe, filename: string) {
     if (!snapshot || typeof snapshot !== 'object') {
       return;
     }

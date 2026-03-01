@@ -5,8 +5,23 @@ import {
 import { COMPONENT_SIGNAL_PREVIEW_LIMIT } from '../config/constants';
 import { createComponentExplorerController } from './controller';
 import { createComponentSourceController } from '../../source/controllers/controller';
+import type { RunnerPresetModel } from '../../../types/models';
+import type { RuntimeContext } from '../../../types/runtime';
+import type { AppState } from '../../../types/state';
+import type { MergedDomRefs } from '../../../types/dom';
+import type { ExplorerDomRefs, ExplorerRuntimeLike, ExplorerStateLike } from '../lib/types';
 
-function requireFn(name: any, fn: any) {
+interface ComponentLazyGetterOptions {
+  dom: MergedDomRefs;
+  state: AppState;
+  runtime: RuntimeContext;
+  scheduleReduxUxSync: (reason: string) => void;
+  currentComponentSourceText: () => string;
+  currentRunnerPreset: () => RunnerPresetModel;
+  destroyComponentGraph: () => void;
+}
+
+function requireFn(name: string, fn: unknown): void {
   if (typeof fn !== 'function') {
     throw new Error(`createComponentLazyGetters requires function: ${name}`);
   }
@@ -20,7 +35,7 @@ export function createComponentLazyGetters({
   currentComponentSourceText,
   currentRunnerPreset,
   destroyComponentGraph
-}: any = {}) {
+}: ComponentLazyGetterOptions) {
   if (!dom || !state || !runtime) {
     throw new Error('createComponentLazyGetters requires dom/state/runtime');
   }
@@ -29,15 +44,15 @@ export function createComponentLazyGetters({
   requireFn('currentRunnerPreset', currentRunnerPreset);
   requireFn('destroyComponentGraph', destroyComponentGraph);
 
-  let componentExplorerController: any = null;
-  let componentSourceController: any = null;
+  let componentExplorerController: ReturnType<typeof createComponentExplorerController> | null = null;
+  let componentSourceController: ReturnType<typeof createComponentSourceController> | null = null;
 
-  function getComponentExplorerController() {
+  function getComponentExplorerController(): ReturnType<typeof createComponentExplorerController> {
     if (!componentExplorerController) {
       componentExplorerController = createComponentExplorerController({
-        dom,
-        state,
-        runtime,
+        dom: dom as unknown as ExplorerDomRefs,
+        state: state as unknown as ExplorerStateLike,
+        runtime: runtime as unknown as ExplorerRuntimeLike,
         scheduleReduxUxSync,
         currentComponentSourceText,
         componentSignalPreviewLimit: COMPONENT_SIGNAL_PREVIEW_LIMIT
@@ -46,7 +61,7 @@ export function createComponentLazyGetters({
     return componentExplorerController;
   }
 
-  function getComponentSourceController() {
+  function getComponentSourceController(): ReturnType<typeof createComponentSourceController> {
     if (!componentSourceController) {
       componentSourceController = createComponentSourceController({
         dom,

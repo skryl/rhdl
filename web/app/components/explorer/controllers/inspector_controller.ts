@@ -11,6 +11,61 @@ import {
   summarizeExpr as summarizeExprModel,
   collectConnectionRows as collectConnectionRowsModel
 } from '../lib/inspector_model';
+import type {
+  ComponentModel,
+  ComponentNode,
+  ComponentSignal,
+  ExplorerDomRefs,
+  ExplorerRuntimeLike,
+  ExplorerStateLike,
+  SchematicBundleEntry,
+  UnknownRecord
+} from '../lib/types';
+
+interface SignalRef {
+  name: string;
+  liveName: string | null;
+  width: number;
+  valueKey: string;
+}
+
+interface InspectorControllerOptions {
+  dom: ExplorerDomRefs;
+  state: ExplorerStateLike;
+  runtime: ExplorerRuntimeLike;
+  componentSignalPreviewLimit?: number;
+  renderComponentInspectorView: (options: {
+    dom: ExplorerDomRefs;
+    node: ComponentNode | null;
+    parseError: string;
+    signalRows: Array<ComponentSignal & { value: unknown }>;
+    hiddenSignalCount: number;
+    codeTextRhdl: string;
+    codeTextVerilog: string;
+    title: string;
+    metaText: string;
+    signalMetaText: string;
+    formatValue: typeof formatValue;
+  }) => void;
+  renderComponentLiveSignalsView: (
+    dom: ExplorerDomRefs,
+    data: UnknownRecord,
+    formatter: typeof formatValue
+  ) => void;
+  renderComponentConnectionsView: (
+    dom: ExplorerDomRefs,
+    metaText: string,
+    rows: Array<{ type: string; source: string; target: string; details: string }>,
+    hiddenCount: number
+  ) => void;
+  clearComponentConnectionsView: (dom: ExplorerDomRefs, metaText: string) => void;
+}
+
+function requireFn(name: string, fn: unknown): void {
+  if (typeof fn !== 'function') {
+    throw new Error(`createExplorerInspectorController requires function: ${name}`);
+  }
+}
 
 export function createExplorerInspectorController({
   dom,
@@ -21,28 +76,26 @@ export function createExplorerInspectorController({
   renderComponentLiveSignalsView,
   renderComponentConnectionsView,
   clearComponentConnectionsView
-}: any = {}) {
+}: InspectorControllerOptions) {
   if (!dom || !state || !runtime) {
     throw new Error('createExplorerInspectorController requires dom/state/runtime');
   }
-  if (typeof renderComponentInspectorView !== 'function') {
-    throw new Error('createExplorerInspectorController requires function: renderComponentInspectorView');
-  }
-  if (typeof renderComponentLiveSignalsView !== 'function') {
-    throw new Error('createExplorerInspectorController requires function: renderComponentLiveSignalsView');
-  }
-  if (typeof renderComponentConnectionsView !== 'function') {
-    throw new Error('createExplorerInspectorController requires function: renderComponentConnectionsView');
-  }
-  if (typeof clearComponentConnectionsView !== 'function') {
-    throw new Error('createExplorerInspectorController requires function: clearComponentConnectionsView');
-  }
+  requireFn('renderComponentInspectorView', renderComponentInspectorView);
+  requireFn('renderComponentLiveSignalsView', renderComponentLiveSignalsView);
+  requireFn('renderComponentConnectionsView', renderComponentConnectionsView);
+  requireFn('clearComponentConnectionsView', clearComponentConnectionsView);
 
-  function componentSignalLookup(node: any) {
+  function componentSignalLookup(node: ComponentNode | null): Map<string, ComponentSignal> {
     return buildComponentSignalLookup(node);
   }
 
-  function resolveNodeSignalRef(node: any, lookup: any, signalName: any, width = 1, signalSet = null) {
+  function resolveNodeSignalRef(
+    node: ComponentNode | null,
+    lookup: Map<string, ComponentSignal>,
+    signalName: unknown,
+    width = 1,
+    signalSet: Set<string> | null = null
+  ): SignalRef | null {
     return resolveNodeSignalRefModel({
       state,
       runtime,
@@ -54,15 +107,19 @@ export function createExplorerInspectorController({
     });
   }
 
-  function collectExprSignalNames(expr: any, out = new Set(), maxSignals = 20) {
+  function collectExprSignalNames(
+    expr: unknown,
+    out = new Set<string>(),
+    maxSignals = 20
+  ): Set<string> {
     return collectExprSignalNamesModel(expr, out, maxSignals);
   }
 
-  function findComponentSchematicEntry(node: any) {
+  function findComponentSchematicEntry(node: ComponentNode | null): SchematicBundleEntry | null {
     return findComponentSchematicEntryModel(state, node);
   }
 
-  function summarizeExpr(expr: any) {
+  function summarizeExpr(expr: unknown): string {
     return summarizeExprModel(expr);
   }
 
@@ -77,7 +134,7 @@ export function createExplorerInspectorController({
     ellipsizeText
   });
 
-  function signalLiveValue(signal: any) {
+  function signalLiveValue(signal: ComponentSignal): unknown {
     if (!runtime.sim || !signal?.liveName) {
       return null;
     }
@@ -86,23 +143,23 @@ export function createExplorerInspectorController({
     }
     try {
       return runtime.sim.peek(signal.liveName);
-    } catch (_err: any) {
+    } catch {
       return null;
     }
   }
 
-  function signalLiveValueByName(liveName: any) {
+  function signalLiveValueByName(liveName: string): unknown {
     if (!runtime.sim || !liveName) {
       return null;
     }
     try {
       return runtime.sim.peek(liveName);
-    } catch (_err: any) {
+    } catch {
       return null;
     }
   }
 
-  function renderComponentConnections(node: any) {
+  function renderComponentConnections(node: ComponentNode | null): void {
     if (!node) {
       clearComponentConnectionsView(dom, state.components.parseError || 'Select a component to inspect connections.');
       return;
@@ -118,17 +175,22 @@ export function createExplorerInspectorController({
     );
   }
 
-  function renderComponentInspector(node: any) {
-    const signalRows = node ? node.signals.slice(0, componentSignalPreviewLimit).map((signal: any) => ({
-      ...signal,
-      value: signalLiveValue(signal)
-    })) : [];
+  function renderComponentInspector(node: ComponentNode | null): void {
+    const signalRows: Array<ComponentSignal & { value: unknown }> = node
+      ? node.signals.slice(0, componentSignalPreviewLimit).map((signal) => ({
+        ...signal,
+        value: signalLiveValue(signal)
+      }))
+      : [];
     const hiddenSignalCount = node ? Math.max(0, node.signals.length - signalRows.length) : 0;
+
     const codeTextRhdl = node
-      ? (formatSourceBackedComponentCode(state, node, 'rhdl', state.components.model) || formatComponentCode(node))
+      ? (formatSourceBackedComponentCode(state, node, 'rhdl', state.components.model as ComponentModel | null)
+        || formatComponentCode(node))
       : '';
     const codeTextVerilog = node
-      ? (formatSourceBackedComponentCode(state, node, 'verilog', state.components.model) || formatComponentCode(node))
+      ? (formatSourceBackedComponentCode(state, node, 'verilog', state.components.model as ComponentModel | null)
+        || formatComponentCode(node))
       : '';
 
     renderComponentInspectorView({
@@ -146,10 +208,10 @@ export function createExplorerInspectorController({
     });
   }
 
-  function renderComponentLiveSignals(node: any) {
+  function renderComponentLiveSignals(node: ComponentNode | null): void {
     const highlight = state.components.graphHighlightedSignal;
     const limitedSignals = Array.isArray(node?.signals) ? node.signals.slice(0, 120) : [];
-    const rows = [];
+    const rows: Array<ComponentSignal & { matchesHighlight: boolean; value: unknown }> = [];
     let highlightedRows = 0;
 
     for (const signal of limitedSignals) {
@@ -173,11 +235,15 @@ export function createExplorerInspectorController({
       highlight,
       highlightedRows,
       highlightLabel: node ? `Highlighted wire not in ${node.name}` : '',
-      extraSignals: Math.max(0, (node?.signals?.length || 0) - limitedSignals.length)
+      extraSignals: Math.max(0, (node?.signals.length || 0) - limitedSignals.length)
     }, formatValue);
   }
 
-  function createSchematicElements(model: any, focusNode: any, showChildren: any) {
+  function createSchematicElements(
+    model: ComponentModel,
+    focusNode: ComponentNode,
+    showChildren: boolean
+  ): unknown[] {
     return schematicElementBuilder.createComponentSchematicElements(model, focusNode, showChildren);
   }
 

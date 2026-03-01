@@ -2,19 +2,19 @@ import { createListenerGroup } from '../../../core/bindings/listener_group';
 import { GENERATED_MEMORY_DUMP_ASSET_FILES } from '../config/generated_dump_assets';
 import { createDumpAssetTree, isDumpAssetPath, normalizeDumpAssetPath } from '../lib/dump_assets';
 
-function updateSelectedAssetButton(container: any, selectedPath: any) {
+function updateSelectedAssetButton(container: Unsafe, selectedPath: Unsafe) {
   if (!container || typeof container.querySelectorAll !== 'function') {
     return;
   }
   const normalized = normalizeDumpAssetPath(selectedPath);
   const buttons = container.querySelectorAll('button[data-asset-path]');
-  buttons.forEach((button: any) => {
+  buttons.forEach((button: Unsafe) => {
     const buttonPath = normalizeDumpAssetPath(button.dataset?.assetPath || '');
     button.classList.toggle('selected', !!normalized && buttonPath === normalized);
   });
 }
 
-function renderDumpAssetTree(container: any, paths: any) {
+function renderDumpAssetTree(container: Unsafe, paths: Unsafe) {
   if (!container || typeof container.replaceChildren !== 'function') {
     return;
   }
@@ -28,7 +28,7 @@ function renderDumpAssetTree(container: any, paths: any) {
   const rootList = documentRef.createElement('ul');
   rootList.className = 'memory-dump-tree-root';
 
-  const appendNode = (listElement: any, node: any) => {
+  const appendNode = (listElement: Unsafe, node: Unsafe) => {
     for (const dir of node.dirs) {
       const dirItem = documentRef.createElement('li');
       dirItem.className = 'memory-dump-tree-dir';
@@ -80,7 +80,7 @@ export function bindMemoryBindings({
   store,
   util,
   scheduleReduxUxSync
-}: any) {
+}: Unsafe) {
   const listeners = createListenerGroup();
 
   renderDumpAssetTree(dom.memoryDumpAssetTree, GENERATED_MEMORY_DUMP_ASSET_FILES);
@@ -102,7 +102,7 @@ export function bindMemoryBindings({
     apple2.refreshMemoryView();
   });
 
-  listeners.on(dom.memoryDumpAssetTree, 'click', (event: any) => {
+  listeners.on(dom.memoryDumpAssetTree, 'click', (event: Unsafe) => {
     const target = event?.target;
     if (!target || typeof target.closest !== 'function') {
       return;
@@ -186,7 +186,7 @@ export function bindMemoryBindings({
     await apple2.resetWithMemoryVectorOverride();
   });
 
-  listeners.on(dom.memoryResetVector, 'keydown', async (event: any) => {
+  listeners.on(dom.memoryResetVector, 'keydown', async (event: Unsafe) => {
     if (event.key !== 'Enter') {
       return;
     }

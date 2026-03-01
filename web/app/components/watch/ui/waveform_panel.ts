@@ -1,7 +1,7 @@
 // @ts-expect-error no @types/p5
 import p5 from 'p5';
 
-function requireFn(name: any, fn: any) {
+function requireFn(name: Unsafe, fn: Unsafe) {
   if (typeof fn !== 'function') {
     throw new Error(`setupWaveformP5 requires function: ${name}`);
   }
@@ -17,7 +17,7 @@ export function setupWaveformP5({
   waveformPalette,
   formatValue,
   p5Ctor = p5
-}: any = {}) {
+}: Unsafe = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('setupWaveformP5 requires dom/state/runtime');
   }
@@ -34,7 +34,7 @@ export function setupWaveformP5({
     throw new Error('setupWaveformP5 requires a mount element');
   }
 
-  const sketch = (p: any) => {
+  const sketch = (p: Unsafe) => {
     const leftPad = 170;
 
     const resize = () => {
@@ -81,8 +81,8 @@ export function setupWaveformP5({
       const rowH = Math.max(28, Math.floor((p.height - 20) / rows.length));
       const plotW = p.width - leftPad - 8;
 
-      const xFor = (t: any) => leftPad + ((t - startT) / Math.max(1, latest - startT)) * plotW;
-      const yFor = (rowTop: any, rowHeight: any, value: any, width: any) => {
+      const xFor = (t: Unsafe) => leftPad + ((t - startT) / Math.max(1, latest - startT)) * plotW;
+      const yFor = (rowTop: Unsafe, rowHeight: Unsafe, value: Unsafe, width: Unsafe) => {
         if (width <= 1) {
           return value ? rowTop + 6 : rowTop + rowHeight - 6;
         }
@@ -93,7 +93,7 @@ export function setupWaveformP5({
         return rowTop + rowHeight - 6 - (clamped / max) * (rowHeight - 12);
       };
 
-      rows.forEach((row: any, i: any) => {
+      rows.forEach((row: Unsafe, i: Unsafe) => {
         const top = 10 + i * rowH;
         const bottom = top + rowH;
 

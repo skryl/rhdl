@@ -1,4 +1,4 @@
-export function resolveComponentRefreshPlan(activeTab: any) {
+export function resolveComponentRefreshPlan(activeTab: unknown) {
   const tab = String(activeTab || '');
   if (tab === 'componentTab') {
     return {

@@ -1,4 +1,8 @@
-export async function fetchTextAsset(path: any, label = 'asset', fetchImpl = globalThis.fetch) {
+function messageFromError(err: unknown) {
+  return err instanceof Error ? err.message : String(err);
+}
+
+export async function fetchTextAsset(path: string, label = 'asset', fetchImpl: typeof fetch = globalThis.fetch) {
   const response = await fetchImpl(path);
   if (!response.ok) {
     throw new Error(`${label} load failed (${response.status})`);
@@ -6,11 +10,15 @@ export async function fetchTextAsset(path: any, label = 'asset', fetchImpl = glo
   return response.text();
 }
 
-export async function fetchJsonAsset(path: any, label = 'asset', fetchImpl = globalThis.fetch) {
+export async function fetchJsonAsset<T = unknown>(
+  path: string,
+  label = 'asset',
+  fetchImpl: typeof fetch = globalThis.fetch
+): Promise<T> {
   const text = await fetchTextAsset(path, label, fetchImpl);
   try {
-    return JSON.parse(text);
-  } catch (err: any) {
-    throw new Error(`${label} parse failed: ${err.message || err}`);
+    return JSON.parse(text) as T;
+  } catch (err: unknown) {
+    throw new Error(`${label} parse failed: ${messageFromError(err)}`);
   }
 }

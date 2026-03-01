@@ -113,8 +113,8 @@ test('buildRenderList with null/undefined input returns empty sub-arrays', () =>
 
 test('buildRenderList derives symbol type from classes', () => {
   const rl = buildRenderList(minimalElements());
-  const cpu = rl.symbols.find(s => s.id === 'sym:cpu');
-  const alu = rl.symbols.find(s => s.id === 'sym:alu');
+  const cpu = rl.symbols.find(s => s.id === 'sym:cpu')!;
+  const alu = rl.symbols.find(s => s.id === 'sym:alu')!;
 
   assert.equal(cpu.type, 'focus', 'schem-focus -> type focus');
   assert.equal(alu.type, 'component', 'schem-component without schem-focus -> type component');
@@ -128,14 +128,14 @@ test('buildRenderList derives type for all class variants', () => {
   ];
   const rl = buildRenderList(elements);
 
-  assert.equal(rl.symbols.find(s => s.id === 'a').type, 'memory');
-  assert.equal(rl.symbols.find(s => s.id === 'b').type, 'op');
-  assert.equal(rl.symbols.find(s => s.id === 'c').type, 'io');
+  assert.equal(rl.symbols.find(s => s.id === 'a')!.type, 'memory');
+  assert.equal(rl.symbols.find(s => s.id === 'b')!.type, 'op');
+  assert.equal(rl.symbols.find(s => s.id === 'c')!.type, 'io');
 });
 
 test('buildRenderList symbols have expected fields', () => {
   const rl = buildRenderList(minimalElements());
-  const cpu = rl.symbols.find(s => s.id === 'sym:cpu');
+  const cpu = rl.symbols.find(s => s.id === 'sym:cpu')!;
 
   assert.equal(cpu.label, 'CPU');
   assert.equal(cpu.componentId, 'cpu');
@@ -149,7 +149,7 @@ test('buildRenderList symbols have expected fields', () => {
 
 test('buildRenderList pins have expected fields', () => {
   const rl = buildRenderList(minimalElements());
-  const pin = rl.pins.find(p => p.id === 'pin:cpu:clk');
+  const pin = rl.pins.find(p => p.id === 'pin:cpu:clk')!;
 
   assert.equal(pin.symbolId, 'sym:cpu');
   assert.equal(pin.side, 'left');
@@ -164,8 +164,8 @@ test('buildRenderList pins have expected fields', () => {
 
 test('buildRenderList pins detect bus from classes', () => {
   const rl = buildRenderList(minimalElements());
-  const busPin = rl.pins.find(p => p.id === 'pin:cpu:data');
-  const normalPin = rl.pins.find(p => p.id === 'pin:cpu:clk');
+  const busPin = rl.pins.find(p => p.id === 'pin:cpu:data')!;
+  const normalPin = rl.pins.find(p => p.id === 'pin:cpu:clk')!;
 
   assert.equal(busPin.bus, true);
   assert.equal(normalPin.bus, false);
@@ -276,11 +276,11 @@ test('applyLayoutPositions updates symbol and net positions from ELK output', ()
 
   applyLayoutPositions(rl, elkOutput);
 
-  const cpu = rl.symbols.find(s => s.id === 'sym:cpu');
+  const cpu = rl.symbols.find(s => s.id === 'sym:cpu')!;
   assert.equal(cpu.x, 100 + 228 * 0.5, 'symbol x = elkX + width/2');
   assert.equal(cpu.y, 200 + 94 * 0.5, 'symbol y = elkY + height/2');
 
-  const net = rl.nets.find(n => n.id === 'net:cpu:clk');
+  const net = rl.nets.find(n => n.id === 'net:cpu:clk')!;
   assert.equal(net.x, 300 + 52 * 0.5, 'net x = elkX + width/2');
   assert.equal(net.y, 250 + 18 * 0.5, 'net y = elkY + height/2');
 });
@@ -308,11 +308,11 @@ test('applyLayoutPositions updates pin positions relative to parent symbol', () 
 
   applyLayoutPositions(rl, elkOutput);
 
-  const clkPin = rl.pins.find(p => p.id === 'pin:cpu:clk');
+  const clkPin = rl.pins.find(p => p.id === 'pin:cpu:clk')!;
   assert.equal(clkPin.x, 100 + 0 + 14 * 0.5, 'pin x = parentElkX + portX + portWidth/2');
   assert.equal(clkPin.y, 200 + 20 + 10 * 0.5, 'pin y = parentElkY + portY + portHeight/2');
 
-  const dataPin = rl.pins.find(p => p.id === 'pin:cpu:data');
+  const dataPin = rl.pins.find(p => p.id === 'pin:cpu:data')!;
   assert.equal(dataPin.x, 100 + 214 + 14 * 0.5);
   assert.equal(dataPin.y, 200 + 40 + 10 * 0.5);
 });
@@ -328,10 +328,10 @@ test('applyLayoutPositions handles missing ELK entries gracefully', () => {
 
   applyLayoutPositions(rl, elkOutput);
 
-  const cpu = rl.symbols.find(s => s.id === 'sym:cpu');
+  const cpu = rl.symbols.find(s => s.id === 'sym:cpu')!;
   assert.equal(cpu.x, 100 + 228 * 0.5);
 
-  const alu = rl.symbols.find(s => s.id === 'sym:alu');
+  const alu = rl.symbols.find(s => s.id === 'sym:alu')!;
   assert.equal(alu.x, 0, 'unmatched symbol stays at default');
   assert.equal(alu.y, 0);
 });

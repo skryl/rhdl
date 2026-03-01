@@ -2,10 +2,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bindD3Interactions } from '../../../../app/components/explorer/renderers/interactions';
 
+type HighlightSignal = { signalName: string | null; liveName: string | null } | null;
+type MockCanvasEvent = {
+  clientX: number;
+  clientY: number;
+  button: number;
+  deltaY: number;
+  preventDefault: () => void;
+  stopPropagation: () => void;
+};
+type MockCanvasListener = (event: MockCanvasEvent) => void;
+
 // Minimal mock spatial index
-function createMockIndex(hitMap: any) {
+function createMockIndex(hitMap: Map<string, unknown>) {
   return {
-    queryPoint(x: any, y: any) {
+    queryPoint(x: number, y: number) {
       const key = `${x},${y}`;
       return hitMap.get(key) || null;
     }
@@ -15,27 +26,27 @@ function createMockIndex(hitMap: any) {
 function createState() {
   return {
     components: {
-      selectedNodeId: null,
+      selectedNodeId: null as string | null,
       graphLastTap: null,
-      graphFocusId: null,
+      graphFocusId: null as string | null,
       graphShowChildren: false,
-      graphHighlightedSignal: null
+      graphHighlightedSignal: null as HighlightSignal
     }
   };
 }
 
 // Mock canvas with event listener support
 function createMockCanvas() {
-  const listeners = new Map();
+  const listeners = new Map<string, MockCanvasListener[]>();
   return {
     width: 800,
     height: 600,
     listeners,
-    addEventListener(event: any, handler: any) {
+    addEventListener(event: string, handler: MockCanvasListener) {
       if (!listeners.has(event)) listeners.set(event, []);
-      listeners.get(event).push(handler);
+      listeners.get(event)?.push(handler);
     },
-    removeEventListener(event: any, handler: any) {
+    removeEventListener(event: string, handler: MockCanvasListener) {
       const list = listeners.get(event);
       if (list) {
         const idx = list.indexOf(handler);
@@ -45,7 +56,7 @@ function createMockCanvas() {
     getBoundingClientRect() {
       return { left: 0, top: 0, width: 800, height: 600 };
     },
-    emit(event: any, x: any, y: any, extra = {}) {
+    emit(event: string, x: number, y: number, extra: Partial<MockCanvasEvent> = {}) {
       const handlers = listeners.get(event) || [];
       for (const h of handlers) {
         h({
@@ -192,7 +203,7 @@ test('clicking a pin sets graphHighlightedSignal', () => {
 test('clicking empty canvas clears graphHighlightedSignal', () => {
   const canvas = createMockCanvas();
   const state = createState();
-  state.components.graphHighlightedSignal = { signalName: 'clk', liveName: 'top__clk' } as any;
+  state.components.graphHighlightedSignal = { signalName: 'clk', liveName: 'top__clk' };
   const model = { nodes: new Map() };
   let viewRenders = 0;
 

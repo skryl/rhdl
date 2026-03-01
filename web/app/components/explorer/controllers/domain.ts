@@ -1,3 +1,18 @@
+interface ComponentDomainControllerOptions {
+  isComponentTabActive: () => boolean;
+  refreshActiveComponentTab: () => void;
+  refreshComponentExplorer: () => void;
+  renderComponentTree: () => void;
+  setComponentGraphFocus: (nodeId: string | null, showChildren?: boolean) => void;
+  currentComponentGraphFocusNode: () => unknown;
+  renderComponentViews: () => void;
+  zoomComponentGraphIn: () => unknown;
+  zoomComponentGraphOut: () => unknown;
+  resetComponentGraphViewport: () => unknown;
+  clearComponentSourceOverride: () => void;
+  resetComponentExplorerState: () => void;
+}
+
 export function createComponentDomainController({
   isComponentTabActive,
   refreshActiveComponentTab,
@@ -11,7 +26,7 @@ export function createComponentDomainController({
   resetComponentGraphViewport,
   clearComponentSourceOverride,
   resetComponentExplorerState
-}: any = {}) {
+}: ComponentDomainControllerOptions) {
   return {
     isTabActive: isComponentTabActive,
     refreshActiveTab: refreshActiveComponentTab,

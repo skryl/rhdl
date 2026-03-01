@@ -3,29 +3,27 @@ import assert from 'node:assert/strict';
 
 import { actions } from '../../../app/core/state/actions';
 import { createAppStore } from '../../../app/core/state/store';
+import { createInitialState as createBaseInitialState } from '../../../app/core/state/initial_state';
+import type { AppState } from '../../../app/types/state';
 
 function createInitialState() {
-  return {
-    backend: 'compiler',
-    theme: 'shenzhen',
-    runnerPreset: 'apple2',
-    activeTab: 'ioTab',
-    sidebarCollapsed: false,
-    terminalOpen: false,
-    running: false,
-    cycle: 0,
-    uiCyclesPending: 0,
-    memory: {
-      followPc: false
-    },
-    apple2: {
-      displayHires: false,
-      displayColor: false,
-      soundEnabled: false
-    },
-    watches: new Map(),
-    breakpoints: []
-  };
+  const state = createBaseInitialState();
+  state.backend = 'compiler';
+  state.theme = 'shenzhen';
+  state.runnerPreset = 'apple2';
+  state.activeTab = 'ioTab';
+  state.sidebarCollapsed = false;
+  state.terminalOpen = false;
+  state.running = false;
+  state.cycle = 0;
+  state.uiCyclesPending = 0;
+  state.memory.followPc = false;
+  state.apple2.displayHires = false;
+  state.apple2.displayColor = false;
+  state.apple2.soundEnabled = false;
+  state.watches = new Map();
+  state.breakpoints = [];
+  return state;
 }
 
 test('app/ui actions update primary state fields', () => {
@@ -87,7 +85,7 @@ test('breakpoint actions replace by signal name and clear cleanly', () => {
   let state = store.getState();
   assert.equal(state.breakpoints.length, 2);
   assert.equal(
-    state.breakpoints.find((entry: any) => entry.name === 'pc_debug')?.value,
+    state.breakpoints.find((entry) => entry.name === 'pc_debug')?.value,
     0xB849
   );
 
@@ -108,8 +106,8 @@ test('touch + mutate actions keep store dispatch-friendly for app-level sync', (
     notifyCount += 1;
   });
 
-  store.dispatch(actions.touch({ reason: 'test' } as any));
-  store.dispatch(actions.mutate((draft: any) => {
+  store.dispatch(actions.touch({ reason: 'test' }));
+  store.dispatch(actions.mutate((draft: AppState) => {
     draft.cycle = 99;
     draft.running = true;
   }));

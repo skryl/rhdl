@@ -14,12 +14,12 @@ test('apple2 reset override service validates reset vector format', async () => 
     setMemoryFollowPcState: () => {},
     getApple2ProgramCounter: () => 0,
     parsePcLiteral: () => null,
-    hexWord: (value: any) => Number(value).toString(16).toUpperCase().padStart(4, '0'),
+    hexWord: (value: unknown) => Number(value).toString(16).toUpperCase().padStart(4, '0'),
     ensureApple2Ready: () => true,
     romResetService: { applySnapshotStartPc: async () => ({ applied: false, reason: 'invalid' }) },
     performApple2ResetSequence: () => ({ pcAfter: 0 }),
     refreshApple2UiState: () => {},
-    setMemoryDumpStatus: (message: any) => {
+    setMemoryDumpStatus: (message: string) => {
       status = message;
     },
     setMemoryResetVectorInput: () => {},
@@ -41,12 +41,12 @@ test('apple2 reset override service applies vector and updates memory pane', asy
   };
   const service = createApple2ResetOverrideService({
     dom,
-    setMemoryFollowPcState: (value: any) => {
+    setMemoryFollowPcState: (value: boolean) => {
       followState = value;
     },
     getApple2ProgramCounter: () => 0xB849,
     parsePcLiteral: () => 0xB82A,
-    hexWord: (value: any) => Number(value).toString(16).toUpperCase().padStart(4, '0'),
+    hexWord: (value: unknown) => Number(value).toString(16).toUpperCase().padStart(4, '0'),
     ensureApple2Ready: () => true,
     romResetService: {
       applySnapshotStartPc: async () => ({ applied: true, pc: 0xB82A, reason: 'ok' })

@@ -11,7 +11,7 @@ test('shell state runtime service updates terminal open state and persists toggl
     tabPanels: [],
     appShell: {
       classList: {
-        toggle(name: any, active: any) {
+        toggle(name: string, active: boolean) {
           appShellClasses.set(String(name), !!active);
         }
       }
@@ -31,7 +31,7 @@ test('shell state runtime service updates terminal open state and persists toggl
     runtime: {},
     setActiveTabState: () => {},
     setSidebarCollapsedState: () => {},
-    setTerminalOpenState: (value: any) => {
+    setTerminalOpenState: (value: boolean) => {
       state.terminalOpen = !!value;
     },
     setThemeState: () => {},
@@ -44,16 +44,16 @@ test('shell state runtime service updates terminal open state and persists toggl
     TERMINAL_OPEN_KEY: 't',
     THEME_KEY: 'th',
     localStorageRef: {
-      setItem(key: any, value: any) {
+      setItem(key: string, value: string) {
         stored.set(key, value);
       }
     },
-    requestAnimationFrameImpl: (cb: any) => cb(),
+    requestAnimationFrameImpl: (cb: () => void) => cb(),
     documentRef: { body: { classList: { toggle() {} } } },
     windowRef: { dispatchEvent() {} },
     eventCtor: class {
-      type: any;
-      constructor(type: any) {
+      type: string;
+      constructor(type: string) {
         this.type = type;
       }
     }
@@ -67,7 +67,7 @@ test('shell state runtime service updates terminal open state and persists toggl
 });
 
 test('shell state runtime service defers and deduplicates component explorer refresh on tab switch', () => {
-  const pendingTimers: any[] = [];
+  const pendingTimers: Array<() => void> = [];
   let refreshCalls = 0;
   const state = { activeTab: 'ioTab', terminalOpen: false, sidebarCollapsed: false, theme: 'shenzhen' };
   const dom = {
@@ -84,7 +84,7 @@ test('shell state runtime service defers and deduplicates component explorer ref
     dom,
     state,
     runtime: {},
-    setActiveTabState: (value: any) => {
+    setActiveTabState: (value: string) => {
       state.activeTab = value;
     },
     setSidebarCollapsedState: () => {},
@@ -101,15 +101,15 @@ test('shell state runtime service defers and deduplicates component explorer ref
     TERMINAL_OPEN_KEY: 't',
     THEME_KEY: 'th',
     localStorageRef: { setItem() {} },
-    requestAnimationFrameImpl: (cb: any) => cb(),
-    setTimeoutImpl: (cb: any) => {
+    requestAnimationFrameImpl: (cb: () => void) => cb(),
+    setTimeoutImpl: (cb: () => void) => {
       pendingTimers.push(cb);
     },
     documentRef: { body: { classList: { toggle() {} } } },
     windowRef: { dispatchEvent() {} },
     eventCtor: class {
-      type: any;
-      constructor(type: any) {
+      type: string;
+      constructor(type: string) {
         this.type = type;
       }
     }
@@ -121,7 +121,9 @@ test('shell state runtime service defers and deduplicates component explorer ref
   assert.equal(refreshCalls, 0);
   assert.equal(pendingTimers.length, 1);
 
-  pendingTimers.shift()();
+  const flush = pendingTimers.shift();
+  assert.ok(flush);
+  flush();
 
   assert.equal(refreshCalls, 1);
 });

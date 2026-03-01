@@ -1,5 +1,56 @@
-function componentCyIdForNode(nodeId: any) {
-  return `cmp:${String(nodeId || '')}`;
+import {
+  asRecord,
+  asStringArray,
+  type ComponentModel,
+  type ComponentNode,
+  type ComponentSignal,
+  type ExplorerRuntimeLike,
+  type ExplorerStateLike,
+  type SchematicBundleEntry,
+  type SchematicElement,
+  type UnknownRecord
+} from './types';
+
+interface SignalRef {
+  name: string;
+  liveName: string | null;
+  width: number;
+  valueKey: string;
+}
+
+interface SchematicElementBuilderOptions {
+  state: ExplorerStateLike;
+  runtime: ExplorerRuntimeLike;
+  componentSignalLookup: (node: ComponentNode) => Map<string, ComponentSignal>;
+  resolveNodeSignalRef: (
+    node: ComponentNode,
+    lookup: Map<string, ComponentSignal>,
+    signalName: unknown,
+    width?: number,
+    signalSet?: Set<string> | null
+  ) => SignalRef | null;
+  collectExprSignalNames: (expr: unknown, out?: Set<string>, maxSignals?: number) => Set<string>;
+  findComponentSchematicEntry: (node: ComponentNode) => SchematicBundleEntry | null;
+  summarizeExpr: (expr: unknown) => string;
+  ellipsizeText: (value: unknown, maxLen?: number) => string;
+}
+
+function componentCyIdForNode(nodeId: string): string {
+  return `cmp:${nodeId}`;
+}
+
+function readWidth(value: unknown, fallback = 1): number {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function normalizeSide(side: unknown): string {
+  const raw = String(side || '').toLowerCase();
+  return ['left', 'right', 'top', 'bottom'].includes(raw) ? raw : 'left';
+}
+
+function normalizeDirection(direction: unknown): string {
+  return String(direction || 'inout').toLowerCase();
 }
 
 export function createSchematicElementBuilder({
@@ -11,37 +62,46 @@ export function createSchematicElementBuilder({
   findComponentSchematicEntry,
   summarizeExpr,
   ellipsizeText
-}: any = {}) {
+}: SchematicElementBuilderOptions) {
   if (!state || !runtime) {
     throw new Error('createSchematicElementBuilder requires state/runtime');
   }
 
-  function createComponentSchematicElementsFromExport(model: any, focusNode: any, showChildren: any, schematicEntry: any) {
-    const elements: any[] = [];
-    if (!model || !focusNode || !schematicEntry || typeof schematicEntry !== 'object') {
-      return elements;
-    }
-    const schematic = schematicEntry.schematic;
-    if (!schematic || typeof schematic !== 'object') {
+  function createComponentSchematicElementsFromExport(
+    model: ComponentModel,
+    focusNode: ComponentNode,
+    showChildren: boolean,
+    schematicEntry: SchematicBundleEntry
+  ): SchematicElement[] {
+    const elements: SchematicElement[] = [];
+    const schematic = asRecord(schematicEntry.schematic);
+    if (!schematic) {
       return elements;
     }
 
     const lookup = componentSignalLookup(focusNode);
-    const seenNodes = new Set();
-    const seenEdges = new Set();
+    const seenNodes = new Set<string>();
+    const seenEdges = new Set<string>();
     let edgeSeq = 0;
 
-    const pathToNodeId = new Map();
+    const pathToNodeId = new Map<string, string>();
     for (const node of model.nodes.values()) {
       pathToNodeId.set(String(node.path || ''), node.id);
     }
 
-    const normalizeSignal = (name: any, width = 1, liveName = null) => {
+    const normalizeSignal = (
+      name: unknown,
+      width = 1,
+      liveName: unknown = null
+    ): SignalRef | null => {
       const signalName = String(name || '').trim();
       if (!signalName) {
         return null;
       }
       const ref = resolveNodeSignalRef(focusNode, lookup, signalName, width);
+      if (!ref) {
+        return null;
+      }
       const explicitLive = String(liveName || '').trim();
       if (explicitLive) {
         ref.liveName = explicitLive;
@@ -50,7 +110,7 @@ export function createSchematicElementBuilder({
       return ref;
     };
 
-    const pushNode = (id: any, data: any, classes = '') => {
+    const pushNode = (id: string, data: UnknownRecord, classes = ''): void => {
       if (!id || seenNodes.has(id)) {
         return;
       }
@@ -64,12 +124,17 @@ export function createSchematicElementBuilder({
       });
     };
 
-    const pushEdge = (source: any, target: any, data: any = {}, classes = '') => {
+    const pushEdge = (
+      source: string,
+      target: string,
+      data: UnknownRecord = {},
+      classes = ''
+    ): void => {
       if (!source || !target || !seenNodes.has(source) || !seenNodes.has(target)) {
         return;
       }
       edgeSeq += 1;
-      const base = data.id || `wire:${source}:${target}:${edgeSeq}`;
+      const base = String(data.id || `wire:${source}:${target}:${edgeSeq}`);
       let id = base;
       while (seenEdges.has(id)) {
         edgeSeq += 1;
@@ -88,10 +153,11 @@ export function createSchematicElementBuilder({
     };
 
     const pins = Array.isArray(schematic.pins) ? schematic.pins : [];
-    const pinCountBySymbol = new Map();
+    const pinCountBySymbol = new Map<string, Record<string, number>>();
     for (const pin of pins) {
-      const symbolId = String(pin?.symbol_id || '').trim();
-      const side = String(pin?.side || 'left').trim().toLowerCase();
+      const pinRecord = asRecord(pin);
+      const symbolId = pinRecord ? String(pinRecord.symbol_id || '').trim() : '';
+      const side = normalizeSide(pinRecord?.side || 'left');
       if (!symbolId) {
         continue;
       }
@@ -99,6 +165,9 @@ export function createSchematicElementBuilder({
         pinCountBySymbol.set(symbolId, { left: 0, right: 0, top: 0, bottom: 0 });
       }
       const counts = pinCountBySymbol.get(symbolId);
+      if (!counts) {
+        continue;
+      }
       if (Object.prototype.hasOwnProperty.call(counts, side)) {
         counts[side] += 1;
       } else {
@@ -106,27 +175,32 @@ export function createSchematicElementBuilder({
       }
     }
 
-    const symbolIdSet = new Set();
-    const netIdSet = new Set();
-    const pinIdSet = new Set();
-    const netSignalById = new Map();
+    const symbolIdSet = new Set<string>();
+    const netIdSet = new Set<string>();
+    const pinIdSet = new Set<string>();
+    const netSignalById = new Map<string, SignalRef>();
     const hideTopFocusSymbol = String(focusNode.path || 'top') === 'top';
 
     const symbols = Array.isArray(schematic.symbols) ? schematic.symbols : [];
     for (const symbol of symbols) {
-      if (!symbol || typeof symbol !== 'object') {
+      const symbolRecord = asRecord(symbol);
+      if (!symbolRecord) {
         continue;
       }
-      const symbolId = String(symbol.id || '').trim();
+      const symbolId = String(symbolRecord.id || '').trim();
       if (!symbolId) {
         continue;
       }
-      const symbolType = String(symbol.type || 'component').trim().toLowerCase();
-      const componentPath = String(symbol.component_path || '').trim();
+      const symbolType = String(symbolRecord.type || 'component').trim().toLowerCase();
+      const componentPath = String(symbolRecord.component_path || '').trim();
       if (hideTopFocusSymbol && symbolType === 'focus') {
         continue;
       }
-      const isChildComponent = symbolType === 'component' && componentPath && componentPath !== String(focusNode.path || 'top');
+      const isChildComponent = (
+        symbolType === 'component'
+        && componentPath
+        && componentPath !== String(focusNode.path || 'top')
+      );
       if (!showChildren && isChildComponent) {
         continue;
       }
@@ -141,7 +215,7 @@ export function createSchematicElementBuilder({
         return String(pathToNodeId.get(componentPath) || '');
       })();
 
-      const direction = String(symbol.direction || '').trim().toLowerCase();
+      const direction = normalizeDirection(symbolRecord.direction || '');
       const counts = pinCountBySymbol.get(symbolId) || { left: 0, right: 0, top: 0, bottom: 0 };
       const verticalPins = Math.max(counts.left, counts.right);
       const horizontalPins = Math.max(counts.top, counts.bottom);
@@ -179,13 +253,15 @@ export function createSchematicElementBuilder({
         'schem-symbol',
         symbolType === 'focus' || symbolType === 'component' ? 'schem-component' : '',
         symbolType === 'focus' ? 'schem-focus' : '',
-        symbolType === 'io' ? `schem-io ${direction === 'in' ? 'schem-io-in' : direction === 'out' ? 'schem-io-out' : ''}` : '',
+        symbolType === 'io'
+          ? `schem-io ${direction === 'in' ? 'schem-io-in' : direction === 'out' ? 'schem-io-out' : ''}`
+          : '',
         symbolType === 'memory' ? 'schem-memory' : '',
         symbolType === 'op' ? 'schem-op' : ''
       ].filter(Boolean).join(' ');
 
       pushNode(symbolId, {
-        label: String(symbol.label || symbol.name || symbolId),
+        label: String(symbolRecord.label || symbolRecord.name || symbolId),
         nodeRole: 'symbol',
         symbolType,
         componentId,
@@ -199,18 +275,19 @@ export function createSchematicElementBuilder({
 
     const nets = Array.isArray(schematic.nets) ? schematic.nets : [];
     for (const net of nets) {
-      if (!net || typeof net !== 'object') {
+      const netRecord = asRecord(net);
+      if (!netRecord) {
         continue;
       }
-      const netId = String(net.id || '').trim();
-      const signalName = String(net.name || net.signal || '').trim();
+      const netId = String(netRecord.id || '').trim();
+      const signalName = String(netRecord.name || netRecord.signal || '').trim();
       if (!netId || !signalName) {
         continue;
       }
-      const width = Number.parseInt(net.width, 10) || 1;
-      const signalRef = normalizeSignal(signalName, width, net.live_name);
+      const width = readWidth(netRecord.width, 1);
+      const signalRef = normalizeSignal(signalName, width, netRecord.live_name);
       const classes = ['schem-net'];
-      if ((signalRef?.width || width || 1) > 1 || net.bus) {
+      if ((signalRef?.width || width || 1) > 1 || Boolean(netRecord.bus)) {
         classes.push('schem-bus');
       }
       pushNode(netId, {
@@ -220,11 +297,11 @@ export function createSchematicElementBuilder({
         liveName: signalRef?.liveName || '',
         valueKey: signalRef?.valueKey || `${focusNode.path}::${signalName}`,
         width: signalRef?.width || width || 1,
-        group: String(net.group || '')
+        group: String(netRecord.group || '')
       }, classes.join(' '));
       netIdSet.add(netId);
       netSignalById.set(netId, {
-        signalName: signalRef?.name || signalName,
+        name: signalRef?.name || signalName,
         liveName: signalRef?.liveName || '',
         valueKey: signalRef?.valueKey || `${focusNode.path}::${signalName}`,
         width: signalRef?.width || width || 1
@@ -232,33 +309,32 @@ export function createSchematicElementBuilder({
     }
 
     for (const pin of pins) {
-      if (!pin || typeof pin !== 'object') {
+      const pinRecord = asRecord(pin);
+      if (!pinRecord) {
         continue;
       }
-      const pinId = String(pin.id || '').trim();
-      const symbolId = String(pin.symbol_id || '').trim();
+      const pinId = String(pinRecord.id || '').trim();
+      const symbolId = String(pinRecord.symbol_id || '').trim();
       if (!pinId || !symbolId || !symbolIdSet.has(symbolId)) {
         continue;
       }
 
-      const signalName = String(pin.signal || pin.name || '').trim();
-      const width = Number.parseInt(pin.width, 10) || 1;
-      const signalRef = signalName ? normalizeSignal(signalName, width, pin.live_name) : null;
-      const side = ['left', 'right', 'top', 'bottom'].includes(String(pin.side || '').toLowerCase())
-        ? String(pin.side || '').toLowerCase()
-        : 'left';
-      const direction = String(pin.direction || 'inout').toLowerCase();
+      const signalName = String(pinRecord.signal || pinRecord.name || '').trim();
+      const width = readWidth(pinRecord.width, 1);
+      const signalRef = signalName ? normalizeSignal(signalName, width, pinRecord.live_name) : null;
+      const side = normalizeSide(pinRecord.side);
+      const direction = normalizeDirection(pinRecord.direction || 'inout');
       const classes = ['schem-pin', `schem-pin-${side}`];
-      if ((signalRef?.width || width || 1) > 1 || pin.bus) {
+      if ((signalRef?.width || width || 1) > 1 || Boolean(pinRecord.bus)) {
         classes.push('schem-bus');
       }
 
       pushNode(pinId, {
-        label: String(pin.name || signalRef?.name || pinId),
+        label: String(pinRecord.name || signalRef?.name || pinId),
         nodeRole: 'pin',
         symbolId,
         side,
-        order: Number.parseInt(pin.order, 10) || 0,
+        order: readWidth(pinRecord.order, 0),
         direction,
         signalName: signalRef?.name || signalName,
         liveName: signalRef?.liveName || '',
@@ -270,12 +346,13 @@ export function createSchematicElementBuilder({
 
     const wires = Array.isArray(schematic.wires) ? schematic.wires : [];
     for (const wire of wires) {
-      if (!wire || typeof wire !== 'object') {
+      const wireRecord = asRecord(wire);
+      if (!wireRecord) {
         continue;
       }
-      const fromPinId = String(wire.from_pin_id || '').trim();
-      const toPinId = String(wire.to_pin_id || '').trim();
-      let netId = String(wire.net_id || '').trim();
+      const fromPinId = String(wireRecord.from_pin_id || '').trim();
+      const toPinId = String(wireRecord.to_pin_id || '').trim();
+      let netId = String(wireRecord.net_id || '').trim();
       if (!fromPinId || !toPinId) {
         continue;
       }
@@ -286,12 +363,12 @@ export function createSchematicElementBuilder({
       }
 
       if (!netId || !netIdSet.has(netId)) {
-        const signalName = String(wire.signal || '').trim();
+        const signalName = String(wireRecord.signal || '').trim();
         if (!signalName) {
           continue;
         }
-        const width = Number.parseInt(wire.width, 10) || 1;
-        const signalRef = normalizeSignal(signalName, width, wire.live_name);
+        const width = readWidth(wireRecord.width, 1);
+        const signalRef = normalizeSignal(signalName, width, wireRecord.live_name);
         netId = `net:${focusNode.id}:${signalRef?.name || signalName}`;
         if (!netIdSet.has(netId)) {
           pushNode(netId, {
@@ -305,20 +382,20 @@ export function createSchematicElementBuilder({
           netIdSet.add(netId);
         }
         netSignalById.set(netId, {
-          signalName: signalRef?.name || signalName,
+          name: signalRef?.name || signalName,
           liveName: signalRef?.liveName || '',
           valueKey: signalRef?.valueKey || `${focusNode.path}::${signalName}`,
           width: signalRef?.width || width || 1
         });
       }
 
-      const netSignal = netSignalById.get(netId) || {};
-      const direction = String(wire.direction || 'inout').toLowerCase();
-      const width = Number.parseInt(wire.width, 10) || netSignal.width || 1;
-      const signalName = String(wire.signal || netSignal.signalName || '').trim();
-      const liveName = String(wire.live_name || netSignal.liveName || '').trim();
-      const valueKey = String(netSignal.valueKey || (signalName ? `${focusNode.path}::${signalName}` : '')).trim();
-      const wireKind = String(wire.kind || 'wire').trim();
+      const netSignal = netSignalById.get(netId);
+      const direction = normalizeDirection(wireRecord.direction || 'inout');
+      const width = readWidth(wireRecord.width, netSignal?.width || 1);
+      const signalName = String(wireRecord.signal || netSignal?.name || '').trim();
+      const liveName = String(wireRecord.live_name || netSignal?.liveName || '').trim();
+      const valueKey = String(netSignal?.valueKey || (signalName ? `${focusNode.path}::${signalName}` : '')).trim();
+      const wireKind = String(wireRecord.kind || 'wire').trim();
 
       const classes = ['schem-wire', `schem-kind-${wireKind.replace(/[^a-zA-Z0-9_-]+/g, '_')}`];
       if (width > 1) {
@@ -328,30 +405,42 @@ export function createSchematicElementBuilder({
         classes.push('schem-bidir');
       }
 
-      const edgeData = {
+      const edgeData: UnknownRecord = {
         signalName,
         liveName,
         valueKey,
         width,
         direction,
         kind: wireKind,
-        wireId: String(wire.id || ''),
+        wireId: String(wireRecord.id || ''),
         netId
       };
 
       if (hasFrom) {
-        pushEdge(fromPinId, netId, { ...edgeData, segment: 'from', id: `${wire.id || `${fromPinId}:${netId}`}:from` }, classes.join(' '));
+        pushEdge(fromPinId, netId, {
+          ...edgeData,
+          segment: 'from',
+          id: `${String(wireRecord.id || `${fromPinId}:${netId}`)}:from`
+        }, classes.join(' '));
       }
       if (hasTo) {
-        pushEdge(netId, toPinId, { ...edgeData, segment: 'to', id: `${wire.id || `${netId}:${toPinId}`}:to` }, classes.join(' '));
+        pushEdge(netId, toPinId, {
+          ...edgeData,
+          segment: 'to',
+          id: `${String(wireRecord.id || `${netId}:${toPinId}`)}:to`
+        }, classes.join(' '));
       }
     }
 
     return elements;
   }
 
-  function createComponentSchematicElements(model: any, focusNode: any, showChildren: any) {
-    const elements: any[] = [];
+  function createComponentSchematicElements(
+    model: ComponentModel,
+    focusNode: ComponentNode,
+    showChildren: boolean
+  ): SchematicElement[] {
+    const elements: SchematicElement[] = [];
     if (!model || !focusNode) {
       return elements;
     }
@@ -363,18 +452,19 @@ export function createSchematicElementBuilder({
 
     const lookup = componentSignalLookup(focusNode);
     const liveSignalSet = new Set(
-      state.components.overrideMeta?.liveSignalNames
-      || state.components.overrideMeta?.names
-      || runtime.irMeta?.names
-      || []
+      asStringArray(
+        state.components.overrideMeta?.liveSignalNames
+        || state.components.overrideMeta?.names
+        || runtime.irMeta?.names
+      )
     );
-    const raw = focusNode.rawRef && typeof focusNode.rawRef === 'object' ? focusNode.rawRef : {};
-    const seenNodes = new Set();
-    const seenEdges = new Set();
-    const netNodes = new Map();
+    const raw = focusNode.rawRef || {};
+    const seenNodes = new Set<string>();
+    const seenEdges = new Set<string>();
+    const netNodes = new Map<string, string>();
     let edgeSeq = 0;
 
-    const pushNode = (id: any, data: any, classes = '') => {
+    const pushNode = (id: string, data: UnknownRecord, classes = ''): void => {
       if (!id || seenNodes.has(id)) {
         return;
       }
@@ -388,12 +478,17 @@ export function createSchematicElementBuilder({
       });
     };
 
-    const pushEdge = (source: any, target: any, data: any = {}, classes = '') => {
+    const pushEdge = (
+      source: string,
+      target: string,
+      data: UnknownRecord = {},
+      classes = ''
+    ): void => {
       if (!source || !target) {
         return;
       }
       edgeSeq += 1;
-      const base = data.id || `wire:${source}:${target}:${edgeSeq}`;
+      const base = String(data.id || `wire:${source}:${target}:${edgeSeq}`);
       let id = base;
       while (seenEdges.has(id)) {
         edgeSeq += 1;
@@ -411,13 +506,13 @@ export function createSchematicElementBuilder({
       });
     };
 
-    const ensureNet = (name: any, width = 1) => {
+    const ensureNet = (name: unknown, width = 1): string | null => {
       const signalName = String(name || '').trim();
       if (!signalName) {
         return null;
       }
       if (netNodes.has(signalName)) {
-        return netNodes.get(signalName);
+        return netNodes.get(signalName) || null;
       }
       const ref = resolveNodeSignalRef(focusNode, lookup, signalName, width, liveSignalSet);
       const id = `net:${focusNode.id}:${signalName}`;
@@ -433,11 +528,17 @@ export function createSchematicElementBuilder({
       return id;
     };
 
-    const addPortEdge = (fromId: any, toId: any, signalRef: any, direction: any, kind = 'port') => {
+    const addPortEdge = (
+      fromId: string,
+      toId: string,
+      signalRef: SignalRef | null,
+      direction: string,
+      kind = 'port'
+    ): void => {
       if (!fromId || !toId || !signalRef) {
         return;
       }
-      const edgeData = {
+      const edgeData: UnknownRecord = {
         signalName: signalRef.name,
         liveName: signalRef.liveName || '',
         valueKey: signalRef.valueKey,
@@ -468,15 +569,22 @@ export function createSchematicElementBuilder({
     const rawPorts = Array.isArray(raw.ports) ? raw.ports : [];
     const maxIoPorts = 120;
     for (const port of rawPorts.slice(0, maxIoPorts)) {
-      if (!port || typeof port.name !== 'string') {
+      const portRecord = asRecord(port);
+      if (!portRecord || typeof portRecord.name !== 'string') {
         continue;
       }
-      const signalRef = resolveNodeSignalRef(focusNode, lookup, port.name, Number.parseInt(port.width, 10) || 1, liveSignalSet);
-      const netId = ensureNet(port.name, signalRef?.width || 1);
+      const signalRef = resolveNodeSignalRef(
+        focusNode,
+        lookup,
+        portRecord.name,
+        readWidth(portRecord.width, 1),
+        liveSignalSet
+      );
+      const netId = ensureNet(portRecord.name, signalRef?.width || 1);
       if (!netId || !signalRef) {
         continue;
       }
-      const direction = String(port.direction || '?').toLowerCase();
+      const direction = normalizeDirection(portRecord.direction || '?');
       const ioId = `io:${focusNode.id}:${signalRef.name}`;
       const ioClass = direction === 'in'
         ? 'schem-io schem-io-in'
@@ -494,8 +602,7 @@ export function createSchematicElementBuilder({
       addPortEdge(ioId, netId, signalRef, direction, 'io-port');
     }
 
-    const shouldShowChildren = !!showChildren;
-    if (shouldShowChildren) {
+    if (showChildren) {
       for (const childId of focusNode.children || []) {
         const childNode = model.nodes.get(childId);
         if (!childNode) {
@@ -515,25 +622,32 @@ export function createSchematicElementBuilder({
           children: childNode.children.length
         }, 'schem-component schem-component-fallback');
 
-        const childRaw = childNode.rawRef && typeof childNode.rawRef === 'object' ? childNode.rawRef : {};
+        const childRaw = childNode.rawRef || {};
         const childPorts = Array.isArray(childRaw.ports) ? childRaw.ports : [];
         for (const port of childPorts) {
-          if (!port || typeof port.name !== 'string') {
+          const portRecord = asRecord(port);
+          if (!portRecord || typeof portRecord.name !== 'string') {
             continue;
           }
-          const signalRef = resolveNodeSignalRef(focusNode, lookup, port.name, Number.parseInt(port.width, 10) || 1, liveSignalSet);
-          const netId = ensureNet(port.name, signalRef?.width || 1);
+          const signalRef = resolveNodeSignalRef(
+            focusNode,
+            lookup,
+            portRecord.name,
+            readWidth(portRecord.width, 1),
+            liveSignalSet
+          );
+          const netId = ensureNet(portRecord.name, signalRef?.width || 1);
           if (!netId || !signalRef) {
             continue;
           }
-          const direction = String(port.direction || '?').toLowerCase();
+          const direction = normalizeDirection(portRecord.direction || '?');
           addPortEdge(netId, childCyId, signalRef, direction, 'child-port');
         }
       }
     }
 
-    const memoryNodes = new Set();
-    const ensureMemoryNode = (name: any) => {
+    const memoryNodes = new Set<string>();
+    const ensureMemoryNode = (name: unknown): string | null => {
       const memoryName = String(name || '').trim();
       if (!memoryName) {
         return null;
@@ -549,11 +663,11 @@ export function createSchematicElementBuilder({
       return id;
     };
 
-    const addAssignEdges = () => {
+    const addAssignEdges = (): void => {
       const assigns = Array.isArray(raw.assigns) ? raw.assigns : [];
-      const maxAssigns = shouldShowChildren && focusNode.children.length > 0 ? 48 : 220;
+      const maxAssigns = showChildren && focusNode.children.length > 0 ? 48 : 220;
       for (let idx = 0; idx < Math.min(assigns.length, maxAssigns); idx += 1) {
-        const assign = assigns[idx];
+        const assign = asRecord(assigns[idx]);
         const targetName = String(assign?.target || '').trim();
         if (!targetName) {
           continue;
@@ -575,7 +689,7 @@ export function createSchematicElementBuilder({
           }, 'schem-wire');
         }
 
-        const sourceSignals = Array.from(collectExprSignalNames(assign?.expr, new Set(), 14));
+        const sourceSignals = Array.from(collectExprSignalNames(assign?.expr, new Set<string>(), 14));
         for (const sourceName of sourceSignals) {
           const sourceRef = resolveNodeSignalRef(focusNode, lookup, sourceName, 1, liveSignalSet);
           const sourceNetId = ensureNet(sourceRef?.name || sourceName, sourceRef?.width || 1);
@@ -594,11 +708,17 @@ export function createSchematicElementBuilder({
 
     const writePorts = Array.isArray(raw.write_ports) ? raw.write_ports : [];
     for (const [idx, port] of writePorts.entries()) {
-      const memId = ensureMemoryNode(port?.memory || `mem_wr_${idx}`);
+      const portRecord = asRecord(port);
+      const memId = ensureMemoryNode(portRecord?.memory || `mem_wr_${idx}`);
       if (!memId) {
         continue;
       }
-      for (const signalName of [summarizeExpr(port?.addr), summarizeExpr(port?.data), summarizeExpr(port?.enable), port?.clock]) {
+      for (const signalName of [
+        summarizeExpr(portRecord?.addr),
+        summarizeExpr(portRecord?.data),
+        summarizeExpr(portRecord?.enable),
+        portRecord?.clock
+      ]) {
         const ref = resolveNodeSignalRef(focusNode, lookup, signalName, 1, liveSignalSet);
         const netId = ensureNet(ref?.name || signalName, 1);
         if (!ref || !netId) {
@@ -615,11 +735,16 @@ export function createSchematicElementBuilder({
 
     const syncReadPorts = Array.isArray(raw.sync_read_ports) ? raw.sync_read_ports : [];
     for (const [idx, port] of syncReadPorts.entries()) {
-      const memId = ensureMemoryNode(port?.memory || `mem_rd_${idx}`);
+      const portRecord = asRecord(port);
+      const memId = ensureMemoryNode(portRecord?.memory || `mem_rd_${idx}`);
       if (!memId) {
         continue;
       }
-      for (const signalName of [summarizeExpr(port?.addr), summarizeExpr(port?.enable), port?.clock]) {
+      for (const signalName of [
+        summarizeExpr(portRecord?.addr),
+        summarizeExpr(portRecord?.enable),
+        portRecord?.clock
+      ]) {
         const ref = resolveNodeSignalRef(focusNode, lookup, signalName, 1, liveSignalSet);
         const netId = ensureNet(ref?.name || signalName, 1);
         if (!ref || !netId) {
@@ -632,8 +757,8 @@ export function createSchematicElementBuilder({
           kind: 'mem-read-ctrl'
         }, 'schem-wire');
       }
-      const dataRef = resolveNodeSignalRef(focusNode, lookup, port?.data, 1, liveSignalSet);
-      const dataNetId = ensureNet(dataRef?.name || port?.data, 1);
+      const dataRef = resolveNodeSignalRef(focusNode, lookup, portRecord?.data, 1, liveSignalSet);
+      const dataNetId = ensureNet(dataRef?.name || portRecord?.data, 1);
       if (dataRef && dataNetId) {
         pushEdge(memId, dataNetId, {
           signalName: dataRef.name,

@@ -1,9 +1,27 @@
 import { createExplorerModelRuntimeService } from '../services/model_runtime_service';
+import type { ExplorerDomRefs, ExplorerRuntimeLike, ExplorerStateLike, TreeRow } from '../lib/types';
 
-function requireFn(name: any, fn: any) {
+interface ModelControllerOptions {
+  dom: ExplorerDomRefs;
+  state: ExplorerStateLike;
+  runtime: ExplorerRuntimeLike;
+  currentComponentSourceText: () => string;
+  renderComponentTreeRows: (
+    dom: ExplorerDomRefs,
+    treeRows: TreeRow[],
+    parseError: string
+  ) => void;
+}
+
+function requireFn(name: string, fn: unknown): void {
   if (typeof fn !== 'function') {
     throw new Error(`createExplorerModelController requires function: ${name}`);
   }
+}
+
+function hasModel(state: ExplorerStateLike): boolean {
+  const model = state.components.model;
+  return !!(model && model.nodes && model.nodes.size > 0);
 }
 
 export function createExplorerModelController({
@@ -12,7 +30,7 @@ export function createExplorerModelController({
   runtime,
   currentComponentSourceText,
   renderComponentTreeRows
-}: any = {}) {
+}: ModelControllerOptions) {
   if (!dom || !state || !runtime) {
     throw new Error('createExplorerModelController requires dom/state/runtime');
   }
@@ -25,20 +43,19 @@ export function createExplorerModelController({
     currentComponentSourceText
   });
 
-  function renderComponentTree() {
+  function renderComponentTree(): void {
     if (!dom.componentTree) {
       return;
     }
-    const hasModel = !!(state.components.model && state.components.model.nodes && state.components.model.nodes.size);
-    if (!hasModel || state.components.parseError) {
+    if (!hasModel(state) || state.components.parseError) {
       renderComponentTreeRows(dom, [], state.components.parseError || '');
       return;
     }
-    const rows = runtimeService.buildComponentTreeRows(
-      dom.componentTree && typeof dom.componentTree.getFilter === 'function'
-        ? dom.componentTree.getFilter()
-        : ''
-    );
+
+    const filter = dom.componentTree && typeof dom.componentTree.getFilter === 'function'
+      ? String(dom.componentTree.getFilter())
+      : '';
+    const rows = runtimeService.buildComponentTreeRows(filter);
     renderComponentTreeRows(dom, rows, '');
   }
 

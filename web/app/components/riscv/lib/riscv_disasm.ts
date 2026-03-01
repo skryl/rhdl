@@ -48,20 +48,20 @@ export const CSR_NAMES: Record<number, string> = {
   0xF13: 'mimpid', 0xF14: 'mhartid'
 };
 
-function reg(n: any) {
+function reg(n: Unsafe) {
   return REGS[n & 0x1f];
 }
 
-function signExtend(value: any, bits: any) {
+function signExtend(value: Unsafe, bits: Unsafe) {
   const shift = 32 - bits;
   return (value << shift) >> shift;
 }
 
-function csrName(csr: any) {
+function csrName(csr: Unsafe) {
   return CSR_NAMES[csr & 0xfff] || `0x${(csr & 0xfff).toString(16)}`;
 }
 
-function fenceFlags(val: any) {
+function fenceFlags(val: Unsafe) {
   let s = '';
   if (val & 8) s += 'i';
   if (val & 4) s += 'o';
@@ -70,7 +70,7 @@ function fenceFlags(val: any) {
   return s || '0';
 }
 
-function amoSuffix(funct7: any) {
+function amoSuffix(funct7: Unsafe) {
   const aq = (funct7 >> 1) & 1;
   const rl = funct7 & 1;
   if (aq && rl) return '.aqrl';
@@ -79,7 +79,7 @@ function amoSuffix(funct7: any) {
   return '';
 }
 
-function formatAddr(addr: any, wide: any) {
+function formatAddr(addr: Unsafe, wide: Unsafe) {
   return wide
     ? (addr >>> 0).toString(16).toUpperCase().padStart(8, '0')
     : (addr & 0xffff).toString(16).toUpperCase().padStart(4, '0');
@@ -87,7 +87,7 @@ function formatAddr(addr: any, wide: any) {
 
 // --- 32-bit instruction decoder ---
 
-function decodeOpImm(inst: any) {
+function decodeOpImm(inst: Unsafe) {
   const rd = (inst >> 7) & 0x1f;
   const funct3 = (inst >> 12) & 0x7;
   const rs1 = (inst >> 15) & 0x1f;
@@ -118,7 +118,7 @@ function decodeOpImm(inst: any) {
   }
 }
 
-function decodeOp(inst: any) {
+function decodeOp(inst: Unsafe) {
   const rd = (inst >> 7) & 0x1f;
   const funct3 = (inst >> 12) & 0x7;
   const rs1 = (inst >> 15) & 0x1f;
@@ -169,7 +169,7 @@ function decodeOp(inst: any) {
   return '???';
 }
 
-function decodeBranch(inst: any, addr: any) {
+function decodeBranch(inst: Unsafe, addr: Unsafe) {
   const funct3 = (inst >> 12) & 0x7;
   const rs1 = (inst >> 15) & 0x1f;
   const rs2 = (inst >> 20) & 0x1f;
@@ -193,7 +193,7 @@ function decodeBranch(inst: any, addr: any) {
   return `${mn} ${reg(rs1)}, ${reg(rs2)}, ${formatAddr(target, wide)}`;
 }
 
-function decodeSystem(inst: any) {
+function decodeSystem(inst: Unsafe) {
   const rd = (inst >> 7) & 0x1f;
   const funct3 = (inst >> 12) & 0x7;
   const rs1 = (inst >> 15) & 0x1f;
@@ -237,7 +237,7 @@ function decodeSystem(inst: any) {
   }
 }
 
-function decodeAmo(inst: any) {
+function decodeAmo(inst: Unsafe) {
   const rd = (inst >> 7) & 0x1f;
   const funct3 = (inst >> 12) & 0x7;
   const rs1 = (inst >> 15) & 0x1f;
@@ -265,7 +265,7 @@ function decodeAmo(inst: any) {
   }
 }
 
-export function decode32(inst: any, addr: any) {
+export function decode32(inst: Unsafe, addr: Unsafe) {
   const opcode = inst & 0x7f;
   const rd = (inst >> 7) & 0x1f;
   const funct3 = (inst >> 12) & 0x7;
@@ -354,7 +354,7 @@ export function decode32(inst: any, addr: any) {
 
 // --- 16-bit compressed instruction decoder ---
 
-export function decode16(inst: any, addr: any) {
+export function decode16(inst: Unsafe, addr: Unsafe) {
   const quadrant = inst & 0x3;
   const funct3 = (inst >> 13) & 0x7;
   const rdRs1 = (inst >> 7) & 0x1f;
@@ -368,7 +368,7 @@ export function decode16(inst: any, addr: any) {
   return '???';
 }
 
-function decodeQ0(inst: any, funct3: any) {
+function decodeQ0(inst: Unsafe, funct3: Unsafe) {
   const rdp = reg(((inst >> 2) & 0x7) + 8);
   const rs1p = reg(((inst >> 7) & 0x7) + 8);
 
@@ -402,7 +402,7 @@ function decodeQ0(inst: any, funct3: any) {
   return '???';
 }
 
-function decodeQ1(inst: any, funct3: any, addr: any) {
+function decodeQ1(inst: Unsafe, funct3: Unsafe, addr: Unsafe) {
   const rdRs1 = (inst >> 7) & 0x1f;
   const rdp = ((inst >> 7) & 0x7) + 8;
   const rs2p = ((inst >> 2) & 0x7) + 8;
@@ -476,7 +476,7 @@ function decodeQ1(inst: any, funct3: any, addr: any) {
   return '???';
 }
 
-function decodeQ2(inst: any, funct3: any, rdRs1: any, rs2: any) {
+function decodeQ2(inst: Unsafe, funct3: Unsafe, rdRs1: Unsafe, rs2: Unsafe) {
   if (funct3 === 0b000) {
     // C.SLLI
     const shamt = (inst >> 2) & 0x1f;
@@ -510,8 +510,8 @@ function decodeQ2(inst: any, funct3: any, rdRs1: any, rs2: any) {
   return '???';
 }
 
-function decodeCJOffset(inst: any) {
-  const b = (bit: any) => (inst >> bit) & 1;
+function decodeCJOffset(inst: Unsafe) {
+  const b = (bit: Unsafe) => (inst >> bit) & 1;
   const raw =
     (b(12) << 11) | (b(11) << 4) | (b(10) << 9) | (b(9) << 8) |
     (b(8) << 10) | (b(7) << 6) | (b(6) << 7) | (b(5) << 3) |
@@ -519,8 +519,8 @@ function decodeCJOffset(inst: any) {
   return signExtend(raw, 12);
 }
 
-function decodeCBOffset(inst: any) {
-  const b = (bit: any) => (inst >> bit) & 1;
+function decodeCBOffset(inst: Unsafe) {
+  const b = (bit: Unsafe) => (inst >> bit) & 1;
   const raw =
     (b(12) << 8) | (b(11) << 4) | (b(10) << 3) |
     (b(6) << 7) | (b(5) << 6) | (b(4) << 2) |
@@ -532,7 +532,7 @@ function decodeCBOffset(inst: any) {
 
 // Classify a mnemonic into a rendering category for syntax coloring.
 // Returns one of: 'arith', 'load', 'store', 'branch', 'jump', 'imm', 'sys', 'amo', or null.
-export function classifyMnemonic(mn: any) {
+export function classifyMnemonic(mn: Unsafe) {
   if (!mn || mn === '???' || mn === 'unimp') return null;
 
   // Handle compressed special forms before stripping prefix.
@@ -559,10 +559,10 @@ export function classifyMnemonic(mn: any) {
 // --- Main disassembly entry point ---
 
 export function disassembleRiscvLines(
-  startAddress: any,
-  lineCount: any,
-  readMemory: any,
-  options: any = {}
+  startAddress: Unsafe,
+  lineCount: Unsafe,
+  readMemory: Unsafe,
+  options: Unsafe = {}
 ) {
   const count = Math.max(1, Math.min(4096, Number.parseInt(lineCount, 10) || 1));
   const addressSpace = Math.max(1, Number.parseInt(options.addressSpace, 10) || 0x100000000);
@@ -580,7 +580,7 @@ export function disassembleRiscvLines(
     ? readMemory(start, fetchLen)
     : new Uint8Array(0);
 
-  const readByte = (addr: any) => {
+  const readByte = (addr: Unsafe) => {
     const normalized = (addr >>> 0) % addressSpace;
     const offset = (normalized - start + addressSpace) % addressSpace;
     if (memory instanceof Uint8Array && offset < memory.length) {
@@ -589,10 +589,10 @@ export function disassembleRiscvLines(
     return 0;
   };
 
-  const readHalf = (addr: any) =>
+  const readHalf = (addr: Unsafe) =>
     readByte(addr) | (readByte(addr + 1) << 8);
 
-  const readWord = (addr: any) =>
+  const readWord = (addr: Unsafe) =>
     readByte(addr) | (readByte(addr + 1) << 8) |
     (readByte(addr + 2) << 16) | (readByte(addr + 3) << 24);
 

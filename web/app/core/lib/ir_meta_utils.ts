@@ -1,11 +1,26 @@
-export function parseIrMeta(irJson: any) {
-  const ir = JSON.parse(irJson);
-  const widths = new Map();
-  const signalInfo = new Map();
-  const names = [];
+import type {
+  IrEntryModel,
+  IrMetaModel,
+  IrModel,
+  IrProcessModel,
+  IrSignalInfoModel
+} from '../../types/models';
 
-  for (const kind of ['ports', 'nets', 'regs']) {
-    const entries = Array.isArray(ir[kind]) ? ir[kind] : [];
+function asIrObject(value: unknown): IrModel {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+  return value as IrModel;
+}
+
+export function parseIrMeta(irJson: string): IrMetaModel {
+  const ir = asIrObject(JSON.parse(irJson));
+  const widths = new Map<string, number>();
+  const signalInfo = new Map<string, IrSignalInfoModel>();
+  const names: string[] = [];
+
+  for (const kind of ['ports', 'nets', 'regs'] as const) {
+    const entries = Array.isArray(ir[kind]) ? (ir[kind] as IrEntryModel[]) : [];
     for (const entry of entries) {
       if (!entry || typeof entry.name !== 'string') {
         continue;
@@ -13,22 +28,26 @@ export function parseIrMeta(irJson: any) {
       if (!widths.has(entry.name)) {
         names.push(entry.name);
       }
-      const width = Number.parseInt(entry.width, 10) || 1;
+      const width = Number.parseInt(String(entry.width ?? ''), 10) || 1;
       widths.set(entry.name, width);
       signalInfo.set(entry.name, {
         name: entry.name,
         width,
         kind,
-        direction: entry.direction || null,
+        direction: typeof entry.direction === 'string' ? entry.direction : null,
         entry
       });
     }
   }
 
-  const clocks: any[] = [];
-  const processes = Array.isArray(ir.processes) ? ir.processes : [];
+  const clocks: string[] = [];
+  const processes = Array.isArray(ir.processes) ? (ir.processes as IrProcessModel[]) : [];
   for (const process of processes) {
-    if (process?.clocked && typeof process.clock === 'string' && !clocks.includes(process.clock)) {
+    if (
+      process?.clocked
+      && typeof process.clock === 'string'
+      && !clocks.includes(process.clock)
+    ) {
       clocks.push(process.clock);
     }
   }
@@ -46,7 +65,7 @@ export function parseIrMeta(irJson: any) {
     }
   }
 
-  const rankClock = (name: any) => {
+  const rankClock = (name: string) => {
     if (/^(clk|clock)$/i.test(name)) {
       return 0;
     }
@@ -70,7 +89,7 @@ export function parseIrMeta(irJson: any) {
   return { ir, widths, signalInfo, names, clocks, clockCandidates };
 }
 
-export function currentIrSourceKey(irText: any) {
+export function currentIrSourceKey(irText: unknown) {
   const source = String(irText || '');
   if (!source) {
     return '';

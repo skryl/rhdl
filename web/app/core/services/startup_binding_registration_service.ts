@@ -1,7 +1,22 @@
-function requireFn(name: any, fn: any) {
+import type {
+  StartupBindingRegistrationService,
+  StartupBindingRegistrationServiceDeps,
+  UnknownFn
+} from '../../types/services';
+
+type Teardown = (() => void) | null | undefined;
+
+function requireFn(name: string, fn: unknown): asserts fn is UnknownFn {
   if (typeof fn !== 'function') {
     throw new Error(`createStartupBindingRegistrationService requires function: ${name}`);
   }
+}
+
+function toTeardown(value: unknown): Teardown {
+  if (typeof value === 'function') {
+    return value as () => void;
+  }
+  return null;
 }
 
 export function createStartupBindingRegistrationService({
@@ -14,7 +29,7 @@ export function createStartupBindingRegistrationService({
   util,
   env,
   log
-}: any = {}) {
+}: Partial<StartupBindingRegistrationServiceDeps> = {}): StartupBindingRegistrationService {
   if (!dom || !state || !runtime) {
     throw new Error('createStartupBindingRegistrationService requires dom/state/runtime');
   }
@@ -22,6 +37,15 @@ export function createStartupBindingRegistrationService({
     throw new Error('createStartupBindingRegistrationService requires bindings/app/store/util/env');
   }
   requireFn('log', log);
+
+  const resolvedDom = dom;
+  const resolvedState = state;
+  const resolvedRuntime = runtime;
+  const resolvedBindings = bindings;
+  const resolvedApp = app;
+  const resolvedStore = store;
+  const resolvedUtil = util;
+  const resolvedEnv = env;
 
   const {
     bindCoreBindings,
@@ -34,9 +58,9 @@ export function createStartupBindingRegistrationService({
     COLLAPSIBLE_PANEL_SELECTOR,
     registerUiBinding,
     disposeUiBindings
-  } = bindings;
+  } = resolvedBindings;
 
-  const { requestAnimationFrameImpl = globalThis.requestAnimationFrame } = env;
+  const { requestAnimationFrameImpl = globalThis.requestAnimationFrame } = resolvedEnv;
 
   const {
     setRunnerPresetState,
@@ -49,12 +73,25 @@ export function createStartupBindingRegistrationService({
     setMemoryFollowPcState,
     setMemoryShowSourceState,
     scheduleReduxUxSync
-  } = store;
+  } = resolvedStore;
 
-  const { getBackendDef, parseHexOrDec, hexByte, isSnapshotFileName } = util;
+  const { getBackendDef, parseHexOrDec, hexByte, isSnapshotFileName } = resolvedUtil;
 
-  const { shell = {}, runner = {}, components = {}, apple2 = {}, sim = {}, watch = {} } = app;
-  const { terminal = {}, dashboard = {} } = shell;
+  const { shell, runner, components, apple2, sim, watch } = resolvedApp;
+  const { terminal, dashboard } = shell;
+
+  const terminalAppendInput = typeof terminal.appendInput === 'function'
+    ? terminal.appendInput
+    : (() => undefined);
+  const terminalBackspaceInput = typeof terminal.backspaceInput === 'function'
+    ? terminal.backspaceInput
+    : (() => undefined);
+  const terminalFocusInput = typeof terminal.focusInput === 'function'
+    ? terminal.focusInput
+    : (() => undefined);
+  const queueApple2Key = typeof apple2.queueKey === 'function'
+    ? apple2.queueKey
+    : (() => undefined);
 
   requireFn('bindCoreBindings', bindCoreBindings);
   requireFn('bindMemoryBindings', bindMemoryBindings);
@@ -103,6 +140,14 @@ export function createStartupBindingRegistrationService({
   requireFn('sim.refreshStatus', sim.refreshStatus);
   requireFn('sim.initializeSimulator', sim.initializeSimulator);
 
+  const bindCoreBindingsFn = bindCoreBindings;
+  const bindMemoryBindingsFn = bindMemoryBindings;
+  const bindComponentBindingsFn = bindComponentBindings;
+  const bindIoBindingsFn = bindIoBindings;
+  const bindSimBindingsFn = bindSimBindings;
+  const bindEditorBindingsFn = bindEditorBindings;
+  const bindCollapsiblePanelsFn = bindCollapsiblePanels;
+
   function resetBindingLifecycle() {
     disposeUiBindings();
     dashboard.disposeLayoutBuilder();
@@ -113,32 +158,32 @@ export function createStartupBindingRegistrationService({
 
   function registerBindings() {
     registerUiBinding(
-      bindCollapsiblePanels({
+      toTeardown(bindCollapsiblePanelsFn({
         selector: COLLAPSIBLE_PANEL_SELECTOR,
         actions: {
           refreshDashboardRowSizing: dashboard.refreshRowSizing,
           refreshAllDashboardRowSizing: dashboard.refreshAllRowSizing,
           isComponentTabActive: components.isTabActive,
           refreshActiveComponentTab: components.refreshActiveTab,
-          getActiveTab: () => state.activeTab,
+          getActiveTab: () => resolvedState.activeTab,
           refreshMemoryView: apple2.refreshMemoryView
         }
-      })
+      }))
     );
     dashboard.initializeLayoutBuilder();
 
     registerUiBinding(
-      bindCoreBindings({
-        dom,
-        state,
+      toTeardown(bindCoreBindingsFn({
+        dom: resolvedDom,
+        state: resolvedState,
         shell: {
           setSidebarCollapsed: shell.setSidebarCollapsed,
           setTerminalOpen: shell.setTerminalOpen,
           submitTerminalInput: terminal.submitInput,
           terminalHistoryNavigate: terminal.historyNavigate,
-          terminalAppendInput: terminal.appendInput || (() => {}),
-          terminalBackspaceInput: terminal.backspaceInput || (() => {}),
-          terminalFocusInput: terminal.focusInput || (() => {}),
+          terminalAppendInput,
+          terminalBackspaceInput,
+          terminalFocusInput,
           applyTheme: shell.applyTheme,
           setActiveTab: shell.setActiveTab
         },
@@ -157,7 +202,7 @@ export function createStartupBindingRegistrationService({
         },
         apple2: {
           refreshMemoryView: apple2.refreshMemoryView,
-          queueKey: apple2.queueKey || (() => {})
+          queueKey: queueApple2Key
         },
         components: {
           refreshExplorer: components.refreshExplorer
@@ -170,23 +215,23 @@ export function createStartupBindingRegistrationService({
           getBackendDef
         },
         log
-      })
+      }))
     );
 
     registerUiBinding(
-      bindComponentBindings({
-        dom,
-        state,
+      toTeardown(bindComponentBindingsFn({
+        dom: resolvedDom,
+        state: resolvedState,
         components,
         scheduleReduxUxSync,
         log
-      })
+      }))
     );
 
     registerUiBinding(
-      bindIoBindings({
-        dom,
-        state,
+      toTeardown(bindIoBindingsFn({
+        dom: resolvedDom,
+        state: resolvedState,
         apple2,
         sim,
         store: {
@@ -194,15 +239,15 @@ export function createStartupBindingRegistrationService({
           setApple2DisplayColorState
         },
         scheduleReduxUxSync
-      })
+      }))
     );
 
     registerUiBinding(
-      bindSimBindings({
-        dom,
-        state,
-        runtime,
-        scheduleAnimationFrame: (cb: any) => requestAnimationFrameImpl(cb),
+      toTeardown(bindSimBindingsFn({
+        dom: resolvedDom,
+        state: resolvedState,
+        runtime: resolvedRuntime,
+        scheduleAnimationFrame: (cb: FrameRequestCallback) => requestAnimationFrameImpl(cb),
         sim,
         apple2,
         components,
@@ -213,13 +258,13 @@ export function createStartupBindingRegistrationService({
           setUiCyclesPendingState
         },
         log
-      })
+      }))
     );
 
     registerUiBinding(
-      bindMemoryBindings({
-        dom,
-        runtime,
+      toTeardown(bindMemoryBindingsFn({
+        dom: resolvedDom,
+        runtime: resolvedRuntime,
         apple2,
         store: {
           setMemoryFollowPcState,
@@ -231,18 +276,18 @@ export function createStartupBindingRegistrationService({
           hexByte
         },
         scheduleReduxUxSync
-      })
+      }))
     );
 
     registerUiBinding(
-      bindEditorBindings({
-        dom,
-        state,
-        runtime,
+      toTeardown(bindEditorBindingsFn({
+        dom: resolvedDom,
+        state: resolvedState,
+        runtime: resolvedRuntime,
         sim,
         watch,
         log
-      })
+      }))
     );
   }
 

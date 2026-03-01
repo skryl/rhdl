@@ -8,7 +8,7 @@ import { createSimInitializerController } from './initializer_controller';
 import { createSimStatusController } from './status_controller';
 import { createSimLoopController } from './loop_controller';
 
-function requireFn(name: any, fn: any) {
+function requireFn(name: Unsafe, fn: Unsafe) {
   if (typeof fn !== 'function') {
     throw new Error(`createSimLazyGetters requires function: ${name}`);
   }
@@ -57,7 +57,7 @@ export function createSimLazyGetters({
   isComponentTabActive,
   refreshActiveComponentTab,
   drainTrace
-}: any = {}) {
+}: Unsafe = {}) {
   if (!dom || !state || !runtime || !appStore || !storeActions) {
     throw new Error('createSimLazyGetters requires dom/state/runtime/appStore/storeActions');
   }
@@ -97,10 +97,10 @@ export function createSimLazyGetters({
   requireFn('refreshActiveComponentTab', refreshActiveComponentTab);
   requireFn('drainTrace', drainTrace);
 
-  let simRuntimeController: any = null;
-  let simInitializerController: any = null;
-  let simStatusController: any = null;
-  let simLoopController: any = null;
+  let simRuntimeController: Unsafe = null;
+  let simInitializerController: Unsafe = null;
+  let simStatusController: Unsafe = null;
+  let simLoopController: Unsafe = null;
 
   function getSimRuntimeController() {
     if (!simRuntimeController) {
@@ -130,7 +130,7 @@ export function createSimLazyGetters({
         setComponentSourceBundle,
         setComponentSchematicBundle,
         ensureBackendInstance,
-        createSimulator: (instance: any, json: any, backend: any) => new WasmIrSimulator(instance, json, backend),
+        createSimulator: (instance: Unsafe, json: Unsafe, backend: Unsafe) => new WasmIrSimulator(instance, json, backend),
         setCycleState,
         setUiCyclesPendingState,
         setRunningState,

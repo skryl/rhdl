@@ -97,9 +97,9 @@ const RUNNER_PROBE_RISCV_UART_TX_LEN = 17;
 const RUNNER_CONTROL_CLEAR_UART_TX = 6;
 
 export class WasmIrSimulator {
-  [key: string]: any;
+  [key: string]: Unsafe;
 
-  constructor(instance: any, irJson: any, backend = 'interpreter', subCycles = 14) {
+  constructor(instance: Unsafe, irJson: Unsafe, backend = 'interpreter', subCycles = 14) {
     this.instance = instance;
     this.backend = getBackendDef(backend);
     this.e = WasmIrSimulator.normalizeExports(instance.exports, this.backend);
@@ -167,8 +167,8 @@ export class WasmIrSimulator {
     }
   }
 
-  static normalizeExports(raw: any, backendDef: any) {
-    const pick = (...names: any[]) => {
+  static normalizeExports(raw: Unsafe, backendDef: Unsafe) {
+    const pick = (...names: Unsafe[]) => {
       for (const name of names) {
         if (name && typeof raw[name] === 'function') {
           return raw[name].bind(raw);
@@ -176,7 +176,7 @@ export class WasmIrSimulator {
       }
       return null;
     };
-    const must = (...names: any[]) => {
+    const must = (...names: Unsafe[]) => {
       const fn = pick(...names);
       if (!fn) {
         throw new Error(`Missing WASM export (backend ${backendDef.id}): ${names[0]}`);
@@ -187,7 +187,7 @@ export class WasmIrSimulator {
     const core = backendDef.corePrefix;
     const alloc = backendDef.allocPrefix || core;
 
-    const out: any = {
+    const out: Unsafe = {
       memory: raw.memory
     };
 
@@ -222,13 +222,13 @@ export class WasmIrSimulator {
     return out;
   }
 
-  requireExport(name: any) {
+  requireExport(name: Unsafe) {
     if (!this.e[name]) {
       throw new Error(`Missing WASM export: ${name}`);
     }
   }
 
-  hasExport(name: any) {
+  hasExport(name: Unsafe) {
     return typeof this.e[name] === 'function';
   }
 
@@ -244,17 +244,17 @@ export class WasmIrSimulator {
     return new Uint32Array(this.memoryBuffer());
   }
 
-  alloc(size: any) {
+  alloc(size: Unsafe) {
     return this.e.sim_wasm_alloc(Math.max(1, size));
   }
 
-  dealloc(ptr: any, size: any) {
+  dealloc(ptr: Unsafe, size: Unsafe) {
     if (ptr) {
       this.e.sim_wasm_dealloc(ptr, Math.max(1, size));
     }
   }
 
-  withCString(text: any, fn: any) {
+  withCString(text: Unsafe, fn: Unsafe) {
     const bytes = this.encoder.encode(String(text));
     const ptr = this.alloc(bytes.length + 1);
     try {
@@ -267,7 +267,7 @@ export class WasmIrSimulator {
     }
   }
 
-  readCString(ptr: any) {
+  readCString(ptr: Unsafe) {
     if (!ptr) {
       return '';
     }
@@ -280,7 +280,7 @@ export class WasmIrSimulator {
     return this.decoder.decode(mem.subarray(ptr, end));
   }
 
-  takeOwnedCString(ptr: any, freeFn: any = null) {
+  takeOwnedCString(ptr: Unsafe, freeFn: Unsafe = null) {
     if (!ptr) {
       return '';
     }
@@ -315,8 +315,8 @@ export class WasmIrSimulator {
     }
   }
 
-  simSignal(op: any, { name = null, idx = 0, value = 0 }: any = {}) {
-    const invoke = (namePtr: any) => {
+  simSignal(op: Unsafe, { name = null, idx = 0, value = 0 }: Unsafe = {}) {
+    const invoke = (namePtr: Unsafe) => {
       const outPtr = this.alloc(8);
       try {
         this.u8().fill(0, outPtr, outPtr + 8);
@@ -336,12 +336,12 @@ export class WasmIrSimulator {
     };
 
     if (typeof name === 'string') {
-      return this.withCString(name, (ptr: any) => invoke(ptr));
+      return this.withCString(name, (ptr: Unsafe) => invoke(ptr));
     }
     return invoke(0);
   }
 
-  simExec(op: any, arg0 = 0, arg1 = 0, errorOutPtr = 0) {
+  simExec(op: Unsafe, arg0 = 0, arg1 = 0, errorOutPtr = 0) {
     const outPtr = this.alloc(8);
     try {
       this.u8().fill(0, outPtr, outPtr + 8);
@@ -360,8 +360,8 @@ export class WasmIrSimulator {
     }
   }
 
-  simTrace(op: any, strArg = null) {
-    const invoke = (argPtr: any) => {
+  simTrace(op: Unsafe, strArg = null) {
+    const invoke = (argPtr: Unsafe) => {
       const outPtr = this.alloc(8);
       try {
         this.u8().fill(0, outPtr, outPtr + 8);
@@ -379,12 +379,12 @@ export class WasmIrSimulator {
     };
 
     if (typeof strArg === 'string') {
-      return this.withCString(strArg, (ptr: any) => invoke(ptr));
+      return this.withCString(strArg, (ptr: Unsafe) => invoke(ptr));
     }
     return invoke(0);
   }
 
-  simBlob(op: any) {
+  simBlob(op: Unsafe) {
     const required = this.e.sim_blob(this.ctx, Number(op) >>> 0, 0, 0) >>> 0;
     if (required === 0) {
       return '';
@@ -432,28 +432,28 @@ export class WasmIrSimulator {
     return csv.split(',').filter(Boolean);
   }
 
-  get_signal_idx(name: any) {
+  get_signal_idx(name: Unsafe) {
     const result = this.simSignal(SIM_SIGNAL_GET_INDEX, { name });
     return result.ok ? (result.value | 0) : -1;
   }
 
-  has_signal(name: any) {
+  has_signal(name: Unsafe) {
     return this.simSignal(SIM_SIGNAL_HAS, { name }).value !== 0;
   }
 
-  poke(name: any, value: any) {
+  poke(name: Unsafe, value: Unsafe) {
     return this.simSignal(SIM_SIGNAL_POKE, { name, value }).ok;
   }
 
-  peek(name: any) {
+  peek(name: Unsafe) {
     return this.simSignal(SIM_SIGNAL_PEEK, { name }).value;
   }
 
-  poke_by_idx(idx: any, value: any) {
+  poke_by_idx(idx: Unsafe, value: Unsafe) {
     this.simSignal(SIM_SIGNAL_POKE_INDEX, { idx, value });
   }
 
-  peek_by_idx(idx: any) {
+  peek_by_idx(idx: Unsafe) {
     return this.simSignal(SIM_SIGNAL_PEEK_INDEX, { idx }).value;
   }
 
@@ -462,11 +462,11 @@ export class WasmIrSimulator {
     this.captureTraceIfEnabled();
   }
 
-  set_prev_clock(clockListIdx: any, value: any) {
+  set_prev_clock(clockListIdx: Unsafe, value: Unsafe) {
     this.simExec(SIM_EXEC_SET_PREV_CLOCK, clockListIdx, value);
   }
 
-  get_clock_list_idx(signalIdx: any) {
+  get_clock_list_idx(signalIdx: Unsafe) {
     const result = this.simExec(SIM_EXEC_GET_CLOCK_LIST_IDX, signalIdx, 0);
     return result.ok ? (result.value | 0) : -1;
   }
@@ -495,14 +495,14 @@ export class WasmIrSimulator {
     this.captureTraceIfEnabled();
   }
 
-  run_ticks(n: any) {
+  run_ticks(n: Unsafe) {
     const ticks = Math.max(0, Number.parseInt(n, 10) || 0);
     for (let i = 0; i < ticks; i += 1) {
       this.tick();
     }
   }
 
-  run_clock_ticks(clockSignal: any, cycles: any) {
+  run_clock_ticks(clockSignal: Unsafe, cycles: Unsafe) {
     if (!this.features.hasSignalIndex) {
       this.run_ticks(cycles);
       return;
@@ -558,7 +558,7 @@ export class WasmIrSimulator {
     }
   }
 
-  clock_mode(name: any) {
+  clock_mode(name: Unsafe) {
     if (!name) {
       return 'none';
     }
@@ -579,7 +579,7 @@ export class WasmIrSimulator {
     return mode;
   }
 
-  clock_signals_by_name(names: any) {
+  clock_signals_by_name(names: Unsafe) {
     const result = [];
     for (const name of names) {
       if (!name || !this.has_signal(name)) {
@@ -599,7 +599,7 @@ export class WasmIrSimulator {
       return [];
     }
     const names = csv.split(',').filter(Boolean);
-    return this.clock_signals_by_name(names.filter((n: any) => /(^|_)clk(_|$)/i.test(n)));
+    return this.clock_signals_by_name(names.filter((n: Unsafe) => /(^|_)clk(_|$)/i.test(n)));
   }
 
   reset() {
@@ -611,7 +611,7 @@ export class WasmIrSimulator {
     return this.simTrace(SIM_TRACE_START).ok;
   }
 
-  trace_start_streaming(path: any) {
+  trace_start_streaming(path: Unsafe) {
     return this.simTrace(SIM_TRACE_START_STREAMING, path).ok;
   }
 
@@ -619,11 +619,11 @@ export class WasmIrSimulator {
     this.simTrace(SIM_TRACE_STOP);
   }
 
-  trace_add_signal(name: any) {
+  trace_add_signal(name: Unsafe) {
     return this.simTrace(SIM_TRACE_ADD_SIGNAL, name).ok;
   }
 
-  trace_add_signals_matching(pattern: any) {
+  trace_add_signals_matching(pattern: Unsafe) {
     return this.simTrace(SIM_TRACE_ADD_SIGNALS_MATCHING, pattern).value | 0;
   }
 
@@ -671,15 +671,15 @@ export class WasmIrSimulator {
     return this.simTrace(SIM_TRACE_SIGNAL_COUNT).value >>> 0;
   }
 
-  trace_set_timescale(timescale: any) {
+  trace_set_timescale(timescale: Unsafe) {
     return this.simTrace(SIM_TRACE_SET_TIMESCALE, timescale).ok;
   }
 
-  trace_set_module_name(name: any) {
+  trace_set_module_name(name: Unsafe) {
     return this.simTrace(SIM_TRACE_SET_MODULE_NAME, name).ok;
   }
 
-  withAllocatedBytes(bytes: any, fn: any) {
+  withAllocatedBytes(bytes: Unsafe, fn: Unsafe) {
     if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
       return fn(0, 0);
     }
@@ -692,7 +692,7 @@ export class WasmIrSimulator {
     }
   }
 
-  readBytesViaExport(readFn: any, offset: any, length: any) {
+  readBytesViaExport(readFn: Unsafe, offset: Unsafe, length: Unsafe) {
     const len = Math.max(0, Number.parseInt(length, 10) || 0);
     if (len === 0) {
       return new Uint8Array(0);
@@ -707,7 +707,7 @@ export class WasmIrSimulator {
     }
   }
 
-  readRunnerCaps(capsPtr: any) {
+  readRunnerCaps(capsPtr: Unsafe) {
     const view = new DataView(this.memoryBuffer(), capsPtr, 16);
     return {
       kind: view.getInt32(0, true),
@@ -738,7 +738,7 @@ export class WasmIrSimulator {
     }
   }
 
-  runnerProbe(op: any, arg0 = 0) {
+  runnerProbe(op: Unsafe, arg0 = 0) {
     if (!this.hasExport('runner_probe')) {
       return 0;
     }
@@ -747,7 +747,7 @@ export class WasmIrSimulator {
     return Number.isFinite(value) ? value : 0;
   }
 
-  readRunnerRunResult(resultPtr: any) {
+  readRunnerRunResult(resultPtr: Unsafe) {
     const view = new DataView(this.memoryBuffer(), resultPtr, 20);
     return {
       text_dirty: view.getInt32(0, true) !== 0,
@@ -758,14 +758,14 @@ export class WasmIrSimulator {
     };
   }
 
-  runnerMemTransfer(op: any, space: any, offset: any, bytes: any, flags = 0) {
+  runnerMemTransfer(op: Unsafe, space: Unsafe, offset: Unsafe, bytes: Unsafe, flags = 0) {
     if (!this.hasExport('runner_mem')) {
       return 0;
     }
     if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
       return 0;
     }
-    return this.withAllocatedBytes(bytes, (ptr: any, len: any) => (
+    return this.withAllocatedBytes(bytes, (ptr: Unsafe, len: Unsafe) => (
       this.e.runner_mem(
         this.ctx,
         Number(op) >>> 0,
@@ -778,7 +778,7 @@ export class WasmIrSimulator {
     ));
   }
 
-  runnerMemRead(space: any, offset: any, length: any, flags = 0) {
+  runnerMemRead(space: Unsafe, offset: Unsafe, length: Unsafe, flags = 0) {
     if (!this.hasExport('runner_mem')) {
       return new Uint8Array(0);
     }
@@ -827,29 +827,29 @@ export class WasmIrSimulator {
     return this.runnerProbe(RUNNER_PROBE_IS_MODE) !== 0;
   }
 
-  runner_load_memory(bytes: any, offset = 0, options: any = {}) {
+  runner_load_memory(bytes: Unsafe, offset = 0, options: Unsafe = {}) {
     const space = options.isRom ? RUNNER_MEM_SPACE_ROM : RUNNER_MEM_SPACE_MAIN;
     return this.runnerMemTransfer(RUNNER_MEM_OP_LOAD, space, offset, bytes, 0) > 0;
   }
 
-  runner_read_memory(offset: any, length: any, options: any = {}) {
+  runner_read_memory(offset: Unsafe, length: Unsafe, options: Unsafe = {}) {
     const flags = options.mapped === false ? 0 : RUNNER_MEM_FLAG_MAPPED;
     return this.runnerMemRead(RUNNER_MEM_SPACE_MAIN, offset, length, flags);
   }
 
-  runner_write_memory(offset: any, bytes: any, options: any = {}) {
+  runner_write_memory(offset: Unsafe, bytes: Unsafe, options: Unsafe = {}) {
     const flags = options.mapped === false ? 0 : RUNNER_MEM_FLAG_MAPPED;
     return this.runnerMemTransfer(RUNNER_MEM_OP_WRITE, RUNNER_MEM_SPACE_MAIN, offset, bytes, flags) > 0;
   }
 
-  runner_load_rom(bytes: any, offset = 0) {
+  runner_load_rom(bytes: Unsafe, offset = 0) {
     if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
       return false;
     }
     return this.runnerMemTransfer(RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_ROM, offset, bytes, 0) > 0;
   }
 
-  runner_load_boot_rom(bytes: any) {
+  runner_load_boot_rom(bytes: Unsafe) {
     if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
       return false;
     }
@@ -857,7 +857,7 @@ export class WasmIrSimulator {
     return written > 0 || this.runner_kind() !== 'gameboy';
   }
 
-  runner_set_reset_vector(address: any) {
+  runner_set_reset_vector(address: Unsafe) {
     if (!this.hasExport('runner_control')) {
       return false;
     }
@@ -873,7 +873,7 @@ export class WasmIrSimulator {
     ) !== 0;
   }
 
-  runner_run_cycles(cycles: any, keyData = 0, keyReady = false) {
+  runner_run_cycles(cycles: Unsafe, keyData = 0, keyReady = false) {
     if (!this.hasExport('runner_run')) {
       return null;
     }
@@ -905,7 +905,7 @@ export class WasmIrSimulator {
     }
   }
 
-  runner_run_cycles_full(cycles: any) {
+  runner_run_cycles_full(cycles: Unsafe) {
     if (!this.hasExport('runner_run')) {
       return { cycles_run: 0, frames_completed: 0 };
     }
@@ -949,12 +949,12 @@ export class WasmIrSimulator {
     this.simRunnerSpeakerToggles = 0;
   }
 
-  runner_read_vram(addr: any) {
+  runner_read_vram(addr: Unsafe) {
     const bytes = this.runnerMemRead(RUNNER_MEM_SPACE_VRAM, addr, 1, 0);
     return bytes.length > 0 ? (bytes[0] & 0xFF) : 0;
   }
 
-  runner_write_vram(addr: any, value: any) {
+  runner_write_vram(addr: Unsafe, value: Unsafe) {
     this.runnerMemTransfer(
       RUNNER_MEM_OP_WRITE,
       RUNNER_MEM_SPACE_VRAM,
@@ -964,12 +964,12 @@ export class WasmIrSimulator {
     );
   }
 
-  runner_read_zpram(addr: any) {
+  runner_read_zpram(addr: Unsafe) {
     const bytes = this.runnerMemRead(RUNNER_MEM_SPACE_ZPRAM, addr, 1, 0);
     return bytes.length > 0 ? (bytes[0] & 0xFF) : 0;
   }
 
-  runner_write_zpram(addr: any, value: any) {
+  runner_write_zpram(addr: Unsafe, value: Unsafe) {
     this.runnerMemTransfer(
       RUNNER_MEM_OP_WRITE,
       RUNNER_MEM_SPACE_ZPRAM,
@@ -979,12 +979,12 @@ export class WasmIrSimulator {
     );
   }
 
-  runner_read_wram(addr: any) {
+  runner_read_wram(addr: Unsafe) {
     const bytes = this.runnerMemRead(RUNNER_MEM_SPACE_WRAM, addr, 1, 0);
     return bytes.length > 0 ? (bytes[0] & 0xFF) : 0;
   }
 
-  runner_write_wram(addr: any, value: any) {
+  runner_write_wram(addr: Unsafe, value: Unsafe) {
     this.runnerMemTransfer(
       RUNNER_MEM_OP_WRITE,
       RUNNER_MEM_SPACE_WRAM,
@@ -1013,7 +1013,7 @@ export class WasmIrSimulator {
     return this.runnerProbe(RUNNER_PROBE_RISCV_UART_TX_LEN) >>> 0;
   }
 
-  runner_riscv_uart_receive_bytes(bytes: any) {
+  runner_riscv_uart_receive_bytes(bytes: Unsafe) {
     if (this.runner_kind() !== 'riscv') {
       return false;
     }
@@ -1030,12 +1030,12 @@ export class WasmIrSimulator {
     return this.runnerMemTransfer(RUNNER_MEM_OP_WRITE, RUNNER_MEM_SPACE_UART_RX, 0, payload, 0) > 0;
   }
 
-  runner_riscv_uart_receive_text(text: any) {
+  runner_riscv_uart_receive_text(text: Unsafe) {
     const encoded = new TextEncoder().encode(String(text ?? ''));
     return this.runner_riscv_uart_receive_bytes(encoded);
   }
 
-  runner_riscv_load_disk(bytes: any, offset = 0) {
+  runner_riscv_load_disk(bytes: Unsafe, offset = 0) {
     if (this.runner_kind() !== 'riscv') {
       return false;
     }
@@ -1045,7 +1045,7 @@ export class WasmIrSimulator {
     return this.runnerMemTransfer(RUNNER_MEM_OP_LOAD, RUNNER_MEM_SPACE_DISK, offset, bytes, 0) > 0;
   }
 
-  runner_riscv_uart_tx_bytes(offset: any = 0, length: any = null) {
+  runner_riscv_uart_tx_bytes(offset: Unsafe = 0, length: Unsafe = null) {
     if (!this.hasExport('runner_mem')) {
       return new Uint8Array(0);
     }
@@ -1093,7 +1093,7 @@ export class WasmIrSimulator {
     return this.runnerProbe(RUNNER_PROBE_IF_R) >>> 0;
   }
 
-  runner_get_signal(idx: any) {
+  runner_get_signal(idx: Unsafe) {
     return this.runnerProbe(RUNNER_PROBE_SIGNAL, idx);
   }
 
@@ -1113,24 +1113,24 @@ export class WasmIrSimulator {
     return null;
   }
 
-  memory_load(bytes: any, offset = 0, options: any = {}) {
+  memory_load(bytes: Unsafe, offset = 0, options: Unsafe = {}) {
     return this.runner_load_memory(bytes, offset, options);
   }
 
-  memory_read(offset: any, length: any, options: any = {}) {
+  memory_read(offset: Unsafe, length: Unsafe, options: Unsafe = {}) {
     return this.runner_read_memory(offset, length, options);
   }
 
-  memory_write(offset: any, bytes: any, options: any = {}) {
+  memory_write(offset: Unsafe, bytes: Unsafe, options: Unsafe = {}) {
     return this.runner_write_memory(offset, bytes, options);
   }
 
-  memory_read_byte(address: any, options: any = {}) {
+  memory_read_byte(address: Unsafe, options: Unsafe = {}) {
     const bytes = this.runner_read_memory(address, 1, options);
     return bytes.length > 0 ? (bytes[0] & 0xFF) : 0;
   }
 
-  memory_write_byte(address: any, value: any, options: any = {}) {
+  memory_write_byte(address: Unsafe, value: Unsafe, options: Unsafe = {}) {
     return this.runner_write_memory(address, new Uint8Array([Number(value) & 0xFF]), options);
   }
 }

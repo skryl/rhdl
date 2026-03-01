@@ -11,8 +11,8 @@ test('createRuntimeContext creates isolated runtime holders', () => {
   assert.equal(a.sim, null);
   assert.equal(a.irMeta, null);
   assert.equal(a.waveformP5, null);
-  assert.equal(a.parser.kind, 'parser-a');
-  assert.equal(b.parser.kind, 'parser-b');
+  assert.equal((a.parser as { kind?: string } | null)?.kind, 'parser-a');
+  assert.equal((b.parser as { kind?: string } | null)?.kind, 'parser-b');
 
   assert.ok(a.backendInstances instanceof Map);
   assert.ok(b.backendInstances instanceof Map);

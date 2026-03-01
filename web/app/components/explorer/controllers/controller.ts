@@ -11,8 +11,24 @@ import {
   renderComponentConnectionsView,
   clearComponentConnectionsView
 } from '../ui/schematic_panel';
+import type {
+  ComponentModel,
+  ComponentNode,
+  ExplorerDomRefs,
+  ExplorerRuntimeLike,
+  ExplorerStateLike
+} from '../lib/types';
 
-function requireFn(name: any, fn: any) {
+interface ComponentExplorerControllerOptions {
+  dom: ExplorerDomRefs;
+  state: ExplorerStateLike;
+  runtime: ExplorerRuntimeLike;
+  scheduleReduxUxSync: (reason: string) => void;
+  currentComponentSourceText: () => string;
+  componentSignalPreviewLimit?: number;
+}
+
+function requireFn(name: string, fn: unknown): void {
   if (typeof fn !== 'function') {
     throw new Error(`createComponentExplorerController requires function: ${name}`);
   }
@@ -25,7 +41,7 @@ export function createComponentExplorerController({
   scheduleReduxUxSync,
   currentComponentSourceText,
   componentSignalPreviewLimit = 180
-}: any = {}) {
+}: ComponentExplorerControllerOptions) {
   if (!dom || !state || !runtime) {
     throw new Error('createComponentExplorerController requires dom/state/runtime');
   }
@@ -51,24 +67,19 @@ export function createComponentExplorerController({
     clearComponentConnectionsView
   });
 
-  function renderComponentInspectorOnly() {
+  function renderComponentInspectorOnly(): void {
     const node = modelController.currentSelectedComponentNode();
     inspectorController.renderComponentInspector(node);
   }
 
-  function renderComponentGraphOnly() {
-    graphController.renderComponentGraphPanel();
-  }
-
-  function renderComponentViews() {
+  function renderComponentViews(): void {
     const plan = resolveComponentRefreshPlan(state.activeTab);
     if (plan.renderInspector) {
       renderComponentInspectorOnly();
       return;
     }
     if (plan.renderGraph) {
-      renderComponentGraphOnly();
-      return;
+      graphController.renderComponentGraphPanel();
     }
   }
 
@@ -86,11 +97,17 @@ export function createComponentExplorerController({
     renderComponentConnections: inspectorController.renderComponentConnections
   });
 
-  function setComponentGraphFocus(nodeId: any, showChildren = true) {
-    const changed = modelController.setComponentGraphFocus(nodeId, showChildren);
+  function setComponentGraphFocus(nodeId: unknown, showChildren = true): void {
+    const normalizedId = String(nodeId || '').trim();
+    if (!normalizedId) {
+      return;
+    }
+
+    const changed = modelController.setComponentGraphFocus(normalizedId, showChildren);
     if (!changed) {
       return;
     }
+
     const plan = resolveComponentRefreshPlan(state.activeTab);
     if (plan.renderTree) {
       modelController.renderComponentTree();
@@ -99,20 +116,23 @@ export function createComponentExplorerController({
     scheduleReduxUxSync('setComponentGraphFocus');
   }
 
-  function isComponentTabActive() {
+  function isComponentTabActive(): boolean {
     return state.activeTab === 'componentTab' || state.activeTab === 'componentGraphTab';
   }
 
-  function refreshActiveComponentTab() {
+  function refreshActiveComponentTab(): void {
     const plan = resolveComponentRefreshPlan(state.activeTab);
     if (plan.renderInspector) {
       renderComponentInspectorOnly();
     } else if (plan.renderGraph) {
-      renderComponentGraphOnly();
+      graphController.renderComponentGraphPanel();
     }
   }
 
-  function rebuildComponentExplorer(meta = runtime.irMeta, source = currentComponentSourceText()) {
+  function rebuildComponentExplorer(
+    meta = runtime.irMeta,
+    source = currentComponentSourceText()
+  ): void {
     modelController.rebuildComponentExplorer(meta, source);
     const plan = resolveComponentRefreshPlan(state.activeTab);
     if (plan.renderTree) {
@@ -122,11 +142,11 @@ export function createComponentExplorerController({
       renderComponentInspectorOnly();
     }
     if (plan.renderGraph) {
-      renderComponentGraphOnly();
+      graphController.renderComponentGraphPanel();
     }
   }
 
-  function refreshComponentExplorer() {
+  function refreshComponentExplorer(): void {
     modelController.refreshComponentExplorer();
     const plan = resolveComponentRefreshPlan(state.activeTab);
     if (plan.renderTree) {
@@ -136,19 +156,19 @@ export function createComponentExplorerController({
       renderComponentInspectorOnly();
     }
     if (plan.renderGraph) {
-      renderComponentGraphOnly();
+      graphController.renderComponentGraphPanel();
     }
   }
 
-  function zoomComponentGraphIn() {
+  function zoomComponentGraphIn(): boolean {
     return graphController.zoomInComponentGraph();
   }
 
-  function zoomComponentGraphOut() {
+  function zoomComponentGraphOut(): boolean {
     return graphController.zoomOutComponentGraph();
   }
 
-  function resetComponentGraphViewport() {
+  function resetComponentGraphViewport(): boolean {
     return graphController.resetComponentGraphViewport();
   }
 

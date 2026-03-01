@@ -1,6 +1,31 @@
 import { createExplorerGraphRuntimeService } from '../../services/graph_runtime_service';
+import type {
+  ComponentModel,
+  ComponentNode,
+  ExplorerDomRefs,
+  ExplorerRuntimeLike,
+  ExplorerStateLike
+} from '../../lib/types';
 
-function requireFn(name: any, fn: any) {
+interface GraphControllerOptions {
+  dom: ExplorerDomRefs;
+  state: ExplorerStateLike;
+  runtime: ExplorerRuntimeLike;
+  currentComponentGraphFocusNode: () => ComponentNode | null;
+  currentSelectedComponentNode: () => ComponentNode | null;
+  renderComponentTree: () => void;
+  renderComponentViews: () => void;
+  createSchematicElements: (
+    model: ComponentModel,
+    focusNode: ComponentNode,
+    showChildren: boolean
+  ) => unknown[];
+  signalLiveValueByName: (liveName: string) => unknown;
+  renderComponentLiveSignals: (node: ComponentNode | null) => void;
+  renderComponentConnections: (node: ComponentNode | null) => void;
+}
+
+function requireFn(name: string, fn: unknown): void {
   if (typeof fn !== 'function') {
     throw new Error(`createExplorerGraphController requires function: ${name}`);
   }
@@ -18,7 +43,7 @@ export function createExplorerGraphController({
   signalLiveValueByName,
   renderComponentLiveSignals,
   renderComponentConnections
-}: any = {}) {
+}: GraphControllerOptions) {
   if (!dom || !state || !runtime) {
     throw new Error('createExplorerGraphController requires dom/state/runtime');
   }
@@ -40,16 +65,17 @@ export function createExplorerGraphController({
     createSchematicElements,
     signalLiveValueByName,
     isTraceEnabled: () => (
-      !!runtime?.sim
+      !!runtime.sim
       && typeof runtime.sim.trace_enabled === 'function'
       && runtime.sim.trace_enabled() === true
     )
   });
 
-  function renderComponentGraphPanel() {
+  function renderComponentGraphPanel(): void {
     const selectedNode = currentSelectedComponentNode();
     const focusNode = currentComponentGraphFocusNode();
     const panelState = runtimeService.describeComponentGraphPanel({ selectedNode, focusNode });
+
     if (dom.componentGraphTitle) {
       dom.componentGraphTitle.textContent = panelState.title;
     }

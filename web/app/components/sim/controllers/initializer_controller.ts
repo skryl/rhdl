@@ -5,13 +5,13 @@ import {
   initializeApple2Mode
 } from '../services/initializer_runtime_service';
 
-function requireFn(name: any, fn: any) {
+function requireFn(name: Unsafe, fn: Unsafe) {
   if (typeof fn !== 'function') {
     throw new Error(`createSimInitializerController requires function: ${name}`);
   }
 }
 
-function resolveTraceEnabledOnLoad(preset: any = null) {
+function resolveTraceEnabledOnLoad(preset: Unsafe = null) {
   if (!preset || typeof preset !== 'object') {
     return false;
   }
@@ -62,7 +62,7 @@ export function createSimInitializerController({
   fetchImpl = globalThis.fetch,
   requestFrame = globalThis.requestAnimationFrame,
   setTimeoutImpl = globalThis.setTimeout
-}: any = {}) {
+}: Unsafe = {}) {
   if (!dom || !state || !runtime || !appStore || !storeActions) {
     throw new Error('createSimInitializerController requires dom/state/runtime/appStore/storeActions');
   }
@@ -133,7 +133,7 @@ export function createSimInitializerController({
     });
   }
 
-  async function initializeSimulator(options: any = {}) {
+  async function initializeSimulator(options: Unsafe = {}) {
     const shouldYieldToUi = options.yieldToUi === true;
     const deferComponentExplorerRebuild = options.deferComponentExplorerRebuild === true;
     const transferChunkBytes = Number.parseInt(options.transferChunkBytes, 10);
@@ -229,8 +229,8 @@ export function createSimInitializerController({
       }
       refreshStatus();
       log('Simulator initialized');
-    } catch (err: any) {
-      log(`Initialization failed: ${err.message || err}`);
+    } catch (err) {
+      log(`Initialization failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

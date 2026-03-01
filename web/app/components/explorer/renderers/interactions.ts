@@ -7,23 +7,126 @@ const MIN_ZOOM_SCALE = 0.05;
 const MAX_ZOOM_SCALE = 8;
 const PAN_DRAG_THRESHOLD = 3;
 
-function clamp(value: any, min: any, max: any) {
+interface GraphViewport {
+  x: number;
+  y: number;
+  scale: number;
+}
+
+interface HitElement {
+  type?: string;
+  componentId?: string;
+  signalName?: string;
+  liveName?: string;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+}
+
+interface InteractionState {
+  components: {
+    selectedNodeId: string | null;
+    graphLastTap: { nodeId: string; timeMs: number } | null;
+    graphFocusId: string | null;
+    graphShowChildren: boolean;
+    graphHighlightedSignal: { signalName: string | null; liveName: string | null } | null;
+  };
+}
+
+interface InteractionModel {
+  nodes: Map<string, unknown>;
+}
+
+interface SpatialIndexLike {
+  queryPoint: (x: number, y: number) => HitElement | null;
+}
+
+interface CanvasLike {
+  width: number;
+  height: number;
+  getBoundingClientRect: () => { left: number; top: number; width: number; height: number };
+}
+
+interface ListenerTargetLike {
+  addEventListener?: (type: string, listener: unknown, options?: unknown) => void;
+  removeEventListener?: (type: string, listener: unknown, options?: unknown) => void;
+}
+
+interface PanState {
+  startX: number;
+  startY: number;
+  baseX: number;
+  baseY: number;
+  dragged: boolean;
+}
+
+interface BindD3InteractionOptions {
+  canvas: CanvasLike;
+  state: InteractionState;
+  model: InteractionModel;
+  spatialIndex: SpatialIndexLike;
+  renderComponentTree: () => void;
+  renderComponentViews: () => void;
+  requestRender?: () => void;
+  now?: () => number;
+  doubleTapMs?: number;
+  viewport?: GraphViewport | null;
+}
+
+function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function isComponent(element: any) {
+function asListenerTarget(value: unknown): ListenerTargetLike | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  return value as ListenerTargetLike;
+}
+
+function addListener(target: unknown, type: string, listener: EventListener, options?: unknown): void {
+  const listenerTarget = asListenerTarget(target);
+  if (!listenerTarget || typeof listenerTarget.addEventListener !== 'function') {
+    return;
+  }
+  listenerTarget.addEventListener(type, listener, options);
+}
+
+function removeListener(target: unknown, type: string, listener: EventListener, options?: unknown): void {
+  const listenerTarget = asListenerTarget(target);
+  if (!listenerTarget || typeof listenerTarget.removeEventListener !== 'function') {
+    return;
+  }
+  listenerTarget.removeEventListener(type, listener, options);
+}
+
+function isComponent(element: HitElement): boolean {
   return element.type === 'component' || element.type === 'focus';
 }
 
-function isNetOrPin(element: any) {
-  return !!(element.signalName || element.liveName) && !isComponent(element);
+function isNetOrPin(element: HitElement): boolean {
+  const hasSignal = String(element.signalName || '').trim() !== '' || String(element.liveName || '').trim() !== '';
+  return hasSignal && !isComponent(element);
 }
 
-function readSignalHighlight(element: any) {
+function readSignalHighlight(element: HitElement): { signalName: string | null; liveName: string | null } | null {
   const signalName = String(element.signalName || '').trim();
   const liveName = String(element.liveName || '').trim();
-  if (!signalName && !liveName) return null;
-  return { signalName: signalName || null, liveName: liveName || null };
+  if (!signalName && !liveName) {
+    return null;
+  }
+  return {
+    signalName: signalName || null,
+    liveName: liveName || null
+  };
+}
+
+function readMousePosition(event: MouseEvent | WheelEvent): { x: number; y: number } {
+  return {
+    x: Number(event.clientX) || 0,
+    y: Number(event.clientY) || 0
+  };
 }
 
 export function bindD3Interactions({
@@ -37,25 +140,22 @@ export function bindD3Interactions({
   now = () => Date.now(),
   doubleTapMs = DOUBLE_TAP_MS,
   viewport = null
-}: any = {}) {
+}: BindD3InteractionOptions): { destroy: () => void } {
   if (!canvas || !state || !model) {
     throw new Error('bindD3Interactions requires canvas, state, and model');
   }
-  if (typeof renderComponentTree !== 'function' || typeof renderComponentViews !== 'function') {
-    throw new Error('bindD3Interactions requires render callbacks');
-  }
 
   const renderNow = typeof requestRender === 'function' ? requestRender : () => {};
-  const globalTarget =
+  const globalTarget: unknown =
     typeof window !== 'undefined' && typeof window.addEventListener === 'function'
       ? window
       : canvas;
 
-  let panState: any = null;
+  let panState: PanState | null = null;
   let suppressClick = false;
-  const wheelListenerOptions = { passive: false };
+  const wheelListenerOptions: AddEventListenerOptions = { passive: false };
 
-  function toScreenCoords(clientX: any, clientY: any) {
+  function toScreenCoords(clientX: number, clientY: number): { x: number; y: number } {
     const rect = canvas.getBoundingClientRect();
     return {
       x: clientX - rect.left,
@@ -63,53 +163,56 @@ export function bindD3Interactions({
     };
   }
 
-  function toWorldCoords(clientX: any, clientY: any) {
+  function toWorldCoords(clientX: number, clientY: number): { x: number; y: number } {
     const screen = toScreenCoords(clientX, clientY);
-    const sx = screen.x;
-    const sy = screen.y;
-
     if (viewport) {
+      const scale = Number.isFinite(viewport.scale) && viewport.scale > 0 ? viewport.scale : 1;
+      const tx = Number.isFinite(viewport.x) ? viewport.x : 0;
+      const ty = Number.isFinite(viewport.y) ? viewport.y : 0;
       return {
-        x: (sx - (viewport.x || 0)) / (viewport.scale || 1),
-        y: (sy - (viewport.y || 0)) / (viewport.scale || 1)
+        x: (screen.x - tx) / scale,
+        y: (screen.y - ty) / scale
       };
     }
-    return { x: sx, y: sy };
+    return screen;
   }
 
-  function handleClick(evt: any) {
+  function handleClick(event: MouseEvent): void {
     if (suppressClick) {
       suppressClick = false;
       return;
     }
 
-    const { x, y } = toWorldCoords(evt.clientX, evt.clientY);
-    const hit = spatialIndex.queryPoint(x, y);
+    const point = readMousePosition(event);
+    const world = toWorldCoords(point.x, point.y);
+    const hit = spatialIndex.queryPoint(world.x, world.y);
 
     if (!hit) {
-      // canvas tap — clear highlight
       state.components.graphHighlightedSignal = null;
       renderComponentViews();
       return;
     }
 
-    // net or pin tap — highlight signal
     if (isNetOrPin(hit)) {
       state.components.graphHighlightedSignal = readSignalHighlight(hit);
       renderComponentViews();
       return;
     }
 
-    // component tap
     if (isComponent(hit)) {
-      const componentId = hit.componentId;
+      const componentId = String(hit.componentId || '').trim();
       if (!componentId || !model.nodes.has(componentId)) {
         return;
       }
 
       const nowMs = now();
       const lastTap = state.components.graphLastTap;
-      const isDoubleTap = !!(lastTap && lastTap.nodeId === componentId && (nowMs - lastTap.timeMs) < doubleTapMs);
+      const isDoubleTap = !!(
+        lastTap
+        && lastTap.nodeId === componentId
+        && (nowMs - lastTap.timeMs) < doubleTapMs
+      );
+
       state.components.graphLastTap = { nodeId: componentId, timeMs: nowMs };
 
       if (state.components.selectedNodeId !== componentId) {
@@ -127,86 +230,93 @@ export function bindD3Interactions({
     }
   }
 
-  function handleWheel(evt: any) {
-    if (!viewport) return;
+  function handleWheel(event: WheelEvent): void {
+    if (!viewport) {
+      return;
+    }
+
     const prevScale = Number.isFinite(viewport.scale) ? viewport.scale : 1;
-    const zoom = Math.exp(-Number(evt.deltaY || 0) * ZOOM_SENSITIVITY);
+    const zoom = Math.exp(-(Number(event.deltaY) || 0) * ZOOM_SENSITIVITY);
     const nextScale = clamp(prevScale * zoom, MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
     if (!Number.isFinite(nextScale) || Math.abs(nextScale - prevScale) < 1e-6) {
       return;
     }
 
-    const { x: sx, y: sy } = toScreenCoords(evt.clientX, evt.clientY);
+    const point = readMousePosition(event);
+    const screen = toScreenCoords(point.x, point.y);
     const tx = Number.isFinite(viewport.x) ? viewport.x : 0;
     const ty = Number.isFinite(viewport.y) ? viewport.y : 0;
-    const worldX = (sx - tx) / prevScale;
-    const worldY = (sy - ty) / prevScale;
+    const worldX = (screen.x - tx) / prevScale;
+    const worldY = (screen.y - ty) / prevScale;
 
     viewport.scale = nextScale;
-    viewport.x = sx - (worldX * nextScale);
-    viewport.y = sy - (worldY * nextScale);
+    viewport.x = screen.x - worldX * nextScale;
+    viewport.y = screen.y - worldY * nextScale;
 
-    if (typeof evt.preventDefault === 'function') {
-      evt.preventDefault();
-    }
+    event.preventDefault();
     renderNow();
   }
 
-  function handleMouseDown(evt: any) {
-    if (!viewport) return;
-    if (evt.button !== 0) return;
+  function handleMouseDown(event: MouseEvent): void {
+    if (!viewport || event.button !== 0) {
+      return;
+    }
+
     const tx = Number.isFinite(viewport.x) ? viewport.x : 0;
     const ty = Number.isFinite(viewport.y) ? viewport.y : 0;
     panState = {
-      startX: Number(evt.clientX) || 0,
-      startY: Number(evt.clientY) || 0,
+      startX: Number(event.clientX) || 0,
+      startY: Number(event.clientY) || 0,
       baseX: tx,
       baseY: ty,
       dragged: false
     };
   }
 
-  function handleMouseMove(evt: any) {
-    if (!panState || !viewport) return;
-    const dx = (Number(evt.clientX) || 0) - panState.startX;
-    const dy = (Number(evt.clientY) || 0) - panState.startY;
+  function handleMouseMove(event: MouseEvent): void {
+    if (!panState || !viewport) {
+      return;
+    }
+
+    const dx = (Number(event.clientX) || 0) - panState.startX;
+    const dy = (Number(event.clientY) || 0) - panState.startY;
     if (!panState.dragged) {
       const moved = Math.abs(dx) >= PAN_DRAG_THRESHOLD || Math.abs(dy) >= PAN_DRAG_THRESHOLD;
-      if (!moved) return;
+      if (!moved) {
+        return;
+      }
       panState.dragged = true;
     }
 
     viewport.x = panState.baseX + dx;
     viewport.y = panState.baseY + dy;
-    if (typeof evt.preventDefault === 'function') {
-      evt.preventDefault();
-    }
+    event.preventDefault();
     renderNow();
   }
 
-  function handleMouseUp(evt: any) {
-    if (!panState) return;
+  function handleMouseUp(event: MouseEvent): void {
+    if (!panState) {
+      return;
+    }
     if (panState.dragged) {
       suppressClick = true;
-      if (typeof evt.preventDefault === 'function') {
-        evt.preventDefault();
-      }
+      event.preventDefault();
     }
     panState = null;
   }
 
-  canvas.addEventListener('click', handleClick);
-  canvas.addEventListener('wheel', handleWheel, wheelListenerOptions);
-  canvas.addEventListener('mousedown', handleMouseDown);
-  globalTarget.addEventListener('mousemove', handleMouseMove);
-  globalTarget.addEventListener('mouseup', handleMouseUp);
+  addListener(canvas, 'click', handleClick as EventListener);
+  addListener(canvas, 'wheel', handleWheel as EventListener, wheelListenerOptions);
+  addListener(canvas, 'mousedown', handleMouseDown as EventListener);
+  addListener(globalTarget, 'mousemove', handleMouseMove as EventListener);
+  addListener(globalTarget, 'mouseup', handleMouseUp as EventListener);
 
-  function destroy() {
-    canvas.removeEventListener('click', handleClick);
-    canvas.removeEventListener('wheel', handleWheel, wheelListenerOptions);
-    canvas.removeEventListener('mousedown', handleMouseDown);
-    globalTarget.removeEventListener('mousemove', handleMouseMove);
-    globalTarget.removeEventListener('mouseup', handleMouseUp);
+  function destroy(): void {
+    removeListener(canvas, 'click', handleClick as EventListener);
+    removeListener(canvas, 'wheel', handleWheel as EventListener, wheelListenerOptions);
+    removeListener(canvas, 'mousedown', handleMouseDown as EventListener);
+    removeListener(globalTarget, 'mousemove', handleMouseMove as EventListener);
+    removeListener(globalTarget, 'mouseup', handleMouseUp as EventListener);
   }
 
   return { destroy };

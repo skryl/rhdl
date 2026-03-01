@@ -5,8 +5,9 @@ import { createWatchDomRefs } from '../../components/watch/bindings/dom_refs';
 import { createApple2DomRefs } from '../../components/apple2/bindings/dom_refs';
 import { createMemoryDomRefs } from '../../components/memory/bindings/dom_refs';
 import { createExplorerDomRefs } from '../../components/explorer/bindings/dom_refs';
+import type { MergedDomRefs } from '../../types/dom';
 
-export function createDomRefs(documentRef = globalThis.document) {
+export function createDomRefs(documentRef = globalThis.document): MergedDomRefs {
   return {
     ...createShellDomRefs(documentRef),
     ...createRunnerDomRefs(documentRef),
@@ -15,5 +16,5 @@ export function createDomRefs(documentRef = globalThis.document) {
     ...createApple2DomRefs(documentRef),
     ...createMemoryDomRefs(documentRef),
     ...createExplorerDomRefs(documentRef)
-  };
+  } as MergedDomRefs;
 }

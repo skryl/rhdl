@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStartupBindingRegistrationService } from '../../../../app/core/services/startup_binding_registration_service';
+import type { StartupBindingRegistrationServiceDeps } from '../../../../app/types/services';
 
 test('startup binding registration service resets lifecycle and registers all bindings', () => {
-  const calls: any[] = [];
-  const registered: any[] = [];
-  const service = createStartupBindingRegistrationService({
+  const calls: string[] = [];
+  const registered: unknown[] = [];
+  const service = createStartupBindingRegistrationService(({
     dom: {},
     state: { activeTab: 'ioTab' },
     runtime: {},
@@ -18,7 +19,7 @@ test('startup binding registration service resets lifecycle and registers all bi
       bindSimBindings: () => 'sim-disposer',
       bindEditorBindings: () => 'editor-disposer',
       bindCollapsiblePanels: () => 'collapsible-disposer',
-      registerUiBinding: (fn: any) => registered.push(fn),
+      registerUiBinding: (fn: unknown) => registered.push(fn),
       disposeUiBindings: () => calls.push('disposeUiBindings')
     },
     app: {
@@ -43,7 +44,7 @@ test('startup binding registration service resets lifecycle and registers all bi
         ensureBackendInstance: async () => {},
         currentPreset: () => ({ id: 'apple2' }),
         loadBundle: async () => ({}),
-        getPreset: (id: any) => ({ id }),
+        getPreset: (id: unknown) => ({ id }),
         updateIrSourceVisibility: () => {},
         loadSample: async () => {}
       },
@@ -74,16 +75,19 @@ test('startup binding registration service resets lifecycle and registers all bi
       scheduleReduxUxSync: () => {}
     },
     util: {
-      getBackendDef: (id: any) => ({ id }),
+      getBackendDef: (id: unknown) => ({ id }),
       parseHexOrDec: () => 0,
       hexByte: () => '00',
       isSnapshotFileName: () => false
     },
     env: {
-      requestAnimationFrameImpl: (cb: any) => cb()
+      requestAnimationFrameImpl: (cb: FrameRequestCallback) => {
+        cb(0);
+        return 0;
+      }
     },
     log: () => {}
-  });
+  }) as unknown as Partial<StartupBindingRegistrationServiceDeps>);
 
   service.resetBindingLifecycle();
   service.registerBindings();

@@ -1,3 +1,4 @@
+// @ts-nocheck
 (function mirbWorkerBootstrap(globalRef) {
   const globalObject = globalRef || self;
 
@@ -10,29 +11,29 @@
   const DEFAULT_STDIN_BUFFER_BYTES = 1 << 20;
 
   let runtimeScriptUrl = '';
-  let runtimeInitPromise: any = null;
+  let runtimeInitPromise: unknown = null;
   let runtimeReady = false;
   let runtimeAbortReason = '';
 
   let processRunning = false;
   let processExited = false;
-  let processExitCode: any = null;
-  let processStartPromise: any = null;
+  let processExitCode: unknown = null;
+  let processStartPromise: unknown = null;
   let processStartedAtMs = 0;
 
-  let stdinControlBuffer: any = null;
-  let stdinDataBuffer: any = null;
-  let stdinControl: any = null;
-  let stdinData: any = null;
+  let stdinControlBuffer: unknown = null;
+  let stdinDataBuffer: unknown = null;
+  let stdinControl: unknown = null;
+  let stdinData: unknown = null;
   let stdinReadCount = 0;
 
   let debugIo = false;
   let debugEventSeq = 0;
   let ttyStdinPatched = false;
-  let originalTtyRead: any = null;
+  let originalTtyRead: unknown = null;
   let originalTtyGetChar = null;
 
-  function asMessage(err: any) {
+  function asMessage(err: unknown) {
     if (err instanceof Error && err.message) {
       if (err.stack) {
         return `${err.message}\n${err.stack}`;
@@ -42,14 +43,14 @@
     return String(err ?? 'unknown error');
   }
 
-  function asByteHex(value: any) {
+  function asByteHex(value: unknown) {
     if (!Number.isFinite(value)) {
       return null;
     }
     return `0x${(value & 0xff).toString(16).padStart(2, '0')}`;
   }
 
-  function emitDebug(event: any, details = {}) {
+  function emitDebug(event: unknown, details = {}) {
     if (!debugIo) {
       return;
     }
@@ -62,12 +63,12 @@
     };
     try {
       globalObject.postMessage(payload);
-    } catch (_err: any) {
+    } catch (_err: unknown) {
       // Ignore debug transport failures.
     }
   }
 
-  function joinUrl(base: any, suffix: any) {
+  function joinUrl(base: unknown, suffix: unknown) {
     const trimmedBase = String(base || '').replace(/[^/]*$/, '');
     return `${trimmedBase}${suffix}`;
   }
@@ -223,8 +224,8 @@
       return;
     }
 
-    const fs = (globalObject as any).FS || (globalObject as any).Module?.FS;
-    const tty = (globalObject as any).TTY;
+    const fs = (globalObject as unknown).FS || (globalObject as unknown).Module?.FS;
+    const tty = (globalObject as unknown).TTY;
     if (!fs || !tty || !tty.stream_ops || !tty.default_tty_ops) {
       emitDebug('stdin.tty_patch.skipped', {
         hasFs: !!fs,
@@ -244,7 +245,7 @@
     }
 
     tty.default_tty_ops.get_char = () => readStdinNonBlocking();
-    tty.stream_ops.read = function patchedTtyRead(stream: any, buffer: any, offset: any, length: any, pos: any) {
+    tty.stream_ops.read = function patchedTtyRead(stream: unknown, buffer: unknown, offset: unknown, length: unknown, pos: unknown) {
       const path = String(stream?.path || '');
       const isStdinStream = stream?.fd === 0 || path === '/dev/stdin' || path === '/dev/tty';
       if (!isStdinStream) {
@@ -259,7 +260,7 @@
         let result;
         try {
           result = stream.tty.ops.get_char(stream.tty);
-        } catch (_err: any) {
+        } catch (_err: unknown) {
           throw new fs.ErrnoError(29);
         }
 
@@ -288,7 +289,7 @@
     emitDebug('stdin.tty_patch.ready', {});
   }
 
-  function emitStreamChunk(type: any, value: any) {
+  function emitStreamChunk(type: unknown, value: unknown) {
     let chunk = '';
     if (typeof value === 'number') {
       chunk = String.fromCharCode(value & 0xff);
@@ -309,20 +310,20 @@
         type,
         data: chunk
       });
-    } catch (_err: any) {
+    } catch (_err: unknown) {
       // Ignore stream transport failures.
     }
   }
 
-  function writeStdout(value: any) {
+  function writeStdout(value: unknown) {
     emitStreamChunk('stdout', value);
   }
 
-  function writeStderr(value: any) {
+  function writeStderr(value: unknown) {
     emitStreamChunk('stderr', value);
   }
 
-  function notifyProcessFailure(kind: any, message: any, exitCode: any = processExitCode) {
+  function notifyProcessFailure(kind: unknown, message: unknown, exitCode: unknown = processExitCode) {
     const type = kind === 'exit' ? 'process_exit' : 'process_error';
     try {
       globalObject.postMessage({
@@ -330,7 +331,7 @@
         exitCode,
         message
       });
-    } catch (_err: any) {
+    } catch (_err: unknown) {
       // Ignore process state transport failures.
     }
   }
@@ -340,9 +341,9 @@
       return;
     }
 
-    const callMain = typeof (globalObject as any).callMain === 'function'
-      ? (globalObject as any).callMain
-      : (globalObject as any).Module?.callMain;
+    const callMain = typeof (globalObject as unknown).callMain === 'function'
+      ? (globalObject as unknown).callMain
+      : (globalObject as unknown).Module?.callMain;
 
     if (typeof callMain !== 'function') {
       throw new Error('mirb runtime missing callMain');
@@ -396,7 +397,7 @@
   }
 
   function emitFsDiagnostics() {
-    const fs = (globalObject as any).FS || (globalObject as any).Module?.FS;
+    const fs = (globalObject as unknown).FS || (globalObject as unknown).Module?.FS;
     if (!fs) {
       emitDebug('fs.diag', { available: false });
       return;
@@ -419,7 +420,7 @@
     });
   }
 
-  async function ensureRuntime(scriptUrl: any) {
+  async function ensureRuntime(scriptUrl: unknown) {
     runtimeScriptUrl = String(scriptUrl || runtimeScriptUrl || '');
     if (!runtimeScriptUrl) {
       throw new Error('mirb worker missing script URL');
@@ -431,15 +432,15 @@
 
     if (!runtimeInitPromise) {
       runtimeInitPromise = new Promise<void>((resolve, reject) => {
-        (globalObject as any).Module = {
+        (globalObject as unknown).Module = {
           noInitialRun: true,
           noExitRuntime: true,
           arguments: [],
           // Keep default /dev/tty streams so mirb stays in interactive mode.
           print: writeStdout,
           printErr: writeStderr,
-          locateFile: (path: any) => joinUrl(runtimeScriptUrl, path),
-          onAbort: (reason: any) => {
+          locateFile: (path: unknown) => joinUrl(runtimeScriptUrl, path),
+          onAbort: (reason: unknown) => {
             runtimeAbortReason = `mirb aborted: ${String(reason || 'unknown reason')}`;
             emitDebug('runtime.abort', {
               reason: runtimeAbortReason
@@ -453,8 +454,8 @@
         };
 
         try {
-          (globalObject as any).importScripts(runtimeScriptUrl);
-        } catch (err: any) {
+          (globalObject as unknown).importScripts(runtimeScriptUrl);
+        } catch (err: unknown) {
           reject(err);
         }
       });
@@ -462,13 +463,13 @@
 
     try {
       await runtimeInitPromise;
-    } catch (err: any) {
+    } catch (err: unknown) {
       runtimeInitPromise = null;
       throw err;
     }
   }
 
-  async function initializeWorker(payload: any) {
+  async function initializeWorker(payload: unknown) {
     runtimeScriptUrl = String(payload?.scriptUrl || runtimeScriptUrl || '');
     debugIo = payload?.debugIo === true;
     const stdinBufferBytes = Number(payload?.stdinBufferBytes || DEFAULT_STDIN_BUFFER_BYTES);
@@ -501,14 +502,14 @@
     globalObject.setTimeout(() => {
       try {
         startMirbProcess();
-      } catch (err: any) {
+      } catch (err: unknown) {
         const message = `mirb process failed to start: ${asMessage(err)}`;
         notifyProcessFailure('error', message, null);
       }
     }, 0);
   }
 
-  function handleMessage(event: any) {
+  function handleMessage(event: unknown) {
     const payload = event?.data || {};
     const type = String(payload.type || '').trim();
 

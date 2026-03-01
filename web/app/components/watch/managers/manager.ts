@@ -1,4 +1,4 @@
-function requireFn(name: any, fn: any) {
+function requireFn(name: Unsafe, fn: Unsafe) {
   if (typeof fn !== 'function') {
     throw new Error(`createWatchManager requires function: ${name}`);
   }
@@ -19,7 +19,7 @@ export function createWatchManager({
   renderWatchTableRows,
   renderWatchListItems,
   renderBreakpointListItems
-}: any = {}) {
+}: Unsafe = {}) {
   if (!dom || !state || !runtime || !appStore || !storeActions) {
     throw new Error('createWatchManager requires dom, state, runtime, appStore, and storeActions');
   }
@@ -62,7 +62,7 @@ export function createWatchManager({
     scheduleReduxUxSync('renderBreakpointList');
   }
 
-  function addWatchSignal(name: any) {
+  function addWatchSignal(name: Unsafe) {
     if (!runtime.sim || !name) {
       return false;
     }
@@ -93,7 +93,7 @@ export function createWatchManager({
     return true;
   }
 
-  function removeWatchSignal(name: any) {
+  function removeWatchSignal(name: Unsafe) {
     const had = state.watches instanceof Map && state.watches.has(name);
     appStore.dispatch(storeActions.watchRemove(name));
     if (!had) {
@@ -111,7 +111,7 @@ export function createWatchManager({
     renderWatchList();
   }
 
-  function addBreakpointSignal(signal: any, valueRaw: any) {
+  function addBreakpointSignal(signal: Unsafe, valueRaw: Unsafe) {
     if (!runtime.sim) {
       throw new Error('Simulator not initialized.');
     }

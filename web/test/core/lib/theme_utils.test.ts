@@ -21,11 +21,12 @@ test('waveformFontFamily follows selected theme', () => {
 test('waveformPalette returns expected palette keys for both themes', () => {
   const original = waveformPalette('original');
   const shenzhen = waveformPalette('shenzhen');
+  const paletteKeys = ['bg', 'axis', 'grid', 'label', 'trace', 'value', 'time', 'hint'] as const;
 
   for (const palette of [original, shenzhen]) {
-    for (const key of ['bg', 'axis', 'grid', 'label', 'trace', 'value', 'time', 'hint']) {
-      assert.ok(Array.isArray((palette as Record<string, any>)[key]));
-      assert.equal((palette as Record<string, any>)[key].length, 3);
+    for (const key of paletteKeys) {
+      assert.ok(Array.isArray(palette[key]));
+      assert.equal(palette[key].length, 3);
     }
   }
 

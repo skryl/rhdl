@@ -10,29 +10,126 @@ import { bindD3Interactions } from '../renderers/interactions';
 import { buildElkGraph, applyElkResult } from '../renderers/elk_layout_adapter';
 import { updateRenderActivity } from '../renderers/render_activity';
 import { getThemePalette, drawLegend } from '../renderers/themes';
+import type {
+  ComponentModel,
+  ComponentNode,
+  ExplorerDomRefs,
+  ExplorerGraphLike,
+  ExplorerStateLike,
+  GraphViewport,
+  RenderList,
+  SpatialIndex,
+  ThemePalette
+} from '../lib/types';
 
 const MIN_GRAPH_SCALE = 0.05;
 const MAX_GRAPH_SCALE = 8;
 const BUTTON_ZOOM_FACTOR = 1.2;
-const DEFAULT_GRAPH_VIEWPORT = Object.freeze({ x: 0, y: 0, scale: 1 });
+const DEFAULT_GRAPH_VIEWPORT: GraphViewport = Object.freeze({ x: 0, y: 0, scale: 1 });
 const SCHEMATIC_LOADING_TEXT = 'Loading schematic...';
 
-function requireFn(name: any, fn: any) {
+interface GraphRuntimeServiceOptions {
+  dom: ExplorerDomRefs;
+  state: ExplorerStateLike;
+  currentComponentGraphFocusNode: () => ComponentNode | null;
+  renderComponentTree: () => void;
+  renderComponentViews: () => void;
+  createSchematicElements: (
+    model: ComponentModel,
+    focusNode: ComponentNode,
+    showChildren: boolean
+  ) => unknown[];
+  signalLiveValueByName: (liveName: string) => unknown;
+  isTraceEnabled?: () => boolean;
+}
+
+interface InFlightGraphBuild {
+  token: number;
+  key: string;
+}
+
+interface GraphRenderer {
+  render: (renderList: RenderList, viewport: GraphViewport, palette: ThemePalette) => void;
+  destroy: () => void;
+}
+
+interface GraphInteractions {
+  destroy: () => void;
+}
+
+interface LocalGraphHandle extends ExplorerGraphLike {
+  type: 'd3';
+  renderer: GraphRenderer;
+  interactions: GraphInteractions;
+  canvas: HTMLCanvasElement;
+  legendCanvas: HTMLCanvasElement | null;
+  viewport: GraphViewport;
+  spatialIndex: SpatialIndex;
+  renderList: RenderList;
+  renderLegendOverlay: (palette: ThemePalette) => void;
+  destroy: () => void;
+}
+
+interface BuildGraphOptions {
+  model: ComponentModel;
+  focusNode: ComponentNode;
+  showChildren: boolean;
+  graphKey: string;
+  rerender: () => void;
+  token: number;
+}
+
+interface RenderPanelOptions {
+  node: ComponentNode | null;
+  model: ComponentModel | null;
+  rerender: () => void;
+}
+
+interface DescribePanelOptions {
+  selectedNode: ComponentNode | null;
+  focusNode: ComponentNode | null;
+}
+
+interface PanelDescription {
+  title: string;
+  meta: string;
+  focusPath: string;
+  topDisabled: boolean;
+  upDisabled: boolean;
+}
+
+type ElkInstance = {
+  layout: (graph: ReturnType<typeof buildElkGraph>) => Promise<unknown>;
+};
+
+type ElkConstructor = new () => ElkInstance;
+
+function requireFn(name: string, fn: unknown): void {
   if (typeof fn !== 'function') {
     throw new Error(`createExplorerGraphRuntimeService requires function: ${name}`);
   }
 }
 
-function clamp(value: any, min: any, max: any) {
+function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function toCanvasPixelSize(value: any, fallback: any) {
+function toCanvasPixelSize(value: unknown, fallback: unknown): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return Math.max(1, Math.floor(Number(fallback) || 1));
   }
   return Math.max(1, Math.floor(parsed));
+}
+
+function hasRenderableGraph(graph: ExplorerGraphLike | null): graph is LocalGraphHandle {
+  return !!graph
+    && !!graph.renderer
+    && typeof graph.renderer.render === 'function';
+}
+
+function describeError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 export function createExplorerGraphRuntimeService({
@@ -44,7 +141,7 @@ export function createExplorerGraphRuntimeService({
   createSchematicElements,
   signalLiveValueByName,
   isTraceEnabled = () => true
-}: any = {}) {
+}: GraphRuntimeServiceOptions) {
   if (!dom || !state) {
     throw new Error('createExplorerGraphRuntimeService requires dom/state');
   }
@@ -54,19 +151,20 @@ export function createExplorerGraphRuntimeService({
   requireFn('createSchematicElements', createSchematicElements);
   requireFn('signalLiveValueByName', signalLiveValueByName);
 
-  // renderer state (kept outside components state to avoid serialization)
-  let renderListRef: any = null;
-  let viewport = { ...DEFAULT_GRAPH_VIEWPORT };
+  let renderListRef: RenderList | null = null;
+  let viewport: GraphViewport = { ...DEFAULT_GRAPH_VIEWPORT };
   let graphBuildVersion = 0;
-  let graphBuildInFlight: any = null;
+  let graphBuildInFlight: InFlightGraphBuild | null = null;
 
-  function syncGraphCanvasSize(graph: any) {
+  function syncGraphCanvasSize(graph: LocalGraphHandle): boolean {
     if (!graph?.canvas) {
       return false;
     }
 
-    const targetWidth = toCanvasPixelSize(dom.componentVisual?.clientWidth, graph.canvas.width || 800);
-    const targetHeight = toCanvasPixelSize(dom.componentVisual?.clientHeight, graph.canvas.height || 600);
+    const fallbackWidth = Number((graph.canvas as unknown as { width?: unknown }).width) || 800;
+    const fallbackHeight = Number((graph.canvas as unknown as { height?: unknown }).height) || 600;
+    const targetWidth = toCanvasPixelSize(dom.componentVisual?.clientWidth, fallbackWidth);
+    const targetHeight = toCanvasPixelSize(dom.componentVisual?.clientHeight, fallbackHeight);
     let resized = false;
 
     if (graph.canvas.width !== targetWidth || graph.canvas.height !== targetHeight) {
@@ -86,7 +184,7 @@ export function createExplorerGraphRuntimeService({
     return resized;
   }
 
-  function yieldToBrowser() {
+  function yieldToBrowser(): Promise<void> {
     return new Promise<void>((resolve) => {
       const scheduleTimeout = () => {
         if (typeof globalThis.setTimeout === 'function') {
@@ -105,7 +203,7 @@ export function createExplorerGraphRuntimeService({
     });
   }
 
-  function isBuildCurrent(token: any, key: any) {
+  function isBuildCurrent(token: number, key: string): boolean {
     return (
       graphBuildVersion === token
       && !!graphBuildInFlight
@@ -114,18 +212,18 @@ export function createExplorerGraphRuntimeService({
     );
   }
 
-  function clearBuildInFlightIfCurrent(token: any, key: any) {
+  function clearBuildInFlightIfCurrent(token: number, key: string): void {
     if (isBuildCurrent(token, key)) {
       graphBuildInFlight = null;
     }
   }
 
-  function renderGraphWithViewport(graph: any) {
-    if (!graph || !graph.renderer || typeof graph.renderer.render !== 'function') {
+  function renderGraphWithViewport(graph: LocalGraphHandle): boolean {
+    if (!hasRenderableGraph(graph)) {
       return false;
     }
     syncGraphCanvasSize(graph);
-    const renderList = renderListRef || graph.renderList || [];
+    const renderList = renderListRef || graph.renderList;
     const palette = getThemePalette(state.theme);
     graph.renderer.render(renderList, viewport, palette);
     if (typeof graph.renderLegendOverlay === 'function') {
@@ -134,14 +232,15 @@ export function createExplorerGraphRuntimeService({
     return true;
   }
 
-  function zoomComponentGraphByFactor(factor = 1) {
+  function zoomComponentGraphByFactor(factor = 1): boolean {
     const graph = state.components.graph;
-    if (!graph || !graph.canvas || !viewport) {
+    if (!graph || !('canvas' in graph) || !graph.canvas || !viewport) {
       return false;
     }
     if (graph.viewport && graph.viewport !== viewport) {
       viewport = graph.viewport;
     }
+
     const prevScale = Number.isFinite(viewport.scale) ? viewport.scale : 1;
     const nextScale = clamp(prevScale * Number(factor || 1), MIN_GRAPH_SCALE, MAX_GRAPH_SCALE);
     if (!Number.isFinite(nextScale) || Math.abs(nextScale - prevScale) < 1e-6) {
@@ -151,28 +250,28 @@ export function createExplorerGraphRuntimeService({
     const rect = typeof graph.canvas.getBoundingClientRect === 'function'
       ? graph.canvas.getBoundingClientRect()
       : null;
-    const centerX = (Number(rect?.width) > 0 ? Number(rect.width) : Number(graph.canvas.width) || 800) * 0.5;
-    const centerY = (Number(rect?.height) > 0 ? Number(rect.height) : Number(graph.canvas.height) || 600) * 0.5;
+    const centerX = (Number(rect?.width) > 0 ? Number(rect?.width) : Number(graph.canvas.width) || 800) * 0.5;
+    const centerY = (Number(rect?.height) > 0 ? Number(rect?.height) : Number(graph.canvas.height) || 600) * 0.5;
     const tx = Number.isFinite(viewport.x) ? viewport.x : 0;
     const ty = Number.isFinite(viewport.y) ? viewport.y : 0;
     const worldX = (centerX - tx) / prevScale;
     const worldY = (centerY - ty) / prevScale;
 
-    viewport.scale = nextScale as any;
-    viewport.x = (centerX - (worldX * nextScale)) as any;
-    viewport.y = (centerY - (worldY * nextScale)) as any;
-    return renderGraphWithViewport(graph);
+    viewport.scale = nextScale;
+    viewport.x = centerX - worldX * nextScale;
+    viewport.y = centerY - worldY * nextScale;
+    return hasRenderableGraph(graph) ? renderGraphWithViewport(graph) : false;
   }
 
-  function zoomInComponentGraph() {
+  function zoomInComponentGraph(): boolean {
     return zoomComponentGraphByFactor(BUTTON_ZOOM_FACTOR);
   }
 
-  function zoomOutComponentGraph() {
+  function zoomOutComponentGraph(): boolean {
     return zoomComponentGraphByFactor(1 / BUTTON_ZOOM_FACTOR);
   }
 
-  function resetComponentGraphViewport() {
+  function resetComponentGraphViewport(): boolean {
     const graph = state.components.graph;
     if (!graph || !viewport) {
       return false;
@@ -183,10 +282,10 @@ export function createExplorerGraphRuntimeService({
     viewport.x = DEFAULT_GRAPH_VIEWPORT.x;
     viewport.y = DEFAULT_GRAPH_VIEWPORT.y;
     viewport.scale = DEFAULT_GRAPH_VIEWPORT.scale;
-    return renderGraphWithViewport(graph);
+    return hasRenderableGraph(graph) ? renderGraphWithViewport(graph) : false;
   }
 
-  function destroyComponentGraph() {
+  function destroyComponentGraph(): void {
     graphBuildVersion += 1;
     graphBuildInFlight = null;
     if (state.components.graph && typeof state.components.graph.destroy === 'function') {
@@ -208,7 +307,7 @@ export function createExplorerGraphRuntimeService({
     graphKey,
     rerender,
     token
-  }: any) {
+  }: BuildGraphOptions): Promise<void> {
     try {
       await yieldToBrowser();
       if (!isBuildCurrent(token, graphKey)) {
@@ -228,6 +327,7 @@ export function createExplorerGraphRuntimeService({
         clearBuildInFlightIfCurrent(token, graphKey);
         return;
       }
+
       dom.componentVisual.innerHTML = '';
 
       const canvas = document.createElement('canvas');
@@ -245,10 +345,11 @@ export function createExplorerGraphRuntimeService({
         dom.componentVisual.textContent = 'Unable to render component schematic.';
         return;
       }
+
       state.components.graphRenderBackend = webglRenderer ? 'webgl' : 'canvas2d';
 
-      let legendCanvas: any = null;
-      let legendCtx: any = null;
+      let legendCanvas: HTMLCanvasElement | null = null;
+      let legendCtx: CanvasRenderingContext2D | null = null;
       if (webglRenderer) {
         legendCanvas = document.createElement('canvas');
         legendCanvas.width = canvas.width;
@@ -264,18 +365,22 @@ export function createExplorerGraphRuntimeService({
         legendCtx = legendCanvas.getContext('2d');
       }
 
-      function renderLegendOverlay(pal: any) {
-        if (!legendCtx) return;
+      const renderLegendOverlay = (palette: ThemePalette) => {
+        if (!legendCtx || !legendCanvas) {
+          return;
+        }
         legendCtx.clearRect(0, 0, legendCanvas.width, legendCanvas.height);
-        drawLegend(legendCtx, legendCanvas.width, legendCanvas.height, pal);
-      }
+        drawLegend(legendCtx, legendCanvas.width, legendCanvas.height, palette);
+      };
 
       await yieldToBrowser();
       if (!isBuildCurrent(token, graphKey)) {
         clearBuildInFlightIfCurrent(token, graphKey);
         return;
       }
-      const spatialIndex = buildSpatialIndex(renderList);
+
+      let spatialIndex = buildSpatialIndex(renderList);
+      let graphHandle: LocalGraphHandle | null = null;
 
       const interactions = bindD3Interactions({
         canvas,
@@ -286,11 +391,13 @@ export function createExplorerGraphRuntimeService({
         renderComponentTree,
         renderComponentViews,
         requestRender: () => {
-          renderGraphWithViewport(graphHandle);
+          if (graphHandle) {
+            renderGraphWithViewport(graphHandle);
+          }
         }
       });
 
-      const graphHandle = {
+      graphHandle = {
         type: 'd3',
         renderer,
         interactions,
@@ -315,7 +422,7 @@ export function createExplorerGraphRuntimeService({
       state.components.graphKey = graphKey;
       state.components.graphSelectedId = null;
       if (!state.components.graphLiveValues) {
-        state.components.graphLiveValues = new Map();
+        state.components.graphLiveValues = new Map<string, string>();
       }
       renderGraphWithViewport(graphHandle);
 
@@ -323,7 +430,7 @@ export function createExplorerGraphRuntimeService({
         graphBuildInFlight = null;
       }
 
-      if (typeof rerender === 'function' && state.activeTab === 'componentGraphTab') {
+      if (state.activeTab === 'componentGraphTab') {
         rerender();
       }
 
@@ -332,27 +439,41 @@ export function createExplorerGraphRuntimeService({
         return;
       }
 
+      const elkAvailable = typeof ELK === 'function';
+      if (!elkAvailable) {
+        state.components.graphLayoutEngine = 'missing';
+        return;
+      }
+
       const elkGraph = buildElkGraph(renderList);
-      const elk = new ELK();
+      const ElkCtor = ELK as unknown as ElkConstructor;
+      const elk = new ElkCtor();
       state.components.graphLayoutEngine = 'elk';
-      elk.layout(elkGraph as any).then((result) => {
-        if (state.components.graph !== graphHandle || state.components.graphKey !== graphKey) {
-          return;
-        }
-        if (result && Array.isArray(result.children)) {
-          applyElkResult(renderList, result);
-          const newIndex = buildSpatialIndex(renderList);
-          if (graphHandle.interactions) {
-            graphHandle.spatialIndex = newIndex;
+
+      void elk.layout(elkGraph)
+        .then((result) => {
+          if (state.components.graph !== graphHandle || state.components.graphKey !== graphKey) {
+            return;
           }
+          const resultRecord = result && typeof result === 'object' ? result : null;
+          const children = resultRecord && Array.isArray((resultRecord as { children?: unknown }).children)
+            ? (resultRecord as { children: unknown[] }).children
+            : null;
+          if (!children) {
+            return;
+          }
+
+          applyElkResult(renderList, result as Parameters<typeof applyElkResult>[1]);
+          spatialIndex = buildSpatialIndex(renderList);
+          graphHandle.spatialIndex = spatialIndex;
           renderGraphWithViewport(graphHandle);
-        }
-      }).catch((_err) => {
-        if (state.components.graph === graphHandle && state.components.graphKey === graphKey) {
-          state.components.graphLayoutEngine = 'error';
-        }
-      });
-    } catch (_err: any) {
+        })
+        .catch(() => {
+          if (state.components.graph === graphHandle && state.components.graphKey === graphKey) {
+            state.components.graphLayoutEngine = 'error';
+          }
+        });
+    } catch {
       if (isBuildCurrent(token, graphKey)) {
         graphBuildInFlight = null;
         state.components.graphLayoutEngine = 'error';
@@ -363,8 +484,8 @@ export function createExplorerGraphRuntimeService({
     }
   }
 
-  function ensureComponentGraph(model: any, rerender: any) {
-    if (!dom.componentVisual || !model) {
+  function ensureComponentGraph(model: ComponentModel, rerender: () => void): LocalGraphHandle | null {
+    if (!dom.componentVisual) {
       return null;
     }
 
@@ -372,24 +493,28 @@ export function createExplorerGraphRuntimeService({
     if (!focusNode) {
       return null;
     }
+
     const showChildren = !!state.components.graphShowChildren;
     const schematicKey = state.components.schematicBundle
-      ? (state.components.schematicBundle.generated_at || state.components.schematicBundle.runner || 'schem')
+      ? String(state.components.schematicBundle.generated_at || state.components.schematicBundle.runner || 'schem')
       : 'none';
     const elkAvailable = typeof ELK === 'function';
     state.components.graphElkAvailable = elkAvailable;
+
     const graphKey =
-      `${state.components.sourceKey}:d3:${state.theme}:` +
-      `${schematicKey}:${focusNode.id}:${showChildren ? 1 : 0}:` +
-      `${focusNode.children.length}:${focusNode.signals.length}:${elkAvailable ? 1 : 0}`;
+      `${state.components.sourceKey}:d3:${state.theme}:`
+      + `${schematicKey}:${focusNode.id}:${showChildren ? 1 : 0}:`
+      + `${focusNode.children.length}:${focusNode.signals.length}:${elkAvailable ? 1 : 0}`;
 
     if (!elkAvailable) {
       state.components.graphLayoutEngine = 'missing';
       return null;
     }
-    if (state.components.graph && state.components.graphKey === graphKey) {
+
+    if (hasRenderableGraph(state.components.graph) && state.components.graphKey === graphKey) {
       return state.components.graph;
     }
+
     if (graphBuildInFlight && graphBuildInFlight.key === graphKey) {
       return null;
     }
@@ -410,13 +535,15 @@ export function createExplorerGraphRuntimeService({
       rerender,
       token
     });
+
     return null;
   }
 
-  function renderComponentVisual({ node, model, rerender }: any) {
+  function renderComponentVisual({ node, model, rerender }: RenderPanelOptions): { ok: boolean; reason?: string } {
     if (!dom.componentVisual) {
       return { ok: false, reason: 'missing-container' };
     }
+
     if (!node || !model) {
       destroyComponentGraph();
       dom.componentVisual.textContent = 'Select a component to visualize.';
@@ -440,38 +567,34 @@ export function createExplorerGraphRuntimeService({
     }
 
     if (dom.componentVisual.clientWidth < 20 || dom.componentVisual.clientHeight < 20) {
-      requestAnimationFrame(() => {
-        if (state.activeTab === 'componentGraphTab') {
-          rerender();
-        }
-      });
+      if (typeof globalThis.requestAnimationFrame === 'function') {
+        globalThis.requestAnimationFrame(() => {
+          if (state.activeTab === 'componentGraphTab') {
+            rerender();
+          }
+        });
+      }
       return { ok: false, reason: 'small-container' };
     }
 
     const renderList = renderListRef || graph.renderList;
 
-    // Update live signal activity
-    const traceEnabled = (
-      typeof isTraceEnabled === 'function'
-      ? isTraceEnabled() === true
-      : true
-    );
+    const traceEnabled = typeof isTraceEnabled === 'function' ? isTraceEnabled() === true : true;
     const nextValues = updateRenderActivity({
       renderList,
       signalLiveValueByName: traceEnabled ? signalLiveValueByName : (() => null),
       toBigInt,
       highlightedSignal: state.components.graphHighlightedSignal,
-      previousValues: traceEnabled ? (state.components.graphLiveValues || new Map()) : new Map()
+      previousValues: traceEnabled ? (state.components.graphLiveValues || new Map<string, string>()) : new Map<string, string>()
     });
     state.components.graphLiveValues = nextValues;
 
-    // Re-render canvas
     renderGraphWithViewport(graph);
 
     return { ok: true };
   }
 
-  function describeComponentGraphPanel({ selectedNode, focusNode }: any) {
+  function describeComponentGraphPanel({ selectedNode, focusNode }: DescribePanelOptions): PanelDescription {
     if (!selectedNode || !focusNode) {
       return {
         title: 'Component Schematic',
@@ -489,8 +612,8 @@ export function createExplorerGraphRuntimeService({
     return {
       title: nodeDisplayPath(focusNode),
       meta:
-        `selected=${nodeDisplayPath(selectedNode)} | focus=${nodeDisplayPath(focusNode)}` +
-        ` | ${mode} | layout=${layout} | elk=${elk} | dbl-click dive, drag pan, wheel zoom, reset view`,
+        `selected=${nodeDisplayPath(selectedNode)} | focus=${nodeDisplayPath(focusNode)}`
+        + ` | ${mode} | layout=${layout} | elk=${elk} | dbl-click dive, drag pan, wheel zoom, reset view`,
       focusPath: `Focus: ${nodeDisplayPath(focusNode)}`,
       topDisabled: !model || focusNode.id === model.rootId,
       upDisabled: !focusNode.parentId

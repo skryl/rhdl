@@ -10,7 +10,7 @@ const SHELL_STYLE_TEXT = [
 ].join('\n\n');
 
 class RhdlAppShell extends LitElement {
-  [key: string]: any;
+  [key: string]: unknown;
   createRenderRoot() {
     return this;
   }

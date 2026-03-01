@@ -1,10 +1,10 @@
-function requireFn(name: any, fn: any) {
+function requireFn(name: Unsafe, fn: Unsafe) {
   if (typeof fn !== 'function') {
     throw new Error(`createSimStatusRuntimeService requires function: ${name}`);
   }
 }
 
-function parsePositiveNumber(value: any, fallback: any) {
+function parsePositiveNumber(value: Unsafe, fallback: Unsafe) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return fallback;
@@ -12,7 +12,7 @@ function parsePositiveNumber(value: any, fallback: any) {
   return parsed;
 }
 
-function formatRate(value: any) {
+function formatRate(value: Unsafe) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) {
     return '0';
@@ -26,7 +26,7 @@ function formatRate(value: any) {
   return numeric.toFixed(2);
 }
 
-function resolveTimingConfig(preset: any = {}) {
+function resolveTimingConfig(preset: Unsafe = {}) {
   const raw = preset?.timing && typeof preset.timing === 'object' ? preset.timing : {};
   return {
     cyclesPerHertz: parsePositiveNumber(raw.cyclesPerHertz, 1),
@@ -40,7 +40,7 @@ export function createSimStatusRuntimeService({
   getBackendDef,
   currentRunnerPreset,
   isApple2UiEnabled
-}: any = {}) {
+}: Unsafe = {}) {
   if (!state || !runtime) {
     throw new Error('createSimStatusRuntimeService requires state/runtime');
   }
@@ -48,7 +48,7 @@ export function createSimStatusRuntimeService({
   requireFn('currentRunnerPreset', currentRunnerPreset);
   requireFn('isApple2UiEnabled', isApple2UiEnabled);
 
-  function selectedClock(value: any) {
+  function selectedClock(value: Unsafe) {
     const val = String(value || '').trim();
     if (!val || val === '__none__') {
       return null;
@@ -56,14 +56,14 @@ export function createSimStatusRuntimeService({
     return val;
   }
 
-  function maskForWidth(width: any) {
+  function maskForWidth(width: Unsafe) {
     if (width >= 64) {
       return (1n << 64n) - 1n;
     }
     return (1n << BigInt(width)) - 1n;
   }
 
-  function describeStatus(clockValue: any) {
+  function describeStatus(clockValue: Unsafe) {
     const backendDef = getBackendDef(state.backend);
     if (!runtime.sim) {
       return {
@@ -120,7 +120,7 @@ export function createSimStatusRuntimeService({
     };
   }
 
-  function listClockOptions(currentValue: any) {
+  function listClockOptions(currentValue: Unsafe) {
     const current = selectedClock(currentValue);
     const options = [{ value: '__none__', label: '(none)' }];
     if (!runtime.irMeta) {
@@ -149,7 +149,7 @@ export function createSimStatusRuntimeService({
       if (preset.id === 'apple2' && clocks.includes('clk_14m')) {
         return { options, selected: 'clk_14m' };
       }
-      const preferred = clocks.find((clk: any) => /^(clk|clock)$/i.test(clk));
+      const preferred = clocks.find((clk: Unsafe) => /^(clk|clock)$/i.test(clk));
       return { options, selected: preferred || clocks[0] };
     }
 

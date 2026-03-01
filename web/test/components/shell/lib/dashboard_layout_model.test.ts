@@ -8,7 +8,7 @@ import {
   applyDashboardDropSpanPolicy
 } from '../../../../app/components/shell/lib/dashboard_layout_model';
 
-function panel(id: any, span = 'full') {
+function panel(id: string, span = 'full') {
   return {
     dataset: {
       layoutItemId: id,
@@ -17,7 +17,7 @@ function panel(id: any, span = 'full') {
   };
 }
 
-const normalizeSpan = (value: any, fallback = 'full') => (value === 'half' ? 'half' : fallback);
+const normalizeSpan = (value: unknown, fallback = 'full') => (value === 'half' ? 'half' : fallback);
 
 test('normalizeDashboardPanelSpans fixes dangling half rows', () => {
   const panels = [panel('a', 'half'), panel('b', 'full'), panel('c', 'half')];

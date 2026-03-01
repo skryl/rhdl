@@ -1,7 +1,23 @@
-function decodeTextChar(code: any, textConfig: any = {}) {
-  const charMask = Number.parseInt(textConfig.charMask, 10);
-  const asciiMin = Number.parseInt(textConfig.asciiMin, 10);
-  const asciiMax = Number.parseInt(textConfig.asciiMax, 10);
+interface UartTextConfig {
+  charMask?: unknown;
+  asciiMin?: unknown;
+  asciiMax?: unknown;
+}
+
+interface UartGridOptions {
+  width?: unknown;
+  height?: unknown;
+  textConfig?: UartTextConfig;
+}
+
+function isIterable(value: unknown): value is Iterable<unknown> {
+  return !!value && typeof (value as { [Symbol.iterator]?: unknown })[Symbol.iterator] === 'function';
+}
+
+function decodeTextChar(code: number, textConfig: UartTextConfig = {}) {
+  const charMask = Number.parseInt(String(textConfig.charMask ?? ''), 10);
+  const asciiMin = Number.parseInt(String(textConfig.asciiMin ?? ''), 10);
+  const asciiMax = Number.parseInt(String(textConfig.asciiMax ?? ''), 10);
   const masked = Number.isFinite(charMask) ? (code & charMask) : (code & 0x7F);
   const min = Number.isFinite(asciiMin) ? asciiMin : 0x20;
   const max = Number.isFinite(asciiMax) ? asciiMax : 0x7E;
@@ -11,17 +27,18 @@ function decodeTextChar(code: any, textConfig: any = {}) {
   return ' ';
 }
 
-function makeRow(width: any) {
+function makeRow(width: number) {
   return new Array(width).fill(' ');
 }
 
-export function renderUartTextGrid(bytes: any, {
-  width = 80,
-  height = 24,
-  textConfig = {} as any
-}: any = {}) {
-  const cols = Math.max(1, Number.parseInt(width, 10) || 80);
-  const rowsCount = Math.max(1, Number.parseInt(height, 10) || 24);
+export function renderUartTextGrid(bytes: unknown, options: UartGridOptions = {}) {
+  const {
+    width = 80,
+    height = 24,
+    textConfig = {}
+  } = options;
+  const cols = Math.max(1, Number.parseInt(String(width), 10) || 80);
+  const rowsCount = Math.max(1, Number.parseInt(String(height), 10) || 24);
 
   const rows = Array.from({ length: rowsCount }, () => makeRow(cols));
   let row = 0;
@@ -48,7 +65,7 @@ export function renderUartTextGrid(bytes: any, {
     }
   };
 
-  if (bytes && typeof bytes[Symbol.iterator] === 'function') {
+  if (isIterable(bytes)) {
     let pendingCarriageReturn = false;
 
     const flushPendingCarriageReturn = () => {

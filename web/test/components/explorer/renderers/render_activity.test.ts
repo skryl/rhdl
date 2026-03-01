@@ -16,19 +16,23 @@ function makeRenderList() {
   };
 }
 
-const toBigInt = (v: any) => {
+const toBigInt = (v: unknown) => {
   if (v == null) return 0n;
-  try { return BigInt(v); } catch { return 0n; }
+  if (typeof v === 'bigint') return v;
+  if (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean') {
+    try { return BigInt(v); } catch { return 0n; }
+  }
+  return 0n;
 };
 
 test('updateRenderActivity sets active when value is non-zero', () => {
   const rl = makeRenderList();
   const prev = new Map();
-  const values = { 'top__clk': 1n, 'top__data': 0n };
+  const values: Record<string, bigint> = { 'top__clk': 1n, 'top__data': 0n };
 
   updateRenderActivity({
     renderList: rl,
-    signalLiveValueByName: (name: any) => (values as any)[name] ?? null,
+    signalLiveValueByName: (name: string) => values[name] ?? null,
     toBigInt,
     highlightedSignal: null,
     previousValues: prev
@@ -42,11 +46,11 @@ test('updateRenderActivity sets active when value is non-zero', () => {
 test('updateRenderActivity sets toggled when value changes', () => {
   const rl = makeRenderList();
   const prev = new Map([['top::clk', '0'], ['top::data', '5']]);
-  const values = { 'top__clk': 1n, 'top__data': 5n };
+  const values: Record<string, bigint> = { 'top__clk': 1n, 'top__data': 5n };
 
   updateRenderActivity({
     renderList: rl,
-    signalLiveValueByName: (name: any) => (values as any)[name] ?? null,
+    signalLiveValueByName: (name: string) => values[name] ?? null,
     toBigInt,
     highlightedSignal: null,
     previousValues: prev
@@ -59,11 +63,11 @@ test('updateRenderActivity sets toggled when value changes', () => {
 test('updateRenderActivity sets selected when signal matches highlight', () => {
   const rl = makeRenderList();
   const prev = new Map();
-  const values = { 'top__clk': 1n, 'top__data': 0n };
+  const values: Record<string, bigint> = { 'top__clk': 1n, 'top__data': 0n };
 
   updateRenderActivity({
     renderList: rl,
-    signalLiveValueByName: (name: any) => (values as any)[name] ?? null,
+    signalLiveValueByName: (name: string) => values[name] ?? null,
     toBigInt,
     highlightedSignal: { signalName: null, liveName: 'top__clk' },
     previousValues: prev
@@ -92,11 +96,11 @@ test('updateRenderActivity selected matches by signalName', () => {
 test('updateRenderActivity propagates state to wires via valueKey', () => {
   const rl = makeRenderList();
   const prev = new Map([['top::clk', '0']]);
-  const values = { 'top__clk': 1n };
+  const values: Record<string, bigint> = { 'top__clk': 1n };
 
   updateRenderActivity({
     renderList: rl,
-    signalLiveValueByName: (name: any) => (values as any)[name] ?? null,
+    signalLiveValueByName: (name: string) => values[name] ?? null,
     toBigInt,
     highlightedSignal: { signalName: null, liveName: 'top__clk' },
     previousValues: prev
@@ -111,11 +115,11 @@ test('updateRenderActivity propagates state to wires via valueKey', () => {
 test('updateRenderActivity returns nextValues map', () => {
   const rl = makeRenderList();
   const prev = new Map();
-  const values = { 'top__clk': 42n, 'top__data': 0n };
+  const values: Record<string, bigint> = { 'top__clk': 42n, 'top__data': 0n };
 
   const next = updateRenderActivity({
     renderList: rl,
-    signalLiveValueByName: (name: any) => (values as any)[name] ?? null,
+    signalLiveValueByName: (name: string) => values[name] ?? null,
     toBigInt,
     highlightedSignal: null,
     previousValues: prev

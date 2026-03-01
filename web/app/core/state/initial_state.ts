@@ -6,8 +6,9 @@ import { createApple2StateSlice } from '../../components/apple2/state/slice';
 import { createWatchStateSlice } from '../../components/watch/state/slice';
 import { createTerminalStateSlice } from '../../components/terminal/state/slice';
 import { createExplorerStateSlice } from '../../components/explorer/state/slice';
+import type { AppState } from '../../types/state';
 
-export function createInitialState() {
+export function createInitialState(): AppState {
   return {
     ...createSimStateSlice(),
     ...createShellStateSlice(),
@@ -17,5 +18,5 @@ export function createInitialState() {
     ...createWatchStateSlice(),
     ...createTerminalStateSlice(),
     ...createExplorerStateSlice()
-  };
+  } as AppState;
 }

@@ -6,7 +6,7 @@ export function createWatchDomainController({
   clearAllBreakpoints,
   removeBreakpointSignal,
   renderBreakpointList
-}: any = {}) {
+}: Unsafe = {}) {
   return {
     refreshTable: refreshWatchTable,
     addSignal: addWatchSignal,

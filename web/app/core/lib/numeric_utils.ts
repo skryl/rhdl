@@ -1,14 +1,14 @@
-export function toBigInt(value: any) {
+export function toBigInt(value: unknown) {
   if (typeof value === 'bigint') {
     return value;
   }
-  if (Number.isFinite(value)) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
     return BigInt(Math.trunc(value));
   }
   return 0n;
 }
 
-export function parseNumeric(text: any) {
+export function parseNumeric(text: unknown) {
   const raw = String(text || '').trim().toLowerCase();
   if (!raw) {
     return null;
@@ -22,25 +22,25 @@ export function parseNumeric(text: any) {
       return BigInt(raw);
     }
     return BigInt(raw);
-  } catch (_err: any) {
+  } catch (_err: unknown) {
     return null;
   }
 }
 
-export function formatValue(value: any, width: any) {
+export function formatValue(value: unknown, width: unknown) {
   if (value == null) {
     return '-';
   }
 
   const v = toBigInt(value);
-  if (width <= 1) {
+  if (Number(width) <= 1) {
     return String(Number(v & 1n));
   }
 
   return `0x${v.toString(16)}`;
 }
 
-export function parseHexOrDec(text: any, defaultValue = 0) {
+export function parseHexOrDec(text: unknown, defaultValue = 0) {
   const raw = String(text || '').trim().toLowerCase();
   if (!raw) {
     return defaultValue;
@@ -53,10 +53,10 @@ export function parseHexOrDec(text: any, defaultValue = 0) {
   return Number.isFinite(value) ? value : defaultValue;
 }
 
-export function hexWord(value: any) {
+export function hexWord(value: unknown) {
   return (Number(value) & 0xffff).toString(16).toUpperCase().padStart(4, '0');
 }
 
-export function hexByte(value: any) {
+export function hexByte(value: unknown) {
   return Number(value).toString(16).toUpperCase().padStart(2, '0');
 }

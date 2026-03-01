@@ -1,14 +1,69 @@
 import {
   buildApple2SnapshotPayload,
   parseApple2SnapshotText,
-  isSnapshotFileName
+  isSnapshotFileName,
+  type ParsedApple2Snapshot
 } from '../lib/snapshot';
 import { hexWord } from '../../../core/lib/numeric_utils';
 
-function requireFn(name: any, fn: any) {
+function requireFn(name: string, fn: unknown) {
   if (typeof fn !== 'function') {
     throw new Error(`createApple2DumpWorkflowService requires function: ${name}`);
   }
+}
+
+function formatError(err: unknown) {
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return String(err);
+}
+
+interface FileLike {
+  name: string;
+  text?: () => Promise<string>;
+  arrayBuffer?: () => Promise<ArrayBuffer>;
+}
+
+interface ResponseLike {
+  ok: boolean;
+  status?: number;
+  text?: () => Promise<string>;
+  arrayBuffer?: () => Promise<ArrayBuffer>;
+}
+
+interface PcStatus {
+  applied?: boolean;
+  pc?: number | null;
+  reason?: string;
+}
+
+interface Apple2DumpWorkflowDeps {
+  dom: Unsafe;
+  state: Unsafe;
+  runtime: Unsafe;
+  APPLE2_RAM_BYTES: number;
+  KARATEKA_PC: number;
+  dumpStorageService: {
+    save: Unsafe;
+    load: Unsafe;
+  };
+  downloadService: {
+    downloadMemoryDump: Unsafe;
+    downloadSnapshot: Unsafe;
+  };
+  romResetService: {
+    applySnapshotStartPc: Unsafe;
+    patchApple2ResetVector: Unsafe;
+  };
+  getApple2ProgramCounter: Unsafe;
+  ensureApple2Ready: Unsafe;
+  setMemoryDumpStatus: Unsafe;
+  setMemoryResetVectorInput: Unsafe;
+  loadApple2MemoryDumpBytes: Unsafe;
+  log: Unsafe;
+  fetchImpl?: (assetPath: string) => Promise<ResponseLike | Unsafe>;
+  fixtureRoot?: string;
 }
 
 export function createApple2DumpWorkflowService({
@@ -26,9 +81,9 @@ export function createApple2DumpWorkflowService({
   setMemoryResetVectorInput,
   loadApple2MemoryDumpBytes,
   log,
-  fetchImpl = globalThis.fetch,
+  fetchImpl = globalThis.fetch as unknown as (assetPath: string) => Promise<ResponseLike>,
   fixtureRoot = './assets/fixtures/apple2'
-}: any = {}) {
+}: Apple2DumpWorkflowDeps) {
   if (!dom || !state || !runtime) {
     throw new Error('createApple2DumpWorkflowService requires dom/state/runtime');
   }
@@ -137,7 +192,7 @@ export function createApple2DumpWorkflowService({
     const startPc = getApple2ProgramCounter();
     const runnerId = currentRunnerId();
     const label = `${runnerId} ram snapshot ${nowIso}`;
-    const snapshot = buildApple2SnapshotPayload(bytes, dumpStart, label, nowIso as any, startPc as any, {
+    const snapshot = buildApple2SnapshotPayload(bytes, dumpStart, label, nowIso, startPc, {
       kind: 'rhdl.memory.snapshot'
     });
     if (!snapshot) {
@@ -166,7 +221,7 @@ export function createApple2DumpWorkflowService({
     return true;
   }
 
-  function basenameFromPath(pathValue: any) {
+  function basenameFromPath(pathValue: string) {
     const token = String(pathValue || '').trim().replace(/\\/g, '/');
     if (!token) {
       return 'asset dump';
@@ -175,7 +230,7 @@ export function createApple2DumpWorkflowService({
     return parts[parts.length - 1] || token;
   }
 
-  async function loadApple2Snapshot(snapshot: any) {
+  async function loadApple2Snapshot(snapshot: ParsedApple2Snapshot) {
     if (!snapshot) {
       return false;
     }
@@ -184,10 +239,10 @@ export function createApple2DumpWorkflowService({
       dom.memoryDumpOffset.value = `0x${hexWord(snapshot.offset)}`;
     }
 
-    let pcStatus = null;
+    let pcStatus: PcStatus | null = null;
     let resetAfterLoad = false;
     if (snapshot.startPc != null) {
-      pcStatus = await romResetService.applySnapshotStartPc(snapshot.startPc);
+      pcStatus = (await romResetService.applySnapshotStartPc(snapshot.startPc)) as PcStatus;
       resetAfterLoad = !!pcStatus.applied;
       if (pcStatus?.pc != null) {
         setMemoryResetVectorInput(pcStatus.pc);
@@ -211,13 +266,17 @@ export function createApple2DumpWorkflowService({
     return loaded;
   }
 
-  async function loadApple2DumpOrSnapshotFile(file: any, offsetRaw: any) {
+  async function loadApple2DumpOrSnapshotFile(file: FileLike, offsetRaw: unknown) {
     if (!file) {
       setMemoryDumpStatus('Select a dump/snapshot file first.');
       return false;
     }
 
     if (isSnapshotFileName(file.name)) {
+      if (typeof file.text !== 'function') {
+        setMemoryDumpStatus(`Invalid snapshot file: ${file.name}`);
+        return false;
+      }
       const snapshot = parseApple2SnapshotText(await file.text());
       if (!snapshot) {
         setMemoryDumpStatus(`Invalid snapshot file: ${file.name}`);
@@ -226,11 +285,15 @@ export function createApple2DumpWorkflowService({
       return loadApple2Snapshot(snapshot);
     }
 
+    if (typeof file.arrayBuffer !== 'function') {
+      setMemoryDumpStatus(`Invalid dump file: ${file.name}`);
+      return false;
+    }
     const bytes = new Uint8Array(await file.arrayBuffer());
     return loadApple2MemoryDumpBytes(bytes, offsetRaw, { label: file.name });
   }
 
-  async function loadApple2DumpOrSnapshotAssetPath(assetPath: any, offsetRaw: any) {
+  async function loadApple2DumpOrSnapshotAssetPath(assetPath: string, offsetRaw: unknown) {
     const pathToken = String(assetPath || '').trim();
     if (!pathToken) {
       setMemoryDumpStatus('Select an asset path first.');
@@ -245,6 +308,10 @@ export function createApple2DumpWorkflowService({
       }
 
       if (isSnapshotFileName(pathToken)) {
+        if (typeof response.text !== 'function') {
+          setMemoryDumpStatus(`Invalid snapshot asset: ${pathToken}`);
+          return false;
+        }
         const snapshot = parseApple2SnapshotText(await response.text());
         if (!snapshot) {
           setMemoryDumpStatus(`Invalid snapshot asset: ${pathToken}`);
@@ -253,10 +320,13 @@ export function createApple2DumpWorkflowService({
         return loadApple2Snapshot(snapshot);
       }
 
+      if (typeof response.arrayBuffer !== 'function') {
+        throw new Error('asset response missing arrayBuffer()');
+      }
       const bytes = new Uint8Array(await response.arrayBuffer());
       return loadApple2MemoryDumpBytes(bytes, offsetRaw, { label: basenameFromPath(pathToken) });
-    } catch (err: any) {
-      const msg = `Asset load failed (${pathToken}): ${err.message || err}`;
+    } catch (err: unknown) {
+      const msg = `Asset load failed (${pathToken}): ${formatError(err)}`;
       setMemoryDumpStatus(msg);
       log(msg);
       return false;
@@ -269,7 +339,7 @@ export function createApple2DumpWorkflowService({
     }
 
     const saved = dumpStorageService.load();
-    const source = saved || state.memory.lastSavedDump;
+    const source = (saved || state.memory.lastSavedDump) as ParsedApple2Snapshot | null;
     if (!source) {
       setMemoryDumpStatus('No saved dump found.');
       return false;
@@ -279,10 +349,10 @@ export function createApple2DumpWorkflowService({
       dom.memoryDumpOffset.value = `0x${hexWord(source.offset)}`;
     }
 
-    let pcStatus = null;
+    let pcStatus: PcStatus | null = null;
     let resetAfterLoad = false;
     if (source.startPc != null) {
-      pcStatus = await romResetService.applySnapshotStartPc(source.startPc);
+      pcStatus = (await romResetService.applySnapshotStartPc(source.startPc)) as PcStatus;
       resetAfterLoad = !!pcStatus.applied;
       if (pcStatus?.pc != null) {
         setMemoryResetVectorInput(pcStatus.pc);
@@ -330,7 +400,7 @@ export function createApple2DumpWorkflowService({
       }
 
       let startPc = KARATEKA_PC;
-      if (metaResp.ok) {
+      if (metaResp.ok && typeof metaResp.text === 'function') {
         const meta = await metaResp.text();
         const m = meta.match(/PC at dump:\s*\$([0-9A-Fa-f]+)/);
         if (m) {
@@ -341,6 +411,9 @@ export function createApple2DumpWorkflowService({
         }
       }
 
+      if (typeof romResp.arrayBuffer !== 'function') {
+        throw new Error('rom response missing arrayBuffer()');
+      }
       const romBytes = new Uint8Array(await romResp.arrayBuffer());
       state.apple2.baseRomBytes = new Uint8Array(romBytes);
       const patchedRom = romResetService.patchApple2ResetVector(romBytes, startPc);
@@ -350,14 +423,17 @@ export function createApple2DumpWorkflowService({
       }
       setMemoryResetVectorInput(startPc);
 
+      if (typeof dumpResp.arrayBuffer !== 'function') {
+        throw new Error('dump response missing arrayBuffer()');
+      }
       const dumpBytes = new Uint8Array(await dumpResp.arrayBuffer());
       await loadApple2MemoryDumpBytes(dumpBytes, 0, {
         resetAfterLoad: true,
         resetReleaseCycles: 0,
         label: `Karateka dump (PC=$${hexWord(startPc)})`
       });
-    } catch (err: any) {
-      const msg = `Karateka load failed: ${err.message || err}`;
+    } catch (err: unknown) {
+      const msg = `Karateka load failed: ${formatError(err)}`;
       setMemoryDumpStatus(msg);
       log(msg);
     }

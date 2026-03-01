@@ -3,9 +3,22 @@ import assert from 'node:assert/strict';
 
 import { createSimStatusController } from '../../../../app/components/sim/controllers/status_controller';
 
+type StatusTestSim = {
+  signal_count: () => number;
+  reg_count: () => number;
+  clock_mode: () => string;
+  trace_enabled: () => boolean;
+  trace_change_count: () => number;
+  runner_kind: () => string;
+  features: {
+    hasSignalIndex: boolean;
+    hasLiveTrace: boolean;
+  };
+};
+
 function createHarness() {
-  const scheduleCalls: any[] = [];
-  const ioCalls: any[] = [];
+  const scheduleCalls: string[] = [];
+  const ioCalls: string[] = [];
   const dom = {
     clockSignal: { value: '__none__' },
     simStatus: { textContent: '' },
@@ -20,7 +33,11 @@ function createHarness() {
     running: false,
     apple2: { keyQueue: [1, 2] }
   };
-  const runtime = {
+  const runtime: {
+    sim: StatusTestSim | null;
+    irMeta: null;
+    throughput: { cyclesPerSecond: number };
+  } = {
     sim: null,
     irMeta: null,
     throughput: {
@@ -42,9 +59,9 @@ function createHarness() {
     }),
     isApple2UiEnabled: () => true,
     updateIoToggleUi: () => ioCalls.push('io'),
-    scheduleReduxUxSync: (reason: any) => scheduleCalls.push(reason),
+    scheduleReduxUxSync: (reason: string) => scheduleCalls.push(reason),
     litRender: () => {},
-    html: (strings: any, ...values: any[]) => ({ strings, values })
+    html: (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values })
   });
   return { controller, dom, state, runtime, scheduleCalls, ioCalls };
 }
@@ -87,7 +104,7 @@ test('refreshStatus with simulator writes running metrics and queues sync', () =
       hasSignalIndex: false,
       hasLiveTrace: false
     }
-  } as any;
+  };
   controller.refreshStatus();
   assert.match(dom.simStatus.textContent, /Cycle 123 \| 7 signals \| 3 regs/);
   assert.match(dom.simStatus.textContent, /14,000 cyc\/s/);

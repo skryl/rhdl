@@ -1,11 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createWebGLRenderer } from '../../../../app/components/explorer/renderers/webgl_renderer';
+import type { RenderList, RenderNet, RenderPin, RenderSymbol, RenderWire } from '../../../../app/components/explorer/lib/types';
+
+type GlCall = { method: string; args: unknown[] };
 
 function createMockCanvas(hasWebGL = true) {
-  const glCalls: any[] = [];
+  const glCalls: GlCall[] = [];
   const gl = hasWebGL ? new Proxy({}, {
-    get(target: any, prop) {
+    get(target: Record<PropertyKey, unknown>, prop: PropertyKey) {
       if (prop in target) return target[prop];
       if (prop === 'canvas') return { width: 800, height: 600 };
       if (prop === 'drawingBufferWidth') return 800;
@@ -26,8 +29,8 @@ function createMockCanvas(hasWebGL = true) {
       if (prop === 'BLEND') return 3042;
       if (prop === 'SRC_ALPHA') return 770;
       if (prop === 'ONE_MINUS_SRC_ALPHA') return 771;
-      return (...args: any[]) => {
-        glCalls.push({ method: prop, args });
+      return (...args: unknown[]) => {
+        glCalls.push({ method: String(prop), args });
         // Return sensible defaults for GL queries
         if (prop === 'createShader') return {};
         if (prop === 'createProgram') return {};
@@ -46,7 +49,7 @@ function createMockCanvas(hasWebGL = true) {
       width: 800,
       height: 600,
       style: {},
-      getContext(type: any) {
+      getContext(type: string) {
         if (type === 'webgl2') return gl;
         return null;
       },
@@ -70,11 +73,11 @@ function makePalette() {
 }
 
 function makeRenderList(count = 2) {
-  const symbols: any[] = [];
-  const pins: any[] = [];
-  const nets: any[] = [];
-  const wires: any[] = [];
-  const byId = new Map();
+  const symbols: RenderSymbol[] = [];
+  const pins: RenderPin[] = [];
+  const nets: RenderNet[] = [];
+  const wires: RenderWire[] = [];
+  const byId = new Map<string, unknown>();
   for (let i = 0; i < count; i++) {
     const sym = {
       id: `s${i}`, type: 'component', label: `C${i}`,
@@ -107,11 +110,11 @@ function makeRenderList(count = 2) {
       byId.set(wire.id, wire);
     }
   }
-  return { symbols, pins, nets, wires, byId };
+  return { symbols, pins, nets, wires, byId } as RenderList;
 }
 
-function readFirstLineWidth(glCalls: any) {
-  const lineBufferUpload = glCalls.find((call: any) => (
+function readFirstLineWidth(glCalls: GlCall[]) {
+  const lineBufferUpload = glCalls.find((call) => (
     call.method === 'bufferData'
     && call.args?.[1] instanceof Float32Array
     && call.args[1].length >= 10
@@ -119,7 +122,11 @@ function readFirstLineWidth(glCalls: any) {
   if (!lineBufferUpload) {
     return 0;
   }
-  return Number(lineBufferUpload.args[1][8] || 0);
+  const data = lineBufferUpload.args[1];
+  if (!(data instanceof Float32Array)) {
+    return 0;
+  }
+  return Number(data[8] || 0);
 }
 
 test('createWebGLRenderer returns object with render and destroy when WebGL2 available', () => {
@@ -197,7 +204,13 @@ test('destroy does not throw', () => {
 test('render with empty renderList does not throw', () => {
   const { canvas } = createMockCanvas(true);
   const renderer = createWebGLRenderer(canvas)!;
-  const rl = { symbols: [], pins: [], nets: [], wires: [], byId: new Map() };
+  const rl: RenderList = {
+    symbols: [],
+    pins: [],
+    nets: [],
+    wires: [],
+    byId: new Map<string, unknown>()
+  };
   renderer.render(rl, { x: 0, y: 0, scale: 1 }, makePalette());
 });
 

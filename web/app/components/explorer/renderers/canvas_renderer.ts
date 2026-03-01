@@ -2,8 +2,48 @@
 
 import { symbolShapes } from './symbols';
 import { drawLegend, resolveWireStrokeWidth } from './themes';
+import type {
+  GraphViewport,
+  RenderList,
+  RenderNet,
+  RenderPin,
+  RenderSymbol,
+  RenderWire,
+  ThemePalette
+} from '../lib/types';
 
-function resolveColors(element: any, palette: any) {
+interface CanvasLike {
+  width: number;
+  height: number;
+  getContext: (type: '2d') => CanvasRenderingContext2D | null;
+}
+
+interface SymbolColors {
+  fill: string;
+  stroke: string;
+  text: string;
+  lineWidth: number;
+}
+
+interface WireColors {
+  color: string;
+  width: number;
+}
+
+interface NetColors {
+  fill: string;
+  stroke: string;
+  text: string;
+  lineWidth: number;
+}
+
+interface PinColors {
+  fill: string;
+  stroke: string;
+  lineWidth: number;
+}
+
+function resolveColors(element: RenderSymbol, palette: ThemePalette): SymbolColors {
   const type = element.type || '';
   let fill = palette.componentBg;
   let stroke = palette.componentBorder;
@@ -30,14 +70,14 @@ function resolveColors(element: any, palette: any) {
   return { fill, stroke, text, lineWidth };
 }
 
-function resolveWireColor(wire: any, palette: any) {
+function resolveWireColor(wire: RenderWire, palette: ThemePalette): WireColors {
   if (wire.selected) return { color: '#ffffff', width: 3.2 };
   if (wire.toggled) return { color: palette.wireToggle, width: 2.7 };
   if (wire.active) return { color: palette.wireActive, width: 2.0 };
   return { color: palette.wire, width: wire.bus ? 2.4 : 1.4 };
 }
 
-function resolveNetColors(net: any, palette: any) {
+function resolveNetColors(net: RenderNet, palette: ThemePalette): NetColors {
   let fill = palette.netBg;
   let stroke = palette.netBorder;
   let text = palette.netText;
@@ -58,7 +98,7 @@ function resolveNetColors(net: any, palette: any) {
   return { fill, stroke, text, lineWidth };
 }
 
-function resolvePinColors(pin: any, palette: any) {
+function resolvePinColors(pin: RenderPin, palette: ThemePalette): PinColors {
   let fill = palette.pinBg;
   let stroke = palette.pinBorder;
   let lineWidth = pin.bus ? 2.1 : 1.2;
@@ -76,19 +116,40 @@ function resolvePinColors(pin: any, palette: any) {
   return { fill, stroke, lineWidth };
 }
 
-export function createCanvasRenderer(canvas: any) {
+function resolveViewport(viewport: GraphViewport | null | undefined): GraphViewport {
+  return {
+    scale: Number.isFinite(viewport?.scale) ? (viewport?.scale || 1) : 1,
+    x: Number.isFinite(viewport?.x) ? (viewport?.x || 0) : 0,
+    y: Number.isFinite(viewport?.y) ? (viewport?.y || 0) : 0
+  };
+}
+
+function hasPoint(value: unknown): value is { x: number; y: number } {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const record = value as { x?: unknown; y?: unknown };
+  return Number.isFinite(Number(record.x)) && Number.isFinite(Number(record.y));
+}
+
+export function createCanvasRenderer(canvas: CanvasLike) {
   const ctx = canvas.getContext('2d');
   let destroyed = false;
 
-  function render(renderList: any, viewport: any, palette: any) {
-    if (destroyed || !ctx) return;
+  function render(renderList: RenderList, viewport: GraphViewport, palette: ThemePalette): void {
+    if (destroyed || !ctx) {
+      return;
+    }
 
-    const { scale = 1, x: tx = 0, y: ty = 0 } = viewport || {};
+    const resolvedViewport = resolveViewport(viewport);
+    const scale = resolvedViewport.scale;
+    const tx = resolvedViewport.x;
+    const ty = resolvedViewport.y;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(scale, 0, 0, scale, tx, ty);
 
-    // 1. Draw wires (back layer)
+    // 1. Draw wires (back layer).
     for (const wire of renderList.wires) {
       const wc = resolveWireColor(wire, palette);
       ctx.strokeStyle = wc.color;
@@ -103,16 +164,17 @@ export function createCanvasRenderer(canvas: any) {
       ctx.beginPath();
 
       if (Array.isArray(wire.bendPoints) && wire.bendPoints.length >= 2) {
-        // Draw polyline through ELK-computed bend points
         ctx.moveTo(wire.bendPoints[0].x, wire.bendPoints[0].y);
-        for (let i = 1; i < wire.bendPoints.length; i++) {
-          ctx.lineTo(wire.bendPoints[i].x, wire.bendPoints[i].y);
+        for (let index = 1; index < wire.bendPoints.length; index += 1) {
+          ctx.lineTo(wire.bendPoints[index].x, wire.bendPoints[index].y);
         }
       } else {
-        // Fallback: straight line between source and target centers
-        const src = renderList.byId.get(wire.sourceId);
-        const tgt = renderList.byId.get(wire.targetId);
-        if (!src || !tgt) { ctx.setLineDash([]); continue; }
+        const src = renderList.byId.get(String(wire.sourceId || ''));
+        const tgt = renderList.byId.get(String(wire.targetId || ''));
+        if (!hasPoint(src) || !hasPoint(tgt)) {
+          ctx.setLineDash([]);
+          continue;
+        }
         ctx.moveTo(src.x, src.y);
         ctx.lineTo(tgt.x, tgt.y);
       }
@@ -124,55 +186,86 @@ export function createCanvasRenderer(canvas: any) {
       }
     }
 
-    // 2. Draw symbols
+    // 2. Draw symbols.
     for (const sym of renderList.symbols) {
       const colors = resolveColors(sym, palette);
-      const shape = symbolShapes.get(sym.type) || symbolShapes.get('component');
+      const shape = symbolShapes.get(String(sym.type || '')) || symbolShapes.get('component');
+      if (!shape) {
+        continue;
+      }
 
       ctx.fillStyle = colors.fill;
       ctx.strokeStyle = colors.stroke;
-      shape.draw(ctx, sym.x, sym.y, sym.width, sym.height, sym);
+      shape.draw(
+        ctx,
+        Number(sym.x) || 0,
+        Number(sym.y) || 0,
+        Number(sym.width) || 150,
+        Number(sym.height) || 64,
+        {}
+      );
 
-      // label
       ctx.fillStyle = colors.text;
       ctx.font = '8px monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(sym.label, sym.x, sym.y);
+      ctx.fillText(String(sym.label || ''), Number(sym.x) || 0, Number(sym.y) || 0);
     }
 
-    // 3. Draw nets
+    // 3. Draw nets.
     for (const net of renderList.nets) {
       const colors = resolveNetColors(net, palette);
       const shape = symbolShapes.get('net');
+      if (!shape) {
+        continue;
+      }
 
       ctx.fillStyle = colors.fill;
       ctx.strokeStyle = colors.stroke;
-      shape.draw(ctx, net.x, net.y, net.width, net.height, net);
+      ctx.lineWidth = colors.lineWidth;
+      shape.draw(
+        ctx,
+        Number(net.x) || 0,
+        Number(net.y) || 0,
+        Number(net.width) || 52,
+        Number(net.height) || 18,
+        net
+      );
 
       ctx.fillStyle = colors.text;
       ctx.font = '7px monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(net.label, net.x, net.y);
+      ctx.fillText(String(net.label || ''), Number(net.x) || 0, Number(net.y) || 0);
     }
 
-    // 4. Draw pins
+    // 4. Draw pins.
     for (const pin of renderList.pins) {
       const colors = resolvePinColors(pin, palette);
       const shape = symbolShapes.get('pin');
+      if (!shape) {
+        continue;
+      }
 
       ctx.fillStyle = colors.fill;
       ctx.strokeStyle = colors.stroke;
-      shape.draw(ctx, pin.x, pin.y, pin.width, pin.height, pin);
+      ctx.lineWidth = colors.lineWidth;
+      shape.draw(
+        ctx,
+        Number(pin.x) || 0,
+        Number(pin.y) || 0,
+        Number(pin.width) || 14,
+        Number(pin.height) || 10,
+        pin
+      );
     }
 
-    // reset transform and draw legend in screen space
+    // Reset transform and draw legend in screen space.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     drawLegend(ctx, canvas.width, canvas.height, palette);
   }
 
-  function destroy() {
+  function destroy(): void {
     destroyed = true;
   }
 

@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { access } from 'node:fs/promises';
+import path from 'node:path';
+import type { ConsoleMessage, Page } from 'playwright';
 
 import {
   createStaticServer,
@@ -11,11 +14,34 @@ const BENIGN_PAGE_ERRORS = [
   'Failed to execute \'drawImage\' on \'CanvasRenderingContext2D\': The image argument is a canvas element with a width or height of 0.'
 ];
 
-function setupTestPage(page: any) {
-  const pageErrors: any[] = [];
-  const consoleErrors: any[] = [];
+type TerminalTextElement = Element & {
+  dataset?: DOMStringMap;
+  value?: string;
+};
 
-  page.on('pageerror', (err: any) => {
+type TerminalUxState = {
+  uartPassthrough?: boolean;
+  history?: string[];
+};
+
+type UxState = {
+  terminal?: TerminalUxState;
+};
+
+type WindowWithUxState = Window & {
+  __RHDL_UX_STATE__?: UxState;
+};
+
+type StepOptions = {
+  stepTicks?: number;
+  maxSteps?: number;
+};
+
+function setupTestPage(page: Page) {
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
+
+  page.on('pageerror', (err: Error) => {
     const message = String(err?.message || err);
     if (BENIGN_PAGE_ERRORS.some((entry) => message.includes(entry))) {
       return;
@@ -23,7 +49,7 @@ function setupTestPage(page: any) {
     pageErrors.push(message);
   });
 
-  page.on('console', (msg: any) => {
+  page.on('console', (msg: ConsoleMessage) => {
     if (msg.type() !== 'error') {
       return;
     }
@@ -37,8 +63,8 @@ function setupTestPage(page: any) {
   return { pageErrors, consoleErrors };
 }
 
-async function waitForRunnerOption(page: any, runnerId: any) {
-  await page.waitForFunction((id: any) => {
+async function waitForRunnerOption(page: Page, runnerId: string): Promise<void> {
+  await page.waitForFunction((id: string) => {
     const select = document.querySelector('#runnerSelect');
     if (!(select instanceof HTMLSelectElement)) {
       return false;
@@ -47,7 +73,7 @@ async function waitForRunnerOption(page: any, runnerId: any) {
   }, runnerId, { timeout: 120000 });
 }
 
-async function loadRiscvRunnerOnCompiler(page: any) {
+async function loadRiscvRunnerOnCompiler(page: Page): Promise<void> {
   await waitForRunnerOption(page, 'riscv');
 
   await page.selectOption('#backendSelect', 'compiler');
@@ -76,43 +102,63 @@ async function loadRiscvRunnerOnCompiler(page: any) {
   }, null, { timeout: 120000 });
 }
 
-async function ensureTerminalOpen(page: any) {
+async function ensureTerminalOpen(page: Page): Promise<void> {
   await page.waitForSelector('#terminalPanel', { state: 'attached', timeout: 20000 });
   await page.waitForSelector('#terminalToggleBtn', { state: 'attached', timeout: 20000 });
-  const hidden = await page.$eval('#terminalPanel', (panel: any) => !!panel.hidden);
+  const hidden = await page.$eval('#terminalPanel', (panel) => (panel as HTMLElement).hidden);
   if (hidden) {
     await page.click('#terminalToggleBtn');
   }
   await page.waitForFunction(() => {
     const panel = document.querySelector('#terminalPanel');
-    return !!panel && (panel as any).hidden === false;
+    return panel instanceof HTMLElement && panel.hidden === false;
   }, null, { timeout: 20000 });
 }
 
-function readTerminalOutput(page: any) {
-  return page.$eval('#terminalOutput', (el: any) => String(el.dataset?.terminalText ?? el.value ?? el.textContent ?? ''));
+function readTerminalOutput(page: Page): Promise<string> {
+  return page.$eval('#terminalOutput', (el) => {
+    const terminalEl = el as TerminalTextElement;
+    return String(terminalEl.dataset?.terminalText ?? terminalEl.value ?? terminalEl.textContent ?? '');
+  });
 }
 
-function getDisplayText(page: any) {
-  return page.$eval('#apple2TextScreen', (el: any) => el?.textContent || '');
+function getDisplayText(page: Page): Promise<string> {
+  return page.$eval('#apple2TextScreen', (el) => el.textContent || '');
 }
 
-function getSimCycle(page: any) {
-  return page.$eval('#simStatus', (el: any) => {
-    const text = String(el?.textContent || '');
+function getSimCycle(page: Page): Promise<number> {
+  return page.$eval('#simStatus', (el) => {
+    const text = String(el.textContent || '');
     const match = text.match(/Cycle\s+([\d,]+)/);
     return match ? Number.parseInt(match[1].replace(/,/g, ''), 10) : -1;
   });
 }
 
-function countOccurrences(haystack: any, needle: any) {
+function countOccurrences(haystack: string, needle: string): number {
   if (!needle) {
     return 0;
   }
-  return String(haystack || '').split(needle).length - 1;
+  return haystack.split(needle).length - 1;
 }
 
-async function stepUntilDisplayMatch(page: any, predicate: any, { stepTicks = 3_000_000, maxSteps = 20 }: any = {}) {
+async function hasRiscvShellAssets(webRoot: string): Promise<boolean> {
+  const required = [
+    path.join(webRoot, 'assets', 'fixtures', 'riscv', 'software', 'bin', 'kernel.bin'),
+    path.join(webRoot, 'assets', 'fixtures', 'riscv', 'software', 'bin', 'fs.img')
+  ];
+  try {
+    await Promise.all(required.map(async (filePath) => access(filePath)));
+    return true;
+  } catch (_err: unknown) {
+    return false;
+  }
+}
+
+async function stepUntilDisplayMatch(
+  page: Page,
+  predicate: (displayText: string) => boolean,
+  { stepTicks = 3_000_000, maxSteps = 20 }: StepOptions = {}
+): Promise<string> {
   await page.click('[data-tab="ioTab"]');
 
   let lastDisplay = '';
@@ -122,7 +168,7 @@ async function stepUntilDisplayMatch(page: any, predicate: any, { stepTicks = 3_
     const before = await getSimCycle(page);
     await page.click('#stepBtn');
 
-    await page.waitForFunction((startCycle: any) => {
+    await page.waitForFunction((startCycle: number) => {
       const text = document.querySelector('#simStatus')?.textContent || '';
       const match = text.match(/Cycle\s+([\d,]+)/);
       if (!match) {
@@ -146,12 +192,16 @@ test('ghostty keyboard can interact with riscv uart shell', { timeout: 320000 },
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err: any) {
-    t.skip('Playwright is not installed (run: `cd web && npm install`)');
+  } catch (_err: unknown) {
+    console.warn('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
 
   const webRoot = resolveWebRoot(import.meta.url);
+  if (!(await hasRiscvShellAssets(webRoot))) {
+    console.warn('riscv shell assets are missing (run: `bundle exec rake web:build`)');
+    return;
+  }
   const server = await createStaticServer(webRoot);
   t.after(() => {
     server.close();
@@ -160,8 +210,8 @@ test('ghostty keyboard can interact with riscv uart shell', { timeout: 320000 },
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-  } catch (_err: any) {
-    t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
+  } catch (_err: unknown) {
+    console.warn('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }
   t.after(async () => {
@@ -178,21 +228,21 @@ test('ghostty keyboard can interact with riscv uart shell', { timeout: 320000 },
 
   await stepUntilDisplayMatch(
     page,
-    (displayText: any) => displayText.includes('init: starting sh') && /\$\s/.test(displayText),
+    (displayText: string) => displayText.includes('init: starting sh') && /\$\s/.test(displayText),
     { stepTicks: 3_000_000, maxSteps: 20 }
   );
 
   await ensureTerminalOpen(page);
   await page.waitForFunction(() => {
-    const el = document.querySelector('#terminalOutput');
-    return ((el as any)?.dataset?.terminalRenderer || '') === 'ghostty-web';
+    const terminalEl = document.querySelector('#terminalOutput') as TerminalTextElement | null;
+    return (terminalEl?.dataset?.terminalRenderer || '') === 'ghostty-web';
   }, null, { timeout: 45000 });
 
   await page.click('#terminalOutput');
   await page.keyboard.type('terminal uart on');
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => {
-    const terminal = (window as any).__RHDL_UX_STATE__?.terminal;
+    const terminal = (window as WindowWithUxState).__RHDL_UX_STATE__?.terminal;
     return !!terminal && terminal.uartPassthrough === true;
   }, null, { timeout: 60000 });
 
@@ -202,7 +252,7 @@ test('ghostty keyboard can interact with riscv uart shell', { timeout: 320000 },
 
   const uartText = await stepUntilDisplayMatch(
     page,
-    (displayText: any) => countOccurrences(displayText, 'ghostty_uart_ok') >= 2,
+    (displayText: string) => countOccurrences(displayText, 'ghostty_uart_ok') >= 2,
     { stepTicks: 750_000, maxSteps: 40 }
   );
 
@@ -210,7 +260,7 @@ test('ghostty keyboard can interact with riscv uart shell', { timeout: 320000 },
   assert.match(uartText, /init: starting sh/);
 
   const terminalText = await readTerminalOutput(page);
-  const terminalState = await page.evaluate(() => (window as any).__RHDL_UX_STATE__?.terminal || null);
+  const terminalState = await page.evaluate(() => (window as WindowWithUxState).__RHDL_UX_STATE__?.terminal || null);
   assert.equal(
     Array.isArray(terminalState?.history) ? terminalState.history.includes('echo ghostty_uart_ok') : false,
     false,

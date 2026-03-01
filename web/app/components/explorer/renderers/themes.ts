@@ -1,32 +1,45 @@
 // Renderer-agnostic theme system.
 
-export function getThemePalette(theme = 'shenzhen') {
+import { asRecord, type ElementColorResult, type ThemePalette } from '../lib/types';
+
+interface ElementColorOptions {
+  viewportScale?: number;
+}
+
+interface LegendEntry {
+  label: string;
+  fill: string | null;
+  stroke: string;
+  isLine?: boolean;
+}
+
+export function getThemePalette(theme = 'shenzhen'): ThemePalette {
   if (theme === 'shenzhen') {
     return {
-      componentBg: '#143848',
-      componentBorder: '#4ec8d8',
-      componentText: '#d4eef5',
-      pinBg: '#2d4040',
+      componentBg: '#1b3d32',
+      componentBorder: '#76d4a4',
+      componentText: '#d8eee0',
+      pinBg: '#2d5d4f',
       pinBorder: '#78a898',
-      netBg: '#1e3828',
+      netBg: '#243a35',
       netBorder: '#58a068',
       netText: '#b0d4b8',
-      ioBg: '#2e2850',
+      ioBg: '#28463d',
       ioBorder: '#9088e0',
       ioText: '#d8d8f0',
-      opBg: '#453820',
+      opBg: '#3f4c3a',
       opBorder: '#d4a850',
       opText: '#f0e4c8',
-      memoryBg: '#4a3020',
+      memoryBg: '#4f3e2f',
       memoryBorder: '#d08848',
-      wire: '#4a7868',
+      wire: '#4f7d6d',
       wireActive: '#7be9ad',
       wireToggle: '#f4bf66',
       selected: '#9cffe3'
     };
   }
 
-  // original theme
+  // Original theme.
   return {
     componentBg: '#214c71',
     componentBorder: '#2f6b97',
@@ -54,11 +67,12 @@ export function getThemePalette(theme = 'shenzhen') {
 const WIRE_ZOOM_WIDTH_EXPONENT = 0.65;
 const MIN_WIRE_ZOOM_FACTOR = 0.18;
 
-export function resolveWireStrokeWidth(strokeWidth: any, viewportScale = 1) {
+export function resolveWireStrokeWidth(strokeWidth: unknown, viewportScale = 1): number {
   const base = Number(strokeWidth);
   if (!Number.isFinite(base) || base <= 0) {
     return 0;
   }
+
   const scale = Number(viewportScale);
   if (!Number.isFinite(scale) || scale >= 1) {
     return base;
@@ -66,21 +80,31 @@ export function resolveWireStrokeWidth(strokeWidth: any, viewportScale = 1) {
   if (scale <= 0) {
     return base * MIN_WIRE_ZOOM_FACTOR;
   }
+
   const zoomFactor = Math.max(MIN_WIRE_ZOOM_FACTOR, Math.pow(scale, WIRE_ZOOM_WIDTH_EXPONENT));
   return base * zoomFactor;
 }
 
-export function resolveElementColors(element: any, palette: any, options: any = {}) {
-  const type = element.type || '';
+export function resolveElementColors(
+  element: unknown,
+  palette: ThemePalette,
+  options: ElementColorOptions = {}
+): ElementColorResult {
+  const elementRecord = asRecord(element) || {};
+  const type = String(elementRecord.type || '');
   const viewportScale = Number(options.viewportScale);
-  const wireStrokeWidth = (rawWidth: any) => resolveWireStrokeWidth(rawWidth, viewportScale);
+  const wireStrokeWidth = (rawWidth: unknown) =>
+    resolveWireStrokeWidth(rawWidth, Number.isFinite(viewportScale) ? viewportScale : 1);
 
   // Wire
   if (type === 'wire') {
-    if (element.selected) return { stroke: '#ffffff', strokeWidth: wireStrokeWidth(3.2) };
-    if (element.toggled) return { stroke: palette.wireToggle, strokeWidth: wireStrokeWidth(2.7) };
-    if (element.active) return { stroke: palette.wireActive, strokeWidth: wireStrokeWidth(2.0) };
-    return { stroke: palette.wire, strokeWidth: wireStrokeWidth(element.bus ? 2.4 : 1.4) };
+    if (elementRecord.selected === true) return { stroke: '#ffffff', strokeWidth: wireStrokeWidth(3.2) };
+    if (elementRecord.toggled === true) return { stroke: palette.wireToggle, strokeWidth: wireStrokeWidth(2.7) };
+    if (elementRecord.active === true) return { stroke: palette.wireActive, strokeWidth: wireStrokeWidth(2.0) };
+    return {
+      stroke: palette.wire,
+      strokeWidth: wireStrokeWidth(elementRecord.bus === true ? 2.4 : 1.4)
+    };
   }
 
   // Net
@@ -88,15 +112,15 @@ export function resolveElementColors(element: any, palette: any, options: any = 
     let fill = palette.netBg;
     let stroke = palette.netBorder;
     let text = palette.netText;
-    let strokeWidth = element.bus ? 2.2 : 1.2;
+    let strokeWidth = elementRecord.bus === true ? 2.2 : 1.2;
 
-    if (element.selected) {
+    if (elementRecord.selected === true) {
       stroke = palette.selected;
       strokeWidth = 2.8;
-    } else if (element.toggled) {
+    } else if (elementRecord.toggled === true) {
       stroke = palette.wireToggle;
       strokeWidth = 2.2;
-    } else if (element.active) {
+    } else if (elementRecord.active === true) {
       fill = palette.wireActive;
       stroke = palette.wireActive;
       text = '#001513';
@@ -109,14 +133,14 @@ export function resolveElementColors(element: any, palette: any, options: any = 
   if (type === 'pin') {
     let fill = palette.pinBg;
     let stroke = palette.pinBorder;
-    let strokeWidth = element.bus ? 2.1 : 1.2;
+    let strokeWidth = elementRecord.bus === true ? 2.1 : 1.2;
 
-    if (element.selected) {
+    if (elementRecord.selected === true) {
       stroke = palette.selected;
       strokeWidth = 2.4;
-    } else if (element.toggled) {
+    } else if (elementRecord.toggled === true) {
       stroke = palette.wireToggle;
-    } else if (element.active) {
+    } else if (elementRecord.active === true) {
       fill = palette.wireActive;
       stroke = palette.wireActive;
     }
@@ -124,7 +148,7 @@ export function resolveElementColors(element: any, palette: any, options: any = 
     return { fill, stroke, strokeWidth };
   }
 
-  // Symbol types: focus, component, memory, op, io
+  // Symbol types: focus, component, memory, op, io.
   let fill = palette.componentBg;
   let stroke = palette.componentBorder;
   let text = palette.componentText;
@@ -148,7 +172,7 @@ export function resolveElementColors(element: any, palette: any, options: any = 
   return { fill, stroke, text, strokeWidth };
 }
 
-export function getLegendEntries(palette: any) {
+export function getLegendEntries(palette: ThemePalette): LegendEntry[] {
   return [
     { label: 'Component', fill: palette.componentBg, stroke: palette.componentBorder },
     { label: 'IO Port', fill: palette.ioBg, stroke: palette.ioBorder },
@@ -160,7 +184,21 @@ export function getLegendEntries(palette: any) {
   ];
 }
 
-export function drawLegend(ctx: any, canvasWidth: any, canvasHeight: any, palette: any) {
+export function drawLegend(
+  ctx: CanvasRenderingContext2D,
+  canvasWidth: unknown,
+  canvasHeight: unknown,
+  palette: ThemePalette
+): void {
+  if (!ctx || typeof ctx.measureText !== 'function') {
+    return;
+  }
+
+  const width = Number(canvasWidth);
+  const height = Number(canvasHeight);
+  const safeWidth = Number.isFinite(width) ? width : 0;
+  const safeHeight = Number.isFinite(height) ? height : 0;
+
   const entries = getLegendEntries(palette);
   const fontSize = 11;
   const swatchW = 18;
@@ -172,53 +210,53 @@ export function drawLegend(ctx: any, canvasWidth: any, canvasHeight: any, palett
 
   ctx.font = `${fontSize}px monospace`;
   let maxTextW = 0;
-  for (const e of entries) {
-    const w = ctx.measureText(e.label).width;
-    if (w > maxTextW) maxTextW = w;
+  for (const entry of entries) {
+    const measure = ctx.measureText(entry.label).width;
+    if (measure > maxTextW) {
+      maxTextW = measure;
+    }
   }
 
   const boxW = pad * 2 + textOffsetX + maxTextW;
   const boxH = pad * 2 + entries.length * rowH - (rowH - swatchH);
-  const boxX = canvasWidth - boxW - 14;
-  const boxY = canvasHeight - boxH - 14;
+  const boxX = safeWidth - boxW - 14;
+  const boxY = safeHeight - boxH - 14;
 
-  // Background
+  // Background.
   ctx.fillStyle = 'rgba(0, 12, 10, 0.82)';
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  const r = 4;
-  ctx.moveTo(boxX + r, boxY);
-  ctx.lineTo(boxX + boxW - r, boxY);
-  ctx.arcTo(boxX + boxW, boxY, boxX + boxW, boxY + r, r);
-  ctx.lineTo(boxX + boxW, boxY + boxH - r);
-  ctx.arcTo(boxX + boxW, boxY + boxH, boxX + boxW - r, boxY + boxH, r);
-  ctx.lineTo(boxX + r, boxY + boxH);
-  ctx.arcTo(boxX, boxY + boxH, boxX, boxY + boxH - r, r);
-  ctx.lineTo(boxX, boxY + r);
-  ctx.arcTo(boxX, boxY, boxX + r, boxY, r);
+  const radius = 4;
+  ctx.moveTo(boxX + radius, boxY);
+  ctx.lineTo(boxX + boxW - radius, boxY);
+  ctx.arcTo(boxX + boxW, boxY, boxX + boxW, boxY + radius, radius);
+  ctx.lineTo(boxX + boxW, boxY + boxH - radius);
+  ctx.arcTo(boxX + boxW, boxY + boxH, boxX + boxW - radius, boxY + boxH, radius);
+  ctx.lineTo(boxX + radius, boxY + boxH);
+  ctx.arcTo(boxX, boxY + boxH, boxX, boxY + boxH - radius, radius);
+  ctx.lineTo(boxX, boxY + radius);
+  ctx.arcTo(boxX, boxY, boxX + radius, boxY, radius);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
 
-  // Entries
-  for (let i = 0; i < entries.length; i++) {
-    const e = entries[i];
+  // Entries.
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
     const sx = boxX + pad;
-    const sy = boxY + pad + i * rowH;
+    const sy = boxY + pad + index * rowH;
 
-    if (e.isLine) {
-      // Draw a line swatch
-      ctx.strokeStyle = e.stroke;
+    if (entry.isLine) {
+      ctx.strokeStyle = entry.stroke;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(sx, sy + swatchH / 2);
       ctx.lineTo(sx + swatchW, sy + swatchH / 2);
       ctx.stroke();
     } else {
-      // Draw a filled rect swatch
-      ctx.fillStyle = e.fill;
-      ctx.strokeStyle = e.stroke;
+      ctx.fillStyle = entry.fill || 'transparent';
+      ctx.strokeStyle = entry.stroke;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.rect(sx, sy, swatchW, swatchH);
@@ -226,11 +264,10 @@ export function drawLegend(ctx: any, canvasWidth: any, canvasHeight: any, palett
       ctx.stroke();
     }
 
-    // Label
     ctx.fillStyle = 'rgba(220, 230, 225, 0.9)';
     ctx.font = `${fontSize}px monospace`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(e.label, sx + textOffsetX, sy + swatchH / 2);
+    ctx.fillText(entry.label, sx + textOffsetX, sy + swatchH / 2);
   }
 }

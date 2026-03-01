@@ -13,12 +13,38 @@ const BENIGN_PAGE_ERRORS = [
   'Failed to execute \'drawImage\' on \'CanvasRenderingContext2D\': The image argument is a canvas element with a width or height of 0.'
 ];
 
+type WireProbe = {
+  wrappedContexts: number;
+  lineDrawCalls: number;
+  lineDivisorZeroCalls: number;
+};
+
+type UxState = {
+  components?: {
+    graphRenderBackend?: string;
+    graph?: {
+      renderList?: {
+        wires?: unknown[];
+      };
+    };
+  };
+};
+
+type WindowWithProbeState = Window & {
+  __RHDL_WEBGL_WIRE_PROBE__?: WireProbe;
+  __RHDL_UX_STATE__?: UxState;
+};
+
+type ProbeableWebGL2Context = WebGL2RenderingContext & {
+  __rhdlWireProbeWrapped?: boolean;
+};
+
 test('schematic webgl renderer emits wire draws with line divisor resets', { timeout: 180000 }, async (t) => {
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err: any) {
-    t.skip('Playwright is not installed (run: `cd web && npm install`)');
+  } catch (_err: unknown) {
+    console.warn('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
 
@@ -31,8 +57,8 @@ test('schematic webgl renderer emits wire draws with line divisor resets', { tim
   let browser;
   try {
     browser = await chromium.launch({ headless: true, args: WEBGL_LAUNCH_ARGS });
-  } catch (_err: any) {
-    t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
+  } catch (_err: unknown) {
+    console.warn('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }
   t.after(async () => {
@@ -40,27 +66,39 @@ test('schematic webgl renderer emits wire draws with line divisor resets', { tim
   });
 
   const page = await browser.newPage({ viewport: { width: 1920, height: 1600 } });
-  const pageErrors: any[] = [];
-  const consoleErrors: any[] = [];
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
 
   await page.addInitScript(() => {
-    const probe = {
+    const probe: WireProbe = {
       wrappedContexts: 0,
       lineDrawCalls: 0,
       lineDivisorZeroCalls: 0
     };
-    (window as any).__RHDL_WEBGL_WIRE_PROBE__ = probe;
+    (window as WindowWithProbeState).__RHDL_WEBGL_WIRE_PROBE__ = probe;
 
     const proto = globalThis.HTMLCanvasElement?.prototype;
     if (!proto || typeof proto.getContext !== 'function') {
       return;
     }
+
     const originalGetContext = proto.getContext;
-    (proto as any).getContext = function patchedGetContext(type: any, ...args: any[]) {
-      const ctx: any = originalGetContext.call(this, type, ...args);
-      if (type !== 'webgl2' || !ctx || ctx.__rhdlWireProbeWrapped) {
-        return ctx;
+    proto.getContext = function patchedGetContext(this: HTMLCanvasElement, type: unknown, ...args: unknown[]) {
+      const context = Reflect.apply(
+        originalGetContext as (...innerArgs: unknown[]) => unknown,
+        this,
+        [type, ...args]
+      );
+
+      if (type !== 'webgl2' || !context || typeof context !== 'object') {
+        return context as ReturnType<typeof originalGetContext>;
       }
+
+      const ctx = context as ProbeableWebGL2Context;
+      if (ctx.__rhdlWireProbeWrapped) {
+        return context as ReturnType<typeof originalGetContext>;
+      }
+
       ctx.__rhdlWireProbeWrapped = true;
       probe.wrappedContexts += 1;
 
@@ -68,7 +106,7 @@ test('schematic webgl renderer emits wire draws with line divisor resets', { tim
         ? ctx.vertexAttribDivisor.bind(ctx)
         : null;
       if (originalDivisor) {
-        ctx.vertexAttribDivisor = function patchedDivisor(index: any, divisor: any) {
+        ctx.vertexAttribDivisor = function patchedDivisor(index: number, divisor: number) {
           if (index >= 0 && index <= 4 && divisor === 0) {
             probe.lineDivisorZeroCalls += 1;
           }
@@ -80,7 +118,7 @@ test('schematic webgl renderer emits wire draws with line divisor resets', { tim
         ? ctx.drawArrays.bind(ctx)
         : null;
       if (originalDrawArrays) {
-        ctx.drawArrays = function patchedDrawArrays(mode: any, first: any, count: any) {
+        ctx.drawArrays = function patchedDrawArrays(mode: number, first: number, count: number) {
           if (mode === ctx.TRIANGLE_STRIP && count === 4) {
             probe.lineDrawCalls += 1;
           }
@@ -88,8 +126,8 @@ test('schematic webgl renderer emits wire draws with line divisor resets', { tim
         };
       }
 
-      return ctx;
-    };
+      return context as ReturnType<typeof originalGetContext>;
+    } as typeof proto.getContext;
   });
 
   page.on('pageerror', (err) => {
@@ -126,7 +164,7 @@ test('schematic webgl renderer emits wire draws with line divisor resets', { tim
   }, null, { timeout: 120000 });
   await page.waitForSelector('#componentVisual canvas', { state: 'attached', timeout: 120000 });
   await page.waitForFunction(() => {
-    const state = (window as any).__RHDL_UX_STATE__;
+    const state = (window as WindowWithProbeState).__RHDL_UX_STATE__;
     const graph = state?.components?.graph;
     const renderList = graph?.renderList;
     if (!renderList || !Array.isArray(renderList.wires) || renderList.wires.length === 0) {
@@ -139,16 +177,16 @@ test('schematic webgl renderer emits wire draws with line divisor resets', { tim
   await page.click('#componentGraphZoomOutBtn');
 
   const probeState = await page.evaluate(() => {
-    const state = (window as any).__RHDL_UX_STATE__;
+    const state = (window as WindowWithProbeState).__RHDL_UX_STATE__;
     const graph = state?.components?.graph;
     const wireCount = Array.isArray(graph?.renderList?.wires) ? graph.renderList.wires.length : 0;
-    const probe = (window as any).__RHDL_WEBGL_WIRE_PROBE__ || {};
+    const probe = (window as WindowWithProbeState).__RHDL_WEBGL_WIRE_PROBE__;
     return {
       backend: state?.components?.graphRenderBackend || null,
       wireCount,
-      wrappedContexts: Number(probe.wrappedContexts || 0),
-      lineDrawCalls: Number(probe.lineDrawCalls || 0),
-      lineDivisorZeroCalls: Number(probe.lineDivisorZeroCalls || 0)
+      wrappedContexts: Number(probe?.wrappedContexts || 0),
+      lineDrawCalls: Number(probe?.lineDrawCalls || 0),
+      lineDivisorZeroCalls: Number(probe?.lineDivisorZeroCalls || 0)
     };
   });
 

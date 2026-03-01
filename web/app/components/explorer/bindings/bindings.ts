@@ -1,12 +1,67 @@
 import { createListenerGroup } from '../../../core/bindings/listener_group';
 
+interface BindingsDom {
+  componentTree?: EventTarget | null;
+  componentGraphTopBtn?: EventTarget | null;
+  componentGraphUpBtn?: EventTarget | null;
+  componentGraphZoomInBtn?: EventTarget | null;
+  componentGraphZoomOutBtn?: EventTarget | null;
+  componentGraphResetViewBtn?: EventTarget | null;
+  irFileInput?: EventTarget | null;
+  irJson?: (EventTarget & { value?: unknown }) | null;
+}
+
+interface BindingsState {
+  components: {
+    model?: { rootId?: string | null } | null;
+    selectedNodeId: string | null;
+  };
+}
+
+interface ComponentBindingsController {
+  renderTree: () => void;
+  setGraphFocus: (nodeId: string, showChildren?: boolean) => void;
+  currentGraphFocusNode: () => { parentId: string | null } | null;
+  renderViews: () => void;
+  zoomGraphIn?: () => void;
+  zoomGraphOut?: () => void;
+  resetGraphView?: () => void;
+  clearSourceOverride: () => void;
+  resetExplorerState: () => void;
+  isTabActive: () => boolean;
+  refreshExplorer: () => void;
+}
+
+interface BindComponentBindingsOptions {
+  dom: BindingsDom;
+  state: BindingsState;
+  components: ComponentBindingsController;
+  scheduleReduxUxSync: (reason: string) => void;
+  log: (message: string) => void;
+}
+
+function readNodeId(event: unknown): string | null {
+  const detail = event && typeof event === 'object' && 'detail' in event
+    ? (event as { detail?: { nodeId?: unknown } }).detail
+    : null;
+  const nodeId = String(detail?.nodeId || '').trim();
+  return nodeId || null;
+}
+
+function readFileFromEvent(event: unknown): File | null {
+  const target = event && typeof event === 'object' && 'target' in event
+    ? (event as { target?: { files?: FileList | null } }).target
+    : null;
+  return target?.files?.[0] || null;
+}
+
 export function bindComponentBindings({
   dom,
   state,
   components,
   scheduleReduxUxSync,
   log
-}: any) {
+}: BindComponentBindingsOptions) {
   const listeners = createListenerGroup();
 
   listeners.on(dom.componentTree, 'component-filter-change', () => {
@@ -48,8 +103,8 @@ export function bindComponentBindings({
     }
   });
 
-  listeners.on(dom.componentTree, 'component-select', (event: any) => {
-    const nodeId = event?.detail?.nodeId;
+  listeners.on(dom.componentTree, 'component-select', (event: unknown) => {
+    const nodeId = readNodeId(event);
     if (!nodeId) {
       return;
     }
@@ -61,9 +116,9 @@ export function bindComponentBindings({
     }
   });
 
-  listeners.on(dom.irFileInput, 'change', async (event: any) => {
-    const file = event?.target?.files?.[0];
-    if (!file) {
+  listeners.on(dom.irFileInput, 'change', async (event: unknown) => {
+    const file = readFileFromEvent(event);
+    if (!file || !dom.irJson) {
       return;
     }
 

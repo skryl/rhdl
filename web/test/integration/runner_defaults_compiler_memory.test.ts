@@ -16,12 +16,33 @@ const DEFAULT_BACKEND = 'compiler';
 const DEFAULT_MEMORY_LENGTH = 768;
 const DEFAULT_TRACE_ENABLED_ON_LOAD = false;
 
+type RunnerPreset = {
+  preferredBackend?: string;
+  io?: {
+    memory?: {
+      dumpLength?: number;
+    };
+  };
+  defaults?: {
+    traceEnabled?: boolean;
+  };
+  traceEnabledOnLoad?: boolean;
+};
+
+type RunnerSummary = {
+  preferredBackend: string | null;
+  dumpLength: number | null;
+  traceEnabledOnLoad: boolean;
+};
+
+type RunnerSummaryMap = Record<string, RunnerSummary>;
+
 test('all runner presets default to compiler backend, 768 memory length, and trace disabled on load', { timeout: 120000 }, async (t) => {
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err: any) {
-    t.skip('Playwright is not installed (run: `cd web && npm install`)');
+  } catch (_err: unknown) {
+    console.warn('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
 
@@ -34,8 +55,8 @@ test('all runner presets default to compiler backend, 768 memory length, and tra
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-  } catch (_err: any) {
-    t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
+  } catch (_err: unknown) {
+    console.warn('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }
   t.after(async () => {
@@ -43,8 +64,8 @@ test('all runner presets default to compiler backend, 768 memory length, and tra
   });
 
   const page = await browser.newPage();
-  const pageErrors: any[] = [];
-  const consoleErrors: any[] = [];
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
 
   page.on('pageerror', (err) => {
     const message = String(err?.message || err);
@@ -76,12 +97,14 @@ test('all runner presets default to compiler backend, 768 memory length, and tra
     return expected.every((id) => available.has(id));
   }, EXPECTED_RUNNERS, { timeout: 120000 });
 
-  const defaults: any = await page.evaluate(async () => {
+  const defaults = await page.evaluate(async (): Promise<RunnerSummaryMap> => {
     // @ts-expect-error browser-context dynamic import; not resolvable by Node TS
-    const module: any = await import('./app/components/runner/config/generated_presets');
+    const module = await import('./app/components/runner/config/generated_presets') as {
+      GENERATED_RUNNER_PRESETS?: Record<string, RunnerPreset>;
+    };
     const presets = module.GENERATED_RUNNER_PRESETS || {};
-    const summary: any = {};
-    for (const [id, preset] of Object.entries(presets) as any) {
+    const summary: RunnerSummaryMap = {};
+    for (const [id, preset] of Object.entries(presets)) {
       const traceEnabledOnLoad = Object.prototype.hasOwnProperty.call(preset || {}, 'traceEnabledOnLoad')
         ? preset?.traceEnabledOnLoad === true
         : (preset?.defaults?.traceEnabled === true);

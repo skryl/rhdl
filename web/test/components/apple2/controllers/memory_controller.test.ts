@@ -4,9 +4,18 @@ import assert from 'node:assert/strict';
 import { parseHexOrDec, hexWord, hexByte } from '../../../../app/core/lib/numeric_utils';
 import { createApple2MemoryController } from '../../../../app/components/apple2/controllers/memory_controller';
 
+type MemoryRenderPayload = {
+  dumpText: string;
+  disasmText: string;
+  dumpRows: Array<{ addressHex: string; [key: string]: unknown }>;
+  showSourceDisabled: boolean;
+  showSourceChecked: boolean;
+  [key: string]: unknown;
+};
+
 function createHarness() {
-  const renderCalls: any[] = [];
-  const statusMessages: any[] = [];
+  const renderCalls: MemoryRenderPayload[] = [];
+  const statusMessages: string[] = [];
   const dom = {
     memoryDump: {},
     memoryStart: { value: '0x0000' },
@@ -18,7 +27,7 @@ function createHarness() {
       disasmLines: 4
     }
   };
-  const runtime = {
+  const runtime: { sim: unknown } = {
     sim: null
   };
   const controller = createApple2MemoryController({
@@ -29,9 +38,9 @@ function createHarness() {
     parseHexOrDec,
     hexWord,
     hexByte,
-    renderMemoryPanel: (_dom: any, payload: any) => renderCalls.push(payload),
+    renderMemoryPanel: (_dom: unknown, payload: MemoryRenderPayload) => renderCalls.push(payload),
     disassemble6502LinesWithMemory: () => ['LDA #$01'],
-    setMemoryDumpStatus: (message: any) => statusMessages.push(message),
+    setMemoryDumpStatus: (message: string) => statusMessages.push(message),
     addressSpace: 0x10000
   });
   return { controller, dom, state, runtime, renderCalls, statusMessages };
@@ -58,7 +67,7 @@ test('refreshMemoryView shows placeholder when simulator is missing', () => {
 
 test('refreshMemoryView shows apple2-required message when disabled', () => {
   const { controller, runtime, renderCalls, statusMessages } = createHarness();
-  runtime.sim = {} as any;
+  runtime.sim = {};
   controller.refreshMemoryView();
   assert.equal(renderCalls.length, 1);
   assert.match(renderCalls[0].dumpText, /Load a runner with memory \+ I\/O support/);
@@ -66,8 +75,8 @@ test('refreshMemoryView shows apple2-required message when disabled', () => {
 });
 
 test('refreshMemoryView allows full-memory length and caps at 64k max', () => {
-  const renderCalls: any[] = [];
-  const disasmCalls: any[] = [];
+  const renderCalls: MemoryRenderPayload[] = [];
+  const disasmCalls: Array<[startAddress: number, lineCount: number]> = [];
   const dom = {
     memoryDump: {},
     memoryStart: { value: '0x0000' },
@@ -89,7 +98,7 @@ test('refreshMemoryView allows full-memory length and caps at 64k max', () => {
   };
   const runtime = {
     sim: {
-      memory_read: (start: any, length: any) => {
+      memory_read: (start: number, length: number) => {
         assert.equal(start, 0);
         assert.equal(length, 0x10000);
         return new Uint8Array(length);
@@ -106,8 +115,8 @@ test('refreshMemoryView allows full-memory length and caps at 64k max', () => {
     parseHexOrDec,
     hexWord,
     hexByte,
-    renderMemoryPanel: (_dom: any, payload: any) => renderCalls.push(payload),
-    disassemble6502LinesWithMemory: (startAddress: any, lineCount: any) => {
+    renderMemoryPanel: (_dom: unknown, payload: MemoryRenderPayload) => renderCalls.push(payload),
+    disassemble6502LinesWithMemory: (startAddress: number, lineCount: number) => {
       disasmCalls.push([startAddress, lineCount]);
       return ['NOP'];
     },
@@ -122,7 +131,7 @@ test('refreshMemoryView allows full-memory length and caps at 64k max', () => {
 });
 
 test('refreshMemoryView formats 32-bit memory addresses when configured', () => {
-  const renderCalls: any[] = [];
+  const renderCalls: MemoryRenderPayload[] = [];
   const dom = {
     memoryDump: {},
     memoryStart: { value: '0x80000000' },
@@ -144,7 +153,7 @@ test('refreshMemoryView formats 32-bit memory addresses when configured', () => 
   };
   const runtime = {
     sim: {
-      memory_read: (start: any, length: any) => {
+      memory_read: (start: number, length: number) => {
         assert.equal(start, 0x80000000);
         assert.equal(length, 16);
         return new Uint8Array(length);
@@ -161,7 +170,7 @@ test('refreshMemoryView formats 32-bit memory addresses when configured', () => 
     parseHexOrDec,
     hexWord,
     hexByte,
-    renderMemoryPanel: (_dom: any, payload: any) => renderCalls.push(payload),
+    renderMemoryPanel: (_dom: unknown, payload: MemoryRenderPayload) => renderCalls.push(payload),
     disassemble6502LinesWithMemory: () => ['NOP'],
     setMemoryDumpStatus: () => {},
     addressSpace: 0x10000
@@ -173,8 +182,8 @@ test('refreshMemoryView formats 32-bit memory addresses when configured', () => 
 });
 
 test('refreshMemoryView uses riscv disassembly for riscv runner', () => {
-  const renderCalls: any[] = [];
-  const riscvDisasmCalls: any[] = [];
+  const renderCalls: MemoryRenderPayload[] = [];
+  const riscvDisasmCalls: Array<{ start: number; count: number; opts: { sourceMap?: unknown; [key: string]: unknown } }> = [];
   const dom = {
     memoryDump: {},
     memoryStart: { value: '0x80000000' },
@@ -196,7 +205,7 @@ test('refreshMemoryView uses riscv disassembly for riscv runner', () => {
   };
   const runtime = {
     sim: {
-      memory_read: (_start: any, length: any) => new Uint8Array(length),
+      memory_read: (_start: number, length: number) => new Uint8Array(length),
       has_signal: () => false,
       runner_kind: () => 'riscv'
     }
@@ -209,9 +218,9 @@ test('refreshMemoryView uses riscv disassembly for riscv runner', () => {
     parseHexOrDec,
     hexWord,
     hexByte,
-    renderMemoryPanel: (_dom: any, payload: any) => renderCalls.push(payload),
+    renderMemoryPanel: (_dom: unknown, payload: MemoryRenderPayload) => renderCalls.push(payload),
     disassemble6502LinesWithMemory: () => ['NOP'],
-    disassembleRiscvLinesWithMemory: (start: any, count: any, readMem: any, opts: any) => {
+    disassembleRiscvLinesWithMemory: (start: number, count: number, readMem: unknown, opts: { sourceMap?: unknown; [key: string]: unknown }) => {
       riscvDisasmCalls.push({ start, count, opts });
       return ['unimp'];
     },
@@ -227,7 +236,7 @@ test('refreshMemoryView uses riscv disassembly for riscv runner', () => {
 });
 
 test('refreshMemoryView passes sourceMap to riscv disassembler when showSource is enabled', () => {
-  const riscvDisasmCalls: any[] = [];
+  const riscvDisasmCalls: Array<{ start: number; count: number; opts: { sourceMap?: unknown; [key: string]: unknown } }> = [];
   const fakeSourceMap = { lookup: () => null };
   const dom = {
     memoryDump: {},
@@ -252,7 +261,7 @@ test('refreshMemoryView passes sourceMap to riscv disassembler when showSource i
   };
   const runtime = {
     sim: {
-      memory_read: (_start: any, length: any) => new Uint8Array(length),
+      memory_read: (_start: number, length: number) => new Uint8Array(length),
       has_signal: () => false,
       runner_kind: () => 'riscv'
     }
@@ -267,7 +276,7 @@ test('refreshMemoryView passes sourceMap to riscv disassembler when showSource i
     hexByte,
     renderMemoryPanel: () => {},
     disassemble6502LinesWithMemory: () => ['NOP'],
-    disassembleRiscvLinesWithMemory: (start: any, count: any, readMem: any, opts: any) => {
+    disassembleRiscvLinesWithMemory: (start: number, count: number, readMem: unknown, opts: { sourceMap?: unknown; [key: string]: unknown }) => {
       riscvDisasmCalls.push({ start, count, opts });
       return ['nop'];
     },
@@ -281,7 +290,7 @@ test('refreshMemoryView passes sourceMap to riscv disassembler when showSource i
 });
 
 test('refreshMemoryView does not pass sourceMap when showSource is false', () => {
-  const riscvDisasmCalls: any[] = [];
+  const riscvDisasmCalls: Array<{ start: number; count: number; opts: { sourceMap?: unknown; [key: string]: unknown } }> = [];
   const dom = {
     memoryDump: {},
     memoryStart: { value: '0x80000000' },
@@ -305,7 +314,7 @@ test('refreshMemoryView does not pass sourceMap when showSource is false', () =>
   };
   const runtime = {
     sim: {
-      memory_read: (_start: any, length: any) => new Uint8Array(length),
+      memory_read: (_start: number, length: number) => new Uint8Array(length),
       has_signal: () => false,
       runner_kind: () => 'riscv'
     }
@@ -320,7 +329,7 @@ test('refreshMemoryView does not pass sourceMap when showSource is false', () =>
     hexByte,
     renderMemoryPanel: () => {},
     disassemble6502LinesWithMemory: () => ['NOP'],
-    disassembleRiscvLinesWithMemory: (start: any, count: any, readMem: any, opts: any) => {
+    disassembleRiscvLinesWithMemory: (start: number, count: number, readMem: unknown, opts: { sourceMap?: unknown; [key: string]: unknown }) => {
       riscvDisasmCalls.push({ start, count, opts });
       return ['nop'];
     },
@@ -334,7 +343,7 @@ test('refreshMemoryView does not pass sourceMap when showSource is false', () =>
 });
 
 test('refreshMemoryView sets showSourceDisabled when no sourceMap', () => {
-  const renderCalls: any[] = [];
+  const renderCalls: MemoryRenderPayload[] = [];
   const dom = {
     memoryDump: {},
     memoryStart: { value: '0x80000000' },
@@ -357,7 +366,7 @@ test('refreshMemoryView sets showSourceDisabled when no sourceMap', () => {
   };
   const runtime = {
     sim: {
-      memory_read: (_start: any, length: any) => new Uint8Array(length),
+      memory_read: (_start: number, length: number) => new Uint8Array(length),
       has_signal: () => false,
       runner_kind: () => 'riscv'
     }
@@ -370,7 +379,7 @@ test('refreshMemoryView sets showSourceDisabled when no sourceMap', () => {
     parseHexOrDec,
     hexWord,
     hexByte,
-    renderMemoryPanel: (_dom: any, payload: any) => renderCalls.push(payload),
+    renderMemoryPanel: (_dom: unknown, payload: MemoryRenderPayload) => renderCalls.push(payload),
     disassemble6502LinesWithMemory: () => ['NOP'],
     disassembleRiscvLinesWithMemory: () => ['nop'],
     setMemoryDumpStatus: () => {},
@@ -384,7 +393,7 @@ test('refreshMemoryView sets showSourceDisabled when no sourceMap', () => {
 });
 
 test('refreshMemoryView aligns follow-pc start for riscv high addresses', () => {
-  const renderCalls: any[] = [];
+  const renderCalls: MemoryRenderPayload[] = [];
   const dom = {
     memoryDump: {},
     memoryStart: { value: '0x80000000' },
@@ -407,8 +416,8 @@ test('refreshMemoryView aligns follow-pc start for riscv high addresses', () => 
   };
   const runtime = {
     sim: {
-      memory_read: (_start: any, length: any) => new Uint8Array(length),
-      has_signal: (name: any) => name === 'debug_pc',
+      memory_read: (_start: number, length: number) => new Uint8Array(length),
+      has_signal: (name: unknown) => name === 'debug_pc',
       peek: () => 0x800000A8,
       runner_kind: () => 'riscv'
     }
@@ -421,7 +430,7 @@ test('refreshMemoryView aligns follow-pc start for riscv high addresses', () => 
     parseHexOrDec,
     hexWord,
     hexByte,
-    renderMemoryPanel: (_dom: any, payload: any) => renderCalls.push(payload),
+    renderMemoryPanel: (_dom: unknown, payload: MemoryRenderPayload) => renderCalls.push(payload),
     disassemble6502LinesWithMemory: () => ['NOP'],
     disassembleRiscvLinesWithMemory: () => ['nop'],
     setMemoryDumpStatus: () => {},

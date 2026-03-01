@@ -10,16 +10,169 @@ import { createApple2DomainController } from '../../components/apple2/controller
 import { createSimDomainController } from '../../components/sim/controllers/domain';
 import { createWatchDomainController } from '../../components/watch/controllers/domain';
 import { resolveRunnerIoConfig } from '../../components/runner/lib/io_config';
+import type { BreakpointModel, RunnerPresetModel, ThemeId } from '../../types/models';
+import type { ControllerRegistry, ControllerRegistryOptions } from '../../types/services';
 
-function normalizePositiveInt(value: any, fallback = null) {
-  const parsed = Number.parseInt(value, 10);
+interface TerminalControllerLike {
+  writeLine(message?: string): void;
+  submitInput(): Promise<unknown>;
+  historyNavigate(delta: number): unknown;
+  appendInput(text?: string): unknown;
+  backspaceInput(): unknown;
+  setInput(text?: string): unknown;
+  focusInput(): unknown;
+  syncUartPassthroughDisplay?: () => void;
+}
+
+interface WatchManagerLike {
+  clearAllWatches(): void;
+  addBreakpointSignal(signal: string, valueRaw: unknown): unknown;
+  clearAllBreakpoints(): void;
+  refreshWatchTable(): void;
+  renderWatchList(): void;
+  renderBreakpointList(): void;
+  addWatchSignal(name: string): unknown;
+  removeWatchSignal(name: string): unknown;
+  checkBreakpoints(): boolean;
+}
+
+interface ComponentSourceControllerLike {
+  setComponentSourceOverride(source?: string, meta?: unknown): void;
+  clearComponentSourceOverride(): void;
+  resetComponentExplorerState(): void;
+  currentComponentSourceText(): string;
+  updateIrSourceVisibility(): void;
+  clearComponentSourceBundle(): void;
+  setComponentSourceBundle(bundle: unknown): void;
+  clearComponentSchematicBundle(): void;
+  setComponentSchematicBundle(bundle: unknown): void;
+}
+
+interface RunnerBundleLoaderLike {
+  loadRunnerIrBundle(preset: RunnerPresetModel, options?: Record<string, unknown>): Promise<unknown>;
+}
+
+interface ShellStateControllerLike {
+  setActiveTab(tabId: string): void;
+  setSidebarCollapsed(collapsed: boolean): void;
+  setTerminalOpen(open: boolean, options?: { persist?: boolean; focus?: boolean }): void;
+  applyTheme(theme: ThemeId | string, options?: { persist?: boolean }): void;
+}
+
+interface DashboardLayoutControllerLike {
+  getDashboardLayoutManager(): unknown;
+  disposeDashboardLayoutBuilder(): void;
+  refreshDashboardRowSizing(rootKey: string): void;
+  refreshAllDashboardRowSizing(): void;
+  initializeDashboardLayoutBuilder(): void;
+}
+
+interface ComponentExplorerControllerLike {
+  ensureComponentSelection(): void;
+  ensureComponentGraphFocus(): void;
+  currentComponentGraphFocusNode(): { parentId: string | null } | null | void;
+  setComponentGraphFocus(nodeId: string | null, showChildren?: boolean): void;
+  renderComponentTree(): void;
+  currentSelectedComponentNode(): unknown;
+  isComponentTabActive(): boolean;
+  renderComponentViews(): void;
+  refreshActiveComponentTab(): void;
+  destroyComponentGraph(): void;
+  zoomComponentGraphIn(): boolean | void;
+  zoomComponentGraphOut(): boolean | void;
+  resetComponentGraphViewport(): boolean | void;
+  rebuildComponentExplorer(meta: unknown, source: string): void;
+  refreshComponentExplorer(): void;
+}
+
+interface Apple2OpsControllerLike {
+  isApple2UiEnabled(): boolean;
+  updateIoToggleUi(): void;
+  apple2HiresLineAddress(row: number): number;
+  setApple2SoundEnabled(enabled: boolean): Promise<unknown>;
+  updateApple2SpeakerAudio(toggles: number, cyclesRun: number): void;
+  setMemoryDumpStatus(message: unknown): void;
+  setMemoryResetVectorInput(value: unknown): void;
+  saveApple2MemoryDump(): Promise<unknown>;
+  saveApple2MemorySnapshot(): Promise<unknown>;
+  loadApple2DumpOrSnapshotFile(file: File | Blob | unknown, offsetRaw: unknown): Promise<unknown>;
+  loadApple2DumpOrSnapshotAssetPath(assetPath: string, offsetRaw: unknown): Promise<unknown>;
+  loadLastSavedApple2Dump(): Promise<unknown>;
+  resetApple2WithMemoryVectorOverride(): Promise<unknown>;
+  performApple2ResetSequence(options?: Record<string, unknown>): unknown;
+  loadApple2MemoryDumpBytes(bytes: Uint8Array, offset: number, options?: Record<string, unknown>): Promise<unknown>;
+  loadKaratekaDump(): Promise<unknown>;
+}
+
+interface Apple2VisualControllerLike {
+  refreshApple2Screen(): void;
+  refreshApple2Debug(): void;
+}
+
+interface Apple2MemoryControllerLike {
+  getApple2ProgramCounter(): number;
+  readApple2MappedMemory(start: number, length: number): unknown;
+  refreshMemoryView(): void;
+}
+
+interface SimLoopControllerLike {
+  queueApple2Key(value: unknown): void;
+  runApple2Cycles(cycles: number): void;
+  stepSimulation(): void;
+  runFrame(): void;
+  resetThroughputSampling?: () => void;
+}
+
+interface SimStatusControllerLike {
+  selectedClock(value?: string): string;
+  maskForWidth(width: number): bigint;
+  refreshStatus(): void;
+  populateClockSelect(): void;
+}
+
+interface SimRuntimeControllerLike {
+  drainTrace(): void;
+  initializeTrace(options?: Record<string, unknown>): void;
+  loadWasmInstance(backend?: string): Promise<unknown>;
+  ensureBackendInstance(backend?: string): Promise<unknown>;
+}
+
+interface SimInitializerControllerLike {
+  initializeSimulator(options?: Record<string, unknown>): Promise<unknown>;
+}
+
+interface RunnerActionsControllerLike {
+  loadSample(samplePathOverride?: string | null): Promise<unknown>;
+  loadRunnerPreset(options?: Record<string, unknown>): Promise<unknown>;
+}
+
+interface RegistryLazyGettersLike {
+  getTerminalController(): TerminalControllerLike;
+  getWatchManager(): WatchManagerLike;
+  getComponentSourceController(): ComponentSourceControllerLike;
+  getRunnerBundleLoader(): RunnerBundleLoaderLike;
+  getShellStateController(): ShellStateControllerLike;
+  getDashboardLayoutController(): DashboardLayoutControllerLike;
+  getComponentExplorerController(): ComponentExplorerControllerLike;
+  getApple2OpsController(): Apple2OpsControllerLike;
+  getApple2VisualController(): Apple2VisualControllerLike;
+  getApple2MemoryController(): Apple2MemoryControllerLike;
+  getSimLoopController(): SimLoopControllerLike;
+  getSimStatusController(): SimStatusControllerLike;
+  getSimRuntimeController(): SimRuntimeControllerLike;
+  getSimInitializerController(): SimInitializerControllerLike;
+  getRunnerActionsController(): RunnerActionsControllerLike;
+}
+
+function normalizePositiveInt(value: unknown, fallback: number | null = null) {
+  const parsed = Number.parseInt(String(value), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return fallback;
   }
   return parsed;
 }
 
-function formatMemoryAddress(value: any) {
+function formatMemoryAddress(value: unknown) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
     return '';
@@ -29,7 +182,9 @@ function formatMemoryAddress(value: any) {
   return `0x${Math.floor(masked).toString(16).toUpperCase().padStart(width, '0')}`;
 }
 
-export function createControllerRegistry(options: any = {}) {
+export function createControllerRegistry(
+  options: ControllerRegistryOptions = {} as ControllerRegistryOptions
+): ControllerRegistry {
   const {
     dom,
     state,
@@ -59,7 +214,7 @@ export function createControllerRegistry(options: any = {}) {
     documentRef = globalThis.document,
     localStorageRef = globalThis.localStorage,
     eventCtor = globalThis.Event,
-    p5Ctor = (globalThis as any).p5
+    p5Ctor = (globalThis as { p5?: unknown }).p5
   } = options;
 
   const lazy = createRegistryLazyGetters({
@@ -148,7 +303,7 @@ export function createControllerRegistry(options: any = {}) {
     documentRef,
     localStorageRef,
     eventCtor
-  });
+  }) as RegistryLazyGettersLike;
 
   function terminalWriteLine(message = '') {
     lazy.getTerminalController().writeLine(message);
@@ -158,7 +313,7 @@ export function createControllerRegistry(options: any = {}) {
     lazy.getWatchManager().clearAllWatches();
   }
 
-  function addBreakpointSignal(signal: any, valueRaw: any) {
+  function addBreakpointSignal(signal: string, valueRaw: unknown) {
     return lazy.getWatchManager().addBreakpointSignal(signal, valueRaw);
   }
 
@@ -166,12 +321,12 @@ export function createControllerRegistry(options: any = {}) {
     lazy.getWatchManager().clearAllBreakpoints();
   }
 
-  function removeBreakpointSignal(name: any) {
+  function removeBreakpointSignal(name: unknown) {
     const key = String(name || '').trim();
     if (!key) {
       return false;
     }
-    const nextBreakpoints = state.breakpoints.filter((bp: any) => String(bp?.name || '') !== key);
+    const nextBreakpoints = state.breakpoints.filter((bp: BreakpointModel) => String(bp?.name || '') !== key);
     if (nextBreakpoints.length === state.breakpoints.length) {
       return false;
     }
@@ -184,7 +339,7 @@ export function createControllerRegistry(options: any = {}) {
     return lazy.getTerminalController().submitInput();
   }
 
-  function terminalHistoryNavigate(delta: any) {
+  function terminalHistoryNavigate(delta: number) {
     return lazy.getTerminalController().historyNavigate(delta);
   }
 
@@ -204,18 +359,19 @@ export function createControllerRegistry(options: any = {}) {
     return lazy.getTerminalController().focusInput();
   }
 
-  function getRunnerPreset(id: any) {
-    if (id && RUNNER_PRESETS[id]) {
-      return RUNNER_PRESETS[id];
+  function getRunnerPreset(id: unknown): RunnerPresetModel {
+    const key = String(id || '');
+    if (key && RUNNER_PRESETS[key]) {
+      return RUNNER_PRESETS[key] as RunnerPresetModel;
     }
-    return RUNNER_PRESETS.generic;
+    return RUNNER_PRESETS.generic as RunnerPresetModel;
   }
 
   function currentRunnerPreset() {
     return getRunnerPreset(state.runnerPreset);
   }
 
-  function setComponentSourceOverride(source = '', meta = null) {
+  function setComponentSourceOverride(source = '', meta: unknown = null) {
     lazy.getComponentSourceController().setComponentSourceOverride(source, meta);
   }
 
@@ -239,7 +395,7 @@ export function createControllerRegistry(options: any = {}) {
     lazy.getComponentSourceController().clearComponentSourceBundle();
   }
 
-  function setComponentSourceBundle(bundle: any) {
+  function setComponentSourceBundle(bundle: unknown) {
     lazy.getComponentSourceController().setComponentSourceBundle(bundle);
   }
 
@@ -247,15 +403,15 @@ export function createControllerRegistry(options: any = {}) {
     lazy.getComponentSourceController().clearComponentSchematicBundle();
   }
 
-  function setComponentSchematicBundle(bundle: any) {
+  function setComponentSchematicBundle(bundle: unknown) {
     lazy.getComponentSourceController().setComponentSchematicBundle(bundle);
   }
 
-  async function loadRunnerIrBundle(preset: any, options = {}) {
+  async function loadRunnerIrBundle(preset: RunnerPresetModel, options: Record<string, unknown> = {}) {
     return lazy.getRunnerBundleLoader().loadRunnerIrBundle(preset, options);
   }
 
-  async function applyRunnerDefaults(preset: any) {
+  async function applyRunnerDefaults(preset: RunnerPresetModel) {
     const ioConfig = resolveRunnerIoConfig(preset);
     const defaults = preset?.defaults && typeof preset.defaults === 'object'
       ? preset.defaults
@@ -289,13 +445,13 @@ export function createControllerRegistry(options: any = {}) {
       }
     }
     if (dom.memoryStart && ioConfig?.memory) {
-      const dumpStart = Number.parseInt(ioConfig.memory.dumpStart as any, 10);
+      const dumpStart = Number.parseInt(String(ioConfig.memory.dumpStart), 10);
       if (Number.isFinite(dumpStart)) {
         dom.memoryStart.value = formatMemoryAddress(dumpStart);
       }
     }
     if (dom.memoryLength && ioConfig?.memory) {
-      const dumpLength = Number.parseInt(ioConfig.memory.dumpLength as any, 10);
+      const dumpLength = Number.parseInt(String(ioConfig.memory.dumpLength), 10);
       if (Number.isFinite(dumpLength)) {
         dom.memoryLength.value = String(dumpLength);
       }
@@ -315,15 +471,15 @@ export function createControllerRegistry(options: any = {}) {
     }
   }
 
-  function setActiveTab(tabId: any) {
+  function setActiveTab(tabId: string) {
     lazy.getShellStateController().setActiveTab(tabId);
   }
 
-  function setSidebarCollapsed(collapsed: any) {
+  function setSidebarCollapsed(collapsed: boolean) {
     lazy.getShellStateController().setSidebarCollapsed(collapsed);
   }
 
-  function setTerminalOpen(open: any, { persist = true, focus = false }: any = {}) {
+  function setTerminalOpen(open: boolean, { persist = true, focus = false }: { persist?: boolean; focus?: boolean } = {}) {
     lazy.getShellStateController().setTerminalOpen(open, { persist, focus });
   }
 
@@ -335,7 +491,7 @@ export function createControllerRegistry(options: any = {}) {
     lazy.getDashboardLayoutController().disposeDashboardLayoutBuilder();
   }
 
-  function refreshDashboardRowSizing(rootKey: any) {
+  function refreshDashboardRowSizing(rootKey: string) {
     lazy.getDashboardLayoutController().refreshDashboardRowSizing(rootKey);
   }
 
@@ -347,7 +503,7 @@ export function createControllerRegistry(options: any = {}) {
     lazy.getDashboardLayoutController().initializeDashboardLayoutBuilder();
   }
 
-  function applyTheme(theme: any, { persist = true }: any = {}) {
+  function applyTheme(theme: ThemeId | string, { persist = true }: { persist?: boolean } = {}) {
     lazy.getShellStateController().applyTheme(theme, { persist });
   }
 
@@ -363,7 +519,7 @@ export function createControllerRegistry(options: any = {}) {
     return lazy.getComponentExplorerController().currentComponentGraphFocusNode();
   }
 
-  function setComponentGraphFocus(nodeId: any, showChildren = true) {
+  function setComponentGraphFocus(nodeId: string | null, showChildren = true) {
     lazy.getComponentExplorerController().setComponentGraphFocus(nodeId, showChildren);
   }
 
@@ -419,67 +575,67 @@ export function createControllerRegistry(options: any = {}) {
     lazy.getApple2OpsController().updateIoToggleUi();
   }
 
-  function apple2HiresLineAddress(row: any) {
+  function apple2HiresLineAddress(row: number) {
     return lazy.getApple2OpsController().apple2HiresLineAddress(row);
   }
 
-  async function setApple2SoundEnabled(enabled: any) {
-    return lazy.getApple2OpsController().setApple2SoundEnabled(enabled);
+  async function setApple2SoundEnabled(enabled: boolean) {
+    await lazy.getApple2OpsController().setApple2SoundEnabled(enabled);
   }
 
-  function updateApple2SpeakerAudio(toggles: any, cyclesRun: any) {
+  function updateApple2SpeakerAudio(toggles: number, cyclesRun: number) {
     lazy.getApple2OpsController().updateApple2SpeakerAudio(toggles, cyclesRun);
   }
 
-  function setMemoryDumpStatus(message: any) {
+  function setMemoryDumpStatus(message: unknown) {
     lazy.getApple2OpsController().setMemoryDumpStatus(message);
   }
 
-  function setMemoryResetVectorInput(value: any) {
+  function setMemoryResetVectorInput(value: unknown) {
     lazy.getApple2OpsController().setMemoryResetVectorInput(value);
   }
 
   async function saveApple2MemoryDump() {
-    return lazy.getApple2OpsController().saveApple2MemoryDump();
+    return !!(await lazy.getApple2OpsController().saveApple2MemoryDump());
   }
 
   async function saveApple2MemorySnapshot() {
-    return lazy.getApple2OpsController().saveApple2MemorySnapshot();
+    return !!(await lazy.getApple2OpsController().saveApple2MemorySnapshot());
   }
 
-  async function loadApple2DumpOrSnapshotFile(file: any, offsetRaw: any) {
-    return lazy.getApple2OpsController().loadApple2DumpOrSnapshotFile(file, offsetRaw);
+  async function loadApple2DumpOrSnapshotFile(file: File | Blob | unknown, offsetRaw: unknown) {
+    return !!(await lazy.getApple2OpsController().loadApple2DumpOrSnapshotFile(file, offsetRaw));
   }
 
-  async function loadApple2DumpOrSnapshotAssetPath(assetPath: any, offsetRaw: any) {
-    return lazy.getApple2OpsController().loadApple2DumpOrSnapshotAssetPath(assetPath, offsetRaw);
+  async function loadApple2DumpOrSnapshotAssetPath(assetPath: string, offsetRaw: unknown) {
+    return !!(await lazy.getApple2OpsController().loadApple2DumpOrSnapshotAssetPath(assetPath, offsetRaw));
   }
 
   async function loadLastSavedApple2Dump() {
-    return lazy.getApple2OpsController().loadLastSavedApple2Dump();
+    return !!(await lazy.getApple2OpsController().loadLastSavedApple2Dump());
   }
 
   async function resetApple2WithMemoryVectorOverride() {
-    return lazy.getApple2OpsController().resetApple2WithMemoryVectorOverride();
+    return !!(await lazy.getApple2OpsController().resetApple2WithMemoryVectorOverride());
   }
 
-  function performApple2ResetSequence(options: any = {}) {
+  function performApple2ResetSequence(options: Record<string, unknown> = {}) {
     return lazy.getApple2OpsController().performApple2ResetSequence(options);
   }
 
-  async function loadApple2MemoryDumpBytes(bytes: any, offset: any, options = {}) {
+  async function loadApple2MemoryDumpBytes(bytes: Uint8Array, offset: number, options: Record<string, unknown> = {}) {
     return lazy.getApple2OpsController().loadApple2MemoryDumpBytes(bytes, offset, options);
   }
 
   async function loadKaratekaDump() {
-    return lazy.getApple2OpsController().loadKaratekaDump();
+    await lazy.getApple2OpsController().loadKaratekaDump();
   }
 
   function selectedClock() {
     return lazy.getSimStatusController().selectedClock();
   }
 
-  function maskForWidth(width: any) {
+  function maskForWidth(width: number) {
     return lazy.getSimStatusController().maskForWidth(width);
   }
 
@@ -513,15 +669,15 @@ export function createControllerRegistry(options: any = {}) {
     lazy.getSimStatusController().populateClockSelect();
   }
 
-  function initializeTrace(options: any = {}) {
+  function initializeTrace(options: Record<string, unknown> = {}) {
     lazy.getSimRuntimeController().initializeTrace(options);
   }
 
-  function addWatchSignal(name: any) {
+  function addWatchSignal(name: string) {
     return lazy.getWatchManager().addWatchSignal(name);
   }
 
-  function removeWatchSignal(name: any) {
+  function removeWatchSignal(name: string) {
     return lazy.getWatchManager().removeWatchSignal(name);
   }
 
@@ -541,7 +697,7 @@ export function createControllerRegistry(options: any = {}) {
     return lazy.getApple2MemoryController().getApple2ProgramCounter();
   }
 
-  function readApple2MappedMemory(start: any, length: any) {
+  function readApple2MappedMemory(start: number, length: number) {
     return lazy.getApple2MemoryController().readApple2MappedMemory(start, length);
   }
 
@@ -549,11 +705,11 @@ export function createControllerRegistry(options: any = {}) {
     lazy.getApple2MemoryController().refreshMemoryView();
   }
 
-  function queueApple2Key(value: any) {
+  function queueApple2Key(value: unknown) {
     lazy.getSimLoopController().queueApple2Key(value);
   }
 
-  function runApple2Cycles(cycles: any) {
+  function runApple2Cycles(cycles: number) {
     lazy.getSimLoopController().runApple2Cycles(cycles);
   }
 
@@ -566,8 +722,9 @@ export function createControllerRegistry(options: any = {}) {
   }
 
   function resetThroughputSampling() {
-    if (typeof lazy.getSimLoopController().resetThroughputSampling === 'function') {
-      lazy.getSimLoopController().resetThroughputSampling();
+    const simLoopController = lazy.getSimLoopController();
+    if (typeof simLoopController.resetThroughputSampling === 'function') {
+      simLoopController.resetThroughputSampling();
     }
   }
 
@@ -591,15 +748,15 @@ export function createControllerRegistry(options: any = {}) {
     return lazy.getSimRuntimeController().ensureBackendInstance(backend);
   }
 
-  async function initializeSimulator(options: any = {}) {
+  async function initializeSimulator(options: Record<string, unknown> = {}) {
     return lazy.getSimInitializerController().initializeSimulator(options);
   }
 
-  async function loadSample(samplePathOverride = null) {
+  async function loadSample(samplePathOverride: string | null = null) {
     return lazy.getRunnerActionsController().loadSample(samplePathOverride);
   }
 
-  async function loadRunnerPreset(options: any = {}) {
+  async function loadRunnerPreset(options: Record<string, unknown> = {}) {
     return lazy.getRunnerActionsController().loadRunnerPreset(options);
   }
 
@@ -647,7 +804,7 @@ export function createControllerRegistry(options: any = {}) {
     resetComponentExplorerState
   });
 
-  const apple2 = createApple2DomainController({
+  const apple2 = createApple2DomainController(({
     isApple2UiEnabled,
     updateIoToggleUi,
     refreshApple2Screen,
@@ -665,7 +822,7 @@ export function createControllerRegistry(options: any = {}) {
     loadLastSavedApple2Dump,
     loadKaratekaDump,
     resetApple2WithMemoryVectorOverride
-  });
+  }) as unknown as Parameters<typeof createApple2DomainController>[0]) as ControllerRegistry['apple2'];
 
   const sim = createSimDomainController({
     setupP5,

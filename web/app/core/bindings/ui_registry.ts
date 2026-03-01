@@ -1,5 +1,8 @@
-export function createUiBindingRegistry(runtime: any) {
-  function registerUiBinding(teardown: any) {
+import type { RuntimeContext } from '../../types/runtime';
+import type { UiBindingRegistry } from '../../types/services';
+
+export function createUiBindingRegistry(runtime: RuntimeContext): UiBindingRegistry {
+  function registerUiBinding(teardown: (() => void) | null | undefined) {
     if (typeof teardown !== 'function') {
       return;
     }
@@ -16,9 +19,12 @@ export function createUiBindingRegistry(runtime: any) {
     }
     while (runtime.uiTeardowns.length > 0) {
       const teardown = runtime.uiTeardowns.pop();
+      if (typeof teardown !== 'function') {
+        continue;
+      }
       try {
         teardown();
-      } catch (_err: any) {
+      } catch (_err: unknown) {
         // Ignore teardown errors; this is best-effort cleanup.
       }
     }

@@ -1,7 +1,9 @@
 import { LitElement, html, css } from 'lit';
 
 class RhdlApple2Debug extends LitElement {
-  [key: string]: any;
+  [key: string]: unknown;
+  rows: Array<[string, string]>;
+  enabled: boolean;
   static properties = {
     rows: { state: true },
     enabled: { state: true }
@@ -59,8 +61,15 @@ class RhdlApple2Debug extends LitElement {
     this.enabled = false;
   }
 
-  setData(rows: any, enabled: any) {
-    this.rows = Array.isArray(rows) ? rows.slice() : [];
+  setData(rows: unknown, enabled: unknown) {
+    this.rows = Array.isArray(rows)
+      ? rows.map((row) => {
+          const pair = Array.isArray(row) ? row : [];
+          const name = String(pair[0] ?? '-');
+          const value = String(pair[1] ?? '');
+          return [name, value] as [string, string];
+        })
+      : [];
     this.enabled = !!enabled;
   }
 
@@ -77,7 +86,7 @@ class RhdlApple2Debug extends LitElement {
           </tr>
         </thead>
         <tbody>
-          ${this.rows.map(([name, value]: any) => html`
+          ${this.rows.map(([name, value]) => html`
             <tr>
               <td>${name}</td>
               <td>${value}</td>
@@ -93,7 +102,7 @@ if (!customElements.get('rhdl-apple2-debug')) {
   customElements.define('rhdl-apple2-debug', RhdlApple2Debug);
 }
 
-export function renderApple2DebugRows(dom: any, rows: any, speakerText: any, apple2Enabled: any) {
+export function renderApple2DebugRows(dom: Unsafe, rows: unknown, speakerText: unknown, apple2Enabled: unknown) {
   const element = dom?.apple2DebugBody;
   if (element && typeof element.setData === 'function') {
     element.setData(rows, apple2Enabled);

@@ -1,4 +1,4 @@
-export function normalizeApple2KeyCode(value: any) {
+export function normalizeApple2KeyCode(value: Unsafe) {
   if (value == null) {
     return null;
   }
@@ -19,7 +19,7 @@ export function normalizeApple2KeyCode(value: any) {
   return ascii & 0xff;
 }
 
-export function normalizeUartKeyCode(value: any) {
+export function normalizeUartKeyCode(value: Unsafe) {
   if (value == null) {
     return null;
   }
@@ -36,7 +36,7 @@ export function normalizeUartKeyCode(value: any) {
   return ascii & 0xff;
 }
 
-export function normalizeMappedKeyCode(value: any, options: any = {}) {
+export function normalizeMappedKeyCode(value: Unsafe, options: Unsafe = {}) {
   const code = normalizeApple2KeyCode(value);
   if (code == null) {
     return null;
@@ -61,7 +61,7 @@ export function normalizeMappedKeyCode(value: any, options: any = {}) {
   return mapped & 0xFF;
 }
 
-function parsePositiveInt(raw: any, fallback: any) {
+function parsePositiveInt(raw: Unsafe, fallback: Unsafe) {
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isFinite(parsed)) {
     return fallback;
@@ -69,11 +69,11 @@ function parsePositiveInt(raw: any, fallback: any) {
   return Math.max(1, parsed);
 }
 
-export function parseStepTickCount(rawValue: any) {
+export function parseStepTickCount(rawValue: Unsafe) {
   return parsePositiveInt(rawValue, 1);
 }
 
-export function parseRunLoopConfig({ runBatchRaw, uiUpdateCyclesRaw }: any = {}) {
+export function parseRunLoopConfig({ runBatchRaw, uiUpdateCyclesRaw }: Unsafe = {}) {
   const batch = parsePositiveInt(runBatchRaw, 20000);
   const uiEvery = parsePositiveInt(uiUpdateCyclesRaw, batch);
   return { batch, uiEvery };
@@ -86,7 +86,7 @@ export function executeGenericRunBatch({
   selectedClock,
   setCycleState,
   checkBreakpoints
-}: any = {}) {
+}: Unsafe = {}) {
   let hit = null;
   let cyclesRan = 0;
   const clk = selectedClock();
@@ -113,7 +113,7 @@ export function shouldRefreshUiAfterRun({
   uiEvery,
   isComponentTabActive,
   traceFollowEnabled = true
-}: any = {}) {
+}: Unsafe = {}) {
   if (!traceFollowEnabled && state.running && !hit) {
     return false;
   }

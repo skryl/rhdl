@@ -1,12 +1,42 @@
 // Symbol shape library for the RTL schematic renderer.
 // Each shape has draw(ctx, cx, cy, w, h, state) and boundingBox(cx, cy, w, h).
 
-export const SYMBOL_TYPES = ['component', 'focus', 'io', 'memory', 'op', 'net', 'pin'];
+interface SymbolState {
+  bus?: boolean;
+}
+
+interface BoundingBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+interface SymbolShape {
+  draw: (
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    w: number,
+    h: number,
+    state: SymbolState
+  ) => void;
+  boundingBox: (cx: number, cy: number, w: number, h: number) => BoundingBox;
+}
+
+export const SYMBOL_TYPES = ['component', 'focus', 'io', 'memory', 'op', 'net', 'pin'] as const;
 
 const CORNER_RADIUS = 6;
 const SMALL_RADIUS = 3;
 
-function roundedRect(ctx: any, x: any, y: any, w: any, h: any, r: any) {
+function roundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+): void {
   const radius = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
   ctx.moveTo(x + radius, y);
@@ -21,15 +51,15 @@ function roundedRect(ctx: any, x: any, y: any, w: any, h: any, r: any) {
   ctx.closePath();
 }
 
-function bb(cx: any, cy: any, w: any, h: any) {
+function bb(cx: number, cy: number, w: number, h: number): BoundingBox {
   return { x: cx - w / 2, y: cy - h / 2, w, h };
 }
 
-export const symbolShapes = new Map();
+export const symbolShapes = new Map<string, SymbolShape>();
 
-// component: rounded rectangle
+// Component: rounded rectangle.
 symbolShapes.set('component', {
-  draw(ctx: any, cx: any, cy: any, w: any, h: any, state: any) {
+  draw(ctx, cx, cy, w, h) {
     const x = cx - w / 2;
     const y = cy - h / 2;
     roundedRect(ctx, x, y, w, h, CORNER_RADIUS);
@@ -40,9 +70,9 @@ symbolShapes.set('component', {
   boundingBox: bb
 });
 
-// focus: rounded rectangle with thicker border
+// Focus: rounded rectangle with thicker border.
 symbolShapes.set('focus', {
-  draw(ctx: any, cx: any, cy: any, w: any, h: any, state: any) {
+  draw(ctx, cx, cy, w, h) {
     const x = cx - w / 2;
     const y = cy - h / 2;
     roundedRect(ctx, x, y, w, h, CORNER_RADIUS);
@@ -53,9 +83,9 @@ symbolShapes.set('focus', {
   boundingBox: bb
 });
 
-// io: small rounded rectangle
+// IO: small rounded rectangle.
 symbolShapes.set('io', {
-  draw(ctx: any, cx: any, cy: any, w: any, h: any, state: any) {
+  draw(ctx, cx, cy, w, h) {
     const x = cx - w / 2;
     const y = cy - h / 2;
     roundedRect(ctx, x, y, w, h, SMALL_RADIUS);
@@ -66,17 +96,16 @@ symbolShapes.set('io', {
   boundingBox: bb
 });
 
-// memory: double-border rounded rectangle
+// Memory: double-border rounded rectangle.
 symbolShapes.set('memory', {
-  draw(ctx: any, cx: any, cy: any, w: any, h: any, state: any) {
+  draw(ctx, cx, cy, w, h) {
     const x = cx - w / 2;
     const y = cy - h / 2;
-    // outer border
     roundedRect(ctx, x, y, w, h, CORNER_RADIUS);
     ctx.fill();
     ctx.lineWidth = 1.2;
     ctx.stroke();
-    // inner border (3px inset)
+
     const inset = 3;
     roundedRect(ctx, x + inset, y + inset, w - inset * 2, h - inset * 2, CORNER_RADIUS - 1);
     ctx.stroke();
@@ -84,9 +113,9 @@ symbolShapes.set('memory', {
   boundingBox: bb
 });
 
-// op: rounded rectangle
+// Op: rounded rectangle.
 symbolShapes.set('op', {
-  draw(ctx: any, cx: any, cy: any, w: any, h: any, state: any) {
+  draw(ctx, cx, cy, w, h) {
     const x = cx - w / 2;
     const y = cy - h / 2;
     roundedRect(ctx, x, y, w, h, SMALL_RADIUS);
@@ -97,9 +126,9 @@ symbolShapes.set('op', {
   boundingBox: bb
 });
 
-// net: compact rounded rectangle
+// Net: compact rounded rectangle.
 symbolShapes.set('net', {
-  draw(ctx: any, cx: any, cy: any, w: any, h: any, state: any) {
+  draw(ctx, cx, cy, w, h, state) {
     const x = cx - w / 2;
     const y = cy - h / 2;
     roundedRect(ctx, x, y, w, h, SMALL_RADIUS);
@@ -110,9 +139,9 @@ symbolShapes.set('net', {
   boundingBox: bb
 });
 
-// pin: small rounded rectangle marker
+// Pin: small rounded rectangle marker.
 symbolShapes.set('pin', {
-  draw(ctx: any, cx: any, cy: any, w: any, h: any, state: any) {
+  draw(ctx, cx, cy, w, h, state) {
     const x = cx - w / 2;
     const y = cy - h / 2;
     roundedRect(ctx, x, y, w, h, 2);

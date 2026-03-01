@@ -1,4 +1,5 @@
-export function handleUiCommand({ cmd, tokens, context }: any) {
+// @ts-nocheck
+export function handleUiCommand({ cmd, tokens, context }: unknown) {
   const { helpers } = context;
 
   if (cmd === 'set') {

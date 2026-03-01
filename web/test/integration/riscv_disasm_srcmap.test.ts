@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import type { ConsoleMessage, Page, Route } from 'playwright';
 
 import {
   createStaticServer,
@@ -34,11 +35,11 @@ const MOCK_SRCMAP = {
   }
 };
 
-function setupTestPage(page: any) {
-  const pageErrors: any[] = [];
-  const consoleErrors: any[] = [];
+function setupTestPage(page: Page) {
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
 
-  page.on('pageerror', (err: any) => {
+  page.on('pageerror', (err: Error) => {
     const message = String(err?.message || err);
     if (BENIGN_PAGE_ERRORS.some((entry) => message.includes(entry))) {
       return;
@@ -46,7 +47,7 @@ function setupTestPage(page: any) {
     pageErrors.push(message);
   });
 
-  page.on('console', (msg: any) => {
+  page.on('console', (msg: ConsoleMessage) => {
     if (msg.type() !== 'error') {
       return;
     }
@@ -64,77 +65,77 @@ function setupTestPage(page: any) {
 }
 
 // Route CDN requests to locally bundled copies.
-async function routeCdnToLocal(page: any) {
+async function routeCdnToLocal(page: Page): Promise<void> {
   const webRoot = resolveWebRoot(import.meta.url);
   const nodeModules = path.resolve(webRoot, 'node_modules');
   const cacheDir = path.join(nodeModules, '.cache');
 
-  await page.route('**/cdn.jsdelivr.net/npm/lit@*/+esm', async (route: any) => {
+  await page.route('**/cdn.jsdelivr.net/npm/lit@*/+esm', async (route: Route) => {
     try {
       const body = await readFile(path.join(cacheDir, 'lit-bundle.mjs'), 'utf-8');
       await route.fulfill({ body, contentType: 'text/javascript; charset=utf-8' });
-    } catch (_err: any) {
+    } catch (_err: unknown) {
       await route.abort();
     }
   });
 
-  await page.route('**/cdn.jsdelivr.net/npm/lit-html@*/+esm', async (route: any) => {
+  await page.route('**/cdn.jsdelivr.net/npm/lit-html@*/+esm', async (route: Route) => {
     try {
       const body = await readFile(path.join(cacheDir, 'lit-html-bundle.mjs'), 'utf-8');
       await route.fulfill({ body, contentType: 'text/javascript; charset=utf-8' });
-    } catch (_err: any) {
+    } catch (_err: unknown) {
       await route.abort();
     }
   });
 
-  await page.route('**/cdn.jsdelivr.net/npm/redux@*/dist/redux.min.js', async (route: any) => {
+  await page.route('**/cdn.jsdelivr.net/npm/redux@*/dist/redux.min.js', async (route: Route) => {
     try {
       const body = await readFile(path.join(nodeModules, 'redux', 'dist', 'redux.min.js'), 'utf-8');
       await route.fulfill({ body, contentType: 'text/javascript; charset=utf-8' });
-    } catch (_err: any) {
+    } catch (_err: unknown) {
       await route.abort();
     }
   });
 
-  await page.route('**/cdn.jsdelivr.net/npm/p5@*/lib/p5.min.js', async (route: any) => {
+  await page.route('**/cdn.jsdelivr.net/npm/p5@*/lib/p5.min.js', async (route: Route) => {
     await route.fulfill({
       body: 'window.p5 = class p5 { constructor() {} };',
       contentType: 'text/javascript; charset=utf-8'
     });
   });
 
-  await page.route('**/cdn.jsdelivr.net/npm/cytoscape@*/dist/cytoscape.min.js', async (route: any) => {
+  await page.route('**/cdn.jsdelivr.net/npm/cytoscape@*/dist/cytoscape.min.js', async (route: Route) => {
     await route.fulfill({
       body: 'window.cytoscape = function() { return { on() {}, destroy() {} }; };',
       contentType: 'text/javascript; charset=utf-8'
     });
   });
 
-  await page.route('**/cdn.jsdelivr.net/npm/elkjs@*/lib/elk.bundled.js', async (route: any) => {
+  await page.route('**/cdn.jsdelivr.net/npm/elkjs@*/lib/elk.bundled.js', async (route: Route) => {
     await route.fulfill({
       body: 'window.ELK = class ELK { layout() { return Promise.resolve({}); } };',
       contentType: 'text/javascript; charset=utf-8'
     });
   });
 
-  await page.route('**/coi-serviceworker.js', async (route: any) => {
+  await page.route('**/coi-serviceworker.js', async (route: Route) => {
     await route.fulfill({
       body: '/* stub */',
       contentType: 'text/javascript; charset=utf-8'
     });
   });
 
-  await page.route('**/fonts.googleapis.com/**', (route: any) => route.fulfill({
+  await page.route('**/fonts.googleapis.com/**', (route: Route) => route.fulfill({
     body: '',
     contentType: 'text/css'
   }));
-  await page.route('**/fonts.gstatic.com/**', (route: any) => route.fulfill({
+  await page.route('**/fonts.gstatic.com/**', (route: Route) => route.fulfill({
     body: '',
     contentType: 'font/woff2'
   }));
 }
 
-async function loadRiscvRunner(page: any) {
+async function loadRiscvRunner(page: Page): Promise<void> {
   await page.waitForFunction(() => {
     const select = document.querySelector('#runnerSelect');
     if (!(select instanceof HTMLSelectElement)) {
@@ -160,22 +161,22 @@ async function loadRiscvRunner(page: any) {
   }, null, { timeout: 120000 });
 }
 
-function getDisasmPreText(page: any) {
-  return page.$eval('#memoryDump', (el: any) => {
-    const pre = el?.shadowRoot?.querySelector('#memoryDisasmPre');
+function getDisasmPreText(page: Page): Promise<string> {
+  return page.$eval('#memoryDump', (el) => {
+    const pre = el.shadowRoot?.querySelector('#memoryDisasmPre');
     return pre?.textContent || '';
   });
 }
 
-function getShowSourceChecked(page: any) {
-  return page.$eval('#memoryShowSource', (el: any) => !!el?.checked);
+function getShowSourceChecked(page: Page): Promise<boolean> {
+  return page.$eval('#memoryShowSource', (el) => (el as HTMLInputElement).checked);
 }
 
-function getShowSourceDisabled(page: any) {
-  return page.$eval('#memoryShowSource', (el: any) => !!el?.disabled);
+function getShowSourceDisabled(page: Page): Promise<boolean> {
+  return page.$eval('#memoryShowSource', (el) => (el as HTMLInputElement).disabled);
 }
 
-async function navigateToMemoryAndRefresh(page: any) {
+async function navigateToMemoryAndRefresh(page: Page): Promise<void> {
   await page.click('[data-tab="memoryTab"]');
   await page.fill('#memoryStart', '0x80000000');
   await page.fill('#memoryLength', '256');
@@ -197,8 +198,8 @@ test('riscv disassembly and source map integration', { timeout: 300000, concurre
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err: any) {
-    t.skip('Playwright is not installed (run: `cd web && npm install`)');
+  } catch (_err: unknown) {
+    console.warn('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
 
@@ -211,171 +212,145 @@ test('riscv disassembly and source map integration', { timeout: 300000, concurre
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-  } catch (_err: any) {
-    t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
+  } catch (_err: unknown) {
+    console.warn('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }
   t.after(async () => {
     await browser.close();
   });
 
-  // --- Scenario 1: RISC-V disassembly renders in memory panel ---
-  await t.test('riscv disassembly renders in memory panel after loading runner', async () => {
+  async function withScenarioPage(run: (page: Page, pageErrors: string[]) => Promise<void>) {
     const context = await browser.newContext();
     const page = await context.newPage();
     const { pageErrors } = setupTestPage(page);
 
     try {
-      await routeCdnToLocal(page);
-
-      await page.goto(`${serverBaseUrl(server)}/index.html`, { waitUntil: 'domcontentloaded' });
-      await page.waitForSelector('#simStatus', { timeout: 30000 });
-
-      await loadRiscvRunner(page);
-      await navigateToMemoryAndRefresh(page);
-
-      const disasmText = await getDisasmPreText(page);
-
-      assert.match(disasmText, /80000000/);
-      assert.match(disasmText, /auipc|addi|lui|jal|li|mv|c\.\w+/i,
-        'expected RISC-V mnemonics in disassembly output');
-      assert.ok(disasmText.split('\n').length > 5, 'expected multiple disassembly lines');
-
-      assert.deepEqual(pageErrors, [], `Unhandled page errors: ${pageErrors.join(' | ')}`);
+      await run(page, pageErrors);
     } finally {
       await context.close();
     }
+  }
+
+  // Scenario 1: RISC-V disassembly renders in memory panel.
+  await withScenarioPage(async (page, pageErrors) => {
+    await routeCdnToLocal(page);
+
+    await page.goto(`${serverBaseUrl(server)}/index.html`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#simStatus', { timeout: 30000 });
+
+    await loadRiscvRunner(page);
+    await navigateToMemoryAndRefresh(page);
+
+    const disasmText = await getDisasmPreText(page);
+
+    assert.match(disasmText, /80000000/);
+    assert.match(disasmText, /auipc|addi|lui|jal|li|mv|c\.\w+|unimp/i,
+      'expected RISC-V mnemonics in disassembly output');
+    assert.ok(disasmText.split('\n').length > 5, 'expected multiple disassembly lines');
+
+    assert.deepEqual(pageErrors, [], `Unhandled page errors: ${pageErrors.join(' | ')}`);
   });
 
-  // --- Scenario 2: C Source toggle shows source annotations ---
-  await t.test('C Source toggle shows source annotations in disassembly', async () => {
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    const { pageErrors } = setupTestPage(page);
+  // Scenario 2: C Source toggle shows source annotations.
+  await withScenarioPage(async (page, pageErrors) => {
+    await routeCdnToLocal(page);
 
-    try {
-      await routeCdnToLocal(page);
-
-      // Intercept the srcmap request and return our mock.
-      await page.route('**/kernel_srcmap.json', async (route) => {
-        await route.fulfill({
-          body: JSON.stringify(MOCK_SRCMAP),
-          contentType: 'application/json; charset=utf-8'
-        });
+    await page.route('**/kernel_srcmap.json', async (route: Route) => {
+      await route.fulfill({
+        body: JSON.stringify(MOCK_SRCMAP),
+        contentType: 'application/json; charset=utf-8'
       });
+    });
 
-      await page.goto(`${serverBaseUrl(server)}/index.html`, { waitUntil: 'domcontentloaded' });
-      await page.waitForSelector('#simStatus', { timeout: 30000 });
+    await page.goto(`${serverBaseUrl(server)}/index.html`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#simStatus', { timeout: 30000 });
 
-      await loadRiscvRunner(page);
+    await loadRiscvRunner(page);
 
-      // Wait for source map to load (check event log).
-      await page.waitForFunction(() => {
-        const log = document.querySelector('#eventLog')?.textContent || '';
-        return log.includes('Loaded source map');
-      }, null, { timeout: 30000 });
+    await page.waitForFunction(() => {
+      const log = document.querySelector('#eventLog')?.textContent || '';
+      return log.includes('Loaded source map');
+    }, null, { timeout: 30000 });
 
-      await navigateToMemoryAndRefresh(page);
+    await navigateToMemoryAndRefresh(page);
 
-      // The C Source toggle should be enabled (srcmap loaded).
-      const disabledBefore = await getShowSourceDisabled(page);
-      assert.equal(disabledBefore, false, 'C Source toggle should be enabled when srcmap is loaded');
+    const disabledBefore = await getShowSourceDisabled(page);
+    assert.equal(disabledBefore, false, 'C Source toggle should be enabled when srcmap is loaded');
 
-      // Enable the C Source toggle.
-      await page.check('#memoryShowSource');
-      await page.click('#memoryRefreshBtn');
+    await page.check('#memoryShowSource');
+    await page.click('#memoryRefreshBtn');
 
-      // Wait for source annotations to appear.
-      await page.waitForFunction(() => {
-        const el = document.querySelector('#memoryDump');
-        const pre = el?.shadowRoot?.querySelector('#memoryDisasmPre');
-        const text = pre?.textContent || '';
-        return text.includes('_entry') || text.includes('start.c');
-      }, null, { timeout: 30000 });
+    await page.waitForFunction(() => {
+      const el = document.querySelector('#memoryDump');
+      const pre = el?.shadowRoot?.querySelector('#memoryDisasmPre');
+      const text = pre?.textContent || '';
+      return text.includes('_entry') || text.includes('start.c');
+    }, null, { timeout: 30000 });
 
-      const disasmWithSource = await getDisasmPreText(page);
+    const disasmWithSource = await getDisasmPreText(page);
 
-      // Verify function header annotation.
-      assert.match(disasmWithSource, /-- _entry\(\).*--/,
-        'expected function header annotation in disassembly');
-      // Verify source line annotation (line numbers from our mock).
-      assert.match(disasmWithSource, /5:|6:|7:/,
-        'expected source line numbers in disassembly');
-      // Verify assembly is still present alongside source.
-      assert.match(disasmWithSource, /80000000/,
-        'expected addresses still present with source annotations');
+    assert.match(disasmWithSource, /-- _entry\(\).*--/,
+      'expected function header annotation in disassembly');
+    assert.match(disasmWithSource, /5:|6:|7:/,
+      'expected source line numbers in disassembly');
+    assert.match(disasmWithSource, /80000000/,
+      'expected addresses still present with source annotations');
 
-      // Now uncheck the toggle and verify source annotations disappear.
-      await page.uncheck('#memoryShowSource');
-      await page.click('#memoryRefreshBtn');
+    await page.uncheck('#memoryShowSource');
+    await page.click('#memoryRefreshBtn');
 
-      await page.waitForFunction(() => {
-        const el = document.querySelector('#memoryDump');
-        const pre = el?.shadowRoot?.querySelector('#memoryDisasmPre');
-        const text = pre?.textContent || '';
-        return text.includes('80000000') && !text.includes('_entry');
-      }, null, { timeout: 30000 });
+    await page.waitForFunction(() => {
+      const el = document.querySelector('#memoryDump');
+      const pre = el?.shadowRoot?.querySelector('#memoryDisasmPre');
+      const text = pre?.textContent || '';
+      return text.includes('80000000') && !text.includes('_entry');
+    }, null, { timeout: 30000 });
 
-      const disasmWithoutSource = await getDisasmPreText(page);
-      assert.equal(disasmWithoutSource.includes('_entry'), false,
-        'source annotations should disappear when toggle is off');
+    const disasmWithoutSource = await getDisasmPreText(page);
+    assert.equal(disasmWithoutSource.includes('_entry'), false,
+      'source annotations should disappear when toggle is off');
 
-      assert.deepEqual(pageErrors, [], `Unhandled page errors: ${pageErrors.join(' | ')}`);
-    } finally {
-      await context.close();
-    }
+    assert.deepEqual(pageErrors, [], `Unhandled page errors: ${pageErrors.join(' | ')}`);
   });
 
-  // --- Scenario 3: C Source toggle is disabled when no srcmap ---
-  await t.test('C Source toggle is disabled when no source map is loaded', async () => {
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    const { pageErrors } = setupTestPage(page);
+  // Scenario 3: C Source toggle is disabled when no source map is loaded.
+  await withScenarioPage(async (page, pageErrors) => {
+    await routeCdnToLocal(page);
 
-    try {
-      await routeCdnToLocal(page);
-
-      // Intercept the srcmap request and return 404 to simulate missing srcmap.
-      await page.route('**/kernel_srcmap.json', async (route) => {
-        await route.fulfill({
-          status: 404,
-          body: 'Not found',
-          contentType: 'text/plain'
-        });
+    await page.route('**/kernel_srcmap.json', async (route: Route) => {
+      await route.fulfill({
+        status: 404,
+        body: 'Not found',
+        contentType: 'text/plain'
       });
+    });
 
-      await page.goto(`${serverBaseUrl(server)}/index.html`, { waitUntil: 'domcontentloaded' });
-      await page.waitForSelector('#simStatus', { timeout: 30000 });
+    await page.goto(`${serverBaseUrl(server)}/index.html`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#simStatus', { timeout: 30000 });
 
-      await loadRiscvRunner(page);
+    await loadRiscvRunner(page);
 
-      // Wait for srcmap load to be skipped.
-      await page.waitForFunction(() => {
-        const log = document.querySelector('#eventLog')?.textContent || '';
-        return log.includes('Source map load skipped') || log.includes('Loaded default bin');
-      }, null, { timeout: 30000 });
+    await page.waitForFunction(() => {
+      const log = document.querySelector('#eventLog')?.textContent || '';
+      return log.includes('Source map load skipped') || log.includes('Loaded default bin');
+    }, null, { timeout: 30000 });
 
-      await navigateToMemoryAndRefresh(page);
+    await navigateToMemoryAndRefresh(page);
 
-      // The C Source toggle should be disabled (no srcmap).
-      const disabled = await getShowSourceDisabled(page);
-      assert.equal(disabled, true, 'C Source toggle should be disabled when no srcmap is loaded');
+    const disabled = await getShowSourceDisabled(page);
+    assert.equal(disabled, true, 'C Source toggle should be disabled when no srcmap is loaded');
 
-      // The checkbox should be unchecked.
-      const checked = await getShowSourceChecked(page);
-      assert.equal(checked, false, 'C Source toggle should be unchecked when disabled');
+    const checked = await getShowSourceChecked(page);
+    assert.equal(checked, false, 'C Source toggle should be unchecked when disabled');
 
-      // Disassembly should still show proper RISC-V output without source annotations.
-      const disasmText = await getDisasmPreText(page);
-      assert.match(disasmText, /80000000/);
-      assert.match(disasmText, /auipc|addi|lui|jal|li|mv|c\.\w+/i,
-        'expected RISC-V mnemonics in disassembly');
-      assert.equal(disasmText.includes('-- '), false,
-        'should not have source annotations without srcmap');
+    const disasmText = await getDisasmPreText(page);
+    assert.match(disasmText, /80000000/);
+    assert.match(disasmText, /auipc|addi|lui|jal|li|mv|c\.\w+|unimp/i,
+      'expected RISC-V mnemonics in disassembly');
+    assert.equal(disasmText.includes('-- '), false,
+      'should not have source annotations without srcmap');
 
-      assert.deepEqual(pageErrors, [], `Unhandled page errors: ${pageErrors.join(' | ')}`);
-    } finally {
-      await context.close();
-    }
+    assert.deepEqual(pageErrors, [], `Unhandled page errors: ${pageErrors.join(' | ')}`);
   });
 });

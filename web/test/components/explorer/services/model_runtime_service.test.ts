@@ -9,7 +9,7 @@ test('explorer model runtime service manages selection and graph focus', () => {
     components: {
       model: {
         rootId: 'root',
-        nodes: new Map<string, any>([
+        nodes: new Map<string, unknown>([
           ['root', rootNode],
           ['child', childNode]
         ])
@@ -26,7 +26,7 @@ test('explorer model runtime service manages selection and graph focus', () => {
   };
 
   const service = createExplorerModelRuntimeService({
-    state,
+    state: state as unknown as Parameters<typeof createExplorerModelRuntimeService>[0]['state'],
     runtime: {},
     currentComponentSourceText: () => ''
   });
@@ -63,7 +63,7 @@ test('explorer model runtime service marks empty IR as not loaded', () => {
   };
 
   const service = createExplorerModelRuntimeService({
-    state,
+    state: state as unknown as Parameters<typeof createExplorerModelRuntimeService>[0]['state'],
     runtime: {},
     currentComponentSourceText: () => ''
   });
@@ -100,7 +100,7 @@ test('explorer model runtime service builds filtered tree rows', () => {
   };
 
   const service = createExplorerModelRuntimeService({
-    state,
+    state: state as unknown as Parameters<typeof createExplorerModelRuntimeService>[0]['state'],
     runtime: {},
     currentComponentSourceText: () => ''
   });

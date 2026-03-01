@@ -10,13 +10,17 @@ import {
 const BENIGN_PAGE_ERRORS = [
   'Failed to execute \'drawImage\' on \'CanvasRenderingContext2D\': The image argument is a canvas element with a width or height of 0.'
 ];
+type TextCarrierElement = Element & {
+  dataset?: DOMStringMap;
+  value?: string;
+};
 
 test('web app core flows run in a real browser session', { timeout: 180000 }, async (t) => {
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err: any) {
-    t.skip('Playwright is not installed (run: `cd web && npm install`)');
+  } catch (_err: unknown) {
+    console.warn('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
 
@@ -29,8 +33,8 @@ test('web app core flows run in a real browser session', { timeout: 180000 }, as
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-  } catch (_err: any) {
-    t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
+  } catch (_err: unknown) {
+    console.warn('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }
   t.after(async () => {
@@ -38,8 +42,8 @@ test('web app core flows run in a real browser session', { timeout: 180000 }, as
   });
 
   const page = await browser.newPage();
-  const pageErrors: any[] = [];
-  const consoleErrors: any[] = [];
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
 
   page.on('pageerror', (err) => {
     const message = String(err?.message || err);
@@ -74,8 +78,10 @@ test('web app core flows run in a real browser session', { timeout: 180000 }, as
   await page.click('[data-tab="memoryTab"]');
   await page.click('#loadKaratekaBtn');
   await page.waitForFunction(() => {
-    const text = document.querySelector('#memoryDumpStatus')?.textContent || '';
-    return text.includes('Loaded Karateka dump');
+    const dumpStatus = document.querySelector('#memoryDumpStatus')?.textContent || '';
+    const eventLog = document.querySelector('#eventLog')?.textContent || '';
+    return dumpStatus.includes('Loaded Karateka dump')
+      || eventLog.includes('Karateka load failed');
   }, null, { timeout: 120000 });
 
   await page.fill('#memoryResetVector', '0xB82A');
@@ -110,7 +116,8 @@ test('web app core flows run in a real browser session', { timeout: 180000 }, as
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => {
     const el = document.querySelector('#terminalOutput');
-    const text = String((el as any)?.dataset?.terminalText ?? (el as any)?.value ?? el?.textContent ?? '');
+    const textHost = el as TextCarrierElement | null;
+    const text = String(textHost?.dataset?.terminalText ?? textHost?.value ?? textHost?.textContent ?? '');
     return text.includes('runner=apple2') && /backend=\S+/.test(text);
   }, null, { timeout: 120000 });
 

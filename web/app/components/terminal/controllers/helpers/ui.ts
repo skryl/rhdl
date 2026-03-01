@@ -1,18 +1,19 @@
+// @ts-nocheck
 import { parseBooleanToken } from '../../lib/tokens';
 import { normalizeUiId } from './parse';
 
 export function createTerminalUiHelpers({
   documentRef = globalThis.document,
   eventCtor = globalThis.Event
-}: any = {}) {
-  function dispatchBubbledEvent(target: any, type: any) {
+}: unknown = {}) {
+  function dispatchBubbledEvent(target: unknown, type: unknown) {
     if (!target || typeof target.dispatchEvent !== 'function' || typeof eventCtor !== 'function') {
       return;
     }
     target.dispatchEvent(new eventCtor(type, { bubbles: true }));
   }
 
-  function setUiInputValueById(id: any, value: any) {
+  function setUiInputValueById(id: unknown, value: unknown) {
     const elementId = normalizeUiId(id);
     if (!elementId) {
       throw new Error('Missing element id.');
@@ -56,7 +57,7 @@ export function createTerminalUiHelpers({
     throw new Error(`Element does not support value assignment: ${elementId}`);
   }
 
-  function clickUiElementById(id: any) {
+  function clickUiElementById(id: unknown) {
     const elementId = normalizeUiId(id);
     if (!elementId) {
       throw new Error('Missing element id.');

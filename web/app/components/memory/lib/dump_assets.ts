@@ -1,11 +1,11 @@
 export const DUMP_ASSET_EXTENSIONS = Object.freeze(['.bin', '.mem', '.dat', '.rhdlsnap', '.snapshot']);
 
-function extensionAllowed(pathValue: any) {
+function extensionAllowed(pathValue: Unsafe) {
   const lower = String(pathValue || '').toLowerCase();
   return DUMP_ASSET_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
-function normalizeAssetPathPrefix(pathValue: any) {
+function normalizeAssetPathPrefix(pathValue: Unsafe) {
   if (pathValue.startsWith('./')) {
     return pathValue;
   }
@@ -15,12 +15,12 @@ function normalizeAssetPathPrefix(pathValue: any) {
   return pathValue;
 }
 
-export function normalizeDumpAssetPath(rawPath: any) {
+export function normalizeDumpAssetPath(rawPath: Unsafe) {
   const normalized = normalizeAssetPathPrefix(String(rawPath || '').trim().replace(/\\/g, '/'));
   return normalized.replace(/\/{2,}/g, '/');
 }
 
-export function isDumpAssetPath(pathValue: any) {
+export function isDumpAssetPath(pathValue: Unsafe) {
   const normalized = normalizeDumpAssetPath(pathValue);
   if (!normalized || !normalized.startsWith('./assets/')) {
     return false;
@@ -37,11 +37,11 @@ function createTreeNode(name = '', path = '') {
   };
 }
 
-function sortByName(a: any, b: any) {
+function sortByName(a: Unsafe, b: Unsafe) {
   return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
 }
 
-function materializeTree(node: any): any {
+function materializeTree(node: Unsafe): Unsafe {
   return {
     name: node.name,
     path: node.path,
@@ -50,7 +50,7 @@ function materializeTree(node: any): any {
   };
 }
 
-export function createDumpAssetTree(paths = []) {
+export function createDumpAssetTree(paths: Unsafe[] = []) {
   const root = createTreeNode();
   for (const rawPath of paths) {
     const normalizedPath = normalizeDumpAssetPath(rawPath);
@@ -75,7 +75,7 @@ export function createDumpAssetTree(paths = []) {
       }
       node = node.dirs.get(dirName);
     }
-    (node.files as any[]).push({
+    (node.files as Unsafe[]).push({
       name: fileName,
       path: normalizedPath
     });

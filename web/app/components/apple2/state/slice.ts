@@ -4,10 +4,25 @@ export const apple2ActionTypes = {
   SET_APPLE2_SOUND_ENABLED: 'apple2/setSoundEnabled'
 };
 
+type Apple2Action = {
+  type?: string;
+  payload?: unknown;
+};
+
+type Apple2State = {
+  apple2?: {
+    displayHires?: boolean;
+    displayColor?: boolean;
+    soundEnabled?: boolean;
+    [key: string]: unknown;
+  } | null;
+  [key: string]: unknown;
+};
+
 export const apple2Actions = {
-  setApple2DisplayHires: (value: any) => ({ type: apple2ActionTypes.SET_APPLE2_DISPLAY_HIRES, payload: !!value }),
-  setApple2DisplayColor: (value: any) => ({ type: apple2ActionTypes.SET_APPLE2_DISPLAY_COLOR, payload: !!value }),
-  setApple2SoundEnabled: (value: any) => ({ type: apple2ActionTypes.SET_APPLE2_SOUND_ENABLED, payload: !!value })
+  setApple2DisplayHires: (value: unknown) => ({ type: apple2ActionTypes.SET_APPLE2_DISPLAY_HIRES, payload: !!value }),
+  setApple2DisplayColor: (value: unknown) => ({ type: apple2ActionTypes.SET_APPLE2_DISPLAY_COLOR, payload: !!value }),
+  setApple2SoundEnabled: (value: unknown) => ({ type: apple2ActionTypes.SET_APPLE2_SOUND_ENABLED, payload: !!value })
 };
 
 export function createApple2StateSlice() {
@@ -30,7 +45,7 @@ export function createApple2StateSlice() {
   };
 }
 
-export function reduceApple2State(state: any, action: any = {}) {
+export function reduceApple2State(state: Apple2State, action: Apple2Action = {}) {
   switch (action.type) {
     case apple2ActionTypes.SET_APPLE2_DISPLAY_HIRES:
       if (!state.apple2 || typeof state.apple2 !== 'object') {

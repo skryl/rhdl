@@ -6,40 +6,56 @@ import {
   fetchJsonAsset
 } from '../../../app/core/lib/fetch_asset';
 
+interface FetchResponseStub {
+  ok: boolean;
+  status: number;
+  text: () => Promise<string>;
+}
+
+function createFetchStub(response: FetchResponseStub): typeof fetch {
+  return (async () => response as Response) as unknown as typeof fetch;
+}
+
 test('fetchTextAsset reads text and reports HTTP errors', async () => {
-  const text = await fetchTextAsset('/ok', 'fixture', (async () => ({
+  const text = await fetchTextAsset('/ok', 'fixture', createFetchStub({
     ok: true,
     status: 200,
     async text() {
       return 'hello';
     }
-  })) as any);
+  }));
   assert.equal(text, 'hello');
 
   await assert.rejects(
-    () => fetchTextAsset('/missing', 'fixture', (async () => ({ ok: false, status: 404 })) as any),
+    () => fetchTextAsset('/missing', 'fixture', createFetchStub({
+      ok: false,
+      status: 404,
+      async text() {
+        return '';
+      }
+    })),
     /fixture load failed \(404\)/
   );
 });
 
 test('fetchJsonAsset parses JSON and reports parse errors', async () => {
-  const parsed = await fetchJsonAsset('/ok', 'bundle', (async () => ({
+  const parsed = await fetchJsonAsset<{ a: number }>('/ok', 'bundle', createFetchStub({
     ok: true,
     status: 200,
     async text() {
       return '{"a":1}';
     }
-  })) as any);
+  }));
   assert.equal(parsed.a, 1);
 
   await assert.rejects(
-    () => fetchJsonAsset('/bad', 'bundle', (async () => ({
+    () => fetchJsonAsset('/bad', 'bundle', createFetchStub({
       ok: true,
       status: 200,
       async text() {
         return '{';
       }
-    })) as any),
+    })),
     /bundle parse failed/
   );
 });

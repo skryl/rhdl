@@ -21,13 +21,13 @@ test('resolveInitializationContext returns null when sim json is missing', () =>
 });
 
 test('resolveInitializationContext normalizes explorer metadata', () => {
-  const parseCalls: any[] = [];
+  const parseCalls: unknown[] = [];
   const context = resolveInitializationContext({
     options: { simJson: '{"a":1}', explorerSource: '{"b":2}' },
     dom: { irJson: { value: '' }, runnerSelect: { value: 'generic' } },
     state: { runnerPreset: 'generic' },
     getRunnerPreset: () => ({ id: 'generic' }),
-    parseIrMeta: (text: any) => {
+    parseIrMeta: (text: string) => {
       parseCalls.push(text);
       return text.includes('"a":1') ? { names: ['clk'], clocks: ['clk'] } : { names: ['x'], clocks: [] };
     },
@@ -40,7 +40,7 @@ test('resolveInitializationContext normalizes explorer metadata', () => {
 });
 
 test('resetSimulatorSession resets runtime and apple2 state', () => {
-  const calls: any[] = [];
+  const calls: unknown[] = [];
   const state = {
     apple2: {
       enabled: true,
@@ -61,7 +61,7 @@ test('resetSimulatorSession resets runtime and apple2 state', () => {
     runtime,
     state,
     appStore: {
-      dispatch: (action: any) => calls.push(action.type)
+      dispatch: (action: { type: string }) => calls.push(action.type)
     },
     storeActions: {
       watchClear: () => ({ type: 'watchClear' }),
@@ -71,15 +71,15 @@ test('resetSimulatorSession resets runtime and apple2 state', () => {
     backend: 'compiler',
     simJson: '{}',
     simMeta: { names: [], clocks: [] },
-    setCycleState: (value: any) => calls.push(`cycle:${value}`),
-    setUiCyclesPendingState: (value: any) => calls.push(`pending:${value}`),
-    setRunningState: (value: any) => calls.push(`running:${value}`),
+    setCycleState: (value: unknown) => calls.push(`cycle:${value}`),
+    setUiCyclesPendingState: (value: unknown) => calls.push(`pending:${value}`),
+    setRunningState: (value: unknown) => calls.push(`running:${value}`),
     updateApple2SpeakerAudio: () => calls.push('speaker'),
-    setMemoryDumpStatus: (value: any) => calls.push(`dump:${value}`),
-    setMemoryResetVectorInput: (value: any) => calls.push(`vector:${value}`)
+    setMemoryDumpStatus: (value: unknown) => calls.push(`dump:${value}`),
+    setMemoryResetVectorInput: (value: unknown) => calls.push(`vector:${value}`)
   });
 
-  assert.equal((runtime.sim as any).created, true);
+  assert.equal((runtime.sim as { created?: boolean }).created, true);
   assert.equal(state.apple2.enabled, false);
   assert.deepEqual(state.apple2.keyQueue, []);
   assert.equal(calls.includes('watchClear'), true);
@@ -87,7 +87,7 @@ test('resetSimulatorSession resets runtime and apple2 state', () => {
 });
 
 test('seedDefaultWatchSignals adds outputs and selected clock', () => {
-  const seen: any[] = [];
+  const seen: unknown[] = [];
   seedDefaultWatchSignals({
     runtime: {
       sim: {
@@ -95,31 +95,31 @@ test('seedDefaultWatchSignals adds outputs and selected clock', () => {
       }
     },
     simMeta: { clocks: ['clk'] },
-    addWatchSignal: (name: any) => seen.push(name),
+    addWatchSignal: (name: string) => seen.push(name),
     selectedClock: () => 'clk_user'
   });
   assert.deepEqual(seen, ['a', 'b', 'c', 'd', 'clk_user']);
 });
 
 test('initializeApple2Mode loads rom when preset enables ui', async () => {
-  const logs: any[] = [];
+  const logs: string[] = [];
   const state = { apple2: { enabled: false, baseRomBytes: null } };
-  const loaded: any[] = [];
+  const loaded: unknown[] = [];
   await initializeApple2Mode({
     runtime: {
       sim: {
         runner_mode: () => true,
-        has_signal: (name: any) => name === 'pc_debug' || name === 'speaker',
-        runner_load_rom: (bytes: any) => {
+        has_signal: (name: string) => name === 'pc_debug' || name === 'speaker',
+        runner_load_rom: (bytes: Uint8Array) => {
           loaded.push(bytes.length);
         }
       }
     },
     state,
     preset: { enableApple2Ui: true, romPath: '/rom.bin' },
-    addWatchSignal: (name: any) => logs.push(`watch:${name}`),
+    addWatchSignal: (name: string) => logs.push(`watch:${name}`),
     fetchImpl: async () => ({ ok: true, async arrayBuffer() { return new Uint8Array([1, 2, 3]).buffer; } }),
-    log: (message: any) => logs.push(message)
+    log: (message: unknown) => logs.push(String(message))
   });
   assert.equal(state.apple2.enabled, true);
   assert.deepEqual(loaded, [3]);
@@ -127,16 +127,16 @@ test('initializeApple2Mode loads rom when preset enables ui', async () => {
 });
 
 test('initializeApple2Mode loads default bin into main memory and resets', async () => {
-  const calls: any[] = [];
+  const calls: unknown[] = [];
   await initializeApple2Mode({
     runtime: {
       sim: {
         runner_mode: () => true,
-        runner_load_memory: (bytes: any, offset: any, options: any) => {
+        runner_load_memory: (bytes: Uint8Array, offset: number, options: { isRom: boolean }) => {
           calls.push(['load', bytes.length, offset, options]);
           return true;
         },
-        runner_set_reset_vector: (pc: any) => {
+        runner_set_reset_vector: (pc: number) => {
           calls.push(['setPc', pc]);
           return true;
         },
@@ -171,12 +171,12 @@ test('initializeApple2Mode loads default bin into main memory and resets', async
 });
 
 test('initializeApple2Mode loads boot ROM default bin through runner API', async () => {
-  const calls: any[] = [];
+  const calls: unknown[] = [];
   await initializeApple2Mode({
     runtime: {
       sim: {
         runner_mode: () => true,
-        runner_load_boot_rom: (bytes: any) => {
+        runner_load_boot_rom: (bytes: Uint8Array) => {
           calls.push(['boot', bytes.length]);
           return true;
         },
@@ -208,7 +208,7 @@ test('initializeApple2Mode loads boot ROM default bin through runner API', async
 });
 
 test('initializeApple2Mode loads snapshot default bin using snapshot offset and start PC', async () => {
-  const calls: any[] = [];
+  const calls: unknown[] = [];
   const snapshotPayload = {
     kind: 'rhdl.apple2.ram_snapshot',
     version: 1,
@@ -223,11 +223,11 @@ test('initializeApple2Mode loads snapshot default bin using snapshot offset and 
     runtime: {
       sim: {
         runner_mode: () => true,
-        runner_load_memory: (bytes: any, offset: any, options: any) => {
+        runner_load_memory: (bytes: Uint8Array, offset: number, options: { isRom: boolean }) => {
           calls.push(['load', Array.from(bytes), offset, options]);
           return true;
         },
-        runner_set_reset_vector: (pc: any) => {
+        runner_set_reset_vector: (pc: number) => {
           calls.push(['setPc', pc]);
           return true;
         },
@@ -261,29 +261,29 @@ test('initializeApple2Mode loads snapshot default bin using snapshot offset and 
 });
 
 test('initializeApple2Mode bootstraps mos6502 runner after default bin reset', async () => {
-  const calls: any[] = [];
-  const logs: any[] = [];
+  const calls: unknown[] = [];
+  const logs: string[] = [];
   await initializeApple2Mode({
     runtime: {
       sim: {
         runner_mode: () => true,
         runner_kind: () => 'mos6502',
-        runner_load_memory: (bytes: any, offset: any, options: any) => {
+        runner_load_memory: (bytes: Uint8Array, offset: number, options: { isRom: boolean }) => {
           calls.push(['load', bytes.length, offset, options]);
           return true;
         },
-        runner_set_reset_vector: (pc: any) => {
+        runner_set_reset_vector: (pc: number) => {
           calls.push(['setPc', pc]);
           return true;
         },
         reset: () => calls.push(['reset']),
         has_signal: () => true,
-        poke: (name: any, value: any) => calls.push(['poke', name, value]),
-        runner_run_cycles: (cycles: any) => {
+        poke: (name: string, value: unknown) => calls.push(['poke', name, value]),
+        runner_run_cycles: (cycles: number) => {
           calls.push(['run', cycles]);
           return { cycles_run: cycles };
         },
-        runner_read_memory: (addr: any) => {
+        runner_read_memory: (addr: number) => {
           if ((addr & 0xFFFF) === 0xFFFC) {
             return new Uint8Array([0x34]);
           }
@@ -316,7 +316,7 @@ test('initializeApple2Mode bootstraps mos6502 runner after default bin reset', a
         return new Uint8Array([0x00]).buffer;
       }
     }),
-    log: (message: any) => logs.push(String(message))
+    log: (message: unknown) => logs.push(String(message))
   });
 
   assert.deepEqual(calls, [
@@ -349,24 +349,24 @@ test('initializeApple2Mode bootstraps mos6502 runner after default bin reset', a
 });
 
 test('initializeApple2Mode supports runner-mapped memory API fallback for uart runners', async () => {
-  const logs: any[] = [];
+  const logs: string[] = [];
   const state = { apple2: { enabled: false, baseRomBytes: null } };
-  const calls: any[] = [];
+  const calls: unknown[] = [];
 
   await initializeApple2Mode({
     runtime: {
       sim: {
         has_signal: () => false,
-        runner_read_memory: (addr: any) => {
+        runner_read_memory: (addr: number) => {
           calls.push(['read', addr]);
           return new Uint8Array([0]);
         },
         runner_write_memory: () => true,
-        runner_load_memory: (bytes: any, offset: any, options: any) => {
+        runner_load_memory: (bytes: Uint8Array, offset: number, options: { isRom: boolean }) => {
           calls.push(['load', bytes.length, offset, options]);
           return true;
         },
-        runner_set_reset_vector: (pc: any) => {
+        runner_set_reset_vector: (pc: number) => {
           calls.push(['setPc', pc]);
           return true;
         },
@@ -395,7 +395,7 @@ test('initializeApple2Mode supports runner-mapped memory API fallback for uart r
         return new Uint8Array([1, 2, 3]).buffer;
       }
     }),
-    log: (message: any) => logs.push(message)
+    log: (message: unknown) => logs.push(String(message))
   });
 
   assert.equal(state.apple2.enabled, true);
@@ -408,22 +408,22 @@ test('initializeApple2Mode supports runner-mapped memory API fallback for uart r
 });
 
 test('initializeApple2Mode loads riscv default disk image before default kernel bin', async () => {
-  const calls: any[] = [];
-  const logs: any[] = [];
+  const calls: unknown[] = [];
+  const logs: string[] = [];
   await initializeApple2Mode({
     runtime: {
       sim: {
         runner_mode: () => true,
         runner_kind: () => 'riscv',
-        runner_riscv_load_disk: (bytes: any, offset: any) => {
+        runner_riscv_load_disk: (bytes: Uint8Array, offset: number) => {
           calls.push(['disk', bytes.length, offset]);
           return true;
         },
-        runner_load_memory: (bytes: any, offset: any, options: any) => {
+        runner_load_memory: (bytes: Uint8Array, offset: number, options: { isRom: boolean }) => {
           calls.push(['load', bytes.length, offset, options]);
           return true;
         },
-        runner_set_reset_vector: (pc: any) => {
+        runner_set_reset_vector: (pc: number) => {
           calls.push(['setPc', pc]);
           return true;
         },
@@ -445,7 +445,7 @@ test('initializeApple2Mode loads riscv default disk image before default kernel 
       }
     },
     addWatchSignal: () => {},
-    fetchImpl: async (path: any) => {
+    fetchImpl: async (path: string) => {
       if (String(path).includes('fs.img')) {
         return {
           ok: true,
@@ -461,7 +461,7 @@ test('initializeApple2Mode loads riscv default disk image before default kernel 
         }
       };
     },
-    log: (message: any) => logs.push(String(message))
+    log: (message: unknown) => logs.push(String(message))
   });
 
   assert.deepEqual(calls, [
@@ -474,14 +474,14 @@ test('initializeApple2Mode loads riscv default disk image before default kernel 
 });
 
 test('initializeApple2Mode loads large default disk image in chunks', async () => {
-  const calls: any[] = [];
-  const yields: any[] = [];
+  const calls: unknown[] = [];
+  const yields: unknown[] = [];
   await initializeApple2Mode({
     runtime: {
       sim: {
         runner_mode: () => true,
         runner_kind: () => 'riscv',
-        runner_riscv_load_disk: (bytes: any, offset: any) => {
+        runner_riscv_load_disk: (bytes: Uint8Array, offset: number) => {
           calls.push(['disk', Array.from(bytes), offset]);
           return true;
         }
@@ -517,18 +517,18 @@ test('initializeApple2Mode loads large default disk image in chunks', async () =
 });
 
 test('initializeApple2Mode loads ordered defaultAssets for riscv linux preset', async () => {
-  const calls: any[] = [];
-  const logs: any[] = [];
+  const calls: unknown[] = [];
+  const logs: string[] = [];
   await initializeApple2Mode({
     runtime: {
       sim: {
         runner_mode: () => true,
         runner_kind: () => 'riscv',
-        runner_load_memory: (bytes: any, offset: any, options: any) => {
+        runner_load_memory: (bytes: Uint8Array, offset: number, options: { isRom: boolean }) => {
           calls.push(['load', bytes.length, offset, options]);
           return true;
         },
-        runner_set_reset_vector: (pc: any) => {
+        runner_set_reset_vector: (pc: number) => {
           calls.push(['setPc', pc]);
           return true;
         },
@@ -545,7 +545,7 @@ test('initializeApple2Mode loads ordered defaultAssets for riscv linux preset', 
       ]
     },
     addWatchSignal: () => {},
-    fetchImpl: async (path: any) => ({
+    fetchImpl: async (path: string) => ({
       ok: true,
       async arrayBuffer() {
         if (String(path).includes('linux_kernel')) return new Uint8Array([1, 2, 3, 4]).buffer;
@@ -554,7 +554,7 @@ test('initializeApple2Mode loads ordered defaultAssets for riscv linux preset', 
         return new Uint8Array([10, 11, 12, 13, 14]).buffer;
       }
     }),
-    log: (message: any) => logs.push(String(message))
+    log: (message: unknown) => logs.push(String(message))
   });
 
   assert.deepEqual(calls, [
@@ -569,26 +569,26 @@ test('initializeApple2Mode loads ordered defaultAssets for riscv linux preset', 
 });
 
 test('initializeApple2Mode repairs riscv start PC when reset-vector apply reports success but PC is low', async () => {
-  const calls: any[] = [];
+  const calls: unknown[] = [];
   await initializeApple2Mode({
     runtime: {
       sim: {
         runner_mode: () => true,
         runner_kind: () => 'riscv',
-        has_signal: (name: any) => name === 'debug_pc' || name === 'pc_reg__pc',
-        peek: (name: any) => {
+        has_signal: (name: string) => name === 'debug_pc' || name === 'pc_reg__pc',
+        peek: (name: string) => {
           if (name === 'debug_pc') {
             return 0x00000FF0;
           }
           return 0;
         },
-        poke: (name: any, value: any) => calls.push(['poke', name, value]),
+        poke: (name: string, value: unknown) => calls.push(['poke', name, value]),
         evaluate: () => calls.push(['evaluate']),
-        runner_load_memory: (bytes: any, offset: any, options: any) => {
+        runner_load_memory: (bytes: Uint8Array, offset: number, options: { isRom: boolean }) => {
           calls.push(['load', bytes.length, offset, options]);
           return true;
         },
-        runner_set_reset_vector: (pc: any) => {
+        runner_set_reset_vector: (pc: number) => {
           calls.push(['setPc', pc]);
           return true;
         },
@@ -626,8 +626,8 @@ test('initializeApple2Mode repairs riscv start PC when reset-vector apply report
 });
 
 test('initializeApple2Mode applies riscv moderate fast-boot PHYSTOP patch to default kernel bin', async () => {
-  const calls: any[] = [];
-  const logs: any[] = [];
+  const calls: unknown[] = [];
+  const logs: string[] = [];
   const rawKernel = new Uint8Array([
     0xB7, 0x05, 0x00, 0x88, // lui a1,0x88000 (patched to 0x84000 in moderate mode)
     0x13, 0x00, 0x00, 0x00
@@ -638,11 +638,11 @@ test('initializeApple2Mode applies riscv moderate fast-boot PHYSTOP patch to def
       sim: {
         runner_mode: () => true,
         runner_kind: () => 'riscv',
-        runner_load_memory: (bytes: any, offset: any, options: any) => {
+        runner_load_memory: (bytes: Uint8Array, offset: number, options: { isRom: boolean }) => {
           calls.push(['load', Array.from(bytes), offset, options]);
           return true;
         },
-        runner_set_reset_vector: (pc: any) => {
+        runner_set_reset_vector: (pc: number) => {
           calls.push(['setPc', pc]);
           return true;
         }
@@ -666,7 +666,7 @@ test('initializeApple2Mode applies riscv moderate fast-boot PHYSTOP patch to def
         return rawKernel.buffer;
       }
     }),
-    log: (message: any) => logs.push(String(message))
+    log: (message: unknown) => logs.push(String(message))
   });
 
   assert.deepEqual(calls, [
@@ -677,8 +677,8 @@ test('initializeApple2Mode applies riscv moderate fast-boot PHYSTOP patch to def
 });
 
 test('initializeApple2Mode applies riscv aggressive fast-boot PHYSTOP patch when requested', async () => {
-  const calls: any[] = [];
-  const logs: any[] = [];
+  const calls: unknown[] = [];
+  const logs: string[] = [];
   const rawKernel = new Uint8Array([
     0xB7, 0x05, 0x00, 0x88, // lui a1,0x88000 (patched to 0x80200 in aggressive mode)
     0x13, 0x00, 0x00, 0x00
@@ -689,11 +689,11 @@ test('initializeApple2Mode applies riscv aggressive fast-boot PHYSTOP patch when
       sim: {
         runner_mode: () => true,
         runner_kind: () => 'riscv',
-        runner_load_memory: (bytes: any, offset: any, options: any) => {
+        runner_load_memory: (bytes: Uint8Array, offset: number, options: { isRom: boolean }) => {
           calls.push(['load', Array.from(bytes), offset, options]);
           return true;
         },
-        runner_set_reset_vector: (pc: any) => {
+        runner_set_reset_vector: (pc: number) => {
           calls.push(['setPc', pc]);
           return true;
         }
@@ -717,7 +717,7 @@ test('initializeApple2Mode applies riscv aggressive fast-boot PHYSTOP patch when
         return rawKernel.buffer;
       }
     }),
-    log: (message: any) => logs.push(String(message))
+    log: (message: unknown) => logs.push(String(message))
   });
 
   assert.deepEqual(calls, [

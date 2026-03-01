@@ -1,6 +1,6 @@
 import { createSimStatusRuntimeService } from '../services/status_runtime_service';
 
-function requireFn(name: any, fn: any) {
+function requireFn(name: Unsafe, fn: Unsafe) {
   if (typeof fn !== 'function') {
     throw new Error(`createSimStatusController requires function: ${name}`);
   }
@@ -17,7 +17,7 @@ export function createSimStatusController({
   scheduleReduxUxSync,
   litRender,
   html
-}: any = {}) {
+}: Unsafe = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('createSimStatusController requires dom/state/runtime');
   }

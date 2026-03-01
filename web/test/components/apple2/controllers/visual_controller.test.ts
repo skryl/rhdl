@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import { createApple2VisualController } from '../../../../app/components/apple2/controllers/visual_controller';
 
 function createHarness() {
-  const debugCalls: any[] = [];
-  const ioCalls: any[] = [];
+  const debugCalls: unknown[][] = [];
+  const ioCalls: string[] = [];
   const dom = {
     apple2TextScreen: { textContent: '' },
     apple2HiresCanvas: null
@@ -26,8 +26,8 @@ function createHarness() {
     runtime,
     isApple2UiEnabled: () => false,
     updateIoToggleUi: () => ioCalls.push('io'),
-    renderApple2DebugRows: (...args: any[]) => debugCalls.push(args),
-    apple2HiresLineAddress: (row: any) => row
+    renderApple2DebugRows: (...args: unknown[]) => debugCalls.push(args),
+    apple2HiresLineAddress: (row: number) => row
   });
   return { controller, dom, debugCalls, ioCalls };
 }
@@ -42,15 +42,16 @@ test('refreshApple2Screen renders disabled message when runner is unavailable', 
 test('refreshApple2Debug renders disabled placeholder when runner is unavailable', () => {
   const { controller, debugCalls } = createHarness();
   controller.refreshApple2Debug();
+  const call = debugCalls[0] as [unknown, unknown, unknown, unknown];
   assert.equal(debugCalls.length, 1);
-  assert.equal(Array.isArray(debugCalls[0][1]), true);
-  assert.equal(debugCalls[0][1].length, 0);
-  assert.match(debugCalls[0][2], /Speaker toggles/);
-  assert.equal(debugCalls[0][3], false);
+  assert.equal(Array.isArray(call[1]), true);
+  assert.equal((call[1] as unknown[]).length, 0);
+  assert.match(String(call[2] || ''), /Speaker toggles/);
+  assert.equal(call[3], false);
 });
 
 test('refreshApple2Screen renders UART mode output when configured', () => {
-  let uartReadArgs: any = null;
+  let uartReadArgs: [number, number] | null = null;
   const uartBytes = new Uint8Array([65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76]);
   const controllerConfig = {
     dom: {
@@ -87,7 +88,7 @@ test('refreshApple2Screen renders UART mode output when configured', () => {
       }
     },
     isApple2UiEnabled: () => true,
-    ioCalls: [] as any[]
+    ioCalls: [] as string[]
   };
   const controller = createApple2VisualController({
     dom: controllerConfig.dom,
@@ -96,7 +97,7 @@ test('refreshApple2Screen renders UART mode output when configured', () => {
     isApple2UiEnabled: controllerConfig.isApple2UiEnabled,
     updateIoToggleUi: () => controllerConfig.ioCalls.push('io'),
     renderApple2DebugRows: () => {},
-    apple2HiresLineAddress: (row: any) => row
+    apple2HiresLineAddress: (row: number) => row
   });
 
   controller.refreshApple2Screen();
@@ -143,7 +144,7 @@ test('refreshApple2Screen renders UART CR/LF as line breaks', () => {
     isApple2UiEnabled: () => true,
     updateIoToggleUi: () => {},
     renderApple2DebugRows: () => {},
-    apple2HiresLineAddress: (row: any) => row
+    apple2HiresLineAddress: (row: number) => row
   });
 
   controller.refreshApple2Screen();

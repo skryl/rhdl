@@ -9,7 +9,35 @@ import {
   createTerminalCommandController
 } from '../../../../app/components/terminal/controllers/command_controller';
 
-function makeBaseState() {
+type Breakpoint = { name: string; width: number; value: bigint };
+type BaseState = {
+  backend: string;
+  activeTab: string;
+  running: boolean;
+  cycle: number;
+  watches: Map<string, bigint>;
+  breakpoints: Breakpoint[];
+  memory: { followPc: boolean };
+  apple2: {
+    ioConfig: {
+      keyboard: {
+        enabled: boolean;
+        mode: string;
+      };
+    };
+  };
+  terminal: {
+    history: string[];
+    historyIndex: number;
+    busy: boolean;
+    uartPassthrough: boolean;
+  };
+};
+
+type MirbResult = { exitCode: number; stdout: string; stderr: string };
+type MirbRunner = (source: string) => Promise<MirbResult>;
+
+function makeBaseState(): BaseState {
   return {
     backend: 'compiler',
     activeTab: 'ioTab',
@@ -71,7 +99,7 @@ function makeBaseDom() {
   };
 }
 
-function makeBaseActions(state: any) {
+function makeBaseActions(state: BaseState) {
   return {
     currentRunnerPreset: () => ({ id: 'apple2', usesManualIr: false }),
     getBackendDef: () => ({ id: state.backend }),
@@ -95,7 +123,7 @@ function makeBaseActions(state: any) {
     clearAllBreakpoints: () => {
       state.breakpoints = [];
     },
-    replaceBreakpointsState: (nextBreakpoints: any) => {
+    replaceBreakpointsState: (nextBreakpoints: Breakpoint[]) => {
       state.breakpoints = nextBreakpoints;
     },
     renderBreakpointList: () => {},
@@ -107,11 +135,11 @@ function makeBaseActions(state: any) {
     saveApple2MemoryDump: async () => {},
     saveApple2MemorySnapshot: async () => {},
     queueApple2Key: () => {},
-    formatValue: (value: any) => String(value)
+    formatValue: (value: unknown) => String(value)
   };
 }
 
-function createControllerHarness({ mirbRunner }: any = {}) {
+function createControllerHarness({ mirbRunner }: { mirbRunner?: MirbRunner } = {}) {
   const state = makeBaseState();
   const dom = makeBaseDom();
   const runtime = {
@@ -136,7 +164,7 @@ function createControllerHarness({ mirbRunner }: any = {}) {
     runnerPresets,
     actions,
     mirbRunner,
-    requestFrame: (cb: any) => cb(),
+    requestFrame: (cb: () => void) => cb(),
     documentRef: {
       getElementById: () => null
     }
@@ -145,8 +173,8 @@ function createControllerHarness({ mirbRunner }: any = {}) {
 }
 
 test('terminal parser helpers resolve known aliases', () => {
-  assert.equal(parseTabToken('memory', [{ id: 'memoryTab' }] as any), 'memoryTab');
-  assert.equal(parseTabToken('customTab', [{ id: 'customTab' }] as any), 'customTab');
+  assert.equal(parseTabToken('memory', [{ id: 'memoryTab' }]), 'memoryTab');
+  assert.equal(parseTabToken('customTab', [{ id: 'customTab' }]), 'customTab');
   assert.equal(parseRunnerToken('apple', { apple2: { id: 'apple2' } }), 'apple2');
   assert.equal(parseBackendToken('compiler', { compiler: { id: 'compiler' } }), 'compiler');
 });
@@ -202,9 +230,9 @@ test('submitInput prints busy when another command is running', async () => {
 });
 
 test('submitInput runs irb command through mirb runner', async () => {
-  let receivedSource: any = null;
+  let receivedSource: string | null = null;
   const { controller, dom } = createControllerHarness({
-    mirbRunner: async (source: any) => {
+    mirbRunner: async (source: string) => {
       receivedSource = source;
       return { exitCode: 0, stdout: '=> 2', stderr: '' };
     }
@@ -229,9 +257,9 @@ test('submitInput reports irb usage when no expression is provided', async () =>
 });
 
 test('submitInput runs mirb alias command through mirb runner', async () => {
-  let receivedSource: any = null;
+  let receivedSource: string | null = null;
   const { controller, dom } = createControllerHarness({
-    mirbRunner: async (source: any) => {
+    mirbRunner: async (source: string) => {
       receivedSource = source;
       return { exitCode: 0, stdout: '=> "ok"', stderr: '' };
     }
@@ -246,15 +274,17 @@ test('submitInput runs mirb alias command through mirb runner', async () => {
 });
 
 test('submitInput supports interactive mirb session with persistent state', async () => {
-  const receivedSources: any[] = [];
-  const outputsBySource = new Map([
-    ['a = 1', '=> 1'],
-    ['a + 2', '=> 3']
-  ]);
+  const receivedSources: string[] = [];
   const { controller, dom } = createControllerHarness({
-    mirbRunner: async (source: any) => {
+    mirbRunner: async (source: string) => {
       receivedSources.push(source);
-      return { exitCode: 0, stdout: outputsBySource.get(source) || '', stderr: '' };
+      if (source.includes('"a = 1","a + 2"')) {
+        return { exitCode: 0, stdout: '__RHDL_SESSION_RESULT__:3', stderr: '' };
+      }
+      if (source.includes('"a = 1"')) {
+        return { exitCode: 0, stdout: '__RHDL_SESSION_RESULT__:1', stderr: '' };
+      }
+      return { exitCode: 0, stdout: '', stderr: '' };
     }
   });
 
@@ -270,7 +300,9 @@ test('submitInput supports interactive mirb session with persistent state', asyn
   dom.terminalInput.value = 'exit';
   await controller.submitInput();
 
-  assert.deepEqual(receivedSources, ['a = 1', 'a + 2']);
+  assert.equal(receivedSources.length, 2);
+  assert.match(receivedSources[0], /\["a = 1"\]\.each/);
+  assert.match(receivedSources[1], /\["a = 1","a \+ 2"\]\.each/);
   assert.match(dom.terminalOutput.textContent, /mirb session started/);
   assert.match(dom.terminalOutput.textContent, /\$ a = 1/);
   assert.match(dom.terminalOutput.textContent, /\$ a \+ 2/);

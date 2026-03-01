@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createListenerGroup } from '../../../app/core/bindings/listener_group';
+import type { EventTargetLike } from '../../../app/types/services';
 
 test('listener group registers listeners and disposes them', () => {
   const group = createListenerGroup();
@@ -25,6 +26,6 @@ test('listener group registers listeners and disposes them', () => {
 test('listener group ignores invalid targets safely', () => {
   const group = createListenerGroup();
   group.on(null, 'x', () => {});
-  group.on({}, 'x', () => {});
+  group.on({} as unknown as EventTargetLike, 'x', () => {});
   assert.equal(group.size(), 0);
 });

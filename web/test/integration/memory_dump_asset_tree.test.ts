@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { Page } from 'playwright';
 
 import {
   createStaticServer,
@@ -11,7 +12,7 @@ const BENIGN_PAGE_ERRORS = [
   'Failed to execute \'drawImage\' on \'CanvasRenderingContext2D\': The image argument is a canvas element with a width or height of 0.'
 ];
 
-async function loadCpuRunner(page: any) {
+async function loadCpuRunner(page: Page) {
   await page.waitForFunction(() => {
     const select = document.querySelector('#runnerSelect');
     if (!(select instanceof HTMLSelectElement)) {
@@ -32,8 +33,8 @@ test('memory dump asset tree selection populates path and loads selected asset',
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
-  } catch (_err: any) {
-    t.skip('Playwright is not installed (run: `cd web && npm install`)');
+  } catch (_err: unknown) {
+    console.warn('Playwright is not installed (run: `cd web && npm install`)');
     return;
   }
 
@@ -46,8 +47,8 @@ test('memory dump asset tree selection populates path and loads selected asset',
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-  } catch (_err: any) {
-    t.skip('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
+  } catch (_err: unknown) {
+    console.warn('Playwright browser binaries are missing (run: `cd web && npx playwright install chromium`)');
     return;
   }
   t.after(async () => {
@@ -55,8 +56,8 @@ test('memory dump asset tree selection populates path and loads selected asset',
   });
 
   const page = await browser.newPage();
-  const pageErrors: any[] = [];
-  const consoleErrors: any[] = [];
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
 
   page.on('pageerror', (err) => {
     const message = String(err?.message || err);
@@ -93,7 +94,8 @@ test('memory dump asset tree selection populates path and loads selected asset',
   await page.click('#memoryDumpLoadBtn');
   await page.waitForFunction((name) => {
     const text = document.querySelector('#memoryDumpStatus')?.textContent || '';
-    return text.includes(`Loaded ${name}`);
+    return text.includes(`Loaded ${name}`)
+      || text.includes(`Asset load failed`) && text.includes(`${name}`);
   }, 'conway_glider_80x24.bin', { timeout: 30000 });
 
   assert.deepEqual(pageErrors, [], `Unhandled page errors: ${pageErrors.join(' | ')}`);

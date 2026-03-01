@@ -1,5 +1,14 @@
 import { createListenerGroup } from '../../../core/bindings/listener_group';
 
+interface IoBindingDeps {
+  dom: Unsafe;
+  state: Unsafe;
+  apple2: Unsafe;
+  sim: Unsafe;
+  store: Unsafe;
+  scheduleReduxUxSync: (reason: string) => void;
+}
+
 export function bindIoBindings({
   dom,
   state,
@@ -7,7 +16,7 @@ export function bindIoBindings({
   sim,
   store,
   scheduleReduxUxSync
-}: any) {
+}: IoBindingDeps) {
   const listeners = createListenerGroup();
 
   listeners.on(dom.toggleHires, 'change', () => {
@@ -51,9 +60,10 @@ export function bindIoBindings({
     dom.apple2KeyInput.value = '';
   });
 
-  listeners.on(dom.apple2KeyInput, 'keydown', (event: any) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
+  listeners.on(dom.apple2KeyInput, 'keydown', (event) => {
+    const keyEvent = event as KeyboardEvent;
+    if (keyEvent.key === 'Enter') {
+      keyEvent.preventDefault();
       const raw = dom.apple2KeyInput?.value || '';
       apple2.queueKey(raw ? raw[0] : '\r');
       dom.apple2KeyInput.value = '';
@@ -65,21 +75,22 @@ export function bindIoBindings({
     sim.refreshStatus();
   });
 
-  listeners.on(dom.apple2TextScreen, 'keydown', (event: any) => {
+  listeners.on(dom.apple2TextScreen, 'keydown', (event) => {
+    const keyEvent = event as KeyboardEvent;
     if (!apple2.isUiEnabled()) {
       return;
     }
-    if (event.key.length === 1) {
-      apple2.queueKey(event.key);
-      event.preventDefault();
+    if (keyEvent.key.length === 1) {
+      apple2.queueKey(keyEvent.key);
+      keyEvent.preventDefault();
       return;
     }
-    if (event.key === 'Enter') {
+    if (keyEvent.key === 'Enter') {
       apple2.queueKey('\r');
-      event.preventDefault();
-    } else if (event.key === 'Backspace') {
+      keyEvent.preventDefault();
+    } else if (keyEvent.key === 'Backspace') {
       apple2.queueKey(String.fromCharCode(0x08));
-      event.preventDefault();
+      keyEvent.preventDefault();
     }
   });
 

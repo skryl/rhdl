@@ -4,15 +4,15 @@ import assert from 'node:assert/strict';
 import { createApple2DownloadService } from '../../../../app/components/apple2/services/download_service';
 
 test('apple2 download service creates and revokes blob urls', () => {
-  const calls: any[] = [];
+  const calls: Array<[name: string, ...args: unknown[]]> = [];
   const service = createApple2DownloadService({
     windowRef: {
       URL: {
-        createObjectURL(blob: any) {
+        createObjectURL(blob: Blob) {
           calls.push(['create', blob instanceof Blob]);
           return 'blob:test';
         },
-        revokeObjectURL(url: any) {
+        revokeObjectURL(url: string) {
           calls.push(['revoke', url]);
         }
       }

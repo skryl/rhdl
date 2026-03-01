@@ -1,6 +1,7 @@
 import { LitElement, html, css } from 'lit';
+import { asRecord, type ExplorerDomRefs } from '../lib/types';
 
-function ellipsizeText(value: any, maxLen = 88) {
+function ellipsizeText(value: unknown, maxLen = 88) {
   const text = String(value ?? '');
   if (text.length <= maxLen) {
     return text;
@@ -8,8 +9,27 @@ function ellipsizeText(value: any, maxLen = 88) {
   return `${text.slice(0, Math.max(0, maxLen - 3))}...`;
 }
 
+type ValueFormatter = (value: unknown, width?: number) => string;
+
+interface LiveSignalRow {
+  name: string;
+  value: string;
+  matchesHighlight: boolean;
+}
+
+interface ConnectionRow {
+  type: string;
+  source: string;
+  target: string;
+  details: string;
+}
+
 class RhdlComponentLiveSignals extends LitElement {
-  [key: string]: any;
+  [key: string]: unknown;
+  rows: LiveSignalRow[];
+  highlightLabel: string;
+  highlightMissing: boolean;
+  extraSignals: number;
   static properties = {
     rows: { state: true },
     highlightLabel: { state: true },
@@ -70,23 +90,32 @@ class RhdlComponentLiveSignals extends LitElement {
 
   constructor() {
     super();
-    this.rows = [];
+    this.rows = [] as LiveSignalRow[];
     this.highlightLabel = '';
     this.highlightMissing = false;
     this.extraSignals = 0;
   }
 
-  setData(data: any, formatValue: any) {
-    const formatter = typeof formatValue === 'function' ? formatValue : (value: any) => String(value ?? '');
-    const signals = Array.isArray(data?.signals) ? data.signals : [];
-    this.rows = signals.map((signal: any) => ({
-      name: signal.fullName || signal.name,
-      value: signal.value == null ? '-' : formatter(signal.value, signal.width || 1),
-      matchesHighlight: !!signal.matchesHighlight
-    }));
-    this.highlightLabel = String(data?.highlightLabel || '');
-    this.highlightMissing = !!(data?.highlight && Number(data?.highlightedRows || 0) === 0 && this.highlightLabel);
-    this.extraSignals = Math.max(0, Number(data?.extraSignals || 0));
+  setData(data: unknown, formatValue: unknown) {
+    const formatter: ValueFormatter = typeof formatValue === 'function'
+      ? (formatValue as ValueFormatter)
+      : (value: unknown) => String(value ?? '');
+    const dataRecord = asRecord(data) || {};
+    const signals = Array.isArray(dataRecord.signals) ? dataRecord.signals : [];
+    this.rows = signals.map((signal): LiveSignalRow => {
+      const signalRecord = asRecord(signal) || {};
+      return {
+        name: String(signalRecord.fullName || signalRecord.name || ''),
+        value:
+          signalRecord.value == null
+            ? '-'
+            : formatter(signalRecord.value, Number(signalRecord.width) || 1),
+        matchesHighlight: signalRecord.matchesHighlight === true
+      };
+    });
+    this.highlightLabel = String(dataRecord.highlightLabel || '');
+    this.highlightMissing = !!(dataRecord.highlight && Number(dataRecord.highlightedRows || 0) === 0 && this.highlightLabel);
+    this.extraSignals = Math.max(0, Number(dataRecord.extraSignals || 0));
   }
 
   render() {
@@ -94,7 +123,7 @@ class RhdlComponentLiveSignals extends LitElement {
       return html`<div class="empty">No live signals to display.</div>`;
     }
     return html`
-      ${this.rows.map((row: any) => html`
+      ${this.rows.map((row: LiveSignalRow) => html`
         <div class=${`row${row.matchesHighlight ? ' highlight' : ''}`}>
           <span class="name">${row.name}</span>
           <span class="value">${row.value}</span>
@@ -117,7 +146,9 @@ class RhdlComponentLiveSignals extends LitElement {
 }
 
 class RhdlComponentConnections extends LitElement {
-  [key: string]: any;
+  [key: string]: unknown;
+  rows: ConnectionRow[];
+  hiddenCount: number;
   static properties = {
     rows: { state: true },
     hiddenCount: { state: true }
@@ -180,12 +211,22 @@ class RhdlComponentConnections extends LitElement {
 
   constructor() {
     super();
-    this.rows = [];
+    this.rows = [] as ConnectionRow[];
     this.hiddenCount = 0;
   }
 
-  setConnections(rows: any, hiddenCount = 0) {
-    this.rows = Array.isArray(rows) ? rows.slice() : [];
+  setConnections(rows: unknown, hiddenCount = 0) {
+    this.rows = Array.isArray(rows)
+      ? rows.map((row): ConnectionRow => {
+        const rowRecord = asRecord(row) || {};
+        return {
+          type: String(rowRecord.type || ''),
+          source: String(rowRecord.source || ''),
+          target: String(rowRecord.target || ''),
+          details: String(rowRecord.details || '')
+        };
+      })
+      : [];
     this.hiddenCount = Math.max(0, Number(hiddenCount) || 0);
   }
 
@@ -210,7 +251,7 @@ class RhdlComponentConnections extends LitElement {
           </tr>
         </thead>
         <tbody>
-          ${this.rows.map((row: any) => html`
+          ${this.rows.map((row: ConnectionRow) => html`
             <tr>
               <td>${row.type}</td>
               <td title=${row.source}>${ellipsizeText(row.source)}</td>
@@ -236,16 +277,25 @@ if (!customElements.get('rhdl-component-connections')) {
   customElements.define('rhdl-component-connections', RhdlComponentConnections);
 }
 
-export function renderComponentLiveSignalsView(dom: any, data: any, formatValue: any) {
-  const element = dom?.componentLiveSignals;
+export function renderComponentLiveSignalsView(
+  dom: ExplorerDomRefs,
+  data: unknown,
+  formatValue: unknown
+) {
+  const element = dom.componentLiveSignals;
   if (!element || typeof element.setData !== 'function') {
     return;
   }
   element.setData(data, formatValue);
 }
 
-export function renderComponentConnectionsView(dom: any, metaText: any, rows: any, hiddenCount = 0) {
-  if (!dom?.componentConnectionMeta || !dom?.componentConnectionBody) {
+export function renderComponentConnectionsView(
+  dom: ExplorerDomRefs,
+  metaText: unknown,
+  rows: unknown,
+  hiddenCount = 0
+) {
+  if (!dom.componentConnectionMeta || !dom.componentConnectionBody) {
     return;
   }
 
@@ -255,8 +305,8 @@ export function renderComponentConnectionsView(dom: any, metaText: any, rows: an
   }
 }
 
-export function clearComponentConnectionsView(dom: any, metaText: any) {
-  if (!dom?.componentConnectionMeta || !dom?.componentConnectionBody) {
+export function clearComponentConnectionsView(dom: ExplorerDomRefs, metaText: unknown) {
+  if (!dom.componentConnectionMeta || !dom.componentConnectionBody) {
     return;
   }
   dom.componentConnectionMeta.textContent = String(metaText || '');

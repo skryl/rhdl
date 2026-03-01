@@ -2,31 +2,34 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCanvasRenderer } from '../../../../app/components/explorer/renderers/canvas_renderer';
 
+type CanvasCall = { method: string; args: unknown[] };
+type MockCtxTarget = { calls: CanvasCall[]; _canvas: unknown } & Record<PropertyKey, unknown>;
+
 function createMockCanvas() {
-  const calls: any[] = [];
+  const calls: CanvasCall[] = [];
   const ctxHandler = {
-    get(target: any, prop: any) {
+    get(target: MockCtxTarget, prop: PropertyKey) {
       if (prop in target) return target[prop];
       if (prop === 'canvas') return target._canvas;
       if (prop === 'measureText') {
         return (text = '') => ({ width: String(text).length * 6 });
       }
-      return (...args: any[]) => { calls.push({ method: prop, args }); };
+      return (...args: unknown[]) => { calls.push({ method: String(prop), args }); };
     },
-    set(target: any, prop: any, value: any) {
+    set(target: MockCtxTarget, prop: PropertyKey, value: unknown) {
       calls.push({ method: `set:${String(prop)}`, args: [value] });
       target[prop] = value;
       return true;
     }
   };
-  const ctx = new Proxy({ calls, _canvas: null }, ctxHandler);
+  const ctx = new Proxy<MockCtxTarget>({ calls, _canvas: null }, ctxHandler);
   const canvas = {
     width: 800,
     height: 600,
-    getContext(type: any) {
+    getContext(type: string) {
       if (type === '2d') {
         ctx._canvas = canvas;
-        return ctx;
+        return ctx as unknown as CanvasRenderingContext2D;
       }
       return null;
     },
@@ -150,11 +153,11 @@ test('render thins wire widths as viewport scale decreases', () => {
 
   calls.length = 0;
   renderer.render(rl, { x: 0, y: 0, scale: 1 }, createMockPalette());
-  const fullScaleWidth = calls.find((c) => c.method === 'set:lineWidth')?.args?.[0] || 0;
+  const fullScaleWidth = Number(calls.find((c) => c.method === 'set:lineWidth')?.args?.[0] || 0);
 
   calls.length = 0;
   renderer.render(rl, { x: 0, y: 0, scale: 0.1 }, createMockPalette());
-  const zoomedOutWidth = calls.find((c) => c.method === 'set:lineWidth')?.args?.[0] || 0;
+  const zoomedOutWidth = Number(calls.find((c) => c.method === 'set:lineWidth')?.args?.[0] || 0);
 
   assert.ok(fullScaleWidth > 0, 'wire width should be set at full scale');
   assert.ok(zoomedOutWidth > 0, 'wire width should be set while zoomed out');

@@ -4,14 +4,15 @@ import { createRunnerLazyGetters } from '../../components/runner/controllers/laz
 import { createApple2LazyGetters } from '../../components/apple2/controllers/lazy_getters';
 import { createSimLazyGetters } from '../../components/sim/controllers/lazy_getters';
 import { createShellLazyGetters } from '../../components/shell/controllers/lazy_getters';
+import type { RegistryLazyGettersOptions, UnknownFn } from '../../types/services';
 
-function requireFn(name: any, fn: any) {
+function requireFn(name: string, fn: unknown): asserts fn is UnknownFn {
   if (typeof fn !== 'function') {
     throw new Error(`createRegistryLazyGetters requires function: ${name}`);
   }
 }
 
-export function createRegistryLazyGetters(options: any = {}) {
+export function createRegistryLazyGetters(options: Partial<RegistryLazyGettersOptions> = {}) {
   const {
     dom,
     state,

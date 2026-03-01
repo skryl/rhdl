@@ -1,7 +1,7 @@
 import { LitElement, html, css } from 'lit';
 
 class RhdlWatchTable extends LitElement {
-  [key: string]: any;
+  [key: string]: Unsafe;
   static properties = {
     rows: { state: true }
   };
@@ -51,9 +51,9 @@ class RhdlWatchTable extends LitElement {
     this.rows = [];
   }
 
-  setRows(rows: any, formatValue: any) {
-    const formatter = typeof formatValue === 'function' ? formatValue : (value: any) => String(value ?? '');
-    this.rows = (rows || []).map((row: any) => ({
+  setRows(rows: Unsafe, formatValue: Unsafe) {
+    const formatter = typeof formatValue === 'function' ? formatValue : (value: Unsafe) => String(value ?? '');
+    this.rows = (rows || []).map((row: Unsafe) => ({
       ...row,
       renderedValue: formatter(row.value, row.width)
     }));
@@ -70,7 +70,7 @@ class RhdlWatchTable extends LitElement {
           </tr>
         </thead>
         <tbody>
-          ${this.rows.map((row: any) => html`
+          ${this.rows.map((row: Unsafe) => html`
             <tr>
               <td>${row.name}</td>
               <td>${row.width}</td>
@@ -84,7 +84,7 @@ class RhdlWatchTable extends LitElement {
 }
 
 class RhdlWatchList extends LitElement {
-  [key: string]: any;
+  [key: string]: Unsafe;
   static properties = {
     names: { state: true }
   };
@@ -139,11 +139,11 @@ class RhdlWatchList extends LitElement {
     this.names = [];
   }
 
-  setNames(names: any) {
+  setNames(names: Unsafe) {
     this.names = Array.isArray(names) ? names.slice() : [];
   }
 
-  onRemove(name: any) {
+  onRemove(name: Unsafe) {
     this.dispatchEvent(new CustomEvent('watch-remove', {
       detail: { name },
       bubbles: true,
@@ -154,7 +154,7 @@ class RhdlWatchList extends LitElement {
   render() {
     return html`
       <ul class="pill-list">
-        ${this.names.map((name: any) => html`
+        ${this.names.map((name: Unsafe) => html`
           <li>
             <span class="name">${name}</span>
             <button type="button" title="remove" @click=${() => this.onRemove(name)}>x</button>
@@ -166,7 +166,7 @@ class RhdlWatchList extends LitElement {
 }
 
 class RhdlBreakpointList extends LitElement {
-  [key: string]: any;
+  [key: string]: Unsafe;
   static properties = {
     rows: { state: true }
   };
@@ -221,15 +221,15 @@ class RhdlBreakpointList extends LitElement {
     this.rows = [];
   }
 
-  setBreakpoints(breakpoints: any, formatValue: any) {
-    const formatter = typeof formatValue === 'function' ? formatValue : (value: any) => String(value ?? '');
-    this.rows = (breakpoints || []).map((bp: any) => ({
+  setBreakpoints(breakpoints: Unsafe, formatValue: Unsafe) {
+    const formatter = typeof formatValue === 'function' ? formatValue : (value: Unsafe) => String(value ?? '');
+    this.rows = (breakpoints || []).map((bp: Unsafe) => ({
       name: bp.name,
       label: `${bp.name}=${formatter(bp.value, bp.width)}`
     }));
   }
 
-  onRemove(name: any) {
+  onRemove(name: Unsafe) {
     this.dispatchEvent(new CustomEvent('breakpoint-remove', {
       detail: { name },
       bubbles: true,
@@ -240,7 +240,7 @@ class RhdlBreakpointList extends LitElement {
   render() {
     return html`
       <ul class="pill-list">
-        ${this.rows.map((row: any) => html`
+        ${this.rows.map((row: Unsafe) => html`
           <li>
             <span class="name">${row.label}</span>
             <button type="button" title="remove" @click=${() => this.onRemove(row.name)}>x</button>
@@ -261,7 +261,7 @@ if (!customElements.get('rhdl-breakpoint-list')) {
   customElements.define('rhdl-breakpoint-list', RhdlBreakpointList);
 }
 
-export function renderWatchTableRows(dom: any, rows: any, formatValue: any) {
+export function renderWatchTableRows(dom: Unsafe, rows: Unsafe, formatValue: Unsafe) {
   const element = dom?.watchTableBody;
   if (!element) {
     return;
@@ -271,7 +271,7 @@ export function renderWatchTableRows(dom: any, rows: any, formatValue: any) {
   }
 }
 
-export function renderWatchListItems(dom: any, names: any) {
+export function renderWatchListItems(dom: Unsafe, names: Unsafe) {
   const element = dom?.watchList;
   if (!element) {
     return;
@@ -281,7 +281,7 @@ export function renderWatchListItems(dom: any, names: any) {
   }
 }
 
-export function renderBreakpointListItems(dom: any, breakpoints: any, formatValue: any) {
+export function renderBreakpointListItems(dom: Unsafe, breakpoints: Unsafe, formatValue: Unsafe) {
   const element = dom?.bpList;
   if (!element) {
     return;

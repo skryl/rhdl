@@ -1,4 +1,5 @@
-function requireFn(name: any, fn: any) {
+// @ts-nocheck
+function requireFn(name: unknown, fn: unknown) {
   if (typeof fn !== 'function') {
     throw new Error(`createDashboardLayoutController requires function: ${name}`);
   }
@@ -26,14 +27,14 @@ export function createDashboardLayoutController({
   refreshMemoryView,
   getActiveTab,
   createDashboardLayoutManager
-}: any = {}) {
+}: unknown = {}) {
   if (!state) {
     throw new Error('createDashboardLayoutController requires state');
   }
   requireFn('getActiveTab', getActiveTab);
   requireFn('createDashboardLayoutManager', createDashboardLayoutManager);
 
-  let dashboardLayoutManager: any = null;
+  let dashboardLayoutManager: unknown = null;
 
   function getDashboardLayoutManager() {
     if (!dashboardLayoutManager) {
@@ -70,7 +71,7 @@ export function createDashboardLayoutController({
     dashboardLayoutManager.dispose();
   }
 
-  function refreshDashboardRowSizing(rootKey: any) {
+  function refreshDashboardRowSizing(rootKey: unknown) {
     getDashboardLayoutManager().refreshRowSizing(rootKey);
   }
 

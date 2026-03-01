@@ -22,7 +22,7 @@ const validJson = {
 };
 
 test('returns null for missing format', () => {
-  const json: any = { ...validJson };
+  const json: { format?: string } & Record<string, unknown> = { ...validJson };
   delete json.format;
   const result = createRiscvSourceMap(json);
   assert.equal(result, null);
@@ -65,7 +65,7 @@ test('lookupLine returns line info for known address', () => {
   assert.equal(line.line, 11);
 });
 
-test('lookupLine returns null for address before any line', () => {
+test('lookupLine returns null for address before first line', () => {
   const map = createRiscvSourceMap(validJson)!;
   const line = map.lookupLine(0x70000000);
   assert.equal(line, null);
@@ -110,7 +110,7 @@ test('disassembleRiscvLines integrates source annotations when sourceMap is give
   view.setUint32(0, NOP, true);
   view.setUint32(4, NOP, true);
 
-  function readMemory(start: any, length: any) {
+  function readMemory(start: number, length: number) {
     const out = new Uint8Array(length);
     const base = 0x80000000;
     for (let i = 0; i < length; i += 1) {
@@ -127,15 +127,19 @@ test('disassembleRiscvLines integrates source annotations when sourceMap is give
     2,
     readMemory,
     { addressSpace: 0x100000000, sourceMap: map }
-  );
+  ) as Array<string | { text: string }>;
 
   // Should contain a function header annotation for start()
   const hasHeader = lines.some(
-    (l: any) => (typeof l === 'string' ? l : l.text).includes('start') && (typeof l === 'string' ? l : l.text).includes('kernel/start.c')
+    (line) => (typeof line === 'string' ? line : line.text).includes('start')
+      && (typeof line === 'string' ? line : line.text).includes('kernel/start.c')
   );
   assert.ok(hasHeader, `Expected function header annotation in output: ${JSON.stringify(lines)}`);
 
   // Should contain a source line annotation for line 10
-  const hasSourceLine = lines.some((l: any) => (typeof l === 'string' ? l : l.text).includes('10:') && (typeof l === 'string' ? l : l.text).includes('line10'));
+  const hasSourceLine = lines.some(
+    (line) => (typeof line === 'string' ? line : line.text).includes('10:')
+      && (typeof line === 'string' ? line : line.text).includes('line10')
+  );
   assert.ok(hasSourceLine, `Expected source line annotation in output: ${JSON.stringify(lines)}`);
 });

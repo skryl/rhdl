@@ -1,29 +1,53 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStartupInitializationService } from '../../../../app/core/services/startup_initialization_service';
+import type { StartupInitializationServiceDeps } from '../../../../app/types/services';
 
-function createHarness(overrides: any = {}) {
-  const calls: any[] = [];
+type RecordedCall = [name: string, ...args: unknown[]];
+
+interface RunnerPresetStub {
+  id: string;
+  autoLoadOnBoot?: boolean;
+}
+
+interface RunnerOverrides {
+  ensureBackendInstance?: (value: string) => Promise<void>;
+  currentPreset?: () => RunnerPresetStub;
+}
+
+interface HarnessOverrides {
+  runner?: RunnerOverrides;
+}
+
+function createHarness(overrides: HarnessOverrides = {}) {
+  const calls: RecordedCall[] = [];
   const state = { backend: 'compiler', runnerPreset: 'apple2' };
   const dom = {
-    backendSelect: { value: 'compiler' },
-    runnerSelect: { value: 'apple2' },
+    backendSelect: { value: 'compiler', innerHTML: '' },
+    runnerSelect: { value: 'apple2', innerHTML: '' },
     simStatus: { textContent: '' },
     terminalOutput: { textContent: '' }
   };
   const shell = {
-    setSidebarCollapsed: (value: any) => calls.push(['shell.setSidebarCollapsed', value]),
-    setTerminalOpen: (value: any, opts: any) => calls.push(['shell.setTerminalOpen', value, opts?.persist]),
-    applyTheme: (value: any, opts: any) => calls.push(['shell.applyTheme', value, opts?.persist]),
-    setActiveTab: (value: any) => calls.push(['shell.setActiveTab', value])
+    setSidebarCollapsed: (value: boolean) => calls.push(['shell.setSidebarCollapsed', value]),
+    setTerminalOpen: (value: boolean, opts: { persist?: boolean } = {}) => calls.push(['shell.setTerminalOpen', value, opts.persist]),
+    applyTheme: (value: string, opts: { persist?: boolean } = {}) => calls.push(['shell.applyTheme', value, opts.persist]),
+    setActiveTab: (value: string) => calls.push(['shell.setActiveTab', value])
   };
   const runner = {
-    ensureBackendInstance: async (value: any) => calls.push(['runner.ensureBackendInstance', value]),
+    ensureBackendInstance: async (value: string) => {
+      calls.push(['runner.ensureBackendInstance', value]);
+    },
     updateIrSourceVisibility: () => calls.push(['runner.updateIrSourceVisibility']),
-    currentPreset: () => ({ id: 'apple2' }),
-    loadPreset: async (options: any) => calls.push(['runner.loadPreset', options?.presetOverride?.id || null]),
+    currentPreset: () => ({ id: 'apple2' } as RunnerPresetStub),
+    loadPreset: async (options: Record<string, unknown> = {}) => {
+      const presetOverride = options.presetOverride as { id?: string } | undefined;
+      calls.push(['runner.loadPreset', presetOverride?.id ?? null]);
+    },
     getActionsController: () => ({
-      preloadStartPreset: async (preset: any) => calls.push(['runner.preloadStartPreset', preset.id])
+      preloadStartPreset: async (preset: { id?: string }) => {
+        calls.push(['runner.preloadStartPreset', preset.id ?? null]);
+      }
     })
   };
   const sim = {
@@ -36,21 +60,21 @@ function createHarness(overrides: any = {}) {
     refreshMemoryView: () => calls.push(['apple2.refreshMemoryView'])
   };
   const terminal = {
-    writeLine: (message: any) => calls.push(['terminal.writeLine', message])
+    writeLine: (message: unknown) => calls.push(['terminal.writeLine', message])
   };
-  const storeCalls: any[] = [];
+  const storeCalls: RecordedCall[] = [];
   const store = {
-    setBackendState: (value: any) => storeCalls.push(['setBackendState', value]),
-    setRunnerPresetState: (value: any) => storeCalls.push(['setRunnerPresetState', value])
+    setBackendState: (value: string) => storeCalls.push(['setBackendState', value]),
+    setRunnerPresetState: (value: string) => storeCalls.push(['setRunnerPresetState', value])
   };
 
-  const service = createStartupInitializationService({
+  const service = createStartupInitializationService(({
     dom,
     state,
     store,
     util: {
-      getBackendDef: (id: any) => ({ id }),
-      normalizeTheme: (value: any) => value
+      getBackendDef: (id: unknown) => ({ id: String(id) }),
+      normalizeTheme: (value: unknown) => (value === 'original' ? 'original' : 'shenzhen')
     },
     keys: {
       SIDEBAR_COLLAPSED_KEY: 'sidebar',
@@ -59,7 +83,7 @@ function createHarness(overrides: any = {}) {
     },
     env: {
       localStorageRef: {
-        getItem(key: any) {
+        getItem(key: string) {
           if (key === 'sidebar') return '1';
           if (key === 'terminal') return '1';
           if (key === 'theme') return 'original';
@@ -75,7 +99,7 @@ function createHarness(overrides: any = {}) {
     sim,
     apple2,
     terminal
-  });
+  }) as unknown as Partial<StartupInitializationServiceDeps>);
 
   return { service, calls, storeCalls, dom };
 }
@@ -117,7 +141,7 @@ test('startup initialization service auto-loads preset when configured', async (
 test('startup initialization service hides unavailable backends from selector', async () => {
   const { service, calls, dom } = createHarness({
     runner: {
-      ensureBackendInstance: async (value: any) => {
+      ensureBackendInstance: async (value: string) => {
         calls.push(['runner.ensureBackendInstance', value]);
         if (value === 'jit') {
           throw new Error('jit unavailable');
@@ -127,7 +151,7 @@ test('startup initialization service hides unavailable backends from selector', 
   });
   await service.initialize();
 
-  assert.match(String((dom.backendSelect as any).innerHTML || ''), /value="interpreter"/);
-  assert.match(String((dom.backendSelect as any).innerHTML || ''), /value="compiler"/);
-  assert.doesNotMatch(String((dom.backendSelect as any).innerHTML || ''), /value="jit"/);
+  assert.match(String(dom.backendSelect.innerHTML || ''), /value="interpreter"/);
+  assert.match(String(dom.backendSelect.innerHTML || ''), /value="compiler"/);
+  assert.doesNotMatch(String(dom.backendSelect.innerHTML || ''), /value="jit"/);
 });

@@ -26,6 +26,6 @@ export function createExplorerStateSlice() {
   };
 }
 
-export function reduceExplorerState(_state: any, _action = {}) {
+export function reduceExplorerState(_state: unknown, _action: unknown = {}) {
   return false;
 }

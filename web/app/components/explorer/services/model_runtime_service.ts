@@ -1,21 +1,53 @@
 import { parseIrMeta, currentIrSourceKey } from '../../../core/lib/ir_meta_utils';
 import { buildComponentModel, nodeMatchesFilter } from '../lib/model_utils';
+import type {
+  ComponentModel,
+  ComponentNode,
+  IrMetaLike,
+  ExplorerRuntimeLike,
+  TreeRow
+} from '../lib/types';
 
-function requireFn(name: any, fn: any) {
+interface ModelRuntimeState {
+  components: {
+    model: ComponentModel | null;
+    selectedNodeId: string | null;
+    graphFocusId: string | null;
+    graphShowChildren: boolean;
+    graphLastTap: { nodeId: string; timeMs: number } | null;
+    graphHighlightedSignal: { signalName: string | null; liveName: string | null } | null;
+    graphLiveValues: Map<string, string>;
+    sourceKey: string;
+    parseError: string;
+    overrideMeta?: IrMetaLike | null;
+  };
+}
+
+interface ModelRuntimeServiceOptions {
+  state: ModelRuntimeState;
+  runtime: ExplorerRuntimeLike;
+  currentComponentSourceText: () => string;
+}
+
+function requireFn(name: string, fn: unknown): void {
   if (typeof fn !== 'function') {
     throw new Error(`createExplorerModelRuntimeService requires function: ${name}`);
   }
 }
 
-function clearGraphState(components: any) {
+function clearGraphState(components: ModelRuntimeState['components']): void {
   components.graphFocusId = null;
   components.graphShowChildren = false;
   components.graphLastTap = null;
   components.graphHighlightedSignal = null;
-  components.graphLiveValues = new Map();
+  components.graphLiveValues = new Map<string, string>();
 }
 
-function clearModelState(components: any, sourceKey: any, parseError: any) {
+function clearModelState(
+  components: ModelRuntimeState['components'],
+  sourceKey: string,
+  parseError: string
+): void {
   components.model = null;
   components.sourceKey = sourceKey;
   components.parseError = parseError;
@@ -23,25 +55,34 @@ function clearModelState(components: any, sourceKey: any, parseError: any) {
   clearGraphState(components);
 }
 
-function resetGraphActivity(components: any) {
+function resetGraphActivity(components: ModelRuntimeState['components']): void {
   components.graphLastTap = null;
   components.graphHighlightedSignal = null;
-  components.graphLiveValues = new Map();
+  components.graphLiveValues = new Map<string, string>();
+}
+
+function normalizeNodeId(nodeId: unknown): string | null {
+  const id = String(nodeId || '').trim();
+  return id || null;
+}
+
+function modelHasNodes(model: ComponentModel | null): model is ComponentModel {
+  return !!model && model.nodes.size > 0;
 }
 
 export function createExplorerModelRuntimeService({
   state,
   runtime,
   currentComponentSourceText
-}: any = {}) {
+}: ModelRuntimeServiceOptions) {
   if (!state || !runtime) {
     throw new Error('createExplorerModelRuntimeService requires state/runtime');
   }
   requireFn('currentComponentSourceText', currentComponentSourceText);
 
-  function ensureComponentSelection() {
+  function ensureComponentSelection(): void {
     const model = state.components.model;
-    if (!model || !model.nodes.size) {
+    if (!modelHasNodes(model)) {
       state.components.selectedNodeId = null;
       return;
     }
@@ -51,9 +92,9 @@ export function createExplorerModelRuntimeService({
     state.components.selectedNodeId = model.rootId;
   }
 
-  function ensureComponentGraphFocus() {
+  function ensureComponentGraphFocus(): void {
     const model = state.components.model;
-    if (!model || !model.nodes.size) {
+    if (!modelHasNodes(model)) {
       state.components.graphFocusId = null;
       state.components.graphShowChildren = false;
       return;
@@ -65,29 +106,30 @@ export function createExplorerModelRuntimeService({
     state.components.graphShowChildren = true;
   }
 
-  function currentComponentGraphFocusNode() {
+  function currentComponentGraphFocusNode(): ComponentNode | null {
     const model = state.components.model;
-    if (!model || !model.nodes.size) {
+    if (!modelHasNodes(model)) {
       return null;
     }
     ensureComponentGraphFocus();
     const id = state.components.graphFocusId || model.rootId;
-    return model.nodes.get(id) || model.nodes.get(model.rootId) || null;
+    return (id ? model.nodes.get(id) : null) || (model.rootId ? model.nodes.get(model.rootId) || null : null);
   }
 
-  function setComponentGraphFocus(nodeId: any, showChildren = true) {
+  function setComponentGraphFocus(nodeId: unknown, showChildren = true): boolean {
     const model = state.components.model;
-    if (!model || !nodeId || !model.nodes.has(nodeId)) {
+    const normalizedId = normalizeNodeId(nodeId);
+    if (!modelHasNodes(model) || !normalizedId || !model.nodes.has(normalizedId)) {
       return false;
     }
-    state.components.graphFocusId = nodeId;
+    state.components.graphFocusId = normalizedId;
     state.components.graphShowChildren = !!showChildren;
     resetGraphActivity(state.components);
-    state.components.selectedNodeId = nodeId;
+    state.components.selectedNodeId = normalizedId;
     return true;
   }
 
-  function currentSelectedComponentNode() {
+  function currentSelectedComponentNode(): ComponentNode | null {
     const model = state.components.model;
     if (!model || !state.components.selectedNodeId) {
       return null;
@@ -95,7 +137,7 @@ export function createExplorerModelRuntimeService({
     return model.nodes.get(state.components.selectedNodeId) || null;
   }
 
-  function parseComponentMetaFromCurrentIr() {
+  function parseComponentMetaFromCurrentIr(): void {
     const source = currentComponentSourceText().trim();
     const sourceKey = currentIrSourceKey(source);
     if (!source) {
@@ -114,16 +156,20 @@ export function createExplorerModelRuntimeService({
       resetGraphActivity(state.components);
       ensureComponentSelection();
       ensureComponentGraphFocus();
-    } catch (err: any) {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       clearModelState(
         state.components,
         sourceKey,
-        `Component explorer parse failed: ${err.message || err}`
+        `Component explorer parse failed: ${message}`
       );
     }
   }
 
-  function rebuildComponentExplorer(meta = runtime.irMeta, source = currentComponentSourceText()) {
+  function rebuildComponentExplorer(
+    meta = runtime.irMeta,
+    source = currentComponentSourceText()
+  ): void {
     const sourceKey = currentIrSourceKey(source);
     if (!meta?.ir) {
       parseComponentMetaFromCurrentIr();
@@ -138,7 +184,7 @@ export function createExplorerModelRuntimeService({
     ensureComponentGraphFocus();
   }
 
-  function refreshComponentExplorer() {
+  function refreshComponentExplorer(): void {
     const source = currentComponentSourceText();
     const sourceKey = currentIrSourceKey(source);
     const preferredMeta = state.components.overrideMeta || runtime.irMeta;
@@ -153,41 +199,45 @@ export function createExplorerModelRuntimeService({
     ensureComponentGraphFocus();
   }
 
-  function buildComponentTreeRows(filterText = '') {
+  function buildComponentTreeRows(filterText = ''): TreeRow[] {
     const model = state.components.model;
-    if (!model || !model.nodes.size || state.components.parseError) {
+    if (!modelHasNodes(model) || state.components.parseError) {
       return [];
     }
+    const modelRef = model;
 
     const filter = String(filterText).trim().toLowerCase();
-    const visibilityCache = new Map();
+    const visibilityCache = new Map<string, boolean>();
 
-    function isVisible(nodeId: any) {
+    function isVisible(nodeId: string): boolean {
       if (!filter) {
         return true;
       }
       if (visibilityCache.has(nodeId)) {
-        return visibilityCache.get(nodeId);
+        return visibilityCache.get(nodeId) || false;
       }
-      const node = model.nodes.get(nodeId);
+      const node = modelRef.nodes.get(nodeId);
       if (!node) {
         visibilityCache.set(nodeId, false);
         return false;
       }
-      const visible = nodeMatchesFilter(node, filter) || node.children.some((childId: any) => isVisible(childId));
+      const visible = nodeMatchesFilter(node, filter)
+        || node.children.some((childId) => isVisible(childId));
       visibilityCache.set(nodeId, visible);
       return visible;
     }
 
-    const treeRows: any[] = [];
-    function appendNode(nodeId: any, depth: any) {
+    const treeRows: TreeRow[] = [];
+
+    function appendNode(nodeId: string, depth: number): void {
       if (!isVisible(nodeId)) {
         return;
       }
-      const node = model.nodes.get(nodeId);
+      const node = modelRef.nodes.get(nodeId);
       if (!node) {
         return;
       }
+
       treeRows.push({
         nodeId,
         depth,
@@ -203,7 +253,9 @@ export function createExplorerModelRuntimeService({
       }
     }
 
-    appendNode(model.rootId, 0);
+    if (modelRef.rootId) {
+      appendNode(modelRef.rootId, 0);
+    }
     return treeRows;
   }
 

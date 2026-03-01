@@ -2,11 +2,53 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { startApp } from '../../../../app/core/controllers/startup';
+import type { StartupContext } from '../../../../app/types/services';
 
-function createHarness(overrides: any = {}) {
-  const calls: any[] = [];
-  const registered: any[] = [];
-  const bound: Record<string, any> = {
+type RecordedCall = [name: string, ...args: unknown[]];
+
+interface CoreBoundArgs {
+  shell: {
+    submitTerminalInput: unknown;
+  };
+}
+
+interface SimBoundArgs {
+  watch: {
+    addBreakpoint: unknown;
+  };
+}
+
+interface MemoryBoundArgs {
+  apple2: {
+    refreshMemoryView: unknown;
+  };
+}
+
+interface CollapsibleBoundArgs {
+  actions: {
+    refreshActiveComponentTab: unknown;
+  };
+}
+
+interface BoundContracts {
+  core: CoreBoundArgs | null;
+  component: unknown;
+  io: unknown;
+  sim: SimBoundArgs | null;
+  editor: unknown;
+  memory: MemoryBoundArgs | null;
+  collapsible: CollapsibleBoundArgs | null;
+}
+
+interface HarnessOverrides {
+  ensureBackendError?: Error;
+  localStorageThrows?: boolean;
+}
+
+function createHarness(overrides: HarnessOverrides = {}) {
+  const calls: RecordedCall[] = [];
+  const registered: unknown[] = [];
+  const bound: BoundContracts = {
     core: null,
     component: null,
     io: null,
@@ -23,14 +65,14 @@ function createHarness(overrides: any = {}) {
   };
 
   const dom = {
-    backendSelect: { value: 'compiler' },
-    runnerSelect: { value: 'apple2' },
+    backendSelect: { value: 'compiler', innerHTML: '' },
+    runnerSelect: { value: 'apple2', innerHTML: '' },
     simStatus: { textContent: '' },
     terminalOutput: { textContent: '', scrollTop: 0, scrollHeight: 0 }
   };
 
   const terminal = {
-    writeLine: (message: any) => calls.push(['terminal.writeLine', message]),
+    writeLine: (message: unknown) => calls.push(['terminal.writeLine', message]),
     submitInput: async () => {},
     historyNavigate: () => {}
   };
@@ -43,20 +85,22 @@ function createHarness(overrides: any = {}) {
   };
 
   const shell = {
-    setSidebarCollapsed: (value: any) => calls.push(['shell.setSidebarCollapsed', value]),
-    setTerminalOpen: (value: any, opts: any) => calls.push(['shell.setTerminalOpen', value, opts?.persist, opts?.focus]),
-    applyTheme: (value: any, opts: any) => calls.push(['shell.applyTheme', value, opts?.persist]),
-    setActiveTab: (tab: any) => calls.push(['shell.setActiveTab', tab]),
+    setSidebarCollapsed: (value: boolean) => calls.push(['shell.setSidebarCollapsed', value]),
+    setTerminalOpen: (value: boolean, opts: { persist?: boolean; focus?: boolean } = {}) => calls.push(['shell.setTerminalOpen', value, opts.persist, opts.focus]),
+    applyTheme: (value: string, opts: { persist?: boolean } = {}) => calls.push(['shell.applyTheme', value, opts.persist]),
+    setActiveTab: (tab: string) => calls.push(['shell.setActiveTab', tab]),
     terminal,
     dashboard
   };
 
   const runnerActionsController = {
-    preloadStartPreset: async (preset: any) => calls.push(['runner.preloadStartPreset', preset?.id || null])
+    preloadStartPreset: async (preset: { id?: string }) => {
+      calls.push(['runner.preloadStartPreset', preset?.id ?? null]);
+    }
   };
 
   const runner = {
-    ensureBackendInstance: async (backend: any) => {
+    ensureBackendInstance: async (backend: string) => {
       calls.push(['runner.ensureBackendInstance', backend]);
       if (overrides.ensureBackendError) {
         throw overrides.ensureBackendError;
@@ -65,9 +109,12 @@ function createHarness(overrides: any = {}) {
     updateIrSourceVisibility: () => calls.push(['runner.updateIrSourceVisibility']),
     currentPreset: () => ({ id: 'apple2', usesManualIr: false, autoLoadOnBoot: true }),
     getActionsController: () => runnerActionsController,
-    loadPreset: async (options: any) => calls.push(['runner.loadPreset', options?.presetOverride?.id || null]),
+    loadPreset: async (options: Record<string, unknown> = {}) => {
+      const presetOverride = options.presetOverride as { id?: string } | undefined;
+      calls.push(['runner.loadPreset', presetOverride?.id ?? null]);
+    },
     loadBundle: async () => ({ simJson: '{}', explorerJson: '{}', explorerMeta: null }),
-    getPreset: (id: any) => ({ id, usesManualIr: id === 'generic' }),
+    getPreset: (id: unknown) => ({ id, usesManualIr: id === 'generic' }),
     loadSample: async () => {}
   };
 
@@ -104,52 +151,52 @@ function createHarness(overrides: any = {}) {
     renderBreakpoints: () => {}
   };
 
-  const localStorageValues = {
+  const localStorageValues: Record<string, string> = {
     'test.sidebar': '1',
     'test.terminal': '1',
     'test.theme': 'original'
   };
 
   const localStorageRef = {
-    getItem(key: any) {
+    getItem(key: string) {
       if (overrides.localStorageThrows) {
         throw new Error('storage unavailable');
       }
-      return (localStorageValues as Record<string, any>)[key] ?? null;
+      return localStorageValues[key] ?? null;
     }
   };
 
   const bindings = {
     COLLAPSIBLE_PANEL_SELECTOR: '.panel',
-    bindCoreBindings(args: any) {
-      bound.core = args;
+    bindCoreBindings(args: unknown) {
+      bound.core = args as CoreBoundArgs;
       return () => {};
     },
-    bindMemoryBindings(args: any) {
-      bound.memory = args;
+    bindMemoryBindings(args: unknown) {
+      bound.memory = args as MemoryBoundArgs;
       return () => {};
     },
-    bindComponentBindings(args: any) {
+    bindComponentBindings(args: unknown) {
       bound.component = args;
       return () => {};
     },
-    bindIoBindings(args: any) {
+    bindIoBindings(args: unknown) {
       bound.io = args;
       return () => {};
     },
-    bindSimBindings(args: any) {
-      bound.sim = args;
+    bindSimBindings(args: unknown) {
+      bound.sim = args as SimBoundArgs;
       return () => {};
     },
-    bindEditorBindings(args: any) {
+    bindEditorBindings(args: unknown) {
       bound.editor = args;
       return () => {};
     },
-    bindCollapsiblePanels(args: any) {
-      bound.collapsible = args;
+    bindCollapsiblePanels(args: unknown) {
+      bound.collapsible = args as CollapsibleBoundArgs;
       return () => {};
     },
-    registerUiBinding(fn: any) {
+    registerUiBinding(fn: unknown) {
       registered.push(fn);
       calls.push(['registerUiBinding']);
     },
@@ -158,10 +205,10 @@ function createHarness(overrides: any = {}) {
     }
   };
 
-  const storeCalls: any[] = [];
+  const storeCalls: RecordedCall[] = [];
   const store = {
-    setBackendState: (value: any) => storeCalls.push(['setBackendState', value]),
-    setRunnerPresetState: (value: any) => storeCalls.push(['setRunnerPresetState', value]),
+    setBackendState: (value: string) => storeCalls.push(['setBackendState', value]),
+    setRunnerPresetState: (value: string) => storeCalls.push(['setRunnerPresetState', value]),
     setApple2DisplayHiresState: () => {},
     setApple2DisplayColorState: () => {},
     setRunningState: () => {},
@@ -169,12 +216,12 @@ function createHarness(overrides: any = {}) {
     setUiCyclesPendingState: () => {},
     setMemoryFollowPcState: () => {},
     setMemoryShowSourceState: () => {},
-    syncReduxUxState: (reason: any) => storeCalls.push(['syncReduxUxState', reason]),
+    syncReduxUxState: (reason: string) => storeCalls.push(['syncReduxUxState', reason]),
     scheduleReduxUxSync: () => {}
   };
 
-  const logs: any[] = [];
-  const log = (message: any) => {
+  const logs: string[] = [];
+  const log = (message: unknown) => {
     logs.push(String(message));
   };
 
@@ -186,15 +233,15 @@ function createHarness(overrides: any = {}) {
     storeActions: {},
     env: {
       localStorageRef,
-      requestAnimationFrameImpl: (cb: any) => cb()
+      requestAnimationFrameImpl: (cb: FrameRequestCallback) => cb(0)
     },
     store,
     util: {
-      getBackendDef: (id: any) => ({ id }),
+      getBackendDef: (id: unknown) => ({ id: String(id) }),
       parseNumeric: () => null,
       parseHexOrDec: () => 0,
-      hexByte: (value: any) => value.toString(16),
-      normalizeTheme: (value: any) => (value === 'original' ? 'original' : 'shenzhen'),
+      hexByte: (value: unknown) => String(value),
+      normalizeTheme: (value: unknown) => (value === 'original' ? 'original' : 'shenzhen'),
       isSnapshotFileName: () => false
     },
     keys: {
@@ -228,7 +275,7 @@ function createHarness(overrides: any = {}) {
 
 test('startApp wires grouped shell/runner/apple2/sim/watch contracts into bindings', async () => {
   const harness = createHarness();
-  const result = await startApp(harness.ctx);
+  const result = await startApp(harness.ctx as unknown as Partial<StartupContext>);
 
   assert.equal(result, true);
   assert.deepEqual(harness.storeCalls[0], ['setBackendState', 'compiler']);
@@ -244,6 +291,10 @@ test('startApp wires grouped shell/runner/apple2/sim/watch contracts into bindin
   assert.equal(harness.calls.some(([name, id]) => name === 'runner.loadPreset' && id === 'apple2'), true);
   assert.equal(harness.calls.some(([name]) => name === 'apple2.refreshMemoryView'), true);
 
+  assert.ok(harness.bound.core);
+  assert.ok(harness.bound.sim);
+  assert.ok(harness.bound.memory);
+  assert.ok(harness.bound.collapsible);
   assert.equal(harness.bound.core.shell.submitTerminalInput, harness.terminal.submitInput);
   assert.equal(harness.bound.sim.watch.addBreakpoint, harness.ctx.app.watch.addBreakpoint);
   assert.equal(harness.bound.memory.apple2.refreshMemoryView, harness.ctx.app.apple2.refreshMemoryView);
@@ -257,7 +308,7 @@ test('startApp surfaces startup failures and skips binding registration', async 
   const backendError = new Error('backend unavailable');
   const harness = createHarness({ ensureBackendError: backendError });
 
-  const result = await startApp(harness.ctx);
+  const result = await startApp(harness.ctx as unknown as Partial<StartupContext>);
 
   assert.equal(result, undefined);
   assert.match(harness.dom.simStatus.textContent, /WASM init failed: backend unavailable/);

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { createRunnerBundleLoader } from '../../../../app/components/runner/controllers/bundle_controller';
 
-function makeResponse(body: any, status = 200) {
+function makeResponse(body: string, status = 200) {
   return {
     ok: status >= 200 && status < 300,
     status,
@@ -15,12 +15,12 @@ function makeResponse(body: any, status = 200) {
 
 test('loadRunnerIrBundle returns manual bundle when preset is generic/manual', async () => {
   const dom = { irJson: { value: '{"foo":1}' } };
-  const logs: any[] = [];
+  const logs: string[] = [];
   const loader = createRunnerBundleLoader({
     dom,
     parseIrMeta: () => ({ parsed: true }),
     resetComponentExplorerState: () => {},
-    log: (msg: any) => logs.push(msg),
+    log: (msg: unknown) => logs.push(String(msg)),
     fetchImpl: async () => makeResponse('')
   });
 
@@ -35,10 +35,10 @@ test('loadRunnerIrBundle returns manual bundle when preset is generic/manual', a
 
 test('loadRunnerIrBundle loads sim/explorer/source/schematic bundles', async () => {
   const dom = { irJson: { value: '' } };
-  const logs: any[] = [];
+  const logs: string[] = [];
   let resets = 0;
   let parseCalls = 0;
-  const fetchMap = {
+  const fetchMap: Record<string, ReturnType<typeof makeResponse>> = {
     '/sim.json': makeResponse('{"ports":[{"name":"clk","width":1}]}'),
     '/hier.json': makeResponse('{"ports":[{"name":"hier_clk","width":1}]}'),
     '/sources.json': makeResponse('{"components":[{"component_class":"Top","module_name":"top_mod"}]}'),
@@ -46,15 +46,15 @@ test('loadRunnerIrBundle loads sim/explorer/source/schematic bundles', async () 
   };
   const loader = createRunnerBundleLoader({
     dom,
-    parseIrMeta: (json: any) => {
+    parseIrMeta: (json: string) => {
       parseCalls += 1;
       return { parsedFrom: json };
     },
     resetComponentExplorerState: () => {
       resets += 1;
     },
-    log: (msg: any) => logs.push(msg),
-    fetchImpl: async (path: any) => (fetchMap as Record<string, any>)[path] || makeResponse('', 404)
+    log: (msg: unknown) => logs.push(String(msg)),
+    fetchImpl: async (path: string) => fetchMap[path] || makeResponse('', 404)
   });
 
   const bundle = await loader.loadRunnerIrBundle({
@@ -72,7 +72,9 @@ test('loadRunnerIrBundle loads sim/explorer/source/schematic bundles', async () 
   assert.equal(bundle.simJson.includes('"clk"'), true);
   assert.equal(bundle.explorerJson.includes('"hier_clk"'), true);
   assert.equal(bundle.explorerMeta.parsedFrom.includes('"hier_clk"'), true);
-  assert.equal(bundle.sourceBundle.byClass.get('Top').module_name, 'top_mod');
-  assert.equal(bundle.schematicBundle.byPath.get('top').path, 'top');
+  assert.notEqual(bundle.sourceBundle, null);
+  assert.notEqual(bundle.schematicBundle, null);
+  assert.equal(bundle.sourceBundle!.byClass.get('Top').module_name, 'top_mod');
+  assert.equal(bundle.schematicBundle!.byPath.get('top').path, 'top');
   assert.ok(logs.includes('Loaded CPU IR bundle'));
 });

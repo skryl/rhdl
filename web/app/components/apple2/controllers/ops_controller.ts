@@ -13,7 +13,7 @@ import { createApple2SimRuntimeService } from '../services/sim_runtime_service';
 import { createApple2ResetOverrideService } from '../services/reset_override_service';
 import { createApple2DumpWorkflowService } from '../services/dump_workflow_service';
 
-function requireFn(name: any, fn: any) {
+function requireFn(name: string, fn: unknown) {
   if (typeof fn !== 'function') {
     throw new Error(`createApple2OpsController requires function: ${name}`);
   }
@@ -45,7 +45,7 @@ export function createApple2OpsController({
   fetchImpl = globalThis.fetch,
   windowRef = globalThis.window,
   documentRef = globalThis.document
-}: any = {}) {
+}: Unsafe = {}) {
   if (!dom || !state || !runtime) {
     throw new Error('createApple2OpsController requires dom/state/runtime');
   }
@@ -166,7 +166,7 @@ export function createApple2OpsController({
     fixtureRoot: APPLE2_FIXTURE_ROOT
   });
 
-  function apple2HiresLineAddress(row: any) {
+  function apple2HiresLineAddress(row: number) {
     const section = Math.floor(row / 64);
     const rowInSection = row % 64;
     const group = Math.floor(rowInSection / 8);

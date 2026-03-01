@@ -9,7 +9,7 @@ test('explorer model controller manages selection and graph focus', () => {
     components: {
       model: {
         rootId: 'root',
-        nodes: new Map<string, any>([
+        nodes: new Map<string, unknown>([
           ['root', rootNode],
           ['child', childNode]
         ])
@@ -27,7 +27,7 @@ test('explorer model controller manages selection and graph focus', () => {
 
   const controller = createExplorerModelController({
     dom: {},
-    state,
+    state: state as unknown as Parameters<typeof createExplorerModelController>[0]['state'],
     runtime: {},
     currentComponentSourceText: () => '',
     renderComponentTreeRows: () => {}
@@ -66,7 +66,7 @@ test('explorer model controller marks empty IR as not loaded', () => {
 
   const controller = createExplorerModelController({
     dom: {},
-    state,
+    state: state as unknown as Parameters<typeof createExplorerModelController>[0]['state'],
     runtime: {},
     currentComponentSourceText: () => '',
     renderComponentTreeRows: () => {}

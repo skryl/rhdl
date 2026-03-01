@@ -4,10 +4,10 @@ import assert from 'node:assert/strict';
 import { createShellStateController } from '../../../../app/components/shell/controllers/state_controller';
 
 function classListStub() {
-  const calls: any[] = [];
+  const calls: Array<{ name: string; value: boolean }> = [];
   return {
     calls,
-    toggle(name: any, value: any) {
+    toggle(name: string, value: boolean) {
       calls.push({ name, value });
     }
   };
@@ -28,14 +28,14 @@ test('setActiveTab updates tabs and schedules sync', () => {
   };
   const state = { activeTab: 'ioTab', theme: 'shenzhen', terminalOpen: false, sidebarCollapsed: false };
   const runtime = {};
-  const syncReasons: any[] = [];
-  const rafCalls: any[] = [];
+  const syncReasons: string[] = [];
+  const rafCalls: string[] = [];
 
   const controller = createShellStateController({
     dom,
     state,
     runtime,
-    setActiveTabState: (value: any) => {
+    setActiveTabState: (value: string) => {
       state.activeTab = value;
     },
     setSidebarCollapsedState: () => {},
@@ -45,7 +45,7 @@ test('setActiveTab updates tabs and schedules sync', () => {
     refreshComponentExplorer: () => {
       rafCalls.push('refreshComponentExplorer');
     },
-    scheduleReduxUxSync: (reason: any) => {
+    scheduleReduxUxSync: (reason: string) => {
       syncReasons.push(reason);
     },
     waveformFontFamily: () => 'mono',
@@ -54,15 +54,15 @@ test('setActiveTab updates tabs and schedules sync', () => {
     TERMINAL_OPEN_KEY: 't',
     THEME_KEY: 'th',
     localStorageRef: { setItem() {} },
-    requestAnimationFrameImpl: (cb: any) => {
+    requestAnimationFrameImpl: (cb: () => void) => {
       rafCalls.push('raf');
       cb();
     },
     documentRef: { body: { classList: classListStub() } },
     windowRef: { dispatchEvent() {} },
     eventCtor: class {
-      type: any;
-      constructor(type: any) {
+      type: string;
+      constructor(type: string) {
         this.type = type;
       }
     }
@@ -91,14 +91,14 @@ test('applyTheme normalizes/persists and updates body class', () => {
     terminalInput: null,
     themeSelect: { value: 'shenzhen' }
   };
-  const runtime: any = {
+  const runtime: { waveformP5: { textFont(value: string): void }; lastFont?: string } = {
     waveformP5: {
-      textFont(value: any) {
+      textFont(value: string) {
         runtime.lastFont = value;
       }
     }
   };
-  const syncReasons: any[] = [];
+  const syncReasons: string[] = [];
 
   const controller = createShellStateController({
     dom,
@@ -107,30 +107,30 @@ test('applyTheme normalizes/persists and updates body class', () => {
     setActiveTabState: () => {},
     setSidebarCollapsedState: () => {},
     setTerminalOpenState: () => {},
-    setThemeState: (value: any) => {
+    setThemeState: (value: string) => {
       state.theme = value;
     },
     refreshAllDashboardRowSizing: () => {},
     refreshComponentExplorer: () => {},
-    scheduleReduxUxSync: (reason: any) => {
+    scheduleReduxUxSync: (reason: string) => {
       syncReasons.push(reason);
     },
-    waveformFontFamily: (theme: any) => `font:${theme}`,
+    waveformFontFamily: (theme: string) => `font:${theme}`,
     normalizeTheme: () => 'original',
     SIDEBAR_COLLAPSED_KEY: 's',
     TERMINAL_OPEN_KEY: 't',
     THEME_KEY: 'th',
     localStorageRef: {
-      setItem(key: any, value: any) {
+      setItem(key: string, value: string) {
         stored.set(key, value);
       }
     },
-    requestAnimationFrameImpl: (cb: any) => cb(),
+    requestAnimationFrameImpl: (cb: () => void) => cb(),
     documentRef: { body: { classList: bodyClass } },
     windowRef: { dispatchEvent() {} },
     eventCtor: class {
-      type: any;
-      constructor(type: any) {
+      type: string;
+      constructor(type: string) {
         this.type = type;
       }
     }

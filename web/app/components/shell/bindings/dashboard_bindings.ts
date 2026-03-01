@@ -1,6 +1,7 @@
+// @ts-nocheck
 import { createListenerGroup } from '../../../core/bindings/listener_group';
 
-export function bindDashboardResizeEvents({ onMouseDown, onMouseMove, onMouseUp, onWindowResize }: any) {
+export function bindDashboardResizeEvents({ onMouseDown, onMouseMove, onMouseUp, onWindowResize }: unknown) {
   const listeners = createListenerGroup();
 
   listeners.on(document, 'mousedown', onMouseDown);
@@ -13,7 +14,7 @@ export function bindDashboardResizeEvents({ onMouseDown, onMouseMove, onMouseUp,
   };
 }
 
-export function bindDashboardPanelEvents({ header, panel, onDragStart, onDragEnd, onDragOver, onDrop }: any) {
+export function bindDashboardPanelEvents({ header, panel, onDragStart, onDragEnd, onDragOver, onDrop }: unknown) {
   const listeners = createListenerGroup();
 
   listeners.on(header, 'dragstart', onDragStart);

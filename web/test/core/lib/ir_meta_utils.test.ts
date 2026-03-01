@@ -17,7 +17,7 @@ test('parseIrMeta collects signal widths and clock candidates', () => {
 
   assert.equal(meta.widths.get('clk'), 1);
   assert.equal(meta.widths.get('out_data'), 8);
-  assert.equal(meta.signalInfo.get('state').kind, 'regs');
+  assert.equal(meta.signalInfo.get('state')?.kind, 'regs');
   assert.deepEqual(meta.clocks, ['clk']);
   assert.equal(meta.clockCandidates[0], 'clk');
 });

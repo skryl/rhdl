@@ -31,11 +31,12 @@ import { getBackendDef } from '../components/sim/runtime/backend_defs';
 import { LiveVcdParser } from '../components/sim/runtime/live_vcd_parser';
 import { createControllerRegistry } from './controllers/registry';
 import { createEventLogger } from '../components/watch/lib/event_logger';
+import type { AppState } from '../types/state';
 
 export function startMainApp() {
   const dom = createDomRefs(document);
-  const runtime = createRuntimeContext((() => new LiveVcdParser()) as any);
-  const state = createInitialState();
+  const runtime = createRuntimeContext(() => new LiveVcdParser());
+  const state = createInitialState() as AppState;
   const appStore = createAppStore(state);
   const { registerUiBinding, disposeUiBindings } = createUiBindingRegistry(runtime);
 
@@ -99,7 +100,7 @@ export function startMainApp() {
     documentRef: document,
     localStorageRef: localStorage,
     eventCtor: Event,
-    p5Ctor: (globalThis as any).p5
+    p5Ctor: (globalThis as { p5?: unknown }).p5
   });
 
   return startApp({

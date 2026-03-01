@@ -1,68 +1,93 @@
-export function createStoreDispatchers({ appStore, storeActions }: any = {}) {
+import type { BreakpointModel } from '../../types/models';
+import type { AppState, StoreDispatchers } from '../../types/state';
+import type {
+  InstallReduxGlobalsOptions,
+  ReduxStoreLike,
+  ReduxSyncHelpers,
+  StoreActionsLike
+} from '../../types/services';
+
+interface StoreBridgeDeps {
+  appStore?: ReduxStoreLike<AppState>;
+  storeActions?: StoreActionsLike;
+}
+
+function requireStoreBridgeDeps(
+  appStore: ReduxStoreLike<AppState> | undefined,
+  storeActions: StoreActionsLike | undefined,
+  name: string
+) {
   if (!appStore || !storeActions) {
-    throw new Error('createStoreDispatchers requires appStore and storeActions');
+    throw new Error(`${name} requires appStore and storeActions`);
   }
+  return { appStore, storeActions };
+}
+
+export function createStoreDispatchers({ appStore, storeActions }: StoreBridgeDeps = {}): StoreDispatchers {
+  const resolved = requireStoreBridgeDeps(appStore, storeActions, 'createStoreDispatchers');
+  const { appStore: resolvedStore, storeActions: resolvedActions } = resolved;
 
   return {
-    setBackendState(value: any) {
-      appStore.dispatch(storeActions.setBackend(value));
+    setBackendState(value: unknown) {
+      resolvedStore.dispatch(resolvedActions.setBackend(value));
     },
-    setThemeState(value: any) {
-      appStore.dispatch(storeActions.setTheme(value));
+    setThemeState(value: unknown) {
+      resolvedStore.dispatch(resolvedActions.setTheme(value));
     },
-    setRunnerPresetState(value: any) {
-      appStore.dispatch(storeActions.setRunnerPreset(value));
+    setRunnerPresetState(value: unknown) {
+      resolvedStore.dispatch(resolvedActions.setRunnerPreset(value));
     },
-    setActiveTabState(value: any) {
-      appStore.dispatch(storeActions.setActiveTab(value));
+    setActiveTabState(value: unknown) {
+      resolvedStore.dispatch(resolvedActions.setActiveTab(value));
     },
-    setSidebarCollapsedState(value: any) {
-      appStore.dispatch(storeActions.setSidebarCollapsed(value));
+    setSidebarCollapsedState(value: unknown) {
+      resolvedStore.dispatch(resolvedActions.setSidebarCollapsed(value));
     },
-    setTerminalOpenState(value: any) {
-      appStore.dispatch(storeActions.setTerminalOpen(value));
+    setTerminalOpenState(value: unknown) {
+      resolvedStore.dispatch(resolvedActions.setTerminalOpen(value));
     },
-    setRunningState(value: any) {
-      appStore.dispatch(storeActions.setRunning(value));
+    setRunningState(value: unknown) {
+      resolvedStore.dispatch(resolvedActions.setRunning(value));
     },
-    setCycleState(value: any) {
-      appStore.dispatch(storeActions.setCycle(value));
+    setCycleState(value: unknown) {
+      resolvedStore.dispatch(resolvedActions.setCycle(value));
     },
-    setUiCyclesPendingState(value: any) {
-      appStore.dispatch(storeActions.setUiCyclesPending(value));
+    setUiCyclesPendingState(value: unknown) {
+      resolvedStore.dispatch(resolvedActions.setUiCyclesPending(value));
     },
-    setMemoryFollowPcState(value: any) {
-      appStore.dispatch(storeActions.setMemoryFollowPc(value));
+    setMemoryFollowPcState(value: unknown) {
+      resolvedStore.dispatch(resolvedActions.setMemoryFollowPc(value));
     },
-    setMemoryShowSourceState(value: any) {
-      appStore.dispatch(storeActions.setMemoryShowSource(value));
+    setMemoryShowSourceState(value: unknown) {
+      resolvedStore.dispatch(resolvedActions.setMemoryShowSource(value));
     },
-    setApple2DisplayHiresState(value: any) {
-      appStore.dispatch(storeActions.setApple2DisplayHires(value));
+    setApple2DisplayHiresState(value: unknown) {
+      resolvedStore.dispatch(resolvedActions.setApple2DisplayHires(value));
     },
-    setApple2DisplayColorState(value: any) {
-      appStore.dispatch(storeActions.setApple2DisplayColor(value));
+    setApple2DisplayColorState(value: unknown) {
+      resolvedStore.dispatch(resolvedActions.setApple2DisplayColor(value));
     },
-    setApple2SoundEnabledState(value: any) {
-      appStore.dispatch(storeActions.setApple2SoundEnabled(value));
+    setApple2SoundEnabledState(value: unknown) {
+      resolvedStore.dispatch(resolvedActions.setApple2SoundEnabled(value));
     },
-    replaceBreakpointsState(nextBreakpoints: any) {
-      appStore.dispatch(storeActions.mutate((draft: any) => {
-        draft.breakpoints = Array.isArray(nextBreakpoints) ? nextBreakpoints : [];
+    replaceBreakpointsState(nextBreakpoints: unknown) {
+      resolvedStore.dispatch(resolvedActions.mutate((draft: AppState) => {
+        draft.breakpoints = Array.isArray(nextBreakpoints)
+          ? (nextBreakpoints as BreakpointModel[])
+          : [];
       }));
     }
   };
 }
 
-export function createReduxSyncHelpers({ appStore, storeActions }: any = {}) {
-  if (!appStore || !storeActions) {
-    throw new Error('createReduxSyncHelpers requires appStore and storeActions');
-  }
+export function createReduxSyncHelpers({ appStore, storeActions }: StoreBridgeDeps = {}): ReduxSyncHelpers {
+  const resolved = requireStoreBridgeDeps(appStore, storeActions, 'createReduxSyncHelpers');
+  const { appStore: resolvedStore, storeActions: resolvedActions } = resolved;
 
   let reduxUxSyncPending = false;
 
   function syncReduxUxState(reason = 'sync') {
-    appStore.dispatch(storeActions.touch({ reason, ts: Date.now() }));
+    resolvedStore.dispatch(resolvedActions.touch({ reason, ts: Date.now() }));
   }
 
   function scheduleReduxUxSync(reason = 'async') {
@@ -89,19 +114,24 @@ export function installReduxGlobals({
   storeKey,
   stateKey,
   syncKey
-}: any = {}) {
+}: InstallReduxGlobalsOptions = {}) {
   if (!windowRef || !appStore || typeof syncReduxUxState !== 'function') {
     return;
   }
 
   try {
-    windowRef[storeKey] = appStore;
-    windowRef[stateKey] = appStore.getState();
+    const globals = windowRef as Record<string, unknown>;
+    const storeToken = String(storeKey);
+    const stateToken = String(stateKey);
+    const syncToken = String(syncKey);
+
+    globals[storeToken] = appStore;
+    globals[stateToken] = appStore.getState();
     appStore.subscribe(() => {
-      windowRef[stateKey] = appStore.getState();
+      globals[stateToken] = appStore.getState();
     });
-    windowRef[syncKey] = (reason = 'manual') => syncReduxUxState(reason);
-  } catch (_err: any) {
+    globals[syncToken] = (reason = 'manual') => syncReduxUxState(reason);
+  } catch (_err: unknown) {
     // Ignore global assignment failures in constrained environments.
   }
 }

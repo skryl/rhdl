@@ -1,11 +1,11 @@
 export class LiveVcdParser {
-  maxPoints: any;
-  signalIds: any;
-  signalWidths: any;
-  traces: any;
-  latestValues: any;
-  time: any;
-  partial: any;
+  maxPoints: Unsafe;
+  signalIds: Unsafe;
+  signalWidths: Unsafe;
+  traces: Unsafe;
+  latestValues: Unsafe;
+  time: Unsafe;
+  partial: Unsafe;
 
   constructor(maxPoints = 5000) {
     this.maxPoints = maxPoints;
@@ -21,7 +21,7 @@ export class LiveVcdParser {
     this.partial = '';
   }
 
-  ingest(chunk: any) {
+  ingest(chunk: Unsafe) {
     if (!chunk) {
       return;
     }
@@ -39,7 +39,7 @@ export class LiveVcdParser {
     }
   }
 
-  parseLine(line: any) {
+  parseLine(line: Unsafe) {
     if (line.startsWith('$var')) {
       const m = line.match(/^\$var\s+wire\s+(\d+)\s+(\S+)\s+(\S+)\s+\$end$/);
       if (m) {
@@ -82,7 +82,7 @@ export class LiveVcdParser {
     }
   }
 
-  record(id: any, value: any) {
+  record(id: Unsafe, value: Unsafe) {
     const name = this.signalIds.get(id);
     if (!name) {
       return;
@@ -101,11 +101,11 @@ export class LiveVcdParser {
     this.latestValues.set(name, value);
   }
 
-  series(name: any) {
+  series(name: Unsafe) {
     return this.traces.get(name) || [];
   }
 
-  value(name: any) {
+  value(name: Unsafe) {
     return this.latestValues.get(name);
   }
 

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createExplorerGraphController } from '../../../../../app/components/explorer/controllers/graph/controller';
 
-function createNoopGraphController(overrides: any = {}) {
+function createNoopGraphController(overrides: Record<string, unknown> = {}) {
   return createExplorerGraphController({
     dom: {},
     state: {
@@ -25,7 +25,7 @@ function createNoopGraphController(overrides: any = {}) {
         model: null,
         sourceKey: ''
       }
-    },
+    } as unknown as Parameters<typeof createExplorerGraphController>[0]['state'],
     runtime: {},
     currentComponentGraphFocusNode: () => null,
     currentSelectedComponentNode: () => null,

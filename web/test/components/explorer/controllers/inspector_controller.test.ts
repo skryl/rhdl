@@ -15,7 +15,7 @@ function createNoopRenderers() {
 test('explorer inspector summarizeExpr formats representative expressions', () => {
   const controller = createExplorerInspectorController({
     dom: {},
-    state: { components: {} },
+    state: { components: {} } as unknown as Parameters<typeof createExplorerInspectorController>[0]['state'],
     runtime: {},
     ...createNoopRenderers()
   });
@@ -26,16 +26,35 @@ test('explorer inspector summarizeExpr formats representative expressions', () =
 });
 
 test('explorer inspector resolveNodeSignalRef resolves live names from lookup', () => {
-  const signal = { name: 'clk', fullName: 'top.clk', liveName: 'top.clk', width: 1 };
+  const signal = {
+    name: 'clk',
+    fullName: 'top.clk',
+    liveName: 'top.clk',
+    width: 1,
+    kind: 'wire',
+    direction: null,
+    declaration: null
+  };
   const controller = createExplorerInspectorController({
     dom: {},
-    state: { components: {} },
+    state: { components: {} } as unknown as Parameters<typeof createExplorerInspectorController>[0]['state'],
     runtime: {},
     ...createNoopRenderers()
   });
 
   const ref = controller.resolveNodeSignalRef(
-    { path: 'top', pathTokens: ['top'] },
+    {
+      id: 'top',
+      parentId: null,
+      name: 'top',
+      kind: 'module',
+      path: 'top',
+      pathTokens: ['top'],
+      children: [],
+      signals: [],
+      rawRef: null,
+      _signalKeys: new Set<string>()
+    },
     new Map([
       ['clk', signal]
     ]),

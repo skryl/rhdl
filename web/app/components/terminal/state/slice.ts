@@ -11,6 +11,6 @@ export function createTerminalStateSlice() {
   };
 }
 
-export function reduceTerminalState(_state: any, _action = {}) {
+export function reduceTerminalState(_state: unknown, _action: unknown = {}) {
   return false;
 }

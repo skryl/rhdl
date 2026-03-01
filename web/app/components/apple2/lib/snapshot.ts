@@ -2,7 +2,41 @@ export const DEFAULT_APPLE2_SNAPSHOT_KIND = 'rhdl.apple2.ram_snapshot';
 export const DEFAULT_APPLE2_SNAPSHOT_VERSION = 1;
 export const DEFAULT_MEMORY_SNAPSHOT_KIND = 'rhdl.memory.snapshot';
 
-function encodeBase64Binary(binaryText: any) {
+interface SnapshotBuildOptions {
+  kind?: unknown;
+  version?: unknown;
+}
+
+interface SnapshotParseOptions {
+  kind?: unknown;
+  kinds?: unknown;
+  version?: unknown;
+}
+
+interface Apple2SnapshotPayload {
+  kind: string;
+  version: number;
+  label: string;
+  offset: number;
+  length: number;
+  savedAtMs: number;
+  savedAtIso: string;
+  dataB64: string;
+  startPc?: number;
+  [key: string]: unknown;
+}
+
+export interface ParsedApple2Snapshot {
+  bytes: Uint8Array;
+  offset: number;
+  label: string;
+  savedAtIso: string | null;
+  startPc: number | null;
+}
+
+type SnapshotPayloadRecord = Record<string, unknown>;
+
+function encodeBase64Binary(binaryText: string) {
   if (typeof btoa === 'function') {
     return btoa(binaryText);
   }
@@ -12,17 +46,17 @@ function encodeBase64Binary(binaryText: any) {
   throw new Error('No base64 encoder available.');
 }
 
-function decodeBase64Binary(base64: any) {
+function decodeBase64Binary(base64: string) {
   if (typeof atob === 'function') {
-    return atob(base64 || '');
+    return atob(base64);
   }
   if (typeof Buffer !== 'undefined') {
-    return Buffer.from(base64 || '', 'base64').toString('binary');
+    return Buffer.from(base64, 'base64').toString('binary');
   }
   throw new Error('No base64 decoder available.');
 }
 
-export function bytesToBase64(bytes: any) {
+export function bytesToBase64(bytes: unknown) {
   if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
     return '';
   }
@@ -35,8 +69,8 @@ export function bytesToBase64(bytes: any) {
   return encodeBase64Binary(binary);
 }
 
-export function base64ToBytes(base64: any) {
-  const binary = decodeBase64Binary(base64 || '');
+export function base64ToBytes(base64: unknown) {
+  const binary = decodeBase64Binary(String(base64 || ''));
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) {
     out[i] = binary.charCodeAt(i);
@@ -44,11 +78,11 @@ export function base64ToBytes(base64: any) {
   return out;
 }
 
-export function parsePcLiteral(value: any) {
+export function parsePcLiteral(value: unknown) {
   if (value == null) {
     return null;
   }
-  if (Number.isFinite(value)) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
     return Math.trunc(value) & 0xffff;
   }
   const raw = String(value).trim();
@@ -75,7 +109,7 @@ export function parsePcLiteral(value: any) {
   return null;
 }
 
-export function extractPcFromText(text: any) {
+export function extractPcFromText(text: unknown) {
   if (typeof text !== 'string' || !text.trim()) {
     return null;
   }
@@ -99,7 +133,7 @@ export function extractPcFromText(text: any) {
   return null;
 }
 
-export function isSnapshotFileName(fileName: any) {
+export function isSnapshotFileName(fileName: unknown) {
   const lower = String(fileName || '').trim().toLowerCase();
   return (
     lower.endsWith('.rhdlsnap')
@@ -110,13 +144,13 @@ export function isSnapshotFileName(fileName: any) {
 }
 
 export function buildApple2SnapshotPayload(
-  bytes: any,
+  bytes: Uint8Array,
   offset = 0,
   label = 'saved dump',
-  savedAtIso = null,
-  startPc = null,
-  options: any = {}
-) {
+  savedAtIso: string | null = null,
+  startPc: unknown = null,
+  options: SnapshotBuildOptions = {}
+): Apple2SnapshotPayload | null {
   if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
     return null;
   }
@@ -127,14 +161,14 @@ export function buildApple2SnapshotPayload(
   }
 
   const kind = String(options.kind || DEFAULT_APPLE2_SNAPSHOT_KIND);
-  const version = Number.parseInt(options.version, 10) || DEFAULT_APPLE2_SNAPSHOT_VERSION;
+  const version = Number.parseInt(String(options.version ?? ''), 10) || DEFAULT_APPLE2_SNAPSHOT_VERSION;
   const iso = typeof savedAtIso === 'string' && savedAtIso ? savedAtIso : new Date().toISOString();
 
-  const payload: any = {
+  const payload: Apple2SnapshotPayload = {
     kind,
     version,
     label: String(label || 'saved dump'),
-    offset: Math.max(0, Number.parseInt(offset as any, 10) || 0),
+    offset: Math.max(0, Number.parseInt(String(offset), 10) || 0),
     length: bytes.length,
     savedAtMs: Date.now(),
     savedAtIso: iso,
@@ -149,13 +183,17 @@ export function buildApple2SnapshotPayload(
   return payload;
 }
 
-export function parseApple2SnapshotPayload(payload: any, options: any = {}) {
+export function parseApple2SnapshotPayload(
+  payload: unknown,
+  options: SnapshotParseOptions = {}
+): ParsedApple2Snapshot | null {
   if (!payload || typeof payload !== 'object') {
     return null;
   }
+  const payloadRecord = payload as SnapshotPayloadRecord;
 
   const explicitKinds = Array.isArray(options.kinds)
-    ? options.kinds.map((kind: any) => String(kind || '').trim()).filter(Boolean)
+    ? options.kinds.map((kind: unknown) => String(kind || '').trim()).filter(Boolean)
     : [];
   if (explicitKinds.length === 0 && options.kind) {
     explicitKinds.push(String(options.kind));
@@ -163,25 +201,25 @@ export function parseApple2SnapshotPayload(payload: any, options: any = {}) {
   if (explicitKinds.length === 0) {
     explicitKinds.push(DEFAULT_APPLE2_SNAPSHOT_KIND, DEFAULT_MEMORY_SNAPSHOT_KIND);
   }
-  const expectedVersion = Number.parseInt(options.version, 10) || DEFAULT_APPLE2_SNAPSHOT_VERSION;
+  const expectedVersion = Number.parseInt(String(options.version ?? ''), 10) || DEFAULT_APPLE2_SNAPSHOT_VERSION;
 
-  if (payload.kind != null && !explicitKinds.includes(String(payload.kind))) {
+  if (payloadRecord.kind != null && !explicitKinds.includes(String(payloadRecord.kind))) {
     return null;
   }
-  if (payload.version != null) {
-    const version = Number.parseInt(payload.version, 10);
+  if (payloadRecord.version != null) {
+    const version = Number.parseInt(String(payloadRecord.version), 10);
     if (!Number.isFinite(version) || version > expectedVersion) {
       return null;
     }
   }
-  if (typeof payload.dataB64 !== 'string') {
+  if (typeof payloadRecord.dataB64 !== 'string') {
     return null;
   }
 
   let bytes;
   try {
-    bytes = base64ToBytes(payload.dataB64);
-  } catch (_err: any) {
+    bytes = base64ToBytes(payloadRecord.dataB64);
+  } catch (_err: unknown) {
     return null;
   }
   if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
@@ -190,13 +228,13 @@ export function parseApple2SnapshotPayload(payload: any, options: any = {}) {
 
   let startPc = null;
   const pcCandidates = [
-    payload.startPc,
-    payload.start_pc,
-    payload.pc,
-    payload.resetPc,
-    payload.reset_pc,
-    payload.entryPc,
-    payload.entry_pc
+    payloadRecord.startPc,
+    payloadRecord.start_pc,
+    payloadRecord.pc,
+    payloadRecord.resetPc,
+    payloadRecord.reset_pc,
+    payloadRecord.entryPc,
+    payloadRecord.entry_pc
   ];
   for (const candidate of pcCandidates) {
     const parsed = parsePcLiteral(candidate);
@@ -206,26 +244,29 @@ export function parseApple2SnapshotPayload(payload: any, options: any = {}) {
     }
   }
   if (startPc == null) {
-    startPc = extractPcFromText(payload.label) ?? extractPcFromText(payload.notes);
+    startPc = extractPcFromText(payloadRecord.label) ?? extractPcFromText(payloadRecord.notes);
   }
 
   return {
     bytes,
-    offset: Math.max(0, Number.parseInt(payload.offset, 10) || 0),
-    label: typeof payload.label === 'string' && payload.label ? payload.label : 'saved dump',
-    savedAtIso: typeof payload.savedAtIso === 'string' ? payload.savedAtIso : null,
+    offset: Math.max(0, Number.parseInt(String(payloadRecord.offset ?? ''), 10) || 0),
+    label: typeof payloadRecord.label === 'string' && payloadRecord.label ? payloadRecord.label : 'saved dump',
+    savedAtIso: typeof payloadRecord.savedAtIso === 'string' ? payloadRecord.savedAtIso : null,
     startPc
   };
 }
 
-export function parseApple2SnapshotText(text: any, options: any = {}) {
+export function parseApple2SnapshotText(
+  text: unknown,
+  options: SnapshotParseOptions = {}
+): ParsedApple2Snapshot | null {
   if (typeof text !== 'string' || !text.trim()) {
     return null;
   }
   try {
     const payload = JSON.parse(text);
     return parseApple2SnapshotPayload(payload, options);
-  } catch (_err: any) {
+  } catch (_err: unknown) {
     return null;
   }
 }

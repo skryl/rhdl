@@ -2,14 +2,14 @@ const U16_MAX = 0xFFFF;
 const U32_MAX = 0xFFFFFFFF;
 const U32_ADDRESS_SPACE = 0x100000000;
 
-function asBoolean(value: any, fallback = false) {
+function asBoolean(value: Unsafe, fallback = false) {
   if (value == null) {
     return fallback;
   }
   return !!value;
 }
 
-function asUint(value: any, fallback = 0, max = U32_MAX) {
+function asUint(value: Unsafe, fallback = 0, max = U32_MAX) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed)) {
     return fallback;
@@ -17,21 +17,21 @@ function asUint(value: any, fallback = 0, max = U32_MAX) {
   return Math.max(0, Math.min(max, Math.trunc(parsed)));
 }
 
-function asOptionalUint(value: any, fallback = null, max = U32_MAX) {
+function asOptionalUint(value: Unsafe, fallback = null, max = U32_MAX) {
   if (value == null || value === '') {
     return fallback;
   }
   return asUint(value, fallback == null ? 0 : fallback, max);
 }
 
-function asString(value: any, fallback = '') {
+function asString(value: Unsafe, fallback = '') {
   if (typeof value !== 'string') {
     return fallback;
   }
   return value;
 }
 
-function asStringArray(value: any) {
+function asStringArray(value: Unsafe) {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -94,7 +94,7 @@ function baseRunnerIoConfig() {
   };
 }
 
-function legacyApple2IoConfig(preset: any = {}) {
+function legacyApple2IoConfig(preset: Unsafe = {}) {
   return {
     enabled: true,
     api: 'apple2',
@@ -139,7 +139,7 @@ function legacyApple2IoConfig(preset: any = {}) {
       mask: 1
     },
     rom: {
-      path: asString(preset.romPath, null as any),
+      path: asString(preset.romPath, null as Unsafe),
       offset: 0xD000,
       isRom: true
     },
@@ -148,7 +148,7 @@ function legacyApple2IoConfig(preset: any = {}) {
   };
 }
 
-function normalizeMemory(memory: any = {}, fallback: any) {
+function normalizeMemory(memory: Unsafe = {}, fallback: Unsafe) {
   return {
     dumpStart: asUint(memory.dumpStart, fallback.dumpStart, U32_MAX),
     dumpLength: asUint(memory.dumpLength, fallback.dumpLength, U32_MAX),
@@ -159,7 +159,7 @@ function normalizeMemory(memory: any = {}, fallback: any) {
   };
 }
 
-function normalizeDisplay(display: any = {}, fallback: any) {
+function normalizeDisplay(display: Unsafe = {}, fallback: Unsafe) {
   const textRaw = display.text && typeof display.text === 'object' ? display.text : {};
   return {
     enabled: asBoolean(display.enabled, fallback.enabled),
@@ -177,7 +177,7 @@ function normalizeDisplay(display: any = {}, fallback: any) {
   };
 }
 
-function normalizeKeyboard(keyboard: any = {}, fallback: any) {
+function normalizeKeyboard(keyboard: Unsafe = {}, fallback: Unsafe) {
   return {
     enabled: asBoolean(keyboard.enabled, fallback.enabled),
     mode: asString(keyboard.mode, fallback.mode),
@@ -192,7 +192,7 @@ function normalizeKeyboard(keyboard: any = {}, fallback: any) {
   };
 }
 
-function normalizeSound(sound: any = {}, fallback: any) {
+function normalizeSound(sound: Unsafe = {}, fallback: Unsafe) {
   return {
     enabled: asBoolean(sound.enabled, fallback.enabled),
     mode: asString(sound.mode, fallback.mode),
@@ -201,7 +201,7 @@ function normalizeSound(sound: any = {}, fallback: any) {
   };
 }
 
-function normalizeRom(rom: any = {}, fallback: any) {
+function normalizeRom(rom: Unsafe = {}, fallback: Unsafe) {
   return {
     path: asString(rom.path, fallback.path),
     offset: asUint(rom.offset, fallback.offset, U16_MAX),
@@ -209,7 +209,7 @@ function normalizeRom(rom: any = {}, fallback: any) {
   };
 }
 
-export function resolveRunnerIoConfig(preset: any = {}) {
+export function resolveRunnerIoConfig(preset: Unsafe = {}) {
   const raw = preset && typeof preset.io === 'object' ? preset.io : null;
   if (!raw) {
     if (preset?.enableApple2Ui) {

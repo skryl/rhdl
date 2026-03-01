@@ -57,9 +57,25 @@ export const MOS6502_MNEMONICS = {
   0xFE: ['INC', 'absx']
 };
 
-export function format6502Operand(mode: any, addr: any, readByte: any) {
-  const b1 = readByte((addr + 1) & 0xffff);
-  const b2 = readByte((addr + 2) & 0xffff);
+type ReadByteFn = (addr: number) => number;
+
+interface DisasmOptions {
+  addressSpace?: unknown;
+  highlightPc?: unknown;
+}
+
+function asReadByte(fn: unknown): ReadByteFn {
+  if (typeof fn === 'function') {
+    return fn as ReadByteFn;
+  }
+  return () => 0;
+}
+
+export function format6502Operand(mode: unknown, addr: unknown, readByte: unknown) {
+  const read = asReadByte(readByte);
+  const baseAddr = Number(addr) & 0xffff;
+  const b1 = read((baseAddr + 1) & 0xffff);
+  const b2 = read((baseAddr + 2) & 0xffff);
   const word = (b2 << 8) | b1;
 
   switch (mode) {
@@ -89,7 +105,7 @@ export function format6502Operand(mode: any, addr: any, readByte: any) {
       return { bytes: 2, operand: `($${hexByte(b1)}),Y` };
     case 'rel': {
       const offset = b1 > 0x7f ? b1 - 0x100 : b1;
-      const target = (addr + 2 + offset) & 0xffff;
+      const target = (baseAddr + 2 + offset) & 0xffff;
       return { bytes: 2, operand: `$${hexWord(target)}` };
     }
     default:
@@ -98,22 +114,22 @@ export function format6502Operand(mode: any, addr: any, readByte: any) {
 }
 
 export function disassemble6502Lines(
-  startAddress: any,
-  lineCount: any,
-  readMemory: any,
-  options: any = {}
+  startAddress: unknown,
+  lineCount: unknown,
+  readMemory: unknown,
+  options: DisasmOptions = {}
 ) {
-  const count = Math.max(1, Math.min(4096, Number.parseInt(lineCount, 10) || 1));
+  const count = Math.max(1, Math.min(4096, Number.parseInt(String(lineCount), 10) || 1));
   const start = Number(startAddress) & 0xffff;
-  const addressSpace = Math.max(1, Number.parseInt(options.addressSpace, 10) || 0x10000);
+  const addressSpace = Math.max(1, Number.parseInt(String(options.addressSpace ?? ''), 10) || 0x10000);
   const highlightPc = options.highlightPc == null ? null : (Number(options.highlightPc) & 0xffff);
 
   const fetchLen = (count * 3) + 3;
   const memory = typeof readMemory === 'function'
-    ? readMemory(start, fetchLen)
+    ? (readMemory as (offset: number, length: number) => Uint8Array)(start, fetchLen)
     : new Uint8Array(0);
 
-  const readByte = (addr: any) => {
+  const readByte = (addr: number) => {
     const normalized = addr & 0xffff;
     const offset = (normalized - start + addressSpace) % addressSpace;
     if (memory instanceof Uint8Array && offset < memory.length) {

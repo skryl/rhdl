@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createTerminalSessionService } from '../../../../app/components/terminal/services/session_service';
 
 function createHarness() {
-  const calls: any[] = [];
+  const calls: Array<[string, ...unknown[]]> = [];
   const dom = {
     terminalOutput: {
       textContent: '',
@@ -27,8 +27,8 @@ function createHarness() {
   const service = createTerminalSessionService({
     dom,
     state,
-    requestFrame: (cb: any) => cb(),
-    runCommand: async (line: any) => {
+    requestFrame: (cb: () => void) => cb(),
+    runCommand: async (line: string) => {
       calls.push(['run', line]);
     },
     refreshStatus: () => {

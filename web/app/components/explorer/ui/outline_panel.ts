@@ -1,7 +1,67 @@
 import { LitElement, html, css } from 'lit';
+import {
+  asRecord,
+  type ComponentNode,
+  type ExplorerDomRefs
+} from '../lib/types';
+
+interface TreeRow {
+  nodeId: string;
+  depth: number;
+  name: string;
+  kind: string;
+  childCount: number;
+  signalCount: number;
+  isActive: boolean;
+}
+
+interface SignalTableRow {
+  name: string;
+  width: string;
+  value: string;
+}
+
+type ValueFormatter = (value: unknown, width?: number) => string;
+
+interface InspectorViewPayload {
+  dom: ExplorerDomRefs;
+  node: ComponentNode | null;
+  parseError: string;
+  signalRows: unknown[];
+  hiddenSignalCount: number;
+  codeTextRhdl: string;
+  codeTextVerilog: string;
+  title: string;
+  metaText: string;
+  signalMetaText: string;
+  formatValue: ValueFormatter;
+}
+
+function normalizeTreeRow(value: unknown): TreeRow | null {
+  const row = asRecord(value);
+  if (!row) {
+    return null;
+  }
+  const nodeId = String(row.nodeId || '').trim();
+  if (!nodeId) {
+    return null;
+  }
+  return {
+    nodeId,
+    depth: Number(row.depth) || 0,
+    name: String(row.name || ''),
+    kind: String(row.kind || ''),
+    childCount: Number(row.childCount) || 0,
+    signalCount: Number(row.signalCount) || 0,
+    isActive: row.isActive === true
+  };
+}
 
 class RhdlComponentTree extends LitElement {
-  [key: string]: any;
+  [key: string]: unknown;
+  rows: TreeRow[];
+  parseError: string;
+  filterText: string;
   static properties = {
     rows: { state: true },
     parseError: { state: true },
@@ -124,13 +184,17 @@ class RhdlComponentTree extends LitElement {
 
   constructor() {
     super();
-    this.rows = [];
+    this.rows = [] as TreeRow[];
     this.parseError = '';
     this.filterText = '';
   }
 
-  setTree(rows: any, parseError = '') {
-    this.rows = Array.isArray(rows) ? rows.slice() : [];
+  setTree(rows: unknown, parseError = '') {
+    this.rows = Array.isArray(rows)
+      ? rows
+        .map((row) => normalizeTreeRow(row))
+        .filter((row): row is TreeRow => row !== null)
+      : [];
     this.parseError = String(parseError || '');
   }
 
@@ -153,7 +217,7 @@ class RhdlComponentTree extends LitElement {
     return String(this.filterText || '');
   }
 
-  selectNode(nodeId: any) {
+  selectNode(nodeId: unknown) {
     this.dispatchEvent(new CustomEvent('component-select', {
       detail: { nodeId },
       bubbles: true,
@@ -161,8 +225,9 @@ class RhdlComponentTree extends LitElement {
     }));
   }
 
-  onFilterInput(event: any) {
-    this.setFilter(event?.target?.value || '', true);
+  onFilterInput(event: Event) {
+    const target = event.target as HTMLInputElement | null;
+    this.setFilter(target?.value || '', true);
   }
 
   clearFilter() {
@@ -175,7 +240,7 @@ class RhdlComponentTree extends LitElement {
       : (this.rows.length
         ? html`
             <div class="tree">
-              ${this.rows.map((row: any) => html`
+              ${this.rows.map((row: TreeRow) => html`
                 <button
                   type="button"
                   class=${row.isActive ? 'active' : ''}
@@ -197,7 +262,7 @@ class RhdlComponentTree extends LitElement {
           type="text"
           placeholder="Search components/signals"
           .value=${this.filterText}
-          @input=${(event: any) => this.onFilterInput(event)}
+          @input=${(event: Event) => this.onFilterInput(event)}
         />
         <button type="button" @click=${() => this.clearFilter()}>Clear</button>
       </div>
@@ -207,7 +272,10 @@ class RhdlComponentTree extends LitElement {
 }
 
 class RhdlComponentCodeViewer extends LitElement {
-  [key: string]: any;
+  [key: string]: unknown;
+  rhdlText: string;
+  verilogText: string;
+  view: 'rhdl' | 'verilog';
   static properties = {
     rhdlText: { state: true },
     verilogText: { state: true },
@@ -297,7 +365,7 @@ class RhdlComponentCodeViewer extends LitElement {
     this.view = 'rhdl';
   }
 
-  normalizeView(view: any) {
+  normalizeView(view: unknown) {
     return view === 'verilog' ? 'verilog' : 'rhdl';
   }
 
@@ -305,7 +373,7 @@ class RhdlComponentCodeViewer extends LitElement {
     return this.normalizeView(this.view);
   }
 
-  setView(view: any, emit = false) {
+  setView(view: unknown, emit = false) {
     const next = this.normalizeView(view);
     if (this.view === next) {
       return;
@@ -320,7 +388,7 @@ class RhdlComponentCodeViewer extends LitElement {
     }
   }
 
-  setCodeTexts({ rhdl = '', verilog = '' }: any = {}) {
+  setCodeTexts({ rhdl = '', verilog = '' }: { rhdl?: string; verilog?: string } = {}) {
     this.rhdlText = String(rhdl || '');
     this.verilogText = String(verilog || '');
   }
@@ -348,7 +416,9 @@ class RhdlComponentCodeViewer extends LitElement {
 }
 
 class RhdlComponentSignalTable extends LitElement {
-  [key: string]: any;
+  [key: string]: unknown;
+  rows: SignalTableRow[];
+  hiddenSignalCount: number;
   static properties = {
     rows: { state: true },
     hiddenSignalCount: { state: true }
@@ -399,17 +469,26 @@ class RhdlComponentSignalTable extends LitElement {
 
   constructor() {
     super();
-    this.rows = [];
+    this.rows = [] as SignalTableRow[];
     this.hiddenSignalCount = 0;
   }
 
-  setSignals(signalRows: any, hiddenSignalCount: any, formatValue: any) {
-    const formatter = typeof formatValue === 'function' ? formatValue : (value: any) => String(value ?? '');
-    this.rows = (signalRows || []).map((signal: any) => ({
-      name: signal.fullName || signal.name,
-      width: String(signal.width || 1),
-      value: signal.value == null ? '-' : formatter(signal.value, signal.width || 1)
-    }));
+  setSignals(signalRows: unknown, hiddenSignalCount: unknown, formatValue: unknown) {
+    const formatter: ValueFormatter = typeof formatValue === 'function'
+      ? (formatValue as ValueFormatter)
+      : (value: unknown) => String(value ?? '');
+    const rows = Array.isArray(signalRows) ? signalRows : [];
+    this.rows = rows.map((signal): SignalTableRow => {
+      const signalRecord = asRecord(signal) || {};
+      return {
+        name: String(signalRecord.fullName || signalRecord.name || ''),
+        width: String(signalRecord.width || 1),
+        value:
+          signalRecord.value == null
+            ? '-'
+            : formatter(signalRecord.value, Number(signalRecord.width) || 1)
+      };
+    });
     this.hiddenSignalCount = Math.max(0, Number(hiddenSignalCount) || 0);
   }
 
@@ -424,7 +503,7 @@ class RhdlComponentSignalTable extends LitElement {
           </tr>
         </thead>
         <tbody>
-          ${this.rows.map((row: any) => html`
+          ${this.rows.map((row: SignalTableRow) => html`
             <tr>
               <td>${row.name}</td>
               <td>${row.width}</td>
@@ -452,8 +531,12 @@ if (!customElements.get('rhdl-component-code-viewer')) {
   customElements.define('rhdl-component-code-viewer', RhdlComponentCodeViewer);
 }
 
-export function renderComponentTreeRows(dom: any, treeRows: any, parseError: any) {
-  const element = dom?.componentTree;
+export function renderComponentTreeRows(
+  dom: ExplorerDomRefs,
+  treeRows: unknown,
+  parseError: string
+) {
+  const element = dom.componentTree;
   if (!element) {
     return;
   }
@@ -474,8 +557,8 @@ export function renderComponentInspectorView({
   metaText,
   signalMetaText,
   formatValue
-}: any) {
-  if (!dom?.componentTitle || !dom?.componentMeta || !dom?.componentSignalBody || !dom?.componentCode) {
+}: InspectorViewPayload) {
+  if (!dom.componentTitle || !dom.componentMeta || !dom.componentSignalBody || !dom.componentCode) {
     return;
   }
 

@@ -1,7 +1,14 @@
-function requireFn(name: any, fn: any) {
+function requireFn(name: string, fn: unknown) {
   if (typeof fn !== 'function') {
     throw new Error(`createApple2AudioRuntimeService requires function: ${name}`);
   }
+}
+
+function formatError(err: unknown) {
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return String(err);
 }
 
 export function createApple2AudioRuntimeService({
@@ -10,7 +17,7 @@ export function createApple2AudioRuntimeService({
   updateIoToggleUi,
   log = () => {},
   windowRef = globalThis.window
-}: any = {}) {
+}: Unsafe = {}) {
   if (!state) {
     throw new Error('createApple2AudioRuntimeService requires state');
   }
@@ -46,7 +53,7 @@ export function createApple2AudioRuntimeService({
     return true;
   }
 
-  async function setApple2SoundEnabled(enabled: any) {
+  async function setApple2SoundEnabled(enabled: unknown) {
     setApple2SoundEnabledState(!!enabled);
     updateIoToggleUi();
 
@@ -66,14 +73,14 @@ export function createApple2AudioRuntimeService({
 
     try {
       await state.apple2.audioCtx.resume();
-    } catch (err: any) {
+    } catch (err: unknown) {
       setApple2SoundEnabledState(false);
       updateIoToggleUi();
-      log(`Failed to enable audio: ${err.message || err}`);
+      log(`Failed to enable audio: ${formatError(err)}`);
     }
   }
 
-  function updateApple2SpeakerAudio(toggles: any, cyclesRun: any) {
+  function updateApple2SpeakerAudio(toggles: unknown, cyclesRun: unknown) {
     if (!state.apple2.soundEnabled) {
       return;
     }
@@ -85,12 +92,14 @@ export function createApple2AudioRuntimeService({
     const gain = state.apple2.audioGain.gain;
     const freq = state.apple2.audioOsc.frequency;
 
-    if (!toggles || !cyclesRun) {
+    const toggleCount = Number(toggles);
+    const cycleCount = Number(cyclesRun);
+    if (!Number.isFinite(toggleCount) || !Number.isFinite(cycleCount) || toggleCount <= 0 || cycleCount <= 0) {
       gain.setTargetAtTime(0, ctx.currentTime, 0.012);
       return;
     }
 
-    const hz = (toggles * 1_000_000) / (2 * Math.max(1, cyclesRun));
+    const hz = (toggleCount * 1_000_000) / (2 * Math.max(1, cycleCount));
     const clampedHz = Math.max(40, Math.min(6000, hz));
     freq.setTargetAtTime(clampedHz, ctx.currentTime, 0.006);
     gain.setTargetAtTime(0.03, ctx.currentTime, 0.005);

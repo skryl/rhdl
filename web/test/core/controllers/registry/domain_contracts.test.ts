@@ -10,6 +10,11 @@ import { createWatchDomainController } from '../../../../app/components/watch/co
 
 test('registry domains expose the grouped controller contracts used by startup + bindings', () => {
   const fn = () => {};
+  const fnBool = () => true;
+  const fnAsyncBool = async () => true;
+  const fnAsyncVoid = async () => {};
+  const fnUnknown = () => null;
+  const fnBigInt = () => 0n;
 
   const shell = createShellDomainController({
     setActiveTab: fn,
@@ -35,13 +40,15 @@ test('registry domains expose the grouped controller contracts used by startup +
     ensureBackendInstance: fn
   });
   const components = createComponentDomainController({
-    isComponentTabActive: fn,
+    isComponentTabActive: fnBool,
     refreshActiveComponentTab: fn,
     refreshComponentExplorer: fn,
     renderComponentTree: fn,
     setComponentGraphFocus: fn,
     currentComponentGraphFocusNode: fn,
     renderComponentViews: fn,
+    zoomComponentGraphIn: fn,
+    zoomComponentGraphOut: fn,
     resetComponentGraphViewport: fn,
     clearComponentSourceOverride: fn,
     resetComponentExplorerState: fn
@@ -52,17 +59,18 @@ test('registry domains expose the grouped controller contracts used by startup +
     refreshApple2Screen: fn,
     refreshApple2Debug: fn,
     refreshMemoryView: fn,
-    setApple2SoundEnabled: fn,
+    setApple2SoundEnabled: fnAsyncVoid,
     updateApple2SpeakerAudio: fn,
     queueApple2Key: fn,
-    performApple2ResetSequence: fn,
+    performApple2ResetSequence: fnUnknown,
     setMemoryDumpStatus: fn,
-    loadApple2DumpOrSnapshotFile: fn,
-    saveApple2MemoryDump: fn,
-    saveApple2MemorySnapshot: fn,
-    loadLastSavedApple2Dump: fn,
-    loadKaratekaDump: fn,
-    resetApple2WithMemoryVectorOverride: fn
+    loadApple2DumpOrSnapshotFile: fnAsyncBool,
+    loadApple2DumpOrSnapshotAssetPath: fnAsyncBool,
+    saveApple2MemoryDump: fnAsyncBool,
+    saveApple2MemorySnapshot: fnAsyncBool,
+    loadLastSavedApple2Dump: fnAsyncBool,
+    loadKaratekaDump: fnAsyncVoid,
+    resetApple2WithMemoryVectorOverride: fnAsyncBool
   });
   const sim = createSimDomainController({
     setupP5: fn,
@@ -72,7 +80,7 @@ test('registry domains expose the grouped controller contracts used by startup +
     stepSimulation: fn,
     runFrame: fn,
     drainTrace: fn,
-    maskForWidth: fn
+    maskForWidth: fnBigInt
   });
   const watch = createWatchDomainController({
     refreshWatchTable: fn,
@@ -90,10 +98,10 @@ test('registry domains expose the grouped controller contracts used by startup +
   assert.equal(components.refreshExplorer, fn);
   assert.equal(components.currentGraphFocusNode, fn);
   assert.equal(components.resetGraphView, fn);
-  assert.equal(apple2.resetWithMemoryVectorOverride, fn);
-  assert.equal(apple2.loadDumpOrSnapshotFile, fn);
+  assert.equal(apple2.resetWithMemoryVectorOverride, fnAsyncBool);
+  assert.equal(apple2.loadDumpOrSnapshotFile, fnAsyncBool);
   assert.equal(sim.initializeSimulator, fn);
-  assert.equal(sim.maskForWidth, fn);
+  assert.equal(sim.maskForWidth, fnBigInt);
   assert.equal(watch.addBreakpoint, fn);
   assert.equal(watch.renderBreakpoints, fn);
 });
