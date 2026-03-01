@@ -63,7 +63,7 @@ jobs:
           set -euo pipefail
           bundle exec rake native:build
 
-      - name: Run test suite
+      - name: Run test suite (parallel)
         env:
           RSPEC_QUIET_OUTPUT: "1"
-        run: bundle exec rake spec
+        run: bundle exec rake pspec
