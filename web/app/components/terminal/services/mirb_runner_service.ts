@@ -2,7 +2,7 @@
 const DEFAULT_MIRB_JS_PATH = './assets/pkg/mirb.js';
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_STDIN_BUFFER_BYTES = 1 << 20;
-const DEFAULT_MIRB_WORKER_SCRIPT_PATH = './app/components/terminal/workers/mirb_worker.js';
+const DEFAULT_MIRB_WORKER_SCRIPT_PATH = './assets/pkg/mirb_worker.js';
 
 const STDIN_CTRL_WRITE_IDX = 0;
 const STDIN_CTRL_READ_IDX = 1;

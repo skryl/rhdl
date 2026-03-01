@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { ConsoleMessage, Page, Route } from 'playwright';
+import type { Browser, ConsoleMessage, Page, Route } from 'playwright';
 
 import {
   createStaticServer,
@@ -209,7 +209,7 @@ test('riscv disassembly and source map integration', { timeout: 300000, concurre
     server.close();
   });
 
-  let browser;
+  let browser: Browser | null = null;
   try {
     browser = await chromium.launch({ headless: true });
   } catch (_err: unknown) {
@@ -217,10 +217,15 @@ test('riscv disassembly and source map integration', { timeout: 300000, concurre
     return;
   }
   t.after(async () => {
-    await browser.close();
+    if (browser) {
+      await browser.close();
+    }
   });
 
   async function withScenarioPage(run: (page: Page, pageErrors: string[]) => Promise<void>) {
+    if (!browser) {
+      throw new Error('browser is not initialized');
+    }
     const context = await browser.newContext();
     const page = await context.newPage();
     const { pageErrors } = setupTestPage(page);

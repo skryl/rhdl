@@ -273,24 +273,27 @@ test('initializeTrace starts tracing when explicitly enabled', () => {
 });
 
 test('arcilator backend resolves runner-specific wasm path override', async () => {
-  const fetchUrls = [];
-  const state = { backend: 'arcilator', runnerPreset: 'apple2' };
-  const runtime = { backendInstances: new Map(), instance: null, sim: null, parser: null };
+  const fetchUrls: string[] = [];
   const presets = {
     apple2: { id: 'apple2', arcilatorWasmPath: '/apple2_arcilator.wasm' },
     riscv: { id: 'riscv' }
   };
+  const state: { backend: string; runnerPreset: keyof typeof presets } = {
+    backend: 'arcilator',
+    runnerPreset: 'apple2'
+  };
+  const runtime = { backendInstances: new Map(), instance: null, sim: null, parser: null };
   const controller = createSimRuntimeController({
     state,
     runtime,
     getBackendDef: () => ({ wasmPath: '/default_arcilator.wasm' }),
     currentRunnerPreset: () => presets[state.runnerPreset],
-    fetchImpl: async (url) => {
+    fetchImpl: async (url: string) => {
       fetchUrls.push(url);
       return makeOkResponse();
     },
     webAssemblyApi: {
-      async instantiate(bytes) {
+      async instantiate(bytes: unknown) {
         void bytes;
         return { instance: { id: 'arc' } };
       }

@@ -95,6 +95,27 @@ if (existsSync(resolve(webRoot, "assets"))) {
   cpSync(resolve(webRoot, "assets"), resolve(distDir, "assets"), { recursive: true });
 }
 
+// mirb worker bundle (compiled from TypeScript source into static asset path)
+mkdirSync(resolve(distDir, "assets", "pkg"), { recursive: true });
+const mirbWorkerResult = await Bun.build({
+  entrypoints: [resolve(webRoot, "app/components/terminal/workers/mirb_worker.ts")],
+  outdir: resolve(distDir, "assets/pkg"),
+  target: "browser",
+  format: "esm",
+  splitting: false,
+  naming: "[name].js",
+  minify: isProduction,
+  sourcemap: "none"
+});
+
+if (!mirbWorkerResult.success) {
+  console.error("mirb worker build failed:");
+  for (const log of mirbWorkerResult.logs) {
+    console.error(log);
+  }
+  process.exit(1);
+}
+
 // Source map
 if (appBundle.sourcemap) {
   // Already written to distDir by Bun.build
