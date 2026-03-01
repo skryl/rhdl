@@ -222,14 +222,17 @@ module RHDL
         end
 
         def install_iverilog_linux
-          unless ensure_homebrew_linux
-            puts "Homebrew is required for Linux dependency installs."
-            puts "Install Homebrew, then run: bundle exec rake deps"
-            return
+          if command_available?('apt-get')
+            puts "Installing iverilog via apt-get..."
+            if ENV['USER'] == 'root'
+              system('apt-get update && apt-get install -y iverilog')
+            else
+              system('sudo apt-get update && sudo apt-get install -y iverilog')
+            end
+          else
+            puts "apt-get not found. Please install iverilog manually:"
+            puts "  sudo apt-get update && sudo apt-get install -y iverilog"
           end
-
-          puts "Installing iverilog via Homebrew..."
-          system('brew install icarus-verilog')
         end
 
         def install_iverilog_macos
@@ -259,14 +262,17 @@ module RHDL
         end
 
         def install_verilator_linux
-          unless ensure_homebrew_linux
-            puts "Homebrew is required for Linux dependency installs."
-            puts "Install Homebrew, then run: bundle exec rake deps"
-            return
+          if command_available?('apt-get')
+            puts "Installing verilator via apt-get..."
+            if ENV['USER'] == 'root'
+              system('apt-get update && apt-get install -y verilator')
+            else
+              system('sudo apt-get update && sudo apt-get install -y verilator')
+            end
+          else
+            puts "apt-get not found. Please install verilator manually:"
+            puts "  sudo apt-get update && sudo apt-get install -y verilator"
           end
-
-          puts "Installing verilator via Homebrew..."
-          system('brew install verilator')
         end
 
         def install_verilator_macos
@@ -297,16 +303,17 @@ module RHDL
         end
 
         def install_arcilator_linux(missing_tools:)
-          if ensure_homebrew_linux
-            puts "Installing CIRCT tools via Homebrew..."
-            system('brew install circt llvm')
+          if command_available?('apt-get')
+            puts "Installing CIRCT tools via apt-get..."
+            if ENV['USER'] == 'root'
+              system('apt-get update && apt-get install -y circt llvm')
+            else
+              system('sudo apt-get update && sudo apt-get install -y circt llvm')
+            end
           else
-            puts "Homebrew is required for Linux dependency installs."
+            puts "apt-get not found. Please install CIRCT tools manually:"
+            puts "  sudo apt-get update && sudo apt-get install -y circt llvm"
           end
-
-          # Fallback for environments where formulae are unavailable or incomplete.
-          remaining = missing_commands(missing_tools)
-          install_arcilator_from_release(platform: :linux, missing_tools: remaining) unless remaining.empty?
         end
 
         def install_arcilator_macos(missing_tools:)
@@ -420,39 +427,6 @@ module RHDL
               puts "Updated LD_LIBRARY_PATH for current process: #{lib_install_dir}"
             end
           end
-        end
-
-        def ensure_homebrew_linux
-          return true if command_available?('brew')
-
-          if command_available?('apt-get')
-            puts "Installing Homebrew via apt-get..."
-            install_cmd = if ENV['USER'] == 'root'
-              'apt-get update && apt-get install -y linuxbrew-wrapper'
-            else
-              'sudo apt-get update && sudo apt-get install -y linuxbrew-wrapper'
-            end
-            system(install_cmd)
-          else
-            puts "apt-get not available; cannot auto-install Homebrew."
-          end
-
-          activate_homebrew_env
-          command_available?('brew')
-        end
-
-        def activate_homebrew_env
-          candidates = [
-            '/home/linuxbrew/.linuxbrew/bin',
-            '/home/linuxbrew/.linuxbrew/sbin',
-            '/home/linuxbrew/.linuxbrew/Homebrew/bin'
-          ]
-
-          path_entries = ENV.fetch('PATH', '').split(File::PATH_SEPARATOR)
-          updated = candidates.select { |dir| File.directory?(dir) && !path_entries.include?(dir) }
-          return if updated.empty?
-
-          ENV['PATH'] = (updated + path_entries).join(File::PATH_SEPARATOR)
         end
 
         def circt_release_asset_name_for(platform)
