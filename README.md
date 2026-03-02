@@ -16,6 +16,8 @@ RHDL is a Domain Specific Language (DSL) for designing hardware using Ruby's fle
 
 Demo: [Web Simulator](https://skryl.github.io/rhdl)
 
+![Web Simulator](docs/screenshots/karateka.gif)
+
 ## Features
 
 - **Component DSLs**: Ruby-based DSLs for combinational, sequential, memory, and state machine components
