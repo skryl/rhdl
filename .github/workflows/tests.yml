@@ -37,6 +37,11 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v4
+        with:
+          bun-version: latest
+
       - name: Install all simulator dependencies via rake deps
         run: |
           set -euo pipefail

@@ -38,6 +38,11 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v4
+        with:
+          bun-version: latest
+
       - name: Cache Rust build outputs
         uses: Swatinem/rust-cache@v2
         with:
