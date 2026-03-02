@@ -136,6 +136,7 @@ module RHDL
           copy_ghostty_web_assets
           copy_vim_wasm_assets
           build_mruby_wasm
+          build_mirb_worker_asset
           ensure_aot_ir_inputs
 
           unless run_rustup_target_add!
@@ -270,6 +271,28 @@ module RHDL
           puts "Wrote #{mirb_js_out}"
           puts "Wrote #{mirb_wasm_out}"
           puts "Wrote #{version_out}"
+        end
+
+        def build_mirb_worker_asset
+          unless command_available?('bun')
+            warn 'WARNING: bun not found; mirb worker asset not updated'
+            return
+          end
+
+          source = File.join(WEB_ROOT, 'app', 'components', 'terminal', 'workers', 'mirb_worker.ts')
+          out = File.join(PKG_DIR, 'mirb_worker.js')
+
+          ok = run_command(
+            'bun', 'build', source, '--target=browser', '--format=esm', '--outfile', out,
+            chdir: PROJECT_ROOT
+          )
+          unless ok
+            warn 'WARNING: mirb worker asset build failed'
+            return
+          end
+
+          File.chmod(0o644, out) if File.file?(out)
+          puts "Wrote #{out}"
         end
 
         def mruby_artifacts_embed_rhdl?

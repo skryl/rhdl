@@ -1,0 +1,7 @@
+node_modules/
+build/
+artifacts/
+bun.lock
+
+# Synced from web/dist/ by prebuild script - do not edit directly
+src/simulator/

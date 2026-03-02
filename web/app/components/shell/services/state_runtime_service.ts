@@ -1,0 +1,186 @@
+// @ts-nocheck
+function requireFn(name: unknown, fn: unknown) {
+  if (typeof fn !== 'function') {
+    throw new Error(`createShellStateRuntimeService requires function: ${name}`);
+  }
+}
+
+export function createShellStateRuntimeService({
+  dom,
+  state,
+  runtime,
+  setActiveTabState,
+  setSidebarCollapsedState,
+  setTerminalOpenState,
+  setThemeState,
+  refreshAllDashboardRowSizing,
+  refreshComponentExplorer,
+  scheduleReduxUxSync,
+  waveformFontFamily,
+  normalizeTheme,
+  SIDEBAR_COLLAPSED_KEY,
+  TERMINAL_OPEN_KEY,
+  THEME_KEY,
+  localStorageRef = globalThis.localStorage,
+  requestAnimationFrameImpl = globalThis.requestAnimationFrame,
+  setTimeoutImpl = globalThis.setTimeout,
+  documentRef = globalThis.document,
+  windowRef = globalThis.window,
+  eventCtor = globalThis.Event
+}: unknown = {}) {
+  if (!dom || !state || !runtime) {
+    throw new Error('createShellStateRuntimeService requires dom/state/runtime');
+  }
+  requireFn('setActiveTabState', setActiveTabState);
+  requireFn('setSidebarCollapsedState', setSidebarCollapsedState);
+  requireFn('setTerminalOpenState', setTerminalOpenState);
+  requireFn('setThemeState', setThemeState);
+  requireFn('refreshAllDashboardRowSizing', refreshAllDashboardRowSizing);
+  requireFn('refreshComponentExplorer', refreshComponentExplorer);
+  requireFn('scheduleReduxUxSync', scheduleReduxUxSync);
+  requireFn('waveformFontFamily', waveformFontFamily);
+  requireFn('normalizeTheme', normalizeTheme);
+
+  let componentRefreshScheduled = false;
+
+  function scheduleComponentExplorerRefresh() {
+    if (componentRefreshScheduled) {
+      return;
+    }
+    componentRefreshScheduled = true;
+    const run = () => {
+      componentRefreshScheduled = false;
+      if (state.activeTab === 'componentTab' || state.activeTab === 'componentGraphTab') {
+        refreshComponentExplorer();
+      }
+    };
+    if (typeof setTimeoutImpl === 'function') {
+      setTimeoutImpl(run, 0);
+      return;
+    }
+    if (typeof requestAnimationFrameImpl === 'function') {
+      requestAnimationFrameImpl(run);
+      return;
+    }
+    run();
+  }
+
+  function setActiveTab(tabId: unknown) {
+    setActiveTabState(tabId);
+    for (const btn of dom.tabButtons) {
+      const selected = btn.dataset.tab === tabId;
+      btn.classList.toggle('active', selected);
+      btn.setAttribute('aria-selected', selected ? 'true' : 'false');
+    }
+    for (const panel of dom.tabPanels) {
+      panel.classList.toggle('active', panel.id === tabId);
+    }
+    requestAnimationFrameImpl(() => {
+      refreshAllDashboardRowSizing();
+    });
+
+    if (tabId === 'vcdTab' || tabId === 'editorTab') {
+      requestAnimationFrameImpl(() => {
+        windowRef.dispatchEvent(new eventCtor('resize'));
+      });
+    }
+    if (tabId === 'componentTab' || tabId === 'componentGraphTab') {
+      scheduleComponentExplorerRefresh();
+    }
+    scheduleReduxUxSync('setActiveTab');
+  }
+
+  function setSidebarCollapsed(collapsed: unknown) {
+    setSidebarCollapsedState(!!collapsed);
+    if (dom.appShell) {
+      dom.appShell.classList.toggle('controls-collapsed', state.sidebarCollapsed);
+    }
+    if (dom.sidebarToggleBtn) {
+      dom.sidebarToggleBtn.setAttribute('aria-expanded', state.sidebarCollapsed ? 'false' : 'true');
+      dom.sidebarToggleBtn.setAttribute('aria-label', state.sidebarCollapsed ? 'Show Config' : 'Hide Config');
+      dom.sidebarToggleBtn.setAttribute('title', state.sidebarCollapsed ? 'Show Config' : 'Hide Config');
+      dom.sidebarToggleBtn.classList.toggle('is-active', !state.sidebarCollapsed);
+    }
+    try {
+      localStorageRef.setItem(SIDEBAR_COLLAPSED_KEY, state.sidebarCollapsed ? '1' : '0');
+    } catch (_err: unknown) {
+      // Ignore storage failures (private mode, policy, etc).
+    }
+    requestAnimationFrameImpl(() => {
+      refreshAllDashboardRowSizing();
+    });
+    scheduleReduxUxSync('setSidebarCollapsed');
+  }
+
+  function setTerminalOpen(open: unknown, { persist = true, focus = false }: unknown = {}) {
+    setTerminalOpenState(!!open);
+    if (dom.appShell) {
+      dom.appShell.classList.toggle('terminal-open', state.terminalOpen);
+    }
+    if (dom.terminalPanel) {
+      dom.terminalPanel.hidden = !state.terminalOpen;
+    }
+    if (dom.terminalToggleBtn) {
+      dom.terminalToggleBtn.classList.toggle('is-active', state.terminalOpen);
+      dom.terminalToggleBtn.setAttribute('aria-expanded', state.terminalOpen ? 'true' : 'false');
+      dom.terminalToggleBtn.setAttribute('aria-label', state.terminalOpen ? 'Hide Terminal' : 'Show Terminal');
+      dom.terminalToggleBtn.setAttribute('title', state.terminalOpen ? 'Hide Terminal' : 'Show Terminal');
+    }
+    if (persist) {
+      try {
+        localStorageRef.setItem(TERMINAL_OPEN_KEY, state.terminalOpen ? '1' : '0');
+      } catch (_err: unknown) {
+        // Ignore storage failures.
+      }
+    }
+    requestAnimationFrameImpl(() => {
+      refreshAllDashboardRowSizing();
+    });
+    if (state.terminalOpen && focus) {
+      requestAnimationFrameImpl(() => {
+        const terminalTarget = dom.terminalOutput || dom.terminalInput;
+        if (!terminalTarget || typeof terminalTarget.focus !== 'function') {
+          return;
+        }
+        terminalTarget.focus();
+        const value = String(terminalTarget.value ?? terminalTarget.textContent ?? '');
+        const end = value.length;
+        if (typeof terminalTarget.setSelectionRange === 'function') {
+          terminalTarget.setSelectionRange(end, end);
+        } else if (typeof terminalTarget.select === 'function') {
+          terminalTarget.select();
+        }
+      });
+    }
+    scheduleReduxUxSync('setTerminalOpen');
+  }
+
+  function applyTheme(theme: unknown, { persist = true }: unknown = {}) {
+    const nextTheme = normalizeTheme(theme);
+    setThemeState(nextTheme);
+    if (documentRef.body) {
+      documentRef.body.classList.toggle('theme-shenzhen', nextTheme === 'shenzhen');
+    }
+    if (dom.themeSelect && dom.themeSelect.value !== nextTheme) {
+      dom.themeSelect.value = nextTheme;
+    }
+    if (runtime.waveformP5 && typeof runtime.waveformP5.textFont === 'function') {
+      runtime.waveformP5.textFont(waveformFontFamily(state.theme));
+    }
+    if (persist) {
+      try {
+        localStorageRef.setItem(THEME_KEY, nextTheme);
+      } catch (_err: unknown) {
+        // Ignore storage failures.
+      }
+    }
+    scheduleReduxUxSync('applyTheme');
+  }
+
+  return {
+    setActiveTab,
+    setSidebarCollapsed,
+    setTerminalOpen,
+    applyTheme
+  };
+}

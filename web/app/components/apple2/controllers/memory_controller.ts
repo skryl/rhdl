@@ -1,0 +1,343 @@
+function requireFn(name: string, fn: unknown) {
+  if (typeof fn !== 'function') {
+    throw new Error(`createApple2MemoryController requires function: ${name}`);
+  }
+}
+
+export function createApple2MemoryController({
+  dom,
+  state,
+  runtime,
+  isApple2UiEnabled,
+  parseHexOrDec,
+  hexWord,
+  hexByte,
+  renderMemoryPanel,
+  disassemble6502LinesWithMemory,
+  disassembleRiscvLinesWithMemory,
+  setMemoryDumpStatus,
+  addressSpace = 0x10000
+}: Unsafe = {}) {
+  if (!dom || !state || !runtime) {
+    throw new Error('createApple2MemoryController requires dom/state/runtime');
+  }
+  requireFn('isApple2UiEnabled', isApple2UiEnabled);
+  requireFn('parseHexOrDec', parseHexOrDec);
+  requireFn('hexWord', hexWord);
+  requireFn('hexByte', hexByte);
+  requireFn('renderMemoryPanel', renderMemoryPanel);
+  requireFn('disassemble6502LinesWithMemory', disassemble6502LinesWithMemory);
+  requireFn('setMemoryDumpStatus', setMemoryDumpStatus);
+  const MAX_MEMORY_VIEW_LENGTH = 0x10000;
+  const BYTES_PER_MEMORY_ROW = 16;
+  const CHANGE_HIGHLIGHT_MS = 750;
+  const ACCESS_HIGHLIGHT_MS = 750;
+  const previousWindowBytes = new Map();
+  const changedByteExpiryMs = new Map();
+  const accessedByteExpiry = new Map();
+
+  function resetHighlightState() {
+    previousWindowBytes.clear();
+    changedByteExpiryMs.clear();
+    accessedByteExpiry.clear();
+  }
+
+  function pruneExpiredHighlights(nowMs: number) {
+    for (const [addr, expiryMs] of changedByteExpiryMs.entries()) {
+      if (expiryMs <= nowMs) {
+        changedByteExpiryMs.delete(addr);
+      }
+    }
+    for (const [addr, info] of accessedByteExpiry.entries()) {
+      if (!info || info.expiryMs <= nowMs) {
+        accessedByteExpiry.delete(addr);
+      }
+    }
+  }
+
+  function currentIoConfig() {
+    return state.apple2?.ioConfig || {};
+  }
+
+  function currentAddressSpace() {
+    const configured = Number.parseInt(currentIoConfig().memory?.addressSpace, 10);
+    if (Number.isFinite(configured) && configured > 0) {
+      return configured >= 0xFFFFFFFF ? 0x100000000 : configured;
+    }
+    return addressSpace;
+  }
+
+  function currentRunnerKind() {
+    if (!runtime.sim || typeof runtime.sim.runner_kind !== 'function') {
+      return null;
+    }
+    return runtime.sim.runner_kind();
+  }
+
+  function getApple2ProgramCounter() {
+    if (!runtime.sim || !isApple2UiEnabled()) {
+      return null;
+    }
+
+    const configCandidates = currentIoConfig().pcSignalCandidates;
+    const candidates = Array.isArray(configCandidates) && configCandidates.length > 0
+      ? configCandidates
+      : ['pc_debug', 'cpu__debug_pc', 'reg_pc'];
+    for (const name of candidates) {
+      if (runtime.sim.has_signal(name)) {
+        const pc = Number(runtime.sim.peek(name));
+        if (!Number.isFinite(pc)) {
+          return null;
+        }
+        return pc >>> 0;
+      }
+    }
+    return null;
+  }
+
+  function formatAddress(value: unknown, addrSpace = currentAddressSpace()) {
+    const parsed = Number(value);
+    const width = addrSpace > 0xFFFF ? 8 : 4;
+    if (!Number.isFinite(parsed)) {
+      return '0'.repeat(width);
+    }
+    const bounded = ((Math.floor(parsed) % addrSpace) + addrSpace) % addrSpace;
+    return (bounded >>> 0).toString(16).toUpperCase().padStart(width, '0');
+  }
+
+  function readApple2MappedMemory(start: unknown, length: unknown) {
+    if (!runtime.sim || !isApple2UiEnabled()) {
+      return new Uint8Array(0);
+    }
+
+    const len = Math.max(0, Number.parseInt(String(length), 10) || 0);
+    if (len === 0) {
+      return new Uint8Array(0);
+    }
+
+    const out = new Uint8Array(len);
+    const addrSpace = currentAddressSpace();
+    const useMapped = currentIoConfig().memory?.viewMapped !== false;
+    let addr = Math.max(0, Number(start) || 0) % addrSpace;
+    let cursor = 0;
+
+    while (cursor < len) {
+      const span = Math.min(len - cursor, Math.max(1, addrSpace - addr));
+      const chunk = typeof runtime.sim.memory_read === 'function'
+        ? runtime.sim.memory_read(addr, span, { mapped: useMapped })
+        : new Uint8Array(0);
+      if (chunk && chunk.length > 0) {
+        out.set(chunk.subarray(0, Math.min(span, chunk.length)), cursor);
+      }
+      cursor += span;
+      addr = (addr + span) % addrSpace;
+    }
+
+    return out;
+  }
+
+  function hasSourceMap() {
+    return !!state.apple2?.sourceMap;
+  }
+
+  function refreshMemoryView() {
+    if (!dom.memoryDump || !runtime.sim) {
+      resetHighlightState();
+      renderMemoryPanel(dom, {
+        followDisabled: !isApple2UiEnabled(),
+        followChecked: !!state.memory.followPc,
+        showSourceDisabled: !hasSourceMap(),
+        showSourceChecked: !!state.memory.showSource,
+        dumpText: '',
+        disasmText: '',
+        dumpRows: []
+      });
+      return;
+    }
+
+    if (!isApple2UiEnabled()) {
+      resetHighlightState();
+      renderMemoryPanel(dom, {
+        followDisabled: true,
+        followChecked: !!state.memory.followPc,
+        showSourceDisabled: true,
+        showSourceChecked: !!state.memory.showSource,
+        dumpText: 'Load a runner with memory + I/O support to browse memory.',
+        disasmText: 'Load a runner with memory + I/O support to view disassembly.',
+        dumpRows: []
+      });
+      setMemoryDumpStatus('Memory dump loading requires a runner with memory + I/O support.');
+      return;
+    }
+
+    const addrSpace = currentAddressSpace();
+    const maxLength = Math.max(1, Math.min(addrSpace, MAX_MEMORY_VIEW_LENGTH));
+    let start = Math.max(0, parseHexOrDec(dom.memoryStart?.value, 0)) % addrSpace;
+    const length = Math.max(1, Math.min(maxLength, parseHexOrDec(dom.memoryLength?.value, maxLength)));
+    const pc = getApple2ProgramCounter();
+
+    if (state.memory.followPc && pc != null) {
+      const maxStart = Math.max(0, addrSpace - length);
+      const centered = Math.max(0, (pc >>> 0) - Math.floor(length / 2));
+      const bounded = Math.min(maxStart, centered);
+      start = Math.floor(bounded / BYTES_PER_MEMORY_ROW) * BYTES_PER_MEMORY_ROW;
+      if (dom.memoryStart) {
+        dom.memoryStart.value = `0x${formatAddress(start, addrSpace)}`;
+      }
+    }
+
+    const data = readApple2MappedMemory(start, length);
+
+    if (!data || data.length === 0) {
+      resetHighlightState();
+      renderMemoryPanel(dom, {
+        followDisabled: false,
+        followChecked: !!state.memory.followPc,
+        showSourceDisabled: !hasSourceMap(),
+        showSourceChecked: !!state.memory.showSource,
+        dumpText: 'No memory data',
+        disasmText: 'No disassembly data',
+        dumpRows: []
+      });
+      return;
+    }
+
+    const nowMs = Date.now();
+    pruneExpiredHighlights(nowMs);
+    const access = detectCurrentMemoryAccess();
+    if (access) {
+      accessedByteExpiry.set(access.addr, {
+        type: access.type,
+        expiryMs: nowMs + ACCESS_HIGHLIGHT_MS
+      });
+    }
+    const nextWindowBytes = new Map();
+    const lines = [];
+    const dumpRows = [];
+    for (let i = 0; i < data.length; i += 16) {
+      const row = data.slice(i, i + 16);
+      const rowBytes = [];
+      for (let j = 0; j < row.length; j += 1) {
+        const value = row[j] & 0xff;
+        const byteAddr = (start + i + j) % addrSpace;
+        const previous = previousWindowBytes.get(byteAddr);
+        if (previous != null && previous !== value) {
+          changedByteExpiryMs.set(byteAddr, nowMs + CHANGE_HIGHLIGHT_MS);
+        }
+        nextWindowBytes.set(byteAddr, value);
+        const changed = (changedByteExpiryMs.get(byteAddr) || 0) > nowMs;
+        const accessInfo = accessedByteExpiry.get(byteAddr);
+        const accessType = accessInfo && accessInfo.expiryMs > nowMs
+          ? accessInfo.type
+          : (changed ? 'write' : null);
+        rowBytes.push({
+          hex: hexByte(value),
+          changed,
+          accessType
+        });
+      }
+      const hex = rowBytes.map((entry) => entry.hex).join(' ');
+      const ascii = Array.from(row, (b) => (b >= 32 && b <= 126 ? String.fromCharCode(b) : '.')).join('');
+      const addr = (start + i) % addrSpace;
+      const hasPc = pc != null && (((pc >>> 0) - addr + addrSpace) % addrSpace) < row.length;
+      const marker = hasPc ? '>>' : '  ';
+      const formattedAddress = formatAddress(addr, addrSpace);
+      lines.push(`${marker} ${formattedAddress}: ${hex.padEnd(16 * 3 - 1, ' ')}  ${ascii}`);
+      dumpRows.push({
+        marker,
+        addressHex: formattedAddress,
+        bytes: rowBytes,
+        ascii
+      });
+    }
+
+    previousWindowBytes.clear();
+    for (const [addr, value] of nextWindowBytes.entries()) {
+      previousWindowBytes.set(addr, value);
+    }
+
+    const disasmLineCount = Math.max(1, Math.ceil(length / BYTES_PER_MEMORY_ROW));
+    const disasmStart = start;
+    const runnerKind = currentRunnerKind();
+    const disasmOpts: Unsafe = { highlightPc: pc, addressSpace: addrSpace };
+    if (state.memory.showSource && state.apple2?.sourceMap) {
+      disasmOpts.sourceMap = state.apple2.sourceMap;
+    }
+    let disasmText;
+    let disasmLines = null;
+    if (runnerKind === 'riscv' && typeof disassembleRiscvLinesWithMemory === 'function') {
+      const rawLines = disassembleRiscvLinesWithMemory(
+        disasmStart, disasmLineCount, readApple2MappedMemory,
+        { ...disasmOpts, structured: true }
+      );
+      disasmText = rawLines.map((l: Unsafe) => l.text ?? l).join('\n');
+      if (rawLines.length > 0 && typeof rawLines[0] === 'object') {
+        disasmLines = rawLines;
+      }
+    } else if (runnerKind == null || runnerKind === 'apple2' || runnerKind === 'mos6502') {
+      disasmText = disassemble6502LinesWithMemory(
+        disasmStart, disasmLineCount, readApple2MappedMemory, disasmOpts
+      ).join('\n');
+    } else {
+      disasmText = `Disassembly unavailable for ${runnerKind} runner.`;
+    }
+    renderMemoryPanel(dom, {
+      followDisabled: false,
+      followChecked: !!state.memory.followPc,
+      showSourceDisabled: !hasSourceMap(),
+      showSourceChecked: !!state.memory.showSource,
+      dumpText: lines.join('\n'),
+      dumpRows,
+      disasmText,
+      disasmLines,
+      followPc: !!state.memory.followPc,
+      pcAddress: pc,
+      windowStart: start,
+      addressSpace: addrSpace,
+      bytesPerRow: BYTES_PER_MEMORY_ROW
+    });
+  }
+
+  function detectCurrentMemoryAccess() {
+    if (!runtime.sim || !isApple2UiEnabled()) {
+      return null;
+    }
+
+    // MOS6502 standalone runner bus signals.
+    if (runtime.sim.has_signal('addr') && runtime.sim.has_signal('rw')) {
+      const addr = Number(runtime.sim.peek('addr')) >>> 0;
+      const rw = runtime.sim.peek('rw') & 0x1;
+      return {
+        addr,
+        type: rw === 0 ? 'write' : 'read'
+      };
+    }
+
+    // Apple2/system runners expose cpu address + ram write-enable.
+    if (runtime.sim.has_signal('cpu__addr_reg') && runtime.sim.has_signal('ram_we')) {
+      const addr = Number(runtime.sim.peek('cpu__addr_reg')) >>> 0;
+      const ramWe = runtime.sim.peek('ram_we') & 0x1;
+      return {
+        addr,
+        type: ramWe === 1 ? 'write' : 'read'
+      };
+    }
+
+    if (runtime.sim.has_signal('ram_addr') && runtime.sim.has_signal('ram_we')) {
+      const addr = Number(runtime.sim.peek('ram_addr')) >>> 0;
+      const ramWe = runtime.sim.peek('ram_we') & 0x1;
+      return {
+        addr,
+        type: ramWe === 1 ? 'write' : 'read'
+      };
+    }
+
+    return null;
+  }
+
+  return {
+    getApple2ProgramCounter,
+    readApple2MappedMemory,
+    refreshMemoryView
+  };
+}

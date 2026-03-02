@@ -497,4 +497,96 @@ namespace :web do
     load_cli_tasks
     RHDL::CLI::Tasks::WebGenerateTask.new.run
   end
+
+  desc "Bundle web simulator with Bun (output in web/dist/)"
+  task :bundle do
+    web_dir = File.expand_path('web', __dir__)
+    unless system('which bun > /dev/null 2>&1')
+      abort "[web:bundle] Bun is required. Install from https://bun.sh"
+    end
+    Dir.chdir(web_dir) do
+      sh 'bun run build'
+    end
+  end
+
+  desc "Bundle web simulator for production"
+  task 'bundle:prod' do
+    web_dir = File.expand_path('web', __dir__)
+    unless system('which bun > /dev/null 2>&1')
+      abort "[web:bundle:prod] Bun is required. Install from https://bun.sh"
+    end
+    Dir.chdir(web_dir) do
+      sh 'bun run build:prod'
+    end
+  end
+end
+
+# =============================================================================
+# Desktop (Electrobun) Tasks
+# =============================================================================
+
+namespace :desktop do
+  desktop_dir = File.expand_path('web/desktop', __dir__)
+
+  check_bun = -> {
+    unless system('which bun > /dev/null 2>&1')
+      abort <<~MSG
+        [desktop] Bun is required but not found.
+        Install it from https://bun.sh:
+          curl -fsSL https://bun.sh/install | bash
+      MSG
+    end
+  }
+
+  check_electrobun = -> {
+    unless File.exist?(File.join(desktop_dir, 'node_modules', 'electrobun'))
+      abort <<~MSG
+        [desktop] Electrobun not installed. Run:
+          cd #{desktop_dir} && bun install
+      MSG
+    end
+  }
+
+  desc "Install desktop app dependencies (bun install)"
+  task :install do
+    check_bun.call
+    Dir.chdir(desktop_dir) do
+      sh 'bun install'
+    end
+  end
+
+  desc "Build and launch desktop app in development mode"
+  task :dev do
+    check_bun.call
+    check_electrobun.call
+    Dir.chdir(desktop_dir) do
+      sh 'bun run dev'
+    end
+  end
+
+  desc "Build desktop app for development"
+  task :build do
+    check_bun.call
+    check_electrobun.call
+    Dir.chdir(desktop_dir) do
+      sh 'bun run build:dev'
+    end
+  end
+
+  desc "Build desktop app for stable release"
+  task :release do
+    check_bun.call
+    check_electrobun.call
+    Dir.chdir(desktop_dir) do
+      sh 'bun run build:stable'
+    end
+  end
+
+  desc "Clean desktop build artifacts"
+  task :clean do
+    rm_rf File.join(desktop_dir, 'build')
+    rm_rf File.join(desktop_dir, 'artifacts')
+    rm_rf File.join(desktop_dir, 'src', 'simulator')
+    puts "[desktop] Cleaned build artifacts."
+  end
 end

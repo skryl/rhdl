@@ -1,0 +1,18 @@
+{
+  "name": "rhdl-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "electrobun run",
+    "dev": "electrobun dev",
+    "build:dev": "electrobun build",
+    "build:canary": "electrobun build --env=canary",
+    "build:stable": "electrobun build --env=stable"
+  },
+  "dependencies": {
+    "electrobun": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

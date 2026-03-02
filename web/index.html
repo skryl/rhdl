@@ -56,9 +56,7 @@ rhdl-app-shell {
         });
       })();
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/p5@1.11.1/lib/p5.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/redux@4.2.1/dist/redux.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js"></script>
+    <!-- Dependencies bundled by Bun (see build.ts) -->
   </head>
   <body>
     <rhdl-app-shell id="appShell" class="app-shell">
@@ -458,6 +456,6 @@ rhdl-app-shell {
       </main>
     </rhdl-app-shell>
 
-    <script type="module" src="./app/main.mjs?v=20260207i"></script>
+    <script type="module" src="./app/main.ts"></script>
   </body>
 </html>

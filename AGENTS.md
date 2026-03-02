@@ -84,6 +84,7 @@ RHDL is a Ruby HDL toolkit with:
 - CLI tooling for diagrams, exports, synthesis, and example system runners
 - example systems: MOS6502, Apple II, Game Boy, and RISC-V (including xv6 workflows)
 - web simulator (WASM + browser UI)
+- desktop app (Electrobun wrapper for the web simulator)
 
 ## Canonical Entry Points
 
@@ -152,8 +153,17 @@ Other:
 - `bundle exec rake native:build`
 - `bundle exec rake native:check`
 - `bundle exec rake web:build`
+- `bundle exec rake web:bundle`
+- `bundle exec rake web:bundle:prod`
 - `bundle exec rake web:generate`
 - `bundle exec rake web:start`
+
+Desktop (Electrobun):
+- `bundle exec rake desktop:install`
+- `bundle exec rake desktop:dev`
+- `bundle exec rake desktop:build`
+- `bundle exec rake desktop:release`
+- `bundle exec rake desktop:clean`
 
 Do not document or introduce non-existent tasks like `rake hdl:*`, `rake diagrams:*`, or `rake generate_all`.
 
@@ -167,7 +177,12 @@ Do not document or introduce non-existent tasks like `rake hdl:*`, `rake diagram
   - `examples/riscv/`
 - `spec/`: tests, generally mirroring implementation paths
 - `docs/`: user docs
-- `web/`: browser simulator app
+- `web/`: browser simulator app (TypeScript, bundled with Bun)
+  - `web/app/`: application source (`.ts` files)
+  - `web/test/`: tests (`bun test`)
+  - `web/build.ts`: Bun build script
+  - `web/dist/`: bundled output (gitignored)
+  - `web/desktop/`: Electrobun desktop app wrapper
 
 ## Documentation Source of Truth
 
