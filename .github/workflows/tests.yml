@@ -38,7 +38,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Set up Bun
-        uses: oven-sh/setup-bun@v4
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
