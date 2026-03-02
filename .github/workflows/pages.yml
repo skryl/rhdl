@@ -43,6 +43,10 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Install web JS dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+
       - name: Cache Rust build outputs
         uses: Swatinem/rust-cache@v2
         with:

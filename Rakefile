@@ -475,6 +475,23 @@ task default: :spec
 # =============================================================================
 
 namespace :web do
+  web_dir = File.expand_path('web', __dir__)
+  web_node_modules_dir = File.join(web_dir, 'node_modules')
+
+  install_web_dependencies = lambda do
+    has_node_modules = if File.directory?(web_node_modules_dir)
+      Dir.entries(web_node_modules_dir).size > 2
+    else
+      false
+    end
+
+    return if has_node_modules
+
+    Dir.chdir(web_dir) do
+      sh 'bun install --frozen-lockfile'
+    end
+  end
+
   desc "Start local web server for the web UI (default host 127.0.0.1, port 8080)"
   task :start, [:port] do |_t, args|
     require 'webrick'
@@ -529,10 +546,12 @@ namespace :web do
 
   desc "Bundle web simulator with Bun (output in web/dist/)"
   task :bundle do
-    web_dir = File.expand_path('web', __dir__)
     unless system('which bun > /dev/null 2>&1')
       abort "[web:bundle] Bun is required. Install from https://bun.sh"
     end
+
+    install_web_dependencies.call
+
     Dir.chdir(web_dir) do
       sh 'bun run build'
     end
@@ -540,10 +559,12 @@ namespace :web do
 
   desc "Bundle web simulator for production"
   task 'bundle:prod' do
-    web_dir = File.expand_path('web', __dir__)
     unless system('which bun > /dev/null 2>&1')
       abort "[web:bundle:prod] Bun is required. Install from https://bun.sh"
     end
+
+    install_web_dependencies.call
+
     Dir.chdir(web_dir) do
       sh 'bun run build:prod'
     end
