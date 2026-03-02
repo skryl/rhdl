@@ -139,15 +139,17 @@ Parallel:
 - `bundle exec rake pspec:riscv`
 
 Spec benchmarks:
-- `bundle exec rake spec:bench:all[20]`
-- `bundle exec rake spec:bench:riscv[20]`
+- `bundle exec rake spec:bench[all,20]`
+- `bundle exec rake spec:bench[riscv,20]`
 
 Simulation benchmarks:
-- `bundle exec rake bench:gates`
-- `bundle exec rake bench:mos6502[5000000]`
-- `bundle exec rake bench:apple2[5000000]`
-- `bundle exec rake bench:gameboy[1000]`
-- `bundle exec rake bench:ir[5000000]`
+- `bundle exec rake bench`
+- `bundle exec rake bench[mos6502,5000000]`
+- `bundle exec rake bench[apple2,5000000]`
+- `bundle exec rake bench[gameboy,1000]`
+- `bundle exec rake bench[ir,5000000]`
+- `bundle exec rake bench:web[apple2,5000000]`
+- `bundle exec rake bench:web[riscv,100000]`
 
 Other:
 - `bundle exec rake native:build`
@@ -242,4 +244,3 @@ For runner changes:
 1. Headless mode still works.
 2. Interactive controls still work (`Ctrl+C`, escape/command mode).
 3. Debug output path is visible when debug mode is enabled.
-

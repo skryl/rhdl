@@ -612,12 +612,12 @@ See [Simulation](docs/simulation.md) and [Gate-Level Backend](docs/gate_level_ba
 RHDL includes benchmarking tasks to measure simulation performance across backends:
 
 ```bash
-rake bench:mos6502[cycles]    # Benchmark MOS 6502 CPU
-rake bench:apple2[cycles]     # Benchmark Apple II full system
-rake bench:gameboy[frames]    # Benchmark GameBoy with Prince of Persia
-rake bench:gates              # Benchmark gate-level simulation
-rake bench:web:apple2[cycles] # Benchmark Apple II web WASM backends
-rake bench:web:riscv[cycles]  # Benchmark RISC-V web WASM backends
+rake bench                    # Benchmark gate-level simulation
+rake bench[mos6502,cycles]    # Benchmark MOS 6502 CPU
+rake bench[apple2,cycles]     # Benchmark Apple II full system
+rake bench[gameboy,frames]    # Benchmark GameBoy with Prince of Persia
+rake bench:web[apple2,cycles] # Benchmark Apple II web WASM backends
+rake bench:web[riscv,cycles]  # Benchmark RISC-V web WASM backends
 ```
 
 **Sample Results (1M cycles):**
@@ -641,25 +641,33 @@ See [Performance Guide](docs/performance.md) for detailed benchmarks and optimiz
 ```bash
 # Testing
 bundle exec rake spec                  # Run all tests
-bundle exec rake spec:riscv            # Run RISC-V specs
+bundle exec rake spec[riscv]           # Run RISC-V specs
 bundle exec rake pspec                 # Run tests in parallel
-bundle exec rake pspec:riscv           # Run RISC-V specs in parallel
+bundle exec rake pspec[riscv]          # Run RISC-V specs in parallel
 
 # Test and simulation benchmarks
-bundle exec rake spec:bench:riscv[20]  # Benchmark 20 RISC-V spec files
-bundle exec rake bench:ir[5000000]     # Benchmark IR runners
-bundle exec rake bench:gates           # Benchmark gate-level simulation
-bundle exec rake bench:web:apple2      # Benchmark Apple II web compiler vs arcilator vs verilator
-bundle exec rake bench:web:riscv       # Benchmark RISC-V web compiler vs arcilator vs verilator
+bundle exec rake spec:bench[riscv,20]  # Benchmark 20 RISC-V spec files
+bundle exec rake bench[ir,5000000]     # Benchmark IR runners
+bundle exec rake bench                  # Benchmark gate-level simulation
+bundle exec rake bench:web[apple2]     # Benchmark Apple II web compiler vs arcilator vs verilator
+bundle exec rake bench:web[riscv]      # Benchmark RISC-V web compiler vs arcilator vs verilator
 
 # Native backends
 bundle exec rake native:build          # Build native extensions
 bundle exec rake native:check          # Check extension availability
 
 # Web simulator
-bundle exec rake web:build             # Build WASM artifacts
+bundle exec rake web:build             # Generate web simulator WASM artifacts
 bundle exec rake web:generate          # Generate web fixtures/artifacts
-bundle exec rake web:start             # Start local web server
+bundle exec rake web:bundle            # Bundle web app + runtime assets with Bun (web/dist/)
+bundle exec rake web:start             # Start local web server with COOP/COEP headers
+
+# Desktop app (Electrobun)
+bundle exec rake desktop:install        # Install desktop dependencies (bun install in web/desktop)
+bundle exec rake desktop:dev           # Build and launch desktop app in dev mode
+bundle exec rake desktop:build         # Build desktop app package (development target)
+bundle exec rake desktop:release       # Build desktop app package (stable target)
+bundle exec rake desktop:clean         # Remove desktop build artifacts
 ```
 
 ## Component Library

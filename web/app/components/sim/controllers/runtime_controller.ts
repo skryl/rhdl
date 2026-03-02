@@ -21,6 +21,47 @@ export function createSimRuntimeController({
     throw new Error('createSimRuntimeController requires webAssemblyApi.instantiate');
   }
 
+  function resolveAssetCandidates(path: string) {
+    const trimmed = String(path || '').trim();
+    if (!trimmed) {
+      return [];
+    }
+
+    const urls = [trimmed];
+    const seen = new Set(urls);
+    const addCandidate = (candidate: unknown) => {
+      const url = String(candidate || '').trim();
+      if (!url || seen.has(url)) {
+        return;
+      }
+      seen.add(url);
+      urls.push(url);
+    };
+
+    const addFromBase = (base: unknown) => {
+      try {
+        addCandidate(new URL(trimmed, String(base)).toString());
+      } catch (_error) {
+        // ignore invalid bases.
+      }
+    };
+
+    if (typeof document === 'object' && document?.baseURI) {
+      addFromBase(document.baseURI);
+    }
+    if (typeof location === 'object' && location?.href) {
+      addFromBase(location.href);
+    }
+    addFromBase(import.meta.url);
+
+    if (trimmed.startsWith('./')) {
+      addCandidate(trimmed.slice(2));
+      addCandidate(`/${trimmed.slice(2)}`);
+    }
+
+    return urls;
+  }
+
   function resolveBackendDef(backend = state.backend) {
     const def = getBackendDef(backend);
     if (typeof currentRunnerPreset !== 'function') {
@@ -48,26 +89,48 @@ export function createSimRuntimeController({
 
   async function loadWasmInstance(backend = state.backend) {
     const def = resolveBackendDef(backend);
-    const url = def.wasmPath;
-    const response = await fetchImpl(url);
+    const candidateUrls = resolveAssetCandidates(def.wasmPath);
+    let lastResponse: Response | null = null;
+    const failures: string[] = [];
+    const isUsableResponse = (response: Response) => response.ok || response.status === 0;
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch ${url}: ${response.status}`);
-    }
-
-    if (typeof webAssemblyApi.instantiateStreaming === 'function') {
+    for (const url of candidateUrls) {
       try {
-        const streamResponse = typeof response.clone === 'function' ? response.clone() : response;
-        const result = await webAssemblyApi.instantiateStreaming(streamResponse, {});
-        return result.instance;
-      } catch (_err) {
-        // Fall back to instantiate(bytes).
+        const response = await fetchImpl(url);
+        if (isUsableResponse(response)) {
+          try {
+            if (typeof webAssemblyApi.instantiateStreaming === 'function') {
+              try {
+                const streamResponse = typeof response.clone === 'function' ? response.clone() : response;
+                const result = await webAssemblyApi.instantiateStreaming(streamResponse, {});
+                return result.instance;
+              } catch (_err) {
+                // Fall back to instantiate(bytes) for this successful fetch.
+              }
+            }
+
+            const bytes = await response.arrayBuffer();
+            const result = await webAssemblyApi.instantiate(bytes, {});
+            return result.instance;
+          } catch (err: unknown) {
+            failures.push(`${url} -> ${err instanceof Error ? err.message : String(err)}`);
+            lastResponse = response;
+          }
+        }
+
+        const detail = response.status === 0
+          ? `${response.type}/${response.url || url}`
+          : `${response.status}`;
+        failures.push(`${url} -> ${detail}`);
+        lastResponse = response;
+      } catch (err: unknown) {
+        failures.push(`${url} -> ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
-    const bytes = await response.arrayBuffer();
-    const result = await webAssemblyApi.instantiate(bytes, {});
-    return result.instance;
+    const lastRequestUrl = lastResponse?.url || candidateUrls[candidateUrls.length - 1] || def.wasmPath;
+    throw new Error(`Failed to fetch ${lastRequestUrl}: ${failures.join(', ') || 'No usable fetch URL'}`);
+
   }
 
   async function ensureBackendInstance(backend = state.backend) {

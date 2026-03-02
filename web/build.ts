@@ -34,6 +34,30 @@ const cdnRewritePlugin: import("bun").BunPlugin = {
   },
 };
 
+function copyRuntimeDependencyAssets(distDir: string, webRoot: string) {
+  const dependencies = [
+    ["vim-wasm/vimwasm.js", "vimwasm.js"],
+    ["vim-wasm/vim.js", "vim.js"],
+    ["vim-wasm/vim.wasm", "vim.wasm"],
+    ["vim-wasm/vim.data", "vim.data"],
+    ["ghostty-web/dist/ghostty-web.js", "ghostty-web.js"],
+    ["ghostty-web/dist/ghostty-vt.wasm", "ghostty-vt.wasm"],
+    ["ghostty-web/dist/__vite-browser-external-2447137e.js", "__vite-browser-external-2447137e.js"],
+  ] as const;
+
+  const sourceRoot = resolve(webRoot, "node_modules");
+  const targetRoot = resolve(distDir, "assets", "pkg");
+
+  for (const [relativeSource, targetName] of dependencies) {
+    const sourcePath = resolve(sourceRoot, relativeSource);
+    if (!existsSync(sourcePath)) {
+      throw new Error(`[build] Missing dependency asset: ${sourcePath}`);
+    }
+    const targetPath = resolve(targetRoot, targetName);
+    cpSync(sourcePath, targetPath, { force: true });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Main app bundle
 // ---------------------------------------------------------------------------
@@ -91,7 +115,7 @@ if (existsSync(resolve(webRoot, "coi-serviceworker.js"))) {
 }
 
 // WASM and fixture assets
-if (existsSync(resolve(webRoot, "assets"))) {
+  if (existsSync(resolve(webRoot, "assets"))) {
   cpSync(resolve(webRoot, "assets"), resolve(distDir, "assets"), { recursive: true });
 }
 
@@ -113,6 +137,14 @@ if (!mirbWorkerResult.success) {
   for (const log of mirbWorkerResult.logs) {
     console.error(log);
   }
+  process.exit(1);
+}
+
+try {
+  copyRuntimeDependencyAssets(distDir, webRoot);
+} catch (err) {
+  console.error("Failed to copy dependency runtime assets:");
+  console.error(err);
   process.exit(1);
 }
 

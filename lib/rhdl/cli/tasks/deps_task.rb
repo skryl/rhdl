@@ -126,6 +126,35 @@ module RHDL
             end
           end
 
+          # Check for bun (for web/desktop tooling)
+          puts
+          bun_available = command_available?('bun')
+
+          if bun_available
+            version = `bun --version 2>&1`.lines.first&.strip
+            puts "[OK] bun is installed: #{version}"
+          else
+            puts "[MISSING] bun is not installed"
+            puts
+
+            install_bun(platform)
+
+            puts
+            if command_available?('bun')
+              version = `bun --version 2>&1`.lines.first&.strip
+              puts "[OK] bun installed successfully: #{version}"
+            else
+              bun_bin = File.join(Dir.home, '.bun', 'bin', 'bun')
+              if File.exist?(bun_bin)
+                version = run_command_with_timeout("#{bun_bin} --version").first.lines.first&.strip
+                puts "[OK] bun installed successfully: #{version} (use #{bun_bin} on this machine)"
+                ENV['PATH'] = "#{File.join(Dir.home, '.bun', 'bin')}#{File::PATH_SEPARATOR}#{ENV.fetch('PATH', '')}"
+              else
+                puts "[WARN] bun installation may have failed. Check above for errors."
+              end
+            end
+          end
+
           puts
           puts '=' * 50
           puts "Dependency check complete."
@@ -141,6 +170,7 @@ module RHDL
             'firtool' => { cmd: 'firtool --version', optional: true, desc: 'CIRCT firtool (for Arcilator HDL simulation)' },
             'arcilator' => { cmd: 'arcilator --version', optional: true, desc: 'CIRCT Arcilator (cycle-based HDL simulator)' },
             'dot' => { cmd: 'dot -V', optional: true, desc: 'Graphviz (for diagram rendering)' },
+            'bun' => { cmd: 'bun --version', optional: true, desc: 'Bun (for web and desktop tooling)' },
             'ruby' => { cmd: 'ruby --version', optional: false, desc: 'Ruby interpreter' },
             'bundler' => { cmd: 'bundle --version', optional: false, desc: 'Ruby Bundler' }
           }
@@ -387,6 +417,59 @@ module RHDL
             puts "  /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
             puts "Then run: brew install graphviz"
           end
+        end
+
+        def install_bun(platform)
+          case platform
+          when :linux
+            install_bun_linux
+          when :macos
+            install_bun_macos
+          when :windows
+            puts "On Windows, please install Bun manually:"
+            puts "  https://bun.sh/#installation"
+          else
+            puts "Unknown platform. Please install bun manually:"
+            puts "  https://bun.sh/#installation"
+          end
+        end
+
+        def install_bun_linux
+          if command_available?('curl')
+            puts "Installing bun via official install script..."
+            system("curl -fsSL https://bun.sh/install | bash")
+            export_bun_path
+          else
+            puts "curl not found. Please install bun manually:"
+            puts "  https://bun.sh/#installation"
+          end
+        end
+
+        def install_bun_macos
+          if command_available?('brew')
+            puts "Installing bun via Homebrew..."
+            system('brew install oven-sh/bun/bun')
+            return
+          end
+
+          if command_available?('curl')
+            puts "Homebrew not found. Installing bun via official script..."
+            system("curl -fsSL https://bun.sh/install | bash")
+            export_bun_path
+          else
+            puts "curl not found. Please install bun manually:"
+            puts "  https://bun.sh/#installation"
+          end
+        end
+
+        def export_bun_path
+          bun_bin = File.join(Dir.home, '.bun', 'bin', 'bun')
+          return unless File.exist?(bun_bin)
+
+          ENV['PATH'] = "#{File.join(Dir.home, '.bun', 'bin')}#{File::PATH_SEPARATOR}#{ENV.fetch('PATH', '')}"
+          puts "Added #{File.join(Dir.home, '.bun', 'bin')} to PATH for current process."
+          puts "If bun is still not found, run:"
+          puts "  source ~/.bashrc   # or your shell profile"
         end
 
         def install_arcilator_macos(missing_tools:)

@@ -3,6 +3,74 @@
 # Try to load bundler, but don't fail if it's not available
 begin
   require "bundler/gem_tasks"
+
+  original_clean_task = Rake::Task.task_defined?('clean') ? Rake::Task['clean'] : nil
+  original_clobber_task = Rake::Task.task_defined?('clobber') ? Rake::Task['clobber'] : nil
+  original_release_task = Rake::Task.task_defined?('release') ? Rake::Task['release'] : nil
+
+  namespace :gem do
+    desc "Build the rhdl gem package"
+    task :build do
+      Bundler::GemHelper.instance.build_gem
+    end
+
+    desc "Install the rhdl gem locally"
+    task :install do
+      Bundler::GemHelper.instance.install_gem
+    end
+
+    namespace :build do
+      desc "Generate SHA512 checksum of built gem artifact"
+      task :checksum do
+        Bundler::GemHelper.instance.build_checksum
+      end
+    end
+
+    namespace :install do
+      desc "Install the rhdl gem locally from built artifacts"
+      task :local do
+        Bundler::GemHelper.instance.install_gem(nil, true)
+      end
+    end
+
+    desc "Release the rhdl gem"
+    task :release do
+      if original_release_task
+        original_release_task.invoke
+      else
+        abort "Bundler release task is not available. Ensure bundler gem tasks are loaded."
+      end
+    end
+  end
+
+  namespace :build do
+    if original_clean_task
+      desc "Remove any temporary products"
+      task :clean do
+        original_clean_task.invoke
+      end
+    end
+
+    if original_clobber_task
+      desc "Remove any generated files"
+      task :clobber do
+        original_clobber_task.invoke
+      end
+    end
+
+    # No custom dependency install task in build namespace
+  end
+
+  Rake.application.instance_variable_get(:@tasks).delete('build')
+  Rake.application.instance_variable_get(:@tasks).delete('build:checksum')
+  Rake.application.instance_variable_get(:@tasks).delete('install')
+  Rake.application.instance_variable_get(:@tasks).delete('install:local')
+  Rake.application.instance_variable_get(:@tasks).delete('release')
+  Rake.application.instance_variable_get(:@tasks).delete('clean')
+  Rake.application.instance_variable_get(:@tasks).delete('clobber')
+
+  desc "Install test dependencies (alias for deps:install)"
+  task deps: 'deps:install'
 rescue LoadError
   # Bundler not available, skip gem tasks
 end
@@ -21,27 +89,49 @@ end
 # Development Tasks
 # =============================================================================
 
-namespace :setup do
-  desc "Generate binstubs for all gem executables"
-  task :binstubs do
-    binstubs_needed = {
-      'rake' => 'rake',
-      'rspec-core' => 'rspec',
-      'parallel_tests' => 'parallel_rspec'
-    }
+namespace :build do
+  namespace :setup do
+    desc "Generate binstubs for all gem executables"
+    task :binstubs do
+      binstubs_needed = {
+        'rake' => 'rake',
+        'rspec-core' => 'rspec',
+        'parallel_tests' => 'parallel_rspec'
+      }
 
-    binstubs_needed.each do |gem_name, executable|
-      binstub_path = File.expand_path("bin/#{executable}", __dir__)
-      unless File.executable?(binstub_path)
-        puts "Generating binstub for #{executable}..."
-        system("bundle binstubs #{gem_name} --force")
+      binstubs_needed.each do |gem_name, executable|
+        binstub_path = File.expand_path("bin/#{executable}", __dir__)
+        unless File.executable?(binstub_path)
+          puts "Generating binstub for #{executable}..."
+          system("bundle binstubs #{gem_name} --force")
+        end
       end
     end
   end
+
+  desc "Setup development environment (install deps + binstubs)"
+  task setup: ['build:setup:binstubs']
 end
 
-desc "Setup development environment (install deps + binstubs)"
-task setup: ['setup:binstubs']
+namespace :native do
+  desc "Build the native ISA simulator Rust extension"
+  task :build, [:target] do |_t, args|
+    load_cli_tasks
+    RHDL::CLI::Tasks::NativeTask.new(build: true, target: args[:target]).run
+  end
+
+  desc "Clean native extension build artifacts"
+  task :clean, [:target] do |_t, args|
+    load_cli_tasks
+    RHDL::CLI::Tasks::NativeTask.new(clean: true, target: args[:target]).run
+  end
+
+  desc "Check if native extension is available"
+  task :check, [:target] do |_t, args|
+    load_cli_tasks
+    RHDL::CLI::Tasks::NativeTask.new(check: true, target: args[:target]).run
+  end
+end
 
 # =============================================================================
 # Test Tasks (spec namespace)
@@ -61,158 +151,146 @@ SPEC_PATHS = {
 begin
   require "rspec/core/rake_task"
 
-  RSpec::Core::RakeTask.new(:spec) do |t|
-    t.rspec_path = 'bin/rspec'
-    t.pattern = "#{SPEC_PATHS[:all]}**/*_spec.rb"
-    t.ruby_opts = '-W0'
-    t.rspec_opts = "--format progress"
+  desc "Run specs by scope (all, lib, hdl, mos6502, apple2, riscv)"
+  task :spec, [:scope] => 'build:setup:binstubs' do |_, args|
+    scope = (args[:scope] || 'all').to_sym
+
+    patterns = {
+      all: SPEC_PATHS[:all],
+      lib: SPEC_PATHS[:lib],
+      hdl: SPEC_PATHS[:hdl],
+      mos6502: SPEC_PATHS[:mos6502],
+      apple2: SPEC_PATHS[:apple2],
+      riscv: SPEC_PATHS[:riscv]
+    }
+    pattern = patterns[scope]
+
+    if pattern.nil?
+      puts "Unknown spec scope '#{scope}'."
+      puts "Available scopes: all, lib, hdl, mos6502, apple2, riscv"
+      exit 1
+    end
+
+    sh "bin/rspec #{pattern} --format progress"
   end
-
+  
   namespace :spec do
-    desc "Run lib/rhdl specs"
-    RSpec::Core::RakeTask.new(:lib) do |t|
-      t.rspec_path = 'bin/rspec'
-      t.pattern = "#{SPEC_PATHS[:lib]}**/*_spec.rb"
-      t.ruby_opts = '-W0'
-      t.rspec_opts = "--format progress"
-    end
-
-    desc "Run HDL component specs"
-    RSpec::Core::RakeTask.new(:hdl) do |t|
-      t.rspec_path = 'bin/rspec'
-      t.pattern = "#{SPEC_PATHS[:hdl]}**/*_spec.rb"
-      t.ruby_opts = '-W0'
-      t.rspec_opts = "--format progress"
-    end
-
-    desc "Run MOS 6502 specs"
-    RSpec::Core::RakeTask.new(:mos6502) do |t|
-      t.rspec_path = 'bin/rspec'
-      t.pattern = "#{SPEC_PATHS[:mos6502]}**/*_spec.rb"
-      t.ruby_opts = '-W0'
-      t.rspec_opts = "--format progress"
-    end
-
-    desc "Run Apple II specs"
-    RSpec::Core::RakeTask.new(:apple2) do |t|
-      t.rspec_path = 'bin/rspec'
-      t.pattern = "#{SPEC_PATHS[:apple2]}**/*_spec.rb"
-      t.ruby_opts = '-W0'
-      t.rspec_opts = "--format progress"
-    end
-
-    desc "Run RISC-V specs"
-    RSpec::Core::RakeTask.new(:riscv) do |t|
-      t.rspec_path = 'bin/rspec'
-      t.pattern = "#{SPEC_PATHS[:riscv]}**/*_spec.rb"
-      t.ruby_opts = '-W0'
-      t.rspec_opts = "--format progress"
-    end
-
     # Benchmark tasks
-    namespace :bench do
-      desc "Benchmark all specs"
-      task :all, [:count] => 'setup:binstubs' do |_, args|
-        load_cli_tasks
-        RHDL::CLI::Tasks::BenchmarkTask.new(
-          type: :tests,
-          count: args[:count]&.to_i || 20,
-          pattern: SPEC_PATHS[:all]
-        ).run
+    desc "Benchmark specs by scope (all, lib, hdl, mos6502, apple2, riscv)"
+    task :bench, [:scope, :count] => 'build:setup:binstubs' do |_, args|
+      load_cli_tasks
+
+      scope = (args[:scope] || 'all').to_sym
+      count = args[:count]&.to_i || 20
+
+      patterns = {
+        all: SPEC_PATHS[:all],
+        lib: SPEC_PATHS[:lib],
+        hdl: SPEC_PATHS[:hdl],
+        mos6502: SPEC_PATHS[:mos6502],
+        apple2: SPEC_PATHS[:apple2],
+        riscv: SPEC_PATHS[:riscv]
+      }
+      pattern = patterns[scope]
+
+      if pattern.nil?
+        puts "Unknown spec benchmark scope '#{scope}'."
+        puts "Available scopes: all, lib, hdl, mos6502, apple2, riscv"
+        exit 1
       end
 
-      desc "Benchmark lib/rhdl specs"
-      task :lib, [:count] => 'setup:binstubs' do |_, args|
-        load_cli_tasks
-        RHDL::CLI::Tasks::BenchmarkTask.new(
-          type: :tests,
-          count: args[:count]&.to_i || 20,
-          pattern: SPEC_PATHS[:lib]
-        ).run
-      end
-
-      desc "Benchmark HDL specs"
-      task :hdl, [:count] => 'setup:binstubs' do |_, args|
-        load_cli_tasks
-        RHDL::CLI::Tasks::BenchmarkTask.new(
-          type: :tests,
-          count: args[:count]&.to_i || 20,
-          pattern: SPEC_PATHS[:hdl]
-        ).run
-      end
-
-      desc "Benchmark MOS 6502 specs"
-      task :mos6502, [:count] => 'setup:binstubs' do |_, args|
-        load_cli_tasks
-        RHDL::CLI::Tasks::BenchmarkTask.new(
-          type: :tests,
-          count: args[:count]&.to_i || 20,
-          pattern: SPEC_PATHS[:mos6502]
-        ).run
-      end
-
-      desc "Benchmark Apple II specs"
-      task :apple2, [:count] => 'setup:binstubs' do |_, args|
-        load_cli_tasks
-        RHDL::CLI::Tasks::BenchmarkTask.new(
-          type: :tests,
-          count: args[:count]&.to_i || 20,
-          pattern: SPEC_PATHS[:apple2]
-        ).run
-      end
-
-      desc "Benchmark RISC-V specs"
-      task :riscv, [:count] => 'setup:binstubs' do |_, args|
-        load_cli_tasks
-        RHDL::CLI::Tasks::BenchmarkTask.new(
-          type: :tests,
-          count: args[:count]&.to_i || 20,
-          pattern: SPEC_PATHS[:riscv]
-        ).run
-      end
+      RHDL::CLI::Tasks::BenchmarkTask.new(
+        type: :tests,
+        count: count,
+        pattern: pattern
+      ).run
     end
 
-    desc "Benchmark all specs (alias for spec:bench:all)"
-    task bench: 'spec:bench:all'
+    namespace :bench do
+      desc "Run full test timing analysis (detailed per-file timing)"
+      task :timing => 'build:setup:binstubs' do
+        load_cli_tasks
+        RHDL::CLI::Tasks::BenchmarkTask.new(type: :timing).run
+      end
+
+      desc "Quick benchmark of test categories"
+      task :quick => 'build:setup:binstubs' do
+        load_cli_tasks
+        RHDL::CLI::Tasks::BenchmarkTask.new(type: :quick).run
+      end
+    end
   end
 
 rescue LoadError
-  desc "Run RSpec tests"
-  task :spec do
-    sh "ruby -Ilib -S rspec"
+  desc "Run specs by scope (all, lib, hdl, mos6502, apple2, riscv)"
+  task :spec, [:scope] => 'build:setup:binstubs' do |_, args|
+    scope = (args[:scope] || 'all').to_sym
+    patterns = {
+      all: SPEC_PATHS[:all],
+      lib: SPEC_PATHS[:lib],
+      hdl: SPEC_PATHS[:hdl],
+      mos6502: SPEC_PATHS[:mos6502],
+      apple2: SPEC_PATHS[:apple2],
+      riscv: SPEC_PATHS[:riscv]
+    }
+    pattern = patterns[scope]
+
+    if pattern.nil?
+      puts "Unknown spec scope '#{scope}'."
+      puts "Available scopes: all, lib, hdl, mos6502, apple2, riscv"
+      exit 1
+    end
+
+    sh "ruby -Ilib -S rspec #{pattern} --format progress"
   end
 
   namespace :spec do
-    desc "Run lib/rhdl specs"
-    task :lib do
-      sh "ruby -Ilib -S rspec #{SPEC_PATHS[:lib]} --format progress"
+    # Benchmark tasks
+    desc "Benchmark specs by scope (all, lib, hdl, mos6502, apple2, riscv)"
+    task :bench, [:scope, :count] do |_, args|
+      load_cli_tasks
+
+      scope = (args[:scope] || 'all').to_sym
+      count = args[:count]&.to_i || 20
+
+      patterns = {
+        all: SPEC_PATHS[:all],
+        lib: SPEC_PATHS[:lib],
+        hdl: SPEC_PATHS[:hdl],
+        mos6502: SPEC_PATHS[:mos6502],
+        apple2: SPEC_PATHS[:apple2],
+        riscv: SPEC_PATHS[:riscv]
+      }
+      pattern = patterns[scope]
+
+      if pattern.nil?
+        puts "Unknown spec benchmark scope '#{scope}'."
+        puts "Available scopes: all, lib, hdl, mos6502, apple2, riscv"
+        exit 1
+      end
+
+      RHDL::CLI::Tasks::BenchmarkTask.new(
+        type: :tests,
+        count: count,
+        pattern: pattern
+      ).run
     end
 
-    desc "Run HDL component specs"
-    task :hdl do
-      sh "ruby -Ilib -S rspec #{SPEC_PATHS[:hdl]} --format progress"
-    end
+    namespace :bench do
+      desc "Run full test timing analysis (detailed per-file timing)"
+      task :timing do
+        load_cli_tasks
+        RHDL::CLI::Tasks::BenchmarkTask.new(type: :timing).run
+      end
 
-    desc "Run MOS 6502 specs"
-    task :mos6502 do
-      sh "ruby -Ilib -S rspec #{SPEC_PATHS[:mos6502]} --format progress"
-    end
-
-    desc "Run Apple II specs"
-    task :apple2 do
-      sh "ruby -Ilib -S rspec #{SPEC_PATHS[:apple2]} --format progress"
-    end
-
-    desc "Run RISC-V specs"
-    task :riscv do
-      sh "ruby -Ilib -S rspec #{SPEC_PATHS[:riscv]} --format progress"
+      desc "Quick benchmark of test categories"
+      task :quick do
+        load_cli_tasks
+        RHDL::CLI::Tasks::BenchmarkTask.new(type: :quick).run
+      end
     end
   end
 end
-
-# Ensure binstubs exist before running tests
-task spec: 'setup:binstubs'
-task pspec: 'setup:binstubs'
 
 # =============================================================================
 # Parallel Test Tasks (pspec namespace)
@@ -236,37 +314,29 @@ begin
     sh "RUBYOPT=-W0 #{parallel_rspec_cmd} --quiet --test-options '--format progress' #{args}"
   end
 
-  desc "Run all tests in parallel"
-  task :pspec do
-    run_parallel_rspec(SPEC_PATHS[:all])
+  desc "Run specs in parallel by scope (all, lib, hdl, mos6502, apple2, riscv)"
+  task :pspec, [:scope] => 'build:setup:binstubs' do |_, args|
+    scope = (args[:scope] || 'all').to_sym
+    patterns = {
+      all: SPEC_PATHS[:all],
+      lib: SPEC_PATHS[:lib],
+      hdl: SPEC_PATHS[:hdl],
+      mos6502: SPEC_PATHS[:mos6502],
+      apple2: SPEC_PATHS[:apple2],
+      riscv: SPEC_PATHS[:riscv]
+    }
+    pattern = patterns[scope]
+
+    if pattern.nil?
+      puts "Unknown pspec scope '#{scope}'."
+      puts "Available scopes: all, lib, hdl, mos6502, apple2, riscv"
+      exit 1
+    end
+
+    run_parallel_rspec(pattern)
   end
 
   namespace :pspec do
-    desc "Run lib/rhdl specs in parallel"
-    task :lib do
-      run_parallel_rspec(SPEC_PATHS[:lib])
-    end
-
-    desc "Run HDL specs in parallel"
-    task :hdl do
-      run_parallel_rspec(SPEC_PATHS[:hdl])
-    end
-
-    desc "Run MOS 6502 specs in parallel"
-    task :mos6502 do
-      run_parallel_rspec(SPEC_PATHS[:mos6502])
-    end
-
-    desc "Run Apple II specs in parallel"
-    task :apple2 do
-      run_parallel_rspec(SPEC_PATHS[:apple2])
-    end
-
-    desc "Run RISC-V specs in parallel"
-    task :riscv do
-      run_parallel_rspec(SPEC_PATHS[:riscv])
-    end
-
     desc "Run tests with specific number of processes"
     task :n, [:count] do |_, args|
       count = args[:count] || ENV['PARALLEL_TEST_PROCESSORS'] || Parallel.processor_count
@@ -294,7 +364,22 @@ begin
 
 rescue LoadError
   desc "Run tests in parallel (requires parallel_tests gem)"
-  task :pspec do
+  task :pspec, [:scope] => 'build:setup:binstubs' do |_, args|
+    scope = (args[:scope] || 'all').to_sym
+    patterns = {
+      all: SPEC_PATHS[:all],
+      lib: SPEC_PATHS[:lib],
+      hdl: SPEC_PATHS[:hdl],
+      mos6502: SPEC_PATHS[:mos6502],
+      apple2: SPEC_PATHS[:apple2],
+      riscv: SPEC_PATHS[:riscv]
+    }
+
+    if patterns[scope].nil?
+      puts "Unknown pspec scope '#{scope}'."
+      puts "Available scopes: all, lib, hdl, mos6502, apple2, riscv"
+    end
+
     abort "parallel_tests gem not installed. Run: bundle install"
   end
 end
@@ -322,88 +407,61 @@ namespace :deps do
   end
 end
 
-desc "Install test dependencies (alias for deps:install)"
-task deps: 'deps:install'
-
 # Benchmarking
 namespace :bench do
-  desc "Benchmark gate-level simulation"
-  task :gates do
+  desc "Benchmark by scope (gates, mos6502, apple2, gameboy, ir, riscv)"
+  task :native, [:scope, :count] do |_, args|
     load_cli_tasks
-    RHDL::CLI::Tasks::BenchmarkTask.new(type: :gates).run
+
+    scope = (args[:scope] || 'gates').to_sym
+    count = args[:count]&.to_i
+
+    case scope
+    when :gates
+      RHDL::CLI::Tasks::BenchmarkTask.new(type: :gates).run
+    when :mos6502
+      cycles = count || 5_000_000
+      RHDL::CLI::Tasks::BenchmarkTask.new(type: :mos6502, cycles: cycles).run
+    when :apple2
+      cycles = count || 5_000_000
+      RHDL::CLI::Tasks::BenchmarkTask.new(type: :apple2, cycles: cycles).run
+    when :gameboy
+      frames = count || 1_000
+      RHDL::CLI::Tasks::BenchmarkTask.new(type: :gameboy, frames: frames).run
+    when :ir
+      cycles = count || 5_000_000
+      RHDL::CLI::Tasks::BenchmarkTask.new(type: :ir, cycles: cycles).run
+    when :riscv
+      cycles = count || 100_000
+      RHDL::CLI::Tasks::BenchmarkTask.new(type: :riscv, cycles: cycles).run
+    else
+      puts "Unknown benchmark scope '#{scope}'."
+      puts "Available scopes: gates, mos6502, apple2, gameboy, ir, riscv"
+      exit 1
+    end
   end
 
-  desc "Benchmark MOS6502 CPU IR with memory bridging"
-  task :mos6502, [:cycles] do |_, args|
+  desc "Run web benchmarks by scope (apple2, riscv)"
+  task :web, [:scope, :count] do |_, args|
     load_cli_tasks
-    cycles = args[:cycles]&.to_i || 5_000_000
-    RHDL::CLI::Tasks::BenchmarkTask.new(type: :mos6502, cycles: cycles).run
-  end
 
-  desc "Benchmark Apple2 full system IR"
-  task :apple2, [:cycles] do |_, args|
-    load_cli_tasks
-    cycles = args[:cycles]&.to_i || 5_000_000
-    RHDL::CLI::Tasks::BenchmarkTask.new(type: :apple2, cycles: cycles).run
-  end
+    scope = (args[:scope] || 'apple2').to_sym
+    count = args[:count]&.to_i
 
-  desc "Benchmark GameBoy with Prince of Persia ROM"
-  task :gameboy, [:frames] do |_, args|
-    load_cli_tasks
-    frames = args[:frames]&.to_i || 1000
-    RHDL::CLI::Tasks::BenchmarkTask.new(type: :gameboy, frames: frames).run
-  end
-
-  desc "Benchmark IR runners"
-  task :ir, [:cycles] do |_, args|
-    load_cli_tasks
-    cycles = args[:cycles]&.to_i || 5_000_000
-    RHDL::CLI::Tasks::BenchmarkTask.new(type: :ir, cycles: cycles).run
-  end
-
-  desc "Benchmark RISC-V single-cycle CPU (IR Compiler, Verilator, Arcilator) with xv6"
-  task :riscv, [:cycles] do |_, args|
-    load_cli_tasks
-    cycles = args[:cycles]&.to_i || 100_000
-    RHDL::CLI::Tasks::BenchmarkTask.new(type: :riscv, cycles: cycles).run
-  end
-
-  namespace :web do
-    desc "Benchmark Apple II web WASM backends (Rust AOT compiler, Arcilator, Verilator) via Node.js"
-    task :apple2, [:cycles] do |_, args|
-      load_cli_tasks
-      cycles = args[:cycles]&.to_i || 5_000_000
+    case scope
+    when :apple2
+      cycles = count || 5_000_000
       RHDL::CLI::Tasks::BenchmarkTask.new(type: :web_apple2, cycles: cycles).run
-    end
-
-    desc "Benchmark RISC-V web WASM backends (Rust AOT compiler, Arcilator, Verilator) via Node.js"
-    task :riscv, [:cycles] do |_, args|
-      load_cli_tasks
-      cycles = args[:cycles]&.to_i || 100_000
+    when :riscv
+      cycles = count || 100_000
       RHDL::CLI::Tasks::BenchmarkTask.new(type: :web_riscv, cycles: cycles).run
+    else
+      puts "Unknown web benchmark scope '#{scope}'."
+      puts "Available scopes: apple2, riscv"
+      exit 1
     end
   end
 end
-
-desc "Run gate benchmark (alias for bench:gates)"
-task bench: 'bench:gates'
-
-namespace :benchmark do
-  desc "Run full test timing analysis (detailed per-file timing)"
-  task timing: 'setup:binstubs' do
-    load_cli_tasks
-    RHDL::CLI::Tasks::BenchmarkTask.new(type: :timing).run
-  end
-
-  desc "Quick benchmark of test categories"
-  task quick: 'setup:binstubs' do
-    load_cli_tasks
-    RHDL::CLI::Tasks::BenchmarkTask.new(type: :quick).run
-  end
-end
-
-desc "Benchmark tests showing 20 slowest (alias for spec:bench)"
-task benchmark: 'spec:bench'
 
 # Default task
 task default: :spec
@@ -411,42 +469,6 @@ task default: :spec
 # =============================================================================
 # Native Extension Tasks
 # =============================================================================
-
-namespace :native do
-  desc "Build the native ISA simulator Rust extension"
-  task :build, [:target] do |_t, args|
-    load_cli_tasks
-    RHDL::CLI::Tasks::NativeTask.new(build: true, target: args[:target]).run
-  end
-
-  desc "Clean native extension build artifacts"
-  task :clean, [:target] do |_t, args|
-    load_cli_tasks
-    RHDL::CLI::Tasks::NativeTask.new(clean: true, target: args[:target]).run
-  end
-
-  desc "Check if native extension is available"
-  task :check, [:target] do |_t, args|
-    load_cli_tasks
-    RHDL::CLI::Tasks::NativeTask.new(check: true, target: args[:target]).run
-  end
-end
-
-desc "Build native ISA simulator (alias for native:build)"
-task native: 'native:build'
-
-# =============================================================================
-# Debug Tasks
-# =============================================================================
-
-namespace :debug do
-  desc "Debug Game Boy interrupt handling with VCD tracing"
-  task :interrupt do
-    load_cli_tasks
-    require_relative 'lib/rhdl/cli/tasks/debug_interrupt_task'
-    RHDL::CLI::Tasks::DebugInterruptTask.new.run
-  end
-end
 
 # =============================================================================
 # Web Tasks
@@ -459,7 +481,14 @@ namespace :web do
 
     host = (ENV['HOST'] || '127.0.0.1').to_s
     port = Integer(args[:port] || ENV['PORT'] || '8080')
-    web_root = File.expand_path('web', __dir__)
+    web_root = File.expand_path('web/dist', __dir__)
+    unless File.directory?(web_root)
+      abort <<~MSG
+        [web] Missing built assets at #{web_root}.
+        Run:
+          bundle exec rake web:bundle
+      MSG
+    end
     puts "Starting web server at http://#{host}:#{port} (root: #{web_root})"
 
     headers_callback = proc do |_req, res|

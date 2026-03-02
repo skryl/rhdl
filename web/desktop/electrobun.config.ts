@@ -36,6 +36,6 @@ export default {
     defaultRenderer: "native",
   },
   scripts: {
-    preBuild: "bun run scripts/prebuild.ts",
+    preBuild: "scripts/prebuild.ts",
   },
 } satisfies ElectrobunConfig;

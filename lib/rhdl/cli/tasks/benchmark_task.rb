@@ -426,7 +426,7 @@ module RHDL
           print_benchmark_summary(results, cycles)
         end
 
-        # Benchmark Apple2 full system IR (legacy bench:ir)
+        # Benchmark Apple2 full system IR (legacy bench:native[ir])
         def benchmark_apple2
           require 'rhdl/codegen'
 

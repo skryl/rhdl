@@ -1,6 +1,6 @@
 // @ts-nocheck
-const DEFAULT_GHOSTTY_MODULE_PATH = '../../../../assets/pkg/ghostty-web.js';
-const DEFAULT_GHOSTTY_WASM_PATH = '../../../../assets/pkg/ghostty-vt.wasm';
+const DEFAULT_GHOSTTY_MODULE_PATH = './assets/pkg/ghostty-web.js';
+const DEFAULT_GHOSTTY_WASM_PATH = './assets/pkg/ghostty-vt.wasm';
 const DEFAULT_THEME = Object.freeze({
   background: '#071421',
   foreground: '#b5d3ef',

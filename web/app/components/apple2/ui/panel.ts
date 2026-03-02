@@ -2,8 +2,8 @@ import { LitElement, html, css } from 'lit';
 
 class RhdlApple2Debug extends LitElement {
   [key: string]: unknown;
-  rows: Array<[string, string]>;
-  enabled: boolean;
+  declare rows: Array<[string, string]>;
+  declare enabled: boolean;
   static properties = {
     rows: { state: true },
     enabled: { state: true }

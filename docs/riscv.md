@@ -302,7 +302,7 @@ bundle exec rspec spec/examples/riscv/zicbo_extension_spec.rb
 Broader:
 
 ```bash
-bundle exec rake spec:riscv
+bundle exec rake spec[riscv]
 ```
 
 ## Web simulator integration

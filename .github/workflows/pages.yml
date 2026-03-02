@@ -49,21 +49,21 @@ jobs:
       - name: Generate web assets
         run: bundle exec rake web:generate
 
+      - name: Bundle web UI
+        run: bundle exec rake web:bundle
+
       - name: Verify WASM artifacts
         run: |
           set -euo pipefail
-          test -f web/assets/pkg/ir_interpreter.wasm
-          test -f web/assets/pkg/ir_compiler.wasm
+          test -f web/dist/assets/pkg/ir_interpreter.wasm
+          test -f web/dist/assets/pkg/ir_compiler.wasm
 
       - name: Assemble Pages artifact
         run: |
           set -euo pipefail
           rm -rf web-dist
           mkdir -p web-dist
-          rsync -a web/index.html web-dist/
-          rsync -a web/coi-serviceworker.js web-dist/
-          rsync -a web/app web-dist/
-          rsync -a web/assets web-dist/
+          rsync -a web/dist/ web-dist/
           touch web-dist/.nojekyll
 
       - name: Upload Pages artifact

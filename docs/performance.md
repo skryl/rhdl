@@ -24,8 +24,8 @@ RHDL includes rake tasks for benchmarking different system configurations:
 Benchmarks the MOS 6502 CPU running Karateka game code with memory bridging:
 
 ```bash
-rake bench:mos6502              # Default: 5M cycles
-rake bench:mos6502[1000000]     # Custom: 1M cycles
+rake bench[mos6502]             # Default: 5M cycles
+rake bench[mos6502,1000000]     # Custom: 1M cycles
 ```
 
 **Sample Results (1M cycles):**
@@ -42,8 +42,8 @@ rake bench:mos6502[1000000]     # Custom: 1M cycles
 Benchmarks the complete Apple II system (CPU + memory + I/O) running Karateka:
 
 ```bash
-rake bench:apple2               # Default: 5M cycles
-rake bench:apple2[1000000]      # Custom: 1M cycles
+rake bench[apple2]              # Default: 5M cycles
+rake bench[apple2,1000000]      # Custom: 1M cycles
 ```
 
 **Sample Results (1M cycles):**
@@ -60,8 +60,8 @@ rake bench:apple2[1000000]      # Custom: 1M cycles
 Benchmarks the GameBoy running Prince of Persia ROM for a specified number of frames:
 
 ```bash
-rake bench:gameboy              # Default: 1000 frames
-rake bench:gameboy[100]         # Custom: 100 frames
+rake bench[gameboy]             # Default: 1000 frames
+rake bench[gameboy,100]         # Custom: 100 frames
 ```
 
 **Sample Results (100 frames / 7M cycles):**
@@ -78,7 +78,7 @@ The GameBoy runs at 4.19 MHz, so backends achieving >100% can run faster than re
 Benchmarks low-level gate simulation:
 
 ```bash
-rake bench:gates                # Gate-level toggle benchmark
+rake bench                      # Gate-level toggle benchmark
 ```
 
 ### Web WASM Backend Benchmarks
@@ -86,10 +86,10 @@ rake bench:gates                # Gate-level toggle benchmark
 Benchmarks browser-style WASM execution paths for compiler vs arcilator vs verilator backends:
 
 ```bash
-rake bench:web:apple2           # Apple II web WASM benchmark
-rake bench:web:apple2[5000000]  # Apple II custom cycle count
-rake bench:web:riscv            # RISC-V xv6 web WASM benchmark
-rake bench:web:riscv[100000]    # RISC-V custom cycle count
+rake bench:web[apple2]          # Apple II web WASM benchmark
+rake bench:web[apple2,5000000]  # Apple II custom cycle count
+rake bench:web[riscv]           # RISC-V xv6 web WASM benchmark
+rake bench:web[riscv,100000]    # RISC-V custom cycle count
 ```
 
 ## Backend Selection Guide

@@ -26,10 +26,10 @@ interface ConnectionRow {
 
 class RhdlComponentLiveSignals extends LitElement {
   [key: string]: unknown;
-  rows: LiveSignalRow[];
-  highlightLabel: string;
-  highlightMissing: boolean;
-  extraSignals: number;
+  declare rows: LiveSignalRow[];
+  declare highlightLabel: string;
+  declare highlightMissing: boolean;
+  declare extraSignals: number;
   static properties = {
     rows: { state: true },
     highlightLabel: { state: true },
@@ -147,8 +147,8 @@ class RhdlComponentLiveSignals extends LitElement {
 
 class RhdlComponentConnections extends LitElement {
   [key: string]: unknown;
-  rows: ConnectionRow[];
-  hiddenCount: number;
+  declare rows: ConnectionRow[];
+  declare hiddenCount: number;
   static properties = {
     rows: { state: true },
     hiddenCount: { state: true }

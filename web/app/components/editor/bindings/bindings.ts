@@ -15,6 +15,8 @@ const DEFAULT_EDITOR_SOURCE = [
 
 const EDITOR_FILE_PATH = '/workspace/editor.rb';
 const MIRB_PRELUDE = "require 'rhdl'";
+const DEFAULT_VIM_MODULE_PATH = './assets/pkg/vimwasm.js';
+const DEFAULT_VIM_WORKER_PATH = './assets/pkg/vim.js';
 
 const EXPORT_TIMEOUT_MS = 3500;
 
@@ -30,6 +32,15 @@ function isTerminalTextEntryKey(event: unknown) {
 
 function normalizedText(value: unknown) {
   return String(value || '').replace(/\r/g, '').trim();
+}
+
+function resolveAssetUrl(path: unknown, { documentRef, globalRef }: unknown = {}) {
+  const base = documentRef?.baseURI || globalRef?.location?.href || 'http://localhost/';
+  try {
+    return new URL(path, base).href;
+  } catch (_err: unknown) {
+    return String(path || '');
+  }
 }
 
 function buildMirbSessionReplaySource(lines: unknown[] = []) {
@@ -77,15 +88,19 @@ function collectUniqueSignalNames(runtime: unknown) {
   return names;
 }
 
-async function loadVimWasmModule(fetchImpl = globalThis.fetch) {
-  const moduleUrl = new URL('../../../../assets/pkg/vimwasm.js', import.meta.url);
+async function loadVimWasmModule({
+  documentRef = globalThis.document,
+  globalRef = globalThis,
+  fetchImpl = globalThis.fetch
+}: unknown = {}) {
+  const moduleUrl = resolveAssetUrl(DEFAULT_VIM_MODULE_PATH, { documentRef, globalRef });
   if (typeof fetchImpl === 'function') {
-    const response = await fetchImpl(moduleUrl.href);
+    const response = await fetchImpl(moduleUrl);
     if (!response.ok) {
-      throw new Error(`Missing vim.wasm module asset: ${moduleUrl.pathname}`);
+      throw new Error(`Missing vim.wasm module asset: ${new URL(moduleUrl).pathname}`);
     }
   }
-  return import(moduleUrl.href);
+  return import(moduleUrl);
 }
 
 function setEditorStatus(dom: unknown, message: unknown, level = 'info') {
@@ -470,7 +485,7 @@ export function bindEditorBindings({
 
   (async () => {
     try {
-      const mod = await loadVimWasmModule();
+      const mod = await loadVimWasmModule({ documentRef, globalRef: windowRef });
       if (disposed) {
         return;
       }
@@ -488,11 +503,11 @@ export function bindEditorBindings({
         return;
       }
 
-      const workerScriptUrl = new URL('../../../../assets/pkg/vim.js', import.meta.url);
+      const workerScriptUrl = resolveAssetUrl(DEFAULT_VIM_WORKER_PATH, { documentRef, globalRef: windowRef });
       const vim = new mod.VimWasm({
         canvas: dom.editorVimCanvas,
         input: dom.editorVimInput,
-        workerScriptPath: workerScriptUrl.href
+        workerScriptPath: workerScriptUrl
       });
       vim.onError = (err: unknown) => {
         setEditorStatus(dom, `vim.wasm error: ${err?.message || err}`, 'warn');

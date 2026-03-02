@@ -17,9 +17,9 @@ Architecture details are included at the bottom of this page.
 - Watch list + current value table
 - Value breakpoints (`signal == value`)
 - Export full VCD file for GTKWave
-- Redux-backed UX state store (CDN, no build step) for tooling/automation
-- LitElement UI components with co-located styles (no build step)
-- Panel components split into modules under `web/app/components/*.mjs` (no build step)
+- Redux-backed UX state store for tooling/automation
+- LitElement UI components with co-located styles
+- Panel components split into modules under `web/app/components/` and bundled by Bun
 - Built-in terminal command dispatcher for runner/backend switching, stepping, watches, breakpoints, and memory helpers
 - Tabbed workspace:
   - `1. I/O`: Apple II display + `HIRES`, `COLOR`, `SOUND` toggles, keyboard input queue, debug registers
@@ -33,15 +33,20 @@ Architecture details are included at the bottom of this page.
   - `Load Last Saved` restores the most recently saved dump from browser storage
   - `Reset (Vector)` resets the Apple II runner from the Memory tab, with optional manual reset-vector override (`$B82A` / `0xB82A`)
 
-## Build WASM
+## Build pipeline
 
-Build only WASM backends:
+The web simulator uses a two-stage build:
+
+1. Ruby-side artifact generation (WASM + IR/fixture metadata)
+2. Bun bundle (JS + runtime assets) into `web/dist/`
 
 ```bash
 bundle exec rake web:build
 ```
 
-Generate web artifacts (IR/source/schematic fixtures + memory fixtures). If WASM artifacts are missing, this task builds them first:
+Generates core web runtime artifacts under `web/assets/pkg/*.wasm`.
+
+If artifacts are missing, run:
 
 ```bash
 bundle exec rake web:generate
@@ -51,9 +56,37 @@ bundle exec rake web:generate
 - `web:build` runs `ir_compiler`'s `aot_codegen` over `assets/fixtures/apple2/ir/apple2.json` by default.
 - Then it builds `ir_compiler.wasm` with `--features aot`.
 
+Bundle simulator output into `web/dist` with Bun:
+
+```bash
+cd web
+bun run build
+```
+
+or via rake:
+
+```bash
+bundle exec rake web:bundle
+```
+
+For production bundle:
+
+```bash
+cd web
+bun run build:prod
+```
+
+or:
+
+```bash
+bundle exec rake web:bundle:prod
+```
+
+`web:bundle` copies required third-party runtime files (`vim-wasm`, `ghostty-web`) into `web/dist/assets/pkg` so editor and terminal WASM integrations are packaged together.
+
 ## Run Web UI
 
-Serve the `web` directory:
+Serve the bundled `web/dist` directory:
 
 ```bash
 bundle exec rake web:start
@@ -72,11 +105,28 @@ Without those headers, the mirb worker will not be able to use `SharedArrayBuffe
 Manual example (must be configured to emit COOP/COEP):
 
 ```bash
-cd web
+cd web/dist
 python3 -m http.server 8080
 ```
 
 Open [http://localhost:8080](http://localhost:8080).
+
+## Desktop app (Electrobun)
+
+Desktop builds package the same `web/dist/` output into `web/desktop/src/simulator` via
+`web/desktop/scripts/prebuild.ts`.
+
+```bash
+# From repository root
+bundle exec rake desktop:install   # Install Electrobun dependencies
+bundle exec rake web:bundle       # Ensure web/dist is fresh (or run `bun run build` in web/)
+bundle exec rake desktop:dev      # Build and launch desktop app in dev mode
+bundle exec rake desktop:build    # Build dev package output
+bundle exec rake desktop:release  # Build stable package output
+bundle exec rake desktop:clean    # Remove packaged desktop artifacts
+```
+
+`desktop:dev`/`desktop:build`/`desktop:release` rely on the prebuild hook to sync the `web/dist` bundle.
 
 ## Runner Presets and Defaults
 
@@ -135,12 +185,13 @@ RISC-V web preset status:
 ## Deploy To GitHub Pages
 
 - A workflow is included at `.github/workflows/pages.yml`.
-- It builds all web artifacts via `bundle exec rake web:generate`.
+- It builds all web artifacts via:
+  - `bundle exec rake web:generate`
+  - `bundle exec rake web:bundle`
 - It publishes a static artifact containing:
-  - `web/index.html`
-  - `web/coi-serviceworker.js`
-  - `web/app/`
-  - `web/assets/`
+  - `web/dist/index.html`
+  - `web/dist/coi-serviceworker.js`
+  - `web/dist/` (bundled JS, WASM, and static assets)
 - GitHub Pages does not let this repo configure COOP/COEP response headers directly.
 - `index.html` registers `coi-serviceworker.js` to inject COOP/COEP/CORP on same-origin responses as a fallback.
 - Enable Pages in repository settings:
@@ -197,6 +248,7 @@ node --test web/test/state/store.test.mjs
 - `assets/fixtures/apple2/memory/karateka_mem.bin` + `assets/fixtures/apple2/memory/karateka_mem_meta.txt` for quick dump load
 - Build/update wasm backends only:
   - `bundle exec rake web:build`
+  - `bundle exec rake web:bundle`
 - Regenerate web artifacts (IR + source + schematic):
   - `bundle exec rake web:generate`
 - Memory tab supports:
@@ -217,8 +269,8 @@ This section describes the current architecture of the RHDL web simulator and wh
 
 ### Runtime Model
 
-- `web/app/bootstrap.mjs` is the composition root.
-- `web/app/main.mjs` loads UI components and starts bootstrap.
+- `web/app/core/bootstrap.ts` is the composition root.
+- `web/app/main.ts` loads UI components and starts bootstrap.
 - Bootstrap creates:
   - DOM refs (`bindings/dom_bindings.mjs`)
   - mutable runtime context (`runtime/context.mjs`)
@@ -269,7 +321,7 @@ This keeps startup deterministic and testable without browser globals.
 ### UI Composition
 
 - `index.html` contains shell markup and panel containers.
-- Lit components (`components/*.mjs`) own panel-specific rendering and styles.
+- Lit components (`components/*.ts`) own panel-specific rendering and styles.
 - Bindings attach listeners and call domain methods.
 - Redux sync snapshots app state for toolability and test instrumentation.
 
@@ -319,4 +371,5 @@ pins. A color legend is drawn in screen space in the bottom-right corner.
 - `assets/pkg`: wasm artifacts.
 - `assets/fixtures`: generated IR/source/schematic fixtures and sample binary assets.
 - `bundle exec rake web:build`: wasm build pipeline entrypoint.
+- `bundle exec rake web:bundle`: Bun bundle entrypoint for `web/dist/`.
 - `bundle exec rake web:generate`: web asset generation entrypoint (builds wasm first when missing).

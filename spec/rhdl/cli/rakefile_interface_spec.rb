@@ -53,12 +53,12 @@ RSpec.describe 'Rakefile interface' do
   end
 
   describe 'bench tasks' do
-    it 'bench:gates invokes BenchmarkTask with type: :gates' do
+    it 'bench:native invokes BenchmarkTask with type: :gates' do
       expect_task_class(RHDL::CLI::Tasks::BenchmarkTask, type: :gates)
-      Rake::Task['bench:gates'].invoke
+      Rake::Task['bench:native'].invoke
     end
 
-    it 'bench:ir invokes BenchmarkTask with type: :ir and cycles' do
+    it 'bench:native :ir scope invokes BenchmarkTask with type: :ir and cycles' do
       task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
       allow(task_instance).to receive(:run)
 
@@ -68,10 +68,10 @@ RSpec.describe 'Rakefile interface' do
         task_instance
       end
 
-      Rake::Task['bench:ir'].invoke
+      Rake::Task['bench:native'].invoke('ir')
     end
 
-    it 'bench:web:riscv invokes BenchmarkTask with type: :web_riscv and cycles' do
+    it 'bench:web scope riscv invokes BenchmarkTask with type: :web_riscv and cycles' do
       task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
       allow(task_instance).to receive(:run)
 
@@ -81,24 +81,24 @@ RSpec.describe 'Rakefile interface' do
         task_instance
       end
 
-      Rake::Task['bench:web:riscv'].invoke
+      Rake::Task['bench:web'].invoke('riscv')
     end
   end
 
   describe 'benchmark tasks' do
-    it 'benchmark:timing invokes BenchmarkTask with type: :timing' do
+    it 'spec:bench:timing invokes BenchmarkTask with type: :timing' do
       expect_task_class(RHDL::CLI::Tasks::BenchmarkTask, type: :timing)
-      Rake::Task['benchmark:timing'].invoke
+      Rake::Task['spec:bench:timing'].invoke
     end
 
-    it 'benchmark:quick invokes BenchmarkTask with type: :quick' do
+    it 'spec:bench:quick invokes BenchmarkTask with type: :quick' do
       expect_task_class(RHDL::CLI::Tasks::BenchmarkTask, type: :quick)
-      Rake::Task['benchmark:quick'].invoke
+      Rake::Task['spec:bench:quick'].invoke
     end
   end
 
   describe 'spec:bench tasks' do
-    it 'spec:bench:all invokes BenchmarkTask with type: :tests for all specs' do
+    it 'spec:bench scope all invokes BenchmarkTask with type: :tests for all specs' do
       task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
       allow(task_instance).to receive(:run)
 
@@ -109,10 +109,10 @@ RSpec.describe 'Rakefile interface' do
         task_instance
       end
 
-      Rake::Task['spec:bench:all'].invoke
+      Rake::Task['spec:bench'].invoke('all')
     end
 
-    it 'spec:bench:lib invokes BenchmarkTask with lib pattern' do
+    it 'spec:bench scope lib invokes BenchmarkTask with lib pattern' do
       task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
       allow(task_instance).to receive(:run)
 
@@ -122,10 +122,10 @@ RSpec.describe 'Rakefile interface' do
         task_instance
       end
 
-      Rake::Task['spec:bench:lib'].invoke
+      Rake::Task['spec:bench'].invoke('lib')
     end
 
-    it 'spec:bench:hdl invokes BenchmarkTask with hdl pattern' do
+    it 'spec:bench scope hdl invokes BenchmarkTask with hdl pattern' do
       task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
       allow(task_instance).to receive(:run)
 
@@ -135,10 +135,10 @@ RSpec.describe 'Rakefile interface' do
         task_instance
       end
 
-      Rake::Task['spec:bench:hdl'].invoke
+      Rake::Task['spec:bench'].invoke('hdl')
     end
 
-    it 'spec:bench:mos6502 invokes BenchmarkTask with mos6502 pattern' do
+    it 'spec:bench scope mos6502 invokes BenchmarkTask with mos6502 pattern' do
       task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
       allow(task_instance).to receive(:run)
 
@@ -148,10 +148,10 @@ RSpec.describe 'Rakefile interface' do
         task_instance
       end
 
-      Rake::Task['spec:bench:mos6502'].invoke
+      Rake::Task['spec:bench'].invoke('mos6502')
     end
 
-    it 'spec:bench:apple2 invokes BenchmarkTask with apple2 pattern' do
+    it 'spec:bench scope apple2 invokes BenchmarkTask with apple2 pattern' do
       task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
       allow(task_instance).to receive(:run)
 
@@ -161,7 +161,20 @@ RSpec.describe 'Rakefile interface' do
         task_instance
       end
 
-      Rake::Task['spec:bench:apple2'].invoke
+      Rake::Task['spec:bench'].invoke('apple2')
+    end
+
+    it 'spec:bench scope riscv invokes BenchmarkTask with riscv pattern' do
+      task_instance = instance_double(RHDL::CLI::Tasks::BenchmarkTask)
+      allow(task_instance).to receive(:run)
+
+      expect(RHDL::CLI::Tasks::BenchmarkTask).to receive(:new) do |opts|
+        expect(opts[:type]).to eq(:tests)
+        expect(opts[:pattern]).to eq('spec/examples/riscv/')
+        task_instance
+      end
+
+      Rake::Task['spec:bench'].invoke('riscv')
     end
   end
 
@@ -309,17 +322,18 @@ RSpec.describe 'Rakefile interface' do
 
   describe 'rake task existence' do
     # Verify all custom rake tasks exist
-    %w[
-      spec spec:lib spec:hdl spec:mos6502 spec:apple2
-      spec:bench spec:bench:all spec:bench:lib spec:bench:hdl spec:bench:mos6502 spec:bench:apple2
-      pspec pspec:lib pspec:hdl pspec:mos6502 pspec:apple2 pspec:n pspec:prepare pspec:balanced
-      deps deps:install deps:check
-      bench bench:gates bench:ir bench:web:apple2 bench:web:riscv
-      benchmark benchmark:timing benchmark:quick
-      native native:build native:clean native:check
-      web:start web:build web:generate
-      setup setup:binstubs
-    ].each do |task_name|
+      %w[
+        spec pspec
+        spec:bench spec:bench:timing spec:bench:quick
+        pspec:n pspec:prepare pspec:balanced
+        deps deps:install deps:check
+        bench:native bench:web
+        gem:build gem:build:checksum gem:install gem:install:local gem:release
+        native:build native:clean native:check
+        web:start web:build web:generate
+        build:setup build:setup:binstubs
+        build:clean build:clobber
+      ].each do |task_name|
       it "defines #{task_name} task" do
         expect(Rake::Task.task_defined?(task_name)).to be(true),
           "Expected rake task '#{task_name}' to be defined"

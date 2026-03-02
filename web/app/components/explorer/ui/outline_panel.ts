@@ -59,9 +59,9 @@ function normalizeTreeRow(value: unknown): TreeRow | null {
 
 class RhdlComponentTree extends LitElement {
   [key: string]: unknown;
-  rows: TreeRow[];
-  parseError: string;
-  filterText: string;
+  declare rows: TreeRow[];
+  declare parseError: string;
+  declare filterText: string;
   static properties = {
     rows: { state: true },
     parseError: { state: true },
@@ -273,9 +273,9 @@ class RhdlComponentTree extends LitElement {
 
 class RhdlComponentCodeViewer extends LitElement {
   [key: string]: unknown;
-  rhdlText: string;
-  verilogText: string;
-  view: 'rhdl' | 'verilog';
+  declare rhdlText: string;
+  declare verilogText: string;
+  declare view: 'rhdl' | 'verilog';
   static properties = {
     rhdlText: { state: true },
     verilogText: { state: true },
@@ -417,8 +417,8 @@ class RhdlComponentCodeViewer extends LitElement {
 
 class RhdlComponentSignalTable extends LitElement {
   [key: string]: unknown;
-  rows: SignalTableRow[];
-  hiddenSignalCount: number;
+  declare rows: SignalTableRow[];
+  declare hiddenSignalCount: number;
   static properties = {
     rows: { state: true },
     hiddenSignalCount: { state: true }

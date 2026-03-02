@@ -200,7 +200,7 @@ rake cli:gates:export
 rake cli:gates:stats
 
 # Run gate-level benchmark
-rake dev:bench:gates
+rake bench:native[gates]
 ```
 
 ## Lowering Algorithms

@@ -639,29 +639,28 @@ end
 
 ```bash
 # Gate-level simulation benchmark
-rake bench:gates
-RHDL_BENCH_LANES=128 RHDL_BENCH_CYCLES=1000000 rake bench:gates
+rake bench
+RHDL_BENCH_LANES=128 RHDL_BENCH_CYCLES=1000000 rake bench
 
 # MOS6502 CPU benchmark
-rake bench:mos6502
-rake bench:mos6502[5000000]  # 5M cycles
+rake bench[mos6502]
+rake bench[mos6502,5000000]  # 5M cycles
 
 # Apple II full system benchmark
-rake bench:apple2
-rake bench:apple2[2000000]  # 2M cycles
+rake bench[apple2]
+rake bench[apple2,2000000]  # 2M cycles
 
-# Verilator comparison (requires Verilator)
-rake bench:verilator[1000000]
+# Legacy alias removed (use bench scopes)
 
 # Test suite benchmarks
 rake spec:bench            # 20 slowest tests
-rake spec:bench:all[50]    # 50 slowest tests
-rake spec:bench:hdl[20]    # HDL tests
-rake spec:bench:mos6502[20] # MOS6502 tests
+rake spec:bench[all,50]    # 50 slowest tests
+rake spec:bench[hdl,20]    # HDL tests
+rake spec:bench[mos6502,20] # MOS6502 tests
 
 # Detailed timing analysis
-rake benchmark:timing       # Per-file timing
-rake benchmark:quick        # Category summary
+rake spec:bench:timing      # Per-file timing
+rake spec:bench:quick       # Category summary
 ```
 
 ### Programmatic Benchmarking
